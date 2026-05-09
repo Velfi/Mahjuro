@@ -3,7 +3,7 @@ use super::*;
 use crate::core::tile_pack::TilePackKind;
 use crate::debug_overlays::ShopEnvDebugOverlay;
 use crate::game::engine::GameEngine;
-use crate::scenes::TilePackCelebrationScene;
+use crate::scenes::{ShowcasePresenter, ShowcaseScene, TilePackPresenter};
 use crate::scenes::reload_scene_layout_from_disk;
 use crate::scenes::shop::PackCelebration;
 use crate::ui::scene_layout::clear_saved_layout_files;
@@ -178,9 +178,9 @@ impl App {
                     let tiles = GameEngine::debug_add_pack(&mut self.run, kind);
                     let celeb = PackCelebration::new(tiles, kind.name(), kind);
                     let inventory = s.tile_pack_celeb_inventory_counts(&self.run);
-                    self.overlay_stack.push(Scene::TilePackCelebration(
-                        TilePackCelebrationScene::new(celeb, inventory),
-                    ));
+                    self.overlay_stack.push(Scene::Showcase(ShowcaseScene::new(
+                        ShowcasePresenter::TilePack(TilePackPresenter::new(celeb, inventory)),
+                    )));
                     log::debug!("Opened tile pack celebration overlay");
                 }
                 _ => log::warn!("Open Pack ignored — not in shop scene"),
@@ -199,7 +199,7 @@ impl App {
                         Scene::TileSelect(_) => "TileSelect",
                         Scene::ProfileSelect(_) => "ProfileSelect",
                         Scene::Shop(_) => "Shop",
-                        Scene::ItemInspect(_) => "ItemInspect",
+                        Scene::Showcase(_) => "Showcase",
                         Scene::PickBlind(_) => "PickBlind",
                         Scene::Gameplay(_) => "Gameplay",
                         Scene::GameOver(_) => "GameOver",
@@ -214,8 +214,6 @@ impl App {
                         Scene::TransitionPlayground(_) => "TransitionPlayground",
                         Scene::RumbleLab(_) => "RumbleLab",
                         Scene::YakuJournal(_) => "YakuJournal",
-                        Scene::ZodiacCelebration(_) => "ZodiacCelebration",
-                        Scene::TilePackCelebration(_) => "TilePackCelebration",
                     };
                     log::warn!("Demo Cascade ignored — current scene is {name}");
                 }

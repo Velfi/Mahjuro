@@ -1,0 +1,796 @@
+//! Shared glTF **room environment** decode: PBR meshes, bounds, embedded perspective cameras,
+//! [`KHR_lights_punctual`], collision triangle soups, and world-space framing helpers.
+//!
+//! [`crate::render::shop_glb`] and [`crate::render::hallway_glb`] load different assets but share
+//! this pipeline and GPU path (`shop_glb.wgsl`).
+
+use std::collections::HashMap;
+
+use anyhow::Context;
+use glam::{Mat4, Vec3, Vec4};
+
+use crate::render::draw_cmd::CameraParams;
+use crate::render::gltf_helpers::{apply_texture_transform, sampler_cpu_from_material};
+use crate::render::tile_glb::{
+    GltfAlphaMode, LoadedPrimitive, Vertex3dTex, compute_vertex_tangents, gltf_image_to_rgba8,
+    multiply_rgba8_by_factor, solid_albedo_rgba8,
+};
+
+/// One environment mesh primitive plus embedded glTF sampler parameters for GPU samplers.
+pub struct RoomEnvPrimitiveCpu {
+    pub mesh: LoadedPrimitive,
+}
+
+/// CPU triangle soup for one named GLB node (typically invisible anchor geometry).
+#[derive(Clone)]
+pub struct RoomCollisionMesh {
+    pub node_name: String,
+    pub triangles: Vec<[Vec3; 3]>,
+}
+
+/// Axis-aligned bounds of decoded environment vertices (glTF document space).
+#[derive(Clone, Copy, Debug)]
+pub struct RoomEnvironmentBounds {
+    pub min: Vec3,
+    pub max: Vec3,
+}
+
+impl RoomEnvironmentBounds {
+    #[inline]
+    pub fn center(self) -> Vec3 {
+        (self.min + self.max) * 0.5
+    }
+
+    pub fn corners(self) -> [Vec3; 8] {
+        let mn = self.min;
+        let mx = self.max;
+        [
+            Vec3::new(mn.x, mn.y, mn.z),
+            Vec3::new(mx.x, mn.y, mn.z),
+            Vec3::new(mn.x, mx.y, mn.z),
+            Vec3::new(mx.x, mx.y, mn.z),
+            Vec3::new(mn.x, mn.y, mx.z),
+            Vec3::new(mx.x, mn.y, mx.z),
+            Vec3::new(mn.x, mx.y, mx.z),
+            Vec3::new(mx.x, mx.y, mx.z),
+        ]
+    }
+}
+
+/// [`KHR_lights_punctual`] point light — positions in **document units** (same as mesh).
+#[derive(Clone, Copy, Debug)]
+pub struct RoomGltfEmbeddedPointLight {
+    pub pos_doc: Vec3,
+    pub color_linear: [f32; 3],
+    pub is_candle: bool,
+    pub intensity: f32,
+    pub range_doc: Option<f32>,
+}
+
+/// [`KHR_lights_punctual`] spot light — cone aims along node **−Z** in document space.
+#[derive(Clone, Copy, Debug)]
+pub struct RoomGltfEmbeddedSpotLight {
+    pub pos_doc: Vec3,
+    pub dir_doc: Vec3,
+    pub color_linear: [f32; 3],
+    pub is_candle: bool,
+    pub intensity: f32,
+    pub range_doc: Option<f32>,
+    pub inner_cone_rad: f32,
+    pub outer_cone_rad: f32,
+}
+
+/// Perspective camera baked into a room glTF (positions in **document units**).
+#[derive(Clone, Copy, Debug)]
+pub struct RoomGltfEmbeddedCamera {
+    pub eye: Vec3,
+    pub target: Vec3,
+    pub up: Vec3,
+    pub fovy_deg: f32,
+}
+
+impl RoomGltfEmbeddedCamera {
+    pub fn to_camera_params(
+        &self,
+        window_h: f32,
+        env_height_scale: f32,
+        center_doc: Vec3,
+    ) -> CameraParams {
+        let s = room_env_world_scale(window_h, env_height_scale);
+        let up = self.up.normalize_or_zero();
+        let up = if up.length_squared() > 1e-12 {
+            up
+        } else {
+            Vec3::Z
+        };
+        CameraParams {
+            eye: ((self.eye - center_doc) * s).to_array(),
+            target: ((self.target - center_doc) * s).to_array(),
+            up: up.to_array(),
+            fovy_deg: self.fovy_deg,
+        }
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct EmbeddedCameraHarvest {
+    named: Option<RoomGltfEmbeddedCamera>,
+    fallback: Option<RoomGltfEmbeddedCamera>,
+}
+
+impl EmbeddedCameraHarvest {
+    pub(crate) fn pick(self) -> Option<RoomGltfEmbeddedCamera> {
+        self.named.or(self.fallback)
+    }
+
+    pub(crate) fn insert(&mut self, name: &str, cam: RoomGltfEmbeddedCamera) {
+        let key = name.to_ascii_lowercase();
+        let preferred = matches!(key.as_str(), "camera" | "shopcamera" | "shop_camera");
+        if preferred {
+            if self.named.replace(cam).is_some() {
+                log::warn!("room glTF: multiple preferred camera node names — using last");
+            }
+        } else if self.fallback.is_none() {
+            self.fallback = Some(cam);
+        }
+    }
+}
+
+#[inline]
+pub fn room_env_world_scale(window_h: f32, height_scale: f32) -> f32 {
+    window_h.max(1e-6) * height_scale
+}
+
+/// KHR punctual `range` in **world units** for point/spot `pos.w` (`shop_glb.wgsl`).
+#[inline]
+pub fn glb_punctual_range_world_upload(window_h: f32, scale: f32, range_doc: Option<f32>) -> f32 {
+    match range_doc {
+        None => (window_h * 24.0).max(scale * 40.0),
+        Some(r) if r.is_finite() && r > 0.0 => r * scale,
+        Some(_) => 0.0,
+    }
+}
+
+#[inline]
+pub fn room_env_model_matrix(window_h: f32, height_scale: f32, center_doc: Vec3) -> Mat4 {
+    let s = room_env_world_scale(window_h, height_scale);
+    Mat4::from_translation(-center_doc * s) * Mat4::from_scale(Vec3::splat(s))
+}
+
+#[inline]
+pub fn room_env_model_matrix_from_bounds_doc(
+    window_h: f32,
+    height_scale: f32,
+    environment_bounds_doc: Option<RoomEnvironmentBounds>,
+) -> Mat4 {
+    let c = environment_bounds_doc
+        .map(|b| b.center())
+        .unwrap_or(Vec3::ZERO);
+    room_env_model_matrix(window_h, height_scale, c)
+}
+
+fn compute_room_environment_bounds(prims: &[RoomEnvPrimitiveCpu]) -> Option<RoomEnvironmentBounds> {
+    let mut min_v = Vec3::splat(f32::INFINITY);
+    let mut max_v = Vec3::splat(f32::NEG_INFINITY);
+    for p in prims {
+        for vtx in &p.mesh.vertices {
+            let pos = Vec3::from(vtx.position);
+            min_v = min_v.min(pos);
+            max_v = max_v.max(pos);
+        }
+    }
+    if !min_v.x.is_finite() || !max_v.x.is_finite() {
+        return None;
+    }
+    Some(RoomEnvironmentBounds {
+        min: min_v,
+        max: max_v,
+    })
+}
+
+pub fn room_environment_bounds(prims: &[RoomEnvPrimitiveCpu]) -> Option<RoomEnvironmentBounds> {
+    compute_room_environment_bounds(prims)
+}
+
+/// World-space AABB corners after centering and scale (for FOV fitting).
+pub fn room_world_bounds_corners_centered(
+    bounds_doc: RoomEnvironmentBounds,
+    window_h: f32,
+    env_height_scale: f32,
+) -> Vec<Vec3> {
+    let s = room_env_world_scale(window_h, env_height_scale);
+    let c = bounds_doc.center();
+    bounds_doc
+        .corners()
+        .iter()
+        .map(|p| (*p - c) * s)
+        .collect()
+}
+
+/// Widen vertical FOV (only upward) so corners **in front of** the camera project inside `±margin_ndc`.
+pub fn room_camera_fit_fovy_for_corners(
+    window_w: f32,
+    window_h: f32,
+    mut cam: CameraParams,
+    corners_world: &[Vec3],
+    margin_ndc: f32,
+) -> CameraParams {
+    if corners_world.is_empty() {
+        return cam;
+    }
+    let eye = Vec3::from_array(cam.eye);
+    let target = Vec3::from_array(cam.target);
+    let forward = (target - eye).normalize_or_zero();
+    if forward.length_squared() < 1e-12 {
+        return cam;
+    }
+    let test_pts: Vec<Vec3> = corners_world
+        .iter()
+        .copied()
+        .filter(|p| (*p - eye).dot(forward) > 0.25)
+        .collect();
+    if test_pts.len() < 4 {
+        return cam;
+    }
+
+    let h = window_h.max(1e-6);
+    let aspect = window_w / h;
+    let far_p = h * 12.0;
+
+    let projects_ok = |fovy_deg: f32| -> bool {
+        let fov_y = fovy_deg.to_radians();
+        let up = Vec3::from_array(cam.up);
+        let view = Mat4::look_at_rh(eye, target, up);
+        let proj = Mat4::perspective_rh(fov_y, aspect, 1.0, far_p);
+        let vp = proj * view;
+        for p in &test_pts {
+            let clip = vp * Vec4::new(p.x, p.y, p.z, 1.0);
+            if clip.w <= 0.01 {
+                return false;
+            }
+            let inv_w = 1.0 / clip.w;
+            let nx = clip.x * inv_w;
+            let ny = clip.y * inv_w;
+            if nx.abs() > margin_ndc || ny.abs() > margin_ndc {
+                return false;
+            }
+        }
+        true
+    };
+
+    if projects_ok(cam.fovy_deg) {
+        return cam;
+    }
+
+    let mut lo = cam.fovy_deg;
+    let mut hi = 170.0_f32;
+    if !projects_ok(hi) {
+        return cam;
+    }
+
+    for _ in 0..24 {
+        if hi - lo < 0.05 {
+            break;
+        }
+        let mid = (lo + hi) * 0.5;
+        if projects_ok(mid) {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    cam.fovy_deg = hi;
+    cam
+}
+
+pub fn merge_marker_mesh_bounds(
+    map: &mut HashMap<String, RoomEnvironmentBounds>,
+    node_name: &str,
+    prim: &RoomEnvPrimitiveCpu,
+) {
+    let mut min_v = Vec3::splat(f32::INFINITY);
+    let mut max_v = Vec3::splat(f32::NEG_INFINITY);
+    for vtx in &prim.mesh.vertices {
+        let p = Vec3::from(vtx.position);
+        min_v = min_v.min(p);
+        max_v = max_v.max(p);
+    }
+    if !min_v.x.is_finite() {
+        return;
+    }
+    use std::collections::hash_map::Entry;
+    match map.entry(node_name.to_string()) {
+        Entry::Vacant(e) => {
+            e.insert(RoomEnvironmentBounds { min: min_v, max: max_v });
+        }
+        Entry::Occupied(mut e) => {
+            let b = e.get_mut();
+            b.min = b.min.min(min_v);
+            b.max = b.max.max(max_v);
+        }
+    }
+}
+
+pub fn decode_collision_triangles(
+    primitive: gltf::Primitive<'_>,
+    node_world: Mat4,
+    buffers: &[Vec<u8>],
+) -> anyhow::Result<Vec<[Vec3; 3]>> {
+    let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
+    let positions: Vec<[f32; 3]> = reader
+        .read_positions()
+        .context("collision primitive has no POSITION")?
+        .collect();
+    let indices: Vec<u32> = if let Some(ids) = reader.read_indices() {
+        ids.into_u32().collect()
+    } else {
+        (0..positions.len() as u32).collect()
+    };
+    let mut out = Vec::with_capacity(indices.len() / 3);
+    for tri in indices.chunks_exact(3) {
+        let p0 = node_world.transform_point3(Vec3::from(positions[tri[0] as usize]));
+        let p1 = node_world.transform_point3(Vec3::from(positions[tri[1] as usize]));
+        let p2 = node_world.transform_point3(Vec3::from(positions[tri[2] as usize]));
+        out.push([p0, p1, p2]);
+    }
+    Ok(out)
+}
+
+pub fn room_embedded_camera_from_node(
+    world: Mat4,
+    cam: gltf::Camera<'_>,
+) -> Option<RoomGltfEmbeddedCamera> {
+    let gltf::camera::Projection::Perspective(p) = cam.projection() else {
+        return None;
+    };
+    let fovy_deg = p.yfov().to_degrees();
+    let z_axis = world.z_axis.truncate();
+    let y_axis = world.y_axis.truncate();
+    let eye = world.w_axis.truncate();
+    let z_len = z_axis.length();
+    let y_len = y_axis.length();
+    if !(z_len > 1e-20 && y_len > 1e-20) {
+        return None;
+    }
+    let forward = (-z_axis / z_len).normalize();
+    let up = (y_axis / y_len).normalize();
+    let target = eye + forward;
+    Some(RoomGltfEmbeddedCamera {
+        eye,
+        target,
+        up,
+        fovy_deg,
+    })
+}
+
+fn apply_normal_scale_rgba8(pixels: &mut [u8], scale: f32) {
+    if (scale - 1.0).abs() < 1e-5 {
+        return;
+    }
+    for chunk in pixels.chunks_exact_mut(4) {
+        let x = chunk[0] as f32 / 255.0 * 2.0 - 1.0;
+        let y = chunk[1] as f32 / 255.0 * 2.0 - 1.0;
+        let z = chunk[2] as f32 / 255.0 * 2.0 - 1.0;
+        let nx = x * scale;
+        let ny = y * scale;
+        let nz = z;
+        let len = (nx * nx + ny * ny + nz * nz).sqrt().max(1e-8);
+        let nx = (nx / len) * 0.5 + 0.5;
+        let ny = (ny / len) * 0.5 + 0.5;
+        let nz = (nz / len) * 0.5 + 0.5;
+        chunk[0] = (nx.clamp(0.0, 1.0) * 255.0).round() as u8;
+        chunk[1] = (ny.clamp(0.0, 1.0) * 255.0).round() as u8;
+        chunk[2] = (nz.clamp(0.0, 1.0) * 255.0).round() as u8;
+    }
+}
+
+pub fn decode_env_primitive(
+    primitive: gltf::Primitive<'_>,
+    node_world: Mat4,
+    buffers: &[Vec<u8>],
+    images: &[gltf::image::Data],
+    log_asset_label: &str,
+) -> anyhow::Result<RoomEnvPrimitiveCpu> {
+    let normal_xform = node_world.inverse().transpose();
+    let material = primitive.material();
+    let sampler_cpu = sampler_cpu_from_material(&material);
+
+    let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
+
+    let positions_local: Vec<[f32; 3]> = reader
+        .read_positions()
+        .context("primitive has no POSITION attribute")?
+        .collect();
+
+    let normals_local: Vec<[f32; 3]> = if let Some(n) = reader.read_normals() {
+        n.collect()
+    } else {
+        vec![[0.0, 1.0, 0.0]; positions_local.len()]
+    };
+
+    anyhow::ensure!(
+        normals_local.len() == positions_local.len(),
+        "NORMAL count does not match POSITION count"
+    );
+
+    let pbr = material.pbr_metallic_roughness();
+    let base_tex_coord = pbr.base_color_texture().map(|t| t.tex_coord()).unwrap_or(0);
+
+    let mut uvs: Vec<[f32; 2]> = if let Some(tc) = reader.read_tex_coords(base_tex_coord) {
+        tc.into_f32().collect()
+    } else {
+        vec![[0.0, 0.0]; positions_local.len()]
+    };
+
+    anyhow::ensure!(
+        uvs.len() == positions_local.len(),
+        "TEXCOORD count does not match POSITION count"
+    );
+
+    if let Some(tex_info) = pbr.base_color_texture() {
+        apply_texture_transform(&mut uvs, &tex_info);
+    }
+
+    let mut uv_emr = uvs.clone();
+    let mut tangents_local: Vec<[f32; 4]> = if let Some(t_iter) = reader.read_tangents() {
+        let t: Vec<[f32; 4]> = t_iter.map(|a| [a[0], a[1], a[2], a[3]]).collect();
+        anyhow::ensure!(
+            t.len() == positions_local.len(),
+            "TANGENT count does not match POSITION count"
+        );
+        t
+    } else {
+        Vec::new()
+    };
+
+    if let Some(nt) = material.normal_texture() {
+        let set = nt.tex_coord();
+        if set != base_tex_coord {
+            uv_emr = if let Some(tc) = reader.read_tex_coords(set) {
+                tc.into_f32().collect()
+            } else {
+                uvs.clone()
+            };
+            anyhow::ensure!(
+                uv_emr.len() == positions_local.len(),
+                "normal TEXCOORD count does not match POSITION count"
+            );
+            tangents_local.clear();
+        }
+    }
+
+    let indices: Vec<u32> = if let Some(ids) = reader.read_indices() {
+        ids.into_u32().collect()
+    } else {
+        (0..positions_local.len() as u32).collect()
+    };
+
+    if tangents_local.is_empty() {
+        tangents_local =
+            compute_vertex_tangents(&positions_local, &normals_local, &uv_emr, &indices);
+    }
+
+    let colors: Vec<[f32; 4]> = if let Some(iter) = reader.read_colors(0) {
+        iter.into_rgba_f32().collect()
+    } else {
+        Vec::new()
+    };
+
+    let vertices: Vec<Vertex3dTex> = (0..positions_local.len())
+        .map(|i| {
+            let p = node_world.transform_point3(Vec3::from(positions_local[i]));
+            let n = normal_xform
+                .transform_vector3(Vec3::from(normals_local[i]))
+                .normalize_or_zero();
+            let tl = tangents_local[i];
+            let t_loc = Vec3::new(tl[0], tl[1], tl[2]);
+            let w = tl[3];
+            let t_w = node_world.transform_vector3(t_loc).normalize_or_zero();
+            let color = colors.get(i).copied().unwrap_or([1.0, 1.0, 1.0, 1.0]);
+            Vertex3dTex {
+                position: p.into(),
+                normal: n.into(),
+                uv: uvs[i],
+                tangent: [t_w.x, t_w.y, t_w.z, w],
+                uv_emr: uv_emr[i],
+                color,
+            }
+        })
+        .collect();
+    let factor = pbr.base_color_factor();
+
+    let mut albedo_rgba = pbr.base_color_texture().and_then(|tex_info| {
+        let img_index = tex_info.texture().source().index();
+        images.get(img_index).and_then(gltf_image_to_rgba8)
+    });
+
+    if albedo_rgba.is_none() && pbr.base_color_texture().is_some() {
+        log::warn!(
+            "{log_asset_label} primitive {}: base color texture present but image decode failed",
+            primitive.index()
+        );
+    }
+
+    match &mut albedo_rgba {
+        Some((pix, _, _)) => multiply_rgba8_by_factor(pix, &factor),
+        None => {
+            let want_fallback_tex =
+                factor != [1.0, 1.0, 1.0, 1.0] || pbr.base_color_texture().is_some();
+            if want_fallback_tex {
+                albedo_rgba = Some(solid_albedo_rgba8(&factor));
+            }
+        }
+    }
+
+    let normal_rgba = material.normal_texture().and_then(|nt| {
+        let scale = nt.scale();
+        let img_index = nt.texture().source().index();
+        images
+            .get(img_index)
+            .and_then(gltf_image_to_rgba8)
+            .map(|mut tex| {
+                apply_normal_scale_rgba8(&mut tex.0, scale);
+                tex
+            })
+    });
+
+    if normal_rgba.is_none() && material.normal_texture().is_some() {
+        log::warn!(
+            "{log_asset_label} primitive {}: normal texture present but image decode failed",
+            primitive.index()
+        );
+    }
+
+    let metallic_roughness_rgba = pbr.metallic_roughness_texture().and_then(|tex_info| {
+        let img_index = tex_info.texture().source().index();
+        images.get(img_index).and_then(gltf_image_to_rgba8)
+    });
+
+    let emissive_rgba = material.emissive_texture().and_then(|tex_info| {
+        let img_index = tex_info.texture().source().index();
+        images.get(img_index).and_then(gltf_image_to_rgba8)
+    });
+
+    let alpha_mode = GltfAlphaMode::from(material.alpha_mode());
+    let alpha_cutoff = material.alpha_cutoff().unwrap_or(0.5);
+
+    Ok(RoomEnvPrimitiveCpu {
+        mesh: LoadedPrimitive {
+            vertices,
+            indices,
+            albedo_rgba,
+            normal_rgba,
+            metallic_roughness_rgba,
+            emissive_rgba,
+            metallic_factor: pbr.metallic_factor(),
+            roughness_factor: pbr.roughness_factor(),
+            emissive_factor: crate::render::gltf_helpers::effective_gltf_emissive_rgb(&material),
+            alpha_mode,
+            alpha_cutoff,
+            double_sided: material.double_sided(),
+            sampler: sampler_cpu,
+        },
+    })
+}
+
+pub fn harvest_khr_punctual_light(
+    world: Mat4,
+    light: gltf::khr_lights_punctual::Light<'_>,
+    node_name: &str,
+    candle_node_prefix: &str,
+    log_asset_label: &str,
+    points: &mut Vec<RoomGltfEmbeddedPointLight>,
+    spots: &mut Vec<RoomGltfEmbeddedSpotLight>,
+) {
+    use gltf::khr_lights_punctual::Kind;
+
+    let color_linear = light.color();
+    let is_candle = node_name.starts_with(candle_node_prefix);
+    let intensity = light.intensity();
+    let range_doc = light.range();
+
+    match light.kind() {
+        Kind::Point => {
+            let pos_doc = world.transform_point3(Vec3::ZERO);
+            points.push(RoomGltfEmbeddedPointLight {
+                pos_doc,
+                color_linear,
+                is_candle,
+                intensity,
+                range_doc,
+            });
+        }
+        Kind::Spot {
+            inner_cone_angle,
+            outer_cone_angle,
+        } => {
+            let z_axis = world.z_axis.truncate();
+            let z_len = z_axis.length();
+            if z_len < 1e-20 {
+                log::warn!(
+                    "{log_asset_label}: spot light {:?} has degenerate orientation — skipping",
+                    node_name
+                );
+                return;
+            }
+            let dir_doc = (-z_axis / z_len).normalize();
+            let pos_doc = world.transform_point3(Vec3::ZERO);
+            let outer_rad = outer_cone_angle.max(1e-4);
+            let inner_rad = inner_cone_angle.min(outer_rad).max(0.0);
+            spots.push(RoomGltfEmbeddedSpotLight {
+                pos_doc,
+                dir_doc,
+                color_linear,
+                is_candle,
+                intensity,
+                range_doc,
+                inner_cone_rad: inner_rad,
+                outer_cone_rad: outer_rad,
+            });
+        }
+        Kind::Directional => {
+            log::debug!(
+                "{log_asset_label}: skipping directional light on node {:?}",
+                node_name
+            );
+        }
+    }
+}
+
+/// How mesh geometry under a node contributes to environment draw + picking.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RoomMeshPolicy {
+    /// Decode each primitive as a visible environment mesh.
+    EnvironmentDraw,
+    /// Skip draw; if the node is a marker, decode collision triangles only (invisible anchor volumes).
+    SkipDrawCollisionIfMarker,
+    /// Visible mesh plus collision tris + marker bounds union (diegetic buttons).
+    EnvironmentDrawWithCollision,
+}
+
+/// Per-asset rules for [`walk_room_env_node`].
+pub trait RoomEnvWalkHooks {
+    fn is_marker(&self, name: &str) -> bool;
+    fn mesh_policy(&self, name: &str) -> RoomMeshPolicy;
+    fn log_asset_label(&self) -> &'static str;
+}
+
+pub fn walk_room_env_node(
+    node: gltf::Node<'_>,
+    parent: Mat4,
+    hooks: &impl RoomEnvWalkHooks,
+    candle_node_prefix: &str,
+    markers: &mut HashMap<String, Mat4>,
+    env_primitives: &mut Vec<RoomEnvPrimitiveCpu>,
+    marker_mesh_bounds_doc: &mut HashMap<String, RoomEnvironmentBounds>,
+    collision_meshes: &mut Vec<RoomCollisionMesh>,
+    embedded_cameras: &mut EmbeddedCameraHarvest,
+    embedded_point_lights: &mut Vec<RoomGltfEmbeddedPointLight>,
+    embedded_spot_lights: &mut Vec<RoomGltfEmbeddedSpotLight>,
+    buffers: &[Vec<u8>],
+    images: &[gltf::image::Data],
+) -> anyhow::Result<()> {
+    let label = hooks.log_asset_label();
+    let local = Mat4::from_cols_array_2d(&node.transform().matrix());
+    let world = parent * local;
+    let name = node.name().unwrap_or("");
+
+    if let Some(light) = node.light() {
+        harvest_khr_punctual_light(
+            world,
+            light,
+            name,
+            candle_node_prefix,
+            label,
+            embedded_point_lights,
+            embedded_spot_lights,
+        );
+    }
+
+    if let Some(cam) = node.camera() {
+        match cam.projection() {
+            gltf::camera::Projection::Perspective(_) => {
+                if let Some(ec) = room_embedded_camera_from_node(world, cam) {
+                    embedded_cameras.insert(name, ec);
+                }
+            }
+            gltf::camera::Projection::Orthographic(_) => {
+                log::debug!("{label}: skipping orthographic camera on node {:?}", name);
+            }
+        }
+    }
+
+    if hooks.is_marker(name) {
+        if markers.insert(name.to_string(), world).is_some() {
+            log::warn!(
+                "{label}: duplicate marker node name {:?} — using last transform",
+                name
+            );
+        }
+    }
+
+    if let Some(mesh) = node.mesh() {
+        match hooks.mesh_policy(name) {
+            RoomMeshPolicy::SkipDrawCollisionIfMarker => {
+                if hooks.is_marker(name) {
+                    let mut tris = Vec::new();
+                    for prim in mesh.primitives() {
+                        match decode_collision_triangles(prim, world, buffers) {
+                            Ok(chunk) => tris.extend(chunk),
+                            Err(e) => log::warn!("{label} node {:?} collision: {e:#}", name),
+                        }
+                    }
+                    if !tris.is_empty() {
+                        collision_meshes.push(RoomCollisionMesh {
+                            node_name: name.to_string(),
+                            triangles: tris,
+                        });
+                    }
+                }
+            }
+            RoomMeshPolicy::EnvironmentDrawWithCollision => {
+                let mut tris: Vec<[Vec3; 3]> = Vec::new();
+                for prim in mesh.primitives() {
+                    match decode_collision_triangles(prim.clone(), world, buffers) {
+                        Ok(chunk) => tris.extend(chunk),
+                        Err(e) => log::warn!("{label} node {:?} collision: {e:#}", name),
+                    }
+                    let decoded =
+                        decode_env_primitive(prim, world, buffers, images, label)?;
+                    merge_marker_mesh_bounds(marker_mesh_bounds_doc, name, &decoded);
+                    env_primitives.push(decoded);
+                }
+                if !tris.is_empty() {
+                    collision_meshes.push(RoomCollisionMesh {
+                        node_name: name.to_string(),
+                        triangles: tris,
+                    });
+                }
+            }
+            RoomMeshPolicy::EnvironmentDraw => {
+                for prim in mesh.primitives() {
+                    let decoded =
+                        decode_env_primitive(prim, world, buffers, images, label)?;
+                    if hooks.is_marker(name) {
+                        merge_marker_mesh_bounds(marker_mesh_bounds_doc, name, &decoded);
+                    }
+                    env_primitives.push(decoded);
+                }
+            }
+        }
+    }
+
+    for child in node.children() {
+        walk_room_env_node(
+            child,
+            world,
+            hooks,
+            candle_node_prefix,
+            markers,
+            env_primitives,
+            marker_mesh_bounds_doc,
+            collision_meshes,
+            embedded_cameras,
+            embedded_point_lights,
+            embedded_spot_lights,
+            buffers,
+            images,
+        )?;
+    }
+    Ok(())
+}
+
+/// Document-space marker origin minus environment AABB center (multiply by [`room_env_world_scale`]
+/// for world space consistent with the centered room model matrix).
+pub fn marker_translation_doc(
+    markers: &HashMap<String, Mat4>,
+    environment_bounds_doc: Option<RoomEnvironmentBounds>,
+    name: &str,
+) -> Option<Vec3> {
+    let center_doc = environment_bounds_doc
+        .map(|b| b.center())
+        .unwrap_or(Vec3::ZERO);
+    markers
+        .get(name)
+        .map(|m| m.transform_point3(Vec3::ZERO) - center_doc)
+}

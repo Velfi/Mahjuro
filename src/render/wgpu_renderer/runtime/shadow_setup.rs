@@ -17,6 +17,7 @@ impl WgpuRenderer {
         &self,
         camera: &CameraFrame,
         shadows_enabled: bool,
+        frame: &crate::render::draw_cmd::UiFrame,
     ) -> ShadowFrame {
         // Anchor the shadow frustum to the same key direction the lit
         // shaders use. The orthographic frustum is sized to cover the play
@@ -52,7 +53,8 @@ impl WgpuRenderer {
         let shop_suppresses_shadow = matches!(
             self.active_scene_key.as_deref(),
             Some("shop" | "tile_pack_celebration")
-        );
+        ) || (self.active_scene_key.as_deref() == Some("showcase")
+            && frame.showcase_render_hints.suppress_table_shadows);
         let shadow_enabled_flag = if shadows_enabled && !shop_suppresses_shadow {
             1.0_f32
         } else {

@@ -111,7 +111,7 @@ impl SceneBehavior for MaterialViewerScene {
 
         // Lights arranged above the grid so every orb gets similar illumination.
         for (dx, dy) in &[(0.25f32, 0.20f32), (0.75, 0.20), (0.50, 0.55)] {
-            frame.point_lights.push(PointLight {
+            frame.scene_lighting.push_smooth(PointLight {
                 pos: [w * dx, h * dy, h * 0.6],
                 radius: h * 1.5,
                 color: [1.0, 0.97, 0.90],
@@ -271,6 +271,10 @@ fn material_entries() -> Vec<MaterialEntry> {
         MaterialEntry {
             label: "Porcelain (Antique)",
             material: mk(Porcelain, [0.55, 0.52, 0.46], 0.7, 128.0),
+        },
+        MaterialEntry {
+            label: "Emissive",
+            material: MaterialParams::emissive_lamp([1.0, 0.85, 0.55], 0.65),
         },
     ]
 }

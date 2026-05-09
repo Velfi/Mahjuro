@@ -143,7 +143,7 @@ impl SceneBehavior for YakuJournalScene {
         // bright specular blooms on the wood that pulled the eye away
         // from the grid; a single, very high, wide-radius light gives
         // tiles enough dimensional shading without hotspots.
-        frame.point_lights.push(PointLight {
+        frame.scene_lighting.push_smooth(PointLight {
             pos: [w * 0.5, h * -0.10, h * 1.40],
             radius: h * 3.0,
             color: [1.0, 0.96, 0.88],
@@ -938,6 +938,11 @@ fn signature_tiles(yk: YakuKind, id: &mut u32) -> Vec<Tile> {
             (Suit::Characters, 1),
             (Suit::Characters, 1),
             (Suit::Bamboos, 5),
+        ],
+        YakuKind::KokushiMusou => &[
+            (Suit::Characters, 1),
+            (Suit::Wind, 1),
+            (Suit::Dragon, 1),
         ],
         YakuKind::ChickenHand => &[
             (Suit::Characters, 1),

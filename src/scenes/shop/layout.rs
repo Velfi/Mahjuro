@@ -27,7 +27,6 @@ pub(super) fn live_shop_hit(
                     | PICK_JOURNAL_BOOK
                     | PICK_LEAVE_PROP
                     | PICK_REROLL_PROP
-                    | PICK_SELL_TRAY
             ) {
                 true
             } else if let Some(idx) = tile_pack_index_from_pick(id) {

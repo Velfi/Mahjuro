@@ -15,6 +15,7 @@
 
 use crate::core::hand::{SetKind, find_pairs_and_triplets, validate_selection};
 use crate::core::tile::{Suit, Tile};
+use crate::core::yaku::is_complete_winning_hand;
 
 /// All 34 tile faces in a standard set: 9 ranks × 3 number suits + 4 winds + 3 dragons.
 fn all_faces() -> Vec<(Suit, u8)> {
@@ -33,21 +34,12 @@ fn all_faces() -> Vec<(Suit, u8)> {
     out
 }
 
-/// True iff `tiles` validates as a FullHand: 4 melds + 1 pair (kongs allowed,
-/// adding 1 tile each over 14). Caller must pre-sort if needed —
+/// True iff `tiles` validates as a winning hand (standard 4 melds + pair,
+/// Chiitoitsu, or Kokushi Musō). Caller must pre-sort if needed —
 /// `validate_selection` sorts internally.
 pub fn is_complete(tiles: &[Tile]) -> bool {
-    let kongs_target = |sets: &[crate::core::hand::DetectedSet]| -> bool {
-        let kongs = sets.iter().filter(|s| s.kind == SetKind::Kong).count();
-        let melds = sets
-            .iter()
-            .filter(|s| matches!(s.kind, SetKind::Triplet | SetKind::Sequence | SetKind::Kong))
-            .count();
-        let pairs = sets.iter().filter(|s| s.kind == SetKind::Pair).count();
-        tiles.len() == 14 + kongs && melds == 4 && pairs == 1
-    };
     match validate_selection(tiles) {
-        Some(sets) => kongs_target(&sets),
+        Some(sets) => is_complete_winning_hand(tiles, &sets),
         None => false,
     }
 }

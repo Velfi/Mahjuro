@@ -1,8 +1,8 @@
 //! Audio system: sound effects and background music.
 //!
 //! Uses rodio for playback. Gracefully degrades if audio device is unavailable.
-//! OGG files are decoded to PCM once at load time so the device thread never
-//! runs Vorbis.
+//! SFX (OGG/Vorbis) and music (MP3) are decoded to PCM once at load time so
+//! the device thread never runs decoders during playback.
 
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -81,18 +81,18 @@ impl Source for SharedPcmSource {
     }
 }
 
-fn decode_ogg(label: &str, bytes: &[u8]) -> Option<Arc<PcmClip>> {
+fn decode_rodio(label: &str, bytes: &[u8]) -> Option<Arc<PcmClip>> {
     let cursor = Cursor::new(bytes.to_vec());
     let decoder = Decoder::new(cursor).ok()?;
     let channels = decoder.channels();
     let sample_rate = decoder.sample_rate();
     if channels == 0 || sample_rate == 0 {
-        log::warn!("decode_ogg({label}): invalid ch={channels} rate={sample_rate}");
+        log::warn!("decode_rodio({label}): invalid ch={channels} rate={sample_rate}");
         return None;
     }
     let samples: Vec<i16> = decoder.collect();
     if samples.is_empty() {
-        log::warn!("decode_ogg({label}): empty");
+        log::warn!("decode_rodio({label}): empty");
         return None;
     }
     Some(Arc::new(PcmClip {
@@ -100,6 +100,86 @@ fn decode_ogg(label: &str, bytes: &[u8]) -> Option<Arc<PcmClip>> {
         sample_rate,
         samples,
     }))
+}
+
+/// Background music slot (embedded under `assets/audio/music/`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MusicId {
+    MainMenu,
+    Gameplay,
+    Shop,
+}
+
+impl MusicId {
+    fn asset_path(self) -> &'static str {
+        match self {
+            MusicId::MainMenu => "audio/music/main_menu.mp3",
+            MusicId::Gameplay => "audio/music/gameplay.mp3",
+            MusicId::Shop => "audio/music/shop.mp3",
+        }
+    }
+}
+
+/// Loops a decoded clip without `repeat_infinite`'s extra buffering (important
+/// for long stereo tracks).
+struct LoopingPcmSource {
+    clip: Arc<PcmClip>,
+    pos: usize,
+}
+
+impl LoopingPcmSource {
+    fn new(clip: Arc<PcmClip>) -> Self {
+        Self { clip, pos: 0 }
+    }
+
+    fn duration(clip: &PcmClip) -> Duration {
+        SharedPcmSource::duration(clip)
+    }
+}
+
+impl Iterator for LoopingPcmSource {
+    type Item = i16;
+
+    fn next(&mut self) -> Option<i16> {
+        if self.clip.samples.is_empty() {
+            return None;
+        }
+        if self.pos >= self.clip.samples.len() {
+            self.pos = 0;
+        }
+        let s = self.clip.samples[self.pos];
+        self.pos += 1;
+        Some(s)
+    }
+}
+
+impl Source for LoopingPcmSource {
+    fn current_frame_len(&self) -> Option<usize> {
+        None
+    }
+
+    fn channels(&self) -> u16 {
+        self.clip.channels
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.clip.sample_rate
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        Some(Self::duration(&self.clip))
+    }
+
+    fn try_seek(&mut self, pos: Duration) -> Result<(), SeekError> {
+        let ch = self.channels() as usize;
+        let curr_channel = self.pos % ch;
+        let new_pos = (pos.as_secs_f32() * self.sample_rate() as f32 * ch as f32) as usize;
+        let new_pos = new_pos.min(self.clip.samples.len());
+        let new_pos = new_pos.next_multiple_of(ch);
+        let new_pos = new_pos.saturating_sub(curr_channel);
+        self.pos = new_pos;
+        Ok(())
+    }
 }
 
 /// Sound effect identifiers.
@@ -202,6 +282,7 @@ pub enum SfxId {
     YakuJunchan,
     YakuHonroutou,
     YakuChiitoitsu,
+    YakuKokushiMusou,
     YakuChickenHand,
     /// Played ~1 second after the victory screen appears.
     Victory,
@@ -285,6 +366,7 @@ pub fn all_sfx_ids() -> &'static [SfxId] {
         SfxId::YakuJunchan,
         SfxId::YakuHonroutou,
         SfxId::YakuChiitoitsu,
+        SfxId::YakuKokushiMusou,
         SfxId::YakuChickenHand,
         SfxId::Victory,
         SfxId::Victory2,
@@ -358,6 +440,8 @@ impl SfxId {
             SfxId::YakuJunchan => "yaku_junchan.ogg",
             SfxId::YakuHonroutou => "yaku_honroutou.ogg",
             SfxId::YakuChiitoitsu => "yaku_chiitoitsu.ogg",
+            // TODO(audio): Ship `assets/audio/yaku_kokushi_musou.ogg` (or alias another stinger); until then scoring no-ops this cue.
+            SfxId::YakuKokushiMusou => "yaku_kokushi_musou.ogg",
             SfxId::YakuChickenHand => "yaku_chicken_hand.ogg",
             SfxId::Victory => "victory.ogg",
             SfxId::Victory2 => "victory2.ogg",
@@ -391,6 +475,7 @@ impl SfxId {
             YakuKind::Junchan => SfxId::YakuJunchan,
             YakuKind::Honroutou => SfxId::YakuHonroutou,
             YakuKind::Chiitoitsu => SfxId::YakuChiitoitsu,
+            YakuKind::KokushiMusou => SfxId::YakuKokushiMusou,
             YakuKind::ChickenHand => SfxId::YakuChickenHand,
         }
     }
@@ -421,6 +506,7 @@ pub struct AudioManager {
     _stream: Option<OutputStream>,
     handle: Option<OutputStreamHandle>,
     sfx_data: HashMap<SfxId, Arc<PcmClip>>,
+    music_data: HashMap<MusicId, Arc<PcmClip>>,
     /// Per-relic trigger samples loaded from `assets/audio/relics/<slug>.ogg`
     /// at startup. Lookup is by `RelicId`; missing entries fall back to
     /// [`SfxId::ScoreStep`] in [`AudioManager::play_relic_trigger`].
@@ -436,16 +522,23 @@ pub struct AudioManager {
     master_volume: f32,
     sfx_volume: f32,
     music_volume: f32,
-    enabled: bool,
+    /// User toggle: sound effects only; music uses [`Self::handle`] independently.
+    sfx_enabled: bool,
+    /// Dedicated sink for looping background music (separate from SFX sinks).
+    music_sink: Option<Sink>,
+    /// Last requested background track.
+    last_music: Option<MusicId>,
+    /// Track currently driving `music_sink` (when playing).
+    music_active_id: Option<MusicId>,
 }
 
 impl AudioManager {
     pub fn new() -> Self {
-        let (stream, handle, enabled) = match OutputStream::try_default() {
-            Ok((s, h)) => (Some(s), Some(h), true),
+        let (stream, handle) = match OutputStream::try_default() {
+            Ok((s, h)) => (Some(s), Some(h)),
             Err(e) => {
                 log::warn!("Audio device unavailable: {e}. Running without sound.");
-                (None, None, false)
+                (None, None)
             }
         };
 
@@ -454,7 +547,7 @@ impl AudioManager {
             let asset_path = format!("audio/{}", sfx_id.filename());
             if let Some(file) = crate::asset_path::get(&asset_path) {
                 let label = format!("{asset_path} ({sfx_id:?})");
-                if let Some(clip) = decode_ogg(&label, file.data.as_ref()) {
+                if let Some(clip) = decode_rodio(&label, file.data.as_ref()) {
                     sfx_data.insert(sfx_id, clip);
                 }
             }
@@ -472,7 +565,7 @@ impl AudioManager {
             let asset_path = format!("audio/relics/{slug}.ogg");
             if let Some(file) = crate::asset_path::get(&asset_path) {
                 let label = asset_path.clone();
-                if let Some(clip) = decode_ogg(&label, file.data.as_ref()) {
+                if let Some(clip) = decode_rodio(&label, file.data.as_ref()) {
                     relic_trigger_data.insert(def.id, clip);
                 }
             }
@@ -484,17 +577,36 @@ impl AudioManager {
             );
         }
 
+        let mut music_data = HashMap::new();
+        for id in [MusicId::MainMenu, MusicId::Gameplay, MusicId::Shop] {
+            let path = id.asset_path();
+            if let Some(file) = crate::asset_path::get(path) {
+                if let Some(clip) = decode_rodio(path, file.data.as_ref()) {
+                    music_data.insert(id, clip);
+                }
+            }
+        }
+        if music_data.is_empty() {
+            log::debug!("No music files in assets/audio/music/; background music disabled.");
+        } else {
+            log::debug!("Loaded {} background music track(s).", music_data.len());
+        }
+
         Self {
             _stream: stream,
             handle,
             sfx_data,
+            music_data,
             relic_trigger_data,
             active_sinks: Vec::with_capacity(MAX_CONCURRENT_SFX),
             pending_sfx: Vec::new(),
             master_volume: 0.7,
             sfx_volume: 0.7,
             music_volume: 0.7,
-            enabled,
+            sfx_enabled: true,
+            music_sink: None,
+            last_music: None,
+            music_active_id: None,
         }
     }
 
@@ -547,8 +659,8 @@ impl AudioManager {
     }
 
     fn play_clip(&mut self, tag: &str, clip: Arc<PcmClip>, speed: f32) {
-        if !self.enabled {
-            log::debug!("play_clip({tag}): disabled");
+        if !self.sfx_enabled {
+            log::debug!("play_clip({tag}): sfx disabled");
             return;
         }
         let Some(handle) = &self.handle else {
@@ -584,6 +696,7 @@ impl AudioManager {
     /// Set the master volume (0.0 to 1.0).
     pub fn set_master_volume(&mut self, vol: f32) {
         self.master_volume = vol.clamp(0.0, 1.0);
+        self.refresh_music_sink_volume();
     }
 
     /// Set the sound effects volume (0.0 to 1.0).
@@ -594,10 +707,64 @@ impl AudioManager {
     /// Set the music volume (0.0 to 1.0).
     pub fn set_music_volume(&mut self, vol: f32) {
         self.music_volume = vol.clamp(0.0, 1.0);
+        self.refresh_music_sink_volume();
     }
 
-    /// Enable or disable sound effects.
+    /// Enable or disable sound effects. Background music is unaffected.
     pub fn set_enabled(&mut self, enabled: bool) {
-        self.enabled = enabled;
+        if self.sfx_enabled == enabled {
+            return;
+        }
+        self.sfx_enabled = enabled;
+    }
+
+    fn refresh_music_sink_volume(&mut self) {
+        let Some(sink) = self.music_sink.as_ref() else {
+            return;
+        };
+        sink.set_volume(self.master_volume * self.music_volume);
+    }
+
+    /// Stop background music and clear the remembered track (e.g. splash / loading).
+    pub fn stop_background_music(&mut self) {
+        self.last_music = None;
+        self.music_active_id = None;
+        if let Some(sink) = self.music_sink.take() {
+            sink.stop();
+        }
+    }
+
+    /// Switch background music to `id` (loops). No-op if the asset is missing.
+    pub fn set_music_track(&mut self, id: MusicId) {
+        self.last_music = Some(id);
+        self.start_music_track(id);
+    }
+
+    fn start_music_track(&mut self, id: MusicId) {
+        let Some(clip) = self.music_data.get(&id).cloned() else {
+            log::debug!("start_music_track({id:?}): no data");
+            return;
+        };
+        let Some(handle) = &self.handle else {
+            return;
+        };
+        if let Some(sink) = self.music_sink.as_ref() {
+            if !sink.empty() && self.music_active_id == Some(id) {
+                self.refresh_music_sink_volume();
+                return;
+            }
+        }
+        if let Some(sink) = self.music_sink.take() {
+            sink.stop();
+        }
+        let Ok(sink) = Sink::try_new(handle) else {
+            log::warn!("start_music_track({id:?}): sink creation failed");
+            return;
+        };
+        sink.set_volume(self.master_volume * self.music_volume);
+        let source = LoopingPcmSource::new(clip);
+        sink.append(source);
+        self.music_sink = Some(sink);
+        self.music_active_id = Some(id);
     }
 }

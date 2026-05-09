@@ -9,6 +9,7 @@ impl WgpuRenderer {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn place_object3d_primitive(
         &mut self,
+        frame: &crate::render::draw_cmd::UiFrame,
         camera: &CameraFrame,
         obj: &crate::render::draw_cmd::Object3d,
         shape: &crate::render::primitive::MeshId,
@@ -115,10 +116,15 @@ impl WgpuRenderer {
         let arrange_name: String = if let Some(name) = obj.arrange_name {
             name.to_string()
         } else if *shape == MeshId::BeveledSlab {
+            let shop_like = self.active_scene_key == Some("shop")
+                || (self.active_scene_key == Some("showcase")
+                    && frame
+                        .showcase_render_hints
+                        .shop_tonemap_and_lit_mesh_context);
             match (self.active_scene_key, slot_i) {
                 (Some("gameplay"), 0) => "gameplay.score_panel.plaque".to_string(),
                 (Some("gameplay"), 1) => "gameplay.score_panel.scoring_placard".to_string(),
-                (Some("shop"), i) => format!("shop.plaque[{i}]"),
+                (_, i) if shop_like => format!("shop.plaque[{i}]"),
                 (_, i) => format!("plaque[{i}]"),
             }
         } else {

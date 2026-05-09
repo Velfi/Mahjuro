@@ -54,8 +54,6 @@ pub(crate) enum ShopFocus {
     NextRound,
     /// The 2D "Reroll" button at the bottom of the screen — also maps to PICK_REROLL_PROP.
     Reroll,
-    /// The 3D sell tray prop in the inventory row.
-    SellTray,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,7 +70,6 @@ impl ShopFocus {
             ShopHit::Talisman(i) => Self::Talisman(i),
             ShopHit::Dish(id) if id == PICK_LEAVE_PROP => Self::NextRound,
             ShopHit::Dish(id) if id == PICK_REROLL_PROP => Self::Reroll,
-            ShopHit::Dish(id) if id == PICK_SELL_TRAY => Self::SellTray,
             ShopHit::Dish(id) => Self::Dish(id),
             ShopHit::TilePack(id) => Self::Pack(id),
             ShopHit::EnvSpawnSlot(_) | ShopHit::EnvInvSlot(_) | ShopHit::EnvConsumableOrd(_) => {
@@ -93,7 +90,6 @@ impl ShopFocus {
             Self::Pack(id) => Some(ShopHit::TilePack(id)),
             Self::NextRound => Some(ShopHit::Dish(PICK_LEAVE_PROP)),
             Self::Reroll => Some(ShopHit::Dish(PICK_REROLL_PROP)),
-            Self::SellTray => Some(ShopHit::Dish(PICK_SELL_TRAY)),
         }
     }
 }
@@ -164,56 +160,6 @@ pub(super) fn focused_sell_action(
         }
         ShopFocus::Talisman(i) if i >= talisman_items.len() => {
             owned_talisman_inventory_index(i, talisman_items, shop).map(ShopAction::SellConsumable)
-        }
-        _ => None,
-    }
-}
-
-/// Convert a [`ShopHit`] to the corresponding [`ShopDragSource`] if the hit
-/// refers to an owned item. Returns `None` for for-sale items and dishes.
-pub(super) fn drag_source_from_hit(
-    hit: ShopHit,
-    n_for_sale_relics: usize,
-    zodiac_items: &[ConsumableShopItem],
-    talisman_items: &[ConsumableShopItem],
-    shop: &ShopReadModel,
-) -> Option<ShopDragSource> {
-    match hit {
-        ShopHit::Relic(i) if i >= n_for_sale_relics => {
-            let owned_idx = i - n_for_sale_relics;
-            (owned_idx < shop.owned_relics.len()).then_some(ShopDragSource::OwnedRelic(owned_idx))
-        }
-        ShopHit::Ribbon(i) if i >= zodiac_items.len() => {
-            owned_ribbon_inventory_index(i, zodiac_items, shop).map(ShopDragSource::OwnedConsumable)
-        }
-        ShopHit::Talisman(i) if i >= talisman_items.len() => {
-            owned_talisman_inventory_index(i, talisman_items, shop)
-                .map(ShopDragSource::OwnedConsumable)
-        }
-        _ => None,
-    }
-}
-
-/// Convert a [`ShopFocus`] to the corresponding [`ShopDragSource`] if the
-/// focus refers to an owned item. Returns `None` otherwise.
-pub(super) fn drag_source_from_focus(
-    focus: Option<ShopFocus>,
-    n_for_sale_relics: usize,
-    zodiac_items: &[ConsumableShopItem],
-    talisman_items: &[ConsumableShopItem],
-    shop: &ShopReadModel,
-) -> Option<ShopDragSource> {
-    match focus? {
-        ShopFocus::Relic(i) if i >= n_for_sale_relics => {
-            let owned_idx = i - n_for_sale_relics;
-            (owned_idx < shop.owned_relics.len()).then_some(ShopDragSource::OwnedRelic(owned_idx))
-        }
-        ShopFocus::Ribbon(i) if i >= zodiac_items.len() => {
-            owned_ribbon_inventory_index(i, zodiac_items, shop).map(ShopDragSource::OwnedConsumable)
-        }
-        ShopFocus::Talisman(i) if i >= talisman_items.len() => {
-            owned_talisman_inventory_index(i, talisman_items, shop)
-                .map(ShopDragSource::OwnedConsumable)
         }
         _ => None,
     }
@@ -491,6 +437,9 @@ pub(crate) struct PackCelebration {
     pub(crate) dismissed: bool,
     /// Number of tiles whose reveal sound has already been fired.
     pub(crate) revealed_count: usize,
+    /// When true, headless warmup does not auto-skip from [`CelebPhase::Closeup`] to Reveal
+    /// (used for screenshots that must show the pack mesh).
+    pub(crate) headless_hold_pack_closeup: bool,
 }
 
 impl PackCelebration {
@@ -513,6 +462,7 @@ impl PackCelebration {
             started_at: Instant::now(),
             dismissed: false,
             revealed_count: 0,
+            headless_hold_pack_closeup: false,
         }
     }
 
@@ -540,7 +490,8 @@ impl PackCelebration {
         (t / Self::TILE_FLY_SECS).clamp(0.0, 1.0)
     }
 
-    /// Headless screenshot: reveal phase with every tile landed and prompt visible.
+    /// Headless preset: reveal phase with every tile landed and prompt visible (tile row, no pack mesh).
+    #[allow(dead_code)] // kept for optional reveal-phase captures / future CLI
     pub(crate) fn screenshot_reveal_settled(
         tiles: Vec<crate::core::tile::Tile>,
         pack_name: &'static str,
@@ -553,27 +504,16 @@ impl PackCelebration {
         s.revealed_count = s.tiles.len();
         s
     }
-}
 
-/// An owned item the player is currently dragging (keyboard/controller hold-A
-/// or mouse press-and-drag) toward the sell tray. Stores enough information to
-/// reconstruct the sell action once the item is dropped.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ShopDragSource {
-    /// An owned relic at flat-index `i` in the renderer relic list (i.e.
-    /// `i >= n_for_sale_relics`). The value stored is the *owned* sub-index
-    /// `i - n_for_sale`.
-    OwnedRelic(usize),
-    /// An owned consumable at index `inv_idx` in `run.consumables.items`.
-    OwnedConsumable(usize),
-}
-
-impl ShopDragSource {
-    /// Convert back to a `ShopAction::Sell*` action.
-    pub(super) fn sell_action(self) -> ShopAction {
-        match self {
-            Self::OwnedRelic(idx) => ShopAction::SellRelic(idx),
-            Self::OwnedConsumable(idx) => ShopAction::SellConsumable(idx),
-        }
+    /// Headless screenshot: pack closeup (3D box visible). Holds Closeup across headless ticks.
+    pub(crate) fn screenshot_pack_closeup_headless(
+        tiles: Vec<crate::core::tile::Tile>,
+        pack_name: &'static str,
+        pack_kind: crate::core::tile_pack::TilePackKind,
+    ) -> Self {
+        let mut s = Self::new(tiles, pack_name, pack_kind);
+        s.headless_hold_pack_closeup = true;
+        s.started_at = Instant::now() - std::time::Duration::from_secs_f32(10.0);
+        s
     }
 }

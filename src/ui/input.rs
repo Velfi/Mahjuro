@@ -78,10 +78,11 @@ pub enum UiAction {
     FocusDown,
     /// Vertical menu navigation (up).
     FocusUp,
-    /// Toggle-select the focused tile for discard.
+    /// Gamepad **South** / **Enter** / **Space** — confirm / hand tile toggle (scene-defined).
     Confirm,
     /// Controller-only: release the confirm face button.
     ConfirmRelease,
+    /// Gamepad **East** / **Backspace** — cancel / back (scene-defined).
     Cancel,
     /// Commit selected melds into the structure (costs one play).
     ScoreHand,
@@ -91,12 +92,11 @@ pub enum UiAction {
     CommitDiscard,
     /// Restore hand and wall immediately before the last discard (accessibility).
     UndoDiscard,
-    /// Move focus onto the gameplay Play button (no commit). Emitted by the
-    /// gamepad West (X) face when the "X and Y quick action" setting is OFF.
+    /// Move focus onto the gameplay Play mirror (no commit). Emitted by the
+    /// gamepad **North** face when "X and Y quick action" is OFF.
     FocusPlayButton,
-    /// Move focus onto the gameplay Discard button (no commit). Emitted by
-    /// the gamepad North (Y) face when the "X and Y quick action" setting
-    /// is OFF.
+    /// Move focus onto the gameplay Discard bowl (no commit). Emitted by the
+    /// gamepad **West** face when "X and Y quick action" is OFF.
     FocusDiscardButton,
     NavigateHudNext,
     NavigateHudPrev,
@@ -110,7 +110,7 @@ pub enum UiAction {
     PageNext,
     /// Step to the previous page within the current tab (PageUp).
     PagePrev,
-    /// Pause the game (Escape / Start button).
+    /// **Escape** / gamepad **Start** — pause menu.
     Pause,
     /// Open the glossary / help overlay (`?`, `F1`, `H`, gamepad Select).
     Help,
@@ -123,12 +123,12 @@ pub enum UiAction {
     /// blue = +Z) anchored at the camera's look target. Triggered from the
     /// native Debug menu.
     DebugToggleAxes,
-    /// Shop: gamepad **North** / keyboard **E** — toggle close-up inspect for the focused item.
-    ShopItemInspectToggle,
-    /// Shop: gamepad **West** (hold) / hold **Q** — start hold-to-sell when over sellable owned stock.
-    ShopSellHoldPress,
-    /// Shop: gamepad **West** release / **Q** release — complete hold-to-sell if held long enough.
-    ShopSellHoldRelease,
+    /// Gamepad **North** / keyboard **E** — scene-defined (inspect, play hand, …).
+    NorthFacePress,
+    /// Gamepad **West** (press) / keyboard **Q** (press) — scene-defined (discard, hold-to-sell start, …).
+    WestFacePress,
+    /// Gamepad **West** release / **Q** release — shop hold-to-sell completion; ignored elsewhere.
+    WestFaceRelease,
 }
 
 /// Per-frame hints so [`InputState::poll_gamepads`] can emit scene-appropriate
@@ -137,10 +137,10 @@ pub enum UiAction {
 pub struct GamepadPollCtx {
     /// Shop is active with no blocking in-scene overlay — use shop face maps.
     pub shop_face_buttons: bool,
-    /// Collection browser: North opens inspect; West stays default (no sell-hold).
-    pub collection_inspect_north: bool,
-    /// Shop item inspect is active — sample right stick + triggers for orbit/zoom.
-    pub shop_item_inspect: bool,
+    /// Collection scene: route gamepad North (and **E**) to inspect, same as shop North.
+    pub collection_uses_north_for_inspect: bool,
+    /// Showcase **orbit** overlay ([`crate::scenes::Scene::Showcase`] inspect presenters) — sample right stick + triggers for orbit/zoom.
+    pub item_inspect_overlay: bool,
 }
 
 /// What kind of draggable inventory item is currently being rearranged.
@@ -223,10 +223,8 @@ pub struct InputState {
     pub swap_ab: bool,
     /// When true, gamepad West (X) and North (Y) are swapped.
     pub swap_xy: bool,
-    /// When true, gamepad West (X) immediately commits ScoreHand and North
-    /// (Y) immediately commits CommitDiscard. When false, those buttons
-    /// only move focus onto the corresponding action button — the player
-    /// must press Confirm (A) to actually fire the action.
+    /// When true, West/North emit [`UiAction::WestFacePress`] / [`UiAction::NorthFacePress`] in gameplay
+    /// (discard / play). When false, they only move focus onto the bowl / mirror.
     pub xy_quick_action: bool,
     /// Settings mirror: all controller rumble (shop hold-to-sell, scoring cascade, …).
     pub hold_to_sell_rumble_enabled: bool,
@@ -249,10 +247,12 @@ pub struct InputState {
     /// D-pad hold repeats (also fed from SDL D-pad buttons).
     dpad_axis_repeat_x: Option<(i8, Instant)>,
     dpad_axis_repeat_y: Option<(i8, Instant)>,
-    /// Right stick axes (−1..1) while shop item inspect is active.
-    pub shop_inspect_orbit_stick: (f32, f32),
-    /// Trigger analog zoom for shop inspect: `RightTrigger2 − LeftTrigger2`, plus bumpers (see [`Self::sample_shop_inspect_analog`]).
-    pub shop_inspect_zoom_triggers: f32,
+    /// Right stick axes (−1..1) while a showcase orbit presenter is active.
+    pub item_inspect_orbit_stick: (f32, f32),
+    /// LMB drag pixel delta this frame (summed from motion events); merged in [`Self::gamepad_frame_tick`].
+    item_inspect_mouse_orbit_px: (f32, f32),
+    /// Trigger analog zoom for item inspect: `RightTrigger2 − LeftTrigger2`, plus bumpers (see [`Self::sample_item_inspect_analog`]).
+    pub item_inspect_zoom_triggers: f32,
     /// Controller family for on-screen button prompts (from USB vendor / name).
     pub gamepad_style: GamepadStyle,
     /// Scheduled scoring / rumble-lab pulses (`SDL_Gamepad::set_rumble` cannot overlap envelope/composite).
@@ -280,11 +280,18 @@ impl InputState {
             stick_repeat_y: None,
             dpad_axis_repeat_x: None,
             dpad_axis_repeat_y: None,
-            shop_inspect_orbit_stick: (0.0, 0.0),
-            shop_inspect_zoom_triggers: 0.0,
+            item_inspect_orbit_stick: (0.0, 0.0),
+            item_inspect_mouse_orbit_px: (0.0, 0.0),
+            item_inspect_zoom_triggers: 0.0,
             gamepad_style: GamepadStyle::default(),
             scoring_rumble_schedule: Vec::new(),
         })
+    }
+
+    #[inline]
+    pub fn accum_item_inspect_mouse_orbit(&mut self, dx: f32, dy: f32) {
+        self.item_inspect_mouse_orbit_px.0 += dx;
+        self.item_inspect_mouse_orbit_px.1 += dy;
     }
 
     /// Run scheduled SDL rumble pulses (composite / staggered lab patterns).
@@ -561,44 +568,45 @@ impl InputState {
                     UiAction::Cancel
                 }),
                 GpButton::West => {
+                    // West face = discard / hold-to-sell; North = play / inspect (`swap_xy` swaps which physical button is which).
                     if self.swap_xy {
-                        if poll_ctx.shop_face_buttons || poll_ctx.collection_inspect_north {
-                            actions.push(UiAction::ShopItemInspectToggle);
+                        if poll_ctx.shop_face_buttons || poll_ctx.collection_uses_north_for_inspect {
+                            actions.push(UiAction::NorthFacePress);
                         } else {
                             actions.push(if self.xy_quick_action {
-                                UiAction::CommitDiscard
+                                UiAction::WestFacePress
                             } else {
                                 UiAction::FocusDiscardButton
                             });
                         }
                     } else if poll_ctx.shop_face_buttons {
-                        actions.push(UiAction::ShopSellHoldPress);
+                        actions.push(UiAction::WestFacePress);
                     } else {
                         actions.push(if self.xy_quick_action {
-                            UiAction::ScoreHand
+                            UiAction::WestFacePress
                         } else {
-                            UiAction::FocusPlayButton
+                            UiAction::FocusDiscardButton
                         });
                     }
                 }
                 GpButton::North => {
                     if self.swap_xy {
                         if poll_ctx.shop_face_buttons {
-                            actions.push(UiAction::ShopSellHoldPress);
+                            actions.push(UiAction::WestFacePress);
                         } else {
                             actions.push(if self.xy_quick_action {
-                                UiAction::ScoreHand
+                                UiAction::NorthFacePress
                             } else {
                                 UiAction::FocusPlayButton
                             });
                         }
-                    } else if poll_ctx.shop_face_buttons || poll_ctx.collection_inspect_north {
-                        actions.push(UiAction::ShopItemInspectToggle);
+                    } else if poll_ctx.shop_face_buttons || poll_ctx.collection_uses_north_for_inspect {
+                        actions.push(UiAction::NorthFacePress);
                     } else {
                         actions.push(if self.xy_quick_action {
-                            UiAction::CommitDiscard
+                            UiAction::NorthFacePress
                         } else {
-                            UiAction::FocusDiscardButton
+                            UiAction::FocusPlayButton
                         });
                     }
                 }
@@ -653,12 +661,12 @@ impl InputState {
                 }
                 GpButton::West => {
                     if poll_ctx.shop_face_buttons && !self.swap_xy {
-                        actions.push(UiAction::ShopSellHoldRelease);
+                        actions.push(UiAction::WestFaceRelease);
                     }
                 }
                 GpButton::North => {
                     if poll_ctx.shop_face_buttons && self.swap_xy {
-                        actions.push(UiAction::ShopSellHoldRelease);
+                        actions.push(UiAction::WestFaceRelease);
                     }
                 }
                 _ => {}
@@ -752,20 +760,28 @@ impl InputState {
         poll_ctx: GamepadPollCtx,
         actions: &mut Vec<UiAction>,
     ) -> bool {
-        self.shop_inspect_orbit_stick = (0.0, 0.0);
-        self.shop_inspect_zoom_triggers = 0.0;
+        self.item_inspect_orbit_stick = (0.0, 0.0);
+        self.item_inspect_zoom_triggers = 0.0;
 
         let before = actions.len();
         shell.prepare_gamepad_frame();
 
         Self::sync_gamepad_style_from_first_connected(shell, &mut self.gamepad_style);
 
-        if poll_ctx.shop_item_inspect {
-            Self::sample_shop_inspect_analog(
+        if poll_ctx.item_inspect_overlay {
+            Self::sample_item_inspect_analog(
                 shell,
-                &mut self.shop_inspect_orbit_stick,
-                &mut self.shop_inspect_zoom_triggers,
+                &mut self.item_inspect_orbit_stick,
+                &mut self.item_inspect_zoom_triggers,
             );
+            // Mouse / trackpad: LMB drag orbit (same presenters as right stick).
+            let (mx, my) = self.item_inspect_mouse_orbit_px;
+            self.item_inspect_mouse_orbit_px = (0.0, 0.0);
+            const SENS: f32 = 0.014;
+            let sx = (mx * SENS).clamp(-1.0, 1.0);
+            let sy = (-my * SENS).clamp(-1.0, 1.0);
+            self.item_inspect_orbit_stick.0 = (self.item_inspect_orbit_stick.0 + sx).clamp(-1.0, 1.0);
+            self.item_inspect_orbit_stick.1 = (self.item_inspect_orbit_stick.1 + sy).clamp(-1.0, 1.0);
         }
         Self::emit_held_navigation_repeats(
             shell,
@@ -796,7 +812,7 @@ impl InputState {
         }
     }
 
-    fn sample_shop_inspect_analog(
+    fn sample_item_inspect_analog(
         shell: &SdlShell,
         out_stick: &mut (f32, f32),
         out_zoom: &mut f32,
@@ -1062,9 +1078,9 @@ impl InputState {
             // Mirrors LB / RB on the controller so keyboard players have a non-mouse path.
             Scancode::LeftBracket => actions.push(UiAction::NavigateHudPrev),
             Scancode::RightBracket => actions.push(UiAction::NavigateHudNext),
-            // Shop (gamepad West = hold sell, North = inspect): **Q** hold sell, **E** inspect.
-            Scancode::E => actions.push(UiAction::ShopItemInspectToggle),
-            Scancode::Q => actions.push(UiAction::ShopSellHoldPress),
+            // **Q** / **E** = gamepad West / North (see [`UiAction::WestFacePress`], [`UiAction::NorthFacePress`]).
+            Scancode::E => actions.push(UiAction::NorthFacePress),
+            Scancode::Q => actions.push(UiAction::WestFacePress),
             // Glossary / help — `?`, `/`, `H`, `F1`. ShiftLeft+Slash on
             // most layouts produces `?`, but we don't need shift state here:
             // both Slash and KeyH are unambiguous.
@@ -1090,7 +1106,7 @@ impl InputState {
             actions.push(UiAction::ConfirmRelease);
         }
         if matches!(code, Scancode::Q) {
-            actions.push(UiAction::ShopSellHoldRelease);
+            actions.push(UiAction::WestFaceRelease);
         }
     }
 
@@ -1237,9 +1253,9 @@ pub fn apply_ui_actions(
             | UiAction::TabPrev
             | UiAction::PageNext
             | UiAction::PagePrev => {}
-            UiAction::ShopItemInspectToggle
-            | UiAction::ShopSellHoldPress
-            | UiAction::ShopSellHoldRelease => {}
+            UiAction::NorthFacePress
+            | UiAction::WestFacePress
+            | UiAction::WestFaceRelease => {}
         }
     }
 }

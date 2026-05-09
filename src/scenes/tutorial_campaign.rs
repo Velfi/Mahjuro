@@ -630,7 +630,7 @@ impl TutorialCampaignScene {
             rotation: [0.0, 0.0, 0.0],
             color: [0.42, 0.82, 0.55, 1.0],
             kind: Object3dKind::Talisman {
-                kind: TalismanKind::Jade,
+                kind: TalismanKind::Pearl,
             },
             hover_target: 0.0,
             anim_id: 0,
@@ -1413,7 +1413,7 @@ impl SceneBehavior for TutorialCampaignScene {
             (panel_x + panel_w * 0.34, label_y + 10.0 * scale, 1.10),
             (panel_x + panel_w * 0.66, label_y + 10.0 * scale, 1.10),
         ] {
-            frame.point_lights.push(PointLight {
+            frame.scene_lighting.push_smooth(PointLight {
                 pos: [lx, ly, light_y],
                 radius: h * 0.95,
                 color: [1.0, 0.96, 0.88],

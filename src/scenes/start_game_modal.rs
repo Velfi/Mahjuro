@@ -20,9 +20,7 @@ use crate::ui::widget_tree::{
 use super::main_menu_exterior::MainMenuExteriorScene;
 use super::shop::ShopScene;
 use crate::render::draw_cmd::UiFrame;
-use crate::render::world_space::{
-    LayoutAnchorPx, layout_px_py_from_norm, layout_py_top_from_bottom_margin,
-};
+use crate::render::world_space::{LayoutAnchorPx, layout_px_py_from_norm};
 
 use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 use std::borrow::Cow;
@@ -62,6 +60,7 @@ fn stake_glyph(stake: Stake) -> &'static str {
 
 pub struct TileSelectScene {
     tree: TreeState,
+    pub positions: crate::ui::scene_layout::TileSelectPositions,
     material: TileMaterial,
     /// Currently-selected difficulty stake. Cycled by StakePrev/StakeNext
     /// buttons on the modal; gated by `PlayerProgress::stake_unlocked_for`
@@ -76,6 +75,7 @@ impl TileSelectScene {
     pub fn new() -> Self {
         Self {
             tree: TreeState::new(),
+            positions: crate::ui::scene_layout::load_tile_select_positions(),
             material: TileMaterial::default(),
             stake: Stake::default(),
             tutorial_mode: false,
@@ -86,6 +86,7 @@ impl TileSelectScene {
     pub fn new_tutorial() -> Self {
         Self {
             tree: TreeState::new(),
+            positions: crate::ui::scene_layout::load_tile_select_positions(),
             material: TileMaterial::Bamboo,
             stake: Stake::Spring,
             tutorial_mode: true,
@@ -117,6 +118,7 @@ impl TileSelectScene {
         window_h: f32,
         ui_scale: f32,
         progress: &crate::core::progression::PlayerProgress,
+        positions: &crate::ui::scene_layout::TileSelectPositions,
     ) -> Tree<ModalAction> {
         let scale = metrics::scene_scale(window_w, window_h, ui_scale);
         let panel_w = window_w * 0.38;
@@ -137,14 +139,14 @@ impl TileSelectScene {
             (12.0 * scale).max(6.0)
         };
 
-        // In non-tutorial mode the menu sits lower and includes the stake
-        // token row; budget extra vertical space for it.
-        let start_y = if self.tutorial_mode {
-            window_h * 0.62
-        } else {
-            window_h * 0.60
-        };
-        let menu_x = (panel_w - btn_w) * 0.5;
+        // Vertical offset matches the old tutorial vs standard split.
+        let start_y = positions.button_menu.ny * window_h
+            + if self.tutorial_mode {
+                0.02 * window_h
+            } else {
+                0.0
+            };
+        let menu_x = positions.button_menu.nx * window_w;
 
         let (root, block_h) = if self.tutorial_mode {
             let items = vec![
@@ -267,6 +269,23 @@ impl TileSelectScene {
             Some(Scene::Shop(ShopScene::new(run)))
         }
     }
+
+    /// Top-left `(x, y)` and `(width, height)` in layout pixels for the showcase grid.
+    fn preview_grid_rect(&self, w: f32, h: f32) -> (f32, f32, f32, f32) {
+        let tl = &self.positions.preview_corner_tl;
+        let br = &self.positions.preview_corner_br;
+        let mut x0 = tl.nx * w;
+        let mut y0 = tl.ny * h;
+        let mut x1 = br.nx * w;
+        let mut y1 = br.ny * h;
+        if x1 < x0 {
+            std::mem::swap(&mut x0, &mut x1);
+        }
+        if y1 < y0 {
+            std::mem::swap(&mut y0, &mut y1);
+        }
+        (x0, y0, (x1 - x0).max(1.0), (y1 - y0).max(1.0))
+    }
 }
 
 /// The 38 unique tile faces in the standard set, ordered by suit for grid display.
@@ -304,16 +323,7 @@ const GRID_ROWS: [(usize, usize); 5] = [
     (34, 4), // Flowers 1–4
 ];
 
-/// Tile-preview grid — responsive fractions of the window, converted to layout **`px`/`py`**
-/// (top-down, [`crate::render::world_space::pixel_to_world`] input) via [`layout_py_top_from_bottom_margin`].
-/// Horizontal: left edge and width. Vertical: height + bottom margin (larger margin ⇒ grid higher).
-const TILE_PREVIEW_GRID_LEFT_FRAC: f32 = 0.42 + 0.02;
-const TILE_PREVIEW_GRID_WIDTH_FRAC: f32 = 0.58 - 0.02 - 0.05;
-const TILE_PREVIEW_GRID_HEIGHT_FRAC: f32 = 0.76;
-const TILE_PREVIEW_GRID_MARGIN_BOTTOM_FRAC: f32 = 0.16;
-/// Key light: normalized screen → [`layout_px_py_from_norm`], packed via [`LayoutAnchorPx`].
-const TILE_PREVIEW_KEY_LIGHT_NX: f32 = 0.70;
-const TILE_PREVIEW_KEY_LIGHT_NY: f32 = 0.26;
+/// Key light height above the felt uses a fixed fraction of window height (screen-space cue).
 const TILE_PREVIEW_KEY_LIGHT_LIFT_FRAC_OF_H: f32 = 0.80;
 
 /// Compute 38 top-down pixel `(x, y, w, h)` slot rects (`y` increases downward; fed to
@@ -373,7 +383,7 @@ impl SceneBehavior for TileSelectScene {
             }
         }
 
-        let tree = self.build_tree(w, h, ctx.ui_scale, ctx.progress);
+        let tree = self.build_tree(w, h, ctx.ui_scale, ctx.progress, &self.positions);
         let action = self.tree.update(
             &tree,
             TreeInput {
@@ -458,12 +468,13 @@ impl SceneBehavior for TileSelectScene {
         let body_h = body_px * 1.4;
         let hint_h = hint_px * 1.4;
 
-        let mut cursor_y = if self.tutorial_mode {
-            h * 0.22
-        } else {
-            h * 0.10
-        };
-        let text_x = panel_w * 0.05;
+        let text_x = self.positions.left_panel.nx * w;
+        let mut cursor_y = self.positions.left_panel.ny * h
+            + if self.tutorial_mode {
+                0.12 * h
+            } else {
+                0.0
+            };
         let text_w = panel_w * 0.90;
 
         let title_text = if self.tutorial_mode {
@@ -560,9 +571,10 @@ impl SceneBehavior for TileSelectScene {
         // Hint at the bottom of the panel — only surface info the buttons
         // don't already teach. Left/right already have a visible chevron row;
         // Esc does not, so that's what the hint says.
-        let hint_y = h - hint_h - (12.0 * scale);
+        let hint_panel_x = self.positions.bottom_hint.nx * w;
+        let hint_panel_y = self.positions.bottom_hint.ny * h;
         text_labels.push(TextLabel {
-            rect: [text_x, hint_y, text_w, hint_h],
+            rect: [hint_panel_x, hint_panel_y, text_w, hint_h],
             text: if self.tutorial_mode {
                 "Enter to confirm the focused option".into()
             } else {
@@ -574,7 +586,7 @@ impl SceneBehavior for TileSelectScene {
         });
 
         // ── Buttons (via widget tree) ──────────────────────────────
-        let tree = self.build_tree(w, h, ui_scale, ctx.progress);
+        let tree = self.build_tree(w, h, ui_scale, ctx.progress, &self.positions);
         let mut tree_frame = TreeFrame {
             instances: &mut instances,
             labels: &mut text_labels,
@@ -584,11 +596,7 @@ impl SceneBehavior for TileSelectScene {
         self.tree.draw(&tree, &mut tree_frame, &noop_render_custom);
 
         // ── Tile preview grid on the right ─────────────────────────
-        let grid_w = TILE_PREVIEW_GRID_WIDTH_FRAC * w;
-        let grid_h = TILE_PREVIEW_GRID_HEIGHT_FRAC * h;
-        let grid_x = TILE_PREVIEW_GRID_LEFT_FRAC * w;
-        let grid_y =
-            layout_py_top_from_bottom_margin(h, grid_h, TILE_PREVIEW_GRID_MARGIN_BOTTOM_FRAC * h);
+        let (grid_x, grid_y, grid_w, grid_h) = self.preview_grid_rect(w, h);
         let hand_tiles = preview_tiles();
         let hand_slots = grid_slots(grid_x, grid_y, grid_w, grid_h);
 
@@ -643,19 +651,19 @@ impl SceneBehavior for TileSelectScene {
         // Key light positioned above the tile cluster so the warm specular
         // falls on the tiles themselves rather than puddling on the wood
         // floor in front. Intensity dialed back so the hero art reads clean.
-        let (key_px, key_py) =
-            layout_px_py_from_norm(w, h, TILE_PREVIEW_KEY_LIGHT_NX, TILE_PREVIEW_KEY_LIGHT_NY);
+        let kl = &self.positions.key_light;
+        let (key_px, key_py) = layout_px_py_from_norm(w, h, kl.nx, kl.ny);
         let key_light = LayoutAnchorPx {
             px: key_px,
             py: key_py,
             lift_z: TILE_PREVIEW_KEY_LIGHT_LIFT_FRAC_OF_H * h,
         };
-        frame.point_lights = vec![PointLight {
+        frame.scene_lighting.set_smooth_points(vec![PointLight {
             pos: key_light.to_draw_cmd_triple(),
             radius: h * 1.80,
             color: [1.00, 0.88, 0.62],
             intensity: 1.05,
-        }];
+        }]);
         frame.buttons = buttons;
         frame.window_title = if self.tutorial_mode {
             "Mahjuro — Tutorial Prompt".into()

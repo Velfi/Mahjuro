@@ -11,22 +11,53 @@ fn scene_viewport_clear() -> wgpu::Color {
     }
 }
 
-/// Split [`RenderOp`]s at [`RenderOp::ClearSceneDepth`] markers (markers omitted).
-fn split_render_ops_by_clear_depth(ops: &[RenderOp]) -> Vec<&[RenderOp]> {
+#[derive(Clone, Copy, Default)]
+enum PassAShopInspectHdrUpload {
+    #[default]
+    None,
+    Subject,
+}
+
+/// One contiguous slice of [`RenderOp`]s inside Pass A. `shop_inspect_hdr_upload` selects an
+/// optional [`SsrGlobals.felt`] upload **before** this slice's render pass.
+struct PassAChunk<'a> {
+    ops: &'a [RenderOp],
+    shop_inspect_hdr_upload: PassAShopInspectHdrUpload,
+}
+
+/// Split Pass A at [`RenderOp::ClearSceneDepth`] and [`RenderOp::ShopInspectLitMeshSubjectHdr`]
+/// (markers omitted from chunks).
+fn split_pass_a_chunks(ops: &[RenderOp]) -> Vec<PassAChunk<'_>> {
     let mut out = Vec::new();
-    let mut start = 0;
+    let mut start = 0usize;
+    let mut upload_before_next = PassAShopInspectHdrUpload::None;
     for (i, op) in ops.iter().enumerate() {
-        if matches!(op, RenderOp::ClearSceneDepth) {
-            if start < i {
-                out.push(&ops[start..i]);
-            }
-            start = i + 1;
+        let split = matches!(
+            op,
+            RenderOp::ClearSceneDepth | RenderOp::ShopInspectLitMeshSubjectHdr
+        );
+        if !split {
+            continue;
         }
+        if start < i {
+            out.push(PassAChunk {
+                ops: &ops[start..i],
+                shop_inspect_hdr_upload: upload_before_next,
+            });
+            upload_before_next = PassAShopInspectHdrUpload::None;
+        }
+        if matches!(op, RenderOp::ShopInspectLitMeshSubjectHdr) {
+            upload_before_next = PassAShopInspectHdrUpload::Subject;
+        }
+        start = i + 1;
     }
     if start < ops.len() {
-        out.push(&ops[start..]);
+        out.push(PassAChunk {
+            ops: &ops[start..],
+            shop_inspect_hdr_upload: upload_before_next,
+        });
     }
-    out.into_iter().filter(|c| !c.is_empty()).collect()
+    out.into_iter().filter(|c| !c.ops.is_empty()).collect()
 }
 
 impl WgpuRenderer {
@@ -482,6 +513,7 @@ impl WgpuRenderer {
         // ── instanced draw. ────────────────────────────────────────────────
         let mut quad_buffers: Vec<wgpu::Buffer> = Vec::new();
         let mut gradient_quad_buffers: Vec<wgpu::Buffer> = Vec::new();
+        let mut squircle_quad_buffers: Vec<wgpu::Buffer> = Vec::new();
         let mut flame_buffers: Vec<wgpu::Buffer> = Vec::new();
         let mut text_draws: Vec<TextDraw> = Vec::new();
         let mut tile_face_quads: Vec<TileFaceQuad> = Vec::new();
@@ -571,8 +603,16 @@ impl WgpuRenderer {
                     ops.push(RenderOp::ShopEnvironment);
                     i += 1;
                 }
+                DrawCmd::HallwayEnvironment => {
+                    ops.push(RenderOp::HallwayEnvironment);
+                    i += 1;
+                }
                 DrawCmd::ClearSceneDepth => {
                     ops.push(RenderOp::ClearSceneDepth);
+                    i += 1;
+                }
+                DrawCmd::ShopInspectLitMeshSubjectHdr => {
+                    ops.push(RenderOp::ShopInspectLitMeshSubjectHdr);
                     i += 1;
                 }
                 DrawCmd::Quad(_) => {
@@ -612,6 +652,26 @@ impl WgpuRenderer {
                     let buf_idx = gradient_quad_buffers.len();
                     gradient_quad_buffers.push(buf);
                     ops.push(RenderOp::GradientQuadBatch {
+                        buf_idx,
+                        count: batch.len() as u32,
+                    });
+                }
+                DrawCmd::SquircleQuad(_) => {
+                    let mut batch: Vec<GpuInstance> = Vec::new();
+                    while let Some(DrawCmd::SquircleQuad(inst)) = frame.cmds.get(i) {
+                        batch.push(*inst);
+                        i += 1;
+                    }
+                    let buf = self
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("squircle-quad-batch"),
+                            contents: bytemuck::cast_slice(&batch),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                    let buf_idx = squircle_quad_buffers.len();
+                    squircle_quad_buffers.push(buf);
+                    ops.push(RenderOp::SquircleQuadBatch {
                         buf_idx,
                         count: batch.len() as u32,
                     });
@@ -847,9 +907,6 @@ impl WgpuRenderer {
                 model,
                 self.table_material,
             );
-
-            // Felt shells share `table_instance`'s uniform; shell layer comes
-            // from `@builtin(instance_index)` in `vs_felt_shell_instanced`.
         }
         // Reset the debug pickable catch-all for this frame; each draw
         // loop below appends entries it wants to expose to
@@ -1003,6 +1060,7 @@ impl WgpuRenderer {
         // Wood tablets migrated to Object3dKind::WoodTablet.
 
         self.run_object3d_placement(
+            frame,
             &camera,
             &object3d_cmds,
             &wall_stack_cmds,
@@ -1057,7 +1115,7 @@ impl WgpuRenderer {
         self.garbage_collect_prev_tile_world();
 
         // ── Shadow map setup ────────────────────────────────────────────
-        let shadow_frame = self.setup_shadow_frame(&camera, shadows_enabled);
+        let shadow_frame = self.setup_shadow_frame(&camera, shadows_enabled, frame);
         let light_view_proj_arr = shadow_frame.light_view_proj_arr;
 
         let shadow_just_enabled = shadows_enabled && !self.prev_frame_shadows_enabled;
@@ -1088,7 +1146,10 @@ impl WgpuRenderer {
         );
 
         if ops.iter().any(|o| matches!(o, RenderOp::ShopEnvironment)) {
-            self.write_shop_environment_uniforms(frame, &camera, frame.shop_env_gltf_punctual);
+            self.write_shop_environment_uniforms(frame, &camera, false);
+        }
+        if ops.iter().any(|o| matches!(o, RenderOp::HallwayEnvironment)) {
+            self.write_hallway_environment_uniforms(frame, &camera, false);
         }
 
         let mut encoder = self
@@ -1116,6 +1177,7 @@ impl WgpuRenderer {
             bg_inst_buffers: &bg_inst_buffers,
             quad_buffers: &quad_buffers,
             gradient_quad_buffers: &gradient_quad_buffers,
+            squircle_quad_buffers: &squircle_quad_buffers,
             flame_buffers: &flame_buffers,
             text_draws: &text_draws,
             tile_face_inst_buffers: &tile_face_inst_buffers,
@@ -1141,6 +1203,7 @@ impl WgpuRenderer {
             bg_inst_buffers: &bg_inst_buffers,
             quad_buffers: &quad_buffers,
             gradient_quad_buffers: &gradient_quad_buffers,
+            squircle_quad_buffers: &squircle_quad_buffers,
             flame_buffers: &flame_buffers,
             text_draws: &text_draws,
             tile_face_inst_buffers: &tile_face_inst_buffers,
@@ -1196,9 +1259,12 @@ impl WgpuRenderer {
             #[cfg(not(debug_assertions))]
             let split_main_for_profile = false;
 
-            let mut pass_a_chunks = split_render_ops_by_clear_depth(&ops);
+            let mut pass_a_chunks = split_pass_a_chunks(&ops);
             if pass_a_chunks.is_empty() && !ops.is_empty() {
-                pass_a_chunks.push(ops.as_slice());
+                pass_a_chunks.push(PassAChunk {
+                    ops: ops.as_slice(),
+                    shop_inspect_hdr_upload: PassAShopInspectHdrUpload::None,
+                });
             }
 
             macro_rules! pass_a_draw_loop {
@@ -1227,7 +1293,7 @@ impl WgpuRenderer {
 
             macro_rules! pass_a_draw_chunk {
                 ($pass:expr, $chunk:expr, $skip_table:expr, $only_table:expr) => {{
-                    for op in $chunk.iter() {
+                    for op in $chunk.ops.iter() {
                         if matches!(op, RenderOp::TextDraw(_) | RenderOp::PromptIconQuad(_)) {
                             continue;
                         }
@@ -1302,6 +1368,16 @@ impl WgpuRenderer {
                             wgpu::LoadOp::Clear(1.0)
                         };
                         let is_last_scene_chunk = ci + 1 == n_scene_chunks;
+                        match chunk.shop_inspect_hdr_upload {
+                            PassAShopInspectHdrUpload::None => {}
+                            PassAShopInspectHdrUpload::Subject => {
+                                self.upload_shop_inspect_lit_mesh_subject_ssr(
+                                    &camera,
+                                    ssr_enabled,
+                                    frame,
+                                );
+                            }
+                        }
                         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                             label: Some("main-pass-scene"),
                             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1349,6 +1425,16 @@ impl WgpuRenderer {
                         };
                         let depth_load = wgpu::LoadOp::Clear(1.0);
                         let is_last_chunk = ci + 1 == n_chunks;
+                        match chunk.shop_inspect_hdr_upload {
+                            PassAShopInspectHdrUpload::None => {}
+                            PassAShopInspectHdrUpload::Subject => {
+                                self.upload_shop_inspect_lit_mesh_subject_ssr(
+                                    &camera,
+                                    ssr_enabled,
+                                    frame,
+                                );
+                            }
+                        }
                         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                             label: Some("main-pass"),
                             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1385,6 +1471,146 @@ impl WgpuRenderer {
                         }
                     }
                 }
+            }
+        }
+
+        // Linear HDR bloom source for `shop_glb` — emissive + bright BRDF survive
+        // thresholding (bloom extract still keys off tonemapped `scene_color` elsewhere).
+        let glb_room_bloom_linear = bloom_active
+            && frame.room_uses_shop_glb_shader()
+            && (ops.iter().any(|o| matches!(o, RenderOp::ShopEnvironment))
+                || ops.iter().any(|o| matches!(o, RenderOp::HallwayEnvironment)));
+        if glb_room_bloom_linear {
+            if ops.iter().any(|o| matches!(o, RenderOp::ShopEnvironment))
+                && self.shop_environment.is_some()
+                && !self.shop_env_primitives.is_empty()
+            {
+                self.write_shop_environment_uniforms(frame, &camera, true);
+                {
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("shop-linear-bloom-pass"),
+                        color_attachments: &[
+                            Some(wgpu::RenderPassColorAttachment {
+                                view: &self.shop_linear_bloom_view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                    store: wgpu::StoreOp::Store,
+                                },
+                                depth_slice: None,
+                            }),
+                            Some(wgpu::RenderPassColorAttachment {
+                                view: &self.room_emissive_view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                    store: wgpu::StoreOp::Store,
+                                },
+                                depth_slice: None,
+                            }),
+                        ],
+                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                            view: &self.depth_view,
+                            depth_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Load,
+                                store: wgpu::StoreOp::Store,
+                            }),
+                            stencil_ops: None,
+                        }),
+                        occlusion_query_set: None,
+                        timestamp_writes: None,
+                        multiview_mask: None,
+                    });
+                    self.draw_shop_environment_meshes(&mut pass, frame, true);
+                }
+                self.write_shop_environment_uniforms(frame, &camera, false);
+            }
+            if ops.iter().any(|o| matches!(o, RenderOp::HallwayEnvironment))
+                && self.hallway_environment.is_some()
+                && !self.hallway_env_primitives.is_empty()
+            {
+                self.write_hallway_environment_uniforms(frame, &camera, true);
+                {
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("hallway-linear-bloom-pass"),
+                        color_attachments: &[
+                            Some(wgpu::RenderPassColorAttachment {
+                                view: &self.shop_linear_bloom_view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                    store: wgpu::StoreOp::Store,
+                                },
+                                depth_slice: None,
+                            }),
+                            Some(wgpu::RenderPassColorAttachment {
+                                view: &self.room_emissive_view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                    store: wgpu::StoreOp::Store,
+                                },
+                                depth_slice: None,
+                            }),
+                        ],
+                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                            view: &self.depth_view,
+                            depth_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Load,
+                                store: wgpu::StoreOp::Store,
+                            }),
+                            stencil_ops: None,
+                        }),
+                        occlusion_query_set: None,
+                        timestamp_writes: None,
+                        multiview_mask: None,
+                    });
+                    self.draw_hallway_environment_meshes(&mut pass, frame, true);
+                }
+                self.write_hallway_environment_uniforms(frame, &camera, false);
+            }
+        }
+
+        if glb_room_bloom_linear && !is_prepass {
+            let inv_vp = glam::Mat4::from_cols_array(&camera.view_proj_arr).inverse();
+            let gw = self.size.width.max(1) as f32;
+            let gh = self.size.height.max(1) as f32;
+            let gi = crate::render::wgpu_renderer::EmissiveGiParams {
+                inv_view_proj: inv_vp.to_cols_array(),
+                view_pos: [camera.cam_pos.x, camera.cam_pos.y, camera.cam_pos.z, 1.0],
+                screen: [gw, gh, 0.0, 0.0],
+                tuning: [
+                    crate::render::shop_glb::SHOP_ROOM_EMISSIVE_GI_STRENGTH,
+                    140.0,
+                    32.0,
+                    0.0,
+                ],
+            };
+            self.queue.write_buffer(
+                &self.emissive_gi_params_buffer,
+                0,
+                bytemuck::bytes_of(&gi),
+            );
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("emissive-ssgi-pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &self.emissive_gi_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: None,
+                    occlusion_query_set: None,
+                    timestamp_writes: None,
+                    multiview_mask: None,
+                });
+                pass.set_pipeline(&self.emissive_ssgi_pipeline);
+                pass.set_bind_group(0, &self.emissive_ssgi_bind_group, &[]);
+                pass.draw(0..3, 0..1);
             }
         }
 
@@ -1447,7 +1673,16 @@ impl WgpuRenderer {
                 1.0 / bloom_w as f32,
                 1.0 / bloom_h as f32,
             ],
-            data1: [0.0; 4],
+            data1: [
+                0.0,
+                0.0,
+                if bloom_active {
+                    0.02
+                } else {
+                    9999.0
+                },
+                if bloom_active { 1.15 } else { 0.0 },
+            ],
         };
         let blur_h_params = BloomParams {
             data0: [
@@ -1588,6 +1823,28 @@ impl WgpuRenderer {
             });
             pass.set_pipeline(&self.bloom_composite_pipeline);
             pass.set_bind_group(0, &self.bloom_composite_bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+
+        if glb_room_bloom_linear && !is_prepass {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("emissive-gi-composite-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.post_bloom_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.emissive_gi_composite_pipeline);
+            pass.set_bind_group(0, &self.emissive_gi_composite_bind_group, &[]);
             pass.draw(0..3, 0..1);
         }
 

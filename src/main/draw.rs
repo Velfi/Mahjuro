@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::scene_transition::overlay_kind_for_transition;
+
 #[inline]
 fn append_fullscreen_debug_panel(
     frame: &mut UiFrame,
@@ -126,7 +128,7 @@ impl App {
                     self.progress.has_won = true;
                     self.progress.runs_completed += 1;
                     self.progress.record_score(self.run.round_score);
-                    let _ = self.progress.check_level_up();
+                    let level_up = self.progress.check_level_up();
                     self.steam
                         .unlock_achievement(crate::steam::Achievement::FirstRunCompleted);
                     if self.progress.runs_completed >= 10 {
@@ -152,6 +154,15 @@ impl App {
                         ));
                     let _ = persistence::save_profile(self.active_profile, &self.progress);
                     persistence::delete_saved_run(self.active_profile);
+
+                    if let Some(result) = level_up
+                        && let Some(modal) = build_level_up_modal(&result, ww, wh)
+                    {
+                        log::info!("Level up! Now level {}", result.new_level);
+                        self.pending_post_game_over_level_up = Some(modal);
+                        self.audio.play_sfx(audio::SfxId::LevelUp);
+                    }
+
                     Scene::GameOver(GameOverScene::victory(&self.run))
                 } else if let Some(lesson) = tutorial_lesson_before {
                     // Tutorial: show a recap of the completed lesson.
@@ -252,7 +263,7 @@ impl App {
                     && let Some(modal) = build_level_up_modal(&result, ww, wh)
                 {
                     log::info!("Level up! Now level {}", result.new_level);
-                    self.pending_post_game_over_modals.push(modal);
+                    self.pending_post_game_over_level_up = Some(modal);
                     self.audio.play_sfx(audio::SfxId::LevelUp);
                 }
 
@@ -299,15 +310,17 @@ impl App {
             .layout_engine
             .solve(size.width as f32, size.height as f32);
 
-        let item_inspect_top = matches!(
-            self.overlay_stack.last(),
-            Some(crate::scenes::Scene::ItemInspect(_))
-        );
-        let suspended_shop = match (&self.scene, item_inspect_top) {
+        let showcase_orbit_top = self.overlay_stack.last().is_some_and(|top| {
+            matches!(
+                top,
+                crate::scenes::Scene::Showcase(s) if s.wants_orbit_input()
+            )
+        });
+        let suspended_shop = match (&self.scene, showcase_orbit_top) {
             (crate::scenes::Scene::Shop(s), true) => Some(s),
             _ => None,
         };
-        let suspended_collection = match (&self.scene, item_inspect_top) {
+        let suspended_collection = match (&self.scene, showcase_orbit_top) {
             (crate::scenes::Scene::Collection(c), true) => Some(c),
             _ => None,
         };
@@ -372,6 +385,7 @@ impl App {
                 .unwrap_or_default(),
             suspended_shop,
             suspended_collection,
+            self.gfx.tile_preset,
         );
         // Build the scene's frame in canonical push-order. For migrated
         // scenes (gameplay) this calls their direct `draw_frame` impl;
@@ -427,54 +441,15 @@ impl App {
         let alpha = self.transition_alpha;
         frame.apply_alpha(alpha);
 
-        // Overlay the shooting-star cascade effect during dramatic transitions.
+        // Overlay fullscreen transition shaders (not zodiac’s in-scene cascade).
         if self.transition_timer > 0.0 && self.effect_layers.transition_fullscreen_fx {
-            match self.transition_kind {
-                TransitionKind::ShootingStarCascade => {
-                    frame.transition_progress = self.transition_timer;
-                    frame.shooting_star_cascade();
-                }
-                TransitionKind::ForestOfTiles => {
-                    crate::render::transition_fx::push_overlay_transition(
-                        &mut frame,
-                        crate::render::transition_fx::OverlayTransitionKind::ForestOfTiles,
-                        self.transition_timer,
-                        (size.width as f32, size.height as f32),
-                    );
-                }
-                TransitionKind::GalaxyOfTiles => {
-                    crate::render::transition_fx::push_overlay_transition(
-                        &mut frame,
-                        crate::render::transition_fx::OverlayTransitionKind::GalaxyOfTiles,
-                        self.transition_timer,
-                        (size.width as f32, size.height as f32),
-                    );
-                }
-                TransitionKind::Maelstrom => {
-                    crate::render::transition_fx::push_overlay_transition(
-                        &mut frame,
-                        crate::render::transition_fx::OverlayTransitionKind::Maelstrom,
-                        self.transition_timer,
-                        (size.width as f32, size.height as f32),
-                    );
-                }
-                TransitionKind::TileWaterfall => {
-                    crate::render::transition_fx::push_overlay_transition(
-                        &mut frame,
-                        crate::render::transition_fx::OverlayTransitionKind::TileWaterfall,
-                        self.transition_timer,
-                        (size.width as f32, size.height as f32),
-                    );
-                }
-                TransitionKind::ShufflingFan => {
-                    crate::render::transition_fx::push_overlay_transition(
-                        &mut frame,
-                        crate::render::transition_fx::OverlayTransitionKind::ShufflingFan,
-                        self.transition_timer,
-                        (size.width as f32, size.height as f32),
-                    );
-                }
-                TransitionKind::Quick => {}
+            if let Some(kind) = overlay_kind_for_transition(self.transition_kind) {
+                crate::render::transition_fx::push_overlay_transition(
+                    &mut frame,
+                    kind,
+                    self.transition_timer,
+                    (size.width as f32, size.height as f32),
+                );
             }
         }
 
@@ -642,7 +617,9 @@ impl App {
         // selected (or "select an object" prompt when the mode is armed but
         // nothing is picked yet). Mirrors the FPS HUD sizing in the
         // upper-right.
-        if let Some(ref inner) = self.debug.arrange_mode {
+        if let Some(ref inner) = self.debug.arrange_mode
+            && !showcase_orbit_top
+        {
             let size = self.last_drawable_px;
             let w = size.width as f32;
             let h = size.height as f32;
@@ -746,12 +723,8 @@ impl App {
         // prefixed canonical pickable names for arrange mode.
         let scene_for_renderer = self.overlay_stack.last().unwrap_or(&self.scene);
         let active_scene_key: Option<&'static str> = match scene_for_renderer {
-            Scene::ItemInspect(ins) => match ins.host {
-                crate::scenes::ItemInspectHost::Shop => Some("shop"),
-                crate::scenes::ItemInspectHost::Collection => Some("collection"),
-            },
+            Scene::Showcase(_) => Some("showcase"),
             Scene::Shop(_) => Some("shop"),
-            Scene::TilePackCelebration(_) => Some("tile_pack_celebration"),
             Scene::Gameplay(_) => Some("gameplay"),
             Scene::Collection(_) => Some("collection"),
             Scene::PickBlind(_) => Some("pick_blind"),
@@ -765,7 +738,7 @@ impl App {
         // up its Placement's rx/ry/rz_deg without each scene site having to
         // wire it into its own rotation matrix.
         let rotations_scene = match self.overlay_stack.last() {
-            Some(Scene::ItemInspect(_)) => &self.scene,
+            Some(Scene::Showcase(s)) if s.wants_orbit_input() => &self.scene,
             _ => scene_for_renderer,
         };
         renderer.set_committed_arrange_rotations(collect_committed_rotations(rotations_scene));
@@ -776,6 +749,7 @@ impl App {
             sl.linear_exposure,
             sl.ambient_scale,
             sl.lit_mesh_gltf_punctual_scale,
+            sl.gltf_emissive_scale,
         );
         // Push mountain-haze art-direction knobs into the haze shader's
         // uniform — lets the Volumetric debug overlay drive density,
@@ -853,7 +827,7 @@ impl App {
 
 /// Build the paginated celebration modal for a level-up. Returns `None`
 /// when the level grants nothing displayable (no new relics or rules).
-pub(super) fn build_level_up_modal(
+pub(crate) fn build_level_up_modal(
     result: &core::progression::LevelUpResult,
     window_w: f32,
     window_h: f32,

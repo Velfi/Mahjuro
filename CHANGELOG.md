@@ -39,7 +39,7 @@ commit history.
 - "Destroyed" is now a styled keyword in tooltips, highlighted in crimson and explained by a Glossary entry that ties together the relic, tile, and transformation cases. Paper Lantern, Silver Filigree Lantern, Silk Thread, and Melting Ice descriptions were rephrased to use the keyword consistently — Silk Thread and Melting Ice now say "Transforms at 0" so it's clear that becoming Silk Moth or Taotie isn't a destruction (Kintsugi will not fire on it).
 - Bright spots and warm lighting no longer blow out to flat white on standard displays while looking softer on HDR—the game now maps scene lighting through a single tone curve so SDR and HDR stay in the same ballpark.
 - When the Hex boss disables one of your relics for the round, that relic now shows the same debuff mark as debuffed tiles so you can see which one is shut off at a glance.
-- Green felt shell detail now scales more gently with the Effects quality setting, and the 3D table path does less redundant work when tiles move or when nothing casts a shadow—especially noticeable on slower machines or in busy scenes.
+- The 3D table path does less redundant work when tiles move or when nothing casts a shadow—especially noticeable on slower machines or in busy scenes.
 - Polychrome talismans no longer pick up an extra self-lit glow in the shop, so the token stays readable instead of washing out in bloom.
 - Release builds no longer ship the Debug menu, and on Windows the game now launches without a black console window behind it. Both are still present in development builds.
 - Reworked the Leading Tile relic into Geese — it now retriggers the first 5 scored tiles in the hand instead of just the first tile of each scored set.

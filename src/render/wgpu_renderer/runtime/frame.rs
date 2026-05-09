@@ -6,7 +6,7 @@ pub(super) enum RenderFrame {
 }
 
 impl WgpuRenderer {
-    fn ensure_showcase_decal_atlas(&mut self, tileset_name: &str) {
+    pub(crate) fn ensure_showcase_decal_atlas(&mut self, tileset_name: &str) {
         if self.showcase_decal_atlas_tileset.as_deref() == Some(tileset_name)
             && self.showcase_decal_atlas.is_some()
         {
@@ -30,9 +30,13 @@ impl WgpuRenderer {
         effects_quality: crate::persistence::EffectsQuality,
         tileset_name: &str,
     ) {
-        self.ensure_showcase_decal_atlas(tileset_name);
-        // `tile_3d.wgsl` reads `base_color_factor.w`: procedural kinds 0–2, shop env 4,
-        // imported Tile.glb (per-primitive albedo + face decal) 5 — see `tile_body.rs`.
+        // Showcase decal atlas is built lazily in `run_showcase_tiles_placement` when
+        // the frame actually draws `ShowcaseTileBatch` — avoids 336 CPU raster passes
+        // at startup and on scenes that never use showcase tiles.
+        // `tile_3d.wgsl` reads `base_color_factor.w`: procedural kinds 0–2 for the legacy
+        // procedural mesh; 4 = shop env (base map only); 5 = `Tile.glb` + projected decal.
+        // Imported tile meshes must use kind 5 — procedural 0–2 assumes authored local frame
+        // (front-face + ivory band) and reads nearly black on GLB geometry (e.g. pack reveal).
         self.tile_base_color_factor[3] = if self.tile_primitives.is_empty() {
             crate::render::tile_body::TileBodyShaderKind::resolve(tile_material).id()
         } else {
@@ -51,11 +55,6 @@ impl WgpuRenderer {
             }
         };
 
-        // Cap shell-fluff draws by the effects-quality knob. Shells are
-        // the dominant felt-mode perf cost — each one is a full-screen-
-        // fragment-bound extra draw of the table mesh, so this is the
-        // single most important felt knob.
-        self.active_felt_shell_count = effects_quality.felt_shell_count().min(10);
         self.felt_shader_lod = effects_quality.felt_shader_lod();
 
         // Swap tilesets: if the user picked a different set in Options, update
@@ -66,6 +65,8 @@ impl WgpuRenderer {
             self.tile_face_overlays.clear();
             self.hand_tiles.clear();
             self.showcase_tiles.clear();
+            self.showcase_decal_atlas = None;
+            self.showcase_decal_atlas_tileset = None;
         }
     }
 
@@ -82,6 +83,10 @@ impl WgpuRenderer {
                     Ok(RenderFrame::Skip)
                 }
                 wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Validation => {
+                    log::warn!(
+                        "swapchain surface lost or invalid — reconfiguring (next frame should recover)"
+                    );
+                    surface.configure(&self.device, &self.config);
                     Ok(RenderFrame::Skip)
                 }
             },
@@ -93,7 +98,8 @@ impl WgpuRenderer {
         frame.cmds.iter().any(|cmd| {
             matches!(
                 cmd,
-                DrawCmd::MoonlitWater | DrawCmd::ShopEnvironment | DrawCmd::EmberDrift
+                DrawCmd::MoonlitWater | DrawCmd::ShopEnvironment | DrawCmd::HallwayEnvironment
+                    | DrawCmd::EmberDrift
             )
         })
     }
@@ -163,32 +169,82 @@ impl WgpuRenderer {
         let pl_w = self.size.width.max(1) as f32;
         let pl_h = self.size.height.max(1) as f32;
         let time_s = self.creation_time.elapsed().as_secs_f32();
+        let has_showcase_tiles = frame.cmds.iter().any(|c| {
+            matches!(c, crate::render::draw_cmd::DrawCmd::ShowcaseTileBatch(_))
+        });
+        let h = &frame.showcase_render_hints;
+        let lit_mesh_inv_scale = if frame.scene_lighting.embedded_gltf_punctual {
+            self.shop_lit_mesh_gltf_punctual_scale
+        } else {
+            1.0
+        };
         let point_lights_buf = match (
             self.active_scene_key.as_deref(),
             frame.camera_override.as_ref(),
         ) {
-            (Some("shop") | Some("tile_pack_celebration"), Some(cam))
-                if frame.cmds.iter().any(|c| {
-                    matches!(c, crate::render::draw_cmd::DrawCmd::ShowcaseTileBatch(_))
-                }) =>
-            {
-                PointLightsBuf::from_lights_shop_camera(
-                    &frame.point_lights,
+            // Pack closeup has no showcase tiles; lights must still use the same
+            // ray → plane_z mapping as perspective `Object3d` / showcase placement.
+            (Some("tile_pack_celebration"), Some(cam)) => {
+                PointLightsBuf::from_scene_punctual_shop_camera(
+                    &frame.scene_lighting.punctual,
                     cam,
                     frame.candle_light_count,
                     frame.flame_height_world,
-                    1.0,
+                    lit_mesh_inv_scale,
                     pl_w,
                     pl_h,
                     gamma,
                     time_s,
                 )
             }
-            _ => PointLightsBuf::from_lights(
-                &frame.point_lights,
+            (Some("showcase"), Some(cam))
+                if h.object3d_use_camera_ray_plane_z
+                    || (h.showcase_tiles_use_camera_ray_plane_z && has_showcase_tiles) =>
+            {
+                PointLightsBuf::from_scene_punctual_shop_camera(
+                    &frame.scene_lighting.punctual,
+                    cam,
+                    frame.candle_light_count,
+                    frame.flame_height_world,
+                    lit_mesh_inv_scale,
+                    pl_w,
+                    pl_h,
+                    gamma,
+                    time_s,
+                )
+            }
+            (Some("shop"), Some(cam)) if has_showcase_tiles => {
+                PointLightsBuf::from_scene_punctual_shop_camera(
+                    &frame.scene_lighting.punctual,
+                    cam,
+                    frame.candle_light_count,
+                    frame.flame_height_world,
+                    lit_mesh_inv_scale,
+                    pl_w,
+                    pl_h,
+                    gamma,
+                    time_s,
+                )
+            }
+            // Pick-blind always uses a perspective `camera_override` (hallway GLB or shrine
+            // layout). Smooth fills must use the same ray → plane_z mapping as the env mesh;
+            // `pixel_to_world` is not the inverse of that projection (see `world_space.rs`).
+            (Some("pick_blind"), Some(cam)) => PointLightsBuf::from_scene_punctual_shop_camera(
+                &frame.scene_lighting.punctual,
+                cam,
                 frame.candle_light_count,
                 frame.flame_height_world,
-                1.0,
+                lit_mesh_inv_scale,
+                pl_w,
+                pl_h,
+                gamma,
+                time_s,
+            ),
+            _ => PointLightsBuf::from_scene_punctual(
+                &frame.scene_lighting.punctual,
+                frame.candle_light_count,
+                frame.flame_height_world,
+                lit_mesh_inv_scale,
                 pl_w,
                 pl_h,
                 gamma,
@@ -201,35 +257,23 @@ impl WgpuRenderer {
             bytemuck::bytes_of(&point_lights_buf),
         );
 
-        // Shop `KHR_lights_punctual` uploads — `shop_glb` binding 0 / `lit_mesh` binding 2, inverse-square.
-        // `extras.w` dims `lit_mesh` props only; `shop_glb.wgsl` does not read it.
-        let shop_gltf_lit_mesh_scale = if frame.shop_env_gltf_punctual {
-            self.shop_lit_mesh_gltf_punctual_scale
-        } else {
-            1.0
+        // Upload spotlights (tile + `lit_mesh` group 3).
+        let spot_cam = match self.active_scene_key.as_deref() {
+            Some("tile_pack_celebration") => frame.camera_override.as_ref(),
+            Some("showcase") if frame.showcase_render_hints.object3d_use_camera_ray_plane_z => {
+                frame.camera_override.as_ref()
+            }
+            _ => None,
         };
-        self.queue.write_buffer(
-            &self.shop_gltf_point_lights_buffer,
-            0,
-            bytemuck::bytes_of(&PointLightsBuf::from_lights(
-                &frame.shop_gltf_point_lights,
-                0,
-                frame.flame_height_world,
-                shop_gltf_lit_mesh_scale,
-                pl_w,
-                pl_h,
-                gamma,
-                time_s,
-            )),
-        );
-
-        // Upload spotlights for the tile shader (group 3). Scenes push
-        // directional cone lights into `frame.spot_lights`; only the tile
-        // pipeline samples them (not `lit_mesh`).
         self.queue.write_buffer(
             &self.spot_lights_buffer,
             0,
-            bytemuck::bytes_of(&SpotLightsBuf::from_lights(&frame.spot_lights, pl_w, pl_h)),
+            bytemuck::bytes_of(&SpotLightsBuf::from_lights(
+                &frame.scene_lighting.spot_lights,
+                pl_w,
+                pl_h,
+                spot_cam,
+            )),
         );
     }
 }

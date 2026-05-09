@@ -148,8 +148,7 @@ impl RunState {
                 self.hand.sort();
                 self.restamp_hand_enhancements();
             }
-            TalismanKind::Jade
-            | TalismanKind::Pearl
+            TalismanKind::Pearl
             | TalismanKind::Gilded
             | TalismanKind::Polychrome => {
                 unreachable!("selection-only path");

@@ -150,11 +150,10 @@ pub fn build_talisman_mesh() -> MeshCpu {
         vertices,
         indices,
         default_material: MaterialParams {
-            kind: MaterialKind::Jade,
-            // Default jade-green; per-instance color overrides this.
-            base_color: [0.45, 0.78, 0.55, 1.0],
-            specular_strength: 0.55,
-            specular_power: 48.0,
+            kind: MaterialKind::Pearl,
+            base_color: [0.92, 0.90, 0.88, 1.0],
+            specular_strength: 0.60,
+            specular_power: 64.0,
         },
     }
 }
@@ -172,7 +171,6 @@ pub fn talisman_material(
 ) -> MaterialParams {
     use crate::core::talisman::TalismanKind as T;
     let (mat_kind, spec_strength, spec_power) = match kind {
-        T::Jade => (MaterialKind::Jade, 0.55, 48.0),
         T::Pearl => (MaterialKind::Pearl, 0.60, 64.0),
         T::Gilded => (MaterialKind::Foil, 0.70, 48.0),
         T::Polychrome => (MaterialKind::Polychrome, 0.70, 32.0),

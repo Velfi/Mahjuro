@@ -54,6 +54,14 @@ impl WgpuRenderer {
                 .sum::<usize>()
                 .min(MAX_SHOWCASE_TILE_SLOTS);
 
+            if total_showcase > 0 {
+                let tileset_owned = self
+                    .tile_set
+                    .clone()
+                    .expect("tile_set must be set by apply_render_settings before drawing showcase tiles");
+                self.ensure_showcase_decal_atlas(&tileset_owned);
+            }
+
             // Ensure we have enough slots.
             while self.showcase_tiles.len() < total_showcase {
                 // Placeholder — will be rebuilt immediately below if tile_id
@@ -68,7 +76,7 @@ impl WgpuRenderer {
                     let decal_atlas = self
                         .showcase_decal_atlas
                         .as_ref()
-                        .expect("apply_render_settings must build decal atlas before showcase");
+                        .expect("showcase decal atlas must be built when showcase tiles are drawn");
                     let ctx = ShowcaseTileCtx {
                         device: &self.device,
                         layout: &self.tile_material_layout,
@@ -152,7 +160,7 @@ impl WgpuRenderer {
                         let decal_atlas = self
                             .showcase_decal_atlas
                             .as_ref()
-                            .expect("apply_render_settings must build decal atlas before showcase");
+                            .expect("showcase decal atlas must be built when showcase tiles are drawn");
                         let ctx = ShowcaseTileCtx {
                             device: &self.device,
                             layout: &self.tile_material_layout,
@@ -173,6 +181,18 @@ impl WgpuRenderer {
                         frame.camera_override.as_ref(),
                     ) {
                         (Some("shop") | Some("tile_pack_celebration"), Some(cam)) => {
+                            crate::render::world_space::world_on_camera_ray_plane_z(
+                                w,
+                                h,
+                                cam,
+                                p.center_pos[0],
+                                p.center_pos[1],
+                                p.center_pos[2],
+                            )
+                        }
+                        (Some("showcase"), Some(cam))
+                            if frame.showcase_render_hints.showcase_tiles_use_camera_ray_plane_z =>
+                        {
                             crate::render::world_space::world_on_camera_ray_plane_z(
                                 w,
                                 h,

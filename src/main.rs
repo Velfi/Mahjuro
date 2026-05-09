@@ -4,6 +4,7 @@
 // doesn't pop a black terminal behind the game window. Debug builds keep the
 // console so `log` output is visible during development.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+#![deny(unused_imports)]
 
 pub mod asset_path;
 mod audio;
@@ -34,6 +35,8 @@ mod main_draw;
 mod main_event_loop;
 #[path = "main/frame_tick.rs"]
 mod main_frame_tick;
+#[path = "main/scene_transition.rs"]
+mod scene_transition;
 #[path = "main/headless.rs"]
 mod main_headless;
 #[path = "main/render_settings.rs"]
@@ -63,12 +66,11 @@ use game::run::RunState;
 use game::volumetric_tuning::VolumetricTuning;
 use render::animation::AnimationController;
 use render::draw_cmd::{apply_modal_relic_staging, CameraParams, UiFrame};
-use render::wgpu_renderer::{DebugArrangeOverride, GpuInstance, ShopHit, TextLabel, WgpuRenderer};
+use render::wgpu_renderer::{DebugArrangeOverride, GpuInstance, TextLabel, WgpuRenderer};
 use scenes::game_over::GameOverScene;
 use scenes::gameplay::GameplayScene;
 use scenes::material_viewer::MaterialViewerScene;
 use scenes::rumble_lab::RumbleLabScene;
-use scenes::shop::SHOP_DRAG_DROP_ID;
 use scenes::splash::SplashScene;
 use scenes::transition_playground::TransitionPlaygroundScene;
 use scenes::tutorial_recap::TutorialRecapScene;
@@ -95,18 +97,7 @@ use main_render_settings::RenderSettings;
 // `DebugState`, `ArrangeModeState`, and `RenderSettings` live in
 // `main/debug_state.rs` and `main/render_settings.rs`.
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum TransitionKind {
-    /// Default fast fade (~0.2 s).
-    Quick,
-    /// Dramatic shooting-star cascade (~1.7 s total before extra score steps).
-    ShootingStarCascade,
-    ForestOfTiles,
-    GalaxyOfTiles,
-    Maelstrom,
-    TileWaterfall,
-    ShufflingFan,
-}
+use scene_transition::{PendingSceneDestination, TransitionKind, DEFAULT_QUICK_SPEC};
 
 struct App {
     /// Last known drawable size in pixels (updated each SDL frame).
@@ -138,12 +129,10 @@ struct App {
     transition_timer: f32,
     transition_kind: TransitionKind,
     pending_scene: Option<Scene>,
-    /// Captured when `pending_scene` was set: true if the transition was
-    /// initiated by an overlay (replace overlay top at fade-end), false if
-    /// by the base scene (replace `self.scene`). Decoupling this from the
-    /// live stack depth prevents overlays pushed mid-transition (e.g. a
-    /// zodiac celebration during a skip flow) from being clobbered.
-    pending_scene_targets_overlay: bool,
+    /// Captured when `pending_scene` was set: where the next scene is
+    /// written when the fade completes. Decoupled from live stack depth so
+    /// overlays pushed mid-transition are not clobbered.
+    pending_scene_destination: PendingSceneDestination,
     /// Pushdown stack for overlay scenes (e.g. zodiac/pack celebrations,
     /// meld guide from in-game).
     /// When non-empty, the top of the stack is the active scene: only it
@@ -152,7 +141,8 @@ struct App {
     quit_requested: bool,
     close_saved: bool,
     modals: ModalQueue,
-    pending_post_game_over_modals: Vec<Modal>,
+    /// Meta profile level-up after game over — shown as [`Scene::Showcase`] (`MetaLevelUpPresenter`).
+    pending_post_game_over_level_up: Option<Modal>,
     gfx: RenderSettings,
     effect_layers: crate::effect_layers::EffectLayers,
     debug: DebugState,
@@ -175,11 +165,6 @@ struct App {
     #[cfg(target_os = "macos")]
     sparkle: Option<macos_updater::SparkleUpdater>,
     modifiers: Mod,
-    /// Shop drag-to-sell: the 3D hit that started a mouse-drag over an owned
-    /// shop item, plus the cursor position at drag start.  Set on mouse-down;
-    /// if the cursor moves far enough and is over the sell tray on mouse-up,
-    /// a `SHOP_DRAG_DROP_ID` click is injected.
-    shop_drag_start: Option<(crate::render::wgpu_renderer::ShopHit, (f32, f32))>,
     /// Steamworks integration. Either `Connected` (initialized successfully
     /// and the user is signed into Steam) or `Disabled` (init failed,
     /// Steam isn't running, or `--no-steam` was passed). Every method on
@@ -314,16 +299,16 @@ impl App {
             active_profile,
             audio,
             transition_alpha: 1.0,
-            transition_speed: 0.08,
+            transition_speed: DEFAULT_QUICK_SPEC.speed,
             transition_timer: 0.0,
             transition_kind: TransitionKind::Quick,
             pending_scene: None,
-            pending_scene_targets_overlay: false,
+            pending_scene_destination: PendingSceneDestination::default(),
             overlay_stack: Vec::new(),
             quit_requested: false,
             close_saved: false,
             modals: ModalQueue::default(),
-            pending_post_game_over_modals: Vec::new(),
+            pending_post_game_over_level_up: None,
             deferred_round_end: None,
             gfx: RenderSettings {
                 effects_quality: settings.effects_quality,
@@ -352,7 +337,6 @@ impl App {
                 .then(macos_updater::SparkleUpdater::start)
                 .flatten(),
             modifiers: Mod::NOMOD,
-            shop_drag_start: None::<(ShopHit, (f32, f32))>,
             steam,
         }
     }
@@ -444,9 +428,62 @@ impl App {
     }
 }
 
+/// When `MAHJURO_LOG_FILE` is set, send `log` output to that path (append) instead
+/// of stderr. Steam and other GUI launchers often discard stderr, so this is the
+/// reliable way to capture `RUST_LOG` when launching from Steam.
+fn init_env_logger() {
+    use std::fs::OpenOptions;
+    use std::io::LineWriter;
+    use std::path::Path;
+
+    let mut builder =
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
+    if let Some(path_raw) = std::env::var_os("MAHJURO_LOG_FILE") {
+        let path = Path::new(&path_raw);
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match OpenOptions::new().create(true).append(true).open(path) {
+            Ok(f) => {
+                builder.target(env_logger::Target::Pipe(Box::new(LineWriter::new(f))));
+            }
+            Err(e) => {
+                eprintln!(
+                    "Mahjuro: could not open MAHJURO_LOG_FILE {}: {e}",
+                    path.display()
+                );
+            }
+        }
+    }
+    builder.init();
+}
+
+/// Non-panic startup failures never run the panic hook / `crash_guard` dialog.
+/// If the user set `MAHJURO_LOG_FILE`, mirror the final error there too.
+fn append_startup_error_to_log_file(msg: &str) {
+    use std::io::Write;
+
+    let Some(path_raw) = std::env::var_os("MAHJURO_LOG_FILE") else {
+        return;
+    };
+    let path = std::path::Path::new(&path_raw);
+    let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    else {
+        return;
+    };
+    let _ = writeln!(
+        f,
+        "{} [startup error] {msg}",
+        chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+    );
+}
+
 fn main() -> anyhow::Result<()> {
     crash_guard::install();
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    init_env_logger();
     let cli = Cli::parse();
 
     if main_commands::run_cli_command(cli.command)? {
@@ -486,7 +523,11 @@ fn main() -> anyhow::Result<()> {
         }));
 
     match result {
-        Ok(inner) => inner,
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => {
+            append_startup_error_to_log_file(&format!("{e:#}"));
+            Err(e)
+        }
         Err(_) => {
             crash_guard::show_crash_report();
             std::process::exit(1);

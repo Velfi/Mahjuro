@@ -12,6 +12,10 @@
 //! `PickBlindLayout` builds the camera + per-shrine world positions, the
 //! 3D meshes get pushed via `frame.shrine_batch(...)`, and a 2D HUD
 //! (panel headers, per-shrine labels, skip button) sits on top.
+//!
+//! When [`hallway.glb`](../../assets/hallway.glb) loads, the procedural shrines
+//! are replaced by the hallway room; `btn_play_round` / `btn_skip_round` drive
+//! the same actions as the legacy altar dishes.
 
 use std::cell::Cell;
 
@@ -20,8 +24,10 @@ use crate::core::rules::BlindKind;
 use crate::game::engine::{GameCommand, GameEngine};
 use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::{
-    CameraParams, Object3d, Object3dKind, UiFrame, camera_facing_rotation,
+    CameraParams, Object3d, Object3dKind, ScenePunctualLight, UiFrame, camera_facing_rotation,
 };
+use crate::render::hallway_glb::{self, BTN_PLAY_ROUND, BTN_SKIP_ROUND};
+use crate::render::shop_glb;
 use crate::render::table_transform::{
     mat4_to_euler_xyz_rad, mesh_y_thickness_along_local_y_to_z_up, rot_world_z_rad,
 };
@@ -133,6 +139,34 @@ impl PickBlindScene {
     fn play_focused(&self) -> bool {
         self.tree.focused() == Some(BlindAction::PlayBlind.id())
     }
+
+    fn flat_items_hallway(
+        win_w: f32,
+        win_h: f32,
+        cam: &CameraParams,
+        env_h: f32,
+        can_skip: bool,
+    ) -> Vec<FlatItem<BlindAction>> {
+        let play_rect = hallway_button_screen_rect(win_w, win_h, cam, env_h, BTN_PLAY_ROUND)
+            .map(inflate_hit_rect)
+            .unwrap_or_else(|| [win_w * 0.12, win_h * 0.52, win_w * 0.30, win_h * 0.20]);
+        let mut items = vec![FlatItem::new(
+            BlindAction::PlayBlind.id(),
+            play_rect,
+            BlindAction::PlayBlind,
+        )];
+        if can_skip {
+            let skip_rect = hallway_button_screen_rect(win_w, win_h, cam, env_h, BTN_SKIP_ROUND)
+                .map(inflate_hit_rect)
+                .unwrap_or_else(|| [win_w * 0.58, win_h * 0.52, win_w * 0.30, win_h * 0.20]);
+            items.push(FlatItem::new(
+                BlindAction::SkipBlind.id(),
+                skip_rect,
+                BlindAction::SkipBlind,
+            ));
+        }
+        items
+    }
 }
 
 /// Shared placement for the floating plaque above the upcoming shrine.
@@ -173,6 +207,41 @@ fn upcoming_plaque_anchor(
 /// dish silhouette, which is small for our altar dishes (~80×40px). We
 /// pad them out so the cursor doesn't have to land pixel-perfectly on
 /// the dish to register a click.
+#[inline]
+fn pick_blind_hallway_loaded() -> bool {
+    hallway_glb::with_hallway_glb_cpu(|o| o.is_some())
+}
+
+/// Screen-space hit rect for a named hallway marker (projected mesh AABB, with legacy min size).
+fn hallway_button_screen_rect(
+    win_w: f32,
+    win_h: f32,
+    cam: &CameraParams,
+    env_height_scale: f32,
+    node_name: &str,
+) -> Option<[f32; 4]> {
+    let min_rw = (win_w * 0.11).max(80.0);
+    let min_rh = (win_h * 0.07).max(52.0);
+    hallway_glb::with_hallway_glb_cpu(|opt| {
+        let cpu = opt?;
+        if let Some(r) = shop_glb::screen_rect_for_marker_mesh_bounds(
+            win_w,
+            win_h,
+            cam,
+            env_height_scale,
+            cpu,
+            node_name,
+            min_rw,
+            min_rh,
+        ) {
+            return Some(r);
+        }
+        let tw = hallway_glb::hallway_marker_world(win_h, env_height_scale, cpu, node_name)?;
+        let (cx, cy) = cam.project_world_to_screen(win_w, win_h, tw);
+        Some([cx - min_rw * 0.5, cy - min_rh * 0.5, min_rw, min_rh])
+    })
+}
+
 fn inflate_hit_rect(rect: [f32; 4]) -> [f32; 4] {
     let pad_x = (rect[2] * 0.80).max(60.0);
     let pad_y = (rect[3] * 1.50).max(60.0);
@@ -431,13 +500,11 @@ impl SceneBehavior for PickBlindScene {
         {
             ctx.bus
                 .push(crate::game::event_bus::GameEvent::ZodiacReveal);
-            *ctx.overlay_request = Some(super::OverlayRequest::Push(Box::new(
-                Scene::ZodiacCelebration(super::ZodiacCelebrationScene::new(
-                    kind,
-                    yaku.name(),
-                    new_level,
+            *ctx.overlay_request = Some(super::OverlayRequest::Push(Box::new(Scene::Showcase(
+                super::ShowcaseScene::new(super::ShowcasePresenter::Zodiac(
+                    super::ZodiacPresenter::new(kind, yaku.name(), new_level),
                 )),
-            )));
+            ))));
             return None;
         }
 
@@ -450,13 +517,29 @@ impl SceneBehavior for PickBlindScene {
         let can_skip = Self::can_skip(upcoming);
 
         let layout = PickBlindLayout::build(ctx.layout, upcoming_index(upcoming));
-        let items = Self::flat_items(
-            &layout,
-            upcoming,
-            can_skip,
-            self.last_play_rect.get(),
-            self.last_skip_rect.get(),
-        );
+        let hallway = pick_blind_hallway_loaded();
+        let cam = if hallway {
+            hallway_glb::hallway_camera_base(ctx.layout.window_w, ctx.layout.window_h, ctx.shop_env_height_scale)
+        } else {
+            layout.camera
+        };
+        let items = if hallway {
+            Self::flat_items_hallway(
+                ctx.layout.window_w,
+                ctx.layout.window_h,
+                &cam,
+                ctx.shop_env_height_scale,
+                can_skip,
+            )
+        } else {
+            Self::flat_items(
+                &layout,
+                upcoming,
+                can_skip,
+                self.last_play_rect.get(),
+                self.last_skip_rect.get(),
+            )
+        };
         let action = self.tree.update_flat(
             &items,
             TreeInput {
@@ -487,12 +570,8 @@ impl SceneBehavior for PickBlindScene {
                 let _ = engine.dispatch(GameCommand::SkipUpcomingBlindWithTag);
                 Some(Scene::PickBlind(PickBlindScene::new()))
             }
-            Some(BlindAction::PlayBlind) | Some(BlindAction::SkipBlind) => {
+            Some(BlindAction::PlayBlind) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::RoundStart));
-                // Record boss encounters the moment the player commits to
-                // fighting one. "Encountered" = selected via PlayBlind, so
-                // skips don't count and unseen bosses stay hidden in the
-                // Collection.
                 if upcoming == BlindKind::Boss
                     && let Some(bk) = pick.boss_kind
                 {
@@ -500,6 +579,7 @@ impl SceneBehavior for PickBlindScene {
                 }
                 Some(Scene::Gameplay(GameplayScene::with_pending_blind(upcoming)))
             }
+            Some(BlindAction::SkipBlind) => None,
             None => None,
         }
     }
@@ -515,6 +595,7 @@ impl SceneBehavior for PickBlindScene {
         let upcoming_idx = upcoming_index(upcoming);
         let layout = PickBlindLayout::build(ctx.layout, upcoming_idx);
         let blinds = [BlindKind::Small, BlindKind::Big, BlindKind::Boss];
+        let skip_tag = pick.skip_tag;
 
         let mut frame = UiFrame::new();
         // Pure black temple background via the synthetic 1×1 black
@@ -527,8 +608,97 @@ impl SceneBehavior for PickBlindScene {
         if ctx.effect_layers.ember_drift {
             frame.ember_drift();
         }
-        frame.camera_override = Some(layout.camera);
+        let hallway = pick_blind_hallway_loaded();
+        let cam = if hallway {
+            hallway_glb::hallway_camera_base(w, h, ctx.shop_env_height_scale)
+        } else {
+            layout.camera
+        };
+        frame.camera_override = Some(cam);
 
+        if hallway {
+            frame.hallway_environment();
+            let room_glb = hallway_glb::hallway_glb_has_embedded_lights();
+            frame.scene_lighting.embedded_gltf_punctual = room_glb;
+            frame.scene_lighting.room_shop_glb_brdf = room_glb;
+            frame.scene_lighting.spot_lights = if room_glb {
+                hallway_glb::hallway_embedded_spot_lights_runtime(
+                    w,
+                    h,
+                    ctx.shop_env_height_scale,
+                    &ctx.shop_env_lighting,
+                )
+            } else {
+                Vec::new()
+            };
+            let mut inverse_punctual: Vec<ScenePunctualLight> = if room_glb {
+                hallway_glb::hallway_embedded_point_lights_runtime(
+                    w,
+                    h,
+                    ctx.shop_env_height_scale,
+                    &ctx.shop_env_lighting,
+                )
+                .into_iter()
+                .map(ScenePunctualLight::InverseSquare)
+                .collect()
+            } else {
+                Vec::new()
+            };
+            let mut point_lights: Vec<PointLight> = if room_glb {
+                Vec::new()
+            } else {
+                vec![
+                    PointLight {
+                        pos: [w * 0.5, h * 0.40, h * 0.50],
+                        radius: h * 1.30,
+                        color: [1.0, 0.94, 0.82],
+                        intensity: 1.70,
+                    },
+                    PointLight {
+                        pos: [w * 0.5, h * 0.78, h * 0.22],
+                        radius: h * 2.0,
+                        color: [0.42, 0.52, 0.88],
+                        intensity: 0.40,
+                    },
+                ]
+            };
+            let play_on = self.play_focused();
+            let skip_on = self.skip_focused() && can_skip;
+            let play_b = if play_on { 1.9 } else { 1.0 };
+            let skip_b = if skip_on { 1.9 } else { 1.0 };
+            if let Some(r) =
+                hallway_button_screen_rect(w, h, &cam, ctx.shop_env_height_scale, BTN_PLAY_ROUND)
+            {
+                let cx = r[0] + r[2] * 0.5;
+                let cy = r[1] + r[3] * 0.5;
+                point_lights.push(PointLight {
+                    pos: [cx, cy - 18.0, h * 0.19 + 55.0],
+                    radius: r[2].max(r[3]) * 2.4,
+                    color: [1.0, 0.90, 0.58],
+                    intensity: (if room_glb { 0.42 } else { 1.22 }) * play_b,
+                });
+            }
+            if can_skip {
+                if let Some(r) =
+                    hallway_button_screen_rect(w, h, &cam, ctx.shop_env_height_scale, BTN_SKIP_ROUND)
+                {
+                    let cx = r[0] + r[2] * 0.5;
+                    let cy = r[1] + r[3] * 0.5;
+                    point_lights.push(PointLight {
+                        pos: [cx, cy - 18.0, h * 0.19 + 50.0],
+                        radius: r[2].max(r[3]) * 2.2,
+                        color: [1.0, 0.86, 0.52],
+                        intensity: (if room_glb { 0.36 } else { 1.05 }) * skip_b,
+                    });
+                }
+            }
+            inverse_punctual.extend(
+                point_lights
+                    .into_iter()
+                    .map(ScenePunctualLight::Smooth),
+            );
+            frame.scene_lighting.punctual = inverse_punctual;
+        } else {
         // ── 3D shrines ────────────────────────────────────────────────
         let mut shrine_objects: Vec<Object3d> = Vec::with_capacity(3);
         for (i, &blind) in blinds.iter().enumerate() {
@@ -617,7 +787,6 @@ impl SceneBehavior for PickBlindScene {
         // begin). Skip is on the RIGHT and holds a small pile of coins
         // (the tribute reward for walking away). Both reuse the shop's
         // existing dish + coin meshes.
-        let skip_tag = pick.skip_tag;
         let (play_px, play_py) = layout.play_dish_anchor_px;
         let play_dext = layout.play_dish_extents;
         frame.object3d(Object3d {
@@ -850,7 +1019,11 @@ impl SceneBehavior for PickBlindScene {
             });
         }
 
-        frame.point_lights = point_lights;
+        frame.scene_lighting.embedded_gltf_punctual = false;
+        frame.scene_lighting.room_shop_glb_brdf = false;
+        frame.scene_lighting.spot_lights.clear();
+        frame.scene_lighting.set_smooth_points(point_lights);
+        }
 
         // ── Minimal 2D HUD ────────────────────────────────────────────
         // The 3D shrines + spotlight do the heavy lifting; the only text
@@ -863,6 +1036,7 @@ impl SceneBehavior for PickBlindScene {
         let mut texts: Vec<TextLabel> = Vec::new();
         let mut buttons: Vec<ButtonDef> = Vec::new();
 
+        if !hallway {
         // ── Per-shrine name labels (anchored to projected rects) ─────
         // Each blind label sits directly above its shrine using the
         // renderer's previous-frame projected screen rect. On the first
@@ -1062,159 +1236,293 @@ impl SceneBehavior for PickBlindScene {
                 });
             }
         }
+        }
 
-        // ── Caption labels above the 3D altars ───────────────────────
-        // We anchor the labels to the *projected* screen rect of each
-        // altar (computed by the renderer the previous frame) so the
-        // text always sits above the visible dish, regardless of camera
-        // angle or window size. The renderer pushes a (pick_id, rect)
-        // entry into `aux_dish_rects` for each `DishExplicit`; we look
-        // up our PICK_PLAY_DISH / PICK_SKIP_DISH entries here.
-        //
-        // On the very first frame `aux_dish_rects` is empty, so we fall
-        // back to a screen-pixel estimate derived from the layout's raw
-        // pixel anchor — close enough that the labels still look
-        // reasonable for the one frame before projection kicks in.
+        // ── Caption labels (dish projection) or hallway side panels ─
         let play_focused_label = self.play_focused();
         let skip_focused_label = self.skip_focused();
 
-        let projected_play = ctx
-            .proj
-            .aux_dish_rects
-            .iter()
-            .find_map(|(pid, r)| (*pid == Some(PICK_PLAY_DISH)).then_some(*r));
-        let projected_skip = ctx
-            .proj
-            .aux_dish_rects
-            .iter()
-            .find_map(|(pid, r)| (*pid == Some(PICK_SKIP_DISH)).then_some(*r));
-
-        // Cache for next frame's update() and flat_items() — must come
-        // BEFORE the labels are pushed so the cached value reflects this
-        // frame's projection.
-        if let Some(r) = projected_play {
-            self.last_play_rect.set(Some(r));
-        }
-        if let Some(r) = projected_skip {
-            self.last_skip_rect.set(Some(r));
-        }
-
-        let altar_label_w = (w * 0.28).clamp(240.0, 420.0);
-        let altar_label_h = typography::size(typography::HEADING, h, ui_scale) * 2.4;
-        let altar_caption_h = typography::size(typography::CAPTION, h, ui_scale) * 2.4;
-
-        // Helper: stack a two-line label (title + caption) above a
-        // projected screen rect, clamped to the window bounds.
-        let push_altar_caption = |rect: [f32; 4],
-                                  title: &str,
-                                  caption: &str,
-                                  focused: bool,
-                                  no_glossary: bool,
-                                  texts: &mut Vec<TextLabel>| {
-            let cx = rect[0] + rect[2] * 0.5;
-            let lx = (cx - altar_label_w * 0.5)
-                .max(8.0)
-                .min(w - altar_label_w - 8.0);
-            // Stack the two lines below the projected dish bottom so they
-            // aren't occluded by the shrine base geometry.
-            let stack_h = altar_label_h + altar_caption_h + 2.0;
-            let ly = (rect[1] + rect[3] + 30.0).min(h - stack_h - 8.0);
+        let (play_anchor_rect, skip_anchor_rect) = if hallway {
+            let pr = hallway_button_screen_rect(w, h, &cam, ctx.shop_env_height_scale, BTN_PLAY_ROUND)
+                .unwrap_or_else(|| [w * 0.12, h * 0.50, w * 0.14, h * 0.10]);
+            let sr = if can_skip {
+                hallway_button_screen_rect(w, h, &cam, ctx.shop_env_height_scale, BTN_SKIP_ROUND)
+                    .unwrap_or_else(|| [w * 0.74, h * 0.50, w * 0.14, h * 0.10])
+            } else {
+                [0.0, 0.0, 1.0, 1.0]
+            };
+            // Hallway side columns: pin `font_px` so long lines (ante / rewards) are not
+            // crushed by the legacy auto-shrink width/char cap (see font-scaling agent note).
+            let side_w = (w * 0.30).clamp(280.0, 520.0);
+            let px_action = typography::size(typography::HEADING, h, ui_scale) * 1.45;
+            let px_blind = typography::size(typography::TITLE, h, ui_scale) * 1.12;
+            let px_detail = typography::size(typography::BODY, h, ui_scale) * 1.18;
+            let h_action = (px_action * 1.38).max(22.0);
+            let h_blind = (px_blind * 1.42).max(26.0);
+            let h_detail = (px_detail * 1.36).max(22.0);
+            let base_target = pick.base_target;
+            let upcoming_run_number = pick.run_number;
+            let blind_display = if upcoming == BlindKind::Boss {
+                pick.boss_name.clone().unwrap_or_else(|| "Boss Blind".to_string())
+            } else {
+                upcoming.name().to_string()
+            };
+            let target_value = base_target.saturating_mul(upcoming_run_number);
+            let stake_suffix = match ctx.run.mode.stake {
+                crate::core::stake::Stake::Spring => String::new(),
+                other => format!(" · {}", other.label()),
+            };
+            let lx_play = (pr[0] + pr[2] + 18.0).min(w - side_w - 10.0);
+            let mut ly_play = pr[1].max(10.0);
             texts.push(TextLabel {
-                rect: [lx, ly, altar_label_w, altar_label_h],
-                text: title.to_string(),
-                color: if focused {
+                rect: [lx_play, ly_play, side_w, h_action],
+                text: "Play round".to_string(),
+                color: if play_focused_label {
                     color::CHAMPAGNE
                 } else {
                     color::PARCHMENT
                 },
-                no_glossary,
+                font_px: Some(px_action),
                 ..Default::default()
             });
+            ly_play += h_action + 4.0;
             texts.push(TextLabel {
-                rect: [lx, ly + altar_label_h + 2.0, altar_label_w, altar_caption_h],
-                text: caption.to_string(),
-                color: if focused { color::GOLD } else { color::STONE },
-                no_glossary,
+                rect: [lx_play, ly_play, side_w, h_blind],
+                text: blind_display,
+                color: if play_focused_label { color::GOLD } else { color::STONE },
+                no_glossary: true,
+                font_px: Some(px_blind),
                 ..Default::default()
             });
-        };
+            ly_play += h_blind + 6.0;
+            texts.push(TextLabel {
+                rect: [lx_play, ly_play, side_w, h_detail],
+                text: format!(
+                    "Ante {}/{} · Target {}",
+                    pick.ante,
+                    crate::game::run::FINAL_ANTE,
+                    target_value,
+                ),
+                color: if play_focused_label { color::GOLD } else { color::STONE },
+                no_glossary: true,
+                font_px: Some(px_detail),
+                ..Default::default()
+            });
+            ly_play += h_detail + 4.0;
+            texts.push(TextLabel {
+                rect: [lx_play, ly_play, side_w, h_detail],
+                text: format!("Reward ${}{}", upcoming.clear_reward(), stake_suffix),
+                color: if play_focused_label { color::GOLD } else { color::STONE },
+                no_glossary: true,
+                font_px: Some(px_detail),
+                ..Default::default()
+            });
+            ly_play += h_detail + 4.0;
+            if upcoming == BlindKind::Boss {
+                if let Some(desc) = pick.boss_description.as_deref() {
+                    texts.push(TextLabel {
+                        rect: [lx_play, ly_play, side_w, h_detail * 1.35],
+                        text: desc.to_string(),
+                        color: color::AMBER,
+                        font_px: Some(px_detail),
+                        ..Default::default()
+                    });
+                    ly_play += h_detail * 1.35 + 4.0;
+                }
+                if let Some(tier) = pick.boss_tier_label {
+                    texts.push(TextLabel {
+                        rect: [lx_play, ly_play, side_w, h_detail],
+                        text: format!("[{}]", tier),
+                        color: color::AMBER,
+                        font_px: Some(px_detail),
+                        ..Default::default()
+                    });
+                }
+            }
+            if can_skip {
+                let lx_skip = (sr[0] - side_w - 18.0).max(10.0);
+                let mut ly_skip = sr[1].max(10.0);
+                if let Some(tag) = skip_tag {
+                    texts.push(TextLabel {
+                        rect: [lx_skip, ly_skip, side_w, h_action],
+                        text: "Skip round".to_string(),
+                        color: if skip_focused_label {
+                            color::CHAMPAGNE
+                        } else {
+                            color::PARCHMENT
+                        },
+                        font_px: Some(px_action),
+                        ..Default::default()
+                    });
+                    ly_skip += h_action + 4.0;
+                    texts.push(TextLabel {
+                        rect: [lx_skip, ly_skip, side_w, h_blind],
+                        text: tag.name().to_string(),
+                        color: if skip_focused_label { color::GOLD } else { color::STONE },
+                        font_px: Some(px_blind),
+                        ..Default::default()
+                    });
+                    ly_skip += h_blind + 6.0;
+                    texts.push(TextLabel {
+                        rect: [lx_skip, ly_skip, side_w, h_detail * 1.45],
+                        text: tag.description().to_string(),
+                        color: if skip_focused_label { color::GOLD } else { color::STONE },
+                        font_px: Some(px_detail),
+                        ..Default::default()
+                    });
+                } else {
+                    texts.push(TextLabel {
+                        rect: [lx_skip, ly_skip, side_w, h_action],
+                        text: "Skip round".to_string(),
+                        color: if skip_focused_label {
+                            color::CHAMPAGNE
+                        } else {
+                            color::PARCHMENT
+                        },
+                        font_px: Some(px_action),
+                        ..Default::default()
+                    });
+                    ly_skip += h_action + 4.0;
+                    texts.push(TextLabel {
+                        rect: [lx_skip, ly_skip, side_w, h_detail],
+                        text: "Tribute · Esc".to_string(),
+                        color: if skip_focused_label { color::GOLD } else { color::STONE },
+                        font_px: Some(px_detail),
+                        ..Default::default()
+                    });
+                }
+            }
+            (pr, sr)
+        } else {
+            let projected_play = ctx
+                .proj
+                .aux_dish_rects
+                .iter()
+                .find_map(|(pid, r)| (*pid == Some(PICK_PLAY_DISH)).then_some(*r));
+            let projected_skip = ctx
+                .proj
+                .aux_dish_rects
+                .iter()
+                .find_map(|(pid, r)| (*pid == Some(PICK_SKIP_DISH)).then_some(*r));
+            if let Some(r) = projected_play {
+                self.last_play_rect.set(Some(r));
+            }
+            if let Some(r) = projected_skip {
+                self.last_skip_rect.set(Some(r));
+            }
 
-        // Play altar caption — projected rect from this frame, or
-        // (first-frame fallback) a small estimate around the pixel anchor.
-        let play_anchor_rect = projected_play.unwrap_or_else(|| {
-            let (pdx, pdy) = layout.play_dish_anchor_px;
-            let est_w = layout.play_dish_extents[0] * 0.8;
-            let est_h = layout.play_dish_extents[2] * 0.8;
-            [pdx - est_w * 0.5, pdy - est_h * 0.5, est_w, est_h]
-        });
-        push_altar_caption(
-            play_anchor_rect,
-            "Play",
-            "Begin · Enter",
-            play_focused_label,
-            true,
-            &mut texts,
-        );
+            let altar_label_w = (w * 0.28).clamp(240.0, 420.0);
+            let altar_label_h = typography::size(typography::HEADING, h, ui_scale) * 2.4;
+            let altar_caption_h = typography::size(typography::CAPTION, h, ui_scale) * 2.4;
 
-        let skip_anchor_rect = projected_skip.unwrap_or_else(|| {
-            let (sdx, sdy) = layout.skip_dish_anchor_px;
-            let est_w = layout.skip_dish_extents[0] * 0.8;
-            let est_h = layout.skip_dish_extents[2] * 0.8;
-            [sdx - est_w * 0.5, sdy - est_h * 0.5, est_w, est_h]
-        });
-        if can_skip {
-            if let Some(tag) = skip_tag {
-                // Three-line stack: "Skip" (heading), tag name, tag description.
-                let cx = skip_anchor_rect[0] + skip_anchor_rect[2] * 0.5;
+            let push_altar_caption = |rect: [f32; 4],
+                                      title: &str,
+                                      caption: &str,
+                                      focused: bool,
+                                      no_glossary: bool,
+                                      texts: &mut Vec<TextLabel>| {
+                let cx = rect[0] + rect[2] * 0.5;
                 let lx = (cx - altar_label_w * 0.5)
                     .max(8.0)
                     .min(w - altar_label_w - 8.0);
-                let stack_h = altar_label_h + altar_caption_h * 2.0 + 4.0;
-                let ly = (skip_anchor_rect[1] + skip_anchor_rect[3] + 30.0).min(h - stack_h - 8.0);
-                let title_color = if skip_focused_label {
-                    color::CHAMPAGNE
-                } else {
-                    color::PARCHMENT
-                };
-                let sub_color = if skip_focused_label {
-                    color::GOLD
-                } else {
-                    color::STONE
-                };
+                let stack_h = altar_label_h + altar_caption_h + 2.0;
+                let ly = (rect[1] + rect[3] + 30.0).min(h - stack_h - 8.0);
                 texts.push(TextLabel {
                     rect: [lx, ly, altar_label_w, altar_label_h],
-                    text: "Skip".to_string(),
-                    color: title_color,
+                    text: title.to_string(),
+                    color: if focused {
+                        color::CHAMPAGNE
+                    } else {
+                        color::PARCHMENT
+                    },
+                    no_glossary,
                     ..Default::default()
                 });
                 texts.push(TextLabel {
                     rect: [lx, ly + altar_label_h + 2.0, altar_label_w, altar_caption_h],
-                    text: tag.name().to_string(),
-                    color: sub_color,
+                    text: caption.to_string(),
+                    color: if focused { color::GOLD } else { color::STONE },
+                    no_glossary,
                     ..Default::default()
                 });
-                texts.push(TextLabel {
-                    rect: [
-                        lx,
-                        ly + altar_label_h + altar_caption_h + 4.0,
-                        altar_label_w,
-                        altar_caption_h,
-                    ],
-                    text: tag.description().to_string(),
-                    color: sub_color,
-                    ..Default::default()
-                });
-            } else {
-                push_altar_caption(
-                    skip_anchor_rect,
-                    "Skip",
-                    "Tribute · Esc",
-                    skip_focused_label,
-                    false,
-                    &mut texts,
-                );
+            };
+
+            let play_anchor_rect = projected_play.unwrap_or_else(|| {
+                let (pdx, pdy) = layout.play_dish_anchor_px;
+                let est_w = layout.play_dish_extents[0] * 0.8;
+                let est_h = layout.play_dish_extents[2] * 0.8;
+                [pdx - est_w * 0.5, pdy - est_h * 0.5, est_w, est_h]
+            });
+            push_altar_caption(
+                play_anchor_rect,
+                "Play",
+                "Begin · Enter",
+                play_focused_label,
+                true,
+                &mut texts,
+            );
+
+            let skip_anchor_rect = projected_skip.unwrap_or_else(|| {
+                let (sdx, sdy) = layout.skip_dish_anchor_px;
+                let est_w = layout.skip_dish_extents[0] * 0.8;
+                let est_h = layout.skip_dish_extents[2] * 0.8;
+                [sdx - est_w * 0.5, sdy - est_h * 0.5, est_w, est_h]
+            });
+            if can_skip {
+                if let Some(tag) = skip_tag {
+                    let cx = skip_anchor_rect[0] + skip_anchor_rect[2] * 0.5;
+                    let lx = (cx - altar_label_w * 0.5)
+                        .max(8.0)
+                        .min(w - altar_label_w - 8.0);
+                    let stack_h = altar_label_h + altar_caption_h * 2.0 + 4.0;
+                    let ly =
+                        (skip_anchor_rect[1] + skip_anchor_rect[3] + 30.0).min(h - stack_h - 8.0);
+                    let title_color = if skip_focused_label {
+                        color::CHAMPAGNE
+                    } else {
+                        color::PARCHMENT
+                    };
+                    let sub_color = if skip_focused_label {
+                        color::GOLD
+                    } else {
+                        color::STONE
+                    };
+                    texts.push(TextLabel {
+                        rect: [lx, ly, altar_label_w, altar_label_h],
+                        text: "Skip".to_string(),
+                        color: title_color,
+                        ..Default::default()
+                    });
+                    texts.push(TextLabel {
+                        rect: [lx, ly + altar_label_h + 2.0, altar_label_w, altar_caption_h],
+                        text: tag.name().to_string(),
+                        color: sub_color,
+                        ..Default::default()
+                    });
+                    texts.push(TextLabel {
+                        rect: [
+                            lx,
+                            ly + altar_label_h + altar_caption_h + 4.0,
+                            altar_label_w,
+                            altar_caption_h,
+                        ],
+                        text: tag.description().to_string(),
+                        color: sub_color,
+                        ..Default::default()
+                    });
+                } else {
+                    push_altar_caption(
+                        skip_anchor_rect,
+                        "Skip",
+                        "Tribute · Esc",
+                        skip_focused_label,
+                        false,
+                        &mut texts,
+                    );
+                }
             }
-        }
+            (play_anchor_rect, skip_anchor_rect)
+        };
 
         let scale = metrics::scene_scale(w, h, ui_scale);
 
@@ -1231,13 +1539,17 @@ impl SceneBehavior for PickBlindScene {
         }
 
         // Register focus-tree click targets for PlayBlind + SkipBlind.
-        let items = Self::flat_items(
-            &layout,
-            upcoming,
-            can_skip,
-            self.last_play_rect.get(),
-            self.last_skip_rect.get(),
-        );
+        let items = if hallway {
+            Self::flat_items_hallway(w, h, &cam, ctx.shop_env_height_scale, can_skip)
+        } else {
+            Self::flat_items(
+                &layout,
+                upcoming,
+                can_skip,
+                self.last_play_rect.get(),
+                self.last_skip_rect.get(),
+            )
+        };
         self.tree.register_flat_buttons(&items, &mut buttons);
 
         // Pause menu overlay. Drop scene buttons while paused so the

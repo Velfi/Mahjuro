@@ -121,6 +121,9 @@ pub enum MaterialKind {
     /// table-mesh draw when the user picks `SurfaceKind::GreenFelt`.
     /// No clearcoat, no SSR — felt is a diffuse dielectric.
     FeltGreen = 19,
+    /// Unlit emission added on top of the usual lit path. `specular_strength`
+    /// scales `base_color.rgb` in the shader (`lit_mesh.wgsl` emissive term).
+    Emissive = 20,
 }
 
 /// Compact per-mesh material parameters.
@@ -166,6 +169,17 @@ impl MaterialParams {
             // Felt has no pinpoint highlight — broad soft sheen only.
             specular_strength: 0.04,
             specular_power: 8.0,
+        }
+    }
+
+    /// Warm lamp filament / bulb: `intensity` drives HDR-style glow in the
+    /// lit-mesh path (still tonemapped like the rest of the table scene).
+    pub fn emissive_lamp(tint_rgb: [f32; 3], intensity: f32) -> Self {
+        Self {
+            kind: MaterialKind::Emissive,
+            base_color: [tint_rgb[0], tint_rgb[1], tint_rgb[2], 1.0],
+            specular_strength: intensity,
+            specular_power: 0.0,
         }
     }
 }

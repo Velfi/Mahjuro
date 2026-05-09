@@ -1,7 +1,6 @@
 use super::*;
 
 use crate::physical_size::PhysicalSize;
-use crate::scenes::shop::pick_ids::PICK_SELL_TRAY;
 use crate::sdl_shell::SdlShell;
 use sdl3::event::Event;
 use sdl3::keyboard::{Mod, Scancode};
@@ -21,9 +20,15 @@ fn mod_gui(m: Mod) -> bool {
 
 impl App {
     pub fn run_sdl_main(mut self, shell: &mut SdlShell) -> anyhow::Result<()> {
+        // Match [`draw::App::draw`]: HDR swapchain is only used when both the
+        // options toggle and `EffectLayers::hdr` allow it. Baseline builds keep
+        // `hdr` off, so seeding the surface from `gfx.hdr_enabled` alone forced
+        // an HDR swapchain at init then an immediate SDR reconfigure on frame
+        // 1 — a redundant Metal surface transition linked to intermittent black
+        // startup frames on macOS.
         let renderer = WgpuRenderer::new(render::wgpu_renderer::TargetInit::Windowed {
             window: shell.window.clone(),
-            hdr_enabled: self.gfx.hdr_enabled,
+            hdr_enabled: self.effect_layers.hdr_enabled(&self.gfx),
         })?;
         self.renderer = Some(renderer);
         self.input = Some(InputState::new()?);
@@ -187,14 +192,16 @@ impl App {
         let shop_face = matches!(&self.scene, Scene::Shop(_))
             && self.overlay_stack.is_empty()
             && !self.scene.has_blocking_overlay();
-        let collection_inspect_north = matches!(&self.scene, Scene::Collection(_))
+        let collection_uses_north_for_inspect = matches!(&self.scene, Scene::Collection(_))
             && self.overlay_stack.is_empty()
             && !self.scene.has_blocking_overlay();
-        let shop_inspect = matches!(self.overlay_stack.last(), Some(Scene::ItemInspect(_)));
+        let showcase_orbit_overlay = self.overlay_stack.last().is_some_and(|top| {
+            matches!(top, Scene::Showcase(s) if s.wants_orbit_input())
+        });
         crate::ui::input::GamepadPollCtx {
             shop_face_buttons: shop_face,
-            collection_inspect_north,
-            shop_item_inspect: shop_inspect,
+            collection_uses_north_for_inspect,
+            item_inspect_overlay: showcase_orbit_overlay,
         }
     }
 
@@ -328,7 +335,6 @@ impl App {
 
             // Check if click hit any button.
             let mut hit = false;
-            let mut hit_shop_3d = false;
             for btn in &self.active_buttons {
                 let (bx, by, bw, bh) = btn.rect;
                 if cursor.0 >= bx && cursor.0 <= bx + bw && cursor.1 >= by && cursor.1 <= by + bh {
@@ -336,31 +342,12 @@ impl App {
                     match btn.action {
                         ButtonAction::Ui(a) => self.mouse_actions.push(a),
                         ButtonAction::Scene(id) => {
-                            if id == scenes::shop::SHOP_3D_HIT_ID {
-                                hit_shop_3d = true;
-                            }
                             self.mouse_button_clicks.push(id);
                         }
                     }
                     hit = true;
                     break;
                 }
-            }
-            // Shop drag-to-sell: on mouse-down over a 3D shop object, record
-            // which item was under the cursor so that a drag onto the sell
-            // tray (detected on mouse-up) can sell the right item.
-            if hit_shop_3d {
-                if let Some(renderer) = self.renderer.as_ref() {
-                    let picked = renderer.pick_shop_object(cursor.0, cursor.1);
-                    self.shop_drag_start = match picked {
-                        Some(ShopHit::Relic(_))
-                        | Some(ShopHit::Ribbon(_))
-                        | Some(ShopHit::Talisman(_)) => picked.map(|h| (h, cursor)),
-                        _ => None,
-                    };
-                }
-            } else {
-                self.shop_drag_start = None;
             }
             if !hit {
                 // Check if we're clicking on a hand tile to start drag.
@@ -386,27 +373,6 @@ impl App {
             }
         } else {
             self.mouse_left_down = false;
-            // Shop drag-to-sell: if a drag started on an owned item and the
-            // cursor moved far enough and is now over the sell tray, inject
-            // a drop event so the shop can complete the sale.
-            if let Some((_, start)) = self.shop_drag_start.take()
-                && matches!(&self.scene, Scene::Shop(_))
-            {
-                let dx = cursor.0 - start.0;
-                let dy = cursor.1 - start.1;
-                let dist = (dx * dx + dy * dy).sqrt();
-                if dist > 10.0
-                    && let Some(renderer) = self.renderer.as_ref()
-                {
-                    let over_sell_tray = matches!(
-                        renderer.pick_shop_object(cursor.0, cursor.1),
-                        Some(ShopHit::Dish(id)) if id == PICK_SELL_TRAY
-                    );
-                    if over_sell_tray {
-                        self.mouse_button_clicks.push(SHOP_DRAG_DROP_ID);
-                    }
-                }
-            }
             // End drag — swap relics if dropped on a different slot.
             // Require minimum drag distance to avoid accidental swaps.
             let dropped_relic_slot = self.gameplay_relic_slot_at_cursor(cursor);
@@ -483,6 +449,13 @@ impl App {
                 }
             }
             input.update_pointer_hover(input.last_cursor, &slots);
+            // Showcase inspect (shop / collection): orbit with LMB drag — same stick channel as gamepad.
+            let showcase_orbit = self.overlay_stack.last().is_some_and(|top| {
+                matches!(top, Scene::Showcase(s) if s.wants_orbit_input())
+            });
+            if showcase_orbit && self.mouse_left_down {
+                input.accum_item_inspect_mouse_orbit(dx, dy);
+            }
             // Update drag position if dragging.
             if let Some(ref mut drag) = input.drag {
                 drag.current_pos = input.last_cursor;

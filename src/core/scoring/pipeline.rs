@@ -384,11 +384,13 @@ fn score_sets_inner(
 
     {
         use crate::core::tile::TileEnhancement;
-        let mut jade_chips = 0i32;
-        let mut pearl_chips = 0i32;
+        /// Flat chips per scored meld that includes ≥1 Pearl-stamped tile (Polychrome’s chip twin).
+        const PEARL_CHIPS_PER_MELD: i32 = 100;
+        let mut pearl_melds = 0i32;
         let mut gilded_gold = 0i32;
         let mut polychrome_melds = 0i32;
         for s in sets {
+            let mut meld_has_pearl = false;
             let mut meld_has_polychrome = false;
             for &tid in &s.tile_ids {
                 let Some(t) = tile_by_id(tiles, tid) else {
@@ -399,12 +401,7 @@ fn score_sets_inner(
                 }
                 let Some(enh) = t.enhancement else { continue };
                 match enh {
-                    TileEnhancement::Jade => {
-                        if !matches!(s.kind, SetKind::Pair) {
-                            jade_chips += 20;
-                        }
-                    }
-                    TileEnhancement::Pearl => pearl_chips += 25,
+                    TileEnhancement::Pearl => meld_has_pearl = true,
                     TileEnhancement::Gilded => {
                         if !matches!(s.kind, SetKind::Pair) {
                             gilded_gold += 1;
@@ -413,15 +410,15 @@ fn score_sets_inner(
                     TileEnhancement::Polychrome => meld_has_polychrome = true,
                 }
             }
+            if meld_has_pearl {
+                pearl_melds += 1;
+            }
             if meld_has_polychrome {
                 polychrome_melds += 1;
             }
         }
-        if jade_chips > 0 {
-            push_chips!("Jade Talisman", jade_chips);
-        }
-        if pearl_chips > 0 {
-            push_chips!("Pearl Talisman", pearl_chips);
+        for _ in 0..pearl_melds {
+            push_chips!("Pearl Talisman", PEARL_CHIPS_PER_MELD);
         }
         if gilded_gold > 0 {
             push_gold!("Gilded Talisman", gilded_gold);

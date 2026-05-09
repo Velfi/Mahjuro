@@ -4,6 +4,7 @@
 //! in `assets/data/yaku.json`. Behaviour — detection predicates, leveling
 //! formulas, scoring integration — stays in Rust.
 
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
@@ -85,6 +86,9 @@ pub enum YakuKind {
     Honroutou,
     /// Seven distinct pairs (alternate hand shape). Tied to the Pig zodiac.
     Chiitoitsu,
+    /// Thirteen orphans: one of each terminal and honor type, plus one
+    /// duplicate of an orphan face. No zodiac card levels this pattern.
+    KokushiMusou,
     /// A structurally valid hand that triggers no other yaku. Scores base
     /// chips × 1 mult — legal, but worth very little. Tied to the Rooster
     /// zodiac.
@@ -142,7 +146,7 @@ impl YakuKind {
         yaku_def(self).name
     }
 
-    /// All 13 yaku, in display order.
+    /// All 14 yaku, in display order.
     pub fn all() -> &'static [YakuKind] {
         &[
             YakuKind::Tanyao,
@@ -157,6 +161,7 @@ impl YakuKind {
             YakuKind::Honitsu,
             YakuKind::Yakuhai,
             YakuKind::Chiitoitsu,
+            YakuKind::KokushiMusou,
             YakuKind::ChickenHand,
         ]
     }
@@ -260,6 +265,9 @@ pub fn detect_yaku_with_wind(
     if is_chiitoitsu(sets) {
         found.push(YakuKind::Chiitoitsu);
     }
+    if is_kokushi_musou(sets, tiles) {
+        found.push(YakuKind::KokushiMusou);
+    }
     if is_iipeikou(sets, tiles) {
         found.push(YakuKind::Iipeikou);
     }
@@ -278,7 +286,7 @@ pub fn detect_yaku_with_wind(
     if is_junchan(sets, composition) {
         found.push(YakuKind::Junchan);
     }
-    if is_honroutou(composition) {
+    if is_honroutou(composition) && !is_kokushi_musou(sets, tiles) {
         found.push(YakuKind::Honroutou);
     }
 
@@ -287,7 +295,41 @@ pub fn detect_yaku_with_wind(
 
 /// True if `tiles`/`sets` form a complete standard win (4 melds + pair or chiitoitsu).
 pub fn is_complete_winning_hand(tiles: &[Tile], sets: &[DetectedSet]) -> bool {
-    is_full_hand(tiles, sets) || is_chiitoitsu(sets)
+    is_full_hand(tiles, sets) || is_chiitoitsu(sets) || is_kokushi_musou(sets, tiles)
+}
+
+/// Kokushi Musō: twelve [`SetKind::Single`] and one [`SetKind::Pair`], using exactly
+/// the thirteen orphan faces with one duplicated.
+fn is_kokushi_musou(sets: &[DetectedSet], tiles: &[Tile]) -> bool {
+    if sets.len() != 13 {
+        return false;
+    }
+    let singles = sets.iter().filter(|s| s.kind == SetKind::Single).count();
+    let pairs = sets.iter().filter(|s| s.kind == SetKind::Pair).count();
+    if singles != 12 || pairs != 1 {
+        return false;
+    }
+    for s in sets {
+        match s.kind {
+            SetKind::Single if s.tile_ids.len() == 1 => {}
+            SetKind::Pair if s.tile_ids.len() == 2 => {}
+            SetKind::Single | SetKind::Pair => return false,
+            _ => return false,
+        }
+    }
+    let mut counts: HashMap<(Suit, u8), u8> = HashMap::new();
+    for s in sets {
+        for &id in &s.tile_ids {
+            let Some(t) = tiles.iter().find(|x| x.id == id) else {
+                return false;
+            };
+            if !t.is_kokushi_orphan() {
+                return false;
+            }
+            *counts.entry((t.suit, t.rank)).or_insert(0) += 1;
+        }
+    }
+    counts.len() == 13 && counts.values().filter(|&&c| c == 2).count() == 1
 }
 
 /// Toitoi (formerly `AllTriplets`): all non-pair sets are triplets or kongs,
@@ -1021,7 +1063,7 @@ mod tests {
         }
         assert_eq!(
             YakuKind::all().len(),
-            13,
+            14,
             "YakuKind::all() must list every variant — update if you added one"
         );
     }

@@ -108,8 +108,8 @@ pub enum PromptInputSurface {
     MouseOrKeyboard,
 }
 
-/// Core shop HUD actions in **Exit → Select → Hold sell → Inspect** order (matches [`crate::ui::kenney_prompt_paths::shop_prompt_icon_paths`]).
-pub const SHOP_LEGEND_VERB_LABELS: [&str; 4] = ["Exit", "Select", "Hold sell", "Inspect"];
+/// Core shop HUD actions in **Exit → Select → Sell → Inspect** order (matches [`crate::ui::kenney_prompt_paths::shop_prompt_icon_paths`]).
+pub const SHOP_LEGEND_VERB_LABELS: [&str; 4] = ["Exit", "Select", "Sell", "Inspect"];
 
 /// For [`ButtonPrompt::shop_floating_legend`] unit tests only.
 #[cfg(test)]
@@ -136,7 +136,9 @@ impl ButtonPrompt {
     pub fn shop_inspect_mode_hint(surface: PromptInputSurface, style: GamepadStyle) -> String {
         match surface {
             PromptInputSurface::Controller => Self::inspect_camera_extras(style),
-            PromptInputSurface::MouseOrKeyboard => "Mouse wheel zoom (inspect)".to_string(),
+            PromptInputSurface::MouseOrKeyboard => {
+                "Drag to orbit · Mouse wheel: zoom (inspect)".to_string()
+            }
         }
     }
 
@@ -162,7 +164,7 @@ impl ButtonPrompt {
                     (FaceButton::East, FaceButton::South)
                 };
                 format!(
-                    "{} Exit  ·  {} Select  ·  {} Hold sell  ·  {} Inspect",
+                    "{} Exit  ·  {} Select  ·  {} Sell  ·  {} Inspect",
                     Self::face(style, exit_face),
                     Self::face(style, select_face),
                     Self::face(style, FaceButton::West),
@@ -177,7 +179,7 @@ impl ButtonPrompt {
 
     #[cfg(test)]
     fn shop_core_verbs_only() -> &'static str {
-        "Exit  ·  Select  ·  Hold sell  ·  Inspect"
+        "Exit  ·  Select  ·  Sell  ·  Inspect"
     }
 
     /// Full bottom-bar copy for the shop (two lines when `inspect_active`) — unit-test helper only.

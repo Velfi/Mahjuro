@@ -146,23 +146,11 @@ impl RunState {
             let v = self.relic_counters.entry(RelicId::SilkThread).or_insert(40);
             *v = (*v - 3).max(0);
             if *v == 0 {
-                // Metamorphosis: Silk Thread doesn't vanish — it cocoons,
-                // then hatches into Silk Moth in the same slot. This isn't
-                // a destruction (Kintsugi must NOT count it), so we do an
-                // in-place swap rather than calling `note_relic_destroyed`.
                 self.relic_counters.remove(&RelicId::SilkThread);
-                if let Some(slot) = self
-                    .relics
-                    .active
-                    .iter()
-                    .position(|&r| r == RelicId::SilkThread)
-                {
-                    self.relics.active[slot] = RelicId::SilkMoth;
-                } else {
-                    self.relics.active.push(RelicId::SilkMoth);
-                }
-                self.relic_counters.insert(RelicId::SilkMoth, 0);
-                self.relic_activations.push(RelicId::SilkMoth);
+                self.relics.active.retain(|&r| r != RelicId::SilkThread);
+                self.silk_thread_extinct = true;
+                self.note_relic_destroyed();
+                bus.push(GameEvent::TransformationSuccessorDiscovered(RelicId::SilkMoth));
                 bus.push(GameEvent::AchievementUnlocked(
                     crate::steam::Achievement::SilkMothEmerged,
                 ));
@@ -171,8 +159,6 @@ impl RunState {
 
         // Silk Moth: produce $1 per discard action and accumulate the lifetime
         // total in `relic_counters[SilkMoth]` so the live tooltip can show it.
-        // Fires after the SilkThread→SilkMoth swap above so the very discard
-        // that cracked the cocoon already pays out.
         if self.relics.has(RelicId::SilkMoth) {
             self.gold = self.gold.saturating_add(1);
             *self.relic_counters.entry(RelicId::SilkMoth).or_insert(0) += 1;
@@ -204,22 +190,8 @@ impl RunState {
         GameplayCoreState::with_run_mut(self, |core| {
             core.push_drawn_tiles(&drawn);
         });
-        let mut restocked = !drawn.is_empty();
+        let restocked = !drawn.is_empty();
 
-        // Shanten Shove: if the refilled hand holds at least one partial
-        // (a set one tile away from being playable), draw 1 bonus tile.
-        if self.relics.has(crate::core::relic::RelicId::ShantenShove)
-            && crate::core::shanten::has_scoring_partial(&self.hand)
-            && let Some(t) = self.wall.draw()
-        {
-            GameplayCoreState::with_run_mut(self, |core| {
-                core.push_drawn_tiles(&[t]);
-            });
-            bus.push(GameEvent::TileDrawn);
-            self.relic_activations
-                .push(crate::core::relic::RelicId::ShantenShove);
-            restocked = true;
-        }
         if restocked {
             self.times_restocked = self.times_restocked.saturating_add(1);
         }

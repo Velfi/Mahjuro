@@ -1,15 +1,18 @@
 //! Fullscreen celebration backdrop: dimmer quad, depth reset for 3D, and
 //! shared bottom prompt copy. Used by the shop tile-pack flow and
-//! [`super::zodiac_celebration::ZodiacCelebrationScene`].
+//! [`super::showcase::ZodiacPresenter`].
 //!
 //! Prefer [`CelebrationOverlayScratch`] so fullscreen passes stay in the right
 //! order: **dimmer → optional starfield → depth reset → celebration 3D**.
 //!
-//! [`CelebrationStarShowerIntro`] drives the same shooting-star wipe as dramatic
-//! scene transitions (`TransitionKind::ShootingStarCascade`), gated by
-//! [`EffectLayers::transition_fullscreen_fx`].
+//! [`ShootingStarCelebrationIntro`] drives the shooting-star cascade wipe used for
+//! the zodiac ribbon celebration. When [`Self::force_shooting_star_wipe`] is set
+//! (see [`ShootingStarCelebrationIntro::new_zodiac`]), the wipe runs whenever the
+//! celebration opens; otherwise it follows [`EffectLayers::transition_fullscreen_fx`]
 
 use std::time::{Duration, Instant};
+
+use super::UpdateCtx;
 
 use crate::audio::SfxId;
 use crate::effect_layers::EffectLayers;
@@ -186,12 +189,14 @@ fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
 /// Append [`Self::push_shooting_star_cascade_if_active`] **last** in the frame so the wipe
 /// composites over celebration geometry.
 #[derive(Clone, Copy, Debug)]
-pub struct CelebrationStarShowerIntro {
+pub struct ShootingStarCelebrationIntro {
     started_at: Instant,
     sound_emitted: bool,
+    /// Zodiac / meta level-up: always run the cascade + content fade-in when the overlay appears.
+    force_shooting_star_wipe: bool,
 }
 
-impl CelebrationStarShowerIntro {
+impl ShootingStarCelebrationIntro {
     /// Total wipe duration (matches typical app transition timing).
     pub const DURATION_SECS: f32 = 1.7;
     const CONTENT_FADE_START: f32 = 0.42;
@@ -202,7 +207,31 @@ impl CelebrationStarShowerIntro {
         Self {
             started_at: Instant::now(),
             sound_emitted: false,
+            force_shooting_star_wipe: false,
         }
+    }
+
+    /// Ribbon celebration on [`crate::scenes::ShowcasePresenter::Zodiac`]: play the wipe even when
+    /// [`EffectLayers::transition_fullscreen_fx`] is off (e.g. baseline graphics).
+    #[inline]
+    pub fn new_zodiac() -> Self {
+        Self {
+            started_at: Instant::now(),
+            sound_emitted: false,
+            force_shooting_star_wipe: true,
+        }
+    }
+
+    /// Meta profile level-up showcase: same forced wipe as zodiac so the cascade still plays when
+    /// [`EffectLayers::transition_fullscreen_fx`] is off.
+    #[inline]
+    pub fn new_meta_level_up() -> Self {
+        Self::new_zodiac()
+    }
+
+    #[inline]
+    fn wipe_active(&self, layers: &EffectLayers) -> bool {
+        self.force_shooting_star_wipe || layers.transition_fullscreen_fx
     }
 
     /// Headless / fast-forward: treat the wipe as finished and skip audio.
@@ -232,16 +261,16 @@ impl CelebrationStarShowerIntro {
         self.norm_t() >= 1.0
     }
 
-    /// When `transition_fullscreen_fx` is off, there is no wipe — content is fully visible immediately.
+    /// When no wipe is active for this intro, content is fully visible immediately.
     #[inline]
     pub fn is_done_for(&self, layers: &EffectLayers) -> bool {
-        !layers.transition_fullscreen_fx || self.is_complete()
+        !self.wipe_active(layers) || self.is_complete()
     }
 
     /// Fade factor for ribbon, text, and dimmer during the wipe.
     #[inline]
     pub fn content_alpha_for(&self, layers: &EffectLayers) -> f32 {
-        if !layers.transition_fullscreen_fx {
+        if !self.wipe_active(layers) {
             return 1.0;
         }
         let t = self.transition_progress();
@@ -250,7 +279,7 @@ impl CelebrationStarShowerIntro {
 
     #[inline]
     pub fn tick_audio(&mut self, bus: &mut EventBus, headless: bool, layers: &EffectLayers) {
-        if headless || !layers.transition_fullscreen_fx || self.sound_emitted {
+        if headless || !self.wipe_active(layers) || self.sound_emitted {
             return;
         }
         bus.push(GameEvent::UiSound(SfxId::StarShimmer));
@@ -260,7 +289,7 @@ impl CelebrationStarShowerIntro {
     /// Sets [`UiFrame::transition_progress`] and queues the cascade pass (no-op when inactive).
     #[inline]
     pub fn push_shooting_star_cascade_if_active(&self, frame: &mut UiFrame, layers: &EffectLayers) {
-        if !layers.transition_fullscreen_fx || self.is_complete() {
+        if !self.wipe_active(layers) || self.is_complete() {
             return;
         }
         frame.transition_progress = self.transition_progress();
@@ -268,8 +297,52 @@ impl CelebrationStarShowerIntro {
     }
 }
 
-impl Default for CelebrationStarShowerIntro {
+impl Default for ShootingStarCelebrationIntro {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Audio, headless fast-forward, and post-wipe grace window shared by zodiac and meta level-up showcases.
+pub struct CelebrationShowcaseIntroGate {
+    pub intro: ShootingStarCelebrationIntro,
+    intro_grace_start: Option<Instant>,
+}
+
+impl CelebrationShowcaseIntroGate {
+    pub const GRACE_AFTER_DONE_SECS: f32 = 0.35;
+
+    #[inline]
+    pub fn new(intro: ShootingStarCelebrationIntro) -> Self {
+        Self {
+            intro,
+            intro_grace_start: None,
+        }
+    }
+
+    pub fn tick(&mut self, ctx: &mut UpdateCtx<'_>) {
+        self.intro
+            .tick_audio(ctx.bus, ctx.headless, &ctx.effect_layers);
+        if ctx.headless {
+            self.intro.jump_to_done();
+            self.intro_grace_start = Some(Instant::now() - Duration::from_secs_f32(1.0));
+        }
+        if self.intro.is_done_for(&ctx.effect_layers) && self.intro_grace_start.is_none() {
+            self.intro_grace_start = Some(Instant::now());
+        }
+    }
+
+    #[inline]
+    pub fn ready_for_dismiss(&self, layers: &EffectLayers) -> bool {
+        if !self.intro.is_done_for(layers) {
+            return false;
+        }
+        match self.intro_grace_start {
+            Some(t) => {
+                Instant::now().saturating_duration_since(t).as_secs_f32()
+                    >= Self::GRACE_AFTER_DONE_SECS
+            }
+            None => false,
+        }
     }
 }

@@ -21,7 +21,6 @@ use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::main_menu_exterior::MainMenuExteriorScene;
 use super::{DrawCtx, OverlayRequest, Scene, SceneBehavior, SceneTransition, UpdateCtx};
-use crate::scenes::item_inspect::{ItemInspectHost, ItemInspectScene};
 use crate::scenes::object3d_inspect::{
     InspectFrameEnv, InspectRig, ItemInspectOrbitState, apply_inspect_view_to_frame,
 };
@@ -536,7 +535,7 @@ impl CollectionScene {
             // is pixel-space (renderer converts via `pixel_to_world`), so
             // pixel_x + pixel_y define the (X, Y) world position and the
             // third coordinate is the world-Z lift directly.
-            frame.point_lights = vec![
+            frame.scene_lighting.set_smooth_points(vec![
                 PointLight {
                     pos: [focus_px_x, cab_px_y + h * 0.5, focus_px_z + cell * 0.5],
                     radius: cell_pitch * 14.0,
@@ -563,7 +562,7 @@ impl CollectionScene {
                     color: [1.0, 0.65, 0.55],
                     intensity: 1.3,
                 },
-            ];
+            ]);
         }
 
         // Grid window size — how many cells we actually push as 3D
@@ -824,11 +823,12 @@ impl CollectionScene {
             let hud_wz = cam_world_z - h * 0.18;
 
             // ── Close-up ─────────────────────────────────────────────
-            // Render the focused artifact at ~3× cell scale using the
+            // Render the focused artifact large in the HUD using the
             // same kind-aware path the grid uses, so each category
             // reads the same visually (relic silhouette/medallion vs.
-            // tinted plaque).
-            let closeup_size = h * 0.14;
+            // tinted plaque). No `glow` on the relic here — the grid
+            // cell already carries the pulsing selection halo.
+            let closeup_size = h * 0.28;
             let closeup_px = cab_px_x + closeup_wx;
             let closeup_anchor = crate::ui::placement::PlacementAnchor::new(
                 [closeup_px, hud_py, hud_wz],
@@ -869,7 +869,7 @@ impl CollectionScene {
                         color,
                         kind: Object3dKind::Relic {
                             relic_id: *relic_id,
-                            glow: if silhouette { 0.0 } else { 0.9 },
+                            glow: 0.0,
                             silhouette,
                             debuffed: false,
                             pick_id: None,
@@ -1417,7 +1417,7 @@ impl SceneBehavior for CollectionScene {
                         push_relic_stinger_for(ctx.bus, self.active_tab, ctx.progress, i);
                     }
                 }
-                UiAction::ShopItemInspectToggle => {
+                UiAction::NorthFacePress => {
                     let w = ctx.layout.window_w;
                     let h = ctx.layout.window_h;
                     let bosses = tab_artifacts(self.active_tab, ctx.progress);
@@ -1427,10 +1427,13 @@ impl SceneBehavior for CollectionScene {
                     if let Some(orbit) =
                         self.collection_inspect_orbit_for_focus(w, h, &bosses, ctx.layout)
                     {
-                        *ctx.overlay_request =
-                            Some(OverlayRequest::Push(Box::new(Scene::ItemInspect(
-                                ItemInspectScene::new(ItemInspectHost::Collection, orbit),
-                            ))));
+                        *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(
+                            Scene::Showcase(crate::scenes::ShowcaseScene::new(
+                                crate::scenes::ShowcasePresenter::CollectionInspect(
+                                    crate::scenes::CollectionInspectPresenter::new(orbit),
+                                ),
+                            )),
+                        )));
                     }
                 }
                 _ => {}
@@ -1541,6 +1544,7 @@ fn tab_artifacts(tab: Tab, progress: &crate::core::progression::PlayerProgress) 
             let defs = all_relic_defs();
             let available = progress.available_relics();
             defs.iter()
+                .filter(|d| progress.transformation_successor_visible(d.id))
                 .map(|d| Artifact {
                     name: d.name.to_string(),
                     unlocked: available.contains(&d.id),

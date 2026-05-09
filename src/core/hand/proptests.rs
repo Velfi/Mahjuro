@@ -174,6 +174,9 @@ proptest! {
                             prop_assert_eq!(set_tiles[0].rank, set_tiles[i].rank);
                         }
                     }
+                    SetKind::Single => {
+                        prop_assert_eq!(set_tiles.len(), 1);
+                    }
                 }
             }
         }

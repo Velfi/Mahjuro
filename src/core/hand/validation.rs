@@ -87,6 +87,13 @@ pub fn validate_selection_with_rules(
     {
         return Some(pairs);
     }
+
+    // Kokushi Musō: twelve distinct orphan singletons + one pair on an orphan face.
+    if flower_ids.is_empty()
+        && let Some(kokushi) = decomposition::try_kokushi_musou(&regular)
+    {
+        return Some(kokushi);
+    }
     None
 }
 

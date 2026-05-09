@@ -720,7 +720,7 @@ pub fn rasterize_wood_tablet_decal(label: &str, ui_font: Option<&fontdue::Font>)
 
 /// Two-line engraved decal for the gameplay scene's hanging score plaque.
 /// `top` is the blind/round/score line (champagne ink, slightly larger);
-/// `bot` is the gold/wall/wind/shanten status line (parchment ink, slightly
+/// `bot` is the gold/wall/wind status line (parchment ink, slightly
 /// smaller). Both are baked into a 1024×384 transparent RGBA texture so the
 /// lit-mesh shader can composite them onto the +Z face of the plaque mesh.
 ///
@@ -1187,8 +1187,6 @@ fn fit_multiline_font_px(
 /// "gem" in the upper-right corner.
 ///
 /// Each enhancement gets its own visual treatment:
-/// - **Jade** — two-tone imperial green, lighter on top edges, deeper on
-///   bottom (suggests carved stone catching light from above).
 /// - **Pearl** — soft, low-saturation iridescence cycling around the frame
 ///   in cool/warm pastels.
 /// - **Gilded** — polished gold with a sine-wave brightness highlight that
@@ -1329,17 +1327,6 @@ fn enhancement_border_color(enh: TileEnhancement, t: f32) -> (u8, u8, u8) {
             let b = (0.25 * bright * bright * 255.0).clamp(0.0, 255.0) as u8;
             (r, g, b)
         }
-
-        TileEnhancement::Jade => {
-            // Two-tone carved stone: cosine over t puts the highlight along
-            // the top of the frame and the deepest green along the bottom.
-            // top_w ≈ 1 at the top edge, ≈ 0 at the bottom.
-            let top_w = ((t * std::f32::consts::TAU).cos() * 0.5 + 0.5).clamp(0.0, 1.0);
-            let r = ((0.10 + 0.30 * top_w) * 255.0) as u8;
-            let g = ((0.50 + 0.40 * top_w) * 255.0) as u8;
-            let b = ((0.30 + 0.25 * top_w) * 255.0) as u8;
-            (r, g, b)
-        }
     }
 }
 
@@ -1373,21 +1360,6 @@ fn enhancement_gem_color(enh: TileEnhancement, angle_t: f32, r_norm: f32) -> (u8
             let r = (1.00 * bright * 255.0) as u8;
             let g = (0.82 * bright * 255.0) as u8;
             let b = (0.28 * bright * bright * 255.0) as u8;
-            (r, g, b)
-        }
-
-        TileEnhancement::Jade => {
-            // Carved jade orb: brighter highlight in the upper-left, deeper
-            // green in the lower-right. Same axis convention as the frame.
-            let highlight = 0.875_f32;
-            let mut d_angle = (angle_t - highlight).abs();
-            if d_angle > 0.5 {
-                d_angle = 1.0 - d_angle;
-            }
-            let lit = (1.0 - d_angle * 2.0).clamp(0.0, 1.0) * (1.0 - 0.4 * r_norm);
-            let r = ((0.10 + 0.35 * lit) * 255.0) as u8;
-            let g = ((0.50 + 0.45 * lit) * 255.0) as u8;
-            let b = ((0.28 + 0.30 * lit) * 255.0) as u8;
             (r, g, b)
         }
     }
@@ -1882,11 +1854,11 @@ pub fn measure_label_advances(
     (font_px, start_x, advances)
 }
 
-/// Load Cormorant Garamond for game UI text.
+/// Load Instrument Serif for game UI text.
 ///
 /// Resolution order:
-/// 1. Embedded Cormorant Garamond (the primary serif used everywhere).
-/// 2. Embedded Noto Sans (a fallback for missing Garamond glyphs — only used
+/// 1. Embedded Instrument Serif (the primary serif used everywhere).
+/// 2. Embedded Noto Sans (a fallback for missing serif glyphs — only used
 ///    if the user has dropped a Noto Sans TTF into `assets/Noto_Sans/`).
 /// 3. System fonts (last-ditch fallback for unbundled dev builds).
 ///
@@ -1895,11 +1867,8 @@ pub fn load_ui_font_bytes() -> Option<Vec<u8>> {
     static CACHE: std::sync::OnceLock<Option<Vec<u8>>> = std::sync::OnceLock::new();
     CACHE
         .get_or_init(|| {
-            // Primary: Cormorant Garamond.
-            let primary = [
-                "Cormorant_Garamond/CormorantGaramond-VariableFont_wght.ttf",
-                "Cormorant_Garamond/static/CormorantGaramond-Regular.ttf",
-            ];
+            // Primary: Instrument Serif.
+            let primary = ["Instrument_Serif/InstrumentSerif-Regular.ttf"];
             for path in primary {
                 if let Some(file) = crate::asset_path::get(path) {
                     log::debug!("decal: loaded UI font from embedded {path}");

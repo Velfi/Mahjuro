@@ -109,9 +109,9 @@ impl Default for ShopPositions {
             camera_eye_z_frac: 0.34,
             camera_target_y_frac: 0.18,
             camera_target_z_frac: 0.10,
-            celeb_pack_closeup: Placement::at(0.383_101_85, 0.45, -2.573_530_7),
+            celeb_pack_closeup: Placement::at(0.358_506_95, 0.010_361_195, -47.252_86),
             celeb_pack_reveal: Placement::at(-3.352_761_3e-8, 0.55, 36.887_23),
-            celeb_zodiac: Placement::at(0.5, 0.967_870_7, 242.013_03),
+            celeb_zodiac: Placement::at(0.5, 0.78963876, 134.33585),
         }
     }
 }

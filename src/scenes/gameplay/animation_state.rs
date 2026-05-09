@@ -428,14 +428,15 @@ pub(super) fn build_candles_and_spotlights(
             // wick is much farther from the action row than any of the
             // table-edge candles — bump its radius and intensity to
             // compensate, otherwise the front row stays in shadow.
-            let (light_radius_mul, light_intensity) = if i == 6 { (2.2, 1.0) } else { (1.0, 2.3) };
+            let (light_radius_mul, light_intensity) = if i == 6 { (2.2, 1.0) } else { (1.0, 2.05) };
             // Flare multiplier: boosts intensity and radius when a
             // monster hand clears the whole blind in one shot.
             let flare_mul = 1.0 + scene.candle_flare;
             point_lights.push(PointLight {
                 pos: [cx_j, cy_j, wick_world_y],
                 radius: radius_px * light_radius_mul * (1.05 + 0.3 * candle.flicker) * flare_mul,
-                color: [1.0, 0.55, 0.22],
+                // Slightly desaturated vs pure amber so candle key doesn’t dye every albedo neon-warm.
+                color: [1.0, 0.62, 0.34],
                 intensity: light_intensity * candle.flicker * scene.light_ramp * flare_mul,
             });
             let _ = candle_w;

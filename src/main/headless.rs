@@ -1,8 +1,11 @@
 use std::path::PathBuf;
 
 use super::*;
-use crate::scenes::TilePackCelebrationScene;
 use crate::scenes::shop::ShopScene;
+use crate::scenes::{
+    CollectionInspectPresenter, MetaLevelUpPresenter, ShopInspectPresenter, ShowcasePresenter,
+    ShowcaseScene, TilePackPresenter, ZodiacPresenter,
+};
 
 /// Map a user-supplied `--boss` slug (case-insensitive, spaces/underscores
 /// interchangeable) to a `BossKind`. Matches against canonical `name()`
@@ -31,7 +34,7 @@ fn parse_boss_slug(slug: &str) -> anyhow::Result<crate::core::boss::BossKind> {
     anyhow::bail!("unknown --boss '{slug}'");
 }
 
-/// `--zodiac` for `zodiac_celebration` screenshots: slug or display name.
+/// `--zodiac` for `zodiac_celebration` / zodiac-mode `showcase` screenshots: slug or display name.
 fn parse_zodiac_slug(slug: &str) -> anyhow::Result<crate::core::zodiac::ZodiacKind> {
     let normalized = slug
         .trim()
@@ -45,7 +48,7 @@ fn parse_zodiac_slug(slug: &str) -> anyhow::Result<crate::core::zodiac::ZodiacKi
     anyhow::bail!("unknown --zodiac '{slug}'");
 }
 
-/// `--pack` for `tile_pack_celebration`: variant name or compact pack title.
+/// `--pack` for `tile_pack_celebration` / `showcase --pack`: variant name or compact pack title.
 fn parse_tile_pack_slug(slug: &str) -> anyhow::Result<crate::core::tile_pack::TilePackKind> {
     use crate::core::tile_pack::TilePackKind;
     let n = slug
@@ -194,7 +197,7 @@ fn setup_gameplay_screenshot_state(run: &mut RunState) {
     run.consumables.items.clear();
     let _ = run
         .consumables
-        .try_push(Consumable::Talisman(TalismanKind::Jade));
+        .try_push(Consumable::Talisman(TalismanKind::Pearl));
     let _ = run
         .consumables
         .try_push(Consumable::Zodiac(ZodiacKind::Dragon));
@@ -219,7 +222,7 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
     let collection_like = matches!(s.scene.as_str(), "collection");
     if s.item_inspect && !shop_like && !collection_like {
         anyhow::bail!(
-            "--item-inspect requires --scene shop or collection (tile_pack_celebration is a standalone scene)"
+            "--item-inspect requires --scene shop or collection (full-screen pack/showcase captures do not use it)"
         );
     }
     if s.item_inspect && shop_like {
@@ -246,16 +249,25 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
     if s.journal_transition.is_some() && !shop_like {
         anyhow::bail!("--journal-transition is only valid with --scene shop");
     }
-    let celebration_like = matches!(s.scene.as_str(), "zodiac_celebration");
+    let showcase_like = matches!(s.scene.as_str(), "showcase");
+    let celebration_like = matches!(s.scene.as_str(), "zodiac_celebration")
+        || (showcase_like && s.pack.is_none());
+    let pack_celeb_like =
+        matches!(s.scene.as_str(), "tile_pack_celebration") || (showcase_like && s.pack.is_some());
+    if showcase_like && s.pack.is_some() && s.zodiac.is_some() {
+        anyhow::bail!("--scene showcase: use only one of --pack (tile pack) or --zodiac (ribbon); omit --zodiac for default snake");
+    }
     if s.zodiac.is_some() && !celebration_like {
-        anyhow::bail!("--zodiac is only valid with --scene zodiac_celebration");
+        anyhow::bail!("--zodiac is only valid with --scene zodiac_celebration or --scene showcase without --pack");
     }
     if s.celebration_level.is_some() && !celebration_like {
-        anyhow::bail!("--celebration-level is only valid with --scene zodiac_celebration");
+        anyhow::bail!(
+            "--celebration-level (--zodiac-yaku-level) is only for zodiac ribbon showcase \
+             (`zodiac_celebration` or `showcase` without `--pack`); meta level-up is `--scene game_over_level_up`"
+        );
     }
-    let pack_celeb_like = matches!(s.scene.as_str(), "tile_pack_celebration");
     if s.pack.is_some() && !pack_celeb_like {
-        anyhow::bail!("--pack is only valid with --scene tile_pack_celebration");
+        anyhow::bail!("--pack is only valid with --scene tile_pack_celebration or --scene showcase");
     }
     let boss_override = s.boss.as_deref().map(parse_boss_slug).transpose()?;
     let mut run = RunState::new_demo();
@@ -328,6 +340,24 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
                 false,
             )
         }
+        "game_over_level_up" | "meta_level_up" => {
+            let mut progress = crate::core::progression::PlayerProgress::new();
+            progress.runs_completed = 1;
+            let result = progress
+                .check_level_up()
+                .ok_or_else(|| anyhow::anyhow!("game_over_level_up: check_level_up returned None"))?;
+            let ww = s.width.max(1) as f32;
+            let hh = s.height.max(1) as f32;
+            let modal = crate::main_draw::build_level_up_modal(&result, ww, hh).ok_or_else(|| {
+                anyhow::anyhow!("game_over_level_up: no unlock pages for modal")
+            })?;
+            (
+                Scene::Showcase(ShowcaseScene::new(ShowcasePresenter::MetaLevelUp(
+                    MetaLevelUpPresenter::new(modal),
+                ))),
+                false,
+            )
+        }
         "zodiac_celebration" => {
             let z = s
                 .zodiac
@@ -338,13 +368,45 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
             let level = s.celebration_level.unwrap_or(2).max(1);
             let yaku = z.yaku();
             (
-                Scene::ZodiacCelebration(scenes::ZodiacCelebrationScene::new(
-                    z,
-                    yaku.name(),
-                    level,
-                )),
+                Scene::Showcase(ShowcaseScene::new(ShowcasePresenter::Zodiac(
+                    ZodiacPresenter::new(z, yaku.name(), level),
+                ))),
                 false,
             )
+        }
+        "showcase" => {
+            if s.pack.is_some() {
+                let pack = s
+                    .pack
+                    .as_deref()
+                    .map(parse_tile_pack_slug)
+                    .transpose()?
+                    .unwrap_or(crate::core::tile_pack::TilePackKind::Honors);
+                setup_shop_state(&mut run);
+                let shop = ShopScene::new(&mut run);
+                let counts = shop.tile_pack_celeb_inventory_counts(&run);
+                (
+                    Scene::Showcase(ShowcaseScene::new(ShowcasePresenter::TilePack(
+                        TilePackPresenter::new_headless_with_shop_counts(&run, pack, counts),
+                    ))),
+                    true,
+                )
+            } else {
+                let z = s
+                    .zodiac
+                    .as_deref()
+                    .map(parse_zodiac_slug)
+                    .transpose()?
+                    .unwrap_or(crate::core::zodiac::ZodiacKind::Snake);
+                let level = s.celebration_level.unwrap_or(2).max(1);
+                let yaku = z.yaku();
+                (
+                    Scene::Showcase(ShowcaseScene::new(ShowcasePresenter::Zodiac(
+                        ZodiacPresenter::new(z, yaku.name(), level),
+                    ))),
+                    false,
+                )
+            }
         }
         "tile_pack_celebration" => {
             let pack = s
@@ -357,9 +419,9 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
             let shop = ShopScene::new(&mut run);
             let counts = shop.tile_pack_celeb_inventory_counts(&run);
             (
-                Scene::TilePackCelebration(
-                    TilePackCelebrationScene::new_headless_with_shop_counts(&run, pack, counts),
-                ),
+                Scene::Showcase(ShowcaseScene::new(ShowcasePresenter::TilePack(
+                    TilePackPresenter::new_headless_with_shop_counts(&run, pack, counts),
+                ))),
                 true,
             )
         }
@@ -368,8 +430,9 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
                 "unsupported --scene '{other}' (supported: collection, \
                 yaku_journal, gameplay, gameplay_hero, pick_blind, shop, \
                 main_menu_exterior, tile_select, transition_playground, \
-                material_viewer, relic_unlock, zodiac_celebration, \
-                tile_pack_celebration)"
+                material_viewer, relic_unlock, game_over_level_up, meta_level_up, \
+                showcase, \
+                zodiac_celebration, tile_pack_celebration)"
             )
         }
     };
@@ -392,11 +455,9 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
                         "--item-inspect: could not build inspect orbit (check --shop-focus index and stock)"
                     )
                 })?;
-                app.overlay_stack
-                    .push(Scene::ItemInspect(scenes::ItemInspectScene::new(
-                        scenes::ItemInspectHost::Shop,
-                        orbit,
-                    )));
+                app.overlay_stack.push(Scene::Showcase(ShowcaseScene::new(
+                    ShowcasePresenter::ShopInspect(ShopInspectPresenter::new(orbit)),
+                )));
             }
             Scene::Collection(coll) => {
                 let orbit = coll
@@ -406,11 +467,9 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
                             "--item-inspect: collection tab has no artifacts or orbit failed"
                         )
                     })?;
-                app.overlay_stack
-                    .push(Scene::ItemInspect(scenes::ItemInspectScene::new(
-                        scenes::ItemInspectHost::Collection,
-                        orbit,
-                    )));
+                app.overlay_stack.push(Scene::Showcase(ShowcaseScene::new(
+                    ShowcasePresenter::CollectionInspect(CollectionInspectPresenter::new(orbit)),
+                )));
             }
             _ => {}
         }
@@ -435,6 +494,9 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
     }
     if force_relic_modal {
         app.force_relic_unlock_modal();
+    }
+    if let Some(mul) = s.gltf_emissive_scale {
+        app.shop_env_lighting.gltf_emissive_scale = mul;
     }
     app.run_screenshot(s.output.clone(), s.warmup_frames)
 }
@@ -488,6 +550,9 @@ struct HeadlessApp {
     /// dependent animations (e.g. journal-cover open tween) actually
     /// progress during warmup.
     input_mode_override: Option<crate::ui::input::InputMode>,
+    /// Same knobs as interactive `App` debug shop env; headless defaults to
+    /// [`ShopEnvLightingTune::SOURCE_DEFAULTS`] unless CLI overrides emissive scale.
+    shop_env_lighting: crate::render::shop_glb::ShopEnvLightingTune,
 }
 
 impl HeadlessApp {
@@ -543,6 +608,7 @@ impl HeadlessApp {
             queued_actions: Vec::new(),
             modal_overlay: None,
             input_mode_override: None,
+            shop_env_lighting: crate::render::shop_glb::ShopEnvLightingTune::SOURCE_DEFAULTS,
         })
     }
 
@@ -707,20 +773,21 @@ impl HeadlessApp {
                 overlay_request: &mut overlay_request,
                 headless: true,
                 effect_layers: self.effect_layers,
-                shop_inspect_orbit_stick: (0.0, 0.0),
-                shop_inspect_zoom_triggers: 0.0,
+                item_inspect_orbit_stick: (0.0, 0.0),
+                item_inspect_zoom_triggers: 0.0,
                 rumble_lab_ops: &mut rumble_lab_ops,
                 suspended_shop: None,
+                shop_env_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
             })
         } else {
-            let item_inspect_shop = self.overlay_stack.last().is_some_and(|top| {
+            let showcase_shop_inspect = self.overlay_stack.last().is_some_and(|top| {
                 matches!(
                     top,
-                    Scene::ItemInspect(ins)
-                        if matches!(ins.host, scenes::ItemInspectHost::Shop)
+                    Scene::Showcase(s)
+                        if matches!(s.presenter, scenes::ShowcasePresenter::ShopInspect(_))
                 )
             });
-            let suspended_shop = if item_inspect_shop {
+            let suspended_shop = if showcase_shop_inspect {
                 match &self.scene {
                     Scene::Shop(shop) => Some(shop),
                     _ => None,
@@ -761,10 +828,11 @@ impl HeadlessApp {
                     overlay_request: &mut overlay_request,
                     headless: true,
                     effect_layers: self.effect_layers,
-                    shop_inspect_orbit_stick: (0.0, 0.0),
-                    shop_inspect_zoom_triggers: 0.0,
+                    item_inspect_orbit_stick: (0.0, 0.0),
+                    item_inspect_zoom_triggers: 0.0,
                     rumble_lab_ops: &mut rumble_lab_ops,
                     suspended_shop,
+                    shop_env_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
                 })
         };
         match overlay_request {
@@ -776,12 +844,14 @@ impl HeadlessApp {
         }
         let _ = update_result;
 
-        let item_inspect_top = matches!(self.overlay_stack.last(), Some(Scene::ItemInspect(_)));
-        let suspended_shop = match (&self.scene, item_inspect_top) {
+        let showcase_orbit_top = self.overlay_stack.last().is_some_and(|top| {
+            matches!(top, Scene::Showcase(s) if s.wants_orbit_input())
+        });
+        let suspended_shop = match (&self.scene, showcase_orbit_top) {
             (Scene::Shop(s), true) => Some(s),
             _ => None,
         };
-        let suspended_collection = match (&self.scene, item_inspect_top) {
+        let suspended_collection = match (&self.scene, showcase_orbit_top) {
             (Scene::Collection(c), true) => Some(c),
             _ => None,
         };
@@ -804,7 +874,7 @@ impl HeadlessApp {
             false,
             None,
             crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
-            crate::render::shop_glb::ShopEnvLightingTune::SOURCE_DEFAULTS,
+            self.shop_env_lighting,
             self.effect_layers,
             (0.0, 0.0),
             self.input_mode_override.unwrap_or(InputMode::Cursor),
@@ -813,6 +883,7 @@ impl HeadlessApp {
             crate::ui::button_prompts::GamepadStyle::default(),
             suspended_shop,
             suspended_collection,
+            self.gfx.tile_preset,
         );
         let mut frame: UiFrame = if let Some(top) = self.overlay_stack.last() {
             top.draw_frame(ctx)
@@ -848,12 +919,8 @@ impl HeadlessApp {
 
         let scene_for_renderer = self.overlay_stack.last().unwrap_or(&self.scene);
         let active_scene_key: Option<&'static str> = match scene_for_renderer {
-            Scene::ItemInspect(ins) => match ins.host {
-                scenes::ItemInspectHost::Shop => Some("shop"),
-                scenes::ItemInspectHost::Collection => Some("collection"),
-            },
+            Scene::Showcase(_) => Some("showcase"),
             Scene::Shop(_) => Some("shop"),
-            Scene::TilePackCelebration(_) => Some("tile_pack_celebration"),
             Scene::Gameplay(_) => Some("gameplay"),
             Scene::Collection(_) => Some("collection"),
             Scene::PickBlind(_) => Some("pick_blind"),
@@ -863,18 +930,19 @@ impl HeadlessApp {
         };
         self.renderer.set_active_scene(active_scene_key);
         let rotations_scene = match self.overlay_stack.last() {
-            Some(Scene::ItemInspect(_)) => &self.scene,
+            Some(Scene::Showcase(s)) if s.wants_orbit_input() => &self.scene,
             _ => scene_for_renderer,
         };
         self.renderer
             .set_committed_arrange_rotations(collect_committed_rotations(rotations_scene));
         self.renderer
             .set_shop_env_height_scale(crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE);
-        let sl = crate::render::shop_glb::ShopEnvLightingTune::SOURCE_DEFAULTS;
+        let sl = self.shop_env_lighting;
         self.renderer.set_shop_env_render_tune(
             sl.linear_exposure,
             sl.ambient_scale,
             sl.lit_mesh_gltf_punctual_scale,
+            sl.gltf_emissive_scale,
         );
         let haze_horizon_y = frame
             .gameplay_fog_wall_horizon_y

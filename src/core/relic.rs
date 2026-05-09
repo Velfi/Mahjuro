@@ -33,11 +33,6 @@ pub enum RelicId {
     WildWinds,
     DragonEcho,
     // ── Draw tempo, dora, wind, zodiac ──────────────────────────────────
-    /// After refill, if the hand contains a partial you've invested in — a
-    /// pair wanting a third, a triplet wanting a kong, or two numbered tiles
-    /// of the same suit within 2 ranks wanting a sequence — draw 1 extra tile
-    /// from the wall.
-    ShantenShove,
     /// Kongs grant +1 play this round and +4 mult when scored.
     KanDrum,
     /// Reveal an extra dora indicator at round start; dora chips become +35.
@@ -108,13 +103,15 @@ pub enum RelicId {
     WayOfPurity,
     // ── Broad relic pool ───────────────────────────────────────────────
     // Retrigger
-    /// Retrigger the first 5 scored tiles in the hand.
+    /// Retrigger the first 5 scored tiles in the hand. Hidden from Collection
+    /// and shops until Tea Ceremony burns once (profile unlock).
     Geese,
     /// Retrigger tiles ranked 1–4 in scored sets.
     VoiceOfThePeople,
     /// Retrigger tiles ranked 6–9 in scored sets.
     VoiceOfTheElite,
-    /// Retrigger all scored tiles for 3 plays, then self-destructs.
+    /// Retrigger all scored tiles for 3 plays, then burns (slot empties);
+    /// Tea cannot shop-roll again and Geese returns to the pool this run.
     TeaCeremony,
     /// Tiles NOT in scored sets each grant +2 chips.
     GhostHand,
@@ -129,11 +126,10 @@ pub enum RelicId {
     /// +20 chips permanently each time you score a sequence.
     RiverRunner,
     // Fragile
-    /// +80 chips, loses 8 chips per play. Transforms into Taotie at 0
-    /// instead of vanishing.
+    /// +80 chips, loses 8 chips per play. At 0 the relic burns (slot empties);
+    /// Taotie enters the shop pool this run.
     MeltingIce,
-    /// Successor to Melting Ice. Created in-place when Melting Ice's counter
-    /// would hit 0 — the bronze mask thaws free. Permanent +80 chips base.
+    /// Successor to Melting Ice after it burns — buy from shop. Permanent +80 chips base.
     /// At cash-in, every scored honor (wind/dragon) tile is destroyed: the
     /// tile is permanently removed from the run's wall (added to
     /// `removed_tile_ids`, the same primitive Kiln uses) and Taotie's chip
@@ -141,13 +137,12 @@ pub enum RelicId {
     /// the accumulated chip bonus; divide by 20 for the honor count
     /// shown in the live tooltip.
     Taotie,
-    /// +4 mult, loses 0.3 mult per discard. Transforms into Silk Moth at 0
-    /// instead of vanishing.
+    /// +4 mult, loses 0.3 mult per discard. At 0 the relic burns (slot empties);
+    /// Silk Moth enters the shop pool this run.
     SilkThread,
-    /// Successor to Silk Thread. Created in-place when Silk Thread's counter
-    /// would hit 0 — the cocoon hatches. +2 mult on every scored hand and
-    /// +$1 every discard. Counter `relic_counters[SilkMoth]` tracks
-    /// cumulative gold paid out across the run for the live tooltip.
+    /// Successor to Silk Thread after it burns — buy from shop. +2 mult on every
+    /// scored hand and +$1 every discard. Counter `relic_counters[SilkMoth]`
+    /// tracks cumulative gold paid out across the run for the live tooltip.
     SilkMoth,
     // Copy / Meta
     /// Copies the effect of the first relic in your inventory.
@@ -225,7 +220,7 @@ pub enum RelicId {
     Kintsugi,
     /// Sequences may wrap 9→1 freely (9-1-2, 8-9-1 are valid sequences).
     AntTrail,
-    /// Buff talismans (Jade/Pearl/Gilded/Polychrome) apply their enhancement
+    /// Buff talismans (Pearl/Gilded/Polychrome) apply their enhancement
     /// to every tile drawn for the rest of the run, not just the 14 currently
     /// in hand. Also grants +1 consumable inventory slot.
     BrocadePouch,
@@ -251,7 +246,6 @@ impl RelicId {
             RelicId::WildWinds => "wild_winds.png",
             RelicId::DragonEcho => "dragon_echo.png",
             // Filenames for icons; loader falls back to the relic slug if missing.
-            RelicId::ShantenShove => "shanten_shove.png",
             RelicId::KanDrum => "kan_drum.png",
             RelicId::DoraCrown => "dora_crown.png",
             RelicId::RoundCompass => "round_compass.png",
@@ -617,6 +611,17 @@ pub fn relic_description_live(
                 }
             }
             s
+        }
+        RelicId::Sweepstakes => {
+            let ff = inventory_focus
+                .is_some_and(|(relics, _)| relics.has(RelicId::FortunesFavor));
+            if ff {
+                format!(
+                    "{base}\n\nFortune's Favor: round start becomes 1/3 +$2, 1/3 +$4, 1/3 nothing."
+                )
+            } else {
+                base.to_string()
+            }
         }
         _ => base.to_string(),
     }
@@ -1006,7 +1011,6 @@ mod tests {
                     | RelicId::SetMagnet
                     | RelicId::WildWinds
                     | RelicId::DragonEcho
-                    | RelicId::ShantenShove
                     | RelicId::KanDrum
                     | RelicId::DoraCrown
                     | RelicId::RoundCompass
@@ -1097,7 +1101,6 @@ mod tests {
                 RelicId::SetMagnet,
                 RelicId::WildWinds,
                 RelicId::DragonEcho,
-                RelicId::ShantenShove,
                 RelicId::KanDrum,
                 RelicId::DoraCrown,
                 RelicId::RoundCompass,

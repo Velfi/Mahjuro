@@ -2,6 +2,7 @@ use super::collection::collection_field_path;
 use super::gameplay::gameplay_field_path;
 use super::main_menu_exterior::main_menu_exterior_field_path;
 use super::shop::shop_field_path;
+use super::tile_select::tile_select_field_path;
 use super::tutorial::tutorial_field_path;
 use super::*;
 use crate::ui::{
@@ -11,6 +12,7 @@ use crate::ui::{
         gameplay::{GAMEPLAY_HIERARCHY, GameplayField, sanitize_gameplay_positions},
         main_menu_exterior::{MAIN_MENU_EXTERIOR_HIERARCHY, MainMenuExteriorField},
         shop::{SHOP_HIERARCHY, ShopField, sanitize_shop_positions},
+        tile_select::{TILE_SELECT_HIERARCHY, TileSelectField},
         tutorial::{TUTORIAL_HIERARCHY, TutorialField},
     },
 };
@@ -315,6 +317,26 @@ fn tutorial_hierarchy_leaves_all_resolve() {
     use crate::ui::placement::all_leaf_names;
     let mut p = TutorialPositions::default();
     for leaf in all_leaf_names(TUTORIAL_HIERARCHY) {
+        assert!(p.placement_mut(leaf).is_some());
+    }
+}
+
+#[test]
+fn tile_select_field_path_roundtrip() {
+    for &field in TileSelectField::ALL {
+        let path = tile_select_field_path(field);
+        assert_eq!(
+            super::tile_select::lookup_tile_select_field(path),
+            Some(field)
+        );
+    }
+}
+
+#[test]
+fn tile_select_hierarchy_leaves_all_resolve() {
+    use crate::ui::placement::all_leaf_names;
+    let mut p = TileSelectPositions::default();
+    for leaf in all_leaf_names(TILE_SELECT_HIERARCHY) {
         assert!(p.placement_mut(leaf).is_some());
     }
 }

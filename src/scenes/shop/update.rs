@@ -2,7 +2,8 @@ use super::view::snap_focus_after_shop_purchase;
 use super::*;
 use crate::scenes::journal_transition::{JournalDirection, JournalTransition};
 use crate::scenes::{
-    ItemInspectHost, ItemInspectScene, MeldGuideScene, OverlayRequest, Scene, YakuJournalScene,
+    MeldGuideScene, OverlayRequest, Scene, ShopInspectPresenter, ShowcasePresenter, ShowcaseScene,
+    YakuJournalScene,
     options,
 };
 
@@ -13,6 +14,31 @@ impl ShopScene {
 
     pub(super) fn has_blocking_overlay_impl(&self) -> bool {
         self.pause_menu.paused
+    }
+
+    /// Push [`ShowcasePresenter::ShopInspect`] when `focus` can be orbited (relic / ribbon / talisman / pack).
+    pub(super) fn try_push_shop_inspect_overlay(
+        &self,
+        focus: ShopFocus,
+        w: f32,
+        h: f32,
+        shop_rm: &crate::game::engine::ShopReadModel,
+        overlay_request: &mut Option<OverlayRequest>,
+    ) {
+        if !super::shared::shop_focus_inspectable(focus) {
+            return;
+        }
+        let env_h = self.drawn_env_height_scale.get();
+        let Some(orbit) = super::view::shop_item_inspect_orbit_for_focus(
+            self, w, h, env_h, shop_rm, focus,
+        ) else {
+            return;
+        };
+        *overlay_request = Some(OverlayRequest::Push(Box::new(Scene::Showcase(
+            ShowcaseScene::new(ShowcasePresenter::ShopInspect(ShopInspectPresenter::new(
+                orbit,
+            ))),
+        ))));
     }
 
     /// Mouse pick dispatch for shop hits (3D props + screen-space UI buttons).
@@ -51,35 +77,6 @@ impl ShopScene {
             }
             return None;
         }
-        if matches!(hit, ShopHit::Dish(id) if id == PICK_SELL_TRAY) {
-            let sell_action = self.mouse_drag.take().map(|d| d.sell_action()).or_else(|| {
-                focused_sell_action(
-                    self.focus,
-                    self.items.len(),
-                    &self.zodiac_items,
-                    &self.talisman_items,
-                    &shop,
-                )
-            });
-            if let Some(action) = sell_action {
-                self.apply_sell_action(
-                    action,
-                    ctx.run,
-                    ctx.bus,
-                    ctx.cursor_pos,
-                    ctx.overlay_request,
-                    (ctx.layout.window_w, ctx.layout.window_h),
-                );
-            }
-            return None;
-        }
-        self.mouse_drag = drag_source_from_hit(
-            hit,
-            self.items.len(),
-            &self.zodiac_items,
-            &self.talisman_items,
-            &shop,
-        );
         if let Some(action) = shop_action_for_hit(
             hit,
             &self.items,
@@ -94,6 +91,15 @@ impl ShopScene {
                 ctx.cursor_pos,
                 ctx.overlay_request,
                 (ctx.layout.window_w, ctx.layout.window_h),
+            );
+        } else {
+            let focus = ShopFocus::from_hit(hit);
+            self.try_push_shop_inspect_overlay(
+                focus,
+                ctx.layout.window_w,
+                ctx.layout.window_h,
+                &shop,
+                ctx.overlay_request,
             );
         }
         None
@@ -311,23 +317,13 @@ impl ShopScene {
         let h = ctx.layout.window_h;
 
         for &a in ctx.actions {
-            if matches!(a, UiAction::ShopItemInspectToggle) {
+            if matches!(a, UiAction::NorthFacePress) {
                 if let Some(f) = self.focus {
-                    if super::shared::shop_focus_inspectable(f) {
-                        let env_h = self.drawn_env_height_scale.get();
-                        if let Some(orbit) = super::view::shop_item_inspect_orbit_for_focus(
-                            self, w, h, env_h, &shop, f,
-                        ) {
-                            *ctx.overlay_request =
-                                Some(OverlayRequest::Push(Box::new(Scene::ItemInspect(
-                                    ItemInspectScene::new(ItemInspectHost::Shop, orbit),
-                                ))));
-                        }
-                    }
+                    self.try_push_shop_inspect_overlay(f, w, h, &shop, ctx.overlay_request);
                 }
                 continue;
             }
-            if matches!(a, UiAction::ShopSellHoldPress) {
+            if matches!(a, UiAction::WestFacePress) {
                 if focused_sell_action(
                     self.focus,
                     self.items.len(),
@@ -336,14 +332,14 @@ impl ShopScene {
                     &shop,
                 )
                 .is_some()
-                    && self.north_sell_hold_started.is_none()
+                    && self.west_sell_hold_started.is_none()
                 {
-                    self.north_sell_hold_started = Some(now);
+                    self.west_sell_hold_started = Some(now);
                 }
                 continue;
             }
-            if matches!(a, UiAction::ShopSellHoldRelease) {
-                if let Some(start) = self.north_sell_hold_started.take() {
+            if matches!(a, UiAction::WestFaceRelease) {
+                if let Some(start) = self.west_sell_hold_started.take() {
                     let hold = super::SHOP_SELL_HOLD_SECONDS;
                     if now.saturating_duration_since(start).as_secs_f32() >= hold {
                         if let Some(action) = focused_sell_action(
@@ -477,21 +473,8 @@ impl ShopScene {
                 continue;
             }
 
-            // Controller/keyboard Confirm on an owned item starts a "hold to
-            // drag" flow. In cursor mode the normal immediate action fires.
+            // Controller/keyboard Confirm on shop controls (cursor mode uses immediate picks).
             if matches!(a, UiAction::Confirm) {
-                if ctx.input_mode != InputMode::Cursor
-                    && let Some(src) = drag_source_from_focus(
-                        self.focus,
-                        self.items.len(),
-                        &self.zodiac_items,
-                        &self.talisman_items,
-                        &shop,
-                    )
-                {
-                    self.held_item_drag = Some(src);
-                    continue;
-                }
                 if let Some(focus) = self.focus {
                     if matches!(focus, ShopFocus::NextRound) {
                         return Some(self.continue_scene(ctx.run));
@@ -532,32 +515,18 @@ impl ShopScene {
                                 });
                             }
                             return None;
+                        } else {
+                            // Select / Space / Enter with no purchase (e.g. owned relic): same
+                            // [`ShowcaseScene`] inspect path as Y / E / North.
+                            self.try_push_shop_inspect_overlay(focus, w, h, &shop, ctx.overlay_request);
                         }
                     }
                 }
                 continue;
             }
 
-            if matches!(a, UiAction::ConfirmRelease) {
-                if let Some(drag) = self.held_item_drag.take()
-                    && matches!(self.focus, Some(ShopFocus::SellTray))
-                {
-                    self.apply_sell_action(
-                        drag.sell_action(),
-                        ctx.run,
-                        ctx.bus,
-                        ctx.cursor_pos,
-                        ctx.overlay_request,
-                        (w, h),
-                    );
-                }
-                continue;
-            }
-
             if matches!(a, UiAction::Cancel) {
-                self.held_item_drag = None;
-                self.mouse_drag = None;
-                self.north_sell_hold_started = None;
+                self.west_sell_hold_started = None;
                 self.focus = Some(ShopFocus::NextRound);
                 continue;
             }
@@ -603,25 +572,6 @@ impl ShopScene {
                 self.reroll(ctx.run);
                 return None;
             }
-        }
-
-        // Mouse drag-to-sell drop: injected by main.rs when the mouse button is
-        // released over the sell tray after a drag that started on an owned item.
-        for &cid in ctx.button_clicks {
-            if cid != SHOP_DRAG_DROP_ID {
-                continue;
-            }
-            if let Some(drag) = self.mouse_drag.take() {
-                self.apply_sell_action(
-                    drag.sell_action(),
-                    ctx.run,
-                    ctx.bus,
-                    ctx.cursor_pos,
-                    ctx.overlay_request,
-                    (w, h),
-                );
-            }
-            return None;
         }
 
         // 3D-hit dispatcher: route the action based on the renderer pick.

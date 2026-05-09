@@ -9,12 +9,13 @@
 //!    distance / FOV / [`InspectLightPreset`]).
 //! 3. **Pivot** — Build [`ItemInspectOrbitState`] with `target_world` in the same Z-up world space as
 //!    your [`Object3d`](crate::render::draw_cmd::Object3d) anchors.
-//! 4. **Apply view** — Call [`apply_inspect_view_to_frame`] (sets camera + point lights; optionally
-//!    shop storeroom lighting overrides).
+//! 4. **Apply view** — Call [`apply_inspect_view_to_frame`] (sets camera + point lights + a subject
+//!    [`SpotLight`](crate::render::wgpu_renderer::SpotLight); optionally shop storeroom lighting overrides).
 //! 5. **Meshes** — Push `object3d` / `object3d_batch` for the subject (and composed scene geometry).
-//! 6. **Overlay** — Push [`Scene::ItemInspect`](crate::scenes::Scene::ItemInspect) with the orbit state;
-//!    parent scenes stay frozen in `suspended_*` [`DrawCtx`](crate::scenes::DrawCtx) fields while the
-//!    overlay owns input (see [`crate::scenes::ItemInspectScene`]).
+//! 6. **Overlay** — Shop and collection **only** use the shared
+//!    [`Scene::Showcase`](crate::scenes::Scene::Showcase) inspect presenters (never an in-scene inspect mode).
+//!    Parent snapshots live in `suspended_*` [`DrawCtx`](crate::scenes::DrawCtx) / [`UpdateCtx`](crate::scenes::UpdateCtx);
+//!    the overlay owns input (see [`crate::scenes::ShopInspectPresenter`] / [`crate::scenes::CollectionInspectPresenter`]).
 //!
 //! For per-frame pivot correction under a moving camera (shop shelves), run your sync before draw and
 //! update `orbit.target_world`, then call `apply_inspect_view_to_frame` with the resolved target.
@@ -22,7 +23,7 @@
 use glam::{Mat3, Vec3};
 
 use crate::render::draw_cmd::{CameraParams, UiFrame};
-use crate::render::wgpu_renderer::PointLight;
+use crate::render::wgpu_renderer::{PointLight, SpotLight};
 
 /// Orbit + zoom state for close-up inspection (right stick, triggers, scroll).
 #[derive(Clone, Copy, Debug)]
@@ -30,7 +31,7 @@ pub struct ItemInspectOrbitState {
     pub target_world: [f32; 3],
     pub yaw: f32,
     pub pitch: f32,
-    /// Scales camera offset from the item (smaller = closer). Clamped in `ItemInspectScene::update`.
+    /// Scales camera offset from the item (smaller = closer). Clamped in showcase inspect presenters' `update`.
     pub zoom: f32,
 }
 
@@ -46,10 +47,12 @@ pub struct InspectLightPreset {
 }
 
 impl InspectLightPreset {
+    /// Storeroom inspect turns off GLB punctual; synthetic lights must land in the same HDR band
+    /// as `SHOP_INSPECT_LIT_MESH_HDR_LINEAR_MUL` after ACES (see `tile_hdr_tonemap` shop-inspect branch).
     pub const SHOP: Self = Self {
-        key_i: 5.5,
-        fill_i: 2.6,
-        rim_i: 3.2,
+        key_i: 17.5,
+        fill_i: 8.2,
+        rim_i: 10.0,
         key_r: 1.1,
         fill_r: 0.95,
         rim_r: 0.58,
@@ -101,7 +104,7 @@ impl InspectRig {
 /// Environment-specific frame flags applied with inspect lighting.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InspectFrameEnv {
-    /// Only set camera + `frame.point_lights` (collection, isolated inspect).
+    /// Only set camera + `frame.scene_lighting` punctual (collection, isolated inspect).
     Neutral,
     /// Shop storeroom: disable GLB punctual and clear shop/spot light vectors (matches prior inspect).
     ShopStoreroomInspect,
@@ -209,6 +212,48 @@ pub fn inspect_point_lights(
     ]
 }
 
+/// Tight cone aimed at the inspect pivot — pools extra energy on the hero mesh (`lit_mesh` spot loop).
+pub fn inspect_subject_spotlight(
+    window_w: f32,
+    window_h: f32,
+    cam: &CameraParams,
+    target_world: [f32; 3],
+) -> SpotLight {
+    let target = Vec3::from_array(target_world);
+    let eye = Vec3::from_array(cam.eye);
+    let mut view_dir = eye - target;
+    if view_dir.length_squared() < 1e-8 {
+        view_dir = Vec3::new(0.0, -1.0, 0.2);
+    }
+    let view_dir = view_dir.normalize();
+    let mut up = Vec3::from_array(cam.up);
+    if up.length_squared() < 1e-8 {
+        up = Vec3::Z;
+    } else {
+        up = up.normalize();
+    }
+    let scale = window_h.max(120.0);
+    // Between pivot and camera, nudged toward the key side so the cone grazes the front face.
+    let light_world = target + view_dir * (scale * 0.34) + up * (scale * 0.07);
+    let mut dir_w = target - light_world;
+    if dir_w.length_squared() < 1e-8 {
+        dir_w = -view_dir;
+    } else {
+        dir_w = dir_w.normalize();
+    }
+    let cos_outer = (32.0_f32).to_radians().cos();
+    let cos_inner = (18.0_f32).to_radians().cos();
+    SpotLight {
+        pos: world_to_point_light_pos(window_w, window_h, light_world),
+        dir: dir_w.to_array(),
+        radius: scale * 1.5,
+        cos_outer,
+        cos_inner,
+        color: [1.0, 0.94, 0.86],
+        intensity: 15.0,
+    }
+}
+
 /// Sets inspect camera, synthetic point lights, and optional shop storeroom lighting overrides.
 pub fn apply_inspect_view_to_frame(
     frame: &mut UiFrame,
@@ -221,12 +266,21 @@ pub fn apply_inspect_view_to_frame(
 ) {
     let cam = inspect_orbit_camera(orbit, rig);
     frame.camera_override = Some(cam);
-    frame.point_lights =
-        inspect_point_lights(window_w, window_h, &cam, target_world, rig.light_preset);
+    frame.scene_lighting.set_smooth_points(inspect_point_lights(
+        window_w,
+        window_h,
+        &cam,
+        target_world,
+        rig.light_preset,
+    ));
+    frame.scene_lighting.spot_lights = vec![inspect_subject_spotlight(
+        window_w,
+        window_h,
+        &cam,
+        target_world,
+    )];
 
     if env == InspectFrameEnv::ShopStoreroomInspect {
-        frame.shop_env_gltf_punctual = false;
-        frame.shop_gltf_point_lights = Vec::new();
-        frame.spot_lights = Vec::new();
+        frame.scene_lighting.embedded_gltf_punctual = false;
     }
 }

@@ -283,7 +283,7 @@ impl SceneBehavior for SolitaireScene {
         let mut frame = UiFrame::new();
 
         // ── Paper/linen background ────────────────────────────────
-        frame.background(BackgroundId::Menu);
+        frame.background(BackgroundId::Black);
         frame.quad(GpuInstance {
             rect: [0.0, 0.0, w, h],
             color: [0.92, 0.89, 0.82, 1.0], // warm parchment
@@ -314,7 +314,7 @@ impl SceneBehavior for SolitaireScene {
             (w * 0.25, h * 0.70),
             (w * 0.75, h * 0.70),
         ] {
-            frame.point_lights.push(PointLight {
+            frame.scene_lighting.push_smooth(PointLight {
                 pos: [lx, ly, light_y],
                 radius: h * 1.2,
                 color: [1.0, 0.97, 0.90], // warm daylight

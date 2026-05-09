@@ -32,6 +32,7 @@ mod fs;
 mod gameplay;
 mod main_menu_exterior;
 mod shop;
+mod tile_select;
 mod tutorial;
 
 pub use collection::{CollectionPositions, load_collection_positions, save_collection_positions};
@@ -44,6 +45,9 @@ pub use main_menu_exterior::{
 };
 pub use shop::{
     CANONICAL_WINDOW_W, HFRAC_TO_MM, ShopPositions, load_shop_positions, save_shop_positions,
+};
+pub use tile_select::{
+    TileSelectPositions, load_tile_select_positions, save_tile_select_positions,
 };
 pub use tutorial::{TutorialPositions, load_tutorial_positions, save_tutorial_positions};
 

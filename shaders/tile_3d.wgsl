@@ -13,15 +13,6 @@ struct CameraUniform {
     hdr_tonemap: vec4<f32>,
 };
 
-/// Khronos `KHR_lights_punctual` reference spotlight angular falloff.
-fn khr_spot_angle_attenuation(cos_a: f32, cos_inner: f32, cos_outer: f32) -> f32 {
-    let den = max(cos_inner - cos_outer, 1e-3);
-    let scale = 1.0 / den;
-    let offset = -cos_outer * scale;
-    let angular = clamp(cos_a * scale + offset, 0.0, 1.0);
-    return angular * angular;
-}
-
 /// Same ACES fit as `shop_glb.wgsl` / `lit_mesh.wgsl`.
 fn aces_fitted(color: vec3<f32>) -> vec3<f32> {
     let a = 2.51;
@@ -60,17 +51,18 @@ struct GltfPbrUniform {
 @group(0) @binding(7) var emissive_tex: texture_2d<f32>;
 
 struct PointLight {
-    // xyz = position in screen-pixel space (z is unused; we treat the table
-    // as a flat plane), w = falloff radius in pixels.
+    // xyz = world position after upload; w = smooth radius or inverse-square range.
     pos: vec4<f32>,
     // rgb = linear colour, a = intensity multiplier.
     color: vec4<f32>,
+    // x = 0 smooth, 1 inverse-square (see `scene_pbr_lights.wgsl`).
+    params: vec4<f32>,
 };
 
 struct PointLights {
     // count.x = number of active lights; rest is std140 padding.
     count: vec4<u32>,
-    // extras.x = display gamma; extras.w unused on tiles (lit_mesh shop buffer uses it).
+    // extras.x = display gamma; extras.w = inverse-square scale for `lit_mesh` when embedded GLB.
     extras: vec4<f32>,
     lights: array<PointLight, 16>,
 };
@@ -507,7 +499,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     }
 
     // Enhancement kind from base_color_factor.z:
-    //   0 = none, 1 = jade, 2 = pearl, 3 = gilded, 4 = polychrome.
+    //   0 = none, 1 = pearl, 2 = gilded, 3 = polychrome.
     let enh = cam.base_color_factor.z;
     let has_enh = enh > 0.5;
 
@@ -523,10 +515,15 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let radius = lights.lights[i].pos.w;
         let lc = lights.lights[i].color.rgb;
         let intensity = lights.lights[i].color.a;
+        let kind = lights.lights[i].params.x;
         let to_light = lp - in.world_pos;
         let dist = length(to_light);
-        let t = clamp(1.0 - dist / max(radius, 1.0), 0.0, 1.0);
-        let atten = t * t;
+        let inv_doc = cam.decal_atlas_uv.y;
+        let atten = select(
+            scene_smooth_point_atten(dist, radius),
+            punctual_attenuation_with_inv_doc_scale(dist, radius, inv_doc),
+            kind > 0.5,
+        );
         let l_dir = to_light / max(dist, 0.0001);
         let nl = max(dot(n_world, l_dir), 0.0);
         // 0.35 ambient floor so even back-facing fragments warm up a little
@@ -536,8 +533,8 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
 
         // ── Enhancement sheen lobes ────────────────────────────────────
         // Fresnel-masked specular highlights per enhancement type, matching
-        // the talisman material language: jade luster, pearl nacre, gold
-        // conductor, polychrome holographic.
+        // the talisman material language: pearl nacre, gold conductor,
+        // polychrome holographic.
         if (has_enh) {
             let h = normalize(l_dir + view_dir);
             let nh = max(dot(n_world, h), 0.0);
@@ -546,12 +543,6 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
             let broad = nl;
 
             if (enh < 1.5) {
-                // Jade: waxy vitreous green luster.
-                let fresnel = 0.06 + 0.25 * pow(1.0 - ndv, 2.5);
-                let lobe = pow(nh, 14.0) * 0.5 + broad * 0.10;
-                let tint = vec3<f32>(0.50, 0.92, 0.60);
-                sheen_acc = sheen_acc + lc * intensity * atten * lobe * fresnel * tint;
-            } else if (enh < 2.5) {
                 // Pearl: pearlescent nacre with pink-to-blue color shift.
                 let fresnel = 0.08 + 0.40 * pow(1.0 - ndv, 3.0);
                 let phase = ndv * 3.14159;
@@ -562,7 +553,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
                 );
                 let lobe = pow(nh, 18.0) * 0.6 + broad * 0.15;
                 sheen_acc = sheen_acc + lc * intensity * atten * lobe * fresnel * pearl_tint;
-            } else if (enh < 3.5) {
+            } else if (enh < 2.5) {
                 // Gilded: metallic gold conductor — Schlick Fresnel tinted
                 // by gold base so highlights read warm.
                 let f0 = vec3<f32>(0.95, 0.75, 0.30);
@@ -605,7 +596,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let cos_a = dot(frag_dir, s.dir.xyz);
         let cos_outer = s.dir.w;
         let cos_inner = s.params.x;
-        let spot_factor = khr_spot_angle_attenuation(cos_a, cos_inner, cos_outer);
+        let spot_factor = khr_spot_angle_attenuation_scene(cos_a, cos_inner, cos_outer);
         if (spot_factor <= 0.0) {
             continue;
         }
@@ -621,16 +612,12 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     if (has_enh) {
         let edge = 1.0 - ndv_global;
         if (enh < 1.5) {
-            // Jade: subtle green rim glow.
-            let rim = pow(edge, 2.5) * 0.20;
-            rgb = mix(rgb, vec3<f32>(0.45, 0.95, 0.55), rim);
-        } else if (enh < 2.5) {
             // Pearl: cool iridescent white-pink shift at edges.
             let rim = pow(edge, 2.0) * 0.25;
             let phase = ndv_global * 3.14159;
             let pearl = vec3<f32>(0.95, 0.88 + 0.08 * cos(phase), 0.95);
             rgb = mix(rgb, pearl, rim);
-        } else if (enh < 3.5) {
+        } else if (enh < 2.5) {
             // Gilded: warm gold rim.
             let rim = pow(edge, 2.0) * 0.25;
             rgb = mix(rgb, vec3<f32>(1.0, 0.90, 0.60), rim);
@@ -666,10 +653,16 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     }
 
     // glTF metallic–roughness + emissive (linear), sampled on `uv_emr`.
+    // `decal_atlas_uv.z` carries room emissive scale for imported shop/hallway only;
+    // showcase `Tile.glb` uses zw as decal atlas scale — keep multiplier at 1 there.
+    var gltf_emissive_hdr = vec3<f32>(0.0);
     if (use_textured_albedo) {
         let mr_s = textureSample(metallic_roughness_tex, base_sampler, in.uv_emr);
         let metallic = clamp(mr_s.b * pbr.metallic_factor, 0.0, 1.0);
-        let emissive = textureSample(emissive_tex, base_sampler, in.uv_emr).rgb * pbr.emissive_factor.rgb;
+        let emissive_base = textureSample(emissive_tex, base_sampler, in.uv_emr).rgb * pbr.emissive_factor.rgb;
+        let emissive_scale = select(1.0, cam.decal_atlas_uv.z, use_textured_env);
+        let emissive = emissive_base * emissive_scale;
+        gltf_emissive_hdr = emissive;
         lit_rgb = lit_rgb * (1.0 - metallic * 0.78);
         lit_rgb = lit_rgb + emissive;
     }
@@ -707,8 +700,14 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     let inv_g = 1.0 / max(lights.extras.x, 0.01);
     var out_rgb: vec3<f32>;
     if (cam.hdr_tonemap.x > 0.5) {
-        var hdr = lit_rgb + cam.hdr_tonemap.z * rgb * vec3<f32>(0.08);
-        hdr = hdr * cam.hdr_tonemap.y;
+        // Table / room HDR path: `hdr_tonemap.y` crushes punctual-lit albedo (gameplay feel).
+        // glTF emissive is authored as outgoing radiance — if it goes through the same multiplier,
+        // bright point lights on the same mesh (e.g. hallway lamp bulbs) swamp it and changing
+        // emissive scale is invisible. Keep emissive out of that multiply (same idea as
+        // `shop_glb.wgsl`: emissive is not scaled by `tile_seed`).
+        let hem = cam.hdr_tonemap.z * rgb * vec3<f32>(0.08);
+        var hdr = (lit_rgb - gltf_emissive_hdr + hem) * cam.hdr_tonemap.y;
+        hdr = hdr + gltf_emissive_hdr;
         out_rgb = pow(aces_fitted(hdr), vec3<f32>(inv_g));
     } else {
         out_rgb = pow(lit_rgb, vec3<f32>(inv_g));

@@ -394,15 +394,6 @@ RELICS = [
         "Ivory tile faces, deep emerald felt, glowing crimson dragon glyphs, ghostly amber echo arcs, drifting ember sparks.",
     ),
     (
-        "shanten_shove",
-        "Shanten Shove",
-        "A hand of mahjong tiles standing in a neat row on a felt table, "
-        "with one extra tile being nudged forward into the last open slot "
-        "by an unseen force — a faint push-line trailing behind it. The "
-        "arrangement reads as one tile away from complete.",
-        "Ivory tile faces, deep emerald felt, warm gold push line, muted ink markings.",
-    ),
-    (
         "kan_drum",
         "Kan Drum",
         "A large ceremonial taiko drum on a lacquered stand, four thick "

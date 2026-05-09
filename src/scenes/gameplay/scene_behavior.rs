@@ -1342,6 +1342,33 @@ impl SceneBehavior for GameplayScene {
             if let Some(rect) = ctx.proj.mirror_rect {
                 push_centered(&mut hud_text, rect, "Score hand");
             }
+            let undo_bottom_y = discard_undo_rect.map(|r| r[1] + r[3]);
+            let settings = crate::persistence::load_settings();
+            let show_discard_legend = super::action_prompts::gameplay_west_north_legend_active(
+                ctx.input_mode,
+                settings.xy_quick_action,
+                self.focus,
+                discard_enabled,
+            );
+            let show_play_legend = super::action_prompts::gameplay_west_north_legend_active(
+                ctx.input_mode,
+                settings.xy_quick_action,
+                self.focus,
+                play_enabled,
+            );
+            super::action_prompts::push_gameplay_action_prompts(
+                &mut frame,
+                &ctx,
+                discard_btn_rect,
+                play_btn_rect,
+                trigger_btn_rect,
+                gameplay.uses_structure_bank,
+                has_structure,
+                show_discard_legend,
+                show_play_legend,
+                undo_bottom_y,
+                &mut hud_text,
+            );
             if let Some(undo_rect) = discard_undo_rect {
                 let is_focus = matches!(self.focus, Some(FocusTarget::DiscardUndo));
                 let fs = body_px.min(undo_rect[3] * 0.55).max(10.0);
@@ -1601,8 +1628,8 @@ impl SceneBehavior for GameplayScene {
         // to the volumetric lightbake shader as the analytic flame envelope
         // height in world units.
         frame.flame_height_world = layout.mm(30.0);
-        frame.point_lights = point_lights;
-        frame.spot_lights = spot_lights;
+        frame.scene_lighting.set_smooth_points(point_lights);
+        frame.scene_lighting.spot_lights = spot_lights;
         frame.wind_gusts = wind_gusts;
         // Projected rects for the discard river + play mirror: hit-test order
         // before the fullscreen 3D catch-all (same id — dispatcher uses

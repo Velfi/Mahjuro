@@ -1,9 +1,11 @@
 use crate::core::tile_pack::TilePackKind;
-use crate::scenes::TilePackCelebrationScene;
+use crate::scenes::{
+    ShowcasePresenter, ShowcaseScene, TilePackPresenter, ZodiacPresenter,
+};
 
 use super::view::snap_focus_after_shop_purchase;
 use super::*;
-use crate::scenes::{GameplayScene, OverlayRequest, ZodiacCelebrationScene};
+use crate::scenes::{GameplayScene, OverlayRequest};
 
 /// Generate randomized shop stock (relics + consumables) from the player's
 /// unowned-relic pool. Shared between initial shop creation and rerolls.
@@ -11,7 +13,7 @@ pub(super) fn generate_shop_stock(
     relics: &RelicState,
     available_relics: &[RelicId],
     extra_relics: usize,
-    paper_lantern_extinct: bool,
+    pool_extinction: crate::game::run::RelicShopPoolExtinction,
     mode: &crate::game::game_mode::GameMode,
 ) -> (
     Vec<ShopItem>,
@@ -63,26 +65,17 @@ pub(super) fn generate_shop_stock(
 
     let defs = all_relic_defs();
     // Some relics are never offered in the shop — they only appear via
-    // special means (transformation, duplication, etc.).
-    // Paper ↔ Silver Filigree Lantern follow a Gros Michel / Cavendish pool
-    // swap: Paper is in the pool until it burns, then extinct run-wide and
-    // Silver Filigree takes its place.
+    // duplication, run-wide burn swaps, etc. See
+    // [`crate::game::run::relic_eligible_for_shop_stock`].
     let mut relic_pool: Vec<&_> = defs
         .iter()
         .filter(|d| {
-            if !available_relics.contains(&d.id) || relics.owns(d.id) {
-                return false;
-            }
-            if d.id == RelicId::PhantomRelic {
-                return false;
-            }
-            if d.id == RelicId::PaperLantern && paper_lantern_extinct {
-                return false;
-            }
-            if d.id == RelicId::SilverFiligreeLantern && !paper_lantern_extinct {
-                return false;
-            }
-            true
+            crate::game::run::relic_eligible_for_shop_stock(
+                d.id,
+                relics,
+                available_relics,
+                pool_extinction,
+            )
         })
         .collect();
     relic_pool.shuffle(&mut rng);
@@ -161,7 +154,7 @@ fn tutorial_shop_stock(
             sold: false,
         }],
         vec![ConsumableShopItem {
-            consumable: Consumable::Talisman(TalismanKind::Jade),
+            consumable: Consumable::Talisman(TalismanKind::Pearl),
             sold: false,
         }],
         // Tutorial mode: two deterministic packs so the player can see
@@ -208,7 +201,7 @@ impl ShopScene {
                 &shop.relic_state,
                 &shop.available_relics,
                 extra_relics,
-                shop.paper_lantern_extinct,
+                run.relic_shop_pool_extinction(),
                 &run.mode,
             )
         };
@@ -265,12 +258,10 @@ impl ShopScene {
             },
             relic_glow_starts: std::collections::HashMap::new(),
             positions: crate::ui::scene_layout::load_shop_positions(),
-            held_item_drag: None,
-            mouse_drag: None,
             drawn_env_height_scale: std::cell::Cell::new(
                 crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
             ),
-            north_sell_hold_started: None,
+            west_sell_hold_started: None,
         }
     }
 
@@ -297,7 +288,7 @@ impl ShopScene {
         overlay_request: &mut Option<OverlayRequest>,
         window_wh: (f32, f32),
     ) {
-        self.north_sell_hold_started = None;
+        self.west_sell_hold_started = None;
         let prev_focus = self.focus;
         let before = (
             self.items.len(),
@@ -341,7 +332,7 @@ impl ShopScene {
         overlay_request: &mut Option<OverlayRequest>,
         window_wh: (f32, f32),
     ) {
-        self.north_sell_hold_started = None;
+        self.west_sell_hold_started = None;
         let prev_focus = self.focus;
         let shop_before = GameEngine::read_shop(run);
         let before_owned = (
@@ -389,9 +380,11 @@ impl ShopScene {
                     n_for_sale_talismans: self.talisman_items.len(),
                     n_owned_relics: shop_rm.owned_relics.len(),
                 };
-                *overlay_request = Some(OverlayRequest::Push(Box::new(
-                    Scene::TilePackCelebration(TilePackCelebrationScene::new(celeb, inventory)),
-                )));
+                *overlay_request = Some(OverlayRequest::Push(Box::new(Scene::Showcase(
+                    ShowcaseScene::new(ShowcasePresenter::TilePack(TilePackPresenter::new(
+                        celeb, inventory,
+                    ))),
+                ))));
             }
             ShopActionResult::ZodiacApplied {
                 zodiac_kind,
@@ -399,8 +392,12 @@ impl ShopScene {
                 new_level,
             } => {
                 bus.push(crate::game::event_bus::GameEvent::ZodiacReveal);
-                *overlay_request = Some(OverlayRequest::Push(Box::new(Scene::ZodiacCelebration(
-                    ZodiacCelebrationScene::new(zodiac_kind, yaku_name, new_level),
+                *overlay_request = Some(OverlayRequest::Push(Box::new(Scene::Showcase(
+                    ShowcaseScene::new(ShowcasePresenter::Zodiac(ZodiacPresenter::new(
+                        zodiac_kind,
+                        yaku_name,
+                        new_level,
+                    ))),
                 ))));
             }
         }
@@ -418,14 +415,14 @@ impl ShopScene {
         if outcome.rejection.is_some() {
             return;
         }
-        self.north_sell_hold_started = None;
+        self.west_sell_hold_started = None;
         self.reroll_cost += REROLL_COST_INCREMENT;
         let shop = GameEngine::read_shop(run);
         let (items, zodiac_items, talisman_items, pack_items) = generate_shop_stock(
             &shop.relic_state,
             &shop.available_relics,
             0,
-            shop.paper_lantern_extinct,
+            run.relic_shop_pool_extinction(),
             &run.mode,
         );
         self.items = items;
@@ -442,7 +439,7 @@ impl ShopScene {
             &shop.relic_state,
             &shop.available_relics,
             0,
-            shop.paper_lantern_extinct,
+            run.relic_shop_pool_extinction(),
             &run.mode,
         );
         self.items = items;

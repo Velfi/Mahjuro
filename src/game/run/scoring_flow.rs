@@ -77,23 +77,11 @@ impl RunState {
             let v = self.relic_counters.entry(RelicId::MeltingIce).or_insert(80);
             *v = (*v - 8).max(0);
             if *v == 0 {
-                // Metamorphosis: Melting Ice doesn't vanish — the bronze
-                // mask frozen inside thaws free in the same slot. Not a
-                // destruction (Kintsugi must NOT count it), so we do an
-                // in-place swap rather than calling `note_relic_destroyed`.
                 self.relic_counters.remove(&RelicId::MeltingIce);
-                if let Some(slot) = self
-                    .relics
-                    .active
-                    .iter()
-                    .position(|&r| r == RelicId::MeltingIce)
-                {
-                    self.relics.active[slot] = RelicId::Taotie;
-                } else {
-                    self.relics.active.push(RelicId::Taotie);
-                }
-                self.relic_counters.insert(RelicId::Taotie, 0);
-                self.relic_activations.push(RelicId::Taotie);
+                self.relics.active.retain(|&r| r != RelicId::MeltingIce);
+                self.melting_ice_extinct = true;
+                self.note_relic_destroyed();
+                bus.push(GameEvent::TransformationSuccessorDiscovered(RelicId::Taotie));
                 bus.push(GameEvent::AchievementUnlocked(
                     crate::steam::Achievement::TaotieAwakened,
                 ));
@@ -103,9 +91,11 @@ impl RunState {
             let v = self.relic_counters.entry(RelicId::TeaCeremony).or_insert(3);
             *v -= 1;
             if *v <= 0 {
-                self.relics.active.retain(|&r| r != RelicId::TeaCeremony);
                 self.relic_counters.remove(&RelicId::TeaCeremony);
+                self.relics.active.retain(|&r| r != RelicId::TeaCeremony);
+                self.tea_ceremony_extinct = true;
                 self.note_relic_destroyed();
+                bus.push(GameEvent::TransformationSuccessorDiscovered(RelicId::Geese));
             }
         }
         if self.relics.has(RelicId::Humility) {

@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 mod decomposition;
 mod validation;
 
-pub use decomposition::{detect_all_sets, enumerate_decompositions, find_pairs_and_triplets};
+pub use decomposition::{detect_all_sets, enumerate_decompositions};
+#[cfg(test)]
+pub use decomposition::find_pairs_and_triplets;
 pub use validation::{suggest_completions, validate_selection, validate_selection_with_rules};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -19,6 +21,8 @@ pub enum SetKind {
     /// Four of a kind (mahjong "kan"). Counts as a triplet for yaku and meld
     /// detection but uses a higher base chip table entry than a triplet.
     Kong,
+    /// One tile (used only for Kokushi Musō decomposition: twelve singles + one pair).
+    Single,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

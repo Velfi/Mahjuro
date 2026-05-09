@@ -1,6 +1,15 @@
 //! Gameplay scene — the main tile-playing loop.
+//!
+//! **Concurrent UI / flow state** (orthogonal concerns; check the right gate per feature):
+//! - App-level [`crate::UpdateCtx::transitioning`] — global scene replace in progress; input blocked.
+//! - `pending_blind` — opening round; hand not yet applied until the candle light-ramp completes.
+//! - `pause_menu` — pause root + optional embedded options + meld-guide request.
+//! - `cascade_queue` — scoring presentation; also drives [`crate::scenes::SceneBehavior::has_blocking_overlay`].
+//! - `journal_transition` + overlay push — Yaku Journal from the table book.
+//! - `tutorial_overlay` — in-run hints when the tutorial is active.
 
 mod action_bar_layout;
+mod action_prompts;
 mod animation_state;
 mod candle;
 mod cascade_controller;

@@ -8,7 +8,6 @@ pub mod progression;
 pub mod relic;
 pub mod rules;
 pub mod scoring;
-pub mod shanten;
 pub mod stake;
 pub mod structure;
 pub mod tag;

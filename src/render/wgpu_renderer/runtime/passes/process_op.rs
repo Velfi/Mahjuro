@@ -7,6 +7,7 @@ pub(super) struct ProcessOpCtx<'a> {
     pub bg_inst_buffers: &'a [wgpu::Buffer],
     pub quad_buffers: &'a [wgpu::Buffer],
     pub gradient_quad_buffers: &'a [wgpu::Buffer],
+    pub squircle_quad_buffers: &'a [wgpu::Buffer],
     pub flame_buffers: &'a [wgpu::Buffer],
     pub text_draws: &'a [TextDraw],
     pub tile_face_inst_buffers: &'a [wgpu::Buffer],
@@ -41,6 +42,7 @@ impl WgpuRenderer {
         let bg_inst_buffers = ctx.bg_inst_buffers;
         let quad_buffers = ctx.quad_buffers;
         let gradient_quad_buffers = ctx.gradient_quad_buffers;
+        let squircle_quad_buffers = ctx.squircle_quad_buffers;
         let flame_buffers = ctx.flame_buffers;
         let text_draws = ctx.text_draws;
         let tile_face_inst_buffers = ctx.tile_face_inst_buffers;
@@ -59,6 +61,9 @@ impl WgpuRenderer {
         match op {
             RenderOp::ClearSceneDepth => {
                 // Marker only: Pass A is split into subpasses at this op; never drawn here.
+            }
+            RenderOp::ShopInspectLitMeshSubjectHdr => {
+                // Marker only: split for `SsrGlobals` upload between subpasses.
             }
             RenderOp::Background { id, buf_idx } => {
                 if let (Some(bg_tex), Some(inst_buf)) = (
@@ -130,26 +135,6 @@ impl WgpuRenderer {
                     wgpu::IndexFormat::Uint32,
                 );
                 pass.draw_indexed(0..self.table_mesh.index_count, 0, 0..1);
-
-                // Felt shell-fluff: only when the active surface is felt.
-                // The base table draw above produces the solid plane;
-                // the shells stack above it as alpha-cut fuzz layers
-                // (see lit_mesh.wgsl felt-shell vertex extrusion + FS
-                // alpha discard). Drawn with the blended pipeline so
-                // the surviving fragments composite softly.
-                if matches!(
-                    self.table_material.kind,
-                    crate::render::lit_mesh::MaterialKind::FeltGreen
-                ) && self.active_felt_shell_count > 0
-                {
-                    pass.set_pipeline(&self.lit_mesh_felt_shell_instanced_pipeline);
-                    pass.set_bind_group(0, &self.table_instance.bind_group, &[]);
-                    pass.draw_indexed(
-                        0..self.table_mesh.index_count,
-                        0,
-                        0..self.active_felt_shell_count as u32,
-                    );
-                }
             }
             RenderOp::Object3dBatch { start, end } => {
                 pass.set_pipeline(&self.lit_mesh_pipeline);
@@ -357,54 +342,13 @@ impl WgpuRenderer {
                 }
             }
             RenderOp::ShopEnvironment => {
-                if let Some(ref gpu) = self.shop_environment {
-                    if self.shop_env_primitives.is_empty() {
-                        // GPU upload skipped — asset missing or markers-only GLB.
-                    } else {
-                        if frame.shop_env_gltf_punctual {
-                            pass.set_bind_group(
-                                1,
-                                &self.shop_gltf_point_lights_scene_bind_group,
-                                &[],
-                            );
-                        } else {
-                            pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
-                        }
-                        pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
-                        pass.set_bind_group(3, &self.spot_lights_bind_group, &[]);
-                        // Opaque/mask first, then alpha-blended primitives (same depth target).
-                        for blend_phase in [false, true] {
-                            let mut last_pi: Option<usize> = None;
-                            let mut last_key: Option<TileGlbPipelineKey> = None;
-                            for (pi, prim) in self.shop_env_primitives.iter().enumerate() {
-                                if prim.pipeline_key.is_blend() != blend_phase {
-                                    continue;
-                                }
-                                if last_key != Some(prim.pipeline_key) {
-                                    let pipe = if frame.shop_env_gltf_punctual {
-                                        self.shop_env_pipeline(prim.pipeline_key)
-                                    } else {
-                                        self.tile_glb_pipeline(prim.pipeline_key)
-                                    };
-                                    pass.set_pipeline(pipe);
-                                    last_key = Some(prim.pipeline_key);
-                                }
-                                if last_pi != Some(pi) {
-                                    pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
-                                    pass.set_index_buffer(
-                                        prim.index_buffer.slice(..),
-                                        wgpu::IndexFormat::Uint32,
-                                    );
-                                    last_pi = Some(pi);
-                                }
-                                let Some(bg) = gpu.bind_groups.get(pi) else {
-                                    continue;
-                                };
-                                pass.set_bind_group(0, bg, &[]);
-                                pass.draw_indexed(0..prim.index_count, 0, 0..1);
-                            }
-                        }
-                    }
+                if self.shop_environment.is_some() {
+                    self.draw_shop_environment_meshes(pass, frame, false);
+                }
+            }
+            RenderOp::HallwayEnvironment => {
+                if self.hallway_environment.is_some() {
+                    self.draw_hallway_environment_meshes(pass, frame, false);
                 }
             }
             RenderOp::ShowcaseTileBatch(batch_idx) => {
@@ -508,6 +452,14 @@ impl WgpuRenderer {
                 pass.set_bind_group(0, &self.globals_bind_group, &[]);
                 pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                 pass.set_vertex_buffer(1, gradient_quad_buffers[*buf_idx].slice(..));
+                pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                pass.draw_indexed(0..6, 0, 0..*count);
+            }
+            RenderOp::SquircleQuadBatch { buf_idx, count } => {
+                pass.set_pipeline(&self.squircle_quad_pipeline);
+                pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                pass.set_vertex_buffer(1, squircle_quad_buffers[*buf_idx].slice(..));
                 pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 pass.draw_indexed(0..6, 0, 0..*count);
             }

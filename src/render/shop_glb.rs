@@ -67,18 +67,21 @@
 //! Punctual lights on nodes whose names start with [`SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX`] use
 //! [`SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL`] for a warm candle read; other lights keep glTF-authored color.
 //! `range` maps to glTF max distance (`0` = infinite).
+//!
+//! Shared glTF room decode (meshes, lights, cameras, collision) lives in [`crate::render::room_env_gltf`].
 
 use std::collections::HashMap;
 use std::sync::RwLock;
 
 use crate::render::draw_cmd::CameraParams;
-use crate::render::gltf_helpers::{apply_texture_transform, sampler_cpu_from_material};
-use crate::render::tile_glb::{
-    GltfAlphaMode, LoadedPrimitive, Vertex3dTex, compute_vertex_tangents, gltf_image_to_rgba8,
-    multiply_rgba8_by_factor, release_loaded_primitive_gpu_source_buffers, solid_albedo_rgba8,
+use crate::render::room_env_gltf::{
+    self as renv, EmbeddedCameraHarvest, RoomEnvWalkHooks, RoomMeshPolicy, marker_translation_doc,
+    room_camera_fit_fovy_for_corners, room_env_model_matrix_from_bounds_doc,
+    room_world_bounds_corners_centered, walk_room_env_node,
 };
+use crate::render::tile_glb::release_loaded_primitive_gpu_source_buffers;
 use anyhow::Context;
-use glam::{Mat4, Vec3, Vec4};
+use glam::{Mat4, Vec3};
 
 enum ShopGlbCache {
     Uninit,
@@ -173,6 +176,15 @@ pub const SHOP_GLTF_LIGHT_INTENSITY_SCALE: f32 = 0.6;
 /// Multiplied with [`ShopEnvLightingTune::linear_exposure`] and written to `shop_glb` / shop `lit_mesh` path.
 pub const SHOP_ENV_LINEAR_EXPOSURE_BASE: f32 = 1.0 / 512.0; // 2^-9
 
+/// Extra multiplier on room glTF emissive (`CameraUniform.decal_atlas_uv.z`), after
+/// `KHR_materials_emissive_strength` and `emissiveFactor × emissiveTexture`. Keep near `1` when
+/// assets use emissive strength; raise only if authors omit the extension.
+pub const SHOP_GLTF_EMISSIVE_SCALE: f32 = 1.0;
+
+/// Linear HDR strength for the half-res emissive screen-space gather on shop / hallway GLB
+/// (additive before tonemap; keys off [`SHOP_GLTF_EMISSIVE_SCALE`] via the emissive-only buffer).
+pub const SHOP_ROOM_EMISSIVE_GI_STRENGTH: f32 = 0.42;
+
 /// Default **tuning** multiplier for linear HDR (debug overlay); shop applies [`SHOP_ENV_LINEAR_EXPOSURE_BASE`]
 /// on top. Table scenes use this value alone (no shop base).
 pub const SHOP_ENV_LINEAR_EXPOSURE: f32 = 1.0;
@@ -181,13 +193,51 @@ pub const SHOP_ENV_LINEAR_EXPOSURE: f32 = 1.0;
 /// [`crate::render::draw_cmd::DrawCmd::ShopEnvironment`], but showcase tiles still use shop-style
 /// punctual lights — without this, `tile_hdr_tonemap` falls back to `linear_hdr ≈ 1` and faces clip.
 /// Between full shop (`×`[`SHOP_ENV_LINEAR_EXPOSURE_BASE`]) and isolation showcase.
-pub const TILE_PACK_CELEBRATION_HDR_LINEAR_EXPOSURE: f32 = 1.0 / 40.0;
+/// `lit_mesh` (pack box) shares this with showcase tiles; too low reads as black with zero ambient.
+pub const TILE_PACK_CELEBRATION_HDR_LINEAR_EXPOSURE: f32 = 1.0 / 3.8;
+
+/// Floor for `hdr_tonemap.z` → `lit_mesh` `felt.w` hemispheric fill (`× 0.08` in shader) on pack scenes
+/// when [`SHOP_ENV_AMBIENT_SCALE`] is 0.
+pub const TILE_PACK_CELEBRATION_LIT_MESH_AMBIENT_MIN: f32 = 0.62;
+
+/// Shop [`ItemInspectScene`] `lit_mesh` path: synthetic inspect lights only (no GLB punctual).
+/// [`SHOP_ENV_LINEAR_EXPOSURE_BASE`] is too dark; [`GAMEPLAY_TABLE_HDR_LINEAR_MUL`] reads blown out.
+pub const SHOP_INSPECT_LIT_MESH_HDR_LINEAR_MUL: f32 = 1.0 / 52.0;
+
+/// Hemispheric fill term in `lit_mesh.wgsl` (`felt.w * 0.08` before ACES). Keep below
+/// [`GAMEPLAY_TABLE_AMBIENT_MIN`] so inspect does not wash out like the table.
+pub const SHOP_INSPECT_LIT_MESH_AMBIENT: f32 = 0.29;
+
+/// Storeroom linear HDR during shop inspect = subject linear × this. Using the ratio of
+/// legacy shop crush ([`SHOP_ENV_LINEAR_EXPOSURE_BASE`]) to subject inspect gain
+/// ([`SHOP_INSPECT_LIT_MESH_HDR_LINEAR_MUL`]) ties both to the same tuning multiplier and
+/// composite path (SDR and HDR swapchains share `tonemap_composite.wgsl`).
+pub const SHOP_INSPECT_ENV_VS_LIT_LINEAR: f32 =
+    SHOP_ENV_LINEAR_EXPOSURE_BASE / SHOP_INSPECT_LIT_MESH_HDR_LINEAR_MUL;
+
+/// Room hemispheric fill vs subject `hdr_tonemap.z` during inspect (`tile_3d.wgsl`).
+pub const SHOP_INSPECT_ENV_VS_LIT_AMBIENT: f32 = 0.45;
+
+/// Item inspect disables GLB punctual and drives `shop_glb.wgsl` via `tile_seed` / ambient.
+/// The storeroom BRDF stacks different radiance than `lit_mesh`; without this boost the room reads black.
+pub const SHOP_INSPECT_STOREROOM_GLB_TILE_SEED_MUL: f32 = 12.0;
 
 /// Hemispheric fill in `shop_glb.wgsl` (`decal_atlas_uv.x`).
 pub const SHOP_ENV_AMBIENT_SCALE: f32 = 0.0;
 
-/// Applied in `lit_mesh.wgsl` as `shop_gltf_point_lights.extras.w` when
-/// [`crate::render::draw_cmd::UiFrame::shop_env_gltf_punctual`] is set (`shop_glb.wgsl` ignores it).
+/// Lower bound for `hdr_tonemap.z` on candle-key **table** scenes (`gameplay`, `tutorial`,
+/// `pick_blind`, `collection`). Shop keeps authored ambient only. Tiles and `lit_mesh` add
+/// `albedo * scale * 0.08` before ACES — without this, shadowed areas read as pure black and
+/// lit areas clip warm, which feels flat and hyper-saturated.
+pub const GAMEPLAY_TABLE_AMBIENT_MIN: f32 = 0.52;
+
+/// Linear HDR multiplier for table scenes only (after [`ShopEnvLightingTune::linear_exposure`];
+/// shop still applies [`SHOP_ENV_LINEAR_EXPOSURE_BASE`]). Slightly <1 reins in peak energy
+/// before ACES so highlights retain separation from midtones.
+pub const GAMEPLAY_TABLE_HDR_LINEAR_MUL: f32 = 0.88;
+
+/// Applied in `lit_mesh.wgsl` as the punctual buffer `extras.w` when
+/// [`crate::render::draw_cmd::SceneLighting::embedded_gltf_punctual`] is set (`shop_glb.wgsl` ignores it).
 /// Defaults to `1` so embedded punctual lights match the room; debug tuning may lower it.
 pub const SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE: f32 = 0.55;
 
@@ -206,6 +256,8 @@ pub struct ShopEnvLightingTune {
     pub linear_exposure: f32,
     pub ambient_scale: f32,
     pub lit_mesh_gltf_punctual_scale: f32,
+    /// Room glTF emissive strength ([`SHOP_GLTF_EMISSIVE_SCALE`] default).
+    pub gltf_emissive_scale: f32,
     pub candle_light_color_mul: [f32; 3],
 }
 
@@ -221,119 +273,39 @@ impl ShopEnvLightingTune {
         linear_exposure: SHOP_ENV_LINEAR_EXPOSURE,
         ambient_scale: SHOP_ENV_AMBIENT_SCALE,
         lit_mesh_gltf_punctual_scale: SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE,
+        gltf_emissive_scale: SHOP_GLTF_EMISSIVE_SCALE,
         candle_light_color_mul: SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL,
     };
 }
 
-/// [`KHR_lights_punctual`] point light — positions in **document units** (same as mesh).
-#[derive(Clone, Copy, Debug)]
-pub struct ShopGlbEmbeddedPointLight {
-    pub pos_doc: Vec3,
-    /// Linear RGB from glTF before candle tint (see [`ShopGlbEmbeddedPointLight::is_candle`]).
-    pub color_linear: [f32; 3],
-    pub is_candle: bool,
-    pub intensity: f32,
-    pub range_doc: Option<f32>,
-}
+// --- Stable `Shop*` names (shared decode in `room_env_gltf`) ---
+pub type ShopEnvPrimitiveCpu = renv::RoomEnvPrimitiveCpu;
+pub type ShopCollisionMesh = renv::RoomCollisionMesh;
+pub type ShopEnvironmentBounds = renv::RoomEnvironmentBounds;
+pub type ShopGlbEmbeddedPointLight = renv::RoomGltfEmbeddedPointLight;
+pub type ShopGlbEmbeddedSpotLight = renv::RoomGltfEmbeddedSpotLight;
+pub type ShopGlbEmbeddedCamera = renv::RoomGltfEmbeddedCamera;
 
-/// [`KHR_lights_punctual`] spot light — cone aims along node **−Z** in document space.
-#[derive(Clone, Copy, Debug)]
-pub struct ShopGlbEmbeddedSpotLight {
-    pub pos_doc: Vec3,
-    /// Unit vector from light toward illuminated surfaces (world/doc −Z axis).
-    pub dir_doc: Vec3,
-    pub color_linear: [f32; 3],
-    pub is_candle: bool,
-    pub intensity: f32,
-    pub range_doc: Option<f32>,
-    pub inner_cone_rad: f32,
-    pub outer_cone_rad: f32,
-}
+pub(crate) use crate::render::room_env_gltf::room_environment_bounds;
+pub use crate::render::room_env_gltf::glb_punctual_range_world_upload;
 
 #[inline]
 pub fn shop_env_world_scale(window_h: f32, height_scale: f32) -> f32 {
-    window_h.max(1e-6) * height_scale
+    renv::room_env_world_scale(window_h, height_scale)
 }
 
-/// One environment mesh primitive plus embedded glTF sampler parameters for GPU samplers.
-pub struct ShopEnvPrimitiveCpu {
-    pub mesh: LoadedPrimitive,
-}
-
-/// CPU triangle soup for one named GLB node (typically invisible anchor geometry). Vertices are
-/// in the same pre-GPU-scale space as uploaded shop environment meshes (node transform applied).
-#[derive(Clone)]
-pub struct ShopCollisionMesh {
-    pub node_name: String,
-    pub triangles: Vec<[Vec3; 3]>,
-}
-
-/// Axis-aligned bounds of all decoded shop environment vertices (glTF document space).
-#[derive(Clone, Copy, Debug)]
-pub struct ShopEnvironmentBounds {
-    pub min: Vec3,
-    pub max: Vec3,
-}
-
-impl ShopEnvironmentBounds {
-    #[inline]
-    pub fn center(self) -> Vec3 {
-        (self.min + self.max) * 0.5
-    }
-
-    pub fn corners(self) -> [Vec3; 8] {
-        let mn = self.min;
-        let mx = self.max;
-        [
-            Vec3::new(mn.x, mn.y, mn.z),
-            Vec3::new(mx.x, mn.y, mn.z),
-            Vec3::new(mn.x, mx.y, mn.z),
-            Vec3::new(mx.x, mx.y, mn.z),
-            Vec3::new(mn.x, mn.y, mx.z),
-            Vec3::new(mx.x, mn.y, mx.z),
-            Vec3::new(mn.x, mx.y, mx.z),
-            Vec3::new(mx.x, mx.y, mx.z),
-        ]
-    }
-}
-
-fn compute_environment_bounds(prims: &[ShopEnvPrimitiveCpu]) -> Option<ShopEnvironmentBounds> {
-    let mut min_v = Vec3::splat(f32::INFINITY);
-    let mut max_v = Vec3::splat(f32::NEG_INFINITY);
-    for p in prims {
-        for vtx in &p.mesh.vertices {
-            let pos = Vec3::from(vtx.position);
-            min_v = min_v.min(pos);
-            max_v = max_v.max(pos);
-        }
-    }
-    if !min_v.x.is_finite() || !max_v.x.is_finite() {
-        return None;
-    }
-    Some(ShopEnvironmentBounds {
-        min: min_v,
-        max: max_v,
-    })
-}
-
-/// `translate(-center_doc * s) * uniformScale(s)` — matches centered shop mesh + picking.
+/// `translate(-center_doc * s) * uniformScale(s)` — matches centered room mesh + picking.
+#[allow(dead_code)]
 #[inline]
 pub fn shop_env_model_matrix(window_h: f32, height_scale: f32, center_doc: Vec3) -> Mat4 {
-    let s = shop_env_world_scale(window_h, height_scale);
-    Mat4::from_translation(-center_doc * s) * Mat4::from_scale(Vec3::splat(s))
+    renv::room_env_model_matrix(window_h, height_scale, center_doc)
 }
 
-/// Model matrix using bounds center from the loaded Shop.glb, or plain scale if missing.
 #[inline]
 pub fn shop_env_model_matrix_from_cpu(window_h: f32, height_scale: f32, cpu: &ShopGlbCpu) -> Mat4 {
-    let c = cpu
-        .environment_bounds_doc
-        .map(|b| b.center())
-        .unwrap_or(Vec3::ZERO);
-    shop_env_model_matrix(window_h, height_scale, c)
+    room_env_model_matrix_from_bounds_doc(window_h, height_scale, cpu.environment_bounds_doc)
 }
 
-/// World-space AABB corners after centering and scale (for FOV fitting).
 pub fn shop_world_bounds_corners_centered(
     window_h: f32,
     env_height_scale: f32,
@@ -342,156 +314,51 @@ pub fn shop_world_bounds_corners_centered(
     let Some(bounds) = cpu.environment_bounds_doc else {
         return Vec::new();
     };
-    let s = shop_env_world_scale(window_h, env_height_scale);
-    let c = bounds.center();
-    bounds.corners().iter().map(|p| (*p - c) * s).collect()
+    room_world_bounds_corners_centered(bounds, window_h, env_height_scale)
 }
 
-/// Widen vertical FOV (only upward) so corners **in front of** the camera project inside `±margin_ndc`.
-/// Corners behind the eye (common when the camera sits inside a tight AABB) are ignored so we don't
-/// force a useless 170° search.
 pub fn shop_camera_fit_fovy_for_corners(
     window_w: f32,
     window_h: f32,
-    mut cam: CameraParams,
+    cam: CameraParams,
     corners_world: &[Vec3],
     margin_ndc: f32,
 ) -> CameraParams {
-    if corners_world.is_empty() {
-        return cam;
-    }
-    let eye = Vec3::from_array(cam.eye);
-    let target = Vec3::from_array(cam.target);
-    let forward = (target - eye).normalize_or_zero();
-    if forward.length_squared() < 1e-12 {
-        return cam;
-    }
-    let test_pts: Vec<Vec3> = corners_world
-        .iter()
-        .copied()
-        .filter(|p| (*p - eye).dot(forward) > 0.25)
-        .collect();
-    if test_pts.len() < 4 {
-        return cam;
-    }
-
-    let h = window_h.max(1e-6);
-    let aspect = window_w / h;
-    let far_p = h * 12.0;
-
-    let projects_ok = |fovy_deg: f32| -> bool {
-        let fov_y = fovy_deg.to_radians();
-        let up = Vec3::from_array(cam.up);
-        let view = Mat4::look_at_rh(eye, target, up);
-        let proj = Mat4::perspective_rh(fov_y, aspect, 1.0, far_p);
-        let vp = proj * view;
-        for p in &test_pts {
-            let clip = vp * Vec4::new(p.x, p.y, p.z, 1.0);
-            if clip.w <= 0.01 {
-                return false;
-            }
-            let inv_w = 1.0 / clip.w;
-            let nx = clip.x * inv_w;
-            let ny = clip.y * inv_w;
-            if nx.abs() > margin_ndc || ny.abs() > margin_ndc {
-                return false;
-            }
-        }
-        true
-    };
-
-    if projects_ok(cam.fovy_deg) {
-        return cam;
-    }
-
-    let mut lo = cam.fovy_deg;
-    let mut hi = 170.0_f32;
-    if !projects_ok(hi) {
-        return cam;
-    }
-
-    for _ in 0..24 {
-        if hi - lo < 0.05 {
-            break;
-        }
-        let mid = (lo + hi) * 0.5;
-        if projects_ok(mid) {
-            hi = mid;
-        } else {
-            lo = mid;
-        }
-    }
-    cam.fovy_deg = hi;
-    cam
-}
-
-/// Perspective camera baked into `Shop.glb` (positions in **document units**, same as mesh verts).
-#[derive(Clone, Copy, Debug)]
-pub struct ShopGlbEmbeddedCamera {
-    pub eye: Vec3,
-    pub target: Vec3,
-    pub up: Vec3,
-    pub fovy_deg: f32,
-}
-
-impl ShopGlbEmbeddedCamera {
-    pub fn to_camera_params(
-        &self,
-        window_h: f32,
-        env_height_scale: f32,
-        center_doc: Vec3,
-    ) -> CameraParams {
-        let s = shop_env_world_scale(window_h, env_height_scale);
-        let up = self.up.normalize_or_zero();
-        let up = if up.length_squared() > 1e-12 {
-            up
-        } else {
-            Vec3::Z
-        };
-        CameraParams {
-            eye: ((self.eye - center_doc) * s).to_array(),
-            target: ((self.target - center_doc) * s).to_array(),
-            up: up.to_array(),
-            fovy_deg: self.fovy_deg,
-        }
-    }
-}
-
-#[derive(Default)]
-struct EmbeddedCameraHarvest {
-    named: Option<ShopGlbEmbeddedCamera>,
-    fallback: Option<ShopGlbEmbeddedCamera>,
-}
-
-impl EmbeddedCameraHarvest {
-    fn pick(self) -> Option<ShopGlbEmbeddedCamera> {
-        self.named.or(self.fallback)
-    }
-
-    fn insert(&mut self, name: &str, cam: ShopGlbEmbeddedCamera) {
-        let key = name.to_ascii_lowercase();
-        let preferred = matches!(key.as_str(), "camera" | "shopcamera" | "shop_camera");
-        if preferred {
-            if self.named.replace(cam).is_some() {
-                log::warn!("Shop.glb: multiple preferred camera node names — using last");
-            }
-        } else if self.fallback.is_none() {
-            self.fallback = Some(cam);
-        }
-    }
+    room_camera_fit_fovy_for_corners(window_w, window_h, cam, corners_world, margin_ndc)
 }
 
 pub struct ShopGlbCpu {
     pub markers: HashMap<String, Mat4>,
     pub environment_primitives: Vec<ShopEnvPrimitiveCpu>,
-    /// Bounds of environment mesh vertices (document space); drives centering + FOV fit.
     pub environment_bounds_doc: Option<ShopEnvironmentBounds>,
-    /// Trimesh colliders for skipped-draw marker meshes (`shop_spawn_*`, `shop_player_*`).
+    pub marker_mesh_bounds_doc: HashMap<String, ShopEnvironmentBounds>,
     pub collision_meshes: Vec<ShopCollisionMesh>,
-    /// First eligible perspective camera from the default scene, if any.
     pub embedded_perspective_camera: Option<ShopGlbEmbeddedCamera>,
     pub embedded_point_lights: Vec<ShopGlbEmbeddedPointLight>,
     pub embedded_spot_lights: Vec<ShopGlbEmbeddedSpotLight>,
+}
+
+#[derive(Copy, Clone)]
+struct ShopRoomWalkHooks;
+
+impl RoomEnvWalkHooks for ShopRoomWalkHooks {
+    fn is_marker(&self, name: &str) -> bool {
+        is_marker_name(name)
+    }
+
+    fn mesh_policy(&self, name: &str) -> RoomMeshPolicy {
+        if skip_shop_env_mesh_for_node_name(name) {
+            RoomMeshPolicy::SkipDrawCollisionIfMarker
+        } else if is_shop_counter_button_node(name) {
+            RoomMeshPolicy::EnvironmentDrawWithCollision
+        } else {
+            RoomMeshPolicy::EnvironmentDraw
+        }
+    }
+
+    fn log_asset_label(&self) -> &'static str {
+        "Shop.glb"
+    }
 }
 
 #[inline]
@@ -534,6 +401,11 @@ fn is_marker_name(name: &str) -> bool {
         || name.starts_with("shop_player_consumable_")
 }
 
+#[inline]
+fn is_shop_counter_button_node(name: &str) -> bool {
+    matches!(name, "exit_btn" | "restock_btn" | "journal_btn")
+}
+
 /// Environment draw skip: anchor nodes often have collision/helper meshes that should not render.
 /// Button markers are excluded — their mesh is a visible control and may bind focus UI.
 fn skip_shop_env_mesh_for_node_name(name: &str) -> bool {
@@ -542,417 +414,42 @@ fn skip_shop_env_mesh_for_node_name(name: &str) -> bool {
         || name.starts_with("shop_player_consumable_")
 }
 
-fn decode_collision_triangles(
-    primitive: gltf::Primitive<'_>,
-    node_world: Mat4,
-    buffers: &[Vec<u8>],
-) -> anyhow::Result<Vec<[Vec3; 3]>> {
-    let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
-    let positions: Vec<[f32; 3]> = reader
-        .read_positions()
-        .context("collision primitive has no POSITION")?
-        .collect();
-    let indices: Vec<u32> = if let Some(ids) = reader.read_indices() {
-        ids.into_u32().collect()
-    } else {
-        (0..positions.len() as u32).collect()
-    };
-    let mut out = Vec::with_capacity(indices.len() / 3);
-    for tri in indices.chunks_exact(3) {
-        let p0 = node_world.transform_point3(Vec3::from(positions[tri[0] as usize]));
-        let p1 = node_world.transform_point3(Vec3::from(positions[tri[1] as usize]));
-        let p2 = node_world.transform_point3(Vec3::from(positions[tri[2] as usize]));
-        out.push([p0, p1, p2]);
-    }
-    Ok(out)
-}
-
-fn shop_embedded_camera_from_node(
-    world: Mat4,
-    cam: gltf::Camera<'_>,
-) -> Option<ShopGlbEmbeddedCamera> {
-    let gltf::camera::Projection::Perspective(p) = cam.projection() else {
-        return None;
-    };
-    let fovy_deg = p.yfov().to_degrees();
-    let z_axis = world.z_axis.truncate();
-    let y_axis = world.y_axis.truncate();
-    let eye = world.w_axis.truncate();
-    let z_len = z_axis.length();
-    let y_len = y_axis.length();
-    if !(z_len > 1e-20 && y_len > 1e-20) {
-        return None;
-    }
-    let forward = (-z_axis / z_len).normalize();
-    let up = (y_axis / y_len).normalize();
-    let target = eye + forward;
-    Some(ShopGlbEmbeddedCamera {
-        eye,
-        target,
-        up,
-        fovy_deg,
-    })
-}
-
-/// Bake glTF `normalTexture.scale` into linear-ish RGBA normal texels.
-fn apply_normal_scale_rgba8(pixels: &mut [u8], scale: f32) {
-    if (scale - 1.0).abs() < 1e-5 {
-        return;
-    }
-    for chunk in pixels.chunks_exact_mut(4) {
-        let x = chunk[0] as f32 / 255.0 * 2.0 - 1.0;
-        let y = chunk[1] as f32 / 255.0 * 2.0 - 1.0;
-        let z = chunk[2] as f32 / 255.0 * 2.0 - 1.0;
-        let nx = x * scale;
-        let ny = y * scale;
-        let nz = z;
-        let len = (nx * nx + ny * ny + nz * nz).sqrt().max(1e-8);
-        let nx = (nx / len) * 0.5 + 0.5;
-        let ny = (ny / len) * 0.5 + 0.5;
-        let nz = (nz / len) * 0.5 + 0.5;
-        chunk[0] = (nx.clamp(0.0, 1.0) * 255.0).round() as u8;
-        chunk[1] = (ny.clamp(0.0, 1.0) * 255.0).round() as u8;
-        chunk[2] = (nz.clamp(0.0, 1.0) * 255.0).round() as u8;
-    }
-}
-
-fn decode_primitive(
-    primitive: gltf::Primitive<'_>,
-    node_world: Mat4,
-    buffers: &[Vec<u8>],
-    images: &[gltf::image::Data],
-) -> anyhow::Result<ShopEnvPrimitiveCpu> {
-    let normal_xform = node_world.inverse().transpose();
-    let material = primitive.material();
-    let sampler_cpu = sampler_cpu_from_material(&material);
-
-    let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
-
-    let positions_local: Vec<[f32; 3]> = reader
-        .read_positions()
-        .context("primitive has no POSITION attribute")?
-        .collect();
-
-    let normals_local: Vec<[f32; 3]> = if let Some(n) = reader.read_normals() {
-        n.collect()
-    } else {
-        vec![[0.0, 1.0, 0.0]; positions_local.len()]
-    };
-
-    anyhow::ensure!(
-        normals_local.len() == positions_local.len(),
-        "NORMAL count does not match POSITION count"
-    );
-
-    let pbr = material.pbr_metallic_roughness();
-    let base_tex_coord = pbr.base_color_texture().map(|t| t.tex_coord()).unwrap_or(0);
-
-    let mut uvs: Vec<[f32; 2]> = if let Some(tc) = reader.read_tex_coords(base_tex_coord) {
-        tc.into_f32().collect()
-    } else {
-        vec![[0.0, 0.0]; positions_local.len()]
-    };
-
-    anyhow::ensure!(
-        uvs.len() == positions_local.len(),
-        "TEXCOORD count does not match POSITION count"
-    );
-
-    if let Some(tex_info) = pbr.base_color_texture() {
-        apply_texture_transform(&mut uvs, &tex_info);
-    }
-
-    let mut uv_emr = uvs.clone();
-    let mut tangents_local: Vec<[f32; 4]> = if let Some(t_iter) = reader.read_tangents() {
-        let t: Vec<[f32; 4]> = t_iter.map(|a| [a[0], a[1], a[2], a[3]]).collect();
-        anyhow::ensure!(
-            t.len() == positions_local.len(),
-            "TANGENT count does not match POSITION count"
-        );
-        t
-    } else {
-        Vec::new()
-    };
-
-    if let Some(nt) = material.normal_texture() {
-        let set = nt.tex_coord();
-        if set != base_tex_coord {
-            uv_emr = if let Some(tc) = reader.read_tex_coords(set) {
-                tc.into_f32().collect()
-            } else {
-                uvs.clone()
-            };
-            anyhow::ensure!(
-                uv_emr.len() == positions_local.len(),
-                "normal TEXCOORD count does not match POSITION count"
-            );
-            tangents_local.clear();
-        }
-    }
-
-    let indices: Vec<u32> = if let Some(ids) = reader.read_indices() {
-        ids.into_u32().collect()
-    } else {
-        (0..positions_local.len() as u32).collect()
-    };
-
-    if tangents_local.is_empty() {
-        tangents_local =
-            compute_vertex_tangents(&positions_local, &normals_local, &uv_emr, &indices);
-    }
-
-    let colors: Vec<[f32; 4]> = if let Some(iter) = reader.read_colors(0) {
-        iter.into_rgba_f32().collect()
-    } else {
-        Vec::new()
-    };
-
-    let vertices: Vec<Vertex3dTex> = (0..positions_local.len())
-        .map(|i| {
-            let p = node_world.transform_point3(Vec3::from(positions_local[i]));
-            let n = normal_xform
-                .transform_vector3(Vec3::from(normals_local[i]))
-                .normalize_or_zero();
-            let tl = tangents_local[i];
-            let t_loc = Vec3::new(tl[0], tl[1], tl[2]);
-            let w = tl[3];
-            let t_w = node_world.transform_vector3(t_loc).normalize_or_zero();
-            let color = colors.get(i).copied().unwrap_or([1.0, 1.0, 1.0, 1.0]);
-            Vertex3dTex {
-                position: p.into(),
-                normal: n.into(),
-                uv: uvs[i],
-                tangent: [t_w.x, t_w.y, t_w.z, w],
-                uv_emr: uv_emr[i],
-                color,
-            }
-        })
-        .collect();
-    let factor = pbr.base_color_factor();
-
-    let mut albedo_rgba = pbr.base_color_texture().and_then(|tex_info| {
-        let img_index = tex_info.texture().source().index();
-        images.get(img_index).and_then(gltf_image_to_rgba8)
-    });
-
-    if albedo_rgba.is_none() && pbr.base_color_texture().is_some() {
-        log::warn!(
-            "Shop.glb primitive {}: base color texture present but image decode failed",
-            primitive.index()
-        );
-    }
-
-    match &mut albedo_rgba {
-        Some((pix, _, _)) => multiply_rgba8_by_factor(pix, &factor),
-        None => {
-            let want_fallback_tex =
-                factor != [1.0, 1.0, 1.0, 1.0] || pbr.base_color_texture().is_some();
-            if want_fallback_tex {
-                albedo_rgba = Some(solid_albedo_rgba8(&factor));
-            }
-        }
-    }
-
-    let normal_rgba = material.normal_texture().and_then(|nt| {
-        let scale = nt.scale();
-        let img_index = nt.texture().source().index();
-        images
-            .get(img_index)
-            .and_then(gltf_image_to_rgba8)
-            .map(|mut tex| {
-                apply_normal_scale_rgba8(&mut tex.0, scale);
-                tex
-            })
-    });
-
-    if normal_rgba.is_none() && material.normal_texture().is_some() {
-        log::warn!(
-            "Shop.glb primitive {}: normal texture present but image decode failed",
-            primitive.index()
-        );
-    }
-
-    let metallic_roughness_rgba = pbr.metallic_roughness_texture().and_then(|tex_info| {
-        let img_index = tex_info.texture().source().index();
-        images.get(img_index).and_then(gltf_image_to_rgba8)
-    });
-
-    let emissive_rgba = material.emissive_texture().and_then(|tex_info| {
-        let img_index = tex_info.texture().source().index();
-        images.get(img_index).and_then(gltf_image_to_rgba8)
-    });
-
-    let alpha_mode = GltfAlphaMode::from(material.alpha_mode());
-    let alpha_cutoff = material.alpha_cutoff().unwrap_or(0.5);
-
-    Ok(ShopEnvPrimitiveCpu {
-        mesh: LoadedPrimitive {
-            vertices,
-            indices,
-            albedo_rgba,
-            normal_rgba,
-            metallic_roughness_rgba,
-            emissive_rgba,
-            metallic_factor: pbr.metallic_factor(),
-            roughness_factor: pbr.roughness_factor(),
-            emissive_factor: material.emissive_factor(),
-            alpha_mode,
-            alpha_cutoff,
-            double_sided: material.double_sided(),
-            sampler: sampler_cpu,
-        },
-    })
-}
-
-fn harvest_khr_light(
-    world: Mat4,
-    light: gltf::khr_lights_punctual::Light<'_>,
+/// Project the eight corners of a named marker's decoded mesh AABB to screen pixels (same centering
+/// / scale as the uploaded room). Returns `None` if bounds are missing. Clamps size to at least
+/// `min_rw` × `min_rh` while keeping the projected center.
+pub fn screen_rect_for_marker_mesh_bounds(
+    win_w: f32,
+    win_h: f32,
+    cam: &crate::render::draw_cmd::CameraParams,
+    env_height_scale: f32,
+    cpu: &ShopGlbCpu,
     node_name: &str,
-    points: &mut Vec<ShopGlbEmbeddedPointLight>,
-    spots: &mut Vec<ShopGlbEmbeddedSpotLight>,
-) {
-    use gltf::khr_lights_punctual::Kind;
-
-    let color_linear = light.color();
-    let is_candle = node_name.starts_with(SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX);
-    let intensity = light.intensity();
-    let range_doc = light.range();
-
-    match light.kind() {
-        Kind::Point => {
-            let pos_doc = world.transform_point3(Vec3::ZERO);
-            points.push(ShopGlbEmbeddedPointLight {
-                pos_doc,
-                color_linear,
-                is_candle,
-                intensity,
-                range_doc,
-            });
-        }
-        Kind::Spot {
-            inner_cone_angle,
-            outer_cone_angle,
-        } => {
-            let z_axis = world.z_axis.truncate();
-            let z_len = z_axis.length();
-            if z_len < 1e-20 {
-                log::warn!(
-                    "Shop.glb: spot light {:?} has degenerate orientation — skipping",
-                    node_name
-                );
-                return;
-            }
-            let dir_doc = (-z_axis / z_len).normalize();
-            let pos_doc = world.transform_point3(Vec3::ZERO);
-            let outer_rad = outer_cone_angle.max(1e-4);
-            let inner_rad = inner_cone_angle.min(outer_rad).max(0.0);
-            spots.push(ShopGlbEmbeddedSpotLight {
-                pos_doc,
-                dir_doc,
-                color_linear,
-                is_candle,
-                intensity,
-                range_doc,
-                inner_cone_rad: inner_rad,
-                outer_cone_rad: outer_rad,
-            });
-        }
-        Kind::Directional => {
-            log::debug!(
-                "Shop.glb: skipping directional light on node {:?}",
-                node_name
-            );
-        }
+    min_rw: f32,
+    min_rh: f32,
+) -> Option<[f32; 4]> {
+    let bounds = cpu.marker_mesh_bounds_doc.get(node_name)?;
+    let s = shop_env_world_scale(win_h, env_height_scale);
+    let center_doc = cpu
+        .environment_bounds_doc
+        .map(|b| b.center())
+        .unwrap_or(Vec3::ZERO);
+    let mut mn_x = f32::INFINITY;
+    let mut mn_y = f32::INFINITY;
+    let mut mx_x = f32::NEG_INFINITY;
+    let mut mx_y = f32::NEG_INFINITY;
+    for c in bounds.corners() {
+        let world = (c - center_doc) * s;
+        let (sx, sy) = cam.project_world_to_screen(win_w, win_h, world);
+        mn_x = mn_x.min(sx);
+        mn_y = mn_y.min(sy);
+        mx_x = mx_x.max(sx);
+        mx_y = mx_y.max(sy);
     }
-}
-
-fn walk_node(
-    node: gltf::Node<'_>,
-    parent: Mat4,
-    markers: &mut HashMap<String, Mat4>,
-    env_primitives: &mut Vec<ShopEnvPrimitiveCpu>,
-    collision_meshes: &mut Vec<ShopCollisionMesh>,
-    embedded_cameras: &mut EmbeddedCameraHarvest,
-    embedded_point_lights: &mut Vec<ShopGlbEmbeddedPointLight>,
-    embedded_spot_lights: &mut Vec<ShopGlbEmbeddedSpotLight>,
-    buffers: &[Vec<u8>],
-    images: &[gltf::image::Data],
-) -> anyhow::Result<()> {
-    let local = Mat4::from_cols_array_2d(&node.transform().matrix());
-    let world = parent * local;
-    let name = node.name().unwrap_or("");
-
-    if let Some(light) = node.light() {
-        harvest_khr_light(
-            world,
-            light,
-            name,
-            embedded_point_lights,
-            embedded_spot_lights,
-        );
-    }
-
-    if let Some(cam) = node.camera() {
-        match cam.projection() {
-            gltf::camera::Projection::Perspective(_) => {
-                if let Some(ec) = shop_embedded_camera_from_node(world, cam) {
-                    embedded_cameras.insert(name, ec);
-                }
-            }
-            gltf::camera::Projection::Orthographic(_) => {
-                log::debug!("Shop.glb: skipping orthographic camera on node {:?}", name);
-            }
-        }
-    }
-
-    if is_marker_name(name) {
-        if markers.insert(name.to_string(), world).is_some() {
-            log::warn!(
-                "Shop.glb: duplicate marker node name {:?} — using last transform",
-                name
-            );
-        }
-    }
-
-    if let Some(mesh) = node.mesh() {
-        if skip_shop_env_mesh_for_node_name(name) {
-            if is_marker_name(name) {
-                let mut tris = Vec::new();
-                for prim in mesh.primitives() {
-                    match decode_collision_triangles(prim, world, buffers) {
-                        Ok(chunk) => tris.extend(chunk),
-                        Err(e) => log::warn!("Shop.glb node {:?} collision: {e:#}", name),
-                    }
-                }
-                if !tris.is_empty() {
-                    collision_meshes.push(ShopCollisionMesh {
-                        node_name: name.to_string(),
-                        triangles: tris,
-                    });
-                }
-            }
-        } else {
-            for prim in mesh.primitives() {
-                env_primitives.push(decode_primitive(prim, world, buffers, images)?);
-            }
-        }
-    }
-
-    for child in node.children() {
-        walk_node(
-            child,
-            world,
-            markers,
-            env_primitives,
-            collision_meshes,
-            embedded_cameras,
-            embedded_point_lights,
-            embedded_spot_lights,
-            buffers,
-            images,
-        )?;
-    }
-    Ok(())
+    let cx = (mn_x + mx_x) * 0.5;
+    let cy = (mn_y + mx_y) * 0.5;
+    let rw = ((mx_x - mn_x).max(1.0)).max(min_rw);
+    let rh = ((mx_y - mn_y).max(1.0)).max(min_rh);
+    Some([cx - rw * 0.5, cy - rh * 0.5, rw, rh])
 }
 
 pub fn load_shop_glb_from_bytes(data: &[u8]) -> anyhow::Result<ShopGlbCpu> {
@@ -968,17 +465,21 @@ pub fn load_shop_glb_from_bytes(data: &[u8]) -> anyhow::Result<ShopGlbCpu> {
 
     let mut markers = HashMap::new();
     let mut environment_primitives = Vec::new();
+    let mut marker_mesh_bounds_doc = HashMap::new();
     let mut collision_meshes = Vec::new();
     let mut embedded_cameras = EmbeddedCameraHarvest::default();
     let mut embedded_point_lights = Vec::new();
     let mut embedded_spot_lights = Vec::new();
 
     for node in scene.nodes() {
-        walk_node(
+        walk_room_env_node(
             node,
             Mat4::IDENTITY,
+            &ShopRoomWalkHooks,
+            SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX,
             &mut markers,
             &mut environment_primitives,
+            &mut marker_mesh_bounds_doc,
             &mut collision_meshes,
             &mut embedded_cameras,
             &mut embedded_point_lights,
@@ -989,12 +490,13 @@ pub fn load_shop_glb_from_bytes(data: &[u8]) -> anyhow::Result<ShopGlbCpu> {
     }
 
     let embedded_perspective_camera = embedded_cameras.pick();
-    let environment_bounds_doc = compute_environment_bounds(&environment_primitives);
+    let environment_bounds_doc = room_environment_bounds(&environment_primitives);
 
     Ok(ShopGlbCpu {
         markers,
         environment_primitives,
         environment_bounds_doc,
+        marker_mesh_bounds_doc,
         collision_meshes,
         embedded_perspective_camera,
         embedded_point_lights,
@@ -1022,11 +524,43 @@ pub fn shop_camera_from_glb_if_present(
 /// Document-space marker origin minus environment AABB center (multiply by [`shop_env_world_scale`]
 /// for world space consistent with the centered shop model matrix).
 pub fn marker_translation(cpu: &ShopGlbCpu, name: &str) -> Option<Vec3> {
-    let center_doc = cpu
-        .environment_bounds_doc
-        .map(|b| b.center())
-        .unwrap_or(Vec3::ZERO);
-    cpu.markers
-        .get(name)
-        .map(|m| m.transform_point3(Vec3::ZERO) - center_doc)
+    marker_translation_doc(&cpu.markers, cpu.environment_bounds_doc, name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Documents how many environment primitives carry glTF emissive; re-run after
+    /// authoring lamps in Blender so the count reflects exported `emissiveTexture` / factor.
+    #[test]
+    fn shop_glb_emissive_material_summary() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/Shop.glb");
+        let data = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("skip shop_glb_emissive_material_summary: {path:?}: {e}");
+                return;
+            }
+        };
+        let cpu = load_shop_glb_from_bytes(&data).expect("Shop.glb decode");
+        let mut with_tex = 0usize;
+        let mut with_factor = 0usize;
+        for ep in &cpu.environment_primitives {
+            let m = &ep.mesh;
+            if m.emissive_rgba.is_some() {
+                with_tex += 1;
+            }
+            let f = m.emissive_factor;
+            if f[0] > 1e-5 || f[1] > 1e-5 || f[2] > 1e-5 {
+                with_factor += 1;
+            }
+        }
+        eprintln!(
+            "Shop.glb: {} env primitive(s), {} with emissive texture, {} with non-zero emissive factor",
+            cpu.environment_primitives.len(),
+            with_tex,
+            with_factor
+        );
+    }
 }

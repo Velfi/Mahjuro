@@ -258,12 +258,7 @@ pub(crate) fn load_pack_textures(
 pub(crate) fn spawn_background_loader() -> mpsc::Receiver<DecodedBackgroundImage> {
     let (tx, rx) = mpsc::channel();
 
-    let backgrounds: Vec<(BackgroundId, &'static str)> = [
-        BackgroundId::Menu,
-        BackgroundId::Score,
-        BackgroundId::MainMenuExterior,
-        BackgroundId::ShopStoreroom,
-    ]
+    let backgrounds: Vec<(BackgroundId, &'static str)> = [BackgroundId::MainMenuExterior]
     .iter()
     .filter_map(|id| id.asset_path().map(|p| (*id, p)))
     .collect();

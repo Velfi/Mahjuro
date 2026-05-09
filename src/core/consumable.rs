@@ -79,7 +79,7 @@ mod tests {
             capacity: 2,
         };
         assert!(inv.try_push(Consumable::Zodiac(ZodiacKind::Rat)));
-        assert!(inv.try_push(Consumable::Talisman(TalismanKind::Jade)));
+        assert!(inv.try_push(Consumable::Talisman(TalismanKind::Pearl)));
         assert!(inv.is_full());
         assert!(!inv.try_push(Consumable::Zodiac(ZodiacKind::Ox)));
     }
