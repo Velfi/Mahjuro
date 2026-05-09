@@ -137,8 +137,16 @@ pub struct BotCli {
     pub stake: Option<crate::core::stake::Stake>,
     #[arg(long, action = ArgAction::SetTrue)]
     pub bot_log: bool,
+    /// Write bot results to this path. Format is taken from `--output-format`, or
+    /// from the extension (`.json`, `.html`/`.htm`, else plain text).
+    #[arg(long, short = 'o', visible_alias = "export-json")]
+    pub output_file: Option<PathBuf>,
+    /// Output format when using `--output-file`. If omitted, inferred from the path.
+    #[arg(long, value_enum)]
+    pub output_format: Option<bot::BotOutputFormat>,
+    /// Write one `RunStats` JSON object per line (JSON Lines) for per-run analysis.
     #[arg(long)]
-    pub export_json: Option<PathBuf>,
+    pub output_runs: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -202,6 +210,17 @@ impl BotCli {
             stake: self.stake,
             ..Default::default()
         }
+    }
+
+    pub fn bot_output_target(&self) -> Option<bot::BotOutputTarget> {
+        let path = self.output_file.as_ref()?;
+        let format = self
+            .output_format
+            .unwrap_or_else(|| bot::BotOutputFormat::infer_from_path(path));
+        Some(bot::BotOutputTarget {
+            path: path.clone(),
+            format,
+        })
     }
 }
 

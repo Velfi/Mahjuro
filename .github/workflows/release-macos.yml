@@ -1,0 +1,295 @@
+name: Release build (macOS)
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  build:
+    name: Release macOS
+    runs-on: macos-latest
+
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release_tag }}
+          lfs: true
+
+      - name: Compute version (strip leading v)
+        id: version
+        shell: bash
+        run: |
+          TAG="${RELEASE_TAG}"
+          VERSION="${TAG#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Add macOS x86_64 target
+        run: rustup target add x86_64-apple-darwin
+
+      - name: Import Apple signing certificate and notarization key
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APPLE_CERTIFICATE:-}" ]; then
+            echo "::error::APPLE_CERTIFICATE secret is empty"; exit 1
+          fi
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          CERT_SIZE=$(wc -c < certificate.p12)
+          if [ "$CERT_SIZE" -lt 100 ]; then
+            echo "::error::Decoded certificate.p12 is only ${CERT_SIZE} bytes — APPLE_CERTIFICATE base64 is likely corrupt"; exit 1
+          fi
+          echo "Decoded certificate.p12: ${CERT_SIZE} bytes"
+          security create-keychain -p "" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          security list-keychains -d user -s build.keychain login.keychain
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -f pkcs12
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
+          rm certificate.p12
+          mkdir -p ~/.private_keys
+          echo "$APPLE_API_KEY_CONTENT" > ~/.private_keys/AuthKey_${APPLE_API_KEY}.p8
+          echo "APPLE_API_KEY_PATH=$HOME/.private_keys/AuthKey_${APPLE_API_KEY}.p8" >> "$GITHUB_ENV"
+          IDENTITY=$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Cache Cargo registry and target
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: release-aarch64-apple-darwin-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            release-aarch64-apple-darwin-cargo-
+
+      - name: Run tests
+        run: cargo test
+
+      - name: Build macOS universal release
+        run: |
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
+          mkdir -p target/release-universal
+          lipo -create \
+            target/aarch64-apple-darwin/release/mahjuro \
+            target/x86_64-apple-darwin/release/mahjuro \
+            -output target/release-universal/mahjuro
+
+      - name: Set artifact name
+        id: artifact
+        shell: bash
+        run: |
+          NAME="mahjuro-${RELEASE_TAG}-macos-universal"
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "filename=${NAME}.dmg" >> "$GITHUB_OUTPUT"
+
+      # ──────────────────────────── macOS: .app + .dmg ────────────────────────────
+      - name: Build .app bundle (macOS)
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          APP="Mahjuro.app"
+          rm -rf "$APP"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+
+          # Binary
+          cp target/release-universal/mahjuro "$APP/Contents/MacOS/mahjuro"
+          chmod +x "$APP/Contents/MacOS/mahjuro"
+          cp packaging/steam_input/game_actions_4636490.vdf \
+            "$APP/Contents/MacOS/game_actions_4636490.vdf"
+
+          # Steamworks dylib: link uses @loader_path/libsteam_api.dylib (see build.rs).
+          # CI duplicates app layout here; must match scripts/package-macos.sh.
+          cp target/aarch64-apple-darwin/release/libsteam_api.dylib \
+            "$APP/Contents/MacOS/libsteam_api.dylib"
+
+          # SDL3 dylib (sdl3 build-from-source); binary uses -rpath @loader_path (build.rs).
+          lipo -create \
+            target/aarch64-apple-darwin/release/libSDL3.0.dylib \
+            target/x86_64-apple-darwin/release/libSDL3.0.dylib \
+            -output "$APP/Contents/MacOS/libSDL3.0.dylib"
+          install_name_tool -id @loader_path/libSDL3.0.dylib \
+            "$APP/Contents/MacOS/libSDL3.0.dylib"
+
+          # Info.plist with version substituted in
+          sed "s/__VERSION__/${VERSION}/g" packaging/Info.plist > "$APP/Contents/Info.plist"
+
+          # Generate AppIcon.icns from icon.png. Source is small (120x120) so larger
+          # sizes will be upscaled — replace icon.png with a higher-resolution
+          # source to improve quality.
+          ICONSET="AppIcon.iconset"
+          rm -rf "$ICONSET"
+          mkdir -p "$ICONSET"
+          for spec in "16:icon_16x16.png" "32:icon_16x16@2x.png" \
+                      "32:icon_32x32.png" "64:icon_32x32@2x.png" \
+                      "128:icon_128x128.png" "256:icon_128x128@2x.png" \
+                      "256:icon_256x256.png" "512:icon_256x256@2x.png" \
+                      "512:icon_512x512.png" "1024:icon_512x512@2x.png"; do
+            size="${spec%%:*}"
+            name="${spec##*:}"
+            sips -z "$size" "$size" icon.png --out "$ICONSET/$name" >/dev/null
+          done
+          iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+          rm -rf "$ICONSET"
+
+      - name: Embed Sparkle.framework (macOS)
+        env:
+          SPARKLE_VERSION: "2.9.1"
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "Sparkle-${SPARKLE_VERSION}.tar.xz" \
+            "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+          mkdir sparkle-dist
+          tar -xf "Sparkle-${SPARKLE_VERSION}.tar.xz" -C sparkle-dist
+          mkdir -p Mahjuro.app/Contents/Frameworks
+          cp -R sparkle-dist/Sparkle.framework Mahjuro.app/Contents/Frameworks/
+          # Stash the CLI tools where the appcast step below expects them.
+          mkdir -p sparkle-bin
+          cp sparkle-dist/bin/sign_update sparkle-bin/
+
+      - name: Sign .app bundle (macOS)
+        run: |
+          codesign --sign "$APPLE_SIGNING_IDENTITY" \
+            --entitlements Entitlements.plist \
+            --options runtime \
+            --force \
+            --deep \
+            --timestamp \
+            Mahjuro.app
+          codesign --verify --strict --verbose=2 Mahjuro.app
+
+      - name: Notarize .app bundle (macOS)
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          ditto -c -k --keepParent Mahjuro.app Mahjuro-notarize.zip
+          xcrun notarytool submit Mahjuro-notarize.zip \
+            --key "$APPLE_API_KEY_PATH" \
+            --key-id "$APPLE_API_KEY" \
+            --issuer "$APPLE_API_ISSUER" \
+            --wait
+          rm Mahjuro-notarize.zip
+          xcrun stapler staple Mahjuro.app
+
+      - name: Build DMG (macOS)
+        run: |
+          DMG="${{ steps.artifact.outputs.filename }}"
+          STAGING="dmg-staging"
+          rm -rf "$STAGING" "$DMG"
+          mkdir "$STAGING"
+          cp -R Mahjuro.app "$STAGING/"
+          ln -s /Applications "$STAGING/Applications"
+          hdiutil create \
+            -volname "Mahjuro" \
+            -srcfolder "$STAGING" \
+            -ov \
+            -format UDZO \
+            "$DMG"
+          rm -rf "$STAGING"
+
+      - name: Sign and notarize DMG (macOS)
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          DMG="${{ steps.artifact.outputs.filename }}"
+          codesign --sign "$APPLE_SIGNING_IDENTITY" --timestamp "$DMG"
+          xcrun notarytool submit "$DMG" \
+            --key "$APPLE_API_KEY_PATH" \
+            --key-id "$APPLE_API_KEY" \
+            --issuer "$APPLE_API_ISSUER" \
+            --wait
+          xcrun stapler staple "$DMG"
+
+      - name: Generate Sparkle appcast (macOS)
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          DMG="${{ steps.artifact.outputs.filename }}"
+          # `sign_update` consumes the EdDSA private key on stdin (`--ed-key-file -`)
+          # and prints `sparkle:edSignature="..." length="..."` to stdout.
+          SIG_LINE=$(printf '%s' "$SPARKLE_PRIVATE_KEY" | \
+            ./sparkle-bin/sign_update --ed-key-file - "$DMG")
+          DMG_SIZE=$(stat -f%z "$DMG")
+          PUB_DATE=$(date -u +"%a, %d %b %Y %H:%M:%S +0000")
+          DMG_URL="https://github.com/Velfi/Mahjuro/releases/download/${RELEASE_TAG}/${DMG}"
+          # Minimum macOS 10.13 mirrors LSMinimumSystemVersion in Info.plist.
+          cat > appcast.xml <<EOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+            <channel>
+              <title>Mahjuro</title>
+              <link>${DMG_URL}</link>
+              <description>Mahjuro updates feed.</description>
+              <language>en</language>
+              <item>
+                <title>Version ${VERSION}</title>
+                <pubDate>${PUB_DATE}</pubDate>
+                <sparkle:version>${VERSION}</sparkle:version>
+                <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
+                <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
+                <enclosure url="${DMG_URL}" type="application/octet-stream" length="${DMG_SIZE}" ${SIG_LINE} />
+              </item>
+            </channel>
+          </rss>
+          EOF
+          # Strip the 10-space indent applied by the YAML run block.
+          sed -i '' 's/^          //' appcast.xml
+          echo "appcast.xml written:"
+          cat appcast.xml
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: appcast.xml
+          path: appcast.xml
+
+      - name: Create update archive (macOS)
+        id: update_archive
+        run: |
+          codesign --sign "$APPLE_SIGNING_IDENTITY" \
+            --options runtime \
+            --timestamp \
+            target/release-universal/mahjuro
+          ARCHIVE="mahjuro-${RELEASE_TAG}-macos-universal.tar.gz"
+          cp packaging/steam_input/game_actions_4636490.vdf target/release-universal/
+          tar -czf "$ARCHIVE" -C target/release-universal \
+            mahjuro game_actions_4636490.vdf
+          echo "filename=${ARCHIVE}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.update_archive.outputs.filename }}
+          path: ${{ steps.update_archive.outputs.filename }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.artifact.outputs.filename }}
+          path: ${{ steps.artifact.outputs.filename }}

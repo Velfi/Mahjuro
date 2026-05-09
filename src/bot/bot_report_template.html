@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mahjuro bot report</title>
+<style>
+  :root {
+    --bg0: #0c0d10;
+    --bg1: #12141a;
+    --surface: #181b24;
+    --surface2: #1e222d;
+    --border: rgba(255, 255, 255, 0.06);
+    --border-strong: rgba(255, 255, 255, 0.1);
+    --text: #e8eaef;
+    --muted: #8b919d;
+    --faint: #5c6370;
+    --accent: #5eead4;
+    --accent-dim: rgba(94, 234, 212, 0.14);
+    --accent2: #a78bfa;
+    --accent2-dim: rgba(167, 139, 250, 0.12);
+    --positive: #4ade80;
+    --warn: #fbbf24;
+    --danger: #f87171;
+    --radius: 12px;
+    --radius-sm: 8px;
+    --shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+    --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html {
+    font-family: var(--font);
+    line-height: 1.5;
+    color: var(--text);
+    background: var(--bg0);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background:
+      radial-gradient(ellipse 120% 80% at 10% -20%, rgba(94, 234, 212, 0.08), transparent 50%),
+      radial-gradient(ellipse 80% 60% at 90% 0%, rgba(167, 139, 250, 0.07), transparent 45%),
+      linear-gradient(180deg, var(--bg0) 0%, #0a0b0e 100%);
+  }
+
+  .dashboard {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 1.5rem 1.25rem 3rem;
+  }
+
+  @media (min-width: 768px) {
+    .dashboard { padding: 2rem 2rem 4rem; }
+  }
+
+  /* —— Header —— */
+  .dash-header {
+    margin-bottom: 1.75rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--border-strong);
+  }
+
+  .dash-header__title {
+    font-size: clamp(1.35rem, 3vw, 1.65rem);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    margin: 0 0 0.5rem;
+    background: linear-gradient(135deg, var(--text) 0%, var(--muted) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .dash-header__title span { color: var(--accent); -webkit-text-fill-color: var(--accent); }
+
+  .dash-header__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+    color: var(--muted);
+    font-size: 0.875rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.25rem 0.65rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+  }
+
+  .badge--accent {
+    border-color: rgba(94, 234, 212, 0.35);
+    background: var(--accent-dim);
+    color: var(--accent);
+  }
+
+  .badge--violet {
+    border-color: rgba(167, 139, 250, 0.35);
+    background: var(--accent2-dim);
+    color: #c4b5fd;
+  }
+
+  .dash-header__note {
+    font-size: 0.8rem;
+    color: var(--faint);
+    max-width: 52rem;
+    margin: 0;
+    line-height: 1.5;
+  }
+
+  /* —— KPI grid —— */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+  }
+
+  @media (min-width: 640px) {
+    .kpi-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+
+  @media (min-width: 1024px) {
+    .kpi-grid { grid-template-columns: repeat(6, 1fr); }
+  }
+
+  .kpi {
+    background: linear-gradient(145deg, var(--surface) 0%, var(--bg1) 100%);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem 1rem 0.9rem;
+    box-shadow: var(--shadow);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .kpi::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    opacity: 0.85;
+  }
+
+  .kpi__label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-bottom: 0.35rem;
+  }
+
+  .kpi__value {
+    font-size: 1.35rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
+
+  .kpi__hint {
+    font-size: 0.72rem;
+    color: var(--faint);
+    margin-top: 0.35rem;
+  }
+
+  .kpi--highlight .kpi__value { color: var(--accent); }
+
+  /* —— Cards —— */
+  .dash-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 1rem;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .dash-card__head {
+    padding: 1rem 1.15rem;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, var(--surface2) 0%, var(--surface) 100%);
+  }
+
+  .dash-card__title {
+    font-size: 0.95rem;
+    font-weight: 650;
+    margin: 0;
+    letter-spacing: -0.02em;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .dash-card__title::before {
+    content: "";
+    width: 4px;
+    height: 1.1em;
+    border-radius: 2px;
+    background: linear-gradient(180deg, var(--accent), var(--accent2));
+    flex-shrink: 0;
+  }
+
+  .dash-card__subtitle {
+    margin: 0.35rem 0 0;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+
+  .dash-card__body {
+    padding: 0.85rem 1rem 1rem;
+  }
+
+  .dash-card__subhead {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--muted);
+    margin: 1.25rem 0 0.65rem;
+    padding-top: 0.75rem;
+    border-top: 1px dashed var(--border);
+  }
+
+  .dash-card__subhead:first-child {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+  }
+
+  /* —— Definition list (summary) —— */
+  .stat-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  @media (min-width: 720px) {
+    .stat-grid {
+      grid-template-columns: minmax(11rem, 0.38fr) 1fr;
+    }
+  }
+
+  .stat-grid dt {
+    font-size: 0.8rem;
+    color: var(--muted);
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border);
+    font-weight: 500;
+  }
+
+  .stat-grid dd {
+    margin: 0;
+    font-size: 0.82rem;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border);
+    font-variant-numeric: tabular-nums;
+    text-align: left;
+  }
+
+  @media (min-width: 720px) {
+    .stat-grid dd { text-align: right; }
+  }
+
+  .stat-grid dt:last-of-type,
+  .stat-grid dd:last-of-type {
+    border-bottom: none;
+  }
+
+  /* —— Tables —— */
+  .table-scroll {
+    overflow-x: auto;
+    margin: 0 -0.15rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+  }
+
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+  }
+
+  .data-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    text-align: left;
+    padding: 0.55rem 0.75rem;
+    font-weight: 600;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    background: var(--bg1);
+    border-bottom: 1px solid var(--border-strong);
+    white-space: nowrap;
+  }
+
+  .data-table tbody tr {
+    transition: background 0.12s ease;
+  }
+
+  .data-table tbody tr:nth-child(even) {
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .data-table tbody tr:hover {
+    background: rgba(94, 234, 212, 0.04);
+  }
+
+  .data-table td {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+
+  .data-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  .data-table .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+  }
+
+  .delta-pos { color: var(--positive); }
+  .delta-neg { color: var(--danger); }
+
+  /* —— Bar tracks —— */
+  .bar-track {
+    height: 8px;
+    border-radius: 999px;
+    background: var(--bg1);
+    border: 1px solid var(--border);
+    overflow: hidden;
+    min-width: 4rem;
+  }
+
+  .bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #2dd4bf, var(--accent2));
+    box-shadow: 0 0 12px rgba(94, 234, 212, 0.25);
+    transition: width 0.4s ease;
+  }
+
+  .bar-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    min-width: 8rem;
+  }
+
+  /* —— Alert / prose —— */
+  .alert {
+    padding: 0.85rem 1rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid rgba(251, 191, 36, 0.25);
+    background: rgba(251, 191, 36, 0.06);
+    color: #fcd34d;
+    font-size: 0.85rem;
+    line-height: 1.55;
+  }
+
+  .prose {
+    font-size: 0.85rem;
+    color: var(--muted);
+    line-height: 1.6;
+    margin: 0;
+  }
+
+  .chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .chip {
+    font-size: 0.75rem;
+    padding: 0.3rem 0.55rem;
+    border-radius: 6px;
+    background: var(--bg1);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .error {
+    color: var(--danger);
+    padding: 1rem 1.15rem;
+    background: rgba(248, 113, 113, 0.08);
+    border: 1px solid rgba(248, 113, 113, 0.25);
+    border-radius: var(--radius);
+    margin: 1rem;
+  }
+
+</style>
+</head>
+<body>
+<script id="mahjuro-bot-b64" type="text/plain">__BOT_JSON_B64__</script>
+<main id="app" class="dashboard"></main>
+<script>
+(function () {
+  const boot = document.getElementById('mahjuro-bot-b64');
+  const app = document.getElementById('app');
+
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null && text !== '') e.textContent = text;
+    return e;
+  }
+
+  function fmtCompact(n) {
+    if (typeof n !== 'number' || !Number.isFinite(n)) return String(n);
+    return new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 2 }).format(n);
+  }
+
+  function decodePayload() {
+    const raw = boot.textContent.trim();
+    const bin = atob(raw);
+    const u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    return JSON.parse(new TextDecoder().decode(u8));
+  }
+
+  function card(title, subtitle) {
+    const section = el('section', 'dash-card');
+    const head = el('div', 'dash-card__head');
+    head.appendChild(el('h2', 'dash-card__title', title));
+    if (subtitle) head.appendChild(el('p', 'dash-card__subtitle', subtitle));
+    section.appendChild(head);
+    const body = el('div', 'dash-card__body');
+    section.appendChild(body);
+    return { section, body };
+  }
+
+  function addTable(parent, headers, rows) {
+    const wrap = el('div', 'table-scroll');
+    const table = el('table', 'data-table');
+    const thead = el('thead');
+    const trh = el('tr');
+    for (const h of headers) {
+      trh.appendChild(el('th', h.align === 'right' ? 'num' : null, h.label));
+    }
+    thead.appendChild(trh);
+    table.appendChild(thead);
+    const tbody = el('tbody');
+    for (const r of rows) {
+      const tr = el('tr');
+      for (let i = 0; i < r.length; i++) {
+        const cell = r[i];
+        const td = el('td', headers[i].align === 'right' ? 'num' : null);
+        if (cell instanceof Node) td.appendChild(cell);
+        else td.textContent = cell;
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    parent.appendChild(wrap);
+  }
+
+  function kpiTile(k) {
+    const k0 = el('div', 'kpi' + (k.highlight ? ' kpi--highlight' : ''));
+    k0.appendChild(el('div', 'kpi__label', k.label));
+    k0.appendChild(el('div', 'kpi__value', k.value));
+    if (k.hint) k0.appendChild(el('div', 'kpi__hint', k.hint));
+    return k0;
+  }
+
+  function barCell(pct) {
+    const track = el('div', 'bar-track');
+    const fill = el('div', 'bar-fill');
+    fill.style.width = Math.min(100, pct) + '%';
+    track.appendChild(fill);
+    const wrap = el('div', 'bar-wrap');
+    wrap.appendChild(track);
+    return wrap;
+  }
+
+  function renderV2(data) {
+    const runs = data.runs;
+    const mode = data.mode || {};
+    const sums = (data.aggregate && data.aggregate.sums) || {};
+    const d = data.derived || {};
+    const pr = d.per_run || {};
+    const meta = data.meta || {};
+
+    document.title = 'Mahjuro bot — ' + runs + ' runs';
+
+    const stake = mode.stake != null ? String(mode.stake) : '—';
+    const wins = sums.victories ?? 0;
+
+    const header = el('header', 'dash-header');
+    const h1 = el('h1', 'dash-header__title');
+    h1.appendChild(document.createTextNode('Bot '));
+    const sp = el('span');
+    sp.textContent = 'metrics';
+    h1.appendChild(sp);
+    header.appendChild(h1);
+
+    const metaRow = el('div', 'dash-header__meta');
+    metaRow.appendChild(el('span', 'badge badge--accent', 'schema v' + (data.schema_version ?? '?')));
+    if (meta.crate_version) metaRow.appendChild(el('span', 'badge', meta.crate_version));
+    metaRow.appendChild(el('span', 'badge badge--accent', runs + ' runs'));
+    metaRow.appendChild(el('span', 'badge badge--violet', stake));
+    metaRow.appendChild(el('span', 'badge', 'target ' + (mode.base_target ?? '—')));
+    metaRow.appendChild(el('span', 'badge', 'wins ' + wins + ' · ' + (pr.win_rate_pct ?? 0).toFixed(1) + '%'));
+    header.appendChild(metaRow);
+    header.appendChild(el('p', 'dash-header__note',
+      'Export schema v2: `aggregate` = { sums, maps }; `derived` = precomputed tables (same source as CLI). Per-run lines: `mahjuro bot --output-runs runs.jsonl`.'));
+    app.appendChild(header);
+
+    const kpiRow = el('div', 'kpi-grid');
+    for (const k of d.kpis || []) kpiRow.appendChild(kpiTile(k));
+    app.appendChild(kpiRow);
+
+    const sumC = card('Run economics & pacing', 'Rust-derived per-run averages (`derived.per_run`)');
+    const dl = el('dl', 'stat-grid');
+    function row(label, value) {
+      dl.appendChild(el('dt', null, label));
+      dl.appendChild(el('dd', null, value));
+    }
+    row('Victories', wins + ' / ' + runs + ' (' + (pr.win_rate_pct ?? 0).toFixed(1) + '%)');
+    row('Avg blinds cleared', (pr.blinds_cleared ?? 0).toFixed(2));
+    row('Avg antes cleared', (pr.antes_cleared ?? 0).toFixed(2));
+    row('Max ante reached', String(sums.max_ante_reached ?? 0));
+    row('Avg total score', fmtCompact(pr.total_score ?? 0));
+    row('Avg plays used', (pr.plays ?? 0).toFixed(2));
+    row('Avg discards used',
+      (pr.discards ?? 0).toFixed(2) + ' (' + (pr.strategic_discards ?? 0).toFixed(2) + ' strategic, ' + (pr.random_discards ?? 0).toFixed(2) + ' random)');
+    row('Avg blinds skipped', (pr.blinds_skipped ?? 0).toFixed(2));
+    row('Avg relics bought', (pr.relics_bought ?? 0).toFixed(2) + ' (avg gold spent: ' + (pr.gold_spent ?? 0).toFixed(1) + ')');
+    row('Avg gold earned',
+      (pr.gold_from_clears ?? 0).toFixed(1) + ' clears + ' + (pr.gold_from_skip_tags ?? 0).toFixed(1) + ' skip-tags = ' +
+      ((pr.gold_from_clears ?? 0) + (pr.gold_from_skip_tags ?? 0)).toFixed(1));
+    row('Avg clear payout',
+      (pr.gold_clear_base ?? 0).toFixed(1) + ' base + ' + (pr.gold_clear_unused_plays ?? 0).toFixed(1) + ' plays + ' +
+      (pr.gold_clear_interest ?? 0).toFixed(1) + ' interest + ' + (pr.gold_clear_relics ?? 0).toFixed(1) + ' relics');
+    row('Relic slice (clear)',
+      (pr.gold_clear_green_luck ?? 0).toFixed(1) + ' green luck + ' + (pr.gold_clear_gold_idol ?? 0).toFixed(1) + ' gold idol + ' +
+      (pr.gold_clear_jade_abacus ?? 0).toFixed(1) + ' jade abacus + ' + (pr.gold_clear_patience ?? 0).toFixed(1) + ' patience');
+    row('Avg second-wind forfeits', (pr.second_wind_forfeits ?? 0).toFixed(2));
+    row('Avg structure cash-ins',
+      (pr.structure_triggers ?? 0).toFixed(2) + ' (' + (pr.structure_trigger_points_per_run ?? 0).toFixed(0) + ' pts/run from structure)');
+    row('Avg turns / run', (pr.turns ?? 0).toFixed(2) + ' (avg peak hand size ' + (pr.peak_hand_size ?? 0).toFixed(2) + ')');
+    row('Tiles destroyed / relic activations',
+      (pr.tiles_destroyed ?? 0).toFixed(2) + '/run | ' + (pr.relic_activations ?? 0).toFixed(0) + '/run');
+    row('Avg final gold',
+      (pr.final_gold ?? 0).toFixed(1) + ' (avg skip-tag value taken: ' + (pr.skip_tag_gold_value ?? 0).toFixed(1) + ')');
+    row('Avg targets faced',
+      fmtCompact(pr.target_score_faced ?? 0) + ' (score/target ' + (pr.score_to_target_ratio ?? 0).toFixed(2) + 'x, avg overscore ' +
+      fmtCompact(pr.overscore ?? 0) + ', peak blind score ' + fmtCompact(sums.peak_blind_score ?? 0) + ')');
+    sumC.body.appendChild(dl);
+    app.appendChild(sumC.section);
+
+    if (d.loss_breakdown) {
+      const lb = d.loss_breakdown;
+      const lossC = card('Loss breakdown', 'Engine stop reasons (non-wins only)');
+      const alert = el('div', 'alert');
+      alert.textContent = 'Out of plays: ' + lb.out_of_plays + ' (' + lb.out_of_plays_pct_of_losses.toFixed(1) + '% of losses) · No actions: ' +
+        lb.no_actions_remaining + ' (' + lb.no_actions_pct_of_losses.toFixed(1) + '%)';
+      lossC.body.appendChild(alert);
+      app.appendChild(lossC.section);
+    }
+
+    if ((d.deaths_by_ante || []).length) {
+      const sec = card('Deaths by ante', 'Share of all runs; bar normalized to max bucket');
+      const rows = d.deaths_by_ante.map((row) => [
+        String(row.ante), String(row.count), row.pct_of_runs.toFixed(1) + '%', barCell(row.dashboard_bar_pct || 0)
+      ]);
+      addTable(sec.body,
+        [{ label: 'Ante' }, { label: 'Count', align: 'right' }, { label: '% runs', align: 'right' }, { label: 'Distribution', align: 'right' }],
+        rows);
+      app.appendChild(sec.section);
+    }
+
+    if ((d.deaths_by_blind || []).length) {
+      const sec = card('Deaths by blind', null);
+      addTable(sec.body,
+        [{ label: 'Blind' }, { label: 'Count', align: 'right' }, { label: '% runs', align: 'right' }],
+        d.deaths_by_blind.map((row) => [row.name, String(row.count), row.pct_of_runs.toFixed(1) + '%']));
+      app.appendChild(sec.section);
+    }
+
+    if ((d.surplus_by_slot || []).length) {
+      const sec = card('Score surplus by blind slot', 'Log-scaled bar (matches CLI)');
+      const rows = d.surplus_by_slot.map((row) => {
+        const fill = el('div', 'bar-fill');
+        fill.style.width = Math.min(100, row.bar_pct || 0) + '%';
+        const track = el('div', 'bar-track');
+        track.appendChild(fill);
+        const wrap = el('div', 'bar-wrap');
+        wrap.appendChild(track);
+        return [row.slot, String(row.clears), fmtCompact(row.avg_surplus), wrap];
+      });
+      addTable(sec.body,
+        [{ label: 'Slot' }, { label: 'n', align: 'right' }, { label: 'Avg surplus', align: 'right' }, { label: '' }],
+        rows);
+      app.appendChild(sec.section);
+    }
+
+    if ((d.avg_turns_to_clear || []).length) {
+      const sec = card('Avg turns to clear', 'Cleared blinds only (`derived.avg_turns_to_clear`)');
+      addTable(sec.body,
+        [{ label: 'Slot' }, { label: 'Avg turns', align: 'right' }],
+        d.avg_turns_to_clear.map((row) => [row.slot, row.avg_turns.toFixed(2)]));
+      app.appendChild(sec.section);
+    }
+
+    if ((d.skip_tags || []).length) {
+      const sec = card('Skip tags', 'Per-run share');
+      addTable(sec.body,
+        [{ label: 'Tag' }, { label: 'Count', align: 'right' }, { label: '% runs', align: 'right' }],
+        d.skip_tags.map((row) => [row.name, String(row.count), row.pct_of_runs.toFixed(1) + '%']));
+      app.appendChild(sec.section);
+    }
+
+    if ((d.consumable_zodiacs || []).length || (d.consumable_talismans || []).length) {
+      const sec = card('Consumables used', 'In-round + scoring (not shop buys)');
+      if ((d.consumable_zodiacs || []).length) {
+        const row = el('div', 'chip-row');
+        for (const x of d.consumable_zodiacs) row.appendChild(el('span', 'chip', x.name + ' ×' + x.count));
+        sec.body.appendChild(el('p', 'prose', 'Zodiacs'));
+        sec.body.appendChild(row);
+      }
+      if ((d.consumable_talismans || []).length) {
+        const row = el('div', 'chip-row');
+        for (const x of d.consumable_talismans) row.appendChild(el('span', 'chip', x.name + ' ×' + x.count));
+        sec.body.appendChild(el('p', 'prose', 'Talismans'));
+        sec.body.appendChild(row);
+      }
+      app.appendChild(sec.section);
+    }
+
+    if ((d.transformations_top || []).length) {
+      const sec = card('Transformation successors', null);
+      addTable(sec.body, [{ label: 'Pattern' }, { label: 'Count', align: 'right' }],
+        d.transformations_top.map((x) => [x.name, String(x.count)]));
+      app.appendChild(sec.section);
+    }
+
+    if ((d.relics_bought || []).length) {
+      const sec = card('Relics', 'Shop purchases');
+      addTable(sec.body,
+        [{ label: 'Relic' }, { label: 'Bought', align: 'right' }, { label: 'Won', align: 'right' }, { label: 'Win%', align: 'right' }],
+        d.relics_bought.map((row) => [row.name, String(row.bought), String(row.won), row.win_pct.toFixed(1) + '%']));
+      if ((d.relics_by_win_rate || []).length) {
+        const baseline = (pr.win_rate_pct ?? 0).toFixed(1);
+        sec.body.appendChild(el('h3', 'dash-card__subhead', 'Win rate vs baseline (≥20 buys · baseline ' + baseline + '%)'));
+        const deltaRows = d.relics_by_win_rate.map((row) => {
+          const cell = el('span', row.delta_vs_baseline_pct >= 0 ? 'delta-pos' : 'delta-neg',
+            (row.delta_vs_baseline_pct >= 0 ? '+' : '') + row.delta_vs_baseline_pct.toFixed(1));
+          return [row.name, String(row.bought), String(row.won), row.win_pct.toFixed(1) + '%', cell];
+        });
+        addTable(sec.body,
+          [{ label: 'Relic' }, { label: 'Bought', align: 'right' }, { label: 'Won', align: 'right' }, { label: 'Win%', align: 'right' }, { label: 'Δ', align: 'right' }],
+          deltaRows);
+      }
+      app.appendChild(sec.section);
+    }
+
+    function perRunTable(title, subtitle, rows) {
+      if (!rows || !rows.length) return;
+      const sec = card(title, subtitle);
+      addTable(sec.body,
+        [{ label: 'Item' }, { label: 'Count', align: 'right' }, { label: '/run', align: 'right' }],
+        rows.map((row) => [row.name, String(row.count), row.per_run.toFixed(2)]));
+      app.appendChild(sec.section);
+    }
+    perRunTable('Talismans bought', 'Shop', d.talismans_shop);
+    perRunTable('Zodiacs acquired', 'Shop', d.zodiacs_shop);
+    perRunTable('Packs bought', null, d.packs_shop);
+
+    if (d.yaku) {
+      const y = d.yaku;
+      const sec = card('Yaku distribution',
+        'Total ' + y.total_awards + ' awards (' + y.awards_per_run.toFixed(2) + '/run); uniform ' + y.uniform_baseline_pct.toFixed(1) + '% · ' + y.kind_count + ' kinds');
+      const yRows = y.rows.map((row) => {
+        const cell = el('span', row.delta_uniform_pct >= 0 ? 'delta-pos' : 'delta-neg',
+          (row.delta_uniform_pct >= 0 ? '+' : '') + row.delta_uniform_pct.toFixed(1) + '%');
+        return [row.name, String(row.awards), row.per_run.toFixed(2), row.share_pct.toFixed(1) + '%', cell];
+      });
+      addTable(sec.body,
+        [{ label: 'Yaku' }, { label: 'Awards', align: 'right' }, { label: '/run', align: 'right' }, { label: 'Share', align: 'right' }, { label: 'Δ uni', align: 'right' }],
+        yRows);
+      if ((y.never_awarded || []).length) {
+        sec.body.appendChild(el('p', 'prose', 'Never awarded (' + y.never_awarded.length + ' kinds): ' + y.never_awarded.join(', ')));
+      }
+      app.appendChild(sec.section);
+    }
+
+    if (d.bot_issues) {
+      const bi = d.bot_issues;
+      const sec = card('Bot terminal issues', 'Dead-ends and diagnostics');
+      if (bi.dead_end_total > 0) {
+        sec.body.appendChild(el('p', 'prose', 'Dead-ends: total ' + bi.dead_end_total +
+          ' · no-valid ' + bi.no_valid + ' · unplayable-only ' + bi.only_unplayable +
+          ' · no-score-only ' + bi.only_no_score + ' · other ' + bi.other));
+      }
+      if (bi.lost_with_lines > 0) sec.body.appendChild(el('p', 'prose', 'Lost with scoring lines available: ' + bi.lost_with_lines));
+      function chips(label, pairs) {
+        if (!pairs || !pairs.length) return;
+        sec.body.appendChild(el('p', 'prose', label));
+        const row = el('div', 'chip-row');
+        for (const [a, b] of pairs) row.appendChild(el('span', 'chip', a + ': ' + b));
+        sec.body.appendChild(row);
+      }
+      chips('Hottest blinds', bi.hottest_blinds);
+      chips('Hottest bosses', bi.hottest_bosses);
+      chips('Reasons', bi.reasons_top);
+      app.appendChild(sec.section);
+    }
+
+    for (const tbl of d.supplementary_tables || []) {
+      if (!tbl.rows || !tbl.rows.length) continue;
+      const sec = card(tbl.title, 'From `aggregate.maps`');
+      addTable(sec.body, [{ label: 'Key' }, { label: 'Σ', align: 'right' }],
+        tbl.rows.map((row) => [row.name, String(row.count)]));
+      app.appendChild(sec.section);
+    }
+  }
+
+  try {
+    const data = decodePayload();
+    if (data.schema_version !== 2) {
+      app.appendChild(el('div', 'error', 'Expected export schema_version 2; got ' + data.schema_version + '. Re-run `mahjuro bot -o report.html`.'));
+    } else {
+      renderV2(data);
+    }
+  } catch (e) {
+    app.appendChild(el('div', 'error', 'Failed to load embedded bot JSON: ' + e));
+  }
+})();
+</script>
+</body>
+</html>

@@ -31,12 +31,15 @@ use crate::game::event_bus::{EventBus, GameEvent};
 use crate::game::game_mode::GameMode;
 use crate::game::run::{FINAL_ANTE, RunState, relic_eligible_for_shop_stock};
 
+mod export_schema;
 mod reporting;
 mod stats;
+mod stats_derived;
 
 pub use reporting::{
-    BotConfig, BotRunOptions, BotStrategy, StrategyFile, run_forced_relic_sweep, run_headless,
-    run_headless_aggregate, run_strategy_sweep, run_sweep,
+    BotConfig, BotOutputFormat, BotOutputTarget, BotRunOptions, BotStrategy, HeadlessBotBatch,
+    StrategyFile, run_forced_relic_sweep, run_headless, run_headless_aggregate, run_strategy_sweep,
+    run_sweep,
 };
 use stats::clear_payout_breakdown;
 pub use stats::{AggregateStats, RunStats};
@@ -87,13 +90,8 @@ macro_rules! bot_log {
     };
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-struct ClearPayoutBreakdown {
-    base_reward: u32,
-    unused_play_bonus: u32,
-    interest: u32,
-    relic_bonus: u32,
-    total: u32,
+fn blind_slot_key(run: &RunState) -> String {
+    format!("{:02}-{}", run.ante, run.blind.name())
 }
 
 fn blind_log_label(run: &RunState, blind: BlindKind) -> String {
@@ -131,26 +129,6 @@ fn fmt_indices(indices: &[usize]) -> impl fmt::Display + '_ {
 
 fn current_boss_name(run: &RunState) -> Option<&'static str> {
     run.boss.upcoming.map(|boss| boss.name())
-}
-
-fn format_top_counts(
-    counts: &std::collections::BTreeMap<String, u32>,
-    limit: usize,
-) -> Option<String> {
-    if counts.is_empty() {
-        return None;
-    }
-
-    let mut items: Vec<(&String, &u32)> = counts.iter().collect();
-    items.sort_by(|(ka, va), (kb, vb)| vb.cmp(va).then_with(|| ka.cmp(kb)));
-    Some(
-        items
-            .into_iter()
-            .take(limit)
-            .map(|(name, count)| format!("{name} x{count}"))
-            .collect::<Vec<_>>()
-            .join(", "),
-    )
 }
 
 #[derive(Debug, Default)]
@@ -192,35 +170,32 @@ fn analyze_hand_options(
     }
 
     let mut analysis = HandOptionAnalysis::default();
+    let mut ctx = bot_score_context_base(run, &run.relics, None);
+    let base_set_len = run.structure_sets().len();
+    let base_tile_len = run.structure_tiles().len();
+    let mut merged_sets = run.structure_sets().to_vec();
+    let mut merged_tiles = run.structure_tiles().to_vec();
     for mask in enumerate_candidate_play_masks(hand, rules) {
-        let indices: Vec<usize> = (0..n).filter(|i| mask & (1 << i) != 0).collect();
-        let tiles: Vec<Tile> = indices.iter().map(|&i| hand[i]).collect();
+        let tiles = tiles_from_play_mask(hand, n, mask);
         let Some((sets, scoring_tiles)) = run.try_validate_with_wildcards(&tiles) else {
             continue;
         };
 
         analysis.valid_count += 1;
 
-        if run.uses_structure_bank() {
-            let kongs_after = run
-                .structure_sets()
-                .iter()
-                .chain(sets.iter())
-                .filter(|s| s.kind == SetKind::Kong)
-                .count();
-            if run.structure_tiles().len() + scoring_tiles.len()
-                > crate::game::run::HAND_SIZE + kongs_after
-            {
-                continue;
-            }
+        if !structure_bank_allows_commit(run, scoring_tiles.len(), &sets) {
+            continue;
         }
         analysis.committable_count += 1;
 
-        let mut merged_sets = run.structure_sets().to_vec();
+        merged_sets.truncate(base_set_len);
         merged_sets.extend(sets.iter().cloned());
-        let mut merged_tiles = run.structure_tiles().to_vec();
+        merged_tiles.truncate(base_tile_len);
         merged_tiles.extend(scoring_tiles.iter().copied());
-        let ctx = ctx_for_merged_commit(run, &run.relics, &merged_sets, None);
+        ctx.structure = Some(StructureTriggerMeta {
+            meld_count: merged_sets.len() as u32,
+            inject_chicken_if_no_yaku: true,
+        });
         let breakdown = score_sets_with_original(&merged_tiles, &merged_sets, &ctx, rules, &tiles);
         if breakdown.total > 0 {
             analysis.positive_score_count += 1;
@@ -280,19 +255,15 @@ fn record_terminal_hand_issue(stats: &mut RunStats, run: &RunState, cause: Termi
     }
 }
 
-/// Score context for evaluating a **commit** (merged structure + new melds) as if triggered.
-fn ctx_for_merged_commit<'a>(
+/// Score context shared across all candidate masks for one `evaluate_play_masks` / analysis pass.
+/// Only [`ScoreContext::structure`] changes per mask (meld count for structure-depth relics).
+fn bot_score_context_base<'a>(
     run: &'a RunState,
     relics: &'a RelicState,
-    merged_sets: &[crate::core::hand::DetectedSet],
-    yaku_levels: Option<&YakuLevels>,
+    yaku_levels_override: Option<&YakuLevels>,
 ) -> ScoreContext<'a> {
     let plays_rem_after = run.plays_remaining.saturating_sub(1);
     let plays_used_after = run.plays_max.saturating_sub(plays_rem_after);
-    let meta = StructureTriggerMeta {
-        meld_count: merged_sets.len() as u32,
-        inject_chicken_if_no_yaku: true,
-    };
     ScoreContext {
         relics,
         tile_debuffs: &run.tile_debuffs,
@@ -302,7 +273,7 @@ fn ctx_for_merged_commit<'a>(
         round_wind: Some(BlindKind::round_wind_for_ante(run.ante)),
         plays_used: plays_used_after,
         yaku_levels: Some(
-            yaku_levels
+            yaku_levels_override
                 .cloned()
                 .unwrap_or_else(|| run.yaku_levels.clone()),
         ),
@@ -312,8 +283,174 @@ fn ctx_for_merged_commit<'a>(
         is_final_play: plays_rem_after == 0,
         relic_counters: run.relic_counters.clone(),
         hand_for_ghost: run.hand(),
-        structure: Some(meta),
+        structure: None,
     }
+}
+
+fn tiles_from_play_mask(hand: &[Tile], hand_len: usize, mask: u32) -> Vec<Tile> {
+    let count = mask.count_ones() as usize;
+    let mut tiles = Vec::with_capacity(count);
+    for (i, &tile) in hand.iter().enumerate().take(hand_len) {
+        if mask & (1 << i) != 0 {
+            tiles.push(tile);
+        }
+    }
+    tiles
+}
+
+fn indices_from_play_mask(hand_len: usize, mask: u32) -> Vec<usize> {
+    (0..hand_len).filter(|i| mask & (1 << i) != 0).collect()
+}
+
+/// Whether committing `new_sets` with `scoring_tile_count` tiles fits the structure bank.
+fn structure_bank_allows_commit(
+    run: &RunState,
+    scoring_tile_count: usize,
+    new_sets: &[crate::core::hand::DetectedSet],
+) -> bool {
+    if !run.uses_structure_bank() {
+        return true;
+    }
+    let kongs_after = run
+        .structure_sets()
+        .iter()
+        .chain(new_sets.iter())
+        .filter(|s| s.kind == SetKind::Kong)
+        .count();
+    run.structure_tiles().len() + scoring_tile_count
+        <= crate::game::run::HAND_SIZE + kongs_after
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct PlayRank {
+    score: u64,
+    meld_count: usize,
+    tile_count: usize,
+}
+
+/// Best play from an explicit candidate mask list (used by [`best_play_in_hand`] and benches).
+fn evaluate_play_masks(
+    run: &RunState,
+    hand: &[Tile],
+    rules: &[RuleModifier],
+    relics_override: Option<&RelicState>,
+    yaku_levels_override: Option<&YakuLevels>,
+    masks: &[u32],
+) -> Option<(u64, Vec<usize>)> {
+    let n = hand.len();
+    if !(2..=20).contains(&n) {
+        return None;
+    }
+    let relics = relics_override.unwrap_or(&run.relics);
+    let mut ctx = bot_score_context_base(run, relics, yaku_levels_override);
+    let base_set_len = run.structure_sets().len();
+    let base_tile_len = run.structure_tiles().len();
+    let mut merged_sets = run.structure_sets().to_vec();
+    let mut merged_tiles = run.structure_tiles().to_vec();
+    let mut best: Option<(PlayRank, Vec<usize>)> = None;
+    for &mask in masks {
+        let tiles = tiles_from_play_mask(hand, n, mask);
+        let Some(sets) = validate_selection_with_rules(&tiles, rules) else {
+            continue;
+        };
+        if !structure_bank_allows_commit(run, tiles.len(), &sets) {
+            continue;
+        }
+        merged_sets.truncate(base_set_len);
+        merged_sets.extend(sets.iter().cloned());
+        merged_tiles.truncate(base_tile_len);
+        merged_tiles.extend(tiles.iter().copied());
+        ctx.structure = Some(StructureTriggerMeta {
+            meld_count: merged_sets.len() as u32,
+            inject_chicken_if_no_yaku: true,
+        });
+        let breakdown = score_sets_with_original(&merged_tiles, &merged_sets, &ctx, rules, &tiles);
+        if breakdown.total == 0 {
+            continue;
+        }
+        let rank = PlayRank {
+            score: breakdown.total,
+            meld_count: sets.len(),
+            tile_count: tiles.len(),
+        };
+        let indices = indices_from_play_mask(n, mask);
+        if best
+            .as_ref()
+            .map(|(best_rank, _)| rank > *best_rank)
+            .unwrap_or(true)
+        {
+            best = Some((rank, indices));
+        }
+    }
+    best.map(|(rank, indices)| (rank.score, indices))
+}
+
+/// Masks that pass meld validation and structure-bank checks (still may score to zero).
+fn masks_passing_validate_and_structure(
+    run: &RunState,
+    hand: &[Tile],
+    rules: &[RuleModifier],
+    masks: &[u32],
+) -> usize {
+    let n = hand.len();
+    if !(2..=20).contains(&n) {
+        return 0;
+    }
+    let mut hits = 0usize;
+    for &mask in masks {
+        let tiles = tiles_from_play_mask(hand, n, mask);
+        let Some(sets) = validate_selection_with_rules(&tiles, rules) else {
+            continue;
+        };
+        if structure_bank_allows_commit(run, tiles.len(), &sets) {
+            hits += 1;
+        }
+    }
+    hits
+}
+
+/// Masks that reach a positive score after full relic/yaku evaluation.
+fn masks_with_positive_score(
+    run: &RunState,
+    hand: &[Tile],
+    rules: &[RuleModifier],
+    masks: &[u32],
+    relics_override: Option<&RelicState>,
+    yaku_levels_override: Option<&YakuLevels>,
+) -> usize {
+    let n = hand.len();
+    if !(2..=20).contains(&n) {
+        return 0;
+    }
+    let relics = relics_override.unwrap_or(&run.relics);
+    let mut ctx = bot_score_context_base(run, relics, yaku_levels_override);
+    let base_set_len = run.structure_sets().len();
+    let base_tile_len = run.structure_tiles().len();
+    let mut merged_sets = run.structure_sets().to_vec();
+    let mut merged_tiles = run.structure_tiles().to_vec();
+    let mut hits = 0usize;
+    for &mask in masks {
+        let tiles = tiles_from_play_mask(hand, n, mask);
+        let Some(sets) = validate_selection_with_rules(&tiles, rules) else {
+            continue;
+        };
+        if !structure_bank_allows_commit(run, tiles.len(), &sets) {
+            continue;
+        }
+        merged_sets.truncate(base_set_len);
+        merged_sets.extend(sets.iter().cloned());
+        merged_tiles.truncate(base_tile_len);
+        merged_tiles.extend(tiles.iter().copied());
+        ctx.structure = Some(StructureTriggerMeta {
+            meld_count: merged_sets.len() as u32,
+            inject_chicken_if_no_yaku: true,
+        });
+        let breakdown = score_sets_with_original(&merged_tiles, &merged_sets, &ctx, rules, &tiles);
+        if breakdown.total > 0 {
+            hits += 1;
+        }
+    }
+    hits
 }
 
 /// Find the best (score, indices) commit from `hand`, merging into the current structure.
@@ -325,66 +462,15 @@ fn best_play_in_hand(
     relics_override: Option<&RelicState>,
     yaku_levels_override: Option<&YakuLevels>,
 ) -> Option<(u64, Vec<usize>)> {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-    struct PlayRank {
-        score: u64,
-        meld_count: usize,
-        tile_count: usize,
-    }
-
-    let n = hand.len();
-    if !(2..=20).contains(&n) {
-        return None;
-    }
-    let relics = relics_override.unwrap_or(&run.relics);
-    let mut best: Option<(PlayRank, Vec<usize>)> = None;
-    for mask in enumerate_candidate_play_masks(hand, rules) {
-        let count = mask.count_ones() as usize;
-        let mut tiles: Vec<Tile> = Vec::with_capacity(count);
-        for (i, &tile) in hand.iter().enumerate().take(n) {
-            if mask & (1 << i) != 0 {
-                tiles.push(tile);
-            }
-        }
-        let Some(sets) = validate_selection_with_rules(&tiles, rules) else {
-            continue;
-        };
-        if run.uses_structure_bank() {
-            let kongs_after = run
-                .structure_sets()
-                .iter()
-                .chain(sets.iter())
-                .filter(|s| s.kind == SetKind::Kong)
-                .count();
-            if run.structure_tiles().len() + tiles.len() > crate::game::run::HAND_SIZE + kongs_after
-            {
-                continue;
-            }
-        }
-        let mut merged_sets = run.structure_sets().to_vec();
-        merged_sets.extend(sets.iter().cloned());
-        let mut merged_tiles = run.structure_tiles().to_vec();
-        merged_tiles.extend(tiles.iter().copied());
-        let ctx = ctx_for_merged_commit(run, relics, &merged_sets, yaku_levels_override);
-        let breakdown = score_sets_with_original(&merged_tiles, &merged_sets, &ctx, rules, &tiles);
-        if breakdown.total == 0 {
-            continue;
-        }
-        let rank = PlayRank {
-            score: breakdown.total,
-            meld_count: sets.len(),
-            tile_count: tiles.len(),
-        };
-        let indices: Vec<usize> = (0..n).filter(|i| mask & (1 << i) != 0).collect();
-        if best
-            .as_ref()
-            .map(|(best_rank, _)| rank > *best_rank)
-            .unwrap_or(true)
-        {
-            best = Some((rank, indices));
-        }
-    }
-    best.map(|(rank, indices)| (rank.score, indices))
+    let masks = enumerate_candidate_play_masks(hand, rules);
+    evaluate_play_masks(
+        run,
+        hand,
+        rules,
+        relics_override,
+        yaku_levels_override,
+        &masks,
+    )
 }
 
 #[derive(Clone, Copy)]
@@ -765,6 +851,54 @@ pub fn pick_best_play(run: &RunState) -> Option<(u64, Vec<usize>)> {
     best_play_in_hand(run, &run.hand(), &run.round_rules, None, None)
 }
 
+/// Demo [`RunState`] with `tiles` as the current hand (sorted). For benches/tests only.
+#[doc(hidden)]
+pub fn bench_fixture_run(mut tiles: Vec<Tile>) -> RunState {
+    let mut run = RunState::new_demo();
+    tiles.sort();
+    *run.hand_mut() = tiles;
+    run
+}
+
+/// Candidate play bitmasks for `hand` under `rules` (Criterion: pair with [`bench_evaluate_play_masks`]).
+#[doc(hidden)]
+pub fn bench_enumerate_play_masks(hand: &[Tile], rules: &[RuleModifier]) -> Vec<u32> {
+    enumerate_candidate_play_masks(hand, rules)
+}
+
+/// Full scoring pass over precomputed masks (enumeration excluded).
+#[doc(hidden)]
+pub fn bench_evaluate_play_masks(
+    run: &RunState,
+    hand: &[Tile],
+    rules: &[RuleModifier],
+    masks: &[u32],
+) -> Option<(u64, Vec<usize>)> {
+    evaluate_play_masks(run, hand, rules, None, None, masks)
+}
+
+/// Count masks that pass validation + structure-bank checks (before scoring).
+#[doc(hidden)]
+pub fn bench_count_masks_validate_structure(
+    run: &RunState,
+    hand: &[Tile],
+    rules: &[RuleModifier],
+    masks: &[u32],
+) -> usize {
+    masks_passing_validate_and_structure(run, hand, rules, masks)
+}
+
+/// Count masks that yield a positive score (includes full scoring work).
+#[doc(hidden)]
+pub fn bench_count_masks_positive_score(
+    run: &RunState,
+    hand: &[Tile],
+    rules: &[RuleModifier],
+    masks: &[u32],
+) -> usize {
+    masks_with_positive_score(run, hand, rules, masks, None, None)
+}
+
 /// Rate each tile by how many *potential* melds in the current hand it participates in.
 /// A tile that appears in zero detected sets is "isolated" and a prime discard target.
 /// Returns a vector parallel to `hand` containing usage counts.
@@ -831,7 +965,11 @@ enum PlayBlindOutcome {
 
 /// Drains scoring / refill events. A `RoundComplete` with `reached_target: false` is Second
 /// Wind: apply the forfeit transition immediately (matches deferred UI handling).
-fn drain_post_action_bus(run: &mut RunState, bus: &mut EventBus) -> Option<PlayBlindOutcome> {
+fn drain_post_action_bus(
+    run: &mut RunState,
+    bus: &mut EventBus,
+    stats: &mut RunStats,
+) -> Option<PlayBlindOutcome> {
     let events: Vec<GameEvent> = bus.drain().collect();
     for ev in events {
         match ev {
@@ -848,14 +986,36 @@ fn drain_post_action_bus(run: &mut RunState, bus: &mut EventBus) -> Option<PlayB
                 run.forfeit_current_blind_second_wind(bus);
                 return Some(PlayBlindOutcome::SecondWindForfeit);
             }
+            GameEvent::YakuScored(yk) => {
+                *stats.yaku_scored.entry(yk.name()).or_insert(0) += 1;
+            }
+            GameEvent::RelicActivated(id) => {
+                *stats
+                    .relic_activations
+                    .entry(relic_display_name(id))
+                    .or_insert(0) += 1;
+            }
+            GameEvent::TalismanUsed(kind) => {
+                *stats.talismans_used.entry(kind.name()).or_insert(0) += 1;
+            }
+            GameEvent::TilesDestroyed => {
+                stats.tiles_destroyed += 1;
+            }
+            GameEvent::TransformationSuccessorDiscovered(id) => {
+                *stats
+                    .transformations_successor
+                    .entry(relic_display_name(id))
+                    .or_insert(0) += 1;
+            }
             _ => {}
         }
     }
     None
 }
 
-/// Play the current blind to completion.
-fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> PlayBlindOutcome {
+/// Play the current blind to completion. Returns outcome and the number of **decision
+/// turns** taken this blind (incremented once per loop iteration after failure checks).
+fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> (PlayBlindOutcome, u32) {
     let mut bus = EventBus::default();
     let mut rng = rand::rng();
     let mut turn = 0u32;
@@ -869,9 +1029,10 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> PlayBlindO
                 run.round_score,
                 run.target_score
             );
-            return PlayBlindOutcome::Cleared;
+            return (PlayBlindOutcome::Cleared, turn);
         }
         if let Some(reason) = run.round_failure_reason() {
+            stats.death_reason = Some(reason);
             let cause = match reason {
                 GameOverReason::OutOfPlays => TerminalIssueCause::OutOfPlays,
                 GameOverReason::NoActionsRemaining => TerminalIssueCause::NoActionsRemaining,
@@ -884,9 +1045,15 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> PlayBlindO
                 run.round_score,
                 run.target_score
             );
-            return PlayBlindOutcome::LostRun;
+            return (PlayBlindOutcome::LostRun, turn);
         }
         turn += 1;
+        let slot = blind_slot_key(run);
+        *stats.turns_by_blind_slot.entry(slot).or_insert(0) += 1;
+        stats.turns_total += 1;
+        stats.peak_hand_size = stats
+            .peak_hand_size
+            .max(run.hand().len() as u32);
 
         bot_log!(
             log,
@@ -900,7 +1067,7 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> PlayBlindO
             run.gold
         );
 
-        if use_bot_consumables(run, log) {
+        if use_bot_consumables(run, stats, log) {
             continue;
         }
 
@@ -919,6 +1086,8 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> PlayBlindO
             && (best_score == 0 || trigger_preview >= best_score)
         {
             let earned = run.trigger_structure_manual(&mut bus);
+            stats.structure_triggers += 1;
+            stats.structure_trigger_points += earned;
             if earned > 0 {
                 bot_log!(
                     log,
@@ -926,10 +1095,13 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> PlayBlindO
                     earned,
                     best_score
                 );
-                if drain_post_action_bus(run, &mut bus) == Some(PlayBlindOutcome::SecondWindForfeit)
-                {
-                    return PlayBlindOutcome::SecondWindForfeit;
-                }
+            }
+            if drain_post_action_bus(run, &mut bus, stats)
+                == Some(PlayBlindOutcome::SecondWindForfeit)
+            {
+                return (PlayBlindOutcome::SecondWindForfeit, turn);
+            }
+            if earned > 0 {
                 continue;
             }
         }
@@ -972,9 +1144,14 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> PlayBlindO
                 run.discard_selected(&mut bus);
                 stats.discards_used += 1;
                 stats.strategic_discards += 1;
-                if drain_post_action_bus(run, &mut bus) == Some(PlayBlindOutcome::SecondWindForfeit)
+                *stats
+                    .discards_by_blind_slot
+                    .entry(blind_slot_key(run))
+                    .or_insert(0) += 1;
+                if drain_post_action_bus(run, &mut bus, stats)
+                    == Some(PlayBlindOutcome::SecondWindForfeit)
                 {
-                    return PlayBlindOutcome::SecondWindForfeit;
+                    return (PlayBlindOutcome::SecondWindForfeit, turn);
                 }
                 did_discard = true;
             }
@@ -1009,11 +1186,13 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> PlayBlindO
                 run.clear_selection();
                 for _ in bus.drain() {}
                 record_terminal_hand_issue(stats, run, TerminalIssueCause::RejectedChosenPlay);
-                return PlayBlindOutcome::LostRun;
+                return (PlayBlindOutcome::LostRun, turn);
             }
             stats.plays_used += 1;
-            if drain_post_action_bus(run, &mut bus) == Some(PlayBlindOutcome::SecondWindForfeit) {
-                return PlayBlindOutcome::SecondWindForfeit;
+            if drain_post_action_bus(run, &mut bus, stats)
+                == Some(PlayBlindOutcome::SecondWindForfeit)
+            {
+                return (PlayBlindOutcome::SecondWindForfeit, turn);
             }
             continue;
         }
@@ -1023,14 +1202,14 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> PlayBlindO
         if run.discards_remaining == 0 {
             record_terminal_hand_issue(stats, run, TerminalIssueCause::NoDiscardsRemaining);
             bot_log!(log, "      action: no discards remaining");
-            return PlayBlindOutcome::LostRun;
+            return (PlayBlindOutcome::LostRun, turn);
         }
         run.clear_selection();
         let hand_n = run.hand().len();
         if hand_n == 0 {
             record_terminal_hand_issue(stats, run, TerminalIssueCause::EmptyHand);
             bot_log!(log, "      action: hand empty, cannot continue");
-            return PlayBlindOutcome::LostRun;
+            return (PlayBlindOutcome::LostRun, turn);
         }
         let drop_n = rng.random_range(1..=hand_n.min(5));
         let mut indices: Vec<usize> = (0..hand_n).collect();
@@ -1046,8 +1225,13 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> PlayBlindO
         }
         run.discard_selected(&mut bus);
         stats.discards_used += 1;
-        if drain_post_action_bus(run, &mut bus) == Some(PlayBlindOutcome::SecondWindForfeit) {
-            return PlayBlindOutcome::SecondWindForfeit;
+        *stats
+            .discards_by_blind_slot
+            .entry(blind_slot_key(run))
+            .or_insert(0) += 1;
+        if drain_post_action_bus(run, &mut bus, stats) == Some(PlayBlindOutcome::SecondWindForfeit)
+        {
+            return (PlayBlindOutcome::SecondWindForfeit, turn);
         }
     }
 }
@@ -1057,7 +1241,7 @@ mod tests {
     use super::{
         best_play_in_hand, enumerate_candidate_play_masks, pick_best_play,
         remaining_antes_including_current, scale_long_term_value_for_ante, talisman_marginal_value,
-        use_bot_consumables, zodiac_marginal_value,
+        use_bot_consumables, zodiac_marginal_value, RunStats,
     };
     use crate::core::consumable::Consumable;
     use crate::core::hand::{DetectedSet, SetKind};
@@ -1114,7 +1298,11 @@ mod tests {
             merged_sets.extend(sets.iter().cloned());
             let mut merged_tiles = run.structure_tiles().to_vec();
             merged_tiles.extend(tiles.iter().copied());
-            let ctx = super::ctx_for_merged_commit(run, &run.relics, &merged_sets, None);
+            let mut ctx = super::bot_score_context_base(run, &run.relics, None);
+            ctx.structure = Some(super::StructureTriggerMeta {
+                meld_count: merged_sets.len() as u32,
+                inject_chicken_if_no_yaku: true,
+            });
             let total = crate::core::scoring::score_sets_with_original(
                 &merged_tiles,
                 &merged_sets,
@@ -1371,7 +1559,7 @@ mod tests {
             Consumable::Talisman(TalismanKind::Pearl),
         ];
 
-        assert!(use_bot_consumables(&mut run, false));
+        assert!(use_bot_consumables(&mut run, &mut RunStats::default(), false));
         assert_eq!(run.yaku_levels.level_of(ZodiacKind::Ox.yaku()), 2);
         assert!(
             run.hand().iter().all(|tile| tile.enhancement.is_some()),
@@ -1829,7 +2017,7 @@ fn pack_marginal_value(run: &RunState, kind: TilePackKind) -> i32 {
     scale_long_term_value_for_ante(avg, run.ante)
 }
 
-fn use_bot_consumables(run: &mut RunState, log: bool) -> bool {
+fn use_bot_consumables(run: &mut RunState, stats: &mut RunStats, log: bool) -> bool {
     let mut used_any = false;
 
     while let Some(idx) = run
@@ -1843,6 +2031,7 @@ fn use_bot_consumables(run: &mut RunState, log: bool) -> bool {
             Consumable::Talisman(_) => unreachable!(),
         };
         let _ = run.use_consumable(idx, &mut crate::game::event_bus::EventBus::default());
+        *stats.zodiacs_used.entry(zodiac.name()).or_insert(0) += 1;
         bot_log!(log, "      action: use zodiac {:?}", zodiac);
         used_any = true;
     }
@@ -1896,6 +2085,7 @@ fn use_bot_consumables(run: &mut RunState, log: bool) -> bool {
             }
         }
         let _ = run.use_consumable(idx, &mut crate::game::event_bus::EventBus::default());
+        *stats.talismans_used.entry(kind.name()).or_insert(0) += 1;
         bot_log!(
             log,
             "      action: use talisman {:?} (+{} projected best-play value from {})",
@@ -2268,7 +2458,7 @@ fn play_run_with_options(
         if let Some(boss_name) = &boss_for_this_blind {
             stats.boss_faced.insert(boss_name.clone(), 1);
         }
-        let outcome = play_blind(&mut run, &mut stats, log);
+        let (outcome, blind_turns) = play_blind(&mut run, &mut stats, log);
         stats.total_score += run.round_score;
         stats.peak_blind_score = stats.peak_blind_score.max(run.round_score);
         stats.died_on_ante = run.ante;
@@ -2290,6 +2480,7 @@ fn play_run_with_options(
             break;
         }
         if outcome == PlayBlindOutcome::SecondWindForfeit {
+            stats.second_wind_forfeits += 1;
             bot_log!(
                 log,
                 "  second wind — forfeited blind; gold {} | next {:?}",
@@ -2303,6 +2494,10 @@ fn play_run_with_options(
         let blind_overscore = run.round_score.saturating_sub(run.target_score as u64);
         stats.total_overscore += blind_overscore;
         let slot_key = format!("{:02}-{}", run.ante, blind.name());
+        *stats
+            .turns_cleared_by_slot
+            .entry(slot_key.clone())
+            .or_insert(0) += blind_turns;
         *stats.overscore_by_slot.entry(slot_key.clone()).or_insert(0) += blind_overscore;
         *stats.cleared_by_slot.entry(slot_key).or_insert(0) += 1;
         if matches!(blind, BlindKind::Boss) {
@@ -2314,6 +2509,10 @@ fn play_run_with_options(
         stats.gold_from_unused_plays += payout.unused_play_bonus;
         stats.gold_from_interest += payout.interest;
         stats.gold_from_clear_relics += payout.relic_bonus;
+        stats.gold_clear_green_luck += payout.green_luck_bonus;
+        stats.gold_clear_gold_idol += payout.gold_idol_bonus;
+        stats.gold_clear_jade_abacus += payout.jade_abacus_bonus;
+        stats.gold_clear_patience += payout.patience_bonus;
 
         bot_log!(
             log,
@@ -2330,6 +2529,19 @@ fn play_run_with_options(
         visit_shop(&mut run, &mut stats, log, &strategy);
     }
 
+    stats.final_relics = run
+        .relics
+        .active
+        .iter()
+        .map(|&id| relic_display_name(id).to_string())
+        .collect();
+    stats.final_consumables = run
+        .consumables
+        .items
+        .iter()
+        .map(|c| c.name())
+        .collect();
+    stats.final_yaku_levels = run.yaku_levels.clone();
     stats.final_gold = run.gold;
     bot_log!(log, "== bot run stats: {:?} ==", stats);
     stats

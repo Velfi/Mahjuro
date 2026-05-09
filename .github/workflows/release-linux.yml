@@ -1,0 +1,164 @@
+name: Release build (Linux)
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  build:
+    name: Release Linux
+    runs-on: ubuntu-latest
+
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release_tag }}
+          lfs: true
+
+      - name: Compute version (strip leading v)
+        id: version
+        shell: bash
+        run: |
+          TAG="${RELEASE_TAG}"
+          VERSION="${TAG#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwayland-dev \
+            libxkbcommon-dev \
+            libasound2-dev \
+            libudev-dev \
+            pkg-config \
+            libx11-dev \
+            libxi-dev \
+            libxrandr-dev \
+            libxss-dev \
+            libxcursor-dev \
+            libvulkan-dev \
+            libgtk-3-dev \
+            libxdo-dev \
+            libfuse2 \
+            xvfb
+
+      # Exit 143 (SIGTERM) on Linux is often OOM during parallel rustc + linker.
+      # Extra swap + fewer jobs keeps peak RSS below hosted-runner limits (release
+      # builds are heavier than CI debug builds).
+      - name: Linux — swap and compile job limit
+        run: |
+          SWAPFILE=/home/runner/cargo_extra.swap
+          sudo fallocate -l 8G "$SWAPFILE" || sudo dd if=/dev/zero of="$SWAPFILE" bs=1M count=8192 status=none
+          sudo chmod 600 "$SWAPFILE"
+          sudo mkswap "$SWAPFILE"
+          sudo swapon "$SWAPFILE"
+          echo "CARGO_BUILD_JOBS=2" >> "$GITHUB_ENV"
+
+      - name: Cache Cargo registry and target
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: release-x86_64-unknown-linux-gnu-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            release-x86_64-unknown-linux-gnu-cargo-
+
+      - name: Run tests (Linux)
+        run: xvfb-run --auto-servernum cargo test
+
+      - name: Build release
+        run: cargo build --release --target x86_64-unknown-linux-gnu
+
+      - name: Set artifact name
+        id: artifact
+        shell: bash
+        run: |
+          NAME="mahjuro-${RELEASE_TAG}-linux-x86_64"
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "filename=${NAME}.AppImage" >> "$GITHUB_OUTPUT"
+
+      # ──────────────────────────── Linux: AppImage ────────────────────────────
+      - name: Build AppImage (Linux)
+        run: |
+          set -euo pipefail
+          APPDIR="Mahjuro.AppDir"
+          rm -rf "$APPDIR"
+          mkdir -p "$APPDIR/usr/bin"
+
+          cp "target/x86_64-unknown-linux-gnu/release/mahjuro" "$APPDIR/usr/bin/mahjuro"
+          chmod +x "$APPDIR/usr/bin/mahjuro"
+          cp "target/x86_64-unknown-linux-gnu/release/libsteam_api.so" "$APPDIR/usr/bin/"
+          RELEASE_DIR="target/x86_64-unknown-linux-gnu/release"
+          shopt -s nullglob
+          sdl_libs=( "$RELEASE_DIR"/libSDL3.so* )
+          if [[ ${#sdl_libs[@]} -eq 0 ]]; then
+            echo "error: no libSDL3.so in $RELEASE_DIR (sdl3 build-from-source)" >&2
+            ls -la "$RELEASE_DIR"
+            exit 1
+          fi
+          cp "${sdl_libs[@]}" "$APPDIR/usr/bin/"
+          cp packaging/steam_input/game_actions_4636490.vdf "$APPDIR/usr/bin/"
+
+          cp packaging/AppRun "$APPDIR/AppRun"
+          chmod +x "$APPDIR/AppRun"
+
+          cp packaging/mahjuro.desktop "$APPDIR/mahjuro.desktop"
+          cp icon.png "$APPDIR/mahjuro.png"
+
+          # Fetch appimagetool.
+          curl -L -o appimagetool \
+            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+
+          ARCH=x86_64 ./appimagetool "$APPDIR" "${{ steps.artifact.outputs.filename }}"
+
+      - name: Create update archive (Linux)
+        id: update_archive
+        run: |
+          set -euo pipefail
+          ARCHIVE="mahjuro-${RELEASE_TAG}-linux-x86_64.tar.gz"
+          RELEASE_DIR="target/x86_64-unknown-linux-gnu/release"
+          (
+            cd "$RELEASE_DIR"
+            shopt -s nullglob
+            sdl_libs=( libSDL3.so* )
+            if [[ ${#sdl_libs[@]} -eq 0 ]]; then
+              echo "error: no libSDL3.so in $(pwd)" >&2
+              ls -la
+              exit 1
+            fi
+            tar -czf "$OLDPWD/$ARCHIVE" mahjuro libsteam_api.so \
+              "${sdl_libs[@]}" game_actions_4636490.vdf
+          )
+          echo "filename=${ARCHIVE}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.update_archive.outputs.filename }}
+          path: ${{ steps.update_archive.outputs.filename }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.artifact.outputs.filename }}
+          path: ${{ steps.artifact.outputs.filename }}

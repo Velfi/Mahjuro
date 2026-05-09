@@ -16,7 +16,8 @@ pub fn run_cli_command(command: Option<Command>) -> anyhow::Result<bool> {
     // Headless tuning subcommands. Examples:
     //   mahjuro bot
     //   mahjuro bot 200 --base-target 250 --target-scale 1.3 --plays 5
-    //   mahjuro bot --export-json /tmp/bot.json
+    //   mahjuro bot -o /tmp/bot.json
+    //   mahjuro bot -o report.html --output-format html
     //   mahjuro bot-graph 10000 --slug baseline_10k --label "Baseline\n(10k runs)"
     //   mahjuro sweep
     //   mahjuro sweep --runs 50 --export-json /tmp/sweep.json
@@ -65,7 +66,8 @@ pub fn run_cli_command(command: Option<Command>) -> anyhow::Result<bool> {
                 bot_cli.bot_config(),
                 bot::BotRunOptions {
                     log: bot_cli.bot_log,
-                    export_json: bot_cli.export_json.clone(),
+                    output: bot_cli.bot_output_target(),
+                    output_runs: bot_cli.output_runs.clone(),
                 },
             );
             Ok(true)
@@ -82,17 +84,18 @@ pub fn run_cli_command(command: Option<Command>) -> anyhow::Result<bool> {
                 .clone()
                 .unwrap_or_else(|| default_snapshot_label(&mode, bot_graph.runs))
                 .replace("\\n", "\n");
-            let agg = bot::run_headless_aggregate(
+            let batch = bot::run_headless_aggregate(
                 bot_graph.runs,
                 config,
                 bot::BotRunOptions {
                     log: bot_graph.bot_log,
-                    export_json: None,
+                    output: None,
+                    output_runs: None,
                 },
             );
-            agg.print_summary();
+            batch.aggregate.print_summary();
 
-            let snapshot = build_bot_graph_snapshot(&agg, slug.clone(), label);
+            let snapshot = build_bot_graph_snapshot(&batch.aggregate, slug.clone(), label);
             let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"));
             let snapshot_path = repo_root.join("docs").join("bot_balance_runs.json");
             upsert_snapshot(&snapshot_path, snapshot)?;

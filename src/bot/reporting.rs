@@ -1,5 +1,50 @@
 use super::*;
 
+use base64::Engine;
+use clap::ValueEnum;
+
+use crate::bot::export_schema::{BotExportMeta, EXPORT_SCHEMA_VERSION};
+
+/// File format for `mahjuro bot --output-file`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+#[clap(rename_all = "lower")]
+pub enum BotOutputFormat {
+    /// Plain text (same layout as the printed summary).
+    #[default]
+    Txt,
+    Json,
+    Html,
+}
+
+impl BotOutputFormat {
+    pub fn infer_from_path(path: &Path) -> Self {
+        match path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|s| s.to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("json") => Self::Json,
+            Some("htm" | "html") => Self::Html,
+            _ => Self::Txt,
+        }
+    }
+
+    fn export_label(self) -> &'static str {
+        match self {
+            Self::Txt => "text",
+            Self::Json => "JSON",
+            Self::Html => "HTML",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct BotOutputTarget {
+    pub path: PathBuf,
+    pub format: BotOutputFormat,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct BotConfig {
     pub base_target: Option<u32>,
@@ -59,14 +104,58 @@ impl Default for BotStrategy {
 #[derive(Clone, Debug, Default)]
 pub struct BotRunOptions {
     pub log: bool,
-    pub export_json: Option<PathBuf>,
+    pub output: Option<BotOutputTarget>,
+    /// One JSON object per line (`RunStats`) for tooling / quant analysis.
+    pub output_runs: Option<PathBuf>,
+}
+
+#[derive(Debug)]
+pub struct HeadlessBotBatch {
+    pub aggregate: AggregateStats,
+    pub runs: Vec<RunStats>,
 }
 
 #[derive(Serialize)]
-struct BotExport<'a> {
+struct BotExportPayload<'a> {
+    schema_version: u32,
+    meta: BotExportMeta,
     runs: u32,
     mode: &'a GameMode,
-    aggregate: &'a AggregateStats,
+    aggregate: crate::bot::export_schema::BotAggregateV2,
+    derived: crate::bot::export_schema::BotReportDerived,
+}
+
+fn bot_export_value(
+    runs: u32,
+    mode: &GameMode,
+    agg: &AggregateStats,
+) -> anyhow::Result<serde_json::Value> {
+    let ykc = crate::core::yaku::YakuKind::all().len();
+    let payload = BotExportPayload {
+        schema_version: EXPORT_SCHEMA_VERSION,
+        meta: BotExportMeta {
+            yaku_kind_count: ykc,
+            crate_version: env!("CARGO_PKG_VERSION"),
+        },
+        runs,
+        mode,
+        aggregate: agg.to_aggregate_v2(),
+        derived: agg.to_derived(ykc),
+    };
+    Ok(serde_json::to_value(&payload)?)
+}
+
+fn write_runs_jsonl(path: &Path, runs: &[RunStats]) -> anyhow::Result<()> {
+    use std::io::Write;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut f = std::fs::File::create(path)?;
+    for r in runs {
+        serde_json::to_writer(&mut f, r)?;
+        writeln!(f)?;
+    }
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -90,6 +179,47 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> anyhow::Result<()> {
     }
     std::fs::write(path, json)?;
     Ok(())
+}
+
+fn write_bot_html(path: &Path, json_b64: &str) -> anyhow::Result<()> {
+    const TEMPLATE: &str = include_str!("bot_report_template.html");
+    let html = TEMPLATE.replace("__BOT_JSON_B64__", json_b64);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, html)?;
+    Ok(())
+}
+
+fn write_bot_export(
+    target: &BotOutputTarget,
+    runs: u32,
+    mode: &GameMode,
+    agg: &AggregateStats,
+) -> anyhow::Result<()> {
+    if let Some(parent) = target.path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    match target.format {
+        BotOutputFormat::Json => {
+            let v = bot_export_value(runs, mode, agg)?;
+            let json = serde_json::to_string_pretty(&v)?;
+            std::fs::write(&target.path, json)?;
+            Ok(())
+        }
+        BotOutputFormat::Txt => {
+            let mut buf = Vec::new();
+            agg.write_summary(&mut buf)?;
+            std::fs::write(&target.path, buf)?;
+            Ok(())
+        }
+        BotOutputFormat::Html => {
+            let v = bot_export_value(runs, mode, agg)?;
+            let json_compact = serde_json::to_string(&v)?;
+            let b64 = base64::engine::general_purpose::STANDARD.encode(json_compact.as_bytes());
+            write_bot_html(&target.path, &b64)
+        }
+    }
 }
 
 impl BotConfig {
@@ -133,7 +263,7 @@ pub(crate) fn run_with_sequential(n: u32, config: BotConfig) -> AggregateStats {
     agg
 }
 
-pub fn run_headless_aggregate(n: u32, config: BotConfig, options: BotRunOptions) -> AggregateStats {
+pub fn run_headless_aggregate(n: u32, config: BotConfig, options: BotRunOptions) -> HeadlessBotBatch {
     let mode = config.clone().into_mode();
     println!(
         "Running bot for {} runs (base_target={}, target_scaling={}, plays={}, discards={}, gold={}, log={})...",
@@ -176,22 +306,31 @@ pub fn run_headless_aggregate(n: u32, config: BotConfig, options: BotRunOptions)
             );
         }
     }
-    agg
+    HeadlessBotBatch { aggregate: agg, runs }
 }
 
 pub fn run_headless(n: u32, config: BotConfig, options: BotRunOptions) {
     let mode = config.clone().into_mode();
-    let agg = run_headless_aggregate(n, config, options.clone());
-    agg.print_summary();
-    if let Some(path) = options.export_json.as_deref() {
-        let payload = BotExport {
-            runs: n,
-            mode: &mode,
-            aggregate: &agg,
-        };
-        match write_json(path, &payload) {
-            Ok(()) => println!("exported bot JSON to {}", path.display()),
-            Err(err) => eprintln!("failed to export bot JSON to {}: {err}", path.display()),
+    let batch = run_headless_aggregate(n, config, options.clone());
+    batch.aggregate.print_summary();
+    if let Some(ref path) = options.output_runs {
+        match write_runs_jsonl(path, &batch.runs) {
+            Ok(()) => println!("exported {} per-run JSON lines to {}", batch.runs.len(), path.display()),
+            Err(err) => eprintln!("failed to export runs to {}: {err}", path.display()),
+        }
+    }
+    if let Some(ref target) = options.output {
+        match write_bot_export(target, n, &mode, &batch.aggregate) {
+            Ok(()) => println!(
+                "exported bot {} to {}",
+                target.format.export_label(),
+                target.path.display()
+            ),
+            Err(err) => eprintln!(
+                "failed to export bot {} to {}: {err}",
+                target.format.export_label(),
+                target.path.display()
+            ),
         }
     }
 }

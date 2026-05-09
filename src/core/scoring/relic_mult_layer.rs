@@ -1,0 +1,521 @@
+//! Relic-driven **mult** and late **chip** lines applied after yaku and structure depth
+//! ([`super::dora_yaku_layer`]). Earlier relic chip/mult effects live in [`super::pre_yaku_layer`].
+//!
+//! Keeping this in one module makes the main pipeline easier to read and gives a
+//! single place to audit "post-yaku" balance.
+
+use crate::core::hand::{DetectedSet, SetKind};
+use crate::core::relic::{RelicId, ScoreContext};
+use crate::core::tile::{Suit, Tile};
+
+use super::effective_relic::EffectiveRelics;
+use super::push_steps::{push_chips, push_mult};
+use super::tea_bonus::{tea_harmony_chips, tea_purity_mult, tea_respect_chips, tea_tranquility_chips};
+use super::{tile_by_id, tile_is_debuffed, ScoreStep};
+
+pub(crate) fn apply_post_yaku_relic_modifiers(
+    ctx: &ScoreContext<'_>,
+    tiles: &[Tile],
+    sets: &[DetectedSet],
+    eff: EffectiveRelics,
+    honor_triple: bool,
+    no_seq_bonus: bool,
+    has_triplet_boost: bool,
+    chips: &mut i32,
+    mult: &mut f64,
+    steps: &mut Vec<ScoreStep>,
+) {
+    let has = |id: RelicId| eff.has(ctx.relics, id);
+    let count = |id: RelicId| eff.count(ctx.relics, id);
+
+    if has(RelicId::RedDragonRage) {
+        for s in sets {
+            if !matches!(s.kind, SetKind::Triplet | SetKind::Kong) {
+                continue;
+            }
+            let is_dragon = s
+                .tile_ids
+                .first()
+                .and_then(|id| tile_by_id(tiles, *id))
+                .is_some_and(|t| t.suit == Suit::Dragon);
+            if is_dragon {
+                push_mult(steps, *chips, mult, "Red Dragon Rage", 5.0);
+            }
+        }
+    }
+
+    if has(RelicId::WhiteDragonsHush) {
+        for s in sets {
+            if s.kind != SetKind::Pair {
+                continue;
+            }
+            let is_white_dragon = s
+                .tile_ids
+                .first()
+                .and_then(|id| tile_by_id(tiles, *id))
+                .is_some_and(|t| t.suit == Suit::Dragon && t.rank == 3);
+            if is_white_dragon {
+                push_mult(steps, *chips, mult, "White Dragon's Hush", 4.0);
+            }
+        }
+    }
+
+    if has(RelicId::SequenceSurge) {
+        let seq_count = sets.iter().filter(|s| s.kind == SetKind::Sequence).count() as i32;
+        if seq_count > 0 {
+            push_mult(
+                steps,
+                *chips,
+                mult,
+                "Sequence Surge",
+                0.5 * seq_count as f64,
+            );
+        }
+    }
+
+    if has(RelicId::PairPower) {
+        let pair_count = sets.iter().filter(|s| s.kind == SetKind::Pair).count() as i32;
+        if pair_count > 0 {
+            push_mult(steps, *chips, mult, "Pair Power", pair_count as f64);
+        }
+    }
+
+    if has(RelicId::KanDrum) {
+        let kong_count = sets.iter().filter(|s| s.kind == SetKind::Kong).count() as i32;
+        if kong_count > 0 {
+            push_mult(steps, *chips, mult, "Kan Drum", 4.0 * kong_count as f64);
+        }
+    }
+
+    if has(RelicId::KongsBlessing) {
+        let kong_count = sets.iter().filter(|s| s.kind == SetKind::Kong).count() as i32;
+        if kong_count > 0 {
+            push_mult(steps, *chips, mult, "Kong's Blessing", 2.0 * kong_count as f64);
+        }
+    }
+
+    if has_triplet_boost {
+        let trip_count = sets
+            .iter()
+            .filter(|s| matches!(s.kind, SetKind::Triplet | SetKind::Kong))
+            .count() as i32;
+        if trip_count > 0 {
+            push_mult(steps, *chips, mult, "Triplet Boost", 0.2 * trip_count as f64);
+        }
+    }
+
+    if has(RelicId::RoundCompass)
+        && let Some(wind) = ctx.round_wind
+    {
+        for s in sets {
+            if !matches!(s.kind, SetKind::Triplet | SetKind::Kong) {
+                continue;
+            }
+            let is_round_wind = s
+                .tile_ids
+                .first()
+                .and_then(|id| tile_by_id(tiles, *id))
+                .is_some_and(|t| t.suit == Suit::Wind && t.rank == wind);
+            if is_round_wind {
+                push_mult(steps, *chips, mult, "Round Compass", 6.0);
+            }
+        }
+    }
+
+    if honor_triple {
+        for s in sets {
+            if !matches!(s.kind, SetKind::Triplet | SetKind::Kong) {
+                continue;
+            }
+            let is_honor = s
+                .tile_ids
+                .first()
+                .and_then(|id| tile_by_id(tiles, *id))
+                .is_some_and(|t| matches!(t.suit, Suit::Wind | Suit::Dragon));
+            if is_honor {
+                push_mult(steps, *chips, mult, "Honor Triple (rule)", 3.0);
+            }
+        }
+    }
+
+    if no_seq_bonus && !sets.iter().any(|s| s.kind == SetKind::Sequence) {
+        push_mult(steps, *chips, mult, "No-Seq Bonus (rule)", 3.0);
+    }
+
+    if has(RelicId::Ikebana) {
+        let flower_count = sets
+            .iter()
+            .flat_map(|s| &s.tile_ids)
+            .filter(|id| {
+                tile_by_id(tiles, **id).is_some_and(|t| {
+                    t.suit == Suit::Flower && !tile_is_debuffed(t, ctx.tile_debuffs)
+                })
+            })
+            .count();
+        if flower_count >= 2 {
+            push_mult(steps, *chips, mult, "Ikebana", 6.0);
+        }
+    }
+
+    if has(RelicId::LuckySeven) {
+        let count7 = sets
+            .iter()
+            .flat_map(|s| &s.tile_ids)
+            .filter_map(|id| tile_by_id(tiles, *id))
+            .filter(|t| !tile_is_debuffed(t, ctx.tile_debuffs))
+            .filter(|t| {
+                matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles) && t.rank == 7
+            })
+            .count();
+        if count7 > 0 {
+            push_mult(steps, *chips, mult, "Lucky Seven", 1.5 * count7 as f64);
+        }
+    }
+
+    for _ in 0..count(RelicId::PaperLantern) {
+        push_mult(steps, *chips, mult, "Paper Lantern", 4.0);
+    }
+
+    if has(RelicId::MultiplierMaster) {
+        let bonus = 0.5 * ctx.relics.enabled_len() as f64;
+        if bonus > 0.0 {
+            push_mult(steps, *chips, mult, "Multiplier Master", bonus);
+        }
+    }
+
+    if has(RelicId::ChainReaction) && ctx.scored_last_turn {
+        push_mult(steps, *chips, mult, "Chain Reaction", 4.0);
+    }
+
+    if has(RelicId::ClosedGate) {
+        let all_terminal_or_honor = sets
+            .iter()
+            .flat_map(|s| &s.tile_ids)
+            .filter_map(|id| tile_by_id(tiles, *id))
+            .all(|t| {
+                matches!(t.suit, Suit::Wind | Suit::Dragon)
+                    || (matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles)
+                        && (t.rank == 1 || t.rank == 9))
+            });
+        if all_terminal_or_honor {
+            push_mult(steps, *chips, mult, "Closed Gate", 4.0);
+        }
+    }
+
+    if has(RelicId::GoldenEngine) {
+        let bonus = (ctx.gold.max(0) as f64 / 5.0).floor();
+        if bonus > 0.0 {
+            push_mult(steps, *chips, mult, "Golden Engine", bonus);
+        }
+    }
+
+    if has(RelicId::Snowball) {
+        let bonus = ctx.total_score as f64 / 5000.0;
+        if bonus > 0.0 {
+            push_mult(steps, *chips, mult, "Snowball", bonus);
+        }
+    }
+
+    if has(RelicId::MonarchButterfly) {
+        let excess = ctx
+            .relic_counters
+            .get(&RelicId::MonarchButterfly)
+            .copied()
+            .unwrap_or(0);
+        let bonus = crate::core::relic::monarch_butterfly_bonus_chips(excess);
+        if bonus > 0 {
+            push_chips(steps, chips, *mult, "Monarch Butterfly", bonus);
+        }
+    }
+
+    if has(RelicId::Momentum) && ctx.plays_used > 0 {
+        push_mult(
+            steps,
+            *chips,
+            mult,
+            "Momentum",
+            0.5 * ctx.plays_used as f64,
+        );
+    }
+
+    if has(RelicId::Minimalist) && sets.len() == 1 && sets[0].kind == SetKind::Pair {
+        push_mult(steps, *chips, mult, "Minimalist", 4.0);
+    }
+
+    if has(RelicId::TurtleShell) && *mult < 3.0 {
+        push_chips(steps, chips, *mult, "Turtle Shell", 50);
+    }
+
+    if has(RelicId::SilkThread) {
+        let thread_mult = ctx
+            .relic_counters
+            .get(&RelicId::SilkThread)
+            .copied()
+            .unwrap_or(0);
+        if thread_mult > 0 {
+            push_mult(
+                steps,
+                *chips,
+                mult,
+                "Silk Thread",
+                thread_mult as f64 / 10.0,
+            );
+        }
+    }
+
+    if has(RelicId::SilkMoth) {
+        push_mult(steps, *chips, mult, "Silk Moth", 2.0);
+    }
+
+    for _ in 0..count(RelicId::EulersNumber) {
+        push_mult(
+            steps,
+            *chips,
+            mult,
+            "Euler's Number",
+            std::f64::consts::E,
+        );
+    }
+
+    for _ in 0..count(RelicId::PiConstant) {
+        push_mult(steps, *chips, mult, "Pi", std::f64::consts::PI);
+    }
+
+    if has(RelicId::Humility) {
+        let streak = ctx
+            .relic_counters
+            .get(&RelicId::Humility)
+            .copied()
+            .unwrap_or(0);
+        if streak > 0 {
+            push_mult(steps, *chips, mult, "Humility", 0.5 * streak as f64);
+        }
+    }
+
+    if has(RelicId::Obsession) {
+        let rounds = ctx
+            .relic_counters
+            .get(&RelicId::Obsession)
+            .copied()
+            .unwrap_or(0);
+        if rounds > 0 {
+            push_mult(steps, *chips, mult, "Obsession", 0.3 * rounds as f64);
+        }
+    }
+
+    if has(RelicId::Bonfire) {
+        let sold = ctx
+            .relic_counters
+            .get(&RelicId::Bonfire)
+            .copied()
+            .unwrap_or(0);
+        if sold > 0 {
+            push_mult(steps, *chips, mult, "Bonfire", 0.4 * sold as f64);
+        }
+    }
+
+    if has(RelicId::Kintsugi) {
+        let broken = ctx
+            .relic_counters
+            .get(&RelicId::Kintsugi)
+            .copied()
+            .unwrap_or(0);
+        if broken > 0 {
+            push_mult(steps, *chips, mult, "Kintsugi", broken as f64);
+        }
+    }
+
+    if has(RelicId::Rakuware) {
+        if let Some(c) = tea_harmony_chips(tiles) {
+            push_chips(steps, chips, *mult, "Rakuware · Harmony", c);
+        }
+        if let Some(c) = tea_respect_chips(tiles) {
+            push_chips(steps, chips, *mult, "Rakuware · Respect", c);
+        }
+        if let Some(m) = tea_purity_mult(tiles) {
+            push_mult(steps, *chips, mult, "Rakuware · Purity", m);
+        }
+        if let Some(c) = tea_tranquility_chips(sets) {
+            push_chips(steps, chips, *mult, "Rakuware · Tranquility", c);
+        }
+    }
+
+    if has(RelicId::SolitarySage) {
+        let empty = ctx.relics.max_slots.saturating_sub(ctx.relics.active.len());
+        if empty > 0 {
+            push_mult(steps, *chips, mult, "Solitary Sage", 1.5 * empty as f64);
+        }
+    }
+
+    if has(RelicId::CurioCabinet) {
+        let bonus: u32 = ctx
+            .relics
+            .active
+            .iter()
+            .copied()
+            .filter(|&id| id != RelicId::CurioCabinet)
+            .map(|id| crate::core::relic::relic_sell_price_live(id, &ctx.relic_counters))
+            .sum();
+        if bonus > 0 {
+            push_mult(steps, *chips, mult, "Curio Cabinet", bonus as f64);
+        }
+    }
+
+    if has(RelicId::LotusBloom) {
+        let blooms = ctx
+            .relic_counters
+            .get(&RelicId::LotusBloom)
+            .copied()
+            .unwrap_or(0);
+        if blooms > 0 {
+            push_mult(steps, *chips, mult, "Lotus Bloom", 0.5 * blooms as f64);
+        }
+    }
+
+    if has(RelicId::WallWeaver) {
+        let overflow_extras = if eff.has(ctx.relics, RelicId::StrengthInNumbers) {
+            68
+        } else {
+            0
+        };
+        let extra_added = ctx
+            .relic_counters
+            .get(&RelicId::WallWeaver)
+            .copied()
+            .unwrap_or(0)
+            .max(0);
+        let excess = overflow_extras + extra_added;
+        if excess > 0 {
+            push_mult(steps, *chips, mult, "Wall Weaver", 0.2 * excess as f64);
+        }
+    }
+
+    if has(RelicId::Heirloom) {
+        let bosses = ctx
+            .relic_counters
+            .get(&RelicId::Heirloom)
+            .copied()
+            .unwrap_or(0)
+            .max(0);
+        if bosses > 0 {
+            push_mult(steps, *chips, mult, "Heirloom", bosses as f64);
+        }
+    }
+
+    if has(RelicId::Tourist) {
+        let mut seen = [false; 6];
+        for s in sets {
+            for &tid in &s.tile_ids {
+                let Some(t) = tile_by_id(tiles, tid) else {
+                    continue;
+                };
+                if tile_is_debuffed(t, ctx.tile_debuffs) {
+                    continue;
+                }
+                let idx = match t.suit {
+                    Suit::Characters => 0,
+                    Suit::Bamboos => 1,
+                    Suit::Circles => 2,
+                    Suit::Wind => 3,
+                    Suit::Dragon => 4,
+                    Suit::Flower => 5,
+                    Suit::Season => continue,
+                };
+                seen[idx] = true;
+            }
+        }
+        let distinct = seen.iter().filter(|b| **b).count();
+        if distinct > 0 {
+            push_mult(steps, *chips, mult, "Tourist", 3.0 * distinct as f64);
+        }
+    }
+
+    if has(RelicId::CrackedTile) {
+        use rand::RngExt;
+        let mut rng = rand::rng();
+        let bonus: f64 = rng.random_range(0.0..=8.0);
+        if bonus > 0.0 {
+            push_mult(
+                steps,
+                *chips,
+                mult,
+                "Cracked Tile",
+                (bonus * 10.0).floor() / 10.0,
+            );
+        }
+    }
+
+    if has(RelicId::HungryGhost) {
+        let perm_mult = ctx
+            .relic_counters
+            .get(&RelicId::HungryGhost)
+            .copied()
+            .unwrap_or(0);
+        if perm_mult > 0 {
+            push_mult(
+                steps,
+                *chips,
+                mult,
+                "Hungry Ghost",
+                perm_mult as f64 / 10.0,
+            );
+        }
+    }
+
+    if has(RelicId::WayOfPurity) {
+        let numbered_suits: Vec<Suit> = sets
+            .iter()
+            .flat_map(|s| &s.tile_ids)
+            .filter_map(|id| tile_by_id(tiles, *id))
+            .map(|t| t.suit)
+            .filter(|s| matches!(s, Suit::Bamboos | Suit::Characters | Suit::Circles))
+            .collect();
+        if !numbered_suits.is_empty() {
+            let first = numbered_suits[0];
+            let all_same = numbered_suits.iter().all(|&s| s == first)
+                && sets
+                    .iter()
+                    .flat_map(|s| &s.tile_ids)
+                    .filter_map(|id| tile_by_id(tiles, *id))
+                    .all(|t| matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles));
+            if all_same {
+                let delta = *mult * 1.5;
+                push_mult(steps, *chips, mult, "Way of Purity", delta);
+            }
+        }
+    }
+
+    if has(RelicId::WayOfPairs) && !sets.is_empty() && sets.iter().all(|s| s.kind == SetKind::Pair)
+    {
+        let delta = *mult;
+        push_mult(steps, *chips, mult, "Way of Pairs", delta);
+    }
+
+    if has(RelicId::WayOfTriplets)
+        && !sets.is_empty()
+        && sets
+            .iter()
+            .all(|s| matches!(s.kind, SetKind::Triplet | SetKind::Kong))
+    {
+        let delta = *mult * 1.5;
+        push_mult(steps, *chips, mult, "Way of Triplets", delta);
+    }
+
+    if has(RelicId::WayOfSequences)
+        && !sets.is_empty()
+        && sets.iter().all(|s| s.kind == SetKind::Sequence)
+    {
+        let delta = *mult;
+        push_mult(steps, *chips, mult, "Way of Sequences", delta);
+    }
+
+    for _ in 0..count(RelicId::SilverFiligreeLantern) {
+        let delta = *mult;
+        push_mult(steps, *chips, mult, "Silver Filigree Lantern", delta);
+    }
+
+    for _ in 0..count(RelicId::GlassCannon) {
+        let delta = *mult * 2.0;
+        push_mult(steps, *chips, mult, "Glass Cannon", delta);
+    }
+}

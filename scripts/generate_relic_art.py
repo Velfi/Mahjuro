@@ -750,7 +750,7 @@ RELICS = [
         "Ivory tile faces, deep emerald felt, traditional crimson man-zu numerals, pale crimson echo silhouettes, soft gold ripples, warm amber rim light.",
     ),
     (
-        "rustling_goose_egg",
+        "xxxl_egg",
         "XXXL Egg",
         "A comically oversized goose egg — smooth matte white shell — teetering in a "
         "realistic ground-nest bowl far too small for it: matted dry grasses and reeds "
