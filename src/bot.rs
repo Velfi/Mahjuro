@@ -61,9 +61,19 @@ fn acquire_relic(run: &mut RunState, id: RelicId) {
         RelicId::SilkThread => {
             run.relic_counters.insert(RelicId::SilkThread, 40);
         }
-        RelicId::TeaCeremony => {
-            run.relic_counters.insert(RelicId::TeaCeremony, 3);
+        RelicId::RustlingGooseEgg => {
+            run.relic_counters.insert(RelicId::RustlingGooseEgg, 3);
         }
+        RelicId::TeaCeremony => {
+            run.relic_counters.insert(RelicId::TeaCeremony, 0);
+        }
+        RelicId::Chrysalis => {
+            run.relic_counters.insert(RelicId::MonarchButterfly, 0);
+        }
+        RelicId::MonarchButterfly => {
+            run.relic_counters.insert(RelicId::MonarchButterfly, 0);
+        }
+        RelicId::Rakuware => {}
         _ => {}
     }
     run.recompute_capacities();
@@ -302,7 +312,7 @@ fn ctx_for_merged_commit<'a>(
         total_score: run.total_score_earned,
         is_final_play: plays_rem_after == 0,
         relic_counters: run.relic_counters.clone(),
-        unscored_hand_tiles: run.hand().len().saturating_sub(merged_tiles.len()),
+        hand_for_ghost: run.hand(),
         structure: Some(meta),
     }
 }
@@ -819,8 +829,40 @@ fn rollout_post_discard_score(run: &RunState, discard_indices: &[usize]) -> u64 
         .unwrap_or(0)
 }
 
-/// Play the current blind to completion. Returns `true` if the bot reached the target.
-fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> bool {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PlayBlindOutcome {
+    Cleared,
+    LostRun,
+    SecondWindForfeit,
+}
+
+/// Drains scoring / refill events. A `RoundComplete` with `reached_target: false` is Second
+/// Wind: apply the forfeit transition immediately (matches deferred UI handling).
+fn drain_post_action_bus(run: &mut RunState, bus: &mut EventBus) -> Option<PlayBlindOutcome> {
+    let events: Vec<GameEvent> = bus.drain().collect();
+    for ev in events {
+        match ev {
+            GameEvent::RoundComplete {
+                payout,
+                reached_target: true,
+            } => {
+                run.gold = run.gold.saturating_add(payout.total as i32);
+            }
+            GameEvent::RoundComplete {
+                reached_target: false,
+                ..
+            } => {
+                run.forfeit_current_blind_second_wind(bus);
+                return Some(PlayBlindOutcome::SecondWindForfeit);
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Play the current blind to completion.
+fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> PlayBlindOutcome {
     let mut bus = EventBus::default();
     let mut rng = rand::rng();
     let mut turn = 0u32;
@@ -834,7 +876,7 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> bool {
                 run.round_score,
                 run.target_score
             );
-            return true;
+            return PlayBlindOutcome::Cleared;
         }
         if let Some(reason) = run.round_failure_reason() {
             let cause = match reason {
@@ -849,7 +891,7 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> bool {
                 run.round_score,
                 run.target_score
             );
-            return false;
+            return PlayBlindOutcome::LostRun;
         }
         turn += 1;
 
@@ -891,10 +933,9 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> bool {
                     earned,
                     best_score
                 );
-                for ev in bus.drain() {
-                    if let GameEvent::RoundComplete { payout, .. } = ev {
-                        run.gold = run.gold.saturating_add(payout.total as i32);
-                    }
+                if drain_post_action_bus(run, &mut bus) == Some(PlayBlindOutcome::SecondWindForfeit)
+                {
+                    return PlayBlindOutcome::SecondWindForfeit;
                 }
                 continue;
             }
@@ -938,7 +979,10 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> bool {
                 run.discard_selected(&mut bus);
                 stats.discards_used += 1;
                 stats.strategic_discards += 1;
-                for _ in bus.drain() {}
+                if drain_post_action_bus(run, &mut bus) == Some(PlayBlindOutcome::SecondWindForfeit)
+                {
+                    return PlayBlindOutcome::SecondWindForfeit;
+                }
                 did_discard = true;
             }
         }
@@ -972,13 +1016,11 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> bool {
                 run.clear_selection();
                 for _ in bus.drain() {}
                 record_terminal_hand_issue(stats, run, TerminalIssueCause::RejectedChosenPlay);
-                return false;
+                return PlayBlindOutcome::LostRun;
             }
             stats.plays_used += 1;
-            for ev in bus.drain() {
-                if let GameEvent::RoundComplete { payout, .. } = ev {
-                    run.gold = run.gold.saturating_add(payout.total as i32);
-                }
+            if drain_post_action_bus(run, &mut bus) == Some(PlayBlindOutcome::SecondWindForfeit) {
+                return PlayBlindOutcome::SecondWindForfeit;
             }
             continue;
         }
@@ -988,14 +1030,14 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> bool {
         if run.discards_remaining == 0 {
             record_terminal_hand_issue(stats, run, TerminalIssueCause::NoDiscardsRemaining);
             bot_log!(log, "      action: no discards remaining");
-            return false;
+            return PlayBlindOutcome::LostRun;
         }
         run.clear_selection();
         let hand_n = run.hand().len();
         if hand_n == 0 {
             record_terminal_hand_issue(stats, run, TerminalIssueCause::EmptyHand);
             bot_log!(log, "      action: hand empty, cannot continue");
-            return false;
+            return PlayBlindOutcome::LostRun;
         }
         let drop_n = rng.random_range(1..=hand_n.min(5));
         let mut indices: Vec<usize> = (0..hand_n).collect();
@@ -1011,7 +1053,9 @@ fn play_blind(run: &mut RunState, stats: &mut RunStats, log: bool) -> bool {
         }
         run.discard_selected(&mut bus);
         stats.discards_used += 1;
-        for _ in bus.drain() {}
+        if drain_post_action_bus(run, &mut bus) == Some(PlayBlindOutcome::SecondWindForfeit) {
+            return PlayBlindOutcome::SecondWindForfeit;
+        }
     }
 }
 
@@ -1466,7 +1510,7 @@ fn relic_marginal_value(run: &RunState, candidate: RelicId) -> i32 {
 
     // Samples 2..N: synthetic random hands from fresh walls.
     for _ in 0..RELIC_EVAL_SAMPLES {
-        let hand = sample_random_hand(run.mode.hand_size);
+        let hand = sample_random_hand(crate::core::boss::effective_hand_size(run));
         delta_sum += best_play_score_for_hand(run, &hand, Some(&hypothetical), None) as i64
             - best_play_score_for_hand(run, &hand, None, None) as i64;
         sample_count += 1;
@@ -1485,7 +1529,7 @@ fn zodiac_marginal_value(run: &RunState, zodiac: ZodiacKind) -> i32 {
     let mut sample_count: i64 = 1;
 
     for _ in 0..RELIC_EVAL_SAMPLES {
-        let hand = sample_random_hand(run.mode.hand_size);
+        let hand = sample_random_hand(crate::core::boss::effective_hand_size(run));
         delta_sum += best_play_score_for_hand(run, &hand, None, Some(&hypothetical)) as i64
             - best_play_score_for_hand(run, &hand, None, None) as i64;
         sample_count += 1;
@@ -1680,7 +1724,7 @@ fn sampled_selection_talisman_value(run: &RunState, kind: TalismanKind) -> i32 {
     let mut delta_sum: i64 = 0;
     let mut count: i64 = 0;
     for _ in 0..RELIC_EVAL_SAMPLES + 1 {
-        let hand = sample_random_hand(run.mode.hand_size);
+        let hand = sample_random_hand(crate::core::boss::effective_hand_size(run));
         if let Some((_, delta)) = best_selection_for_talisman_on_hand(run, &hand, kind) {
             delta_sum += delta;
             count += 1;
@@ -1714,7 +1758,7 @@ fn talisman_marginal_value(run: &RunState, talisman: TalismanKind) -> i32 {
     };
     let mut sample_count: i64 = 1;
     for _ in 0..RELIC_EVAL_SAMPLES {
-        let hand = sample_random_hand(run.mode.hand_size);
+        let hand = sample_random_hand(crate::core::boss::effective_hand_size(run));
         let base = best_play_score_for_hand(run, &hand, None, None) as i64;
         let mut enhanced = hand.clone();
         crate::core::talisman::apply_to_hand(&mut enhanced, talisman);
@@ -1761,15 +1805,20 @@ fn pack_marginal_value(run: &RunState, kind: TilePackKind) -> i32 {
             &run.tile_enhancements,
             run.relics.has(RelicId::StrengthInNumbers),
         );
-        let mut base_hand = Vec::with_capacity(run.mode.hand_size);
+        let target = crate::core::boss::effective_hand_size(run);
+        let mut base_hand = Vec::with_capacity(target);
         let mut base_wall = base_wall;
-        for _ in 0..run.mode.hand_size {
+        for _ in 0..target {
             if let Some(t) = base_wall.draw() {
                 base_hand.push(t);
             }
         }
         base_hand.sort();
-        let with = sample_random_hand_with_extra_pack(run, kind, run.mode.hand_size);
+        let with = sample_random_hand_with_extra_pack(
+            run,
+            kind,
+            crate::core::boss::effective_hand_size(run),
+        );
         let base_score = best_play_score_for_hand(run, &base_hand, None, None) as i64;
         let enriched = best_play_score_for_hand(run, &with, None, None) as i64;
         delta_sum += enriched - base_score;
@@ -2227,17 +2276,17 @@ fn play_run_with_options(
         if let Some(boss_name) = &boss_for_this_blind {
             stats.boss_faced.insert(boss_name.clone(), 1);
         }
-        let cleared = play_blind(&mut run, &mut stats, log);
+        let outcome = play_blind(&mut run, &mut stats, log);
         stats.total_score += run.round_score;
         stats.peak_blind_score = stats.peak_blind_score.max(run.round_score);
         stats.died_on_ante = run.ante;
         stats.died_on_blind = blind;
         if let Some(boss_name) = &boss_for_this_blind
-            && cleared
+            && outcome == PlayBlindOutcome::Cleared
         {
             stats.boss_beaten.insert(boss_name.clone(), 1);
         }
-        if !cleared {
+        if outcome == PlayBlindOutcome::LostRun {
             stats.final_gold = run.gold;
             bot_log!(
                 log,
@@ -2247,6 +2296,16 @@ fn play_run_with_options(
                 run.gold
             );
             break;
+        }
+        if outcome == PlayBlindOutcome::SecondWindForfeit {
+            bot_log!(
+                log,
+                "  second wind — forfeited blind; gold {} | next {:?}",
+                run.gold,
+                run.upcoming_blind
+            );
+            visit_shop(&mut run, &mut stats, log, &strategy);
+            continue;
         }
         stats.blinds_cleared += 1;
         let blind_overscore = run.round_score.saturating_sub(run.target_score as u64);

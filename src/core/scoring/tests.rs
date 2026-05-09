@@ -19,7 +19,7 @@ fn ctx_with(relics: &RelicState, scored_last_turn: bool) -> ScoreContext<'_> {
         total_score: 0,
         is_final_play: false,
         relic_counters: std::collections::BTreeMap::new(),
-        unscored_hand_tiles: 0,
+        hand_for_ghost: &[],
         structure: None,
     }
 }

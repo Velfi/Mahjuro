@@ -287,6 +287,85 @@ impl RunState {
         }
     }
 
+    /// Second Wind: leave the current blind with no blind clear gold and no boss
+    /// / ante credit. Relic hooks that run at a normal round end (Paper Lantern,
+    /// Nest Egg, Obsession, …) still apply; Heirloom does not (blind was not cleared).
+    pub(crate) fn forfeit_current_blind_second_wind(&mut self, bus: &mut EventBus) {
+        let fortunes = self.relics.has(RelicId::FortunesFavor);
+        if self.relics.has(RelicId::PaperLantern) {
+            use rand::RngExt;
+
+            let mut rng = rand::rng();
+            let denom = if fortunes { 10 } else { 5 };
+            if rng.random_ratio(1, denom) {
+                self.relics.active.retain(|&r| r != RelicId::PaperLantern);
+                self.paper_lantern_extinct = true;
+                self.note_relic_destroyed();
+                bus.push(GameEvent::TransformationSuccessorDiscovered(
+                    RelicId::SilverFiligreeLantern,
+                ));
+            }
+        }
+        if self.relics.has(RelicId::SilverFiligreeLantern) {
+            use rand::RngExt;
+
+            let mut rng = rand::rng();
+            let denom = if fortunes { 2000 } else { 1000 };
+            if rng.random_ratio(1, denom) {
+                self.relics
+                    .active
+                    .retain(|&r| r != RelicId::SilverFiligreeLantern);
+                self.note_relic_destroyed();
+            }
+        }
+        if self.relics.has(RelicId::NestEgg) {
+            *self.relic_counters.entry(RelicId::NestEgg).or_insert(0) += 1;
+            self.relic_activations.push(RelicId::NestEgg);
+        }
+        if self.relics.has(RelicId::PhantomRelic) {
+            *self
+                .relic_counters
+                .entry(RelicId::PhantomRelic)
+                .or_insert(0) += 1;
+            self.relic_activations.push(RelicId::PhantomRelic);
+        }
+        if self.relics.has(RelicId::Obsession) {
+            let top_yaku = self
+                .yaku_times_played
+                .iter()
+                .max_by_key(|(_, count)| **count)
+                .map(|(&y, _)| y);
+            if let Some(top) = top_yaku {
+                if !self.played_yaku_this_round.contains(&top) {
+                    *self.relic_counters.entry(RelicId::Obsession).or_insert(0) += 1;
+                    self.relic_activations.push(RelicId::Obsession);
+                } else {
+                    self.relic_counters.insert(RelicId::Obsession, 0);
+                }
+            }
+        }
+
+        self.relic_counters.remove(&RelicId::KongCollector);
+        self.run_number += 1;
+        self.round_rules.clear();
+        self.reset_round_resources();
+        self.last_breakdown = None;
+        self.scored_last_turn = false;
+        self.quickdraw_uses_remaining = crate::game::run::QUICKDRAW_USES_PER_ROUND;
+        self.joker_used = false;
+        self.full_hand_played_this_round = false;
+        self.boss.bonus_hand_size = 0;
+        self.boss.gold_cost_per_play = 0;
+        self.played_yaku_this_round.clear();
+        self.honors_scored_this_round = false;
+        self.upcoming_blind = self.upcoming_blind.next();
+        self.blind = self.upcoming_blind;
+        GameplayCoreState::with_run_mut(self, |core| {
+            core.clear_hand_structure_bank();
+        });
+        self.tag_bonus_hand_size = 0;
+    }
+
     /// Skip the upcoming blind: advance to the next in the cycle without
     /// playing or visiting the shop. Resets per-round state. Skipping is
     /// not allowed for the Boss blind — callers should check first.

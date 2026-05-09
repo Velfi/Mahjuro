@@ -360,11 +360,11 @@ RELICS = [
     (
         "set_magnet",
         "Set Magnet",
-        "A chunk of raw magnetite ore resting on a felt table, with one "
+        "A chunk of raw magnetite ore resting on a rough cool-grey stone slab, with one "
         "mahjong tile lifting free from a row of face-down wall tiles and "
         "floating toward three matching tiles already gathered beside the "
         "stone. Faint iron filings cling to the ore's crystalline facets.",
-        "Blue-black magnetite, silver-grey filings, ivory tile faces, deep emerald felt.",
+        "Blue-black magnetite, silver-grey filings, ivory tile faces, cool grey stone slab.",
     ),
     (
         "wild_winds",
@@ -539,6 +539,15 @@ RELICS = [
         "Polished brass loupe, ivory tile face, deep emerald felt, paper price tag with red string, warm gold coin accents, soft amber lamplight.",
     ),
     (
+        "i_got_a_guy",
+        "I Got A Guy",
+        "A creased paper business card and a scrap with a phone number scribbled "
+        "in ink, clipped together with a bent paperclip, resting on emerald "
+        "felt beside a mahjong wall tile edge. Slightly comedic noir mood, "
+        "small prop readable at icon scale.",
+        "Cream paper, black ink scrawl, steel paperclip, emerald felt, warm counter light.",
+    ),
+    (
         "edge_runner",
         "Edge Runner",
         "Two mahjong tiles standing upright at opposite ends of an emerald "
@@ -554,8 +563,8 @@ RELICS = [
         "Lucky Seven",
         "A vintage slot machine — the three-reel mechanical type — showing "
         "triple sevens in the window. A single brass lever on the side. "
-        "Sitting alone on a green baize table in a dim room.",
-        "Chrome and brass machine, cherry-red sevens, green baize, dim amber.",
+        "Sitting alone on a dark wooden counter in a dim room.",
+        "Chrome and brass machine, cherry-red sevens, deep walnut wood, dim amber.",
     ),
     (
         "momentum",
@@ -564,7 +573,7 @@ RELICS = [
         "with the last few tiles in the chain already airborne and trailing "
         "bright motion streaks. Energy visibly accumulates toward the leading "
         "edge of the cascade.",
-        "Ivory tile faces, deep ink markings, warm gold motion streaks, dark felt underneath.",
+        "Ivory tile faces, deep ink markings, warm gold motion streaks, dark neutral shadow plane.",
     ),
     (
         "minimalist",
@@ -741,11 +750,54 @@ RELICS = [
         "Ivory tile faces, deep emerald felt, traditional crimson man-zu numerals, pale crimson echo silhouettes, soft gold ripples, warm amber rim light.",
     ),
     (
+        "rustling_goose_egg",
+        "XXXL Egg",
+        "A comically oversized goose egg — smooth matte white shell — teetering in a "
+        "realistic ground-nest bowl far too small for it: matted dry grasses and reeds "
+        "with patches of moss and lichen, the cup lined with soft gray-white down and "
+        "body feathers the way geese line their scrape before incubation. The nest "
+        "reads shallow and bowl-shaped, not a tidy woven basket. The shell has a "
+        "hairline crack with a sliver of down showing through. Something inside shifts — "
+        "faint motion blur on the shell; a loose pale feather or two beside the rim. "
+        "Warm amber rim light; compact enamel-badge composition.",
+        "Matte white goose egg, grassy bowl nest with moss and lichen, down-lined cup, "
+        "straw and olive tones, warm amber rim light, subtle motion hint.",
+    ),
+    (
         "tea_ceremony",
         "Tea Ceremony",
-        "A refined tea bowl with three drifting steam curls above it, rendered "
-        "as a formal ceremonial enamel badge.",
-        "Cream porcelain, muted celadon glaze, warm brown tea tones, soft gold rim.",
+        "Paired chanoyu set (1 of 2 — the other pin is the Rakuware relic): use "
+        "the **same rounded-square badge crop, bowl scale, and three-quarter "
+        "view from slightly above** as the companion pin so they line up side "
+        "by side as one story. Subject: a **smooth refined chawan** (porcelain "
+        "or soft celadon), centered — the bowl that **precedes** the rustic "
+        "raku piece in the pair. **Four** delicate rising steam wisps (not "
+        "three), each whisper-tinted a different muted hue — sage green, pale "
+        "shell pink, cool mist blue, warm ivory — suggesting the four guiding "
+        "spirits of the ceremony without text or symbols. No wooden rest, no "
+        "kiln drama; calm, luminous, **still steaming**. Formal ceremonial "
+        "enamel badge — subject only, no tabletop scene.",
+        "Cream porcelain, muted celadon glaze, four subtly tinted steam wisps, "
+        "soft gold lip line, pale warm neutral void — **must match the void "
+        "tone and framing of the Rakuware pin** in the same matched pair.",
+    ),
+    (
+        "rakuware",
+        "Rakuware",
+        "Paired chanoyu set (2 of 2 — the other pin is the Tea Ceremony relic): "
+        "use the **same rounded-square badge crop, bowl scale, and three-quarter "
+        "view from slightly above** as the companion pin so they line up side "
+        "by side as one story. Subject: a **hand-built raku chawan** — the bowl "
+        "that **follows** the refined steaming bowl in the pair: bold crackle "
+        "glaze, warm charcoal reduction, soft coppery flash at the rim. **No "
+        "steam** — the tea is finished; the clay has cooled. A single hairline "
+        "crack traced in fine metallic gold — kintsugi hint, not a full repair. "
+        "Optional **small dark wooden rest** only if it stays inside the badge "
+        "silhouette without clutter. Compact enamel composition; same calm "
+        "negative space as the Tea Ceremony pin.",
+        "Matte black raku glaze, gold kintsugi line in one crack, warm copper "
+        "rim flash, deep walnut rest if present, **same pale warm neutral void "
+        "as Tea Ceremony** — second chapter of the same two-pin tea story.",
     ),
     (
         "ghost_hand",
@@ -791,46 +843,48 @@ RELICS = [
     (
         "melting_ice",
         "Melting Ice",
-        "A clear block of ice resting at the center of an emerald felt "
-        "table, with something dark frozen deep inside — only the faintest "
-        "hint of curling horns and a pair of eyes glinting bronze through "
-        "the fractures, the rest lost to refraction and frost. Hairline "
-        "cracks lace the ice and meltwater has begun pooling on the felt "
-        "around the block's base.",
-        "Pale blue ice, white frost, cool grey internal cracks, deep "
-        "emerald felt, faint cyan refraction, dim shape within with two "
-        "bronze glints, glistening meltwater pool, soft amber rim light.",
+        "Abstract pin emblem, not a scene: a **stylized faceted ice shard or "
+        "hex crystal** built from a few bold cloisonné planes — sharp geometry "
+        "only, no realistic cube or plinth. The lower edge **breaks into "
+        "graphic drip and bead shapes** (enamel teardrops) reading as melt, "
+        "not water simulation. At the heart, **suggest** something sleeping "
+        "through **symbolic negative space** — twin shallow crescent horn "
+        "curves and two small bronze enamel dots for eyes inside one pale "
+        "recessed cell; no body, no muzzle, no illustration of a beast. "
+        "Hairline wire cracks divide facets like a badge crest. Flat graphic "
+        "silhouette; readable at icon scale.",
+        "Pale arctic blue and frost-white enamel facets, cool grey crack lines "
+        "in wire, copper-bronze horn curves and eye dots as minimal glyphs, "
+        "translucent aqua drip beads along the lower rim, soft amber pin "
+        "rim light — **graphic enamel**, not painterly ice.",
     ),
     (
         "taotie",
         "Taotie",
-        "A green-patinated bronze taotie ritual mask centered on an "
-        "emerald felt table — broad bulging eyes, twin curling horns "
+        "A green-patinated bronze taotie ritual mask centered on a cool grey "
+        "stone plinth — broad bulging eyes, twin curling horns "
         "rising over the brow, jaws cracked open in a hungry grin baring "
         "blunt bronze teeth. A single mahjong tile is captured mid-flight "
         "just above the open mouth, tilted and being drawn down into it; "
         "faint motion-blur lines trail behind the tile to read the pull "
-        "as gravitational, not gentle. A shallow pool of meltwater from "
-        "the parent ice still glistens beneath the mask's chin, and a few "
-        "stray face-down wall tiles lie blurred in the background.",
+        "as gravitational, not gentle. A shallow pool of meltwater still "
+        "glistens beneath the mask's chin. Soft dark out-of-focus backdrop.",
         "Green-patinated bronze, deep jade highlights, warm bronze "
         "underglow in the recessed eye sockets, ivory tile face with "
-        "crimson dragon glyph being devoured, deep emerald felt, "
+        "crimson dragon glyph being devoured, cool grey stone plinth, "
         "glistening meltwater puddle, soft amber rim light.",
     ),
     (
         "silk_thread",
         "Silk Thread",
-        "A plump silkworm in the act of cocooning a single mahjong tile at "
-        "the center of an emerald felt table — fresh ivory silk fans out "
+        "A plump silkworm cocooning a single upright mahjong tile — fresh ivory silk fans out "
         "from the worm's mouth and partially wraps the tile in a glossy, "
         "translucent skein, the still-bare lower half of the tile face "
         "showing through. The worm is mid-motion, its segmented body "
         "curled along the tile's edge, head lifted as it spins another "
-        "loop. A single mulberry leaf rests on the felt beside the "
-        "in-progress cocoon, and a few stray face-down wall tiles lie "
-        "blurred in the background.",
-        "Pale cream silkworm, glossy ivory silk, deep emerald felt, "
+        "loop. A single mulberry leaf rests on dark lacquered wood beside the "
+        "in-progress cocoon. Soft dark out-of-focus backdrop.",
+        "Pale cream silkworm, glossy ivory silk, dark lacquered wood surface, "
         "muted jade mulberry leaf, soft cream tile face with faint amber "
         "warmth from within the half-cocoon.",
     ),
@@ -838,14 +892,14 @@ RELICS = [
         "silk_moth",
         "Silk Moth",
         "A pale silk moth with broad ivory wings emerging from a split "
-        "cocoon at the center of an emerald felt table — the cocoon is "
+        "cocoon on dark lacquered wood — the cocoon is "
         "torn open along its seam, the discarded silk shell still threaded "
         "around the remains of a single mahjong tile beneath it. Fine "
         "silk strands trail from the moth's legs and the cocoon's torn "
-        "rim, drifting across the felt. The moth's wings are unfurled "
+        "rim, drifting in the air. The moth's wings are unfurled "
         "and dusted with a faint amber underglow as if freshly hatched. "
-        "A few stray face-down wall tiles lie blurred in the background.",
-        "Ivory moth wings, soft pearl silk strands, deep emerald felt, "
+        "Soft dark out-of-focus backdrop.",
+        "Ivory moth wings, soft pearl silk strands, dark lacquered wood surface, "
         "warm amber underglow, cream tile fragment beneath the cocoon, "
         "muted gold dust on the wings.",
     ),
@@ -1106,6 +1160,72 @@ RELICS = [
         "glimmers of colored light leak from the mouth, hinting at charmed "
         "tokens inside. Resting on dark wood.",
         "Deep indigo silk, antique gold embroidery, pale jade bead, warm amber highlights.",
+    ),
+    (
+        "eulers_number",
+        "Euler's Number",
+        "A small ivory plaque-style badge dominated by a single large engraved "
+        "lowercase e in an upright classical serif, open counter, even stroke "
+        "weight. Include a miniature visual proof in the same engraved draftsmanship: "
+        "the curve y = 1/x from x = 1 toward e with cross-hatched or stippled area "
+        "under that curve between 1 and e reading as exactly one unit square — the "
+        "classic 'ln(e) = 1' picture. Along a margin or ribbon, tiny step marks can "
+        "suggest (1 + 1/n)^n converging toward e. A fine spiral may still unwind "
+        "from the letter as a secondary motif. Resting flat; letter plus proof read "
+        "as one crest.",
+        "Warm aged ivory, deep umber letter and diagram scoring, soft brass corner caps, muted ink shadows, subtle hatched enamel for the unit-area band under the hyperbola.",
+    ),
+    (
+        "pi_constant",
+        "Pi",
+        "A scholar's ivory tablet with the Greek letter pi engraved large at "
+        "the center. Include a clear visual proof motif: thin radial wedges sliced "
+        "from a disk and rearranged into an alternating up-down stack that forms "
+        "an almost rectangular strip — the classic dissection suggesting "
+        "area = (half circumference) × radius = πr² without printing equations. "
+        "A perfect compass-scribed circle and implied diameter remain visible as "
+        "part of the construction. Fine radial tick marks at the rim. Flat, "
+        "geometric, proof-like.",
+        "Warm aged ivory, deep umber engraving, soft brass corner caps, muted ink shadows, soft contrast between adjacent wedge enamel fills.",
+    ),
+    (
+        "big_hands",
+        "Big Hands",
+        "A pair of stylized open hands — palms forward, fingers spread wide — "
+        "carved in raised relief on a single enamel pin crest, as if offering "
+        "or catching an oversized fan of mahjong tiles fanned above them. "
+        "Generous scale, broad gesture, readable silhouette.",
+        "Warm copper cloisonné wires, cream and jade enamel fills, ivory tile hints, soft amber rim light.",
+    ),
+    (
+        "tiny_hands",
+        "Tiny Hands",
+        "The same crest motif as Big Hands but at doll or Lilliputian scale: "
+        "two minuscule delicate hands — short thin fingers, tiny palms — "
+        "clearly dwarfed beneath a cluster of mahjong tiles that read large "
+        "relative to the hands. Hands occupy only a small fraction of the "
+        "badge height; gestures tight and nimble, fingers close together. "
+        "Same framing and metal tier as its twin for a matched set, "
+        "unmistakably tinier than Big Hands.",
+        "Warm copper cloisonné wires, cream and jade enamel fills, ivory tile hints, soft amber rim light.",
+    ),
+    (
+        "chrysalis",
+        "Chrysalis",
+        "A monarch butterfly chrysalis — jade-green and gold-speckled pupa "
+        "hanging from a short silk pad stem, matte shell with subtle "
+        "segment lines, contained and still; no wings yet. Cloisonné pin, "
+        "centered, readable silhouette.",
+        "Matte jade-green enamel, warm gold speckles, dark umber stem wrap, soft amber rim light.",
+    ),
+    (
+        "monarch_butterfly",
+        "Monarch Butterfly",
+        "An open-wing monarch butterfly as a cloisonné pin — vivid orange "
+        "wings with black veins and white dots at the wing edges, wings "
+        "spread symmetric, body slim and black. Product-shot centered, "
+        "wings filling the frame.",
+        "Bright orange and black enamel wing bands, cream wing spots, copper cloisonné wires, soft amber rim light.",
     ),
 ]
 

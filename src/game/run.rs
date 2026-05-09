@@ -105,7 +105,9 @@ pub struct RelicShopPoolExtinction {
     pub paper_lantern: bool,
     pub silk_thread: bool,
     pub melting_ice: bool,
+    pub rustling_goose_egg: bool,
     pub tea_ceremony: bool,
+    pub chrysalis: bool,
 }
 
 /// Silk Moth / Taotie / Geese / Silver Filigree: shop-only after the primary
@@ -122,7 +124,13 @@ fn transformation_successor_shop_eligible(
         RelicId::SilkMoth => ex.silk_thread && available_relics.contains(&RelicId::SilkThread),
         RelicId::Taotie => ex.melting_ice && available_relics.contains(&RelicId::MeltingIce),
         RelicId::Geese => {
+            available_relics.contains(&RelicId::RustlingGooseEgg) && ex.rustling_goose_egg
+        }
+        RelicId::Rakuware => {
             available_relics.contains(&RelicId::TeaCeremony) && ex.tea_ceremony
+        }
+        RelicId::MonarchButterfly => {
+            available_relics.contains(&RelicId::Chrysalis) && ex.chrysalis
         }
         _ => false,
     }
@@ -155,7 +163,13 @@ pub(crate) fn relic_eligible_for_shop_stock(
     if id == RelicId::MeltingIce && ex.melting_ice {
         return false;
     }
+    if id == RelicId::RustlingGooseEgg && ex.rustling_goose_egg {
+        return false;
+    }
     if id == RelicId::TeaCeremony && ex.tea_ceremony {
+        return false;
+    }
+    if id == RelicId::Chrysalis && ex.chrysalis {
         return false;
     }
     true
@@ -670,9 +684,15 @@ pub struct RunState {
     /// Melting Ice burned this run — Taotie can appear in shops.
     #[serde(default)]
     pub melting_ice_extinct: bool,
-    /// Tea Ceremony burned this run — Geese returns to the shop pool (when Tea is meta-unlocked).
+    /// XXXL Egg burned this run — Geese returns to the shop pool (when the egg is meta-unlocked).
     #[serde(default)]
+    pub rustling_goose_egg_extinct: bool,
+    /// Tea Ceremony completed this run (became Rakuware) — Rakuware can appear in shops.
+    #[serde(default, rename = "tea_to_raku_extinct")]
     pub tea_ceremony_extinct: bool,
+    /// Chrysalis hatched this run — Monarch Butterfly can appear in shops.
+    #[serde(default)]
+    pub chrysalis_extinct: bool,
     /// Per-yaku cumulative play counter for the entire run. Powers the
     /// Yaku Journal overlay's "Played N×" line. Persisted across save/load
     /// (defaults to empty for old saves).
@@ -765,11 +785,15 @@ pub struct RunState {
     ///   MeltingIce   → remaining chip bonus (starts 80, -8 per play)
     ///   SilkThread   → remaining mult ×10 (starts 40, -3 per discard)
     ///   NestEgg      → rounds held (sell value grows)
-    ///   TeaCeremony  → plays remaining before burning (Geese shop unlock)
+    ///   RustlingGooseEgg (XXXL Egg) → plays remaining before burning (Geese shop unlock)
+    ///   TeaCeremony  → principle index 0–3 (four scored hands, then transforms)
+    ///   Rakuware     → (no counter; all four Tea beats when conditions hold)
+    ///   MonarchButterfly → cumulative absorbed excess (post-target); tiers for chip bonus
     ///   PhantomRelic → rounds held
     ///   HungryGhost  → permanent mult bonus ×10
     ///   TilePolisher → accumulated +chip bonus (each scored tile +3)
     ///   RiverRunner  → accumulated +chip bonus (each scored sequence +20)
+    ///   IGotAGuy     → shop restock waivers remaining (starts 3 on buy)
     #[serde(default)]
     pub relic_counters: std::collections::BTreeMap<RelicId, i32>,
     /// Tutorial state. `None` for normal (non-tutorial) runs. Present
@@ -789,6 +813,23 @@ pub struct RunState {
 }
 
 impl RunState {
+    /// Remaining gold-free shop restocks from [RelicId::IGotAGuy]. Zero if not owned.
+    pub(crate) fn i_got_a_guy_restock_charges(&self) -> i32 {
+        if !self.relics.has(RelicId::IGotAGuy) {
+            return 0;
+        }
+        self.relic_counters
+            .get(&RelicId::IGotAGuy)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    pub(crate) fn can_afford_shop_reroll(&self, reroll_cost: u32) -> bool {
+        reroll_cost == 0
+            || self.gold >= reroll_cost as i32
+            || self.i_got_a_guy_restock_charges() > 0
+    }
+
     pub fn hand(&self) -> &[Tile] {
         &self.hand
     }
@@ -799,6 +840,36 @@ impl RunState {
 
     pub fn selected_slice(&self) -> &[bool] {
         &self.selected
+    }
+
+    /// Ghost Hand HUD / tooltip preview: in structure-bank mode the next cash-in
+    /// scores all tiles still in hand as "unscored"; in classic mode, if any tile
+    /// is selected the preview is the sum of **un**selected hand tiles (what stays
+    /// out of the meld), otherwise the sum of the whole hand before you choose a meld.
+    pub fn ghost_hand_preview_chips(&self) -> i32 {
+        let hand = self.hand();
+        let debuffs = &self.tile_debuffs;
+        let sum_points = |tiles: &[Tile]| -> i32 {
+            tiles
+                .iter()
+                .filter(|t| !debuffs.iter().any(|d| d.matches(t)))
+                .map(|t| t.point_value() as i32)
+                .sum()
+        };
+        if self.mode.structure_bank {
+            return sum_points(hand);
+        }
+        let sel = self.selected_slice();
+        if sel.iter().any(|&x| x) {
+            let unselected: Vec<Tile> = hand
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !sel.get(*i).copied().unwrap_or(false))
+                .map(|(_, t)| *t)
+                .collect();
+            return sum_points(&unselected);
+        }
+        sum_points(hand)
     }
 
     pub(crate) fn selected_mut(&mut self) -> &mut Vec<bool> {
@@ -834,19 +905,23 @@ impl RunState {
         self.structure_tiles = structure_tiles;
     }
 
+    fn discard_cap_for(mode: &GameMode, relics: &RelicState) -> u32 {
+        let mut d = mode.starting_discards;
+        if relics.has(crate::core::relic::RelicId::BigHands) {
+            d = d.saturating_sub(1);
+        }
+        if relics.has(crate::core::relic::RelicId::TinyHands) {
+            d = d.saturating_add(2);
+        }
+        d
+    }
+
     fn round_play_cap(&self) -> u32 {
-        let mut plays = self.mode.starting_plays;
-        if self.relics.has(crate::core::relic::RelicId::SecondWind) {
-            plays += 1;
-        }
-        if self.relics.has(crate::core::relic::RelicId::GlassCannon) {
-            plays = plays.saturating_sub(1);
-        }
-        plays
+        self.mode.starting_plays
     }
 
     fn round_discard_cap(&self) -> u32 {
-        self.mode.starting_discards
+        Self::discard_cap_for(&self.mode, &self.relics)
     }
 
     pub fn relic_shop_pool_extinction(&self) -> RelicShopPoolExtinction {
@@ -854,7 +929,9 @@ impl RunState {
             paper_lantern: self.paper_lantern_extinct,
             silk_thread: self.silk_thread_extinct,
             melting_ice: self.melting_ice_extinct,
+            rustling_goose_egg: self.rustling_goose_egg_extinct,
             tea_ceremony: self.tea_ceremony_extinct,
+            chrysalis: self.chrysalis_extinct,
         }
     }
 
@@ -869,8 +946,11 @@ impl RunState {
     /// without going through here will silently break that synergy.
     ///
     /// Gros-Michel-style relic burns (Paper Lantern, Silk Thread, Melting Ice,
-    /// Tea Ceremony) remove the relic from inventory and call this so Kintsugi
+    /// XXXL Egg, Glass Cannon after its scoring use) remove the relic from inventory and call this so Kintsugi
     /// can react; successors enter the shop pool via [`RelicShopPoolExtinction`].
+    /// Tea Ceremony instead transforms into Rakuware in-slot and also invokes this
+    /// so Kintsugi can count the finished ritual. Chrysalis transforms into
+    /// Monarch Butterfly the same way when excess crosses the hatch threshold.
     fn note_relic_destroyed(&mut self) {
         if self.relics.has(crate::core::relic::RelicId::Kintsugi) {
             *self
@@ -909,8 +989,16 @@ impl RunState {
     }
 
     pub fn new(mode: GameMode) -> Self {
-        let hand_size = mode.hand_size;
         let mut wall = Wall::from_standard_shuffled();
+
+        let mut relics = RelicState::default();
+        for &r in &mode.starting_relics {
+            if !relics.is_full() {
+                relics.active.push(r);
+            }
+        }
+
+        let hand_size = boss::effective_hand_size_components(mode.hand_size, 0, &relics);
         let mut hand = Vec::with_capacity(hand_size);
         for _ in 0..hand_size {
             if let Some(t) = wall.draw() {
@@ -920,19 +1008,13 @@ impl RunState {
         hand.sort();
         let selected = vec![false; hand.len()];
 
-        let mut relics = RelicState::default();
-        for &r in &mode.starting_relics {
-            if !relics.is_full() {
-                relics.active.push(r);
-            }
-        }
-
         let mut boss_pool_remaining = boss::regular_pool();
         let mut rng = rand::rng();
         let boss_floor = mode.stake.boss_min_ante_floor();
         let upcoming_boss =
             boss::pick_for_ante_with_floor(&mut boss_pool_remaining, 1, boss_floor, &mut rng);
 
+        let starting_discards = Self::discard_cap_for(&mode, &relics);
         let mut state = Self {
             wall,
             hand,
@@ -948,8 +1030,8 @@ impl RunState {
             ante: 1,
             plays_remaining: mode.starting_plays,
             plays_max: mode.starting_plays,
-            discards_remaining: mode.starting_discards,
-            discards_max: mode.starting_discards,
+            discards_remaining: starting_discards,
+            discards_max: starting_discards,
             gold: mode.starting_gold as i32,
             blind: BlindKind::Small,
             upcoming_blind: BlindKind::Small,
@@ -984,7 +1066,9 @@ impl RunState {
             paper_lantern_extinct: false,
             silk_thread_extinct: false,
             melting_ice_extinct: false,
+            rustling_goose_egg_extinct: false,
             tea_ceremony_extinct: false,
+            chrysalis_extinct: false,
             yaku_times_played: std::collections::HashMap::new(),
             tiles_played: 0,
             tiles_discarded: 0,
@@ -1119,6 +1203,7 @@ mod tests {
     use super::*;
     use crate::core::deck::build_wall;
     use crate::core::hand::DetectedSet;
+    use crate::core::relic::RelicId;
 
     /// Standard mode starting plays (Bamboo: 4 base + 1 bonus).
     const STARTING_PLAYS: u32 = 5;
@@ -1193,7 +1278,9 @@ mod tests {
             paper_lantern_extinct: false,
             silk_thread_extinct: false,
             melting_ice_extinct: false,
+            rustling_goose_egg_extinct: false,
             tea_ceremony_extinct: false,
+            chrysalis_extinct: false,
             small_blind_tag: None,
             big_blind_tag: None,
             tag_free_reroll: false,
@@ -1571,14 +1658,13 @@ mod tests {
         let mut run = test_run();
         run.plays_remaining = 1;
         run.discards_remaining = 0;
-        run.relics.active.push(RelicId::SecondWind);
         run.tag_bonus_plays = 1;
         run.tag_bonus_discards = 1;
 
         run.apply_blind(BlindKind::Small);
 
-        assert_eq!(run.plays_remaining, STARTING_PLAYS + 2);
-        assert_eq!(run.plays_max, STARTING_PLAYS + 2);
+        assert_eq!(run.plays_remaining, STARTING_PLAYS + 1);
+        assert_eq!(run.plays_max, STARTING_PLAYS + 1);
         assert_eq!(run.discards_remaining, STARTING_DISCARDS + 1);
         assert_eq!(run.discards_max, STARTING_DISCARDS + 1);
         assert_eq!(run.tag_bonus_plays, 0);
@@ -1586,28 +1672,62 @@ mod tests {
     }
 
     #[test]
-    fn second_wind_round_cap_does_not_accumulate_across_round_transitions() {
+    fn second_wind_salvages_round_instead_of_game_over() {
         let mut run = test_run();
         let mut bus = bus();
         run.relics.active.push(RelicId::SecondWind);
+        run.hand = vec![
+            Tile::new(Suit::Characters, 1, 1),
+            Tile::new(Suit::Characters, 3, 2),
+            Tile::new(Suit::Characters, 5, 3),
+            Tile::new(Suit::Characters, 7, 4),
+            Tile::new(Suit::Characters, 9, 5),
+            Tile::new(Suit::Bamboos, 2, 6),
+            Tile::new(Suit::Bamboos, 4, 7),
+            Tile::new(Suit::Bamboos, 6, 8),
+            Tile::new(Suit::Bamboos, 8, 9),
+            Tile::new(Suit::Circles, 1, 10),
+            Tile::new(Suit::Circles, 3, 11),
+            Tile::new(Suit::Circles, 5, 12),
+            Tile::new(Suit::Wind, 1, 13),
+            Tile::new(Suit::Dragon, 1, 14),
+        ];
+        run.selected = vec![false; run.hand.len()];
+        run.discards_remaining = 0;
+        run.plays_remaining = 3;
+        run.structure_sets.clear();
+        run.structure_tiles.clear();
 
-        run.apply_blind(BlindKind::Small);
-        assert_eq!(run.plays_remaining, STARTING_PLAYS + 1);
-        assert_eq!(run.plays_max, STARTING_PLAYS + 1);
+        run.refill_hand(&mut bus);
 
-        run.advance_round(&mut bus);
-        assert_eq!(run.plays_remaining, STARTING_PLAYS + 1);
-        assert_eq!(run.plays_max, STARTING_PLAYS + 1);
-
-        run.apply_blind(BlindKind::Big);
-        assert_eq!(run.plays_remaining, STARTING_PLAYS + 1);
-        assert_eq!(run.plays_max, STARTING_PLAYS + 1);
+        assert!(
+            !bus.queue.iter().any(|ev| matches!(ev, GameEvent::GameOver { .. })),
+            "Second Wind should prevent GameOver"
+        );
+        assert!(
+            bus.queue.iter().any(|ev| {
+                matches!(
+                    ev,
+                    GameEvent::RoundComplete {
+                        reached_target: false,
+                        ..
+                    }
+                )
+            }),
+            "Second Wind should enqueue a zero-payout RoundComplete"
+        );
+        assert!(
+            !run.relics.has(RelicId::SecondWind),
+            "Second Wind should be destroyed"
+        );
+        run.forfeit_current_blind_second_wind(&mut bus);
+        assert_eq!(run.upcoming_blind, BlindKind::Big);
+        assert_eq!(run.run_number, 2);
     }
 
     #[test]
     fn second_wind_plays_used_uses_effective_round_cap() {
         let mut run = test_run();
-        run.relics.active.push(RelicId::SecondWind);
         run.apply_blind(BlindKind::Small);
         run.plays_remaining -= 2;
 
@@ -1626,7 +1746,7 @@ mod tests {
             total_score: run.total_score_earned,
             is_final_play: run.plays_remaining == 0,
             relic_counters: run.relic_counters.clone(),
-            unscored_hand_tiles: run.hand.len(),
+            hand_for_ghost: run.hand(),
             structure: None,
         };
 
@@ -1659,6 +1779,44 @@ mod tests {
 
         assert_eq!(run.discards_remaining, STARTING_DISCARDS / 2);
         assert_eq!(run.discards_max, STARTING_DISCARDS / 2);
+    }
+
+    #[test]
+    fn big_hands_increases_effective_hand_and_reduces_discard_cap() {
+        let mut run = test_run();
+        run.relics.active.push(RelicId::BigHands);
+        assert_eq!(boss::effective_hand_size(&run), HAND_SIZE + 2);
+        run.reset_round_resources();
+        assert_eq!(run.discards_remaining, STARTING_DISCARDS - 1);
+        assert_eq!(run.discards_max, STARTING_DISCARDS - 1);
+    }
+
+    #[test]
+    fn tiny_hands_decreases_effective_hand_and_adds_discard_cap() {
+        let mut run = test_run();
+        run.relics.active.push(RelicId::TinyHands);
+        assert_eq!(boss::effective_hand_size(&run), HAND_SIZE - 2);
+        run.reset_round_resources();
+        assert_eq!(run.discards_remaining, STARTING_DISCARDS + 2);
+        assert_eq!(run.discards_max, STARTING_DISCARDS + 2);
+    }
+
+    #[test]
+    fn big_hands_and_tiny_hands_cancel_hand_delta() {
+        let mut run = test_run();
+        run.relics.active.push(RelicId::BigHands);
+        run.relics.active.push(RelicId::TinyHands);
+        assert_eq!(boss::effective_hand_size(&run), HAND_SIZE);
+    }
+
+    #[test]
+    fn refill_hand_reaches_big_hands_target_from_undersized_hand() {
+        let mut run = test_run();
+        run.relics.active.push(RelicId::BigHands);
+        assert_eq!(run.hand.len(), HAND_SIZE);
+        let mut bus = bus();
+        run.refill_hand(&mut bus);
+        assert_eq!(run.hand.len(), HAND_SIZE + 2);
     }
 
     #[test]
@@ -1740,6 +1898,27 @@ mod tests {
         // Scored tiles removed and redrawn.
         assert_eq!(run.hand.len(), HAND_SIZE);
         assert_eq!(run.selected_count(), 0);
+    }
+
+    #[test]
+    fn glass_cannon_destroys_after_first_scoring_hand() {
+        let mut run = test_run();
+        run.mode.structure_bank = false;
+        run.relics.active.push(RelicId::GlassCannon);
+        let mut bus = bus();
+        run.toggle_select(0);
+        run.toggle_select(1);
+        run.toggle_select(2);
+        let _ = run.score_selected_tiles(&mut bus);
+        assert!(!run.relics.active.contains(&RelicId::GlassCannon));
+    }
+
+    #[test]
+    fn glass_cannon_does_not_reduce_starting_plays_cap() {
+        let mut run = test_run();
+        assert_eq!(run.round_play_cap(), STARTING_PLAYS);
+        run.relics.active.push(RelicId::GlassCannon);
+        assert_eq!(run.round_play_cap(), STARTING_PLAYS);
     }
 
     #[test]

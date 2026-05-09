@@ -196,7 +196,7 @@ impl RunState {
         self.hand = kept_hand;
         self.selected = kept_sel;
         // Refill hand from the wall.
-        while self.hand.len() < self.mode.hand_size {
+        while self.hand.len() < crate::core::boss::effective_hand_size(self) {
             if let Some(t) = self.wall.draw() {
                 self.hand.push(t);
                 self.selected.push(false);

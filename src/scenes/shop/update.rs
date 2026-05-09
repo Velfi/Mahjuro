@@ -72,7 +72,8 @@ impl ShopScene {
             return Some(self.continue_scene(ctx.run));
         }
         if matches!(hit, ShopHit::Dish(id) if id == PICK_REROLL_PROP) {
-            if self.mode == ShopMode::Standard && shop.gold >= self.reroll_cost as i32 {
+            if self.mode == ShopMode::Standard && ctx.run.can_afford_shop_reroll(self.reroll_cost)
+            {
                 self.reroll(ctx.run);
             }
             return None;
@@ -481,7 +482,7 @@ impl ShopScene {
                     }
                     if matches!(focus, ShopFocus::Reroll)
                         && self.mode == ShopMode::Standard
-                        && shop.gold >= self.reroll_cost as i32
+                        && ctx.run.can_afford_shop_reroll(self.reroll_cost)
                     {
                         self.reroll(ctx.run);
                         continue;
@@ -567,7 +568,7 @@ impl ShopScene {
             }
             if cid == SHOP_REROLL_ID
                 && self.mode == ShopMode::Standard
-                && shop.gold >= self.reroll_cost as i32
+                && ctx.run.can_afford_shop_reroll(self.reroll_cost)
             {
                 self.reroll(ctx.run);
                 return None;

@@ -23,8 +23,11 @@ impl App {
         let ww = win_size.width as f32;
         let wh = win_size.height as f32;
         match ev {
-            GameEvent::RoundComplete { payout, .. } => {
-                if self.run.onboarding_active() {
+            GameEvent::RoundComplete {
+                payout,
+                reached_target,
+            } => {
+                if self.run.onboarding_active() && reached_target {
                     self.run.gold = self.run.gold.saturating_add(payout.total as i32);
                     self.progress.tutorial_completed = true;
                     let _ = persistence::save_profile(self.active_profile, &self.progress);
@@ -33,6 +36,32 @@ impl App {
                         .unlock_achievement(crate::steam::Achievement::TutorialComplete);
                     self.pending_scene =
                         Some(Scene::TutorialSummary(TutorialSummaryScene::new(true)));
+                    self.transition_alpha = 1.0;
+                    return;
+                }
+                if !reached_target {
+                    let cleared_round_score = self.run.round_score;
+                    let cleared_target_score = self.run.target_score;
+                    self.run.forfeit_current_blind_second_wind(&mut self.bus);
+                    self.audio.play_sfx(audio::SfxId::TilesDestroyed);
+                    let modal = Modal::new(
+                        "Second Wind",
+                        format!(
+                            "The relic shatters. No payout for this blind — only your other relics matter now.\n\nScore: {} / {}",
+                            cleared_round_score, cleared_target_score
+                        ),
+                        ModalTheme::Info,
+                    );
+                    self.modals.push(modal);
+                    self.pending_scene = Some(
+                        if !self.run.tutorial_shop_enabled() {
+                            Scene::Gameplay(GameplayScene::with_pending_blind(
+                                self.run.upcoming_blind,
+                            ))
+                        } else {
+                            Scene::Shop(crate::scenes::ShopScene::new(&mut self.run))
+                        },
+                    );
                     self.transition_alpha = 1.0;
                     return;
                 }

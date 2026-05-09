@@ -1021,9 +1021,26 @@ impl<'a> GameEngine<'a> {
                     RelicId::SilkMoth => {
                         self.run.relic_counters.insert(RelicId::SilkMoth, 0);
                     }
-                    RelicId::TeaCeremony => {
-                        self.run.relic_counters.insert(RelicId::TeaCeremony, 3);
+                    RelicId::RustlingGooseEgg => {
+                        self.run.relic_counters.insert(RelicId::RustlingGooseEgg, 3);
                     }
+                    RelicId::TeaCeremony => {
+                        self.run.relic_counters.insert(RelicId::TeaCeremony, 0);
+                    }
+                    RelicId::Chrysalis => {
+                        self.run
+                            .relic_counters
+                            .insert(RelicId::MonarchButterfly, 0);
+                    }
+                    RelicId::MonarchButterfly => {
+                        self.run
+                            .relic_counters
+                            .insert(RelicId::MonarchButterfly, 0);
+                    }
+                    RelicId::IGotAGuy => {
+                        self.run.relic_counters.insert(RelicId::IGotAGuy, 3);
+                    }
+                    RelicId::Rakuware => {}
                     _ => {}
                 }
                 self.run.recompute_capacities();
@@ -1102,6 +1119,9 @@ impl<'a> GameEngine<'a> {
                     let victim_value = crate::core::relic::relic_sell_price(victim_id) as i32;
                     self.run.relics.active.remove(index + 1);
                     self.run.relics.active.remove(index);
+                    if !self.run.relics.has(RelicId::IGotAGuy) {
+                        self.run.relic_counters.remove(&RelicId::IGotAGuy);
+                    }
                     *self
                         .run
                         .relic_counters
@@ -1128,6 +1148,9 @@ impl<'a> GameEngine<'a> {
                     );
                 }
                 self.run.relics.active.remove(index);
+                if !self.run.relics.has(RelicId::IGotAGuy) {
+                    self.run.relic_counters.remove(&RelicId::IGotAGuy);
+                }
                 self.run.gold = self.run.gold.saturating_add(refund as i32);
                 self.bus.push(GameEvent::UiSound(crate::audio::SfxId::Sell));
                 *self.run.relic_counters.entry(RelicId::Bonfire).or_insert(0) += 1;
@@ -1262,14 +1285,30 @@ impl<'a> GameEngine<'a> {
                 }
             }
             ShopCommand::RerollShop { cost } => {
-                if self.run.gold < cost as i32 {
+                let mut gold_cost = cost;
+                if gold_cost > 0
+                    && self.run.relics.has(RelicId::IGotAGuy)
+                    && self
+                        .run
+                        .relic_counters
+                        .get(&RelicId::IGotAGuy)
+                        .copied()
+                        .unwrap_or(0)
+                        > 0
+                {
+                    if let Some(n) = self.run.relic_counters.get_mut(&RelicId::IGotAGuy) {
+                        *n -= 1;
+                    }
+                    gold_cost = 0;
+                }
+                if self.run.gold < gold_cost as i32 {
                     return ShopCommandOutcome::rejected(
                         command,
                         before,
                         ShopCommandRejection::InsufficientGold,
                     );
                 }
-                self.run.gold -= cost as i32;
+                self.run.gold -= gold_cost as i32;
                 ShopCommandData::Rerolled
             }
         };
@@ -1486,8 +1525,9 @@ mod tests {
         let mut run = RunState::new(GameMode::standard());
         let tiles = build_wall();
         let mut wall = Wall::from_unshuffled(tiles);
-        let mut hand = Vec::with_capacity(run.mode.hand_size);
-        for _ in 0..run.mode.hand_size {
+        let target = crate::core::boss::effective_hand_size(&run);
+        let mut hand = Vec::with_capacity(target);
+        for _ in 0..target {
             hand.push(wall.draw().expect("enough tiles for deterministic hand"));
         }
         run.wall = wall;
@@ -1793,5 +1833,65 @@ mod tests {
         );
         assert_eq!(run.gold, before);
         assert_eq!(outcome.before, outcome.after);
+    }
+
+    #[test]
+    fn reroll_shop_spends_i_got_a_guy_charge_when_gold_is_low() {
+        let mut run = deterministic_run();
+        run.gold = 0;
+        run.relics.active.push(crate::core::relic::RelicId::IGotAGuy);
+        run.relic_counters.insert(crate::core::relic::RelicId::IGotAGuy, 2);
+        let mut bus = EventBus::default();
+
+        let outcome =
+            GameEngine::new(&mut run, &mut bus).dispatch_shop(ShopCommand::RerollShop { cost: 5 });
+
+        assert_eq!(outcome.rejection, None);
+        assert_eq!(run.gold, 0);
+        assert_eq!(
+            run.relic_counters
+                .get(&crate::core::relic::RelicId::IGotAGuy)
+                .copied(),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn reroll_shop_rejects_when_gold_low_and_no_i_got_a_guy_charges() {
+        let mut run = deterministic_run();
+        run.gold = 0;
+        run.relics.active.push(crate::core::relic::RelicId::IGotAGuy);
+        run.relic_counters.insert(crate::core::relic::RelicId::IGotAGuy, 0);
+        let before_gold = run.gold;
+        let mut bus = EventBus::default();
+
+        let outcome =
+            GameEngine::new(&mut run, &mut bus).dispatch_shop(ShopCommand::RerollShop { cost: 3 });
+
+        assert_eq!(
+            outcome.rejection,
+            Some(ShopCommandRejection::InsufficientGold)
+        );
+        assert_eq!(run.gold, before_gold);
+    }
+
+    #[test]
+    fn reroll_shop_zero_cost_does_not_spend_i_got_a_guy_charge() {
+        let mut run = deterministic_run();
+        run.gold = 0;
+        run.relics.active.push(crate::core::relic::RelicId::IGotAGuy);
+        run.relic_counters.insert(crate::core::relic::RelicId::IGotAGuy, 3);
+        let mut bus = EventBus::default();
+
+        let outcome =
+            GameEngine::new(&mut run, &mut bus).dispatch_shop(ShopCommand::RerollShop { cost: 0 });
+
+        assert_eq!(outcome.rejection, None);
+        assert_eq!(
+            run.relic_counters
+                .get(&crate::core::relic::RelicId::IGotAGuy)
+                .copied(),
+            Some(3)
+        );
     }
 }

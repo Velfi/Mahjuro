@@ -71,7 +71,7 @@ pub struct PlayerProgress {
     #[serde(default)]
     pub run_history: Vec<RunRecord>,
     /// Successor relics unlocked only after a fragile primary burns (Silk Moth,
-    /// Taotie, Geese, Silver Filigree). Shops, runs, and Collection consult this.
+    /// Taotie, Geese, Rakuware, Silver Filigree, Monarch Butterfly). Shops, runs, and Collection consult this.
     #[serde(default)]
     pub discovered_transformation_successors: HashSet<RelicId>,
     /// Per-material ladder of cleared stakes. `Spring` is implicitly unlocked
@@ -93,7 +93,9 @@ pub fn transformation_successor_relic_ids() -> &'static [RelicId] {
         RelicId::SilkMoth,
         RelicId::Taotie,
         RelicId::Geese,
+        RelicId::Rakuware,
         RelicId::SilverFiligreeLantern,
+        RelicId::MonarchButterfly,
     ]
 }
 
@@ -321,7 +323,7 @@ impl PlayerProgress {
     }
 
     /// Relics available for this player's progression level (shop / run stock).
-    /// Transformation successors (Silk Moth, Taotie, Geese, Silver Filigree)
+    /// Transformation successors (Silk Moth, Taotie, Geese, Rakuware, Silver Filigree)
     /// are omitted — they only enter the shop after a primary burns on the
     /// current run; see [`crate::game::run::relic_eligible_for_shop_stock`].
     pub fn available_relics(&self) -> Vec<RelicId> {
@@ -343,6 +345,9 @@ impl PlayerProgress {
         !is_transformation_successor_relic(id)
             || self.discovered_transformation_successors.contains(&id)
             || (id == RelicId::Geese && self.unlocked_relics.contains(&RelicId::Geese))
+            || (id == RelicId::Rakuware && self.unlocked_relics.contains(&RelicId::Rakuware))
+            || (id == RelicId::MonarchButterfly
+                && self.unlocked_relics.contains(&RelicId::MonarchButterfly))
     }
 
     /// Record that the player has seen a successor (Collection reveal). Returns true if new.
@@ -498,6 +503,7 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::SetMagnet,
                 RelicId::RoundCompass,
                 RelicId::MerchantsEye,
+                RelicId::IGotAGuy,
                 RelicId::Momentum,
                 RelicId::KongCollector,
                 RelicId::BeggarsCup,
@@ -545,7 +551,9 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::VoiceOfTheElite,
                 RelicId::Ikebana,
                 RelicId::TilePolisher,
+                RelicId::RustlingGooseEgg,
                 RelicId::TeaCeremony,
+                RelicId::Chrysalis,
             ],
             rules: vec![],
             yaku: vec![YakuKind::SanshokuDoujun, YakuKind::Honroutou],
