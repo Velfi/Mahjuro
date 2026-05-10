@@ -169,6 +169,9 @@ retention dashboard). Enter **API Name**, **Display Name**, and
 | `ALL_BOSSES_SEEN` | Full Roster | Encounter every non-final boss blind at least once. | All non-final bosses seen |
 | `SILK_MOTH_EMERGED` | Silk Moth | Carry Silk Thread through to Silk Moth. | Silk Thread → Silk Moth |
 | `TAOTIE_AWAKENED` | Taotie | Carry Melting Ice through to Taotie. | Melting Ice → Taotie |
+| `GEESE_TAKE_FLIGHT` | Geese | Carry XXXL Egg through to Geese. | XXXL Egg → Geese |
+| `THIRTEEN_ORPHANS` | Thirteen Orphans | Score Kokushi Musō (thirteen orphans). | Kokushi Musō scored |
+| `HOUSE_DEFEATED` | Beat the House | Defeat The House on the final boss blind. | Final boss **The House** cleared |
 
 When adding an achievement, add the variant + API Name in code, configure
 the matching achievement in the partner backend, and wire the trigger

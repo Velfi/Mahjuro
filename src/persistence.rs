@@ -518,6 +518,24 @@ pub fn has_saved_run(index: usize) -> bool {
     saved_run_path(index).exists()
 }
 
+/// Destination for an Options-menu "export play stats" HTML report. Uses
+/// `Downloads/Mahjuro/` when available, then Documents, then local data dir.
+pub fn play_stats_export_path(profile_index: usize) -> PathBuf {
+    let base = dirs::download_dir()
+        .or_else(dirs::document_dir)
+        .map(|p| p.join(APP_DIR))
+        .unwrap_or_else(data_dir);
+    let _ = fs::create_dir_all(&base);
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    base.join(format!(
+        "play_stats_profile{}_{ts}.html",
+        profile_index + 1
+    ))
+}
+
 /// Wrapper that stamps each saved run with the build version. On load we
 /// reject any save whose version doesn't match the current binary so an
 /// update can ship breaking changes to `RunState` without having to write a

@@ -7,7 +7,7 @@ impl RunState {
         &self,
         tiles: &[Tile],
     ) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
-        let validation_rules = self.validation_rules_for_current_mode();
+        let validation_rules = self.validation_rules_for_structure_commits();
         // Try standard validation first.
         if let Some(sets) = validate_selection_with_rules(tiles, &validation_rules) {
             return Some((sets, tiles.to_vec()));
@@ -203,6 +203,7 @@ impl RunState {
 
         self.seed_tutorial_hand();
         self.restamp_hand_enhancements();
+        self.try_autotrigger_structure_full(bus);
         self.emit_round_resolution_events(bus);
     }
 }

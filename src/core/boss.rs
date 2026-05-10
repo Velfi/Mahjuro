@@ -14,7 +14,7 @@
 //! * `on_apply` — called from `apply_blind` when the boss blind starts. Used
 //!   for one-shot mutations to `RunState` (zero discards, target bumps,
 //!   shrunken hand, etc.).
-//! * `on_play` — called from `score_selected_tiles` after a successful play,
+//! * `on_play` — called from `commit_selection_to_structure` after a successful play,
 //!   for per-play taxers (gold cost, wall burn).
 //!
 //! Adding a new boss is purely a matter of appending to `bosses.json`
@@ -66,6 +66,7 @@ pub enum BossKind {
     TaxCollector,
     // ── Final (final ante only) ──────────────────────────────────────────
     Dragon,
+    House,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -114,15 +115,15 @@ pub struct BossEffect {
     /// One-shot mutation when the boss applies (start of round). `None` if
     /// the boss is purely rule-based.
     pub on_apply: Option<fn(&mut RunState)>,
-    /// Per-play hook fired from `score_selected_tiles` after a successful
-    /// play (post-scoring, post-refill). Used for taxers and wall burn.
+    /// Per-play hook fired from `commit_selection_to_structure` after a successful
+    /// commit (post-refill). Used for taxers and wall burn.
     pub on_play: Option<fn(&mut RunState)>,
 }
 
 /// Owned, ante-scoped sibling of `BossEffect`. Static bosses get one of these
 /// built from their static `BossEffect` at reveal time; reactive bosses build
 /// their own from scratch via `BossDef::on_reveal`. Stored on `RunState` and
-/// read by `apply_blind` / `score_selected_tiles` instead of the static def
+/// read by `apply_blind` / `commit_selection_to_structure` instead of the static def
 /// so reactive variants land at the right moment.
 #[derive(Clone, Debug)]
 pub struct ResolvedBossEffect {
@@ -205,7 +206,7 @@ fn drought_apply(run: &mut RunState) {
 
 fn whisper_apply(run: &mut RunState) {
     // Shrink the hand by 1 for the whole round. The bonus_hand_size delta is
-    // honored by `refill_hand` and the `score_selected_tiles` draw target.
+    // honored by `refill_hand` and the `commit_selection_to_structure` draw target.
     run.boss.bonus_hand_size -= 1;
     let target = effective_hand_size(run);
     crate::game::engine_state::GameplayCoreState::with_run_mut(run, |core| {
@@ -604,7 +605,8 @@ fn boss_behavior(kind: BossKind) -> BossBehavior {
         B::Mirror => b.on_reveal = Some(mirror_reveal),
         B::Counterweight => b.on_reveal = Some(counterweight_reveal),
         B::TaxCollector => b.on_reveal = Some(tax_collector_reveal),
-        B::Dragon => {} // pure presentation; no scoring effect yet
+        B::Dragon => {} // honorless structures debuffed in scoring_tile_debuffs
+        B::House => b.rule_pushes = &[RuleModifier::CashInRequiresNoDiscards],
     }
     b
 }
@@ -804,6 +806,7 @@ mod tests {
             BossKind::Counterweight,
             BossKind::TaxCollector,
             BossKind::Dragon,
+            BossKind::House,
         ];
         // Force-compile-error if a new variant is added without classifying it.
         for &kind in ALL {
@@ -831,7 +834,8 @@ mod tests {
                 | BossKind::Mirror
                 | BossKind::Counterweight
                 | BossKind::TaxCollector
-                | BossKind::Dragon => (),
+                | BossKind::Dragon
+                | BossKind::House => (),
             };
             // Both presentation lookup and behaviour lookup must succeed.
             let _ = kind.def();

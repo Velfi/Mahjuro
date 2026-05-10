@@ -1,7 +1,7 @@
 //! Options scene — volume sliders, visual settings, rendering, and accessibility.
 //!
 //! Layout: a table-of-contents (TOC) column on the left links to
-//! sections (Audio, Visual, Rendering, Accessibility, Controls) in a
+//! sections (Audio, Visual, Rendering, Accessibility, Controls, Data) in a
 //! scrollable content pane on the right.  Entry-based scroll stepping (same
 //! pattern as the glossary) keeps every visible row fully on-screen — the
 //! renderer has no scissor support.
@@ -41,6 +41,7 @@ enum Section {
     Rendering,
     Accessibility,
     Controls,
+    Data,
 }
 
 impl Section {
@@ -51,6 +52,7 @@ impl Section {
             Section::Rendering => "Rendering",
             Section::Accessibility => "Accessibility",
             Section::Controls => "Controls",
+            Section::Data => "Data",
         }
     }
 }
@@ -61,6 +63,7 @@ const SECTIONS: &[Section] = &[
     Section::Rendering,
     Section::Accessibility,
     Section::Controls,
+    Section::Data,
 ];
 
 // ── Rows ───────────────────────────────────────────────────────────────
@@ -87,6 +90,7 @@ enum Row {
     HoldToSellRumble,
     AutoCashInOnFullStructure,
     Hints,
+    ExportPlayStats,
 }
 
 impl Row {
@@ -128,6 +132,7 @@ const ROWS: &[Row] = &[
     Row::HoldToSellRumble,
     Row::AutoCashInOnFullStructure,
     Row::Hints,
+    Row::ExportPlayStats,
 ];
 
 // ── Content slots (section headers interspersed with rows) ─────────────
@@ -164,6 +169,8 @@ const CONTENT: &[ContentSlot] = &[
     ContentSlot::Row(Row::HoldToSellRumble),
     ContentSlot::Row(Row::AutoCashInOnFullStructure),
     ContentSlot::Row(Row::Hints),
+    ContentSlot::Header(Section::Data),
+    ContentSlot::Row(Row::ExportPlayStats),
 ];
 
 fn content_index_of_row(row: Row) -> usize {
@@ -295,6 +302,8 @@ pub struct OptionsScene {
     focus_changed: bool,
     confirm_requested: bool,
     cancel_requested: bool,
+    /// User activated "Export play stats" this frame (after [`Self::update_input`]).
+    export_requested: bool,
     /// Smooth-scrolling state for the content pane.
     scroll: SmoothScroll,
 
@@ -342,6 +351,7 @@ impl OptionsScene {
             focus_changed: false,
             confirm_requested: false,
             cancel_requested: false,
+            export_requested: false,
             scroll: SmoothScroll::new(),
             master_volume: settings.master_volume,
             sfx_volume: settings.sfx_volume,
@@ -430,6 +440,12 @@ impl OptionsScene {
         let requested = self.cancel_requested;
         self.cancel_requested = false;
         requested
+    }
+
+    pub fn take_export_requested(&mut self) -> bool {
+        let v = self.export_requested;
+        self.export_requested = false;
+        v
     }
 
     /// Range (min, max, step) for a slider row.
@@ -525,6 +541,7 @@ impl OptionsScene {
             }
             Row::Hints => self.hints_enabled = !self.hints_enabled,
             Row::UndoDiscard => self.discard_undo_enabled = !self.discard_undo_enabled,
+            Row::ExportPlayStats => return,
             _ => return,
         }
         self.save_settings();
@@ -555,6 +572,7 @@ impl OptionsScene {
             }
             Row::Hints => self.hints_enabled = !self.hints_enabled,
             Row::UndoDiscard => self.discard_undo_enabled = !self.discard_undo_enabled,
+            Row::ExportPlayStats => return,
             _ => return,
         }
         self.save_settings();
@@ -635,6 +653,9 @@ impl OptionsScene {
             Row::UndoDiscard => {
                 self.discard_undo_enabled = !self.discard_undo_enabled;
                 self.save_settings();
+            }
+            Row::ExportPlayStats => {
+                self.export_requested = true;
             }
         }
         false
@@ -1137,6 +1158,9 @@ impl OptionsScene {
                             "OFF"
                         }
                     ),
+                    Row::ExportPlayStats => {
+                        "Export play stats (HTML) — Space / click".into()
+                    }
                     _ => unreachable!(),
                 };
                 text_labels.push(TextLabel {
@@ -1173,6 +1197,19 @@ impl SceneBehavior for OptionsScene {
         }
         if self.take_confirm_requested() {
             ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
+        }
+        if self.take_export_requested() {
+            let path = crate::persistence::play_stats_export_path(ctx.active_profile);
+            match crate::bot::export_play_history_html(&path, ctx.progress) {
+                Ok(()) => ctx.bus.push(GameEvent::InfoModal {
+                    title: "Stats exported".into(),
+                    body: format!("Saved HTML report to:\n{}", path.display()),
+                }),
+                Err(e) => ctx.bus.push(GameEvent::InfoModal {
+                    title: "Export failed".into(),
+                    body: format!("{e:#}"),
+                }),
+            }
         }
         None
     }

@@ -60,7 +60,6 @@ pub fn push_gameplay_action_prompts(
     discard_btn_rect: (f32, f32, f32, f32),
     play_btn_rect: (f32, f32, f32, f32),
     trigger_btn_rect: (f32, f32, f32, f32),
-    uses_structure_bank: bool,
     cash_in_enabled: bool,
     show_discard_legend: bool,
     show_play_legend: bool,
@@ -134,9 +133,6 @@ pub fn push_gameplay_action_prompts(
     let mut visible: [usize; 3] = [0; 3];
     let mut n_visible = 0usize;
     for i in 0..3 {
-        if i == 2 && !uses_structure_bank {
-            break;
-        }
         let (_dx, _dy, dw, dh) = rects[i];
         if dw <= 1.0 || dh <= 1.0 {
             continue;
@@ -214,7 +210,7 @@ pub fn push_gameplay_action_prompts(
 
     for k in 0..n_visible {
         let i = visible[k];
-        let cash_in_disabled = i == 2 && uses_structure_bank && !cash_in_enabled;
+        let cash_in_disabled = i == 2 && !cash_in_enabled;
 
         let col_x = inner_left + k as f32 * col_w;
         let ix = col_x + col_pad;

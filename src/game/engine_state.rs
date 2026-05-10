@@ -185,18 +185,12 @@ impl GameplayCoreState {
     }
 
     /// Push validated sets onto the structure bank, extend structure tiles,
-    /// and decrement plays. Used when the run has `structure_bank` mode.
+    /// and decrement plays.
     pub fn commit_sets_to_structure(&mut self, sets: &[DetectedSet], scoring_tiles: &[Tile]) {
         for set in sets {
             self.structure_sets.push(set.clone());
         }
         self.structure_tiles.extend(scoring_tiles.iter().copied());
-        self.plays_remaining = self.plays_remaining.saturating_sub(1);
-    }
-
-    /// Decrement plays without touching the structure bank. Used when the
-    /// play-selection path scores immediately (non-bank mode).
-    pub fn consume_play(&mut self) {
         self.plays_remaining = self.plays_remaining.saturating_sub(1);
     }
 

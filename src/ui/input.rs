@@ -1212,7 +1212,7 @@ pub fn apply_ui_actions(
     for a in actions {
         match a {
             UiAction::ScoreHand => {
-                run.score_selected_tiles(bus);
+                run.commit_selection_to_structure(bus);
                 anim.pulse(crate::render::animation::ENTITY_SCORE_PANEL);
             }
             UiAction::Confirm => {

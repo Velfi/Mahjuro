@@ -6,10 +6,10 @@ use crate::core::relic::{
 };
 
 impl RunState {
-    /// Commit selected melds into structure (costs one play). Alias for the
-    /// structure-system primary action — same as [`Self::commit_selection_to_structure`].
-    pub fn score_selected_tiles(&mut self, bus: &mut EventBus) -> u64 {
-        self.commit_selection_to_structure(bus)
+    /// The House boss: structure cash-in is locked until every discard for the round is spent.
+    pub(crate) fn cash_in_blocked_until_discards_spent(&self) -> bool {
+        self.round_rules.contains(&RuleModifier::CashInRequiresNoDiscards)
+            && self.discards_remaining > 0
     }
 
     /// Move validated melds from hand into **structure**; consumes one play.
@@ -49,34 +49,21 @@ impl RunState {
         }
         self.tiles_played = self.tiles_played.saturating_add(scoring_tiles.len() as u32);
 
-        if self.mode.structure_bank {
-            let current_tile_count = self.structure_tiles.len();
-            let kongs_after = self
-                .structure_sets
-                .iter()
-                .chain(sets.iter())
-                .filter(|s| s.kind == SetKind::Kong)
-                .count();
-            if current_tile_count + scoring_tiles.len() > HAND_SIZE + kongs_after {
-                bus.push(GameEvent::InvalidAction);
-                return 0;
-            }
-            crate::game::engine_state::GameplayCoreState::with_run_mut(self, |core| {
-                core.commit_sets_to_structure(&sets, &scoring_tiles);
-            });
-            bus.push(GameEvent::StructureCommitted);
-        } else {
-            let _ = self.apply_scored_melds(
-                sets.clone(),
-                scoring_tiles.clone(),
-                selected_tiles.clone(),
-                None,
-                bus,
-            );
-            crate::game::engine_state::GameplayCoreState::with_run_mut(self, |core| {
-                core.consume_play();
-            });
+        let current_tile_count = self.structure_tiles.len();
+        let kongs_after = self
+            .structure_sets
+            .iter()
+            .chain(sets.iter())
+            .filter(|s| s.kind == SetKind::Kong)
+            .count();
+        if current_tile_count + scoring_tiles.len() > HAND_SIZE + kongs_after {
+            bus.push(GameEvent::InvalidAction);
+            return 0;
         }
+        crate::game::engine_state::GameplayCoreState::with_run_mut(self, |core| {
+            core.commit_sets_to_structure(&sets, &scoring_tiles);
+        });
+        bus.push(GameEvent::StructureCommitted);
 
         if self.relics.has(RelicId::MeltingIce) {
             let v = self.relic_counters.entry(RelicId::MeltingIce).or_insert(80);
@@ -138,9 +125,7 @@ impl RunState {
             }
         }
 
-        if self.mode.structure_bank {
-            self.scored_last_turn = false;
-        }
+        self.scored_last_turn = false;
 
         crate::game::engine_state::GameplayCoreState::with_run_mut(self, |core| {
             let _ = core.take_selected_tiles();
@@ -186,8 +171,7 @@ impl RunState {
         }
 
         self.try_autotrigger_structure_full(bus);
-        if self.mode.structure_bank
-            && self.plays_remaining == 0
+        if self.plays_remaining == 0
             && self.round_score < self.target_score as u64
             && !self.structure_sets.is_empty()
         {
@@ -197,13 +181,7 @@ impl RunState {
         1
     }
 
-    /// When false, plays score immediately and the structure bank / cash-in UI are disabled.
-    #[inline]
-    pub fn uses_structure_bank(&self) -> bool {
-        self.mode.structure_bank
-    }
-
-    /// Core scoring path for resolved melds (structure trigger or classic commit).
+    /// Core scoring path for resolved melds (structure cash-in).
     pub(super) fn apply_scored_melds(
         &mut self,
         sets: Vec<DetectedSet>,
@@ -395,6 +373,14 @@ impl RunState {
             }
             bus.push(GameEvent::YakuScored(y));
         }
+        if breakdown
+            .detected_yaku
+            .contains(&crate::core::yaku::YakuKind::KokushiMusou)
+        {
+            bus.push(GameEvent::AchievementUnlocked(
+                crate::steam::Achievement::ThirteenOrphans,
+            ));
+        }
         self.last_breakdown = Some(breakdown);
         self.scored_last_turn = breakdown_total > 0;
 
@@ -478,6 +464,9 @@ impl RunState {
         if self.structure_sets.is_empty() {
             return 0;
         }
+        if self.cash_in_blocked_until_discards_spent() {
+            return 0;
+        }
         let rw = Some(BlindKind::round_wind_for_ante(self.ante));
         if kind == StructureTriggerKind::Manual
             && !can_trigger_structure(
@@ -510,11 +499,14 @@ impl RunState {
         earned
     }
 
-    pub(super) fn try_autotrigger_structure_full(&mut self, bus: &mut EventBus) {
+    pub(crate) fn try_autotrigger_structure_full(&mut self, bus: &mut EventBus) {
         if !self.auto_cash_in_on_full_structure {
             return;
         }
         if self.structure_sets.is_empty() {
+            return;
+        }
+        if self.cash_in_blocked_until_discards_spent() {
             return;
         }
         let rw = Some(BlindKind::round_wind_for_ante(self.ante));
@@ -664,7 +656,10 @@ impl RunState {
 
     /// Whether [`Self::trigger_structure_manual`] can score (structure non-empty and rules allow).
     pub fn can_trigger_structure_now(&self) -> bool {
-        if !self.mode.structure_bank || self.structure_sets.is_empty() {
+        if self.structure_sets.is_empty() {
+            return false;
+        }
+        if self.cash_in_blocked_until_discards_spent() {
             return false;
         }
         let rw = Some(BlindKind::round_wind_for_ante(self.ante));
@@ -680,7 +675,10 @@ impl RunState {
     /// Read-only scoring breakdown for a manual structure cash-in (no state change).
     /// RNG-driven relic hooks in a real [`Self::trigger_structure`] may differ slightly.
     pub fn preview_manual_trigger_breakdown(&self) -> Option<ScoreBreakdown> {
-        if !self.mode.structure_bank || self.structure_sets.is_empty() {
+        if self.structure_sets.is_empty() {
+            return None;
+        }
+        if self.cash_in_blocked_until_discards_spent() {
             return None;
         }
         let rw = Some(BlindKind::round_wind_for_ante(self.ante));
@@ -781,7 +779,7 @@ impl RunState {
         if !is_full_hand && matches!(bias, DecompositionBias::Neutral) {
             return default_sets;
         }
-        let rules = self.validation_rules_for_current_mode();
+        let rules = self.validation_rules_for_structure_commits();
         let alternatives = enumerate_decompositions(scoring_tiles, &rules);
         if alternatives.len() <= 1 {
             return default_sets;
@@ -858,16 +856,12 @@ impl RunState {
         best
     }
 
-    pub(super) fn validation_rules_for_current_mode(&self) -> Vec<RuleModifier> {
-        if self.mode.structure_bank {
-            self.round_rules
-                .iter()
-                .copied()
-                .filter(|rule| *rule != RuleModifier::RequireHonor)
-                .collect()
-        } else {
-            self.round_rules.clone()
-        }
+    pub(super) fn validation_rules_for_structure_commits(&self) -> Vec<RuleModifier> {
+        self.round_rules
+            .iter()
+            .copied()
+            .filter(|rule| *rule != RuleModifier::RequireHonor)
+            .collect()
     }
 
     fn has_any_committable_play(&self) -> bool {
@@ -879,7 +873,7 @@ impl RunState {
             return false;
         }
 
-        let rules = self.validation_rules_for_current_mode();
+        let rules = self.validation_rules_for_structure_commits();
         for mask in enumerate_candidate_play_masks(&self.hand, &rules) {
             let indices: Vec<usize> = (0..hand_len).filter(|i| mask & (1 << i) != 0).collect();
             let tiles: Vec<Tile> = indices.iter().map(|&i| self.hand[i]).collect();
@@ -887,16 +881,14 @@ impl RunState {
                 continue;
             };
 
-            if self.uses_structure_bank() {
-                let kongs_after = self
-                    .structure_sets
-                    .iter()
-                    .chain(new_sets.iter())
-                    .filter(|s| s.kind == SetKind::Kong)
-                    .count();
-                if self.structure_tiles.len() + scoring_tiles.len() > HAND_SIZE + kongs_after {
-                    continue;
-                }
+            let kongs_after = self
+                .structure_sets
+                .iter()
+                .chain(new_sets.iter())
+                .filter(|s| s.kind == SetKind::Kong)
+                .count();
+            if self.structure_tiles.len() + scoring_tiles.len() > HAND_SIZE + kongs_after {
+                continue;
             }
             return true;
         }
