@@ -294,7 +294,7 @@ pub enum SfxId {
     MainMenuEnter,
     /// Generic level-up stinger.
     LevelUp,
-    /// Tiles permanently destroyed (e.g. Kiln talisman).
+    /// Tiles permanently destroyed (e.g. Taotie).
     TilesDestroyed,
     /// Boss blind encountered — ominous sting as the round begins.
     BossEncountered,

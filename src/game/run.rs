@@ -727,7 +727,7 @@ pub struct RunState {
     /// so packs and prior-stamped tiles keep their specific enhancement.
     #[serde(default)]
     pub global_buff_enhancement: Option<TileEnhancement>,
-    /// Tile IDs permanently removed from the wall via the Kiln talisman.
+    /// Tile IDs permanently removed from the wall (e.g. Taotie devour).
     /// Filtered out during wall construction each round.
     #[serde(default)]
     pub removed_tile_ids: std::collections::HashSet<u32>,

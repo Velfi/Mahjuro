@@ -3888,7 +3888,6 @@ impl WgpuRenderer {
                 "textures/talismans/talisman_polychrome.png",
                 "talisman-polychrome-hm",
             ),
-            ("textures/talismans/talisman_kiln.png", "talisman-kiln-hm"),
             (
                 "textures/talismans/talisman_bamboo.png",
                 "talisman-bamboo-hm",

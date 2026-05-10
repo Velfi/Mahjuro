@@ -1339,7 +1339,6 @@ pub(super) fn build_consumable_dish(
                         crate::core::talisman::TalismanKind::Pearl => [0.94, 0.95, 0.98, 1.0],
                         crate::core::talisman::TalismanKind::Gilded => [0.96, 0.78, 0.30, 1.0],
                         crate::core::talisman::TalismanKind::Polychrome => [0.82, 0.55, 0.95, 1.0],
-                        crate::core::talisman::TalismanKind::Kiln => [0.85, 0.35, 0.18, 1.0],
                         crate::core::talisman::TalismanKind::Bamboo => [0.06, 0.55, 0.28, 1.0], // emerald
                         crate::core::talisman::TalismanKind::Dots => [0.08, 0.22, 0.78, 1.0], // sapphire
                         crate::core::talisman::TalismanKind::Characters => [0.82, 0.08, 0.18, 1.0], // ruby

@@ -43,7 +43,6 @@ Mahjuro is a mahjong-inspired roguelite that makes mahjong approachable for west
 * **Pearl** — +30 chips
 * **Gilded** — +0.5 mult
 * **Polychrome** — ×1.2 mult per meld containing the tile
-* **Kiln** — permanently removes chosen tiles
 
 Additional talismans **transform** selected tiles (suit shifts, honors, flowers, conformity, etc.).
 
@@ -197,7 +196,7 @@ The original MVP scope is fully implemented and significantly exceeded:
 | Score targets                     | Done        | 8 antes × 3 blinds; **Spring–Winter stakes** |
 | Post-run unlocks                  | Done        | 7-level relic/rule/**dora** gating + stakes |
 | *Bonus: Yaku system*              | Implemented | **13** patterns + zodiac leveling         |
-| *Bonus: Talismans & enhancements* | Implemented | Hand-wide buffs, Kiln, transforms, …      |
+| *Bonus: Talismans & enhancements* | Implemented | Hand-wide buffs, transforms, …            |
 | *Bonus: 3D shop*                  | Implemented | Curio cabinet, spotlight hover, dishes    |
 | *Bonus: Tutorial / onboarding*    | Implemented | Overlay + campaign/summary/recap scenes   |
 | *Bonus: VFX / animation*          | Implemented | Fluid, particles, props, transitions    |

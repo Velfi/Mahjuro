@@ -143,8 +143,8 @@ pub enum RelicId {
     /// Successor to Melting Ice after it burns — buy from shop. Permanent +80 chips base.
     /// At cash-in, every scored honor (wind/dragon) tile is destroyed: the
     /// tile is permanently removed from the run's wall (added to
-    /// `removed_tile_ids`, the same primitive Kiln uses) and Taotie's chip
-    /// bonus grows by +20 per tile. `relic_counters[Taotie]` holds
+    /// `removed_tile_ids`) and Taotie's chip bonus grows by +20 per tile.
+    /// `relic_counters[Taotie]` holds
     /// the accumulated chip bonus; divide by 20 for the honor count
     /// shown in the live tooltip.
     Taotie,
