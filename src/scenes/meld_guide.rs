@@ -4,9 +4,9 @@
 //! that shows concrete tile examples: basic melds, tile categories, flowers, and
 //! every yaku hand pattern.
 //!
-//! Accessible from the start screen ("Meld Guide" button) or mid-game via the
-//! pause menu. When entered mid-game, the previous scene is suspended by `App`
-//! and restored when the player presses Back.
+//! Opened from the pause menu (gameplay or shop), the tutorial summary, or
+//! in-shop help. The previous scene is suspended by `App` and restored when
+//! the player presses Back.
 
 use crate::core::hand::SetKind;
 use crate::core::progression::PlayerProgress;
@@ -17,8 +17,7 @@ use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::ui::input::UiAction;
 
-use super::main_menu_exterior::MainMenuExteriorScene;
-use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+use super::{BackgroundId, ButtonDef, DrawCtx, SceneBehavior, SceneTransition, UpdateCtx};
 
 // ── Page indices ──────────────────────────────────────────────────────────
 //
@@ -44,28 +43,16 @@ const CLICK_BACK: u32 = 0xD003;
 
 pub struct MeldGuideScene {
     page: usize,
-    /// `true` when entered from gameplay/shop (i.e. there is a suspended scene
-    /// to return to). Affects the "Back" button label.
-    has_suspended: bool,
 }
 
 impl MeldGuideScene {
-    pub fn new(has_suspended: bool) -> Self {
-        Self {
-            page: 0,
-            has_suspended,
-        }
+    pub fn new() -> Self {
+        Self { page: 0 }
     }
 
-    /// Transition to return to the start screen. When entered as an overlay
-    /// (from in-game pause menu or shop), pops the overlay instead.
     fn go_back(&self, overlay_request: &mut Option<super::OverlayRequest>) -> SceneTransition {
-        if self.has_suspended {
-            *overlay_request = Some(super::OverlayRequest::Pop);
-            None
-        } else {
-            Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()))
-        }
+        *overlay_request = Some(super::OverlayRequest::Pop);
+        None
     }
 }
 

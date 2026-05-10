@@ -114,7 +114,7 @@ impl SceneBehavior for GameplayScene {
             if cid == HELP_BADGE_ID {
                 GameEngine::mark_tutorial_meld_guide_opened(ctx.run);
                 *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::MeldGuide(
-                    MeldGuideScene::new(true),
+                    MeldGuideScene::new(),
                 ))));
                 return None;
             }
@@ -123,7 +123,7 @@ impl SceneBehavior for GameplayScene {
             if matches!(a, UiAction::Help) {
                 GameEngine::mark_tutorial_meld_guide_opened(ctx.run);
                 *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::MeldGuide(
-                    MeldGuideScene::new(true),
+                    MeldGuideScene::new(),
                 ))));
                 return None;
             }
@@ -137,7 +137,7 @@ impl SceneBehavior for GameplayScene {
             if self.pause_menu.take_meld_guide_request() {
                 GameEngine::mark_tutorial_meld_guide_opened(ctx.run);
                 *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::MeldGuide(
-                    MeldGuideScene::new(true),
+                    MeldGuideScene::new(),
                 ))));
                 return None;
             }

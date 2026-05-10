@@ -266,7 +266,7 @@ impl ShopScene {
         }
         if open_guide {
             *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::MeldGuide(
-                MeldGuideScene::new(true),
+                MeldGuideScene::new(),
             ))));
             return None;
         }
@@ -276,7 +276,7 @@ impl ShopScene {
             // Drain a meld guide request from the pause menu.
             if self.pause_menu.take_meld_guide_request() {
                 *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::MeldGuide(
-                    MeldGuideScene::new(true),
+                    MeldGuideScene::new(),
                 ))));
                 return None;
             }
