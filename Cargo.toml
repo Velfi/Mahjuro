@@ -3,13 +3,6 @@ name = "mahjuro"
 version = "0.5.0-5"
 edition = "2024"
 
-[profile.release]
-# MSVC link.exe (especially recent VS previews) has intermittently reported
-# LNK4003 "invalid library format" on this crate's rlib when linking the bin
-# (lib + bin package with heavy native deps: SDL3, Steam, ring, wgpu). Keeping
-# bitcode out of rlibs avoids one class of bad interactions with the MSVC linker.
-embed-bitcode = false
-
 [profile.release-with-debug]
 inherits = "release"
 debug = true
