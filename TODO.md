@@ -9,6 +9,6 @@
 - fix shop lighting (needs a tuning pass)
 - fix pick_blind lighting (needs a tuning pass)
 - gold piles need work, revisit different objects for different denominations
-- consider merging the profile and collection screens
 - controller rumble broken
   - We switched to SDL to avoid gilrs problems. Let's make sure everything we think we got out of the switch is actually real.
+- can we get back to dynamically linking SDL3 instead of statically? There was some issue with the build script that was causing problems. Is linking still an issue?

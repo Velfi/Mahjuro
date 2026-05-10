@@ -1,5 +1,9 @@
 //! WGPU: depth-tested 3D tile meshes for the hand + 2D UI quads on top.
 
+#[path = "wgpu_renderer/embedded_wgsl.rs"]
+mod embedded_wgsl;
+#[path = "wgpu_renderer/init_phases.rs"]
+mod init_phases;
 #[path = "wgpu_renderer/init.rs"]
 mod init;
 #[path = "wgpu_renderer/resources.rs"]

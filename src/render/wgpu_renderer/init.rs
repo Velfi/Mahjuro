@@ -8,282 +8,57 @@ use crate::render::lamp_mesh::{
 impl WgpuRenderer {
     pub fn new(target_init: TargetInit) -> anyhow::Result<Self> {
         let t_total = Instant::now();
-        let instance = wgpu::Instance::default();
-
-        // Branch on target: the windowed path creates a Surface *before*
-        // adapter selection (compatible_surface), then picks a format from
-        // the surface caps. The headless path requests an adapter without
-        // any surface and picks the format itself.
-        let (surface_opt, size, hdr_enabled): (
-            Option<wgpu::Surface<'static>>,
-            crate::physical_size::PhysicalSize,
-            bool,
-        ) = match &target_init {
-            TargetInit::Windowed {
-                window,
-                hdr_enabled,
-            } => {
-                let (pw, ph) = window.size_in_pixels();
-                let size = crate::physical_size::PhysicalSize::new(pw.max(1), ph.max(1));
-                use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
-                let raw_window_handle = window
-                    .window_handle()
-                    .map_err(|e| anyhow::anyhow!("window_handle: {e}"))?
-                    .as_raw();
-                let raw_display_handle = window
-                    .display_handle()
-                    .map_err(|e| anyhow::anyhow!("display_handle: {e}"))?
-                    .as_raw();
-                let surface = unsafe {
-                    instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
-                        raw_display_handle: Some(raw_display_handle),
-                        raw_window_handle,
-                    })?
-                };
-                (Some(surface), size, *hdr_enabled)
-            }
-            TargetInit::Headless {
-                width,
-                height,
-                hdr_enabled,
-            } => {
-                let size =
-                    crate::physical_size::PhysicalSize::new((*width).max(1), (*height).max(1));
-                (None, size, *hdr_enabled)
-            }
-        };
-
-        let size = super::clamp_render_physical_size(size);
-
-        let t0 = Instant::now();
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::default(),
-            compatible_surface: surface_opt.as_ref(),
-            force_fallback_adapter: false,
-        }))
-        .map_err(|e| anyhow::anyhow!("adapter: {e:?}"))?;
-        log::debug!("wgpu adapter acquired in {:?}", t0.elapsed());
-
-        // Flag CPU-fallback adapters in headless mode so local runs don't
-        // silently get wrong anti-aliasing. Still valid on CI without a GPU.
-        if surface_opt.is_none() {
-            let info = adapter.get_info();
-            if info.device_type == wgpu::DeviceType::Cpu {
-                log::warn!(
-                    "headless renderer using CPU fallback adapter '{}' ({:?}); anti-aliasing may differ from GPU runs",
-                    info.name,
-                    info.backend
-                );
-            }
-        }
-
-        // Pick the output format. Windowed mode queries the surface caps;
-        // headless mode hard-picks Rgba8UnormSrgb — every backend supports
-        // it as RENDER_ATTACHMENT | COPY_SRC and the existing PNG readback
-        // already handles sRGB8 correctly (no BGRA swap needed).
-        let (format, swapchain_sdr_format, swapchain_hdr_available) = match surface_opt.as_ref() {
-            Some(surface) => {
-                let caps = surface.get_capabilities(&adapter);
-                let swapchain_sdr_format = caps
-                    .formats
-                    .iter()
-                    .find(|f| f.is_srgb())
-                    .copied()
-                    .unwrap_or(caps.formats[0]);
-                let swapchain_hdr_available =
-                    caps.formats.contains(&wgpu::TextureFormat::Rgba16Float);
-                let format = if hdr_enabled {
-                    if swapchain_hdr_available {
-                        log::info!("HDR enabled — using Rgba16Float surface format");
-                        wgpu::TextureFormat::Rgba16Float
-                    } else {
-                        log::warn!(
-                            "HDR requested but Rgba16Float not supported; falling back to sRGB"
-                        );
-                        swapchain_sdr_format
-                    }
-                } else {
-                    swapchain_sdr_format
-                };
-                (format, swapchain_sdr_format, swapchain_hdr_available)
-            }
-            None => {
-                if hdr_enabled {
-                    log::info!("headless renderer ignoring hdr_enabled; screenshots are sRGB8");
-                }
-                (
-                    wgpu::TextureFormat::Rgba8UnormSrgb,
-                    wgpu::TextureFormat::Rgba8UnormSrgb,
-                    false,
-                )
-            }
-        };
+        // Instance, adapter, device, surface/offscreen target, depth — see
+        // `init_phases::early_gpu_and_depth`.
+        let super::init_phases::EarlyGpuState {
+            device,
+            queue,
+            size,
+            target,
+            config,
+            format,
+            swapchain_sdr_format,
+            swapchain_hdr_available,
+            timestamp_supported,
+            depth_texture,
+            depth_view,
+            ssr_prev_depth_texture,
+            ssr_prev_depth_view,
+        } = super::init_phases::early_gpu_and_depth(target_init)?;
 
         // Linear HDR intermediate — main scene + bloom; tonemap maps to the swapchain format.
         let scene_hdr_format = SCENE_HDR_FORMAT;
 
-        let mut limits = wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits());
-        // `downlevel_webgl2_defaults` zeros storage-buffer counts for WebGL2-tier parity; the
-        // emissive probe GI compute pass needs at least one `storage` binding. Take the adapter
-        // ceiling so Metal/Vulkan/DX12 keep full capability (see crash: max_storage_buffers… = 0).
-        let al = adapter.limits();
-        limits.max_storage_buffers_per_shader_stage = limits
-            .max_storage_buffers_per_shader_stage
-            .max(al.max_storage_buffers_per_shader_stage)
-            .max(1);
-        limits.max_storage_buffer_binding_size = limits
-            .max_storage_buffer_binding_size
-            .max(al.max_storage_buffer_binding_size);
-        // Same downlevel preset disables compute (`max_compute_*` = 0); emissive probe update uses
-        // `@workgroup_size(64, 1, 1)` and `dispatch_workgroups` — restore adapter compute limits.
-        limits.max_compute_invocations_per_workgroup = limits
-            .max_compute_invocations_per_workgroup
-            .max(al.max_compute_invocations_per_workgroup)
-            .max(64);
-        limits.max_compute_workgroup_size_x = limits
-            .max_compute_workgroup_size_x
-            .max(al.max_compute_workgroup_size_x)
-            .max(64);
-        limits.max_compute_workgroup_size_y = limits
-            .max_compute_workgroup_size_y
-            .max(al.max_compute_workgroup_size_y)
-            .max(1);
-        limits.max_compute_workgroup_size_z = limits
-            .max_compute_workgroup_size_z
-            .max(al.max_compute_workgroup_size_z)
-            .max(1);
-        limits.max_compute_workgroup_storage_size = limits
-            .max_compute_workgroup_storage_size
-            .max(al.max_compute_workgroup_storage_size);
-        limits.max_compute_workgroups_per_dimension = limits
-            .max_compute_workgroups_per_dimension
-            .max(al.max_compute_workgroups_per_dimension)
-            .max(1);
-
-        // Opt into TIMESTAMP_QUERY when the adapter supports it so the GPU
-        // pass profiler (Debug menu → "Profile GPU…") can record start/end
-        // ticks per render pass. The feature is optional — on backends that
-        // lack it the profiler stays a no-op.
-        let mut required_features = wgpu::Features::CLEAR_TEXTURE;
-        let timestamp_supported = adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY);
-        if timestamp_supported {
-            required_features |= wgpu::Features::TIMESTAMP_QUERY;
-            // INSIDE_ENCODERS allows `encoder.write_timestamp()` outside of
-            // render passes — only needed for debug profiling tools.
-            #[cfg(debug_assertions)]
-            if adapter
-                .features()
-                .contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS)
-            {
-                required_features |= wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
-            }
-        }
-
         let t0 = Instant::now();
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("mahjuro-device"),
-            required_features,
-            required_limits: limits,
-            experimental_features: wgpu::ExperimentalFeatures::default(),
-            memory_hints: wgpu::MemoryHints::default(),
-            trace: wgpu::Trace::default(),
-        }))
-        .map_err(|e| anyhow::anyhow!("device: {e:?}"))?;
-        log::debug!("wgpu device created in {:?}", t0.elapsed());
-
-        // Build the shared `SurfaceConfiguration` that downstream textures
-        // track against. Windowed mode seeds it from `get_default_config`
-        // and calls `surface.configure`; headless mode fills in the same
-        // fields by hand (alpha_mode / view_formats don't matter for the
-        // texture path) and creates the offscreen render-attachment.
-        let (target, config) = match surface_opt {
-            Some(surface) => {
-                let mut config = surface
-                    .get_default_config(&adapter, size.width.max(1), size.height.max(1))
-                    .ok_or_else(|| anyhow::anyhow!("no default surface config"))?;
-                config.format = format;
-                config.present_mode = wgpu::PresentMode::Fifo;
-                config.desired_maximum_frame_latency = 2;
-                // Need COPY_SRC so we can snapshot the swapchain into
-                // `scene_prev_texture` at end-of-frame for the lacquer SSR pass.
-                config.usage |= wgpu::TextureUsages::COPY_SRC;
-                surface.configure(&device, &config);
-                (RenderTarget::Surface(surface), config)
-            }
-            None => {
-                let config = wgpu::SurfaceConfiguration {
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-                    format,
-                    width: size.width.max(1),
-                    height: size.height.max(1),
-                    present_mode: wgpu::PresentMode::Fifo,
-                    desired_maximum_frame_latency: 2,
-                    alpha_mode: wgpu::CompositeAlphaMode::Auto,
-                    view_formats: vec![],
-                };
-                let texture = device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("headless-frame-target"),
-                    size: wgpu::Extent3d {
-                        width: config.width,
-                        height: config.height,
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format,
-                    usage: config.usage,
-                    view_formats: &[],
-                });
-                (RenderTarget::Offscreen { texture }, config)
-            }
-        };
-
-        let (depth_texture, depth_view) =
-            create_depth(&device, size.width.max(1), size.height.max(1));
-        // Separate depth snapshot for the lacquered-table SSR sample —
-        // copied after Pass A together with `scene_prev_texture`.
-        let (ssr_prev_depth_texture, ssr_prev_depth_view) =
-            create_depth_copy(&device, size.width.max(1), size.height.max(1));
-
-        let t0 = Instant::now();
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("quad-shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../../../shaders/quad.wgsl").into()),
-        });
-
-        let scene_pbr_lights_wgsl = include_str!("../../../shaders/scene_pbr_lights.wgsl");
-        let scene_hdr_tonemap_wgsl = include_str!("../../../shaders/scene_hdr_tonemap.wgsl");
-        let tile_3d_wgsl = include_str!("../../../shaders/tile_3d.wgsl");
-        let tile_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("tile-3d-shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                format!(
-                    "{}\n{}\n{}",
-                    scene_pbr_lights_wgsl, scene_hdr_tonemap_wgsl, tile_3d_wgsl
-                )
-                .into(),
-            ),
-        });
-
-        let shop_glb_wgsl = include_str!("../../../shaders/shop_glb.wgsl");
-        let shop_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("shop-glb-shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                format!(
-                    "{}\n{}\n{}",
-                    scene_pbr_lights_wgsl, scene_hdr_tonemap_wgsl, shop_glb_wgsl
-                )
-                .into(),
-            ),
-        });
-
-        let text_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("text-shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../../shaders/text_quad.wgsl").into(),
-            ),
-        });
+        let super::init_phases::RendererShaderPack {
+            quad: shader,
+            tile: tile_shader,
+            shop: shop_shader,
+            text: text_shader,
+            gradient: gradient_shader,
+            squircle: squircle_shader,
+            flame: flame_shader,
+            starfield: starfield_shader,
+            ember_drift: ember_drift_shader,
+            golden_dust: golden_dust_shader,
+            moonlit_water: moonlit_water_shader,
+            sunlit_water: sunlit_water_shader,
+            mountain_haze: mountain_haze_shader,
+            shooting_star_cascade: shooting_star_cascade_shader,
+            cascade_composite: cascade_composite_shader,
+            tile_outline: tile_outline_shader,
+            tile_glow: tile_glow_shader,
+            lit_mesh: lit_mesh_shader,
+            shadow: shadow_shader,
+            image: image_shader,
+            bloom_extract: bloom_extract_shader,
+            bloom_blur: bloom_blur_shader,
+            bloom_composite: bloom_composite_shader,
+            tonemap: tonemap_shader_module,
+            emissive_probe_update: emissive_probe_update_shader,
+            emissive_probe_apply: emissive_probe_apply_shader,
+            emissive_gi_composite: emissive_gi_composite_shader,
+        } = super::init_phases::create_renderer_shader_modules(&device);
 
         let globals_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("globals"),
@@ -848,17 +623,6 @@ impl WgpuRenderer {
             ],
         };
 
-        let gradient_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("gradient_quad.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/shaders/gradient_quad.wgsl"
-                ))
-                .into(),
-            ),
-        });
-
         let gradient_quad_pipeline =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("gradient-quad-pipeline"),
@@ -888,17 +652,6 @@ impl WgpuRenderer {
                 multiview_mask: None,
                 cache: None,
             });
-
-        let squircle_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("squircle_quad.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/shaders/squircle_quad.wgsl"
-                ))
-                .into(),
-            ),
-        });
 
         let squircle_quad_pipeline =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -962,12 +715,6 @@ impl WgpuRenderer {
                 },
                 count: None,
             }],
-        });
-        let flame_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("flame.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/flame.wgsl")).into(),
-            ),
         });
         let flame_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("flame-pl"),
@@ -1068,22 +815,18 @@ impl WgpuRenderer {
         // Starfield, ember-drift, and golden-dust all share the same
         // layout: no vertex buffers, globals-only bind group, additive
         // blend onto the UI colour target.
-        let vignette_pipeline = |label: &str, wgsl: &str| -> wgpu::RenderPipeline {
-            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some(label),
-                source: wgpu::ShaderSource::Wgsl(wgsl.into()),
-            });
+        let vignette_pipeline = |label: &str, module: &wgpu::ShaderModule| -> wgpu::RenderPipeline {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(&quad_layout),
                 vertex: wgpu::VertexState {
-                    module: &shader,
+                    module,
                     entry_point: Some("vs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     buffers: &[],
                 },
                 fragment: Some(wgpu::FragmentState {
-                    module: &shader,
+                    module,
                     entry_point: Some("fs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     targets: &[Some(wgpu::ColorTargetState {
@@ -1114,51 +857,23 @@ impl WgpuRenderer {
             })
         };
 
-        let starfield_pipeline = vignette_pipeline(
-            "starfield-pipeline",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/shaders/starfield.wgsl"
-            )),
-        );
-        let ember_drift_pipeline = vignette_pipeline(
-            "ember-drift-pipeline",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/shaders/ember_drift.wgsl"
-            )),
-        );
-        let golden_dust_pipeline = vignette_pipeline(
-            "golden-dust-pipeline",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/shaders/golden_dust.wgsl"
-            )),
-        );
+        let starfield_pipeline = vignette_pipeline("starfield-pipeline", &starfield_shader);
+        let ember_drift_pipeline = vignette_pipeline("ember-drift-pipeline", &ember_drift_shader);
+        let golden_dust_pipeline = vignette_pipeline("golden-dust-pipeline", &golden_dust_shader);
         // moonlit_water gets its own pipeline so it can bind the moon albedo
         // texture at group 1 in addition to the globals at group 0.
         let moonlit_water_pipeline = {
-            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("moonlit-water-pipeline"),
-                source: wgpu::ShaderSource::Wgsl(
-                    include_str!(concat!(
-                        env!("CARGO_MANIFEST_DIR"),
-                        "/shaders/moonlit_water.wgsl"
-                    ))
-                    .into(),
-                ),
-            });
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("moonlit-water-pipeline"),
                 layout: Some(&moonlit_water_layout),
                 vertex: wgpu::VertexState {
-                    module: &shader,
+                    module: &moonlit_water_shader,
                     entry_point: Some("vs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     buffers: &[],
                 },
                 fragment: Some(wgpu::FragmentState {
-                    module: &shader,
+                    module: &moonlit_water_shader,
                     entry_point: Some("fs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     targets: &[Some(wgpu::ColorTargetState {
@@ -1188,37 +903,22 @@ impl WgpuRenderer {
                 cache: None,
             })
         };
-        let sunlit_water_pipeline = vignette_pipeline(
-            "sunlit-water-pipeline",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/shaders/sunlit_water.wgsl"
-            )),
-        );
+        let sunlit_water_pipeline =
+            vignette_pipeline("sunlit-water-pipeline", &sunlit_water_shader);
         // Mountain-haze uses a custom pipeline layout so the fragment shader
         // can bind the haze uniform (group 1) alongside globals (group 0).
         let mountain_haze_pipeline = {
-            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("mountain-haze-pipeline"),
-                source: wgpu::ShaderSource::Wgsl(
-                    include_str!(concat!(
-                        env!("CARGO_MANIFEST_DIR"),
-                        "/shaders/mountain_haze.wgsl"
-                    ))
-                    .into(),
-                ),
-            });
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("mountain-haze-pipeline"),
                 layout: Some(&mountain_haze_layout),
                 vertex: wgpu::VertexState {
-                    module: &shader,
+                    module: &mountain_haze_shader,
                     entry_point: Some("vs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     buffers: &[],
                 },
                 fragment: Some(wgpu::FragmentState {
-                    module: &shader,
+                    module: &mountain_haze_shader,
                     entry_point: Some("fs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     targets: &[Some(wgpu::ColorTargetState {
@@ -1253,27 +953,17 @@ impl WgpuRenderer {
         // pass. The offscreen pipeline writes with REPLACE blend since the
         // target is cleared per-frame before the pre-pass.
         let shooting_star_cascade_pipeline = {
-            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("shooting-star-cascade-pipeline"),
-                source: wgpu::ShaderSource::Wgsl(
-                    include_str!(concat!(
-                        env!("CARGO_MANIFEST_DIR"),
-                        "/shaders/shooting_star_cascade.wgsl"
-                    ))
-                    .into(),
-                ),
-            });
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("shooting-star-cascade-pipeline"),
                 layout: Some(&quad_layout),
                 vertex: wgpu::VertexState {
-                    module: &shader,
+                    module: &shooting_star_cascade_shader,
                     entry_point: Some("vs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     buffers: &[],
                 },
                 fragment: Some(wgpu::FragmentState {
-                    module: &shader,
+                    module: &shooting_star_cascade_shader,
                     entry_point: Some("fs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     targets: &[Some(wgpu::ColorTargetState {
@@ -1325,16 +1015,6 @@ impl WgpuRenderer {
             ..Default::default()
         });
         let cascade_composite_pipeline = {
-            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("cascade-composite-pipeline"),
-                source: wgpu::ShaderSource::Wgsl(
-                    include_str!(concat!(
-                        env!("CARGO_MANIFEST_DIR"),
-                        "/shaders/shooting_star_cascade_composite.wgsl"
-                    ))
-                    .into(),
-                ),
-            });
             let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("cascade-composite-pl"),
                 bind_group_layouts: &[Some(&cascade_composite_layout)],
@@ -1344,13 +1024,13 @@ impl WgpuRenderer {
                 label: Some("cascade-composite-pipeline"),
                 layout: Some(&pl),
                 vertex: wgpu::VertexState {
-                    module: &shader,
+                    module: &cascade_composite_shader,
                     entry_point: Some("vs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     buffers: &[],
                 },
                 fragment: Some(wgpu::FragmentState {
-                    module: &shader,
+                    module: &cascade_composite_shader,
                     entry_point: Some("fs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     targets: &[Some(wgpu::ColorTargetState {
@@ -1602,13 +1282,6 @@ impl WgpuRenderer {
         );
 
         // ---- Gold outline shell pipeline (selected tiles) ----
-        let tile_outline_wgsl = include_str!("../../../shaders/tile_outline.wgsl");
-        let tile_outline_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("tile-outline-shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                format!("{}\n{}", scene_hdr_tonemap_wgsl, tile_outline_wgsl).into(),
-            ),
-        });
         let tile_outline_instance_vertex_layout = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<TileOutlineInstance>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Instance,
@@ -1681,12 +1354,6 @@ impl WgpuRenderer {
             });
 
         // ---- Tile glow pipeline (selected tile additive halo) ----
-        let tile_glow_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("tile-glow-shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../../shaders/tile_glow.wgsl").into(),
-            ),
-        });
         let tile_glow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("tile-glow-pipeline"),
             layout: Some(&quad_layout),
@@ -1730,17 +1397,6 @@ impl WgpuRenderer {
         });
 
         // ---- Lit-mesh pipeline (procedural candles + wood table) ----
-        let lit_mesh_wgsl = include_str!("../../../shaders/lit_mesh.wgsl");
-        let lit_mesh_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("lit-mesh-shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                format!(
-                    "{}\n{}\n{}",
-                    scene_pbr_lights_wgsl, scene_hdr_tonemap_wgsl, lit_mesh_wgsl
-                )
-                .into(),
-            ),
-        });
         let lit_mesh_material_layout = create_lit_mesh_material_layout(&device);
         let lit_mesh_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("lit-mesh-pl"),
@@ -2011,10 +1667,6 @@ impl WgpuRenderer {
         // Shared by lit-mesh casters (table-excluded) and hand tiles —
         // both vertex layouts begin with `position : vec3<f32>` at
         // offset 0, and the shader only reads location 0.
-        let shadow_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("shadow-shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../../../shaders/shadow.wgsl").into()),
-        });
         let shadow_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("shadow-pl"),
             bind_group_layouts: &[Some(&shadow_caster_layout)],
@@ -2155,12 +1807,6 @@ impl WgpuRenderer {
             });
 
         // ---- Image pipeline (full-colour textured quads for relic icons, etc.) ----
-        let image_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("image-shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../../shaders/image_quad.wgsl").into(),
-            ),
-        });
         let image_pipeline_scene_hdr =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("image-pipeline-scene-hdr"),
@@ -2345,18 +1991,6 @@ impl WgpuRenderer {
             bind_group_layouts: &[Some(&bloom_extract_bind_group_layout)],
             immediate_size: 0,
         });
-        let bloom_extract_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("bloom-extract-shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../../shaders/bloom_extract.wgsl").into(),
-            ),
-        });
-        let bloom_blur_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("bloom-blur-shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../../shaders/bloom_blur.wgsl").into(),
-            ),
-        });
         let bloom_extract_pipeline =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("bloom-extract-pipeline"),
@@ -2414,12 +2048,6 @@ impl WgpuRenderer {
                 bind_group_layouts: &[Some(&bloom_composite_bind_group_layout)],
                 immediate_size: 0,
             });
-        let bloom_composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("bloom-composite-shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../../shaders/bloom_composite.wgsl").into(),
-            ),
-        });
         let bloom_composite_pipeline =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("bloom-composite-pipeline"),
@@ -2485,12 +2113,6 @@ impl WgpuRenderer {
                 bind_group_layouts: &[Some(&tonemap_bind_group_layout)],
                 immediate_size: 0,
             });
-        let tonemap_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("tonemap-shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../../shaders/tonemap_composite.wgsl").into(),
-            ),
-        });
         let make_tonemap_pipe = |label: &'static str, out_fmt: wgpu::TextureFormat| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
@@ -2731,18 +2353,6 @@ impl WgpuRenderer {
                     },
                 ],
             });
-        let emissive_probe_update_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("emissive-probe-update-shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../../shaders/emissive_probe_update.wgsl").into(),
-            ),
-        });
-        let emissive_probe_apply_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("emissive-probe-apply-shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../../shaders/emissive_probe_apply.wgsl").into(),
-            ),
-        });
         let emissive_probe_update_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("emissive-probe-update-pl"),
             bind_group_layouts: &[Some(&emissive_probe_update_bind_group_layout)],
@@ -2855,12 +2465,6 @@ impl WgpuRenderer {
                     },
                 ],
             });
-        let emissive_gi_composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("emissive-gi-composite-shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../../shaders/emissive_gi_composite.wgsl").into(),
-            ),
-        });
         let emissive_gi_composite_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("emissive-gi-composite-pl"),
             bind_group_layouts: &[Some(&emissive_gi_composite_bind_group_layout)],
