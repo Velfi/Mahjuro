@@ -23,7 +23,7 @@ gltf = { version = "1.4.1", features = [
     "KHR_materials_emissive_strength",
 ] }
 image = { version = "0.25", default-features = false, features = ["png"] }
-sdl3 = { version = "0.17", features = ["build-from-source", "raw-window-handle"] }
+sdl3 = { version = "0.17", features = ["build-from-source-static", "raw-window-handle"] }
 log = "0.4.28"
 pollster = "0.4.0"
 rand = "0.10.0"

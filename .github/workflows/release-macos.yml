@@ -122,14 +122,6 @@ jobs:
           cp target/aarch64-apple-darwin/release/libsteam_api.dylib \
             "$APP/Contents/MacOS/libsteam_api.dylib"
 
-          # SDL3 dylib (sdl3 build-from-source); binary uses -rpath @loader_path (build.rs).
-          lipo -create \
-            target/aarch64-apple-darwin/release/libSDL3.0.dylib \
-            target/x86_64-apple-darwin/release/libSDL3.0.dylib \
-            -output "$APP/Contents/MacOS/libSDL3.0.dylib"
-          install_name_tool -id @loader_path/libSDL3.0.dylib \
-            "$APP/Contents/MacOS/libSDL3.0.dylib"
-
           # Info.plist with version substituted in
           sed "s/__VERSION__/${VERSION}/g" packaging/Info.plist > "$APP/Contents/Info.plist"
 

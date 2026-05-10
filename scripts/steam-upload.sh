@@ -151,19 +151,10 @@ stage_local () {
                 exit 1
             fi
             cp "$so" "$CONTENT/linux/libsteam_api.so"
-            shopt -s nullglob
-            local sdl_libs=( "$REPO_ROOT/target/release"/libSDL3.so* )
-            if [[ ${#sdl_libs[@]} -eq 0 ]]; then
-                echo "error: no libSDL3.so under target/release." >&2
-                echo "       SDL is linked dynamically; copy artifacts from a release build." >&2
-                exit 1
-            fi
-            cp "${sdl_libs[@]}" "$CONTENT/linux/"
             cp "$REPO_ROOT/packaging/steam_input/game_actions_4636490.vdf" \
                 "$CONTENT/linux/game_actions_4636490.vdf"
             echo "staged: linux/mahjuro (from $bin)"
             echo "staged: linux/libsteam_api.so (from $so)"
-            echo "staged: linux/libSDL3.so* (${#sdl_libs[@]} file(s))"
             echo "staged: linux/game_actions_4636490.vdf"
             echo "warning: --local stages only the host platform; windows/ and macos/ are empty." >&2
             ;;
@@ -191,11 +182,11 @@ stage_release () {
     unzip -q "$DOWNLOADS/mahjuro-${TAG}-windows-x86_64.zip" -d "$CONTENT/windows/"
     echo "staged: windows/mahjuro.exe"
 
-    # Linux: tar.gz contains mahjuro + libsteam_api.so + libSDL3.so* + IGA manifest.
+    # Linux: tar.gz contains mahjuro + libsteam_api.so + IGA manifest (SDL is static).
     tar -xzf "$DOWNLOADS/mahjuro-${TAG}-linux-x86_64.tar.gz" -C "$CONTENT/linux/"
     chmod +x "$CONTENT/linux/mahjuro"
     echo "staged: linux/mahjuro"
-    echo "staged: linux/libsteam_api.so + libSDL3.so* (from release tarball)"
+    echo "staged: linux/libsteam_api.so (from release tarball)"
 
     # macOS: mount the DMG and copy the .app out of it (signed + notarized + stapled).
     if [[ "$(uname)" != "Darwin" ]]; then

@@ -7,7 +7,7 @@ The shipped **`Mahjuro.app`** must place vendored `.dylib` files in **`Contents/
 | Library | Why |
 |--------|-----|
 | **`libsteam_api.dylib`** | Linked as `@loader_path/libsteam_api.dylib`. Copied next to the binary by [`build.rs`](../../build.rs) during `cargo build`; **packaging must also copy it** into the app (CI historically missed this once). |
-| **`libSDL3.0.dylib`** | Linked as `@rpath/libSDL3.0.dylib` from `sdl3` (dynamic, build-from-source). **`build.rs` adds `-Wl,-rpath,@loader_path`** so resolution uses the executable directory. **Packaging must copy** the dylib; universal builds **`lipo`** the arm64 and x86_64 copies, then run **`install_name_tool -id @loader_path/libSDL3.0.dylib`** on the bundled file. |
+| **SDL3** | Linked **statically** via `sdl3` feature `build-from-source-static` — no `libSDL3` dylib in the bundle. |
 
 Keep **[`.github/workflows/release.yml`](../../.github/workflows/release.yml)** and **[`scripts/package-macos.sh`](../../scripts/package-macos.sh)** aligned whenever this layout changes.
 

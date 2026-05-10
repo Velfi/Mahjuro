@@ -14,8 +14,8 @@ use crate::core::zodiac::ZodiacKind;
 use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::{CameraParams, Object3d, Object3dKind, UiFrame};
 use crate::render::table_transform::{euler_xyz_rad_from_deg, rot_fixed_axes_deg};
-use crate::render::theme::{color, typography};
-use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, PointLight, TextLabel};
+use crate::render::theme::{color, metrics, typography};
+use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, PointLight, TextAlign, TextLabel};
 use crate::ui::input::UiAction;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
@@ -26,6 +26,39 @@ use super::{DrawCtx, OverlayRequest, Scene, SceneBehavior, SceneTransition, Upda
 use crate::scenes::object3d_inspect::{
     InspectFrameEnv, InspectRig, ItemInspectOrbitState, apply_inspect_view_to_frame,
 };
+
+/// 2D chrome sizes shared by [`CollectionScene::draw_collection_frame`] and
+/// [`CollectionScene::flat_items`] — tuned for legibility at TV distance.
+#[derive(Clone, Copy)]
+struct ArchiveChromeLayout {
+    scale: f32,
+    margin_x: f32,
+    title_y: f32,
+    chrome_btn_h: f32,
+    back_w: f32,
+    switch_w: f32,
+    arrow_w: f32,
+}
+
+fn archive_chrome_layout(w: f32, h: f32, ui_scale: f32) -> ArchiveChromeLayout {
+    let scale = metrics::scene_scale(w, h, ui_scale);
+    let margin_x = w * 0.04;
+    let title_y = h * 0.02;
+    // ~5% of screen height, clamped so 720p sofas stay readable and 4K doesn't balloon.
+    let chrome_btn_h = (h * 0.052).clamp(44.0, 72.0);
+    let back_w = (104.0 * scale).max(90.0);
+    let switch_w = (168.0 * scale).min(w * 0.36).max(142.0);
+    let arrow_w = (58.0 * scale).max(48.0);
+    ArchiveChromeLayout {
+        scale,
+        margin_x,
+        title_y,
+        chrome_btn_h,
+        back_w,
+        switch_w,
+        arrow_w,
+    }
+}
 
 /// One catalog section. Each tab drives a separate grid of artifacts.
 /// Yaku entries carry their matching Zodiac ribbon as the 3D prop — the
@@ -278,14 +311,15 @@ impl CollectionScene {
         ui_scale: f32,
         progress: &crate::core::progression::PlayerProgress,
     ) -> Vec<FlatItem<CollectionAction>> {
-        let scale = (w.min(h)) / 600.0 * ui_scale;
-        let title_y = h * 0.02;
-        let margin_x = w * 0.04;
-        let back_w = (70.0 * scale).max(48.0);
-        let back_h = (24.0 * scale).max(18.0);
-        let switch_w = (118.0 * scale).min(w * 0.22).max(88.0);
+        let ch = archive_chrome_layout(w, h, ui_scale);
+        let scale = ch.scale;
+        let title_y = ch.title_y;
+        let margin_x = ch.margin_x;
+        let back_w = ch.back_w;
+        let back_h = ch.chrome_btn_h;
+        let switch_w = ch.switch_w;
         let switch_x = w - margin_x - switch_w;
-        let arrow_w = (40.0 * scale).max(28.0);
+        let arrow_w = ch.arrow_w;
         let arrow_h = back_h;
         // Footer-centered Prev/Next so the player can drive the cabinet
         // spin with the mouse, not just the keyboard.
@@ -1190,30 +1224,32 @@ impl CollectionScene {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
         let ui_scale = ctx.ui_scale;
-        let scale = (w.min(h)) / 600.0 * ui_scale;
+        let ch = archive_chrome_layout(w, h, ui_scale);
+        let scale = ch.scale;
+        let margin_x = ch.margin_x;
+        let title_y = ch.title_y;
 
         let frame = UiFrame::new();
 
         let mut quads: Vec<GpuInstance> = Vec::new();
         let mut text_labels: Vec<TextLabel> = Vec::new();
 
-        // Title — currently shows the active tab's category name so the
-        // player has a non-3D anchor for "where am I in the cabinet".
-        let title_font = (24.0 * scale).max(14.0);
-        let title_h = (title_font / 0.55).ceil();
-        let title_y = h * 0.02;
-        let margin_x = w * 0.04;
+        // Title — pinned font so long couch viewing doesn't auto-shrink glyphs.
+        let title_font_px = typography::size(typography::TITLE, h, ui_scale).max(30.0);
+        let title_h = (title_font_px / 0.55).ceil() + 8.0;
         text_labels.push(TextLabel {
             rect: [0.0, title_y, w, title_h],
             text: format!("Archive — {}", self.active_tab.label()),
             color: color::CHAMPAGNE,
+            font_px: Some(title_font_px),
             ..Default::default()
         });
 
-        // Career frieze (secondary to tab title): short lines, wide rect for font scaling.
-        let frieze_font = typography::size(typography::CAPTION, h, ui_scale);
-        let frieze_line_h = (frieze_font / 0.55).ceil();
-        let frieze_top = title_y + title_h + h * 0.008;
+        // Career frieze: body tier + generous line height (TV / wide couch).
+        let frieze_font_px = typography::size(typography::BODY, h, ui_scale).max(22.0);
+        let frieze_line_h = (frieze_font_px / 0.55).ceil() + 6.0;
+        let frieze_gap = (h * 0.018).max(12.0);
+        let frieze_top = title_y + title_h + h * 0.012;
         for (i, line) in archive_career::career_frieze_lines(ctx.progress)
             .into_iter()
             .take(4)
@@ -1222,28 +1258,34 @@ impl CollectionScene {
             text_labels.push(TextLabel {
                 rect: [
                     margin_x,
-                    frieze_top + i as f32 * (frieze_line_h + 2.0),
+                    frieze_top + i as f32 * (frieze_line_h + frieze_gap),
                     w - margin_x * 2.0,
                     frieze_line_h,
                 ],
                 text: line,
-                color: [0.78, 0.76, 0.70, 0.92],
+                color: [0.86, 0.84, 0.78, 0.96],
+                font_px: Some(frieze_font_px),
+                align: TextAlign::Left,
                 ..Default::default()
             });
         }
         if matches!(self.active_tab, Tab::Chronicle) {
-            let note_y = frieze_top + 4.0 * (frieze_line_h + 2.0) + h * 0.01;
+            let note_y =
+                frieze_top + 4.0 * (frieze_line_h + frieze_gap) + (h * 0.014).max(10.0);
             text_labels.push(TextLabel {
                 rect: [margin_x, note_y, w - margin_x * 2.0, frieze_line_h],
                 text: archive_career::CHRONICLE_TUTORIAL_NOTE.into(),
-                color: [0.62, 0.64, 0.72, 0.88],
+                color: [0.74, 0.76, 0.84, 0.92],
+                font_px: Some(frieze_font_px),
+                align: TextAlign::Left,
                 ..Default::default()
             });
         }
 
         // Back button.
-        let back_w = (70.0 * scale).max(48.0);
-        let back_h = (24.0 * scale).max(18.0);
+        let back_w = ch.back_w;
+        let back_h = ch.chrome_btn_h;
+        let btn_label_px = typography::size(typography::BODY, h, ui_scale).max(21.0);
         quads.push(GpuInstance {
             rect: [margin_x, title_y, back_w, back_h],
             color: [0.18, 0.20, 0.30, 0.92],
@@ -1251,11 +1293,12 @@ impl CollectionScene {
         text_labels.push(TextLabel {
             rect: [margin_x, title_y, back_w, back_h],
             text: "< Back".into(),
-            color: [0.85, 0.85, 0.95, 1.0],
+            color: [0.92, 0.92, 0.98, 1.0],
+            font_px: Some(btn_label_px),
             ..Default::default()
         });
 
-        let switch_w = (118.0 * scale).min(w * 0.22).max(88.0);
+        let switch_w = ch.switch_w;
         let switch_x = w - margin_x - switch_w;
         quads.push(GpuInstance {
             rect: [switch_x, title_y, switch_w, back_h],
@@ -1264,13 +1307,14 @@ impl CollectionScene {
         text_labels.push(TextLabel {
             rect: [switch_x, title_y, switch_w, back_h],
             text: "Switch save".into(),
-            color: [0.85, 0.85, 0.95, 1.0],
+            color: [0.92, 0.92, 0.98, 1.0],
+            font_px: Some(btn_label_px),
             ..Default::default()
         });
 
         // Footer Prev/Next tab arrows. Match the rects from `flat_items`
         // so the click hit-testing and the visual button line up.
-        let arrow_w = (40.0 * scale).max(28.0);
+        let arrow_w = ch.arrow_w;
         let arrow_h = back_h;
         let arrow_y = h - arrow_h - h * 0.02;
         let prev_x = w * 0.5 - arrow_w * 1.5;
@@ -1283,7 +1327,8 @@ impl CollectionScene {
             text_labels.push(TextLabel {
                 rect: [x, arrow_y, arrow_w, arrow_h],
                 text: sym.into(),
-                color: [0.85, 0.85, 0.95, 1.0],
+                color: [0.92, 0.92, 0.98, 1.0],
+                font_px: Some(btn_label_px * 1.15),
                 ..Default::default()
             });
         }
@@ -1298,26 +1343,32 @@ impl CollectionScene {
             let probe = compute_layout(w, h, scale, self.active_tab, all_count_hint);
             (probe.grid_rows as usize) > probe.visible_rows as usize
         };
-        // Couch-readable hint: CAPTION tier scales with window height
-        // and respects the player's UI scale preference, so it stays
-        // legible at TV viewing distance instead of vanishing into a
-        // 12pt micro-label.
-        let hint_font = typography::size(typography::CAPTION, h, ui_scale);
-        let hint_h = (hint_font / 0.55).ceil();
-        let hint_y = arrow_y - hint_h - h * 0.010;
-        let hint_text = if inspect.is_some() {
-            "Right stick: orbit   Triggers / scroll: zoom   E / North: close inspect   Esc: back to menu"
+        // TV: pinned body size + multi-line copy so width-based auto-shrink
+        // never drives hints to microtext.
+        let hint_font_px = typography::size(typography::BODY, h, ui_scale).max(22.0);
+        let hint_line_h = (hint_font_px / 0.55).ceil() + 4.0;
+        let hint_text: String = if inspect.is_some() {
+            "Right stick: orbit camera\nTriggers / scroll: zoom   ·   E / North: close   ·   Esc: menu"
+                .to_string()
         } else if matches!(self.active_tab, Tab::Chronicle) && all_count_hint == 0 {
-            "Finish a non-tutorial run to add folios here. Tab / Shift+Tab: cycle tab   Esc: back"
+            "Finish a non-tutorial run to add folios here.\nTab / Shift+Tab: tabs   ·   Esc: back"
+                .to_string()
         } else if tab_scrollable {
-            "Tab / Shift+Tab: cycle tab   \u{2190}\u{2192}\u{2191}\u{2193}: focus   Wheel/PgUp/PgDn: scroll   Enter: pedestal   E / North: inspect   Esc: back"
+            "Tab / Shift+Tab: cycle tab   ·   \u{2190}\u{2192}\u{2191}\u{2193}: focus   ·   Enter: pedestal   ·   E/North: inspect   ·   Esc: back\nScroll: mouse wheel or PgUp / PgDn"
+                .to_string()
         } else {
-            "Tab / Shift+Tab: cycle tab   \u{2190}\u{2192}\u{2191}\u{2193}: focus   Enter: pedestal   E / North: inspect   Esc: back"
+            "Tab / Shift+Tab: cycle tab   ·   \u{2190}\u{2192}\u{2191}\u{2193}: focus\nEnter: pedestal   ·   E/North: inspect   ·   Esc: back"
+                .to_string()
         };
+        let hint_lines = hint_text.lines().count().max(1) as f32;
+        let hint_h = hint_line_h * hint_lines + 10.0;
+        let hint_y = arrow_y - hint_h - (h * 0.014).max(10.0);
         text_labels.push(TextLabel {
-            rect: [0.0, hint_y, w, hint_h],
-            text: hint_text.into(),
-            color: [0.70, 0.72, 0.82, 0.85],
+            rect: [margin_x * 0.5, hint_y, w - margin_x, hint_h],
+            text: hint_text,
+            color: [0.78, 0.80, 0.88, 0.92],
+            font_px: Some(hint_font_px),
+            align: TextAlign::Center,
             ..Default::default()
         });
 
@@ -1327,11 +1378,14 @@ impl CollectionScene {
         // omitted — the line is decorative, not a checklist.
         let ladder_line = stake_ladder_summary(ctx.progress);
         if !ladder_line.is_empty() {
-            let ladder_y = hint_y - hint_h - h * 0.006;
+            let ladder_band_h = hint_line_h + 8.0;
+            let ladder_y = hint_y - ladder_band_h - (h * 0.014).max(10.0);
             text_labels.push(TextLabel {
-                rect: [0.0, ladder_y, w, hint_h],
+                rect: [margin_x * 0.5, ladder_y, w - margin_x, ladder_band_h],
                 text: ladder_line.into(),
-                color: [0.82, 0.72, 0.46, 0.90],
+                color: [0.90, 0.80, 0.52, 0.95],
+                font_px: Some(hint_font_px),
+                align: TextAlign::Center,
                 ..Default::default()
             });
         }
