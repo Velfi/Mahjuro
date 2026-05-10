@@ -7,6 +7,11 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.5.0-5 — 2026-05-09
+
+### Removed
+- The Kiln talisman is no longer in the shop or the talisman pool—you can’t permanently remove tiles from your hand that way anymore.
+
 ## 0.5.0-4 — 2026-05-09
 
 ### Added
