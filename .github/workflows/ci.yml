@@ -23,7 +23,7 @@ jobs:
       matrix:
         include:
           - name: Windows
-            runner: windows-latest
+            runner: windows-2022
             target: x86_64-pc-windows-msvc
             binary: mahjuro.exe
             artifact_name: mahjuro-debug-windows-x86_64

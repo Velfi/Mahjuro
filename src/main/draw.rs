@@ -380,6 +380,9 @@ impl App {
             } else {
                 None
             };
+        let p = self.active_profile.min(2);
+        let archive_has_new_chronicle =
+            self.progress.run_history.len() as u32 > self.archive_last_seen_run_len[p];
         let ctx = DrawCtx::new(
             &layout,
             &self.anim,
@@ -421,6 +424,7 @@ impl App {
             suspended_shop,
             suspended_collection,
             self.gfx.tile_preset,
+            archive_has_new_chronicle,
         );
         // Build the scene's frame in canonical push-order. For migrated
         // scenes (gameplay) this calls their direct `draw_frame` impl;

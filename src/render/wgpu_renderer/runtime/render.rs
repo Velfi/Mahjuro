@@ -345,6 +345,7 @@ impl WgpuRenderer {
              frame_id: u64,
              lbl: &TextLabel,
              font: &fontdue::Font,
+             font_italic: Option<&fontdue::Font>,
              emoji_fallback: Option<&fontdue::Font>|
              -> TextDraw {
                 // Clamp before casting: `f32 as u32` saturates negatives/NaN to u32::MAX,
@@ -359,23 +360,40 @@ impl WgpuRenderer {
                 };
                 let scroll_offset_px = lbl.scroll_offset.round() as i32;
                 let cacheable = scroll_offset_px == 0;
+                let flavor = lbl
+                    .flavor_spans
+                    .and_then(|s| if s.is_empty() { None } else { Some(s) });
                 let shape_key = TextLabelShapeKey {
                     emoji_path: emoji_fallback.is_some(),
+                    flavor_spans: flavor.is_some(),
                     font_px: lbl.font_px.map(|p| p.round() as u32),
                     width_px: tw,
                     height_px: th,
                     align: lbl.align,
                     scroll_offset_px,
                 };
+                let cache_inner_key: String = if let Some(spans) = flavor {
+                    crate::core::relic::flavor_spans_cache_key(spans)
+                } else {
+                    lbl.text.clone()
+                };
 
-                let (bind_group, owned_tex) = if cacheable {
-                    // Two-level lookup: hit path borrows &str (no String alloc).
-                    let inner = cache.entry(shape_key).or_default();
-                    if let Some(entry) = inner.get_mut(lbl.text.as_str()) {
-                        entry.last_used = frame_id;
-                        (entry.bind_group.clone(), None)
+                let rasterize = || -> Vec<u8> {
+                    if let Some(spans) = flavor {
+                        let italic = font_italic.unwrap_or(font);
+                        let px = lbl.font_px.unwrap_or(13.0).max(8.0);
+                        crate::render::decal::rasterize_label_flavor_spans(
+                            font,
+                            italic,
+                            emoji_fallback,
+                            spans,
+                            tw,
+                            th,
+                            px,
+                            align,
+                        )
                     } else {
-                        let rgba = rasterize_label_styled_with_fallback(
+                        rasterize_label_styled_with_fallback(
                             font,
                             emoji_fallback,
                             &lbl.text,
@@ -386,7 +404,17 @@ impl WgpuRenderer {
                                 align,
                                 scroll_offset: lbl.scroll_offset,
                             },
-                        );
+                        )
+                    }
+                };
+
+                let (bind_group, owned_tex) = if cacheable {
+                    let inner = cache.entry(shape_key).or_default();
+                    if let Some(entry) = inner.get_mut(&cache_inner_key) {
+                        entry.last_used = frame_id;
+                        (entry.bind_group.clone(), None)
+                    } else {
+                        let rgba = rasterize();
                         let (tex, view) =
                             upload_rgba_texture(device, queue, "text-lbl", &rgba, tw, th);
                         let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -405,7 +433,7 @@ impl WgpuRenderer {
                         });
                         let bg_clone = bg.clone();
                         inner.insert(
-                            lbl.text.clone(),
+                            cache_inner_key,
                             CachedTextLabel {
                                 tex,
                                 bind_group: bg,
@@ -415,19 +443,7 @@ impl WgpuRenderer {
                         (bg_clone, None)
                     }
                 } else {
-                    // Marquee path: rasterize fresh, do not insert into cache.
-                    let rgba = rasterize_label_styled_with_fallback(
-                        font,
-                        emoji_fallback,
-                        &lbl.text,
-                        tw,
-                        th,
-                        crate::render::decal::LabelStyle {
-                            font_px: lbl.font_px,
-                            align,
-                            scroll_offset: lbl.scroll_offset,
-                        },
-                    );
+                    let rgba = rasterize();
                     let (tex, view) = upload_rgba_texture(device, queue, "text-lbl", &rgba, tw, th);
                     let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("text-lbl-bg"),
@@ -488,6 +504,7 @@ impl WgpuRenderer {
                     cache_frame_id,
                     lbl,
                     font,
+                    self.ui_font_italic.as_ref(),
                     None,
                 ));
             }
@@ -503,6 +520,7 @@ impl WgpuRenderer {
                     cache_frame_id,
                     lbl,
                     font,
+                    None,
                     None,
                 ));
             }
@@ -733,6 +751,7 @@ impl WgpuRenderer {
                             cache_frame_id,
                             lbl,
                             font,
+                            self.ui_font_italic.as_ref(),
                             self.emoji_font.as_ref(),
                         );
                         let idx = text_draws.len();
@@ -876,6 +895,7 @@ impl WgpuRenderer {
                     cache_frame_id,
                     &lbl,
                     font,
+                    self.ui_font_italic.as_ref(),
                     None,
                 );
                 let idx = text_draws.len();

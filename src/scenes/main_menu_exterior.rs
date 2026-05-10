@@ -18,7 +18,6 @@ use crate::ui::input::UiAction;
 use super::collection::CollectionScene;
 use super::gameplay::GameplayScene;
 use super::options::OptionsScene;
-use super::profile_select::ProfileSelectScene;
 use super::shop::ShopScene;
 use super::start_game_modal::TileSelectScene;
 use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
@@ -27,8 +26,7 @@ use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransit
 enum HubFocus {
     Continue,
     NewGame,
-    Profile,
-    Collection,
+    Archive,
     Options,
     Quit,
 }
@@ -39,27 +37,31 @@ fn menu_items(in_progress: bool) -> Vec<HubFocus> {
         items.push(HubFocus::Continue);
     }
     items.push(HubFocus::NewGame);
-    items.push(HubFocus::Profile);
-    items.push(HubFocus::Collection);
+    items.push(HubFocus::Archive);
     items.push(HubFocus::Options);
     items.push(HubFocus::Quit);
     items
 }
 
-fn label_for(item: HubFocus, in_progress: bool) -> &'static str {
+fn label_for(item: HubFocus, in_progress: bool, archive_has_new_chronicle: bool) -> String {
     match item {
-        HubFocus::Continue => "Continue",
+        HubFocus::Continue => "Continue".into(),
         HubFocus::NewGame => {
             if in_progress {
-                "New Game"
+                "New Game".into()
             } else {
-                "Play"
+                "Play".into()
             }
         }
-        HubFocus::Profile => "Profile",
-        HubFocus::Collection => "Collection",
-        HubFocus::Options => "Options",
-        HubFocus::Quit => "Quit",
+        HubFocus::Archive => {
+            if archive_has_new_chronicle {
+                "Archive (new)".into()
+            } else {
+                "Archive".into()
+            }
+        }
+        HubFocus::Options => "Options".into(),
+        HubFocus::Quit => "Quit".into(),
     }
 }
 
@@ -220,10 +222,7 @@ impl SceneBehavior for MainMenuExteriorScene {
                     );
                     return Some(Scene::Shop(ShopScene::new(ctx.run, ctx.progress)));
                 }
-                Some(HubFocus::Profile) => {
-                    return Some(Scene::ProfileSelect(ProfileSelectScene::from_settings()));
-                }
-                Some(HubFocus::Collection) => {
+                Some(HubFocus::Archive) => {
                     return Some(Scene::Collection(CollectionScene::new()));
                 }
                 Some(HubFocus::Options) => {
@@ -324,7 +323,7 @@ impl SceneBehavior for MainMenuExteriorScene {
         for &(item, rect) in &focus_rects {
             text_labels.push(TextLabel {
                 rect,
-                text: label_for(item, in_progress).into(),
+                text: label_for(item, in_progress, ctx.archive_has_new_chronicle),
                 font_px: Some(menu_font),
                 color: label_color,
                 align: TextAlign::Center,

@@ -28,7 +28,7 @@ impl Default for CollectionPositions {
 
 pub const COLLECTION_HIERARCHY: &[Node] = &[Node::Group {
     name: "collection",
-    label: "Collection",
+    label: "Archive",
     children: &[
         Node::Leaf {
             name: "collection.cabinet",

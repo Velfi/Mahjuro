@@ -227,6 +227,8 @@ pub struct TextLabel {
     /// stay stable.
     #[allow(dead_code)]
     pub no_glossary: bool,
+    /// See [`crate::render::wgpu_renderer::TextLabel::flavor_spans`].
+    pub flavor_spans: Option<&'static [crate::core::relic::RelicFlavorSpan]>,
 }
 
 impl Default for TextLabel {
@@ -238,6 +240,7 @@ impl Default for TextLabel {
             font_px: None,
             align: TextAlign::Center,
             no_glossary: false,
+            flavor_spans: None,
         }
     }
 }

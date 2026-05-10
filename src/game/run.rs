@@ -969,6 +969,13 @@ impl RunState {
         }
     }
 
+    /// Fresh run for the given mode.
+    ///
+    /// The wall is shuffled and the opening hand is drawn from it, and the first
+    /// boss is picked with RNG — nothing about the deal is reproducible across
+    /// calls, machines, or CI. For tests, screenshots, or anything that assumes a
+    /// fixed hand, set `hand` (and any other fields you care about) explicitly
+    /// after construction or use a dedicated test fixture.
     pub fn new(mode: GameMode) -> Self {
         let mut wall = Wall::from_standard_shuffled();
 
@@ -1125,7 +1132,8 @@ impl RunState {
         self.boss.effect = Some(effect);
     }
 
-    /// Convenience constructor using the standard game mode.
+    /// [`Self::new`] with [`GameMode::standard`](crate::game::game_mode::GameMode::standard).
+    /// The initial hand is **not** deterministic; see [`Self::new`].
     pub fn new_demo() -> Self {
         Self::new(GameMode::standard())
     }

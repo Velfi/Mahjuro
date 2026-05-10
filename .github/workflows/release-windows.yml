@@ -17,7 +17,11 @@ permissions:
 jobs:
   build:
     name: Release Windows
-    runs-on: windows-latest
+    # `windows-latest` can track Server 2025 + VS 2026 (e.g. MSVC 14.50). We hit
+    # LNK4003 on libmahjuro-*.rlib there even with a cold target dir — linker
+    # incompatibility with this crate's rlib/native mix, not GHA cache. Stay on
+    # the mature image until upstream (rustc / image) sorts it out.
+    runs-on: windows-2022
 
     env:
       RELEASE_TAG: ${{ inputs.release_tag }}
@@ -41,11 +45,8 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
-      # Cache crates.io sources only — not `target/`. Persisted MSVC link outputs have
-      # intermittently hit LNK4003 on `libmahjuro-*.rlib` after cache restore (link.exe
-      # ignores the rlib → LNK2019 for `mahjuro::run`). Registry cache still saves most
-      # compile time. If failures continue with a cold target, suspect bundling/linker
-      # behavior (native libs / lib+bin), not GHA cache alone — see rust-lang/rust#119092.
+      # Cache crates.io sources only — not `target/`. (LNK4003 on `libmahjuro-*.rlib`
+      # reproduced with *no* cache on VS2026 runners; see `runs-on` pin + release profile.)
       - name: Rust cache
         uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
@@ -85,8 +86,41 @@ jobs:
       - name: Run tests
         run: cargo test --locked
 
+      # Verbose rustc (full link lines) + MSVC /VERBOSE + /LINKREPRO for LNK4003-style
+      # failures. /VERBOSE is noisy (every link.exe invocation); drop it if logs truncate.
       - name: Build release
-        run: cargo build --release --locked --target x86_64-pc-windows-msvc
+        shell: bash
+        env:
+          RUSTFLAGS: -C link-arg=/VERBOSE -C link-arg=/LINKREPRO:${{ github.workspace }}/link-repro
+        run: |
+          rm -rf link-repro
+          mkdir -p link-repro
+          cargo build --release --locked -vv --target x86_64-pc-windows-msvc
+
+      - name: Windows link diagnostics (on failure)
+        if: failure()
+        shell: bash
+        run: |
+          set -x
+          LLVM_AR="$(rustc --print sysroot)/lib/rustlib/x86_64-pc-windows-msvc/bin/llvm-ar.exe"
+          if [[ -x "$LLVM_AR" ]]; then
+            shopt -s nullglob
+            for f in target/x86_64-pc-windows-msvc/release/deps/libmahjuro-*.rlib; do
+              echo "=== llvm-ar t $f ==="
+              "$LLVM_AR" t "$f" 2>&1 | head -500
+            done
+          else
+            echo "llvm-ar not found at $LLVM_AR"
+          fi
+          ls -la link-repro 2>/dev/null || echo "(no link-repro directory)"
+
+      - name: Upload MSVC link repro (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-msvc-link-repro
+          path: link-repro/
+          if-no-files-found: ignore
 
       - name: Set artifact name
         id: artifact
@@ -130,7 +164,7 @@ jobs:
           Copy-Item "target\x86_64-pc-windows-msvc\release\mahjuro.exe" "$stage\"
           Copy-Item "packaging\steam_input\game_actions_4636490.vdf" "$stage\"
           # Generate multi-resolution icon.ico from icon.png. ImageMagick is
-          # preinstalled on windows-latest runners as `magick`.
+          # preinstalled on GitHub Windows runners as `magick`.
           magick icon.png -define icon:auto-resize=256,128,64,48,32,16 "$stage\icon.ico"
 
       - name: Build NSIS installer (Windows)

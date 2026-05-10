@@ -746,6 +746,7 @@ impl HeadlessApp {
         let mut delete_profile: Option<usize> = None;
         let mut complete_onboarding = false;
         let mut overlay_request: Option<scenes::OverlayRequest> = None;
+        let mut bump_archive_chronicle_seen: Option<u32> = None;
         let mut rumble_lab_ops: Vec<crate::ui::input::RumbleLabOp> = Vec::new();
         let actions_this_tick: Vec<UiAction> = self
             .queued_actions
@@ -792,6 +793,7 @@ impl HeadlessApp {
                 rumble_lab_ops: &mut rumble_lab_ops,
                 suspended_shop: None,
                 shop_env_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
+                bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
             })
         } else {
             let showcase_shop_inspect = self.overlay_stack.last().is_some_and(|top| {
@@ -848,6 +850,7 @@ impl HeadlessApp {
                     rumble_lab_ops: &mut rumble_lab_ops,
                     suspended_shop,
                     shop_env_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
+                    bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
                 })
         };
         match overlay_request {
@@ -899,6 +902,7 @@ impl HeadlessApp {
             suspended_shop,
             suspended_collection,
             self.gfx.tile_preset,
+            false,
         );
         let mut frame: UiFrame = if let Some(top) = self.overlay_stack.last() {
             top.draw_frame(ctx)

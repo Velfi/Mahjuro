@@ -1,6 +1,7 @@
 //! Scene system: each screen in the game is a `Scene` variant.
 //! Scenes transition by returning `Some(Scene)` from `update()`.
 
+pub mod archive_career;
 pub mod celebration_overlay;
 pub mod collection;
 pub mod game_over;
@@ -205,6 +206,9 @@ pub struct UpdateCtx<'a> {
     pub suspended_shop: Option<&'a ShopScene>,
     /// Same as [`DrawCtx::shop_env_height_scale`] — glTF room vertical scale vs window height.
     pub shop_env_height_scale: f32,
+    /// Archive scene sets this to `Some(progress.run_history.len())` when the count changes so
+    /// the app can persist per-profile "seen" state for menu hints.
+    pub bump_archive_chronicle_seen: &'a mut Option<u32>,
 }
 
 /// Pushdown-stack action a scene's `update()` can request. Scenes do this
@@ -272,6 +276,8 @@ pub struct DrawCtx<'a> {
     pub suspended_collection: Option<&'a CollectionScene>,
     /// Physical tile proportions for 3D layout (options / renderer settings).
     pub tile_preset: crate::persistence::TilePreset,
+    /// True when `run_history` has grown since the player last opened Archive (this profile).
+    pub archive_has_new_chronicle: bool,
 }
 
 impl<'a> DrawCtx<'a> {
@@ -301,6 +307,7 @@ impl<'a> DrawCtx<'a> {
         suspended_shop: Option<&'a ShopScene>,
         suspended_collection: Option<&'a CollectionScene>,
         tile_preset: crate::persistence::TilePreset,
+        archive_has_new_chronicle: bool,
     ) -> Self {
         Self {
             layout,
@@ -327,6 +334,7 @@ impl<'a> DrawCtx<'a> {
             suspended_shop,
             suspended_collection,
             tile_preset,
+            archive_has_new_chronicle,
         }
     }
 }
@@ -466,6 +474,16 @@ pub enum Scene {
     TransitionPlayground(TransitionPlaygroundScene),
     RumbleLab(RumbleLabScene),
     YakuJournal(YakuJournalScene),
+}
+
+/// Avoid a `profile_select` ↔ `options` module cycle when returning from [`ProfileSelectScene`].
+pub(crate) fn scene_options_menu() -> Scene {
+    Scene::Options(OptionsScene::new())
+}
+
+/// Return from profile picker to the Archive (collection) without a `profile_select` ↔ `collection` cycle.
+pub(crate) fn scene_collection_archive() -> Scene {
+    Scene::Collection(CollectionScene::new())
 }
 
 /// Refresh cached layout structs after deleting override JSON on disk.

@@ -265,6 +265,7 @@ pub fn push_gameplay_action_prompts(
             align: TextAlign::Left,
             no_glossary: false,
             scroll_offset: 0.0,
+            flavor_spans: None,
         });
     }
 

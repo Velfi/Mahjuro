@@ -119,7 +119,9 @@ pub(crate) fn transition_spec_for_edge(from: SceneTag, to: SceneTag) -> Transiti
             speed: 0.034,
         };
     }
-    if undirected_edge(from, to, MainMenuExterior, ProfileSelect) {
+    if undirected_edge(from, to, MainMenuExterior, ProfileSelect)
+        || undirected_edge(from, to, Options, ProfileSelect)
+    {
         return TransitionSpec {
             kind: TransitionKind::ShufflingFan,
             speed: 0.035,

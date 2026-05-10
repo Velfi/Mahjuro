@@ -47,7 +47,7 @@ use crate::scenes::{ButtonDef, DrawCtx, SceneBehavior, SceneTransition, UpdateCt
 use crate::ui::button_prompts::{ButtonPrompt, PromptInputSurface, SHOP_LEGEND_VERB_LABELS};
 use crate::ui::focus_nav::{clamp_rect_to_viewport, push_focus_ring, rect_center};
 use crate::ui::input::InputMode;
-use crate::ui::inspect_plaque::push_focus_tooltip_panel_2d;
+use crate::ui::inspect_plaque::{push_floating_relic_flavor_labels, push_focus_tooltip_panel_2d};
 use crate::ui::kenney_prompt_paths::shop_prompt_icon_paths;
 
 use super::layout::{
@@ -602,7 +602,8 @@ fn resolve_shop_orbit_target_for_draw(
     }
 }
 
-fn push_shop_inspect_overlay_chrome(frame: &mut UiFrame, ctx: &DrawCtx<'_>, w: f32, h: f32) {
+/// Bottom control hint for isolated shop inspect (pushed after flavor so it composites on top).
+fn push_shop_inspect_overlay_chrome(out: &mut Vec<TextLabel>, ctx: &DrawCtx<'_>, w: f32, h: f32) {
     let hint_font = typography::size(typography::CAPTION, h, ctx.ui_scale);
     let hint_h = (hint_font / 0.55).ceil();
     let hint_y = h - hint_h - h * 0.02;
@@ -617,7 +618,7 @@ fn push_shop_inspect_overlay_chrome(frame: &mut UiFrame, ctx: &DrawCtx<'_>, w: f
             format!("Esc · Backspace · E: close   ·   {orbit}")
         }
     };
-    frame.texts(vec![TextLabel {
+    out.push(TextLabel {
         rect: [w * 0.05, hint_y, w * 0.9, hint_h.max(20.0)],
         text: line,
         color: [0.70, 0.72, 0.82, 0.92],
@@ -625,7 +626,8 @@ fn push_shop_inspect_overlay_chrome(frame: &mut UiFrame, ctx: &DrawCtx<'_>, w: f
         align: TextAlign::Center,
         no_glossary: false,
         scroll_offset: 0.0,
-    }]);
+        flavor_spans: None,
+    });
 }
 
 /// Showcase shop inspect: dark backdrop + orbit camera + focused stock mesh only (no storeroom GLB or shop HUD).
@@ -673,7 +675,37 @@ pub(crate) fn render_shop_inspect_isolated_frame(
         frame.object3d_batch(vec![subj]);
     }
 
-    push_shop_inspect_overlay_chrome(&mut frame, &ctx, w, h);
+    let mut overlay_texts: Vec<TextLabel> = Vec::new();
+
+    if let Some(ShopFocus::Relic(i)) = shop.focus {
+        let n_sale = shop.items.len();
+        let def_opt = if i < n_sale {
+            shop.items
+                .get(i)
+                .and_then(|it| all_relic_defs().iter().find(|d| d.id == it.relic))
+        } else {
+            shop_rm
+                .owned_relics
+                .get(i.saturating_sub(n_sale))
+                .and_then(|rid| all_relic_defs().iter().find(|d| d.id == *rid))
+        };
+        let hint_font = typography::size(typography::CAPTION, h, ctx.ui_scale);
+        let hint_h = (hint_font / 0.55).ceil().max(20.0);
+        let reserve_bottom = hint_h + h * 0.04;
+        if let Some(d) = def_opt.filter(|d| !d.flavor.is_empty()) {
+            push_floating_relic_flavor_labels(
+                &mut overlay_texts,
+                w,
+                h,
+                ctx.ui_scale,
+                d.flavor,
+                reserve_bottom,
+            );
+        }
+    }
+
+    push_shop_inspect_overlay_chrome(&mut overlay_texts, &ctx, w, h);
+    frame.texts(overlay_texts);
     frame
 }
 
@@ -1039,6 +1071,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
         align: TextAlign::Center,
         no_glossary: false,
         scroll_offset: 0.0,
+        flavor_spans: None,
     }]);
 
     // Shelf focus ring uses shelf-slot screen rects.
@@ -1114,6 +1147,23 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
             hover_is_owned,
             skip_title,
         );
+        if let ShopHit::Relic(i) = hit {
+            let n_sale = shop.items.len();
+            let def_opt = if i < n_sale {
+                shop.items
+                    .get(i)
+                    .and_then(|it| all_relic_defs().iter().find(|d| d.id == it.relic))
+            } else {
+                let oi = i - n_sale;
+                shop_rm
+                    .owned_relics
+                    .get(oi)
+                    .and_then(|rid| all_relic_defs().iter().find(|d| d.id == *rid))
+            };
+            if let Some(d) = def_opt.filter(|d| !d.flavor.is_empty()) {
+                push_floating_relic_flavor_labels(&mut tip_texts, w, h, ui_scale, d.flavor, 0.0);
+            }
+        }
         frame.quads(tip_quads);
         frame.texts(tip_texts);
     }
@@ -1195,6 +1245,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
             None,
             None,
             ctx.tile_preset,
+            ctx.archive_has_new_chronicle,
         );
         let prepass = SceneBehavior::draw_frame(&scratch, inner_ctx);
         frame.journal_prepass_frame = Some(Box::new(prepass));
@@ -1389,6 +1440,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                 align: TextAlign::Left,
                 no_glossary: false,
                 scroll_offset: 0.0,
+                flavor_spans: None,
             });
         }
 
@@ -1434,6 +1486,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                 align: TextAlign::Center,
                 no_glossary: false,
                 scroll_offset: 0.0,
+                flavor_spans: None,
             });
         }
 

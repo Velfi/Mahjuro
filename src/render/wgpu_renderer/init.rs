@@ -2924,6 +2924,7 @@ impl WgpuRenderer {
         } else {
             log::warn!("No UI font found; panel text will be blank.");
         }
+        let ui_font_italic = crate::render::decal::load_ui_font_italic();
         let emoji_font = load_noto_emoji_font();
         if emoji_font.is_some() {
             log::debug!("Noto Emoji font loaded.");
@@ -4157,6 +4158,7 @@ impl WgpuRenderer {
             image_pipeline_scene_hdr,
             ui_font,
             emoji_font,
+            ui_font_italic,
             size,
             last_focus: usize::MAX,
             focus_spin: None,
