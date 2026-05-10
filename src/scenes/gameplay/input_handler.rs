@@ -2111,6 +2111,18 @@ pub(super) fn build_yaku_panel_and_tablets(
                     Some(crate::render::wgpu_renderer::GameplayPick::YakuTablet(j))
                         if j == i,
                 );
+                let yaku_discovered = ctx
+                    .progress
+                    .yaku_times_scored
+                    .get(&p.kind)
+                    .copied()
+                    .unwrap_or(0)
+                    >= 1;
+                let tablet_label: std::borrow::Cow<'static, str> = if yaku_discovered {
+                    std::borrow::Cow::Borrowed(p.kind.name())
+                } else {
+                    std::borrow::Cow::Borrowed("???")
+                };
                 yaku_tablet_placements.push(Object3d {
                     pos: [
                         center_px + yaku_tablet_px_dx,
@@ -2121,7 +2133,7 @@ pub(super) fn build_yaku_panel_and_tablets(
                     rotation: yaku_tablet_rot,
                     color: [1.0, 1.0, 1.0, 1.0],
                     kind: Object3dKind::YakuTablet {
-                        label: std::borrow::Cow::Borrowed(p.kind.name()),
+                        label: tablet_label,
                         active: p.active,
                         hover: if hovered_now { 1.0 } else { 0.0 },
                     },

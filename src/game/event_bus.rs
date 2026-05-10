@@ -98,7 +98,7 @@ pub enum GameEvent {
     /// Player consumed a talisman from the dish — App layer bumps
     /// `PlayerProgress::talisman_times_used` and saves.
     TalismanUsed(crate::core::talisman::TalismanKind),
-    /// A committed hand awarded this yaku — App layer bumps
+    /// Structure cash-in awarded this yaku. App layer bumps
     /// `PlayerProgress::yaku_times_scored` and saves.
     YakuScored(crate::core::yaku::YakuKind),
     /// Gameplay code asks the App layer to fire a Steam achievement.

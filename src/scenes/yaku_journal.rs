@@ -8,6 +8,9 @@
 //! drawn from the same `yaku_page()` data the meld guide teaches with (so
 //! the plaque hand is guaranteed to score as its named yaku — see the
 //! scoring test in meld_guide).
+//!
+//! Kokushi Musō does not appear in the grid until the first time it is cashed in
+//! (same gate as `PlayerProgress::available_yaku`).
 
 use crate::core::tile::{Suit, Tile};
 use crate::core::yaku::YakuKind;
@@ -39,14 +42,26 @@ fn journal_compact_factor(short_edge_px: f32) -> f32 {
     ((960.0 - short_edge_px) / 320.0).clamp(0.0, 1.0)
 }
 
-/// 5 / 4 / 4 grid — 13 yaku laid out so no row looks stranded. Row index
-/// per yaku, in the order `YakuKind::all()` returns them. Keeping this as
-/// a const lets the `update` selection navigation share the same structure
-/// as the `draw_frame` layout without re-deriving it.
-const ROW_COUNTS: [usize; 3] = [5, 4, 4];
+/// Row widths for the journal grid (3 rows). Kokushi Musō is hidden until
+/// discovery, so the count is usually 13; after the first Kokushi cash-in it is 14.
+fn yaku_journal_row_counts(n: usize) -> Vec<usize> {
+    match n {
+        13 => vec![5, 4, 4],
+        14 => vec![5, 5, 4],
+        _ => {
+            let base = n / 3;
+            let rem = n % 3;
+            vec![
+                base + usize::from(rem > 0),
+                base + usize::from(rem > 1),
+                base,
+            ]
+        }
+    }
+}
 
 pub struct YakuJournalScene {
-    /// Index into `YakuKind::all()` of the currently-focused yaku.
+    /// Index into the visible yaku row order (`PlayerProgress::available_yaku`).
     selected: usize,
 }
 
@@ -55,43 +70,48 @@ impl YakuJournalScene {
         Self { selected: 0 }
     }
 
-    /// Convert a flat yaku index (0..13) into `(row, col)` in the grid.
-    fn index_to_grid(i: usize) -> (usize, usize) {
+    fn index_to_grid(i: usize, rows: &[usize]) -> (usize, usize) {
         let mut remaining = i;
-        for (row, &n) in ROW_COUNTS.iter().enumerate() {
+        for (row, &n) in rows.iter().enumerate() {
             if remaining < n {
                 return (row, remaining);
             }
             remaining -= n;
         }
-        // Clamp out-of-range to the last cell.
-        let row = ROW_COUNTS.len() - 1;
-        (row, ROW_COUNTS[row] - 1)
+        let row = rows.len().saturating_sub(1);
+        (row, rows[row].saturating_sub(1))
     }
 
-    /// Convert `(row, col)` back into a flat index. Clamps col into the
-    /// target row's width.
-    fn grid_to_index(row: usize, col: usize) -> usize {
-        let row = row.min(ROW_COUNTS.len() - 1);
-        let col = col.min(ROW_COUNTS[row] - 1);
-        ROW_COUNTS.iter().take(row).sum::<usize>() + col
+    fn grid_to_index(row: usize, col: usize, rows: &[usize]) -> usize {
+        let row = row.min(rows.len().saturating_sub(1));
+        let col = col.min(rows[row].saturating_sub(1));
+        rows.iter().take(row).sum::<usize>() + col
     }
 
-    fn move_focus(&mut self, drow: isize, dcol: isize) {
-        let (row, col) = Self::index_to_grid(self.selected);
-        let new_row = ((row as isize + drow).rem_euclid(ROW_COUNTS.len() as isize)) as usize;
+    fn move_focus(&mut self, drow: isize, dcol: isize, rows: &[usize]) {
+        if rows.is_empty() {
+            return;
+        }
+        let (row, col) = Self::index_to_grid(self.selected, rows);
+        let new_row = ((row as isize + drow).rem_euclid(rows.len() as isize)) as usize;
         let target_col = if drow != 0 {
-            col.min(ROW_COUNTS[new_row] - 1)
+            col.min(rows[new_row].saturating_sub(1))
         } else {
-            let width = ROW_COUNTS[new_row] as isize;
+            let width = rows[new_row] as isize;
             ((col as isize + dcol).rem_euclid(width)) as usize
         };
-        self.selected = Self::grid_to_index(new_row, target_col);
+        self.selected = Self::grid_to_index(new_row, target_col, rows);
     }
 }
 
 impl SceneBehavior for YakuJournalScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
+        let yaku_list = ctx.progress.available_yaku();
+        let rows = yaku_journal_row_counts(yaku_list.len());
+        if !yaku_list.is_empty() && self.selected >= yaku_list.len() {
+            self.selected = yaku_list.len() - 1;
+        }
+
         for &cid in ctx.button_clicks {
             if cid == CLICK_BACK {
                 *ctx.overlay_request = Some(OverlayRequest::Pop);
@@ -104,10 +124,10 @@ impl SceneBehavior for YakuJournalScene {
                     *ctx.overlay_request = Some(OverlayRequest::Pop);
                     return None;
                 }
-                UiAction::FocusPrev => self.move_focus(0, -1),
-                UiAction::FocusNext => self.move_focus(0, 1),
-                UiAction::FocusUp => self.move_focus(-1, 0),
-                UiAction::FocusDown => self.move_focus(1, 0),
+                UiAction::FocusPrev => self.move_focus(0, -1, &rows),
+                UiAction::FocusNext => self.move_focus(0, 1, &rows),
+                UiAction::FocusUp => self.move_focus(-1, 0, &rows),
+                UiAction::FocusDown => self.move_focus(1, 0, &rows),
                 _ => {}
             }
         }
@@ -123,6 +143,8 @@ impl SceneBehavior for YakuJournalScene {
         let jc = journal_compact_factor(short_edge);
         let run = ctx.run;
         let progress = ctx.progress;
+        let yaku = progress.available_yaku();
+        let rows = yaku_journal_row_counts(yaku.len());
 
         let mut frame = UiFrame::new();
         frame.background(BackgroundId::Black);
@@ -155,7 +177,6 @@ impl SceneBehavior for YakuJournalScene {
         // better used letting the grid breathe.
 
         // ── Grid metrics ─────────────────────────────────────────
-        let yaku = YakuKind::all();
         // Bottom-anchored plaque + tighter gaps on handheld so the grid keeps
         // vertical room for bigger tiles (Steam Deck 800px short edge).
         let grid_top = h * (0.045 - 0.019 * jc);
@@ -165,7 +186,7 @@ impl SceneBehavior for YakuJournalScene {
         let plaque_top = h - bottom_safe - plaque_h;
         let grid_bot = plaque_top - gap_above_plaque;
         let grid_h = grid_bot - grid_top;
-        let row_h = grid_h / ROW_COUNTS.len() as f32;
+        let row_h = grid_h / rows.len().max(1) as f32;
 
         let side_margin = w * (0.052 - 0.020 * jc);
         // Cells are sized by the widest row so every row's cells match
@@ -202,7 +223,7 @@ impl SceneBehavior for YakuJournalScene {
         let yaku_progress = GameEngine::read_yaku_progress(run);
 
         let mut yi = 0usize;
-        for (row_i, &row_n) in ROW_COUNTS.iter().enumerate() {
+        for (row_i, &row_n) in rows.iter().enumerate() {
             let row_w = cell_w * row_n as f32;
             let row_x0 = (w - row_w) * 0.5;
             let row_top = grid_top + row_h * row_i as f32;
@@ -297,20 +318,39 @@ impl SceneBehavior for YakuJournalScene {
                     });
                 }
 
-                // Name — unseen yaku read as dimmer parchment.
-                let name_color = match state {
-                    ProgressionState::Unseen => color::alpha(color::PARCHMENT, 0.55),
-                    _ if is_selected => color::CHAMPAGNE,
-                    _ => color::PARCHMENT,
-                };
-                frame.text(TextLabel {
-                    rect: [cell_cx - cell_w * 0.5, caption_y, cell_w, name_h],
-                    text: yk.name().into(),
-                    color: name_color,
-                    align: TextAlign::Center,
-                    font_px: Some(name_font),
-                    ..Default::default()
-                });
+                // Name — until the first cash-in (`yaku_times_scored`), show a
+                // mystery pill instead of the real title (gameplay tablets match).
+                match state {
+                    ProgressionState::Unseen => {
+                        let shadow_scale = (h / 1080.0).max(1.0);
+                        let bamboo_face = color::darken(color::JADE, 0.76);
+                        draw_mystery_name_pill(
+                            &mut frame,
+                            cell_cx,
+                            caption_y + name_h * 0.02,
+                            name_h * 0.92,
+                            name_font * 1.05,
+                            shadow_scale,
+                            color::darken(bamboo_face, 0.28),
+                            color::alpha(color::CHAMPAGNE, 0.88),
+                        );
+                    }
+                    _ => {
+                        let name_color = if is_selected {
+                            color::CHAMPAGNE
+                        } else {
+                            color::PARCHMENT
+                        };
+                        frame.text(TextLabel {
+                            rect: [cell_cx - cell_w * 0.5, caption_y, cell_w, name_h],
+                            text: yk.name().into(),
+                            color: name_color,
+                            align: TextAlign::Center,
+                            font_px: Some(name_font),
+                            ..Default::default()
+                        });
+                    }
+                }
 
                 // Level caption. Sealed cells get a thin en-dash —
                 // the wax seal already says "locked," so a redundant
@@ -390,7 +430,9 @@ impl SceneBehavior for YakuJournalScene {
         }
 
         // ── Floating plaque for the selected yaku ────────────────
-        let sel_yk = yaku[self.selected];
+        let Some(&sel_yk) = yaku.get(self.selected) else {
+            return frame;
+        };
         let sel_state = progression_state(run, progress, sel_yk);
         draw_plaque(
             &mut frame,
@@ -513,12 +555,48 @@ fn draw_sealed_slab(
     });
 }
 
+/// Caption / header pill hiding the yaku name until the first cash-in.
+fn draw_mystery_name_pill(
+    frame: &mut UiFrame,
+    pill_center_x: f32,
+    top_y: f32,
+    pill_h: f32,
+    font_px: f32,
+    shadow_scale: f32,
+    pill_bg: [f32; 4],
+    text_color: [f32; 4],
+) {
+    let pill_w = font_px * 2.38;
+    let pill_x = pill_center_x - pill_w * 0.5;
+    frame.quad(GpuInstance {
+        rect: [
+            pill_x + 1.5 * shadow_scale,
+            top_y + 2.0 * shadow_scale,
+            pill_w,
+            pill_h,
+        ],
+        color: color::alpha([0.08, 0.04, 0.02, 1.0], 0.35),
+    });
+    frame.quad(GpuInstance {
+        rect: [pill_x, top_y, pill_w, pill_h],
+        color: pill_bg,
+    });
+    frame.text(TextLabel {
+        rect: [pill_x, top_y + pill_h * 0.12, pill_w, pill_h * 0.76],
+        text: "???".into(),
+        color: text_color,
+        align: TextAlign::Center,
+        font_px: Some(font_px * 1.08),
+        ..Default::default()
+    });
+}
+
 /// Progression state for one yaku. Drives the grid material cues and the
 /// plaque's reveal/veil decision.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProgressionState {
-    /// Never scored in any run (cumulative `PlayerProgress::yaku_times_scored`
-    /// is zero) and never leveled. Rendered as a sealed tablet so first-time
+    /// Never **cashed in** this yaku in any run (`PlayerProgress::yaku_times_scored`
+    /// is zero). Rendered as a sealed tablet and `???` caption so first-time
     /// discovery stays a moment.
     Unseen,
     /// Scored at least once in any run's history, still at base level.
@@ -527,10 +605,9 @@ enum ProgressionState {
     Leveled,
 }
 
-/// Once a yaku has appeared in any round, it stays unlocked forever —
-/// so the "played" check is against the cumulative
-/// `PlayerProgress::yaku_times_scored` (persisted across runs), not the
-/// per-run `RunState::yaku_times_played` which resets.
+/// Journal reveal is tied to **cash-in** only: cumulative
+/// `PlayerProgress::yaku_times_scored` (from `GameEvent::YakuScored`), not
+/// in-run preview state.
 fn progression_state(
     run: &crate::game::run::RunState,
     progress: &crate::core::progression::PlayerProgress,
@@ -539,13 +616,12 @@ fn progression_state(
     let yaku_progress = GameEngine::read_yaku_progress(run);
     let lvl = yaku_progress.level_of(yk);
     let scored_ever = progress.yaku_times_scored.get(&yk).copied().unwrap_or(0);
-    let played_this_run = yaku_progress.played_this_run(yk);
-    if lvl >= 2 {
-        ProgressionState::Leveled
-    } else if scored_ever >= 1 || played_this_run >= 1 {
-        ProgressionState::Played
-    } else {
+    if scored_ever == 0 {
         ProgressionState::Unseen
+    } else if lvl >= 2 {
+        ProgressionState::Leveled
+    } else {
+        ProgressionState::Played
     }
 }
 
@@ -656,20 +732,34 @@ fn draw_plaque(
     let mult = yk.mult_bonus_at(lvl);
     let chip = yk.chip_bonus_at(lvl);
 
-    // Title — yaku name in big, ink-dark ANTIQUE, left-aligned. Given
-    // a fixed-ish left lane so the level pill below has a predictable
-    // landing point regardless of how long the name is.
+    // Title — full name once cashed in; until then a `???` pill (matches
+    // gameplay bone tablets).
     let title_font = typography::size(typography::TITLE, h, ui_scale).max(38.0 * jr);
     let title_h = title_font * 1.05;
     let title_lane_w = header_w * 0.5;
-    frame.text(TextLabel {
-        rect: [header_x, header_y, title_lane_w, title_h],
-        text: yk.name().into(),
-        color: label_champagne,
-        align: TextAlign::Left,
-        font_px: Some(title_font),
-        ..Default::default()
-    });
+    if matches!(state, ProgressionState::Unseen) {
+        let title_glyph = title_font * 1.02;
+        let title_pill_w = title_glyph * 2.38;
+        draw_mystery_name_pill(
+            frame,
+            header_x + title_pill_w * 0.5,
+            header_y + title_h * 0.02,
+            title_h * 0.88,
+            title_glyph,
+            shadow_scale,
+            color::darken(bamboo_face, 0.28),
+            label_champagne_soft,
+        );
+    } else {
+        frame.text(TextLabel {
+            rect: [header_x, header_y, title_lane_w, title_h],
+            text: yk.name().into(),
+            color: label_champagne,
+            align: TextAlign::Left,
+            font_px: Some(title_font),
+            ..Default::default()
+        });
+    }
 
     // Level pill — brass background, bold mono text. Sits flush
     // underneath the title (not beside it) so variable name widths

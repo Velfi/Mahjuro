@@ -85,7 +85,9 @@ pub enum YakuKind {
     /// Seven distinct pairs (alternate hand shape). Tied to the Pig zodiac.
     Chiitoitsu,
     /// Thirteen orphans: one of each terminal and honor type, plus one
-    /// duplicate of an orphan face. Tied to the Qilin zodiac.
+    /// duplicate of an orphan face. Tied to the Qilin zodiac. Omitted from
+    /// `PlayerProgress::available_yaku` (previews, journal, meld guide) until
+    /// the first cash-in that scores it; detection still applies when valid.
     KokushiMusou,
     /// A structurally valid hand that triggers no other yaku. Scores base
     /// chips × 1 mult — legal, but worth very little. Tied to the Rooster

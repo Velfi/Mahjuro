@@ -15,7 +15,7 @@
 //!   * Boss Blind clear  → 2 random Zodiacs (or one Festival pack of 3 → pick 1)
 //!   * Shop              → 4 gold per single, 6 gold per Festival pack
 //!     (Qilin is omitted from shop zodiac rolls until Kokushi Musō has been
-//!     scored at least once on the save profile.)
+//!     cashed in at least once — see [`crate::core::progression::PlayerProgress::kokushi_musou_discovered`].)
 //!
 //! The consumable inventory holds 2 cards by default and is expandable via
 //! the Brocade Pouch (+1) relic.
