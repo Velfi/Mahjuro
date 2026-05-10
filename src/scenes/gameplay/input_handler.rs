@@ -161,7 +161,7 @@ pub(super) fn process_focus_and_actions(
         Some(FocusTarget::Button(GameplayButton::Trigger))
     ) {
         let gameplay = GameEngine::read(ctx.run);
-        let has_structure = gameplay.uses_structure_bank && gameplay.has_structure;
+        let has_structure = gameplay.has_structure;
         if !has_structure {
             scene.focus = None;
         }
@@ -539,7 +539,7 @@ pub(super) fn process_focus_and_actions(
         }
         use crate::render::wgpu_renderer::GameplayPick;
         let gameplay = GameEngine::read(ctx.run);
-        let has_structure = gameplay.uses_structure_bank && gameplay.has_structure;
+        let has_structure = gameplay.has_structure;
         if matches!(ctx.picked_gameplay_object, Some(GameplayPick::JournalBook))
             && scene.journal_transition.is_none()
         {
@@ -609,23 +609,16 @@ pub(super) fn process_focus_and_actions(
                         .collect();
                     GameEngine::validate_with_wildcards(ctx.run, &selected_tiles).map(
                         |(sets, scoring_tiles)| {
-                            if gameplay.uses_structure_bank {
-                                let mut tiles = GameplayScene::display_tiles(
-                                    gameplay.structure_tiles.iter().copied(),
-                                    ctx.run,
-                                );
-                                tiles.extend(GameplayScene::display_tiles(scoring_tiles, ctx.run));
-                                let mut all_sets = gameplay.structure_sets.clone();
-                                all_sets.extend(sets);
-                                CascadeShowcase {
-                                    tiles,
-                                    sets: all_sets,
-                                }
-                            } else {
-                                CascadeShowcase {
-                                    tiles: GameplayScene::display_tiles(scoring_tiles, ctx.run),
-                                    sets,
-                                }
+                            let mut tiles = GameplayScene::display_tiles(
+                                gameplay.structure_tiles.iter().copied(),
+                                ctx.run,
+                            );
+                            tiles.extend(GameplayScene::display_tiles(scoring_tiles, ctx.run));
+                            let mut all_sets = gameplay.structure_sets.clone();
+                            all_sets.extend(sets);
+                            CascadeShowcase {
+                                tiles,
+                                sets: all_sets,
                             }
                         },
                     )
@@ -633,10 +626,10 @@ pub(super) fn process_focus_and_actions(
                 let structure_was_complete = gameplay.structure_complete;
                 let outcome = {
                     let mut engine = GameEngine::new(ctx.run, ctx.bus);
-                    engine.dispatch(GameCommand::PlaySelection)
+                    engine.dispatch(GameCommand::CommitSelection)
                 };
                 let step = match outcome.data {
-                    CommandData::PlaySelection { step } => step,
+                    CommandData::CommitSelection { step } => step,
                     _ => 0,
                 };
                 if step > 0 {
@@ -644,10 +637,9 @@ pub(super) fn process_focus_and_actions(
                 }
                 let gained = outcome.after.round_score.saturating_sub(round_before);
                 log::info!(
-                    "[score] Commit: step={} gained={} structure_bank={} breakdown_steps={} base_steps={}",
+                    "[score] Commit: step={} gained={} breakdown_steps={} base_steps={}",
                     step,
                     gained,
-                    gameplay.uses_structure_bank,
                     ctx.run
                         .last_breakdown
                         .as_ref()
@@ -695,52 +687,48 @@ pub(super) fn process_focus_and_actions(
                 }
             }
             UiAction::TriggerStructure => {
-                if !GameEngine::read(ctx.run).uses_structure_bank {
-                    // Classic mode: plays score on commit; no cash-in action.
+                let score_before = GameEngine::read(ctx.run).round_score;
+                let gameplay = GameEngine::read(ctx.run);
+                let cascade_showcase = Some(CascadeShowcase {
+                    tiles: GameplayScene::display_tiles(
+                        gameplay.structure_tiles.iter().copied(),
+                        ctx.run,
+                    ),
+                    sets: gameplay.structure_sets.clone(),
+                });
+                let outcome = {
+                    let mut engine = GameEngine::new(ctx.run, ctx.bus);
+                    engine.dispatch(GameCommand::TriggerStructure)
+                };
+                let earned = match outcome.data {
+                    CommandData::TriggerStructure { earned } => earned,
+                    _ => 0,
+                };
+                if earned > 0 {
+                    scene.clear_discard_undo();
+                }
+                let gained = outcome.after.round_score.saturating_sub(score_before);
+                log::info!(
+                    "[score] TriggerStructure: earned={} gained={} breakdown_steps={} base_steps={}",
+                    earned,
+                    gained,
+                    ctx.run
+                        .last_breakdown
+                        .as_ref()
+                        .map(|b| b.steps.len())
+                        .unwrap_or(0),
+                    ctx.run
+                        .last_breakdown
+                        .as_ref()
+                        .map(|b| b.base_steps.len())
+                        .unwrap_or(0),
+                );
+                if earned == 0 {
+                    ctx.anim
+                        .shake(crate::render::animation::ENTITY_HAND_STRIP, 6.0, 160);
                 } else {
-                    let score_before = GameEngine::read(ctx.run).round_score;
-                    let gameplay = GameEngine::read(ctx.run);
-                    let cascade_showcase = Some(CascadeShowcase {
-                        tiles: GameplayScene::display_tiles(
-                            gameplay.structure_tiles.iter().copied(),
-                            ctx.run,
-                        ),
-                        sets: gameplay.structure_sets.clone(),
-                    });
-                    let outcome = {
-                        let mut engine = GameEngine::new(ctx.run, ctx.bus);
-                        engine.dispatch(GameCommand::TriggerStructure)
-                    };
-                    let earned = match outcome.data {
-                        CommandData::TriggerStructure { earned } => earned,
-                        _ => 0,
-                    };
-                    if earned > 0 {
-                        scene.clear_discard_undo();
-                    }
-                    let gained = outcome.after.round_score.saturating_sub(score_before);
-                    log::info!(
-                        "[score] TriggerStructure: earned={} gained={} breakdown_steps={} base_steps={}",
-                        earned,
-                        gained,
-                        ctx.run
-                            .last_breakdown
-                            .as_ref()
-                            .map(|b| b.steps.len())
-                            .unwrap_or(0),
-                        ctx.run
-                            .last_breakdown
-                            .as_ref()
-                            .map(|b| b.base_steps.len())
-                            .unwrap_or(0),
-                    );
-                    if earned == 0 {
-                        ctx.anim
-                            .shake(crate::render::animation::ENTITY_HAND_STRIP, 6.0, 160);
-                    } else {
-                        ctx.anim.pulse(ENTITY_SCORE_PANEL);
-                        scene.begin_scoring_cascade(ctx, score_before, gained, cascade_showcase);
-                    }
+                    ctx.anim.pulse(ENTITY_SCORE_PANEL);
+                    scene.begin_scoring_cascade(ctx, score_before, gained, cascade_showcase);
                 }
             }
             UiAction::SortBySuit => {
@@ -1836,35 +1824,27 @@ pub(super) fn build_yaku_panel_and_tablets(
     let mut yaku_preview_effective_tiles: Vec<crate::core::tile::Tile> = Vec::new();
     let mut yaku_preview_sets: Vec<crate::core::hand::DetectedSet> = Vec::new();
 
-    if gameplay.uses_structure_bank {
-        if selected_tiles_for_yaku.is_empty() {
-            yaku_preview_original_tiles =
-                GameplayScene::display_tiles(gameplay.structure_tiles.iter().copied(), run);
-            yaku_preview_effective_tiles =
-                GameplayScene::display_tiles(gameplay.structure_tiles.iter().copied(), run);
-            yaku_preview_sets = gameplay.structure_sets.clone();
-        } else if let Some((selected_sets, selected_scoring_tiles)) = wildcard_result.as_ref() {
-            yaku_preview_original_tiles =
-                GameplayScene::display_tiles(gameplay.structure_tiles.iter().copied(), run);
-            yaku_preview_original_tiles.extend(GameplayScene::display_tiles(
-                selected_tiles_for_yaku.iter().copied(),
-                run,
-            ));
-            yaku_preview_effective_tiles =
-                GameplayScene::display_tiles(gameplay.structure_tiles.iter().copied(), run);
-            yaku_preview_effective_tiles.extend(GameplayScene::display_tiles(
-                selected_scoring_tiles.iter().copied(),
-                run,
-            ));
-            yaku_preview_sets = gameplay.structure_sets.clone();
-            yaku_preview_sets.extend(selected_sets.iter().cloned());
-        }
+    if selected_tiles_for_yaku.is_empty() {
+        yaku_preview_original_tiles =
+            GameplayScene::display_tiles(gameplay.structure_tiles.iter().copied(), run);
+        yaku_preview_effective_tiles =
+            GameplayScene::display_tiles(gameplay.structure_tiles.iter().copied(), run);
+        yaku_preview_sets = gameplay.structure_sets.clone();
     } else if let Some((selected_sets, selected_scoring_tiles)) = wildcard_result.as_ref() {
         yaku_preview_original_tiles =
-            GameplayScene::display_tiles(selected_tiles_for_yaku.iter().copied(), run);
+            GameplayScene::display_tiles(gameplay.structure_tiles.iter().copied(), run);
+        yaku_preview_original_tiles.extend(GameplayScene::display_tiles(
+            selected_tiles_for_yaku.iter().copied(),
+            run,
+        ));
         yaku_preview_effective_tiles =
-            GameplayScene::display_tiles(selected_scoring_tiles.iter().copied(), run);
-        yaku_preview_sets = selected_sets.clone();
+            GameplayScene::display_tiles(gameplay.structure_tiles.iter().copied(), run);
+        yaku_preview_effective_tiles.extend(GameplayScene::display_tiles(
+            selected_scoring_tiles.iter().copied(),
+            run,
+        ));
+        yaku_preview_sets = gameplay.structure_sets.clone();
+        yaku_preview_sets.extend(selected_sets.iter().cloned());
     }
 
     let previews = if yaku_preview_sets.is_empty() {

@@ -670,7 +670,7 @@ impl GameplayScene {
         let gameplay = GameEngine::read(run);
         let interaction = GameEngine::read_interaction(run);
         let hand_slots = hand_slots_for_count(layout, interaction.hand_len);
-        let has_structure = gameplay.uses_structure_bank && gameplay.has_structure;
+        let has_structure = gameplay.has_structure;
         let hud_layout = compute_gameplay_hud_layout(
             layout,
             &hand_slots,
@@ -692,7 +692,7 @@ impl GameplayScene {
         let gameplay = GameEngine::read(run);
         let interaction = GameEngine::read_interaction(run);
         let hand_slots = hand_slots_for_count(layout, interaction.hand_len);
-        let has_structure = gameplay.uses_structure_bank && gameplay.has_structure;
+        let has_structure = gameplay.has_structure;
         let hud_layout = compute_gameplay_hud_layout(
             layout,
             &hand_slots,
@@ -716,7 +716,7 @@ impl GameplayScene {
         let gameplay = GameEngine::read(run);
         let showcase = if let Some(showcase) = cascade_showcase {
             showcase.clone()
-        } else if gameplay.uses_structure_bank && gameplay.has_structure {
+        } else if gameplay.has_structure {
             CascadeShowcase {
                 tiles: Self::display_tiles(gameplay.structure_tiles.iter().copied(), run),
                 sets: gameplay.structure_sets.clone(),
@@ -727,7 +727,7 @@ impl GameplayScene {
         let interaction = GameEngine::read_interaction(run);
         let hand_slots = hand_slots_for_count(layout, interaction.hand_len);
         let layout_scale = (layout.window_w.min(layout.window_h)) / 600.0;
-        let has_structure = gameplay.uses_structure_bank && gameplay.has_structure;
+        let has_structure = gameplay.has_structure;
         let showcase_present = has_structure || cascade_showcase.is_some();
         let hud_layout =
             compute_gameplay_hud_layout(layout, &hand_slots, 1.0, has_structure, showcase_present);

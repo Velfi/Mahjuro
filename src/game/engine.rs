@@ -33,7 +33,7 @@ use crate::ui::input::MarqueeSelect;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GameCommand {
-    PlaySelection,
+    CommitSelection,
     TriggerStructure,
     DiscardSelectionNoRefill,
     RefillHand,
@@ -122,7 +122,7 @@ impl EngineSnapshot {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CommandData {
     None,
-    PlaySelection { step: u64 },
+    CommitSelection { step: u64 },
     TriggerStructure { earned: u64 },
     DiscardSelection { count: usize },
     RefillHand,
@@ -271,7 +271,6 @@ pub struct GameplayReadModel {
     pub tiles_left: usize,
     pub dora_faces: Vec<(Suit, u8)>,
     pub dora_indicator_tiles: Vec<Tile>,
-    pub uses_structure_bank: bool,
     pub has_structure: bool,
     pub structure_complete: bool,
     pub structure_tiles: Vec<Tile>,
@@ -716,7 +715,6 @@ impl<'a> GameEngine<'a> {
             tiles_left: run.wall.remaining(),
             dora_faces: run.wall.dora_faces(),
             dora_indicator_tiles: run.wall.dora_indicator_tiles().to_vec(),
-            uses_structure_bank: run.uses_structure_bank(),
             has_structure: !core.structure_sets.is_empty(),
             structure_complete: is_winning_structure_shape(
                 &core.structure_tiles,
@@ -841,7 +839,7 @@ impl<'a> GameEngine<'a> {
         let before = self.snapshot();
         let queue_start = self.bus.queue.len();
         let data = match command {
-            GameCommand::PlaySelection => {
+            GameCommand::CommitSelection => {
                 if self.run.selected_count() == 0 {
                     return CommandOutcome::rejected(
                         command,
@@ -856,17 +854,17 @@ impl<'a> GameEngine<'a> {
                         CommandRejection::NoPlaysRemaining,
                     );
                 }
-                let step = self.run.score_selected_tiles(self.bus);
+                let step = self.run.commit_selection_to_structure(self.bus);
                 if step == 0 {
                     return self.finish_outcome(
                         command,
                         before,
                         queue_start,
-                        CommandData::PlaySelection { step },
+                        CommandData::CommitSelection { step },
                         Some(CommandRejection::InvalidSelection),
                     );
                 }
-                CommandData::PlaySelection { step }
+                CommandData::CommitSelection { step }
             }
             GameCommand::TriggerStructure => {
                 if !self.run.can_trigger_structure_now() {
@@ -1574,7 +1572,7 @@ mod tests {
     }
 
     #[test]
-    fn play_selection_rejects_invalid_melds() {
+    fn commit_selection_rejects_invalid_melds() {
         let mut run = deterministic_run();
         *run.hand_mut() = vec![
             tile(Suit::Characters, 1, 0),
@@ -1585,7 +1583,7 @@ mod tests {
         let mut bus = EventBus::default();
         let mut engine = GameEngine::new(&mut run, &mut bus);
 
-        let outcome = engine.dispatch(GameCommand::PlaySelection);
+        let outcome = engine.dispatch(GameCommand::CommitSelection);
 
         assert_eq!(outcome.rejection, Some(CommandRejection::InvalidSelection));
         assert!(outcome.events.contains(&EngineEvent::InvalidAction));

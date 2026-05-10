@@ -206,6 +206,7 @@ impl PauseMenu {
                     window_h: ctx.layout.window_h,
                     ui_scale: ctx.ui_scale,
                 },
+                ctx.active_profile,
             );
             return Some(match result {
                 PauseUpdate::StayPaused | PauseUpdate::Resume => None,
@@ -236,6 +237,7 @@ impl PauseMenu {
         run: &mut RunState,
         bus: &mut EventBus,
         viewport: crate::ui::layout::ViewportCtx,
+        active_profile: usize,
     ) -> PauseUpdate {
         let PauseInput {
             actions,
@@ -270,6 +272,19 @@ impl PauseMenu {
                 }
                 if opts.take_confirm_requested() {
                     bus.push(GameEvent::UiSound(SfxId::UiConfirm));
+                }
+                if opts.take_export_requested() {
+                    let path = crate::persistence::play_stats_export_path(active_profile);
+                    match crate::bot::export_play_history_html(&path, progress) {
+                        Ok(()) => bus.push(GameEvent::InfoModal {
+                            title: "Stats exported".into(),
+                            body: format!("Saved HTML report to:\n{}", path.display()),
+                        }),
+                        Err(e) => bus.push(GameEvent::InfoModal {
+                            title: "Export failed".into(),
+                            body: format!("{e:#}"),
+                        }),
+                    }
                 }
             }
             if self.options_overlay.is_none() {

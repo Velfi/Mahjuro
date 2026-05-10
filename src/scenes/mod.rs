@@ -119,6 +119,8 @@ pub struct UpdateCtx<'a> {
     /// matching against named const values local to the scene.
     pub button_clicks: &'a [u32],
     pub progress: &'a crate::core::progression::PlayerProgress,
+    /// Active save profile slot (0–2).
+    pub active_profile: usize,
     pub run: &'a mut RunState,
     pub bus: &'a mut EventBus,
     pub anim: &'a mut AnimationController,

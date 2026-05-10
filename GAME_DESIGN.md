@@ -22,7 +22,7 @@ Mahjuro is a mahjong-inspired roguelite that makes mahjong approachable for west
 5. **Discard to Refine** — Sacrifice unwanted tiles from a limited discard budget (4/round by default) to redraw from the wall. Unused discards can still pay out via relics and end-of-round bonuses.
 6. **Repeat Plays** — Each round gives a fixed number of plays and discards to meet the blind's score target. The default **Bamboo** tileset starts with **5 plays** and **4 discards** (material bonuses and meta upgrades can change this).
 7. **Shop Phase** — Between blinds, spend earned coins on relics, zodiacs, talismans, packs, and rerolls from a 3D curio cabinet.
-8. **Advance Antes** — Clear Small → Big → Boss across 7 antes. The final boss at ante 7 ends the run.
+8. **Advance Antes** — Clear **Small → Big → Boss** on each ante from the first through the **final ante**; beating the boss on the final ante wins the run (`FINAL_ANTE` in `run.rs` is the single source of truth for how many antes that is).
 
 ---
 
@@ -59,7 +59,7 @@ Additional talismans **transform** selected tiles (suit shifts, honors, flowers,
 
 ### **D. Yaku (Hand Patterns)**
 
-**Thirteen** yaku are implemented. They add chips and/or mult on top of meld scoring (exact bonuses live in `assets/data/yaku.json`). Patterns include:
+Many **yaku** are implemented (exact list and bonuses live in `assets/data/yaku.json`). They add chips and/or mult on top of meld scoring. Patterns include:
 
 * **Structure / value:** FullHand (4 melds + pair), Yakuhai (dragon or round-wind triplet), Chicken Hand (valid hand with no other yaku)
 * **Suit / composition:** Tanyao (2–8 only), Toitoi (all triplets/kongs), Iipeikou (doubled sequence), Sanshoku Doujun (same sequence in three suits), Ittsu (1–9 straight one suit), Honitsu (one number suit + honors), Chinitsu (one number suit), Junchan (every meld touches a terminal), Honroutou (terminals and honors only), Chiitoitsu (seven pairs)
@@ -78,7 +78,7 @@ Yaku level up via **zodiacs**: each use on a card boosts its bound yaku by `+20 
 
 ### **F. Relics**
 
-**88 relics** are implemented, spanning categories such as:
+A large **relic** pool is implemented (see `assets/data/relics.json`), spanning categories such as:
 
 * **Meld-type & dragon base** — TripletBoost, SequenceSurge, PairPower, HonorFury, RedDragonRage, GreenLuck, WhiteDragonsHush, JokerTile, StrengthInNumbers, QuickDraw, ChainReaction, MultiplierMaster, SetMagnet, WildWinds, DragonEcho
 * **Wall & scoring infrastructure** — ShantenShove, KanDrum, KongsBlessing, DoraCrown, RoundCompass, EightTreasures
@@ -96,7 +96,7 @@ Relics use **Common / Uncommon / Rare / Legendary** tiers (see `relics.json`) fo
 
 ### **G. Rule Modifiers**
 
-**11** `RuleModifier` variants — round rules and boss-pushed scoring/validation hooks:
+Multiple **`RuleModifier`** variants — round rules and boss-pushed scoring/validation hooks (see the rules module and boss defs for the live set):
 
 * **Round rules:** Sequence Wrap (8-9-1 and 9-1-2 style wraps), Pair Double Score, No Sequences, Reduced Plays (3 plays for the round), Honor Triple Score, No-Sequence Bonus
 * **Boss validation/scoring:** Pairs Score Zero (Hermit), Sequences Halved (Forest), **Must Play Five** (Bureaucrat — selection must be exactly five tiles), Require Honor (Dragon final boss), Censor Repeats (Censor)
@@ -113,7 +113,7 @@ Talismans and zodiacs share one **consumable inventory** (default **2 slots**). 
 
 ### **A. In-Run Progression**
 
-* **8 antes**, each with **Small → Big → Boss** in order; Boss encounters pull from themed pools (final ante reserves **Dragon**).
+* The run advances through a ladder of **antes**, each with **Small → Big → Boss** in order; boss encounters pull from themed pools, and the **final ante** reserves **Dragon**.
 * **Score targets** scale as **`base_target × run_number`** (`run_number` rises after every blind **cleared** or **skipped**). `base_target` is set at run creation from **stake** (e.g. Spring defaults to **500** before material/stake tweaks). Boss blinds add pressure via **boss hooks**, not a separate target multiplier in code.
 * Round wind cycles East → South → West → North by ante, affecting Yakuhai eligibility
 * Coins earned from blinds fund shop purchases between rounds
@@ -121,11 +121,10 @@ Talismans and zodiacs share one **consumable inventory** (default **2 slots**). 
 
 ### **B. Meta Progression (Between Runs)**
 
-Tracked in `PlayerProgress` with a **7-level unlock system** driven by **runs completed**:
+Tracked in `PlayerProgress` with a **tiered unlock ladder** driven by **runs completed** (thresholds live in progression code / data):
 
-* Levels 1→7 map to run counts: **0** | **1–2** | **3–5** | **6–9** | **10–14** | **15–19** | **20+**
-* Each tier unlocks **relic shop pools**, **round rules** available in shops/runs, and **dora** (enabled at level 4). Level-up tables still reference **yaku names** for messaging; scoring uses the full yaku list once progression is applied.
-* Top **10** high scores per profile; **run history** records finished runs for analytics and stake unlocks.
+* Each tier unlocks **relic shop pools**, **round rules** available in shops/runs, and **dora** at the configured tier. Level-up tables still reference **yaku names** for messaging; scoring uses the full yaku list once progression is applied.
+* A capped **high-score list** per profile; **run history** records finished runs for analytics and stake unlocks.
 * **Stake** ladder (**Spring → Summer → Autumn → Winter**) raises targets, shop prices, reroll base cost, and boss floors; **Winter** also adds the **No-Sequence Bonus** rule every round. Higher stakes unlock per **tile material** after clearing the previous stake with that material.
 * First **victory** unlocks **Plastic** tiles (+1 starting discard); **Tortoise Shell** grants bonus starting gold (material choice at run start).
 
@@ -140,7 +139,7 @@ Tracked in `PlayerProgress` with a **7-level unlock system** driven by **runs co
 
 ## **5. Difficulty Scaling**
 
-* **23** distinct boss kinds in code (soft / medium / hard / reactive pools plus **Dragon** on the final ante)—effects mix `RuleModifier` pushes, **tile debuffs**, gold taxes, hand-size tweaks, and reactive “pick at reveal” variants (**Mirror**, **Counterweight**, **Tax Collector**).
+* Many distinct **boss kinds** in code, grouped into soft / medium / hard / reactive pools, with **Dragon** on the final ante (full roster in `assets/data/bosses.json` + `BossKind` in `boss.rs`)—effects mix `RuleModifier` pushes, **tile debuffs**, gold taxes, hand-size tweaks, and reactive “pick at reveal” variants (**Mirror**, **Counterweight**, **Tax Collector**).
 * Score targets rise with **run_number** (every blind faced or skipped) and **stake** (`base_target`); ante progression swaps boss pools and round wind
 * Round rules and boss hooks stack in later antes
 * The **Dragon** final boss pushes **Require Honor** (structure must include an honor tile)
@@ -149,7 +148,7 @@ Tracked in `PlayerProgress` with a **7-level unlock system** driven by **runs co
 
 ## **6. Visual & UI Design**
 
-* **3D render pipeline** (wgpu) — **49** top-level `render/` modules (meshes, particles, fluid, flying coins, cabinet/shrine props, `wgpu_renderer` umbrella, etc.)
+* **3D render pipeline** (wgpu) — many top-level `render/` modules (meshes, particles, fluid, flying coins, cabinet/shrine props, `wgpu_renderer` umbrella, etc.)
 * **First-class scenes** (`Scene` enum): Splash, Start Screen, **Tile Select** (material / start modal), Profile Select, Shop, Pick Blind, Gameplay, Game Over, Meld Guide, Material Viewer, Options, Collection, Solitaire, Tutorial Recap, **Tutorial Campaign**, **Tutorial Summary**, Tile Literacy, **Transition Playground** (dev), **Yaku Journal**, **Zodiac Celebration**
 * **Pause menu** is embedded in run-adjacent scenes (gameplay, shop, pick blind)—not a separate `Scene` variant
 * **Score popups** animate each chip/mult cascade step
@@ -191,11 +190,11 @@ The original MVP scope is fully implemented and significantly exceeded:
 | Tile draw/discard                 | Done        | Wall refill, discard bowl, river mesh     |
 | Pair / Triplet / Sequence         | Done        | + Kong, flower wildcards, structure bank   |
 | Scoring system                    | Done        | Balatro-style chips × mult with cascades  |
-| 10–15 relics                      | Exceeded    | **88 relics**                             |
-| 1–2 rule modifiers                | Exceeded    | **11** `RuleModifier`s + rich boss hooks  |
-| Score targets                     | Done        | 8 antes × 3 blinds; **Spring–Winter stakes** |
-| Post-run unlocks                  | Done        | 7-level relic/rule/**dora** gating + stakes |
-| *Bonus: Yaku system*              | Implemented | **13** patterns + zodiac leveling         |
+| 10–15 relics                      | Exceeded    | Large pool — `assets/data/relics.json`    |
+| 1–2 rule modifiers                | Exceeded    | Broad `RuleModifier` set + rich boss hooks |
+| Score targets                     | Done        | Full ante ladder (**Small / Big / Boss** per ante); **Spring–Winter stakes** |
+| Post-run unlocks                  | Done        | Tiered relic/rule/**dora** gating + stakes |
+| *Bonus: Yaku system*              | Implemented | Full list in `yaku.json` + zodiac leveling |
 | *Bonus: Talismans & enhancements* | Implemented | Hand-wide buffs, transforms, …            |
 | *Bonus: 3D shop*                  | Implemented | Curio cabinet, spotlight hover, dishes    |
 | *Bonus: Tutorial / onboarding*    | Implemented | Overlay + campaign/summary/recap scenes   |

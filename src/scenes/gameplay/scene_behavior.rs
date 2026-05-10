@@ -430,7 +430,7 @@ impl SceneBehavior for GameplayScene {
         //
         // Vertical order: structure strip, yaku tablets, hand rack, bowl/mirror
         // row, then sort + journal.
-        let has_structure = gameplay.uses_structure_bank && gameplay.has_structure;
+        let has_structure = gameplay.has_structure;
         let cascade_showcase_ref = self.cascade_queue.front().and_then(|(_, sc)| sc.as_ref());
         let showcase_present = has_structure || cascade_showcase_ref.is_some();
         let hud_layout = compute_gameplay_hud_layout(
@@ -1395,7 +1395,6 @@ impl SceneBehavior for GameplayScene {
                 discard_btn_rect,
                 play_btn_rect,
                 trigger_btn_rect,
-                gameplay.uses_structure_bank,
                 has_structure,
                 show_discard_legend,
                 show_play_legend,

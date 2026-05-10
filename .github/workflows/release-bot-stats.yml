@@ -48,7 +48,7 @@ jobs:
           lfs: true
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           targets: x86_64-unknown-linux-gnu
 
@@ -80,26 +80,19 @@ jobs:
           sudo swapon "$SWAPFILE"
           echo "CARGO_BUILD_JOBS=2" >> "$GITHUB_ENV"
 
-      - name: Cache Cargo registry and target
-        uses: actions/cache@v5
+      - name: Rust cache
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: x86_64-unknown-linux-gnu-cargo-release-bot-stats-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            x86_64-unknown-linux-gnu-cargo-release-bot-stats-
-            x86_64-unknown-linux-gnu-cargo-
+          prefix-key: bot-stats-100k
 
       - name: Build release binary
-        run: cargo build --release
+        run: cargo build --release --locked
 
       - name: Run 100k bot simulation
         run: ./target/release/mahjuro bot 100000 -o docs/bot_stats_100k.html
 
       - name: Open PR with bot stats HTML
-        uses: peter-evans/create-pull-request@v8
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
         with:
           commit-message: "docs: bot stats (100k) for ${{ steps.tag.outputs.tag }}"
           branch: ci/bot-stats-100k-${{ steps.tag.outputs.tag }}

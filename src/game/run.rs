@@ -698,7 +698,7 @@ pub struct RunState {
     /// (defaults to empty for old saves).
     #[serde(default)]
     pub yaku_times_played: std::collections::HashMap<crate::core::yaku::YakuKind, u32>,
-    /// Cumulative tiles committed from hand into scored plays / structure.
+    /// Cumulative tiles committed from hand into the structure bank (melds).
     #[serde(default)]
     pub tiles_played: u32,
     /// Cumulative tiles thrown away via the discard action.
@@ -707,7 +707,7 @@ pub struct RunState {
     /// Number of times the hand was replenished after spending tiles.
     #[serde(default)]
     pub times_restocked: u32,
-    /// Highest score earned by a single scored hand / structure cash-in.
+    /// Highest chip total from a single structure cash-in.
     #[serde(default)]
     pub best_structure_score: u64,
     /// Display label for the highest-scoring structure.
@@ -842,34 +842,15 @@ impl RunState {
         &self.selected
     }
 
-    /// Ghost Hand HUD / tooltip preview: in structure-bank mode the next cash-in
-    /// scores all tiles still in hand as "unscored"; in classic mode, if any tile
-    /// is selected the preview is the sum of **un**selected hand tiles (what stays
-    /// out of the meld), otherwise the sum of the whole hand before you choose a meld.
+    /// Ghost Hand HUD / tooltip preview: the next cash-in scores all tiles still
+    /// in hand as "unscored" (chips from tiles not yet committed to structure).
     pub fn ghost_hand_preview_chips(&self) -> i32 {
         let hand = self.hand();
         let debuffs = &self.tile_debuffs;
-        let sum_points = |tiles: &[Tile]| -> i32 {
-            tiles
-                .iter()
-                .filter(|t| !debuffs.iter().any(|d| d.matches(t)))
-                .map(|t| t.point_value() as i32)
-                .sum()
-        };
-        if self.mode.structure_bank {
-            return sum_points(hand);
-        }
-        let sel = self.selected_slice();
-        if sel.iter().any(|&x| x) {
-            let unselected: Vec<Tile> = hand
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| !sel.get(*i).copied().unwrap_or(false))
-                .map(|(_, t)| *t)
-                .collect();
-            return sum_points(&unselected);
-        }
-        sum_points(hand)
+        hand.iter()
+            .filter(|t| !debuffs.iter().any(|d| d.matches(t)))
+            .map(|t| t.point_value() as i32)
+            .sum()
     }
 
     pub(crate) fn selected_mut(&mut self) -> &mut Vec<bool> {
@@ -1202,7 +1183,6 @@ impl RunState {
 mod tests {
     use super::*;
     use crate::core::deck::build_wall;
-    use crate::core::hand::DetectedSet;
     use crate::core::relic::{RelicId, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle, ScoreRoundBundle, ScoreTileBundle};
 
     /// Standard mode starting plays (Bamboo: 4 base + 1 bonus).
@@ -1891,10 +1871,10 @@ mod tests {
         assert_eq!(run.tag_bonus_hand_size, 0);
     }
 
-    // ── score_selected_tiles ──────────────────────────────────────
+    // ── commit_selection_to_structure ───────────────────────────
 
     #[test]
-    fn score_selected_valid_triplet() {
+    fn commit_selection_valid_triplet() {
         let mut run = test_run();
         let mut bus = bus();
         // Deterministic hand (sorted): 1m×4, 2m×4, 3m×4, 4m×2
@@ -1902,8 +1882,8 @@ mod tests {
         run.toggle_select(0);
         run.toggle_select(1);
         run.toggle_select(2);
-        let pts = run.score_selected_tiles(&mut bus);
-        assert!(pts > 0, "valid triplet should score");
+        let pts = run.commit_selection_to_structure(&mut bus);
+        assert!(pts > 0, "valid triplet should commit");
         assert_eq!(run.plays_remaining, STARTING_PLAYS - 1);
         // Scored tiles removed and redrawn.
         assert_eq!(run.hand.len(), HAND_SIZE);
@@ -1913,13 +1893,12 @@ mod tests {
     #[test]
     fn glass_cannon_destroys_after_first_scoring_hand() {
         let mut run = test_run();
-        run.mode.structure_bank = false;
         run.relics.active.push(RelicId::GlassCannon);
         let mut bus = bus();
-        run.toggle_select(0);
-        run.toggle_select(1);
-        run.toggle_select(2);
-        let _ = run.score_selected_tiles(&mut bus);
+        let (tiles, sets) = winning_structure();
+        run.structure_tiles = tiles;
+        run.structure_sets = sets;
+        let _ = run.trigger_structure_manual(&mut bus);
         assert!(!run.relics.active.contains(&RelicId::GlassCannon));
     }
 
@@ -1932,56 +1911,42 @@ mod tests {
     }
 
     #[test]
-    fn classic_mode_scores_on_commit_without_structure_bank() {
-        let mut run = test_run();
-        run.mode.structure_bank = false;
-        let mut bus = bus();
-        let score_before = run.round_score;
-        run.toggle_select(0);
-        run.toggle_select(1);
-        run.toggle_select(2);
-        let pts = run.score_selected_tiles(&mut bus);
-        assert!(pts > 0);
-        assert!(
-            run.round_score > score_before,
-            "classic play adds to round score immediately"
-        );
-        assert!(run.structure_sets.is_empty());
-        assert!(run.structure_tiles.is_empty());
-    }
+    fn dragon_allows_non_honor_structure_but_debuffs_its_score() {
+        let tiles = vec![
+            Tile::new(Suit::Characters, 1, 1),
+            Tile::new(Suit::Characters, 1, 2),
+            Tile::new(Suit::Characters, 1, 3),
+        ];
+        let sets = vec![DetectedSet {
+            kind: SetKind::Triplet,
+            tile_ids: vec![1, 2, 3],
+        }];
 
-    #[test]
-    fn dragon_allows_non_honor_play_but_debuffs_its_score() {
         let mut baseline = test_run();
-        baseline.mode.structure_bank = false;
-        baseline.blind = BlindKind::Boss;
-        baseline.upcoming_blind = BlindKind::Boss;
+        baseline.blind = BlindKind::Small;
+        baseline.structure_tiles = tiles.clone();
+        baseline.structure_sets = sets.clone();
         let mut baseline_bus = bus();
-        baseline.toggle_select(0);
-        baseline.toggle_select(1);
-        baseline.toggle_select(2);
-        let baseline_pts = baseline.score_selected_tiles(&mut baseline_bus);
-        assert!(baseline_pts > 0);
+        let baseline_earned = baseline.trigger_structure_manual(&mut baseline_bus);
+        assert!(baseline_earned > 0);
         let baseline_score = baseline.round_score;
 
         let mut dragon = test_run();
-        dragon.mode.structure_bank = false;
         dragon.blind = BlindKind::Boss;
         dragon.upcoming_blind = BlindKind::Boss;
         dragon.boss.upcoming = Some(BossKind::Dragon);
+        dragon.structure_tiles = tiles;
+        dragon.structure_sets = sets;
         let mut dragon_bus = bus();
-        dragon.toggle_select(0);
-        dragon.toggle_select(1);
-        dragon.toggle_select(2);
-        let dragon_pts = dragon.score_selected_tiles(&mut dragon_bus);
-        assert!(dragon_pts > 0, "Dragon should still allow cycling plays");
+        let dragon_earned = dragon.trigger_structure_manual(&mut dragon_bus);
+        assert!(dragon_earned > 0, "Dragon should still allow structure cash-in");
         assert!(
             dragon.round_score > 0,
-            "debuffed Dragon plays should still score something"
+            "debuffed Dragon cash-in should still score something"
         );
         assert!(
             dragon.round_score < baseline_score,
-            "Dragon should weaken non-honor plays instead of hard-locking them"
+            "Dragon should weaken non-honor cash-ins vs a non-Dragon blind"
         );
     }
 
@@ -2017,7 +1982,30 @@ mod tests {
     }
 
     #[test]
-    fn score_selected_invalid_returns_zero() {
+    fn house_rule_blocks_autocash_until_discards_are_spent() {
+        let mut run = test_run();
+        let mut bus = bus();
+        run.round_rules.push(RuleModifier::CashInRequiresNoDiscards);
+        run.discards_remaining = 2;
+        let (tiles, sets) = winning_structure();
+        run.structure_tiles = tiles;
+        run.structure_sets = sets;
+
+        run.try_autotrigger_structure_full(&mut bus);
+
+        assert_eq!(run.structure_sets.len(), 5);
+        assert!(!run.can_trigger_structure_now());
+        assert_eq!(run.round_score, 0);
+
+        run.discards_remaining = 0;
+        assert!(run.can_trigger_structure_now());
+        run.try_autotrigger_structure_full(&mut bus);
+        assert!(run.structure_sets.is_empty());
+        assert!(run.round_score > 0);
+    }
+
+    #[test]
+    fn commit_selection_invalid_returns_zero() {
         let mut run = test_run();
         let mut bus = bus();
         // Select 4 tiles: triplet + 1 leftover → invalid.
@@ -2025,17 +2013,17 @@ mod tests {
         run.toggle_select(1);
         run.toggle_select(2);
         run.toggle_select(4); // 2m — leftover
-        let pts = run.score_selected_tiles(&mut bus);
+        let pts = run.commit_selection_to_structure(&mut bus);
         assert_eq!(pts, 0, "invalid selection should score 0");
         assert_eq!(run.plays_remaining, STARTING_PLAYS, "no play consumed");
         assert_eq!(run.hand.len(), HAND_SIZE, "hand unchanged");
     }
 
     #[test]
-    fn score_selected_nothing_returns_zero() {
+    fn commit_selection_nothing_returns_zero() {
         let mut run = test_run();
         let mut bus = bus();
-        let pts = run.score_selected_tiles(&mut bus);
+        let pts = run.commit_selection_to_structure(&mut bus);
         assert_eq!(pts, 0);
         assert_eq!(run.plays_remaining, STARTING_PLAYS);
     }
@@ -2111,7 +2099,7 @@ mod tests {
     }
 
     #[test]
-    fn score_selected_removes_tiles_from_hand() {
+    fn commit_selection_removes_tiles_from_hand() {
         let mut run = test_run();
         let mut bus = bus();
         // Select a pair: indices 0 and 1 (1m, 1m).
@@ -2119,7 +2107,7 @@ mod tests {
         let tile1 = run.hand[1];
         run.toggle_select(0);
         run.toggle_select(1);
-        run.score_selected_tiles(&mut bus);
+        run.commit_selection_to_structure(&mut bus);
         // Those specific tiles should be gone.
         assert!(!run.hand.iter().any(|t| t.id == tile0.id));
         assert!(!run.hand.iter().any(|t| t.id == tile1.id));

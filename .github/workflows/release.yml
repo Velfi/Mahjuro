@@ -79,7 +79,7 @@ jobs:
 
       - name: Create GitHub Release (with CHANGELOG body)
         if: steps.notes.outputs.have_notes == 'true'
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           name: Mahjuro ${{ env.RELEASE_TAG }}
@@ -90,7 +90,7 @@ jobs:
 
       - name: Create GitHub Release (auto-generated fallback)
         if: steps.notes.outputs.have_notes != 'true'
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           name: Mahjuro ${{ env.RELEASE_TAG }}

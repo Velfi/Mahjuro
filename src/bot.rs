@@ -45,8 +45,8 @@ mod stats_wilson;
 
 pub use reporting::{
     BotConfig, BotOutputFormat, BotOutputTarget, BotRunOptions, BotStrategy, BotTimeoutDiag,
-    HeadlessBotBatch, StrategyFile, run_forced_relic_sweep, run_headless, run_headless_aggregate,
-    run_strategy_sweep, run_sweep,
+    HeadlessBotBatch, StrategyFile, export_play_history_html, run_forced_relic_sweep, run_headless,
+    run_headless_aggregate, run_strategy_sweep, run_sweep,
 };
 use stats::clear_payout_breakdown;
 use stats::{BotScoringAction, PeakBlindSnapshot};
@@ -231,7 +231,7 @@ fn analyze_hand_options(
 
         analysis.valid_count += 1;
 
-        if !structure_bank_allows_commit(run, scoring_tiles.len(), &sets) {
+        if !structure_commit_fits(run, scoring_tiles.len(), &sets) {
             continue;
         }
         analysis.committable_count += 1;
@@ -360,15 +360,12 @@ fn indices_from_play_mask(hand_len: usize, mask: u32) -> Vec<usize> {
     (0..hand_len).filter(|i| mask & (1 << i) != 0).collect()
 }
 
-/// Whether committing `new_sets` with `scoring_tile_count` tiles fits the structure bank.
-fn structure_bank_allows_commit(
+/// Whether a commit of `new_sets` with `scoring_tile_count` tiles fits the structure bank.
+fn structure_commit_fits(
     run: &RunState,
     scoring_tile_count: usize,
     new_sets: &[crate::core::hand::DetectedSet],
 ) -> bool {
-    if !run.uses_structure_bank() {
-        return true;
-    }
     let kongs_after = run
         .structure_sets()
         .iter()
@@ -411,7 +408,7 @@ fn evaluate_play_masks(
         let Some(sets) = validate_selection_with_rules(&tiles, rules) else {
             continue;
         };
-        if !structure_bank_allows_commit(run, tiles.len(), &sets) {
+        if !structure_commit_fits(run, tiles.len(), &sets) {
             continue;
         }
         merged_sets.truncate(base_set_len);
@@ -460,7 +457,7 @@ fn masks_passing_validate_and_structure(
         let Some(sets) = validate_selection_with_rules(&tiles, rules) else {
             continue;
         };
-        if structure_bank_allows_commit(run, tiles.len(), &sets) {
+        if structure_commit_fits(run, tiles.len(), &sets) {
             hits += 1;
         }
     }
@@ -492,7 +489,7 @@ fn masks_with_positive_score(
         let Some(sets) = validate_selection_with_rules(&tiles, rules) else {
             continue;
         };
-        if !structure_bank_allows_commit(run, tiles.len(), &sets) {
+        if !structure_commit_fits(run, tiles.len(), &sets) {
             continue;
         }
         merged_sets.truncate(base_set_len);
@@ -1225,15 +1222,12 @@ fn play_blind(
 
         // Structure: cash in when the current structure scores at least as much as the best
         // commit preview (saves a play), or when there is no positive commit but the structure can score.
-        let trigger_preview = if run.uses_structure_bank() && run.can_trigger_structure_now() {
+        let trigger_preview = if run.can_trigger_structure_now() {
             run.preview_manual_trigger_total()
         } else {
             0
         };
-        if run.uses_structure_bank()
-            && trigger_preview > 0
-            && (best_score == 0 || trigger_preview >= best_score)
-        {
+        if trigger_preview > 0 && (best_score == 0 || trigger_preview >= best_score) {
             let score_before_structure = run.round_score;
             let earned = run.trigger_structure_manual(&mut bus);
             stats.structure_triggers += 1;
@@ -1333,7 +1327,7 @@ fn play_blind(
             }
             let plays_before = run.plays_remaining;
             let score_before = run.round_score;
-            let committed = run.score_selected_tiles(&mut bus);
+            let committed = run.commit_selection_to_structure(&mut bus);
             if committed == 0
                 && run.plays_remaining == plays_before
                 && run.round_score == score_before
@@ -1449,18 +1443,16 @@ mod tests {
             else {
                 continue;
             };
-            if run.uses_structure_bank() {
-                let kongs_after = run
-                    .structure_sets()
-                    .iter()
-                    .chain(sets.iter())
-                    .filter(|s| s.kind == SetKind::Kong)
-                    .count();
-                if run.structure_tiles().len() + tiles.len()
-                    > crate::game::run::HAND_SIZE + kongs_after
-                {
-                    continue;
-                }
+            let kongs_after = run
+                .structure_sets()
+                .iter()
+                .chain(sets.iter())
+                .filter(|s| s.kind == SetKind::Kong)
+                .count();
+            if run.structure_tiles().len() + tiles.len()
+                > crate::game::run::HAND_SIZE + kongs_after
+            {
+                continue;
             }
             let mut merged_sets = run.structure_sets().to_vec();
             merged_sets.extend(sets.iter().cloned());

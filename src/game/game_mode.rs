@@ -27,10 +27,6 @@ pub struct GameMode {
     /// gameplay bonuses (e.g. Plastic grants +1 discard).
     #[serde(default)]
     pub tile_material: TileMaterial,
-    /// When true (default), valid plays commit melds into the structure bank
-    /// until cash-in. When false, each play scores immediately (classic).
-    #[serde(default = "default_structure_bank")]
-    pub structure_bank: bool,
     /// Difficulty tier selected at run start. Modulates target score, shop
     /// prices, reroll base cost, and boss min_ante floor — see `core::stake`.
     #[serde(default)]
@@ -40,10 +36,6 @@ pub struct GameMode {
     /// `relic_shop_price`) can multiply without reaching for the stake enum.
     #[serde(default = "default_price_multiplier")]
     pub price_multiplier: f32,
-}
-
-fn default_structure_bank() -> bool {
-    true
 }
 
 fn default_price_multiplier() -> f32 {
@@ -112,7 +104,6 @@ impl GameMode {
             starting_yaku: crate::core::yaku::YakuKind::all().to_vec(),
             consumable_capacity: 2,
             tile_material: material,
-            structure_bank: true,
             stake,
             price_multiplier: stake.price_multiplier(),
         }

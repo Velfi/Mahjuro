@@ -109,6 +109,12 @@ pub enum GameEvent {
     /// (`PlayerProgress::discovered_transformation_successors`). Shops use
     /// run burn flags only; successors are not added to meta `available_relics`.
     TransformationSuccessorDiscovered(crate::core::relic::RelicId),
+    /// Informational dialog only. The main loop turns this into a modal on
+    /// the next bus drain.
+    InfoModal {
+        title: String,
+        body: String,
+    },
 }
 
 #[derive(Default)]

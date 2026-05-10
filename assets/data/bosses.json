@@ -21,5 +21,6 @@
   { "id": "mirror",        "name": "The Mirror",        "description": "Silences your strongest scoring axis",                  "tier": "medium", "min_ante": 3 },
   { "id": "counterweight", "name": "The Counterweight", "description": "Debuffs the tile family your relics support most",      "tier": "medium", "min_ante": 3 },
   { "id": "tax_collector", "name": "The Tax Collector", "description": "Per-play gold cost scales to your hoard",               "tier": "medium", "min_ante": 3 },
-  { "id": "dragon",        "name": "The Dragon",        "description": "Structures without an honor score zero",                "tier": "final",  "min_ante": 7 }
+  { "id": "dragon",        "name": "The Dragon",        "description": "Structures without an honor score zero",                "tier": "final",  "min_ante": 7 },
+  { "id": "house",         "name": "The House",         "description": "Cannot cash in until all discards are used",            "tier": "final",  "min_ante": 7 }
 ]

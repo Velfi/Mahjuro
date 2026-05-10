@@ -29,6 +29,9 @@ pub enum RuleModifier {
     RequireHonor,
     /// Yaku already played this round score at half strength. (The Censor boss.)
     CensorRepeats,
+    /// Structure cash-in is disabled until all discards for the round are spent.
+    /// (The House final boss.)
+    CashInRequiresNoDiscards,
 }
 
 impl RuleModifier {
@@ -45,6 +48,7 @@ impl RuleModifier {
             RuleModifier::MustPlayFive => "Bureaucratic Form",
             RuleModifier::RequireHonor => "Honor Required",
             RuleModifier::CensorRepeats => "Repeats Censored",
+            RuleModifier::CashInRequiresNoDiscards => "No Cash-In With Discards",
         }
     }
 
@@ -61,6 +65,9 @@ impl RuleModifier {
             RuleModifier::MustPlayFive => "Must play exactly 5 tiles",
             RuleModifier::RequireHonor => "Structure must contain an honor tile",
             RuleModifier::CensorRepeats => "Repeated yaku score at half",
+            RuleModifier::CashInRequiresNoDiscards => {
+                "Cannot cash in until all discards are used"
+            }
         }
     }
 }

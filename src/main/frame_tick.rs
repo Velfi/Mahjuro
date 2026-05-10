@@ -200,6 +200,10 @@ impl App {
                     let _ = persistence::save_profile(self.active_profile, &self.progress);
                     self.steam
                         .unlock_achievement(crate::steam::Achievement::FirstBossDefeated);
+                    if bk == crate::core::boss::BossKind::House {
+                        self.steam
+                            .unlock_achievement(crate::steam::Achievement::HouseDefeated);
+                    }
                 }
                 GameEvent::TalismanPurchased(tk) => {
                     self.audio.play_sfx(audio::SfxId::TalismanPurchased);
@@ -232,6 +236,9 @@ impl App {
                 GameEvent::TransformationSuccessorDiscovered(rid) => {
                     let _ = self.progress.note_transformation_successor_discovered(rid);
                     let _ = persistence::save_profile(self.active_profile, &self.progress);
+                }
+                GameEvent::InfoModal { title, body } => {
+                    self.modals.push(Modal::new(title, body, ModalTheme::Info));
                 }
             }
         }
@@ -582,6 +589,7 @@ impl App {
                 actions: &actions,
                 button_clicks: &button_clicks,
                 progress: &self.progress,
+                active_profile: self.active_profile,
                 run: &mut self.run,
                 bus: &mut self.bus,
                 anim: &mut self.anim,
@@ -650,6 +658,7 @@ impl App {
                     actions: &actions,
                     button_clicks: &button_clicks,
                     progress: &self.progress,
+                    active_profile: self.active_profile,
                     run: &mut self.run,
                     bus: &mut self.bus,
                     anim: &mut self.anim,

@@ -37,6 +37,10 @@ pub enum Achievement {
     TaotieAwakened,
     /// XXXL Egg burned out into Geese — fragile retrigger cluster.
     GeeseTakeFlight,
+    /// Scored Kokushi Musō (thirteen orphans) — the alternate full-hand pattern.
+    ThirteenOrphans,
+    /// Beat **The House** on the final boss blind.
+    HouseDefeated,
 }
 
 impl Achievement {
@@ -54,6 +58,8 @@ impl Achievement {
             Self::SilkMothEmerged => "SILK_MOTH_EMERGED",
             Self::TaotieAwakened => "TAOTIE_AWAKENED",
             Self::GeeseTakeFlight => "GEESE_TAKE_FLIGHT",
+            Self::ThirteenOrphans => "THIRTEEN_ORPHANS",
+            Self::HouseDefeated => "HOUSE_DEFEATED",
         }
     }
 }

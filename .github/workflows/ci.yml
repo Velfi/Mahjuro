@@ -51,7 +51,7 @@ jobs:
           lfs: true
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           targets: ${{ matrix.target }}
 
@@ -91,26 +91,21 @@ jobs:
           sudo swapon "$SWAPFILE"
           echo "CARGO_BUILD_JOBS=2" >> "$GITHUB_ENV"
 
-      - name: Cache Cargo registry and target
-        uses: actions/cache@v5
+      - name: Rust cache
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ matrix.target }}-cargo-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            ${{ matrix.target }}-cargo-
+          prefix-key: ci
+          key: ${{ matrix.target }}
 
       - name: Build (debug)
         if: matrix.name != 'macOS'
-        run: cargo build --target ${{ matrix.target }}
+        run: cargo build --locked --target ${{ matrix.target }}
 
       - name: Build macOS universal (debug)
         if: matrix.name == 'macOS'
         run: |
-          cargo build --target aarch64-apple-darwin
-          cargo build --target x86_64-apple-darwin
+          cargo build --locked --target aarch64-apple-darwin
+          cargo build --locked --target x86_64-apple-darwin
           lipo -create \
             target/aarch64-apple-darwin/debug/mahjuro \
             target/x86_64-apple-darwin/debug/mahjuro \
@@ -118,11 +113,11 @@ jobs:
 
       - name: Run tests
         if: matrix.name != 'Linux'
-        run: cargo test
+        run: cargo test --locked
 
       - name: Run tests (Linux)
         if: matrix.name == 'Linux'
-        run: xvfb-run --auto-servernum cargo test
+        run: xvfb-run --auto-servernum cargo test --locked
 
       # Signing verification — skipped on fork PRs where secrets are unavailable.
       - name: Verify Apple codesign identity

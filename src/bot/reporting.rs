@@ -895,3 +895,119 @@ pub fn run_forced_relic_sweep(runs_per_relic: u32, export_json: Option<&Path>) {
         }
     }
 }
+
+fn blinds_cleared_before_death(blind: crate::core::rules::BlindKind) -> u32 {
+    match blind {
+        crate::core::rules::BlindKind::Small => 0,
+        crate::core::rules::BlindKind::Big => 1,
+        crate::core::rules::BlindKind::Boss => 2,
+    }
+}
+
+/// Approximate [`RunStats`] from a saved [`crate::core::progression::RunRecord`] for the
+/// play-history HTML export. Fields that are only tracked in the headless bot stay default.
+pub fn run_stats_from_progress_record(
+    rec: &crate::core::progression::RunRecord,
+) -> RunStats {
+    use crate::core::progression::RunOutcome;
+    use crate::core::relic::all_relic_defs;
+    use crate::core::rules::BlindKind;
+    use crate::game::run::FINAL_ANTE;
+    use std::collections::BTreeMap;
+
+    let victory = matches!(rec.outcome, RunOutcome::Victory);
+    let (antes_cleared, blinds_cleared) = if victory {
+        (FINAL_ANTE, FINAL_ANTE.saturating_mul(3))
+    } else {
+        let completed_antes = rec.final_ante.saturating_sub(1);
+        (
+            completed_antes,
+            completed_antes
+                .saturating_mul(3)
+                .saturating_add(blinds_cleared_before_death(rec.final_blind)),
+        )
+    };
+    let death_reason = match rec.outcome {
+        RunOutcome::Defeat { reason } => Some(reason),
+        _ => None,
+    };
+    let mut yaku_scored: BTreeMap<&'static str, u32> = BTreeMap::new();
+    for (&yk, &n) in &rec.yaku_times_played {
+        *yaku_scored.entry(yk.name()).or_insert(0) += n;
+    }
+    let final_relics: Vec<String> = rec
+        .relics_owned
+        .iter()
+        .map(|&id| {
+            all_relic_defs()
+                .iter()
+                .find(|d| d.id == id)
+                .map(|d| d.name.to_string())
+                .unwrap_or_else(|| format!("{id:?}"))
+        })
+        .collect();
+    let final_consumables: Vec<String> =
+        rec.consumables_owned.iter().map(|c| c.name()).collect();
+    let mut boss_faced: BTreeMap<String, u8> = BTreeMap::new();
+    let mut boss_beaten: BTreeMap<String, u8> = BTreeMap::new();
+    if rec.final_blind == BlindKind::Boss {
+        if let Some(bk) = rec.final_boss {
+            let key = bk.name().to_string();
+            boss_faced.insert(key.clone(), 1);
+            if victory {
+                boss_beaten.insert(key, 1);
+            }
+        }
+    }
+    RunStats {
+        blinds_cleared,
+        antes_cleared,
+        victory,
+        died_on_ante: rec.final_ante,
+        died_on_blind: rec.final_blind,
+        total_score: rec.total_score_earned,
+        discards_used: rec.tiles_discarded,
+        final_gold: rec.final_gold,
+        peak_blind_score: rec.best_structure_score,
+        yaku_scored,
+        final_relics,
+        final_consumables,
+        death_reason,
+        boss_faced,
+        boss_beaten,
+        ..RunStats::default()
+    }
+}
+
+/// Write the same interactive HTML report as `mahjuro bot -o …html`, using
+/// completed runs from [`crate::core::progression::PlayerProgress::run_history`].
+/// Tutorial runs are skipped. Returns an error when there is nothing to export.
+pub fn export_play_history_html(
+    path: &Path,
+    progress: &crate::core::progression::PlayerProgress,
+) -> anyhow::Result<()> {
+    use crate::game::game_mode::GameMode;
+
+    let records: Vec<&crate::core::progression::RunRecord> = progress
+        .run_history
+        .iter()
+        .filter(|r| !r.tutorial_run)
+        .collect();
+    if records.is_empty() {
+        anyhow::bail!(
+            "No completed runs to export yet (tutorial runs are excluded). Finish a run first."
+        );
+    }
+    let last = records.last().expect("non-empty");
+    let mode = GameMode::with_material_and_stake(last.tile_material, last.stake);
+    let mut agg = AggregateStats::default();
+    for rec in &records {
+        agg.record(&run_stats_from_progress_record(rec));
+    }
+    let runs = records.len() as u32;
+    let v = bot_export_value(runs, &mode, &agg)?;
+    let json_compact = serde_json::to_string(&v)?;
+    let embedded = escape_json_for_html_script(&json_compact);
+    write_bot_html(path, &embedded)?;
+    Ok(())
+}
