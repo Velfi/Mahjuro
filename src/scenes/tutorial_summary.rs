@@ -84,7 +84,7 @@ impl SceneBehavior for TutorialSummaryScene {
             Some(SummaryAction::MeldGuide) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                 *ctx.overlay_request = Some(super::OverlayRequest::Push(Box::new(
-                    Scene::MeldGuide(MeldGuideScene::new(true)),
+                    Scene::MeldGuide(MeldGuideScene::new()),
                 )));
                 None
             }
@@ -119,7 +119,7 @@ impl SceneBehavior for TutorialSummaryScene {
             "Full Hand and Chiitoitsu (seven pairs) are the two tutorial patterns to learn first.",
             "Score is chips × mult; yaku are the usual way to grow mult early.",
             "Relics passively help all shrines; ribbons level yaku; talismans stamp tiles; packs reshape the wall.",
-            "Any time: Pause or the main menu → Meld Guide for pictures of every meld and yaku.",
+            "Any time: open Pause → Meld Guide for pictures of every meld and yaku.",
         ];
 
         let mut frame = UiFrame::new();

@@ -17,7 +17,6 @@ use crate::ui::input::UiAction;
 
 use super::collection::CollectionScene;
 use super::gameplay::GameplayScene;
-use super::meld_guide::MeldGuideScene;
 use super::options::OptionsScene;
 use super::profile_select::ProfileSelectScene;
 use super::shop::ShopScene;
@@ -28,7 +27,6 @@ use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransit
 enum HubFocus {
     Continue,
     NewGame,
-    MeldGuide,
     Profile,
     Collection,
     Options,
@@ -41,7 +39,6 @@ fn menu_items(in_progress: bool) -> Vec<HubFocus> {
         items.push(HubFocus::Continue);
     }
     items.push(HubFocus::NewGame);
-    items.push(HubFocus::MeldGuide);
     items.push(HubFocus::Profile);
     items.push(HubFocus::Collection);
     items.push(HubFocus::Options);
@@ -59,7 +56,6 @@ fn label_for(item: HubFocus, in_progress: bool) -> &'static str {
                 "Play"
             }
         }
-        HubFocus::MeldGuide => "Meld Guide",
         HubFocus::Profile => "Profile",
         HubFocus::Collection => "Collection",
         HubFocus::Options => "Options",
@@ -223,9 +219,6 @@ impl SceneBehavior for MainMenuExteriorScene {
                         &settings,
                     );
                     return Some(Scene::Shop(ShopScene::new(ctx.run, ctx.progress)));
-                }
-                Some(HubFocus::MeldGuide) => {
-                    return Some(Scene::MeldGuide(MeldGuideScene::new(false)));
                 }
                 Some(HubFocus::Profile) => {
                     return Some(Scene::ProfileSelect(ProfileSelectScene::from_settings()));
