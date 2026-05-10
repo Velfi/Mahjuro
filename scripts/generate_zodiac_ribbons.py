@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Generate three-piece silk-ribbon textures for the 13 zodiac consumable
+Generate three-piece silk-ribbon textures for the 14 zodiac consumable
 cards in Mahjuro using OpenAI's image generation API (Mouse + the 12
-standard).
+standard animals + Qilin for Kokushi Musō).
 
 Each zodiac ribbon is split into three square tiles so that the ribbon
 mesh can stretch to any length by tiling the middle piece:
@@ -132,8 +132,7 @@ ALL_PIECES = ["top", "mid", "bot"]
 
 # Each tuple: (slug, display_name, animal_visual, silk_palette).
 # Order MUST match ZodiacKind::all() in src/core/zodiac.rs (calendar order:
-# Mouse, Rat, Ox, Tiger, Rabbit, Dragon, Snake, Horse, Goat, Monkey,
-# Rooster, Dog, Pig — 13 total). Silk colors are creature-appropriate.
+# Mouse … Pig, then Qilin — 14 total). Silk colors are creature-appropriate.
 ZODIACS = [
     (
         "mouse",
@@ -243,6 +242,19 @@ ZODIACS = [
         "upturned snout, and floppy ears. Eyes closed in a small blissful "
         "smile, as if dreaming about something good.",
         "Rosy pink silk (#e8a0b4) with gold embroidery and gold edge trim.",
+    ),
+    (
+        "qilin",
+        "Qilin",
+        "A mythical Chinese qilin (kirin): deer-like legs with cloven hooves, "
+        "scaled flanks like a dragon, a flowing lion mane and tufted tail, "
+        "delicate antlers or a single short horn, and small wispy auspicious "
+        "cloud curls around its body. Standing calm and regal, eyes half-lidded "
+        "and knowing — the rarest embroidery in the set, slightly more filigree "
+        "and inner line detail than the ordinary animals, but still bold "
+        "cartoon shapes with thick dark-gold outlines readable from a distance.",
+        "Deep twilight-violet silk (#3a2f55) with brilliant gold embroidery "
+        "and gold edge trim.",
     ),
 ]
 

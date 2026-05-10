@@ -65,6 +65,9 @@ pub(crate) use super::{Scene, SceneTransition, UpdateCtx};
 
 pub struct ShopScene {
     mode: ShopMode,
+    /// Snapshot when the shop opened: Qilin is in the zodiac roll only if
+    /// [`crate::core::progression::PlayerProgress::qilin_ribbon_unlocked`].
+    qilin_ribbon_unlocked: bool,
     items: Vec<ShopItem>,
     zodiac_items: Vec<ConsumableShopItem>,
     talisman_items: Vec<ConsumableShopItem>,
@@ -317,7 +320,7 @@ mod tests {
         let mut run = crate::game::run::RunState::new(GameMode::standard());
         run.tag_patron_gift = true;
 
-        let shop = ShopScene::new(&mut run);
+        let shop = ShopScene::new(&mut run, &crate::core::progression::PlayerProgress::new());
 
         assert!(!shop.items.is_empty());
         assert!(shop.items.iter().any(|item| item.price == 0));
@@ -329,7 +332,7 @@ mod tests {
         let mut run = crate::game::run::RunState::new(GameMode::standard());
         run.tag_rich_stock = true;
 
-        let shop = ShopScene::new(&mut run);
+        let shop = ShopScene::new(&mut run, &crate::core::progression::PlayerProgress::new());
 
         assert!(shop.items.len() >= 2);
         assert!(!run.tag_rich_stock);
@@ -347,6 +350,7 @@ mod tests {
             1,
             crate::game::run::RelicShopPoolExtinction::default(),
             &mode,
+            false,
         );
 
         assert!(!items.is_empty());
@@ -367,6 +371,7 @@ mod tests {
             1,
             crate::game::run::RelicShopPoolExtinction::default(),
             &spring,
+            false,
         );
         let (winter_items, _, _, _) = actions::generate_shop_stock(
             &relics,
@@ -374,6 +379,7 @@ mod tests {
             1,
             crate::game::run::RelicShopPoolExtinction::default(),
             &winter,
+            false,
         );
 
         let spring_price = spring_items[0].price;
@@ -384,5 +390,32 @@ mod tests {
             winter_price,
             spring_price,
         );
+    }
+
+    #[test]
+    fn shop_zodiac_stock_excludes_qilin_until_meta_unlock() {
+        let relics = RelicState::default();
+        let available = vec![RelicId::PairPower];
+        let mode = GameMode::standard();
+        let ex = crate::game::run::RelicShopPoolExtinction::default();
+        for _ in 0..48 {
+            let (_, zodiacs, _, _) =
+                actions::generate_shop_stock(&relics, &available, 0, ex, &mode, false);
+            assert!(!zodiacs.iter().any(|item| {
+                matches!(item.consumable, Consumable::Zodiac(ZodiacKind::Qilin))
+            }));
+        }
+        let mut saw_qilin = false;
+        for _ in 0..64 {
+            let (_, zodiacs, _, _) =
+                actions::generate_shop_stock(&relics, &available, 0, ex, &mode, true);
+            if zodiacs.iter().any(|item| {
+                matches!(item.consumable, Consumable::Zodiac(ZodiacKind::Qilin))
+            }) {
+                saw_qilin = true;
+                break;
+            }
+        }
+        assert!(saw_qilin);
     }
 }

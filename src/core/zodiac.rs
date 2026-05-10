@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 //! Chinese Zodiac consumable cards — Mahjuro's planet-card analogue.
 //!
-//! Each Zodiac card is mapped 1:1 to one of the 12 canonical yaku in
-//! [`crate::core::yaku`]. Using a card increments the *level* of its yaku for
+//! Each Zodiac card is mapped 1:1 to one yaku in [`crate::core::yaku`]
+//! (including Kokushi Musō via the Qilin ribbon). Using a card increments the *level* of its yaku for
 //! the rest of the run, scaling both the chip and mult contributions per the
 //! formula in `YakuKind::mult_bonus_at` / `chip_bonus_at`:
 //!
@@ -14,6 +14,8 @@
 //!   * Big Blind clear   → 1 random Zodiac
 //!   * Boss Blind clear  → 2 random Zodiacs (or one Festival pack of 3 → pick 1)
 //!   * Shop              → 4 gold per single, 6 gold per Festival pack
+//!     (Qilin is omitted from shop zodiac rolls until Kokushi Musō has been
+//!     scored at least once on the save profile.)
 //!
 //! The consumable inventory holds 2 cards by default and is expandable via
 //! the Brocade Pouch (+1) relic.
@@ -22,8 +24,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::yaku::YakuKind;
 
-/// The 12 Chinese zodiac animals, in calendar order. Variant order matters
-/// for serialization stability.
+/// Zodiac ribbon kinds: the thirteen calendar animals (Mouse precedes Rat) plus
+/// **Qilin** for Kokushi Musō. Variant order matters for serialization stability.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ZodiacKind {
@@ -40,10 +42,12 @@ pub enum ZodiacKind {
     Rooster,
     Dog,
     Pig,
+    /// Mythical auspicious beast; levels Kokushi Musō (thirteen orphans).
+    Qilin,
 }
 
 impl ZodiacKind {
-    /// All 13 zodiacs in calendar order (Mouse precedes Rat).
+    /// All ribbon kinds: calendar order (Mouse precedes Rat), then Qilin.
     pub fn all() -> &'static [ZodiacKind] {
         &[
             ZodiacKind::Mouse,
@@ -59,6 +63,7 @@ impl ZodiacKind {
             ZodiacKind::Rooster,
             ZodiacKind::Dog,
             ZodiacKind::Pig,
+            ZodiacKind::Qilin,
         ]
     }
 
@@ -78,6 +83,7 @@ impl ZodiacKind {
             ZodiacKind::Rooster => "Rooster",
             ZodiacKind::Dog => "Dog",
             ZodiacKind::Pig => "Pig",
+            ZodiacKind::Qilin => "Qilin",
         }
     }
 
@@ -99,6 +105,7 @@ impl ZodiacKind {
             ZodiacKind::Rooster => YakuKind::ChickenHand,
             ZodiacKind::Dog => YakuKind::Yakuhai,
             ZodiacKind::Pig => YakuKind::Chiitoitsu,
+            ZodiacKind::Qilin => YakuKind::KokushiMusou,
         }
     }
 
@@ -120,6 +127,7 @@ impl ZodiacKind {
             ZodiacKind::Rooster => "rooster",
             ZodiacKind::Dog => "dog",
             ZodiacKind::Pig => "pig",
+            ZodiacKind::Qilin => "qilin",
         }
     }
 
@@ -211,8 +219,7 @@ mod tests {
         for &z in ZodiacKind::all() {
             assert!(seen.insert(z.yaku()), "duplicate yaku for {:?}", z);
         }
-        // All 12 yaku should be covered.
-        assert_eq!(seen.len(), 13);
+        assert_eq!(seen.len(), 14);
     }
 
     #[test]

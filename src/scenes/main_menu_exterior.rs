@@ -4,6 +4,7 @@
 use std::cell::RefCell;
 
 use crate::audio::SfxId;
+use crate::core::progression::PlayerProgress;
 use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;
 use crate::game::run::RunState;
@@ -74,14 +75,18 @@ fn default_focus(in_progress: bool) -> HubFocus {
     }
 }
 
-pub(crate) fn scene_from_resume(resume_scene: ResumeScene, run: &mut RunState) -> Scene {
+pub(crate) fn scene_from_resume(
+    resume_scene: ResumeScene,
+    run: &mut RunState,
+    progress: &PlayerProgress,
+) -> Scene {
     match resume_scene {
         ResumeScene::Gameplay => Scene::Gameplay(GameplayScene::new()),
         ResumeScene::Shop => {
             if GameEngine::resumes_to_tutorial_shop(run) {
                 Scene::Shop(ShopScene::new_tutorial(run))
             } else {
-                Scene::Shop(ShopScene::new(run))
+                Scene::Shop(ShopScene::new(run, progress))
             }
         }
         ResumeScene::PickBlind => Scene::PickBlind(super::pick_blind::PickBlindScene::new()),
@@ -201,7 +206,7 @@ impl SceneBehavior for MainMenuExteriorScene {
             ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
             match self.focus {
                 Some(HubFocus::Continue) => {
-                    return Some(scene_from_resume(ctx.resume_scene, ctx.run));
+                    return Some(scene_from_resume(ctx.resume_scene, ctx.run, ctx.progress));
                 }
                 Some(HubFocus::NewGame) => {
                     if ctx.tutorial_eligible {
@@ -217,7 +222,7 @@ impl SceneBehavior for MainMenuExteriorScene {
                         ctx.progress,
                         &settings,
                     );
-                    return Some(Scene::Shop(ShopScene::new(ctx.run)));
+                    return Some(Scene::Shop(ShopScene::new(ctx.run, ctx.progress)));
                 }
                 Some(HubFocus::MeldGuide) => {
                     return Some(Scene::MeldGuide(MeldGuideScene::new(false)));

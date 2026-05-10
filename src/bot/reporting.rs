@@ -284,10 +284,6 @@ impl BotConfig {
     }
 }
 
-pub fn play_run_with(config: BotConfig) -> RunStats {
-    super::play_run_with_options(config, BotRunOptions::default(), None)
-}
-
 pub(crate) fn run_with_sequential(n: u32, config: BotConfig, options: BotRunOptions) -> AggregateStats {
     let mut agg = AggregateStats::default();
     for i in 0..n {

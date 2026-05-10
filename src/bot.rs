@@ -2277,6 +2277,7 @@ fn visit_shop(
     log: bool,
     strategy: &BotStrategy,
     deadline: Option<Instant>,
+    qilin_ribbon_unlocked: bool,
 ) -> ShopVisitOutcome {
     // Consume tag-granted shop modifiers (headless analogue of ShopScene::new).
     let extra_relics: usize = if run.tag_rich_stock { 2 } else { 0 };
@@ -2335,6 +2336,9 @@ fn visit_shop(
     }
 
     let mut zodiac_pool: Vec<ZodiacKind> = ZodiacKind::all().to_vec();
+    if !qilin_ribbon_unlocked {
+        zodiac_pool.retain(|&z| z != ZodiacKind::Qilin);
+    }
     zodiac_pool.shuffle(&mut rng);
     let mut talisman_pool: Vec<TalismanKind> = TalismanKind::all().to_vec();
     talisman_pool.shuffle(&mut rng);
@@ -2729,7 +2733,15 @@ fn play_run_with_options(
                 run.gold,
                 run.upcoming_blind
             );
-            match visit_shop(&mut run, &mut stats, log, &strategy, deadline) {
+            let qilin_unlocked = stats.kokushi_musou_scored();
+            match visit_shop(
+                &mut run,
+                &mut stats,
+                log,
+                &strategy,
+                deadline,
+                qilin_unlocked,
+            ) {
                 ShopVisitOutcome::Completed => {}
                 ShopVisitOutcome::TimedOut => {
                     record_timeout_snapshot(
@@ -2782,7 +2794,15 @@ fn play_run_with_options(
 
         // Shop visit happens after advance_round (matching Shop → PickBlind scene
         // flow), so we evaluate purchases against the freshly-drawn next hand.
-        match visit_shop(&mut run, &mut stats, log, &strategy, deadline) {
+        let qilin_unlocked = stats.kokushi_musou_scored();
+        match visit_shop(
+            &mut run,
+            &mut stats,
+            log,
+            &strategy,
+            deadline,
+            qilin_unlocked,
+        ) {
             ShopVisitOutcome::Completed => {}
             ShopVisitOutcome::TimedOut => {
                 record_timeout_snapshot(
