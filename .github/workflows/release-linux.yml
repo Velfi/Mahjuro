@@ -103,15 +103,6 @@ jobs:
           cp "target/x86_64-unknown-linux-gnu/release/mahjuro" "$APPDIR/usr/bin/mahjuro"
           chmod +x "$APPDIR/usr/bin/mahjuro"
           cp "target/x86_64-unknown-linux-gnu/release/libsteam_api.so" "$APPDIR/usr/bin/"
-          RELEASE_DIR="target/x86_64-unknown-linux-gnu/release"
-          shopt -s nullglob
-          sdl_libs=( "$RELEASE_DIR"/libSDL3.so* )
-          if [[ ${#sdl_libs[@]} -eq 0 ]]; then
-            echo "error: no libSDL3.so in $RELEASE_DIR (sdl3 build-from-source)" >&2
-            ls -la "$RELEASE_DIR"
-            exit 1
-          fi
-          cp "${sdl_libs[@]}" "$APPDIR/usr/bin/"
           cp packaging/steam_input/game_actions_4636490.vdf "$APPDIR/usr/bin/"
 
           cp packaging/AppRun "$APPDIR/AppRun"
@@ -135,15 +126,8 @@ jobs:
           RELEASE_DIR="target/x86_64-unknown-linux-gnu/release"
           (
             cd "$RELEASE_DIR"
-            shopt -s nullglob
-            sdl_libs=( libSDL3.so* )
-            if [[ ${#sdl_libs[@]} -eq 0 ]]; then
-              echo "error: no libSDL3.so in $(pwd)" >&2
-              ls -la
-              exit 1
-            fi
             tar -czf "$OLDPWD/$ARCHIVE" mahjuro libsteam_api.so \
-              "${sdl_libs[@]}" game_actions_4636490.vdf
+              game_actions_4636490.vdf
           )
           echo "filename=${ARCHIVE}" >> "$GITHUB_OUTPUT"
 

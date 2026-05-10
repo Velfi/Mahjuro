@@ -86,16 +86,21 @@ jobs:
       - name: Run tests
         run: cargo test --locked
 
-      # Verbose rustc (full link lines) + MSVC /VERBOSE + /LINKREPRO for LNK4003-style
-      # failures. /VERBOSE is noisy (every link.exe invocation); drop it if logs truncate.
+      # Do not set RUSTFLAGS with /LINKREPRO (or /VERBOSE) for the whole workspace:
+      # cargo runs many link.exe jobs in parallel; they share one output dir and clobber
+      # each other, which can fail the `mahjuro` lib link with exit 101 before the bin.
       - name: Build release
         shell: bash
-        env:
-          RUSTFLAGS: -C link-arg=/VERBOSE -C link-arg=/LINKREPRO:${{ github.workspace }}/link-repro
         run: |
-          rm -rf link-repro
-          mkdir -p link-repro
-          cargo build --release --locked -vv --target x86_64-pc-windows-msvc
+          cargo build --release --locked --target x86_64-pc-windows-msvc
+
+      # Re-run with maximum rustc logging; single job avoids interleaved link.exe output.
+      - name: Verbose rebuild for logs (on failure)
+        if: failure()
+        continue-on-error: true
+        shell: bash
+        run: |
+          cargo build --release --locked -vv --target x86_64-pc-windows-msvc -j 1
 
       - name: Windows link diagnostics (on failure)
         if: failure()
@@ -112,15 +117,6 @@ jobs:
           else
             echo "llvm-ar not found at $LLVM_AR"
           fi
-          ls -la link-repro 2>/dev/null || echo "(no link-repro directory)"
-
-      - name: Upload MSVC link repro (on failure)
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: windows-msvc-link-repro
-          path: link-repro/
-          if-no-files-found: ignore
 
       - name: Set artifact name
         id: artifact

@@ -13,15 +13,13 @@
 //! the bundle layout — see `scripts/package-macos.sh`.
 //!
 //! Linux does not search the executable directory for shared libraries by
-//! default. We pass `-Wl,-rpath,$ORIGIN` so `libsteam_api.so` and `libSDL3.so*`
-//! (from `sdl3` build-from-source) can live next to `mahjuro` (same layout as
-//! Steam depots and GitHub release tarballs — see release workflow AppImage /
-//! linux tarball steps).
+//! default. We pass `-Wl,-rpath,$ORIGIN` so `libsteam_api.so` can live next to
+//! `mahjuro` (same layout as Steam depots and GitHub release tarballs — see
+//! release workflow AppImage / linux tarball steps). SDL is linked statically
+//! (`sdl3` feature `build-from-source-static`).
 //!
-//! On macOS, `sdl3-sys` (dynamic) links `libSDL3` with an `@rpath` install
-//! name but does not add an LC_RPATH to this crate. We pass
-//! `-Wl,-rpath,@loader_path` so bundled `libSDL3.0.dylib` next to `mahjuro`
-//! resolves (see `scripts/package-macos.sh`).
+//! On macOS we pass `-Wl,-rpath,@loader_path` so `libsteam_api.dylib` next to
+//! `mahjuro` resolves (see `scripts/package-macos.sh`).
 
 use std::env;
 use std::fs;
