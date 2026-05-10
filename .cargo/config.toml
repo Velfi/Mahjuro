@@ -1,0 +1,7 @@
+# Use LLVM lld (rust-lld) instead of MSVC link.exe for this target.
+# Workaround for LNK4003 "invalid library format" on large rlibs with some link.exe versions.
+# See: https://doc.rust-lang.org/rustc/codegen-options/index.html#linker
+#      https://github.com/rust-lang/rust/issues/71520
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld"
+rustdocflags = ["-Clinker=rust-lld"]
