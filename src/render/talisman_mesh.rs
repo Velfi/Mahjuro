@@ -174,7 +174,6 @@ pub fn talisman_material(
         T::Pearl => (MaterialKind::Pearl, 0.60, 64.0),
         T::Gilded => (MaterialKind::Foil, 0.70, 48.0),
         T::Polychrome => (MaterialKind::Polychrome, 0.70, 32.0),
-        T::Kiln => (MaterialKind::Polychrome, 0.70, 32.0),
         T::Bamboo | T::Dots | T::Characters | T::Conformity => {
             (MaterialKind::Moonstone, 0.80, 80.0)
         }

@@ -56,7 +56,7 @@ pub enum GameEvent {
     GameOver {
         reason: GameOverReason,
     },
-    /// Tiles permanently destroyed via the Kiln talisman.
+    /// Tiles permanently destroyed (e.g. Taotie devouring honors).
     TilesDestroyed,
     /// A tile pack was purchased in the shop.
     PackBought,

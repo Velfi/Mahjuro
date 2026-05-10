@@ -63,6 +63,7 @@ pub fn aggregate_to_v2(a: &AggregateStats) -> BotAggregateV2 {
             total_target_score: a.total_target_score,
             total_overscore: a.total_overscore,
             peak_blind_score: a.peak_blind_score,
+            peak_blind_detail: a.peak_blind_detail.clone(),
             total_bot_issue_no_valid_hand: a.total_bot_issue_no_valid_hand,
             total_bot_issue_only_valid_unplayable: a.total_bot_issue_only_valid_unplayable,
             total_bot_issue_only_valid_no_score: a.total_bot_issue_only_valid_no_score,
@@ -284,7 +285,7 @@ pub fn derived_from_aggregate(a: &AggregateStats, yaku_kind_count: usize) -> Bot
             id: "peak_blind".into(),
             label: "Peak blind".into(),
             value: human_readable_score(a.peak_blind_score as f64),
-            hint: "best single blind".into(),
+            hint: "best single blind; see Peak blind (batch max) for tiles/relics".into(),
             highlight: false,
         },
     ];

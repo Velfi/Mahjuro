@@ -4,7 +4,9 @@
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-pub const EXPORT_SCHEMA_VERSION: u32 = 3;
+use super::stats::PeakBlindSnapshot;
+
+pub const EXPORT_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Serialize)]
 pub struct BotExportMeta {
@@ -37,6 +39,8 @@ pub struct AggregateSums {
     pub total_target_score: u64,
     pub total_overscore: u64,
     pub peak_blind_score: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub peak_blind_detail: Option<PeakBlindSnapshot>,
     pub total_bot_issue_no_valid_hand: u64,
     pub total_bot_issue_only_valid_unplayable: u64,
     pub total_bot_issue_only_valid_no_score: u64,

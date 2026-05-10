@@ -282,13 +282,6 @@
     color: var(--text);
   }
 
-  .kpi__hint {
-    font-size: 0.78rem;
-    color: var(--muted);
-    margin-top: 0.2rem;
-    line-height: 1.35;
-  }
-
   .kpi--highlight .kpi__value { color: var(--accent); }
 
   .mini-bars {
@@ -386,6 +379,77 @@
 
   .stat-grid dt:last-of-type,
   .stat-grid dd:last-of-type { border-bottom: none; }
+
+  .stat-grid dt.dt-with-help {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.2rem;
+  }
+
+  /* —— Inline field help (?); empty button + ::after keeps TSV headers clean —— */
+  .field-help {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 1.125rem;
+    height: 1.125rem;
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    background: var(--navy2);
+    color: var(--muted);
+    font: inherit;
+    line-height: 1;
+    cursor: help;
+    vertical-align: middle;
+  }
+
+  .field-help::after {
+    content: '?';
+    font-size: 0.62rem;
+    font-weight: 800;
+    line-height: 1;
+  }
+
+  .field-help:hover,
+  .field-help:focus-visible {
+    color: var(--accent);
+    border-color: rgba(77, 184, 232, 0.45);
+    background: var(--accent-dim);
+  }
+
+  .field-help:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .th-label-wrap,
+  .data-table th.th-sort .th-sort__head {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
+
+  .data-table th.th-sort .th-sort__head {
+    padding-right: 0.15rem;
+  }
+
+  .kpi__label-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.2rem;
+    margin-bottom: 0.2rem;
+  }
+
+  .kpi__label-row .kpi__label {
+    margin-bottom: 0;
+  }
 
   /* —— Full-width cards —— */
   .dash-card {
@@ -675,6 +739,11 @@
     margin-top: 0;
   }
 
+  .ci-help__body strong {
+    color: var(--text);
+    font-weight: 650;
+  }
+
   .dash-header__tagline code {
     font-family: var(--mono);
     background: var(--navy2);
@@ -697,6 +766,32 @@
     if (cls) e.className = cls;
     if (text != null && text !== '') e.textContent = text;
     return e;
+  }
+
+  /** Hover/focus tooltip; stops sort when placed inside a sortable header. */
+  function fieldHelp(text) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'field-help';
+    b.title = text;
+    b.setAttribute('aria-label', text);
+    const stop = (ev) => { ev.stopPropagation(); };
+    b.addEventListener('click', (ev) => { ev.preventDefault(); stop(ev); });
+    b.addEventListener('mousedown', stop);
+    return b;
+  }
+
+  function thPlain(label, help) {
+    const th = el('th', null);
+    if (help) {
+      const wrap = el('span', 'th-label-wrap');
+      wrap.appendChild(document.createTextNode(label));
+      wrap.appendChild(fieldHelp(help));
+      th.appendChild(wrap);
+    } else {
+      th.textContent = label;
+    }
+    return th;
   }
 
   function fmtCompact(n) {
@@ -838,7 +933,7 @@
   }
 
   /**
-   * headers: { label, align?, sort?: 'str'|'num'|'pct'|'tier'|false, sortDefault?: 'asc'|'desc' }
+   * headers: { label, align?, help?, sort?: 'str'|'num'|'pct'|'tier'|false, sortDefault?: 'asc'|'desc' }
    * rows: cell arrays, or { cells, keys? } where keys[i] overrides sort value for column i
    */
   function addTable(parent, headers, rows, options) {
@@ -955,7 +1050,10 @@
         th.setAttribute('role', 'button');
         th.setAttribute('tabindex', '0');
         th.title = 'Sort by ' + h.label;
-        th.appendChild(el('span', 'th-sort__label', h.label));
+        const head = el('span', 'th-sort__head');
+        head.appendChild(el('span', 'th-sort__label', h.label));
+        if (h.help) head.appendChild(fieldHelp(h.help));
+        th.appendChild(head);
         th.appendChild(el('span', 'th-sort__ind', ''));
         const activate = (ev) => {
           ev.preventDefault();
@@ -971,6 +1069,11 @@
         th.addEventListener('keydown', (ev) => {
           if (ev.key === 'Enter' || ev.key === ' ') activate(ev);
         });
+      } else if (h.help) {
+        const wrap = el('span', 'th-label-wrap');
+        wrap.appendChild(document.createTextNode(h.label));
+        wrap.appendChild(fieldHelp(h.help));
+        th.appendChild(wrap);
       } else {
         th.textContent = h.label;
       }
@@ -1010,9 +1113,11 @@
 
   function kpiTile(k) {
     const k0 = el('div', 'kpi' + (k.highlight ? ' kpi--highlight' : ''));
-    k0.appendChild(el('div', 'kpi__label', k.label));
+    const lr = el('div', 'kpi__label-row');
+    lr.appendChild(el('div', 'kpi__label', k.label));
+    if (k.hint) lr.appendChild(fieldHelp(k.hint));
+    k0.appendChild(lr);
     k0.appendChild(el('div', 'kpi__value', k.value));
-    if (k.hint) k0.appendChild(el('div', 'kpi__hint', k.hint));
     return k0;
   }
 
@@ -1073,6 +1178,9 @@
     const pr = d.per_run || {};
     const meta = data.meta || {};
 
+    const HELP_WILSON_CI = 'Wilson 95% interval for a binomial proportion (the rate implied by this row’s counts). Wide bands mean few trials; standard frequentist CI, not a Bayesian credible interval.';
+    const HELP_WILSON_WIN_RATE = 'Wilson 95% interval for wins ÷ buys on this row (only defined when bought ≥ 1).';
+
     document.title = 'Mahjuro bot — ' + runs + ' runs';
 
     const stake = mode.stake != null ? String(mode.stake) : '—';
@@ -1108,16 +1216,26 @@
     app.appendChild(header);
 
     const ciHelp = el('details', 'ci-help');
-    ciHelp.appendChild(el('summary', null, 'How to interpret 95% confidence intervals'));
+    ciHelp.appendChild(el('summary', null, 'What does "95% CI" mean?'));
     const ciBody = el('div', 'ci-help__body');
     function ciP(text) {
       const p = el('p');
       p.textContent = text;
       ciBody.appendChild(p);
     }
-    ciP('Each "95% CI" is a Wilson score interval for a binomial proportion (a count divided by a denominator), shown as low-high on a percent scale. It summarizes precision from sample size: more runs or a larger denominator usually means a narrower band.');
-    ciP('Denominators differ by table. Win rate uses all runs. "Deaths by ante" divides deaths on that ante by all runs. "Death hazard" divides by runs that reached that ante. Relic win rates divide by runs that bought that relic (a conditional rate, not causal).');
-    ciP('Use intervals as a sanity check, not a formal test: wide bands mean the point estimate is noisy; overlap does not prove two rates are equal, and separation is suggestive but not definitive. Early/late splits and relic Δ still mix shop choice and game state (see footer).');
+    function ciEx(lead, rest) {
+      const p = el('p');
+      const s = el('strong');
+      s.textContent = lead;
+      p.appendChild(s);
+      p.appendChild(document.createTextNode(' ' + rest));
+      ciBody.appendChild(p);
+    }
+    ciP('The tables show a percentage from your bot batch (for example, how often it wins). The 95% CI is a "could easily be this low or this high" band around that number, based only on how many runs went into the count. More runs usually make the band narrower, like a poll\'s margin of error. It does not mean the true long-run rate has a 95% chance of sitting inside this one interval on this one report.');
+    ciEx('Example 1:', '400 runs and 100 wins give a 25.0% win rate. The 95% band this report uses for that situation runs about 21.0% through 29.5%. Treating 25% as exact would be misleading — anything in that band is still plausible for the same batch.');
+    ciEx('Example 2:', 'Suppose only 50 runs reached a certain ante and 10 died there: that is a 20% hazard, but the same kind of interval is about 11.2% through 33.0%. A handful of different deaths would swing the headline, so tiny gaps between rows are often just noise.');
+    ciP('Different tables count different things. Win rate divides by every run. "Death hazard" divides only by runs that actually reached that ante. Relic win% divides by runs where the bot bought that relic — it describes that subset of games, not proof the relic caused wins.');
+    ciP('If two intervals overlap, that does not automatically mean the two rates are the same; if they do not overlap, it is a hint worth a closer look, not a courtroom verdict. Relic deltas and early/late splits still mix shop luck with skill — see the short note at the bottom of the page.');
     ciHelp.appendChild(ciBody);
     app.appendChild(ciHelp);
 
@@ -1159,6 +1277,21 @@
       return lo.toFixed(1) + '–' + hi.toFixed(1) + '%';
     }
 
+    /** Two decimals; leading ~ when the value is positive but still rounds to 0.00. */
+    function fmtAvg2(n) {
+      const v = Number(n ?? 0);
+      const s = v.toFixed(2);
+      if (v > 0 && s === '0.00') return '~' + s;
+      return s;
+    }
+
+    /** Readable full average for tooltips (avoids long float tails from JSON). */
+    function fmtExactAvg(n) {
+      const v = Number(n ?? 0);
+      if (v === 0) return '0';
+      return String(Number(v.toPrecision(12)));
+    }
+
     if ((d.deaths_by_ante || []).length) {
       const anteC = card('Deaths by ante', 'Share of all runs; Wilson 95% CI on the binomial proportion. Bar = relative to busiest ante. Click column headers to sort.');
       const rows = d.deaths_by_ante.map((row) => ({
@@ -1175,9 +1308,11 @@
         [
           { label: 'Ante', sort: 'num' },
           { label: 'Deaths', sort: 'num', align: 'right' },
-          { label: '% runs', sort: 'pct', align: 'right' },
-          { label: '95% CI', sort: 'str', sortDefault: 'asc', align: 'right' },
-          { label: 'Relative share', sort: 'pct', align: 'right' }
+          { label: '% runs', sort: 'pct', align: 'right',
+            help: 'Deaths on this ante ÷ all runs in the batch (not conditioned on reaching the ante).' },
+          { label: '95% CI', sort: 'str', sortDefault: 'asc', align: 'right', help: HELP_WILSON_CI },
+          { label: 'Relative share', sort: 'pct', align: 'right',
+            help: 'Bar width vs the ante with the most deaths (visual only; shares need not sum to 100%).' }
         ],
         rows);
       colM.appendChild(anteC.section);
@@ -1188,10 +1323,13 @@
       addTable(hazC.body,
         [
           { label: 'Ante', sort: 'num' },
-          { label: 'Reached', sort: 'num', align: 'right' },
-          { label: 'Deaths', sort: 'num', align: 'right' },
-          { label: 'Hazard', sort: 'pct', align: 'right' },
-          { label: '95% CI', sort: 'str', sortDefault: 'asc', align: 'right' }
+          { label: 'Reached', sort: 'num', align: 'right',
+            help: 'Runs that started this ante before winning or dying earlier.' },
+          { label: 'Deaths', sort: 'num', align: 'right',
+            help: 'Runs that died while playing this ante (numerator for hazard).' },
+          { label: 'Hazard', sort: 'pct', align: 'right',
+            help: 'Deaths ÷ reached: chance of dying on this ante given you got that far.' },
+          { label: '95% CI', sort: 'str', sortDefault: 'asc', align: 'right', help: HELP_WILSON_CI }
         ],
         d.deaths_by_ante_hazard.map((row) => ({
           cells: [
@@ -1210,43 +1348,122 @@
     for (const k of d.kpis || []) kpiRow.appendChild(kpiTile(k));
     colM.appendChild(kpiRow);
 
+    const pbd = sums.peak_blind_detail;
+    if (pbd && pbd.total_score != null) {
+      const peakC = card(
+        'Peak blind (batch max)',
+        'Single blind with the highest round score in this batch: active relics after that blind and each scoring step (plays show compact tile labels; structure = bank cash-in). Points are round-score deltas after each action.');
+      const sub = el('div', 'peak-blind-detail');
+      const head = el('p', 'peak-blind-detail__head');
+      head.appendChild(document.createTextNode(
+        (pbd.blind_label || pbd.blind_slot || '—') +
+        ' · target ' + String(pbd.target_score ?? '—') +
+        ' · scored ' + fmtCompact(pbd.total_score ?? 0)));
+      sub.appendChild(head);
+      if ((pbd.relics || []).length) {
+        const relP = el('p', 'peak-blind-detail__relics');
+        const rs = el('strong');
+        rs.textContent = 'Relics: ';
+        relP.appendChild(rs);
+        relP.appendChild(document.createTextNode(pbd.relics.join(', ')));
+        sub.appendChild(relP);
+      }
+      const actions = pbd.scoring_actions || [];
+      if (actions.length) {
+        const tbl = el('table', 'data-table peak-blind-detail__table');
+        const thead = el('thead');
+        const hr = el('tr');
+        const peakCols = [
+          ['#', null],
+          ['Kind', 'Scoring step type (yaku, hook, structure cash-in, etc.).'],
+          ['Points', 'Round-score delta from this step.'],
+          ['Tiles', 'Tiles involved (compact notation; empty if none).']
+        ];
+        for (const [lab, h] of peakCols) {
+          hr.appendChild(h ? thPlain(lab, h) : el('th', null, lab));
+        }
+        thead.appendChild(hr);
+        tbl.appendChild(thead);
+        const tb = el('tbody');
+        let i = 0;
+        for (const a of actions) {
+          i += 1;
+          const tr = el('tr');
+          tr.appendChild(el('td', null, String(i)));
+          tr.appendChild(el('td', null, String(a.kind ?? '—')));
+          tr.appendChild(el('td', 'num', fmtCompact(a.points ?? 0)));
+          tr.appendChild(el('td', 'peak-blind-detail__tiles', a.tiles != null ? String(a.tiles) : '—'));
+          tb.appendChild(tr);
+        }
+        tbl.appendChild(tb);
+        sub.appendChild(tbl);
+      }
+      peakC.body.appendChild(sub);
+      colM.appendChild(peakC.section);
+    }
+
     const sumW = widget('Economics and pacing', 'Per-run averages from derived.per_run');
     const dl = el('dl', 'stat-grid');
-    function row(label, value) {
-      dl.appendChild(el('dt', null, label));
-      dl.appendChild(el('dd', null, value));
+    function row(label, value, hint, valueTitle) {
+      const dt = el('dt', hint ? 'dt-with-help' : null);
+      dt.appendChild(document.createTextNode(label));
+      if (hint) dt.appendChild(fieldHelp(hint));
+      dl.appendChild(dt);
+      const dd = el('dd', null, value);
+      if (valueTitle) dd.title = valueTitle;
+      dl.appendChild(dd);
     }
     row('Victories', wins + ' / ' + runs + ' (' + (pr.win_rate_pct ?? 0).toFixed(1) + '%' +
-      (wci && wci.lo != null && wci.hi != null ? '; 95% Wilson ' + wci.lo.toFixed(1) + '–' + wci.hi.toFixed(1) + '%' : '') + ')');
-    row('Avg blinds cleared', (pr.blinds_cleared ?? 0).toFixed(2));
-    row('Avg antes cleared', (pr.antes_cleared ?? 0).toFixed(2));
+      (wci && wci.lo != null && wci.hi != null ? '; 95% Wilson ' + wci.lo.toFixed(1) + '–' + wci.hi.toFixed(1) + '%' : '') + ')',
+      'Overall wins ÷ runs. When shown, the Wilson range is a 95% CI for that overall win rate (same method as relic Win% CIs).');
+    row('Avg blinds cleared', (pr.blinds_cleared ?? 0).toFixed(2),
+      'Mean blinds cleared per run (small, big, and boss each count as one).');
+    row('Avg antes cleared', (pr.antes_cleared ?? 0).toFixed(2),
+      'Mean boss blinds cleared per run (finishing a boss advances the ante).');
     row('Max ante reached', String(sums.max_ante_reached ?? 0));
-    row('Avg total score', fmtCompact(pr.total_score ?? 0));
-    row('Avg plays used', (pr.plays ?? 0).toFixed(2));
+    row('Avg total score', fmtCompact(pr.total_score ?? 0),
+      'Per-run mean of cumulative score earned over the whole run.');
+    row('Avg plays used', (pr.plays ?? 0).toFixed(2),
+      'Mean plays consumed per run (each blind gives a fresh play budget).');
     row('Avg discards used',
-      (pr.discards ?? 0).toFixed(2) + ' (' + (pr.strategic_discards ?? 0).toFixed(2) + ' strategic, ' + (pr.random_discards ?? 0).toFixed(2) + ' random)');
-    row('Avg blinds skipped', (pr.blinds_skipped ?? 0).toFixed(2));
-    row('Avg relics bought', (pr.relics_bought ?? 0).toFixed(2) + ' (avg gold spent: ' + (pr.gold_spent ?? 0).toFixed(1) + ')');
+      (pr.discards ?? 0).toFixed(2) + ' (' + (pr.strategic_discards ?? 0).toFixed(2) + ' strategic, ' + (pr.random_discards ?? 0).toFixed(2) + ' random)',
+      'Strategic = a chosen scoring line included discards; random = scored line without a discard choice (see bot scoring policy).');
+    row('Avg blinds skipped', (pr.blinds_skipped ?? 0).toFixed(2),
+      'Mean blinds skipped per run using skip tags.');
+    row('Avg relics bought', (pr.relics_bought ?? 0).toFixed(2) + ' (avg gold spent: ' + (pr.gold_spent ?? 0).toFixed(1) + ')',
+      'Shop relic purchases per run and average gold spent in shops (all shop spending aggregated).');
     row('Avg gold earned',
       (pr.gold_from_clears ?? 0).toFixed(1) + ' clears + ' + (pr.gold_from_skip_tags ?? 0).toFixed(1) + ' skip-tags = ' +
-      ((pr.gold_from_clears ?? 0) + (pr.gold_from_skip_tags ?? 0)).toFixed(1));
+      ((pr.gold_from_clears ?? 0) + (pr.gold_from_skip_tags ?? 0)).toFixed(1),
+      'Gold from blind clears vs skip-tag payouts (value when you take a tag’s gold instead of skipping).');
     row('Avg clear payout',
       (pr.gold_clear_base ?? 0).toFixed(1) + ' base + ' + (pr.gold_clear_unused_plays ?? 0).toFixed(1) + ' plays + ' +
-      (pr.gold_clear_interest ?? 0).toFixed(1) + ' interest + ' + (pr.gold_clear_relics ?? 0).toFixed(1) + ' relics');
-    row('Relic slice (clear)',
+      (pr.gold_clear_interest ?? 0).toFixed(1) + ' interest + ' + (pr.gold_clear_relics ?? 0).toFixed(1) + ' relics',
+      'Mean gold components when a blind clears: base reward, unused plays, interest on banked gold, then relic modifiers (next row splits relics).');
+    row('Relic gold on blind clear',
       (pr.gold_clear_green_luck ?? 0).toFixed(1) + ' green luck + ' + (pr.gold_clear_gold_idol ?? 0).toFixed(1) + ' gold idol + ' +
-      (pr.gold_clear_jade_abacus ?? 0).toFixed(1) + ' jade abacus + ' + (pr.gold_clear_patience ?? 0).toFixed(1) + ' patience');
-    row('Avg second-wind forfeits', (pr.second_wind_forfeits ?? 0).toFixed(2));
+      (pr.gold_clear_jade_abacus ?? 0).toFixed(1) + ' jade abacus + ' + (pr.gold_clear_patience ?? 0).toFixed(1) + ' patience',
+      'Per-run average of extra gold from relics when a blind is cleared. These four lines are the breakdown of the relics term in Avg clear payout (above); they sum to that value.');
+    const swAvg = Number(pr.second_wind_forfeits ?? 0);
+    const swTotal = Number(sums.total_second_wind_forfeits ?? 0);
+    row('Avg second-wind forfeits', fmtAvg2(swAvg),
+      'Per-run average at two decimals. A ~ prefix means 0 < avg < 0.005 (rounds to 0.00 here). Hover the value for the exact average and event count.',
+      'Actual per-run average: ' + fmtExactAvg(swAvg) + ' · ' + swTotal + ' total / ' + runs + ' runs');
     row('Avg structure cash-ins',
-      (pr.structure_triggers ?? 0).toFixed(2) + ' (' + (pr.structure_trigger_points_per_run ?? 0).toFixed(0) + ' pts/run from structure)');
-    row('Avg turns / run', (pr.turns ?? 0).toFixed(2) + ' (avg peak hand size ' + (pr.peak_hand_size ?? 0).toFixed(2) + ')');
+      (pr.structure_triggers ?? 0).toFixed(2) + ' (' + (pr.structure_trigger_points_per_run ?? 0).toFixed(0) + ' pts/run from structure)',
+      'Mean in-run structure (bank) cash-in events per run; parentheses = average points from structure per run.');
+    row('Avg turns / run', (pr.turns ?? 0).toFixed(2) + ' (avg peak hand size ' + (pr.peak_hand_size ?? 0).toFixed(2) + ')',
+      'Mean player turns per run. Peak hand size is the largest hand count seen in a run, averaged across runs.');
     row('Tiles destroyed / relic activations',
-      (pr.tiles_destroyed ?? 0).toFixed(2) + '/run | ' + (pr.relic_activations ?? 0).toFixed(0) + '/run');
+      (pr.tiles_destroyed ?? 0).toFixed(2) + '/run | ' + (pr.relic_activations ?? 0).toFixed(0) + '/run',
+      'Averages per run: tiles removed by effects, and relic activations triggered.');
     row('Avg final gold',
-      (pr.final_gold ?? 0).toFixed(1) + ' (avg skip-tag value taken: ' + (pr.skip_tag_gold_value ?? 0).toFixed(1) + ')');
+      (pr.final_gold ?? 0).toFixed(1) + ' (avg skip-tag value taken: ' + (pr.skip_tag_gold_value ?? 0).toFixed(1) + ')',
+      'Gold when the run ended; skip-tag figure is average gold taken when choosing a tag’s payout.');
     row('Avg targets faced',
       fmtCompact(pr.target_score_faced ?? 0) + ' (score/target ' + (pr.score_to_target_ratio ?? 0).toFixed(2) + 'x, avg overscore ' +
-      fmtCompact(pr.overscore ?? 0) + ', peak blind score ' + fmtCompact(sums.peak_blind_score ?? 0) + ')');
+      fmtCompact(pr.overscore ?? 0) + ', peak blind score ' + fmtCompact(sums.peak_blind_score ?? 0) + ')',
+      'Mean blind target score faced; ratio = total score ÷ sum of those targets; overscore = score above target on cleared blinds; peak = batch max single-blind score.');
     sumW.body.appendChild(dl);
     colM.appendChild(sumW.section);
 
@@ -1306,7 +1523,8 @@
         [
           { label: 'Blind', sort: 'str', sortDefault: 'asc' },
           { label: 'Count', sort: 'num', align: 'right' },
-          { label: '% runs', sort: 'pct', align: 'right' }
+          { label: '% runs', sort: 'pct', align: 'right',
+            help: 'Deaths on this blind ÷ all runs (marginal, not conditional on seeing the blind).' }
         ],
         d.deaths_by_blind.map((row) => ({
           cells: [row.name, String(row.count), row.pct_of_runs.toFixed(1) + '%'],
@@ -1332,9 +1550,12 @@
       addTable(sec.body,
         [
           { label: 'Slot', sort: 'str', sortDefault: 'asc' },
-          { label: 'n', sort: 'num', align: 'right' },
-          { label: 'Avg surplus', sort: 'num', align: 'right' },
-          { label: 'Bar', sort: 'pct', align: 'right' }
+          { label: 'n', sort: 'num', align: 'right',
+            help: 'Clears in this blind slot (denominator for average surplus).' },
+          { label: 'Avg surplus', sort: 'num', align: 'right',
+            help: 'Mean (score − target) on clears for this slot.' },
+          { label: 'Bar', sort: 'pct', align: 'right',
+            help: 'Log-scaled bar (same compression idea as the CLI bar).' }
         ],
         rows);
       full.appendChild(sec.section);
@@ -1345,7 +1566,8 @@
       addTable(sec.body,
         [
           { label: 'Slot', sort: 'str', sortDefault: 'asc' },
-          { label: 'Avg turns', sort: 'num', align: 'right' }
+          { label: 'Avg turns', sort: 'num', align: 'right',
+            help: 'Mean player turns to clear this slot, counting only runs that cleared it.' }
         ],
         d.avg_turns_to_clear.map((row) => ({
           cells: [row.slot, row.avg_turns.toFixed(2)],
@@ -1360,7 +1582,8 @@
         [
           { label: 'Tag', sort: 'str', sortDefault: 'asc' },
           { label: 'Count', sort: 'num', align: 'right' },
-          { label: '% runs', sort: 'pct', align: 'right' }
+          { label: '% runs', sort: 'pct', align: 'right',
+            help: 'Runs where this skip tag appeared at least once ÷ all runs.' }
         ],
         d.skip_tags.map((row) => ({
           cells: [row.name, String(row.count), row.pct_of_runs.toFixed(1) + '%'],
@@ -1389,7 +1612,11 @@
     if ((d.transformations_top || []).length) {
       const sec = card('Transformation successors', null);
       addTable(sec.body,
-        [{ label: 'Pattern', sort: 'str', sortDefault: 'asc' }, { label: 'Count', sort: 'num', align: 'right' }],
+        [
+          { label: 'Pattern', sort: 'str', sortDefault: 'asc',
+            help: 'Successor tile pattern key after a transformation (engine-internal label).' },
+          { label: 'Count', sort: 'num', align: 'right' }
+        ],
         d.transformations_top.map((x) => ({
           cells: [x.name, String(x.count)],
           keys: [x.name.toLowerCase(), x.count]
@@ -1436,16 +1663,21 @@
         return p.toFixed(0) + '%';
       }
 
-      const relicHdr = [
-        { label: 'Relic', sort: 'str', sortDefault: 'asc' },
-        { label: 'Tier', sort: 'tier', sortDefault: 'desc' },
-        { label: 'Bought', sort: 'num', sortDefault: 'desc', align: 'right' },
-        { label: 'Won', sort: 'num', sortDefault: 'desc', align: 'right' },
-        { label: 'Win%', sort: 'pct', sortDefault: 'desc', align: 'right' },
-        { label: '95% CI', sort: 'str', sortDefault: 'asc', align: 'right' },
-        { label: 'Δ', sort: 'num', sortDefault: 'desc', align: 'right' },
-        { label: '% late', sort: 'num', sortDefault: 'desc', align: 'right' }
-      ];
+      function relicMainHeaders() {
+        return [
+          { label: 'Relic', sort: 'str', sortDefault: 'asc' },
+          { label: 'Tier', sort: 'tier', sortDefault: 'desc' },
+          { label: 'Bought', sort: 'num', sortDefault: 'desc', align: 'right' },
+          { label: 'Won', sort: 'num', sortDefault: 'desc', align: 'right' },
+          { label: 'Win%', sort: 'pct', sortDefault: 'desc', align: 'right',
+            help: 'Runs that won and bought this relic at least once ÷ runs that bought it at least once.' },
+          { label: '95% CI', sort: 'str', sortDefault: 'asc', align: 'right', help: HELP_WILSON_WIN_RATE },
+          { label: 'Δ', sort: 'num', sortDefault: 'desc', align: 'right',
+            help: 'This row’s Win% minus the batch overall win rate (percentage points). Strong selection bias — not causal relic power.' },
+          { label: '% late', sort: 'num', sortDefault: 'desc', align: 'right',
+            help: 'Among this relic’s shop buys, fraction where run.ante > ' + anteMx + ' at purchase (see card prose).' }
+        ];
+      }
       const boughtRows = d.relics_bought.map((row) => {
         const slug = (row.rarity && String(row.rarity)) || '';
         const dlt = row.delta_vs_baseline_pct;
@@ -1474,7 +1706,7 @@
           ]
         };
       });
-      addTable(sec.body, relicHdr, boughtRows, {
+      addTable(sec.body, relicMainHeaders(), boughtRows, {
         group: {
           enabled: () => groupCb.checked,
           tierOf: (nr) => {
@@ -1488,16 +1720,7 @@
       if ((d.relics_by_win_rate || []).length) {
         const baseline = baselinePct.toFixed(1);
         sec.body.appendChild(el('h3', 'dash-card__subhead', '≥20 buys (same columns; sorted by win%) · baseline ' + baseline + '%'));
-        const deltaHdr = [
-          { label: 'Relic', sort: 'str', sortDefault: 'asc' },
-          { label: 'Tier', sort: 'tier', sortDefault: 'desc' },
-          { label: 'Bought', sort: 'num', sortDefault: 'desc', align: 'right' },
-          { label: 'Won', sort: 'num', sortDefault: 'desc', align: 'right' },
-          { label: 'Win%', sort: 'pct', sortDefault: 'desc', align: 'right' },
-          { label: '95% CI', sort: 'str', sortDefault: 'asc', align: 'right' },
-          { label: 'Δ', sort: 'num', sortDefault: 'desc', align: 'right' },
-          { label: '% late', sort: 'num', sortDefault: 'desc', align: 'right' }
-        ];
+        const deltaHdr = relicMainHeaders();
         const deltaRows = d.relics_by_win_rate.map((row) => {
           const slug = (row.rarity && String(row.rarity)) || '';
           const dlt = row.delta_vs_baseline_pct;
@@ -1545,13 +1768,20 @@
         const splitHdr = [
           { label: 'Relic', sort: 'str', sortDefault: 'asc' },
           { label: 'Tier', sort: 'tier', sortDefault: 'desc' },
-          { label: 'Early N', sort: 'num', sortDefault: 'desc', align: 'right' },
-          { label: 'Early win%', sort: 'pct', sortDefault: 'desc', align: 'right' },
-          { label: 'Early CI', sort: 'str', sortDefault: 'asc', align: 'right' },
-          { label: 'Late N', sort: 'num', sortDefault: 'desc', align: 'right' },
-          { label: 'Late win%', sort: 'pct', sortDefault: 'desc', align: 'right' },
-          { label: 'Late CI', sort: 'str', sortDefault: 'asc', align: 'right' },
-          { label: 'Late−early', sort: 'num', sortDefault: 'desc', align: 'right' }
+          { label: 'Early N', sort: 'num', sortDefault: 'desc', align: 'right',
+            help: 'Shop purchases of this relic when run.ante ≤ ' + anteMx + ' at the visit.' },
+          { label: 'Early win%', sort: 'pct', sortDefault: 'desc', align: 'right',
+            help: 'Wins ÷ Early N for runs that bought the relic in that early bucket.' },
+          { label: 'Early CI', sort: 'str', sortDefault: 'asc', align: 'right',
+            help: 'Wilson 95% interval for the early-bucket win rate (wins ÷ Early N).' },
+          { label: 'Late N', sort: 'num', sortDefault: 'desc', align: 'right',
+            help: 'Purchases when run.ante > ' + anteMx + ' at the shop.' },
+          { label: 'Late win%', sort: 'pct', sortDefault: 'desc', align: 'right',
+            help: 'Wins ÷ Late N.' },
+          { label: 'Late CI', sort: 'str', sortDefault: 'asc', align: 'right',
+            help: 'Wilson 95% interval for the late-bucket win rate (wins ÷ Late N). Compare to Early CI; gaps often mix timing and survivorship, not just relic effect.' },
+          { label: 'Late−early', sort: 'num', sortDefault: 'desc', align: 'right',
+            help: 'Late win% minus early win%, in percentage points.' }
         ];
         const splitRows = d.relics_shop_timing_split.map((row) => {
           const slug = (row.rarity && String(row.rarity)) || '';
@@ -1606,7 +1836,8 @@
         [
           { label: 'Item', sort: 'str', sortDefault: 'asc' },
           { label: 'Count', sort: 'num', align: 'right' },
-          { label: '/run', sort: 'num', align: 'right' }
+          { label: '/run', sort: 'num', align: 'right',
+            help: 'Average per simulated run in this batch (Count ÷ runs).' }
         ],
         rows.map((row) => ({
           cells: [row.name, String(row.count), row.per_run.toFixed(2)],
@@ -1626,9 +1857,12 @@
         [
           { label: 'Yaku', sort: 'str', sortDefault: 'asc' },
           { label: 'Awards', sort: 'num', align: 'right' },
-          { label: '/run', sort: 'num', align: 'right' },
-          { label: 'Share', sort: 'pct', align: 'right' },
-          { label: 'Δ uni', sort: 'pct', align: 'right' }
+          { label: '/run', sort: 'num', align: 'right',
+            help: 'Mean awards of this yaku per run (Awards ÷ runs).' },
+          { label: 'Share', sort: 'pct', align: 'right',
+            help: 'This yaku’s awards ÷ all yaku awards in the batch.' },
+          { label: 'Δ uni', sort: 'pct', align: 'right',
+            help: 'Share minus a uniform baseline (100% ÷ yaku kind count). Positive = more common than equal-split null.' }
         ],
         y.rows.map((row) => {
           const cell = el('span', row.delta_uniform_pct >= 0 ? 'delta-pos' : 'delta-neg',
@@ -1670,7 +1904,11 @@
       if (!tbl.rows || !tbl.rows.length) continue;
       const sec = card(tbl.title, 'From aggregate.maps');
       addTable(sec.body,
-        [{ label: 'Key', sort: 'str', sortDefault: 'asc' }, { label: 'Σ', sort: 'num', align: 'right' }],
+        [
+          { label: 'Key', sort: 'str', sortDefault: 'asc' },
+          { label: 'Σ', sort: 'num', align: 'right',
+            help: 'Sum of this counter across all runs in the batch (see table title).' }
+        ],
         tbl.rows.map((row) => ({
           cells: [row.name, String(row.count)],
           keys: [row.name.toLowerCase(), row.count]
@@ -1688,8 +1926,8 @@
   try {
     const data = loadPayload();
     const sv = data.schema_version;
-    if (sv !== 2 && sv !== 3) {
-      app.appendChild(el('div', 'error', 'Expected export schema_version 2 or 3; got ' + sv + '. Re-run: mahjuro bot -o report.html'));
+    if (sv !== 2 && sv !== 3 && sv !== 4) {
+      app.appendChild(el('div', 'error', 'Expected export schema_version 2–4; got ' + sv + '. Re-run: mahjuro bot -o report.html'));
     } else {
       renderV2(data);
     }

@@ -329,9 +329,9 @@ impl RunState {
             // The hungry mask devours honors at the moment of consumption.
             // Each devoured honor permanently grows Taotie's chip bonus by
             // CHIPS_PER_DEVOURED and is removed from the run's tile supply
-            // (won't reappear in next round's wall — same primitive Kiln
-            // uses). The wall has 28 honors total; Kiln's 56-tile cap is
-            // never threatened, so we skip the budget check.
+            // (won't reappear in next round's wall — same `removed_tile_ids`
+            // primitive as other permanent destruction). The wall has 28 honors
+            // total, so we skip any removal budget check.
             //
             // Anti-synergy with Honor Fury / Round Compass / Yakuhai is
             // deliberate — feeding the mask drains the supply those relics

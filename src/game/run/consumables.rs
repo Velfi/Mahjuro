@@ -1,7 +1,5 @@
 use super::*;
 
-use crate::game::engine_state::GameplayCoreState;
-
 impl RunState {
     /// Use a consumable from the shared inventory at `index`. Zodiacs level
     /// their yaku for the run; Talismans stamp their enhancement onto every
@@ -59,16 +57,13 @@ impl RunState {
     fn apply_talisman_to_selection(
         &mut self,
         kind: crate::core::talisman::TalismanKind,
-        bus: &mut crate::game::event_bus::EventBus,
+        _bus: &mut crate::game::event_bus::EventBus,
     ) {
         use crate::core::talisman::TalismanKind;
         use crate::core::tile::Suit;
         use rand::RngExt;
 
         match kind {
-            TalismanKind::Kiln => {
-                let _ = self.destroy_selected_tiles(bus);
-            }
             TalismanKind::Bamboo | TalismanKind::Dots | TalismanKind::Characters => {
                 let target = match kind {
                     TalismanKind::Bamboo => Suit::Bamboos,
@@ -160,58 +155,6 @@ impl RunState {
         for s in &mut self.selected {
             *s = false;
         }
-    }
-
-    /// Maximum number of tiles that can be removed from the wall via the Kiln.
-    /// The wall needs enough tiles to deal a full hand each round.
-    const MAX_REMOVED_TILES: usize = 56;
-
-    /// Canonical *tile destroyed* path (Kiln talisman).
-    ///
-    /// The "destroyed" keyword is the
-    /// player-facing name for permanent removal of a tile from a run; for
-    /// tiles, that means writing the tile id into `removed_tile_ids` so the
-    /// per-round `Wall::from_filtered_with_packs` rebuild excludes it for
-    /// the rest of the run. New tile-destruction effects (Taotie's devour
-    /// is the other current site, in `scoring_flow.rs`) should follow the
-    /// same primitive: insert into `removed_tile_ids`, drop the tile's
-    /// enhancement, and emit `GameEvent::TilesDestroyed`. Round-only effects
-    /// (e.g. Tempest's wall burn) are *not* destruction — they just draw off
-    /// this round's wall and leave `removed_tile_ids` untouched.
-    pub fn destroy_selected_tiles(&mut self, bus: &mut crate::game::event_bus::EventBus) -> usize {
-        let budget = Self::MAX_REMOVED_TILES.saturating_sub(self.removed_tile_ids.len());
-        let mut destroyed = 0usize;
-        let mut kept_hand = Vec::new();
-        let mut kept_sel = Vec::new();
-        for (i, tile) in self.hand.iter().enumerate() {
-            if self.selected[i] && destroyed < budget {
-                self.removed_tile_ids.insert(tile.id);
-                self.tile_enhancements.remove(&tile.id);
-                destroyed += 1;
-            } else {
-                kept_hand.push(*tile);
-                kept_sel.push(false);
-            }
-        }
-        self.hand = kept_hand;
-        self.selected = kept_sel;
-        // Refill hand from the wall.
-        while self.hand.len() < crate::core::boss::effective_hand_size(self) {
-            if let Some(t) = self.wall.draw() {
-                self.hand.push(t);
-                self.selected.push(false);
-            } else {
-                break;
-            }
-        }
-        GameplayCoreState::with_run_mut(self, |core| {
-            core.finalize_hand_after_draw();
-        });
-        self.restamp_hand_enhancements();
-        if destroyed > 0 {
-            bus.push(crate::game::event_bus::GameEvent::TilesDestroyed);
-        }
-        destroyed
     }
 
     /// Re-stamp every tile in the current hand with whatever enhancement is

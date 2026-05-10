@@ -25,9 +25,6 @@ pub enum TalismanKind {
     Pearl,
     Gilded,
     Polychrome,
-    /// Destroy any number of tiles from your hand. They are permanently
-    /// removed from the wall for the rest of the run.
-    Kiln,
     /// Convert selected numbered tiles to bamboo; winds and dragons unchanged.
     Bamboo,
     /// Convert selected numbered tiles to dots (circles); honors unchanged.
@@ -48,7 +45,6 @@ impl TalismanKind {
             TalismanKind::Pearl,
             TalismanKind::Gilded,
             TalismanKind::Polychrome,
-            TalismanKind::Kiln,
             TalismanKind::Bamboo,
             TalismanKind::Dots,
             TalismanKind::Characters,
@@ -63,8 +59,7 @@ impl TalismanKind {
     pub fn acts_on_selection(self) -> bool {
         matches!(
             self,
-            TalismanKind::Kiln
-                | TalismanKind::Bamboo
+            TalismanKind::Bamboo
                 | TalismanKind::Dots
                 | TalismanKind::Characters
                 | TalismanKind::Honors
@@ -78,7 +73,6 @@ impl TalismanKind {
             TalismanKind::Pearl => "Pearl Talisman",
             TalismanKind::Gilded => "Gilded Talisman",
             TalismanKind::Polychrome => "Polychrome Talisman",
-            TalismanKind::Kiln => "Kiln Talisman",
             TalismanKind::Bamboo => "Bamboo Talisman",
             TalismanKind::Dots => "Dots Talisman",
             TalismanKind::Characters => "Characters Talisman",
@@ -96,7 +90,6 @@ impl TalismanKind {
             }
             TalismanKind::Gilded => "Every tile in hand: +$1 when scored in a meld.",
             TalismanKind::Polychrome => "Every meld played from this hand gets \u{00d7}1.2 mult.",
-            TalismanKind::Kiln => "Select tiles, then use to destroy them permanently.",
             TalismanKind::Bamboo => {
                 "Select tiles, then use: numbered tiles become bamboo; honors unchanged."
             }
@@ -125,8 +118,7 @@ impl TalismanKind {
             TalismanKind::Pearl => Some(TileEnhancement::Pearl),
             TalismanKind::Gilded => Some(TileEnhancement::Gilded),
             TalismanKind::Polychrome => Some(TileEnhancement::Polychrome),
-            TalismanKind::Kiln
-            | TalismanKind::Bamboo
+            TalismanKind::Bamboo
             | TalismanKind::Dots
             | TalismanKind::Characters
             | TalismanKind::Honors
@@ -143,7 +135,6 @@ impl TalismanKind {
             TalismanKind::Pearl => [0.94, 0.95, 0.98, 1.0],
             TalismanKind::Gilded => [1.0, 0.84, 0.38, 1.0],
             TalismanKind::Polychrome => [0.82, 0.55, 0.95, 1.0],
-            TalismanKind::Kiln => [0.85, 0.35, 0.18, 1.0],
             TalismanKind::Bamboo => [0.06, 0.55, 0.28, 1.0],
             TalismanKind::Dots => [0.08, 0.22, 0.78, 1.0],
             TalismanKind::Characters => [0.82, 0.08, 0.18, 1.0],
@@ -153,11 +144,10 @@ impl TalismanKind {
         }
     }
 
-    /// Flat shop price in gold. Selection talismans are priced like Kiln.
+    /// Flat shop price in gold. Suit / transform selection talismans share one tier.
     pub fn shop_price(self) -> u32 {
         match self {
-            TalismanKind::Kiln
-            | TalismanKind::Bamboo
+            TalismanKind::Bamboo
             | TalismanKind::Dots
             | TalismanKind::Characters
             | TalismanKind::Honors
@@ -223,7 +213,7 @@ mod tests {
     }
 
     #[test]
-    fn kiln_has_no_enhancement() {
-        assert_eq!(TalismanKind::Kiln.enhancement(), None);
+    fn bamboo_has_no_enhancement() {
+        assert_eq!(TalismanKind::Bamboo.enhancement(), None);
     }
 }

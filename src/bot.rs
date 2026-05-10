@@ -49,6 +49,7 @@ pub use reporting::{
     run_strategy_sweep, run_sweep,
 };
 use stats::clear_payout_breakdown;
+use stats::{BotScoringAction, PeakBlindSnapshot};
 pub use stats::{AggregateStats, RunStats, RunTimeoutSnapshot};
 
 fn relic_display_name(id: RelicId) -> &'static str {
@@ -99,6 +100,16 @@ macro_rules! bot_log {
 
 fn blind_slot_key(run: &RunState) -> String {
     format!("{:02}-{}", run.ante, run.blind.name())
+}
+
+fn fmt_play_tiles(hand: &[Tile], indices: &[usize]) -> String {
+    let mut idx: Vec<usize> = indices.to_vec();
+    idx.sort_unstable();
+    idx.iter()
+        .filter_map(|&i| hand.get(i))
+        .map(|t| t.label())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn blind_log_label(run: &RunState, blind: BlindKind) -> String {
@@ -1149,6 +1160,7 @@ fn play_blind(
     stats: &mut RunStats,
     log: bool,
     deadline: Option<Instant>,
+    scoring_log: &mut Vec<BotScoringAction>,
 ) -> (PlayBlindOutcome, u32) {
     let mut bus = EventBus::default();
     let mut rng = rand::rng();
@@ -1222,6 +1234,7 @@ fn play_blind(
             && trigger_preview > 0
             && (best_score == 0 || trigger_preview >= best_score)
         {
+            let score_before_structure = run.round_score;
             let earned = run.trigger_structure_manual(&mut bus);
             stats.structure_triggers += 1;
             stats.structure_trigger_points += earned;
@@ -1237,6 +1250,14 @@ fn play_blind(
                 == Some(PlayBlindOutcome::SecondWindForfeit)
             {
                 return (PlayBlindOutcome::SecondWindForfeit, turn);
+            }
+            let structure_delta = run.round_score.saturating_sub(score_before_structure);
+            if structure_delta > 0 {
+                scoring_log.push(BotScoringAction {
+                    kind: "structure".into(),
+                    points: structure_delta,
+                    tiles: None,
+                });
             }
             if earned > 0 {
                 continue;
@@ -1304,6 +1325,8 @@ fn play_blind(
                 fmt_indices(&indices),
                 best_score
             );
+            let hand_before = run.hand().to_vec();
+            let tile_labels = fmt_play_tiles(&hand_before, &indices);
             run.clear_selection();
             for i in &indices {
                 run.toggle_select(*i);
@@ -1330,6 +1353,14 @@ fn play_blind(
                 == Some(PlayBlindOutcome::SecondWindForfeit)
             {
                 return (PlayBlindOutcome::SecondWindForfeit, turn);
+            }
+            let play_delta = run.round_score.saturating_sub(score_before);
+            if play_delta > 0 {
+                scoring_log.push(BotScoringAction {
+                    kind: "play".into(),
+                    points: play_delta,
+                    tiles: Some(tile_labels),
+                });
             }
             continue;
         }
@@ -1922,37 +1953,6 @@ fn best_selection_for_talisman_on_hand(
     }
     let base = best_play_score_for_hand(run, hand, None, None) as i64;
     match kind {
-        // Kiln destroys selected tiles. Simulate dropping k lowest-
-        // participation tiles (no draws simulated since shop-time hand is
-        // empty anyway — we approximate Kiln's value as "remove dead weight
-        // and replace with a typical random tile").
-        TalismanKind::Kiln => {
-            let counts = tile_meld_participation(hand);
-            let mut indexed: Vec<(usize, u32)> = counts.into_iter().enumerate().collect();
-            indexed.sort_by_key(|(_, c)| *c);
-            let order: Vec<usize> = indexed.into_iter().map(|(i, _)| i).collect();
-            let max_k = order.len().min(3);
-            let mut best: Option<(Vec<usize>, i64)> = None;
-            for k in 1..=max_k {
-                let sel: Vec<usize> = order.iter().take(k).copied().collect();
-                let drop_set: std::collections::HashSet<usize> = sel.iter().copied().collect();
-                let mut replaced: Vec<Tile> = hand
-                    .iter()
-                    .enumerate()
-                    .filter(|(i, _)| !drop_set.contains(i))
-                    .map(|(_, t)| *t)
-                    .collect();
-                let drawn = sample_random_hand(k);
-                replaced.extend(drawn);
-                replaced.sort();
-                let after = best_play_score_for_hand(run, &replaced, None, None) as i64;
-                let delta = after - base;
-                if best.as_ref().map(|(_, d)| delta > *d).unwrap_or(true) {
-                    best = Some((sel, delta));
-                }
-            }
-            best
-        }
         // Suit-transforms rewrite selected numbered tiles to a target suit.
         // Convert all numbered tiles NOT already in the target suit and
         // measure the delta against the baseline.
@@ -2673,9 +2673,27 @@ fn play_run_with_options(
         if let Some(boss_name) = &boss_for_this_blind {
             stats.boss_faced.insert(boss_name.clone(), 1);
         }
-        let (outcome, blind_turns) = play_blind(&mut run, &mut stats, log, deadline);
-        stats.total_score += run.round_score;
-        stats.peak_blind_score = stats.peak_blind_score.max(run.round_score);
+        let mut blind_scoring: Vec<BotScoringAction> = Vec::new();
+        let (outcome, blind_turns) =
+            play_blind(&mut run, &mut stats, log, deadline, &mut blind_scoring);
+        let blind_score = run.round_score;
+        stats.total_score += blind_score;
+        if blind_score > stats.peak_blind_score {
+            stats.peak_blind_detail = Some(PeakBlindSnapshot {
+                blind_slot: format!("{:02}-{}", run.ante, blind.name()),
+                blind_label: blind_log_label(&run, blind),
+                target_score: run.target_score,
+                total_score: blind_score,
+                relics: run
+                    .relics
+                    .active
+                    .iter()
+                    .map(|&id| relic_display_name(id).to_string())
+                    .collect(),
+                scoring_actions: blind_scoring,
+            });
+        }
+        stats.peak_blind_score = stats.peak_blind_score.max(blind_score);
         stats.died_on_ante = run.ante;
         stats.died_on_blind = blind;
         if let Some(boss_name) = &boss_for_this_blind
