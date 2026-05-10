@@ -364,7 +364,9 @@ impl PauseMenu {
     ) -> PauseUpdate {
         let settings = crate::persistence::load_settings();
         GameEngine::reset_to_demo(run, progress, &settings);
-        PauseUpdate::Transition(Box::new(Some(Scene::Shop(ShopScene::new(run)))))
+        PauseUpdate::Transition(Box::new(Some(Scene::Shop(ShopScene::new(
+            run, progress,
+        )))))
     }
 
     /// Append pause-overlay draw elements to the given vectors.

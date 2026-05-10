@@ -79,6 +79,16 @@ fn shop_focus_slug_inspectable(slug: &str) -> bool {
         || slug.starts_with("pack:")
 }
 
+/// Profile snapshot for shop stock in screenshot CLI (Qilin ribbon gate).
+fn screenshot_profile_for_shop_stock(fresh_progress: bool) -> crate::core::progression::PlayerProgress {
+    let settings = persistence::load_settings();
+    if fresh_progress {
+        crate::core::progression::PlayerProgress::new()
+    } else {
+        persistence::load_profile(settings.active_profile)
+    }
+}
+
 /// Replace `run`'s freshly-dealt hand with a curated 14-tile winning hand
 /// designed for a juicy Steam-store hero shot: Red Dragon triplet, White
 /// Dragon triplet, two number sequences, East Wind pair. Decomposes as
@@ -127,7 +137,7 @@ fn setup_hero_state(run: &mut RunState) {
 /// Populate a richer `run` state for the shop screenshot: bump gold,
 /// pretend ante 3 (so the round-3 stock variety kicks in), and set the
 /// `rich_stock` tag to add extra relic offerings. The tag is consumed
-/// inside `ShopScene::new`, leaving the run otherwise untouched.
+/// inside `ShopScene::new(.., progress)`, leaving the run otherwise untouched.
 fn setup_shop_state(run: &mut RunState) {
     run.gold = 42;
     run.run_number = 3;
@@ -299,7 +309,8 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
         "pick_blind" => (Scene::PickBlind(scenes::PickBlindScene::new()), true),
         "shop" => {
             setup_shop_state(&mut run);
-            let mut shop = ShopScene::new(&mut run);
+            let progress = screenshot_profile_for_shop_stock(s.fresh_progress);
+            let mut shop = ShopScene::new(&mut run, &progress);
             if let Some(focus_slug) = s.shop_focus.as_deref() {
                 shop.set_focus_for_screenshot(focus_slug)
                     .map_err(anyhow::Error::msg)?;
@@ -383,7 +394,8 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
                     .transpose()?
                     .unwrap_or(crate::core::tile_pack::TilePackKind::Honors);
                 setup_shop_state(&mut run);
-                let shop = ShopScene::new(&mut run);
+                let progress = screenshot_profile_for_shop_stock(s.fresh_progress);
+                let shop = ShopScene::new(&mut run, &progress);
                 let counts = shop.tile_pack_celeb_inventory_counts(&run);
                 (
                     Scene::Showcase(ShowcaseScene::new(ShowcasePresenter::TilePack(
@@ -416,7 +428,8 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
                 .transpose()?
                 .unwrap_or(crate::core::tile_pack::TilePackKind::Honors);
             setup_shop_state(&mut run);
-            let shop = ShopScene::new(&mut run);
+            let progress = screenshot_profile_for_shop_stock(s.fresh_progress);
+            let shop = ShopScene::new(&mut run, &progress);
             let counts = shop.tile_pack_celeb_inventory_counts(&run);
             (
                 Scene::Showcase(ShowcaseScene::new(ShowcasePresenter::TilePack(

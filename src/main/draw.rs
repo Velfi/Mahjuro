@@ -59,7 +59,10 @@ impl App {
                                 self.run.upcoming_blind,
                             ))
                         } else {
-                            Scene::Shop(crate::scenes::ShopScene::new(&mut self.run))
+                            Scene::Shop(crate::scenes::ShopScene::new(
+                                &mut self.run,
+                                &self.progress,
+                            ))
                         },
                     );
                     self.transition_alpha = 1.0;
@@ -200,7 +203,10 @@ impl App {
                 } else if !self.run.tutorial_shop_enabled() {
                     Scene::Gameplay(GameplayScene::with_pending_blind(self.run.upcoming_blind))
                 } else {
-                    Scene::Shop(crate::scenes::ShopScene::new(&mut self.run))
+                    Scene::Shop(crate::scenes::ShopScene::new(
+                        &mut self.run,
+                        &self.progress,
+                    ))
                 });
                 self.transition_alpha = 1.0;
             }

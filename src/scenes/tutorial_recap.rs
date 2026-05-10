@@ -63,7 +63,7 @@ impl SceneBehavior for TutorialRecapScene {
         if action.is_some() {
             ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
             return Some(if self.shop_follows {
-                Scene::Shop(ShopScene::new(ctx.run))
+                Scene::Shop(ShopScene::new(ctx.run, ctx.progress))
             } else {
                 Scene::Gameplay(GameplayScene::with_pending_blind(
                     GameEngine::current_upcoming_blind(ctx.run),

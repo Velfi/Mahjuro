@@ -172,6 +172,16 @@ pub struct RunRecord {
 }
 
 impl PlayerProgress {
+    /// Kokushi Musō scored at least once (lifetime). Gates the Qilin zodiac
+    /// ribbon in the shop until unlocked.
+    pub fn qilin_ribbon_unlocked(&self) -> bool {
+        self.yaku_times_scored
+            .get(&YakuKind::KokushiMusou)
+            .copied()
+            .unwrap_or(0)
+            > 0
+    }
+
     pub fn new() -> Self {
         Self {
             unlocked_relics: HashSet::new(),

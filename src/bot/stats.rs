@@ -172,6 +172,18 @@ pub struct RunStats {
     pub timeout_detail: Option<RunTimeoutSnapshot>,
 }
 
+impl RunStats {
+    /// Kokushi Musō scored at least once this run (bot has no meta profile;
+    /// mirrors the shop Qilin gate for simulation).
+    pub fn kokushi_musou_scored(&self) -> bool {
+        *self
+            .yaku_scored
+            .get(YakuKind::KokushiMusou.name())
+            .unwrap_or(&0)
+            > 0
+    }
+}
+
 impl Default for RunStats {
     fn default() -> Self {
         Self {
