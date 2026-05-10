@@ -54,7 +54,9 @@ pub struct PlayerProgress {
     /// "times used" is the more interesting stat to display.
     #[serde(default)]
     pub talisman_times_used: HashMap<TalismanKind, u32>,
-    /// Times each yaku was scored on a committed hand. Keys gate the
+    /// Times each yaku was scored on a committed hand (cash-in). Persisted on
+    /// the profile — once non-zero, that yaku stays **name-revealed** in the
+    /// journal and on gameplay tablets for all later runs. Also keys the
     /// Collection's Yaku tab.
     #[serde(default)]
     pub yaku_times_scored: HashMap<YakuKind, u32>,
@@ -172,14 +174,20 @@ pub struct RunRecord {
 }
 
 impl PlayerProgress {
-    /// Kokushi Musō scored at least once (lifetime). Gates the Qilin zodiac
-    /// ribbon in the shop until unlocked.
-    pub fn qilin_ribbon_unlocked(&self) -> bool {
+    /// Kokushi Musō has been **cashed in** at least once: `GameEvent::YakuScored`
+    /// only fires on structure cash-in, so this matches the first successful
+    /// Kokushi score (not hand previews or undiscovered state).
+    pub fn kokushi_musou_discovered(&self) -> bool {
         self.yaku_times_scored
             .get(&YakuKind::KokushiMusou)
             .copied()
             .unwrap_or(0)
             > 0
+    }
+
+    /// Shop Qilin ribbon — same gate as [`Self::kokushi_musou_discovered`].
+    pub fn qilin_ribbon_unlocked(&self) -> bool {
+        self.kokushi_musou_discovered()
     }
 
     pub fn new() -> Self {
@@ -378,9 +386,23 @@ impl PlayerProgress {
         available
     }
 
-    /// All yaku patterns are always available.
+    /// Yaku the run may surface in previews and reference UI.
+    ///
+    /// Kokushi Musō stays **secret** until the first time it is cashed in and
+    /// recorded in [`Self::yaku_times_scored`]. Scoring still awards it when
+    /// the hand qualifies — the scorer always applies Kokushi when detected,
+    /// even if this list omits it.
     pub fn available_yaku(&self) -> Vec<YakuKind> {
-        YakuKind::all().to_vec()
+        YakuKind::all()
+            .iter()
+            .copied()
+            .filter(|&y| {
+                if y == YakuKind::KokushiMusou && !self.kokushi_musou_discovered() {
+                    return false;
+                }
+                true
+            })
+            .collect()
     }
 
     /// Whether the Plastic tile material is unlocked (requires first victory).
@@ -603,6 +625,19 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kokushi_omitted_from_available_yaku_until_first_cash_in() {
+        use crate::core::yaku::YakuKind;
+        let mut p = PlayerProgress::new();
+        let ay = p.available_yaku();
+        assert!(!ay.contains(&YakuKind::KokushiMusou));
+        assert_eq!(ay.len(), YakuKind::all().len() - 1);
+        *p.yaku_times_scored.entry(YakuKind::KokushiMusou).or_insert(0) += 1;
+        let ay2 = p.available_yaku();
+        assert!(ay2.contains(&YakuKind::KokushiMusou));
+        assert_eq!(ay2.len(), YakuKind::all().len());
+    }
 
     #[test]
     fn level_progression() {

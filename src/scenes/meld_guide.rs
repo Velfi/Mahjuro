@@ -9,6 +9,7 @@
 //! and restored when the player presses Back.
 
 use crate::core::hand::SetKind;
+use crate::core::progression::PlayerProgress;
 use crate::core::tile::{Suit, Tile};
 use crate::core::yaku::YakuKind;
 use crate::render::draw_cmd::{CameraParams, DrawCmd, ShowcaseTilePlacement, UiFrame};
@@ -29,8 +30,8 @@ const PAGE_BASIC_MELDS: usize = 0;
 const PAGE_TILES_AND_FLOWERS: usize = 1;
 const YAKU_PAGE_START: usize = 2;
 
-fn total_pages() -> usize {
-    YAKU_PAGE_START + YakuKind::all().len()
+fn total_pages(progress: &PlayerProgress) -> usize {
+    YAKU_PAGE_START + progress.available_yaku().len()
 }
 
 // ── Button click IDs ──────────────────────────────────────────────────────
@@ -70,7 +71,7 @@ impl MeldGuideScene {
 
 impl SceneBehavior for MeldGuideScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
-        let pages = total_pages();
+        let pages = total_pages(ctx.progress);
 
         for &cid in ctx.button_clicks {
             match cid {
@@ -118,6 +119,7 @@ impl SceneBehavior for MeldGuideScene {
         let h = ctx.layout.window_h;
         let ui_scale = ctx.ui_scale;
         let scale = (w.min(h)) / 600.0 * ui_scale;
+        let progress = ctx.progress;
 
         let mut frame = UiFrame::new();
         frame.background(BackgroundId::Black);
@@ -143,7 +145,7 @@ impl SceneBehavior for MeldGuideScene {
         });
 
         // ── Page content ──────────────────────────────────────────
-        let (title, description, groups) = page_content(self.page);
+        let (title, description, groups) = page_content(self.page, progress);
 
         // Title
         let title_font = typography::size(typography::TITLE, h, ui_scale).max(24.0);
@@ -209,7 +211,7 @@ impl SceneBehavior for MeldGuideScene {
         // ── Scoring info (yaku pages) ─────────────────────────────
         if self.page >= YAKU_PAGE_START {
             let yaku_idx = self.page - YAKU_PAGE_START;
-            if let Some(&yk) = YakuKind::all().get(yaku_idx) {
+            if let Some(&yk) = progress.available_yaku().get(yaku_idx) {
                 let score_font = typography::size(typography::BODY, h, ui_scale).max(16.0);
                 let score_h = score_font * 1.5;
                 let score_y = h * 0.78;
@@ -227,7 +229,7 @@ impl SceneBehavior for MeldGuideScene {
         }
 
         // ── Page indicator ────────────────────────────────────────
-        let pages = total_pages();
+        let pages = total_pages(progress);
         let page_font = typography::size(typography::CAPTION, h, ui_scale).max(13.0);
         let page_h = page_font * 1.4;
         let page_y = h * 0.84;
@@ -357,7 +359,7 @@ fn t(suit: Suit, rank: u8, id: u32) -> Tile {
 }
 
 /// Returns `(title, description, groups)` for the given page index.
-fn page_content(page: usize) -> (&'static str, &'static str, Vec<TileGroup>) {
+fn page_content(page: usize, progress: &PlayerProgress) -> (&'static str, &'static str, Vec<TileGroup>) {
     match page {
         PAGE_BASIC_MELDS => (
             "Basic melds",
@@ -442,10 +444,10 @@ fn page_content(page: usize) -> (&'static str, &'static str, Vec<TileGroup>) {
             ],
         ),
         _ => {
-            // Yaku pages
+            // Yaku pages (Kokushi Musō page is omitted until first cash-in).
             let yaku_idx = page - YAKU_PAGE_START;
-            let all = YakuKind::all();
-            if let Some(&yk) = all.get(yaku_idx) {
+            let visible = progress.available_yaku();
+            if let Some(&yk) = visible.get(yaku_idx) {
                 let (desc, groups) = yaku_page(yk);
                 (yk.name(), desc, groups)
             } else {

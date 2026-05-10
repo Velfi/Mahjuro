@@ -577,3 +577,39 @@ fn mirror_tile_doubles_garden_keeper_extra_pass() {
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
     assert_eq!(flower_chips_delta(&breakdown), 120);
 }
+
+#[test]
+fn kokushi_musou_scores_when_omitted_from_available_yaku() {
+    use crate::core::hand::validate_selection;
+    use crate::core::yaku::YakuKind;
+    let tiles = vec![
+        Tile::new(Suit::Characters, 1, 0),
+        Tile::new(Suit::Characters, 9, 1),
+        Tile::new(Suit::Bamboos, 1, 2),
+        Tile::new(Suit::Bamboos, 9, 3),
+        Tile::new(Suit::Circles, 1, 4),
+        Tile::new(Suit::Circles, 9, 5),
+        Tile::new(Suit::Wind, 1, 6),
+        Tile::new(Suit::Wind, 2, 7),
+        Tile::new(Suit::Wind, 3, 8),
+        Tile::new(Suit::Wind, 4, 9),
+        Tile::new(Suit::Dragon, 1, 10),
+        Tile::new(Suit::Dragon, 2, 11),
+        Tile::new(Suit::Dragon, 3, 12),
+        Tile::new(Suit::Characters, 1, 13),
+    ];
+    let sets = validate_selection(&tiles).expect("kokushi decomposition");
+    let r = RelicState::default();
+    let mut ctx = ctx_with(&r, false);
+    ctx.pattern.available_yaku = YakuKind::all()
+        .iter()
+        .copied()
+        .filter(|&y| y != YakuKind::KokushiMusou)
+        .collect();
+    let breakdown = score_sets(&tiles, &sets, &ctx, &[]);
+    assert!(
+        breakdown.detected_yaku.contains(&YakuKind::KokushiMusou),
+        "expected Kokushi despite secret-yaku filter, got {:?}",
+        breakdown.detected_yaku
+    );
+}

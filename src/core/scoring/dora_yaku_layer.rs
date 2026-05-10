@@ -64,7 +64,14 @@ pub(crate) fn apply_dora_yaku_and_structure(
     } else {
         all_yaku
             .into_iter()
-            .filter(|y| ctx.pattern.available_yaku.contains(y))
+            .filter(|y| {
+                // Secret pattern: Kokushi Musō is omitted from `available_yaku`
+                // until the first cash-in, but the hand must still score when valid.
+                if *y == YakuKind::KokushiMusou {
+                    return true;
+                }
+                ctx.pattern.available_yaku.contains(y)
+            })
             .collect()
     };
     if let Some(st) = &ctx.structure
