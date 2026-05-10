@@ -10,10 +10,16 @@ use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use crate::render::draw_cmd::UiFrame;
 
-use super::main_menu_exterior::MainMenuExteriorScene;
-use super::{DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+use super::{scene_collection_archive, scene_options_menu, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 const PROFILE_COUNT: usize = 3;
+
+/// Where [`ProfileSelectScene`] returns after pick / cancel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProfileSelectReturn {
+    Options,
+    Archive,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct PickProfile(usize);
@@ -30,22 +36,35 @@ enum ConfirmDelete {
 pub struct ProfileSelectScene {
     tree: TreeState,
     confirm_delete: ConfirmDelete,
+    return_to: ProfileSelectReturn,
 }
 
 impl ProfileSelectScene {
-    pub fn new(active_profile: usize) -> Self {
+    pub fn new(active_profile: usize, return_to: ProfileSelectReturn) -> Self {
         let mut tree = TreeState::new();
         tree.set_focus(FocusId(active_profile.min(PROFILE_COUNT - 1) as u32));
         Self {
             tree,
             confirm_delete: ConfirmDelete::None,
+            return_to,
         }
     }
 
-    /// Create with cursor pre-set to the currently active profile from settings.
-    pub fn from_settings() -> Self {
+    pub fn from_options_menu() -> Self {
         let settings = persistence::load_settings();
-        Self::new(settings.active_profile)
+        Self::new(settings.active_profile, ProfileSelectReturn::Options)
+    }
+
+    pub fn from_archive_switch_save() -> Self {
+        let settings = persistence::load_settings();
+        Self::new(settings.active_profile, ProfileSelectReturn::Archive)
+    }
+
+    fn pop_return_scene(&self) -> Scene {
+        match self.return_to {
+            ProfileSelectReturn::Options => scene_options_menu(),
+            ProfileSelectReturn::Archive => scene_collection_archive(),
+        }
     }
 
     fn cursor(&self) -> usize {
@@ -133,7 +152,7 @@ impl SceneBehavior for ProfileSelectScene {
         for a in ctx.actions {
             if matches!(a, UiAction::Cancel | UiAction::Pause) {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                return Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()));
+                return Some(self.pop_return_scene());
             }
             if matches!(a, UiAction::Delete) {
                 let idx = self.cursor();
@@ -147,7 +166,7 @@ impl SceneBehavior for ProfileSelectScene {
         if let Some(PickProfile(idx)) = action {
             ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
             *ctx.switch_profile = Some(idx);
-            return Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()));
+            return Some(self.pop_return_scene());
         }
         None
     }
@@ -171,9 +190,13 @@ impl SceneBehavior for ProfileSelectScene {
         let title_h = (48.0 * scale).max(28.0);
         let title_y = h * 0.06;
         if !showing_dialog {
+            let title = match self.return_to {
+                ProfileSelectReturn::Options => "Save & profiles",
+                ProfileSelectReturn::Archive => "Switch save",
+            };
             frame.text(TextLabel {
                 rect: [0.0, title_y, w, title_h],
-                text: "Select Profile".into(),
+                text: title.into(),
                 color: color::CHAMPAGNE,
                 ..Default::default()
             });

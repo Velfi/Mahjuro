@@ -1547,7 +1547,8 @@ mod tests {
 
     #[test]
     fn enumerated_masks_match_bruteforce_best_play_on_demo_hand() {
-        let run = RunState::new_demo();
+        // `RunState::new` / `new_demo` deal is non-deterministic — see `RunState::new` docs.
+        let run = scoring_test_run();
         assert_eq!(pick_best_play(&run), brute_force_best_play_in_hand(&run));
     }
 

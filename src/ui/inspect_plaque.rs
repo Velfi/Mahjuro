@@ -2,6 +2,7 @@
 
 use crate::core::consumable::Consumable;
 use crate::core::debuff::TileDebuff;
+use crate::core::relic::RelicFlavorSpan;
 use crate::core::tile::{Suit, Tile, TileEnhancement};
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
@@ -122,6 +123,44 @@ pub fn push_focus_tooltip_panel_2d(
             y += section_gap;
         }
     }
+}
+
+/// Relic inspect flavor only: no tooltip frame; draw as a bottom-centered band
+/// (readable on a dark / black inspect backdrop).
+///
+/// `extra_bottom_reserve` lifts the band upward (e.g. leave room for shop inspect hints).
+pub fn push_floating_relic_flavor_labels(
+    texts: &mut Vec<TextLabel>,
+    window_w: f32,
+    window_h: f32,
+    ui_scale: f32,
+    flavor: &'static [RelicFlavorSpan],
+    extra_bottom_reserve: f32,
+) {
+    if flavor.is_empty() {
+        return;
+    }
+    let margin_x = window_w * 0.06;
+    let band_w = (window_w - 2.0 * margin_x).min(760.0);
+    let left = (window_w - band_w) * 0.5;
+    let body_px = typography::size(typography::BODY, window_h, ui_scale).max(13.0);
+    let line_step = body_px * 1.4;
+    let max_lines = 5usize;
+    let band_h = (line_step * max_lines as f32 + body_px * 0.5)
+        .min(window_h * 0.25)
+        .max(body_px * 2.0);
+    let bottom_margin = window_h * 0.055 + extra_bottom_reserve.max(0.0);
+    let top = window_h - bottom_margin - band_h;
+    texts.push(TextLabel {
+        rect: [left, top, band_w, band_h],
+        text: String::new(),
+        color: color::CHAMPAGNE,
+        font_px: Some(body_px),
+        align: TextAlign::Center,
+        no_glossary: true,
+        scroll_offset: 0.0,
+        flavor_spans: Some(flavor),
+    });
 }
 
 /// Identity line for gameplay hover (title strip).

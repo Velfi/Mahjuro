@@ -583,6 +583,7 @@ impl App {
         let scroll_lines = std::mem::take(&mut self.scroll_delta);
         let mut overlay_request: Option<scenes::OverlayRequest> = None;
         let mut rumble_lab_ops: Vec<crate::ui::input::RumbleLabOp> = Vec::new();
+        let mut bump_archive_chronicle_seen: Option<u32> = None;
         let updated_overlay = !self.overlay_stack.is_empty();
         let update_result = if self.overlay_stack.is_empty() {
             self.scene.update(UpdateCtx {
@@ -634,6 +635,7 @@ impl App {
                 rumble_lab_ops: &mut rumble_lab_ops,
                 suspended_shop: None,
                 shop_env_height_scale: self.debug.shop_env_height_scale,
+                bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
             })
         } else {
             let showcase_shop_inspect = self.overlay_stack.last().is_some_and(|top| {
@@ -703,8 +705,18 @@ impl App {
                     rumble_lab_ops: &mut rumble_lab_ops,
                     suspended_shop,
                     shop_env_height_scale: self.debug.shop_env_height_scale,
+                    bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
                 })
         };
+        if let Some(n) = bump_archive_chronicle_seen {
+            let p = self.active_profile.min(2);
+            let mut s = persistence::load_settings();
+            if s.archive_last_seen_run_len[p] != n {
+                s.archive_last_seen_run_len[p] = n;
+                self.archive_last_seen_run_len[p] = n;
+                let _ = persistence::save_settings(&s);
+            }
+        }
         // Apply overlay push/pop before a SceneTransition (Replace).
         // Push/Pop operate on the overlay stack; they never fade.
         match overlay_request {

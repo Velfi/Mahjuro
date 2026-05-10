@@ -170,6 +170,8 @@ struct App {
     /// `SteamClient` is safe to call in either state — `Disabled` is a
     /// logged no-op — so no `Option` wrapping is needed at call sites.
     steam: steam::SteamClient,
+    /// Mirrors `AppSettings::archive_last_seen_run_len` for menu hints without disk reads.
+    archive_last_seen_run_len: [u32; 3],
 }
 
 impl App {
@@ -337,6 +339,7 @@ impl App {
                 .flatten(),
             modifiers: Mod::NOMOD,
             steam,
+            archive_last_seen_run_len: settings.archive_last_seen_run_len,
         }
     }
 
@@ -407,6 +410,7 @@ impl App {
         // Persist the active profile choice.
         settings.active_profile = new_index;
         let _ = persistence::save_settings(&settings);
+        self.archive_last_seen_run_len = settings.archive_last_seen_run_len;
     }
 
     /// Persist `self.run` for resume on next launch. Called from every quit

@@ -1,98 +1,1890 @@
 [
-  { "id": "triplet_boost", "name": "Triplet Boost", "description": "Triplets/Kongs: +40 chips and +0.2 mult", "rarity": "common" },
-  { "id": "sequence_surge", "name": "Sequence Surge", "description": "Sequences +25 chips and +0.5 mult", "rarity": "uncommon" },
-  { "id": "pair_power", "name": "Pair Power", "description": "Pairs +30 chips and +1 mult", "rarity": "uncommon" },
-  { "id": "honor_fury", "name": "Honor Fury", "description": "+28 chips per honor tile in sets", "rarity": "rare" },
-  { "id": "red_dragon_rage", "name": "Red Dragon Rage", "description": "Any dragon triplet/kong: +5 mult", "rarity": "rare" },
-  { "id": "green_luck", "name": "Green Luck", "description": "+4 gold at round end if no honors scored", "rarity": "common" },
-  { "id": "white_dragons_hush", "name": "White Dragon's Hush", "description": "White dragon pair: +4 mult, draws a Zodiac", "rarity": "rare" },
-  { "id": "joker_tile", "name": "Joker Tile", "description": "Once per round: one tile acts as wild", "rarity": "rare" },
-  { "id": "strength_in_numbers", "name": "Strength in Numbers", "description": "Wall contains 6 copies per tile instead of 4", "rarity": "rare" },
-  { "id": "quick_draw", "name": "Quick Draw", "description": "Draw +1 tile after each play (max 3 per round)", "rarity": "uncommon" },
-  { "id": "chain_reaction", "name": "Chain Reaction", "description": "+4 mult if you scored a yaku last turn", "rarity": "rare" },
-  { "id": "multiplier_master", "name": "Multiplier Master", "description": "+0.5 mult per relic owned", "rarity": "rare" },
-  { "id": "set_magnet", "name": "Set Magnet", "description": "Drawing a 3rd copy of a tile pulls the 4th from the wall", "rarity": "uncommon" },
-  { "id": "wild_winds", "name": "Wild Winds", "description": "Wind tiles can substitute in sequences", "rarity": "rare" },
-  { "id": "dragon_echo", "name": "Dragon Echo", "description": "Dragon triplets/kongs copy every other set's base chips", "rarity": "legendary" },
-  { "id": "kan_drum", "name": "Kan Drum", "description": "Kongs grant +1 play this round and +4 mult", "rarity": "rare" },
-  { "id": "dora_crown", "name": "Dora Crown", "description": "+1 dora indicator; dora chips become +35", "rarity": "rare" },
-  { "id": "round_compass", "name": "Round Compass", "description": "Round Wind triplets/kongs: +6 mult", "rarity": "uncommon" },
-  { "id": "eight_treasures", "name": "Eight Treasures", "description": "Scoring a Full Hand grants a random Zodiac", "rarity": "legendary" },
-  { "id": "kongs_blessing", "name": "Kong's Blessing", "description": "Kongs: +120 chips and +2 mult", "rarity": "legendary" },
-  { "id": "garden_keeper", "name": "Garden Keeper", "description": "Flower effects fire twice", "rarity": "uncommon" },
-  { "id": "ikebana", "name": "Ikebana", "description": "Scoring 2+ flowers in one hand: +6 mult", "rarity": "rare" },
-  { "id": "hanami", "name": "Hanami", "description": "+$3 gold each time a flower is scored", "rarity": "common" },
-  { "id": "jade_serpent", "name": "Jade Serpent", "description": "Bamboo tiles in scored sets: +8 chips each", "rarity": "common" },
-  { "id": "red_serpent", "name": "Red Serpent", "description": "Characters tiles in scored sets: +8 chips each", "rarity": "common" },
-  { "id": "blue_serpent", "name": "Blue Serpent", "description": "Dots tiles in scored sets: +8 chips each", "rarity": "common" },
-  { "id": "low_tide", "name": "Low Tide", "description": "Tiles ranked 1-3 in scored sets: +6 chips each", "rarity": "common" },
-  { "id": "high_tide", "name": "High Tide", "description": "Tiles ranked 7-9 in scored sets: +6 chips each", "rarity": "common" },
-  { "id": "merchants_eye", "name": "Merchant's Eye", "description": "Relics cost 25% less in the shop", "rarity": "uncommon" },
-  { "id": "i_got_a_guy", "name": "I Got A Guy", "description": "The next 3 shop restocks you pay gold for cost $0 instead", "rarity": "uncommon" },
-  { "id": "edge_runner", "name": "Edge Runner", "description": "Terminal tiles (1s and 9s) in scored sets: +12 chips each", "rarity": "uncommon" },
-  { "id": "lucky_seven", "name": "Lucky Seven", "description": "Rank-7 tiles in scored sets: +1.5 mult each", "rarity": "uncommon" },
-  { "id": "momentum", "name": "Momentum", "description": "+0.5 mult per play already used this round", "rarity": "uncommon" },
-  { "id": "minimalist", "name": "Minimalist", "description": "Playing a single pair: +4 mult", "rarity": "uncommon" },
-  { "id": "turtle_shell", "name": "Turtle Shell", "description": "+50 chips if your mult is below 3", "rarity": "uncommon" },
-  { "id": "closed_gate", "name": "Closed Gate", "description": "All scored tiles are terminals or honors: +4 mult", "rarity": "rare" },
-  { "id": "golden_engine", "name": "Golden Engine", "description": "+1 mult per 5 gold held", "rarity": "rare" },
-  { "id": "snowball", "name": "Snowball", "description": "+0.1 mult per 100 total score this run", "rarity": "rare" },
-  { "id": "second_wind", "name": "Second Wind", "description": "The first time you would lose a blind, destroy this relic and forfeit that blind with no payout (other relics still apply)", "rarity": "rare" },
-  { "id": "glass_cannon", "name": "Glass Cannon", "description": "×3 final mult on your next scored hand, then destroyed", "rarity": "common" },
-  { "id": "last_breath", "name": "Last Breath", "description": "When you cash in with no plays remaining, retrigger all scored tiles", "rarity": "rare" },
-  { "id": "tile_polisher", "name": "Tile Polisher", "description": "Every scored tile permanently gains +3 chips this run", "rarity": "rare" },
-  { "id": "paper_lantern", "name": "Paper Lantern", "description": "+4 mult; 1-in-5 chance to be destroyed at round end (extinct run-wide)", "rarity": "uncommon" },
-  { "id": "silver_filigree_lantern", "name": "Silver Filigree Lantern", "description": "×2 mult; 1-in-1000 chance to be destroyed at round end", "rarity": "legendary" },
-  { "id": "mirror_tile", "name": "Mirror Tile", "description": "Copies the effect of the next relic in your inventory", "rarity": "legendary" },
-  { "id": "way_of_purity", "name": "Way of Purity", "description": "All scored tiles are one suit: ×2.5 mult", "rarity": "rare" },
-  { "id": "geese", "name": "Geese", "description": "Retrigger the first 5 scored tiles in the hand", "rarity": "uncommon" },
-  { "id": "voice_of_the_people", "name": "Voice of the People", "description": "Retrigger tiles ranked 1-4 in scored sets", "rarity": "uncommon" },
-  { "id": "voice_of_the_elite", "name": "Voice of the Elite", "description": "Retrigger tiles ranked 6-9 in scored sets", "rarity": "uncommon" },
-  { "id": "xxxl_egg", "name": "XXXL Egg", "description": "Retrigger all tiles for 3 plays, then is destroyed", "rarity": "rare" },
-  { "id": "tea_ceremony", "name": "Tea Ceremony", "description": "Each of the next 4 scored hands follows one principle (Harmony, Respect, Purity, Tranquility), then this relic is destroyed", "rarity": "rare" },
-  { "id": "rakuware", "name": "Rakuware", "description": "Each score: +40 chips if 2+ numbered suits; +10 chips per honor; +1.5 mult if numbered tiles are one suit; +35 chips if a pair meld", "rarity": "rare" },
-  { "id": "ghost_hand", "name": "Ghost Hand", "description": "Gain chips equal to the total point value of hand tiles that are not part of the scored melds (structure cash-in: your full hand).", "rarity": "uncommon" },
-  { "id": "humility", "name": "Humility", "description": "+0.5 mult per consecutive play without honors", "rarity": "uncommon" },
-  { "id": "obsession", "name": "Obsession", "description": "+0.3 mult per round without your top yaku", "rarity": "rare" },
-  { "id": "bonfire", "name": "Bonfire", "description": "+0.4 mult per relic sold this run", "rarity": "uncommon" },
-  { "id": "river_runner", "name": "River Runner", "description": "+20 chips permanently each time you score a sequence", "rarity": "rare" },
-  { "id": "melting_ice", "name": "Melting Ice", "description": "+80 chips, loses 8 per play. At 0 it is destroyed", "rarity": "uncommon" },
-  { "id": "taotie", "name": "Taotie", "description": "+80 chips. At cash-in, each scored honor tile is destroyed. Each adds +20 chips permanently to this relic.", "rarity": "rare" },
-  { "id": "silk_thread", "name": "Silk Thread", "description": "+4 mult, loses 0.3 per discard. At 0 it is destroyed", "rarity": "uncommon" },
-  { "id": "silk_moth", "name": "Silk Moth", "description": "+2 mult and +$1 every discard", "rarity": "rare" },
-  { "id": "shadow_hand", "name": "Shadow Hand", "description": "Copies the effect of your first relic", "rarity": "legendary" },
-  { "id": "solitary_sage", "name": "Solitary Sage", "description": "+1.5 mult per empty relic slot", "rarity": "uncommon" },
-  { "id": "gold_idol", "name": "Gold Idol", "description": "+3 gold at round end", "rarity": "common" },
-  { "id": "jade_abacus", "name": "Jade Abacus", "description": "+1 interest per 4 gold held (max +4)", "rarity": "common" },
-  { "id": "nest_egg", "name": "Nest Egg", "description": "Gains +2 sell value each round; sell when ripe", "rarity": "common" },
-  { "id": "patience", "name": "Patience", "description": "+2 gold per unused discard at round end", "rarity": "common" },
-  { "id": "way_of_pairs", "name": "Way of Pairs", "description": "All pairs scored: ×2 mult", "rarity": "rare" },
-  { "id": "way_of_triplets", "name": "Way of Triplets", "description": "All triplets/kongs scored: ×2.5 mult", "rarity": "rare" },
-  { "id": "way_of_sequences", "name": "Way of Sequences", "description": "All sequences scored: ×2 mult", "rarity": "rare" },
-  { "id": "fortunes_favor", "name": "Fortune's Favor", "description": "Doubles all relic trigger probabilities", "rarity": "legendary" },
-  { "id": "cracked_tile", "name": "Cracked Tile", "description": "+0 to +8 mult (random per play)", "rarity": "common" },
-  { "id": "star_tile", "name": "Star Tile", "description": "1-in-4 chance to level up a scored yaku", "rarity": "uncommon" },
-  { "id": "smoke_bomb", "name": "Smoke Bomb", "description": "Sell to skip the current boss blind", "rarity": "rare" },
-  { "id": "phantom_relic", "name": "Phantom Relic", "description": "After 3 rounds, sell to duplicate a random relic", "rarity": "rare" },
-  { "id": "hungry_ghost", "name": "Hungry Ghost", "description": "At round beginning, destroy the next relic in inventory. If a relic was destroyed this way, add a permanent mult increase equal to its sell value", "rarity": "rare" },
-  { "id": "disgust", "name": "Disgust", "description": "East + 1/2/3 West tiles count as pair/triplet/kong", "rarity": "rare" },
-  { "id": "curio_cabinet", "name": "Curio Cabinet", "description": "+mult equal to the summed sell value of your other relics", "rarity": "rare" },
-  { "id": "lotus_bloom", "name": "Lotus Bloom", "description": "+0.5 mult permanently per flower drawn or scored", "rarity": "rare" },
-  { "id": "wall_weaver", "name": "Wall Weaver", "description": "+0.2 mult per tile in the wall beyond 140", "rarity": "uncommon" },
-  { "id": "kong_collector", "name": "Kong Collector", "description": "+$5 per kong scored this round, paid at round end", "rarity": "uncommon" },
-  { "id": "no_honor_but_wealth", "name": "No Honor But Wealth", "description": "+$1 each time an honor tile is discarded", "rarity": "common" },
-  { "id": "sweepstakes", "name": "Sweepstakes", "description": "Round start: 25% +$2, 25% +$4, 50% nothing", "rarity": "common" },
-  { "id": "beggars_cup", "name": "Beggar's Cup", "description": "+$1 at round end, +$1 more per boss defeated", "rarity": "uncommon" },
-  { "id": "cosmopolitan", "name": "Cosmopolitan", "description": "+$1 at round end per unique yaku scored this round", "rarity": "uncommon" },
-  { "id": "heirloom", "name": "Heirloom", "description": "+1 mult per blind played (skips don't count)", "rarity": "uncommon" },
-  { "id": "tourist", "name": "Tourist", "description": "+3 mult per distinct suit among scored tiles", "rarity": "uncommon" },
-  { "id": "kintsugi", "name": "Kintsugi", "description": "+1 mult permanently each time another relic is destroyed", "rarity": "legendary" },
-  { "id": "ant_trail", "name": "Ant Trail", "description": "Sequences may wrap 9-1-2", "rarity": "rare" },
-  { "id": "brocade_pouch", "name": "Brocade Pouch", "description": "Buff talismans mark every drawn tile for the rest of the run. +1 consumable slot", "rarity": "rare" },
-  { "id": "eulers_number", "name": "Euler's Number", "description": "Flat +e mult (Euler's constant ≈ 2.71828…)", "rarity": "rare" },
-  { "id": "pi_constant", "name": "Pi", "description": "Flat +π mult (≈ 3.14159…)", "rarity": "rare" },
-  { "id": "big_hands", "name": "Big Hands", "description": "+2 hand tiles; −1 discard", "rarity": "uncommon" },
-  { "id": "tiny_hands", "name": "Tiny Hands", "description": "−2 hand tiles; +2 discards", "rarity": "uncommon" },
-  { "id": "chrysalis", "name": "Chrysalis", "description": "After the blind target is met, further scores this round add no round or run total — they are absorbed. At 2000 absorbed excess, hatches into Monarch Butterfly.", "rarity": "rare" },
-  { "id": "monarch_butterfly", "name": "Monarch Butterfly", "description": "Each scored hand: +chips from a log tier based on total absorbed excess (post-target) this run. Further post-target scores still add no round/run total but keep increasing absorbed excess and tiers.", "rarity": "rare" }
+  {
+    "id": "triplet_boost",
+    "name": "Triplet Boost",
+    "description": "Triplets/Kongs: +40 chips and +0.2 mult",
+    "rarity": "common",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Triplet Boost wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "sequence_surge",
+    "name": "Sequence Surge",
+    "description": "Sequences +25 chips and +0.5 mult",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Sequence",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "pair_power",
+    "name": "Pair Power",
+    "description": "Pairs +30 chips and +1 mult",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "honor_fury",
+    "name": "Honor Fury",
+    "description": "+28 chips per honor tile in sets",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Honor Fury wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "red_dragon_rage",
+    "name": "Red Dragon Rage",
+    "description": "Any dragon triplet/kong: +5 mult",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Red",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "green_luck",
+    "name": "Green Luck",
+    "description": "+4 gold at round end if no honors scored",
+    "rarity": "common",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "white_dragons_hush",
+    "name": "White Dragon's Hush",
+    "description": "White dragon pair: +4 mult, draws a Zodiac",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows White Dragon's Hush wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "joker_tile",
+    "name": "Joker Tile",
+    "description": "Once per round: one tile acts as wild",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Joker",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "strength_in_numbers",
+    "name": "Strength in Numbers",
+    "description": "Wall contains 6 copies per tile instead of 4",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "quick_draw",
+    "name": "Quick Draw",
+    "description": "Draw +1 tile after each play (max 3 per round)",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Quick Draw wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "chain_reaction",
+    "name": "Chain Reaction",
+    "description": "+4 mult if you scored a yaku last turn",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Chain",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "multiplier_master",
+    "name": "Multiplier Master",
+    "description": "+0.5 mult per relic owned",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "set_magnet",
+    "name": "Set Magnet",
+    "description": "Drawing a 3rd copy of a tile pulls the 4th from the wall",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Set Magnet wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "wild_winds",
+    "name": "Wild Winds",
+    "description": "Wind tiles can substitute in sequences",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Wild",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "dragon_echo",
+    "name": "Dragon Echo",
+    "description": "Dragon triplets/kongs copy every other set's base chips",
+    "rarity": "legendary",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "kan_drum",
+    "name": "Kan Drum",
+    "description": "Kongs grant +1 play this round and +4 mult",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Kan Drum wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "dora_crown",
+    "name": "Dora Crown",
+    "description": "+1 dora indicator; dora chips become +35",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Dora",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "round_compass",
+    "name": "Round Compass",
+    "description": "Round Wind triplets/kongs: +6 mult",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "eight_treasures",
+    "name": "Eight Treasures",
+    "description": "Scoring a Full Hand grants a random Zodiac",
+    "rarity": "legendary",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Eight Treasures wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "kongs_blessing",
+    "name": "Kong's Blessing",
+    "description": "Kongs: +120 chips and +2 mult",
+    "rarity": "legendary",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Kong's",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "garden_keeper",
+    "name": "Garden Keeper",
+    "description": "Flower effects fire twice",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "ikebana",
+    "name": "Ikebana",
+    "description": "Scoring 2+ flowers in one hand: +6 mult",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Ikebana wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "hanami",
+    "name": "Hanami",
+    "description": "+$3 gold each time a flower is scored",
+    "rarity": "common",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Hanami",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "jade_serpent",
+    "name": "Jade Serpent",
+    "description": "Bamboo tiles in scored sets: +8 chips each",
+    "rarity": "common",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "red_serpent",
+    "name": "Red Serpent",
+    "description": "Characters tiles in scored sets: +8 chips each",
+    "rarity": "common",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Red Serpent wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "blue_serpent",
+    "name": "Blue Serpent",
+    "description": "Dots tiles in scored sets: +8 chips each",
+    "rarity": "common",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Blue",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "low_tide",
+    "name": "Low Tide",
+    "description": "Tiles ranked 1-3 in scored sets: +6 chips each",
+    "rarity": "common",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "high_tide",
+    "name": "High Tide",
+    "description": "Tiles ranked 7-9 in scored sets: +6 chips each",
+    "rarity": "common",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows High Tide wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "merchants_eye",
+    "name": "Merchant's Eye",
+    "description": "Relics cost 25% less in the shop",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Merchant's",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "i_got_a_guy",
+    "name": "I Got A Guy",
+    "description": "The next 3 shop restocks you pay gold for cost $0 instead",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "edge_runner",
+    "name": "Edge Runner",
+    "description": "Terminal tiles (1s and 9s) in scored sets: +12 chips each",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Edge Runner wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "lucky_seven",
+    "name": "Lucky Seven",
+    "description": "Rank-7 tiles in scored sets: +1.5 mult each",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Lucky",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "momentum",
+    "name": "Momentum",
+    "description": "+0.5 mult per play already used this round",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "minimalist",
+    "name": "Minimalist",
+    "description": "Playing a single pair: +4 mult",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Minimalist wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "turtle_shell",
+    "name": "Turtle Shell",
+    "description": "+50 chips if your mult is below 3",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Turtle",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "closed_gate",
+    "name": "Closed Gate",
+    "description": "All scored tiles are terminals or honors: +4 mult",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "golden_engine",
+    "name": "Golden Engine",
+    "description": "+1 mult per 5 gold held",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Golden Engine wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "snowball",
+    "name": "Snowball",
+    "description": "+0.1 mult per 100 total score this run",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Snowball",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "second_wind",
+    "name": "Second Wind",
+    "description": "The first time you would lose a blind, destroy this relic and forfeit that blind with no payout (other relics still apply)",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "glass_cannon",
+    "name": "Glass Cannon",
+    "description": "\u00d73 final mult on your next scored hand, then destroyed",
+    "rarity": "common",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Glass Cannon wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "last_breath",
+    "name": "Last Breath",
+    "description": "When you cash in with no plays remaining, retrigger all scored tiles",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Last",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "tile_polisher",
+    "name": "Tile Polisher",
+    "description": "Every scored tile permanently gains +3 chips this run",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "paper_lantern",
+    "name": "Paper Lantern",
+    "description": "+4 mult; 1-in-5 chance to be destroyed at round end (extinct run-wide)",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Paper Lantern wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "silver_filigree_lantern",
+    "name": "Silver Filigree Lantern",
+    "description": "\u00d72 mult; 1-in-1000 chance to be destroyed at round end",
+    "rarity": "legendary",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Silver",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "mirror_tile",
+    "name": "Mirror Tile",
+    "description": "Copies the effect of the next relic in your inventory",
+    "rarity": "legendary",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "way_of_purity",
+    "name": "Way of Purity",
+    "description": "All scored tiles are one suit: \u00d72.5 mult",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Way of Purity wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "geese",
+    "name": "Geese",
+    "description": "Retrigger the first 5 scored tiles in the hand",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Geese",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "voice_of_the_people",
+    "name": "Voice of the People",
+    "description": "Retrigger tiles ranked 1-4 in scored sets",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "voice_of_the_elite",
+    "name": "Voice of the Elite",
+    "description": "Retrigger tiles ranked 6-9 in scored sets",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Voice of the Elite wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "xxxl_egg",
+    "name": "XXXL Egg",
+    "description": "Retrigger all tiles for 3 plays, then is destroyed",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "XXXL",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "tea_ceremony",
+    "name": "Tea Ceremony",
+    "description": "Each of the next 4 scored hands follows one principle (Harmony, Respect, Purity, Tranquility), then this relic is destroyed",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "rakuware",
+    "name": "Rakuware",
+    "description": "Each score: +40 chips if 2+ numbered suits; +10 chips per honor; +1.5 mult if numbered tiles are one suit; +35 chips if a pair meld",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Rakuware wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "ghost_hand",
+    "name": "Ghost Hand",
+    "description": "Gain chips equal to the total point value of hand tiles that are not part of the scored melds (structure cash-in: your full hand).",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Ghost",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "humility",
+    "name": "Humility",
+    "description": "+0.5 mult per consecutive play without honors",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "obsession",
+    "name": "Obsession",
+    "description": "+0.3 mult per round without your top yaku",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Obsession wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "bonfire",
+    "name": "Bonfire",
+    "description": "+0.4 mult per relic sold this run",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Bonfire",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "river_runner",
+    "name": "River Runner",
+    "description": "+20 chips permanently each time you score a sequence",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "melting_ice",
+    "name": "Melting Ice",
+    "description": "+80 chips, loses 8 per play. At 0 it is destroyed",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Melting Ice wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "taotie",
+    "name": "Taotie",
+    "description": "+80 chips. At cash-in, each scored honor tile is destroyed. Each adds +20 chips permanently to this relic.",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Taotie",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "silk_thread",
+    "name": "Silk Thread",
+    "description": "+4 mult, loses 0.3 per discard. At 0 it is destroyed",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "silk_moth",
+    "name": "Silk Moth",
+    "description": "+2 mult and +$1 every discard",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Silk Moth wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "shadow_hand",
+    "name": "Shadow Hand",
+    "description": "Copies the effect of your first relic",
+    "rarity": "legendary",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Shadow",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "solitary_sage",
+    "name": "Solitary Sage",
+    "description": "+1.5 mult per empty relic slot",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "gold_idol",
+    "name": "Gold Idol",
+    "description": "+3 gold at round end",
+    "rarity": "common",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Gold Idol wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "jade_abacus",
+    "name": "Jade Abacus",
+    "description": "+1 interest per 4 gold held (max +4)",
+    "rarity": "common",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Jade",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "nest_egg",
+    "name": "Nest Egg",
+    "description": "Gains +2 sell value each round; sell when ripe",
+    "rarity": "common",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "patience",
+    "name": "Patience",
+    "description": "+2 gold per unused discard at round end",
+    "rarity": "common",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Patience wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "way_of_pairs",
+    "name": "Way of Pairs",
+    "description": "All pairs scored: \u00d72 mult",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Way",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "way_of_triplets",
+    "name": "Way of Triplets",
+    "description": "All triplets/kongs scored: \u00d72.5 mult",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "way_of_sequences",
+    "name": "Way of Sequences",
+    "description": "All sequences scored: \u00d72 mult",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Way of Sequences wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "fortunes_favor",
+    "name": "Fortune's Favor",
+    "description": "Doubles all relic trigger probabilities",
+    "rarity": "legendary",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Fortune's",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "cracked_tile",
+    "name": "Cracked Tile",
+    "description": "+0 to +8 mult (random per play)",
+    "rarity": "common",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "star_tile",
+    "name": "Star Tile",
+    "description": "1-in-4 chance to level up a scored yaku",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Star Tile wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "smoke_bomb",
+    "name": "Smoke Bomb",
+    "description": "Sell to skip the current boss blind",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Pull the pin, vanish in the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "smoke",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": "\u2014 the blind opens on an empty chair.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "phantom_relic",
+    "name": "Phantom Relic",
+    "description": "After 3 rounds, sell to duplicate a random relic",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "hungry_ghost",
+    "name": "Hungry Ghost",
+    "description": "At round beginning, destroy the next relic in inventory. If a relic was destroyed this way, add a permanent mult increase equal to its sell value",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Hungry Ghost wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "disgust",
+    "name": "Disgust",
+    "description": "East + 1/2/3 West tiles count as pair/triplet/kong",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Disgust",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "curio_cabinet",
+    "name": "Curio Cabinet",
+    "description": "+mult equal to the summed sell value of your other relics",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "lotus_bloom",
+    "name": "Lotus Bloom",
+    "description": "+0.5 mult permanently per flower drawn or scored",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Lotus Bloom wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "wall_weaver",
+    "name": "Wall Weaver",
+    "description": "+0.2 mult per tile in the wall beyond 140",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Wall",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "kong_collector",
+    "name": "Kong Collector",
+    "description": "+$5 per kong scored this round, paid at round end",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "no_honor_but_wealth",
+    "name": "No Honor But Wealth",
+    "description": "+$1 each time an honor tile is discarded",
+    "rarity": "common",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows No Honor But Wealth wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "sweepstakes",
+    "name": "Sweepstakes",
+    "description": "Round start: 25% +$2, 25% +$4, 50% nothing",
+    "rarity": "common",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Sweepstakes",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "beggars_cup",
+    "name": "Beggar's Cup",
+    "description": "+$1 at round end, +$1 more per boss defeated",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "cosmopolitan",
+    "name": "Cosmopolitan",
+    "description": "+$1 at round end per unique yaku scored this round",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Cosmopolitan wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "heirloom",
+    "name": "Heirloom",
+    "description": "+1 mult per blind played (skips don't count)",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Heirloom",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "tourist",
+    "name": "Tourist",
+    "description": "+3 mult per distinct suit among scored tiles",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "kintsugi",
+    "name": "Kintsugi",
+    "description": "+1 mult permanently each time another relic is destroyed",
+    "rarity": "legendary",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Kintsugi wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "ant_trail",
+    "name": "Ant Trail",
+    "description": "Sequences may wrap 9-1-2",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Ant",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "brocade_pouch",
+    "name": "Brocade Pouch",
+    "description": "Buff talismans mark every drawn tile for the rest of the run. +1 consumable slot",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "eulers_number",
+    "name": "Euler's Number",
+    "description": "Flat +e mult (Euler's constant \u2248 2.71828\u2026)",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Euler's Number wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "pi_constant",
+    "name": "Pi",
+    "description": "Flat +\u03c0 mult (\u2248 3.14159\u2026)",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Pi",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "big_hands",
+    "name": "Big Hands",
+    "description": "+2 hand tiles; \u22121 discard",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "tiny_hands",
+    "name": "Tiny Hands",
+    "description": "\u22122 hand tiles; +2 discards",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Tiny Hands wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "chrysalis",
+    "name": "Chrysalis",
+    "description": "After the blind target is met, further scores this round add no round or run total \u2014 they are absorbed. At 2000 absorbed excess, hatches into Monarch Butterfly.",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Old players swear by the ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "Chrysalis",
+        "bold": true,
+        "italic": false
+      },
+      {
+        "text": " \u2014 never the tile, always the tale.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  },
+  {
+    "id": "monarch_butterfly",
+    "name": "Monarch Butterfly",
+    "description": "Each scored hand: +chips from a log tier based on total absorbed excess (post-target) this run. Further post-target scores still add no round/run total but keep increasing absorbed excess and tiers.",
+    "rarity": "rare",
+    "flavor_spans": [
+      {
+        "text": "Worn smooth by ",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "countless",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " late-night rounds.",
+        "bold": false,
+        "italic": false
+      }
+    ]
+  }
 ]

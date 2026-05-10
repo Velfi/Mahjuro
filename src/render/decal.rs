@@ -8,6 +8,7 @@
 //! To get the real Unicode tile glyphs, drop any TTF/OTF that covers the
 //! Mahjong block (e.g. Noto Emoji) at `assets/font.ttf` in the project root.
 
+use crate::core::relic::RelicFlavorSpan;
 use crate::core::tile::{Suit, Tile, TileEnhancement};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -1493,6 +1494,26 @@ pub fn load_ui_font() -> Option<fontdue::Font> {
         .clone()
 }
 
+/// Instrument Serif italic for UI (relic inspect flavor, etc.). Falls back to
+/// [`load_ui_font`] when the italic file is missing.
+pub fn load_ui_font_italic() -> Option<fontdue::Font> {
+    static CACHE: std::sync::OnceLock<Option<fontdue::Font>> = OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            let path = "Instrument_Serif/InstrumentSerif-Italic.ttf";
+            if let Some(file) = crate::asset_path::get(path) {
+                if let Ok(f) =
+                    fontdue::Font::from_bytes(file.data.as_ref(), fontdue::FontSettings::default())
+                {
+                    return Some(f);
+                }
+            }
+            log::debug!("decal: italic UI font missing at {path}, using regular");
+            load_ui_font()
+        })
+        .clone()
+}
+
 /// Horizontal alignment hint for [`rasterize_label_styled`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LabelAlign {
@@ -1816,6 +1837,297 @@ fn blit_glyph(src: GlyphSrc<'_>, rgba: &mut [u8], width: u32, height: u32) {
             rgba[dst + 3] = rgba[dst + 3].saturating_add(v);
         }
     }
+}
+
+// --- Relic inspect flavor (mixed weight / italic, bottom-aligned block) ---
+
+const FLAVOR_FAUX_BOLD_DX: f32 = 0.65;
+
+#[derive(Clone, Copy)]
+struct FlavorCell {
+    ch: char,
+    bold: bool,
+    italic: bool,
+}
+
+fn pick_face_for_flavor<'a>(
+    regular: &'a fontdue::Font,
+    italic: &'a fontdue::Font,
+    emoji: Option<&'a fontdue::Font>,
+    ch: char,
+    use_italic: bool,
+) -> &'a fontdue::Font {
+    if let Some(e) = emoji {
+        if !regular.has_glyph(ch) && e.has_glyph(ch) {
+            return e;
+        }
+    }
+    if use_italic && italic.has_glyph(ch) {
+        return italic;
+    }
+    regular
+}
+
+fn flavor_cell_advance(
+    regular: &fontdue::Font,
+    italic: &fontdue::Font,
+    emoji: Option<&fontdue::Font>,
+    c: FlavorCell,
+    font_px: f32,
+) -> f32 {
+    let face = pick_face_for_flavor(regular, italic, emoji, c.ch, c.italic);
+    face.metrics(c.ch, font_px).advance_width
+}
+
+fn flavor_line_advance(
+    regular: &fontdue::Font,
+    italic: &fontdue::Font,
+    emoji: Option<&fontdue::Font>,
+    line: &[FlavorCell],
+    font_px: f32,
+) -> f32 {
+    line
+        .iter()
+        .map(|c| flavor_cell_advance(regular, italic, emoji, *c, font_px))
+        .sum()
+}
+
+fn tokenize_flavor_cells(cells: &[FlavorCell]) -> Vec<&[FlavorCell]> {
+    if cells.is_empty() {
+        return Vec::new();
+    }
+    let mut out: Vec<&[FlavorCell]> = Vec::new();
+    let mut i = 0;
+    while i < cells.len() {
+        let ws = cells[i].ch.is_whitespace();
+        let mut j = i + 1;
+        while j < cells.len() && cells[j].ch.is_whitespace() == ws {
+            j += 1;
+        }
+        out.push(&cells[i..j]);
+        i = j;
+    }
+    out
+}
+
+fn trim_trailing_flavor_ws(line: &mut Vec<FlavorCell>) {
+    while line.last().is_some_and(|c| c.ch.is_whitespace()) {
+        line.pop();
+    }
+}
+
+fn wrap_flavor_hard_line(
+    cells: &[FlavorCell],
+    max_w: f32,
+    regular: &fontdue::Font,
+    italic: &fontdue::Font,
+    emoji: Option<&fontdue::Font>,
+    font_px: f32,
+) -> Vec<Vec<FlavorCell>> {
+    let space_w = regular.metrics(' ', font_px).advance_width;
+    let tokens = tokenize_flavor_cells(cells);
+    if tokens.is_empty() {
+        return vec![Vec::new()];
+    }
+    let mut lines: Vec<Vec<FlavorCell>> = Vec::new();
+    let mut line: Vec<FlavorCell> = Vec::new();
+    let mut line_w = 0.0_f32;
+
+    for tok in &tokens {
+        let is_ws = tok[0].ch.is_whitespace();
+        let tw = flavor_line_advance(regular, italic, emoji, tok, font_px);
+        if is_ws {
+            if line.is_empty() {
+                continue;
+            }
+            if line_w + tw <= max_w {
+                line.extend_from_slice(tok);
+                line_w += tw;
+            }
+            continue;
+        }
+        if line.is_empty() {
+            line.extend_from_slice(tok);
+            line_w = tw;
+            continue;
+        }
+        let gap = if line.last().is_some_and(|c| c.ch.is_whitespace()) {
+            0.0
+        } else {
+            space_w
+        };
+        if line_w + gap + tw <= max_w {
+            if gap > 0.0 {
+                line.push(FlavorCell {
+                    ch: ' ',
+                    bold: false,
+                    italic: false,
+                });
+                line_w += space_w;
+            }
+            line.extend_from_slice(tok);
+            line_w += tw;
+        } else {
+            trim_trailing_flavor_ws(&mut line);
+            if !line.is_empty() {
+                lines.push(std::mem::take(&mut line));
+            }
+            line.extend_from_slice(tok);
+            line_w = tw;
+        }
+    }
+    trim_trailing_flavor_ws(&mut line);
+    if !line.is_empty() || lines.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
+fn flatten_relic_flavor_to_hard_lines(spans: &[RelicFlavorSpan]) -> Vec<Vec<FlavorCell>> {
+    if spans.is_empty() {
+        return Vec::new();
+    }
+    let mut lines: Vec<Vec<FlavorCell>> = vec![Vec::new()];
+    for sp in spans {
+        let mut first = true;
+        for segment in sp.text.split('\n') {
+            if !first {
+                lines.push(Vec::new());
+            }
+            first = false;
+            let cur = lines.last_mut().unwrap();
+            for ch in segment.chars() {
+                cur.push(FlavorCell {
+                    ch,
+                    bold: sp.bold,
+                    italic: sp.italic,
+                });
+            }
+        }
+    }
+    lines
+}
+
+fn blit_one_flavor_glyph(
+    rgba: &mut [u8],
+    width: u32,
+    height: u32,
+    cx: f32,
+    baseline_y: f32,
+    m: fontdue::Metrics,
+    bitmap: &[u8],
+    bold: bool,
+) {
+    let mut draw = |ox: f32| {
+        if bitmap.is_empty() {
+            return;
+        }
+        let glyph_left = (cx + ox + m.xmin as f32) as i32;
+        let glyph_top = (baseline_y - (m.ymin as f32 + m.height as f32)) as i32;
+        blit_glyph(
+            GlyphSrc {
+                bitmap,
+                gw: m.width,
+                gh: m.height,
+                left: glyph_left,
+                top: glyph_top,
+            },
+            rgba,
+            width,
+            height,
+        );
+    };
+    draw(0.0);
+    if bold {
+        draw(FLAVOR_FAUX_BOLD_DX);
+    }
+}
+
+fn blit_flavor_line(
+    line: &[FlavorCell],
+    rgba: &mut [u8],
+    width: u32,
+    height: u32,
+    start_x: f32,
+    baseline_y: f32,
+    regular: &fontdue::Font,
+    italic: &fontdue::Font,
+    emoji: Option<&fontdue::Font>,
+    font_px: f32,
+) {
+    let mut cx = start_x;
+    for c in line {
+        let face = pick_face_for_flavor(regular, italic, emoji, c.ch, c.italic);
+        let (m, bmp) = face.rasterize(c.ch, font_px);
+        blit_one_flavor_glyph(rgba, width, height, cx, baseline_y, m, &bmp, c.bold);
+        cx += m.advance_width;
+    }
+}
+
+/// Multi-line relic inspect flavor: mixed regular/italic and faux-bold at a
+/// fixed `font_px`, bottom-aligned in `height`.
+pub fn rasterize_label_flavor_spans(
+    font: &fontdue::Font,
+    font_italic: &fontdue::Font,
+    emoji_font: Option<&fontdue::Font>,
+    spans: &[RelicFlavorSpan],
+    width: u32,
+    height: u32,
+    font_px: f32,
+    align: LabelAlign,
+) -> Vec<u8> {
+    if spans.is_empty() {
+        return vec![0u8; (width * height * 4) as usize];
+    }
+    let font_px = font_px.max(8.0);
+    let hard_lines = flatten_relic_flavor_to_hard_lines(spans);
+    let max_w = width as f32;
+    let mut soft_lines: Vec<Vec<FlavorCell>> = Vec::new();
+    for hl in &hard_lines {
+        if hl.is_empty() {
+            soft_lines.push(Vec::new());
+            continue;
+        }
+        let mut wrapped = wrap_flavor_hard_line(hl, max_w, font, font_italic, emoji_font, font_px);
+        soft_lines.append(&mut wrapped);
+    }
+    if soft_lines.is_empty() {
+        return vec![0u8; (width * height * 4) as usize];
+    }
+    let line_metrics = font.horizontal_line_metrics(font_px);
+    let (line_h, ascender_px) = if let Some(lm) = line_metrics {
+        (lm.new_line_size, lm.ascent)
+    } else {
+        (font_px * 1.2, font_px * 0.8)
+    };
+    let total_h = line_h * soft_lines.len() as f32;
+    let block_top = (height as f32 - total_h).max(0.0);
+    let mut rgba = vec![0u8; (width * height * 4) as usize];
+    for (i, line) in soft_lines.iter().enumerate() {
+        if line.is_empty() {
+            continue;
+        }
+        let baseline_y = block_top + i as f32 * line_h + ascender_px;
+        let adv = flavor_line_advance(font, font_italic, emoji_font, line, font_px);
+        let start_x = match align {
+            LabelAlign::Left => 0.0,
+            LabelAlign::Center => (width as f32 - adv) * 0.5,
+            LabelAlign::Right => width as f32 - adv,
+        };
+        blit_flavor_line(
+            line,
+            &mut rgba,
+            width,
+            height,
+            start_x,
+            baseline_y,
+            font,
+            font_italic,
+            emoji_font,
+            font_px,
+        );
+    }
+    rgba
 }
 
 /// Compute per-character advance widths for text rendered in a rect.

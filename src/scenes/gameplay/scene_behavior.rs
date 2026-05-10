@@ -9,7 +9,7 @@ use crate::scenes::tutorial_overlay::TutorialOverlay;
 use crate::scenes::{BackgroundId, MeldGuideScene, OverlayRequest};
 use crate::ui::inspect_plaque::{
     dora_focus_tooltip_strings, gameplay_consumable_description_full, hand_tile_inspect_lines,
-    push_focus_tooltip_panel_2d,
+    push_floating_relic_flavor_labels, push_focus_tooltip_panel_2d,
 };
 
 impl SceneBehavior for GameplayScene {
@@ -1518,6 +1518,16 @@ impl SceneBehavior for GameplayScene {
                                     false,
                                     false,
                                 );
+                                if let Some(d) = def.filter(|d| !d.flavor.is_empty()) {
+                                    push_floating_relic_flavor_labels(
+                                        &mut inspect_tooltip_texts,
+                                        layout.window_w,
+                                        layout.window_h,
+                                        ctx.ui_scale,
+                                        d.flavor,
+                                        0.0,
+                                    );
+                                }
                             }
                         }
                         FocusTarget::Consumable(i) => {

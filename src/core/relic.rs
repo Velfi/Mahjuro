@@ -413,12 +413,44 @@ pub enum RelicRenderMaterial {
     Gold,
 }
 
+/// One styled run for relic inspect flavor text (floating overlay only).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct RelicFlavorSpan {
+    pub text: &'static str,
+    pub bold: bool,
+    pub italic: bool,
+}
+
+/// Cache key for rasterized flavor labels (must change when content or styles change).
+pub fn flavor_spans_cache_key(spans: &[RelicFlavorSpan]) -> String {
+    let mut s = String::new();
+    for sp in spans {
+        s.push_str(sp.text);
+        s.push('\x1f');
+        s.push(if sp.bold { 'B' } else { 'b' });
+        s.push(if sp.italic { 'I' } else { 'i' });
+        s.push('\x1f');
+    }
+    s
+}
+
 #[derive(Clone, Debug)]
 pub struct RelicDef {
     pub id: RelicId,
     pub name: &'static str,
     pub description: &'static str,
     pub rarity: Rarity,
+    /// Optional flavor lines for inspect UI only; empty when absent in data.
+    pub flavor: &'static [RelicFlavorSpan],
+}
+
+#[derive(Deserialize)]
+struct RelicFlavorSpanRaw {
+    text: String,
+    #[serde(default)]
+    bold: bool,
+    #[serde(default)]
+    italic: bool,
 }
 
 #[derive(Deserialize)]
@@ -427,6 +459,8 @@ struct RelicDefRaw {
     name: String,
     description: String,
     rarity: Rarity,
+    #[serde(default)]
+    flavor_spans: Vec<RelicFlavorSpanRaw>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -758,11 +792,33 @@ fn load_relic_defs() -> Vec<RelicDef> {
     const PATH: &str = "data/relics.json";
     let raw: Vec<RelicDefRaw> = load_json_asset(PATH, "relic data");
     raw.into_iter()
-        .map(|r| RelicDef {
-            id: r.id,
-            name: Box::leak(r.name.into_boxed_str()),
-            description: Box::leak(r.description.into_boxed_str()),
-            rarity: r.rarity,
+        .map(|r| {
+            let flavor: &'static [RelicFlavorSpan] = if r.flavor_spans.is_empty() {
+                &[]
+            } else {
+                let v: Vec<RelicFlavorSpan> = r
+                    .flavor_spans
+                    .into_iter()
+                    .filter(|s| !s.text.trim().is_empty())
+                    .map(|s| RelicFlavorSpan {
+                        text: Box::leak(s.text.into_boxed_str()),
+                        bold: s.bold,
+                        italic: s.italic,
+                    })
+                    .collect();
+                if v.is_empty() {
+                    &[]
+                } else {
+                    Box::leak(v.into_boxed_slice())
+                }
+            };
+            RelicDef {
+                id: r.id,
+                name: Box::leak(r.name.into_boxed_str()),
+                description: Box::leak(r.description.into_boxed_str()),
+                rarity: r.rarity,
+                flavor,
+            }
         })
         .collect()
 }

@@ -317,6 +317,10 @@ pub struct AppSettings {
     pub discard_undo_enabled: bool,
     #[serde(default = "default_ui_scale")]
     pub ui_scale: f32,
+    /// Per profile slot: `run_history.len()` last time the player opened Archive.
+    /// Used for a subtle "new chronicle" hint on the main menu.
+    #[serde(default = "default_archive_last_seen_run_len")]
+    pub archive_last_seen_run_len: [u32; 3],
 }
 
 fn default_volume() -> f32 {
@@ -330,6 +334,10 @@ fn default_gamma() -> f32 {
 }
 fn default_ui_scale() -> f32 {
     1.0
+}
+
+fn default_archive_last_seen_run_len() -> [u32; 3] {
+    [0, 0, 0]
 }
 
 /// Min/max for the user-facing gamma slider.
@@ -365,6 +373,7 @@ impl Default for AppSettings {
             hints_enabled: false,
             discard_undo_enabled: false,
             ui_scale: 1.0,
+            archive_last_seen_run_len: [0, 0, 0],
         }
     }
 }

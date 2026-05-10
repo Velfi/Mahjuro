@@ -1,5 +1,5 @@
-//! Collection scene — 3D skeuomorphic vault. Four tabs
-//! (Relics / Yaku / Bosses / Talismans) each render as an infinite
+//! Archive collection — 3D skeuomorphic vault. Five tabs
+//! (Relics / Yaku / Bosses / Talismans / Chronicle) each render as an infinite
 //! scrolling grid of artifacts; focusing a cell lifts its close-up
 //! + description card into the foreground HUD.
 
@@ -19,7 +19,9 @@ use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, PointLight
 use crate::ui::input::UiAction;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
+use super::archive_career;
 use super::main_menu_exterior::MainMenuExteriorScene;
+use super::profile_select::ProfileSelectScene;
 use super::{DrawCtx, OverlayRequest, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 use crate::scenes::object3d_inspect::{
     InspectFrameEnv, InspectRig, ItemInspectOrbitState, apply_inspect_view_to_frame,
@@ -34,9 +36,16 @@ enum Tab {
     Yaku,
     Bosses,
     Talismans,
+    Chronicle,
 }
 
-const TABS: [Tab; 4] = [Tab::Relics, Tab::Yaku, Tab::Bosses, Tab::Talismans];
+const TABS: [Tab; 5] = [
+    Tab::Relics,
+    Tab::Yaku,
+    Tab::Bosses,
+    Tab::Talismans,
+    Tab::Chronicle,
+];
 
 impl Tab {
     fn label(self) -> &'static str {
@@ -45,6 +54,7 @@ impl Tab {
             Tab::Yaku => "Yaku",
             Tab::Bosses => "Bosses",
             Tab::Talismans => "Talismans",
+            Tab::Chronicle => "Chronicle",
         }
     }
 }
@@ -70,11 +80,14 @@ enum ArtifactKind {
     /// Yaku, rules, and bosses don't have per-item 3D models — they
     /// render as engraved plaques on the table.
     PlaqueOnly,
+    /// Index into [`crate::core::progression::PlayerProgress::run_history`].
+    ChronicleRun(usize),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CollectionAction {
     Back,
+    SwitchSave,
     PrevTab,
     NextTab,
     /// Click on an artifact in the current tab's row → set as the
@@ -88,6 +101,7 @@ impl CollectionAction {
     fn id(self) -> FocusId {
         match self {
             CollectionAction::Back => FocusId(20),
+            CollectionAction::SwitchSave => FocusId(23),
             CollectionAction::PrevTab => FocusId(21),
             CollectionAction::NextTab => FocusId(22),
             // SelectArtifact IDs start at 200. The widget tree just needs
@@ -134,6 +148,8 @@ pub struct CollectionScene {
     /// doesn't desync the tween. `None` means the camera is parked at
     /// `cam_target` (no tween in flight).
     cam_anim: std::cell::Cell<Option<CamAnim>>,
+    /// Last `run_history.len()` reported to persist "seen" chronicle hints.
+    chronicle_seen_cursor: Option<u32>,
 }
 
 #[derive(Clone, Copy)]
@@ -169,6 +185,7 @@ impl CollectionScene {
             target_scroll_rows: std::cell::Cell::new(0.0),
             scroll_last_tick: std::cell::Cell::new(Instant::now()),
             cam_anim: std::cell::Cell::new(None),
+            chronicle_seen_cursor: None,
         }
     }
 
@@ -266,6 +283,8 @@ impl CollectionScene {
         let margin_x = w * 0.04;
         let back_w = (70.0 * scale).max(48.0);
         let back_h = (24.0 * scale).max(18.0);
+        let switch_w = (118.0 * scale).min(w * 0.22).max(88.0);
+        let switch_x = w - margin_x - switch_w;
         let arrow_w = (40.0 * scale).max(28.0);
         let arrow_h = back_h;
         // Footer-centered Prev/Next so the player can drive the cabinet
@@ -280,6 +299,11 @@ impl CollectionScene {
                 CollectionAction::Back.id(),
                 [margin_x, title_y, back_w, back_h],
                 CollectionAction::Back,
+            ),
+            FlatItem::new(
+                CollectionAction::SwitchSave.id(),
+                [switch_x, title_y, switch_w, back_h],
+                CollectionAction::SwitchSave,
             ),
             FlatItem::new(
                 CollectionAction::PrevTab.id(),
@@ -785,6 +809,35 @@ impl CollectionScene {
                             arrange_name: None,
                         });
                     }
+                    ArtifactKind::ChronicleRun(_) => {
+                        use crate::render::primitive::{
+                            DecalLayout, DecalSpec, MaterialSpec, MeshId,
+                        };
+                        plaques.push(Object3d {
+                            pos: [cx, nameplate_py, cz],
+                            extents: [plate_w, plate_h, plate_thick],
+                            rotation: euler_xyz_rad_from_deg(90.0, 0.0, 0.0),
+                            color: bright,
+                            kind: Object3dKind::Primitive {
+                                shape: MeshId::BeveledSlab,
+                                material: MaterialSpec::lacquered_wood_flat().with_decal(
+                                    DecalSpec {
+                                        text: boss.name.clone(),
+                                        layout: DecalLayout::Fit {
+                                            target_short_edge:
+                                                crate::render::decal::PLAQUE_DECAL_HEIGHT,
+                                        },
+                                    },
+                                ),
+                                pick_id: None,
+                                shadow_caster: false,
+                                silhouette: false,
+                            },
+                            hover_target: if is_focus { 1.0 } else { 0.0 },
+                            anim_id: boss_i as u64,
+                            arrange_name: None,
+                        });
+                    }
                 }
             }
         }
@@ -954,13 +1007,39 @@ impl CollectionScene {
                         arrange_name: Some(closeup_anchor.arrange_name),
                     });
                 }
+                ArtifactKind::ChronicleRun(_) => {
+                    let label = boss.name.clone();
+                    use crate::render::primitive::{DecalLayout, DecalSpec, MaterialSpec, MeshId};
+                    let closeup_material = MaterialSpec::lacquered_wood_flat().with_decal(DecalSpec {
+                        text: label,
+                        layout: DecalLayout::Fit {
+                            target_short_edge: crate::render::decal::PLAQUE_DECAL_HEIGHT,
+                        },
+                    });
+                    hud_plaques.push(Object3d {
+                        pos: closeup_anchor.pos,
+                        extents: [closeup_size, closeup_size, closeup_size * 0.1],
+                        rotation: closeup_anchor.object3d_rotation(),
+                        color: closeup_bright,
+                        kind: Object3dKind::Primitive {
+                            shape: MeshId::BeveledSlab,
+                            material: closeup_material,
+                            pick_id: None,
+                            shadow_caster: false,
+                            silhouette: false,
+                        },
+                        hover_target: 1.0,
+                        anim_id: 0xC105E0,
+                        arrange_name: Some(closeup_anchor.arrange_name),
+                    });
+                }
             }
 
             // ── Description plaque ───────────────────────────────────
             let card_w = h * 0.22;
             let card_h = h * 0.16;
             let card_px = cab_px_x + card_wx;
-            let body = description_for(boss, ctx.run);
+            let body = description_for(boss, ctx.run, ctx.progress);
             let card_text = if body.is_empty() {
                 boss.name.clone()
             } else {
@@ -1099,7 +1178,7 @@ impl CollectionScene {
             self.tree.register_flat_buttons(&items, &mut frame.buttons);
         }
 
-        frame.window_title = format!("Mahjuro — Collection ({})", self.active_tab.label());
+        frame.window_title = format!("Mahjuro — Archive ({})", self.active_tab.label());
         frame
     }
 
@@ -1123,15 +1202,46 @@ impl CollectionScene {
         let title_font = (24.0 * scale).max(14.0);
         let title_h = (title_font / 0.55).ceil();
         let title_y = h * 0.02;
+        let margin_x = w * 0.04;
         text_labels.push(TextLabel {
             rect: [0.0, title_y, w, title_h],
-            text: format!("Collection — {}", self.active_tab.label()),
+            text: format!("Archive — {}", self.active_tab.label()),
             color: color::CHAMPAGNE,
             ..Default::default()
         });
 
+        // Career frieze (secondary to tab title): short lines, wide rect for font scaling.
+        let frieze_font = typography::size(typography::CAPTION, h, ui_scale);
+        let frieze_line_h = (frieze_font / 0.55).ceil();
+        let frieze_top = title_y + title_h + h * 0.008;
+        for (i, line) in archive_career::career_frieze_lines(ctx.progress)
+            .into_iter()
+            .take(4)
+            .enumerate()
+        {
+            text_labels.push(TextLabel {
+                rect: [
+                    margin_x,
+                    frieze_top + i as f32 * (frieze_line_h + 2.0),
+                    w - margin_x * 2.0,
+                    frieze_line_h,
+                ],
+                text: line,
+                color: [0.78, 0.76, 0.70, 0.92],
+                ..Default::default()
+            });
+        }
+        if matches!(self.active_tab, Tab::Chronicle) {
+            let note_y = frieze_top + 4.0 * (frieze_line_h + 2.0) + h * 0.01;
+            text_labels.push(TextLabel {
+                rect: [margin_x, note_y, w - margin_x * 2.0, frieze_line_h],
+                text: archive_career::CHRONICLE_TUTORIAL_NOTE.into(),
+                color: [0.62, 0.64, 0.72, 0.88],
+                ..Default::default()
+            });
+        }
+
         // Back button.
-        let margin_x = w * 0.04;
         let back_w = (70.0 * scale).max(48.0);
         let back_h = (24.0 * scale).max(18.0);
         quads.push(GpuInstance {
@@ -1141,6 +1251,19 @@ impl CollectionScene {
         text_labels.push(TextLabel {
             rect: [margin_x, title_y, back_w, back_h],
             text: "< Back".into(),
+            color: [0.85, 0.85, 0.95, 1.0],
+            ..Default::default()
+        });
+
+        let switch_w = (118.0 * scale).min(w * 0.22).max(88.0);
+        let switch_x = w - margin_x - switch_w;
+        quads.push(GpuInstance {
+            rect: [switch_x, title_y, switch_w, back_h],
+            color: [0.18, 0.20, 0.30, 0.92],
+        });
+        text_labels.push(TextLabel {
+            rect: [switch_x, title_y, switch_w, back_h],
+            text: "Switch save".into(),
             color: [0.85, 0.85, 0.95, 1.0],
             ..Default::default()
         });
@@ -1184,6 +1307,8 @@ impl CollectionScene {
         let hint_y = arrow_y - hint_h - h * 0.010;
         let hint_text = if inspect.is_some() {
             "Right stick: orbit   Triggers / scroll: zoom   E / North: close inspect   Esc: back to menu"
+        } else if matches!(self.active_tab, Tab::Chronicle) && all_count_hint == 0 {
+            "Finish a non-tutorial run to add folios here. Tab / Shift+Tab: cycle tab   Esc: back"
         } else if tab_scrollable {
             "Tab / Shift+Tab: cycle tab   \u{2190}\u{2192}\u{2191}\u{2193}: focus   Wheel/PgUp/PgDn: scroll   Enter: pedestal   E / North: inspect   Esc: back"
         } else {
@@ -1224,6 +1349,12 @@ impl CollectionScene {
 
 impl SceneBehavior for CollectionScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
+        let len = ctx.progress.run_history.len() as u32;
+        if self.chronicle_seen_cursor != Some(len) {
+            self.chronicle_seen_cursor = Some(len);
+            *ctx.bump_archive_chronicle_seen = Some(len);
+        }
+
         let items = self.flat_items(
             ctx.layout.window_w,
             ctx.layout.window_h,
@@ -1445,6 +1576,12 @@ impl SceneBehavior for CollectionScene {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
                 return Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()));
             }
+            Some(CollectionAction::SwitchSave) => {
+                ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
+                return Some(Scene::ProfileSelect(
+                    ProfileSelectScene::from_archive_switch_save(),
+                ));
+            }
             Some(CollectionAction::PrevTab) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                 self.cycle_tab(false);
@@ -1584,6 +1721,18 @@ fn tab_artifacts(tab: Tab, progress: &crate::core::progression::PlayerProgress) 
                 accent: tk.accent_color(),
             })
             .collect(),
+        Tab::Chronicle => archive_career::chronicle_indices_recent_first(progress)
+            .into_iter()
+            .filter_map(|idx| {
+                let rec = progress.run_history.get(idx)?;
+                Some(Artifact {
+                    name: archive_career::chronicle_folio_title(progress, rec),
+                    unlocked: true,
+                    kind: ArtifactKind::ChronicleRun(idx),
+                    accent: color::PARCHMENT,
+                })
+            })
+            .collect(),
     }
 }
 
@@ -1603,7 +1752,11 @@ fn zodiac_for_yaku(yk: YakuKind) -> ZodiacKind {
 /// module's own description method (with live-counter support for
 /// relics). Yaku entries describe the hand + the zodiac ribbon that
 /// levels it up — the two live on one catalog card now.
-fn description_for(art: &Artifact, run: &crate::game::run::RunState) -> String {
+fn description_for(
+    art: &Artifact,
+    run: &crate::game::run::RunState,
+    progress: &crate::core::progression::PlayerProgress,
+) -> String {
     if !art.unlocked {
         return "Locked — keep playing to reveal this entry.".to_string();
     }
@@ -1627,6 +1780,11 @@ fn description_for(art: &Artifact, run: &crate::game::run::RunState) -> String {
                 .map(str::to_string)
                 .unwrap_or_default()
         }
+        ArtifactKind::ChronicleRun(idx) => progress
+            .run_history
+            .get(*idx)
+            .map(archive_career::chronicle_run_description)
+            .unwrap_or_else(|| "Missing run record.".to_string()),
     }
 }
 
@@ -1678,6 +1836,11 @@ fn stats_for(art: &Artifact, progress: &crate::core::progression::PlayerProgress
                 if let Some(n) = progress.boss_times_defeated.get(&def.kind).copied() {
                     lines.push(format!("Defeated: {}", n));
                 }
+            }
+        }
+        ArtifactKind::ChronicleRun(idx) => {
+            if let Some(rec) = progress.run_history.get(*idx) {
+                return archive_career::chronicle_run_stats(rec);
             }
         }
     }

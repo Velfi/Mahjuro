@@ -711,6 +711,10 @@ pub struct TextLabel {
     /// Shifts the rasterised text leftward by this many pixels so the
     /// caller can animate it for overflow text.  Default 0.0.
     pub scroll_offset: f32,
+    /// Relic inspect flavor only: when non-empty, rasterized with mixed
+    /// regular/italic and faux-bold; `text` is not drawn (cache uses
+    /// [`crate::core::relic::flavor_spans_cache_key`]).
+    pub flavor_spans: Option<&'static [crate::core::relic::RelicFlavorSpan]>,
 }
 
 impl Default for TextLabel {
@@ -723,6 +727,7 @@ impl Default for TextLabel {
             align: TextAlign::Center,
             no_glossary: false,
             scroll_offset: 0.0,
+            flavor_spans: None,
         }
     }
 }
@@ -736,6 +741,8 @@ impl Default for TextLabel {
 struct TextLabelShapeKey {
     /// Font kind: `false` = ui_font, `true` = emoji-fallback path.
     emoji_path: bool,
+    /// Relic flavor span raster path (italic + faux-bold).
+    flavor_spans: bool,
     /// Font size in px, quantized to int. `None` means auto-size from rect.
     font_px: Option<u32>,
     /// Rasterized texture width in px (rect.w clamped to [1, 16384]).
@@ -1102,6 +1109,7 @@ pub struct WgpuRenderer {
     image_pipeline_scene_hdr: wgpu::RenderPipeline,
     ui_font: Option<fontdue::Font>,
     emoji_font: Option<fontdue::Font>,
+    ui_font_italic: Option<fontdue::Font>,
     pub size: crate::physical_size::PhysicalSize,
     /// Last focused tile index — used to detect focus changes.
     last_focus: usize,
