@@ -1,5 +1,5 @@
-use super::*;
 use super::camera::CameraFrame;
+use super::*;
 
 impl WgpuRenderer {
     fn draw_gltf_room_env_meshes(

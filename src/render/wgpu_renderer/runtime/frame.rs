@@ -98,7 +98,9 @@ impl WgpuRenderer {
         frame.cmds.iter().any(|cmd| {
             matches!(
                 cmd,
-                DrawCmd::MoonlitWater | DrawCmd::ShopEnvironment | DrawCmd::HallwayEnvironment
+                DrawCmd::MoonlitWater
+                    | DrawCmd::ShopEnvironment
+                    | DrawCmd::HallwayEnvironment
                     | DrawCmd::EmberDrift
             )
         })
@@ -169,9 +171,10 @@ impl WgpuRenderer {
         let pl_w = self.size.width.max(1) as f32;
         let pl_h = self.size.height.max(1) as f32;
         let time_s = self.creation_time.elapsed().as_secs_f32();
-        let has_showcase_tiles = frame.cmds.iter().any(|c| {
-            matches!(c, crate::render::draw_cmd::DrawCmd::ShowcaseTileBatch(_))
-        });
+        let has_showcase_tiles = frame
+            .cmds
+            .iter()
+            .any(|c| matches!(c, crate::render::draw_cmd::DrawCmd::ShowcaseTileBatch(_)));
         let h = &frame.showcase_render_hints;
         let lit_mesh_inv_scale = if frame.scene_lighting.embedded_gltf_punctual {
             self.shop_lit_mesh_gltf_punctual_scale

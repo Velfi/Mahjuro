@@ -1168,7 +1168,10 @@ impl WgpuRenderer {
         if ops.iter().any(|o| matches!(o, RenderOp::ShopEnvironment)) {
             self.write_shop_environment_uniforms(frame, &camera, false);
         }
-        if ops.iter().any(|o| matches!(o, RenderOp::HallwayEnvironment)) {
+        if ops
+            .iter()
+            .any(|o| matches!(o, RenderOp::HallwayEnvironment))
+        {
             self.write_hallway_environment_uniforms(frame, &camera, false);
         }
 
@@ -1499,7 +1502,9 @@ impl WgpuRenderer {
         let glb_room_bloom_linear = bloom_active
             && frame.room_uses_shop_glb_shader()
             && (ops.iter().any(|o| matches!(o, RenderOp::ShopEnvironment))
-                || ops.iter().any(|o| matches!(o, RenderOp::HallwayEnvironment)));
+                || ops
+                    .iter()
+                    .any(|o| matches!(o, RenderOp::HallwayEnvironment)));
         if glb_room_bloom_linear {
             if ops.iter().any(|o| matches!(o, RenderOp::ShopEnvironment))
                 && self.shop_environment.is_some()
@@ -1545,7 +1550,9 @@ impl WgpuRenderer {
                 }
                 self.write_shop_environment_uniforms(frame, &camera, false);
             }
-            if ops.iter().any(|o| matches!(o, RenderOp::HallwayEnvironment))
+            if ops
+                .iter()
+                .any(|o| matches!(o, RenderOp::HallwayEnvironment))
                 && self.hallway_environment.is_some()
                 && !self.hallway_env_primitives.is_empty()
             {
@@ -1592,40 +1599,34 @@ impl WgpuRenderer {
         }
 
         if glb_room_bloom_linear && !is_prepass {
-            let room_aabb =
-                if ops
-                    .iter()
-                    .any(|o| matches!(o, RenderOp::ShopEnvironment))
-                {
-                    crate::render::shop_glb::with_shop_glb_cpu(|cpu| {
-                        cpu.and_then(|c| {
-                            let corners =
-                                crate::render::shop_glb::shop_world_bounds_corners_centered(
-                                    camera.h,
-                                    self.shop_env_height_scale,
-                                    c,
-                                );
-                            crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
-                        })
+            let room_aabb = if ops.iter().any(|o| matches!(o, RenderOp::ShopEnvironment)) {
+                crate::render::shop_glb::with_shop_glb_cpu(|cpu| {
+                    cpu.and_then(|c| {
+                        let corners = crate::render::shop_glb::shop_world_bounds_corners_centered(
+                            camera.h,
+                            self.shop_env_height_scale,
+                            c,
+                        );
+                        crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
                     })
-                } else if ops
-                    .iter()
-                    .any(|o| matches!(o, RenderOp::HallwayEnvironment))
-                {
-                    crate::render::hallway_glb::with_hallway_glb_cpu(|cpu| {
-                        cpu.and_then(|c| {
-                            let corners =
-                                crate::render::shop_glb::shop_world_bounds_corners_centered(
-                                    camera.h,
-                                    self.shop_env_height_scale,
-                                    c,
-                                );
-                            crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
-                        })
+                })
+            } else if ops
+                .iter()
+                .any(|o| matches!(o, RenderOp::HallwayEnvironment))
+            {
+                crate::render::hallway_glb::with_hallway_glb_cpu(|cpu| {
+                    cpu.and_then(|c| {
+                        let corners = crate::render::shop_glb::shop_world_bounds_corners_centered(
+                            camera.h,
+                            self.shop_env_height_scale,
+                            c,
+                        );
+                        crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
                     })
-                } else {
-                    None
-                };
+                })
+            } else {
+                None
+            };
 
             let [nx, ny, nz] = crate::render::shop_glb::ROOM_EMISSIVE_PROBE_GRID;
             let probe_count = nx * ny * nz;
@@ -1649,11 +1650,7 @@ impl WgpuRenderer {
                     nx,
                     ny,
                     nz,
-                    if room_aabb.is_some() {
-                        probe_count
-                    } else {
-                        0
-                    },
+                    if room_aabb.is_some() { probe_count } else { 0 },
                 ],
                 screen_march: [
                     gw,
@@ -1789,11 +1786,7 @@ impl WgpuRenderer {
             data1: [
                 0.0,
                 0.0,
-                if bloom_active {
-                    0.02
-                } else {
-                    9999.0
-                },
+                if bloom_active { 0.02 } else { 9999.0 },
                 if bloom_active { 1.15 } else { 0.0 },
             ],
         };

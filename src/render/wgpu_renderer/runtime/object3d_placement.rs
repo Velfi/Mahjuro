@@ -79,8 +79,7 @@ impl WgpuRenderer {
                         }
                         _ => false,
                     };
-                    let center = if use_ray_plane
-                        && let Some(cam) = frame.camera_override.as_ref()
+                    let center = if use_ray_plane && let Some(cam) = frame.camera_override.as_ref()
                     {
                         crate::render::world_space::world_on_camera_ray_plane_z(
                             w, h, cam, obj.pos[0], obj.pos[1], obj.pos[2],
