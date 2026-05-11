@@ -1,0 +1,107 @@
+//! Renderer-wide numeric limits and clamp helpers.
+
+/// Maximum width/height for window-backed surfaces and derived HDR targets.
+/// Caps bogus platform `Resized` values that can otherwise allocate tens of GB.
+pub(crate) const MAX_RENDER_DIMENSION: u32 = 8192;
+
+pub(crate) fn clamp_render_physical_size(
+    size: crate::physical_size::PhysicalSize,
+) -> crate::physical_size::PhysicalSize {
+    let w = size.width.clamp(1, MAX_RENDER_DIMENSION);
+    let h = size.height.clamp(1, MAX_RENDER_DIMENSION);
+    if w != size.width || h != size.height {
+        log::warn!(
+            "clamping render size {}×{} to {}×{} (MAX_RENDER_DIMENSION={})",
+            size.width,
+            size.height,
+            w,
+            h,
+            MAX_RENDER_DIMENSION
+        );
+    }
+    crate::physical_size::PhysicalSize::new(w, h)
+}
+
+/// Maximum number of point lights uploaded each frame. Must match the array
+/// length in tile_3d.wgsl.
+pub const MAX_POINT_LIGHTS: usize = 16;
+
+/// Maximum number of spotlights uploaded each frame. Must match the array
+/// length in `tile_3d.wgsl` and `lit_mesh.wgsl`. Bound as render pipeline
+/// group 3 for tiles and lit meshes (table / Object3d).
+pub const MAX_SPOT_LIGHTS: usize = 8;
+
+/// Maximum number of analytic tile occluders uploaded for the candle-pool
+/// shadow tests in `lit_mesh.wgsl`. One per visible hand tile, conservatively
+/// sized so the full hand fits.
+pub const MAX_TILE_OCCLUDERS: usize = 16;
+
+pub(super) const MAX_SHOWCASE_TILE_SLOTS: usize = 160;
+
+/// Frames an unused entry stays in `text_label_cache` before eviction.
+pub(super) const TEXT_CACHE_TTL_FRAMES: u64 = 120;
+
+// Tile-mesh local extents (after `normalize_mesh` in tile_glb.rs):
+//   local X — long face axis  (extent ~1.000) → table-Z (front-back)
+//   local Y — thickness        (extent ~0.424) → world Y (up off table)
+//   local Z — short face axis  (extent ~0.734) → table-X (left-right)
+pub(super) const LOCAL_X_EXTENT: f32 = 1.000;
+pub(super) const LOCAL_Y_EXTENT: f32 = 0.424;
+pub(super) const LOCAL_Z_EXTENT: f32 = 0.734;
+
+pub const MAIN_MENU_PICK_PLAY: u32 = 240;
+pub const MAIN_MENU_PICK_OPTIONS: u32 = 241;
+pub const MAIN_MENU_PICK_QUIT: u32 = 242;
+
+/// Maximum number of physical relic placeholders rendered in one batch. Must
+/// match the size of the `relic_instances` slot pool below; the renderer
+/// silently truncates batches longer than this.
+pub const MAX_RELIC_SLOTS: usize = 128;
+/// Maximum number of zodiac/talisman ribbon *draw slots* per frame (across all
+/// `ZodiacBatch` cmds). Each textured ribbon uses up to 3 slots (top/mid/bot
+/// caps), so 16 logical ribbons × 3 = 48. Truncated silently.
+pub const MAX_RIBBON_SLOTS: usize = 48;
+/// Maximum number of talisman tablets rendered per frame.
+pub const MAX_TALISMAN_SLOTS: usize = 8;
+/// Maximum number of 3D bugs (insects near the lamp) rendered per frame.
+/// Each live bug consumes one slot for body + two for live wings + two for
+/// blur-fan surrogates (L/R). The blur-fan slot pools share this same size.
+pub const MAX_BUG_SLOTS: usize = 8;
+/// Maximum number of material-preview orbs rendered per frame. Only the
+/// material viewer debug scene uses these; 32 covers every `MaterialKind`
+/// with room to grow.
+pub const MAX_ORB_SLOTS: usize = 32;
+/// Maximum number of explicit auxiliary dishes per frame (the shop uses 2:
+/// the relic dish and the coin dish).
+/// Maximum number of shrine instances per frame (pick-blind uses 3: Small,
+/// Big, Boss). Truncated silently.
+pub const MAX_SHRINE_SLOTS: usize = 4;
+/// Maximum number of dora-plinth instances per frame (gameplay uses 1).
+pub const MAX_DORA_PLINTH_SLOTS: usize = 2;
+/// Maximum number of yaku tablets per frame (5 visible + headroom).
+pub const MAX_YAKU_TABLET_SLOTS: usize = 12;
+/// Maximum number of wood action tablets per frame (sort suit, sort rank, play).
+pub const MAX_WOOD_TABLET_SLOTS: usize = 8;
+/// Maximum number of leather books per frame (shop uses 1: journal).
+pub const MAX_BOOK_SLOTS: usize = 2;
+/// Maximum number of bowls per frame (gameplay uses 1: discard).
+pub const MAX_BOWL_SLOTS: usize = 2;
+/// Maximum number of bronze mirrors per frame (gameplay uses 1: play hand).
+pub const MAX_MIRROR_SLOTS: usize = 2;
+/// Maximum number of tally fans per frame (gameplay uses 2: draws + discards).
+pub const MAX_TALLY_FAN_SLOTS: usize = 2;
+/// Maximum total number of tally sticks rendered per frame across all fans.
+/// Each fan emits `count` base sticks plus `count` tip-cap overlays, so this
+/// bound is on the sum of both.
+pub const MAX_TALLY_STICK_SLOTS: usize = 32;
+/// Maximum number of facedown wall tiles drawn at the back of the table.
+pub const MAX_WALL_TILE_SLOTS: usize = 80;
+/// Cascade scoring bone pool (modifier strip + structure tier preview batches).
+pub use crate::render::gpu_types::MAX_CASCADE_TOKEN_SLOTS;
+/// Maximum number of in-flight 3D extruded-glyph score popups. A single
+/// cascade rarely fires more than 8-10 steps, so 32 is plenty for the
+/// per-step popups plus the running-total readout that holds across the
+/// final beat.
+/// Score reel uses up to 2 × N_COLS slots (prev + current per spinning column)
+/// plus popup labels. 48 gives headroom for reel overflow columns.
+pub const MAX_EXTRUDED_GLYPH_SLOTS: usize = 80;

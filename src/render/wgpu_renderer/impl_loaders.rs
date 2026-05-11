@@ -1,0 +1,174 @@
+use super::*;
+
+impl WgpuRenderer {
+    fn relic_mesh_for(&self, relic_id: RelicId) -> &LitMeshGpu {
+        self.relic_meshes
+            .get(&relic_id)
+            .unwrap_or(&self.relic_box_mesh)
+    }
+
+    /// Drain any decoded relic images from the background loader and upload them
+    /// to the GPU.  Called once per frame; a no-op once all images are loaded.
+    fn poll_relic_textures(&mut self) {
+        let Some(ref rx) = self.relic_rx else { return };
+        let mut finished = false;
+        // Non-blocking drain: upload every image that's ready this frame.
+        loop {
+            match rx.try_recv() {
+                Ok(img) => {
+                    let mesh_source = img
+                        .mesh_rgba
+                        .as_deref()
+                        .map(|rgba| (rgba, img.mesh_width, img.mesh_height))
+                        .unwrap_or((&img.rgba, img.width, img.height));
+                    if let Some(cpu) =
+                        build_relic_mesh_from_rgba(mesh_source.0, mesh_source.1, mesh_source.2)
+                    {
+                        // Cache the CPU triangle list alongside the GPU mesh so
+                        // `pick_collection_object` / `pick_shop_object` can do
+                        // per-triangle ray casts against the real silhouette
+                        // instead of a loose AABB slab.
+                        let tris: Vec<[glam::Vec3; 3]> = cpu
+                            .indices
+                            .chunks_exact(3)
+                            .map(|c| {
+                                let a = cpu.vertices[c[0] as usize].position;
+                                let b = cpu.vertices[c[1] as usize].position;
+                                let d = cpu.vertices[c[2] as usize].position;
+                                [
+                                    glam::Vec3::from(a),
+                                    glam::Vec3::from(b),
+                                    glam::Vec3::from(d),
+                                ]
+                            })
+                            .collect();
+                        self.relic_tri_lists.insert(img.id, tris);
+                        self.relic_meshes.insert(
+                            img.id,
+                            LitMeshGpu::new(
+                                &self.device,
+                                &cpu,
+                                &format!("relic-mesh-{:?}", img.id),
+                            ),
+                        );
+                    }
+                    let (tex, view) = upload_rgba_texture(
+                        &self.device,
+                        &self.queue,
+                        img.name,
+                        &img.rgba,
+                        img.width,
+                        img.height,
+                    );
+                    let (relief_tex, relief_view) = upload_rgba_texture_linear(
+                        &self.device,
+                        &self.queue,
+                        &format!("{}-relief", img.name),
+                        &img.relief_rgba,
+                        img.relief_width,
+                        img.relief_height,
+                    );
+                    let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some(img.name),
+                        layout: &self.text_bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(&self.tile_sampler),
+                            },
+                        ],
+                    });
+                    self.relic_textures.insert(
+                        img.id,
+                        RelicTextureGpu {
+                            view,
+                            texture: tex,
+                            bind_group,
+                            relief_texture: Some(relief_tex),
+                            relief_view,
+                        },
+                    );
+                }
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    finished = true;
+                    break;
+                }
+            }
+        }
+        if finished {
+            let elapsed = self
+                .relic_load_start
+                .take()
+                .map(|t| t.elapsed())
+                .unwrap_or_default();
+            log::debug!(
+                "all {} relic textures uploaded to GPU in {:?} (spawn → last upload)",
+                self.relic_textures.len(),
+                elapsed,
+            );
+            self.relic_rx = None; // drop the channel
+        }
+    }
+
+    /// Drain any decoded background images from the loader and upload to GPU.
+    fn poll_background_textures(&mut self) {
+        let Some(ref rx) = self.background_rx else {
+            return;
+        };
+        let mut finished = false;
+        loop {
+            match rx.try_recv() {
+                Ok(img) => {
+                    let label = format!("bg-{:?}", img.id);
+                    let (_tex, view) = upload_rgba_texture(
+                        &self.device,
+                        &self.queue,
+                        &label,
+                        &img.rgba,
+                        img.width,
+                        img.height,
+                    );
+                    let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some(&label),
+                        layout: &self.text_bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(&self.tile_sampler),
+                            },
+                        ],
+                    });
+                    self.background_textures
+                        .insert(img.id, BackgroundTextureGpu { bind_group });
+                }
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    finished = true;
+                    break;
+                }
+            }
+        }
+        if finished {
+            let elapsed = self
+                .background_load_start
+                .take()
+                .map(|t| t.elapsed())
+                .unwrap_or_default();
+            log::debug!(
+                "all {} background textures uploaded to GPU in {:?} (spawn → last upload)",
+                self.background_textures.len(),
+                elapsed,
+            );
+            self.background_rx = None;
+        }
+    }
+}

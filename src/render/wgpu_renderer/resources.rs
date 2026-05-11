@@ -423,7 +423,10 @@ pub(super) fn load_zodiac_ribbon_textures(
     let mut mid_views = Vec::with_capacity(cap);
     let mut bot_views = Vec::with_capacity(cap);
 
-    let load_one = |textures: &mut Vec<wgpu::Texture>, slug: &str, part: &str| -> wgpu::TextureView {
+    let load_one = |textures: &mut Vec<wgpu::Texture>,
+                    slug: &str,
+                    part: &str|
+     -> wgpu::TextureView {
         let path = format!("textures/zodiacs/zodiac_{}_{}.png", slug, part);
         let label = format!("zodiac-ribbon-{}-{}", slug, part);
         let (tex, view) = match crate::asset_path::get(&path) {

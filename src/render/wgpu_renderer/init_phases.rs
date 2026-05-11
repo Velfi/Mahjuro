@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use super::embedded_wgsl;
 use super::{
-    clamp_render_physical_size, create_depth, create_depth_copy, RenderTarget, TargetInit,
+    RenderTarget, TargetInit, clamp_render_physical_size, create_depth, create_depth_copy,
 };
 
 /// All WGSL `ShaderModule`s created during renderer init (no pipelines).
@@ -249,9 +249,7 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
                     log::info!("HDR enabled — using Rgba16Float surface format");
                     wgpu::TextureFormat::Rgba16Float
                 } else {
-                    log::warn!(
-                        "HDR requested but Rgba16Float not supported; falling back to sRGB"
-                    );
+                    log::warn!("HDR requested but Rgba16Float not supported; falling back to sRGB");
                     swapchain_sdr_format
                 }
             } else {
@@ -378,8 +376,7 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
         }
     };
 
-    let (depth_texture, depth_view) =
-        create_depth(&device, size.width.max(1), size.height.max(1));
+    let (depth_texture, depth_view) = create_depth(&device, size.width.max(1), size.height.max(1));
     let (ssr_prev_depth_texture, ssr_prev_depth_view) =
         create_depth_copy(&device, size.width.max(1), size.height.max(1));
 

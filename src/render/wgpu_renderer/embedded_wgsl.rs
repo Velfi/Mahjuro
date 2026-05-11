@@ -60,7 +60,10 @@ pub const SHOP_GLB: &str = concat!(
         "/shaders/scene_hdr_tonemap.wgsl"
     )),
     "\n",
-    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/shop_glb.wgsl")),
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/shaders/shop_glb.wgsl"
+    )),
 );
 
 /// `scene_hdr_tonemap` + `tile_outline`
@@ -88,5 +91,8 @@ pub const LIT_MESH: &str = concat!(
         "/shaders/scene_hdr_tonemap.wgsl"
     )),
     "\n",
-    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/lit_mesh.wgsl")),
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/shaders/lit_mesh.wgsl"
+    )),
 );

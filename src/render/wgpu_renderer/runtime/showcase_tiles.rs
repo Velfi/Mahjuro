@@ -55,10 +55,9 @@ impl WgpuRenderer {
                 .min(MAX_SHOWCASE_TILE_SLOTS);
 
             if total_showcase > 0 {
-                let tileset_owned = self
-                    .tile_set
-                    .clone()
-                    .expect("tile_set must be set by apply_render_settings before drawing showcase tiles");
+                let tileset_owned = self.tile_set.clone().expect(
+                    "tile_set must be set by apply_render_settings before drawing showcase tiles",
+                );
                 self.ensure_showcase_decal_atlas(&tileset_owned);
             }
 
@@ -157,10 +156,9 @@ impl WgpuRenderer {
                     );
                     // Re-rasterise decal if the tile identity changed.
                     if self.showcase_tiles[slot_cursor].tile_id != wanted_id {
-                        let decal_atlas = self
-                            .showcase_decal_atlas
-                            .as_ref()
-                            .expect("showcase decal atlas must be built when showcase tiles are drawn");
+                        let decal_atlas = self.showcase_decal_atlas.as_ref().expect(
+                            "showcase decal atlas must be built when showcase tiles are drawn",
+                        );
                         let ctx = ShowcaseTileCtx {
                             device: &self.device,
                             layout: &self.tile_material_layout,
@@ -191,7 +189,9 @@ impl WgpuRenderer {
                             )
                         }
                         (Some("showcase"), Some(cam))
-                            if frame.showcase_render_hints.showcase_tiles_use_camera_ray_plane_z =>
+                            if frame
+                                .showcase_render_hints
+                                .showcase_tiles_use_camera_ray_plane_z =>
                         {
                             crate::render::world_space::world_on_camera_ray_plane_z(
                                 w,
