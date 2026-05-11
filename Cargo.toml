@@ -7,12 +7,6 @@ edition = "2024"
 inherits = "release"
 debug = true
 
-# Use when `cargo build --release` hits `rustc-LLVM ERROR: out of memory` on the
-# `mahjuro` lib (large LLVM IR at opt-level 3). Example: `cargo run --profile release-low-mem`
-[profile.release-low-mem]
-inherits = "release"
-opt-level = 1
-
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]
 opt-level = 1

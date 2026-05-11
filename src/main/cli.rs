@@ -39,6 +39,9 @@ pub enum Command {
     /// Use `--scene showcase` without `--pack` for the zodiac ribbon (same as `zodiac_celebration`).
     /// Use `--scene game_over_level_up` for meta profile level-up (`Showcase` / `MetaLevelUpPresenter`).
     Screenshot(ScreenshotCli),
+    /// Internal: Win32 Vulkan WSI smoke test (parent uses this to fall back to DX12 on fault).
+    #[command(hide = true, name = "vulkan-wsi-probe")]
+    VulkanWsiProbe,
 }
 
 /// Headless one-shot capture: runs `warmup_frames` settle ticks offscreen, then writes `--output`.

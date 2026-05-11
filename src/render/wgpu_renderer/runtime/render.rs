@@ -2043,11 +2043,25 @@ impl WgpuRenderer {
         // this is safe. Tied into the same encoder so no extra submit.
         // Skipped on the journal pre-pass — only the final swapchain
         // pass produces a presentable image worth screenshotting.
-        let screenshot_path = if is_prepass {
+        let mut screenshot_path = if is_prepass {
             None
         } else {
             self.pending_screenshot.take()
         };
+        if let Some(ref path) = screenshot_path {
+            if matches!(self.target, RenderTarget::Surface(_))
+                && !self
+                    .config
+                    .usage
+                    .contains(wgpu::TextureUsages::COPY_SRC)
+            {
+                log::warn!(
+                    "screenshot skipped ({}): swapchain has no COPY_SRC (see MAHJURO_VULKAN_WIN_SURFACE_COPY on Windows Vulkan)",
+                    path.display()
+                );
+                screenshot_path = None;
+            }
+        }
         let screenshot_staging = match (&screenshot_path, &frame_texture_opt) {
             (Some(path), Some(ft)) => {
                 log::debug!("screenshot: encoding capture for {}", path.display());

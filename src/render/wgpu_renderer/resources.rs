@@ -11,6 +11,11 @@ use crate::render::gpu_types::RelicTextureGpu;
 /// GPU scene target — independent of swapchain (SDR vs HDR).
 pub(crate) const SCENE_HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
+/// Backgrounds decoded in `spawn_background_loader`. Keep in sync with that thread:
+/// if every decode fails, the renderer still inserts a solid GPU fallback (see `impl_loaders`)
+/// so `is_loading()` clearing does not leave the main menu drawing nothing.
+pub(crate) const ASYNC_LOADED_BACKGROUNDS: &[BackgroundId] = &[BackgroundId::MainMenuExterior];
+
 /// Pre-loaded background texture + bind group for the image pipeline.
 pub(crate) struct BackgroundTextureGpu {
     pub bind_group: wgpu::BindGroup,
@@ -526,7 +531,7 @@ pub(super) fn load_pack_textures(
 pub(super) fn spawn_background_loader() -> mpsc::Receiver<DecodedBackgroundImage> {
     let (tx, rx) = mpsc::channel();
 
-    let backgrounds: Vec<(BackgroundId, &'static str)> = [BackgroundId::MainMenuExterior]
+    let backgrounds: Vec<(BackgroundId, &'static str)> = ASYNC_LOADED_BACKGROUNDS
         .iter()
         .filter_map(|id| id.asset_path().map(|p| (*id, p)))
         .collect();
