@@ -9,6 +9,7 @@ use super::{
 };
 
 /// Env set on the `vulkan-wsi-probe` subprocess so it does not recurse into another probe.
+#[cfg(target_os = "windows")]
 pub(crate) const VULKAN_PROBE_CHILD_ENV: &str = "MAHJURO_VULKAN_PROBE_CHILD";
 
 #[cfg(target_os = "windows")]
@@ -225,7 +226,7 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
     #[cfg(target_os = "windows")]
     win32_maybe_clear_vulkan_env_after_probe();
 
-    let mut instance_desc =
+    let instance_desc =
         wgpu::InstanceDescriptor::new_without_display_handle_from_env();
     #[cfg(target_os = "windows")]
     if std::env::var_os("WGPU_BACKEND").is_none() {

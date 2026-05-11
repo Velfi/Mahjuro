@@ -99,13 +99,40 @@ if [[ ! -d "$STEAM_SDK_ROOT" ]]; then
 fi
 
 case "$(uname)" in
-    Darwin) STEAMCMD="$STEAM_SDK_ROOT/tools/ContentBuilder/builder_osx/steamcmd.sh" ;;
+    Darwin)
+        _osx_cb="$STEAM_SDK_ROOT/tools/ContentBuilder/builder_osx"
+        # Newer Content Builder ships steamcmd beside steamcmd.sh; the .sh wrapper
+        # may still expect Steam.AppBundle (older layout). Prefer the direct binary.
+        # Valve sometimes unpacks steamcmd without the execute bit — fix that once.
+        if [[ -f "$_osx_cb/steamcmd" ]]; then
+            [[ -x "$_osx_cb/steamcmd" ]] || chmod u+x "$_osx_cb/steamcmd"
+            STEAMCMD="$_osx_cb/steamcmd"
+        else
+            STEAMCMD="$_osx_cb/steamcmd.sh"
+        fi
+        unset _osx_cb
+        ;;
     Linux)  STEAMCMD="$STEAM_SDK_ROOT/tools/ContentBuilder/builder_linux/steamcmd.sh" ;;
     *) echo "error: unsupported host OS: $(uname)" >&2; exit 1 ;;
 esac
 if [[ ! -x "$STEAMCMD" ]]; then
     echo "error: steamcmd not found or not executable: $STEAMCMD" >&2
     exit 1
+fi
+
+# Valve's builder_osx/steamcmd.sh execs Steam.AppBundle/.../steamcmd. A partial
+# SDK copy fails at runtime with "No such file or directory" on line 37 of the
+# wrapper — catch that here when we're not using the standalone steamcmd binary.
+if [[ "$(uname)" == "Darwin" && "$STEAMCMD" == *.sh ]]; then
+    _steamcmd_embedded="$(dirname "$STEAMCMD")/Steam.AppBundle/Steam/Contents/MacOS/steamcmd"
+    if [[ ! -x "$_steamcmd_embedded" ]]; then
+        echo "error: Content Builder steamcmd binary missing: $_steamcmd_embedded" >&2
+        echo "       Re-download the Steamworks SDK from the partner site and ensure" >&2
+        echo "       tools/ContentBuilder/builder_osx/Steam.AppBundle is fully present," >&2
+        echo "       or use a layout that includes builder_osx/steamcmd (executable)." >&2
+        exit 1
+    fi
+    unset _steamcmd_embedded
 fi
 
 # ─────────────────────────── Staging tree ───────────────────────────
