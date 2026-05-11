@@ -292,7 +292,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     let loaded_glb = match tile_glb_file {
         Some(file) => load_glb_tile_from_bytes(&file.data),
         None => Err(anyhow::anyhow!(
-            "tile_plastic.glb (or Tile.glb) not found in embedded assets"
+            "tile_plastic.glb (or Tile.glb) not found (packs or assets/)"
         )),
     };
 

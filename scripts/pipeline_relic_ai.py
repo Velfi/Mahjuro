@@ -10,7 +10,7 @@ Steps:
   2. `derive_relic_runtime_textures.py` — writes `assets/textures/relics/<slug>.png`
      (preferred albedo) and, with `--emit-masks`, `source/<slug>_mask.png` for extrusion.
 
-  3. Rebuild the game — `rust-embed` bakes `assets/` at compile time.
+  3. Rebuild or re-bake packs — see `tools/bake_assets/README.md`.
 
 Runtime loading is implemented in `src/render/relic_pipeline.rs`: albedo
 (`relics/<slug>.png` then `source/<slug>_object.png`), optional masks, linear
@@ -149,7 +149,7 @@ def main() -> None:
     print(
         "\nNext: rebuild the game so embedded assets update, e.g.\n"
         "  cargo build\n"
-        "(rust-embed bakes assets/ at compile time.)"
+        "(Re-bake asset packs or use loose assets/ in dev — tools/bake_assets/README.md.)"
     )
 
 

@@ -86,6 +86,15 @@ jobs:
       - name: Run tests
         run: cargo test --locked
 
+      - name: Install asset bake tools (ffmpeg, pngquant, oxipng)
+        shell: pwsh
+        run: |
+          choco install ffmpeg pngquant oxipng -y --no-progress
+
+      - name: Bake asset packs
+        shell: bash
+        run: python3 tools/bake_assets/bake_assets.py --out baked-packs
+
       # Do not set RUSTFLAGS with /LINKREPRO (or /VERBOSE) for the whole workspace:
       # cargo runs many link.exe jobs in parallel; they share one output dir and clobber
       # each other, which can fail the `mahjuro` lib link with exit 101 before the bin.
@@ -159,6 +168,10 @@ jobs:
           New-Item -ItemType Directory -Force $stage | Out-Null
           Copy-Item "target\x86_64-pc-windows-msvc\release\mahjuro.exe" "$stage\"
           Copy-Item "packaging\steam_input\game_actions_4636490.vdf" "$stage\"
+          Copy-Item "baked-packs\pack_manifest.json" "$stage\"
+          Copy-Item "baked-packs\mahjuro-pack-essential.zip" "$stage\"
+          Copy-Item "baked-packs\mahjuro-pack-gameplay.zip" "$stage\"
+          Copy-Item "baked-packs\mahjuro-pack-audio.zip" "$stage\"
           # Generate multi-resolution icon.ico from icon.png. ImageMagick is
           # preinstalled on GitHub Windows runners as `magick`.
           magick icon.png -define icon:auto-resize=256,128,64,48,32,16 "$stage\icon.ico"
@@ -206,8 +219,13 @@ jobs:
         shell: bash
         run: |
           ARCHIVE="mahjuro-${RELEASE_TAG}-windows-x86_64.zip"
+          ROOT="$PWD"
           cd "target/x86_64-pc-windows-msvc/release"
-          7z a "../../../${ARCHIVE}" "mahjuro.exe" game_actions_4636490.vdf
+          7z a "$ROOT/${ARCHIVE}" mahjuro.exe game_actions_4636490.vdf \
+            "$ROOT/baked-packs/pack_manifest.json" \
+            "$ROOT/baked-packs/mahjuro-pack-essential.zip" \
+            "$ROOT/baked-packs/mahjuro-pack-gameplay.zip" \
+            "$ROOT/baked-packs/mahjuro-pack-audio.zip"
           cd ../../..
           echo "filename=${ARCHIVE}" >> "$GITHUB_OUTPUT"
 

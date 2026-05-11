@@ -83,6 +83,12 @@ jobs:
       - name: Run tests
         run: cargo test --locked
 
+      - name: Install asset bake tools (ffmpeg, pngquant, oxipng)
+        run: brew install ffmpeg pngquant oxipng
+
+      - name: Bake asset packs
+        run: python3 tools/bake_assets/bake_assets.py --out baked-packs
+
       - name: Build macOS universal release
         run: |
           cargo build --release --locked --target aarch64-apple-darwin
@@ -142,6 +148,11 @@ jobs:
           done
           iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
           rm -rf "$ICONSET"
+
+          cp baked-packs/pack_manifest.json "$APP/Contents/Resources/"
+          cp baked-packs/mahjuro-pack-essential.zip "$APP/Contents/Resources/"
+          cp baked-packs/mahjuro-pack-gameplay.zip "$APP/Contents/Resources/"
+          cp baked-packs/mahjuro-pack-audio.zip "$APP/Contents/Resources/"
 
       - name: Embed Sparkle.framework (macOS)
         env:

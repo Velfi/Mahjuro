@@ -199,6 +199,9 @@ pub(crate) fn apply_post_scene_transition_effects(ctx: PostSceneTransitionCtx<'_
         ctx.audio
             .play_sfx(crate::audio::SfxId::MainMenuEnter);
     }
+    if ctx.to == SceneTag::MainMenuExterior {
+        crate::asset_path::prefetch_lazy_packs_after_menu_once();
+    }
     sync_music_for_scene(ctx.audio, ctx.to);
     if let Some(input) = ctx.input {
         input.focus_slot = 0;

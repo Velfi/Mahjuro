@@ -6,6 +6,7 @@
 #![deny(unused_imports)]
 
 pub mod asset_path;
+mod asset_sources;
 mod audio;
 pub mod bot;
 pub mod core;
@@ -494,6 +495,7 @@ pub fn run() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    asset_path::init();
     asset_path::log_all_assets();
 
     let no_steam = cli.no_steam;

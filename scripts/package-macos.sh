@@ -113,6 +113,14 @@ done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 rm -rf "$ICONSET"
 
+BAKE_OUT="$REPO_ROOT/target/mahjuro-bake-packs"
+rm -rf "$BAKE_OUT"
+python3 "$REPO_ROOT/tools/bake_assets/bake_assets.py" --out "$BAKE_OUT"
+cp "$BAKE_OUT/pack_manifest.json" "$APP/Contents/Resources/"
+cp "$BAKE_OUT/mahjuro-pack-essential.zip" "$APP/Contents/Resources/"
+cp "$BAKE_OUT/mahjuro-pack-gameplay.zip" "$APP/Contents/Resources/"
+cp "$BAKE_OUT/mahjuro-pack-audio.zip" "$APP/Contents/Resources/"
+
 # ─────────────────────────── Sign (optional) ───────────────────────────
 if [[ $SIGN -eq 1 ]]; then
     if [[ -z "${APPLE_SIGNING_IDENTITY:-}" ]]; then

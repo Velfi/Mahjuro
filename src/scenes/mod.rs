@@ -91,7 +91,7 @@ pub enum BackgroundId {
 }
 
 impl BackgroundId {
-    /// Asset path relative to the `assets/` root (embedded via rust-embed).
+    /// Asset path relative to the `assets/` root (packs or loose `assets/`).
     pub fn asset_path(self) -> Option<&'static str> {
         match self {
             BackgroundId::None => None,
