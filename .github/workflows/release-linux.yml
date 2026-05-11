@@ -9,6 +9,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Pinned; install from GitHub releases (apt package often missing on hosted runners).
+  OXIPNG_VERSION: "10.1.1"
 
 permissions:
   contents: write
@@ -61,8 +63,13 @@ jobs:
             libfuse2 \
             xvfb \
             ffmpeg \
-            pngquant \
-            oxipng
+            pngquant
+
+      - name: Install oxipng (GitHub release)
+        run: |
+          set -euo pipefail
+          curl -sLO "https://github.com/oxipng/oxipng/releases/download/v${OXIPNG_VERSION}/oxipng_${OXIPNG_VERSION}-1_amd64.deb"
+          sudo apt-get install -y "./oxipng_${OXIPNG_VERSION}-1_amd64.deb"
 
       # Exit 143 (SIGTERM) on Linux is often OOM during parallel rustc + linker.
       # Extra swap + fewer jobs keeps peak RSS below hosted-runner limits (release
