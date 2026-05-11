@@ -9,6 +9,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Pinned; Chocolatey oxipng can break when upstream moves (install from releases instead).
+  OXIPNG_VERSION: "10.1.1"
 
 permissions:
   contents: write
@@ -86,10 +88,24 @@ jobs:
       - name: Run tests
         run: cargo test --locked --target x86_64-pc-windows-msvc
 
-      - name: Install asset bake tools (ffmpeg, pngquant, oxipng)
+      - name: Install asset bake tools (ffmpeg, pngquant)
         shell: pwsh
         run: |
-          choco install ffmpeg pngquant oxipng -y --no-progress
+          choco install ffmpeg pngquant -y --no-progress
+
+      - name: Install oxipng (GitHub release)
+        shell: pwsh
+        run: |
+          $zip = "oxipng-$env:OXIPNG_VERSION-x86_64-pc-windows-msvc.zip"
+          $url = "https://github.com/oxipng/oxipng/releases/download/v$env:OXIPNG_VERSION/$zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath oxipng-unpack -Force
+          $exe = Get-ChildItem oxipng-unpack -Recurse -Filter oxipng.exe | Select-Object -First 1
+          if (-not $exe) { throw "oxipng.exe not found in release archive" }
+          $dest = Join-Path $env:RUNNER_TEMP "oxipng"
+          New-Item -ItemType Directory -Force $dest | Out-Null
+          Copy-Item $exe.FullName (Join-Path $dest "oxipng.exe")
+          Add-Content $env:GITHUB_PATH $dest
 
       - name: Bake asset packs
         shell: bash
