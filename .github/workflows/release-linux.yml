@@ -59,7 +59,10 @@ jobs:
             libgtk-3-dev \
             libxdo-dev \
             libfuse2 \
-            xvfb
+            xvfb \
+            ffmpeg \
+            pngquant \
+            oxipng
 
       # Exit 143 (SIGTERM) on Linux is often OOM during parallel rustc + linker.
       # Extra swap + fewer jobs keeps peak RSS below hosted-runner limits (release
@@ -80,6 +83,9 @@ jobs:
 
       - name: Run tests (Linux)
         run: xvfb-run --auto-servernum cargo test --locked
+
+      - name: Bake asset packs
+        run: python3 tools/bake_assets/bake_assets.py --out baked-packs
 
       - name: Build release
         run: cargo build --release --locked --target x86_64-unknown-linux-gnu
@@ -104,6 +110,10 @@ jobs:
           chmod +x "$APPDIR/usr/bin/mahjuro"
           cp "target/x86_64-unknown-linux-gnu/release/libsteam_api.so" "$APPDIR/usr/bin/"
           cp packaging/steam_input/game_actions_4636490.vdf "$APPDIR/usr/bin/"
+          cp baked-packs/pack_manifest.json "$APPDIR/usr/bin/"
+          cp baked-packs/mahjuro-pack-essential.zip "$APPDIR/usr/bin/"
+          cp baked-packs/mahjuro-pack-gameplay.zip "$APPDIR/usr/bin/"
+          cp baked-packs/mahjuro-pack-audio.zip "$APPDIR/usr/bin/"
 
           cp packaging/AppRun "$APPDIR/AppRun"
           chmod +x "$APPDIR/AppRun"
@@ -122,14 +132,23 @@ jobs:
         id: update_archive
         run: |
           set -euo pipefail
-          ARCHIVE="mahjuro-${RELEASE_TAG}-linux-x86_64.tar.gz"
+          ROOT="$PWD"
+          ARCHIVE="$ROOT/mahjuro-${RELEASE_TAG}-linux-x86_64.tar.gz"
           RELEASE_DIR="target/x86_64-unknown-linux-gnu/release"
+          cp baked-packs/pack_manifest.json "$RELEASE_DIR/"
+          cp baked-packs/mahjuro-pack-essential.zip "$RELEASE_DIR/"
+          cp baked-packs/mahjuro-pack-gameplay.zip "$RELEASE_DIR/"
+          cp baked-packs/mahjuro-pack-audio.zip "$RELEASE_DIR/"
           (
             cd "$RELEASE_DIR"
-            tar -czf "$OLDPWD/$ARCHIVE" mahjuro libsteam_api.so \
-              game_actions_4636490.vdf
+            tar -czf "$ARCHIVE" mahjuro libsteam_api.so \
+              game_actions_4636490.vdf \
+              pack_manifest.json \
+              mahjuro-pack-essential.zip \
+              mahjuro-pack-gameplay.zip \
+              mahjuro-pack-audio.zip
           )
-          echo "filename=${ARCHIVE}" >> "$GITHUB_OUTPUT"
+          echo "filename=mahjuro-${RELEASE_TAG}-linux-x86_64.tar.gz" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v7
         with:

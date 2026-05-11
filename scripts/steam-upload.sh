@@ -178,7 +178,8 @@ stage_release () {
         --pattern "mahjuro-${TAG}-macos-universal.dmg" \
         --dir "$DOWNLOADS"
 
-    # Windows: zip contains mahjuro.exe at the root.
+    # Windows: zip contains mahjuro.exe, Steam IGA manifest, and pack_manifest.json +
+    # mahjuro-pack-*.zip beside the exe.
     unzip -q "$DOWNLOADS/mahjuro-${TAG}-windows-x86_64.zip" -d "$CONTENT/windows/"
     echo "staged: windows/mahjuro.exe"
 

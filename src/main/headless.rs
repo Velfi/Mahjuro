@@ -227,6 +227,7 @@ fn force_boss_blind(run: &mut RunState, kind: crate::core::boss::BossKind) {
 }
 
 pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> {
+    asset_path::init();
     asset_path::log_all_assets();
     let shop_like = matches!(s.scene.as_str(), "shop");
     let collection_like = matches!(s.scene.as_str(), "collection");

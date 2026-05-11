@@ -2,8 +2,8 @@
 //!
 //! Display metadata (name, description, rarity) lives in
 //! `assets/data/relics.json` so balance edits don't require recompiling
-//! the core crate. In debug builds rust-embed reads the file from disk on
-//! every game start; in release builds it is baked into the binary.
+//! the core crate. At runtime the file is loaded from shipped asset packs
+//! or from the repo `assets/` tree in development.
 //! Behaviour (scoring hooks, prices, visuals) stays in Rust.
 
 use std::collections::BTreeSet;

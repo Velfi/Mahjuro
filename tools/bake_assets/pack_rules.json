@@ -1,0 +1,36 @@
+{
+  "_comment": "Packs are matched in array order (see assign_pack in bake_assets.py). Within a pack, list longer path_prefixes before shorter ones if they overlap. root_globs apply only to files with no '/' in the path.",
+  "packs": [
+    {
+      "id": "essential",
+      "file": "mahjuro-pack-essential.zip",
+      "load_tier": "eager",
+      "path_prefixes": [
+        "sets/",
+        "backgrounds/",
+        "Instrument_Serif/",
+        "Cormorant_Garamond/",
+        "Noto_Emoji/"
+      ],
+      "root_files": []
+    },
+    {
+      "id": "gameplay",
+      "file": "mahjuro-pack-gameplay.zip",
+      "load_tier": "eager",
+      "path_prefixes": [
+        "data/",
+        "textures/",
+        "kenney_input-prompts/",
+        "steam_assets/"
+      ],
+      "root_globs": ["*.glb", "*.png"]
+    },
+    {
+      "id": "audio",
+      "file": "mahjuro-pack-audio.zip",
+      "load_tier": "lazy",
+      "path_prefixes": ["audio/"]
+    }
+  ]
+}
