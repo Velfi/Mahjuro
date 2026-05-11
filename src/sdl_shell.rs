@@ -52,6 +52,10 @@ impl SdlShell {
         {
             use sdl3::video::WindowFlags;
             wb.set_flags(WindowFlags::RESIZABLE | WindowFlags::HIGH_PIXEL_DENSITY);
+            // Do NOT set `SDL_WINDOW_VULKAN` here: wgpu creates its Vulkan surface from the raw
+            // HWND (`Instance::create_surface_unsafe` → `vkCreateWin32SurfaceKHR`), so the flag is
+            // not required for the Vulkan WSI path. Setting it changes the Win32 window class SDL
+            // registers, which drops mouse events through the default `WindowProc`.
         }
 
         let window = wb
@@ -140,8 +144,13 @@ impl SdlShell {
     }
 
     /// Map SDL window-coordinate mouse position to drawable pixels (HiDPI).
+    ///
+    /// Use `SDL_GetWindowPixelDensity` (= `pixel_size / window_size`), not
+    /// `SDL_GetWindowDisplayScale`. The latter folds in the user's display content scale (the
+    /// Windows "Scale & layout" 125/150 % setting), so at 150 % a click at the right edge of the
+    /// window lands ~1.5× past the right edge of the backbuffer and misses every UI rect.
     pub fn event_xy_to_pixels(&self, x: f32, y: f32) -> (f32, f32) {
-        let s = self.window.display_scale();
+        let s = self.window.pixel_density();
         (x * s, y * s)
     }
 

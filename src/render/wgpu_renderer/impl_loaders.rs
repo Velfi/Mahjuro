@@ -158,6 +158,9 @@ impl WgpuRenderer {
             }
         }
         if finished {
+            for &id in super::resources::ASYNC_LOADED_BACKGROUNDS {
+                self.insert_background_solid_fallback_if_missing(id);
+            }
             let elapsed = self
                 .background_load_start
                 .take()
@@ -170,5 +173,44 @@ impl WgpuRenderer {
             );
             self.background_rx = None;
         }
+    }
+
+    /// When async decode fails (missing pack, corrupt file, …), `is_loading()` still goes
+    /// false once the loader thread ends — without a bind group the background pass is
+    /// skipped and the hub looks like a stuck splash (black) while menu music plays.
+    fn insert_background_solid_fallback_if_missing(&mut self, id: BackgroundId) {
+        if self.background_textures.contains_key(&id) {
+            return;
+        }
+        log::warn!(
+            "background {:?} missing after async load — using solid fallback",
+            id
+        );
+        let label = format!("bg-fallback-{id:?}");
+        let rgba = vec![10u8, 10u8, 14u8, 255u8];
+        let (_tex, view) = upload_rgba_texture(
+            &self.device,
+            &self.queue,
+            &label,
+            &rgba,
+            1,
+            1,
+        );
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&label),
+            layout: &self.text_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.tile_sampler),
+                },
+            ],
+        });
+        self.background_textures
+            .insert(id, BackgroundTextureGpu { bind_group });
     }
 }

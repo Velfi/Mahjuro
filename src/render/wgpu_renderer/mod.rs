@@ -4,6 +4,10 @@ mod embedded_wgsl;
 mod init;
 mod init_phases;
 pub(crate) mod resources;
+
+pub(crate) fn run_vulkan_wsi_probe_smoke() -> anyhow::Result<()> {
+    init_phases::run_vulkan_wsi_probe_smoke()
+}
 mod runtime;
 mod showcase;
 
