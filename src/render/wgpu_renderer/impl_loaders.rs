@@ -1,7 +1,7 @@
 use super::*;
 
 impl WgpuRenderer {
-    fn relic_mesh_for(&self, relic_id: RelicId) -> &LitMeshGpu {
+    pub(crate) fn relic_mesh_for(&self, relic_id: RelicId) -> &LitMeshGpu {
         self.relic_meshes
             .get(&relic_id)
             .unwrap_or(&self.relic_box_mesh)
@@ -9,7 +9,7 @@ impl WgpuRenderer {
 
     /// Drain any decoded relic images from the background loader and upload them
     /// to the GPU.  Called once per frame; a no-op once all images are loaded.
-    fn poll_relic_textures(&mut self) {
+    pub(crate) fn poll_relic_textures(&mut self) {
         let Some(ref rx) = self.relic_rx else { return };
         let mut finished = false;
         // Non-blocking drain: upload every image that's ready this frame.
@@ -116,7 +116,7 @@ impl WgpuRenderer {
     }
 
     /// Drain any decoded background images from the loader and upload to GPU.
-    fn poll_background_textures(&mut self) {
+    pub(crate) fn poll_background_textures(&mut self) {
         let Some(ref rx) = self.background_rx else {
             return;
         };

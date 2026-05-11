@@ -1,6 +1,6 @@
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub(super) struct Globals {
+pub(crate) struct Globals {
     pub screen: [f32; 2],
     pub time: f32,
     pub gamma: f32,
@@ -17,7 +17,7 @@ pub(super) struct Globals {
 /// ranges that drive these values from the debug overlay.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub(super) struct HazeUniform {
+pub(crate) struct HazeUniform {
     /// RGB haze colour (linear) + density multiplier in the alpha slot.
     pub color_density: [f32; 4],
     /// `x` = horizon y (0..1), `y` = drift-speed multiplier,
@@ -27,14 +27,14 @@ pub(super) struct HazeUniform {
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub(super) struct BloomParams {
+pub(crate) struct BloomParams {
     pub data0: [f32; 4],
     pub data1: [f32; 4],
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub(super) struct TonemapParams {
+pub(crate) struct TonemapParams {
     pub exposure: f32,
     /// 0 = ACES fitted (SDR or HDR swapchain); 1 = linear × exposure (journal prepass float target).
     pub mode: f32,
@@ -60,7 +60,7 @@ pub(crate) struct ProbeGiFrameUniform {
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub(super) struct CameraUniform {
+pub(crate) struct CameraUniform {
     pub view_proj: [f32; 16],
     pub model: [f32; 16],
     pub base_color_factor: [f32; 4],
@@ -81,7 +81,7 @@ pub(super) struct CameraUniform {
 /// Per-frame data for `tile_outline.wgsl` group 0 binding 0.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub(super) struct TileOutlineFrameUniform {
+pub(crate) struct TileOutlineFrameUniform {
     pub view_proj: [f32; 16],
     pub hdr_tonemap: [f32; 4],
 }
@@ -89,7 +89,7 @@ pub(super) struct TileOutlineFrameUniform {
 /// One outlined tile instance for `tile_outline.wgsl` storage buffer (binding 1).
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub(super) struct TileOutlineInstance {
+pub(crate) struct TileOutlineInstance {
     pub model: [f32; 16],
     pub base_color_factor: [f32; 4],
 }
@@ -101,7 +101,7 @@ pub(super) struct TileOutlineInstance {
 /// stage, and the flame vertex shader needs `view_proj`.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub(super) struct FlameViewUniform {
+pub(crate) struct FlameViewUniform {
     pub view_proj: [f32; 16],
     pub view_pos: [f32; 4],
 }

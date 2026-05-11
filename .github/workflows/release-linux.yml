@@ -82,7 +82,7 @@ jobs:
           prefix-key: release-linux
 
       - name: Run tests (Linux)
-        run: xvfb-run --auto-servernum cargo test --locked
+        run: xvfb-run --auto-servernum cargo test --locked --target x86_64-unknown-linux-gnu
 
       - name: Bake asset packs
         run: python3 tools/bake_assets/bake_assets.py --out baked-packs

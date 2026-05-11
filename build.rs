@@ -20,10 +20,17 @@
 //!
 //! On macOS we pass `-Wl,-rpath,@loader_path` so `libsteam_api.dylib` next to
 //! `mahjuro` resolves (see `scripts/package-macos.sh`).
+//!
+//! **Asset packs:** this script runs `tools/bake_assets/bake_assets.py` into
+//! `target/<profile>/` (or `target/<triple>/<profile>/` when cross-compiling) so
+//! `pack_manifest.json` and the zip packs sit next to the game binary. Set
+//! `MAHJURO_SKIP_ASSET_BAKE=1` to skip (you must supply packs or `MAHJURO_ASSETS`).
 
 use std::env;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 fn main() {
     emit_debug_menu_cfg();
@@ -46,11 +53,111 @@ fn main() {
     }
 
     println!("cargo:rerun-if-env-changed=STEAM_SDK_LOCATION");
+    println!("cargo:rerun-if-env-changed=MAHJURO_SKIP_ASSET_BAKE");
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=packaging/steam_input/game_actions_4636490.vdf");
+    println!("cargo:rerun-if-changed=tools/bake_assets/bake_assets.py");
+    println!("cargo:rerun-if-changed=tools/bake_assets/pack_rules.json");
+    println!("cargo:rerun-if-changed=assets");
+
+    if let Some(out_dir) = env::var_os("OUT_DIR").map(PathBuf::from) {
+        if let Some(profile_dir) = profile_dir(&out_dir) {
+            bake_asset_packs(&profile_dir);
+        }
+    }
 
     copy_steam_redistributable_next_to_binary();
     copy_steam_input_actions_next_to_binary();
+}
+
+fn bake_asset_packs(profile_dir: &Path) {
+    if env::var("MAHJURO_SKIP_ASSET_BAKE")
+        .map(|v| {
+            let v = v.trim();
+            !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false")
+        })
+        .unwrap_or(false)
+    {
+        println!(
+            "cargo:warning=MAHJURO_SKIP_ASSET_BAKE: skipping pack bake; ensure {} exists or set MAHJURO_ASSETS",
+            profile_dir.join("pack_manifest.json").display()
+        );
+        return;
+    }
+
+    let repo = match env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from) {
+        Some(p) if p.is_dir() => p,
+        _ => {
+            println!("cargo:warning=CARGO_MANIFEST_DIR unset; skipping pack bake");
+            return;
+        }
+    };
+
+    let script = repo.join("tools/bake_assets/bake_assets.py");
+    if !script.is_file() {
+        println!(
+            "cargo:warning={} missing; skipping pack bake",
+            script.display()
+        );
+        return;
+    }
+
+    let profile = env::var("PROFILE").unwrap_or_default();
+    let release = profile == "release";
+
+    if let Err(e) = run_pack_bake(&repo, &script, profile_dir, release) {
+        panic!("asset pack bake failed: {e}");
+    }
+}
+
+/// Run `bake_assets.py` with a Python interpreter available on PATH.
+fn run_pack_bake(
+    repo: &Path,
+    script: &Path,
+    out_dir: &Path,
+    release: bool,
+) -> Result<(), String> {
+    let lossy: &[&str] = if release { &[] } else { &["--no-lossy"] };
+
+    #[cfg(windows)]
+    let attempts: &[(&str, &[&str])] = &[
+        ("python3", &[]),
+        ("python", &[]),
+        ("py", &["-3"]),
+    ];
+    #[cfg(not(windows))]
+    let attempts: &[(&str, &[&str])] = &[("python3", &[]), ("python", &[])];
+
+    for (cmd, prefix) in attempts {
+        let mut c = Command::new(cmd);
+        c.current_dir(repo);
+        for p in *prefix {
+            c.arg(p);
+        }
+        c.arg(script);
+        c.arg("--out").arg(out_dir);
+        for a in lossy {
+            c.arg(a);
+        }
+
+        match c.status() {
+            Ok(status) if status.success() => return Ok(()),
+            Ok(status) => {
+                return Err(format!(
+                    "{cmd} exited with {status} (cwd {}, args for bake_assets.py)",
+                    repo.display()
+                ));
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(format!("failed to spawn {cmd}: {e}")),
+        }
+    }
+
+    Err(
+        "no Python interpreter found (tried python3, python, and on Windows py -3); \
+         install Python or set MAHJURO_SKIP_ASSET_BAKE=1 and provide MAHJURO_ASSETS"
+            .into(),
+    )
 }
 
 /// Steam Input In-Game Actions file (`game_actions_<appid>.vdf`). Lived next to
@@ -97,7 +204,9 @@ fn copy_steam_redistributable_next_to_binary() {
         return;
     };
 
-    let sdk = env::var_os("STEAM_SDK_LOCATION").map(PathBuf::from);
+    let sdk = env::var_os("STEAM_SDK_LOCATION")
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
     let had_sdk_env = sdk.is_some();
     let from_sdk = sdk.map(|s| s.join("redistributable_bin").join(subdir).join(file));
 

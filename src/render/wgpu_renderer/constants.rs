@@ -36,18 +36,18 @@ pub const MAX_SPOT_LIGHTS: usize = 8;
 /// sized so the full hand fits.
 pub const MAX_TILE_OCCLUDERS: usize = 16;
 
-pub(super) const MAX_SHOWCASE_TILE_SLOTS: usize = 160;
+pub(crate) const MAX_SHOWCASE_TILE_SLOTS: usize = 160;
 
 /// Frames an unused entry stays in `text_label_cache` before eviction.
-pub(super) const TEXT_CACHE_TTL_FRAMES: u64 = 120;
+pub(crate) const TEXT_CACHE_TTL_FRAMES: u64 = 120;
 
 // Tile-mesh local extents (after `normalize_mesh` in tile_glb.rs):
 //   local X — long face axis  (extent ~1.000) → table-Z (front-back)
 //   local Y — thickness        (extent ~0.424) → world Y (up off table)
 //   local Z — short face axis  (extent ~0.734) → table-X (left-right)
-pub(super) const LOCAL_X_EXTENT: f32 = 1.000;
-pub(super) const LOCAL_Y_EXTENT: f32 = 0.424;
-pub(super) const LOCAL_Z_EXTENT: f32 = 0.734;
+pub(crate) const LOCAL_X_EXTENT: f32 = 1.000;
+pub(crate) const LOCAL_Y_EXTENT: f32 = 0.424;
+pub(crate) const LOCAL_Z_EXTENT: f32 = 0.734;
 
 pub const MAIN_MENU_PICK_PLAY: u32 = 240;
 pub const MAIN_MENU_PICK_OPTIONS: u32 = 241;

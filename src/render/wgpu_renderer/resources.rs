@@ -576,7 +576,7 @@ pub(super) fn spawn_background_loader() -> mpsc::Receiver<DecodedBackgroundImage
     rx
 }
 
-pub(super) fn create_depth(
+pub(crate) fn create_depth(
     device: &wgpu::Device,
     width: u32,
     height: u32,
@@ -741,7 +741,7 @@ pub(super) fn create_post_texture(
 }
 
 /// Depth texture usable as a shader-sampled snapshot (e.g. SSR history).
-pub(super) fn create_depth_copy(
+pub(crate) fn create_depth_copy(
     device: &wgpu::Device,
     width: u32,
     height: u32,

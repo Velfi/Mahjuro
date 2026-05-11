@@ -1,7 +1,7 @@
 use super::*;
 
 impl WgpuRenderer {
-    fn scene_path(&self, suffix: &str) -> String {
+    pub(crate) fn scene_path(&self, suffix: &str) -> String {
         match self.active_scene_key {
             Some(scene) => format!("{scene}.{suffix}"),
             None => suffix.to_string(),
@@ -21,7 +21,7 @@ impl WgpuRenderer {
     ///
     /// Returns the matrix unchanged if no override is set or the name doesn't
     /// match.
-    fn apply_arrange_override(&self, name: &str, model: Mat4) -> Mat4 {
+    pub(crate) fn apply_arrange_override(&self, name: &str, model: Mat4) -> Mat4 {
         // Fuse the committed rotation (from the Placement) with any staged
         // arrange-mode rotation delta into a single Euler-angle sum before
         // left-multiplying onto the model. This matters because rotations

@@ -1,4 +1,5 @@
 use super::*;
+use wgpu::util::DeviceExt;
 
 #[derive(Copy, Clone)]
 pub(super) struct ShowcaseTileCtx<'a> {

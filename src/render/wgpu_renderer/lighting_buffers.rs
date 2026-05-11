@@ -4,8 +4,8 @@ use crate::render::world_space::pixel_to_world;
 use super::constants::{MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, MAX_TILE_OCCLUDERS};
 
 /// `PointLightGpu.params.x` — must match WGSL `lights.lights[i].params.x`.
-pub(super) const SCENE_POINT_KIND_SMOOTH: f32 = 0.0;
-pub(super) const SCENE_POINT_KIND_INVERSE_SQUARE: f32 = 1.0;
+pub(crate) const SCENE_POINT_KIND_SMOOTH: f32 = 0.0;
+pub(crate) const SCENE_POINT_KIND_INVERSE_SQUARE: f32 = 1.0;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -25,7 +25,7 @@ pub(crate) struct TileOccludersBuf {
 }
 
 impl TileOccludersBuf {
-    pub(super) fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         Self {
             count: [0; 4],
             boxes: [TileOccluderGpu {
@@ -57,7 +57,7 @@ pub struct PointLight {
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub(super) struct PointLightGpu {
+pub(crate) struct PointLightGpu {
     /// xyz = world-space position, w = smooth radius **or** inverse-square range.
     pub pos: [f32; 4],
     /// rgb = colour, a = intensity.
@@ -68,7 +68,7 @@ pub(super) struct PointLightGpu {
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub(super) struct PointLightsBuf {
+pub(crate) struct PointLightsBuf {
     /// `count.x` = number of active lights; rest is std140 padding.
     pub count: [u32; 4],
     /// Frame-wide extras shared with shaders that bind this buffer:
@@ -117,7 +117,7 @@ pub struct SpotLight {
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub(super) struct SpotLightGpu {
+pub(crate) struct SpotLightGpu {
     /// xyz = world-space position, w = radius.
     pub pos: [f32; 4],
     /// xyz = world-space direction (normalized), w = cos_outer.
@@ -130,14 +130,14 @@ pub(super) struct SpotLightGpu {
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub(super) struct SpotLightsBuf {
+pub(crate) struct SpotLightsBuf {
     /// `count.x` = number of active spotlights; rest is std140 padding.
     pub count: [u32; 4],
     pub lights: [SpotLightGpu; MAX_SPOT_LIGHTS],
 }
 
 impl SpotLightsBuf {
-    pub(super) fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         Self {
             count: [0; 4],
             lights: [SpotLightGpu {
@@ -155,7 +155,7 @@ impl SpotLightsBuf {
     /// is set (perspective shop / pack celebration). Direction is taken as-is
     /// in world space (already Z-up) and normalised on the GPU side — we
     /// normalise here too to keep the uniform sane to inspect.
-    pub(super) fn from_lights(
+    pub(crate) fn from_lights(
         src: &[SpotLight],
         screen_w: f32,
         screen_h: f32,
@@ -212,7 +212,7 @@ impl PointLightsBuf {
     }
 
     /// Unified punctual upload (smooth + inverse-square in one buffer).
-    pub(super) fn from_scene_punctual(
+    pub(crate) fn from_scene_punctual(
         src: &[ScenePunctualLight],
         candle_count: u32,
         flame_height_world: f32,
@@ -260,7 +260,7 @@ impl PointLightsBuf {
 
     /// Same as [`Self::from_scene_punctual`] but smooth lights use the shop camera ray /
     /// horizontal-plane hit; inverse-square lights keep `pixel_to_world` (embedded anchors).
-    pub(super) fn from_scene_punctual_shop_camera(
+    pub(crate) fn from_scene_punctual_shop_camera(
         src: &[ScenePunctualLight],
         cam: &crate::render::draw_cmd::CameraParams,
         candle_count: u32,
