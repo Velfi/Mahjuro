@@ -7,6 +7,14 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.5.0-6 — 2026-05-11
+
+### Added
+- The final ante can now pit you against **The House**, which won’t let you cash in your structure until you’ve used every discard for the round.
+
+### Changed
+- The **Meld Guide** no longer appears on the main menu; open it from **Pause** while you’re in a run.
+
 ## 0.5.0-5 — 2026-05-09
 
 ### Removed
