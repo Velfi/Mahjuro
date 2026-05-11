@@ -278,10 +278,9 @@ impl SceneBehavior for MainMenuExteriorScene {
         let summary = &summaries[active];
         let prof_text = if summary.exists {
             format!(
-                "Profile {}  —  Level {} ({} runs)",
+                "Profile {}  —  Level {}",
                 active + 1,
                 summary.level,
-                summary.runs_completed,
             )
         } else {
             format!("Profile {}  —  New", active + 1)

@@ -1,5 +1,7 @@
 //! Rasterize embedded Kenney prompt SVGs ([`crate::asset_path`]) to straight-alpha RGBA8.
 
+use std::path::Path;
+
 use resvg::tiny_skia::{Pixmap, Transform};
 use resvg::usvg;
 
@@ -44,4 +46,38 @@ pub fn rasterize_embedded_svg_rgba(asset_rel_path: &str) -> Option<(Vec<u8>, u32
     let mut rgba = pixmap.data().to_vec();
     unpremultiply_rgba(&mut rgba);
     Some((rgba, out_w, out_h))
+}
+
+/// Returns `(rgba8, width, height)` for a Steam Input glyph path (`.svg` or `.png`).
+pub fn rasterize_filesystem_svg_or_png_rgba(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if ext == "svg" {
+        let bytes = std::fs::read(path).ok()?;
+        let opt = usvg::Options::default();
+        let tree = usvg::Tree::from_data(&bytes, &opt).ok()?;
+        let sz = tree.size();
+        let w = sz.width();
+        let h = sz.height();
+        if !(w.is_finite() && h.is_finite()) || w <= 0.0 || h <= 0.0 {
+            return None;
+        }
+        let max_dim = w.max(h);
+        let scale = MAX_EDGE_PX as f32 / max_dim;
+        let out_w = (w * scale).ceil().max(1.0) as u32;
+        let out_h = (h * scale).ceil().max(1.0) as u32;
+        let mut pixmap = Pixmap::new(out_w, out_h)?;
+        let ts = Transform::from_scale(scale, scale);
+        resvg::render(&tree, ts, &mut pixmap.as_mut());
+        let mut rgba = pixmap.data().to_vec();
+        unpremultiply_rgba(&mut rgba);
+        return Some((rgba, out_w, out_h));
+    }
+
+    let img = image::open(path).ok()?.to_rgba8();
+    let (w, h) = img.dimensions();
+    Some((img.into_raw(), w, h))
 }

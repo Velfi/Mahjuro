@@ -70,7 +70,7 @@ pub enum InputMode {
 }
 
 /// Logical UI actions (device-agnostic).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum UiAction {
     FocusNext,
     FocusPrev,
@@ -363,6 +363,15 @@ impl InputState {
         (weak, strong, duration_ms, gain)
     }
 
+    pub fn shop_sell_hold_rumble_params(hold_progress: f32) -> (u16, u16, u32, f32) {
+        let curve = shop_hold_rumble_gain_curve(hold_progress);
+        let gain = SHOP_HOLD_RUMBLE_PEAK_GAIN * curve;
+        let weak = ((5_000u32 as f32) * gain).min(65535.0) as u16;
+        let strong = ((18_000u32 as f32) * gain).min(65535.0) as u16;
+        const HOLD_REFRESH_MS: u32 = 120;
+        (weak, strong, HOLD_REFRESH_MS, 1.0)
+    }
+
     /// Drain rumble patterns queued by the rumble lab debug scene.
     pub fn apply_rumble_lab_ops(
         &mut self,
@@ -500,13 +509,12 @@ impl InputState {
             return;
         }
 
-        let curve = shop_hold_rumble_gain_curve(hold_progress);
-        let gain = SHOP_HOLD_RUMBLE_PEAK_GAIN * curve;
-        let low = ((18_000u32 as f32) * gain).min(65535.0) as u16;
-        let high = ((5_000u32 as f32) * gain).min(65535.0) as u16;
-        const HOLD_REFRESH_MS: u32 = 120;
+        let (weak, strong, hold_refresh_ms, gain) =
+            Self::shop_sell_hold_rumble_params(hold_progress);
+        let low = ((strong as f32) * gain).min(65535.0) as u16;
+        let high = ((weak as f32) * gain).min(65535.0) as u16;
         for gp in shell.pads.values_mut() {
-            if let Err(e) = gp.set_rumble(low, high, HOLD_REFRESH_MS) {
+            if let Err(e) = gp.set_rumble(low, high, hold_refresh_ms) {
                 log::debug!("shop sell hold rumble: {e}");
             }
         }
@@ -570,7 +578,8 @@ impl InputState {
                 GpButton::West => {
                     // West face = discard / hold-to-sell; North = play / inspect (`swap_xy` swaps which physical button is which).
                     if self.swap_xy {
-                        if poll_ctx.shop_face_buttons || poll_ctx.collection_uses_north_for_inspect {
+                        if poll_ctx.shop_face_buttons || poll_ctx.collection_uses_north_for_inspect
+                        {
                             actions.push(UiAction::NorthFacePress);
                         } else {
                             actions.push(if self.xy_quick_action {
@@ -600,7 +609,9 @@ impl InputState {
                                 UiAction::FocusPlayButton
                             });
                         }
-                    } else if poll_ctx.shop_face_buttons || poll_ctx.collection_uses_north_for_inspect {
+                    } else if poll_ctx.shop_face_buttons
+                        || poll_ctx.collection_uses_north_for_inspect
+                    {
                         actions.push(UiAction::NorthFacePress);
                     } else {
                         actions.push(if self.xy_quick_action {
@@ -780,8 +791,10 @@ impl InputState {
             const SENS: f32 = 0.014;
             let sx = (mx * SENS).clamp(-1.0, 1.0);
             let sy = (-my * SENS).clamp(-1.0, 1.0);
-            self.item_inspect_orbit_stick.0 = (self.item_inspect_orbit_stick.0 + sx).clamp(-1.0, 1.0);
-            self.item_inspect_orbit_stick.1 = (self.item_inspect_orbit_stick.1 + sy).clamp(-1.0, 1.0);
+            self.item_inspect_orbit_stick.0 =
+                (self.item_inspect_orbit_stick.0 + sx).clamp(-1.0, 1.0);
+            self.item_inspect_orbit_stick.1 =
+                (self.item_inspect_orbit_stick.1 + sy).clamp(-1.0, 1.0);
         }
         Self::emit_held_navigation_repeats(
             shell,
@@ -1253,9 +1266,7 @@ pub fn apply_ui_actions(
             | UiAction::TabPrev
             | UiAction::PageNext
             | UiAction::PagePrev => {}
-            UiAction::NorthFacePress
-            | UiAction::WestFacePress
-            | UiAction::WestFaceRelease => {}
+            UiAction::NorthFacePress | UiAction::WestFacePress | UiAction::WestFaceRelease => {}
         }
     }
 }

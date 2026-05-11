@@ -189,9 +189,16 @@ pub(super) fn make_prompt_icon_overlay_gpu(
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
     sampler: &wgpu::Sampler,
-    asset_rel_path: &'static str,
+    source: &crate::render::draw_cmd::PromptIconSource,
 ) -> Option<TileFaceOverlayGpu> {
-    let (rgba, w, h) = crate::render::kenney_svg::rasterize_embedded_svg_rgba(asset_rel_path)?;
+    let (rgba, w, h) = match source {
+        crate::render::draw_cmd::PromptIconSource::Embedded(asset_rel_path) => {
+            crate::render::kenney_svg::rasterize_embedded_svg_rgba(asset_rel_path)?
+        }
+        crate::render::draw_cmd::PromptIconSource::Filesystem(path) => {
+            crate::render::kenney_svg::rasterize_filesystem_svg_or_png_rgba(path)?
+        }
+    };
     let (texture, view) = upload_rgba_texture(device, queue, "kenney-prompt-icon", &rgba, w, h);
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("kenney-prompt-icon-bg"),

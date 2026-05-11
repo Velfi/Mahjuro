@@ -43,12 +43,14 @@ use crate::scenes::object3d_inspect::{
     inspect_orbit_camera,
 };
 use crate::scenes::options::OptionsScene;
-use crate::scenes::{ButtonDef, DrawCtx, SceneBehavior, SceneTransition, UpdateCtx, YakuJournalScene};
+use crate::scenes::{
+    ButtonDef, DrawCtx, SceneBehavior, SceneTransition, UpdateCtx, YakuJournalScene,
+};
 use crate::ui::button_prompts::{ButtonPrompt, PromptInputSurface, SHOP_LEGEND_VERB_LABELS};
 use crate::ui::focus_nav::{clamp_rect_to_viewport, push_focus_ring, rect_center};
 use crate::ui::input::InputMode;
 use crate::ui::inspect_plaque::{push_floating_relic_flavor_labels, push_focus_tooltip_panel_2d};
-use crate::ui::kenney_prompt_paths::shop_prompt_icon_paths;
+use crate::ui::kenney_prompt_paths::shop_keyboard_prompt_icon_paths;
 
 use super::layout::{
     ShopInventoryCounts, ShopLayout, consumable_color, is_tile_pack_pick, live_shop_hit,
@@ -152,7 +154,8 @@ fn embedded_point_lights_runtime(
             .take(budget)
             .map(|l| {
                 let world = (l.pos_doc - center_doc) * s;
-                let radius = crate::render::shop_glb::glb_punctual_range_world_upload(h, s, l.range_doc);
+                let radius =
+                    crate::render::shop_glb::glb_punctual_range_world_upload(h, s, l.range_doc);
                 PointLight {
                     pos: surface_anchor_from_world_xyz(w, h, world),
                     radius,
@@ -196,7 +199,8 @@ fn spot_lights_from_glb(w: f32, h: f32, env_h: f32, tune: &ShopEnvLightingTune) 
                     return None;
                 }
                 let world = (l.pos_doc - center_doc) * s;
-                let radius = crate::render::shop_glb::glb_punctual_range_world_upload(h, s, l.range_doc);
+                let radius =
+                    crate::render::shop_glb::glb_punctual_range_world_upload(h, s, l.range_doc);
                 let cos_outer = l.outer_cone_rad.cos();
                 let cos_inner = l.inner_cone_rad.cos().max(cos_outer);
                 Some(SpotLight {
@@ -905,11 +909,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
             }
         }
 
-        merged_punctual.extend(
-            point_lights
-                .into_iter()
-                .map(ScenePunctualLight::Smooth),
-        );
+        merged_punctual.extend(point_lights.into_iter().map(ScenePunctualLight::Smooth));
         frame.scene_lighting.punctual = merged_punctual;
         frame.scene_lighting.spot_lights =
             spot_lights_from_glb(w, h, env_h, &ctx.shop_env_lighting);
@@ -1080,11 +1080,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
             .and_then(|r| clamp_rect_to_viewport(r, w, h))
         {
             let mut quads = Vec::new();
-            let ring_scale = if room_glb_lights {
-                scale * 1.24
-            } else {
-                scale
-            };
+            let ring_scale = if room_glb_lights { scale * 1.24 } else { scale };
             push_focus_ring(ring_rect, ring_scale, w, h, &mut quads);
             frame.quads(quads);
         }
@@ -1242,6 +1238,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
             ctx.gamepad_swap_ab,
             ctx.gamepad_swap_xy,
             ctx.gamepad_style,
+            ctx.steam_glyphs,
             None,
             None,
             ctx.tile_preset,
@@ -1357,9 +1354,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
             .unwrap_or(legend_font_px * 1.2)
             .max(legend_font_px * 0.85);
 
-        let primary_h = (icon_px * 1.06)
-            .max(legend_line_h)
-            .max(font_px * 1.35);
+        let primary_h = (icon_px * 1.06).max(legend_line_h).max(font_px * 1.35);
         let inspect_line_h = if inspect_active {
             (font_px * 0.92).max(12.0) * 1.4 + h * 0.008
         } else {
@@ -1370,16 +1365,10 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
         let primary_y0 = h - pad_bottom - block_h;
         let iy = primary_y0 + (primary_h - icon_px) * 0.5;
 
-        let paths = shop_prompt_icon_paths(
-            surface,
-            ctx.gamepad_style,
-            ctx.gamepad_swap_ab,
-            ctx.gamepad_swap_xy,
-        );
+        let keyboard_paths = shop_keyboard_prompt_icon_paths();
 
         let pill_bg = [0.06_f32, 0.055, 0.07, 0.82];
-        let pill_pad_x =
-            (icon_px * 0.10).clamp(6.0, 16.0) + (h * 0.003).clamp(4.0, 8.0);
+        let pill_pad_x = (icon_px * 0.10).clamp(6.0, 16.0) + (h * 0.003).clamp(4.0, 8.0);
 
         let legend_text_h_px = legend_line_h.max(8.0).round().max(1.0) as u32;
         let pill_pad_y = (legend_line_h * 0.14).clamp(3.0, 9.0);
@@ -1420,20 +1409,32 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                 ],
                 color: pill_bg,
             });
-            icon_cmds.push(PromptIconQuad {
-                inst: GpuInstance {
-                    rect: [ix, iy, icon_px, icon_px],
-                    color: [0.92, 0.88, 0.82, 0.96],
-                },
-                asset_rel_path: paths[i],
-            });
+            let action = match i {
+                0 => crate::ui::input::UiAction::Cancel,
+                1 => crate::ui::input::UiAction::Confirm,
+                2 => crate::ui::input::UiAction::WestFacePress,
+                _ => crate::ui::input::UiAction::NorthFacePress,
+            };
+            let source = match surface {
+                PromptInputSurface::Controller => ctx.steam_glyphs.iter().find_map(|(a, path)| {
+                    (*a == action)
+                        .then(|| crate::render::draw_cmd::PromptIconSource::Filesystem(path.clone()))
+                }),
+                PromptInputSurface::MouseOrKeyboard => Some(
+                    crate::render::draw_cmd::PromptIconSource::Embedded(keyboard_paths[i]),
+                ),
+            };
+            if let Some(source) = source {
+                icon_cmds.push(PromptIconQuad {
+                    inst: GpuInstance {
+                        rect: [ix, iy, icon_px, icon_px],
+                        color: [0.92, 0.88, 0.82, 0.96],
+                    },
+                    source,
+                });
+            }
             legend_texts.push(TextLabel {
-                rect: [
-                    text_x,
-                    legend_text_y,
-                    text_w,
-                    legend_line_h,
-                ],
+                rect: [text_x, legend_text_y, text_w, legend_line_h],
                 text: SHOP_LEGEND_VERB_LABELS[i].to_string(),
                 color: [0.88, 0.84, 0.78, 0.96],
                 font_px: Some(legend_font_px),

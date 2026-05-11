@@ -330,12 +330,28 @@ pub struct TileFaceQuad {
     pub inst: GpuInstance,
 }
 
-/// Kenney-style input prompt drawn as a tinted image quad (`shaders/image_quad.wgsl`).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum PromptIconSource {
+    /// Path relative to `assets/` (embedded); selects the cached raster.
+    Embedded(&'static str),
+    /// Absolute filesystem path returned by Steam Input for the active origin.
+    Filesystem(std::path::PathBuf),
+}
+
+impl PromptIconSource {
+    pub fn cache_key(&self) -> String {
+        match self {
+            Self::Embedded(path) => format!("asset:{path}"),
+            Self::Filesystem(path) => format!("file:{}", path.display()),
+        }
+    }
+}
+
+/// Input prompt drawn as a tinted image quad (`shaders/image_quad.wgsl`).
+#[derive(Clone, Debug)]
 pub struct PromptIconQuad {
     pub inst: GpuInstance,
-    /// Path relative to `assets/` (embedded); selects the cached raster.
-    pub asset_rel_path: &'static str,
+    pub source: PromptIconSource,
 }
 
 /// One shrine placement (used by the pick-blind scene to draw the three
@@ -883,8 +899,7 @@ impl UiFrame {
     }
     /// Dimmed vs full inspect HDR boundary for shop [`ItemInspectScene`] (see [`DrawCmd::ShopInspectLitMeshSubjectHdr`]).
     pub fn shop_inspect_lit_mesh_subject_hdr(&mut self) {
-        self.cmds
-            .push(DrawCmd::ShopInspectLitMeshSubjectHdr);
+        self.cmds.push(DrawCmd::ShopInspectLitMeshSubjectHdr);
     }
     pub fn starfield(&mut self) {
         self.cmds.push(DrawCmd::Starfield);
@@ -918,7 +933,8 @@ impl UiFrame {
     }
 
     pub fn squircle_quads<I: IntoIterator<Item = GpuInstance>>(&mut self, iter: I) {
-        self.cmds.extend(iter.into_iter().map(DrawCmd::SquircleQuad));
+        self.cmds
+            .extend(iter.into_iter().map(DrawCmd::SquircleQuad));
     }
 
     pub fn gradient_quads<

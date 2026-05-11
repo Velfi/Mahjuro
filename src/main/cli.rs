@@ -12,12 +12,10 @@ pub struct Cli {
     /// this flag.
     #[arg(long, global = true, action = ArgAction::SetTrue)]
     pub no_steam: bool,
-    /// Call `ISteamInput::Init` and sync with `RunFrame` each tick. **Not for
-    /// normal play:** gamepads are read via SDL; this can break controllers when
-    /// Steam is running. Use to test In-Game Actions (`game_actions_*.vdf`) /
-    /// overlay binding. Same as env `MAHJURO_STEAM_INPUT=1`.
+    /// Keep Steamworks enabled but skip `ISteamInput::Init`, using the SDL
+    /// gamepad fallback instead. Same as env `MAHJURO_NO_STEAM_INPUT=1`.
     #[arg(long, global = true, action = ArgAction::SetTrue)]
-    pub steam_input: bool,
+    pub no_steam_input: bool,
     #[command(subcommand)]
     pub command: Option<Command>,
 }

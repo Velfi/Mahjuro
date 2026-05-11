@@ -2,14 +2,14 @@
 
 use super::focus::FocusTarget;
 use crate::render::decal::{load_ui_font, measure_label_advances};
-use crate::render::draw_cmd::{PromptIconQuad, UiFrame};
+use crate::render::draw_cmd::{PromptIconQuad, PromptIconSource, UiFrame};
 use crate::render::theme::color;
 use crate::render::theme::typography;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::scenes::DrawCtx;
 use crate::ui::button_prompts::PromptInputSurface;
 use crate::ui::input::InputMode;
-use crate::ui::kenney_prompt_paths::gameplay_action_prompt_icon_paths;
+use crate::ui::kenney_prompt_paths::gameplay_keyboard_prompt_icon_paths;
 
 /// Whether to show the West / North (keyboard **Q** / **E**) gameplay legend for discard or play.
 ///
@@ -73,7 +73,7 @@ pub fn push_gameplay_action_prompts(
         InputMode::Controller => PromptInputSurface::Controller,
         InputMode::Keyboard | InputMode::Cursor => PromptInputSurface::MouseOrKeyboard,
     };
-    let paths = gameplay_action_prompt_icon_paths(surface, ctx.gamepad_style, ctx.gamepad_swap_xy);
+    let keyboard_paths = gameplay_keyboard_prompt_icon_paths();
 
     // Match [`crate::scenes::shop::view::render_shop_frame`] floating legend (non-inspect row).
     let font_px = typography::size(typography::CAPTION, h, ctx.ui_scale).max(14.0);
@@ -84,8 +84,7 @@ pub fn push_gameplay_action_prompts(
     let gap_after_icon = icon_px * 0.18;
     let pill_bg = [0.06_f32, 0.055, 0.07, 0.82];
     let pill_bg_disabled = [0.045_f32, 0.042, 0.048, 0.55];
-    let pill_pad_x =
-        (icon_px * 0.10).clamp(6.0, 16.0) + (h * 0.003).clamp(4.0, 8.0);
+    let pill_pad_x = (icon_px * 0.10).clamp(6.0, 16.0) + (h * 0.003).clamp(4.0, 8.0);
 
     let ui_font = load_ui_font();
     let legend_line_h = ui_font
@@ -97,11 +96,7 @@ pub fn push_gameplay_action_prompts(
     let legend_text_h_px = legend_line_h.max(8.0).round().max(1.0) as u32;
     let pill_pad_y = (legend_line_h * 0.14).clamp(3.0, 9.0);
 
-    let rects: [(f32, f32, f32, f32); 3] = [
-        discard_btn_rect,
-        play_btn_rect,
-        trigger_btn_rect,
-    ];
+    let rects: [(f32, f32, f32, f32); 3] = [discard_btn_rect, play_btn_rect, trigger_btn_rect];
 
     // One baseline for all three legends so cash-in stays aligned with discard/draw
     // even when the trigger rect sits above the mirror (no structure yet).
@@ -198,9 +193,7 @@ pub fn push_gameplay_action_prompts(
     let icon_px = icon_px_mut;
     let gap_after_icon = gap_mut;
 
-    let primary_h = (icon_px * 1.06)
-        .max(label_block_h)
-        .max(font_px * 1.35);
+    let primary_h = (icon_px * 1.06).max(label_block_h).max(font_px * 1.35);
     let row_top = legend_row_top;
     let iy = row_top + (primary_h - icon_px) * 0.5;
     let label_top = row_top + (primary_h - label_block_h) * 0.5;
@@ -245,13 +238,28 @@ pub fn push_gameplay_action_prompts(
         } else {
             [0.88, 0.84, 0.78, 0.96]
         };
-        icon_cmds.push(PromptIconQuad {
-            inst: GpuInstance {
-                rect: [ix, iy, icon_px, icon_px],
-                color: icon_tint,
-            },
-            asset_rel_path: paths[i],
-        });
+        let action = match i {
+            0 => crate::ui::input::UiAction::WestFacePress,
+            1 => crate::ui::input::UiAction::NorthFacePress,
+            _ => crate::ui::input::UiAction::TriggerStructure,
+        };
+        let source = match surface {
+            PromptInputSurface::Controller => ctx.steam_glyphs.iter().find_map(|(a, path)| {
+                (*a == action).then(|| PromptIconSource::Filesystem(path.clone()))
+            }),
+            PromptInputSurface::MouseOrKeyboard => {
+                Some(PromptIconSource::Embedded(keyboard_paths[i]))
+            }
+        };
+        if let Some(source) = source {
+            icon_cmds.push(PromptIconQuad {
+                inst: GpuInstance {
+                    rect: [ix, iy, icon_px, icon_px],
+                    color: icon_tint,
+                },
+                source,
+            });
+        }
         hud_text.push(TextLabel {
             rect: [
                 text_x + LABEL_PAD_X,

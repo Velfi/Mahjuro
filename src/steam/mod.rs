@@ -3,24 +3,12 @@
 //! when Steam isn't available (CLI screenshots, headless bot, dev runs
 //! with `--no-steam`, players who launched outside Steam, etc.).
 //!
-//! ## Controllers vs Steam Input API
+//! ## Steam Input API
 //!
-//! Mahjuro reads gamepads **only through SDL** (`SdlShell`, `InputState`).
-//! The Steam Input API (`ISteamInput::Init`, action sets, etc.) is for games
-//! that poll Steam for digital/analog actions. Initializing it while still
-//! using SDL for pads can leave SDL with no usable gamepad when the Steam
-//! client is running.
-//!
-//! **Default (shipping):** we do **not** call `ISteamInput::Init`. Steam
-//! overlay, achievements, and friends still work; SDL reads pads from the OS
-//! like any other SDL game (use Steam’s per-game controller settings if needed).
-//!
-//! **Opt-in (development / IGA testing):** pass `enable_steam_input_api:
-//! true` to [`SteamClient::init`], or set `--steam-input` / `MAHJURO_STEAM_INPUT=1`.
-//! That registers `game_actions_4636490.vdf` (if present), calls `Init`, and
-//! enables [`SteamClient::run_steam_input_frame`] each frame. Full In-Game
-//! Actions support would still require reading actions via the Steam Input
-//! API instead of SDL — this path is only for experiments and overlay binding.
+//! Steam builds use the Steam Input API as the canonical gamepad path. `SdlShell`
+//! still owns window, mouse, keyboard, and the non-Steam fallback gamepad path,
+//! but when `ISteamInput::Init` succeeds, controllers emit semantic actions via
+//! [`input::SteamInputBridge`].
 //!
 //! The init contract: [`SteamClient::init`] is called once at startup. On
 //! success it returns `Connected`; on failure or `--no-steam` it returns
@@ -33,8 +21,10 @@ use std::sync::Arc;
 use steamworks::{AppId, Client};
 
 pub mod achievement;
+pub mod input;
 
 pub use achievement::Achievement;
+pub use input::{ActionSet, AnalogSnapshot, SteamInputBridge};
 
 /// Mahjuro's Steam App ID (configured in Steamworks partner backend).
 const MAHJURO_APP_ID: u32 = 4636490;
@@ -50,10 +40,10 @@ pub fn launched_via_steam() -> bool {
         || std::env::var_os("SteamClientLaunch").is_some()
 }
 
-/// `MAHJURO_STEAM_INPUT=1` or `true` — same effect as [`SteamClient::init`]
-/// with `enable_steam_input_api: true` (see module docs).
-pub fn steam_input_api_requested_via_env() -> bool {
-    std::env::var("MAHJURO_STEAM_INPUT")
+/// `MAHJURO_NO_STEAM_INPUT=1` or `true` — keep Steamworks on but force SDL
+/// gamepad fallback for controller debugging.
+pub fn steam_input_disabled_via_env() -> bool {
+    std::env::var("MAHJURO_NO_STEAM_INPUT")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
 }
@@ -64,9 +54,9 @@ pub enum SteamClient {
     /// thread without an extra wrapper type.
     Connected {
         client: Arc<Client>,
-        /// `ISteamInput::Init` succeeded (opt-in only) — call
-        /// [`Self::run_steam_input_frame`] once per frame before SDL input.
-        steam_input_ready: bool,
+        /// `ISteamInput::Init` succeeded — call [`Self::run_steam_input_frame`]
+        /// once per frame before semantic action polling.
+        steam_input: Option<SteamInputBridge>,
     },
     /// Steam is unavailable. Every method is a logged no-op. Used for
     /// `--no-steam`, headless CLI subcommands, and any init failure.
@@ -77,10 +67,9 @@ impl SteamClient {
     /// Initialize the Steamworks API. Logs and returns `Disabled` on any
     /// failure path so the caller never has to special-case errors.
     ///
-    /// `enable_steam_input_api`: when `true`, registers the IGA VDF (if
-    /// present), calls `ISteamInput::Init`, and enables [`Self::run_steam_input_frame`].
-    /// Prefer `false` for normal play (SDL gamepads). See the module-level **Controllers vs Steam Input API** section.
-    pub fn init(enable_steam_input_api: bool) -> Self {
+    /// `disable_steam_input`: when true, skips `ISteamInput::Init` but keeps
+    /// overlay / achievements enabled. Used for controller fallback debugging.
+    pub fn init(disable_steam_input: bool) -> Self {
         match Client::init_app(AppId(MAHJURO_APP_ID)) {
             Ok(client) => {
                 let name = client.friends().name();
@@ -92,10 +81,10 @@ impl SteamClient {
                     MAHJURO_APP_ID,
                 );
                 let client = Arc::new(client);
-                let steam_input_ready = init_steam_input(client.as_ref(), enable_steam_input_api);
+                let steam_input = init_steam_input(client.as_ref(), !disable_steam_input);
                 Self::Connected {
                     client,
-                    steam_input_ready,
+                    steam_input,
                 }
             }
             Err(err) => {
@@ -126,20 +115,123 @@ impl SteamClient {
         }
     }
 
-    /// Synchronize Steam Input before SDL gamepad events / polling. No-op when
-    /// Steam is disabled or Steam Input failed to initialize.
-    pub fn run_steam_input_frame(&self) {
-        let Self::Connected {
-            client,
-            steam_input_ready,
-        } = self
-        else {
+    /// Synchronize Steam Input before semantic action polling. No-op when Steam
+    /// is disabled or Steam Input failed to initialize.
+    pub fn run_steam_input_frame(&mut self) {
+        let Self::Connected { steam_input, .. } = self else {
             return;
         };
-        if !steam_input_ready {
-            return;
+        if let Some(steam_input) = steam_input {
+            steam_input.run_frame();
         }
-        client.input().run_frame();
+    }
+
+    pub fn has_steam_input(&self) -> bool {
+        matches!(
+            self,
+            Self::Connected {
+                steam_input: Some(_),
+                ..
+            }
+        )
+    }
+
+    pub fn set_action_set(&mut self, set: ActionSet) {
+        if let Self::Connected {
+            steam_input: Some(steam_input),
+            ..
+        } = self
+        {
+            steam_input.set_active_action_set(set);
+        }
+    }
+
+    pub fn poll_actions(
+        &mut self,
+        actions: &mut Vec<crate::ui::input::UiAction>,
+        analog: &mut AnalogSnapshot,
+    ) -> bool {
+        if let Self::Connected {
+            steam_input: Some(steam_input),
+            ..
+        } = self
+        {
+            return steam_input.poll(actions, analog);
+        }
+        false
+    }
+
+    pub fn glyph_path_for(&self, action: crate::ui::input::UiAction) -> Option<PathBuf> {
+        match self {
+            Self::Connected {
+                steam_input: Some(steam_input),
+                ..
+            } => steam_input.glyph_path_for(action),
+            _ => None,
+        }
+    }
+
+    pub fn trigger_input_rumble(
+        &mut self,
+        weak: u16,
+        strong: u16,
+        duration_ms: u32,
+        gain: f32,
+    ) -> bool {
+        if let Self::Connected {
+            steam_input: Some(steam_input),
+            ..
+        } = self
+        {
+            return steam_input.trigger_rumble(weak, strong, duration_ms, gain);
+        }
+        false
+    }
+
+    pub fn steam_input_diagnostics(&self) -> Option<String> {
+        match self {
+            Self::Connected {
+                steam_input: Some(steam_input),
+                ..
+            } => Some(steam_input.diagnostics()),
+            _ => None,
+        }
+    }
+
+    pub fn first_controller_style(&self) -> Option<crate::ui::button_prompts::GamepadStyle> {
+        match self {
+            Self::Connected {
+                steam_input: Some(steam_input),
+                ..
+            } => steam_input.first_controller_style(),
+            _ => None,
+        }
+    }
+
+    pub fn show_gamepad_text_input<F>(
+        &self,
+        description: &str,
+        max_characters: u32,
+        existing_text: Option<&str>,
+        mut submitted: F,
+    ) -> bool
+    where
+        F: FnMut(Option<String>) + 'static + Send,
+    {
+        let Self::Connected { client, .. } = self else {
+            return false;
+        };
+        let utils = client.utils();
+        utils.show_gamepad_text_input(
+            steamworks::GamepadTextInputMode::Normal,
+            steamworks::GamepadTextInputLineMode::SingleLine,
+            description,
+            max_characters,
+            existing_text,
+            move |dismissed| {
+                submitted(entered_gamepad_text(&dismissed));
+            },
+        )
     }
 
     /// Unlock an achievement. Idempotent — Steam itself silently ignores
@@ -180,6 +272,23 @@ impl SteamClient {
     }
 }
 
+fn entered_gamepad_text(dismissed: &steamworks::GamepadTextInputDismissed) -> Option<String> {
+    let len = dismissed.submitted_text_len?;
+    let utils = unsafe { steamworks::sys::SteamAPI_SteamUtils_v010() };
+    if utils.is_null() {
+        return None;
+    }
+    let mut buf = vec![0u8; len as usize];
+    let ok = unsafe {
+        steamworks::sys::SteamAPI_ISteamUtils_GetEnteredGamepadTextInput(
+            utils,
+            buf.as_mut_ptr().cast(),
+            len,
+        )
+    };
+    ok.then(|| String::from_utf8_lossy(&buf).to_string())
+}
+
 fn steam_input_iga_path() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
@@ -188,13 +297,13 @@ fn steam_input_iga_path() -> Option<PathBuf> {
 }
 
 /// [`ISteamInput::SetInputActionManifestFilePath`] + [`ISteamInput::Init`] when `enable` is true.
-/// When `enable` is false, does not touch the Steam Input interface (SDL-first; see module docs).
-fn init_steam_input(client: &Client, enable: bool) -> bool {
+/// When `enable` is false, does not touch the Steam Input interface.
+fn init_steam_input(client: &Client, enable: bool) -> Option<SteamInputBridge> {
     if !enable {
         log::debug!(
-            "Steam Input API: off (SDL gamepads). Enable with --steam-input or MAHJURO_STEAM_INPUT=1 for IGA / Init experiments only."
+            "Steam Input API: disabled by --no-steam-input / MAHJURO_NO_STEAM_INPUT; using SDL gamepad fallback."
         );
-        return false;
+        return None;
     }
 
     let input = client.input();
@@ -213,11 +322,12 @@ fn init_steam_input(client: &Client, enable: bool) -> bool {
 
     let ok = input.init(true);
     if ok {
-        log::debug!("Steam Input: ISteamInput::Init ok (explicit RunFrame before SDL each frame)");
+        log::debug!("Steam Input: ISteamInput::Init ok (semantic controller actions enabled)");
+        Some(SteamInputBridge::new(input))
     } else {
         log::warn!("Steam Input: ISteamInput::Init returned false");
+        None
     }
-    ok
 }
 
 /// Whether `steam_api64.dll` can be loaded from the executable directory.

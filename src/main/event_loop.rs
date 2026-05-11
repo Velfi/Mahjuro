@@ -55,6 +55,9 @@ impl App {
             if self.quit_requested {
                 break 'running;
             }
+            if std::env::var_os("SteamTenfoot").is_some() && !shell.desktop_fullscreen_on() {
+                let _ = shell.set_desktop_fullscreen(true);
+            }
             let prev = self.last_drawable_px;
             let (dw, dh) = shell.drawable_size();
             self.last_drawable_px = PhysicalSize::new(dw.max(1), dh.max(1));
@@ -182,6 +185,9 @@ impl App {
     }
 
     fn dispatch_controller_event(&mut self, shell: &mut SdlShell, event: Event) {
+        if self.steam.has_steam_input() {
+            return;
+        }
         let gp_ctx = self.gamepad_poll_ctx();
         if let Some(input) = self.input.as_mut() {
             let _ = input.handle_controller_event(shell, event, gp_ctx, &mut self.mouse_actions);
@@ -195,9 +201,10 @@ impl App {
         let collection_uses_north_for_inspect = matches!(&self.scene, Scene::Collection(_))
             && self.overlay_stack.is_empty()
             && !self.scene.has_blocking_overlay();
-        let showcase_orbit_overlay = self.overlay_stack.last().is_some_and(|top| {
-            matches!(top, Scene::Showcase(s) if s.wants_orbit_input())
-        });
+        let showcase_orbit_overlay = self
+            .overlay_stack
+            .last()
+            .is_some_and(|top| matches!(top, Scene::Showcase(s) if s.wants_orbit_input()));
         crate::ui::input::GamepadPollCtx {
             shop_face_buttons: shop_face,
             collection_uses_north_for_inspect,
@@ -450,9 +457,10 @@ impl App {
             }
             input.update_pointer_hover(input.last_cursor, &slots);
             // Showcase inspect (shop / collection): orbit with LMB drag — same stick channel as gamepad.
-            let showcase_orbit = self.overlay_stack.last().is_some_and(|top| {
-                matches!(top, Scene::Showcase(s) if s.wants_orbit_input())
-            });
+            let showcase_orbit = self
+                .overlay_stack
+                .last()
+                .is_some_and(|top| matches!(top, Scene::Showcase(s) if s.wants_orbit_input()));
             if showcase_orbit && self.mouse_left_down {
                 input.accum_item_inspect_mouse_orbit(dx, dy);
             }
