@@ -53,18 +53,11 @@ impl App {
                         ModalTheme::Info,
                     );
                     self.modals.push(modal);
-                    self.pending_scene = Some(
-                        if !self.run.tutorial_shop_enabled() {
-                            Scene::Gameplay(GameplayScene::with_pending_blind(
-                                self.run.upcoming_blind,
-                            ))
-                        } else {
-                            Scene::Shop(crate::scenes::ShopScene::new(
-                                &mut self.run,
-                                &self.progress,
-                            ))
-                        },
-                    );
+                    self.pending_scene = Some(if !self.run.tutorial_shop_enabled() {
+                        Scene::Gameplay(GameplayScene::with_pending_blind(self.run.upcoming_blind))
+                    } else {
+                        Scene::Shop(crate::scenes::ShopScene::new(&mut self.run, &self.progress))
+                    });
                     self.transition_alpha = 1.0;
                     return;
                 }
@@ -203,10 +196,7 @@ impl App {
                 } else if !self.run.tutorial_shop_enabled() {
                     Scene::Gameplay(GameplayScene::with_pending_blind(self.run.upcoming_blind))
                 } else {
-                    Scene::Shop(crate::scenes::ShopScene::new(
-                        &mut self.run,
-                        &self.progress,
-                    ))
+                    Scene::Shop(crate::scenes::ShopScene::new(&mut self.run, &self.progress))
                 });
                 self.transition_alpha = 1.0;
             }
@@ -360,29 +350,38 @@ impl App {
             _ => None,
         };
 
-        let arrange_preview =
-            if let Some(Some(ref state)) = self.debug.arrange_mode {
-                let ww = size.width as f32;
-                let wh = size.height as f32;
-                Some(crate::ui::placement::ArrangePreview {
-                    name: state.object_name.clone(),
-                    dnx: if ww > 0.0 { state.delta_px / ww } else { 0.0 },
-                    dny: if wh > 0.0 { state.delta_py / wh } else { 0.0 },
-                    // Match the live preview in `sample_arrange_placement`
-                    // (see HUD code in this file): convert the world-unit
-                    // lift step back to mm at the canonical window.
-                    d_lift_mm: state.delta_lift * crate::ui::scene_layout::HFRAC_TO_MM
-                        / crate::ui::scene_layout::CANONICAL_WINDOW_W,
-                    d_rx_deg: state.delta_rx_deg,
-                    d_ry_deg: state.delta_ry_deg,
-                    d_rz_deg: state.delta_rz_deg,
-                })
-            } else {
-                None
-            };
+        let arrange_preview = if let Some(Some(ref state)) = self.debug.arrange_mode {
+            let ww = size.width as f32;
+            let wh = size.height as f32;
+            Some(crate::ui::placement::ArrangePreview {
+                name: state.object_name.clone(),
+                dnx: if ww > 0.0 { state.delta_px / ww } else { 0.0 },
+                dny: if wh > 0.0 { state.delta_py / wh } else { 0.0 },
+                // Match the live preview in `sample_arrange_placement`
+                // (see HUD code in this file): convert the world-unit
+                // lift step back to mm at the canonical window.
+                d_lift_mm: state.delta_lift * crate::ui::scene_layout::HFRAC_TO_MM
+                    / crate::ui::scene_layout::CANONICAL_WINDOW_W,
+                d_rx_deg: state.delta_rx_deg,
+                d_ry_deg: state.delta_ry_deg,
+                d_rz_deg: state.delta_rz_deg,
+            })
+        } else {
+            None
+        };
         let p = self.active_profile.min(2);
         let archive_has_new_chronicle =
             self.progress.run_history.len() as u32 > self.archive_last_seen_run_len[p];
+        let steam_glyphs: Vec<(UiAction, std::path::PathBuf)> = [
+            UiAction::Cancel,
+            UiAction::Confirm,
+            UiAction::WestFacePress,
+            UiAction::NorthFacePress,
+            UiAction::TriggerStructure,
+        ]
+        .into_iter()
+        .filter_map(|action| self.steam.glyph_path_for(action).map(|path| (action, path)))
+        .collect();
         let ctx = DrawCtx::new(
             &layout,
             &self.anim,
@@ -391,9 +390,9 @@ impl App {
             self.active_profile,
             self.run.is_in_progress(),
             renderer.projections(),
-            self.input.as_ref().and_then(|i| {
-                renderer.pick_gameplay_object(i.last_cursor.0, i.last_cursor.1)
-            }),
+            self.input
+                .as_ref()
+                .and_then(|i| renderer.pick_gameplay_object(i.last_cursor.0, i.last_cursor.1)),
             self.input
                 .as_ref()
                 .and_then(|i| renderer.pick_shop_object(i.last_cursor.0, i.last_cursor.1)),
@@ -421,6 +420,7 @@ impl App {
                 .as_ref()
                 .map(|i| i.gamepad_style)
                 .unwrap_or_default(),
+            &steam_glyphs,
             suspended_shop,
             suspended_collection,
             self.gfx.tile_preset,
@@ -452,6 +452,21 @@ impl App {
                 frame.gameplay_fog_wall_horizon_y = Some(fog.ny.clamp(0.0, 1.0));
                 frame.gameplay_fog_wall_center_x = Some(fog.nx.clamp(0.0, 1.0));
             }
+        }
+
+        if std::env::var_os("MAHJURO_STEAM_INPUT_DEBUG").is_some()
+            && let Some(text) = self.steam.steam_input_diagnostics()
+        {
+            frame.text(TextLabel {
+                rect: [18.0, 18.0, (size.width as f32 * 0.72).max(320.0), 34.0],
+                text,
+                color: [0.88, 0.95, 1.0, 0.92],
+                font_px: Some(18.0 * self.gfx.ui_scale.max(0.75)),
+                align: crate::render::wgpu_renderer::TextAlign::Left,
+                no_glossary: true,
+                scroll_offset: 0.0,
+                flavor_spans: None,
+            });
         }
 
         let h = size.height as f32;

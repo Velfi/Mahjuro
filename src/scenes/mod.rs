@@ -29,6 +29,7 @@ pub mod tutorial_recap;
 pub mod tutorial_summary;
 pub mod yaku_journal;
 pub use collection::CollectionScene;
+use enum_dispatch::enum_dispatch;
 pub use game_over::GameOverScene;
 pub use gameplay::GameplayScene;
 pub use main_menu_exterior::MainMenuExteriorScene;
@@ -51,7 +52,6 @@ pub use tutorial_campaign::TutorialCampaignScene;
 pub use tutorial_recap::TutorialRecapScene;
 pub use tutorial_summary::TutorialSummaryScene;
 pub use yaku_journal::YakuJournalScene;
-use enum_dispatch::enum_dispatch;
 
 use crate::effect_layers::EffectLayers;
 use crate::game::cascade::CascadeTuning;
@@ -270,6 +270,8 @@ pub struct DrawCtx<'a> {
     pub gamepad_swap_xy: bool,
     /// Detected controller family for button-prompt glyphs (see [`crate::ui::button_prompts`]).
     pub gamepad_style: crate::ui::button_prompts::GamepadStyle,
+    /// Steam Input glyph files for semantic actions in the current action set.
+    pub steam_glyphs: &'a [(crate::ui::input::UiAction, std::path::PathBuf)],
     /// Frozen [`ShopScene`] under shop showcase inspect — fed to [`crate::scenes::shop::render_shop_inspect_isolated_frame`].
     pub suspended_shop: Option<&'a ShopScene>,
     /// Suspended collection beneath collection showcase inspect for pedestal orbit.
@@ -304,6 +306,7 @@ impl<'a> DrawCtx<'a> {
         gamepad_swap_ab: bool,
         gamepad_swap_xy: bool,
         gamepad_style: crate::ui::button_prompts::GamepadStyle,
+        steam_glyphs: &'a [(crate::ui::input::UiAction, std::path::PathBuf)],
         suspended_shop: Option<&'a ShopScene>,
         suspended_collection: Option<&'a CollectionScene>,
         tile_preset: crate::persistence::TilePreset,
@@ -331,6 +334,7 @@ impl<'a> DrawCtx<'a> {
             gamepad_swap_ab,
             gamepad_swap_xy,
             gamepad_style,
+            steam_glyphs,
             suspended_shop,
             suspended_collection,
             tile_preset,
@@ -474,6 +478,18 @@ pub enum Scene {
     TransitionPlayground(TransitionPlaygroundScene),
     RumbleLab(RumbleLabScene),
     YakuJournal(YakuJournalScene),
+}
+
+impl Scene {
+    pub fn steam_input_action_set(&self) -> crate::steam::ActionSet {
+        match self {
+            Scene::Gameplay(_) => crate::steam::ActionSet::Gameplay,
+            Scene::Shop(_) => crate::steam::ActionSet::Shop,
+            Scene::Showcase(s) if s.wants_orbit_input() => crate::steam::ActionSet::Inspect,
+            Scene::RumbleLab(_) => crate::steam::ActionSet::RumbleLab,
+            _ => crate::steam::ActionSet::MenuControls,
+        }
+    }
 }
 
 /// Avoid a `profile_select` ↔ `options` module cycle when returning from [`ProfileSelectScene`].

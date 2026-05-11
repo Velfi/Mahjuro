@@ -1,8 +1,8 @@
 use super::*;
 
 use crate::scene_transition::{
-    apply_post_scene_transition_effects, transition_spec_for_edge, PendingSceneDestination,
-    PostSceneTransitionCtx, SceneTag, DEFAULT_QUICK_SPEC,
+    DEFAULT_QUICK_SPEC, PendingSceneDestination, PostSceneTransitionCtx, SceneTag,
+    apply_post_scene_transition_effects, transition_spec_for_edge,
 };
 use crate::sdl_shell::SdlShell;
 
@@ -16,6 +16,22 @@ impl App {
         self.last_frame = now;
         self.anim.update(now);
         self.audio.tick(now);
+        if self.steam.has_steam_input() {
+            let mut fired: Vec<(u16, u16, u32, f32)> = Vec::new();
+            self.steam_rumble_schedule.retain(|(at, w, s, d, g)| {
+                if *at <= now {
+                    fired.push((*w, *s, *d, *g));
+                    false
+                } else {
+                    true
+                }
+            });
+            for (weak, strong, duration_ms, gain) in fired {
+                let _ = self
+                    .steam
+                    .trigger_input_rumble(weak, strong, duration_ms, gain);
+            }
+        }
 
         // Refresh opened gamepads before any rumble this frame. `tick_scoring_rumble_keepalive`
         // and bus handlers run before `gamepad_frame_tick`; without this, `shell.pads` can
@@ -53,7 +69,14 @@ impl App {
                         if input.mode == crate::ui::input::InputMode::Controller
                             && input.hold_to_sell_rumble_enabled
                         {
-                            input.play_scoring_cascade_step_rumble(shell, now);
+                            let (weak, strong, duration_ms, gain) =
+                                InputState::cascade_step_rumble_params();
+                            if !self
+                                .steam
+                                .trigger_input_rumble(weak, strong, duration_ms, gain)
+                            {
+                                input.play_scoring_cascade_step_rumble(shell, now);
+                            }
                         }
                     }
                 }
@@ -69,7 +92,14 @@ impl App {
                         if input.mode == crate::ui::input::InputMode::Controller
                             && input.hold_to_sell_rumble_enabled
                         {
-                            input.play_scoring_cascade_final_rumble(shell, now, earned);
+                            let (weak, strong, duration_ms, gain) =
+                                InputState::cascade_final_rumble_params(earned);
+                            if !self
+                                .steam
+                                .trigger_input_rumble(weak, strong, duration_ms, gain)
+                            {
+                                input.play_scoring_cascade_final_rumble(shell, now, earned);
+                            }
                         }
                     }
                 }
@@ -303,22 +333,41 @@ impl App {
         button_clicks.append(&mut self.mouse_button_clicks);
         let mut hide_cursor = false;
         if let Some(input) = self.input.as_mut() {
-            let shop_face = matches!(&self.scene, Scene::Shop(_))
-                && self.overlay_stack.is_empty()
-                && !self.scene.has_blocking_overlay();
-            let collection_uses_north_for_inspect = matches!(&self.scene, Scene::Collection(_))
-                && self.overlay_stack.is_empty()
-                && !self.scene.has_blocking_overlay();
-            let showcase_orbit_overlay = self.overlay_stack.last().is_some_and(|top| {
-                matches!(top, Scene::Showcase(s) if s.wants_orbit_input())
-            });
-            let gp_ctx = crate::ui::input::GamepadPollCtx {
-                shop_face_buttons: shop_face,
-                collection_uses_north_for_inspect,
-                item_inspect_overlay: showcase_orbit_overlay,
-            };
-            if input.gamepad_frame_tick(shell, gp_ctx, &mut actions) {
-                hide_cursor = true;
+            input.item_inspect_orbit_stick = (0.0, 0.0);
+            input.item_inspect_zoom_triggers = 0.0;
+            if self.steam.has_steam_input() {
+                let active_scene = self.overlay_stack.last().unwrap_or(&self.scene);
+                self.steam
+                    .set_action_set(active_scene.steam_input_action_set());
+                let mut analog = crate::steam::AnalogSnapshot::default();
+                if self.steam.poll_actions(&mut actions, &mut analog) {
+                    input.mode = crate::ui::input::InputMode::Controller;
+                    hide_cursor = true;
+                }
+                input.item_inspect_orbit_stick = analog.orbit;
+                input.item_inspect_zoom_triggers = analog.inspect_zoom;
+                if let Some(style) = self.steam.first_controller_style() {
+                    input.gamepad_style = style;
+                }
+            } else {
+                let shop_face = matches!(&self.scene, Scene::Shop(_))
+                    && self.overlay_stack.is_empty()
+                    && !self.scene.has_blocking_overlay();
+                let collection_uses_north_for_inspect = matches!(&self.scene, Scene::Collection(_))
+                    && self.overlay_stack.is_empty()
+                    && !self.scene.has_blocking_overlay();
+                let showcase_orbit_overlay = self
+                    .overlay_stack
+                    .last()
+                    .is_some_and(|top| matches!(top, Scene::Showcase(s) if s.wants_orbit_input()));
+                let gp_ctx = crate::ui::input::GamepadPollCtx {
+                    shop_face_buttons: shop_face,
+                    collection_uses_north_for_inspect,
+                    item_inspect_overlay: showcase_orbit_overlay,
+                };
+                if input.gamepad_frame_tick(shell, gp_ctx, &mut actions) {
+                    hide_cursor = true;
+                }
             }
             actions.append(&mut self.mouse_actions);
 
@@ -729,7 +778,49 @@ impl App {
             None => {}
         }
         if let Some(input) = self.input.as_mut() {
-            input.apply_rumble_lab_ops(shell, now, rumble_lab_ops);
+            if self.steam.has_steam_input() {
+                for op in rumble_lab_ops {
+                    match op {
+                        crate::ui::input::RumbleLabOp::Pulse {
+                            weak,
+                            strong,
+                            duration_ms,
+                            gain,
+                        } => {
+                            let _ =
+                                self.steam
+                                    .trigger_input_rumble(weak, strong, duration_ms, gain);
+                        }
+                        crate::ui::input::RumbleLabOp::Composite { gain, segments } => {
+                            for (delay, weak, strong, duration_ms) in segments {
+                                self.steam_rumble_schedule.push((
+                                    now + std::time::Duration::from_millis(u64::from(delay)),
+                                    weak,
+                                    strong,
+                                    duration_ms.max(1),
+                                    gain,
+                                ));
+                            }
+                        }
+                        crate::ui::input::RumbleLabOp::Envelope {
+                            gain,
+                            weak,
+                            strong,
+                            duration_ms,
+                            ..
+                        } => {
+                            let _ = self.steam.trigger_input_rumble(
+                                weak,
+                                strong,
+                                duration_ms.max(60),
+                                gain,
+                            );
+                        }
+                    }
+                }
+            } else {
+                input.apply_rumble_lab_ops(shell, now, rumble_lab_ops);
+            }
             let shop_ready = matches!(&self.scene, Scene::Shop(_))
                 && self.overlay_stack.is_empty()
                 && !self.scene.has_blocking_overlay();
@@ -744,20 +835,28 @@ impl App {
             // false, sync stops motors — if we ran that every frame globally it would
             // cancel rumble lab / scoring pulses the same tick they fire.
             if shop_ready {
-                input.sync_shop_sell_hold_rumble(
-                    shell,
-                    hold,
-                    controller,
-                    input.hold_to_sell_rumble_enabled,
-                    progress,
-                );
+                if self.steam.has_steam_input() {
+                    if hold && controller && input.hold_to_sell_rumble_enabled {
+                        let (weak, strong, duration_ms, gain) =
+                            InputState::shop_sell_hold_rumble_params(progress);
+                        let _ = self
+                            .steam
+                            .trigger_input_rumble(weak, strong, duration_ms, gain);
+                    }
+                } else {
+                    input.sync_shop_sell_hold_rumble(
+                        shell,
+                        hold,
+                        controller,
+                        input.hold_to_sell_rumble_enabled,
+                        progress,
+                    );
+                }
             }
         }
         if let Some(next_scene) = update_result {
-            let spec = transition_spec_for_edge(
-                SceneTag::from(&self.scene),
-                SceneTag::from(&next_scene),
-            );
+            let spec =
+                transition_spec_for_edge(SceneTag::from(&self.scene), SceneTag::from(&next_scene));
             self.transition_kind = spec.kind;
             self.transition_speed = spec.speed;
             self.transition_timer = 0.0;
@@ -878,19 +977,19 @@ impl App {
                     let to_tag = SceneTag::from(&next);
                     // If we're transitioning out of the GameOver scene,
                     // surface deferred meta level-up on the showcase overlay.
-                    let pushed_meta_level_up =
-                        if matches!(self.scene, Scene::GameOver(_))
-                            && let Some(modal) = self.pending_post_game_over_level_up.take()
-                        {
-                            self.overlay_stack.push(Scene::Showcase(scenes::ShowcaseScene::new(
+                    let pushed_meta_level_up = if matches!(self.scene, Scene::GameOver(_))
+                        && let Some(modal) = self.pending_post_game_over_level_up.take()
+                    {
+                        self.overlay_stack
+                            .push(Scene::Showcase(scenes::ShowcaseScene::new(
                                 scenes::ShowcasePresenter::MetaLevelUp(
                                     scenes::MetaLevelUpPresenter::new(modal),
                                 ),
                             )));
-                            true
-                        } else {
-                            false
-                        };
+                        true
+                    } else {
+                        false
+                    };
                     // Route the new scene to the target recorded
                     // when the transition started, not whatever is
                     // on top now — overlays may have been pushed

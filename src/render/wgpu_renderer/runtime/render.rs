@@ -794,22 +794,20 @@ impl WgpuRenderer {
                     i += 1;
                 }
                 DrawCmd::PromptIconQuad(icon) => {
-                    if !self.prompt_icon_overlays.contains_key(icon.asset_rel_path) {
+                    let key = icon.source.cache_key();
+                    if !self.prompt_icon_overlays.contains_key(&key) {
                         match make_prompt_icon_overlay_gpu(
                             &self.device,
                             &self.queue,
                             &self.text_bind_group_layout,
                             &self.tile_sampler,
-                            icon.asset_rel_path,
+                            &icon.source,
                         ) {
                             Some(gpu) => {
-                                self.prompt_icon_overlays.insert(icon.asset_rel_path, gpu);
+                                self.prompt_icon_overlays.insert(key.clone(), gpu);
                             }
                             None => {
-                                log::warn!(
-                                    "Kenney prompt SVG missing or invalid: {}",
-                                    icon.asset_rel_path
-                                );
+                                log::warn!("prompt icon missing or invalid: {key}");
                             }
                         }
                     }
@@ -821,7 +819,7 @@ impl WgpuRenderer {
                             usage: wgpu::BufferUsages::VERTEX,
                         });
                     let idx = prompt_icon_quads.len();
-                    prompt_icon_quads.push(*icon);
+                    prompt_icon_quads.push(icon.clone());
                     prompt_icon_inst_buffers.push(buf);
                     ops.push(RenderOp::PromptIconQuad(idx));
                     i += 1;
@@ -2050,10 +2048,7 @@ impl WgpuRenderer {
         };
         if let Some(ref path) = screenshot_path {
             if matches!(self.target, RenderTarget::Surface(_))
-                && !self
-                    .config
-                    .usage
-                    .contains(wgpu::TextureUsages::COPY_SRC)
+                && !self.config.usage.contains(wgpu::TextureUsages::COPY_SRC)
             {
                 log::warn!(
                     "screenshot skipped ({}): swapchain has no COPY_SRC (see MAHJURO_VULKAN_WIN_SURFACE_COPY on Windows Vulkan)",

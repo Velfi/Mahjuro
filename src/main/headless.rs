@@ -80,7 +80,9 @@ fn shop_focus_slug_inspectable(slug: &str) -> bool {
 }
 
 /// Profile snapshot for shop stock in screenshot CLI (Qilin ribbon gate).
-fn screenshot_profile_for_shop_stock(fresh_progress: bool) -> crate::core::progression::PlayerProgress {
+fn screenshot_profile_for_shop_stock(
+    fresh_progress: bool,
+) -> crate::core::progression::PlayerProgress {
     let settings = persistence::load_settings();
     if fresh_progress {
         crate::core::progression::PlayerProgress::new()
@@ -261,15 +263,19 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
         anyhow::bail!("--journal-transition is only valid with --scene shop");
     }
     let showcase_like = matches!(s.scene.as_str(), "showcase");
-    let celebration_like = matches!(s.scene.as_str(), "zodiac_celebration")
-        || (showcase_like && s.pack.is_none());
+    let celebration_like =
+        matches!(s.scene.as_str(), "zodiac_celebration") || (showcase_like && s.pack.is_none());
     let pack_celeb_like =
         matches!(s.scene.as_str(), "tile_pack_celebration") || (showcase_like && s.pack.is_some());
     if showcase_like && s.pack.is_some() && s.zodiac.is_some() {
-        anyhow::bail!("--scene showcase: use only one of --pack (tile pack) or --zodiac (ribbon); omit --zodiac for default snake");
+        anyhow::bail!(
+            "--scene showcase: use only one of --pack (tile pack) or --zodiac (ribbon); omit --zodiac for default snake"
+        );
     }
     if s.zodiac.is_some() && !celebration_like {
-        anyhow::bail!("--zodiac is only valid with --scene zodiac_celebration or --scene showcase without --pack");
+        anyhow::bail!(
+            "--zodiac is only valid with --scene zodiac_celebration or --scene showcase without --pack"
+        );
     }
     if s.celebration_level.is_some() && !celebration_like {
         anyhow::bail!(
@@ -278,7 +284,9 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
         );
     }
     if s.pack.is_some() && !pack_celeb_like {
-        anyhow::bail!("--pack is only valid with --scene tile_pack_celebration or --scene showcase");
+        anyhow::bail!(
+            "--pack is only valid with --scene tile_pack_celebration or --scene showcase"
+        );
     }
     let boss_override = s.boss.as_deref().map(parse_boss_slug).transpose()?;
     let mut run = RunState::new_demo();
@@ -355,14 +363,13 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
         "game_over_level_up" | "meta_level_up" => {
             let mut progress = crate::core::progression::PlayerProgress::new();
             progress.runs_completed = 1;
-            let result = progress
-                .check_level_up()
-                .ok_or_else(|| anyhow::anyhow!("game_over_level_up: check_level_up returned None"))?;
+            let result = progress.check_level_up().ok_or_else(|| {
+                anyhow::anyhow!("game_over_level_up: check_level_up returned None")
+            })?;
             let ww = s.width.max(1) as f32;
             let hh = s.height.max(1) as f32;
-            let modal = crate::main_draw::build_level_up_modal(&result, ww, hh).ok_or_else(|| {
-                anyhow::anyhow!("game_over_level_up: no unlock pages for modal")
-            })?;
+            let modal = crate::main_draw::build_level_up_modal(&result, ww, hh)
+                .ok_or_else(|| anyhow::anyhow!("game_over_level_up: no unlock pages for modal"))?;
             (
                 Scene::Showcase(ShowcaseScene::new(ShowcasePresenter::MetaLevelUp(
                     MetaLevelUpPresenter::new(modal),
@@ -863,9 +870,10 @@ impl HeadlessApp {
         }
         let _ = update_result;
 
-        let showcase_orbit_top = self.overlay_stack.last().is_some_and(|top| {
-            matches!(top, Scene::Showcase(s) if s.wants_orbit_input())
-        });
+        let showcase_orbit_top = self
+            .overlay_stack
+            .last()
+            .is_some_and(|top| matches!(top, Scene::Showcase(s) if s.wants_orbit_input()));
         let suspended_shop = match (&self.scene, showcase_orbit_top) {
             (Scene::Shop(s), true) => Some(s),
             _ => None,
@@ -900,6 +908,7 @@ impl HeadlessApp {
             false,
             false,
             crate::ui::button_prompts::GamepadStyle::default(),
+            &[],
             suspended_shop,
             suspended_collection,
             self.gfx.tile_preset,

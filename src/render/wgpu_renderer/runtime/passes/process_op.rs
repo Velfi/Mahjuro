@@ -512,7 +512,7 @@ impl WgpuRenderer {
             }
             RenderOp::PromptIconQuad(idx) => {
                 let icon = &prompt_icon_quads[*idx];
-                if let Some(gpu) = self.prompt_icon_overlays.get(icon.asset_rel_path) {
+                if let Some(gpu) = self.prompt_icon_overlays.get(&icon.source.cache_key()) {
                     pass.set_pipeline(if scene_hdr_attachment {
                         &self.image_pipeline_scene_hdr
                     } else {

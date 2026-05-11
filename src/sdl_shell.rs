@@ -33,8 +33,14 @@ impl SdlShell {
         let gamepad = _sdl.gamepad().map_err(anyhow::Error::from)?;
         let joystick = _sdl.joystick().map_err(anyhow::Error::from)?;
 
+        let tenfoot = std::env::var_os("SteamTenfoot").is_some();
         let mut wb = WindowBuilder::new(&_video, title, width, height);
-        wb.resizable().high_pixel_density().position_centered();
+        wb.resizable().high_pixel_density();
+        if tenfoot {
+            wb.fullscreen();
+        } else {
+            wb.position_centered();
+        }
 
         #[cfg(target_os = "macos")]
         {

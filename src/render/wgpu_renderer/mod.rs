@@ -50,8 +50,8 @@ use crate::render::decal::{
 };
 use crate::render::dora_plinth_mesh::build_dora_plinth_mesh;
 use crate::render::draw_cmd::{
-    CascadeTokenKind, DrawCmd, ShowcaseTilePlacement, ShrinePlacement,
-    TallyFanKind, TileFaceQuad, UiFrame, WallStackPlacement, YakuTabletPlacement,
+    CascadeTokenKind, DrawCmd, ShowcaseTilePlacement, ShrinePlacement, TallyFanKind, TileFaceQuad,
+    UiFrame, WallStackPlacement, YakuTabletPlacement,
 };
 use crate::render::gpu_types::{DecodedRelicImage, RelicTextureGpu};
 use crate::render::lit_mesh::Aabb;
@@ -231,8 +231,8 @@ pub struct WgpuRenderer {
     /// Cached 2D tile-face overlays keyed by tile identity.
     tile_face_overlays:
         HashMap<(Suit, u8, Option<crate::core::tile::TileEnhancement>, bool), TileFaceOverlayGpu>,
-    /// Cached Kenney SVG prompts keyed by `assets/` relative path (`&'static str` from scene code).
-    prompt_icon_overlays: HashMap<&'static str, TileFaceOverlayGpu>,
+    /// Cached prompt icons keyed by source path (`asset:...` or `file:...`).
+    prompt_icon_overlays: HashMap<String, TileFaceOverlayGpu>,
     /// Lazily built texture + bind group for [`Object3dKind::Relic::debuffed`] overlays.
     debuff_marker_overlay: Option<TileFaceOverlayGpu>,
     /// Cached text-label rasterizations. Two-level map so the hit path can
@@ -703,7 +703,6 @@ pub struct WgpuRenderer {
     /// [`WgpuRenderer::queue_screenshot`].
     pending_screenshot: std::cell::Cell<Option<std::path::PathBuf>>,
 }
-
 
 mod impl_arrange;
 mod impl_loaders;

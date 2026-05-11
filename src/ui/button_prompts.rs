@@ -67,7 +67,9 @@ impl GamepadStyle {
 }
 
 /// Physical face positions in the SDL **semantic** layout (south =
-/// bottom, etc.), not vendor paint.
+/// bottom, etc.), not vendor paint. Test-only; runtime glyphs come from
+/// Steam Input (see [`crate::steam::SteamInputBridge::glyph_path_for`]).
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FaceButton {
     South,
@@ -108,7 +110,7 @@ pub enum PromptInputSurface {
     MouseOrKeyboard,
 }
 
-/// Core shop HUD actions in **Exit → Select → Sell → Inspect** order (matches [`crate::ui::kenney_prompt_paths::shop_prompt_icon_paths`]).
+/// Core shop HUD actions in **Exit → Select → Sell → Inspect** order (matches [`crate::ui::kenney_prompt_paths::shop_keyboard_prompt_icon_paths`]).
 pub const SHOP_LEGEND_VERB_LABELS: [&str; 4] = ["Exit", "Select", "Sell", "Inspect"];
 
 /// For [`ButtonPrompt::shop_floating_legend`] unit tests only.

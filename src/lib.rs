@@ -35,8 +35,6 @@ mod main_draw;
 mod main_event_loop;
 #[path = "main/frame_tick.rs"]
 mod main_frame_tick;
-#[path = "main/scene_transition.rs"]
-mod scene_transition;
 #[path = "main/headless.rs"]
 mod main_headless;
 #[path = "main/render_settings.rs"]
@@ -44,6 +42,8 @@ mod main_render_settings;
 mod persistence;
 mod physical_size;
 mod render;
+#[path = "main/scene_transition.rs"]
+mod scene_transition;
 mod scenes;
 mod sdl_shell;
 mod steam;
@@ -65,7 +65,7 @@ use game::event_bus::{EventBus, GameEvent};
 use game::run::RunState;
 use game::volumetric_tuning::VolumetricTuning;
 use render::animation::AnimationController;
-use render::draw_cmd::{apply_modal_relic_staging, CameraParams, UiFrame};
+use render::draw_cmd::{CameraParams, UiFrame, apply_modal_relic_staging};
 use render::wgpu_renderer::{DebugArrangeOverride, GpuInstance, TextLabel, WgpuRenderer};
 use scenes::game_over::GameOverScene;
 use scenes::gameplay::GameplayScene;
@@ -97,7 +97,7 @@ use main_render_settings::RenderSettings;
 // `DebugState`, `ArrangeModeState`, and `RenderSettings` live in
 // `main/debug_state.rs` and `main/render_settings.rs`.
 
-use scene_transition::{PendingSceneDestination, TransitionKind, DEFAULT_QUICK_SPEC};
+use scene_transition::{DEFAULT_QUICK_SPEC, PendingSceneDestination, TransitionKind};
 
 struct App {
     /// Last known drawable size in pixels (updated each SDL frame).
@@ -171,6 +171,7 @@ struct App {
     /// `SteamClient` is safe to call in either state — `Disabled` is a
     /// logged no-op — so no `Option` wrapping is needed at call sites.
     steam: steam::SteamClient,
+    steam_rumble_schedule: Vec<(Instant, u16, u16, u32, f32)>,
     /// Mirrors `AppSettings::archive_last_seen_run_len` for menu hints without disk reads.
     archive_last_seen_run_len: [u32; 3],
 }
@@ -340,6 +341,7 @@ impl App {
                 .flatten(),
             modifiers: Mod::NOMOD,
             steam,
+            steam_rumble_schedule: Vec::new(),
             archive_last_seen_run_len: settings.archive_last_seen_run_len,
         }
     }
@@ -518,8 +520,9 @@ pub fn run() -> anyhow::Result<()> {
                 );
                 steam::SteamClient::disabled()
             } else {
-                let steam_input_api = cli.steam_input || steam::steam_input_api_requested_via_env();
-                steam::SteamClient::init(steam_input_api)
+                let disable_steam_input =
+                    cli.no_steam_input || steam::steam_input_disabled_via_env();
+                steam::SteamClient::init(disable_steam_input)
             };
 
             let mut shell = sdl_shell::SdlShell::new("Mahjuro", 1920, 1080)?;

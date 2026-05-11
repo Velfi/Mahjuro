@@ -99,6 +99,26 @@ Builds default to "uploaded but not live". Promote them via
 [partner.steamgames.com/apps/builds/4636490](https://partner.steamgames.com/apps/builds/4636490):
 pick the build, set the branch (`default` for production), and save.
 
+## Steam Input partner settings
+
+Mahjuro bundles its Steam Input action manifest at
+[`packaging/steam_input/game_actions_4636490.vdf`](../packaging/steam_input/game_actions_4636490.vdf).
+After staging a build, verify `game_actions_4636490.vdf` is present next to
+the executable in each depot.
+
+In the partner site, open **Application → Steam Input**:
+
+- Set **Steam Input Template** to **Custom Configuration (Bundled with Game)**.
+- Set the Action Manifest path to `game_actions_4636490.vdf`.
+- Opt in Xbox, PlayStation, Switch, Steam Deck, Steam Controller, and **Any Future Devices**.
+- Use Big Picture / Controller Configurator to save the default configuration privately first.
+- Publish that configuration as official only after a build that polls semantic actions is live.
+
+For local QA, launch Steam with `steam://forceinputappid/4636490`, run the game
+from Steam, and set `MAHJURO_STEAM_INPUT_DEBUG=1` to show the in-game Steam
+Input diagnostics overlay. Use `--no-steam-input` or
+`MAHJURO_NO_STEAM_INPUT=1` only when testing the SDL fallback path.
+
 ## Troubleshooting
 
 - **`Login Failure: Invalid Login Auth Code`** — Steam Guard token expired or
