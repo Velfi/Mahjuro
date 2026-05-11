@@ -84,7 +84,7 @@ jobs:
             --output table
 
       - name: Run tests
-        run: cargo test --locked
+        run: cargo test --locked --target x86_64-pc-windows-msvc
 
       - name: Install asset bake tools (ffmpeg, pngquant, oxipng)
         shell: pwsh

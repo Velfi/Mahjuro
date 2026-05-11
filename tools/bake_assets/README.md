@@ -1,6 +1,8 @@
 # Asset packs (release builds)
 
-Shipped builds load game data from ZIP packs next to the executable (or under `Contents/Resources/` in a `.app`), driven by `pack_manifest.json`. Debug / `cargo test` uses the repo `assets/` tree when no manifest is present.
+Shipped builds load game data from ZIP packs next to the executable (or under `Contents/Resources/` in a `.app`), driven by `pack_manifest.json`.
+
+**Local `cargo build` / `cargo test`:** `build.rs` runs this bake into `target/<profile>/` (or `target/<triple>/<profile>/` when using `--target`), so the game and tests load packs without copying the repo `assets/` tree. Set **`MAHJURO_SKIP_ASSET_BAKE=1`** to skip that step (you must place `pack_manifest.json` + zips next to the binary, set **`MAHJURO_ASSETS_PACK_DIR`**, or point **`MAHJURO_ASSETS`** at a loose tree). Debug profile uses **`--no-lossy`** for faster iteration; release uses the default lossy profile when optimizers are on `PATH`.
 
 ## Bake
 
@@ -29,5 +31,6 @@ The manifest includes **`game_version`** (from the root crate `[package].version
 ## Runtime overrides
 
 - `MAHJURO_ASSETS_PACK_DIR` — directory containing `pack_manifest.json` and the zip files.
-- `MAHJURO_ASSETS` — loose `assets/` root (overrides pack discovery when used with dev fallbacks).
+- `MAHJURO_ASSETS` — loose `assets/` root (used when packs are absent or you want to override).
+- `MAHJURO_SKIP_ASSET_BAKE` — if set (non-empty, not `0`/`false`), `build.rs` does not run the baker (see above).
 - `MAHJURO_STRICT_PACK_VERSION` — if set, panic when manifest `game_version` ≠ binary (see above).

@@ -296,11 +296,12 @@ mod tests {
     /// emissive; re-run after authoring so the count reflects `emissiveTexture` / factor.
     #[test]
     fn pick_blind_room_emissive_material_summary() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/hallway.glb");
-        let data = match std::fs::read(&path) {
-            Ok(b) => b,
-            Err(e) => {
-                eprintln!("skip pick_blind_room_emissive_material_summary: {path:?}: {e}");
+        let data = match crate::asset_path::get("hallway.glb") {
+            Some(f) => f.data,
+            None => {
+                eprintln!(
+                    "skip pick_blind_room_emissive_material_summary: no hallway.glb (bake packs or set MAHJURO_ASSETS)"
+                );
                 return;
             }
         };

@@ -81,7 +81,7 @@ jobs:
           echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
 
       - name: Run tests
-        run: cargo test --locked
+        run: cargo test --locked --target aarch64-apple-darwin
 
       - name: Install asset bake tools (ffmpeg, pngquant, oxipng)
         run: brew install ffmpeg pngquant oxipng

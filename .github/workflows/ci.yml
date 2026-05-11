@@ -113,11 +113,11 @@ jobs:
 
       - name: Run tests
         if: matrix.name != 'Linux'
-        run: cargo test --locked
+        run: cargo test --locked --target ${{ matrix.target }}
 
       - name: Run tests (Linux)
         if: matrix.name == 'Linux'
-        run: xvfb-run --auto-servernum cargo test --locked
+        run: xvfb-run --auto-servernum cargo test --locked --target ${{ matrix.target }}
 
       # Signing verification — skipped on fork PRs where secrets are unavailable.
       - name: Verify Apple codesign identity

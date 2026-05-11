@@ -1,5 +1,10 @@
 use super::super::*;
 
+use crate::render::gltf_helpers::{GltfPbrUniform, build_sampler_descriptor};
+use crate::render::lamp_mesh::{
+    build_bug_body_mesh, build_bug_wing_blur_mesh, build_bug_wing_mesh,
+};
+
 pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<WgpuRenderer> {
     let t_total = Instant::now();
     // Instance, adapter, device, surface/offscreen target, depth — see
@@ -3613,7 +3618,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         }),
     );
 
-    Ok(Self {
+    Ok(WgpuRenderer {
         target,
         device,
         queue,

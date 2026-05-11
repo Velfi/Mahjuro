@@ -1,5 +1,5 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum TileGlbPipelineKey {
+pub(crate) enum TileGlbPipelineKey {
     /// Not selected by [`Self::from_loaded_primitive`]; pipelines kept for symmetry.
     #[allow(dead_code)]
     OpaqueDoubleSided,
@@ -9,7 +9,7 @@ pub(super) enum TileGlbPipelineKey {
 }
 
 impl TileGlbPipelineKey {
-    pub(super) fn from_loaded_primitive(lp: &crate::render::tile_glb::LoadedPrimitive) -> Self {
+    pub(crate) fn from_loaded_primitive(lp: &crate::render::tile_glb::LoadedPrimitive) -> Self {
         use crate::render::tile_glb::GltfAlphaMode::*;
         // glTF `doubleSided` on opaque/mask solids (e.g. mahjong tiles) makes interior
         // back-faces visible on thin-walled geometry; only honor it for blend materials.
@@ -21,7 +21,7 @@ impl TileGlbPipelineKey {
     }
 
     #[inline]
-    pub(super) fn is_blend(self) -> bool {
+    pub(crate) fn is_blend(self) -> bool {
         matches!(self, Self::BlendDoubleSided | Self::BlendCullBack)
     }
 }

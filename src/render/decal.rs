@@ -221,7 +221,7 @@ fn decode_atlas(tile_set: &str) -> Option<Atlas> {
 
     let png_path = format!("sets/{tile_set}/atlas.png");
     let png_file = crate::asset_path::get(&png_path)?;
-    let decoder = image::ImageReader::new(std::io::Cursor::new(png_file.data.as_ref()))
+    let decoder = image::ImageReader::new(std::io::Cursor::new(png_file.data.as_slice()))
         .with_guessed_format()
         .ok()?;
     let img = decoder.decode().ok()?.to_rgba8();
@@ -494,7 +494,7 @@ fn blit_flower_decal(dst: &mut [u8], dst_w: u32, dst_h: u32, rank: u8) {
 
     // Decode PNG and alpha-blend onto the destination buffer.
     let Ok(decoder) =
-        image::ImageReader::new(std::io::Cursor::new(file.data.as_ref())).with_guessed_format()
+        image::ImageReader::new(std::io::Cursor::new(file.data.as_slice())).with_guessed_format()
     else {
         blit_flower_fallback(dst, dst_w, dst_h, rank);
         return;

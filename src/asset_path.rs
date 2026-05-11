@@ -1,4 +1,4 @@
-//! Asset loading: shipped ZIP packs (see `pack_manifest.json`) or loose `assets/` in dev.
+//! Asset loading: ZIP packs (`pack_manifest.json`, baked by `build.rs`) or loose `MAHJURO_ASSETS`.
 
 pub use crate::asset_sources::{
     get, init, list_tilesets, log_all_assets, prefetch_lazy_packs,

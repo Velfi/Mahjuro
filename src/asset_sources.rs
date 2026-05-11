@@ -1,4 +1,5 @@
-//! Runtime asset loading: multi-pack ZIP (manifest + lazy audio) or loose `assets/` for dev.
+//! Runtime asset loading: multi-pack ZIP (manifest + lazy audio), or a loose tree if
+//! `MAHJURO_ASSETS` is set.
 //!
 //! **Boot loading:** `essential` and `gameplay` packs are both **eager** — the renderer pulls most
 //! of the tree during `WgpuRenderer::new`, so deferring gameplay would require async init. Only
@@ -108,6 +109,14 @@ fn resolve_pack_dir() -> Option<PathBuf> {
         if dir.join(MANIFEST_NAME).is_file() {
             return Some(dir);
         }
+        // `cargo test`: exe is under `target/.../deps/`; build.rs writes packs in the parent profile dir.
+        if dir.file_name() == Some(std::ffi::OsStr::new("deps")) {
+            if let Some(parent) = dir.parent() {
+                if parent.join(MANIFEST_NAME).is_file() {
+                    return Some(parent.to_path_buf());
+                }
+            }
+        }
         if let Some(exe) = std::env::current_exe().ok() {
             if let Some(res) = macos_resources_dir(&exe) {
                 if res.join(MANIFEST_NAME).is_file() {
@@ -119,10 +128,7 @@ fn resolve_pack_dir() -> Option<PathBuf> {
     None
 }
 
-fn loose_dev_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("assets")
-}
-
+/// Loose tree only when explicitly requested (no implicit repo `assets/` path).
 fn try_loose_root() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("MAHJURO_ASSETS") {
         let pb = PathBuf::from(p);
@@ -130,13 +136,20 @@ fn try_loose_root() -> Option<PathBuf> {
             return Some(pb);
         }
     }
-    if cfg!(debug_assertions) || cfg!(test) {
-        let r = loose_dev_root();
-        if r.is_dir() {
-            return Some(r);
-        }
-    }
     None
+}
+
+fn loose_or_panic() -> AssetsState {
+    if let Some(root) = try_loose_root() {
+        log::warn!("assets: loose tree {}", root.display());
+        return AssetsState::Loose(root);
+    }
+    panic!(
+        "Mahjuro assets not found: expected {} next to the executable, under MAHJURO_ASSETS_PACK_DIR, \
+         or in the parent of `deps/` when running tests — or set MAHJURO_ASSETS to a loose assets/ directory. \
+         Run `cargo build` (build.rs runs tools/bake_assets/bake_assets.py) or see tools/bake_assets/README.md.",
+        MANIFEST_NAME
+    );
 }
 
 /// Reject zip-slip / odd paths when indexing a trusted-but-modifiable pack file.
@@ -175,7 +188,7 @@ fn route_lazy_pack(manifest: &PackManifest, lookup_key: &str) -> Option<usize> {
                 let score = usize::MAX;
                 best = Some(match best {
                     None => (score, idx),
-                    Some((s, i)) if score > s => (score, idx),
+                    Some((s, _i)) if score > s => (score, idx),
                     Some(b) => b,
                 });
             }
@@ -186,7 +199,7 @@ fn route_lazy_pack(manifest: &PackManifest, lookup_key: &str) -> Option<usize> {
                 let score = pref_n.len();
                 best = Some(match best {
                     None => (score, idx),
-                    Some((s, i)) if score > s => (score, idx),
+                    Some((s, _i)) if score > s => (score, idx),
                     Some(b) => b,
                 });
             }
@@ -197,7 +210,7 @@ fn route_lazy_pack(manifest: &PackManifest, lookup_key: &str) -> Option<usize> {
                     let score = 1000 + pat.len();
                     best = Some(match best {
                         None => (score, idx),
-                        Some((s, i)) if score > s => (score, idx),
+                        Some((s, _i)) if score > s => (score, idx),
                         Some(b) => b,
                     });
                 }
@@ -245,6 +258,12 @@ impl PacksState {
         let mut index = PathIndex::new();
 
         for spec in &manifest.packs {
+            log::trace!(
+                "asset pack `{}` file={} tier={:?}",
+                spec.id,
+                spec.file,
+                spec.load_tier
+            );
             let archive = if matches!(spec.load_tier, LoadTier::Eager) {
                 Some(open_zip(&pack_dir, &spec.file)?)
             } else {
@@ -392,20 +411,14 @@ fn init_state() -> AssetsState {
             Ok(s) => s,
             Err(e) => {
                 log::warn!("pack manifest unreadable ({}): {e}", path.display());
-                if let Some(root) = try_loose_root() {
-                    return AssetsState::Loose(root);
-                }
-                return AssetsState::Loose(loose_dev_root());
+                return loose_or_panic();
             }
         };
         let manifest: PackManifest = match serde_json::from_str(&raw) {
             Ok(m) => m,
             Err(e) => {
                 log::warn!("pack manifest JSON: {e}");
-                if let Some(root) = try_loose_root() {
-                    return AssetsState::Loose(root);
-                }
-                return AssetsState::Loose(loose_dev_root());
+                return loose_or_panic();
             }
         };
         verify_manifest_version(&manifest);
@@ -422,12 +435,7 @@ fn init_state() -> AssetsState {
             Err(e) => log::warn!("asset packs init failed: {e}"),
         }
     }
-    if let Some(root) = try_loose_root() {
-        log::debug!("assets: loose {}", root.display());
-        return AssetsState::Loose(root);
-    }
-    log::debug!("assets: loose dev {}", loose_dev_root().display());
-    AssetsState::Loose(loose_dev_root())
+    loose_or_panic()
 }
 
 /// Initialize asset backend (packs or loose). Idempotent; safe to call multiple times.

@@ -67,6 +67,7 @@ Every third blind is a **boss** with a special rule that forces you to adapt:
 ### Requirements
 
 - [Rust](https://rustup.rs/) (2024 edition)
+- [Python](https://www.python.org/) 3 on `PATH` (`python3` or `python`) — `build.rs` runs `tools/bake_assets/bake_assets.py` so packs sit next to the binary (set `MAHJURO_SKIP_ASSET_BAKE=1` only if you supply packs or `MAHJURO_ASSETS` yourself)
 - A GPU with Vulkan, Metal, or DX12 support
 
 ### Build & Run
@@ -76,7 +77,7 @@ Every third blind is a **boss** with a special rule that forces you to adapt:
 git clone https://github.com/Velfi/Mahjuro.git
 cd mahjuro
 
-# Build and run (release mode recommended)
+# Build and run (release mode recommended; first build bakes ZIP packs via Python)
 cargo run --release
 ```
 

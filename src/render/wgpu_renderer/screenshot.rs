@@ -1,5 +1,5 @@
 /// Per-screenshot staging buffer + the metadata needed to decode it.
-pub(super) struct ScreenshotStaging {
+pub(crate) struct ScreenshotStaging {
     pub buffer: wgpu::Buffer,
     pub width: u32,
     pub height: u32,

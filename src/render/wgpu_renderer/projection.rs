@@ -3,10 +3,10 @@ use glam::Mat4;
 /// Camera state captured at the end of a frame, for unprojecting cursor
 /// positions into world-space rays in `pick_hand_tile`.
 #[derive(Clone, Copy)]
-pub(super) struct PickCamera {
-    pub(super) inv_view_proj: Mat4,
-    pub(super) viewport_w: f32,
-    pub(super) viewport_h: f32,
+pub(crate) struct PickCamera {
+    pub(crate) inv_view_proj: Mat4,
+    pub(crate) viewport_w: f32,
+    pub(crate) viewport_h: f32,
 }
 
 /// Per-frame projected screen-space rects for every 3D element category.

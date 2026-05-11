@@ -1,7 +1,7 @@
 use super::*;
 
 impl WgpuRenderer {
-    fn encode_screenshot_copy(
+    pub(crate) fn encode_screenshot_copy(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         tex: &wgpu::Texture,
@@ -56,7 +56,7 @@ impl WgpuRenderer {
 
     /// Map the staging buffer, decode pixels (handling BGRA→RGBA + row
     /// stride), and write the PNG. Synchronous: blocks on `device.poll`.
-    fn finalize_screenshot(
+    pub(crate) fn finalize_screenshot(
         &self,
         staging: ScreenshotStaging,
         path: &std::path::Path,
