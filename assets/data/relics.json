@@ -196,17 +196,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "Chain",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " — never the tile, always the tale.",
+        "text": "With ever link in the chain , the power of your tiles grow.",
         "bold": false,
         "italic": false
       }
