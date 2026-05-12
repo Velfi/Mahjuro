@@ -226,10 +226,9 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
     #[cfg(target_os = "windows")]
     win32_maybe_clear_vulkan_env_after_probe();
 
-    let instance_desc =
+    let mut instance_desc =
         wgpu::InstanceDescriptor::new_without_display_handle_from_env();
-    #[cfg(target_os = "windows")]
-    if std::env::var_os("WGPU_BACKEND").is_none() {
+    if cfg!(target_os = "windows") && std::env::var_os("WGPU_BACKEND").is_none() {
         // Vulkan + Win32 swapchain still faults on some AMD stacks; DX12 is the safe default.
         // Set `WGPU_BACKEND=vulkan` (or `vk`) to test Vulkan.
         instance_desc.backends = wgpu::Backends::DX12;

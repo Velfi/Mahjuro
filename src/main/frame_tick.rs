@@ -270,6 +270,18 @@ impl App {
                 GameEvent::InfoModal { title, body } => {
                     self.modals.push(Modal::new(title, body, ModalTheme::Info));
                 }
+                GameEvent::OpenSteamInputBindings => {
+                    if !self.steam.show_input_binding_panel() {
+                        self.modals.push(Modal::new(
+                            "Controller rebinding unavailable".to_string(),
+                            "Connect a Steam-supported controller and launch Mahjuro \
+                             through Steam to open the binding configurator. The \
+                             Steam overlay must be enabled."
+                                .to_string(),
+                            ModalTheme::Info,
+                        ));
+                    }
+                }
             }
         }
 

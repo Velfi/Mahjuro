@@ -115,6 +115,12 @@ pub enum GameEvent {
         title: String,
         body: String,
     },
+    /// Open Steam's overlay controller-binding configurator for the active
+    /// controller. The App layer owns `SteamClient` and routes this to
+    /// [`crate::steam::SteamClient::show_input_binding_panel`]; falls back to
+    /// an [`Self::InfoModal`] when Steam Input or the overlay aren't
+    /// available (no controller, launched outside Steam, etc.).
+    OpenSteamInputBindings,
 }
 
 #[derive(Default)]

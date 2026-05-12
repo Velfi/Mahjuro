@@ -208,30 +208,17 @@ impl SteamClient {
         }
     }
 
-    pub fn show_gamepad_text_input<F>(
-        &self,
-        description: &str,
-        max_characters: u32,
-        existing_text: Option<&str>,
-        mut submitted: F,
-    ) -> bool
-    where
-        F: FnMut(Option<String>) + 'static + Send,
-    {
-        let Self::Connected { client, .. } = self else {
-            return false;
-        };
-        let utils = client.utils();
-        utils.show_gamepad_text_input(
-            steamworks::GamepadTextInputMode::Normal,
-            steamworks::GamepadTextInputLineMode::SingleLine,
-            description,
-            max_characters,
-            existing_text,
-            move |dismissed| {
-                submitted(entered_gamepad_text(&dismissed));
-            },
-        )
+    /// Open Steam's overlay binding configurator for the first connected
+    /// controller. No-op (returns `false`) when Steam Input isn't active or
+    /// no controller is present.
+    pub fn show_input_binding_panel(&self) -> bool {
+        match self {
+            Self::Connected {
+                steam_input: Some(steam_input),
+                ..
+            } => steam_input.show_binding_panel(),
+            _ => false,
+        }
     }
 
     /// Unlock an achievement. Idempotent — Steam itself silently ignores
@@ -270,23 +257,6 @@ impl SteamClient {
         }
         log::info!("unlocked Steam achievement: {api_name}");
     }
-}
-
-fn entered_gamepad_text(dismissed: &steamworks::GamepadTextInputDismissed) -> Option<String> {
-    let len = dismissed.submitted_text_len?;
-    let utils = unsafe { steamworks::sys::SteamAPI_SteamUtils_v010() };
-    if utils.is_null() {
-        return None;
-    }
-    let mut buf = vec![0u8; len as usize];
-    let ok = unsafe {
-        steamworks::sys::SteamAPI_ISteamUtils_GetEnteredGamepadTextInput(
-            utils,
-            buf.as_mut_ptr().cast(),
-            len,
-        )
-    };
-    ok.then(|| String::from_utf8_lossy(&buf).to_string())
 }
 
 fn steam_input_iga_path() -> Option<PathBuf> {

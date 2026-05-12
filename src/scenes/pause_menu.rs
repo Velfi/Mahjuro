@@ -284,6 +284,9 @@ impl PauseMenu {
                         }),
                     }
                 }
+                if opts.take_rebind_controller_requested() {
+                    bus.push(GameEvent::OpenSteamInputBindings);
+                }
             }
             if self.options_overlay.is_none() {
                 bus.push(GameEvent::UiSound(SfxId::UiCancel));
