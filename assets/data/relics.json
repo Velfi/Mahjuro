@@ -1782,19 +1782,14 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
+        "text": "\"They look like big, good, strong hands, don't they? I alway thought that's what they were.\"                                                     - ",
         "bold": false,
         "italic": false
       },
       {
-        "text": "countless",
-        "bold": true,
+        "text": "Pyornkrachzark.",
+        "bold": false,
         "italic": true
-      },
-      {
-        "text": " late-night rounds.",
-        "bold": false,
-        "italic": false
       }
     ]
   },
