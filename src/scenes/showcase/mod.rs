@@ -1,6 +1,6 @@
 //! Full-screen [`crate::scenes::Scene::Showcase`] overlay — one scene type for every flow below:
 //! - **Celebrations**: [`TilePackPresenter`], [`ZodiacPresenter`], [`MetaLevelUpPresenter`]
-//! - **Orbit inspect**: [`ShopInspectPresenter`] (storeroom), [`CollectionInspectPresenter`] (corridor)
+//! - **Orbit inspect**: [`ShopInspectPresenter`] (storeroom), [`CollectionInspectPresenter`] (Archive)
 //!
 //! Presenters share [`ShowcaseRenderHints`](crate::render::draw_cmd::ShowcaseRenderHints) on [`UiFrame`].
 

@@ -1,7 +1,6 @@
-//! Archive collection — 3D skeuomorphic vault. Five tabs
-//! (Relics / Yaku / Bosses / Talismans / Chronicle) each render as an infinite
-//! scrolling grid of artifacts; focusing a cell lifts its close-up
-//! + description card into the foreground HUD.
+//! Archive — five tabs (Relics / Yaku / Bosses / Talismans / Chronicle).
+//! Each tab is a scrolling grid of artifacts on a backdrop plane; focus
+//! shows a close-up and description plaque. E / North opens orbit inspect.
 
 use std::time::Instant;
 
@@ -124,7 +123,7 @@ enum CollectionAction {
     PrevTab,
     NextTab,
     /// Click on an artifact in the current tab's row → set as the
-    /// featured item on the inspection pedestal. Indexes into the
+    /// featured item for [`ItemInspectScene`] orbit. Indexes into the
     /// active tab's artifact list globally so the selection survives
     /// scroll position changes.
     SelectArtifact(usize),
@@ -146,22 +145,21 @@ impl CollectionAction {
 
 pub struct CollectionScene {
     tree: TreeState,
-    /// Arrange-mode-tunable placements for the cabinet, pedestal, and
-    /// pedestal-featured artifact pose.
+    /// Arrange-mode-tunable placements for the grid, focus plaques, and
+    /// inspect-orbit anchor pose.
     pub positions: crate::ui::scene_layout::CollectionPositions,
     /// Currently-selected tab. Determines which content row sits on the
     /// table.
     active_tab: Tab,
-    /// Index into the active tab's visible row of the artifact
-    /// featured on the inspection pedestal. `None` falls back to the
-    /// "first unlocked" artifact for the tab. Set by mouse click or by
-    /// pressing Confirm while a row item is focused; reset on tab
-    /// change so stale indices don't bleed across tabs.
+    /// Index into the active tab's visible row of the artifact featured for
+    /// orbit inspect. `None` falls back to the first unlocked artifact for the
+    /// tab. Set by mouse click or by pressing Confirm while a row item is
+    /// focused; reset on tab change so stale indices don't bleed across tabs.
     selected_artifact: Option<usize>,
     /// Row item that currently has keyboard / controller focus (the
     /// arrow-key / DPad cursor). `None` until the player first uses
-    /// directional input. Confirm presses lift the focused item onto
-    /// the inspection pedestal (sets `selected_artifact`).
+    /// directional input. Confirm sets the focused row as the orbit-inspect
+    /// target (`selected_artifact`).
     focused_row: Option<usize>,
     /// Continuous vertical scroll offset of the grid in *rows*. 0.0
     /// means row 0 sits at the top of the visible band. Eased toward
@@ -320,7 +318,7 @@ impl CollectionScene {
         let switch_x = w - margin_x - switch_w;
         let arrow_w = ch.arrow_w;
         let arrow_h = back_h;
-        // Footer-centered Prev/Next so the player can drive the cabinet
+        // Footer-centered Prev/Next so the player can paginate tabs
         // spin with the mouse, not just the keyboard.
         let center_x = w * 0.5;
         let arrow_y = h - arrow_h - h * 0.02;
@@ -386,7 +384,7 @@ impl CollectionScene {
         items
     }
 
-    /// World-space pedestal anchor for [`ItemInspectScene`] orbit (matches HUD close-up).
+    /// World-space anchor for [`ItemInspectScene`] orbit (matches HUD close-up).
     fn collection_inspect_target_world(
         &self,
         w: f32,
@@ -466,15 +464,9 @@ impl CollectionScene {
         self.collection_inspect_orbit_for_focus(w, h, &bosses, layout)
     }
 
-    /// Build the draw frame for the Bosses tab — a procedural infinite
-    /// corridor in place of the vitrine+grid shelf. Each bay holds one
-    /// boss nameplate between two lacquered uprights; extra bays loop
-    /// past the last entry into darkness to sell the "recedes to the
-    /// vanishing point" effect. The camera sits low in the hallway
-    /// looking straight along +Y so the fisheye post-pass bends the
-    /// framing into a lens-like warp. Scroll dollies the camera forward
-    /// through the corridor instead of sliding rows.
-    fn build_corridor_frame(
+    /// Build the 3D frame for the active Archive tab: grid on a plane, camera
+    /// eased to the focused cell, plus close-up and description plaques.
+    fn build_archive_grid_frame(
         &self,
         mut frame: UiFrame,
         quads: Vec<GpuInstance>,
@@ -486,40 +478,20 @@ impl CollectionScene {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
 
-        // ── Infinite curio-cabinet wall ───────────────────────────────
-        // Camera faces a flat cabinet grid head-on. Cells extend far
-        // beyond the window in every direction; the fisheye post-pass
-        // bends the edges toward the vanishing corners so the grid
-        // reads as "recedes into infinity." The player steers the
-        // viewport with L/R/U/D (mapped in `update()` via
-        // `focused_row`); the camera chases the focused cell so it
-        // stays near screen-centre, and a description card pops up for
-        // the focused boss.
-        //
-        // Object `pos` values in `Object3d` are pixel-space (the
-        // renderer calls `pixel_to_world` on them). The camera
-        // override, however, takes world coordinates directly. To keep
-        // the two consistent we:
-        //   • Place objects relative to a pixel-space cabinet anchor
-        //     (`cab_px_x`, `cab_px_y`) and lift them in world-space Z.
-        //   • Derive the camera world-space eye/target from the same
-        //     pixel anchor via `pixel_to_world`-equivalent arithmetic.
+        // Grid + backdrop plane. Object `pos` in `Object3d` is pixel-space
+        // (renderer `pixel_to_world`); camera override uses world coords
+        // derived from the same anchor (`cab_px_x`, `cab_px_y`).
         let cell = (w * 0.12).min(h * 0.18);
         let cell_gap = cell * 0.22;
         let cell_pitch = cell + cell_gap;
-        // Pixel-space anchor for the cabinet center. This is where the
-        // focused cell lands on-screen before fisheye warp. Cabinet
-        // plane sits at world Y = 0 (i.e. pixel_y = h/2) so objects
-        // with pos.1 = h/2 end up at world Y = 0.
+        // Pixel-space anchor for the grid center; plane at world Y = 0
+        // (pixel_y = h/2 for cells on the plane).
         let cab_px_x = w * 0.5;
         let cab_px_y = h * 0.5;
-        // Camera world-Y pulled back so the cabinet fills ~⅔ of the
-        // frame at the default FOV. Camera looks along +Y toward the
-        // cabinet plane (world Y = 0).
+        // Camera sits back along −Y, looking toward the grid plane (world Y = 0).
         let cam_world_y = -h * 1.1;
 
-        // Grid dimensions. Column count is 6 (matches the original
-        // vitrine's grid). Rows span the full boss catalogue; we
+        // Grid: 6 columns. Rows span the full tab catalogue; we
         // render a window of rows around the focused cell so
         // draw-calls stay bounded while the player can scroll
         // forever across the logical grid.
@@ -530,8 +502,7 @@ impl CollectionScene {
         // index so the in-place keyboard navigation (arrows / DPad)
         // continues to work without new UI plumbing. Default focus is
         // the middle-ish cell (col 2, row 0) so the initial view is
-        // already centred on a boss rather than parked on the left
-        // edge.
+        // already centred on an entry rather than parked on the left edge.
         let default_focus = total_cells.min(2);
         let focus_flat = self
             .focused_row
@@ -547,9 +518,8 @@ impl CollectionScene {
         //   world_x = pixel_x - w*0.5
         //   world_y = h*0.5 - pixel_y
         //   world_z = lift
-        // The focused cell's world X is the offset from the cabinet
-        // center; world Z is the focused row's lift. World Y = 0 for
-        // all cells (they lie on the cabinet plane at pixel_y = h/2).
+        // Focused cell world X is offset from grid center; world Z is row lift.
+        // All cells share world Y = 0 on the plane.
         let focus_world_x = (focus_col as f32 - (cols as f32 - 1.0) * 0.5) * cell_pitch;
         let focus_world_z = -(focus_row as f32 * cell_pitch);
         // Camera rides an eased (col, row) so arrow-key moves glide via
@@ -584,12 +554,12 @@ impl CollectionScene {
         frame.fisheye_strength = 0.0;
 
         let focus_px_x = cab_px_x + focus_world_x;
-        let focus_px_y = cab_px_y; // cabinet plane
+        let focus_px_y = cab_px_y; // grid plane
         let focus_px_z = focus_world_z;
 
         if inspect.is_none() {
-            // Three warm key-lights in front of the cabinet. Light `pos`
-            // is pixel-space (renderer converts via `pixel_to_world`), so
+            // Three warm key-lights in front of the grid. Light `pos` is
+            // pixel-space (renderer converts via `pixel_to_world`), so
             // pixel_x + pixel_y define the (X, Y) world position and the
             // third coordinate is the world-Z lift directly.
             frame.scene_lighting.set_smooth_points(vec![
@@ -638,7 +608,7 @@ impl CollectionScene {
         );
 
         // Back-wall slab: a single dark lacquered panel behind the
-        // whole cell window. Sits BEHIND the cabinet plane in world Y
+        // whole cell window. Sits behind the grid plane in world Y
         // (i.e. smaller pixel_y than cab_px_y maps to world Y > 0,
         // which is farther from camera than the plane). Gaps between
         // cells show this panel rather than the clear colour.
@@ -659,18 +629,17 @@ impl CollectionScene {
             },
             hover_target: 0.0,
             anim_id: 0,
-            arrange_name: Some("collection.cabinet_backing"),
+            arrange_name: Some("collection.grid_backing"),
         });
 
-        // Cell frames + nameplates. For each (col, row) in the window
-        // we push a frame (lacquered wood) and — if that cell maps to
-        // a real boss — a tinted nameplate sitting slightly proud of
-        // the frame. Cells beyond the catalogue fill the grid with
-        // empty frames so the cabinet extends into darkness on all
-        // sides rather than having a ragged edge.
+        // Cell frames + nameplates. For each (col, row) in the window we push
+        // lacquered framing and — if that cell maps to a real catalog entry — a
+        // tinted nameplate slightly proud of the frame. Cells beyond the catalogue
+        // fill the grid with empty frames so it extends into darkness on all sides
+        // rather than a ragged edge.
         for row in row_min..=row_max {
             for col in col_min..=col_max {
-                // Pixel X: cabinet center + per-col offset.
+                // Pixel X: grid center + per-col offset.
                 let cx = cab_px_x + (col as f32 - (cols as f32 - 1.0) * 0.5) * cell_pitch;
                 // World Z: focused row is 0, lower rows go negative.
                 let cz = -row as f32 * cell_pitch;
@@ -703,13 +672,13 @@ impl CollectionScene {
                 // inside the wood frame so the frame reads as a
                 // picture-frame around coloured content. Using the
                 // boss accent directly (not tinted toward wood) so the
-                // cells pop as distinct boss cards rather than looking
-                // like more cabinet. Focused cell is larger and lifted
+                // cells pop as distinct cards rather than looking
+                // like more backing. Focused cell is larger and lifted
                 // farther forward so it stands out against the wall.
                 // Nameplate pixel_y: ABOVE cab_px_y (smaller pixel_y)
                 // gives world Y > 0 (farther from camera); BELOW gives
                 // world Y < 0 (closer). We want nameplates CLOSER than
-                // the cabinet plane, so add to cab_px_y.
+                // the grid plane, so add to cab_px_y.
                 let is_focus = col == focus_col && row == focus_row;
                 let nameplate_py = cab_px_y + if is_focus { cell * 0.5 } else { cell * 0.15 };
                 let plate_w = cell * if is_focus { 0.78 } else { 0.62 };
@@ -749,7 +718,7 @@ impl CollectionScene {
                             // Muted rarity tint: locked entries still carry
                             // a dim hint of their accent so Common / Rare /
                             // Legendary remain visually distinct in the
-                            // cabinet ladder.
+                            // grid.
                             [
                                 boss.accent[0] * 0.22 + 0.02,
                                 boss.accent[1] * 0.22 + 0.02,
@@ -786,7 +755,7 @@ impl CollectionScene {
                         // so Rx(+90°) here was flipping the art upside
                         // down. A small Ry tilt breaks the dead-flat
                         // pose so jade/pearl/foil materials catch the
-                        // cabinet key-lights at a glancing angle.
+                        // grid key-lights at a glancing angle.
                         plaques.push(Object3d {
                             pos: [cx, nameplate_py, cz],
                             extents: [plate_w * 0.70, plate_w, plate_w * 0.18],
@@ -875,15 +844,8 @@ impl CollectionScene {
             }
         }
 
-        // ── Foreground HUD: close-up + description plaque ──────────────
-        // Both sit in front of the cabinet plane, anchored to the eased
-        // camera so they hold a fixed on-screen position as the player
-        // scrolls the grid. The close-up goes on the left, description
-        // on the right; the focused cell is visible between/behind them.
-        // HUD close-up + description + stats are drawn as a second 3D
-        // batch after the grid so the gradient backers (drawn between
-        // the two batches) compose correctly — grid behind, backers on
-        // top of grid, HUD panels on top of backers.
+        // ── Foreground: close-up + description plaque ───────────────
+        // In front of the grid plane; camera easing keeps them stable on screen.
         let mut hud_plaques: Vec<Object3d> = Vec::new();
         let mut gradient_backers: Vec<GradientQuadInstance> = Vec::new();
 
@@ -902,7 +864,7 @@ impl CollectionScene {
             // sits closer (smaller world_y) so its view plane is ~0.6h.
             // Offsets below are tuned to keep both panels comfortably
             // inside the frame.
-            let hud_world_y_offset = -h * 0.45; // in front of cabinet plane
+            let hud_world_y_offset = -h * 0.45; // in front of grid plane
             let hud_py = cab_px_y - hud_world_y_offset; // py = h/2 - world_y ⇒ world_y<0 → py>h/2
             let closeup_wx = cam_world_x - h * 0.22;
             let card_wx = cam_world_x + h * 0.20;
@@ -1072,7 +1034,19 @@ impl CollectionScene {
             let card_w = h * 0.22;
             let card_h = h * 0.16;
             let card_px = cab_px_x + card_wx;
-            let body = description_for(boss, ctx.run, ctx.progress);
+            // Relic: grid focus plaque shows mechanical rules; orbit inspect shows flavor only.
+            let body = if boss.unlocked
+                && inspect.is_some()
+                && let ArtifactKind::Relic(rid) = &boss.kind
+            {
+                all_relic_defs()
+                    .iter()
+                    .find(|d| d.id == *rid)
+                    .map(|d| d.flavor.iter().fold(String::new(), |acc, s| acc + s.text))
+                    .unwrap_or_default()
+            } else {
+                description_for(boss, ctx.run, ctx.progress)
+            };
             let card_text = if body.is_empty() {
                 boss.name.clone()
             } else {
@@ -1191,10 +1165,8 @@ impl CollectionScene {
             }
         }
 
-        // Assemble the frame. 2D UI (title, back button, footer arrows,
-        // hint text) was already built by the caller and is passed in
-        // via `quads` / `text_labels` so this corridor path shares all
-        // the chrome with the vitrine layout.
+        // Assemble the frame. 2D chrome from the caller (`quads` / `text_labels`)
+        // is merged here with the grid and focus plaques.
         frame.quads(quads);
         frame.object3d_batch(plaques);
         if !gradient_backers.is_empty() {
@@ -1352,10 +1324,10 @@ impl CollectionScene {
             "Finish a non-tutorial run to add folios here.\nTab / Shift+Tab: tabs   ·   Esc: back"
                 .to_string()
         } else if tab_scrollable {
-            "Tab / Shift+Tab: cycle tab   ·   \u{2190}\u{2192}\u{2191}\u{2193}: focus   ·   Enter: pedestal   ·   E/North: inspect   ·   Esc: back\nScroll: mouse wheel or PgUp / PgDn"
+            "Tab / Shift+Tab: cycle tab   ·   \u{2190}\u{2192}\u{2191}\u{2193}: focus   ·   Enter: select   ·   E/North: inspect   ·   Esc: back\nScroll: mouse wheel or PgUp / PgDn"
                 .to_string()
         } else {
-            "Tab / Shift+Tab: cycle tab   ·   \u{2190}\u{2192}\u{2191}\u{2193}: focus\nEnter: pedestal   ·   E/North: inspect   ·   Esc: back"
+            "Tab / Shift+Tab: cycle tab   ·   \u{2190}\u{2192}\u{2191}\u{2193}: focus\nEnter: select   ·   E/North: inspect   ·   Esc: back"
                 .to_string()
         };
         let hint_lines = hint_text.lines().count().max(1) as f32;
@@ -1388,14 +1360,10 @@ impl CollectionScene {
             });
         }
 
-        // Gather active-tab artifacts once — feeds the grid layout, the
-        // pedestal featured item, and the description plaque.
         let all_artifacts = tab_artifacts(self.active_tab, ctx.progress);
 
-        // Infinite curio corridor: every tab renders as a procedural
-        // cabinet grid with a tinted-accent nameplate per entry and a
-        // description card floating in front of the focused cell.
-        self.build_corridor_frame(frame, quads, text_labels, &all_artifacts, ctx, inspect)
+        // Grid layout, focus close-up, and description plaque.
+        self.build_archive_grid_frame(frame, quads, text_labels, &all_artifacts, ctx, inspect)
     }
 }
 
@@ -1439,7 +1407,7 @@ impl SceneBehavior for CollectionScene {
         //   - Up/Down arrows + DPad U/D → move focus across rows;
         //     auto-scrolls the viewport when focus exits the band
         //   - Mouse wheel → scroll one row per line tick
-        //   - Confirm (A / Space / Enter) → lift focused item onto pedestal
+        //   - Confirm (A / Space / Enter) → set focused item as inspect target
         let all_count = tab_artifacts(self.active_tab, ctx.progress).len();
         let cols = GRID_COLS as usize;
         let total_rows = total_rows_for(all_count) as usize;
@@ -1986,7 +1954,7 @@ fn compute_layout(w: f32, h: f32, scale: f32, _tab: Tab, item_count: usize) -> S
     let arrow_h = ((24.0 * (w.min(h) / 600.0)).max(18.0)).max(18.0);
     let arrow_y = h - arrow_h - h * 0.02;
 
-    // ── Shelf band: foreground scroll viewport ───────────────────────
+    // ── Grid viewport (between title and footer) ───────────────────
     // The grid is always 6 columns wide and grows vertically with the
     // tab's universe. The visible band shows ~3.5 rows so the
     // half-row above/below is the affordance that more content
@@ -1995,13 +1963,12 @@ fn compute_layout(w: f32, h: f32, scale: f32, _tab: Tab, item_count: usize) -> S
     let grid_rows_total = total_rows_for(item_count);
     let grid_cols = GRID_COLS;
     let margin_x = w * 0.06;
-    // Tight top margin + smaller pedestal band → taller scroll
-    // band → larger cells. Browsing is the primary verb on this
-    // screen; the inspection pedestal supports it but shouldn't
-    // dominate.
+    // Tight top margin + smaller footer reserve → taller scroll band →
+    // larger cells. Browsing is the primary verb; orbit inspect should not
+    // dominate the layout.
     let grid_y_top_band = title_y + title_h + h * 0.14;
-    let pedestal_band_h = h * 0.10;
-    let grid_y_bottom_band = arrow_y - pedestal_band_h;
+    let footer_band_h = h * 0.10;
+    let grid_y_bottom_band = arrow_y - footer_band_h;
     let band_h = (grid_y_bottom_band - grid_y_top_band).max(1.0);
     let usable_w = w - margin_x * 2.0;
     // Visible-row count + cell size. We want at least ~3 rows visible
@@ -2045,9 +2012,8 @@ fn compute_layout(w: f32, h: f32, scale: f32, _tab: Tab, item_count: usize) -> S
     let band_top_y = grid_y_top_band;
     let band_bottom_y = grid_y_top_band + visible_grid_h;
 
-    // Anchor only kept for the hit-test ray cast in `flat_items`. The
-    // corridor scene draws its own stage — this value is never used
-    // for 3D placement there.
+    // Anchor only kept for the hit-test ray cast in `flat_items`. Unused for
+    // 3D placement in [`CollectionScene::build_archive_grid_frame`].
     let shelf_top_lift = cell_w * 0.15;
 
     let cam_dist = h * 1.6;
