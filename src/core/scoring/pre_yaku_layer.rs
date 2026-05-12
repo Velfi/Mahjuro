@@ -35,6 +35,19 @@ pub(crate) fn apply_pre_yaku_scoring(
     let has_pair_power = eff.has(ctx.relic.roster, RelicId::PairPower);
     let has_honor_fury = eff.has(ctx.relic.roster, RelicId::HonorFury);
 
+    if eff.has(ctx.relic.roster, RelicId::Snowball) {
+        let stacks = ctx
+            .relic
+            .counters
+            .get(&RelicId::Snowball)
+            .copied()
+            .unwrap_or(0);
+        let bonus = crate::core::relic::snowball_score_chips(stacks);
+        if bonus > 0 {
+            push_chips(steps, chips, *mult, "Snowball", bonus);
+        }
+    }
+
     for s in sets {
         match s.kind {
             SetKind::Triplet | SetKind::Kong if has_triplet_boost => {

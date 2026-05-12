@@ -808,6 +808,8 @@ impl WgpuRenderer {
                             }
                             None => {
                                 log::warn!("prompt icon missing or invalid: {key}");
+                                i += 1;
+                                continue;
                             }
                         }
                     }

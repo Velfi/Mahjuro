@@ -1,4 +1,4 @@
-//! Waterfront façade backdrop (`assets/backgrounds/main_menu_exterior.png`) with a flat hub menu.
+//! Waterfront façade backdrop (`assets/scenes/main_menu/exterior.png`) with a flat hub menu.
 //! Replaces the legacy candlelit start screen (`start_screen.rs`, removed).
 
 use std::cell::RefCell;
@@ -201,6 +201,20 @@ impl SceneBehavior for MainMenuExteriorScene {
         }
 
         if activated {
+            // Avoid entering 3D-heavy scenes until async relic/backdrop uploads
+            // finish (`WgpuRenderer::is_loading`). Tile pick flows first — those
+            // gates live in `TileSelectScene::update`.
+            let needs_gpu_ready = match self.focus {
+                Some(HubFocus::Continue) => true,
+                Some(HubFocus::NewGame) => {
+                    !ctx.tutorial_eligible && !ctx.multiple_materials
+                }
+                _ => false,
+            };
+            if needs_gpu_ready && !ctx.loading_done {
+                ctx.bus.push(GameEvent::UiSound(SfxId::InvalidAction));
+                return None;
+            }
             ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
             match self.focus {
                 Some(HubFocus::Continue) => {

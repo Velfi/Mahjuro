@@ -18,8 +18,9 @@ impl WgpuRenderer {
         self.active_scene_key = key;
     }
 
-    /// Returns `true` while background asset loading (relic/background textures)
-    /// is still in progress.
+    /// Returns `true` while boot-time async decode threads (relic images and/or
+    /// full-screen backdrop plates) still have GPU uploads pending. Used by the
+    /// headless screenshot harness; **splash** does not gate on this (see `frame_tick`).
     pub fn is_loading(&self) -> bool {
         self.relic_rx.is_some() || self.background_rx.is_some()
     }

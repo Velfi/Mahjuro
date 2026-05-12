@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use sdl3::gamepad::Gamepad;
 use sdl3::joystick::JoystickId;
-use sdl3::video::{FullscreenType, Window, WindowBuilder};
+use sdl3::video::{FullscreenType, Window, WindowBuilder, WindowFlags};
 use sdl3::{EventPump, GamepadSubsystem, JoystickSubsystem, Sdl, VideoSubsystem};
 
 pub struct SdlShell {
@@ -24,17 +24,43 @@ pub struct SdlShell {
 }
 
 impl SdlShell {
-    pub fn new(title: &str, width: u32, height: u32) -> anyhow::Result<Self> {
+    /// `borderless_fullscreen`: after creating a windowed surface, enter borderless fullscreen
+    /// (ignored when `SteamTenfoot` is set — that path always starts fullscreen).
+    pub fn new(
+        title: &str,
+        width: u32,
+        height: u32,
+        borderless_fullscreen: bool,
+    ) -> anyhow::Result<Self> {
         let _sdl = sdl3::init().map_err(anyhow::Error::from)?;
         #[cfg(target_os = "macos")]
         sdl3::hint::set("SDL_VIDEO_MACOSX_METAL_LAYER", "1");
+
+        // Steam Input arbitration:
+        //
+        // When the player has a controller bound through Steam Input, Steam
+        // signals SDL to suppress the raw HID device so the game doesn't see
+        // both Steam's virtual gamepad and the underlying physical pad
+        // (double-input bug from the Steam Controller dev docs:
+        // <https://partner.steamgames.com/doc/features/steam_controller/getting_started_for_devs>).
+        // SDL3 enables this arbitration automatically when started inside the
+        // Steam runtime, but we set the hints explicitly to lock the
+        // behaviour against future SDL default changes.
+        sdl3::hint::set("SDL_JOYSTICK_HIDAPI", "1");
+        sdl3::hint::set("SDL_JOYSTICK_HIDAPI_STEAM", "1");
+        sdl3::hint::set("SDL_JOYSTICK_HIDAPI_STEAMDECK", "1");
 
         let _video = _sdl.video().map_err(anyhow::Error::from)?;
         let gamepad = _sdl.gamepad().map_err(anyhow::Error::from)?;
         let joystick = _sdl.joystick().map_err(anyhow::Error::from)?;
 
         let tenfoot = std::env::var_os("SteamTenfoot").is_some();
-        let mut wb = WindowBuilder::new(&_video, title, width, height);
+        let (win_w, win_h) = if tenfoot {
+            (width, height)
+        } else {
+            Self::clamp_launch_window_size(&_video, width, height)
+        };
+        let mut wb = WindowBuilder::new(&_video, title, win_w, win_h);
         wb.resizable().high_pixel_density();
         if tenfoot {
             wb.fullscreen();
@@ -83,7 +109,24 @@ impl SdlShell {
             non_gamepad_logged: HashSet::new(),
         };
         shell.refresh_gamepads();
+
+        if !tenfoot && borderless_fullscreen {
+            shell.set_desktop_fullscreen(true)?;
+        }
+
         Ok(shell)
+    }
+
+    fn clamp_launch_window_size(video: &VideoSubsystem, w: u32, h: u32) -> (u32, u32) {
+        let Ok(display) = video.get_primary_display() else {
+            return (w, h);
+        };
+        let Ok(bounds) = display.get_usable_bounds() else {
+            return (w, h);
+        };
+        let max_w = bounds.width().max(1);
+        let max_h = bounds.height().max(1);
+        (w.min(max_w), h.min(max_h))
     }
 
     pub fn show_cursor(&self, show: bool) {
@@ -147,6 +190,16 @@ impl SdlShell {
 
     pub fn drawable_size(&self) -> (u32, u32) {
         self.window.size_in_pixels()
+    }
+
+    /// True when this window should simulate and render (focused, visible, not minimized).
+    ///
+    /// When false, the SDL main loop skips per-frame simulation and rendering so the game does
+    /// not keep running while backgrounded.
+    pub fn window_is_foreground(&self) -> bool {
+        let flags = WindowFlags::from(self.window.window_flags());
+        self.window.has_input_focus()
+            && !flags.intersects(WindowFlags::MINIMIZED | WindowFlags::HIDDEN)
     }
 
     /// Map SDL window-coordinate mouse position to drawable pixels (HiDPI).

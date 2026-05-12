@@ -16,6 +16,7 @@ pub mod gltf_helpers;
 pub mod glyph_mesh;
 pub mod gpu_profiler;
 pub mod gpu_types;
+pub mod kenney_atlas;
 pub mod kenney_svg;
 pub mod lamp_mesh;
 pub mod lit_mesh;

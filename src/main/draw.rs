@@ -32,6 +32,7 @@ impl App {
                     self.progress.tutorial_completed = true;
                     let _ = persistence::save_profile(self.active_profile, &self.progress);
                     persistence::delete_saved_run(self.active_profile);
+                    self.steam.sync_profile_stats(&self.progress);
                     self.steam
                         .unlock_achievement(crate::steam::Achievement::TutorialComplete);
                     self.pending_scene =
@@ -179,6 +180,7 @@ impl App {
                         ));
                     let _ = persistence::save_profile(self.active_profile, &self.progress);
                     persistence::delete_saved_run(self.active_profile);
+                    self.steam.sync_profile_stats(&self.progress);
 
                     if let Some(result) = level_up
                         && let Some(modal) = build_level_up_modal(&result, ww, wh)
@@ -283,6 +285,7 @@ impl App {
                 // Run is over — drop any saved-on-quit snapshot so the
                 // player isn't offered "Continue" into a finished game.
                 persistence::delete_saved_run(self.active_profile);
+                self.steam.sync_profile_stats(&self.progress);
 
                 if let Some(result) = level_up
                     && let Some(modal) = build_level_up_modal(&result, ww, wh)
@@ -372,16 +375,19 @@ impl App {
         let p = self.active_profile.min(2);
         let archive_has_new_chronicle =
             self.progress.run_history.len() as u32 > self.archive_last_seen_run_len[p];
-        let steam_glyphs: Vec<(UiAction, std::path::PathBuf)> = [
-            UiAction::Cancel,
-            UiAction::Confirm,
-            UiAction::WestFacePress,
-            UiAction::NorthFacePress,
-            UiAction::TriggerStructure,
-        ]
-        .into_iter()
-        .filter_map(|action| self.steam.glyph_path_for(action).map(|path| (action, path)))
-        .collect();
+        let gamepad_style = self
+            .input
+            .as_ref()
+            .map(|i| i.gamepad_style)
+            .unwrap_or_default();
+        let swap_ab = self.input.as_ref().map(|i| i.swap_ab).unwrap_or(false);
+        let swap_xy = self.input.as_ref().map(|i| i.swap_xy).unwrap_or(false);
+        let glyphs = crate::ui::glyph_source::GlyphResolver::new(
+            &self.steam,
+            gamepad_style,
+            swap_ab,
+            swap_xy,
+        );
         let ctx = DrawCtx::new(
             &layout,
             &self.anim,
@@ -413,13 +419,10 @@ impl App {
                 .as_ref()
                 .map(|i| i.mode)
                 .unwrap_or(crate::ui::input::InputMode::Cursor),
-            self.input.as_ref().map(|i| i.swap_ab).unwrap_or(false),
-            self.input.as_ref().map(|i| i.swap_xy).unwrap_or(false),
-            self.input
-                .as_ref()
-                .map(|i| i.gamepad_style)
-                .unwrap_or_default(),
-            &steam_glyphs,
+            swap_ab,
+            swap_xy,
+            gamepad_style,
+            glyphs,
             suspended_shop,
             suspended_collection,
             self.gfx.tile_preset,

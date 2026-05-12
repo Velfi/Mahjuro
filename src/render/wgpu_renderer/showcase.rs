@@ -192,8 +192,8 @@ pub(super) fn make_prompt_icon_overlay_gpu(
     source: &crate::render::draw_cmd::PromptIconSource,
 ) -> Option<TileFaceOverlayGpu> {
     let (rgba, w, h) = match source {
-        crate::render::draw_cmd::PromptIconSource::Embedded(asset_rel_path) => {
-            crate::render::kenney_svg::rasterize_embedded_svg_rgba(asset_rel_path)?
+        crate::render::draw_cmd::PromptIconSource::AtlasSprite { sheet, name } => {
+            crate::render::kenney_atlas::extract_sprite_rgba(sheet, name)?
         }
         crate::render::draw_cmd::PromptIconSource::Filesystem(path) => {
             crate::render::kenney_svg::rasterize_filesystem_svg_or_png_rgba(path)?

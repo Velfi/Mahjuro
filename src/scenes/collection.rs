@@ -1703,10 +1703,11 @@ fn stake_ladder_summary(progress: &crate::core::progression::PlayerProgress) -> 
 
 // ── Tab artifact enumeration ────────────────────────────────────────
 
-/// Build the list of artifacts for one tab. Reads
-/// [`PlayerProgress`] to mark which items are unlocked; everything in
-/// the universe of that category is returned (locked items show as
-/// placeholders in the row so the player can see what's still to find).
+/// Build the list of artifacts for one tab. Reads [`PlayerProgress`].
+/// Relics only include entries already in the meta [`PlayerProgress::available_relics`]
+/// pool; higher-tier relics stay out of the grid until leveled in. Other
+/// tabs list only content the player has already surfaced (yaku scored,
+/// bosses met, talismans bought, chronicle runs).
 fn push_relic_stinger_for(
     bus: &mut crate::game::event_bus::EventBus,
     tab: Tab,
@@ -1732,9 +1733,10 @@ fn tab_artifacts(tab: Tab, progress: &crate::core::progression::PlayerProgress) 
             let available = progress.available_relics();
             defs.iter()
                 .filter(|d| progress.transformation_successor_visible(d.id))
+                .filter(|d| available.contains(&d.id))
                 .map(|d| Artifact {
                     name: d.name.to_string(),
-                    unlocked: available.contains(&d.id),
+                    unlocked: true,
                     kind: ArtifactKind::Relic(d.id),
                     accent: rarity_accent(d.rarity),
                 })

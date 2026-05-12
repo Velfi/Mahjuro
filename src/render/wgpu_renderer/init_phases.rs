@@ -51,7 +51,7 @@ fn win32_maybe_clear_vulkan_env_after_probe() {
 
 /// Internal CLI (`mahjuro vulkan-wsi-probe`): window + adapter + device + first swapchain configure.
 pub(crate) fn run_vulkan_wsi_probe_smoke() -> anyhow::Result<()> {
-    let shell = crate::sdl_shell::SdlShell::new("Vulkan WSI probe", 256, 256)?;
+    let shell = crate::sdl_shell::SdlShell::new("Vulkan WSI probe", 256, 256, false)?;
     early_gpu_and_depth(TargetInit::Windowed {
         window: shell.window.clone(),
         hdr_enabled: false,

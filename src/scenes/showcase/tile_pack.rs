@@ -131,6 +131,34 @@ impl TilePackPresenter {
                 frame.text(celebration_overlay::label_confirm_to_open(h, w, t));
             }
             CelebPhase::Reveal => {
+                let box_h = h * 0.28;
+                let box_w = box_h * crate::core::tile_pack::PACK_ASPECT_W_OVER_H;
+                let box_d = box_h * 0.10;
+
+                // Keep the pack box visible while tiles fly out of it.
+                // In Reveal, `started_at` is reset, so we use a smooth settle or just let it rest.
+                // We'll let it rest at the base closeup position without the bobbing
+                // so it looks like it settled down to open.
+                frame.object3d_batch(vec![Object3d {
+                    pos: [
+                        w * 0.5,
+                        h * self.positions.celeb_pack_closeup.ny,
+                        layout.mm(self.positions.celeb_pack_closeup.lift_mm) + box_h * 0.5,
+                    ],
+                    extents: [box_w, box_d, box_h],
+                    rotation: mat4_to_euler_xyz_rad(
+                        Mat4::from_rotation_y(0.0) * Mat4::from_rotation_x(0.0),
+                    ),
+                    color: celeb.pack_kind.foil_tint(),
+                    kind: Object3dKind::Pack {
+                        kind: celeb.pack_kind,
+                        pick_id: None,
+                    },
+                    hover_target: 0.0,
+                    anim_id: 0,
+                    arrange_name: Some("shop.celebrations.pack_reveal_bg"),
+                }]);
+
                 let row_py = h * self.positions.celeb_pack_reveal.ny;
                 let row_lift = layout.mm(self.positions.celeb_pack_reveal.lift_mm);
                 let rotation = pack_reveal_euler_rad(&self.positions);

@@ -13,7 +13,7 @@ pub(crate) const SCENE_HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rg
 
 /// Backgrounds decoded in `spawn_background_loader`. Keep in sync with that thread:
 /// if every decode fails, the renderer still inserts a solid GPU fallback (see `impl_loaders`)
-/// so `is_loading()` clearing does not leave the main menu drawing nothing.
+/// so the hub is drawable while the lazy scene pack mounts; splash does not wait on this.
 pub(crate) const ASYNC_LOADED_BACKGROUNDS: &[BackgroundId] = &[BackgroundId::MainMenuExterior];
 
 /// Pre-loaded background texture + bind group for the image pipeline.

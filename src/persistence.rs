@@ -299,10 +299,20 @@ pub struct AppSettings {
     pub ssr_enabled: bool,
     #[serde(default)]
     pub hdr_enabled: bool,
+    /// Borderless fullscreen when true; windowed (resizable) when false.
+    #[serde(default = "default_true")]
+    pub borderless_fullscreen: bool,
     #[serde(default)]
     pub swap_ab: bool,
     #[serde(default)]
     pub swap_xy: bool,
+    /// True once the player has manually toggled `swap_ab`/`swap_xy` in Options.
+    /// Until then, the input layer auto-applies sensible defaults the first
+    /// time it sees a real controller this process (Nintendo → both ON, every
+    /// other style → both OFF). Once the player takes control, that auto-apply
+    /// is suppressed for life.
+    #[serde(default)]
+    pub controller_layout_user_set: bool,
     #[serde(default = "default_true")]
     pub xy_quick_action: bool,
     /// Controller vibration (shop hold-to-sell, scoring cascade, etc.). Default on.
@@ -356,8 +366,10 @@ impl Default for AppSettings {
             shadows_enabled: true,
             ssr_enabled: true,
             hdr_enabled: false,
+            borderless_fullscreen: true,
             swap_ab: false,
             swap_xy: false,
+            controller_layout_user_set: false,
             xy_quick_action: true,
             hold_to_sell_rumble: true,
             auto_cash_in_on_full_structure: true,

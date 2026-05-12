@@ -209,13 +209,6 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
         }
     }
 
-    if has(RelicId::Snowball) {
-        let bonus = ctx.economy.total_score as f64 / 5000.0;
-        if bonus > 0.0 {
-            push_mult(steps, *chips, mult, "Snowball", bonus);
-        }
-    }
-
     if has(RelicId::MonarchButterfly) {
         let excess = ctx.relic.counters
             .get(&RelicId::MonarchButterfly)

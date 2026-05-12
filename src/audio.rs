@@ -102,7 +102,7 @@ fn decode_rodio(label: &str, bytes: &[u8]) -> Option<Arc<PcmClip>> {
     }))
 }
 
-/// Background music slot (embedded under `assets/audio/music/`).
+/// Background music slot (embedded under `assets/music/`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MusicId {
     MainMenu,
@@ -113,9 +113,9 @@ pub enum MusicId {
 impl MusicId {
     fn asset_path(self) -> &'static str {
         match self {
-            MusicId::MainMenu => "audio/music/main_menu.mp3",
-            MusicId::Gameplay => "audio/music/gameplay.mp3",
-            MusicId::Shop => "audio/music/shop.mp3",
+            MusicId::MainMenu => "music/main_menu.mp3",
+            MusicId::Gameplay => "music/gameplay.mp3",
+            MusicId::Shop => "music/shop.mp3",
         }
     }
 }
@@ -577,20 +577,7 @@ impl AudioManager {
             );
         }
 
-        let mut music_data = HashMap::new();
-        for id in [MusicId::MainMenu, MusicId::Gameplay, MusicId::Shop] {
-            let path = id.asset_path();
-            if let Some(file) = crate::asset_path::get(path) {
-                if let Some(clip) = decode_rodio(path, file.data.as_ref()) {
-                    music_data.insert(id, clip);
-                }
-            }
-        }
-        if music_data.is_empty() {
-            log::debug!("No music files in assets/audio/music/; background music disabled.");
-        } else {
-            log::debug!("Loaded {} background music track(s).", music_data.len());
-        }
+        let music_data = HashMap::new();
 
         Self {
             _stream: stream,
@@ -740,7 +727,21 @@ impl AudioManager {
         self.start_music_track(id);
     }
 
+    fn ensure_music_loaded(&mut self, id: MusicId) {
+        if self.music_data.contains_key(&id) {
+            return;
+        }
+        let path = id.asset_path();
+        if let Some(file) = crate::asset_path::get(path) {
+            if let Some(clip) = decode_rodio(path, file.data.as_ref()) {
+                log::debug!("Loaded BGM {path} ({id:?})");
+                self.music_data.insert(id, clip);
+            }
+        }
+    }
+
     fn start_music_track(&mut self, id: MusicId) {
+        self.ensure_music_loaded(id);
         let Some(clip) = self.music_data.get(&id).cloned() else {
             log::debug!("start_music_track({id:?}): no data");
             return;

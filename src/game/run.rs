@@ -671,7 +671,7 @@ pub struct RunState {
     /// `advance_round` and `skip_to_next_blind`.
     #[serde(skip)]
     pub honors_scored_this_round: bool,
-    /// Cumulative score earned across the entire run (for Snowball relic).
+    /// Cumulative score earned across the entire run (metrics / Golden Engine).
     #[serde(default)]
     pub total_score_earned: u64,
     /// True once Paper Lantern has burned up this run. Prevents Paper from
@@ -788,7 +788,7 @@ pub struct RunState {
     ///   XXXL Egg → plays remaining before burning (Geese shop unlock)
     ///   TeaCeremony  → principle index 0–3 (four scored hands, then transforms)
     ///   Rakuware     → (no counter; all four Tea beats when conditions hold)
-    ///   MonarchButterfly → cumulative absorbed excess (post-target); tiers for chip bonus
+    ///   MonarchButterfly → cumulative absorbed excess (post-target); linear chip tiers
     ///   PhantomRelic → rounds held
     ///   HungryGhost  → permanent mult bonus ×10
     ///   TilePolisher → accumulated +chip bonus (each scored tile +3)

@@ -1,9 +1,10 @@
-//! Runtime asset loading: multi-pack ZIP (manifest + lazy audio), or a loose tree if
-//! `MAHJURO_ASSETS` is set.
+//! Runtime asset loading: multi-pack ZIP (manifest), or a loose tree if `MAHJURO_ASSETS` is set.
 //!
-//! **Boot loading:** `essential` and `gameplay` packs are both **eager** — the renderer pulls most
-//! of the tree during `WgpuRenderer::new`, so deferring gameplay would require async init. Only
-//! the **audio** pack is lazy-mounted until first `audio/` read (or prefetch after main menu).
+//! **Boot loading:** **`shared`** (fonts, `sets/`, all `audio/` SFX) and **`gameplay`** packs are
+//! **eager** — opened and indexed during `PacksState::new` (before `WgpuRenderer::new` pulls the
+//! tree). **`scenes/main_menu/`** (lazy `scene_main_menu` pack) and **`music/`** are **lazy** —
+//! those zips stay closed until first read (menu façade, BGM on first play), or until
+//! [`prefetch_lazy_packs`] / [`prefetch_lazy_packs_after_menu_once`].
 
 use serde::Deserialize;
 use std::collections::{BTreeSet, HashMap};
@@ -499,7 +500,7 @@ pub fn log_all_assets() {
 }
 
 /// Enumerate tileset names (`sets/*/atlas.toml` + `atlas.png`). With packs, `sets/` lives in the
-/// eager **essential** pack, so this does not mount lazy packs in normal layouts.
+/// eager **shared** pack, so this does not mount lazy packs in normal layouts.
 pub fn list_tilesets() -> Vec<String> {
     init();
     let Some(state) = STATE.get() else {

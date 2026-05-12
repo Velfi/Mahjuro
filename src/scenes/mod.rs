@@ -96,7 +96,7 @@ impl BackgroundId {
         match self {
             BackgroundId::None => None,
             BackgroundId::Black => None,
-            BackgroundId::MainMenuExterior => Some("backgrounds/main_menu_exterior.png"),
+            BackgroundId::MainMenuExterior => Some("scenes/main_menu/exterior.png"),
         }
     }
 
@@ -138,7 +138,9 @@ pub struct UpdateCtx<'a> {
     pub complete_onboarding: &'a mut bool,
     /// Current mouse cursor position in window coordinates.
     pub cursor_pos: (f32, f32),
-    /// `true` once all background asset loading has completed.
+    /// For **splash**: `true` once the window has a [`WgpuRenderer`] (hub may still be
+    /// decoding façade art / relics in parallel). Other scenes: `true` when boot async
+    /// loaders have finished GPU upload (see [`crate::render::wgpu_renderer::WgpuRenderer::is_loading`]).
     pub loading_done: bool,
     /// Cascade animation timing parameters.
     pub cascade_tuning: &'a CascadeTuning,
@@ -265,8 +267,10 @@ pub struct DrawCtx<'a> {
     pub gamepad_swap_xy: bool,
     /// Detected controller family for button-prompt glyphs (see [`crate::ui::button_prompts`]).
     pub gamepad_style: crate::ui::button_prompts::GamepadStyle,
-    /// Steam Input glyph files for semantic actions in the current action set.
-    pub steam_glyphs: &'a [(crate::ui::input::UiAction, std::path::PathBuf)],
+    /// Resolves a controller-prompt glyph for a given [`UiAction`]. Steam Input
+    /// wins when active; the static [`GamepadStyle`]-keyed atlas is the fallback.
+    /// See [`crate::ui::glyph_source::GlyphResolver`].
+    pub glyphs: crate::ui::glyph_source::GlyphResolver<'a>,
     /// Frozen [`ShopScene`] under shop showcase inspect — fed to [`crate::scenes::shop::render_shop_inspect_isolated_frame`].
     pub suspended_shop: Option<&'a ShopScene>,
     /// Suspended collection beneath collection showcase inspect for pedestal orbit.
@@ -300,7 +304,7 @@ impl<'a> DrawCtx<'a> {
         gamepad_swap_ab: bool,
         gamepad_swap_xy: bool,
         gamepad_style: crate::ui::button_prompts::GamepadStyle,
-        steam_glyphs: &'a [(crate::ui::input::UiAction, std::path::PathBuf)],
+        glyphs: crate::ui::glyph_source::GlyphResolver<'a>,
         suspended_shop: Option<&'a ShopScene>,
         suspended_collection: Option<&'a CollectionScene>,
         tile_preset: crate::persistence::TilePreset,
@@ -327,7 +331,7 @@ impl<'a> DrawCtx<'a> {
             gamepad_swap_ab,
             gamepad_swap_xy,
             gamepad_style,
-            steam_glyphs,
+            glyphs,
             suspended_shop,
             suspended_collection,
             tile_preset,
@@ -479,8 +483,10 @@ impl Scene {
             Scene::Gameplay(_) => crate::steam::ActionSet::Gameplay,
             Scene::Shop(_) => crate::steam::ActionSet::Shop,
             Scene::Showcase(s) if s.wants_orbit_input() => crate::steam::ActionSet::Inspect,
-            Scene::RumbleLab(_) => crate::steam::ActionSet::RumbleLab,
-            _ => crate::steam::ActionSet::MenuControls,
+            // Debug scenes (RumbleLab, MaterialViewer, TransitionPlayground)
+            // share the Menus set — no Steam Input bindings are reserved for
+            // them. They're only reachable via the dev debug menu.
+            _ => crate::steam::ActionSet::Menus,
         }
     }
 }

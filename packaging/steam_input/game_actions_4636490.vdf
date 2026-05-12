@@ -2,13 +2,13 @@
 {
 	"actions"
 	{
-		"MenuControls"
+		"Menus"
 		{
 			"title" "#Set_Menu"
-			"legacy_set" "0"
 			"StickPadGyro"
 			{
 				"nav" { "title" "#Action_Nav" "input_mode" "joystick_move" }
+				"cursor" { "title" "#Action_Cursor" "input_mode" "absolute_mouse" "os_mouse" "1" }
 			}
 			"AnalogTrigger"
 			{
@@ -35,10 +35,10 @@
 		"Gameplay"
 		{
 			"title" "#Set_Gameplay"
-			"legacy_set" "0"
 			"StickPadGyro"
 			{
 				"nav" { "title" "#Action_Nav" "input_mode" "joystick_move" }
+				"cursor" { "title" "#Action_Cursor" "input_mode" "absolute_mouse" "os_mouse" "1" }
 			}
 			"AnalogTrigger"
 			{
@@ -67,10 +67,10 @@
 		"Shop"
 		{
 			"title" "#Set_Shop"
-			"legacy_set" "0"
 			"StickPadGyro"
 			{
 				"nav" { "title" "#Action_Nav" "input_mode" "joystick_move" }
+				"cursor" { "title" "#Action_Cursor" "input_mode" "absolute_mouse" "os_mouse" "1" }
 			}
 			"AnalogTrigger"
 			{
@@ -95,7 +95,6 @@
 		"Inspect"
 		{
 			"title" "#Set_Inspect"
-			"legacy_set" "0"
 			"StickPadGyro"
 			{
 				"nav" { "title" "#Action_Nav" "input_mode" "joystick_move" }
@@ -120,55 +119,6 @@
 			}
 		}
 
-		"RumbleLab"
-		{
-			"title" "#Set_RumbleLab"
-			"legacy_set" "0"
-			"StickPadGyro"
-			{
-				"nav" { "title" "#Action_Nav" "input_mode" "joystick_move" }
-			}
-			"AnalogTrigger"
-			{
-			}
-			"Button"
-			{
-				"confirm" "#Action_Confirm"
-				"cancel" "#Action_Cancel"
-				"focus_next" "#Action_FocusNext"
-				"focus_prev" "#Action_FocusPrev"
-				"focus_up" "#Action_FocusUp"
-				"focus_down" "#Action_FocusDown"
-				"pause" "#Action_Pause"
-				"help" "#Action_Help"
-			}
-		}
-
-		"PauseMenu"
-		{
-			"title" "#Set_PauseMenu"
-			"legacy_set" "0"
-			"StickPadGyro"
-			{
-				"nav" { "title" "#Action_Nav" "input_mode" "joystick_move" }
-			}
-			"AnalogTrigger"
-			{
-			}
-			"Button"
-			{
-				"confirm" "#Action_Confirm"
-				"cancel" "#Action_Cancel"
-				"focus_next" "#Action_FocusNext"
-				"focus_prev" "#Action_FocusPrev"
-				"focus_up" "#Action_FocusUp"
-				"focus_down" "#Action_FocusDown"
-				"tab_next" "#Action_TabNext"
-				"tab_prev" "#Action_TabPrev"
-				"pause" "#Action_Pause"
-				"help" "#Action_Help"
-			}
-		}
 	}
 	"localization"
 	{
@@ -178,11 +128,10 @@
 			"Set_Gameplay" "Gameplay"
 			"Set_Shop" "Shop"
 			"Set_Inspect" "Inspect Item"
-			"Set_RumbleLab" "Rumble Lab"
-			"Set_PauseMenu" "Pause Menu"
 			"Title_Official" "Official Configuration"
 			"Description_Official" "Default Steam Input configuration for Mahjuro."
 			"Action_Nav" "Navigate"
+			"Action_Cursor" "Menu Cursor"
 			"Action_Orbit" "Orbit Camera"
 			"Action_InspectZoom" "Zoom"
 			"Action_Confirm" "Confirm / Select"

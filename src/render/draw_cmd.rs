@@ -332,8 +332,15 @@ pub struct TileFaceQuad {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum PromptIconSource {
-    /// Path relative to `assets/` (embedded); selects the cached raster.
-    Embedded(&'static str),
+    /// Sub-rectangle of a baked Kenney Input Prompts sheet PNG. `sheet` is the
+    /// asset-relative path (under `assets/`) to the `_sheet_double.png`; `name`
+    /// is the matching `SubTexture name="…"` from the sibling XML index. The
+    /// renderer decodes each sheet once on first use, then crops the named
+    /// sub-rect into a per-glyph GPU texture (cached by [`Self::cache_key`]).
+    AtlasSprite {
+        sheet: &'static str,
+        name: &'static str,
+    },
     /// Absolute filesystem path returned by Steam Input for the active origin.
     Filesystem(std::path::PathBuf),
 }
@@ -341,7 +348,7 @@ pub enum PromptIconSource {
 impl PromptIconSource {
     pub fn cache_key(&self) -> String {
         match self {
-            Self::Embedded(path) => format!("asset:{path}"),
+            Self::AtlasSprite { sheet, name } => format!("atlas:{sheet}:{name}"),
             Self::Filesystem(path) => format!("file:{}", path.display()),
         }
     }

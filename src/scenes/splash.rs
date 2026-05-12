@@ -10,7 +10,7 @@ use crate::render::draw_cmd::UiFrame;
 use super::main_menu_exterior::MainMenuExteriorScene;
 use super::{DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
-const MIN_DISPLAY_SECS: f32 = 0.5;
+const MIN_DISPLAY_SECS: f32 = 0.3;
 
 pub struct SplashScene {
     /// When the splash was first shown.
@@ -36,7 +36,8 @@ impl SceneBehavior for SplashScene {
 
         let elapsed = self.start.elapsed().as_secs_f32();
 
-        // Wait for both the minimum display time and background loading to finish.
+        // Wait for GPU/renderer readiness (see `loading_done` in `frame_tick`) and a short
+        // minimum time — do not block on relic or menu-backdrop decode; those finish in parallel.
         if ctx.loading_done && elapsed >= MIN_DISPLAY_SECS {
             self.done = true;
             log::info!("splash: transitioning to start screen after {elapsed:.2}s");

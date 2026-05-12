@@ -176,8 +176,8 @@ impl WgpuRenderer {
     }
 
     /// When async decode fails (missing pack, corrupt file, …), `is_loading()` still goes
-    /// false once the loader thread ends — without a bind group the background pass is
-    /// skipped and the hub looks like a stuck splash (black) while menu music plays.
+    /// false once the loader thread ends — without a bind group the façade pass uses a solid
+    /// fallback until a successful decode replaces it.
     fn insert_background_solid_fallback_if_missing(&mut self, id: BackgroundId) {
         if self.background_textures.contains_key(&id) {
             return;

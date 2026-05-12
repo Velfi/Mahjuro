@@ -229,6 +229,11 @@ impl RunState {
         if self.relics.has(RelicId::Heirloom) {
             *self.relic_counters.entry(RelicId::Heirloom).or_insert(0) += 1;
         }
+        // Snowball: stacks once per cleared blind (skips don't count), capped.
+        if self.relics.has(RelicId::Snowball) {
+            let e = self.relic_counters.entry(RelicId::Snowball).or_insert(0);
+            *e = (*e + 1).min(crate::core::relic::SNOWBALL_STACK_CAP);
+        }
         // Kong Collector: per-round kong tally is consumed at round end; clear it now.
         self.relic_counters.remove(&RelicId::KongCollector);
         self.run_number += 1;

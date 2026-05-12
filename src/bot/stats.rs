@@ -56,6 +56,9 @@ pub struct RunTimeoutSnapshot {
 }
 
 /// One scoring step toward [`PeakBlindSnapshot::total_score`] (a committed play or structure cash-in).
+///
+/// `tiles`: compact `Tile::label` list — full structure bank on cash-in (`kind == "structure"` or
+/// auto cash-in after commit); otherwise tiles from the commit when only part of the bank scored.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BotScoringAction {
     pub kind: String,

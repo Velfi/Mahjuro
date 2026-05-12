@@ -16,7 +16,7 @@ mod debug_overlays;
 mod effect_layers;
 pub mod game;
 #[cfg(target_os = "macos")]
-mod macos_updater;
+mod macos_fullscreen_shortcut;
 #[path = "main/arrange.rs"]
 mod main_arrange;
 #[path = "main/bot_graph.rs"]
@@ -48,7 +48,6 @@ mod scenes;
 mod sdl_shell;
 mod steam;
 mod ui;
-mod update_check;
 
 use std::time::Instant;
 
@@ -138,6 +137,11 @@ struct App {
     /// When non-empty, the top of the stack is the active scene: only it
     /// ticks and draws. `self.scene` is the root; overlays stack above.
     overlay_stack: Vec<Scene>,
+    /// Snapshot of "any controller currently connected?" from the previous
+    /// frame, used to detect the falling edge (controller unplugged) so we
+    /// can auto-pause the game while the player is in [`InputMode::Controller`].
+    /// Steam Input docs Golden Rule #5: a disconnected gamepad should pause.
+    prev_controller_present: bool,
     quit_requested: bool,
     close_saved: bool,
     modals: ModalQueue,
@@ -149,21 +153,6 @@ struct App {
     cascade_tuning: CascadeTuning,
     volumetric_tuning: VolumetricTuning,
     deferred_round_end: Option<GameEvent>,
-    /// `None` when the Steam build is hosting us — Steam handles its own
-    /// update pipeline and self-replacing the binary fights the Steam
-    /// installer. Otherwise `Some` and polled every frame.
-    update_checker: Option<update_check::UpdateChecker>,
-    /// `Some(version)` while the "update available" prompt modal is on
-    /// screen. Confirming the modal triggers the install; cancelling
-    /// clears this.
-    pending_update_prompt: Option<String>,
-    /// macOS-only: Sparkle's updater controller. Holds the framework alive
-    /// for the lifetime of the app and keeps Sparkle's background scheduler
-    /// running. `None` on dev builds where `Sparkle.framework` isn't
-    /// embedded yet (the legacy `update_checker` then takes over) or when
-    /// Steam is hosting us (Steam owns updates).
-    #[cfg(target_os = "macos")]
-    sparkle: Option<macos_updater::SparkleUpdater>,
     modifiers: Mod,
     /// Steamworks integration. Either `Connected` (initialized successfully
     /// and the user is signed into Steam) or `Disabled` (init failed,
@@ -171,7 +160,6 @@ struct App {
     /// `SteamClient` is safe to call in either state — `Disabled` is a
     /// logged no-op — so no `Option` wrapping is needed at call sites.
     steam: steam::SteamClient,
-    steam_rumble_schedule: Vec<(Instant, u16, u16, u32, f32)>,
     /// Mirrors `AppSettings::archive_last_seen_run_len` for menu hints without disk reads.
     archive_last_seen_run_len: [u32; 3],
 }
@@ -263,6 +251,7 @@ impl App {
         run.set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
         run.set_hints_enabled(settings.hints_enabled);
         run.apply_progression(&progress);
+        steam.sync_profile_stats(&progress);
         let mut audio = audio::AudioManager::new();
         audio.set_master_volume(settings.master_volume);
         audio.set_sfx_volume(settings.sfx_volume);
@@ -271,15 +260,6 @@ impl App {
             audio.set_enabled(false);
         }
         log::debug!("App::new() settings + profile loaded in {:?}", t0.elapsed());
-        // Steam owns updates for Steam-installed builds: self-replacing the
-        // binary fights the Steam content system. Detect Steam two ways —
-        // the SDK signal (strongest: Steam *is* hosting us right now) and
-        // the env-var signal (catches "launched outside Steam from a Steam
-        // library" and offline-mode init failures).
-        let is_steam_build = steam.is_connected() || steam::launched_via_steam();
-        if is_steam_build {
-            log::debug!("Steam-hosted build detected; skipping in-app updaters");
-        }
         Self {
             last_drawable_px: PhysicalSize::new(1920, 1080),
             renderer: None,
@@ -308,6 +288,7 @@ impl App {
             pending_scene: None,
             pending_scene_destination: PendingSceneDestination::default(),
             overlay_stack: Vec::new(),
+            prev_controller_present: false,
             quit_requested: false,
             close_saved: false,
             modals: ModalQueue::default(),
@@ -332,15 +313,8 @@ impl App {
             volumetric_tuning: persistence::load_tuning_override::<VolumetricTuning>(
                 "VolumetricTuning",
             ),
-            update_checker: (!is_steam_build).then(update_check::UpdateChecker::spawn),
-            pending_update_prompt: None,
-            #[cfg(target_os = "macos")]
-            sparkle: (!is_steam_build)
-                .then(macos_updater::SparkleUpdater::start)
-                .flatten(),
             modifiers: Mod::NOMOD,
             steam,
-            steam_rumble_schedule: Vec::new(),
             archive_last_seen_run_len: settings.archive_last_seen_run_len,
         }
     }
@@ -348,6 +322,9 @@ impl App {
     fn toggle_fullscreen(&mut self, shell: &mut sdl_shell::SdlShell) -> anyhow::Result<()> {
         let on = shell.desktop_fullscreen_on();
         shell.set_desktop_fullscreen(!on)?;
+        let mut settings = persistence::load_settings();
+        settings.borderless_fullscreen = shell.desktop_fullscreen_on();
+        let _ = persistence::save_settings(&settings);
         Ok(())
     }
 
@@ -376,7 +353,21 @@ impl App {
 
         #[cfg(target_os = "macos")]
         {
-            keymod.is_empty() && code == Scancode::F
+            if code != Scancode::F {
+                return false;
+            }
+            let disallowed_mod = keymod.contains(Mod::LCTRLMOD)
+                || keymod.contains(Mod::RCTRLMOD)
+                || keymod.contains(Mod::LALTMOD)
+                || keymod.contains(Mod::RALTMOD)
+                || keymod.contains(Mod::LGUIMOD)
+                || keymod.contains(Mod::RGUIMOD)
+                || keymod.contains(Mod::LSHIFTMOD)
+                || keymod.contains(Mod::RSHIFTMOD);
+            if disallowed_mod {
+                return false;
+            }
+            crate::macos_fullscreen_shortcut::fn_modifier_held()
         }
 
         #[cfg(not(any(target_os = "windows", target_os = "macos")))]
@@ -409,6 +400,7 @@ impl App {
             .set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
         self.run.set_hints_enabled(settings.hints_enabled);
         self.run.apply_progression(&self.progress);
+        self.steam.sync_profile_stats(&self.progress);
         // Persist the active profile choice.
         settings.active_profile = new_index;
         let _ = persistence::save_settings(&settings);
@@ -524,7 +516,10 @@ pub fn run() -> anyhow::Result<()> {
                 steam::SteamClient::init(disable_steam_input)
             };
 
-            let mut shell = sdl_shell::SdlShell::new("Mahjuro", 1920, 1080)?;
+            let settings = persistence::load_settings();
+            let tenfoot = std::env::var_os("SteamTenfoot").is_some();
+            let launch_borderless = !tenfoot && settings.borderless_fullscreen;
+            let mut shell = sdl_shell::SdlShell::new("Mahjuro", 1920, 1080, launch_borderless)?;
             let app = App::new(steam);
             app.run_sdl_main(&mut shell)?;
             Ok(())

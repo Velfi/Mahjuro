@@ -5,8 +5,126 @@ use crate::scene_transition::{
     apply_post_scene_transition_effects, transition_spec_for_edge,
 };
 use crate::sdl_shell::SdlShell;
+use crate::ui::input::RumbleLabOp;
 
 impl App {
+    /// Whether scoring-cascade / hold-to-sell rumble should fire this frame:
+    /// the player is on the controller and hasn't disabled gameplay rumble in
+    /// settings. (The setting was originally named after shop hold-to-sell
+    /// but now gates every gameplay-driven rumble, including cascade pulses.)
+    fn controller_rumble_active(&self) -> bool {
+        self.input.as_ref().is_some_and(|input| {
+            input.mode == crate::ui::input::InputMode::Controller
+                && input.hold_to_sell_rumble_enabled
+        })
+    }
+
+    /// Fire a one-shot rumble pulse on whichever controller path is active.
+    /// Steam Input takes precedence; the SDL gamepad path is the fallback when
+    /// Steam Input isn't running. Centralised so the call sites don't have to
+    /// repeat the "try Steam, else SDL" dance.
+    fn fire_rumble_pulse(
+        &mut self,
+        shell: &mut SdlShell,
+        now: Instant,
+        weak: u16,
+        strong: u16,
+        duration_ms: u32,
+        gain: f32,
+    ) {
+        if self
+            .steam
+            .trigger_input_rumble(weak, strong, duration_ms, gain)
+        {
+            return;
+        }
+        if let Some(input) = self.input.as_mut() {
+            input.play_scoring_rumble_pulse(shell, now, weak, strong, duration_ms, gain);
+        }
+    }
+
+    /// Drain rumble-lab ops onto the active controller path. Composite patterns
+    /// schedule their staggered pulses on the same path (Steam Input owns its
+    /// own schedule queue; SDL uses [`crate::ui::input::InputState`]'s).
+    fn dispatch_rumble_lab_ops(
+        &mut self,
+        shell: &mut SdlShell,
+        now: Instant,
+        ops: Vec<RumbleLabOp>,
+    ) {
+        if !self.steam.has_steam_input() {
+            if let Some(input) = self.input.as_mut() {
+                input.apply_rumble_lab_ops(shell, now, ops);
+            }
+            return;
+        }
+        for op in ops {
+            match op {
+                RumbleLabOp::Pulse {
+                    weak,
+                    strong,
+                    duration_ms,
+                    gain,
+                } => {
+                    let _ = self
+                        .steam
+                        .trigger_input_rumble(weak, strong, duration_ms, gain);
+                }
+                RumbleLabOp::Composite { gain, segments } => {
+                    for (delay, weak, strong, duration_ms) in segments {
+                        self.steam.schedule_input_rumble_pulse(
+                            now + std::time::Duration::from_millis(u64::from(delay)),
+                            weak,
+                            strong,
+                            duration_ms.max(1),
+                            gain,
+                        );
+                    }
+                }
+                RumbleLabOp::Envelope {
+                    gain,
+                    weak,
+                    strong,
+                    duration_ms,
+                    ..
+                } => {
+                    // SDL has no envelope shaping either — `InputState::play_rumble_envelope`
+                    // collapses to a single pulse. Mirror that.
+                    let _ =
+                        self.steam
+                            .trigger_input_rumble(weak, strong, duration_ms.max(60), gain);
+                }
+            }
+        }
+    }
+
+    /// Drive the shop sell-hold rumble on whichever controller path is active.
+    /// Off-path callers (other scenes) should not invoke this.
+    fn sync_shop_sell_hold_rumble(
+        &mut self,
+        shell: &mut SdlShell,
+        hold: bool,
+        controller: bool,
+        enabled: bool,
+        progress: f32,
+    ) {
+        if self.steam.has_steam_input() {
+            if hold && controller && enabled {
+                let (weak, strong, duration_ms, gain) =
+                    InputState::shop_sell_hold_rumble_params(progress);
+                let _ = self
+                    .steam
+                    .trigger_input_rumble(weak, strong, duration_ms, gain);
+            } else if !hold {
+                self.steam.stop_input_rumble();
+            }
+            return;
+        }
+        if let Some(input) = self.input.as_mut() {
+            input.sync_shop_sell_hold_rumble(shell, hold, controller, enabled, progress);
+        }
+    }
+
     pub(super) fn frame_tick(&mut self, shell: &mut SdlShell) {
         let now = Instant::now();
         self.last_frame_dt = now
@@ -16,22 +134,6 @@ impl App {
         self.last_frame = now;
         self.anim.update(now);
         self.audio.tick(now);
-        if self.steam.has_steam_input() {
-            let mut fired: Vec<(u16, u16, u32, f32)> = Vec::new();
-            self.steam_rumble_schedule.retain(|(at, w, s, d, g)| {
-                if *at <= now {
-                    fired.push((*w, *s, *d, *g));
-                    false
-                } else {
-                    true
-                }
-            });
-            for (weak, strong, duration_ms, gain) in fired {
-                let _ = self
-                    .steam
-                    .trigger_input_rumble(weak, strong, duration_ms, gain);
-            }
-        }
 
         // Refresh opened gamepads before any rumble this frame. `tick_scoring_rumble_keepalive`
         // and bus handlers run before `gamepad_frame_tick`; without this, `shell.pads` can
@@ -46,7 +148,10 @@ impl App {
         if let Some(input) = self.input.as_mut() {
             input.tick_scoring_rumble_keepalive(shell, now);
         }
-        for ev in self.bus.drain() {
+        // Drain into a Vec so the bus borrow ends before the loop body, which
+        // calls back into `&mut self` (rumble helpers, scene transitions, …).
+        let drained: Vec<GameEvent> = self.bus.drain().collect();
+        for ev in drained {
             match ev {
                 GameEvent::TileDrawn => {
                     self.audio.play_sfx(audio::SfxId::TilePlace);
@@ -65,19 +170,10 @@ impl App {
                     // wired into the game.
                     self.audio.play_score_tick(index);
                     self.audio.play_sfx(audio::SfxId::ScoreStep);
-                    if let Some(input) = self.input.as_mut() {
-                        if input.mode == crate::ui::input::InputMode::Controller
-                            && input.hold_to_sell_rumble_enabled
-                        {
-                            let (weak, strong, duration_ms, gain) =
-                                InputState::cascade_step_rumble_params();
-                            if !self
-                                .steam
-                                .trigger_input_rumble(weak, strong, duration_ms, gain)
-                            {
-                                input.play_scoring_cascade_step_rumble(shell, now);
-                            }
-                        }
+                    if self.controller_rumble_active() {
+                        let (weak, strong, duration_ms, gain) =
+                            InputState::cascade_step_rumble_params();
+                        self.fire_rumble_pulse(shell, now, weak, strong, duration_ms, gain);
                     }
                 }
                 GameEvent::ScoreCascadeFinal { earned } => {
@@ -88,19 +184,10 @@ impl App {
                     self.audio.play_sfx(audio::SfxId::ScoreCrescendo);
                     self.steam
                         .unlock_achievement(crate::steam::Achievement::FirstStructure);
-                    if let Some(input) = self.input.as_mut() {
-                        if input.mode == crate::ui::input::InputMode::Controller
-                            && input.hold_to_sell_rumble_enabled
-                        {
-                            let (weak, strong, duration_ms, gain) =
-                                InputState::cascade_final_rumble_params(earned);
-                            if !self
-                                .steam
-                                .trigger_input_rumble(weak, strong, duration_ms, gain)
-                            {
-                                input.play_scoring_cascade_final_rumble(shell, now, earned);
-                            }
-                        }
+                    if self.controller_rumble_active() {
+                        let (weak, strong, duration_ms, gain) =
+                            InputState::cascade_final_rumble_params(earned);
+                        self.fire_rumble_pulse(shell, now, weak, strong, duration_ms, gain);
                     }
                 }
                 GameEvent::GoldChanged { .. } => {
@@ -285,54 +372,7 @@ impl App {
             }
         }
 
-        // 1a. Poll background update pipeline. Skipped on macOS when
-        // Sparkle is driving updates — Sparkle owns the entire UX
-        // (appcast polling, prompts, download, atomic bundle swap)
-        // because Gatekeeper blocks any in-process self-replace inside
-        // `/Applications/Mahjuro.app`. On dev `cargo run` builds the
-        // framework isn't embedded, `self.sparkle` is `None`, and the
-        // legacy in-game path takes over.
-        #[cfg(target_os = "macos")]
-        let skip_legacy_update_poll = self.sparkle.is_some();
-        #[cfg(not(target_os = "macos"))]
-        let skip_legacy_update_poll = false;
-        if !skip_legacy_update_poll
-            && let Some(checker) = self.update_checker.as_mut()
-            && let Some(result) = checker.poll()
-        {
-            let modal = match result {
-                update_check::UpdateResult::UpdateAvailable { new_version } => {
-                    let current = env!("CARGO_PKG_VERSION");
-                    let body = format!(
-                        "v{new_version} is available (you have v{current}).\n\nDownload and install now?\n\nPress Enter to install, Esc to skip."
-                    );
-                    self.pending_update_prompt = Some(new_version);
-                    Modal::new("Update Available", body, ModalTheme::Info)
-                }
-                update_check::UpdateResult::Updated { new_version } => Modal::new(
-                    "Updated!",
-                    format!("v{new_version} installed.\nRestart to use the new version."),
-                    ModalTheme::Info,
-                ),
-                update_check::UpdateResult::UpdateFailed {
-                    new_version,
-                    release_url,
-                    error,
-                } => {
-                    log::warn!("auto-update to v{new_version} failed: {error}");
-                    Modal::new(
-                        "Update Failed",
-                        format!(
-                            "v{new_version} download/install failed.\n\nGet it manually:\n{release_url}"
-                        ),
-                        ModalTheme::Info,
-                    )
-                }
-            };
-            self.modals.push(modal);
-        }
-
-        // 1b. Poll debug menu actions.
+        // 1a. Poll debug menu actions.
         if let Some(ref debug_menu) = self.debug.menu {
             for action in debug_menu.poll() {
                 self.handle_debug_action(action);
@@ -360,6 +400,7 @@ impl App {
                 input.item_inspect_zoom_triggers = analog.inspect_zoom;
                 if let Some(style) = self.steam.first_controller_style() {
                     input.gamepad_style = style;
+                    input.apply_controller_layout_defaults_for_active_style();
                 }
             } else {
                 let shop_face = matches!(&self.scene, Scene::Shop(_))
@@ -381,6 +422,30 @@ impl App {
                     hide_cursor = true;
                 }
             }
+
+            // Steam Input docs Golden Rule #5: a disconnected gamepad
+            // should pause the game. Detect the falling edge — last
+            // controller present last frame, none this frame — and only
+            // when the player was actually playing on a pad. We inject a
+            // Pause action so the active scene's existing pause-overlay
+            // path opens the menu naturally (and falls back to a no-op
+            // outside gameplay scenes that don't bind Pause).
+            let now_controller_present = if self.steam.has_steam_input() {
+                self.steam.input_controller_count() > 0
+            } else {
+                shell.gamepad.gamepads().map(|v| !v.is_empty()).unwrap_or(false)
+            };
+            if self.prev_controller_present
+                && !now_controller_present
+                && input.mode == crate::ui::input::InputMode::Controller
+            {
+                log::info!("controller disconnected — auto-pausing");
+                actions.push(crate::ui::input::UiAction::Pause);
+                input.mode = crate::ui::input::InputMode::Cursor;
+                shell.show_cursor(true);
+            }
+            self.prev_controller_present = now_controller_present;
+
             actions.append(&mut self.mouse_actions);
 
             let size = self.last_drawable_px;
@@ -574,18 +639,10 @@ impl App {
             for a in &actions {
                 match a {
                     UiAction::Confirm => {
-                        if let Some(version) = self.pending_update_prompt.take()
-                            && let Some(checker) = self.update_checker.as_mut()
-                        {
-                            checker.start_install(version);
-                        }
                         self.modals.advance_page();
                         break;
                     }
                     UiAction::Cancel => {
-                        if self.pending_update_prompt.take().is_some() {
-                            log::debug!("user skipped update");
-                        }
                         self.modals.dismiss();
                         break;
                     }
@@ -624,7 +681,12 @@ impl App {
             .as_ref()
             .map(|i| i.last_cursor)
             .unwrap_or((0.0, 0.0));
-        let loading_done = self.renderer.as_ref().is_none_or(|r| !r.is_loading());
+        let loading_done = match &self.scene {
+            // Splash may dismiss as soon as the window has a renderer; relic and menu-backdrop
+            // decode continue in parallel (solid fallback until the façade texture lands).
+            Scene::Splash(_) => self.renderer.is_some(),
+            _ => self.renderer.as_ref().is_none_or(|r| !r.is_loading()),
+        };
         let picked_shop_object = self
             .renderer
             .as_ref()
@@ -787,82 +849,24 @@ impl App {
             }
             None => {}
         }
-        if let Some(input) = self.input.as_mut() {
-            if self.steam.has_steam_input() {
-                for op in rumble_lab_ops {
-                    match op {
-                        crate::ui::input::RumbleLabOp::Pulse {
-                            weak,
-                            strong,
-                            duration_ms,
-                            gain,
-                        } => {
-                            let _ =
-                                self.steam
-                                    .trigger_input_rumble(weak, strong, duration_ms, gain);
-                        }
-                        crate::ui::input::RumbleLabOp::Composite { gain, segments } => {
-                            for (delay, weak, strong, duration_ms) in segments {
-                                self.steam_rumble_schedule.push((
-                                    now + std::time::Duration::from_millis(u64::from(delay)),
-                                    weak,
-                                    strong,
-                                    duration_ms.max(1),
-                                    gain,
-                                ));
-                            }
-                        }
-                        crate::ui::input::RumbleLabOp::Envelope {
-                            gain,
-                            weak,
-                            strong,
-                            duration_ms,
-                            ..
-                        } => {
-                            let _ = self.steam.trigger_input_rumble(
-                                weak,
-                                strong,
-                                duration_ms.max(60),
-                                gain,
-                            );
-                        }
-                    }
-                }
-            } else {
-                input.apply_rumble_lab_ops(shell, now, rumble_lab_ops);
-            }
-            let shop_ready = matches!(&self.scene, Scene::Shop(_))
-                && self.overlay_stack.is_empty()
-                && !self.scene.has_blocking_overlay();
-            let hold =
-                shop_ready && matches!(&self.scene, Scene::Shop(s) if s.sell_hold_in_progress());
+        self.dispatch_rumble_lab_ops(shell, now, rumble_lab_ops);
+        let shop_ready = matches!(&self.scene, Scene::Shop(_))
+            && self.overlay_stack.is_empty()
+            && !self.scene.has_blocking_overlay();
+        // Only drive shop-hold rumble on the unobstructed shop face. When `hold`
+        // is false, sync stops motors — if we ran that every frame globally it
+        // would cancel rumble lab / scoring pulses the same tick they fire.
+        if shop_ready
+            && let Some(input) = self.input.as_ref()
+        {
+            let hold = matches!(&self.scene, Scene::Shop(s) if s.sell_hold_in_progress());
             let progress = match &self.scene {
                 Scene::Shop(s) if hold => s.sell_hold_progress(now).unwrap_or(0.0),
                 _ => 0.0,
             };
             let controller = input.mode == crate::ui::input::InputMode::Controller;
-            // Only drive shop-hold rumble on the unobstructed shop face. When `hold` is
-            // false, sync stops motors — if we ran that every frame globally it would
-            // cancel rumble lab / scoring pulses the same tick they fire.
-            if shop_ready {
-                if self.steam.has_steam_input() {
-                    if hold && controller && input.hold_to_sell_rumble_enabled {
-                        let (weak, strong, duration_ms, gain) =
-                            InputState::shop_sell_hold_rumble_params(progress);
-                        let _ = self
-                            .steam
-                            .trigger_input_rumble(weak, strong, duration_ms, gain);
-                    }
-                } else {
-                    input.sync_shop_sell_hold_rumble(
-                        shell,
-                        hold,
-                        controller,
-                        input.hold_to_sell_rumble_enabled,
-                        progress,
-                    );
-                }
-            }
+            let enabled = input.hold_to_sell_rumble_enabled;
+            self.sync_shop_sell_hold_rumble(shell, hold, controller, enabled, progress);
         }
         if let Some(next_scene) = update_result {
             let spec =
@@ -910,6 +914,9 @@ impl App {
             self.gfx.shadows_enabled = opts.shadows_enabled;
             self.gfx.ssr_enabled = opts.ssr_enabled;
             self.gfx.hdr_enabled = opts.hdr_enabled;
+            if opts.borderless_fullscreen != shell.desktop_fullscreen_on() {
+                let _ = shell.set_desktop_fullscreen(opts.borderless_fullscreen);
+            }
             self.run
                 .set_auto_cash_in_on_full_structure(opts.auto_cash_in_on_full_structure);
             self.run.set_hints_enabled(opts.hints_enabled);
@@ -955,6 +962,7 @@ impl App {
                     .map(|saved| saved.run)
                     .unwrap_or_else(crate::game::run::RunState::new_demo);
                 self.run.apply_progression(&self.progress);
+                self.steam.sync_profile_stats(&self.progress);
             }
         }
 

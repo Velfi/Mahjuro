@@ -1,13 +1,13 @@
 {
-  "_comment": "Packs are matched in array order (see assign_pack in bake_assets.py). Within a pack, list longer path_prefixes before shorter ones if they overlap. root_globs apply only to files with no '/' in the path.",
+  "_comment": "assign_pack precedence: see bake_assets.py. shared (eager) = cross-scene: fonts, sets/, all audio/ SFX. gameplay (eager) = bulk 3D/UI. scene_main_menu (lazy) = main menu façade + future scene-only assets under scenes/main_menu/. music (lazy) = BGM under music/.",
   "packs": [
     {
-      "id": "essential",
-      "file": "mahjuro-pack-essential.zip",
+      "id": "shared",
+      "file": "mahjuro-pack-shared.zip",
       "load_tier": "eager",
       "path_prefixes": [
         "sets/",
-        "backgrounds/",
+        "audio/",
         "Instrument_Serif/",
         "Cormorant_Garamond/",
         "Noto_Emoji/"
@@ -27,10 +27,16 @@
       "root_globs": ["*.glb", "*.png"]
     },
     {
-      "id": "audio",
-      "file": "mahjuro-pack-audio.zip",
+      "id": "scene_main_menu",
+      "file": "mahjuro-pack-scene-main_menu.zip",
       "load_tier": "lazy",
-      "path_prefixes": ["audio/"]
+      "path_prefixes": ["scenes/main_menu/"]
+    },
+    {
+      "id": "music",
+      "file": "mahjuro-pack-music.zip",
+      "load_tier": "lazy",
+      "path_prefixes": ["music/"]
     }
   ]
 }
