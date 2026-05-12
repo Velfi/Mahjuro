@@ -6,6 +6,7 @@ use std::time::Instant;
 
 use crate::audio::SfxId;
 use crate::core::boss::{all_bosses, final_bosses};
+use crate::core::progression::is_transformation_successor_relic;
 use crate::core::relic::{Rarity, RelicId, all_relic_defs};
 use crate::core::talisman::TalismanKind;
 use crate::core::yaku::YakuKind;
@@ -1672,9 +1673,10 @@ fn stake_ladder_summary(progress: &crate::core::progression::PlayerProgress) -> 
 // ── Tab artifact enumeration ────────────────────────────────────────
 
 /// Build the list of artifacts for one tab. Reads [`PlayerProgress`].
-/// Relics only include entries already in the meta [`PlayerProgress::available_relics`]
-/// pool; higher-tier relics stay out of the grid until leveled in. Other
-/// tabs list only content the player has already surfaced (yaku scored,
+/// Relics: level-gated entries from [`PlayerProgress::available_relics`], plus
+/// any transformation successor that is [`PlayerProgress::transformation_successor_visible`]
+/// (discovered via burn — those ids are intentionally omitted from `available_relics`).
+/// Other tabs list only content the player has already surfaced (yaku scored,
 /// bosses met, talismans bought, chronicle runs).
 fn push_relic_stinger_for(
     bus: &mut crate::game::event_bus::EventBus,
@@ -1701,7 +1703,9 @@ fn tab_artifacts(tab: Tab, progress: &crate::core::progression::PlayerProgress) 
             let available = progress.available_relics();
             defs.iter()
                 .filter(|d| progress.transformation_successor_visible(d.id))
-                .filter(|d| available.contains(&d.id))
+                .filter(|d| {
+                    available.contains(&d.id) || is_transformation_successor_relic(d.id)
+                })
                 .map(|d| Artifact {
                     name: d.name.to_string(),
                     unlocked: true,

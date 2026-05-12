@@ -105,6 +105,10 @@ pub enum DebugAction {
     /// About panel's icon conversion path in `muda`.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     OpenAbout,
+    /// Meta: discover all transformation successors; ensure progression lists
+    /// all fragile primaries. Run: mark every burn chain as extinct so
+    /// successors can appear in the shop pool.
+    UnlockAllTransformationsAndSuccessors,
 }
 
 /// Holds the menu bar and maps MenuIds to DebugActions.
@@ -270,6 +274,14 @@ impl DebugMenuBar {
         let wind_item = MenuItem::new("Blow Wind Gust", true, None);
         mappings.push((wind_item.id().clone(), DebugAction::BlowWindGust));
         let _ = cheats_sub.append(&wind_item);
+
+        let unlock_transforms_item =
+            MenuItem::new("Unlock Transformations & Successors", true, None);
+        mappings.push((
+            unlock_transforms_item.id().clone(),
+            DebugAction::UnlockAllTransformationsAndSuccessors,
+        ));
+        let _ = cheats_sub.append(&unlock_transforms_item);
 
         let _ = cheats_sub.append(&PredefinedMenuItem::separator());
 

@@ -916,6 +916,17 @@ impl RunState {
         }
     }
 
+    /// Debug / cheat: act as if every fragile primary in the transform chains
+    /// has already burned this run so successors become shop-eligible.
+    pub fn cheat_force_all_transform_extinctions(&mut self) {
+        self.paper_lantern_extinct = true;
+        self.silk_thread_extinct = true;
+        self.melting_ice_extinct = true;
+        self.xxxl_egg_extinct = true;
+        self.tea_ceremony_extinct = true;
+        self.chrysalis_extinct = true;
+    }
+
     /// Canonical *relic destroyed* trigger.
     ///
     /// The "destroyed" keyword is the
