@@ -519,11 +519,16 @@ pub fn relic_visual(id: RelicId) -> RelicVisualDef {
         .map(|d| d.rarity)
         .unwrap_or(Rarity::Common);
 
-    let material = match rarity {
-        Rarity::Common => Iron,
-        Rarity::Uncommon => Copper,
-        Rarity::Rare => Silver,
-        Rarity::Legendary => Gold,
+    let material = match id {
+        // Rare tier for shop math, but the art direction calls for a gold
+        // cloisonné frame (jade + gold speckle), not the default Rare silver.
+        RelicId::Chrysalis => Gold,
+        _ => match rarity {
+            Rarity::Common => Iron,
+            Rarity::Uncommon => Copper,
+            Rarity::Rare => Silver,
+            Rarity::Legendary => Gold,
+        },
     };
 
     let (ui_tilt_x_deg, thickness_scale) = match material {
