@@ -1610,19 +1610,14 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
+        "text": "\"Is a vessel made not in some part by the worth of it's content? Modest in appearance, a heart of gold within.\"                                                                                        -",
         "bold": false,
         "italic": false
       },
       {
-        "text": "countless",
-        "bold": true,
+        "text": "Guru Pakba.",
+        "bold": false,
         "italic": true
-      },
-      {
-        "text": " late-night rounds.",
-        "bold": false,
-        "italic": false
       }
     ]
   },
