@@ -36,7 +36,6 @@ impl SceneBehavior for TileLiteracyScene {
                 button_clicks: ctx.button_clicks,
                 cursor_pos: ctx.cursor_pos,
                 window: (ctx.layout.window_w, ctx.layout.window_h),
-                ui_scale: ctx.ui_scale,
                 input_mode: ctx.input_mode,
                 scroll_lines: 0.0,
             },
@@ -54,7 +53,7 @@ impl SceneBehavior for TileLiteracyScene {
     fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
-        let scale = (w / 800.0).min(h / 600.0).max(0.5) * ctx.ui_scale;
+        let scale = (w / 800.0).min(h / 600.0).max(0.5);
 
         let mut frame = UiFrame::new();
 

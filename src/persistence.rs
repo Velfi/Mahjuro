@@ -315,8 +315,6 @@ pub struct AppSettings {
     /// After a discard, offer a one-step undo until any other action.
     #[serde(default)]
     pub discard_undo_enabled: bool,
-    #[serde(default = "default_ui_scale")]
-    pub ui_scale: f32,
     /// Per profile slot: `run_history.len()` last time the player opened Archive.
     /// Used for a subtle "new chronicle" hint on the main menu.
     #[serde(default = "default_archive_last_seen_run_len")]
@@ -332,9 +330,6 @@ fn default_true() -> bool {
 fn default_gamma() -> f32 {
     1.0
 }
-fn default_ui_scale() -> f32 {
-    1.0
-}
 
 fn default_archive_last_seen_run_len() -> [u32; 3] {
     [0, 0, 0]
@@ -343,10 +338,6 @@ fn default_archive_last_seen_run_len() -> [u32; 3] {
 /// Min/max for the user-facing gamma slider.
 pub const GAMMA_MIN: f32 = 0.5;
 pub const GAMMA_MAX: f32 = 2.0;
-
-/// Min/max for the user-facing UI scale slider.
-pub const UI_SCALE_MIN: f32 = 0.75;
-pub const UI_SCALE_MAX: f32 = 2.0;
 
 impl Default for AppSettings {
     fn default() -> Self {
@@ -372,7 +363,6 @@ impl Default for AppSettings {
             auto_cash_in_on_full_structure: true,
             hints_enabled: false,
             discard_undo_enabled: false,
-            ui_scale: 1.0,
             archive_last_seen_run_len: [0, 0, 0],
         }
     }

@@ -37,7 +37,7 @@ pub fn action_hud_world_z_py_nudge(layout_scale: f32) -> f32 {
 /// `(x, y, w, h)` layout rects and scalar anchors for the bottom HUD row.
 #[derive(Clone, Copy, Debug)]
 pub struct ActionBarLayout {
-    /// UI scale factor including [`crate::scenes::DrawCtx::ui_scale`].
+    /// Pixel scale from window size (`min / 600`).
     pub scale: f32,
     pub container_w: f32,
     pub container_x: f32,
@@ -82,7 +82,6 @@ pub fn compute_action_bar(
     layout: &LayoutResult,
     hand_slots: &[(f32, f32, f32, f32)],
     layout_scale: f32,
-    ui_scale: f32,
     structure: StructureStrip,
 ) -> ActionBarLayout {
     let StructureStrip {
@@ -91,7 +90,7 @@ pub fn compute_action_bar(
         tag_h: structure_tag_h,
         meld_h: structure_meld_h,
     } = structure;
-    let scale = (layout.window_w.min(layout.window_h)) / 600.0 * ui_scale;
+    let scale = layout_scale;
     let btn_w = (120.0 * layout_scale).max(60.0);
     let btn_h = (32.0 * layout_scale).max(20.0);
     let btn_gap = 12.0 * layout_scale;
@@ -201,7 +200,6 @@ pub fn compute_action_bar(
 pub fn compute_gameplay_hud_layout(
     layout: &LayoutResult,
     hand_slots: &[(f32, f32, f32, f32)],
-    ui_scale: f32,
     has_structure: bool,
     showcase_present: bool,
 ) -> GameplayHudLayout {
@@ -264,7 +262,6 @@ pub fn compute_gameplay_hud_layout(
         layout,
         hand_slots,
         layout_scale,
-        ui_scale,
         StructureStrip {
             has_structure,
             strip_top: structure_strip_top,

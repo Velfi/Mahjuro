@@ -159,8 +159,8 @@ impl TransitionPlaygroundScene {
         dt
     }
 
-    fn layout(w: f32, h: f32, ui_scale: f32) -> Layout {
-        let scale = theme::metrics::scene_scale(w, h, ui_scale);
+    fn layout(w: f32, h: f32) -> Layout {
+        let scale = theme::metrics::scene_scale(w, h);
         let panel_h = (172.0 * scale).clamp(136.0, h * 0.34);
         let panel_margin = (18.0 * scale).max(10.0);
         let panel = [
@@ -416,14 +416,13 @@ impl SceneBehavior for TransitionPlaygroundScene {
             return None;
         }
 
-        let layout = Self::layout(ctx.layout.window_w, ctx.layout.window_h, ctx.ui_scale);
+        let layout = Self::layout(ctx.layout.window_w, ctx.layout.window_h);
         let items = self.controls(&layout);
         let input = TreeInput {
             actions: ctx.actions,
             button_clicks: ctx.button_clicks,
             cursor_pos: ctx.cursor_pos,
             window: (ctx.layout.window_w, ctx.layout.window_h),
-            ui_scale: ctx.ui_scale,
             input_mode: ctx.input_mode,
             scroll_lines: ctx.scroll_lines,
         };
@@ -478,8 +477,7 @@ impl SceneBehavior for TransitionPlaygroundScene {
     fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
-        let ui_scale = ctx.ui_scale;
-        let layout = Self::layout(w, h, ui_scale);
+        let layout = Self::layout(w, h);
         let controls = self.controls(&layout);
         let focused = self.tree.focused();
 
@@ -497,7 +495,6 @@ impl SceneBehavior for TransitionPlaygroundScene {
                     scene,
                     pose,
                     self.preview_time,
-                    ui_scale,
                 );
             }
         }
@@ -523,7 +520,6 @@ impl SceneBehavior for TransitionPlaygroundScene {
             self.duration_secs,
             self.style,
             self.is_playing(),
-            ui_scale,
         );
 
         push_panel(
@@ -543,7 +539,6 @@ impl SceneBehavior for TransitionPlaygroundScene {
                 style: self.style,
                 is_playing: self.is_playing(),
             },
-            ui_scale,
         );
         self.tree
             .register_flat_buttons(&controls, &mut frame.buttons);
@@ -560,10 +555,9 @@ fn draw_top_banner(
     duration_secs: f32,
     style: TransitionStyle,
     is_playing: bool,
-    ui_scale: f32,
 ) {
     let [x, y, w, _] = viewport;
-    let scale = theme::metrics::scene_scale(w, viewport[3], ui_scale);
+    let scale = theme::metrics::scene_scale(w, viewport[3]);
     let badge = [
         x + 18.0 * scale,
         y + 18.0 * scale,
@@ -591,7 +585,7 @@ fn draw_top_banner(
             if is_playing { "playing" } else { "paused" }
         ),
         color: color::CHAMPAGNE,
-        font_px: Some(typography::size(typography::HEADING, viewport[3], ui_scale)),
+        font_px: Some(typography::size(typography::HEADING, viewport[3])),
         ..Default::default()
     });
     frame.text(TextLabel {
@@ -603,7 +597,7 @@ fn draw_top_banner(
         ],
         text: "Scene A lives at t=0. Scene B lives at t=1. Click the bars to scrub.".into(),
         color: color::STONE,
-        font_px: Some(typography::size(typography::CAPTION, viewport[3], ui_scale)),
+        font_px: Some(typography::size(typography::CAPTION, viewport[3])),
         ..Default::default()
     });
 }
@@ -624,7 +618,6 @@ fn draw_controls(
     controls: &[FlatItem<TransitionAction>],
     focused: Option<FocusId>,
     anim: PlaygroundAnim,
-    ui_scale: f32,
 ) {
     let PlaygroundAnim {
         progress,
@@ -632,7 +625,7 @@ fn draw_controls(
         style,
         is_playing,
     } = anim;
-    let scale = theme::metrics::scene_scale(layout.panel[2], layout.panel[3], ui_scale);
+    let scale = theme::metrics::scene_scale(layout.panel[2], layout.panel[3]);
 
     frame.text(TextLabel {
         rect: [
@@ -646,7 +639,6 @@ fn draw_controls(
         font_px: Some(typography::size(
             typography::HEADING,
             layout.panel[3],
-            ui_scale,
         )),
         ..Default::default()
     });
@@ -662,7 +654,6 @@ fn draw_controls(
         font_px: Some(typography::size(
             typography::CAPTION,
             layout.panel[3],
-            ui_scale,
         )),
         ..Default::default()
     });
@@ -678,7 +669,6 @@ fn draw_controls(
         font_px: Some(typography::size(
             typography::CAPTION,
             layout.panel[3],
-            ui_scale,
         )),
         ..Default::default()
     });
@@ -694,7 +684,6 @@ fn draw_controls(
                     format!("{:.0}%", progress * 100.0),
                     is_focus,
                     color::GOLD,
-                    ui_scale,
                 );
             }
             TransitionAction::DurationBar => {
@@ -708,7 +697,6 @@ fn draw_controls(
                     format!("{duration_secs:.2}s"),
                     is_focus,
                     color::JADE,
-                    ui_scale,
                 );
             }
             TransitionAction::StylePrev => {
@@ -718,7 +706,6 @@ fn draw_controls(
                     "<",
                     ButtonVariant::Subtle,
                     is_focus,
-                    ui_scale,
                 );
             }
             TransitionAction::StyleNext => {
@@ -728,7 +715,6 @@ fn draw_controls(
                     ">",
                     ButtonVariant::Subtle,
                     is_focus,
-                    ui_scale,
                 );
             }
             TransitionAction::PlayForward => {
@@ -738,7 +724,6 @@ fn draw_controls(
                     "Play A -> B",
                     ButtonVariant::Primary,
                     is_focus,
-                    ui_scale,
                 );
             }
             TransitionAction::PlayBackward => {
@@ -748,7 +733,6 @@ fn draw_controls(
                     "Play B -> A",
                     ButtonVariant::Default,
                     is_focus,
-                    ui_scale,
                 );
             }
             TransitionAction::TogglePlayback => {
@@ -758,7 +742,6 @@ fn draw_controls(
                     if is_playing { "Pause" } else { "Resume" },
                     ButtonVariant::Subtle,
                     is_focus,
-                    ui_scale,
                 );
             }
             TransitionAction::Back => {
@@ -768,7 +751,6 @@ fn draw_controls(
                     "Back",
                     ButtonVariant::Subtle,
                     is_focus,
-                    ui_scale,
                 );
             }
             TransitionAction::SnapA => {
@@ -778,7 +760,6 @@ fn draw_controls(
                     "Jump A",
                     ButtonVariant::Default,
                     is_focus,
-                    ui_scale,
                 );
             }
             TransitionAction::SnapB => {
@@ -788,7 +769,6 @@ fn draw_controls(
                     "Jump B",
                     ButtonVariant::Default,
                     is_focus,
-                    ui_scale,
                 );
             }
         }
@@ -807,7 +787,6 @@ fn draw_controls(
         font_px: Some(typography::size(
             typography::BODY,
             layout.panel[3],
-            ui_scale,
         )),
         ..Default::default()
     });
@@ -824,7 +803,6 @@ fn draw_controls(
         font_px: Some(typography::size(
             typography::MICRO,
             layout.panel[3],
-            ui_scale,
         )),
         ..Default::default()
     });
@@ -846,7 +824,6 @@ fn draw_button(
     label: &str,
     variant: ButtonVariant,
     focused: bool,
-    ui_scale: f32,
 ) {
     let state = if focused {
         ButtonState::Hover
@@ -856,14 +833,14 @@ fn draw_button(
     let colors = theme::button_colors(variant, state);
     push_panel(frame, rect, colors.bg, colors.border);
     if focused {
-        push_focus_outline(frame, rect, ui_scale);
+        push_focus_outline(frame, rect);
     }
     frame.text(TextLabel {
         rect,
         text: label.into(),
         color: colors.text,
         align: TextAlign::Center,
-        font_px: Some(typography::size(typography::BODY, rect[3] * 10.0, ui_scale)),
+        font_px: Some(typography::size(typography::BODY, rect[3] * 10.0)),
         ..Default::default()
     });
 }
@@ -875,7 +852,6 @@ fn draw_bar(
     value_label: String,
     focused: bool,
     fill: [f32; 4],
-    ui_scale: f32,
 ) {
     let colors = theme::button_colors(
         ButtonVariant::Default,
@@ -906,14 +882,14 @@ fn draw_bar(
         color: fill,
     });
     if focused {
-        push_focus_outline(frame, rect, ui_scale);
+        push_focus_outline(frame, rect);
     }
     frame.text(TextLabel {
         rect,
         text: value_label,
         color: color::PARCHMENT,
         align: TextAlign::Center,
-        font_px: Some(typography::size(typography::BODY, rect[3] * 10.0, ui_scale)),
+        font_px: Some(typography::size(typography::BODY, rect[3] * 10.0)),
         ..Default::default()
     });
 }
@@ -924,15 +900,14 @@ fn draw_demo_scene(
     kind: DemoSceneKind,
     pose: Pose,
     time: f32,
-    ui_scale: f32,
 ) {
     match kind {
-        DemoSceneKind::A => draw_scene_a(frame, viewport, pose, time, ui_scale),
-        DemoSceneKind::B => draw_scene_b(frame, viewport, pose, time, ui_scale),
+        DemoSceneKind::A => draw_scene_a(frame, viewport, pose, time),
+        DemoSceneKind::B => draw_scene_b(frame, viewport, pose, time),
     }
 }
 
-fn draw_scene_a(frame: &mut UiFrame, viewport: [f32; 4], pose: Pose, time: f32, ui_scale: f32) {
+fn draw_scene_a(frame: &mut UiFrame, viewport: [f32; 4], pose: Pose, time: f32) {
     let glow = time.sin() * 0.5 + 0.5;
     push_scene_panel(
         frame,
@@ -986,7 +961,7 @@ fn draw_scene_a(frame: &mut UiFrame, viewport: [f32; 4], pose: Pose, time: f32, 
         "Scene A — ember hall",
         LabelStyle {
             color_rgba: color::CHAMPAGNE,
-            font_px: typography::size(typography::TITLE, viewport[3], ui_scale),
+            font_px: typography::size(typography::TITLE, viewport[3]),
             align: TextAlign::Center,
         },
         pose,
@@ -998,7 +973,7 @@ fn draw_scene_a(frame: &mut UiFrame, viewport: [f32; 4], pose: Pose, time: f32, 
         "Warm, chunky shapes and strong contrast are useful for testing fades.",
         LabelStyle {
             color_rgba: color::PARCHMENT,
-            font_px: typography::size(typography::BODY, viewport[3], ui_scale),
+            font_px: typography::size(typography::BODY, viewport[3]),
             align: TextAlign::Left,
         },
         pose,
@@ -1010,7 +985,7 @@ fn draw_scene_a(frame: &mut UiFrame, viewport: [f32; 4], pose: Pose, time: f32, 
         "Queue",
         LabelStyle {
             color_rgba: color::AMBER,
-            font_px: typography::size(typography::CAPTION, viewport[3], ui_scale),
+            font_px: typography::size(typography::CAPTION, viewport[3]),
             align: TextAlign::Center,
         },
         pose,
@@ -1022,14 +997,14 @@ fn draw_scene_a(frame: &mut UiFrame, viewport: [f32; 4], pose: Pose, time: f32, 
         "Status",
         LabelStyle {
             color_rgba: color::STONE,
-            font_px: typography::size(typography::CAPTION, viewport[3], ui_scale),
+            font_px: typography::size(typography::CAPTION, viewport[3]),
             align: TextAlign::Center,
         },
         pose,
     );
 }
 
-fn draw_scene_b(frame: &mut UiFrame, viewport: [f32; 4], pose: Pose, time: f32, ui_scale: f32) {
+fn draw_scene_b(frame: &mut UiFrame, viewport: [f32; 4], pose: Pose, time: f32) {
     let wave = (time * 1.3).sin() * 0.5 + 0.5;
     push_scene_panel(
         frame,
@@ -1082,7 +1057,7 @@ fn draw_scene_b(frame: &mut UiFrame, viewport: [f32; 4], pose: Pose, time: f32, 
         "Scene B — tide terminal",
         LabelStyle {
             color_rgba: color::PARCHMENT,
-            font_px: typography::size(typography::TITLE, viewport[3], ui_scale),
+            font_px: typography::size(typography::TITLE, viewport[3]),
             align: TextAlign::Center,
         },
         pose,
@@ -1094,7 +1069,7 @@ fn draw_scene_b(frame: &mut UiFrame, viewport: [f32; 4], pose: Pose, time: f32, 
         "Cool hues, offset cards, and animated rows help reveal sliding transforms.",
         LabelStyle {
             color_rgba: color::STONE,
-            font_px: typography::size(typography::BODY, viewport[3], ui_scale),
+            font_px: typography::size(typography::BODY, viewport[3]),
             align: TextAlign::Left,
         },
         pose,
@@ -1106,7 +1081,7 @@ fn draw_scene_b(frame: &mut UiFrame, viewport: [f32; 4], pose: Pose, time: f32, 
         "Telemetry ribbon",
         LabelStyle {
             color_rgba: color::CHAMPAGNE,
-            font_px: typography::size(typography::CAPTION, viewport[3], ui_scale),
+            font_px: typography::size(typography::CAPTION, viewport[3]),
             align: TextAlign::Center,
         },
         pose,
@@ -1159,8 +1134,8 @@ fn push_panel(frame: &mut UiFrame, rect: [f32; 4], bg: [f32; 4], border: [f32; 4
     });
 }
 
-fn push_focus_outline(frame: &mut UiFrame, rect: [f32; 4], ui_scale: f32) {
-    let pad = (2.0 * ui_scale).clamp(2.0, 5.0);
+fn push_focus_outline(frame: &mut UiFrame, rect: [f32; 4]) {
+    let pad = (rect[3] * 0.12).clamp(2.0, 5.0);
     let outer = [
         rect[0] - pad,
         rect[1] - pad,

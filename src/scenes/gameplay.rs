@@ -674,7 +674,6 @@ impl GameplayScene {
         let hud_layout = compute_gameplay_hud_layout(
             layout,
             &hand_slots,
-            1.0,
             has_structure,
             has_structure || cascade_showcase.is_some(),
         );
@@ -696,7 +695,6 @@ impl GameplayScene {
         let hud_layout = compute_gameplay_hud_layout(
             layout,
             &hand_slots,
-            1.0,
             has_structure,
             has_structure || cascade_showcase.is_some(),
         );
@@ -730,7 +728,7 @@ impl GameplayScene {
         let has_structure = gameplay.has_structure;
         let showcase_present = has_structure || cascade_showcase.is_some();
         let hud_layout =
-            compute_gameplay_hud_layout(layout, &hand_slots, 1.0, has_structure, showcase_present);
+            compute_gameplay_hud_layout(layout, &hand_slots, has_structure, showcase_present);
         let ab = hud_layout.action_bar;
         let pad = (8.0 * layout_scale).max(6.0);
         let preview_pill_w = (22.0 * layout_scale).max(18.0);

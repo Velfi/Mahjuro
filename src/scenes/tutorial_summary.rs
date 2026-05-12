@@ -39,8 +39,8 @@ impl TutorialSummaryScene {
         }
     }
 
-    fn flat_items(&self, w: f32, h: f32, ui_scale: f32) -> Vec<FlatItem<SummaryAction>> {
-        let scale = (w / 800.0).min(h / 600.0).max(0.5) * ui_scale;
+    fn flat_items(&self, w: f32, h: f32) -> Vec<FlatItem<SummaryAction>> {
+        let scale = (w / 800.0).min(h / 600.0).max(0.5);
         let btn_w = (200.0 * scale).min(w * 0.38).max(140.0);
         let btn_h = (44.0 * scale).max(32.0);
         let gap = 16.0 * scale;
@@ -64,7 +64,7 @@ impl TutorialSummaryScene {
 
 impl SceneBehavior for TutorialSummaryScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
-        let items = self.flat_items(ctx.layout.window_w, ctx.layout.window_h, ctx.ui_scale);
+        let items = self.flat_items(ctx.layout.window_w, ctx.layout.window_h);
         let action = self.tree.update_flat(
             &items,
             TreeInput {
@@ -72,7 +72,6 @@ impl SceneBehavior for TutorialSummaryScene {
                 button_clicks: ctx.button_clicks,
                 cursor_pos: ctx.cursor_pos,
                 window: (ctx.layout.window_w, ctx.layout.window_h),
-                ui_scale: ctx.ui_scale,
                 input_mode: ctx.input_mode,
                 scroll_lines: 0.0,
             },
@@ -101,7 +100,7 @@ impl SceneBehavior for TutorialSummaryScene {
     fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
-        let scale = (w / 800.0).min(h / 600.0).max(0.5) * ctx.ui_scale;
+        let scale = (w / 800.0).min(h / 600.0).max(0.5);
         let mut texts = Vec::new();
 
         let title = if self.won {
@@ -178,7 +177,7 @@ impl SceneBehavior for TutorialSummaryScene {
         let subtitle_x = card_x + 34.0 * scale;
         let subtitle_y = card_y + 78.0 * scale;
         let subtitle_w = card_w - 68.0 * scale;
-        let subtitle_font = typography::size(typography::BODY, h, ctx.ui_scale).max(16.0);
+        let subtitle_font = typography::size(typography::BODY, h).max(16.0);
         let subtitle_lines = widget::wrap_text(subtitle, subtitle_w, subtitle_font);
         let subtitle_h = subtitle_lines.len().max(1) as f32 * subtitle_font * 1.3;
         widget::push_text_block(
@@ -192,14 +191,13 @@ impl SceneBehavior for TutorialSummaryScene {
                 align: TextAlign::Center,
             },
             h,
-            ctx.ui_scale,
         );
 
         let mut bullet_y = subtitle_y + subtitle_h + 20.0 * scale;
         for bullet in bullets {
             let bullet_text = format!("• {bullet}");
             let bullet_w = card_w - 72.0 * scale;
-            let bullet_font = typography::size(typography::BODY, h, ctx.ui_scale).max(15.0);
+            let bullet_font = typography::size(typography::BODY, h).max(15.0);
             let bullet_lines = widget::wrap_text(&bullet_text, bullet_w, bullet_font);
             let bullet_h = bullet_lines.len().max(1) as f32 * bullet_font * 1.25;
             widget::push_text_block(
@@ -213,7 +211,6 @@ impl SceneBehavior for TutorialSummaryScene {
                     align: TextAlign::Left,
                 },
                 h,
-                ctx.ui_scale,
             );
             bullet_y += bullet_h + 10.0 * scale;
         }
@@ -232,7 +229,7 @@ impl SceneBehavior for TutorialSummaryScene {
             ..Default::default()
         });
 
-        let items = self.flat_items(w, h, ctx.ui_scale);
+        let items = self.flat_items(w, h);
         use crate::render::theme::{ButtonState, ButtonVariant};
         use crate::ui::input::UiAction;
         let mut btn_quads = Vec::new();

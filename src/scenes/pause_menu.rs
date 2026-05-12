@@ -104,12 +104,12 @@ impl PauseMenu {
         self.options_overlay.as_ref()
     }
 
-    fn build_tree(&self, window_w: f32, window_h: f32, ui_scale: f32) -> Tree<PauseAction> {
-        let scale = metrics::scene_scale(window_w, window_h, ui_scale);
+    fn build_tree(&self, window_w: f32, window_h: f32) -> Tree<PauseAction> {
+        let scale = metrics::scene_scale(window_w, window_h);
         let btn_w = (220.0 * scale).min(window_w * 0.55);
         let btn_gap = (12.0 * scale).max(6.0);
         let count = 6_f32;
-        let title_h = typography::size(typography::TITLE, window_h, ui_scale);
+        let title_h = typography::size(typography::TITLE, window_h);
         let title_gap = (24.0 * scale).max(10.0);
         // Cap button height so the full menu fits on screen.
         let max_menu_h = window_h * 0.88 - title_h - title_gap;
@@ -204,7 +204,6 @@ impl PauseMenu {
                 crate::ui::layout::ViewportCtx {
                     window_w: ctx.layout.window_w,
                     window_h: ctx.layout.window_h,
-                    ui_scale: ctx.ui_scale,
                 },
                 ctx.active_profile,
             );
@@ -249,7 +248,6 @@ impl PauseMenu {
         let crate::ui::layout::ViewportCtx {
             window_w,
             window_h,
-            ui_scale,
         } = viewport;
         // If the options sub-overlay is open, all input goes to it. When it
         // signals close, drop back to the pause root rather than resuming
@@ -302,7 +300,7 @@ impl PauseMenu {
             }
         }
 
-        let tree = self.build_tree(window_w, window_h, ui_scale);
+        let tree = self.build_tree(window_w, window_h);
         let action = self.tree.update(
             &tree,
             TreeInput {
@@ -310,7 +308,6 @@ impl PauseMenu {
                 button_clicks,
                 cursor_pos,
                 window: (window_w, window_h),
-                ui_scale,
                 input_mode,
                 scroll_lines: 0.0,
             },
@@ -381,7 +378,6 @@ impl PauseMenu {
         let crate::ui::layout::ViewportCtx {
             window_w,
             window_h,
-            ui_scale,
         } = viewport;
         if !self.paused {
             return;
@@ -403,7 +399,7 @@ impl PauseMenu {
         // Title — gold serif, centered just above the menu block.
         let btn_gap = (12.0 * scale).max(6.0);
         let count = 5.0;
-        let title_h = typography::size(typography::TITLE, window_h, ui_scale);
+        let title_h = typography::size(typography::TITLE, window_h);
         let title_gap = (24.0 * scale).max(10.0);
         let max_menu_h = window_h * 0.88 - title_h - title_gap;
         let btn_h = (44.0 * scale)
@@ -420,7 +416,7 @@ impl PauseMenu {
         });
 
         // Menu via the widget tree.
-        let tree = self.build_tree(window_w, window_h, ui_scale);
+        let tree = self.build_tree(window_w, window_h);
         let mut frame = TreeFrame {
             instances,
             labels: text_labels,

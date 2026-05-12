@@ -9,7 +9,7 @@
 
 use crate::render::draw_cmd::{CameraParams, Object3d, Object3dKind, UiFrame};
 use crate::render::lit_mesh::{MaterialKind, MaterialParams};
-use crate::render::theme::{color, typography};
+use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::ui::input::UiAction;
 
@@ -57,8 +57,7 @@ impl SceneBehavior for MaterialViewerScene {
     fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
-        let ui_scale = ctx.ui_scale;
-        let scale = (w.min(h)) / 600.0 * ui_scale;
+        let scale = metrics::scene_scale(w, h);
 
         let mut frame = UiFrame::new();
         frame.background(BackgroundId::Black);
@@ -76,7 +75,7 @@ impl SceneBehavior for MaterialViewerScene {
         });
 
         // ── Title ─────────────────────────────────────────────────
-        let title_font = typography::size(typography::TITLE, h, ui_scale).max(24.0);
+        let title_font = typography::size(typography::TITLE, h).max(24.0);
         let title_h = title_font * 1.6;
         let title_y = h * 0.04;
         frame.text(TextLabel {
@@ -106,7 +105,7 @@ impl SceneBehavior for MaterialViewerScene {
         // Orb diameter sized to a comfortable fraction of cell width; caption
         // sits under the orb in pixel space.
         let orb_diameter = (cell_w.min(cell_h) * 0.62).max(40.0);
-        let label_font = typography::size(typography::CAPTION, h, ui_scale).max(12.0);
+        let label_font = typography::size(typography::CAPTION, h).max(12.0);
         let label_h = label_font * 1.3;
 
         // Lights arranged above the grid so every orb gets similar illumination.
@@ -154,7 +153,7 @@ impl SceneBehavior for MaterialViewerScene {
         frame.object3d_batch(orbs);
 
         // ── Back button ───────────────────────────────────────────
-        let btn_font = typography::size(typography::BODY, h, ui_scale).max(16.0);
+        let btn_font = typography::size(typography::BODY, h).max(16.0);
         let btn_h = (44.0 * scale).max(32.0);
         let btn_w = (160.0 * scale).max(100.0);
         let btn_y = h * 0.91;

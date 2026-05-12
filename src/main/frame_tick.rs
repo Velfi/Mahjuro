@@ -488,7 +488,7 @@ impl App {
                     self.mouse_left_down,
                 )
             });
-            let close = overlay.update(&actions, mouse, ww, wh, self.gfx.ui_scale);
+            let close = overlay.update(&actions, mouse, ww, wh);
             self.mouse_clicked = false;
             self.debug.shop_env_height_scale = overlay.height_scale;
             self.debug.shop_env_lighting = overlay.lighting;
@@ -662,7 +662,6 @@ impl App {
                     .unwrap_or(crate::ui::input::InputMode::Cursor),
                 picked_hand_tile: picked_hand_tile_for_update,
                 scroll_lines,
-                ui_scale: self.gfx.ui_scale,
                 tutorial_eligible: self.progress.runs_completed == 0
                     && !self.progress.tutorial_completed,
                 multiple_materials: self.progress.plastic_unlocked(),
@@ -732,7 +731,6 @@ impl App {
                         .unwrap_or(crate::ui::input::InputMode::Cursor),
                     picked_hand_tile: picked_hand_tile_for_update,
                     scroll_lines,
-                    ui_scale: self.gfx.ui_scale,
                     tutorial_eligible: self.progress.runs_completed == 0
                         && !self.progress.tutorial_completed,
                     multiple_materials: self.progress.plastic_unlocked(),
@@ -900,7 +898,6 @@ impl App {
             self.gfx.shadows_enabled = opts.shadows_enabled;
             self.gfx.ssr_enabled = opts.ssr_enabled;
             self.gfx.hdr_enabled = opts.hdr_enabled;
-            self.gfx.ui_scale = opts.ui_scale;
             self.run
                 .set_auto_cash_in_on_full_structure(opts.auto_cash_in_on_full_structure);
             self.run.set_hints_enabled(opts.hints_enabled);

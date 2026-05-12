@@ -6,6 +6,7 @@ use crate::audio;
 use crate::game::cascade::CascadeTuning;
 use crate::game::volumetric_tuning::VolumetricTuning;
 use crate::render::draw_cmd::CameraParams;
+use crate::render::theme::metrics;
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::ui::input::UiAction;
 use sdl3::keyboard::Scancode;
@@ -95,9 +96,8 @@ impl DebugVisibilityOverlay {
         &self,
         window_w: f32,
         window_h: f32,
-        ui_scale: f32,
     ) -> (Vec<GpuInstance>, Vec<TextLabel>) {
-        let scale = (window_w.min(window_h)) / 600.0 * ui_scale;
+        let scale = metrics::scene_scale(window_w, window_h);
         let mut instances = Vec::new();
         let mut labels = Vec::new();
 
@@ -297,9 +297,8 @@ impl TuningOverlay {
         &self,
         window_w: f32,
         window_h: f32,
-        ui_scale: f32,
     ) -> (Vec<GpuInstance>, Vec<TextLabel>) {
-        let scale = (window_w.min(window_h)) / 600.0 * ui_scale;
+        let scale = metrics::scene_scale(window_w, window_h);
         let mut instances = Vec::new();
         let mut labels = Vec::new();
 
@@ -679,9 +678,8 @@ impl SfxTestOverlay {
         &mut self,
         window_w: f32,
         window_h: f32,
-        ui_scale: f32,
     ) -> (Vec<GpuInstance>, Vec<TextLabel>) {
-        let scale = (window_w.min(window_h)) / 600.0 * ui_scale;
+        let scale = metrics::scene_scale(window_w, window_h);
         let mut instances = Vec::new();
         let mut labels = Vec::new();
 
@@ -913,9 +911,8 @@ impl CameraDebugOverlay {
         &self,
         window_w: f32,
         window_h: f32,
-        ui_scale: f32,
     ) -> (Vec<GpuInstance>, Vec<TextLabel>) {
-        let scale = (window_w.min(window_h)) / 600.0 * ui_scale;
+        let scale = metrics::scene_scale(window_w, window_h);
         let mut instances = Vec::new();
         let mut labels = Vec::new();
 
@@ -1044,8 +1041,8 @@ struct ShopEnvDebugLayout {
 }
 
 impl ShopEnvDebugLayout {
-    fn compute(window_w: f32, window_h: f32, ui_scale: f32, row_count: usize) -> Self {
-        let scale = (window_w.min(window_h)) / 600.0 * ui_scale;
+    fn compute(window_w: f32, window_h: f32, row_count: usize) -> Self {
+        let scale = metrics::scene_scale(window_w, window_h);
         let row_h = (22.0 * scale).max(16.0);
         let row_gap = (3.0 * scale).max(2.0);
         let title_h = (24.0 * scale).max(16.0);
@@ -1334,9 +1331,8 @@ impl ShopEnvDebugOverlay {
         mouse: Option<(f32, f32, bool, bool)>,
         window_w: f32,
         window_h: f32,
-        ui_scale: f32,
     ) -> bool {
-        let layout = ShopEnvDebugLayout::compute(window_w, window_h, ui_scale, self.row_count());
+        let layout = ShopEnvDebugLayout::compute(window_w, window_h, self.row_count());
         let n = self.row_count();
 
         if let Some((mx, my, clicked, held)) = mouse {
@@ -1435,9 +1431,8 @@ impl ShopEnvDebugOverlay {
         &self,
         window_w: f32,
         window_h: f32,
-        ui_scale: f32,
     ) -> (Vec<GpuInstance>, Vec<TextLabel>) {
-        let layout = ShopEnvDebugLayout::compute(window_w, window_h, ui_scale, self.row_count());
+        let layout = ShopEnvDebugLayout::compute(window_w, window_h, self.row_count());
         let mut instances = Vec::new();
         let mut labels = Vec::new();
 
@@ -1709,9 +1704,8 @@ impl VolumetricDebugOverlay {
         &self,
         window_w: f32,
         window_h: f32,
-        ui_scale: f32,
     ) -> (Vec<GpuInstance>, Vec<TextLabel>) {
-        let scale = (window_w.min(window_h)) / 600.0 * ui_scale;
+        let scale = metrics::scene_scale(window_w, window_h);
         let mut instances = Vec::new();
         let mut labels = Vec::new();
 

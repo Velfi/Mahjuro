@@ -608,7 +608,7 @@ fn resolve_shop_orbit_target_for_draw(
 
 /// Bottom control hint for isolated shop inspect (pushed after flavor so it composites on top).
 fn push_shop_inspect_overlay_chrome(out: &mut Vec<TextLabel>, ctx: &DrawCtx<'_>, w: f32, h: f32) {
-    let hint_font = typography::size(typography::CAPTION, h, ctx.ui_scale);
+    let hint_font = typography::size(typography::CAPTION, h);
     let hint_h = (hint_font / 0.55).ceil();
     let hint_y = h - hint_h - h * 0.02;
     let surface = match ctx.input_mode {
@@ -693,7 +693,7 @@ pub(crate) fn render_shop_inspect_isolated_frame(
                 .get(i.saturating_sub(n_sale))
                 .and_then(|rid| all_relic_defs().iter().find(|d| d.id == *rid))
         };
-        let hint_font = typography::size(typography::CAPTION, h, ctx.ui_scale);
+        let hint_font = typography::size(typography::CAPTION, h);
         let hint_h = (hint_font / 0.55).ceil().max(20.0);
         let reserve_bottom = hint_h + h * 0.04;
         if let Some(d) = def_opt.filter(|d| !d.flavor.is_empty()) {
@@ -701,7 +701,6 @@ pub(crate) fn render_shop_inspect_isolated_frame(
                 &mut overlay_texts,
                 w,
                 h,
-                ctx.ui_scale,
                 d.flavor,
                 reserve_bottom,
             );
@@ -717,12 +716,11 @@ pub(crate) fn render_shop_inspect_isolated_frame(
 pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
     let w = ctx.layout.window_w;
     let h = ctx.layout.window_h;
-    let ui_scale = ctx.ui_scale;
     let env_h = ctx.shop_env_height_scale;
     shop.drawn_env_height_scale.set(env_h);
     let shop_rm = GameEngine::read_shop(ctx.run);
 
-    let scale = metrics::scene_scale(w, h, ui_scale);
+    let scale = metrics::scene_scale(w, h);
 
     let mut frame = UiFrame::new();
     frame.quad(GpuInstance {
@@ -1015,7 +1013,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
         frame.object3d_batch(bugs);
     }
 
-    let credits_font_px = typography::size(typography::BODY, h, ui_scale).max(18.0) * 2.0;
+    let credits_font_px = typography::size(typography::BODY, h).max(18.0) * 2.0;
     let gold_text = format!("{}g", shop_rm.display_gold);
     let h_px = credits_font_px.max(1.0).round().max(1.0) as u32;
     let (credits_rw, credits_rh) = if let Some(ref font) = load_ui_font() {
@@ -1094,7 +1092,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                     && item.price == 0
                 {
                     let r = shop_shelf_slot_rect(w, h, &cam, slot_i, env_h);
-                    push_free_badge(&mut free_quads, &mut free_texts, r, h, ui_scale);
+                    push_free_badge(&mut free_quads, &mut free_texts, r, h);
                 }
             }
         }
@@ -1134,7 +1132,6 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
             &mut tip_texts,
             w,
             h,
-            ui_scale,
             tooltip_anchor,
             title,
             desc,
@@ -1157,7 +1154,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                     .and_then(|rid| all_relic_defs().iter().find(|d| d.id == *rid))
             };
             if let Some(d) = def_opt.filter(|d| !d.flavor.is_empty()) {
-                push_floating_relic_flavor_labels(&mut tip_texts, w, h, ui_scale, d.flavor, 0.0);
+                push_floating_relic_flavor_labels(&mut tip_texts, w, h, d.flavor, 0.0);
             }
         }
         frame.quads(tip_quads);
@@ -1227,7 +1224,6 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
             ctx.picked_gameplay_object,
             ctx.picked_shop_object,
             ctx.debug_visibility,
-            ctx.ui_scale,
             ctx.modal_active,
             ctx.arrange_preview.clone(),
             ctx.shop_env_height_scale,
@@ -1261,7 +1257,6 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
             crate::ui::layout::ViewportCtx {
                 window_w: w,
                 window_h: h,
-                ui_scale,
             },
             scale,
             &mut pause_quads,
@@ -1321,7 +1316,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
         let inner_right = x + bw * 0.98;
         let inner_w = (inner_right - inner_left).max(8.0);
 
-        let font_px = typography::size(typography::CAPTION, h, ui_scale).max(14.0);
+        let font_px = typography::size(typography::CAPTION, h).max(14.0);
         let legend_font_px = font_px * 2.0;
 
         // Primary row: four equal columns, each `[icon][label]` for Exit → Select → Sell → Inspect.

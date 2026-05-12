@@ -20,15 +20,11 @@ pub struct Rect {
     pub h: f32,
 }
 
-/// Window + UI scale context: the three values widget helpers need to lay
-/// out a frame (window dimensions + the player's UI-scale preference).
-/// Passing one `ViewportCtx` keeps call sites compact and makes it obvious
-/// which floats move together.
+/// Window dimensions for widget layout helpers.
 #[derive(Clone, Copy, Debug)]
 pub struct ViewportCtx {
     pub window_w: f32,
     pub window_h: f32,
-    pub ui_scale: f32,
 }
 
 /// Solved UI layout for one frame.

@@ -467,10 +467,10 @@ impl ModalQueue {
     /// Generate GPU instances, text labels, 3D relic placements, and buttons
     /// for the active modal.
     /// Returns `None` if no modal is active.
-    pub fn draw(&self, window_w: f32, window_h: f32, ui_scale: f32) -> Option<ModalDrawOutput> {
+    pub fn draw(&self, window_w: f32, window_h: f32) -> Option<ModalDrawOutput> {
         let modal = self.queue.first()?;
         let alpha = modal.opacity();
-        let scale = (window_w.min(window_h)) / 600.0 * ui_scale;
+        let scale = (window_w.min(window_h)) / 600.0;
 
         let mut instances = Vec::new();
         let mut labels = Vec::new();
@@ -489,7 +489,6 @@ impl ModalQueue {
             let (pag_i, pag_l, pag_r, mut pag_g) = modal_paginated_unlock_layer_vecs(
                 modal,
                 alpha,
-                ui_scale,
                 window_w,
                 window_h,
             );
@@ -534,11 +533,12 @@ impl ModalQueue {
         labels: &mut Vec<TextLabel>,
     ) {
         let (window_w, window_h) = window;
+        let text_floor = crate::render::theme::typography::readable_floor_px(window_h);
         let card_w = (360.0 * scale).min(window_w * 0.8);
-        let title_h = (48.0 * scale).max(28.0);
-        let dismiss_h = (28.0 * scale).max(18.0);
+        let title_h = (48.0 * scale).max(28.0).max(text_floor * 1.35);
+        let dismiss_h = (28.0 * scale).max(18.0).max(text_floor * 1.15);
         let padding = (20.0 * scale).max(10.0);
-        let body_font = (18.0 * scale).max(14.0);
+        let body_font = (18.0 * scale).max(14.0).max(text_floor);
         let body_inner_w = card_w - padding * 2.0;
         let wrapped = wrap_text(&modal.body, body_inner_w, body_font);
         let body_line_step = body_font * 1.4;
@@ -581,7 +581,7 @@ impl ModalQueue {
             rect: [card_x + padding, title_y, card_w - padding * 2.0, title_h],
             text: modal.title.clone(),
             color: [tr, tg, tb, ta * alpha],
-            font_px: Some(title_h * 0.65),
+            font_px: Some((title_h * 0.65).max(text_floor)),
             ..Default::default()
         });
 
@@ -610,7 +610,7 @@ impl ModalQueue {
                 let [r, g, b, a] = crate::render::theme::color::UMBER;
                 [r, g, b, a * 0.8 * alpha]
             },
-            font_px: Some((14.0 * scale).max(12.0)),
+            font_px: Some((14.0 * scale).max(12.0).max(text_floor)),
             ..Default::default()
         });
     }
@@ -634,6 +634,7 @@ fn draw_modal_paginated_unlock(
             gradient_quads,
         } = out;
         let (window_w, window_h) = window;
+        let text_floor = crate::render::theme::typography::readable_floor_px(window_h);
         let page = &modal.pages[modal.current_page];
 
         // ── Vignette (cinematic letterbox) ───────────────────────────
@@ -742,10 +743,10 @@ fn draw_modal_paginated_unlock(
         // ── Type column ──────────────────────────────────────────────
         // All sizes scale against `base` (smaller window dim) so the
         // hierarchy holds at any resolution.
-        let category_font = (base * 0.024).max(20.0);
+        let category_font = (base * 0.024).max(20.0).max(text_floor);
         let name_font = (base * 0.072).max(48.0);
-        let desc_font = (base * 0.030).max(24.0);
-        let nav_font = (base * 0.022).max(18.0);
+        let desc_font = (base * 0.030).max(text_floor);
+        let nav_font = (base * 0.022).max(text_floor);
 
         // Category placard ("New Relic" / "New Rule") — sits above the
         // relic, slate tone, smaller. Reads as a museum label.
@@ -820,7 +821,6 @@ fn draw_modal_paginated_unlock(
 pub(crate) fn modal_paginated_unlock_layer_vecs(
     modal: &Modal,
     alpha: f32,
-    ui_scale: f32,
     window_w: f32,
     window_h: f32,
 ) -> (
@@ -829,7 +829,7 @@ pub(crate) fn modal_paginated_unlock_layer_vecs(
     Vec<Object3d>,
     Vec<GradientQuadInstance>,
 ) {
-    let scale = (window_w.min(window_h)) / 600.0 * ui_scale;
+    let scale = (window_w.min(window_h)) / 600.0;
     let mut instances = Vec::new();
     let mut labels = Vec::new();
     let mut relic_objects = Vec::new();

@@ -323,7 +323,6 @@ impl App {
                 shadows_enabled: settings.shadows_enabled,
                 ssr_enabled: settings.ssr_enabled,
                 hdr_enabled: settings.hdr_enabled,
-                ui_scale: settings.ui_scale,
             },
             // Default: cheap baseline; see `effect_layers.rs`. Use `FULL` or flip
             // flags to restore shadows, SSR, particles, transition FX, HDR, etc.

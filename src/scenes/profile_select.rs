@@ -77,10 +77,10 @@ impl ProfileSelectScene {
 
     /// Single source of truth for profile card layout — used by both
     /// `update()` (hit-test) and `draw()` (rendering + button registration).
-    fn card_rects(window_w: f32, window_h: f32, ui_scale: f32) -> Vec<[f32; 4]> {
+    fn card_rects(window_w: f32, window_h: f32) -> Vec<[f32; 4]> {
         let w = window_w;
         let h = window_h;
-        let scale = (w.min(h)) / 600.0 * ui_scale;
+        let scale = (w.min(h)) / 600.0;
         let title_h = (48.0 * scale).max(28.0);
         let title_y = h * 0.06;
         let card_w = (260.0 * scale).min(w * 0.8);
@@ -101,8 +101,8 @@ impl ProfileSelectScene {
             .collect()
     }
 
-    fn flat_items(window_w: f32, window_h: f32, ui_scale: f32) -> Vec<FlatItem<PickProfile>> {
-        Self::card_rects(window_w, window_h, ui_scale)
+    fn flat_items(window_w: f32, window_h: f32) -> Vec<FlatItem<PickProfile>> {
+        Self::card_rects(window_w, window_h)
             .into_iter()
             .enumerate()
             .map(|(i, rect)| FlatItem::new(FocusId(i as u32), rect, PickProfile(i)))
@@ -132,7 +132,7 @@ impl SceneBehavior for ProfileSelectScene {
         }
 
         // ── Normal profile selection ───────────────────────────────────
-        let items = Self::flat_items(ctx.layout.window_w, ctx.layout.window_h, ctx.ui_scale);
+        let items = Self::flat_items(ctx.layout.window_w, ctx.layout.window_h);
         let action = self.tree.update_flat(
             &items,
             TreeInput {
@@ -140,7 +140,6 @@ impl SceneBehavior for ProfileSelectScene {
                 button_clicks: ctx.button_clicks,
                 cursor_pos: ctx.cursor_pos,
                 window: (ctx.layout.window_w, ctx.layout.window_h),
-                ui_scale: ctx.ui_scale,
                 input_mode: ctx.input_mode,
                 scroll_lines: 0.0,
             },
@@ -174,7 +173,7 @@ impl SceneBehavior for ProfileSelectScene {
     fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
-        let scale = (w.min(h)) / 600.0 * ctx.ui_scale;
+        let scale = (w.min(h)) / 600.0;
 
         let mut frame = UiFrame::new();
         let mut buttons = Vec::new();
@@ -204,7 +203,7 @@ impl SceneBehavior for ProfileSelectScene {
 
         // Profile cards — single source of truth via card_rects().
         let summaries = persistence::all_profile_summaries();
-        let card_rects = Self::card_rects(w, h, ctx.ui_scale);
+        let card_rects = Self::card_rects(w, h);
         let cursor = self.cursor();
 
         for (i, summary) in summaries.iter().enumerate() {
@@ -330,7 +329,7 @@ impl SceneBehavior for ProfileSelectScene {
         }
 
         // Single hit-target list shared with update() — no layout drift.
-        let items = Self::flat_items(w, h, ctx.ui_scale);
+        let items = Self::flat_items(w, h);
         self.tree.register_flat_buttons(&items, &mut buttons);
 
         // ── Confirmation overlay ───────────────────────────────────────

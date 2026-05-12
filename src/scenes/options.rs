@@ -25,8 +25,6 @@ use super::{ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx
 const VOL_STEP: f32 = 0.05;
 /// Gamma adjustment step per input press.
 const GAMMA_STEP: f32 = 0.05;
-/// UI scale adjustment step per input press.
-const UI_SCALE_STEP: f32 = 0.05;
 
 /// Click-id base for TOC links (high range to avoid collisions).
 const TOC_ID_BASE: u32 = 0xF200;
@@ -80,7 +78,6 @@ enum Row {
     Tile,
     Tileset,
     Surface,
-    UiScale,
     Shadows,
     Ssr,
     Hdr,
@@ -107,7 +104,7 @@ impl Row {
     fn is_slider(self) -> bool {
         matches!(
             self,
-            Row::Master | Row::Music | Row::Sfx | Row::Gamma | Row::UiScale
+            Row::Master | Row::Music | Row::Sfx | Row::Gamma
         )
     }
 }
@@ -123,7 +120,6 @@ const ROWS: &[Row] = &[
     Row::Tile,
     Row::Tileset,
     Row::Surface,
-    Row::UiScale,
     Row::Shadows,
     Row::Ssr,
     Row::Hdr,
@@ -158,7 +154,6 @@ const CONTENT: &[ContentSlot] = &[
     ContentSlot::Row(Row::Tile),
     ContentSlot::Row(Row::Tileset),
     ContentSlot::Row(Row::Surface),
-    ContentSlot::Row(Row::UiScale),
     ContentSlot::Header(Section::Rendering),
     ContentSlot::Row(Row::Shadows),
     ContentSlot::Row(Row::Ssr),
@@ -234,8 +229,8 @@ struct PanelLayout {
     hint_h: f32,
 }
 
-fn compute_layout(w: f32, h: f32, ui_scale: f32) -> PanelLayout {
-    let scale = (w.min(h)) / 600.0 * ui_scale;
+fn compute_layout(w: f32, h: f32) -> PanelLayout {
+    let scale = (w.min(h)) / 600.0;
 
     let title_h = (48.0 * scale).max(28.0);
     let title_y = h * 0.06;
@@ -334,7 +329,6 @@ pub struct OptionsScene {
     pub auto_cash_in_on_full_structure: bool,
     pub hints_enabled: bool,
     pub discard_undo_enabled: bool,
-    pub ui_scale: f32,
 }
 
 impl OptionsScene {
@@ -380,7 +374,6 @@ impl OptionsScene {
             auto_cash_in_on_full_structure: settings.auto_cash_in_on_full_structure,
             hints_enabled: settings.hints_enabled,
             discard_undo_enabled: settings.discard_undo_enabled,
-            ui_scale: settings.ui_scale,
         }
     }
 
@@ -427,7 +420,6 @@ impl OptionsScene {
         settings.auto_cash_in_on_full_structure = self.auto_cash_in_on_full_structure;
         settings.hints_enabled = self.hints_enabled;
         settings.discard_undo_enabled = self.discard_undo_enabled;
-        settings.ui_scale = self.ui_scale;
         let _ = crate::persistence::save_settings(&settings);
     }
 
@@ -469,11 +461,6 @@ impl OptionsScene {
                 crate::persistence::GAMMA_MAX,
                 GAMMA_STEP,
             ),
-            Row::UiScale => (
-                crate::persistence::UI_SCALE_MIN,
-                crate::persistence::UI_SCALE_MAX,
-                UI_SCALE_STEP,
-            ),
             _ => (0.0, 1.0, VOL_STEP),
         }
     }
@@ -484,7 +471,6 @@ impl OptionsScene {
             Row::Music => self.music_volume,
             Row::Sfx => self.sfx_volume,
             Row::Gamma => self.gamma,
-            Row::UiScale => self.ui_scale,
             _ => return None,
         })
     }
@@ -498,7 +484,6 @@ impl OptionsScene {
             Row::Music => self.music_volume = clamped,
             Row::Sfx => self.sfx_volume = clamped,
             Row::Gamma => self.gamma = clamped,
-            Row::UiScale => self.ui_scale = clamped,
             _ => {}
         }
     }
@@ -594,7 +579,7 @@ impl OptionsScene {
     /// Apply a click/confirm on a row. Returns true if the scene should close.
     fn apply_click(&mut self, row: Row, layout: &PanelLayout, cursor_pos: (f32, f32)) -> bool {
         match row {
-            Row::Master | Row::Music | Row::Sfx | Row::Gamma | Row::UiScale => {
+            Row::Master | Row::Music | Row::Sfx | Row::Gamma => {
                 // Click-to-position on the slider track.
                 let cx = cursor_pos.0;
                 let label_w = layout.content_w * 0.35;
@@ -694,7 +679,7 @@ impl OptionsScene {
         self.focus_changed = false;
         self.confirm_requested = false;
         self.cancel_requested = false;
-        let layout = compute_layout(window_w, window_h, self.ui_scale);
+        let layout = compute_layout(window_w, window_h);
         self.sync_scroll(&layout);
         let prev_focus = (self.focused, self.back_focused);
 
@@ -847,7 +832,7 @@ impl OptionsScene {
         text_labels: &mut Vec<TextLabel>,
         buttons: &mut Vec<ButtonDef>,
     ) {
-        let layout = compute_layout(w, h, self.ui_scale);
+        let layout = compute_layout(w, h);
         self.sync_scroll(&layout);
 
         // ── Title ──────────────────────────────────────────────────────
@@ -1028,7 +1013,7 @@ impl OptionsScene {
         let scale = (row_h / 40.0).max(0.5);
 
         match row {
-            Row::Master | Row::Music | Row::Sfx | Row::Gamma | Row::UiScale => {
+            Row::Master | Row::Music | Row::Sfx | Row::Gamma => {
                 let value = self.slider_value(row).unwrap_or(0.0);
                 let (lo, hi, _) = Self::slider_range(row);
                 let fill_ratio = ((value - lo) / (hi - lo)).clamp(0.0, 1.0);
@@ -1037,7 +1022,6 @@ impl OptionsScene {
                     Row::Music => "Music Volume",
                     Row::Sfx => "SFX Volume",
                     Row::Gamma => "Gamma",
-                    Row::UiScale => "UI Scale",
                     _ => unreachable!(),
                 };
 
@@ -1095,7 +1079,6 @@ impl OptionsScene {
                 });
                 let readout = match row {
                     Row::Gamma => format!("{:.2}", value),
-                    Row::UiScale => format!("{:.0}%", value * 100.0),
                     _ => format!("{}%", (value * 100.0).round() as u32),
                 };
                 text_labels.push(TextLabel {
