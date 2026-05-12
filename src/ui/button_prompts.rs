@@ -26,6 +26,12 @@ impl GamepadStyle {
                 0x045E => return Self::Xbox,        // Microsoft
                 0x054C => return Self::PlayStation, // Sony
                 0x057E => return Self::Nintendo,    // Nintendo
+                // Valve (Steam Deck built-in pads, Steam Controller). Buttons
+                // are physically labelled ABXY in the Xbox layout, so route to
+                // the Generic family — which already prints Xbox-positional
+                // glyphs from the static atlas. (When Steam Input is live, the
+                // glyph resolver overrides this with Steam's own art.)
+                0x28DE => return Self::Generic,
                 _ => {}
             }
         }
@@ -68,7 +74,7 @@ impl GamepadStyle {
 
 /// Physical face positions in the SDL **semantic** layout (south =
 /// bottom, etc.), not vendor paint. Test-only; runtime glyphs come from
-/// Steam Input (see [`crate::steam::SteamInputBridge::glyph_path_for`]).
+/// [`crate::ui::glyph_source::GlyphResolver`] (Steam Input first, static atlas fallback).
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FaceButton {
@@ -110,7 +116,7 @@ pub enum PromptInputSurface {
     MouseOrKeyboard,
 }
 
-/// Core shop HUD actions in **Exit → Select → Sell → Inspect** order (matches [`crate::ui::kenney_prompt_paths::shop_keyboard_prompt_icon_paths`]).
+/// Core shop HUD actions in **Exit → Select → Sell → Inspect** order (matches [`crate::ui::kenney_prompt_paths::shop_keyboard_prompt_icons`]).
 pub const SHOP_LEGEND_VERB_LABELS: [&str; 4] = ["Exit", "Select", "Sell", "Inspect"];
 
 /// For [`ButtonPrompt::shop_floating_legend`] unit tests only.
@@ -220,6 +226,17 @@ mod tests {
         assert_eq!(
             GamepadStyle::infer(None, "Sony DualSense Wireless Controller"),
             GamepadStyle::PlayStation
+        );
+    }
+
+    #[test]
+    fn infer_vendor_valve_routes_to_generic() {
+        // Steam Deck / Steam Controller — physical labels are ABXY, so we keep
+        // the Xbox-positional Generic family for the static atlas fallback.
+        // Steam Input overrides this with native art when active.
+        assert_eq!(
+            GamepadStyle::infer(Some(0x28DE), "Steam Virtual Gamepad"),
+            GamepadStyle::Generic
         );
     }
 

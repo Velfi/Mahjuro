@@ -1,5 +1,6 @@
 pub mod button_prompts;
 pub mod focus_nav;
+pub mod glyph_source;
 pub mod input;
 pub mod inspect_plaque;
 pub mod kenney_prompt_paths;

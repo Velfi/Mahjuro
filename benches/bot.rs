@@ -69,11 +69,11 @@ fn print_dashboard(fixtures: &[(&'static str, RunState)]) {
     );
     for (slug, run) in fixtures {
         let hand = run.hand();
-        let rules = &run.round_rules;
-        let masks = bench_enumerate_play_masks(hand, rules);
+        let commit_rules = run.validation_rules_for_structure_commits();
+        let masks = bench_enumerate_play_masks(hand, &commit_rules);
         let n = masks.len();
-        let v = bench_count_masks_validate_structure(&run, hand, rules, &masks);
-        let p = bench_count_masks_positive_score(&run, hand, rules, &masks);
+        let v = bench_count_masks_validate_structure(&run, hand, &masks);
+        let p = bench_count_masks_positive_score(&run, hand, &masks);
         eprintln!(
             "{:<16} {:>4} {:>10} {:>12} {:>12}",
             slug,
@@ -87,9 +87,9 @@ fn print_dashboard(fixtures: &[(&'static str, RunState)]) {
 }
 
 fn register_fixture(c: &mut Criterion, slug: &str, run: RunState) {
+    let commit_rules = run.validation_rules_for_structure_commits();
     let hand = run.hand();
-    let rules = &run.round_rules;
-    let masks = bench_enumerate_play_masks(hand, rules);
+    let masks = bench_enumerate_play_masks(hand, &commit_rules);
     let n = masks.len() as u64;
     let tp = Throughput::Elements(n.max(1));
 
@@ -103,7 +103,7 @@ fn register_fixture(c: &mut Criterion, slug: &str, run: RunState) {
     group.throughput(tp);
     group.bench_function(format!("01_enumerate_masks (out={n})"), |b| {
         b.iter(|| {
-            bench_enumerate_play_masks(black_box(hand), black_box(rules));
+            bench_enumerate_play_masks(black_box(hand), black_box(commit_rules.as_slice()));
         })
     });
 
@@ -112,7 +112,6 @@ fn register_fixture(c: &mut Criterion, slug: &str, run: RunState) {
             bench_count_masks_validate_structure(
                 black_box(&run),
                 black_box(hand),
-                black_box(rules),
                 black_box(masks.as_slice()),
             )
         })
@@ -123,7 +122,6 @@ fn register_fixture(c: &mut Criterion, slug: &str, run: RunState) {
             bench_evaluate_play_masks(
                 black_box(&run),
                 black_box(hand),
-                black_box(rules),
                 black_box(masks.as_slice()),
             )
         })
@@ -134,7 +132,6 @@ fn register_fixture(c: &mut Criterion, slug: &str, run: RunState) {
             bench_count_masks_positive_score(
                 black_box(&run),
                 black_box(hand),
-                black_box(rules),
                 black_box(masks.as_slice()),
             )
         })

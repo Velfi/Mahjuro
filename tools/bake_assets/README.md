@@ -14,7 +14,14 @@ python3 tools/bake_assets/bake_assets.py --out path/to/out
 scripts/bake-assets.sh --out path/to/out
 ```
 
-Outputs `pack_manifest.json`, `mahjuro-pack-essential.zip`, `mahjuro-pack-gameplay.zip`, `mahjuro-pack-audio.zip`. Partition rules live in `pack_rules.json` (see top-level `_comment` for pack / prefix precedence).
+Outputs `pack_manifest.json`, `mahjuro-pack-shared.zip`, `mahjuro-pack-gameplay.zip`, `mahjuro-pack-scene-main_menu.zip`, `mahjuro-pack-music.zip`. Partition rules live in `pack_rules.json` (see top-level `_comment` for pack / prefix precedence).
+
+- **`shared` (eager):** fonts, `sets/` tile atlases, and all `audio/` sound effects — needed across scenes.
+- **`gameplay` (eager):** `data/`, `textures/`, input prompts, Steam assets, and root-level `*.glb` / `*.png` shipped with the game.
+- **`scene_main_menu` (lazy):** `scenes/main_menu/` — hub façade art and future menu-only models.
+- **`music` (lazy):** looping BGM under `music/` (decoded on first play, not at `AudioManager::new`).
+
+### Bake options
 
 - **Default** (`--lossy`): minifies JSON; runs `pngquant`/`oxipng` and `ffmpeg` when installed.
 - **`--no-lossy`**: copies bytes except JSON minify (faster local checks).
@@ -24,7 +31,7 @@ Release CI (Linux / Windows / macOS) installs `ffmpeg`, `pngquant`, and `oxipng`
 
 ## Boot loading (runtime)
 
-At startup, **`essential` and `gameplay` packs are both mounted eagerly** — most of the asset tree is needed during renderer init, so gameplay is not lazy today. Only the **`audio` pack** stays lazy until first audio read (or until prefetch after the main menu). Plan pack contents accordingly.
+At startup, **`shared`** and **`gameplay`** mount **eagerly**. **`scenes/main_menu/`** and **`music/`** use **lazy** zips (menu art on first draw of the façade; BGM when a track first starts). The splash screen does not wait on those decodes — the hub may briefly show a solid fallback until the façade texture uploads.
 
 The manifest includes **`game_version`** (from the root crate `[package].version` in `Cargo.toml`). At init, the game logs a warning if it does not match `CARGO_PKG_VERSION`. Set **`MAHJURO_STRICT_PACK_VERSION`** to any value to **panic** on mismatch instead (useful when debugging mismatched installs).
 

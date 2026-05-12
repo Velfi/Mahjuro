@@ -30,12 +30,6 @@
     <string>NSApplication</string>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
-    <key>SUFeedURL</key>
-    <string>https://github.com/Velfi/Mahjuro/releases/latest/download/appcast.xml</string>
-    <key>SUPublicEDKey</key>
-    <string>qNRVb4+L+njDq0f5zY00jFMXakF/dsEgA8RF3yfVntk=</string>
-    <key>SUEnableInstallerLauncherService</key>
-    <true/>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.games</string>
 </dict>

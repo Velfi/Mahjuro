@@ -41,7 +41,7 @@ Persistent upgrades that stack and interact in surprising ways. A few favorites:
 
 - **Triplet Boost** -- Triplets get x2 multiplier
 - **Kan Drum** -- Kongs grant +1 play and +4 mult
-- **Snowball** -- Earn +0.1 mult for every 100 points scored (max +5)
+- **Snowball** -- Cleared blinds stack investment; each stack adds chips scaled to the current blind's target (see in-run tooltip)
 - **Dora Crown** -- Extra dora indicator with +35 bonus chips
 
 There are 50+ relics to find across your runs.
@@ -132,7 +132,7 @@ src/
   audio/      Sound effects and music
   persistence/  Save/load
 
-assets/       Tile models, textures, fonts, audio, backgrounds
+assets/       Tile models, textures, fonts, audio, `scenes/` per-scene art, music
 ```
 
 ### Documentation

@@ -11,10 +11,6 @@ The shipped **`Mahjuro.app`** must place vendored `.dylib` files in **`Contents/
 
 Keep **[`.github/workflows/release.yml`](../../.github/workflows/release.yml)** and **[`scripts/package-macos.sh`](../../scripts/package-macos.sh)** aligned whenever this layout changes.
 
-## Sparkle
-
-**`Sparkle.framework`** lives under **`Contents/Frameworks/`**, loaded at runtime (see [`macos_updater.rs`](../../src/macos_updater.rs)). It is not a `Contents/MacOS/` dylib dependency of the main binary.
-
 ## Verification
 
 After changing native deps, check the release binary:

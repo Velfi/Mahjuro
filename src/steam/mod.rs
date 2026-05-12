@@ -13,7 +13,8 @@
 //! The init contract: [`SteamClient::init`] is called once at startup. On
 //! success it returns `Connected`; on failure or `--no-steam` it returns
 //! `Disabled`. Either way, call sites use the same methods (`unlock_achievement`,
-//! `run_callbacks`, …) — `Disabled` is a logged no-op.
+//! [`SteamClient::sync_profile_stats`], `run_callbacks`, …) — `Disabled` is a
+//! logged no-op.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -22,23 +23,13 @@ use steamworks::{AppId, Client};
 
 pub mod achievement;
 pub mod input;
+mod stat;
 
 pub use achievement::Achievement;
 pub use input::{ActionSet, AnalogSnapshot, SteamInputBridge};
 
 /// Mahjuro's Steam App ID (configured in Steamworks partner backend).
 const MAHJURO_APP_ID: u32 = 4636490;
-
-/// Whether this process was launched by the Steam client. Steam injects
-/// these env vars into every game it spawns, so this is true even when
-/// `SteamClient::init` later fails (offline mode, license check race,
-/// etc.) — useful for "we're running off a Steam-installed binary, leave
-/// auto-update to Steam" decisions.
-pub fn launched_via_steam() -> bool {
-    std::env::var_os("SteamAppId").is_some()
-        || std::env::var_os("SteamGameId").is_some()
-        || std::env::var_os("SteamClientLaunch").is_some()
-}
 
 /// `MAHJURO_NO_STEAM_INPUT=1` or `true` — keep Steamworks on but force SDL
 /// gamepad fallback for controller debugging.
@@ -100,11 +91,6 @@ impl SteamClient {
     /// `--no-steam` and headless CLI paths.
     pub fn disabled() -> Self {
         Self::Disabled
-    }
-
-    /// Whether Steamworks initialized successfully this session.
-    pub fn is_connected(&self) -> bool {
-        matches!(self, Self::Connected { .. })
     }
 
     /// Drain pending Steam callbacks. Should be called once per frame
@@ -188,6 +174,41 @@ impl SteamClient {
         false
     }
 
+    /// Queue a Steam Input rumble pulse to fire at `at`. Returns false (no-op)
+    /// when Steam Input isn't active. Composite / staggered patterns use this
+    /// so the start delays don't drift relative to the in-game cascade beats.
+    pub fn schedule_input_rumble_pulse(
+        &mut self,
+        at: std::time::Instant,
+        weak: u16,
+        strong: u16,
+        duration_ms: u32,
+        gain: f32,
+    ) -> bool {
+        if let Self::Connected {
+            steam_input: Some(steam_input),
+            ..
+        } = self
+        {
+            steam_input.schedule_rumble_pulse(at, weak, strong, duration_ms, gain);
+            return true;
+        }
+        false
+    }
+
+    /// Hard-stop any active rumble on the Steam Input path. No-op when
+    /// Steam Input isn't active. Used by the shop sell-hold guard so we
+    /// don't leave motors running across scene boundaries.
+    pub fn stop_input_rumble(&mut self) {
+        if let Self::Connected {
+            steam_input: Some(steam_input),
+            ..
+        } = self
+        {
+            steam_input.stop_rumble();
+        }
+    }
+
     pub fn steam_input_diagnostics(&self) -> Option<String> {
         match self {
             Self::Connected {
@@ -205,6 +226,20 @@ impl SteamClient {
                 ..
             } => steam_input.first_controller_style(),
             _ => None,
+        }
+    }
+
+    /// Number of currently-connected Steam Input controllers, or `0` when
+    /// Steam Input is unavailable. Used by [`crate::App`] to detect the
+    /// "all gamepads disconnected" edge for the auto-pause behaviour the
+    /// Steam Input docs recommend (Golden Rule #5).
+    pub fn input_controller_count(&self) -> usize {
+        match self {
+            Self::Connected {
+                steam_input: Some(steam_input),
+                ..
+            } => steam_input.controller_count(),
+            _ => 0,
         }
     }
 
@@ -256,6 +291,44 @@ impl SteamClient {
             return;
         }
         log::info!("unlocked Steam achievement: {api_name}");
+    }
+
+    /// Push meta profile counters to Steam Stats (partner-configured INT
+    /// stats). Idempotent from the game's perspective — values are always
+    /// rewritten from local [`crate::core::progression::PlayerProgress`].
+    ///
+    /// No-op when disabled. If Steam has not finished loading the user's
+    /// stats blob yet, sets are skipped (same as achievements); the next
+    /// sync after `run_callbacks` has drained usually succeeds.
+    ///
+    /// Call after profile saves and when switching profiles so the library
+    /// matches disk.
+    pub fn sync_profile_stats(&self, progress: &crate::core::progression::PlayerProgress) {
+        let Self::Connected { client, .. } = self else {
+            return;
+        };
+        let stats = client.user_stats();
+        let snapshot = stat::profile_stat_snapshot(progress);
+        let mut any_ok = false;
+        for (st, value) in snapshot {
+            let name = st.api_name();
+            match stats.set_stat_i32(name, value) {
+                Ok(()) => any_ok = true,
+                Err(()) => {
+                    log::debug!(
+                        "Steam stat '{name}' not set to {value} (stats not loaded yet or unknown name)",
+                    );
+                }
+            }
+        }
+        if !any_ok {
+            return;
+        }
+        if let Err(()) = stats.store_stats() {
+            log::warn!("Steam profile stat sync: store_stats failed");
+        } else {
+            log::debug!("Steam profile stats synced");
+        }
     }
 }
 

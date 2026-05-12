@@ -723,7 +723,7 @@
   {
     "id": "snowball",
     "name": "Snowball",
-    "description": "+0.1 mult per 100 total score this run",
+    "description": "Each cleared blind while you own this adds +15 chips to every scored hand (max 15 clears counted). Skipped blinds do not count.",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -791,7 +791,7 @@
         "italic": false
       },
       {
-        "text": "Last",
+        "text": "Last Breath",
         "bold": true,
         "italic": false
       },
@@ -1844,7 +1844,7 @@
   {
     "id": "chrysalis",
     "name": "Chrysalis",
-    "description": "After the blind target is met, further scores this round add no round or run total \u2014 they are absorbed. At 2000 absorbed excess, hatches into Monarch Butterfly.",
+    "description": "After this blind's target is met, further scores this round absorb their points (they do not add to the round or run total). At 2000 absorbed, hatches into Monarch Butterfly.",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1867,7 +1867,7 @@
   {
     "id": "monarch_butterfly",
     "name": "Monarch Butterfly",
-    "description": "Each scored hand: +chips from a log tier based on total absorbed excess (post-target) this run. Further post-target scores still add no round/run total but keep increasing absorbed excess and tiers.",
+    "description": "Each scored hand: +12 chips per tier. Gain one tier every 200 total absorbed score (after the blind target is met this round; those plays still do not add to the round or run total). Max tier 24.",
     "rarity": "rare",
     "flavor_spans": [
       {

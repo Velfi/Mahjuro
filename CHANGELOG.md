@@ -14,6 +14,7 @@ commit history.
 
 ### Changed
 - The **Meld Guide** no longer appears on the main menu; open it from **Pause** while you’re in a run.
+- **Snowball** adds **+15 chips** to every scored hand for each **cleared** blind while you own it (skips don’t count), up to **15** clears counted; selling the relic resets the counter. Chip bonus is flat per clear (not tied to the blind’s score target).
 
 ## 0.5.0-5 — 2026-05-09
 
@@ -23,7 +24,7 @@ commit history.
 ## 0.5.0-4 — 2026-05-09
 
 ### Added
-- New relic **Chrysalis**: once you've already reached the blind's target score, further scores that round no longer add to your round or run totals—instead that value is absorbed. Gather enough absorbed score and it hatches into **Monarch Butterfly**, which adds bonus chips each hand based on tiers that grow from total absorbed excess (with diminishing tier gains as excess climbs).
+- New relic **Chrysalis**: once you've already reached the blind's target score, further scores that round no longer add to your round or run totals—instead that value is absorbed. Gather **2000** absorbed and it hatches into **Monarch Butterfly**, which adds **+12 chips per tier**, gaining **one tier per 200** absorbed (cap **24** tiers); post-target scores still feed absorbed total without adding to round or run score.
 - New rare relic **Euler's Number** adds a flat mult bonus equal to the constant *e* (about 2.718) every time you score a hand.
 - New relic **I Got A Guy**: three times per run you can restock the shop without paying gold (normal restock price increases still apply after each restock).
 

@@ -400,10 +400,18 @@ impl SceneBehavior for TileSelectScene {
 
         match action {
             Some(ModalAction::Play) => {
+                if !ctx.loading_done {
+                    ctx.bus.push(GameEvent::UiSound(SfxId::InvalidAction));
+                    return None;
+                }
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                 self.start_game(ctx.run, ctx.progress)
             }
             Some(ModalAction::SkipTutorial) => {
+                if !ctx.loading_done {
+                    ctx.bus.push(GameEvent::UiSound(SfxId::InvalidAction));
+                    return None;
+                }
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                 *ctx.complete_onboarding = true;
                 let settings = crate::persistence::load_settings();

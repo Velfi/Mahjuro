@@ -1,6 +1,7 @@
 //! Headless bot runner used for tuning balance.
 //!
-//! The bot picks the highest-scoring valid play available in its current hand each turn.
+//! The bot picks the highest-scoring valid play available in its current hand each turn
+//! (same validation path as real commits: structure-commit rules + wildcard relic resolution).
 //! Candidate plays are meld-built subsets plus every 14-tile Kokushi Musō orphan combination
 //! (the meld enumerator never emits twelve singletons + one pair).
 //! Between turns it strategically discards isolated tiles via 1-step rollout when the
@@ -112,6 +113,20 @@ fn fmt_play_tiles(hand: &[Tile], indices: &[usize]) -> String {
         .join(" ")
 }
 
+/// Compact labels for the structure bank at cash-in (same `Tile::label` as plays).
+fn fmt_structure_cash_in(tiles: &[Tile]) -> Option<String> {
+    if tiles.is_empty() {
+        return None;
+    }
+    Some(
+        tiles
+            .iter()
+            .map(|t| t.label())
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
+}
+
 fn blind_log_label(run: &RunState, blind: BlindKind) -> String {
     match blind {
         BlindKind::Boss => {
@@ -207,11 +222,7 @@ impl TerminalIssueCause {
     }
 }
 
-fn analyze_hand_options(
-    run: &RunState,
-    hand: &[Tile],
-    rules: &[RuleModifier],
-) -> HandOptionAnalysis {
+fn analyze_hand_options(run: &RunState, hand: &[Tile]) -> HandOptionAnalysis {
     let n = hand.len();
     if !(2..=20).contains(&n) {
         return HandOptionAnalysis::default();
@@ -223,7 +234,8 @@ fn analyze_hand_options(
     let base_tile_len = run.structure_tiles().len();
     let mut merged_sets = run.structure_sets().to_vec();
     let mut merged_tiles = run.structure_tiles().to_vec();
-    for mask in enumerate_candidate_play_masks(hand, rules) {
+    let commit_rules = run.validation_rules_for_structure_commits();
+    for mask in enumerate_candidate_play_masks(hand, &commit_rules) {
         let tiles = tiles_from_play_mask(hand, n, mask);
         let Some((sets, scoring_tiles)) = run.try_validate_with_wildcards(&tiles) else {
             continue;
@@ -244,7 +256,8 @@ fn analyze_hand_options(
             meld_count: merged_sets.len() as u32,
             inject_chicken_if_no_yaku: true,
         });
-        let breakdown = score_sets_with_original(&merged_tiles, &merged_sets, &ctx, rules, &tiles);
+        let breakdown =
+            score_sets_with_original(&merged_tiles, &merged_sets, &ctx, &run.round_rules, &tiles);
         if breakdown.total > 0 {
             analysis.positive_score_count += 1;
         }
@@ -265,7 +278,7 @@ fn record_terminal_hand_issue(stats: &mut RunStats, run: &RunState, cause: Termi
             .or_insert(0) += 1;
     }
 
-    let analysis = analyze_hand_options(run, &run.hand(), &run.round_rules);
+    let analysis = analyze_hand_options(run, &run.hand());
     let issue_key = if analysis.valid_count == 0 {
         "no-valid".to_string()
     } else if analysis.valid_count == 1 && analysis.committable_count == 0 {
@@ -384,10 +397,10 @@ struct PlayRank {
 }
 
 /// Best play from an explicit candidate mask list (used by [`best_play_in_hand`] and benches).
+/// Masks must be enumerated for **structure commits** (see [`RunState::validation_rules_for_structure_commits`]).
 fn evaluate_play_masks(
     run: &RunState,
     hand: &[Tile],
-    rules: &[RuleModifier],
     relics_override: Option<&RelicState>,
     yaku_levels_override: Option<&YakuLevels>,
     masks: &[u32],
@@ -405,28 +418,34 @@ fn evaluate_play_masks(
     let mut best: Option<(PlayRank, Vec<usize>)> = None;
     for &mask in masks {
         let tiles = tiles_from_play_mask(hand, n, mask);
-        let Some(sets) = validate_selection_with_rules(&tiles, rules) else {
+        let Some((sets, scoring_tiles)) = run.try_validate_with_wildcards(&tiles) else {
             continue;
         };
-        if !structure_commit_fits(run, tiles.len(), &sets) {
+        if !structure_commit_fits(run, scoring_tiles.len(), &sets) {
             continue;
         }
         merged_sets.truncate(base_set_len);
         merged_sets.extend(sets.iter().cloned());
         merged_tiles.truncate(base_tile_len);
-        merged_tiles.extend(tiles.iter().copied());
+        merged_tiles.extend(scoring_tiles.iter().copied());
         ctx.structure = Some(StructureTriggerMeta {
             meld_count: merged_sets.len() as u32,
             inject_chicken_if_no_yaku: true,
         });
-        let breakdown = score_sets_with_original(&merged_tiles, &merged_sets, &ctx, rules, &tiles);
+        let breakdown = score_sets_with_original(
+            &merged_tiles,
+            &merged_sets,
+            &ctx,
+            &run.round_rules,
+            &tiles,
+        );
         if breakdown.total == 0 {
             continue;
         }
         let rank = PlayRank {
             score: breakdown.total,
             meld_count: sets.len(),
-            tile_count: tiles.len(),
+            tile_count: scoring_tiles.len(),
         };
         let indices = indices_from_play_mask(n, mask);
         if best
@@ -441,12 +460,7 @@ fn evaluate_play_masks(
 }
 
 /// Masks that pass meld validation and structure-bank checks (still may score to zero).
-fn masks_passing_validate_and_structure(
-    run: &RunState,
-    hand: &[Tile],
-    rules: &[RuleModifier],
-    masks: &[u32],
-) -> usize {
+fn masks_passing_validate_and_structure(run: &RunState, hand: &[Tile], masks: &[u32]) -> usize {
     let n = hand.len();
     if !(2..=20).contains(&n) {
         return 0;
@@ -454,10 +468,10 @@ fn masks_passing_validate_and_structure(
     let mut hits = 0usize;
     for &mask in masks {
         let tiles = tiles_from_play_mask(hand, n, mask);
-        let Some(sets) = validate_selection_with_rules(&tiles, rules) else {
+        let Some((sets, scoring_tiles)) = run.try_validate_with_wildcards(&tiles) else {
             continue;
         };
-        if structure_commit_fits(run, tiles.len(), &sets) {
+        if structure_commit_fits(run, scoring_tiles.len(), &sets) {
             hits += 1;
         }
     }
@@ -468,7 +482,6 @@ fn masks_passing_validate_and_structure(
 fn masks_with_positive_score(
     run: &RunState,
     hand: &[Tile],
-    rules: &[RuleModifier],
     masks: &[u32],
     relics_override: Option<&RelicState>,
     yaku_levels_override: Option<&YakuLevels>,
@@ -486,21 +499,27 @@ fn masks_with_positive_score(
     let mut hits = 0usize;
     for &mask in masks {
         let tiles = tiles_from_play_mask(hand, n, mask);
-        let Some(sets) = validate_selection_with_rules(&tiles, rules) else {
+        let Some((sets, scoring_tiles)) = run.try_validate_with_wildcards(&tiles) else {
             continue;
         };
-        if !structure_commit_fits(run, tiles.len(), &sets) {
+        if !structure_commit_fits(run, scoring_tiles.len(), &sets) {
             continue;
         }
         merged_sets.truncate(base_set_len);
         merged_sets.extend(sets.iter().cloned());
         merged_tiles.truncate(base_tile_len);
-        merged_tiles.extend(tiles.iter().copied());
+        merged_tiles.extend(scoring_tiles.iter().copied());
         ctx.structure = Some(StructureTriggerMeta {
             meld_count: merged_sets.len() as u32,
             inject_chicken_if_no_yaku: true,
         });
-        let breakdown = score_sets_with_original(&merged_tiles, &merged_sets, &ctx, rules, &tiles);
+        let breakdown = score_sets_with_original(
+            &merged_tiles,
+            &merged_sets,
+            &ctx,
+            &run.round_rules,
+            &tiles,
+        );
         if breakdown.total > 0 {
             hits += 1;
         }
@@ -513,15 +532,14 @@ fn masks_with_positive_score(
 fn best_play_in_hand(
     run: &RunState,
     hand: &[Tile],
-    rules: &[RuleModifier],
     relics_override: Option<&RelicState>,
     yaku_levels_override: Option<&YakuLevels>,
 ) -> Option<(u64, Vec<usize>)> {
-    let masks = enumerate_candidate_play_masks(hand, rules);
+    let commit_rules = run.validation_rules_for_structure_commits();
+    let masks = enumerate_candidate_play_masks(hand, &commit_rules);
     evaluate_play_masks(
         run,
         hand,
-        rules,
         relics_override,
         yaku_levels_override,
         &masks,
@@ -960,7 +978,7 @@ fn wrap_sequence_ranks(rank: u8) -> &'static [[u8; 2]] {
 /// Search for the highest-scoring playable selection in the current hand.
 /// Returns `(score, indices)`, or `None` if no positive-scoring play exists.
 pub fn pick_best_play(run: &RunState) -> Option<(u64, Vec<usize>)> {
-    best_play_in_hand(run, &run.hand(), &run.round_rules, None, None)
+    best_play_in_hand(run, &run.hand(), None, None)
 }
 
 /// Demo [`RunState`] with `tiles` as the current hand (sorted). For benches/tests only.
@@ -973,6 +991,7 @@ pub fn bench_fixture_run(mut tiles: Vec<Tile>) -> RunState {
 }
 
 /// Candidate play bitmasks for `hand` under `rules` (Criterion: pair with [`bench_evaluate_play_masks`]).
+/// For gameplay-accurate enumeration, pass [`RunState::validation_rules_for_structure_commits`].
 #[doc(hidden)]
 pub fn bench_enumerate_play_masks(hand: &[Tile], rules: &[RuleModifier]) -> Vec<u32> {
     enumerate_candidate_play_masks(hand, rules)
@@ -983,10 +1002,9 @@ pub fn bench_enumerate_play_masks(hand: &[Tile], rules: &[RuleModifier]) -> Vec<
 pub fn bench_evaluate_play_masks(
     run: &RunState,
     hand: &[Tile],
-    rules: &[RuleModifier],
     masks: &[u32],
 ) -> Option<(u64, Vec<usize>)> {
-    evaluate_play_masks(run, hand, rules, None, None, masks)
+    evaluate_play_masks(run, hand, None, None, masks)
 }
 
 /// Count masks that pass validation + structure-bank checks (before scoring).
@@ -994,10 +1012,9 @@ pub fn bench_evaluate_play_masks(
 pub fn bench_count_masks_validate_structure(
     run: &RunState,
     hand: &[Tile],
-    rules: &[RuleModifier],
     masks: &[u32],
 ) -> usize {
-    masks_passing_validate_and_structure(run, hand, rules, masks)
+    masks_passing_validate_and_structure(run, hand, masks)
 }
 
 /// Count masks that yield a positive score (includes full scoring work).
@@ -1005,10 +1022,9 @@ pub fn bench_count_masks_validate_structure(
 pub fn bench_count_masks_positive_score(
     run: &RunState,
     hand: &[Tile],
-    rules: &[RuleModifier],
     masks: &[u32],
 ) -> usize {
-    masks_with_positive_score(run, hand, rules, masks, None, None)
+    masks_with_positive_score(run, hand, masks, None, None)
 }
 
 /// Rate each tile by how many *potential* melds in the current hand it participates in.
@@ -1081,7 +1097,7 @@ fn rollout_post_discard_score(run: &RunState, discard_indices: &[usize]) -> u64 
         .collect();
     new_hand.extend_from_slice(peeked);
     new_hand.sort();
-    best_play_in_hand(run, &new_hand, &run.round_rules, None, None)
+    best_play_in_hand(run, &new_hand, None, None)
         .map(|(s, _)| s)
         .unwrap_or(0)
 }
@@ -1229,6 +1245,7 @@ fn play_blind(
         };
         if trigger_preview > 0 && (best_score == 0 || trigger_preview >= best_score) {
             let score_before_structure = run.round_score;
+            let cash_in_tiles = run.structure_tiles().to_vec();
             let earned = run.trigger_structure_manual(&mut bus);
             stats.structure_triggers += 1;
             stats.structure_trigger_points += earned;
@@ -1250,7 +1267,7 @@ fn play_blind(
                 scoring_log.push(BotScoringAction {
                     kind: "structure".into(),
                     points: structure_delta,
-                    tiles: None,
+                    tiles: fmt_structure_cash_in(&cash_in_tiles),
                 });
             }
             if earned > 0 {
@@ -1319,8 +1336,14 @@ fn play_blind(
                 fmt_indices(&indices),
                 best_score
             );
+            let bank_before_commit = run.structure_tiles().to_vec();
             let hand_before = run.hand().to_vec();
-            let tile_labels = fmt_play_tiles(&hand_before, &indices);
+            let mut idx_sorted: Vec<usize> = indices.to_vec();
+            idx_sorted.sort_unstable();
+            let committed_tiles: Vec<Tile> = idx_sorted
+                .iter()
+                .filter_map(|&i| hand_before.get(i).copied())
+                .collect();
             run.clear_selection();
             for i in &indices {
                 run.toggle_select(*i);
@@ -1350,10 +1373,17 @@ fn play_blind(
             }
             let play_delta = run.round_score.saturating_sub(score_before);
             if play_delta > 0 {
+                let tiles = if run.structure_tiles().is_empty() {
+                    let mut full = bank_before_commit;
+                    full.extend(committed_tiles);
+                    fmt_structure_cash_in(&full)
+                } else {
+                    Some(fmt_play_tiles(&hand_before, &indices))
+                };
                 scoring_log.push(BotScoringAction {
                     kind: "play".into(),
                     points: play_delta,
-                    tiles: Some(tile_labels),
+                    tiles,
                 });
             }
             continue;
@@ -1425,7 +1455,7 @@ mod tests {
         let limit: u32 = 1u32 << n;
         for mask in 1u32..limit {
             let count = mask.count_ones() as usize;
-            // `validate_selection_with_rules` accepts several sizes (e.g. 3 = one meld,
+            // `try_validate_with_wildcards` accepts several sizes (e.g. 3 = one meld,
             // 4 = kong or two flower pairs, 6 = two melds). Do not skip by count —
             // an old `4`-tile exclusion caused brute force to disagree with
             // `enumerate_candidate_play_masks` / `best_play_in_hand`.
@@ -1438,9 +1468,7 @@ mod tests {
                     tiles.push(run.hand()[i]);
                 }
             }
-            let Some(sets) =
-                crate::core::hand::validate_selection_with_rules(&tiles, &run.round_rules)
-            else {
+            let Some((sets, scoring_tiles)) = run.try_validate_with_wildcards(&tiles) else {
                 continue;
             };
             let kongs_after = run
@@ -1449,7 +1477,7 @@ mod tests {
                 .chain(sets.iter())
                 .filter(|s| s.kind == SetKind::Kong)
                 .count();
-            if run.structure_tiles().len() + tiles.len()
+            if run.structure_tiles().len() + scoring_tiles.len()
                 > crate::game::run::HAND_SIZE + kongs_after
             {
                 continue;
@@ -1457,7 +1485,7 @@ mod tests {
             let mut merged_sets = run.structure_sets().to_vec();
             merged_sets.extend(sets.iter().cloned());
             let mut merged_tiles = run.structure_tiles().to_vec();
-            merged_tiles.extend(tiles.iter().copied());
+            merged_tiles.extend(scoring_tiles.iter().copied());
             let mut ctx = super::bot_score_context_base(run, &run.relics, None);
             ctx.structure = Some(super::StructureTriggerMeta {
                 meld_count: merged_sets.len() as u32,
@@ -1477,7 +1505,7 @@ mod tests {
             let rank = PlayRank {
                 score: total,
                 meld_count: sets.len(),
-                tile_count: tiles.len(),
+                tile_count: scoring_tiles.len(),
             };
             let indices: Vec<usize> = (0..n).filter(|i| mask & (1 << i) != 0).collect();
             if best
@@ -1575,7 +1603,8 @@ mod tests {
         let best = pick_best_play(&run).expect("kokushi should score");
         assert_eq!(best.1.len(), 14);
         let mask: u32 = best.1.iter().fold(0u32, |acc, &i| acc | (1u32 << i));
-        assert!(enumerate_candidate_play_masks(run.hand(), &run.round_rules).contains(&mask));
+        let commit_rules = run.validation_rules_for_structure_commits();
+        assert!(enumerate_candidate_play_masks(run.hand(), &commit_rules).contains(&mask));
         assert_eq!(Some(best), brute_force_best_play_in_hand(&run));
     }
 
@@ -1596,7 +1625,7 @@ mod tests {
             t(Suit::Flower, 2, 11),
         ];
         run.hand_mut().sort();
-        let new_best = best_play_in_hand(&run, &run.hand(), &run.round_rules, None, None);
+        let new_best = best_play_in_hand(&run, &run.hand(), None, None);
         let old_best = brute_force_best_play_in_hand(&run);
         assert_eq!(new_best, old_best);
     }
@@ -1620,7 +1649,8 @@ mod tests {
         ];
         run.hand_mut().sort();
 
-        for mask in enumerate_candidate_play_masks(&run.hand(), &run.round_rules) {
+        let commit_rules = run.validation_rules_for_structure_commits();
+        for mask in enumerate_candidate_play_masks(&run.hand(), &commit_rules) {
             let tiles: Vec<_> = run
                 .hand()
                 .iter()
@@ -1628,8 +1658,7 @@ mod tests {
                 .filter_map(|(i, t)| (mask & (1 << i) != 0).then_some(*t))
                 .collect();
             assert!(
-                crate::core::hand::validate_selection_with_rules(&tiles, &run.round_rules)
-                    .is_some(),
+                run.try_validate_with_wildcards(&tiles).is_some(),
                 "invalid candidate mask {mask:b} for hand {:?}",
                 run.hand()
             );
@@ -1647,7 +1676,8 @@ mod tests {
         ];
         run.hand_mut().sort();
 
-        let masks = enumerate_candidate_play_masks(&run.hand(), &run.round_rules);
+        let commit_rules = run.validation_rules_for_structure_commits();
+        let masks = enumerate_candidate_play_masks(&run.hand(), &commit_rules);
         let selected_ids: Vec<Vec<u32>> = masks
             .iter()
             .map(|mask| {
@@ -1814,15 +1844,9 @@ fn best_play_score_for_hand(
     relics_override: Option<&RelicState>,
     yaku_levels_override: Option<&YakuLevels>,
 ) -> u64 {
-    best_play_in_hand(
-        run,
-        hand,
-        &run.round_rules,
-        relics_override,
-        yaku_levels_override,
-    )
-    .map(|(s, _)| s)
-    .unwrap_or(0)
+    best_play_in_hand(run, hand, relics_override, yaku_levels_override)
+        .map(|(s, _)| s)
+        .unwrap_or(0)
 }
 
 /// Synthetic random hands per shop valuation (plus the real current hand).

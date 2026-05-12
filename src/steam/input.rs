@@ -11,25 +11,25 @@ use steamworks::{Input, InputType, sys};
 use crate::ui::button_prompts::GamepadStyle;
 use crate::ui::input::UiAction;
 
+/// Steam Input action set. Mirrors the `Menus` / `Gameplay` / `Shop` / `Inspect`
+/// sets in `packaging/steam_input/game_actions_4636490.vdf`. `Menus` covers every
+/// non-gameplay scene (start screen, profile select, options, pause overlay,
+/// rumble lab, …) — its action list is a superset of what those scenes use.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ActionSet {
-    MenuControls,
+    Menus,
     Gameplay,
     Shop,
     Inspect,
-    RumbleLab,
-    PauseMenu,
 }
 
 impl ActionSet {
     fn name(self) -> &'static str {
         match self {
-            Self::MenuControls => "MenuControls",
+            Self::Menus => "Menus",
             Self::Gameplay => "Gameplay",
             Self::Shop => "Shop",
             Self::Inspect => "Inspect",
-            Self::RumbleLab => "RumbleLab",
-            Self::PauseMenu => "PauseMenu",
         }
     }
 }
@@ -42,23 +42,19 @@ pub struct AnalogSnapshot {
 
 #[derive(Clone, Copy)]
 struct ActionSetHandles {
-    menu: sys::InputActionSetHandle_t,
+    menus: sys::InputActionSetHandle_t,
     gameplay: sys::InputActionSetHandle_t,
     shop: sys::InputActionSetHandle_t,
     inspect: sys::InputActionSetHandle_t,
-    rumble_lab: sys::InputActionSetHandle_t,
-    pause_menu: sys::InputActionSetHandle_t,
 }
 
 impl ActionSetHandles {
     fn get(self, set: ActionSet) -> sys::InputActionSetHandle_t {
         match set {
-            ActionSet::MenuControls => self.menu,
+            ActionSet::Menus => self.menus,
             ActionSet::Gameplay => self.gameplay,
             ActionSet::Shop => self.shop,
             ActionSet::Inspect => self.inspect,
-            ActionSet::RumbleLab => self.rumble_lab,
-            ActionSet::PauseMenu => self.pause_menu,
         }
     }
 }
@@ -68,6 +64,13 @@ struct AnalogHandles {
     nav: sys::InputAnalogActionHandle_t,
     orbit: sys::InputAnalogActionHandle_t,
     inspect_zoom: sys::InputAnalogActionHandle_t,
+    /// `cursor` (Menus / Gameplay / Shop) is `absolute_mouse` + `os_mouse=1`.
+    /// Steam pushes the cursor deltas through the OS mouse path so SDL's
+    /// `MouseMotion` event handler picks them up automatically — we never
+    /// poll this handle, but registering it tells Steam Input to surface
+    /// the action in the configurator UI for trackpad / gyro binding.
+    #[allow(dead_code)]
+    cursor: sys::InputAnalogActionHandle_t,
 }
 
 #[derive(Clone, Copy)]
@@ -206,17 +209,29 @@ pub struct SteamInputBridge {
     active_set: ActionSet,
     style_by_controller: HashMap<sys::InputHandle_t, GamepadStyle>,
     rumble_stop_at: Option<Instant>,
+    /// Pulses queued by [`Self::schedule_rumble_pulse`] (rumble lab composites,
+    /// scoring cascade beats). Drained by [`Self::run_frame`] when each pulse's
+    /// fire time arrives. Mirrors [`crate::ui::input::InputState::scoring_rumble_schedule`]
+    /// for the SDL fallback path.
+    rumble_schedule: Vec<ScheduledPulse>,
+}
+
+#[derive(Clone, Copy)]
+struct ScheduledPulse {
+    at: Instant,
+    weak: u16,
+    strong: u16,
+    duration_ms: u32,
+    gain: f32,
 }
 
 impl SteamInputBridge {
     pub fn new(input: Input) -> Self {
         let sets = ActionSetHandles {
-            menu: input.get_action_set_handle(ActionSet::MenuControls.name()),
+            menus: input.get_action_set_handle(ActionSet::Menus.name()),
             gameplay: input.get_action_set_handle(ActionSet::Gameplay.name()),
             shop: input.get_action_set_handle(ActionSet::Shop.name()),
             inspect: input.get_action_set_handle(ActionSet::Inspect.name()),
-            rumble_lab: input.get_action_set_handle(ActionSet::RumbleLab.name()),
-            pause_menu: input.get_action_set_handle(ActionSet::PauseMenu.name()),
         };
         let digitals: Vec<_> = DIGITAL_BINDINGS
             .iter()
@@ -231,6 +246,7 @@ impl SteamInputBridge {
             nav: input.get_analog_action_handle("nav"),
             orbit: input.get_analog_action_handle("orbit"),
             inspect_zoom: input.get_analog_action_handle("inspect_zoom"),
+            cursor: input.get_analog_action_handle("cursor"),
         };
         Self {
             input,
@@ -240,9 +256,10 @@ impl SteamInputBridge {
             analogs,
             controllers: Vec::new(),
             prev_digital: HashSet::new(),
-            active_set: ActionSet::MenuControls,
+            active_set: ActionSet::Menus,
             style_by_controller: HashMap::new(),
             rumble_stop_at: None,
+            rumble_schedule: Vec::new(),
         }
     }
 
@@ -256,12 +273,47 @@ impl SteamInputBridge {
                 Self::style_for_type(self.input.get_input_type_for_handle(controller)),
             );
         }
+        let now = Instant::now();
+        let mut fired: Vec<ScheduledPulse> = Vec::new();
+        self.rumble_schedule.retain(|pulse| {
+            if pulse.at <= now {
+                fired.push(*pulse);
+                false
+            } else {
+                true
+            }
+        });
+        for pulse in fired {
+            self.trigger_rumble(pulse.weak, pulse.strong, pulse.duration_ms, pulse.gain);
+        }
         if self
             .rumble_stop_at
             .is_some_and(|stop_at| Instant::now() >= stop_at)
         {
             self.stop_rumble();
         }
+    }
+
+    /// Queue a rumble pulse to fire at `at`. Used by composite/staggered
+    /// rumble-lab patterns and by the scoring cascade.
+    pub fn schedule_rumble_pulse(
+        &mut self,
+        at: Instant,
+        weak: u16,
+        strong: u16,
+        duration_ms: u32,
+        gain: f32,
+    ) {
+        if duration_ms == 0 {
+            return;
+        }
+        self.rumble_schedule.push(ScheduledPulse {
+            at,
+            weak,
+            strong,
+            duration_ms: duration_ms.max(1),
+            gain,
+        });
     }
 
     pub fn set_active_action_set(&mut self, set: ActionSet) {
@@ -431,6 +483,12 @@ impl SteamInputBridge {
             .copied()
     }
 
+    /// Live count from the most recent [`Self::run_frame`] poll. Used by
+    /// the disconnect-detected auto-pause path.
+    pub fn controller_count(&self) -> usize {
+        self.controllers.len()
+    }
+
     pub fn diagnostics(&self) -> String {
         format!(
             "Steam Input: set={:?}, controllers={}, actions={}",
@@ -500,5 +558,138 @@ fn analog_xy(data: &sys::InputAnalogActionData_t) -> (f32, f32) {
             std::ptr::addr_of!(data.x).read_unaligned(),
             std::ptr::addr_of!(data.y).read_unaligned(),
         )
+    }
+}
+
+#[cfg(test)]
+mod vdf_consistency {
+    //! Catch drift between Rust-side action declarations and the In-Game Actions
+    //! file (`packaging/steam_input/game_actions_4636490.vdf`). A mismatch here
+    //! would make the bridge silently swallow inputs at runtime.
+
+    use super::{ActionSet, DIGITAL_BINDINGS};
+    use std::collections::HashSet;
+
+    const VDF: &str = include_str!("../../packaging/steam_input/game_actions_4636490.vdf");
+
+    /// Analog handles registered separately by [`AnalogHandles`]; not in [`DIGITAL_BINDINGS`].
+    const ANALOG_NAMES: &[&str] = &["nav", "orbit", "inspect_zoom", "cursor"];
+
+    enum Tok {
+        Str(String),
+        Open,
+        Close,
+    }
+
+    fn lex(s: &str) -> Vec<Tok> {
+        let mut out = Vec::new();
+        let mut chars = s.chars().peekable();
+        while let Some(c) = chars.next() {
+            match c {
+                '"' => {
+                    let mut buf = String::new();
+                    for n in chars.by_ref() {
+                        if n == '"' {
+                            break;
+                        }
+                        buf.push(n);
+                    }
+                    out.push(Tok::Str(buf));
+                }
+                '{' => out.push(Tok::Open),
+                '}' => out.push(Tok::Close),
+                _ => {}
+            }
+        }
+        out
+    }
+
+    /// Walks the VDF and yields every `(parent_block, key)` pair. Parent block
+    /// is the immediately enclosing `{ … }` whose own key is, e.g., `Button`.
+    fn walk_pairs(vdf: &str) -> Vec<(String, String)> {
+        let tokens = lex(vdf);
+        let mut path: Vec<String> = Vec::new();
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < tokens.len() {
+            match &tokens[i] {
+                Tok::Str(key) => match tokens.get(i + 1) {
+                    Some(Tok::Open) => {
+                        if let Some(parent) = path.last() {
+                            out.push((parent.clone(), key.clone()));
+                        }
+                        path.push(key.clone());
+                        i += 2;
+                    }
+                    Some(Tok::Str(_)) => {
+                        if let Some(parent) = path.last() {
+                            out.push((parent.clone(), key.clone()));
+                        }
+                        i += 2;
+                    }
+                    _ => i += 1,
+                },
+                Tok::Close => {
+                    path.pop();
+                    i += 1;
+                }
+                _ => i += 1,
+            }
+        }
+        out
+    }
+
+    fn vdf_binding_names() -> HashSet<String> {
+        walk_pairs(VDF)
+            .into_iter()
+            .filter(|(parent, _)| {
+                matches!(parent.as_str(), "Button" | "AnalogTrigger" | "StickPadGyro")
+            })
+            .map(|(_, key)| key)
+            .filter(|name| !ANALOG_NAMES.contains(&name.as_str()))
+            .collect()
+    }
+
+    fn vdf_action_set_names() -> HashSet<String> {
+        walk_pairs(VDF)
+            .into_iter()
+            .filter(|(parent, _)| parent == "actions")
+            .map(|(_, key)| key)
+            .collect()
+    }
+
+    #[test]
+    fn vdf_bindings_match_digital_bindings() {
+        let vdf: HashSet<String> = vdf_binding_names();
+        let rust: HashSet<String> = DIGITAL_BINDINGS
+            .iter()
+            .map(|b| b.name.to_string())
+            .collect();
+        let only_in_vdf: Vec<&String> = vdf.difference(&rust).collect();
+        let only_in_rust: Vec<&String> = rust.difference(&vdf).collect();
+        assert!(
+            only_in_vdf.is_empty() && only_in_rust.is_empty(),
+            "Steam Input VDF / DIGITAL_BINDINGS drift:\n  only in VDF:  {only_in_vdf:?}\n  only in Rust: {only_in_rust:?}",
+        );
+    }
+
+    #[test]
+    fn vdf_action_sets_match_action_set_enum() {
+        let vdf = vdf_action_set_names();
+        let rust: HashSet<String> = [
+            ActionSet::Menus,
+            ActionSet::Gameplay,
+            ActionSet::Shop,
+            ActionSet::Inspect,
+        ]
+        .iter()
+        .map(|s| s.name().to_string())
+        .collect();
+        let only_in_vdf: Vec<&String> = vdf.difference(&rust).collect();
+        let only_in_rust: Vec<&String> = rust.difference(&vdf).collect();
+        assert!(
+            only_in_vdf.is_empty() && only_in_rust.is_empty(),
+            "Steam Input VDF / ActionSet drift:\n  only in VDF:  {only_in_vdf:?}\n  only in Rust: {only_in_rust:?}",
+        );
     }
 }

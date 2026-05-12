@@ -50,7 +50,7 @@ use crate::ui::button_prompts::{ButtonPrompt, PromptInputSurface, SHOP_LEGEND_VE
 use crate::ui::focus_nav::{clamp_rect_to_viewport, push_focus_ring, rect_center};
 use crate::ui::input::InputMode;
 use crate::ui::inspect_plaque::{push_floating_relic_flavor_labels, push_focus_tooltip_panel_2d};
-use crate::ui::kenney_prompt_paths::shop_keyboard_prompt_icon_paths;
+use crate::ui::kenney_prompt_paths::shop_keyboard_prompt_icons;
 
 use super::layout::{
     ShopInventoryCounts, ShopLayout, consumable_color, is_tile_pack_pick, live_shop_hit,
@@ -1234,7 +1234,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
             ctx.gamepad_swap_ab,
             ctx.gamepad_swap_xy,
             ctx.gamepad_style,
-            ctx.steam_glyphs,
+            ctx.glyphs,
             None,
             None,
             ctx.tile_preset,
@@ -1360,7 +1360,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
         let primary_y0 = h - pad_bottom - block_h;
         let iy = primary_y0 + (primary_h - icon_px) * 0.5;
 
-        let keyboard_paths = shop_keyboard_prompt_icon_paths();
+        let keyboard_icons = shop_keyboard_prompt_icons();
 
         let pill_bg = [0.06_f32, 0.055, 0.07, 0.82];
         let pill_pad_x = (icon_px * 0.10).clamp(6.0, 16.0) + (h * 0.003).clamp(4.0, 8.0);
@@ -1411,13 +1411,8 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                 _ => crate::ui::input::UiAction::NorthFacePress,
             };
             let source = match surface {
-                PromptInputSurface::Controller => ctx.steam_glyphs.iter().find_map(|(a, path)| {
-                    (*a == action)
-                        .then(|| crate::render::draw_cmd::PromptIconSource::Filesystem(path.clone()))
-                }),
-                PromptInputSurface::MouseOrKeyboard => Some(
-                    crate::render::draw_cmd::PromptIconSource::Embedded(keyboard_paths[i]),
-                ),
+                PromptInputSurface::Controller => ctx.glyphs.glyph_for(action),
+                PromptInputSurface::MouseOrKeyboard => Some(keyboard_icons[i].clone()),
             };
             if let Some(source) = source {
                 icon_cmds.push(PromptIconQuad {

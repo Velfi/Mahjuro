@@ -3,7 +3,7 @@
 Bake Mahjuro assets/ into versioned ZIP packs + pack_manifest.json.
 
 Default release profile: minify JSON; optional lossy tools if on PATH (oxipng, pngquant, ffmpeg).
-See pack_rules.json for pack split (Steam-friendly + lazy audio).
+See pack_rules.json for pack split (shared cross-scene, gameplay bulk, lazy scene_main_menu + music).
 """
 
 from __future__ import annotations

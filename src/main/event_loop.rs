@@ -1,5 +1,7 @@
 use super::*;
 
+use std::time::{Duration, Instant};
+
 use crate::physical_size::PhysicalSize;
 use crate::sdl_shell::SdlShell;
 use sdl3::event::Event;
@@ -66,7 +68,15 @@ impl App {
                     r.resize(self.last_drawable_px);
                 }
             }
-            self.frame_tick(shell);
+            if shell.window_is_foreground() {
+                self.frame_tick(shell);
+            } else {
+                // Idle cheaply while backgrounded: no catch-up simulation tick, no GPU work.
+                let now = Instant::now();
+                self.last_frame = now;
+                self.last_frame_dt = 1.0 / 60.0;
+                std::thread::sleep(Duration::from_millis(50));
+            }
         }
 
         if self.close_saved {

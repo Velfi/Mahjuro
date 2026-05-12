@@ -856,7 +856,9 @@ impl RunState {
         best
     }
 
-    pub(super) fn validation_rules_for_structure_commits(&self) -> Vec<RuleModifier> {
+    /// Rules used when validating a selection before committing it to the structure
+    /// (differs from [`RunState::round_rules`] e.g. honor-gated tutorial modifiers).
+    pub fn validation_rules_for_structure_commits(&self) -> Vec<RuleModifier> {
         self.round_rules
             .iter()
             .copied()

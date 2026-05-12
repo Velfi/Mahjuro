@@ -2,14 +2,14 @@
 
 use super::focus::FocusTarget;
 use crate::render::decal::{load_ui_font, measure_label_advances};
-use crate::render::draw_cmd::{PromptIconQuad, PromptIconSource, UiFrame};
+use crate::render::draw_cmd::{PromptIconQuad, UiFrame};
 use crate::render::theme::color;
 use crate::render::theme::typography;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::scenes::DrawCtx;
 use crate::ui::button_prompts::PromptInputSurface;
 use crate::ui::input::InputMode;
-use crate::ui::kenney_prompt_paths::gameplay_keyboard_prompt_icon_paths;
+use crate::ui::kenney_prompt_paths::gameplay_keyboard_prompt_icons;
 
 /// Whether to show the West / North (keyboard **Q** / **E**) gameplay legend for discard or play.
 ///
@@ -73,7 +73,7 @@ pub fn push_gameplay_action_prompts(
         InputMode::Controller => PromptInputSurface::Controller,
         InputMode::Keyboard | InputMode::Cursor => PromptInputSurface::MouseOrKeyboard,
     };
-    let keyboard_paths = gameplay_keyboard_prompt_icon_paths();
+    let keyboard_icons = gameplay_keyboard_prompt_icons();
 
     // Match [`crate::scenes::shop::view::render_shop_frame`] floating legend (non-inspect row).
     let font_px = typography::size(typography::CAPTION, h).max(14.0);
@@ -244,12 +244,8 @@ pub fn push_gameplay_action_prompts(
             _ => crate::ui::input::UiAction::TriggerStructure,
         };
         let source = match surface {
-            PromptInputSurface::Controller => ctx.steam_glyphs.iter().find_map(|(a, path)| {
-                (*a == action).then(|| PromptIconSource::Filesystem(path.clone()))
-            }),
-            PromptInputSurface::MouseOrKeyboard => {
-                Some(PromptIconSource::Embedded(keyboard_paths[i]))
-            }
+            PromptInputSurface::Controller => ctx.glyphs.glyph_for(action),
+            PromptInputSurface::MouseOrKeyboard => Some(keyboard_icons[i].clone()),
         };
         if let Some(source) = source {
             icon_cmds.push(PromptIconQuad {

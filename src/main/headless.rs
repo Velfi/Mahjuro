@@ -763,6 +763,14 @@ impl HeadlessApp {
             .collect();
         self.tick_count += 1;
         let headless_cascade = CascadeTuning::default();
+        let loading_done = if self.overlay_stack.is_empty() {
+            match &self.scene {
+                Scene::Splash(_) => true,
+                _ => !self.renderer.is_loading(),
+            }
+        } else {
+            !self.renderer.is_loading()
+        };
         let update_result = if self.overlay_stack.is_empty() {
             self.scene.update(UpdateCtx {
                 actions: &actions_this_tick,
@@ -779,7 +787,7 @@ impl HeadlessApp {
                 delete_profile: &mut delete_profile,
                 complete_onboarding: &mut complete_onboarding,
                 cursor_pos: (0.0, 0.0),
-                loading_done: !self.renderer.is_loading(),
+                loading_done,
                 cascade_tuning: &headless_cascade,
                 picked_shop_object: None,
                 picked_gameplay_object: None,
@@ -835,7 +843,7 @@ impl HeadlessApp {
                     delete_profile: &mut delete_profile,
                     complete_onboarding: &mut complete_onboarding,
                     cursor_pos: (0.0, 0.0),
-                    loading_done: !self.renderer.is_loading(),
+                    loading_done,
                     cascade_tuning: &headless_cascade,
                     picked_shop_object: None,
                     picked_gameplay_object: None,
@@ -880,6 +888,13 @@ impl HeadlessApp {
             _ => None,
         };
 
+        let headless_steam = crate::steam::SteamClient::disabled();
+        let glyphs = crate::ui::glyph_source::GlyphResolver::new(
+            &headless_steam,
+            crate::ui::button_prompts::GamepadStyle::default(),
+            false,
+            false,
+        );
         let ctx = DrawCtx::new(
             &layout,
             &self.anim,
@@ -904,7 +919,7 @@ impl HeadlessApp {
             false,
             false,
             crate::ui::button_prompts::GamepadStyle::default(),
-            &[],
+            glyphs,
             suspended_shop,
             suspended_collection,
             self.gfx.tile_preset,

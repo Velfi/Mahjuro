@@ -333,6 +333,8 @@ pub struct ShopReadModel {
     pub owned_talismans: Vec<ShopOwnedConsumable>,
     pub relic_counters: std::collections::BTreeMap<RelicId, i32>,
     pub total_score_earned: u64,
+    /// Score target for the next fight (`base_target * run_number`), for relic tooltips.
+    pub next_blind_target: u32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -547,6 +549,7 @@ impl<'a> GameEngine<'a> {
             owned_talismans,
             relic_counters: run.relic_counters.clone(),
             total_score_earned: run.total_score_earned,
+            next_blind_target: run.base_target.saturating_mul(run.run_number),
         }
     }
 
@@ -1148,6 +1151,9 @@ impl<'a> GameEngine<'a> {
                 self.run.relics.active.remove(index);
                 if !self.run.relics.has(RelicId::IGotAGuy) {
                     self.run.relic_counters.remove(&RelicId::IGotAGuy);
+                }
+                if rid == RelicId::Snowball {
+                    self.run.relic_counters.remove(&RelicId::Snowball);
                 }
                 self.run.gold = self.run.gold.saturating_add(refund as i32);
                 self.bus.push(GameEvent::UiSound(crate::audio::SfxId::Sell));

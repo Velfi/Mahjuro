@@ -84,7 +84,8 @@ A large **relic** pool is implemented (see `assets/data/relics.json`), spanning 
 * **Wall & scoring infrastructure** — ShantenShove, KanDrum, KongsBlessing, DoraCrown, RoundCompass, EightTreasures
 * **Flowers** — GardenKeeper, Ikebana, Hanami
 * **Suit, rank, terminal, shop** — JadeSerpent, RedSerpent, BlueSerpent, LowTide, HighTide, MerchantsEye, EdgeRunner, LuckySeven
-* **Plays per round & conditional mult** — Momentum, Minimalist, TurtleShell, ClosedGate, GoldenEngine, Snowball, SecondWind, GlassCannon
+* **Plays per round & conditional mult** — Momentum, Minimalist, TurtleShell, ClosedGate, GoldenEngine, SecondWind, GlassCannon
+* **Plays per round & scaling chips** — Snowball
 * **Interest & passive gold** — GoldIdol, JadeAbacus, NestEgg, Patience
 * **Retrigger, polish, lanterns, mirror** — LastBreath, TilePolisher, PaperLantern, SilverFiligreeLantern, MirrorTile, Geese, VoiceOfThePeople, VoiceOfTheElite, TeaCeremony, GhostHand
 * **Ramp, fragile evolutions, inventory tricks** — Humility, Obsession, Bonfire, RiverRunner, MeltingIce, Taotie, SilkThread, SilkMoth, ShadowHand, SolitarySage, Disgust

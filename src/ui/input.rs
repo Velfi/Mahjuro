@@ -255,6 +255,11 @@ pub struct InputState {
     pub item_inspect_zoom_triggers: f32,
     /// Controller family for on-screen button prompts (from USB vendor / name).
     pub gamepad_style: GamepadStyle,
+    /// Last style we ran `apply_controller_layout_defaults_for_active_style`
+    /// against. Used to debounce: we only re-evaluate when the connected
+    /// controller's family actually changes (Nintendo ↔ Xbox etc.), not every
+    /// frame. `None` until we've seen a real pad at least once.
+    last_seen_layout_style: Option<GamepadStyle>,
     /// Scheduled scoring / rumble-lab pulses (`SDL_Gamepad::set_rumble` cannot overlap envelope/composite).
     scoring_rumble_schedule: Vec<(Instant, u16, u16, u32, f32)>,
 }
@@ -284,6 +289,7 @@ impl InputState {
             item_inspect_mouse_orbit_px: (0.0, 0.0),
             item_inspect_zoom_triggers: 0.0,
             gamepad_style: GamepadStyle::default(),
+            last_seen_layout_style: None,
             scoring_rumble_schedule: Vec::new(),
         })
     }
@@ -463,29 +469,6 @@ impl InputState {
         gain: f32,
     ) {
         Self::fire_sdl_rumble(shell, weak, strong, duration_ms, gain);
-    }
-
-    /// Light tap aligned with each cascade reveal beat (score tick SFX).
-    pub fn play_scoring_cascade_step_rumble(&mut self, shell: &mut SdlShell, now: Instant) {
-        self.play_scoring_rumble_pulse(
-            shell,
-            now,
-            SCORING_STEP_RUMBLE_WEAK,
-            SCORING_STEP_RUMBLE_STRONG,
-            SCORING_STEP_RUMBLE_MS,
-            SCORING_STEP_RUMBLE_GAIN,
-        );
-    }
-
-    /// Stronger pulse for the final total; scales with hand magnitude like screen shake.
-    pub fn play_scoring_cascade_final_rumble(
-        &mut self,
-        shell: &mut SdlShell,
-        now: Instant,
-        earned: u64,
-    ) {
-        let (weak, strong, duration_ms, gain) = Self::cascade_final_rumble_params(earned);
-        self.play_scoring_rumble_pulse(shell, now, weak, strong, duration_ms, gain);
     }
 
     /// Drive shop hold-to-sell rumble (same master toggle as scoring-cascade rumble).
@@ -777,7 +760,9 @@ impl InputState {
         let before = actions.len();
         shell.prepare_gamepad_frame();
 
-        Self::sync_gamepad_style_from_first_connected(shell, &mut self.gamepad_style);
+        if Self::sync_gamepad_style_from_first_connected(shell, &mut self.gamepad_style) {
+            self.apply_controller_layout_defaults_for_active_style();
+        }
 
         if poll_ctx.item_inspect_overlay {
             Self::sample_item_inspect_analog(
@@ -812,17 +797,51 @@ impl InputState {
         false
     }
 
-    fn sync_gamepad_style_from_first_connected(shell: &SdlShell, out: &mut GamepadStyle) {
+    /// Returns `true` when a real connected gamepad was found and `out` was
+    /// updated. Callers use the return value to gate one-shot side effects
+    /// (e.g. [`Self::apply_controller_layout_defaults_if_first_seen`]).
+    fn sync_gamepad_style_from_first_connected(shell: &SdlShell, out: &mut GamepadStyle) -> bool {
         let Ok(ids) = shell.gamepad.gamepads() else {
-            return;
+            return false;
         };
         for id in ids {
             let vendor = shell.gamepad.vendor_for_id(id);
             if let Ok(name) = shell.gamepad.name_for_id(id) {
                 *out = GamepadStyle::infer(vendor, &name);
-                return;
+                return true;
             }
         }
+        false
+    }
+
+    /// Pick smart defaults for `swap_ab` / `swap_xy` based on the **currently
+    /// connected** controller style, but only if the player has never manually
+    /// toggled either setting in Options. Nintendo pads flip both ON so the
+    /// eastern face button labelled "A" becomes Confirm (matching every other
+    /// Switch title); all other styles flip both OFF.
+    ///
+    /// Re-runs whenever the detected style changes (Nintendo ↔ Xbox etc.) so
+    /// a mid-session controller swap rebinds correctly. Once the player has
+    /// taken control via Options (`controller_layout_user_set == true`) this
+    /// stops touching their settings forever.
+    pub fn apply_controller_layout_defaults_for_active_style(&mut self) {
+        if self.last_seen_layout_style == Some(self.gamepad_style) {
+            return;
+        }
+        self.last_seen_layout_style = Some(self.gamepad_style);
+        let mut settings = crate::persistence::load_settings();
+        if settings.controller_layout_user_set {
+            return;
+        }
+        let want_swap = matches!(self.gamepad_style, GamepadStyle::Nintendo);
+        self.swap_ab = want_swap;
+        self.swap_xy = want_swap;
+        if settings.swap_ab == want_swap && settings.swap_xy == want_swap {
+            return;
+        }
+        settings.swap_ab = want_swap;
+        settings.swap_xy = want_swap;
+        let _ = crate::persistence::save_settings(&settings);
     }
 
     fn sample_item_inspect_analog(

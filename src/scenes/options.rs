@@ -37,6 +37,7 @@ const BACK_ID: u32 = 0xF210;
 enum Section {
     Audio,
     Visual,
+    Display,
     Rendering,
     Accessibility,
     Controls,
@@ -48,6 +49,7 @@ impl Section {
         match self {
             Section::Audio => "Audio",
             Section::Visual => "Visual",
+            Section::Display => "Display",
             Section::Rendering => "Rendering",
             Section::Accessibility => "Accessibility",
             Section::Controls => "Controls",
@@ -59,6 +61,7 @@ impl Section {
 const SECTIONS: &[Section] = &[
     Section::Audio,
     Section::Visual,
+    Section::Display,
     Section::Rendering,
     Section::Accessibility,
     Section::Controls,
@@ -78,6 +81,7 @@ enum Row {
     Tile,
     Tileset,
     Surface,
+    BorderlessFullscreen,
     Shadows,
     Ssr,
     Hdr,
@@ -121,6 +125,7 @@ const ROWS: &[Row] = &[
     Row::Tile,
     Row::Tileset,
     Row::Surface,
+    Row::BorderlessFullscreen,
     Row::Shadows,
     Row::Ssr,
     Row::Hdr,
@@ -156,6 +161,8 @@ const CONTENT: &[ContentSlot] = &[
     ContentSlot::Row(Row::Tile),
     ContentSlot::Row(Row::Tileset),
     ContentSlot::Row(Row::Surface),
+    ContentSlot::Header(Section::Display),
+    ContentSlot::Row(Row::BorderlessFullscreen),
     ContentSlot::Header(Section::Rendering),
     ContentSlot::Row(Row::Shadows),
     ContentSlot::Row(Row::Ssr),
@@ -230,6 +237,9 @@ struct PanelLayout {
     // Hint
     hint_y: f32,
     hint_h: f32,
+    // Version footer (below hint)
+    version_y: f32,
+    version_h: f32,
 }
 
 fn compute_layout(w: f32, h: f32) -> PanelLayout {
@@ -257,10 +267,12 @@ fn compute_layout(w: f32, h: f32) -> PanelLayout {
     let slot_h = (40.0 * scale).max(26.0);
     let slot_gap = (10.0 * scale).max(5.0);
 
-    // Back button and hint pinned to the bottom.
+    // Back button, hint, and version footer pinned to the bottom.
     let back_h = (42.0 * scale).max(28.0);
     let hint_h = (20.0 * scale).max(14.0);
-    let hint_y = h - hint_h - (8.0 * scale);
+    let version_h = (14.0 * scale).max(10.0);
+    let version_y = h - version_h - (4.0 * scale);
+    let hint_y = version_y - hint_h - (6.0 * scale);
     let back_y = hint_y - back_h - (12.0 * scale);
     let back_w = (180.0 * scale).min(content_w * 0.5);
     let back_x = content_x + (content_w - back_w) * 0.5;
@@ -291,6 +303,8 @@ fn compute_layout(w: f32, h: f32) -> PanelLayout {
         back_h,
         hint_y,
         hint_h,
+        version_y,
+        version_h,
     }
 }
 
@@ -328,8 +342,13 @@ pub struct OptionsScene {
     pub shadows_enabled: bool,
     pub ssr_enabled: bool,
     pub hdr_enabled: bool,
+    pub borderless_fullscreen: bool,
     pub swap_ab: bool,
     pub swap_xy: bool,
+    /// Mirrors `AppSettings::controller_layout_user_set`. Goes ON the moment
+    /// the player toggles `swap_ab` or `swap_xy` here, locking out the
+    /// auto-applied controller-style defaults from then on.
+    pub controller_layout_user_set: bool,
     pub xy_quick_action: bool,
     pub hold_to_sell_rumble: bool,
     pub auto_cash_in_on_full_structure: bool,
@@ -374,8 +393,10 @@ impl OptionsScene {
             shadows_enabled: settings.shadows_enabled,
             ssr_enabled: settings.ssr_enabled,
             hdr_enabled: settings.hdr_enabled,
+            borderless_fullscreen: settings.borderless_fullscreen,
             swap_ab: settings.swap_ab,
             swap_xy: settings.swap_xy,
+            controller_layout_user_set: settings.controller_layout_user_set,
             xy_quick_action: settings.xy_quick_action,
             hold_to_sell_rumble: settings.hold_to_sell_rumble,
             auto_cash_in_on_full_structure: settings.auto_cash_in_on_full_structure,
@@ -420,8 +441,10 @@ impl OptionsScene {
         settings.shadows_enabled = self.shadows_enabled;
         settings.ssr_enabled = self.ssr_enabled;
         settings.hdr_enabled = self.hdr_enabled;
+        settings.borderless_fullscreen = self.borderless_fullscreen;
         settings.swap_ab = self.swap_ab;
         settings.swap_xy = self.swap_xy;
+        settings.controller_layout_user_set = self.controller_layout_user_set;
         settings.xy_quick_action = self.xy_quick_action;
         settings.hold_to_sell_rumble = self.hold_to_sell_rumble;
         settings.auto_cash_in_on_full_structure = self.auto_cash_in_on_full_structure;
@@ -540,11 +563,18 @@ impl OptionsScene {
             Row::Tile => self.tile_preset = self.tile_preset.next(),
             Row::Tileset => self.cycle_tileset(1),
             Row::Surface => self.cycle_surface(1),
+            Row::BorderlessFullscreen => self.borderless_fullscreen = !self.borderless_fullscreen,
             Row::Shadows => self.shadows_enabled = !self.shadows_enabled,
             Row::Ssr => self.ssr_enabled = !self.ssr_enabled,
             Row::Hdr => self.hdr_enabled = !self.hdr_enabled,
-            Row::SwapAb => self.swap_ab = !self.swap_ab,
-            Row::SwapXy => self.swap_xy = !self.swap_xy,
+            Row::SwapAb => {
+                self.swap_ab = !self.swap_ab;
+                self.controller_layout_user_set = true;
+            }
+            Row::SwapXy => {
+                self.swap_xy = !self.swap_xy;
+                self.controller_layout_user_set = true;
+            }
             Row::XyQuickAction => self.xy_quick_action = !self.xy_quick_action,
             Row::HoldToSellRumble => self.hold_to_sell_rumble = !self.hold_to_sell_rumble,
             Row::AutoCashInOnFullStructure => {
@@ -571,11 +601,18 @@ impl OptionsScene {
             Row::Tile => self.tile_preset = self.tile_preset.prev(),
             Row::Tileset => self.cycle_tileset(-1),
             Row::Surface => self.cycle_surface(-1),
+            Row::BorderlessFullscreen => self.borderless_fullscreen = !self.borderless_fullscreen,
             Row::Shadows => self.shadows_enabled = !self.shadows_enabled,
             Row::Ssr => self.ssr_enabled = !self.ssr_enabled,
             Row::Hdr => self.hdr_enabled = !self.hdr_enabled,
-            Row::SwapAb => self.swap_ab = !self.swap_ab,
-            Row::SwapXy => self.swap_xy = !self.swap_xy,
+            Row::SwapAb => {
+                self.swap_ab = !self.swap_ab;
+                self.controller_layout_user_set = true;
+            }
+            Row::SwapXy => {
+                self.swap_xy = !self.swap_xy;
+                self.controller_layout_user_set = true;
+            }
             Row::XyQuickAction => self.xy_quick_action = !self.xy_quick_action,
             Row::HoldToSellRumble => self.hold_to_sell_rumble = !self.hold_to_sell_rumble,
             Row::AutoCashInOnFullStructure => {
@@ -625,6 +662,10 @@ impl OptionsScene {
                 self.cycle_surface(1);
                 self.save_settings();
             }
+            Row::BorderlessFullscreen => {
+                self.borderless_fullscreen = !self.borderless_fullscreen;
+                self.save_settings();
+            }
             Row::Shadows => {
                 self.shadows_enabled = !self.shadows_enabled;
                 self.save_settings();
@@ -639,10 +680,12 @@ impl OptionsScene {
             }
             Row::SwapAb => {
                 self.swap_ab = !self.swap_ab;
+                self.controller_layout_user_set = true;
                 self.save_settings();
             }
             Row::SwapXy => {
                 self.swap_xy = !self.swap_xy;
+                self.controller_layout_user_set = true;
                 self.save_settings();
             }
             Row::XyQuickAction => {
@@ -1009,6 +1052,20 @@ impl OptionsScene {
             color: color::UMBER,
             ..Default::default()
         });
+
+        let version_text = if cfg!(debug_assertions) {
+            "vNEXT".into()
+        } else {
+            format!("v{}", env!("CARGO_PKG_VERSION"))
+        };
+        let version_font = (12.0 * layout.scale).max(10.0);
+        text_labels.push(TextLabel {
+            rect: [0.0, layout.version_y, w, layout.version_h],
+            text: version_text,
+            font_px: Some(version_font),
+            color: color::STONE,
+            ..Default::default()
+        });
     }
 
     // ── Row rendering ──────────────────────────────────────────────────
@@ -1131,6 +1188,14 @@ impl OptionsScene {
                     Row::Tile => format!("Tile Style: {}", self.tile_preset.label()),
                     Row::Tileset => format!("Tile Set: {}", self.tileset_name),
                     Row::Surface => format!("Surface: {}", self.surface_kind.label()),
+                    Row::BorderlessFullscreen => format!(
+                        "Display: {}",
+                        if self.borderless_fullscreen {
+                            "Borderless fullscreen"
+                        } else {
+                            "Windowed"
+                        }
+                    ),
                     Row::Shadows => format!(
                         "Shadows: {}",
                         if self.shadows_enabled { "ON" } else { "OFF" }
@@ -1143,7 +1208,7 @@ impl OptionsScene {
                     Row::SwapAb => format!("Swap A/B: {}", if self.swap_ab { "ON" } else { "OFF" }),
                     Row::SwapXy => format!("Swap X/Y: {}", if self.swap_xy { "ON" } else { "OFF" }),
                     Row::XyQuickAction => format!(
-                        "X and Y Quick Action: {}",
+                        "Instant play / discard (X·Y face): {}",
                         if self.xy_quick_action { "ON" } else { "OFF" }
                     ),
                     Row::HoldToSellRumble => format!(
