@@ -828,7 +828,7 @@
   {
     "id": "paper_lantern",
     "name": "Paper Lantern",
-    "description": "+4 mult; 1-in-5 chance to be destroyed at round end (extinct run-wide)",
+    "description": "+4 mult; 1-in-5 chance to be destroyed at round end (extinct run-wide). After destruction, Stone Lantern may appear in shops this run.",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -841,7 +841,7 @@
   {
     "id": "stone_lantern",
     "name": "Stone Lantern",
-    "description": "×2 mult; 1-in-1000 chance to be destroyed at round end",
+    "description": "×2 mult; 1-in-1000 chance to be destroyed at round end. After Paper Lantern is destroyed this run, may appear in shops.",
     "rarity": "legendary",
     "flavor_spans": [
       {

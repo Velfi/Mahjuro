@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Mahjuro — relic flavor_spans editor</title>
+  <title>Mahjuro — relic description &amp; flavor editor</title>
   <style>
     :root {
       --bg: #12141a;
@@ -21,20 +21,33 @@
       background: var(--bg);
       color: var(--text);
       margin: 0;
-      padding: 1.25rem;
+      padding: 0.75rem 1rem 1.25rem;
       line-height: 1.45;
-      max-width: 52rem;
+      max-width: 88rem;
+      margin-inline: auto;
+    }
+    .page-header {
+      margin-bottom: 0.75rem;
     }
     h1 {
-      font-size: 1.35rem;
+      font-size: 1.25rem;
       font-weight: normal;
       color: var(--accent);
-      margin: 0 0 0.5rem;
+      margin: 0 0 0.35rem;
     }
-    p.hint {
+    details.hint-details {
       color: var(--muted);
-      font-size: 0.9rem;
-      margin: 0 0 1rem;
+      font-size: 0.85rem;
+    }
+    details.hint-details summary {
+      cursor: pointer;
+      user-select: none;
+    }
+    details.hint-details summary::-webkit-details-marker { color: var(--accent); }
+    details.hint-details p {
+      margin: 0.5rem 0 0;
+      padding-left: 0.1rem;
+      max-width: 60ch;
     }
     label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.25rem; }
     select, button, input[type="file"] {
@@ -50,13 +63,44 @@
       border: 1px solid var(--border);
       border-radius: 4px;
     }
-    .row { margin-bottom: 1rem; }
+    .top-controls {
+      display: grid;
+      gap: 0.65rem;
+      margin-bottom: 0.75rem;
+    }
+    @media (min-width: 560px) {
+      .top-controls {
+        grid-template-columns: minmax(10rem, 20rem) minmax(0, 1fr);
+        align-items: end;
+      }
+    }
+    .work-area {
+      display: grid;
+      gap: 0.75rem 1rem;
+      align-items: start;
+    }
+    @media (min-width: 720px) {
+      .work-area.has-art {
+        grid-template-columns: minmax(9.5rem, 12.5rem) minmax(0, 1fr);
+      }
+    }
+    .editor-stack {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+    }
+    .row { margin-bottom: 0; }
     .toolbar {
       display: flex;
       flex-wrap: wrap;
       gap: 0.4rem;
       align-items: center;
       margin-bottom: 0.5rem;
+    }
+    .toolbar-note {
+      color: var(--muted);
+      font-size: 0.78rem;
     }
     button {
       padding: 0.4rem 0.75rem;
@@ -69,8 +113,8 @@
     button:hover { background: var(--btn-hi); }
     button.primary { border-color: var(--accent); color: var(--accent); }
     #editor {
-      min-height: 7rem;
-      padding: 0.75rem 1rem;
+      min-height: clamp(5.5rem, 18vh, 12rem);
+      padding: 0.65rem 0.85rem;
       background: var(--panel);
       border: 1px solid var(--border);
       border-radius: 4px;
@@ -83,63 +127,156 @@
       color: var(--muted);
       pointer-events: none;
     }
+    #ruleEditor {
+      display: block;
+      width: 100%;
+      min-height: clamp(3rem, 10vh, 6rem);
+      max-height: min(10rem, 24vh);
+      padding: 0.55rem 0.75rem;
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      outline: none;
+      font: inherit;
+      font-size: 0.95rem;
+      line-height: 1.4;
+      resize: vertical;
+    }
+    #ruleEditor:focus { border-color: var(--accent); }
+    #ruleEditor:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
     pre#preview {
       font-family: ui-monospace, monospace;
       font-size: 0.72rem;
       background: #0d0f14;
       border: 1px solid var(--border);
       border-radius: 4px;
-      padding: 0.75rem;
+      padding: 0.65rem 0.75rem;
       overflow-x: auto;
+      overflow-y: auto;
+      max-height: min(14rem, 32vh);
       white-space: pre-wrap;
       word-break: break-word;
       color: #a8b8c8;
+      margin: 0;
     }
-    .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
+    .preview-row label { margin-bottom: 0.35rem; }
+    .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0; }
     code { font-family: ui-monospace, monospace; font-size: 0.85em; color: #b8c4d4; }
     body.drag-files {
       outline: 3px dashed var(--accent);
       outline-offset: -8px;
     }
+    #objectArtAside[hidden] { display: none !important; }
+    .object-art-aside {
+      min-width: 0;
+    }
+    @media (min-width: 720px) {
+      .object-art-aside {
+        position: sticky;
+        top: 0.5rem;
+      }
+    }
+    .object-art-aside label {
+      font-size: 0.75rem;
+    }
+    .object-art-frame {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.45rem;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    #relicObjectArt {
+      display: block;
+      max-width: 100%;
+      width: auto;
+      max-height: min(200px, 28vh);
+      height: auto;
+      object-fit: contain;
+      vertical-align: middle;
+    }
+    #relicObjectArt.is-hidden { display: none; }
+    .object-art-hint {
+      margin: 0;
+      font-size: 0.72rem;
+      color: var(--muted);
+      text-align: center;
+      line-height: 1.3;
+      word-break: break-word;
+    }
   </style>
 </head>
 <body>
-  <h1>Relic flavor → <code>flavor_spans</code></h1>
-  <p class="hint">
-    Load <code>assets/data/relics.json</code> via the file picker or <strong>drag and drop</strong> the file onto this page.
-    Pick a relic, edit with <strong>B</strong> / <em>I</em> (or Ctrl+B / Ctrl+I).
-    Save writes the full array back (pretty-printed). Browsers that support it will open a real save dialog; others download <code>relics.json</code> for you to move into <code>assets/data/</code>.
-  </p>
+  <header class="page-header">
+    <h1>Relic text → <code>description</code> &amp; <code>flavor_spans</code></h1>
+    <details class="hint-details">
+      <summary>
+        Load <code>relics.json</code> (file or drag-drop), edit the rule line and flavor, use <strong>B</strong> / <em>I</em> in the flavor box. Save writes the full array. More…
+      </summary>
+      <p>
+        <strong>Rule</strong> is the plain-string <code>description</code> field (what players read as the mechanical summary). <strong>Flavor</strong> is rich-text <code>flavor_spans</code> for inspect UI.
+        Changing relic in the dropdown saves the current relic’s edits in memory first (then save file when you are ready).
+        Browsers that support it open a real save dialog; otherwise you get a download of <code>relics.json</code> to move into <code>assets/data/</code>.
+        Object art uses <code>assets/textures/relics/source/&lt;id&gt;_object.png</code> relative to this page; if images are missing, serve the repo from its root (e.g. <code>python3 -m http.server</code>) and open this HTML over <code>http://localhost/…</code>.
+      </p>
+    </details>
+  </header>
 
-  <div class="row">
-    <label for="file">JSON file</label>
-    <input type="file" id="file" accept=".json,application/json" />
-  </div>
-
-  <div class="row">
-    <label for="relic">Relic</label>
-    <select id="relic" disabled></select>
-  </div>
-
-  <div class="row">
-    <label>Flavor (rich text)</label>
-    <div class="toolbar">
-      <button type="button" id="btnBold" title="Bold">B</button>
-      <button type="button" id="btnItalic" title="Italic"><em>I</em></button>
-      <button type="button" id="btnClearFmt">Clear format</button>
-      <span style="color:var(--muted);font-size:0.8rem;">Line breaks in the box become <code>\n</code> in JSON.</span>
+  <div class="top-controls">
+    <div class="field">
+      <label for="file">JSON file</label>
+      <input type="file" id="file" accept=".json,application/json" />
     </div>
-    <div id="editor" contenteditable="true" data-placeholder="Type flavor text…"></div>
+    <div class="field">
+      <label for="relic">Relic</label>
+      <select id="relic" disabled></select>
+    </div>
   </div>
 
-  <div class="row">
-    <label>Preview <code>flavor_spans</code> (this relic only)</label>
-    <pre id="preview">{}</pre>
-  </div>
+  <div id="workArea" class="work-area">
+    <aside id="objectArtAside" class="object-art-aside" hidden>
+      <label>Object art</label>
+      <div class="object-art-frame">
+        <img id="relicObjectArt" alt="" decoding="async" />
+        <p id="relicObjectArtHint" class="object-art-hint"></p>
+      </div>
+    </aside>
 
-  <div class="actions">
-    <button type="button" class="primary" id="btnSave" disabled>Save relics.json</button>
-    <button type="button" id="btnCopy" disabled>Copy spans JSON</button>
+    <div class="editor-stack">
+      <div class="row">
+        <label for="ruleEditor">Rule (<code>description</code>)</label>
+        <textarea id="ruleEditor" disabled rows="2" placeholder="Mechanical / shop summary…"></textarea>
+      </div>
+
+      <div class="row">
+        <label>Flavor (rich text)</label>
+        <div class="toolbar">
+          <button type="button" id="btnBold" title="Bold">B</button>
+          <button type="button" id="btnItalic" title="Italic"><em>I</em></button>
+          <button type="button" id="btnClearFmt">Clear format</button>
+          <span class="toolbar-note">Line breaks → <code>\n</code> in JSON.</span>
+        </div>
+        <div id="editor" contenteditable="true" data-placeholder="Type flavor text…"></div>
+      </div>
+
+      <div class="row preview-row">
+        <label>Preview JSON (this relic: <code>description</code> + <code>flavor_spans</code>)</label>
+        <pre id="preview">{}</pre>
+      </div>
+
+      <div class="actions">
+        <button type="button" class="primary" id="btnSave" disabled>Save relics.json</button>
+        <button type="button" id="btnCopy" disabled>Copy preview JSON</button>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -217,21 +354,90 @@
 
     function updatePreview() {
       const spans = editorToSpans($("editor"));
-      $("preview").textContent = JSON.stringify({ flavor_spans: spans }, null, 2);
+      const description = $("ruleEditor").value;
+      $("preview").textContent = JSON.stringify({ description, flavor_spans: spans }, null, 2);
+    }
+
+    function commitCurrentRelicEdits() {
+      if (!relics || currentId == null) return;
+      const idx = relics.findIndex((x) => x.id === currentId);
+      if (idx < 0) return;
+      relics[idx].flavor_spans = editorToSpans($("editor"));
+      relics[idx].description = $("ruleEditor").value;
     }
 
     function loadRelicIntoEditor(id) {
+      if (relics && currentId != null && currentId !== id) {
+        commitCurrentRelicEdits();
+      }
       currentId = id;
+      const sel = $("relic");
+      if (sel && sel.value !== id) sel.value = id;
       const r = relics.find((x) => x.id === id);
       const spans = (r && r.flavor_spans) || [];
       $("editor").innerHTML = spansToHtml(spans);
+      $("ruleEditor").value = r && r.description != null ? String(r.description) : "";
       updatePreview();
+      updateObjectArt(id);
     }
 
+    function updateObjectArt(id) {
+      const aside = $("objectArtAside");
+      const workArea = $("workArea");
+      const img = $("relicObjectArt");
+      const hint = $("relicObjectArtHint");
+      if (!id || !relics) {
+        aside.hidden = true;
+        workArea.classList.remove("has-art");
+        img.removeAttribute("src");
+        img.removeAttribute("title");
+        img.onload = null;
+        img.onerror = null;
+        img.classList.remove("is-hidden");
+        hint.textContent = "";
+        return;
+      }
+      aside.hidden = false;
+      workArea.classList.add("has-art");
+      const rel = `../assets/textures/relics/source/${id}_object.png`;
+      img.alt = `Relic object art: ${id}`;
+      img.classList.remove("is-hidden");
+      hint.textContent = "Loading…";
+
+      img.onload = () => {
+        img.onload = null;
+        img.onerror = null;
+        img.title = rel;
+        hint.textContent = `${id}_object.png`;
+      };
+      img.onerror = () => {
+        img.onload = null;
+        img.onerror = null;
+        img.removeAttribute("title");
+        img.classList.add("is-hidden");
+        hint.textContent =
+          `Missing ${rel}. From repo root: python3 -m http.server → open …/tools/relic_flavor_editor.html`;
+      };
+      img.src = rel;
+    }
+
+    /** Stable display order for the relic dropdown (does not reorder `relics` on save). */
+    function sortRelicsForDisplay(arr) {
+      return [...arr].sort((a, b) => {
+        const labelA = String(a.name ?? a.id ?? "");
+        const labelB = String(b.name ?? b.id ?? "");
+        const cmp = labelA.localeCompare(labelB, undefined, { sensitivity: "base" });
+        if (cmp !== 0) return cmp;
+        return String(a.id ?? "").localeCompare(String(b.id ?? ""), undefined, { sensitivity: "base" });
+      });
+    }
+
+    /** @returns {string | null} first relic id in sorted order (for initial selection) */
     function populateRelicSelect() {
       const sel = $("relic");
       sel.innerHTML = "";
-      for (const r of relics) {
+      const sorted = sortRelicsForDisplay(relics);
+      for (const r of sorted) {
         const opt = document.createElement("option");
         opt.value = r.id;
         opt.textContent = `${r.name} (${r.id})`;
@@ -240,6 +446,8 @@
       sel.disabled = false;
       $("btnSave").disabled = false;
       $("btnCopy").disabled = false;
+      $("ruleEditor").disabled = false;
+      return sorted[0]?.id ?? null;
     }
 
     /** @returns {boolean} */
@@ -249,15 +457,21 @@
       } catch (err) {
         alert("Invalid JSON: " + err.message);
         relics = null;
+        $("ruleEditor").disabled = true;
+        $("ruleEditor").value = "";
+        updateObjectArt(null);
         return false;
       }
       if (!Array.isArray(relics)) {
         alert("Expected a JSON array of relic objects.");
         relics = null;
+        $("ruleEditor").disabled = true;
+        $("ruleEditor").value = "";
+        updateObjectArt(null);
         return false;
       }
-      populateRelicSelect();
-      loadRelicIntoEditor(relics[0].id);
+      const firstId = populateRelicSelect();
+      if (firstId) loadRelicIntoEditor(firstId);
       return true;
     }
 
@@ -319,6 +533,7 @@
     });
 
     $("editor").addEventListener("input", updatePreview);
+    $("ruleEditor").addEventListener("input", updatePreview);
 
     function exec(cmd, val = null) {
       document.execCommand(cmd, false, val);
@@ -345,11 +560,12 @@
     });
 
     $("btnCopy").addEventListener("click", async () => {
+      const description = $("ruleEditor").value;
       const spans = editorToSpans($("editor"));
-      const snippet = JSON.stringify(spans, null, 2);
+      const snippet = JSON.stringify({ description, flavor_spans: spans }, null, 2);
       try {
         await navigator.clipboard.writeText(snippet);
-        alert("Copied flavor_spans array to clipboard.");
+        alert("Copied description + flavor_spans to clipboard.");
       } catch {
         prompt("Copy:", snippet);
       }
@@ -361,6 +577,7 @@
       if (idx < 0) return;
       const spans = editorToSpans($("editor"));
       relics[idx].flavor_spans = spans;
+      relics[idx].description = $("ruleEditor").value;
       const out = JSON.stringify(relics, null, 2) + "\n";
       const name = "relics.json";
 
