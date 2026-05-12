@@ -88,6 +88,7 @@ enum Row {
     HoldToSellRumble,
     AutoCashInOnFullStructure,
     Hints,
+    RebindController,
     ExportPlayStats,
     SaveAndProfiles,
 }
@@ -130,6 +131,7 @@ const ROWS: &[Row] = &[
     Row::HoldToSellRumble,
     Row::AutoCashInOnFullStructure,
     Row::Hints,
+    Row::RebindController,
     Row::ExportPlayStats,
     Row::SaveAndProfiles,
 ];
@@ -167,6 +169,7 @@ const CONTENT: &[ContentSlot] = &[
     ContentSlot::Row(Row::HoldToSellRumble),
     ContentSlot::Row(Row::AutoCashInOnFullStructure),
     ContentSlot::Row(Row::Hints),
+    ContentSlot::Row(Row::RebindController),
     ContentSlot::Header(Section::Data),
     ContentSlot::Row(Row::ExportPlayStats),
     ContentSlot::Row(Row::SaveAndProfiles),
@@ -305,6 +308,9 @@ pub struct OptionsScene {
     export_requested: bool,
     /// User chose Save & profiles — open profile picker then return here.
     profile_select_requested: bool,
+    /// User activated "Rebind controller" this frame — owner pushes
+    /// [`GameEvent::OpenSteamInputBindings`] on the next drain.
+    rebind_controller_requested: bool,
     /// Smooth-scrolling state for the content pane.
     scroll: SmoothScroll,
 
@@ -353,6 +359,7 @@ impl OptionsScene {
             cancel_requested: false,
             export_requested: false,
             profile_select_requested: false,
+            rebind_controller_requested: false,
             scroll: SmoothScroll::new(),
             master_volume: settings.master_volume,
             sfx_volume: settings.sfx_volume,
@@ -453,6 +460,12 @@ impl OptionsScene {
         v
     }
 
+    pub fn take_rebind_controller_requested(&mut self) -> bool {
+        let v = self.rebind_controller_requested;
+        self.rebind_controller_requested = false;
+        v
+    }
+
     /// Range (min, max, step) for a slider row.
     fn slider_range(row: Row) -> (f32, f32, f32) {
         match row {
@@ -539,7 +552,7 @@ impl OptionsScene {
             }
             Row::Hints => self.hints_enabled = !self.hints_enabled,
             Row::UndoDiscard => self.discard_undo_enabled = !self.discard_undo_enabled,
-            Row::ExportPlayStats | Row::SaveAndProfiles => return,
+            Row::RebindController | Row::ExportPlayStats | Row::SaveAndProfiles => return,
             _ => return,
         }
         self.save_settings();
@@ -570,7 +583,7 @@ impl OptionsScene {
             }
             Row::Hints => self.hints_enabled = !self.hints_enabled,
             Row::UndoDiscard => self.discard_undo_enabled = !self.discard_undo_enabled,
-            Row::ExportPlayStats | Row::SaveAndProfiles => return,
+            Row::RebindController | Row::ExportPlayStats | Row::SaveAndProfiles => return,
             _ => return,
         }
         self.save_settings();
@@ -651,6 +664,9 @@ impl OptionsScene {
             Row::UndoDiscard => {
                 self.discard_undo_enabled = !self.discard_undo_enabled;
                 self.save_settings();
+            }
+            Row::RebindController => {
+                self.rebind_controller_requested = true;
             }
             Row::ExportPlayStats => {
                 self.export_requested = true;
@@ -1157,6 +1173,9 @@ impl OptionsScene {
                             "OFF"
                         }
                     ),
+                    Row::RebindController => {
+                        "Rebind controller (Steam overlay) — Space / click".into()
+                    }
                     Row::ExportPlayStats => {
                         "Export play stats (HTML) — Space / click".into()
                     }
@@ -1212,6 +1231,9 @@ impl SceneBehavior for OptionsScene {
                     body: format!("{e:#}"),
                 }),
             }
+        }
+        if self.take_rebind_controller_requested() {
+            ctx.bus.push(GameEvent::OpenSteamInputBindings);
         }
         if self.take_profile_select_requested() {
             return Some(Scene::ProfileSelect(ProfileSelectScene::from_options_menu()));
