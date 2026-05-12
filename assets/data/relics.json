@@ -1071,17 +1071,17 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
+        "text": "Flames warm your bones, the ",
         "bold": false,
         "italic": false
       },
       {
-        "text": "Bonfire",
+        "text": "Bulgae",
         "bold": true,
         "italic": false
       },
       {
-        "text": " — never the tile, always the tale.",
+        "text": " dances in your favor.",
         "bold": false,
         "italic": false
       }
