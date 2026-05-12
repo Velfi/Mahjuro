@@ -29,7 +29,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -88,7 +88,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -147,7 +147,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -206,7 +206,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -265,7 +265,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -324,7 +324,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -383,7 +383,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -442,7 +442,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -501,7 +501,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -560,7 +560,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -619,7 +619,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -678,7 +678,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -737,7 +737,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -769,7 +769,7 @@
   {
     "id": "glass_cannon",
     "name": "Glass Cannon",
-    "description": "\u00d73 final mult on your next scored hand, then destroyed",
+    "description": "×3 final mult on your next scored hand, then destroyed",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -796,7 +796,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -841,7 +841,7 @@
   {
     "id": "silver_filigree_lantern",
     "name": "Silver Filigree Lantern",
-    "description": "\u00d72 mult; 1-in-1000 chance to be destroyed at round end",
+    "description": "×2 mult; 1-in-1000 chance to be destroyed at round end",
     "rarity": "legendary",
     "flavor_spans": [
       {
@@ -855,7 +855,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -887,7 +887,7 @@
   {
     "id": "way_of_purity",
     "name": "Way of Purity",
-    "description": "All scored tiles are one suit: \u00d72.5 mult",
+    "description": "All scored tiles are one suit: ×2.5 mult",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -914,7 +914,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -973,7 +973,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -1022,17 +1022,7 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "Ghost",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": "A disembodied hand beckons you forward, coins fall from it's palm.",
         "bold": false,
         "italic": false
       }
@@ -1091,7 +1081,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -1150,7 +1140,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -1209,7 +1199,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -1268,7 +1258,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -1313,7 +1303,7 @@
   {
     "id": "way_of_pairs",
     "name": "Way of Pairs",
-    "description": "All pairs scored: \u00d72 mult",
+    "description": "All pairs scored: ×2 mult",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1327,7 +1317,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -1336,7 +1326,7 @@
   {
     "id": "way_of_triplets",
     "name": "Way of Triplets",
-    "description": "All triplets/kongs scored: \u00d72.5 mult",
+    "description": "All triplets/kongs scored: ×2.5 mult",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1359,7 +1349,7 @@
   {
     "id": "way_of_sequences",
     "name": "Way of Sequences",
-    "description": "All sequences scored: \u00d72 mult",
+    "description": "All sequences scored: ×2 mult",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1386,7 +1376,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -1445,7 +1435,7 @@
         "italic": true
       },
       {
-        "text": "\u2014 the blind opens on an empty chair.",
+        "text": "— the blind opens on an empty chair.",
         "bold": false,
         "italic": true
       }
@@ -1504,7 +1494,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -1563,7 +1553,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -1622,7 +1612,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -1681,7 +1671,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -1740,7 +1730,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -1772,7 +1762,7 @@
   {
     "id": "eulers_number",
     "name": "Euler's Number",
-    "description": "Flat +e mult (Euler's constant \u2248 2.71828\u2026)",
+    "description": "Flat +e mult (Euler's constant ≈ 2.71828…)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1785,7 +1775,7 @@
   {
     "id": "pi_constant",
     "name": "Pi",
-    "description": "Flat +\u03c0 mult (\u2248 3.14159\u2026)",
+    "description": "Flat +π mult (≈ 3.14159…)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1799,7 +1789,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -1808,7 +1798,7 @@
   {
     "id": "big_hands",
     "name": "Big Hands",
-    "description": "+2 hand tiles; \u22121 discard",
+    "description": "+2 hand tiles; −1 discard",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1831,7 +1821,7 @@
   {
     "id": "tiny_hands",
     "name": "Tiny Hands",
-    "description": "\u22122 hand tiles; +2 discards",
+    "description": "−2 hand tiles; +2 discards",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1858,7 +1848,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
