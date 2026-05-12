@@ -1,8 +1,8 @@
 //! Keyboard / mouse glyph references for in-game prompt rows.
 //!
 //! Controller glyphs are resolved by [`crate::ui::glyph_source::GlyphResolver`]
-//! (Steam Input first, static [`PromptIconSource::AtlasSprite`] fallback). This
-//! module owns the keyboard / mouse glyphs that neither path provides.
+//! (Kenney Input Prompts atlases keyed by [`crate::ui::button_prompts::GamepadStyle`]).
+//! This module owns the keyboard / mouse glyphs that neither path provides.
 
 use crate::render::draw_cmd::PromptIconSource;
 

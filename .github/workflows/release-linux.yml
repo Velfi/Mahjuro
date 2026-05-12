@@ -118,7 +118,6 @@ jobs:
           cp "target/x86_64-unknown-linux-gnu/release/mahjuro" "$APPDIR/usr/bin/mahjuro"
           chmod +x "$APPDIR/usr/bin/mahjuro"
           cp "target/x86_64-unknown-linux-gnu/release/libsteam_api.so" "$APPDIR/usr/bin/"
-          cp packaging/steam_input/game_actions_4636490.vdf "$APPDIR/usr/bin/"
           cp baked-packs/pack_manifest.json "$APPDIR/usr/bin/"
           cp baked-packs/mahjuro-pack-shared.zip "$APPDIR/usr/bin/"
           cp baked-packs/mahjuro-pack-gameplay.zip "$APPDIR/usr/bin/"
@@ -153,7 +152,6 @@ jobs:
           (
             cd "$RELEASE_DIR"
             tar -czf "$ARCHIVE" mahjuro libsteam_api.so \
-              game_actions_4636490.vdf \
               pack_manifest.json \
               mahjuro-pack-shared.zip \
               mahjuro-pack-gameplay.zip \

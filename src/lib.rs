@@ -139,8 +139,7 @@ struct App {
     overlay_stack: Vec<Scene>,
     /// Snapshot of "any controller currently connected?" from the previous
     /// frame, used to detect the falling edge (controller unplugged) so we
-    /// can auto-pause the game while the player is in [`InputMode::Controller`].
-    /// Steam Input docs Golden Rule #5: a disconnected gamepad should pause.
+    /// can auto-pause while the player is in [`InputMode::Controller`].
     prev_controller_present: bool,
     quit_requested: bool,
     close_saved: bool,
@@ -511,9 +510,7 @@ pub fn run() -> anyhow::Result<()> {
                 );
                 steam::SteamClient::disabled()
             } else {
-                let disable_steam_input =
-                    cli.no_steam_input || steam::steam_input_disabled_via_env();
-                steam::SteamClient::init(disable_steam_input)
+                steam::SteamClient::init()
             };
 
             let settings = persistence::load_settings();

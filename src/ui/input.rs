@@ -841,7 +841,10 @@ impl InputState {
         if settings.controller_layout_user_set {
             return;
         }
-        let want_swap = matches!(self.gamepad_style, GamepadStyle::Nintendo);
+        let want_swap = matches!(
+            self.gamepad_style,
+            GamepadStyle::Nintendo | GamepadStyle::NintendoSwitch2
+        );
         self.swap_ab = want_swap;
         self.swap_xy = want_swap;
         if settings.swap_ab == want_swap && settings.swap_xy == want_swap {

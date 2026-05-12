@@ -267,10 +267,9 @@ pub struct DrawCtx<'a> {
     pub gamepad_swap_xy: bool,
     /// Detected controller family for button-prompt glyphs (see [`crate::ui::button_prompts`]).
     pub gamepad_style: crate::ui::button_prompts::GamepadStyle,
-    /// Resolves a controller-prompt glyph for a given [`UiAction`]. Steam Input
-    /// wins when active; the static [`GamepadStyle`]-keyed atlas is the fallback.
-    /// See [`crate::ui::glyph_source::GlyphResolver`].
-    pub glyphs: crate::ui::glyph_source::GlyphResolver<'a>,
+    /// Resolves a controller-prompt glyph for a given [`UiAction`] (Kenney
+    /// Input Prompts atlases). See [`crate::ui::glyph_source::GlyphResolver`].
+    pub glyphs: crate::ui::glyph_source::GlyphResolver,
     /// Frozen [`ShopScene`] under shop showcase inspect — fed to [`crate::scenes::shop::render_shop_inspect_isolated_frame`].
     pub suspended_shop: Option<&'a ShopScene>,
     /// Suspended collection beneath collection showcase inspect for pedestal orbit.
@@ -304,7 +303,7 @@ impl<'a> DrawCtx<'a> {
         gamepad_swap_ab: bool,
         gamepad_swap_xy: bool,
         gamepad_style: crate::ui::button_prompts::GamepadStyle,
-        glyphs: crate::ui::glyph_source::GlyphResolver<'a>,
+        glyphs: crate::ui::glyph_source::GlyphResolver,
         suspended_shop: Option<&'a ShopScene>,
         suspended_collection: Option<&'a CollectionScene>,
         tile_preset: crate::persistence::TilePreset,
@@ -475,20 +474,6 @@ pub enum Scene {
     TransitionPlayground(TransitionPlaygroundScene),
     RumbleLab(RumbleLabScene),
     YakuJournal(YakuJournalScene),
-}
-
-impl Scene {
-    pub fn steam_input_action_set(&self) -> crate::steam::ActionSet {
-        match self {
-            Scene::Gameplay(_) => crate::steam::ActionSet::Gameplay,
-            Scene::Shop(_) => crate::steam::ActionSet::Shop,
-            Scene::Showcase(s) if s.wants_orbit_input() => crate::steam::ActionSet::Inspect,
-            // Debug scenes (RumbleLab, MaterialViewer, TransitionPlayground)
-            // share the Menus set — no Steam Input bindings are reserved for
-            // them. They're only reachable via the dev debug menu.
-            _ => crate::steam::ActionSet::Menus,
-        }
-    }
 }
 
 /// Avoid a `profile_select` ↔ `options` module cycle when returning from [`ProfileSelectScene`].

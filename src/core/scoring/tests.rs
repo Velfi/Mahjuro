@@ -259,14 +259,14 @@ fn honor_fury_adds_chips_per_honor_tile() {
 }
 
 #[test]
-fn red_dragon_rage_mults_red_triplet() {
+fn dragon_rage_mults_red_triplet() {
     let hand = vec![
         Tile::new(Suit::Dragon, 1, 0),
         Tile::new(Suit::Dragon, 1, 1),
         Tile::new(Suit::Dragon, 1, 2),
     ];
     let sets = find_pairs_and_triplets(&hand);
-    let r = relics(vec![RelicId::RedDragonRage]);
+    let r = relics(vec![RelicId::DragonRage]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
     assert_eq!(breakdown.final_chips, 126);
     assert_eq!(breakdown.final_mult, 9.0);
@@ -274,20 +274,20 @@ fn red_dragon_rage_mults_red_triplet() {
 }
 
 #[test]
-fn red_dragon_rage_fires_on_any_dragon_triplet() {
+fn dragon_rage_fires_on_any_dragon_triplet() {
     let hand = vec![
         Tile::new(Suit::Dragon, 2, 0),
         Tile::new(Suit::Dragon, 2, 1),
         Tile::new(Suit::Dragon, 2, 2),
     ];
     let sets = find_pairs_and_triplets(&hand);
-    let r = relics(vec![RelicId::RedDragonRage]);
+    let r = relics(vec![RelicId::DragonRage]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
     assert!(
         breakdown
             .steps
             .iter()
-            .any(|s| s.source == "Red Dragon Rage")
+            .any(|s| s.source == "Dragon Rage")
     );
 }
 

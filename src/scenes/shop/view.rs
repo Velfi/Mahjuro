@@ -58,7 +58,8 @@ use super::layout::{
 };
 use super::shared::shop_focus_inspectable;
 use super::{
-    BUG_COUNT, BUG_PARAMS, ConsumableShopItem, ShopFocus, ShopMode, ShopScene, push_free_badge,
+    BUG_COUNT, BUG_PARAMS, ConsumableShopItem, ShopFocus, ShopItem, ShopMode, ShopScene,
+    TilePackShopItem, push_free_badge,
 };
 
 /// Matches [`super::RELIC_GLOW_LIFETIME`] — keep glow envelope in sync.
@@ -2555,6 +2556,36 @@ pub(in crate::scenes::shop) fn is_purchasable_shop_focus(f: ShopFocus, scene: &S
             .is_some_and(|idx| scene.pack_items.get(idx).is_some_and(|p| !p.sold)),
         _ => false,
     }
+}
+
+/// Default focus for a fresh shelf: first for-sale relic, else first unsold pack,
+/// talisman, then ribbon (same order as [`for_sale_slots`]). When nothing is for sale,
+/// the leave bell so the player can still advance immediately.
+pub(in crate::scenes::shop) fn default_shop_focus_for_stock(
+    items: &[ShopItem],
+    zodiac_items: &[ConsumableShopItem],
+    talisman_items: &[ConsumableShopItem],
+    pack_items: &[TilePackShopItem],
+) -> ShopFocus {
+    if !items.is_empty() {
+        return ShopFocus::Relic(0);
+    }
+    for (k, p) in pack_items.iter().enumerate() {
+        if !p.sold {
+            return ShopFocus::Pack(super::PICK_TILE_PACK_BASE + k as u32);
+        }
+    }
+    for (i, t) in talisman_items.iter().enumerate() {
+        if !t.sold {
+            return ShopFocus::Talisman(i);
+        }
+    }
+    for (i, z) in zodiac_items.iter().enumerate() {
+        if !z.sold {
+            return ShopFocus::Ribbon(i);
+        }
+    }
+    ShopFocus::NextRound
 }
 
 fn closest_purchasable_focus(

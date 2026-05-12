@@ -185,7 +185,6 @@ jobs:
           $stage = "installer-src"
           New-Item -ItemType Directory -Force $stage | Out-Null
           Copy-Item "target\x86_64-pc-windows-msvc\release\mahjuro.exe" "$stage\"
-          Copy-Item "packaging\steam_input\game_actions_4636490.vdf" "$stage\"
           Copy-Item "baked-packs\pack_manifest.json" "$stage\"
           Copy-Item "baked-packs\mahjuro-pack-shared.zip" "$stage\"
           Copy-Item "baked-packs\mahjuro-pack-gameplay.zip" "$stage\"
@@ -240,7 +239,7 @@ jobs:
           ARCHIVE="mahjuro-${RELEASE_TAG}-windows-x86_64.zip"
           ROOT="$PWD"
           cd "target/x86_64-pc-windows-msvc/release"
-          7z a "$ROOT/${ARCHIVE}" mahjuro.exe game_actions_4636490.vdf \
+          7z a "$ROOT/${ARCHIVE}" mahjuro.exe \
             "$ROOT/baked-packs/pack_manifest.json" \
             "$ROOT/baked-packs/mahjuro-pack-shared.zip" \
             "$ROOT/baked-packs/mahjuro-pack-gameplay.zip" \

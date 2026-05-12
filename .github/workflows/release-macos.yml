@@ -122,8 +122,6 @@ jobs:
           # Binary
           cp target/release-universal/mahjuro "$APP/Contents/MacOS/mahjuro"
           chmod +x "$APP/Contents/MacOS/mahjuro"
-          cp packaging/steam_input/game_actions_4636490.vdf \
-            "$APP/Contents/MacOS/game_actions_4636490.vdf"
 
           # Steamworks dylib: link uses @loader_path/libsteam_api.dylib (see build.rs).
           # CI duplicates app layout here; must match scripts/package-macos.sh.
@@ -220,9 +218,8 @@ jobs:
             --timestamp \
             target/release-universal/mahjuro
           ARCHIVE="mahjuro-${RELEASE_TAG}-macos-universal.tar.gz"
-          cp packaging/steam_input/game_actions_4636490.vdf target/release-universal/
           tar -czf "$ARCHIVE" -C target/release-universal \
-            mahjuro game_actions_4636490.vdf
+            mahjuro
           echo "filename=${ARCHIVE}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v7

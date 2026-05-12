@@ -582,7 +582,7 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::DoraCrown,
                 RelicId::HonorFury,
                 RelicId::WhiteDragonsHush,
-                RelicId::RedDragonRage,
+                RelicId::DragonRage,
                 RelicId::StrengthInNumbers,
                 RelicId::WallWeaver,
                 RelicId::LotusBloom,

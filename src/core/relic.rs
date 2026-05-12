@@ -22,7 +22,8 @@ pub enum RelicId {
     SequenceSurge,
     PairPower,
     HonorFury,
-    RedDragonRage,
+    #[serde(alias = "red_dragon_rage")]
+    DragonRage,
     GreenLuck,
     WhiteDragonsHush,
     JokerTile,
@@ -299,7 +300,7 @@ impl RelicId {
             RelicId::SequenceSurge => "sequence_surge.png",
             RelicId::PairPower => "pair_power.png",
             RelicId::HonorFury => "honor_fury.png",
-            RelicId::RedDragonRage => "red_dragon_rage.png",
+            RelicId::DragonRage => "dragon_rage.png",
             RelicId::GreenLuck => "green_luck.png",
             RelicId::WhiteDragonsHush => "white_dragons_hush.png",
             RelicId::JokerTile => "joker_tile.png",
@@ -1067,7 +1068,7 @@ fn relic_scoring_copy_dup_is_compatible(target: RelicId) -> bool {
             | RelicId::Hanami
             | RelicId::DragonEcho
             | RelicId::DoraCrown
-            | RelicId::RedDragonRage
+            | RelicId::DragonRage
             | RelicId::WhiteDragonsHush
             | RelicId::KanDrum
             | RelicId::RoundCompass
@@ -1234,7 +1235,7 @@ mod tests {
                     | RelicId::SequenceSurge
                     | RelicId::PairPower
                     | RelicId::HonorFury
-                    | RelicId::RedDragonRage
+                    | RelicId::DragonRage
                     | RelicId::GreenLuck
                     | RelicId::WhiteDragonsHush
                     | RelicId::JokerTile
@@ -1333,7 +1334,7 @@ mod tests {
                 RelicId::SequenceSurge,
                 RelicId::PairPower,
                 RelicId::HonorFury,
-                RelicId::RedDragonRage,
+                RelicId::DragonRage,
                 RelicId::GreenLuck,
                 RelicId::WhiteDragonsHush,
                 RelicId::JokerTile,

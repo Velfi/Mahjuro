@@ -85,7 +85,7 @@ The game includes a **tutorial** that walks you through the basics -- just start
 
 ### Gamepad Support
 
-Mahjuro supports gamepads out of the box via the gilrs library.
+Mahjuro supports gamepads through **SDL3** (Xbox, PlayStation, Nintendo Switch / Switch 2, Steam Deck, Steam Controller, and generic USB pads).
 
 ## Progression
 
