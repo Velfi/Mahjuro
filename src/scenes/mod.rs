@@ -138,6 +138,9 @@ pub struct UpdateCtx<'a> {
     pub complete_onboarding: &'a mut bool,
     /// Current mouse cursor position in window coordinates.
     pub cursor_pos: (f32, f32),
+    /// True while the left mouse button is held (press through release).
+    /// Used for continuous gestures such as options-menu slider drags.
+    pub mouse_left_down: bool,
     /// For **splash**: `true` once the window has a [`WgpuRenderer`] (hub may still be
     /// decoding façade art / relics in parallel). Other scenes: `true` when boot async
     /// loaders have finished GPU upload (see [`crate::render::wgpu_renderer::WgpuRenderer::is_loading`]).

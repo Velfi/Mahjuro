@@ -92,7 +92,7 @@ pub struct ShowcaseRenderHints {
     pub tile_pack_celebration_tonemap: bool,
     /// Shop storeroom tonemap + lit_mesh inspect / glTF punctual branches.
     pub shop_tonemap_and_lit_mesh_context: bool,
-    /// Collection corridor / table-like HDR (legacy `collection` key).
+    /// Archive grid HDR / tonemap branch for the showcase overlay.
     pub collection_tonemap_context: bool,
 }
 
@@ -837,8 +837,8 @@ pub struct UiFrame {
     /// Barrel / fisheye lens distortion applied in the final composite.
     /// 0.0 = off (no distortion). Positive = outward barrel (center
     /// magnified, edges compressed). Typical range 0.0..=0.6. Scenes
-    /// that want the "looking into infinity" effect (e.g. the collection
-    /// corridor) set this to pull the viewport toward a fisheye lens.
+    /// that use barrel distortion (e.g. Archive browser) set this to pull
+    /// the viewport toward a fisheye lens.
     pub fisheye_strength: f32,
     /// Optional pre-pass `UiFrame` rendered into `journal_scene_texture`
     /// before the main frame. Set by the shop while the journal book is

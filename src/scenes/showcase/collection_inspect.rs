@@ -1,4 +1,4 @@
-//! Frozen collection corridor + orbit inspect on the showcase overlay.
+//! Frozen Archive grid + [`ItemInspectScene`] orbit on the showcase overlay.
 
 use std::time::Instant;
 

@@ -89,7 +89,7 @@ impl InspectRig {
         }
     }
 
-    /// Collection corridor / HUD close-up: linear in window height.
+    /// Archive grid close-up: linear in window height.
     pub fn collection(window_h: f32) -> Self {
         let h = window_h.max(1.0);
         Self {
@@ -148,7 +148,7 @@ fn world_to_point_light_pos(window_w: f32, window_h: f32, world: Vec3) -> [f32; 
     [world.x + window_w * 0.5, window_h * 0.5 - world.y, world.z]
 }
 
-/// Three-point rig in inspect space — not the shop lamp, GLB punctual, or collection corridor defaults.
+/// Three-point rig in inspect space — not the shop lamp, GLB punctual, or [`InspectRig::collection`] defaults.
 pub fn inspect_point_lights(
     window_w: f32,
     window_h: f32,

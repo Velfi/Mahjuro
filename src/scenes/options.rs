@@ -330,6 +330,8 @@ pub struct OptionsScene {
     rebind_controller_requested: bool,
     /// Smooth-scrolling state for the content pane.
     scroll: SmoothScroll,
+    /// While `Some`, LMB is held after pressing on this row's slider track.
+    dragging_slider: Option<Row>,
 
     /// Local copy of settings; written back on change and scene exit.
     pub master_volume: f32,
@@ -384,6 +386,7 @@ impl OptionsScene {
             profile_select_requested: false,
             rebind_controller_requested: false,
             scroll: SmoothScroll::new(),
+            dragging_slider: None,
             master_volume: settings.master_volume,
             sfx_volume: settings.sfx_volume,
             music_volume: settings.music_volume,
@@ -538,6 +541,27 @@ impl OptionsScene {
         }
     }
 
+    fn slider_track_xw(layout: &PanelLayout) -> (f32, f32) {
+        let label_w = layout.content_w * 0.35;
+        let slider_x = layout.content_x + label_w;
+        let slider_w = layout.content_w * 0.50;
+        (slider_x, slider_w)
+    }
+
+    fn cursor_on_slider_track(layout: &PanelLayout, cursor_pos: (f32, f32)) -> bool {
+        let (slider_x, slider_w) = Self::slider_track_xw(layout);
+        let cx = cursor_pos.0;
+        cx >= slider_x && cx <= slider_x + slider_w
+    }
+
+    fn set_slider_from_cursor(&mut self, row: Row, layout: &PanelLayout, cursor_pos: (f32, f32)) {
+        let (slider_x, slider_w) = Self::slider_track_xw(layout);
+        let cx = cursor_pos.0;
+        let ratio = ((cx - slider_x) / slider_w).clamp(0.0, 1.0);
+        let (lo, hi, _) = Self::slider_range(row);
+        self.store_slider(row, lo + ratio * (hi - lo));
+    }
+
     /// Clamp scroll offset and update max for the given layout.
     fn sync_scroll(&self, layout: &PanelLayout) {
         let max = CONTENT.len().saturating_sub(layout.visible_slots) as u32;
@@ -638,15 +662,8 @@ impl OptionsScene {
     fn apply_click(&mut self, row: Row, layout: &PanelLayout, cursor_pos: (f32, f32)) -> bool {
         match row {
             Row::Master | Row::Music | Row::Sfx | Row::Gamma => {
-                // Click-to-position on the slider track.
-                let cx = cursor_pos.0;
-                let label_w = layout.content_w * 0.35;
-                let slider_x = layout.content_x + label_w;
-                let slider_w = layout.content_w * 0.50;
-                if cx >= slider_x && cx <= slider_x + slider_w {
-                    let ratio = (cx - slider_x) / slider_w;
-                    let (lo, hi, _) = Self::slider_range(row);
-                    self.store_slider(row, lo + ratio * (hi - lo));
+                if Self::cursor_on_slider_track(layout, cursor_pos) {
+                    self.set_slider_from_cursor(row, layout, cursor_pos);
                     self.save_settings();
                 }
             }
@@ -746,10 +763,14 @@ impl OptionsScene {
         window_h: f32,
         scroll_lines: f32,
         input_mode: InputMode,
+        mouse_left_down: bool,
     ) -> bool {
         self.focus_changed = false;
         self.confirm_requested = false;
         self.cancel_requested = false;
+        if !mouse_left_down {
+            self.dragging_slider = None;
+        }
         let layout = compute_layout(window_w, window_h);
         self.sync_scroll(&layout);
         let prev_focus = (self.focused, self.back_focused);
@@ -827,7 +848,21 @@ impl OptionsScene {
                 self.focused = row;
                 self.back_focused = false;
                 self.confirm_requested = true;
-                return self.apply_click(row, &layout, cursor_pos);
+                let close = self.apply_click(row, &layout, cursor_pos);
+                if row.is_slider() && Self::cursor_on_slider_track(&layout, cursor_pos) {
+                    self.dragging_slider = Some(row);
+                }
+                if close {
+                    return true;
+                }
+                return false;
+            }
+        }
+
+        if mouse_left_down {
+            if let Some(row) = self.dragging_slider {
+                self.set_slider_from_cursor(row, &layout, cursor_pos);
+                self.save_settings();
             }
         }
 
@@ -1290,6 +1325,7 @@ impl SceneBehavior for OptionsScene {
             ctx.layout.window_h,
             ctx.scroll_lines,
             ctx.input_mode,
+            ctx.mouse_left_down,
         ) {
             if self.take_cancel_requested() {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));

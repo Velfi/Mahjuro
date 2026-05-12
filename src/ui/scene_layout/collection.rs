@@ -32,11 +32,11 @@ pub const COLLECTION_HIERARCHY: &[Node] = &[Node::Group {
     children: &[
         Node::Leaf {
             name: "collection.cabinet",
-            label: "Hexagonal cabinet",
+            label: "Grid backdrop",
         },
         Node::Leaf {
             name: "collection.pedestal",
-            label: "Inspection pedestal",
+            label: "Orbit inspect anchor",
         },
         Node::Leaf {
             name: "collection.featured_artifact",

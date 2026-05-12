@@ -33,14 +33,15 @@ impl PauseAction {
 }
 
 /// Frame input for `PauseMenu::update`: action queue, newly clicked
-/// button ids, cursor position, scroll delta, and the current input
-/// device (kb/controller/mouse).
+/// button ids, cursor position, scroll delta, the current input
+/// device (kb/controller/mouse), and LMB held state (for options sliders).
 pub struct PauseInput<'a> {
     pub actions: &'a [UiAction],
     pub button_clicks: &'a [u32],
     pub cursor_pos: (f32, f32),
     pub scroll_lines: f32,
     pub input_mode: crate::ui::input::InputMode,
+    pub mouse_left_down: bool,
 }
 
 /// Result of processing pause menu input for the current frame.
@@ -197,6 +198,7 @@ impl PauseMenu {
                     cursor_pos: ctx.cursor_pos,
                     scroll_lines: ctx.scroll_lines,
                     input_mode: ctx.input_mode,
+                    mouse_left_down: ctx.mouse_left_down,
                 },
                 ctx.progress,
                 ctx.run,
@@ -244,6 +246,7 @@ impl PauseMenu {
             cursor_pos,
             scroll_lines,
             input_mode,
+            mouse_left_down,
         } = input;
         let crate::ui::layout::ViewportCtx {
             window_w,
@@ -261,6 +264,7 @@ impl PauseMenu {
                 window_h,
                 scroll_lines,
                 input_mode,
+                mouse_left_down,
             ) {
                 self.options_overlay = None;
             }

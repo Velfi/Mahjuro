@@ -680,6 +680,7 @@ pub(crate) fn render_shop_inspect_isolated_frame(
         frame.object3d_batch(vec![subj]);
     }
 
+    let mut overlay_quads: Vec<GpuInstance> = Vec::new();
     let mut overlay_texts: Vec<TextLabel> = Vec::new();
 
     if let Some(ShopFocus::Relic(i)) = shop.focus {
@@ -697,18 +698,38 @@ pub(crate) fn render_shop_inspect_isolated_frame(
         let hint_font = typography::size(typography::CAPTION, h);
         let hint_h = (hint_font / 0.55).ceil().max(20.0);
         let reserve_bottom = hint_h + h * 0.04;
-        if let Some(d) = def_opt.filter(|d| !d.flavor.is_empty()) {
-            push_floating_relic_flavor_labels(
+        if let Some(d) = def_opt {
+            let name = d.name.to_string();
+            // Inspect overlay: panel title only; mechanical text stays on shop hover.
+            push_focus_tooltip_panel_2d(
+                &mut overlay_quads,
                 &mut overlay_texts,
                 w,
                 h,
-                d.flavor,
-                reserve_bottom,
+                None,
+                &name,
+                "",
+                "",
+                color::STONE,
+                false,
+                false,
             );
+            if !d.flavor.is_empty() {
+                push_floating_relic_flavor_labels(
+                    &mut overlay_texts,
+                    w,
+                    h,
+                    d.flavor,
+                    reserve_bottom,
+                );
+            }
         }
     }
 
     push_shop_inspect_overlay_chrome(&mut overlay_texts, &ctx, w, h);
+    if !overlay_quads.is_empty() {
+        frame.quads(overlay_quads);
+    }
     frame.texts(overlay_texts);
     frame
 }
@@ -1141,23 +1162,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
             hover_is_owned,
             skip_title,
         );
-        if let ShopHit::Relic(i) = hit {
-            let n_sale = shop.items.len();
-            let def_opt = if i < n_sale {
-                shop.items
-                    .get(i)
-                    .and_then(|it| all_relic_defs().iter().find(|d| d.id == it.relic))
-            } else {
-                let oi = i - n_sale;
-                shop_rm
-                    .owned_relics
-                    .get(oi)
-                    .and_then(|rid| all_relic_defs().iter().find(|d| d.id == *rid))
-            };
-            if let Some(d) = def_opt.filter(|d| !d.flavor.is_empty()) {
-                push_floating_relic_flavor_labels(&mut tip_texts, w, h, d.flavor, 0.0);
-            }
-        }
+        // Relic: hover = name + mechanical; E inspect = name + flavor (no mechanical).
         frame.quads(tip_quads);
         frame.texts(tip_texts);
     }
@@ -1543,8 +1548,7 @@ fn hover_tooltip_content(
         ShopHit::Relic(i) => {
             let oi = i.checked_sub(n_for_sale_relics)?;
             let rid = *shop.owned_relics.get(oi)?;
-            let defs = all_relic_defs();
-            let def = defs.iter().find(|d| d.id == rid);
+            let def = all_relic_defs().iter().find(|d| d.id == rid);
             let name = def
                 .map(|d| d.name.to_string())
                 .unwrap_or_else(|| "Relic".into());
