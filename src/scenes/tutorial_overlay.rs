@@ -61,7 +61,6 @@ impl TutorialOverlay {
         dt: f32,
         _window_w: f32,
         _window_h: f32,
-        _ui_scale: f32,
     ) {
         self.pulse_time += dt;
 
@@ -171,7 +170,6 @@ impl TutorialOverlay {
         &self,
         window_w: f32,
         window_h: f32,
-        ui_scale: f32,
         quads: &mut Vec<GpuInstance>,
         labels: &mut Vec<TextLabel>,
     ) {
@@ -185,9 +183,9 @@ impl TutorialOverlay {
         }
 
         // ── Font sizes (pinned via font_px for readability) ──────────
-        let flavor_px = typography::size(typography::HEADING, window_h, ui_scale);
-        let hint_px = typography::size(typography::TITLE, window_h, ui_scale);
-        let pad = (16.0 * ui_scale).max(10.0);
+        let flavor_px = typography::size(typography::HEADING, window_h);
+        let hint_px = typography::size(typography::TITLE, window_h);
+        let pad = 16.0_f32.max(10.0);
 
         // ── Word-wrap hint text to fit the banner width ──────────────
         let banner_w = window_w * 0.80;

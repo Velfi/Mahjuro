@@ -400,7 +400,6 @@ impl App {
                 hide_candles: self.debug.hide_candles,
                 hide_blind_plaque: self.debug.hide_blind_plaque,
             },
-            self.gfx.ui_scale,
             modal_active,
             arrange_preview,
             self.debug.shop_env_height_scale,
@@ -461,7 +460,7 @@ impl App {
                 rect: [18.0, 18.0, (size.width as f32 * 0.72).max(320.0), 34.0],
                 text,
                 color: [0.88, 0.95, 1.0, 0.92],
-                font_px: Some(18.0 * self.gfx.ui_scale.max(0.75)),
+                font_px: Some(18.0),
                 align: crate::render::wgpu_renderer::TextAlign::Left,
                 no_glossary: true,
                 scroll_offset: 0.0,
@@ -516,7 +515,7 @@ impl App {
             modal_gradient_quads,
         )) = self
             .modals
-            .draw(size.width as f32, size.height as f32, self.gfx.ui_scale)
+            .draw(size.width as f32, size.height as f32)
         {
             frame.quads(modal_insts);
             frame.texts(modal_labels);
@@ -536,7 +535,7 @@ impl App {
         // Tuning overlay — on top of modals.
         if let Some(ref overlay) = self.debug.tuning_overlay {
             let (tuning_insts, tuning_labels) =
-                overlay.draw(size.width as f32, size.height as f32, self.gfx.ui_scale);
+                overlay.draw(size.width as f32, size.height as f32);
             append_fullscreen_debug_panel(
                 &mut frame,
                 &mut self.active_buttons,
@@ -548,7 +547,7 @@ impl App {
         // SFX test overlay — on top of modals.
         if let Some(ref mut overlay) = self.debug.sfx_test_overlay {
             let (insts, lbls) =
-                overlay.draw(size.width as f32, size.height as f32, self.gfx.ui_scale);
+                overlay.draw(size.width as f32, size.height as f32);
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
@@ -556,28 +555,28 @@ impl App {
         if let Some(ref overlay) = self.debug.camera_debug_overlay {
             frame.camera_override = Some(overlay.to_camera_params());
             let (insts, lbls) =
-                overlay.draw(size.width as f32, size.height as f32, self.gfx.ui_scale);
+                overlay.draw(size.width as f32, size.height as f32);
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
         // Shop env scale debug overlay — on top of modals.
         if let Some(ref overlay) = self.debug.shop_env_debug_overlay {
             let (insts, lbls) =
-                overlay.draw(size.width as f32, size.height as f32, self.gfx.ui_scale);
+                overlay.draw(size.width as f32, size.height as f32);
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
         // Debug visibility overlay — on top of modals.
         if let Some(ref overlay) = self.debug.visibility_overlay {
             let (insts, lbls) =
-                overlay.draw(size.width as f32, size.height as f32, self.gfx.ui_scale);
+                overlay.draw(size.width as f32, size.height as f32);
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
         // Volumetric tuning overlay — on top of modals.
         if let Some(ref overlay) = self.debug.volumetric_debug_overlay {
             let (insts, lbls) =
-                overlay.draw(size.width as f32, size.height as f32, self.gfx.ui_scale);
+                overlay.draw(size.width as f32, size.height as f32);
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
@@ -589,7 +588,7 @@ impl App {
                 let cursor = input.last_cursor;
                 let w = size.width as f32;
                 let h = size.height as f32;
-                let scale = self.gfx.ui_scale;
+                let scale = crate::render::theme::metrics::scene_scale(w, h);
                 if let Some(btn) = self.active_buttons.iter().find(|b| {
                     let (bx, by, bw, bh) = b.rect;
                     let inside = cursor.0 >= bx

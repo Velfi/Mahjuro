@@ -616,7 +616,6 @@ impl HeadlessApp {
                 shadows_enabled: settings.shadows_enabled,
                 ssr_enabled: settings.ssr_enabled,
                 hdr_enabled: false,
-                ui_scale: settings.ui_scale,
             },
             effect_layers: crate::effect_layers::EffectLayers::FULL,
             volumetric_tuning: persistence::load_tuning_override::<VolumetricTuning>(
@@ -788,7 +787,6 @@ impl HeadlessApp {
                 input_mode: self.input_mode_override.unwrap_or(InputMode::Cursor),
                 picked_hand_tile: None,
                 scroll_lines: 0.0,
-                ui_scale: self.gfx.ui_scale,
                 tutorial_eligible: false,
                 multiple_materials: self.progress.plastic_unlocked(),
                 resume_scene: persistence::ResumeScene::default(),
@@ -845,7 +843,6 @@ impl HeadlessApp {
                     input_mode: self.input_mode_override.unwrap_or(InputMode::Cursor),
                     picked_hand_tile: None,
                     scroll_lines: 0.0,
-                    ui_scale: self.gfx.ui_scale,
                     tutorial_eligible: false,
                     multiple_materials: self.progress.plastic_unlocked(),
                     resume_scene: persistence::ResumeScene::default(),
@@ -897,7 +894,6 @@ impl HeadlessApp {
                 hide_candles: false,
                 hide_blind_plaque: false,
             },
-            self.gfx.ui_scale,
             false,
             None,
             crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
@@ -929,7 +925,7 @@ impl HeadlessApp {
                 modal_buttons,
                 modal_relic_objects,
                 modal_gradient_quads,
-            )) = queue.draw(self.width as f32, self.height as f32, self.gfx.ui_scale)
+            )) = queue.draw(self.width as f32, self.height as f32)
             {
                 let _ = modal_buttons; // headless ignores click routing
                 frame.quads(modal_insts);

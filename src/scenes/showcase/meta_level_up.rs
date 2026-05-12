@@ -113,7 +113,7 @@ impl MetaLevelUpPresenter {
 
         let card_alpha = self.modal.card_fade_alpha() * intro_a;
         let (instances, labels, relic_objects, mut gradient_quads) =
-            modal_paginated_unlock_layer_vecs(&self.modal, card_alpha, ctx.ui_scale, w, h);
+            modal_paginated_unlock_layer_vecs(&self.modal, card_alpha, w, h);
         self.modal.append_fireworks_gradient_quads(&mut gradient_quads);
 
         frame.quads(instances);

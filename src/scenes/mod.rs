@@ -169,9 +169,6 @@ pub struct UpdateCtx<'a> {
     /// Accumulated scroll-wheel delta this frame in line units.
     /// Negative = scroll up (content moves down), positive = scroll down.
     pub scroll_lines: f32,
-    /// User's UI scale preference (1.0 = default). Thread through to
-    /// `typography::size()` and `metrics::scene_scale()`.
-    pub ui_scale: f32,
     /// Whether the player should be offered the tutorial (first run, tutorial
     /// not yet completed). Read by the start screen and tile-select scenes.
     pub tutorial_eligible: bool,
@@ -244,8 +241,6 @@ pub struct DrawCtx<'a> {
     pub picked_shop_object: Option<crate::render::wgpu_renderer::ShopHit>,
     /// Debug visibility toggles set from the in-game debug visibility modal.
     pub debug_visibility: DebugVisibility,
-    /// User's UI scale preference (1.0 = default).
-    pub ui_scale: f32,
     /// Whether an app-level modal overlay is active (modal queue, debug
     /// overlays, etc). Scenes should suppress hover tooltips when true.
     pub modal_active: bool,
@@ -295,7 +290,6 @@ impl<'a> DrawCtx<'a> {
         picked_gameplay_object: Option<crate::render::wgpu_renderer::GameplayPick>,
         picked_shop_object: Option<crate::render::wgpu_renderer::ShopHit>,
         debug_visibility: DebugVisibility,
-        ui_scale: f32,
         modal_active: bool,
         arrange_preview: Option<crate::ui::placement::ArrangePreview>,
         shop_env_height_scale: f32,
@@ -323,7 +317,6 @@ impl<'a> DrawCtx<'a> {
             picked_gameplay_object,
             picked_shop_object,
             debug_visibility,
-            ui_scale,
             modal_active,
             arrange_preview,
             shop_env_height_scale,

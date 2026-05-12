@@ -138,8 +138,8 @@ impl RumbleLabScene {
         }
     }
 
-    fn layout_items(w: f32, h: f32, ui_scale: f32) -> Vec<FlatItem<LabAction>> {
-        let scale = theme::metrics::scene_scale(w, h, ui_scale);
+    fn layout_items(w: f32, h: f32) -> Vec<FlatItem<LabAction>> {
+        let scale = theme::metrics::scene_scale(w, h);
         let margin_x = (28.0 * scale).max(16.0);
         let grid_top = h * 0.22 + (12.0 * scale);
         let back_h = (44.0 * scale).max(36.0);
@@ -185,13 +185,12 @@ impl RumbleLabScene {
 
 impl SceneBehavior for RumbleLabScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
-        let items = Self::layout_items(ctx.layout.window_w, ctx.layout.window_h, ctx.ui_scale);
+        let items = Self::layout_items(ctx.layout.window_w, ctx.layout.window_h);
         let input = TreeInput {
             actions: ctx.actions,
             button_clicks: ctx.button_clicks,
             cursor_pos: ctx.cursor_pos,
             window: (ctx.layout.window_w, ctx.layout.window_h),
-            ui_scale: ctx.ui_scale,
             input_mode: ctx.input_mode,
             scroll_lines: ctx.scroll_lines,
         };
@@ -216,16 +215,15 @@ impl SceneBehavior for RumbleLabScene {
     fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
-        let ui_scale = ctx.ui_scale;
-        let items = Self::layout_items(w, h, ui_scale);
+        let items = Self::layout_items(w, h);
         let focused = self.tree.focused();
 
         let mut frame = UiFrame::new();
         frame.background(BackgroundId::Black);
 
-        let title_font = typography::size(typography::TITLE, h, ui_scale).max(22.0);
-        let body_font = typography::size(typography::BODY, h, ui_scale).max(14.0);
-        let hint_font = typography::size(typography::CAPTION, h, ui_scale).max(12.0);
+        let title_font = typography::size(typography::TITLE, h).max(22.0);
+        let body_font = typography::size(typography::BODY, h).max(14.0);
+        let hint_font = typography::size(typography::CAPTION, h).max(12.0);
 
         frame.text(TextLabel {
             rect: [0.0, h * 0.03, w, title_font * 1.5],
@@ -290,7 +288,7 @@ impl SceneBehavior for RumbleLabScene {
                 text: it.action.label().into(),
                 color: fg,
                 align: TextAlign::Center,
-                font_px: Some(typography::size(typography::BODY, h, ui_scale).max(14.0)),
+                font_px: Some(typography::size(typography::BODY, h).max(14.0)),
                 ..Default::default()
             });
         }

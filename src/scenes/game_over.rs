@@ -184,7 +184,6 @@ impl SceneBehavior for GameOverScene {
                 button_clicks: ctx.button_clicks,
                 cursor_pos: ctx.cursor_pos,
                 window: (ctx.layout.window_w, ctx.layout.window_h),
-                ui_scale: ctx.ui_scale,
                 input_mode: ctx.input_mode,
                 scroll_lines: 0.0,
             },

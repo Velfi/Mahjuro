@@ -116,11 +116,10 @@ impl TileSelectScene {
         &self,
         window_w: f32,
         window_h: f32,
-        ui_scale: f32,
         progress: &crate::core::progression::PlayerProgress,
         positions: &crate::ui::scene_layout::TileSelectPositions,
     ) -> Tree<ModalAction> {
-        let scale = metrics::scene_scale(window_w, window_h, ui_scale);
+        let scale = metrics::scene_scale(window_w, window_h);
         let panel_w = window_w * 0.38;
         let btn_w = if self.tutorial_mode {
             (220.0 * scale).min(panel_w * 0.78)
@@ -383,7 +382,7 @@ impl SceneBehavior for TileSelectScene {
             }
         }
 
-        let tree = self.build_tree(w, h, ctx.ui_scale, ctx.progress, &self.positions);
+        let tree = self.build_tree(w, h, ctx.progress, &self.positions);
         let action = self.tree.update(
             &tree,
             TreeInput {
@@ -391,7 +390,6 @@ impl SceneBehavior for TileSelectScene {
                 button_clicks: ctx.button_clicks,
                 cursor_pos: ctx.cursor_pos,
                 window: (w, h),
-                ui_scale: ctx.ui_scale,
                 input_mode: ctx.input_mode,
                 scroll_lines: 0.0,
             },
@@ -443,7 +441,6 @@ impl SceneBehavior for TileSelectScene {
     fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
-        let ui_scale = ctx.ui_scale;
 
         let mut instances: Vec<GpuInstance> = Vec::new();
         let mut text_labels: Vec<TextLabel> = Vec::new();
@@ -451,15 +448,15 @@ impl SceneBehavior for TileSelectScene {
 
         // ── Left panel text labels (manually laid out) ─────────────
         let panel_w = w * 0.38;
-        let scale = metrics::scene_scale(w, h, ui_scale);
+        let scale = metrics::scene_scale(w, h);
         let gap_sm = (16.0 * scale).max(8.0);
         let gap_lg = (28.0 * scale).max(14.0);
 
-        let title_px = typography::size(2.25, h, ui_scale);
-        let name_px = typography::size(typography::TITLE, h, ui_scale);
-        let bonus_px = typography::size(typography::HEADING, h, ui_scale);
-        let body_px = typography::size(typography::BODY, h, ui_scale);
-        let hint_px = typography::size(typography::CAPTION, h, ui_scale);
+        let title_px = typography::size(2.25, h);
+        let name_px = typography::size(typography::TITLE, h);
+        let bonus_px = typography::size(typography::HEADING, h);
+        let body_px = typography::size(typography::BODY, h);
+        let hint_px = typography::size(typography::CAPTION, h);
 
         // Rect heights need room above the font size for line padding.
         let title_h = title_px * 1.4;
@@ -504,7 +501,6 @@ impl SceneBehavior for TileSelectScene {
                     align: TextAlign::Left,
                 },
                 h,
-                ui_scale,
             );
             cursor_y += intro_h + 10.0 * scale;
             let skip_h = 50.0 * scale;
@@ -519,7 +515,6 @@ impl SceneBehavior for TileSelectScene {
                     align: TextAlign::Left,
                 },
                 h,
-                ui_scale,
             );
         } else {
             // Material block: name + bonus as a "stat" row (gold glyph + label).
@@ -586,7 +581,7 @@ impl SceneBehavior for TileSelectScene {
         });
 
         // ── Buttons (via widget tree) ──────────────────────────────
-        let tree = self.build_tree(w, h, ui_scale, ctx.progress, &self.positions);
+        let tree = self.build_tree(w, h, ctx.progress, &self.positions);
         let mut tree_frame = TreeFrame {
             instances: &mut instances,
             labels: &mut text_labels,

@@ -109,12 +109,23 @@ pub mod color {
 /// let title_h = theme::typography::TITLE * scale;
 /// ```
 pub mod typography {
+    /// Couch-distance rule of thumb: at 1080p reference height, no UI tier
+    /// should rasterize below this many CSS pixels. Scales down on shorter
+    /// windows (`h/1080`); does not grow past this value on taller displays
+    /// (base/tiers already scale up via [`base`]).
+    pub const MIN_READABLE_PX_AT_1080: f32 = 24.0;
+
+    /// Minimum font size (px) for on-screen copy at the current window height.
+    /// Use with custom layouts that do not go through [`size`].
+    #[inline]
+    pub fn readable_floor_px(window_h: f32) -> f32 {
+        MIN_READABLE_PX_AT_1080 * (window_h / 1080.0).min(1.0)
+    }
+
     /// Base unit derived from window height. ~18px at 600px tall, ~30px at
-    /// 1080p. Other tiers are ratios of this. The `ui_scale` multiplier
-    /// (from the player's Visual settings) boosts the result for TV / couch
-    /// viewing — it also raises the upper clamp so 4K screens benefit.
-    pub fn base(window_h: f32, ui_scale: f32) -> f32 {
-        (window_h * 0.028).clamp(14.0, 36.0 * ui_scale) * ui_scale
+    /// 1080p. Other tiers are ratios of this.
+    pub fn base(window_h: f32) -> f32 {
+        (window_h * 0.028).clamp(14.0, 36.0)
     }
 
     /// Hero numerals: score panel display number. ~3x base.
@@ -131,8 +142,28 @@ pub mod typography {
     pub const MICRO: f32 = 0.7;
 
     /// Compute the absolute pixel height for a tier at a given window height.
-    pub fn size(tier: f32, window_h: f32, ui_scale: f32) -> f32 {
-        tier * base(window_h, ui_scale)
+    pub fn size(tier: f32, window_h: f32) -> f32 {
+        let px = tier * base(window_h);
+        px.max(readable_floor_px(window_h))
+    }
+}
+
+#[cfg(test)]
+mod typography_tests {
+    use super::typography;
+
+    #[test]
+    fn smallest_tier_meets_1080_floor() {
+        assert!(
+            typography::size(typography::MICRO, 1080.0) >= typography::MIN_READABLE_PX_AT_1080
+        );
+    }
+
+    #[test]
+    fn floor_scales_down_below_1080p() {
+        let at_720 = typography::readable_floor_px(720.0);
+        assert!((at_720 - 16.0).abs() < 0.01);
+        assert!(typography::size(typography::MICRO, 720.0) >= at_720);
     }
 }
 
@@ -151,10 +182,9 @@ pub mod metrics {
     /// Standard gap between stacked menu buttons.
     pub const BUTTON_GAP: f32 = 0.022;
 
-    /// Scene layout scale factor incorporating the user's UI scale preference.
-    /// Replaces the common `(w.min(h) / 600.0)` pattern.
-    pub fn scene_scale(w: f32, h: f32, ui_scale: f32) -> f32 {
-        (w.min(h) / 600.0) * ui_scale
+    /// Scene layout scale factor from the smaller window dimension.
+    pub fn scene_scale(w: f32, h: f32) -> f32 {
+        w.min(h) / 600.0
     }
 }
 

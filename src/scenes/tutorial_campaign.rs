@@ -660,15 +660,14 @@ impl TutorialCampaignScene {
         page: &TutorialPage,
         w: f32,
         h: f32,
-        ui_scale: f32,
         _panel_x: f32,
         panel_y: f32,
         panel_w: f32,
     ) -> (f32, f32) {
-        let scale = metrics::scene_scale(w, h, ui_scale);
+        let scale = metrics::scene_scale(w, h);
         let subtitle_y = panel_y + 70.0 * scale;
         let subtitle_w = panel_w - 60.0 * scale;
-        let subtitle_font = typography::size(typography::BODY, h, ui_scale).max(15.0);
+        let subtitle_font = typography::size(typography::BODY, h).max(15.0);
         let subtitle_h = {
             let subtitle_lines = widget::wrap_text(page.subtitle, subtitle_w, subtitle_font);
             (subtitle_lines.len().max(1) as f32 * subtitle_font * 1.35)
@@ -680,8 +679,8 @@ impl TutorialCampaignScene {
         (tile_area_y, label_y)
     }
 
-    fn flat_items(&self, w: f32, h: f32, ui_scale: f32) -> Vec<FlatItem<TutorialNav>> {
-        let scale = metrics::scene_scale(w, h, ui_scale);
+    fn flat_items(&self, w: f32, h: f32) -> Vec<FlatItem<TutorialNav>> {
+        let scale = metrics::scene_scale(w, h);
         let btn_w = (170.0 * scale).max(120.0);
         let btn_h = (46.0 * scale).max(30.0);
         let gap = 14.0 * scale;
@@ -694,7 +693,7 @@ impl TutorialCampaignScene {
         let panel_w = w * 0.88;
         let panel_y = h * 0.07;
         let (_, label_y) =
-            Self::page_content_metrics(page, w, h, ui_scale, panel_x, panel_y, panel_w);
+            Self::page_content_metrics(page, w, h, panel_x, panel_y, panel_w);
 
         let mut items = Vec::new();
         if self.page > 0 {
@@ -819,7 +818,7 @@ impl TutorialCampaignScene {
 
 impl SceneBehavior for TutorialCampaignScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
-        let items = self.flat_items(ctx.layout.window_w, ctx.layout.window_h, ctx.ui_scale);
+        let items = self.flat_items(ctx.layout.window_w, ctx.layout.window_h);
         let action = self.tree.update_flat(
             &items,
             TreeInput {
@@ -827,7 +826,6 @@ impl SceneBehavior for TutorialCampaignScene {
                 button_clicks: ctx.button_clicks,
                 cursor_pos: ctx.cursor_pos,
                 window: (ctx.layout.window_w, ctx.layout.window_h),
-                ui_scale: ctx.ui_scale,
                 input_mode: ctx.input_mode,
                 scroll_lines: 0.0,
             },
@@ -897,8 +895,7 @@ impl SceneBehavior for TutorialCampaignScene {
     fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
-        let ui_scale = ctx.ui_scale;
-        let scale = metrics::scene_scale(w, h, ui_scale);
+        let scale = metrics::scene_scale(w, h);
         let page = self.page();
 
         let mut bg_quads = Vec::new();
@@ -979,7 +976,7 @@ impl SceneBehavior for TutorialCampaignScene {
         let subtitle_x = panel_x + 30.0 * scale;
         let subtitle_y = panel_y + 70.0 * scale;
         let subtitle_w = panel_w - 60.0 * scale;
-        let subtitle_font = typography::size(typography::BODY, h, ui_scale).max(15.0);
+        let subtitle_font = typography::size(typography::BODY, h).max(15.0);
         let subtitle_lines = widget::wrap_text(page.subtitle, subtitle_w, subtitle_font);
         let subtitle_h = (subtitle_lines.len().max(1) as f32 * subtitle_font * 1.35)
             .max(70.0 * scale)
@@ -995,11 +992,10 @@ impl SceneBehavior for TutorialCampaignScene {
                 align: TextAlign::Center,
             },
             h,
-            ui_scale,
-        );
+            );
 
         let (_tile_area_y, label_y) =
-            Self::page_content_metrics(page, w, h, ui_scale, panel_x, panel_y, panel_w);
+            Self::page_content_metrics(page, w, h, panel_x, panel_y, panel_w);
         if self.page != TUTORIAL_PAGE_SHOP {
             showcase_tiles =
                 Self::preview_tile_placements(self.page, page, panel_x, panel_w, label_y, scale);
@@ -1220,8 +1216,7 @@ impl SceneBehavior for TutorialCampaignScene {
                     padding: 0.0,
                     align: TextAlign::Left,
                 },
-                h,
-                ui_scale,
+                h
             );
             if let Some(line) = Self::try_it_demo_line(self.page, self.try_it_phase) {
                 texts.push(TextLabel {
@@ -1288,8 +1283,7 @@ impl SceneBehavior for TutorialCampaignScene {
                     padding: 0.0,
                     align: TextAlign::Left,
                 },
-                h,
-                ui_scale,
+                h
             );
             gy += term_h + 6.0 * scale;
         }
@@ -1306,7 +1300,7 @@ impl SceneBehavior for TutorialCampaignScene {
             } else {
                 panel_w * 0.45
             };
-            let callout_font = typography::size(typography::BODY, h, ui_scale).max(15.0);
+            let callout_font = typography::size(typography::BODY, h).max(15.0);
             let callout_lines = widget::wrap_text(callout, callout_w - 32.0 * scale, callout_font);
             let callout_h = (callout_lines.len().max(1) as f32 * callout_font * 1.3 + 36.0 * scale)
                 .max(112.0 * scale);
@@ -1333,12 +1327,11 @@ impl SceneBehavior for TutorialCampaignScene {
                     padding: 0.0,
                     align: TextAlign::Left,
                 },
-                h,
-                ui_scale,
+                h
             );
         }
 
-        let items = self.flat_items(w, h, ui_scale);
+        let items = self.flat_items(w, h);
         let mut buttons = Vec::new();
         for item in &items {
             if matches!(item.action, TutorialNav::TryPlay | TutorialNav::TryTrigger) {

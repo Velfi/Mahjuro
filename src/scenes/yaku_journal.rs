@@ -137,7 +137,6 @@ impl SceneBehavior for YakuJournalScene {
     fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
-        let ui_scale = ctx.ui_scale;
         let jr = journal_read_boost(w, h);
         let short_edge = w.min(h);
         let jc = journal_compact_factor(short_edge);
@@ -193,8 +192,8 @@ impl SceneBehavior for YakuJournalScene {
         // width regardless of count — row 1 (5 wide) defines the cell.
         let cell_w = (w - side_margin * 2.0) / 5.0;
 
-        let name_font = typography::size(typography::HEADING, h, ui_scale).max(24.0 * jr);
-        let stat_font = typography::size(typography::BODY, h, ui_scale).max(20.0 * jr);
+        let name_font = typography::size(typography::HEADING, h).max(24.0 * jr);
+        let stat_font = typography::size(typography::BODY, h).max(20.0 * jr);
         // Slightly larger than the name's stat line so "Lv N" scans on the felt.
         let grid_lvl_font = stat_font.max(22.0 * jr);
         let name_h = name_font * 1.1;
@@ -386,7 +385,6 @@ impl SceneBehavior for YakuJournalScene {
                             strip_w,
                             tile_long_h,
                             h,
-                            ui_scale,
                             jr,
                         );
                     }
@@ -445,7 +443,6 @@ impl SceneBehavior for YakuJournalScene {
             plaque_h,
             w,
             h,
-            ui_scale,
             jr,
             jc,
         );
@@ -473,7 +470,6 @@ fn draw_sealed_slab(
     w: f32,
     h: f32,
     window_h: f32,
-    ui_scale: f32,
     read_boost: f32,
 ) {
     let scale = (window_h / 1080.0).max(1.0) * read_boost;
@@ -539,7 +535,7 @@ fn draw_sealed_slab(
 
     // "?" stamp — larger glyph, champagne ink so it reads as pressed
     // metal into the wax rather than a flat typeface.
-    let glyph_font = typography::size(typography::TITLE, window_h, ui_scale).max(30.0 * read_boost);
+    let glyph_font = typography::size(typography::TITLE, window_h).max(30.0 * read_boost);
     frame.text(TextLabel {
         rect: [
             cx - seal_d * 0.5,
@@ -650,7 +646,6 @@ fn draw_plaque(
     plaque_h: f32,
     w: f32,
     h: f32,
-    ui_scale: f32,
     jr: f32,
     jc: f32,
 ) {
@@ -703,7 +698,7 @@ fn draw_plaque(
     // footer strip (which carries the control hint).
     let pad_scale = 1.0 - 0.14 * jc;
     let pad = ((14.0 * shadow_scale).max(10.0)) * pad_scale;
-    let hint_font = typography::size(typography::CAPTION, h, ui_scale).max(17.0 * jr);
+    let hint_font = typography::size(typography::CAPTION, h).max(17.0 * jr);
     let footer_h = hint_font * (2.35 - 0.28 * jc);
     let face_x = plaque_x + pad;
     let face_y = plaque_y + pad;
@@ -734,7 +729,7 @@ fn draw_plaque(
 
     // Title — full name once cashed in; until then a `???` pill (matches
     // gameplay bone tablets).
-    let title_font = typography::size(typography::TITLE, h, ui_scale).max(38.0 * jr);
+    let title_font = typography::size(typography::TITLE, h).max(38.0 * jr);
     let title_h = title_font * 1.05;
     let title_lane_w = header_w * 0.5;
     if matches!(state, ProgressionState::Unseen) {
@@ -765,7 +760,7 @@ fn draw_plaque(
     // underneath the title (not beside it) so variable name widths
     // can't crash into it. Visually it tags the title and pairs
     // with the stat strip's right-aligned neighborhood.
-    let pill_font = typography::size(typography::CAPTION, h, ui_scale).max(17.0 * jr);
+    let pill_font = typography::size(typography::CAPTION, h).max(17.0 * jr);
     let pill_h = pill_font * 1.75;
     let pill_text = format!("Lv  {lvl}");
     let pill_w = pill_font * 5.6;
@@ -806,7 +801,7 @@ fn draw_plaque(
     // Shares the header row with the title, with its own 50%-width
     // lane on the right. Locked yaku hide score numbers (no spoilers
     // on bonus scaling until the player has unlocked the yaku).
-    let stat_font = typography::size(typography::HEADING, h, ui_scale).max(28.0 * jr);
+    let stat_font = typography::size(typography::HEADING, h).max(28.0 * jr);
     let stat_y = header_y + (title_h - stat_font * 1.05) * 0.45;
     let stat_text = match state {
         ProgressionState::Unseen => "— — —".into(),
@@ -843,7 +838,7 @@ fn draw_plaque(
     });
 
     // ── Description ──────────────────────────────────────────────
-    let desc_font = typography::size(typography::BODY, h, ui_scale).max(23.0 * jr);
+    let desc_font = typography::size(typography::BODY, h).max(23.0 * jr);
     // Room for two wrapped lines; slightly shorter band on handheld → larger tile strip.
     let desc_h = desc_font * (2.35 - 0.22 * jc);
     let desc_y = rule_y + rule_h + header_pad * 0.35;
@@ -903,7 +898,6 @@ fn draw_plaque(
             band_w,
             hand_tile * FACE_LONG_MAX,
             h,
-            ui_scale,
             jr,
         );
     } else {

@@ -547,7 +547,6 @@ impl SceneBehavior for PickBlindScene {
                 button_clicks: ctx.button_clicks,
                 cursor_pos: ctx.cursor_pos,
                 window: (ctx.layout.window_w, ctx.layout.window_h),
-                ui_scale: ctx.ui_scale,
                 input_mode: ctx.input_mode,
                 scroll_lines: 0.0,
             },
@@ -587,7 +586,6 @@ impl SceneBehavior for PickBlindScene {
     fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
-        let ui_scale = ctx.ui_scale;
 
         let pick = GameEngine::read_pick_blind(ctx.run);
         let upcoming = pick.upcoming_blind;
@@ -1047,8 +1045,8 @@ impl SceneBehavior for PickBlindScene {
         // The boss shrine gets two extra lines: its rule description
         // (e.g. "Hand size -1") and its tier label (e.g. "[Soft]").
         // Other shrines just show their name.
-        let title_h = typography::size(typography::HEADING, h, ui_scale) * 1.4;
-        let desc_h = typography::size(typography::CAPTION, h, ui_scale) * 1.4;
+        let title_h = typography::size(typography::HEADING, h) * 1.4;
+        let desc_h = typography::size(typography::CAPTION, h) * 1.4;
         let base_target = pick.base_target;
         let upcoming_run_number = pick.run_number;
         for (i, &blind) in blinds.iter().enumerate() {
@@ -1254,9 +1252,9 @@ impl SceneBehavior for PickBlindScene {
             // Hallway side columns: pin `font_px` so long lines (ante / rewards) are not
             // crushed by the legacy auto-shrink width/char cap (see font-scaling agent note).
             let side_w = (w * 0.30).clamp(280.0, 520.0);
-            let px_action = typography::size(typography::HEADING, h, ui_scale) * 1.45;
-            let px_blind = typography::size(typography::TITLE, h, ui_scale) * 1.12;
-            let px_detail = typography::size(typography::BODY, h, ui_scale) * 1.18;
+            let px_action = typography::size(typography::HEADING, h) * 1.45;
+            let px_blind = typography::size(typography::TITLE, h) * 1.12;
+            let px_detail = typography::size(typography::BODY, h) * 1.18;
             let h_action = (px_action * 1.38).max(22.0);
             let h_blind = (px_blind * 1.42).max(26.0);
             let h_detail = (px_detail * 1.36).max(22.0);
@@ -1412,8 +1410,8 @@ impl SceneBehavior for PickBlindScene {
             }
 
             let altar_label_w = (w * 0.28).clamp(240.0, 420.0);
-            let altar_label_h = typography::size(typography::HEADING, h, ui_scale) * 2.4;
-            let altar_caption_h = typography::size(typography::CAPTION, h, ui_scale) * 2.4;
+            let altar_label_h = typography::size(typography::HEADING, h) * 2.4;
+            let altar_caption_h = typography::size(typography::CAPTION, h) * 2.4;
 
             let push_altar_caption = |rect: [f32; 4],
                                       title: &str,
@@ -1524,7 +1522,7 @@ impl SceneBehavior for PickBlindScene {
             (play_anchor_rect, skip_anchor_rect)
         };
 
-        let scale = metrics::scene_scale(w, h, ui_scale);
+        let scale = metrics::scene_scale(w, h);
 
         // ── Gold outline around the focused altar ────────────────────
         // A chunky gold border (3× the normal focus ring thickness)
@@ -1561,7 +1559,6 @@ impl SceneBehavior for PickBlindScene {
             crate::ui::layout::ViewportCtx {
                 window_w: w,
                 window_h: h,
-                ui_scale,
             },
             scale,
             &mut quads,

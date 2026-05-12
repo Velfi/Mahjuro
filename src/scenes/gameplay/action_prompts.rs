@@ -76,7 +76,7 @@ pub fn push_gameplay_action_prompts(
     let keyboard_paths = gameplay_keyboard_prompt_icon_paths();
 
     // Match [`crate::scenes::shop::view::render_shop_frame`] floating legend (non-inspect row).
-    let font_px = typography::size(typography::CAPTION, h, ctx.ui_scale).max(14.0);
+    let font_px = typography::size(typography::CAPTION, h).max(14.0);
     let legend_font_px = font_px * 2.0;
     let bar_h_ref = h * 0.056;
     let icon_cap_3x = bar_h_ref * 0.72 * 3.0;

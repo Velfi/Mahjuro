@@ -40,8 +40,8 @@ struct ArchiveChromeLayout {
     arrow_w: f32,
 }
 
-fn archive_chrome_layout(w: f32, h: f32, ui_scale: f32) -> ArchiveChromeLayout {
-    let scale = metrics::scene_scale(w, h, ui_scale);
+fn archive_chrome_layout(w: f32, h: f32) -> ArchiveChromeLayout {
+    let scale = metrics::scene_scale(w, h);
     let margin_x = w * 0.04;
     let title_y = h * 0.02;
     // ~5% of screen height, clamped so 720p sofas stay readable and 4K doesn't balloon.
@@ -308,10 +308,9 @@ impl CollectionScene {
         &self,
         w: f32,
         h: f32,
-        ui_scale: f32,
         progress: &crate::core::progression::PlayerProgress,
     ) -> Vec<FlatItem<CollectionAction>> {
-        let ch = archive_chrome_layout(w, h, ui_scale);
+        let ch = archive_chrome_layout(w, h);
         let scale = ch.scale;
         let title_y = ch.title_y;
         let margin_x = ch.margin_x;
@@ -1208,7 +1207,7 @@ impl CollectionScene {
 
         // Hit rects for 2D chrome — skipped while [`ItemInspectScene`] owns input.
         if inspect.is_none() {
-            let items = self.flat_items(w, h, ctx.ui_scale, ctx.progress);
+            let items = self.flat_items(w, h, ctx.progress);
             self.tree.register_flat_buttons(&items, &mut frame.buttons);
         }
 
@@ -1223,8 +1222,7 @@ impl CollectionScene {
     ) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
-        let ui_scale = ctx.ui_scale;
-        let ch = archive_chrome_layout(w, h, ui_scale);
+        let ch = archive_chrome_layout(w, h);
         let scale = ch.scale;
         let margin_x = ch.margin_x;
         let title_y = ch.title_y;
@@ -1235,7 +1233,7 @@ impl CollectionScene {
         let mut text_labels: Vec<TextLabel> = Vec::new();
 
         // Title — pinned font so long couch viewing doesn't auto-shrink glyphs.
-        let title_font_px = typography::size(typography::TITLE, h, ui_scale).max(30.0);
+        let title_font_px = typography::size(typography::TITLE, h).max(30.0);
         let title_h = (title_font_px / 0.55).ceil() + 8.0;
         text_labels.push(TextLabel {
             rect: [0.0, title_y, w, title_h],
@@ -1246,7 +1244,7 @@ impl CollectionScene {
         });
 
         // Career frieze: body tier + generous line height (TV / wide couch).
-        let frieze_font_px = typography::size(typography::BODY, h, ui_scale).max(22.0);
+        let frieze_font_px = typography::size(typography::BODY, h).max(22.0);
         let frieze_line_h = (frieze_font_px / 0.55).ceil() + 6.0;
         let frieze_gap = (h * 0.018).max(12.0);
         let frieze_top = title_y + title_h + h * 0.012;
@@ -1285,7 +1283,7 @@ impl CollectionScene {
         // Back button.
         let back_w = ch.back_w;
         let back_h = ch.chrome_btn_h;
-        let btn_label_px = typography::size(typography::BODY, h, ui_scale).max(21.0);
+        let btn_label_px = typography::size(typography::BODY, h).max(21.0);
         quads.push(GpuInstance {
             rect: [margin_x, title_y, back_w, back_h],
             color: [0.18, 0.20, 0.30, 0.92],
@@ -1345,7 +1343,7 @@ impl CollectionScene {
         };
         // TV: pinned body size + multi-line copy so width-based auto-shrink
         // never drives hints to microtext.
-        let hint_font_px = typography::size(typography::BODY, h, ui_scale).max(22.0);
+        let hint_font_px = typography::size(typography::BODY, h).max(22.0);
         let hint_line_h = (hint_font_px / 0.55).ceil() + 4.0;
         let hint_text: String = if inspect.is_some() {
             "Right stick: orbit camera\nTriggers / scroll: zoom   ·   E / North: close   ·   Esc: menu"
@@ -1412,7 +1410,6 @@ impl SceneBehavior for CollectionScene {
         let items = self.flat_items(
             ctx.layout.window_w,
             ctx.layout.window_h,
-            ctx.ui_scale,
             ctx.progress,
         );
         // Keyboard / directional / Confirm are handled below by the
@@ -1428,7 +1425,6 @@ impl SceneBehavior for CollectionScene {
                 button_clicks: ctx.button_clicks,
                 cursor_pos: ctx.cursor_pos,
                 window: (ctx.layout.window_w, ctx.layout.window_h),
-                ui_scale: ctx.ui_scale,
                 input_mode: ctx.input_mode,
                 scroll_lines: 0.0,
             },

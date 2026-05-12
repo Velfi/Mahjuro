@@ -11,5 +11,4 @@ pub struct RenderSettings {
     pub shadows_enabled: bool,
     pub ssr_enabled: bool,
     pub hdr_enabled: bool,
-    pub ui_scale: f32,
 }

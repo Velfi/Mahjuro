@@ -278,7 +278,7 @@ impl SceneBehavior for SolitaireScene {
     fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
-        let scale = (w.min(h)) / 600.0 * ctx.ui_scale;
+        let scale = (w.min(h)) / 600.0;
 
         let mut frame = UiFrame::new();
 

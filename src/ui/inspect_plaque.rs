@@ -16,7 +16,6 @@ pub fn push_focus_tooltip_panel_2d(
     texts: &mut Vec<TextLabel>,
     window_w: f32,
     window_h: f32,
-    ui_scale: f32,
     anchor_rect: Option<[f32; 4]>,
     title: &str,
     desc: &str,
@@ -29,14 +28,14 @@ pub fn push_focus_tooltip_panel_2d(
         return;
     }
 
-    let pad = (14.0 * ui_scale).max(10.0);
+    let pad = 14.0_f32.max(10.0);
     let border = tooltip::FRAME_BORDER_PX;
     let margin = window_w * 0.02;
     let panel_w = (window_w * 0.38).min(520.0);
     let inner_w = (panel_w - pad * 2.0 - border * 2.0).max(80.0);
 
-    let heading_px = typography::size(typography::HEADING, window_h, ui_scale).max(15.0);
-    let body_px = typography::size(typography::BODY, window_h, ui_scale).max(13.0);
+    let heading_px = typography::size(typography::HEADING, window_h).max(15.0);
+    let body_px = typography::size(typography::BODY, window_h).max(13.0);
     let section_gap = 6.0_f32;
 
     let desc_trim = truncate_inspect_text(desc, 400);
@@ -133,7 +132,6 @@ pub fn push_floating_relic_flavor_labels(
     texts: &mut Vec<TextLabel>,
     window_w: f32,
     window_h: f32,
-    ui_scale: f32,
     flavor: &'static [RelicFlavorSpan],
     extra_bottom_reserve: f32,
 ) {
@@ -143,7 +141,7 @@ pub fn push_floating_relic_flavor_labels(
     let margin_x = window_w * 0.06;
     let band_w = (window_w - 2.0 * margin_x).min(760.0);
     let left = (window_w - band_w) * 0.5;
-    let body_px = typography::size(typography::BODY, window_h, ui_scale).max(13.0);
+    let body_px = typography::size(typography::BODY, window_h).max(13.0);
     let line_step = body_px * 1.4;
     let max_lines = 5usize;
     let band_h = (line_step * max_lines as f32 + body_px * 0.5)

@@ -242,8 +242,7 @@ impl SceneBehavior for MainMenuExteriorScene {
         let layout = ctx.layout;
         let w = layout.window_w;
         let h = layout.window_h;
-        let ui_scale = ctx.ui_scale;
-        let scale = metrics::scene_scale(w, h, ui_scale);
+        let scale = metrics::scene_scale(w, h);
 
         // App modals (level-up / relic unlock) append 3D hero staging after the
         // scene, but all `Text` cmds share one post-tonemap overlay pass. Hub
@@ -286,7 +285,7 @@ impl SceneBehavior for MainMenuExteriorScene {
             format!("Profile {}  —  New", active + 1)
         };
 
-        let profile_h = (typography::size(typography::CAPTION, h, ui_scale) * 1.45).max(15.0);
+        let profile_h = (typography::size(typography::CAPTION, h) * 1.45).max(15.0);
         let profile_y = focus_rects
             .first()
             .map(|(_, r)| r[1] - profile_h - h * 0.022)
@@ -300,7 +299,7 @@ impl SceneBehavior for MainMenuExteriorScene {
             focus_nav::push_focus_ring(rect, scale, w, h, &mut quads);
         }
 
-        let menu_font = typography::size(typography::HEADING, h, ui_scale).max(20.0);
+        let menu_font = typography::size(typography::HEADING, h).max(20.0);
         let label_color = color::PARCHMENT;
         let mut text_labels = vec![
             TextLabel {

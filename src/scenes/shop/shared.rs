@@ -376,12 +376,11 @@ pub(super) fn push_free_badge(
     texts: &mut Vec<TextLabel>,
     rect: [f32; 4],
     window_h: f32,
-    ui_scale: f32,
 ) {
     if rect[2] <= 1.0 || rect[3] <= 1.0 || !rect[0].is_finite() || !rect[1].is_finite() {
         return;
     }
-    let badge_font = typography::size(typography::MICRO, window_h, ui_scale).max(12.0);
+    let badge_font = typography::size(typography::MICRO, window_h).max(12.0);
     let badge_h = (badge_font * 1.55).max(18.0);
     let badge_w = (badge_font * 4.8).max(52.0);
     let badge_x = rect[0] + rect[2] - badge_w * 0.88;

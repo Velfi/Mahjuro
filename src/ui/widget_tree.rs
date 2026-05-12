@@ -447,7 +447,6 @@ pub struct TreeState {
     /// is `(item id, rect, kind tag)`. Decorations are not cached.
     layout: Vec<LaidOut>,
     last_window: (f32, f32),
-    last_ui_scale: f32,
     /// Smooth-scroll state for autoscroll when content overflows anchor.
     scroll: SmoothScroll,
     /// The pixel offset currently applied to laid-out rects (cached for draw).
@@ -478,7 +477,6 @@ impl TreeState {
             focus_changed: false,
             layout: Vec::new(),
             last_window: (0.0, 0.0),
-            last_ui_scale: 1.0,
             scroll: SmoothScroll::new(),
             scroll_offset_px: 0.0,
             content_height: 0.0,
@@ -655,7 +653,6 @@ pub struct TreeInput<'a> {
     pub button_clicks: &'a [u32],
     pub cursor_pos: (f32, f32),
     pub window: (f32, f32),
-    pub ui_scale: f32,
     pub input_mode: crate::ui::input::InputMode,
     /// Mouse-wheel / trackpad scroll delta in line units.
     /// Positive = scroll down. Only used when the tree content overflows
@@ -679,12 +676,11 @@ struct LayoutInfo {
 fn layout_tree<A: Copy>(
     tree: &Tree<A>,
     window: (f32, f32),
-    ui_scale: f32,
     out: &mut Vec<LaidOut>,
 ) -> LayoutInfo {
     out.clear();
     let (w, h) = window;
-    let scale = metrics::scene_scale(w, h, ui_scale);
+    let scale = metrics::scene_scale(w, h);
 
     // Resolve the root anchor. Defaults to centered, narrow column for
     // vertical menus; full screen for everything else.
@@ -703,10 +699,10 @@ fn layout_tree<A: Copy>(
     });
 
     // Measure the natural content height of the root column for autoscroll.
-    let content_height = root_content_height(&tree.root, anchor[2], h, scale, ui_scale);
+    let content_height = root_content_height(&tree.root, anchor[2], h, scale);
 
     let mut rects = Vec::new();
-    layout_node(&tree.root, anchor, scale, h, ui_scale, out, &mut rects);
+    layout_node(&tree.root, anchor, scale, h, out, &mut rects);
     LayoutInfo {
         rects,
         content_height,
@@ -720,7 +716,6 @@ fn root_content_height<A: Copy>(
     container_w: f32,
     window_h: f32,
     scale: f32,
-    ui_scale: f32,
 ) -> f32 {
     match node {
         Node::Column { gap, children, .. } => {
@@ -731,7 +726,7 @@ fn root_content_height<A: Copy>(
             };
             let mut total = 0.0f32;
             for (i, c) in children.iter().enumerate() {
-                total += child_height(c, container_w, window_h, scale, ui_scale);
+                total += child_height(c, container_w, window_h, scale);
                 if i + 1 < children.len() {
                     total += gap_px;
                 }
@@ -760,12 +755,11 @@ fn natural_decoration_height(
     decoration: &Decoration,
     window_h: f32,
     scale: f32,
-    ui_scale: f32,
 ) -> f32 {
     match decoration {
-        Decoration::Title { tier, .. } => typography::size(*tier, window_h, ui_scale) * 1.2,
-        Decoration::Body { tier, .. } => typography::size(*tier, window_h, ui_scale) * 1.1,
-        Decoration::Hint { tier, .. } => typography::size(*tier, window_h, ui_scale) * 1.1,
+        Decoration::Title { tier, .. } => typography::size(*tier, window_h) * 1.2,
+        Decoration::Body { tier, .. } => typography::size(*tier, window_h) * 1.1,
+        Decoration::Hint { tier, .. } => typography::size(*tier, window_h) * 1.1,
         Decoration::Spacer(px) => *px * scale,
     }
 }
@@ -775,7 +769,6 @@ fn layout_node<A: Copy>(
     rect: [f32; 4],
     scale: f32,
     window_h: f32,
-    ui_scale: f32,
     out: &mut Vec<LaidOut>,
     rects: &mut Vec<NodeRect>,
 ) {
@@ -796,7 +789,7 @@ fn layout_node<A: Copy>(
             // vertically inside the container.
             let mut child_heights = Vec::with_capacity(children.len());
             for c in children {
-                child_heights.push(child_height(c, w, window_h, scale, ui_scale));
+                child_heights.push(child_height(c, w, window_h, scale));
             }
             let total_h: f32 = child_heights.iter().sum::<f32>()
                 + gap_px * (children.len().saturating_sub(1) as f32);
@@ -816,11 +809,10 @@ fn layout_node<A: Copy>(
                     [cx, cy, cw, *ch],
                     scale,
                     window_h,
-                    ui_scale,
                     out,
                     rects,
                 );
-                cy += ch + gap_px;
+                cy += *ch + gap_px;
             }
         }
         Node::Row {
@@ -839,7 +831,7 @@ fn layout_node<A: Copy>(
             let cw = ((w - total_gap) / n).max(0.0);
             let mut cx = x;
             for child in children {
-                let ch = child_height(child, cw, window_h, scale, ui_scale).min(h);
+                let ch = child_height(child, cw, window_h, scale).min(h);
                 let cy = match align {
                     VAlign::Top => y,
                     VAlign::Bottom => y + h - ch,
@@ -855,7 +847,6 @@ fn layout_node<A: Copy>(
                     [cx, cy, cw, final_h],
                     scale,
                     window_h,
-                    ui_scale,
                     out,
                     rects,
                 );
@@ -886,7 +877,6 @@ fn layout_node<A: Copy>(
                     [cx, cy, cell_w, cell_h],
                     scale,
                     window_h,
-                    ui_scale,
                     out,
                     rects,
                 );
@@ -922,7 +912,6 @@ fn child_height<A: Copy>(
     container_w: f32,
     window_h: f32,
     scale: f32,
-    ui_scale: f32,
 ) -> f32 {
     match node {
         Node::Item(item) => match item.size {
@@ -931,14 +920,14 @@ fn child_height<A: Copy>(
             Size::FracW(f) => container_w * f,
             Size::Auto => natural_item_height(scale),
         },
-        Node::Decoration(d) => natural_decoration_height(d, window_h, scale, ui_scale),
+        Node::Decoration(d) => natural_decoration_height(d, window_h, scale),
         // A Row nested inside a Column needs to report a real height so the
         // Column's vertical layout reserves space for it; we use the tallest
         // child's natural height. Column/Grid still defer to the parent rect
         // (anchor or grid cell).
         Node::Row { children, .. } => children
             .iter()
-            .map(|c| child_height(c, container_w, window_h, scale, ui_scale))
+            .map(|c| child_height(c, container_w, window_h, scale))
             .fold(0.0f32, f32::max),
         Node::Column { .. } | Node::Grid { .. } => 0.0,
     }
@@ -951,8 +940,7 @@ impl TreeState {
     pub fn update<A: Copy>(&mut self, tree: &Tree<A>, input: TreeInput<'_>) -> Option<A> {
         self.focus_changed = false;
         self.last_window = input.window;
-        self.last_ui_scale = input.ui_scale;
-        let info = layout_tree(tree, input.window, input.ui_scale, &mut self.layout);
+        let info = layout_tree(tree, input.window, &mut self.layout);
         self.content_height = info.content_height;
         self.anchor_height = info.anchor_height;
 
@@ -1188,7 +1176,6 @@ impl TreeState {
         let _ = layout_tree(
             tree,
             self.last_window,
-            self.last_ui_scale,
             &mut layout_scratch,
         );
 
@@ -1208,14 +1195,13 @@ impl TreeState {
             layout: &layout_scratch,
             idx: &mut idx,
             window: self.last_window,
-            ui_scale: self.last_ui_scale,
         };
         draw_node(&tree.root, frame, &mut ctx);
     }
 }
 
 /// Per-traversal context for `draw_node`: the focused id, the laid-out
-/// rects array + cursor, and the window size + ui scale. Grouped so the
+/// rects array + cursor, and the window size. Grouped so the
 /// recursion only threads one borrow.
 struct DrawNodeCtx<'a, 'b> {
     focused: Option<FocusId>,
@@ -1223,7 +1209,6 @@ struct DrawNodeCtx<'a, 'b> {
     layout: &'a [LaidOut],
     idx: &'b mut usize,
     window: (f32, f32),
-    ui_scale: f32,
 }
 
 fn draw_node<A: Copy>(node: &Node<A>, frame: &mut TreeFrame<'_>, ctx: &mut DrawNodeCtx<'_, '_>) {
@@ -1251,7 +1236,6 @@ fn draw_node<A: Copy>(node: &Node<A>, frame: &mut TreeFrame<'_>, ctx: &mut DrawN
                 frame,
                 ctx.render_custom,
                 ctx.window,
-                ctx.ui_scale,
             );
         }
         Node::Decoration(d) => {
@@ -1273,7 +1257,7 @@ fn draw_node<A: Copy>(node: &Node<A>, frame: &mut TreeFrame<'_>, ctx: &mut DrawN
             // at a y-position chosen by where we are in the column. For the
             // first migration scenes (start_screen), decorations are always
             // a Title at the top — so we use a window-relative top position.
-            draw_decoration_top(d, frame, ctx.window, ctx.ui_scale);
+            draw_decoration_top(d, frame, ctx.window);
         }
     }
 }
@@ -1282,12 +1266,11 @@ fn draw_decoration_top(
     d: &Decoration,
     frame: &mut TreeFrame<'_>,
     window: (f32, f32),
-    ui_scale: f32,
 ) {
     let (w, h) = window;
     match d {
         Decoration::Title { text, tier, color } => {
-            let th = typography::size(*tier, h, ui_scale);
+            let th = typography::size(*tier, h);
             frame.labels.push(TextLabel {
                 rect: [0.0, h * 0.08, w, th],
                 text: text.clone(),
@@ -1296,7 +1279,7 @@ fn draw_decoration_top(
             });
         }
         Decoration::Body { text, tier, color } => {
-            let th = typography::size(*tier, h, ui_scale);
+            let th = typography::size(*tier, h);
             frame.labels.push(TextLabel {
                 rect: [0.0, h * 0.16, w, th],
                 text: text.clone(),
@@ -1305,8 +1288,8 @@ fn draw_decoration_top(
             });
         }
         Decoration::Hint { text, tier, color } => {
-            let th = typography::size(*tier, h, ui_scale);
-            let scale = metrics::scene_scale(w, h, ui_scale);
+            let th = typography::size(*tier, h);
+            let scale = metrics::scene_scale(w, h);
             let hint_y = h - th - (12.0 * scale);
             frame.labels.push(TextLabel {
                 rect: [0.0, hint_y, w, th],
@@ -1339,7 +1322,6 @@ fn draw_item<A: Copy>(
     frame: &mut TreeFrame<'_>,
     render_custom: &RenderCustomFn<'_>,
     window: (f32, f32),
-    ui_scale: f32,
 ) {
     let state = if !item.enabled {
         ButtonState::Disabled
@@ -1357,7 +1339,7 @@ fn draw_item<A: Copy>(
     // Draw a gold focus ring around the focused item — the 2D equivalent
     // of the 3D tile outline shell that selected in-game tiles get.
     if focused {
-        let scale = (window.0.min(window.1)) / 600.0 * ui_scale;
+        let scale = metrics::scene_scale(window.0, window.1);
         push_focus_ring(rect, scale, window.0, window.1, frame.instances);
     }
 
@@ -1543,7 +1525,6 @@ mod tests {
                 button_clicks: &[],
                 cursor_pos: (0.0, 0.0),
                 window: (1280.0, 720.0),
-                ui_scale: 1.0,
                 input_mode: InputMode::Controller,
                 scroll_lines: 0.0,
             },
@@ -1576,7 +1557,6 @@ mod tests {
                 button_clicks: &[],
                 cursor_pos: (0.0, 0.0),
                 window: (1280.0, 720.0),
-                ui_scale: 1.0,
                 input_mode: InputMode::Cursor,
                 scroll_lines: 0.0,
             },
@@ -1611,7 +1591,6 @@ mod tests {
                 cursor_pos: (150.0, 150.0),
                 button_clicks: &[],
                 window: (1280.0, 720.0),
-                ui_scale: 1.0,
                 input_mode: InputMode::Cursor,
                 scroll_lines: 0.0,
             },

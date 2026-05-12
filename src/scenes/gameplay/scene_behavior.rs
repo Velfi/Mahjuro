@@ -59,7 +59,6 @@ impl SceneBehavior for GameplayScene {
                 dt,
                 ctx.layout.window_w,
                 ctx.layout.window_h,
-                ctx.ui_scale,
             );
         }
         // Compute tutorial affinity glow indices.
@@ -436,7 +435,6 @@ impl SceneBehavior for GameplayScene {
         let hud_layout = compute_gameplay_hud_layout(
             layout,
             &hand_slots,
-            ctx.ui_scale,
             has_structure,
             showcase_present,
         );
@@ -537,7 +535,7 @@ impl SceneBehavior for GameplayScene {
             && self.pending_refill.is_none()
             && let Some(bowl_rect) = ctx.proj.bowl_rect
         {
-            let zscale = (layout.window_w.min(layout.window_h)) / 600.0 * ctx.ui_scale;
+            let zscale = (layout.window_w.min(layout.window_h)) / 600.0;
             let gap = (6.0 * zscale).max(4.0);
             let btn_h = (28.0 * zscale).max(22.0);
             let btn_w = (88.0 * zscale).max(72.0);
@@ -726,7 +724,6 @@ impl SceneBehavior for GameplayScene {
             crate::ui::layout::ViewportCtx {
                 window_w: layout.window_w,
                 window_h: layout.window_h,
-                ui_scale: ctx.ui_scale,
             },
             scale,
             &mut pause_quads,
@@ -1318,7 +1315,6 @@ impl SceneBehavior for GameplayScene {
             let body_px = crate::render::theme::typography::size(
                 crate::render::theme::typography::BODY,
                 layout.window_h,
-                ctx.ui_scale,
             )
             .max(11.0);
             let push_centered = |out: &mut Vec<TextLabel>, rect: [f32; 4], copy: &'static str| {
@@ -1509,7 +1505,6 @@ impl SceneBehavior for GameplayScene {
                                     &mut inspect_tooltip_texts,
                                     layout.window_w,
                                     layout.window_h,
-                                    ctx.ui_scale,
                                     Some(rect),
                                     &name,
                                     &desc,
@@ -1523,7 +1518,6 @@ impl SceneBehavior for GameplayScene {
                                         &mut inspect_tooltip_texts,
                                         layout.window_w,
                                         layout.window_h,
-                                        ctx.ui_scale,
                                         d.flavor,
                                         0.0,
                                     );
@@ -1543,7 +1537,6 @@ impl SceneBehavior for GameplayScene {
                                     &mut inspect_tooltip_texts,
                                     layout.window_w,
                                     layout.window_h,
-                                    ctx.ui_scale,
                                     Some(rect),
                                     &title,
                                     &desc,
@@ -1576,7 +1569,6 @@ impl SceneBehavior for GameplayScene {
                                     &mut inspect_tooltip_texts,
                                     layout.window_w,
                                     layout.window_h,
-                                    ctx.ui_scale,
                                     Some(rect),
                                     title,
                                     &desc,
@@ -1597,7 +1589,6 @@ impl SceneBehavior for GameplayScene {
                                 &mut inspect_tooltip_texts,
                                 layout.window_w,
                                 layout.window_h,
-                                ctx.ui_scale,
                                 Some(rect),
                                 &title,
                                 &desc,
@@ -1613,7 +1604,6 @@ impl SceneBehavior for GameplayScene {
                                 &mut inspect_tooltip_texts,
                                 layout.window_w,
                                 layout.window_h,
-                                ctx.ui_scale,
                                 Some(rect),
                                 "Undo discard",
                                 "Confirm to restore your previous hand and wall before the last discard. Clears when you play, sort, use a consumable, or discard again.",
@@ -1723,7 +1713,6 @@ impl SceneBehavior for GameplayScene {
             overlay.draw(
                 ctx.layout.window_w,
                 ctx.layout.window_h,
-                ctx.ui_scale,
                 &mut tut_quads,
                 &mut tut_labels,
             );
