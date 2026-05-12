@@ -1,0 +1,24 @@
+name: Hydrate LFS bundle
+description: >-
+  Download the mahjuro-lfs-assets tarball from a prior prepare job and extract
+  it at the repository root (overwrites Git LFS pointer files).
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@v7
+      with:
+        name: mahjuro-lfs-assets
+        path: .lfs-bundle
+
+    - name: Extract LFS bundle over workspace
+      shell: bash
+      run: |
+        set -euo pipefail
+        cd "${{ github.workspace }}"
+        BUNDLE="$(find .lfs-bundle -maxdepth 3 -name '*.lfsbundle' -type f | head -1)"
+        if [[ -z "${BUNDLE}" ]]; then
+          echo "::error::No .lfsbundle under .lfs-bundle"; ls -laR .lfs-bundle || true; exit 1
+        fi
+        tar -xzf "$BUNDLE"
+        rm -rf .lfs-bundle

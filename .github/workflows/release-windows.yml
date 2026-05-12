@@ -32,7 +32,9 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.release_tag }}
-          lfs: true
+          lfs: false
+
+      - uses: ./.github/actions/hydrate-lfs-bundle
 
       - name: Compute version (strip leading v)
         id: version

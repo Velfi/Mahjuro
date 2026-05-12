@@ -46,7 +46,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ steps.tag.outputs.tag }}
-          lfs: true
+          lfs: false
 
       # Match release-linux.yml link-time deps so the published binary’s shared
       # libraries resolve (no compile on this job).

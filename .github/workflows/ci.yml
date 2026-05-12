@@ -17,7 +17,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lfs-assets:
+    uses: ./.github/workflows/prepare-lfs-assets.yml
+    with:
+      git_ref: ${{ github.sha }}
+
   build-and-test:
+    needs: lfs-assets
     strategy:
       fail-fast: false
       matrix:
@@ -48,7 +54,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          lfs: true
+          ref: ${{ github.sha }}
+          lfs: false
+
+      - uses: ./.github/actions/hydrate-lfs-bundle
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
