@@ -13,6 +13,7 @@ commit history.
 - The final ante can now pit you against **The House**, which won’t let you cash in your structure until you’ve used every discard for the round.
 
 ### Changed
+- **Silver Filigree Lantern** is now **Stone Lantern** (ishidōrō stone lantern art direction). Internal id is `stone_lantern`; older saves that still store `silver_filigree_lantern` load correctly.
 - The **Meld Guide** no longer appears on the main menu; open it from **Pause** while you’re in a run.
 - **Snowball** adds **+15 chips** to every scored hand for each **cleared** blind while you own it (skips don’t count), up to **15** clears counted; selling the relic resets the counter. Chip bonus is flat per clear (not tied to the blind’s score target).
 

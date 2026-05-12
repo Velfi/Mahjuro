@@ -689,14 +689,16 @@ RELICS = [
         "Warm cream paper, amber inner glow, muted red tassel, dark bronze hook.",
     ),
     (
-        "silver_filigree_lantern",
-        "Silver Filigree Lantern",
-        "An ornate silver lantern wrapped in delicate filigree scrollwork — "
-        "fine pierced silver vinework forms the cage around a steady inner "
-        "flame. Heirloom craftsmanship, like a temple votive elevated to "
-        "treasure. The successor to a humble paper lantern.",
-        "Polished silver filigree, cool argent highlights, warm gold flame, "
-        "soft pearl-white inner glow, faint indigo shadow in the recesses.",
+        "stone_lantern",
+        "Stone Lantern",
+        "A traditional Japanese ishidōrō stone lantern — stacked carved "
+        "stone roof and pillar, hollow light chamber with openings, weathered "
+        "granite texture."
+        "readable as a single centered badge.",
+        "Weathered gray granite and mossy stone, warm amber and soft gold "
+        "candlelight glowing from the chamber interior, muted moonlit sage "
+        "and jade moss with small fern fronds clustered at the stone base "
+        "as part of the pin composition, cool blue-gray rim light on stone edges.",
     ),
     (
         "mirror_tile",
