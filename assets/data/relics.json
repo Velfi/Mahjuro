@@ -1484,19 +1484,14 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
+        "text": "\"The courtyard pond is choked with rotten slime.A thousand petals fall before their time.The gate bears the fetid cloak of rust.A staggering scent of rot.The painting of lingering disgust.\"                                                             - ",
         "bold": false,
         "italic": false
       },
       {
-        "text": "Disgust",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " — never the tile, always the tale.",
+        "text": "A hope-shattered gambler.",
         "bold": false,
-        "italic": false
+        "italic": true
       }
     ]
   },

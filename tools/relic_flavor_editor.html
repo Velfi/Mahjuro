@@ -212,6 +212,12 @@
       line-height: 1.3;
       word-break: break-word;
     }
+    .boot-status {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin: 0 0 0.65rem;
+      min-height: 1.25em;
+    }
   </style>
 </head>
 <body>
@@ -219,16 +225,18 @@
     <h1>Relic text → <code>description</code> &amp; <code>flavor_spans</code></h1>
     <details class="hint-details">
       <summary>
-        Load <code>relics.json</code> (file or drag-drop), edit the rule line and flavor, use <strong>B</strong> / <em>I</em> in the flavor box. Save writes the full array. More…
+        When opened over HTTP from the repo, <code>assets/data/relics.json</code> loads automatically (same paths as object art). File picker / drag-drop still work. Edit rule + flavor; <strong>B</strong> / <em>I</em> in the flavor box. More…
       </summary>
       <p>
         <strong>Rule</strong> is the plain-string <code>description</code> field (what players read as the mechanical summary). <strong>Flavor</strong> is rich-text <code>flavor_spans</code> for inspect UI.
         Changing relic in the dropdown saves the current relic’s edits in memory first (then save file when you are ready).
         Browsers that support it open a real save dialog; otherwise you get a download of <code>relics.json</code> to move into <code>assets/data/</code>.
-        Object art uses <code>assets/textures/relics/source/&lt;id&gt;_object.png</code> relative to this page; if images are missing, serve the repo from its root (e.g. <code>python3 -m http.server</code>) and open this HTML over <code>http://localhost/…</code>.
+        Auto-load uses <code>../assets/data/relics.json</code> from <code>tools/</code>. Object art uses <code>../assets/textures/relics/source/&lt;id&gt;_object.png</code>. If auto-load fails (e.g. <code>file://</code>), run <code>python3 -m http.server</code> from the repo root and open this page over <code>http://localhost/…</code>.
       </p>
     </details>
   </header>
+
+  <p id="bootStatus" class="boot-status" role="status" aria-live="polite"></p>
 
   <div class="top-controls">
     <div class="field">
@@ -280,6 +288,8 @@
   </div>
 
   <script>
+    const DEFAULT_RELICS_JSON_URL = "../assets/data/relics.json";
+
     let relics = null;
     let currentId = null;
     const $ = (id) => document.getElementById(id);
@@ -475,11 +485,35 @@
       return true;
     }
 
+    async function tryAutoLoadRelicsOnBoot() {
+      const el = $("bootStatus");
+      const set = (t) => {
+        if (el) el.textContent = t;
+      };
+      try {
+        const res = await fetch(DEFAULT_RELICS_JSON_URL, { credentials: "same-origin" });
+        if (!res.ok) {
+          set("Auto-load skipped — use file picker or open this page via http:// from the repo root.");
+          return;
+        }
+        const text = await res.text();
+        if (loadRelicsFromJsonText(text)) {
+          set("Loaded " + DEFAULT_RELICS_JSON_URL + ".");
+        }
+      } catch (e) {
+        set("Auto-load unavailable — use file picker or serve the repo (e.g. python3 -m http.server).");
+        console.warn("Auto-load relics.json:", e);
+      }
+    }
+
     $("file").addEventListener("change", async (e) => {
       const f = e.target.files[0];
       if (!f) return;
       const text = await f.text();
-      loadRelicsFromJsonText(text);
+      if (loadRelicsFromJsonText(text)) {
+        const st = $("bootStatus");
+        if (st) st.textContent = "Loaded from file: " + f.name + ".";
+      }
     });
 
     function hasFilePayload(dt) {
@@ -522,7 +556,10 @@
           return;
         }
         const text = await f.text();
-        loadRelicsFromJsonText(text);
+        if (loadRelicsFromJsonText(text)) {
+          const st = $("bootStatus");
+          if (st) st.textContent = "Loaded from dropped file.";
+        }
       },
       true
     );
@@ -612,6 +649,8 @@
     }
 
     $("btnSave").addEventListener("click", saveFullJson);
+
+    tryAutoLoadRelicsOnBoot();
   </script>
 </body>
 </html>
