@@ -18,19 +18,27 @@ permissions:
   actions: write # upload/download artifacts within the workflow run
 
 jobs:
+  lfs-assets:
+    uses: ./.github/workflows/prepare-lfs-assets.yml
+    with:
+      git_ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+
   release-macos:
+    needs: lfs-assets
     uses: ./.github/workflows/release-macos.yml
     with:
       release_tag: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
     secrets: inherit
 
   release-linux:
+    needs: lfs-assets
     uses: ./.github/workflows/release-linux.yml
     with:
       release_tag: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
     secrets: inherit
 
   release-windows:
+    needs: lfs-assets
     uses: ./.github/workflows/release-windows.yml
     with:
       release_tag: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
@@ -52,6 +60,10 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+
+      - name: Drop CI-only LFS bundle from release uploads
+        shell: bash
+        run: find artifacts -name '*.lfsbundle' -delete
 
       - name: Extract release notes from CHANGELOG.md
         id: notes

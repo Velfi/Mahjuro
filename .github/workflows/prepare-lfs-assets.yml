@@ -1,0 +1,71 @@
+# Reusable: checkout without LFS, fingerprint LFS object set, restore/save Actions cache,
+# materialize on miss, upload one tarball for sibling jobs (single LFS pull per workflow run).
+name: Prepare LFS assets
+
+on:
+  workflow_call:
+    inputs:
+      git_ref:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.git_ref }}
+          lfs: false
+
+      - name: LFS fingerprint
+        id: fp
+        shell: bash
+        run: |
+          set -euo pipefail
+          HASH="$(
+            git lfs ls-files -l --json |
+              jq -r '.files | sort_by(.name) | .[] | "\(.name)\t\(.oid)"' |
+              sha256sum | awk '{print $1}'
+          )"
+          echo "hash=${HASH}" >> "$GITHUB_OUTPUT"
+          echo "LFS fingerprint: ${HASH}"
+
+      - name: Restore LFS asset bundle (Actions cache)
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: lfs-asset-bundle/mahjuro-lfs-assets.lfsbundle
+          key: lfs-assets-v1-${{ steps.fp.outputs.hash }}
+
+      - name: Materialize LFS and build bundle (cache miss)
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p lfs-asset-bundle
+          git lfs install
+          git lfs pull
+          git lfs ls-files -l --json |
+            jq -r '.files[].name' |
+            LC_ALL=C sort > lfs-asset-bundle/paths.txt
+          tar -czf lfs-asset-bundle/mahjuro-lfs-assets.lfsbundle -T lfs-asset-bundle/paths.txt
+
+      - name: Save LFS asset bundle to cache
+        if: >-
+          steps.cache.outputs.cache-hit != 'true' &&
+          (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        uses: actions/cache/save@v4
+        with:
+          path: lfs-asset-bundle/mahjuro-lfs-assets.lfsbundle
+          key: lfs-assets-v1-${{ steps.fp.outputs.hash }}
+
+      - name: Upload LFS bundle for sibling jobs
+        uses: actions/upload-artifact@v7
+        with:
+          name: mahjuro-lfs-assets
+          path: lfs-asset-bundle/mahjuro-lfs-assets.lfsbundle
