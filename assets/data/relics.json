@@ -491,17 +491,17 @@
     "rarity": "common",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
+        "text": "The blue serpent ",
         "bold": false,
         "italic": false
       },
       {
-        "text": "Blue",
+        "text": "intertwines",
         "bold": true,
         "italic": false
       },
       {
-        "text": " — never the tile, always the tale.",
+        "text": " itself with the blue tiles you have played.",
         "bold": false,
         "italic": false
       }
