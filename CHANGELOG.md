@@ -7,17 +7,6 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
-## 0.5.0-7 — 2026-05-12
-
-### Changed
-- Simplified controller input plumbing in preparation for first-class Steam Deck support: collapsed Steam Input action sets to four (`Menus`, `Gameplay`, `Shop`, `Inspect`); centralised rumble dispatch so call sites no longer try-Steam-then-fall-back-to-SDL; replaced the per-frame Steam Input glyph Vec with a `GlyphResolver` that prefers Steam Input and falls back to a static Kenney atlas keyed off the detected gamepad style; added a CI-verified consistency test between the VDF action manifest and the Rust binding table; switched in-game prompt glyphs from per-icon SVGs to baked sprite atlases (cropped on demand from each style's `_sheet_double.png` + XML index), shrinking the prompts asset directory from 12 MB to 776 KB and dropping the runtime SVG rasterise step for the static fallback path. Picked smart per-controller defaults that follow whichever pad is currently connected — Nintendo controllers auto-flip `swap_ab` and `swap_xy` to ON so Confirm sits on the eastern "A"-labelled face button, matching every other Switch title; every other style flips both back OFF. The auto-apply re-evaluates on every controller-style transition (Nintendo ↔ Xbox etc.), so plugging a different pad in the same session rebinds correctly, and is suppressed forever once the player toggles either setting in Options. Auto-pause the game when the last connected controller disappears while the player is in Controller mode (Steam Input "Five Golden Rules of Input" #5: a disconnected gamepad should pause the game). Set the explicit SDL3 hints `SDL_JOYSTICK_HIDAPI` / `SDL_JOYSTICK_HIDAPI_STEAM` / `SDL_JOYSTICK_HIDAPI_STEAMDECK` to lock in the Steam Input vs raw-HID arbitration so the player doesn't see double events when Steam captures a pad. Stage `game_actions_4636490.vdf` at the macOS depot root in `scripts/steam-upload.sh` (alongside `Mahjuro.app/`, in addition to the existing copy inside `Mahjuro.app/Contents/MacOS/` that the runtime uses) so the partner-site Action Manifest path resolves to the same `game_actions_4636490.vdf` string on Windows, Linux, and macOS. Tightened the VDF against Valve's Portal 2 reference manifest: dropped redundant `legacy_set "0"` keys from every action set, and added a `cursor` analog action (`absolute_mouse` + `os_mouse=1`) to `Menus`, `Gameplay`, and `Shop` so trackpad / gyro players (Steam Deck, Switch Pro) can drive the existing in-game mouse cursor — Steam pushes the deltas through the OS mouse path, so SDL's `MouseMotion` handler picks them up automatically without any new game-side input dispatch. Added Valve's USB vendor ID (`0x28DE`) to the gamepad-style classifier so Steam Deck and Steam Controller pads route to the Generic family when Steam Input is unavailable. Renamed the Options row "X and Y Quick Action" to "Instant play / discard (X·Y face)" so its purpose is obvious at a glance.
-
-### Fixed
-- Fixed an issue where "phantom overhang" shadows sometimes appeared on tiles.
-
-### Removed
-- Removed the in-app update checker and installer (GitHub Releases / `self_update`), macOS Sparkle integration, and the `self_update` dependency. Distribution updates are handled by Steam (and manual installs for non-Steam builds).
-
 ## 0.5.0-6 — 2026-05-11
 
 ### Added
@@ -35,7 +24,7 @@ commit history.
 ## 0.5.0-4 — 2026-05-09
 
 ### Added
-- New relic **Chrysalis**: once you've already reached the blind's target score, further scores that round no longer add to your round or run totals—instead that value is absorbed. Gather **2000** absorbed and it hatches into **Monarch Butterfly**, which adds **+12 chips per tier**, gaining **one tier per 200** absorbed (cap **24** tiers); post-target scores still feed absorbed total without adding to round or run score.
+- New relic **Chrysalis**: once you've already reached the blind's target score, further scores that round no longer add to your round or run totals—instead that value is absorbed. Gather enough absorbed score and it hatches into **Monarch Butterfly**, which adds bonus chips each hand based on tiers that grow from total absorbed excess (with diminishing tier gains as excess climbs).
 - New rare relic **Euler's Number** adds a flat mult bonus equal to the constant *e* (about 2.718) every time you score a hand.
 - New relic **I Got A Guy**: three times per run you can restock the shop without paying gold (normal restock price increases still apply after each restock).
 
