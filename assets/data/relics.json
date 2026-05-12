@@ -839,23 +839,23 @@
     ]
   },
   {
-    "id": "silver_filigree_lantern",
-    "name": "Silver Filigree Lantern",
+    "id": "stone_lantern",
+    "name": "Stone Lantern",
     "description": "×2 mult; 1-in-1000 chance to be destroyed at round end",
     "rarity": "legendary",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
+        "text": "What paper promised in a night, ",
         "bold": false,
         "italic": false
       },
       {
-        "text": "Silver",
+        "text": "stone",
         "bold": true,
         "italic": false
       },
       {
-        "text": " — never the tile, always the tale.",
+        "text": " keeps in the garden after.",
         "bold": false,
         "italic": false
       }

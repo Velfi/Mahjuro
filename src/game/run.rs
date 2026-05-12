@@ -110,7 +110,7 @@ pub struct RelicShopPoolExtinction {
     pub chrysalis: bool,
 }
 
-/// Silk Moth / Taotie / Geese / Silver Filigree: shop-only after the primary
+/// Silk Moth / Taotie / Geese / Stone Lantern: shop-only after the primary
 /// burns **this run**; never carried in meta `available_relics`.
 fn transformation_successor_shop_eligible(
     id: RelicId,
@@ -118,7 +118,7 @@ fn transformation_successor_shop_eligible(
     ex: RelicShopPoolExtinction,
 ) -> bool {
     match id {
-        RelicId::SilverFiligreeLantern => {
+        RelicId::StoneLantern => {
             ex.paper_lantern && available_relics.contains(&RelicId::PaperLantern)
         }
         RelicId::SilkMoth => ex.silk_thread && available_relics.contains(&RelicId::SilkThread),
@@ -675,7 +675,7 @@ pub struct RunState {
     #[serde(default)]
     pub total_score_earned: u64,
     /// True once Paper Lantern has burned up this run. Prevents Paper from
-    /// reappearing in shops and unlocks Silver Filigree Lantern in the shop pool.
+    /// reappearing in shops and unlocks Stone Lantern in the shop pool.
     #[serde(default)]
     pub paper_lantern_extinct: bool,
     /// Silk Thread burned this run — slot emptied; Silk Moth can appear in shops.

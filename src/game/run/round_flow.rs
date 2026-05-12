@@ -146,7 +146,7 @@ impl RunState {
         let fortunes = self.relics.has(RelicId::FortunesFavor);
         // Paper Lantern: 1-in-5 chance to burn up at round end. When it
         // burns, the slot empties and Paper goes extinct for the rest of
-        // the run — Silver Filigree Lantern then enters the shop pool.
+        // the run — Stone Lantern then enters the shop pool.
         // Fortune's Favor: 1-in-10 instead.
         if self.relics.has(RelicId::PaperLantern) {
             use rand::RngExt;
@@ -158,13 +158,13 @@ impl RunState {
                 self.paper_lantern_extinct = true;
                 self.note_relic_destroyed();
                 bus.push(GameEvent::TransformationSuccessorDiscovered(
-                    RelicId::SilverFiligreeLantern,
+                    RelicId::StoneLantern,
                 ));
             }
         }
-        // Silver Filigree Lantern: 1-in-1000 chance to shatter at round end.
+        // Stone Lantern: 1-in-1000 chance to shatter at round end.
         // Fortune's Favor: 1-in-2000.
-        if self.relics.has(RelicId::SilverFiligreeLantern) {
+        if self.relics.has(RelicId::StoneLantern) {
             use rand::RngExt;
 
             let mut rng = rand::rng();
@@ -172,7 +172,7 @@ impl RunState {
             if rng.random_ratio(1, denom) {
                 self.relics
                     .active
-                    .retain(|&r| r != RelicId::SilverFiligreeLantern);
+                    .retain(|&r| r != RelicId::StoneLantern);
                 self.note_relic_destroyed();
             }
         }
@@ -307,11 +307,11 @@ impl RunState {
                 self.paper_lantern_extinct = true;
                 self.note_relic_destroyed();
                 bus.push(GameEvent::TransformationSuccessorDiscovered(
-                    RelicId::SilverFiligreeLantern,
+                    RelicId::StoneLantern,
                 ));
             }
         }
-        if self.relics.has(RelicId::SilverFiligreeLantern) {
+        if self.relics.has(RelicId::StoneLantern) {
             use rand::RngExt;
 
             let mut rng = rand::rng();
@@ -319,7 +319,7 @@ impl RunState {
             if rng.random_ratio(1, denom) {
                 self.relics
                     .active
-                    .retain(|&r| r != RelicId::SilverFiligreeLantern);
+                    .retain(|&r| r != RelicId::StoneLantern);
                 self.note_relic_destroyed();
             }
         }

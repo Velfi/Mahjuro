@@ -95,11 +95,12 @@ pub enum RelicId {
     /// run. Accumulated in `relic_counters[TilePolisher]`.
     TilePolisher,
     /// +6 mult, but 1-in-5 chance to be destroyed at end of each round.
-    /// When destroyed, replaced by Silver Filigree Lantern.
+    /// When destroyed, replaced by Stone Lantern.
     PaperLantern,
     /// Replaces Paper Lantern when it burns. ×2 final mult, 1-in-1000
     /// chance to break at end of round.
-    SilverFiligreeLantern,
+    #[serde(alias = "silver_filigree_lantern")]
+    StoneLantern,
     /// Copies the scoring effect of the relic immediately after it in
     /// the player's relic inventory. No effect if it's the last slot.
     MirrorTile,
@@ -340,7 +341,7 @@ impl RelicId {
             RelicId::LastBreath => "last_breath.png",
             RelicId::TilePolisher => "tile_polisher.png",
             RelicId::PaperLantern => "paper_lantern.png",
-            RelicId::SilverFiligreeLantern => "silver_filigree_lantern.png",
+            RelicId::StoneLantern => "stone_lantern.png",
             RelicId::MirrorTile => "mirror_tile.png",
             RelicId::WayOfPurity => "way_of_purity.png",
             RelicId::Geese => "geese.png",
@@ -1101,7 +1102,7 @@ fn relic_scoring_copy_dup_is_compatible(target: RelicId) -> bool {
             | RelicId::WayOfPairs
             | RelicId::WayOfTriplets
             | RelicId::WayOfSequences
-            | RelicId::SilverFiligreeLantern
+            | RelicId::StoneLantern
             | RelicId::GlassCannon
             | RelicId::EulersNumber
             | RelicId::PiConstant
@@ -1274,7 +1275,7 @@ mod tests {
                     | RelicId::LastBreath
                     | RelicId::TilePolisher
                     | RelicId::PaperLantern
-                    | RelicId::SilverFiligreeLantern
+                    | RelicId::StoneLantern
                     | RelicId::MirrorTile
                     | RelicId::WayOfPurity
                     | RelicId::Geese
@@ -1373,7 +1374,7 @@ mod tests {
                 RelicId::LastBreath,
                 RelicId::TilePolisher,
                 RelicId::PaperLantern,
-                RelicId::SilverFiligreeLantern,
+                RelicId::StoneLantern,
                 RelicId::MirrorTile,
                 RelicId::WayOfPurity,
                 RelicId::Geese,
