@@ -3,7 +3,7 @@ use crate::scenes::{
     ShowcasePresenter, ShowcaseScene, TilePackPresenter, ZodiacPresenter,
 };
 
-use super::view::snap_focus_after_shop_purchase;
+use super::view::{default_shop_focus_for_stock, snap_focus_after_shop_purchase};
 use super::*;
 use crate::scenes::{GameplayScene, OverlayRequest};
 
@@ -245,6 +245,12 @@ impl ShopScene {
             stake.reroll_base_cost()
         };
 
+        let focus = Some(default_shop_focus_for_stock(
+            &items,
+            &zodiac_items,
+            &talisman_items,
+            &pack_items,
+        ));
         Self {
             mode,
             qilin_ribbon_unlocked,
@@ -254,7 +260,7 @@ impl ShopScene {
             pack_items,
             reroll_cost,
             pause_menu: PauseMenu::new(),
-            focus: None,
+            focus,
             last_focus_rects: std::cell::RefCell::new(Vec::new()),
             score_popups: ScorePopupSystem::new(),
             particles: ParticleSystem::new(),
@@ -448,7 +454,12 @@ impl ShopScene {
         self.zodiac_items = zodiac_items;
         self.talisman_items = talisman_items;
         self.pack_items = pack_items;
-        self.focus = None;
+        self.focus = Some(default_shop_focus_for_stock(
+            &self.items,
+            &self.zodiac_items,
+            &self.talisman_items,
+            &self.pack_items,
+        ));
     }
 
     /// Debug-only: reroll stock without deducting gold or incrementing cost.
@@ -466,6 +477,11 @@ impl ShopScene {
         self.zodiac_items = zodiac_items;
         self.talisman_items = talisman_items;
         self.pack_items = pack_items;
-        self.focus = None;
+        self.focus = Some(default_shop_focus_for_stock(
+            &self.items,
+            &self.zodiac_items,
+            &self.talisman_items,
+            &self.pack_items,
+        ));
     }
 }

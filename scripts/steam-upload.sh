@@ -159,20 +159,7 @@ stage_local () {
                 exit 1
             fi
             cp -R "$app" "$CONTENT/macos/"
-            # Steam Input manifest at the depot root: the partner-site
-            # Action Manifest path field is a single string applied to
-            # every platform, and the docs tell us to keep that path
-            # consistent across builds. Windows/Linux already drop the
-            # VDF at install root next to the binary; on macOS the
-            # binary sits inside Mahjuro.app/Contents/MacOS/, so we
-            # leave that copy in place (used at runtime via
-            # SetInputActionManifestFilePath) and add a sibling copy
-            # at the depot root so Steam finds the manifest at the
-            # same `game_actions_4636490.vdf` path on all three OSes.
-            cp "$REPO_ROOT/packaging/steam_input/game_actions_4636490.vdf" \
-                "$CONTENT/macos/game_actions_4636490.vdf"
             echo "staged: macos/Mahjuro.app (from $app)"
-            echo "staged: macos/game_actions_4636490.vdf (depot-root copy for partner-site path)"
             echo "warning: --local stages only the host platform; windows/ and linux/ are empty." >&2
             ;;
         Linux)
@@ -191,11 +178,7 @@ stage_local () {
                 exit 1
             fi
             cp "$so" "$CONTENT/linux/libsteam_api.so"
-            cp "$REPO_ROOT/packaging/steam_input/game_actions_4636490.vdf" \
-                "$CONTENT/linux/game_actions_4636490.vdf"
             echo "staged: linux/mahjuro (from $bin)"
-            echo "staged: linux/libsteam_api.so (from $so)"
-            echo "staged: linux/game_actions_4636490.vdf"
             echo "warning: --local stages only the host platform; windows/ and macos/ are empty." >&2
             ;;
         *)
@@ -218,12 +201,11 @@ stage_release () {
         --pattern "mahjuro-${TAG}-macos-universal.dmg" \
         --dir "$DOWNLOADS"
 
-    # Windows: zip contains mahjuro.exe, Steam IGA manifest, and pack_manifest.json +
-    # mahjuro-pack-*.zip beside the exe.
+    # Windows: zip contains mahjuro.exe, pack_manifest.json + mahjuro-pack-*.zip beside the exe.
     unzip -q "$DOWNLOADS/mahjuro-${TAG}-windows-x86_64.zip" -d "$CONTENT/windows/"
     echo "staged: windows/mahjuro.exe"
 
-    # Linux: tar.gz contains mahjuro + libsteam_api.so + IGA manifest (SDL is static).
+    # Linux: tar.gz contains mahjuro + libsteam_api.so (SDL is static).
     tar -xzf "$DOWNLOADS/mahjuro-${TAG}-linux-x86_64.tar.gz" -C "$CONTENT/linux/"
     chmod +x "$CONTENT/linux/mahjuro"
     echo "staged: linux/mahjuro"
@@ -248,13 +230,7 @@ stage_release () {
     fi
     cp -R "$mount/Mahjuro.app" "$CONTENT/macos/"
     hdiutil detach "$mount" >/dev/null
-    # Mirror the --local path: stage the IGA at the depot root so the
-    # partner-site Action Manifest path field resolves on macOS as
-    # `game_actions_4636490.vdf`, identical to Windows / Linux.
-    cp "$REPO_ROOT/packaging/steam_input/game_actions_4636490.vdf" \
-        "$CONTENT/macos/game_actions_4636490.vdf"
     echo "staged: macos/Mahjuro.app"
-    echo "staged: macos/game_actions_4636490.vdf (depot-root copy for partner-site path)"
 }
 
 if [[ $LOCAL -eq 1 ]]; then

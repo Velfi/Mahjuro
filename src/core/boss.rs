@@ -389,7 +389,7 @@ fn counterweight_reveal(run: &mut RunState) -> ResolvedBossEffect {
             RelicId::JadeSerpent => bamboos += 3,
             RelicId::BlueSerpent => circles += 3,
             RelicId::HonorFury
-            | RelicId::RedDragonRage
+            | RelicId::DragonRage
             | RelicId::GreenLuck
             | RelicId::WhiteDragonsHush
             | RelicId::WildWinds

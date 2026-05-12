@@ -323,7 +323,7 @@ pub struct OptionsScene {
     /// User chose Save & profiles — open profile picker then return here.
     profile_select_requested: bool,
     /// User activated "Rebind controller" this frame — owner pushes
-    /// [`GameEvent::OpenSteamInputBindings`] on the next drain.
+    /// [`GameEvent::OpenControllerMappingHelp`] on the next drain.
     rebind_controller_requested: bool,
     /// Smooth-scrolling state for the content pane.
     scroll: SmoothScroll,
@@ -1239,7 +1239,7 @@ impl OptionsScene {
                         }
                     ),
                     Row::RebindController => {
-                        "Rebind controller (Steam overlay) — Space / click".into()
+                        "Controller mapping help — Space / click".into()
                     }
                     Row::ExportPlayStats => {
                         "Export play stats (HTML) — Space / click".into()
@@ -1298,7 +1298,7 @@ impl SceneBehavior for OptionsScene {
             }
         }
         if self.take_rebind_controller_requested() {
-            ctx.bus.push(GameEvent::OpenSteamInputBindings);
+            ctx.bus.push(GameEvent::OpenControllerMappingHelp);
         }
         if self.take_profile_select_requested() {
             return Some(Scene::ProfileSelect(ProfileSelectScene::from_options_menu()));

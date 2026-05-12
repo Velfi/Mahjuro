@@ -28,7 +28,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     let has = |id: RelicId| eff.has(ctx.relic.roster, id);
     let count = |id: RelicId| eff.count(ctx.relic.roster, id);
 
-    if has(RelicId::RedDragonRage) {
+    if has(RelicId::DragonRage) {
         for s in sets {
             if !matches!(s.kind, SetKind::Triplet | SetKind::Kong) {
                 continue;
@@ -39,7 +39,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
                 .and_then(|id| tile_by_id(tiles, *id))
                 .is_some_and(|t| t.suit == Suit::Dragon);
             if is_dragon {
-                push_mult(steps, *chips, mult, "Red Dragon Rage", 5.0);
+                push_mult(steps, *chips, mult, "Dragon Rage", 5.0);
             }
         }
     }

@@ -36,16 +36,8 @@ impl SdlShell {
         #[cfg(target_os = "macos")]
         sdl3::hint::set("SDL_VIDEO_MACOSX_METAL_LAYER", "1");
 
-        // Steam Input arbitration:
-        //
-        // When the player has a controller bound through Steam Input, Steam
-        // signals SDL to suppress the raw HID device so the game doesn't see
-        // both Steam's virtual gamepad and the underlying physical pad
-        // (double-input bug from the Steam Controller dev docs:
-        // <https://partner.steamgames.com/doc/features/steam_controller/getting_started_for_devs>).
-        // SDL3 enables this arbitration automatically when started inside the
-        // Steam runtime, but we set the hints explicitly to lock the
-        // behaviour against future SDL default changes.
+        // SDL HIDAPI for Valve controllers (Steam Deck, Steam Controller) so
+        // devices present as standard gamepads with stable mappings.
         sdl3::hint::set("SDL_JOYSTICK_HIDAPI", "1");
         sdl3::hint::set("SDL_JOYSTICK_HIDAPI_STEAM", "1");
         sdl3::hint::set("SDL_JOYSTICK_HIDAPI_STEAMDECK", "1");

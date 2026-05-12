@@ -1,57 +1,35 @@
 //! Resolve a controller-prompt glyph for a given [`UiAction`].
 //!
-//! Two-tier lookup:
+//! Uses Kenney Input Prompts texture atlases keyed off the SDL-detected
+//! [`GamepadStyle`], honouring the player's `swap_ab` / `swap_xy` settings.
 //!
-//! 1. **Steam Input** — when active, asks Steam for the glyph that matches the
-//!    user's actual binding (rebinds, Switch button labels, Steam Deck-specific
-//!    overlays, etc.). This is the path the player sees on a Steam Deck.
-//!
-//! 2. **Static atlas** — when Steam Input is unavailable (game launched outside
-//!    Steam, `--no-steam`, init failure), falls back to a Kenney Input Prompts
-//!    atlas keyed off the OS-detected [`GamepadStyle`]. Honours the player's
-//!    `swap_ab` / `swap_xy` settings.
-//!
-//! Scenes always go through [`GlyphResolver::glyph_for`]; they never branch on
-//! "is Steam Input active" themselves.
+//! Scenes always go through [`GlyphResolver::glyph_for`].
 
 use crate::render::draw_cmd::PromptIconSource;
-use crate::steam::SteamClient;
 use crate::ui::button_prompts::GamepadStyle;
 use crate::ui::input::UiAction;
 
-/// Borrowing wrapper that captures everything needed to pick a glyph for the
-/// active controller. Created in `App::draw` and passed via `DrawCtx`.
+/// Everything needed to pick a glyph for the active controller. Created in
+/// `App::draw` and passed via `DrawCtx`.
 #[derive(Clone, Copy)]
-pub struct GlyphResolver<'a> {
-    steam: &'a SteamClient,
+pub struct GlyphResolver {
     style: GamepadStyle,
     swap_ab: bool,
     swap_xy: bool,
 }
 
-impl<'a> GlyphResolver<'a> {
-    pub fn new(
-        steam: &'a SteamClient,
-        style: GamepadStyle,
-        swap_ab: bool,
-        swap_xy: bool,
-    ) -> Self {
+impl GlyphResolver {
+    pub fn new(style: GamepadStyle, swap_ab: bool, swap_xy: bool) -> Self {
         Self {
-            steam,
             style,
             swap_ab,
             swap_xy,
         }
     }
 
-    /// Best-available glyph for `action`. Steam Input wins when it has one;
-    /// otherwise falls back to the static [`PromptIconSource::AtlasSprite`].
-    /// Returns `None` only when no fallback is defined for the action (most
+    /// Returns `None` only when no glyph is defined for the action (most
     /// non-prompt actions).
     pub fn glyph_for(&self, action: UiAction) -> Option<PromptIconSource> {
-        if let Some(path) = self.steam.glyph_path_for(action) {
-            return Some(PromptIconSource::Filesystem(path));
-        }
         static_glyph_sprite(self.style, action, self.swap_ab, self.swap_xy)
             .map(|(sheet, name)| PromptIconSource::AtlasSprite { sheet, name })
     }
@@ -61,6 +39,11 @@ const XBOX_SHEET: &str = "kenney_input-prompts/Xbox Series/xbox-series_sheet_dou
 const PLAYSTATION_SHEET: &str =
     "kenney_input-prompts/PlayStation Series/playstation-series_sheet_double.png";
 const SWITCH_SHEET: &str = "kenney_input-prompts/Nintendo Switch/nintendo-switch_sheet_double.png";
+const SWITCH2_SHEET: &str =
+    "kenney_input-prompts/Nintendo Switch 2/nintendo-switch-2_sheet_double.png";
+const STEAM_DECK_SHEET: &str = "kenney_input-prompts/Steam Deck/steam-deck_sheet_double.png";
+const STEAM_CONTROLLER_SHEET: &str =
+    "kenney_input-prompts/Steam Controller/steam-controller_sheet_double.png";
 
 /// Logical face the action is rendered as after applying the player's
 /// `swap_ab` / `swap_xy` preferences.
@@ -145,6 +128,29 @@ fn static_glyph_sprite(
         (GamepadStyle::Nintendo, Face::West) => (SWITCH_SHEET, "switch_button_y"),
         (GamepadStyle::Nintendo, Face::North) => (SWITCH_SHEET, "switch_button_x"),
         (GamepadStyle::Nintendo, Face::LeftTrigger) => (SWITCH_SHEET, "switch_button_zl"),
+        (GamepadStyle::NintendoSwitch2, Face::South) => (SWITCH2_SHEET, "switch_button_b"),
+        (GamepadStyle::NintendoSwitch2, Face::East) => (SWITCH2_SHEET, "switch_button_a"),
+        (GamepadStyle::NintendoSwitch2, Face::West) => (SWITCH2_SHEET, "switch_button_y"),
+        (GamepadStyle::NintendoSwitch2, Face::North) => (SWITCH2_SHEET, "switch_button_x"),
+        (GamepadStyle::NintendoSwitch2, Face::LeftTrigger) => (SWITCH2_SHEET, "switch_button_zl"),
+        (GamepadStyle::SteamDeck, Face::South) => (STEAM_DECK_SHEET, "steamdeck_button_a"),
+        (GamepadStyle::SteamDeck, Face::East) => (STEAM_DECK_SHEET, "steamdeck_button_b"),
+        (GamepadStyle::SteamDeck, Face::West) => (STEAM_DECK_SHEET, "steamdeck_button_x"),
+        (GamepadStyle::SteamDeck, Face::North) => (STEAM_DECK_SHEET, "steamdeck_button_y"),
+        (GamepadStyle::SteamDeck, Face::LeftTrigger) => (STEAM_DECK_SHEET, "steamdeck_button_l2"),
+        (GamepadStyle::SteamController, Face::South) => {
+            (STEAM_CONTROLLER_SHEET, "steam_button_color_a")
+        }
+        (GamepadStyle::SteamController, Face::East) => {
+            (STEAM_CONTROLLER_SHEET, "steam_button_color_b")
+        }
+        (GamepadStyle::SteamController, Face::West) => {
+            (STEAM_CONTROLLER_SHEET, "steam_button_color_x")
+        }
+        (GamepadStyle::SteamController, Face::North) => {
+            (STEAM_CONTROLLER_SHEET, "steam_button_color_y")
+        }
+        (GamepadStyle::SteamController, Face::LeftTrigger) => (STEAM_CONTROLLER_SHEET, "steam_lt"),
         (GamepadStyle::Xbox | GamepadStyle::Generic, Face::South) => {
             (XBOX_SHEET, "xbox_button_color_a")
         }
@@ -178,6 +184,14 @@ mod tests {
     const SWITCH_XML: &str = include_str!(
         "../../assets/kenney_input-prompts/Nintendo Switch/nintendo-switch_sheet_double.xml"
     );
+    const SWITCH2_XML: &str = include_str!(
+        "../../assets/kenney_input-prompts/Nintendo Switch 2/nintendo-switch-2_sheet_double.xml"
+    );
+    const STEAM_DECK_XML: &str =
+        include_str!("../../assets/kenney_input-prompts/Steam Deck/steam-deck_sheet_double.xml");
+    const STEAM_CONTROLLER_XML: &str = include_str!(
+        "../../assets/kenney_input-prompts/Steam Controller/steam-controller_sheet_double.xml"
+    );
 
     fn names_in(xml: &str) -> HashMap<String, ()> {
         let mut out = HashMap::new();
@@ -202,6 +216,9 @@ mod tests {
             s if s == XBOX_SHEET => XBOX_XML,
             s if s == PLAYSTATION_SHEET => PLAYSTATION_XML,
             s if s == SWITCH_SHEET => SWITCH_XML,
+            s if s == SWITCH2_SHEET => SWITCH2_XML,
+            s if s == STEAM_DECK_SHEET => STEAM_DECK_XML,
+            s if s == STEAM_CONTROLLER_SHEET => STEAM_CONTROLLER_XML,
             other => panic!("no test XML for sheet {other}"),
         }
     }
@@ -244,6 +261,9 @@ mod tests {
             GamepadStyle::Xbox,
             GamepadStyle::PlayStation,
             GamepadStyle::Nintendo,
+            GamepadStyle::NintendoSwitch2,
+            GamepadStyle::SteamDeck,
+            GamepadStyle::SteamController,
             GamepadStyle::Generic,
         ];
         for &style in &styles {

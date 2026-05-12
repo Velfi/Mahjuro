@@ -382,12 +382,8 @@ impl App {
             .unwrap_or_default();
         let swap_ab = self.input.as_ref().map(|i| i.swap_ab).unwrap_or(false);
         let swap_xy = self.input.as_ref().map(|i| i.swap_xy).unwrap_or(false);
-        let glyphs = crate::ui::glyph_source::GlyphResolver::new(
-            &self.steam,
-            gamepad_style,
-            swap_ab,
-            swap_xy,
-        );
+        let glyphs =
+            crate::ui::glyph_source::GlyphResolver::new(gamepad_style, swap_ab, swap_xy);
         let ctx = DrawCtx::new(
             &layout,
             &self.anim,
@@ -454,21 +450,6 @@ impl App {
                 frame.gameplay_fog_wall_horizon_y = Some(fog.ny.clamp(0.0, 1.0));
                 frame.gameplay_fog_wall_center_x = Some(fog.nx.clamp(0.0, 1.0));
             }
-        }
-
-        if std::env::var_os("MAHJURO_STEAM_INPUT_DEBUG").is_some()
-            && let Some(text) = self.steam.steam_input_diagnostics()
-        {
-            frame.text(TextLabel {
-                rect: [18.0, 18.0, (size.width as f32 * 0.72).max(320.0), 34.0],
-                text,
-                color: [0.88, 0.95, 1.0, 0.92],
-                font_px: Some(18.0),
-                align: crate::render::wgpu_renderer::TextAlign::Left,
-                no_glossary: true,
-                scroll_offset: 0.0,
-                flavor_spans: None,
-            });
         }
 
         let h = size.height as f32;

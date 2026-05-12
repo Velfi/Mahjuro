@@ -19,10 +19,7 @@ impl App {
         })
     }
 
-    /// Fire a one-shot rumble pulse on whichever controller path is active.
-    /// Steam Input takes precedence; the SDL gamepad path is the fallback when
-    /// Steam Input isn't running. Centralised so the call sites don't have to
-    /// repeat the "try Steam, else SDL" dance.
+    /// Fire a one-shot rumble pulse on connected SDL gamepads.
     fn fire_rumble_pulse(
         &mut self,
         shell: &mut SdlShell,
@@ -32,73 +29,24 @@ impl App {
         duration_ms: u32,
         gain: f32,
     ) {
-        if self
-            .steam
-            .trigger_input_rumble(weak, strong, duration_ms, gain)
-        {
-            return;
-        }
         if let Some(input) = self.input.as_mut() {
             input.play_scoring_rumble_pulse(shell, now, weak, strong, duration_ms, gain);
         }
     }
 
-    /// Drain rumble-lab ops onto the active controller path. Composite patterns
-    /// schedule their staggered pulses on the same path (Steam Input owns its
-    /// own schedule queue; SDL uses [`crate::ui::input::InputState`]'s).
+    /// Drain rumble-lab ops onto SDL gamepads ([`crate::ui::input::InputState`]'s queue).
     fn dispatch_rumble_lab_ops(
         &mut self,
         shell: &mut SdlShell,
         now: Instant,
         ops: Vec<RumbleLabOp>,
     ) {
-        if !self.steam.has_steam_input() {
-            if let Some(input) = self.input.as_mut() {
-                input.apply_rumble_lab_ops(shell, now, ops);
-            }
-            return;
-        }
-        for op in ops {
-            match op {
-                RumbleLabOp::Pulse {
-                    weak,
-                    strong,
-                    duration_ms,
-                    gain,
-                } => {
-                    let _ = self
-                        .steam
-                        .trigger_input_rumble(weak, strong, duration_ms, gain);
-                }
-                RumbleLabOp::Composite { gain, segments } => {
-                    for (delay, weak, strong, duration_ms) in segments {
-                        self.steam.schedule_input_rumble_pulse(
-                            now + std::time::Duration::from_millis(u64::from(delay)),
-                            weak,
-                            strong,
-                            duration_ms.max(1),
-                            gain,
-                        );
-                    }
-                }
-                RumbleLabOp::Envelope {
-                    gain,
-                    weak,
-                    strong,
-                    duration_ms,
-                    ..
-                } => {
-                    // SDL has no envelope shaping either — `InputState::play_rumble_envelope`
-                    // collapses to a single pulse. Mirror that.
-                    let _ =
-                        self.steam
-                            .trigger_input_rumble(weak, strong, duration_ms.max(60), gain);
-                }
-            }
+        if let Some(input) = self.input.as_mut() {
+            input.apply_rumble_lab_ops(shell, now, ops);
         }
     }
 
-    /// Drive the shop sell-hold rumble on whichever controller path is active.
+    /// Drive the shop sell-hold rumble on SDL gamepads.
     /// Off-path callers (other scenes) should not invoke this.
     fn sync_shop_sell_hold_rumble(
         &mut self,
@@ -108,18 +56,6 @@ impl App {
         enabled: bool,
         progress: f32,
     ) {
-        if self.steam.has_steam_input() {
-            if hold && controller && enabled {
-                let (weak, strong, duration_ms, gain) =
-                    InputState::shop_sell_hold_rumble_params(progress);
-                let _ = self
-                    .steam
-                    .trigger_input_rumble(weak, strong, duration_ms, gain);
-            } else if !hold {
-                self.steam.stop_input_rumble();
-            }
-            return;
-        }
         if let Some(input) = self.input.as_mut() {
             input.sync_shop_sell_hold_rumble(shell, hold, controller, enabled, progress);
         }
@@ -357,17 +293,18 @@ impl App {
                 GameEvent::InfoModal { title, body } => {
                     self.modals.push(Modal::new(title, body, ModalTheme::Info));
                 }
-                GameEvent::OpenSteamInputBindings => {
-                    if !self.steam.show_input_binding_panel() {
-                        self.modals.push(Modal::new(
-                            "Controller rebinding unavailable".to_string(),
-                            "Connect a Steam-supported controller and launch Mahjuro \
-                             through Steam to open the binding configurator. The \
-                             Steam overlay must be enabled."
-                                .to_string(),
-                            ModalTheme::Info,
-                        ));
-                    }
+                GameEvent::OpenControllerMappingHelp => {
+                    self.modals.push(Modal::new(
+                        "Controller mapping".to_string(),
+                        "Mahjuro reads your gamepad through SDL3 using the standard PC \
+                         layout (south = confirm by default). Use Options to swap \
+                         South/East or West/North if your printed labels differ. For \
+                         OS-wide or per-game remaps, use Windows / macOS / Linux \
+                         settings, Steam's controller configuration, or your device's \
+                         companion app."
+                            .to_string(),
+                        ModalTheme::Info,
+                    ));
                 }
             }
         }
@@ -387,54 +324,33 @@ impl App {
         if let Some(input) = self.input.as_mut() {
             input.item_inspect_orbit_stick = (0.0, 0.0);
             input.item_inspect_zoom_triggers = 0.0;
-            if self.steam.has_steam_input() {
-                let active_scene = self.overlay_stack.last().unwrap_or(&self.scene);
-                self.steam
-                    .set_action_set(active_scene.steam_input_action_set());
-                let mut analog = crate::steam::AnalogSnapshot::default();
-                if self.steam.poll_actions(&mut actions, &mut analog) {
-                    input.mode = crate::ui::input::InputMode::Controller;
-                    hide_cursor = true;
-                }
-                input.item_inspect_orbit_stick = analog.orbit;
-                input.item_inspect_zoom_triggers = analog.inspect_zoom;
-                if let Some(style) = self.steam.first_controller_style() {
-                    input.gamepad_style = style;
-                    input.apply_controller_layout_defaults_for_active_style();
-                }
-            } else {
-                let shop_face = matches!(&self.scene, Scene::Shop(_))
-                    && self.overlay_stack.is_empty()
-                    && !self.scene.has_blocking_overlay();
-                let collection_uses_north_for_inspect = matches!(&self.scene, Scene::Collection(_))
-                    && self.overlay_stack.is_empty()
-                    && !self.scene.has_blocking_overlay();
-                let showcase_orbit_overlay = self
-                    .overlay_stack
-                    .last()
-                    .is_some_and(|top| matches!(top, Scene::Showcase(s) if s.wants_orbit_input()));
-                let gp_ctx = crate::ui::input::GamepadPollCtx {
-                    shop_face_buttons: shop_face,
-                    collection_uses_north_for_inspect,
-                    item_inspect_overlay: showcase_orbit_overlay,
-                };
-                if input.gamepad_frame_tick(shell, gp_ctx, &mut actions) {
-                    hide_cursor = true;
-                }
+            let shop_face = matches!(&self.scene, Scene::Shop(_))
+                && self.overlay_stack.is_empty()
+                && !self.scene.has_blocking_overlay();
+            let collection_uses_north_for_inspect = matches!(&self.scene, Scene::Collection(_))
+                && self.overlay_stack.is_empty()
+                && !self.scene.has_blocking_overlay();
+            let showcase_orbit_overlay = self
+                .overlay_stack
+                .last()
+                .is_some_and(|top| matches!(top, Scene::Showcase(s) if s.wants_orbit_input()));
+            let gp_ctx = crate::ui::input::GamepadPollCtx {
+                shop_face_buttons: shop_face,
+                collection_uses_north_for_inspect,
+                item_inspect_overlay: showcase_orbit_overlay,
+            };
+            if input.gamepad_frame_tick(shell, gp_ctx, &mut actions) {
+                hide_cursor = true;
             }
 
-            // Steam Input docs Golden Rule #5: a disconnected gamepad
-            // should pause the game. Detect the falling edge — last
-            // controller present last frame, none this frame — and only
-            // when the player was actually playing on a pad. We inject a
-            // Pause action so the active scene's existing pause-overlay
-            // path opens the menu naturally (and falls back to a no-op
-            // outside gameplay scenes that don't bind Pause).
-            let now_controller_present = if self.steam.has_steam_input() {
-                self.steam.input_controller_count() > 0
-            } else {
-                shell.gamepad.gamepads().map(|v| !v.is_empty()).unwrap_or(false)
-            };
+            // Detect the falling edge — last controller present last frame,
+            // none this frame — while the player was on a pad. Inject Pause
+            // so gameplay's pause path opens naturally.
+            let now_controller_present = shell
+                .gamepad
+                .gamepads()
+                .map(|v| !v.is_empty())
+                .unwrap_or(false);
             if self.prev_controller_present
                 && !now_controller_present
                 && input.mode == crate::ui::input::InputMode::Controller

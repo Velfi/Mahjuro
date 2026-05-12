@@ -72,8 +72,8 @@
     ]
   },
   {
-    "id": "red_dragon_rage",
-    "name": "Red Dragon Rage",
+    "id": "dragon_rage",
+    "name": "Dragon Rage",
     "description": "Any dragon triplet/kong: +5 mult",
     "rarity": "rare",
     "flavor_spans": [
@@ -83,7 +83,7 @@
         "italic": false
       },
       {
-        "text": "Red",
+        "text": "Dragon",
         "bold": true,
         "italic": false
       },

@@ -3,52 +3,26 @@
 //! when Steam isn't available (CLI screenshots, headless bot, dev runs
 //! with `--no-steam`, players who launched outside Steam, etc.).
 //!
-//! ## Steam Input API
-//!
-//! Steam builds use the Steam Input API as the canonical gamepad path. `SdlShell`
-//! still owns window, mouse, keyboard, and the non-Steam fallback gamepad path,
-//! but when `ISteamInput::Init` succeeds, controllers emit semantic actions via
-//! [`input::SteamInputBridge`].
-//!
-//! The init contract: [`SteamClient::init`] is called once at startup. On
-//! success it returns `Connected`; on failure or `--no-steam` it returns
-//! `Disabled`. Either way, call sites use the same methods (`unlock_achievement`,
-//! [`SteamClient::sync_profile_stats`], `run_callbacks`, …) — `Disabled` is a
-//! logged no-op.
+//! Controller input is handled entirely by SDL3. This module covers
+//! achievements, stats sync, and Steam callbacks only.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use steamworks::{AppId, Client};
 
 pub mod achievement;
-pub mod input;
 mod stat;
 
 pub use achievement::Achievement;
-pub use input::{ActionSet, AnalogSnapshot, SteamInputBridge};
 
 /// Mahjuro's Steam App ID (configured in Steamworks partner backend).
 const MAHJURO_APP_ID: u32 = 4636490;
-
-/// `MAHJURO_NO_STEAM_INPUT=1` or `true` — keep Steamworks on but force SDL
-/// gamepad fallback for controller debugging.
-pub fn steam_input_disabled_via_env() -> bool {
-    std::env::var("MAHJURO_NO_STEAM_INPUT")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
-}
 
 pub enum SteamClient {
     /// Steam initialized successfully. The inner client is `Send + Sync`
     /// in `steamworks` 0.13, so callbacks can be ticked from the main
     /// thread without an extra wrapper type.
-    Connected {
-        client: Arc<Client>,
-        /// `ISteamInput::Init` succeeded — call [`Self::run_steam_input_frame`]
-        /// once per frame before semantic action polling.
-        steam_input: Option<SteamInputBridge>,
-    },
+    Connected { client: Arc<Client> },
     /// Steam is unavailable. Every method is a logged no-op. Used for
     /// `--no-steam`, headless CLI subcommands, and any init failure.
     Disabled,
@@ -57,10 +31,7 @@ pub enum SteamClient {
 impl SteamClient {
     /// Initialize the Steamworks API. Logs and returns `Disabled` on any
     /// failure path so the caller never has to special-case errors.
-    ///
-    /// `disable_steam_input`: when true, skips `ISteamInput::Init` but keeps
-    /// overlay / achievements enabled. Used for controller fallback debugging.
-    pub fn init(disable_steam_input: bool) -> Self {
+    pub fn init() -> Self {
         match Client::init_app(AppId(MAHJURO_APP_ID)) {
             Ok(client) => {
                 let name = client.friends().name();
@@ -71,11 +42,8 @@ impl SteamClient {
                     steam_id.raw(),
                     MAHJURO_APP_ID,
                 );
-                let client = Arc::new(client);
-                let steam_input = init_steam_input(client.as_ref(), !disable_steam_input);
                 Self::Connected {
-                    client,
-                    steam_input,
+                    client: Arc::new(client),
                 }
             }
             Err(err) => {
@@ -98,161 +66,6 @@ impl SteamClient {
     pub fn run_callbacks(&self) {
         if let Self::Connected { client, .. } = self {
             client.run_callbacks();
-        }
-    }
-
-    /// Synchronize Steam Input before semantic action polling. No-op when Steam
-    /// is disabled or Steam Input failed to initialize.
-    pub fn run_steam_input_frame(&mut self) {
-        let Self::Connected { steam_input, .. } = self else {
-            return;
-        };
-        if let Some(steam_input) = steam_input {
-            steam_input.run_frame();
-        }
-    }
-
-    pub fn has_steam_input(&self) -> bool {
-        matches!(
-            self,
-            Self::Connected {
-                steam_input: Some(_),
-                ..
-            }
-        )
-    }
-
-    pub fn set_action_set(&mut self, set: ActionSet) {
-        if let Self::Connected {
-            steam_input: Some(steam_input),
-            ..
-        } = self
-        {
-            steam_input.set_active_action_set(set);
-        }
-    }
-
-    pub fn poll_actions(
-        &mut self,
-        actions: &mut Vec<crate::ui::input::UiAction>,
-        analog: &mut AnalogSnapshot,
-    ) -> bool {
-        if let Self::Connected {
-            steam_input: Some(steam_input),
-            ..
-        } = self
-        {
-            return steam_input.poll(actions, analog);
-        }
-        false
-    }
-
-    pub fn glyph_path_for(&self, action: crate::ui::input::UiAction) -> Option<PathBuf> {
-        match self {
-            Self::Connected {
-                steam_input: Some(steam_input),
-                ..
-            } => steam_input.glyph_path_for(action),
-            _ => None,
-        }
-    }
-
-    pub fn trigger_input_rumble(
-        &mut self,
-        weak: u16,
-        strong: u16,
-        duration_ms: u32,
-        gain: f32,
-    ) -> bool {
-        if let Self::Connected {
-            steam_input: Some(steam_input),
-            ..
-        } = self
-        {
-            return steam_input.trigger_rumble(weak, strong, duration_ms, gain);
-        }
-        false
-    }
-
-    /// Queue a Steam Input rumble pulse to fire at `at`. Returns false (no-op)
-    /// when Steam Input isn't active. Composite / staggered patterns use this
-    /// so the start delays don't drift relative to the in-game cascade beats.
-    pub fn schedule_input_rumble_pulse(
-        &mut self,
-        at: std::time::Instant,
-        weak: u16,
-        strong: u16,
-        duration_ms: u32,
-        gain: f32,
-    ) -> bool {
-        if let Self::Connected {
-            steam_input: Some(steam_input),
-            ..
-        } = self
-        {
-            steam_input.schedule_rumble_pulse(at, weak, strong, duration_ms, gain);
-            return true;
-        }
-        false
-    }
-
-    /// Hard-stop any active rumble on the Steam Input path. No-op when
-    /// Steam Input isn't active. Used by the shop sell-hold guard so we
-    /// don't leave motors running across scene boundaries.
-    pub fn stop_input_rumble(&mut self) {
-        if let Self::Connected {
-            steam_input: Some(steam_input),
-            ..
-        } = self
-        {
-            steam_input.stop_rumble();
-        }
-    }
-
-    pub fn steam_input_diagnostics(&self) -> Option<String> {
-        match self {
-            Self::Connected {
-                steam_input: Some(steam_input),
-                ..
-            } => Some(steam_input.diagnostics()),
-            _ => None,
-        }
-    }
-
-    pub fn first_controller_style(&self) -> Option<crate::ui::button_prompts::GamepadStyle> {
-        match self {
-            Self::Connected {
-                steam_input: Some(steam_input),
-                ..
-            } => steam_input.first_controller_style(),
-            _ => None,
-        }
-    }
-
-    /// Number of currently-connected Steam Input controllers, or `0` when
-    /// Steam Input is unavailable. Used by [`crate::App`] to detect the
-    /// "all gamepads disconnected" edge for the auto-pause behaviour the
-    /// Steam Input docs recommend (Golden Rule #5).
-    pub fn input_controller_count(&self) -> usize {
-        match self {
-            Self::Connected {
-                steam_input: Some(steam_input),
-                ..
-            } => steam_input.controller_count(),
-            _ => 0,
-        }
-    }
-
-    /// Open Steam's overlay binding configurator for the first connected
-    /// controller. No-op (returns `false`) when Steam Input isn't active or
-    /// no controller is present.
-    pub fn show_input_binding_panel(&self) -> bool {
-        match self {
-            Self::Connected {
-                steam_input: Some(steam_input),
-                ..
-            } => steam_input.show_binding_panel(),
-            _ => false,
         }
     }
 
@@ -329,47 +142,6 @@ impl SteamClient {
         } else {
             log::debug!("Steam profile stats synced");
         }
-    }
-}
-
-fn steam_input_iga_path() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let dir = exe.parent()?;
-    let p = dir.join("game_actions_4636490.vdf");
-    p.is_file().then_some(p)
-}
-
-/// [`ISteamInput::SetInputActionManifestFilePath`] + [`ISteamInput::Init`] when `enable` is true.
-/// When `enable` is false, does not touch the Steam Input interface.
-fn init_steam_input(client: &Client, enable: bool) -> Option<SteamInputBridge> {
-    if !enable {
-        log::debug!(
-            "Steam Input API: disabled by --no-steam-input / MAHJURO_NO_STEAM_INPUT; using SDL gamepad fallback."
-        );
-        return None;
-    }
-
-    let input = client.input();
-    if let Some(path) = steam_input_iga_path() {
-        let p = path.to_string_lossy();
-        if input.set_input_action_manifest_file_path(&p) {
-            log::debug!("Steam Input: loaded In-Game Actions from {p}");
-        } else {
-            log::warn!("Steam Input: SetInputActionManifestFilePath failed for {p}");
-        }
-    } else {
-        log::debug!(
-            "Steam Input: game_actions_4636490.vdf not next to executable — Steam defaults only"
-        );
-    }
-
-    let ok = input.init(true);
-    if ok {
-        log::debug!("Steam Input: ISteamInput::Init ok (semantic controller actions enabled)");
-        Some(SteamInputBridge::new(input))
-    } else {
-        log::warn!("Steam Input: ISteamInput::Init returned false");
-        None
     }
 }
 

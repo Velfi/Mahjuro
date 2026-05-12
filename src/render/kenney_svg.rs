@@ -1,9 +1,7 @@
-//! Rasterize Steam Input glyph files (`.svg` or `.png`) to straight-alpha RGBA8.
+//! Rasterize optional SVG / PNG glyph files from disk to straight-alpha RGBA8.
 //!
-//! In-game prompt glyphs come from [`crate::render::kenney_atlas`]; this module
-//! is only used for the per-binding glyphs returned by `ISteamInput::GetGlyph…`,
-//! which Steam delivers as filesystem paths (SVG on most platforms, PNG on some
-//! older Steam clients).
+//! In-game prompt glyphs normally come from [`crate::render::kenney_atlas`].
+//! This helper remains for loading arbitrary small icons from paths when needed.
 
 use std::path::Path;
 
@@ -30,7 +28,7 @@ fn unpremultiply_rgba(buf: &mut [u8]) {
     }
 }
 
-/// Returns `(rgba8, width, height)` for a Steam Input glyph path (`.svg` or `.png`).
+/// Returns `(rgba8, width, height)` for an SVG or PNG file at `path`.
 pub fn rasterize_filesystem_svg_or_png_rgba(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
     let ext = path
         .extension()

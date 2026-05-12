@@ -80,7 +80,7 @@ Yaku level up via **zodiacs**: each use on a card boosts its bound yaku by `+20 
 
 A large **relic** pool is implemented (see `assets/data/relics.json`), spanning categories such as:
 
-* **Meld-type & dragon base** — TripletBoost, SequenceSurge, PairPower, HonorFury, RedDragonRage, GreenLuck, WhiteDragonsHush, JokerTile, StrengthInNumbers, QuickDraw, ChainReaction, MultiplierMaster, SetMagnet, WildWinds, DragonEcho
+* **Meld-type & dragon base** — TripletBoost, SequenceSurge, PairPower, HonorFury, DragonRage, GreenLuck, WhiteDragonsHush, JokerTile, StrengthInNumbers, QuickDraw, ChainReaction, MultiplierMaster, SetMagnet, WildWinds, DragonEcho
 * **Wall & scoring infrastructure** — ShantenShove, KanDrum, KongsBlessing, DoraCrown, RoundCompass, EightTreasures
 * **Flowers** — GardenKeeper, Ikebana, Hanami
 * **Suit, rank, terminal, shop** — JadeSerpent, RedSerpent, BlueSerpent, LowTide, HighTide, MerchantsEye, EdgeRunner, LuckySeven

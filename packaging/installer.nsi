@@ -48,7 +48,6 @@ Section "Mahjuro" SecMain
   SetOutPath "$INSTDIR"
 
   File "${SOURCE_DIR}\mahjuro.exe"
-  File "${SOURCE_DIR}\game_actions_4636490.vdf"
   File "${SOURCE_DIR}\icon.ico"
   File "${SOURCE_DIR}\pack_manifest.json"
   File "${SOURCE_DIR}\mahjuro-pack-shared.zip"
@@ -78,7 +77,6 @@ SectionEnd
 
 Section "Uninstall"
   Delete "$INSTDIR\mahjuro.exe"
-  Delete "$INSTDIR\game_actions_4636490.vdf"
   Delete "$INSTDIR\icon.ico"
   Delete "$INSTDIR\pack_manifest.json"
   Delete "$INSTDIR\mahjuro-pack-shared.zip"

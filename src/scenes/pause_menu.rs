@@ -285,7 +285,7 @@ impl PauseMenu {
                     }
                 }
                 if opts.take_rebind_controller_requested() {
-                    bus.push(GameEvent::OpenSteamInputBindings);
+                    bus.push(GameEvent::OpenControllerMappingHelp);
                 }
             }
             if self.options_overlay.is_none() {

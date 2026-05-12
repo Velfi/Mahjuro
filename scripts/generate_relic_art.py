@@ -218,6 +218,16 @@ def rarity_for(slug: str) -> str:
     return rarity
 
 
+# OpenAI Images API `n` (parallel samples per request; first image is kept).
+RELIC_IMAGE_SAMPLES: dict[str, int] = {
+    "dragon_rage": 3,
+}
+
+
+def image_samples_for(slug: str) -> int:
+    return RELIC_IMAGE_SAMPLES.get(slug, 1)
+
+
 # Each tuple: (filename_slug, display_name, visual_description, palette_hint)
 # Order and slugs MUST match RelicId::asset_filename in src/core/relic.rs.
 RELICS = [
@@ -263,20 +273,18 @@ RELICS = [
         "Ivory tile faces, deep emerald felt, glowing crimson and jade honor marks, warm ember sparks, faint gold shockwaves.",
     ),
     (
-        "red_dragon_rage",
-        "Red Dragon Rage",
-        "Inked scroll illustration of three dragon mahjong tiles standing "
-        "upright in a tight triplet on an emerald felt table — a red dragon "
-        "flanked by a green dragon and a white dragon. The center tile's "
-        "crimson 'chun' character is alive: its brushstrokes uncoil into a "
-        "serpentine eastern dragon that bursts forward off the tile face, "
-        "scaled crimson body lashing through the air with its jaws thrown "
-        "open in a roar. A plume of brushwork flame trails from its mouth "
-        "and scorches the faces of the flanking tiles, leaving sumi-e "
-        "smoke curls drifting upward. The dragon's tail still loops back "
-        "into unfinished crimson calligraphy strokes on the tile face. A "
-        "few stray face-down wall tiles lie blurred in the background.",
-        "Painterly inked scroll illustration, sumi-e brushwork, ivory tile faces, deep emerald felt, crimson chun calligraphy uncoiling into a coiled eastern dragon, jade-green and blue-edged white dragon glyphs, brushstroke flame and smoke curls, warm amber rim light.",
+        "dragon_rage",
+        "Dragon Rage",
+        "A compact cloisonné enamel pin crest: three upright dragon honor "
+        "tiles locked in a tight triplet — center chun (red dragon glyph) "
+        "flanked by green and white dragon marks. Each tile reads as its own "
+        "enamel cell behind raised metal wires; the center cell reads hottest "
+        "with saturated crimson vitreous glass and tiny separate wire-locked "
+        "spark cells. A coiled eastern dragon is only hinted in the routing of "
+        "wires and negative metal space between the tiles — graphic badge "
+        "language at pin scale, not a full illustrated scene. Thick outer "
+        "bezel; bold flat color fields; no felt tabletop or scroll painting.",
+        "Crimson, jade, and cool white-blue honor enamels; soft amber rim light.",
     ),
     (
         "green_luck",
@@ -1435,17 +1443,42 @@ def write_mask_from_object(object_path: Path, mask_path: Path) -> bool:
 
 
 def generate_image(
-    client: OpenAI, prompt: str, output_path: Path, model: str, size: str
+    client: OpenAI,
+    prompt: str,
+    output_path: Path,
+    model: str,
+    size: str,
+    *,
+    n: int = 1,
 ) -> None:
-    """Call the image API and save the resulting PNG."""
-    response = client.images.generate(
-        model=model,
-        prompt=prompt,
-        n=1,
-        size=size,
-        quality="high",
-    )
+    """Call the image API and save the resulting PNG.
 
+    When ``n`` > 1, requests multiple parallel samples and keeps the first
+    returned image (cheaper than serial retries for finicky enamel subjects).
+    If the model rejects ``n`` > 1, falls back to a single sample.
+    """
+    n = max(1, min(n, 10))
+    attempt_ns = [n, 1] if n > 1 else [1]
+    response = None
+    for attempt_n in attempt_ns:
+        try:
+            response = client.images.generate(
+                model=model,
+                prompt=prompt,
+                n=attempt_n,
+                size=size,
+                quality="high",
+            )
+            if attempt_n < n:
+                print(f"  note: used n={attempt_n} (n={n} was rejected)")
+            break
+        except BaseException as e:
+            if attempt_n > 1:
+                print(f"  warn: images.generate n={attempt_n} failed ({e}); retrying n=1")
+                continue
+            raise
+    if response is None:
+        raise RuntimeError("images.generate returned no response")
     save_response_image(response.data[0], output_path)
 
 
@@ -1769,6 +1802,7 @@ def main() -> None:
 
     for idx, (slug, name, visual, palette) in targets:
         rarity = rarity_for(slug)
+        api_n = image_samples_for(slug)
         print(f"\n[{idx + 1}/{len(RELICS)}] {name} [{rarity}]")
 
         object_output_path = out_dir / f"{slug}_object.png"
@@ -1819,6 +1853,7 @@ def main() -> None:
                             object_output_path,
                             args.model,
                             args.size,
+                            n=api_n,
                         )
                         generated += 1
                     # The object ships with a full-alpha seamless backdrop
@@ -1847,6 +1882,7 @@ def main() -> None:
                             height_output_path,
                             args.model,
                             args.size,
+                            n=api_n,
                         )
                         flatten_height_to_black_bg(height_output_path)
                         print(f"  Black bg: {height_output_path.name}")
@@ -1861,7 +1897,9 @@ def main() -> None:
                         args.object_input_fidelity,
                     )
                 else:
-                    generate_image(client, prompt, output_path, args.model, args.size)
+                    generate_image(
+                        client, prompt, output_path, args.model, args.size, n=api_n
+                    )
                     if artifact_name == "height":
                         flatten_height_to_black_bg(output_path)
                         print(f"  Black bg: {output_path.name}")

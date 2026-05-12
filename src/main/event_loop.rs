@@ -47,7 +47,6 @@ impl App {
             if self.quit_requested {
                 break 'running;
             }
-            self.steam.run_steam_input_frame();
             let events: Vec<Event> = shell.pump.poll_iter().collect();
             for event in events {
                 if self.dispatch_sdl_event(shell, event)? {
@@ -195,9 +194,6 @@ impl App {
     }
 
     fn dispatch_controller_event(&mut self, shell: &mut SdlShell, event: Event) {
-        if self.steam.has_steam_input() {
-            return;
-        }
         let gp_ctx = self.gamepad_poll_ctx();
         if let Some(input) = self.input.as_mut() {
             let _ = input.handle_controller_event(shell, event, gp_ctx, &mut self.mouse_actions);

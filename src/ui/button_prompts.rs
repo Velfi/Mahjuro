@@ -11,8 +11,14 @@ pub enum GamepadStyle {
     Xbox,
     /// Sony DualShock / DualSense (shapes).
     PlayStation,
-    /// Nintendo Switch ProController layout (B/A/Y/X at cardinals).
+    /// Nintendo Switch / Pro Controller / Joy-Con (B/A/Y/X at cardinals).
     Nintendo,
+    /// Nintendo Switch 2 family — same face layout as Switch 1; separate Kenney atlas.
+    NintendoSwitch2,
+    /// Valve Steam Deck built-in controls.
+    SteamDeck,
+    /// Valve Steam Controller.
+    SteamController,
     /// Unknown or third-party — use the same **positions** as Xbox letters.
     #[default]
     Generic,
@@ -21,21 +27,39 @@ pub enum GamepadStyle {
 impl GamepadStyle {
     /// Classify from OS-reported USB vendor and human-readable name.
     pub fn infer(vendor_id: Option<u16>, name: &str) -> Self {
+        let n = name.to_ascii_lowercase();
+
+        if n.contains("steam deck") {
+            return Self::SteamDeck;
+        }
+        if n.contains("steam controller") {
+            return Self::SteamController;
+        }
+
         if let Some(v) = vendor_id {
             match v {
                 0x045E => return Self::Xbox,        // Microsoft
                 0x054C => return Self::PlayStation, // Sony
-                0x057E => return Self::Nintendo,    // Nintendo
-                // Valve (Steam Deck built-in pads, Steam Controller). Buttons
-                // are physically labelled ABXY in the Xbox layout, so route to
-                // the Generic family — which already prints Xbox-positional
-                // glyphs from the static atlas. (When Steam Input is live, the
-                // glyph resolver overrides this with Steam's own art.)
-                0x28DE => return Self::Generic,
+                0x057E => {
+                    if n.contains("switch 2") || n.contains("switch2") {
+                        return Self::NintendoSwitch2;
+                    }
+                    return Self::Nintendo;
+                }
+                0x28DE => {
+                    // Valve — prefer name hints (Steam Virtual Gamepad has no "Deck" in the name).
+                    if n.contains("deck") {
+                        return Self::SteamDeck;
+                    }
+                    if n.contains("controller") && n.contains("steam") {
+                        return Self::SteamController;
+                    }
+                    return Self::Generic;
+                }
                 _ => {}
             }
         }
-        let n = name.to_ascii_lowercase();
+
         if n.contains("xbox")
             || n.contains("microsoft")
             || n.contains("xinput")
@@ -52,6 +76,9 @@ impl GamepadStyle {
         {
             return Self::PlayStation;
         }
+        if n.contains("switch 2") || n.contains("switch2") {
+            return Self::NintendoSwitch2;
+        }
         if n.contains("nintendo")
             || n.contains("switch")
             || n.contains("pro controller")
@@ -66,15 +93,19 @@ impl GamepadStyle {
     /// Analog trigger names in UI copy (shoulder digital bumpers unchanged).
     pub fn analog_trigger_pair_label(self) -> &'static str {
         match self {
-            Self::PlayStation => "L2/R2",
-            Self::Xbox | Self::Nintendo | Self::Generic => "LT/RT",
+            Self::PlayStation | Self::SteamDeck => "L2/R2",
+            Self::Xbox
+            | Self::Nintendo
+            | Self::NintendoSwitch2
+            | Self::SteamController
+            | Self::Generic => "LT/RT",
         }
     }
 }
 
 /// Physical face positions in the SDL **semantic** layout (south =
 /// bottom, etc.), not vendor paint. Test-only; runtime glyphs come from
-/// [`crate::ui::glyph_source::GlyphResolver`] (Steam Input first, static atlas fallback).
+/// [`crate::ui::glyph_source::GlyphResolver`].
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FaceButton {
@@ -89,22 +120,24 @@ impl FaceButton {
     /// Short text inside prompts, without wrapping parentheses.
     pub fn glyph(self, style: GamepadStyle) -> &'static str {
         use FaceButton::{East, North, South, West};
-        use GamepadStyle::{Generic, Nintendo, PlayStation, Xbox};
+        use GamepadStyle::{
+            Generic, Nintendo, NintendoSwitch2, PlayStation, SteamController, SteamDeck, Xbox,
+        };
         match (style, self) {
-            (Xbox | Generic, South) => "A",
-            (Xbox | Generic, East) => "B",
-            (Xbox | Generic, West) => "X",
-            (Xbox | Generic, North) => "Y",
+            (Xbox | Generic | SteamDeck | SteamController, South) => "A",
+            (Xbox | Generic | SteamDeck | SteamController, East) => "B",
+            (Xbox | Generic | SteamDeck | SteamController, West) => "X",
+            (Xbox | Generic | SteamDeck | SteamController, North) => "Y",
 
             (PlayStation, South) => "Cross",
             (PlayStation, East) => "Circle",
             (PlayStation, West) => "Square",
             (PlayStation, North) => "Triangle",
 
-            (Nintendo, South) => "B",
-            (Nintendo, East) => "A",
-            (Nintendo, West) => "Y",
-            (Nintendo, North) => "X",
+            (Nintendo | NintendoSwitch2, South) => "B",
+            (Nintendo | NintendoSwitch2, East) => "A",
+            (Nintendo | NintendoSwitch2, West) => "Y",
+            (Nintendo | NintendoSwitch2, North) => "X",
         }
     }
 }
@@ -230,13 +263,34 @@ mod tests {
     }
 
     #[test]
-    fn infer_vendor_valve_routes_to_generic() {
-        // Steam Deck / Steam Controller — physical labels are ABXY, so we keep
-        // the Xbox-positional Generic family for the static atlas fallback.
-        // Steam Input overrides this with native art when active.
+    fn infer_vendor_valve_virtual_gamepad_is_generic() {
         assert_eq!(
             GamepadStyle::infer(Some(0x28DE), "Steam Virtual Gamepad"),
             GamepadStyle::Generic
+        );
+    }
+
+    #[test]
+    fn infer_steam_deck_by_name() {
+        assert_eq!(
+            GamepadStyle::infer(None, "Steam Deck"),
+            GamepadStyle::SteamDeck
+        );
+    }
+
+    #[test]
+    fn infer_steam_controller_by_name() {
+        assert_eq!(
+            GamepadStyle::infer(None, "Valve Steam Controller"),
+            GamepadStyle::SteamController
+        );
+    }
+
+    #[test]
+    fn infer_switch2_by_name() {
+        assert_eq!(
+            GamepadStyle::infer(None, "Nintendo Switch 2 Pro Controller"),
+            GamepadStyle::NintendoSwitch2
         );
     }
 

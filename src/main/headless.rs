@@ -95,7 +95,7 @@ fn screenshot_profile_for_shop_stock(
 /// designed for a juicy Steam-store hero shot: Red Dragon triplet, White
 /// Dragon triplet, two number sequences, East Wind pair. Decomposes as
 /// 4 sets + pair (yakuman-adjacent: Big Two Dragons + Yakuhai), and
-/// pairs naturally with `RedDragonRage` / `WhiteDragonsHush` relics.
+/// pairs naturally with `DragonRage` / `WhiteDragonsHush` relics.
 ///
 /// Marks every tile as selected so the next `UiAction::ScoreHand` plays
 /// the full hand. Also stocks `relics.active` with four visually
@@ -125,7 +125,7 @@ fn setup_hero_state(run: &mut RunState) {
 
     run.relics.active.clear();
     for r in [
-        RelicId::RedDragonRage,
+        RelicId::DragonRage,
         RelicId::WhiteDragonsHush,
         RelicId::GreenLuck,
         RelicId::GoldenEngine,
@@ -888,9 +888,7 @@ impl HeadlessApp {
             _ => None,
         };
 
-        let headless_steam = crate::steam::SteamClient::disabled();
         let glyphs = crate::ui::glyph_source::GlyphResolver::new(
-            &headless_steam,
             crate::ui::button_prompts::GamepadStyle::default(),
             false,
             false,

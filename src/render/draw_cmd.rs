@@ -341,7 +341,8 @@ pub enum PromptIconSource {
         sheet: &'static str,
         name: &'static str,
     },
-    /// Absolute filesystem path returned by Steam Input for the active origin.
+    /// Absolute filesystem path to an SVG or PNG (rasterized at draw time).
+    #[allow(dead_code)] // No current producer; renderer path kept for tooling / experiments.
     Filesystem(std::path::PathBuf),
 }
 
