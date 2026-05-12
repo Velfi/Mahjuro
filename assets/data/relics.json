@@ -1844,7 +1844,7 @@
   {
     "id": "chrysalis",
     "name": "Chrysalis",
-    "description": "After this blind's target is met, further scores this round absorb their points (they do not add to the round or run total). At 2000 absorbed, hatches into Monarch Butterfly.",
+    "description": "Excess score is absorbed each round. At 2000 absorbed excess, hatches into Monarch Butterfly.",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1867,7 +1867,7 @@
   {
     "id": "monarch_butterfly",
     "name": "Monarch Butterfly",
-    "description": "Each scored hand: +12 chips per tier. Gain one tier every 200 total absorbed score (after the blind target is met this round; those plays still do not add to the round or run total). Max tier 24.",
+    "description": "Each scored hand: +chips from total absorbed excess. Excess score is absorbed each round.",
     "rarity": "rare",
     "flavor_spans": [
       {

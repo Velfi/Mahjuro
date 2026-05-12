@@ -248,28 +248,28 @@ pub enum RelicId {
     /// into Monarch Butterfly in-slot.
     Chrysalis,
     /// Shop-only until Chrysalis hatches this run. +chips per score from a
-    /// linear tier: every [`MONARCH_EXCESS_PER_TIER`] absorbed excess adds one
-    /// tier (`relic_counters[MonarchButterfly]`).
+    /// log tier derived from absorbed excess (`relic_counters[MonarchButterfly]`).
     MonarchButterfly,
 }
 
 /// Total absorbed excess (post-target score) needed for Chrysalis to transform.
 pub const CHRYSALIS_HATCH_EXCESS_THRESHOLD: i32 = 2000;
 
-/// Cumulative absorbed excess needed per Monarch Butterfly chip tier (linear).
-pub const MONARCH_EXCESS_PER_TIER: i32 = 200;
-
-/// Chips per tier from [`monarch_butterfly_tier`].
+/// Chips per log-tier from [`monarch_butterfly_tier`].
 pub const MONARCH_CHIPS_PER_TIER: i32 = 12;
 
 /// Max tier for Monarch Butterfly chip bonus.
 pub const MONARCH_TIER_CAP: i32 = 24;
 
-/// Tier from cumulative absorbed excess: one tier per [`MONARCH_EXCESS_PER_TIER`]
-/// points, capped at [`MONARCH_TIER_CAP`].
+/// Tier from cumulative absorbed excess: `ilog2(excess + 1)`, capped (log-spaced tiers).
 #[inline]
 pub fn monarch_butterfly_tier(excess: i32) -> i32 {
-    (excess.max(0) / MONARCH_EXCESS_PER_TIER).min(MONARCH_TIER_CAP)
+    let e = excess.max(0) as u32;
+    if e == 0 {
+        return 0;
+    }
+    let t = e.saturating_add(1).ilog2() as i32;
+    t.min(MONARCH_TIER_CAP)
 }
 
 #[inline]
@@ -277,14 +277,18 @@ pub fn monarch_butterfly_bonus_chips(excess: i32) -> i32 {
     monarch_butterfly_tier(excess).saturating_mul(MONARCH_CHIPS_PER_TIER)
 }
 
-/// Total absorbed excess at which the next chip tier begins (hint for tooltips).
+/// Smallest excess value at which the tier would exceed the current tier (hint for tooltips).
 #[inline]
 pub fn monarch_next_tier_excess_floor(current_excess: i32) -> Option<i32> {
     let t = monarch_butterfly_tier(current_excess);
     if t >= MONARCH_TIER_CAP {
         return None;
     }
-    Some((t + 1).saturating_mul(MONARCH_EXCESS_PER_TIER))
+    let k = (t + 1) as u32;
+    if k >= 31 {
+        return None;
+    }
+    Some(((1i64 << k) - 1).clamp(0, i32::MAX as i64) as i32)
 }
 
 impl RelicId {
@@ -673,10 +677,8 @@ pub fn relic_description_live(
                 .max(0);
             let tier = monarch_butterfly_tier(excess);
             let chips = monarch_butterfly_bonus_chips(excess);
-            let next = monarch_next_tier_excess_floor(excess)
-                .map(|n| format!("next tier at {n} absorbed"))
-                .unwrap_or_else(|| "max tier".to_string());
-            format!("{base} [tier {tier}, +{chips} chips, {excess} absorbed, {next}]")
+            let next = monarch_next_tier_excess_floor(excess).map(|n| format!("next tier ≥{n}")).unwrap_or_else(|| "max tier".to_string());
+            format!("{base} [tier {tier}, +{chips} chips, {excess} excess, {next}]")
         }
         RelicId::Humility => {
             let streak = counters.get(&RelicId::Humility).copied().unwrap_or(0);
@@ -1187,31 +1189,6 @@ mod tests {
         assert_eq!(
             snowball_score_chips(SNOWBALL_STACK_CAP + 50),
             SNOWBALL_STACK_CAP * SNOWBALL_CHIPS_PER_CLEAR
-        );
-    }
-
-    #[test]
-    fn monarch_butterfly_linear_tiers_cap_and_next_threshold() {
-        use super::{
-            monarch_butterfly_bonus_chips, monarch_butterfly_tier, monarch_next_tier_excess_floor,
-            CHRYSALIS_HATCH_EXCESS_THRESHOLD, MONARCH_CHIPS_PER_TIER, MONARCH_EXCESS_PER_TIER,
-            MONARCH_TIER_CAP,
-        };
-        assert_eq!(monarch_butterfly_tier(0), 0);
-        assert_eq!(monarch_butterfly_tier(199), 0);
-        assert_eq!(monarch_butterfly_tier(200), 1);
-        assert_eq!(monarch_butterfly_bonus_chips(200), MONARCH_CHIPS_PER_TIER);
-        assert_eq!(
-            monarch_butterfly_bonus_chips(CHRYSALIS_HATCH_EXCESS_THRESHOLD),
-            (CHRYSALIS_HATCH_EXCESS_THRESHOLD / MONARCH_EXCESS_PER_TIER) * MONARCH_CHIPS_PER_TIER
-        );
-        let huge = MONARCH_TIER_CAP * MONARCH_EXCESS_PER_TIER + 9999;
-        assert_eq!(monarch_butterfly_tier(huge), MONARCH_TIER_CAP);
-        assert_eq!(monarch_next_tier_excess_floor(0), Some(MONARCH_EXCESS_PER_TIER));
-        assert_eq!(monarch_next_tier_excess_floor(2000), Some(2200));
-        assert_eq!(
-            monarch_next_tier_excess_floor(MONARCH_TIER_CAP * MONARCH_EXCESS_PER_TIER),
-            None
         );
     }
 

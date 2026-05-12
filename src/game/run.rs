@@ -788,7 +788,7 @@ pub struct RunState {
     ///   XXXL Egg → plays remaining before burning (Geese shop unlock)
     ///   TeaCeremony  → principle index 0–3 (four scored hands, then transforms)
     ///   Rakuware     → (no counter; all four Tea beats when conditions hold)
-    ///   MonarchButterfly → cumulative absorbed excess (post-target); linear chip tiers
+    ///   MonarchButterfly → cumulative absorbed excess (post-target); tiers for chip bonus
     ///   PhantomRelic → rounds held
     ///   HungryGhost  → permanent mult bonus ×10
     ///   TilePolisher → accumulated +chip bonus (each scored tile +3)
