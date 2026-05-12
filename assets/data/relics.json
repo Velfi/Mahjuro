@@ -1009,7 +1009,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "\"Spun of no wheelForged by fleeting flameCold scorched surfaceYet in these humble handsI feel the hot monsoon rain\"                                                             - The Tanuki",
+        "text": "\"Spun of no wheel, Forged by fleeting flame, Cold scorched surface, Yet in these humble hands I feel the hot monsoon rain\"                                                             - The Tanuki",
         "bold": false,
         "italic": true
       }
@@ -1271,17 +1271,7 @@
     "rarity": "common",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "countless",
-        "bold": true,
-        "italic": true
-      },
-      {
-        "text": " late-night rounds.",
+        "text": "With every round your egg comes one breath closer to hatching.",
         "bold": false,
         "italic": false
       }
