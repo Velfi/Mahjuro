@@ -268,6 +268,9 @@ impl SteamInputBridge {
         self.controllers = self.input.get_connected_controllers();
         self.style_by_controller.clear();
         for &controller in &self.controllers {
+            if controller == 0 {
+                continue;
+            }
             self.style_by_controller.insert(
                 controller,
                 Self::style_for_type(self.input.get_input_type_for_handle(controller)),
@@ -320,6 +323,9 @@ impl SteamInputBridge {
         self.active_set = set;
         let handle = self.sets.get(set);
         for &controller in &self.controllers {
+            if controller == 0 {
+                continue;
+            }
             self.input.activate_action_set_handle(controller, handle);
         }
     }
@@ -329,6 +335,9 @@ impl SteamInputBridge {
         let mut next_pressed = HashSet::new();
         let set_handle = self.sets.get(self.active_set);
         for &controller in &self.controllers {
+            if controller == 0 {
+                continue;
+            }
             self.input
                 .activate_action_set_handle(controller, set_handle);
             for &(binding, handle) in &self.digitals {
@@ -384,7 +393,7 @@ impl SteamInputBridge {
     }
 
     pub fn trigger_rumble(&mut self, weak: u16, strong: u16, duration_ms: u32, gain: f32) -> bool {
-        if self.controllers.is_empty() || duration_ms == 0 {
+        if !self.controllers.iter().any(|&h| h != 0) || duration_ms == 0 {
             return false;
         }
         let g = gain.clamp(0.0, 1.0);
@@ -398,6 +407,9 @@ impl SteamInputBridge {
             return false;
         }
         for &controller in &self.controllers {
+            if controller == 0 {
+                continue;
+            }
             unsafe {
                 sys::SteamAPI_ISteamInput_TriggerVibration(raw, controller, left, right);
             }
@@ -412,6 +424,9 @@ impl SteamInputBridge {
             return;
         }
         for &controller in &self.controllers {
+            if controller == 0 {
+                continue;
+            }
             unsafe {
                 sys::SteamAPI_ISteamInput_TriggerVibration(raw, controller, 0, 0);
             }
@@ -422,7 +437,7 @@ impl SteamInputBridge {
     pub fn glyph_path_for(&self, action: UiAction) -> Option<PathBuf> {
         let action_name = self.action_name_for_glyph(action)?;
         let action_handle = *self.digitals_by_name.get(action_name)?;
-        let controller = *self.controllers.first()?;
+        let controller = self.controllers.iter().copied().find(|&h| h != 0)?;
         let origins = self.input.get_digital_action_origins(
             controller,
             self.sets.get(self.active_set),
@@ -471,29 +486,32 @@ impl SteamInputBridge {
 
     pub fn show_binding_panel(&self) -> bool {
         self.controllers
-            .first()
+            .iter()
             .copied()
+            .find(|&h| h != 0)
             .is_some_and(|controller| self.input.show_binding_panel(controller))
     }
 
     pub fn first_controller_style(&self) -> Option<GamepadStyle> {
         self.controllers
-            .first()
-            .and_then(|controller| self.style_by_controller.get(controller))
+            .iter()
+            .copied()
+            .find(|&h| h != 0)
+            .and_then(|controller| self.style_by_controller.get(&controller))
             .copied()
     }
 
     /// Live count from the most recent [`Self::run_frame`] poll. Used by
     /// the disconnect-detected auto-pause path.
     pub fn controller_count(&self) -> usize {
-        self.controllers.len()
+        self.controllers.iter().filter(|&&h| h != 0).count()
     }
 
     pub fn diagnostics(&self) -> String {
         format!(
             "Steam Input: set={:?}, controllers={}, actions={}",
             self.active_set,
-            self.controllers.len(),
+            self.controller_count(),
             self.digitals.len()
         )
     }

@@ -634,7 +634,11 @@ impl App {
             button_clicks.clear();
         }
 
-        // 3c. If a modal is active, intercept input.
+        // 3c. If a modal is active, intercept input. Cancel / Pause press
+        // does a "skim" gesture on paginated modals: tap = advance one page,
+        // hold = auto-advance through remaining pages at a fast cadence.
+        // The hold timer is driven inside `ModalQueue::update`; here we just
+        // forward the press and release edges.
         if self.modals.is_active() {
             for a in &actions {
                 match a {
@@ -642,9 +646,12 @@ impl App {
                         self.modals.advance_page();
                         break;
                     }
-                    UiAction::Cancel => {
-                        self.modals.dismiss();
+                    UiAction::Cancel | UiAction::Pause => {
+                        self.modals.cancel_pressed();
                         break;
+                    }
+                    UiAction::CancelRelease => {
+                        self.modals.cancel_released();
                     }
                     UiAction::FocusNext => {
                         self.modals.navigate(1);
@@ -660,6 +667,10 @@ impl App {
             // Block all actions from reaching the scene.
             actions.clear();
             button_clicks.clear();
+        } else {
+            // Modal not active; make sure a leftover skim timer doesn't
+            // tick into the next paginated modal that pops up.
+            self.modals.cancel_released();
         }
 
         // Clear one-shot mouse click flag so it doesn't bleed into

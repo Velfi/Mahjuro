@@ -14,14 +14,22 @@ impl App {
         match action {
             DebugAction::SetLevel(level) => {
                 // Set runs_completed to the minimum value for this level.
+                // Must match the curve in `PlayerProgress::current_level`.
                 let runs = match level {
                     1 => 0,
                     2 => 1,
-                    3 => 3,
-                    4 => 6,
-                    5 => 10,
-                    6 => 15,
-                    7 => 20,
+                    3 => 2,
+                    4 => 3,
+                    5 => 4,
+                    6 => 5,
+                    7 => 7,
+                    8 => 9,
+                    9 => 11,
+                    10 => 13,
+                    11 => 15,
+                    12 => 17,
+                    13 => 19,
+                    14 => 21,
                     _ => 0,
                 };
                 self.progress.runs_completed = runs;

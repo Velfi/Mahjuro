@@ -712,7 +712,7 @@ impl HeadlessApp {
         }
     }
 
-    /// Set the in-memory `PlayerProgress` to a level-7, fully-explored
+    /// Set the in-memory `PlayerProgress` to the max-level, fully-explored
     /// state so the Collection grid shows real relic/yaku/boss/talisman
     /// art instead of locked placeholder dots. Only mutates the headless
     /// runner's progress; never persisted.
@@ -720,7 +720,7 @@ impl HeadlessApp {
         use crate::core::boss::all_bosses;
         use crate::core::talisman::TalismanKind;
         use crate::core::yaku::YakuKind;
-        self.progress.runs_completed = 25;
+        self.progress.runs_completed = 100;
         self.progress.has_won = true;
         for yk in YakuKind::all() {
             *self.progress.yaku_times_scored.entry(*yk).or_insert(0) += 1;
