@@ -285,16 +285,25 @@ impl PlayerProgress {
         self.high_scores.truncate(10);
     }
 
-    /// Current progression level (1–7) based on runs completed.
+    /// Current progression level (1–14) based on runs completed.
+    /// New unlocks land every run for the first six runs, then every other run
+    /// until the level-14 catch-all kicks in at 21 runs.
     pub fn current_level(&self) -> u32 {
         match self.runs_completed {
             0 => 1,
-            1..=2 => 2,
-            3..=5 => 3,
-            6..=9 => 4,
-            10..=14 => 5,
-            15..=19 => 6,
-            _ => 7,
+            1 => 2,
+            2 => 3,
+            3 => 4,
+            4 => 5,
+            5..=6 => 6,
+            7..=8 => 7,
+            9..=10 => 8,
+            11..=12 => 9,
+            13..=14 => 10,
+            15..=16 => 11,
+            17..=18 => 12,
+            19..=20 => 13,
+            _ => 14,
         }
     }
 
@@ -476,11 +485,11 @@ pub struct LevelUpResult {
 }
 
 /// Every relic defined in `relics.json` that no earlier level unlocks. Keeps
-/// level 7 a catch-all so newly added relics are reachable without editing
+/// level 14 a catch-all so newly added relics are reachable without editing
 /// this file.
-fn level_7_relics() -> Vec<RelicId> {
+fn level_14_relics() -> Vec<RelicId> {
     use std::collections::HashSet;
-    let earlier: HashSet<RelicId> = (1..=6).flat_map(|l| unlocks_for_level(l).relics).collect();
+    let earlier: HashSet<RelicId> = (1..=13).flat_map(|l| unlocks_for_level(l).relics).collect();
     crate::core::relic::all_relic_defs()
         .iter()
         .map(|d| d.id)
@@ -492,13 +501,12 @@ fn level_7_relics() -> Vec<RelicId> {
 
 fn unlocks_for_level(level: u32) -> LevelUnlocks {
     match level {
+        // ── L1: Set scoring intro + base rule modifiers ──────────────────
         1 => LevelUnlocks {
             relics: vec![
                 RelicId::TripletBoost,
                 RelicId::SequenceSurge,
                 RelicId::PairPower,
-                RelicId::JadeSerpent,
-                RelicId::RedSerpent,
             ],
             rules: vec![
                 RuleModifier::PairDoubleScore,
@@ -509,106 +517,178 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
             yaku: vec![],
             dora: false,
         },
+        // ── L2: Suit & rank chips (all three Serpents together) ──────────
         2 => LevelUnlocks {
             relics: vec![
-                RelicId::MultiplierMaster,
-                RelicId::GreenLuck,
-                RelicId::QuickDraw,
+                RelicId::JadeSerpent,
+                RelicId::RedSerpent,
                 RelicId::BlueSerpent,
                 RelicId::LowTide,
                 RelicId::HighTide,
-                RelicId::NoHonorButWealth,
-                RelicId::Sweepstakes,
-                RelicId::MeltingIce,
+                RelicId::CrackedTile,
+            ],
+            rules: vec![],
+            yaku: vec![],
+            dora: false,
+        },
+        // ── L3: Basic economy + first scoring yaku ───────────────────────
+        3 => LevelUnlocks {
+            relics: vec![
                 RelicId::GoldIdol,
                 RelicId::JadeAbacus,
-                RelicId::CrackedTile,
-                RelicId::Hanami,
+                RelicId::NestEgg,
+                RelicId::Patience,
+                RelicId::NoHonorButWealth,
+                RelicId::Sweepstakes,
+                RelicId::GreenLuck,
             ],
             rules: vec![],
             yaku: vec![YakuKind::Toitoi, YakuKind::Tanyao],
             dora: false,
         },
-        3 => LevelUnlocks {
+        // ── L4: Tempo & shop + flower intro ──────────────────────────────
+        4 => LevelUnlocks {
             relics: vec![
-                RelicId::ChainReaction,
-                RelicId::SetMagnet,
-                RelicId::RoundCompass,
+                RelicId::QuickDraw,
                 RelicId::MerchantsEye,
                 RelicId::IGotAGuy,
                 RelicId::Momentum,
-                RelicId::KongCollector,
-                RelicId::BeggarsCup,
-                RelicId::Cosmopolitan,
-                RelicId::WallWeaver,
-                RelicId::NestEgg,
-                RelicId::Patience,
+                RelicId::Hanami,
                 RelicId::GardenKeeper,
-                RelicId::PaperLantern,
-                RelicId::SolitarySage,
+                RelicId::GlassCannon,
+            ],
+            rules: vec![],
+            yaku: vec![],
+            dora: false,
+        },
+        // ── L5: Set composition + Ikebana flower payoff + Iipeikou/Honitsu
+        5 => LevelUnlocks {
+            relics: vec![
+                RelicId::MultiplierMaster,
+                RelicId::SetMagnet,
+                RelicId::EdgeRunner,
+                RelicId::ChainReaction,
+                RelicId::RoundCompass,
+                RelicId::TurtleShell,
+                RelicId::Ikebana,
             ],
             rules: vec![],
             yaku: vec![YakuKind::Iipeikou, YakuKind::Honitsu],
             dora: false,
         },
-        4 => LevelUnlocks {
+        // ── L6: Dora opens + honors/dragons + Lotus Bloom flower scaler ──
+        6 => LevelUnlocks {
             relics: vec![
+                RelicId::DoraCrown,
                 RelicId::HonorFury,
                 RelicId::WhiteDragonsHush,
+                RelicId::RedDragonRage,
                 RelicId::StrengthInNumbers,
-                RelicId::EdgeRunner,
-                RelicId::TurtleShell,
-                RelicId::Tourist,
-                RelicId::GhostHand,
-                RelicId::Humility,
-                RelicId::Bonfire,
-                RelicId::StarTile,
+                RelicId::WallWeaver,
+                RelicId::LotusBloom,
             ],
             rules: vec![],
             yaku: vec![YakuKind::Chinitsu, YakuKind::Chiitoitsu],
             dora: true,
         },
-        5 => LevelUnlocks {
+        // ── L7: Late-economy uncommons + hand-size modifiers ─────────────
+        7 => LevelUnlocks {
             relics: vec![
-                RelicId::JokerTile,
-                RelicId::WildWinds,
-                RelicId::KanDrum,
-                RelicId::DoraCrown,
-                RelicId::LuckySeven,
-                RelicId::Minimalist,
-                RelicId::Disgust,
+                RelicId::KongCollector,
+                RelicId::BeggarsCup,
+                RelicId::Cosmopolitan,
                 RelicId::Heirloom,
-                RelicId::SilkThread,
-                RelicId::VoiceOfThePeople,
-                RelicId::VoiceOfTheElite,
-                RelicId::Ikebana,
-                RelicId::TilePolisher,
-                RelicId::RustlingGooseEgg,
-                RelicId::TeaCeremony,
-                RelicId::Chrysalis,
+                RelicId::Tourist,
+                RelicId::BigHands,
+                RelicId::TinyHands,
+            ],
+            rules: vec![],
+            yaku: vec![],
+            dora: false,
+        },
+        // ── L8: Mid scaling specialists + Sanshoku/Honroutou ─────────────
+        8 => LevelUnlocks {
+            relics: vec![
+                RelicId::Humility,
+                RelicId::Bonfire,
+                RelicId::StarTile,
             ],
             rules: vec![],
             yaku: vec![YakuKind::SanshokuDoujun, YakuKind::Honroutou],
             dora: false,
         },
-        6 => LevelUnlocks {
+        // ── L9: Specialist rares + Junchan/Ittsu ─────────────────────────
+        9 => LevelUnlocks {
             relics: vec![
-                RelicId::SecondWind,
-                RelicId::GoldenEngine,
-                RelicId::ClosedGate,
+                RelicId::LuckySeven,
+                RelicId::Minimalist,
+                RelicId::AntTrail,
+                RelicId::SolitarySage,
                 RelicId::RiverRunner,
+                RelicId::GhostHand,
+            ],
+            rules: vec![],
+            yaku: vec![YakuKind::Junchan, YakuKind::Ittsu],
+            dora: false,
+        },
+        // ── L10: Fragile transforms (burn-into-successor relics) ─────────
+        10 => LevelUnlocks {
+            relics: vec![
+                RelicId::PaperLantern,
+                RelicId::MeltingIce,
+                RelicId::SilkThread,
+                RelicId::TeaCeremony,
+                RelicId::RustlingGooseEgg,
+            ],
+            rules: vec![],
+            yaku: vec![],
+            dora: false,
+        },
+        // ── L11: Retriggers & polish ─────────────────────────────────────
+        11 => LevelUnlocks {
+            relics: vec![
+                RelicId::TilePolisher,
+                RelicId::LastBreath,
+                RelicId::VoiceOfThePeople,
+                RelicId::VoiceOfTheElite,
+                RelicId::Chrysalis,
+            ],
+            rules: vec![],
+            yaku: vec![],
+            dora: false,
+        },
+        // ── L12: Conditional ×mult "Way of" relics + tough rules ─────────
+        12 => LevelUnlocks {
+            relics: vec![
                 RelicId::WayOfPurity,
                 RelicId::WayOfPairs,
                 RelicId::WayOfTriplets,
                 RelicId::WayOfSequences,
-                RelicId::Obsession,
+                RelicId::ClosedGate,
+                RelicId::Disgust,
             ],
             rules: vec![RuleModifier::NoSequences, RuleModifier::ReducedPlays],
-            yaku: vec![YakuKind::Junchan, YakuKind::Ittsu],
+            yaku: vec![],
             dora: false,
         },
-        7 => LevelUnlocks {
-            relics: level_7_relics(),
+        // ── L13: Late rares (utility / scaling / chaos) ──────────────────
+        13 => LevelUnlocks {
+            relics: vec![
+                RelicId::SecondWind,
+                RelicId::GoldenEngine,
+                RelicId::Snowball,
+                RelicId::Obsession,
+                RelicId::SmokeBomb,
+                RelicId::PhantomRelic,
+                RelicId::KanDrum,
+            ],
+            rules: vec![],
+            yaku: vec![],
+            dora: false,
+        },
+        // ── L14: Capstones (legendaries + the most chaotic rares) ────────
+        14 => LevelUnlocks {
+            relics: level_14_relics(),
             rules: vec![],
             yaku: vec![],
             dora: false,
@@ -645,22 +725,27 @@ mod tests {
         assert_eq!(p.current_level(), 1);
         p.runs_completed = 1;
         assert_eq!(p.current_level(), 2);
-        p.runs_completed = 3;
-        assert_eq!(p.current_level(), 3);
+        p.runs_completed = 4;
+        assert_eq!(p.current_level(), 5);
         p.runs_completed = 6;
-        assert_eq!(p.current_level(), 4);
-        p.runs_completed = 20;
-        assert_eq!(p.current_level(), 7);
+        assert_eq!(p.current_level(), 6);
+        p.runs_completed = 13;
+        assert_eq!(p.current_level(), 10);
+        p.runs_completed = 21;
+        assert_eq!(p.current_level(), 14);
+        p.runs_completed = 100;
+        assert_eq!(p.current_level(), 14);
     }
 
     #[test]
     fn level_up_unlocks_relics() {
         let mut p = PlayerProgress::new();
-        p.runs_completed = 1;
+        // Hop from L1 to L5 in one bump: collect all intervening unlocks.
+        p.runs_completed = 4;
         let result = p.check_level_up();
         assert!(result.is_some());
         let result = result.unwrap();
-        assert_eq!(result.new_level, 2);
+        assert_eq!(result.new_level, 5);
         assert!(result.relics.contains(&RelicId::MultiplierMaster));
         assert!(p.unlocked_relics.contains(&RelicId::MultiplierMaster));
     }
@@ -670,14 +755,14 @@ mod tests {
         let mut p = PlayerProgress::new();
         let l1 = p.available_relics().len();
         p.runs_completed = 6;
-        let l4 = p.available_relics().len();
-        assert!(l4 > l1);
+        let l6 = p.available_relics().len();
+        assert!(l6 > l1);
     }
 
     #[test]
     fn transformation_successors_hidden_until_discovered() {
         let mut p = PlayerProgress::new();
-        p.runs_completed = 20;
+        p.runs_completed = 100;
         assert!(!p.available_relics().contains(&RelicId::SilkMoth));
         assert!(!p.transformation_successor_visible(RelicId::SilkMoth));
         assert!(p.note_transformation_successor_discovered(RelicId::SilkMoth));
@@ -694,7 +779,7 @@ mod tests {
         use crate::core::relic::all_relic_defs;
         use std::collections::HashSet;
         let unlocked: HashSet<RelicId> =
-            (1..=7).flat_map(|l| unlocks_for_level(l).relics).collect();
+            (1..=14).flat_map(|l| unlocks_for_level(l).relics).collect();
         let successors: HashSet<RelicId> = transformation_successor_relic_ids().iter().copied().collect();
         let missing: Vec<RelicId> = all_relic_defs()
             .iter()
@@ -708,10 +793,24 @@ mod tests {
     }
 
     #[test]
-    fn dora_unlocks_at_level_4() {
+    fn no_relic_appears_in_two_levels() {
+        use std::collections::HashMap;
+        let mut seen: HashMap<RelicId, u32> = HashMap::new();
+        for l in 1..=14u32 {
+            for r in unlocks_for_level(l).relics {
+                if let Some(prev) = seen.insert(r, l) {
+                    panic!("relic {:?} appears in level {} and level {}", r, prev, l);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn dora_unlocks_at_level_6() {
         let mut p = PlayerProgress::new();
         assert!(!p.dora_enabled());
-        p.runs_completed = 6;
+        p.runs_completed = 5;
+        assert_eq!(p.current_level(), 6);
         assert!(p.dora_enabled());
     }
 

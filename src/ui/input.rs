@@ -84,6 +84,10 @@ pub enum UiAction {
     ConfirmRelease,
     /// Gamepad **East** / **Backspace** — cancel / back (scene-defined).
     Cancel,
+    /// Gamepad **East** / **Backspace** / **Escape** release — used by the
+    /// modal hold-to-skim gesture so the level-up celebration knows when to
+    /// stop auto-advancing pages. No current consumers outside `ModalQueue`.
+    CancelRelease,
     /// Commit selected melds into the structure (costs one play).
     ScoreHand,
     /// Cash in the structure for score (no play cost).
@@ -644,13 +648,17 @@ impl InputState {
             },
             Event::ControllerButtonUp { button, .. } => match button {
                 GpButton::South => {
-                    if !self.swap_ab {
+                    if self.swap_ab {
+                        actions.push(UiAction::CancelRelease);
+                    } else {
                         actions.push(UiAction::ConfirmRelease);
                     }
                 }
                 GpButton::East => {
                     if self.swap_ab {
                         actions.push(UiAction::ConfirmRelease);
+                    } else {
+                        actions.push(UiAction::CancelRelease);
                     }
                 }
                 GpButton::West => {
@@ -1126,10 +1134,11 @@ impl InputState {
         false
     }
 
-    /// Mirror of [`Self::on_key`] for key-release events. Currently only
-    /// emits `ConfirmRelease` when Space/Enter goes up — the marquee
-    /// multi-select gesture needs a release edge for keyboard parity with
-    /// the gamepad South button.
+    /// Mirror of [`Self::on_key`] for key-release events. Emits
+    /// `ConfirmRelease` for Space/Enter (marquee multi-select edge),
+    /// `WestFaceRelease` for Q (shop hold-to-sell), and `CancelRelease` for
+    /// Backspace / Escape so the modal level-up skim can detect when the
+    /// player lets go of the cancel/back key.
     pub fn on_key_release(&mut self, key: Option<Scancode>, actions: &mut Vec<UiAction>) {
         let Some(code) = key else {
             return;
@@ -1139,6 +1148,9 @@ impl InputState {
         }
         if matches!(code, Scancode::Q) {
             actions.push(UiAction::WestFaceRelease);
+        }
+        if matches!(code, Scancode::Backspace | Scancode::Escape) {
+            actions.push(UiAction::CancelRelease);
         }
     }
 
@@ -1286,6 +1298,7 @@ pub fn apply_ui_actions(
             | UiAction::PageNext
             | UiAction::PagePrev => {}
             UiAction::NorthFacePress | UiAction::WestFacePress | UiAction::WestFaceRelease => {}
+            UiAction::CancelRelease => {}
         }
     }
 }

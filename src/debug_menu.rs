@@ -273,9 +273,9 @@ impl DebugMenuBar {
 
         let _ = cheats_sub.append(&PredefinedMenuItem::separator());
 
-        // Set Level submenu (levels 1-7).
+        // Set Level submenu (levels 1-14).
         let level_sub = Submenu::new("Set Player Level", true);
-        for lvl in 1..=7u32 {
+        for lvl in 1..=14u32 {
             let item = MenuItem::new(format!("Level {lvl}"), true, None);
             mappings.push((item.id().clone(), DebugAction::SetLevel(lvl)));
             let _ = level_sub.append(&item);

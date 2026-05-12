@@ -2799,24 +2799,28 @@ mod progression_snapshot_tests {
 
     #[test]
     fn run_relic_unlocks_only_change_when_a_new_run_applies_progression() {
+        // `BigHands` first unlocks at level 7. We bump from L6 → L7 in one
+        // step (`check_level_up` only re-emits the current level's relics)
+        // and make sure `apply_progression` only refreshes the run's
+        // available pool when a fresh `RunState` is created.
         let mut progress = crate::core::progression::PlayerProgress::new();
         progress.runs_completed = 6;
         progress.check_level_up();
 
         let mut current_run = RunState::new_demo();
         current_run.apply_progression(&progress);
-        assert!(!current_run.available_relics.contains(&RelicId::JokerTile));
+        assert!(!current_run.available_relics.contains(&RelicId::BigHands));
 
-        progress.runs_completed = 10;
+        progress.runs_completed = 7;
         let result = progress
             .check_level_up()
-            .expect("level 5 should unlock relics");
-        assert!(result.relics.contains(&RelicId::JokerTile));
-        assert!(!current_run.available_relics.contains(&RelicId::JokerTile));
+            .expect("crossing into level 7 should unlock new relics");
+        assert!(result.relics.contains(&RelicId::BigHands));
+        assert!(!current_run.available_relics.contains(&RelicId::BigHands));
 
         let mut next_run = RunState::new_demo();
         next_run.apply_progression(&progress);
-        assert!(next_run.available_relics.contains(&RelicId::JokerTile));
+        assert!(next_run.available_relics.contains(&RelicId::BigHands));
     }
 }
 

@@ -1,6 +1,15 @@
 //! Modal overlay system for toasting important game events.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+/// Quiet window before a held cancel/back key starts auto-advancing pages.
+/// A quick tap (<this) advances exactly one page; longer than this and the
+/// modal starts skimming.
+const SKIM_INITIAL_DELAY: Duration = Duration::from_millis(250);
+/// Interval between subsequent auto-advances while the cancel/back key is
+/// still held — fast enough that "skim through all updates" feels snappy,
+/// slow enough that each unlock card is still visible in passing.
+const SKIM_REPEAT_INTERVAL: Duration = Duration::from_millis(120);
 
 use crate::core::relic::RelicId;
 use crate::core::relic::relic_visual;
@@ -370,6 +379,11 @@ impl Modal {
 pub struct ModalQueue {
     queue: Vec<Modal>,
     last_update: Instant,
+    /// `Some(next_advance_at)` while the player is holding the cancel/back
+    /// key over a paginated modal. The first auto-advance fires at
+    /// `press_time + SKIM_INITIAL_DELAY`; subsequent advances fire every
+    /// `SKIM_REPEAT_INTERVAL` after that. `None` means no skim in progress.
+    skim_next_at: Option<Instant>,
 }
 
 impl Default for ModalQueue {
@@ -377,6 +391,7 @@ impl Default for ModalQueue {
         Self {
             queue: Vec::new(),
             last_update: Instant::now(),
+            skim_next_at: None,
         }
     }
 }
@@ -407,7 +422,9 @@ impl ModalQueue {
         false
     }
 
-    /// Tick firework particles on the active modal.
+    /// Tick firework particles on the active modal, and auto-advance pages
+    /// while the player is holding the cancel/back key over a paginated
+    /// modal (level-up celebration skim).
     pub fn update(&mut self) {
         let now = Instant::now();
         let dt = now
@@ -419,6 +436,63 @@ impl ModalQueue {
                 fw.update(dt);
             }
         }
+        // Skim: while the cancel/back key is held over a paginated modal,
+        // advance one page per `SKIM_REPEAT_INTERVAL`. The first scheduled
+        // advance is `SKIM_INITIAL_DELAY` after the initial press (set by
+        // `cancel_pressed`), so a quick tap never auto-skims.
+        if let Some(next_at) = self.skim_next_at
+            && now >= next_at
+        {
+            let still_paginated = self
+                .queue
+                .first()
+                .map(|m| m.has_pages())
+                .unwrap_or(false);
+            if still_paginated {
+                self.advance_page();
+                let paginated_after = self
+                    .queue
+                    .first()
+                    .map(|m| m.has_pages())
+                    .unwrap_or(false);
+                // Keep skimming as long as a paginated modal is still on
+                // top (the next modal in queue might also be paginated and
+                // continue the skim seamlessly).
+                self.skim_next_at = if paginated_after {
+                    Some(now + SKIM_REPEAT_INTERVAL)
+                } else {
+                    None
+                };
+            } else {
+                self.skim_next_at = None;
+            }
+        }
+    }
+
+    /// Press edge for the cancel/back key (gamepad East, Backspace,
+    /// Escape). On a paginated modal this advances one page immediately
+    /// and arms the held-skim timer so further holding flips through the
+    /// remaining unlock cards rapidly. On a non-paginated modal it falls
+    /// back to the historical dismiss-on-cancel behavior.
+    pub fn cancel_pressed(&mut self) -> bool {
+        let paginated = self
+            .queue
+            .first()
+            .map(|m| m.has_pages())
+            .unwrap_or(false);
+        if paginated {
+            let advanced = self.advance_page();
+            self.skim_next_at = Some(Instant::now() + SKIM_INITIAL_DELAY);
+            advanced
+        } else {
+            self.skim_next_at = None;
+            self.dismiss()
+        }
+    }
+
+    /// Release edge for the cancel/back key. Stops the held-skim timer.
+    pub fn cancel_released(&mut self) {
+        self.skim_next_at = None;
     }
 
     /// Navigate pages on the active modal by `delta` (-1 = left, +1 = right).
@@ -459,6 +533,10 @@ impl ModalQueue {
             // Reset fade-in timer on the next modal.
             if let Some(next) = self.queue.first_mut() {
                 next.shown_at = Instant::now();
+            }
+            // If skimming and the queue just drained, stop ticking.
+            if self.queue.is_empty() {
+                self.skim_next_at = None;
             }
             true
         }
