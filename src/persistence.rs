@@ -8,6 +8,73 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::progression::PlayerProgress;
 use crate::game::run::RunState;
+use crate::ui::button_prompts::GamepadStyle;
+
+/// Which controller icon atlas to use for on-screen button prompts (Kenney).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum GlyphPromptSetting {
+    /// Match the first connected gamepad (vendor / name heuristics).
+    #[default]
+    Auto,
+    Xbox,
+    PlayStation,
+    Nintendo,
+    NintendoSwitch2,
+    SteamDeck,
+    SteamController,
+    Generic,
+}
+
+impl GlyphPromptSetting {
+    const ORDER: &[Self] = &[
+        Self::Auto,
+        Self::Xbox,
+        Self::PlayStation,
+        Self::Nintendo,
+        Self::NintendoSwitch2,
+        Self::SteamDeck,
+        Self::SteamController,
+        Self::Generic,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Auto => "Auto",
+            Self::Xbox => "Xbox",
+            Self::PlayStation => "PlayStation",
+            Self::Nintendo => "Switch",
+            Self::NintendoSwitch2 => "Switch 2",
+            Self::SteamDeck => "Steam Deck",
+            Self::SteamController => "Steam Controller",
+            Self::Generic => "Generic",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        let i = Self::ORDER.iter().position(|&x| x == self).unwrap_or(0);
+        Self::ORDER[(i + 1) % Self::ORDER.len()]
+    }
+
+    pub fn prev(self) -> Self {
+        let i = Self::ORDER.iter().position(|&x| x == self).unwrap_or(0);
+        let n = Self::ORDER.len();
+        Self::ORDER[(i + n - 1) % n]
+    }
+
+    pub fn resolve(self, detected: GamepadStyle) -> GamepadStyle {
+        match self {
+            Self::Auto => detected,
+            Self::Xbox => GamepadStyle::Xbox,
+            Self::PlayStation => GamepadStyle::PlayStation,
+            Self::Nintendo => GamepadStyle::Nintendo,
+            Self::NintendoSwitch2 => GamepadStyle::NintendoSwitch2,
+            Self::SteamDeck => GamepadStyle::SteamDeck,
+            Self::SteamController => GamepadStyle::SteamController,
+            Self::Generic => GamepadStyle::Generic,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ResumeScene {
@@ -302,6 +369,9 @@ pub struct AppSettings {
     /// Borderless fullscreen when true; windowed (resizable) when false.
     #[serde(default = "default_true")]
     pub borderless_fullscreen: bool,
+    /// On-screen controller button art: Auto follows hardware, or force a family.
+    #[serde(default)]
+    pub glyph_prompt: GlyphPromptSetting,
     #[serde(default)]
     pub swap_ab: bool,
     #[serde(default)]
@@ -367,6 +437,7 @@ impl Default for AppSettings {
             ssr_enabled: true,
             hdr_enabled: false,
             borderless_fullscreen: true,
+            glyph_prompt: GlyphPromptSetting::default(),
             swap_ab: false,
             swap_xy: false,
             controller_layout_user_set: false,
@@ -684,4 +755,31 @@ pub fn delete_profile(index: usize) {
         log::warn!("delete_profile: {e}");
     }
     delete_saved_run(index);
+}
+
+#[cfg(test)]
+mod glyph_prompt_setting_tests {
+    use super::GlyphPromptSetting;
+    use crate::ui::button_prompts::GamepadStyle;
+
+    #[test]
+    fn auto_uses_detected() {
+        assert_eq!(
+            GlyphPromptSetting::Auto.resolve(GamepadStyle::PlayStation),
+            GamepadStyle::PlayStation
+        );
+    }
+
+    #[test]
+    fn next_cycles_back_to_auto() {
+        let start = GlyphPromptSetting::default();
+        let mut v = start;
+        for _ in 0..32 {
+            v = v.next();
+            if v == start {
+                return;
+            }
+        }
+        panic!("glyph prompt cycle did not return to Auto");
+    }
 }

@@ -888,11 +888,10 @@ impl HeadlessApp {
             _ => None,
         };
 
-        let glyphs = crate::ui::glyph_source::GlyphResolver::new(
-            crate::ui::button_prompts::GamepadStyle::default(),
-            false,
-            false,
-        );
+        let settings = crate::persistence::load_settings();
+        let detected = crate::ui::button_prompts::GamepadStyle::default();
+        let prompt_style = settings.glyph_prompt.resolve(detected);
+        let glyphs = crate::ui::glyph_source::GlyphResolver::new(prompt_style, false, false);
         let ctx = DrawCtx::new(
             &layout,
             &self.anim,
@@ -916,7 +915,7 @@ impl HeadlessApp {
             self.input_mode_override.unwrap_or(InputMode::Cursor),
             false,
             false,
-            crate::ui::button_prompts::GamepadStyle::default(),
+            prompt_style,
             glyphs,
             suspended_shop,
             suspended_collection,
