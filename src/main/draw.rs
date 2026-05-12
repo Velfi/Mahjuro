@@ -375,15 +375,17 @@ impl App {
         let p = self.active_profile.min(2);
         let archive_has_new_chronicle =
             self.progress.run_history.len() as u32 > self.archive_last_seen_run_len[p];
-        let gamepad_style = self
+        let settings = crate::persistence::load_settings();
+        let detected = self
             .input
             .as_ref()
             .map(|i| i.gamepad_style)
             .unwrap_or_default();
+        let prompt_style = settings.glyph_prompt.resolve(detected);
         let swap_ab = self.input.as_ref().map(|i| i.swap_ab).unwrap_or(false);
         let swap_xy = self.input.as_ref().map(|i| i.swap_xy).unwrap_or(false);
         let glyphs =
-            crate::ui::glyph_source::GlyphResolver::new(gamepad_style, swap_ab, swap_xy);
+            crate::ui::glyph_source::GlyphResolver::new(prompt_style, swap_ab, swap_xy);
         let ctx = DrawCtx::new(
             &layout,
             &self.anim,
@@ -417,7 +419,7 @@ impl App {
                 .unwrap_or(crate::ui::input::InputMode::Cursor),
             swap_ab,
             swap_xy,
-            gamepad_style,
+            prompt_style,
             glyphs,
             suspended_shop,
             suspended_collection,

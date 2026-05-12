@@ -92,6 +92,7 @@ enum Row {
     HoldToSellRumble,
     AutoCashInOnFullStructure,
     Hints,
+    GlyphPrompts,
     RebindController,
     ExportPlayStats,
     SaveAndProfiles,
@@ -136,6 +137,7 @@ const ROWS: &[Row] = &[
     Row::HoldToSellRumble,
     Row::AutoCashInOnFullStructure,
     Row::Hints,
+    Row::GlyphPrompts,
     Row::RebindController,
     Row::ExportPlayStats,
     Row::SaveAndProfiles,
@@ -176,6 +178,7 @@ const CONTENT: &[ContentSlot] = &[
     ContentSlot::Row(Row::HoldToSellRumble),
     ContentSlot::Row(Row::AutoCashInOnFullStructure),
     ContentSlot::Row(Row::Hints),
+    ContentSlot::Row(Row::GlyphPrompts),
     ContentSlot::Row(Row::RebindController),
     ContentSlot::Header(Section::Data),
     ContentSlot::Row(Row::ExportPlayStats),
@@ -354,6 +357,7 @@ pub struct OptionsScene {
     pub auto_cash_in_on_full_structure: bool,
     pub hints_enabled: bool,
     pub discard_undo_enabled: bool,
+    pub glyph_prompt: crate::persistence::GlyphPromptSetting,
 }
 
 impl OptionsScene {
@@ -402,6 +406,7 @@ impl OptionsScene {
             auto_cash_in_on_full_structure: settings.auto_cash_in_on_full_structure,
             hints_enabled: settings.hints_enabled,
             discard_undo_enabled: settings.discard_undo_enabled,
+            glyph_prompt: settings.glyph_prompt,
         }
     }
 
@@ -450,6 +455,7 @@ impl OptionsScene {
         settings.auto_cash_in_on_full_structure = self.auto_cash_in_on_full_structure;
         settings.hints_enabled = self.hints_enabled;
         settings.discard_undo_enabled = self.discard_undo_enabled;
+        settings.glyph_prompt = self.glyph_prompt;
         let _ = crate::persistence::save_settings(&settings);
     }
 
@@ -581,6 +587,7 @@ impl OptionsScene {
                 self.auto_cash_in_on_full_structure = !self.auto_cash_in_on_full_structure
             }
             Row::Hints => self.hints_enabled = !self.hints_enabled,
+            Row::GlyphPrompts => self.glyph_prompt = self.glyph_prompt.next(),
             Row::UndoDiscard => self.discard_undo_enabled = !self.discard_undo_enabled,
             Row::RebindController | Row::ExportPlayStats | Row::SaveAndProfiles => return,
             _ => return,
@@ -619,6 +626,7 @@ impl OptionsScene {
                 self.auto_cash_in_on_full_structure = !self.auto_cash_in_on_full_structure
             }
             Row::Hints => self.hints_enabled = !self.hints_enabled,
+            Row::GlyphPrompts => self.glyph_prompt = self.glyph_prompt.prev(),
             Row::UndoDiscard => self.discard_undo_enabled = !self.discard_undo_enabled,
             Row::RebindController | Row::ExportPlayStats | Row::SaveAndProfiles => return,
             _ => return,
@@ -702,6 +710,10 @@ impl OptionsScene {
             }
             Row::Hints => {
                 self.hints_enabled = !self.hints_enabled;
+                self.save_settings();
+            }
+            Row::GlyphPrompts => {
+                self.glyph_prompt = self.glyph_prompt.next();
                 self.save_settings();
             }
             Row::UndoDiscard => {
@@ -1229,6 +1241,12 @@ impl OptionsScene {
                     ),
                     Row::Hints => {
                         format!("Hints: {}", if self.hints_enabled { "ON" } else { "OFF" })
+                    }
+                    Row::GlyphPrompts => {
+                        format!(
+                            "Button prompt icons: {}",
+                            self.glyph_prompt.label()
+                        )
                     }
                     Row::UndoDiscard => format!(
                         "Discard undo: {}",
