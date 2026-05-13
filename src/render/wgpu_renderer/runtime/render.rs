@@ -796,6 +796,10 @@ impl WgpuRenderer {
                 }
                 DrawCmd::PromptIconQuad(icon) => {
                     let key = icon.source.cache_key();
+                    if self.prompt_icon_missing.contains(&key) {
+                        i += 1;
+                        continue;
+                    }
                     if !self.prompt_icon_overlays.contains_key(&key) {
                         match make_prompt_icon_overlay_gpu(
                             &self.device,
@@ -809,6 +813,7 @@ impl WgpuRenderer {
                             }
                             None => {
                                 log::warn!("prompt icon missing or invalid: {key}");
+                                self.prompt_icon_missing.insert(key);
                                 i += 1;
                                 continue;
                             }

@@ -1,7 +1,7 @@
 //! Meld bonuses, early relic chips/mults, talismans, flowers, and Dragon Echo —
 //! everything applied before [`super::dora_yaku_layer`] (Dora, yaku, structure depth).
 
-use crate::core::hand::{DetectedSet, SetKind};
+use crate::core::hand::{DetectedMeld, MeldKind};
 use crate::core::relic::{RelicId, ScoreContext};
 use crate::core::tile::{Suit, Tile};
 
@@ -22,7 +22,7 @@ fn effective_point_value(t: &Tile, ctx: &ScoreContext<'_>) -> i32 {
 pub(crate) fn apply_pre_yaku_scoring(
     ctx: &ScoreContext<'_>,
     tiles: &[Tile],
-    sets: &[DetectedSet],
+    sets: &[DetectedMeld],
     eff: EffectiveRelics,
     pair_double: bool,
     has_triplet_boost: bool,
@@ -50,18 +50,18 @@ pub(crate) fn apply_pre_yaku_scoring(
 
     for s in sets {
         match s.kind {
-            SetKind::Triplet | SetKind::Kong if has_triplet_boost => {
+            MeldKind::Triplet | MeldKind::Kong if has_triplet_boost => {
                 push_chips(steps, chips, *mult, "Triplet Boost", 40);
             }
-            SetKind::Sequence if has_sequence_surge => {
+            MeldKind::Sequence if has_sequence_surge => {
                 push_chips(steps, chips, *mult, "Sequence Surge", 25);
             }
-            SetKind::Pair if has_pair_power => {
+            MeldKind::Pair if has_pair_power => {
                 push_chips(steps, chips, *mult, "Pair Power", 30);
             }
             _ => {}
         }
-        if matches!(s.kind, SetKind::Kong) && eff.has(ctx.relic.roster, RelicId::KongsBlessing) {
+        if matches!(s.kind, MeldKind::Kong) && eff.has(ctx.relic.roster, RelicId::KongsBlessing) {
             push_chips(steps, chips, *mult, "Kong's Blessing", 120);
         }
 
@@ -132,7 +132,7 @@ pub(crate) fn apply_pre_yaku_scoring(
     }
 
     if pair_double {
-        let pair_count = sets.iter().filter(|s| s.kind == SetKind::Pair).count() as i32;
+        let pair_count = sets.iter().filter(|s| s.kind == MeldKind::Pair).count() as i32;
         if pair_count > 0 {
             push_chips(steps, chips, *mult, "Pair Double (rule)", 30 * pair_count);
         }
@@ -340,7 +340,7 @@ pub(crate) fn apply_pre_yaku_scoring(
                 match enh {
                     TileEnhancement::Pearl => meld_has_pearl = true,
                     TileEnhancement::Gilded => {
-                        if !matches!(s.kind, SetKind::Pair) {
+                        if !matches!(s.kind, MeldKind::Pair) {
                             gilded_gold += 1;
                         }
                     }
@@ -439,7 +439,7 @@ pub(crate) fn apply_pre_yaku_scoring(
         let is_dragon_trip: Vec<bool> = sets
             .iter()
             .map(|s| {
-                if !matches!(s.kind, SetKind::Triplet | SetKind::Kong) {
+                if !matches!(s.kind, MeldKind::Triplet | MeldKind::Kong) {
                     return false;
                 }
                 s.tile_ids

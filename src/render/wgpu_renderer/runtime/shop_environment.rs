@@ -54,7 +54,7 @@ impl WgpuRenderer {
         }
     }
 
-    /// Draw [`Shop.glb`] environment primitives through `shop_glb.wgsl` / `tile_3d.wgsl`
+    /// Draw [`shop.glb`] environment primitives through `shop_glb.wgsl` / `tile_3d.wgsl`
     /// (same routing as [`RenderOp::ShopEnvironment`]).
     pub(super) fn draw_shop_environment_meshes(
         &self,
@@ -260,7 +260,7 @@ impl WgpuRenderer {
         let Some(tex) = gpu.archive_sign_decal_texture.as_ref() else {
             return;
         };
-        use crate::render::archive_glb::ARCHIVE_DESCRIPTION_DECAL_HOST_EXTENTS;
+        use crate::render::archive_glb::archive_sign_description_decal_extents;
         use crate::render::decal::{
             decal_dimensions, rasterize_plaque_decal_styled, PlaqueDecalStyle,
             PLAQUE_DECAL_HEIGHT,
@@ -270,7 +270,7 @@ impl WgpuRenderer {
         let layout = DecalLayout::Fit {
             target_short_edge: PLAQUE_DECAL_HEIGHT,
         };
-        let (dw, dh) = decal_dimensions(&layout, ARCHIVE_DESCRIPTION_DECAL_HOST_EXTENTS);
+        let (dw, dh) = decal_dimensions(&layout, archive_sign_description_decal_extents());
         let key = match frame.archive_sign_description_decal_text.as_ref() {
             None => u64::MAX,
             Some(t) => super::super::tablet_label_hash(t, dw, dh),

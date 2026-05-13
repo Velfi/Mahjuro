@@ -136,6 +136,10 @@ enum CollectionAction {
     /// active tab's artifact list globally so the selection survives
     /// scroll position changes.
     SelectArtifact(usize),
+    /// Footer arrow paginates the archive cabinet by one page (only used when the
+    /// `archive.glb` room is loaded; procedural fallback uses the arrows for tabs).
+    PrevPage,
+    NextPage,
 }
 
 impl CollectionAction {
@@ -145,6 +149,8 @@ impl CollectionAction {
             CollectionAction::SwitchSave => FocusId(23),
             CollectionAction::PrevTab => FocusId(21),
             CollectionAction::NextTab => FocusId(22),
+            CollectionAction::PrevPage => FocusId(24),
+            CollectionAction::NextPage => FocusId(25),
             CollectionAction::SelectTab(i) => FocusId(400 + i as u32),
             // SelectArtifact IDs start at 200. The widget tree just needs
             // unique IDs per hit target — the values themselves don't matter.
@@ -191,8 +197,11 @@ pub struct CollectionScene {
     cam_anim: std::cell::Cell<Option<CamAnim>>,
     /// Last `run_history.len()` reported to persist "seen" chronicle hints.
     chronicle_seen_cursor: Option<u32>,
-    /// Horizontal scroll origin (logical column 0..=3) for the 3-wide `archive.glb` window.
-    archive_col_scroll: i32,
+    /// Current page index when the `archive.glb` room is loaded. The cabinet shows
+    /// `ARCHIVE_SLOT_COUNT` items per page; navigation pages flip rather than
+    /// horizontally / vertically scroll a sliding window. Procedural fallback
+    /// ignores this and uses [`Self::target_scroll_rows`] instead.
+    archive_page: usize,
     /// Last drawn [`DrawCtx::room_gltf_height_scale`] — matches GPU glTF room scale when `flat_items` /
     /// `update` build marker hit rects (possibly one frame behind).
     drawn_room_gltf_height_scale: std::cell::Cell<f32>,
@@ -232,7 +241,7 @@ impl CollectionScene {
             scroll_last_tick: std::cell::Cell::new(Instant::now()),
             cam_anim: std::cell::Cell::new(None),
             chronicle_seen_cursor: None,
-            archive_col_scroll: 0,
+            archive_page: 0,
             drawn_room_gltf_height_scale: std::cell::Cell::new(1.0),
         }
     }
@@ -290,7 +299,7 @@ impl CollectionScene {
         self.focused_row = Some(0);
         self.scroll_rows.set(0.0);
         self.target_scroll_rows.set(0.0);
-        self.archive_col_scroll = 0;
+        self.archive_page = 0;
         self.cam_anim.set(None);
     }
 
@@ -338,12 +347,19 @@ impl CollectionScene {
         let switch_x = w - margin_x - switch_w;
         let arrow_w = ch.arrow_w;
         let arrow_h = back_h;
-        // Footer-centered Prev/Next so the player can paginate tabs
-        // spin with the mouse, not just the keyboard.
+        // Footer-centered Prev/Next pair. Archive room → page prev/next (cabinet
+        // spans more catalog entries than slots). Procedural fallback → tab cycle
+        // (legacy mouse affordance for keyboardless scenes).
         let center_x = w * 0.5;
         let arrow_y = h - arrow_h - h * 0.02;
         let prev_x = center_x - arrow_w * 1.5;
         let next_x = center_x + arrow_w * 0.5;
+        let archive_path_for_arrows = archive_glb::archive_room_draw_ready();
+        let (footer_prev_action, footer_next_action) = if archive_path_for_arrows {
+            (CollectionAction::PrevPage, CollectionAction::NextPage)
+        } else {
+            (CollectionAction::PrevTab, CollectionAction::NextTab)
+        };
 
         let mut items = vec![
             FlatItem::new(
@@ -357,14 +373,14 @@ impl CollectionScene {
                 CollectionAction::SwitchSave,
             ),
             FlatItem::new(
-                CollectionAction::PrevTab.id(),
+                footer_prev_action.id(),
                 [prev_x, arrow_y, arrow_w, arrow_h],
-                CollectionAction::PrevTab,
+                footer_prev_action,
             ),
             FlatItem::new(
-                CollectionAction::NextTab.id(),
+                footer_next_action.id(),
                 [next_x, arrow_y, arrow_w, arrow_h],
-                CollectionAction::NextTab,
+                footer_next_action,
             ),
         ];
 
@@ -388,8 +404,6 @@ impl CollectionScene {
                 }
             }
             if !all.is_empty() {
-                let cols: i32 = GRID_COLS as i32;
-                let total_rows = ((all.len() as i32 + cols - 1).max(1)) / cols;
                 let anchors: Vec<Option<[f32; 3]>> = archive_glb::with_archive_glb_cpu(|opt| {
                     let mut out = vec![None; archive_glb::ARCHIVE_SLOT_COUNT];
                     let Some(cpu) = opt else {
@@ -406,30 +420,21 @@ impl CollectionScene {
                     }
                     out
                 });
-                let max_c0 = (cols as usize).saturating_sub(archive_glb::ARCHIVE_SLOT_COLS) as i32;
-                let win_col0 = self.archive_col_scroll.clamp(0, max_c0.max(0));
-                let max_r0 = (total_rows - archive_glb::ARCHIVE_SLOT_ROWS as i32).max(0);
-                let win_row0 =
-                    scroll_rows_eased_to_row_i32(self.target_scroll_rows.get(), max_r0);
+                let page_size = archive_page_size();
+                let page_count = archive_page_count(all.len());
+                let page = self.archive_page.min(page_count.saturating_sub(1));
                 let cell = (w * 0.12).min(h * 0.18);
                 let cell_gap = cell * 0.22;
                 let cell_pitch = cell + cell_gap;
                 let rect_w = cell_pitch * 0.95;
                 let rect_h = cell_pitch * 0.95;
                 let vp = camera_view_proj(w, h, &cam);
-                for slot in 0..archive_glb::ARCHIVE_SLOT_COUNT {
+                for slot in 0..page_size {
                     let Some(anchor) = anchors[slot] else {
                         continue;
                     };
-                    let sr = (slot / archive_glb::ARCHIVE_SLOT_COLS) as i32;
-                    let sc = (slot % archive_glb::ARCHIVE_SLOT_COLS) as i32;
-                    let global_row = win_row0 + sr;
-                    let global_col = win_col0 + sc;
-                    if global_row < 0 || global_col < 0 || global_col >= cols || global_row >= total_rows {
-                        continue;
-                    }
-                    let flat = (global_row * cols + global_col) as usize;
-                    if flat >= all.len() {
+                    let global_idx = page * page_size + slot;
+                    if global_idx >= all.len() {
                         continue;
                     }
                     let world = pixel_to_world_xy(w, h, anchor[0], anchor[1], anchor[2]);
@@ -438,9 +443,9 @@ impl CollectionScene {
                         continue;
                     }
                     items.push(FlatItem::new(
-                        CollectionAction::SelectArtifact(flat).id(),
+                        CollectionAction::SelectArtifact(global_idx).id(),
                         [sx - rect_w * 0.5, sy - rect_h * 0.5, rect_w, rect_h],
-                        CollectionAction::SelectArtifact(flat),
+                        CollectionAction::SelectArtifact(global_idx),
                     ));
                 }
             }
@@ -705,19 +710,44 @@ impl CollectionScene {
 
         if inspect.is_none() {
             if use_archive {
+                // Reference X for "place the sign opposite this point" math. In cursor mode that
+                // is the pointer; in keyboard / controller mode the cursor is intentionally
+                // ignored (mouse can sit anywhere on screen without disturbing the layout) and
+                // we project the focused archive slot's marker instead so the sign always sits
+                // on the opposite side of whatever the player is selecting.
+                let ref_x = match ctx.input_mode {
+                    crate::ui::input::InputMode::Cursor => ctx.cursor_pos.0,
+                    crate::ui::input::InputMode::Keyboard
+                    | crate::ui::input::InputMode::Controller => {
+                        let focused_slot_in_page =
+                            (focus_flat as usize) % archive_page_size().max(1);
+                        archive_glb::with_archive_glb_cpu(|opt| {
+                            let cpu = opt?;
+                            archive_glb::archive_marker_screen_x(
+                                w,
+                                h,
+                                env_scale,
+                                &base_cam,
+                                cpu,
+                                archive_glb::archive_spawn_item_marker_name(focused_slot_in_page),
+                            )
+                        })
+                        .unwrap_or(w * 0.5)
+                    }
+                };
                 frame.archive_description_sign_use_left = Some(
                     archive_glb::with_archive_glb_cpu(|opt| {
                         let cpu = opt?;
-                        archive_glb::archive_description_sign_use_left_for_cursor(
+                        archive_glb::archive_description_sign_use_left_for_ref_x(
                             w,
                             h,
                             env_scale,
                             &base_cam,
-                            ctx.cursor_pos.0,
+                            ref_x,
                             cpu,
                         )
                     })
-                    .unwrap_or(ctx.cursor_pos.0 >= w * 0.5),
+                    .unwrap_or(ref_x >= w * 0.5),
                 );
                 let room_glb = archive_glb::archive_glb_has_embedded_lights();
                 frame.scene_lighting.embedded_gltf_punctual = room_glb;
@@ -942,27 +972,19 @@ impl CollectionScene {
                 }
                 out
             });
-            let max_c0 = (cols as usize).saturating_sub(archive_glb::ARCHIVE_SLOT_COLS) as i32;
-            let win_col0 = self.archive_col_scroll.clamp(0, max_c0.max(0));
-            let max_r0 = (total_rows - archive_glb::ARCHIVE_SLOT_ROWS as i32).max(0);
-            let win_row0 = scroll_rows_eased_to_row_i32(self.target_scroll_rows.get(), max_r0);
-            for slot in 0..archive_glb::ARCHIVE_SLOT_COUNT {
+            let page_size = archive_page_size();
+            let page_count = archive_page_count(bosses.len());
+            let page = self.archive_page.min(page_count.saturating_sub(1));
+            for slot in 0..page_size {
                 let Some(anchor) = anchors[slot] else {
                     continue;
                 };
-                let sr = (slot / archive_glb::ARCHIVE_SLOT_COLS) as i32;
-                let sc = (slot % archive_glb::ARCHIVE_SLOT_COLS) as i32;
-                let global_row = win_row0 + sr;
-                let global_col = win_col0 + sc;
-                if global_row < 0 || global_col < 0 || global_col >= cols || global_row >= total_rows {
+                let global_idx = page * page_size + slot;
+                if global_idx >= bosses.len() {
                     continue;
                 }
-                let flat = (global_row * cols + global_col) as usize;
-                if flat >= bosses.len() {
-                    continue;
-                }
-                let boss = &bosses[flat];
-                let is_focus = focus_flat as usize == flat;
+                let boss = &bosses[global_idx];
+                let is_focus = focus_flat as usize == global_idx;
                 collection_push_grid_cell_object3d(
                     &mut plaques,
                     boss,
@@ -970,7 +992,7 @@ impl CollectionScene {
                     cell,
                     1.0,
                     is_focus,
-                    flat as i32,
+                    global_idx as i32,
                 );
             }
         }
@@ -1496,14 +1518,16 @@ impl CollectionScene {
 
         // Control hints — sits just above the tab arrows so keyboard /
         // controller bindings are discoverable without a separate help
-        // overlay. The grid scroll affordance only mentions PgUp/PgDn
-        // when the active tab actually has rows beyond the viewport;
-        // otherwise the arrow-only hint is enough.
+        // overlay. The page / scroll affordance line is omitted when the
+        // tab fits in one page so the hint stays compact on small catalogs.
         let all_count_hint = tab_artifacts(self.active_tab, ctx.progress).len();
         let tab_scrollable = (total_rows_for(all_count_hint) as usize) > 0 && {
             let probe = compute_layout(w, h, scale, self.active_tab, all_count_hint);
             (probe.grid_rows as usize) > probe.visible_rows as usize
         };
+        let archive_path = archive_glb::archive_room_draw_ready();
+        let archive_page_count_now = archive_page_count(all_count_hint);
+        let archive_multi_page = archive_path && archive_page_count_now > 1;
         // TV: pinned body size + multi-line copy so width-based auto-shrink
         // never drives hints to microtext.
         let hint_font_px = typography::size(typography::BODY, h).max(22.0);
@@ -1514,12 +1538,12 @@ impl CollectionScene {
         } else if matches!(self.active_tab, Tab::Chronicle) && all_count_hint == 0 {
             "Finish a non-tutorial run to add folios here.\nTab / Shift+Tab: tabs   ·   Esc: back"
                 .to_string()
-        } else if archive_glb::archive_room_draw_ready() {
-            if tab_scrollable {
-                "Tab / Shift+Tab: cycle tab   ·   \u{2190}\u{2193}: next in catalog   ·   \u{2192}\u{2191}: previous (wrap)   ·   Enter: select   ·   E/North: inspect   ·   Esc: back\nScroll: mouse wheel or PgUp / PgDn"
+        } else if archive_path {
+            if archive_multi_page {
+                "Tab / Shift+Tab: section   ·   \u{2190}\u{2192}\u{2191}\u{2193}: focus   ·   Enter / E / North: inspect   ·   Esc: back\nPgUp / PgDn or mouse wheel: page   ·   Footer arrows or page-edge \u{2190} / \u{2192}: page"
                     .to_string()
             } else {
-                "Tab / Shift+Tab: cycle tab   ·   \u{2190}\u{2193}: next in catalog   ·   \u{2192}\u{2191}: previous (wrap)\nEnter: select   ·   E/North: inspect   ·   Esc: back"
+                "Tab / Shift+Tab: section   ·   \u{2190}\u{2192}\u{2191}\u{2193}: focus   ·   Enter / E / North: inspect   ·   Esc: back"
                     .to_string()
             }
         } else if tab_scrollable {
@@ -1531,7 +1555,22 @@ impl CollectionScene {
         };
         let hint_lines = hint_text.lines().count().max(1) as f32;
         let hint_h = hint_line_h * hint_lines + 10.0;
-        let hint_y = arrow_y - hint_h - (h * 0.014).max(10.0);
+        // Layout (bottom → top): footer arrows → page indicator (multi-page only)
+        // → hint copy → ladder line. Compute the indicator band first so the hint
+        // can stack above it without overlap.
+        let page_band_h = if archive_multi_page && inspect.is_none() {
+            hint_line_h + 8.0
+        } else {
+            0.0
+        };
+        let page_band_y = arrow_y
+            - page_band_h
+            - if archive_multi_page && inspect.is_none() {
+                (h * 0.006).max(4.0)
+            } else {
+                0.0
+            };
+        let hint_y = page_band_y - hint_h - (h * 0.014).max(10.0);
         text_labels.push(TextLabel {
             rect: [margin_x * 0.5, hint_y, w - margin_x, hint_h],
             text: hint_text,
@@ -1540,6 +1579,46 @@ impl CollectionScene {
             align: TextAlign::Center,
             ..Default::default()
         });
+
+        // Page indicator — `Page X / Y · ● ○ ○ …` centred between the hint and
+        // the footer arrows, only when archive multi-page. Gives the player a
+        // glanceable cue that the catalog continues past the visible cabinet.
+        if archive_multi_page && inspect.is_none() {
+            let cur_page = self.archive_page.min(archive_page_count_now - 1);
+            // Cap the dot row to keep the indicator readable on very large
+            // catalogs; show numeric only when dots would crowd the line.
+            const MAX_DOTS: usize = 12;
+            let dots_text = if archive_page_count_now <= MAX_DOTS {
+                let mut s = String::new();
+                for i in 0..archive_page_count_now {
+                    if i > 0 {
+                        s.push(' ');
+                    }
+                    s.push(if i == cur_page { '\u{25CF}' } else { '\u{25CB}' });
+                }
+                s
+            } else {
+                String::new()
+            };
+            let label = if dots_text.is_empty() {
+                format!("Page {} / {}", cur_page + 1, archive_page_count_now)
+            } else {
+                format!(
+                    "Page {} / {}   {}",
+                    cur_page + 1,
+                    archive_page_count_now,
+                    dots_text
+                )
+            };
+            text_labels.push(TextLabel {
+                rect: [margin_x * 0.5, page_band_y, w - margin_x, page_band_h],
+                text: label,
+                color: [0.95, 0.86, 0.56, 0.95],
+                font_px: Some(hint_font_px),
+                align: TextAlign::Center,
+                ..Default::default()
+            });
+        }
 
         // Stake ladder readout: highest stake cleared per tile material.
         // Uses the same caption size as the hint line and sits just above
@@ -1607,8 +1686,10 @@ impl SceneBehavior for CollectionScene {
         //     and column window follow focus.
         //   - Procedural grid: spatial neighbor moves from cell rects, with
         //     L/R and U/D as fallback axes; wheel scrolls one row per tick.
-        //   - Confirm (A / Space / Enter) → set focused item as inspect target
+        //   - Confirm (A / Space / Enter) → open inspect orbit on the archive path;
+        //     procedural fallback uses Confirm to set the focused item as the plinth target.
         let all_count = tab_artifacts(self.active_tab, ctx.progress).len();
+        let archive_path = archive_glb::archive_room_draw_ready();
         let cols = GRID_COLS as usize;
         let total_rows = total_rows_for(all_count) as usize;
         let visible_rows = {
@@ -1625,11 +1706,19 @@ impl SceneBehavior for CollectionScene {
         };
         let max_scroll = total_rows.saturating_sub(visible_rows) as f32;
 
-        // Mouse wheel: 1 row per line tick. Negative scroll_lines (wheel
-        // up) moves the content down → reduce scroll_rows.
-        if ctx.scroll_lines.abs() > 0.001 && max_scroll > 0.0 {
-            let next = (self.target_scroll_rows.get() + ctx.scroll_lines).clamp(0.0, max_scroll);
-            self.target_scroll_rows.set(next);
+        // Mouse wheel:
+        //   - archive room: 1 page per tick (matches the cabinet-as-page model)
+        //   - procedural grid: 1 row per tick (legacy scroll behaviour)
+        if ctx.scroll_lines.abs() > 0.001 {
+            if archive_path {
+                let dir: i32 = if ctx.scroll_lines > 0.0 { 1 } else { -1 };
+                let from = archive_focus_row_col_in_page(self.focused_row);
+                archive_page_step(self, ctx.bus, dir, from, all_count);
+            } else if max_scroll > 0.0 {
+                let next =
+                    (self.target_scroll_rows.get() + ctx.scroll_lines).clamp(0.0, max_scroll);
+                self.target_scroll_rows.set(next);
+            }
         }
 
         // Resolve the focused item's global (row, col) so directional
@@ -1670,11 +1759,14 @@ impl SceneBehavior for CollectionScene {
                     ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                     self.cycle_tab(false);
                 }
-                // PageUp/PageDown still scroll the viewport — by one
-                // visible-page worth. Useful as a power-user shortcut
-                // even though the primary navigation is the arrows.
+                // PageUp/PageDown:
+                //   - archive room: flip cabinet page (matches the wheel + footer arrows)
+                //   - procedural grid: scroll viewport by one visible-page worth
                 UiAction::PageNext => {
-                    if max_scroll > 0.0 {
+                    if archive_path {
+                        let from = archive_focus_row_col_in_page(self.focused_row);
+                        archive_page_step(self, ctx.bus, 1, from, all_count);
+                    } else if max_scroll > 0.0 {
                         ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                         let next = (self.target_scroll_rows.get() + visible_rows as f32)
                             .clamp(0.0, max_scroll);
@@ -1682,7 +1774,10 @@ impl SceneBehavior for CollectionScene {
                     }
                 }
                 UiAction::PagePrev => {
-                    if max_scroll > 0.0 {
+                    if archive_path {
+                        let from = archive_focus_row_col_in_page(self.focused_row);
+                        archive_page_step(self, ctx.bus, -1, from, all_count);
+                    } else if max_scroll > 0.0 {
                         ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                         let next = (self.target_scroll_rows.get() - visible_rows as f32)
                             .clamp(0.0, max_scroll);
@@ -1693,17 +1788,13 @@ impl SceneBehavior for CollectionScene {
                     if all_count == 0 {
                         continue;
                     }
-                    if archive_glb::archive_room_draw_ready() {
-                        // Archive: **→** (with **↑) walks backward along the single row-major strip
-                        // through the full 6×N grid (3×7 window slides with focus).
-                        archive_catalog_advance_focus(
+                    if archive_path {
+                        archive_directional_step(
                             self,
                             ctx.bus,
+                            &items,
+                            FocusDir::Right,
                             all_count,
-                            cols,
-                            false,
-                            max_scroll,
-                            visible_rows,
                         );
                         continue;
                     }
@@ -1728,16 +1819,13 @@ impl SceneBehavior for CollectionScene {
                     if all_count == 0 {
                         continue;
                     }
-                    if archive_glb::archive_room_draw_ready() {
-                        // Archive: **←** (with **↓**) walks forward (wrap) along that same strip.
-                        archive_catalog_advance_focus(
+                    if archive_path {
+                        archive_directional_step(
                             self,
                             ctx.bus,
+                            &items,
+                            FocusDir::Left,
                             all_count,
-                            cols,
-                            true,
-                            max_scroll,
-                            visible_rows,
                         );
                         continue;
                     }
@@ -1758,15 +1846,13 @@ impl SceneBehavior for CollectionScene {
                     if all_count == 0 {
                         continue;
                     }
-                    if archive_glb::archive_room_draw_ready() {
-                        archive_catalog_advance_focus(
+                    if archive_path {
+                        archive_directional_step(
                             self,
                             ctx.bus,
+                            &items,
+                            FocusDir::Up,
                             all_count,
-                            cols,
-                            false,
-                            max_scroll,
-                            visible_rows,
                         );
                         continue;
                     }
@@ -1792,15 +1878,13 @@ impl SceneBehavior for CollectionScene {
                     if all_count == 0 {
                         continue;
                     }
-                    if archive_glb::archive_room_draw_ready() {
-                        archive_catalog_advance_focus(
+                    if archive_path {
+                        archive_directional_step(
                             self,
                             ctx.bus,
+                            &items,
+                            FocusDir::Down,
                             all_count,
-                            cols,
-                            true,
-                            max_scroll,
-                            visible_rows,
                         );
                         continue;
                     }
@@ -1825,7 +1909,32 @@ impl SceneBehavior for CollectionScene {
                     }
                 }
                 UiAction::Confirm => {
-                    if let Some(i) = self.focused_row {
+                    if archive_path {
+                        // Plinth already mirrors focus, so Confirm has no separate
+                        // "select" semantics — open the inspect orbit instead, matching
+                        // E / North. Keeps Enter/A useful from keyboard + gamepad.
+                        let w = ctx.layout.window_w;
+                        let h = ctx.layout.window_h;
+                        let bosses = tab_artifacts(self.active_tab, ctx.progress);
+                        if !bosses.is_empty()
+                            && let Some(orbit) = self.collection_inspect_orbit_for_focus(
+                                w,
+                                h,
+                                &bosses,
+                                ctx.layout,
+                                ctx.room_gltf_height_scale,
+                            )
+                        {
+                            ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
+                            *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(
+                                Scene::Showcase(crate::scenes::ShowcaseScene::new(
+                                    crate::scenes::ShowcasePresenter::CollectionInspect(
+                                        crate::scenes::CollectionInspectPresenter::new(orbit),
+                                    ),
+                                )),
+                            )));
+                        }
+                    } else if let Some(i) = self.focused_row {
                         ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                         self.selected_artifact = Some(i);
                         push_relic_stinger_for(ctx.bus, self.active_tab, ctx.progress, i);
@@ -1879,6 +1988,14 @@ impl SceneBehavior for CollectionScene {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                 self.cycle_tab(true);
             }
+            Some(CollectionAction::PrevPage) => {
+                let from = archive_focus_row_col_in_page(self.focused_row);
+                archive_page_step(self, ctx.bus, -1, from, all_count);
+            }
+            Some(CollectionAction::NextPage) => {
+                let from = archive_focus_row_col_in_page(self.focused_row);
+                archive_page_step(self, ctx.bus, 1, from, all_count);
+            }
             Some(CollectionAction::SelectTab(i)) => {
                 if i < TABS.len() {
                     ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
@@ -1887,7 +2004,7 @@ impl SceneBehavior for CollectionScene {
                     self.focused_row = Some(0);
                     self.scroll_rows.set(0.0);
                     self.target_scroll_rows.set(0.0);
-                    self.archive_col_scroll = 0;
+                    self.archive_page = 0;
                     self.cam_anim.set(None);
                 }
             }
@@ -1928,10 +2045,8 @@ impl SceneBehavior for CollectionScene {
 
         if archive_glb::archive_room_draw_ready() {
             let n = tab_artifacts(self.active_tab, ctx.progress).len();
-            if n > 0 {
-                let max_c0 = (GRID_COLS as usize).saturating_sub(archive_glb::ARCHIVE_SLOT_COLS) as i32;
-                self.archive_col_scroll = self.archive_col_scroll.clamp(0, max_c0.max(0));
-            }
+            let pc = archive_page_count(n);
+            self.archive_page = self.archive_page.min(pc.saturating_sub(1));
         }
 
         // Advance the scroll easing every tick so wheel/key inputs
@@ -2389,11 +2504,27 @@ fn screen_hit_anchor_is_finite(sx: f32, sy: f32, rw: f32, rh: f32) -> bool {
     sx.is_finite() && sy.is_finite() && rw.is_finite() && rh.is_finite() && rw > 0.0 && rh > 0.0
 }
 
-/// `archive_col_scroll` so column `focus_col` stays inside the 3-wide `archive.glb` window.
+/// Items shown per cabinet page when the `archive.glb` room is loaded.
 #[inline]
-fn archive_win_col0_for_focus_col(focus_col: i32, cols: i32) -> i32 {
-    let max_c0 = (cols as usize).saturating_sub(archive_glb::ARCHIVE_SLOT_COLS) as i32;
-    (focus_col - (archive_glb::ARCHIVE_SLOT_COLS as i32 - 1)).clamp(0, max_c0.max(0))
+fn archive_page_size() -> usize {
+    archive_glb::ARCHIVE_SLOT_COUNT
+}
+
+/// Number of cabinet pages required to display `all_count` items
+/// (always at least 1 so the empty-tab UI still has a page indicator).
+#[inline]
+fn archive_page_count(all_count: usize) -> usize {
+    let ps = archive_page_size().max(1);
+    if all_count == 0 {
+        1
+    } else {
+        all_count.div_ceil(ps)
+    }
+}
+
+#[inline]
+fn archive_page_for_idx(idx: usize) -> usize {
+    idx / archive_page_size().max(1)
 }
 
 fn collection_scroll_catalog_row_into_view(
@@ -2429,33 +2560,106 @@ fn collection_sync_artifact_focus_to_idx(
     scene
         .tree
         .set_focus(CollectionAction::SelectArtifact(idx).id());
-    collection_scroll_catalog_row_into_view(scene, idx / cols, max_scroll, visible_rows);
     if archive_glb::archive_room_draw_ready() {
-        scene.archive_col_scroll =
-            archive_win_col0_for_focus_col((idx % cols) as i32, cols as i32);
+        // Page-based browsing: snap the visible cabinet to the page that
+        // contains `idx`. Vertical row-scroll state is unused on this path.
+        scene.archive_page = archive_page_for_idx(idx);
+    } else {
+        collection_scroll_catalog_row_into_view(scene, idx / cols, max_scroll, visible_rows);
     }
 }
 
-fn archive_catalog_advance_focus(
+/// (row, col) within the active archive page (0-indexed; cols < `ARCHIVE_SLOT_COLS`).
+/// Returns (0, 0) when no item is focused so callers can land on slot 0.
+fn archive_focus_row_col_in_page(focused: Option<usize>) -> (usize, usize) {
+    let cols = archive_glb::ARCHIVE_SLOT_COLS.max(1);
+    let page_size = archive_page_size().max(1);
+    let slot = focused.map(|i| i % page_size).unwrap_or(0);
+    (slot / cols, slot % cols)
+}
+
+/// Flip the archive cabinet by `dir` pages (positive = next, negative = prev) and land focus on
+/// the slot corresponding to `target_in_page = (row, col)` within the new page. The candidate
+/// slot is clamped to the last present artifact, so partial pages still land on a real item.
+///
+/// Caller chooses `target_in_page` based on gesture intent:
+///   - **Directional edge-cross** (← / → walked off the column edge): preserve the row, swap the
+///     column to the opposite edge so Right-then-Left is a no-op on full pages.
+///   - **Bulk page-flip** (PgUp/PgDn, mouse wheel, footer arrows): preserve both row and column
+///     so the gesture is fully reversible.
+///
+/// No-ops when the catalogue is empty or already at the requested edge.
+fn archive_page_step(
     scene: &mut CollectionScene,
     bus: &mut crate::game::event_bus::EventBus,
+    dir: i32,
+    target_in_page: (usize, usize),
     all_count: usize,
-    cols: usize,
-    forward: bool,
-    max_scroll: f32,
-    visible_rows: usize,
+) {
+    if all_count == 0 || dir == 0 {
+        return;
+    }
+    let page_count = archive_page_count(all_count);
+    let cur = scene.archive_page.min(page_count.saturating_sub(1));
+    let next = if dir > 0 {
+        (cur + 1).min(page_count.saturating_sub(1))
+    } else {
+        cur.saturating_sub(1)
+    };
+    if next == cur {
+        return;
+    }
+    let cols = archive_glb::ARCHIVE_SLOT_COLS.max(1);
+    let page_size = archive_page_size().max(1);
+    let target_row = target_in_page.0.min(archive_glb::ARCHIVE_SLOT_ROWS.saturating_sub(1));
+    let target_col = target_in_page.1.min(cols - 1);
+    let local_slot = (target_row * cols + target_col).min(page_size - 1);
+    let candidate = next * page_size + local_slot;
+    let new_focus = candidate.min(all_count - 1);
+    scene.archive_page = next;
+    scene.focused_row = Some(new_focus);
+    scene
+        .tree
+        .set_focus(CollectionAction::SelectArtifact(new_focus).id());
+    bus.push(GameEvent::UiSound(SfxId::UiConfirm));
+}
+
+/// Spatial neighbour move within the current archive page; if the requested
+/// neighbour falls off the page horizontally we flip to the adjacent page.
+/// Vertical edges (no Up / Down neighbour) just stop — pages are conceptually
+/// horizontal so the player isn't surprised by a content jump on Up/Down.
+fn archive_directional_step(
+    scene: &mut CollectionScene,
+    bus: &mut crate::game::event_bus::EventBus,
+    items: &[FlatItem<CollectionAction>],
+    dir: FocusDir,
+    all_count: usize,
 ) {
     if all_count == 0 {
         return;
     }
-    let cur = scene.focused_row.unwrap_or(0).min(all_count - 1);
-    let next = if forward {
-        (cur + 1) % all_count
-    } else {
-        (cur + all_count - 1) % all_count
-    };
-    bus.push(GameEvent::UiSound(SfxId::TilePlace));
-    collection_sync_artifact_focus_to_idx(scene, next, cols, max_scroll, visible_rows);
+    if let Some(ni) = collection_spatial_artifact_step(items, scene.focused_row, dir) {
+        if Some(ni) != scene.focused_row {
+            bus.push(GameEvent::UiSound(SfxId::TilePlace));
+            scene.focused_row = Some(ni);
+            scene.archive_page = archive_page_for_idx(ni);
+            scene
+                .tree
+                .set_focus(CollectionAction::SelectArtifact(ni).id());
+            return;
+        }
+    }
+    // No spatial neighbour exists in the requested direction. For Left/Right that
+    // means we're at a page edge column — flip the page so navigation feels
+    // continuous, preserving the row so → then ← (or vice versa) returns the
+    // player to where they came from. Up/Down at top/bottom row stop in place.
+    let (from_row, _) = archive_focus_row_col_in_page(scene.focused_row);
+    let last_col = archive_glb::ARCHIVE_SLOT_COLS.saturating_sub(1);
+    match dir {
+        FocusDir::Right => archive_page_step(scene, bus, 1, (from_row, 0), all_count),
+        FocusDir::Left => archive_page_step(scene, bus, -1, (from_row, last_col), all_count),
+        _ => {}
+    }
 }
 
 /// Section tab hit rects from `section_buttons_*_bound` AABBs (left: Relics/Yaku; right: rest).
@@ -2511,17 +2715,6 @@ fn archive_section_tab_hit_rects(
         distribute(right, &[2, 3, 4], &mut out);
         Some(out)
     })
-}
-
-/// Row index into the logical grid from eased vertical scroll (finite `f32` → `i32`).
-#[inline]
-fn scroll_rows_eased_to_row_i32(scroll_f: f32, max_r0: i32) -> i32 {
-    let s = if scroll_f.is_finite() {
-        scroll_f.clamp(-1_000_000.0, 1_000_000.0)
-    } else {
-        0.0
-    };
-    (s.round() as i32).clamp(0, max_r0.max(0))
 }
 
 /// Compose the same view-projection matrix the renderer uses (must

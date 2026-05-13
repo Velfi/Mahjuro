@@ -1,4 +1,4 @@
-// Shop.glb environment — glTF-style punctual lights + metallic–roughness + ACES (fitted).
+// shop.glb environment — glTF-style punctual lights + metallic–roughness + ACES (fitted).
 // Separate from `tile_3d.wgsl` (candle pools + artistic lambert floor).
 //
 // Uniform hacks (same `CameraUniform` layout as tiles; shop writer only):
@@ -350,7 +350,7 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     hdr = hdr + emissive;
 
     // Gameplay shadow map is ortho-fit around the mahjong table near the origin.
-    // Shop.glb uses the same Z-up frame but geometry is scaled by `window_h`, so
+    // shop.glb uses the same Z-up frame but geometry is scaled by `window_h`, so
     // light-space coverage is meaningless here and PCF often zeros the room.
     let gameplay_shadow = sample_shadow_visibility(in.world_pos);
     // `clamp(gs+1,1,2) - gs` is always 1.0 but keeps the shadow sample live for the layout.

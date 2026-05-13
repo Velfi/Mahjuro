@@ -32,7 +32,7 @@ mod tea_bonus;
 #[cfg(test)]
 mod tests;
 
-use crate::core::hand::{DetectedSet, SetKind};
+use crate::core::hand::{DetectedMeld, MeldKind};
 use crate::core::tile::Tile;
 use crate::core::yaku::YakuKind;
 
@@ -74,26 +74,26 @@ pub struct ScoreBreakdown {
     pub total: u64,
     pub flower_gold: i32,
 
-    pub scored_set_kinds: Vec<crate::core::hand::SetKind>,
+    pub scored_meld_kinds: Vec<crate::core::hand::MeldKind>,
 }
 
-pub(crate) fn meld_chip_bonus(kind: SetKind) -> i32 {
+pub(crate) fn meld_chip_bonus(kind: MeldKind) -> i32 {
     match kind {
-        SetKind::Pair => 18,
-        SetKind::Sequence => 28,
-        SetKind::Triplet => 50,
-        SetKind::Kong => 80,
-        SetKind::Single => 0,
+        MeldKind::Pair => 18,
+        MeldKind::Sequence => 28,
+        MeldKind::Triplet => 50,
+        MeldKind::Kong => 80,
+        MeldKind::Single => 0,
     }
 }
 
-pub(crate) fn describe_set(tiles: &[Tile], set: &DetectedSet) -> String {
+pub(crate) fn describe_set(tiles: &[Tile], set: &DetectedMeld) -> String {
     let label = match set.kind {
-        SetKind::Pair => "Pair",
-        SetKind::Sequence => "Sequence",
-        SetKind::Triplet => "Triplet",
-        SetKind::Kong => "Kong",
-        SetKind::Single => "Single",
+        MeldKind::Pair => "Pair",
+        MeldKind::Sequence => "Sequence",
+        MeldKind::Triplet => "Triplet",
+        MeldKind::Kong => "Kong",
+        MeldKind::Single => "Single",
     };
     let faces = set
         .tile_ids

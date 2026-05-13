@@ -60,7 +60,7 @@ pub enum DebugAction {
     OpenTuning,
     OpenSfxTest,
     OpenCameraDebug,
-    /// Live-edit `Shop.glb` room scale (`window_h *` multiplier).
+    /// Live-edit `shop.glb` room scale (`window_h *` multiplier).
     OpenShopEnvDebug,
     /// Open the volumetric tuning overlay — global dust strength (and any
     /// future volumetric knobs).

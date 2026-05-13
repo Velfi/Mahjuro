@@ -1763,7 +1763,7 @@ pub(super) fn build_action_row_and_journal(
 /// Outputs of the yaku panel + structure showcase + yaku tablet builder.
 pub(super) struct YakuPanelOutputs {
     pub(super) yaku_preview_effective_tiles: Vec<crate::core::tile::Tile>,
-    pub(super) yaku_preview_sets: Vec<crate::core::hand::DetectedSet>,
+    pub(super) yaku_preview_sets: Vec<crate::core::hand::DetectedMeld>,
     pub(super) yaku_tablet_placements: Vec<crate::render::draw_cmd::Object3d>,
     pub(super) structure_showcase: Vec<crate::render::draw_cmd::ShowcaseTilePlacement>,
     pub(super) structure_pile_tokens: Vec<crate::render::draw_cmd::Object3d>,
@@ -1822,7 +1822,7 @@ pub(super) fn build_yaku_panel_and_tablets(
     };
     let mut yaku_preview_original_tiles: Vec<crate::core::tile::Tile> = Vec::new();
     let mut yaku_preview_effective_tiles: Vec<crate::core::tile::Tile> = Vec::new();
-    let mut yaku_preview_sets: Vec<crate::core::hand::DetectedSet> = Vec::new();
+    let mut yaku_preview_sets: Vec<crate::core::hand::DetectedMeld> = Vec::new();
 
     if selected_tiles_for_yaku.is_empty() {
         yaku_preview_original_tiles =

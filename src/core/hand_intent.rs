@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use crate::core::hand::{DetectedSet, SetKind};
+use crate::core::hand::{DetectedMeld, MeldKind};
 use crate::core::tile::{Suit, Tile};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,17 +47,17 @@ pub fn infer_decomposition_bias(full_hand: &[Tile]) -> DecompositionBias {
 
 /// Score a candidate decomposition under the given bias. Higher is better.
 /// Pure shape arithmetic — no yaku detection, no scoring engine.
-pub fn decomposition_affinity(sets: &[DetectedSet], bias: DecompositionBias) -> i32 {
+pub fn decomposition_affinity(sets: &[DetectedMeld], bias: DecompositionBias) -> i32 {
     if matches!(bias, DecompositionBias::Neutral) {
         return 0;
     }
     let mut score = 0;
     for s in sets {
         match (bias, s.kind) {
-            (DecompositionBias::PreferPairs, SetKind::Pair) => score += 1,
-            (DecompositionBias::PreferPairs, SetKind::Triplet | SetKind::Kong) => score -= 1,
-            (DecompositionBias::PreferTriplets, SetKind::Triplet | SetKind::Kong) => score += 2,
-            (DecompositionBias::PreferTriplets, SetKind::Pair) => score -= 1,
+            (DecompositionBias::PreferPairs, MeldKind::Pair) => score += 1,
+            (DecompositionBias::PreferPairs, MeldKind::Triplet | MeldKind::Kong) => score -= 1,
+            (DecompositionBias::PreferTriplets, MeldKind::Triplet | MeldKind::Kong) => score += 2,
+            (DecompositionBias::PreferTriplets, MeldKind::Pair) => score -= 1,
             _ => {}
         }
     }
@@ -84,30 +84,30 @@ mod tests {
         Tile::new(suit, rank, id)
     }
 
-    fn pair(a: u32, b: u32) -> DetectedSet {
-        DetectedSet {
-            kind: SetKind::Pair,
+    fn pair(a: u32, b: u32) -> DetectedMeld {
+        DetectedMeld {
+            kind: MeldKind::Pair,
             tile_ids: vec![a, b],
         }
     }
 
-    fn triplet(a: u32, b: u32, c: u32) -> DetectedSet {
-        DetectedSet {
-            kind: SetKind::Triplet,
+    fn triplet(a: u32, b: u32, c: u32) -> DetectedMeld {
+        DetectedMeld {
+            kind: MeldKind::Triplet,
             tile_ids: vec![a, b, c],
         }
     }
 
-    fn kong(a: u32, b: u32, c: u32, d: u32) -> DetectedSet {
-        DetectedSet {
-            kind: SetKind::Kong,
+    fn kong(a: u32, b: u32, c: u32, d: u32) -> DetectedMeld {
+        DetectedMeld {
+            kind: MeldKind::Kong,
             tile_ids: vec![a, b, c, d],
         }
     }
 
-    fn seq(a: u32, b: u32, c: u32) -> DetectedSet {
-        DetectedSet {
-            kind: SetKind::Sequence,
+    fn seq(a: u32, b: u32, c: u32) -> DetectedMeld {
+        DetectedMeld {
+            kind: MeldKind::Sequence,
             tile_ids: vec![a, b, c],
         }
     }

@@ -49,7 +49,7 @@ pub(super) enum RenderOp {
     TextDraw(usize),
     TileFaceQuad(usize),
     PromptIconQuad(usize),
-    /// Imported shop room (`Shop.glb`), drawn like showcase tiles with identity model.
+    /// Imported shop room (`shop.glb`), drawn like showcase tiles with identity model.
     ShopEnvironment,
     /// Pick-blind hallway (`hallway.glb`).
     HallwayEnvironment,

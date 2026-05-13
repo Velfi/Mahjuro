@@ -887,7 +887,7 @@
   {
     "id": "way_of_purity",
     "name": "Way of Purity",
-    "description": "All scored tiles are one suit: \u00d72.5 mult",
+    "description": "\u00d72.5 mult if scored structure is all one suit",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1313,7 +1313,7 @@
   {
     "id": "way_of_pairs",
     "name": "Way of Pairs",
-    "description": "All pairs scored: \u00d72 mult",
+    "description": "\u00d72 mult if scored structure is all pairs",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1336,7 +1336,7 @@
   {
     "id": "way_of_triplets",
     "name": "Way of Triplets",
-    "description": "All triplets/kongs scored: \u00d72.5 mult",
+    "description": "\u00d72.5 mult if scored structure is all triplets and kongs",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1359,7 +1359,7 @@
   {
     "id": "way_of_sequences",
     "name": "Way of Sequences",
-    "description": "All sequences scored: \u00d72 mult",
+    "description": "\u00d72 mult if scored structure is all sequences",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1772,7 +1772,7 @@
   {
     "id": "eulers_number",
     "name": "Euler's Number",
-    "description": "Flat +e mult (Euler's constant \u2248 2.71828\u2026)",
+    "description": "Flat +e mult\n(\u2248 2.71828\u2026)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1785,7 +1785,7 @@
   {
     "id": "pi_constant",
     "name": "Pi",
-    "description": "Flat +\u03c0 mult (\u2248 3.14159\u2026)",
+    "description": "Flat +\u03c0 mult\n(\u2248 3.14159\u2026)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1808,7 +1808,7 @@
   {
     "id": "big_hands",
     "name": "Big Hands",
-    "description": "+2 hand tiles; \u22121 discard",
+    "description": "+2 hand tiles;\n\u22121 discard",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1831,7 +1831,7 @@
   {
     "id": "tiny_hands",
     "name": "Tiny Hands",
-    "description": "\u22122 hand tiles; +2 discards",
+    "description": "\u22122 hand tiles;\n+2 discards",
     "rarity": "uncommon",
     "flavor_spans": [
       {

@@ -23,7 +23,7 @@ use crate::core::boss::{self, BossKind};
 use crate::core::debuff::TileDebuff;
 use crate::core::deck::Wall;
 use crate::core::hand::{
-    DetectedSet, SetKind, enumerate_decompositions, validate_selection_with_rules,
+    DetectedMeld, MeldKind, enumerate_decompositions, validate_selection_with_rules,
 };
 use crate::core::hand_intent::{
     DecompositionBias, decomposition_affinity, infer_decomposition_bias,
@@ -591,7 +591,7 @@ pub struct RunState {
     selected: Vec<bool>,
     /// Melds committed from hand into the structure (deferred scoring until trigger).
     #[serde(default)]
-    structure_sets: Vec<DetectedSet>,
+    structure_sets: Vec<DetectedMeld>,
     /// Tile copies held in the structure (same ids as in `structure_sets`).
     #[serde(default)]
     structure_tiles: Vec<Tile>,
@@ -857,11 +857,11 @@ impl RunState {
         &mut self.selected
     }
 
-    pub fn structure_sets(&self) -> &[DetectedSet] {
+    pub fn structure_sets(&self) -> &[DetectedMeld] {
         &self.structure_sets
     }
 
-    pub(crate) fn structure_sets_mut(&mut self) -> &mut Vec<DetectedSet> {
+    pub(crate) fn structure_sets_mut(&mut self) -> &mut Vec<DetectedMeld> {
         &mut self.structure_sets
     }
 
@@ -877,7 +877,7 @@ impl RunState {
         &mut self,
         hand: Vec<Tile>,
         selected: Vec<bool>,
-        structure_sets: Vec<DetectedSet>,
+        structure_sets: Vec<DetectedMeld>,
         structure_tiles: Vec<Tile>,
     ) {
         self.hand = hand;
@@ -1291,7 +1291,7 @@ mod tests {
         EventBus::default()
     }
 
-    fn winning_structure() -> (Vec<Tile>, Vec<DetectedSet>) {
+    fn winning_structure() -> (Vec<Tile>, Vec<DetectedMeld>) {
         let tiles = vec![
             Tile::new(Suit::Characters, 1, 1),
             Tile::new(Suit::Characters, 1, 2),
@@ -1309,24 +1309,24 @@ mod tests {
             Tile::new(Suit::Wind, 1, 14),
         ];
         let sets = vec![
-            DetectedSet {
-                kind: SetKind::Pair,
+            DetectedMeld {
+                kind: MeldKind::Pair,
                 tile_ids: vec![1, 2],
             },
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![3, 4, 5],
             },
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![6, 7, 8],
             },
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![9, 10, 11],
             },
-            DetectedSet {
-                kind: SetKind::Triplet,
+            DetectedMeld {
+                kind: MeldKind::Triplet,
                 tile_ids: vec![12, 13, 14],
             },
         ];
@@ -1925,8 +1925,8 @@ mod tests {
             Tile::new(Suit::Characters, 1, 2),
             Tile::new(Suit::Characters, 1, 3),
         ];
-        let sets = vec![DetectedSet {
-            kind: SetKind::Triplet,
+        let sets = vec![DetectedMeld {
+            kind: MeldKind::Triplet,
             tile_ids: vec![1, 2, 3],
         }];
 
@@ -2266,7 +2266,7 @@ const ALL_FACES: [(Suit, u8); 34] = {
 fn try_joker_substitution(
     tiles: &[Tile],
     rules: &[RuleModifier],
-) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
+) -> Option<(Vec<DetectedMeld>, Vec<Tile>)> {
     for (idx, _) in tiles.iter().enumerate() {
         for &(suit, rank) in &ALL_FACES {
             let mut modified = tiles.to_vec();
@@ -2311,7 +2311,7 @@ fn wind_candidate_faces(tiles: &[Tile]) -> Vec<(Suit, u8)> {
 fn try_wind_substitution(
     tiles: &[Tile],
     rules: &[RuleModifier],
-) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
+) -> Option<(Vec<DetectedMeld>, Vec<Tile>)> {
     try_wind_substitution_excluding(tiles, &[], rules)
 }
 
@@ -2323,7 +2323,7 @@ fn try_wind_substitution_excluding(
     tiles: &[Tile],
     frozen: &[usize],
     rules: &[RuleModifier],
-) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
+) -> Option<(Vec<DetectedMeld>, Vec<Tile>)> {
     let wind_indices: Vec<usize> = tiles
         .iter()
         .enumerate()
@@ -2343,7 +2343,7 @@ fn try_wind_substitution_excluding(
         pos: usize,
         candidates: &[(Suit, u8)],
         rules: &[RuleModifier],
-    ) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
+    ) -> Option<(Vec<DetectedMeld>, Vec<Tile>)> {
         if pos == wind_indices.len() {
             return validate_selection_with_rules(tiles, rules).map(|sets| (sets, tiles.clone()));
         }
@@ -2376,7 +2376,7 @@ fn try_disgust_substitution(
     tiles: &[Tile],
     rules: &[RuleModifier],
     chain_winds: bool,
-) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
+) -> Option<(Vec<DetectedMeld>, Vec<Tile>)> {
     let has_east = tiles.iter().any(|t| t.suit == Suit::Wind && t.rank == 1);
     let has_west = tiles.iter().any(|t| t.suit == Suit::Wind && t.rank == 3);
     if !has_east || !has_west {
@@ -2432,7 +2432,7 @@ mod joker_tile_tests {
         assert!(result.is_some(), "joker should complete the sequence");
         let (sets, modified) = result.unwrap();
         assert_eq!(sets.len(), 1);
-        assert_eq!(sets[0].kind, SetKind::Sequence);
+        assert_eq!(sets[0].kind, MeldKind::Sequence);
         // The modified tile should now be 3m
         assert_eq!(modified[2].suit, Suit::Characters);
         assert_eq!(modified[2].rank, 3);
@@ -2449,7 +2449,7 @@ mod joker_tile_tests {
         let result = try_joker_substitution(&tiles, &[]);
         assert!(result.is_some());
         let (sets, _) = result.unwrap();
-        assert_eq!(sets[0].kind, SetKind::Triplet);
+        assert_eq!(sets[0].kind, MeldKind::Triplet);
     }
 
     #[test]
@@ -2459,7 +2459,7 @@ mod joker_tile_tests {
         let result = try_joker_substitution(&tiles, &[]);
         assert!(result.is_some());
         let (sets, _) = result.unwrap();
-        assert_eq!(sets[0].kind, SetKind::Pair);
+        assert_eq!(sets[0].kind, MeldKind::Pair);
     }
 
     #[test]
@@ -2524,7 +2524,7 @@ mod wild_wind_tests {
         );
         let (sets, _) = result.unwrap();
         assert_eq!(sets.len(), 4);
-        assert!(sets.iter().all(|s| s.kind == SetKind::Sequence));
+        assert!(sets.iter().all(|s| s.kind == MeldKind::Sequence));
     }
 
     #[test]
@@ -2539,7 +2539,7 @@ mod wild_wind_tests {
         assert!(result.is_some());
         let (sets, _) = result.unwrap();
         assert_eq!(sets.len(), 1);
-        assert_eq!(sets[0].kind, SetKind::Sequence);
+        assert_eq!(sets[0].kind, MeldKind::Sequence);
     }
 
     #[test]
@@ -2554,7 +2554,7 @@ mod wild_wind_tests {
         assert!(result.is_some());
         let (sets, _) = result.unwrap();
         assert_eq!(sets.len(), 1);
-        assert_eq!(sets[0].kind, SetKind::Triplet);
+        assert_eq!(sets[0].kind, MeldKind::Triplet);
     }
 
     #[test]
@@ -2837,7 +2837,7 @@ mod disgust_tests {
         let tiles = vec![tile(Suit::Wind, 1, 0), tile(Suit::Wind, 3, 1)];
         let (sets, _) = try_disgust_substitution(&tiles, &[], false).expect("EW should be a pair");
         assert_eq!(sets.len(), 1);
-        assert_eq!(sets[0].kind, SetKind::Pair);
+        assert_eq!(sets[0].kind, MeldKind::Pair);
     }
 
     #[test]
@@ -2850,7 +2850,7 @@ mod disgust_tests {
         let (sets, _) =
             try_disgust_substitution(&tiles, &[], false).expect("EWW should be a triplet");
         assert_eq!(sets.len(), 1);
-        assert_eq!(sets[0].kind, SetKind::Triplet);
+        assert_eq!(sets[0].kind, MeldKind::Triplet);
     }
 
     #[test]
@@ -2864,7 +2864,7 @@ mod disgust_tests {
         let (sets, _) =
             try_disgust_substitution(&tiles, &[], false).expect("EWWW should be a kong");
         assert_eq!(sets.len(), 1);
-        assert_eq!(sets[0].kind, SetKind::Kong);
+        assert_eq!(sets[0].kind, MeldKind::Kong);
     }
 
     #[test]

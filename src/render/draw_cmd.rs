@@ -683,7 +683,7 @@ pub enum DrawCmd {
     /// instanced from the renderer's pre-allocated coin slot pool. Used by
     /// the shop scene to display the player's gold as a pile of coins in a
     /// dish.
-    /// Imported `Shop.glb` room mesh (tile-textured pipeline, world-space vertices).
+    /// Imported `shop.glb` room mesh (tile-textured pipeline, world-space vertices).
     ShopEnvironment,
     /// Imported `hallway.glb` pick-blind room (same GPU path as [`DrawCmd::ShopEnvironment`]).
     HallwayEnvironment,
@@ -821,7 +821,7 @@ pub struct UiFrame {
     /// post-transition scene.
     pub journal_prepass_frame: Option<Box<UiFrame>>,
     /// Shop [`ItemInspectScene`] uses synthetic point lights only (GLB punctual off). Those
-    /// lights are tuned for table-scale HDR — not the `/512` crush used for bright `Shop.glb`.
+    /// lights are tuned for table-scale HDR — not the `/512` crush used for bright `shop.glb`.
     /// When set, [`crate::render::wgpu_renderer::runtime::camera::WgpuRenderer::tile_hdr_tonemap`]
     /// applies gameplay-style linear exposure for `lit_mesh` so shelf props stay visible.
     pub shop_inspect_lit_mesh_hdr: bool,
@@ -872,7 +872,7 @@ impl UiFrame {
     pub fn background(&mut self, bg: BackgroundId) {
         self.cmds.push(DrawCmd::Background(bg));
     }
-    /// Draw the 3D shop from embedded [`Shop.glb`](../../assets/Shop.glb). No-op if the asset failed to load.
+    /// Draw the 3D shop from embedded [`shop.glb`](../../assets/shop.glb). No-op if the asset failed to load.
     pub fn shop_environment(&mut self) {
         self.cmds.push(DrawCmd::ShopEnvironment);
     }

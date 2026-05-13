@@ -137,7 +137,7 @@ pub(crate) struct ShowcaseTileGpu {
     pub tile_id: (Suit, u8, Option<crate::core::tile::TileEnhancement>, bool),
 }
 
-/// GPU uniforms + bind groups for the imported [`Shop.glb`](../../assets/Shop.glb) environment mesh.
+/// GPU uniforms + bind groups for the imported [`shop.glb`](../../assets/shop.glb) environment mesh.
 /// Uses the same tile textured pipeline as hand tiles; vertices are already in world space (`model = I`).
 pub(crate) struct ShopEnvironmentGpu {
     pub uniform_buffer: wgpu::Buffer,

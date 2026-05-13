@@ -490,7 +490,7 @@ impl GameplayScene {
             return;
         }
         if let Some(ref breakdown) = GameEngine::last_breakdown(ctx.run) {
-            let set_kinds = breakdown.scored_set_kinds.clone();
+            let meld_kinds = breakdown.scored_meld_kinds.clone();
             let is_full_hand = ctx
                 .run
                 .available_yaku
@@ -505,7 +505,7 @@ impl GameplayScene {
                 && breakdown
                     .detected_yaku
                     .contains(&crate::core::yaku::YakuKind::Yakuhai);
-            if let Some(milestone) = crate::game::tutorial::milestone_for_sets(&set_kinds) {
+            if let Some(milestone) = crate::game::tutorial::milestone_for_melds(&meld_kinds) {
                 let _ = GameEngine::celebrate_tutorial_milestone(ctx.run, ctx.bus, milestone);
             }
             if is_full_hand {

@@ -15,7 +15,7 @@ fn triplet_detected() {
         t(Suit::Bamboos, 3, 2),
     ];
     let sets = find_pairs_and_triplets(&hand);
-    assert!(sets.iter().any(|s| s.kind == SetKind::Triplet));
+    assert!(sets.iter().any(|s| s.kind == MeldKind::Triplet));
 }
 
 #[test]
@@ -26,7 +26,7 @@ fn sequence_detected() {
         t(Suit::Characters, 4, 2),
     ];
     let seqs = find_sequences(&hand);
-    assert!(seqs.iter().any(|s| s.kind == SetKind::Sequence));
+    assert!(seqs.iter().any(|s| s.kind == MeldKind::Sequence));
 }
 
 // ── validate_selection ─────────────────────────────────────────
@@ -36,7 +36,7 @@ fn validate_pair() {
     let tiles = vec![t(Suit::Bamboos, 5, 0), t(Suit::Bamboos, 5, 1)];
     let sets = validate_selection(&tiles).unwrap();
     assert_eq!(sets.len(), 1);
-    assert_eq!(sets[0].kind, SetKind::Pair);
+    assert_eq!(sets[0].kind, MeldKind::Pair);
 }
 
 #[test]
@@ -48,7 +48,7 @@ fn validate_triplet() {
     ];
     let sets = validate_selection(&tiles).unwrap();
     assert_eq!(sets.len(), 1);
-    assert_eq!(sets[0].kind, SetKind::Triplet);
+    assert_eq!(sets[0].kind, MeldKind::Triplet);
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn validate_sequence() {
     ];
     let sets = validate_selection(&tiles).unwrap();
     assert_eq!(sets.len(), 1);
-    assert_eq!(sets[0].kind, SetKind::Sequence);
+    assert_eq!(sets[0].kind, MeldKind::Sequence);
 }
 
 #[test]
@@ -140,7 +140,7 @@ fn validate_kong_four_of_a_kind() {
     ];
     let sets = validate_selection(&tiles).unwrap();
     assert_eq!(sets.len(), 1);
-    assert_eq!(sets[0].kind, SetKind::Kong);
+    assert_eq!(sets[0].kind, MeldKind::Kong);
     assert_eq!(sets[0].tile_ids.len(), 4);
 }
 
@@ -153,8 +153,8 @@ fn find_pairs_and_triplets_emits_kong() {
         t(Suit::Circles, 7, 3),
     ];
     let sets = find_pairs_and_triplets(&tiles);
-    assert!(sets.iter().any(|s| s.kind == SetKind::Kong));
-    assert!(!sets.iter().any(|s| s.kind == SetKind::Triplet));
+    assert!(sets.iter().any(|s| s.kind == MeldKind::Kong));
+    assert!(!sets.iter().any(|s| s.kind == MeldKind::Triplet));
 }
 
 #[test]
@@ -201,7 +201,7 @@ fn flower_completes_triplet() {
     ];
     let sets = validate_selection(&tiles).unwrap();
     assert_eq!(sets.len(), 1);
-    assert_eq!(sets[0].kind, SetKind::Triplet);
+    assert_eq!(sets[0].kind, MeldKind::Triplet);
     assert!(sets[0].tile_ids.contains(&100)); // flower id present
 }
 
@@ -215,7 +215,7 @@ fn flower_completes_sequence_high() {
     ];
     let sets = validate_selection(&tiles).unwrap();
     assert_eq!(sets.len(), 1);
-    assert_eq!(sets[0].kind, SetKind::Sequence);
+    assert_eq!(sets[0].kind, MeldKind::Sequence);
 }
 
 #[test]
@@ -228,7 +228,7 @@ fn flower_completes_sequence_mid() {
     ];
     let sets = validate_selection(&tiles).unwrap();
     assert_eq!(sets.len(), 1);
-    assert_eq!(sets[0].kind, SetKind::Sequence);
+    assert_eq!(sets[0].kind, MeldKind::Sequence);
 }
 
 #[test]
@@ -241,7 +241,7 @@ fn flower_completes_sequence_low() {
     ];
     let sets = validate_selection(&tiles).unwrap();
     assert_eq!(sets.len(), 1);
-    assert_eq!(sets[0].kind, SetKind::Sequence);
+    assert_eq!(sets[0].kind, MeldKind::Sequence);
 }
 
 #[test]
@@ -294,7 +294,7 @@ fn unused_flower_is_invalid() {
     // flower-triplet(3s×2 + flower) works!
     let sets = validate_selection(&tiles).unwrap();
     assert_eq!(sets.len(), 1);
-    assert_eq!(sets[0].kind, SetKind::Triplet);
+    assert_eq!(sets[0].kind, MeldKind::Triplet);
 }
 
 #[test]
@@ -303,7 +303,7 @@ fn flower_pair_valid() {
     let tiles = vec![t(Suit::Flower, 1, 100), t(Suit::Flower, 2, 101)];
     let sets = validate_selection(&tiles).unwrap();
     assert_eq!(sets.len(), 1);
-    assert_eq!(sets[0].kind, SetKind::Pair);
+    assert_eq!(sets[0].kind, MeldKind::Pair);
 }
 
 #[test]
@@ -316,7 +316,7 @@ fn flower_triplet_valid() {
     ];
     let sets = validate_selection(&tiles).unwrap();
     assert_eq!(sets.len(), 1);
-    assert_eq!(sets[0].kind, SetKind::Triplet);
+    assert_eq!(sets[0].kind, MeldKind::Triplet);
 }
 
 #[test]
@@ -330,7 +330,7 @@ fn flower_two_pairs_valid() {
     ];
     let sets = validate_selection(&tiles).unwrap();
     assert_eq!(sets.len(), 2);
-    assert!(sets.iter().all(|s| s.kind == SetKind::Pair));
+    assert!(sets.iter().all(|s| s.kind == MeldKind::Pair));
 }
 
 #[test]
@@ -354,7 +354,7 @@ fn sequence_wrap_891() {
     // With wrap: valid sequence
     let sets = validate_selection_with_rules(&tiles, &[RuleModifier::SequenceWrap]).unwrap();
     assert_eq!(sets.len(), 1);
-    assert_eq!(sets[0].kind, SetKind::Sequence);
+    assert_eq!(sets[0].kind, MeldKind::Sequence);
 }
 
 #[test]
@@ -367,7 +367,7 @@ fn sequence_wrap_912() {
     assert!(validate_selection(&tiles).is_none());
     let sets = validate_selection_with_rules(&tiles, &[RuleModifier::SequenceWrap]).unwrap();
     assert_eq!(sets.len(), 1);
-    assert_eq!(sets[0].kind, SetKind::Sequence);
+    assert_eq!(sets[0].kind, MeldKind::Sequence);
 }
 
 #[test]
@@ -392,7 +392,7 @@ fn no_sequences_allows_triplets() {
     ];
     let sets = validate_selection_with_rules(&tiles, &[RuleModifier::NoSequences]).unwrap();
     assert_eq!(sets.len(), 1);
-    assert_eq!(sets[0].kind, SetKind::Triplet);
+    assert_eq!(sets[0].kind, MeldKind::Triplet);
 }
 
 #[test]
@@ -414,7 +414,7 @@ fn require_honor_allows_honor_only_structure() {
     ];
     let sets = validate_selection_with_rules(&tiles, &[RuleModifier::RequireHonor]).unwrap();
     assert_eq!(sets.len(), 1);
-    assert_eq!(sets[0].kind, SetKind::Triplet);
+    assert_eq!(sets[0].kind, MeldKind::Triplet);
 }
 
 #[test]
@@ -453,7 +453,7 @@ fn tricky_chiitoitsu_seven_distinct_pairs() {
     ];
     let sets = validate_selection(&tiles).expect("chiitoitsu hand");
     assert_eq!(sets.len(), 7);
-    assert!(sets.iter().all(|s| s.kind == SetKind::Pair));
+    assert!(sets.iter().all(|s| s.kind == MeldKind::Pair));
     let alts = enumerate_decompositions(&tiles, &[]);
     assert!(!alts.is_empty());
     assert!(alts.iter().all(|c| c.len() == 7));
@@ -480,8 +480,8 @@ fn tricky_kokushi_musou_decomposed() {
     ];
     let sets = validate_selection(&tiles).expect("kokushi");
     assert_eq!(sets.len(), 13);
-    assert_eq!(sets.iter().filter(|s| s.kind == SetKind::Single).count(), 12);
-    assert_eq!(sets.iter().filter(|s| s.kind == SetKind::Pair).count(), 1);
+    assert_eq!(sets.iter().filter(|s| s.kind == MeldKind::Single).count(), 12);
+    assert_eq!(sets.iter().filter(|s| s.kind == MeldKind::Pair).count(), 1);
     let yaku = crate::core::yaku::detect_yaku_with_wind(&tiles, &sets, None, None);
     assert!(yaku.contains(&crate::core::yaku::YakuKind::KokushiMusou));
     assert!(!yaku.contains(&crate::core::yaku::YakuKind::Honroutou));

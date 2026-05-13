@@ -21,12 +21,12 @@ pub enum ShopHit {
     /// Index into the most recent flat list of `TilePackPlacement`s pushed
     /// this frame (across all `TilePackBatch` cmds).
     TilePack(u32),
-    /// Shop.glb trimesh hit on `shop_spawn_relic_{slot:02}` — resolve via
+    /// shop.glb trimesh hit on `shop_spawn_relic_{slot:02}` — resolve via
     /// [`crate::scenes::shop::layout::live_shop_hit`] before using as a relic index.
     EnvSpawnSlot(usize),
-    /// Shop.glb trimesh hit on `shop_player_relic_{slot:02}` — inventory bar index.
+    /// shop.glb trimesh hit on `shop_player_relic_{slot:02}` — inventory bar index.
     EnvInvSlot(usize),
-    /// Shop.glb trimesh hit on `shop_player_consumable_{ord:02}` consumable marker ordinal.
+    /// shop.glb trimesh hit on `shop_player_consumable_{ord:02}` consumable marker ordinal.
     EnvConsumableOrd(usize),
 }
 

@@ -4,7 +4,7 @@
 //! Keeping this in one module makes the main pipeline easier to read and gives a
 //! single place to audit "post-yaku" balance.
 
-use crate::core::hand::{DetectedSet, SetKind};
+use crate::core::hand::{DetectedMeld, MeldKind};
 use crate::core::relic::{RelicId, ScoreContext};
 use crate::core::tile::{Suit, Tile};
 
@@ -16,7 +16,7 @@ use super::{tile_by_id, tile_is_debuffed, ScoreStep};
 pub(crate) fn apply_post_yaku_relic_modifiers(
     ctx: &ScoreContext<'_>,
     tiles: &[Tile],
-    sets: &[DetectedSet],
+    sets: &[DetectedMeld],
     eff: EffectiveRelics,
     honor_triple: bool,
     no_seq_bonus: bool,
@@ -30,7 +30,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
 
     if has(RelicId::DragonRage) {
         for s in sets {
-            if !matches!(s.kind, SetKind::Triplet | SetKind::Kong) {
+            if !matches!(s.kind, MeldKind::Triplet | MeldKind::Kong) {
                 continue;
             }
             let is_dragon = s
@@ -46,7 +46,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
 
     if has(RelicId::WhiteDragonsHush) {
         for s in sets {
-            if s.kind != SetKind::Pair {
+            if s.kind != MeldKind::Pair {
                 continue;
             }
             let is_white_dragon = s
@@ -61,7 +61,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     }
 
     if has(RelicId::SequenceSurge) {
-        let seq_count = sets.iter().filter(|s| s.kind == SetKind::Sequence).count() as i32;
+        let seq_count = sets.iter().filter(|s| s.kind == MeldKind::Sequence).count() as i32;
         if seq_count > 0 {
             push_mult(
                 steps,
@@ -74,21 +74,21 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     }
 
     if has(RelicId::PairPower) {
-        let pair_count = sets.iter().filter(|s| s.kind == SetKind::Pair).count() as i32;
+        let pair_count = sets.iter().filter(|s| s.kind == MeldKind::Pair).count() as i32;
         if pair_count > 0 {
             push_mult(steps, *chips, mult, "Pair Power", pair_count as f64);
         }
     }
 
     if has(RelicId::KanDrum) {
-        let kong_count = sets.iter().filter(|s| s.kind == SetKind::Kong).count() as i32;
+        let kong_count = sets.iter().filter(|s| s.kind == MeldKind::Kong).count() as i32;
         if kong_count > 0 {
             push_mult(steps, *chips, mult, "Kan Drum", 4.0 * kong_count as f64);
         }
     }
 
     if has(RelicId::KongsBlessing) {
-        let kong_count = sets.iter().filter(|s| s.kind == SetKind::Kong).count() as i32;
+        let kong_count = sets.iter().filter(|s| s.kind == MeldKind::Kong).count() as i32;
         if kong_count > 0 {
             push_mult(steps, *chips, mult, "Kong's Blessing", 2.0 * kong_count as f64);
         }
@@ -97,7 +97,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     if has_triplet_boost {
         let trip_count = sets
             .iter()
-            .filter(|s| matches!(s.kind, SetKind::Triplet | SetKind::Kong))
+            .filter(|s| matches!(s.kind, MeldKind::Triplet | MeldKind::Kong))
             .count() as i32;
         if trip_count > 0 {
             push_mult(steps, *chips, mult, "Triplet Boost", 0.2 * trip_count as f64);
@@ -108,7 +108,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
         && let Some(wind) = ctx.round.round_wind
     {
         for s in sets {
-            if !matches!(s.kind, SetKind::Triplet | SetKind::Kong) {
+            if !matches!(s.kind, MeldKind::Triplet | MeldKind::Kong) {
                 continue;
             }
             let is_round_wind = s
@@ -124,7 +124,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
 
     if honor_triple {
         for s in sets {
-            if !matches!(s.kind, SetKind::Triplet | SetKind::Kong) {
+            if !matches!(s.kind, MeldKind::Triplet | MeldKind::Kong) {
                 continue;
             }
             let is_honor = s
@@ -138,7 +138,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
         }
     }
 
-    if no_seq_bonus && !sets.iter().any(|s| s.kind == SetKind::Sequence) {
+    if no_seq_bonus && !sets.iter().any(|s| s.kind == MeldKind::Sequence) {
         push_mult(steps, *chips, mult, "No-Seq Bonus (rule)", 3.0);
     }
 
@@ -230,7 +230,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
         );
     }
 
-    if has(RelicId::Minimalist) && sets.len() == 1 && sets[0].kind == SetKind::Pair {
+    if has(RelicId::Minimalist) && sets.len() == 1 && sets[0].kind == MeldKind::Pair {
         push_mult(steps, *chips, mult, "Minimalist", 4.0);
     }
 
@@ -469,7 +469,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
         }
     }
 
-    if has(RelicId::WayOfPairs) && !sets.is_empty() && sets.iter().all(|s| s.kind == SetKind::Pair)
+    if has(RelicId::WayOfPairs) && !sets.is_empty() && sets.iter().all(|s| s.kind == MeldKind::Pair)
     {
         let delta = *mult;
         push_mult(steps, *chips, mult, "Way of Pairs", delta);
@@ -479,7 +479,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
         && !sets.is_empty()
         && sets
             .iter()
-            .all(|s| matches!(s.kind, SetKind::Triplet | SetKind::Kong))
+            .all(|s| matches!(s.kind, MeldKind::Triplet | MeldKind::Kong))
     {
         let delta = *mult * 1.5;
         push_mult(steps, *chips, mult, "Way of Triplets", delta);
@@ -487,7 +487,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
 
     if has(RelicId::WayOfSequences)
         && !sets.is_empty()
-        && sets.iter().all(|s| s.kind == SetKind::Sequence)
+        && sets.iter().all(|s| s.kind == MeldKind::Sequence)
     {
         let delta = *mult;
         push_mult(steps, *chips, mult, "Way of Sequences", delta);

@@ -293,11 +293,11 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         });
 
     let tile_glb_file =
-        crate::asset_path::get("tile_plastic.glb").or_else(|| crate::asset_path::get("Tile.glb"));
+        crate::asset_path::get("tile_plastic.glb").or_else(|| crate::asset_path::get("tile.glb"));
     let loaded_glb = match tile_glb_file {
         Some(file) => load_glb_tile_from_bytes(&file.data),
         None => Err(anyhow::anyhow!(
-            "tile_plastic.glb (or Tile.glb) not found (packs or assets/)"
+            "tile_plastic.glb (or tile.glb) not found (packs or assets/)"
         )),
     };
 
@@ -2881,7 +2881,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     bind_groups,
                     archive_sign_decal_texture: None,
                 });
-                log::info!("Shop.glb GPU: {} primitive draw(s)", prims.len());
+                log::info!("shop.glb GPU: {} primitive draw(s)", prims.len());
             }
             (prims, gpu_wrap)
         });
@@ -3199,7 +3199,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     &crate::render::primitive::DecalLayout::Fit {
                         target_short_edge: crate::render::decal::PLAQUE_DECAL_HEIGHT,
                     },
-                    crate::render::archive_glb::ARCHIVE_DESCRIPTION_DECAL_HOST_EXTENTS,
+                    crate::render::archive_glb::archive_sign_description_decal_extents_for(cpu),
                 );
                 let sign_decal_clear =
                     vec![0u8; (sign_decal_w * sign_decal_h * 4) as usize];
@@ -3940,6 +3940,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         showcase_tiles: Vec::new(),
         tile_face_overlays: HashMap::new(),
         prompt_icon_overlays: HashMap::new(),
+        prompt_icon_missing: std::collections::HashSet::new(),
         debuff_marker_overlay: None,
         text_label_cache: HashMap::new(),
         text_cache_frame: 0,

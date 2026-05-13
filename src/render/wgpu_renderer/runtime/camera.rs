@@ -150,7 +150,7 @@ impl WgpuRenderer {
                 0.0,
             ];
         }
-        // Shop applies a heavy linear HDR divisor so bright `Shop.glb` fills land in
+        // Shop applies a heavy linear HDR divisor so bright `shop.glb` fills land in
         // range. Showcase tiles alone (e.g. headless pack-celebration isolation)
         // use ordinary tile shading — same /512 crush makes them vanish.
         let shop_showcase_without_env = shop_scene

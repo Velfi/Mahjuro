@@ -109,7 +109,7 @@ pub(super) fn push_structure_preview_pile(
 #[derive(Clone)]
 pub(super) struct CascadeShowcase {
     pub(super) tiles: Vec<crate::core::tile::Tile>,
-    pub(super) sets: Vec<crate::core::hand::DetectedSet>,
+    pub(super) sets: Vec<crate::core::hand::DetectedMeld>,
 }
 
 /// Per-frame cascade HUD state snapshot: the chips/×/mult trio under the

@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use anyhow::Context;
-use glam::{Mat4, Vec3, Vec4};
+use glam::{Mat4, Vec2, Vec3, Vec4};
 
 use crate::render::draw_cmd::CameraParams;
 use crate::render::gltf_helpers::{apply_texture_transform, sampler_cpu_from_material};
@@ -479,6 +479,30 @@ pub fn decode_env_primitive(
         Vec::new()
     };
 
+    // Archive `sign_description_*` boards: pack the decal sampler onto the mesh's UV bounding
+    // box so the description maps exactly once across whatever UV layout the asset ships with
+    // (Repeat sampler + UVs > 1 would otherwise tile the text — see screenshot in PR thread).
+    let is_archive_sign = matches!(
+        gltf_node_name,
+        "sign_description_left" | "sign_description_right"
+    );
+    let uv_remap = if is_archive_sign {
+        let mut min = Vec2::splat(f32::INFINITY);
+        let mut max = Vec2::splat(f32::NEG_INFINITY);
+        for uv in &uvs {
+            min = min.min(Vec2::from_array(*uv));
+            max = max.max(Vec2::from_array(*uv));
+        }
+        let span = max - min;
+        let inv = Vec2::new(
+            if span.x.abs() > 1e-6 { 1.0 / span.x } else { 0.0 },
+            if span.y.abs() > 1e-6 { 1.0 / span.y } else { 0.0 },
+        );
+        Some((min, inv))
+    } else {
+        None
+    };
+
     let mut vertices: Vec<Vertex3dTex> = (0..positions_local.len())
         .map(|i| {
             let p = node_world.transform_point3(Vec3::from(positions_local[i]));
@@ -490,21 +514,25 @@ pub fn decode_env_primitive(
             let w = tl[3];
             let t_w = node_world.transform_vector3(t_loc).normalize_or_zero();
             let color = colors.get(i).copied().unwrap_or([1.0, 1.0, 1.0, 1.0]);
+            let uv = if let Some((min, inv)) = uv_remap {
+                let u = Vec2::from_array(uvs[i]);
+                let n = (u - min) * inv;
+                [n.x, n.y]
+            } else {
+                uvs[i]
+            };
             Vertex3dTex {
                 position: p.into(),
                 normal: n.into(),
-                uv: uvs[i],
+                uv,
                 tangent: [t_w.x, t_w.y, t_w.z, w],
                 uv_emr: uv_emr[i],
                 color,
             }
         })
         .collect();
-    // Archive `sign_description_*` boards: `shop_glb.wgsl` composites `@binding(3)` when alpha > 1.
-    if matches!(
-        gltf_node_name,
-        "sign_description_left" | "sign_description_right"
-    ) {
+    // `shop_glb.wgsl` composites `@binding(3)` decal_tex when `COLOR_0.a > 1`.
+    if is_archive_sign {
         for v in &mut vertices {
             v.color[3] = 2.0;
         }

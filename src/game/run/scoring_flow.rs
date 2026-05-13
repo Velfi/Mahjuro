@@ -37,8 +37,8 @@ impl RunState {
         let sets = self.pick_best_decomposition(sets, &scoring_tiles, &selected_tiles);
 
         {
-            let set_kinds: Vec<SetKind> = sets.iter().map(|s| s.kind).collect();
-            if self.tutorial_validate_sets(&set_kinds).is_err() {
+            let meld_kinds: Vec<MeldKind> = sets.iter().map(|s| s.kind).collect();
+            if self.tutorial_validate_melds(&meld_kinds).is_err() {
                 bus.push(GameEvent::InvalidAction);
                 return 0;
             }
@@ -54,7 +54,7 @@ impl RunState {
             .structure_sets
             .iter()
             .chain(sets.iter())
-            .filter(|s| s.kind == SetKind::Kong)
+            .filter(|s| s.kind == MeldKind::Kong)
             .count();
         if current_tile_count + scoring_tiles.len() > HAND_SIZE + kongs_after {
             bus.push(GameEvent::InvalidAction);
@@ -115,7 +115,7 @@ impl RunState {
             }
         }
         if self.relics.has(RelicId::KongCollector) {
-            let kong_count = sets.iter().filter(|s| s.kind == SetKind::Kong).count() as i32;
+            let kong_count = sets.iter().filter(|s| s.kind == MeldKind::Kong).count() as i32;
             if kong_count > 0 {
                 *self
                     .relic_counters
@@ -184,7 +184,7 @@ impl RunState {
     /// Core scoring path for resolved melds (structure cash-in).
     pub(super) fn apply_scored_melds(
         &mut self,
-        sets: Vec<DetectedSet>,
+        sets: Vec<DetectedMeld>,
         scoring_tiles: Vec<Tile>,
         original_for_wildcard: Vec<Tile>,
         structure_meta: Option<StructureTriggerMeta>,
@@ -297,7 +297,7 @@ impl RunState {
             self.relic_activations.push(RelicId::TilePolisher);
         }
         if self.relics.has(RelicId::RiverRunner) {
-            let seq_count = sets.iter().filter(|s| s.kind == SetKind::Sequence).count() as i32;
+            let seq_count = sets.iter().filter(|s| s.kind == MeldKind::Sequence).count() as i32;
             if seq_count > 0 {
                 *self.relic_counters.entry(RelicId::RiverRunner).or_insert(0) += 20 * seq_count;
                 self.relic_activations.push(RelicId::RiverRunner);
@@ -360,7 +360,7 @@ impl RunState {
             self.full_hand_played_this_round = true;
         }
         if self.relics.has(RelicId::KanDrum) {
-            let kong_count = sets.iter().filter(|s| s.kind == SetKind::Kong).count() as u32;
+            let kong_count = sets.iter().filter(|s| s.kind == MeldKind::Kong).count() as u32;
             if kong_count > 0 {
                 self.plays_remaining = self.plays_remaining.saturating_add(kong_count);
                 self.relic_activations.push(RelicId::KanDrum);
@@ -761,14 +761,14 @@ impl RunState {
     /// decomposition found.
     fn pick_best_decomposition(
         &self,
-        default_sets: Vec<DetectedSet>,
+        default_sets: Vec<DetectedMeld>,
         scoring_tiles: &[Tile],
         original_tiles: &[Tile],
-    ) -> Vec<DetectedSet> {
+    ) -> Vec<DetectedMeld> {
         // A full hand has 14 + kong_count tiles (kongs use 4 tiles each).
         let kongs = default_sets
             .iter()
-            .filter(|s| s.kind == SetKind::Kong)
+            .filter(|s| s.kind == MeldKind::Kong)
             .count();
         let is_full_hand =
             scoring_tiles.len() >= HAND_SIZE && scoring_tiles.len() == HAND_SIZE + kongs;
@@ -887,7 +887,7 @@ impl RunState {
                 .structure_sets
                 .iter()
                 .chain(new_sets.iter())
-                .filter(|s| s.kind == SetKind::Kong)
+                .filter(|s| s.kind == MeldKind::Kong)
                 .count();
             if self.structure_tiles.len() + scoring_tiles.len() > HAND_SIZE + kongs_after {
                 continue;

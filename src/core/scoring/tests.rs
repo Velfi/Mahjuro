@@ -93,8 +93,8 @@ fn sequence_surge_adds_chips_to_sequence() {
         Tile::new(Suit::Characters, 2, 1),
         Tile::new(Suit::Characters, 3, 2),
     ];
-    let sets = vec![crate::core::hand::DetectedSet {
-        kind: crate::core::hand::SetKind::Sequence,
+    let sets = vec![crate::core::hand::DetectedMeld {
+        kind: crate::core::hand::MeldKind::Sequence,
         tile_ids: vec![0, 1, 2],
     }];
     let r = relics(vec![RelicId::SequenceSurge]);
@@ -121,24 +121,24 @@ fn stacked_yaku_score_full_value_without_loadout_gating() {
         Tile::new(Suit::Bamboos, 7, 13),
     ];
     let sets = vec![
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Sequence,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Sequence,
             tile_ids: vec![0, 1, 2],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Sequence,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Sequence,
             tile_ids: vec![3, 4, 5],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Sequence,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Sequence,
             tile_ids: vec![6, 7, 8],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Triplet,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Triplet,
             tile_ids: vec![9, 10, 11],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Pair,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Pair,
             tile_ids: vec![12, 13],
         },
     ];
@@ -162,16 +162,16 @@ fn yaku_levels_scale_chip_and_mult() {
         Tile::new(Suit::Wind, 1, 7),
     ];
     let sets = vec![
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Triplet,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Triplet,
             tile_ids: vec![0, 1, 2],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Triplet,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Triplet,
             tile_ids: vec![3, 4, 5],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Pair,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Pair,
             tile_ids: vec![6, 7],
         },
     ];
@@ -322,16 +322,16 @@ fn dragon_echo_copies_adjacent_set_chips() {
         Tile::new(Suit::Bamboos, 9, 8),
     ];
     let sets = vec![
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Sequence,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Sequence,
             tile_ids: vec![0, 1, 2],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Triplet,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Triplet,
             tile_ids: vec![3, 4, 5],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Sequence,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Sequence,
             tile_ids: vec![6, 7, 8],
         },
     ];
@@ -363,12 +363,12 @@ fn dragon_echo_ignores_non_dragon_triplet() {
         Tile::new(Suit::Wind, 1, 5),
     ];
     let sets = vec![
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Sequence,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Sequence,
             tile_ids: vec![0, 1, 2],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Triplet,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Triplet,
             tile_ids: vec![3, 4, 5],
         },
     ];
@@ -467,24 +467,24 @@ fn explosive_flush_full_hand_demonstration() {
         Tile::new(Suit::Bamboos, 7, 13),
     ];
     let sets = vec![
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Sequence,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Sequence,
             tile_ids: vec![0, 1, 2],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Sequence,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Sequence,
             tile_ids: vec![3, 4, 5],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Sequence,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Sequence,
             tile_ids: vec![6, 7, 8],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Triplet,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Triplet,
             tile_ids: vec![9, 10, 11],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Pair,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Pair,
             tile_ids: vec![12, 13],
         },
     ];
@@ -554,7 +554,7 @@ fn flower_chips_delta(breakdown: &ScoreBreakdown) -> i32 {
 
 #[test]
 fn mirror_tile_doubles_garden_keeper_extra_pass() {
-    use crate::core::hand::{DetectedSet, SetKind};
+    use crate::core::hand::{DetectedMeld, MeldKind};
     // One pair to satisfy minimum scoring + a flower tile.
     let hand = vec![
         Tile::new(Suit::Bamboos, 5, 0),
@@ -562,12 +562,12 @@ fn mirror_tile_doubles_garden_keeper_extra_pass() {
         Tile::new(Suit::Flower, 1, 2), // Plum Blossom: 40 chips
     ];
     let sets = vec![
-        DetectedSet {
-            kind: SetKind::Pair,
+        DetectedMeld {
+            kind: MeldKind::Pair,
             tile_ids: vec![0, 1],
         },
-        DetectedSet {
-            kind: SetKind::Pair,
+        DetectedMeld {
+            kind: MeldKind::Pair,
             tile_ids: vec![2],
         }, // single flower as pseudo-set
     ];
