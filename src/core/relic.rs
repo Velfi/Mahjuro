@@ -601,6 +601,11 @@ pub fn relic_sell_price_live(
 /// When `inventory_focus` is `Some((relics, slot_index))`, Mirror Tile and
 /// Shadow Hand append which relic they copy and a compatibility line (ordering
 /// matches gameplay).
+///
+/// Live counter readouts are only shown when `inventory_focus` is `Some` — i.e.
+/// during gameplay or shop. Callers that render archive/collection entries pass
+/// `None` and get the static description so locked/unowned relic entries don't
+/// leak run state.
 pub fn relic_description_live(
     id: RelicId,
     counters: &std::collections::BTreeMap<RelicId, i32>,
@@ -613,6 +618,9 @@ pub fn relic_description_live(
         .find(|d| d.id == id)
         .map(|d| d.description)
         .unwrap_or("");
+    if inventory_focus.is_none() {
+        return base.to_string();
+    }
     match id {
         RelicId::MeltingIce => {
             let remaining = counters.get(&RelicId::MeltingIce).copied().unwrap_or(80);
@@ -732,6 +740,80 @@ pub fn relic_description_live(
         RelicId::Kintsugi => {
             let broken = counters.get(&RelicId::Kintsugi).copied().unwrap_or(0);
             format!("{base} [+{broken} mult]")
+        }
+        RelicId::Heirloom => {
+            let blinds = counters.get(&RelicId::Heirloom).copied().unwrap_or(0).max(0);
+            format!(
+                "{base} [{blinds} blind{}, +{blinds} mult]",
+                if blinds == 1 { "" } else { "s" }
+            )
+        }
+        RelicId::BeggarsCup => {
+            let bosses = counters
+                .get(&RelicId::BeggarsCup)
+                .copied()
+                .unwrap_or(0)
+                .max(0);
+            let payout = 1 + bosses;
+            format!(
+                "{base} [{bosses} boss{}, +${payout} at round end]",
+                if bosses == 1 { "" } else { "es" }
+            )
+        }
+        RelicId::WallWeaver => {
+            let added = counters
+                .get(&RelicId::WallWeaver)
+                .copied()
+                .unwrap_or(0)
+                .max(0);
+            let overflow = inventory_focus
+                .is_some_and(|(relics, _)| relics.has(RelicId::StrengthInNumbers))
+                .then_some(68)
+                .unwrap_or(0);
+            let excess = overflow + added;
+            if excess > 0 {
+                format!("{base} [+{:.1} mult]", 0.2 * excess as f64)
+            } else {
+                base.to_string()
+            }
+        }
+        RelicId::CurioCabinet => {
+            if let Some((relics, _)) = inventory_focus {
+                let bonus: u32 = relics
+                    .active
+                    .iter()
+                    .copied()
+                    .filter(|&rid| rid != RelicId::CurioCabinet)
+                    .map(|rid| relic_sell_price_live(rid, counters))
+                    .sum();
+                format!("{base} [+{bonus} mult]")
+            } else {
+                base.to_string()
+            }
+        }
+        RelicId::SolitarySage => {
+            if let Some((relics, _)) = inventory_focus {
+                let empty = relics.max_slots.saturating_sub(relics.active.len());
+                format!(
+                    "{base} [{empty} empty slot{}, +{:.1} mult]",
+                    if empty == 1 { "" } else { "s" },
+                    1.5 * empty as f64
+                )
+            } else {
+                base.to_string()
+            }
+        }
+        RelicId::MultiplierMaster => {
+            if let Some((relics, _)) = inventory_focus {
+                let n = relics.enabled_len();
+                format!(
+                    "{base} [{n} relic{}, +{:.1} mult]",
+                    if n == 1 { "" } else { "s" },
+                    0.5 * n as f64
+                )
+            } else {
+                base.to_string()
+            }
         }
         RelicId::RiverRunner => {
             let chips = counters.get(&RelicId::RiverRunner).copied().unwrap_or(0);

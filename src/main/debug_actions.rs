@@ -149,6 +149,10 @@ impl App {
                     log::warn!("Cannot start GPU profile: renderer not initialised");
                 }
             }
+            DebugAction::ProfileCpu => {
+                self.cpu_profiler.start(100);
+                log::debug!("CPU profile capture queued (100 frames)");
+            }
             DebugAction::BlowWindGust => {
                 // Inject the same UiAction that pressing `B` would push,
                 // so the gameplay scene's existing wind-trigger branch

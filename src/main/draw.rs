@@ -451,11 +451,15 @@ impl App {
         // for legacy scenes the default impl forwards through `draw()` +
         // `into_frame()`. Either way we get back a single ordered
         // `UiFrame.cmds` list whose push order is z-order.
+        self.cpu_profiler
+            .begin(crate::render::cpu_profiler::CpuStage::DrawFrame);
         let mut frame: UiFrame = if let Some(top) = self.overlay_stack.last() {
             top.draw_frame(ctx)
         } else {
             self.scene.draw_frame(ctx)
         };
+        self.cpu_profiler
+            .end(crate::render::cpu_profiler::CpuStage::DrawFrame);
 
         // Fold fog-wall arrange preview here (same `ArrangePreview` math as `ctx`)
         // so mountain-haze `horizon_y` and the pick slab respond immediately.
@@ -878,9 +882,14 @@ impl App {
             }
         }
 
+        self.cpu_profiler
+            .begin(crate::render::cpu_profiler::CpuStage::Render);
         if let Err(e) = renderer.render(&frame, render_settings) {
             log::error!("render: {e:?}");
         }
+        self.cpu_profiler
+            .end(crate::render::cpu_profiler::CpuStage::Render);
+        self.cpu_profiler.end_frame();
     }
 }
 

@@ -161,6 +161,9 @@ struct App {
     steam: steam::SteamClient,
     /// Mirrors `AppSettings::archive_last_seen_run_len` for menu hints without disk reads.
     archive_last_seen_run_len: [u32; 3],
+    /// Optional CPU-side frame timer; sibling of the renderer's `GpuProfiler`.
+    /// Started on demand from the Debug menu via `Profile (CPU + GPU)`.
+    cpu_profiler: render::cpu_profiler::CpuProfiler,
 }
 
 impl App {
@@ -315,6 +318,7 @@ impl App {
             modifiers: Mod::NOMOD,
             steam,
             archive_last_seen_run_len: settings.archive_last_seen_run_len,
+            cpu_profiler: render::cpu_profiler::CpuProfiler::new(),
         }
     }
 

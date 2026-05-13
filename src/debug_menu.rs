@@ -66,10 +66,16 @@ pub enum DebugAction {
     /// future volumetric knobs).
     OpenVolumetricDebug,
     BlowWindGust,
-    /// Capture GPU pass timings averaged over the next 100 rendered frames
-    /// and log the result. Only meaningful on backends that support
-    /// `wgpu::Features::TIMESTAMP_QUERY`.
+    /// Capture GPU pass timings (shadow, main, …) averaged over the next 100
+    /// rendered frames and log the result. Only meaningful on backends that
+    /// support `wgpu::Features::TIMESTAMP_QUERY`. The synchronous readback
+    /// inflates the CPU `render` stage if the CPU profile runs at the same
+    /// time, so this is split from [`DebugAction::ProfileCpu`].
     ProfileGpu,
+    /// Capture CPU stage timings (`update`, `draw_frame`, `render`) averaged
+    /// over the next 100 rendered frames and log the result. Always
+    /// available; safe to run while the GPU profile is *not* active.
+    ProfileCpu,
     /// Arm a one-shot picker: the next mouse click in the game world is
     /// hit-tested against every known scene object and the matched object's
     /// name is logged. Activating this while already armed disarms it.
@@ -194,9 +200,13 @@ impl DebugMenuBar {
         // One-shot dev tools: profiling, picking, layout capture.
         let tools_sub = Submenu::new("Tools", true);
 
-        let profile_item = MenuItem::new("Profile GPU (100 frames)", true, None);
-        mappings.push((profile_item.id().clone(), DebugAction::ProfileGpu));
-        let _ = tools_sub.append(&profile_item);
+        let profile_cpu_item = MenuItem::new("Profile CPU (100 frames)", true, None);
+        mappings.push((profile_cpu_item.id().clone(), DebugAction::ProfileCpu));
+        let _ = tools_sub.append(&profile_cpu_item);
+
+        let profile_gpu_item = MenuItem::new("Profile GPU (100 frames)", true, None);
+        mappings.push((profile_gpu_item.id().clone(), DebugAction::ProfileGpu));
+        let _ = tools_sub.append(&profile_gpu_item);
 
         let hit_test_item = MenuItem::new("Object Hit Test", true, None);
         mappings.push((hit_test_item.id().clone(), DebugAction::ArmObjectHitTest));
