@@ -67,6 +67,11 @@ pub struct GpuProfiler {
     /// because callers hold an immutable borrow of `self` (closures
     /// capturing `&self` for other fields) while encoding the frame.
     last_frame_passes: [Cell<bool>; NUM_PASSES],
+    /// Latched on the frame the session ends (after `report()`). Polled by
+    /// the app once per frame via [`Self::take_just_completed`] to play a
+    /// confirmation SFX, so the player knows the capture is done without
+    /// watching the log stream.
+    just_completed: bool,
 }
 
 impl GpuProfiler {
@@ -105,6 +110,7 @@ impl GpuProfiler {
             accum_ms: [0.0; NUM_PASSES],
             pass_frame_counts: [0; NUM_PASSES],
             last_frame_passes: [const { Cell::new(false) }; NUM_PASSES],
+            just_completed: false,
         }
     }
 
@@ -123,7 +129,14 @@ impl GpuProfiler {
             accum_ms: [0.0; NUM_PASSES],
             pass_frame_counts: [0; NUM_PASSES],
             last_frame_passes: [const { Cell::new(false) }; NUM_PASSES],
+            just_completed: false,
         }
+    }
+
+    /// Consume the "session just ended" latch. Returns `true` exactly once,
+    /// on the frame after [`Self::report`] fires.
+    pub fn take_just_completed(&mut self) -> bool {
+        std::mem::take(&mut self.just_completed)
     }
 
     /// Begin sampling for the next `frames` rendered frames. No-op (with a
@@ -257,6 +270,7 @@ impl GpuProfiler {
         if self.frames_remaining == 0 {
             self.report();
             self.sampling = false;
+            self.just_completed = true;
         }
     }
 

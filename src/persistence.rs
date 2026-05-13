@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -455,7 +456,34 @@ fn settings_path() -> PathBuf {
     data_dir().join(SETTINGS_NAME)
 }
 
+/// Process-local cache for [`load_settings`]. The settings file is only ever
+/// mutated by this process via [`save_settings`], so a single in-memory copy
+/// is always authoritative once loaded — no file watcher or stat-on-read
+/// needed. Profiling showed `load_settings` was being called 5–7 times per
+/// gameplay frame from update / draw paths (discard-undo eligibility checks,
+/// etc.), each doing a stat + read + JSON parse + asset-pack tileset scan;
+/// caching turned that into a clone of an `Arc<...>`-free `AppSettings`
+/// (only `String` allocations) gated by a single mutex acquire.
+static SETTINGS_CACHE: OnceLock<Mutex<Option<AppSettings>>> = OnceLock::new();
+
+fn settings_cache() -> &'static Mutex<Option<AppSettings>> {
+    SETTINGS_CACHE.get_or_init(|| Mutex::new(None))
+}
+
 pub fn load_settings() -> AppSettings {
+    if let Ok(guard) = settings_cache().lock() {
+        if let Some(cached) = guard.as_ref() {
+            return cached.clone();
+        }
+    }
+    let settings = load_settings_uncached();
+    if let Ok(mut guard) = settings_cache().lock() {
+        *guard = Some(settings.clone());
+    }
+    settings
+}
+
+fn load_settings_uncached() -> AppSettings {
     let path = settings_path();
     if !path.exists() {
         return AppSettings::default();
@@ -481,7 +509,13 @@ pub fn load_settings() -> AppSettings {
 
 pub fn save_settings(settings: &AppSettings) -> anyhow::Result<()> {
     let json = serde_json::to_string_pretty(settings).context("serialize settings")?;
-    fs::write(settings_path(), json).context("write settings")
+    fs::write(settings_path(), json).context("write settings")?;
+    // Update the cache so the next `load_settings` (often the very next
+    // frame) sees the new values without re-reading or re-parsing.
+    if let Ok(mut guard) = settings_cache().lock() {
+        *guard = Some(settings.clone());
+    }
+    Ok(())
 }
 
 // ── Tuning overrides ────────────────────────────────────────────────────
@@ -552,7 +586,37 @@ fn profile_path(index: usize) -> PathBuf {
     data_dir().join(format!("profile_{index}.json"))
 }
 
+/// Process-local cache for [`load_profile`], one slot per profile index.
+/// Callers churn through `load_profile` on profile switches and during
+/// gameplay-event bookkeeping; the in-memory copy is authoritative because
+/// the app is the only writer (via [`save_profile`]).
+///
+/// Note: [`load_run`] is intentionally *not* cached. `RunState` does not
+/// derive `Clone` and threading `Clone` through the deep tree is invasive,
+/// while `load_run` is only invoked at scene transitions and profile
+/// switches — well off the per-frame hot path that motivated the
+/// settings-cache fix.
+static PROFILE_CACHE: OnceLock<Mutex<[Option<PlayerProgress>; MAX_PROFILES]>> = OnceLock::new();
+
+fn profile_cache() -> &'static Mutex<[Option<PlayerProgress>; MAX_PROFILES]> {
+    PROFILE_CACHE.get_or_init(|| Mutex::new([const { None }; MAX_PROFILES]))
+}
+
 pub fn load_profile(index: usize) -> PlayerProgress {
+    let idx = index.min(MAX_PROFILES - 1);
+    if let Ok(guard) = profile_cache().lock() {
+        if let Some(cached) = guard[idx].as_ref() {
+            return cached.clone();
+        }
+    }
+    let progress = load_profile_uncached(idx);
+    if let Ok(mut guard) = profile_cache().lock() {
+        guard[idx] = Some(progress.clone());
+    }
+    progress
+}
+
+fn load_profile_uncached(index: usize) -> PlayerProgress {
     let path = profile_path(index);
     if !path.exists() {
         return PlayerProgress::new();
@@ -572,7 +636,15 @@ pub fn load_profile(index: usize) -> PlayerProgress {
 
 pub fn save_profile(index: usize, progress: &PlayerProgress) -> anyhow::Result<()> {
     let json = serde_json::to_string_pretty(progress).context("serialize")?;
-    fs::write(profile_path(index), json).context("write save")
+    fs::write(profile_path(index), json).context("write save")?;
+    // Update the cache so subsequent `load_profile` calls (e.g. the
+    // gameplay event bus saving + reloading the same profile in quick
+    // succession during a scoring cascade) skip the disk round-trip.
+    let idx = index.min(MAX_PROFILES - 1);
+    if let Ok(mut guard) = profile_cache().lock() {
+        guard[idx] = Some(progress.clone());
+    }
+    Ok(())
 }
 
 /// Check if a profile has any save data on disk.

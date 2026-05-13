@@ -87,7 +87,7 @@ fn load_sheet(sheet_asset: &str) -> Option<DecodedSheet> {
             return None;
         }
     };
-    let (width, _height) = img.dimensions();
+    let (width, height) = img.dimensions();
 
     let Some(stripped) = sheet_asset.strip_suffix(".png") else {
         warn_once(format!("{sheet_asset}|extension"), || {
@@ -111,7 +111,7 @@ fn load_sheet(sheet_asset: &str) -> Option<DecodedSheet> {
             return None;
         }
     };
-    let sub_textures = parse_subtextures(xml_text);
+    let sub_textures = parse_subtextures(xml_text, height);
     if sub_textures.is_empty() {
         log::warn!("kenney_atlas: '{xml_asset}' produced no SubTexture entries");
     }
@@ -140,7 +140,13 @@ fn warn_once<F: FnOnce() -> String>(key: String, msg: F) {
 /// Lightweight scanner for `<SubTexture name="…" x="…" y="…" width="…" height="…"/>`.
 /// Kenney's TexturePacker output is one element per line with no nested content,
 /// so we don't need a full XML parser.
-fn parse_subtextures(xml: &str) -> HashMap<String, SubRect> {
+///
+/// Kenney's sheets emit `y` as the **distance from the bottom of the sheet** to
+/// the top of the sub-rect (OpenGL-style, bottom-up). The decoded RGBA buffer
+/// is top-down, so we convert by `top_y = sheet_height - y - height` at parse
+/// time. This way the rest of the pipeline (cropping, GPU upload) can treat
+/// rects as top-down without further transforms.
+fn parse_subtextures(xml: &str, sheet_height: u32) -> HashMap<String, SubRect> {
     let mut out = HashMap::new();
     for line in xml.lines() {
         let line = line.trim();
@@ -149,10 +155,11 @@ fn parse_subtextures(xml: &str) -> HashMap<String, SubRect> {
         };
         let name = attr(rest, "name");
         let x: Option<u32> = attr(rest, "x").and_then(|s| s.parse().ok());
-        let y: Option<u32> = attr(rest, "y").and_then(|s| s.parse().ok());
+        let y_bottom: Option<u32> = attr(rest, "y").and_then(|s| s.parse().ok());
         let w: Option<u32> = attr(rest, "width").and_then(|s| s.parse().ok());
         let h: Option<u32> = attr(rest, "height").and_then(|s| s.parse().ok());
-        if let (Some(name), Some(x), Some(y), Some(w), Some(h)) = (name, x, y, w, h) {
+        if let (Some(name), Some(x), Some(y_bottom), Some(w), Some(h)) = (name, x, y_bottom, w, h) {
+            let y = sheet_height.saturating_sub(y_bottom).saturating_sub(h);
             out.insert(name.to_string(), SubRect { x, y, w, h });
         }
     }
@@ -191,15 +198,36 @@ mod tests {
         "../../assets/kenney_input-prompts/Keyboard & Mouse/keyboard-&-mouse_sheet_double.xml"
     );
 
+    /// Height of the matching `keyboard-&-mouse_sheet_double.png` (used to
+    /// convert the XML's bottom-up `y` into a top-down crop rect).
+    const KEYBOARD_SHEET_HEIGHT: u32 = 2048;
+
     #[test]
     fn parser_extracts_known_keyboard_entries() {
-        let map = parse_subtextures(KEYBOARD_XML);
+        let map = parse_subtextures(KEYBOARD_XML, KEYBOARD_SHEET_HEIGHT);
         assert!(map.contains_key("keyboard_q"));
         assert!(map.contains_key("keyboard_e"));
         assert!(map.contains_key("keyboard_space"));
         assert!(map.contains_key("keyboard_backspace"));
         let q = map["keyboard_q"];
         assert!(q.w > 0 && q.h > 0);
+    }
+
+    /// The XML stores `y` as the bottom of the rect measured from the sheet's
+    /// bottom edge; [`parse_subtextures`] flips that into the top-down origin
+    /// the rest of the cropper uses. Without this transform we'd extract the
+    /// sprite mirrored about the vertical centre of the sheet — the original
+    /// shop legend bug where Backspace rendered as Tab, Space as Ctrl, etc.
+    #[test]
+    fn parser_flips_y_to_top_down() {
+        let map = parse_subtextures(KEYBOARD_XML, KEYBOARD_SHEET_HEIGHT);
+        // Raw XML row for keyboard_backspace: y="384" (bottom-up). With a 2048-tall
+        // sheet and 128-tall sprite the top-down row is 2048 - 384 - 128 = 1536.
+        let r = map["keyboard_backspace"];
+        assert_eq!(r.y, 1536, "backspace should crop from row 1536 (top-down)");
+        // keyboard_tab raw y="1536" → 2048 - 1536 - 128 = 384.
+        let r = map["keyboard_tab"];
+        assert_eq!(r.y, 384);
     }
 
     #[test]

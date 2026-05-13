@@ -7,6 +7,7 @@ pub mod cabinet_mesh;
 pub mod bell_tassel_mesh;
 pub mod candle_mesh;
 pub mod coin_mesh;
+pub mod cpu_profiler;
 pub mod decal;
 pub mod dora_plinth_mesh;
 pub mod draw_cmd;

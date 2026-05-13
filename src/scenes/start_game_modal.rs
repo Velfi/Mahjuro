@@ -23,7 +23,6 @@ use crate::render::draw_cmd::UiFrame;
 use crate::render::world_space::{LayoutAnchorPx, layout_px_py_from_norm};
 
 use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
-use std::borrow::Cow;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ModalAction {
@@ -194,12 +193,11 @@ impl TileSelectScene {
                     // desaturation (handled by the theme) — no padlock glyph,
                     // the dimmed treatment is enough to read "locked".
                     let label = stake_glyph(s).to_string();
-                    let tooltip = Some(Cow::Owned(format!("{} — {}", s.label(), s.description())));
                     wt::Node::Item(wt::Item {
                         id: ModalAction::StakeSelect(s).id(),
                         size: wt::Size::Auto,
                         enabled: unlocked,
-                        tooltip,
+                        tooltip: None,
                         kind: wt::ItemKind::Button {
                             label,
                             variant,
@@ -463,14 +461,14 @@ impl SceneBehavior for TileSelectScene {
         let title_px = typography::size(2.25, h);
         let name_px = typography::size(typography::TITLE, h);
         let bonus_px = typography::size(typography::HEADING, h);
-        let body_px = typography::size(typography::BODY, h);
+        let stake_desc_px = typography::size(typography::HEADING, h);
         let hint_px = typography::size(typography::CAPTION, h);
 
         // Rect heights need room above the font size for line padding.
         let title_h = title_px * 1.4;
         let name_h = name_px * 1.4;
         let bonus_h = bonus_px * 1.4;
-        let body_h = body_px * 1.4;
+        let stake_desc_h = stake_desc_px * 1.4;
         let hint_h = hint_px * 1.4;
 
         let text_x = self.positions.left_panel.nx * w;
@@ -558,7 +556,7 @@ impl SceneBehavior for TileSelectScene {
             cursor_y += hint_h + gap_sm * 0.25;
 
             text_labels.push(TextLabel {
-                rect: [text_x, cursor_y, text_w, body_h],
+                rect: [text_x, cursor_y, text_w, stake_desc_h],
                 text: format!(
                     "{} \u{2014} {}",
                     self.stake.label(),
@@ -566,7 +564,7 @@ impl SceneBehavior for TileSelectScene {
                 )
                 .into(),
                 color: color::STONE,
-                font_px: Some(body_px),
+                font_px: Some(stake_desc_px),
                 ..Default::default()
             });
         }

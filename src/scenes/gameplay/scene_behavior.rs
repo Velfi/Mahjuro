@@ -36,7 +36,10 @@ impl SceneBehavior for GameplayScene {
         let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
         let focus_kind_before = focus_kind(self.focus);
-        animation_state::tick_basic_animations(self, &mut ctx, now, dt);
+        {
+            let _g = crate::render::cpu_profiler::scope("update.tick_basic_animations");
+            animation_state::tick_basic_animations(self, &mut ctx, now, dt);
+        }
         let interaction = GameEngine::read_interaction(ctx.run);
         // Cursor position is captured every frame for cursor-mode hit-test
         // and tooltip placement. The legacy `cursor_moved` guard that used
@@ -68,9 +71,18 @@ impl SceneBehavior for GameplayScene {
             self.tutorial_affinity_indices.clear();
         }
 
-        animation_state::tick_wind_and_deal_detection(self, &mut ctx, now);
-        animation_state::tick_gold_change_coins(self, &mut ctx);
-        animation_state::tick_candle_and_light_ramp(self, now, dt);
+        {
+            let _g = crate::render::cpu_profiler::scope("update.tick_wind_and_deal_detection");
+            animation_state::tick_wind_and_deal_detection(self, &mut ctx, now);
+        }
+        {
+            let _g = crate::render::cpu_profiler::scope("update.tick_gold_change_coins");
+            animation_state::tick_gold_change_coins(self, &mut ctx);
+        }
+        {
+            let _g = crate::render::cpu_profiler::scope("update.tick_candle_and_light_ramp");
+            animation_state::tick_candle_and_light_ramp(self, now, dt);
+        }
 
         // Deferred round start: fire `apply_blind` once the opening candle
         // light-ramp has hit full brightness. The round's hand deal, boss
@@ -241,9 +253,10 @@ impl SceneBehavior for GameplayScene {
             }
         }
 
-        if let Some(t) =
+        if let Some(t) = {
+            let _g = crate::render::cpu_profiler::scope("update.process_focus_and_actions");
             input_handler::process_focus_and_actions(self, &mut ctx, now, focus_kind_before)
-        {
+        } {
             return t;
         }
         None
@@ -499,26 +512,29 @@ impl SceneBehavior for GameplayScene {
             structure_showcase: yaku_structure_showcase,
             structure_pile_tokens: yaku_structure_pile_tokens,
             cam_euler,
-        } = input_handler::build_yaku_panel_and_tablets(
-            self,
-            layout,
-            run,
-            &ctx,
-            &gameplay,
-            &interaction,
-            cascade_showcase_ref,
-            cascade_frame.as_ref(),
-            has_structure,
-            layout_scale,
-            container_w,
-            container_x,
-            structure_strip_top,
-            structure_tag_h,
-            structure_meld_h,
-            yaku_panel_h,
-            yaku_row_y,
-            trigger_btn_rect,
-        );
+        } = {
+            let _g = crate::render::cpu_profiler::scope("draw_frame.build_yaku_panel_and_tablets");
+            input_handler::build_yaku_panel_and_tablets(
+                self,
+                layout,
+                run,
+                &ctx,
+                &gameplay,
+                &interaction,
+                cascade_showcase_ref,
+                cascade_frame.as_ref(),
+                has_structure,
+                layout_scale,
+                container_w,
+                container_x,
+                structure_strip_top,
+                structure_tag_h,
+                structure_meld_h,
+                yaku_panel_h,
+                yaku_row_y,
+                trigger_btn_rect,
+            )
+        };
         // Merge the yaku-panel structure showcase + preview pile pushes
         // into the outer accumulators so the rest of the draw_frame logic
         // (which pushes its own placements) can append to them.
@@ -559,25 +575,28 @@ impl SceneBehavior for GameplayScene {
             discard_bowl_placement,
             bronze_mirror_placement,
             journal_book,
-        } = input_handler::build_action_row_and_journal(
-            self,
-            layout,
-            run,
-            &ctx,
-            &gameplay,
-            &btn_rects,
-            rank_btn_rect,
-            journal_btn_cx,
-            journal_btn_w,
-            action_world_z_py,
-            action_hud_table_lift,
-            cam_euler,
-            has_structure,
-            play_enabled,
-            discard_enabled,
-            now,
-            &mut focus_rect_graph,
-        );
+        } = {
+            let _g = crate::render::cpu_profiler::scope("draw_frame.build_action_row_and_journal");
+            input_handler::build_action_row_and_journal(
+                self,
+                layout,
+                run,
+                &ctx,
+                &gameplay,
+                &btn_rects,
+                rank_btn_rect,
+                journal_btn_cx,
+                journal_btn_w,
+                action_world_z_py,
+                action_hud_table_lift,
+                cam_euler,
+                has_structure,
+                play_enabled,
+                discard_enabled,
+                now,
+                &mut focus_rect_graph,
+            )
+        };
         let _ = &mut wood_tablet_placements;
 
         // Score-panel text fits inside the narrow centered cartouche painted
@@ -669,7 +688,8 @@ impl SceneBehavior for GameplayScene {
         let mut buttons: Vec<ButtonDef> = Vec::new();
         let _ = paused;
 
-        let (talisman_dish_placements, ribbon_dish_placements, talisman_dish_strip) =
+        let (talisman_dish_placements, ribbon_dish_placements, talisman_dish_strip) = {
+            let _g = crate::render::cpu_profiler::scope("draw_frame.build_consumable_dish");
             input_handler::build_consumable_dish(
                 self,
                 layout,
@@ -678,7 +698,8 @@ impl SceneBehavior for GameplayScene {
                 paused,
                 &mut focus_rect_graph,
                 &mut buttons,
-            );
+            )
+        };
 
         // Particle instances. Pushed into the persistent HUD layer (under
         // hand tile faces) to preserve the legacy z-order — score-cascade
@@ -751,26 +772,31 @@ impl SceneBehavior for GameplayScene {
             point_lights,
             spot_lights,
             candle_placements,
-        } = animation_state::build_candles_and_spotlights(
-            self,
-            layout,
-            run,
-            &gameplay,
-            &hand_slots,
-            &hint_indices,
-            discard_bowl_placement.as_ref(),
-            bronze_mirror_placement.as_ref(),
-            ctx.debug_visibility.hide_candles,
-            ctx.progress.dora_enabled(),
-        );
+        } = {
+            let _g = crate::render::cpu_profiler::scope("draw_frame.build_candles_and_spotlights");
+            animation_state::build_candles_and_spotlights(
+                self,
+                layout,
+                run,
+                &gameplay,
+                &hand_slots,
+                &hint_indices,
+                discard_bowl_placement.as_ref(),
+                bronze_mirror_placement.as_ref(),
+                ctx.debug_visibility.hide_candles,
+                ctx.progress.dora_enabled(),
+            )
+        };
 
         // The 3D table + tiles + candles ARE the UI. Selection feedback is
         // now a true 3D gold-metal outline shell drawn by the renderer's
         // tile_outline_pipeline (which catches candlelight), so no 2D
         // selection overlay is added here.
 
-        let (relic_objects, wind_gusts) =
-            input_handler::build_relic_tray_and_wind(self, layout, run, now, &hand_slots);
+        let (relic_objects, wind_gusts) = {
+            let _g = crate::render::cpu_profiler::scope("draw_frame.build_relic_tray_and_wind");
+            input_handler::build_relic_tray_and_wind(self, layout, run, now, &hand_slots)
+        };
 
         // ── Frame assembly ──────────────────────────────────────────────
         //
@@ -814,6 +840,7 @@ impl SceneBehavior for GameplayScene {
         // Each slot becomes one ShowcaseTilePlacement; the renderer draws,
         // picks, and projects them with no separate hand-tile GPU path.
         {
+            let _g = crate::render::cpu_profiler::scope("draw_frame.hand_tile_placements");
             use crate::ui::layout::HAND_TILE_MESH_Y_FRAC;
             // Rx(+π/2): rotates face normal from +Z → -Y (toward camera at large -Y).
             // Rz(π): flips the tile's long axis so the top faces up (without Rz the top faces down).
@@ -1267,14 +1294,17 @@ impl SceneBehavior for GameplayScene {
             }
         }
 
-        animation_state::build_ambient_table_objects(
-            self,
-            layout,
-            &gameplay,
-            ctx.progress.dora_enabled(),
-            coin_pile_rect,
-            &mut frame,
-        );
+        {
+            let _g = crate::render::cpu_profiler::scope("draw_frame.build_ambient_table_objects");
+            animation_state::build_ambient_table_objects(
+                self,
+                layout,
+                &gameplay,
+                ctx.progress.dora_enabled(),
+                coin_pile_rect,
+                &mut frame,
+            );
+        }
 
         // Flying coin animations (gold changes).
         {

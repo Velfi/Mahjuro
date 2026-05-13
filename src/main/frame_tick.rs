@@ -609,9 +609,18 @@ impl App {
             .map(|i| i.last_cursor)
             .unwrap_or((0.0, 0.0));
         let loading_done = match &self.scene {
-            // Splash may dismiss as soon as the window has a renderer; relic and menu-backdrop
-            // decode continue in parallel (solid fallback until the façade texture lands).
-            Scene::Splash(_) => self.renderer.is_some(),
+            // Splash may dismiss as soon as the window has a renderer AND the
+            // showcase decal atlas has been pre-baked. Relic and menu-backdrop
+            // decode continue in parallel (solid fallback until the façade
+            // texture lands). The atlas bake is the largest one-shot CPU
+            // cost in the renderer (~3 s of image resize + PNG decode); the
+            // bake itself is kicked at the bottom of this frame_tick when
+            // the splash is the active scene, so the splash plate is shown
+            // for at least one full frame before the freeze.
+            Scene::Splash(_) => self
+                .renderer
+                .as_ref()
+                .is_some_and(|r| r.showcase_decal_atlas_baked()),
             _ => self.renderer.as_ref().is_none_or(|r| !r.is_loading()),
         };
         let picked_shop_object = self
@@ -635,6 +644,8 @@ impl App {
         let mut rumble_lab_ops: Vec<crate::ui::input::RumbleLabOp> = Vec::new();
         let mut bump_archive_chronicle_seen: Option<u32> = None;
         let updated_overlay = !self.overlay_stack.is_empty();
+        self.cpu_profiler
+            .begin(crate::render::cpu_profiler::CpuStage::Update);
         let update_result = if self.overlay_stack.is_empty() {
             self.scene.update(UpdateCtx {
                 actions: &actions,
@@ -758,6 +769,8 @@ impl App {
                     bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
                 })
         };
+        self.cpu_profiler
+            .end(crate::render::cpu_profiler::CpuStage::Update);
         if let Some(n) = bump_archive_chronicle_seen {
             let p = self.active_profile.min(2);
             let mut s = persistence::load_settings();
@@ -986,5 +999,33 @@ impl App {
         }
 
         self.draw(shell);
+
+        // After the splash plate has been presented, run the showcase decal
+        // atlas pre-bake. The bake is a synchronous ~3 s of image-resize +
+        // PNG decode; doing it here means the splash is on screen during the
+        // freeze instead of the first gameplay frame stalling for 3 s. Splash
+        // dismissal in `loading_done` (above) waits on
+        // `renderer.showcase_decal_atlas_baked()`.
+        if matches!(self.scene, Scene::Splash(_)) {
+            let tileset = self.gfx.tileset_name.clone();
+            if let Some(renderer) = self.renderer.as_mut() {
+                if !renderer.showcase_decal_atlas_baked() {
+                    renderer.prebake_showcase_decal_atlas(&tileset);
+                }
+            }
+        }
+
+        // Profile capture completion chime: each profiler latches a one-shot
+        // flag the frame its report is logged. Both latches are polled here
+        // so a CPU-only run, a GPU-only run, or back-to-back captures each
+        // ring once.
+        let cpu_done = self.cpu_profiler.take_just_completed();
+        let gpu_done = self
+            .renderer
+            .as_mut()
+            .is_some_and(|r| r.take_gpu_profile_just_completed());
+        if cpu_done || gpu_done {
+            self.audio.play_sfx(audio::SfxId::UiConfirm);
+        }
     }
 }

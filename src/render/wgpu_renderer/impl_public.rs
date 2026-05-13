@@ -14,8 +14,48 @@ impl WgpuRenderer {
             .start(frames, self.size.width, self.size.height);
     }
 
+    /// Returns `true` exactly once, on the frame after a GPU profile session
+    /// finishes and emits its report. Polled from the app loop to play a
+    /// confirmation SFX so the player knows the capture is done.
+    pub fn take_gpu_profile_just_completed(&mut self) -> bool {
+        self.gpu_profiler.take_just_completed()
+    }
+
     pub fn set_active_scene(&mut self, key: Option<&'static str>) {
         self.active_scene_key = key;
+    }
+
+    /// True when the showcase decal atlas for the active tileset is built and
+    /// resident on the GPU. The atlas is the single biggest CPU cost in the
+    /// renderer (≈3 s of `image::resize` + PNG decode for 336 face decals on
+    /// first use); the splash scene gates its dismissal on this so the bake
+    /// happens behind the splash plate rather than freezing the first
+    /// gameplay frame.
+    pub fn showcase_decal_atlas_baked(&self) -> bool {
+        self.showcase_decal_atlas.is_some()
+    }
+
+    /// Pre-bake the showcase decal atlas for `tileset_name`, blocking until
+    /// the GPU upload is queued. Idempotent for an already-baked tileset.
+    /// Called from the splash scene's tick so the cost is amortised behind
+    /// the splash plate; subsequent renders skip the lazy bake in
+    /// `runtime/showcase_tiles.rs`.
+    ///
+    /// Also seeds `tile_set` so `apply_render_settings` doesn't immediately
+    /// invalidate the atlas on the first real `render()` call (its
+    /// "tileset changed" check compares against this field).
+    pub fn prebake_showcase_decal_atlas(&mut self, tileset_name: &str) {
+        if self.showcase_decal_atlas.is_some()
+            && self.showcase_decal_atlas_tileset.as_deref() == Some(tileset_name)
+        {
+            return;
+        }
+        // Seed tile_set so the next apply_render_settings does not see a
+        // mismatch and clear the atlas we are about to build.
+        if self.tile_set.as_deref() != Some(tileset_name) {
+            self.tile_set = Some(tileset_name.to_owned());
+        }
+        self.ensure_showcase_decal_atlas(tileset_name);
     }
 
     /// Returns `true` while boot-time async decode threads (relic images and/or
