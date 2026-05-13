@@ -13,7 +13,7 @@
 //! `Complete` vs `Tenpai` matter for coarse HUD messaging, so the
 //! approximation is purely a UI hint.
 
-use crate::core::hand::{SetKind, find_pairs_and_triplets, validate_selection};
+use crate::core::hand::{MeldKind, find_pairs_and_triplets, validate_selection};
 use crate::core::tile::{Suit, Tile};
 use crate::core::yaku::is_complete_winning_hand;
 
@@ -103,8 +103,8 @@ pub fn shanten_estimate(tiles: &[Tile]) -> i32 {
     let mut has_pair = false;
     for s in &sets {
         match s.kind {
-            SetKind::Triplet | SetKind::Kong => complete += 1,
-            SetKind::Pair => {
+            MeldKind::Triplet | MeldKind::Kong => complete += 1,
+            MeldKind::Pair => {
                 if !has_pair {
                     has_pair = true;
                 } else {
@@ -112,7 +112,7 @@ pub fn shanten_estimate(tiles: &[Tile]) -> i32 {
                     complete += 0;
                 }
             }
-            SetKind::Sequence => complete += 1,
+            MeldKind::Sequence => complete += 1,
         }
     }
     let partials = count_partial_melds(tiles, &sets) as i32;
@@ -177,7 +177,7 @@ pub fn has_scoring_partial(tiles: &[Tile]) -> bool {
 /// one more tile (edge wait, kanchan, ryanmen). Honor pairs that aren't
 /// already triplets are *not* counted here — `find_pairs_and_triplets` has
 /// already handled those.
-fn count_partial_melds(tiles: &[Tile], existing_sets: &[crate::core::hand::DetectedSet]) -> usize {
+fn count_partial_melds(tiles: &[Tile], existing_sets: &[crate::core::hand::DetectedMeld]) -> usize {
     let mut used: std::collections::HashSet<u32> = std::collections::HashSet::new();
     for s in existing_sets {
         for id in &s.tile_ids {

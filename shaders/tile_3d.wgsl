@@ -329,7 +329,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     // cam.base_color_factor.w — see `tile_body.rs`:
     //   0–2 = procedural tile body (`TileBodyShaderKind`),
     //   4 = sample bound base-color texture, no decal projection (shop room),
-    //   5 = sample bound base-color per primitive + mahjong decal on front (`Tile.glb`).
+    //   5 = sample bound base-color per primitive + mahjong decal on front (`tile.glb`).
     let body_kind = cam.base_color_factor.w;
     let use_textured_env = body_kind > 3.5 && body_kind < 4.5;
     let use_textured_tile_glb = body_kind > 4.5 && body_kind < 5.5;
@@ -624,7 +624,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
 
     // Tile albedo × candle/spot contribution, modulated by the mesh shadow
     // map so casters darken tiles on the table like the lit-mesh path.
-    // `use_textured_env` = imported shop room (`Shop.glb`): same table shadow map
+    // `use_textured_env` = imported shop room (`shop.glb`): same table shadow map
     // mismatch as `shop_glb.wgsl` — skip gameplay shadow for that path only.
     let mesh_shadow_vis = sample_shadow_visibility(in.world_pos);
     let mesh_shadow = select(mesh_shadow_vis, 1.0, use_textured_env);
@@ -642,7 +642,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
 
     // glTF metallic–roughness + emissive (linear), sampled on `uv_emr`.
     // `decal_atlas_uv.z` carries room emissive scale for imported shop/hallway only;
-    // showcase `Tile.glb` uses zw as decal atlas scale — keep multiplier at 1 there.
+    // showcase `tile.glb` uses zw as decal atlas scale — keep multiplier at 1 there.
     var gltf_emissive_hdr = vec3<f32>(0.0);
     if (use_textured_albedo) {
         let mr_s = textureSample(metallic_roughness_tex, base_sampler, in.uv_emr);

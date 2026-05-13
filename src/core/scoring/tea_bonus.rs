@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use crate::core::hand::{DetectedSet, SetKind};
+use crate::core::hand::{DetectedMeld, MeldKind};
 use crate::core::tile::{Suit, Tile};
 
 pub(crate) fn tea_harmony_chips(tiles: &[Tile]) -> Option<i32> {
@@ -35,8 +35,8 @@ pub(crate) fn tea_purity_mult(tiles: &[Tile]) -> Option<f64> {
     }
 }
 
-pub(crate) fn tea_tranquility_chips(sets: &[DetectedSet]) -> Option<i32> {
+pub(crate) fn tea_tranquility_chips(sets: &[DetectedMeld]) -> Option<i32> {
     sets.iter()
-        .any(|s| s.kind == SetKind::Pair)
+        .any(|s| s.kind == MeldKind::Pair)
         .then_some(35)
 }

@@ -12,7 +12,8 @@
 //!
 //! **Description copy:** name/body text is **CPU-rasterized** in [`CollectionScene`](../../scenes/collection.rs)
 //! into the archive decal texture (see `sync_archive_description_decal_texture`).
-//! [`archive_description_sign_use_left_for_cursor`] picks the side;
+//! [`archive_description_sign_use_left_for_ref_x`] picks the side (cursor X in
+//! [`crate::ui::input::InputMode::Cursor`]; projected focused-item X in keyboard / controller mode);
 //! [`UiFrame::archive_description_sign_use_left`] culls the opposite GLB primitive so only one
 //! board draws the active copy.
 //!
@@ -39,9 +40,47 @@ pub const SECTION_BUTTONS_LEFT_BOUND: &str = "section_buttons_left_bound";
 pub const SECTION_BUTTONS_RIGHT_BOUND: &str = "section_buttons_right_bound";
 pub const ARCHIVE_SPAWN_FOCUSED_ITEM: &str = "archive_spawn_focused_item";
 
-/// Virtual host extents for [`crate::render::decal::decal_dimensions`] when rasterizing description
-/// copy onto `sign_description_*` meshes (must match init in `build.rs`).
-pub const ARCHIVE_DESCRIPTION_DECAL_HOST_EXTENTS: [f32; 3] = [4.0, 1.0, 1.0];
+/// Fallback host extents for [`crate::render::decal::decal_dimensions`] when the archive `.glb`
+/// is missing. Live archive decal sizing reads the actual sign-face aspect via
+/// [`archive_sign_description_decal_extents`].
+pub const ARCHIVE_DESCRIPTION_DECAL_HOST_EXTENTS: [f32; 3] = [1.0, 1.0, 1.0];
+
+/// Read the `sign_description_*` mesh's face aspect from a loaded archive `.glb` and pack it
+/// into the `[long, short, thin]` host extents that [`crate::render::decal::decal_dimensions`]
+/// expects. Returns [`ARCHIVE_DESCRIPTION_DECAL_HOST_EXTENTS`] when the asset is unavailable so
+/// the rasterized decal matches the rectangular sign and does not stretch / squish glyphs.
+///
+/// Takes `cpu` by reference rather than re-entering [`with_archive_glb_cpu`] because callers
+/// (`build.rs`, `sync_archive_description_decal_texture`) are typically already inside that
+/// closure — recursive read-locks on `std::sync::RwLock` are UB on macOS pthreads and deadlock
+/// in practice.
+pub fn archive_sign_description_decal_extents_for(cpu: &RoomGlbCpu) -> [f32; 3] {
+    let Some(bounds) = cpu
+        .marker_mesh_bounds_doc_for(SIGN_DESCRIPTION_LEFT)
+        .or_else(|| cpu.marker_mesh_bounds_doc_for(SIGN_DESCRIPTION_RIGHT))
+    else {
+        return ARCHIVE_DESCRIPTION_DECAL_HOST_EXTENTS;
+    };
+    let diag = bounds.max - bounds.min;
+    let mut e = [diag.x.abs(), diag.y.abs(), diag.z.abs()];
+    // Sort ascending so e[2] = longest face edge, e[1] = shorter face edge, e[0] = thickness.
+    e.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let long = e[2].max(1e-6);
+    let short = e[1].max(1e-6);
+    // `decal_dimensions(Fit)` does `extents[0] / extents[1].max(1.0)` — normalize the short
+    // edge to exactly 1.0 so doc-space units (which can be < 1) still yield the true aspect.
+    [long / short, 1.0, 1.0]
+}
+
+/// Convenience wrapper that opens the archive `.glb` cache. **Do not call from inside an
+/// existing [`with_archive_glb_cpu`] closure** — use [`archive_sign_description_decal_extents_for`]
+/// directly instead.
+pub fn archive_sign_description_decal_extents() -> [f32; 3] {
+    with_archive_glb_cpu(|opt| {
+        opt.map(archive_sign_description_decal_extents_for)
+            .unwrap_or(ARCHIVE_DESCRIPTION_DECAL_HOST_EXTENTS)
+    })
+}
 
 /// Linear HDR exposure multiplier for `archive.glb` (applied when embedded punctual lights are active).
 pub const ARCHIVE_ENV_LINEAR_EXPOSURE_MUL: f32 = 1.85;
@@ -263,15 +302,18 @@ pub fn archive_camera_base(w: f32, h: f32, env_h: f32) -> CameraParams {
     })
 }
 
-/// When both description signs have projected bounds, compares `cursor_x` to the midpoint between
-/// their screen centers so the visible quad tends to sit **away** from the pointer. One-sided
-/// assets lock to that side; if neither has bounds, returns [`None`] (caller may use window center).
-pub fn archive_description_sign_use_left_for_cursor(
+/// When both description signs have projected bounds, compares `ref_x` (screen-X in window pixels)
+/// to the midpoint between their screen centers so the visible quad tends to sit **away** from
+/// `ref_x`. Callers pass the cursor X in [`crate::ui::input::InputMode::Cursor`] and the focused
+/// item's projected X in keyboard / controller mode so the active sign always sits opposite the
+/// thing the player is looking at. One-sided assets lock to that side; if neither has bounds,
+/// returns [`None`] (caller may use window center).
+pub fn archive_description_sign_use_left_for_ref_x(
     win_w: f32,
     win_h: f32,
     env_h: f32,
     cam: &CameraParams,
-    cursor_x: f32,
+    ref_x: f32,
     cpu: &RoomGlbCpu,
 ) -> Option<bool> {
     let rl = shop_glb::screen_rect_for_marker_mesh_bounds(
@@ -299,12 +341,29 @@ pub fn archive_description_sign_use_left_for_cursor(
             let mid_l = l[0] + l[2] * 0.5;
             let mid_r = r[0] + r[2] * 0.5;
             let mid = (mid_l + mid_r) * 0.5;
-            Some(cursor_x >= mid)
+            Some(ref_x >= mid)
         }
         (Some(_), None) => Some(true),
         (None, Some(_)) => Some(false),
         (None, None) => None,
     }
+}
+
+/// Project a marker's world position to screen-X in window pixels. Used by
+/// [`archive_description_sign_use_left_for_ref_x`] callers in keyboard / controller mode to
+/// reference the focused item rather than the cursor.
+pub fn archive_marker_screen_x(
+    win_w: f32,
+    win_h: f32,
+    env_h: f32,
+    cam: &CameraParams,
+    cpu: &RoomGlbCpu,
+    name: &str,
+) -> Option<f32> {
+    let m = archive_marker_world_mat4(win_h, env_h, cpu, name)?;
+    let p = m.transform_point3(Vec3::ZERO);
+    let (sx, _) = cam.project_world_to_screen(win_w, win_h, p);
+    Some(sx)
 }
 
 pub fn archive_glb_has_embedded_lights() -> bool {

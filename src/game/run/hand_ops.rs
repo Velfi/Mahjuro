@@ -6,7 +6,7 @@ impl RunState {
     pub fn try_validate_with_wildcards(
         &self,
         tiles: &[Tile],
-    ) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
+    ) -> Option<(Vec<DetectedMeld>, Vec<Tile>)> {
         let validation_rules = self.validation_rules_for_structure_commits();
         // Try standard validation first.
         if let Some(sets) = validate_selection_with_rules(tiles, &validation_rules) {

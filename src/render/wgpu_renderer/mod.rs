@@ -148,7 +148,7 @@ pub struct WgpuRenderer {
     tile_pipeline_opaque_cull: wgpu::RenderPipeline,
     tile_pipeline_blend_double: wgpu::RenderPipeline,
     tile_pipeline_blend_cull: wgpu::RenderPipeline,
-    /// Shop.glb only — glTF punctual + metallic-roughness + ACES (`shop_glb.wgsl`).
+    /// shop.glb only — glTF punctual + metallic-roughness + ACES (`shop_glb.wgsl`).
     shop_pipeline_opaque_double: wgpu::RenderPipeline,
     shop_pipeline_opaque_cull: wgpu::RenderPipeline,
     shop_pipeline_blend_double: wgpu::RenderPipeline,
@@ -196,7 +196,7 @@ pub struct WgpuRenderer {
     tile_outline_vertex_buffer: wgpu::Buffer,
     tile_outline_index_buffer: wgpu::Buffer,
     tile_outline_index_count: u32,
-    /// [`Shop.glb`](../../assets/Shop.glb) environment primitives (tile vertex layout + materials).
+    /// [`shop.glb`](../../assets/shop.glb) environment primitives (tile vertex layout + materials).
     shop_env_primitives: Vec<TilePrimitiveGpu>,
     shop_environment: Option<ShopEnvironmentGpu>,
     /// [`hallway.glb`](../../assets/hallway.glb) pick-blind room.
@@ -220,9 +220,9 @@ pub struct WgpuRenderer {
     shop_env_ambient_scale: f32,
     /// Scales embedded glTF punctual contribution in `lit_mesh` (`PointLightsBuf.extras.w` when embedded).
     shop_lit_mesh_gltf_punctual_scale: f32,
-    /// Scales glTF mesh emissive on `Shop.glb` / `hallway.glb` (`CameraUniform.decal_atlas_uv.z`).
+    /// Scales glTF mesh emissive on `shop.glb` / `hallway.glb` (`CameraUniform.decal_atlas_uv.z`).
     shop_gltf_emissive_scale: f32,
-    /// CPU triangle soups from invisible marker meshes in [`Shop.glb`](../../assets/Shop.glb).
+    /// CPU triangle soups from invisible marker meshes in [`shop.glb`](../../assets/shop.glb).
     pub(super) shop_env_collision_meshes: Vec<crate::render::shop_glb::ShopCollisionMesh>,
     /// Identity factor used by every primitive (kept for the cam uniform).
     tile_base_color_factor: [f32; 4],
@@ -240,6 +240,10 @@ pub struct WgpuRenderer {
         HashMap<(Suit, u8, Option<crate::core::tile::TileEnhancement>, bool), TileFaceOverlayGpu>,
     /// Cached prompt icons keyed by source path (`asset:...` or `file:...`).
     prompt_icon_overlays: HashMap<String, TileFaceOverlayGpu>,
+    /// Negative cache for [`Self::prompt_icon_overlays`]: keys whose upload
+    /// already failed. Re-trying every frame would re-decode the sheet and
+    /// flood the log; we warn once and skip thereafter.
+    prompt_icon_missing: std::collections::HashSet<String>,
     /// Lazily built texture + bind group for [`Object3dKind::Relic::debuffed`] overlays.
     debuff_marker_overlay: Option<TileFaceOverlayGpu>,
     /// Cached text-label rasterizations. Two-level map so the hit path can

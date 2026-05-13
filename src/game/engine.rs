@@ -12,7 +12,7 @@
 
 use crate::core::boss::BossKind;
 use crate::core::consumable::Consumable;
-use crate::core::hand::DetectedSet;
+use crate::core::hand::DetectedMeld;
 use crate::core::progression::PlayerProgress;
 use crate::core::relic::{RelicId, RelicState};
 use crate::core::rules::BlindKind;
@@ -274,7 +274,7 @@ pub struct GameplayReadModel {
     pub has_structure: bool,
     pub structure_complete: bool,
     pub structure_tiles: Vec<Tile>,
-    pub structure_sets: Vec<DetectedSet>,
+    pub structure_sets: Vec<DetectedMeld>,
     pub trigger_enabled: bool,
     pub trigger_preview_total: u64,
     pub selected_count: usize,
@@ -663,7 +663,7 @@ impl<'a> GameEngine<'a> {
     pub fn validate_with_wildcards(
         run: &RunState,
         tiles: &[Tile],
-    ) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
+    ) -> Option<(Vec<DetectedMeld>, Vec<Tile>)> {
         run.try_validate_with_wildcards(tiles)
     }
 
@@ -753,7 +753,7 @@ impl<'a> GameEngine<'a> {
         crate::game::tutorial::affinity_tile_indices(
             run.hand(),
             run.selected_slice(),
-            lesson.allowed_sets,
+            lesson.allowed_melds,
         )
     }
 
@@ -1520,7 +1520,7 @@ mod tests {
     use super::*;
     use crate::core::consumable::Consumable;
     use crate::core::deck::{Wall, build_wall};
-    use crate::core::hand::{DetectedSet, SetKind};
+    use crate::core::hand::{DetectedMeld, MeldKind};
     use crate::core::tile::{Suit, Tile};
     use crate::core::zodiac::ZodiacKind;
     use crate::game::game_mode::GameMode;
@@ -1661,7 +1661,7 @@ mod tests {
         assert_hand_selection_invariant(&run);
     }
 
-    fn winning_structure_bank() -> (Vec<Tile>, Vec<DetectedSet>) {
+    fn winning_structure_bank() -> (Vec<Tile>, Vec<DetectedMeld>) {
         let tiles = vec![
             tile(Suit::Characters, 1, 1),
             tile(Suit::Characters, 1, 2),
@@ -1679,24 +1679,24 @@ mod tests {
             tile(Suit::Wind, 1, 14),
         ];
         let sets = vec![
-            DetectedSet {
-                kind: SetKind::Pair,
+            DetectedMeld {
+                kind: MeldKind::Pair,
                 tile_ids: vec![1, 2],
             },
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![3, 4, 5],
             },
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![6, 7, 8],
             },
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![9, 10, 11],
             },
-            DetectedSet {
-                kind: SetKind::Triplet,
+            DetectedMeld {
+                kind: MeldKind::Triplet,
                 tile_ids: vec![12, 13, 14],
             },
         ];

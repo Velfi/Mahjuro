@@ -792,7 +792,15 @@ pub fn rasterize_plaque_decal_styled(
         LabelAlign::Center,
     );
 
-    let (shadow, base, highlight): ([f32; 4], [f32; 4], [f32; 4]) = match style {
+    // Shadow / body / highlight tints + per-pass pixel offset (relative to the body pass).
+    // Tighter offsets read as ink on a flat ground; larger offsets read as carved engraving.
+    let (shadow, base, highlight, shadow_off, highlight_off): (
+        [f32; 4],
+        [f32; 4],
+        [f32; 4],
+        (u32, u32),
+        (i32, i32),
+    ) = match style {
         PlaqueDecalStyle::GildedEngraving => {
             // Gilded letters: a deep umber drop-shadow under a rich gold body, topped
             // by a bright pale-gold highlight offset up-left. Three passes give the
@@ -801,33 +809,41 @@ pub fn rasterize_plaque_decal_styled(
                 [0.18_f32, 0.12, 0.04, 0.92], // burnt umber recess
                 [0.92_f32, 0.74, 0.28, 1.0],  // rich antique gold
                 [1.00_f32, 0.96, 0.74, 1.0],  // pale champagne sheen
+                (3, 3),
+                (-1, -1),
             )
         }
         PlaqueDecalStyle::WalnutInkOnLight => {
-            // Walnut / iron-gall ink on off-white board: cool shadow, dense body,
-            // slight warm lift up-left (not metallic — keeps legibility on white).
+            // Walnut / iron-gall ink on off-white board: keep the shadow tight and
+            // soft so it reads as paper bleed instead of a second silhouette. No
+            // bright top-pass — on white grounds a champagne lift would wash the
+            // body out.
             (
-                [0.11_f32, 0.07, 0.05, 0.88],
-                [0.24_f32, 0.14, 0.095, 1.0],
-                [0.38_f32, 0.26, 0.18, 0.42],
+                [0.10_f32, 0.06, 0.04, 0.32],
+                [0.22_f32, 0.13, 0.09, 1.0],
+                [0.0_f32, 0.0, 0.0, 0.0],
+                (1, 1),
+                (0, 0),
             )
         }
     };
 
-    blit_tinted(
-        TintedSrc {
-            pixels: &block,
-            width: inner_w,
-            height: inner_h,
-        },
-        TintedDst {
-            pixels: &mut rgba,
-            width: w,
-            x: pad_x + 3,
-            y: pad_y + 3,
-        },
-        shadow,
-    );
+    if shadow[3] > 0.0 {
+        blit_tinted(
+            TintedSrc {
+                pixels: &block,
+                width: inner_w,
+                height: inner_h,
+            },
+            TintedDst {
+                pixels: &mut rgba,
+                width: w,
+                x: pad_x + shadow_off.0,
+                y: pad_y + shadow_off.1,
+            },
+            shadow,
+        );
+    }
     blit_tinted(
         TintedSrc {
             pixels: &block,
@@ -842,20 +858,32 @@ pub fn rasterize_plaque_decal_styled(
         },
         base,
     );
-    blit_tinted(
-        TintedSrc {
-            pixels: &block,
-            width: inner_w,
-            height: inner_h,
-        },
-        TintedDst {
-            pixels: &mut rgba,
-            width: w,
-            x: pad_x.saturating_sub(1),
-            y: pad_y.saturating_sub(1),
-        },
-        highlight,
-    );
+    if highlight[3] > 0.0 {
+        let hx = if highlight_off.0 >= 0 {
+            pad_x + highlight_off.0 as u32
+        } else {
+            pad_x.saturating_sub(highlight_off.0.unsigned_abs())
+        };
+        let hy = if highlight_off.1 >= 0 {
+            pad_y + highlight_off.1 as u32
+        } else {
+            pad_y.saturating_sub(highlight_off.1.unsigned_abs())
+        };
+        blit_tinted(
+            TintedSrc {
+                pixels: &block,
+                width: inner_w,
+                height: inner_h,
+            },
+            TintedDst {
+                pixels: &mut rgba,
+                width: w,
+                x: hx,
+                y: hy,
+            },
+            highlight,
+        );
+    }
     rgba
 }
 
@@ -1523,6 +1551,32 @@ pub fn load_noto_emoji_font() -> Option<fontdue::Font> {
         .clone()
 }
 
+/// Static-lifetime symbols / math / Greek fallback consulted by [`pick_font`] before the emoji
+/// font. **Noto Sans Math** covers Greek (π), math operators (≈, ≠, ≤, ≥, ×, ÷, …), arrows,
+/// and most BMP punctuation — superset of what plaque copy actually requests.
+///
+/// Loaded lazily from `assets/Noto_Sans_Math/NotoSansMath-Regular.ttf`. Returns `None` (and
+/// caches that) when the asset is unavailable, so the cost amortizes to one lookup per process.
+fn noto_sans_symbols_font() -> Option<&'static fontdue::Font> {
+    static CELL: std::sync::OnceLock<Option<fontdue::Font>> = std::sync::OnceLock::new();
+    CELL.get_or_init(|| {
+        let candidates = ["Noto_Sans_Math/NotoSansMath-Regular.ttf"];
+        for path in candidates {
+            if let Some(file) = crate::asset_path::get(path) {
+                if let Ok(f) =
+                    fontdue::Font::from_bytes(file.data.as_ref(), fontdue::FontSettings::default())
+                {
+                    log::debug!("decal: loaded Noto Sans Math (symbol fallback) from {path}");
+                    return Some(f);
+                }
+            }
+        }
+        log::debug!("decal: Noto Sans Math symbol fallback not found in embedded assets.");
+        None
+    })
+    .as_ref()
+}
+
 /// Load the UI font and return a ready-to-use `fontdue::Font`.
 /// Cached so the font is only parsed once.
 pub fn load_ui_font() -> Option<fontdue::Font> {
@@ -1762,18 +1816,31 @@ fn rasterize_block(
 
 /// Pick the best font for `ch`: use the primary font if it has the glyph,
 /// otherwise fall back to the emoji font (if provided).
+/// Three-tier glyph fallback used by every decal text path:
+/// 1. `primary` — the caller's font (Instrument Serif for plaque copy).
+/// 2. **Noto Sans** (auto-loaded via [`noto_sans_symbols_font`]) — covers Greek (π),
+///    Cyrillic, plus most BMP punctuation / math operators (≈, ×, ÷, …).
+/// 3. `fallback` — Noto Emoji for emoji codepoints (passed by the caller as today).
+///
+/// `&'static` references coerce to the caller's `'a` automatically, so adding the symbols tier
+/// keeps the existing `pick_font(primary, emoji, ch)` call signature intact at every call site.
 fn pick_font<'a>(
     primary: &'a fontdue::Font,
     fallback: Option<&'a fontdue::Font>,
     ch: char,
 ) -> &'a fontdue::Font {
     if primary.has_glyph(ch) {
-        primary
-    } else if let Some(fb) = fallback {
-        fb
-    } else {
-        primary
+        return primary;
     }
+    if let Some(symbols) = noto_sans_symbols_font() {
+        if symbols.has_glyph(ch) {
+            return symbols;
+        }
+    }
+    if let Some(fb) = fallback {
+        return fb;
+    }
+    primary
 }
 
 struct GlyphData {

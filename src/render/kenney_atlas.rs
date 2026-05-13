@@ -35,7 +35,10 @@ static SHEET_CACHE: LazyLock<Mutex<HashMap<String, DecodedSheet>>> =
 /// `sheet_asset` is an asset-relative path to the `_sheet_double.png`; the
 /// matching XML index is found by swapping the `.png` extension for `.xml`.
 /// Returns `None` if the sheet asset is missing, the XML index lacks the
-/// requested name, or the PNG fails to decode.
+/// requested name, or the PNG fails to decode. On the first failure for a
+/// given `(sheet, sprite)` pair, a granular `log::warn!` identifies which
+/// step failed; subsequent failures are silenced via [`MISS_LOG`] so the
+/// negative cache in the renderer doesn't double up on the warning.
 pub fn extract_sprite_rgba(sheet_asset: &str, sprite_name: &str) -> Option<(Vec<u8>, u32, u32)> {
     let mut cache = SHEET_CACHE.lock().ok()?;
     if !cache.contains_key(sheet_asset) {
@@ -43,19 +46,71 @@ pub fn extract_sprite_rgba(sheet_asset: &str, sprite_name: &str) -> Option<(Vec<
         cache.insert(sheet_asset.to_string(), sheet);
     }
     let sheet = cache.get(sheet_asset)?;
-    let rect = sheet.sub_textures.get(sprite_name).copied()?;
-    let rgba = crop_rgba(&sheet.rgba, sheet.width, rect)?;
-    Some((rgba, rect.w, rect.h))
+    let Some(rect) = sheet.sub_textures.get(sprite_name).copied() else {
+        warn_once(format!("{sheet_asset}|{sprite_name}|missing-sub-texture"), || {
+            format!(
+                "kenney_atlas: '{sprite_name}' not in '{sheet_asset}' \
+                 ({} entries indexed)",
+                sheet.sub_textures.len()
+            )
+        });
+        return None;
+    };
+    match crop_rgba(&sheet.rgba, sheet.width, rect) {
+        Some(rgba) => Some((rgba, rect.w, rect.h)),
+        None => {
+            warn_once(format!("{sheet_asset}|{sprite_name}|crop-oob"), || {
+                format!(
+                    "kenney_atlas: crop out-of-bounds for '{sprite_name}' in '{sheet_asset}' \
+                     (rect={}x{}+{}+{}, sheet width={})",
+                    rect.w, rect.h, rect.x, rect.y, sheet.width
+                )
+            });
+            None
+        }
+    }
 }
 
 fn load_sheet(sheet_asset: &str) -> Option<DecodedSheet> {
-    let png = crate::asset_path::get(sheet_asset)?;
-    let img = image::load_from_memory(&png.data).ok()?.to_rgba8();
+    let Some(png) = crate::asset_path::get(sheet_asset) else {
+        warn_once(format!("{sheet_asset}|png-missing"), || {
+            format!("kenney_atlas: PNG '{sheet_asset}' not found in asset packs / loose tree")
+        });
+        return None;
+    };
+    let img = match image::load_from_memory(&png.data) {
+        Ok(img) => img.to_rgba8(),
+        Err(e) => {
+            warn_once(format!("{sheet_asset}|png-decode"), || {
+                format!("kenney_atlas: PNG '{sheet_asset}' decode failed: {e}")
+            });
+            return None;
+        }
+    };
     let (width, _height) = img.dimensions();
 
-    let xml_asset = format!("{}.xml", sheet_asset.strip_suffix(".png")?);
-    let xml = crate::asset_path::get(&xml_asset)?;
-    let xml_text = std::str::from_utf8(&xml.data).ok()?;
+    let Some(stripped) = sheet_asset.strip_suffix(".png") else {
+        warn_once(format!("{sheet_asset}|extension"), || {
+            format!("kenney_atlas: sheet path '{sheet_asset}' missing `.png` suffix")
+        });
+        return None;
+    };
+    let xml_asset = format!("{stripped}.xml");
+    let Some(xml) = crate::asset_path::get(&xml_asset) else {
+        warn_once(format!("{xml_asset}|xml-missing"), || {
+            format!("kenney_atlas: XML '{xml_asset}' not found in asset packs / loose tree")
+        });
+        return None;
+    };
+    let xml_text = match std::str::from_utf8(&xml.data) {
+        Ok(s) => s,
+        Err(e) => {
+            warn_once(format!("{xml_asset}|xml-utf8"), || {
+                format!("kenney_atlas: XML '{xml_asset}' is not valid UTF-8: {e}")
+            });
+            return None;
+        }
+    };
     let sub_textures = parse_subtextures(xml_text);
     if sub_textures.is_empty() {
         log::warn!("kenney_atlas: '{xml_asset}' produced no SubTexture entries");
@@ -66,6 +121,20 @@ fn load_sheet(sheet_asset: &str) -> Option<DecodedSheet> {
         width,
         sub_textures,
     })
+}
+
+/// Suppress repeat `kenney_atlas` warnings for a key we've already logged.
+/// The renderer also negative-caches per `cache_key`, but that key only
+/// covers the renderer's view; this guards `load_sheet` failures (which
+/// happen once per sheet, before per-sprite caching applies).
+static MISS_LOG: LazyLock<Mutex<std::collections::HashSet<String>>> =
+    LazyLock::new(|| Mutex::new(std::collections::HashSet::new()));
+
+fn warn_once<F: FnOnce() -> String>(key: String, msg: F) {
+    let Ok(mut seen) = MISS_LOG.lock() else { return };
+    if seen.insert(key) {
+        log::warn!("{}", msg());
+    }
 }
 
 /// Lightweight scanner for `<SubTexture name="…" x="…" y="…" width="…" height="…"/>`.
@@ -138,5 +207,18 @@ mod tests {
         assert_eq!(attr(r#"name="foo" x="12""#, "name"), Some("foo"));
         assert_eq!(attr(r#"name="foo" x="12""#, "x"), Some("12"));
         assert_eq!(attr(r#"name="foo""#, "missing"), None);
+    }
+
+    /// End-to-end: load the keyboard sheet via the live asset loader (packs or
+    /// loose) and crop a known sprite. Catches breakage between bake_assets,
+    /// the pack index, and the cropper without booting wgpu.
+    #[test]
+    fn live_keyboard_atlas_extracts_q() {
+        let sheet = "kenney_input-prompts/Keyboard & Mouse/keyboard-&-mouse_sheet_double.png";
+        let got = extract_sprite_rgba(sheet, "keyboard_q");
+        assert!(got.is_some(), "extract_sprite_rgba returned None for keyboard_q");
+        let (rgba, w, h) = got.unwrap();
+        assert!(w > 0 && h > 0);
+        assert_eq!(rgba.len(), (w * h * 4) as usize);
     }
 }

@@ -1,4 +1,4 @@
-//! Shop view (`THEME.md` storeroom): `Shop.glb` room, screen-space hit slots, and shelf props.
+//! Shop view (`THEME.md` storeroom): `shop.glb` room, screen-space hit slots, and shelf props.
 //! Stock and input dispatch live on [`super::ShopScene`].
 
 use std::borrow::Cow;
@@ -67,7 +67,7 @@ const RELIC_GLOW_SECS: f32 = 0.9;
 
 /// Screen-space hit ids (processed in `update` before the main shop pick pass).
 const SHOP_SHELF_CLICK_BASE: u32 = 0xD000;
-/// One UI/hit slot per `shop_spawn_relic_00` … `shop_spawn_relic_08` in Shop.glb.
+/// One UI/hit slot per `shop_spawn_relic_00` … `shop_spawn_relic_08` in shop.glb.
 const SHOP_SPAWN_SLOT_COUNT: usize = 9;
 const SHOP_INV_CLICK_BASE: u32 = 0xD00A;
 const SHOP_CLICK_JOURNAL: u32 = 0xD011;
@@ -97,7 +97,7 @@ fn default_fill_point_lights(w: f32, h: f32) -> Vec<PointLight> {
     ]
 }
 
-/// True when `Shop.glb` carries `KHR_lights_punctual` lights — then we use **only** those (no lamp / default fills).
+/// True when `shop.glb` carries `KHR_lights_punctual` lights — then we use **only** those (no lamp / default fills).
 fn shop_glb_has_embedded_lights() -> bool {
     with_shop_glb_cpu(|opt| {
         opt.is_some_and(|cpu| {
@@ -145,7 +145,7 @@ fn embedded_point_lights_runtime(
         let budget = MAX_POINT_LIGHTS.saturating_sub(2);
         if cpu.embedded_point_lights.len() > budget {
             log::warn!(
-                "Shop.glb: {} point lights exceed usable budget ({}) — truncating",
+                "shop.glb: {} point lights exceed usable budget ({}) — truncating",
                 cpu.embedded_point_lights.len(),
                 budget
             );
@@ -186,7 +186,7 @@ fn spot_lights_from_glb(w: f32, h: f32, env_h: f32, tune: &ShopEnvLightingTune) 
             .unwrap_or(glam::Vec3::ZERO);
         if cpu.embedded_spot_lights.len() > MAX_SPOT_LIGHTS {
             log::warn!(
-                "Shop.glb: {} spot lights exceed {} — truncating",
+                "shop.glb: {} spot lights exceed {} — truncating",
                 cpu.embedded_spot_lights.len(),
                 MAX_SPOT_LIGHTS
             );
@@ -221,7 +221,7 @@ fn spot_lights_from_glb(w: f32, h: f32, env_h: f32, tune: &ShopEnvLightingTune) 
 pub(super) fn shop_camera_base(w: f32, h: f32, env_h: f32) -> CameraParams {
     let from_glb = shop_camera_from_glb_if_present(h, env_h);
     let cam = from_glb.unwrap_or_else(|| {
-        // ref_h: 1080 — fallback when Shop.glb has no usable perspective camera (room centered at origin).
+        // ref_h: 1080 — fallback when shop.glb has no usable perspective camera (room centered at origin).
         let cs = h / 1080_f32;
         CameraParams {
             eye: [0.0 * cs, -1517.6 * cs, 1557.2 * cs],
@@ -2404,7 +2404,7 @@ fn rect_center_n(window_w: f32, window_h: f32, nx: f32, ny: f32, rw: f32, rh: f3
     [cx - rw * 0.5, cy - rh * 0.5, rw, rh]
 }
 
-/// Fallback rects when Shop.glb markers are missing — one horizontal row of nine spawn empties.
+/// Fallback rects when shop.glb markers are missing — one horizontal row of nine spawn empties.
 fn shop_shelf_slot_rect(w: f32, h: f32, cam: &CameraParams, index: usize, env_h: f32) -> [f32; 4] {
     let rw = w * 0.065;
     let rh = h * 0.125;

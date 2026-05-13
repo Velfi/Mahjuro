@@ -146,19 +146,19 @@ proptest! {
                     .collect();
 
                 match s.kind {
-                    SetKind::Pair => {
+                    MeldKind::Pair => {
                         prop_assert_eq!(set_tiles.len(), 2);
                         prop_assert_eq!(set_tiles[0].suit, set_tiles[1].suit);
                         prop_assert_eq!(set_tiles[0].rank, set_tiles[1].rank);
                     }
-                    SetKind::Triplet => {
+                    MeldKind::Triplet => {
                         prop_assert_eq!(set_tiles.len(), 3);
                         prop_assert_eq!(set_tiles[0].suit, set_tiles[1].suit);
                         prop_assert_eq!(set_tiles[0].suit, set_tiles[2].suit);
                         prop_assert_eq!(set_tiles[0].rank, set_tiles[1].rank);
                         prop_assert_eq!(set_tiles[0].rank, set_tiles[2].rank);
                     }
-                    SetKind::Sequence => {
+                    MeldKind::Sequence => {
                         prop_assert_eq!(set_tiles.len(), 3);
                         let mut ranks: Vec<u8> = set_tiles.iter().map(|t| t.rank).collect();
                         ranks.sort();
@@ -167,14 +167,14 @@ proptest! {
                         prop_assert_eq!(ranks[1], ranks[0] + 1, "sequence not consecutive");
                         prop_assert_eq!(ranks[2], ranks[1] + 1, "sequence not consecutive");
                     }
-                    SetKind::Kong => {
+                    MeldKind::Kong => {
                         prop_assert_eq!(set_tiles.len(), 4);
                         for i in 1..4 {
                             prop_assert_eq!(set_tiles[0].suit, set_tiles[i].suit);
                             prop_assert_eq!(set_tiles[0].rank, set_tiles[i].rank);
                         }
                     }
-                    SetKind::Single => {
+                    MeldKind::Single => {
                         prop_assert_eq!(set_tiles.len(), 1);
                     }
                 }

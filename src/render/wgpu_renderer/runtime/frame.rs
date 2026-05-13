@@ -34,7 +34,7 @@ impl WgpuRenderer {
         // the frame actually draws `ShowcaseTileBatch` — avoids 336 CPU raster passes
         // at startup and on scenes that never use showcase tiles.
         // `tile_3d.wgsl` reads `base_color_factor.w`: procedural kinds 0–2 for the legacy
-        // procedural mesh; 4 = shop env (base map only); 5 = `Tile.glb` + projected decal.
+        // procedural mesh; 4 = shop env (base map only); 5 = `tile.glb` + projected decal.
         // Imported tile meshes must use kind 5 — procedural 0–2 assumes authored local frame
         // (front-face + ivory band) and reads nearly black on GLB geometry (e.g. pack reveal).
         self.tile_base_color_factor[3] = if self.tile_primitives.is_empty() {

@@ -2,7 +2,7 @@
 //! block between early relics ([`super::pre_yaku_layer`]) and post-yaku relics
 //! ([`super::relic_mult_layer`]).
 
-use crate::core::hand::DetectedSet;
+use crate::core::hand::DetectedMeld;
 use crate::core::relic::{RelicId, ScoreContext};
 use crate::core::structure::structure_depth_mult_bonus;
 use crate::core::tile::Tile;
@@ -16,7 +16,7 @@ use super::{ScoreStep, StepKind, combine, tile_is_debuffed};
 pub(crate) fn apply_dora_yaku_and_structure(
     ctx: &ScoreContext<'_>,
     tiles: &[Tile],
-    sets: &[DetectedSet],
+    sets: &[DetectedMeld],
     eff: EffectiveRelics,
     censor_repeats: bool,
     original_tiles: Option<&[Tile]>,

@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
-use crate::core::hand::{DetectedSet, SetKind, validate_selection};
+use crate::core::hand::{DetectedMeld, MeldKind, validate_selection};
 use crate::core::json_asset::load_json_asset;
 use crate::core::tile::{Suit, Tile};
 
@@ -188,7 +188,7 @@ pub fn yaku_preview(
     tiles: &[Tile],
     available: &[YakuKind],
     round_wind: Option<u8>,
-    wildcard_result: Option<(&[DetectedSet], &[Tile])>,
+    wildcard_result: Option<(&[DetectedMeld], &[Tile])>,
 ) -> Vec<YakuPreview> {
     let (sets_opt, effective_tiles, original) = match wildcard_result {
         Some((sets, resolved)) => (Some(sets.to_vec()), resolved, Some(tiles)),
@@ -205,7 +205,7 @@ pub fn yaku_preview(
 
 fn yaku_preview_inner(
     tiles: &[Tile],
-    sets_opt: &Option<Vec<DetectedSet>>,
+    sets_opt: &Option<Vec<DetectedMeld>>,
     available: &[YakuKind],
     round_wind: Option<u8>,
     original_tiles: Option<&[Tile]>,
@@ -240,7 +240,7 @@ fn yaku_preview_inner(
 pub fn detect_yaku_with_wind(
     // checked against what the player actually selected, not the resolved faces.
     tiles: &[Tile],
-    sets: &[DetectedSet],
+    sets: &[DetectedMeld],
     round_wind: Option<u8>,
     original_tiles: Option<&[Tile]>,
 ) -> Vec<YakuKind> {
@@ -294,26 +294,26 @@ pub fn detect_yaku_with_wind(
 }
 
 /// True if `tiles`/`sets` form a complete standard win (4 melds + pair or chiitoitsu).
-pub fn is_complete_winning_hand(tiles: &[Tile], sets: &[DetectedSet]) -> bool {
+pub fn is_complete_winning_hand(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
     is_full_hand(tiles, sets) || is_chiitoitsu(sets) || is_kokushi_musou(sets, tiles)
 }
 
-/// Kokushi Musō: twelve [`SetKind::Single`] and one [`SetKind::Pair`], using exactly
+/// Kokushi Musō: twelve [`MeldKind::Single`] and one [`MeldKind::Pair`], using exactly
 /// the thirteen orphan faces with one duplicated.
-fn is_kokushi_musou(sets: &[DetectedSet], tiles: &[Tile]) -> bool {
+fn is_kokushi_musou(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
     if sets.len() != 13 {
         return false;
     }
-    let singles = sets.iter().filter(|s| s.kind == SetKind::Single).count();
-    let pairs = sets.iter().filter(|s| s.kind == SetKind::Pair).count();
+    let singles = sets.iter().filter(|s| s.kind == MeldKind::Single).count();
+    let pairs = sets.iter().filter(|s| s.kind == MeldKind::Pair).count();
     if singles != 12 || pairs != 1 {
         return false;
     }
     for s in sets {
         match s.kind {
-            SetKind::Single if s.tile_ids.len() == 1 => {}
-            SetKind::Pair if s.tile_ids.len() == 2 => {}
-            SetKind::Single | SetKind::Pair => return false,
+            MeldKind::Single if s.tile_ids.len() == 1 => {}
+            MeldKind::Pair if s.tile_ids.len() == 2 => {}
+            MeldKind::Single | MeldKind::Pair => return false,
             _ => return false,
         }
     }
@@ -335,21 +335,21 @@ fn is_kokushi_musou(sets: &[DetectedSet], tiles: &[Tile]) -> bool {
 /// Toitoi (formerly `AllTriplets`): all non-pair sets are triplets or kongs,
 /// no sequences. Requires ≥ 2 such melds so a single meld can't trivially
 /// claim the bonus.
-fn is_toitoi(sets: &[DetectedSet]) -> bool {
+fn is_toitoi(sets: &[DetectedMeld]) -> bool {
     let triplet_like = sets
         .iter()
-        .filter(|s| matches!(s.kind, SetKind::Triplet | SetKind::Kong))
+        .filter(|s| matches!(s.kind, MeldKind::Triplet | MeldKind::Kong))
         .count();
-    let sequences = sets.iter().filter(|s| s.kind == SetKind::Sequence).count();
+    let sequences = sets.iter().filter(|s| s.kind == MeldKind::Sequence).count();
     triplet_like >= 2 && sequences == 0
 }
 
 /// Yakuhai: a triplet (or kong) of any dragon, or of the round wind. The
 /// round wind is the ante's wind (East/South/West/North) — passed in via
 /// `round_wind` (1..=4) or `None` if the caller doesn't track it.
-fn is_yakuhai(tiles: &[Tile], sets: &[DetectedSet], round_wind: Option<u8>) -> bool {
+fn is_yakuhai(tiles: &[Tile], sets: &[DetectedMeld], round_wind: Option<u8>) -> bool {
     sets.iter()
-        .filter(|s| matches!(s.kind, SetKind::Triplet | SetKind::Kong))
+        .filter(|s| matches!(s.kind, MeldKind::Triplet | MeldKind::Kong))
         .any(|s| {
             s.tile_ids
                 .first()
@@ -375,13 +375,13 @@ fn is_tanyao(tiles: &[Tile]) -> bool {
 
 /// Chiitoitsu: 7 distinct pairs and nothing else (no triplets, no sequences,
 /// no kongs). The hand-validation layer in `hand.rs` reframes 14-tile
-/// chiitoitsu hands as `Vec<DetectedSet>` of 7 `Pair`s, so we just need to
+/// chiitoitsu hands as `Vec<DetectedMeld>` of 7 `Pair`s, so we just need to
 /// check that shape here.
-fn is_chiitoitsu(sets: &[DetectedSet]) -> bool {
+fn is_chiitoitsu(sets: &[DetectedMeld]) -> bool {
     if sets.len() != 7 {
         return false;
     }
-    if sets.iter().any(|s| s.kind != SetKind::Pair) {
+    if sets.iter().any(|s| s.kind != MeldKind::Pair) {
         return false;
     }
     // All 7 pairs must be distinct faces. Tile ids guarantee that the same
@@ -404,10 +404,10 @@ fn is_chiitoitsu(sets: &[DetectedSet]) -> bool {
 /// Iipeikou: two identical sequences in the same suit (e.g. 1-2-3m + 1-2-3m).
 /// We compare normalized (suit, low_rank) tuples for each sequence and look
 /// for duplicates.
-fn is_iipeikou(sets: &[DetectedSet], tiles: &[Tile]) -> bool {
+fn is_iipeikou(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
     let mut seq_keys: Vec<(Suit, u8)> = sets
         .iter()
-        .filter(|s| s.kind == SetKind::Sequence)
+        .filter(|s| s.kind == MeldKind::Sequence)
         .filter_map(|s| {
             let mut ranks: Vec<(Suit, u8)> = s
                 .tile_ids
@@ -426,10 +426,10 @@ fn is_iipeikou(sets: &[DetectedSet], tiles: &[Tile]) -> bool {
 /// Sanshoku Doujun: same numerical run in all three number suits. The hand
 /// must contain three sequences whose `(low_rank)` matches across
 /// Characters / Bamboos / Circles.
-fn is_sanshoku_doujun(sets: &[DetectedSet], tiles: &[Tile]) -> bool {
+fn is_sanshoku_doujun(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
     use std::collections::HashMap;
     let mut by_low: HashMap<u8, Vec<Suit>> = HashMap::new();
-    for s in sets.iter().filter(|s| s.kind == SetKind::Sequence) {
+    for s in sets.iter().filter(|s| s.kind == MeldKind::Sequence) {
         let tile_refs: Vec<&Tile> = s
             .tile_ids
             .iter()
@@ -450,11 +450,11 @@ fn is_sanshoku_doujun(sets: &[DetectedSet], tiles: &[Tile]) -> bool {
 }
 
 /// Ittsu: 1-2-3, 4-5-6, 7-8-9 in a single number suit (a complete 1-9 run).
-fn is_ittsu(sets: &[DetectedSet], tiles: &[Tile]) -> bool {
+fn is_ittsu(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
     use std::collections::HashMap;
     // For each number suit, gather the set of low-ranks of sequences in that suit.
     let mut suit_lows: HashMap<Suit, Vec<u8>> = HashMap::new();
-    for s in sets.iter().filter(|s| s.kind == SetKind::Sequence) {
+    for s in sets.iter().filter(|s| s.kind == MeldKind::Sequence) {
         let tile_refs: Vec<&Tile> = s
             .tile_ids
             .iter()
@@ -525,7 +525,7 @@ fn is_honitsu(tiles: &[Tile]) -> bool {
 /// Junchan: every meld contains at least one terminal (1 or 9) and the pair
 /// is also a terminal pair. Honors disqualify (that's Honroutou's territory).
 /// Requires ≥ 5 non-flower tiles and ≥ 2 sets. Flowers are neutral.
-fn is_junchan(sets: &[DetectedSet], tiles: &[Tile]) -> bool {
+fn is_junchan(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
     let regular: Vec<&Tile> = tiles.iter().filter(|t| !t.is_flower()).collect();
     if regular.len() < 5 || sets.len() < 2 {
         return false;
@@ -562,8 +562,8 @@ fn is_honroutou(tiles: &[Tile]) -> bool {
 /// usual 14. Two kongs → 16 tiles, etc. Flower tiles in melds count toward
 /// the total (they substitute for regular tiles), plus unused flowers are
 /// allowed as extras.
-fn is_full_hand(tiles: &[Tile], sets: &[DetectedSet]) -> bool {
-    let kongs = sets.iter().filter(|s| s.kind == SetKind::Kong).count();
+fn is_full_hand(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
+    let kongs = sets.iter().filter(|s| s.kind == MeldKind::Kong).count();
     // Count tiles that are part of melds (includes flower substitutes).
     let tiles_in_sets: usize = sets.iter().map(|s| s.tile_ids.len()).sum();
     // The remaining tiles should be unused flowers.
@@ -583,9 +583,9 @@ fn is_full_hand(tiles: &[Tile], sets: &[DetectedSet]) -> bool {
     }
     let melds = sets
         .iter()
-        .filter(|s| matches!(s.kind, SetKind::Triplet | SetKind::Sequence | SetKind::Kong))
+        .filter(|s| matches!(s.kind, MeldKind::Triplet | MeldKind::Sequence | MeldKind::Kong))
         .count();
-    let pairs = sets.iter().filter(|s| s.kind == SetKind::Pair).count();
+    let pairs = sets.iter().filter(|s| s.kind == MeldKind::Pair).count();
     melds == 4 && pairs == 1
 }
 
@@ -611,16 +611,16 @@ mod tests {
             t(Suit::Wind, 1, 7),
         ];
         let sets = vec![
-            DetectedSet {
-                kind: SetKind::Triplet,
+            DetectedMeld {
+                kind: MeldKind::Triplet,
                 tile_ids: vec![0, 1, 2],
             },
-            DetectedSet {
-                kind: SetKind::Triplet,
+            DetectedMeld {
+                kind: MeldKind::Triplet,
                 tile_ids: vec![3, 4, 5],
             },
-            DetectedSet {
-                kind: SetKind::Pair,
+            DetectedMeld {
+                kind: MeldKind::Pair,
                 tile_ids: vec![6, 7],
             },
         ];
@@ -639,12 +639,12 @@ mod tests {
             t(Suit::Circles, 5, 4),
         ];
         let sets = vec![
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![0, 1, 2],
             },
-            DetectedSet {
-                kind: SetKind::Pair,
+            DetectedMeld {
+                kind: MeldKind::Pair,
                 tile_ids: vec![3, 4],
             },
         ];
@@ -662,12 +662,12 @@ mod tests {
             t(Suit::Circles, 5, 4),
         ];
         let sets = vec![
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![0, 1, 2],
             },
-            DetectedSet {
-                kind: SetKind::Pair,
+            DetectedMeld {
+                kind: MeldKind::Pair,
                 tile_ids: vec![3, 4],
             },
         ];
@@ -694,24 +694,24 @@ mod tests {
             t(Suit::Wind, 1, 13),
         ];
         let sets = vec![
-            DetectedSet {
-                kind: SetKind::Triplet,
+            DetectedMeld {
+                kind: MeldKind::Triplet,
                 tile_ids: vec![0, 1, 2],
             },
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![3, 4, 5],
             },
-            DetectedSet {
-                kind: SetKind::Triplet,
+            DetectedMeld {
+                kind: MeldKind::Triplet,
                 tile_ids: vec![6, 7, 8],
             },
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![9, 10, 11],
             },
-            DetectedSet {
-                kind: SetKind::Pair,
+            DetectedMeld {
+                kind: MeldKind::Pair,
                 tile_ids: vec![12, 13],
             },
         ];
@@ -722,8 +722,8 @@ mod tests {
     #[test]
     fn no_yaku_on_simple_pair() {
         let tiles = vec![t(Suit::Bamboos, 3, 0), t(Suit::Bamboos, 3, 1)];
-        let sets = vec![DetectedSet {
-            kind: SetKind::Pair,
+        let sets = vec![DetectedMeld {
+            kind: MeldKind::Pair,
             tile_ids: vec![0, 1],
         }];
         let yaku = detect_yaku_with_wind(&tiles, &sets, None, None);
@@ -753,9 +753,9 @@ mod tests {
             t(Suit::Dragon, 2, 12),
             t(Suit::Dragon, 2, 13),
         ];
-        let sets: Vec<DetectedSet> = (0..7)
-            .map(|i| DetectedSet {
-                kind: SetKind::Pair,
+        let sets: Vec<DetectedMeld> = (0..7)
+            .map(|i| DetectedMeld {
+                kind: MeldKind::Pair,
                 tile_ids: vec![(i * 2) as u32, (i * 2 + 1) as u32],
             })
             .collect();
@@ -773,12 +773,12 @@ mod tests {
             t(Suit::Bamboos, 4, 4),
         ];
         let sets = vec![
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![0, 1, 2],
             },
-            DetectedSet {
-                kind: SetKind::Pair,
+            DetectedMeld {
+                kind: MeldKind::Pair,
                 tile_ids: vec![3, 4],
             },
         ];
@@ -797,12 +797,12 @@ mod tests {
             t(Suit::Wind, 1, 4),
         ];
         let sets = vec![
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![0, 1, 2],
             },
-            DetectedSet {
-                kind: SetKind::Pair,
+            DetectedMeld {
+                kind: MeldKind::Pair,
                 tile_ids: vec![3, 4],
             },
         ];
@@ -825,16 +825,16 @@ mod tests {
             t(Suit::Dragon, 3, 7),
         ];
         let sets = vec![
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![0, 1, 2],
             },
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![3, 4, 5],
             },
-            DetectedSet {
-                kind: SetKind::Pair,
+            DetectedMeld {
+                kind: MeldKind::Pair,
                 tile_ids: vec![6, 7],
             },
         ];
@@ -853,12 +853,12 @@ mod tests {
             t(Suit::Characters, 4, 5),
         ];
         let sets = vec![
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![0, 1, 2],
             },
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![3, 4, 5],
             },
         ];
@@ -880,16 +880,16 @@ mod tests {
             t(Suit::Circles, 6, 8),
         ];
         let sets = vec![
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![0, 1, 2],
             },
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![3, 4, 5],
             },
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![6, 7, 8],
             },
         ];
@@ -911,16 +911,16 @@ mod tests {
             t(Suit::Circles, 9, 8),
         ];
         let sets = vec![
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![0, 1, 2],
             },
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![3, 4, 5],
             },
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![6, 7, 8],
             },
         ];
@@ -938,12 +938,12 @@ mod tests {
             t(Suit::Wind, 1, 4),
         ];
         let sets = vec![
-            DetectedSet {
-                kind: SetKind::Triplet,
+            DetectedMeld {
+                kind: MeldKind::Triplet,
                 tile_ids: vec![0, 1, 2],
             },
-            DetectedSet {
-                kind: SetKind::Pair,
+            DetectedMeld {
+                kind: MeldKind::Pair,
                 tile_ids: vec![3, 4],
             },
         ];
@@ -974,7 +974,7 @@ mod tests {
         ];
         let sets = validate_selection(&tiles).expect("seven pairs should validate");
         assert_eq!(sets.len(), 7);
-        assert!(sets.iter().all(|s| s.kind == SetKind::Pair));
+        assert!(sets.iter().all(|s| s.kind == MeldKind::Pair));
     }
 
     #[test]
@@ -985,8 +985,8 @@ mod tests {
             t(Suit::Dragon, 2, 1),
             t(Suit::Dragon, 2, 2),
         ];
-        let sets = vec![DetectedSet {
-            kind: SetKind::Triplet,
+        let sets = vec![DetectedMeld {
+            kind: MeldKind::Triplet,
             tile_ids: vec![0, 1, 2],
         }];
         assert!(detect_yaku_with_wind(&tiles, &sets, None, None).contains(&YakuKind::Yakuhai));
@@ -1001,8 +1001,8 @@ mod tests {
             t(Suit::Wind, 1, 1),
             t(Suit::Wind, 1, 2),
         ];
-        let sets = vec![DetectedSet {
-            kind: SetKind::Triplet,
+        let sets = vec![DetectedMeld {
+            kind: MeldKind::Triplet,
             tile_ids: vec![0, 1, 2],
         }];
         // Without wind context, wind triplets don't fire.
@@ -1022,8 +1022,8 @@ mod tests {
             t(Suit::Dragon, 1, 2),
             t(Suit::Dragon, 1, 3),
         ];
-        let sets = vec![DetectedSet {
-            kind: SetKind::Kong,
+        let sets = vec![DetectedMeld {
+            kind: MeldKind::Kong,
             tile_ids: vec![0, 1, 2, 3],
         }];
         assert!(detect_yaku_with_wind(&tiles, &sets, None, None).contains(&YakuKind::Yakuhai));

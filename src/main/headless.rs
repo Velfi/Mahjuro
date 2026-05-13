@@ -153,7 +153,7 @@ fn setup_shop_state(run: &mut RunState) {
 /// filled only up to the mode cap (standard = 2).
 fn setup_gameplay_screenshot_state(run: &mut RunState) {
     use crate::core::consumable::Consumable;
-    use crate::core::hand::{DetectedSet, SetKind};
+    use crate::core::hand::{DetectedMeld, MeldKind};
     use crate::core::relic::RelicId;
     use crate::core::talisman::TalismanKind;
     use crate::core::tile::{Suit, Tile};
@@ -180,24 +180,24 @@ fn setup_gameplay_screenshot_state(run: &mut RunState) {
         Tile::new(Suit::Wind, 1, 14),
     ];
     *run.structure_sets_mut() = vec![
-        DetectedSet {
-            kind: SetKind::Pair,
+        DetectedMeld {
+            kind: MeldKind::Pair,
             tile_ids: vec![1, 2],
         },
-        DetectedSet {
-            kind: SetKind::Sequence,
+        DetectedMeld {
+            kind: MeldKind::Sequence,
             tile_ids: vec![3, 4, 5],
         },
-        DetectedSet {
-            kind: SetKind::Sequence,
+        DetectedMeld {
+            kind: MeldKind::Sequence,
             tile_ids: vec![6, 7, 8],
         },
-        DetectedSet {
-            kind: SetKind::Sequence,
+        DetectedMeld {
+            kind: MeldKind::Sequence,
             tile_ids: vec![9, 10, 11],
         },
-        DetectedSet {
-            kind: SetKind::Triplet,
+        DetectedMeld {
+            kind: MeldKind::Triplet,
             tile_ids: vec![12, 13, 14],
         },
     ];

@@ -1,4 +1,4 @@
-//! Shop scene — between rounds; player can buy relics with gold (`THEME.md` storeroom + `Shop.glb`).
+//! Shop scene — between rounds; player can buy relics with gold (`THEME.md` storeroom + `shop.glb`).
 //!
 //! **[`ShopScene`]** is the [`crate::scenes::Scene`] variant; rendering and hit layout live in the internal `view` module.
 

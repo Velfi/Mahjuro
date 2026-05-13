@@ -16,7 +16,8 @@
         "audio/",
         "Instrument_Serif/",
         "Cormorant_Garamond/",
-        "Noto_Emoji/"
+        "Noto_Emoji/",
+        "Noto_Sans_Math/"
       ],
       "root_files": []
     },

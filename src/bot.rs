@@ -21,7 +21,7 @@ use std::time::Instant;
 
 use crate::core::consumable::Consumable;
 use crate::core::deck::Wall;
-use crate::core::hand::{SetKind, detect_all_sets, validate_selection_with_rules};
+use crate::core::hand::{MeldKind, detect_all_sets, validate_selection_with_rules};
 use crate::core::relic::{
     RelicId, RelicState, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
     ScoreRoundBundle, ScoreTileBundle, all_relic_defs, relic_shop_price,
@@ -377,13 +377,13 @@ fn indices_from_play_mask(hand_len: usize, mask: u32) -> Vec<usize> {
 fn structure_commit_fits(
     run: &RunState,
     scoring_tile_count: usize,
-    new_sets: &[crate::core::hand::DetectedSet],
+    new_sets: &[crate::core::hand::DetectedMeld],
 ) -> bool {
     let kongs_after = run
         .structure_sets()
         .iter()
         .chain(new_sets.iter())
-        .filter(|s| s.kind == SetKind::Kong)
+        .filter(|s| s.kind == MeldKind::Kong)
         .count();
     run.structure_tiles().len() + scoring_tile_count
         <= crate::game::run::HAND_SIZE + kongs_after
@@ -601,7 +601,7 @@ fn next_combination_in_range(pos: &mut [usize], n: usize) -> bool {
     false
 }
 
-/// Kokushi Musō uses twelve [`SetKind::Single`]s and one pair — the meld-based enumerator
+/// Kokushi Musō uses twelve [`MeldKind::Single`]s and one pair — the meld-based enumerator
 /// never selects singletons, so it would miss every Kokushi win. Add every 14-tile orphan
 /// subset that [`validate_selection_with_rules`] accepts as Kokushi (or another valid hand).
 fn push_kokushi_play_masks(
@@ -1436,7 +1436,7 @@ mod tests {
         use_bot_consumables, zodiac_marginal_value_with_base, RunStats, ShopMarginalBase,
     };
     use crate::core::consumable::Consumable;
-    use crate::core::hand::{DetectedSet, SetKind};
+    use crate::core::hand::{DetectedMeld, MeldKind};
     use crate::core::talisman::TalismanKind;
     use crate::core::tile::{Suit, Tile};
     use crate::core::zodiac::ZodiacKind;
@@ -1475,7 +1475,7 @@ mod tests {
                 .structure_sets()
                 .iter()
                 .chain(sets.iter())
-                .filter(|s| s.kind == SetKind::Kong)
+                .filter(|s| s.kind == MeldKind::Kong)
                 .count();
             if run.structure_tiles().len() + scoring_tiles.len()
                 > crate::game::run::HAND_SIZE + kongs_after
@@ -1545,20 +1545,20 @@ mod tests {
         let mut run = RunState::new_demo();
         *run.structure_tiles_mut() = run.hand().iter().take(12).copied().collect();
         *run.structure_sets_mut() = vec![
-            DetectedSet {
-                kind: SetKind::Triplet,
+            DetectedMeld {
+                kind: MeldKind::Triplet,
                 tile_ids: run.structure_tiles()[0..3].iter().map(|t| t.id).collect(),
             },
-            DetectedSet {
-                kind: SetKind::Triplet,
+            DetectedMeld {
+                kind: MeldKind::Triplet,
                 tile_ids: run.structure_tiles()[3..6].iter().map(|t| t.id).collect(),
             },
-            DetectedSet {
-                kind: SetKind::Triplet,
+            DetectedMeld {
+                kind: MeldKind::Triplet,
                 tile_ids: run.structure_tiles()[6..9].iter().map(|t| t.id).collect(),
             },
-            DetectedSet {
-                kind: SetKind::Triplet,
+            DetectedMeld {
+                kind: MeldKind::Triplet,
                 tile_ids: run.structure_tiles()[9..12].iter().map(|t| t.id).collect(),
             },
         ];

@@ -253,7 +253,7 @@ pub struct DrawCtx<'a> {
     /// live-preview nudges on placements that can't be routed through
     /// `apply_arrange_override` (wind emitters, particle sources, etc.).
     pub arrange_preview: Option<crate::ui::placement::ArrangePreview>,
-    /// Vertical scale for embedded glTF room scenes (`Shop.glb`, `hallway.glb`, `archive.glb`, …):
+    /// Vertical scale for embedded glTF room scenes (`shop.glb`, `hallway.glb`, `archive.glb`, …):
     /// authored room height is multiplied by `window_h *` this. Debug tuning can override.
     pub room_gltf_height_scale: f32,
     /// Shop punctual + tonemap tuning (debug overlay / defaults from `shop_glb` constants).
