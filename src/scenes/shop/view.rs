@@ -40,7 +40,7 @@ use crate::render::world_space::{
 use crate::scenes::journal_transition;
 use crate::scenes::object3d_inspect::{
     InspectFrameEnv, InspectRig, ItemInspectOrbitState, apply_inspect_view_to_frame,
-    inspect_orbit_camera,
+    inspect_orbit_camera, prepend_inspect_orbit_subject_rotation,
 };
 use crate::scenes::options::OptionsScene;
 use crate::scenes::{
@@ -355,7 +355,7 @@ fn shop_inspect_pivot_world(
     ))
 }
 
-/// World-space inspect target for orbit camera (matches shelf mesh anchor under `base` cam).
+/// World-space inspect target for fixed inspect camera (matches shelf mesh anchor under `base` cam).
 pub(super) fn shop_inspect_target_world(
     scene: &ShopScene,
     w: f32,
@@ -401,7 +401,7 @@ pub(super) fn shop_sync_item_inspect_orbit_target(
         return;
     }
     let shop_rm = GameEngine::read_shop(run);
-    let env_h = scene.drawn_env_height_scale.get();
+    let env_h = scene.drawn_room_gltf_height_scale.get();
     let rig = InspectRig::shop(h, env_h);
     for _ in 0..4 {
         let cam_try = inspect_orbit_camera(orbit, &rig);
@@ -573,7 +573,7 @@ impl SceneBehavior for ShopScene {
 impl ShopScene {
     pub(super) fn stash_focus_rects(&mut self, w: f32, h: f32, run: &RunState) {
         let shop = GameEngine::read_shop(run);
-        let env_h = self.drawn_env_height_scale.get();
+        let env_h = self.drawn_room_gltf_height_scale.get();
         let cam = shop_camera_params(w, h, env_h);
         *self.last_focus_rects.borrow_mut() = build_focus_rects(self, w, h, &cam, &shop);
     }
@@ -635,7 +635,7 @@ fn push_shop_inspect_overlay_chrome(out: &mut Vec<TextLabel>, ctx: &DrawCtx<'_>,
     });
 }
 
-/// Showcase shop inspect: dark backdrop + orbit camera + focused stock mesh only (no storeroom GLB or shop HUD).
+/// Showcase shop inspect: dark backdrop + fixed inspect camera + turntable hero mesh only (no storeroom GLB or shop HUD).
 pub(crate) fn render_shop_inspect_isolated_frame(
     shop: &ShopScene,
     ctx: DrawCtx<'_>,
@@ -643,8 +643,8 @@ pub(crate) fn render_shop_inspect_isolated_frame(
 ) -> UiFrame {
     let w = ctx.layout.window_w;
     let h = ctx.layout.window_h;
-    let env_h = ctx.shop_env_height_scale;
-    shop.drawn_env_height_scale.set(env_h);
+    let env_h = ctx.room_gltf_height_scale;
+    shop.drawn_room_gltf_height_scale.set(env_h);
     let shop_rm = GameEngine::read_shop(ctx.run);
 
     let mut frame = UiFrame::new();
@@ -677,6 +677,7 @@ pub(crate) fn render_shop_inspect_isolated_frame(
     if let Some(subj) = stock_subj {
         frame.clear_scene_depth();
         frame.shop_inspect_lit_mesh_subject_hdr();
+        let subj = prepend_inspect_orbit_subject_rotation(subj, &o, &inspect_rig);
         frame.object3d_batch(vec![subj]);
     }
 
@@ -738,8 +739,8 @@ pub(crate) fn render_shop_inspect_isolated_frame(
 pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
     let w = ctx.layout.window_w;
     let h = ctx.layout.window_h;
-    let env_h = ctx.shop_env_height_scale;
-    shop.drawn_env_height_scale.set(env_h);
+    let env_h = ctx.room_gltf_height_scale;
+    shop.drawn_room_gltf_height_scale.set(env_h);
     let shop_rm = GameEngine::read_shop(ctx.run);
 
     let scale = metrics::scene_scale(w, h);
@@ -1232,7 +1233,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
             ctx.debug_visibility,
             ctx.modal_active,
             ctx.arrange_preview.clone(),
-            ctx.shop_env_height_scale,
+            ctx.room_gltf_height_scale,
             ctx.shop_env_lighting,
             ctx.effect_layers,
             ctx.cursor_pos,
@@ -1808,7 +1809,7 @@ fn ring_target_rect(
 ) -> Option<[f32; 4]> {
     if ctx.input_mode == InputMode::Cursor {
         let (cx, cy) = ctx.cursor_pos;
-        return cursor_hover_rect(cx, cy, w, h, cam, scene, shop, ctx.shop_env_height_scale);
+        return cursor_hover_rect(cx, cy, w, h, cam, scene, shop, ctx.room_gltf_height_scale);
     }
     scene.focus.and_then(|f| {
         build_focus_rects(scene, w, h, cam, shop)
@@ -2069,7 +2070,7 @@ fn push_stock_meshes(
     let mut dim = Vec::new();
     let mut subject = None;
     let niche_base = w * 0.048;
-    let env_h = scene.drawn_env_height_scale.get();
+    let env_h = scene.drawn_room_gltf_height_scale.get();
 
     let sale = for_sale_slots(scene);
     for (slot_i, foc_opt) in sale.iter().enumerate() {
@@ -2637,7 +2638,7 @@ pub(in crate::scenes::shop) fn snap_focus_after_shop_purchase(
     }
 
     let shop = GameEngine::read_shop(run);
-    let env_h = scene.drawn_env_height_scale.get();
+    let env_h = scene.drawn_room_gltf_height_scale.get();
     let cam = shop_camera_params(w, h, env_h);
     let rects = build_focus_rects(scene, w, h, &cam, &shop);
 
@@ -2666,7 +2667,7 @@ fn build_focus_rects(
     cam: &CameraParams,
     shop: &ShopReadModel,
 ) -> Vec<(ShopFocus, [f32; 4])> {
-    let env_h = scene.drawn_env_height_scale.get();
+    let env_h = scene.drawn_room_gltf_height_scale.get();
     let mut v = Vec::new();
     let sale_slots = for_sale_slots(scene);
     for (i, sf) in sale_slots.into_iter().enumerate() {

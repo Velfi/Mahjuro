@@ -50,7 +50,7 @@ use crate::render::decal::{
 };
 use crate::render::dora_plinth_mesh::build_dora_plinth_mesh;
 use crate::render::draw_cmd::{
-    CascadeTokenKind, DrawCmd, ShowcaseTilePlacement, ShrinePlacement, TallyFanKind, TileFaceQuad,
+    CascadeTokenKind, DrawCmd, ShowcaseTilePlacement, TallyFanKind, TileFaceQuad,
     UiFrame, WallStackPlacement, YakuTabletPlacement,
 };
 use crate::render::gpu_types::{DecodedRelicImage, RelicTextureGpu};
@@ -78,7 +78,6 @@ use crate::render::river_mesh::{
     build_river_mesh,
 };
 use crate::render::shop_bell_mesh::build_shop_bell_mesh;
-use crate::render::shrine_mesh::build_shrine_mesh;
 use crate::render::table_mesh::build_table_mesh;
 use crate::render::table_transform::{
     mesh_y_thickness_along_local_y_to_z_up, ribbon_submesh, rot_euler_xyz_rad,
@@ -203,9 +202,17 @@ pub struct WgpuRenderer {
     /// [`hallway.glb`](../../assets/hallway.glb) pick-blind room.
     hallway_env_primitives: Vec<TilePrimitiveGpu>,
     hallway_environment: Option<ShopEnvironmentGpu>,
-    /// Multiplier for `Shop.glb` environment scale (`window_h *` this). Set each frame from the app
-    /// (debug overlay may override [`crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE`]).
-    shop_env_height_scale: f32,
+    /// [`archive.glb`](../../assets/archive.glb) Archive room.
+    archive_env_primitives: Vec<TilePrimitiveGpu>,
+    archive_environment: Option<ShopEnvironmentGpu>,
+    /// GPU primitive index of `sign_description_left` in `archive_env_primitives` (for culling).
+    archive_sign_left_prim_idx: Option<usize>,
+    archive_sign_right_prim_idx: Option<usize>,
+    /// Last-uploaded description decal (`archive_sign_decal_texture`); `u64::MAX` = cleared / none.
+    archive_sign_decal_upload_key: u64,
+    /// Multiplier for embedded glTF **room** scale (`window_h *` this): shop, hallway, archive, etc.
+    /// Set each frame from the app (debug overlay may override [`crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE`]).
+    room_gltf_height_scale: f32,
     /// Debug HDR multiplier; shop applies [`crate::render::shop_glb::SHOP_ENV_LINEAR_EXPOSURE_BASE`]
     /// × this before ACES (`CameraUniform.tile_seed` + `SsrGlobals.felt.z`).
     shop_env_linear_exposure: f32,
@@ -496,8 +503,6 @@ pub struct WgpuRenderer {
     // ── Shop scene meshes (curio cabinet + ribbons + talismans) ─
     ribbon_mesh: LitMeshGpu,
     talisman_mesh: LitMeshGpu,
-    /// Procedural shrine mesh used by the pick-blind scene.
-    shrine_mesh: LitMeshGpu,
     /// Procedural ornate brass plinth used by the gameplay scene to hold
     /// the dora indicator tile(s).
     dora_plinth_mesh: LitMeshGpu,
@@ -552,9 +557,6 @@ pub struct WgpuRenderer {
     /// render flat, previewing the shading model rather than any per-asset
     /// heightmap.
     orb_instances: Vec<LitMeshInstance>,
-    /// Per-shrine instances (pick-blind scene). Indexed sequentially by
-    /// `ShrineBatch` placement order; truncated at `MAX_SHRINE_SLOTS`.
-    shrine_instances: Vec<LitMeshInstance>,
     /// Per-dora-plinth instances (gameplay scene). Truncated at
     /// `MAX_DORA_PLINTH_SLOTS`. The gameplay scene only ever pushes one
     /// plinth per frame, but the slot pool tolerates more without allocation.
@@ -714,7 +716,7 @@ pub use constants::{
     MAIN_MENU_PICK_OPTIONS, MAIN_MENU_PICK_PLAY, MAIN_MENU_PICK_QUIT, MAX_BOOK_SLOTS,
     MAX_BOWL_SLOTS, MAX_BUG_SLOTS, MAX_CASCADE_TOKEN_SLOTS, MAX_DORA_PLINTH_SLOTS,
     MAX_EXTRUDED_GLYPH_SLOTS, MAX_MIRROR_SLOTS, MAX_ORB_SLOTS, MAX_POINT_LIGHTS, MAX_RELIC_SLOTS,
-    MAX_RIBBON_SLOTS, MAX_SHRINE_SLOTS, MAX_SPOT_LIGHTS, MAX_TALISMAN_SLOTS, MAX_TALLY_FAN_SLOTS,
+    MAX_RIBBON_SLOTS, MAX_SPOT_LIGHTS, MAX_TALISMAN_SLOTS, MAX_TALLY_FAN_SLOTS,
     MAX_TALLY_STICK_SLOTS, MAX_TILE_OCCLUDERS, MAX_WALL_TILE_SLOTS, MAX_WOOD_TABLET_SLOTS,
     MAX_YAKU_TABLET_SLOTS,
 };

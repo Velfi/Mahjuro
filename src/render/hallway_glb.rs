@@ -143,7 +143,7 @@ pub fn hallway_camera_from_glb_if_present(
     })
 }
 
-/// Camera for pick-blind: embedded perspective when present, else fit bounds (legacy shrine framing).
+/// Camera for pick-blind: embedded perspective when present, else fit bounds.
 pub fn hallway_camera_base(w: f32, h: f32, env_h: f32) -> CameraParams {
     let from_glb = hallway_camera_from_glb_if_present(h, env_h);
     let cam = from_glb.unwrap_or_else(|| CameraParams {

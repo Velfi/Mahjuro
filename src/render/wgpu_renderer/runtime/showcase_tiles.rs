@@ -282,7 +282,7 @@ impl WgpuRenderer {
                             let gy = overlay_y + (overlay_h - gh) * 0.5;
                             tile_glows.push(GpuInstance {
                                 rect: [gx, gy, gw, gh],
-                                color: p.glow_color.unwrap_or([1.00, 0.78, 0.32, 0.55]),
+                                color: p.glow_color.unwrap_or([1.00, 0.38, 0.05, 0.62]),
                             });
                         }
                     }
@@ -319,7 +319,7 @@ impl WgpuRenderer {
                         }),
                     );
                     if p.outline {
-                        const OUTLINE_GROW: f32 = 1.055;
+                        const OUTLINE_GROW: f32 = 1.07;
                         let outline_scale = scale * OUTLINE_GROW;
                         let outline_model = translate_rot_scale(center, oriented, outline_scale);
                         self.tile_outline_instances_staging.push(

@@ -735,12 +735,22 @@ pub fn rasterize_wood_tablet_decal(label: &str, ui_font: Option<&fontdue::Font>)
 /// fully transparent. A 2-px-offset carved-shadow pass renders behind each
 /// line so the engraving still reads after the texture is bilinear-stretched
 /// across the on-screen plaque face.
-pub fn rasterize_plaque_decal(
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PlaqueDecalStyle {
+    /// Gilded three-pass engraving for lacquered wood plaques (default).
+    GildedEngraving,
+    /// Dark warm brown ink for light grounds (Archive `sign_description_*` boards).
+    WalnutInkOnLight,
+}
+
+/// Same layout pipeline as [`rasterize_plaque_decal`] with a selectable ink palette.
+pub fn rasterize_plaque_decal_styled(
     text: &str,
     ui_font: Option<&fontdue::Font>,
     emoji_font: Option<&fontdue::Font>,
     w: u32,
     h: u32,
+    style: PlaqueDecalStyle,
 ) -> Vec<u8> {
     let mut rgba = vec![0u8; (w * h * 4) as usize];
     let Some(font) = ui_font else {
@@ -782,12 +792,27 @@ pub fn rasterize_plaque_decal(
         LabelAlign::Center,
     );
 
-    // Gilded letters: a deep umber drop-shadow under a rich gold body, topped
-    // by a bright pale-gold highlight offset up-left. Three passes give the
-    // engraving a metallic, leafed-gold read at any size.
-    let gold_base = [0.92_f32, 0.74, 0.28, 1.0]; // rich antique gold
-    let gold_highlight = [1.00_f32, 0.96, 0.74, 1.0]; // pale champagne sheen
-    let gold_shadow = [0.18_f32, 0.12, 0.04, 0.92]; // burnt umber recess
+    let (shadow, base, highlight): ([f32; 4], [f32; 4], [f32; 4]) = match style {
+        PlaqueDecalStyle::GildedEngraving => {
+            // Gilded letters: a deep umber drop-shadow under a rich gold body, topped
+            // by a bright pale-gold highlight offset up-left. Three passes give the
+            // engraving a metallic, leafed-gold read at any size.
+            (
+                [0.18_f32, 0.12, 0.04, 0.92], // burnt umber recess
+                [0.92_f32, 0.74, 0.28, 1.0],  // rich antique gold
+                [1.00_f32, 0.96, 0.74, 1.0],  // pale champagne sheen
+            )
+        }
+        PlaqueDecalStyle::WalnutInkOnLight => {
+            // Walnut / iron-gall ink on off-white board: cool shadow, dense body,
+            // slight warm lift up-left (not metallic — keeps legibility on white).
+            (
+                [0.11_f32, 0.07, 0.05, 0.88],
+                [0.24_f32, 0.14, 0.095, 1.0],
+                [0.38_f32, 0.26, 0.18, 0.42],
+            )
+        }
+    };
 
     blit_tinted(
         TintedSrc {
@@ -801,7 +826,7 @@ pub fn rasterize_plaque_decal(
             x: pad_x + 3,
             y: pad_y + 3,
         },
-        gold_shadow,
+        shadow,
     );
     blit_tinted(
         TintedSrc {
@@ -815,7 +840,7 @@ pub fn rasterize_plaque_decal(
             x: pad_x,
             y: pad_y,
         },
-        gold_base,
+        base,
     );
     blit_tinted(
         TintedSrc {
@@ -829,9 +854,26 @@ pub fn rasterize_plaque_decal(
             x: pad_x.saturating_sub(1),
             y: pad_y.saturating_sub(1),
         },
-        gold_highlight,
+        highlight,
     );
     rgba
+}
+
+pub fn rasterize_plaque_decal(
+    text: &str,
+    ui_font: Option<&fontdue::Font>,
+    emoji_font: Option<&fontdue::Font>,
+    w: u32,
+    h: u32,
+) -> Vec<u8> {
+    rasterize_plaque_decal_styled(
+        text,
+        ui_font,
+        emoji_font,
+        w,
+        h,
+        PlaqueDecalStyle::GildedEngraving,
+    )
 }
 
 /// Fit `text` into a `(w, h)` area by searching for the largest font size

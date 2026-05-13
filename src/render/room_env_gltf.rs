@@ -18,6 +18,8 @@ use crate::render::tile_glb::{
 
 /// One environment mesh primitive plus embedded glTF sampler parameters for GPU samplers.
 pub struct RoomEnvPrimitiveCpu {
+    /// glTF node name for this primitive (per-node mesh), when known.
+    pub gltf_node_name: Option<String>,
     pub mesh: LoadedPrimitive,
 }
 
@@ -390,6 +392,7 @@ pub fn decode_env_primitive(
     buffers: &[Vec<u8>],
     images: &[gltf::image::Data],
     log_asset_label: &str,
+    gltf_node_name: &str,
 ) -> anyhow::Result<RoomEnvPrimitiveCpu> {
     let normal_xform = node_world.inverse().transpose();
     let material = primitive.material();
@@ -476,7 +479,7 @@ pub fn decode_env_primitive(
         Vec::new()
     };
 
-    let vertices: Vec<Vertex3dTex> = (0..positions_local.len())
+    let mut vertices: Vec<Vertex3dTex> = (0..positions_local.len())
         .map(|i| {
             let p = node_world.transform_point3(Vec3::from(positions_local[i]));
             let n = normal_xform
@@ -497,6 +500,15 @@ pub fn decode_env_primitive(
             }
         })
         .collect();
+    // Archive `sign_description_*` boards: `shop_glb.wgsl` composites `@binding(3)` when alpha > 1.
+    if matches!(
+        gltf_node_name,
+        "sign_description_left" | "sign_description_right"
+    ) {
+        for v in &mut vertices {
+            v.color[3] = 2.0;
+        }
+    }
     let factor = pbr.base_color_factor();
 
     let mut albedo_rgba = pbr.base_color_texture().and_then(|tex_info| {
@@ -555,6 +567,11 @@ pub fn decode_env_primitive(
     let alpha_cutoff = material.alpha_cutoff().unwrap_or(0.5);
 
     Ok(RoomEnvPrimitiveCpu {
+        gltf_node_name: if gltf_node_name.is_empty() {
+            None
+        } else {
+            Some(gltf_node_name.to_string())
+        },
         mesh: LoadedPrimitive {
             vertices,
             indices,
@@ -736,7 +753,7 @@ pub fn walk_room_env_node(
                         Err(e) => log::warn!("{label} node {:?} collision: {e:#}", name),
                     }
                     let decoded =
-                        decode_env_primitive(prim, world, buffers, images, label)?;
+                        decode_env_primitive(prim, world, buffers, images, label, name)?;
                     merge_marker_mesh_bounds(marker_mesh_bounds_doc, name, &decoded);
                     env_primitives.push(decoded);
                 }
@@ -750,7 +767,7 @@ pub fn walk_room_env_node(
             RoomMeshPolicy::EnvironmentDraw => {
                 for prim in mesh.primitives() {
                     let decoded =
-                        decode_env_primitive(prim, world, buffers, images, label)?;
+                        decode_env_primitive(prim, world, buffers, images, label, name)?;
                     if hooks.is_marker(name) {
                         merge_marker_mesh_bounds(marker_mesh_bounds_doc, name, &decoded);
                     }

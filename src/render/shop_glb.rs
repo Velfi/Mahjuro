@@ -173,7 +173,7 @@ pub fn release_shop_environment_cpu_sources_after_gpu_upload() {
 pub const SHOP_ENV_HEIGHT_SCALE: f32 = 1.0;
 
 /// Multiplies glTF punctual **intensity** before upload (document-space inverse-square; see
-/// `decal_atlas_uv.y` / `SsrGlobals.shop_punctual`). Default `1` uses authored intensities.
+/// `decal_atlas_uv.y` / `SsrGlobals.shop_punctual.x` (inverse doc scale for attenuation).
 pub const SHOP_GLTF_LIGHT_INTENSITY_SCALE: f32 = 0.6;
 
 /// Linear HDR gain for **shop** only: `2^-9` ≈ Don McCurdy glTF viewer exposure **−9** (EV on linear HDR).
@@ -370,6 +370,20 @@ pub struct RoomGlbCpu {
     pub embedded_spot_lights: Vec<ShopGlbEmbeddedSpotLight>,
 }
 
+impl RoomGlbCpu {
+    /// glTF node local transform in **document** space (before [`shop_env_model_matrix_from_cpu`]).
+    #[inline]
+    pub fn marker_node_transform_doc(&self, node_name: &str) -> Option<Mat4> {
+        self.markers.get(node_name).copied()
+    }
+
+    /// Document-space AABB for the marker node's mesh (when decoded), for bounds / screen projection.
+    #[inline]
+    pub fn marker_mesh_bounds_doc_for(&self, node_name: &str) -> Option<&ShopEnvironmentBounds> {
+        self.marker_mesh_bounds_doc.get(node_name)
+    }
+}
+
 /// Back-compat name — shop and hallway both decode to [`RoomGlbCpu`].
 #[allow(dead_code)]
 pub type ShopGlbCpu = RoomGlbCpu;
@@ -463,7 +477,7 @@ pub fn screen_rect_for_marker_mesh_bounds(
     min_rw: f32,
     min_rh: f32,
 ) -> Option<[f32; 4]> {
-    let bounds = cpu.marker_mesh_bounds_doc.get(node_name)?;
+    let bounds = cpu.marker_mesh_bounds_doc_for(node_name)?;
     let s = shop_env_world_scale(win_h, env_height_scale);
     let center_doc = cpu
         .environment_bounds_doc

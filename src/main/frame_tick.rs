@@ -483,7 +483,7 @@ impl App {
             });
             let close = overlay.update(&actions, mouse, ww, wh);
             self.mouse_clicked = false;
-            self.debug.shop_env_height_scale = overlay.height_scale;
+            self.debug.room_gltf_height_scale = overlay.height_scale;
             self.debug.shop_env_lighting = overlay.lighting;
             if !close {
                 self.debug.shop_env_debug_overlay = Some(overlay);
@@ -684,7 +684,7 @@ impl App {
                     .unwrap_or(0.0),
                 rumble_lab_ops: &mut rumble_lab_ops,
                 suspended_shop: None,
-                shop_env_height_scale: self.debug.shop_env_height_scale,
+                room_gltf_height_scale: self.debug.room_gltf_height_scale,
                 bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
             })
         } else {
@@ -754,7 +754,7 @@ impl App {
                         .unwrap_or(0.0),
                     rumble_lab_ops: &mut rumble_lab_ops,
                     suspended_shop,
-                    shop_env_height_scale: self.debug.shop_env_height_scale,
+                    room_gltf_height_scale: self.debug.room_gltf_height_scale,
                     bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
                 })
         };

@@ -28,7 +28,7 @@ impl ShopScene {
         if !super::shared::shop_focus_inspectable(focus) {
             return;
         }
-        let env_h = self.drawn_env_height_scale.get();
+        let env_h = self.drawn_room_gltf_height_scale.get();
         let Some(orbit) = super::view::shop_item_inspect_orbit_for_focus(
             self, w, h, env_h, shop_rm, focus,
         ) else {

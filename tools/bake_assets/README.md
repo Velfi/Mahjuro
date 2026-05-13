@@ -16,10 +16,10 @@ scripts/bake-assets.sh --out path/to/out
 
 Outputs `pack_manifest.json`, `mahjuro-pack-shared.zip`, `mahjuro-pack-gameplay.zip`, `mahjuro-pack-scene-main_menu.zip`, `mahjuro-pack-music.zip`. Partition rules live in `pack_rules.json` (see top-level `_comment` for pack / prefix precedence).
 
-- **`shared` (eager):** fonts, `sets/` tile atlases, and all `audio/` sound effects — needed across scenes.
+- **`music` (lazy):** background music + win/loss jingles under `audio/music/` (decoded on first play, not at `AudioManager::new`). Listed first so the `audio/music/` prefix wins over the `shared` pack's broader `audio/` prefix.
+- **`shared` (eager):** fonts, `sets/` tile atlases, and the rest of `audio/` (sound effects) — needed across scenes.
 - **`gameplay` (eager):** `data/`, `textures/`, input prompts, Steam assets, and root-level `*.glb` / `*.png` shipped with the game.
 - **`scene_main_menu` (lazy):** `scenes/main_menu/` — hub façade art and future menu-only models.
-- **`music` (lazy):** looping BGM under `music/` (decoded on first play, not at `AudioManager::new`).
 
 ### Bake options
 

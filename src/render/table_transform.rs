@@ -24,8 +24,6 @@
 //! When you already have a pure rotation matrix, [`rot_fixed_axes_deg_matrix`] maps it
 //! to that same convention.
 //!
-//! On-table spin about **world +Z** uses [`rot_world_z_rad`].
-//!
 //! | Helper | Notes |
 //! |--------|--------|
 //! | [`rot_euler_xyz_rad`] | `glam::EulerRot::XYZ` — hand tiles + showcase tiles |
@@ -35,12 +33,6 @@
 //! | [`ribbon_submesh`] | ribbon segments along local **-Y** | Zodiac ribbon caps/mid (after anchor [`translate_rot_scale`]) |
 //!
 use glam::{EulerRot, Mat4, Vec3, Vec4};
-
-/// Yaw about **world +Z** (radians) — coins, bars, etc. on the felt.
-#[inline]
-pub fn rot_world_z_rad(z_rad: f32) -> Mat4 {
-    Mat4::from_rotation_z(z_rad)
-}
 
 /// Table procedural mesh is already in **XY** with normal **+Z**; no rotation.
 #[inline]

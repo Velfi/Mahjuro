@@ -71,11 +71,6 @@ pub const MAX_BUG_SLOTS: usize = 8;
 /// material viewer debug scene uses these; 32 covers every `MaterialKind`
 /// with room to grow.
 pub const MAX_ORB_SLOTS: usize = 32;
-/// Maximum number of explicit auxiliary dishes per frame (the shop uses 2:
-/// the relic dish and the coin dish).
-/// Maximum number of shrine instances per frame (pick-blind uses 3: Small,
-/// Big, Boss). Truncated silently.
-pub const MAX_SHRINE_SLOTS: usize = 4;
 /// Maximum number of dora-plinth instances per frame (gameplay uses 1).
 pub const MAX_DORA_PLINTH_SLOTS: usize = 2;
 /// Maximum number of yaku tablets per frame (5 visible + headroom).

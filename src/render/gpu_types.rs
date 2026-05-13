@@ -412,11 +412,6 @@ pub const MAX_TALISMAN_SLOTS: usize = 8;
 /// `CoinBatch` cmds). The shop tooltip still shows the true gold count when
 /// it exceeds this; the visual just caps the pile.
 pub const MAX_COIN_SLOTS: usize = 64;
-/// Maximum number of explicit auxiliary dishes per frame (the shop uses 2:
-/// the relic dish and the coin dish).
-/// Maximum number of shrine instances per frame (pick-blind uses 3: Small,
-/// Big, Boss). Truncated silently.
-pub const MAX_SHRINE_SLOTS: usize = 4;
 /// Maximum number of yaku tablets per frame (5 visible + headroom).
 pub const MAX_YAKU_TABLET_SLOTS: usize = 12;
 /// Maximum number of wood action tablets per frame (sort suit, sort rank, play).

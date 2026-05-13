@@ -362,26 +362,6 @@ pub struct PromptIconQuad {
     pub source: PromptIconSource,
 }
 
-/// One shrine placement (used by the pick-blind scene to draw the three
-/// blind shrines side by side, each scaled by `extents`). Geometry is the
-/// procedural shrine mesh in normalized -0.5..+0.5 local space, scaled by
-/// `extents` and translated to `world_pos`.
-#[derive(Clone, Copy, Debug)]
-pub struct ShrinePlacement {
-    /// `(pixel_x, pixel_y, lift)` for the shrine's *base center*.
-    pub world_pos: WorldSurfaceAnchor,
-    /// Full extents in world units (width × height × depth). Per-instance
-    /// scaling is how the Small / Big / Boss shrines get visibly distinct
-    /// sizes.
-    pub extents: [f32; 3],
-    /// Linear-space RGBA tint applied to every face of the mesh.
-    pub color: [f32; 4],
-    /// Brighten multiplier in [0, 1]. The upcoming shrine pushes this above
-    /// 0 so it reads as the active choice even before the spotlight
-    /// `PointLight` adds its bloom on top.
-    pub glow: f32,
-}
-
 // ── General-purpose 3D placement ─────────────────────────────────────────
 
 /// Euler **XYZ** radians for [`Object3d::rotation`] — same convention as
@@ -394,15 +374,6 @@ pub fn camera_facing_euler_xyz_rad(cam_eye: [f32; 3], look_target: [f32; 3]) -> 
     let look = glam::Vec3::from(look_target) - glam::Vec3::from(cam_eye);
     let pitch = look.z.atan2(look.y.abs()) + std::f32::consts::PI;
     [pitch, 0.0, 0.0]
-}
-
-/// [`Mat4`] view of [`camera_facing_euler_xyz_rad`] — for legacy compose-on-left math.
-///
-/// Prefer storing [`Object3dEuler`] via [`camera_facing_euler_xyz_rad`] on new code paths.
-#[inline]
-pub fn camera_facing_rotation(cam_eye: [f32; 3], look_target: [f32; 3]) -> glam::Mat4 {
-    let e = camera_facing_euler_xyz_rad(cam_eye, look_target);
-    glam::Mat4::from_rotation_x(e[0])
 }
 
 /// Mesh-specific data carried alongside the common [`Object3d`] fields.
@@ -450,8 +421,6 @@ pub enum Object3dKind {
     },
 
     // ── Props ────────────────────────────────────────────────────────
-    /// Procedural shrine altar (Small / Big / Boss scale via `extents`).
-    Shrine { glow: f32 },
     /// Procedural ornate brass plinth used by the gameplay scene to display
     /// the dora indicator tile(s). The mesh has no roof; the indicator
     /// tile face(s) are pushed separately as `ShowcaseTilePlacement`s
@@ -718,6 +687,8 @@ pub enum DrawCmd {
     ShopEnvironment,
     /// Imported `hallway.glb` pick-blind room (same GPU path as [`DrawCmd::ShopEnvironment`]).
     HallwayEnvironment,
+    /// Imported `archive.glb` Archive room (same GPU path as [`DrawCmd::ShopEnvironment`]).
+    ArchiveEnvironment,
     /// Reset the main scene depth target while keeping the HDR color buffer. Later 3D
     /// draws (same camera) composite by depth among themselves but no longer test
     /// against geometry drawn before this marker — e.g. pack celebration meshes over
@@ -856,6 +827,12 @@ pub struct UiFrame {
     pub shop_inspect_lit_mesh_hdr: bool,
     /// Set by showcase overlay presenters; read by shadow / placement / tonemap paths.
     pub showcase_render_hints: ShowcaseRenderHints,
+    /// Archive description quads: `Some(true)` = show left sign only; `Some(false)` = right only;
+    /// `None` = draw both (or procedural Archive). Renderer culls the hidden GLB primitive index.
+    pub archive_description_sign_use_left: Option<bool>,
+    /// When set, description copy is rasterized into the archive room decal atlas and composited
+    /// on the `sign_description_left` / `sign_description_right` meshes in `shop_glb.wgsl`.
+    pub archive_sign_description_decal_text: Option<String>,
 }
 
 impl UiFrame {
@@ -880,6 +857,8 @@ impl UiFrame {
             gameplay_fog_wall_center_x: None,
             shop_inspect_lit_mesh_hdr: false,
             showcase_render_hints: ShowcaseRenderHints::default(),
+            archive_description_sign_use_left: None,
+            archive_sign_description_decal_text: None,
         }
     }
 
@@ -900,6 +879,10 @@ impl UiFrame {
     /// Draw the pick-blind hallway from embedded [`hallway.glb`](../../assets/hallway.glb).
     pub fn hallway_environment(&mut self) {
         self.cmds.push(DrawCmd::HallwayEnvironment);
+    }
+    /// Draw [`archive.glb`](../../assets/archive.glb). No-op if the asset failed to load.
+    pub fn archive_environment(&mut self) {
+        self.cmds.push(DrawCmd::ArchiveEnvironment);
     }
     /// See [`DrawCmd::ClearSceneDepth`].
     pub fn clear_scene_depth(&mut self) {
@@ -1010,6 +993,7 @@ impl UiFrame {
                 | DrawCmd::ShootingStarCascade
                 | DrawCmd::ShopEnvironment
                 | DrawCmd::HallwayEnvironment
+                | DrawCmd::ArchiveEnvironment
                 | DrawCmd::ClearSceneDepth
                 | DrawCmd::ShopInspectLitMeshSubjectHdr
                 | DrawCmd::Table
@@ -1045,6 +1029,7 @@ pub fn apply_modal_relic_staging(
                 | DrawCmd::TileFaceQuad(_)
                 | DrawCmd::ShopEnvironment
                 | DrawCmd::HallwayEnvironment
+                | DrawCmd::ArchiveEnvironment
                 | DrawCmd::Table
         )
     });

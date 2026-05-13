@@ -1,5 +1,5 @@
-//! **Isolated-first Object3d inspect core** — orbit camera, three-point fill, and frame flags
-//! shared by shop, collection, and future hosts.
+//! **Isolated-first Object3d inspect core** — fixed inspect camera, turntable (yaw/pitch) on the
+//! subject mesh, three-point fill, and frame flags shared by shop, collection, and future hosts.
 //!
 //! ## Adding a new inspect host
 //!
@@ -11,7 +11,8 @@
 //!    your [`Object3d`](crate::render::draw_cmd::Object3d) anchors.
 //! 4. **Apply view** — Call [`apply_inspect_view_to_frame`] (sets camera + point lights + a subject
 //!    [`SpotLight`](crate::render::wgpu_renderer::SpotLight); optionally shop storeroom lighting overrides).
-//! 5. **Meshes** — Push `object3d` / `object3d_batch` for the subject (and composed scene geometry).
+//! 5. **Meshes** — Push `object3d` / `object3d_batch` for the subject; compose yaw/pitch with
+//!    [`prepend_inspect_orbit_subject_rotation`] on the hero mesh so it orbits under the fixed camera.
 //! 6. **Overlay** — Shop and collection **only** use the shared
 //!    [`Scene::Showcase`](crate::scenes::Scene::Showcase) inspect presenters (never an in-scene inspect mode).
 //!    Parent snapshots live in `suspended_*` [`DrawCtx`](crate::scenes::DrawCtx) / [`UpdateCtx`](crate::scenes::UpdateCtx);
@@ -20,9 +21,10 @@
 //! For per-frame pivot correction under a moving camera (shop shelves), run your sync before draw and
 //! update `orbit.target_world`, then call `apply_inspect_view_to_frame` with the resolved target.
 
-use glam::{Mat3, Vec3};
+use glam::{Mat3, Mat4, Vec3};
 
-use crate::render::draw_cmd::{CameraParams, UiFrame};
+use crate::render::draw_cmd::{CameraParams, Object3d, UiFrame};
+use crate::render::table_transform::{mat4_to_euler_xyz_rad, rot_euler_xyz_rad};
 use crate::render::wgpu_renderer::{PointLight, SpotLight};
 
 /// Orbit + zoom state for close-up inspection (right stick, triggers, scroll).
@@ -78,9 +80,9 @@ pub struct InspectRig {
 
 impl InspectRig {
     /// Storeroom close-up: distance scales with [`crate::render::shop_glb::shop_env_world_scale`].
-    pub fn shop(window_h: f32, shop_env_height_scale: f32) -> Self {
+    pub fn shop(window_h: f32, room_gltf_height_scale: f32) -> Self {
         let h = window_h.max(1.0);
-        let s = crate::render::shop_glb::shop_env_world_scale(h, shop_env_height_scale);
+        let s = crate::render::shop_glb::shop_env_world_scale(h, room_gltf_height_scale);
         Self {
             base_dir: Vec3::new(0.32_f32, -0.74, 0.59).normalize(),
             base_distance: 0.52 * s,
@@ -110,19 +112,21 @@ pub enum InspectFrameEnv {
     ShopStoreroomInspect,
 }
 
-/// Close-up inspect camera: offset from pivot, then yaw (+Z) / pitch / zoom. Does not inherit the parent camera.
-pub fn inspect_orbit_camera(ins: &ItemInspectOrbitState, rig: &InspectRig) -> CameraParams {
-    let target = Vec3::from_array(ins.target_world);
-    let up = [0.0_f32, 0.0, 1.0];
-
+#[inline]
+fn inspect_orbit_unrotated_offset_vec(ins: &ItemInspectOrbitState, rig: &InspectRig) -> Vec3 {
     let dir0 = rig.base_dir.normalize_or_zero();
     let dir0 = if dir0.length_squared() < 1e-8 {
         Vec3::new(0.0, -1.0, 0.2).normalize()
     } else {
         dir0
     };
+    dir0 * rig.base_distance * ins.zoom
+}
 
-    let v = dir0 * rig.base_distance * ins.zoom;
+/// `rot_p * rot_z` used historically to swing the inspect camera offset around the pivot — now the
+/// inverse is applied to the subject mesh while the camera stays on the unrotated offset.
+fn inspect_orbit_offset_mat3(ins: &ItemInspectOrbitState, rig: &InspectRig) -> Mat3 {
+    let v = inspect_orbit_unrotated_offset_vec(ins, rig);
     let rot_z = Mat3::from_axis_angle(Vec3::Z, ins.yaw);
     let vp = rot_z * v;
     let horiz = Vec3::new(vp.x, vp.y, 0.0);
@@ -133,14 +137,39 @@ pub fn inspect_orbit_camera(ins: &ItemInspectOrbitState, rig: &InspectRig) -> Ca
         Vec3::new(-hn.y, hn.x, 0.0)
     };
     let rot_p = Mat3::from_axis_angle(pitch_axis, ins.pitch);
-    let vf = rot_p * vp;
-    let new_eye = target + vf;
+    rot_p * rot_z
+}
+
+/// Close-up inspect camera: offset from pivot along [`InspectRig::base_dir`] with zoom only.
+/// Yaw / pitch spin the subject via [`prepend_inspect_orbit_subject_rotation`], not the camera.
+pub fn inspect_orbit_camera(ins: &ItemInspectOrbitState, rig: &InspectRig) -> CameraParams {
+    let target = Vec3::from_array(ins.target_world);
+    let up = [0.0_f32, 0.0, 1.0];
+
+    let v = inspect_orbit_unrotated_offset_vec(ins, rig);
+    let new_eye = target + v;
     CameraParams {
         eye: new_eye.to_array(),
         target: ins.target_world,
         up,
         fovy_deg: rig.fovy_deg,
     }
+}
+
+/// Left-multiplies the inspect inverse-orbit rotation into [`Object3d::rotation`] (same composition
+/// as the renderer’s `translate_rot_scale` path).
+#[inline]
+pub fn prepend_inspect_orbit_subject_rotation(
+    mut obj: Object3d,
+    ins: &ItemInspectOrbitState,
+    rig: &InspectRig,
+) -> Object3d {
+    let r = inspect_orbit_offset_mat3(ins, rig);
+    let r_inv = r.transpose();
+    let base = rot_euler_xyz_rad(obj.rotation[0], obj.rotation[1], obj.rotation[2]);
+    let combined = Mat4::from_mat3(r_inv) * base;
+    obj.rotation = mat4_to_euler_xyz_rad(combined);
+    obj
 }
 
 #[inline]

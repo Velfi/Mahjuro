@@ -1,6 +1,12 @@
 {
-  "_comment": "assign_pack precedence: see bake_assets.py. shared (eager) = cross-scene: fonts, sets/, all audio/ SFX. gameplay (eager) = bulk 3D/UI. scene_main_menu (lazy) = main menu façade + future scene-only assets under scenes/main_menu/. music (lazy) = BGM under music/.",
+  "_comment": "assign_pack precedence: see bake_assets.py. music (lazy) is listed before shared so audio/music/ files route there even though they share the audio/ prefix. shared (eager) = cross-scene: fonts, sets/, all other audio/ SFX. gameplay (eager) = bulk 3D/UI. scene_main_menu (lazy) = main menu façade + future scene-only assets under scenes/main_menu/.",
   "packs": [
+    {
+      "id": "music",
+      "file": "mahjuro-pack-music.zip",
+      "load_tier": "lazy",
+      "path_prefixes": ["audio/music/"]
+    },
     {
       "id": "shared",
       "file": "mahjuro-pack-shared.zip",
@@ -31,12 +37,6 @@
       "file": "mahjuro-pack-scene-main_menu.zip",
       "load_tier": "lazy",
       "path_prefixes": ["scenes/main_menu/"]
-    },
-    {
-      "id": "music",
-      "file": "mahjuro-pack-music.zip",
-      "load_tier": "lazy",
-      "path_prefixes": ["music/"]
     }
   ]
 }

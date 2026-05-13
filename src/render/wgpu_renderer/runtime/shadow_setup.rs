@@ -94,7 +94,6 @@ impl WgpuRenderer {
         camera: &CameraFrame,
         light_view_proj_arr: [f32; 16],
         tile_pick_models: &[(usize, Mat4)],
-        shrine_batches: &[&[ShrinePlacement]],
         shadow_uniforms_changed: &mut bool,
     ) {
         let w = camera.w;
@@ -142,37 +141,6 @@ impl WgpuRenderer {
                         );
                         slot_i += 1;
                     }
-                }
-            }
-        }
-        // Shrine shadow casters (pick-blind scene). Same model as the main
-        // pass: scale by extents, lift base by half-height.
-        {
-            let mut shrine_shadow_cursor: usize = 0;
-            for batch in shrine_batches.iter() {
-                for s in batch.iter() {
-                    if shrine_shadow_cursor >= MAX_SHRINE_SLOTS {
-                        break;
-                    }
-                    let slot_i = shrine_shadow_cursor;
-                    shrine_shadow_cursor += 1;
-                    let center = pixel_to_world(
-                        w,
-                        h,
-                        s.world_pos[0],
-                        s.world_pos[1],
-                        s.world_pos[2] + s.extents[1] * 0.5,
-                    );
-                    let model = translate_rot_scale(
-                        center,
-                        Mat4::IDENTITY,
-                        glam::Vec3::new(s.extents[0], s.extents[1], s.extents[2]),
-                    );
-                    *shadow_uniforms_changed |= self.shrine_instances[slot_i].write_shadow_uniform(
-                        &self.queue,
-                        light_view_proj_arr,
-                        model,
-                    );
                 }
             }
         }

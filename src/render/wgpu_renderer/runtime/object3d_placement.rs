@@ -49,7 +49,6 @@ impl WgpuRenderer {
             let mut obj3d_pack_slot: usize = 0;
             let mut obj3d_talisman_slot: usize = 0;
             let mut obj3d_ribbon_slot: usize = 0;
-            let mut obj3d_shrine_slot: usize = 0;
             let mut obj3d_dora_plinth_slot: usize = 0;
             let mut obj3d_orb_slot: usize = 0;
             let mut obj3d_bowl_slot: usize = 0;
@@ -767,101 +766,6 @@ impl WgpuRenderer {
                                 &mut obj3d_ribbon_slot,
                                 object3d_draw_list,
                             );
-                        }
-                        Object3dKind::Shrine { glow } => {
-                            if obj3d_shrine_slot >= MAX_SHRINE_SLOTS {
-                                continue;
-                            }
-                            let slot_i = obj3d_shrine_slot;
-                            obj3d_shrine_slot += 1;
-                            // Shrines are pick-blind only; one placement per slot.
-                            let shrine_name = match slot_i {
-                                0 => "pick_blind.shrine[0]",
-                                1 => "pick_blind.shrine[1]",
-                                2 => "pick_blind.shrine[2]",
-                                _ => "pick_blind.shrine",
-                            };
-                            // Shrine center is lifted by half-height; scene passes base pos.
-                            let shrine_center = pixel_to_world(
-                                w,
-                                h,
-                                obj.pos[0],
-                                obj.pos[1],
-                                obj.pos[2] + obj.extents[1] * 0.5,
-                            );
-                            // The shrine mesh is built Y-up; rotate into Z-up world so it
-                            // stands upright rather than lying flat. Compose with any
-                            // scene-level obj.rotation (e.g. arrange-mode overrides).
-                            let shrine_rot =
-                                mesh_y_thickness_along_local_y_to_z_up() * obj.rotation_matrix();
-                            let shrine_model = self.apply_arrange_override(
-                                shrine_name,
-                                translate_rot_scale(
-                                    shrine_center,
-                                    shrine_rot,
-                                    glam::Vec3::from(obj.extents),
-                                ),
-                            );
-                            let g = glow.clamp(0.0, 1.0);
-                            let base_color = if g > 0.0 {
-                                let target = [1.10, 1.05, 0.95, obj.color[3]];
-                                [
-                                    obj.color[0] + (target[0] - obj.color[0]) * g,
-                                    obj.color[1] + (target[1] - obj.color[1]) * g,
-                                    obj.color[2] + (target[2] - obj.color[2]) * g,
-                                    obj.color[3],
-                                ]
-                            } else {
-                                obj.color
-                            };
-                            let material = MaterialParams {
-                                kind: MaterialKind::Plain,
-                                base_color,
-                                specular_strength: 0.06,
-                                specular_power: 8.0,
-                            };
-                            self.shrine_instances[slot_i].write_uniform(
-                                &self.queue,
-                                view_proj_arr,
-                                shrine_model,
-                                material,
-                            );
-                            // Project AABB for shrine_rects (label anchoring).
-                            let shrine_world_center = shrine_model.w_axis.truncate();
-                            let [hx, hy, hz] = [
-                                obj.extents[0] * 0.5,
-                                obj.extents[1] * 0.5,
-                                obj.extents[2] * 0.5,
-                            ];
-                            let (mut mn_x, mut mn_y, mut mx_x, mut mx_y) = (
-                                f32::INFINITY,
-                                f32::INFINITY,
-                                f32::NEG_INFINITY,
-                                f32::NEG_INFINITY,
-                            );
-                            for cx in [-hx, hx] {
-                                for cy in [-hy, hy] {
-                                    for cz in [-hz, hz] {
-                                        let world =
-                                            shrine_world_center + glam::Vec3::new(cx, cy, cz);
-                                        let (px, py) = project_to_screen(world);
-                                        mn_x = mn_x.min(px);
-                                        mn_y = mn_y.min(py);
-                                        mx_x = mx_x.max(px);
-                                        mx_y = mx_y.max(py);
-                                    }
-                                }
-                            }
-                            self.proj
-                                .shrine_rects
-                                .push([mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]);
-                            self.last_debug_pickables.push((
-                                shrine_name.to_string(),
-                                shrine_model,
-                                glam::Vec3::new(hx, hy, hz),
-                                0.0,
-                            ));
-                            object3d_draw_list.push((DrawKind::Shrine, slot_i));
                         }
                         Object3dKind::DoraPlinth { glow } => {
                             if obj3d_dora_plinth_slot >= MAX_DORA_PLINTH_SLOTS {

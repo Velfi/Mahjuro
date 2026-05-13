@@ -2,7 +2,7 @@
 //!
 //! **Boot loading:** **`shared`** (fonts, `sets/`, all `audio/` SFX) and **`gameplay`** packs are
 //! **eager** — opened and indexed during `PacksState::new` (before `WgpuRenderer::new` pulls the
-//! tree). **`scenes/main_menu/`** (lazy `scene_main_menu` pack) and **`music/`** are **lazy** —
+//! tree). **`scenes/main_menu/`** (lazy `scene_main_menu` pack) and **`audio/music/`** are **lazy** —
 //! those zips stay closed until first read (menu façade, BGM on first play), or until
 //! [`prefetch_lazy_packs`] / [`prefetch_lazy_packs_after_menu_once`].
 

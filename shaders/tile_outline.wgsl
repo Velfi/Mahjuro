@@ -1,7 +1,7 @@
 // Gold-metal "shell" outline for selected tiles.
 //
 // The renderer draws this pipeline BEFORE the normal tile mesh, with the
-// model matrix scaled up ~6% around the tile center and front-face culling
+// model matrix scaled up ~7% around the tile center and front-face culling
 // enabled. Only the back side of the inflated shell survives, so when the
 // real tile is drawn on top it overwrites the interior of the shell —
 // leaving a thin gold rim around the tile silhouette. The fragment shader
@@ -66,20 +66,28 @@ fn vs_main(
 fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
     // base_color_factor.y encodes hover/select state:
     //   >= 0.75 → selected (warm gold rim)
-    //    < 0.75 → hovered  (cool blue-white rim)
+    //   ~0.5    → hovered (saturated blue rim)
     let sel = in.sel_y;
-    let base_color = select(
-        vec3<f32>(0.72, 0.88, 1.00),   // hovered: cool blue-white
-        vec3<f32>(1.00, 0.78, 0.34),   // selected: polished champagne gold
-        sel >= 0.75,
-    );
+    let is_selected = sel >= 0.75;
+    let is_hovered = sel > 0.25 && sel < 0.75;
+    var base_color = vec3<f32>(0.72, 0.88, 1.00);
+    if (is_selected) {
+        base_color = vec3<f32>(1.00, 0.38, 0.02);
+    } else if (is_hovered) {
+        base_color = vec3<f32>(0.05, 0.40, 1.00);
+    }
 
     // Local-space directional ambient + diffuse so the rim has shape even
     // when no candles are lit. Mirrors tile_3d.wgsl's key-light direction.
     let n_local = select(-normalize(in.local_n), normalize(in.local_n), front_facing);
     let key = normalize(vec3<f32>(0.25, 1.0, 0.35));
     let ndl = max(dot(n_local, key), 0.0);
-    let base_shade = 0.45 + 0.55 * ndl;
+    var base_shade = 0.45 + 0.55 * ndl;
+    if (is_selected) {
+        base_shade = 0.72 + 0.33 * ndl;
+    } else if (is_hovered) {
+        base_shade = 0.58 + 0.48 * ndl;
+    }
 
     // Point-light pass: same falloff/Lambert model the tile shader uses,
     // but with a sharper exponent so the gold reads as polished metal —
@@ -102,11 +110,37 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let l_dir = to_light / max(dist, 0.0001);
         let nl = max(dot(n_world, l_dir), 0.0);
         // Diffuse floor + sharper specular-ish term for the metallic look.
-        let metal = 0.30 + 1.60 * pow(nl, 1.8);
+        var metal = 0.30 + 1.60 * pow(nl, 1.8);
+        if (is_selected) {
+            metal = 0.35 + 2.05 * pow(nl, 1.65);
+        } else if (is_hovered) {
+            metal = 0.32 + 1.85 * pow(nl, 1.72);
+        }
         contrib = contrib + lc * intensity * atten * metal;
     }
 
     var lit = base_color * base_shade + base_color * contrib;
+    // Emissive + chroma punch so ACES/HDR does not wash rims to grey/white.
+    lit = lit + select(vec3<f32>(0.0), base_color * 0.16, is_hovered);
+    lit = lit + select(vec3<f32>(0.0), base_color * 0.26, is_selected);
+    if (is_selected) {
+        let luma = dot(lit, vec3<f32>(0.2126, 0.7152, 0.0722));
+        let sat = 1.75;
+        lit = vec3<f32>(luma) + (lit - vec3<f32>(luma)) * sat;
+        lit = max(lit, vec3<f32>(0.0));
+    } else if (is_hovered) {
+        let luma = dot(lit, vec3<f32>(0.2126, 0.7152, 0.0722));
+        let sat = 1.58;
+        lit = vec3<f32>(luma) + (lit - vec3<f32>(luma)) * sat;
+        lit = max(lit, vec3<f32>(0.0));
+    }
+    var gain = 1.0;
+    if (is_selected) {
+        gain = 1.38;
+    } else if (is_hovered) {
+        gain = 1.20;
+    }
+    lit = lit * gain;
     let inv_g = 1.0 / max(lights.extras.x, 0.01);
     var out_rgb: vec3<f32>;
     if (outline_frame.hdr_tonemap.x > 0.5) {
