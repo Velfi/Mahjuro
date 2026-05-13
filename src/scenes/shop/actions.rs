@@ -282,7 +282,7 @@ impl ShopScene {
             },
             relic_glow_starts: std::collections::HashMap::new(),
             positions: crate::ui::scene_layout::load_shop_positions(),
-            drawn_env_height_scale: std::cell::Cell::new(
+            drawn_room_gltf_height_scale: std::cell::Cell::new(
                 crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
             ),
             west_sell_hold_started: None,

@@ -206,8 +206,8 @@ pub struct UpdateCtx<'a> {
     pub rumble_lab_ops: &'a mut Vec<RumbleLabOp>,
     /// [`ShopScene`] under shop showcase **inspect** presenter: orbit sync to mesh anchors.
     pub suspended_shop: Option<&'a ShopScene>,
-    /// Same as [`DrawCtx::shop_env_height_scale`] — glTF room vertical scale vs window height.
-    pub shop_env_height_scale: f32,
+    /// Same as [`DrawCtx::room_gltf_height_scale`] — vertical scale for embedded glTF rooms vs window height.
+    pub room_gltf_height_scale: f32,
     /// Archive scene sets this to `Some(progress.run_history.len())` when the count changes so
     /// the app can persist per-profile "seen" state for menu hints.
     pub bump_archive_chronicle_seen: &'a mut Option<u32>,
@@ -253,8 +253,9 @@ pub struct DrawCtx<'a> {
     /// live-preview nudges on placements that can't be routed through
     /// `apply_arrange_override` (wind emitters, particle sources, etc.).
     pub arrange_preview: Option<crate::ui::placement::ArrangePreview>,
-    /// `Shop.glb` room scale vs window height (`window_h *` this). Debug menu can override.
-    pub shop_env_height_scale: f32,
+    /// Vertical scale for embedded glTF room scenes (`Shop.glb`, `hallway.glb`, `archive.glb`, …):
+    /// authored room height is multiplied by `window_h *` this. Debug tuning can override.
+    pub room_gltf_height_scale: f32,
     /// Shop punctual + tonemap tuning (debug overlay / defaults from `shop_glb` constants).
     pub shop_env_lighting: crate::render::shop_glb::ShopEnvLightingTune,
     /// Master switches for layered visuals — start from [`EffectLayers::BASELINE`]
@@ -298,7 +299,7 @@ impl<'a> DrawCtx<'a> {
         debug_visibility: DebugVisibility,
         modal_active: bool,
         arrange_preview: Option<crate::ui::placement::ArrangePreview>,
-        shop_env_height_scale: f32,
+        room_gltf_height_scale: f32,
         shop_env_lighting: crate::render::shop_glb::ShopEnvLightingTune,
         effect_layers: EffectLayers,
         cursor_pos: (f32, f32),
@@ -325,7 +326,7 @@ impl<'a> DrawCtx<'a> {
             debug_visibility,
             modal_active,
             arrange_preview,
-            shop_env_height_scale,
+            room_gltf_height_scale,
             shop_env_lighting,
             effect_layers,
             cursor_pos,

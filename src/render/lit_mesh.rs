@@ -684,8 +684,9 @@ pub struct SsrGlobals {
     /// z = linear exposure before ACES (shop env tuning).
     /// w = hemispheric ambient scale (shop env tuning).
     pub felt: [f32; 4],
-    /// x = `1/shop_env_world_scale` for shop glTF punctual attenuation (document-space distance);
-    /// **0** = use world-space distance (gameplay). yzw unused.
+    /// x = `1/shop_env_world_scale` for embedded glTF punctual attenuation in `lit_mesh`
+    /// (document-space distance; **0** = world-space / gameplay).
+    /// y = shop vitrine material tuning (1 = shop + embedded punctual only); zw unused.
     pub shop_punctual: [f32; 4],
 }
 

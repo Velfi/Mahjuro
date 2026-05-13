@@ -170,7 +170,7 @@ pub struct ButtonPrompt;
 impl ButtonPrompt {
     fn inspect_camera_extras(style: GamepadStyle) -> String {
         let t = style.analog_trigger_pair_label();
-        format!("Right stick orbit  ·  {t} zoom")
+        format!("Right stick: orbit item  ·  {t} zoom")
     }
 
     /// Second shop HUD line while **item inspect** is active (gamepad vs mouse).
@@ -178,7 +178,7 @@ impl ButtonPrompt {
         match surface {
             PromptInputSurface::Controller => Self::inspect_camera_extras(style),
             PromptInputSurface::MouseOrKeyboard => {
-                "Drag to orbit · Mouse wheel: zoom (inspect)".to_string()
+                "Drag to orbit item · Mouse wheel: zoom (inspect)".to_string()
             }
         }
     }

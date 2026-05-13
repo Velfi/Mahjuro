@@ -81,8 +81,8 @@ pub struct DebugState {
     /// Effective 3D camera after the scene's `draw_frame` (override or table
     /// default), updated each paint — used to seed camera debug overlay.
     pub last_effective_camera: CameraParams,
-    /// `Shop.glb` room scale multiplier (`window_h *` this). Debug overlay can edit live.
-    pub shop_env_height_scale: f32,
+    /// `Shop.glb` / hallway / archive room scale multiplier (`window_h *` this). Debug overlay can edit live.
+    pub room_gltf_height_scale: f32,
     /// glTF punctual + `shop_glb` tonemap tuning. Debug overlay edits live.
     pub shop_env_lighting: ShopEnvLightingTune,
 }
@@ -107,7 +107,7 @@ impl DebugState {
             object_hit_test_armed: false,
             arrange_mode: None,
             last_effective_camera: CameraParams::default_table_camera(800.0),
-            shop_env_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
+            room_gltf_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
             shop_env_lighting: ShopEnvLightingTune::SOURCE_DEFAULTS,
         }
     }

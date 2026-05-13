@@ -71,6 +71,16 @@ impl App {
                 // finished — kept deferred so the UI doesn't jump early.
                 self.run.gold = self.run.gold.saturating_add(payout.total as i32);
                 self.audio.play_sfx(audio::SfxId::RoundWin);
+                // Win jingle owns the music sink for the celebration; the
+                // pending scene transition will queue Shop/Gameplay BGM
+                // behind it via `set_music_track`, and `AudioManager::tick`
+                // resumes that loop once the jingle finishes.
+                let won_jingle = if self.run.blind == crate::core::rules::BlindKind::Boss {
+                    audio::MusicId::BossWin
+                } else {
+                    audio::MusicId::BlindWin
+                };
+                self.audio.play_music_jingle(won_jingle);
                 // Capture the tutorial lesson *before* advancing so the
                 // recap scene can show what was just learned.
                 let tutorial_lesson_before = self
@@ -296,6 +306,16 @@ impl App {
                 }
 
                 self.audio.play_sfx(audio::SfxId::GameOver);
+                // Loss jingle takes over the music sink while the GameOver
+                // scene fades in; `sync_music_for_scene` will call
+                // `stop_background_music`, which defers until the jingle
+                // empties so the stinger isn't truncated mid-fade.
+                let loss_jingle = if self.run.blind == crate::core::rules::BlindKind::Boss {
+                    audio::MusicId::BossLoss
+                } else {
+                    audio::MusicId::BlindLoss
+                };
+                self.audio.play_music_jingle(loss_jingle);
                 self.pending_scene = Some(Scene::GameOver(GameOverScene::new(&self.run, reason)));
                 self.transition_alpha = 1.0;
             }
@@ -406,7 +426,7 @@ impl App {
             },
             modal_active,
             arrange_preview,
-            self.debug.shop_env_height_scale,
+            self.debug.room_gltf_height_scale,
             self.debug.shop_env_lighting,
             self.effect_layers,
             self.input
@@ -782,7 +802,7 @@ impl App {
         };
         renderer.set_committed_arrange_rotations(collect_committed_rotations(rotations_scene));
 
-        renderer.set_shop_env_height_scale(self.debug.shop_env_height_scale);
+        renderer.set_room_gltf_height_scale(self.debug.room_gltf_height_scale);
         let sl = self.debug.shop_env_lighting;
         renderer.set_shop_env_render_tune(
             sl.linear_exposure,

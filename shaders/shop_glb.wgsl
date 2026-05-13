@@ -203,7 +203,12 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         && base_s.a > 1e-4) {
         tex_rgb = vec3<f32>(base_s.a);
     }
-    let albedo = tex_rgb * in.v_color.rgb;
+    var albedo = tex_rgb * in.v_color.rgb;
+    // Archive `sign_description_*` meshes tag `COLOR_0.a = 2` in `room_env_gltf` (see `decode_env_primitive`).
+    if (in.v_color.a > 1.5) {
+        let dec = textureSample(decal_tex, base_sampler, in.uv);
+        albedo = mix(albedo, dec.rgb, dec.a);
+    }
     let albedo_lum = dot(albedo, vec3<f32>(0.299, 0.587, 0.114));
 
     let mr_s = textureSample(metallic_roughness_tex, base_sampler, in.uv_emr);

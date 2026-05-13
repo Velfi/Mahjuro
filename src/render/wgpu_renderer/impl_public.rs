@@ -63,9 +63,9 @@ impl WgpuRenderer {
         self.debug_arrange_override = ov;
     }
 
-    /// Scale factor for embedded `Shop.glb` room geometry vs window height. Must match shop marker math.
-    pub fn set_shop_env_height_scale(&mut self, v: f32) {
-        self.shop_env_height_scale = v;
+    /// Scale factor for embedded glTF room geometry vs window height. Must match shop/hallway/archive marker math.
+    pub fn set_room_gltf_height_scale(&mut self, v: f32) {
+        self.room_gltf_height_scale = v;
     }
 
     /// Shop room tonemap + `lit_mesh` glTF punctual scale. Set each frame from app debug tuning.
@@ -83,8 +83,8 @@ impl WgpuRenderer {
     }
 
     #[inline]
-    pub(crate) fn shop_env_height_scale(&self) -> f32 {
-        self.shop_env_height_scale
+    pub(crate) fn room_gltf_height_scale(&self) -> f32 {
+        self.room_gltf_height_scale
     }
 
     /// Push art-direction knobs for the procedural mountain-haze shader

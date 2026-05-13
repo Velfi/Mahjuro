@@ -128,7 +128,7 @@ impl App {
             DebugAction::OpenShopEnvDebug => {
                 if self.debug.shop_env_debug_overlay.is_none() {
                     self.debug.shop_env_debug_overlay = Some(ShopEnvDebugOverlay::new(
-                        self.debug.shop_env_height_scale,
+                        self.debug.room_gltf_height_scale,
                         self.debug.shop_env_lighting,
                     ));
                     log::debug!("Opened shop env & lighting debug overlay");

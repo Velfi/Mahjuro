@@ -539,9 +539,6 @@ impl WgpuRenderer {
         let mut prompt_icon_quads: Vec<crate::render::draw_cmd::PromptIconQuad> = Vec::new();
         let mut prompt_icon_inst_buffers: Vec<wgpu::Buffer> = Vec::new();
         // Skeuomorphic gameplay HUD cmd buffers (phase 1).
-        // Dead empty vecs — kept so existing shadow/draw loops that still iterate
-        // these compile; scenes no longer push to these variants.
-        let shrine_batches: Vec<&[ShrinePlacement]> = Vec::new();
         let yaku_tablet_batches: Vec<&[YakuTabletPlacement]> = Vec::new();
         let wall_stack_cmds: Vec<&WallStackPlacement> = Vec::new();
         let mut showcase_tile_batches: Vec<&[ShowcaseTilePlacement]> = Vec::new();
@@ -623,6 +620,10 @@ impl WgpuRenderer {
                 }
                 DrawCmd::HallwayEnvironment => {
                     ops.push(RenderOp::HallwayEnvironment);
+                    i += 1;
+                }
+                DrawCmd::ArchiveEnvironment => {
+                    ops.push(RenderOp::ArchiveEnvironment);
                     i += 1;
                 }
                 DrawCmd::ClearSceneDepth => {
@@ -966,97 +967,6 @@ impl WgpuRenderer {
         // ── Pack placeholders (same mesh + pipeline as relics) ──────────
         self.proj.pack_rects.clear();
         // Pack placements migrated to Object3dKind::Pack.
-        // ── Shrines (pick-blind scene). Each placement gets its own slot. ─
-        // The shrine mesh is built in normalized -0.5..+0.5 local space, so
-        // a per-instance scale by `extents` sizes Small/Big/Boss
-        // independently. `world_pos` is the *base center*, so we lift the
-        // model up by half the height to put the plinth on the ground.
-        self.proj.shrine_rects.clear();
-        {
-            let mut shrine_cursor: usize = 0;
-            for batch in &shrine_batches {
-                for s in batch.iter() {
-                    if shrine_cursor >= MAX_SHRINE_SLOTS {
-                        break;
-                    }
-                    let slot_i = shrine_cursor;
-                    shrine_cursor += 1;
-                    let center = pixel_to_world(
-                        w,
-                        h,
-                        s.world_pos[0],
-                        s.world_pos[1],
-                        s.world_pos[2] + s.extents[1] * 0.5,
-                    );
-                    let model = translate_rot_scale(
-                        center,
-                        Mat4::IDENTITY,
-                        glam::Vec3::new(s.extents[0], s.extents[1], s.extents[2]),
-                    );
-                    // Project the shrine's 8 AABB corners to screen and
-                    // take the bounding rect — gives the scene a 2D rect
-                    // it can anchor labels to without re-projecting the
-                    // perspective transform itself.
-                    let hx = s.extents[0] * 0.5;
-                    let hy = s.extents[1] * 0.5;
-                    let hz = s.extents[2] * 0.5;
-                    let mut mn_x = f32::INFINITY;
-                    let mut mn_y = f32::INFINITY;
-                    let mut mx_x = f32::NEG_INFINITY;
-                    let mut mx_y = f32::NEG_INFINITY;
-                    for cx in [-hx, hx] {
-                        for cy in [-hy, hy] {
-                            for cz in [-hz, hz] {
-                                let world = center + glam::Vec3::new(cx, cy, cz);
-                                let (px, py) = project_to_screen(world);
-                                mn_x = mn_x.min(px);
-                                mn_y = mn_y.min(py);
-                                mx_x = mx_x.max(px);
-                                mx_y = mx_y.max(py);
-                            }
-                        }
-                    }
-                    self.proj
-                        .shrine_rects
-                        .push([mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]);
-                    // Glow gently brightens the shrine's tint so the
-                    // upcoming shrine reads as the active choice at
-                    // rest, but most of the warmth still comes from
-                    // the warm spotlight tinting the stone — the
-                    // shrine itself shouldn't self-illuminate.
-                    let g = s.glow.clamp(0.0, 1.0);
-                    let base_color = if g > 0.0 {
-                        let target = [1.10, 1.05, 0.95, s.color[3]];
-                        [
-                            s.color[0] + (target[0] - s.color[0]) * g,
-                            s.color[1] + (target[1] - s.color[1]) * g,
-                            s.color[2] + (target[2] - s.color[2]) * g,
-                            s.color[3],
-                        ]
-                    } else {
-                        s.color
-                    };
-                    // Rough stone material: very low specular strength
-                    // and a low specular power so any highlight that
-                    // does catch is wide and soft (like weathered
-                    // rock, not polished marble). Identical params for
-                    // every shrine so cleared/future ones can't catch
-                    // sharp glints from ambient fills.
-                    let material = MaterialParams {
-                        kind: MaterialKind::Plain,
-                        base_color,
-                        specular_strength: 0.06,
-                        specular_power: 8.0,
-                    };
-                    self.shrine_instances[slot_i].write_uniform(
-                        &self.queue,
-                        view_proj_arr,
-                        model,
-                        material,
-                    );
-                }
-            }
-        }
 
         // Auxiliary dishes migrated to Object3dKind::Dish.
 
@@ -1147,7 +1057,6 @@ impl WgpuRenderer {
             &camera,
             light_view_proj_arr,
             &tile_pick_models,
-            &shrine_batches,
             &mut shadow_uniforms_changed,
         );
 
@@ -1174,6 +1083,15 @@ impl WgpuRenderer {
         {
             self.write_hallway_environment_uniforms(frame, &camera, false);
         }
+        if self.archive_environment.is_some() {
+            self.sync_archive_description_decal_texture(frame);
+        }
+        if ops
+            .iter()
+            .any(|o| matches!(o, RenderOp::ArchiveEnvironment))
+        {
+            self.write_archive_environment_uniforms(frame, &camera, false);
+        }
 
         let mut encoder = self
             .device
@@ -1187,7 +1105,6 @@ impl WgpuRenderer {
             shadows_enabled,
             shadow_uniforms_changed,
             &showcase_tile_batches,
-            &shrine_batches,
             &tile_3d_rects,
         );
 
@@ -1504,7 +1421,10 @@ impl WgpuRenderer {
             && (ops.iter().any(|o| matches!(o, RenderOp::ShopEnvironment))
                 || ops
                     .iter()
-                    .any(|o| matches!(o, RenderOp::HallwayEnvironment)));
+                    .any(|o| matches!(o, RenderOp::HallwayEnvironment))
+                || ops
+                    .iter()
+                    .any(|o| matches!(o, RenderOp::ArchiveEnvironment)));
         if glb_room_bloom_linear {
             if ops.iter().any(|o| matches!(o, RenderOp::ShopEnvironment))
                 && self.shop_environment.is_some()
@@ -1596,6 +1516,52 @@ impl WgpuRenderer {
                 }
                 self.write_hallway_environment_uniforms(frame, &camera, false);
             }
+            if ops
+                .iter()
+                .any(|o| matches!(o, RenderOp::ArchiveEnvironment))
+                && self.archive_environment.is_some()
+                && !self.archive_env_primitives.is_empty()
+            {
+                self.write_archive_environment_uniforms(frame, &camera, true);
+                {
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("archive-linear-bloom-pass"),
+                        color_attachments: &[
+                            Some(wgpu::RenderPassColorAttachment {
+                                view: &self.shop_linear_bloom_view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                    store: wgpu::StoreOp::Store,
+                                },
+                                depth_slice: None,
+                            }),
+                            Some(wgpu::RenderPassColorAttachment {
+                                view: &self.room_emissive_view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                    store: wgpu::StoreOp::Store,
+                                },
+                                depth_slice: None,
+                            }),
+                        ],
+                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                            view: &self.depth_view,
+                            depth_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Load,
+                                store: wgpu::StoreOp::Store,
+                            }),
+                            stencil_ops: None,
+                        }),
+                        occlusion_query_set: None,
+                        timestamp_writes: None,
+                        multiview_mask: None,
+                    });
+                    self.draw_archive_environment_meshes(&mut pass, frame, true);
+                }
+                self.write_archive_environment_uniforms(frame, &camera, false);
+            }
         }
 
         if glb_room_bloom_linear && !is_prepass {
@@ -1604,7 +1570,7 @@ impl WgpuRenderer {
                     cpu.and_then(|c| {
                         let corners = crate::render::shop_glb::shop_world_bounds_corners_centered(
                             camera.h,
-                            self.shop_env_height_scale,
+                            self.room_gltf_height_scale,
                             c,
                         );
                         crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
@@ -1618,7 +1584,21 @@ impl WgpuRenderer {
                     cpu.and_then(|c| {
                         let corners = crate::render::shop_glb::shop_world_bounds_corners_centered(
                             camera.h,
-                            self.shop_env_height_scale,
+                            self.room_gltf_height_scale,
+                            c,
+                        );
+                        crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
+                    })
+                })
+            } else if ops
+                .iter()
+                .any(|o| matches!(o, RenderOp::ArchiveEnvironment))
+            {
+                crate::render::archive_glb::with_archive_glb_cpu(|cpu| {
+                    cpu.and_then(|c| {
+                        let corners = crate::render::shop_glb::shop_world_bounds_corners_centered(
+                            camera.h,
+                            self.room_gltf_height_scale,
                             c,
                         );
                         crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)

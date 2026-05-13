@@ -667,15 +667,15 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
 
     // ── Hover / selection fresnel ───────────────────────────────────
     // base_color_factor.y: 0.0 = none, 0.5 = hovered, 1.0 = selected.
-    // Hover: cool silver-white rim (thin, tight).
+    // Hover: saturated electric-blue rim (thin, tight).
     // Selected: warm champagne-gold rim (wider, brighter).
     let sel = cam.base_color_factor.y;
     if (sel > 0.25) {
         let edge = 1.0 - ndv_global;
         if (sel < 0.75) {
-            // Hover — cool blue-white fresnel, tight falloff.
-            let cool = vec3<f32>(0.75, 0.88, 1.00);
-            let rim = pow(edge, 3.5) * 0.9;
+            // Hover — strong blue (matches tile_outline shell).
+            let cool = vec3<f32>(0.06, 0.42, 1.00);
+            let rim = pow(edge, 3.5) * 1.05;
             lit_rgb = lit_rgb + cool * rim;
         } else {
             // Selected — warm gold fresnel, wider.

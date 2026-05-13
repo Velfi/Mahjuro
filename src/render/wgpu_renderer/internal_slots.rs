@@ -142,6 +142,8 @@ pub(crate) struct ShowcaseTileGpu {
 pub(crate) struct ShopEnvironmentGpu {
     pub uniform_buffer: wgpu::Buffer,
     pub bind_groups: Vec<wgpu::BindGroup>,
+    /// Archive room only: CPU-updated decal atlas at `@group(0) @binding(3)`.
+    pub archive_sign_decal_texture: Option<wgpu::Texture>,
 }
 
 pub(crate) struct TileFaceOverlayGpu {

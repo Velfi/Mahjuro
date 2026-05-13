@@ -807,7 +807,7 @@ impl HeadlessApp {
                 item_inspect_zoom_triggers: 0.0,
                 rumble_lab_ops: &mut rumble_lab_ops,
                 suspended_shop: None,
-                shop_env_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
+                room_gltf_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
                 bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
             })
         } else {
@@ -864,7 +864,7 @@ impl HeadlessApp {
                     item_inspect_zoom_triggers: 0.0,
                     rumble_lab_ops: &mut rumble_lab_ops,
                     suspended_shop,
-                    shop_env_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
+                    room_gltf_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
                     bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
                 })
         };
@@ -975,7 +975,7 @@ impl HeadlessApp {
         self.renderer
             .set_committed_arrange_rotations(collect_committed_rotations(rotations_scene));
         self.renderer
-            .set_shop_env_height_scale(crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE);
+            .set_room_gltf_height_scale(crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE);
         let sl = self.shop_env_lighting;
         self.renderer.set_shop_env_render_tune(
             sl.linear_exposure,

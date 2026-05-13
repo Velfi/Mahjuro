@@ -2879,6 +2879,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 gpu_wrap = Some(ShopEnvironmentGpu {
                     uniform_buffer,
                     bind_groups,
+                    archive_sign_decal_texture: None,
                 });
                 log::info!("Shop.glb GPU: {} primitive draw(s)", prims.len());
             }
@@ -3067,6 +3068,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 gpu_wrap = Some(ShopEnvironmentGpu {
                     uniform_buffer,
                     bind_groups,
+                    archive_sign_decal_texture: None,
                 });
                 log::info!("hallway.glb GPU: {} primitive draw(s)", prims.len());
             }
@@ -3074,6 +3076,247 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         });
 
     crate::render::hallway_glb::release_hallway_environment_cpu_sources_after_gpu_upload();
+
+    let (archive_env_primitives, archive_environment, archive_sign_left_prim_idx, archive_sign_right_prim_idx) =
+        crate::render::archive_glb::with_archive_glb_cpu(|cpu_opt| {
+            let mut prims = Vec::new();
+            let mut gpu_wrap = None;
+            let mut sign_l = None;
+            let mut sign_r = None;
+            let Some(cpu) = cpu_opt else {
+                return (prims, gpu_wrap, sign_l, sign_r);
+            };
+            if !cpu.environment_primitives.is_empty() {
+                for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
+                    if let Some(ref name) = env_prim.gltf_node_name {
+                        if name == crate::render::archive_glb::SIGN_DESCRIPTION_LEFT {
+                            sign_l = Some(i);
+                        } else if name == crate::render::archive_glb::SIGN_DESCRIPTION_RIGHT {
+                            sign_r = Some(i);
+                        }
+                    }
+                    let prim = &env_prim.mesh;
+                    let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("archive-env-verts-{i}")),
+                        contents: bytemuck::cast_slice(&prim.vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+                    let ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("archive-env-idx-{i}")),
+                        contents: bytemuck::cast_slice(&prim.indices),
+                        usage: wgpu::BufferUsages::INDEX,
+                    });
+                    let mips = crate::render::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
+                    let (_albedo_texture, albedo_view) = match &prim.albedo_rgba {
+                        Some((rgba, aw, ah)) => upload_rgba_texture_with_mips(
+                            &device,
+                            &queue,
+                            &format!("archive-env-albedo-{i}"),
+                            rgba,
+                            *aw,
+                            *ah,
+                            wgpu::TextureFormat::Rgba8UnormSrgb,
+                            mips,
+                        ),
+                        None => white_albedo(&device, &queue),
+                    };
+                    let normal_view = match &prim.normal_rgba {
+                        Some((rgba, nw, nh)) => {
+                            upload_rgba_texture_with_mips(
+                                &device,
+                                &queue,
+                                &format!("archive-env-normal-{i}"),
+                                rgba,
+                                *nw,
+                                *nh,
+                                wgpu::TextureFormat::Rgba8Unorm,
+                                mips,
+                            )
+                            .1
+                        }
+                        None => tile_default_normal_view.clone(),
+                    };
+                    let metallic_roughness_view = match &prim.metallic_roughness_rgba {
+                        Some((rgba, w, h)) => {
+                            upload_rgba_texture_with_mips(
+                                &device,
+                                &queue,
+                                &format!("archive-env-mr-{i}"),
+                                rgba,
+                                *w,
+                                *h,
+                                wgpu::TextureFormat::Rgba8Unorm,
+                                mips,
+                            )
+                            .1
+                        }
+                        None => tile_glb_default_mr_view.clone(),
+                    };
+                    let emissive_view = match &prim.emissive_rgba {
+                        Some((rgba, w, h)) => {
+                            upload_rgba_texture_with_mips(
+                                &device,
+                                &queue,
+                                &format!("archive-env-emissive-{i}"),
+                                rgba,
+                                *w,
+                                *h,
+                                wgpu::TextureFormat::Rgba8UnormSrgb,
+                                mips,
+                            )
+                            .1
+                        }
+                        None => tile_glb_default_emissive_view.clone(),
+                    };
+                    let pbr_uniform_buffer =
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some(&format!("archive-pbr-{i}")),
+                            contents: bytemuck::bytes_of(&GltfPbrUniform::from_loaded(
+                                prim.metallic_factor,
+                                prim.roughness_factor,
+                                prim.emissive_factor,
+                                prim.alpha_mode,
+                                prim.alpha_cutoff,
+                            )),
+                            usage: wgpu::BufferUsages::UNIFORM,
+                        });
+                    let sampler =
+                        device.create_sampler(&build_sampler_descriptor(prim.sampler, None));
+                    prims.push(TilePrimitiveGpu {
+                        vertex_buffer: vb,
+                        index_buffer: ib,
+                        index_count: prim.indices.len() as u32,
+                        albedo_view,
+                        normal_view,
+                        metallic_roughness_view,
+                        emissive_view,
+                        pbr_uniform_buffer,
+                        sampler,
+                        pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
+                    });
+                }
+                let (sign_decal_w, sign_decal_h) = crate::render::decal::decal_dimensions(
+                    &crate::render::primitive::DecalLayout::Fit {
+                        target_short_edge: crate::render::decal::PLAQUE_DECAL_HEIGHT,
+                    },
+                    crate::render::archive_glb::ARCHIVE_DESCRIPTION_DECAL_HOST_EXTENTS,
+                );
+                let sign_decal_clear =
+                    vec![0u8; (sign_decal_w * sign_decal_h * 4) as usize];
+                let archive_sign_decal_tex = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("archive-sign-decal"),
+                    size: wgpu::Extent3d {
+                        width: sign_decal_w,
+                        height: sign_decal_h,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
+                });
+                queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &archive_sign_decal_tex,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    &sign_decal_clear,
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(4 * sign_decal_w),
+                        rows_per_image: Some(sign_decal_h),
+                    },
+                    wgpu::Extent3d {
+                        width: sign_decal_w,
+                        height: sign_decal_h,
+                        depth_or_array_layers: 1,
+                    },
+                );
+                let archive_decal_view =
+                    archive_sign_decal_tex.create_view(&wgpu::TextureViewDescriptor::default());
+                let identity = Mat4::IDENTITY;
+                let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("archive-env-uniform"),
+                    contents: bytemuck::bytes_of(&CameraUniform {
+                        view_proj: identity.to_cols_array(),
+                        model: identity.to_cols_array(),
+                        base_color_factor: [
+                            1.0,
+                            0.0,
+                            0.0,
+                            crate::render::tile_body::TEXTURED_BASE_MAP_BODY_KIND,
+                        ],
+                        cam_pos: [0.0; 3],
+                        tile_seed: 0.0,
+                        decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
+                        hdr_tonemap: [0.0; 4],
+                    }),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+                let bind_groups: Vec<wgpu::BindGroup> = prims
+                    .iter()
+                    .enumerate()
+                    .map(|(_bi, p)| {
+                        device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("archive-env-bg"),
+                            layout: &tile_material_layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: uniform_buffer.as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: wgpu::BindingResource::TextureView(&p.albedo_view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 2,
+                                    resource: wgpu::BindingResource::Sampler(&p.sampler),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 3,
+                                    resource: wgpu::BindingResource::TextureView(
+                                        &archive_decal_view,
+                                    ),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 4,
+                                    resource: wgpu::BindingResource::TextureView(&p.normal_view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 5,
+                                    resource: p.pbr_uniform_buffer.as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 6,
+                                    resource: wgpu::BindingResource::TextureView(
+                                        &p.metallic_roughness_view,
+                                    ),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 7,
+                                    resource: wgpu::BindingResource::TextureView(&p.emissive_view),
+                                },
+                            ],
+                        })
+                    })
+                    .collect();
+                gpu_wrap = Some(ShopEnvironmentGpu {
+                    uniform_buffer,
+                    bind_groups,
+                    archive_sign_decal_texture: Some(archive_sign_decal_tex),
+                });
+                log::info!("archive.glb GPU: {} primitive draw(s)", prims.len());
+            }
+            (prims, gpu_wrap, sign_l, sign_r)
+        });
+
+    crate::render::archive_glb::release_archive_environment_cpu_sources_after_gpu_upload();
 
     let shop_env_collision_meshes = crate::render::shop_glb::with_shop_glb_cpu(|opt| {
         opt.map(|c| c.collision_meshes.clone()).unwrap_or_default()
@@ -3118,7 +3361,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     let pack_mesh = LitMeshGpu::new(&device, &build_pack_mesh(), "pack-mesh");
     let ribbon_mesh = LitMeshGpu::new(&device, &build_ribbon_mesh(), "ribbon");
     let talisman_mesh = LitMeshGpu::new(&device, &build_talisman_mesh(), "talisman");
-    let shrine_mesh = LitMeshGpu::new(&device, &build_shrine_mesh(), "shrine");
     let dora_plinth_mesh = LitMeshGpu::new(&device, &build_dora_plinth_mesh(), "dora-plinth");
     let bug_body_mesh = LitMeshGpu::new(&device, &build_bug_body_mesh(), "bug-body");
     let bug_wing_mesh = LitMeshGpu::new(&device, &build_bug_wing_mesh(), "bug-wing");
@@ -3490,17 +3732,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             &tile_sampler,
         ));
     }
-    let mut shrine_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_SHRINE_SLOTS);
-    for _ in 0..MAX_SHRINE_SLOTS {
-        shrine_instances.push(LitMeshInstance::new(
-            &device,
-            &lit_mesh_material_layout,
-            &shadow_caster_layout,
-            &lit_mesh_white_view,
-            &lit_mesh_relief_default_view,
-            &tile_sampler,
-        ));
-    }
     let mut dora_plinth_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_DORA_PLINTH_SLOTS);
     for _ in 0..MAX_DORA_PLINTH_SLOTS {
         dora_plinth_instances.push(LitMeshInstance::new(
@@ -3690,7 +3921,12 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         shop_environment,
         hallway_env_primitives,
         hallway_environment,
-        shop_env_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
+        archive_env_primitives,
+        archive_environment,
+        archive_sign_left_prim_idx,
+        archive_sign_right_prim_idx,
+        archive_sign_decal_upload_key: 0,
+        room_gltf_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
         shop_env_linear_exposure: crate::render::shop_glb::SHOP_ENV_LINEAR_EXPOSURE,
         shop_env_ambient_scale: crate::render::shop_glb::SHOP_ENV_AMBIENT_SCALE,
         shop_lit_mesh_gltf_punctual_scale:
@@ -3738,7 +3974,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         pack_slot_texture: vec![None; 4],
         ribbon_mesh,
         talisman_mesh,
-        shrine_mesh,
         dora_plinth_mesh,
         ribbon_instances,
         ribbon_slot_zodiac,
@@ -3754,7 +3989,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         bug_wing_blur_r_instances,
         orb_mesh,
         orb_instances,
-        shrine_instances,
         dora_plinth_instances,
         last_ribbon_models: Vec::new(),
         last_ribbon_slot_count: 0,

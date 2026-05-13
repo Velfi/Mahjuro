@@ -53,6 +53,8 @@ pub(super) enum RenderOp {
     ShopEnvironment,
     /// Pick-blind hallway (`hallway.glb`).
     HallwayEnvironment,
+    /// Archive room (`archive.glb`).
+    ArchiveEnvironment,
     /// Marker: start a new Pass A subpass with depth cleared (HDR color unchanged).
     /// Emitted from [`crate::render::draw_cmd::DrawCmd::ClearSceneDepth`]. Never dispatched
     /// through [`super::process_op::WgpuRenderer::process_op`].
@@ -81,7 +83,6 @@ pub(super) enum DrawKind {
     Pack,
     Ribbon,
     Talisman,
-    Shrine,
     BugBody,
     BugWingL,
     BugWingR,

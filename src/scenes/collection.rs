@@ -1,6 +1,7 @@
 //! Archive — five tabs (Relics / Yaku / Bosses / Talismans / Chronicle).
 //! Each tab is a scrolling grid of artifacts on a backdrop plane; focus
-//! shows a close-up and description plaque. E / North opens orbit inspect.
+//! shows a close-up and description on the room's sign boards (or a floating card when
+//! inspecting or using the procedural layout). E / North opens orbit inspect.
 
 use std::time::Instant;
 
@@ -11,10 +12,15 @@ use crate::core::talisman::TalismanKind;
 use crate::core::yaku::YakuKind;
 use crate::core::zodiac::ZodiacKind;
 use crate::game::event_bus::GameEvent;
-use crate::render::draw_cmd::{CameraParams, Object3d, Object3dKind, UiFrame};
+use crate::render::archive_glb;
+use crate::render::draw_cmd::{CameraParams, Object3d, Object3dKind, ScenePunctualLight, UiFrame};
+use crate::render::shop_glb;
 use crate::render::table_transform::{euler_xyz_rad_from_deg, rot_fixed_axes_deg};
 use crate::render::theme::{color, metrics, typography};
+use crate::render::world_space::{surface_anchor_from_world_xyz, world_on_camera_ray_plane_z};
 use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, PointLight, TextAlign, TextLabel};
+use glam::Vec3;
+use crate::ui::focus_nav::{pick_neighbor, FocusDir};
 use crate::ui::input::UiAction;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
@@ -24,6 +30,7 @@ use super::profile_select::ProfileSelectScene;
 use super::{DrawCtx, OverlayRequest, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 use crate::scenes::object3d_inspect::{
     InspectFrameEnv, InspectRig, ItemInspectOrbitState, apply_inspect_view_to_frame,
+    prepend_inspect_orbit_subject_rotation,
 };
 
 /// 2D chrome sizes shared by [`CollectionScene::draw_collection_frame`] and
@@ -122,6 +129,8 @@ enum CollectionAction {
     SwitchSave,
     PrevTab,
     NextTab,
+    /// Direct tab pick when `archive.glb` provides section button bounds.
+    SelectTab(usize),
     /// Click on an artifact in the current tab's row → set as the
     /// featured item for [`ItemInspectScene`] orbit. Indexes into the
     /// active tab's artifact list globally so the selection survives
@@ -136,6 +145,7 @@ impl CollectionAction {
             CollectionAction::SwitchSave => FocusId(23),
             CollectionAction::PrevTab => FocusId(21),
             CollectionAction::NextTab => FocusId(22),
+            CollectionAction::SelectTab(i) => FocusId(400 + i as u32),
             // SelectArtifact IDs start at 200. The widget tree just needs
             // unique IDs per hit target — the values themselves don't matter.
             CollectionAction::SelectArtifact(i) => FocusId(200 + i as u32),
@@ -181,6 +191,11 @@ pub struct CollectionScene {
     cam_anim: std::cell::Cell<Option<CamAnim>>,
     /// Last `run_history.len()` reported to persist "seen" chronicle hints.
     chronicle_seen_cursor: Option<u32>,
+    /// Horizontal scroll origin (logical column 0..=3) for the 3-wide `archive.glb` window.
+    archive_col_scroll: i32,
+    /// Last drawn [`DrawCtx::room_gltf_height_scale`] — matches GPU glTF room scale when `flat_items` /
+    /// `update` build marker hit rects (possibly one frame behind).
+    drawn_room_gltf_height_scale: std::cell::Cell<f32>,
 }
 
 #[derive(Clone, Copy)]
@@ -217,6 +232,8 @@ impl CollectionScene {
             scroll_last_tick: std::cell::Cell::new(Instant::now()),
             cam_anim: std::cell::Cell::new(None),
             chronicle_seen_cursor: None,
+            archive_col_scroll: 0,
+            drawn_room_gltf_height_scale: std::cell::Cell::new(1.0),
         }
     }
 
@@ -273,6 +290,7 @@ impl CollectionScene {
         self.focused_row = Some(0);
         self.scroll_rows.set(0.0);
         self.target_scroll_rows.set(0.0);
+        self.archive_col_scroll = 0;
         self.cam_anim.set(None);
     }
 
@@ -307,7 +325,9 @@ impl CollectionScene {
         w: f32,
         h: f32,
         progress: &crate::core::progression::PlayerProgress,
+        env_h: f32,
     ) -> Vec<FlatItem<CollectionAction>> {
+        let env_h = collection_sanitized_room_gltf_height_scale(env_h);
         let ch = archive_chrome_layout(w, h);
         let scale = ch.scale;
         let title_y = ch.title_y;
@@ -353,32 +373,108 @@ impl CollectionScene {
         let all = tab_artifacts(self.active_tab, progress);
         let layout = compute_layout(w, h, scale, self.active_tab, all.len());
 
-        // Per-artifact hit rects. Apply current scroll offset and clip
-        // to the visible band so off-screen rows can't catch clicks.
-        let scroll = self.scroll_rows.get();
-        let view_proj = camera_view_proj(w, h, &layout.camera);
-        let cell_h_screen = layout.grid_row_pitch * 0.95;
-        let cell_half = layout.grid_cell_w * 0.5;
-        for idx in 0..all.len() {
-            let row = (idx as u32) / layout.grid_cols;
-            let col = (idx as u32) % layout.grid_cols;
-            let cx = layout.grid_x_start + col as f32 * layout.grid_cell_w;
-            let cy = layout.grid_y_top + (row as f32 - scroll) * layout.grid_row_pitch;
-            // Clip rows whose center lies more than half a cell outside
-            // the band — those are off-screen and not meaningfully
-            // clickable.
-            if cy + cell_half < layout.band_top_y || cy - cell_half > layout.band_bottom_y {
-                continue;
+        if archive_glb::archive_room_draw_ready() {
+            let cam = archive_glb::archive_camera_base(w, h, env_h);
+            if let Some(tab_rects) = archive_section_tab_hit_rects(w, h, env_h, &cam) {
+                for (ti, rect) in tab_rects {
+                    if !flat_rect_xywh_is_finite(rect) {
+                        continue;
+                    }
+                    items.push(FlatItem::new(
+                        CollectionAction::SelectTab(ti).id(),
+                        rect,
+                        CollectionAction::SelectTab(ti),
+                    ));
+                }
             }
-            let world = pixel_to_world_xy(w, h, cx, cy, layout.shelf_top_lift);
-            let (sx, sy) = world_to_screen(view_proj, w, h, world);
-            let rect_w = layout.grid_cell_w * 0.95;
-            let rect_h = cell_h_screen;
-            items.push(FlatItem::new(
-                CollectionAction::SelectArtifact(idx).id(),
-                [sx - rect_w * 0.5, sy - rect_h * 0.5, rect_w, rect_h],
-                CollectionAction::SelectArtifact(idx),
-            ));
+            if !all.is_empty() {
+                let cols: i32 = GRID_COLS as i32;
+                let total_rows = ((all.len() as i32 + cols - 1).max(1)) / cols;
+                let anchors: Vec<Option<[f32; 3]>> = archive_glb::with_archive_glb_cpu(|opt| {
+                    let mut out = vec![None; archive_glb::ARCHIVE_SLOT_COUNT];
+                    let Some(cpu) = opt else {
+                        return out;
+                    };
+                    let model = shop_glb::shop_env_model_matrix_from_cpu(h, env_h, cpu);
+                    for slot in 0..archive_glb::ARCHIVE_SLOT_COUNT {
+                        let name = archive_glb::archive_spawn_item_marker_name(slot);
+                        let Some(node) = cpu.markers.get(name) else {
+                            continue;
+                        };
+                        let p = model.transform_point3(node.transform_point3(Vec3::ZERO));
+                        out[slot] = Some(surface_anchor_from_world_xyz(w, h, p));
+                    }
+                    out
+                });
+                let max_c0 = (cols as usize).saturating_sub(archive_glb::ARCHIVE_SLOT_COLS) as i32;
+                let win_col0 = self.archive_col_scroll.clamp(0, max_c0.max(0));
+                let max_r0 = (total_rows - archive_glb::ARCHIVE_SLOT_ROWS as i32).max(0);
+                let win_row0 =
+                    scroll_rows_eased_to_row_i32(self.target_scroll_rows.get(), max_r0);
+                let cell = (w * 0.12).min(h * 0.18);
+                let cell_gap = cell * 0.22;
+                let cell_pitch = cell + cell_gap;
+                let rect_w = cell_pitch * 0.95;
+                let rect_h = cell_pitch * 0.95;
+                let vp = camera_view_proj(w, h, &cam);
+                for slot in 0..archive_glb::ARCHIVE_SLOT_COUNT {
+                    let Some(anchor) = anchors[slot] else {
+                        continue;
+                    };
+                    let sr = (slot / archive_glb::ARCHIVE_SLOT_COLS) as i32;
+                    let sc = (slot % archive_glb::ARCHIVE_SLOT_COLS) as i32;
+                    let global_row = win_row0 + sr;
+                    let global_col = win_col0 + sc;
+                    if global_row < 0 || global_col < 0 || global_col >= cols || global_row >= total_rows {
+                        continue;
+                    }
+                    let flat = (global_row * cols + global_col) as usize;
+                    if flat >= all.len() {
+                        continue;
+                    }
+                    let world = pixel_to_world_xy(w, h, anchor[0], anchor[1], anchor[2]);
+                    let (sx, sy) = world_to_screen(vp, w, h, world);
+                    if !screen_hit_anchor_is_finite(sx, sy, rect_w, rect_h) {
+                        continue;
+                    }
+                    items.push(FlatItem::new(
+                        CollectionAction::SelectArtifact(flat).id(),
+                        [sx - rect_w * 0.5, sy - rect_h * 0.5, rect_w, rect_h],
+                        CollectionAction::SelectArtifact(flat),
+                    ));
+                }
+            }
+        } else {
+            // Per-artifact hit rects. Apply current scroll offset and clip
+            // to the visible band so off-screen rows can't catch clicks.
+            let scroll = self.scroll_rows.get();
+            let view_proj = camera_view_proj(w, h, &layout.camera);
+            let cell_h_screen = layout.grid_row_pitch * 0.95;
+            let cell_half = layout.grid_cell_w * 0.5;
+            for idx in 0..all.len() {
+                let row = (idx as u32) / layout.grid_cols;
+                let col = (idx as u32) % layout.grid_cols;
+                let cx = layout.grid_x_start + col as f32 * layout.grid_cell_w;
+                let cy = layout.grid_y_top + (row as f32 - scroll) * layout.grid_row_pitch;
+                // Clip rows whose center lies more than half a cell outside
+                // the band — those are off-screen and not meaningfully
+                // clickable.
+                if cy + cell_half < layout.band_top_y || cy - cell_half > layout.band_bottom_y {
+                    continue;
+                }
+                let world = pixel_to_world_xy(w, h, cx, cy, layout.shelf_top_lift);
+                let rect_w = layout.grid_cell_w * 0.95;
+                let rect_h = cell_h_screen;
+                let (sx, sy) = world_to_screen(view_proj, w, h, world);
+                if !screen_hit_anchor_is_finite(sx, sy, rect_w, rect_h) {
+                    continue;
+                }
+                items.push(FlatItem::new(
+                    CollectionAction::SelectArtifact(idx).id(),
+                    [sx - rect_w * 0.5, sy - rect_h * 0.5, rect_w, rect_h],
+                    CollectionAction::SelectArtifact(idx),
+                ));
+            }
         }
 
         items
@@ -391,9 +487,26 @@ impl CollectionScene {
         h: f32,
         bosses: &[Artifact],
         layout: &crate::ui::layout::LayoutResult,
+        env_h: f32,
     ) -> Option<[f32; 3]> {
+        let env_h = collection_sanitized_room_gltf_height_scale(env_h);
         if bosses.is_empty() {
             return None;
+        }
+        if archive_glb::archive_room_draw_ready() {
+            let world: Option<Vec3> = archive_glb::with_archive_glb_cpu(|opt| {
+                let cpu = opt?;
+                let m = archive_glb::archive_marker_world_mat4(
+                    h,
+                    env_h,
+                    cpu,
+                    archive_glb::ARCHIVE_SPAWN_FOCUSED_ITEM,
+                )?;
+                Some(m.transform_point3(Vec3::ZERO))
+            });
+            if let Some(p) = world {
+                return Some(p.to_array());
+            }
         }
         let cell = (w * 0.12).min(h * 0.18);
         let cell_gap = cell * 0.22;
@@ -441,8 +554,9 @@ impl CollectionScene {
         h: f32,
         bosses: &[Artifact],
         layout: &crate::ui::layout::LayoutResult,
+        env_h: f32,
     ) -> Option<ItemInspectOrbitState> {
-        let tw = self.collection_inspect_target_world(w, h, bosses, layout)?;
+        let tw = self.collection_inspect_target_world(w, h, bosses, layout, env_h)?;
         Some(ItemInspectOrbitState {
             target_world: tw,
             yaw: 0.0,
@@ -461,11 +575,18 @@ impl CollectionScene {
         progress: &crate::core::progression::PlayerProgress,
     ) -> Option<ItemInspectOrbitState> {
         let bosses = tab_artifacts(self.active_tab, progress);
-        self.collection_inspect_orbit_for_focus(w, h, &bosses, layout)
+        self.collection_inspect_orbit_for_focus(
+            w,
+            h,
+            &bosses,
+            layout,
+            crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
+        )
     }
 
     /// Build the 3D frame for the active Archive tab: grid on a plane, camera
-    /// eased to the focused cell, plus close-up and description plaques.
+    /// eased to the focused cell, plus close-up and description on GLB signs (or a floating card
+    /// when inspecting / procedural layout).
     fn build_archive_grid_frame(
         &self,
         mut frame: UiFrame,
@@ -477,6 +598,12 @@ impl CollectionScene {
     ) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
+        let env_scale = collection_sanitized_room_gltf_height_scale(ctx.room_gltf_height_scale);
+        let use_archive = archive_glb::archive_room_draw_ready();
+        if use_archive {
+            frame.archive_environment();
+        }
+        frame.archive_sign_description_decal_text = None;
 
         // Grid + backdrop plane. Object `pos` in `Object3d` is pixel-space
         // (renderer `pixel_to_world`); camera override uses world coords
@@ -530,11 +657,29 @@ impl CollectionScene {
         let (cam_col, cam_row) = self.tick_cam_focus(focus_col as f32, focus_row as f32);
         let cam_world_x = (cam_col - (cols as f32 - 1.0) * 0.5) * cell_pitch;
         let cam_world_z = -(cam_row * cell_pitch);
-        let base_cam = CameraParams {
-            eye: [cam_world_x, cam_world_y, cam_world_z],
-            target: [cam_world_x, 0.0, cam_world_z],
-            up: [0.0, 0.0, 1.0],
-            fovy_deg: 48.0,
+        let base_cam = if use_archive && inspect.is_none() {
+            archive_glb::archive_camera_base(w, h, env_scale)
+        } else {
+            CameraParams {
+                eye: [cam_world_x, cam_world_y, cam_world_z],
+                target: [cam_world_x, 0.0, cam_world_z],
+                up: [0.0, 0.0, 1.0],
+                fovy_deg: 48.0,
+            }
+        };
+        let archive_feat_plane_z = if use_archive && inspect.is_none() {
+            archive_glb::with_archive_glb_cpu(|opt| {
+                let cpu = opt?;
+                let m = archive_glb::archive_marker_world_mat4(
+                    h,
+                    env_scale,
+                    cpu,
+                    archive_glb::ARCHIVE_SPAWN_FOCUSED_ITEM,
+                )?;
+                Some(m.transform_point3(Vec3::ZERO).z)
+            })
+        } else {
+            None
         };
         let coll_rig = InspectRig::collection(h);
         if let Some(ins) = inspect {
@@ -547,6 +692,7 @@ impl CollectionScene {
                 ins.target_world,
                 InspectFrameEnv::Neutral,
             );
+            frame.archive_description_sign_use_left = None;
         } else {
             frame.camera_override = Some(base_cam);
         }
@@ -558,54 +704,138 @@ impl CollectionScene {
         let focus_px_z = focus_world_z;
 
         if inspect.is_none() {
-            // Three warm key-lights in front of the grid. Light `pos` is
-            // pixel-space (renderer converts via `pixel_to_world`), so
-            // pixel_x + pixel_y define the (X, Y) world position and the
-            // third coordinate is the world-Z lift directly.
-            frame.scene_lighting.set_smooth_points(vec![
-                PointLight {
-                    pos: [focus_px_x, cab_px_y + h * 0.5, focus_px_z + cell * 0.5],
-                    radius: cell_pitch * 14.0,
-                    color: [1.0, 0.88, 0.62],
-                    intensity: 2.4,
-                },
-                PointLight {
-                    pos: [
-                        focus_px_x - cell_pitch * 4.0,
-                        focus_px_y + h * 0.4,
-                        focus_px_z + cell_pitch * 3.0,
-                    ],
-                    radius: cell_pitch * 10.0,
-                    color: [0.85, 0.70, 1.0],
-                    intensity: 1.3,
-                },
-                PointLight {
-                    pos: [
-                        focus_px_x + cell_pitch * 4.0,
-                        focus_px_y + h * 0.4,
-                        focus_px_z - cell_pitch * 3.0,
-                    ],
-                    radius: cell_pitch * 10.0,
-                    color: [1.0, 0.65, 0.55],
-                    intensity: 1.3,
-                },
-            ]);
+            if use_archive {
+                frame.archive_description_sign_use_left = Some(
+                    archive_glb::with_archive_glb_cpu(|opt| {
+                        let cpu = opt?;
+                        archive_glb::archive_description_sign_use_left_for_cursor(
+                            w,
+                            h,
+                            env_scale,
+                            &base_cam,
+                            ctx.cursor_pos.0,
+                            cpu,
+                        )
+                    })
+                    .unwrap_or(ctx.cursor_pos.0 >= w * 0.5),
+                );
+                let room_glb = archive_glb::archive_glb_has_embedded_lights();
+                frame.scene_lighting.embedded_gltf_punctual = room_glb;
+                frame.scene_lighting.room_shop_glb_brdf = room_glb;
+                frame.scene_lighting.spot_lights = if room_glb {
+                    archive_glb::archive_embedded_spot_lights_runtime(
+                        w,
+                        h,
+                        env_scale,
+                        &ctx.shop_env_lighting,
+                    )
+                } else {
+                    Vec::new()
+                };
+                let inverse_punctual: Vec<ScenePunctualLight> = if room_glb {
+                    archive_glb::archive_embedded_point_lights_runtime(
+                        w,
+                        h,
+                        env_scale,
+                        &ctx.shop_env_lighting,
+                    )
+                    .into_iter()
+                    .map(ScenePunctualLight::InverseSquare)
+                    .collect()
+                } else {
+                    Vec::new()
+                };
+                if room_glb {
+                    frame.scene_lighting.punctual = inverse_punctual;
+                } else {
+                    frame.scene_lighting.set_smooth_points(vec![
+                        PointLight {
+                            pos: [focus_px_x, cab_px_y + h * 0.5, focus_px_z + cell * 0.5],
+                            radius: cell_pitch * 14.0,
+                            color: [1.0, 0.88, 0.62],
+                            intensity: 2.4,
+                        },
+                        PointLight {
+                            pos: [
+                                focus_px_x - cell_pitch * 4.0,
+                                focus_px_y + h * 0.4,
+                                focus_px_z + cell_pitch * 3.0,
+                            ],
+                            radius: cell_pitch * 10.0,
+                            color: [0.85, 0.70, 1.0],
+                            intensity: 1.3,
+                        },
+                        PointLight {
+                            pos: [
+                                focus_px_x + cell_pitch * 4.0,
+                                focus_px_y + h * 0.4,
+                                focus_px_z - cell_pitch * 3.0,
+                            ],
+                            radius: cell_pitch * 10.0,
+                            color: [1.0, 0.65, 0.55],
+                            intensity: 1.3,
+                        },
+                    ]);
+                }
+            } else {
+                frame.archive_description_sign_use_left = None;
+                // Three warm key-lights in front of the grid. Light `pos` is
+                // pixel-space (renderer converts via `pixel_to_world`), so
+                // pixel_x + pixel_y define the (X, Y) world position and the
+                // third coordinate is the world-Z lift directly.
+                frame.scene_lighting.set_smooth_points(vec![
+                    PointLight {
+                        pos: [focus_px_x, cab_px_y + h * 0.5, focus_px_z + cell * 0.5],
+                        radius: cell_pitch * 14.0,
+                        color: [1.0, 0.88, 0.62],
+                        intensity: 2.4,
+                    },
+                    PointLight {
+                        pos: [
+                            focus_px_x - cell_pitch * 4.0,
+                            focus_px_y + h * 0.4,
+                            focus_px_z + cell_pitch * 3.0,
+                        ],
+                        radius: cell_pitch * 10.0,
+                        color: [0.85, 0.70, 1.0],
+                        intensity: 1.3,
+                    },
+                    PointLight {
+                        pos: [
+                            focus_px_x + cell_pitch * 4.0,
+                            focus_px_y + h * 0.4,
+                            focus_px_z - cell_pitch * 3.0,
+                        ],
+                        radius: cell_pitch * 10.0,
+                        color: [1.0, 0.65, 0.55],
+                        intensity: 1.3,
+                    },
+                ]);
+            }
         }
 
-        // Grid window size — how many cells we actually push as 3D
-        // objects. Larger = more infinite-looking, slower to render.
-        // Bounded around the focused cell so the draw count stays
-        // constant as the player scrolls.
-        let window_cols: i32 = 11;
-        let window_rows: i32 = 9;
-        let col_min = focus_col - window_cols;
-        let col_max = focus_col + window_cols;
-        let row_min = focus_row - window_rows;
-        let row_max = focus_row + window_rows;
+        // Grid window size — procedural infinite corridor only.
+        let mut plaques: Vec<Object3d> = if use_archive {
+            Vec::with_capacity(archive_glb::ARCHIVE_SLOT_COUNT + 8)
+        } else {
+            let window_cols: i32 = 11;
+            let window_rows: i32 = 9;
+            let col_min = focus_col - window_cols;
+            let col_max = focus_col + window_cols;
+            let row_min = focus_row - window_rows;
+            let row_max = focus_row + window_rows;
+            Vec::with_capacity(
+                ((col_max - col_min + 1) * (row_max - row_min + 1)) as usize * 2 + 8,
+            )
+        };
 
-        let mut plaques: Vec<Object3d> = Vec::with_capacity(
-            ((col_max - col_min + 1) * (row_max - row_min + 1)) as usize * 2 + 8,
-        );
+        if !use_archive {
+            let window_cols: i32 = 11;
+            let window_rows: i32 = 9;
+            let col_min = focus_col - window_cols;
+            let col_max = focus_col + window_cols;
+            let row_min = focus_row - window_rows;
+            let row_max = focus_row + window_rows;
 
         // Back-wall slab: a single dark lacquered panel behind the
         // whole cell window. Sits behind the grid plane in world Y
@@ -680,167 +910,68 @@ impl CollectionScene {
                 // world Y < 0 (closer). We want nameplates CLOSER than
                 // the grid plane, so add to cab_px_y.
                 let is_focus = col == focus_col && row == focus_row;
-                let nameplate_py = cab_px_y + if is_focus { cell * 0.5 } else { cell * 0.15 };
-                let plate_w = cell * if is_focus { 0.78 } else { 0.62 };
-                let plate_h = cell * if is_focus { 0.78 } else { 0.62 };
-                let plate_thick = cell * 0.06;
-                // Use the boss accent as-is (not lift_floor'd toward
-                // white) so distinct tiers stay visually distinct.
-                // Outer cells still dim toward black via `fade`.
-                // Push the accent up by ~1.8x so lit-mesh shading
-                // doesn't swallow it into the wood background. Clamp
-                // alpha to 1.0; channels above 1.0 feed bloom for a
-                // subtle glow on the focused cell.
-                let bright = {
-                    let k = if is_focus { 2.0 } else { 1.6 };
-                    let f = fade.max(if is_focus { 1.0 } else { 0.55 });
-                    [
-                        boss.accent[0] * k * f,
-                        boss.accent[1] * k * f,
-                        boss.accent[2] * k * f,
-                        1.0,
-                    ]
+                collection_push_grid_cell_object3d(
+                    &mut plaques,
+                    boss,
+                    [cx, cab_px_y, cz],
+                    cell,
+                    fade,
+                    is_focus,
+                    boss_i,
+                );
+            }
+        }
+        } else {
+            let anchors: Vec<Option<[f32; 3]>> = archive_glb::with_archive_glb_cpu(|opt| {
+                let mut out = vec![None; archive_glb::ARCHIVE_SLOT_COUNT];
+                let Some(cpu) = opt else {
+                    return out;
                 };
-                match &boss.kind {
-                    ArtifactKind::Relic(relic_id) => {
-                        // Render the actual silhouette-extruded relic model
-                        // instead of a tinted plaque. Locked relics render
-                        // as a dim rarity-accent silhouette so the row still
-                        // reads as a ladder of unlockables. The extents
-                        // square (plate_w × plate_w × thick) fills the cell
-                        // from the plaque layout so focus-scaling stays
-                        // consistent with non-relic cells.
-                        let silhouette = !boss.unlocked;
-                        let visual = crate::core::relic::relic_visual(*relic_id);
-                        let face = plate_w;
-                        let thick = face * 0.12 * visual.thickness_scale;
-                        let color = if silhouette {
-                            // Muted rarity tint: locked entries still carry
-                            // a dim hint of their accent so Common / Rare /
-                            // Legendary remain visually distinct in the
-                            // grid.
-                            [
-                                boss.accent[0] * 0.22 + 0.02,
-                                boss.accent[1] * 0.22 + 0.02,
-                                boss.accent[2] * 0.22 + 0.02,
-                                1.0,
-                            ]
-                        } else {
-                            boss.accent
-                        };
-                        plaques.push(Object3d {
-                            pos: [cx, nameplate_py, cz],
-                            extents: [face, thick, face],
-                            rotation: euler_xyz_rad_from_deg(
-                                180.0 + visual.ui_tilt_x_deg,
-                                0.0,
-                                0.0,
-                            ),
-                            color,
-                            kind: Object3dKind::Relic {
-                                relic_id: *relic_id,
-                                glow: if is_focus && !silhouette { 0.6 } else { 0.0 },
-                                silhouette,
-                                debuffed: false,
-                                pick_id: Some(boss_i as u32),
-                            },
-                            hover_target: if is_focus { 1.0 } else { 0.0 },
-                            anim_id: boss_i as u64,
-                            arrange_name: None,
-                        });
-                    }
-                    ArtifactKind::Talisman(tk) => {
-                        // Hang the tablet pendant-style: the mesh UVs
-                        // assume the shop's Rx(-90°) peg orientation,
-                        // so Rx(+90°) here was flipping the art upside
-                        // down. A small Ry tilt breaks the dead-flat
-                        // pose so jade/pearl/foil materials catch the
-                        // grid key-lights at a glancing angle.
-                        plaques.push(Object3d {
-                            pos: [cx, nameplate_py, cz],
-                            extents: [plate_w * 0.70, plate_w, plate_w * 0.18],
-                            rotation: euler_xyz_rad_from_deg(-90.0, 14.0, 0.0),
-                            color: bright,
-                            kind: Object3dKind::Talisman { kind: *tk },
-                            hover_target: if is_focus { 1.0 } else { 0.0 },
-                            anim_id: boss_i as u64,
-                            arrange_name: None,
-                        });
-                    }
-                    ArtifactKind::Zodiac(zk) => {
-                        // Silken ribbon draped along the cell's long
-                        // axis. Width × 0.15 = thickness per renderer.
-                        let rib_w = plate_w * 0.34;
-                        plaques.push(Object3d {
-                            pos: [cx, nameplate_py, cz],
-                            extents: [rib_w, plate_w, rib_w * 0.15],
-                            rotation: euler_xyz_rad_from_deg(90.0, 0.0, 0.0),
-                            color: [1.0, 1.0, 1.0, 1.0],
-                            kind: Object3dKind::ZodiacRibbon { kind: Some(*zk) },
-                            hover_target: if is_focus { 1.0 } else { 0.0 },
-                            anim_id: boss_i as u64,
-                            arrange_name: None,
-                        });
-                    }
-                    ArtifactKind::PlaqueOnly => {
-                        use crate::render::primitive::{
-                            DecalLayout, DecalSpec, MaterialSpec, MeshId,
-                        };
-                        plaques.push(Object3d {
-                            pos: [cx, nameplate_py, cz],
-                            extents: [plate_w, plate_h, plate_thick],
-                            rotation: euler_xyz_rad_from_deg(90.0, 0.0, 0.0),
-                            color: bright,
-                            kind: Object3dKind::Primitive {
-                                shape: MeshId::BeveledSlab,
-                                material: MaterialSpec::lacquered_wood_flat().with_decal(
-                                    DecalSpec {
-                                        text: boss.name.clone(),
-                                        layout: DecalLayout::Fit {
-                                            target_short_edge:
-                                                crate::render::decal::PLAQUE_DECAL_HEIGHT,
-                                        },
-                                    },
-                                ),
-                                pick_id: None,
-                                shadow_caster: false,
-                                silhouette: false,
-                            },
-                            hover_target: if is_focus { 1.0 } else { 0.0 },
-                            anim_id: boss_i as u64,
-                            arrange_name: None,
-                        });
-                    }
-                    ArtifactKind::ChronicleRun(_) => {
-                        use crate::render::primitive::{
-                            DecalLayout, DecalSpec, MaterialSpec, MeshId,
-                        };
-                        plaques.push(Object3d {
-                            pos: [cx, nameplate_py, cz],
-                            extents: [plate_w, plate_h, plate_thick],
-                            rotation: euler_xyz_rad_from_deg(90.0, 0.0, 0.0),
-                            color: bright,
-                            kind: Object3dKind::Primitive {
-                                shape: MeshId::BeveledSlab,
-                                material: MaterialSpec::lacquered_wood_flat().with_decal(
-                                    DecalSpec {
-                                        text: boss.name.clone(),
-                                        layout: DecalLayout::Fit {
-                                            target_short_edge:
-                                                crate::render::decal::PLAQUE_DECAL_HEIGHT,
-                                        },
-                                    },
-                                ),
-                                pick_id: None,
-                                shadow_caster: false,
-                                silhouette: false,
-                            },
-                            hover_target: if is_focus { 1.0 } else { 0.0 },
-                            anim_id: boss_i as u64,
-                            arrange_name: None,
-                        });
-                    }
+                let model = shop_glb::shop_env_model_matrix_from_cpu(
+                    h,
+                    env_scale,
+                    cpu,
+                );
+                for slot in 0..archive_glb::ARCHIVE_SLOT_COUNT {
+                    let name = archive_glb::archive_spawn_item_marker_name(slot);
+                    let Some(node) = cpu.markers.get(name) else {
+                        continue;
+                    };
+                    let p = model.transform_point3(node.transform_point3(Vec3::ZERO));
+                    out[slot] = Some(surface_anchor_from_world_xyz(w, h, p));
                 }
+                out
+            });
+            let max_c0 = (cols as usize).saturating_sub(archive_glb::ARCHIVE_SLOT_COLS) as i32;
+            let win_col0 = self.archive_col_scroll.clamp(0, max_c0.max(0));
+            let max_r0 = (total_rows - archive_glb::ARCHIVE_SLOT_ROWS as i32).max(0);
+            let win_row0 = scroll_rows_eased_to_row_i32(self.target_scroll_rows.get(), max_r0);
+            for slot in 0..archive_glb::ARCHIVE_SLOT_COUNT {
+                let Some(anchor) = anchors[slot] else {
+                    continue;
+                };
+                let sr = (slot / archive_glb::ARCHIVE_SLOT_COLS) as i32;
+                let sc = (slot % archive_glb::ARCHIVE_SLOT_COLS) as i32;
+                let global_row = win_row0 + sr;
+                let global_col = win_col0 + sc;
+                if global_row < 0 || global_col < 0 || global_col >= cols || global_row >= total_rows {
+                    continue;
+                }
+                let flat = (global_row * cols + global_col) as usize;
+                if flat >= bosses.len() {
+                    continue;
+                }
+                let boss = &bosses[flat];
+                let is_focus = focus_flat as usize == flat;
+                collection_push_grid_cell_object3d(
+                    &mut plaques,
+                    boss,
+                    anchor,
+                    cell,
+                    1.0,
+                    is_focus,
+                    flat as i32,
+                );
             }
         }
 
@@ -850,6 +981,13 @@ impl CollectionScene {
         let mut gradient_backers: Vec<GradientQuadInstance> = Vec::new();
 
         if let Some(boss) = bosses.get(focus_flat as usize) {
+            let with_inspect_spin = |o: Object3d| -> Object3d {
+                if let Some(ins) = inspect {
+                    prepend_inspect_orbit_subject_rotation(o, ins, &coll_rig)
+                } else {
+                    o
+                }
+            };
             // World-space offsets from the camera target. View direction
             // is +Y (eye at world_y = -h*1.1, target at world_y = 0), so
             // X and Z offsets slide the object across the view plane.
@@ -878,8 +1016,26 @@ impl CollectionScene {
             // cell already carries the pulsing selection halo.
             let closeup_size = h * 0.28;
             let closeup_px = cab_px_x + closeup_wx;
+            let (closeup_ax, closeup_ay, closeup_az) = if use_archive && inspect.is_none() {
+                let anchor: Option<[f32; 3]> = archive_glb::with_archive_glb_cpu(|opt| {
+                    let cpu = opt?;
+                    let m = archive_glb::archive_marker_world_mat4(
+                        h,
+                        env_scale,
+                        cpu,
+                        archive_glb::ARCHIVE_SPAWN_FOCUSED_ITEM,
+                    )?;
+                    let p = m.transform_point3(Vec3::ZERO);
+                    Some(surface_anchor_from_world_xyz(w, h, p))
+                });
+                anchor
+                    .map(|a| (a[0], a[1], a[2]))
+                    .unwrap_or((closeup_px, hud_py, hud_wz))
+            } else {
+                (closeup_px, hud_py, hud_wz)
+            };
             let closeup_anchor = crate::ui::placement::PlacementAnchor::new(
-                [closeup_px, hud_py, hud_wz],
+                [closeup_ax, closeup_ay, closeup_az],
                 rot_fixed_axes_deg(90.0, 0.0, 0.0),
                 &self.positions.featured_artifact,
                 "collection.featured_artifact",
@@ -910,7 +1066,7 @@ impl CollectionScene {
                     } else {
                         boss.accent
                     };
-                    hud_plaques.push(Object3d {
+                    hud_plaques.push(with_inspect_spin(Object3d {
                         pos: closeup_anchor.pos,
                         extents: [face, thick, face],
                         rotation: euler_xyz_rad_from_deg(180.0 + visual.ui_tilt_x_deg, 0.0, 0.0),
@@ -925,13 +1081,13 @@ impl CollectionScene {
                         hover_target: 1.0,
                         anim_id: 0xC105E0,
                         arrange_name: Some(closeup_anchor.arrange_name),
-                    });
+                    }));
                 }
                 ArtifactKind::Talisman(tk) => {
                     // Pendant orientation matches the grid cells; see the
                     // grid-side Rx(-90°) comment. 14° Ry tilt keeps the
                     // material sheen readable on the featured tablet too.
-                    hud_plaques.push(Object3d {
+                    hud_plaques.push(with_inspect_spin(Object3d {
                         pos: closeup_anchor.pos,
                         extents: [closeup_size * 0.70, closeup_size, closeup_size * 0.18],
                         rotation: euler_xyz_rad_from_deg(-90.0, 14.0, 0.0),
@@ -940,11 +1096,11 @@ impl CollectionScene {
                         hover_target: 1.0,
                         anim_id: 0xC105E0,
                         arrange_name: Some(closeup_anchor.arrange_name),
-                    });
+                    }));
                 }
                 ArtifactKind::Zodiac(zk) => {
                     let rib_w = closeup_size * 0.34;
-                    hud_plaques.push(Object3d {
+                    hud_plaques.push(with_inspect_spin(Object3d {
                         pos: closeup_anchor.pos,
                         extents: [rib_w, closeup_size, rib_w * 0.15],
                         rotation: closeup_anchor.object3d_rotation(),
@@ -953,7 +1109,7 @@ impl CollectionScene {
                         hover_target: 1.0,
                         anim_id: 0xC105E0,
                         arrange_name: Some(closeup_anchor.arrange_name),
-                    });
+                    }));
                 }
                 ArtifactKind::PlaqueOnly => {
                     let label = if boss.unlocked {
@@ -985,7 +1141,7 @@ impl CollectionScene {
                             },
                         })
                     };
-                    hud_plaques.push(Object3d {
+                    hud_plaques.push(with_inspect_spin(Object3d {
                         pos: closeup_anchor.pos,
                         extents: [closeup_size, closeup_size, closeup_size * 0.1],
                         rotation: closeup_anchor.object3d_rotation(),
@@ -1000,7 +1156,7 @@ impl CollectionScene {
                         hover_target: 1.0,
                         anim_id: 0xC105E0,
                         arrange_name: Some(closeup_anchor.arrange_name),
-                    });
+                    }));
                 }
                 ArtifactKind::ChronicleRun(_) => {
                     let label = boss.name.clone();
@@ -1011,7 +1167,7 @@ impl CollectionScene {
                             target_short_edge: crate::render::decal::PLAQUE_DECAL_HEIGHT,
                         },
                     });
-                    hud_plaques.push(Object3d {
+                    hud_plaques.push(with_inspect_spin(Object3d {
                         pos: closeup_anchor.pos,
                         extents: [closeup_size, closeup_size, closeup_size * 0.1],
                         rotation: closeup_anchor.object3d_rotation(),
@@ -1026,14 +1182,16 @@ impl CollectionScene {
                         hover_target: 1.0,
                         anim_id: 0xC105E0,
                         arrange_name: Some(closeup_anchor.arrange_name),
-                    });
+                    }));
                 }
             }
 
             // ── Description plaque ───────────────────────────────────
             let card_w = h * 0.22;
             let card_h = h * 0.16;
-            let card_px = cab_px_x + card_wx;
+            let card_px_proc = cab_px_x + card_wx;
+            const ARCHIVE_DESC_SX_FRAC: f32 = 0.705_f32;
+            const ARCHIVE_DESC_SY_FRAC: f32 = 0.50_f32;
             // Relic: grid focus plaque shows mechanical rules; orbit inspect shows flavor only.
             let body = if boss.unlocked
                 && inspect.is_some()
@@ -1052,14 +1210,30 @@ impl CollectionScene {
             } else {
                 format!("{}\n\n{}", boss.name, body)
             };
-            let anchor = crate::ui::placement::PlacementAnchor::new(
-                [card_px, hud_py, hud_wz],
-                rot_fixed_axes_deg(90.0, 0.0, 0.0),
-                &self.positions.focus_card,
-                "collection.focus_card",
-                ctx.layout,
-            );
-            {
+            if use_archive && inspect.is_none() {
+                frame.archive_sign_description_decal_text = Some(card_text.clone());
+            }
+            if !use_archive || inspect.is_some() {
+                // Procedural archive layout, orbit inspect, or non-GLB room: floating description card.
+                let card_base: [f32; 3] = if let Some(pz) = archive_feat_plane_z {
+                    collection_hud_anchor_on_cam_plane(
+                        w,
+                        h,
+                        &base_cam,
+                        w * ARCHIVE_DESC_SX_FRAC,
+                        h * ARCHIVE_DESC_SY_FRAC,
+                        pz,
+                    )
+                } else {
+                    [card_px_proc, hud_py, hud_wz]
+                };
+                let anchor = crate::ui::placement::PlacementAnchor::new(
+                    card_base,
+                    rot_fixed_axes_deg(90.0, 0.0, 0.0),
+                    &self.positions.focus_card,
+                    "collection.focus_card",
+                    ctx.layout,
+                );
                 use crate::render::primitive::{DecalLayout, DecalSpec, MaterialSpec, MeshId};
                 hud_plaques.push(Object3d {
                     pos: anchor.pos,
@@ -1092,10 +1266,23 @@ impl CollectionScene {
             let stats_text = stats_for(boss, ctx.progress);
             if !stats_text.is_empty() {
                 let stats_h = h * 0.08;
-                let stats_wz = hud_wz - card_h * 0.65 - stats_h * 0.55;
+                let stats_base: [f32; 3] = if let Some(pz) = archive_feat_plane_z {
+                    let dz = card_h * 0.65 + stats_h * 0.55;
+                    collection_hud_anchor_on_cam_plane(
+                        w,
+                        h,
+                        &base_cam,
+                        w * ARCHIVE_DESC_SX_FRAC,
+                        h * ARCHIVE_DESC_SY_FRAC,
+                        pz - dz,
+                    )
+                } else {
+                    let stats_wz = hud_wz - card_h * 0.65 - stats_h * 0.55;
+                    [card_px_proc, hud_py, stats_wz]
+                };
                 use crate::render::primitive::{DecalLayout, DecalSpec, MaterialSpec, MeshId};
                 hud_plaques.push(Object3d {
-                    pos: [card_px, hud_py, stats_wz],
+                    pos: stats_base,
                     extents: [card_w, stats_h, stats_h * 0.06],
                     rotation: euler_xyz_rad_from_deg(90.0, 0.0, 0.0),
                     color: [0.26, 0.22, 0.16, 1.0],
@@ -1126,6 +1313,7 @@ impl CollectionScene {
             // then pads the screen-space bbox so the gradient feathers
             // beyond the panel edges.
             if let Some(cam) = frame.camera_override {
+                if archive_feat_plane_z.is_none() {
                 let vp = camera_view_proj(w, h, &cam);
                 let closeup_half_face = closeup_size * 0.65;
                 let card_half_w = card_w * 0.65;
@@ -1162,6 +1350,7 @@ impl CollectionScene {
                         feather: [0.35, 0.0, 0.0, 0.0],
                     });
                 }
+                }
             }
         }
 
@@ -1179,7 +1368,7 @@ impl CollectionScene {
 
         // Hit rects for 2D chrome — skipped while [`ItemInspectScene`] owns input.
         if inspect.is_none() {
-            let items = self.flat_items(w, h, ctx.progress);
+            let items = self.flat_items(w, h, ctx.progress, env_scale);
             self.tree.register_flat_buttons(&items, &mut frame.buttons);
         }
 
@@ -1194,6 +1383,8 @@ impl CollectionScene {
     ) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
+        self.drawn_room_gltf_height_scale
+            .set(collection_sanitized_room_gltf_height_scale(ctx.room_gltf_height_scale));
         let ch = archive_chrome_layout(w, h);
         let scale = ch.scale;
         let margin_x = ch.margin_x;
@@ -1318,11 +1509,19 @@ impl CollectionScene {
         let hint_font_px = typography::size(typography::BODY, h).max(22.0);
         let hint_line_h = (hint_font_px / 0.55).ceil() + 4.0;
         let hint_text: String = if inspect.is_some() {
-            "Right stick: orbit camera\nTriggers / scroll: zoom   ·   E / North: close   ·   Esc: menu"
+            "Right stick: orbit item\nTriggers / scroll: zoom   ·   E / North: close   ·   Esc: menu"
                 .to_string()
         } else if matches!(self.active_tab, Tab::Chronicle) && all_count_hint == 0 {
             "Finish a non-tutorial run to add folios here.\nTab / Shift+Tab: tabs   ·   Esc: back"
                 .to_string()
+        } else if archive_glb::archive_room_draw_ready() {
+            if tab_scrollable {
+                "Tab / Shift+Tab: cycle tab   ·   \u{2190}\u{2193}: next in catalog   ·   \u{2192}\u{2191}: previous (wrap)   ·   Enter: select   ·   E/North: inspect   ·   Esc: back\nScroll: mouse wheel or PgUp / PgDn"
+                    .to_string()
+            } else {
+                "Tab / Shift+Tab: cycle tab   ·   \u{2190}\u{2193}: next in catalog   ·   \u{2192}\u{2191}: previous (wrap)\nEnter: select   ·   E/North: inspect   ·   Esc: back"
+                    .to_string()
+            }
         } else if tab_scrollable {
             "Tab / Shift+Tab: cycle tab   ·   \u{2190}\u{2192}\u{2191}\u{2193}: focus   ·   Enter: select   ·   E/North: inspect   ·   Esc: back\nScroll: mouse wheel or PgUp / PgDn"
                 .to_string()
@@ -1379,13 +1578,13 @@ impl SceneBehavior for CollectionScene {
             ctx.layout.window_w,
             ctx.layout.window_h,
             ctx.progress,
+            self.drawn_room_gltf_height_scale.get(),
         );
-        // Keyboard / directional / Confirm are handled below by the
-        // scene's own 2D grid navigator, which reads `self.focused_row`.
-        // The tree only hit-tests mouse clicks and tracks hover focus —
-        // forwarding `ctx.actions` here would let the tree's 1D focus
-        // race the scene's 2D focus, so Confirm would lift whatever the
-        // tree happened to focus (usually not the visibly-focused cell).
+        // Keyboard / directional / Confirm: grid moves use each artifact's
+        // screen AABB (`flat_items`) + spatial neighbors first, then fall
+        // back to column/row index rules (horizontal archive window scroll,
+        // etc.). The tree handles hover + clicks and stays in sync via
+        // `apply_artifact_focus` (`set_focus` on `SelectArtifact`).
         let action = self.tree.update_flat(
             &items,
             TreeInput {
@@ -1403,10 +1602,11 @@ impl SceneBehavior for CollectionScene {
 
         // Keyboard / controller / wheel navigation:
         //   - Triggers / Tab / Shift+Tab → cycle tabs (outer axis)
-        //   - L/R arrows + DPad L/R → move focus across columns
-        //   - Up/Down arrows + DPad U/D → move focus across rows;
-        //     auto-scrolls the viewport when focus exits the band
-        //   - Mouse wheel → scroll one row per line tick
+        //   - Archive room: ←/↓ advance one slot forward along the full
+        //     catalog (row-major); →/↑ go backward (wrap). Viewport scroll
+        //     and column window follow focus.
+        //   - Procedural grid: spatial neighbor moves from cell rects, with
+        //     L/R and U/D as fallback axes; wheel scrolls one row per tick.
         //   - Confirm (A / Space / Enter) → set focused item as inspect target
         let all_count = tab_artifacts(self.active_tab, ctx.progress).len();
         let cols = GRID_COLS as usize;
@@ -1442,24 +1642,6 @@ impl SceneBehavior for CollectionScene {
                 None
             }
         });
-        // Scroll the viewport so `row` sits inside the visible band.
-        // No-op when already visible. Used after every directional move.
-        let scroll_row_into_view = |scene: &Self, row: usize| {
-            if max_scroll <= 0.0 {
-                return;
-            }
-            let top = scene.target_scroll_rows.get();
-            let bottom = top + visible_rows.saturating_sub(1) as f32;
-            let row_f = row as f32;
-            let next = if row_f < top {
-                row_f
-            } else if row_f > bottom {
-                row_f - visible_rows.saturating_sub(1) as f32
-            } else {
-                top
-            };
-            scene.target_scroll_rows.set(next.clamp(0.0, max_scroll));
-        };
         // Clamp a (row, col) candidate to the last actually-present
         // artifact (the final row may be partially filled).
         let global_idx = |row: usize, col: usize| -> Option<usize> {
@@ -1468,6 +1650,10 @@ impl SceneBehavior for CollectionScene {
             }
             let cand = row * cols + col;
             Some(cand.min(all_count - 1))
+        };
+        let apply_artifact_focus = |scene: &mut CollectionScene, bus: &mut crate::game::event_bus::EventBus, idx: usize| {
+            bus.push(GameEvent::UiSound(SfxId::TilePlace));
+            collection_sync_artifact_focus_to_idx(scene, idx, cols, max_scroll, visible_rows);
         };
 
         for a in ctx.actions {
@@ -1507,46 +1693,127 @@ impl SceneBehavior for CollectionScene {
                     if all_count == 0 {
                         continue;
                     }
+                    if archive_glb::archive_room_draw_ready() {
+                        // Archive: **→** (with **↑) walks backward along the single row-major strip
+                        // through the full 6×N grid (3×7 window slides with focus).
+                        archive_catalog_advance_focus(
+                            self,
+                            ctx.bus,
+                            all_count,
+                            cols,
+                            false,
+                            max_scroll,
+                            visible_rows,
+                        );
+                        continue;
+                    }
+                    if let Some(ni) =
+                        collection_spatial_artifact_step(&items, self.focused_row, FocusDir::Right)
+                    {
+                        if Some(ni) != self.focused_row {
+                            apply_artifact_focus(self, ctx.bus, ni);
+                            continue;
+                        }
+                    }
                     let (row, col) = cur_row_col.unwrap_or((0, 0));
                     let next_col = (col + 1).min(cols - 1);
                     if next_col != col
                         && let Some(i) = global_idx(row, next_col)
                         && Some(i) != self.focused_row
                     {
-                        ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
-                        self.focused_row = Some(i);
-                        scroll_row_into_view(self, i / cols);
+                        apply_artifact_focus(self, ctx.bus, i);
                     }
                 }
                 UiAction::FocusPrev => {
                     if all_count == 0 {
                         continue;
                     }
-                    let (row, col) = cur_row_col.unwrap_or((0, 0));
-                    if col > 0
-                        && let Some(i) = global_idx(row, col - 1)
+                    if archive_glb::archive_room_draw_ready() {
+                        // Archive: **←** (with **↓**) walks forward (wrap) along that same strip.
+                        archive_catalog_advance_focus(
+                            self,
+                            ctx.bus,
+                            all_count,
+                            cols,
+                            true,
+                            max_scroll,
+                            visible_rows,
+                        );
+                        continue;
+                    }
+                    if let Some(ni) =
+                        collection_spatial_artifact_step(&items, self.focused_row, FocusDir::Left)
                     {
-                        ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
-                        self.focused_row = Some(i);
-                        scroll_row_into_view(self, i / cols);
+                        if Some(ni) != self.focused_row {
+                            apply_artifact_focus(self, ctx.bus, ni);
+                            continue;
+                        }
+                    }
+                    let (row, col) = cur_row_col.unwrap_or((0, 0));
+                    if col > 0 && let Some(i) = global_idx(row, col - 1) {
+                        apply_artifact_focus(self, ctx.bus, i);
                     }
                 }
                 UiAction::FocusUp => {
-                    if all_count == 0 || total_rows <= 1 {
+                    if all_count == 0 {
                         continue;
+                    }
+                    if archive_glb::archive_room_draw_ready() {
+                        archive_catalog_advance_focus(
+                            self,
+                            ctx.bus,
+                            all_count,
+                            cols,
+                            false,
+                            max_scroll,
+                            visible_rows,
+                        );
+                        continue;
+                    }
+                    if total_rows <= 1 {
+                        continue;
+                    }
+                    if let Some(ni) =
+                        collection_spatial_artifact_step(&items, self.focused_row, FocusDir::Up)
+                    {
+                        if Some(ni) != self.focused_row {
+                            apply_artifact_focus(self, ctx.bus, ni);
+                            continue;
+                        }
                     }
                     let (row, col) = cur_row_col.unwrap_or((0, 0));
                     if row > 0
                         && let Some(i) = global_idx(row - 1, col)
                     {
-                        ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
-                        self.focused_row = Some(i);
-                        scroll_row_into_view(self, i / cols);
+                        apply_artifact_focus(self, ctx.bus, i);
                     }
                 }
                 UiAction::FocusDown => {
-                    if all_count == 0 || total_rows <= 1 {
+                    if all_count == 0 {
                         continue;
+                    }
+                    if archive_glb::archive_room_draw_ready() {
+                        archive_catalog_advance_focus(
+                            self,
+                            ctx.bus,
+                            all_count,
+                            cols,
+                            true,
+                            max_scroll,
+                            visible_rows,
+                        );
+                        continue;
+                    }
+                    if total_rows <= 1 {
+                        continue;
+                    }
+                    if let Some(ni) =
+                        collection_spatial_artifact_step(&items, self.focused_row, FocusDir::Down)
+                    {
+                        if Some(ni) != self.focused_row {
+                            apply_artifact_focus(self, ctx.bus, ni);
+                            continue;
+                        }
                     }
                     let (row, col) = cur_row_col.unwrap_or((0, 0));
                     let next_row = (row + 1).min(total_rows - 1);
@@ -1554,9 +1821,7 @@ impl SceneBehavior for CollectionScene {
                         && let Some(i) = global_idx(next_row, col)
                         && Some(i) != self.focused_row
                     {
-                        ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
-                        self.focused_row = Some(i);
-                        scroll_row_into_view(self, i / cols);
+                        apply_artifact_focus(self, ctx.bus, i);
                     }
                 }
                 UiAction::Confirm => {
@@ -1574,7 +1839,13 @@ impl SceneBehavior for CollectionScene {
                         continue;
                     }
                     if let Some(orbit) =
-                        self.collection_inspect_orbit_for_focus(w, h, &bosses, ctx.layout)
+                        self.collection_inspect_orbit_for_focus(
+                            w,
+                            h,
+                            &bosses,
+                            ctx.layout,
+                            ctx.room_gltf_height_scale,
+                        )
                     {
                         *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(
                             Scene::Showcase(crate::scenes::ShowcaseScene::new(
@@ -1608,31 +1879,61 @@ impl SceneBehavior for CollectionScene {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                 self.cycle_tab(true);
             }
+            Some(CollectionAction::SelectTab(i)) => {
+                if i < TABS.len() {
+                    ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
+                    self.active_tab = TABS[i];
+                    self.selected_artifact = None;
+                    self.focused_row = Some(0);
+                    self.scroll_rows.set(0.0);
+                    self.target_scroll_rows.set(0.0);
+                    self.archive_col_scroll = 0;
+                    self.cam_anim.set(None);
+                }
+            }
             Some(CollectionAction::SelectArtifact(idx)) => {
-                // Relic cells have a per-triangle trimesh picker running
-                // each frame; when it reports a hit, prefer that index
-                // over the loose cell rect so clicks that land in the
-                // empty space around a relic's silhouette don't select
-                // the wrong artifact. For non-relic cells (talismans /
-                // zodiacs / plaques) the trimesh picker stays silent
-                // and the flat cell rect remains the source of truth.
-                let resolved = ctx
-                    .picked_collection_object
-                    .map(|pid| pid as usize)
-                    .unwrap_or(idx);
-                ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
-                self.selected_artifact = Some(resolved);
-                push_relic_stinger_for(ctx.bus, self.active_tab, ctx.progress, resolved);
-                // Mouse click also moves keyboard focus so subsequent
-                // arrow-key navigation continues from the clicked item
-                // instead of teleporting back to position 0.
-                self.focused_row = Some(resolved);
-                // Keep the viewport synced to the clicked row so the
-                // focus halo and the visible slot agree.
-                scroll_row_into_view(self, resolved / cols);
+                if all_count > 0 {
+                    let idx = idx.min(all_count.saturating_sub(1));
+                    // Relic cells have a per-triangle trimesh picker running
+                    // each frame; when it reports a hit, prefer that index
+                    // over the loose cell rect so clicks that land in the
+                    // empty space around a relic's silhouette don't select
+                    // the wrong artifact. For non-relic cells (talismans /
+                    // zodiacs / plaques) the trimesh picker stays silent
+                    // and the flat cell rect remains the source of truth.
+                    let resolved_raw = ctx
+                        .picked_collection_object
+                        .map(|pid| pid as usize)
+                        .unwrap_or(idx);
+                    let resolved = resolved_raw.min(all_count - 1);
+                    ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
+                    self.selected_artifact = Some(resolved);
+                    push_relic_stinger_for(ctx.bus, self.active_tab, ctx.progress, resolved);
+                    // Mouse click also moves keyboard focus so subsequent
+                    // arrow-key navigation continues from the clicked item
+                    // instead of teleporting back to position 0.
+                    // Keep the viewport synced to the clicked row so the
+                    // focus halo and the visible slot agree.
+                    collection_sync_artifact_focus_to_idx(
+                        self,
+                        resolved,
+                        cols,
+                        max_scroll,
+                        visible_rows,
+                    );
+                }
             }
             None => {}
         }
+
+        if archive_glb::archive_room_draw_ready() {
+            let n = tab_artifacts(self.active_tab, ctx.progress).len();
+            if n > 0 {
+                let max_c0 = (GRID_COLS as usize).saturating_sub(archive_glb::ARCHIVE_SLOT_COLS) as i32;
+                self.archive_col_scroll = self.archive_col_scroll.clamp(0, max_c0.max(0));
+            }
+        }
+
         // Advance the scroll easing every tick so wheel/key inputs
         // glide rather than snap.
         let _ = self.tick_scroll();
@@ -1876,10 +2177,359 @@ fn pixel_to_world_xy(w: f32, h: f32, px: f32, py: f32, lift: f32) -> glam::Vec3 
     glam::Vec3::new(px - w * 0.5, h * 0.5 - py, lift)
 }
 
+/// Screen pixel → world on `z = plane_z` using the same view-proj as the frame, then packed for
+/// [`Object3d::pos`] (see [`surface_anchor_from_world_xyz`]). Used when the Archive draws with the
+/// embedded `archive.glb` camera so HUD plaques track the perspective view instead of the virtual
+/// grid-ease camera offsets.
+#[inline]
+fn collection_hud_anchor_on_cam_plane(
+    w: f32,
+    h: f32,
+    cam: &CameraParams,
+    screen_px: f32,
+    screen_py: f32,
+    plane_z: f32,
+) -> [f32; 3] {
+    let p = world_on_camera_ray_plane_z(w, h, cam, screen_px, screen_py, plane_z);
+    surface_anchor_from_world_xyz(w, h, p)
+}
+
+/// Push one catalog cell's 3D prop at a [`WorldSurfaceAnchor`](crate::render::draw_cmd::WorldSurfaceAnchor).
+fn collection_push_grid_cell_object3d(
+    plaques: &mut Vec<Object3d>,
+    boss: &Artifact,
+    anchor: [f32; 3],
+    cell: f32,
+    fade: f32,
+    is_focus: bool,
+    boss_i: i32,
+) {
+    let cx = anchor[0];
+    let cz = anchor[2];
+    let nameplate_py = anchor[1] + if is_focus { cell * 0.5 } else { cell * 0.15 };
+    let plate_w = cell * if is_focus { 0.78 } else { 0.62 };
+    let plate_h = cell * if is_focus { 0.78 } else { 0.62 };
+    let plate_thick = cell * 0.06;
+    let bright = {
+        let k = if is_focus { 2.0 } else { 1.6 };
+        let f = fade.max(if is_focus { 1.0 } else { 0.55 });
+        [
+            boss.accent[0] * k * f,
+            boss.accent[1] * k * f,
+            boss.accent[2] * k * f,
+            1.0,
+        ]
+    };
+    match &boss.kind {
+        ArtifactKind::Relic(relic_id) => {
+            let silhouette = !boss.unlocked;
+            let visual = crate::core::relic::relic_visual(*relic_id);
+            let face = plate_w;
+            let thick = face * 0.12 * visual.thickness_scale;
+            let color = if silhouette {
+                [
+                    boss.accent[0] * 0.22 + 0.02,
+                    boss.accent[1] * 0.22 + 0.02,
+                    boss.accent[2] * 0.22 + 0.02,
+                    1.0,
+                ]
+            } else {
+                boss.accent
+            };
+            plaques.push(Object3d {
+                pos: [cx, nameplate_py, cz],
+                extents: [face, thick, face],
+                rotation: euler_xyz_rad_from_deg(180.0 + visual.ui_tilt_x_deg, 0.0, 0.0),
+                color,
+                kind: Object3dKind::Relic {
+                    relic_id: *relic_id,
+                    glow: if is_focus && !silhouette { 0.6 } else { 0.0 },
+                    silhouette,
+                    debuffed: false,
+                    pick_id: Some(boss_i as u32),
+                },
+                hover_target: if is_focus { 1.0 } else { 0.0 },
+                anim_id: boss_i as u64,
+                arrange_name: None,
+            });
+        }
+        ArtifactKind::Talisman(tk) => {
+            plaques.push(Object3d {
+                pos: [cx, nameplate_py, cz],
+                extents: [plate_w * 0.70, plate_w, plate_w * 0.18],
+                rotation: euler_xyz_rad_from_deg(-90.0, 14.0, 0.0),
+                color: bright,
+                kind: Object3dKind::Talisman { kind: *tk },
+                hover_target: if is_focus { 1.0 } else { 0.0 },
+                anim_id: boss_i as u64,
+                arrange_name: None,
+            });
+        }
+        ArtifactKind::Zodiac(zk) => {
+            let rib_w = plate_w * 0.34;
+            plaques.push(Object3d {
+                pos: [cx, nameplate_py, cz],
+                extents: [rib_w, plate_w, rib_w * 0.15],
+                rotation: euler_xyz_rad_from_deg(90.0, 0.0, 0.0),
+                color: [1.0, 1.0, 1.0, 1.0],
+                kind: Object3dKind::ZodiacRibbon { kind: Some(*zk) },
+                hover_target: if is_focus { 1.0 } else { 0.0 },
+                anim_id: boss_i as u64,
+                arrange_name: None,
+            });
+        }
+        ArtifactKind::PlaqueOnly => {
+            use crate::render::primitive::{DecalLayout, DecalSpec, MaterialSpec, MeshId};
+            plaques.push(Object3d {
+                pos: [cx, nameplate_py, cz],
+                extents: [plate_w, plate_h, plate_thick],
+                rotation: euler_xyz_rad_from_deg(90.0, 0.0, 0.0),
+                color: bright,
+                kind: Object3dKind::Primitive {
+                    shape: MeshId::BeveledSlab,
+                    material: MaterialSpec::lacquered_wood_flat().with_decal(DecalSpec {
+                        text: boss.name.clone(),
+                        layout: DecalLayout::Fit {
+                            target_short_edge: crate::render::decal::PLAQUE_DECAL_HEIGHT,
+                        },
+                    }),
+                    pick_id: None,
+                    shadow_caster: false,
+                    silhouette: false,
+                },
+                hover_target: if is_focus { 1.0 } else { 0.0 },
+                anim_id: boss_i as u64,
+                arrange_name: None,
+            });
+        }
+        ArtifactKind::ChronicleRun(_) => {
+            use crate::render::primitive::{DecalLayout, DecalSpec, MaterialSpec, MeshId};
+            plaques.push(Object3d {
+                pos: [cx, nameplate_py, cz],
+                extents: [plate_w, plate_h, plate_thick],
+                rotation: euler_xyz_rad_from_deg(90.0, 0.0, 0.0),
+                color: bright,
+                kind: Object3dKind::Primitive {
+                    shape: MeshId::BeveledSlab,
+                    material: MaterialSpec::lacquered_wood_flat().with_decal(DecalSpec {
+                        text: boss.name.clone(),
+                        layout: DecalLayout::Fit {
+                            target_short_edge: crate::render::decal::PLAQUE_DECAL_HEIGHT,
+                        },
+                    }),
+                    pick_id: None,
+                    shadow_caster: false,
+                    silhouette: false,
+                },
+                hover_target: if is_focus { 1.0 } else { 0.0 },
+                anim_id: boss_i as u64,
+                arrange_name: None,
+            });
+        }
+    }
+}
+
+/// Clamp / default `DrawCtx::room_gltf_height_scale` so glTF room matrices stay finite.
+#[inline]
+fn collection_sanitized_room_gltf_height_scale(env_h: f32) -> f32 {
+    if env_h.is_finite() && env_h > 1e-4 {
+        env_h.clamp(0.03, 25.0)
+    } else {
+        crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE
+    }
+}
+
+#[inline]
+fn flat_rect_xywh_is_finite(rect: [f32; 4]) -> bool {
+    let [x, y, rw, rh] = rect;
+    x.is_finite()
+        && y.is_finite()
+        && rw.is_finite()
+        && rh.is_finite()
+        && rw > 0.0
+        && rh > 0.0
+}
+
+/// Screen-space AABB hit targets for catalog cells (`FlatItem` rects), for spatial D-pad / arrow
+/// moves between neighbors.
+fn collection_artifact_hit_rects(items: &[FlatItem<CollectionAction>]) -> Vec<(usize, [f32; 4])> {
+    items
+        .iter()
+        .filter_map(|it| match it.action {
+            CollectionAction::SelectArtifact(i) => Some((i, it.rect)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Next artifact index when moving from `focused` in `dir` using each cell's screen rect, or
+/// [`None`] when no neighbor qualifies (caller may fall back to scroll / grid index rules).
+fn collection_spatial_artifact_step(
+    items: &[FlatItem<CollectionAction>],
+    focused: Option<usize>,
+    dir: FocusDir,
+) -> Option<usize> {
+    let candidates = collection_artifact_hit_rects(items);
+    if candidates.is_empty() {
+        return None;
+    }
+    let cur_rect = focused
+        .and_then(|fi| {
+            candidates
+                .iter()
+                .find(|(i, _)| *i == fi)
+                .map(|(_, r)| *r)
+        })
+        .or_else(|| candidates.first().map(|(_, r)| *r))?;
+    pick_neighbor(cur_rect, dir, &candidates)
+}
+
+#[inline]
+fn screen_hit_anchor_is_finite(sx: f32, sy: f32, rw: f32, rh: f32) -> bool {
+    sx.is_finite() && sy.is_finite() && rw.is_finite() && rh.is_finite() && rw > 0.0 && rh > 0.0
+}
+
+/// `archive_col_scroll` so column `focus_col` stays inside the 3-wide `archive.glb` window.
+#[inline]
+fn archive_win_col0_for_focus_col(focus_col: i32, cols: i32) -> i32 {
+    let max_c0 = (cols as usize).saturating_sub(archive_glb::ARCHIVE_SLOT_COLS) as i32;
+    (focus_col - (archive_glb::ARCHIVE_SLOT_COLS as i32 - 1)).clamp(0, max_c0.max(0))
+}
+
+fn collection_scroll_catalog_row_into_view(
+    scene: &mut CollectionScene,
+    row: usize,
+    max_scroll: f32,
+    visible_rows: usize,
+) {
+    if max_scroll <= 0.0 {
+        return;
+    }
+    let top = scene.target_scroll_rows.get();
+    let bottom = top + visible_rows.saturating_sub(1) as f32;
+    let row_f = row as f32;
+    let next = if row_f < top {
+        row_f
+    } else if row_f > bottom {
+        row_f - visible_rows.saturating_sub(1) as f32
+    } else {
+        top
+    };
+    scene.target_scroll_rows.set(next.clamp(0.0, max_scroll));
+}
+
+fn collection_sync_artifact_focus_to_idx(
+    scene: &mut CollectionScene,
+    idx: usize,
+    cols: usize,
+    max_scroll: f32,
+    visible_rows: usize,
+) {
+    scene.focused_row = Some(idx);
+    scene
+        .tree
+        .set_focus(CollectionAction::SelectArtifact(idx).id());
+    collection_scroll_catalog_row_into_view(scene, idx / cols, max_scroll, visible_rows);
+    if archive_glb::archive_room_draw_ready() {
+        scene.archive_col_scroll =
+            archive_win_col0_for_focus_col((idx % cols) as i32, cols as i32);
+    }
+}
+
+fn archive_catalog_advance_focus(
+    scene: &mut CollectionScene,
+    bus: &mut crate::game::event_bus::EventBus,
+    all_count: usize,
+    cols: usize,
+    forward: bool,
+    max_scroll: f32,
+    visible_rows: usize,
+) {
+    if all_count == 0 {
+        return;
+    }
+    let cur = scene.focused_row.unwrap_or(0).min(all_count - 1);
+    let next = if forward {
+        (cur + 1) % all_count
+    } else {
+        (cur + all_count - 1) % all_count
+    };
+    bus.push(GameEvent::UiSound(SfxId::TilePlace));
+    collection_sync_artifact_focus_to_idx(scene, next, cols, max_scroll, visible_rows);
+}
+
+/// Section tab hit rects from `section_buttons_*_bound` AABBs (left: Relics/Yaku; right: rest).
+fn archive_section_tab_hit_rects(
+    w: f32,
+    h: f32,
+    env_h: f32,
+    cam: &CameraParams,
+) -> Option<Vec<(usize, [f32; 4])>> {
+    archive_glb::with_archive_glb_cpu(|opt| {
+        let cpu = opt?;
+        let left = shop_glb::screen_rect_for_marker_mesh_bounds(
+            w,
+            h,
+            cam,
+            env_h,
+            cpu,
+            archive_glb::SECTION_BUTTONS_LEFT_BOUND,
+            48.0,
+            32.0,
+        )?;
+        let right = shop_glb::screen_rect_for_marker_mesh_bounds(
+            w,
+            h,
+            cam,
+            env_h,
+            cpu,
+            archive_glb::SECTION_BUTTONS_RIGHT_BOUND,
+            48.0,
+            32.0,
+        )?;
+        let mut out = Vec::new();
+        let distribute = |parent: [f32; 4], tabs: &[usize], out: &mut Vec<(usize, [f32; 4])>| {
+            if tabs.is_empty() {
+                return;
+            }
+            let [x, y, rw, rh] = parent;
+            let n = tabs.len();
+            // Wide section volumes: tabs in a horizontal row; tall narrow: vertical stack.
+            if rw >= rh * 0.75 {
+                let cw = rw / n as f32;
+                for (k, &ti) in tabs.iter().enumerate() {
+                    out.push((ti, [x + cw * k as f32, y, cw, rh]));
+                }
+            } else {
+                let sh = rh / n as f32;
+                for (k, &ti) in tabs.iter().enumerate() {
+                    out.push((ti, [x, y + sh * k as f32, rw, sh]));
+                }
+            }
+        };
+        distribute(left, &[0, 1], &mut out);
+        distribute(right, &[2, 3, 4], &mut out);
+        Some(out)
+    })
+}
+
+/// Row index into the logical grid from eased vertical scroll (finite `f32` → `i32`).
+#[inline]
+fn scroll_rows_eased_to_row_i32(scroll_f: f32, max_r0: i32) -> i32 {
+    let s = if scroll_f.is_finite() {
+        scroll_f.clamp(-1_000_000.0, 1_000_000.0)
+    } else {
+        0.0
+    };
+    (s.round() as i32).clamp(0, max_r0.max(0))
+}
+
 /// Compose the same view-projection matrix the renderer uses (must
 /// match `WgpuRenderer`'s perspective + look_at_rh path: near=1.0,
 /// far=h*12.0). Drift here makes hit rects misalign with visible 3D.
 fn camera_view_proj(w: f32, h: f32, cam: &CameraParams) -> glam::Mat4 {
+    let w = w.max(1.0);
+    let h = h.max(1.0);
     let aspect = w / h;
     let view = glam::Mat4::look_at_rh(
         glam::Vec3::from_array(cam.eye),

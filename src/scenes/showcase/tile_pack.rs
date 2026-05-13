@@ -265,7 +265,7 @@ impl TilePackPresenter {
     pub fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
-        let env_h = ctx.shop_env_height_scale;
+        let env_h = ctx.room_gltf_height_scale;
 
         debug_assert!(
             !self.celebration.tiles.is_empty(),

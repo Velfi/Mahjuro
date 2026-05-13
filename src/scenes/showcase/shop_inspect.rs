@@ -1,4 +1,4 @@
-//! Frozen shop storeroom + orbit inspect on the showcase overlay.
+//! Frozen shop storeroom + item turntable inspect on the showcase overlay.
 
 use std::time::Instant;
 

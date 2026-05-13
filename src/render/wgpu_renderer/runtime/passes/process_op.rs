@@ -251,7 +251,6 @@ impl WgpuRenderer {
                         DrawKind::Talisman => {
                             (&self.talisman_mesh, self.talisman_instances.get(slot_i))
                         }
-                        DrawKind::Shrine => (&self.shrine_mesh, self.shrine_instances.get(slot_i)),
                         DrawKind::BugBody => {
                             (&self.bug_body_mesh, self.bug_body_instances.get(slot_i))
                         }
@@ -349,6 +348,11 @@ impl WgpuRenderer {
             RenderOp::HallwayEnvironment => {
                 if self.hallway_environment.is_some() {
                     self.draw_hallway_environment_meshes(pass, frame, false);
+                }
+            }
+            RenderOp::ArchiveEnvironment => {
+                if self.archive_environment.is_some() {
+                    self.draw_archive_environment_meshes(pass, frame, false);
                 }
             }
             RenderOp::ShowcaseTileBatch(batch_idx) => {

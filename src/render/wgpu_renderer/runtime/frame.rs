@@ -101,6 +101,7 @@ impl WgpuRenderer {
                 DrawCmd::MoonlitWater
                     | DrawCmd::ShopEnvironment
                     | DrawCmd::HallwayEnvironment
+                    | DrawCmd::ArchiveEnvironment
                     | DrawCmd::EmberDrift
             )
         })
@@ -229,8 +230,8 @@ impl WgpuRenderer {
                     time_s,
                 )
             }
-            // Pick-blind always uses a perspective `camera_override` (hallway GLB or shrine
-            // layout). Smooth fills must use the same ray → plane_z mapping as the env mesh;
+            // Pick-blind always uses a perspective `camera_override` (hallway GLB).
+            // Smooth fills must use the same ray → plane_z mapping as the env mesh;
             // `pixel_to_world` is not the inverse of that projection (see `world_space.rs`).
             (Some("pick_blind"), Some(cam)) => PointLightsBuf::from_scene_punctual_shop_camera(
                 &frame.scene_lighting.punctual,
