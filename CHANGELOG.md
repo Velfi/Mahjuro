@@ -7,6 +7,11 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.5.0-8 — 2026-05-13
+
+### Changed
+- The rare relic is now called **Dragon Rage** instead of Red Dragon Rage. Its effect is unchanged: any dragon triplet or kong still adds extra mult.
+
 ## 0.5.0-6 — 2026-05-11
 
 ### Added
