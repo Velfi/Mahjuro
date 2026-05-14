@@ -80,7 +80,7 @@ pub fn tile_suit_emoji(tile: &Tile) -> &'static str {
 
 /// Return the asset filename stem for a tile inside a tileset directory.
 ///
-/// Maps `(Suit, rank)` to the naming convention used in `assets/sets/`:
+/// Maps `(Suit, rank)` to the naming convention used in `assets/textures/tile_sets/`:
 ///   Bamboos 1–9 → B1..B9, Characters → C1..C9, Circles → D1..D9,
 ///   Winds → EWind/SWind/WWind/NWind, Dragons → DRed/DGreen/DWhite,
 ///   Flowers → Flower1..Flower4, Seasons → Season1..Season4.
@@ -211,7 +211,7 @@ fn load_atlas(tile_set: &str) -> Option<std::sync::Arc<Atlas>> {
 }
 
 fn decode_atlas(tile_set: &str) -> Option<Atlas> {
-    let toml_path = format!("sets/{tile_set}/atlas.toml");
+    let toml_path = format!("textures/tile_sets/{tile_set}/atlas.toml");
     let toml_file = crate::asset_path::get(&toml_path)?;
     let toml_src = std::str::from_utf8(toml_file.data.as_ref()).ok()?;
     let (tile_w, tile_h, columns, layout) = parse_atlas_toml(toml_src)?;
@@ -219,7 +219,7 @@ fn decode_atlas(tile_set: &str) -> Option<Atlas> {
         return None;
     }
 
-    let png_path = format!("sets/{tile_set}/atlas.png");
+    let png_path = format!("textures/tile_sets/{tile_set}/atlas.png");
     let png_file = crate::asset_path::get(&png_path)?;
     let decoder = image::ImageReader::new(std::io::Cursor::new(png_file.data.as_slice()))
         .with_guessed_format()
@@ -296,7 +296,7 @@ fn blit_set_decal(dst: &mut [u8], dst_w: u32, dst_h: u32, tile: &Tile, tile_set:
 /// after the shader stretches the texture across the face.
 ///
 /// When `tile_set` is `Some("original")` (or another set name), the function
-/// crops the tile from that set's `assets/sets/<name>/atlas.png` (using the
+/// crops the tile from that set's `assets/textures/tile_sets/<name>/atlas.png` (using the
 /// `atlas.toml` layout) instead of rasterizing glyphs. Falls back to font
 /// rasterization if the atlas is missing or doesn't list this tile code.
 ///
@@ -1523,8 +1523,8 @@ fn load_noto_emoji_bytes() -> Option<Vec<u8>> {
     CACHE
         .get_or_init(|| {
             let candidates = [
-                "Noto_Emoji/NotoEmoji-VariableFont_wght.ttf",
-                "Noto_Emoji/static/NotoEmoji-Regular.ttf",
+                "fonts/Noto_Emoji/NotoEmoji-VariableFont_wght.ttf",
+                "fonts/Noto_Emoji/static/NotoEmoji-Regular.ttf",
             ];
             for path in candidates {
                 if let Some(file) = crate::asset_path::get(path) {
@@ -1555,12 +1555,12 @@ pub fn load_noto_emoji_font() -> Option<fontdue::Font> {
 /// font. **Noto Sans Math** covers Greek (π), math operators (≈, ≠, ≤, ≥, ×, ÷, …), arrows,
 /// and most BMP punctuation — superset of what plaque copy actually requests.
 ///
-/// Loaded lazily from `assets/Noto_Sans_Math/NotoSansMath-Regular.ttf`. Returns `None` (and
-/// caches that) when the asset is unavailable, so the cost amortizes to one lookup per process.
+/// Loaded lazily from `assets/fonts/Noto_Sans_Math/NotoSansMath-Regular.ttf`. Returns `None`
+/// (and caches that) when the asset is unavailable, so the cost amortizes to one lookup per process.
 fn noto_sans_symbols_font() -> Option<&'static fontdue::Font> {
     static CELL: std::sync::OnceLock<Option<fontdue::Font>> = std::sync::OnceLock::new();
     CELL.get_or_init(|| {
-        let candidates = ["Noto_Sans_Math/NotoSansMath-Regular.ttf"];
+        let candidates = ["fonts/Noto_Sans_Math/NotoSansMath-Regular.ttf"];
         for path in candidates {
             if let Some(file) = crate::asset_path::get(path) {
                 if let Ok(f) =
@@ -1596,7 +1596,7 @@ pub fn load_ui_font_italic() -> Option<fontdue::Font> {
     static CACHE: std::sync::OnceLock<Option<fontdue::Font>> = OnceLock::new();
     CACHE
         .get_or_init(|| {
-            let path = "Instrument_Serif/InstrumentSerif-Italic.ttf";
+            let path = "fonts/Instrument_Serif/InstrumentSerif-Italic.ttf";
             if let Some(file) = crate::asset_path::get(path) {
                 if let Ok(f) =
                     fontdue::Font::from_bytes(file.data.as_ref(), fontdue::FontSettings::default())
@@ -2280,7 +2280,7 @@ pub fn measure_label_advances(
 /// Resolution order:
 /// 1. Embedded Instrument Serif (the primary serif used everywhere).
 /// 2. Embedded Noto Sans (a fallback for missing serif glyphs — only used
-///    if the user has dropped a Noto Sans TTF into `assets/Noto_Sans/`).
+///    if the user has dropped a Noto Sans TTF into `assets/fonts/Noto_Sans/`).
 /// 3. System fonts (last-ditch fallback for unbundled dev builds).
 ///
 /// Cached so the bytes are only resolved once.
@@ -2289,7 +2289,7 @@ pub fn load_ui_font_bytes() -> Option<Vec<u8>> {
     CACHE
         .get_or_init(|| {
             // Primary: Instrument Serif.
-            let primary = ["Instrument_Serif/InstrumentSerif-Regular.ttf"];
+            let primary = ["fonts/Instrument_Serif/InstrumentSerif-Regular.ttf"];
             for path in primary {
                 if let Some(file) = crate::asset_path::get(path) {
                     log::debug!("decal: loaded UI font from embedded {path}");
@@ -2297,12 +2297,12 @@ pub fn load_ui_font_bytes() -> Option<Vec<u8>> {
                 }
             }
             // Embedded Noto Sans fallback — only present if a TTF has been
-            // dropped into assets/Noto_Sans/. Tries the variable-font name
+            // dropped into assets/fonts/Noto_Sans/. Tries the variable-font name
             // first, then a static Regular.
             let noto_sans = [
-                "Noto_Sans/NotoSans-VariableFont_wdth,wght.ttf",
-                "Noto_Sans/NotoSans-Regular.ttf",
-                "Noto_Sans/static/NotoSans-Regular.ttf",
+                "fonts/Noto_Sans/NotoSans-VariableFont_wdth,wght.ttf",
+                "fonts/Noto_Sans/NotoSans-Regular.ttf",
+                "fonts/Noto_Sans/static/NotoSans-Regular.ttf",
             ];
             for path in noto_sans {
                 if let Some(file) = crate::asset_path::get(path) {

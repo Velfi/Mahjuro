@@ -546,7 +546,7 @@ struct HeadlessApp {
     active_profile: usize,
     gfx: RenderSettings,
     effect_layers: crate::effect_layers::EffectLayers,
-    volumetric_tuning: VolumetricTuning,
+    tonemap_tuning: crate::game::tonemap_tuning::TonemapTuningSet,
     width: u32,
     height: u32,
     game_in_progress: bool,
@@ -616,11 +616,14 @@ impl HeadlessApp {
                 shadows_enabled: settings.shadows_enabled,
                 ssr_enabled: settings.ssr_enabled,
                 hdr_enabled: false,
+                // Headless screenshots stay on the clean tonemap path so
+                // captures don't pick up VHS overlay artifacts. Per-scene
+                // amounts can still be edited at runtime via the debug
+                // overlay; the headless path simply ignores them.
+                vhs_enabled: false,
             },
             effect_layers: crate::effect_layers::EffectLayers::FULL,
-            volumetric_tuning: persistence::load_tuning_override::<VolumetricTuning>(
-                "VolumetricTuning",
-            ),
+            tonemap_tuning: crate::game::tonemap_tuning::TonemapTuningSet::load(),
             width,
             height,
             game_in_progress,
@@ -968,6 +971,8 @@ impl HeadlessApp {
             _ => None,
         };
         self.renderer.set_active_scene(active_scene_key);
+        let tonemap = self.tonemap_tuning.resolve(active_scene_key);
+        self.renderer.set_tonemap_tuning(&tonemap);
         let rotations_scene = match self.overlay_stack.last() {
             Some(Scene::Showcase(s)) if s.wants_orbit_input() => &self.scene,
             _ => scene_for_renderer,
@@ -982,28 +987,6 @@ impl HeadlessApp {
             sl.ambient_scale,
             sl.lit_mesh_gltf_punctual_scale,
             sl.gltf_emissive_scale,
-        );
-        let haze_horizon_y = frame
-            .gameplay_fog_wall_horizon_y
-            .unwrap_or(self.volumetric_tuning.haze_horizon_y);
-        let wall_center_x = frame
-            .gameplay_fog_wall_center_x
-            .unwrap_or(0.5)
-            .clamp(0.0, 1.0);
-        let wall_half_width_uv = if frame.gameplay_fog_wall_horizon_y.is_some() {
-            crate::ui::scene_layout::GAMEPLAY_FOG_WALL_HALF_WIDTH_UV
-        } else {
-            0.0
-        };
-        self.renderer.set_haze_tuning(
-            self.volumetric_tuning.haze_density,
-            self.volumetric_tuning.haze_color_r,
-            self.volumetric_tuning.haze_color_g,
-            self.volumetric_tuning.haze_color_b,
-            haze_horizon_y,
-            self.volumetric_tuning.haze_drift_speed,
-            wall_center_x,
-            wall_half_width_uv,
         );
 
         let active_material = frame

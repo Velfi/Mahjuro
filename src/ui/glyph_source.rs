@@ -35,15 +35,17 @@ impl GlyphResolver {
     }
 }
 
-const XBOX_SHEET: &str = "kenney_input-prompts/Xbox Series/xbox-series_sheet_double.png";
+const XBOX_SHEET: &str = "textures/kenney_input-prompts/Xbox Series/xbox-series_sheet_double.png";
 const PLAYSTATION_SHEET: &str =
-    "kenney_input-prompts/PlayStation Series/playstation-series_sheet_double.png";
-const SWITCH_SHEET: &str = "kenney_input-prompts/Nintendo Switch/nintendo-switch_sheet_double.png";
+    "textures/kenney_input-prompts/PlayStation Series/playstation-series_sheet_double.png";
+const SWITCH_SHEET: &str =
+    "textures/kenney_input-prompts/Nintendo Switch/nintendo-switch_sheet_double.png";
 const SWITCH2_SHEET: &str =
-    "kenney_input-prompts/Nintendo Switch 2/nintendo-switch-2_sheet_double.png";
-const STEAM_DECK_SHEET: &str = "kenney_input-prompts/Steam Deck/steam-deck_sheet_double.png";
+    "textures/kenney_input-prompts/Nintendo Switch 2/nintendo-switch-2_sheet_double.png";
+const STEAM_DECK_SHEET: &str =
+    "textures/kenney_input-prompts/Steam Deck/steam-deck_sheet_double.png";
 const STEAM_CONTROLLER_SHEET: &str =
-    "kenney_input-prompts/Steam Controller/steam-controller_sheet_double.png";
+    "textures/kenney_input-prompts/Steam Controller/steam-controller_sheet_double.png";
 
 /// Logical face the action is rendered as after applying the player's
 /// `swap_ab` / `swap_xy` preferences.
@@ -176,21 +178,22 @@ mod tests {
     /// open the live PNGs without a renderer, but the XMLs let us assert that
     /// every static glyph reference resolves to a real entry.
     const XBOX_XML: &str = include_str!(
-        "../../assets/kenney_input-prompts/Xbox Series/xbox-series_sheet_double.xml"
+        "../../assets/textures/kenney_input-prompts/Xbox Series/xbox-series_sheet_double.xml"
     );
     const PLAYSTATION_XML: &str = include_str!(
-        "../../assets/kenney_input-prompts/PlayStation Series/playstation-series_sheet_double.xml"
+        "../../assets/textures/kenney_input-prompts/PlayStation Series/playstation-series_sheet_double.xml"
     );
     const SWITCH_XML: &str = include_str!(
-        "../../assets/kenney_input-prompts/Nintendo Switch/nintendo-switch_sheet_double.xml"
+        "../../assets/textures/kenney_input-prompts/Nintendo Switch/nintendo-switch_sheet_double.xml"
     );
     const SWITCH2_XML: &str = include_str!(
-        "../../assets/kenney_input-prompts/Nintendo Switch 2/nintendo-switch-2_sheet_double.xml"
+        "../../assets/textures/kenney_input-prompts/Nintendo Switch 2/nintendo-switch-2_sheet_double.xml"
     );
-    const STEAM_DECK_XML: &str =
-        include_str!("../../assets/kenney_input-prompts/Steam Deck/steam-deck_sheet_double.xml");
+    const STEAM_DECK_XML: &str = include_str!(
+        "../../assets/textures/kenney_input-prompts/Steam Deck/steam-deck_sheet_double.xml"
+    );
     const STEAM_CONTROLLER_XML: &str = include_str!(
-        "../../assets/kenney_input-prompts/Steam Controller/steam-controller_sheet_double.xml"
+        "../../assets/textures/kenney_input-prompts/Steam Controller/steam-controller_sheet_double.xml"
     );
 
     fn names_in(xml: &str) -> HashMap<String, ()> {

@@ -606,20 +606,18 @@ impl TutorialCampaignScene {
     }
 
     fn shop_preview_ribbon(center_x: f32, item_y: f32, h: f32, scale: f32) -> Object3d {
-        let length = 46.0 * scale;
-        let width = 24.0 * scale;
-        Object3d {
-            pos: [center_x, item_y + 2.0 * scale, h * 0.18],
-            extents: [width, length, width * 0.15],
-            rotation: [0.0, 0.0, 0.0],
-            color: [1.0, 1.0, 1.0, 1.0],
-            kind: Object3dKind::ZodiacRibbon {
+        crate::render::ribbon_mesh::zodiac_ribbon_object3d(
+            crate::render::ribbon_mesh::ZodiacRibbonSpec {
+                pos: [center_x, item_y + 2.0 * scale, h * 0.18],
+                length: 46.0 * scale,
+                rotation: [0.0, 0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
                 kind: Some(ZodiacKind::Dragon),
+                hover_target: 0.0,
+                anim_id: 0,
+                arrange_name: Some("tutorial.shop.ribbon"),
             },
-            hover_target: 0.0,
-            anim_id: 0,
-            arrange_name: Some("tutorial.shop.ribbon"),
-        }
+        )
     }
 
     fn shop_preview_talisman(center_x: f32, item_y: f32, h: f32, scale: f32) -> Object3d {

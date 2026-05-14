@@ -13,7 +13,7 @@ Balatro booster packs) rather than '90s foil wrappers. Shiny effects,
 if wanted, are applied later as an in-engine shader pass — not baked
 into the PNG.
 
-Outputs `pack_<slug>.png` into assets/textures/packs/.
+Outputs `pack_<slug>.png` into assets/textures/tile_packs/.
 
 Usage:
     pip install openai pillow
@@ -47,7 +47,7 @@ except ImportError:
 
 
 OUTPUT_DIR = (
-    Path(__file__).resolve().parent.parent / "assets" / "textures" / "packs"
+    Path(__file__).resolve().parent.parent / "assets" / "textures" / "tile_packs"
 )
 FINAL_SIZE = (256, 384)  # tall portrait, matches a booster-pack aspect ratio
 

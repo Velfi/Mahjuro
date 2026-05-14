@@ -72,6 +72,7 @@ impl EffectLayers {
             gamma: gfx.gamma,
             shadows_enabled: gfx.shadows_enabled && self.shadows,
             ssr_enabled: gfx.ssr_enabled && self.ssr,
+            vhs_enabled: gfx.vhs_enabled,
         }
     }
 

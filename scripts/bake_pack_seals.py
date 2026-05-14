@@ -16,7 +16,7 @@ and a rarity-tied edge:
   even when the wrapper is otherwise occluded.
 
 Idempotent: on first run, the unbaked PNG is moved to
-`assets/textures/packs/source/`; subsequent runs re-bake from source
+`assets/textures/tile_packs/source/`; subsequent runs re-bake from source
 and overwrite the live PNG. Re-runs do not double-stamp.
 
 Usage:
@@ -37,7 +37,7 @@ except ImportError:
 
 
 PACK_DIR = (
-    Path(__file__).resolve().parent.parent / "assets" / "textures" / "packs"
+    Path(__file__).resolve().parent.parent / "assets" / "textures" / "tile_packs"
 )
 SOURCE_DIR = PACK_DIR / "source"
 

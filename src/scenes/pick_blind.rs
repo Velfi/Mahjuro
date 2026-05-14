@@ -1,5 +1,5 @@
 //! Pick-blind scene — choose **Play** or **Skip** before the next blind.
-//! Renders the [`hallway.glb`](../../assets/hallway.glb) room with embedded
+//! Renders the [`hallway.glb`](../../assets/3d/hallway.glb) room with embedded
 //! punctual lights when the asset is present; copy and focus navigation use
 //! the GLB `btn_play_round` / `btn_skip_round` hit targets.
 //!

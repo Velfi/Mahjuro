@@ -2,7 +2,7 @@
 """Spot-fix a single tile (or several) inside an existing atlas.
 
 Workflow:
-  1. Read `assets/sets/<name>/atlas.png` + `atlas.toml`.
+  1. Read `assets/textures/tile_sets/<name>/atlas.png` + `atlas.toml`.
   2. For each requested tile code, find its cell rect in the atlas, crop it,
      and write the crop to a temp PNG.
   3. Call the OpenAI image-edit API on that crop with a tile-specific content
@@ -63,7 +63,7 @@ from tile_specs import tile_content_spec
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SETS_DIR = REPO_ROOT / "assets" / "sets"
+SETS_DIR = REPO_ROOT / "assets" / "textures" / "tile_sets"
 
 
 def parse_atlas_toml(src: str) -> tuple[int, int, int, list[str]]:
@@ -132,7 +132,7 @@ def call_edit(client: OpenAI, crop_path: Path, prompt: str,
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("set_name",
-                    help="Tileset directory name under assets/sets/ "
+                    help="Tileset directory name under assets/textures/tile_sets/ "
                          "(e.g. classic).")
     ap.add_argument("codes", nargs="+",
                     help="One or more tile codes to fix (e.g. B5 B6 B7).")

@@ -6,8 +6,8 @@ the bottom-right of each cell with a light rounded backing for legibility.
 
 Usage (repo root):
 
-    python3 scripts/annotate_atlas_indices.py assets/sets/classic
-    python3 scripts/annotate_atlas_indices.py assets/sets/painted_from_scratch/atlas.png
+    python3 scripts/annotate_atlas_indices.py assets/textures/tile_sets/classic
+    python3 scripts/annotate_atlas_indices.py assets/textures/tile_sets/painted_from_scratch/atlas.png
 """
 from __future__ import annotations
 

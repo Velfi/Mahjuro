@@ -400,7 +400,6 @@ impl ShopScene {
                 let shop_rm = GameEngine::read_shop(run);
                 let inventory = ShopInventoryCounts {
                     n_for_sale: self.items.len(),
-                    n_for_sale_zodiacs: self.zodiac_items.len(),
                     n_for_sale_talismans: self.talisman_items.len(),
                     n_owned_relics: shop_rm.owned_relics.len(),
                 };

@@ -3,8 +3,8 @@
 //! These are NOT a framework — just functions that push `GpuInstance`,
 //! `TextLabel`, and `ButtonDef` values into the vectors a scene already
 //! maintains. The goal is to give every screen the same visual language
-//! (Midnight Gold theme) without forcing scenes to adopt a retained-mode
-//! widget tree.
+//! (Walnut, Brass & Felt theme — see `COLOR_THEME.md`) without forcing
+//! scenes to adopt a retained-mode widget tree.
 //!
 //! Each helper takes the rect to draw at and pushes:
 //! - One or more background quads (for inset borders).

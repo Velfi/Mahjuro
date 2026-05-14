@@ -6,8 +6,8 @@
 
 use crate::debug_menu::DebugMenuBar;
 use crate::debug_overlays::{
-    CameraDebugOverlay, DebugVisibilityOverlay, SfxTestOverlay, ShopEnvDebugOverlay, TuningOverlay,
-    VolumetricDebugOverlay,
+    CameraDebugOverlay, DebugVisibilityOverlay, SfxTestOverlay, ShopEnvDebugOverlay,
+    TonemapDebugOverlay, TuningOverlay,
 };
 use crate::render::draw_cmd::CameraParams;
 use crate::render::shop_glb::ShopEnvLightingTune;
@@ -66,7 +66,10 @@ pub struct DebugState {
     pub sfx_test_overlay: Option<SfxTestOverlay>,
     pub camera_debug_overlay: Option<CameraDebugOverlay>,
     pub shop_env_debug_overlay: Option<ShopEnvDebugOverlay>,
-    pub volumetric_debug_overlay: Option<VolumetricDebugOverlay>,
+    /// Per-scene tonemap + VHS tuning overlay. Edits the in-memory
+    /// `App.tonemap_tuning` live; Save persists under
+    /// `TonemapTuning:<scene_key>` (or `_default`); Reset clears that key.
+    pub tonemap_debug_overlay: Option<TonemapDebugOverlay>,
     /// One-shot debug picker armed by the "Object Hit Test" debug menu
     /// item.
     pub object_hit_test_armed: bool,
@@ -103,7 +106,7 @@ impl DebugState {
             sfx_test_overlay: None,
             camera_debug_overlay: None,
             shop_env_debug_overlay: None,
-            volumetric_debug_overlay: None,
+            tonemap_debug_overlay: None,
             object_hit_test_armed: false,
             arrange_mode: None,
             last_effective_camera: CameraParams::default_table_camera(800.0),
@@ -119,6 +122,6 @@ impl DebugState {
             || self.camera_debug_overlay.is_some()
             || self.shop_env_debug_overlay.is_some()
             || self.visibility_overlay.is_some()
-            || self.volumetric_debug_overlay.is_some()
+            || self.tonemap_debug_overlay.is_some()
     }
 }

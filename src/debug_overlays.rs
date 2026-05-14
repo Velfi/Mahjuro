@@ -4,7 +4,7 @@
 
 use crate::audio;
 use crate::game::cascade::CascadeTuning;
-use crate::game::volumetric_tuning::VolumetricTuning;
+use crate::game::tonemap_tuning::{TONEMAP_SLIDER_META, TonemapTuning};
 use crate::render::draw_cmd::CameraParams;
 use crate::render::theme::metrics;
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
@@ -1588,56 +1588,55 @@ impl ShopEnvDebugOverlay {
     }
 }
 
-// ── Volumetric tuning overlay ───────────────────────────────────────────
+// ── Tonemap tuning overlay ──────────────────────────────────────────────
 //
-// Mountain-haze / fog-wall knobs. Edits apply via `WgpuRenderer::set_haze_tuning`
-// on the next frame.
+// Per-scene exposure + VHS knobs. Edits apply via
+// `WgpuRenderer::set_tonemap_tuning` on the next frame. Save persists the
+// current scene's tuning under `TonemapTuning:<scene_key>` (or
+// `TonemapTuning:_default` for the no-scene fallback). Reset clears the
+// scene's override so the resolver falls back to the default tuning.
 
-pub const VOL_ROW_COUNT: usize = 8; // 6 sliders + Save-as-Default + Reset
-const VOL_SLIDER_ROWS: usize = VOL_ROW_COUNT - 2;
-const VOL_SAVE_ROW: usize = VOL_ROW_COUNT - 2;
-const VOL_RESET_ROW: usize = VOL_ROW_COUNT - 1;
+const TONEMAP_SLIDER_ROWS: usize = 5;
+const TONEMAP_SAVE_ROW: usize = TONEMAP_SLIDER_ROWS;
+const TONEMAP_RESET_ROW: usize = TONEMAP_SLIDER_ROWS + 1;
+const TONEMAP_ROW_COUNT: usize = TONEMAP_SLIDER_ROWS + 2;
 
-// (label, min, max, step). Order must match the `match cursor` arms in
-// `adjust` and `slider_value` below — add sliders there too when this
-// table grows.
-const VOL_SLIDER_META: [(&str, f32, f32, f32); VOL_SLIDER_ROWS] = [
-    ("Haze Density", 0.0, 3.0, 0.05),
-    ("Haze Color R", 0.0, 0.5, 0.005),
-    ("Haze Color G", 0.0, 0.5, 0.005),
-    ("Haze Color B", 0.0, 0.5, 0.005),
-    ("Haze Horizon Y", 0.0, 1.0, 0.01),
-    ("Haze Drift Speed", 0.0, 3.0, 0.05),
-];
-
-pub struct VolumetricDebugOverlay {
+pub struct TonemapDebugOverlay {
     cursor: usize,
-    pub tuning: VolumetricTuning,
+    /// Live-edited tuning for the active scene. Read-back into the app's
+    /// `TonemapTuningSet` happens in the close/save path so partial edits
+    /// don't leak into other scenes via the resolver.
+    pub tuning: TonemapTuning,
+    /// Active scene this overlay edits — `None` selects the `_default`
+    /// fallback slot. Captured at open time so the overlay's title /
+    /// persistence path is stable even if the player swaps scenes mid-edit.
+    pub scene_key: Option<String>,
 }
 
-pub enum VolumetricDebugResult {
+pub enum TonemapDebugResult {
     Stay,
     Close,
     Reset,
     SaveAsDefault,
 }
 
-impl VolumetricDebugOverlay {
-    pub fn new(tuning: &VolumetricTuning) -> Self {
+impl TonemapDebugOverlay {
+    pub fn new(tuning: TonemapTuning, scene_key: Option<String>) -> Self {
         Self {
             cursor: 0,
-            tuning: *tuning,
+            tuning,
+            scene_key,
         }
     }
 
-    pub fn update(&mut self, actions: &[UiAction]) -> VolumetricDebugResult {
+    pub fn update(&mut self, actions: &[UiAction]) -> TonemapDebugResult {
         for a in actions {
             match a {
                 UiAction::FocusDown => {
-                    self.cursor = (self.cursor + 1) % VOL_ROW_COUNT;
+                    self.cursor = (self.cursor + 1) % TONEMAP_ROW_COUNT;
                 }
                 UiAction::FocusUp => {
-                    self.cursor = (self.cursor + VOL_ROW_COUNT - 1) % VOL_ROW_COUNT;
+                    self.cursor = (self.cursor + TONEMAP_ROW_COUNT - 1) % TONEMAP_ROW_COUNT;
                 }
                 UiAction::FocusNext | UiAction::NavigateHudNext => {
                     self.adjust(1.0);
@@ -1646,77 +1645,62 @@ impl VolumetricDebugOverlay {
                     self.adjust(-1.0);
                 }
                 UiAction::Confirm => {
-                    if self.cursor == VOL_SAVE_ROW {
-                        return VolumetricDebugResult::SaveAsDefault;
-                    } else if self.cursor == VOL_RESET_ROW {
-                        return VolumetricDebugResult::Reset;
+                    if self.cursor == TONEMAP_SAVE_ROW {
+                        return TonemapDebugResult::SaveAsDefault;
+                    } else if self.cursor == TONEMAP_RESET_ROW {
+                        return TonemapDebugResult::Reset;
                     }
                 }
                 UiAction::Cancel | UiAction::Pause => {
-                    return VolumetricDebugResult::Close;
+                    return TonemapDebugResult::Close;
                 }
                 _ => {}
             }
         }
-        VolumetricDebugResult::Stay
+        TonemapDebugResult::Stay
     }
 
     fn adjust(&mut self, dir: f32) {
-        if self.cursor >= VOL_SLIDER_ROWS {
+        if self.cursor >= TONEMAP_SLIDER_ROWS {
             return;
         }
-        let (_, min, max, step) = VOL_SLIDER_META[self.cursor];
-        let delta = dir * step;
-        let t = &mut self.tuning;
-        match self.cursor {
-            0 => t.haze_density = (t.haze_density + delta).clamp(min, max),
-            1 => t.haze_color_r = (t.haze_color_r + delta).clamp(min, max),
-            2 => t.haze_color_g = (t.haze_color_g + delta).clamp(min, max),
-            3 => t.haze_color_b = (t.haze_color_b + delta).clamp(min, max),
-            4 => t.haze_horizon_y = (t.haze_horizon_y + delta).clamp(min, max),
-            5 => t.haze_drift_speed = (t.haze_drift_speed + delta).clamp(min, max),
-            _ => {}
-        }
-    }
-
-    fn slider_value(&self, i: usize) -> f32 {
-        match i {
-            0 => self.tuning.haze_density,
-            1 => self.tuning.haze_color_r,
-            2 => self.tuning.haze_color_g,
-            3 => self.tuning.haze_color_b,
-            4 => self.tuning.haze_horizon_y,
-            5 => self.tuning.haze_drift_speed,
-            _ => 0.0,
-        }
+        let (_, _, _, step) = TONEMAP_SLIDER_META[self.cursor];
+        let cur = self.tuning.field_at(self.cursor);
+        self.tuning.set_field_at(self.cursor, cur + dir * step);
     }
 
     fn format_value(&self, i: usize) -> String {
+        let v = self.tuning.field_at(i);
         // Match precision to the slider's step so tiny increments visibly
-        // change the displayed value.
-        match i {
-            1..=3 => format!("{:.3}", self.slider_value(i)),
-            _ => format!("{:.2}", self.slider_value(i)),
+        // change the displayed value (chromatic step is 1e-4).
+        let (_, _, _, step) = TONEMAP_SLIDER_META[i];
+        if step >= 0.01 {
+            format!("{v:.2}")
+        } else if step >= 0.001 {
+            format!("{v:.3}")
+        } else {
+            format!("{v:.4}")
         }
     }
 
-    pub fn draw(
-        &self,
-        window_w: f32,
-        window_h: f32,
-    ) -> (Vec<GpuInstance>, Vec<TextLabel>) {
+    pub fn draw(&self, window_w: f32, window_h: f32) -> (Vec<GpuInstance>, Vec<TextLabel>) {
         let scale = metrics::scene_scale(window_w, window_h);
         let mut instances = Vec::new();
         let mut labels = Vec::new();
 
         let margin = (10.0 * scale).max(6.0);
-        let panel_w = (300.0 * scale).min(window_w * 0.40);
+        let panel_w = (320.0 * scale).min(window_w * 0.42);
         let row_h = (22.0 * scale).max(16.0);
         let row_gap = (3.0 * scale).max(2.0);
         let title_h = (24.0 * scale).max(16.0);
+        let scene_h = (16.0 * scale).max(12.0);
         let hint_h = (14.0 * scale).max(10.0);
-        let panel_h =
-            title_h + row_gap + VOL_ROW_COUNT as f32 * (row_h + row_gap) + hint_h + row_gap * 2.0;
+        let panel_h = title_h
+            + scene_h
+            + row_gap
+            + TONEMAP_ROW_COUNT as f32 * (row_h + row_gap)
+            + hint_h
+            + row_gap * 2.0;
         let panel_x = window_w - panel_w - margin;
         let panel_y = margin;
 
@@ -1728,35 +1712,48 @@ impl VolumetricDebugOverlay {
                 panel_w + border * 2.0,
                 panel_h + border * 2.0,
             ],
-            color: [0.3, 0.45, 0.7, 0.85],
+            color: [0.55, 0.45, 0.30, 0.85],
         });
         instances.push(GpuInstance {
             rect: [panel_x, panel_y, panel_w, panel_h],
-            color: [0.08, 0.08, 0.14, 0.92],
+            color: [0.10, 0.08, 0.12, 0.92],
         });
 
         labels.push(TextLabel {
             rect: [panel_x, panel_y + row_gap, panel_w, title_h],
-            text: "Volumetric".into(),
+            text: "Tonemap".into(),
             color: [1.0, 0.95, 0.7, 1.0],
             ..Default::default()
         });
 
-        let cursor_y = panel_y + row_gap + title_h + row_gap;
+        let scene_label = match self.scene_key.as_deref() {
+            Some(k) => format!("scene: {k}"),
+            None => "scene: (default)".into(),
+        };
+        labels.push(TextLabel {
+            rect: [panel_x, panel_y + row_gap + title_h, panel_w, scene_h],
+            text: scene_label,
+            color: [0.85, 0.82, 0.65, 0.95],
+            ..Default::default()
+        });
+
+        let cursor_y = panel_y + row_gap + title_h + scene_h + row_gap;
         let label_w = panel_w * 0.44;
         let slider_w = panel_w * 0.32;
         let value_w = panel_w * 0.20;
 
-        for (i, &(name, min, max, _step)) in
-            VOL_SLIDER_META.iter().enumerate().take(VOL_SLIDER_ROWS)
+        for (i, &(name, min, max, _step)) in TONEMAP_SLIDER_META
+            .iter()
+            .enumerate()
+            .take(TONEMAP_SLIDER_ROWS)
         {
             let row_y = cursor_y + i as f32 * (row_h + row_gap);
             let is_focused = self.cursor == i;
 
             let bg = if is_focused {
-                [0.20, 0.32, 0.50, 0.90]
+                [0.32, 0.24, 0.18, 0.92]
             } else {
-                [0.12, 0.15, 0.24, 0.75]
+                [0.16, 0.13, 0.18, 0.78]
             };
             instances.push(GpuInstance {
                 rect: [panel_x + 4.0, row_y, panel_w - 8.0, row_h],
@@ -1766,7 +1763,7 @@ impl VolumetricDebugOverlay {
             let tc = if is_focused {
                 [1.0, 1.0, 1.0, 1.0]
             } else {
-                [0.7, 0.72, 0.82, 0.9]
+                [0.78, 0.74, 0.70, 0.9]
             };
             labels.push(TextLabel {
                 rect: [panel_x + 6.0 * scale, row_y, label_w, row_h],
@@ -1780,16 +1777,16 @@ impl VolumetricDebugOverlay {
             let track_y = row_y + (row_h - track_h) * 0.5;
             instances.push(GpuInstance {
                 rect: [track_x, track_y, slider_w, track_h],
-                color: [0.08, 0.08, 0.14, 1.0],
+                color: [0.08, 0.07, 0.10, 1.0],
             });
 
-            let v = self.slider_value(i);
+            let v = self.tuning.field_at(i);
             let t = ((v - min) / (max - min)).clamp(0.0, 1.0);
             let fill_w = slider_w * t;
             let fill_color = if is_focused {
-                [0.35, 0.65, 0.90, 1.0]
+                [0.85, 0.55, 0.30, 1.0]
             } else {
-                [0.22, 0.42, 0.62, 0.85]
+                [0.55, 0.36, 0.22, 0.85]
             };
             instances.push(GpuInstance {
                 rect: [track_x, track_y, fill_w, track_h],
@@ -1802,9 +1799,9 @@ impl VolumetricDebugOverlay {
             instances.push(GpuInstance {
                 rect: [knob_x, knob_y, knob_size, knob_size],
                 color: if is_focused {
-                    [0.9, 0.9, 1.0, 1.0]
+                    [1.0, 0.92, 0.78, 1.0]
                 } else {
-                    [0.6, 0.6, 0.7, 0.9]
+                    [0.7, 0.62, 0.55, 0.9]
                 },
             });
 
@@ -1817,8 +1814,8 @@ impl VolumetricDebugOverlay {
             });
         }
 
-        let save_y = cursor_y + VOL_SLIDER_ROWS as f32 * (row_h + row_gap);
-        let save_focused = self.cursor == VOL_SAVE_ROW;
+        let save_y = cursor_y + TONEMAP_SLIDER_ROWS as f32 * (row_h + row_gap);
+        let save_focused = self.cursor == TONEMAP_SAVE_ROW;
         let save_bg = if save_focused {
             [0.30, 0.50, 0.35, 0.95]
         } else {
@@ -1830,17 +1827,17 @@ impl VolumetricDebugOverlay {
         });
         labels.push(TextLabel {
             rect: [panel_x, save_y, panel_w, row_h],
-            text: "Save as Default".into(),
+            text: "Save for this scene".into(),
             color: if save_focused {
                 [1.0, 1.0, 1.0, 1.0]
             } else {
-                [0.75, 0.85, 0.78, 0.9]
+                [0.78, 0.88, 0.80, 0.9]
             },
             ..Default::default()
         });
 
         let reset_y = save_y + row_h + row_gap;
-        let reset_focused = self.cursor == VOL_RESET_ROW;
+        let reset_focused = self.cursor == TONEMAP_RESET_ROW;
         let reset_bg = if reset_focused {
             [0.50, 0.30, 0.30, 0.95]
         } else {
@@ -1852,11 +1849,11 @@ impl VolumetricDebugOverlay {
         });
         labels.push(TextLabel {
             rect: [panel_x, reset_y, panel_w, row_h],
-            text: "Reset to Defaults".into(),
+            text: "Reset scene to default".into(),
             color: if reset_focused {
                 [1.0, 1.0, 1.0, 1.0]
             } else {
-                [0.7, 0.72, 0.82, 0.9]
+                [0.85, 0.72, 0.72, 0.9]
             },
             ..Default::default()
         });
@@ -1867,7 +1864,7 @@ impl VolumetricDebugOverlay {
             text:
                 "\u{2191}/\u{2193} select   \u{2190}/\u{2192} adjust   \u{23ce} confirm   Esc close"
                     .into(),
-            color: [0.55, 0.6, 0.75, 0.9],
+            color: [0.65, 0.55, 0.50, 0.9],
             ..Default::default()
         });
 

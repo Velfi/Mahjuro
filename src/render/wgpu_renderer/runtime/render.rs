@@ -119,7 +119,13 @@ impl WgpuRenderer {
             gamma,
             shadows_enabled,
             ssr_enabled,
+            vhs_enabled,
         } = settings;
+        // Master Options-toggle override: when the user has VHS off we kill
+        // the per-scene branch even if the per-scene tuning has non-zero
+        // amplitudes. Computed locally — `self.tonemap_vhs_enabled` keeps
+        // the per-scene resolution so re-enabling restores the look.
+        let effective_vhs_on = self.tonemap_vhs_enabled && vhs_enabled;
         self.apply_render_settings(tile_material, surface_kind, effects_quality, &tileset_name);
 
         // Upload any relic/background textures that finished decoding.
@@ -600,10 +606,6 @@ impl WgpuRenderer {
                     ops.push(RenderOp::SunlitWater);
                     i += 1;
                 }
-                DrawCmd::MountainHaze => {
-                    ops.push(RenderOp::MountainHaze);
-                    i += 1;
-                }
                 DrawCmd::ShootingStarCascade => {
                     if effects_quality >= crate::persistence::EffectsQuality::Low {
                         ops.push(RenderOp::ShootingStarCascade);
@@ -938,28 +940,6 @@ impl WgpuRenderer {
         // loop below appends entries it wants to expose to
         // `pick_debug_object`.
         self.last_debug_pickables.clear();
-        self.last_gameplay_fog_wall_horizon_y = frame.gameplay_fog_wall_horizon_y;
-        self.last_gameplay_fog_wall_center_x = frame.gameplay_fog_wall_center_x;
-        if let Some(hy) = frame.gameplay_fog_wall_horizon_y {
-            let py = hy.clamp(0.0, 1.0) * h;
-            let cx_px = frame
-                .gameplay_fog_wall_center_x
-                .unwrap_or(0.5)
-                .clamp(0.0, 1.0)
-                * w;
-            let center = pixel_to_world(w, h, cx_px, py, 720.0);
-            let model = translate_rot_scale(
-                center,
-                Mat4::IDENTITY,
-                glam::Vec3::new(w * 12.0, 160.0, 140.0),
-            );
-            self.last_debug_pickables.push((
-                "gameplay.fog_wall".to_string(),
-                model,
-                glam::Vec3::splat(0.5),
-                0.0,
-            ));
-        }
 
         // Candles migrated to Object3dKind::Candle.
 
@@ -976,9 +956,8 @@ impl WgpuRenderer {
         // Auxiliary dishes migrated to Object3dKind::Dish.
 
         // ── Ribbon batches (shop scene) ────────────────────────────────
-        // Each textured ribbon uses up to 3 draw slots (top cap, tileable
-        // middle, bottom cap) so its length is independent of texture aspect.
-        // Untextured (plain) ribbons still use a single slot.
+        // Each ribbon uses one draw slot — the whole hanging banner is a
+        // single textured mesh sampling one tall portrait per zodiac.
         self.last_ribbon_models.clear();
         self.last_ribbon_batch_slot_counts.clear();
         // Zodiac ribbons migrated to Object3dKind::ZodiacRibbon.
@@ -1943,13 +1922,22 @@ impl WgpuRenderer {
         // book mesh to sample — keep that linear. Swapchain HDR (`Rgba16Float`) must
         // use the same ACES fitted curve as SDR or ingame colors read oversaturated.
         let tonemap_mode = if is_prepass { 1.0f32 } else { 0.0f32 };
+        // Journal prepass also forces VHS off so the book-page mesh never
+        // resamples a buffer with overlay artifacts baked in.
+        let vhs_on_now = if is_prepass { false } else { effective_vhs_on };
+        let tonemap_time = self.creation_time.elapsed().as_secs_f32();
         self.queue.write_buffer(
             &self.tonemap_params_buffer,
             0,
             bytemuck::bytes_of(&TonemapParams {
                 exposure: self.tonemap_exposure,
                 mode: tonemap_mode,
-                _pad: [0.0; 2],
+                vhs_enabled: if vhs_on_now { 1.0 } else { 0.0 },
+                time: tonemap_time,
+                vhs_chromatic: self.tonemap_vhs_chromatic,
+                vhs_scanline: self.tonemap_vhs_scanline,
+                vhs_grain: self.tonemap_vhs_grain,
+                vhs_vignette: self.tonemap_vhs_vignette,
             }),
         );
         let tonemap_pipe = if is_prepass {

@@ -733,17 +733,6 @@ impl WgpuRenderer {
             return Some(n.to_string());
         }
 
-        if let Some(hy) = self.last_gameplay_fog_wall_horizon_y {
-            let cx = self
-                .last_gameplay_fog_wall_center_x
-                .unwrap_or(0.5)
-                .clamp(0.0, 1.0);
-            let cy_frac = cursor_y / cam.viewport_h;
-            let cx_frac = cursor_x / cam.viewport_w;
-            if (cy_frac - hy).abs() < 0.11 && (cx_frac - cx).abs() < 0.09 {
-                return Some("gameplay.fog_wall".to_string());
-            }
-        }
         None
     }
 
@@ -914,22 +903,6 @@ impl WgpuRenderer {
             return Some((n.to_string(), Some(m)));
         }
 
-        if let Some(hy) = self.last_gameplay_fog_wall_horizon_y {
-            let cx = self
-                .last_gameplay_fog_wall_center_x
-                .unwrap_or(0.5)
-                .clamp(0.0, 1.0);
-            let cy_frac = cursor_y / cam.viewport_h;
-            let cx_frac = cursor_x / cam.viewport_w;
-            if (cy_frac - hy).abs() < 0.11 && (cx_frac - cx).abs() < 0.09 {
-                let model = self
-                    .last_debug_pickables
-                    .iter()
-                    .find(|(name, _, _, _)| name == "gameplay.fog_wall")
-                    .map(|(_, m, _, _)| *m);
-                return Some(("gameplay.fog_wall".to_string(), model));
-            }
-        }
         None
     }
 }

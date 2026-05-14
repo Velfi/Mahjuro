@@ -42,7 +42,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         golden_dust: golden_dust_shader,
         moonlit_water: moonlit_water_shader,
         sunlit_water: sunlit_water_shader,
-        mountain_haze: mountain_haze_shader,
         shooting_star_cascade: shooting_star_cascade_shader,
         cascade_composite: cascade_composite_shader,
         tile_outline: tile_outline_shader,
@@ -292,12 +291,12 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             }],
         });
 
-    let tile_glb_file =
-        crate::asset_path::get("tile_plastic.glb").or_else(|| crate::asset_path::get("tile.glb"));
+    let tile_glb_file = crate::asset_path::get("3d/tile_plastic.glb")
+        .or_else(|| crate::asset_path::get("3d/Tile.glb"));
     let loaded_glb = match tile_glb_file {
         Some(file) => load_glb_tile_from_bytes(&file.data),
         None => Err(anyhow::anyhow!(
-            "tile_plastic.glb (or tile.glb) not found (packs or assets/)"
+            "3d/tile_plastic.glb (or 3d/Tile.glb) not found (packs or assets/)"
         )),
     };
 
@@ -362,44 +361,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 resource: wgpu::BindingResource::Sampler(&tile_sampler),
             },
         ],
-    });
-
-    // ── Mountain-haze uniform (density/colour/horizon/drift) ───────────
-    // Live-driven from the Volumetric debug overlay; see
-    // `set_haze_tuning` below for the per-frame write path.
-    let haze_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("haze-uniform"),
-        contents: bytemuck::bytes_of(&HazeUniform {
-            color_density: [0.080, 0.105, 0.145, 1.0],
-            params: [0.55, 1.0, 0.0, 0.0],
-        }),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
-    let haze_uniform_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("haze-uniform-layout"),
-        entries: &[wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        }],
-    });
-    let haze_uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("haze-uniform-bg"),
-        layout: &haze_uniform_layout,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: haze_uniform_buffer.as_entire_binding(),
-        }],
-    });
-    let mountain_haze_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("mountain-haze-pl"),
-        bind_group_layouts: &[Some(&globals_layout), Some(&haze_uniform_layout)],
-        immediate_size: 0,
     });
 
     // ---- Shadow map resources (depth texture + sampler + layouts) ----
@@ -892,49 +853,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         })
     };
     let sunlit_water_pipeline = vignette_pipeline("sunlit-water-pipeline", &sunlit_water_shader);
-    // Mountain-haze uses a custom pipeline layout so the fragment shader
-    // can bind the haze uniform (group 1) alongside globals (group 0).
-    let mountain_haze_pipeline = {
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("mountain-haze-pipeline"),
-            layout: Some(&mountain_haze_layout),
-            vertex: wgpu::VertexState {
-                module: &mountain_haze_shader,
-                entry_point: Some("vs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &mountain_haze_shader,
-                entry_point: Some("fs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: scene_hdr_format,
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::One,
-                            dst_factor: wgpu::BlendFactor::One,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                        alpha: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::One,
-                            dst_factor: wgpu::BlendFactor::One,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                ..Default::default()
-            },
-            depth_stencil: Some(depth_ui.clone()),
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        })
-    };
     // The cascade shader is heavy per-pixel; it renders into a half-res
     // offscreen target and is additively composited back into the main
     // pass. The offscreen pipeline writes with REPLACE blend since the
@@ -3601,7 +3519,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             &tile_sampler,
         ));
     }
-    let ribbon_slot_zodiac: Vec<Option<(u8, u8)>> = vec![None; MAX_RIBBON_SLOTS];
+    let ribbon_slot_zodiac: Vec<Option<u8>> = vec![None; MAX_RIBBON_SLOTS];
     // Coin face heightmap (Chinese cash-coin engraving). Bound at slot 1
     // of every shop-pile coin instance; the metal branch in lit_mesh.wgsl
     // samples it as a heightfield to perturb the coin's surface normal so
@@ -3845,7 +3763,12 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         bytemuck::bytes_of(&TonemapParams {
             exposure: 1.0,
             mode: 0.0,
-            _pad: [0.0; 2],
+            vhs_enabled: 0.0,
+            time: 0.0,
+            vhs_chromatic: 0.0,
+            vhs_scanline: 0.0,
+            vhs_grain: 0.0,
+            vhs_vignette: 0.0,
         }),
     );
 
@@ -3872,9 +3795,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         moonlit_water_pipeline,
         moon_albedo_bind_group,
         sunlit_water_pipeline,
-        mountain_haze_pipeline,
-        haze_uniform_buffer,
-        haze_uniform_bind_group,
         shooting_star_cascade_pipeline,
         cascade_composite_pipeline,
         cascade_composite_layout,
@@ -4026,8 +3946,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         last_bowl_model: None,
         last_mirror_model: None,
         last_debug_pickables: Vec::new(),
-        last_gameplay_fog_wall_horizon_y: None,
-        last_gameplay_fog_wall_center_x: None,
         active_scene_key: None,
         debug_arrange_override: None,
         committed_arrange_rotations: std::collections::HashMap::new(),
@@ -4106,6 +4024,11 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         swapchain_sdr_format,
         swapchain_hdr_available,
         tonemap_exposure: 1.0,
+        tonemap_vhs_enabled: false,
+        tonemap_vhs_chromatic: 0.001,
+        tonemap_vhs_scanline: 0.040,
+        tonemap_vhs_grain: 0.020,
+        tonemap_vhs_vignette: 0.100,
         lit_mesh_pipeline,
         lit_mesh_blended_pipeline,
         lit_mesh_white_view,

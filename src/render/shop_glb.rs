@@ -1,4 +1,4 @@
-//! Load [`shop.glb`](../../../assets/shop.glb): named empties/meshes for UI anchors + merged environment geometry.
+//! Load [`Shop.glb`](../../../assets/3d/Shop.glb): named empties/meshes for UI anchors + merged environment geometry.
 //!
 //! Marker object names (Blender object names → glTF node names):
 //! - `exit_btn`, `restock_btn`, `journal_btn`
@@ -95,7 +95,7 @@ fn ensure_shop_glb_loaded() {
     if !matches!(*w, ShopGlbCache::Uninit) {
         return;
     }
-    let ready = if let Some(file) = crate::asset_path::get("shop.glb") {
+    let ready = if let Some(file) = crate::asset_path::get("3d/Shop.glb") {
         match load_shop_glb_from_bytes(&file.data) {
             Ok(cpu) => {
                 log::debug!(

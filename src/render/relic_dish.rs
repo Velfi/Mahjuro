@@ -457,8 +457,9 @@ pub fn build_dish_mesh() -> MeshCpu {
     MeshCpu {
         vertices,
         indices,
-        // Darker brass tint — matches the Midnight Gold palette and reads
-        // as a recessed metal tray under candlelight.
+        // Darker brass tint — matches the Walnut, Brass & Felt palette
+        // (see `COLOR_THEME.md`) and reads as a recessed metal tray under
+        // candlelight.
         default_material: MaterialParams {
             kind: MaterialKind::Plain,
             base_color: [0.32, 0.22, 0.10, 1.0],

@@ -7,7 +7,7 @@
 use crate::render::draw_cmd::PromptIconSource;
 
 const KEYBOARD_SHEET: &str =
-    "kenney_input-prompts/Keyboard & Mouse/keyboard-&-mouse_sheet_double.png";
+    "textures/kenney_input-prompts/Keyboard & Mouse/keyboard-&-mouse_sheet_double.png";
 
 const fn key(name: &'static str) -> PromptIconSource {
     PromptIconSource::AtlasSprite {
@@ -36,7 +36,7 @@ mod tests {
     use super::*;
 
     const KEYBOARD_XML: &str = include_str!(
-        "../../assets/kenney_input-prompts/Keyboard & Mouse/keyboard-&-mouse_sheet_double.xml"
+        "../../assets/textures/kenney_input-prompts/Keyboard & Mouse/keyboard-&-mouse_sheet_double.xml"
     );
 
     fn expect_resolves(icon: &PromptIconSource) {

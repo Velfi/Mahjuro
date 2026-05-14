@@ -827,13 +827,6 @@ impl SceneBehavior for GameplayScene {
             frame.camera_override = Some(camera);
         }
         frame.background(BackgroundId::Black);
-        // Procedural fog wall (mountain haze): always on during gameplay.
-        // Arrange mode edits `gameplay.fog_wall`; `App::draw` folds preview deltas.
-        frame.mountain_haze();
-        // Committed placement only — interactive `App::draw` overwrites with the
-        // full arrange preview so `set_haze_tuning` matches `DrawCtx::arrange_preview`.
-        frame.gameplay_fog_wall_horizon_y = Some(self.positions.fog_wall.ny.clamp(0.0, 1.0));
-        frame.gameplay_fog_wall_center_x = Some(self.positions.fog_wall.nx.clamp(0.0, 1.0));
         frame.table();
 
         // Build hand tile placements for the showcase pipeline.

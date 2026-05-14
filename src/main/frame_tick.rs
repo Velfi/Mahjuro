@@ -514,36 +514,51 @@ impl App {
             button_clicks.clear();
         }
 
-        // 3b'''''. Volumetric tuning overlay (haze / fog wall)
-        // Live-copy so `renderer.set_haze_tuning` picks up edits on the next frame.
-        if let Some(ref mut overlay) = self.debug.volumetric_debug_overlay {
+        // 3b''''''. Tonemap tuning overlay (per-scene exposure + VHS knobs)
+        // Edits are live; Save/Reset persist to / clear the per-scene
+        // override under the captured scene key.
+        if let Some(ref mut overlay) = self.debug.tonemap_debug_overlay {
+            use crate::debug_overlays::TonemapDebugResult;
+            use crate::game::tonemap_tuning::{
+                FALLBACK_SCENE_KEY, TonemapTuning, storage_key,
+            };
+            let scene_key_owned = overlay.scene_key.clone();
+            let scene_key_persist = scene_key_owned.as_deref().unwrap_or(FALLBACK_SCENE_KEY);
+            let scene_key_lookup = scene_key_owned.as_deref();
             match overlay.update(&actions) {
-                VolumetricDebugResult::Stay => {
-                    self.volumetric_tuning = overlay.tuning;
+                TonemapDebugResult::Stay => {
+                    self.tonemap_tuning.set(scene_key_lookup, overlay.tuning);
                 }
-                VolumetricDebugResult::Reset => {
-                    overlay.tuning = VolumetricTuning::default();
-                    self.volumetric_tuning = overlay.tuning;
-                    match persistence::clear_tuning_override("VolumetricTuning") {
-                        Ok(()) => log::debug!("Cleared VolumetricTuning override"),
-                        Err(e) => {
-                            log::warn!("Failed to clear VolumetricTuning override: {e}")
-                        }
+                TonemapDebugResult::Reset => {
+                    overlay.tuning = TonemapTuning::default();
+                    self.tonemap_tuning.clear(scene_key_lookup);
+                    match persistence::clear_tuning_override(&storage_key(scene_key_persist)) {
+                        Ok(()) => log::debug!(
+                            "Cleared TonemapTuning override for scene '{scene_key_persist}'"
+                        ),
+                        Err(e) => log::warn!(
+                            "Failed to clear TonemapTuning override for '{scene_key_persist}': {e}"
+                        ),
                     }
                 }
-                VolumetricDebugResult::SaveAsDefault => {
-                    self.volumetric_tuning = overlay.tuning;
-                    match persistence::save_tuning_override("VolumetricTuning", &overlay.tuning) {
-                        Ok(()) => log::debug!("Saved VolumetricTuning override"),
-                        Err(e) => {
-                            log::warn!("Failed to save VolumetricTuning override: {e}")
-                        }
+                TonemapDebugResult::SaveAsDefault => {
+                    self.tonemap_tuning.set(scene_key_lookup, overlay.tuning);
+                    match persistence::save_tuning_override(
+                        &storage_key(scene_key_persist),
+                        &overlay.tuning,
+                    ) {
+                        Ok(()) => log::debug!(
+                            "Saved TonemapTuning override for scene '{scene_key_persist}'"
+                        ),
+                        Err(e) => log::warn!(
+                            "Failed to save TonemapTuning override for '{scene_key_persist}': {e}"
+                        ),
                     }
                 }
-                VolumetricDebugResult::Close => {
-                    self.volumetric_tuning = overlay.tuning;
-                    self.debug.volumetric_debug_overlay = None;
-                    log::debug!("Closed volumetric debug overlay");
+                TonemapDebugResult::Close => {
+                    self.tonemap_tuning.set(scene_key_lookup, overlay.tuning);
+                    self.debug.tonemap_debug_overlay = None;
+                    log::debug!("Closed tonemap debug overlay");
                 }
             }
             actions.clear();

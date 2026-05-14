@@ -195,7 +195,7 @@ mod tests {
 
     /// Constants reused by the live code so we test exactly what ships.
     const KEYBOARD_XML: &str = include_str!(
-        "../../assets/kenney_input-prompts/Keyboard & Mouse/keyboard-&-mouse_sheet_double.xml"
+        "../../assets/textures/kenney_input-prompts/Keyboard & Mouse/keyboard-&-mouse_sheet_double.xml"
     );
 
     /// Height of the matching `keyboard-&-mouse_sheet_double.png` (used to
@@ -242,7 +242,7 @@ mod tests {
     /// the pack index, and the cropper without booting wgpu.
     #[test]
     fn live_keyboard_atlas_extracts_q() {
-        let sheet = "kenney_input-prompts/Keyboard & Mouse/keyboard-&-mouse_sheet_double.png";
+        let sheet = "textures/kenney_input-prompts/Keyboard & Mouse/keyboard-&-mouse_sheet_double.png";
         let got = extract_sprite_rgba(sheet, "keyboard_q");
         assert!(got.is_some(), "extract_sprite_rgba returned None for keyboard_q");
         let (rgba, w, h) = got.unwrap();

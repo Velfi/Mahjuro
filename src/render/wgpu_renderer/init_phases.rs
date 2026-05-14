@@ -73,7 +73,6 @@ pub(super) struct RendererShaderPack {
     pub golden_dust: wgpu::ShaderModule,
     pub moonlit_water: wgpu::ShaderModule,
     pub sunlit_water: wgpu::ShaderModule,
-    pub mountain_haze: wgpu::ShaderModule,
     pub shooting_star_cascade: wgpu::ShaderModule,
     pub cascade_composite: wgpu::ShaderModule,
     pub tile_outline: wgpu::ShaderModule,
@@ -140,10 +139,6 @@ pub(super) fn create_renderer_shader_modules(device: &wgpu::Device) -> RendererS
         sunlit_water: device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("sunlit-water-pipeline"),
             source: wgpu::ShaderSource::Wgsl(embedded_wgsl::SUNLIT_WATER.into()),
-        }),
-        mountain_haze: device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("mountain-haze-pipeline"),
-            source: wgpu::ShaderSource::Wgsl(embedded_wgsl::MOUNTAIN_HAZE.into()),
         }),
         shooting_star_cascade: device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shooting-star-cascade-pipeline"),

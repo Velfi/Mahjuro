@@ -36,10 +36,7 @@ mod tile_select;
 mod tutorial;
 
 pub use collection::{CollectionPositions, load_collection_positions, save_collection_positions};
-pub use gameplay::{
-    GAMEPLAY_FOG_WALL_HALF_WIDTH_UV, GAMEPLAY_HIERARCHY, GameplayPositions,
-    load_gameplay_positions, save_gameplay_positions,
-};
+pub use gameplay::{GameplayPositions, load_gameplay_positions, save_gameplay_positions};
 pub use main_menu_exterior::{
     MainMenuExteriorPositions, load_main_menu_exterior_positions, save_main_menu_exterior_positions,
 };

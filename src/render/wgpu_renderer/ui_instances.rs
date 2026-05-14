@@ -17,13 +17,18 @@ pub struct RenderSettings {
     /// Which procedural surface the table mesh routes through (walnut wood
     /// or green felt). Matches the user's Options-scene choice.
     pub surface_kind: crate::persistence::SurfaceKind,
-    /// Subdirectory of `assets/sets/` whose PNGs should be used for tile faces.
+    /// Subdirectory of `assets/textures/tile_sets/` whose PNGs should be used for tile faces.
     pub tileset_name: String,
     pub draw_settle_speed: f32,
     pub sort_settle_speed: f32,
     pub gamma: f32,
     pub shadows_enabled: bool,
     pub ssr_enabled: bool,
+    /// Master Options-toggle gate for the VHS overlay. The per-effect
+    /// amounts (chromatic / scanline / grain / vignette) live on the
+    /// renderer itself — pushed via `set_tonemap_tuning` from the per-scene
+    /// resolver — so this field is a hard kill switch only.
+    pub vhs_enabled: bool,
 }
 
 /// Instance for the `gradient_quad_pipeline` — same `rect`/`color` payload
