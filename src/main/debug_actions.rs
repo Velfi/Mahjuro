@@ -1,7 +1,7 @@
 use super::*;
 
 use crate::core::tile_pack::TilePackKind;
-use crate::debug_overlays::ShopEnvDebugOverlay;
+use crate::debug_overlays::{ShopEnvDebugOverlay, TonemapDebugOverlay};
 use crate::game::engine::GameEngine;
 use crate::scenes::{ShowcasePresenter, ShowcaseScene, TilePackPresenter};
 use crate::scenes::reload_scene_layout_from_disk;
@@ -134,11 +134,18 @@ impl App {
                     log::debug!("Opened shop env & lighting debug overlay");
                 }
             }
-            DebugAction::OpenVolumetricDebug => {
-                if self.debug.volumetric_debug_overlay.is_none() {
-                    self.debug.volumetric_debug_overlay =
-                        Some(VolumetricDebugOverlay::new(&self.volumetric_tuning));
-                    log::debug!("Opened volumetric debug overlay");
+            DebugAction::OpenTonemapDebug => {
+                if self.debug.tonemap_debug_overlay.is_none() {
+                    let scene_key = self.active_scene_key_for_renderer();
+                    let tuning = self.tonemap_tuning.resolve(scene_key);
+                    self.debug.tonemap_debug_overlay = Some(TonemapDebugOverlay::new(
+                        tuning,
+                        scene_key.map(str::to_string),
+                    ));
+                    log::debug!(
+                        "Opened tonemap debug overlay (scene: {})",
+                        scene_key.unwrap_or("_default")
+                    );
                 }
             }
             DebugAction::ProfileGpu => {

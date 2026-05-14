@@ -1,4 +1,4 @@
-//! [`hallway.glb`](../../../assets/hallway.glb) — pick-blind hallway room.
+//! [`hallway.glb`](../../../assets/3d/hallway.glb) — pick-blind hallway room.
 //!
 //! Marker object names (Blender → glTF):
 //! - `btn_play_round` — commit to the upcoming blind (same as legacy Play altar).
@@ -42,7 +42,7 @@ fn ensure_hallway_glb_loaded() {
     if !matches!(*w, HallwayGlbCache::Uninit) {
         return;
     }
-    let ready = if let Some(file) = crate::asset_path::get("hallway.glb") {
+    let ready = if let Some(file) = crate::asset_path::get("3d/hallway.glb") {
         match load_hallway_glb_from_bytes(&file.data) {
             Ok(cpu) => {
                 log::debug!(
@@ -296,11 +296,11 @@ mod tests {
     /// emissive; re-run after authoring so the count reflects `emissiveTexture` / factor.
     #[test]
     fn pick_blind_room_emissive_material_summary() {
-        let data = match crate::asset_path::get("hallway.glb") {
+        let data = match crate::asset_path::get("3d/hallway.glb") {
             Some(f) => f.data,
             None => {
                 eprintln!(
-                    "skip pick_blind_room_emissive_material_summary: no hallway.glb (bake packs or set MAHJURO_ASSETS)"
+                    "skip pick_blind_room_emissive_material_summary: no 3d/hallway.glb (bake packs or set MAHJURO_ASSETS)"
                 );
                 return;
             }

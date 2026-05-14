@@ -62,9 +62,10 @@ pub enum DebugAction {
     OpenCameraDebug,
     /// Live-edit `shop.glb` room scale (`window_h *` multiplier).
     OpenShopEnvDebug,
-    /// Open the volumetric tuning overlay — global dust strength (and any
-    /// future volumetric knobs).
-    OpenVolumetricDebug,
+    /// Open the per-scene tonemap + VHS tuning overlay. Edits apply live
+    /// and Save persists for the active scene only (`gameplay`, `shop`,
+    /// `pick_blind`, …) — like arrange mode but for the post-process pass.
+    OpenTonemapDebug,
     BlowWindGust,
     /// Capture GPU pass timings (shadow, main, …) averaged over the next 100
     /// rendered frames and log the result. Only meaningful on backends that
@@ -186,9 +187,9 @@ impl DebugMenuBar {
         mappings.push((shop_env_item.id().clone(), DebugAction::OpenShopEnvDebug));
         let _ = tuning_sub.append(&shop_env_item);
 
-        let vol_item = MenuItem::new("Volumetric...", true, None);
-        mappings.push((vol_item.id().clone(), DebugAction::OpenVolumetricDebug));
-        let _ = tuning_sub.append(&vol_item);
+        let tonemap_item = MenuItem::new("Tonemap (per scene)...", true, None);
+        mappings.push((tonemap_item.id().clone(), DebugAction::OpenTonemapDebug));
+        let _ = tuning_sub.append(&tonemap_item);
 
         let sfx_item = MenuItem::new("Sound Effects Test...", true, None);
         mappings.push((sfx_item.id().clone(), DebugAction::OpenSfxTest));

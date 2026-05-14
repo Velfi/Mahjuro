@@ -1,4 +1,4 @@
-//! [`archive.glb`](../../../assets/archive.glb) — Archive (`CollectionScene`) room.
+//! [`archive.glb`](../../../assets/3d/archive.glb) — Archive (`CollectionScene`) room.
 //!
 //! ## Node names (Blender object names → glTF nodes)
 //!
@@ -138,7 +138,7 @@ fn ensure_archive_glb_loaded() {
     if !matches!(*w, ArchiveGlbCache::Uninit) {
         return;
     }
-    let ready = if let Some(file) = crate::asset_path::get("archive.glb") {
+    let ready = if let Some(file) = crate::asset_path::get("3d/archive.glb") {
         match load_archive_glb_from_bytes(&file.data) {
             Ok(cpu) => {
                 log::debug!(

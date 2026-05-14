@@ -18,7 +18,6 @@ pub const EMBER_DRIFT: &str = wgsl_file!("ember_drift.wgsl");
 pub const GOLDEN_DUST: &str = wgsl_file!("golden_dust.wgsl");
 pub const MOONLIT_WATER: &str = wgsl_file!("moonlit_water.wgsl");
 pub const SUNLIT_WATER: &str = wgsl_file!("sunlit_water.wgsl");
-pub const MOUNTAIN_HAZE: &str = wgsl_file!("mountain_haze.wgsl");
 pub const SHOOTING_STAR_CASCADE: &str = wgsl_file!("shooting_star_cascade.wgsl");
 pub const SHOOTING_STAR_CASCADE_COMPOSITE: &str =
     wgsl_file!("shooting_star_cascade_composite.wgsl");

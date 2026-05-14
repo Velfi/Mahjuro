@@ -46,7 +46,6 @@ impl TilePackPresenter {
         let shop_rm = GameEngine::read_shop(run);
         let inventory = ShopInventoryCounts {
             n_for_sale: 0,
-            n_for_sale_zodiacs: 0,
             n_for_sale_talismans: 0,
             n_owned_relics: shop_rm.owned_relics.len(),
         };

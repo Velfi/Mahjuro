@@ -19,6 +19,9 @@ use crate::render::draw_cmd::{
     CameraParams, Object3d, Object3dKind, PromptIconQuad, ScenePunctualLight, UiFrame,
     camera_facing_euler_xyz_rad,
 };
+use crate::render::ribbon_mesh::{
+    ZodiacRibbonSpec, ribbon_length_fitting_rect, zodiac_ribbon_object3d,
+};
 use crate::render::shop_glb::{
     ShopEnvLightingTune, marker_translation, player_consumable_marker_name,
     player_gold_dish_marker_translation, player_relic_marker_name,
@@ -291,7 +294,7 @@ fn shop_inspect_pivot_world(
             }
             ShopFocus::Ribbon(i) => {
                 scene.zodiac_items.get(i)?;
-                let ribbon_len = r[3] * 0.62;
+                let ribbon_len = ribbon_length_fitting_rect(r[2] * 0.38, r[3] * 0.62);
                 let cz = wz + ribbon_len * 0.35;
                 sale_anchor_at_slot(w, h, cam, slot_i, env_h, cx, cy, cz)
             }
@@ -329,7 +332,7 @@ fn shop_inspect_pivot_world(
                 let zodiac_for_sale = scene.zodiac_items.len();
                 let oi = i.saturating_sub(zodiac_for_sale);
                 shop.owned_zodiacs.get(oi)?;
-                let ribbon_len = r[3] * 0.58;
+                let ribbon_len = ribbon_length_fitting_rect(r[2] * 0.36, r[3] * 0.58);
                 let cz = wz + ribbon_len * 0.32;
                 inv_marker_surface_anchor(w, h, cam, scene, shop, slot_i, env_h, cx, cy, cz)
             }
@@ -765,7 +768,6 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
         &shop.positions,
         ShopInventoryCounts {
             n_for_sale: shop.items.len(),
-            n_for_sale_zodiacs: shop.zodiac_items.len(),
             n_for_sale_talismans: shop.talisman_items.len(),
             n_owned_relics: shop_rm.owned_relics.len(),
         },
@@ -2176,8 +2178,10 @@ fn push_stock_meshes(
                 if item.sold {
                     col[3] = 0.30;
                 }
-                let ribbon_w = r[2] * 0.38;
-                let ribbon_len = r[3] * 0.62;
+                // Largest 3:1 ribbon that fits the inspect slot's
+                // (0.38 × 0.62) envelope — width-bound when the slot is
+                // very tall, length-bound otherwise.
+                let ribbon_len = ribbon_length_fitting_rect(r[2] * 0.38, r[3] * 0.62);
                 let z_k = if let Consumable::Zodiac(z) = item.consumable {
                     Some(z)
                 } else {
@@ -2194,16 +2198,16 @@ fn push_stock_meshes(
                 partition_shop_inspect_stock_mesh(
                     inspect_anchor,
                     *foc,
-                    Object3d {
+                    zodiac_ribbon_object3d(ZodiacRibbonSpec {
                         pos: ribbon_pos,
-                        extents: [ribbon_w, ribbon_len, ribbon_w * 0.14],
+                        length: ribbon_len,
                         rotation: euler_xyz_rad_from_deg(90.0, 0.0, 0.0),
                         color: [1.0, 1.0, 1.0, col[3]],
-                        kind: Object3dKind::ZodiacRibbon { kind: z_k },
+                        kind: z_k,
                         hover_target: 0.0,
                         anim_id: 0,
                         arrange_name: Some("shop.for_sale.ribbons"),
-                    },
+                    }),
                     &mut dim,
                     &mut subject,
                 );
@@ -2317,8 +2321,9 @@ fn push_stock_meshes(
                     continue;
                 };
                 if let Consumable::Zodiac(z) = owned.consumable {
-                    let ribbon_w = r[2] * 0.36;
-                    let ribbon_len = r[3] * 0.58;
+                    // Largest 3:1 ribbon that fits the inventory slot's
+                    // (0.36 × 0.58) envelope.
+                    let ribbon_len = ribbon_length_fitting_rect(r[2] * 0.36, r[3] * 0.58);
                     let cz = wz + ribbon_len * 0.32;
                     let pos = object3d_pos_for_shop_inspect_focus(
                         inspect_anchor,
@@ -2333,19 +2338,19 @@ fn push_stock_meshes(
                     partition_shop_inspect_stock_mesh(
                         inspect_anchor,
                         *foc,
-                        Object3d {
+                        zodiac_ribbon_object3d(ZodiacRibbonSpec {
                             pos,
-                            extents: [ribbon_w, ribbon_len, ribbon_w * 0.13],
+                            length: ribbon_len,
                             rotation: euler_rad_add(
                                 base_rot,
                                 sell_hold_wobble_euler_rad(scene, *foc),
                             ),
                             color: [1.0, 1.0, 1.0, 1.0],
-                            kind: Object3dKind::ZodiacRibbon { kind: Some(z) },
+                            kind: Some(z),
                             hover_target: 0.0,
                             anim_id: 0,
                             arrange_name: Some("shop.shelf.ribbon_tray"),
-                        },
+                        }),
                         &mut dim,
                         &mut subject,
                     );

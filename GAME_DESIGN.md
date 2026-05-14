@@ -174,7 +174,7 @@ Tracked in `PlayerProgress` with a **tiered unlock ladder** driven by **runs com
 
 * Clean, modern 3D tile art with multiple materials (Plastic unlock is one example)
 * Smooth cascade animations for draws, melds, and scoring
-* "Midnight Gold" palette — cool indigo base with gold accents
+* "Walnut, Brass & Felt" palette — warm walnut base with sparing brass accents (see `COLOR_THEME.md`)
 * Audio cues:
   * *Click* → tile placement
   * *Clack* → completed meld

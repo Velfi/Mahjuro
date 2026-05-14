@@ -1,16 +1,31 @@
-//! Midnight Gold visual theme.
+//! Walnut, Brass & Felt visual theme.
 //!
 //! Single source of truth for colors, typography scale, and standard metrics.
 //! Every scene should pull from here rather than hard-coding `[r, g, b, a]`
 //! literals — that way the whole game can be re-skinned by editing one file.
 //!
+//! See `COLOR_THEME.md` at the repo root for the design rationale, anti-patterns,
+//! and the wider material story (felt cabinet linings, twilight outside, lacquer
+//! framing, candle bloom). This file holds the *constants*; the doc holds the
+//! *intent*.
+//!
 //! ## Palette philosophy
 //!
-//! Dark walnut panel tones with sparing gold accents. Gold is precious —
+//! Dark walnut panel tones with sparing brass accents. Brass is precious —
 //! reserve it for headers, score numerals, selected-tile rims, currency, and
-//! relic borders. Body text is `PARCHMENT`, never pure white. Think
+//! relic borders. Body text is `PARCHMENT`, never pure white. Highlights pull
+//! toward `TALLOW` (candle bloom), not toward white. Think
 //! "lacquered rosewood box with brass fittings under candlelight," not
 //! flat UI gray.
+//!
+//! ## Material vs. semantic colors
+//!
+//! Material tokens (`WALNUT_*`, `FELT_*`, `TWILIGHT_*`, `LACQUER`, `CINNABAR`,
+//! `TALLOW`) describe surfaces in the House. Semantic tokens (`JADE`, `RUBY`,
+//! `AMBER`) describe UI signals (success / danger / warning). Don't cross them:
+//! `JADE` is "this succeeded," not "this is a tabletop." `RUBY` is "this is
+//! dangerous," not "this is celebratory." Materials are wood and felt and ink;
+//! semantics are flags painted on top.
 //!
 //! ## Conversions
 //!
@@ -53,12 +68,51 @@ pub mod color {
     pub const UMBER: [f32; 4] = [0.388, 0.361, 0.322, 1.0];
 
     // ── Semantic colors (desaturated to sit on warm wood panels) ──────────
-    /// `#5FD4A8` — success / target met / positive.
+    /// `#5FD4A8` — success / target met / positive. **Semantic**, not the
+    /// tabletop color (use `FELT` for that).
     pub const JADE: [f32; 4] = [0.373, 0.831, 0.659, 1.0];
-    /// `#E85A6B` — danger / exit / negative.
+    /// `#E85A6B` — danger / exit / negative. **Semantic**, not ceremonial
+    /// red (use `CINNABAR` for that).
     pub const RUBY: [f32; 4] = [0.910, 0.353, 0.420, 1.0];
     /// `#F0A848` — warning / attention.
     pub const AMBER: [f32; 4] = [0.941, 0.659, 0.282, 1.0];
+
+    // ── Felt: cabinet linings, scoring panels, mahjong tabletop. *Material*
+    //    color — green felt as a surface, not a "success" signal. Use `JADE`
+    //    when you mean "this succeeded."
+    /// `#1A2A20` — in-shadow felt, e.g. cubby corners.
+    pub const FELT_DEEP: [f32; 4] = [0.102, 0.165, 0.129, 1.0];
+    /// `#2D4A38` — lit tabletop, archive cubby lining.
+    pub const FELT: [f32; 4] = [0.176, 0.290, 0.220, 1.0];
+    /// `#4A6B52` — felt directly under a candle/lamp.
+    pub const FELT_LIT: [f32; 4] = [0.290, 0.420, 0.322, 1.0];
+
+    // ── Twilight: the cool counterpoint. The world *outside* the House.
+    //    Sky behind the main menu, shop wall plaster, info-modal backings,
+    //    journal page tints — anything that reads as "looking out from
+    //    inside." Reach for these before any saturated UI blue.
+    /// `#0E1422` — distant night through a window.
+    pub const TWILIGHT_INK: [f32; 4] = [0.055, 0.078, 0.133, 1.0];
+    /// `#1E2A40` — shop walls, info modal background.
+    pub const TWILIGHT: [f32; 4] = [0.118, 0.165, 0.251, 1.0];
+    /// `#5A6E94` — distant lit window, hint text on cool surfaces.
+    pub const TWILIGHT_GLOW: [f32; 4] = [0.353, 0.431, 0.580, 1.0];
+
+    // ── Lacquer & Cinnabar: deep contrast and ceremony.
+    /// `#0A0608` — true black-with-warmth. Counter tops, deepest shadow,
+    /// frames around precious things. Distinct from `WALNUT_INK`: lacquer is
+    /// *flat* black, walnut ink is *wood-grain* black.
+    pub const LACQUER: [f32; 4] = [0.039, 0.024, 0.031, 1.0];
+    /// `#B83228` — ceremonial red. Character-suit ink, dragon "Chun",
+    /// celebration sigils, temple stamps. **Distinct from `RUBY`** —
+    /// `RUBY` means "danger," `CINNABAR` means "ritual."
+    pub const CINNABAR: [f32; 4] = [0.722, 0.196, 0.157, 1.0];
+
+    // ── Tallow: candle bloom. The color of the light itself.
+    /// `#FFE8B8` — particle cores, lantern halo, score-pop center,
+    /// "this just happened" highlights. Highlights pull toward `TALLOW`,
+    /// not toward white — light in this game is *made of fire*.
+    pub const TALLOW: [f32; 4] = [1.000, 0.910, 0.722, 1.0];
 
     /// Fully transparent — used for spacers and invisible hit targets.
     pub const CLEAR: [f32; 4] = [0.0, 0.0, 0.0, 0.0];

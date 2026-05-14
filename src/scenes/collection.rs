@@ -14,14 +14,15 @@ use crate::core::zodiac::ZodiacKind;
 use crate::game::event_bus::GameEvent;
 use crate::render::archive_glb;
 use crate::render::draw_cmd::{CameraParams, Object3d, Object3dKind, ScenePunctualLight, UiFrame};
+use crate::render::ribbon_mesh::{ZodiacRibbonSpec, zodiac_ribbon_object3d};
 use crate::render::shop_glb;
 use crate::render::table_transform::{euler_xyz_rad_from_deg, rot_fixed_axes_deg};
 use crate::render::theme::{color, metrics, typography};
 use crate::render::world_space::{surface_anchor_from_world_xyz, world_on_camera_ray_plane_z};
 use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, PointLight, TextAlign, TextLabel};
 use glam::Vec3;
-use crate::ui::focus_nav::{pick_neighbor, FocusDir};
-use crate::ui::input::UiAction;
+use crate::ui::focus_nav::{pick_neighbor, push_focus_ring, FocusDir};
+use crate::ui::input::{InputMode, UiAction};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::archive_career;
@@ -30,9 +31,8 @@ use super::profile_select::ProfileSelectScene;
 use super::{DrawCtx, OverlayRequest, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 use crate::scenes::object3d_inspect::{
     InspectFrameEnv, InspectRig, ItemInspectOrbitState, apply_inspect_view_to_frame,
-    prepend_inspect_orbit_subject_rotation,
+    inspect_orbit_camera, prepend_inspect_orbit_subject_rotation,
 };
-
 /// 2D chrome sizes shared by [`CollectionScene::draw_collection_frame`] and
 /// [`CollectionScene::flat_items`] — tuned for legibility at TV distance.
 #[derive(Clone, Copy)]
@@ -205,6 +205,23 @@ pub struct CollectionScene {
     /// Last drawn [`DrawCtx::room_gltf_height_scale`] — matches GPU glTF room scale when `flat_items` /
     /// `update` build marker hit rects (possibly one frame behind).
     drawn_room_gltf_height_scale: std::cell::Cell<f32>,
+    /// Cubic ease-in-out blend between the resting grid camera and the orbit-inspect
+    /// camera. `phase` advances linearly toward `1.0` while inspect is active and back
+    /// toward `0.0` once the overlay pops; the lerp into [`build_archive_grid_frame`]
+    /// uses [`ease_in_out_cubic`] to dolly without snapping in either direction.
+    inspect_dolly: std::cell::Cell<InspectDolly>,
+    /// Most recent inspect-orbit camera. Frozen each frame the inspect overlay is alive
+    /// so the dolly-out can keep sampling the inspect endpoint after the presenter (and
+    /// its [`ItemInspectOrbitState`]) has been dropped.
+    last_inspect_cam: std::cell::Cell<Option<CameraParams>>,
+    /// When `Some`, controller / keyboard focus is parked on a chrome button
+    /// (Back / Switch save / footer Prev / Next) rather than on an artifact.
+    /// Pressing Up from the top row of the cabinet enters the title bar;
+    /// pressing Down from the bottom row enters the footer. Cleared by tab /
+    /// page changes and any move back into the artifact grid. The artifact
+    /// selection in `focused_row` is preserved so direction-reversal lands on
+    /// the same cell.
+    focused_chrome: Option<CollectionAction>,
 }
 
 #[derive(Clone, Copy)]
@@ -215,6 +232,38 @@ struct CamAnim {
     target_row: f32,
     t0: Instant,
     duration: f32,
+}
+
+/// Inspect dolly state: linear phase plus the wall-clock used to advance it. The
+/// build-frame call samples [`ease_in_out_cubic`] on `phase` to lerp the camera so
+/// open / close are symmetric and direction reversals don't kink.
+#[derive(Clone, Copy)]
+struct InspectDolly {
+    phase: f32,
+    last_tick: Instant,
+}
+
+/// Time over which the inspect dolly travels from grid to orbit (or back). Tuned long
+/// enough to register as a deliberate "lean in" without delaying input.
+const INSPECT_DOLLY_DURATION: f32 = 0.34;
+
+/// Component-wise lerp between two `CameraParams`. Up vector is taken from `a` since
+/// both grid and inspect cameras use Z-up; lerping a unit vector and not renormalising
+/// would slowly shrink it.
+fn lerp_camera(a: &CameraParams, b: &CameraParams, t: f32) -> CameraParams {
+    fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+        [
+            a[0] + (b[0] - a[0]) * t,
+            a[1] + (b[1] - a[1]) * t,
+            a[2] + (b[2] - a[2]) * t,
+        ]
+    }
+    CameraParams {
+        eye: lerp3(a.eye, b.eye, t),
+        target: lerp3(a.target, b.target, t),
+        up: a.up,
+        fovy_deg: a.fovy_deg + (b.fovy_deg - a.fovy_deg) * t,
+    }
 }
 
 /// Cubic ease-in-out on t ∈ [0,1]. Matches the score-popup formula.
@@ -243,7 +292,38 @@ impl CollectionScene {
             chronicle_seen_cursor: None,
             archive_page: 0,
             drawn_room_gltf_height_scale: std::cell::Cell::new(1.0),
+            inspect_dolly: std::cell::Cell::new(InspectDolly {
+                phase: 0.0,
+                last_tick: Instant::now(),
+            }),
+            last_inspect_cam: std::cell::Cell::new(None),
+            focused_chrome: None,
         }
+    }
+
+    /// Advance the inspect dolly toward `target_phase` (`1.0` while inspect is active,
+    /// `0.0` once it has popped) and return the eased blend factor used to lerp between
+    /// the grid camera and the orbit camera. `dt` is clamped so a stalled frame can't
+    /// teleport the camera; the linear phase ↔ cubic ease layout matches `tick_cam_focus`
+    /// so reversals mid-flight read smoothly.
+    fn tick_inspect_dolly(&self, target_phase: f32) -> f32 {
+        let now = Instant::now();
+        let mut anim = self.inspect_dolly.get();
+        let dt = now
+            .saturating_duration_since(anim.last_tick)
+            .as_secs_f32()
+            .min(0.10);
+        anim.last_tick = now;
+        let delta = target_phase - anim.phase;
+        if delta.abs() > 0.0 {
+            let step = (dt / INSPECT_DOLLY_DURATION).max(0.0);
+            anim.phase = (anim.phase + delta.signum() * step).clamp(0.0, 1.0);
+            if (anim.phase - target_phase).abs() < 1e-4 {
+                anim.phase = target_phase;
+            }
+        }
+        self.inspect_dolly.set(anim);
+        ease_in_out_cubic(anim.phase)
     }
 
     /// Resolve the camera's current (col, row) focus, advancing any
@@ -285,6 +365,33 @@ impl CollectionScene {
             }
         }
         (cur_col, cur_row)
+    }
+
+    /// Chrome action that should currently render a focus ring. Controller /
+    /// keyboard mode uses `focused_chrome`; cursor mode reads the tree's hover
+    /// target so mouse users see the same brass ring when they're over a
+    /// chrome button. Returns `None` when no chrome button should be ringed.
+    fn chrome_focus_for_draw(&self, input_mode: InputMode) -> Option<CollectionAction> {
+        if let Some(c) = self.focused_chrome {
+            return Some(c);
+        }
+        if input_mode != InputMode::Cursor {
+            return None;
+        }
+        let f = self.tree.focused()?;
+        for chrome in [
+            CollectionAction::Back,
+            CollectionAction::SwitchSave,
+            CollectionAction::PrevPage,
+            CollectionAction::NextPage,
+            CollectionAction::PrevTab,
+            CollectionAction::NextTab,
+        ] {
+            if chrome.id() == f {
+                return Some(chrome);
+            }
+        }
+        None
     }
 
     fn cycle_tab(&mut self, forward: bool) {
@@ -662,7 +769,10 @@ impl CollectionScene {
         let (cam_col, cam_row) = self.tick_cam_focus(focus_col as f32, focus_row as f32);
         let cam_world_x = (cam_col - (cols as f32 - 1.0) * 0.5) * cell_pitch;
         let cam_world_z = -(cam_row * cell_pitch);
-        let base_cam = if use_archive && inspect.is_none() {
+        // Resting grid camera, regardless of inspect — used as one endpoint of the
+        // inspect dolly lerp below, and (when the archive room is loaded and inspect is
+        // off) as the anchor plane for the description / stats cards.
+        let base_cam = if use_archive {
             archive_glb::archive_camera_base(w, h, env_scale)
         } else {
             CameraParams {
@@ -687,20 +797,50 @@ impl CollectionScene {
             None
         };
         let coll_rig = InspectRig::collection(h);
-        if let Some(ins) = inspect {
-            apply_inspect_view_to_frame(
-                &mut frame,
-                w,
-                h,
-                ins,
-                &coll_rig,
-                ins.target_world,
-                InspectFrameEnv::Neutral,
-            );
-            frame.archive_description_sign_use_left = None;
-        } else {
-            frame.camera_override = Some(base_cam);
+        // Compute the inspect-orbit camera for this frame (when inspect is on) and cache
+        // it so the dolly-out lerp can keep sampling that endpoint after the overlay
+        // pops and `ItemInspectOrbitState` is gone.
+        let inspect_cam_now: Option<CameraParams> =
+            inspect.map(|ins| inspect_orbit_camera(ins, &coll_rig));
+        if let Some(ic) = inspect_cam_now {
+            self.last_inspect_cam.set(Some(ic));
         }
+        // Procedural archive (no GLB) leans on `apply_inspect_view_to_frame` for its
+        // synthetic three-point rig; the archive room handles its own lighting block
+        // below, so for that path we only need to clear the description-sign flag and
+        // let the dolly own `camera_override`.
+        match (inspect, use_archive) {
+            (Some(_), true) => {
+                // Sign side selection happens unconditionally below (after `final_cam`) so the
+                // chosen visible sign reflects whichever camera is in use. Don't pre-clear the
+                // flag here; the decal text is set in the description-routing block.
+            }
+            (Some(ins), false) => {
+                apply_inspect_view_to_frame(
+                    &mut frame,
+                    w,
+                    h,
+                    ins,
+                    &coll_rig,
+                    ins.target_world,
+                    InspectFrameEnv::Neutral,
+                );
+                frame.archive_description_sign_use_left = None;
+            }
+            (None, _) => {}
+        }
+        // Cubic-eased dolly between grid (`base_cam`) and orbit (`inspect_cam_*`).
+        // `target_phase = 1.0` while inspect is on, `0.0` once it has popped; the eased
+        // blend factor drives a per-component camera lerp so eye / target / fovy all
+        // glide together.
+        let target_phase = if inspect.is_some() { 1.0 } else { 0.0 };
+        let eased = self.tick_inspect_dolly(target_phase);
+        let inspect_cam_for_lerp = inspect_cam_now.or_else(|| self.last_inspect_cam.get());
+        let final_cam = match (inspect_cam_for_lerp, eased > 1e-4) {
+            (Some(ic), true) => lerp_camera(&base_cam, &ic, eased),
+            _ => base_cam,
+        };
+        frame.camera_override = Some(final_cam);
 
         frame.fisheye_strength = 0.0;
 
@@ -708,111 +848,85 @@ impl CollectionScene {
         let focus_px_y = cab_px_y; // grid plane
         let focus_px_z = focus_world_z;
 
-        if inspect.is_none() {
-            if use_archive {
-                // Reference X for "place the sign opposite this point" math. In cursor mode that
-                // is the pointer; in keyboard / controller mode the cursor is intentionally
-                // ignored (mouse can sit anywhere on screen without disturbing the layout) and
-                // we project the focused archive slot's marker instead so the sign always sits
-                // on the opposite side of whatever the player is selecting.
-                let ref_x = match ctx.input_mode {
-                    crate::ui::input::InputMode::Cursor => ctx.cursor_pos.0,
-                    crate::ui::input::InputMode::Keyboard
-                    | crate::ui::input::InputMode::Controller => {
-                        let focused_slot_in_page =
-                            (focus_flat as usize) % archive_page_size().max(1);
-                        archive_glb::with_archive_glb_cpu(|opt| {
-                            let cpu = opt?;
-                            archive_glb::archive_marker_screen_x(
-                                w,
-                                h,
-                                env_scale,
-                                &base_cam,
-                                cpu,
-                                archive_glb::archive_spawn_item_marker_name(focused_slot_in_page),
-                            )
-                        })
-                        .unwrap_or(w * 0.5)
-                    }
-                };
-                frame.archive_description_sign_use_left = Some(
+        if use_archive {
+            // Archive room lighting applies whether or not the player is in orbit
+            // inspect — the room stays lit by the same embedded `KHR_lights_punctual`
+            // either way, so opening inspect doesn't change the exposure or wipe the
+            // GLB spot/point lights.
+            //
+            // Sign side selection runs in both grid and inspect modes: in inspect we want exactly
+            // one description board visible (decal carries the flavor copy) so the close-up never
+            // sits between two competing signs. The chosen side projects against `final_cam` so
+            // the side picked still tracks the camera once the dolly settles on the orbit pose.
+            //
+            // Reference X for "place the sign opposite this point" math. In cursor mode that is
+            // the pointer; in keyboard / controller mode the cursor is intentionally ignored
+            // (mouse can sit anywhere on screen without disturbing the layout) and we project the
+            // focused archive slot's marker instead so the sign always sits on the opposite side
+            // of whatever the player is selecting.
+            let ref_x = match ctx.input_mode {
+                crate::ui::input::InputMode::Cursor => ctx.cursor_pos.0,
+                crate::ui::input::InputMode::Keyboard
+                | crate::ui::input::InputMode::Controller => {
+                    let focused_slot_in_page =
+                        (focus_flat as usize) % archive_page_size().max(1);
                     archive_glb::with_archive_glb_cpu(|opt| {
                         let cpu = opt?;
-                        archive_glb::archive_description_sign_use_left_for_ref_x(
+                        archive_glb::archive_marker_screen_x(
                             w,
                             h,
                             env_scale,
-                            &base_cam,
-                            ref_x,
+                            &final_cam,
                             cpu,
+                            archive_glb::archive_spawn_item_marker_name(focused_slot_in_page),
                         )
                     })
-                    .unwrap_or(ref_x >= w * 0.5),
-                );
-                let room_glb = archive_glb::archive_glb_has_embedded_lights();
-                frame.scene_lighting.embedded_gltf_punctual = room_glb;
-                frame.scene_lighting.room_shop_glb_brdf = room_glb;
-                frame.scene_lighting.spot_lights = if room_glb {
-                    archive_glb::archive_embedded_spot_lights_runtime(
-                        w,
-                        h,
-                        env_scale,
-                        &ctx.shop_env_lighting,
-                    )
-                } else {
-                    Vec::new()
-                };
-                let inverse_punctual: Vec<ScenePunctualLight> = if room_glb {
-                    archive_glb::archive_embedded_point_lights_runtime(
-                        w,
-                        h,
-                        env_scale,
-                        &ctx.shop_env_lighting,
-                    )
-                    .into_iter()
-                    .map(ScenePunctualLight::InverseSquare)
-                    .collect()
-                } else {
-                    Vec::new()
-                };
-                if room_glb {
-                    frame.scene_lighting.punctual = inverse_punctual;
-                } else {
-                    frame.scene_lighting.set_smooth_points(vec![
-                        PointLight {
-                            pos: [focus_px_x, cab_px_y + h * 0.5, focus_px_z + cell * 0.5],
-                            radius: cell_pitch * 14.0,
-                            color: [1.0, 0.88, 0.62],
-                            intensity: 2.4,
-                        },
-                        PointLight {
-                            pos: [
-                                focus_px_x - cell_pitch * 4.0,
-                                focus_px_y + h * 0.4,
-                                focus_px_z + cell_pitch * 3.0,
-                            ],
-                            radius: cell_pitch * 10.0,
-                            color: [0.85, 0.70, 1.0],
-                            intensity: 1.3,
-                        },
-                        PointLight {
-                            pos: [
-                                focus_px_x + cell_pitch * 4.0,
-                                focus_px_y + h * 0.4,
-                                focus_px_z - cell_pitch * 3.0,
-                            ],
-                            radius: cell_pitch * 10.0,
-                            color: [1.0, 0.65, 0.55],
-                            intensity: 1.3,
-                        },
-                    ]);
+                    .unwrap_or(w * 0.5)
                 }
+            };
+            frame.archive_description_sign_use_left = Some(
+                archive_glb::with_archive_glb_cpu(|opt| {
+                    let cpu = opt?;
+                    archive_glb::archive_description_sign_use_left_for_ref_x(
+                        w,
+                        h,
+                        env_scale,
+                        &final_cam,
+                        ref_x,
+                        cpu,
+                    )
+                })
+                .unwrap_or(ref_x >= w * 0.5),
+            );
+            let room_glb = archive_glb::archive_glb_has_embedded_lights();
+            frame.scene_lighting.embedded_gltf_punctual = room_glb;
+            frame.scene_lighting.room_shop_glb_brdf = room_glb;
+            frame.scene_lighting.spot_lights = if room_glb {
+                archive_glb::archive_embedded_spot_lights_runtime(
+                    w,
+                    h,
+                    env_scale,
+                    &ctx.shop_env_lighting,
+                )
             } else {
-                frame.archive_description_sign_use_left = None;
-                // Three warm key-lights in front of the grid. Light `pos` is
-                // pixel-space (renderer converts via `pixel_to_world`), so
-                // pixel_x + pixel_y define the (X, Y) world position and the
-                // third coordinate is the world-Z lift directly.
+                Vec::new()
+            };
+            let inverse_punctual: Vec<ScenePunctualLight> = if room_glb {
+                archive_glb::archive_embedded_point_lights_runtime(
+                    w,
+                    h,
+                    env_scale,
+                    &ctx.shop_env_lighting,
+                )
+                .into_iter()
+                .map(ScenePunctualLight::InverseSquare)
+                .collect()
+            } else {
+                Vec::new()
+            };
+            if room_glb {
+                frame.scene_lighting.punctual = inverse_punctual;
+            } else {
                 frame.scene_lighting.set_smooth_points(vec![
                     PointLight {
                         pos: [focus_px_x, cab_px_y + h * 0.5, focus_px_z + cell * 0.5],
@@ -842,6 +956,40 @@ impl CollectionScene {
                     },
                 ]);
             }
+        } else if inspect.is_none() {
+            frame.archive_description_sign_use_left = None;
+            // Three warm key-lights in front of the grid. Light `pos` is
+            // pixel-space (renderer converts via `pixel_to_world`), so
+            // pixel_x + pixel_y define the (X, Y) world position and the
+            // third coordinate is the world-Z lift directly.
+            frame.scene_lighting.set_smooth_points(vec![
+                PointLight {
+                    pos: [focus_px_x, cab_px_y + h * 0.5, focus_px_z + cell * 0.5],
+                    radius: cell_pitch * 14.0,
+                    color: [1.0, 0.88, 0.62],
+                    intensity: 2.4,
+                },
+                PointLight {
+                    pos: [
+                        focus_px_x - cell_pitch * 4.0,
+                        focus_px_y + h * 0.4,
+                        focus_px_z + cell_pitch * 3.0,
+                    ],
+                    radius: cell_pitch * 10.0,
+                    color: [0.85, 0.70, 1.0],
+                    intensity: 1.3,
+                },
+                PointLight {
+                    pos: [
+                        focus_px_x + cell_pitch * 4.0,
+                        focus_px_y + h * 0.4,
+                        focus_px_z - cell_pitch * 3.0,
+                    ],
+                    radius: cell_pitch * 10.0,
+                    color: [1.0, 0.65, 0.55],
+                    intensity: 1.3,
+                },
+            ]);
         }
 
         // Grid window size — procedural infinite corridor only.
@@ -948,6 +1096,8 @@ impl CollectionScene {
                     fade,
                     is_focus,
                     boss_i,
+                    &self.positions.cubby_zodiac,
+                    ctx.layout,
                 );
             }
         }
@@ -993,6 +1143,8 @@ impl CollectionScene {
                     1.0,
                     is_focus,
                     global_idx as i32,
+                    &self.positions.cubby_zodiac,
+                    ctx.layout,
                 );
             }
         }
@@ -1038,7 +1190,12 @@ impl CollectionScene {
             // cell already carries the pulsing selection halo.
             let closeup_size = h * 0.28;
             let closeup_px = cab_px_x + closeup_wx;
-            let (closeup_ax, closeup_ay, closeup_az) = if use_archive && inspect.is_none() {
+            // Anchor the close-up to the `ARCHIVE_SPAWN_FOCUSED_ITEM` marker whenever
+            // the archive room is loaded. Orbit inspect uses the same marker for
+            // `target_world` (`collection_inspect_target_world`); pinning the mesh here
+            // keeps the inspected item under the inspect camera instead of drifting to
+            // the procedural fallback (which made it disappear off-frame).
+            let (closeup_ax, closeup_ay, closeup_az) = if use_archive {
                 let anchor: Option<[f32; 3]> = archive_glb::with_archive_glb_cpu(|opt| {
                     let cpu = opt?;
                     let m = archive_glb::archive_marker_world_mat4(
@@ -1121,17 +1278,18 @@ impl CollectionScene {
                     }));
                 }
                 ArtifactKind::Zodiac(zk) => {
-                    let rib_w = closeup_size * 0.34;
-                    hud_plaques.push(with_inspect_spin(Object3d {
-                        pos: closeup_anchor.pos,
-                        extents: [rib_w, closeup_size, rib_w * 0.15],
-                        rotation: closeup_anchor.object3d_rotation(),
-                        color: [1.0, 1.0, 1.0, 1.0],
-                        kind: Object3dKind::ZodiacRibbon { kind: Some(*zk) },
-                        hover_target: 1.0,
-                        anim_id: 0xC105E0,
-                        arrange_name: Some(closeup_anchor.arrange_name),
-                    }));
+                    hud_plaques.push(with_inspect_spin(zodiac_ribbon_object3d(
+                        ZodiacRibbonSpec {
+                            pos: closeup_anchor.pos,
+                            length: closeup_size,
+                            rotation: closeup_anchor.object3d_rotation(),
+                            color: [1.0, 1.0, 1.0, 1.0],
+                            kind: Some(*zk),
+                            hover_target: 1.0,
+                            anim_id: 0xC105E0,
+                            arrange_name: Some(closeup_anchor.arrange_name),
+                        },
+                    )));
                 }
                 ArtifactKind::PlaqueOnly => {
                     let label = if boss.unlocked {
@@ -1232,11 +1390,33 @@ impl CollectionScene {
             } else {
                 format!("{}\n\n{}", boss.name, body)
             };
-            if use_archive && inspect.is_none() {
-                frame.archive_sign_description_decal_text = Some(card_text.clone());
-            }
-            if !use_archive || inspect.is_some() {
-                // Procedural archive layout, orbit inspect, or non-GLB room: floating description card.
+            // Description routing matrix:
+            // - Archive room (grid or inspect): rasterize copy onto the visible GLB sign decal.
+            //   For unlocked relics in inspect we use the styled `flavor_spans` flattened to
+            //   plain text (the decal pipeline takes a single string; bold / italic styling is
+            //   surrendered, but the player gets the flavor on the sign as expected). All other
+            //   states (grid mode, locked relics, non-relic artifacts in inspect) use
+            //   `card_text` (name + body) as in the prior grid-only path. The sign carries the
+            //   single readable surface in both modes — no bottom-centred floating flavor band
+            //   or top tooltip panel runs alongside it, which would double up the copy.
+            // - Procedural archive (no GLB) or non-archive: floating 3D description card
+            //   (existing behaviour, sized for that camera).
+            if use_archive {
+                let sign_text = if inspect.is_some()
+                    && boss.unlocked
+                    && let ArtifactKind::Relic(rid) = &boss.kind
+                    && let Some(def) = all_relic_defs().iter().find(|d| d.id == *rid)
+                    && !def.flavor.is_empty()
+                {
+                    def.flavor
+                        .iter()
+                        .fold(String::new(), |acc, s| acc + s.text)
+                } else {
+                    card_text.clone()
+                };
+                frame.archive_sign_description_decal_text = Some(sign_text);
+            } else {
+                // Procedural archive layout / non-GLB room: floating 3D description card.
                 let card_base: [f32; 3] = if let Some(pz) = archive_feat_plane_z {
                     collection_hud_anchor_on_cam_plane(
                         w,
@@ -1465,55 +1645,93 @@ impl CollectionScene {
             });
         }
 
-        // Back button.
+        // Back / Switch save buttons. Controller / keyboard focus draws a
+        // brass ring via `focused_chrome`; cursor hover reads the tree focus
+        // so mouse users get the same affordance even though they don't drive
+        // `focused_chrome` directly.
         let back_w = ch.back_w;
         let back_h = ch.chrome_btn_h;
         let btn_label_px = typography::size(typography::BODY, h).max(21.0);
+        let ring_focus = self.chrome_focus_for_draw(ctx.input_mode);
+        let back_rect = [margin_x, title_y, back_w, back_h];
+        let back_focused = ring_focus == Some(CollectionAction::Back);
         quads.push(GpuInstance {
-            rect: [margin_x, title_y, back_w, back_h],
-            color: [0.18, 0.20, 0.30, 0.92],
+            rect: back_rect,
+            color: chrome_btn_color(back_focused),
         });
         text_labels.push(TextLabel {
-            rect: [margin_x, title_y, back_w, back_h],
+            rect: back_rect,
             text: "< Back".into(),
             color: [0.92, 0.92, 0.98, 1.0],
             font_px: Some(btn_label_px),
             ..Default::default()
         });
+        if back_focused {
+            push_focus_ring(back_rect, scale, w, h, &mut quads);
+        }
 
         let switch_w = ch.switch_w;
         let switch_x = w - margin_x - switch_w;
+        let switch_rect = [switch_x, title_y, switch_w, back_h];
+        let switch_focused = ring_focus == Some(CollectionAction::SwitchSave);
         quads.push(GpuInstance {
-            rect: [switch_x, title_y, switch_w, back_h],
-            color: [0.18, 0.20, 0.30, 0.92],
+            rect: switch_rect,
+            color: chrome_btn_color(switch_focused),
         });
         text_labels.push(TextLabel {
-            rect: [switch_x, title_y, switch_w, back_h],
+            rect: switch_rect,
             text: "Switch save".into(),
             color: [0.92, 0.92, 0.98, 1.0],
             font_px: Some(btn_label_px),
             ..Default::default()
         });
+        if switch_focused {
+            push_focus_ring(switch_rect, scale, w, h, &mut quads);
+        }
 
         // Footer Prev/Next tab arrows. Match the rects from `flat_items`
-        // so the click hit-testing and the visual button line up.
+        // so the click hit-testing and the visual button line up. The
+        // active footer action depends on whether the archive room is loaded
+        // (page) vs. the procedural grid (tab cycle), so the focus ring
+        // checks both variants.
         let arrow_w = ch.arrow_w;
         let arrow_h = back_h;
         let arrow_y = h - arrow_h - h * 0.02;
         let prev_x = w * 0.5 - arrow_w * 1.5;
         let next_x = w * 0.5 + arrow_w * 0.5;
-        for (x, sym) in [(prev_x, "<"), (next_x, ">")] {
+        for (x, sym, focused) in [
+            (
+                prev_x,
+                "<",
+                matches!(
+                    ring_focus,
+                    Some(CollectionAction::PrevPage) | Some(CollectionAction::PrevTab)
+                ),
+            ),
+            (
+                next_x,
+                ">",
+                matches!(
+                    ring_focus,
+                    Some(CollectionAction::NextPage) | Some(CollectionAction::NextTab)
+                ),
+            ),
+        ] {
+            let rect = [x, arrow_y, arrow_w, arrow_h];
             quads.push(GpuInstance {
-                rect: [x, arrow_y, arrow_w, arrow_h],
-                color: [0.18, 0.20, 0.30, 0.92],
+                rect,
+                color: chrome_btn_color(focused),
             });
             text_labels.push(TextLabel {
-                rect: [x, arrow_y, arrow_w, arrow_h],
+                rect,
                 text: sym.into(),
                 color: [0.92, 0.92, 0.98, 1.0],
                 font_px: Some(btn_label_px * 1.15),
                 ..Default::default()
             });
+            if focused {
+                push_focus_ring(rect, scale, w, h, &mut quads);
+            }
         }
 
         // Control hints — sits just above the tab arrows so keyboard /
@@ -1785,6 +2003,10 @@ impl SceneBehavior for CollectionScene {
                     }
                 }
                 UiAction::FocusNext => {
+                    if self.focused_chrome.is_some() {
+                        collection_chrome_directional(self, ctx.bus, &items, FocusDir::Right);
+                        continue;
+                    }
                     if all_count == 0 {
                         continue;
                     }
@@ -1816,6 +2038,10 @@ impl SceneBehavior for CollectionScene {
                     }
                 }
                 UiAction::FocusPrev => {
+                    if self.focused_chrome.is_some() {
+                        collection_chrome_directional(self, ctx.bus, &items, FocusDir::Left);
+                        continue;
+                    }
                     if all_count == 0 {
                         continue;
                     }
@@ -1843,20 +2069,26 @@ impl SceneBehavior for CollectionScene {
                     }
                 }
                 UiAction::FocusUp => {
-                    if all_count == 0 {
+                    if self.focused_chrome.is_some() {
+                        collection_chrome_directional(self, ctx.bus, &items, FocusDir::Up);
                         continue;
                     }
                     if archive_path {
-                        archive_directional_step(
-                            self,
-                            ctx.bus,
-                            &items,
-                            FocusDir::Up,
-                            all_count,
-                        );
+                        if all_count == 0
+                            || !archive_directional_step(
+                                self,
+                                ctx.bus,
+                                &items,
+                                FocusDir::Up,
+                                all_count,
+                            )
+                        {
+                            collection_enter_chrome(self, ctx.bus, &items, FocusDir::Up);
+                        }
                         continue;
                     }
-                    if total_rows <= 1 {
+                    if all_count == 0 || total_rows <= 1 {
+                        collection_enter_chrome(self, ctx.bus, &items, FocusDir::Up);
                         continue;
                     }
                     if let Some(ni) =
@@ -1872,23 +2104,31 @@ impl SceneBehavior for CollectionScene {
                         && let Some(i) = global_idx(row - 1, col)
                     {
                         apply_artifact_focus(self, ctx.bus, i);
+                    } else {
+                        collection_enter_chrome(self, ctx.bus, &items, FocusDir::Up);
                     }
                 }
                 UiAction::FocusDown => {
-                    if all_count == 0 {
+                    if self.focused_chrome.is_some() {
+                        collection_chrome_directional(self, ctx.bus, &items, FocusDir::Down);
                         continue;
                     }
                     if archive_path {
-                        archive_directional_step(
-                            self,
-                            ctx.bus,
-                            &items,
-                            FocusDir::Down,
-                            all_count,
-                        );
+                        if all_count == 0
+                            || !archive_directional_step(
+                                self,
+                                ctx.bus,
+                                &items,
+                                FocusDir::Down,
+                                all_count,
+                            )
+                        {
+                            collection_enter_chrome(self, ctx.bus, &items, FocusDir::Down);
+                        }
                         continue;
                     }
-                    if total_rows <= 1 {
+                    if all_count == 0 || total_rows <= 1 {
+                        collection_enter_chrome(self, ctx.bus, &items, FocusDir::Down);
                         continue;
                     }
                     if let Some(ni) =
@@ -1906,9 +2146,45 @@ impl SceneBehavior for CollectionScene {
                         && Some(i) != self.focused_row
                     {
                         apply_artifact_focus(self, ctx.bus, i);
+                    } else {
+                        collection_enter_chrome(self, ctx.bus, &items, FocusDir::Down);
                     }
                 }
                 UiAction::Confirm => {
+                    if let Some(chrome) = self.focused_chrome {
+                        match chrome {
+                            CollectionAction::Back => {
+                                ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
+                                return Some(Scene::MainMenuExterior(
+                                    MainMenuExteriorScene::new(),
+                                ));
+                            }
+                            CollectionAction::SwitchSave => {
+                                ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
+                                return Some(Scene::ProfileSelect(
+                                    ProfileSelectScene::from_archive_switch_save(),
+                                ));
+                            }
+                            CollectionAction::PrevPage => {
+                                let from = archive_focus_row_col_in_page(self.focused_row);
+                                archive_page_step(self, ctx.bus, -1, from, all_count);
+                            }
+                            CollectionAction::NextPage => {
+                                let from = archive_focus_row_col_in_page(self.focused_row);
+                                archive_page_step(self, ctx.bus, 1, from, all_count);
+                            }
+                            CollectionAction::PrevTab => {
+                                ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
+                                self.cycle_tab(false);
+                            }
+                            CollectionAction::NextTab => {
+                                ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
+                                self.cycle_tab(true);
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
                     if archive_path {
                         // Plinth already mirrors focus, so Confirm has no separate
                         // "select" semantics — open the inspect orbit instead, matching
@@ -2002,6 +2278,7 @@ impl SceneBehavior for CollectionScene {
                     self.active_tab = TABS[i];
                     self.selected_artifact = None;
                     self.focused_row = Some(0);
+                    self.focused_chrome = None;
                     self.scroll_rows.set(0.0);
                     self.target_scroll_rows.set(0.0);
                     self.archive_page = 0;
@@ -2025,6 +2302,7 @@ impl SceneBehavior for CollectionScene {
                     let resolved = resolved_raw.min(all_count - 1);
                     ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                     self.selected_artifact = Some(resolved);
+                    self.focused_chrome = None;
                     push_relic_stinger_for(ctx.bus, self.active_tab, ctx.progress, resolved);
                     // Mouse click also moves keyboard focus so subsequent
                     // arrow-key navigation continues from the clicked item
@@ -2310,6 +2588,10 @@ fn collection_hud_anchor_on_cam_plane(
 }
 
 /// Push one catalog cell's 3D prop at a [`WorldSurfaceAnchor`](crate::render::draw_cmd::WorldSurfaceAnchor).
+///
+/// `cubby_zodiac` is folded in for `ArtifactKind::Zodiac` only so the ribbon
+/// can be re-centred inside its cubby via arrange mode (shared target so
+/// every cubby ribbon moves together).
 fn collection_push_grid_cell_object3d(
     plaques: &mut Vec<Object3d>,
     boss: &Artifact,
@@ -2318,6 +2600,8 @@ fn collection_push_grid_cell_object3d(
     fade: f32,
     is_focus: bool,
     boss_i: i32,
+    cubby_zodiac: &crate::ui::placement::Placement,
+    layout: &crate::ui::layout::LayoutResult,
 ) {
     let cx = anchor[0];
     let cz = anchor[2];
@@ -2381,17 +2665,23 @@ fn collection_push_grid_cell_object3d(
             });
         }
         ArtifactKind::Zodiac(zk) => {
-            let rib_w = plate_w * 0.34;
-            plaques.push(Object3d {
-                pos: [cx, nameplate_py, cz],
-                extents: [rib_w, plate_w, rib_w * 0.15],
-                rotation: euler_xyz_rad_from_deg(90.0, 0.0, 0.0),
+            let zodiac_anchor = crate::ui::placement::PlacementAnchor::new(
+                [cx, nameplate_py, cz],
+                rot_fixed_axes_deg(90.0, 0.0, 0.0),
+                cubby_zodiac,
+                "collection.cubby_zodiac",
+                layout,
+            );
+            plaques.push(zodiac_ribbon_object3d(ZodiacRibbonSpec {
+                pos: zodiac_anchor.pos,
+                length: plate_w,
+                rotation: zodiac_anchor.object3d_rotation(),
                 color: [1.0, 1.0, 1.0, 1.0],
-                kind: Object3dKind::ZodiacRibbon { kind: Some(*zk) },
+                kind: Some(*zk),
                 hover_target: if is_focus { 1.0 } else { 0.0 },
                 anim_id: boss_i as u64,
-                arrange_name: None,
-            });
+                arrange_name: Some(zodiac_anchor.arrange_name),
+            }));
         }
         ArtifactKind::PlaqueOnly => {
             use crate::render::primitive::{DecalLayout, DecalSpec, MaterialSpec, MeshId};
@@ -2626,17 +2916,20 @@ fn archive_page_step(
 
 /// Spatial neighbour move within the current archive page; if the requested
 /// neighbour falls off the page horizontally we flip to the adjacent page.
-/// Vertical edges (no Up / Down neighbour) just stop — pages are conceptually
-/// horizontal so the player isn't surprised by a content jump on Up/Down.
+/// Vertical edges (no Up / Down neighbour) hand focus to the chrome bar above
+/// (Back / Switch save) or below (Prev / Next) so controller users can reach
+/// every button. Returns whether the gesture consumed input — `false` means the
+/// caller should consider further fallback (e.g. chrome entry on a procedural
+/// page that has no spatial neighbour at all).
 fn archive_directional_step(
     scene: &mut CollectionScene,
     bus: &mut crate::game::event_bus::EventBus,
     items: &[FlatItem<CollectionAction>],
     dir: FocusDir,
     all_count: usize,
-) {
+) -> bool {
     if all_count == 0 {
-        return;
+        return false;
     }
     if let Some(ni) = collection_spatial_artifact_step(items, scene.focused_row, dir) {
         if Some(ni) != scene.focused_row {
@@ -2646,18 +2939,200 @@ fn archive_directional_step(
             scene
                 .tree
                 .set_focus(CollectionAction::SelectArtifact(ni).id());
-            return;
+            return true;
         }
     }
     // No spatial neighbour exists in the requested direction. For Left/Right that
     // means we're at a page edge column — flip the page so navigation feels
     // continuous, preserving the row so → then ← (or vice versa) returns the
-    // player to where they came from. Up/Down at top/bottom row stop in place.
+    // player to where they came from. Up/Down at top/bottom row defers to the
+    // caller so the title-bar / footer chrome can claim focus.
     let (from_row, _) = archive_focus_row_col_in_page(scene.focused_row);
     let last_col = archive_glb::ARCHIVE_SLOT_COLS.saturating_sub(1);
     match dir {
-        FocusDir::Right => archive_page_step(scene, bus, 1, (from_row, 0), all_count),
-        FocusDir::Left => archive_page_step(scene, bus, -1, (from_row, last_col), all_count),
+        FocusDir::Right => {
+            archive_page_step(scene, bus, 1, (from_row, 0), all_count);
+            true
+        }
+        FocusDir::Left => {
+            archive_page_step(scene, bus, -1, (from_row, last_col), all_count);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Chrome buttons currently in the flat-item list. Used for spatial neighbour
+/// picks when the player walks off the artifact grid vertically and for
+/// chrome ↔ chrome traversal once focus has parked on a button.
+fn collection_chrome_rects(
+    items: &[FlatItem<CollectionAction>],
+) -> Vec<(CollectionAction, [f32; 4])> {
+    items
+        .iter()
+        .filter_map(|it| match it.action {
+            CollectionAction::Back
+            | CollectionAction::SwitchSave
+            | CollectionAction::PrevPage
+            | CollectionAction::NextPage
+            | CollectionAction::PrevTab
+            | CollectionAction::NextTab => Some((it.action, it.rect)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[inline]
+fn collection_chrome_is_top(action: CollectionAction) -> bool {
+    matches!(action, CollectionAction::Back | CollectionAction::SwitchSave)
+}
+
+#[inline]
+fn collection_chrome_is_bottom(action: CollectionAction) -> bool {
+    matches!(
+        action,
+        CollectionAction::PrevPage
+            | CollectionAction::NextPage
+            | CollectionAction::PrevTab
+            | CollectionAction::NextTab
+    )
+}
+
+#[inline]
+fn rect_center_x(rect: [f32; 4]) -> f32 {
+    rect[0] + rect[2] * 0.5
+}
+
+/// Chrome button fill colour — slight lift when focused so the brass ring
+/// (and the button itself) reads "active" even on low-contrast displays.
+#[inline]
+fn chrome_btn_color(focused: bool) -> [f32; 4] {
+    if focused {
+        [0.28, 0.30, 0.42, 0.96]
+    } else {
+        [0.18, 0.20, 0.30, 0.92]
+    }
+}
+
+fn collection_focused_artifact_center_x(
+    items: &[FlatItem<CollectionAction>],
+    focused: Option<usize>,
+) -> f32 {
+    if let Some(fi) = focused {
+        for it in items {
+            if let CollectionAction::SelectArtifact(idx) = it.action
+                && idx == fi
+            {
+                return rect_center_x(it.rect);
+            }
+        }
+    }
+    // No focused artifact rect — fall back to a chrome button's centre
+    // (covers cases where the artifact grid is empty, e.g. the Chronicle
+    // tab before the first run).
+    items
+        .iter()
+        .find_map(|it| match it.action {
+            CollectionAction::Back | CollectionAction::SwitchSave => Some(rect_center_x(it.rect)),
+            _ => None,
+        })
+        .unwrap_or(0.0)
+}
+
+/// Park focus on the chrome button nearest the current artifact column.
+/// `dir` selects the title bar (Up) or the footer (Down). No-op when the
+/// flat item list doesn't surface the requested chrome row (e.g. archive
+/// builds without the footer arrow pair).
+fn collection_enter_chrome(
+    scene: &mut CollectionScene,
+    bus: &mut crate::game::event_bus::EventBus,
+    items: &[FlatItem<CollectionAction>],
+    dir: FocusDir,
+) -> bool {
+    let predicate: fn(CollectionAction) -> bool = match dir {
+        FocusDir::Up => collection_chrome_is_top,
+        FocusDir::Down => collection_chrome_is_bottom,
+        _ => return false,
+    };
+    let candidates: Vec<(CollectionAction, [f32; 4])> = collection_chrome_rects(items)
+        .into_iter()
+        .filter(|(a, _)| predicate(*a))
+        .collect();
+    if candidates.is_empty() {
+        return false;
+    }
+    let ref_x = collection_focused_artifact_center_x(items, scene.focused_row);
+    let target = candidates
+        .iter()
+        .min_by(|a, b| {
+            let dax = rect_center_x(a.1) - ref_x;
+            let dbx = rect_center_x(b.1) - ref_x;
+            dax.abs()
+                .partial_cmp(&dbx.abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(a, _)| *a)
+        .unwrap_or(candidates[0].0);
+    scene.focused_chrome = Some(target);
+    scene.tree.set_focus(target.id());
+    bus.push(GameEvent::UiSound(SfxId::TilePlace));
+    true
+}
+
+/// Directional move while chrome is focused. Up / Down peels focus back to
+/// the artifact grid; Left / Right hops between the two buttons sharing the
+/// same chrome row.
+fn collection_chrome_directional(
+    scene: &mut CollectionScene,
+    bus: &mut crate::game::event_bus::EventBus,
+    items: &[FlatItem<CollectionAction>],
+    dir: FocusDir,
+) {
+    let Some(cur) = scene.focused_chrome else {
+        return;
+    };
+    let on_top = collection_chrome_is_top(cur);
+    let on_bottom = collection_chrome_is_bottom(cur);
+    match dir {
+        FocusDir::Down if on_top => {
+            scene.focused_chrome = None;
+            if let Some(fi) = scene.focused_row {
+                scene.tree.set_focus(CollectionAction::SelectArtifact(fi).id());
+            }
+            bus.push(GameEvent::UiSound(SfxId::TilePlace));
+        }
+        FocusDir::Up if on_bottom => {
+            scene.focused_chrome = None;
+            if let Some(fi) = scene.focused_row {
+                scene.tree.set_focus(CollectionAction::SelectArtifact(fi).id());
+            }
+            bus.push(GameEvent::UiSound(SfxId::TilePlace));
+        }
+        FocusDir::Left | FocusDir::Right => {
+            let same_row: fn(CollectionAction) -> bool = if on_top {
+                collection_chrome_is_top
+            } else if on_bottom {
+                collection_chrome_is_bottom
+            } else {
+                return;
+            };
+            let same_row_rects: Vec<(CollectionAction, [f32; 4])> = collection_chrome_rects(items)
+                .into_iter()
+                .filter(|(a, _)| same_row(*a))
+                .collect();
+            let cur_rect = same_row_rects
+                .iter()
+                .find(|(a, _)| *a == cur)
+                .map(|(_, r)| *r);
+            if let Some(rect) = cur_rect
+                && let Some(next) = pick_neighbor(rect, dir, &same_row_rects)
+                && next != cur
+            {
+                scene.focused_chrome = Some(next);
+                scene.tree.set_focus(next.id());
+                bus.push(GameEvent::UiSound(SfxId::TilePlace));
+            }
+        }
         _ => {}
     }
 }

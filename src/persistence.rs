@@ -367,6 +367,13 @@ pub struct AppSettings {
     pub ssr_enabled: bool,
     #[serde(default)]
     pub hdr_enabled: bool,
+    /// Master kill-switch for the per-scene VHS overlay. Defaults to `true`
+    /// so the per-scene Tonemap debug overlay's amounts apply directly;
+    /// per-scene amounts of 0 already short-circuit the shader, so this
+    /// toggle is mainly for an "everything off" emergency exit. Not yet
+    /// surfaced in the Options scene — flip via `app_settings.json`.
+    #[serde(default = "default_true")]
+    pub vhs_enabled: bool,
     /// Borderless fullscreen when true; windowed (resizable) when false.
     #[serde(default = "default_true")]
     pub borderless_fullscreen: bool,
@@ -437,6 +444,7 @@ impl Default for AppSettings {
             shadows_enabled: true,
             ssr_enabled: true,
             hdr_enabled: false,
+            vhs_enabled: true,
             borderless_fullscreen: true,
             glyph_prompt: GlyphPromptSetting::default(),
             swap_ab: false,
@@ -562,6 +570,13 @@ pub fn load_tuning_override<T: serde::de::DeserializeOwned + Default>(name: &str
         Some(v) => serde_json::from_value(v.clone()).unwrap_or_default(),
         None => T::default(),
     }
+}
+
+/// True iff a tuning override exists on disk for `name`. Used by the
+/// per-scene tonemap loader to distinguish "no entry" (fall back to the
+/// default tuning) from "entry that happens to match defaults".
+pub fn has_tuning_override(name: &str) -> bool {
+    read_tuning_overrides().contains_key(name)
 }
 
 /// Promote the current value of `T` to the persistent override.

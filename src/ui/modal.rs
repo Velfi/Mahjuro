@@ -67,7 +67,8 @@ impl ModalTheme {
     fn bg_color(&self) -> [f32; 4] {
         use crate::render::theme::color;
         match self {
-            ModalTheme::Success => [0.12, 0.14, 0.08, 0.95],
+            // Success = a win at the table → felt-toned background.
+            ModalTheme::Success => color::alpha(color::FELT_DEEP, 0.95),
             ModalTheme::Info => color::alpha(color::WALNUT_DEEP, 0.95),
         }
     }
@@ -75,7 +76,7 @@ impl ModalTheme {
     fn border_color(&self) -> [f32; 4] {
         use crate::render::theme::color;
         match self {
-            ModalTheme::Success => [0.85, 0.75, 0.2, 0.9],
+            ModalTheme::Success => color::alpha(color::GOLD, 0.9),
             ModalTheme::Info => color::alpha(color::BRASS, 0.9),
         }
     }
@@ -83,7 +84,7 @@ impl ModalTheme {
     fn title_color(&self) -> [f32; 4] {
         use crate::render::theme::color;
         match self {
-            ModalTheme::Success => [1.0, 0.92, 0.4, 1.0],
+            ModalTheme::Success => color::CHAMPAGNE,
             ModalTheme::Info => color::CHAMPAGNE,
         }
     }
@@ -91,7 +92,8 @@ impl ModalTheme {
     fn body_color(&self) -> [f32; 4] {
         use crate::render::theme::color;
         match self {
-            ModalTheme::Success => [0.9, 0.88, 0.7, 1.0],
+            // Warm candle-bloom body text on lit felt — celebratory.
+            ModalTheme::Success => color::TALLOW,
             ModalTheme::Info => color::PARCHMENT,
         }
     }

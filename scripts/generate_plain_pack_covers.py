@@ -5,7 +5,7 @@ These are deliberately effect-free: solid color regions only, no
 gradients, no shading, no holographic sheen, no textures, no text, no
 illustration detail. Art direction applies effects in a later pass.
 
-Outputs `pack_<slug>.png` into assets/textures/packs/plain/.
+Outputs `pack_<slug>.png` into assets/textures/tile_packs/plain/.
 
 Usage:
     pip install openai pillow
@@ -40,7 +40,7 @@ except ImportError:
 
 OUTPUT_DIR = (
     Path(__file__).resolve().parent.parent
-    / "assets" / "textures" / "packs" / "plain"
+    / "assets" / "textures" / "tile_packs" / "plain"
 )
 FINAL_SIZE = (256, 384)
 

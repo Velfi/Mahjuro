@@ -27,7 +27,6 @@ pub(super) enum RenderOp {
     GoldenDust,
     MoonlitWater,
     SunlitWater,
-    MountainHaze,
     ShootingStarCascade,
     Table,
     QuadBatch {

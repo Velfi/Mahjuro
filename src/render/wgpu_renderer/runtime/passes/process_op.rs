@@ -104,12 +104,6 @@ impl WgpuRenderer {
                 pass.set_bind_group(1, &self.moon_albedo_bind_group, &[]);
                 pass.draw(0..3, 0..1);
             }
-            RenderOp::MountainHaze => {
-                pass.set_pipeline(&self.mountain_haze_pipeline);
-                pass.set_bind_group(0, &self.globals_bind_group, &[]);
-                pass.set_bind_group(1, &self.haze_uniform_bind_group, &[]);
-                pass.draw(0..3, 0..1);
-            }
             RenderOp::SunlitWater => {
                 pass.set_pipeline(&self.sunlit_water_pipeline);
                 pass.set_bind_group(0, &self.globals_bind_group, &[]);

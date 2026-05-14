@@ -87,7 +87,7 @@ nothing to do at max level.
 ## 2. Booster packs in shop
 
 **Goal:** Bring the "open pack → pick 1 of N" ritual that Balatro leans on.
-The assets (`assets/textures/packs/`, pack cover art from
+The assets (`assets/textures/tile_packs/`, pack cover art from
 `scripts/generate_pack_covers.py`) and the `src/core/tile_pack.rs` module
 exist but the pick-1-of-N UI is only wired for the Festival zodiac pack.
 

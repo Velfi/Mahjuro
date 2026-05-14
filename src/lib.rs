@@ -57,12 +57,12 @@ use debug_menu::DebugAction;
 use debug_menu::DebugMenuBar;
 use debug_overlays::{
     CameraDebugOverlay, DebugVisResult, DebugVisibilityOverlay, SfxTestOverlay, TuningOverlay,
-    TuningResult, VolumetricDebugOverlay, VolumetricDebugResult,
+    TuningResult,
 };
 use game::cascade::CascadeTuning;
 use game::event_bus::{EventBus, GameEvent};
 use game::run::RunState;
-use game::volumetric_tuning::VolumetricTuning;
+use game::tonemap_tuning::TonemapTuningSet;
 use render::animation::AnimationController;
 use render::draw_cmd::{CameraParams, UiFrame, apply_modal_relic_staging};
 use render::wgpu_renderer::{DebugArrangeOverride, GpuInstance, TextLabel, WgpuRenderer};
@@ -150,7 +150,11 @@ struct App {
     effect_layers: crate::effect_layers::EffectLayers,
     debug: DebugState,
     cascade_tuning: CascadeTuning,
-    volumetric_tuning: VolumetricTuning,
+    /// Per-scene tonemap + VHS tuning, resolved each frame from
+    /// `active_scene_key`. Loaded from `tuning_overrides.json` on startup;
+    /// the debug overlay edits this in place and writes back via
+    /// [`persistence`].
+    tonemap_tuning: TonemapTuningSet,
     deferred_round_end: Option<GameEvent>,
     modifiers: Mod,
     /// Steamworks integration. Either `Connected` (initialized successfully
@@ -306,15 +310,14 @@ impl App {
                 shadows_enabled: settings.shadows_enabled,
                 ssr_enabled: settings.ssr_enabled,
                 hdr_enabled: settings.hdr_enabled,
+                vhs_enabled: settings.vhs_enabled,
             },
             // Default: cheap baseline; see `effect_layers.rs`. Use `FULL` or flip
             // flags to restore shadows, SSR, particles, transition FX, HDR, etc.
             effect_layers: crate::effect_layers::EffectLayers::BASELINE,
             debug: DebugState::new(),
             cascade_tuning: CascadeTuning::default(),
-            volumetric_tuning: persistence::load_tuning_override::<VolumetricTuning>(
-                "VolumetricTuning",
-            ),
+            tonemap_tuning: TonemapTuningSet::load(),
             modifiers: Mod::NOMOD,
             steam,
             archive_last_seen_run_len: settings.archive_last_seen_run_len,

@@ -15,6 +15,26 @@ fn append_fullscreen_debug_panel(
 }
 
 impl App {
+    /// Canonical scene-key string for the renderer (`active_scene_key`).
+    /// Mirrors the match in [`Self::draw`]; pulled out so the per-scene
+    /// tonemap resolver and the debug-action handler that opens the
+    /// tonemap overlay see the exact same key the renderer does. `None`
+    /// for scenes that don't register one — those fall back to the
+    /// `_default` slot in [`crate::game::tonemap_tuning::TonemapTuningSet`].
+    pub(super) fn active_scene_key_for_renderer(&self) -> Option<&'static str> {
+        let scene_for_renderer = self.overlay_stack.last().unwrap_or(&self.scene);
+        match scene_for_renderer {
+            Scene::Showcase(_) => Some("showcase"),
+            Scene::Shop(_) => Some("shop"),
+            Scene::Gameplay(_) => Some("gameplay"),
+            Scene::Collection(_) => Some("collection"),
+            Scene::PickBlind(_) => Some("pick_blind"),
+            Scene::MainMenuExterior(_) => Some("main_menu_exterior"),
+            Scene::TutorialCampaign(_) => Some("tutorial"),
+            _ => None,
+        }
+    }
+
     /// Process a `RoundComplete` or `GameOver` event that was held while the
     /// scoring cascade was still playing. Pushes celebration modals, plays the
     /// appropriate sting, and queues the next scene.
@@ -345,7 +365,7 @@ impl App {
             || self.debug.sfx_test_overlay.is_some()
             || self.debug.camera_debug_overlay.is_some()
             || self.debug.shop_env_debug_overlay.is_some()
-            || self.debug.volumetric_debug_overlay.is_some();
+            || self.debug.tonemap_debug_overlay.is_some();
         let preserve_overlay_stack_buttons = matches!(
             self.overlay_stack.last(),
             Some(Scene::RumbleLab(_) | Scene::MaterialViewer(_) | Scene::TransitionPlayground(_))
@@ -461,23 +481,6 @@ impl App {
         self.cpu_profiler
             .end(crate::render::cpu_profiler::CpuStage::DrawFrame);
 
-        // Fold fog-wall arrange preview here (same `ArrangePreview` math as `ctx`)
-        // so mountain-haze `horizon_y` and the pick slab respond immediately.
-        if self.overlay_stack.is_empty() {
-            if let Scene::Gameplay(ref gp) = self.scene {
-                let ww = size.width as f32;
-                let wh = size.height as f32;
-                let fog = gameplay_fog_wall_placement_for_tune(
-                    &gp.positions.fog_wall,
-                    &self.debug.arrange_mode,
-                    ww,
-                    wh,
-                );
-                frame.gameplay_fog_wall_horizon_y = Some(fog.ny.clamp(0.0, 1.0));
-                frame.gameplay_fog_wall_center_x = Some(fog.nx.clamp(0.0, 1.0));
-            }
-        }
-
         let h = size.height as f32;
         self.debug.last_effective_camera = frame
             .camera_override
@@ -583,8 +586,10 @@ impl App {
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
-        // Volumetric tuning overlay — on top of modals.
-        if let Some(ref overlay) = self.debug.volumetric_debug_overlay {
+        // Tonemap tuning overlay — on top of modals. Uploaded value is
+        // already pushed via `set_tonemap_tuning` near the top of `draw`,
+        // so this draw call is the panel UI only.
+        if let Some(ref overlay) = self.debug.tonemap_debug_overlay {
             let (insts, lbls) =
                 overlay.draw(size.width as f32, size.height as f32);
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
@@ -784,6 +789,9 @@ impl App {
         // Tell the renderer which scene is active so shared mesh pipelines
         // (Object3dKind::Ofuda, coin/gold piles, etc.) can emit correctly-
         // prefixed canonical pickable names for arrange mode.
+        // Inlined (rather than calling `active_scene_key_for_renderer`)
+        // because `renderer` already holds a mutable borrow of
+        // `self.renderer`; an `&self` helper here would clash.
         let scene_for_renderer = self.overlay_stack.last().unwrap_or(&self.scene);
         let active_scene_key: Option<&'static str> = match scene_for_renderer {
             Scene::Showcase(_) => Some("showcase"),
@@ -796,6 +804,16 @@ impl App {
             _ => None,
         };
         renderer.set_active_scene(active_scene_key);
+
+        // Resolve and push the per-scene tonemap + VHS knobs. The debug
+        // Tonemap overlay (when open) edits the in-memory tuning live;
+        // when closed, this just re-uploads the saved values each frame.
+        let active_tonemap = if let Some(ref overlay) = self.debug.tonemap_debug_overlay {
+            overlay.tuning
+        } else {
+            self.tonemap_tuning.resolve(active_scene_key)
+        };
+        renderer.set_tonemap_tuning(&active_tonemap);
 
         // Push the committed rotation map so every arrange-tagged draw picks
         // up its Placement's rx/ry/rz_deg without each scene site having to
@@ -813,31 +831,6 @@ impl App {
             sl.ambient_scale,
             sl.lit_mesh_gltf_punctual_scale,
             sl.gltf_emissive_scale,
-        );
-        // Push mountain-haze art-direction knobs into the haze shader's
-        // uniform — lets the Volumetric debug overlay drive density,
-        // colour, horizon band, and wind speed live.
-        let haze_horizon_y = frame
-            .gameplay_fog_wall_horizon_y
-            .unwrap_or(self.volumetric_tuning.haze_horizon_y);
-        let wall_center_x = frame
-            .gameplay_fog_wall_center_x
-            .unwrap_or(0.5)
-            .clamp(0.0, 1.0);
-        let wall_half_width_uv = if frame.gameplay_fog_wall_horizon_y.is_some() {
-            crate::ui::scene_layout::GAMEPLAY_FOG_WALL_HALF_WIDTH_UV
-        } else {
-            0.0
-        };
-        renderer.set_haze_tuning(
-            self.volumetric_tuning.haze_density,
-            self.volumetric_tuning.haze_color_r,
-            self.volumetric_tuning.haze_color_g,
-            self.volumetric_tuning.haze_color_b,
-            haze_horizon_y,
-            self.volumetric_tuning.haze_drift_speed,
-            wall_center_x,
-            wall_half_width_uv,
         );
 
         // Push arrange-mode override so the renderer draws the selected object
@@ -948,33 +941,3 @@ pub(crate) fn build_level_up_modal(
     )
 }
 
-/// Effective [`gameplay.fog_wall`] placement: committed layout plus staged
-/// arrange deltas when that leaf is selected.
-fn gameplay_fog_wall_placement_for_tune(
-    fog_wall: &crate::ui::placement::Placement,
-    arrange_mode: &Option<Option<crate::main_debug_state::ArrangeModeState>>,
-    ww: f32,
-    wh: f32,
-) -> crate::ui::placement::Placement {
-    let base = *fog_wall;
-    match arrange_mode {
-        Some(Some(st)) => {
-            let ap = crate::ui::placement::ArrangePreview {
-                name: st.object_name.clone(),
-                dnx: if ww > 0.0 { st.delta_px / ww } else { 0.0 },
-                dny: if wh > 0.0 { st.delta_py / wh } else { 0.0 },
-                d_lift_mm: st.delta_lift * crate::ui::scene_layout::HFRAC_TO_MM
-                    / crate::ui::scene_layout::CANONICAL_WINDOW_W,
-                d_rx_deg: st.delta_rx_deg,
-                d_ry_deg: st.delta_ry_deg,
-                d_rz_deg: st.delta_rz_deg,
-            };
-            ap.applied_to(
-                crate::ui::scene_layout::GAMEPLAY_HIERARCHY,
-                "gameplay.fog_wall",
-                base,
-            )
-        }
-        _ => base,
-    }
-}

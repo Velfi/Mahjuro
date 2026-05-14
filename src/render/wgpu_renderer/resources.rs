@@ -402,20 +402,19 @@ pub(super) fn load_metal_heightmap(
     }
 }
 
-/// Decoded three-part zodiac ribbon textures (top cap, tileable middle, bottom cap).
-/// One set of three textures per `ZodiacKind` in `ZodiacKind::all()` order.
+/// Decoded full-ribbon zodiac textures — one tall portrait image per zodiac.
+/// Indexed by position in `ZodiacKind::all()`.
 pub(super) struct ZodiacRibbonTextures {
     /// Keeps GPU textures alive so the views remain valid.
     #[allow(dead_code)]
     pub textures: Vec<wgpu::Texture>,
-    pub top_views: Vec<wgpu::TextureView>,
-    pub mid_views: Vec<wgpu::TextureView>,
-    pub bot_views: Vec<wgpu::TextureView>,
+    pub views: Vec<wgpu::TextureView>,
 }
 
-/// Decode the zodiac silk ribbon PNGs (three parts each: `_top`, `_mid`, `_bot`)
-/// and upload them as sRGB textures. Each missing or undecodeable file falls
-/// back to a flat 1×1 white texture so the slot still renders (just untextured).
+/// Decode the zodiac silk ribbon PNGs (one tall portrait per zodiac at
+/// `textures/zodiacs/zodiac_<slug>.png`) and upload them as sRGB textures.
+/// Missing or undecodeable files fall back to a flat 1×1 white texture so
+/// the slot still renders (just untextured).
 pub(super) fn load_zodiac_ribbon_textures(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -423,17 +422,13 @@ pub(super) fn load_zodiac_ribbon_textures(
     use crate::core::zodiac::ZodiacKind;
     let zodiacs = ZodiacKind::all();
     let cap = zodiacs.len();
-    let mut textures = Vec::with_capacity(cap * 3);
-    let mut top_views = Vec::with_capacity(cap);
-    let mut mid_views = Vec::with_capacity(cap);
-    let mut bot_views = Vec::with_capacity(cap);
+    let mut textures = Vec::with_capacity(cap);
+    let mut views = Vec::with_capacity(cap);
 
-    let load_one = |textures: &mut Vec<wgpu::Texture>,
-                    slug: &str,
-                    part: &str|
-     -> wgpu::TextureView {
-        let path = format!("textures/zodiacs/zodiac_{}_{}.png", slug, part);
-        let label = format!("zodiac-ribbon-{}-{}", slug, part);
+    for &z in zodiacs {
+        let slug = z.slug();
+        let path = format!("textures/zodiacs/zodiac_{}.png", slug);
+        let label = format!("zodiac-ribbon-{}", slug);
         let (tex, view) = match crate::asset_path::get(&path) {
             Some(file) => match image::load_from_memory(&file.data) {
                 Ok(img) => {
@@ -452,21 +447,9 @@ pub(super) fn load_zodiac_ribbon_textures(
             }
         };
         textures.push(tex);
-        view
-    };
-
-    for &z in zodiacs {
-        let slug = z.slug();
-        top_views.push(load_one(&mut textures, slug, "top"));
-        mid_views.push(load_one(&mut textures, slug, "mid"));
-        bot_views.push(load_one(&mut textures, slug, "bot"));
+        views.push(view);
     }
-    ZodiacRibbonTextures {
-        textures,
-        top_views,
-        mid_views,
-        bot_views,
-    }
+    ZodiacRibbonTextures { textures, views }
 }
 
 /// Load tile-pack box art textures synchronously at init. There are at most 7
@@ -480,7 +463,7 @@ pub(super) fn load_pack_textures(
 ) -> HashMap<TilePackKind, RelicTextureGpu> {
     let mut map = HashMap::new();
     for &kind in TilePackKind::all() {
-        let asset_path = format!("textures/packs/{}", kind.asset_filename());
+        let asset_path = format!("textures/tile_packs/{}", kind.asset_filename());
         let bytes = match crate::asset_path::get(&asset_path) {
             Some(file) => file.data.to_vec(),
             None => {

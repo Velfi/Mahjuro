@@ -96,7 +96,7 @@ impl BackgroundId {
         match self {
             BackgroundId::None => None,
             BackgroundId::Black => None,
-            BackgroundId::MainMenuExterior => Some("scenes/main_menu/exterior.png"),
+            BackgroundId::MainMenuExterior => Some("textures/scenes/main_menu/exterior.png"),
         }
     }
 

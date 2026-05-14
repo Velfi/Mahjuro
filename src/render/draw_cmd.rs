@@ -656,10 +656,6 @@ pub enum DrawCmd {
     MoonlitWater,
     /// Procedural sun hovering above rippling water (fullscreen triangle, no data).
     SunlitWater,
-    /// Procedural mountain-haze atmosphere (fullscreen triangle, no data).
-    /// FBM scrolling noise + vertical gradient, additively blended — reads as
-    /// slow drifting mountain fog without the cost of a volumetric sim.
-    MountainHaze,
     /// Procedural shooting-star cascade transition (fullscreen triangle, no data).
     /// Brightness driven by `UiFrame::transition_progress`.
     ShootingStarCascade,
@@ -797,14 +793,6 @@ pub struct UiFrame {
     /// Arrange-mode clamp hints. Drawn as a faint band when the named
     /// pickable is the current selection — see [`ArrangeClamp`].
     pub arrange_clamps: Vec<ArrangeClamp>,
-    /// Gameplay only: [`MountainHaze`] horizon height in normalized screen Y
-    /// (0 = top, 1 = bottom). Overrides volumetric `haze_horizon_y` for this
-    /// frame; sourced from gameplay scene layout `fog_wall.ny`.
-    pub gameplay_fog_wall_horizon_y: Option<f32>,
-    /// Gameplay only: horizontal center of the fog slab in normalized screen X
-    /// (0 = left, 1 = right). From `fog_wall.nx`; drives `set_haze_tuning` with
-    /// [`GAMEPLAY_FOG_WALL_HALF_WIDTH_UV`](crate::ui::scene_layout::GAMEPLAY_FOG_WALL_HALF_WIDTH_UV).
-    pub gameplay_fog_wall_center_x: Option<f32>,
     /// Barrel / fisheye lens distortion applied in the final composite.
     /// 0.0 = off (no distortion). Positive = outward barrel (center
     /// magnified, edges compressed). Typical range 0.0..=0.6. Scenes
@@ -853,8 +841,6 @@ impl UiFrame {
             arrange_clamps: Vec::new(),
             fisheye_strength: 0.0,
             journal_prepass_frame: None,
-            gameplay_fog_wall_horizon_y: None,
-            gameplay_fog_wall_center_x: None,
             shop_inspect_lit_mesh_hdr: false,
             showcase_render_hints: ShowcaseRenderHints::default(),
             archive_description_sign_use_left: None,
@@ -872,15 +858,15 @@ impl UiFrame {
     pub fn background(&mut self, bg: BackgroundId) {
         self.cmds.push(DrawCmd::Background(bg));
     }
-    /// Draw the 3D shop from embedded [`shop.glb`](../../assets/shop.glb). No-op if the asset failed to load.
+    /// Draw the 3D shop from embedded [`Shop.glb`](../../assets/3d/Shop.glb). No-op if the asset failed to load.
     pub fn shop_environment(&mut self) {
         self.cmds.push(DrawCmd::ShopEnvironment);
     }
-    /// Draw the pick-blind hallway from embedded [`hallway.glb`](../../assets/hallway.glb).
+    /// Draw the pick-blind hallway from embedded [`hallway.glb`](../../assets/3d/hallway.glb).
     pub fn hallway_environment(&mut self) {
         self.cmds.push(DrawCmd::HallwayEnvironment);
     }
-    /// Draw [`archive.glb`](../../assets/archive.glb). No-op if the asset failed to load.
+    /// Draw [`archive.glb`](../../assets/3d/archive.glb). No-op if the asset failed to load.
     pub fn archive_environment(&mut self) {
         self.cmds.push(DrawCmd::ArchiveEnvironment);
     }
@@ -906,9 +892,6 @@ impl UiFrame {
     }
     pub fn sunlit_water(&mut self) {
         self.cmds.push(DrawCmd::SunlitWater);
-    }
-    pub fn mountain_haze(&mut self) {
-        self.cmds.push(DrawCmd::MountainHaze);
     }
     pub fn shooting_star_cascade(&mut self) {
         self.cmds.push(DrawCmd::ShootingStarCascade);
@@ -999,8 +982,7 @@ impl UiFrame {
                 | DrawCmd::Table
                 | DrawCmd::ShowcaseTileBatch(_)
                 | DrawCmd::Object3d(_)
-                | DrawCmd::Object3dBatch(_)
-                | DrawCmd::MountainHaze => {}
+                | DrawCmd::Object3dBatch(_) => {}
             }
         }
     }

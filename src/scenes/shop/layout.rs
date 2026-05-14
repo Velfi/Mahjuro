@@ -103,7 +103,6 @@ impl ShopLayout {
 #[derive(Clone, Copy)]
 pub(crate) struct ShopInventoryCounts {
     pub n_for_sale: usize,
-    pub n_for_sale_zodiacs: usize,
     pub n_for_sale_talismans: usize,
     pub n_owned_relics: usize,
 }
@@ -116,7 +115,6 @@ impl ShopLayout {
     ) -> Self {
         let ShopInventoryCounts {
             n_for_sale,
-            n_for_sale_zodiacs,
             n_for_sale_talismans,
             n_owned_relics,
             ..
@@ -152,8 +150,6 @@ impl ShopLayout {
         let pack_wz = layout.mm(positions.packs.lift_mm);
         let talisman_pixel_y = positions.talismans.ny * h;
         let talisman_wz = layout.mm(positions.talismans.lift_mm);
-        let ribbon_pixel_y = positions.ribbons.ny * h;
-        let ribbon_wz = layout.mm(positions.ribbons.lift_mm);
 
         let mut niche_centers_px = [(0.0, 0.0, 0.0); KIOSK_RELIC_SLOTS];
         let n_niches = n_for_sale.min(KIOSK_RELIC_SLOTS);
@@ -165,16 +161,6 @@ impl ShopLayout {
                 (i as f32 - (n_niches as f32 - 1.0) * 0.5) * relic_spread
             };
             *slot = (col_px_x[0] + off, relic_pixel_y, relic_wz);
-        }
-
-        let ribbon_width = h * 0.055;
-        let ribbon_length = ribbon_width * 2.0;
-        let ribbon_pin_wz = ribbon_wz + ribbon_length;
-        let mut ribbon_anchors_px = [(0.0, 0.0, 0.0); 8];
-        let n_ribbons = n_for_sale_zodiacs.min(8);
-        for (i, slot) in ribbon_anchors_px.iter_mut().enumerate().take(n_ribbons) {
-            let off = (i as f32 - (n_ribbons as f32 - 1.0) * 0.5) * positions.ribbon_spread_nx * w;
-            *slot = (col_px_x[3] + off, ribbon_pixel_y, ribbon_pin_wz);
         }
 
         let talisman_wall_width = h * 0.072;

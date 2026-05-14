@@ -11,4 +11,9 @@ pub struct RenderSettings {
     pub shadows_enabled: bool,
     pub ssr_enabled: bool,
     pub hdr_enabled: bool,
+    /// Master toggle for the per-scene VHS overlay (sourced from the
+    /// Options scene). When `false`, every per-scene VHS amount in
+    /// [`crate::game::tonemap_tuning::TonemapTuning`] is ignored at the
+    /// shader level.
+    pub vhs_enabled: bool,
 }

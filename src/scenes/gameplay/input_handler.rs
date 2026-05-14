@@ -1344,22 +1344,26 @@ pub(super) fn build_consumable_dish(
                 let pendant_y = layout.mm(td.lift_mm + 5.0) + 2.0;
                 match item {
                     crate::core::consumable::Consumable::Zodiac(z) => {
-                        // Ribbon thickness = width × 0.15 (set by the
-                        // renderer); bump width to mm(12) so the silk
-                        // reads as ~1.8mm thick at table scale.
-                        let ribbon_w = layout.mm(12.0);
-                        ribbon_dish_placements.push(Object3d {
-                            pos: [zx + slot_w * 0.5, zy, pendant_y],
-                            extents: [ribbon_w, slot_h * 0.85, ribbon_w * 0.15],
-                            rotation: crate::render::table_transform::euler_xyz_rad_from_deg(
-                                -90.0, 0.0, 0.0,
+                        // Length is the natural dimension here — the
+                        // ribbon hangs to fill most of the slot height —
+                        // and width / depth come from the canonical 3:1
+                        // aspect via the helper.
+                        ribbon_dish_placements.push(
+                            crate::render::ribbon_mesh::zodiac_ribbon_object3d(
+                                crate::render::ribbon_mesh::ZodiacRibbonSpec {
+                                    pos: [zx + slot_w * 0.5, zy, pendant_y],
+                                    length: slot_h * 0.85,
+                                    rotation: crate::render::table_transform::euler_xyz_rad_from_deg(
+                                        -90.0, 0.0, 0.0,
+                                    ),
+                                    color: [1.0, 1.0, 1.0, 1.0],
+                                    kind: Some(z),
+                                    hover_target: 0.0,
+                                    anim_id: 0,
+                                    arrange_name: None,
+                                },
                             ),
-                            color: [1.0, 1.0, 1.0, 1.0],
-                            kind: Object3dKind::ZodiacRibbon { kind: Some(z) },
-                            hover_target: 0.0,
-                            anim_id: 0,
-                            arrange_name: None,
-                        });
+                        );
                     }
                     crate::core::consumable::Consumable::Talisman(tk) => {
                         let talisman_half_height = slot_w * 0.55 * 0.5;

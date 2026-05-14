@@ -1,4 +1,4 @@
-//! Waterfront façade backdrop (`assets/scenes/main_menu/exterior.png`) with a flat hub menu.
+//! Waterfront façade backdrop (`assets/textures/scenes/main_menu/exterior.png`) with a flat hub menu.
 //! Replaces the legacy candlelit start screen (`start_screen.rs`, removed).
 
 use std::cell::RefCell;

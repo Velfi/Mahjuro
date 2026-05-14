@@ -131,9 +131,6 @@ pub struct WgpuRenderer {
     // Owns the GPU resource that `moon_albedo_bind_group` samples from.
     moon_albedo_bind_group: wgpu::BindGroup,
     sunlit_water_pipeline: wgpu::RenderPipeline,
-    mountain_haze_pipeline: wgpu::RenderPipeline,
-    haze_uniform_buffer: wgpu::Buffer,
-    haze_uniform_bind_group: wgpu::BindGroup,
     /// Expensive shooting-star cascade transition renders into a half-res
     /// offscreen target to keep costs bounded at large resolutions; these
     /// fields own that target plus the two pipelines involved.
@@ -196,13 +193,13 @@ pub struct WgpuRenderer {
     tile_outline_vertex_buffer: wgpu::Buffer,
     tile_outline_index_buffer: wgpu::Buffer,
     tile_outline_index_count: u32,
-    /// [`shop.glb`](../../assets/shop.glb) environment primitives (tile vertex layout + materials).
+    /// [`Shop.glb`](../../assets/3d/Shop.glb) environment primitives (tile vertex layout + materials).
     shop_env_primitives: Vec<TilePrimitiveGpu>,
     shop_environment: Option<ShopEnvironmentGpu>,
-    /// [`hallway.glb`](../../assets/hallway.glb) pick-blind room.
+    /// [`hallway.glb`](../../assets/3d/hallway.glb) pick-blind room.
     hallway_env_primitives: Vec<TilePrimitiveGpu>,
     hallway_environment: Option<ShopEnvironmentGpu>,
-    /// [`archive.glb`](../../assets/archive.glb) Archive room.
+    /// [`archive.glb`](../../assets/3d/archive.glb) Archive room.
     archive_env_primitives: Vec<TilePrimitiveGpu>,
     archive_environment: Option<ShopEnvironmentGpu>,
     /// GPU primitive index of `sign_description_left` in `archive_env_primitives` (for culling).
@@ -220,14 +217,14 @@ pub struct WgpuRenderer {
     shop_env_ambient_scale: f32,
     /// Scales embedded glTF punctual contribution in `lit_mesh` (`PointLightsBuf.extras.w` when embedded).
     shop_lit_mesh_gltf_punctual_scale: f32,
-    /// Scales glTF mesh emissive on `shop.glb` / `hallway.glb` (`CameraUniform.decal_atlas_uv.z`).
+    /// Scales glTF mesh emissive on `Shop.glb` / `hallway.glb` (`CameraUniform.decal_atlas_uv.z`).
     shop_gltf_emissive_scale: f32,
-    /// CPU triangle soups from invisible marker meshes in [`shop.glb`](../../assets/shop.glb).
+    /// CPU triangle soups from invisible marker meshes in [`Shop.glb`](../../assets/3d/Shop.glb).
     pub(super) shop_env_collision_meshes: Vec<crate::render::shop_glb::ShopCollisionMesh>,
     /// Identity factor used by every primitive (kept for the cam uniform).
     tile_base_color_factor: [f32; 4],
     /// Active tileset directory name (e.g. `"original"`). When `Some`, tile
-    /// decals are loaded from `assets/sets/<name>/` instead of rasterized.
+    /// decals are loaded from `assets/textures/tile_sets/<name>/` instead of rasterized.
     tile_set: Option<String>,
     /// Per-hand-tile GPU resources; kept in sync with the hand via `update_hand_tiles`.
     hand_tiles: Vec<HandTileGpu>,
@@ -426,8 +423,18 @@ pub struct WgpuRenderer {
     swapchain_sdr_format: wgpu::TextureFormat,
     /// Whether `Rgba16Float` was in the surface capabilities at init.
     swapchain_hdr_available: bool,
-    /// Global exposure applied in the tonemap pass (linear HDR → display).
+    /// Effective tonemap + VHS knobs for the next `render` call. Resolved
+    /// per scene by the app (see `crate::game::tonemap_tuning`); pushed
+    /// here once per frame and read in `render.rs` when assembling the
+    /// `TonemapParams` upload. `tonemap_vhs_enabled` gates the VHS branch
+    /// independently — when off, the per-amount values are still preserved
+    /// so re-enabling restores the previous look without round-tripping.
     pub tonemap_exposure: f32,
+    pub tonemap_vhs_enabled: bool,
+    pub tonemap_vhs_chromatic: f32,
+    pub tonemap_vhs_scanline: f32,
+    pub tonemap_vhs_grain: f32,
+    pub tonemap_vhs_vignette: f32,
     /// Pipeline for procedural scene props (candles, table). Shares the
     /// `point_lights_layout` (group 1) with the tile pipeline.
     lit_mesh_pipeline: wgpu::RenderPipeline,
@@ -510,15 +517,15 @@ pub struct WgpuRenderer {
     /// Procedural ornate brass plinth used by the gameplay scene to hold
     /// the dora indicator tile(s).
     dora_plinth_mesh: LitMeshGpu,
-    /// Per-ribbon draw-slot instances (shop scene). Each textured ribbon uses
-    /// up to 3 slots (top/mid/bot); untextured ribbons use 1. Truncated at
+    /// Per-ribbon draw-slot instances (shop scene). One slot per ribbon —
+    /// the whole ribbon is a single textured mesh now. Truncated at
     /// `MAX_RIBBON_SLOTS`.
     ribbon_instances: Vec<LitMeshInstance>,
-    /// Currently bound zodiac texture per ribbon slot. `Some((zodiac_idx, part))`
-    /// where part is 0=top, 1=mid, 2=bot. `None` means the flat-white
+    /// Currently bound zodiac texture per ribbon slot. `Some(zodiac_idx)`
+    /// maps to `ribbon_zodiac_tex.views[idx]`; `None` means the flat-white
     /// fallback is bound. Used to skip redundant bind-group rebuilds.
-    ribbon_slot_zodiac: Vec<Option<(u8, u8)>>,
-    /// Three-part zodiac silk textures (top/mid/bot per zodiac).
+    ribbon_slot_zodiac: Vec<Option<u8>>,
+    /// Per-zodiac silk ribbon textures (one tall portrait per zodiac).
     ribbon_zodiac_tex: ZodiacRibbonTextures,
     /// Per-talisman instances (shop scene). Indexed sequentially by
     /// `TalismanBatch` placement order; truncated at `MAX_TALISMAN_SLOTS`.
@@ -662,10 +669,6 @@ pub struct WgpuRenderer {
     /// renderer walks the frame's draw cmds; consumed by
     /// `pick_debug_object`.
     pub(super) last_debug_pickables: Vec<(String, Mat4, glam::Vec3, f32)>,
-    /// Latest gameplay fog-wall horizon (normalized screen Y). Used for arrange-mode
-    /// screen-band picking when the cursor ray misses the invisible pick slab.
-    pub(super) last_gameplay_fog_wall_horizon_y: Option<f32>,
-    pub(super) last_gameplay_fog_wall_center_x: Option<f32>,
     /// Canonical scene-path prefix for the currently active scene — e.g.
     /// `"shop"` or `"gameplay"`. Set per-frame by `App` so the renderer can
     /// disambiguate shared mesh pipelines (e.g. `Object3dKind::Ofuda` is used
@@ -743,7 +746,7 @@ pub(crate) use screenshot::ScreenshotStaging;
 pub(crate) use targets::RenderTarget;
 pub(crate) use tile_pipeline::{TileGlbPipelineKey, TilePrimitiveGpu};
 pub(crate) use uniforms::{
-    BloomParams, CameraUniform, FlameViewUniform, Globals, HazeUniform, ProbeGiFrameUniform,
+    BloomParams, CameraUniform, FlameViewUniform, Globals, ProbeGiFrameUniform,
     TileOutlineFrameUniform, TileOutlineInstance, TonemapParams,
 };
 
