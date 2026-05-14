@@ -83,7 +83,7 @@ impl App {
         }
         log::debug!("SDL loop exit — saving profile");
         self.progress.record_score(self.run.round_score);
-        let _ = persistence::save_profile(self.active_profile, &self.progress);
+        self.save_profile_sync_for_exit();
         self.persist_run_if_in_progress();
         Ok(())
     }
@@ -95,7 +95,7 @@ impl App {
             Event::Quit { .. } => {
                 log::debug!("Quit event — saving and exiting");
                 self.progress.record_score(self.run.round_score);
-                let _ = persistence::save_profile(self.active_profile, &self.progress);
+                self.save_profile_sync_for_exit();
                 self.persist_run_if_in_progress();
                 self.close_saved = true;
                 return Ok(true);
@@ -114,7 +114,7 @@ impl App {
                         }
                         log::debug!("CloseRequested — saving profile and exiting");
                         self.progress.record_score(self.run.round_score);
-                        let _ = persistence::save_profile(self.active_profile, &self.progress);
+                        self.save_profile_sync_for_exit();
                         self.persist_run_if_in_progress();
                         self.close_saved = true;
                         return Ok(true);

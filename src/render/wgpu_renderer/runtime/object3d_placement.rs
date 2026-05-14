@@ -93,6 +93,30 @@ impl WgpuRenderer {
                         obj.rotation_matrix(),
                         glam::Vec3::from(obj.extents),
                     );
+                    // Frustum cull — skip work for kinds that aren't
+                    // shadow casters or part of slot-shared shadow walks.
+                    // `Candle` / `Ribbon` / `Talisman` / `Primitive`
+                    // shadows in `passes/shadow.rs` re-walk `frame.cmds`
+                    // with their own per-shape cursors and would draw
+                    // stale uniforms if we culled here without also
+                    // updating that walk; the easier safe move is to
+                    // leave them alone for now (Steam Deck baseline
+                    // disables shadows anyway). Local extent of 1.5x
+                    // the unit cube gives generous slack against
+                    // arrange-mode nudges and per-kind y-offsets so we
+                    // never pop a barely-on-screen object.
+                    let cull_eligible = !matches!(
+                        obj.kind,
+                        Object3dKind::Candle { .. }
+                            | Object3dKind::ZodiacRibbon { .. }
+                            | Object3dKind::Talisman { .. }
+                            | Object3dKind::Primitive { .. }
+                    );
+                    if cull_eligible
+                        && camera.aabb_outside_frustum(model, [1.5, 1.5, 1.5])
+                    {
+                        continue;
+                    }
                     match &obj.kind {
                         Object3dKind::Primitive {
                             shape,

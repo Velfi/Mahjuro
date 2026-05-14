@@ -76,6 +76,71 @@ impl CameraFrame {
         self.project_aabb_rect(model, [0.5, 0.5, 0.5], 0.0)
     }
 
+    /// Conservative AABB-vs-frustum cull. Returns `true` when every one
+    /// of the eight local-space corners under `model` lies outside the
+    /// same clip-space half-space (left/right/top/bottom/near/far). The
+    /// caller can safely skip the draw in that case.
+    ///
+    /// `half` is the local-space half-extents. We use the per-frame
+    /// `view_proj` so projection details (perspective, near/far) match
+    /// what the GPU sees.
+    ///
+    /// Doesn't test "is the AABB fully inside" — only fully outside.
+    /// False negatives (i.e. AABB barely on screen but we say it's
+    /// outside) can manifest as pop-in, so callers should pass a
+    /// generous `half` if the local mesh is uncertain.
+    pub(super) fn aabb_outside_frustum(&self, model: Mat4, half: [f32; 3]) -> bool {
+        let h = [half[0].abs(), half[1].abs(), half[2].abs()];
+        // Avoid culling degenerate-extent placements (zero-scale boxes
+        // from layout glitches) — keep them visible so the issue is
+        // obvious in-game rather than silently invisible.
+        if h[0] == 0.0 && h[1] == 0.0 && h[2] == 0.0 {
+            return false;
+        }
+        let corners = [
+            glam::Vec3::new(-h[0], -h[1], -h[2]),
+            glam::Vec3::new(h[0], -h[1], -h[2]),
+            glam::Vec3::new(-h[0], h[1], -h[2]),
+            glam::Vec3::new(h[0], h[1], -h[2]),
+            glam::Vec3::new(-h[0], -h[1], h[2]),
+            glam::Vec3::new(h[0], -h[1], h[2]),
+            glam::Vec3::new(-h[0], h[1], h[2]),
+            glam::Vec3::new(h[0], h[1], h[2]),
+        ];
+        let mut left = 0u8;
+        let mut right = 0u8;
+        let mut bottom = 0u8;
+        let mut top = 0u8;
+        let mut near = 0u8;
+        let mut far = 0u8;
+        for c in corners {
+            let w = model.transform_point3(c);
+            let clip = self.view_proj * glam::Vec4::new(w.x, w.y, w.z, 1.0);
+            if clip.x < -clip.w {
+                left += 1;
+            }
+            if clip.x > clip.w {
+                right += 1;
+            }
+            if clip.y < -clip.w {
+                bottom += 1;
+            }
+            if clip.y > clip.w {
+                top += 1;
+            }
+            // wgpu clip-space depth is `[0, w]` (DirectX-style after the
+            // perspective matrix), so anything with `z < 0` is behind
+            // the near plane; `z > w` is past the far plane.
+            if clip.z < 0.0 {
+                near += 1;
+            }
+            if clip.z > clip.w {
+                far += 1;
+            }
+        }
+        left == 8 || right == 8 || top == 8 || bottom == 8 || near == 8 || far == 8
+    }
+
     /// Project a world-space AABB to a screen-space rect `[x, y, w, h]`.
     /// `model` transforms local-space corners; `half` is the half-extents
     /// in local space; `center_y` shifts the local-space box along Y
@@ -326,5 +391,76 @@ impl WgpuRenderer {
         );
         self.queue
             .write_buffer(&self.lit_mesh_ssr_buffer, 0, bytemuck::bytes_of(&g));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_camera() -> CameraFrame {
+        let cam_pos = glam::Vec3::new(0.0, -10.0, 5.0);
+        let look_target = glam::Vec3::new(0.0, 0.0, 0.0);
+        let up_v = glam::Vec3::Z;
+        let fov_y: f32 = 60f32.to_radians();
+        let w = 1280.0;
+        let h = 800.0;
+        let aspect = w / h;
+        let view_mat = Mat4::look_at_rh(cam_pos, look_target, up_v);
+        let proj = Mat4::perspective_rh(fov_y, aspect, 1.0, h * 12.0);
+        let view_proj = proj * view_mat;
+        CameraFrame {
+            cam_pos,
+            look_target,
+            up_v,
+            fov_y,
+            aspect,
+            view_mat,
+            proj,
+            view_proj,
+            view_proj_arr: view_proj.to_cols_array(),
+            w,
+            h,
+        }
+    }
+
+    #[test]
+    fn aabb_outside_frustum_culls_far_left() {
+        let cam = test_camera();
+        // Place a unit cube far to the left of the view target — no chance
+        // it's in the frustum.
+        let model = Mat4::from_translation(glam::Vec3::new(-100.0, 0.0, 0.0));
+        assert!(cam.aabb_outside_frustum(model, [0.5, 0.5, 0.5]));
+    }
+
+    #[test]
+    fn aabb_outside_frustum_culls_behind_camera() {
+        let cam = test_camera();
+        // Behind the camera, well past the eye on the −Y looking axis.
+        let model = Mat4::from_translation(glam::Vec3::new(0.0, -100.0, 5.0));
+        assert!(cam.aabb_outside_frustum(model, [0.5, 0.5, 0.5]));
+    }
+
+    #[test]
+    fn aabb_outside_frustum_keeps_centered_box() {
+        let cam = test_camera();
+        // Right at the look target.
+        let model = Mat4::from_translation(glam::Vec3::ZERO);
+        assert!(!cam.aabb_outside_frustum(model, [0.5, 0.5, 0.5]));
+    }
+
+    #[test]
+    fn aabb_outside_frustum_keeps_partially_visible_box() {
+        let cam = test_camera();
+        // Near the right edge but not fully outside — a giant box.
+        let model = Mat4::from_translation(glam::Vec3::new(8.0, 0.0, 0.0));
+        assert!(!cam.aabb_outside_frustum(model, [4.0, 4.0, 4.0]));
+    }
+
+    #[test]
+    fn aabb_outside_frustum_zero_extent_never_culls() {
+        let cam = test_camera();
+        let model = Mat4::from_translation(glam::Vec3::new(-100.0, 0.0, 0.0));
+        assert!(!cam.aabb_outside_frustum(model, [0.0, 0.0, 0.0]));
     }
 }

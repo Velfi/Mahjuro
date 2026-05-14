@@ -1,6 +1,7 @@
 //! WGPU: depth-tested 3D tile meshes for the hand + 2D UI quads on top.
 
 mod embedded_wgsl;
+mod frame_pool;
 mod init;
 mod init_phases;
 pub(crate) mod resources;
@@ -92,6 +93,7 @@ use crate::render::wood_tablet_mesh::build_wood_tablet_mesh;
 use crate::render::world_space::pixel_to_world;
 use crate::scenes::BackgroundId;
 
+use self::frame_pool::FrameBufferPool;
 use self::resources::*;
 use self::showcase::*;
 
@@ -142,6 +144,14 @@ pub struct WgpuRenderer {
     cascade_offscreen_texture: wgpu::Texture,
     cascade_offscreen_view: wgpu::TextureView,
     cascade_composite_bind_group: wgpu::BindGroup,
+    /// Half-res downsample blit that publishes `scene_color_view` →
+    /// `scene_prev_view` once per frame as the new SSR history input.
+    /// Replaces the old full-res `copy_texture_to_texture` of color
+    /// (~12 MB/frame at 1080p → ~3 MB/frame). Reuses
+    /// `cascade_composite_layout` (texture + sampler) and the
+    /// `cascade_composite_sampler`. See `scene_color_downsample.wgsl`.
+    scene_color_downsample_pipeline: wgpu::RenderPipeline,
+    scene_color_downsample_bind_group: wgpu::BindGroup,
     tile_pipeline_opaque_double: wgpu::RenderPipeline,
     tile_pipeline_opaque_cull: wgpu::RenderPipeline,
     tile_pipeline_blend_double: wgpu::RenderPipeline,
@@ -425,6 +435,15 @@ pub struct WgpuRenderer {
     tonemap_bind_group_layout: wgpu::BindGroupLayout,
     tonemap_params_buffer: wgpu::Buffer,
     tonemap_bind_group: wgpu::BindGroup,
+    /// Alt tonemap bind group whose binding 1 points at `scene_color_view`
+    /// (instead of `post_bloom_view`). Used to skip the scene-composite
+    /// pass when bloom + fisheye + GI are all inactive. See `render.rs`.
+    tonemap_bind_group_scene: wgpu::BindGroup,
+    /// Per-frame bump-allocated GPU buffer pool. Reset at the top of
+    /// every `render()` and used by `runtime/render.rs` for quad-batch,
+    /// gradient/squircle quad, background and text-instance vertex
+    /// uploads. See [`crate::render::wgpu_renderer::frame_pool`].
+    frame_buffer_pool: FrameBufferPool,
     tonemap_shader_module: wgpu::ShaderModule,
     tonemap_pipeline_layout: wgpu::PipelineLayout,
     /// Surface format used when HDR is off (or unavailable).

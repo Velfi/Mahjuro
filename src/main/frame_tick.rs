@@ -228,12 +228,12 @@ impl App {
                     // no bespoke audio file.
                     self.audio.play_relic_trigger(rid);
                     *self.progress.relic_times_activated.entry(rid).or_insert(0) += 1;
-                    let _ = persistence::save_profile(self.active_profile, &self.progress);
+                    self.mark_profile_dirty();
                 }
                 GameEvent::BossEncountered(bk) => {
                     self.audio.play_sfx(audio::SfxId::BossEncountered);
                     *self.progress.boss_times_encountered.entry(bk).or_insert(0) += 1;
-                    let _ = persistence::save_profile(self.active_profile, &self.progress);
+                    self.mark_profile_dirty();
                     // "All bosses seen" — the regular (non-final)
                     // pool is the breadth-of-content signal we want.
                     // Beating Dragon is implied by `FirstRunCompleted`,
@@ -250,7 +250,7 @@ impl App {
                 GameEvent::BossDefeated(bk) => {
                     self.audio.play_sfx(audio::SfxId::BossDefeated);
                     *self.progress.boss_times_defeated.entry(bk).or_insert(0) += 1;
-                    let _ = persistence::save_profile(self.active_profile, &self.progress);
+                    self.mark_profile_dirty();
                     self.steam
                         .unlock_achievement(crate::steam::Achievement::FirstBossDefeated);
                     if bk == crate::core::boss::BossKind::House {
@@ -265,16 +265,16 @@ impl App {
                         .talisman_times_purchased
                         .entry(tk)
                         .or_insert(0) += 1;
-                    let _ = persistence::save_profile(self.active_profile, &self.progress);
+                    self.mark_profile_dirty();
                 }
                 GameEvent::TalismanUsed(tk) => {
                     self.audio.play_sfx(audio::SfxId::TalismanUsed);
                     *self.progress.talisman_times_used.entry(tk).or_insert(0) += 1;
-                    let _ = persistence::save_profile(self.active_profile, &self.progress);
+                    self.mark_profile_dirty();
                 }
                 GameEvent::YakuScored(yk) => {
                     *self.progress.yaku_times_scored.entry(yk).or_insert(0) += 1;
-                    let _ = persistence::save_profile(self.active_profile, &self.progress);
+                    self.mark_profile_dirty();
                     const YAKU_STINGER_SPACING_MS: u64 = 200;
                     let offset = std::time::Duration::from_millis(
                         (yaku_stinger_index as u64) * YAKU_STINGER_SPACING_MS,
@@ -288,7 +288,7 @@ impl App {
                 }
                 GameEvent::TransformationSuccessorDiscovered(rid) => {
                     let _ = self.progress.note_transformation_successor_discovered(rid);
-                    let _ = persistence::save_profile(self.active_profile, &self.progress);
+                    self.mark_profile_dirty();
                 }
                 GameEvent::InfoModal { title, body } => {
                     self.modals.push(Modal::new(title, body, ModalTheme::Info));
@@ -638,22 +638,25 @@ impl App {
                 .is_some_and(|r| r.showcase_decal_atlas_baked()),
             _ => self.renderer.as_ref().is_none_or(|r| !r.is_loading()),
         };
-        let picked_shop_object = self
-            .renderer
-            .as_ref()
-            .and_then(|r| r.pick_shop_object(cursor_pos.0, cursor_pos.1));
-        let picked_gameplay_object = self
-            .renderer
-            .as_ref()
-            .and_then(|r| r.pick_gameplay_object(cursor_pos.0, cursor_pos.1));
-        let picked_collection_object = self
-            .renderer
-            .as_ref()
-            .and_then(|r| r.pick_collection_object(cursor_pos.0, cursor_pos.1));
-        let picked_hand_tile_for_update = self
-            .renderer
-            .as_ref()
-            .and_then(|r| r.pick_hand_tile(cursor_pos.0, cursor_pos.1));
+        // Compute every scene pick once per frame. The same four results
+        // are consumed below for `update` and again later by `draw` (via
+        // `App::frame_picks`). Without this caching, each gameplay frame
+        // pays for two full walks of the per-class matrix lists for
+        // shop/gameplay objects in particular.
+        self.frame_picks = if let Some(r) = self.renderer.as_ref() {
+            FramePicks {
+                hand: r.pick_hand_tile(cursor_pos.0, cursor_pos.1),
+                shop: r.pick_shop_object(cursor_pos.0, cursor_pos.1),
+                gameplay: r.pick_gameplay_object(cursor_pos.0, cursor_pos.1),
+                collection: r.pick_collection_object(cursor_pos.0, cursor_pos.1),
+            }
+        } else {
+            FramePicks::default()
+        };
+        let picked_shop_object = self.frame_picks.shop;
+        let picked_gameplay_object = self.frame_picks.gameplay;
+        let picked_collection_object = self.frame_picks.collection;
+        let picked_hand_tile_for_update = self.frame_picks.hand;
         let scroll_lines = std::mem::take(&mut self.scroll_delta);
         let mut overlay_request: Option<scenes::OverlayRequest> = None;
         let mut rumble_lab_ops: Vec<crate::ui::input::RumbleLabOp> = Vec::new();
@@ -843,7 +846,7 @@ impl App {
 
         if complete_onboarding {
             self.progress.tutorial_completed = true;
-            let _ = persistence::save_profile(self.active_profile, &self.progress);
+            self.mark_profile_dirty();
         }
 
         // Sync live audio/graphics settings whenever the player has
@@ -1014,6 +1017,11 @@ impl App {
         }
 
         self.draw(shell);
+
+        // Hand any progress mutations from this frame's event handlers to
+        // the background saver. Cheap (one clone). The cache is updated
+        // synchronously inside `enqueue` so subsequent loads see fresh data.
+        self.flush_dirty_profile();
 
         // After the splash plate has been presented, run the showcase decal
         // atlas pre-bake. The bake is a synchronous ~3 s of image-resize +

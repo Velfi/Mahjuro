@@ -1,6 +1,10 @@
 use super::*;
 
 impl WgpuRenderer {
+    // `push_arrange_bbox_overlay` takes its dependencies as plain
+    // arguments rather than `&self` so the caller in `render.rs` can
+    // simultaneously hold a `&mut self.frame_buffer_pool`. See the
+    // call site for the borrow-split rationale.
     /// Draw the 2D screen-space rectangle outline around the projected
     /// AABB of the currently selected debug-arrange object, plus the two
     /// clamp-band hint lines that tell the user why a nudge can't move
@@ -9,20 +13,25 @@ impl WgpuRenderer {
     /// No-op when nothing is selected. Pushes one or two `RenderOp::QuadBatch`
     /// entries onto `ops` and the matching vertex buffers onto
     /// `quad_buffers`.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn push_arrange_bbox_overlay(
-        &self,
+        device: &wgpu::Device,
+        debug_arrange_override: Option<&crate::render::wgpu_renderer::DebugArrangeOverride>,
+        last_debug_pickables: &[(String, Mat4, glam::Vec3, f32)],
         frame: &UiFrame,
         camera: &CameraFrame,
-        quad_buffers: &mut Vec<wgpu::Buffer>,
+        pool: &mut crate::render::wgpu_renderer::frame_pool::FrameBufferPool,
+        queue: &wgpu::Queue,
+        quad_buffers: &mut Vec<crate::render::wgpu_renderer::frame_pool::PoolSlice>,
         ops: &mut Vec<RenderOp>,
     ) {
-        let Some(ref ov) = self.debug_arrange_override else {
+        let _ = device;
+        let Some(ov) = debug_arrange_override else {
             return;
         };
         let w = camera.w;
         let h = camera.h;
-        let aabb = self
-            .last_debug_pickables
+        let aabb = last_debug_pickables
             .iter()
             .find(|(n, _, _, _)| n == &ov.name)
             .map(|(_, m, h, o)| (*m, *h, *o));
@@ -53,15 +62,9 @@ impl WgpuRenderer {
                     color,
                 },
             ];
-            let buf = self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("arrange-bbox"),
-                    contents: bytemuck::cast_slice(&border_quads),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
+            let slice = pool.alloc(device, queue, &border_quads);
             let buf_idx = quad_buffers.len();
-            quad_buffers.push(buf);
+            quad_buffers.push(slice);
             ops.push(RenderOp::QuadBatch { buf_idx, count: 4 });
         }
 
@@ -96,15 +99,9 @@ impl WgpuRenderer {
                     ]
                 }
             };
-            let buf = self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("arrange-clamp"),
-                    contents: bytemuck::cast_slice(&clamp_quads),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
+            let slice = pool.alloc(device, queue, &clamp_quads);
             let buf_idx = quad_buffers.len();
-            quad_buffers.push(buf);
+            quad_buffers.push(slice);
             ops.push(RenderOp::QuadBatch { buf_idx, count: 2 });
         }
     }
