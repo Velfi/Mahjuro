@@ -44,6 +44,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         sunlit_water: sunlit_water_shader,
         shooting_star_cascade: shooting_star_cascade_shader,
         cascade_composite: cascade_composite_shader,
+        scene_color_downsample: scene_color_downsample_shader,
         tile_outline: tile_outline_shader,
         tile_glow: tile_glow_shader,
         lit_mesh: lit_mesh_shader,
@@ -966,6 +967,45 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         })
     };
 
+    // Half-res scene_color → scene_prev blit. Reuses the cascade-composite
+    // bind group layout (texture + filtering sampler) for parity with the
+    // existing "tiny fullscreen blit" shader infra.
+    let scene_color_downsample_pipeline = {
+        let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("scene-color-downsample-pl"),
+            bind_group_layouts: &[Some(&cascade_composite_layout)],
+            immediate_size: 0,
+        });
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("scene-color-downsample-pipeline"),
+            layout: Some(&pl),
+            vertex: wgpu::VertexState {
+                module: &scene_color_downsample_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &scene_color_downsample_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: scene_hdr_format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        })
+    };
+
     let tile_vertex_layout = wgpu::VertexBufferLayout {
         array_stride: std::mem::size_of::<Vertex3dTex>() as wgpu::BufferAddress,
         step_mode: wgpu::VertexStepMode::Vertex,
@@ -1332,12 +1372,9 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         mipmap_filter: wgpu::MipmapFilterMode::Nearest,
         ..Default::default()
     });
-    let (scene_prev_texture, scene_prev_view) = create_scene_prev(
-        &device,
-        scene_hdr_format,
-        size.width.max(1),
-        size.height.max(1),
-    );
+    let (scene_prev_w, scene_prev_h) = scene_prev_size(size.width.max(1), size.height.max(1));
+    let (scene_prev_texture, scene_prev_view) =
+        create_scene_prev(&device, scene_hdr_format, scene_prev_w, scene_prev_h);
     let (scene_color_texture, scene_color_view) = create_scene_color(
         &device,
         scene_hdr_format,
@@ -1383,6 +1420,22 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             wgpu::BindGroupEntry {
                 binding: 0,
                 resource: wgpu::BindingResource::TextureView(&cascade_offscreen_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(&cascade_composite_sampler),
+            },
+        ],
+    });
+    // Sampled by the half-res `scene_color → scene_prev` blit each frame.
+    // Rebuilt in `resize()` whenever `scene_color_view` is recreated.
+    let scene_color_downsample_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("scene-color-downsample-bg"),
+        layout: &cascade_composite_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&scene_color_view),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
@@ -2059,6 +2112,29 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             wgpu::BindGroupEntry {
                 binding: 1,
                 resource: wgpu::BindingResource::TextureView(&post_bloom_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Sampler(&bloom_sampler),
+            },
+        ],
+    });
+    // Alternative tonemap bind group that samples the linear HDR scene
+    // directly when bloom + fisheye + GI are all inactive. Lets the
+    // scene-composite-pass be skipped on the Steam Deck baseline (where
+    // bloom is disabled in `EffectLayers::BASELINE`), saving one
+    // fullscreen R16G16B16A16 read+write per frame.
+    let tonemap_bind_group_scene = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("tonemap-pass-scene-bg"),
+        layout: &tonemap_bind_group_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: tonemap_params_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&scene_color_view),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
@@ -3773,6 +3849,16 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         }),
     );
 
+    // Per-frame bump-allocated buffer pool used by the highest-frequency
+    // per-frame instance vertex uploads in `runtime/render.rs`. Created
+    // before the struct literal so the `&device` borrow doesn't conflict
+    // with `device` being moved into the `WgpuRenderer.device` field.
+    let frame_buffer_pool = super::super::frame_pool::FrameBufferPool::new(
+        &device,
+        "frame-buffer-pool",
+        1 << 20,
+    );
+
     Ok(WgpuRenderer {
         target,
         device,
@@ -3803,6 +3889,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         cascade_offscreen_texture,
         cascade_offscreen_view,
         cascade_composite_bind_group,
+        scene_color_downsample_pipeline,
+        scene_color_downsample_bind_group,
         tile_pipeline_opaque_double,
         tile_pipeline_opaque_cull,
         tile_pipeline_blend_double,
@@ -4021,6 +4109,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         tonemap_bind_group_layout,
         tonemap_params_buffer,
         tonemap_bind_group,
+        tonemap_bind_group_scene,
+        frame_buffer_pool,
         tonemap_shader_module,
         tonemap_pipeline_layout,
         swapchain_sdr_format,

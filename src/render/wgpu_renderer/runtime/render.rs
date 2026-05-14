@@ -207,6 +207,13 @@ impl WgpuRenderer {
         };
         let bloom_active = Self::bloom_is_active(frame);
 
+        // Reset the per-frame bump pool. `frame_buffer_pool` backs the
+        // hot quad-batch / text-instance / background-instance vertex
+        // uploads below, replacing per-call `device.create_buffer_init`s
+        // (~11/frame previously) with one growable persistent buffer
+        // and `queue.write_buffer` per allocation.
+        self.frame_buffer_pool.begin_frame();
+
         // Lerp per-tile slide animations toward 0 (ease-out) and advance
         // short-lived departing-tile clocks.
         let dt = self.advance_frame_timers(draw_settle_speed, sort_settle_speed);
@@ -579,24 +586,35 @@ impl WgpuRenderer {
         // ── Walk frame.cmds; build per-cmd GPU resources + a parallel ─────
         // ── ordered op list, batching contiguous Quad runs into a single ──
         // ── instanced draw. ────────────────────────────────────────────────
-        let mut quad_buffers: Vec<wgpu::Buffer> = Vec::new();
-        let mut gradient_quad_buffers: Vec<wgpu::Buffer> = Vec::new();
-        let mut squircle_quad_buffers: Vec<wgpu::Buffer> = Vec::new();
+        // Pool slices for per-frame instance vertex buffers. The
+        // backing storage lives in `self.frame_buffer_pool`; each
+        // `PoolSlice` is `(offset, byte_len)` into that single
+        // persistent buffer. See `frame_pool.rs`.
+        let mut quad_buffers: Vec<crate::render::wgpu_renderer::frame_pool::PoolSlice> =
+            Vec::new();
+        let mut gradient_quad_buffers: Vec<crate::render::wgpu_renderer::frame_pool::PoolSlice> =
+            Vec::new();
+        let mut squircle_quad_buffers: Vec<crate::render::wgpu_renderer::frame_pool::PoolSlice> =
+            Vec::new();
+        // TODO(perf): route flame / tile-face / prompt-icon / tile-glow /
+        // relic-glow / relic-debuff buffers through `frame_buffer_pool`
+        // too. They're lower-frequency than the quad batches and text
+        // instance vertices, but each is still a per-frame
+        // `device.create_buffer_init` that could share the bump pool.
         let mut flame_buffers: Vec<wgpu::Buffer> = Vec::new();
         let mut text_draws: Vec<TextDraw> = Vec::new();
         let mut tile_face_quads: Vec<TileFaceQuad> = Vec::new();
         let mut tile_face_inst_buffers: Vec<wgpu::Buffer> = Vec::new();
         let mut prompt_icon_quads: Vec<crate::render::draw_cmd::PromptIconQuad> = Vec::new();
         let mut prompt_icon_inst_buffers: Vec<wgpu::Buffer> = Vec::new();
-        // Skeuomorphic gameplay HUD cmd buffers (phase 1).
         let yaku_tablet_batches: Vec<&[YakuTabletPlacement]> = Vec::new();
         let wall_stack_cmds: Vec<&WallStackPlacement> = Vec::new();
         let mut showcase_tile_batches: Vec<&[ShowcaseTilePlacement]> = Vec::new();
         let mut object3d_cmds: Vec<&[crate::render::draw_cmd::Object3d]> = Vec::new();
-        // Flat draw list built during the Object3d pre-pass: (DrawKind, slot_i).
         let mut object3d_draw_list: Vec<(DrawKind, usize)> = Vec::new();
         let mut ops: Vec<RenderOp> = Vec::new();
-        let mut bg_inst_buffers: Vec<wgpu::Buffer> = Vec::new();
+        let mut bg_inst_buffers: Vec<crate::render::wgpu_renderer::frame_pool::PoolSlice> =
+            Vec::new();
 
         let mut i = 0;
         while i < frame.cmds.len() {
@@ -608,15 +626,13 @@ impl WgpuRenderer {
                         rect: [0.0, 0.0, ww, wh],
                         color: id.image_vertex_color(),
                     };
-                    let buf = self
-                        .device
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("bg-inst"),
-                            contents: bytemuck::cast_slice(&[bg_inst]),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        });
+                    let slice = self.frame_buffer_pool.alloc(
+                        &self.device,
+                        &self.queue,
+                        std::slice::from_ref(&bg_inst),
+                    );
                     let buf_idx = bg_inst_buffers.len();
-                    bg_inst_buffers.push(buf);
+                    bg_inst_buffers.push(slice);
                     ops.push(RenderOp::Background { id: *id, buf_idx });
                     i += 1;
                 }
@@ -681,21 +697,14 @@ impl WgpuRenderer {
                     i += 1;
                 }
                 DrawCmd::Quad(_) => {
-                    // Collect contiguous run of Quad cmds into a single batch.
                     let mut batch: Vec<GpuInstance> = Vec::new();
                     while let Some(DrawCmd::Quad(inst)) = frame.cmds.get(i) {
                         batch.push(*inst);
                         i += 1;
                     }
-                    let buf = self
-                        .device
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("quad-batch"),
-                            contents: bytemuck::cast_slice(&batch),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        });
+                    let slice = self.frame_buffer_pool.alloc(&self.device, &self.queue, &batch);
                     let buf_idx = quad_buffers.len();
-                    quad_buffers.push(buf);
+                    quad_buffers.push(slice);
                     ops.push(RenderOp::QuadBatch {
                         buf_idx,
                         count: batch.len() as u32,
@@ -707,15 +716,9 @@ impl WgpuRenderer {
                         batch.push(*inst);
                         i += 1;
                     }
-                    let buf = self
-                        .device
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("gradient-quad-batch"),
-                            contents: bytemuck::cast_slice(&batch),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        });
+                    let slice = self.frame_buffer_pool.alloc(&self.device, &self.queue, &batch);
                     let buf_idx = gradient_quad_buffers.len();
-                    gradient_quad_buffers.push(buf);
+                    gradient_quad_buffers.push(slice);
                     ops.push(RenderOp::GradientQuadBatch {
                         buf_idx,
                         count: batch.len() as u32,
@@ -727,15 +730,9 @@ impl WgpuRenderer {
                         batch.push(*inst);
                         i += 1;
                     }
-                    let buf = self
-                        .device
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("squircle-quad-batch"),
-                            contents: bytemuck::cast_slice(&batch),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        });
+                    let slice = self.frame_buffer_pool.alloc(&self.device, &self.queue, &batch);
                     let buf_idx = squircle_quad_buffers.len();
-                    squircle_quad_buffers.push(buf);
+                    squircle_quad_buffers.push(slice);
                     ops.push(RenderOp::SquircleQuadBatch {
                         buf_idx,
                         count: batch.len() as u32,
@@ -1043,7 +1040,21 @@ impl WgpuRenderer {
         }
 
         // ── Arrange-mode bounding box overlay ──────────────────────────────
-        self.push_arrange_bbox_overlay(frame, &camera, &mut quad_buffers, &mut ops);
+        // Borrow-split: `push_arrange_bbox_overlay` reads only
+        // `device` / `debug_arrange_override` / `last_debug_pickables`
+        // off `self`, so we hand it its dependencies directly to keep
+        // `frame_buffer_pool` mutably borrowable alongside.
+        Self::push_arrange_bbox_overlay(
+            &self.device,
+            self.debug_arrange_override.as_ref(),
+            &self.last_debug_pickables,
+            frame,
+            &camera,
+            &mut self.frame_buffer_pool,
+            &self.queue,
+            &mut quad_buffers,
+            &mut ops,
+        );
 
         // Relic activation halo buffer — built from `relic_glows` populated
         // during the relic projection loop above. Drawn through the same
@@ -1141,6 +1152,7 @@ impl WgpuRenderer {
         // tonemapping to the journal target.
         let process_ctx_scene = ProcessOpCtx {
             frame,
+            frame_pool_buffer: self.frame_buffer_pool.buffer(),
             bg_inst_buffers: &bg_inst_buffers,
             quad_buffers: &quad_buffers,
             gradient_quad_buffers: &gradient_quad_buffers,
@@ -1167,6 +1179,7 @@ impl WgpuRenderer {
             is_prepass || matches!(self.config.format, wgpu::TextureFormat::Rgba16Float);
         let process_ctx_overlay = ProcessOpCtx {
             frame,
+            frame_pool_buffer: self.frame_buffer_pool.buffer(),
             bg_inst_buffers: &bg_inst_buffers,
             quad_buffers: &quad_buffers,
             gradient_quad_buffers: &gradient_quad_buffers,
@@ -1488,9 +1501,7 @@ impl WgpuRenderer {
                 }
                 self.write_shop_environment_uniforms(frame, &camera, false);
             }
-            if ops
-                .iter()
-                .any(|o| matches!(o, RenderOp::HallwayEnvironment))
+            if ops_flags.hallway_env
                 && self.hallway_environment.is_some()
                 && !self.hallway_env_primitives.is_empty()
             {
@@ -1534,9 +1545,7 @@ impl WgpuRenderer {
                 }
                 self.write_hallway_environment_uniforms(frame, &camera, false);
             }
-            if ops
-                .iter()
-                .any(|o| matches!(o, RenderOp::ArchiveEnvironment))
+            if ops_flags.archive_env
                 && self.archive_environment.is_some()
                 && !self.archive_env_primitives.is_empty()
             {
@@ -1582,44 +1591,59 @@ impl WgpuRenderer {
             }
         }
 
-        if glb_room_bloom_linear && !is_prepass {
-            let room_aabb = if ops_flags.shop_env {
-                crate::render::shop_glb::with_shop_glb_cpu(|cpu| {
-                    cpu.and_then(|c| {
-                        let corners = crate::render::shop_glb::shop_world_bounds_corners_centered(
-                            camera.h,
-                            self.room_gltf_height_scale,
-                            c,
-                        );
-                        crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
+        // GI compute / apply / composite are only meaningful when we have
+        // a real room AABB to march through. Resolve once here so the
+        // composite block below shares the same gate, dropping the
+        // clear-only pass + redundant composite when there's no room
+        // (loading frames, scenes that pull in `glb_room_bloom_linear`
+        // before the GLB has parsed, etc.).
+        let room_gi_aabb: Option<(glam::Vec3, glam::Vec3)> =
+            if glb_room_bloom_linear && !is_prepass {
+                if ops_flags.shop_env {
+                    crate::render::shop_glb::with_shop_glb_cpu(|cpu| {
+                        cpu.and_then(|c| {
+                            let corners =
+                                crate::render::shop_glb::shop_world_bounds_corners_centered(
+                                    camera.h,
+                                    self.room_gltf_height_scale,
+                                    c,
+                                );
+                            crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
+                        })
                     })
-                })
-            } else if ops_flags.hallway_env {
-                crate::render::hallway_glb::with_hallway_glb_cpu(|cpu| {
-                    cpu.and_then(|c| {
-                        let corners = crate::render::shop_glb::shop_world_bounds_corners_centered(
-                            camera.h,
-                            self.room_gltf_height_scale,
-                            c,
-                        );
-                        crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
+                } else if ops_flags.hallway_env {
+                    crate::render::hallway_glb::with_hallway_glb_cpu(|cpu| {
+                        cpu.and_then(|c| {
+                            let corners =
+                                crate::render::shop_glb::shop_world_bounds_corners_centered(
+                                    camera.h,
+                                    self.room_gltf_height_scale,
+                                    c,
+                                );
+                            crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
+                        })
                     })
-                })
-            } else if ops_flags.archive_env {
-                crate::render::archive_glb::with_archive_glb_cpu(|cpu| {
-                    cpu.and_then(|c| {
-                        let corners = crate::render::shop_glb::shop_world_bounds_corners_centered(
-                            camera.h,
-                            self.room_gltf_height_scale,
-                            c,
-                        );
-                        crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
+                } else if ops_flags.archive_env {
+                    crate::render::archive_glb::with_archive_glb_cpu(|cpu| {
+                        cpu.and_then(|c| {
+                            let corners =
+                                crate::render::shop_glb::shop_world_bounds_corners_centered(
+                                    camera.h,
+                                    self.room_gltf_height_scale,
+                                    c,
+                                );
+                            crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
+                        })
                     })
-                })
+                } else {
+                    None
+                }
             } else {
                 None
             };
+        let gi_runs_this_frame = room_gi_aabb.is_some();
 
+        if gi_runs_this_frame {
             let [nx, ny, nz] = crate::render::shop_glb::ROOM_EMISSIVE_PROBE_GRID;
             let probe_count = nx * ny * nz;
             debug_assert!(probe_count <= crate::render::shop_glb::ROOM_EMISSIVE_PROBE_MAX);
@@ -1628,22 +1652,13 @@ impl WgpuRenderer {
             let gw = self.size.width.max(1) as f32;
             let gh = self.size.height.max(1) as f32;
 
-            let (mn, mx) = if let Some((a, b)) = room_aabb {
-                (a, b)
-            } else {
-                (glam::Vec3::ZERO, glam::Vec3::ZERO)
-            };
+            let (mn, mx) = room_gi_aabb.expect("gi_runs_this_frame implies Some");
             let gi = crate::render::wgpu_renderer::ProbeGiFrameUniform {
                 inv_view_proj: inv_vp.to_cols_array(),
                 view_proj: camera.view_proj_arr,
                 world_min: [mn.x, mn.y, mn.z, 0.0],
                 world_max: [mx.x, mx.y, mx.z, 0.0],
-                grid_dims: [
-                    nx,
-                    ny,
-                    nz,
-                    if room_aabb.is_some() { probe_count } else { 0 },
-                ],
+                grid_dims: [nx, ny, nz, probe_count],
                 screen_march: [
                     gw,
                     gh,
@@ -1664,7 +1679,7 @@ impl WgpuRenderer {
                 bytemuck::bytes_of(&gi),
             );
 
-            if room_aabb.is_some() && probe_count > 0 {
+            if probe_count > 0 {
                 {
                     let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                         label: Some("emissive-probe-update-pass"),
@@ -1672,7 +1687,7 @@ impl WgpuRenderer {
                     });
                     cpass.set_pipeline(&self.emissive_probe_update_pipeline);
                     cpass.set_bind_group(0, &self.emissive_probe_update_bind_group, &[]);
-                    let wg = (probe_count + 63) / 64;
+                    let wg = probe_count.div_ceil(64);
                     cpass.dispatch_workgroups(wg, 1, 1);
                 }
                 {
@@ -1696,23 +1711,6 @@ impl WgpuRenderer {
                     pass.set_bind_group(0, &self.emissive_probe_apply_bind_group, &[]);
                     pass.draw(0..3, 0..1);
                 }
-            } else {
-                let _ = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("emissive-probe-clear-pass"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &self.emissive_gi_view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                            store: wgpu::StoreOp::Store,
-                        },
-                        depth_slice: None,
-                    })],
-                    depth_stencil_attachment: None,
-                    occlusion_query_set: None,
-                    timestamp_writes: None,
-                    multiview_mask: None,
-                });
             }
         }
 
@@ -1737,25 +1735,39 @@ impl WgpuRenderer {
             && surface_kind == crate::persistence::SurfaceKind::Walnut
             && ops_flags.needs_table;
         if ssr_writes_history {
-            encoder.copy_texture_to_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &self.scene_color_texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                wgpu::TexelCopyTextureInfo {
-                    texture: &self.scene_prev_texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                wgpu::Extent3d {
-                    width: self.size.width.max(1),
-                    height: self.size.height.max(1),
-                    depth_or_array_layers: 1,
-                },
-            );
+            // Half-res blit replaces the old full-res
+            // `copy_texture_to_texture` of `scene_color → scene_prev`.
+            // `scene_prev_texture` is allocated at half size (see
+            // `scene_prev_size` / `create_scene_prev`), so a fullscreen
+            // triangle that samples `scene_color_view` at the half-res
+            // viewport gives a 4-tap-equivalent bilinear box filter — a
+            // little softer than the previous exact copy, but SSR
+            // already integrates over reflection rays so the loss is
+            // imperceptible. Bandwidth: ~16 MB → ~4 MB at 1080p.
+            let mut ds_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("scene-color-downsample-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.scene_prev_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            ds_pass.set_pipeline(&self.scene_color_downsample_pipeline);
+            ds_pass.set_bind_group(0, &self.scene_color_downsample_bind_group, &[]);
+            ds_pass.draw(0..3, 0..1);
+            drop(ds_pass);
+            // Depth is still copied at full resolution (`ssr_prev_depth_texture`
+            // matches `depth_texture`). The lit_mesh SSR sampler reads both
+            // via normalised UVs so the size mismatch with `scene_prev` is
+            // fine. A future change can downsample depth to halve this too.
             encoder.copy_texture_to_texture(
                 wgpu::TexelCopyTextureInfo {
                     texture: &self.depth_texture,
@@ -1915,7 +1927,19 @@ impl WgpuRenderer {
             }
         }
 
-        {
+        // The scene-composite pass applies bloom + fisheye + vignette and
+        // produces `post_bloom_view` for tonemap (and as an additive
+        // target for GI). When all three are inactive, the pass collapses
+        // to a fullscreen copy `scene_color → post_bloom`. On the Steam
+        // Deck baseline that's a ~16 MB read+write per frame at 1080p
+        // for nothing — skip it and have tonemap sample `scene_color`
+        // directly via `tonemap_bind_group_scene`. GI's additive
+        // composite still wants `post_bloom_view` as a stable target
+        // (it `LoadOp::Load`s and adds), so when GI runs we keep the
+        // copy.
+        let skip_scene_composite =
+            !bloom_active && fisheye_strength == 0.0 && !gi_runs_this_frame;
+        if !skip_scene_composite {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene-composite-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1937,7 +1961,7 @@ impl WgpuRenderer {
             pass.draw(0..3, 0..1);
         }
 
-        if glb_room_bloom_linear && !is_prepass {
+        if gi_runs_this_frame {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("emissive-gi-composite-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -2004,7 +2028,15 @@ impl WgpuRenderer {
                 multiview_mask: None,
             });
             pass.set_pipeline(tonemap_pipe);
-            pass.set_bind_group(0, &self.tonemap_bind_group, &[]);
+            // When the scene-composite pass was skipped, `post_bloom_view`
+            // holds whatever the previous frame left in it — sample
+            // `scene_color_view` directly instead.
+            let tonemap_bg = if skip_scene_composite {
+                &self.tonemap_bind_group_scene
+            } else {
+                &self.tonemap_bind_group
+            };
+            pass.set_bind_group(0, tonemap_bg, &[]);
             pass.draw(0..3, 0..1);
         }
 

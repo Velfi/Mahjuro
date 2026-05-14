@@ -434,12 +434,11 @@ impl App {
             self.active_profile,
             self.run.is_in_progress(),
             renderer.projections(),
-            self.input
-                .as_ref()
-                .and_then(|i| renderer.pick_gameplay_object(i.last_cursor.0, i.last_cursor.1)),
-            self.input
-                .as_ref()
-                .and_then(|i| renderer.pick_shop_object(i.last_cursor.0, i.last_cursor.1)),
+            // Reuse the frame_tick pick cache; both are computed against
+            // the same cursor and frame matrices, and walking the AABB
+            // tests twice per frame for free was the prior behavior.
+            self.frame_picks.gameplay,
+            self.frame_picks.shop,
             scenes::DebugVisibility {
                 hide_candles: self.debug.hide_candles,
                 hide_blind_plaque: self.debug.hide_blind_plaque,
@@ -486,7 +485,13 @@ impl App {
             .camera_override
             .unwrap_or_else(|| CameraParams::default_table_camera(h));
 
-        let _ = shell.window.set_title(&frame.window_title);
+        // SDL3 → Wayland/X11 charges a syscall on every set_title; only
+        // call when the title actually changes. The title rarely moves
+        // outside of debug toggles or scene transitions.
+        if frame.window_title != self.last_window_title {
+            let _ = shell.window.set_title(&frame.window_title);
+            self.last_window_title = frame.window_title.clone();
+        }
         self.active_buttons = frame.buttons.clone();
 
         // Click-safety wipe: if any modal-like overlay is up, scene buttons

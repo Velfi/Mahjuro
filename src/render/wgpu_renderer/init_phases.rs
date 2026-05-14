@@ -75,6 +75,9 @@ pub(super) struct RendererShaderPack {
     pub sunlit_water: wgpu::ShaderModule,
     pub shooting_star_cascade: wgpu::ShaderModule,
     pub cascade_composite: wgpu::ShaderModule,
+    /// Half-res blit that downsamples `scene_color_view` into the SSR
+    /// history target each frame; see `scene_color_downsample.wgsl`.
+    pub scene_color_downsample: wgpu::ShaderModule,
     pub tile_outline: wgpu::ShaderModule,
     pub tile_glow: wgpu::ShaderModule,
     pub lit_mesh: wgpu::ShaderModule,
@@ -147,6 +150,10 @@ pub(super) fn create_renderer_shader_modules(device: &wgpu::Device) -> RendererS
         cascade_composite: device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("cascade-composite-pipeline"),
             source: wgpu::ShaderSource::Wgsl(embedded_wgsl::SHOOTING_STAR_CASCADE_COMPOSITE.into()),
+        }),
+        scene_color_downsample: device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("scene-color-downsample"),
+            source: wgpu::ShaderSource::Wgsl(embedded_wgsl::SCENE_COLOR_DOWNSAMPLE.into()),
         }),
         tile_outline: device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("tile-outline-shader"),

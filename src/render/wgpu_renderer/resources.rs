@@ -576,6 +576,12 @@ pub(crate) fn create_depth(
 /// before the candles each frame, so it has to reflect *last* frame's
 /// composited candles + flames + tiles. The camera is fixed, so the
 /// one-frame stale image is essentially correct.
+///
+/// Allocated at half the visible resolution (`width / 2`, `height / 2`)
+/// — see `scene_color_downsample.wgsl`. The lit_mesh SSR sampler reads
+/// it with normalized UVs so any size works. Texture is a render
+/// attachment because the downsample blit writes to it directly
+/// (the old full-res `copy_texture_to_texture` path is gone).
 pub(super) fn create_scene_prev(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
@@ -593,11 +599,18 @@ pub(super) fn create_scene_prev(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
         view_formats: &[],
     });
     let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
     (tex, view)
+}
+
+/// Returns the `(width, height)` to allocate `scene_prev_texture` at,
+/// given the swapchain's full size. Centralised so the init path and
+/// the resize path can't drift.
+pub(super) fn scene_prev_size(full_width: u32, full_height: u32) -> (u32, u32) {
+    ((full_width / 2).max(1), (full_height / 2).max(1))
 }
 
 pub(super) fn create_scene_color(

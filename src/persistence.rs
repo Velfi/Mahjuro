@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::sync::mpsc;
 use std::sync::{Mutex, OnceLock};
 
 use anyhow::Context;
@@ -650,16 +651,101 @@ fn load_profile_uncached(index: usize) -> PlayerProgress {
 }
 
 pub fn save_profile(index: usize, progress: &PlayerProgress) -> anyhow::Result<()> {
+    write_profile_to_disk(index, progress)?;
+    update_profile_cache(index, progress);
+    Ok(())
+}
+
+fn write_profile_to_disk(index: usize, progress: &PlayerProgress) -> anyhow::Result<()> {
     let json = serde_json::to_string_pretty(progress).context("serialize")?;
     fs::write(profile_path(index), json).context("write save")?;
-    // Update the cache so subsequent `load_profile` calls (e.g. the
-    // gameplay event bus saving + reloading the same profile in quick
-    // succession during a scoring cascade) skip the disk round-trip.
+    Ok(())
+}
+
+fn update_profile_cache(index: usize, progress: &PlayerProgress) {
     let idx = index.min(MAX_PROFILES - 1);
     if let Ok(mut guard) = profile_cache().lock() {
         guard[idx] = Some(progress.clone());
     }
-    Ok(())
+}
+
+/// Background-thread profile saver. Pairs with `App::mark_profile_dirty`
+/// + a frame-end flush so per-event saves (relic activation, boss
+/// bookkeeping, yaku tally, …) don't stall the frame on slow disks
+/// (Steam Deck SD card installs are the motivating case).
+///
+/// `enqueue` updates the in-process [`profile_cache`] synchronously so
+/// any subsequent `load_profile` sees fresh state immediately, then
+/// hands a snapshot to the worker for serialization + write. The
+/// worker coalesces back-to-back queued saves per profile index — a
+/// scoring cascade that fires N save events the same frame turns into
+/// at most one write per profile.
+pub struct ProfileSaver {
+    tx: Option<mpsc::Sender<(usize, PlayerProgress)>>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ProfileSaver {
+    pub fn spawn() -> Self {
+        let (tx, rx) = mpsc::channel::<(usize, PlayerProgress)>();
+        let handle = std::thread::Builder::new()
+            .name("profile-saver".to_string())
+            .spawn(move || profile_saver_loop(rx))
+            .expect("spawn profile-saver thread");
+        Self {
+            tx: Some(tx),
+            handle: Some(handle),
+        }
+    }
+
+    /// Update the in-memory cache synchronously, then send a snapshot
+    /// for background disk write. Best-effort — channel send failure
+    /// (worker exited) is logged but never propagated.
+    pub fn enqueue(&self, index: usize, progress: &PlayerProgress) {
+        update_profile_cache(index, progress);
+        if let Some(tx) = self.tx.as_ref()
+            && let Err(e) = tx.send((index.min(MAX_PROFILES - 1), progress.clone()))
+        {
+            log::warn!("profile-saver enqueue failed: {e}");
+        }
+    }
+
+    /// Drop the sender and join the worker so any pending writes land
+    /// before the process exits. Idempotent; called from `Drop`.
+    pub fn shutdown(&mut self) {
+        self.tx.take();
+        if let Some(handle) = self.handle.take()
+            && let Err(e) = handle.join()
+        {
+            log::warn!("profile-saver thread join failed: {e:?}");
+        }
+    }
+}
+
+impl Drop for ProfileSaver {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+fn profile_saver_loop(rx: mpsc::Receiver<(usize, PlayerProgress)>) {
+    while let Ok((idx, progress)) = rx.recv() {
+        // Coalesce: drain anything already buffered and keep the
+        // latest snapshot per profile index. Multiple saves landing
+        // on the same frame collapse into one write.
+        let mut latest: [Option<PlayerProgress>; MAX_PROFILES] = [const { None }; MAX_PROFILES];
+        latest[idx.min(MAX_PROFILES - 1)] = Some(progress);
+        while let Ok((idx2, progress2)) = rx.try_recv() {
+            latest[idx2.min(MAX_PROFILES - 1)] = Some(progress2);
+        }
+        for (j, snap) in latest.iter().enumerate() {
+            if let Some(p) = snap
+                && let Err(e) = write_profile_to_disk(j, p)
+            {
+                log::warn!("profile-saver: write_profile_to_disk({j}) failed: {e}");
+            }
+        }
+    }
 }
 
 /// Check if a profile has any save data on disk.

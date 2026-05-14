@@ -21,6 +21,7 @@ pub const SUNLIT_WATER: &str = wgsl_file!("sunlit_water.wgsl");
 pub const SHOOTING_STAR_CASCADE: &str = wgsl_file!("shooting_star_cascade.wgsl");
 pub const SHOOTING_STAR_CASCADE_COMPOSITE: &str =
     wgsl_file!("shooting_star_cascade_composite.wgsl");
+pub const SCENE_COLOR_DOWNSAMPLE: &str = wgsl_file!("scene_color_downsample.wgsl");
 pub const TILE_GLOW: &str = wgsl_file!("tile_glow.wgsl");
 pub const SHADOW: &str = wgsl_file!("shadow.wgsl");
 pub const IMAGE_QUAD: &str = wgsl_file!("image_quad.wgsl");
