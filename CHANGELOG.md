@@ -7,6 +7,22 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.5.0-9 — 2026-05-14
+
+### Added
+- Archive cubby zodiac ribbons are now a tunable arrange-mode target (`collection.cubby_zodiac`) so the whole row of ribbons can be re-centred inside their cubbies without editing each cell. Previously the cubby ribbons fell through the renderer's `arrange_name` default and reported as `shop.for_sale.ribbons` — a placement that doesn't exist on the Archive scene, so confirms only landed on the clipboard.
+- Optional VHS overlay in Options → Visual ("VHS overlay: ON/OFF"). Adds a subtle creepy-footage look — soft scanlines, vignette, low-amplitude grain, and micro chromatic aberration. Off by default. Tuned to stay accessible: HUD text and tile faces remain legible, no flashing or hue swings, and the journal-page pre-pass deliberately skips the effect so the in-game journal never accumulates artifacts.
+
+### Changed
+- Archive Back and Switch save buttons are now reachable from controller and keyboard. Pressing Up from the top cabinet row parks focus on the title-bar chrome (column-nearest of Back / Switch save); Down from the bottom row enters the footer Prev / Next arrows. A / Enter on a focused chrome button activates it, and a brass focus ring (matching the rest of the menu) reads in both controller and cursor modes.
+- Added two named theme tokens — **`LAPIS`** (sky-blue, the cool counterpart to `RUBY`) and **`PORCELAIN_AGED`** (well-loved ceramic cream, distinct from `PARCHMENT` paper) — and a `CascadeTokenKind::color()` helper that funnels the score-popup, cascade-HUD label, and 3D cascade-token meshes through a single Chips→`LAPIS` / Mult→`RUBY` mapping. Score-popup constants now resolve to `LAPIS / RUBY / RELIC_GOLD / TALLOW` instead of four drifting literals; the consumable dish, action-prompt legend, and shop legend ceramic surfaces now share `PORCELAIN_AGED`. See `COLOR_THEME.md` and `python3 tools/color_inventory.py` for the audit.
+- Color palette renamed from "Midnight Gold" to **"Walnut, Brass & Felt"** to match how the game actually looks. Added felt-green, twilight-indigo, lacquer-black, cinnabar-red, and tallow-cream as named tokens — round-win modals now sit on lit felt with a brass border instead of an ad-hoc olive panel. Full design rationale lives in `COLOR_THEME.md`; run `python3 tools/palette_preview.py` to render the new palette sheet.
+- Zodiac silk ribbons now use a single tall portrait texture per zodiac (`zodiac_<slug>.png`) instead of a fragile 3-piece tile set (`_top` / `_mid` / `_bot`). `gpt-image-2` accepts portrait aspects up to 3:1 directly, so the entire ribbon — finial, embroidered animal, and tasselled tip — is generated in one shot. Renderer collapses to one mesh + one bind group per ribbon (3× fewer draw slots used per zodiac), shadow caster does the same, and `scripts/generate_zodiac_ribbons.py` is half the size with no joining-edge prompt hacks. Re-run the script to regenerate art (the 42 old `_top/_mid/_bot.png` files have been removed).
+
+### Fixed
+- Archive relic close-up now decals the relic flavor onto a single visible description sign instead of leaving both boards blank while printing the flavor in champagne text under the close-up. Sign side selection runs in inspect mode too (using the eased inspect camera and the existing cursor / focused-slot reference X), so the chosen board sits opposite the player's reference point as in grid mode. Locked relics and non-relic artifacts get the standard `name + body` decal on the same sign instead of the previous floating tooltip panel.
+- Tile-pack celebration: pack mesh and reveal-row tiles are visible again. The default `celeb_pack_closeup` placement (and any saved arrange-mode override that mirrored those values) had drifted to a near-top, sub-felt position that pushed the pack out of frame.
+
 ## 0.5.0-8 — 2026-05-13
 
 ### Changed
