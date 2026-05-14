@@ -27,6 +27,7 @@
 //! mirror/bowl convention so per-instance scale supplies the true size.
 
 use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu};
+use crate::render::theme::color;
 use crate::render::tile_glb::Vertex3dTex;
 
 /// Half-width of the tray body in local space.
@@ -248,13 +249,13 @@ pub fn build_reliquary_tray_mesh() -> MeshCpu {
     MeshCpu {
         vertices,
         indices,
-        // Deep obsidian-lacquer body. Phase 2 will add a brass rim overlay
-        // and emissive pulse driven by the structure bank's depth
-        // multiplier; for now a single dark dielectric reads as "tray",
-        // not "placeholder."
+        // Deep obsidian-lacquer body — `TWILIGHT_INK` reads as the cool
+        // counterpoint to the surrounding warm walnut. Phase 2 will add a
+        // brass rim overlay and emissive pulse driven by the structure
+        // bank's depth multiplier.
         default_material: MaterialParams {
             kind: MaterialKind::LacqueredWood,
-            base_color: [0.06, 0.07, 0.12, 1.0],
+            base_color: color::TWILIGHT_INK,
             specular_strength: 0.55,
             specular_power: 96.0,
         },

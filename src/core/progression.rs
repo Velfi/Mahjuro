@@ -1,7 +1,8 @@
 //! Meta progression and unlocks.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::core::boss::BossKind;
@@ -192,23 +193,23 @@ impl PlayerProgress {
 
     pub fn new() -> Self {
         Self {
-            unlocked_relics: HashSet::new(),
-            unlocked_rules: HashSet::new(),
+            unlocked_relics: HashSet::default(),
+            unlocked_rules: HashSet::default(),
             high_scores: Vec::new(),
             runs_completed: 0,
             bonus_plays: 0,
             starting_relic_slots: 0,
             tutorial_completed: false,
             has_won: false,
-            boss_times_encountered: HashMap::new(),
-            boss_times_defeated: HashMap::new(),
-            talisman_times_purchased: HashMap::new(),
-            talisman_times_used: HashMap::new(),
-            yaku_times_scored: HashMap::new(),
-            relic_times_activated: HashMap::new(),
+            boss_times_encountered: HashMap::default(),
+            boss_times_defeated: HashMap::default(),
+            talisman_times_purchased: HashMap::default(),
+            talisman_times_used: HashMap::default(),
+            yaku_times_scored: HashMap::default(),
+            relic_times_activated: HashMap::default(),
             run_history: Vec::new(),
             unlocked_stakes: BTreeMap::new(),
-            discovered_transformation_successors: HashSet::new(),
+            discovered_transformation_successors: HashSet::default(),
         }
     }
 
@@ -488,8 +489,8 @@ pub struct LevelUpResult {
 /// level 14 a catch-all so newly added relics are reachable without editing
 /// this file.
 fn level_14_relics() -> Vec<RelicId> {
-    use std::collections::HashSet;
-    let earlier: HashSet<RelicId> = (1..=13).flat_map(|l| unlocks_for_level(l).relics).collect();
+    let earlier: rustc_hash::FxHashSet<RelicId> =
+        (1..=13).flat_map(|l| unlocks_for_level(l).relics).collect();
     crate::core::relic::all_relic_defs()
         .iter()
         .map(|d| d.id)
@@ -777,10 +778,11 @@ mod tests {
     #[test]
     fn every_active_relic_is_level_or_transformation_successor() {
         use crate::core::relic::all_relic_defs;
-        use std::collections::HashSet;
-        let unlocked: HashSet<RelicId> =
+        use rustc_hash::FxHashSet;
+        let unlocked: FxHashSet<RelicId> =
             (1..=14).flat_map(|l| unlocks_for_level(l).relics).collect();
-        let successors: HashSet<RelicId> = transformation_successor_relic_ids().iter().copied().collect();
+        let successors: FxHashSet<RelicId> =
+            transformation_successor_relic_ids().iter().copied().collect();
         let missing: Vec<RelicId> = all_relic_defs()
             .iter()
             .map(|d| d.id)
@@ -794,8 +796,8 @@ mod tests {
 
     #[test]
     fn no_relic_appears_in_two_levels() {
-        use std::collections::HashMap;
-        let mut seen: HashMap<RelicId, u32> = HashMap::new();
+        use rustc_hash::FxHashMap;
+        let mut seen: FxHashMap<RelicId, u32> = FxHashMap::default();
         for l in 1..=14u32 {
             for r in unlocks_for_level(l).relics {
                 if let Some(prev) = seen.insert(r, l) {
@@ -880,7 +882,7 @@ mod tests {
             times_restocked: 0,
             best_structure_score: 400,
             best_structure_name: "Pair".to_string(),
-            yaku_times_played: HashMap::new(),
+            yaku_times_played: HashMap::default(),
             relics_owned: vec![],
             consumables_owned: vec![],
             tile_material: TileMaterial::Bamboo,

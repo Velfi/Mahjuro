@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::mpsc;
 use std::time::Instant;
 
@@ -6,6 +6,7 @@ use super::*;
 
 use crate::core::tile_pack::TilePackKind;
 use crate::render::gpu_types::RelicTextureGpu;
+use crate::render::theme::color;
 
 /// Linear HDR color format for the main 3D scene, bloom chain, and journal
 /// GPU scene target — independent of swapchain (SDR vs HDR).
@@ -36,51 +37,32 @@ pub(super) fn relic_material_params(
 ) -> MaterialParams {
     let visual = relic_visual(relic_id);
     let g = glow.clamp(0.0, 1.0);
-    match visual.material {
-        RelicRenderMaterial::Iron => MaterialParams {
-            kind: MaterialKind::Enamel,
-            base_color: [
-                0.42 + base_color[0] * 0.14,
-                0.44 + base_color[1] * 0.14,
-                0.48 + base_color[2] * 0.14,
-                base_color[3],
-            ],
-            specular_strength: 0.38 + 0.18 * g,
-            specular_power: 26.0,
-        },
-        RelicRenderMaterial::Copper => MaterialParams {
-            kind: MaterialKind::Enamel,
-            base_color: [
-                0.78 + base_color[0] * 0.16,
-                0.46 + base_color[1] * 0.14,
-                0.26 + base_color[2] * 0.10,
-                base_color[3],
-            ],
-            specular_strength: 0.52 + 0.22 * g,
-            specular_power: 34.0,
-        },
-        RelicRenderMaterial::Silver => MaterialParams {
-            kind: MaterialKind::Enamel,
-            base_color: [
-                0.82 + base_color[0] * 0.14,
-                0.84 + base_color[1] * 0.14,
-                0.88 + base_color[2] * 0.12,
-                base_color[3],
-            ],
-            specular_strength: 0.78 + 0.22 * g,
-            specular_power: 64.0,
-        },
-        RelicRenderMaterial::Gold => MaterialParams {
-            kind: MaterialKind::Enamel,
-            base_color: [
-                0.94 + base_color[0] * 0.14,
-                0.78 + base_color[1] * 0.14,
-                0.28 + base_color[2] * 0.10,
-                base_color[3],
-            ],
-            specular_strength: 0.88 + 0.24 * g,
-            specular_power: 80.0,
-        },
+
+    // Each metal tier is `RELIC_<METAL>` (the rarity-keyed body color, see
+    // `theme::color`) plus a small per-channel admixture of the per-relic
+    // `base_color`, so individual relics in the same tier shift slightly
+    // around the canonical metal hue without leaving the palette.
+    //
+    // Per-channel scales bias each tier toward its character: copper-bronze
+    // and gold push red harder and cap blue, silver lifts blue a touch less,
+    // iron is symmetric. Pulled from the original literals so the visual
+    // baseline is unchanged by the token switch.
+    let (metal, scale, spec_base, spec_glow, spec_pow) = match visual.material {
+        RelicRenderMaterial::Iron => (color::RELIC_IRON, [0.14, 0.14, 0.14], 0.38, 0.18, 26.0),
+        RelicRenderMaterial::Copper => (color::RELIC_COPPER, [0.16, 0.14, 0.10], 0.52, 0.22, 34.0),
+        RelicRenderMaterial::Silver => (color::RELIC_SILVER, [0.14, 0.14, 0.12], 0.78, 0.22, 64.0),
+        RelicRenderMaterial::Gold => (color::RELIC_GOLD, [0.14, 0.14, 0.10], 0.88, 0.24, 80.0),
+    };
+    MaterialParams {
+        kind: MaterialKind::Enamel,
+        base_color: [
+            metal[0] + base_color[0] * scale[0],
+            metal[1] + base_color[1] * scale[1],
+            metal[2] + base_color[2] * scale[2],
+            base_color[3],
+        ],
+        specular_strength: spec_base + spec_glow * g,
+        specular_power: spec_pow,
     }
 }
 
@@ -460,8 +442,8 @@ pub(super) fn load_pack_textures(
     text_layout: &wgpu::BindGroupLayout,
     sampler: &wgpu::Sampler,
     default_relief_view: &wgpu::TextureView,
-) -> HashMap<TilePackKind, RelicTextureGpu> {
-    let mut map = HashMap::new();
+) -> FxHashMap<TilePackKind, RelicTextureGpu> {
+    let mut map = FxHashMap::default();
     for &kind in TilePackKind::all() {
         let asset_path = format!("textures/tile_packs/{}", kind.asset_filename());
         let bytes = match crate::asset_path::get(&asset_path) {

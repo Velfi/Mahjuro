@@ -220,7 +220,7 @@ impl WgpuRenderer {
         // instance the draw-pass will select.
         {
             use crate::render::primitive::{MeshId, shape_orientation};
-            let mut cursors: HashMap<MeshId, usize> = HashMap::new();
+            let mut cursors: rustc_hash::FxHashMap<MeshId, usize> = rustc_hash::FxHashMap::default();
             for cmd in frame.cmds.iter() {
                 let objs: Box<dyn Iterator<Item = &crate::render::draw_cmd::Object3d>> = match cmd {
                     DrawCmd::Object3d(o) => Box::new(std::iter::once(o)),

@@ -10,6 +10,7 @@
 use std::f32::consts::TAU;
 
 use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu};
+use crate::render::theme::color;
 use crate::render::tile_glb::Vertex3dTex;
 
 const SIDES: usize = 16;
@@ -133,7 +134,7 @@ pub fn build_coin_mesh() -> MeshCpu {
             kind: MaterialKind::Metal,
             // Bright polished gold; per-instance color overrides this and
             // also tints the metallic specular lobe in the shader.
-            base_color: [1.00, 0.78, 0.30, 1.0],
+            base_color: color::RELIC_GOLD,
             specular_strength: 1.0,
             specular_power: 96.0,
         },

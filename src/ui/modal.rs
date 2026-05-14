@@ -173,13 +173,17 @@ impl Fireworks {
     /// wide a 6px spark is a single dot, but scaling with the spread
     /// keeps the motes legible at TV distance.
     fn spawn_one(&mut self, rng: &mut impl rand::RngExt) {
+        use crate::render::theme::color;
         // Warm palette: champagne / amber / soft gold. Subtle hue
         // variance so the swarm doesn't read as a flat monochrome dust.
+        // Anchored on the CHAMPAGNE and TALLOW tokens; the other two
+        // entries are deliberate brighter/darker variants that round out
+        // the swarm.
         let palette: [[f32; 3]; 4] = [
-            [1.00, 0.86, 0.55], // champagne
-            [0.96, 0.78, 0.45], // gold
-            [1.00, 0.72, 0.38], // amber
-            [0.95, 0.90, 0.74], // pale ivory
+            [1.00, 0.86, 0.55], // champagne shoulder, brighter than the token
+            [color::CHAMPAGNE[0], color::CHAMPAGNE[1], color::CHAMPAGNE[2]],
+            [1.00, 0.72, 0.38], // amber shoulder, warmer than the AMBER token
+            [color::TALLOW[0], color::TALLOW[1], color::TALLOW[2]],
         ];
         let color = palette[rng.random_range(0..palette.len())];
         let x = self.spawn_center_x + (rng.random::<f32>() - 0.5) * self.spawn_spread;

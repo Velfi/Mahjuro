@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use crate::audio::SfxId;
 use crate::core::boss::{all_bosses, final_bosses};
-use crate::core::relic::{Rarity, RelicId, all_relic_defs};
+use crate::core::relic::{RelicId, all_relic_defs};
 use crate::core::talisman::TalismanKind;
 use crate::core::yaku::YakuKind;
 use crate::core::zodiac::ZodiacKind;
@@ -1027,7 +1027,7 @@ impl CollectionScene {
             pos: [focus_px_x, cab_px_y - cell * 0.5, focus_world_z],
             extents: [backing_w, backing_h, cell * 0.1],
             rotation: euler_xyz_rad_from_deg(90.0, 0.0, 0.0),
-            color: [0.10, 0.07, 0.04, 1.0],
+            color: color::WALNUT_DEEP,
             kind: Object3dKind::Primitive {
                 shape: crate::render::primitive::MeshId::BeveledSlab,
                 material: crate::render::primitive::MaterialSpec::lacquered_wood_flat(),
@@ -1487,7 +1487,7 @@ impl CollectionScene {
                     pos: stats_base,
                     extents: [card_w, stats_h, stats_h * 0.06],
                     rotation: euler_xyz_rad_from_deg(90.0, 0.0, 0.0),
-                    color: [0.26, 0.22, 0.16, 1.0],
+                    color: color::WALNUT_BRIGHT,
                     kind: Object3dKind::Primitive {
                         shape: MeshId::BeveledSlab,
                         material: MaterialSpec::lacquered_wood_flat().with_decal(DecalSpec {
@@ -1626,7 +1626,7 @@ impl CollectionScene {
                     frieze_line_h,
                 ],
                 text: line,
-                color: [0.86, 0.84, 0.78, 0.96],
+                color: color::alpha(color::PORCELAIN_AGED, 0.96),
                 font_px: Some(frieze_font_px),
                 align: TextAlign::Left,
                 ..Default::default()
@@ -2400,7 +2400,7 @@ fn tab_artifacts(tab: Tab, progress: &crate::core::progression::PlayerProgress) 
                     name: d.name.to_string(),
                     unlocked: true,
                     kind: ArtifactKind::Relic(d.id),
-                    accent: rarity_accent(d.rarity),
+                    accent: color::rarity(d.rarity.tier()),
                 })
                 .collect()
         }
@@ -3358,11 +3358,3 @@ fn compute_layout(w: f32, h: f32, scale: f32, _tab: Tab, item_count: usize) -> S
     }
 }
 
-fn rarity_accent(r: Rarity) -> [f32; 4] {
-    match r {
-        Rarity::Common => [0.65, 0.65, 0.70, 1.0],
-        Rarity::Uncommon => [0.55, 0.85, 0.65, 1.0],
-        Rarity::Rare => [0.55, 0.70, 0.95, 1.0],
-        Rarity::Legendary => [0.95, 0.75, 0.45, 1.0],
-    }
-}

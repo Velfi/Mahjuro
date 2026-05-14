@@ -2,7 +2,7 @@
 //!
 //! See the parent [`crate::core::hand`] module for the public `validate_selection` / `find_*` API.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::core::rules::RuleModifier;
 use crate::core::tile::Suit;
@@ -16,8 +16,8 @@ type DecompositionKey = Vec<(MeldKind, Vec<(Suit, u8)>)>;
 
 /// Group tiles by face (suit+rank), keeping one id list per face key.
 /// Flower tiles are excluded — they're wildcards, not a groupable face.
-fn face_groups(tiles: &[Tile]) -> HashMap<(Suit, u8), Vec<u32>> {
-    let mut m = HashMap::new();
+fn face_groups(tiles: &[Tile]) -> FxHashMap<(Suit, u8), Vec<u32>> {
+    let mut m: FxHashMap<(Suit, u8), Vec<u32>> = FxHashMap::default();
     for t in tiles {
         if t.is_flower() {
             continue;
@@ -136,7 +136,7 @@ pub fn enumerate_decompositions(tiles: &[Tile], rules: &[RuleModifier]) -> Vec<V
     let require_honor = rules.contains(&RuleModifier::RequireHonor);
 
     let mut all: Vec<Vec<DetectedMeld>> = Vec::new();
-    let mut seen: HashSet<DecompositionKey> = HashSet::new();
+    let mut seen: FxHashSet<DecompositionKey> = FxHashSet::default();
 
     let tile_lookup = |id: u32| tiles.iter().find(|t| t.id == id).copied();
     let canonicalize = |sets: &[DetectedMeld]| -> DecompositionKey {
@@ -556,36 +556,40 @@ pub(super) fn try_kokushi_musou(tiles: &[Tile]) -> Option<Vec<DetectedMeld>> {
 /// Handles arbitrarily many flowers (e.g. from Wildflower talisman).
 pub(super) fn flower_meld_partitions(flower_ids: &[u32]) -> Vec<(Vec<DetectedMeld>, Vec<u32>)> {
     let mut results = Vec::new();
-    flower_meld_partitions_recurse(flower_ids, vec![], &mut results);
+    // Push/pop into a single shared scratch buffer instead of cloning
+    // `melds_so_far` at every recursion level — was O(2^n) cloning with
+    // Wildflower talisman in play.
+    let mut scratch: Vec<DetectedMeld> = Vec::new();
+    flower_meld_partitions_recurse(flower_ids, &mut scratch, &mut results);
     results
 }
 
 fn flower_meld_partitions_recurse(
     remaining: &[u32],
-    melds_so_far: Vec<DetectedMeld>,
+    scratch: &mut Vec<DetectedMeld>,
     results: &mut Vec<(Vec<DetectedMeld>, Vec<u32>)>,
 ) {
     // Base: leave all remaining as wildcards.
-    results.push((melds_so_far.clone(), remaining.to_vec()));
+    results.push((scratch.clone(), remaining.to_vec()));
 
     // Try consuming a pair.
     if remaining.len() >= 2 {
-        let mut melds = melds_so_far.clone();
-        melds.push(DetectedMeld {
+        scratch.push(DetectedMeld {
             kind: MeldKind::Pair,
             tile_ids: vec![remaining[0], remaining[1]],
         });
-        flower_meld_partitions_recurse(&remaining[2..], melds, results);
+        flower_meld_partitions_recurse(&remaining[2..], scratch, results);
+        scratch.pop();
     }
 
     // Try consuming a triplet.
     if remaining.len() >= 3 {
-        let mut melds = melds_so_far.clone();
-        melds.push(DetectedMeld {
+        scratch.push(DetectedMeld {
             kind: MeldKind::Triplet,
             tile_ids: vec![remaining[0], remaining[1], remaining[2]],
         });
-        flower_meld_partitions_recurse(&remaining[3..], melds, results);
+        flower_meld_partitions_recurse(&remaining[3..], scratch, results);
+        scratch.pop();
     }
 }
 

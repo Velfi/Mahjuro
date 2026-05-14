@@ -40,8 +40,10 @@ impl WgpuRenderer {
                 look.z.atan2(look.y.abs()).to_degrees() + 180.0
             };
 
-            let mut obj3d_primitive_slot: HashMap<crate::render::primitive::MeshId, usize> =
-                HashMap::new();
+            let mut obj3d_primitive_slot: rustc_hash::FxHashMap<
+                crate::render::primitive::MeshId,
+                usize,
+            > = rustc_hash::FxHashMap::default();
             let mut obj3d_yaku_slot: usize = 0;
             let mut obj3d_wood_slot: usize = 0;
             let mut obj3d_book_slot: usize = 0;
@@ -1101,10 +1103,7 @@ impl WgpuRenderer {
                                 ),
                             );
                             let model = self.apply_arrange_override(cascade_token_name, model);
-                            let base = match ck {
-                                CascadeTokenKind::Chips => [0.55, 0.78, 1.00, 1.0],
-                                CascadeTokenKind::Mult => [0.85, 0.32, 0.42, 1.0],
-                            };
+                            let base = ck.color();
                             let material = MaterialParams {
                                 kind: MaterialKind::Plain,
                                 base_color: base,

@@ -25,6 +25,7 @@
 //! ```
 
 use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu, push_quad};
+use crate::render::theme::color;
 use crate::render::tile_glb::Vertex3dTex;
 
 /// Hexagonal column body radius (apothem-style: distance from local Z
@@ -314,7 +315,7 @@ pub fn build_cabinet_rails_mesh() -> MeshCpu {
             kind: MaterialKind::Metal,
             // Warm brass tint; the Metal shader drives Schlick Fresnel
             // against this base colour for the conductor look.
-            base_color: [0.86, 0.65, 0.32, 1.0],
+            base_color: color::GOLD,
             specular_strength: 0.85,
             specular_power: 96.0,
         },

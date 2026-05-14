@@ -167,7 +167,7 @@ impl SceneBehavior for YakuJournalScene {
         frame.scene_lighting.push_smooth(PointLight {
             pos: [w * 0.5, h * -0.10, h * 1.40],
             radius: h * 3.0,
-            color: [1.0, 0.96, 0.88],
+            color: color::rgb(color::PARCHMENT),
             intensity: 1.2,
         });
 
@@ -486,7 +486,7 @@ fn draw_sealed_slab(
     });
     frame.quad(GpuInstance {
         rect: [x + inset, y + inset, w - inset * 2.0, h - inset * 2.0],
-        color: [0.14, 0.10, 0.08, 1.0],
+        color: color::WALNUT_RAISED,
     });
 
     // Wax seal — stacked discs. Outer shadow ring sits slightly offset
@@ -506,7 +506,7 @@ fn draw_sealed_slab(
             seal_d,
             seal_d,
         ],
-        color: color::alpha([0.05, 0.02, 0.01, 1.0], 0.55),
+        color: color::alpha(color::WALNUT_INK, 0.55),
     });
     // Dark wax ring.
     frame.quad(GpuInstance {
@@ -571,7 +571,7 @@ fn draw_mystery_name_pill(
             pill_w,
             pill_h,
         ],
-        color: color::alpha([0.08, 0.04, 0.02, 1.0], 0.35),
+        color: color::alpha(color::WALNUT_DEEP, 0.35),
     });
     frame.quad(GpuInstance {
         rect: [pill_x, top_y, pill_w, pill_h],
@@ -657,7 +657,7 @@ fn draw_plaque(
     // double-layered for softness. Gives the plaque a clearer sense of
     // floating above the wood rather than being painted on it.
     let shadow_scale = (h / 1080.0).max(1.0);
-    let shadow_warm = [0.08, 0.04, 0.02, 1.0];
+    let shadow_warm = color::WALNUT_DEEP;
     // Far, soft shadow.
     frame.quad(GpuInstance {
         rect: [
@@ -782,7 +782,7 @@ fn draw_plaque(
             pill_w,
             pill_h,
         ],
-        color: color::alpha([0.08, 0.04, 0.02, 1.0], 0.35),
+        color: color::alpha(color::WALNUT_DEEP, 0.35),
     });
     frame.quad(GpuInstance {
         rect: [pill_x, pill_y, pill_w, pill_h],

@@ -652,12 +652,7 @@ impl HeadlessApp {
             .find(|d| d.name == "Kong Collector")
             .or_else(|| defs.first())
             .expect("at least one relic must be defined");
-        let accent = match chosen.rarity {
-            crate::core::relic::Rarity::Common => render::theme::color::rarity(0),
-            crate::core::relic::Rarity::Uncommon => render::theme::color::rarity(1),
-            crate::core::relic::Rarity::Rare => render::theme::color::rarity(2),
-            crate::core::relic::Rarity::Legendary => render::theme::color::rarity(3),
-        };
+        let accent = render::theme::color::rarity(chosen.rarity.tier());
         let page = UnlockPage {
             category: "New Relic".into(),
             name: chosen.name.into(),

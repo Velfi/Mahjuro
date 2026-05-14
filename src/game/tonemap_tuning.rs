@@ -16,7 +16,7 @@
 //! off, every per-scene VHS amount is ignored.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 /// Per-scene tonemap + VHS knobs. All terms are read by
 /// `shaders/tonemap_composite.wgsl`; ranges chosen so the slider in the
@@ -124,7 +124,7 @@ pub const KNOWN_SCENE_KEYS: &[&str] = &[
 #[derive(Clone, Debug, Default)]
 pub struct TonemapTuningSet {
     pub default_tuning: TonemapTuning,
-    pub per_scene: HashMap<String, TonemapTuning>,
+    pub per_scene: FxHashMap<String, TonemapTuning>,
 }
 
 impl TonemapTuningSet {
@@ -135,7 +135,7 @@ impl TonemapTuningSet {
         let default_tuning = crate::persistence::load_tuning_override::<TonemapTuning>(
             &storage_key(FALLBACK_SCENE_KEY),
         );
-        let mut per_scene = HashMap::new();
+        let mut per_scene = FxHashMap::default();
         for &key in KNOWN_SCENE_KEYS {
             // `load_tuning_override` returns `T::default()` when the key
             // is absent; we only want entries that actually live on disk

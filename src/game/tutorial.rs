@@ -4,7 +4,7 @@
 //! It introduces mechanics one lesson at a time across 9 blinds (3 antes),
 //! then hands off to the normal progression system.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use serde::{Deserialize, Serialize};
 
@@ -79,7 +79,7 @@ pub struct TutorialState {
     /// Current lesson (1-indexed). Lessons advance when a blind is beaten.
     pub current_lesson: u32,
     /// Lessons whose blind has been beaten.
-    pub completed_lessons: HashSet<u32>,
+    pub completed_lessons: FxHashSet<u32>,
     /// Whether the player dismissed the current hint banner.
     pub hint_dismissed: bool,
     /// Sub-step within the current lesson (drives contextual prompts).
@@ -89,13 +89,13 @@ pub struct TutorialState {
     /// Consecutive failures on the current blind (drives adaptive difficulty).
     pub retry_count: u32,
     /// Milestones already celebrated (prevents repeat fireworks).
-    pub celebrated: HashSet<TutorialMilestone>,
+    pub celebrated: FxHashSet<TutorialMilestone>,
     /// Whether the annotated (slow-mo) cascade has been shown this lesson.
     pub cascade_annotated: bool,
     /// Whether the player has opened the Meld Guide during this lesson.
     pub meld_guide_opened: bool,
     /// First-encounter tooltips already shown (persists across lessons).
-    pub encounters_shown: HashSet<FirstEncounter>,
+    pub encounters_shown: FxHashSet<FirstEncounter>,
 }
 
 impl Default for TutorialState {
@@ -108,15 +108,15 @@ impl TutorialState {
     pub fn new(starting_lesson: u32) -> Self {
         Self {
             current_lesson: starting_lesson,
-            completed_lessons: HashSet::new(),
+            completed_lessons: FxHashSet::default(),
             hint_dismissed: false,
             sub_step: 0,
             finished: false,
             retry_count: 0,
-            celebrated: HashSet::new(),
+            celebrated: FxHashSet::default(),
             cascade_annotated: false,
             meld_guide_opened: false,
-            encounters_shown: HashSet::new(),
+            encounters_shown: FxHashSet::default(),
         }
     }
 

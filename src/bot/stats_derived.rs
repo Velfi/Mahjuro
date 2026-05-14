@@ -635,7 +635,7 @@ pub fn derived_from_aggregate(a: &AggregateStats, yaku_kind_count: usize) -> Bot
             })
             .collect();
         rows.sort_by(|a, b| b.awards.cmp(&a.awards).then_with(|| a.name.cmp(&b.name)));
-        let awarded: std::collections::HashSet<&str> = a.yaku_scored.keys().copied().collect();
+        let awarded: rustc_hash::FxHashSet<&str> = a.yaku_scored.keys().copied().collect();
         let mut never_awarded: Vec<String> = YakuKind::all()
             .iter()
             .filter(|yk| !awarded.contains(yk.name()))

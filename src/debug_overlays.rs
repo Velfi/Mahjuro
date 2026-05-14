@@ -6,7 +6,7 @@ use crate::audio;
 use crate::game::cascade::CascadeTuning;
 use crate::game::tonemap_tuning::{TONEMAP_SLIDER_META, TonemapTuning};
 use crate::render::draw_cmd::CameraParams;
-use crate::render::theme::metrics;
+use crate::render::theme::{color, metrics};
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::ui::input::UiAction;
 use sdl3::keyboard::Scancode;
@@ -104,7 +104,7 @@ impl DebugVisibilityOverlay {
         // Dim full-screen backdrop.
         instances.push(GpuInstance {
             rect: [0.0, 0.0, window_w, window_h],
-            color: [0.0, 0.0, 0.0, 0.7],
+            color: color::alpha(color::LACQUER, 0.7),
         });
 
         let panel_w = (440.0 * scale).min(window_w * 0.90);
@@ -129,19 +129,19 @@ impl DebugVisibilityOverlay {
                 panel_w + border * 2.0,
                 panel_h + border * 2.0,
             ],
-            color: [0.3, 0.45, 0.7, 0.85],
+            color: color::alpha(color::TWILIGHT_GLOW, 0.85),
         });
         // Panel.
         instances.push(GpuInstance {
             rect: [panel_x, panel_y, panel_w, panel_h],
-            color: [0.08, 0.08, 0.14, 0.95],
+            color: color::alpha(color::TWILIGHT_INK, 0.95),
         });
 
         // Title.
         labels.push(TextLabel {
             rect: [panel_x, panel_y + row_gap, panel_w, title_h],
             text: "Debug Visibility".into(),
-            color: [1.0, 0.95, 0.7, 1.0],
+            color: color::TALLOW,
             ..Default::default()
         });
 
@@ -154,9 +154,9 @@ impl DebugVisibilityOverlay {
 
             // Row background.
             let bg = if is_focused {
-                [0.20, 0.32, 0.50, 0.90]
+                color::alpha(color::TWILIGHT_GLOW, 0.85)
             } else {
-                [0.12, 0.15, 0.24, 0.75]
+                color::alpha(color::TWILIGHT, 0.75)
             };
             instances.push(GpuInstance {
                 rect: [panel_x + 4.0, row_y, panel_w - 8.0, row_h],
@@ -168,11 +168,11 @@ impl DebugVisibilityOverlay {
             let cb_y = row_y + (row_h - check_size) * 0.5;
             instances.push(GpuInstance {
                 rect: [cb_x - 2.0, cb_y - 2.0, check_size + 4.0, check_size + 4.0],
-                color: [0.55, 0.65, 0.85, 0.9],
+                color: color::alpha(color::STONE, 0.9),
             });
             instances.push(GpuInstance {
                 rect: [cb_x, cb_y, check_size, check_size],
-                color: [0.04, 0.05, 0.10, 1.0],
+                color: color::TWILIGHT_INK,
             });
             // Filled square when checked.
             if checked {
@@ -184,15 +184,15 @@ impl DebugVisibilityOverlay {
                         check_size - pad * 2.0,
                         check_size - pad * 2.0,
                     ],
-                    color: [0.95, 0.80, 0.30, 1.0],
+                    color: color::GOLD,
                 });
             }
 
             // Label.
             let tc = if is_focused {
-                [1.0, 1.0, 1.0, 1.0]
+                color::PARCHMENT
             } else {
-                [0.7, 0.72, 0.82, 0.9]
+                color::alpha(color::STONE, 0.9)
             };
             labels.push(TextLabel {
                 rect: [
@@ -213,7 +213,7 @@ impl DebugVisibilityOverlay {
         labels.push(TextLabel {
             rect: [panel_x, row_y + row_gap, panel_w, footer_h],
             text: "\u{2191}/\u{2193} select   \u{23ce} toggle   Esc close".into(),
-            color: [0.55, 0.6, 0.75, 0.9],
+            color: color::alpha(color::STONE, 0.75),
             ..Default::default()
         });
 
@@ -305,7 +305,7 @@ impl TuningOverlay {
         // Dim overlay background.
         instances.push(GpuInstance {
             rect: [0.0, 0.0, window_w, window_h],
-            color: [0.0, 0.0, 0.0, 0.7],
+            color: color::alpha(color::LACQUER, 0.7),
         });
 
         // Panel dimensions.
@@ -327,7 +327,7 @@ impl TuningOverlay {
         // Panel background.
         instances.push(GpuInstance {
             rect: [panel_x, panel_y, panel_w, panel_h],
-            color: [0.08, 0.08, 0.14, 0.95],
+            color: color::alpha(color::TWILIGHT_INK, 0.95),
         });
         // Panel border.
         let border = 3.0;
@@ -338,19 +338,19 @@ impl TuningOverlay {
                 panel_w + border * 2.0,
                 panel_h + border * 2.0,
             ],
-            color: [0.3, 0.45, 0.7, 0.8],
+            color: color::alpha(color::TWILIGHT_GLOW, 0.8),
         });
         // Re-draw panel on top of border.
         instances.push(GpuInstance {
             rect: [panel_x, panel_y, panel_w, panel_h],
-            color: [0.08, 0.08, 0.14, 0.95],
+            color: color::alpha(color::TWILIGHT_INK, 0.95),
         });
 
         // Title.
         labels.push(TextLabel {
             rect: [panel_x, panel_y + row_gap, panel_w, title_h],
             text: "Cascade Tuning".into(),
-            color: [1.0, 0.95, 0.7, 1.0],
+            color: color::TALLOW,
             ..Default::default()
         });
 
@@ -365,7 +365,7 @@ impl TuningOverlay {
                 panel_w - diag_pad * 2.0,
                 diagram_h,
             ],
-            color: [0.06, 0.06, 0.10, 0.9],
+            color: color::alpha(color::TWILIGHT_INK, 0.9),
         });
         // Draw timeline segments proportional to actual values.
         let total_ms =
@@ -375,10 +375,10 @@ impl TuningOverlay {
         let bar_h = (16.0 * scale).max(10.0);
         let bar_y = cursor_y + diagram_h * 0.35;
         let colors: [[f32; 4]; 4] = [
-            [0.35, 0.65, 0.90, 0.9], // base hold (blue)
-            [0.55, 0.80, 0.45, 0.9], // step 1 (green)
-            [0.45, 0.70, 0.35, 0.9], // step 2 (green darker)
-            [0.90, 0.75, 0.30, 0.9], // total hold (gold)
+            color::alpha(color::TWILIGHT_GLOW, 0.9), // base hold (twilight)
+            color::alpha(color::JADE, 0.9),          // step 1 (jade)
+            color::alpha(color::FELT_LIT, 0.9),      // step 2 (felt, darker)
+            color::alpha(color::GOLD, 0.9),          // total hold (brass)
         ];
         let segments: [u64; 4] = [
             self.tuning.base_hold_ms,
@@ -399,7 +399,7 @@ impl TuningOverlay {
                 labels.push(TextLabel {
                     rect: [seg_x, bar_y, seg_w, bar_h],
                     text: seg_labels[i].to_string(),
-                    color: [0.0, 0.0, 0.0, 0.9],
+                    color: color::alpha(color::LACQUER, 0.9),
                     ..Default::default()
                 });
             }
@@ -414,7 +414,7 @@ impl TuningOverlay {
                 diagram_h * 0.28,
             ],
             text: "Timeline: Base > Steps (x N) > Total".into(),
-            color: [0.6, 0.6, 0.7, 0.8],
+            color: color::alpha(color::STONE, 0.8),
             ..Default::default()
         });
         // Tick duration annotation.
@@ -430,7 +430,7 @@ impl TuningOverlay {
                 "Score counter ticks over {}ms per phase",
                 self.tuning.tick_duration_ms
             ),
-            color: [0.5, 0.5, 0.6, 0.7],
+            color: color::alpha(color::STONE, 0.7),
             ..Default::default()
         });
 
@@ -495,9 +495,9 @@ impl TuningOverlay {
 
             // Row background.
             let bg = if is_focused {
-                [0.20, 0.32, 0.50, 0.90]
+                color::alpha(color::TWILIGHT_GLOW, 0.85)
             } else {
-                [0.12, 0.15, 0.24, 0.75]
+                color::alpha(color::TWILIGHT, 0.75)
             };
             instances.push(GpuInstance {
                 rect: [panel_x + 4.0, row_y, panel_w - 8.0, row_h + desc_h],
@@ -506,9 +506,9 @@ impl TuningOverlay {
 
             // Label.
             let tc = if is_focused {
-                [1.0, 1.0, 1.0, 1.0]
+                color::PARCHMENT
             } else {
-                [0.6, 0.6, 0.7, 0.9]
+                color::alpha(color::STONE, 0.9)
             };
             labels.push(TextLabel {
                 rect: [panel_x + 12.0 * scale, row_y, label_w, row_h],
@@ -526,7 +526,7 @@ impl TuningOverlay {
                     desc_h,
                 ],
                 text: desc.to_string(),
-                color: [0.45, 0.45, 0.55, 0.7],
+                color: color::alpha(color::UMBER, 0.85),
                 ..Default::default()
             });
 
@@ -536,16 +536,16 @@ impl TuningOverlay {
             let track_y = row_y + (row_h - track_h) * 0.5;
             instances.push(GpuInstance {
                 rect: [track_x, track_y, slider_w, track_h],
-                color: [0.08, 0.08, 0.14, 1.0],
+                color: color::TWILIGHT_INK,
             });
 
             // Slider fill.
             let t = (*value as f32 - TUNING_MIN_MS as f32) / (TUNING_MAX_MS - TUNING_MIN_MS) as f32;
             let fill_w = slider_w * t.clamp(0.0, 1.0);
             let fill_color = if is_focused {
-                [0.35, 0.65, 0.90, 1.0]
+                color::TWILIGHT_GLOW
             } else {
-                [0.22, 0.42, 0.62, 0.85]
+                color::alpha(color::TWILIGHT_GLOW, 0.7)
             };
             instances.push(GpuInstance {
                 rect: [track_x, track_y, fill_w, track_h],
@@ -559,9 +559,9 @@ impl TuningOverlay {
             instances.push(GpuInstance {
                 rect: [knob_x, knob_y, knob_size, knob_size],
                 color: if is_focused {
-                    [0.9, 0.9, 1.0, 1.0]
+                    color::PARCHMENT
                 } else {
-                    [0.6, 0.6, 0.7, 0.9]
+                    color::alpha(color::STONE, 0.9)
                 },
             });
 
@@ -579,9 +579,9 @@ impl TuningOverlay {
         let export_y = cursor_y + TUNING_SLIDER_ROWS as f32 * row_total_h;
         let is_focused = self.cursor == TUNING_ROW_COUNT - 1;
         let bg = if is_focused {
-            [0.25, 0.45, 0.30, 0.95]
+            color::alpha(color::FELT_LIT, 0.95)
         } else {
-            [0.15, 0.20, 0.18, 0.85]
+            color::alpha(color::FELT_DEEP, 0.85)
         };
         instances.push(GpuInstance {
             rect: [panel_x + 4.0, export_y, panel_w - 8.0, row_h],
@@ -591,9 +591,9 @@ impl TuningOverlay {
             rect: [panel_x, export_y, panel_w, row_h],
             text: "Export as JSON".into(),
             color: if is_focused {
-                [1.0, 1.0, 1.0, 1.0]
+                color::PARCHMENT
             } else {
-                [0.6, 0.6, 0.7, 0.9]
+                color::alpha(color::STONE, 0.9)
             },
             ..Default::default()
         });
@@ -603,7 +603,7 @@ impl TuningOverlay {
         labels.push(TextLabel {
             rect: [panel_x, hint_y, panel_w, row_h * 0.6],
             text: "Left/Right: adjust   Esc: close".into(),
-            color: [0.4, 0.4, 0.5, 0.6],
+            color: color::alpha(color::UMBER, 0.7),
             ..Default::default()
         });
 
@@ -686,7 +686,7 @@ impl SfxTestOverlay {
         // Dim overlay background.
         instances.push(GpuInstance {
             rect: [0.0, 0.0, window_w, window_h],
-            color: [0.0, 0.0, 0.0, 0.7],
+            color: color::alpha(color::LACQUER, 0.7),
         });
 
         let ids = audio::all_sfx_ids();
@@ -711,19 +711,19 @@ impl SfxTestOverlay {
                 panel_w + border * 2.0,
                 panel_h + border * 2.0,
             ],
-            color: [0.55, 0.45, 0.20, 0.85],
+            color: color::alpha(color::ANTIQUE, 0.85),
         });
         // Panel background (theme WALNUT_DEEP — dark walnut).
         instances.push(GpuInstance {
             rect: [panel_x, panel_y, panel_w, panel_h],
-            color: [0.06, 0.07, 0.14, 0.97],
+            color: color::alpha(color::TWILIGHT_INK, 0.97),
         });
 
         // Title.
         labels.push(TextLabel {
             rect: [panel_x, panel_y + pad, panel_w, title_h],
             text: "Sound Effects Test".into(),
-            color: [1.0, 0.85, 0.45, 1.0],
+            color: color::CHAMPAGNE,
             ..Default::default()
         });
 
@@ -737,9 +737,9 @@ impl SfxTestOverlay {
             let is_focused = self.cursor == i;
 
             let bg = if is_focused {
-                [0.30, 0.26, 0.50, 0.95]
+                color::alpha(color::TWILIGHT_GLOW, 0.85)
             } else {
-                [0.10, 0.12, 0.20, 0.80]
+                color::alpha(color::TWILIGHT, 0.80)
             };
             instances.push(GpuInstance {
                 rect: [panel_x + 4.0, row_y, panel_w - 8.0, row_h],
@@ -747,9 +747,9 @@ impl SfxTestOverlay {
             });
 
             let tc = if is_focused {
-                [1.0, 0.92, 0.60, 1.0]
+                color::TALLOW
             } else {
-                [0.65, 0.65, 0.78, 0.95]
+                color::alpha(color::STONE, 0.95)
             };
             // Variant name (left).
             let name_w = panel_w * 0.32;
@@ -778,7 +778,7 @@ impl SfxTestOverlay {
         labels.push(TextLabel {
             rect: [panel_x, hint_y, panel_w, hint_h],
             text: "Up/Down: select   Enter/Click: play   Esc: close".into(),
-            color: [0.55, 0.55, 0.65, 0.75],
+            color: color::alpha(color::STONE, 0.75),
             ..Default::default()
         });
 
@@ -939,19 +939,19 @@ impl CameraDebugOverlay {
                 panel_w + border * 2.0,
                 panel_h + border * 2.0,
             ],
-            color: [0.55, 0.45, 0.20, 0.85],
+            color: color::alpha(color::ANTIQUE, 0.85),
         });
         // Panel background.
         instances.push(GpuInstance {
             rect: [panel_x, panel_y, panel_w, panel_h],
-            color: [0.06, 0.07, 0.14, 0.97],
+            color: color::alpha(color::TWILIGHT_INK, 0.97),
         });
 
         // Title.
         labels.push(TextLabel {
             rect: [panel_x, panel_y + pad, panel_w, title_h],
             text: "Camera Debug".into(),
-            color: [1.0, 0.85, 0.45, 1.0],
+            color: color::CHAMPAGNE,
             ..Default::default()
         });
 
@@ -962,9 +962,9 @@ impl CameraDebugOverlay {
             let is_focused = self.cursor == i;
 
             let bg = if is_focused {
-                [0.30, 0.26, 0.50, 0.95]
+                color::alpha(color::TWILIGHT_GLOW, 0.85)
             } else {
-                [0.10, 0.12, 0.20, 0.80]
+                color::alpha(color::TWILIGHT, 0.80)
             };
             instances.push(GpuInstance {
                 rect: [panel_x + 4.0, row_y, panel_w - 8.0, row_h],
@@ -972,9 +972,9 @@ impl CameraDebugOverlay {
             });
 
             let tc = if is_focused {
-                [1.0, 0.92, 0.60, 1.0]
+                color::TALLOW
             } else {
-                [0.65, 0.65, 0.78, 0.95]
+                color::alpha(color::STONE, 0.95)
             };
             // Label (left).
             let name_w = panel_w * 0.50;
@@ -1003,7 +1003,7 @@ impl CameraDebugOverlay {
         labels.push(TextLabel {
             rect: [panel_x, hint_y, panel_w, hint_h],
             text: "\u{2191}\u{2193} sel  \u{2190}\u{2192} adj  \u{23ce} copy  Esc".into(),
-            color: [0.55, 0.55, 0.65, 0.75],
+            color: color::alpha(color::STONE, 0.75),
             ..Default::default()
         });
 
@@ -1455,11 +1455,11 @@ impl ShopEnvDebugOverlay {
                 layout.panel_w + border * 2.0,
                 panel_h + border * 2.0,
             ],
-            color: [0.35, 0.52, 0.28, 0.85],
+            color: color::alpha(color::FELT_LIT, 0.85),
         });
         instances.push(GpuInstance {
             rect: [layout.panel_x, layout.panel_y, layout.panel_w, panel_h],
-            color: [0.06, 0.07, 0.14, 0.97],
+            color: color::alpha(color::TWILIGHT_INK, 0.97),
         });
 
         labels.push(TextLabel {
@@ -1470,7 +1470,7 @@ impl ShopEnvDebugOverlay {
                 title_h,
             ],
             text: "Shop Env & Lighting".into(),
-            color: [0.65, 1.0, 0.55, 1.0],
+            color: color::JADE,
             ..Default::default()
         });
 
@@ -1481,9 +1481,9 @@ impl ShopEnvDebugOverlay {
             let v = self.row_value(i);
 
             let bg = if is_focused {
-                [0.22, 0.38, 0.28, 0.95]
+                color::alpha(color::FELT_LIT, 0.95)
             } else {
-                [0.10, 0.12, 0.20, 0.80]
+                color::alpha(color::TWILIGHT, 0.80)
             };
             instances.push(GpuInstance {
                 rect: [
@@ -1496,9 +1496,9 @@ impl ShopEnvDebugOverlay {
             });
 
             let tc = if is_focused {
-                [0.85, 1.0, 0.75, 1.0]
+                color::PARCHMENT
             } else {
-                [0.65, 0.65, 0.78, 0.95]
+                color::alpha(color::STONE, 0.95)
             };
             labels.push(TextLabel {
                 rect: [
@@ -1515,14 +1515,14 @@ impl ShopEnvDebugOverlay {
             let (track_x, track_y, tw, th) = layout.slider_track(i);
             instances.push(GpuInstance {
                 rect: [track_x, track_y, tw, th],
-                color: [0.08, 0.08, 0.14, 1.0],
+                color: color::TWILIGHT_INK,
             });
             let t = ((v - min) / (max - min).max(1e-8)).clamp(0.0, 1.0);
             let fill_w = tw * t;
             let fill_color = if is_focused {
-                [0.35, 0.85, 0.45, 1.0]
+                color::JADE
             } else {
-                [0.22, 0.55, 0.32, 0.9]
+                color::alpha(color::JADE, 0.7)
             };
             instances.push(GpuInstance {
                 rect: [track_x, track_y, fill_w, th],
@@ -1534,9 +1534,9 @@ impl ShopEnvDebugOverlay {
             instances.push(GpuInstance {
                 rect: [knob_x, knob_y, knob_size, knob_size],
                 color: if is_focused {
-                    [0.9, 1.0, 0.85, 1.0]
+                    color::PARCHMENT
                 } else {
-                    [0.65, 0.75, 0.68, 0.95]
+                    color::alpha(color::STONE, 0.95)
                 },
             });
 
@@ -1553,9 +1553,9 @@ impl ShopEnvDebugOverlay {
             instances.push(GpuInstance {
                 rect: [vx, vy + vh * 0.15, vw, vh * 0.7],
                 color: if self.editing && i == self.cursor {
-                    [0.05, 0.06, 0.10, 0.95]
+                    color::alpha(color::TWILIGHT_INK, 0.95)
                 } else {
-                    [0.08, 0.09, 0.13, 0.75]
+                    color::alpha(color::TWILIGHT_INK, 0.75)
                 },
             });
             labels.push(TextLabel {
@@ -1572,7 +1572,7 @@ impl ShopEnvDebugOverlay {
         labels.push(TextLabel {
             rect: [layout.panel_x, hint_y, layout.panel_w, hint_h],
             text: "Mouse: drag slider / click value to type".into(),
-            color: [0.55, 0.55, 0.65, 0.75],
+            color: color::alpha(color::STONE, 0.75),
             ..Default::default()
         });
         labels.push(TextLabel {
@@ -1580,7 +1580,7 @@ impl ShopEnvDebugOverlay {
             text:
                 "\u{2191}\u{2193} row  \u{2190}\u{2192} nudge  Enter edit/apply  Esc  Ctrl+C copy"
                     .into(),
-            color: [0.55, 0.55, 0.65, 0.75],
+            color: color::alpha(color::STONE, 0.75),
             ..Default::default()
         });
 
@@ -1712,17 +1712,17 @@ impl TonemapDebugOverlay {
                 panel_w + border * 2.0,
                 panel_h + border * 2.0,
             ],
-            color: [0.55, 0.45, 0.30, 0.85],
+            color: color::alpha(color::ANTIQUE, 0.85),
         });
         instances.push(GpuInstance {
             rect: [panel_x, panel_y, panel_w, panel_h],
-            color: [0.10, 0.08, 0.12, 0.92],
+            color: color::alpha(color::TWILIGHT_INK, 0.92),
         });
 
         labels.push(TextLabel {
             rect: [panel_x, panel_y + row_gap, panel_w, title_h],
             text: "Tonemap".into(),
-            color: [1.0, 0.95, 0.7, 1.0],
+            color: color::TALLOW,
             ..Default::default()
         });
 
@@ -1733,7 +1733,7 @@ impl TonemapDebugOverlay {
         labels.push(TextLabel {
             rect: [panel_x, panel_y + row_gap + title_h, panel_w, scene_h],
             text: scene_label,
-            color: [0.85, 0.82, 0.65, 0.95],
+            color: color::alpha(color::CHAMPAGNE, 0.7),
             ..Default::default()
         });
 
@@ -1751,9 +1751,9 @@ impl TonemapDebugOverlay {
             let is_focused = self.cursor == i;
 
             let bg = if is_focused {
-                [0.32, 0.24, 0.18, 0.92]
+                color::alpha(color::WALNUT_BRIGHT, 0.95)
             } else {
-                [0.16, 0.13, 0.18, 0.78]
+                color::alpha(color::WALNUT_SOFT, 0.78)
             };
             instances.push(GpuInstance {
                 rect: [panel_x + 4.0, row_y, panel_w - 8.0, row_h],
@@ -1761,9 +1761,9 @@ impl TonemapDebugOverlay {
             });
 
             let tc = if is_focused {
-                [1.0, 1.0, 1.0, 1.0]
+                color::PARCHMENT
             } else {
-                [0.78, 0.74, 0.70, 0.9]
+                color::alpha(color::STONE, 0.9)
             };
             labels.push(TextLabel {
                 rect: [panel_x + 6.0 * scale, row_y, label_w, row_h],
@@ -1777,16 +1777,16 @@ impl TonemapDebugOverlay {
             let track_y = row_y + (row_h - track_h) * 0.5;
             instances.push(GpuInstance {
                 rect: [track_x, track_y, slider_w, track_h],
-                color: [0.08, 0.07, 0.10, 1.0],
+                color: color::TWILIGHT_INK,
             });
 
             let v = self.tuning.field_at(i);
             let t = ((v - min) / (max - min)).clamp(0.0, 1.0);
             let fill_w = slider_w * t;
             let fill_color = if is_focused {
-                [0.85, 0.55, 0.30, 1.0]
+                color::AMBER
             } else {
-                [0.55, 0.36, 0.22, 0.85]
+                color::alpha(color::ANTIQUE, 0.95)
             };
             instances.push(GpuInstance {
                 rect: [track_x, track_y, fill_w, track_h],
@@ -1799,9 +1799,9 @@ impl TonemapDebugOverlay {
             instances.push(GpuInstance {
                 rect: [knob_x, knob_y, knob_size, knob_size],
                 color: if is_focused {
-                    [1.0, 0.92, 0.78, 1.0]
+                    color::TALLOW
                 } else {
-                    [0.7, 0.62, 0.55, 0.9]
+                    color::alpha(color::STONE, 0.9)
                 },
             });
 
@@ -1817,9 +1817,9 @@ impl TonemapDebugOverlay {
         let save_y = cursor_y + TONEMAP_SLIDER_ROWS as f32 * (row_h + row_gap);
         let save_focused = self.cursor == TONEMAP_SAVE_ROW;
         let save_bg = if save_focused {
-            [0.30, 0.50, 0.35, 0.95]
+            color::alpha(color::FELT_LIT, 0.95)
         } else {
-            [0.15, 0.22, 0.18, 0.85]
+            color::alpha(color::FELT_DEEP, 0.85)
         };
         instances.push(GpuInstance {
             rect: [panel_x + 4.0, save_y, panel_w - 8.0, row_h],
@@ -1829,9 +1829,9 @@ impl TonemapDebugOverlay {
             rect: [panel_x, save_y, panel_w, row_h],
             text: "Save for this scene".into(),
             color: if save_focused {
-                [1.0, 1.0, 1.0, 1.0]
+                color::PARCHMENT
             } else {
-                [0.78, 0.88, 0.80, 0.9]
+                color::alpha(color::JADE, 0.7)
             },
             ..Default::default()
         });
@@ -1839,9 +1839,9 @@ impl TonemapDebugOverlay {
         let reset_y = save_y + row_h + row_gap;
         let reset_focused = self.cursor == TONEMAP_RESET_ROW;
         let reset_bg = if reset_focused {
-            [0.50, 0.30, 0.30, 0.95]
+            color::alpha(color::RUBY, 0.55)
         } else {
-            [0.22, 0.15, 0.18, 0.85]
+            color::alpha(color::WALNUT_BRIGHT, 0.85)
         };
         instances.push(GpuInstance {
             rect: [panel_x + 4.0, reset_y, panel_w - 8.0, row_h],
@@ -1851,9 +1851,9 @@ impl TonemapDebugOverlay {
             rect: [panel_x, reset_y, panel_w, row_h],
             text: "Reset scene to default".into(),
             color: if reset_focused {
-                [1.0, 1.0, 1.0, 1.0]
+                color::PARCHMENT
             } else {
-                [0.85, 0.72, 0.72, 0.9]
+                color::alpha(color::RUBY, 0.7)
             },
             ..Default::default()
         });
@@ -1864,7 +1864,7 @@ impl TonemapDebugOverlay {
             text:
                 "\u{2191}/\u{2193} select   \u{2190}/\u{2192} adjust   \u{23ce} confirm   Esc close"
                     .into(),
-            color: [0.65, 0.55, 0.50, 0.9],
+            color: color::alpha(color::STONE, 0.85),
             ..Default::default()
         });
 

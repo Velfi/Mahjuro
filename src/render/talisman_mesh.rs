@@ -18,6 +18,7 @@
 use std::f32::consts::TAU;
 
 use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu};
+use crate::render::theme::color;
 use crate::render::tile_glb::Vertex3dTex;
 
 const SIDES: usize = 8;
@@ -151,7 +152,7 @@ pub fn build_talisman_mesh() -> MeshCpu {
         indices,
         default_material: MaterialParams {
             kind: MaterialKind::Pearl,
-            base_color: [0.92, 0.90, 0.88, 1.0],
+            base_color: color::PARCHMENT,
             specular_strength: 0.60,
             specular_power: 64.0,
         },

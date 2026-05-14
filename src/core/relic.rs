@@ -406,6 +406,21 @@ pub enum Rarity {
     Legendary,
 }
 
+impl Rarity {
+    /// 0..=3 tier index, suitable for `theme::color::rarity(tier)` and any
+    /// other rarity-keyed table that wants a numeric ladder. Centralized so
+    /// the relic / yaku / blind UIs all walk the same rungs in the same
+    /// order (iron → bronze → silver → gold).
+    pub fn tier(self) -> u8 {
+        match self {
+            Rarity::Common => 0,
+            Rarity::Uncommon => 1,
+            Rarity::Rare => 2,
+            Rarity::Legendary => 3,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RelicRenderMaterial {
     Iron,

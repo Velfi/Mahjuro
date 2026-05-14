@@ -1,0 +1,157 @@
+{
+  "_generated_by": "src/render/pack_palette.rs (cargo test pack_palette::tests::dump_pack_palette -- --nocapture)",
+  "_kind_order": [
+    "honors",
+    "terminals",
+    "flowers",
+    "bamboo_grove",
+    "coin_cache",
+    "scroll_library"
+  ],
+  "border_gold": [
+    0.851,
+    0.702,
+    0.353,
+    1.0
+  ],
+  "packs": {
+    "bamboo_grove": {
+      "bg": [
+        0.039,
+        0.102,
+        0.055,
+        1.0
+      ],
+      "bg_name": "deep forest-black",
+      "display_name": "Bamboo Grove",
+      "foil": [
+        0.48,
+        0.78,
+        0.52,
+        1.0
+      ],
+      "insignia": "B",
+      "seal": [
+        0.78,
+        0.18,
+        0.14,
+        1.0
+      ]
+    },
+    "coin_cache": {
+      "bg": [
+        0.102,
+        0.055,
+        0.071,
+        1.0
+      ],
+      "bg_name": "burgundy-black",
+      "display_name": "Coin Cache",
+      "foil": [
+        0.78,
+        0.82,
+        0.88,
+        1.0
+      ],
+      "insignia": "C",
+      "seal": [
+        0.58,
+        0.1,
+        0.18,
+        1.0
+      ]
+    },
+    "flowers": {
+      "bg": [
+        0.11,
+        0.059,
+        0.118,
+        1.0
+      ],
+      "bg_name": "plum-black",
+      "display_name": "Flowers Pack",
+      "foil": [
+        0.92,
+        0.62,
+        0.7,
+        1.0
+      ],
+      "insignia": "F",
+      "seal": [
+        0.52,
+        0.14,
+        0.3,
+        1.0
+      ]
+    },
+    "honors": {
+      "bg": [
+        0.055,
+        0.094,
+        0.22,
+        1.0
+      ],
+      "bg_name": "deep navy",
+      "display_name": "Honors Pack",
+      "foil": [
+        0.92,
+        0.78,
+        0.38,
+        1.0
+      ],
+      "insignia": "H",
+      "seal": [
+        0.722,
+        0.196,
+        0.157,
+        1.0
+      ]
+    },
+    "scroll_library": {
+      "bg": [
+        0.102,
+        0.078,
+        0.039,
+        1.0
+      ],
+      "bg_name": "sepia-black",
+      "display_name": "Scroll Library",
+      "foil": [
+        0.42,
+        0.48,
+        0.78,
+        1.0
+      ],
+      "insignia": "S",
+      "seal": [
+        0.72,
+        0.18,
+        0.18,
+        1.0
+      ]
+    },
+    "terminals": {
+      "bg": [
+        0.102,
+        0.078,
+        0.071,
+        1.0
+      ],
+      "bg_name": "warm obsidian",
+      "display_name": "Terminals Pack",
+      "foil": [
+        0.78,
+        0.52,
+        0.32,
+        1.0
+      ],
+      "insignia": "9",
+      "seal": [
+        0.56,
+        0.14,
+        0.12,
+        1.0
+      ]
+    }
+  }
+}

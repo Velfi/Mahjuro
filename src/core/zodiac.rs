@@ -191,7 +191,7 @@ impl ZodiacInventory {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct YakuLevels {
     /// Sparse map: only yaku that have been leveled appear here.
-    pub levels: std::collections::HashMap<YakuKind, u32>,
+    pub levels: rustc_hash::FxHashMap<YakuKind, u32>,
 }
 
 impl YakuLevels {
@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn each_zodiac_has_unique_yaku() {
-        let mut seen: std::collections::HashSet<YakuKind> = Default::default();
+        let mut seen: rustc_hash::FxHashSet<YakuKind> = Default::default();
         for &z in ZodiacKind::all() {
             assert!(seen.insert(z.yaku()), "duplicate yaku for {:?}", z);
         }

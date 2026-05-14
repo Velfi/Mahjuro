@@ -7,7 +7,7 @@
 //! ambiguous results so the chosen decomposition matches what the player is
 //! visibly building toward.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::core::hand::{DetectedMeld, MeldKind};
 use crate::core::tile::{Suit, Tile};
@@ -64,8 +64,8 @@ pub fn decomposition_affinity(sets: &[DetectedMeld], bias: DecompositionBias) ->
     score
 }
 
-fn face_counts(tiles: &[Tile]) -> HashMap<(Suit, u8), usize> {
-    let mut m: HashMap<(Suit, u8), usize> = HashMap::new();
+fn face_counts(tiles: &[Tile]) -> FxHashMap<(Suit, u8), usize> {
+    let mut m: FxHashMap<(Suit, u8), usize> = FxHashMap::default();
     for t in tiles {
         if t.is_flower() {
             continue;

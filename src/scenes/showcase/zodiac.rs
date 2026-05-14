@@ -6,6 +6,7 @@ use crate::core::zodiac::ZodiacKind;
 use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::{ShowcaseRenderHints, UiFrame};
+use crate::render::theme::color;
 use crate::render::ribbon_mesh::{ZodiacRibbonSpec, zodiac_ribbon_object3d};
 use crate::render::table_transform::rot_fixed_axes_deg_matrix;
 use crate::render::world_space::pixel_to_world;
@@ -128,7 +129,7 @@ impl ZodiacPresenter {
             PointLight {
                 pos: [cx, cy - h * 0.15, lift - h * 0.15],
                 radius: w.max(h) * 1.6,
-                color: [0.95, 0.78, 0.25],
+                color: color::rgb(color::RELIC_GOLD),
                 intensity: 1.1,
             },
         ]);
@@ -151,7 +152,7 @@ impl ZodiacPresenter {
             radius: w.max(h) * 2.2,
             cos_outer,
             cos_inner,
-            color: [1.0, 0.90, 0.72],
+            color: color::rgb(color::TALLOW),
             intensity: 6.0,
         }];
 

@@ -1407,7 +1407,7 @@ impl SceneBehavior for TutorialCampaignScene {
             frame.scene_lighting.push_smooth(PointLight {
                 pos: [lx, ly, light_y],
                 radius: h * 0.95,
-                color: [1.0, 0.96, 0.88],
+                color: color::rgb(color::PARCHMENT),
                 intensity,
             });
         }

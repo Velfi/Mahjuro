@@ -136,16 +136,16 @@ Live in [`src/core/tile.rs`](src/core/tile.rs). Spread across the wheel for inst
 
 ## Rarity spectrum
 
-Live in `theme::color::rarity(tier)`. Echoes existing tokens for harmony.
+Live in `theme::color::rarity(tier)` and the `RELIC_*` tokens in `theme.rs`. The same tokens drive both the 3D relic-body material (via `relic_material_params`) and the UI accent chip — they cannot drift apart.
 
-| Rarity | Token | Hex |
-|---|---|---|
-| Common | `STONE` | `#B8AEA2` |
-| Uncommon | `JADE` | `#5FD4A8` |
-| Rare | `WALNUT_BRIGHT` | `#362A21` |
-| Legendary | `CHAMPAGNE` | `#F5C674` |
+| Rarity | Token | Hex | Material feel |
+|---|---|---|---|
+| Common | `RELIC_IRON` | `#6B707A` | Cool steel gray. Unadorned. |
+| Uncommon | `RELIC_COPPER` | `#C77542` | Warm copper. A step up from common. |
+| Rare | `RELIC_SILVER` | `#D1D6E0` | Pale cool silver. High specular. |
+| Legendary | `RELIC_GOLD` | `#F0C747` | Warm yellow gold leaf. Distinct from the UI `GOLD` fixture token. |
 
-**Note:** rare uses a panel tone, not a saturated color, on purpose — rare relics borrow the warmth of *more wood*, legendaries earn the brass.
+**Rule:** `RELIC_GOLD` is for relic identity; `GOLD` (`#E8B14A`) is for UI fixtures (headers, currency, button borders). They are visibly different — do not substitute one for the other.
 
 ## Tile surface
 

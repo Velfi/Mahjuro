@@ -147,8 +147,8 @@ impl WgpuRenderer {
             // uniform-upload pass above).
             {
                 use crate::render::primitive::MeshId;
-                let mut cursors: std::collections::HashMap<MeshId, usize> =
-                    std::collections::HashMap::new();
+                let mut cursors: rustc_hash::FxHashMap<MeshId, usize> =
+                    rustc_hash::FxHashMap::default();
                 for cmd in frame.cmds.iter() {
                     let objs: Box<dyn Iterator<Item = &crate::render::draw_cmd::Object3d>> =
                         match cmd {

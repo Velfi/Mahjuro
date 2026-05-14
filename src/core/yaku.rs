@@ -4,9 +4,9 @@
 //! in `assets/data/yaku.json`. Behaviour — detection predicates, leveling
 //! formulas, scoring integration — stays in Rust.
 
-use std::collections::HashMap;
 use std::sync::OnceLock;
 
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::core::hand::{DetectedMeld, MeldKind, validate_selection};
@@ -28,7 +28,7 @@ struct YakuDef {
 }
 
 fn yaku_def(id: YakuKind) -> &'static YakuDef {
-    static DEFS: OnceLock<std::collections::HashMap<YakuKind, YakuDef>> = OnceLock::new();
+    static DEFS: OnceLock<FxHashMap<YakuKind, YakuDef>> = OnceLock::new();
     let map = DEFS.get_or_init(|| {
         const PATH: &str = "data/yaku.json";
         let raw: Vec<YakuDefRaw> = load_json_asset(PATH, "yaku data");
@@ -317,7 +317,7 @@ fn is_kokushi_musou(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
             _ => return false,
         }
     }
-    let mut counts: HashMap<(Suit, u8), u8> = HashMap::new();
+    let mut counts: FxHashMap<(Suit, u8), u8> = FxHashMap::default();
     for s in sets {
         for &id in &s.tile_ids {
             let Some(t) = tiles.iter().find(|x| x.id == id) else {
@@ -427,8 +427,7 @@ fn is_iipeikou(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
 /// must contain three sequences whose `(low_rank)` matches across
 /// Characters / Bamboos / Circles.
 fn is_sanshoku_doujun(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
-    use std::collections::HashMap;
-    let mut by_low: HashMap<u8, Vec<Suit>> = HashMap::new();
+    let mut by_low: FxHashMap<u8, Vec<Suit>> = FxHashMap::default();
     for s in sets.iter().filter(|s| s.kind == MeldKind::Sequence) {
         let tile_refs: Vec<&Tile> = s
             .tile_ids
@@ -451,9 +450,8 @@ fn is_sanshoku_doujun(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
 
 /// Ittsu: 1-2-3, 4-5-6, 7-8-9 in a single number suit (a complete 1-9 run).
 fn is_ittsu(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
-    use std::collections::HashMap;
     // For each number suit, gather the set of low-ranks of sequences in that suit.
-    let mut suit_lows: HashMap<Suit, Vec<u8>> = HashMap::new();
+    let mut suit_lows: FxHashMap<Suit, Vec<u8>> = FxHashMap::default();
     for s in sets.iter().filter(|s| s.kind == MeldKind::Sequence) {
         let tile_refs: Vec<&Tile> = s
             .tile_ids

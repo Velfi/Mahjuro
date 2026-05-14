@@ -4,7 +4,7 @@
 //! SFX (OGG/Vorbis) and music (MP3) are decoded to PCM once at load time so
 //! the device thread never runs decoders during playback.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::io::Cursor;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -531,12 +531,12 @@ const SCORE_TICK_PITCHES: [f32; 8] = [
 pub struct AudioManager {
     _stream: Option<OutputStream>,
     handle: Option<OutputStreamHandle>,
-    sfx_data: HashMap<SfxId, Arc<PcmClip>>,
-    music_data: HashMap<MusicId, Arc<PcmClip>>,
+    sfx_data: FxHashMap<SfxId, Arc<PcmClip>>,
+    music_data: FxHashMap<MusicId, Arc<PcmClip>>,
     /// Per-relic trigger samples loaded from `assets/audio/relics/<slug>.ogg`
     /// at startup. Lookup is by `RelicId`; missing entries fall back to
     /// [`SfxId::ScoreStep`] in [`AudioManager::play_relic_trigger`].
-    relic_trigger_data: HashMap<crate::core::relic::RelicId, Arc<PcmClip>>,
+    relic_trigger_data: FxHashMap<crate::core::relic::RelicId, Arc<PcmClip>>,
     /// Live sinks, FIFO-ordered (oldest first). Finished sinks are swept
     /// each `play_sfx` call; when the cap is hit, the oldest is dropped.
     active_sinks: Vec<Sink>,
@@ -576,7 +576,7 @@ impl AudioManager {
             }
         };
 
-        let mut sfx_data = HashMap::new();
+        let mut sfx_data = FxHashMap::default();
         for &sfx_id in all_sfx_ids() {
             let asset_path = format!("audio/{}", sfx_id.filename());
             if let Some(file) = crate::asset_path::get(&asset_path) {
@@ -593,7 +593,7 @@ impl AudioManager {
             log::debug!("Loaded {} sound effect(s).", sfx_data.len());
         }
 
-        let mut relic_trigger_data = HashMap::new();
+        let mut relic_trigger_data = FxHashMap::default();
         for def in crate::core::relic::all_relic_defs() {
             let slug = def.id.asset_filename().trim_end_matches(".png");
             let asset_path = format!("audio/relics/{slug}.ogg");
@@ -611,7 +611,7 @@ impl AudioManager {
             );
         }
 
-        let music_data = HashMap::new();
+        let music_data = FxHashMap::default();
 
         Self {
             _stream: stream,

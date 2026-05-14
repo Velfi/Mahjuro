@@ -82,19 +82,19 @@ fn default_fill_point_lights(w: f32, h: f32) -> Vec<PointLight> {
         PointLight {
             pos: [w * 0.52, h * 0.34, h * 0.26],
             radius: h * 2.5,
-            color: [1.0, 0.93, 0.78],
+            color: color::rgb(color::TALLOW),
             intensity: 3.6,
         },
         PointLight {
             pos: [w * 0.52, h * 0.46, h * 0.21],
             radius: h * 2.3,
-            color: [0.98, 0.90, 0.74],
+            color: color::rgb(color::TALLOW),
             intensity: 3.0,
         },
         PointLight {
             pos: [w * 0.52, h * 0.78, h * 0.13],
             radius: h * 2.0,
-            color: [1.0, 0.92, 0.76],
+            color: color::rgb(color::TALLOW),
             intensity: 2.7,
         },
     ]
@@ -526,7 +526,7 @@ fn shop_gameplay_style_gold_pile(
             pos: [pile_cx + lx, pile_cy + lz, world_y],
             extents: [coin_radius * 2.0, coin_thickness, coin_radius * 2.0],
             rotation: [0.0, rot_y, 0.0],
-            color: [1.00, 0.78, 0.30, 1.0],
+            color: color::RELIC_GOLD,
             kind: Object3dKind::Primitive {
                 shape: crate::render::primitive::MeshId::Cylinder,
                 material: crate::render::primitive::MaterialSpec::metal(),
@@ -751,7 +751,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
     let mut frame = UiFrame::new();
     frame.quad(GpuInstance {
         rect: [0.0, 0.0, w, h],
-        color: [0.04, 0.04, 0.055, 1.0],
+        color: color::LACQUER,
     });
     if with_shop_glb_cpu(|opt| opt.is_some()) {
         frame.shop_environment();
@@ -867,7 +867,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                     point_lights.push(PointLight {
                         pos: [px, py - 30.0, wy + 60.0],
                         radius: h * 0.65 * hover_r_mul,
-                        color: [1.00, 0.92, 0.70],
+                        color: color::rgb(color::TALLOW),
                         intensity: 3.20 * hover_i_mul,
                     });
                 }
@@ -877,7 +877,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                         point_lights.push(PointLight {
                             pos: [cx, cy + 35.0, wy + 50.0],
                             radius: h * 0.72 * hover_r_mul,
-                            color: [1.00, 0.92, 0.74],
+                            color: color::rgb(color::TALLOW),
                             intensity: 3.00 * hover_i_mul,
                         });
                     }
@@ -899,7 +899,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                     point_lights.push(PointLight {
                         pos: [center.0, center.1 - 20.0, center.2.max(80.0)],
                         radius: h * 0.55 * hover_r_mul,
-                        color: [1.00, 0.92, 0.70],
+                        color: color::rgb(color::TALLOW),
                         intensity: 2.50 * hover_i_mul,
                     });
                 }
@@ -909,7 +909,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                         point_lights.push(PointLight {
                             pos: [cx, cy - 28.0, wy + 55.0],
                             radius: h * 0.62 * hover_r_mul,
-                            color: [1.00, 0.92, 0.70],
+                            color: color::rgb(color::TALLOW),
                             intensity: 3.20 * hover_i_mul,
                         });
                     } else if let Some(idx) = super::layout::tile_pack_index_from_pick(id) {
@@ -921,7 +921,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                         point_lights.push(PointLight {
                             pos: [center.0, center.1 - 30.0, center.2 + 60.0],
                             radius: h * 0.62 * hover_r_mul,
-                            color: [1.00, 0.92, 0.70],
+                            color: color::rgb(color::TALLOW),
                             intensity: 3.20 * hover_i_mul,
                         });
                     }
@@ -1075,7 +1075,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
     let bh = credits_rect[3] + pad * 1.05;
     frame.quad(GpuInstance {
         rect: [bx - 4.0, by - 3.0, bw + 8.0, bh + 7.0],
-        color: [0.02, 0.02, 0.04, 0.48],
+        color: color::alpha(color::LACQUER, 0.48),
     });
     frame.quad(GpuInstance {
         rect: [bx, by, bw, bh],
@@ -1427,7 +1427,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                 icon_cmds.push(PromptIconQuad {
                     inst: GpuInstance {
                         rect: [ix, iy, icon_px, icon_px],
-                        color: [0.92, 0.88, 0.82, 0.96],
+                        color: color::alpha(color::PORCELAIN_AGED, 0.96),
                     },
                     source,
                 });
@@ -1435,7 +1435,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
             legend_texts.push(TextLabel {
                 rect: [text_x, legend_text_y, text_w, legend_line_h],
                 text: SHOP_LEGEND_VERB_LABELS[i].to_string(),
-                color: [0.88, 0.84, 0.78, 0.96],
+                color: color::alpha(color::PORCELAIN_AGED, 0.96),
                 font_px: Some(legend_font_px),
                 align: TextAlign::Left,
                 no_glossary: false,

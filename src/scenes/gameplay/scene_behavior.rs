@@ -200,7 +200,7 @@ impl SceneBehavior for GameplayScene {
                             new_level as f32,
                         );
                         self.particles
-                            .emit(src.0, src.1, 24, [0.95, 0.78, 0.25, 1.0], 0.9);
+                            .emit(src.0, src.1, 24, color::RELIC_GOLD, 0.9);
                         ctx.bus
                             .push(crate::game::event_bus::GameEvent::ZodiacLevelUp);
                     }
@@ -711,11 +711,26 @@ impl SceneBehavior for GameplayScene {
         }
 
         // Hint: compute tile indices that would complete a meld with current selection.
+        // `suggest_completions` runs full backtracking validation per unselected
+        // tile, so memoize against the inputs that affect its result (hand uids
+        // + selection bitmask). Same hand+selection across frames → reuse.
         let mut hint_indices = if interaction.hints_enabled
             && !interaction.selected_indices.is_empty()
             && self.cascade_queue.is_empty()
         {
-            suggest_completions(&interaction.hand, &interaction.selected_indices)
+            let selection_mask: u32 = interaction
+                .selected_indices
+                .iter()
+                .fold(0u32, |acc, &i| acc | (1u32 << i.min(31)));
+            let mut cache = self.suggest_hint_cache.borrow_mut();
+            if !cache.matches(&interaction.hand, selection_mask) {
+                cache.hand_uids.clear();
+                cache.hand_uids.extend(interaction.hand.iter().map(|t| t.id));
+                cache.selection_mask = selection_mask;
+                cache.hints =
+                    suggest_completions(&interaction.hand, &interaction.selected_indices);
+            }
+            cache.hints.clone()
         } else {
             vec![]
         };
@@ -1267,7 +1282,7 @@ impl SceneBehavior for GameplayScene {
                 rotation: [std::f32::consts::FRAC_PI_2, 0.0, 0.0],
                 // Aged cream — same tint as the gold dish so the two
                 // ceramic surfaces read as a matched set across the table.
-                color: [0.88, 0.84, 0.78, 1.0],
+                color: color::PORCELAIN_AGED,
                 kind: Object3dKind::Primitive {
                     shape: crate::render::primitive::MeshId::PorcelainDish,
                     material: crate::render::primitive::MaterialSpec::porcelain(),

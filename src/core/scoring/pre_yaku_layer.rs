@@ -267,8 +267,8 @@ pub(crate) fn apply_pre_yaku_scoring(
     }
 
     if eff.has(ctx.relic.roster, RelicId::GhostHand) && !ctx.tiles.hand_for_ghost.is_empty() {
-        use std::collections::HashSet;
-        let scored_ids: HashSet<u32> = sets
+        use rustc_hash::FxHashSet;
+        let scored_ids: FxHashSet<u32> = sets
             .iter()
             .flat_map(|s| s.tile_ids.iter().copied())
             .collect();

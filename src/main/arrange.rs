@@ -168,10 +168,10 @@ pub fn reset_arrange_to_default(name: &str, scene: &mut crate::Scene) {
 
 pub fn collect_committed_rotations(
     scene: &crate::Scene,
-) -> std::collections::HashMap<String, [f32; 3]> {
+) -> rustc_hash::FxHashMap<String, [f32; 3]> {
     use crate::ui::placement::{ArrangeTarget, all_leaf_names};
     type PlacementLookup<'a> = Box<dyn Fn(&str) -> Option<crate::ui::placement::Placement> + 'a>;
-    let mut out = std::collections::HashMap::new();
+    let mut out = rustc_hash::FxHashMap::default();
     let (hierarchy, lookup): (&'static [crate::ui::placement::Node], PlacementLookup<'_>) =
         match scene {
             crate::Scene::Gameplay(gp) => (

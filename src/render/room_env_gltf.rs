@@ -4,7 +4,7 @@
 //! [`crate::render::shop_glb`] and [`crate::render::hallway_glb`] load different assets but share
 //! this pipeline and GPU path (`shop_glb.wgsl`).
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use anyhow::Context;
 use glam::{Mat4, Vec2, Vec3, Vec4};
@@ -286,7 +286,7 @@ pub fn room_camera_fit_fovy_for_corners(
 }
 
 pub fn merge_marker_mesh_bounds(
-    map: &mut HashMap<String, RoomEnvironmentBounds>,
+    map: &mut FxHashMap<String, RoomEnvironmentBounds>,
     node_name: &str,
     prim: &RoomEnvPrimitiveCpu,
 ) {
@@ -705,9 +705,9 @@ pub fn walk_room_env_node(
     parent: Mat4,
     hooks: &impl RoomEnvWalkHooks,
     candle_node_prefix: &str,
-    markers: &mut HashMap<String, Mat4>,
+    markers: &mut FxHashMap<String, Mat4>,
     env_primitives: &mut Vec<RoomEnvPrimitiveCpu>,
-    marker_mesh_bounds_doc: &mut HashMap<String, RoomEnvironmentBounds>,
+    marker_mesh_bounds_doc: &mut FxHashMap<String, RoomEnvironmentBounds>,
     collision_meshes: &mut Vec<RoomCollisionMesh>,
     embedded_cameras: &mut EmbeddedCameraHarvest,
     embedded_point_lights: &mut Vec<RoomGltfEmbeddedPointLight>,
@@ -828,7 +828,7 @@ pub fn walk_room_env_node(
 /// Document-space marker origin minus environment AABB center (multiply by [`room_env_world_scale`]
 /// for world space consistent with the centered room model matrix).
 pub fn marker_translation_doc(
-    markers: &HashMap<String, Mat4>,
+    markers: &FxHashMap<String, Mat4>,
     environment_bounds_doc: Option<RoomEnvironmentBounds>,
     name: &str,
 ) -> Option<Vec3> {

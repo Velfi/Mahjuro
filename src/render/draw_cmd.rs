@@ -15,6 +15,7 @@ use crate::core::relic::RelicId;
 use crate::core::tile::Tile;
 use crate::core::tile_pack::TilePackKind;
 use crate::render::lit_mesh::MaterialParams;
+use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, SpotLight, TextLabel};
 use crate::scenes::{BackgroundId, ButtonDef};
 use glam;
@@ -263,6 +264,20 @@ pub struct WallStackPlacement {
 pub enum CascadeTokenKind {
     Chips,
     Mult,
+}
+
+impl CascadeTokenKind {
+    /// Canonical RGBA tint for this cascade token kind. Centralized so
+    /// the score-popup glyphs, the cascade HUD label, and the 3D
+    /// cascade-token meshes all stay in sync — any one of those reading
+    /// the wrong color would break the warm-vs-cool reading of the
+    /// score breakdown.
+    pub fn color(self) -> [f32; 4] {
+        match self {
+            CascadeTokenKind::Chips => crate::render::theme::color::LAPIS,
+            CascadeTokenKind::Mult => crate::render::theme::color::RUBY,
+        }
+    }
 }
 
 /// Material selector for the extruded-glyph score popup. Maps to the lit-mesh
@@ -1039,7 +1054,7 @@ pub fn apply_modal_relic_staging(
         PointLight {
             pos: [w * 0.5, h * 0.5 - h * 0.30, h * 0.05],
             radius: h * 1.0,
-            color: [1.00, 0.78, 0.42],
+            color: color::rgb(color::CHAMPAGNE),
             intensity: 1.0,
         },
     ]);

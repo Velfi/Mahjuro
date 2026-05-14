@@ -240,7 +240,7 @@ impl ShopScene {
                 new_level as f32,
             );
             self.particles
-                .emit(center.0, center.1, 24, [0.95, 0.78, 0.25, 1.0], 0.9);
+                .emit(center.0, center.1, 24, crate::render::theme::color::RELIC_GOLD, 0.9);
         }
 
         // Drain relic activations and evict expired glows.

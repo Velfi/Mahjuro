@@ -24,6 +24,7 @@ pub mod lit_mesh;
 pub mod mirror_mesh;
 pub mod ofuda_mesh;
 pub mod orb_mesh;
+pub mod pack_palette;
 pub mod particles;
 pub mod picking;
 pub mod plaque_mesh;

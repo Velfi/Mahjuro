@@ -1,7 +1,6 @@
 /target
 /.claude
 /.cursor
-.DS_Store
 /.pycache
 */__pycache__
 /.venv

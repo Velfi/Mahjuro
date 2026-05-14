@@ -70,8 +70,9 @@
 //!
 //! Shared glTF room decode (meshes, lights, cameras, collision) lives in [`crate::render::room_env_gltf`].
 
-use std::collections::HashMap;
 use std::sync::RwLock;
+
+use rustc_hash::FxHashMap;
 
 use crate::render::draw_cmd::CameraParams;
 use crate::render::room_env_gltf::{
@@ -277,7 +278,8 @@ pub const SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX: &str = "light_candle_";
 
 /// Linear RGB multiplier for punctual lights on nodes matching [`SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX`].
 /// Warm shift for candle reads; other lights keep glTF linear RGB.
-pub const SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL: [f32; 3] = [1.0, 0.91, 0.74];
+pub const SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL: [f32; 3] =
+    crate::render::theme::color::rgb(crate::render::theme::color::TALLOW);
 
 /// Runtime shop lighting matching the `SHOP_*` source constants. Carried on [`DrawCtx`](crate::scenes::DrawCtx)
 /// and editable from the debug overlay.
@@ -360,10 +362,10 @@ pub fn shop_camera_fit_fovy_for_corners(
 
 /// Decoded room GLB (shop, hallway, …): shared layout for [`shop_glb.wgsl`] and punctual uploads.
 pub struct RoomGlbCpu {
-    pub markers: HashMap<String, Mat4>,
+    pub markers: FxHashMap<String, Mat4>,
     pub environment_primitives: Vec<ShopEnvPrimitiveCpu>,
     pub environment_bounds_doc: Option<ShopEnvironmentBounds>,
-    pub marker_mesh_bounds_doc: HashMap<String, ShopEnvironmentBounds>,
+    pub marker_mesh_bounds_doc: FxHashMap<String, ShopEnvironmentBounds>,
     pub collision_meshes: Vec<ShopCollisionMesh>,
     pub embedded_perspective_camera: Option<ShopGlbEmbeddedCamera>,
     pub embedded_point_lights: Vec<ShopGlbEmbeddedPointLight>,
@@ -518,9 +520,9 @@ pub fn load_room_glb_from_bytes(
 
     let buffers: Vec<Vec<u8>> = buffers_vec.into_iter().map(|b| b.0).collect();
 
-    let mut markers = HashMap::new();
+    let mut markers = FxHashMap::default();
     let mut environment_primitives = Vec::new();
-    let mut marker_mesh_bounds_doc = HashMap::new();
+    let mut marker_mesh_bounds_doc = FxHashMap::default();
     let mut collision_meshes = Vec::new();
     let mut embedded_cameras = EmbeddedCameraHarvest::default();
     let mut embedded_point_lights = Vec::new();

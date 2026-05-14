@@ -280,7 +280,7 @@ impl ShopScene {
                 }
                 phases
             },
-            relic_glow_starts: std::collections::HashMap::new(),
+            relic_glow_starts: rustc_hash::FxHashMap::default(),
             positions: crate::ui::scene_layout::load_shop_positions(),
             drawn_room_gltf_height_scale: std::cell::Cell::new(
                 crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,

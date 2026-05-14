@@ -573,7 +573,7 @@ fn enumerate_candidate_play_masks(hand: &[Tile], rules: &[RuleModifier]) -> Vec<
         must_play_five: rules.contains(&RuleModifier::MustPlayFive),
     };
 
-    let mut masks = std::collections::HashSet::new();
+    let mut masks: rustc_hash::FxHashSet<u32> = rustc_hash::FxHashSet::default();
     enumerate_regular_subsets(&regular, &flowers, 0, subset_rules, 0, &mut masks);
     push_kokushi_play_masks(hand, rules, &mut masks);
     let mut out: Vec<u32> = masks.into_iter().collect();
@@ -607,7 +607,7 @@ fn next_combination_in_range(pos: &mut [usize], n: usize) -> bool {
 fn push_kokushi_play_masks(
     hand: &[Tile],
     rules: &[RuleModifier],
-    out: &mut std::collections::HashSet<u32>,
+    out: &mut rustc_hash::FxHashSet<u32>,
 ) {
     if rules.contains(&RuleModifier::MustPlayFive) {
         return;
@@ -654,7 +654,7 @@ fn enumerate_regular_subsets(
     current_mask: u32,
     rules: SubsetRules,
     current_tile_count: usize,
-    out: &mut std::collections::HashSet<u32>,
+    out: &mut rustc_hash::FxHashSet<u32>,
 ) {
     let SubsetRules {
         allow_wrap,
@@ -806,7 +806,7 @@ fn emit_leaf_masks(
     current_mask: u32,
     current_tile_count: usize,
     must_play_five: bool,
-    out: &mut std::collections::HashSet<u32>,
+    out: &mut rustc_hash::FxHashSet<u32>,
 ) {
     for extra_mask in flower_only_masks(flowers) {
         let total_mask = current_mask | extra_mask;
@@ -1042,8 +1042,7 @@ fn tile_meld_participation(hand: &[Tile]) -> Vec<u32> {
     }
     // Orphan terminals/honors often sit outside standard meld detection until the hand is
     // nearly Kokushi — bias discards toward non-orphans when many distinct orphans are present.
-    use std::collections::HashSet;
-    let mut orphan_faces: HashSet<(Suit, u8)> = HashSet::new();
+    let mut orphan_faces: rustc_hash::FxHashSet<(Suit, u8)> = rustc_hash::FxHashSet::default();
     for t in hand {
         if !t.is_flower() && t.is_kokushi_orphan() {
             orphan_faces.insert((t.suit, t.rank));
@@ -1084,8 +1083,7 @@ fn discard_candidates(hand: &[Tile], max_k: usize) -> Vec<Vec<usize>> {
 /// "perfect-information" oracle, which gives us a tuning ceiling rather than a
 /// realistic player bot.
 fn rollout_post_discard_score(run: &RunState, discard_indices: &[usize]) -> u64 {
-    use std::collections::HashSet;
-    let drop_set: HashSet<usize> = discard_indices.iter().copied().collect();
+    let drop_set: rustc_hash::FxHashSet<usize> = discard_indices.iter().copied().collect();
     let k = discard_indices.len();
     let peeked = run.wall.peek_next(k);
     let mut new_hand: Vec<Tile> = run

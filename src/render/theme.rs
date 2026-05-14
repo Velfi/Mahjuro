@@ -114,12 +114,56 @@ pub mod color {
     /// not toward white — light in this game is *made of fire*.
     pub const TALLOW: [f32; 4] = [1.000, 0.910, 0.722, 1.0];
 
+    // ── Lapis: the cool number-signal counterpart to RUBY/CINNABAR.
+    /// `#8CC7FF` — sky-blue tint for "Chips" score tokens, info chips,
+    /// and any other UI signal that wants to read as the *cool* half of
+    /// a warm/cool score pair. Paired with `RUBY` (Mult) at every score
+    /// readout, and with `RELIC_GOLD` (Gold) / `TALLOW` (Final) when all
+    /// four cascade kinds appear together. Distinct from the moody
+    /// `TWILIGHT_*` family, which is *atmospheric* night-sky color, not a
+    /// number-signal accent.
+    pub const LAPIS: [f32; 4] = [0.55, 0.78, 1.00, 1.0];
+
+    // ── Porcelain: aged ceramic surfaces — temple-merchant pottery, the
+    //    coin/consumable dishes on the gameplay table, the worn cream of
+    //    a well-loved bowl. Distinct from `PARCHMENT` (paper) and
+    //    `TALLOW` (light): porcelain is *fired clay with a tea-stain*,
+    //    softer than parchment and noticeably less warm than tallow.
+    /// `#E0D6C7` — aged porcelain cream. Used for the relic dish, the
+    /// consumable dish, and the "well-loved ceramic" base color.
+    pub const PORCELAIN_AGED: [f32; 4] = [0.88, 0.84, 0.78, 1.0];
+
+    // ── Relic metal tiers: rarity-keyed body materials for relics.
+    //    Common → Iron, Uncommon → Copper, Rare → Silver, Legendary → Gold.
+    //    Both the per-instance metal-shader base in `relic_material_params`
+    //    and the `color::rarity(tier)` accent used by collection / shop /
+    //    gameplay UI resolve to these tokens, so a relic's metal and its UI
+    //    chip cannot drift apart. Distinct from the brass UI palette
+    //    (`GOLD`, `BRASS`, `ANTIQUE`) which is for fixtures (headers,
+    //    currency, button borders), not for material identity.
+    /// `#6B707A` — Common-tier relic body. Cool steel gray.
+    pub const RELIC_IRON: [f32; 4] = [0.42, 0.44, 0.48, 1.0];
+    /// `#C77542` — Uncommon-tier relic body. Warm copper.
+    pub const RELIC_COPPER: [f32; 4] = [0.78, 0.46, 0.26, 1.0];
+    /// `#D1D6E0` — Rare-tier relic body. Pale cool silver.
+    pub const RELIC_SILVER: [f32; 4] = [0.82, 0.84, 0.88, 1.0];
+    /// `#F0C747` — Legendary-tier relic body. Warm yellow gold; brighter
+    /// than the UI `GOLD` token because legendaries earn the *light*, not
+    /// just the fixture.
+    pub const RELIC_GOLD: [f32; 4] = [0.94, 0.78, 0.28, 1.0];
+
     /// Fully transparent — used for spacers and invisible hit targets.
     pub const CLEAR: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
 
     /// Helper: same color but with the alpha channel replaced.
     pub const fn alpha(c: [f32; 4], a: f32) -> [f32; 4] {
         [c[0], c[1], c[2], a]
+    }
+
+    /// Helper: drop the alpha channel for call sites that take `[f32; 3]`
+    /// (point light tints, particle colors, etc.).
+    pub const fn rgb(c: [f32; 4]) -> [f32; 3] {
+        [c[0], c[1], c[2]]
     }
 
     /// Helper: dim a color toward black by `t` (0 = unchanged, 1 = black).
@@ -140,15 +184,17 @@ pub mod color {
     }
 
     /// Rarity color for relic/yaku/blind cards. Centralized so the shop and
-    /// collection scenes don't drift apart.
+    /// collection scenes don't drift apart, and so the UI chip color
+    /// matches the relic body metal at that tier (see `RELIC_*` tokens).
     ///
-    /// `tier` is 0..=3: common, uncommon, rare, legendary.
+    /// `tier` is 0..=3: common, uncommon, rare, legendary, mapped to the
+    /// metal escalation iron → bronze → silver → gold.
     pub fn rarity(tier: u8) -> [f32; 4] {
         match tier {
-            0 => STONE,         // common — neutral
-            1 => JADE,          // uncommon — green
-            2 => WALNUT_BRIGHT, // rare — lighter walnut highlight
-            _ => CHAMPAGNE,     // legendary — gold
+            0 => RELIC_IRON,   // common
+            1 => RELIC_COPPER, // uncommon
+            2 => RELIC_SILVER, // rare
+            _ => RELIC_GOLD,   // legendary
         }
     }
 }

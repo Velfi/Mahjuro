@@ -10,7 +10,7 @@
 
 use crate::core::relic::RelicFlavorSpan;
 use crate::core::tile::{Suit, Tile, TileEnhancement};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::{Mutex, OnceLock};
 
 // ---------------------------------------------------------------------------
@@ -120,12 +120,12 @@ struct Atlas {
     tile_w: u32,
     tile_h: u32,
     columns: u32,
-    origins: HashMap<String, (u32, u32)>,
+    origins: FxHashMap<String, (u32, u32)>,
 }
 
-fn atlas_cache() -> &'static Mutex<HashMap<String, Option<std::sync::Arc<Atlas>>>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, Option<std::sync::Arc<Atlas>>>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+fn atlas_cache() -> &'static Mutex<FxHashMap<String, Option<std::sync::Arc<Atlas>>>> {
+    static CACHE: OnceLock<Mutex<FxHashMap<String, Option<std::sync::Arc<Atlas>>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(FxHashMap::default()))
 }
 
 /// Minimal parser for the fixed-schema atlas.toml our packer emits.
@@ -226,7 +226,8 @@ fn decode_atlas(tile_set: &str) -> Option<Atlas> {
         .ok()?;
     let img = decoder.decode().ok()?.to_rgba8();
 
-    let mut origins = HashMap::with_capacity(layout.len());
+    let mut origins: FxHashMap<String, (u32, u32)> =
+        FxHashMap::with_capacity_and_hasher(layout.len(), Default::default());
     for (i, code) in layout.into_iter().enumerate() {
         // Empty layout slots exist as row-padding ("" entries in atlas.toml).
         // They consume a grid cell but never get looked up, so skip indexing.

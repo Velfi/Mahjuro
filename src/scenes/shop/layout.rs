@@ -241,13 +241,7 @@ impl ShopLayout {
 }
 
 pub(super) fn rarity_color(rarity: Rarity) -> [f32; 4] {
-    let tier = match rarity {
-        Rarity::Common => 0,
-        Rarity::Uncommon => 1,
-        Rarity::Rare => 2,
-        Rarity::Legendary => 3,
-    };
-    color::rarity(tier)
+    color::rarity(rarity.tier())
 }
 
 pub(super) fn relic_half_extents(id: RelicId, base: f32) -> [f32; 3] {
@@ -259,11 +253,12 @@ pub(super) fn relic_half_extents(id: RelicId, base: f32) -> [f32; 3] {
 }
 
 pub(super) fn consumable_color(c: Consumable) -> [f32; 4] {
+    use crate::render::theme::color;
     match c {
         Consumable::Zodiac(z) => {
             let palette = [
                 [0.96, 0.62, 0.42, 1.0],
-                [0.95, 0.78, 0.32, 1.0],
+                color::RELIC_GOLD,
                 [0.78, 0.42, 0.34, 1.0],
                 [0.50, 0.78, 0.55, 1.0],
                 [0.55, 0.62, 0.92, 1.0],
