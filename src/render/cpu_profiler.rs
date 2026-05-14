@@ -14,10 +14,11 @@
 //! (when the adapter doesn't support TIMESTAMP_QUERY, or when the GPU
 //! profiler isn't started) read clean.
 
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
+
+use rustc_hash::FxHashMap;
 
 const NUM_STAGES: usize = 3;
 const STAGE_LABELS: [&str; NUM_STAGES] = ["update", "draw_frame", "render"];
@@ -32,10 +33,10 @@ struct ScopeAccum {
     samples: u32,
 }
 
-static SCOPE_ACCUM: OnceLock<Mutex<HashMap<&'static str, ScopeAccum>>> = OnceLock::new();
+static SCOPE_ACCUM: OnceLock<Mutex<FxHashMap<&'static str, ScopeAccum>>> = OnceLock::new();
 
-fn scope_accum() -> &'static Mutex<HashMap<&'static str, ScopeAccum>> {
-    SCOPE_ACCUM.get_or_init(|| Mutex::new(HashMap::new()))
+fn scope_accum() -> &'static Mutex<FxHashMap<&'static str, ScopeAccum>> {
+    SCOPE_ACCUM.get_or_init(|| Mutex::new(FxHashMap::default()))
 }
 
 /// Open a named timing scope. Returns a guard that records the elapsed time

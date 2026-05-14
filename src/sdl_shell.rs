@@ -1,6 +1,6 @@
 //! Single SDL3 context: window, event pump, gamepads (wgpu stays separate).
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use sdl3::gamepad::Gamepad;
 use sdl3::joystick::JoystickId;
@@ -16,11 +16,11 @@ pub struct SdlShell {
     /// Rumble is applied via the gamepad API but SDL documents that
     /// [`SDL_UpdateJoysticks`](https://wiki.libsdl.org/SDL3/SDL_RumbleGamepad) must run for effects to reach hardware.
     pub(crate) joystick: JoystickSubsystem,
-    pub(crate) pads: HashMap<JoystickId, Gamepad>,
-    pub(crate) lt_prev: HashMap<JoystickId, f32>,
-    pub(crate) rt_prev: HashMap<JoystickId, f32>,
+    pub(crate) pads: FxHashMap<JoystickId, Gamepad>,
+    pub(crate) lt_prev: FxHashMap<JoystickId, f32>,
+    pub(crate) rt_prev: FxHashMap<JoystickId, f32>,
     /// Joystick IDs we already logged as non-gamepad (avoid spam each frame).
-    non_gamepad_logged: HashSet<JoystickId>,
+    non_gamepad_logged: FxHashSet<JoystickId>,
 }
 
 impl SdlShell {
@@ -95,10 +95,10 @@ impl SdlShell {
             pump,
             gamepad,
             joystick,
-            pads: HashMap::new(),
-            lt_prev: HashMap::new(),
-            rt_prev: HashMap::new(),
-            non_gamepad_logged: HashSet::new(),
+            pads: FxHashMap::default(),
+            lt_prev: FxHashMap::default(),
+            rt_prev: FxHashMap::default(),
+            non_gamepad_logged: FxHashSet::default(),
         };
         shell.refresh_gamepads();
 

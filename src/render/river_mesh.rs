@@ -27,6 +27,7 @@
 //! extents (X longer than Z) to make the river read as a stream.
 
 use crate::render::lit_mesh::{Aabb, MaterialKind, MaterialParams, MeshCpu, push_box};
+use crate::render::theme::color;
 use crate::render::tile_glb::Vertex3dTex;
 
 // Flow-axis half-extent (local X). The water reaches nearly to the
@@ -195,7 +196,8 @@ pub fn build_river_mesh() -> MeshCpu {
         indices,
         default_material: MaterialParams {
             kind: MaterialKind::Water,
-            base_color: [0.06, 0.09, 0.18, 1.0],
+            // Twilight-ink reflects the cool sky into the water surface.
+            base_color: color::TWILIGHT_INK,
             specular_strength: 0.85,
             specular_power: 220.0,
         },

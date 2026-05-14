@@ -3287,7 +3287,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     // the generic `Object3dKind::Primitive` dispatch can reach by
     // `MeshId`. Legacy named fields above still own their own
     // allocations during the migration window.
-    let mut primitive_meshes: HashMap<MeshId, std::sync::Arc<LitMeshGpu>> = HashMap::new();
+    let mut primitive_meshes: rustc_hash::FxHashMap<MeshId, std::sync::Arc<LitMeshGpu>> =
+        rustc_hash::FxHashMap::default();
     {
         let unit_cube_cpu = {
             let mut verts: Vec<crate::render::tile_glb::Vertex3dTex> = Vec::new();
@@ -3432,10 +3433,10 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     // the Metal branch in lit_mesh.wgsl can sample the cash-coin
     // relief. Populated now so `primitive_textures` is ready by
     // the time `dispatch_primitive` first creates an instance.
-    let mut primitive_textures: HashMap<
+    let mut primitive_textures: rustc_hash::FxHashMap<
         crate::render::primitive::MeshId,
         (wgpu::TextureView, wgpu::TextureView),
-    > = HashMap::new();
+    > = rustc_hash::FxHashMap::default();
     let bone_tablet_mesh = LitMeshGpu::new(&device, &build_bone_tablet_mesh(), "bone-tablet");
     let wood_tablet_mesh = LitMeshGpu::new(&device, &build_wood_tablet_mesh(), "wood-tablet");
     let book_mesh = LitMeshGpu::new(&device, &build_book_body_mesh(), "book");
@@ -3858,11 +3859,11 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         tile_set: None,
         hand_tiles: Vec::new(),
         showcase_tiles: Vec::new(),
-        tile_face_overlays: HashMap::new(),
-        prompt_icon_overlays: HashMap::new(),
-        prompt_icon_missing: std::collections::HashSet::new(),
+        tile_face_overlays: rustc_hash::FxHashMap::default(),
+        prompt_icon_overlays: rustc_hash::FxHashMap::default(),
+        prompt_icon_missing: rustc_hash::FxHashSet::default(),
         debuff_marker_overlay: None,
-        text_label_cache: HashMap::new(),
+        text_label_cache: rustc_hash::FxHashMap::default(),
         text_cache_frame: 0,
         vertex_buffer,
         index_buffer,
@@ -3935,11 +3936,11 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         cascade_token_instances,
         extruded_glyph_instances,
         glyph_cpu_cache: crate::render::glyph_mesh::GlyphMeshCache::new(),
-        extruded_glyph_meshes: HashMap::new(),
+        extruded_glyph_meshes: rustc_hash::FxHashMap::default(),
         primitive_meshes,
-        primitive_instances: HashMap::new(),
+        primitive_instances: rustc_hash::FxHashMap::default(),
         primitive_textures,
-        last_primitive_pick_models: HashMap::new(),
+        last_primitive_pick_models: rustc_hash::FxHashMap::default(),
         debug_axes_instances,
         last_yaku_tablet_models: Vec::new(),
         last_wood_tablet_models: Vec::new(),
@@ -3948,19 +3949,20 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         last_debug_pickables: Vec::new(),
         active_scene_key: None,
         debug_arrange_override: None,
-        committed_arrange_rotations: std::collections::HashMap::new(),
+        committed_arrange_rotations: rustc_hash::FxHashMap::default(),
         last_frame: Instant::now(),
         frame_dt: 0.0,
-        obj3d_hover_state: HashMap::new(),
+        obj3d_hover_state: rustc_hash::FxHashMap::default(),
         creation_time: Instant::now(),
-        relic_textures: HashMap::new(),
+        relic_textures: rustc_hash::FxHashMap::default(),
         relic_rx,
         relic_load_start,
         pack_textures: pack_textures_map,
-        background_textures: HashMap::new(),
+        background_textures: rustc_hash::FxHashMap::default(),
         background_rx,
         background_load_start,
-        prev_tile_world: HashMap::new(),
+        prev_tile_world: rustc_hash::FxHashMap::default(),
+        tile_uid_scratch: rustc_hash::FxHashSet::default(),
         prev_frame_shadows_enabled: false,
         showcase_decal_atlas: None,
         showcase_decal_atlas_tileset: None,
@@ -4040,9 +4042,9 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         table_mesh,
         relic_box_mesh,
         relic_box_tris,
-        relic_tri_lists: HashMap::new(),
+        relic_tri_lists: rustc_hash::FxHashMap::default(),
         pack_mesh,
-        relic_meshes: HashMap::new(),
+        relic_meshes: rustc_hash::FxHashMap::default(),
         candle_instances,
         table_instance,
         felt_shader_lod: 2.0,

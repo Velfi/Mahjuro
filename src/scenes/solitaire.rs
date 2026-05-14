@@ -9,6 +9,7 @@
 
 use crate::core::tile::{Suit, Tile};
 use crate::render::draw_cmd::{CameraParams, DrawCmd, ShowcaseTilePlacement, UiFrame};
+use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextLabel};
 use crate::ui::input::UiAction;
 
@@ -317,7 +318,7 @@ impl SceneBehavior for SolitaireScene {
             frame.scene_lighting.push_smooth(PointLight {
                 pos: [lx, ly, light_y],
                 radius: h * 1.2,
-                color: [1.0, 0.97, 0.90], // warm daylight
+                color: color::rgb(color::PARCHMENT), // warm daylight
                 intensity: 2.2,
             });
         }
@@ -426,7 +427,7 @@ impl SceneBehavior for SolitaireScene {
         frame.text(TextLabel {
             rect: [back_x, btn_y, btn_w, btn_h],
             text: "< Back".into(),
-            color: [1.0, 0.97, 0.92, 1.0],
+            color: color::PARCHMENT,
             ..Default::default()
         });
         buttons.push(ButtonDef::scene((back_x, btn_y, btn_w, btn_h), CLICK_BACK));
@@ -439,7 +440,7 @@ impl SceneBehavior for SolitaireScene {
         frame.text(TextLabel {
             rect: [new_x, btn_y, btn_w, btn_h],
             text: "New Deal".into(),
-            color: [1.0, 0.97, 0.92, 1.0],
+            color: color::PARCHMENT,
             ..Default::default()
         });
         buttons.push(ButtonDef::scene(
@@ -468,7 +469,7 @@ impl SceneBehavior for SolitaireScene {
             });
             frame.quad(GpuInstance {
                 rect: [bx, by, banner_w, banner_h],
-                color: [0.08, 0.10, 0.18, 0.97],
+                color: color::alpha(color::TWILIGHT_INK, 0.97),
             });
             let (title, subtitle) = match state {
                 Finished::Won => ("You Win!", "All tiles cleared."),
@@ -478,7 +479,7 @@ impl SceneBehavior for SolitaireScene {
             frame.text(TextLabel {
                 rect: [bx, by + banner_h * 0.18, banner_w, title_font],
                 text: title.into(),
-                color: [1.0, 0.95, 0.7, 1.0],
+                color: color::TALLOW,
                 ..Default::default()
             });
             let sub_font = (14.0 * scale).max(10.0);

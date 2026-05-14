@@ -897,12 +897,7 @@ pub(crate) fn build_level_up_modal(
     let relic_defs = core::relic::all_relic_defs();
     for rid in &result.relics {
         if let Some(def) = relic_defs.iter().find(|d| d.id == *rid) {
-            let accent = match def.rarity {
-                core::relic::Rarity::Common => render::theme::color::rarity(0),
-                core::relic::Rarity::Uncommon => render::theme::color::rarity(1),
-                core::relic::Rarity::Rare => render::theme::color::rarity(2),
-                core::relic::Rarity::Legendary => render::theme::color::rarity(3),
-            };
+            let accent = render::theme::color::rarity(def.rarity.tier());
             pages.push(UnlockPage {
                 category: "New Relic".into(),
                 name: def.name.into(),

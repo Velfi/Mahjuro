@@ -172,7 +172,7 @@ fn static_glyph_sprite(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
+    use rustc_hash::FxHashMap;
 
     /// Each style's `SubTexture` index, embedded into the test binary. We can't
     /// open the live PNGs without a renderer, but the XMLs let us assert that
@@ -196,8 +196,8 @@ mod tests {
         "../../assets/textures/kenney_input-prompts/Steam Controller/steam-controller_sheet_double.xml"
     );
 
-    fn names_in(xml: &str) -> HashMap<String, ()> {
-        let mut out = HashMap::new();
+    fn names_in(xml: &str) -> FxHashMap<String, ()> {
+        let mut out = FxHashMap::default();
         for line in xml.lines() {
             let line = line.trim();
             let Some(rest) = line.strip_prefix("<SubTexture ") else {

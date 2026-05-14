@@ -4,6 +4,7 @@ use glam::{Mat4, Vec3};
 
 use crate::core::tile_pack::PACK_TILE_ID_BASE;
 use crate::core::tile_pack::TilePackKind;
+use crate::render::theme::color;
 use crate::game::engine::GameEngine;
 use crate::render::draw_cmd::{
     CameraParams, DrawCmd, Object3d, Object3dKind, ShowcaseRenderHints, ShowcaseTilePlacement,
@@ -431,7 +432,7 @@ fn pack_celebration_isolation_lights(
         PointLight {
             pos: [cx + w * 0.14, row_py - h * 0.22, lift + h * 0.48],
             radius: h * 3.2 * r_mul,
-            color: [1.0, 0.93, 0.78],
+            color: color::rgb(color::TALLOW),
             intensity: 1.55 * i_mul,
         },
         PointLight {
@@ -443,7 +444,7 @@ fn pack_celebration_isolation_lights(
         PointLight {
             pos: [cx, row_py - h * 0.38, lift + h * 0.62],
             radius: h * 2.6 * r_mul,
-            color: [1.0, 0.97, 0.90],
+            color: color::rgb(color::PARCHMENT),
             intensity: 1.25 * i_mul,
         },
     ]

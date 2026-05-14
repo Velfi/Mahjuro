@@ -11,13 +11,13 @@
 //! just without rasterising SVGs at runtime, and without shipping individual
 //! SVG files in the asset pack.
 
-use std::collections::HashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::{LazyLock, Mutex};
 
 struct DecodedSheet {
     rgba: Vec<u8>,
     width: u32,
-    sub_textures: HashMap<String, SubRect>,
+    sub_textures: FxHashMap<String, SubRect>,
 }
 
 #[derive(Clone, Copy)]
@@ -28,8 +28,8 @@ struct SubRect {
     h: u32,
 }
 
-static SHEET_CACHE: LazyLock<Mutex<HashMap<String, DecodedSheet>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+static SHEET_CACHE: LazyLock<Mutex<FxHashMap<String, DecodedSheet>>> =
+    LazyLock::new(|| Mutex::new(FxHashMap::default()));
 
 /// Returns `(rgba8, width, height)` for the named sprite within `sheet_asset`.
 /// `sheet_asset` is an asset-relative path to the `_sheet_double.png`; the
@@ -127,8 +127,8 @@ fn load_sheet(sheet_asset: &str) -> Option<DecodedSheet> {
 /// The renderer also negative-caches per `cache_key`, but that key only
 /// covers the renderer's view; this guards `load_sheet` failures (which
 /// happen once per sheet, before per-sprite caching applies).
-static MISS_LOG: LazyLock<Mutex<std::collections::HashSet<String>>> =
-    LazyLock::new(|| Mutex::new(std::collections::HashSet::new()));
+static MISS_LOG: LazyLock<Mutex<FxHashSet<String>>> =
+    LazyLock::new(|| Mutex::new(FxHashSet::default()));
 
 fn warn_once<F: FnOnce() -> String>(key: String, msg: F) {
     let Ok(mut seen) = MISS_LOG.lock() else { return };
@@ -146,8 +146,8 @@ fn warn_once<F: FnOnce() -> String>(key: String, msg: F) {
 /// is top-down, so we convert by `top_y = sheet_height - y - height` at parse
 /// time. This way the rest of the pipeline (cropping, GPU upload) can treat
 /// rects as top-down without further transforms.
-fn parse_subtextures(xml: &str, sheet_height: u32) -> HashMap<String, SubRect> {
-    let mut out = HashMap::new();
+fn parse_subtextures(xml: &str, sheet_height: u32) -> FxHashMap<String, SubRect> {
+    let mut out = FxHashMap::default();
     for line in xml.lines() {
         let line = line.trim();
         let Some(rest) = line.strip_prefix("<SubTexture ") else {

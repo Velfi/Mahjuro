@@ -229,14 +229,14 @@ pub fn push_gameplay_action_prompts(
             },
         });
         let icon_tint = if cash_in_disabled {
-            color::alpha(color::darken([0.92, 0.88, 0.82, 0.96], 0.45), 0.5)
+            color::alpha(color::darken(color::alpha(color::PORCELAIN_AGED, 0.96), 0.45), 0.5)
         } else {
-            [0.92, 0.88, 0.82, 0.96]
+            color::alpha(color::PORCELAIN_AGED, 0.96)
         };
         let label_color = if cash_in_disabled {
             color::alpha(color::UMBER, 0.72)
         } else {
-            [0.88, 0.84, 0.78, 0.96]
+            color::alpha(color::PORCELAIN_AGED, 0.96)
         };
         let action = match i {
             0 => crate::ui::input::UiAction::WestFacePress,

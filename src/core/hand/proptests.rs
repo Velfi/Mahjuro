@@ -1,7 +1,7 @@
 use super::*;
 use crate::core::tile::{Suit, Tile};
 use proptest::prelude::*;
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 const NUMBER_SUITS: [Suit; 3] = [Suit::Characters, Suit::Bamboos, Suit::Circles];
 const ALL_SUITS: [Suit; 5] = [
@@ -119,12 +119,12 @@ proptest! {
     #[test]
     fn accepted_covers_all_ids(tiles in arb_random_hand()) {
         if let Some(sets) = validate_selection(&tiles) {
-            let input_ids: HashSet<u32> = tiles.iter().map(|t| t.id).collect();
+            let input_ids: FxHashSet<u32> = tiles.iter().map(|t| t.id).collect();
             let mut output_ids = Vec::new();
             for s in &sets {
                 output_ids.extend(&s.tile_ids);
             }
-            let output_set: HashSet<u32> = output_ids.iter().copied().collect();
+            let output_set: FxHashSet<u32> = output_ids.iter().copied().collect();
 
             // Every input tile accounted for.
             prop_assert_eq!(&input_ids, &output_set, "tile IDs mismatch");

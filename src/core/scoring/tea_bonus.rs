@@ -1,12 +1,12 @@
 //! Shared tea-ceremony / rakuware tile-set helpers (chip and mult bonuses).
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use crate::core::hand::{DetectedMeld, MeldKind};
 use crate::core::tile::{Suit, Tile};
 
 pub(crate) fn tea_harmony_chips(tiles: &[Tile]) -> Option<i32> {
-    let suits: HashSet<Suit> = tiles
+    let suits: FxHashSet<Suit> = tiles
         .iter()
         .filter(|t| matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles))
         .map(|t| t.suit)

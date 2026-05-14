@@ -1971,6 +1971,7 @@ dependencies = [
  "rayon",
  "resvg",
  "rodio",
+ "rustc-hash 2.1.2",
  "sdl3",
  "serde",
  "serde_json",

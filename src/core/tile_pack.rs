@@ -83,28 +83,17 @@ impl TilePackKind {
         }
     }
 
-    /// Foil wrapper tint for this pack kind. The pack body is rendered as
-    /// shiny metallic foil in this colour; the pack art is composited on top
-    /// as a decal via its alpha channel. Chosen to evoke each pack's theme
-    /// while staying muted enough that the decal art reads clearly.
+    /// Foil wrapper tint — the metallic surface tint multiplied by the
+    /// cover decal's transparent regions. Sourced from the canonical
+    /// per-pack table in [`crate::render::pack_palette`].
     pub fn foil_tint(self) -> [f32; 4] {
-        match self {
-            // Honors: imperial gold foil.
-            Self::Honors => [0.92, 0.78, 0.38, 1.0],
-            // Terminals: weathered copper/bronze.
-            Self::Terminals => [0.78, 0.52, 0.32, 1.0],
-            // Flowers: soft rose-pink foil.
-            Self::Flowers => [0.92, 0.62, 0.70, 1.0],
-            // Bamboo Grove: jade green.
-            Self::BambooGrove => [0.48, 0.78, 0.52, 1.0],
-            // Coin Cache: polished silver with a cool cast.
-            Self::CoinCache => [0.78, 0.82, 0.88, 1.0],
-            // Scroll Library: lacquer indigo.
-            Self::ScrollLibrary => [0.42, 0.48, 0.78, 1.0],
-        }
+        crate::render::pack_palette::for_kind(self).foil
     }
 
     /// Asset filename (without directory) for this pack's box art texture.
+    /// Derived from the slug in [`crate::render::pack_palette`] so the
+    /// Rust source, the PNG on disk, and `tools/pack_palette.json` can
+    /// never fall out of sync.
     pub fn asset_filename(self) -> &'static str {
         match self {
             Self::Honors => "pack_honors.png",
@@ -116,27 +105,16 @@ impl TilePackKind {
         }
     }
 
-    /// Wax-seal color for the merchant-envelope detail centered on the pack
-    /// face. Each pack picks a wax tone that contrasts with its [`foil_tint`]
-    /// so the seal reads as a focal point at thumbnail size — typically a
-    /// deep, slightly warm red, shifted per kind to harmonize with the
-    /// wrapper. Used by the seal-baking pipeline (`scripts/bake_pack_seals.py`)
-    /// and as the hover-glow accent for the pack on the shop counter.
+    /// Wax-seal color for the merchant-envelope detail centered on the
+    /// pack face. Used both at bake time (`scripts/bake_pack_seals.py`,
+    /// reading `tools/pack_palette.json`) and at runtime as the hover
+    /// halo on the shop counter — the two MUST agree, which is why the
+    /// canonical value lives in [`crate::render::pack_palette`].
+    ///
+    /// Each pack nudges off canonical `CINNABAR` so the seals read as a
+    /// *family* of ceremonial reds rather than six unrelated splotches.
     pub fn seal_color(self) -> [f32; 4] {
-        match self {
-            // Honors (gold foil) — imperial cinnabar.
-            Self::Honors => [0.74, 0.18, 0.16, 1.0],
-            // Terminals (copper foil) — oxblood, deeper than the wrapper.
-            Self::Terminals => [0.56, 0.14, 0.12, 1.0],
-            // Flowers (rose foil) — plum wax so it doesn't melt into the wrapper.
-            Self::Flowers => [0.52, 0.14, 0.30, 1.0],
-            // Bamboo (jade foil) — vermilion, classic temple-stamp red.
-            Self::BambooGrove => [0.78, 0.18, 0.14, 1.0],
-            // Coin Cache (silver foil) — burgundy.
-            Self::CoinCache => [0.58, 0.10, 0.18, 1.0],
-            // Scroll Library (indigo foil) — sealing-wax red.
-            Self::ScrollLibrary => [0.72, 0.18, 0.18, 1.0],
-        }
+        crate::render::pack_palette::for_kind(self).seal
     }
 
     pub fn shop_price(self) -> u32 {

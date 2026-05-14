@@ -593,7 +593,7 @@ pub(super) fn build_candles_and_spotlights(
                 point_lights.push(PointLight {
                     pos: [mirror.pos[0], mirror.pos[1], diam * 0.6],
                     radius: diam * 3.0 + pulse * diam * 1.0,
-                    color: [0.6, 0.75, 1.0],
+                    color: crate::render::theme::color::rgb(crate::render::theme::color::LAPIS),
                     intensity: 3.5 + pulse * 4.0,
                 });
             }
@@ -611,7 +611,7 @@ pub(super) fn build_candles_and_spotlights(
                 point_lights.push(PointLight {
                     pos: [bowl.pos[0], bowl.pos[1], diam * 0.6],
                     radius: diam * 3.0 + pulse * diam * 1.0,
-                    color: [0.6, 0.75, 1.0],
+                    color: crate::render::theme::color::rgb(crate::render::theme::color::LAPIS),
                     intensity: 3.5 + pulse * 4.0,
                 });
             }
@@ -780,7 +780,7 @@ pub(super) fn build_ambient_table_objects(
             // Aged-porcelain cream tint drives a light crazing pattern in
             // the shader so the dish reads as a temple-merchant ceramic
             // piece (well-loved, not fresh from the kiln).
-            color: [0.88, 0.84, 0.78, 1.0],
+            color: crate::render::theme::color::PORCELAIN_AGED,
             kind: Object3dKind::Primitive {
                 shape: crate::render::primitive::MeshId::PorcelainDish,
                 material: crate::render::primitive::MaterialSpec::porcelain(),
@@ -843,7 +843,7 @@ pub(super) fn build_ambient_table_objects(
                 pos: [pile_cx + lx, pile_cy + lz, world_y],
                 extents: [coin_radius * 2.0, coin_thickness, coin_radius * 2.0],
                 rotation: [0.0, rot_y, 0.0],
-                color: [1.00, 0.78, 0.30, 1.0],
+                color: crate::render::theme::color::RELIC_GOLD,
                 kind: Object3dKind::Primitive {
                     shape: crate::render::primitive::MeshId::Cylinder,
                     material: crate::render::primitive::MaterialSpec::metal(),

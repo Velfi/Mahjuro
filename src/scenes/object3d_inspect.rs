@@ -25,6 +25,7 @@ use glam::{Mat3, Mat4, Vec3};
 
 use crate::render::draw_cmd::{CameraParams, Object3d, UiFrame};
 use crate::render::table_transform::{mat4_to_euler_xyz_rad, rot_euler_xyz_rad};
+use crate::render::theme::color;
 use crate::render::wgpu_renderer::{PointLight, SpotLight};
 
 /// Orbit + zoom state for close-up inspection (right stick, triggers, scroll).
@@ -278,7 +279,7 @@ pub fn inspect_subject_spotlight(
         radius: scale * 1.5,
         cos_outer,
         cos_inner,
-        color: [1.0, 0.94, 0.86],
+        color: color::rgb(color::PARCHMENT),
         intensity: 15.0,
     }
 }

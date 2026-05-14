@@ -126,7 +126,7 @@ impl SceneBehavior for MeldGuideScene {
         frame.scene_lighting.push_smooth(PointLight {
             pos: [w * 0.5, h * 0.38, h * 1.35],
             radius: h * 2.9,
-            color: [1.0, 0.96, 0.88],
+            color: color::rgb(color::PARCHMENT),
             intensity: 1.15,
         });
 
@@ -243,7 +243,7 @@ impl SceneBehavior for MeldGuideScene {
         let prev_color = if prev_enabled {
             color::WALNUT_INK
         } else {
-            [0.15, 0.15, 0.18, 0.5]
+            color::alpha(color::FELT_DEEP, 0.5)
         };
         frame.quad(GpuInstance {
             rect: [prev_x, btn_y, btn_w, btn_h],
@@ -291,7 +291,7 @@ impl SceneBehavior for MeldGuideScene {
         let next_color = if next_enabled {
             color::WALNUT_INK
         } else {
-            [0.15, 0.15, 0.18, 0.5]
+            color::alpha(color::FELT_DEEP, 0.5)
         };
         frame.quad(GpuInstance {
             rect: [next_x, btn_y, btn_w, btn_h],

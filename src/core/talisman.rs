@@ -204,7 +204,7 @@ mod tests {
 
     #[test]
     fn each_enhancement_kind_has_unique_enhancement() {
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = rustc_hash::FxHashSet::default();
         for &k in TalismanKind::all() {
             if let Some(e) = k.enhancement() {
                 assert!(seen.insert(e), "duplicate for {:?}", k);

@@ -154,7 +154,7 @@ impl WgpuRenderer {
     /// from `App` with the active scene's entries.
     pub fn set_committed_arrange_rotations(
         &mut self,
-        rotations: std::collections::HashMap<String, [f32; 3]>,
+        rotations: rustc_hash::FxHashMap<String, [f32; 3]>,
     ) {
         self.committed_arrange_rotations = rotations;
     }

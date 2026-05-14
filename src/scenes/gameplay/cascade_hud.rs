@@ -185,9 +185,9 @@ pub(super) fn build_cascade_hud_placements(
     // Color palette mirrors score_popups.rs so the two systems read as
     // siblings: sky blue for Chips (Polychrome), red for Mult (Polychrome),
     // cream for the Metal total / ×.
-    const CHIPS_COLOR: [f32; 4] = [0.55, 0.78, 1.00, 1.0];
-    const MULT_COLOR: [f32; 4] = [1.00, 0.42, 0.38, 1.0];
-    const FINAL_COLOR: [f32; 4] = [1.00, 0.95, 0.76, 1.0];
+    const CHIPS_COLOR: [f32; 4] = crate::render::theme::color::LAPIS;
+    const MULT_COLOR: [f32; 4] = crate::render::theme::color::RUBY;
+    const FINAL_COLOR: [f32; 4] = crate::render::theme::color::TALLOW;
 
     // Lateral spacing for the three labels (chips × mult). Sized off the
     // plaque so the trio lives comfortably beneath it without spilling.

@@ -200,7 +200,7 @@ fn enumerate_candidate_play_masks(hand: &[Tile], rules: &[RuleModifier]) -> Vec<
     let require_honor = rules.contains(&RuleModifier::RequireHonor);
     let must_play_five = rules.contains(&RuleModifier::MustPlayFive);
 
-    let mut masks = std::collections::HashSet::new();
+    let mut masks: rustc_hash::FxHashSet<u32> = rustc_hash::FxHashSet::default();
     enumerate_regular_subsets(
         &regular,
         &flowers,
@@ -227,7 +227,7 @@ fn enumerate_regular_subsets(
     require_honor: bool,
     must_play_five: bool,
     current_tile_count: usize,
-    out: &mut std::collections::HashSet<u32>,
+    out: &mut rustc_hash::FxHashSet<u32>,
 ) {
     if current_tile_count > 14 || (must_play_five && current_tile_count > 5) {
         return;
@@ -392,7 +392,7 @@ fn emit_leaf_masks(
     current_mask: u32,
     current_tile_count: usize,
     must_play_five: bool,
-    out: &mut std::collections::HashSet<u32>,
+    out: &mut rustc_hash::FxHashSet<u32>,
 ) {
     for extra_mask in flower_only_masks(flowers) {
         let total_mask = current_mask | extra_mask;
@@ -697,7 +697,7 @@ pub struct RunState {
     /// Yaku Journal overlay's "Played N×" line. Persisted across save/load
     /// (defaults to empty for old saves).
     #[serde(default)]
-    pub yaku_times_played: std::collections::HashMap<crate::core::yaku::YakuKind, u32>,
+    pub yaku_times_played: rustc_hash::FxHashMap<crate::core::yaku::YakuKind, u32>,
     /// Cumulative tiles committed from hand into the structure bank (melds).
     #[serde(default)]
     pub tiles_played: u32,
@@ -730,7 +730,7 @@ pub struct RunState {
     /// Tile IDs permanently removed from the wall (e.g. Taotie devour).
     /// Filtered out during wall construction each round.
     #[serde(default)]
-    pub removed_tile_ids: std::collections::HashSet<u32>,
+    pub removed_tile_ids: rustc_hash::FxHashSet<u32>,
     /// Tile packs purchased from the shop. Each pack permanently injects
     /// extra tiles into the wall every round. Append-only.
     #[serde(default)]
@@ -1057,7 +1057,7 @@ impl RunState {
             xxxl_egg_extinct: false,
             tea_ceremony_extinct: false,
             chrysalis_extinct: false,
-            yaku_times_played: std::collections::HashMap::new(),
+            yaku_times_played: rustc_hash::FxHashMap::default(),
             tiles_played: 0,
             tiles_discarded: 0,
             times_restocked: 0,
@@ -1065,7 +1065,7 @@ impl RunState {
             best_structure_name: String::new(),
             tile_enhancements: BTreeMap::new(),
             global_buff_enhancement: None,
-            removed_tile_ids: std::collections::HashSet::new(),
+            removed_tile_ids: rustc_hash::FxHashSet::default(),
             tile_packs: Vec::new(),
             small_blind_tag: None,
             big_blind_tag: None,
@@ -1169,8 +1169,8 @@ impl RunState {
             return;
         }
         // Count copies of each (suit, rank) face currently in hand.
-        let mut counts: std::collections::HashMap<(crate::core::tile::Suit, u8), u32> =
-            std::collections::HashMap::new();
+        let mut counts: rustc_hash::FxHashMap<(crate::core::tile::Suit, u8), u32> =
+            rustc_hash::FxHashMap::default();
         for t in &self.hand {
             *counts.entry((t.suit, t.rank)).or_insert(0) += 1;
         }
@@ -1239,7 +1239,7 @@ mod tests {
             played_yaku_this_round: vec![],
             tile_debuffs: vec![],
             honors_scored_this_round: false,
-            yaku_times_played: std::collections::HashMap::new(),
+            yaku_times_played: rustc_hash::FxHashMap::default(),
             tiles_played: 0,
             tiles_discarded: 0,
             times_restocked: 0,
@@ -1257,7 +1257,7 @@ mod tests {
             target_score: mode.base_target,
             tile_enhancements: BTreeMap::new(),
             global_buff_enhancement: None,
-            removed_tile_ids: std::collections::HashSet::new(),
+            removed_tile_ids: rustc_hash::FxHashSet::default(),
             upcoming_blind: BlindKind::Small,
             wall,
             yaku_levels: crate::core::zodiac::YakuLevels::default(),
@@ -2172,7 +2172,7 @@ mod tests {
 
         // Remember which tile ids are in hand *before* use; ids drawn later
         // should still pick up the enhancement via the global fallback.
-        let original_ids: std::collections::HashSet<u32> = run.hand.iter().map(|t| t.id).collect();
+        let original_ids: rustc_hash::FxHashSet<u32> = run.hand.iter().map(|t| t.id).collect();
         run.use_consumable(0, &mut bus);
         assert_eq!(run.global_buff_enhancement, Some(TileEnhancement::Pearl));
 
@@ -2650,7 +2650,7 @@ mod wild_wind_tests {
         /// Extract the multiset of (suit, rank) faces assigned to the wind tiles
         /// in `original` after substitution into `modified`.
         fn wind_face_multiset(original: &[Tile], modified: &[Tile]) -> Vec<(Suit, u8)> {
-            let wind_ids: std::collections::HashSet<u32> = original
+            let wind_ids: rustc_hash::FxHashSet<u32> = original
                 .iter()
                 .filter(|t| t.suit == Suit::Wind)
                 .map(|t| t.id)

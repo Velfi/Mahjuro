@@ -20,6 +20,7 @@ Usage:
 import argparse
 import base64
 import io
+import json
 import os
 import sys
 import time
@@ -38,11 +39,27 @@ except ImportError:
     sys.exit(1)
 
 
-OUTPUT_DIR = (
-    Path(__file__).resolve().parent.parent
-    / "assets" / "textures" / "tile_packs" / "plain"
-)
+REPO_ROOT = Path(__file__).resolve().parent.parent
+OUTPUT_DIR = REPO_ROOT / "assets" / "textures" / "tile_packs" / "plain"
+PALETTE_JSON = REPO_ROOT / "tools" / "pack_palette.json"
 FINAL_SIZE = (256, 384)
+
+
+def _rgba_to_hex(rgba: list[float]) -> str:
+    """`[0..1, 0..1, 0..1, _]` → `"#rrggbb"` for prompt interpolation."""
+    r, g, b = (max(0, min(255, round(c * 255))) for c in rgba[:3])
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+_PALETTE = json.loads(PALETTE_JSON.read_text(encoding="utf-8"))
+
+
+def _bg_label_for(slug: str) -> str:
+    """`"deep navy #0e1838"` style label for the prompt — pulled from
+    `tools/pack_palette.json` so this script and `generate_pack_covers.py`
+    can't drift on the deep-background colors."""
+    entry = _PALETTE["packs"][slug]
+    return f"{entry['bg_name']} {_rgba_to_hex(entry['bg'])}"
 
 STYLE_PREFIX = (
     "A tall vertical 2:3 portrait image of a booster-pack cover for a "
@@ -68,14 +85,16 @@ STYLE_PREFIX = (
 
 
 # Each pack has a deliberately distinct silhouette and composition so
-# the seven are instantly recognizable at thumbnail size. All shapes
-# are flat fills only — no gradients, no shading, no textures, no text.
+# the six are instantly recognizable at thumbnail size. All shapes are
+# flat fills only — no gradients, no shading, no textures, no text.
 #
-# (slug, background_color_hex, composition)
-PACKS = [
+# Background labels come from `tools/pack_palette.json` via
+# `_bg_label_for(slug)`; only the per-pack composition lives here.
+#
+# (slug, composition)
+_COMPOSITIONS = [
     (
         "honors",
-        "deep navy #0e1838",
         "Composition: a single tall vertical ivory (#f2ead6) column "
         "running down the center of the frame, a narrow central stripe "
         "extending nearly top-to-bottom — a ceremonial totem. Stacked "
@@ -89,21 +108,7 @@ PACKS = [
         "symbols are plain flat shapes.",
     ),
     (
-        "polychrome",
-        "pure black #000000",
-        "Composition: a single large flat white (#f2f2f2) upright "
-        "rounded-rectangle mahjong-tile shape in the dead center of "
-        "the frame. Radiating outward from this tile in all "
-        "directions, a starburst of flat triangular shards reaches "
-        "toward the edges of the frame. The shards sweep through a "
-        "full rainbow around the tile — warm reds and oranges on one "
-        "side transitioning through yellow, green, teal, blue, and "
-        "violet around to magenta — each shard a single saturated "
-        "flat fill with hard triangular edges.",
-    ),
-    (
         "terminals",
-        "warm obsidian #1a1412",
         "Composition: an architectural gateway. Two massive flat amber "
         "(#e8a84a) trapezoidal pillars stand on the left and right "
         "edges of the frame, widening slightly at the base, nearly "
@@ -116,7 +121,6 @@ PACKS = [
     ),
     (
         "flowers",
-        "plum-black #1c0f1e",
         "Composition: a 2x2 grid of four distinctly different flat "
         "flowers fills the frame, evenly spaced. "
         "Top-left: a pink (#f2a6c0) five-petal plum blossom with a "
@@ -132,7 +136,6 @@ PACKS = [
     ),
     (
         "bamboo_grove",
-        "deep forest-black #0a1a0e",
         "Composition: a horizontal forest scene. A row of flat "
         "emerald-green (#3aa84e) vertical bamboo stalks of varying "
         "heights stand side by side across the full width of the "
@@ -145,7 +148,6 @@ PACKS = [
     ),
     (
         "coin_cache",
-        "burgundy-black #1a0e12",
         "Composition: a diagonal cascade of coins. In the lower-left "
         "corner, a flat dark-red (#6a1a24) tipped-over rectangular "
         "chest shape with a flat gold (#c8882a) rim along its open "
@@ -159,7 +161,6 @@ PACKS = [
     ),
     (
         "scroll_library",
-        "sepia-black #1a140a",
         "Composition: an interior wall of shelves. A grid of flat "
         "brown (#6a4a1a) rectangular cubbyhole openings — three "
         "columns wide and several rows tall — fills most of the "
@@ -171,6 +172,15 @@ PACKS = [
         "corner in front of the shelves, one small flat amber "
         "(#e8c46a) round lantern shape.",
     ),
+]
+
+
+# (slug, background_label, composition) — the bg label is synthesized
+# from the canonical palette JSON so it can't drift from
+# `generate_pack_covers.py` or the runtime `Object3d` background tint.
+PACKS = [
+    (slug, _bg_label_for(slug), composition)
+    for slug, composition in _COMPOSITIONS
 ]
 
 

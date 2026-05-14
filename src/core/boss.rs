@@ -175,11 +175,12 @@ impl BossTier {
     /// neutral indigo of regular blinds; Medium/Hard/Final escalate through
     /// gold → amber → ruby so the player can read tier at a glance.
     pub fn halo_color(self) -> [f32; 4] {
+        use crate::render::theme::color;
         match self {
             BossTier::Soft => [0.55, 0.65, 0.85, 1.0], // muted indigo
-            BossTier::Medium => [0.91, 0.69, 0.29, 1.0], // GOLD
-            BossTier::Hard => [0.94, 0.66, 0.28, 1.0], // AMBER
-            BossTier::Final => [0.91, 0.35, 0.42, 1.0], // RUBY
+            BossTier::Medium => color::GOLD,
+            BossTier::Hard => color::AMBER,
+            BossTier::Final => color::RUBY,
         }
     }
 

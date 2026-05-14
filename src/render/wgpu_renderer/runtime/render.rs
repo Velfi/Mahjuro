@@ -18,6 +18,40 @@ enum PassAShopInspectHdrUpload {
     Subject,
 }
 
+/// Per-frame summary of which `RenderOp` variants appear in the current ops
+/// list. Computed once with [`OpsFlags::scan`] and reused everywhere that
+/// previously called `ops.iter().any(...)` — those scans showed up multiple
+/// times in `render()` and each was a fresh O(n) walk over the op list.
+#[derive(Default, Clone, Copy)]
+struct OpsFlags {
+    needs_table: bool,
+    shop_env: bool,
+    hallway_env: bool,
+    archive_env: bool,
+    cascade: bool,
+}
+
+impl OpsFlags {
+    fn scan(ops: &[RenderOp]) -> Self {
+        let mut f = OpsFlags::default();
+        for op in ops {
+            match op {
+                RenderOp::Table => f.needs_table = true,
+                RenderOp::ShopEnvironment => f.shop_env = true,
+                RenderOp::HallwayEnvironment => f.hallway_env = true,
+                RenderOp::ArchiveEnvironment => f.archive_env = true,
+                RenderOp::ShootingStarCascade => f.cascade = true,
+                _ => {}
+            }
+            // Early-out: if every flag we care about is set, stop scanning.
+            if f.needs_table && f.shop_env && f.hallway_env && f.archive_env && f.cascade {
+                break;
+            }
+        }
+        f
+    }
+}
+
 /// One contiguous slice of [`RenderOp`]s inside Pass A. `shop_inspect_hdr_upload` selects an
 /// optional [`SsrGlobals.felt`] upload **before** this slice's render pass.
 struct PassAChunk<'a> {
@@ -347,7 +381,10 @@ impl WgpuRenderer {
              queue: &wgpu::Queue,
              text_bgl: &wgpu::BindGroupLayout,
              sampler: &wgpu::Sampler,
-             cache: &mut HashMap<TextLabelShapeKey, HashMap<String, CachedTextLabel>>,
+             cache: &mut rustc_hash::FxHashMap<
+                TextLabelShapeKey,
+                rustc_hash::FxHashMap<String, CachedTextLabel>,
+            >,
              frame_id: u64,
              lbl: &TextLabel,
              font: &fontdue::Font,
@@ -489,15 +526,22 @@ impl WgpuRenderer {
         // mark every entry it touches. Evict entries that haven't been hit
         // for TEXT_CACHE_TTL_FRAMES — labels whose text/size has changed
         // shouldn't keep their stale GPU texture pinned forever.
+        //
+        // The two-level retain walks the full cache, which can balloon to a
+        // few hundred entries on long sessions. The TTL is measured in many
+        // frames anyway, so sweeping every frame is wasteful. Run the eviction
+        // every 32 frames; the absolute TTL still bounds how long stale
+        // entries can stick around.
         self.text_cache_frame = self.text_cache_frame.wrapping_add(1);
         let cache_frame_id = self.text_cache_frame;
-        let ttl_cutoff = cache_frame_id.saturating_sub(TEXT_CACHE_TTL_FRAMES);
-        // Walk the two-level map: drop stale entries from each inner bucket,
-        // then drop any inner bucket that became empty.
-        self.text_label_cache.retain(|_, inner| {
-            inner.retain(|_, entry| entry.last_used >= ttl_cutoff);
-            !inner.is_empty()
-        });
+        const EVICTION_INTERVAL_FRAMES: u64 = 32;
+        if cache_frame_id.is_multiple_of(EVICTION_INTERVAL_FRAMES) {
+            let ttl_cutoff = cache_frame_id.saturating_sub(TEXT_CACHE_TTL_FRAMES);
+            self.text_label_cache.retain(|_, inner| {
+                inner.retain(|_, entry| entry.last_used >= ttl_cutoff);
+                !inner.is_empty()
+            });
+        }
         let mut hand_face_draws: Vec<TextDraw> = Vec::new();
         if let Some(ref font) = self.ui_font {
             for lbl in &tile_labels {
@@ -912,11 +956,16 @@ impl WgpuRenderer {
             }
         }
 
+        // ── Single-pass scan over `ops` to compute the flags every later
+        // section needs. Replaces a handful of repeated `ops.iter().any(...)`
+        // walks (table / cascade / shop / hallway / archive / SSR-relevant)
+        // with one O(n) loop.
+        let ops_flags = OpsFlags::scan(&ops);
+
         // ── Update procedural lit-mesh uniforms (table + candles) ───────
         // Written before the render pass begins, since the pass borrows
         // `self` immutably.
-        let needs_table = ops.iter().any(|o| matches!(o, RenderOp::Table));
-        if needs_table {
+        if ops_flags.needs_table {
             // Horizontal table: mesh is local XY with +Z normal; Y-up mesh
             // chain uses Rx(-90°) so the felt normal is +Y in that basis, then
             // [`translate_rot_scale`] maps to world +Z. Wood grain is
@@ -1058,22 +1107,16 @@ impl WgpuRenderer {
             &mut shadow_uniforms_changed,
         );
 
-        if ops.iter().any(|o| matches!(o, RenderOp::ShopEnvironment)) {
+        if ops_flags.shop_env {
             self.write_shop_environment_uniforms(frame, &camera, false);
         }
-        if ops
-            .iter()
-            .any(|o| matches!(o, RenderOp::HallwayEnvironment))
-        {
+        if ops_flags.hallway_env {
             self.write_hallway_environment_uniforms(frame, &camera, false);
         }
         if self.archive_environment.is_some() {
             self.sync_archive_description_decal_texture(frame);
         }
-        if ops
-            .iter()
-            .any(|o| matches!(o, RenderOp::ArchiveEnvironment))
-        {
+        if ops_flags.archive_env {
             self.write_archive_environment_uniforms(frame, &camera, false);
         }
 
@@ -1150,9 +1193,7 @@ impl WgpuRenderer {
         // quarter-area (half dims) and is additively composited up to the
         // main scene target inside `Pass A`. Skip the pass entirely when no
         // cascade op is queued so the clear isn't paid for on every frame.
-        let cascade_active = ops
-            .iter()
-            .any(|o| matches!(o, RenderOp::ShootingStarCascade));
+        let cascade_active = ops_flags.cascade;
         if cascade_active {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("cascade-offscreen-pass"),
@@ -1178,8 +1219,7 @@ impl WgpuRenderer {
         // ── Pass A: clear + draw main scene ───────────────────────────────
         {
             #[cfg(debug_assertions)]
-            let split_main_for_profile =
-                self.gpu_profiler.is_sampling() && ops.iter().any(|o| matches!(o, RenderOp::Table));
+            let split_main_for_profile = self.gpu_profiler.is_sampling() && ops_flags.needs_table;
             #[cfg(not(debug_assertions))]
             let split_main_for_profile = false;
 
@@ -1402,15 +1442,9 @@ impl WgpuRenderer {
         // thresholding (bloom extract still keys off tonemapped `scene_color` elsewhere).
         let glb_room_bloom_linear = bloom_active
             && frame.room_uses_shop_glb_shader()
-            && (ops.iter().any(|o| matches!(o, RenderOp::ShopEnvironment))
-                || ops
-                    .iter()
-                    .any(|o| matches!(o, RenderOp::HallwayEnvironment))
-                || ops
-                    .iter()
-                    .any(|o| matches!(o, RenderOp::ArchiveEnvironment)));
+            && (ops_flags.shop_env || ops_flags.hallway_env || ops_flags.archive_env);
         if glb_room_bloom_linear {
-            if ops.iter().any(|o| matches!(o, RenderOp::ShopEnvironment))
+            if ops_flags.shop_env
                 && self.shop_environment.is_some()
                 && !self.shop_env_primitives.is_empty()
             {
@@ -1549,7 +1583,7 @@ impl WgpuRenderer {
         }
 
         if glb_room_bloom_linear && !is_prepass {
-            let room_aabb = if ops.iter().any(|o| matches!(o, RenderOp::ShopEnvironment)) {
+            let room_aabb = if ops_flags.shop_env {
                 crate::render::shop_glb::with_shop_glb_cpu(|cpu| {
                     cpu.and_then(|c| {
                         let corners = crate::render::shop_glb::shop_world_bounds_corners_centered(
@@ -1560,10 +1594,7 @@ impl WgpuRenderer {
                         crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
                     })
                 })
-            } else if ops
-                .iter()
-                .any(|o| matches!(o, RenderOp::HallwayEnvironment))
-            {
+            } else if ops_flags.hallway_env {
                 crate::render::hallway_glb::with_hallway_glb_cpu(|cpu| {
                     cpu.and_then(|c| {
                         let corners = crate::render::shop_glb::shop_world_bounds_corners_centered(
@@ -1574,10 +1605,7 @@ impl WgpuRenderer {
                         crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
                     })
                 })
-            } else if ops
-                .iter()
-                .any(|o| matches!(o, RenderOp::ArchiveEnvironment))
-            {
+            } else if ops_flags.archive_env {
                 crate::render::archive_glb::with_archive_glb_cpu(|cpu| {
                     cpu.and_then(|c| {
                         let corners = crate::render::shop_glb::shop_world_bounds_corners_centered(
@@ -1694,8 +1722,21 @@ impl WgpuRenderer {
         // lacquered-table SSR. Only the primary visible pass updates history —
         // not `output_override` prepasses (e.g. shop journal → book texture).
         //
-        // Skipped when `is_prepass`.
-        if !is_prepass {
+        // At 1080p the color copy alone is ~16 MB of `Rgba16Float` per frame,
+        // plus ~8 MB of depth. Skip it on scenes that won't sample SSR:
+        // - prepass (`is_prepass`): journal/etc. don't feed the visible history.
+        // - SSR disabled by user setting (`ssr_enabled = false`).
+        // - Table material is not the lacquered wood that samples SSR; the
+        //   green-felt surface doesn't read `scene_prev_texture`.
+        // - No table on screen this frame at all (`!ops_flags.needs_table`).
+        //
+        // When SSR could be active next frame after a transition, the stale
+        // copy lags one frame — the existing fallback when the camera moves.
+        let ssr_writes_history = !is_prepass
+            && ssr_enabled
+            && surface_kind == crate::persistence::SurfaceKind::Walnut
+            && ops_flags.needs_table;
+        if ssr_writes_history {
             encoder.copy_texture_to_texture(
                 wgpu::TexelCopyTextureInfo {
                     texture: &self.scene_color_texture,
@@ -2061,7 +2102,12 @@ impl WgpuRenderer {
         if self.prev_tile_world.is_empty() {
             return;
         }
-        let live: std::collections::HashSet<u32> = self.tile_uids.iter().copied().collect();
+        // Reuse a per-renderer scratch set to avoid a fresh `HashSet` allocation
+        // every frame. Cleared at the start of each call; the underlying capacity
+        // sticks around between frames.
+        self.tile_uid_scratch.clear();
+        self.tile_uid_scratch.extend(self.tile_uids.iter().copied());
+        let live = &self.tile_uid_scratch;
         self.prev_tile_world.retain(|k, _| live.contains(k));
     }
 }

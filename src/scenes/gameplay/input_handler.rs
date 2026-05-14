@@ -415,7 +415,7 @@ pub(super) fn process_focus_and_actions(
                                     src.0,
                                     src.1,
                                     24,
-                                    [0.95, 0.78, 0.25, 1.0],
+                                    crate::render::theme::color::RELIC_GOLD,
                                     0.9,
                                 );
                                 ctx.bus
@@ -924,13 +924,7 @@ pub(super) fn build_relic_tray_and_wind(
                 .find(|d| d.id == rid)
                 .map(|d| d.rarity)
                 .unwrap_or(crate::core::relic::Rarity::Common);
-            let tier: u8 = match rarity {
-                crate::core::relic::Rarity::Common => 0,
-                crate::core::relic::Rarity::Uncommon => 1,
-                crate::core::relic::Rarity::Rare => 2,
-                crate::core::relic::Rarity::Legendary => 3,
-            };
-            let color = crate::render::theme::color::rarity(tier);
+            let color = crate::render::theme::color::rarity(rarity.tier());
 
             // Activation glow: fast-attack / smooth-decay envelope.
             let (glow, wiggle_deg) = if let Some(start) = scene.relic_glow_starts.get(&rid) {
@@ -1325,7 +1319,7 @@ pub(super) fn build_consumable_dish(
                     crate::core::consumable::Consumable::Zodiac(_) => [0.45, 0.78, 0.55, 1.0],
                     crate::core::consumable::Consumable::Talisman(tk) => match tk {
                         crate::core::talisman::TalismanKind::Pearl => [0.94, 0.95, 0.98, 1.0],
-                        crate::core::talisman::TalismanKind::Gilded => [0.96, 0.78, 0.30, 1.0],
+                        crate::core::talisman::TalismanKind::Gilded => crate::render::theme::color::RELIC_GOLD,
                         crate::core::talisman::TalismanKind::Polychrome => [0.82, 0.55, 0.95, 1.0],
                         crate::core::talisman::TalismanKind::Bamboo => [0.06, 0.55, 0.28, 1.0], // emerald
                         crate::core::talisman::TalismanKind::Dots => [0.08, 0.22, 0.78, 1.0], // sapphire

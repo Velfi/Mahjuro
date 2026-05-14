@@ -25,9 +25,10 @@ mod tile_pipeline;
 mod ui_instances;
 mod uniforms;
 
-use std::collections::HashMap;
 use std::sync::mpsc;
 use std::time::Instant;
+
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use glam::Mat4;
 use wgpu::util::DeviceExt;
@@ -233,14 +234,16 @@ pub struct WgpuRenderer {
     /// when the tile identity changes.
     showcase_tiles: Vec<ShowcaseTileGpu>,
     /// Cached 2D tile-face overlays keyed by tile identity.
-    tile_face_overlays:
-        HashMap<(Suit, u8, Option<crate::core::tile::TileEnhancement>, bool), TileFaceOverlayGpu>,
+    tile_face_overlays: FxHashMap<
+        (Suit, u8, Option<crate::core::tile::TileEnhancement>, bool),
+        TileFaceOverlayGpu,
+    >,
     /// Cached prompt icons keyed by source path (`asset:...` or `file:...`).
-    prompt_icon_overlays: HashMap<String, TileFaceOverlayGpu>,
+    prompt_icon_overlays: FxHashMap<String, TileFaceOverlayGpu>,
     /// Negative cache for [`Self::prompt_icon_overlays`]: keys whose upload
     /// already failed. Re-trying every frame would re-decode the sheet and
     /// flood the log; we warn once and skip thereafter.
-    prompt_icon_missing: std::collections::HashSet<String>,
+    prompt_icon_missing: FxHashSet<String>,
     /// Lazily built texture + bind group for [`Object3dKind::Relic::debuffed`] overlays.
     debuff_marker_overlay: Option<TileFaceOverlayGpu>,
     /// Cached text-label rasterizations. Two-level map so the hit path can
@@ -250,7 +253,7 @@ pub struct WgpuRenderer {
     /// per-frame instance buffer instead. Entries are evicted when their
     /// `last_used` frame stamp falls more than `TEXT_CACHE_TTL_FRAMES` behind
     /// `text_cache_frame`.
-    text_label_cache: HashMap<TextLabelShapeKey, HashMap<String, CachedTextLabel>>,
+    text_label_cache: FxHashMap<TextLabelShapeKey, FxHashMap<String, CachedTextLabel>>,
     /// Monotonically increasing frame counter for `text_label_cache` eviction.
     text_cache_frame: u64,
     vertex_buffer: wgpu::Buffer,
@@ -308,26 +311,31 @@ pub struct WgpuRenderer {
     /// (≈ 70 ms time constant) so lift/tilt animations run in both directions
     /// instead of snapping. Entries are created on first use and never removed
     /// (the map stays tiny — one entry per interactive 3D object in the game).
-    obj3d_hover_state: HashMap<u64, f32>,
+    obj3d_hover_state: FxHashMap<u64, f32>,
     /// Creation time — used as a stable reference for cyclic animations.
     creation_time: Instant,
     /// Cached relic icon textures, populated asynchronously from the loader thread.
-    relic_textures: HashMap<RelicId, RelicTextureGpu>,
+    relic_textures: FxHashMap<RelicId, RelicTextureGpu>,
     /// Receives decoded relic RGBA data from the background loader thread.
     relic_rx: Option<mpsc::Receiver<DecodedRelicImage>>,
     /// Wall-clock start of the relic load pipeline (spawn → last GPU upload).
     relic_load_start: Option<Instant>,
     /// Cached tile-pack box art textures, keyed by `TilePackKind`.
-    pack_textures: HashMap<TilePackKind, RelicTextureGpu>,
+    pack_textures: FxHashMap<TilePackKind, RelicTextureGpu>,
     /// Cached background textures, populated asynchronously.
-    background_textures: HashMap<BackgroundId, BackgroundTextureGpu>,
+    background_textures: FxHashMap<BackgroundId, BackgroundTextureGpu>,
     /// Receives decoded background image data from the background loader thread.
     background_rx: Option<mpsc::Receiver<DecodedBackgroundImage>>,
     /// Wall-clock start of the background load pipeline (spawn → last GPU upload).
     background_load_start: Option<Instant>,
     /// Per-hand-tile last-known world position keyed by tile uid (hand tiles
     /// with pick ids). Used for motion-aware effects and projection caching.
-    prev_tile_world: HashMap<u32, glam::Vec3>,
+    prev_tile_world: FxHashMap<u32, glam::Vec3>,
+    /// Reusable scratch set holding the live tile uids during the per-frame
+    /// `prev_tile_world` GC. Cleared and re-populated each frame so the
+    /// allocation amortizes across frames rather than churning a fresh
+    /// `HashSet` every call.
+    tile_uid_scratch: FxHashSet<u32>,
     /// Previous frame's shadow toggle — forces a shadow-map redraw when shadows enable.
     prev_frame_shadows_enabled: bool,
     /// Pre-rasterized showcase tile decals + UV lookup (`showcase_decal_atlas.rs`).
@@ -468,7 +476,7 @@ pub struct WgpuRenderer {
     /// Per-relic silhouette-derived meshes generated from the loaded relic
     /// texture alpha. Falls back to `relic_box_mesh` when no usable silhouette
     /// can be derived.
-    relic_meshes: HashMap<RelicId, LitMeshGpu>,
+    relic_meshes: FxHashMap<RelicId, LitMeshGpu>,
     /// CPU-side triangle lists for the fallback relic box, used by the
     /// trimesh ray-picker when a relic's per-ID mesh isn't loaded yet.
     /// Built once at renderer init from `build_relic_mesh()`.
@@ -477,7 +485,7 @@ pub struct WgpuRenderer {
     /// used to build `relic_meshes`. Drives per-triangle trimesh picking so
     /// the click silhouette matches the visible relic outline instead of a
     /// loose AABB slab.
-    pub(super) relic_tri_lists: HashMap<RelicId, Vec<[glam::Vec3; 3]>>,
+    pub(super) relic_tri_lists: FxHashMap<RelicId, Vec<[glam::Vec3; 3]>>,
     /// Pre-allocated per-candle uniform buffers + bind groups (one per
     /// primitive). Indexed by candle slot, then 0=wax/1=wick.
     candle_instances: Vec<[LitMeshInstance; 2]>,
@@ -627,25 +635,25 @@ pub struct WgpuRenderer {
     /// the renderer can build a mesh on first sight of a new label string
     /// and reuse it on every subsequent frame the same string appears.
     glyph_cpu_cache: crate::render::glyph_mesh::GlyphMeshCache,
-    extruded_glyph_meshes: HashMap<String, LitMeshGpu>,
+    extruded_glyph_meshes: FxHashMap<String, LitMeshGpu>,
     /// Shape registry for `Object3dKind::Primitive`. During the Phase-1
     /// migration, entries share GPU allocations with the legacy named
     /// fields (`plaque_mesh`, `cabinet_mesh`, …) via `Arc`. Once a
     /// legacy kind is deleted, the registry entry becomes the sole
     /// owner.
-    primitive_meshes: HashMap<crate::render::primitive::MeshId, std::sync::Arc<LitMeshGpu>>,
+    primitive_meshes: FxHashMap<crate::render::primitive::MeshId, std::sync::Arc<LitMeshGpu>>,
     /// Per-shape instance pools for `Object3dKind::Primitive`. Keyed by
     /// `MeshId`; each `Vec` grows on-demand via `ensure_lit_mesh_pool`.
-    primitive_instances: HashMap<crate::render::primitive::MeshId, Vec<LitMeshInstance>>,
+    primitive_instances: FxHashMap<crate::render::primitive::MeshId, Vec<LitMeshInstance>>,
     /// Per-shape texture overrides for primitive instances. When a
     /// shape has an entry here, `dispatch_primitive` binds the
     /// specified albedo + relief textures at instance creation instead
     /// of the default white + flat relief. Used by meshes whose
     /// material samples a heightmap (e.g. engraved coin faces).
     primitive_textures:
-        HashMap<crate::render::primitive::MeshId, (wgpu::TextureView, wgpu::TextureView)>,
+        FxHashMap<crate::render::primitive::MeshId, (wgpu::TextureView, wgpu::TextureView)>,
     /// Per-pick-id model matrix snapshot for primitive hit-testing.
-    pub(super) last_primitive_pick_models: HashMap<u32, Mat4>,
+    pub(super) last_primitive_pick_models: FxHashMap<u32, Mat4>,
     /// Three reusable lit-mesh instances for the debug world-axes overlay
     /// (one per axis: 0 = X red, 1 = Y green, 2 = Z blue). Drawn through
     /// the shared `relic_box_mesh` unit cube; per-frame uniforms position
@@ -683,7 +691,7 @@ pub struct WgpuRenderer {
     /// draw picks up `rx_deg/ry_deg/rz_deg` without each construction site
     /// having to wire them through. Degrees, applied in Z→Y→X order, world
     /// space (left-multiplied onto the model's rotation+scale block).
-    committed_arrange_rotations: std::collections::HashMap<String, [f32; 3]>,
+    committed_arrange_rotations: FxHashMap<String, [f32; 3]>,
 
     // ── Shadow mapping ─────────────────────────────────────────────────
     /// Fixed-size depth texture written by the shadow pre-pass and sampled

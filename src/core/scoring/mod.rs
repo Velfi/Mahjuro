@@ -105,10 +105,14 @@ pub(crate) fn describe_set(tiles: &[Tile], set: &DetectedMeld) -> String {
     format!("{label}  {faces}")
 }
 
+#[inline]
 pub(crate) fn tile_by_id(tiles: &[Tile], id: u32) -> Option<&Tile> {
+    // Inlined linear scan: hand sizes are tiny (≤16 tiles) so a single
+    // cache-warm pass through the slice beats a `HashMap` indirection.
     tiles.iter().find(|t| t.id == id)
 }
 
+#[inline]
 pub(crate) fn tile_is_debuffed(tile: &Tile, debuffs: &[crate::core::debuff::TileDebuff]) -> bool {
     debuffs.iter().any(|debuff| debuff.matches(tile))
 }

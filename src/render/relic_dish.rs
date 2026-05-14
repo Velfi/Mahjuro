@@ -7,6 +7,7 @@
 //! turn it into rectangular prisms of varying sizes.
 
 use crate::render::lit_mesh::{Aabb, MaterialKind, MaterialParams, MeshCpu, push_box};
+use crate::render::theme::color;
 use crate::render::tile_glb::Vertex3dTex;
 
 use lyon_path::Path;
@@ -1016,7 +1017,7 @@ pub fn build_porcelain_dish_mesh() -> MeshCpu {
         indices,
         default_material: MaterialParams {
             kind: MaterialKind::Porcelain,
-            base_color: [0.95, 0.94, 0.92, 1.0],
+            base_color: color::PARCHMENT,
             specular_strength: 0.7,
             specular_power: 128.0,
         },
@@ -1399,7 +1400,7 @@ struct SilhouettePolygon {
 /// increasing downward means CCW-image is actually visually CW — the sign
 /// depends on the axis convention, see `group_contours_into_polygons`).
 fn trace_silhouette_contours(solid: &[bool], w: i32, h: i32) -> Vec<Vec<(f32, f32)>> {
-    use std::collections::HashMap;
+    use rustc_hash::FxHashMap;
 
     // Cells are indexed by top-left pixel (cx, cy); the 4 corners used for
     // the marching-squares lookup are the pixel centers (treated as solid or
@@ -1421,7 +1422,7 @@ fn trace_silhouette_contours(solid: &[bool], w: i32, h: i32) -> Vec<Vec<(f32, f3
     // midpoint of cell (cx, cy) → (2*cx+1, 2*cy). This keeps the stitching
     // hashmap fast and exact.
     type Key = (i32, i32);
-    let mut adj: HashMap<Key, Vec<Key>> = HashMap::new();
+    let mut adj: FxHashMap<Key, Vec<Key>> = FxHashMap::default();
 
     for cy in 0..h {
         for cx in 0..w {

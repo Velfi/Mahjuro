@@ -361,8 +361,8 @@ pub struct TutorialOverlayReadModel {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct YakuProgressReadModel {
-    pub levels: std::collections::HashMap<YakuKind, u32>,
-    pub played_this_run: std::collections::HashMap<YakuKind, u32>,
+    pub levels: rustc_hash::FxHashMap<YakuKind, u32>,
+    pub played_this_run: rustc_hash::FxHashMap<YakuKind, u32>,
 }
 
 impl YakuProgressReadModel {

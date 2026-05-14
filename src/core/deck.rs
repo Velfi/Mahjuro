@@ -168,13 +168,13 @@ impl Wall {
     }
 
     /// Build a wall with tile-pack extras injected, then filter removed IDs.
-    /// Pack tiles get pre-stamped enhancements from `enhancements` (e.g.
-    /// Polychrome pack tiles carry their ×1.2 mult enhancement).
+    /// Pack tiles get pre-stamped enhancements from `enhancements` if any
+    /// pack opts in via `TilePackKind::pre_enhancement`.
     /// When `overflow` is true, 2 extra copies per tile face are added with
     /// IDs starting at [`OVERFLOW_TILE_ID_BASE`] so they can be stripped
     /// mid-round if the relic is lost.
     pub fn from_filtered_with_packs(
-        removed: &std::collections::HashSet<u32>,
+        removed: &rustc_hash::FxHashSet<u32>,
         packs: &[crate::core::tile_pack::TilePackKind],
         enhancements: &std::collections::BTreeMap<u32, super::tile::TileEnhancement>,
         overflow: bool,

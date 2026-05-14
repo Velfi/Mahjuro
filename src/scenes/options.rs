@@ -1148,7 +1148,7 @@ impl OptionsScene {
                 let bg_color = if is_focused {
                     [0.20, 0.32, 0.50, 0.90]
                 } else {
-                    [0.12, 0.15, 0.24, 0.75]
+                    color::alpha(color::TWILIGHT, 0.75)
                 };
                 instances.push(GpuInstance {
                     rect: [row_x, row_y, row_w, row_h],
