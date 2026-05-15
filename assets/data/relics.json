@@ -1650,7 +1650,37 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Euler's Number wherever it rests.",
+        "text": "A fundamental mathematical constant equal to approximately ",
+        "bold": false,
+        "italic": true
+      },
+      {
+        "text": "2.71828",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": "Euler's number appears universally in mathematics, physics and finance whenever continuous ",
+        "bold": false,
+        "italic": true
+      },
+      {
+        "text": "growth",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " or ",
+        "bold": false,
+        "italic": true
+      },
+      {
+        "text": "decay",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " is involved.",
         "bold": false,
         "italic": true
       }
