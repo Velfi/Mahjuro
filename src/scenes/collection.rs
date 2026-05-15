@@ -262,11 +262,20 @@ fn lerp_camera(a: &CameraParams, b: &CameraParams, t: f32) -> CameraParams {
             a[2] + (b[2] - a[2]) * t,
         ]
     }
+    fn lerp_opt(a: Option<f32>, b: Option<f32>, t: f32) -> Option<f32> {
+        match (a, b) {
+            (Some(av), Some(bv)) => Some(av + (bv - av) * t),
+            (Some(v), None) | (None, Some(v)) => Some(v),
+            (None, None) => None,
+        }
+    }
     CameraParams {
         eye: lerp3(a.eye, b.eye, t),
         target: lerp3(a.target, b.target, t),
         up: a.up,
         fovy_deg: a.fovy_deg + (b.fovy_deg - a.fovy_deg) * t,
+        clip_near: lerp_opt(a.clip_near, b.clip_near, t),
+        clip_far: lerp_opt(a.clip_far, b.clip_far, t),
     }
 }
 
@@ -790,6 +799,8 @@ impl CollectionScene {
                 target: [cam_world_x, 0.0, cam_world_z],
                 up: [0.0, 0.0, 1.0],
                 fovy_deg: 48.0,
+                clip_near: None,
+                clip_far: None,
             }
         };
         let archive_feat_plane_z = if use_archive && inspect.is_none() {
@@ -3345,9 +3356,8 @@ fn archive_section_tab_hit_rects(
     })
 }
 
-/// Compose the same view-projection matrix the renderer uses (must
-/// match `WgpuRenderer`'s perspective + look_at_rh path: near=1.0,
-/// far=h*12.0). Drift here makes hit rects misalign with visible 3D.
+/// Compose the same view-projection matrix the renderer uses (must match
+/// [`CameraParams::clip_planes`] + look_at_rh). Drift here makes hit rects misalign with visible 3D.
 fn camera_view_proj(w: f32, h: f32, cam: &CameraParams) -> glam::Mat4 {
     let w = w.max(1.0);
     let h = h.max(1.0);
@@ -3357,7 +3367,8 @@ fn camera_view_proj(w: f32, h: f32, cam: &CameraParams) -> glam::Mat4 {
         glam::Vec3::from_array(cam.target),
         glam::Vec3::from_array(cam.up),
     );
-    let proj = glam::Mat4::perspective_rh(cam.fovy_deg.to_radians(), aspect, 1.0, h * 12.0);
+    let (near, far) = cam.clip_planes(h);
+    let proj = glam::Mat4::perspective_rh(cam.fovy_deg.to_radians(), aspect, near, far);
     proj * view
 }
 
@@ -3494,6 +3505,8 @@ fn compute_layout(w: f32, h: f32, scale: f32, _tab: Tab, item_count: usize) -> S
         target: [0.0, h * 0.05, h * 0.10],
         up: [0.0, 0.0, 1.0],
         fovy_deg: 36.0,
+        clip_near: None,
+        clip_far: None,
     };
 
     SceneLayout {

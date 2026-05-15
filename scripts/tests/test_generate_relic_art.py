@@ -138,7 +138,7 @@ class BuildEditMaskTests(unittest.TestCase):
         draw.ellipse((cx - 20, cy - 20, cx + 20, cy + 20), fill=(180, 60, 60, 255))
         img.save(path, format="PNG")
 
-    def test_emits_rgba_mask_with_matching_size(self):
+    def test_emits_binary_silhouette_with_matching_size(self):
         with tempfile.TemporaryDirectory() as td:
             ref = Path(td) / "ref.png"
             mask = Path(td) / "mask.png"
@@ -146,8 +146,13 @@ class BuildEditMaskTests(unittest.TestCase):
 
             self.assertTrue(self.m.build_edit_mask(ref, mask))
             with Image.open(mask) as m:
-                self.assertEqual(m.mode, "RGBA")
+                # Gemini receives the mask as a second image; the helper
+                # writes an L-mode binary silhouette (white = subject,
+                # black = background).
+                self.assertEqual(m.mode, "L")
                 self.assertEqual(m.size, (48, 48))
+                self.assertEqual(m.getpixel((24, 24)), 255)
+                self.assertEqual(m.getpixel((0, 0)), 0)
 
     def test_fully_opaque_reference_refused(self):
         """A reference with no transparent surround has no silhouette to lock."""
@@ -164,31 +169,18 @@ class BuildEditMaskTests(unittest.TestCase):
                 self.m.build_edit_mask(Path(td) / "missing.png", Path(td) / "m.png")
             )
 
-    def test_mask_alpha_follows_convention_flag(self):
-        """Flipping EDIT_MASK_TRANSPARENT_IS_EDITABLE must invert the mask alpha."""
+    def test_mask_silhouette_matches_reference_alpha(self):
+        """Subject pixels become white; background pixels become black."""
         with tempfile.TemporaryDirectory() as td:
             ref = Path(td) / "ref.png"
+            mask = Path(td) / "mask.png"
             self._make_reference_with_cutout(ref, size=(32, 32))
 
-            mask_a = Path(td) / "a.png"
-            mask_b = Path(td) / "b.png"
-
-            original = self.m.EDIT_MASK_TRANSPARENT_IS_EDITABLE
-            try:
-                self.m.EDIT_MASK_TRANSPARENT_IS_EDITABLE = True
-                self.assertTrue(self.m.build_edit_mask(ref, mask_a))
-                self.m.EDIT_MASK_TRANSPARENT_IS_EDITABLE = False
-                self.assertTrue(self.m.build_edit_mask(ref, mask_b))
-            finally:
-                self.m.EDIT_MASK_TRANSPARENT_IS_EDITABLE = original
-
-            with Image.open(mask_a) as ma, Image.open(mask_b) as mb:
-                a_alpha = ma.split()[-1].getpixel((16, 16))
-                b_alpha = mb.split()[-1].getpixel((16, 16))
-            self.assertEqual(
-                (a_alpha, b_alpha), (0, 255),
-                "Flipping the convention flag should invert the silhouette alpha",
-            )
+            self.assertTrue(self.m.build_edit_mask(ref, mask))
+            with Image.open(mask) as m:
+                self.assertEqual(m.mode, "L")
+                self.assertEqual(m.getpixel((16, 16)), 255)
+                self.assertEqual(m.getpixel((0, 0)), 0)
 
 
 class WriteMaskFromHeightTests(unittest.TestCase):
@@ -220,6 +212,37 @@ class WriteMaskFromHeightTests(unittest.TestCase):
             self.assertFalse(
                 self.m.write_mask_from_height(Path(td) / "missing.png", Path(td) / "m.png")
             )
+
+
+class SpecularFromHeightTests(unittest.TestCase):
+    """`write_specular_from_height` maps metal bright and enamel matte."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.m = _load_module()
+
+    def test_metal_brighter_than_enamel(self):
+        self.assertGreater(
+            self.m.specular_from_height_luma(220),
+            self.m.specular_from_height_luma(120),
+        )
+        self.assertEqual(self.m.specular_from_height_luma(0), 0)
+        self.assertEqual(self.m.specular_from_height_luma(255), 255)
+
+    def test_writes_grayscale_png(self):
+        with tempfile.TemporaryDirectory() as td:
+            h = Path(td) / "h.png"
+            spec = Path(td) / "s.png"
+            img = Image.new("L", (16, 16), 0)
+            for x in range(8):
+                for y in range(16):
+                    img.putpixel((x, y), 180)
+            img.save(h, format="PNG")
+
+            self.assertTrue(self.m.write_specular_from_height(h, spec))
+            with Image.open(spec) as out:
+                self.assertEqual(out.mode, "L")
+                self.assertGreater(out.getpixel((4, 8)), out.getpixel((12, 8)))
 
 
 class ObjectPromptTests(unittest.TestCase):

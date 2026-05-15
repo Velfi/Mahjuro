@@ -21,14 +21,10 @@ impl WgpuRenderer {
         object3d_draw_list: &mut Vec<(DrawKind, usize)>,
     ) {
         let view_proj_arr = camera.view_proj_arr;
-        // The ribbon mesh hangs *down* from its anchor: local y ∈ [-1, 0].
-        // After the unit-scale model, its local-space AABB is centered at
-        // y = -0.5 with half = 0.5, not the unit cube's y ∈ [-0.5, 0.5].
-        // Using `project_unit_cube_rect` here would clip the lower half of
-        // the ribbon out of the projected screen rect (and the picker's
-        // OBB would sit on the upper half only).
+        // Ribbon mesh local y ∈ [-0.5, 0.5] with origin at centroid; z half
+        // is HALF_THICKNESS (0.05), not 0.5 — project that AABB, not the unit cube.
         const RIBBON_HALF: glam::Vec3 = glam::Vec3::new(0.5, 0.5, 0.5);
-        const RIBBON_CENTER_Y: f32 = -0.5;
+        const RIBBON_CENTER_Y: f32 = 0.0;
         let project_ribbon_rect = |model: Mat4| -> [f32; 4] {
             camera.project_aabb_rect(
                 model,

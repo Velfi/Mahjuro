@@ -16,6 +16,7 @@ pub struct EffectLayers {
     pub procedural_surface_quality: bool,
     pub starfield: bool,
     pub golden_dust: bool,
+    #[allow(dead_code)]
     pub ember_drift: bool,
     pub hdr: bool,
     pub transition_fullscreen_fx: bool,

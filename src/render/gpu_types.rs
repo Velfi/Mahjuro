@@ -19,7 +19,8 @@ pub(crate) struct DecodedRelicImage {
     pub mesh_rgba: Option<Vec<u8>>,
     pub mesh_width: u32,
     pub mesh_height: u32,
-    /// Linear RGBA relief (same UV space as albedo); 1×1 mid-gray when height asset is missing.
+    /// Linear RGBA relief (same UV space as albedo): R/B = height, G = specular mask.
+    /// 1×1 mid-gray when height asset is missing.
     pub relief_rgba: Vec<u8>,
     pub relief_width: u32,
     pub relief_height: u32,

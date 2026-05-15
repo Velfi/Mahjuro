@@ -132,6 +132,8 @@ impl ShopLayout {
             ],
             up: [0.0, 0.0, 1.0],
             fovy_deg: 58.0,
+            clip_near: None,
+            clip_far: None,
         };
 
         let col_px_x: [f32; 4] = [

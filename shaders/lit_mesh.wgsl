@@ -33,7 +33,7 @@ struct MeshUniform {
 @group(0) @binding(0) var<uniform> mesh: MeshUniform;
 @group(0) @binding(1) var albedo_tex: texture_2d<f32>;
 @group(0) @binding(2) var albedo_samp: sampler;
-/// Linear grayscale relief for relic enamel (separate from color albedo).
+/// Relic relief data (linear): `.r` = height, `.g` = specular mask (soft-enamel pins).
 @group(0) @binding(3) var relief_tex: texture_2d<f32>;
 
 struct PointLight {
@@ -1441,6 +1441,7 @@ fn fs_main(
     // the cylinder and the gradient there would be meaningless.
     var enamel_height = 0.0;
     var enamel_ridge = 0.0;
+    var enamel_spec_mask = 1.0;
     if (is_metal) {
         let face_flat = abs(n.y);
         if (face_flat > 0.6) {
@@ -1473,9 +1474,10 @@ fn fs_main(
     }
     if (is_enamel) {
         let face_flat = abs(n.y);
-        // Relief is bound separately (linear grayscale); same remap as the old
-        // baked-alpha path so existing height PNGs still read correctly.
-        let hr = textureSampleLevel(relief_tex, albedo_samp, in.uv, 0.0).r;
+        // Relief is bound separately (linear): R = height, G = specular mask.
+        let relief_sample = textureSampleLevel(relief_tex, albedo_samp, in.uv, 0.0);
+        let hr = relief_sample.r;
+        enamel_spec_mask = relief_sample.g;
         let h_c = clamp((hr - 0.62) / 0.33, 0.0, 1.0);
         enamel_height = h_c;
         enamel_ridge = smoothstep(0.70, 0.92, h_c);
@@ -1805,8 +1807,10 @@ fn fs_main(
                 let ridge_f0 = mesh.base_color.rgb;
                 let f_pin = ridge_f0 + (vec3<f32>(1.0) - ridge_f0) * pow(1.0 - vdh, 5.0);
                 let ridge_lobe = pow(nh, max(spec_power * 1.8, 1.0)) * smoothstep(0.68, 0.92, enamel_height);
-                spec_acc = spec_acc + lc * intensity * atten * s * cand_vis * 0.55;
-                spec_acc = spec_acc + lc * intensity * atten * cand_vis * ridge_lobe * 1.15 * f_pin;
+                let fill_spec = mix(0.18, 0.55, enamel_spec_mask);
+                let ridge_spec = mix(0.35, 1.15, enamel_spec_mask);
+                spec_acc = spec_acc + lc * intensity * atten * s * cand_vis * fill_spec;
+                spec_acc = spec_acc + lc * intensity * atten * cand_vis * ridge_lobe * ridge_spec * f_pin;
             } else if (is_glass) {
                 let vdh = max(dot(view_dir, h), 0.0);
                 let fresnel = 0.10 + 0.90 * pow(1.0 - vdh, 5.0);

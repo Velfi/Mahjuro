@@ -275,10 +275,9 @@ impl WgpuRenderer {
                 consider(ShopHit::Relic(i), t);
             }
         }
-        // Ribbons — local bounds x ∈ [-0.5,0.5], y ∈ [-1, 0], z ∈ [-0.05, 0.05].
-        // Express as half-extents (0.5, 0.5, 0.5) centered at y=-0.5 via offset.
+        // Ribbons — local bounds x ∈ [-0.5, 0.5], y ∈ [-0.5, 0.5], z ∈ [-0.05, 0.05].
         for (i, model) in self.last_ribbon_models.iter().enumerate() {
-            if let Some(t) = slab_test(*model, 0.5, 0.5, 0.5, -0.5) {
+            if let Some(t) = slab_test(*model, 0.5, 0.5, 0.5, 0.0) {
                 consider(ShopHit::Ribbon(i), t);
             }
         }

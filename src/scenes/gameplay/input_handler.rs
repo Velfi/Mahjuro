@@ -1328,15 +1328,21 @@ pub(super) fn build_consumable_dish(
                 let pendant_y = layout.mm(td.lift_mm + 5.0) + 2.0;
                 match item {
                     crate::core::consumable::Consumable::Zodiac(z) => {
-                        // Length is the natural dimension here — the
-                        // ribbon hangs to fill most of the slot height —
-                        // and width / depth come from the canonical 3:1
-                        // aspect via the helper.
+                        // Length is the natural dimension here — the ribbon
+                        // fills most of the slot height — and width / depth
+                        // come from the canonical 3:1 aspect via the helper.
+                        // `pos` is the mesh centroid; lift sits half a length
+                        // below the finial that rests on the dish rim.
+                        let ribbon_length = slot_h * 0.85;
                         ribbon_dish_placements.push(
                             crate::render::ribbon_mesh::zodiac_ribbon_object3d(
                                 crate::render::ribbon_mesh::ZodiacRibbonSpec {
-                                    pos: [zx + slot_w * 0.5, zy, pendant_y],
-                                    length: slot_h * 0.85,
+                                    pos: [
+                                        zx + slot_w * 0.5,
+                                        zy,
+                                        pendant_y - ribbon_length * 0.5,
+                                    ],
+                                    length: ribbon_length,
                                     rotation:
                                         crate::render::table_transform::euler_xyz_rad_from_deg(
                                             -90.0, 0.0, 0.0,

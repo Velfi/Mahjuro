@@ -26,8 +26,8 @@ use crate::render::shop_glb::{
     ShopEnvLightingTune, marker_translation, player_consumable_marker_name,
     player_gold_dish_marker_translation, player_relic_marker_name,
     screen_rect_for_marker_mesh_bounds, shop_camera_fit_fovy_for_corners,
-    shop_camera_from_glb_if_present, shop_env_world_scale, shop_world_bounds_corners_centered,
-    spawn_relic_marker_name, with_shop_glb_cpu,
+    shop_camera_from_glb_if_present, shop_camera_with_room_clip_planes, shop_env_world_scale,
+    shop_world_bounds_corners_centered, spawn_relic_marker_name, with_shop_glb_cpu,
 };
 use crate::render::table_transform::euler_xyz_rad_from_deg;
 use crate::render::table_transform::mat4_to_euler_xyz_rad;
@@ -223,28 +223,31 @@ fn spot_lights_from_glb(w: f32, h: f32, env_h: f32, tune: &ShopEnvLightingTune) 
 
 pub(super) fn shop_camera_base(w: f32, h: f32, env_h: f32) -> CameraParams {
     let from_glb = shop_camera_from_glb_if_present(h, env_h);
-    let cam = from_glb.unwrap_or_else(|| {
-        // ref_h: 1080 — fallback when shop.glb has no usable perspective camera (room centered at origin).
-        let cs = h / 1080_f32;
-        CameraParams {
-            eye: [0.0 * cs, -1517.6 * cs, 1557.2 * cs],
-            target: [0.0, 0.0, 0.0],
-            up: [0.0, 0.0, 1.0],
-            fovy_deg: 58.0,
-        }
-    });
-    // Auto-fit widens vertical FOV past the authored value; keep GLB eye / target / up / fovy intact.
-    if from_glb.is_none() {
-        return with_shop_glb_cpu(|opt| {
-            if let Some(cpu) = opt {
-                let corners = shop_world_bounds_corners_centered(h, env_h, cpu);
-                shop_camera_fit_fovy_for_corners(w, h, cam, &corners, 0.94)
-            } else {
-                cam
+    with_shop_glb_cpu(|opt| {
+        let mut cam = from_glb.unwrap_or_else(|| {
+            // ref_h: 1080 — fallback when shop.glb has no usable perspective camera (room centered at origin).
+            let cs = h / 1080_f32;
+            CameraParams {
+                eye: [0.0 * cs, -1517.6 * cs, 1557.2 * cs],
+                target: [0.0, 0.0, 0.0],
+                up: [0.0, 0.0, 1.0],
+                fovy_deg: 58.0,
+                clip_near: None,
+                clip_far: None,
             }
         });
-    }
-    cam
+        // Auto-fit widens vertical FOV past the authored value; keep GLB eye / target / up / fovy intact.
+        if from_glb.is_none() {
+            if let Some(cpu) = opt {
+                let corners = shop_world_bounds_corners_centered(h, env_h, cpu);
+                cam = shop_camera_fit_fovy_for_corners(w, h, cam, &corners, 0.94);
+            }
+        }
+        if let Some(cpu) = opt {
+            cam = shop_camera_with_room_clip_planes(cam, h, env_h, cpu);
+        }
+        cam
+    })
 }
 
 fn shop_camera_params(w: f32, h: f32, env_h: f32) -> CameraParams {
@@ -295,7 +298,7 @@ fn shop_inspect_pivot_world(
             ShopFocus::Ribbon(i) => {
                 scene.zodiac_items.get(i)?;
                 let ribbon_len = ribbon_length_fitting_rect(r[2] * 0.38, r[3] * 0.62);
-                let cz = wz + ribbon_len * 0.35;
+                let cz = wz + ribbon_len * 0.35 - ribbon_len * 0.5;
                 sale_anchor_at_slot(w, h, cam, slot_i, env_h, cx, cy, cz)
             }
             ShopFocus::Talisman(i) => {
@@ -333,7 +336,7 @@ fn shop_inspect_pivot_world(
                 let oi = i.saturating_sub(zodiac_for_sale);
                 shop.owned_zodiacs.get(oi)?;
                 let ribbon_len = ribbon_length_fitting_rect(r[2] * 0.36, r[3] * 0.58);
-                let cz = wz + ribbon_len * 0.32;
+                let cz = wz + ribbon_len * 0.32 - ribbon_len * 0.5;
                 inv_marker_surface_anchor(w, h, cam, scene, shop, slot_i, env_h, cx, cy, cz)
             }
             ShopFocus::Talisman(i) => {
@@ -639,6 +642,8 @@ fn push_shop_inspect_overlay_chrome(out: &mut Vec<TextLabel>, ctx: &DrawCtx<'_>,
         italic: false,
         underline: false,
         text_effect: crate::render::text_effect::TextEffectId::Flat,
+        rotation_quarters: 0,
+        baseline_shift_px: 0.0,
     });
 }
 
@@ -1099,6 +1104,8 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
         italic: false,
         underline: false,
         text_effect: crate::render::text_effect::TextEffectId::Flat,
+        rotation_quarters: 0,
+        baseline_shift_px: 0.0,
     }]);
 
     // Shelf focus ring uses shelf-slot screen rects.
@@ -1445,6 +1452,8 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                 italic: false,
                 underline: false,
                 text_effect: crate::render::text_effect::TextEffectId::Flat,
+                rotation_quarters: 0,
+                baseline_shift_px: 0.0,
             });
         }
 
@@ -1495,6 +1504,8 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                 italic: false,
                 underline: false,
                 text_effect: crate::render::text_effect::TextEffectId::Flat,
+                rotation_quarters: 0,
+                baseline_shift_px: 0.0,
             });
         }
 
@@ -2204,7 +2215,7 @@ fn push_stock_meshes(
                 } else {
                     None
                 };
-                let cz = wz + ribbon_len * 0.35;
+                let cz = wz + ribbon_len * 0.35 - ribbon_len * 0.5;
                 let ribbon_pos = object3d_pos_for_shop_inspect_focus(
                     inspect_anchor,
                     *foc,
@@ -2341,7 +2352,7 @@ fn push_stock_meshes(
                     // Largest 3:1 ribbon that fits the inventory slot's
                     // (0.36 × 0.58) envelope.
                     let ribbon_len = ribbon_length_fitting_rect(r[2] * 0.36, r[3] * 0.58);
-                    let cz = wz + ribbon_len * 0.32;
+                    let cz = wz + ribbon_len * 0.32 - ribbon_len * 0.5;
                     let pos = object3d_pos_for_shop_inspect_focus(
                         inspect_anchor,
                         *foc,

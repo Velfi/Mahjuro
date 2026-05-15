@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """
 Generate single-image silk ribbon textures for the 14 zodiac consumable
-cards in Mahjuro using OpenAI's `gpt-image-2` API (Mouse + the 12
-standard animals + Qilin for Kokushi Musō).
+cards in Mahjuro using Google's Nano Banana 2 (`gemini-3.1-flash-image-
+preview`) API (Mouse + the 12 standard animals + Qilin for Kokushi Musō).
 
-Each zodiac is one tall portrait image rather than a 3-piece tile set —
-modern image models accept arbitrary portrait aspect ratios up to 3:1, so
-we render the whole ribbon (top finial → silk body w/ animal → tassel) in
-one shot. The 3D ribbon mesh maps the texture full-bleed across its
-length, so the visible animal/finial/tassel proportions are baked into
-the image itself.
+Each zodiac is one tall portrait image rather than a 3-piece tile set.
+The 3D ribbon mesh maps the texture full-bleed across its length, so the
+visible animal/finial/tassel proportions are baked into the image itself.
 
-    zodiac_<slug>.png        — full ribbon portrait, default 1024x3072 (1:3)
+    zodiac_<slug>.png        — full ribbon portrait, default 1:4@2K
+
+Nano Banana 2 supports a 1:4 aspect ratio (the closest to the original
+1:3 layout); the prompt still describes a 3-band finial / silk / tassel
+composition that the renderer maps full-bleed.
 
 Style direction: "Walnut, Brass & Felt" — woven silk banners hanging in
 a curio shop. Each ribbon is its own per-zodiac silk color with the
@@ -19,8 +20,8 @@ zodiac animal embroidered in metallic brass thread, plus subtle brass
 trim along the long edges.
 
 Usage:
-    pip install openai pillow requests
-    export OPENAI_API_KEY="sk-..."
+    pip install google-genai pillow
+    export GEMINI_API_KEY="..."
     python3 scripts/generate_zodiac_ribbons.py                  # all missing
     python3 scripts/generate_zodiac_ribbons.py --force          # regenerate all
     python3 scripts/generate_zodiac_ribbons.py --name dragon    # one by slug
@@ -30,17 +31,17 @@ Usage:
 """
 
 import argparse
-import base64
-import os
 import sys
 import time
 from pathlib import Path
 
-try:
-    from openai import OpenAI
-except ImportError:
-    print("Error: openai package not installed. Run: pip install openai")
-    sys.exit(1)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _image_gen import (  # noqa: E402
+    DEFAULT_MODEL,
+    generate_image_bytes,
+    init_client,
+    parse_size,
+)
 
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "assets" / "textures" / "zodiacs"
@@ -318,32 +319,17 @@ def build_prompt(visual: str, palette: str) -> str:
 # ---------------------------------------------------------------------------
 
 def generate_image(
-    client: OpenAI, prompt: str, output_path: Path, model: str, size: str
+    client, prompt: str, output_path: Path, model: str, size: str
 ) -> None:
-    """Call the image API and save the resulting PNG."""
-    response = client.images.generate(
+    """Call Gemini Nano Banana 2 and save the resulting PNG."""
+    aspect_ratio, image_size = parse_size(size)
+    img_bytes = generate_image_bytes(
+        client,
+        prompt,
         model=model,
-        prompt=prompt,
-        n=1,
-        size=size,
-        quality="high",
+        aspect_ratio=aspect_ratio,
+        image_size=image_size,
     )
-
-    data = response.data[0]
-    image_url = getattr(data, "url", None)
-    if image_url is None:
-        b64 = getattr(data, "b64_json", None)
-        if b64 is None:
-            print("  Error: No image URL or b64 data returned.")
-            return
-        img_bytes = base64.b64decode(b64)
-    else:
-        import requests
-
-        img_response = requests.get(image_url, timeout=120)
-        img_response.raise_for_status()
-        img_bytes = img_response.content
-
     output_path.write_bytes(img_bytes)
     print(f"  Saved: {output_path}")
 
@@ -355,7 +341,7 @@ def generate_image(
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Generate Mahjuro zodiac ribbon textures (single tall "
-        "portrait per zodiac) via the OpenAI image API"
+        "portrait per zodiac) via Google Nano Banana 2"
     )
     parser.add_argument(
         "--zodiac",
@@ -385,18 +371,16 @@ def main() -> None:
     parser.add_argument(
         "--model",
         type=str,
-        default="gpt-image-2",
-        help="Image model to use (default: gpt-image-2).",
+        default=DEFAULT_MODEL,
+        help=f"Gemini image model (default: {DEFAULT_MODEL}).",
     )
     parser.add_argument(
         "--size",
         type=str,
-        default="1024x3072",
-        # gpt-image-2 accepts any resolution within: max edge ≤ 3840px,
-        # both edges divisible by 16, long:short ratio ≤ 3:1, total
-        # pixels in [655_360, 8_294_400]. 1024x3072 is the widest 3:1
-        # portrait that hits high quality without wasting tokens.
-        help="Image size — tall portrait (default: 1024x3072).",
+        default="1:4@2K",
+        # Nano Banana 2 supports 1:4 (closest to the legacy 1024x3072 ≈ 1:3
+        # portrait). 2K keeps the long edge sharp without wasting tokens.
+        help="Generation size — Gemini ASPECT@TIER (default: 1:4@2K).",
     )
     parser.add_argument(
         "--output-dir",
@@ -442,11 +426,7 @@ def main() -> None:
 
     client = None
     if not args.dry_run:
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            print("Error: OPENAI_API_KEY environment variable not set.")
-            sys.exit(1)
-        client = OpenAI(api_key=api_key)
+        client = init_client()
 
     generated = 0
     skipped = 0

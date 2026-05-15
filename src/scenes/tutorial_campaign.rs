@@ -612,10 +612,11 @@ impl TutorialCampaignScene {
     }
 
     fn shop_preview_ribbon(center_x: f32, item_y: f32, h: f32, scale: f32) -> Object3d {
+        let length = 46.0 * scale;
         crate::render::ribbon_mesh::zodiac_ribbon_object3d(
             crate::render::ribbon_mesh::ZodiacRibbonSpec {
-                pos: [center_x, item_y + 2.0 * scale, h * 0.18],
-                length: 46.0 * scale,
+                pos: [center_x, item_y + 2.0 * scale + length * 0.5, h * 0.18],
+                length,
                 rotation: [0.0, 0.0, 0.0],
                 color: [1.0, 1.0, 1.0, 1.0],
                 kind: Some(ZodiacKind::Dragon),
@@ -930,6 +931,8 @@ impl SceneBehavior for TutorialCampaignScene {
             target: [0.0, -40.0 * cam_scale, 0.0],
             up: [0.0, 0.0, 1.0],
             fovy_deg: 45.0,
+            clip_near: None,
+            clip_far: None,
         });
 
         let panel_x = w * 0.06;

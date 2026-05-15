@@ -154,6 +154,8 @@ pub fn inspect_orbit_camera(ins: &ItemInspectOrbitState, rig: &InspectRig) -> Ca
         target: ins.target_world,
         up,
         fovy_deg: rig.fovy_deg,
+        clip_near: None,
+        clip_far: None,
     }
 }
 

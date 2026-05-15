@@ -42,6 +42,7 @@ pub mod score_reel;
 pub mod shop_bell_mesh;
 pub mod shop_glb;
 pub mod showcase_decal_atlas;
+pub mod skip_tag_atlas;
 pub mod showcase_tile_layout;
 pub mod table_mesh;
 pub mod table_transform;

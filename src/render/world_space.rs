@@ -80,7 +80,8 @@ pub fn world_on_camera_ray_plane_z(
     let up = Vec3::from_array(cam.up);
     let fov_y = cam.fovy_deg.to_radians();
     let view_mat = Mat4::look_at_rh(eye, target, up);
-    let proj = Mat4::perspective_rh(fov_y, aspect, 1.0, h * 12.0);
+    let (near, far) = cam.clip_planes(h);
+    let proj = Mat4::perspective_rh(fov_y, aspect, near, far);
     let view_proj = proj * view_mat;
     let inv_vp = view_proj.inverse();
 

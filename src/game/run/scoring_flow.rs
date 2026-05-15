@@ -1,3 +1,4 @@
+use super::relic_removal::TransformationPrimaryRelic;
 use super::*;
 
 use crate::core::relic::{
@@ -70,15 +71,7 @@ impl RunState {
             let v = self.relic_counters.entry(RelicId::MeltingIce).or_insert(80);
             *v = (*v - 8).max(0);
             if *v == 0 {
-                self.relic_counters.remove(&RelicId::MeltingIce);
-                self.melting_ice_extinct = true;
-                let _ = self.destroy_relic_removed_from_run(RelicId::MeltingIce);
-                bus.push(GameEvent::TransformationSuccessorDiscovered(
-                    RelicId::Taotie,
-                ));
-                bus.push(GameEvent::AchievementUnlocked(
-                    crate::steam::Achievement::TaotieAwakened,
-                ));
+                self.on_transformation_primary_burned(TransformationPrimaryRelic::MeltingIce, bus);
             }
         }
         if self.relics.has(RelicId::RustlingGooseEgg) {
@@ -88,13 +81,10 @@ impl RunState {
                 .or_insert(3);
             *v -= 1;
             if *v <= 0 {
-                self.relic_counters.remove(&RelicId::RustlingGooseEgg);
-                self.xxxl_egg_extinct = true;
-                let _ = self.destroy_relic_removed_from_run(RelicId::RustlingGooseEgg);
-                bus.push(GameEvent::TransformationSuccessorDiscovered(RelicId::Geese));
-                bus.push(GameEvent::AchievementUnlocked(
-                    crate::steam::Achievement::GeeseTakeFlight,
-                ));
+                self.on_transformation_primary_burned(
+                    TransformationPrimaryRelic::RustlingGooseEgg,
+                    bus,
+                );
             }
         }
         if self.relics.has(RelicId::Humility) {
@@ -281,15 +271,8 @@ impl RunState {
                     .iter()
                     .position(|&r| r == crate::core::relic::RelicId::Chrysalis)
                 {
-                    self.relics.active[pos] = crate::core::relic::RelicId::MonarchButterfly;
+                    self.complete_chrysalis_hatch_in_slot(pos, bus);
                 }
-                self.chrysalis_extinct = true;
-                self.note_relic_destroyed();
-                self.relic_activations
-                    .push(crate::core::relic::RelicId::MonarchButterfly);
-                bus.push(GameEvent::TransformationSuccessorDiscovered(
-                    crate::core::relic::RelicId::MonarchButterfly,
-                ));
             }
         }
 
@@ -421,25 +404,15 @@ impl RunState {
                     .iter()
                     .position(|&r| r == RelicId::TeaCeremony)
                 {
-                    self.relics.active[pos] = RelicId::Rakuware;
+                    self.complete_tea_ceremony_graduation_in_slot(pos, bus);
                 }
-                self.relic_counters.remove(&RelicId::TeaCeremony);
-                self.relic_counters.remove(&RelicId::Rakuware);
-                self.tea_ceremony_extinct = true;
-                self.note_relic_destroyed();
-                self.relic_activations.push(RelicId::Rakuware);
-                bus.push(GameEvent::TransformationSuccessorDiscovered(
-                    RelicId::Rakuware,
-                ));
             } else {
                 self.relic_counters.insert(RelicId::TeaCeremony, phase + 1);
             }
         }
 
         if destroy_glass_cannon {
-            let _ = self.destroy_relic_removed_from_run(RelicId::GlassCannon);
-            self.relic_activations.push(RelicId::GlassCannon);
-            bus.push(GameEvent::RelicActivated(RelicId::GlassCannon));
+            let _ = self.destroy_relic_with_activation_fx(RelicId::GlassCannon, Some(bus));
         }
 
         applied
@@ -640,9 +613,7 @@ impl RunState {
         if !self.relics.has(RelicId::SecondWind) {
             return false;
         }
-        let _ = self.destroy_relic_removed_from_run(RelicId::SecondWind);
-        self.relic_activations.push(RelicId::SecondWind);
-        bus.push(GameEvent::RelicActivated(RelicId::SecondWind));
+        let _ = self.destroy_relic_with_activation_fx(RelicId::SecondWind, Some(bus));
         bus.push(GameEvent::RoundComplete {
             reached_target: false,
             payout: crate::game::event_bus::RoundPayout::default(),

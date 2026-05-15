@@ -25,6 +25,11 @@ impl TextEffectId {
         self as u32
     }
 
+    /// Pack fragment effect (low byte) and clockwise quarter-turns (bits 8–9).
+    pub fn pack_with_rotation(self, rotation_quarters: u8) -> u32 {
+        self.pack() | ((rotation_quarters.min(3) as u32) << 8)
+    }
+
     #[allow(dead_code)] // Reserved for CPU-side inspection / future tooling.
     pub fn decode(packed: u32) -> Self {
         match (packed & 0xff) as u8 {

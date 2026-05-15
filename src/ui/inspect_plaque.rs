@@ -196,6 +196,8 @@ pub fn push_floating_relic_flavor_labels(
         italic: false,
         underline: false,
         text_effect: crate::render::text_effect::TextEffectId::Flat,
+        rotation_quarters: 0,
+        baseline_shift_px: 0.0,
     });
 }
 

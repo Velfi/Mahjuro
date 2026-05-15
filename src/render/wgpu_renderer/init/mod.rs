@@ -1,5 +1,6 @@
 use super::*;
 
+pub mod bloom;
 mod build;
 
 impl WgpuRenderer {

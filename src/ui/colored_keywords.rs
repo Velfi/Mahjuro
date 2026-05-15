@@ -31,7 +31,9 @@
 //! (`glossary_tint: true`) instead of this module’s plain-text wrappers.
 
 use crate::render::decal::load_ui_font;
+#[allow(unused_imports)] // Re-exported for API parity; implementation lives in `vocabulary_colors`.
 pub use crate::render::vocabulary_colors::color_for_token;
+pub use crate::render::vocabulary_colors::colored_token_segments;
 #[allow(unused_imports)] // Re-exported for API parity; table lives in `vocabulary_colors`.
 pub use crate::render::vocabulary_colors::COLORED_KEYWORD_TABLE;
 use crate::render::wgpu_renderer::{TextAlign, TextLabel};
@@ -71,31 +73,36 @@ pub fn wrap_colored_words(
     let mut line_w = 0.0_f32;
 
     for w in words.iter() {
-        let col = color_for_token(w, default);
-        let w_w = word_width(&font, w, font_px);
-        if w_w > max_width_px {
-            if !current.is_empty() {
-                lines.push(std::mem::take(&mut current));
+        let segments = colored_token_segments(w, default);
+        for (si, (seg, col)) in segments.iter().enumerate() {
+            let w_w = word_width(&font, seg, font_px);
+            if w_w > max_width_px {
+                if !current.is_empty() {
+                    lines.push(std::mem::take(&mut current));
+                }
+                lines.push(vec![(seg.clone(), *col)]);
+                line_w = 0.0;
+                continue;
             }
-            lines.push(vec![((*w).to_string(), col)]);
-            line_w = 0.0;
-            continue;
+            let needs_word_gap = si == 0 && !current.is_empty();
+            let extra = if current.is_empty() {
+                w_w
+            } else if needs_word_gap {
+                space_w + w_w
+            } else {
+                w_w
+            };
+            if !current.is_empty() && line_w + extra > max_width_px {
+                lines.push(std::mem::take(&mut current));
+                line_w = 0.0;
+            }
+            if needs_word_gap {
+                current.push((" ".to_string(), default));
+                line_w += space_w;
+            }
+            current.push((seg.clone(), *col));
+            line_w += w_w;
         }
-        let extra = if current.is_empty() {
-            w_w
-        } else {
-            space_w + w_w
-        };
-        if !current.is_empty() && line_w + extra > max_width_px {
-            lines.push(std::mem::take(&mut current));
-            line_w = 0.0;
-        }
-        if !current.is_empty() {
-            current.push((" ".to_string(), default));
-            line_w += space_w;
-        }
-        current.push(((*w).to_string(), col));
-        line_w += w_w;
     }
     if !current.is_empty() {
         lines.push(current);

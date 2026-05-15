@@ -30,7 +30,7 @@
 //! | [`mesh_y_thickness_along_local_y_to_z_up`] | `Rx(+π/2)` | Coin/candle meshes with thickness on **local +Y** → **world +Z** (sits on XY felt) |
 //! | [`tile_mesh_local_to_world`] | fixed permutation | Mahjong tile GLB local → world (see doc) |
 //! | [`translate_rot_scale`] | `T * R * S` | World-space instance pose |
-//! | [`ribbon_submesh`] | offset along local **-Y** + non-uniform scale | Zodiac ribbon mesh (after anchor [`translate_rot_scale`]) |
+//! | [`ribbon_submesh`] | optional local **Y** offset + non-uniform scale | Zodiac ribbon mesh (centroid at origin; after anchor [`translate_rot_scale`]) |
 //!
 use glam::{EulerRot, Mat4, Vec3, Vec4};
 
@@ -124,10 +124,9 @@ pub fn translate_rot_scale(center: Vec3, rotation: Mat4, scale: Vec3) -> Mat4 {
     Mat4::from_translation(center) * rotation * Mat4::from_scale(scale)
 }
 
-/// Zodiac ribbon submesh after the anchor [`translate_rot_scale`]: offset along **local -Y**
-/// (mesh hangs downward), then non-uniform scale. Pass `local_offset_y = 0` for the
-/// (now single-segment) ribbon mesh; the helper still takes an offset because shadow
-/// setup keeps it as a uniform per-segment hook for future reuse.
+/// Zodiac ribbon submesh after the anchor [`translate_rot_scale`]: optional offset along
+/// **local Y**, then non-uniform scale. Pass `local_offset_y = 0` for the single-segment
+/// ribbon mesh (origin at centroid); the helper still takes an offset for per-segment reuse.
 #[inline]
 pub fn ribbon_submesh(parent: Mat4, local_offset_y: f32, scale: Vec3) -> Mat4 {
     parent * Mat4::from_translation(Vec3::new(0.0, local_offset_y, 0.0)) * Mat4::from_scale(scale)

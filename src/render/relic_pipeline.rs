@@ -8,7 +8,8 @@
 //! - **Mesh silhouette:** `source/<slug>_mask.png`, else `<slug>_mask.png` next to albedo.
 //!   Used both for extruded cap geometry and for cutting the albedo's alpha.
 //!   If missing, the albedo's own alpha channel is used as-is.
-//! - **Relief (linear height):** `source/<slug>_height.png`, or a 1×1 mid-gray placeholder
+//! - **Relief (linear height + specular):** `source/<slug>_height.png` with optional
+//!   `source/<slug>_specular.png` packed into the G channel, or a 1×1 mid-gray placeholder
 
 use std::sync::mpsc;
 use std::time::Instant;
@@ -18,6 +19,69 @@ use crate::render::gpu_types::DecodedRelicImage;
 
 fn flat_relief_rgba() -> (Vec<u8>, u32, u32) {
     (vec![128, 128, 128, 255], 1, 1)
+}
+
+/// Matches `HEIGHT_ALPHA_LO` / specular derivation in `scripts/generate_relic_art.py`.
+const HEIGHT_ALPHA_LO: u8 = 8;
+const HEIGHT_ALPHA_HI: u8 = 24;
+const SPECULAR_ENAMEL: u8 = 36;
+const SPECULAR_METAL: u8 = 255;
+const SPECULAR_METAL_THRESHOLD: u8 = 200;
+const SPECULAR_RAMP_START: u8 = 168;
+
+fn specular_from_height_luma(luma: u8) -> u8 {
+    if luma < HEIGHT_ALPHA_LO {
+        return 0;
+    }
+    if luma >= SPECULAR_METAL_THRESHOLD {
+        return SPECULAR_METAL;
+    }
+    if luma >= SPECULAR_RAMP_START {
+        let t = (luma - SPECULAR_RAMP_START) as f32
+            / (SPECULAR_METAL_THRESHOLD - SPECULAR_RAMP_START).max(1) as f32;
+        return (SPECULAR_ENAMEL as f32 + t * (SPECULAR_METAL - SPECULAR_ENAMEL) as f32).round()
+            as u8;
+    }
+    if luma >= HEIGHT_ALPHA_HI {
+        let t = (luma - HEIGHT_ALPHA_HI) as f32
+            / (SPECULAR_RAMP_START - HEIGHT_ALPHA_HI).max(1) as f32;
+        return (SPECULAR_ENAMEL as f32 * (0.65 + 0.35 * t)).round() as u8;
+    }
+    SPECULAR_ENAMEL
+}
+
+fn height_luma(pixel: &image::Rgba<u8>) -> u8 {
+    let r = pixel[0] as u32;
+    let g = pixel[1] as u32;
+    let b = pixel[2] as u32;
+    ((54 * r + 183 * g + 19 * b) / 256) as u8
+}
+
+fn pack_relief_rgba(
+    height: &image::RgbaImage,
+    specular: Option<&image::GrayImage>,
+) -> (Vec<u8>, u32, u32) {
+    let (w, h) = height.dimensions();
+    let mut out = vec![0u8; (w as usize) * (h as usize) * 4];
+    for y in 0..h {
+        for x in 0..w {
+            let hp = height.get_pixel(x, y);
+            let height_l = height_luma(hp);
+            let spec_l = specular
+                .map(|s| {
+                    let mx = ((x as u64) * (s.width() as u64) / (w as u64)) as u32;
+                    let my = ((y as u64) * (s.height() as u64) / (h as u64)) as u32;
+                    s.get_pixel(mx.min(s.width().saturating_sub(1)), my.min(s.height().saturating_sub(1)))[0]
+                })
+                .unwrap_or_else(|| specular_from_height_luma(height_l));
+            let i = ((y * w + x) * 4) as usize;
+            out[i] = height_l;
+            out[i + 1] = spec_l;
+            out[i + 2] = height_l;
+            out[i + 3] = 255;
+        }
+    }
+    (out, w, h)
 }
 
 /// Threshold below which a mask pixel's luminance/alpha reads as "outside the
@@ -92,13 +156,24 @@ pub(crate) fn decode_relic_assets(id: RelicId, name: &'static str) -> Option<Dec
     };
 
     let relief_path = id.source_heightmap_path();
+    let specular_path = id.source_specular_path();
     let (relief_rgba, relief_width, relief_height) =
         if let Some(file) = crate::asset_path::get(&relief_path) {
             match image::load_from_memory(&file.data) {
                 Ok(himg) => {
-                    let rgba = himg.into_rgba8();
-                    let (rw, rh) = rgba.dimensions();
-                    (rgba.into_raw(), rw, rh)
+                    let height = himg.into_rgba8();
+                    let specular = crate::asset_path::get(&specular_path).and_then(|spec_file| {
+                        match image::load_from_memory(&spec_file.data) {
+                            Ok(sim) => Some(sim.into_luma8()),
+                            Err(e) => {
+                                log::warn!(
+                                    "failed to decode relic specular map {specular_path}: {e}"
+                                );
+                                None
+                            }
+                        }
+                    });
+                    pack_relief_rgba(&height, specular.as_ref())
                 }
                 Err(e) => {
                     log::warn!("failed to decode relic heightmap {relief_path}: {e}");

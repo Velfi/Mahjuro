@@ -1,22 +1,20 @@
 # Python deps for the scripts/ helpers.
 #
-# Install with:
-#     pip install -r scripts/requirements.txt
+# Install with (use one Python version — mixed 3.13/3.14 venvs break imports):
+#     python3.13 -m venv .venv
+#     source .venv/bin/activate
+#     python -m pip install -r scripts/requirements.txt
+#     export GEMINI_API_KEY="..."   # or GOOGLE_API_KEY
 #
 # Grouped by which scripts need what — you can slim this down if you only
 # run a subset.
 
-# OpenAI image API — all generate_*.py / gen_*.py asset scripts.
-openai
+# Google Gemini SDK — every generate_*.py / gen_*.py uses Nano Banana 2
+# (`gemini-3.1-flash-image-preview`) via scripts/_image_gen.py.
+google-genai
 
 # Pillow — image load/save/resize in most generator scripts.
 Pillow
-
-# HTTP fetch when the image API returns a URL instead of base64.
-# Used by generate_relic_art, generate_coin_heightmap,
-# generate_mirror_heightmap, generate_zodiac_ribbons,
-# generate_pack_covers, generate_plain_pack_covers.
-requests
 
 # Background removal on *_object.png renders (generate_relic_art --bg-removal).
 # onnxruntime is the ML runtime rembg loads u2net through.

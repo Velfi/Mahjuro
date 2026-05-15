@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Generate a heightmap texture for the coin face using OpenAI's image API,
-then post-process it into a clean displacement map (square, grayscale,
-mid-gray background, raised features in white, recessed features in black).
+Generate a heightmap texture for the coin face using Google's Nano
+Banana 2 image API, then post-process it into a clean displacement map
+(square, grayscale, mid-gray background, raised features in white,
+recessed features in black).
 
 Style direction: an authentic old Chinese cash coin (方孔錢, fāngkǒngqián) —
 the round bronze coin with a square hole that was the standard currency
@@ -18,24 +19,24 @@ no lighting. We then auto-level + center it so it drops straight into
 a displacement / parallax map slot.
 
 Usage:
-    pip install openai pillow requests
-    export OPENAI_API_KEY="sk-..."
+    pip install google-genai pillow
+    export GEMINI_API_KEY="..."
     python scripts/generate_coin_heightmap.py
     python scripts/generate_coin_heightmap.py --raw      # also keep the raw model output
     python scripts/generate_coin_heightmap.py --dry-run  # print the prompt only
 """
 
 import argparse
-import base64
-import os
 import sys
 from pathlib import Path
 
-try:
-    from openai import OpenAI
-except ImportError:
-    print("Error: openai package not installed. Run: pip install openai pillow")
-    sys.exit(1)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _image_gen import (  # noqa: E402
+    DEFAULT_MODEL,
+    generate_image_bytes,
+    init_client,
+    parse_size,
+)
 
 try:
     from PIL import Image, ImageOps
@@ -81,26 +82,15 @@ def build_prompt() -> str:
     return PROMPT
 
 
-def fetch_image_bytes(client: OpenAI, prompt: str, model: str, size: str) -> bytes:
-    response = client.images.generate(
+def fetch_image_bytes(client, prompt: str, model: str, size: str) -> bytes:
+    aspect_ratio, image_size = parse_size(size)
+    return generate_image_bytes(
+        client,
+        prompt,
         model=model,
-        prompt=prompt,
-        n=1,
-        size=size,
-        quality="high",
+        aspect_ratio=aspect_ratio,
+        image_size=image_size,
     )
-    data = response.data[0]
-    image_url = getattr(data, "url", None)
-    if image_url is None:
-        b64 = getattr(data, "b64_json", None)
-        if b64 is None:
-            raise RuntimeError("API returned neither url nor b64_json")
-        return base64.b64decode(b64)
-    import requests
-
-    r = requests.get(image_url, timeout=120)
-    r.raise_for_status()
-    return r.content
 
 
 def postprocess_heightmap(raw_bytes: bytes, out_size: int) -> Image.Image:
@@ -135,7 +125,7 @@ def postprocess_heightmap(raw_bytes: bytes, out_size: int) -> Image.Image:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate a Chinese cash-coin heightmap via the OpenAI image API"
+        description="Generate a Chinese cash-coin heightmap via Google Nano Banana 2"
     )
     parser.add_argument(
         "--name",
@@ -152,14 +142,17 @@ def main() -> None:
     parser.add_argument(
         "--model",
         type=str,
-        default="gpt-image-2",
-        help="Image model to use (default: gpt-image-2).",
+        default=DEFAULT_MODEL,
+        help=f"Gemini image model (default: {DEFAULT_MODEL}).",
     )
     parser.add_argument(
         "--size",
         type=str,
-        default="1024x1024",
-        help="Generation size passed to the API (default: 1024x1024).",
+        default="1:1@1K",
+        help=(
+            "Generation size — Gemini ASPECT@TIER (default: 1:1@1K). "
+            "Legacy WxH like '1024x1024' is auto-translated."
+        ),
     )
     parser.add_argument(
         "--out-size",
@@ -199,12 +192,7 @@ def main() -> None:
         print(f"Refusing to overwrite {out_path} — pass --force to regenerate.")
         sys.exit(1)
 
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        print("Error: OPENAI_API_KEY environment variable not set.")
-        sys.exit(1)
-
-    client = OpenAI(api_key=api_key)
+    client = init_client()
 
     print(f"Generating coin heightmap → {out_path}")
     raw_bytes = fetch_image_bytes(client, prompt, args.model, args.size)

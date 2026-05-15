@@ -5,7 +5,7 @@
 //! gradient down the ribbon. Local extents:
 //!
 //! - x ∈ [-0.5, 0.5] — width
-//! - y ∈ [-1.0, 0.0] — hangs *down* from the anchor at local origin
+//! - y ∈ [-0.5, 0.5] — length; origin at centroid (finial toward +Y)
 //! - z ≈ ±0.05      — slight thickness so a back-face exists
 //!
 //! UVs run 0→1 along y for future texturing/animation.
@@ -37,7 +37,7 @@ pub const RIBBON_DEPTH_OVER_WIDTH: f32 = 0.15;
 /// it's drawn in. Use [`zodiac_ribbon_object3d`] to build the placement.
 #[derive(Clone, Debug)]
 pub struct ZodiacRibbonSpec {
-    /// Anchor position passed straight through to `Object3d::pos`.
+    /// Centroid position passed straight through to `Object3d::pos`.
     pub pos: [f32; 3],
     /// Drives the rendered ribbon size: width = `length /
     /// RIBBON_LENGTH_OVER_WIDTH`, depth = `width * RIBBON_DEPTH_OVER_WIDTH`.
@@ -96,8 +96,8 @@ pub fn build_ribbon_mesh() -> MeshCpu {
     for s in 0..SEGMENTS {
         let v0 = s as f32 / SEGMENTS as f32;
         let v1 = (s + 1) as f32 / SEGMENTS as f32;
-        let y0 = -v0; // y top of this segment (less negative)
-        let y1 = -v1; // y bottom of this segment (more negative)
+        let y0 = 0.5 - v0; // y top of this segment
+        let y1 = 0.5 - v1; // y bottom of this segment
         let base = vertices.len() as u32;
         // Order: top-left, top-right, bottom-right, bottom-left.
         vertices.push(Vertex3dTex {
@@ -139,7 +139,7 @@ pub fn build_ribbon_mesh() -> MeshCpu {
     let back_normal = [0.0, 0.0, -1.0];
     let base = vertices.len() as u32;
     vertices.push(Vertex3dTex {
-        position: [0.5, 0.0, -HALF_THICKNESS],
+        position: [0.5, 0.5, -HALF_THICKNESS],
         normal: back_normal,
         uv: [0.0, 0.0],
         tangent: Vertex3dTex::DEFAULT_TANGENT,
@@ -147,7 +147,7 @@ pub fn build_ribbon_mesh() -> MeshCpu {
         color: [1.0, 1.0, 1.0, 1.0],
     });
     vertices.push(Vertex3dTex {
-        position: [-0.5, 0.0, -HALF_THICKNESS],
+        position: [-0.5, 0.5, -HALF_THICKNESS],
         normal: back_normal,
         uv: [1.0, 0.0],
         tangent: Vertex3dTex::DEFAULT_TANGENT,
@@ -155,7 +155,7 @@ pub fn build_ribbon_mesh() -> MeshCpu {
         color: [1.0, 1.0, 1.0, 1.0],
     });
     vertices.push(Vertex3dTex {
-        position: [-0.5, -1.0, -HALF_THICKNESS],
+        position: [-0.5, -0.5, -HALF_THICKNESS],
         normal: back_normal,
         uv: [1.0, 1.0],
         tangent: Vertex3dTex::DEFAULT_TANGENT,
@@ -163,7 +163,7 @@ pub fn build_ribbon_mesh() -> MeshCpu {
         color: [1.0, 1.0, 1.0, 1.0],
     });
     vertices.push(Vertex3dTex {
-        position: [0.5, -1.0, -HALF_THICKNESS],
+        position: [0.5, -0.5, -HALF_THICKNESS],
         normal: back_normal,
         uv: [0.0, 1.0],
         tangent: Vertex3dTex::DEFAULT_TANGENT,
@@ -176,7 +176,7 @@ pub fn build_ribbon_mesh() -> MeshCpu {
     let left_normal = [-1.0, 0.0, 0.0];
     let base = vertices.len() as u32;
     vertices.push(Vertex3dTex {
-        position: [-0.5, 0.0, -HALF_THICKNESS],
+        position: [-0.5, 0.5, -HALF_THICKNESS],
         normal: left_normal,
         uv: [0.0, 0.0],
         tangent: Vertex3dTex::DEFAULT_TANGENT,
@@ -184,7 +184,7 @@ pub fn build_ribbon_mesh() -> MeshCpu {
         color: [1.0, 1.0, 1.0, 1.0],
     });
     vertices.push(Vertex3dTex {
-        position: [-0.5, 0.0, HALF_THICKNESS],
+        position: [-0.5, 0.5, HALF_THICKNESS],
         normal: left_normal,
         uv: [1.0, 0.0],
         tangent: Vertex3dTex::DEFAULT_TANGENT,
@@ -192,7 +192,7 @@ pub fn build_ribbon_mesh() -> MeshCpu {
         color: [1.0, 1.0, 1.0, 1.0],
     });
     vertices.push(Vertex3dTex {
-        position: [-0.5, -1.0, HALF_THICKNESS],
+        position: [-0.5, -0.5, HALF_THICKNESS],
         normal: left_normal,
         uv: [1.0, 1.0],
         tangent: Vertex3dTex::DEFAULT_TANGENT,
@@ -200,7 +200,7 @@ pub fn build_ribbon_mesh() -> MeshCpu {
         color: [1.0, 1.0, 1.0, 1.0],
     });
     vertices.push(Vertex3dTex {
-        position: [-0.5, -1.0, -HALF_THICKNESS],
+        position: [-0.5, -0.5, -HALF_THICKNESS],
         normal: left_normal,
         uv: [0.0, 1.0],
         tangent: Vertex3dTex::DEFAULT_TANGENT,
@@ -213,7 +213,7 @@ pub fn build_ribbon_mesh() -> MeshCpu {
     let right_normal = [1.0, 0.0, 0.0];
     let base = vertices.len() as u32;
     vertices.push(Vertex3dTex {
-        position: [0.5, 0.0, HALF_THICKNESS],
+        position: [0.5, 0.5, HALF_THICKNESS],
         normal: right_normal,
         uv: [0.0, 0.0],
         tangent: Vertex3dTex::DEFAULT_TANGENT,
@@ -221,7 +221,7 @@ pub fn build_ribbon_mesh() -> MeshCpu {
         color: [1.0, 1.0, 1.0, 1.0],
     });
     vertices.push(Vertex3dTex {
-        position: [0.5, 0.0, -HALF_THICKNESS],
+        position: [0.5, 0.5, -HALF_THICKNESS],
         normal: right_normal,
         uv: [1.0, 0.0],
         tangent: Vertex3dTex::DEFAULT_TANGENT,
@@ -229,7 +229,7 @@ pub fn build_ribbon_mesh() -> MeshCpu {
         color: [1.0, 1.0, 1.0, 1.0],
     });
     vertices.push(Vertex3dTex {
-        position: [0.5, -1.0, -HALF_THICKNESS],
+        position: [0.5, -0.5, -HALF_THICKNESS],
         normal: right_normal,
         uv: [1.0, 1.0],
         tangent: Vertex3dTex::DEFAULT_TANGENT,
@@ -237,7 +237,7 @@ pub fn build_ribbon_mesh() -> MeshCpu {
         color: [1.0, 1.0, 1.0, 1.0],
     });
     vertices.push(Vertex3dTex {
-        position: [0.5, -1.0, HALF_THICKNESS],
+        position: [0.5, -0.5, HALF_THICKNESS],
         normal: right_normal,
         uv: [0.0, 1.0],
         tangent: Vertex3dTex::DEFAULT_TANGENT,

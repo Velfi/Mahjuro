@@ -195,6 +195,9 @@ pub(super) fn make_prompt_icon_overlay_gpu(
         crate::render::draw_cmd::PromptIconSource::AtlasSprite { sheet, name } => {
             crate::render::kenney_atlas::extract_sprite_rgba(sheet, name)?
         }
+        crate::render::draw_cmd::PromptIconSource::PackedAtlas { sheet, name } => {
+            crate::render::skip_tag_atlas::extract_sprite_rgba(sheet, name)?
+        }
         crate::render::draw_cmd::PromptIconSource::Filesystem(path) => {
             crate::render::kenney_svg::rasterize_filesystem_svg_or_png_rgba(path)?
         }

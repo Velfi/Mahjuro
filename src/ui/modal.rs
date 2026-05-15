@@ -845,12 +845,14 @@ fn draw_modal_paginated_unlock(
     let desc_y = name_y + name_font * 1.5;
     let desc_w = window_w * 0.7;
     let desc_x = (window_w - desc_w) * 0.5;
-    let desc_lines = page.description.lines().count().max(1) as f32;
-    let desc_h = desc_lines * desc_font * 1.5;
+    let desc_line_step = desc_font * 1.5;
+    let wrapped_desc = wrap_text(&page.description, desc_w, desc_font);
+    let desc_lines = wrapped_desc.len().max(1) as f32;
+    let desc_h = desc_lines * desc_line_step;
     let [dr, dg, db, _da] = crate::render::theme::color::PARCHMENT;
     labels.push(TextLabel {
         rect: [desc_x, desc_y, desc_w, desc_h],
-        text: page.description.clone(),
+        text: wrapped_desc.join("\n"),
         color: [dr, dg, db, 0.92 * alpha],
         font_px: Some(desc_font),
         ..Default::default()

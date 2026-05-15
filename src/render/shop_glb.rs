@@ -77,8 +77,8 @@ use rustc_hash::FxHashMap;
 use crate::render::draw_cmd::CameraParams;
 use crate::render::room_env_gltf::{
     self as renv, EmbeddedCameraHarvest, RoomEnvWalkHooks, RoomMeshPolicy, marker_translation_doc,
-    room_camera_fit_fovy_for_corners, room_env_model_matrix_from_bounds_doc,
-    room_world_bounds_corners_centered, walk_room_env_node,
+    room_camera_fit_clip_planes, room_camera_fit_fovy_for_corners,
+    room_env_model_matrix_from_bounds_doc, room_world_bounds_corners_centered, walk_room_env_node,
 };
 use crate::render::tile_glb::release_loaded_primitive_gpu_source_buffers;
 use anyhow::Context;
@@ -99,7 +99,7 @@ fn ensure_shop_glb_loaded() {
     let ready = if let Some(file) = crate::asset_path::get("3d/Shop.glb") {
         match load_shop_glb_from_bytes(&file.data) {
             Ok(cpu) => {
-                log::debug!(
+                log::trace!(
                     "shop.glb: {} marker node(s), {} draw primitive(s), {} collision mesh(es)",
                     cpu.markers.len(),
                     cpu.environment_primitives.len(),
@@ -109,18 +109,12 @@ fn ensure_shop_glb_loaded() {
                     || !cpu.embedded_point_lights.is_empty()
                     || !cpu.embedded_spot_lights.is_empty()
                 {
-                    log::debug!(
+                    log::trace!(
                         "shop.glb scene extras: perspective_camera={} point_lights={} spot_lights={}",
                         cpu.embedded_perspective_camera.is_some(),
                         cpu.embedded_point_lights.len(),
                         cpu.embedded_spot_lights.len(),
                     );
-                    if !cpu.embedded_point_lights.is_empty() || !cpu.embedded_spot_lights.is_empty()
-                    {
-                        log::debug!(
-                            "shop.glb punctual lights: re-export from Blender glTF with Lighting Mode **Standard** (cd/lx); validate in https://gltf-viewer.donmccurdy.com/"
-                        );
-                    }
                 }
                 Some(cpu)
             }
@@ -358,6 +352,25 @@ pub fn shop_camera_fit_fovy_for_corners(
     margin_ndc: f32,
 ) -> CameraParams {
     room_camera_fit_fovy_for_corners(window_w, window_h, cam, corners_world, margin_ndc)
+}
+
+pub fn shop_camera_fit_clip_planes(cam: CameraParams, corners_world: &[Vec3]) -> CameraParams {
+    room_camera_fit_clip_planes(cam, corners_world)
+}
+
+/// Embedded-room camera with bounds-tight clip planes (hallway / shop / archive).
+pub fn shop_camera_with_room_clip_planes(
+    mut cam: CameraParams,
+    window_h: f32,
+    env_height_scale: f32,
+    cpu: &RoomGlbCpu,
+) -> CameraParams {
+    let corners = shop_world_bounds_corners_centered(window_h, env_height_scale, cpu);
+    if corners.is_empty() {
+        return cam;
+    }
+    cam = shop_camera_fit_clip_planes(cam, &corners);
+    cam
 }
 
 /// Decoded room GLB (shop, hallway, …): shared layout for [`shop_glb.wgsl`] and punctual uploads.

@@ -403,8 +403,14 @@ impl WgpuRenderer {
             // Clamp before casting: `f32 as u32` saturates negatives/NaN to u32::MAX,
             // which blows past wgpu's 16384 texture limit and panics. Seen in arrange mode
             // when layout math produces a negative rect width.
-            let tw = (lbl.rect[2].clamp(1.0, 16384.0) as u32).max(1);
-            let th = (lbl.rect[3].clamp(1.0, 16384.0) as u32).max(1);
+            let tw_raw = (lbl.rect[2].clamp(1.0, 16384.0) as u32).max(1);
+            let th_raw = (lbl.rect[3].clamp(1.0, 16384.0) as u32).max(1);
+            let rotation_quarters = lbl.rotation_quarters.min(3);
+            let (tw, th) = if rotation_quarters % 2 == 1 {
+                (tw_raw.max(th_raw), tw_raw.min(th_raw))
+            } else {
+                (tw_raw, th_raw)
+            };
             let align = match lbl.align {
                 TextAlign::Left => LabelAlign::Left,
                 TextAlign::Center => LabelAlign::Center,
@@ -427,6 +433,8 @@ impl WgpuRenderer {
                 height_px: th,
                 align: lbl.align,
                 scroll_offset_px,
+                rotation_quarters,
+                baseline_shift_q: (lbl.baseline_shift_px * 8.0).round() as i16,
             };
             let cache_inner_key: String = if let Some(spans) = flavor {
                 crate::core::relic::flavor_spans_cache_key(spans)
@@ -479,6 +487,7 @@ impl WgpuRenderer {
                             align,
                             scroll_offset: lbl.scroll_offset,
                             underline: lbl.underline,
+                            baseline_shift_px: lbl.baseline_shift_px,
                         },
                     )
                 }
@@ -545,7 +554,7 @@ impl WgpuRenderer {
             let inst = GpuInstance {
                 rect: lbl.rect,
                 color: lbl.color,
-                user: packed_effect.pack(),
+                user: packed_effect.pack_with_rotation(rotation_quarters),
             };
             let inst_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("text-inst"),
