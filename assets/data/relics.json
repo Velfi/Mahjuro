@@ -1331,17 +1331,7 @@
     "rarity": "legendary",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "Fortune's",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " — never the tile, always the tale.",
+        "text": "Lady Fortune's favor comes bearing fruitful and blessed benediction to you, The most deserving of her patrons!",
         "bold": false,
         "italic": false
       }
