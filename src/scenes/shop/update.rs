@@ -3,8 +3,7 @@ use super::*;
 use crate::scenes::journal_transition::{JournalDirection, JournalTransition};
 use crate::scenes::{
     MeldGuideScene, OverlayRequest, Scene, ShopInspectPresenter, ShowcasePresenter, ShowcaseScene,
-    YakuJournalScene,
-    options,
+    YakuJournalScene, options,
 };
 
 impl ShopScene {
@@ -28,10 +27,10 @@ impl ShopScene {
         if !super::shared::shop_focus_inspectable(focus) {
             return;
         }
-        let env_h = self.drawn_env_height_scale.get();
-        let Some(orbit) = super::view::shop_item_inspect_orbit_for_focus(
-            self, w, h, env_h, shop_rm, focus,
-        ) else {
+        let env_h = self.drawn_room_gltf_height_scale.get();
+        let Some(orbit) =
+            super::view::shop_item_inspect_orbit_for_focus(self, w, h, env_h, shop_rm, focus)
+        else {
             return;
         };
         *overlay_request = Some(OverlayRequest::Push(Box::new(Scene::Showcase(
@@ -72,8 +71,7 @@ impl ShopScene {
             return Some(self.continue_scene(ctx.run));
         }
         if matches!(hit, ShopHit::Dish(id) if id == PICK_REROLL_PROP) {
-            if self.mode == ShopMode::Standard && ctx.run.can_afford_shop_reroll(self.reroll_cost)
-            {
+            if self.mode == ShopMode::Standard && ctx.run.can_afford_shop_reroll(self.reroll_cost) {
                 self.reroll(ctx.run);
             }
             return None;
@@ -239,8 +237,13 @@ impl ShopScene {
                 crate::core::scoring::StepKind::Gold,
                 new_level as f32,
             );
-            self.particles
-                .emit(center.0, center.1, 24, [0.95, 0.78, 0.25, 1.0], 0.9);
+            self.particles.emit(
+                center.0,
+                center.1,
+                24,
+                crate::render::theme::color::RELIC_GOLD,
+                0.9,
+            );
         }
 
         // Drain relic activations and evict expired glows.
@@ -519,7 +522,13 @@ impl ShopScene {
                         } else {
                             // Select / Space / Enter with no purchase (e.g. owned relic): same
                             // [`ShowcaseScene`] inspect path as Y / E / North.
-                            self.try_push_shop_inspect_overlay(focus, w, h, &shop, ctx.overlay_request);
+                            self.try_push_shop_inspect_overlay(
+                                focus,
+                                w,
+                                h,
+                                &shop,
+                                ctx.overlay_request,
+                            );
                         }
                     }
                 }

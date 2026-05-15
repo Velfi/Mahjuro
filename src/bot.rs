@@ -21,10 +21,10 @@ use std::time::Instant;
 
 use crate::core::consumable::Consumable;
 use crate::core::deck::Wall;
-use crate::core::hand::{SetKind, detect_all_sets, validate_selection_with_rules};
+use crate::core::hand::{MeldKind, detect_all_sets, validate_selection_with_rules};
 use crate::core::relic::{
     RelicId, RelicState, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
-    ScoreRoundBundle, ScoreTileBundle, all_relic_defs, relic_shop_price,
+    ScoreRoundBundle, ScoreTileBundle, all_relic_defs, apply_merchants_eye_discount, relic_shop_price,
 };
 use crate::core::rules::{BlindKind, RuleModifier};
 use crate::core::scoring::score_sets_with_original;
@@ -50,8 +50,8 @@ pub use reporting::{
     run_headless_aggregate, run_strategy_sweep, run_sweep,
 };
 use stats::clear_payout_breakdown;
-use stats::{BotScoringAction, PeakBlindSnapshot};
 pub use stats::{AggregateStats, RunStats, RunTimeoutSnapshot};
+use stats::{BotScoringAction, PeakBlindSnapshot};
 
 fn relic_display_name(id: RelicId) -> &'static str {
     all_relic_defs()
@@ -377,16 +377,15 @@ fn indices_from_play_mask(hand_len: usize, mask: u32) -> Vec<usize> {
 fn structure_commit_fits(
     run: &RunState,
     scoring_tile_count: usize,
-    new_sets: &[crate::core::hand::DetectedSet],
+    new_sets: &[crate::core::hand::DetectedMeld],
 ) -> bool {
     let kongs_after = run
         .structure_sets()
         .iter()
         .chain(new_sets.iter())
-        .filter(|s| s.kind == SetKind::Kong)
+        .filter(|s| s.kind == MeldKind::Kong)
         .count();
-    run.structure_tiles().len() + scoring_tile_count
-        <= crate::game::run::HAND_SIZE + kongs_after
+    run.structure_tiles().len() + scoring_tile_count <= crate::game::run::HAND_SIZE + kongs_after
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -432,13 +431,8 @@ fn evaluate_play_masks(
             meld_count: merged_sets.len() as u32,
             inject_chicken_if_no_yaku: true,
         });
-        let breakdown = score_sets_with_original(
-            &merged_tiles,
-            &merged_sets,
-            &ctx,
-            &run.round_rules,
-            &tiles,
-        );
+        let breakdown =
+            score_sets_with_original(&merged_tiles, &merged_sets, &ctx, &run.round_rules, &tiles);
         if breakdown.total == 0 {
             continue;
         }
@@ -513,13 +507,8 @@ fn masks_with_positive_score(
             meld_count: merged_sets.len() as u32,
             inject_chicken_if_no_yaku: true,
         });
-        let breakdown = score_sets_with_original(
-            &merged_tiles,
-            &merged_sets,
-            &ctx,
-            &run.round_rules,
-            &tiles,
-        );
+        let breakdown =
+            score_sets_with_original(&merged_tiles, &merged_sets, &ctx, &run.round_rules, &tiles);
         if breakdown.total > 0 {
             hits += 1;
         }
@@ -537,13 +526,7 @@ fn best_play_in_hand(
 ) -> Option<(u64, Vec<usize>)> {
     let commit_rules = run.validation_rules_for_structure_commits();
     let masks = enumerate_candidate_play_masks(hand, &commit_rules);
-    evaluate_play_masks(
-        run,
-        hand,
-        relics_override,
-        yaku_levels_override,
-        &masks,
-    )
+    evaluate_play_masks(run, hand, relics_override, yaku_levels_override, &masks)
 }
 
 #[derive(Clone, Copy)]
@@ -573,7 +556,7 @@ fn enumerate_candidate_play_masks(hand: &[Tile], rules: &[RuleModifier]) -> Vec<
         must_play_five: rules.contains(&RuleModifier::MustPlayFive),
     };
 
-    let mut masks = std::collections::HashSet::new();
+    let mut masks: rustc_hash::FxHashSet<u32> = rustc_hash::FxHashSet::default();
     enumerate_regular_subsets(&regular, &flowers, 0, subset_rules, 0, &mut masks);
     push_kokushi_play_masks(hand, rules, &mut masks);
     let mut out: Vec<u32> = masks.into_iter().collect();
@@ -601,13 +584,13 @@ fn next_combination_in_range(pos: &mut [usize], n: usize) -> bool {
     false
 }
 
-/// Kokushi Musō uses twelve [`SetKind::Single`]s and one pair — the meld-based enumerator
+/// Kokushi Musō uses twelve [`MeldKind::Single`]s and one pair — the meld-based enumerator
 /// never selects singletons, so it would miss every Kokushi win. Add every 14-tile orphan
 /// subset that [`validate_selection_with_rules`] accepts as Kokushi (or another valid hand).
 fn push_kokushi_play_masks(
     hand: &[Tile],
     rules: &[RuleModifier],
-    out: &mut std::collections::HashSet<u32>,
+    out: &mut rustc_hash::FxHashSet<u32>,
 ) {
     if rules.contains(&RuleModifier::MustPlayFive) {
         return;
@@ -624,9 +607,7 @@ fn push_kokushi_play_masks(
     }
     let mut pos: Vec<usize> = (0..14).collect();
     loop {
-        let mask: u32 = pos
-            .iter()
-            .fold(0u32, |acc, &pi| acc | (1u32 << pool[pi]));
+        let mask: u32 = pos.iter().fold(0u32, |acc, &pi| acc | (1u32 << pool[pi]));
         let tiles: Vec<Tile> = pos.iter().map(|&pi| hand[pool[pi]]).collect();
         if validate_selection_with_rules(&tiles, rules).is_some() {
             out.insert(mask);
@@ -654,7 +635,7 @@ fn enumerate_regular_subsets(
     current_mask: u32,
     rules: SubsetRules,
     current_tile_count: usize,
-    out: &mut std::collections::HashSet<u32>,
+    out: &mut rustc_hash::FxHashSet<u32>,
 ) {
     let SubsetRules {
         allow_wrap,
@@ -806,7 +787,7 @@ fn emit_leaf_masks(
     current_mask: u32,
     current_tile_count: usize,
     must_play_five: bool,
-    out: &mut std::collections::HashSet<u32>,
+    out: &mut rustc_hash::FxHashSet<u32>,
 ) {
     for extra_mask in flower_only_masks(flowers) {
         let total_mask = current_mask | extra_mask;
@@ -1009,21 +990,13 @@ pub fn bench_evaluate_play_masks(
 
 /// Count masks that pass validation + structure-bank checks (before scoring).
 #[doc(hidden)]
-pub fn bench_count_masks_validate_structure(
-    run: &RunState,
-    hand: &[Tile],
-    masks: &[u32],
-) -> usize {
+pub fn bench_count_masks_validate_structure(run: &RunState, hand: &[Tile], masks: &[u32]) -> usize {
     masks_passing_validate_and_structure(run, hand, masks)
 }
 
 /// Count masks that yield a positive score (includes full scoring work).
 #[doc(hidden)]
-pub fn bench_count_masks_positive_score(
-    run: &RunState,
-    hand: &[Tile],
-    masks: &[u32],
-) -> usize {
+pub fn bench_count_masks_positive_score(run: &RunState, hand: &[Tile], masks: &[u32]) -> usize {
     masks_with_positive_score(run, hand, masks, None, None)
 }
 
@@ -1042,8 +1015,7 @@ fn tile_meld_participation(hand: &[Tile]) -> Vec<u32> {
     }
     // Orphan terminals/honors often sit outside standard meld detection until the hand is
     // nearly Kokushi — bias discards toward non-orphans when many distinct orphans are present.
-    use std::collections::HashSet;
-    let mut orphan_faces: HashSet<(Suit, u8)> = HashSet::new();
+    let mut orphan_faces: rustc_hash::FxHashSet<(Suit, u8)> = rustc_hash::FxHashSet::default();
     for t in hand {
         if !t.is_flower() && t.is_kokushi_orphan() {
             orphan_faces.insert((t.suit, t.rank));
@@ -1084,8 +1056,7 @@ fn discard_candidates(hand: &[Tile], max_k: usize) -> Vec<Vec<usize>> {
 /// "perfect-information" oracle, which gives us a tuning ceiling rather than a
 /// realistic player bot.
 fn rollout_post_discard_score(run: &RunState, discard_indices: &[usize]) -> u64 {
-    use std::collections::HashSet;
-    let drop_set: HashSet<usize> = discard_indices.iter().copied().collect();
+    let drop_set: rustc_hash::FxHashSet<usize> = discard_indices.iter().copied().collect();
     let k = discard_indices.len();
     let peeked = run.wall.peek_next(k);
     let mut new_hand: Vec<Tile> = run
@@ -1130,7 +1101,7 @@ fn drain_post_action_bus(
                 payout,
                 reached_target: true,
             } => {
-                run.gold = run.gold.saturating_add(payout.total as i32);
+                run.apply_gold_reward(payout.total as i32, Some(bus));
             }
             GameEvent::RoundComplete {
                 reached_target: false,
@@ -1213,9 +1184,7 @@ fn play_blind(
         let slot = blind_slot_key(run);
         *stats.turns_by_blind_slot.entry(slot).or_insert(0) += 1;
         stats.turns_total += 1;
-        stats.peak_hand_size = stats
-            .peak_hand_size
-            .max(run.hand().len() as u32);
+        stats.peak_hand_size = stats.peak_hand_size.max(run.hand().len() as u32);
 
         bot_log!(
             log,
@@ -1431,12 +1400,12 @@ fn play_blind(
 #[cfg(test)]
 mod tests {
     use super::{
-        best_play_in_hand, enumerate_candidate_play_masks, pick_best_play,
-        remaining_antes_including_current, scale_long_term_value_for_ante, talisman_marginal_value,
-        use_bot_consumables, zodiac_marginal_value_with_base, RunStats, ShopMarginalBase,
+        RunStats, ShopMarginalBase, best_play_in_hand, enumerate_candidate_play_masks,
+        pick_best_play, remaining_antes_including_current, scale_long_term_value_for_ante,
+        talisman_marginal_value, use_bot_consumables, zodiac_marginal_value_with_base,
     };
     use crate::core::consumable::Consumable;
-    use crate::core::hand::{DetectedSet, SetKind};
+    use crate::core::hand::{DetectedMeld, MeldKind};
     use crate::core::talisman::TalismanKind;
     use crate::core::tile::{Suit, Tile};
     use crate::core::zodiac::ZodiacKind;
@@ -1475,7 +1444,7 @@ mod tests {
                 .structure_sets()
                 .iter()
                 .chain(sets.iter())
-                .filter(|s| s.kind == SetKind::Kong)
+                .filter(|s| s.kind == MeldKind::Kong)
                 .count();
             if run.structure_tiles().len() + scoring_tiles.len()
                 > crate::game::run::HAND_SIZE + kongs_after
@@ -1532,9 +1501,9 @@ mod tests {
             t(Suit::Bamboos, 6, 4),
             t(Suit::Bamboos, 6, 5),
             t(Suit::Bamboos, 6, 6),
-            t(Suit::Circles, 2, 7),
-            t(Suit::Circles, 3, 8),
-            t(Suit::Circles, 4, 9),
+            t(Suit::Dots, 2, 7),
+            t(Suit::Dots, 3, 8),
+            t(Suit::Dots, 4, 9),
         ];
         run.hand_mut().sort();
         run
@@ -1545,20 +1514,20 @@ mod tests {
         let mut run = RunState::new_demo();
         *run.structure_tiles_mut() = run.hand().iter().take(12).copied().collect();
         *run.structure_sets_mut() = vec![
-            DetectedSet {
-                kind: SetKind::Triplet,
+            DetectedMeld {
+                kind: MeldKind::Triplet,
                 tile_ids: run.structure_tiles()[0..3].iter().map(|t| t.id).collect(),
             },
-            DetectedSet {
-                kind: SetKind::Triplet,
+            DetectedMeld {
+                kind: MeldKind::Triplet,
                 tile_ids: run.structure_tiles()[3..6].iter().map(|t| t.id).collect(),
             },
-            DetectedSet {
-                kind: SetKind::Triplet,
+            DetectedMeld {
+                kind: MeldKind::Triplet,
                 tile_ids: run.structure_tiles()[6..9].iter().map(|t| t.id).collect(),
             },
-            DetectedSet {
-                kind: SetKind::Triplet,
+            DetectedMeld {
+                kind: MeldKind::Triplet,
                 tile_ids: run.structure_tiles()[9..12].iter().map(|t| t.id).collect(),
             },
         ];
@@ -1588,8 +1557,8 @@ mod tests {
             t(Suit::Characters, 9, 1),
             t(Suit::Bamboos, 1, 2),
             t(Suit::Bamboos, 9, 3),
-            t(Suit::Circles, 1, 4),
-            t(Suit::Circles, 9, 5),
+            t(Suit::Dots, 1, 4),
+            t(Suit::Dots, 9, 5),
             t(Suit::Wind, 1, 6),
             t(Suit::Wind, 2, 7),
             t(Suit::Wind, 3, 8),
@@ -1778,7 +1747,11 @@ mod tests {
             Consumable::Talisman(TalismanKind::Pearl),
         ];
 
-        assert!(use_bot_consumables(&mut run, &mut RunStats::default(), false));
+        assert!(use_bot_consumables(
+            &mut run,
+            &mut RunStats::default(),
+            false
+        ));
         assert_eq!(run.yaku_levels.level_of(ZodiacKind::Ox.yaku()), 2);
         assert!(
             run.hand().iter().all(|tile| tile.enhancement.is_some()),
@@ -1976,7 +1949,7 @@ fn best_selection_for_talisman_on_hand(
         TalismanKind::Bamboo | TalismanKind::Dots | TalismanKind::Characters => {
             let target = match kind {
                 TalismanKind::Bamboo => Suit::Bamboos,
-                TalismanKind::Dots => Suit::Circles,
+                TalismanKind::Dots => Suit::Dots,
                 TalismanKind::Characters => Suit::Characters,
                 _ => unreachable!(),
             };
@@ -2086,9 +2059,7 @@ fn best_selection_for_talisman_on_hand(
             Some((sel, after - base))
         }
         // Buff talismans should never reach this function.
-        TalismanKind::Pearl
-        | TalismanKind::Gilded
-        | TalismanKind::Polychrome => None,
+        TalismanKind::Pearl | TalismanKind::Gilded | TalismanKind::Polychrome => None,
     }
 }
 
@@ -2303,6 +2274,7 @@ fn visit_shop(
     strategy: &BotStrategy,
     deadline: Option<Instant>,
     qilin_ribbon_unlocked: bool,
+    bus: &mut crate::game::event_bus::EventBus,
 ) -> ShopVisitOutcome {
     // Consume tag-granted shop modifiers (headless analogue of ShopScene::new).
     let extra_relics: usize = if run.tag_rich_stock { 2 } else { 0 };
@@ -2316,9 +2288,7 @@ fn visit_shop(
     let pool_x = run.relic_shop_pool_extinction();
     let mut pool: Vec<RelicId> = defs
         .iter()
-        .filter(|d| {
-            relic_eligible_for_shop_stock(d.id, &run.relics, &run.available_relics, pool_x)
-        })
+        .filter(|d| relic_eligible_for_shop_stock(d.id, &run.relics, &run.available_relics, pool_x))
         .map(|d| d.id)
         .collect();
     pool.shuffle(&mut rand::rng());
@@ -2427,9 +2397,18 @@ fn visit_shop(
                         run.mode.scale_shop_price(relic_shop_price(id, &run.relics))
                     }
                 }
-                ShopOffer::Zodiac(_) => run.mode.scale_shop_price(ZodiacKind::shop_price()),
-                ShopOffer::Talisman(kind) => run.mode.scale_shop_price(kind.shop_price()),
-                ShopOffer::Pack(kind) => run.mode.scale_shop_price(kind.shop_price()),
+                ShopOffer::Zodiac(_) => run.mode.scale_shop_price(apply_merchants_eye_discount(
+                    ZodiacKind::shop_price(),
+                    &run.relics,
+                )),
+                ShopOffer::Talisman(kind) => run.mode.scale_shop_price(apply_merchants_eye_discount(
+                    kind.shop_price(),
+                    &run.relics,
+                )),
+                ShopOffer::Pack(kind) => run.mode.scale_shop_price(apply_merchants_eye_discount(
+                    kind.shop_price(),
+                    &run.relics,
+                )),
             };
             if price as i32 > run.gold {
                 continue;
@@ -2481,7 +2460,7 @@ fn visit_shop(
                     run.mode.scale_shop_price(relic_shop_price(id, &run.relics))
                 };
                 free_relic = false;
-                run.gold -= price as i32;
+                run.apply_gold_delta(-(price as i32), Some(bus));
                 acquire_relic(run, id);
                 stats.relics_bought += 1;
                 let rname = relic_display_name(id);
@@ -2502,8 +2481,11 @@ fn visit_shop(
                 );
             }
             ShopOffer::Zodiac(zodiac) => {
-                let price = run.mode.scale_shop_price(ZodiacKind::shop_price());
-                run.gold -= price as i32;
+                let price = run.mode.scale_shop_price(apply_merchants_eye_discount(
+                    ZodiacKind::shop_price(),
+                    &run.relics,
+                ));
+                run.apply_gold_delta(-(price as i32), Some(bus));
                 let new_level = run.yaku_levels.level_up(zodiac.yaku());
                 stats.gold_spent += price;
                 *stats.zodiacs_picked.entry(zodiac.name()).or_insert(0) += 1;
@@ -2518,8 +2500,11 @@ fn visit_shop(
                 );
             }
             ShopOffer::Talisman(kind) => {
-                let price = run.mode.scale_shop_price(kind.shop_price());
-                run.gold -= price as i32;
+                let price = run.mode.scale_shop_price(apply_merchants_eye_discount(
+                    kind.shop_price(),
+                    &run.relics,
+                ));
+                run.apply_gold_delta(-(price as i32), Some(bus));
                 run.consumables.items.push(Consumable::Talisman(kind));
                 stats.gold_spent += price;
                 *stats.talismans_picked.entry(kind.name()).or_insert(0) += 1;
@@ -2533,8 +2518,11 @@ fn visit_shop(
                 );
             }
             ShopOffer::Pack(kind) => {
-                let price = run.mode.scale_shop_price(kind.shop_price());
-                run.gold -= price as i32;
+                let price = run.mode.scale_shop_price(apply_merchants_eye_discount(
+                    kind.shop_price(),
+                    &run.relics,
+                ));
+                run.apply_gold_delta(-(price as i32), Some(bus));
                 // Mirror the real shop: pre-stamp any enhancement from the
                 // pack kind onto the tiles' IDs, then append the pack. The
                 // wall gets rebuilt with these packs at the start of every
@@ -2636,14 +2624,7 @@ fn play_run_with_options(
             break;
         }
         if run_deadline_expired(deadline) {
-            record_timeout_snapshot(
-                &mut stats,
-                &run,
-                "outer",
-                run.upcoming_blind,
-                None,
-                started,
-            );
+            record_timeout_snapshot(&mut stats, &run, "outer", run.upcoming_blind, None, started);
             break;
         }
         let blind = run.upcoming_blind;
@@ -2664,7 +2645,7 @@ fn play_run_with_options(
             bot_log!(log, "    action: skip {}", blind.name());
             if let Some(tag) = run.tag_for_blind(blind) {
                 let gold_before = run.gold;
-                run.apply_tag(tag);
+                run.apply_tag(tag, Some(&mut bus));
                 let gold_after = run.gold;
                 let realized_gold = gold_after.saturating_sub(gold_before).max(0) as u32;
                 stats.gold_from_skip_tags += realized_gold;
@@ -2685,7 +2666,7 @@ fn play_run_with_options(
         }
 
         stats.total_target_score += run.target_score as u64;
-        run.apply_blind(blind);
+        run.apply_blind(blind, Some(&mut bus));
         let boss_for_this_blind = if matches!(blind, BlindKind::Boss) {
             current_boss_name(&run).map(|name| name.to_string())
         } else {
@@ -2766,6 +2747,7 @@ fn play_run_with_options(
                 &strategy,
                 deadline,
                 qilin_unlocked,
+                &mut bus,
             ) {
                 ShopVisitOutcome::Completed => {}
                 ShopVisitOutcome::TimedOut => {
@@ -2827,6 +2809,7 @@ fn play_run_with_options(
             &strategy,
             deadline,
             qilin_unlocked,
+            &mut bus,
         ) {
             ShopVisitOutcome::Completed => {}
             ShopVisitOutcome::TimedOut => {
@@ -2850,12 +2833,7 @@ fn play_run_with_options(
         .iter()
         .map(|&id| relic_display_name(id).to_string())
         .collect();
-    stats.final_consumables = run
-        .consumables
-        .items
-        .iter()
-        .map(|c| c.name())
-        .collect();
+    stats.final_consumables = run.consumables.items.iter().map(|c| c.name()).collect();
     stats.final_yaku_levels = run.yaku_levels.clone();
     stats.final_gold = run.gold;
     bot_log!(log, "== bot run stats: {:?} ==", stats);

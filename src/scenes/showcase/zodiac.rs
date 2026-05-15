@@ -5,10 +5,12 @@ use std::time::{Duration, Instant};
 use crate::core::zodiac::ZodiacKind;
 use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;
-use crate::render::draw_cmd::{Object3d, Object3dKind, ShowcaseRenderHints, UiFrame};
+use crate::render::draw_cmd::{ShowcaseRenderHints, UiFrame};
+use crate::render::ribbon_mesh::{ZodiacRibbonSpec, zodiac_ribbon_object3d};
 use crate::render::table_transform::rot_fixed_axes_deg_matrix;
-use crate::render::world_space::pixel_to_world;
+use crate::render::theme::color;
 use crate::render::wgpu_renderer::{PointLight, SpotLight};
+use crate::render::world_space::pixel_to_world;
 use crate::scenes::celebration_overlay;
 use crate::ui::input::UiAction;
 use crate::ui::placement::PlacementAnchor;
@@ -84,7 +86,6 @@ impl ZodiacPresenter {
             .push_depth_reset_for_celebration_mesh(&mut frame);
 
         let t = self.elapsed();
-        let ribbon_w = h * 0.12;
         let ribbon_l = h * 0.55;
 
         let sway_yaw = (t * 1.8).sin() * 12.0;
@@ -128,7 +129,7 @@ impl ZodiacPresenter {
             PointLight {
                 pos: [cx, cy - h * 0.15, lift - h * 0.15],
                 radius: w.max(h) * 1.6,
-                color: [0.95, 0.78, 0.25],
+                color: color::rgb(color::RELIC_GOLD),
                 intensity: 1.1,
             },
         ]);
@@ -151,22 +152,20 @@ impl ZodiacPresenter {
             radius: w.max(h) * 2.2,
             cos_outer,
             cos_inner,
-            color: [1.0, 0.90, 0.72],
+            color: color::rgb(color::TALLOW),
             intensity: 6.0,
         }];
 
-        frame.object3d_batch(vec![Object3d {
+        frame.object3d_batch(vec![zodiac_ribbon_object3d(ZodiacRibbonSpec {
             pos: anchor.pos,
-            extents: [ribbon_w, ribbon_l, ribbon_w * 0.15],
+            length: ribbon_l,
             rotation: anchor.object3d_rotation(),
             color: [1.0, 1.0, 1.0, alpha],
-            kind: Object3dKind::ZodiacRibbon {
-                kind: Some(self.kind),
-            },
+            kind: Some(self.kind),
             hover_target: 0.0,
             anim_id: 0,
             arrange_name: Some(anchor.arrange_name),
-        }]);
+        })]);
 
         frame.text(celebration_overlay::label_zodiac_level_title(
             h,

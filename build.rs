@@ -109,20 +109,11 @@ fn bake_asset_packs(profile_dir: &Path) {
 }
 
 /// Run `bake_assets.py` with a Python interpreter available on PATH.
-fn run_pack_bake(
-    repo: &Path,
-    script: &Path,
-    out_dir: &Path,
-    release: bool,
-) -> Result<(), String> {
+fn run_pack_bake(repo: &Path, script: &Path, out_dir: &Path, release: bool) -> Result<(), String> {
     let lossy: &[&str] = if release { &[] } else { &["--no-lossy"] };
 
     #[cfg(windows)]
-    let attempts: &[(&str, &[&str])] = &[
-        ("python3", &[]),
-        ("python", &[]),
-        ("py", &["-3"]),
-    ];
+    let attempts: &[(&str, &[&str])] = &[("python3", &[]), ("python", &[]), ("py", &["-3"])];
     #[cfg(not(windows))]
     let attempts: &[(&str, &[&str])] = &[("python3", &[]), ("python", &[])];
 

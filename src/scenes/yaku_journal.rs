@@ -167,7 +167,7 @@ impl SceneBehavior for YakuJournalScene {
         frame.scene_lighting.push_smooth(PointLight {
             pos: [w * 0.5, h * -0.10, h * 1.40],
             radius: h * 3.0,
-            color: [1.0, 0.96, 0.88],
+            color: color::rgb(color::PARCHMENT),
             intensity: 1.2,
         });
 
@@ -262,8 +262,7 @@ impl SceneBehavior for YakuJournalScene {
                 if matches!(state, ProgressionState::Played | ProgressionState::Leveled) {
                     frame.quad(GpuInstance {
                         rect: [pad_x0, pad_y0, pad_w, pad_h],
-                        color: color::alpha(color::PARCHMENT, 0.06),
-                    });
+                        color: color::alpha(color::PARCHMENT, 0.06), user: 0});
                 }
                 if is_selected {
                     // Stacked halo layers — outer soft pool, inner warm
@@ -279,8 +278,7 @@ impl SceneBehavior for YakuJournalScene {
                             pad_w + halo_pad * 2.0,
                             pad_h + halo_pad * 2.0,
                         ],
-                        color: color::alpha(color::CHAMPAGNE, 0.10),
-                    });
+                        color: color::alpha(color::CHAMPAGNE, 0.10), user: 0});
                     let mid_pad = tile_long_h * 0.14;
                     frame.quad(GpuInstance {
                         rect: [
@@ -289,8 +287,7 @@ impl SceneBehavior for YakuJournalScene {
                             pad_w + mid_pad * 2.0,
                             pad_h + mid_pad * 2.0,
                         ],
-                        color: color::alpha(color::CHAMPAGNE, 0.22),
-                    });
+                        color: color::alpha(color::CHAMPAGNE, 0.22), user: 0});
                     // Crisp brass outline — 4-edge ring so focus reads
                     // even on dark sealed cards.
                     let ring_px = (2.6 * (h / 1080.0)).max(2.0);
@@ -301,20 +298,16 @@ impl SceneBehavior for YakuJournalScene {
                     let ring_color = color::alpha(color::GOLD, 0.85);
                     frame.quad(GpuInstance {
                         rect: [rx, ry, rw, ring_px],
-                        color: ring_color,
-                    });
+                        color: ring_color, user: 0});
                     frame.quad(GpuInstance {
                         rect: [rx, ry + rh - ring_px, rw, ring_px],
-                        color: ring_color,
-                    });
+                        color: ring_color, user: 0});
                     frame.quad(GpuInstance {
                         rect: [rx, ry, ring_px, rh],
-                        color: ring_color,
-                    });
+                        color: ring_color, user: 0});
                     frame.quad(GpuInstance {
                         rect: [rx + rw - ring_px, ry, ring_px, rh],
-                        color: ring_color,
-                    });
+                        color: ring_color, user: 0});
                 }
 
                 // Name — until the first cash-in (`yaku_times_scored`), show a
@@ -482,12 +475,10 @@ fn draw_sealed_slab(
     // by eye to contrast against both PARCHMENT and the wood grain.
     frame.quad(GpuInstance {
         rect: [x, y, w, h],
-        color: color::darken(color::ANTIQUE, 0.75),
-    });
+        color: color::darken(color::ANTIQUE, 0.75), user: 0});
     frame.quad(GpuInstance {
         rect: [x + inset, y + inset, w - inset * 2.0, h - inset * 2.0],
-        color: [0.14, 0.10, 0.08, 1.0],
-    });
+        color: color::WALNUT_RAISED, user: 0});
 
     // Wax seal — stacked discs. Outer shadow ring sits slightly offset
     // down/right to fake drop shadow and give the disc lift. Then the
@@ -506,19 +497,16 @@ fn draw_sealed_slab(
             seal_d,
             seal_d,
         ],
-        color: color::alpha([0.05, 0.02, 0.01, 1.0], 0.55),
-    });
+        color: color::alpha(color::WALNUT_INK, 0.55), user: 0});
     // Dark wax ring.
     frame.quad(GpuInstance {
         rect: [cx - seal_d * 0.5, cy - seal_d * 0.5, seal_d, seal_d],
-        color: color::darken(color::RUBY, 0.5),
-    });
+        color: color::darken(color::RUBY, 0.5), user: 0});
     // Wax body.
     let body_d = seal_d * 0.86;
     frame.quad(GpuInstance {
         rect: [cx - body_d * 0.5, cy - body_d * 0.5, body_d, body_d],
-        color: color::RUBY,
-    });
+        color: color::RUBY, user: 0});
     // Highlight crescent — small off-center champagne square reads as a
     // specular hit on the wax. Placed up-left of center, sized small
     // enough that rectangular edges aren't obvious at TV distance.
@@ -530,8 +518,7 @@ fn draw_sealed_slab(
             hl_d,
             hl_d,
         ],
-        color: color::alpha(color::CHAMPAGNE, 0.55),
-    });
+        color: color::alpha(color::CHAMPAGNE, 0.55), user: 0});
 
     // "?" stamp — larger glyph, champagne ink so it reads as pressed
     // metal into the wax rather than a flat typeface.
@@ -571,12 +558,10 @@ fn draw_mystery_name_pill(
             pill_w,
             pill_h,
         ],
-        color: color::alpha([0.08, 0.04, 0.02, 1.0], 0.35),
-    });
+        color: color::alpha(color::WALNUT_DEEP, 0.35), user: 0});
     frame.quad(GpuInstance {
         rect: [pill_x, top_y, pill_w, pill_h],
-        color: pill_bg,
-    });
+        color: pill_bg, user: 0});
     frame.text(TextLabel {
         rect: [pill_x, top_y + pill_h * 0.12, pill_w, pill_h * 0.76],
         text: "???".into(),
@@ -657,7 +642,7 @@ fn draw_plaque(
     // double-layered for softness. Gives the plaque a clearer sense of
     // floating above the wood rather than being painted on it.
     let shadow_scale = (h / 1080.0).max(1.0);
-    let shadow_warm = [0.08, 0.04, 0.02, 1.0];
+    let shadow_warm = color::WALNUT_DEEP;
     // Far, soft shadow.
     frame.quad(GpuInstance {
         rect: [
@@ -666,8 +651,7 @@ fn draw_plaque(
             plaque_w + 8.0 * shadow_scale,
             plaque_h,
         ],
-        color: color::alpha(shadow_warm, 0.35),
-    });
+        color: color::alpha(shadow_warm, 0.35), user: 0});
     // Near, crisp shadow.
     frame.quad(GpuInstance {
         rect: [
@@ -676,13 +660,11 @@ fn draw_plaque(
             plaque_w,
             plaque_h,
         ],
-        color: color::alpha(shadow_warm, 0.55),
-    });
+        color: color::alpha(shadow_warm, 0.55), user: 0});
     // Brass outer rim.
     frame.quad(GpuInstance {
         rect: [plaque_x, plaque_y, plaque_w, plaque_h],
-        color: color::ANTIQUE,
-    });
+        color: color::ANTIQUE, user: 0});
     // Bevel highlight.
     let bevel = 2.0 * shadow_scale;
     frame.quad(GpuInstance {
@@ -692,8 +674,7 @@ fn draw_plaque(
             plaque_w - bevel * 2.0,
             plaque_h - bevel * 2.0,
         ],
-        color: color::BRASS,
-    });
+        color: color::BRASS, user: 0});
     // Bamboo lacquer face — stops short of the bottom to leave room for the
     // footer strip (which carries the control hint).
     let pad_scale = 1.0 - 0.14 * jc;
@@ -709,8 +690,7 @@ fn draw_plaque(
     let bamboo_face = color::darken(color::JADE, 0.76);
     frame.quad(GpuInstance {
         rect: [face_x, face_y, face_w, face_h],
-        color: bamboo_face,
-    });
+        color: bamboo_face, user: 0});
     let label_champagne = color::CHAMPAGNE;
     let label_champagne_soft = color::alpha(color::CHAMPAGNE, 0.88);
     let label_champagne_muted = color::alpha(color::CHAMPAGNE, 0.52);
@@ -782,12 +762,10 @@ fn draw_plaque(
             pill_w,
             pill_h,
         ],
-        color: color::alpha([0.08, 0.04, 0.02, 1.0], 0.35),
-    });
+        color: color::alpha(color::WALNUT_DEEP, 0.35), user: 0});
     frame.quad(GpuInstance {
         rect: [pill_x, pill_y, pill_w, pill_h],
-        color: pill_bg,
-    });
+        color: pill_bg, user: 0});
     frame.text(TextLabel {
         rect: [pill_x, pill_y + pill_h * 0.18, pill_w, pill_h * 0.8],
         text: pill_text,
@@ -834,8 +812,7 @@ fn draw_plaque(
     let rule_h = (1.5 * shadow_scale).max(1.0);
     frame.quad(GpuInstance {
         rect: [header_x, rule_y, header_w, rule_h],
-        color: color::alpha(color::CHAMPAGNE, 0.22),
-    });
+        color: color::alpha(color::CHAMPAGNE, 0.22), user: 0});
 
     // ── Description ──────────────────────────────────────────────
     let desc_font = typography::size(typography::BODY, h).max(23.0 * jr);
@@ -943,12 +920,10 @@ fn draw_plaque(
     let footer_w = plaque_w - bevel * 2.0;
     frame.quad(GpuInstance {
         rect: [footer_x, footer_y, footer_w, footer_h],
-        color: color::darken(bamboo_face, 0.22),
-    });
+        color: color::darken(bamboo_face, 0.22), user: 0});
     frame.quad(GpuInstance {
         rect: [footer_x, footer_y, footer_w, (1.0 * shadow_scale).max(1.0)],
-        color: color::alpha(color::CHAMPAGNE, 0.18),
-    });
+        color: color::alpha(color::CHAMPAGNE, 0.18), user: 0});
     let footer_pad = header_pad * 0.8;
     frame.text(TextLabel {
         rect: [
@@ -998,9 +973,9 @@ fn signature_tiles(yk: YakuKind, id: &mut u32) -> Vec<Tile> {
         YakuKind::Tanyao => &[
             (Suit::Characters, 4),
             (Suit::Bamboos, 5),
-            (Suit::Circles, 7),
+            (Suit::Dots, 7),
         ],
-        YakuKind::Toitoi => &[(Suit::Circles, 5), (Suit::Circles, 5), (Suit::Circles, 5)],
+        YakuKind::Toitoi => &[(Suit::Dots, 5), (Suit::Dots, 5), (Suit::Dots, 5)],
         YakuKind::Honroutou => &[(Suit::Characters, 1), (Suit::Bamboos, 9), (Suit::Dragon, 1)],
         YakuKind::Iipeikou => &[(Suit::Bamboos, 1), (Suit::Bamboos, 2), (Suit::Bamboos, 3)],
         YakuKind::FullHand => &[
@@ -1012,9 +987,9 @@ fn signature_tiles(yk: YakuKind, id: &mut u32) -> Vec<Tile> {
         YakuKind::SanshokuDoujun => &[
             (Suit::Characters, 5),
             (Suit::Bamboos, 5),
-            (Suit::Circles, 5),
+            (Suit::Dots, 5),
         ],
-        YakuKind::Junchan => &[(Suit::Circles, 1), (Suit::Circles, 2), (Suit::Circles, 3)],
+        YakuKind::Junchan => &[(Suit::Dots, 1), (Suit::Dots, 2), (Suit::Dots, 3)],
         YakuKind::Ittsu => &[(Suit::Bamboos, 1), (Suit::Bamboos, 5), (Suit::Bamboos, 9)],
         YakuKind::Honitsu => &[(Suit::Bamboos, 3), (Suit::Bamboos, 7), (Suit::Wind, 1)],
         YakuKind::Yakuhai => &[(Suit::Dragon, 1), (Suit::Dragon, 1), (Suit::Dragon, 1)],
@@ -1023,11 +998,7 @@ fn signature_tiles(yk: YakuKind, id: &mut u32) -> Vec<Tile> {
             (Suit::Characters, 1),
             (Suit::Bamboos, 5),
         ],
-        YakuKind::KokushiMusou => &[
-            (Suit::Characters, 1),
-            (Suit::Wind, 1),
-            (Suit::Dragon, 1),
-        ],
+        YakuKind::KokushiMusou => &[(Suit::Characters, 1), (Suit::Wind, 1), (Suit::Dragon, 1)],
         YakuKind::ChickenHand => &[
             (Suit::Characters, 1),
             (Suit::Characters, 2),

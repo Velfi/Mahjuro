@@ -40,8 +40,10 @@ impl WgpuRenderer {
                 look.z.atan2(look.y.abs()).to_degrees() + 180.0
             };
 
-            let mut obj3d_primitive_slot: HashMap<crate::render::primitive::MeshId, usize> =
-                HashMap::new();
+            let mut obj3d_primitive_slot: rustc_hash::FxHashMap<
+                crate::render::primitive::MeshId,
+                usize,
+            > = rustc_hash::FxHashMap::default();
             let mut obj3d_yaku_slot: usize = 0;
             let mut obj3d_wood_slot: usize = 0;
             let mut obj3d_book_slot: usize = 0;
@@ -49,7 +51,6 @@ impl WgpuRenderer {
             let mut obj3d_pack_slot: usize = 0;
             let mut obj3d_talisman_slot: usize = 0;
             let mut obj3d_ribbon_slot: usize = 0;
-            let mut obj3d_shrine_slot: usize = 0;
             let mut obj3d_dora_plinth_slot: usize = 0;
             let mut obj3d_orb_slot: usize = 0;
             let mut obj3d_bowl_slot: usize = 0;
@@ -92,6 +93,28 @@ impl WgpuRenderer {
                         obj.rotation_matrix(),
                         glam::Vec3::from(obj.extents),
                     );
+                    // Frustum cull — skip work for kinds that aren't
+                    // shadow casters or part of slot-shared shadow walks.
+                    // `Candle` / `Ribbon` / `Talisman` / `Primitive`
+                    // shadows in `passes/shadow.rs` re-walk `frame.cmds`
+                    // with their own per-shape cursors and would draw
+                    // stale uniforms if we culled here without also
+                    // updating that walk; the easier safe move is to
+                    // leave them alone for now (Steam Deck baseline
+                    // disables shadows anyway). Local extent of 1.5x
+                    // the unit cube gives generous slack against
+                    // arrange-mode nudges and per-kind y-offsets so we
+                    // never pop a barely-on-screen object.
+                    let cull_eligible = !matches!(
+                        obj.kind,
+                        Object3dKind::Candle { .. }
+                            | Object3dKind::ZodiacRibbon { .. }
+                            | Object3dKind::Talisman { .. }
+                            | Object3dKind::Primitive { .. }
+                    );
+                    if cull_eligible && camera.aabb_outside_frustum(model, [1.5, 1.5, 1.5]) {
+                        continue;
+                    }
                     match &obj.kind {
                         Object3dKind::Primitive {
                             shape,
@@ -555,8 +578,7 @@ impl WgpuRenderer {
                                         rw + pad_x * 2.0,
                                         rh + pad_y * 2.0,
                                     ],
-                                    color: [1.00, 0.82, 0.36, 1.20 * g],
-                                });
+                                    color: [1.00, 0.82, 0.36, 1.20 * g], user: 0});
                             }
                             if *debuffed && !*silhouette {
                                 let [rx, ry, rw, rh] = projected_rect;
@@ -565,8 +587,7 @@ impl WgpuRenderer {
                                 let cy = ry + rh * 0.48;
                                 relic_debuff_markers.push(GpuInstance {
                                     rect: [cx - side * 0.5, cy - side * 0.5, side, side],
-                                    color: [1.0, 1.0, 1.0, 1.0],
-                                });
+                                    color: [1.0, 1.0, 1.0, 1.0], user: 0});
                             }
                             object3d_draw_list.push((DrawKind::Relic, slot_i));
                         }
@@ -692,8 +713,7 @@ impl WgpuRenderer {
                                         rw + pad_x * 2.0,
                                         rh + pad_y * 2.0,
                                     ],
-                                    color: [halo_r, halo_g, halo_b, 0.85 * hover_g],
-                                });
+                                    color: [halo_r, halo_g, halo_b, 0.85 * hover_g], user: 0});
                             }
                             object3d_draw_list.push((DrawKind::Pack, slot_i));
                         }
@@ -767,101 +787,6 @@ impl WgpuRenderer {
                                 &mut obj3d_ribbon_slot,
                                 object3d_draw_list,
                             );
-                        }
-                        Object3dKind::Shrine { glow } => {
-                            if obj3d_shrine_slot >= MAX_SHRINE_SLOTS {
-                                continue;
-                            }
-                            let slot_i = obj3d_shrine_slot;
-                            obj3d_shrine_slot += 1;
-                            // Shrines are pick-blind only; one placement per slot.
-                            let shrine_name = match slot_i {
-                                0 => "pick_blind.shrine[0]",
-                                1 => "pick_blind.shrine[1]",
-                                2 => "pick_blind.shrine[2]",
-                                _ => "pick_blind.shrine",
-                            };
-                            // Shrine center is lifted by half-height; scene passes base pos.
-                            let shrine_center = pixel_to_world(
-                                w,
-                                h,
-                                obj.pos[0],
-                                obj.pos[1],
-                                obj.pos[2] + obj.extents[1] * 0.5,
-                            );
-                            // The shrine mesh is built Y-up; rotate into Z-up world so it
-                            // stands upright rather than lying flat. Compose with any
-                            // scene-level obj.rotation (e.g. arrange-mode overrides).
-                            let shrine_rot =
-                                mesh_y_thickness_along_local_y_to_z_up() * obj.rotation_matrix();
-                            let shrine_model = self.apply_arrange_override(
-                                shrine_name,
-                                translate_rot_scale(
-                                    shrine_center,
-                                    shrine_rot,
-                                    glam::Vec3::from(obj.extents),
-                                ),
-                            );
-                            let g = glow.clamp(0.0, 1.0);
-                            let base_color = if g > 0.0 {
-                                let target = [1.10, 1.05, 0.95, obj.color[3]];
-                                [
-                                    obj.color[0] + (target[0] - obj.color[0]) * g,
-                                    obj.color[1] + (target[1] - obj.color[1]) * g,
-                                    obj.color[2] + (target[2] - obj.color[2]) * g,
-                                    obj.color[3],
-                                ]
-                            } else {
-                                obj.color
-                            };
-                            let material = MaterialParams {
-                                kind: MaterialKind::Plain,
-                                base_color,
-                                specular_strength: 0.06,
-                                specular_power: 8.0,
-                            };
-                            self.shrine_instances[slot_i].write_uniform(
-                                &self.queue,
-                                view_proj_arr,
-                                shrine_model,
-                                material,
-                            );
-                            // Project AABB for shrine_rects (label anchoring).
-                            let shrine_world_center = shrine_model.w_axis.truncate();
-                            let [hx, hy, hz] = [
-                                obj.extents[0] * 0.5,
-                                obj.extents[1] * 0.5,
-                                obj.extents[2] * 0.5,
-                            ];
-                            let (mut mn_x, mut mn_y, mut mx_x, mut mx_y) = (
-                                f32::INFINITY,
-                                f32::INFINITY,
-                                f32::NEG_INFINITY,
-                                f32::NEG_INFINITY,
-                            );
-                            for cx in [-hx, hx] {
-                                for cy in [-hy, hy] {
-                                    for cz in [-hz, hz] {
-                                        let world =
-                                            shrine_world_center + glam::Vec3::new(cx, cy, cz);
-                                        let (px, py) = project_to_screen(world);
-                                        mn_x = mn_x.min(px);
-                                        mn_y = mn_y.min(py);
-                                        mx_x = mx_x.max(px);
-                                        mx_y = mx_y.max(py);
-                                    }
-                                }
-                            }
-                            self.proj
-                                .shrine_rects
-                                .push([mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]);
-                            self.last_debug_pickables.push((
-                                shrine_name.to_string(),
-                                shrine_model,
-                                glam::Vec3::new(hx, hy, hz),
-                                0.0,
-                            ));
-                            object3d_draw_list.push((DrawKind::Shrine, slot_i));
                         }
                         Object3dKind::DoraPlinth { glow } => {
                             if obj3d_dora_plinth_slot >= MAX_DORA_PLINTH_SLOTS {
@@ -1197,10 +1122,7 @@ impl WgpuRenderer {
                                 ),
                             );
                             let model = self.apply_arrange_override(cascade_token_name, model);
-                            let base = match ck {
-                                CascadeTokenKind::Chips => [0.55, 0.78, 1.00, 1.0],
-                                CascadeTokenKind::Mult => [0.85, 0.32, 0.42, 1.0],
-                            };
+                            let base = ck.color();
                             let material = MaterialParams {
                                 kind: MaterialKind::Plain,
                                 base_color: base,

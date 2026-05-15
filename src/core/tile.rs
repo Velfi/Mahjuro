@@ -7,7 +7,7 @@ pub enum Suit {
     // Ordered: numbered suits first, then honors, then bonus.
     Characters,
     Bamboos,
-    Circles,
+    Dots,
     Wind,
     Dragon,
     /// Bonus flower tiles (ranks 1–4). Rare wildcards that can substitute for
@@ -16,6 +16,23 @@ pub enum Suit {
     /// Bonus season tiles (ranks 1–4: Spring, Summer, Autumn, Winter).
     /// Used only in solitaire mode; not part of the main game deck.
     Season,
+}
+
+impl Suit {
+    /// Solid tint when this suit’s name is highlighted as UI vocabulary
+    /// (tutorial copy, etc.). Dragon uses the Chun (red) face hue so the
+    /// keyword stays legible without a rank context.
+    pub const fn keyword_color(self) -> [f32; 4] {
+        match self {
+            Suit::Characters => [0.85, 0.25, 0.20, 1.0],
+            Suit::Bamboos => [0.20, 0.65, 0.30, 1.0],
+            Suit::Dots => [0.20, 0.40, 0.80, 1.0],
+            Suit::Wind => [0.70, 0.60, 0.20, 1.0],
+            Suit::Dragon => [0.85, 0.20, 0.18, 1.0],
+            Suit::Flower => [0.90, 0.45, 0.55, 1.0],
+            Suit::Season => [0.30, 0.70, 0.65, 1.0],
+        }
+    }
 }
 
 /// A talisman-applied enhancement attached to an individual tile. The
@@ -97,7 +114,7 @@ impl Tile {
     /// number suit, four winds, three dragons). Flowers and seasons are never orphans.
     pub fn is_kokushi_orphan_face(suit: Suit, rank: u8) -> bool {
         match suit {
-            Suit::Characters | Suit::Bamboos | Suit::Circles => rank == 1 || rank == 9,
+            Suit::Characters | Suit::Bamboos | Suit::Dots => rank == 1 || rank == 9,
             Suit::Wind => (1..=4).contains(&rank),
             Suit::Dragon => (1..=3).contains(&rank),
             Suit::Flower | Suit::Season => false,
@@ -109,7 +126,7 @@ impl Tile {
     }
 
     pub fn is_number_tile(&self) -> bool {
-        matches!(self.suit, Suit::Characters | Suit::Bamboos | Suit::Circles)
+        matches!(self.suit, Suit::Characters | Suit::Bamboos | Suit::Dots)
     }
 
     /// Returns `true` for bonus flower tiles.
@@ -136,7 +153,7 @@ impl Tile {
             },
             Suit::Characters => format!("{}m", self.rank),
             Suit::Bamboos => format!("{}s", self.rank),
-            Suit::Circles => format!("{}p", self.rank),
+            Suit::Dots => format!("{}p", self.rank),
             Suit::Flower => format!("F{}", self.rank),
             Suit::Season => format!("S{}", self.rank),
         }
@@ -147,7 +164,7 @@ impl Tile {
         match self.suit {
             Suit::Characters => format!("{} of Characters", self.rank),
             Suit::Bamboos => format!("{} of Bamboo", self.rank),
-            Suit::Circles => format!("{} of Circles", self.rank),
+            Suit::Dots => format!("{} of Dots", self.rank),
             Suit::Wind => match self.rank {
                 1 => "East Wind".into(),
                 2 => "South Wind".into(),
@@ -184,7 +201,7 @@ impl Tile {
     /// playable from ante 1, when leveled-yaku mults haven't kicked in yet.
     pub fn point_value(&self) -> u32 {
         match self.suit {
-            Suit::Characters | Suit::Bamboos | Suit::Circles => self.rank as u32,
+            Suit::Characters | Suit::Bamboos | Suit::Dots => self.rank as u32,
             Suit::Wind | Suit::Dragon => 12,
             // Flower wildcards contribute no chip value — their power is structural.
             Suit::Flower | Suit::Season => 0,
@@ -196,7 +213,7 @@ impl Tile {
         match self.suit {
             Suit::Characters => [0.85, 0.25, 0.20, 1.0], // red
             Suit::Bamboos => [0.20, 0.65, 0.30, 1.0],    // green
-            Suit::Circles => [0.20, 0.40, 0.80, 1.0],    // blue
+            Suit::Dots => [0.20, 0.40, 0.80, 1.0],    // blue
             Suit::Wind => [0.70, 0.60, 0.20, 1.0],       // gold
             // Dragons are coloured per rank in the traditional set:
             //   1 = Chun  (中) → red
@@ -235,9 +252,9 @@ mod sort_order_tests {
     #[test]
     fn cmp_sort_order_ranks_ascending_within_suit() {
         let mut v = vec![
-            Tile::new(Suit::Circles, 7, 1),
-            Tile::new(Suit::Circles, 2, 2),
-            Tile::new(Suit::Circles, 5, 3),
+            Tile::new(Suit::Dots, 7, 1),
+            Tile::new(Suit::Dots, 2, 2),
+            Tile::new(Suit::Dots, 5, 3),
         ];
         v.sort_by(cmp_sort_order);
         assert_eq!(v[0].rank, 2);
@@ -246,13 +263,13 @@ mod sort_order_tests {
     }
 
     #[test]
-    fn cmp_sort_order_places_circles_before_dragons() {
+    fn cmp_sort_order_places_dots_before_dragons() {
         let mut v = vec![
             Tile::new(Suit::Dragon, 1, 1),
-            Tile::new(Suit::Circles, 5, 2),
+            Tile::new(Suit::Dots, 5, 2),
         ];
         v.sort_by(cmp_sort_order);
-        assert_eq!(v[0].suit, Suit::Circles);
+        assert_eq!(v[0].suit, Suit::Dots);
         assert_eq!(v[1].suit, Suit::Dragon);
     }
 }

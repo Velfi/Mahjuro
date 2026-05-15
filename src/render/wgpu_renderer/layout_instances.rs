@@ -45,8 +45,7 @@ pub fn build_instances_from_layout(
                 themec::JADE
             } else {
                 themec::alpha(themec::JADE, 0.25)
-            },
-        });
+            }, user: 0});
     }
 
     let disc_row_w = discards_max as f32 * pip + (discards_max.saturating_sub(1)) as f32 * gap;
@@ -60,8 +59,7 @@ pub fn build_instances_from_layout(
                 themec::AMBER
             } else {
                 themec::alpha(themec::AMBER, 0.25)
-            },
-        });
+            }, user: 0});
     }
 
     v

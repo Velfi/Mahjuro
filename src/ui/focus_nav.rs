@@ -9,6 +9,7 @@
 //! tag types differ — so the picker math, the cursor hit-test, and the
 //! brass focus-ring drawing all live here.
 
+use crate::render::theme::color;
 use crate::render::wgpu_renderer::GpuInstance;
 
 /// Direction for spatial navigation between focus targets.
@@ -159,12 +160,11 @@ pub fn push_focus_ring(
     if rw <= bt * 2.0 || rh <= bt * 2.0 {
         quads.push(GpuInstance {
             rect: clamped,
-            color: [0.95, 0.78, 0.32, 1.0],
-        });
+            color: color::RELIC_GOLD, user: 0});
         return;
     }
 
-    let ring = [0.95, 0.78, 0.32, 1.0];
+    let ring = color::RELIC_GOLD;
     let borders = [
         [rx, ry, rw, bt],           // top
         [rx, ry + rh - bt, rw, bt], // bottom
@@ -174,7 +174,6 @@ pub fn push_focus_ring(
     for border in borders {
         quads.push(GpuInstance {
             rect: border,
-            color: ring,
-        });
+            color: ring, user: 0});
     }
 }

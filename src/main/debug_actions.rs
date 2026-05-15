@@ -1,11 +1,11 @@
 use super::*;
 
 use crate::core::tile_pack::TilePackKind;
-use crate::debug_overlays::ShopEnvDebugOverlay;
+use crate::debug_overlays::{ShopEnvDebugOverlay, TonemapDebugOverlay};
 use crate::game::engine::GameEngine;
-use crate::scenes::{ShowcasePresenter, ShowcaseScene, TilePackPresenter};
 use crate::scenes::reload_scene_layout_from_disk;
 use crate::scenes::shop::PackCelebration;
+use crate::scenes::{ShowcasePresenter, ShowcaseScene, TilePackPresenter};
 use crate::ui::scene_layout::clear_saved_layout_files;
 use rand::RngExt;
 
@@ -56,7 +56,8 @@ impl App {
                 );
             }
             DebugAction::SetGold(amount) => {
-                self.run.gold = amount as i32;
+                self.run
+                    .set_run_gold_direct(amount as i32, None);
                 log::debug!("Set gold to {}", amount);
             }
             DebugAction::AddRelic(relic_id) => {
@@ -137,17 +138,24 @@ impl App {
             DebugAction::OpenShopEnvDebug => {
                 if self.debug.shop_env_debug_overlay.is_none() {
                     self.debug.shop_env_debug_overlay = Some(ShopEnvDebugOverlay::new(
-                        self.debug.shop_env_height_scale,
+                        self.debug.room_gltf_height_scale,
                         self.debug.shop_env_lighting,
                     ));
                     log::debug!("Opened shop env & lighting debug overlay");
                 }
             }
-            DebugAction::OpenVolumetricDebug => {
-                if self.debug.volumetric_debug_overlay.is_none() {
-                    self.debug.volumetric_debug_overlay =
-                        Some(VolumetricDebugOverlay::new(&self.volumetric_tuning));
-                    log::debug!("Opened volumetric debug overlay");
+            DebugAction::OpenTonemapDebug => {
+                if self.debug.tonemap_debug_overlay.is_none() {
+                    let scene_key = self.active_scene_key_for_renderer();
+                    let tuning = self.tonemap_tuning.resolve(scene_key);
+                    self.debug.tonemap_debug_overlay = Some(TonemapDebugOverlay::new(
+                        tuning,
+                        scene_key.map(str::to_string),
+                    ));
+                    log::debug!(
+                        "Opened tonemap debug overlay (scene: {})",
+                        scene_key.unwrap_or("_default")
+                    );
                 }
             }
             DebugAction::ProfileGpu => {
@@ -157,6 +165,10 @@ impl App {
                 } else {
                     log::warn!("Cannot start GPU profile: renderer not initialised");
                 }
+            }
+            DebugAction::ProfileCpu => {
+                self.cpu_profiler.start(100);
+                log::debug!("CPU profile capture queued (100 frames)");
             }
             DebugAction::BlowWindGust => {
                 // Inject the same UiAction that pressing `B` would push,

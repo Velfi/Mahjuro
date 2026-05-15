@@ -1,7 +1,7 @@
 use super::super::*;
 
 use crate::render::gltf_helpers::{GltfPbrUniform, build_sampler_descriptor};
-use crate::render::lamp_mesh::{
+use crate::render::moths_to_a_light::{
     build_bug_body_mesh, build_bug_wing_blur_mesh, build_bug_wing_mesh,
 };
 
@@ -42,9 +42,9 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         golden_dust: golden_dust_shader,
         moonlit_water: moonlit_water_shader,
         sunlit_water: sunlit_water_shader,
-        mountain_haze: mountain_haze_shader,
         shooting_star_cascade: shooting_star_cascade_shader,
         cascade_composite: cascade_composite_shader,
+        scene_color_downsample: scene_color_downsample_shader,
         tile_outline: tile_outline_shader,
         tile_glow: tile_glow_shader,
         lit_mesh: lit_mesh_shader,
@@ -292,12 +292,12 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             }],
         });
 
-    let tile_glb_file =
-        crate::asset_path::get("tile_plastic.glb").or_else(|| crate::asset_path::get("Tile.glb"));
+    let tile_glb_file = crate::asset_path::get("3d/tile_plastic.glb")
+        .or_else(|| crate::asset_path::get("3d/Tile.glb"));
     let loaded_glb = match tile_glb_file {
         Some(file) => load_glb_tile_from_bytes(&file.data),
         None => Err(anyhow::anyhow!(
-            "tile_plastic.glb (or Tile.glb) not found (packs or assets/)"
+            "3d/tile_plastic.glb (or 3d/Tile.glb) not found (packs or assets/)"
         )),
     };
 
@@ -362,44 +362,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 resource: wgpu::BindingResource::Sampler(&tile_sampler),
             },
         ],
-    });
-
-    // ── Mountain-haze uniform (density/colour/horizon/drift) ───────────
-    // Live-driven from the Volumetric debug overlay; see
-    // `set_haze_tuning` below for the per-frame write path.
-    let haze_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("haze-uniform"),
-        contents: bytemuck::bytes_of(&HazeUniform {
-            color_density: [0.080, 0.105, 0.145, 1.0],
-            params: [0.55, 1.0, 0.0, 0.0],
-        }),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
-    let haze_uniform_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("haze-uniform-layout"),
-        entries: &[wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        }],
-    });
-    let haze_uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("haze-uniform-bg"),
-        layout: &haze_uniform_layout,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: haze_uniform_buffer.as_entire_binding(),
-        }],
-    });
-    let mountain_haze_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("mountain-haze-pl"),
-        bind_group_layouts: &[Some(&globals_layout), Some(&haze_uniform_layout)],
-        immediate_size: 0,
     });
 
     // ---- Shadow map resources (depth texture + sampler + layouts) ----
@@ -532,6 +494,11 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 offset: 16,
                 shader_location: 2,
                 format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: 32,
+                shader_location: 3,
+                format: wgpu::VertexFormat::Uint32,
             },
         ],
     };
@@ -892,49 +859,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         })
     };
     let sunlit_water_pipeline = vignette_pipeline("sunlit-water-pipeline", &sunlit_water_shader);
-    // Mountain-haze uses a custom pipeline layout so the fragment shader
-    // can bind the haze uniform (group 1) alongside globals (group 0).
-    let mountain_haze_pipeline = {
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("mountain-haze-pipeline"),
-            layout: Some(&mountain_haze_layout),
-            vertex: wgpu::VertexState {
-                module: &mountain_haze_shader,
-                entry_point: Some("vs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &mountain_haze_shader,
-                entry_point: Some("fs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: scene_hdr_format,
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::One,
-                            dst_factor: wgpu::BlendFactor::One,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                        alpha: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::One,
-                            dst_factor: wgpu::BlendFactor::One,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                ..Default::default()
-            },
-            depth_stencil: Some(depth_ui.clone()),
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        })
-    };
     // The cascade shader is heavy per-pixel; it renders into a half-res
     // offscreen target and is additively composited back into the main
     // pass. The offscreen pipeline writes with REPLACE blend since the
@@ -1042,6 +966,45 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 ..Default::default()
             },
             depth_stencil: Some(depth_ui.clone()),
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        })
+    };
+
+    // Half-res scene_color → scene_prev blit. Reuses the cascade-composite
+    // bind group layout (texture + filtering sampler) for parity with the
+    // existing "tiny fullscreen blit" shader infra.
+    let scene_color_downsample_pipeline = {
+        let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("scene-color-downsample-pl"),
+            bind_group_layouts: &[Some(&cascade_composite_layout)],
+            immediate_size: 0,
+        });
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("scene-color-downsample-pipeline"),
+            layout: Some(&pl),
+            vertex: wgpu::VertexState {
+                module: &scene_color_downsample_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &scene_color_downsample_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: scene_hdr_format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             multiview_mask: None,
             cache: None,
@@ -1414,12 +1377,9 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         mipmap_filter: wgpu::MipmapFilterMode::Nearest,
         ..Default::default()
     });
-    let (scene_prev_texture, scene_prev_view) = create_scene_prev(
-        &device,
-        scene_hdr_format,
-        size.width.max(1),
-        size.height.max(1),
-    );
+    let (scene_prev_w, scene_prev_h) = scene_prev_size(size.width.max(1), size.height.max(1));
+    let (scene_prev_texture, scene_prev_view) =
+        create_scene_prev(&device, scene_hdr_format, scene_prev_w, scene_prev_h);
     let (scene_color_texture, scene_color_view) = create_scene_color(
         &device,
         scene_hdr_format,
@@ -1465,6 +1425,22 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             wgpu::BindGroupEntry {
                 binding: 0,
                 resource: wgpu::BindingResource::TextureView(&cascade_offscreen_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(&cascade_composite_sampler),
+            },
+        ],
+    });
+    // Sampled by the half-res `scene_color → scene_prev` blit each frame.
+    // Rebuilt in `resize()` whenever `scene_color_view` is recreated.
+    let scene_color_downsample_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("scene-color-downsample-bg"),
+        layout: &cascade_composite_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&scene_color_view),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
@@ -2141,6 +2117,29 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             wgpu::BindGroupEntry {
                 binding: 1,
                 resource: wgpu::BindingResource::TextureView(&post_bloom_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Sampler(&bloom_sampler),
+            },
+        ],
+    });
+    // Alternative tonemap bind group that samples the linear HDR scene
+    // directly when bloom + fisheye + GI are all inactive. Lets the
+    // scene-composite-pass be skipped on the Steam Deck baseline (where
+    // bloom is disabled in `EffectLayers::BASELINE`), saving one
+    // fullscreen R16G16B16A16 read+write per frame.
+    let tonemap_bind_group_scene = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("tonemap-pass-scene-bg"),
+        layout: &tonemap_bind_group_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: tonemap_params_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&scene_color_view),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
@@ -2879,8 +2878,9 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 gpu_wrap = Some(ShopEnvironmentGpu {
                     uniform_buffer,
                     bind_groups,
+                    archive_sign_decal_texture: None,
                 });
-                log::info!("Shop.glb GPU: {} primitive draw(s)", prims.len());
+                log::info!("shop.glb GPU: {} primitive draw(s)", prims.len());
             }
             (prims, gpu_wrap)
         });
@@ -3067,6 +3067,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 gpu_wrap = Some(ShopEnvironmentGpu {
                     uniform_buffer,
                     bind_groups,
+                    archive_sign_decal_texture: None,
                 });
                 log::info!("hallway.glb GPU: {} primitive draw(s)", prims.len());
             }
@@ -3074,6 +3075,246 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         });
 
     crate::render::hallway_glb::release_hallway_environment_cpu_sources_after_gpu_upload();
+
+    let (
+        archive_env_primitives,
+        archive_environment,
+        archive_sign_left_prim_idx,
+        archive_sign_right_prim_idx,
+    ) = crate::render::archive_glb::with_archive_glb_cpu(|cpu_opt| {
+        let mut prims = Vec::new();
+        let mut gpu_wrap = None;
+        let mut sign_l = None;
+        let mut sign_r = None;
+        let Some(cpu) = cpu_opt else {
+            return (prims, gpu_wrap, sign_l, sign_r);
+        };
+        if !cpu.environment_primitives.is_empty() {
+            for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
+                if let Some(ref name) = env_prim.gltf_node_name {
+                    if name == crate::render::archive_glb::SIGN_DESCRIPTION_LEFT {
+                        sign_l = Some(i);
+                    } else if name == crate::render::archive_glb::SIGN_DESCRIPTION_RIGHT {
+                        sign_r = Some(i);
+                    }
+                }
+                let prim = &env_prim.mesh;
+                let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("archive-env-verts-{i}")),
+                    contents: bytemuck::cast_slice(&prim.vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                let ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("archive-env-idx-{i}")),
+                    contents: bytemuck::cast_slice(&prim.indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
+                let mips = crate::render::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
+                let (_albedo_texture, albedo_view) = match &prim.albedo_rgba {
+                    Some((rgba, aw, ah)) => upload_rgba_texture_with_mips(
+                        &device,
+                        &queue,
+                        &format!("archive-env-albedo-{i}"),
+                        rgba,
+                        *aw,
+                        *ah,
+                        wgpu::TextureFormat::Rgba8UnormSrgb,
+                        mips,
+                    ),
+                    None => white_albedo(&device, &queue),
+                };
+                let normal_view = match &prim.normal_rgba {
+                    Some((rgba, nw, nh)) => {
+                        upload_rgba_texture_with_mips(
+                            &device,
+                            &queue,
+                            &format!("archive-env-normal-{i}"),
+                            rgba,
+                            *nw,
+                            *nh,
+                            wgpu::TextureFormat::Rgba8Unorm,
+                            mips,
+                        )
+                        .1
+                    }
+                    None => tile_default_normal_view.clone(),
+                };
+                let metallic_roughness_view = match &prim.metallic_roughness_rgba {
+                    Some((rgba, w, h)) => {
+                        upload_rgba_texture_with_mips(
+                            &device,
+                            &queue,
+                            &format!("archive-env-mr-{i}"),
+                            rgba,
+                            *w,
+                            *h,
+                            wgpu::TextureFormat::Rgba8Unorm,
+                            mips,
+                        )
+                        .1
+                    }
+                    None => tile_glb_default_mr_view.clone(),
+                };
+                let emissive_view = match &prim.emissive_rgba {
+                    Some((rgba, w, h)) => {
+                        upload_rgba_texture_with_mips(
+                            &device,
+                            &queue,
+                            &format!("archive-env-emissive-{i}"),
+                            rgba,
+                            *w,
+                            *h,
+                            wgpu::TextureFormat::Rgba8UnormSrgb,
+                            mips,
+                        )
+                        .1
+                    }
+                    None => tile_glb_default_emissive_view.clone(),
+                };
+                let pbr_uniform_buffer =
+                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("archive-pbr-{i}")),
+                        contents: bytemuck::bytes_of(&GltfPbrUniform::from_loaded(
+                            prim.metallic_factor,
+                            prim.roughness_factor,
+                            prim.emissive_factor,
+                            prim.alpha_mode,
+                            prim.alpha_cutoff,
+                        )),
+                        usage: wgpu::BufferUsages::UNIFORM,
+                    });
+                let sampler = device.create_sampler(&build_sampler_descriptor(prim.sampler, None));
+                prims.push(TilePrimitiveGpu {
+                    vertex_buffer: vb,
+                    index_buffer: ib,
+                    index_count: prim.indices.len() as u32,
+                    albedo_view,
+                    normal_view,
+                    metallic_roughness_view,
+                    emissive_view,
+                    pbr_uniform_buffer,
+                    sampler,
+                    pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
+                });
+            }
+            let (sign_decal_w, sign_decal_h) = crate::render::decal::decal_dimensions(
+                &crate::render::primitive::DecalLayout::Fit {
+                    target_short_edge: crate::render::decal::PLAQUE_DECAL_HEIGHT,
+                },
+                crate::render::archive_glb::archive_sign_description_decal_extents_for(cpu),
+            );
+            let sign_decal_clear = vec![0u8; (sign_decal_w * sign_decal_h * 4) as usize];
+            let archive_sign_decal_tex = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("archive-sign-decal"),
+                size: wgpu::Extent3d {
+                    width: sign_decal_w,
+                    height: sign_decal_h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &archive_sign_decal_tex,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &sign_decal_clear,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4 * sign_decal_w),
+                    rows_per_image: Some(sign_decal_h),
+                },
+                wgpu::Extent3d {
+                    width: sign_decal_w,
+                    height: sign_decal_h,
+                    depth_or_array_layers: 1,
+                },
+            );
+            let archive_decal_view =
+                archive_sign_decal_tex.create_view(&wgpu::TextureViewDescriptor::default());
+            let identity = Mat4::IDENTITY;
+            let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("archive-env-uniform"),
+                contents: bytemuck::bytes_of(&CameraUniform {
+                    view_proj: identity.to_cols_array(),
+                    model: identity.to_cols_array(),
+                    base_color_factor: [
+                        1.0,
+                        0.0,
+                        0.0,
+                        crate::render::tile_body::TEXTURED_BASE_MAP_BODY_KIND,
+                    ],
+                    cam_pos: [0.0; 3],
+                    tile_seed: 0.0,
+                    decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
+                    hdr_tonemap: [0.0; 4],
+                }),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+            let bind_groups: Vec<wgpu::BindGroup> = prims
+                .iter()
+                .enumerate()
+                .map(|(_bi, p)| {
+                    device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("archive-env-bg"),
+                        layout: &tile_material_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: uniform_buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::TextureView(&p.albedo_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::Sampler(&p.sampler),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: wgpu::BindingResource::TextureView(&archive_decal_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 4,
+                                resource: wgpu::BindingResource::TextureView(&p.normal_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 5,
+                                resource: p.pbr_uniform_buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 6,
+                                resource: wgpu::BindingResource::TextureView(
+                                    &p.metallic_roughness_view,
+                                ),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 7,
+                                resource: wgpu::BindingResource::TextureView(&p.emissive_view),
+                            },
+                        ],
+                    })
+                })
+                .collect();
+            gpu_wrap = Some(ShopEnvironmentGpu {
+                uniform_buffer,
+                bind_groups,
+                archive_sign_decal_texture: Some(archive_sign_decal_tex),
+            });
+            log::info!("archive.glb GPU: {} primitive draw(s)", prims.len());
+        }
+        (prims, gpu_wrap, sign_l, sign_r)
+    });
+
+    crate::render::archive_glb::release_archive_environment_cpu_sources_after_gpu_upload();
 
     let shop_env_collision_meshes = crate::render::shop_glb::with_shop_glb_cpu(|opt| {
         opt.map(|c| c.collision_meshes.clone()).unwrap_or_default()
@@ -3084,13 +3325,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     let relic_rx = Some(spawn_relic_loader());
     let (_lit_mesh_relief_default_tex, lit_mesh_relief_default_view) =
         flat_relief_height(&device, &queue);
-    let pack_textures_map = load_pack_textures(
-        &device,
-        &queue,
-        &text_bind_group_layout,
-        &tile_sampler,
-        &lit_mesh_relief_default_view,
-    );
+    let pack_textures_map = load_pack_textures(&device, &queue, &lit_mesh_relief_default_view);
     // Kick off background image loading (non-blocking).
     let background_load_start = Some(Instant::now());
     let background_rx = Some(spawn_background_loader());
@@ -3118,7 +3353,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     let pack_mesh = LitMeshGpu::new(&device, &build_pack_mesh(), "pack-mesh");
     let ribbon_mesh = LitMeshGpu::new(&device, &build_ribbon_mesh(), "ribbon");
     let talisman_mesh = LitMeshGpu::new(&device, &build_talisman_mesh(), "talisman");
-    let shrine_mesh = LitMeshGpu::new(&device, &build_shrine_mesh(), "shrine");
     let dora_plinth_mesh = LitMeshGpu::new(&device, &build_dora_plinth_mesh(), "dora-plinth");
     let bug_body_mesh = LitMeshGpu::new(&device, &build_bug_body_mesh(), "bug-body");
     let bug_wing_mesh = LitMeshGpu::new(&device, &build_bug_wing_mesh(), "bug-wing");
@@ -3127,7 +3361,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     // the generic `Object3dKind::Primitive` dispatch can reach by
     // `MeshId`. Legacy named fields above still own their own
     // allocations during the migration window.
-    let mut primitive_meshes: HashMap<MeshId, std::sync::Arc<LitMeshGpu>> = HashMap::new();
+    let mut primitive_meshes: rustc_hash::FxHashMap<MeshId, std::sync::Arc<LitMeshGpu>> =
+        rustc_hash::FxHashMap::default();
     {
         let unit_cube_cpu = {
             let mut verts: Vec<crate::render::tile_glb::Vertex3dTex> = Vec::new();
@@ -3272,10 +3507,10 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     // the Metal branch in lit_mesh.wgsl can sample the cash-coin
     // relief. Populated now so `primitive_textures` is ready by
     // the time `dispatch_primitive` first creates an instance.
-    let mut primitive_textures: HashMap<
+    let mut primitive_textures: rustc_hash::FxHashMap<
         crate::render::primitive::MeshId,
         (wgpu::TextureView, wgpu::TextureView),
-    > = HashMap::new();
+    > = rustc_hash::FxHashMap::default();
     let bone_tablet_mesh = LitMeshGpu::new(&device, &build_bone_tablet_mesh(), "bone-tablet");
     let wood_tablet_mesh = LitMeshGpu::new(&device, &build_wood_tablet_mesh(), "wood-tablet");
     let book_mesh = LitMeshGpu::new(&device, &build_book_body_mesh(), "book");
@@ -3359,7 +3594,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             &tile_sampler,
         ));
     }
-    let ribbon_slot_zodiac: Vec<Option<(u8, u8)>> = vec![None; MAX_RIBBON_SLOTS];
+    let ribbon_slot_zodiac: Vec<Option<u8>> = vec![None; MAX_RIBBON_SLOTS];
     // Coin face heightmap (Chinese cash-coin engraving). Bound at slot 1
     // of every shop-pile coin instance; the metal branch in lit_mesh.wgsl
     // samples it as a heightfield to perturb the coin's surface normal so
@@ -3490,17 +3725,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             &tile_sampler,
         ));
     }
-    let mut shrine_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_SHRINE_SLOTS);
-    for _ in 0..MAX_SHRINE_SLOTS {
-        shrine_instances.push(LitMeshInstance::new(
-            &device,
-            &lit_mesh_material_layout,
-            &shadow_caster_layout,
-            &lit_mesh_white_view,
-            &lit_mesh_relief_default_view,
-            &tile_sampler,
-        ));
-    }
     let mut dora_plinth_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_DORA_PLINTH_SLOTS);
     for _ in 0..MAX_DORA_PLINTH_SLOTS {
         dora_plinth_instances.push(LitMeshInstance::new(
@@ -3614,9 +3838,21 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         bytemuck::bytes_of(&TonemapParams {
             exposure: 1.0,
             mode: 0.0,
-            _pad: [0.0; 2],
+            vhs_enabled: 0.0,
+            time: 0.0,
+            vhs_chromatic: 0.0,
+            vhs_scanline: 0.0,
+            vhs_grain: 0.0,
+            vhs_vignette: 0.0,
         }),
     );
+
+    // Per-frame bump-allocated buffer pool used by the highest-frequency
+    // per-frame instance vertex uploads in `runtime/render.rs`. Created
+    // before the struct literal so the `&device` borrow doesn't conflict
+    // with `device` being moved into the `WgpuRenderer.device` field.
+    let frame_buffer_pool =
+        super::super::frame_pool::FrameBufferPool::new(&device, "frame-buffer-pool", 1 << 20);
 
     Ok(WgpuRenderer {
         target,
@@ -3641,9 +3877,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         moonlit_water_pipeline,
         moon_albedo_bind_group,
         sunlit_water_pipeline,
-        mountain_haze_pipeline,
-        haze_uniform_buffer,
-        haze_uniform_bind_group,
         shooting_star_cascade_pipeline,
         cascade_composite_pipeline,
         cascade_composite_layout,
@@ -3651,6 +3884,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         cascade_offscreen_texture,
         cascade_offscreen_view,
         cascade_composite_bind_group,
+        scene_color_downsample_pipeline,
+        scene_color_downsample_bind_group,
         tile_pipeline_opaque_double,
         tile_pipeline_opaque_cull,
         tile_pipeline_blend_double,
@@ -3690,7 +3925,12 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         shop_environment,
         hallway_env_primitives,
         hallway_environment,
-        shop_env_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
+        archive_env_primitives,
+        archive_environment,
+        archive_sign_left_prim_idx,
+        archive_sign_right_prim_idx,
+        archive_sign_decal_upload_key: 0,
+        room_gltf_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
         shop_env_linear_exposure: crate::render::shop_glb::SHOP_ENV_LINEAR_EXPOSURE,
         shop_env_ambient_scale: crate::render::shop_glb::SHOP_ENV_AMBIENT_SCALE,
         shop_lit_mesh_gltf_punctual_scale:
@@ -3702,10 +3942,11 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         tile_set: None,
         hand_tiles: Vec::new(),
         showcase_tiles: Vec::new(),
-        tile_face_overlays: HashMap::new(),
-        prompt_icon_overlays: HashMap::new(),
+        tile_face_overlays: rustc_hash::FxHashMap::default(),
+        prompt_icon_overlays: rustc_hash::FxHashMap::default(),
+        prompt_icon_missing: rustc_hash::FxHashSet::default(),
         debuff_marker_overlay: None,
-        text_label_cache: HashMap::new(),
+        text_label_cache: rustc_hash::FxHashMap::default(),
         text_cache_frame: 0,
         vertex_buffer,
         index_buffer,
@@ -3738,7 +3979,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         pack_slot_texture: vec![None; 4],
         ribbon_mesh,
         talisman_mesh,
-        shrine_mesh,
         dora_plinth_mesh,
         ribbon_instances,
         ribbon_slot_zodiac,
@@ -3754,7 +3994,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         bug_wing_blur_r_instances,
         orb_mesh,
         orb_instances,
-        shrine_instances,
         dora_plinth_instances,
         last_ribbon_models: Vec::new(),
         last_ribbon_slot_count: 0,
@@ -3780,34 +4019,33 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         cascade_token_instances,
         extruded_glyph_instances,
         glyph_cpu_cache: crate::render::glyph_mesh::GlyphMeshCache::new(),
-        extruded_glyph_meshes: HashMap::new(),
+        extruded_glyph_meshes: rustc_hash::FxHashMap::default(),
         primitive_meshes,
-        primitive_instances: HashMap::new(),
+        primitive_instances: rustc_hash::FxHashMap::default(),
         primitive_textures,
-        last_primitive_pick_models: HashMap::new(),
+        last_primitive_pick_models: rustc_hash::FxHashMap::default(),
         debug_axes_instances,
         last_yaku_tablet_models: Vec::new(),
         last_wood_tablet_models: Vec::new(),
         last_bowl_model: None,
         last_mirror_model: None,
         last_debug_pickables: Vec::new(),
-        last_gameplay_fog_wall_horizon_y: None,
-        last_gameplay_fog_wall_center_x: None,
         active_scene_key: None,
         debug_arrange_override: None,
-        committed_arrange_rotations: std::collections::HashMap::new(),
+        committed_arrange_rotations: rustc_hash::FxHashMap::default(),
         last_frame: Instant::now(),
         frame_dt: 0.0,
-        obj3d_hover_state: HashMap::new(),
+        obj3d_hover_state: rustc_hash::FxHashMap::default(),
         creation_time: Instant::now(),
-        relic_textures: HashMap::new(),
+        relic_textures: rustc_hash::FxHashMap::default(),
         relic_rx,
         relic_load_start,
         pack_textures: pack_textures_map,
-        background_textures: HashMap::new(),
+        background_textures: rustc_hash::FxHashMap::default(),
         background_rx,
         background_load_start,
-        prev_tile_world: HashMap::new(),
+        prev_tile_world: rustc_hash::FxHashMap::default(),
+        tile_uid_scratch: rustc_hash::FxHashSet::default(),
         prev_frame_shadows_enabled: false,
         showcase_decal_atlas: None,
         showcase_decal_atlas_tileset: None,
@@ -3866,11 +4104,18 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         tonemap_bind_group_layout,
         tonemap_params_buffer,
         tonemap_bind_group,
+        tonemap_bind_group_scene,
+        frame_buffer_pool,
         tonemap_shader_module,
         tonemap_pipeline_layout,
         swapchain_sdr_format,
         swapchain_hdr_available,
         tonemap_exposure: 1.0,
+        tonemap_vhs_enabled: false,
+        tonemap_vhs_chromatic: 0.001,
+        tonemap_vhs_scanline: 0.040,
+        tonemap_vhs_grain: 0.020,
+        tonemap_vhs_vignette: 0.100,
         lit_mesh_pipeline,
         lit_mesh_blended_pipeline,
         lit_mesh_white_view,
@@ -3882,9 +4127,9 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         table_mesh,
         relic_box_mesh,
         relic_box_tris,
-        relic_tri_lists: HashMap::new(),
+        relic_tri_lists: rustc_hash::FxHashMap::default(),
         pack_mesh,
-        relic_meshes: HashMap::new(),
+        relic_meshes: rustc_hash::FxHashMap::default(),
         candle_instances,
         table_instance,
         felt_shader_lod: 2.0,

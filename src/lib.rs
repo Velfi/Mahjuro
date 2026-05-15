@@ -57,12 +57,12 @@ use debug_menu::DebugAction;
 use debug_menu::DebugMenuBar;
 use debug_overlays::{
     CameraDebugOverlay, DebugVisResult, DebugVisibilityOverlay, SfxTestOverlay, TuningOverlay,
-    TuningResult, VolumetricDebugOverlay, VolumetricDebugResult,
+    TuningResult,
 };
 use game::cascade::CascadeTuning;
 use game::event_bus::{EventBus, GameEvent};
 use game::run::RunState;
-use game::volumetric_tuning::VolumetricTuning;
+use game::tonemap_tuning::TonemapTuningSet;
 use render::animation::AnimationController;
 use render::draw_cmd::{CameraParams, UiFrame, apply_modal_relic_staging};
 use render::wgpu_renderer::{DebugArrangeOverride, GpuInstance, TextLabel, WgpuRenderer};
@@ -150,7 +150,11 @@ struct App {
     effect_layers: crate::effect_layers::EffectLayers,
     debug: DebugState,
     cascade_tuning: CascadeTuning,
-    volumetric_tuning: VolumetricTuning,
+    /// Per-scene tonemap + VHS tuning, resolved each frame from
+    /// `active_scene_key`. Loaded from `tuning_overrides.json` on startup;
+    /// the debug overlay edits this in place and writes back via
+    /// [`persistence`].
+    tonemap_tuning: TonemapTuningSet,
     deferred_round_end: Option<GameEvent>,
     modifiers: Mod,
     /// Steamworks integration. Either `Connected` (initialized successfully
@@ -161,6 +165,42 @@ struct App {
     steam: steam::SteamClient,
     /// Mirrors `AppSettings::archive_last_seen_run_len` for menu hints without disk reads.
     archive_last_seen_run_len: [u32; 3],
+    /// Optional CPU-side frame timer; sibling of the renderer's `GpuProfiler`.
+    /// Started on demand from the Debug menu via `Profile (CPU + GPU)`.
+    cpu_profiler: render::cpu_profiler::CpuProfiler,
+    /// Background saver for `progress`. Per-frame event handlers set
+    /// `profile_dirty` instead of doing a synchronous write; the
+    /// frame-end flush hands a snapshot to the saver thread. Quit
+    /// paths still call `save_profile` directly so a forced exit
+    /// can't drop pending state.
+    profile_saver: persistence::ProfileSaver,
+    /// Set by `mark_profile_dirty` whenever an event mutates `progress`.
+    /// Cleared after the frame-end flush enqueues a snapshot.
+    profile_dirty: bool,
+    /// Last `frame.window_title` we pushed to the SDL window. Cached so
+    /// we only call `set_title` when it actually changes — Wayland/X11
+    /// charges a syscall for each call.
+    last_window_title: String,
+    /// Frame-scoped scene-pick cache. Computed once at the top of
+    /// `frame_tick` and reused by both `frame_tick` (for `update`) and
+    /// `draw` (for `DrawCtx::new`). Without this, every gameplay frame
+    /// pays for ~4 separate ray-vs-AABB walks against the full per-class
+    /// matrix lists. Per-event mouse-motion picks in
+    /// [`crate::main::event_loop`] are intentionally not cached — they
+    /// run with a freshly-moved cursor and only test hand tiles.
+    frame_picks: FramePicks,
+}
+
+/// Cached output of the four scene picks that `frame_tick` consumes.
+/// Each field is `None` when the renderer is missing or the cursor is
+/// outside the relevant pickable surface this frame. Recomputed every
+/// frame_tick from the latest cursor position.
+#[derive(Clone, Copy, Default, Debug)]
+pub(crate) struct FramePicks {
+    pub hand: Option<usize>,
+    pub shop: Option<render::wgpu_renderer::ShopHit>,
+    pub gameplay: Option<render::wgpu_renderer::GameplayPick>,
+    pub collection: Option<u32>,
 }
 
 impl App {
@@ -303,19 +343,54 @@ impl App {
                 shadows_enabled: settings.shadows_enabled,
                 ssr_enabled: settings.ssr_enabled,
                 hdr_enabled: settings.hdr_enabled,
+                vhs_enabled: settings.vhs_enabled,
             },
             // Default: cheap baseline; see `effect_layers.rs`. Use `FULL` or flip
             // flags to restore shadows, SSR, particles, transition FX, HDR, etc.
             effect_layers: crate::effect_layers::EffectLayers::BASELINE,
             debug: DebugState::new(),
             cascade_tuning: CascadeTuning::default(),
-            volumetric_tuning: persistence::load_tuning_override::<VolumetricTuning>(
-                "VolumetricTuning",
-            ),
+            tonemap_tuning: TonemapTuningSet::load(),
             modifiers: Mod::NOMOD,
             steam,
             archive_last_seen_run_len: settings.archive_last_seen_run_len,
+            cpu_profiler: render::cpu_profiler::CpuProfiler::new(),
+            profile_saver: persistence::ProfileSaver::spawn(),
+            profile_dirty: false,
+            last_window_title: String::new(),
+            frame_picks: FramePicks::default(),
         }
+    }
+
+    /// Flag `progress` for a background save at frame end. Cheap — the
+    /// actual JSON serialize + write happens off-thread via
+    /// [`persistence::ProfileSaver`]. The cache is updated when the
+    /// flush enqueues a snapshot, which is fine because nothing
+    /// `load_profile`s mid-frame between event handlers.
+    pub(crate) fn mark_profile_dirty(&mut self) {
+        self.profile_dirty = true;
+    }
+
+    /// Frame-end flush: hand a snapshot of `progress` to the saver
+    /// thread iff something marked it dirty. Resets the flag.
+    pub(crate) fn flush_dirty_profile(&mut self) {
+        if self.profile_dirty {
+            self.profile_saver
+                .enqueue(self.active_profile, &self.progress);
+            self.profile_dirty = false;
+        }
+    }
+
+    /// Quit / window-close hand-off: synchronously persist `progress`
+    /// after stopping the background saver. The saver is shut down
+    /// first so any pending older snapshot in its channel can't land
+    /// on disk after the synchronous write.
+    pub(crate) fn save_profile_sync_for_exit(&mut self) {
+        self.profile_saver.shutdown();
+        if let Err(e) = persistence::save_profile(self.active_profile, &self.progress) {
+            log::warn!("save_profile (exit) failed: {e}");
+        }
+        self.profile_dirty = false;
     }
 
     fn toggle_fullscreen(&mut self, shell: &mut sdl_shell::SdlShell) -> anyhow::Result<()> {

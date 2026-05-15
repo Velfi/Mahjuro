@@ -27,8 +27,12 @@ pub enum TextAlign {
 /// `font_px = Some(px)` to pin the font size — this is what `push_text_block`
 /// uses to keep every wrapped line of a paragraph at a consistent size.
 ///
-/// `text` may contain `\n` to indicate explicit line breaks; the rasteriser
+/// `text` may contain `\n` for explicit line breaks; the rasteriser
 /// stacks lines vertically and applies the chosen alignment to each line.
+///
+/// When `bold`, `italic`, or `underline` is set (and `flavor_spans` is `None`),
+/// the renderer uses the multi-face CPU raster path. [`text_effect`](crate::render::text_effect::TextEffectId)
+/// is applied in the fragment shader and does not change the raster cache key.
 pub struct TextLabel {
     /// Position in screen pixels: [x, y, w, h].
     pub rect: [f32; 4],
@@ -53,6 +57,12 @@ pub struct TextLabel {
     /// regular/italic and faux-bold; `text` is not drawn (cache uses
     /// [`crate::core::relic::flavor_spans_cache_key`]).
     pub flavor_spans: Option<&'static [crate::core::relic::RelicFlavorSpan]>,
+    /// Faux-bold / italic face when `flavor_spans` is `None`.
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    /// Fragment shader preset (rainbow, pulse, …). Ignored for image quads.
+    pub text_effect: crate::render::text_effect::TextEffectId,
 }
 
 impl Default for TextLabel {
@@ -66,6 +76,10 @@ impl Default for TextLabel {
             no_glossary: false,
             scroll_offset: 0.0,
             flavor_spans: None,
+            bold: false,
+            italic: false,
+            underline: false,
+            text_effect: crate::render::text_effect::TextEffectId::Flat,
         }
     }
 }
@@ -81,6 +95,8 @@ pub(crate) struct TextLabelShapeKey {
     pub emoji_path: bool,
     /// Relic flavor span raster path (italic + faux-bold).
     pub flavor_spans: bool,
+    /// Bold / italic / underline raster path (non-flavor).
+    pub inline_face_bits: u8,
     /// Font size in px, quantized to int. `None` means auto-size from rect.
     pub font_px: Option<u32>,
     /// Rasterized texture width in px (rect.w clamped to [1, 16384]).
@@ -137,11 +153,13 @@ pub(crate) struct ShowcaseTileGpu {
     pub tile_id: (Suit, u8, Option<crate::core::tile::TileEnhancement>, bool),
 }
 
-/// GPU uniforms + bind groups for the imported [`Shop.glb`](../../assets/Shop.glb) environment mesh.
+/// GPU uniforms + bind groups for the imported [`Shop.glb`](../../assets/3d/Shop.glb) environment mesh.
 /// Uses the same tile textured pipeline as hand tiles; vertices are already in world space (`model = I`).
 pub(crate) struct ShopEnvironmentGpu {
     pub uniform_buffer: wgpu::Buffer,
     pub bind_groups: Vec<wgpu::BindGroup>,
+    /// Archive room only: CPU-updated decal atlas at `@group(0) @binding(3)`.
+    pub archive_sign_decal_texture: Option<wgpu::Texture>,
 }
 
 pub(crate) struct TileFaceOverlayGpu {

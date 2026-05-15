@@ -114,9 +114,9 @@ fn setup_hero_state(run: &mut RunState) {
         Tile::new(Suit::Bamboos, 5, 106),
         Tile::new(Suit::Bamboos, 6, 107),
         Tile::new(Suit::Bamboos, 7, 108),
-        Tile::new(Suit::Circles, 1, 109),
-        Tile::new(Suit::Circles, 2, 110),
-        Tile::new(Suit::Circles, 3, 111),
+        Tile::new(Suit::Dots, 1, 109),
+        Tile::new(Suit::Dots, 2, 110),
+        Tile::new(Suit::Dots, 3, 111),
         Tile::new(Suit::Wind, 1, 112), // East
         Tile::new(Suit::Wind, 1, 113),
     ];
@@ -153,7 +153,7 @@ fn setup_shop_state(run: &mut RunState) {
 /// filled only up to the mode cap (standard = 2).
 fn setup_gameplay_screenshot_state(run: &mut RunState) {
     use crate::core::consumable::Consumable;
-    use crate::core::hand::{DetectedSet, SetKind};
+    use crate::core::hand::{DetectedMeld, MeldKind};
     use crate::core::relic::RelicId;
     use crate::core::talisman::TalismanKind;
     use crate::core::tile::{Suit, Tile};
@@ -169,9 +169,9 @@ fn setup_gameplay_screenshot_state(run: &mut RunState) {
         Tile::new(Suit::Characters, 2, 3),
         Tile::new(Suit::Characters, 3, 4),
         Tile::new(Suit::Characters, 4, 5),
-        Tile::new(Suit::Circles, 2, 6),
-        Tile::new(Suit::Circles, 3, 7),
-        Tile::new(Suit::Circles, 4, 8),
+        Tile::new(Suit::Dots, 2, 6),
+        Tile::new(Suit::Dots, 3, 7),
+        Tile::new(Suit::Dots, 4, 8),
         Tile::new(Suit::Bamboos, 5, 9),
         Tile::new(Suit::Bamboos, 6, 10),
         Tile::new(Suit::Bamboos, 7, 11),
@@ -180,24 +180,24 @@ fn setup_gameplay_screenshot_state(run: &mut RunState) {
         Tile::new(Suit::Wind, 1, 14),
     ];
     *run.structure_sets_mut() = vec![
-        DetectedSet {
-            kind: SetKind::Pair,
+        DetectedMeld {
+            kind: MeldKind::Pair,
             tile_ids: vec![1, 2],
         },
-        DetectedSet {
-            kind: SetKind::Sequence,
+        DetectedMeld {
+            kind: MeldKind::Sequence,
             tile_ids: vec![3, 4, 5],
         },
-        DetectedSet {
-            kind: SetKind::Sequence,
+        DetectedMeld {
+            kind: MeldKind::Sequence,
             tile_ids: vec![6, 7, 8],
         },
-        DetectedSet {
-            kind: SetKind::Sequence,
+        DetectedMeld {
+            kind: MeldKind::Sequence,
             tile_ids: vec![9, 10, 11],
         },
-        DetectedSet {
-            kind: SetKind::Triplet,
+        DetectedMeld {
+            kind: MeldKind::Triplet,
             tile_ids: vec![12, 13, 14],
         },
     ];
@@ -225,7 +225,7 @@ fn force_boss_blind(run: &mut RunState, kind: crate::core::boss::BossKind) {
     run.ante = kind.def().min_ante.max(run.ante);
     run.boss.upcoming = Some(kind);
     run.resolve_upcoming_boss();
-    run.apply_blind(crate::core::rules::BlindKind::Boss);
+    run.apply_blind(crate::core::rules::BlindKind::Boss, None);
 }
 
 pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> {
@@ -546,7 +546,7 @@ struct HeadlessApp {
     active_profile: usize,
     gfx: RenderSettings,
     effect_layers: crate::effect_layers::EffectLayers,
-    volumetric_tuning: VolumetricTuning,
+    tonemap_tuning: crate::game::tonemap_tuning::TonemapTuningSet,
     width: u32,
     height: u32,
     game_in_progress: bool,
@@ -616,11 +616,14 @@ impl HeadlessApp {
                 shadows_enabled: settings.shadows_enabled,
                 ssr_enabled: settings.ssr_enabled,
                 hdr_enabled: false,
+                // Headless screenshots stay on the clean tonemap path so
+                // captures don't pick up VHS overlay artifacts. Per-scene
+                // amounts can still be edited at runtime via the debug
+                // overlay; the headless path simply ignores them.
+                vhs_enabled: false,
             },
             effect_layers: crate::effect_layers::EffectLayers::FULL,
-            volumetric_tuning: persistence::load_tuning_override::<VolumetricTuning>(
-                "VolumetricTuning",
-            ),
+            tonemap_tuning: crate::game::tonemap_tuning::TonemapTuningSet::load(),
             width,
             height,
             game_in_progress,
@@ -649,12 +652,7 @@ impl HeadlessApp {
             .find(|d| d.name == "Kong Collector")
             .or_else(|| defs.first())
             .expect("at least one relic must be defined");
-        let accent = match chosen.rarity {
-            crate::core::relic::Rarity::Common => render::theme::color::rarity(0),
-            crate::core::relic::Rarity::Uncommon => render::theme::color::rarity(1),
-            crate::core::relic::Rarity::Rare => render::theme::color::rarity(2),
-            crate::core::relic::Rarity::Legendary => render::theme::color::rarity(3),
-        };
+        let accent = render::theme::color::rarity(chosen.rarity.tier());
         let page = UnlockPage {
             category: "New Relic".into(),
             name: chosen.name.into(),
@@ -807,7 +805,7 @@ impl HeadlessApp {
                 item_inspect_zoom_triggers: 0.0,
                 rumble_lab_ops: &mut rumble_lab_ops,
                 suspended_shop: None,
-                shop_env_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
+                room_gltf_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
                 bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
             })
         } else {
@@ -864,7 +862,7 @@ impl HeadlessApp {
                     item_inspect_zoom_triggers: 0.0,
                     rumble_lab_ops: &mut rumble_lab_ops,
                     suspended_shop,
-                    shop_env_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
+                    room_gltf_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
                     bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
                 })
         };
@@ -909,7 +907,6 @@ impl HeadlessApp {
                 hide_blind_plaque: false,
             },
             false,
-            None,
             crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
             self.shop_env_lighting,
             self.effect_layers,
@@ -968,6 +965,8 @@ impl HeadlessApp {
             _ => None,
         };
         self.renderer.set_active_scene(active_scene_key);
+        let tonemap = self.tonemap_tuning.resolve(active_scene_key);
+        self.renderer.set_tonemap_tuning(&tonemap);
         let rotations_scene = match self.overlay_stack.last() {
             Some(Scene::Showcase(s)) if s.wants_orbit_input() => &self.scene,
             _ => scene_for_renderer,
@@ -975,35 +974,13 @@ impl HeadlessApp {
         self.renderer
             .set_committed_arrange_rotations(collect_committed_rotations(rotations_scene));
         self.renderer
-            .set_shop_env_height_scale(crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE);
+            .set_room_gltf_height_scale(crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE);
         let sl = self.shop_env_lighting;
         self.renderer.set_shop_env_render_tune(
             sl.linear_exposure,
             sl.ambient_scale,
             sl.lit_mesh_gltf_punctual_scale,
             sl.gltf_emissive_scale,
-        );
-        let haze_horizon_y = frame
-            .gameplay_fog_wall_horizon_y
-            .unwrap_or(self.volumetric_tuning.haze_horizon_y);
-        let wall_center_x = frame
-            .gameplay_fog_wall_center_x
-            .unwrap_or(0.5)
-            .clamp(0.0, 1.0);
-        let wall_half_width_uv = if frame.gameplay_fog_wall_horizon_y.is_some() {
-            crate::ui::scene_layout::GAMEPLAY_FOG_WALL_HALF_WIDTH_UV
-        } else {
-            0.0
-        };
-        self.renderer.set_haze_tuning(
-            self.volumetric_tuning.haze_density,
-            self.volumetric_tuning.haze_color_r,
-            self.volumetric_tuning.haze_color_g,
-            self.volumetric_tuning.haze_color_b,
-            haze_horizon_y,
-            self.volumetric_tuning.haze_drift_speed,
-            wall_center_x,
-            wall_half_width_uv,
         );
 
         let active_material = frame

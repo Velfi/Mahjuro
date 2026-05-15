@@ -415,7 +415,7 @@ pub(super) fn process_focus_and_actions(
                                     src.0,
                                     src.1,
                                     24,
-                                    [0.95, 0.78, 0.25, 1.0],
+                                    crate::render::theme::color::RELIC_GOLD,
                                     0.9,
                                 );
                                 ctx.bus
@@ -794,7 +794,7 @@ pub(super) fn process_focus_and_actions(
                     && scene.pending_refill.is_none()
                     && let Some(snap) = scene.discard_undo.take()
                 {
-                    ctx.run.apply_discard_undo(snap);
+                    ctx.run.apply_discard_undo(snap, Some(ctx.bus));
                     ctx.bus.push(crate::game::event_bus::GameEvent::UiSound(
                         crate::audio::SfxId::TilePlace,
                     ));
@@ -924,13 +924,7 @@ pub(super) fn build_relic_tray_and_wind(
                 .find(|d| d.id == rid)
                 .map(|d| d.rarity)
                 .unwrap_or(crate::core::relic::Rarity::Common);
-            let tier: u8 = match rarity {
-                crate::core::relic::Rarity::Common => 0,
-                crate::core::relic::Rarity::Uncommon => 1,
-                crate::core::relic::Rarity::Rare => 2,
-                crate::core::relic::Rarity::Legendary => 3,
-            };
-            let color = crate::render::theme::color::rarity(tier);
+            let color = crate::render::theme::color::rarity(rarity.tier());
 
             // Activation glow: fast-attack / smooth-decay envelope.
             let (glow, wiggle_deg) = if let Some(start) = scene.relic_glow_starts.get(&rid) {
@@ -1323,17 +1317,7 @@ pub(super) fn build_consumable_dish(
                 // pick up the talisman's enhancement family color.
                 let pendant_color = match item {
                     crate::core::consumable::Consumable::Zodiac(_) => [0.45, 0.78, 0.55, 1.0],
-                    crate::core::consumable::Consumable::Talisman(tk) => match tk {
-                        crate::core::talisman::TalismanKind::Pearl => [0.94, 0.95, 0.98, 1.0],
-                        crate::core::talisman::TalismanKind::Gilded => [0.96, 0.78, 0.30, 1.0],
-                        crate::core::talisman::TalismanKind::Polychrome => [0.82, 0.55, 0.95, 1.0],
-                        crate::core::talisman::TalismanKind::Bamboo => [0.06, 0.55, 0.28, 1.0], // emerald
-                        crate::core::talisman::TalismanKind::Dots => [0.08, 0.22, 0.78, 1.0], // sapphire
-                        crate::core::talisman::TalismanKind::Characters => [0.82, 0.08, 0.18, 1.0], // ruby
-                        crate::core::talisman::TalismanKind::Honors => [0.78, 0.64, 0.28, 1.0],
-                        crate::core::talisman::TalismanKind::Wildflower => [0.92, 0.48, 0.62, 1.0],
-                        crate::core::talisman::TalismanKind::Conformity => [0.62, 0.60, 0.68, 1.0],
-                    },
+                    crate::core::consumable::Consumable::Talisman(tk) => tk.accent_color(),
                 };
                 // Rest the pendant on the dish's rim. The dish is
                 // centered at `mm(td.lift_mm)` with full rim extent
@@ -1344,22 +1328,27 @@ pub(super) fn build_consumable_dish(
                 let pendant_y = layout.mm(td.lift_mm + 5.0) + 2.0;
                 match item {
                     crate::core::consumable::Consumable::Zodiac(z) => {
-                        // Ribbon thickness = width × 0.15 (set by the
-                        // renderer); bump width to mm(12) so the silk
-                        // reads as ~1.8mm thick at table scale.
-                        let ribbon_w = layout.mm(12.0);
-                        ribbon_dish_placements.push(Object3d {
-                            pos: [zx + slot_w * 0.5, zy, pendant_y],
-                            extents: [ribbon_w, slot_h * 0.85, ribbon_w * 0.15],
-                            rotation: crate::render::table_transform::euler_xyz_rad_from_deg(
-                                -90.0, 0.0, 0.0,
+                        // Length is the natural dimension here — the
+                        // ribbon hangs to fill most of the slot height —
+                        // and width / depth come from the canonical 3:1
+                        // aspect via the helper.
+                        ribbon_dish_placements.push(
+                            crate::render::ribbon_mesh::zodiac_ribbon_object3d(
+                                crate::render::ribbon_mesh::ZodiacRibbonSpec {
+                                    pos: [zx + slot_w * 0.5, zy, pendant_y],
+                                    length: slot_h * 0.85,
+                                    rotation:
+                                        crate::render::table_transform::euler_xyz_rad_from_deg(
+                                            -90.0, 0.0, 0.0,
+                                        ),
+                                    color: [1.0, 1.0, 1.0, 1.0],
+                                    kind: Some(z),
+                                    hover_target: 0.0,
+                                    anim_id: 0,
+                                    arrange_name: None,
+                                },
                             ),
-                            color: [1.0, 1.0, 1.0, 1.0],
-                            kind: Object3dKind::ZodiacRibbon { kind: Some(z) },
-                            hover_target: 0.0,
-                            anim_id: 0,
-                            arrange_name: None,
-                        });
+                        );
                     }
                     crate::core::consumable::Consumable::Talisman(tk) => {
                         let talisman_half_height = slot_w * 0.55 * 0.5;
@@ -1763,7 +1752,7 @@ pub(super) fn build_action_row_and_journal(
 /// Outputs of the yaku panel + structure showcase + yaku tablet builder.
 pub(super) struct YakuPanelOutputs {
     pub(super) yaku_preview_effective_tiles: Vec<crate::core::tile::Tile>,
-    pub(super) yaku_preview_sets: Vec<crate::core::hand::DetectedSet>,
+    pub(super) yaku_preview_sets: Vec<crate::core::hand::DetectedMeld>,
     pub(super) yaku_tablet_placements: Vec<crate::render::draw_cmd::Object3d>,
     pub(super) structure_showcase: Vec<crate::render::draw_cmd::ShowcaseTilePlacement>,
     pub(super) structure_pile_tokens: Vec<crate::render::draw_cmd::Object3d>,
@@ -1822,7 +1811,7 @@ pub(super) fn build_yaku_panel_and_tablets(
     };
     let mut yaku_preview_original_tiles: Vec<crate::core::tile::Tile> = Vec::new();
     let mut yaku_preview_effective_tiles: Vec<crate::core::tile::Tile> = Vec::new();
-    let mut yaku_preview_sets: Vec<crate::core::hand::DetectedSet> = Vec::new();
+    let mut yaku_preview_sets: Vec<crate::core::hand::DetectedMeld> = Vec::new();
 
     if selected_tiles_for_yaku.is_empty() {
         yaku_preview_original_tiles =

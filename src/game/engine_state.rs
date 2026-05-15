@@ -1,5 +1,5 @@
 use crate::core::consumable::ConsumableInventory;
-use crate::core::hand::DetectedSet;
+use crate::core::hand::DetectedMeld;
 use crate::core::tile::{Tile, cmp_sort_order};
 use crate::core::yaku::YakuKind;
 use crate::game::run::RunState;
@@ -19,7 +19,7 @@ use crate::ui::input::MarqueeSelect;
 pub struct GameplayCoreState {
     pub hand: Vec<Tile>,
     pub selected: Vec<bool>,
-    pub structure_sets: Vec<DetectedSet>,
+    pub structure_sets: Vec<DetectedMeld>,
     pub structure_tiles: Vec<Tile>,
     pub round_score: u64,
     pub target_score: u32,
@@ -186,7 +186,7 @@ impl GameplayCoreState {
 
     /// Push validated sets onto the structure bank, extend structure tiles,
     /// and decrement plays.
-    pub fn commit_sets_to_structure(&mut self, sets: &[DetectedSet], scoring_tiles: &[Tile]) {
+    pub fn commit_sets_to_structure(&mut self, sets: &[DetectedMeld], scoring_tiles: &[Tile]) {
         for set in sets {
             self.structure_sets.push(set.clone());
         }
@@ -241,7 +241,7 @@ mod tests {
     fn core_state_round_trips_through_run() {
         let mut run = RunState::new_demo();
         *run.hand_mut() = vec![
-            Tile::new(Suit::Circles, 9, 1),
+            Tile::new(Suit::Dots, 9, 1),
             Tile::new(Suit::Characters, 2, 2),
             Tile::new(Suit::Bamboos, 4, 3),
         ];

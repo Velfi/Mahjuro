@@ -89,8 +89,7 @@ impl AfterCelebrationDimmer {
 fn push_dimmer_quad(frame: &mut UiFrame, w: f32, h: f32) {
     frame.quad(GpuInstance {
         rect: [0.0, 0.0, w, h],
-        color: DIMMER_RGBA,
-    });
+        color: DIMMER_RGBA, user: 0});
 }
 
 #[inline]
@@ -100,8 +99,7 @@ fn push_dimmer_quad_scaled(frame: &mut UiFrame, w: f32, h: f32, dimmer_alpha_mul
     c[3] *= m;
     frame.quad(GpuInstance {
         rect: [0.0, 0.0, w, h],
-        color: c,
-    });
+        color: c, user: 0});
 }
 
 #[inline]

@@ -175,7 +175,8 @@ struct SsrGlobals {
     // x = felt procedural LOD (0..2); y = physical HDR (glTF punctual + ACES); z = linear exposure;
     // w = ambient hemispheric scale (see `upload_camera_uniforms`).
     felt: vec4<f32>,
-    // x = 1/shop_env_world_scale for shop glTF punctual (document-space falloff); 0 = world units.
+    // x = 1/shop_env_world_scale for embedded glTF punctual (document-space falloff); 0 = world units.
+    // y = shop vitrine material tuning (1 = shop + embedded punctual); attenuation uses x only.
     shop_punctual: vec4<f32>,
 };
 @group(3) @binding(1) var<uniform> ssr_globals: SsrGlobals;
@@ -792,6 +793,8 @@ fn fs_main(
     let is_emissive  = (kind > 19.5 && kind < 20.5);
     let felt_lod = clamp(ssr_globals.felt.x, 0.0, 2.0);
     let phys_hdr = clamp(ssr_globals.felt.y, 0.0, 1.0);
+    // Shop storeroom-only albedo / spec / ambient tweaks (see `shop_punctual.y` upload).
+    let shop_vitrine_tuning = phys_hdr > 0.5 && ssr_globals.shop_punctual.y > 0.5;
 
     // Brass is a conductor too; group with metal for the per-light
     // Fresnel-spec branch and for the rim halo. Skips the coin-face
@@ -936,8 +939,7 @@ fn fs_main(
         // Shop GLB vitrine: caps used `tex_rgb` alone — under punctual + key shadow,
         // dark tex reads as a black slab while foil/talisman spec stays hot. Tint caps
         // by `base_color` like the sides so material + rarity survive.
-        let shop_vitrine_albedo = phys_hdr > 0.5 && ssr_globals.shop_punctual.x > 1e-8;
-        if (shop_vitrine_albedo) {
+        if (shop_vitrine_tuning) {
             let tinted = mesh.base_color.rgb * tex_rgb;
             albedo = mix(mesh.base_color.rgb, tinted, cap_mask);
         } else {
@@ -2225,7 +2227,7 @@ fn fs_main(
     if (decal_metallic > 0.001) {
         diffuse_scale = mix(diffuse_scale, 0.12, decal_metallic);
     }
-    let shop_vitrine_d = phys_hdr > 0.5 && ssr_globals.shop_punctual.x > 1e-8;
+    let shop_vitrine_d = shop_vitrine_tuning;
     if (shop_vitrine_d && is_foil) {
         diffuse_scale = diffuse_scale * 0.58;
     }
@@ -2247,12 +2249,12 @@ fn fs_main(
     // Shop vitrine enamel: diffuse is already balanced vs foil via shadow floor + albedo tint;
     // skip extra `lit` knee so relics don't fall to black next to spec-heavy props.
     // Conductors: soften only extreme hot spec (metal props), not enough to kill readable highlights.
-    if (phys_hdr > 0.5 && ssr_globals.shop_punctual.x > 1e-8 && is_conductor) {
+    if (shop_vitrine_tuning && is_conductor) {
         spec_acc = spec_acc / (vec3<f32>(1.0) + spec_acc * 0.07);
     }
     // Vitrine: foil packs + carved talismans keep extra spec/sheen lobes; pull them back so relic
     // enamel (diffuse-led) isn't the only thing that looks under-lit.
-    let shop_vitrine = phys_hdr > 0.5 && ssr_globals.shop_punctual.x > 1e-8;
+    let shop_vitrine = shop_vitrine_tuning;
     if (shop_vitrine && is_foil) {
         spec_acc = spec_acc * 0.22;
         sheen_acc = sheen_acc * 0.22;
@@ -2346,7 +2348,7 @@ fn fs_main(
         // on shadowed edges, which the per-light spec can't deliver.
         let rim_gain = mix(albedo, albedo * 0.6 + holo * 0.5, rim);
         albedo = rim_gain;
-        if (phys_hdr > 0.5 && ssr_globals.shop_punctual.x > 1e-8) {
+        if (shop_vitrine_tuning) {
             albedo = albedo * 0.84;
         }
     }
@@ -2392,7 +2394,7 @@ fn fs_main(
     // Directional shadow map (mesh casters): PCF visibility in key-light
     // space. Analytic candle AABB occlusion (`cand_vis` above) still gates
     // each wick; this adds contact shadows from tall geometry onto the felt.
-    let shop_vitrine_shadow = phys_hdr > 0.5 && ssr_globals.shop_punctual.x > 1e-8;
+    let shop_vitrine_shadow = shop_vitrine_tuning;
     var lit_vitrine = lit;
     if (shop_vitrine_shadow && is_foil) {
         lit_vitrine = lit_vitrine * 0.40;
@@ -2532,7 +2534,7 @@ fn fs_main(
     var out_rgb: vec3<f32>;
     if (phys_hdr > 0.5) {
         var amb = ssr_globals.felt.w * 0.08;
-        if (ssr_globals.shop_punctual.x > 1e-8 && is_enamel) {
+        if (ssr_globals.shop_punctual.y > 0.5 && is_enamel) {
             amb = ssr_globals.felt.w * 0.20;
         }
         var hdr = rgb + albedo * vec3<f32>(amb) * diffuse_scale;

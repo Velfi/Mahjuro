@@ -60,16 +60,23 @@ pub enum DebugAction {
     OpenTuning,
     OpenSfxTest,
     OpenCameraDebug,
-    /// Live-edit `Shop.glb` room scale (`window_h *` multiplier).
+    /// Live-edit `shop.glb` room scale (`window_h *` multiplier).
     OpenShopEnvDebug,
-    /// Open the volumetric tuning overlay — global dust strength (and any
-    /// future volumetric knobs).
-    OpenVolumetricDebug,
+    /// Open the per-scene tonemap + VHS tuning overlay. Edits apply live
+    /// and Save persists for the active scene only (`gameplay`, `shop`,
+    /// `pick_blind`, …) — like arrange mode but for the post-process pass.
+    OpenTonemapDebug,
     BlowWindGust,
-    /// Capture GPU pass timings averaged over the next 100 rendered frames
-    /// and log the result. Only meaningful on backends that support
-    /// `wgpu::Features::TIMESTAMP_QUERY`.
+    /// Capture GPU pass timings (shadow, main, …) averaged over the next 100
+    /// rendered frames and log the result. Only meaningful on backends that
+    /// support `wgpu::Features::TIMESTAMP_QUERY`. The synchronous readback
+    /// inflates the CPU `render` stage if the CPU profile runs at the same
+    /// time, so this is split from [`DebugAction::ProfileCpu`].
     ProfileGpu,
+    /// Capture CPU stage timings (`update`, `draw_frame`, `render`) averaged
+    /// over the next 100 rendered frames and log the result. Always
+    /// available; safe to run while the GPU profile is *not* active.
+    ProfileCpu,
     /// Arm a one-shot picker: the next mouse click in the game world is
     /// hit-tested against every known scene object and the matched object's
     /// name is logged. Activating this while already armed disarms it.
@@ -184,9 +191,9 @@ impl DebugMenuBar {
         mappings.push((shop_env_item.id().clone(), DebugAction::OpenShopEnvDebug));
         let _ = tuning_sub.append(&shop_env_item);
 
-        let vol_item = MenuItem::new("Volumetric...", true, None);
-        mappings.push((vol_item.id().clone(), DebugAction::OpenVolumetricDebug));
-        let _ = tuning_sub.append(&vol_item);
+        let tonemap_item = MenuItem::new("Tonemap (per scene)...", true, None);
+        mappings.push((tonemap_item.id().clone(), DebugAction::OpenTonemapDebug));
+        let _ = tuning_sub.append(&tonemap_item);
 
         let sfx_item = MenuItem::new("Sound Effects Test...", true, None);
         mappings.push((sfx_item.id().clone(), DebugAction::OpenSfxTest));
@@ -198,9 +205,13 @@ impl DebugMenuBar {
         // One-shot dev tools: profiling, picking, layout capture.
         let tools_sub = Submenu::new("Tools", true);
 
-        let profile_item = MenuItem::new("Profile GPU (100 frames)", true, None);
-        mappings.push((profile_item.id().clone(), DebugAction::ProfileGpu));
-        let _ = tools_sub.append(&profile_item);
+        let profile_cpu_item = MenuItem::new("Profile CPU (100 frames)", true, None);
+        mappings.push((profile_cpu_item.id().clone(), DebugAction::ProfileCpu));
+        let _ = tools_sub.append(&profile_cpu_item);
+
+        let profile_gpu_item = MenuItem::new("Profile GPU (100 frames)", true, None);
+        mappings.push((profile_gpu_item.id().clone(), DebugAction::ProfileGpu));
+        let _ = tools_sub.append(&profile_gpu_item);
 
         let hit_test_item = MenuItem::new("Object Hit Test", true, None);
         mappings.push((hit_test_item.id().clone(), DebugAction::ArmObjectHitTest));
@@ -362,7 +373,7 @@ impl DebugMenuBar {
         for (suit_label, suit, max_rank) in [
             ("Characters (m)", Suit::Characters, 9u8),
             ("Bamboos (s)", Suit::Bamboos, 9u8),
-            ("Circles (p)", Suit::Circles, 9u8),
+            ("Dots (p)", Suit::Dots, 9u8),
             ("Winds", Suit::Wind, 4u8),
             ("Dragons", Suit::Dragon, 3u8),
         ] {

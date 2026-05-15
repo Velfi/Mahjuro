@@ -16,6 +16,7 @@ fn vs_main(
     @location(0) corner: vec2<f32>,
     @location(1) rect: vec4<f32>,
     @location(2) color: vec4<f32>,
+    @location(3) _user: u32,
 ) -> VsOut {
     let x = rect.x + corner.x * rect.z;
     let y = rect.y + corner.y * rect.w;

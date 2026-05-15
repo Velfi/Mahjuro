@@ -18,6 +18,40 @@ enum PassAShopInspectHdrUpload {
     Subject,
 }
 
+/// Per-frame summary of which `RenderOp` variants appear in the current ops
+/// list. Computed once with [`OpsFlags::scan`] and reused everywhere that
+/// previously called `ops.iter().any(...)` — those scans showed up multiple
+/// times in `render()` and each was a fresh O(n) walk over the op list.
+#[derive(Default, Clone, Copy)]
+struct OpsFlags {
+    needs_table: bool,
+    shop_env: bool,
+    hallway_env: bool,
+    archive_env: bool,
+    cascade: bool,
+}
+
+impl OpsFlags {
+    fn scan(ops: &[RenderOp]) -> Self {
+        let mut f = OpsFlags::default();
+        for op in ops {
+            match op {
+                RenderOp::Table => f.needs_table = true,
+                RenderOp::ShopEnvironment => f.shop_env = true,
+                RenderOp::HallwayEnvironment => f.hallway_env = true,
+                RenderOp::ArchiveEnvironment => f.archive_env = true,
+                RenderOp::ShootingStarCascade => f.cascade = true,
+                _ => {}
+            }
+            // Early-out: if every flag we care about is set, stop scanning.
+            if f.needs_table && f.shop_env && f.hallway_env && f.archive_env && f.cascade {
+                break;
+            }
+        }
+        f
+    }
+}
+
 /// One contiguous slice of [`RenderOp`]s inside Pass A. `shop_inspect_hdr_upload` selects an
 /// optional [`SsrGlobals.felt`] upload **before** this slice's render pass.
 struct PassAChunk<'a> {
@@ -119,7 +153,17 @@ impl WgpuRenderer {
             gamma,
             shadows_enabled,
             ssr_enabled,
+            vhs_enabled,
         } = settings;
+        let flatten_time_text_fx = matches!(
+            effects_quality,
+            crate::persistence::EffectsQuality::Off | crate::persistence::EffectsQuality::Low
+        );
+        // Master Options-toggle override: when the user has VHS off we kill
+        // the per-scene branch even if the per-scene tuning has non-zero
+        // amplitudes. Computed locally — `self.tonemap_vhs_enabled` keeps
+        // the per-scene resolution so re-enabling restores the look.
+        let effective_vhs_on = self.tonemap_vhs_enabled && vhs_enabled;
         self.apply_render_settings(tile_material, surface_kind, effects_quality, &tileset_name);
 
         // Upload any relic/background textures that finished decoding.
@@ -166,6 +210,13 @@ impl WgpuRenderer {
                 .expect("non-prepass render must own a swapchain view"),
         };
         let bloom_active = Self::bloom_is_active(frame);
+
+        // Reset the per-frame bump pool. `frame_buffer_pool` backs the
+        // hot quad-batch / text-instance / background-instance vertex
+        // uploads below, replacing per-call `device.create_buffer_init`s
+        // (~11/frame previously) with one growable persistent buffer
+        // and `queue.write_buffer` per allocation.
+        self.frame_buffer_pool.begin_frame();
 
         // Lerp per-tile slide animations toward 0 (ease-out) and advance
         // short-lived departing-tile clocks.
@@ -282,8 +333,7 @@ impl WgpuRenderer {
             // Tile background.
             tile_quads.push(GpuInstance {
                 rect: [sx, sy, sw, sh],
-                color: [0.0, 0.0, 0.0, alpha],
-            });
+                color: [0.0, 0.0, 0.0, alpha], user: 0});
 
             // Main label.
             let inset_x = sw * 0.10;
@@ -336,112 +386,109 @@ impl WgpuRenderer {
         // cheap and animates freely. Marquee labels (non-zero scroll_offset)
         // bypass the cache because the offset is baked into the raster and
         // would otherwise fill the cache with single-use entries.
-        let make_text_draw =
-            |device: &wgpu::Device,
-             queue: &wgpu::Queue,
-             text_bgl: &wgpu::BindGroupLayout,
-             sampler: &wgpu::Sampler,
-             cache: &mut HashMap<TextLabelShapeKey, HashMap<String, CachedTextLabel>>,
-             frame_id: u64,
-             lbl: &TextLabel,
-             font: &fontdue::Font,
-             font_italic: Option<&fontdue::Font>,
-             emoji_fallback: Option<&fontdue::Font>|
-             -> TextDraw {
-                // Clamp before casting: `f32 as u32` saturates negatives/NaN to u32::MAX,
-                // which blows past wgpu's 16384 texture limit and panics. Seen in arrange mode
-                // when layout math produces a negative rect width.
-                let tw = (lbl.rect[2].clamp(1.0, 16384.0) as u32).max(1);
-                let th = (lbl.rect[3].clamp(1.0, 16384.0) as u32).max(1);
-                let align = match lbl.align {
-                    TextAlign::Left => LabelAlign::Left,
-                    TextAlign::Center => LabelAlign::Center,
-                    TextAlign::Right => LabelAlign::Right,
-                };
-                let scroll_offset_px = lbl.scroll_offset.round() as i32;
-                let cacheable = scroll_offset_px == 0;
-                let flavor = lbl
-                    .flavor_spans
-                    .and_then(|s| if s.is_empty() { None } else { Some(s) });
-                let shape_key = TextLabelShapeKey {
-                    emoji_path: emoji_fallback.is_some(),
-                    flavor_spans: flavor.is_some(),
-                    font_px: lbl.font_px.map(|p| p.round() as u32),
-                    width_px: tw,
-                    height_px: th,
-                    align: lbl.align,
-                    scroll_offset_px,
-                };
-                let cache_inner_key: String = if let Some(spans) = flavor {
-                    crate::core::relic::flavor_spans_cache_key(spans)
+        let make_text_draw = |device: &wgpu::Device,
+                              queue: &wgpu::Queue,
+                              text_bgl: &wgpu::BindGroupLayout,
+                              sampler: &wgpu::Sampler,
+                              cache: &mut rustc_hash::FxHashMap<
+            TextLabelShapeKey,
+            rustc_hash::FxHashMap<String, CachedTextLabel>,
+        >,
+                              frame_id: u64,
+                              lbl: &TextLabel,
+                              font: &fontdue::Font,
+                              font_italic: Option<&fontdue::Font>,
+                              emoji_fallback: Option<&fontdue::Font>|
+         -> TextDraw {
+            // Clamp before casting: `f32 as u32` saturates negatives/NaN to u32::MAX,
+            // which blows past wgpu's 16384 texture limit and panics. Seen in arrange mode
+            // when layout math produces a negative rect width.
+            let tw = (lbl.rect[2].clamp(1.0, 16384.0) as u32).max(1);
+            let th = (lbl.rect[3].clamp(1.0, 16384.0) as u32).max(1);
+            let align = match lbl.align {
+                TextAlign::Left => LabelAlign::Left,
+                TextAlign::Center => LabelAlign::Center,
+                TextAlign::Right => LabelAlign::Right,
+            };
+            let scroll_offset_px = lbl.scroll_offset.round() as i32;
+            let cacheable = scroll_offset_px == 0;
+            let flavor = lbl
+                .flavor_spans
+                .and_then(|s| if s.is_empty() { None } else { Some(s) });
+            let inline_face_bits = (lbl.bold as u8)
+                | ((lbl.italic as u8) << 1)
+                | ((lbl.underline as u8) << 2);
+            let shape_key = TextLabelShapeKey {
+                emoji_path: emoji_fallback.is_some(),
+                flavor_spans: flavor.is_some(),
+                inline_face_bits,
+                font_px: lbl.font_px.map(|p| p.round() as u32),
+                width_px: tw,
+                height_px: th,
+                align: lbl.align,
+                scroll_offset_px,
+            };
+            let cache_inner_key: String = if let Some(spans) = flavor {
+                crate::core::relic::flavor_spans_cache_key(spans)
+            } else {
+                lbl.text.clone()
+            };
+
+            let rasterize = || -> Vec<u8> {
+                if let Some(spans) = flavor {
+                    let italic = font_italic.unwrap_or(font);
+                    let px = lbl.font_px.unwrap_or(13.0).max(8.0);
+                    crate::render::decal::rasterize_label_flavor_spans(
+                        font,
+                        italic,
+                        emoji_fallback,
+                        spans,
+                        tw,
+                        th,
+                        px,
+                        align,
+                    )
+                } else if lbl.bold || lbl.italic || lbl.underline {
+                    let italic = font_italic.unwrap_or(font);
+                    let px = lbl.font_px.unwrap_or(13.0).max(8.0);
+                    let syn = [crate::render::decal::RasterStyleSpan {
+                        text: lbl.text.as_str(),
+                        bold: lbl.bold,
+                        italic: lbl.italic,
+                        underline: lbl.underline,
+                    }];
+                    crate::render::decal::rasterize_label_raster_spans(
+                        font,
+                        italic,
+                        emoji_fallback,
+                        &syn,
+                        tw,
+                        th,
+                        px,
+                        align,
+                    )
                 } else {
-                    lbl.text.clone()
-                };
-
-                let rasterize = || -> Vec<u8> {
-                    if let Some(spans) = flavor {
-                        let italic = font_italic.unwrap_or(font);
-                        let px = lbl.font_px.unwrap_or(13.0).max(8.0);
-                        crate::render::decal::rasterize_label_flavor_spans(
-                            font,
-                            italic,
-                            emoji_fallback,
-                            spans,
-                            tw,
-                            th,
-                            px,
+                    rasterize_label_styled_with_fallback(
+                        font,
+                        emoji_fallback,
+                        &lbl.text,
+                        tw,
+                        th,
+                        crate::render::decal::LabelStyle {
+                            font_px: lbl.font_px,
                             align,
-                        )
-                    } else {
-                        rasterize_label_styled_with_fallback(
-                            font,
-                            emoji_fallback,
-                            &lbl.text,
-                            tw,
-                            th,
-                            crate::render::decal::LabelStyle {
-                                font_px: lbl.font_px,
-                                align,
-                                scroll_offset: lbl.scroll_offset,
-                            },
-                        )
-                    }
-                };
+                            scroll_offset: lbl.scroll_offset,
+                            underline: lbl.underline,
+                        },
+                    )
+                }
+            };
 
-                let (bind_group, owned_tex) = if cacheable {
-                    let inner = cache.entry(shape_key).or_default();
-                    if let Some(entry) = inner.get_mut(&cache_inner_key) {
-                        entry.last_used = frame_id;
-                        (entry.bind_group.clone(), None)
-                    } else {
-                        let rgba = rasterize();
-                        let (tex, view) =
-                            upload_rgba_texture(device, queue, "text-lbl", &rgba, tw, th);
-                        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some("text-lbl-bg"),
-                            layout: text_bgl,
-                            entries: &[
-                                wgpu::BindGroupEntry {
-                                    binding: 0,
-                                    resource: wgpu::BindingResource::TextureView(&view),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 1,
-                                    resource: wgpu::BindingResource::Sampler(sampler),
-                                },
-                            ],
-                        });
-                        let bg_clone = bg.clone();
-                        inner.insert(
-                            cache_inner_key,
-                            CachedTextLabel {
-                                tex,
-                                bind_group: bg,
-                                last_used: frame_id,
-                            },
-                        );
-                        (bg_clone, None)
-                    }
+            let (bind_group, owned_tex) = if cacheable {
+                let inner = cache.entry(shape_key).or_default();
+                if let Some(entry) = inner.get_mut(&cache_inner_key) {
+                    entry.last_used = frame_id;
+                    (entry.bind_group.clone(), None)
                 } else {
                     let rgba = rasterize();
                     let (tex, view) = upload_rgba_texture(device, queue, "text-lbl", &rgba, tw, th);
@@ -459,39 +506,80 @@ impl WgpuRenderer {
                             },
                         ],
                     });
-                    (bg, Some(tex))
-                };
-
-                let inst = GpuInstance {
-                    rect: lbl.rect,
-                    color: lbl.color,
-                };
-                let inst_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("text-inst"),
-                    contents: bytemuck::cast_slice(&[inst]),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-                TextDraw {
-                    inst_buf,
-                    bind_group,
-                    _tex: owned_tex,
+                    let bg_clone = bg.clone();
+                    inner.insert(
+                        cache_inner_key,
+                        CachedTextLabel {
+                            tex,
+                            bind_group: bg,
+                            last_used: frame_id,
+                        },
+                    );
+                    (bg_clone, None)
                 }
+            } else {
+                let rgba = rasterize();
+                let (tex, view) = upload_rgba_texture(device, queue, "text-lbl", &rgba, tw, th);
+                let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("text-lbl-bg"),
+                    layout: text_bgl,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(sampler),
+                        },
+                    ],
+                });
+                (bg, Some(tex))
             };
+
+            let packed_effect = if flatten_time_text_fx && lbl.text_effect.uses_time_in_fragment() {
+                crate::render::text_effect::TextEffectId::Flat
+            } else {
+                lbl.text_effect
+            };
+            let inst = GpuInstance {
+                rect: lbl.rect,
+                color: lbl.color,
+                user: packed_effect.pack(),
+            };
+            let inst_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("text-inst"),
+                contents: bytemuck::cast_slice(&[inst]),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+            TextDraw {
+                inst_buf,
+                bind_group,
+                _tex: owned_tex,
+            }
+        };
 
         // ── Hand tile face/emoji label GPU draws (consumed by HandTileFaces) ──
         // Bump the cache frame stamp once per render() so make_text_draw can
         // mark every entry it touches. Evict entries that haven't been hit
         // for TEXT_CACHE_TTL_FRAMES — labels whose text/size has changed
         // shouldn't keep their stale GPU texture pinned forever.
+        //
+        // The two-level retain walks the full cache, which can balloon to a
+        // few hundred entries on long sessions. The TTL is measured in many
+        // frames anyway, so sweeping every frame is wasteful. Run the eviction
+        // every 32 frames; the absolute TTL still bounds how long stale
+        // entries can stick around.
         self.text_cache_frame = self.text_cache_frame.wrapping_add(1);
         let cache_frame_id = self.text_cache_frame;
-        let ttl_cutoff = cache_frame_id.saturating_sub(TEXT_CACHE_TTL_FRAMES);
-        // Walk the two-level map: drop stale entries from each inner bucket,
-        // then drop any inner bucket that became empty.
-        self.text_label_cache.retain(|_, inner| {
-            inner.retain(|_, entry| entry.last_used >= ttl_cutoff);
-            !inner.is_empty()
-        });
+        const EVICTION_INTERVAL_FRAMES: u64 = 32;
+        if cache_frame_id.is_multiple_of(EVICTION_INTERVAL_FRAMES) {
+            let ttl_cutoff = cache_frame_id.saturating_sub(TEXT_CACHE_TTL_FRAMES);
+            self.text_label_cache.retain(|_, inner| {
+                inner.retain(|_, entry| entry.last_used >= ttl_cutoff);
+                !inner.is_empty()
+            });
+        }
         let mut hand_face_draws: Vec<TextDraw> = Vec::new();
         if let Some(ref font) = self.ui_font {
             for lbl in &tile_labels {
@@ -529,27 +617,34 @@ impl WgpuRenderer {
         // ── Walk frame.cmds; build per-cmd GPU resources + a parallel ─────
         // ── ordered op list, batching contiguous Quad runs into a single ──
         // ── instanced draw. ────────────────────────────────────────────────
-        let mut quad_buffers: Vec<wgpu::Buffer> = Vec::new();
-        let mut gradient_quad_buffers: Vec<wgpu::Buffer> = Vec::new();
-        let mut squircle_quad_buffers: Vec<wgpu::Buffer> = Vec::new();
+        // Pool slices for per-frame instance vertex buffers. The
+        // backing storage lives in `self.frame_buffer_pool`; each
+        // `PoolSlice` is `(offset, byte_len)` into that single
+        // persistent buffer. See `frame_pool.rs`.
+        let mut quad_buffers: Vec<crate::render::wgpu_renderer::frame_pool::PoolSlice> = Vec::new();
+        let mut gradient_quad_buffers: Vec<crate::render::wgpu_renderer::frame_pool::PoolSlice> =
+            Vec::new();
+        let mut squircle_quad_buffers: Vec<crate::render::wgpu_renderer::frame_pool::PoolSlice> =
+            Vec::new();
+        // TODO(perf): route flame / tile-face / prompt-icon / tile-glow /
+        // relic-glow / relic-debuff buffers through `frame_buffer_pool`
+        // too. They're lower-frequency than the quad batches and text
+        // instance vertices, but each is still a per-frame
+        // `device.create_buffer_init` that could share the bump pool.
         let mut flame_buffers: Vec<wgpu::Buffer> = Vec::new();
         let mut text_draws: Vec<TextDraw> = Vec::new();
         let mut tile_face_quads: Vec<TileFaceQuad> = Vec::new();
         let mut tile_face_inst_buffers: Vec<wgpu::Buffer> = Vec::new();
         let mut prompt_icon_quads: Vec<crate::render::draw_cmd::PromptIconQuad> = Vec::new();
         let mut prompt_icon_inst_buffers: Vec<wgpu::Buffer> = Vec::new();
-        // Skeuomorphic gameplay HUD cmd buffers (phase 1).
-        // Dead empty vecs — kept so existing shadow/draw loops that still iterate
-        // these compile; scenes no longer push to these variants.
-        let shrine_batches: Vec<&[ShrinePlacement]> = Vec::new();
         let yaku_tablet_batches: Vec<&[YakuTabletPlacement]> = Vec::new();
         let wall_stack_cmds: Vec<&WallStackPlacement> = Vec::new();
         let mut showcase_tile_batches: Vec<&[ShowcaseTilePlacement]> = Vec::new();
         let mut object3d_cmds: Vec<&[crate::render::draw_cmd::Object3d]> = Vec::new();
-        // Flat draw list built during the Object3d pre-pass: (DrawKind, slot_i).
         let mut object3d_draw_list: Vec<(DrawKind, usize)> = Vec::new();
         let mut ops: Vec<RenderOp> = Vec::new();
-        let mut bg_inst_buffers: Vec<wgpu::Buffer> = Vec::new();
+        let mut bg_inst_buffers: Vec<crate::render::wgpu_renderer::frame_pool::PoolSlice> =
+            Vec::new();
 
         let mut i = 0;
         while i < frame.cmds.len() {
@@ -559,17 +654,14 @@ impl WgpuRenderer {
                     let wh = self.size.height.max(1) as f32;
                     let bg_inst = GpuInstance {
                         rect: [0.0, 0.0, ww, wh],
-                        color: id.image_vertex_color(),
-                    };
-                    let buf = self
-                        .device
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("bg-inst"),
-                            contents: bytemuck::cast_slice(&[bg_inst]),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        });
+                        color: id.image_vertex_color(), user: 0};
+                    let slice = self.frame_buffer_pool.alloc(
+                        &self.device,
+                        &self.queue,
+                        std::slice::from_ref(&bg_inst),
+                    );
                     let buf_idx = bg_inst_buffers.len();
-                    bg_inst_buffers.push(buf);
+                    bg_inst_buffers.push(slice);
                     ops.push(RenderOp::Background { id: *id, buf_idx });
                     i += 1;
                 }
@@ -603,10 +695,6 @@ impl WgpuRenderer {
                     ops.push(RenderOp::SunlitWater);
                     i += 1;
                 }
-                DrawCmd::MountainHaze => {
-                    ops.push(RenderOp::MountainHaze);
-                    i += 1;
-                }
                 DrawCmd::ShootingStarCascade => {
                     if effects_quality >= crate::persistence::EffectsQuality::Low {
                         ops.push(RenderOp::ShootingStarCascade);
@@ -625,6 +713,10 @@ impl WgpuRenderer {
                     ops.push(RenderOp::HallwayEnvironment);
                     i += 1;
                 }
+                DrawCmd::ArchiveEnvironment => {
+                    ops.push(RenderOp::ArchiveEnvironment);
+                    i += 1;
+                }
                 DrawCmd::ClearSceneDepth => {
                     ops.push(RenderOp::ClearSceneDepth);
                     i += 1;
@@ -634,21 +726,16 @@ impl WgpuRenderer {
                     i += 1;
                 }
                 DrawCmd::Quad(_) => {
-                    // Collect contiguous run of Quad cmds into a single batch.
                     let mut batch: Vec<GpuInstance> = Vec::new();
                     while let Some(DrawCmd::Quad(inst)) = frame.cmds.get(i) {
                         batch.push(*inst);
                         i += 1;
                     }
-                    let buf = self
-                        .device
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("quad-batch"),
-                            contents: bytemuck::cast_slice(&batch),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        });
+                    let slice = self
+                        .frame_buffer_pool
+                        .alloc(&self.device, &self.queue, &batch);
                     let buf_idx = quad_buffers.len();
-                    quad_buffers.push(buf);
+                    quad_buffers.push(slice);
                     ops.push(RenderOp::QuadBatch {
                         buf_idx,
                         count: batch.len() as u32,
@@ -660,15 +747,11 @@ impl WgpuRenderer {
                         batch.push(*inst);
                         i += 1;
                     }
-                    let buf = self
-                        .device
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("gradient-quad-batch"),
-                            contents: bytemuck::cast_slice(&batch),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        });
+                    let slice = self
+                        .frame_buffer_pool
+                        .alloc(&self.device, &self.queue, &batch);
                     let buf_idx = gradient_quad_buffers.len();
-                    gradient_quad_buffers.push(buf);
+                    gradient_quad_buffers.push(slice);
                     ops.push(RenderOp::GradientQuadBatch {
                         buf_idx,
                         count: batch.len() as u32,
@@ -680,15 +763,11 @@ impl WgpuRenderer {
                         batch.push(*inst);
                         i += 1;
                     }
-                    let buf = self
-                        .device
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("squircle-quad-batch"),
-                            contents: bytemuck::cast_slice(&batch),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        });
+                    let slice = self
+                        .frame_buffer_pool
+                        .alloc(&self.device, &self.queue, &batch);
                     let buf_idx = squircle_quad_buffers.len();
-                    squircle_quad_buffers.push(buf);
+                    squircle_quad_buffers.push(slice);
                     ops.push(RenderOp::SquircleQuadBatch {
                         buf_idx,
                         count: batch.len() as u32,
@@ -795,6 +874,10 @@ impl WgpuRenderer {
                 }
                 DrawCmd::PromptIconQuad(icon) => {
                     let key = icon.source.cache_key();
+                    if self.prompt_icon_missing.contains(&key) {
+                        i += 1;
+                        continue;
+                    }
                     if !self.prompt_icon_overlays.contains_key(&key) {
                         match make_prompt_icon_overlay_gpu(
                             &self.device,
@@ -808,6 +891,7 @@ impl WgpuRenderer {
                             }
                             None => {
                                 log::warn!("prompt icon missing or invalid: {key}");
+                                self.prompt_icon_missing.insert(key);
                                 i += 1;
                                 continue;
                             }
@@ -904,11 +988,16 @@ impl WgpuRenderer {
             }
         }
 
+        // ── Single-pass scan over `ops` to compute the flags every later
+        // section needs. Replaces a handful of repeated `ops.iter().any(...)`
+        // walks (table / cascade / shop / hallway / archive / SSR-relevant)
+        // with one O(n) loop.
+        let ops_flags = OpsFlags::scan(&ops);
+
         // ── Update procedural lit-mesh uniforms (table + candles) ───────
         // Written before the render pass begins, since the pass borrows
         // `self` immutably.
-        let needs_table = ops.iter().any(|o| matches!(o, RenderOp::Table));
-        if needs_table {
+        if ops_flags.needs_table {
             // Horizontal table: mesh is local XY with +Z normal; Y-up mesh
             // chain uses Rx(-90°) so the felt normal is +Y in that basis, then
             // [`translate_rot_scale`] maps to world +Z. Wood grain is
@@ -932,28 +1021,6 @@ impl WgpuRenderer {
         // loop below appends entries it wants to expose to
         // `pick_debug_object`.
         self.last_debug_pickables.clear();
-        self.last_gameplay_fog_wall_horizon_y = frame.gameplay_fog_wall_horizon_y;
-        self.last_gameplay_fog_wall_center_x = frame.gameplay_fog_wall_center_x;
-        if let Some(hy) = frame.gameplay_fog_wall_horizon_y {
-            let py = hy.clamp(0.0, 1.0) * h;
-            let cx_px = frame
-                .gameplay_fog_wall_center_x
-                .unwrap_or(0.5)
-                .clamp(0.0, 1.0)
-                * w;
-            let center = pixel_to_world(w, h, cx_px, py, 720.0);
-            let model = translate_rot_scale(
-                center,
-                Mat4::IDENTITY,
-                glam::Vec3::new(w * 12.0, 160.0, 140.0),
-            );
-            self.last_debug_pickables.push((
-                "gameplay.fog_wall".to_string(),
-                model,
-                glam::Vec3::splat(0.5),
-                0.0,
-            ));
-        }
 
         // Candles migrated to Object3dKind::Candle.
 
@@ -966,104 +1033,12 @@ impl WgpuRenderer {
         // ── Pack placeholders (same mesh + pipeline as relics) ──────────
         self.proj.pack_rects.clear();
         // Pack placements migrated to Object3dKind::Pack.
-        // ── Shrines (pick-blind scene). Each placement gets its own slot. ─
-        // The shrine mesh is built in normalized -0.5..+0.5 local space, so
-        // a per-instance scale by `extents` sizes Small/Big/Boss
-        // independently. `world_pos` is the *base center*, so we lift the
-        // model up by half the height to put the plinth on the ground.
-        self.proj.shrine_rects.clear();
-        {
-            let mut shrine_cursor: usize = 0;
-            for batch in &shrine_batches {
-                for s in batch.iter() {
-                    if shrine_cursor >= MAX_SHRINE_SLOTS {
-                        break;
-                    }
-                    let slot_i = shrine_cursor;
-                    shrine_cursor += 1;
-                    let center = pixel_to_world(
-                        w,
-                        h,
-                        s.world_pos[0],
-                        s.world_pos[1],
-                        s.world_pos[2] + s.extents[1] * 0.5,
-                    );
-                    let model = translate_rot_scale(
-                        center,
-                        Mat4::IDENTITY,
-                        glam::Vec3::new(s.extents[0], s.extents[1], s.extents[2]),
-                    );
-                    // Project the shrine's 8 AABB corners to screen and
-                    // take the bounding rect — gives the scene a 2D rect
-                    // it can anchor labels to without re-projecting the
-                    // perspective transform itself.
-                    let hx = s.extents[0] * 0.5;
-                    let hy = s.extents[1] * 0.5;
-                    let hz = s.extents[2] * 0.5;
-                    let mut mn_x = f32::INFINITY;
-                    let mut mn_y = f32::INFINITY;
-                    let mut mx_x = f32::NEG_INFINITY;
-                    let mut mx_y = f32::NEG_INFINITY;
-                    for cx in [-hx, hx] {
-                        for cy in [-hy, hy] {
-                            for cz in [-hz, hz] {
-                                let world = center + glam::Vec3::new(cx, cy, cz);
-                                let (px, py) = project_to_screen(world);
-                                mn_x = mn_x.min(px);
-                                mn_y = mn_y.min(py);
-                                mx_x = mx_x.max(px);
-                                mx_y = mx_y.max(py);
-                            }
-                        }
-                    }
-                    self.proj
-                        .shrine_rects
-                        .push([mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]);
-                    // Glow gently brightens the shrine's tint so the
-                    // upcoming shrine reads as the active choice at
-                    // rest, but most of the warmth still comes from
-                    // the warm spotlight tinting the stone — the
-                    // shrine itself shouldn't self-illuminate.
-                    let g = s.glow.clamp(0.0, 1.0);
-                    let base_color = if g > 0.0 {
-                        let target = [1.10, 1.05, 0.95, s.color[3]];
-                        [
-                            s.color[0] + (target[0] - s.color[0]) * g,
-                            s.color[1] + (target[1] - s.color[1]) * g,
-                            s.color[2] + (target[2] - s.color[2]) * g,
-                            s.color[3],
-                        ]
-                    } else {
-                        s.color
-                    };
-                    // Rough stone material: very low specular strength
-                    // and a low specular power so any highlight that
-                    // does catch is wide and soft (like weathered
-                    // rock, not polished marble). Identical params for
-                    // every shrine so cleared/future ones can't catch
-                    // sharp glints from ambient fills.
-                    let material = MaterialParams {
-                        kind: MaterialKind::Plain,
-                        base_color,
-                        specular_strength: 0.06,
-                        specular_power: 8.0,
-                    };
-                    self.shrine_instances[slot_i].write_uniform(
-                        &self.queue,
-                        view_proj_arr,
-                        model,
-                        material,
-                    );
-                }
-            }
-        }
 
         // Auxiliary dishes migrated to Object3dKind::Dish.
 
         // ── Ribbon batches (shop scene) ────────────────────────────────
-        // Each textured ribbon uses up to 3 draw slots (top cap, tileable
-        // middle, bottom cap) so its length is independent of texture aspect.
-        // Untextured (plain) ribbons still use a single slot.
+        // Each ribbon uses one draw slot — the whole hanging banner is a
+        // single textured mesh sampling one tall portrait per zodiac.
         self.last_ribbon_models.clear();
         self.last_ribbon_batch_slot_counts.clear();
         // Zodiac ribbons migrated to Object3dKind::ZodiacRibbon.
@@ -1100,7 +1075,21 @@ impl WgpuRenderer {
         }
 
         // ── Arrange-mode bounding box overlay ──────────────────────────────
-        self.push_arrange_bbox_overlay(frame, &camera, &mut quad_buffers, &mut ops);
+        // Borrow-split: `push_arrange_bbox_overlay` reads only
+        // `device` / `debug_arrange_override` / `last_debug_pickables`
+        // off `self`, so we hand it its dependencies directly to keep
+        // `frame_buffer_pool` mutably borrowable alongside.
+        Self::push_arrange_bbox_overlay(
+            &self.device,
+            self.debug_arrange_override.as_ref(),
+            &self.last_debug_pickables,
+            frame,
+            &camera,
+            &mut self.frame_buffer_pool,
+            &self.queue,
+            &mut quad_buffers,
+            &mut ops,
+        );
 
         // Relic activation halo buffer — built from `relic_glows` populated
         // during the relic projection loop above. Drawn through the same
@@ -1147,7 +1136,6 @@ impl WgpuRenderer {
             &camera,
             light_view_proj_arr,
             &tile_pick_models,
-            &shrine_batches,
             &mut shadow_uniforms_changed,
         );
 
@@ -1165,14 +1153,17 @@ impl WgpuRenderer {
             &mut shadow_uniforms_changed,
         );
 
-        if ops.iter().any(|o| matches!(o, RenderOp::ShopEnvironment)) {
+        if ops_flags.shop_env {
             self.write_shop_environment_uniforms(frame, &camera, false);
         }
-        if ops
-            .iter()
-            .any(|o| matches!(o, RenderOp::HallwayEnvironment))
-        {
+        if ops_flags.hallway_env {
             self.write_hallway_environment_uniforms(frame, &camera, false);
+        }
+        if self.archive_environment.is_some() {
+            self.sync_archive_description_decal_texture(frame);
+        }
+        if ops_flags.archive_env {
+            self.write_archive_environment_uniforms(frame, &camera, false);
         }
 
         let mut encoder = self
@@ -1187,7 +1178,6 @@ impl WgpuRenderer {
             shadows_enabled,
             shadow_uniforms_changed,
             &showcase_tile_batches,
-            &shrine_batches,
             &tile_3d_rects,
         );
 
@@ -1197,6 +1187,7 @@ impl WgpuRenderer {
         // tonemapping to the journal target.
         let process_ctx_scene = ProcessOpCtx {
             frame,
+            frame_pool_buffer: self.frame_buffer_pool.buffer(),
             bg_inst_buffers: &bg_inst_buffers,
             quad_buffers: &quad_buffers,
             gradient_quad_buffers: &gradient_quad_buffers,
@@ -1223,6 +1214,7 @@ impl WgpuRenderer {
             is_prepass || matches!(self.config.format, wgpu::TextureFormat::Rgba16Float);
         let process_ctx_overlay = ProcessOpCtx {
             frame,
+            frame_pool_buffer: self.frame_buffer_pool.buffer(),
             bg_inst_buffers: &bg_inst_buffers,
             quad_buffers: &quad_buffers,
             gradient_quad_buffers: &gradient_quad_buffers,
@@ -1249,9 +1241,7 @@ impl WgpuRenderer {
         // quarter-area (half dims) and is additively composited up to the
         // main scene target inside `Pass A`. Skip the pass entirely when no
         // cascade op is queued so the clear isn't paid for on every frame.
-        let cascade_active = ops
-            .iter()
-            .any(|o| matches!(o, RenderOp::ShootingStarCascade));
+        let cascade_active = ops_flags.cascade;
         if cascade_active {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("cascade-offscreen-pass"),
@@ -1277,8 +1267,7 @@ impl WgpuRenderer {
         // ── Pass A: clear + draw main scene ───────────────────────────────
         {
             #[cfg(debug_assertions)]
-            let split_main_for_profile =
-                self.gpu_profiler.is_sampling() && ops.iter().any(|o| matches!(o, RenderOp::Table));
+            let split_main_for_profile = self.gpu_profiler.is_sampling() && ops_flags.needs_table;
             #[cfg(not(debug_assertions))]
             let split_main_for_profile = false;
 
@@ -1501,12 +1490,9 @@ impl WgpuRenderer {
         // thresholding (bloom extract still keys off tonemapped `scene_color` elsewhere).
         let glb_room_bloom_linear = bloom_active
             && frame.room_uses_shop_glb_shader()
-            && (ops.iter().any(|o| matches!(o, RenderOp::ShopEnvironment))
-                || ops
-                    .iter()
-                    .any(|o| matches!(o, RenderOp::HallwayEnvironment)));
+            && (ops_flags.shop_env || ops_flags.hallway_env || ops_flags.archive_env);
         if glb_room_bloom_linear {
-            if ops.iter().any(|o| matches!(o, RenderOp::ShopEnvironment))
+            if ops_flags.shop_env
                 && self.shop_environment.is_some()
                 && !self.shop_env_primitives.is_empty()
             {
@@ -1550,9 +1536,7 @@ impl WgpuRenderer {
                 }
                 self.write_shop_environment_uniforms(frame, &camera, false);
             }
-            if ops
-                .iter()
-                .any(|o| matches!(o, RenderOp::HallwayEnvironment))
+            if ops_flags.hallway_env
                 && self.hallway_environment.is_some()
                 && !self.hallway_env_primitives.is_empty()
             {
@@ -1596,29 +1580,88 @@ impl WgpuRenderer {
                 }
                 self.write_hallway_environment_uniforms(frame, &camera, false);
             }
+            if ops_flags.archive_env
+                && self.archive_environment.is_some()
+                && !self.archive_env_primitives.is_empty()
+            {
+                self.write_archive_environment_uniforms(frame, &camera, true);
+                {
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("archive-linear-bloom-pass"),
+                        color_attachments: &[
+                            Some(wgpu::RenderPassColorAttachment {
+                                view: &self.shop_linear_bloom_view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                    store: wgpu::StoreOp::Store,
+                                },
+                                depth_slice: None,
+                            }),
+                            Some(wgpu::RenderPassColorAttachment {
+                                view: &self.room_emissive_view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                    store: wgpu::StoreOp::Store,
+                                },
+                                depth_slice: None,
+                            }),
+                        ],
+                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                            view: &self.depth_view,
+                            depth_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Load,
+                                store: wgpu::StoreOp::Store,
+                            }),
+                            stencil_ops: None,
+                        }),
+                        occlusion_query_set: None,
+                        timestamp_writes: None,
+                        multiview_mask: None,
+                    });
+                    self.draw_archive_environment_meshes(&mut pass, frame, true);
+                }
+                self.write_archive_environment_uniforms(frame, &camera, false);
+            }
         }
 
-        if glb_room_bloom_linear && !is_prepass {
-            let room_aabb = if ops.iter().any(|o| matches!(o, RenderOp::ShopEnvironment)) {
+        // GI compute / apply / composite are only meaningful when we have
+        // a real room AABB to march through. Resolve once here so the
+        // composite block below shares the same gate, dropping the
+        // clear-only pass + redundant composite when there's no room
+        // (loading frames, scenes that pull in `glb_room_bloom_linear`
+        // before the GLB has parsed, etc.).
+        let room_gi_aabb: Option<(glam::Vec3, glam::Vec3)> = if glb_room_bloom_linear && !is_prepass
+        {
+            if ops_flags.shop_env {
                 crate::render::shop_glb::with_shop_glb_cpu(|cpu| {
                     cpu.and_then(|c| {
                         let corners = crate::render::shop_glb::shop_world_bounds_corners_centered(
                             camera.h,
-                            self.shop_env_height_scale,
+                            self.room_gltf_height_scale,
                             c,
                         );
                         crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
                     })
                 })
-            } else if ops
-                .iter()
-                .any(|o| matches!(o, RenderOp::HallwayEnvironment))
-            {
+            } else if ops_flags.hallway_env {
                 crate::render::hallway_glb::with_hallway_glb_cpu(|cpu| {
                     cpu.and_then(|c| {
                         let corners = crate::render::shop_glb::shop_world_bounds_corners_centered(
                             camera.h,
-                            self.shop_env_height_scale,
+                            self.room_gltf_height_scale,
+                            c,
+                        );
+                        crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
+                    })
+                })
+            } else if ops_flags.archive_env {
+                crate::render::archive_glb::with_archive_glb_cpu(|cpu| {
+                    cpu.and_then(|c| {
+                        let corners = crate::render::shop_glb::shop_world_bounds_corners_centered(
+                            camera.h,
+                            self.room_gltf_height_scale,
                             c,
                         );
                         crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
@@ -1626,8 +1669,13 @@ impl WgpuRenderer {
                 })
             } else {
                 None
-            };
+            }
+        } else {
+            None
+        };
+        let gi_runs_this_frame = room_gi_aabb.is_some();
 
+        if gi_runs_this_frame {
             let [nx, ny, nz] = crate::render::shop_glb::ROOM_EMISSIVE_PROBE_GRID;
             let probe_count = nx * ny * nz;
             debug_assert!(probe_count <= crate::render::shop_glb::ROOM_EMISSIVE_PROBE_MAX);
@@ -1636,22 +1684,13 @@ impl WgpuRenderer {
             let gw = self.size.width.max(1) as f32;
             let gh = self.size.height.max(1) as f32;
 
-            let (mn, mx) = if let Some((a, b)) = room_aabb {
-                (a, b)
-            } else {
-                (glam::Vec3::ZERO, glam::Vec3::ZERO)
-            };
+            let (mn, mx) = room_gi_aabb.expect("gi_runs_this_frame implies Some");
             let gi = crate::render::wgpu_renderer::ProbeGiFrameUniform {
                 inv_view_proj: inv_vp.to_cols_array(),
                 view_proj: camera.view_proj_arr,
                 world_min: [mn.x, mn.y, mn.z, 0.0],
                 world_max: [mx.x, mx.y, mx.z, 0.0],
-                grid_dims: [
-                    nx,
-                    ny,
-                    nz,
-                    if room_aabb.is_some() { probe_count } else { 0 },
-                ],
+                grid_dims: [nx, ny, nz, probe_count],
                 screen_march: [
                     gw,
                     gh,
@@ -1672,7 +1711,7 @@ impl WgpuRenderer {
                 bytemuck::bytes_of(&gi),
             );
 
-            if room_aabb.is_some() && probe_count > 0 {
+            if probe_count > 0 {
                 {
                     let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                         label: Some("emissive-probe-update-pass"),
@@ -1680,7 +1719,7 @@ impl WgpuRenderer {
                     });
                     cpass.set_pipeline(&self.emissive_probe_update_pipeline);
                     cpass.set_bind_group(0, &self.emissive_probe_update_bind_group, &[]);
-                    let wg = (probe_count + 63) / 64;
+                    let wg = probe_count.div_ceil(64);
                     cpass.dispatch_workgroups(wg, 1, 1);
                 }
                 {
@@ -1704,23 +1743,6 @@ impl WgpuRenderer {
                     pass.set_bind_group(0, &self.emissive_probe_apply_bind_group, &[]);
                     pass.draw(0..3, 0..1);
                 }
-            } else {
-                let _ = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("emissive-probe-clear-pass"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &self.emissive_gi_view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                            store: wgpu::StoreOp::Store,
-                        },
-                        depth_slice: None,
-                    })],
-                    depth_stencil_attachment: None,
-                    occlusion_query_set: None,
-                    timestamp_writes: None,
-                    multiview_mask: None,
-                });
             }
         }
 
@@ -1730,27 +1752,54 @@ impl WgpuRenderer {
         // lacquered-table SSR. Only the primary visible pass updates history —
         // not `output_override` prepasses (e.g. shop journal → book texture).
         //
-        // Skipped when `is_prepass`.
-        if !is_prepass {
-            encoder.copy_texture_to_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &self.scene_color_texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                wgpu::TexelCopyTextureInfo {
-                    texture: &self.scene_prev_texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                wgpu::Extent3d {
-                    width: self.size.width.max(1),
-                    height: self.size.height.max(1),
-                    depth_or_array_layers: 1,
-                },
-            );
+        // At 1080p the color copy alone is ~16 MB of `Rgba16Float` per frame,
+        // plus ~8 MB of depth. Skip it on scenes that won't sample SSR:
+        // - prepass (`is_prepass`): journal/etc. don't feed the visible history.
+        // - SSR disabled by user setting (`ssr_enabled = false`).
+        // - Table material is not the lacquered wood that samples SSR; the
+        //   green-felt surface doesn't read `scene_prev_texture`.
+        // - No table on screen this frame at all (`!ops_flags.needs_table`).
+        //
+        // When SSR could be active next frame after a transition, the stale
+        // copy lags one frame — the existing fallback when the camera moves.
+        let ssr_writes_history = !is_prepass
+            && ssr_enabled
+            && surface_kind == crate::persistence::SurfaceKind::Walnut
+            && ops_flags.needs_table;
+        if ssr_writes_history {
+            // Half-res blit replaces the old full-res
+            // `copy_texture_to_texture` of `scene_color → scene_prev`.
+            // `scene_prev_texture` is allocated at half size (see
+            // `scene_prev_size` / `create_scene_prev`), so a fullscreen
+            // triangle that samples `scene_color_view` at the half-res
+            // viewport gives a 4-tap-equivalent bilinear box filter — a
+            // little softer than the previous exact copy, but SSR
+            // already integrates over reflection rays so the loss is
+            // imperceptible. Bandwidth: ~16 MB → ~4 MB at 1080p.
+            let mut ds_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("scene-color-downsample-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.scene_prev_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            ds_pass.set_pipeline(&self.scene_color_downsample_pipeline);
+            ds_pass.set_bind_group(0, &self.scene_color_downsample_bind_group, &[]);
+            ds_pass.draw(0..3, 0..1);
+            drop(ds_pass);
+            // Depth is still copied at full resolution (`ssr_prev_depth_texture`
+            // matches `depth_texture`). The lit_mesh SSR sampler reads both
+            // via normalised UVs so the size mismatch with `scene_prev` is
+            // fine. A future change can downsample depth to halve this too.
             encoder.copy_texture_to_texture(
                 wgpu::TexelCopyTextureInfo {
                     texture: &self.depth_texture,
@@ -1910,7 +1959,18 @@ impl WgpuRenderer {
             }
         }
 
-        {
+        // The scene-composite pass applies bloom + fisheye + vignette and
+        // produces `post_bloom_view` for tonemap (and as an additive
+        // target for GI). When all three are inactive, the pass collapses
+        // to a fullscreen copy `scene_color → post_bloom`. On the Steam
+        // Deck baseline that's a ~16 MB read+write per frame at 1080p
+        // for nothing — skip it and have tonemap sample `scene_color`
+        // directly via `tonemap_bind_group_scene`. GI's additive
+        // composite still wants `post_bloom_view` as a stable target
+        // (it `LoadOp::Load`s and adds), so when GI runs we keep the
+        // copy.
+        let skip_scene_composite = !bloom_active && fisheye_strength == 0.0 && !gi_runs_this_frame;
+        if !skip_scene_composite {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene-composite-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1932,7 +1992,7 @@ impl WgpuRenderer {
             pass.draw(0..3, 0..1);
         }
 
-        if glb_room_bloom_linear && !is_prepass {
+        if gi_runs_this_frame {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("emissive-gi-composite-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1958,13 +2018,22 @@ impl WgpuRenderer {
         // book mesh to sample — keep that linear. Swapchain HDR (`Rgba16Float`) must
         // use the same ACES fitted curve as SDR or ingame colors read oversaturated.
         let tonemap_mode = if is_prepass { 1.0f32 } else { 0.0f32 };
+        // Journal prepass also forces VHS off so the book-page mesh never
+        // resamples a buffer with overlay artifacts baked in.
+        let vhs_on_now = if is_prepass { false } else { effective_vhs_on };
+        let tonemap_time = self.creation_time.elapsed().as_secs_f32();
         self.queue.write_buffer(
             &self.tonemap_params_buffer,
             0,
             bytemuck::bytes_of(&TonemapParams {
                 exposure: self.tonemap_exposure,
                 mode: tonemap_mode,
-                _pad: [0.0; 2],
+                vhs_enabled: if vhs_on_now { 1.0 } else { 0.0 },
+                time: tonemap_time,
+                vhs_chromatic: self.tonemap_vhs_chromatic,
+                vhs_scanline: self.tonemap_vhs_scanline,
+                vhs_grain: self.tonemap_vhs_grain,
+                vhs_vignette: self.tonemap_vhs_vignette,
             }),
         );
         let tonemap_pipe = if is_prepass {
@@ -1990,7 +2059,15 @@ impl WgpuRenderer {
                 multiview_mask: None,
             });
             pass.set_pipeline(tonemap_pipe);
-            pass.set_bind_group(0, &self.tonemap_bind_group, &[]);
+            // When the scene-composite pass was skipped, `post_bloom_view`
+            // holds whatever the previous frame left in it — sample
+            // `scene_color_view` directly instead.
+            let tonemap_bg = if skip_scene_composite {
+                &self.tonemap_bind_group_scene
+            } else {
+                &self.tonemap_bind_group
+            };
+            pass.set_bind_group(0, tonemap_bg, &[]);
             pass.draw(0..3, 0..1);
         }
 
@@ -2088,7 +2165,12 @@ impl WgpuRenderer {
         if self.prev_tile_world.is_empty() {
             return;
         }
-        let live: std::collections::HashSet<u32> = self.tile_uids.iter().copied().collect();
+        // Reuse a per-renderer scratch set to avoid a fresh `HashSet` allocation
+        // every frame. Cleared at the start of each call; the underlying capacity
+        // sticks around between frames.
+        self.tile_uid_scratch.clear();
+        self.tile_uid_scratch.extend(self.tile_uids.iter().copied());
+        let live = &self.tile_uid_scratch;
         self.prev_tile_world.retain(|k, _| live.contains(k));
     }
 }

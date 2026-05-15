@@ -21,7 +21,9 @@ fn win32_maybe_clear_vulkan_env_after_probe() {
     if std::env::var_os("MAHJURO_SKIP_VULKAN_WSI_PROBE").is_some() {
         return;
     }
-    let wb = std::env::var("WGPU_BACKEND").unwrap_or_default().to_lowercase();
+    let wb = std::env::var("WGPU_BACKEND")
+        .unwrap_or_default()
+        .to_lowercase();
     if !wb.contains("vulkan") && wb != "vk" {
         return;
     }
@@ -73,9 +75,11 @@ pub(super) struct RendererShaderPack {
     pub golden_dust: wgpu::ShaderModule,
     pub moonlit_water: wgpu::ShaderModule,
     pub sunlit_water: wgpu::ShaderModule,
-    pub mountain_haze: wgpu::ShaderModule,
     pub shooting_star_cascade: wgpu::ShaderModule,
     pub cascade_composite: wgpu::ShaderModule,
+    /// Half-res blit that downsamples `scene_color_view` into the SSR
+    /// history target each frame; see `scene_color_downsample.wgsl`.
+    pub scene_color_downsample: wgpu::ShaderModule,
     pub tile_outline: wgpu::ShaderModule,
     pub tile_glow: wgpu::ShaderModule,
     pub lit_mesh: wgpu::ShaderModule,
@@ -141,10 +145,6 @@ pub(super) fn create_renderer_shader_modules(device: &wgpu::Device) -> RendererS
             label: Some("sunlit-water-pipeline"),
             source: wgpu::ShaderSource::Wgsl(embedded_wgsl::SUNLIT_WATER.into()),
         }),
-        mountain_haze: device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("mountain-haze-pipeline"),
-            source: wgpu::ShaderSource::Wgsl(embedded_wgsl::MOUNTAIN_HAZE.into()),
-        }),
         shooting_star_cascade: device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shooting-star-cascade-pipeline"),
             source: wgpu::ShaderSource::Wgsl(embedded_wgsl::SHOOTING_STAR_CASCADE.into()),
@@ -152,6 +152,10 @@ pub(super) fn create_renderer_shader_modules(device: &wgpu::Device) -> RendererS
         cascade_composite: device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("cascade-composite-pipeline"),
             source: wgpu::ShaderSource::Wgsl(embedded_wgsl::SHOOTING_STAR_CASCADE_COMPOSITE.into()),
+        }),
+        scene_color_downsample: device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("scene-color-downsample"),
+            source: wgpu::ShaderSource::Wgsl(embedded_wgsl::SCENE_COLOR_DOWNSAMPLE.into()),
         }),
         tile_outline: device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("tile-outline-shader"),
@@ -226,8 +230,7 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
     #[cfg(target_os = "windows")]
     win32_maybe_clear_vulkan_env_after_probe();
 
-    let mut instance_desc =
-        wgpu::InstanceDescriptor::new_without_display_handle_from_env();
+    let mut instance_desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
     if cfg!(target_os = "windows") && std::env::var_os("WGPU_BACKEND").is_none() {
         // Vulkan + Win32 swapchain still faults on some AMD stacks; DX12 is the safe default.
         // Set `WGPU_BACKEND=vulkan` (or `vk`) to test Vulkan.
@@ -305,8 +308,8 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
         }
     }
 
-    let win32_vulkan = cfg!(target_os = "windows")
-        && adapter.get_info().backend == wgpu::Backend::Vulkan;
+    let win32_vulkan =
+        cfg!(target_os = "windows") && adapter.get_info().backend == wgpu::Backend::Vulkan;
 
     let (format, swapchain_sdr_format, swapchain_hdr_available) = match surface_opt.as_ref() {
         Some(surface) => {
@@ -407,8 +410,8 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
     // `encoder.write_timestamp()` outside of render passes.
     let mut required_features = wgpu::Features::CLEAR_TEXTURE;
     // TIMESTAMP_QUERY + Win32 Vulkan + some AMD stacks: sporadic faults around swapchain setup.
-    let timestamp_supported = adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY)
-        && !win32_vulkan;
+    let timestamp_supported =
+        adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY) && !win32_vulkan;
     if timestamp_supported {
         required_features |= wgpu::Features::TIMESTAMP_QUERY;
         #[cfg(debug_assertions)]

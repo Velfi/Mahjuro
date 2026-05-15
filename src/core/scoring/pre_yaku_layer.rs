@@ -1,14 +1,16 @@
 //! Meld bonuses, early relic chips/mults, talismans, flowers, and Dragon Echo —
 //! everything applied before [`super::dora_yaku_layer`] (Dora, yaku, structure depth).
 
-use crate::core::hand::{DetectedSet, SetKind};
+use crate::core::hand::{DetectedMeld, MeldKind};
 use crate::core::relic::{RelicId, ScoreContext};
 use crate::core::tile::{Suit, Tile};
 
 use super::effective_relic::EffectiveRelics;
 use super::push_steps::{push_chips, push_gold, push_mult};
-use super::tea_bonus::{tea_harmony_chips, tea_purity_mult, tea_respect_chips, tea_tranquility_chips};
-use super::{meld_chip_bonus, tile_by_id, tile_is_debuffed, ScoreStep};
+use super::tea_bonus::{
+    tea_harmony_chips, tea_purity_mult, tea_respect_chips, tea_tranquility_chips,
+};
+use super::{ScoreStep, meld_chip_bonus, tile_by_id, tile_is_debuffed};
 
 #[inline]
 fn effective_point_value(t: &Tile, ctx: &ScoreContext<'_>) -> i32 {
@@ -22,7 +24,7 @@ fn effective_point_value(t: &Tile, ctx: &ScoreContext<'_>) -> i32 {
 pub(crate) fn apply_pre_yaku_scoring(
     ctx: &ScoreContext<'_>,
     tiles: &[Tile],
-    sets: &[DetectedSet],
+    sets: &[DetectedMeld],
     eff: EffectiveRelics,
     pair_double: bool,
     has_triplet_boost: bool,
@@ -50,18 +52,18 @@ pub(crate) fn apply_pre_yaku_scoring(
 
     for s in sets {
         match s.kind {
-            SetKind::Triplet | SetKind::Kong if has_triplet_boost => {
+            MeldKind::Triplet | MeldKind::Kong if has_triplet_boost => {
                 push_chips(steps, chips, *mult, "Triplet Boost", 40);
             }
-            SetKind::Sequence if has_sequence_surge => {
+            MeldKind::Sequence if has_sequence_surge => {
                 push_chips(steps, chips, *mult, "Sequence Surge", 25);
             }
-            SetKind::Pair if has_pair_power => {
+            MeldKind::Pair if has_pair_power => {
                 push_chips(steps, chips, *mult, "Pair Power", 30);
             }
             _ => {}
         }
-        if matches!(s.kind, SetKind::Kong) && eff.has(ctx.relic.roster, RelicId::KongsBlessing) {
+        if matches!(s.kind, MeldKind::Kong) && eff.has(ctx.relic.roster, RelicId::KongsBlessing) {
             push_chips(steps, chips, *mult, "Kong's Blessing", 120);
         }
 
@@ -80,14 +82,14 @@ pub(crate) fn apply_pre_yaku_scoring(
     }
 
     let has_jade_serpent = eff.has(ctx.relic.roster, RelicId::JadeSerpent);
-    let has_red_serpent = eff.has(ctx.relic.roster, RelicId::RedSerpent);
-    let has_blue_serpent = eff.has(ctx.relic.roster, RelicId::BlueSerpent);
+    let has_ruby_serpent = eff.has(ctx.relic.roster, RelicId::RubySerpent);
+    let has_lapis_serpent = eff.has(ctx.relic.roster, RelicId::LapisSerpent);
     let has_edge_runner = eff.has(ctx.relic.roster, RelicId::EdgeRunner);
     let has_low_tide = eff.has(ctx.relic.roster, RelicId::LowTide);
     let has_high_tide = eff.has(ctx.relic.roster, RelicId::HighTide);
     if has_jade_serpent
-        || has_red_serpent
-        || has_blue_serpent
+        || has_ruby_serpent
+        || has_lapis_serpent
         || has_edge_runner
         || has_low_tide
         || has_high_tide
@@ -103,26 +105,26 @@ pub(crate) fn apply_pre_yaku_scoring(
                 if has_jade_serpent && t.suit == Suit::Bamboos {
                     push_chips(steps, chips, *mult, "Jade Serpent", 8);
                 }
-                if has_red_serpent && t.suit == Suit::Characters {
-                    push_chips(steps, chips, *mult, "Red Serpent", 8);
+                if has_ruby_serpent && t.suit == Suit::Characters {
+                    push_chips(steps, chips, *mult, "Ruby Serpent", 8);
                 }
-                if has_blue_serpent && t.suit == Suit::Circles {
-                    push_chips(steps, chips, *mult, "Blue Serpent", 8);
+                if has_lapis_serpent && t.suit == Suit::Dots {
+                    push_chips(steps, chips, *mult, "Lapis Serpent", 8);
                 }
                 if has_edge_runner
-                    && matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles)
+                    && matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Dots)
                     && (t.rank == 1 || t.rank == 9)
                 {
                     push_chips(steps, chips, *mult, "Edge Runner", 12);
                 }
                 if has_low_tide
-                    && matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles)
+                    && matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Dots)
                     && t.rank <= 3
                 {
                     push_chips(steps, chips, *mult, "Low Tide", 6);
                 }
                 if has_high_tide
-                    && matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles)
+                    && matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Dots)
                     && t.rank >= 7
                 {
                     push_chips(steps, chips, *mult, "High Tide", 6);
@@ -132,14 +134,16 @@ pub(crate) fn apply_pre_yaku_scoring(
     }
 
     if pair_double {
-        let pair_count = sets.iter().filter(|s| s.kind == SetKind::Pair).count() as i32;
+        let pair_count = sets.iter().filter(|s| s.kind == MeldKind::Pair).count() as i32;
         if pair_count > 0 {
             push_chips(steps, chips, *mult, "Pair Double (rule)", 30 * pair_count);
         }
     }
 
     if eff.has(ctx.relic.roster, RelicId::TilePolisher) {
-        let bonus = ctx.relic.counters
+        let bonus = ctx
+            .relic
+            .counters
             .get(&RelicId::TilePolisher)
             .copied()
             .unwrap_or(0);
@@ -148,7 +152,10 @@ pub(crate) fn apply_pre_yaku_scoring(
         }
     }
 
-    if eff.has(ctx.relic.roster, RelicId::LastBreath) && ctx.round.is_final_play && ctx.structure.is_some() {
+    if eff.has(ctx.relic.roster, RelicId::LastBreath)
+        && ctx.round.is_final_play
+        && ctx.structure.is_some()
+    {
         let mut retrigger_chips = 0i32;
         for s in sets {
             for &tid in &s.tile_ids {
@@ -186,7 +193,7 @@ pub(crate) fn apply_pre_yaku_scoring(
         for s in sets {
             for &tid in &s.tile_ids {
                 if let Some(t) = tile_by_id(tiles, tid)
-                    && matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles)
+                    && matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Dots)
                     && t.rank <= 4
                 {
                     retrigger += effective_point_value(t, ctx);
@@ -203,7 +210,7 @@ pub(crate) fn apply_pre_yaku_scoring(
         for s in sets {
             for &tid in &s.tile_ids {
                 if let Some(t) = tile_by_id(tiles, tid)
-                    && matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Circles)
+                    && matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Dots)
                     && t.rank >= 6
                 {
                     retrigger += effective_point_value(t, ctx);
@@ -216,7 +223,9 @@ pub(crate) fn apply_pre_yaku_scoring(
     }
 
     if eff.has(ctx.relic.roster, RelicId::RustlingGooseEgg) {
-        let charges = ctx.relic.counters
+        let charges = ctx
+            .relic
+            .counters
             .get(&RelicId::RustlingGooseEgg)
             .copied()
             .unwrap_or(0);
@@ -236,7 +245,9 @@ pub(crate) fn apply_pre_yaku_scoring(
     }
 
     if eff.has(ctx.relic.roster, RelicId::TeaCeremony) {
-        let phase = ctx.relic.counters
+        let phase = ctx
+            .relic
+            .counters
             .get(&RelicId::TeaCeremony)
             .copied()
             .unwrap_or(0)
@@ -267,8 +278,8 @@ pub(crate) fn apply_pre_yaku_scoring(
     }
 
     if eff.has(ctx.relic.roster, RelicId::GhostHand) && !ctx.tiles.hand_for_ghost.is_empty() {
-        use std::collections::HashSet;
-        let scored_ids: HashSet<u32> = sets
+        use rustc_hash::FxHashSet;
+        let scored_ids: FxHashSet<u32> = sets
             .iter()
             .flat_map(|s| s.tile_ids.iter().copied())
             .collect();
@@ -285,7 +296,9 @@ pub(crate) fn apply_pre_yaku_scoring(
     }
 
     if eff.has(ctx.relic.roster, RelicId::RiverRunner) {
-        let bonus = ctx.relic.counters
+        let bonus = ctx
+            .relic
+            .counters
             .get(&RelicId::RiverRunner)
             .copied()
             .unwrap_or(0);
@@ -295,7 +308,9 @@ pub(crate) fn apply_pre_yaku_scoring(
     }
 
     if eff.has(ctx.relic.roster, RelicId::MeltingIce) {
-        let ice_chips = ctx.relic.counters
+        let ice_chips = ctx
+            .relic
+            .counters
             .get(&RelicId::MeltingIce)
             .copied()
             .unwrap_or(0);
@@ -310,7 +325,9 @@ pub(crate) fn apply_pre_yaku_scoring(
         // `apply_scored_melds` at cash-in time (each devoured honor adds
         // 20 chips and the tile is permanently removed from the wall).
         push_chips(steps, chips, *mult, "Taotie", 80);
-        let devoured_chips = ctx.relic.counters
+        let devoured_chips = ctx
+            .relic
+            .counters
             .get(&RelicId::Taotie)
             .copied()
             .unwrap_or(0);
@@ -340,7 +357,7 @@ pub(crate) fn apply_pre_yaku_scoring(
                 match enh {
                     TileEnhancement::Pearl => meld_has_pearl = true,
                     TileEnhancement::Gilded => {
-                        if !matches!(s.kind, SetKind::Pair) {
+                        if !matches!(s.kind, MeldKind::Pair) {
                             gilded_gold += 1;
                         }
                     }
@@ -358,7 +375,14 @@ pub(crate) fn apply_pre_yaku_scoring(
             push_chips(steps, chips, *mult, "Pearl Talisman", PEARL_CHIPS_PER_MELD);
         }
         if gilded_gold > 0 {
-            push_gold(steps, flower_gold, *chips, *mult, "Gilded Talisman", gilded_gold);
+            push_gold(
+                steps,
+                flower_gold,
+                *chips,
+                *mult,
+                "Gilded Talisman",
+                gilded_gold,
+            );
         }
         for _ in 0..polychrome_melds {
             let delta = *mult * 0.2;
@@ -378,39 +402,25 @@ pub(crate) fn apply_pre_yaku_scoring(
                 if t.suit != Suit::Flower || tile_is_debuffed(t, ctx.tiles.debuffs) {
                     continue;
                 }
-                let mut score_flower = |suffix: &str| {
-                    match t.rank {
-                        1 => push_chips(
-                            steps,
-                            chips,
-                            *mult,
-                            format!("Plum Blossom{suffix}"),
-                            40,
-                        ),
-                        2 => push_mult(
-                            steps,
-                            *chips,
-                            mult,
-                            format!("Orchid{suffix}"),
-                            1.5,
-                        ),
-                        3 => push_chips(
-                            steps,
-                            chips,
-                            *mult,
-                            format!("Chrysanthemum{suffix}"),
-                            15 * meld_count,
-                        ),
-                        4 => push_gold(
-                            steps,
-                            flower_gold,
-                            *chips,
-                            *mult,
-                            format!("Bamboo{suffix}"),
-                            4,
-                        ),
-                        _ => {}
-                    }
+                let mut score_flower = |suffix: &str| match t.rank {
+                    1 => push_chips(steps, chips, *mult, format!("Plum Blossom{suffix}"), 40),
+                    2 => push_mult(steps, *chips, mult, format!("Orchid{suffix}"), 1.5),
+                    3 => push_chips(
+                        steps,
+                        chips,
+                        *mult,
+                        format!("Chrysanthemum{suffix}"),
+                        15 * meld_count,
+                    ),
+                    4 => push_gold(
+                        steps,
+                        flower_gold,
+                        *chips,
+                        *mult,
+                        format!("Bamboo{suffix}"),
+                        4,
+                    ),
+                    _ => {}
                 };
                 score_flower("");
                 for _ in 0..garden_keeper_passes {
@@ -439,7 +449,7 @@ pub(crate) fn apply_pre_yaku_scoring(
         let is_dragon_trip: Vec<bool> = sets
             .iter()
             .map(|s| {
-                if !matches!(s.kind, SetKind::Triplet | SetKind::Kong) {
+                if !matches!(s.kind, MeldKind::Triplet | MeldKind::Kong) {
                     return false;
                 }
                 s.tile_ids

@@ -121,7 +121,7 @@ def pack(set_dir: Path) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Pack a tile-set directory into an atlas.")
-    ap.add_argument("set_dir", type=Path, help="Path to assets/sets/<name>/")
+    ap.add_argument("set_dir", type=Path, help="Path to assets/textures/tile_sets/<name>/")
     args = ap.parse_args()
     pack(args.set_dir)
 

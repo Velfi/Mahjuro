@@ -1,6 +1,6 @@
 //! Structure scoring: commit melds from hand into a held area, then trigger to score.
 
-use crate::core::hand::DetectedSet;
+use crate::core::hand::DetectedMeld;
 use crate::core::rules::RuleModifier;
 use crate::core::tile::{Suit, Tile};
 use crate::core::yaku::{YakuKind, detect_yaku_with_wind, is_complete_winning_hand};
@@ -25,15 +25,15 @@ pub struct StructureTriggerMeta {
 }
 
 /// Sum of meld base chip bonuses — exposed for tier HUD.
-pub fn banked_meld_chips(sets: &[DetectedSet]) -> i32 {
-    use crate::core::hand::SetKind;
+pub fn banked_meld_chips(sets: &[DetectedMeld]) -> i32 {
+    use crate::core::hand::MeldKind;
     sets.iter()
         .map(|s| match s.kind {
-            SetKind::Pair => 18,
-            SetKind::Sequence => 28,
-            SetKind::Triplet => 50,
-            SetKind::Kong => 80,
-            SetKind::Single => 0,
+            MeldKind::Pair => 18,
+            MeldKind::Sequence => 28,
+            MeldKind::Triplet => 50,
+            MeldKind::Kong => 80,
+            MeldKind::Single => 0,
         })
         .sum()
 }
@@ -44,11 +44,11 @@ pub fn structure_depth_mult_bonus(meld_count: u32) -> f64 {
     extra.min(3.0)
 }
 
-pub fn is_winning_structure_shape(tiles: &[Tile], sets: &[DetectedSet]) -> bool {
+pub fn is_winning_structure_shape(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
     is_complete_winning_hand(tiles, sets)
 }
 
-fn structure_contains_honor(tiles: &[Tile], sets: &[DetectedSet]) -> bool {
+fn structure_contains_honor(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
     sets.iter().any(|set| {
         set.tile_ids.iter().any(|id| {
             tiles
@@ -61,7 +61,7 @@ fn structure_contains_honor(tiles: &[Tile], sets: &[DetectedSet]) -> bool {
 
 fn yaku_non_empty_filtered(
     tiles: &[Tile],
-    sets: &[DetectedSet],
+    sets: &[DetectedMeld],
     round_wind: Option<u8>,
     available: &[YakuKind],
 ) -> bool {
@@ -77,7 +77,7 @@ fn yaku_non_empty_filtered(
 /// Whether the player may press Trigger.
 pub fn can_trigger_structure(
     tiles: &[Tile],
-    sets: &[DetectedSet],
+    sets: &[DetectedMeld],
     round_wind: Option<u8>,
     available_yaku: &[YakuKind],
     rules: &[RuleModifier],
@@ -100,7 +100,7 @@ pub fn can_trigger_structure(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::hand::SetKind;
+    use crate::core::hand::MeldKind;
 
     fn tile(suit: Suit, rank: u8, id: u32) -> Tile {
         Tile::new(suit, rank, id)
@@ -113,8 +113,8 @@ mod tests {
             tile(Suit::Bamboos, 5, 1),
             tile(Suit::Bamboos, 5, 2),
         ];
-        let sets = vec![DetectedSet {
-            kind: SetKind::Triplet,
+        let sets = vec![DetectedMeld {
+            kind: MeldKind::Triplet,
             tile_ids: vec![0, 1, 2],
         }];
         assert!(!can_trigger_structure(
@@ -133,8 +133,8 @@ mod tests {
             tile(Suit::Dragon, 1, 1),
             tile(Suit::Dragon, 1, 2),
         ];
-        let sets = vec![DetectedSet {
-            kind: SetKind::Triplet,
+        let sets = vec![DetectedMeld {
+            kind: MeldKind::Triplet,
             tile_ids: vec![0, 1, 2],
         }];
         assert!(can_trigger_structure(
@@ -157,12 +157,12 @@ mod tests {
             tile(Suit::Dragon, 1, 5),
         ];
         let sets = vec![
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![0, 1, 2],
             },
-            DetectedSet {
-                kind: SetKind::Triplet,
+            DetectedMeld {
+                kind: MeldKind::Triplet,
                 tile_ids: vec![3, 4, 5],
             },
         ];

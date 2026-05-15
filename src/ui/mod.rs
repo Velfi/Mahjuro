@@ -1,4 +1,6 @@
 pub mod button_prompts;
+pub mod chronicle_dashboard;
+pub mod colored_keywords;
 pub mod focus_nav;
 pub mod glyph_source;
 pub mod input;
@@ -10,6 +12,7 @@ pub mod placement;
 pub mod prompt_hold_ring;
 pub mod scene_layout;
 pub mod smooth_scroll;
+pub mod styled_text;
 pub mod tooltip;
 pub mod widget;
 pub mod widget_tree;

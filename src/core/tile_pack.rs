@@ -1,9 +1,60 @@
 //! Tile packs — purchasable booster packs that permanently add extra tiles
 //! to the wall for the rest of the run.
+//!
+//! Shop copy, prices, and box-art filenames live in `assets/data/tile_packs.json`.
+//! Tile generation (`generate_tiles`) and foil / seal colors (see
+//! [`crate::render::pack_palette`]) stay in Rust.
+
+use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
 use super::tile::{Suit, Tile, TileEnhancement};
+use crate::core::json_asset::load_json_asset;
+
+#[derive(Deserialize)]
+struct TilePackPresentationRaw {
+    id: TilePackKind,
+    name: String,
+    description: String,
+    shop_price: u32,
+    texture_file: String,
+}
+
+struct TilePackPresentation {
+    name: &'static str,
+    description: &'static str,
+    shop_price: u32,
+    texture_file: &'static str,
+}
+
+fn tile_pack_presentations() -> &'static HashMap<TilePackKind, TilePackPresentation> {
+    static MAP: OnceLock<HashMap<TilePackKind, TilePackPresentation>> = OnceLock::new();
+    MAP.get_or_init(|| {
+        const PATH: &str = "data/tile_packs.json";
+        let raw: Vec<TilePackPresentationRaw> = load_json_asset(PATH, "tile pack data");
+        raw.into_iter()
+            .map(|r| {
+                (
+                    r.id,
+                    TilePackPresentation {
+                        name: Box::leak(r.name.into_boxed_str()),
+                        description: Box::leak(r.description.into_boxed_str()),
+                        shop_price: r.shop_price,
+                        texture_file: Box::leak(r.texture_file.into_boxed_str()),
+                    },
+                )
+            })
+            .collect()
+    })
+}
+
+fn tile_pack_presentation(kind: TilePackKind) -> &'static TilePackPresentation {
+    tile_pack_presentations()
+        .get(&kind)
+        .unwrap_or_else(|| panic!("tile pack data missing for {kind:?}"))
+}
 
 /// Cheap deterministic PRNG seeded from a u32 (xorshift32).
 fn pack_rng_next(state: &mut u32) -> u32 {
@@ -34,18 +85,19 @@ pub const PACK_TILE_ID_BASE: u32 = 1000;
 pub const PACK_ID_STRIDE: u32 = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TilePackKind {
-    /// +7 honor tiles: one of each wind (E/S/W/N) + one of each dragon (R/G/W).
+    #[serde(alias = "Honors")]
     Honors,
-    /// +6 terminal tiles: one extra 1 and one extra 9 per numbered suit.
+    #[serde(alias = "Terminals")]
     Terminals,
-    /// +4 flower wildcards (F1–F4), doubling the flower pool.
+    #[serde(alias = "Flowers")]
     Flowers,
-    /// +8 bamboo suit tiles (ranks 1–8).
+    #[serde(alias = "BambooGrove")]
     BambooGrove,
-    /// +8 circle suit tiles (ranks 1–8).
+    #[serde(alias = "CoinCache")]
     CoinCache,
-    /// +8 character suit tiles (ranks 1–8).
+    #[serde(alias = "ScrollLibrary")]
     ScrollLibrary,
 }
 
@@ -62,89 +114,41 @@ impl TilePackKind {
     }
 
     pub fn name(self) -> &'static str {
-        match self {
-            Self::Honors => "Honors Pack",
-            Self::Terminals => "Terminals Pack",
-            Self::Flowers => "Flowers Pack",
-            Self::BambooGrove => "Bamboo Grove",
-            Self::CoinCache => "Coin Cache",
-            Self::ScrollLibrary => "Scroll Library",
-        }
+        tile_pack_presentation(self).name
     }
 
     pub fn description(self) -> &'static str {
-        match self {
-            Self::Honors => "+7 honor tiles to the wall (winds + dragons)",
-            Self::Terminals => "+6 terminal tiles to the wall (1s and 9s)",
-            Self::Flowers => "+4 flower wildcards to the wall",
-            Self::BambooGrove => "+8 bamboo tiles to the wall",
-            Self::CoinCache => "+8 dots tiles to the wall",
-            Self::ScrollLibrary => "+8 character tiles to the wall",
-        }
+        tile_pack_presentation(self).description
     }
 
-    /// Foil wrapper tint for this pack kind. The pack body is rendered as
-    /// shiny metallic foil in this colour; the pack art is composited on top
-    /// as a decal via its alpha channel. Chosen to evoke each pack's theme
-    /// while staying muted enough that the decal art reads clearly.
+    /// Foil wrapper tint — the metallic surface tint multiplied by the
+    /// cover decal's transparent regions. Sourced from the canonical
+    /// per-pack table in [`crate::render::pack_palette`].
     pub fn foil_tint(self) -> [f32; 4] {
-        match self {
-            // Honors: imperial gold foil.
-            Self::Honors => [0.92, 0.78, 0.38, 1.0],
-            // Terminals: weathered copper/bronze.
-            Self::Terminals => [0.78, 0.52, 0.32, 1.0],
-            // Flowers: soft rose-pink foil.
-            Self::Flowers => [0.92, 0.62, 0.70, 1.0],
-            // Bamboo Grove: jade green.
-            Self::BambooGrove => [0.48, 0.78, 0.52, 1.0],
-            // Coin Cache: polished silver with a cool cast.
-            Self::CoinCache => [0.78, 0.82, 0.88, 1.0],
-            // Scroll Library: lacquer indigo.
-            Self::ScrollLibrary => [0.42, 0.48, 0.78, 1.0],
-        }
+        crate::render::pack_palette::for_kind(self).foil
     }
 
     /// Asset filename (without directory) for this pack's box art texture.
+    /// Must match the slug baked into [`crate::render::pack_palette`] and
+    /// the files under `assets/textures/tile_packs/`.
     pub fn asset_filename(self) -> &'static str {
-        match self {
-            Self::Honors => "pack_honors.png",
-            Self::Terminals => "pack_terminals.png",
-            Self::Flowers => "pack_flowers.png",
-            Self::BambooGrove => "pack_bamboo_grove.png",
-            Self::CoinCache => "pack_coin_cache.png",
-            Self::ScrollLibrary => "pack_scroll_library.png",
-        }
+        tile_pack_presentation(self).texture_file
     }
 
-    /// Wax-seal color for the merchant-envelope detail centered on the pack
-    /// face. Each pack picks a wax tone that contrasts with its [`foil_tint`]
-    /// so the seal reads as a focal point at thumbnail size — typically a
-    /// deep, slightly warm red, shifted per kind to harmonize with the
-    /// wrapper. Used by the seal-baking pipeline (`scripts/bake_pack_seals.py`)
-    /// and as the hover-glow accent for the pack on the shop counter.
+    /// Wax-seal color for the merchant-envelope detail centered on the
+    /// pack face. Used both at bake time (`scripts/bake_pack_seals.py`,
+    /// reading `tools/pack_palette.json`) and at runtime as the hover
+    /// halo on the shop counter — the two MUST agree, which is why the
+    /// canonical value lives in [`crate::render::pack_palette`].
+    ///
+    /// Each pack nudges off canonical `CINNABAR` so the seals read as a
+    /// *family* of ceremonial reds rather than six unrelated splotches.
     pub fn seal_color(self) -> [f32; 4] {
-        match self {
-            // Honors (gold foil) — imperial cinnabar.
-            Self::Honors => [0.74, 0.18, 0.16, 1.0],
-            // Terminals (copper foil) — oxblood, deeper than the wrapper.
-            Self::Terminals => [0.56, 0.14, 0.12, 1.0],
-            // Flowers (rose foil) — plum wax so it doesn't melt into the wrapper.
-            Self::Flowers => [0.52, 0.14, 0.30, 1.0],
-            // Bamboo (jade foil) — vermilion, classic temple-stamp red.
-            Self::BambooGrove => [0.78, 0.18, 0.14, 1.0],
-            // Coin Cache (silver foil) — burgundy.
-            Self::CoinCache => [0.58, 0.10, 0.18, 1.0],
-            // Scroll Library (indigo foil) — sealing-wax red.
-            Self::ScrollLibrary => [0.72, 0.18, 0.18, 1.0],
-        }
+        crate::render::pack_palette::for_kind(self).seal
     }
 
     pub fn shop_price(self) -> u32 {
-        match self {
-            Self::Flowers => 5,
-            Self::Honors | Self::Terminals => 6,
-            Self::BambooGrove | Self::CoinCache | Self::ScrollLibrary => 7,
-        }
+        tile_pack_presentation(self).shop_price
     }
 
     /// Generate the extra tiles for this pack. IDs start at `start_id` and
@@ -189,7 +193,7 @@ impl TilePackKind {
                 // 6 terminal tiles — still all 1s and 9s, but the suit
                 // distribution is randomized (could be 3 bamboo-1s and no
                 // character-1, etc.)
-                let suits = [Suit::Characters, Suit::Bamboos, Suit::Circles];
+                let suits = [Suit::Characters, Suit::Bamboos, Suit::Dots];
                 for &terminal_rank in &[1u8, 9] {
                     for _ in 0..3 {
                         let suit = suits[(pack_rng_next(&mut rng_state) as usize) % 3];
@@ -213,7 +217,7 @@ impl TilePackKind {
                 let mut ranks: Vec<u8> = (1..=9).collect();
                 seeded_shuffle(&mut ranks, rng_state);
                 for &rank in ranks.iter().take(8) {
-                    push(Suit::Circles, rank, &mut out);
+                    push(Suit::Dots, rank, &mut out);
                 }
             }
             Self::ScrollLibrary => {
@@ -232,5 +236,44 @@ impl TilePackKind {
     /// at purchase time, if any.
     pub fn pre_enhancement(self) -> Option<TileEnhancement> {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::render::pack_palette;
+
+    #[test]
+    fn every_tile_pack_variant_has_one_data_entry() {
+        const ALL: &[TilePackKind] = &[
+            TilePackKind::Honors,
+            TilePackKind::Terminals,
+            TilePackKind::Flowers,
+            TilePackKind::BambooGrove,
+            TilePackKind::CoinCache,
+            TilePackKind::ScrollLibrary,
+        ];
+        let map = tile_pack_presentations();
+        assert_eq!(
+            map.len(),
+            ALL.len(),
+            "tile_packs.json entry count does not match TilePackKind variant count"
+        );
+        for &k in ALL {
+            let _ = tile_pack_presentation(k);
+        }
+    }
+
+    #[test]
+    fn pack_display_names_match_pack_palette() {
+        for &k in TilePackKind::all() {
+            assert_eq!(
+                k.name(),
+                pack_palette::for_kind(k).display_name,
+                "tile_packs.json name must match pack_palette for {:?}",
+                k
+            );
+        }
     }
 }

@@ -14,8 +14,70 @@ impl WgpuRenderer {
             .start(frames, self.size.width, self.size.height);
     }
 
+    /// Returns `true` exactly once, on the frame after a GPU profile session
+    /// finishes and emits its report. Polled from the app loop to play a
+    /// confirmation SFX so the player knows the capture is done.
+    pub fn take_gpu_profile_just_completed(&mut self) -> bool {
+        self.gpu_profiler.take_just_completed()
+    }
+
     pub fn set_active_scene(&mut self, key: Option<&'static str>) {
         self.active_scene_key = key;
+    }
+
+    /// Push the per-scene tonemap + VHS tuning the next `render` call should
+    /// upload. The renderer keeps the values across frames; the Options
+    /// "VHS overlay" gate (passed via `RenderSettings.vhs_enabled`) can
+    /// hard-mute the VHS branch without zeroing the per-amount values
+    /// here, so toggling the option restores the previously tuned look.
+    pub fn set_tonemap_tuning(&mut self, tuning: &crate::game::tonemap_tuning::TonemapTuning) {
+        self.tonemap_exposure = tuning.exposure;
+        self.tonemap_vhs_chromatic = tuning.vhs_chromatic;
+        self.tonemap_vhs_scanline = tuning.vhs_scanline;
+        self.tonemap_vhs_grain = tuning.vhs_grain;
+        self.tonemap_vhs_vignette = tuning.vhs_vignette;
+        // Per-scene "VHS on" comes from any non-zero amplitude — a scene
+        // that tunes every amount to 0 reads as "VHS effectively off"
+        // here even when the Options master toggle is on. This lets
+        // per-scene saves disable the look without players having to
+        // toggle the global.
+        self.tonemap_vhs_enabled = tuning.vhs_chromatic > 0.0
+            || tuning.vhs_scanline > 0.0
+            || tuning.vhs_grain > 0.0
+            || tuning.vhs_vignette > 0.0;
+    }
+
+    /// True when the showcase decal atlas for the active tileset is built and
+    /// resident on the GPU. The atlas is the single biggest CPU cost in the
+    /// renderer (≈3 s of `image::resize` + PNG decode for 336 face decals on
+    /// first use); the splash scene gates its dismissal on this so the bake
+    /// happens behind the splash plate rather than freezing the first
+    /// gameplay frame.
+    pub fn showcase_decal_atlas_baked(&self) -> bool {
+        self.showcase_decal_atlas.is_some()
+    }
+
+    /// Pre-bake the showcase decal atlas for `tileset_name`, blocking until
+    /// the GPU upload is queued. Idempotent for an already-baked tileset.
+    /// Called from the splash scene's tick so the cost is amortised behind
+    /// the splash plate; subsequent renders skip the lazy bake in
+    /// `runtime/showcase_tiles.rs`.
+    ///
+    /// Also seeds `tile_set` so `apply_render_settings` doesn't immediately
+    /// invalidate the atlas on the first real `render()` call (its
+    /// "tileset changed" check compares against this field).
+    pub fn prebake_showcase_decal_atlas(&mut self, tileset_name: &str) {
+        if self.showcase_decal_atlas.is_some()
+            && self.showcase_decal_atlas_tileset.as_deref() == Some(tileset_name)
+        {
+            return;
+        }
+        // Seed tile_set so the next apply_render_settings does not see a
+        // mismatch and clear the atlas we are about to build.
+        if self.tile_set.as_deref() != Some(tileset_name) {
+            self.tile_set = Some(tileset_name.to_owned());
+        }
+        self.ensure_showcase_decal_atlas(tileset_name);
     }
 
     /// Returns `true` while boot-time async decode threads (relic images and/or
@@ -63,9 +125,9 @@ impl WgpuRenderer {
         self.debug_arrange_override = ov;
     }
 
-    /// Scale factor for embedded `Shop.glb` room geometry vs window height. Must match shop marker math.
-    pub fn set_shop_env_height_scale(&mut self, v: f32) {
-        self.shop_env_height_scale = v;
+    /// Scale factor for embedded glTF room geometry vs window height. Must match shop/hallway/archive marker math.
+    pub fn set_room_gltf_height_scale(&mut self, v: f32) {
+        self.room_gltf_height_scale = v;
     }
 
     /// Shop room tonemap + `lit_mesh` glTF punctual scale. Set each frame from app debug tuning.
@@ -83,39 +145,8 @@ impl WgpuRenderer {
     }
 
     #[inline]
-    pub(crate) fn shop_env_height_scale(&self) -> f32 {
-        self.shop_env_height_scale
-    }
-
-    /// Push art-direction knobs for the procedural mountain-haze shader
-    /// into its uniform buffer. Called once per frame from `main.rs` so
-    /// debug-overlay edits take effect immediately.
-    ///
-    /// When `wall_half_width_uv` is `0`, fog spans the full screen horizontally
-    /// (legacy horizon wash). Gameplay passes a positive half-width for a
-    /// vertical fog slab centered at `wall_center_x`.
-    pub fn set_haze_tuning(
-        &self,
-        density: f32,
-        r: f32,
-        g: f32,
-        b: f32,
-        horizon_y: f32,
-        drift_speed: f32,
-        wall_center_x: f32,
-        wall_half_width_uv: f32,
-    ) {
-        let uniform = HazeUniform {
-            color_density: [r, g, b, density.max(0.0)],
-            params: [
-                horizon_y.clamp(0.0, 1.0),
-                drift_speed.max(0.0),
-                wall_center_x.clamp(0.0, 1.0),
-                wall_half_width_uv.max(0.0),
-            ],
-        };
-        self.queue
-            .write_buffer(&self.haze_uniform_buffer, 0, bytemuck::bytes_of(&uniform));
+    pub(crate) fn room_gltf_height_scale(&self) -> f32 {
+        self.room_gltf_height_scale
     }
 
     /// Replace the committed-rotation map (used to apply each Placement's
@@ -123,7 +154,7 @@ impl WgpuRenderer {
     /// from `App` with the active scene's entries.
     pub fn set_committed_arrange_rotations(
         &mut self,
-        rotations: std::collections::HashMap<String, [f32; 3]>,
+        rotations: rustc_hash::FxHashMap<String, [f32; 3]>,
     ) {
         self.committed_arrange_rotations = rotations;
     }

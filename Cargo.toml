@@ -1,15 +1,18 @@
 [package]
 name = "mahjuro"
-version = "0.5.0-7"
+version = "0.5.0-9"
 edition = "2024"
 
 [profile.release-with-debug]
 inherits = "release"
 debug = true
 
-# Enable a small amount of optimization in the dev profile.
+# Enable a moderate amount of optimization in the dev profile. bumped from 1
+# → 2 so the per-frame render path (cmd-walk, instance allocation, decomp
+# recursion) stays usable in editor playtesting without paying full release
+# build times.
 [profile.dev]
-opt-level = 1
+opt-level = 2
 
 # Enable a large amount of optimization in the dev profile for dependencies.
 [profile.dev.package."*"]
@@ -50,6 +53,7 @@ rodio = { version = "0.19", features = ["vorbis", "mp3"] }
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
 rayon = "1.11.0"
 indicatif = { version = "0.17", features = ["rayon"] }
+rustc-hash = "2.1"
 human_format = "1.2.1"
 steamworks = { version = "0.13", features = ["raw-bindings"] }
 resvg = "0.44"

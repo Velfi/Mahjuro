@@ -1,8 +1,16 @@
 //! Skip-reward tags — Balatro-style one-time bonuses awarded when the player
 //! skips a Small or Big blind. Each ante rolls one tag per skippable blind;
 //! the tag is shown on the skip altar so the player can weigh skip vs play.
+//!
+//! Player-facing copy, rarity tier, pool gates, and bot gold equivalents live
+//! in `assets/data/tags.json`. Rolling (`roll_tag`) stays here.
+
+use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
+
+use crate::core::json_asset::load_json_asset;
 
 /// A one-time bonus awarded for skipping a blind.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -36,7 +44,8 @@ pub enum TagKind {
     WideHand,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TagRarity {
     Common,
     Uncommon,
@@ -53,55 +62,68 @@ impl TagRarity {
     }
 }
 
+#[derive(Deserialize)]
+struct TagPresentationRaw {
+    id: TagKind,
+    name: String,
+    description: String,
+    rarity: TagRarity,
+    min_ante: u32,
+    gold_value: u32,
+}
+
+struct TagPresentation {
+    name: &'static str,
+    description: &'static str,
+    rarity: TagRarity,
+    min_ante: u32,
+    gold_value: u32,
+}
+
+fn tag_presentations() -> &'static HashMap<TagKind, TagPresentation> {
+    static MAP: OnceLock<HashMap<TagKind, TagPresentation>> = OnceLock::new();
+    MAP.get_or_init(|| {
+        const PATH: &str = "data/tags.json";
+        let raw: Vec<TagPresentationRaw> = load_json_asset(PATH, "tag data");
+        raw.into_iter()
+            .map(|r| {
+                (
+                    r.id,
+                    TagPresentation {
+                        name: Box::leak(r.name.into_boxed_str()),
+                        description: Box::leak(r.description.into_boxed_str()),
+                        rarity: r.rarity,
+                        min_ante: r.min_ante,
+                        gold_value: r.gold_value,
+                    },
+                )
+            })
+            .collect()
+    })
+}
+
+fn tag_presentation(kind: TagKind) -> &'static TagPresentation {
+    tag_presentations()
+        .get(&kind)
+        .unwrap_or_else(|| panic!("tag data missing for {kind:?}"))
+}
+
 impl TagKind {
     pub fn name(self) -> &'static str {
-        match self {
-            TagKind::GoldIngot => "Gold Ingot",
-            TagKind::TreasureChest => "Treasure Chest",
-            TagKind::FreeReroll => "Free Reroll",
-            TagKind::PatronGift => "Patron's Gift",
-            TagKind::RichStock => "Rich Stock",
-            TagKind::ZodiacBlessing => "Zodiac Blessing",
-            TagKind::BonusPlay => "Bonus Play",
-            TagKind::BonusDiscard => "Bonus Discard",
-            TagKind::WideHand => "Wide Hand",
-        }
+        tag_presentation(self).name
     }
 
     pub fn description(self) -> &'static str {
-        match self {
-            TagKind::GoldIngot => "+8 gold",
-            TagKind::TreasureChest => "+20 gold",
-            TagKind::FreeReroll => "Next shop reroll is free",
-            TagKind::PatronGift => "One shop relic is free",
-            TagKind::RichStock => "+2 relics in next shop",
-            TagKind::ZodiacBlessing => "Gain a random Zodiac",
-            TagKind::BonusPlay => "+1 play next round",
-            TagKind::BonusDiscard => "+1 discard next round",
-            TagKind::WideHand => "+2 hand size next round",
-        }
+        tag_presentation(self).description
     }
 
     pub fn rarity(self) -> TagRarity {
-        match self {
-            TagKind::GoldIngot => TagRarity::Common,
-            TagKind::FreeReroll => TagRarity::Common,
-            TagKind::BonusPlay => TagRarity::Common,
-            TagKind::BonusDiscard => TagRarity::Common,
-            TagKind::PatronGift => TagRarity::Uncommon,
-            TagKind::RichStock => TagRarity::Uncommon,
-            TagKind::ZodiacBlessing => TagRarity::Uncommon,
-            TagKind::WideHand => TagRarity::Uncommon,
-            TagKind::TreasureChest => TagRarity::Rare,
-        }
+        tag_presentation(self).rarity
     }
 
     /// Minimum ante required for this tag to appear in the pool.
     pub fn min_ante(self) -> u32 {
-        match self {
-            TagKind::TreasureChest => 3,
-            _ => 1,
-        }
+        tag_presentation(self).min_ante
     }
 
     /// All tag variants.
@@ -121,17 +143,7 @@ impl TagKind {
 
     /// Approximate gold-equivalent value for bot skip evaluation.
     pub fn gold_value(self) -> u32 {
-        match self {
-            TagKind::GoldIngot => 8,
-            TagKind::TreasureChest => 20,
-            TagKind::FreeReroll => 5,
-            TagKind::PatronGift => 10,
-            TagKind::RichStock => 6,
-            TagKind::ZodiacBlessing => 6,
-            TagKind::BonusPlay => 8,
-            TagKind::BonusDiscard => 5,
-            TagKind::WideHand => 7,
-        }
+        tag_presentation(self).gold_value
     }
 }
 
@@ -158,4 +170,38 @@ pub fn roll_tag(ante: u32, exclude: Option<TagKind>) -> TagKind {
     }
     // Fallback (shouldn't happen if pool is non-empty).
     *pool.last().unwrap_or(&TagKind::GoldIngot)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_tag_variant_has_one_data_entry() {
+        let map = tag_presentations();
+        assert_eq!(
+            map.len(),
+            TagKind::all().len(),
+            "tags.json entry count does not match TagKind variant count"
+        );
+        for &k in TagKind::all() {
+            let _ = tag_presentation(k);
+        }
+    }
+
+    #[test]
+    fn json_row_order_matches_tag_kind_all() {
+        const PATH: &str = "data/tags.json";
+        let raw: Vec<TagPresentationRaw> = load_json_asset(PATH, "tag data");
+        let all = TagKind::all();
+        assert_eq!(raw.len(), all.len(), "tags.json row count");
+        for (i, row) in raw.iter().enumerate() {
+            assert_eq!(
+                row.id, all[i],
+                "tags.json row {i}: id {:?} does not match TagKind::all()[{i}] {:?}",
+                row.id,
+                all[i]
+            );
+        }
+    }
 }

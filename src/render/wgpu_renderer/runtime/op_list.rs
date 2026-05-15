@@ -27,7 +27,6 @@ pub(super) enum RenderOp {
     GoldenDust,
     MoonlitWater,
     SunlitWater,
-    MountainHaze,
     ShootingStarCascade,
     Table,
     QuadBatch {
@@ -49,10 +48,12 @@ pub(super) enum RenderOp {
     TextDraw(usize),
     TileFaceQuad(usize),
     PromptIconQuad(usize),
-    /// Imported shop room (`Shop.glb`), drawn like showcase tiles with identity model.
+    /// Imported shop room (`shop.glb`), drawn like showcase tiles with identity model.
     ShopEnvironment,
     /// Pick-blind hallway (`hallway.glb`).
     HallwayEnvironment,
+    /// Archive room (`archive.glb`).
+    ArchiveEnvironment,
     /// Marker: start a new Pass A subpass with depth cleared (HDR color unchanged).
     /// Emitted from [`crate::render::draw_cmd::DrawCmd::ClearSceneDepth`]. Never dispatched
     /// through [`super::process_op::WgpuRenderer::process_op`].
@@ -81,7 +82,6 @@ pub(super) enum DrawKind {
     Pack,
     Ribbon,
     Talisman,
-    Shrine,
     BugBody,
     BugWingL,
     BugWingR,

@@ -1,0 +1,86 @@
+{
+  "bosses": {
+    "suggestedFilename": "bosses.json",
+    "fields": [
+      { "key": "id", "type": "string", "readonly": true },
+      { "key": "name", "type": "string" },
+      { "key": "description", "type": "string" },
+      {
+        "key": "tier",
+        "type": "enum",
+        "options": ["soft", "medium", "hard", "final"]
+      },
+      { "key": "min_ante", "type": "number", "step": 1 }
+    ]
+  },
+  "yaku": {
+    "suggestedFilename": "yaku.json",
+    "fields": [
+      { "key": "id", "type": "string", "readonly": true },
+      { "key": "name", "type": "string" },
+      { "key": "mult_bonus", "type": "number", "step": "any" },
+      { "key": "chip_bonus", "type": "number", "step": 1 }
+    ]
+  },
+  "stakes": {
+    "suggestedFilename": "stakes.json",
+    "fields": [
+      { "key": "id", "type": "string", "readonly": true },
+      { "key": "label", "type": "string" },
+      { "key": "description", "type": "string" },
+      { "key": "base_target_mult", "type": "number", "step": "any" },
+      { "key": "price_multiplier", "type": "number", "step": "any" },
+      { "key": "reroll_base_cost", "type": "number", "step": 1 },
+      { "key": "boss_min_ante_floor", "type": "number", "step": 1 },
+      { "key": "starting_rules", "type": "json" }
+    ]
+  },
+  "tags": {
+    "suggestedFilename": "tags.json",
+    "fields": [
+      { "key": "id", "type": "string", "readonly": true },
+      { "key": "name", "type": "string" },
+      { "key": "description", "type": "string" },
+      {
+        "key": "rarity",
+        "type": "enum",
+        "options": ["common", "uncommon", "rare"]
+      },
+      { "key": "min_ante", "type": "number", "step": 1 },
+      { "key": "gold_value", "type": "number", "step": 1 }
+    ]
+  },
+  "talismans": {
+    "suggestedFilename": "talismans.json",
+    "fields": [
+      { "key": "id", "type": "string", "readonly": true },
+      { "key": "name", "type": "string" },
+      { "key": "description", "type": "string" },
+      { "key": "shop_price", "type": "number", "step": 1 },
+      { "key": "accent", "type": "json" }
+    ]
+  },
+  "tile_packs": {
+    "suggestedFilename": "tile_packs.json",
+    "fields": [
+      { "key": "id", "type": "string", "readonly": true },
+      { "key": "name", "type": "string" },
+      { "key": "description", "type": "string" },
+      { "key": "shop_price", "type": "number", "step": 1 },
+      { "key": "texture_file", "type": "string" }
+    ]
+  },
+  "zodiacs": {
+    "suggestedFilename": "zodiacs.json",
+    "defaultRibbonShopPrice": 6,
+    "fileLevelFields": [
+      { "key": "ribbon_shop_price", "type": "number", "step": 1 }
+    ],
+    "fields": [
+      { "key": "id", "type": "string", "readonly": true },
+      { "key": "name", "type": "string" },
+      { "key": "slug", "type": "string" },
+      { "key": "yaku", "type": "string" }
+    ]
+  }
+}

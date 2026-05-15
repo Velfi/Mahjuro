@@ -1,4 +1,4 @@
-use crate::core::hand::{DetectedSet, SetKind};
+use crate::core::hand::{DetectedMeld, MeldKind};
 use crate::core::relic::{RelicId, ScoreContext};
 use crate::core::rules::RuleModifier;
 use crate::core::tile::Tile;
@@ -12,7 +12,7 @@ use super::{
 
 pub fn score_sets_with_original(
     tiles: &[Tile],
-    sets: &[DetectedSet],
+    sets: &[DetectedMeld],
     ctx: &ScoreContext<'_>,
     rules: &[RuleModifier],
     original_tiles: &[Tile],
@@ -23,7 +23,7 @@ pub fn score_sets_with_original(
 #[cfg(test)]
 pub fn score_sets(
     tiles: &[Tile],
-    sets: &[DetectedSet],
+    sets: &[DetectedMeld],
     ctx: &ScoreContext<'_>,
     rules: &[RuleModifier],
 ) -> ScoreBreakdown {
@@ -32,7 +32,7 @@ pub fn score_sets(
 
 fn score_sets_inner(
     tiles: &[Tile],
-    sets: &[DetectedSet],
+    sets: &[DetectedMeld],
     ctx: &ScoreContext<'_>,
     rules: &[RuleModifier],
     original_tiles: Option<&[Tile]>,
@@ -64,10 +64,10 @@ fn score_sets_inner(
                 };
             }
         }
-        if pairs_zero && s.kind == SetKind::Pair {
+        if pairs_zero && s.kind == MeldKind::Pair {
             meld_contrib = 0;
         }
-        if sequences_halved && s.kind == SetKind::Sequence {
+        if sequences_halved && s.kind == MeldKind::Sequence {
             meld_contrib /= 2;
         }
         base_chips += meld_contrib;
@@ -145,6 +145,6 @@ fn score_sets_inner(
         final_mult,
         total,
         flower_gold,
-        scored_set_kinds: sets.iter().map(|s| s.kind).collect(),
+        scored_meld_kinds: sets.iter().map(|s| s.kind).collect(),
     }
 }

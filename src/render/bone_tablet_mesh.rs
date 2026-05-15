@@ -9,6 +9,7 @@
 //! pillow rather than a faceted chamfer.
 
 use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu};
+use crate::render::theme::color;
 use crate::render::tile_glb::Vertex3dTex;
 
 /// Corner radius as a fraction of the full extent. Drives the in-plane
@@ -97,7 +98,7 @@ pub fn build_bone_tablet_mesh() -> MeshCpu {
         indices,
         default_material: MaterialParams {
             kind: MaterialKind::Plain,
-            base_color: [0.97, 0.96, 0.94, 1.0],
+            base_color: color::PARCHMENT,
             specular_strength: 0.65,
             specular_power: 96.0,
         },

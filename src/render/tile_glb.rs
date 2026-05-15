@@ -620,7 +620,7 @@ fn decode_tile_primitive(
         emissive_rgba,
         metallic_factor: pbr.metallic_factor(),
         roughness_factor: pbr.roughness_factor(),
-            emissive_factor: crate::render::gltf_helpers::effective_gltf_emissive_rgb(&material),
+        emissive_factor: crate::render::gltf_helpers::effective_gltf_emissive_rgb(&material),
         alpha_mode,
         alpha_cutoff,
         double_sided: material.double_sided(),

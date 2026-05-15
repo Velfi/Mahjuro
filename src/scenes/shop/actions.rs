@@ -1,7 +1,5 @@
 use crate::core::tile_pack::TilePackKind;
-use crate::scenes::{
-    ShowcasePresenter, ShowcaseScene, TilePackPresenter, ZodiacPresenter,
-};
+use crate::scenes::{ShowcasePresenter, ShowcaseScene, TilePackPresenter, ZodiacPresenter};
 
 use super::view::{default_shop_focus_for_stock, snap_focus_after_shop_purchase};
 use super::*;
@@ -280,9 +278,9 @@ impl ShopScene {
                 }
                 phases
             },
-            relic_glow_starts: std::collections::HashMap::new(),
+            relic_glow_starts: rustc_hash::FxHashMap::default(),
             positions: crate::ui::scene_layout::load_shop_positions(),
-            drawn_env_height_scale: std::cell::Cell::new(
+            drawn_room_gltf_height_scale: std::cell::Cell::new(
                 crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
             ),
             west_sell_hold_started: None,
@@ -400,7 +398,6 @@ impl ShopScene {
                 let shop_rm = GameEngine::read_shop(run);
                 let inventory = ShopInventoryCounts {
                     n_for_sale: self.items.len(),
-                    n_for_sale_zodiacs: self.zodiac_items.len(),
                     n_for_sale_talismans: self.talisman_items.len(),
                     n_owned_relics: shop_rm.owned_relics.len(),
                 };

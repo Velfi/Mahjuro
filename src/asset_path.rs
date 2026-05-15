@@ -1,8 +1,8 @@
 //! Asset loading: ZIP packs (`pack_manifest.json`, baked by `build.rs`) or loose `MAHJURO_ASSETS`.
 
 pub use crate::asset_sources::{
-    get, init, list_tilesets, log_all_assets, prefetch_lazy_packs,
-    prefetch_lazy_packs_after_menu_once, AssetFile,
+    AssetFile, get, init, list_tilesets, log_all_assets, prefetch_lazy_packs,
+    prefetch_lazy_packs_after_menu_once,
 };
 
 /// Tilesets shipped for internal scenes only (title screen, etc.); omitted from

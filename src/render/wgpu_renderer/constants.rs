@@ -71,11 +71,6 @@ pub const MAX_BUG_SLOTS: usize = 8;
 /// material viewer debug scene uses these; 32 covers every `MaterialKind`
 /// with room to grow.
 pub const MAX_ORB_SLOTS: usize = 32;
-/// Maximum number of explicit auxiliary dishes per frame (the shop uses 2:
-/// the relic dish and the coin dish).
-/// Maximum number of shrine instances per frame (pick-blind uses 3: Small,
-/// Big, Boss). Truncated silently.
-pub const MAX_SHRINE_SLOTS: usize = 4;
 /// Maximum number of dora-plinth instances per frame (gameplay uses 1).
 pub const MAX_DORA_PLINTH_SLOTS: usize = 2;
 /// Maximum number of yaku tablets per frame (5 visible + headroom).
@@ -96,8 +91,10 @@ pub const MAX_TALLY_FAN_SLOTS: usize = 2;
 pub const MAX_TALLY_STICK_SLOTS: usize = 32;
 /// Maximum number of facedown wall tiles drawn at the back of the table.
 pub const MAX_WALL_TILE_SLOTS: usize = 80;
-/// Cascade scoring bone pool (modifier strip + structure tier preview batches).
-pub use crate::render::gpu_types::MAX_CASCADE_TOKEN_SLOTS;
+/// Maximum number of cascade scoring tokens per frame across all batches.
+/// Structure HUD can show up to 5 chip-tier + 4 mult-tier bones; the modifier
+/// strip adds 2 more during an active cascade.
+pub const MAX_CASCADE_TOKEN_SLOTS: usize = 32;
 /// Maximum number of in-flight 3D extruded-glyph score popups. A single
 /// cascade rarely fires more than 8-10 steps, so 32 is plenty for the
 /// per-step popups plus the running-total readout that holds across the

@@ -100,9 +100,9 @@ impl WgpuRenderer {
                 // cast when this yaku is the selected target so it still
                 // reads as "active" against the row.
                 let base = if t.active {
-                    [1.00, 0.97, 0.90, 1.0]
+                    crate::render::theme::color::TALLOW
                 } else {
-                    [0.97, 0.96, 0.94, 1.0]
+                    crate::render::theme::color::PARCHMENT
                 };
                 let material = MaterialParams {
                     kind: MaterialKind::Porcelain,

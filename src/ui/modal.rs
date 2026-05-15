@@ -67,7 +67,8 @@ impl ModalTheme {
     fn bg_color(&self) -> [f32; 4] {
         use crate::render::theme::color;
         match self {
-            ModalTheme::Success => [0.12, 0.14, 0.08, 0.95],
+            // Success = a win at the table → felt-toned background.
+            ModalTheme::Success => color::alpha(color::FELT_DEEP, 0.95),
             ModalTheme::Info => color::alpha(color::WALNUT_DEEP, 0.95),
         }
     }
@@ -75,7 +76,7 @@ impl ModalTheme {
     fn border_color(&self) -> [f32; 4] {
         use crate::render::theme::color;
         match self {
-            ModalTheme::Success => [0.85, 0.75, 0.2, 0.9],
+            ModalTheme::Success => color::alpha(color::GOLD, 0.9),
             ModalTheme::Info => color::alpha(color::BRASS, 0.9),
         }
     }
@@ -83,7 +84,7 @@ impl ModalTheme {
     fn title_color(&self) -> [f32; 4] {
         use crate::render::theme::color;
         match self {
-            ModalTheme::Success => [1.0, 0.92, 0.4, 1.0],
+            ModalTheme::Success => color::CHAMPAGNE,
             ModalTheme::Info => color::CHAMPAGNE,
         }
     }
@@ -91,7 +92,8 @@ impl ModalTheme {
     fn body_color(&self) -> [f32; 4] {
         use crate::render::theme::color;
         match self {
-            ModalTheme::Success => [0.9, 0.88, 0.7, 1.0],
+            // Warm candle-bloom body text on lit felt — celebratory.
+            ModalTheme::Success => color::TALLOW,
             ModalTheme::Info => color::PARCHMENT,
         }
     }
@@ -171,13 +173,21 @@ impl Fireworks {
     /// wide a 6px spark is a single dot, but scaling with the spread
     /// keeps the motes legible at TV distance.
     fn spawn_one(&mut self, rng: &mut impl rand::RngExt) {
+        use crate::render::theme::color;
         // Warm palette: champagne / amber / soft gold. Subtle hue
         // variance so the swarm doesn't read as a flat monochrome dust.
+        // Anchored on the CHAMPAGNE and TALLOW tokens; the other two
+        // entries are deliberate brighter/darker variants that round out
+        // the swarm.
         let palette: [[f32; 3]; 4] = [
-            [1.00, 0.86, 0.55], // champagne
-            [0.96, 0.78, 0.45], // gold
-            [1.00, 0.72, 0.38], // amber
-            [0.95, 0.90, 0.74], // pale ivory
+            [1.00, 0.86, 0.55], // champagne shoulder, brighter than the token
+            [
+                color::CHAMPAGNE[0],
+                color::CHAMPAGNE[1],
+                color::CHAMPAGNE[2],
+            ],
+            [1.00, 0.72, 0.38], // amber shoulder, warmer than the AMBER token
+            [color::TALLOW[0], color::TALLOW[1], color::TALLOW[2]],
         ];
         let color = palette[rng.random_range(0..palette.len())];
         let x = self.spawn_center_x + (rng.random::<f32>() - 0.5) * self.spawn_spread;
@@ -443,18 +453,10 @@ impl ModalQueue {
         if let Some(next_at) = self.skim_next_at
             && now >= next_at
         {
-            let still_paginated = self
-                .queue
-                .first()
-                .map(|m| m.has_pages())
-                .unwrap_or(false);
+            let still_paginated = self.queue.first().map(|m| m.has_pages()).unwrap_or(false);
             if still_paginated {
                 self.advance_page();
-                let paginated_after = self
-                    .queue
-                    .first()
-                    .map(|m| m.has_pages())
-                    .unwrap_or(false);
+                let paginated_after = self.queue.first().map(|m| m.has_pages()).unwrap_or(false);
                 // Keep skimming as long as a paginated modal is still on
                 // top (the next modal in queue might also be paginated and
                 // continue the skim seamlessly).
@@ -475,11 +477,7 @@ impl ModalQueue {
     /// remaining unlock cards rapidly. On a non-paginated modal it falls
     /// back to the historical dismiss-on-cancel behavior.
     pub fn cancel_pressed(&mut self) -> bool {
-        let paginated = self
-            .queue
-            .first()
-            .map(|m| m.has_pages())
-            .unwrap_or(false);
+        let paginated = self.queue.first().map(|m| m.has_pages()).unwrap_or(false);
         if paginated {
             let advanced = self.advance_page();
             self.skim_next_at = Some(Instant::now() + SKIM_INITIAL_DELAY);
@@ -560,16 +558,11 @@ impl ModalQueue {
         let [or_, og, ob, _] = crate::render::theme::color::WALNUT_INK;
         instances.push(GpuInstance {
             rect: [0.0, 0.0, window_w, window_h],
-            color: [or_, og, ob, 0.65 * alpha],
-        });
+            color: [or_, og, ob, 0.65 * alpha], user: 0});
 
         if modal.has_pages() {
-            let (pag_i, pag_l, pag_r, mut pag_g) = modal_paginated_unlock_layer_vecs(
-                modal,
-                alpha,
-                window_w,
-                window_h,
-            );
+            let (pag_i, pag_l, pag_r, mut pag_g) =
+                modal_paginated_unlock_layer_vecs(modal, alpha, window_w, window_h);
             modal.append_fireworks_gradient_quads(&mut pag_g);
             instances.extend(pag_i);
             labels.extend(pag_l);
@@ -642,15 +635,13 @@ impl ModalQueue {
                 card_w + border * 2.0,
                 card_h + border * 2.0,
             ],
-            color: [br, bg, bb, ba * alpha],
-        });
+            color: [br, bg, bb, ba * alpha], user: 0});
 
         // Card background.
         let [cr, cg, cb, ca] = modal.theme.bg_color();
         instances.push(GpuInstance {
             rect: [card_x, card_y, card_w, card_h],
-            color: [cr, cg, cb, ca * alpha],
-        });
+            color: [cr, cg, cb, ca * alpha], user: 0});
 
         // Title.
         let title_y = card_y + padding;
@@ -705,194 +696,192 @@ fn draw_modal_paginated_unlock(
     window: (f32, f32),
     out: ModalDrawSink<'_>,
 ) {
-        let ModalDrawSink {
-            instances,
-            labels,
-            relic_objects,
-            gradient_quads,
-        } = out;
-        let (window_w, window_h) = window;
-        let text_floor = crate::render::theme::typography::readable_floor_px(window_h);
-        let page = &modal.pages[modal.current_page];
+    let ModalDrawSink {
+        instances,
+        labels,
+        relic_objects,
+        gradient_quads,
+    } = out;
+    let (window_w, window_h) = window;
+    let text_floor = crate::render::theme::typography::readable_floor_px(window_h);
+    let page = &modal.pages[modal.current_page];
 
-        // ── Vignette (cinematic letterbox) ───────────────────────────
-        // Thin horizontal strips along the top and bottom of the
-        // screen, accumulating to a smooth dark band that frames the
-        // relic stage cinematically. We deliberately skip the left
-        // and right edges: full-height side strips create a visible
-        // vertical seam against the lit center column, while
-        // top-and-bottom only reads as a clean letterbox at TV
-        // distance. The relic-name + description column stays
-        // unaffected.
-        let [vr, vg, vb, _] = crate::render::theme::color::WALNUT_INK;
-        let layers = 24;
-        let strip_h = window_h * 0.30 / layers as f32;
-        for i in 0..layers {
-            // Per-strip alpha steady — stacking handles the gradient.
-            let a = 0.040 * alpha;
-            // Top band.
-            instances.push(GpuInstance {
-                rect: [0.0, i as f32 * strip_h, window_w, strip_h],
-                color: [vr, vg, vb, a],
-            });
-            // Bottom band.
-            instances.push(GpuInstance {
-                rect: [0.0, window_h - (i + 1) as f32 * strip_h, window_w, strip_h],
-                color: [vr, vg, vb, a],
-            });
-        }
+    // ── Vignette (cinematic letterbox) ───────────────────────────
+    // Thin horizontal strips along the top and bottom of the
+    // screen, accumulating to a smooth dark band that frames the
+    // relic stage cinematically. We deliberately skip the left
+    // and right edges: full-height side strips create a visible
+    // vertical seam against the lit center column, while
+    // top-and-bottom only reads as a clean letterbox at TV
+    // distance. The relic-name + description column stays
+    // unaffected.
+    let [vr, vg, vb, _] = crate::render::theme::color::WALNUT_INK;
+    let layers = 24;
+    let strip_h = window_h * 0.30 / layers as f32;
+    for i in 0..layers {
+        // Per-strip alpha steady — stacking handles the gradient.
+        let a = 0.040 * alpha;
+        // Top band.
+        instances.push(GpuInstance {
+            rect: [0.0, i as f32 * strip_h, window_w, strip_h],
+            color: [vr, vg, vb, a], user: 0});
+        // Bottom band.
+        instances.push(GpuInstance {
+            rect: [0.0, window_h - (i + 1) as f32 * strip_h, window_w, strip_h],
+            color: [vr, vg, vb, a], user: 0});
+    }
 
-        // ── Hero stage layout ────────────────────────────────────────
-        // The relic occupies the upper-middle of the screen; type
-        // stacks below it; a footer pins page indicator + dismiss hint
-        // to the bottom edge. All sizes are derived from the smaller
-        // window dimension so a 4K TV scales up cleanly.
-        let base = window_w.min(window_h);
-        let center_x = window_w * 0.5;
+    // ── Hero stage layout ────────────────────────────────────────
+    // The relic occupies the upper-middle of the screen; type
+    // stacks below it; a footer pins page indicator + dismiss hint
+    // to the bottom edge. All sizes are derived from the smaller
+    // window dimension so a 4K TV scales up cleanly.
+    let base = window_w.min(window_h);
+    let center_x = window_w * 0.5;
 
-        // The hero relic disk is sized by the smaller window dimension
-        // so it occupies a fixed fraction of the visible field on every
-        // aspect ratio — about 28% of the smaller axis, which reads
-        // clearly even on a couch-distance TV.
-        let icon_size = base * 0.30;
-        // Vertical centering biased slightly upward so the name +
-        // description below the relic have room without pushing the
-        // page indicator out of the lower vignette.
-        let icon_center_y = window_h * 0.40;
+    // The hero relic disk is sized by the smaller window dimension
+    // so it occupies a fixed fraction of the visible field on every
+    // aspect ratio — about 28% of the smaller axis, which reads
+    // clearly even on a couch-distance TV.
+    let icon_size = base * 0.30;
+    // Vertical centering biased slightly upward so the name +
+    // description below the relic have room without pushing the
+    // page indicator out of the lower vignette.
+    let icon_center_y = window_h * 0.40;
 
-        // ── Stage spotlight pool ─────────────────────────────────────
-        // Single warm radial-gradient quad behind the relic. The
-        // gradient_quad shader does the actual circular falloff in
-        // the fragment stage (feather.y=1 selects radial mode), so
-        // we get a clean soft disc instead of the stacked-rect
-        // pseudo-halos earlier versions of this scene used.
-        if page.relic_id.is_some() {
-            let halo_size = icon_size * 2.6;
-            gradient_quads.push(GradientQuadInstance {
-                rect: [
-                    center_x - halo_size * 0.5,
-                    icon_center_y - halo_size * 0.5,
-                    halo_size,
-                    halo_size,
-                ],
-                color: [1.00, 0.78, 0.42, 0.32 * alpha],
-                feather: [1.0, 1.0, 0.0, 0.0],
-            });
-        }
+    // ── Stage spotlight pool ─────────────────────────────────────
+    // Single warm radial-gradient quad behind the relic. The
+    // gradient_quad shader does the actual circular falloff in
+    // the fragment stage (feather.y=1 selects radial mode), so
+    // we get a clean soft disc instead of the stacked-rect
+    // pseudo-halos earlier versions of this scene used.
+    if page.relic_id.is_some() {
+        let halo_size = icon_size * 2.6;
+        gradient_quads.push(GradientQuadInstance {
+            rect: [
+                center_x - halo_size * 0.5,
+                icon_center_y - halo_size * 0.5,
+                halo_size,
+                halo_size,
+            ],
+            color: [1.00, 0.78, 0.42, 0.32 * alpha],
+            feather: [1.0, 1.0, 0.0, 0.0],
+        });
+    }
 
-        // ── Hero relic ───────────────────────────────────────────────
-        if let Some(relic_id) = page.relic_id {
-            let visual = relic_visual(relic_id);
-            let face_size = icon_size * 0.80;
-            let thick = face_size * 0.12 * visual.thickness_scale;
-            // Camera in main/draw.rs looks along +Y with up=+Z, so
-            // screen-vertical comes from world Z (lift) — not pixel Y.
-            // Park depth at the camera target plane and move the
-            // icon's vertical screen position into the lift.
-            //
-            // The relic mesh is a thin disk with its broad face on the
-            // local XZ plane (normal +Y for the textured front cap).
-            // The +Y-looking camera sits at -Y, so we flip the disk
-            // 180° so the front face points toward the camera. Mirrors
-            // the approach used by the collection scene's relic plaques.
-            //
-            relic_objects.push(Object3d {
-                pos: [center_x, window_h * 0.5, window_h * 0.5 - icon_center_y],
-                extents: [face_size, thick, face_size],
-                rotation: euler_xyz_rad_from_deg(180.0, 0.0, 0.0),
-                color: page.accent_color,
-                kind: Object3dKind::Relic {
-                    relic_id,
-                    // Modest glow — the 2D spotlight halo behind the
-                    // relic does most of the visual lift; pushing the
-                    // disk's own glow too high blooms the textured
-                    // face into a featureless white circle.
-                    glow: alpha * 0.20,
-                    silhouette: false,
-                    debuffed: false,
-                    pick_id: None,
-                },
-                hover_target: 0.0,
-                anim_id: 0,
-                arrange_name: None,
-            });
-        }
-
-        // ── Type column ──────────────────────────────────────────────
-        // All sizes scale against `base` (smaller window dim) so the
-        // hierarchy holds at any resolution.
-        let category_font = (base * 0.024).max(20.0).max(text_floor);
-        let name_font = (base * 0.072).max(48.0);
-        let desc_font = (base * 0.030).max(text_floor);
-        let nav_font = (base * 0.022).max(text_floor);
-
-        // Category placard ("New Relic" / "New Rule") — sits above the
-        // relic, slate tone, smaller. Reads as a museum label.
-        let category_y = icon_center_y - icon_size * 0.55 - category_font * 1.6;
-        labels.push(TextLabel {
-            rect: [0.0, category_y, window_w, category_font * 1.4],
-            text: page.category.to_uppercase(),
-            color: {
-                let [r, g, b, _] = crate::render::theme::color::STONE;
-                [r, g, b, 0.85 * alpha]
+    // ── Hero relic ───────────────────────────────────────────────
+    if let Some(relic_id) = page.relic_id {
+        let visual = relic_visual(relic_id);
+        let face_size = icon_size * 0.80;
+        let thick = face_size * 0.12 * visual.thickness_scale;
+        // Camera in main/draw.rs looks along +Y with up=+Z, so
+        // screen-vertical comes from world Z (lift) — not pixel Y.
+        // Park depth at the camera target plane and move the
+        // icon's vertical screen position into the lift.
+        //
+        // The relic mesh is a thin disk with its broad face on the
+        // local XZ plane (normal +Y for the textured front cap).
+        // The +Y-looking camera sits at -Y, so we flip the disk
+        // 180° so the front face points toward the camera. Mirrors
+        // the approach used by the collection scene's relic plaques.
+        //
+        relic_objects.push(Object3d {
+            pos: [center_x, window_h * 0.5, window_h * 0.5 - icon_center_y],
+            extents: [face_size, thick, face_size],
+            rotation: euler_xyz_rad_from_deg(180.0, 0.0, 0.0),
+            color: page.accent_color,
+            kind: Object3dKind::Relic {
+                relic_id,
+                // Modest glow — the 2D spotlight halo behind the
+                // relic does most of the visual lift; pushing the
+                // disk's own glow too high blooms the textured
+                // face into a featureless white circle.
+                glow: alpha * 0.20,
+                silhouette: false,
+                debuffed: false,
+                pick_id: None,
             },
-            font_px: Some(category_font),
-            ..Default::default()
+            hover_target: 0.0,
+            anim_id: 0,
+            arrange_name: None,
         });
+    }
 
-        // Name — the largest type on screen. Gold-warm, sits just below
-        // the relic disk. We treat it as the page's hero label.
-        let name_y = icon_center_y + icon_size * 0.55 + base * 0.02;
-        let [tr, tg, tb, _ta] = crate::render::theme::color::CHAMPAGNE;
-        labels.push(TextLabel {
-            rect: [0.0, name_y, window_w, name_font * 1.3],
-            text: page.name.clone(),
-            color: [tr, tg, tb, alpha],
-            font_px: Some(name_font),
-            ..Default::default()
-        });
+    // ── Type column ──────────────────────────────────────────────
+    // All sizes scale against `base` (smaller window dim) so the
+    // hierarchy holds at any resolution.
+    let category_font = (base * 0.024).max(20.0).max(text_floor);
+    let name_font = (base * 0.072).max(48.0);
+    let desc_font = (base * 0.030).max(text_floor);
+    let nav_font = (base * 0.022).max(text_floor);
 
-        // Description — wraps under the name, generous leading.
-        let desc_y = name_y + name_font * 1.5;
-        let desc_w = window_w * 0.7;
-        let desc_x = (window_w - desc_w) * 0.5;
-        let desc_lines = page.description.lines().count().max(1) as f32;
-        let desc_h = desc_lines * desc_font * 1.5;
-        let [dr, dg, db, _da] = crate::render::theme::color::PARCHMENT;
-        labels.push(TextLabel {
-            rect: [desc_x, desc_y, desc_w, desc_h],
-            text: page.description.clone(),
-            color: [dr, dg, db, 0.92 * alpha],
-            font_px: Some(desc_font),
-            ..Default::default()
-        });
+    // Category placard ("New Relic" / "New Rule") — sits above the
+    // relic, slate tone, smaller. Reads as a museum label.
+    let category_y = icon_center_y - icon_size * 0.55 - category_font * 1.6;
+    labels.push(TextLabel {
+        rect: [0.0, category_y, window_w, category_font * 1.4],
+        text: page.category.to_uppercase(),
+        color: {
+            let [r, g, b, _] = crate::render::theme::color::STONE;
+            [r, g, b, 0.85 * alpha]
+        },
+        font_px: Some(category_font),
+        ..Default::default()
+    });
 
-        // ── Footer (page indicator + dismiss hint) ───────────────────
-        let total = modal.pages.len();
-        let current = modal.current_page + 1;
-        let nav_text = if total > 1 {
-            format!(
-                "\u{25c0}  {} / {}  \u{25b6}    Enter to continue",
-                current, total
-            )
-        } else {
-            "Enter to continue".into()
-        };
-        labels.push(TextLabel {
-            rect: [0.0, window_h - nav_font * 3.0, window_w, nav_font * 1.5],
-            text: nav_text,
-            color: {
-                let [r, g, b, _] = crate::render::theme::color::STONE;
-                [r, g, b, 0.7 * alpha]
-            },
-            font_px: Some(nav_font),
-            ..Default::default()
-        });
+    // Name — the largest type on screen. Gold-warm, sits just below
+    // the relic disk. We treat it as the page's hero label.
+    let name_y = icon_center_y + icon_size * 0.55 + base * 0.02;
+    let [tr, tg, tb, _ta] = crate::render::theme::color::CHAMPAGNE;
+    labels.push(TextLabel {
+        rect: [0.0, name_y, window_w, name_font * 1.3],
+        text: page.name.clone(),
+        color: [tr, tg, tb, alpha],
+        font_px: Some(name_font),
+        ..Default::default()
+    });
 
-        // Bottom hint strip — left as a single-line caption since
-        // multi-modal interaction (arrows + enter) is the same on
-        // gamepad, keyboard, and mouse via the Confirm action.
-        let _ = scale; // kept on signature for parity with simple draw
+    // Description — wraps under the name, generous leading.
+    let desc_y = name_y + name_font * 1.5;
+    let desc_w = window_w * 0.7;
+    let desc_x = (window_w - desc_w) * 0.5;
+    let desc_lines = page.description.lines().count().max(1) as f32;
+    let desc_h = desc_lines * desc_font * 1.5;
+    let [dr, dg, db, _da] = crate::render::theme::color::PARCHMENT;
+    labels.push(TextLabel {
+        rect: [desc_x, desc_y, desc_w, desc_h],
+        text: page.description.clone(),
+        color: [dr, dg, db, 0.92 * alpha],
+        font_px: Some(desc_font),
+        ..Default::default()
+    });
+
+    // ── Footer (page indicator + dismiss hint) ───────────────────
+    let total = modal.pages.len();
+    let current = modal.current_page + 1;
+    let nav_text = if total > 1 {
+        format!(
+            "\u{25c0}  {} / {}  \u{25b6}    Enter to continue",
+            current, total
+        )
+    } else {
+        "Enter to continue".into()
+    };
+    labels.push(TextLabel {
+        rect: [0.0, window_h - nav_font * 3.0, window_w, nav_font * 1.5],
+        text: nav_text,
+        color: {
+            let [r, g, b, _] = crate::render::theme::color::STONE;
+            [r, g, b, 0.7 * alpha]
+        },
+        font_px: Some(nav_font),
+        ..Default::default()
+    });
+
+    // Bottom hint strip — left as a single-line caption since
+    // multi-modal interaction (arrows + enter) is the same on
+    // gamepad, keyboard, and mouse via the Confirm action.
+    let _ = scale; // kept on signature for parity with simple draw
 }
 
 /// Paginated unlock layers for full-screen showcase (no modal-queue dimmer).

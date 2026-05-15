@@ -37,8 +37,7 @@ pub fn push_tooltip_frame_quads(
     let b = FRAME_BORDER_PX;
     out.push(GpuInstance {
         rect: [left - b, top - b, inner_w + b * 2.0, inner_h + b * 2.0],
-        color: [color::BRASS[0], color::BRASS[1], color::BRASS[2], RIM_ALPHA],
-    });
+        color: [color::BRASS[0], color::BRASS[1], color::BRASS[2], RIM_ALPHA], user: 0});
     out.push(GpuInstance {
         rect: [left, top, inner_w, inner_h],
         color: [
@@ -46,6 +45,5 @@ pub fn push_tooltip_frame_quads(
             color::WALNUT_DEEP[1],
             color::WALNUT_DEEP[2],
             FILL_ALPHA,
-        ],
-    });
+        ], user: 0});
 }

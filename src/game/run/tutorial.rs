@@ -95,12 +95,12 @@ impl RunState {
 
     /// Check if a set of detected meld kinds is valid for the current
     /// tutorial lesson. Returns `Ok(())` or an error message.
-    pub fn tutorial_validate_sets(&self, set_kinds: &[SetKind]) -> Result<(), &'static str> {
+    pub fn tutorial_validate_melds(&self, meld_kinds: &[MeldKind]) -> Result<(), &'static str> {
         if let Some(ref tutorial) = self.tutorial
             && tutorial.is_active()
         {
             let lesson = tutorial.current_lesson_def();
-            return crate::game::tutorial::validate_sets_for_lesson(set_kinds, lesson);
+            return crate::game::tutorial::validate_melds_for_lesson(meld_kinds, lesson);
         }
         Ok(())
     }

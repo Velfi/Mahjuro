@@ -93,8 +93,8 @@ fn sequence_surge_adds_chips_to_sequence() {
         Tile::new(Suit::Characters, 2, 1),
         Tile::new(Suit::Characters, 3, 2),
     ];
-    let sets = vec![crate::core::hand::DetectedSet {
-        kind: crate::core::hand::SetKind::Sequence,
+    let sets = vec![crate::core::hand::DetectedMeld {
+        kind: crate::core::hand::MeldKind::Sequence,
         tile_ids: vec![0, 1, 2],
     }];
     let r = relics(vec![RelicId::SequenceSurge]);
@@ -121,24 +121,24 @@ fn stacked_yaku_score_full_value_without_loadout_gating() {
         Tile::new(Suit::Bamboos, 7, 13),
     ];
     let sets = vec![
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Sequence,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Sequence,
             tile_ids: vec![0, 1, 2],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Sequence,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Sequence,
             tile_ids: vec![3, 4, 5],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Sequence,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Sequence,
             tile_ids: vec![6, 7, 8],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Triplet,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Triplet,
             tile_ids: vec![9, 10, 11],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Pair,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Pair,
             tile_ids: vec![12, 13],
         },
     ];
@@ -152,9 +152,9 @@ fn stacked_yaku_score_full_value_without_loadout_gating() {
 #[test]
 fn yaku_levels_scale_chip_and_mult() {
     let hand = vec![
-        Tile::new(Suit::Circles, 5, 0),
-        Tile::new(Suit::Circles, 5, 1),
-        Tile::new(Suit::Circles, 5, 2),
+        Tile::new(Suit::Dots, 5, 0),
+        Tile::new(Suit::Dots, 5, 1),
+        Tile::new(Suit::Dots, 5, 2),
         Tile::new(Suit::Bamboos, 7, 3),
         Tile::new(Suit::Bamboos, 7, 4),
         Tile::new(Suit::Bamboos, 7, 5),
@@ -162,16 +162,16 @@ fn yaku_levels_scale_chip_and_mult() {
         Tile::new(Suit::Wind, 1, 7),
     ];
     let sets = vec![
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Triplet,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Triplet,
             tile_ids: vec![0, 1, 2],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Triplet,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Triplet,
             tile_ids: vec![3, 4, 5],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Pair,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Pair,
             tile_ids: vec![6, 7],
         },
     ];
@@ -191,8 +191,8 @@ fn yaku_levels_scale_chip_and_mult() {
 #[test]
 fn pair_power_grants_chips_and_mult() {
     let hand = vec![
-        Tile::new(Suit::Circles, 7, 0),
-        Tile::new(Suit::Circles, 7, 1),
+        Tile::new(Suit::Dots, 7, 0),
+        Tile::new(Suit::Dots, 7, 1),
     ];
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::PairPower]);
@@ -205,8 +205,8 @@ fn pair_power_grants_chips_and_mult() {
 #[test]
 fn debuffed_terminal_tiles_keep_pair_bonus_but_lose_tile_points() {
     let hand = vec![
-        Tile::new(Suit::Circles, 1, 0),
-        Tile::new(Suit::Circles, 1, 1),
+        Tile::new(Suit::Dots, 1, 0),
+        Tile::new(Suit::Dots, 1, 1),
     ];
     let sets = find_pairs_and_triplets(&hand);
     let r = RelicState::default();
@@ -222,8 +222,8 @@ fn debuffed_terminal_tiles_keep_pair_bonus_but_lose_tile_points() {
 #[test]
 fn debuffed_relic_is_disabled_for_scoring() {
     let hand = vec![
-        Tile::new(Suit::Circles, 7, 0),
-        Tile::new(Suit::Circles, 7, 1),
+        Tile::new(Suit::Dots, 7, 0),
+        Tile::new(Suit::Dots, 7, 1),
     ];
     let sets = find_pairs_and_triplets(&hand);
     let mut r = relics(vec![RelicId::PairPower]);
@@ -283,29 +283,35 @@ fn dragon_rage_fires_on_any_dragon_triplet() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::DragonRage]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert!(
-        breakdown
-            .steps
-            .iter()
-            .any(|s| s.source == "Dragon Rage")
-    );
+    assert!(breakdown.steps.iter().any(|s| s.source == "Dragon Rage"));
 }
 
 #[test]
-fn multiplier_master_scales_with_relic_count() {
+fn multiplier_master_adds_one_mult_per_relic() {
     let hand = vec![
         Tile::new(Suit::Characters, 9, 0),
         Tile::new(Suit::Characters, 9, 1),
         Tile::new(Suit::Characters, 9, 2),
     ];
     let sets = find_pairs_and_triplets(&hand);
-    let r = relics(vec![
-        RelicId::MultiplierMaster,
-        RelicId::SetMagnet,
-        RelicId::QuickDraw,
-    ]);
+    let r = relics(vec![RelicId::MultiplierMaster]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_mult, 2.5);
+    assert_eq!(breakdown.final_mult, 2.0);
+
+    let r2 = relics(vec![
+        RelicId::MultiplierMaster,
+        RelicId::ChainReaction,
+    ]);
+    let breakdown2 = score_sets(&hand, &sets, &ctx_with(&r2, false), &[]);
+    assert_eq!(breakdown2.final_mult, 3.0);
+
+    let mut r3 = relics(vec![
+        RelicId::MultiplierMaster,
+        RelicId::ChainReaction,
+    ]);
+    r3.set_debuffed([RelicId::ChainReaction]);
+    let breakdown3 = score_sets(&hand, &sets, &ctx_with(&r3, false), &[]);
+    assert_eq!(breakdown3.final_mult, 3.0);
 }
 
 #[test]
@@ -322,16 +328,16 @@ fn dragon_echo_copies_adjacent_set_chips() {
         Tile::new(Suit::Bamboos, 9, 8),
     ];
     let sets = vec![
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Sequence,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Sequence,
             tile_ids: vec![0, 1, 2],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Triplet,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Triplet,
             tile_ids: vec![3, 4, 5],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Sequence,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Sequence,
             tile_ids: vec![6, 7, 8],
         },
     ];
@@ -363,12 +369,12 @@ fn dragon_echo_ignores_non_dragon_triplet() {
         Tile::new(Suit::Wind, 1, 5),
     ];
     let sets = vec![
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Sequence,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Sequence,
             tile_ids: vec![0, 1, 2],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Triplet,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Triplet,
             tile_ids: vec![3, 4, 5],
         },
     ];
@@ -407,8 +413,8 @@ fn chain_reaction_inactive_when_not_scored_last_turn() {
 #[test]
 fn pair_double_rule_adds_chips() {
     let hand = vec![
-        Tile::new(Suit::Circles, 5, 0),
-        Tile::new(Suit::Circles, 5, 1),
+        Tile::new(Suit::Dots, 5, 0),
+        Tile::new(Suit::Dots, 5, 1),
     ];
     let sets = find_pairs_and_triplets(&hand);
     let breakdown = score_sets(
@@ -467,24 +473,24 @@ fn explosive_flush_full_hand_demonstration() {
         Tile::new(Suit::Bamboos, 7, 13),
     ];
     let sets = vec![
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Sequence,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Sequence,
             tile_ids: vec![0, 1, 2],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Sequence,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Sequence,
             tile_ids: vec![3, 4, 5],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Sequence,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Sequence,
             tile_ids: vec![6, 7, 8],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Triplet,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Triplet,
             tile_ids: vec![9, 10, 11],
         },
-        crate::core::hand::DetectedSet {
-            kind: crate::core::hand::SetKind::Pair,
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Pair,
             tile_ids: vec![12, 13],
         },
     ];
@@ -554,7 +560,7 @@ fn flower_chips_delta(breakdown: &ScoreBreakdown) -> i32 {
 
 #[test]
 fn mirror_tile_doubles_garden_keeper_extra_pass() {
-    use crate::core::hand::{DetectedSet, SetKind};
+    use crate::core::hand::{DetectedMeld, MeldKind};
     // One pair to satisfy minimum scoring + a flower tile.
     let hand = vec![
         Tile::new(Suit::Bamboos, 5, 0),
@@ -562,12 +568,12 @@ fn mirror_tile_doubles_garden_keeper_extra_pass() {
         Tile::new(Suit::Flower, 1, 2), // Plum Blossom: 40 chips
     ];
     let sets = vec![
-        DetectedSet {
-            kind: SetKind::Pair,
+        DetectedMeld {
+            kind: MeldKind::Pair,
             tile_ids: vec![0, 1],
         },
-        DetectedSet {
-            kind: SetKind::Pair,
+        DetectedMeld {
+            kind: MeldKind::Pair,
             tile_ids: vec![2],
         }, // single flower as pseudo-set
     ];
@@ -587,8 +593,8 @@ fn kokushi_musou_scores_when_omitted_from_available_yaku() {
         Tile::new(Suit::Characters, 9, 1),
         Tile::new(Suit::Bamboos, 1, 2),
         Tile::new(Suit::Bamboos, 9, 3),
-        Tile::new(Suit::Circles, 1, 4),
-        Tile::new(Suit::Circles, 9, 5),
+        Tile::new(Suit::Dots, 1, 4),
+        Tile::new(Suit::Dots, 9, 5),
         Tile::new(Suit::Wind, 1, 6),
         Tile::new(Suit::Wind, 2, 7),
         Tile::new(Suit::Wind, 3, 8),

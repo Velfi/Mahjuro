@@ -4,10 +4,10 @@
 //! [`crate::render::shop_glb`] and [`crate::render::hallway_glb`] load different assets but share
 //! this pipeline and GPU path (`shop_glb.wgsl`).
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use anyhow::Context;
-use glam::{Mat4, Vec3, Vec4};
+use glam::{Mat4, Vec2, Vec3, Vec4};
 
 use crate::render::draw_cmd::CameraParams;
 use crate::render::gltf_helpers::{apply_texture_transform, sampler_cpu_from_material};
@@ -18,6 +18,8 @@ use crate::render::tile_glb::{
 
 /// One environment mesh primitive plus embedded glTF sampler parameters for GPU samplers.
 pub struct RoomEnvPrimitiveCpu {
+    /// glTF node name for this primitive (per-node mesh), when known.
+    pub gltf_node_name: Option<String>,
     pub mesh: LoadedPrimitive,
 }
 
@@ -200,11 +202,7 @@ pub fn room_world_bounds_corners_centered(
 ) -> Vec<Vec3> {
     let s = room_env_world_scale(window_h, env_height_scale);
     let c = bounds_doc.center();
-    bounds_doc
-        .corners()
-        .iter()
-        .map(|p| (*p - c) * s)
-        .collect()
+    bounds_doc.corners().iter().map(|p| (*p - c) * s).collect()
 }
 
 /// Widen vertical FOV (only upward) so corners **in front of** the camera project inside `±margin_ndc`.
@@ -284,7 +282,7 @@ pub fn room_camera_fit_fovy_for_corners(
 }
 
 pub fn merge_marker_mesh_bounds(
-    map: &mut HashMap<String, RoomEnvironmentBounds>,
+    map: &mut FxHashMap<String, RoomEnvironmentBounds>,
     node_name: &str,
     prim: &RoomEnvPrimitiveCpu,
 ) {
@@ -301,7 +299,10 @@ pub fn merge_marker_mesh_bounds(
     use std::collections::hash_map::Entry;
     match map.entry(node_name.to_string()) {
         Entry::Vacant(e) => {
-            e.insert(RoomEnvironmentBounds { min: min_v, max: max_v });
+            e.insert(RoomEnvironmentBounds {
+                min: min_v,
+                max: max_v,
+            });
         }
         Entry::Occupied(mut e) => {
             let b = e.get_mut();
@@ -390,6 +391,7 @@ pub fn decode_env_primitive(
     buffers: &[Vec<u8>],
     images: &[gltf::image::Data],
     log_asset_label: &str,
+    gltf_node_name: &str,
 ) -> anyhow::Result<RoomEnvPrimitiveCpu> {
     let normal_xform = node_world.inverse().transpose();
     let material = primitive.material();
@@ -476,7 +478,39 @@ pub fn decode_env_primitive(
         Vec::new()
     };
 
-    let vertices: Vec<Vertex3dTex> = (0..positions_local.len())
+    // Archive `sign_description_*` boards: pack the decal sampler onto the mesh's UV bounding
+    // box so the description maps exactly once across whatever UV layout the asset ships with
+    // (Repeat sampler + UVs > 1 would otherwise tile the text — see screenshot in PR thread).
+    let is_archive_sign = matches!(
+        gltf_node_name,
+        "sign_description_left" | "sign_description_right"
+    );
+    let uv_remap = if is_archive_sign {
+        let mut min = Vec2::splat(f32::INFINITY);
+        let mut max = Vec2::splat(f32::NEG_INFINITY);
+        for uv in &uvs {
+            min = min.min(Vec2::from_array(*uv));
+            max = max.max(Vec2::from_array(*uv));
+        }
+        let span = max - min;
+        let inv = Vec2::new(
+            if span.x.abs() > 1e-6 {
+                1.0 / span.x
+            } else {
+                0.0
+            },
+            if span.y.abs() > 1e-6 {
+                1.0 / span.y
+            } else {
+                0.0
+            },
+        );
+        Some((min, inv))
+    } else {
+        None
+    };
+
+    let mut vertices: Vec<Vertex3dTex> = (0..positions_local.len())
         .map(|i| {
             let p = node_world.transform_point3(Vec3::from(positions_local[i]));
             let n = normal_xform
@@ -487,16 +521,29 @@ pub fn decode_env_primitive(
             let w = tl[3];
             let t_w = node_world.transform_vector3(t_loc).normalize_or_zero();
             let color = colors.get(i).copied().unwrap_or([1.0, 1.0, 1.0, 1.0]);
+            let uv = if let Some((min, inv)) = uv_remap {
+                let u = Vec2::from_array(uvs[i]);
+                let n = (u - min) * inv;
+                [n.x, n.y]
+            } else {
+                uvs[i]
+            };
             Vertex3dTex {
                 position: p.into(),
                 normal: n.into(),
-                uv: uvs[i],
+                uv,
                 tangent: [t_w.x, t_w.y, t_w.z, w],
                 uv_emr: uv_emr[i],
                 color,
             }
         })
         .collect();
+    // `shop_glb.wgsl` composites `@binding(3)` decal_tex when `COLOR_0.a > 1`.
+    if is_archive_sign {
+        for v in &mut vertices {
+            v.color[3] = 2.0;
+        }
+    }
     let factor = pbr.base_color_factor();
 
     let mut albedo_rgba = pbr.base_color_texture().and_then(|tex_info| {
@@ -555,6 +602,11 @@ pub fn decode_env_primitive(
     let alpha_cutoff = material.alpha_cutoff().unwrap_or(0.5);
 
     Ok(RoomEnvPrimitiveCpu {
+        gltf_node_name: if gltf_node_name.is_empty() {
+            None
+        } else {
+            Some(gltf_node_name.to_string())
+        },
         mesh: LoadedPrimitive {
             vertices,
             indices,
@@ -660,9 +712,9 @@ pub fn walk_room_env_node(
     parent: Mat4,
     hooks: &impl RoomEnvWalkHooks,
     candle_node_prefix: &str,
-    markers: &mut HashMap<String, Mat4>,
+    markers: &mut FxHashMap<String, Mat4>,
     env_primitives: &mut Vec<RoomEnvPrimitiveCpu>,
-    marker_mesh_bounds_doc: &mut HashMap<String, RoomEnvironmentBounds>,
+    marker_mesh_bounds_doc: &mut FxHashMap<String, RoomEnvironmentBounds>,
     collision_meshes: &mut Vec<RoomCollisionMesh>,
     embedded_cameras: &mut EmbeddedCameraHarvest,
     embedded_point_lights: &mut Vec<RoomGltfEmbeddedPointLight>,
@@ -735,8 +787,7 @@ pub fn walk_room_env_node(
                         Ok(chunk) => tris.extend(chunk),
                         Err(e) => log::warn!("{label} node {:?} collision: {e:#}", name),
                     }
-                    let decoded =
-                        decode_env_primitive(prim, world, buffers, images, label)?;
+                    let decoded = decode_env_primitive(prim, world, buffers, images, label, name)?;
                     merge_marker_mesh_bounds(marker_mesh_bounds_doc, name, &decoded);
                     env_primitives.push(decoded);
                 }
@@ -749,8 +800,7 @@ pub fn walk_room_env_node(
             }
             RoomMeshPolicy::EnvironmentDraw => {
                 for prim in mesh.primitives() {
-                    let decoded =
-                        decode_env_primitive(prim, world, buffers, images, label)?;
+                    let decoded = decode_env_primitive(prim, world, buffers, images, label, name)?;
                     if hooks.is_marker(name) {
                         merge_marker_mesh_bounds(marker_mesh_bounds_doc, name, &decoded);
                     }
@@ -783,7 +833,7 @@ pub fn walk_room_env_node(
 /// Document-space marker origin minus environment AABB center (multiply by [`room_env_world_scale`]
 /// for world space consistent with the centered room model matrix).
 pub fn marker_translation_doc(
-    markers: &HashMap<String, Mat4>,
+    markers: &FxHashMap<String, Mat4>,
     environment_bounds_doc: Option<RoomEnvironmentBounds>,
     name: &str,
 ) -> Option<Vec3> {

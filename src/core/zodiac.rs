@@ -1,28 +1,80 @@
-#![allow(dead_code)]
 //! Chinese Zodiac consumable cards — Mahjuro's planet-card analogue.
 //!
 //! Each Zodiac card is mapped 1:1 to one yaku in [`crate::core::yaku`]
-//! (including Kokushi Musō via the Qilin ribbon). Using a card increments the *level* of its yaku for
 //! the rest of the run, scaling both the chip and mult contributions per the
-//! formula in `YakuKind::mult_bonus_at` / `chip_bonus_at`:
+//! formula in `YakuKind::mult_bonus_at` / `chip_bonus_at`. Zodiacs are
+//! consumed when used on a tile, boosting the level of the yaku bound to that
+//! tile for the rest of the run.
 //!
-//!   mult_bonus(level) = base_mult + 0.5 × (level - 1)
-//!   chip_bonus(level) = base_chips + 20 × (level - 1)
-//!
-//! Drop economy:
-//!   * Small Blind clear → 1 random Zodiac
-//!   * Big Blind clear   → 1 random Zodiac
-//!   * Boss Blind clear  → 2 random Zodiacs (or one Festival pack of 3 → pick 1)
-//!   * Shop              → 4 gold per single, 6 gold per Festival pack
-//!     (Qilin is omitted from shop zodiac rolls until Kokushi Musō has been
-//!     cashed in at least once — see [`crate::core::progression::PlayerProgress::kokushi_musou_discovered`].)
-//!
-//! The consumable inventory holds 2 cards by default and is expandable via
-//! the Brocade Pouch (+1) relic.
+//! Display names, asset slugs, yaku pairing, and ribbon shop price live in
+//! `assets/data/zodiacs.json`. Leveling behaviour stays in [`YakuLevels`].
+
+use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
+use crate::core::json_asset::load_json_asset;
 use crate::core::yaku::YakuKind;
+
+#[derive(Deserialize)]
+struct ZodiacCatalogRaw {
+    ribbon_shop_price: u32,
+    zodiacs: Vec<ZodiacRowRaw>,
+}
+
+#[derive(Deserialize)]
+struct ZodiacRowRaw {
+    id: ZodiacKind,
+    name: String,
+    slug: String,
+    yaku: YakuKind,
+}
+
+struct ZodiacRow {
+    name: &'static str,
+    slug: &'static str,
+    yaku: YakuKind,
+}
+
+struct ZodiacCatalog {
+    ribbon_shop_price: u32,
+    by_kind: HashMap<ZodiacKind, ZodiacRow>,
+}
+
+fn zodiac_catalog() -> &'static ZodiacCatalog {
+    static CATALOG: OnceLock<ZodiacCatalog> = OnceLock::new();
+    CATALOG.get_or_init(|| {
+        const PATH: &str = "data/zodiacs.json";
+        let raw: ZodiacCatalogRaw = load_json_asset(PATH, "zodiac data");
+        let ribbon_shop_price = raw.ribbon_shop_price;
+        let by_kind: HashMap<ZodiacKind, ZodiacRow> = raw
+            .zodiacs
+            .into_iter()
+            .map(|r| {
+                (
+                    r.id,
+                    ZodiacRow {
+                        name: Box::leak(r.name.into_boxed_str()),
+                        slug: Box::leak(r.slug.into_boxed_str()),
+                        yaku: r.yaku,
+                    },
+                )
+            })
+            .collect();
+        ZodiacCatalog {
+            ribbon_shop_price,
+            by_kind,
+        }
+    })
+}
+
+fn zodiac_row(kind: ZodiacKind) -> &'static ZodiacRow {
+    zodiac_catalog()
+        .by_kind
+        .get(&kind)
+        .unwrap_or_else(|| panic!("zodiac data missing for {kind:?}"))
+}
 
 /// Zodiac ribbon kinds: the thirteen calendar animals (Mouse precedes Rat) plus
 /// **Qilin** for Kokushi Musō. Variant order matters for serialization stability.
@@ -42,7 +94,6 @@ pub enum ZodiacKind {
     Rooster,
     Dog,
     Pig,
-    /// Mythical auspicious beast; levels Kokushi Musō (thirteen orphans).
     Qilin,
 }
 
@@ -69,66 +120,19 @@ impl ZodiacKind {
 
     /// English display name.
     pub fn name(self) -> &'static str {
-        match self {
-            ZodiacKind::Mouse => "Mouse",
-            ZodiacKind::Rat => "Rat",
-            ZodiacKind::Ox => "Ox",
-            ZodiacKind::Tiger => "Tiger",
-            ZodiacKind::Rabbit => "Rabbit",
-            ZodiacKind::Dragon => "Dragon",
-            ZodiacKind::Snake => "Snake",
-            ZodiacKind::Horse => "Horse",
-            ZodiacKind::Goat => "Goat",
-            ZodiacKind::Monkey => "Monkey",
-            ZodiacKind::Rooster => "Rooster",
-            ZodiacKind::Dog => "Dog",
-            ZodiacKind::Pig => "Pig",
-            ZodiacKind::Qilin => "Qilin",
-        }
+        zodiac_row(self).name
     }
 
-    /// The yaku this zodiac levels up when used. The 1:1 mapping is fixed in
-    /// the design plan; see Part C of the design doc for the rationale of
-    /// each pairing.
+    /// The yaku this zodiac levels up when used.
     pub fn yaku(self) -> YakuKind {
-        match self {
-            ZodiacKind::Mouse => YakuKind::Honitsu,
-            ZodiacKind::Rat => YakuKind::Chinitsu,
-            ZodiacKind::Ox => YakuKind::Toitoi,
-            ZodiacKind::Tiger => YakuKind::Honroutou,
-            ZodiacKind::Rabbit => YakuKind::Iipeikou,
-            ZodiacKind::Dragon => YakuKind::FullHand,
-            ZodiacKind::Snake => YakuKind::Ittsu,
-            ZodiacKind::Horse => YakuKind::SanshokuDoujun,
-            ZodiacKind::Goat => YakuKind::Junchan,
-            ZodiacKind::Monkey => YakuKind::Tanyao,
-            ZodiacKind::Rooster => YakuKind::ChickenHand,
-            ZodiacKind::Dog => YakuKind::Yakuhai,
-            ZodiacKind::Pig => YakuKind::Chiitoitsu,
-            ZodiacKind::Qilin => YakuKind::KokushiMusou,
-        }
+        zodiac_row(self).yaku
     }
 
     /// Lowercase slug used for asset filenames (e.g. `dragon` →
     /// `assets/textures/zodiac_dragon_{top,mid,bot}.png`). See
     /// `scripts/generate_zodiac_ribbons.py`.
     pub fn slug(self) -> &'static str {
-        match self {
-            ZodiacKind::Mouse => "mouse",
-            ZodiacKind::Rat => "rat",
-            ZodiacKind::Ox => "ox",
-            ZodiacKind::Tiger => "tiger",
-            ZodiacKind::Rabbit => "rabbit",
-            ZodiacKind::Dragon => "dragon",
-            ZodiacKind::Snake => "snake",
-            ZodiacKind::Horse => "horse",
-            ZodiacKind::Goat => "goat",
-            ZodiacKind::Monkey => "monkey",
-            ZodiacKind::Rooster => "rooster",
-            ZodiacKind::Dog => "dog",
-            ZodiacKind::Pig => "pig",
-            ZodiacKind::Qilin => "qilin",
-        }
+        zodiac_row(self).slug
     }
 
     /// Look up the zodiac that levels a given yaku, if any.
@@ -136,9 +140,9 @@ impl ZodiacKind {
         Self::all().iter().copied().find(|z| z.yaku() == yaku)
     }
 
-    /// Shop price in gold for buying one copy of any zodiac (same for all kinds).
+    /// Shop price in gold for buying one ribbon (same catalog price for every kind).
     pub fn shop_price() -> u32 {
-        6
+        zodiac_catalog().ribbon_shop_price
     }
 }
 
@@ -191,7 +195,7 @@ impl ZodiacInventory {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct YakuLevels {
     /// Sparse map: only yaku that have been leveled appear here.
-    pub levels: std::collections::HashMap<YakuKind, u32>,
+    pub levels: rustc_hash::FxHashMap<YakuKind, u32>,
 }
 
 impl YakuLevels {
@@ -215,7 +219,7 @@ mod tests {
 
     #[test]
     fn each_zodiac_has_unique_yaku() {
-        let mut seen: std::collections::HashSet<YakuKind> = Default::default();
+        let mut seen: rustc_hash::FxHashSet<YakuKind> = Default::default();
         for &z in ZodiacKind::all() {
             assert!(seen.insert(z.yaku()), "duplicate yaku for {:?}", z);
         }
@@ -227,6 +231,35 @@ mod tests {
         for &z in ZodiacKind::all() {
             let yk = z.yaku();
             assert_eq!(ZodiacKind::for_yaku(yk), Some(z));
+        }
+    }
+
+    #[test]
+    fn every_zodiac_variant_has_one_data_entry() {
+        let cat = zodiac_catalog();
+        assert_eq!(
+            cat.by_kind.len(),
+            ZodiacKind::all().len(),
+            "zodiacs.json row count does not match ZodiacKind variant count"
+        );
+        for &z in ZodiacKind::all() {
+            let _ = zodiac_row(z);
+        }
+    }
+
+    #[test]
+    fn json_row_order_matches_zodiac_kind_all() {
+        const PATH: &str = "data/zodiacs.json";
+        let raw: ZodiacCatalogRaw = load_json_asset(PATH, "zodiac data");
+        let all = ZodiacKind::all();
+        assert_eq!(raw.zodiacs.len(), all.len(), "zodiacs array length");
+        for (i, row) in raw.zodiacs.iter().enumerate() {
+            assert_eq!(
+                row.id, all[i],
+                "zodiacs.json row {i}: id {:?} does not match ZodiacKind::all()[{i}] {:?}",
+                row.id,
+                all[i]
+            );
         }
     }
 

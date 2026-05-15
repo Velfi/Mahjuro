@@ -25,15 +25,15 @@ impl TileDebuffClass {
         match self {
             TileDebuffClass::Honors => matches!(tile.suit, Suit::Wind | Suit::Dragon),
             TileDebuffClass::Terminals => {
-                matches!(tile.suit, Suit::Characters | Suit::Bamboos | Suit::Circles)
+                matches!(tile.suit, Suit::Characters | Suit::Bamboos | Suit::Dots)
                     && matches!(tile.rank, 1 | 9)
             }
             TileDebuffClass::Simples => {
-                matches!(tile.suit, Suit::Characters | Suit::Bamboos | Suit::Circles)
+                matches!(tile.suit, Suit::Characters | Suit::Bamboos | Suit::Dots)
                     && matches!(tile.rank, 2..=8)
             }
             TileDebuffClass::MiddleTiles => {
-                matches!(tile.suit, Suit::Characters | Suit::Bamboos | Suit::Circles)
+                matches!(tile.suit, Suit::Characters | Suit::Bamboos | Suit::Dots)
                     && tile.rank == 5
             }
         }
@@ -52,7 +52,7 @@ impl TileDebuff {
         match self {
             TileDebuff::Suit(Suit::Characters) => "Characters",
             TileDebuff::Suit(Suit::Bamboos) => "Bamboos",
-            TileDebuff::Suit(Suit::Circles) => "Circles",
+            TileDebuff::Suit(Suit::Dots) => "Dots",
             TileDebuff::Suit(Suit::Wind) => "Winds",
             TileDebuff::Suit(Suit::Dragon) => "Dragons",
             TileDebuff::Suit(Suit::Flower) => "Flowers",

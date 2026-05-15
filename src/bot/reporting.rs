@@ -284,7 +284,11 @@ impl BotConfig {
     }
 }
 
-pub(crate) fn run_with_sequential(n: u32, config: BotConfig, options: BotRunOptions) -> AggregateStats {
+pub(crate) fn run_with_sequential(
+    n: u32,
+    config: BotConfig,
+    options: BotRunOptions,
+) -> AggregateStats {
     let mut agg = AggregateStats::default();
     for i in 0..n {
         let (s, _) = run_scheduled_bot_slot(i + 1, config.clone(), options.clone());
@@ -360,9 +364,7 @@ fn print_bot_timeout_report(events: &[BotTimeoutDiag]) {
     use std::collections::BTreeMap;
     let mut by_phase: BTreeMap<&str, u32> = BTreeMap::new();
     for ev in events {
-        *by_phase
-            .entry(ev.snapshot.phase.as_str())
-            .or_insert(0) += 1;
+        *by_phase.entry(ev.snapshot.phase.as_str()).or_insert(0) += 1;
     }
     let breakdown = by_phase
         .iter()
@@ -392,7 +394,11 @@ fn print_bot_timeout_report(events: &[BotTimeoutDiag]) {
     }
 }
 
-pub fn run_headless_aggregate(n: u32, config: BotConfig, options: BotRunOptions) -> HeadlessBotBatch {
+pub fn run_headless_aggregate(
+    n: u32,
+    config: BotConfig,
+    options: BotRunOptions,
+) -> HeadlessBotBatch {
     let mode = config.clone().into_mode();
     let timeout_label = options
         .run_timeout
@@ -416,13 +422,7 @@ pub fn run_headless_aggregate(n: u32, config: BotConfig, options: BotRunOptions)
         let pb = bot_runs_progress_bar(n);
         let out = (0..n)
             .progress_with(pb.clone())
-            .map(|i| {
-                run_scheduled_bot_slot(
-                    i + 1,
-                    config.clone(),
-                    options.clone(),
-                )
-            })
+            .map(|i| run_scheduled_bot_slot(i + 1, config.clone(), options.clone()))
             .collect();
         pb.finish_and_clear();
         out
@@ -431,13 +431,7 @@ pub fn run_headless_aggregate(n: u32, config: BotConfig, options: BotRunOptions)
         let out = (0..n)
             .into_par_iter()
             .progress_with(pb.clone())
-            .map(|i| {
-                run_scheduled_bot_slot(
-                    i + 1,
-                    config.clone(),
-                    options.clone(),
-                )
-            })
+            .map(|i| run_scheduled_bot_slot(i + 1, config.clone(), options.clone()))
             .collect();
         pb.finish_and_clear();
         out
@@ -492,7 +486,11 @@ pub fn run_headless(n: u32, config: BotConfig, options: BotRunOptions) {
     batch.aggregate.print_summary();
     if let Some(ref path) = options.output_runs {
         match write_runs_jsonl(path, &batch.runs) {
-            Ok(()) => println!("exported {} per-run JSON lines to {}", batch.runs.len(), path.display()),
+            Ok(()) => println!(
+                "exported {} per-run JSON lines to {}",
+                batch.runs.len(),
+                path.display()
+            ),
             Err(err) => eprintln!("failed to export runs to {}: {err}", path.display()),
         }
     }
@@ -902,9 +900,7 @@ fn blinds_cleared_before_death(blind: crate::core::rules::BlindKind) -> u32 {
 
 /// Approximate [`RunStats`] from a saved [`crate::core::progression::RunRecord`] for the
 /// play-history HTML export. Fields that are only tracked in the headless bot stay default.
-pub fn run_stats_from_progress_record(
-    rec: &crate::core::progression::RunRecord,
-) -> RunStats {
+pub fn run_stats_from_progress_record(rec: &crate::core::progression::RunRecord) -> RunStats {
     use crate::core::progression::RunOutcome;
     use crate::core::relic::all_relic_defs;
     use crate::core::rules::BlindKind;
@@ -942,8 +938,7 @@ pub fn run_stats_from_progress_record(
                 .unwrap_or_else(|| format!("{id:?}"))
         })
         .collect();
-    let final_consumables: Vec<String> =
-        rec.consumables_owned.iter().map(|c| c.name()).collect();
+    let final_consumables: Vec<String> = rec.consumables_owned.iter().map(|c| c.name()).collect();
     let mut boss_faced: BTreeMap<String, u8> = BTreeMap::new();
     let mut boss_beaten: BTreeMap<String, u8> = BTreeMap::new();
     if rec.final_blind == BlindKind::Boss {

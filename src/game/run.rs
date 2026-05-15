@@ -23,7 +23,7 @@ use crate::core::boss::{self, BossKind};
 use crate::core::debuff::TileDebuff;
 use crate::core::deck::Wall;
 use crate::core::hand::{
-    DetectedSet, SetKind, enumerate_decompositions, validate_selection_with_rules,
+    DetectedMeld, MeldKind, enumerate_decompositions, validate_selection_with_rules,
 };
 use crate::core::hand_intent::{
     DecompositionBias, decomposition_affinity, infer_decomposition_bias,
@@ -123,15 +123,9 @@ fn transformation_successor_shop_eligible(
         }
         RelicId::SilkMoth => ex.silk_thread && available_relics.contains(&RelicId::SilkThread),
         RelicId::Taotie => ex.melting_ice && available_relics.contains(&RelicId::MeltingIce),
-        RelicId::Geese => {
-            available_relics.contains(&RelicId::RustlingGooseEgg) && ex.xxxl_egg
-        }
-        RelicId::Rakuware => {
-            available_relics.contains(&RelicId::TeaCeremony) && ex.tea_ceremony
-        }
-        RelicId::MonarchButterfly => {
-            available_relics.contains(&RelicId::Chrysalis) && ex.chrysalis
-        }
+        RelicId::Geese => available_relics.contains(&RelicId::RustlingGooseEgg) && ex.xxxl_egg,
+        RelicId::Rakuware => available_relics.contains(&RelicId::TeaCeremony) && ex.tea_ceremony,
+        RelicId::MonarchButterfly => available_relics.contains(&RelicId::Chrysalis) && ex.chrysalis,
         _ => false,
     }
 }
@@ -143,9 +137,6 @@ pub(crate) fn relic_eligible_for_shop_stock(
     ex: RelicShopPoolExtinction,
 ) -> bool {
     if relics.owns(id) {
-        return false;
-    }
-    if id == RelicId::PhantomRelic {
         return false;
     }
     if crate::core::progression::is_transformation_successor_relic(id) {
@@ -200,7 +191,7 @@ fn enumerate_candidate_play_masks(hand: &[Tile], rules: &[RuleModifier]) -> Vec<
     let require_honor = rules.contains(&RuleModifier::RequireHonor);
     let must_play_five = rules.contains(&RuleModifier::MustPlayFive);
 
-    let mut masks = std::collections::HashSet::new();
+    let mut masks: rustc_hash::FxHashSet<u32> = rustc_hash::FxHashSet::default();
     enumerate_regular_subsets(
         &regular,
         &flowers,
@@ -227,7 +218,7 @@ fn enumerate_regular_subsets(
     require_honor: bool,
     must_play_five: bool,
     current_tile_count: usize,
-    out: &mut std::collections::HashSet<u32>,
+    out: &mut rustc_hash::FxHashSet<u32>,
 ) {
     if current_tile_count > 14 || (must_play_five && current_tile_count > 5) {
         return;
@@ -392,7 +383,7 @@ fn emit_leaf_masks(
     current_mask: u32,
     current_tile_count: usize,
     must_play_five: bool,
-    out: &mut std::collections::HashSet<u32>,
+    out: &mut rustc_hash::FxHashSet<u32>,
 ) {
     for extra_mask in flower_only_masks(flowers) {
         let total_mask = current_mask | extra_mask;
@@ -591,7 +582,7 @@ pub struct RunState {
     selected: Vec<bool>,
     /// Melds committed from hand into the structure (deferred scoring until trigger).
     #[serde(default)]
-    structure_sets: Vec<DetectedSet>,
+    structure_sets: Vec<DetectedMeld>,
     /// Tile copies held in the structure (same ids as in `structure_sets`).
     #[serde(default)]
     structure_tiles: Vec<Tile>,
@@ -697,7 +688,7 @@ pub struct RunState {
     /// Yaku Journal overlay's "Played N×" line. Persisted across save/load
     /// (defaults to empty for old saves).
     #[serde(default)]
-    pub yaku_times_played: std::collections::HashMap<crate::core::yaku::YakuKind, u32>,
+    pub yaku_times_played: rustc_hash::FxHashMap<crate::core::yaku::YakuKind, u32>,
     /// Cumulative tiles committed from hand into the structure bank (melds).
     #[serde(default)]
     pub tiles_played: u32,
@@ -730,7 +721,7 @@ pub struct RunState {
     /// Tile IDs permanently removed from the wall (e.g. Taotie devour).
     /// Filtered out during wall construction each round.
     #[serde(default)]
-    pub removed_tile_ids: std::collections::HashSet<u32>,
+    pub removed_tile_ids: rustc_hash::FxHashSet<u32>,
     /// Tile packs purchased from the shop. Each pack permanently injects
     /// extra tiles into the wall every round. Append-only.
     #[serde(default)]
@@ -789,7 +780,6 @@ pub struct RunState {
     ///   TeaCeremony  → principle index 0–3 (four scored hands, then transforms)
     ///   Rakuware     → (no counter; all four Tea beats when conditions hold)
     ///   MonarchButterfly → cumulative absorbed excess (post-target); tiers for chip bonus
-    ///   PhantomRelic → rounds held
     ///   HungryGhost  → permanent mult bonus ×10
     ///   TilePolisher → accumulated +chip bonus (each scored tile +3)
     ///   RiverRunner  → accumulated +chip bonus (each scored sequence +20)
@@ -857,11 +847,11 @@ impl RunState {
         &mut self.selected
     }
 
-    pub fn structure_sets(&self) -> &[DetectedSet] {
+    pub fn structure_sets(&self) -> &[DetectedMeld] {
         &self.structure_sets
     }
 
-    pub(crate) fn structure_sets_mut(&mut self) -> &mut Vec<DetectedSet> {
+    pub(crate) fn structure_sets_mut(&mut self) -> &mut Vec<DetectedMeld> {
         &mut self.structure_sets
     }
 
@@ -877,7 +867,7 @@ impl RunState {
         &mut self,
         hand: Vec<Tile>,
         selected: Vec<bool>,
-        structure_sets: Vec<DetectedSet>,
+        structure_sets: Vec<DetectedMeld>,
         structure_tiles: Vec<Tile>,
     ) {
         self.hand = hand;
@@ -929,21 +919,21 @@ impl RunState {
 
     /// Canonical *relic destroyed* trigger.
     ///
-    /// The "destroyed" keyword is the
-    /// player-facing name for permanent removal of a relic from a run; this
-    /// function is the single code-side anchor the keyword refers to. Every
-    /// path that destroys a relic should call this *after* removing the
-    /// victim from `relics.active`. Kintsugi converts each invocation into
-    /// a permanent +1 mult via its counter — adding a new destruction site
-    /// without going through here will silently break that synergy.
+    /// The "destroyed" keyword is the player-facing name for permanent removal
+    /// of a relic from a run; Kintsugi converts each invocation into a permanent
+    /// +1 mult via its counter — skipping this after a qualifying removal breaks
+    /// that synergy.
     ///
-    /// Gros-Michel-style relic burns (Paper Lantern, Silk Thread, Melting Ice,
-    /// XXXL Egg, Glass Cannon after its scoring use) remove the relic from inventory and call this so Kintsugi
-    /// can react; successors enter the shop pool via [`RelicShopPoolExtinction`].
-    /// Tea Ceremony instead transforms into Rakuware in-slot and also invokes this
-    /// so Kintsugi can count the finished ritual. Chrysalis transforms into
-    /// Monarch Butterfly the same way when excess crosses the hatch threshold.
-    fn note_relic_destroyed(&mut self) {
+    /// Inventory teardown is handled by [`Self::destroy_relic_removed_from_run`],
+    /// which clears debuffs/counters for `relic_id`, removes it from
+    /// [`RelicState::active`], then calls this.
+    ///
+    /// Call this directly only when `relics.active` was already updated (in-slot
+    /// transforms such as Tea Ceremony → Rakuware or Chrysalis → Monarch Butterfly,
+    /// or the Hungry Ghost victim after `active.remove`) — still exactly once per
+    /// qualifying destruction. Successors enter the shop pool via
+    /// [`RelicShopPoolExtinction`] where applicable.
+    pub(crate) fn note_relic_destroyed(&mut self) {
         if self.relics.has(crate::core::relic::RelicId::Kintsugi) {
             *self
                 .relic_counters
@@ -951,6 +941,96 @@ impl RunState {
                 .or_insert(0) += 1;
             self.relic_activations
                 .push(crate::core::relic::RelicId::Kintsugi);
+        }
+    }
+
+    /// Permanent removal of `relic_id` from the run inventory (slot emptied).
+    ///
+    /// Clears [`RelicState::debuffed`] and [`RunState::relic_counters`] entries keyed
+    /// by `relic_id`, removes all copies from [`RelicState::active`], then
+    /// [`Self::note_relic_destroyed`] for Kintsugi.
+    ///
+    /// Does **not** push [`GameEvent`]s, set shop extinction flags, or append to
+    /// [`RunState::relic_activations`] for `relic_id` — callers keep those semantics.
+    ///
+    /// In-slot transforms (Tea Ceremony → Rakuware, Chrysalis → Monarch Butterfly)
+    /// must **not** use this; swap the active entry, then call [`Self::note_relic_destroyed`]
+    /// alone.
+    ///
+    /// Returns whether at least one copy was present (and removed).
+    pub(crate) fn destroy_relic_removed_from_run(&mut self, relic_id: RelicId) -> bool {
+        if !self.relics.active.iter().any(|&r| r == relic_id) {
+            return false;
+        }
+        self.relics.active.retain(|&r| r != relic_id);
+        self.relics.debuffed.remove(&relic_id);
+        self.relic_counters.remove(&relic_id);
+        self.note_relic_destroyed();
+        true
+    }
+
+    /// Apply a signed gold change (shop spend, boss tax). Balance may go negative.
+    pub(crate) fn apply_gold_delta(&mut self, delta: i32, bus: Option<&mut EventBus>) {
+        if delta == 0 {
+            return;
+        }
+        self.gold += delta;
+        self.notify_run_gold_changed(delta, bus);
+    }
+
+    /// Apply a non-negative gold gain with saturation at `i32::MAX`.
+    pub(crate) fn apply_gold_reward(&mut self, delta: i32, bus: Option<&mut EventBus>) {
+        if delta <= 0 {
+            if delta < 0 {
+                self.apply_gold_delta(delta, bus);
+            }
+            return;
+        }
+        let old = self.gold;
+        self.gold = self.gold.saturating_add(delta);
+        let applied = self.gold - old;
+        if applied != 0 {
+            self.notify_run_gold_changed(applied, bus);
+        }
+    }
+
+    /// Set run gold to an absolute value (debug / tooling). Emits the net delta.
+    pub(crate) fn set_run_gold_direct(&mut self, new_gold: i32, bus: Option<&mut EventBus>) {
+        let old = self.gold;
+        if new_gold == old {
+            return;
+        }
+        self.gold = new_gold;
+        self.notify_run_gold_changed(new_gold - old, bus);
+    }
+
+    /// Push [`GameEvent::GoldChanged`] and run gold-reactive relic hooks.
+    pub(crate) fn notify_run_gold_changed(&mut self, delta: i32, mut bus: Option<&mut EventBus>) {
+        if delta == 0 {
+            return;
+        }
+        if let Some(b) = bus.as_mut() {
+            b.push(GameEvent::GoldChanged { delta });
+        }
+        self.relic_hooks_on_run_gold_changed(bus);
+    }
+
+    /// Extensible hook for relics that care about the bank after any gold mutation.
+    fn relic_hooks_on_run_gold_changed(&mut self, bus: Option<&mut EventBus>) {
+        self.turtle_shell_on_gold_broke(bus);
+    }
+
+    fn turtle_shell_on_gold_broke(&mut self, bus: Option<&mut EventBus>) {
+        if self.gold > 0 {
+            return;
+        }
+        if !self.relics.has(RelicId::TurtleShell) {
+            return;
+        }
+        let _ = self.destroy_relic_removed_from_run(RelicId::TurtleShell);
+        self.relic_activations.push(RelicId::TurtleShell);
+        if let Some(bus) = bus {
+            bus.push(GameEvent::RelicActivated(RelicId::TurtleShell));
         }
     }
 
@@ -1068,7 +1148,7 @@ impl RunState {
             xxxl_egg_extinct: false,
             tea_ceremony_extinct: false,
             chrysalis_extinct: false,
-            yaku_times_played: std::collections::HashMap::new(),
+            yaku_times_played: rustc_hash::FxHashMap::default(),
             tiles_played: 0,
             tiles_discarded: 0,
             times_restocked: 0,
@@ -1076,7 +1156,7 @@ impl RunState {
             best_structure_name: String::new(),
             tile_enhancements: BTreeMap::new(),
             global_buff_enhancement: None,
-            removed_tile_ids: std::collections::HashSet::new(),
+            removed_tile_ids: rustc_hash::FxHashSet::default(),
             tile_packs: Vec::new(),
             small_blind_tag: None,
             big_blind_tag: None,
@@ -1180,8 +1260,8 @@ impl RunState {
             return;
         }
         // Count copies of each (suit, rank) face currently in hand.
-        let mut counts: std::collections::HashMap<(crate::core::tile::Suit, u8), u32> =
-            std::collections::HashMap::new();
+        let mut counts: rustc_hash::FxHashMap<(crate::core::tile::Suit, u8), u32> =
+            rustc_hash::FxHashMap::default();
         for t in &self.hand {
             *counts.entry((t.suit, t.rank)).or_insert(0) += 1;
         }
@@ -1202,7 +1282,10 @@ impl RunState {
 mod tests {
     use super::*;
     use crate::core::deck::build_wall;
-    use crate::core::relic::{RelicId, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle, ScoreRoundBundle, ScoreTileBundle};
+    use crate::core::relic::{
+        RelicId, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
+        ScoreRoundBundle, ScoreTileBundle,
+    };
 
     /// Standard mode starting plays (Bamboo: 4 base + 1 bonus).
     const STARTING_PLAYS: u32 = 5;
@@ -1250,7 +1333,7 @@ mod tests {
             played_yaku_this_round: vec![],
             tile_debuffs: vec![],
             honors_scored_this_round: false,
-            yaku_times_played: std::collections::HashMap::new(),
+            yaku_times_played: rustc_hash::FxHashMap::default(),
             tiles_played: 0,
             tiles_discarded: 0,
             times_restocked: 0,
@@ -1268,7 +1351,7 @@ mod tests {
             target_score: mode.base_target,
             tile_enhancements: BTreeMap::new(),
             global_buff_enhancement: None,
-            removed_tile_ids: std::collections::HashSet::new(),
+            removed_tile_ids: rustc_hash::FxHashSet::default(),
             upcoming_blind: BlindKind::Small,
             wall,
             yaku_levels: crate::core::zodiac::YakuLevels::default(),
@@ -1302,16 +1385,16 @@ mod tests {
         EventBus::default()
     }
 
-    fn winning_structure() -> (Vec<Tile>, Vec<DetectedSet>) {
+    fn winning_structure() -> (Vec<Tile>, Vec<DetectedMeld>) {
         let tiles = vec![
             Tile::new(Suit::Characters, 1, 1),
             Tile::new(Suit::Characters, 1, 2),
             Tile::new(Suit::Characters, 2, 3),
             Tile::new(Suit::Characters, 3, 4),
             Tile::new(Suit::Characters, 4, 5),
-            Tile::new(Suit::Circles, 2, 6),
-            Tile::new(Suit::Circles, 3, 7),
-            Tile::new(Suit::Circles, 4, 8),
+            Tile::new(Suit::Dots, 2, 6),
+            Tile::new(Suit::Dots, 3, 7),
+            Tile::new(Suit::Dots, 4, 8),
             Tile::new(Suit::Bamboos, 5, 9),
             Tile::new(Suit::Bamboos, 6, 10),
             Tile::new(Suit::Bamboos, 7, 11),
@@ -1320,24 +1403,24 @@ mod tests {
             Tile::new(Suit::Wind, 1, 14),
         ];
         let sets = vec![
-            DetectedSet {
-                kind: SetKind::Pair,
+            DetectedMeld {
+                kind: MeldKind::Pair,
                 tile_ids: vec![1, 2],
             },
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![3, 4, 5],
             },
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![6, 7, 8],
             },
-            DetectedSet {
-                kind: SetKind::Sequence,
+            DetectedMeld {
+                kind: MeldKind::Sequence,
                 tile_ids: vec![9, 10, 11],
             },
-            DetectedSet {
-                kind: SetKind::Triplet,
+            DetectedMeld {
+                kind: MeldKind::Triplet,
                 tile_ids: vec![12, 13, 14],
             },
         ];
@@ -1660,7 +1743,7 @@ mod tests {
         run.tag_bonus_plays = 1;
         run.tag_bonus_discards = 1;
 
-        run.apply_blind(BlindKind::Small);
+        run.apply_blind(BlindKind::Small, None);
 
         assert_eq!(run.plays_remaining, STARTING_PLAYS + 1);
         assert_eq!(run.plays_max, STARTING_PLAYS + 1);
@@ -1685,9 +1768,9 @@ mod tests {
             Tile::new(Suit::Bamboos, 4, 7),
             Tile::new(Suit::Bamboos, 6, 8),
             Tile::new(Suit::Bamboos, 8, 9),
-            Tile::new(Suit::Circles, 1, 10),
-            Tile::new(Suit::Circles, 3, 11),
-            Tile::new(Suit::Circles, 5, 12),
+            Tile::new(Suit::Dots, 1, 10),
+            Tile::new(Suit::Dots, 3, 11),
+            Tile::new(Suit::Dots, 5, 12),
             Tile::new(Suit::Wind, 1, 13),
             Tile::new(Suit::Dragon, 1, 14),
         ];
@@ -1700,7 +1783,9 @@ mod tests {
         run.refill_hand(&mut bus);
 
         assert!(
-            !bus.queue.iter().any(|ev| matches!(ev, GameEvent::GameOver { .. })),
+            !bus.queue
+                .iter()
+                .any(|ev| matches!(ev, GameEvent::GameOver { .. })),
             "Second Wind should prevent GameOver"
         );
         assert!(
@@ -1727,7 +1812,7 @@ mod tests {
     #[test]
     fn second_wind_plays_used_uses_effective_round_cap() {
         let mut run = test_run();
-        run.apply_blind(BlindKind::Small);
+        run.apply_blind(BlindKind::Small, None);
         run.plays_remaining -= 2;
 
         let rw = Some(BlindKind::round_wind_for_ante(run.ante));
@@ -1770,7 +1855,7 @@ mod tests {
         run.discards_remaining = 0;
         run.tag_bonus_discards = 1;
 
-        run.apply_blind(BlindKind::Small);
+        run.apply_blind(BlindKind::Small, None);
 
         assert_eq!(run.discards_remaining, 6);
         assert_eq!(run.discards_max, 6);
@@ -1784,7 +1869,7 @@ mod tests {
             &crate::core::boss::BossKind::Drought.def().effect,
         ));
 
-        run.apply_blind(BlindKind::Boss);
+        run.apply_blind(BlindKind::Boss, None);
 
         assert_eq!(run.discards_remaining, STARTING_DISCARDS / 2);
         assert_eq!(run.discards_max, STARTING_DISCARDS / 2);
@@ -1831,9 +1916,9 @@ mod tests {
     #[test]
     fn apply_blind_promotes_wide_hand_bonus_to_round_hand_size() {
         let mut run = test_run();
-        run.apply_tag(crate::core::tag::TagKind::WideHand);
+        run.apply_tag(crate::core::tag::TagKind::WideHand, None);
 
-        run.apply_blind(BlindKind::Small);
+        run.apply_blind(BlindKind::Small, None);
 
         assert_eq!(run.hand.len(), HAND_SIZE + 2);
         assert_eq!(boss::effective_hand_size(&run), HAND_SIZE + 2);
@@ -1844,12 +1929,12 @@ mod tests {
     fn skipping_with_wide_hand_carries_bonus_into_next_blind() {
         let mut run = test_run();
 
-        run.apply_tag(crate::core::tag::TagKind::WideHand);
+        run.apply_tag(crate::core::tag::TagKind::WideHand, None);
         run.skip_to_next_blind();
 
         assert_eq!(run.tag_bonus_hand_size, 2);
 
-        run.apply_blind(BlindKind::Big);
+        run.apply_blind(BlindKind::Big, None);
 
         assert_eq!(run.hand.len(), HAND_SIZE + 2);
         assert_eq!(boss::effective_hand_size(&run), HAND_SIZE + 2);
@@ -1936,8 +2021,8 @@ mod tests {
             Tile::new(Suit::Characters, 1, 2),
             Tile::new(Suit::Characters, 1, 3),
         ];
-        let sets = vec![DetectedSet {
-            kind: SetKind::Triplet,
+        let sets = vec![DetectedMeld {
+            kind: MeldKind::Triplet,
             tile_ids: vec![1, 2, 3],
         }];
 
@@ -1958,7 +2043,10 @@ mod tests {
         dragon.structure_sets = sets;
         let mut dragon_bus = bus();
         let dragon_earned = dragon.trigger_structure_manual(&mut dragon_bus);
-        assert!(dragon_earned > 0, "Dragon should still allow structure cash-in");
+        assert!(
+            dragon_earned > 0,
+            "Dragon should still allow structure cash-in"
+        );
         assert!(
             dragon.round_score > 0,
             "debuffed Dragon cash-in should still score something"
@@ -2061,9 +2149,9 @@ mod tests {
             Tile::new(Suit::Bamboos, 4, 7),
             Tile::new(Suit::Bamboos, 6, 8),
             Tile::new(Suit::Bamboos, 8, 9),
-            Tile::new(Suit::Circles, 1, 10),
-            Tile::new(Suit::Circles, 3, 11),
-            Tile::new(Suit::Circles, 5, 12),
+            Tile::new(Suit::Dots, 1, 10),
+            Tile::new(Suit::Dots, 3, 11),
+            Tile::new(Suit::Dots, 5, 12),
             Tile::new(Suit::Wind, 1, 13),
             Tile::new(Suit::Dragon, 1, 14),
         ];
@@ -2097,9 +2185,9 @@ mod tests {
             Tile::new(Suit::Bamboos, 4, 7),
             Tile::new(Suit::Bamboos, 6, 8),
             Tile::new(Suit::Bamboos, 8, 9),
-            Tile::new(Suit::Circles, 1, 10),
-            Tile::new(Suit::Circles, 3, 11),
-            Tile::new(Suit::Circles, 5, 12),
+            Tile::new(Suit::Dots, 1, 10),
+            Tile::new(Suit::Dots, 3, 11),
+            Tile::new(Suit::Dots, 5, 12),
             Tile::new(Suit::Wind, 1, 13),
             Tile::new(Suit::Dragon, 1, 14),
         ];
@@ -2183,7 +2271,7 @@ mod tests {
 
         // Remember which tile ids are in hand *before* use; ids drawn later
         // should still pick up the enhancement via the global fallback.
-        let original_ids: std::collections::HashSet<u32> = run.hand.iter().map(|t| t.id).collect();
+        let original_ids: rustc_hash::FxHashSet<u32> = run.hand.iter().map(|t| t.id).collect();
         run.use_consumable(0, &mut bus);
         assert_eq!(run.global_buff_enhancement, Some(TileEnhancement::Pearl));
 
@@ -2247,7 +2335,7 @@ mod tests {
 const ALL_FACES: [(Suit, u8); 34] = {
     let mut faces = [(Suit::Characters, 0u8); 34];
     let mut i = 0;
-    let suits = [Suit::Characters, Suit::Bamboos, Suit::Circles];
+    let suits = [Suit::Characters, Suit::Bamboos, Suit::Dots];
     let mut si = 0;
     while si < 3 {
         let mut r = 1u8;
@@ -2277,7 +2365,7 @@ const ALL_FACES: [(Suit, u8); 34] = {
 fn try_joker_substitution(
     tiles: &[Tile],
     rules: &[RuleModifier],
-) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
+) -> Option<(Vec<DetectedMeld>, Vec<Tile>)> {
     for (idx, _) in tiles.iter().enumerate() {
         for &(suit, rank) in &ALL_FACES {
             let mut modified = tiles.to_vec();
@@ -2296,7 +2384,7 @@ fn try_joker_substitution(
 fn wind_candidate_faces(tiles: &[Tile]) -> Vec<(Suit, u8)> {
     use std::collections::BTreeSet;
     let mut candidates = BTreeSet::new();
-    let number_suits = [Suit::Characters, Suit::Bamboos, Suit::Circles];
+    let number_suits = [Suit::Characters, Suit::Bamboos, Suit::Dots];
     for t in tiles {
         // Exact face: could pair/triplet with existing tiles.
         candidates.insert((t.suit, t.rank));
@@ -2322,7 +2410,7 @@ fn wind_candidate_faces(tiles: &[Tile]) -> Vec<(Suit, u8)> {
 fn try_wind_substitution(
     tiles: &[Tile],
     rules: &[RuleModifier],
-) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
+) -> Option<(Vec<DetectedMeld>, Vec<Tile>)> {
     try_wind_substitution_excluding(tiles, &[], rules)
 }
 
@@ -2334,7 +2422,7 @@ fn try_wind_substitution_excluding(
     tiles: &[Tile],
     frozen: &[usize],
     rules: &[RuleModifier],
-) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
+) -> Option<(Vec<DetectedMeld>, Vec<Tile>)> {
     let wind_indices: Vec<usize> = tiles
         .iter()
         .enumerate()
@@ -2354,7 +2442,7 @@ fn try_wind_substitution_excluding(
         pos: usize,
         candidates: &[(Suit, u8)],
         rules: &[RuleModifier],
-    ) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
+    ) -> Option<(Vec<DetectedMeld>, Vec<Tile>)> {
         if pos == wind_indices.len() {
             return validate_selection_with_rules(tiles, rules).map(|sets| (sets, tiles.clone()));
         }
@@ -2387,7 +2475,7 @@ fn try_disgust_substitution(
     tiles: &[Tile],
     rules: &[RuleModifier],
     chain_winds: bool,
-) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
+) -> Option<(Vec<DetectedMeld>, Vec<Tile>)> {
     let has_east = tiles.iter().any(|t| t.suit == Suit::Wind && t.rank == 1);
     let has_west = tiles.iter().any(|t| t.suit == Suit::Wind && t.rank == 3);
     if !has_east || !has_west {
@@ -2443,7 +2531,7 @@ mod joker_tile_tests {
         assert!(result.is_some(), "joker should complete the sequence");
         let (sets, modified) = result.unwrap();
         assert_eq!(sets.len(), 1);
-        assert_eq!(sets[0].kind, SetKind::Sequence);
+        assert_eq!(sets[0].kind, MeldKind::Sequence);
         // The modified tile should now be 3m
         assert_eq!(modified[2].suit, Suit::Characters);
         assert_eq!(modified[2].rank, 3);
@@ -2453,14 +2541,14 @@ mod joker_tile_tests {
     fn joker_completes_triplet() {
         // 7p 7p 1s — joker should turn 1s into 7p
         let tiles = vec![
-            tile(Suit::Circles, 7, 0),
-            tile(Suit::Circles, 7, 1),
+            tile(Suit::Dots, 7, 0),
+            tile(Suit::Dots, 7, 1),
             tile(Suit::Bamboos, 1, 2),
         ];
         let result = try_joker_substitution(&tiles, &[]);
         assert!(result.is_some());
         let (sets, _) = result.unwrap();
-        assert_eq!(sets[0].kind, SetKind::Triplet);
+        assert_eq!(sets[0].kind, MeldKind::Triplet);
     }
 
     #[test]
@@ -2470,7 +2558,7 @@ mod joker_tile_tests {
         let result = try_joker_substitution(&tiles, &[]);
         assert!(result.is_some());
         let (sets, _) = result.unwrap();
-        assert_eq!(sets[0].kind, SetKind::Pair);
+        assert_eq!(sets[0].kind, MeldKind::Pair);
     }
 
     #[test]
@@ -2479,7 +2567,7 @@ mod joker_tile_tests {
         let tiles = vec![
             tile(Suit::Characters, 1, 0),
             tile(Suit::Bamboos, 5, 1),
-            tile(Suit::Circles, 9, 2),
+            tile(Suit::Dots, 9, 2),
         ];
         assert!(try_joker_substitution(&tiles, &[]).is_none());
     }
@@ -2524,8 +2612,8 @@ mod wild_wind_tests {
             tile(Suit::Bamboos, 4, 7),
             tile(Suit::Bamboos, 5, 8),
             tile(Suit::Bamboos, 6, 9),
-            tile(Suit::Circles, 7, 10),
-            tile(Suit::Circles, 8, 11),
+            tile(Suit::Dots, 7, 10),
+            tile(Suit::Dots, 8, 11),
             tile(Suit::Wind, 3, 12), // West, should become 9p (or 6p)
         ];
         let result = try_wind_substitution(&tiles, &[]);
@@ -2535,7 +2623,7 @@ mod wild_wind_tests {
         );
         let (sets, _) = result.unwrap();
         assert_eq!(sets.len(), 4);
-        assert!(sets.iter().all(|s| s.kind == SetKind::Sequence));
+        assert!(sets.iter().all(|s| s.kind == MeldKind::Sequence));
     }
 
     #[test]
@@ -2550,7 +2638,7 @@ mod wild_wind_tests {
         assert!(result.is_some());
         let (sets, _) = result.unwrap();
         assert_eq!(sets.len(), 1);
-        assert_eq!(sets[0].kind, SetKind::Sequence);
+        assert_eq!(sets[0].kind, MeldKind::Sequence);
     }
 
     #[test]
@@ -2565,7 +2653,7 @@ mod wild_wind_tests {
         assert!(result.is_some());
         let (sets, _) = result.unwrap();
         assert_eq!(sets.len(), 1);
-        assert_eq!(sets[0].kind, SetKind::Triplet);
+        assert_eq!(sets[0].kind, MeldKind::Triplet);
     }
 
     #[test]
@@ -2605,7 +2693,7 @@ mod wild_wind_tests {
         use super::*;
         use proptest::prelude::*;
 
-        const NUMBER_SUITS: [Suit; 3] = [Suit::Characters, Suit::Bamboos, Suit::Circles];
+        const NUMBER_SUITS: [Suit; 3] = [Suit::Characters, Suit::Bamboos, Suit::Dots];
 
         fn arb_number_tile(id: u32) -> BoxedStrategy<Tile> {
             (0..3usize, 1..=9u8)
@@ -2661,7 +2749,7 @@ mod wild_wind_tests {
         /// Extract the multiset of (suit, rank) faces assigned to the wind tiles
         /// in `original` after substitution into `modified`.
         fn wind_face_multiset(original: &[Tile], modified: &[Tile]) -> Vec<(Suit, u8)> {
-            let wind_ids: std::collections::HashSet<u32> = original
+            let wind_ids: rustc_hash::FxHashSet<u32> = original
                 .iter()
                 .filter(|t| t.suit == Suit::Wind)
                 .map(|t| t.id)
@@ -2848,7 +2936,7 @@ mod disgust_tests {
         let tiles = vec![tile(Suit::Wind, 1, 0), tile(Suit::Wind, 3, 1)];
         let (sets, _) = try_disgust_substitution(&tiles, &[], false).expect("EW should be a pair");
         assert_eq!(sets.len(), 1);
-        assert_eq!(sets[0].kind, SetKind::Pair);
+        assert_eq!(sets[0].kind, MeldKind::Pair);
     }
 
     #[test]
@@ -2861,7 +2949,7 @@ mod disgust_tests {
         let (sets, _) =
             try_disgust_substitution(&tiles, &[], false).expect("EWW should be a triplet");
         assert_eq!(sets.len(), 1);
-        assert_eq!(sets[0].kind, SetKind::Triplet);
+        assert_eq!(sets[0].kind, MeldKind::Triplet);
     }
 
     #[test]
@@ -2875,7 +2963,7 @@ mod disgust_tests {
         let (sets, _) =
             try_disgust_substitution(&tiles, &[], false).expect("EWWW should be a kong");
         assert_eq!(sets.len(), 1);
-        assert_eq!(sets[0].kind, SetKind::Kong);
+        assert_eq!(sets[0].kind, MeldKind::Kong);
     }
 
     #[test]

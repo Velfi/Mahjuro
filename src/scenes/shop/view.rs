@@ -1,4 +1,4 @@
-//! Shop view (`THEME.md` storeroom): `Shop.glb` room, screen-space hit slots, and shelf props.
+//! Shop view (`THEME.md` storeroom): `shop.glb` room, screen-space hit slots, and shelf props.
 //! Stock and input dispatch live on [`super::ShopScene`].
 
 use std::borrow::Cow;
@@ -18,6 +18,9 @@ use crate::render::decal::{load_ui_font, measure_label_advances};
 use crate::render::draw_cmd::{
     CameraParams, Object3d, Object3dKind, PromptIconQuad, ScenePunctualLight, UiFrame,
     camera_facing_euler_xyz_rad,
+};
+use crate::render::ribbon_mesh::{
+    ZodiacRibbonSpec, ribbon_length_fitting_rect, zodiac_ribbon_object3d,
 };
 use crate::render::shop_glb::{
     ShopEnvLightingTune, marker_translation, player_consumable_marker_name,
@@ -40,7 +43,7 @@ use crate::render::world_space::{
 use crate::scenes::journal_transition;
 use crate::scenes::object3d_inspect::{
     InspectFrameEnv, InspectRig, ItemInspectOrbitState, apply_inspect_view_to_frame,
-    inspect_orbit_camera,
+    inspect_orbit_camera, prepend_inspect_orbit_subject_rotation,
 };
 use crate::scenes::options::OptionsScene;
 use crate::scenes::{
@@ -67,7 +70,7 @@ const RELIC_GLOW_SECS: f32 = 0.9;
 
 /// Screen-space hit ids (processed in `update` before the main shop pick pass).
 const SHOP_SHELF_CLICK_BASE: u32 = 0xD000;
-/// One UI/hit slot per `shop_spawn_relic_00` … `shop_spawn_relic_08` in Shop.glb.
+/// One UI/hit slot per `shop_spawn_relic_00` … `shop_spawn_relic_08` in shop.glb.
 const SHOP_SPAWN_SLOT_COUNT: usize = 9;
 const SHOP_INV_CLICK_BASE: u32 = 0xD00A;
 const SHOP_CLICK_JOURNAL: u32 = 0xD011;
@@ -79,25 +82,25 @@ fn default_fill_point_lights(w: f32, h: f32) -> Vec<PointLight> {
         PointLight {
             pos: [w * 0.52, h * 0.34, h * 0.26],
             radius: h * 2.5,
-            color: [1.0, 0.93, 0.78],
+            color: color::rgb(color::TALLOW),
             intensity: 3.6,
         },
         PointLight {
             pos: [w * 0.52, h * 0.46, h * 0.21],
             radius: h * 2.3,
-            color: [0.98, 0.90, 0.74],
+            color: color::rgb(color::TALLOW),
             intensity: 3.0,
         },
         PointLight {
             pos: [w * 0.52, h * 0.78, h * 0.13],
             radius: h * 2.0,
-            color: [1.0, 0.92, 0.76],
+            color: color::rgb(color::TALLOW),
             intensity: 2.7,
         },
     ]
 }
 
-/// True when `Shop.glb` carries `KHR_lights_punctual` lights — then we use **only** those (no lamp / default fills).
+/// True when `shop.glb` carries `KHR_lights_punctual` lights — then we use **only** those (no lamp / default fills).
 fn shop_glb_has_embedded_lights() -> bool {
     with_shop_glb_cpu(|opt| {
         opt.is_some_and(|cpu| {
@@ -145,7 +148,7 @@ fn embedded_point_lights_runtime(
         let budget = MAX_POINT_LIGHTS.saturating_sub(2);
         if cpu.embedded_point_lights.len() > budget {
             log::warn!(
-                "Shop.glb: {} point lights exceed usable budget ({}) — truncating",
+                "shop.glb: {} point lights exceed usable budget ({}) — truncating",
                 cpu.embedded_point_lights.len(),
                 budget
             );
@@ -186,7 +189,7 @@ fn spot_lights_from_glb(w: f32, h: f32, env_h: f32, tune: &ShopEnvLightingTune) 
             .unwrap_or(glam::Vec3::ZERO);
         if cpu.embedded_spot_lights.len() > MAX_SPOT_LIGHTS {
             log::warn!(
-                "Shop.glb: {} spot lights exceed {} — truncating",
+                "shop.glb: {} spot lights exceed {} — truncating",
                 cpu.embedded_spot_lights.len(),
                 MAX_SPOT_LIGHTS
             );
@@ -221,7 +224,7 @@ fn spot_lights_from_glb(w: f32, h: f32, env_h: f32, tune: &ShopEnvLightingTune) 
 pub(super) fn shop_camera_base(w: f32, h: f32, env_h: f32) -> CameraParams {
     let from_glb = shop_camera_from_glb_if_present(h, env_h);
     let cam = from_glb.unwrap_or_else(|| {
-        // ref_h: 1080 — fallback when Shop.glb has no usable perspective camera (room centered at origin).
+        // ref_h: 1080 — fallback when shop.glb has no usable perspective camera (room centered at origin).
         let cs = h / 1080_f32;
         CameraParams {
             eye: [0.0 * cs, -1517.6 * cs, 1557.2 * cs],
@@ -291,7 +294,7 @@ fn shop_inspect_pivot_world(
             }
             ShopFocus::Ribbon(i) => {
                 scene.zodiac_items.get(i)?;
-                let ribbon_len = r[3] * 0.62;
+                let ribbon_len = ribbon_length_fitting_rect(r[2] * 0.38, r[3] * 0.62);
                 let cz = wz + ribbon_len * 0.35;
                 sale_anchor_at_slot(w, h, cam, slot_i, env_h, cx, cy, cz)
             }
@@ -329,7 +332,7 @@ fn shop_inspect_pivot_world(
                 let zodiac_for_sale = scene.zodiac_items.len();
                 let oi = i.saturating_sub(zodiac_for_sale);
                 shop.owned_zodiacs.get(oi)?;
-                let ribbon_len = r[3] * 0.58;
+                let ribbon_len = ribbon_length_fitting_rect(r[2] * 0.36, r[3] * 0.58);
                 let cz = wz + ribbon_len * 0.32;
                 inv_marker_surface_anchor(w, h, cam, scene, shop, slot_i, env_h, cx, cy, cz)
             }
@@ -355,7 +358,7 @@ fn shop_inspect_pivot_world(
     ))
 }
 
-/// World-space inspect target for orbit camera (matches shelf mesh anchor under `base` cam).
+/// World-space inspect target for fixed inspect camera (matches shelf mesh anchor under `base` cam).
 pub(super) fn shop_inspect_target_world(
     scene: &ShopScene,
     w: f32,
@@ -401,7 +404,7 @@ pub(super) fn shop_sync_item_inspect_orbit_target(
         return;
     }
     let shop_rm = GameEngine::read_shop(run);
-    let env_h = scene.drawn_env_height_scale.get();
+    let env_h = scene.drawn_room_gltf_height_scale.get();
     let rig = InspectRig::shop(h, env_h);
     for _ in 0..4 {
         let cam_try = inspect_orbit_camera(orbit, &rig);
@@ -523,7 +526,7 @@ fn shop_gameplay_style_gold_pile(
             pos: [pile_cx + lx, pile_cy + lz, world_y],
             extents: [coin_radius * 2.0, coin_thickness, coin_radius * 2.0],
             rotation: [0.0, rot_y, 0.0],
-            color: [1.00, 0.78, 0.30, 1.0],
+            color: color::RELIC_GOLD,
             kind: Object3dKind::Primitive {
                 shape: crate::render::primitive::MeshId::Cylinder,
                 material: crate::render::primitive::MaterialSpec::metal(),
@@ -573,7 +576,7 @@ impl SceneBehavior for ShopScene {
 impl ShopScene {
     pub(super) fn stash_focus_rects(&mut self, w: f32, h: f32, run: &RunState) {
         let shop = GameEngine::read_shop(run);
-        let env_h = self.drawn_env_height_scale.get();
+        let env_h = self.drawn_room_gltf_height_scale.get();
         let cam = shop_camera_params(w, h, env_h);
         *self.last_focus_rects.borrow_mut() = build_focus_rects(self, w, h, &cam, &shop);
     }
@@ -632,10 +635,14 @@ fn push_shop_inspect_overlay_chrome(out: &mut Vec<TextLabel>, ctx: &DrawCtx<'_>,
         no_glossary: false,
         scroll_offset: 0.0,
         flavor_spans: None,
+        bold: false,
+        italic: false,
+        underline: false,
+        text_effect: crate::render::text_effect::TextEffectId::Flat,
     });
 }
 
-/// Showcase shop inspect: dark backdrop + orbit camera + focused stock mesh only (no storeroom GLB or shop HUD).
+/// Showcase shop inspect: dark backdrop + fixed inspect camera + turntable hero mesh only (no storeroom GLB or shop HUD).
 pub(crate) fn render_shop_inspect_isolated_frame(
     shop: &ShopScene,
     ctx: DrawCtx<'_>,
@@ -643,8 +650,8 @@ pub(crate) fn render_shop_inspect_isolated_frame(
 ) -> UiFrame {
     let w = ctx.layout.window_w;
     let h = ctx.layout.window_h;
-    let env_h = ctx.shop_env_height_scale;
-    shop.drawn_env_height_scale.set(env_h);
+    let env_h = ctx.room_gltf_height_scale;
+    shop.drawn_room_gltf_height_scale.set(env_h);
     let shop_rm = GameEngine::read_shop(ctx.run);
 
     let mut frame = UiFrame::new();
@@ -652,8 +659,7 @@ pub(crate) fn render_shop_inspect_isolated_frame(
 
     frame.quad(GpuInstance {
         rect: [0.0, 0.0, w, h],
-        color: [0.0, 0.0, 0.0, 1.0],
-    });
+        color: [0.0, 0.0, 0.0, 1.0], user: 0});
 
     let inspect_rig = InspectRig::shop(h, env_h);
     let o = resolve_shop_orbit_target_for_draw(shop, orbit, &shop_rm, w, h, env_h);
@@ -677,6 +683,7 @@ pub(crate) fn render_shop_inspect_isolated_frame(
     if let Some(subj) = stock_subj {
         frame.clear_scene_depth();
         frame.shop_inspect_lit_mesh_subject_hdr();
+        let subj = prepend_inspect_orbit_subject_rotation(subj, &o, &inspect_rig);
         frame.object3d_batch(vec![subj]);
     }
 
@@ -738,8 +745,8 @@ pub(crate) fn render_shop_inspect_isolated_frame(
 pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
     let w = ctx.layout.window_w;
     let h = ctx.layout.window_h;
-    let env_h = ctx.shop_env_height_scale;
-    shop.drawn_env_height_scale.set(env_h);
+    let env_h = ctx.room_gltf_height_scale;
+    shop.drawn_room_gltf_height_scale.set(env_h);
     let shop_rm = GameEngine::read_shop(ctx.run);
 
     let scale = metrics::scene_scale(w, h);
@@ -747,8 +754,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
     let mut frame = UiFrame::new();
     frame.quad(GpuInstance {
         rect: [0.0, 0.0, w, h],
-        color: [0.04, 0.04, 0.055, 1.0],
-    });
+        color: color::LACQUER, user: 0});
     if with_shop_glb_cpu(|opt| opt.is_some()) {
         frame.shop_environment();
     }
@@ -764,7 +770,6 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
         &shop.positions,
         ShopInventoryCounts {
             n_for_sale: shop.items.len(),
-            n_for_sale_zodiacs: shop.zodiac_items.len(),
             n_for_sale_talismans: shop.talisman_items.len(),
             n_owned_relics: shop_rm.owned_relics.len(),
         },
@@ -864,7 +869,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                     point_lights.push(PointLight {
                         pos: [px, py - 30.0, wy + 60.0],
                         radius: h * 0.65 * hover_r_mul,
-                        color: [1.00, 0.92, 0.70],
+                        color: color::rgb(color::TALLOW),
                         intensity: 3.20 * hover_i_mul,
                     });
                 }
@@ -874,7 +879,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                         point_lights.push(PointLight {
                             pos: [cx, cy + 35.0, wy + 50.0],
                             radius: h * 0.72 * hover_r_mul,
-                            color: [1.00, 0.92, 0.74],
+                            color: color::rgb(color::TALLOW),
                             intensity: 3.00 * hover_i_mul,
                         });
                     }
@@ -896,7 +901,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                     point_lights.push(PointLight {
                         pos: [center.0, center.1 - 20.0, center.2.max(80.0)],
                         radius: h * 0.55 * hover_r_mul,
-                        color: [1.00, 0.92, 0.70],
+                        color: color::rgb(color::TALLOW),
                         intensity: 2.50 * hover_i_mul,
                     });
                 }
@@ -906,7 +911,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                         point_lights.push(PointLight {
                             pos: [cx, cy - 28.0, wy + 55.0],
                             radius: h * 0.62 * hover_r_mul,
-                            color: [1.00, 0.92, 0.70],
+                            color: color::rgb(color::TALLOW),
                             intensity: 3.20 * hover_i_mul,
                         });
                     } else if let Some(idx) = super::layout::tile_pack_index_from_pick(id) {
@@ -918,7 +923,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                         point_lights.push(PointLight {
                             pos: [center.0, center.1 - 30.0, center.2 + 60.0],
                             radius: h * 0.62 * hover_r_mul,
-                            color: [1.00, 0.92, 0.70],
+                            color: color::rgb(color::TALLOW),
                             intensity: 3.20 * hover_i_mul,
                         });
                     }
@@ -1072,8 +1077,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
     let bh = credits_rect[3] + pad * 1.05;
     frame.quad(GpuInstance {
         rect: [bx - 4.0, by - 3.0, bw + 8.0, bh + 7.0],
-        color: [0.02, 0.02, 0.04, 0.48],
-    });
+        color: color::alpha(color::LACQUER, 0.48), user: 0});
     frame.quad(GpuInstance {
         rect: [bx, by, bw, bh],
         color: [
@@ -1081,8 +1085,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
             color::WALNUT_DEEP[1],
             color::WALNUT_DEEP[2],
             0.88,
-        ],
-    });
+        ], user: 0});
     frame.texts([TextLabel {
         rect: credits_rect,
         text: gold_text,
@@ -1092,6 +1095,10 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
         no_glossary: false,
         scroll_offset: 0.0,
         flavor_spans: None,
+        bold: false,
+        italic: false,
+        underline: false,
+        text_effect: crate::render::text_effect::TextEffectId::Flat,
     }]);
 
     // Shelf focus ring uses shelf-slot screen rects.
@@ -1177,8 +1184,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
             let a = smoothed * 0.72;
             frame.quad(GpuInstance {
                 rect: [0.0, 0.0, w, h],
-                color: [0.03, 0.04, 0.06, a],
-            });
+                color: [0.03, 0.04, 0.06, a], user: 0});
         }
     }
     let (journal_zoom, journal_pos) = match shop.journal_transition {
@@ -1231,8 +1237,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
             ctx.picked_shop_object,
             ctx.debug_visibility,
             ctx.modal_active,
-            ctx.arrange_preview.clone(),
-            ctx.shop_env_height_scale,
+            ctx.room_gltf_height_scale,
             ctx.shop_env_lighting,
             ctx.effect_layers,
             ctx.cursor_pos,
@@ -1408,8 +1413,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                     pill_w,
                     legend_line_h + pill_pad_y * 2.0,
                 ],
-                color: pill_bg,
-            });
+                color: pill_bg, user: 0});
             let action = match i {
                 0 => crate::ui::input::UiAction::Cancel,
                 1 => crate::ui::input::UiAction::Confirm,
@@ -1424,20 +1428,23 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                 icon_cmds.push(PromptIconQuad {
                     inst: GpuInstance {
                         rect: [ix, iy, icon_px, icon_px],
-                        color: [0.92, 0.88, 0.82, 0.96],
-                    },
+                        color: color::alpha(color::PORCELAIN_AGED, 0.96), user: 0},
                     source,
                 });
             }
             legend_texts.push(TextLabel {
                 rect: [text_x, legend_text_y, text_w, legend_line_h],
                 text: SHOP_LEGEND_VERB_LABELS[i].to_string(),
-                color: [0.88, 0.84, 0.78, 0.96],
+                color: color::alpha(color::PORCELAIN_AGED, 0.96),
                 font_px: Some(legend_font_px),
                 align: TextAlign::Left,
                 no_glossary: false,
                 scroll_offset: 0.0,
                 flavor_spans: None,
+                bold: false,
+                italic: false,
+                underline: false,
+                text_effect: crate::render::text_effect::TextEffectId::Flat,
             });
         }
 
@@ -1484,6 +1491,10 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                 no_glossary: false,
                 scroll_offset: 0.0,
                 flavor_spans: None,
+                bold: false,
+                italic: false,
+                underline: false,
+                text_effect: crate::render::text_effect::TextEffectId::Flat,
             });
         }
 
@@ -1564,7 +1575,7 @@ fn hover_tooltip_content(
         }
         ShopHit::Ribbon(i) if i < n_for_sale_zodiacs => {
             let item = &scene.zodiac_items[i];
-            let price = item.price(mode);
+            let price = item.price(mode, &shop.relic_state);
             let can_afford = shop.gold >= price as i32 && !item.sold;
             let cta = if item.sold {
                 "SOLD".to_string()
@@ -1600,7 +1611,7 @@ fn hover_tooltip_content(
         }
         ShopHit::Talisman(i) if i < n_for_sale_talismans => {
             let item = &scene.talisman_items[i];
-            let price = item.price(mode);
+            let price = item.price(mode, &shop.relic_state);
             let can_afford = shop.gold >= price as i32 && !shop.consumables_full && !item.sold;
             let cta = if item.sold {
                 "SOLD".to_string()
@@ -1634,7 +1645,10 @@ fn hover_tooltip_content(
             Some((
                 item.name(),
                 item.description(),
-                format!("Sell {}g", consumable_sell_price_for_mode(c, mode)),
+                format!(
+                    "Sell {}g",
+                    consumable_sell_price_for_mode(c, mode, &shop.relic_state)
+                ),
                 color::CHAMPAGNE,
             ))
         }
@@ -1699,7 +1713,10 @@ fn hover_tooltip_content(
         ShopHit::Dish(id) if is_tile_pack_pick(id) => {
             let idx = tile_pack_index_from_pick(id).unwrap_or(0);
             scene.pack_items.get(idx).map(|pack| {
-                let price = pack.kind.shop_price();
+                let price = mode.scale_shop_price(crate::core::relic::apply_merchants_eye_discount(
+                    pack.kind.shop_price(),
+                    &shop.relic_state,
+                ));
                 let can_afford = shop.gold >= price as i32 && !pack.sold;
                 let cta = if pack.sold {
                     "SOLD".to_string()
@@ -1727,7 +1744,10 @@ fn hover_tooltip_content(
         ShopHit::TilePack(id) => {
             let idx = tile_pack_index_from_pick(id).unwrap_or(0);
             scene.pack_items.get(idx).map(|pack| {
-                let price = pack.kind.shop_price();
+                let price = mode.scale_shop_price(crate::core::relic::apply_merchants_eye_discount(
+                    pack.kind.shop_price(),
+                    &shop.relic_state,
+                ));
                 let can_afford = shop.gold >= price as i32 && !pack.sold;
                 let cta = if pack.sold {
                     "SOLD".to_string()
@@ -1808,7 +1828,7 @@ fn ring_target_rect(
 ) -> Option<[f32; 4]> {
     if ctx.input_mode == InputMode::Cursor {
         let (cx, cy) = ctx.cursor_pos;
-        return cursor_hover_rect(cx, cy, w, h, cam, scene, shop, ctx.shop_env_height_scale);
+        return cursor_hover_rect(cx, cy, w, h, cam, scene, shop, ctx.room_gltf_height_scale);
     }
     scene.focus.and_then(|f| {
         build_focus_rects(scene, w, h, cam, shop)
@@ -2069,7 +2089,7 @@ fn push_stock_meshes(
     let mut dim = Vec::new();
     let mut subject = None;
     let niche_base = w * 0.048;
-    let env_h = scene.drawn_env_height_scale.get();
+    let env_h = scene.drawn_room_gltf_height_scale.get();
 
     let sale = for_sale_slots(scene);
     for (slot_i, foc_opt) in sale.iter().enumerate() {
@@ -2175,8 +2195,10 @@ fn push_stock_meshes(
                 if item.sold {
                     col[3] = 0.30;
                 }
-                let ribbon_w = r[2] * 0.38;
-                let ribbon_len = r[3] * 0.62;
+                // Largest 3:1 ribbon that fits the inspect slot's
+                // (0.38 × 0.62) envelope — width-bound when the slot is
+                // very tall, length-bound otherwise.
+                let ribbon_len = ribbon_length_fitting_rect(r[2] * 0.38, r[3] * 0.62);
                 let z_k = if let Consumable::Zodiac(z) = item.consumable {
                     Some(z)
                 } else {
@@ -2193,16 +2215,16 @@ fn push_stock_meshes(
                 partition_shop_inspect_stock_mesh(
                     inspect_anchor,
                     *foc,
-                    Object3d {
+                    zodiac_ribbon_object3d(ZodiacRibbonSpec {
                         pos: ribbon_pos,
-                        extents: [ribbon_w, ribbon_len, ribbon_w * 0.14],
+                        length: ribbon_len,
                         rotation: euler_xyz_rad_from_deg(90.0, 0.0, 0.0),
                         color: [1.0, 1.0, 1.0, col[3]],
-                        kind: Object3dKind::ZodiacRibbon { kind: z_k },
+                        kind: z_k,
                         hover_target: 0.0,
                         anim_id: 0,
                         arrange_name: Some("shop.for_sale.ribbons"),
-                    },
+                    }),
                     &mut dim,
                     &mut subject,
                 );
@@ -2316,8 +2338,9 @@ fn push_stock_meshes(
                     continue;
                 };
                 if let Consumable::Zodiac(z) = owned.consumable {
-                    let ribbon_w = r[2] * 0.36;
-                    let ribbon_len = r[3] * 0.58;
+                    // Largest 3:1 ribbon that fits the inventory slot's
+                    // (0.36 × 0.58) envelope.
+                    let ribbon_len = ribbon_length_fitting_rect(r[2] * 0.36, r[3] * 0.58);
                     let cz = wz + ribbon_len * 0.32;
                     let pos = object3d_pos_for_shop_inspect_focus(
                         inspect_anchor,
@@ -2332,19 +2355,19 @@ fn push_stock_meshes(
                     partition_shop_inspect_stock_mesh(
                         inspect_anchor,
                         *foc,
-                        Object3d {
+                        zodiac_ribbon_object3d(ZodiacRibbonSpec {
                             pos,
-                            extents: [ribbon_w, ribbon_len, ribbon_w * 0.13],
+                            length: ribbon_len,
                             rotation: euler_rad_add(
                                 base_rot,
                                 sell_hold_wobble_euler_rad(scene, *foc),
                             ),
                             color: [1.0, 1.0, 1.0, 1.0],
-                            kind: Object3dKind::ZodiacRibbon { kind: Some(z) },
+                            kind: Some(z),
                             hover_target: 0.0,
                             anim_id: 0,
                             arrange_name: Some("shop.shelf.ribbon_tray"),
-                        },
+                        }),
                         &mut dim,
                         &mut subject,
                     );
@@ -2403,7 +2426,7 @@ fn rect_center_n(window_w: f32, window_h: f32, nx: f32, ny: f32, rw: f32, rh: f3
     [cx - rw * 0.5, cy - rh * 0.5, rw, rh]
 }
 
-/// Fallback rects when Shop.glb markers are missing — one horizontal row of nine spawn empties.
+/// Fallback rects when shop.glb markers are missing — one horizontal row of nine spawn empties.
 fn shop_shelf_slot_rect(w: f32, h: f32, cam: &CameraParams, index: usize, env_h: f32) -> [f32; 4] {
     let rw = w * 0.065;
     let rh = h * 0.125;
@@ -2637,7 +2660,7 @@ pub(in crate::scenes::shop) fn snap_focus_after_shop_purchase(
     }
 
     let shop = GameEngine::read_shop(run);
-    let env_h = scene.drawn_env_height_scale.get();
+    let env_h = scene.drawn_room_gltf_height_scale.get();
     let cam = shop_camera_params(w, h, env_h);
     let rects = build_focus_rects(scene, w, h, &cam, &shop);
 
@@ -2666,7 +2689,7 @@ fn build_focus_rects(
     cam: &CameraParams,
     shop: &ShopReadModel,
 ) -> Vec<(ShopFocus, [f32; 4])> {
-    let env_h = scene.drawn_env_height_scale.get();
+    let env_h = scene.drawn_room_gltf_height_scale.get();
     let mut v = Vec::new();
     let sale_slots = for_sale_slots(scene);
     for (i, sf) in sale_slots.into_iter().enumerate() {

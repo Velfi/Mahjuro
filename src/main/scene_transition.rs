@@ -182,7 +182,9 @@ pub(crate) struct PostSceneTransitionCtx<'a> {
 pub(crate) fn sync_music_for_scene(audio: &mut crate::audio::AudioManager, tag: SceneTag) {
     use crate::audio::MusicId;
     match tag {
-        SceneTag::MainMenuExterior | SceneTag::Collection => audio.set_music_track(MusicId::MainMenu),
+        SceneTag::MainMenuExterior | SceneTag::Collection => {
+            audio.set_music_track(MusicId::MainMenu)
+        }
         SceneTag::Gameplay => audio.set_music_track(MusicId::Gameplay),
         SceneTag::Shop | SceneTag::PickBlind => audio.set_music_track(MusicId::Shop),
         _ => audio.stop_background_music(),
@@ -196,8 +198,7 @@ pub(crate) fn apply_post_scene_transition_effects(ctx: PostSceneTransitionCtx<'_
         }
     }
     if ctx.to == SceneTag::MainMenuExterior && !ctx.pushed_meta_level_up {
-        ctx.audio
-            .play_sfx(crate::audio::SfxId::MainMenuEnter);
+        ctx.audio.play_sfx(crate::audio::SfxId::MainMenuEnter);
     }
     if ctx.to == SceneTag::MainMenuExterior {
         crate::asset_path::prefetch_lazy_packs_after_menu_once();
@@ -208,12 +209,8 @@ pub(crate) fn apply_post_scene_transition_effects(ctx: PostSceneTransitionCtx<'_
     }
     ctx.anim
         .fade(crate::render::animation::ENTITY_SCORE_PANEL, 0.0, 1.0, 300);
-    ctx.anim.slide_to(
-        crate::render::animation::ENTITY_HAND_STRIP,
-        0.0,
-        -20.0,
-        400,
-    );
+    ctx.anim
+        .slide_to(crate::render::animation::ENTITY_HAND_STRIP, 0.0, -20.0, 400);
 }
 
 #[cfg(test)]
@@ -245,7 +242,13 @@ mod tests {
 
     #[test]
     fn smoke_cleared_tile_select_to_shop() {
-        assert!(should_clear_smoke_on_transition(SceneTag::TileSelect, SceneTag::Shop));
-        assert!(!should_clear_smoke_on_transition(SceneTag::Shop, SceneTag::Gameplay));
+        assert!(should_clear_smoke_on_transition(
+            SceneTag::TileSelect,
+            SceneTag::Shop
+        ));
+        assert!(!should_clear_smoke_on_transition(
+            SceneTag::Shop,
+            SceneTag::Gameplay
+        ));
     }
 }

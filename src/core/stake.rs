@@ -11,21 +11,29 @@
 //! * `boss_min_ante_floor` — reduces `BossDef::min_ante` in the filter in
 //!   `core::boss::pick_for_ante`, letting harder bosses appear earlier.
 //!
-//! Optionally, a stake may push `RuleModifier`s into `starting_rules` so a
-//! run-wide modifier fires every round. Today only `Winter` reserves this
-//! slot; the exact flavor is TBD and it defaults to an empty list.
+//! Labels, descriptions, numeric knobs, and optional `starting_rules` slugs
+//! live in `assets/data/stakes.json`. `next` / `previous` unlock order stays
+//! in this module.
+
+use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
+use crate::core::json_asset::load_json_asset;
 use crate::core::rules::RuleModifier;
 
 /// Ordered list of stakes from easiest to hardest.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Stake {
+    #[serde(alias = "Spring")]
     Spring,
+    #[serde(alias = "Summer")]
     Summer,
+    #[serde(alias = "Autumn")]
     Autumn,
+    #[serde(alias = "Winter")]
     Winter,
 }
 
@@ -35,6 +43,71 @@ impl Default for Stake {
     }
 }
 
+#[derive(Deserialize)]
+struct StakePresentationRaw {
+    id: Stake,
+    label: String,
+    description: String,
+    base_target_mult: f32,
+    price_multiplier: f32,
+    reroll_base_cost: u32,
+    boss_min_ante_floor: u32,
+    starting_rules: Vec<String>,
+}
+
+struct StakePresentation {
+    label: &'static str,
+    description: &'static str,
+    base_target_mult: f32,
+    price_multiplier: f32,
+    reroll_base_cost: u32,
+    boss_min_ante_floor: u32,
+    starting_rules: &'static [RuleModifier],
+}
+
+fn stake_rule_from_data_slug(s: &str) -> RuleModifier {
+    match s {
+        "no_sequence_bonus" => RuleModifier::NoSequenceBonus,
+        _ => panic!("unknown stake starting_rules slug: {s}"),
+    }
+}
+
+fn stake_presentations() -> &'static HashMap<Stake, StakePresentation> {
+    static MAP: OnceLock<HashMap<Stake, StakePresentation>> = OnceLock::new();
+    MAP.get_or_init(|| {
+        const PATH: &str = "data/stakes.json";
+        let raw: Vec<StakePresentationRaw> = load_json_asset(PATH, "stake data");
+        raw.into_iter()
+            .map(|r| {
+                let rules: Vec<RuleModifier> = r
+                    .starting_rules
+                    .iter()
+                    .map(|s| stake_rule_from_data_slug(s))
+                    .collect();
+                let starting_rules: &'static [RuleModifier] = Box::leak(rules.into_boxed_slice());
+                (
+                    r.id,
+                    StakePresentation {
+                        label: Box::leak(r.label.into_boxed_str()),
+                        description: Box::leak(r.description.into_boxed_str()),
+                        base_target_mult: r.base_target_mult,
+                        price_multiplier: r.price_multiplier,
+                        reroll_base_cost: r.reroll_base_cost,
+                        boss_min_ante_floor: r.boss_min_ante_floor,
+                        starting_rules,
+                    },
+                )
+            })
+            .collect()
+    })
+}
+
+fn stake_presentation(stake: Stake) -> &'static StakePresentation {
+    stake_presentations()
+        .get(&stake)
+        .unwrap_or_else(|| panic!("stake data missing for {stake:?}"))
+}
+
 impl Stake {
     /// Every stake, ordered by difficulty. Used by the modal picker and the
     /// unlock-chain logic.
@@ -42,52 +115,27 @@ impl Stake {
 
     /// Short display label for the HUD badge / picker row.
     pub fn label(self) -> &'static str {
-        match self {
-            Stake::Spring => "Spring",
-            Stake::Summer => "Summer",
-            Stake::Autumn => "Autumn",
-            Stake::Winter => "Winter",
-        }
+        stake_presentation(self).label
     }
 
     /// One-line description for the picker row tooltip.
     pub fn description(self) -> &'static str {
-        match self {
-            Stake::Spring => "Baseline difficulty.",
-            Stake::Summer => "+15% targets.",
-            Stake::Autumn => "+30% targets, +25% shop, +1 reroll cost, earlier bosses.",
-            Stake::Winter => {
-                "+50% targets, +50% shop, +2 reroll cost, earliest bosses, sequences lose bonus."
-            }
-        }
+        stake_presentation(self).description
     }
 
     /// Base-target multiplier applied once at run start.
     pub fn base_target_mult(self) -> f32 {
-        match self {
-            Stake::Spring => 1.0,
-            Stake::Summer => 1.15,
-            Stake::Autumn => 1.30,
-            Stake::Winter => 1.50,
-        }
+        stake_presentation(self).base_target_mult
     }
 
     /// Shop price multiplier for everything bought from the shop.
     pub fn price_multiplier(self) -> f32 {
-        match self {
-            Stake::Spring | Stake::Summer => 1.0,
-            Stake::Autumn => 1.25,
-            Stake::Winter => 1.50,
-        }
+        stake_presentation(self).price_multiplier
     }
 
     /// Base reroll cost in the shop. Increment-per-reroll still applies on top.
     pub fn reroll_base_cost(self) -> u32 {
-        match self {
-            Stake::Spring | Stake::Summer => 5,
-            Stake::Autumn => 6,
-            Stake::Winter => 7,
-        }
+        stake_presentation(self).reroll_base_cost
     }
 
     /// Subtracted from a boss's `min_ante` in `pick_for_ante`, letting higher
@@ -95,24 +143,12 @@ impl Stake {
     /// (a positive floor would *delay* bosses — not something any current
     /// stake does).
     pub fn boss_min_ante_floor(self) -> u32 {
-        match self {
-            Stake::Spring | Stake::Summer => 0,
-            Stake::Autumn => 1,
-            Stake::Winter => 2,
-        }
+        stake_presentation(self).boss_min_ante_floor
     }
 
     /// Run-wide `RuleModifier`s pushed into `GameMode::starting_rules`.
-    /// Winter applies `NoSequenceBonus` every round so the sequence lane is
-    /// permanently dampened — stacks with Winter's +50% target and +50% shop
-    /// without compounding into the near-unwinnable territory that
-    /// `PairsScoreZero` would. Spring/Summer/Autumn add nothing here; their
-    /// difficulty comes from the numeric knobs alone.
     pub fn starting_rules(self) -> Vec<RuleModifier> {
-        match self {
-            Stake::Winter => vec![RuleModifier::NoSequenceBonus],
-            _ => Vec::new(),
-        }
+        stake_presentation(self).starting_rules.to_vec()
     }
 
     /// The next stake in the unlock chain, if any. `Winter` is terminal.
@@ -183,5 +219,41 @@ mod tests {
             assert!(m >= prev, "base_target_mult not monotonic at {:?}", s);
             prev = m;
         }
+    }
+
+    #[test]
+    fn every_stake_variant_has_one_data_entry() {
+        let map = stake_presentations();
+        assert_eq!(
+            map.len(),
+            Stake::ALL.len(),
+            "stakes.json entry count does not match Stake variant count"
+        );
+        for s in Stake::ALL {
+            let _ = stake_presentation(s);
+        }
+    }
+
+    #[test]
+    fn json_row_order_matches_stake_all() {
+        const PATH: &str = "data/stakes.json";
+        let raw: Vec<StakePresentationRaw> = load_json_asset(PATH, "stake data");
+        assert_eq!(raw.len(), Stake::ALL.len(), "stakes.json row count");
+        for (i, row) in raw.iter().enumerate() {
+            assert_eq!(
+                row.id, Stake::ALL[i],
+                "stakes.json row {i}: id {:?} does not match Stake::ALL[{i}] {:?}",
+                row.id,
+                Stake::ALL[i]
+            );
+        }
+    }
+
+    #[test]
+    fn winter_starts_no_sequence_bonus_rule() {
+        assert_eq!(
+            Stake::Winter.starting_rules(),
+            vec![RuleModifier::NoSequenceBonus]
+        );
     }
 }

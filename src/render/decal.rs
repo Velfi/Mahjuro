@@ -10,7 +10,7 @@
 
 use crate::core::relic::RelicFlavorSpan;
 use crate::core::tile::{Suit, Tile, TileEnhancement};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::{Mutex, OnceLock};
 
 // ---------------------------------------------------------------------------
@@ -47,7 +47,7 @@ fn finish_tile_decal_rgba(mut rgba: Vec<u8>, width: u32, height: u32, flip_h: bo
 /// Mahjong Unicode glyph is unavailable — no `m`/`s`/`p`, wind initials, or kanji.
 pub fn tile_face_display_label(tile: &Tile) -> String {
     match tile.suit {
-        Suit::Characters | Suit::Bamboos | Suit::Circles => format!("{}", tile.rank),
+        Suit::Characters | Suit::Bamboos | Suit::Dots => format!("{}", tile.rank),
         Suit::Wind => match tile.rank {
             1 => "East".into(),
             2 => "South".into(),
@@ -70,7 +70,7 @@ pub fn tile_suit_emoji(tile: &Tile) -> &'static str {
     match tile.suit {
         Suit::Characters => "\u{1F3B4}", // 🎴 flower card
         Suit::Bamboos => "\u{1F38B}",    // 🎋 tanabata tree / bamboo
-        Suit::Circles => "\u{1F534}",    // 🔴 red circle / disc
+        Suit::Dots => "\u{1F534}",    // 🔴 red circle / disc
         Suit::Wind => "\u{1F32C}",       // 🌬 wind face
         Suit::Dragon => "\u{1F409}",     // 🐉 dragon
         Suit::Flower => "\u{1F33A}",     // 🌺 hibiscus
@@ -80,15 +80,15 @@ pub fn tile_suit_emoji(tile: &Tile) -> &'static str {
 
 /// Return the asset filename stem for a tile inside a tileset directory.
 ///
-/// Maps `(Suit, rank)` to the naming convention used in `assets/sets/`:
-///   Bamboos 1–9 → B1..B9, Characters → C1..C9, Circles → D1..D9,
+/// Maps `(Suit, rank)` to the naming convention used in `assets/textures/tile_sets/`:
+///   Bamboos 1–9 → B1..B9, Characters → C1..C9, Dots → D1..D9,
 ///   Winds → EWind/SWind/WWind/NWind, Dragons → DRed/DGreen/DWhite,
 ///   Flowers → Flower1..Flower4, Seasons → Season1..Season4.
 fn tile_set_filename(tile: &Tile) -> Option<String> {
     match tile.suit {
         Suit::Bamboos => Some(format!("B{}", tile.rank)),
         Suit::Characters => Some(format!("C{}", tile.rank)),
-        Suit::Circles => Some(format!("D{}", tile.rank)),
+        Suit::Dots => Some(format!("D{}", tile.rank)),
         Suit::Wind => {
             let prefix = match tile.rank {
                 1 => "E",
@@ -120,12 +120,13 @@ struct Atlas {
     tile_w: u32,
     tile_h: u32,
     columns: u32,
-    origins: HashMap<String, (u32, u32)>,
+    origins: FxHashMap<String, (u32, u32)>,
 }
 
-fn atlas_cache() -> &'static Mutex<HashMap<String, Option<std::sync::Arc<Atlas>>>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, Option<std::sync::Arc<Atlas>>>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+fn atlas_cache() -> &'static Mutex<FxHashMap<String, Option<std::sync::Arc<Atlas>>>> {
+    static CACHE: OnceLock<Mutex<FxHashMap<String, Option<std::sync::Arc<Atlas>>>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(FxHashMap::default()))
 }
 
 /// Minimal parser for the fixed-schema atlas.toml our packer emits.
@@ -211,7 +212,7 @@ fn load_atlas(tile_set: &str) -> Option<std::sync::Arc<Atlas>> {
 }
 
 fn decode_atlas(tile_set: &str) -> Option<Atlas> {
-    let toml_path = format!("sets/{tile_set}/atlas.toml");
+    let toml_path = format!("textures/tile_sets/{tile_set}/atlas.toml");
     let toml_file = crate::asset_path::get(&toml_path)?;
     let toml_src = std::str::from_utf8(toml_file.data.as_ref()).ok()?;
     let (tile_w, tile_h, columns, layout) = parse_atlas_toml(toml_src)?;
@@ -219,14 +220,15 @@ fn decode_atlas(tile_set: &str) -> Option<Atlas> {
         return None;
     }
 
-    let png_path = format!("sets/{tile_set}/atlas.png");
+    let png_path = format!("textures/tile_sets/{tile_set}/atlas.png");
     let png_file = crate::asset_path::get(&png_path)?;
     let decoder = image::ImageReader::new(std::io::Cursor::new(png_file.data.as_slice()))
         .with_guessed_format()
         .ok()?;
     let img = decoder.decode().ok()?.to_rgba8();
 
-    let mut origins = HashMap::with_capacity(layout.len());
+    let mut origins: FxHashMap<String, (u32, u32)> =
+        FxHashMap::with_capacity_and_hasher(layout.len(), Default::default());
     for (i, code) in layout.into_iter().enumerate() {
         // Empty layout slots exist as row-padding ("" entries in atlas.toml).
         // They consume a grid cell but never get looked up, so skip indexing.
@@ -296,7 +298,7 @@ fn blit_set_decal(dst: &mut [u8], dst_w: u32, dst_h: u32, tile: &Tile, tile_set:
 /// after the shader stretches the texture across the face.
 ///
 /// When `tile_set` is `Some("original")` (or another set name), the function
-/// crops the tile from that set's `assets/sets/<name>/atlas.png` (using the
+/// crops the tile from that set's `assets/textures/tile_sets/<name>/atlas.png` (using the
 /// `atlas.toml` layout) instead of rasterizing glyphs. Falls back to font
 /// rasterization if the atlas is missing or doesn't list this tile code.
 ///
@@ -597,6 +599,7 @@ pub fn rasterize_tablet_label_decal(
             font_px: None,
             align: LabelAlign::Center,
             scroll_offset: 0.0,
+            underline: false,
         },
     );
 
@@ -735,12 +738,22 @@ pub fn rasterize_wood_tablet_decal(label: &str, ui_font: Option<&fontdue::Font>)
 /// fully transparent. A 2-px-offset carved-shadow pass renders behind each
 /// line so the engraving still reads after the texture is bilinear-stretched
 /// across the on-screen plaque face.
-pub fn rasterize_plaque_decal(
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PlaqueDecalStyle {
+    /// Gilded three-pass engraving for lacquered wood plaques (default).
+    GildedEngraving,
+    /// Dark warm brown ink for light grounds (Archive `sign_description_*` boards).
+    WalnutInkOnLight,
+}
+
+/// Same layout pipeline as [`rasterize_plaque_decal`] with a selectable ink palette.
+pub fn rasterize_plaque_decal_styled(
     text: &str,
     ui_font: Option<&fontdue::Font>,
     emoji_font: Option<&fontdue::Font>,
     w: u32,
     h: u32,
+    style: PlaqueDecalStyle,
 ) -> Vec<u8> {
     let mut rgba = vec![0u8; (w * h * 4) as usize];
     let Some(font) = ui_font else {
@@ -748,6 +761,9 @@ pub fn rasterize_plaque_decal(
     };
     if text.trim().is_empty() {
         return rgba;
+    }
+    if matches!(style, PlaqueDecalStyle::WalnutInkOnLight) {
+        return rasterize_plaque_walnut_ink_colored_keywords(text, font, emoji_font, w, h);
     }
 
     // Horizontal padding so glyphs don't run into the engraved-edge silhouette
@@ -780,29 +796,61 @@ pub fn rasterize_plaque_decal(
         inner_h,
         Some(chosen_px),
         LabelAlign::Center,
+        false,
     );
 
-    // Gilded letters: a deep umber drop-shadow under a rich gold body, topped
-    // by a bright pale-gold highlight offset up-left. Three passes give the
-    // engraving a metallic, leafed-gold read at any size.
-    let gold_base = [0.92_f32, 0.74, 0.28, 1.0]; // rich antique gold
-    let gold_highlight = [1.00_f32, 0.96, 0.74, 1.0]; // pale champagne sheen
-    let gold_shadow = [0.18_f32, 0.12, 0.04, 0.92]; // burnt umber recess
+    // Shadow / body / highlight tints + per-pass pixel offset (relative to the body pass).
+    // Tighter offsets read as ink on a flat ground; larger offsets read as carved engraving.
+    let (shadow, base, highlight, shadow_off, highlight_off): (
+        [f32; 4],
+        [f32; 4],
+        [f32; 4],
+        (u32, u32),
+        (i32, i32),
+    ) = match style {
+        PlaqueDecalStyle::GildedEngraving => {
+            // Gilded letters: a deep umber drop-shadow under a rich gold body, topped
+            // by a bright pale-gold highlight offset up-left. Three passes give the
+            // engraving a metallic, leafed-gold read at any size.
+            (
+                [0.18_f32, 0.12, 0.04, 0.92], // burnt umber recess
+                [0.92_f32, 0.74, 0.28, 1.0],  // rich antique gold
+                [1.00_f32, 0.96, 0.74, 1.0],  // pale champagne sheen
+                (3, 3),
+                (-1, -1),
+            )
+        }
+        PlaqueDecalStyle::WalnutInkOnLight => {
+            // Walnut / iron-gall ink on off-white board: keep the shadow tight and
+            // soft so it reads as paper bleed instead of a second silhouette. No
+            // bright top-pass — on white grounds a champagne lift would wash the
+            // body out.
+            (
+                [0.10_f32, 0.06, 0.04, 0.32],
+                [0.22_f32, 0.13, 0.09, 1.0],
+                [0.0_f32, 0.0, 0.0, 0.0],
+                (1, 1),
+                (0, 0),
+            )
+        }
+    };
 
-    blit_tinted(
-        TintedSrc {
-            pixels: &block,
-            width: inner_w,
-            height: inner_h,
-        },
-        TintedDst {
-            pixels: &mut rgba,
-            width: w,
-            x: pad_x + 3,
-            y: pad_y + 3,
-        },
-        gold_shadow,
-    );
+    if shadow[3] > 0.0 {
+        blit_tinted(
+            TintedSrc {
+                pixels: &block,
+                width: inner_w,
+                height: inner_h,
+            },
+            TintedDst {
+                pixels: &mut rgba,
+                width: w,
+                x: pad_x + shadow_off.0,
+                y: pad_y + shadow_off.1,
+            },
+            shadow,
+        );
+    }
     blit_tinted(
         TintedSrc {
             pixels: &block,
@@ -815,23 +863,52 @@ pub fn rasterize_plaque_decal(
             x: pad_x,
             y: pad_y,
         },
-        gold_base,
+        base,
     );
-    blit_tinted(
-        TintedSrc {
-            pixels: &block,
-            width: inner_w,
-            height: inner_h,
-        },
-        TintedDst {
-            pixels: &mut rgba,
-            width: w,
-            x: pad_x.saturating_sub(1),
-            y: pad_y.saturating_sub(1),
-        },
-        gold_highlight,
-    );
+    if highlight[3] > 0.0 {
+        let hx = if highlight_off.0 >= 0 {
+            pad_x + highlight_off.0 as u32
+        } else {
+            pad_x.saturating_sub(highlight_off.0.unsigned_abs())
+        };
+        let hy = if highlight_off.1 >= 0 {
+            pad_y + highlight_off.1 as u32
+        } else {
+            pad_y.saturating_sub(highlight_off.1.unsigned_abs())
+        };
+        blit_tinted(
+            TintedSrc {
+                pixels: &block,
+                width: inner_w,
+                height: inner_h,
+            },
+            TintedDst {
+                pixels: &mut rgba,
+                width: w,
+                x: hx,
+                y: hy,
+            },
+            highlight,
+        );
+    }
     rgba
+}
+
+pub fn rasterize_plaque_decal(
+    text: &str,
+    ui_font: Option<&fontdue::Font>,
+    emoji_font: Option<&fontdue::Font>,
+    w: u32,
+    h: u32,
+) -> Vec<u8> {
+    rasterize_plaque_decal_styled(
+        text,
+        ui_font,
+        emoji_font,
+        w,
+        h,
+        PlaqueDecalStyle::GildedEngraving,
+    )
 }
 
 /// Fit `text` into a `(w, h)` area by searching for the largest font size
@@ -931,6 +1008,121 @@ fn advance_width(
                 .advance_width
         })
         .sum()
+}
+
+/// Archive description plaque: same auto-fit + wrap as [`rasterize_plaque_decal_styled`]
+/// ([`PlaqueDecalStyle::WalnutInkOnLight`]), with per-token keyword tints.
+fn rasterize_plaque_walnut_ink_colored_keywords(
+    text: &str,
+    font: &fontdue::Font,
+    emoji_font: Option<&fontdue::Font>,
+    w: u32,
+    h: u32,
+) -> Vec<u8> {
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    const DEFAULT_INK: [f32; 4] = [0.22_f32, 0.13, 0.09, 1.0];
+    const SHADOW_TINT: [f32; 4] = [0.10_f32, 0.06, 0.04, 0.32];
+
+    let pad_x = (w as f32 * 0.05) as u32;
+    let pad_y = (h as f32 * 0.05) as u32;
+    let inner_w = w.saturating_sub(pad_x * 2).max(1);
+    let inner_h = h.saturating_sub(pad_y * 2).max(1);
+
+    let (chosen_px, chosen_lines) =
+        fit_plaque_text(font, emoji_font, text, inner_w as f32, inner_h as f32);
+
+    let line_metrics = font.horizontal_line_metrics(chosen_px);
+    let line_h = line_metrics
+        .map(|lm| lm.new_line_size)
+        .unwrap_or(chosen_px * 1.2);
+    let ascender_px = line_metrics
+        .map(|m| m.ascent)
+        .unwrap_or(chosen_px * 0.8);
+    let line_cell_h = line_h.ceil() as u32 + 2;
+    let baseline_in_band =
+        ((line_cell_h as f32 - line_h) * 0.5).max(0.0) + ascender_px;
+
+    let n_lines = chosen_lines.len().max(1);
+    let total_text_h = line_h * n_lines as f32;
+    let block_top = ((inner_h as f32 - total_text_h) * 0.5).max(0.0);
+
+    for (i, line) in chosen_lines.iter().enumerate() {
+        let mut chunks: Vec<(String, [f32; 4])> = Vec::new();
+        for (idx, word) in line.split_whitespace().enumerate() {
+            if idx > 0 {
+                chunks.push((" ".to_string(), DEFAULT_INK));
+            }
+            chunks.push((
+                word.to_string(),
+                super::vocabulary_colors::color_for_token(word, DEFAULT_INK),
+            ));
+        }
+        if chunks.is_empty() {
+            continue;
+        }
+
+        let total_adv: f32 = chunks
+            .iter()
+            .map(|(s, _)| advance_width(font, emoji_font, s, chosen_px))
+            .sum();
+        let mut cx = (inner_w as f32 - total_adv) * 0.5;
+        let line_baseline_global = pad_y as f32 + block_top + i as f32 * line_h + ascender_px;
+        let dst_y = (line_baseline_global - baseline_in_band).floor().max(0.0) as u32;
+
+        for (s, tint) in &chunks {
+            let aw = advance_width(font, emoji_font, s, chosen_px);
+            if aw <= 0.0 {
+                continue;
+            }
+            let rw = aw.ceil() as u32 + 3;
+            let rh = line_cell_h.max(1);
+            let band = rasterize_label_styled_with_fallback(
+                font,
+                emoji_font,
+                s,
+                rw.max(1),
+                rh,
+                LabelStyle {
+                    font_px: Some(chosen_px),
+                    align: LabelAlign::Left,
+                    scroll_offset: 0.0,
+                    underline: false,
+                },
+            );
+            let dst_x = pad_x + cx.floor() as u32;
+            blit_tinted(
+                TintedSrc {
+                    pixels: &band,
+                    width: rw.max(1),
+                    height: rh,
+                },
+                TintedDst {
+                    pixels: &mut rgba,
+                    width: w,
+                    x: dst_x.saturating_add(1),
+                    y: dst_y.saturating_add(1),
+                },
+                SHADOW_TINT,
+            );
+            blit_tinted(
+                TintedSrc {
+                    pixels: &band,
+                    width: rw.max(1),
+                    height: rh,
+                },
+                TintedDst {
+                    pixels: &mut rgba,
+                    width: w,
+                    x: dst_x,
+                    y: dst_y,
+                },
+                *tint,
+            );
+            cx += aw;
+        }
+    }
+
+    rgba
 }
 
 /// Reference height (in texels) for the plaque decal texture. The actual
@@ -1453,8 +1645,8 @@ fn load_noto_emoji_bytes() -> Option<Vec<u8>> {
     CACHE
         .get_or_init(|| {
             let candidates = [
-                "Noto_Emoji/NotoEmoji-VariableFont_wght.ttf",
-                "Noto_Emoji/static/NotoEmoji-Regular.ttf",
+                "fonts/Noto_Emoji/NotoEmoji-VariableFont_wght.ttf",
+                "fonts/Noto_Emoji/static/NotoEmoji-Regular.ttf",
             ];
             for path in candidates {
                 if let Some(file) = crate::asset_path::get(path) {
@@ -1481,6 +1673,32 @@ pub fn load_noto_emoji_font() -> Option<fontdue::Font> {
         .clone()
 }
 
+/// Static-lifetime symbols / math / Greek fallback consulted by [`pick_font`] before the emoji
+/// font. **Noto Sans Math** covers Greek (π), math operators (≈, ≠, ≤, ≥, ×, ÷, …), arrows,
+/// and most BMP punctuation — superset of what plaque copy actually requests.
+///
+/// Loaded lazily from `assets/fonts/Noto_Sans_Math/NotoSansMath-Regular.ttf`. Returns `None`
+/// (and caches that) when the asset is unavailable, so the cost amortizes to one lookup per process.
+fn noto_sans_symbols_font() -> Option<&'static fontdue::Font> {
+    static CELL: std::sync::OnceLock<Option<fontdue::Font>> = std::sync::OnceLock::new();
+    CELL.get_or_init(|| {
+        let candidates = ["fonts/Noto_Sans_Math/NotoSansMath-Regular.ttf"];
+        for path in candidates {
+            if let Some(file) = crate::asset_path::get(path) {
+                if let Ok(f) =
+                    fontdue::Font::from_bytes(file.data.as_ref(), fontdue::FontSettings::default())
+                {
+                    log::debug!("decal: loaded Noto Sans Math (symbol fallback) from {path}");
+                    return Some(f);
+                }
+            }
+        }
+        log::debug!("decal: Noto Sans Math symbol fallback not found in embedded assets.");
+        None
+    })
+    .as_ref()
+}
+
 /// Load the UI font and return a ready-to-use `fontdue::Font`.
 /// Cached so the font is only parsed once.
 pub fn load_ui_font() -> Option<fontdue::Font> {
@@ -1500,7 +1718,7 @@ pub fn load_ui_font_italic() -> Option<fontdue::Font> {
     static CACHE: std::sync::OnceLock<Option<fontdue::Font>> = OnceLock::new();
     CACHE
         .get_or_init(|| {
-            let path = "Instrument_Serif/InstrumentSerif-Italic.ttf";
+            let path = "fonts/Instrument_Serif/InstrumentSerif-Italic.ttf";
             if let Some(file) = crate::asset_path::get(path) {
                 if let Ok(f) =
                     fontdue::Font::from_bytes(file.data.as_ref(), fontdue::FontSettings::default())
@@ -1562,16 +1780,19 @@ pub fn rasterize_label_styled(
             font_px,
             align,
             scroll_offset: 0.0,
+            underline: false,
         },
     )
 }
 
 /// Layout options for `rasterize_label_styled_with_fallback`: explicit font
-/// size (or auto-fit when `None`), alignment, and horizontal scroll offset.
+/// size (or auto-fit when `None`), alignment, horizontal scroll offset, and
+/// optional underline for the plain (single-face) raster path.
 pub struct LabelStyle {
     pub font_px: Option<f32>,
     pub align: LabelAlign,
     pub scroll_offset: f32,
+    pub underline: bool,
 }
 
 /// Like [`rasterize_label_styled`] but with an optional emoji fallback font.
@@ -1585,18 +1806,28 @@ pub fn rasterize_label_styled_with_fallback(
     style: LabelStyle,
 ) -> Vec<u8> {
     let LabelStyle {
-        font_px,
+        font_px: font_px_opt,
         align,
         scroll_offset,
+        underline,
     } = style;
     // Multi-line: lay out each line at the same font size, stacked vertically.
     let lines: Vec<&str> = text.split('\n').collect();
     if lines.len() > 1 {
-        return rasterize_block(font, emoji_font, &lines, width, height, font_px, align);
+        return rasterize_block(
+            font,
+            emoji_font,
+            &lines,
+            width,
+            height,
+            font_px_opt,
+            align,
+            underline,
+        );
     }
 
     // Single-line fast path retains the historical centring behaviour.
-    let font_px = match font_px {
+    let font_px = match font_px_opt {
         Some(px) => px.max(8.0),
         None => (height as f32 * 0.55)
             .min(width as f32 * 1.5 / text.chars().count().max(1) as f32)
@@ -1618,21 +1849,20 @@ pub fn rasterize_label_styled_with_fallback(
 
     let total_advance: f32 = glyphs.iter().map(|g| g.metrics.advance_width).sum();
 
-    // The typographic ascender is the highest point above the baseline.
-    // Use the tallest glyph's (height + ymin) as a proxy.
-    let ascender_px: f32 = glyphs
-        .iter()
-        .map(|g| g.metrics.height as f32 + g.metrics.ymin as f32)
-        .fold(0.0_f32, f32::max);
-    let descender_px: f32 = glyphs
-        .iter()
-        .map(|g| (-g.metrics.ymin as f32).max(0.0))
-        .fold(0.0_f32, f32::max);
-    let text_block_h = ascender_px + descender_px;
-
-    // Place the baseline so the text block is vertically centred.
-    // In the pixel buffer Y increases downward, while fontdue uses Y-up from baseline.
-    let baseline_y = (height as f32 - text_block_h) * 0.5 + ascender_px;
+    // When `font_px` is pinned, centre using the font's line box (same idea as
+    // [`rasterize_block`]) so every substring shares one baseline. Per-string
+    // glyph-extent centring would shift short runs (coloured keyword splits)
+    // vertically relative to their neighbours.
+    let baseline_y = if font_px_opt.is_some() {
+        if let Some(lm) = font.horizontal_line_metrics(font_px) {
+            let line_h = lm.new_line_size.max(1.0);
+            ((height as f32 - line_h) * 0.5).max(0.0) + lm.ascent
+        } else {
+            single_line_baseline_from_glyphs(&glyphs, height)
+        }
+    } else {
+        single_line_baseline_from_glyphs(&glyphs, height)
+    };
 
     // Horizontal start depends on alignment, then shifted by scroll_offset.
     let start_x = match align {
@@ -1643,6 +1873,17 @@ pub fn rasterize_label_styled_with_fallback(
 
     let mut rgba = vec![0u8; (width * height * 4) as usize];
     blit_line(&glyphs, &mut rgba, width, height, start_x, baseline_y);
+    if underline {
+        draw_underline_span(
+            &mut rgba,
+            width,
+            height,
+            start_x,
+            start_x + total_advance,
+            baseline_y,
+            font_px,
+        );
+    }
     rgba
 }
 
@@ -1656,6 +1897,7 @@ fn rasterize_block(
     height: u32,
     font_px: Option<f32>,
     align: LabelAlign,
+    underline: bool,
 ) -> Vec<u8> {
     // For multi-line blocks the font size MUST be pinned — auto-shrink would
     // produce different sizes per line which defeats the purpose. If the
@@ -1713,6 +1955,17 @@ fn rasterize_block(
             })
             .collect();
         blit_line_refs(&glyph_view, &mut rgba, width, height, start_x, baseline_y);
+        if underline {
+            draw_underline_span(
+                &mut rgba,
+                width,
+                height,
+                start_x,
+                start_x + line.advance,
+                baseline_y,
+                font_px,
+            );
+        }
     }
 
     rgba
@@ -1720,23 +1973,83 @@ fn rasterize_block(
 
 /// Pick the best font for `ch`: use the primary font if it has the glyph,
 /// otherwise fall back to the emoji font (if provided).
+/// Three-tier glyph fallback used by every decal text path:
+/// 1. `primary` — the caller's font (Instrument Serif for plaque copy).
+/// 2. **Noto Sans** (auto-loaded via [`noto_sans_symbols_font`]) — covers Greek (π),
+///    Cyrillic, plus most BMP punctuation / math operators (≈, ×, ÷, …).
+/// 3. `fallback` — Noto Emoji for emoji codepoints (passed by the caller as today).
+///
+/// `&'static` references coerce to the caller's `'a` automatically, so adding the symbols tier
+/// keeps the existing `pick_font(primary, emoji, ch)` call signature intact at every call site.
 fn pick_font<'a>(
     primary: &'a fontdue::Font,
     fallback: Option<&'a fontdue::Font>,
     ch: char,
 ) -> &'a fontdue::Font {
     if primary.has_glyph(ch) {
-        primary
-    } else if let Some(fb) = fallback {
-        fb
-    } else {
-        primary
+        return primary;
     }
+    if let Some(symbols) = noto_sans_symbols_font() {
+        if symbols.has_glyph(ch) {
+            return symbols;
+        }
+    }
+    if let Some(fb) = fallback {
+        return fb;
+    }
+    primary
 }
 
 struct GlyphData {
     metrics: fontdue::Metrics,
     bitmap: Vec<u8>,
+}
+
+/// Vertical centre for a single raster line from measured glyph extents
+/// (auto-shrink labels and pinned-size fallback when line metrics are missing).
+fn single_line_baseline_from_glyphs(glyphs: &[GlyphData], height: u32) -> f32 {
+    let ascender_px: f32 = glyphs
+        .iter()
+        .map(|g| g.metrics.height as f32 + g.metrics.ymin as f32)
+        .fold(0.0_f32, f32::max);
+    let descender_px: f32 = glyphs
+        .iter()
+        .map(|g| (-g.metrics.ymin as f32).max(0.0))
+        .fold(0.0_f32, f32::max);
+    let text_block_h = ascender_px + descender_px;
+    (height as f32 - text_block_h) * 0.5 + ascender_px
+}
+
+/// 1px-thick faux underline under `[x0, x1)` at a small offset below the baseline.
+fn draw_underline_span(
+    rgba: &mut [u8],
+    width: u32,
+    height: u32,
+    x0: f32,
+    x1: f32,
+    baseline_y: f32,
+    font_px: f32,
+) {
+    let iy = (baseline_y + (font_px * 0.12).clamp(1.5, 6.0)) as i32;
+    if iy < 0 || iy >= height as i32 {
+        return;
+    }
+    let row = iy as u32;
+    let x_start = x0.floor().max(0.0) as i32;
+    let x_end = x1.ceil().min(width as f32) as i32;
+    for px in x_start..x_end {
+        if px < 0 || px >= width as i32 {
+            continue;
+        }
+        let di = ((row * width + px as u32) * 4) as usize;
+        if di + 3 >= rgba.len() {
+            continue;
+        }
+        rgba[di] = rgba[di].max(240);
+        rgba[di + 1] = rgba[di + 1].max(240);
+        rgba[di + 2] = rgba[di + 2].max(240);
+        rgba[di + 3] = rgba[di + 3].saturating_add(220);
+    }
 }
 
 struct GlyphRef<'a> {
@@ -1839,15 +2152,27 @@ fn blit_glyph(src: GlyphSrc<'_>, rgba: &mut [u8], width: u32, height: u32) {
     }
 }
 
-// --- Relic inspect flavor (mixed weight / italic, bottom-aligned block) ---
+// --- Mixed-style text (bold / italic / underline, bottom-aligned block) ---
 
-const FLAVOR_FAUX_BOLD_DX: f32 = 0.65;
+/// One text span for CPU raster (UI styled labels or relic flavor).
+#[derive(Clone, Copy, Debug)]
+pub struct RasterStyleSpan<'a> {
+    pub text: &'a str,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+}
+
+/// Horizontal offset (px) for the second faux-bold pass; layout advances use
+/// [`fontdue::Metrics::advance_width`] only — wrap width must not add this.
+pub const FAUX_BOLD_OVERLAY_OFFSET_PX: f32 = 0.65;
 
 #[derive(Clone, Copy)]
 struct FlavorCell {
     ch: char,
     bold: bool,
     italic: bool,
+    underline: bool,
 }
 
 fn pick_face_for_flavor<'a>(
@@ -1886,8 +2211,7 @@ fn flavor_line_advance(
     line: &[FlavorCell],
     font_px: f32,
 ) -> f32 {
-    line
-        .iter()
+    line.iter()
         .map(|c| flavor_cell_advance(regular, italic, emoji, *c, font_px))
         .sum()
 }
@@ -1962,6 +2286,7 @@ fn wrap_flavor_hard_line(
                     ch: ' ',
                     bold: false,
                     italic: false,
+                    underline: false,
                 });
                 line_w += space_w;
             }
@@ -1983,7 +2308,7 @@ fn wrap_flavor_hard_line(
     lines
 }
 
-fn flatten_relic_flavor_to_hard_lines(spans: &[RelicFlavorSpan]) -> Vec<Vec<FlavorCell>> {
+fn flatten_raster_style_to_hard_lines(spans: &[RasterStyleSpan<'_>]) -> Vec<Vec<FlavorCell>> {
     if spans.is_empty() {
         return Vec::new();
     }
@@ -2001,6 +2326,7 @@ fn flatten_relic_flavor_to_hard_lines(spans: &[RelicFlavorSpan]) -> Vec<Vec<Flav
                     ch,
                     bold: sp.bold,
                     italic: sp.italic,
+                    underline: sp.underline,
                 });
             }
         }
@@ -2039,7 +2365,7 @@ fn blit_one_flavor_glyph(
     };
     draw(0.0);
     if bold {
-        draw(FLAVOR_FAUX_BOLD_DX);
+        draw(FAUX_BOLD_OVERLAY_OFFSET_PX);
     }
 }
 
@@ -2056,21 +2382,32 @@ fn blit_flavor_line(
     font_px: f32,
 ) {
     let mut cx = start_x;
+    let mut u_start: Option<f32> = None;
     for c in line {
+        if c.underline {
+            if u_start.is_none() {
+                u_start = Some(cx);
+            }
+        } else if let Some(sx) = u_start.take() {
+            draw_underline_span(rgba, width, height, sx, cx, baseline_y, font_px);
+        }
         let face = pick_face_for_flavor(regular, italic, emoji, c.ch, c.italic);
         let (m, bmp) = face.rasterize(c.ch, font_px);
         blit_one_flavor_glyph(rgba, width, height, cx, baseline_y, m, &bmp, c.bold);
         cx += m.advance_width;
     }
+    if let Some(sx) = u_start {
+        draw_underline_span(rgba, width, height, sx, cx, baseline_y, font_px);
+    }
 }
 
-/// Multi-line relic inspect flavor: mixed regular/italic and faux-bold at a
-/// fixed `font_px`, bottom-aligned in `height`.
-pub fn rasterize_label_flavor_spans(
+/// Multi-line mixed-style text (bold / italic / underline) at a fixed `font_px`,
+/// bottom-aligned in `height`. Used by relic flavor and UI styled labels.
+pub fn rasterize_label_raster_spans(
     font: &fontdue::Font,
     font_italic: &fontdue::Font,
     emoji_font: Option<&fontdue::Font>,
-    spans: &[RelicFlavorSpan],
+    spans: &[RasterStyleSpan<'_>],
     width: u32,
     height: u32,
     font_px: f32,
@@ -2080,7 +2417,7 @@ pub fn rasterize_label_flavor_spans(
         return vec![0u8; (width * height * 4) as usize];
     }
     let font_px = font_px.max(8.0);
-    let hard_lines = flatten_relic_flavor_to_hard_lines(spans);
+    let hard_lines = flatten_raster_style_to_hard_lines(spans);
     let max_w = width as f32;
     let mut soft_lines: Vec<Vec<FlavorCell>> = Vec::new();
     for hl in &hard_lines {
@@ -2130,6 +2467,42 @@ pub fn rasterize_label_flavor_spans(
     rgba
 }
 
+/// Multi-line relic inspect flavor: mixed regular/italic and faux-bold at a
+/// fixed `font_px`, bottom-aligned in `height`.
+pub fn rasterize_label_flavor_spans(
+    font: &fontdue::Font,
+    font_italic: &fontdue::Font,
+    emoji_font: Option<&fontdue::Font>,
+    spans: &[RelicFlavorSpan],
+    width: u32,
+    height: u32,
+    font_px: f32,
+    align: LabelAlign,
+) -> Vec<u8> {
+    if spans.is_empty() {
+        return vec![0u8; (width * height * 4) as usize];
+    }
+    let mapped: Vec<RasterStyleSpan> = spans
+        .iter()
+        .map(|s| RasterStyleSpan {
+            text: s.text,
+            bold: s.bold,
+            italic: s.italic,
+            underline: false,
+        })
+        .collect();
+    rasterize_label_raster_spans(
+        font,
+        font_italic,
+        emoji_font,
+        &mapped,
+        width,
+        height,
+        font_px,
+        align,
+    )
+}
+
 /// Compute per-character advance widths for text rendered in a rect.
 ///
 /// Returns `(font_px, start_x_offset, per_char_advances)` using the same
@@ -2171,7 +2544,7 @@ pub fn measure_label_advances(
 /// Resolution order:
 /// 1. Embedded Instrument Serif (the primary serif used everywhere).
 /// 2. Embedded Noto Sans (a fallback for missing serif glyphs — only used
-///    if the user has dropped a Noto Sans TTF into `assets/Noto_Sans/`).
+///    if the user has dropped a Noto Sans TTF into `assets/fonts/Noto_Sans/`).
 /// 3. System fonts (last-ditch fallback for unbundled dev builds).
 ///
 /// Cached so the bytes are only resolved once.
@@ -2180,7 +2553,7 @@ pub fn load_ui_font_bytes() -> Option<Vec<u8>> {
     CACHE
         .get_or_init(|| {
             // Primary: Instrument Serif.
-            let primary = ["Instrument_Serif/InstrumentSerif-Regular.ttf"];
+            let primary = ["fonts/Instrument_Serif/InstrumentSerif-Regular.ttf"];
             for path in primary {
                 if let Some(file) = crate::asset_path::get(path) {
                     log::debug!("decal: loaded UI font from embedded {path}");
@@ -2188,12 +2561,12 @@ pub fn load_ui_font_bytes() -> Option<Vec<u8>> {
                 }
             }
             // Embedded Noto Sans fallback — only present if a TTF has been
-            // dropped into assets/Noto_Sans/. Tries the variable-font name
+            // dropped into assets/fonts/Noto_Sans/. Tries the variable-font name
             // first, then a static Regular.
             let noto_sans = [
-                "Noto_Sans/NotoSans-VariableFont_wdth,wght.ttf",
-                "Noto_Sans/NotoSans-Regular.ttf",
-                "Noto_Sans/static/NotoSans-Regular.ttf",
+                "fonts/Noto_Sans/NotoSans-VariableFont_wdth,wght.ttf",
+                "fonts/Noto_Sans/NotoSans-Regular.ttf",
+                "fonts/Noto_Sans/static/NotoSans-Regular.ttf",
             ];
             for path in noto_sans {
                 if let Some(file) = crate::asset_path::get(path) {

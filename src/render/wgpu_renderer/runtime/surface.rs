@@ -76,6 +76,11 @@ impl WgpuRenderer {
                     shader_location: 2,
                     format: wgpu::VertexFormat::Float32x4,
                 },
+                wgpu::VertexAttribute {
+                    offset: 32,
+                    shader_location: 3,
+                    format: wgpu::VertexFormat::Uint32,
+                },
             ],
         };
         let depth_ui = wgpu::DepthStencilState {
@@ -188,15 +193,16 @@ impl WgpuRenderer {
         self.ssr_prev_depth_texture = sdt;
         self.ssr_prev_depth_view = sdv;
 
-        // SSR scene history texture follows the swapchain size; rebuild
-        // the bind group so it points at the freshly allocated views.
+        // SSR scene history texture lives at *half* the swapchain size
+        // (see `scene_color_downsample.wgsl`); rebuild the bind group so
+        // it points at the freshly allocated half-res view. The lit_mesh
+        // SSR sampler reads via normalised UVs so size-mismatch with
+        // `ssr_prev_depth_view` is fine.
         self.scene_prev_texture.destroy();
-        let (spt, spv) = create_scene_prev(
-            &self.device,
-            SCENE_HDR_FORMAT,
-            new_size.width,
-            new_size.height,
-        );
+        let (scene_prev_w, scene_prev_h) =
+            scene_prev_size(new_size.width.max(1), new_size.height.max(1));
+        let (spt, spv) =
+            create_scene_prev(&self.device, SCENE_HDR_FORMAT, scene_prev_w, scene_prev_h);
         self.scene_prev_texture = spt;
         self.scene_prev_view = spv;
         self.scene_color_texture.destroy();
@@ -268,6 +274,21 @@ impl WgpuRenderer {
                     wgpu::BindGroupEntry {
                         binding: 0,
                         resource: wgpu::BindingResource::TextureView(&self.cascade_offscreen_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.cascade_composite_sampler),
+                    },
+                ],
+            });
+        self.scene_color_downsample_bind_group =
+            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("scene-color-downsample-bg"),
+                layout: &self.cascade_composite_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&self.scene_color_view),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
@@ -488,6 +509,24 @@ impl WgpuRenderer {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::TextureView(&self.post_bloom_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
+                },
+            ],
+        });
+        self.tonemap_bind_group_scene = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("tonemap-pass-scene-bg"),
+            layout: &self.tonemap_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.tonemap_params_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&self.scene_color_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,

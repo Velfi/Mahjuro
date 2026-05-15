@@ -56,9 +56,11 @@ pub enum RelicId {
     /// Bamboo-suit tiles in scored sets: +8 chips each.
     JadeSerpent,
     /// Characters-suit tiles in scored sets: +8 chips each.
-    RedSerpent,
-    /// Dots-suit tiles in scored sets: +8 chips each.
-    BlueSerpent,
+    #[serde(alias = "red_serpent")]
+    RubySerpent,
+    /// Dots tiles in scored sets: +8 chips each.
+    #[serde(alias = "blue_serpent")]
+    LapisSerpent,
     /// Tiles ranked 1–3 in scored sets: +6 chips each.
     LowTide,
     /// Tiles ranked 7–9 in scored sets: +6 chips each.
@@ -186,10 +188,6 @@ pub enum RelicId {
     /// 1-in-4 chance to level up a scored yaku after each play.
     StarTile,
     // Sell-to-activate
-    /// Sell to skip the current boss blind.
-    SmokeBomb,
-    /// After 3 rounds, sell to duplicate a random owned relic.
-    PhantomRelic,
     /// Destroy the relic to the right; gain permanent mult equal to
     /// double its sell value.
     HungryGhost,
@@ -322,8 +320,8 @@ impl RelicId {
             RelicId::Ikebana => "ikebana.png",
             RelicId::Hanami => "hanami.png",
             RelicId::JadeSerpent => "jade_serpent.png",
-            RelicId::RedSerpent => "red_serpent.png",
-            RelicId::BlueSerpent => "blue_serpent.png",
+            RelicId::RubySerpent => "ruby_serpent.png",
+            RelicId::LapisSerpent => "lapis_serpent.png",
             RelicId::LowTide => "low_tide.png",
             RelicId::HighTide => "high_tide.png",
             RelicId::MerchantsEye => "merchants_eye.png",
@@ -371,8 +369,6 @@ impl RelicId {
             RelicId::FortunesFavor => "fortunes_favor.png",
             RelicId::CrackedTile => "cracked_tile.png",
             RelicId::StarTile => "star_tile.png",
-            RelicId::SmokeBomb => "smoke_bomb.png",
-            RelicId::PhantomRelic => "phantom_relic.png",
             RelicId::HungryGhost => "hungry_ghost.png",
             RelicId::Disgust => "disgust.png",
             RelicId::CurioCabinet => "curio_cabinet.png",
@@ -405,6 +401,21 @@ pub enum Rarity {
     Uncommon,
     Rare,
     Legendary,
+}
+
+impl Rarity {
+    /// 0..=3 tier index, suitable for `theme::color::rarity(tier)` and any
+    /// other rarity-keyed table that wants a numeric ladder. Centralized so
+    /// the relic / yaku / blind UIs all walk the same rungs in the same
+    /// order (iron → bronze → silver → gold).
+    pub fn tier(self) -> u8 {
+        match self {
+            Rarity::Common => 0,
+            Rarity::Uncommon => 1,
+            Rarity::Rare => 2,
+            Rarity::Legendary => 3,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -561,14 +572,20 @@ pub fn relic_buy_price(id: RelicId) -> u32 {
     }
 }
 
+/// Catalog shop price with Merchant's Eye's 25% discount (before stake scaling).
+/// Floors to at least 1 gold.
+pub fn apply_merchants_eye_discount(base: u32, relics: &RelicState) -> u32 {
+    if relics.has(RelicId::MerchantsEye) {
+        (base * 3 / 4).max(1)
+    } else {
+        base
+    }
+}
+
 /// Effective gold cost to buy a relic in the shop after active price
 /// modifiers are applied.
 pub fn relic_shop_price(id: RelicId, relics: &RelicState) -> u32 {
-    let mut price = relic_buy_price(id);
-    if relics.has(RelicId::MerchantsEye) {
-        price = (price * 3 / 4).max(1);
-    }
-    price
+    apply_merchants_eye_discount(relic_buy_price(id), relics)
 }
 
 /// Find the relic whose display name exactly matches `name`. The scoring
@@ -607,6 +624,11 @@ pub fn relic_sell_price_live(
 /// When `inventory_focus` is `Some((relics, slot_index))`, Mirror Tile and
 /// Shadow Hand append which relic they copy and a compatibility line (ordering
 /// matches gameplay).
+///
+/// Live counter readouts are only shown when `inventory_focus` is `Some` — i.e.
+/// during gameplay or shop. Callers that render archive/collection entries pass
+/// `None` and get the static description so locked/unowned relic entries don't
+/// leak run state.
 pub fn relic_description_live(
     id: RelicId,
     counters: &std::collections::BTreeMap<RelicId, i32>,
@@ -619,6 +641,9 @@ pub fn relic_description_live(
         .find(|d| d.id == id)
         .map(|d| d.description)
         .unwrap_or("");
+    if inventory_focus.is_none() {
+        return base.to_string();
+    }
     match id {
         RelicId::MeltingIce => {
             let remaining = counters.get(&RelicId::MeltingIce).copied().unwrap_or(80);
@@ -641,7 +666,10 @@ pub fn relic_description_live(
             format!("{base} [${paid} produced]")
         }
         RelicId::RustlingGooseEgg => {
-            let charges = counters.get(&RelicId::RustlingGooseEgg).copied().unwrap_or(3);
+            let charges = counters
+                .get(&RelicId::RustlingGooseEgg)
+                .copied()
+                .unwrap_or(3);
             format!(
                 "{base} [{charges} charge{} left]",
                 if charges == 1 { "" } else { "s" }
@@ -655,7 +683,11 @@ pub fn relic_description_live(
             )
         }
         RelicId::TeaCeremony => {
-            let phase = counters.get(&RelicId::TeaCeremony).copied().unwrap_or(0).clamp(0, 3);
+            let phase = counters
+                .get(&RelicId::TeaCeremony)
+                .copied()
+                .unwrap_or(0)
+                .clamp(0, 3);
             let names = ["Harmony", "Respect", "Purity", "Tranquility"];
             let label = names[phase as usize];
             let remain = 4 - phase as i32;
@@ -684,7 +716,9 @@ pub fn relic_description_live(
                 .max(0);
             let tier = monarch_butterfly_tier(excess);
             let chips = monarch_butterfly_bonus_chips(excess);
-            let next = monarch_next_tier_excess_floor(excess).map(|n| format!("next tier ≥{n}")).unwrap_or_else(|| "max tier".to_string());
+            let next = monarch_next_tier_excess_floor(excess)
+                .map(|n| format!("next tier ≥{n}"))
+                .unwrap_or_else(|| "max tier".to_string());
             format!("{base} [tier {tier}, +{chips} chips, {excess} excess, {next}]")
         }
         RelicId::Humility => {
@@ -710,14 +744,6 @@ pub fn relic_description_live(
             let perm = counters.get(&RelicId::HungryGhost).copied().unwrap_or(0);
             format!("{base} [+{:.1} mult stored]", perm as f64 / 10.0)
         }
-        RelicId::PhantomRelic => {
-            let rounds = counters.get(&RelicId::PhantomRelic).copied().unwrap_or(0);
-            if rounds >= 3 {
-                format!("{base} [ready to duplicate!]")
-            } else {
-                format!("{base} [{rounds}/3 rounds]")
-            }
-        }
         RelicId::NestEgg => {
             let rounds = counters.get(&RelicId::NestEgg).copied().unwrap_or(0);
             let sell = relic_sell_price_live(id, counters);
@@ -738,6 +764,80 @@ pub fn relic_description_live(
         RelicId::Kintsugi => {
             let broken = counters.get(&RelicId::Kintsugi).copied().unwrap_or(0);
             format!("{base} [+{broken} mult]")
+        }
+        RelicId::Heirloom => {
+            let blinds = counters
+                .get(&RelicId::Heirloom)
+                .copied()
+                .unwrap_or(0)
+                .max(0);
+            format!(
+                "{base} [{blinds} blind{}, +{blinds} mult]",
+                if blinds == 1 { "" } else { "s" }
+            )
+        }
+        RelicId::BeggarsCup => {
+            let bosses = counters
+                .get(&RelicId::BeggarsCup)
+                .copied()
+                .unwrap_or(0)
+                .max(0);
+            let payout = 1 + bosses;
+            format!(
+                "{base} [{bosses} boss{}, +${payout} at round end]",
+                if bosses == 1 { "" } else { "es" }
+            )
+        }
+        RelicId::WallWeaver => {
+            let added = counters
+                .get(&RelicId::WallWeaver)
+                .copied()
+                .unwrap_or(0)
+                .max(0);
+            let overflow = inventory_focus
+                .is_some_and(|(relics, _)| relics.has(RelicId::StrengthInNumbers))
+                .then_some(68)
+                .unwrap_or(0);
+            let excess = overflow + added;
+            if excess > 0 {
+                format!("{base} [+{:.1} mult]", 0.2 * excess as f64)
+            } else {
+                base.to_string()
+            }
+        }
+        RelicId::CurioCabinet => {
+            if let Some((relics, _)) = inventory_focus {
+                let bonus: u32 = relics
+                    .active
+                    .iter()
+                    .copied()
+                    .filter(|&rid| rid != RelicId::CurioCabinet)
+                    .map(|rid| relic_sell_price_live(rid, counters))
+                    .sum();
+                format!("{base} [+{bonus} mult]")
+            } else {
+                base.to_string()
+            }
+        }
+        RelicId::SolitarySage => {
+            if let Some((relics, _)) = inventory_focus {
+                let empty = relics.max_slots.saturating_sub(relics.active.len());
+                format!(
+                    "{base} [{empty} empty slot{}, +{:.1} mult]",
+                    if empty == 1 { "" } else { "s" },
+                    1.5 * empty as f64
+                )
+            } else {
+                base.to_string()
+            }
+        }
+        RelicId::MultiplierMaster => {
+            if let Some((relics, _)) = inventory_focus {
+                let n = relics.len();
+                format!("{base} [+{n} mult]")
+            } else {
+                base.to_string()
+            }
         }
         RelicId::RiverRunner => {
             let chips = counters.get(&RelicId::RiverRunner).copied().unwrap_or(0);
@@ -781,8 +881,7 @@ pub fn relic_description_live(
             s
         }
         RelicId::Sweepstakes => {
-            let ff = inventory_focus
-                .is_some_and(|(relics, _)| relics.has(RelicId::FortunesFavor));
+            let ff = inventory_focus.is_some_and(|(relics, _)| relics.has(RelicId::FortunesFavor));
             if ff {
                 format!(
                     "{base}\n\nFortune's Favor: round start becomes 1/3 +$2, 1/3 +$4, 1/3 nothing."
@@ -928,7 +1027,11 @@ const COPY_RELIC_COMPATIBLE_SCORING_LINE: &str =
     "Compatible: hand scoring treats this relic as duplicated for chips and mult.";
 
 #[inline]
-fn push_debuffed_self_copy_relic_line(parts: &mut Vec<String>, relics: &RelicState, self_id: RelicId) {
+fn push_debuffed_self_copy_relic_line(
+    parts: &mut Vec<String>,
+    relics: &RelicState,
+    self_id: RelicId,
+) {
     if relics.is_debuffed(self_id) {
         let name = relic_display_name(self_id);
         parts.push(format!("Debuffed: {name} does nothing while suppressed."));
@@ -1053,8 +1156,8 @@ fn relic_scoring_copy_dup_is_compatible(target: RelicId) -> bool {
             | RelicId::HonorFury
             | RelicId::KongsBlessing
             | RelicId::JadeSerpent
-            | RelicId::RedSerpent
-            | RelicId::BlueSerpent
+            | RelicId::RubySerpent
+            | RelicId::LapisSerpent
             | RelicId::EdgeRunner
             | RelicId::LowTide
             | RelicId::HighTide
@@ -1159,6 +1262,10 @@ pub const SNOWBALL_STACK_CAP: i32 = 15;
 /// Chips added per scored hand for each blind clear counted on Snowball (before mult).
 pub const SNOWBALL_CHIPS_PER_CLEAR: i32 = 15;
 
+/// Flat chips from Turtle Shell while the run still holds gold (`gold > 0` at score time).
+/// The relic is removed when run gold hits zero or below (handled in the run gold-change hook).
+pub const TURTLE_SHELL_CHIPS: i32 = 200;
+
 /// Chips from Snowball for one scored hand (`stacks` = blind clears while owned, capped).
 #[inline]
 pub fn snowball_score_chips(stacks: i32) -> i32 {
@@ -1186,8 +1293,8 @@ pub struct ScoreContext<'a> {
 #[cfg(test)]
 mod tests {
     use super::{
-        RelicId, RelicState, relic_buy_price, relic_shop_price, snowball_score_chips,
-        SNOWBALL_CHIPS_PER_CLEAR, SNOWBALL_STACK_CAP,
+        RelicId, RelicState, SNOWBALL_CHIPS_PER_CLEAR, SNOWBALL_STACK_CAP, apply_merchants_eye_discount,
+        relic_buy_price, relic_shop_price, snowball_score_chips,
     };
 
     #[test]
@@ -1219,6 +1326,15 @@ mod tests {
             relic_shop_price(RelicId::TripletBoost, &relics),
             (base * 3 / 4).max(1)
         );
+    }
+
+    #[test]
+    fn merchants_eye_discount_applies_to_non_relic_catalog_prices() {
+        let mut relics = RelicState::default();
+        relics.active.push(RelicId::MerchantsEye);
+        assert_eq!(apply_merchants_eye_discount(8, &relics), 6);
+        let no_eye = RelicState::default();
+        assert_eq!(apply_merchants_eye_discount(8, &no_eye), 8);
     }
 
     /// `assets/data/relics.json` must have exactly one entry per `RelicId`
@@ -1261,8 +1377,8 @@ mod tests {
                     | RelicId::Ikebana
                     | RelicId::Hanami
                     | RelicId::JadeSerpent
-                    | RelicId::RedSerpent
-                    | RelicId::BlueSerpent
+                    | RelicId::RubySerpent
+                    | RelicId::LapisSerpent
                     | RelicId::LowTide
                     | RelicId::HighTide
                     | RelicId::MerchantsEye
@@ -1310,8 +1426,6 @@ mod tests {
                     | RelicId::FortunesFavor
                     | RelicId::CrackedTile
                     | RelicId::StarTile
-                    | RelicId::SmokeBomb
-                    | RelicId::PhantomRelic
                     | RelicId::HungryGhost
                     | RelicId::Disgust
                     | RelicId::CurioCabinet
@@ -1360,8 +1474,8 @@ mod tests {
                 RelicId::Ikebana,
                 RelicId::Hanami,
                 RelicId::JadeSerpent,
-                RelicId::RedSerpent,
-                RelicId::BlueSerpent,
+                RelicId::RubySerpent,
+                RelicId::LapisSerpent,
                 RelicId::LowTide,
                 RelicId::HighTide,
                 RelicId::MerchantsEye,
@@ -1409,8 +1523,6 @@ mod tests {
                 RelicId::FortunesFavor,
                 RelicId::CrackedTile,
                 RelicId::StarTile,
-                RelicId::SmokeBomb,
-                RelicId::PhantomRelic,
                 RelicId::HungryGhost,
                 RelicId::Disgust,
                 RelicId::CurioCabinet,

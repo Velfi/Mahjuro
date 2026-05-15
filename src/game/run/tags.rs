@@ -21,16 +21,20 @@ impl RunState {
     }
 
     /// Apply a skip-reward tag's effect. Returns a short description for UI feedback.
-    pub fn apply_tag(&mut self, tag: crate::core::tag::TagKind) -> &'static str {
+    pub fn apply_tag(
+        &mut self,
+        tag: crate::core::tag::TagKind,
+        bus: Option<&mut EventBus>,
+    ) -> &'static str {
         use crate::core::tag::TagKind;
 
         match tag {
             TagKind::GoldIngot => {
-                self.gold = self.gold.saturating_add(8);
+                self.apply_gold_reward(8, bus);
                 "+8 gold"
             }
             TagKind::TreasureChest => {
-                self.gold = self.gold.saturating_add(20);
+                self.apply_gold_reward(20, bus);
                 "+20 gold"
             }
             TagKind::FreeReroll => {
