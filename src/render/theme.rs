@@ -82,6 +82,9 @@ pub mod color {
     pub const FELT_DEEP: [f32; 4] = [0.102, 0.165, 0.129, 1.0];
     /// `#2D4A38` — lit tabletop, archive cubby lining.
     pub const FELT_LIT: [f32; 4] = [0.290, 0.420, 0.322, 1.0];
+    /// `#3C7837` — leaf green for the **Play** HUD verb in glossary copy.
+    /// Distinct from felt tabletop (`FELT_*`) and success signal (`JADE`).
+    pub const LEAF_GREEN: [f32; 4] = [0.235, 0.471, 0.216, 1.0];
 
     // ── Twilight: the cool counterpoint. The world *outside* the House.
     //    Sky behind the main menu, shop wall plaster, info-modal backings,

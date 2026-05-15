@@ -20,7 +20,8 @@
 //! | `Chips`, `chips` | `LAPIS` | Score rail (cool) |
 //! | `Mult`, `mult` | `RUBY` | Score rail (warm) |
 //! | `Gold`, `gold` | `RELIC_GOLD` | Currency |
-//! | `Play`, `Trigger` | `BRASS` | Primary HUD verbs |
+//! | `Play`, `play` | `LEAF_GREEN` | Bank-meld HUD verb |
+//! | `Trigger`, `trigger` | `BRASS` | Cash-in HUD verb |
 //!
 //! 3D cascade labels and streaming score popups reuse `LAPIS` / `RUBY` /
 //! `RELIC_GOLD` / `TALLOW` for chips, mult, gold, and final totals — see

@@ -681,19 +681,14 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
+        "text": "\"A closed gate , the path of opportunity remains unbarred\"- ",
         "bold": false,
         "italic": false
       },
       {
-        "text": "countless",
-        "bold": true,
+        "text": "The Tanuki",
+        "bold": false,
         "italic": true
-      },
-      {
-        "text": " late-night rounds.",
-        "bold": false,
-        "italic": false
       }
     ]
   },
@@ -1572,9 +1567,14 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Cosmopolitan wherever it rests.",
-        "bold": false,
+        "text": "Passport stamped in gold.\nTiles fall softly on walnut.\nHome lies in the next bet",
+        "bold": true,
         "italic": true
+      },
+      {
+        "text": ".",
+        "bold": true,
+        "italic": false
       }
     ]
   },
@@ -1712,7 +1712,7 @@
   {
     "id": "big_hands",
     "name": "Big Hands",
-    "description": "+2 hand tiles;\n\u22121 discard",
+    "description": "+2 hand tiles;\n−1 discard",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1730,7 +1730,7 @@
   {
     "id": "tiny_hands",
     "name": "Tiny Hands",
-    "description": "\u22122 hand tiles;\n+2 discards",
+    "description": "−2 hand tiles;\n+2 discards",
     "rarity": "uncommon",
     "flavor_spans": [
       {

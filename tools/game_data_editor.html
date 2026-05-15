@@ -120,6 +120,45 @@
     details.raw-panel { margin-top: 0.5rem; }
     details.raw-panel summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; }
     #load-status { font-size: 0.85rem; color: var(--muted); margin-bottom: 0.5rem; }
+    .relic-work-area {
+      display: grid;
+      gap: 0.75rem 1rem;
+      align-items: start;
+    }
+    @media (min-width: 720px) {
+      .relic-work-area.has-art {
+        grid-template-columns: minmax(9.5rem, 12.5rem) minmax(0, 1fr);
+      }
+    }
+    .object-art-frame {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.45rem;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    #relicObjectArt {
+      display: block;
+      max-width: 100%;
+      width: auto;
+      max-height: min(200px, 28vh);
+      height: auto;
+      object-fit: contain;
+    }
+    #relicObjectArt.is-hidden { display: none; }
+    .object-art-hint {
+      margin: 0;
+      font-size: 0.72rem;
+      color: var(--muted);
+      text-align: center;
+      line-height: 1.3;
+      word-break: break-word;
+    }
+    #relicObjectArtAside[hidden] { display: none !important; }
   </style>
 </head>
 <body>
@@ -158,6 +197,15 @@
   </div>
 
   <div id="panel-relics" class="hidden">
+    <div id="relicWorkArea" class="relic-work-area">
+      <aside id="relicObjectArtAside" hidden>
+        <label>Object art</label>
+        <div class="object-art-frame">
+          <img id="relicObjectArt" alt="" decoding="async" />
+          <p id="relicObjectArtHint" class="object-art-hint"></p>
+        </div>
+      </aside>
+      <div>
     <div class="row">
       <label>Flavor (rich text)</label>
       <div class="toolbar">
@@ -171,6 +219,8 @@
     <div class="row">
       <label>Preview <code>flavor_spans</code> (this relic only)</label>
       <pre id="preview-flavor" class="preview">{}</pre>
+    </div>
+      </div>
     </div>
   </div>
 
@@ -207,6 +257,7 @@
     <button type="button" id="btnCopy" disabled>Copy</button>
   </div>
 
+  <script src="editor_assets.js"></script>
   <script>
     /** Embedded fallback if `data_editor_manifest.json` cannot be fetched (e.g. some file:// setups). Keep in sync with tools/data_editor_manifest.json */
     const MANIFEST_FALLBACK = {
@@ -661,11 +712,29 @@
       sel.disabled = false;
     }
 
+    function updateRelicObjectArt(id) {
+      const aside = $("relicObjectArtAside");
+      const workArea = $("relicWorkArea");
+      const img = $("relicObjectArt");
+      const hint = $("relicObjectArtHint");
+      const assets = window.MahjuroEditorAssets;
+      if (effectiveMode !== "relics" || !id || !assets) {
+        if (aside) aside.hidden = true;
+        if (workArea) workArea.classList.remove("has-art");
+        if (assets && img && hint) assets.resetRelicObjectArt(img, hint);
+        return;
+      }
+      aside.hidden = false;
+      workArea.classList.add("has-art");
+      assets.loadRelicObjectArt(img, hint, id);
+    }
+
     function applyPanelsVisibility() {
       const relics = effectiveMode === "relics";
       $("panel-relics").classList.toggle("hidden", !relics);
       $("panel-generic").classList.toggle("hidden", relics || !effectiveMode);
       $("btnCopy").textContent = relics ? "Copy flavor_spans JSON" : "Copy row JSON";
+      if (!relics) updateRelicObjectArt(null);
     }
 
     function buildGenericFields() {
@@ -817,8 +886,10 @@
         const spans = (r && r.flavor_spans) || [];
         $("flavor-editor").innerHTML = spansToHtml(spans);
         updateFlavorPreview();
+        updateRelicObjectArt(id);
       } else {
         loadGenericFormFromRow();
+        updateRelicObjectArt(null);
       }
       syncRawFileTextarea();
     }

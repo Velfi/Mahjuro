@@ -23,7 +23,7 @@ pub const COLORED_KEYWORD_TABLE: &[(&str, [f32; 4])] = &[
     ("mult", color::RUBY),
     ("dots", Suit::Dots.keyword_color()),
     ("gold", color::RELIC_GOLD),
-    ("play", color::BRASS),
+    ("play", color::LEAF_GREEN),
 ];
 
 /// Needles that also read as ordinary English words (often title-cased in
@@ -197,5 +197,20 @@ mod tests {
         let d = [0.5, 0.5, 0.5, 1.0];
         let c = color_for_token("Chips", d);
         assert_ne!(c, d);
+    }
+
+    #[test]
+    fn play_keyword_is_leaf_green() {
+        use crate::render::theme::color;
+        let d = [0.5, 0.5, 0.5, 1.0];
+        assert_eq!(color_for_token("play", d), color::LEAF_GREEN);
+        assert_eq!(color_for_token("Play", d), color::LEAF_GREEN);
+    }
+
+    #[test]
+    fn trigger_keyword_stays_brass() {
+        use crate::render::theme::color;
+        let d = [0.5, 0.5, 0.5, 1.0];
+        assert_eq!(color_for_token("trigger", d), color::BRASS);
     }
 }
