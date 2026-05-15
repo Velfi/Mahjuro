@@ -879,19 +879,14 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
+        "text": "\"The peerless paragons of Puerto Rican pride!\"- ",
         "bold": false,
         "italic": false
       },
       {
-        "text": "Geese",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " — never the tile, always the tale.",
+        "text": "Good Bunny",
         "bold": false,
-        "italic": false
+        "italic": true
       }
     ]
   },
