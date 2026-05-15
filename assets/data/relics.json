@@ -78,17 +78,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "Dragon",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " — never the tile, always the tale.",
+        "text": "The house has crossed the Dragon; His rage will carry you to a most deserved victory.",
         "bold": false,
         "italic": false
       }
@@ -268,17 +258,17 @@
     "rarity": "legendary",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
+        "text": "The roar has passed but it's ",
         "bold": false,
         "italic": false
       },
       {
-        "text": "countless",
+        "text": "power ",
         "bold": true,
-        "italic": true
+        "italic": false
       },
       {
-        "text": " late-night rounds.",
+        "text": "still rings out from the mountain to the sea.",
         "bold": false,
         "italic": false
       }
@@ -350,9 +340,9 @@
     "rarity": "legendary",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Eight Treasures wherever it rests.",
+        "text": "A chest marked clearly in auspicious symbols, every translation the same. \"Good fortune smiles upon the holder of the Eight Treasures!\"",
         "bold": false,
-        "italic": true
+        "italic": false
       }
     ]
   },
@@ -386,19 +376,14 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
+        "text": "\"The Green Thumb's karma is surely paying off this evening!\" — ",
         "bold": false,
         "italic": false
       },
       {
-        "text": "countless",
-        "bold": true,
+        "text": "Member of the cheering crowd",
+        "bold": false,
         "italic": true
-      },
-      {
-        "text": " late-night rounds.",
-        "bold": false,
-        "italic": false
       }
     ]
   },
@@ -586,8 +571,13 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Edge Runner wherever it rests.",
+        "text": "Let prudent souls bemoan spent gold. The universe rewards the ",
         "bold": false,
+        "italic": false
+      },
+      {
+        "text": "free and bold.",
+        "bold": true,
         "italic": true
       }
     ]
@@ -699,7 +689,27 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Golden Engine wherever it rests.",
+        "text": "\"",
+        "bold": false,
+        "italic": true
+      },
+      {
+        "text": "Before you sits the Alchemist's magnum opus, whirring and shaking as it accomplishes the impossible\"",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "- An excerpt from \"",
+        "bold": false,
+        "italic": true
+      },
+      {
+        "text": "Tales of the Not Believed!",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": "\"",
         "bold": false,
         "italic": true
       }
@@ -889,19 +899,14 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
+        "text": "\"The peerless paragons of Puerto Rican pride!\"- ",
         "bold": false,
         "italic": false
       },
       {
-        "text": "Geese",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " — never the tile, always the tale.",
+        "text": "Good Bunny",
         "bold": false,
-        "italic": false
+        "italic": true
       }
     ]
   },
@@ -1220,7 +1225,17 @@
     "rarity": "common",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Gold Idol wherever it rests.",
+        "text": "\"Rumored to have been stolen from the ancient temple of  ",
+        "bold": false,
+        "italic": true
+      },
+      {
+        "text": "Borobudur. ",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": "The doorman thinks it's fake\" - E.V Dropper",
         "bold": false,
         "italic": true
       }
@@ -1341,17 +1356,7 @@
     "rarity": "legendary",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "Fortune's",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " — never the tile, always the tale.",
+        "text": "Lady Fortune's favor comes bearing fruitful and blessed benediction to you, the most deserving of her patrons!",
         "bold": false,
         "italic": false
       }
@@ -1660,7 +1665,37 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Euler's Number wherever it rests.",
+        "text": "A fundamental mathematical constant equal to approximately ",
+        "bold": false,
+        "italic": true
+      },
+      {
+        "text": "2.71828",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": "Euler's number appears universally in mathematics, physics and finance whenever continuous ",
+        "bold": false,
+        "italic": true
+      },
+      {
+        "text": "growth",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " or ",
+        "bold": false,
+        "italic": true
+      },
+      {
+        "text": "decay",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": " is involved.",
         "bold": false,
         "italic": true
       }
