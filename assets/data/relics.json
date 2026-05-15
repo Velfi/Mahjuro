@@ -78,7 +78,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "The house has crossed the Dragon, his rage will carry you to a most deserved victory.",
+        "text": "The house has crossed the Dragon; His rage will carry you to a most deserved victory.",
         "bold": false,
         "italic": false
       }
@@ -376,19 +376,14 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "\"The Green Thumb's karma is surely paying off this evening!\" - ",
+        "text": "\"The Green Thumb's karma is surely paying off this evening!\" — ",
         "bold": false,
         "italic": false
       },
       {
-        "text": "Member of the ch",
+        "text": "Member of the cheering crowd",
         "bold": false,
         "italic": true
-      },
-      {
-        "text": "eering crowd",
-        "bold": false,
-        "italic": false
       }
     ]
   },
@@ -576,8 +571,13 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Let prudent souls bemoan spent goldThe universe rewards the free and bold\n\n",
+        "text": "Let prudent souls bemoan spent gold. The universe rewards the ",
         "bold": false,
+        "italic": false
+      },
+      {
+        "text": "free and bold.",
+        "bold": true,
         "italic": true
       }
     ]
