@@ -282,8 +282,7 @@ impl WgpuRenderer {
                             let gy = overlay_y + (overlay_h - gh) * 0.5;
                             tile_glows.push(GpuInstance {
                                 rect: [gx, gy, gw, gh],
-                                color: p.glow_color.unwrap_or([1.00, 0.38, 0.05, 0.62]),
-                            });
+                                color: p.glow_color.unwrap_or([1.00, 0.38, 0.05, 0.62]), user: 0});
                         }
                     }
 

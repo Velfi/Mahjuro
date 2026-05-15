@@ -125,7 +125,7 @@ impl RunState {
         }
 
         if honor_gold > 0 {
-            self.gold = self.gold.saturating_add(honor_gold);
+            self.apply_gold_reward(honor_gold, Some(bus));
             self.relic_activations.push(RelicId::NoHonorButWealth);
         }
         for _ in &selected_indices {
@@ -147,9 +147,8 @@ impl RunState {
             *v = (*v - 3).max(0);
             if *v == 0 {
                 self.relic_counters.remove(&RelicId::SilkThread);
-                self.relics.active.retain(|&r| r != RelicId::SilkThread);
                 self.silk_thread_extinct = true;
-                self.note_relic_destroyed();
+                let _ = self.destroy_relic_removed_from_run(RelicId::SilkThread);
                 bus.push(GameEvent::TransformationSuccessorDiscovered(
                     RelicId::SilkMoth,
                 ));
@@ -162,7 +161,7 @@ impl RunState {
         // Silk Moth: produce $1 per discard action and accumulate the lifetime
         // total in `relic_counters[SilkMoth]` so the live tooltip can show it.
         if self.relics.has(RelicId::SilkMoth) {
-            self.gold = self.gold.saturating_add(1);
+            self.apply_gold_reward(1, Some(bus));
             *self.relic_counters.entry(RelicId::SilkMoth).or_insert(0) += 1;
             self.relic_activations.push(RelicId::SilkMoth);
         }

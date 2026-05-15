@@ -71,9 +71,8 @@ impl RunState {
             *v = (*v - 8).max(0);
             if *v == 0 {
                 self.relic_counters.remove(&RelicId::MeltingIce);
-                self.relics.active.retain(|&r| r != RelicId::MeltingIce);
                 self.melting_ice_extinct = true;
-                self.note_relic_destroyed();
+                let _ = self.destroy_relic_removed_from_run(RelicId::MeltingIce);
                 bus.push(GameEvent::TransformationSuccessorDiscovered(
                     RelicId::Taotie,
                 ));
@@ -90,11 +89,8 @@ impl RunState {
             *v -= 1;
             if *v <= 0 {
                 self.relic_counters.remove(&RelicId::RustlingGooseEgg);
-                self.relics
-                    .active
-                    .retain(|&r| r != RelicId::RustlingGooseEgg);
                 self.xxxl_egg_extinct = true;
-                self.note_relic_destroyed();
+                let _ = self.destroy_relic_removed_from_run(RelicId::RustlingGooseEgg);
                 bus.push(GameEvent::TransformationSuccessorDiscovered(RelicId::Geese));
                 bus.push(GameEvent::AchievementUnlocked(
                     crate::steam::Achievement::GeeseTakeFlight,
@@ -357,10 +353,7 @@ impl RunState {
             }
         }
         if breakdown.flower_gold > 0 {
-            self.gold = self.gold.saturating_add(breakdown.flower_gold);
-            bus.push(GameEvent::GoldChanged {
-                delta: breakdown.flower_gold,
-            });
+            self.apply_gold_reward(breakdown.flower_gold, Some(bus));
         }
         let scored_full_hand = breakdown
             .detected_yaku
@@ -444,9 +437,7 @@ impl RunState {
         }
 
         if destroy_glass_cannon {
-            self.relics.active.retain(|&r| r != RelicId::GlassCannon);
-            self.relics.debuffed.remove(&RelicId::GlassCannon);
-            self.note_relic_destroyed();
+            let _ = self.destroy_relic_removed_from_run(RelicId::GlassCannon);
             self.relic_activations.push(RelicId::GlassCannon);
             bus.push(GameEvent::RelicActivated(RelicId::GlassCannon));
         }
@@ -649,8 +640,7 @@ impl RunState {
         if !self.relics.has(RelicId::SecondWind) {
             return false;
         }
-        self.relics.active.retain(|&r| r != RelicId::SecondWind);
-        self.note_relic_destroyed();
+        let _ = self.destroy_relic_removed_from_run(RelicId::SecondWind);
         self.relic_activations.push(RelicId::SecondWind);
         bus.push(GameEvent::RelicActivated(RelicId::SecondWind));
         bus.push(GameEvent::RoundComplete {

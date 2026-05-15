@@ -5,7 +5,7 @@ use crate::game::engine_state::GameplayCoreState;
 impl RunState {
     /// Apply a blind choice: sets target score, dispatches boss effect on
     /// boss blinds, and applies any per-round resource resets.
-    pub fn apply_blind(&mut self, blind: BlindKind) {
+    pub fn apply_blind(&mut self, blind: BlindKind, bus: Option<&mut EventBus>) {
         self.blind = blind;
         self.round_score = 0;
         self.reset_round_resources();
@@ -127,7 +127,7 @@ impl RunState {
                 }
             };
             if payout > 0 {
-                self.gold = self.gold.saturating_add(payout);
+                self.apply_gold_reward(payout, bus);
                 self.relic_activations
                     .push(crate::core::relic::RelicId::Sweepstakes);
             }
@@ -154,9 +154,8 @@ impl RunState {
             let mut rng = rand::rng();
             let denom = if fortunes { 10 } else { 5 };
             if rng.random_ratio(1, denom) {
-                self.relics.active.retain(|&r| r != RelicId::PaperLantern);
                 self.paper_lantern_extinct = true;
-                self.note_relic_destroyed();
+                let _ = self.destroy_relic_removed_from_run(RelicId::PaperLantern);
                 bus.push(GameEvent::TransformationSuccessorDiscovered(
                     RelicId::SilverFiligreeLantern,
                 ));
@@ -170,24 +169,13 @@ impl RunState {
             let mut rng = rand::rng();
             let denom = if fortunes { 2000 } else { 1000 };
             if rng.random_ratio(1, denom) {
-                self.relics
-                    .active
-                    .retain(|&r| r != RelicId::SilverFiligreeLantern);
-                self.note_relic_destroyed();
+                let _ = self.destroy_relic_removed_from_run(RelicId::SilverFiligreeLantern);
             }
         }
         // Nest Egg: increment rounds held (affects sell value).
         if self.relics.has(RelicId::NestEgg) {
             *self.relic_counters.entry(RelicId::NestEgg).or_insert(0) += 1;
             self.relic_activations.push(RelicId::NestEgg);
-        }
-        // Phantom Relic: increment rounds held.
-        if self.relics.has(RelicId::PhantomRelic) {
-            *self
-                .relic_counters
-                .entry(RelicId::PhantomRelic)
-                .or_insert(0) += 1;
-            self.relic_activations.push(RelicId::PhantomRelic);
         }
         // Obsession: check if the player's most-used yaku was NOT scored
         // this round. If so, increment the counter.
@@ -303,9 +291,8 @@ impl RunState {
             let mut rng = rand::rng();
             let denom = if fortunes { 10 } else { 5 };
             if rng.random_ratio(1, denom) {
-                self.relics.active.retain(|&r| r != RelicId::PaperLantern);
                 self.paper_lantern_extinct = true;
-                self.note_relic_destroyed();
+                let _ = self.destroy_relic_removed_from_run(RelicId::PaperLantern);
                 bus.push(GameEvent::TransformationSuccessorDiscovered(
                     RelicId::SilverFiligreeLantern,
                 ));
@@ -317,22 +304,12 @@ impl RunState {
             let mut rng = rand::rng();
             let denom = if fortunes { 2000 } else { 1000 };
             if rng.random_ratio(1, denom) {
-                self.relics
-                    .active
-                    .retain(|&r| r != RelicId::SilverFiligreeLantern);
-                self.note_relic_destroyed();
+                let _ = self.destroy_relic_removed_from_run(RelicId::SilverFiligreeLantern);
             }
         }
         if self.relics.has(RelicId::NestEgg) {
             *self.relic_counters.entry(RelicId::NestEgg).or_insert(0) += 1;
             self.relic_activations.push(RelicId::NestEgg);
-        }
-        if self.relics.has(RelicId::PhantomRelic) {
-            *self
-                .relic_counters
-                .entry(RelicId::PhantomRelic)
-                .or_insert(0) += 1;
-            self.relic_activations.push(RelicId::PhantomRelic);
         }
         if self.relics.has(RelicId::Obsession) {
             let top_yaku = self

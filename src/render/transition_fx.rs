@@ -63,8 +63,7 @@ fn push_tile_teeth(frame: &mut UiFrame, progress: f32, window: (f32, f32)) {
 
     frame.quad(GpuInstance {
         rect: [0.0, 0.0, w, h],
-        color: color::alpha(color::WALNUT_INK, 0.14 + cover * 0.36),
-    });
+        color: color::alpha(color::WALNUT_INK, 0.14 + cover * 0.36), user: 0});
 
     let tile_size = grid_overlay_tile_short_px(w, 18.5, 30.0, 0.056);
     let tooth_overlap = tile_size * 0.18;
@@ -152,8 +151,7 @@ fn push_forest_of_tiles(frame: &mut UiFrame, progress: f32, window: (f32, f32)) 
 
     frame.quad(GpuInstance {
         rect: [0.0, 0.0, w, h],
-        color: color::alpha(color::WALNUT_INK, 0.12 + cover * 0.42),
-    });
+        color: color::alpha(color::WALNUT_INK, 0.12 + cover * 0.42), user: 0});
 
     let tile_w = grid_overlay_tile_short_px(w, 17.0, 30.0, 0.062);
     let tile_h = tile_w * 1.34;
@@ -211,8 +209,7 @@ fn push_maelstrom(frame: &mut UiFrame, progress: f32, window: (f32, f32)) {
 
     frame.quad(GpuInstance {
         rect: [0.0, 0.0, w, h],
-        color: color::alpha(color::WALNUT_INK, 0.16 + cover * 0.46),
-    });
+        color: color::alpha(color::WALNUT_INK, 0.16 + cover * 0.46), user: 0});
 
     let seq = tile_sequence();
     let count = scaled_overlay_tile_count(96.0, w, h, 56, 220);
@@ -264,16 +261,14 @@ fn push_galaxy_of_tiles(frame: &mut UiFrame, progress: f32, window: (f32, f32)) 
 
     frame.quad(GpuInstance {
         rect: [0.0, 0.0, w, h],
-        color: color::alpha(color::WALNUT_INK, 0.18 + cover * 0.44),
-    });
+        color: color::alpha(color::WALNUT_INK, 0.18 + cover * 0.44), user: 0});
 
     let cx = w * 0.50;
     let cy = h * 0.47;
     let core_r = w.min(h) * (0.08 + cover * 0.10);
     frame.quad(GpuInstance {
         rect: [cx - core_r, cy - core_r, core_r * 2.0, core_r * 2.0],
-        color: color::alpha(color::CHAMPAGNE, 0.10 + cover * 0.18),
-    });
+        color: color::alpha(color::CHAMPAGNE, 0.10 + cover * 0.18), user: 0});
 
     let arms = 4usize;
     let total_spiral = scaled_overlay_tile_count(104.0, w, h, 48, 220);
@@ -335,8 +330,7 @@ fn push_galaxy_of_tiles(frame: &mut UiFrame, progress: f32, window: (f32, f32)) 
                 size,
                 size,
             ],
-            color: color::alpha(color::CHAMPAGNE, 0.05 + cover * 0.08),
-        });
+            color: color::alpha(color::CHAMPAGNE, 0.05 + cover * 0.08), user: 0});
     }
 
     flush_tiles(frame, quads, faces);
@@ -352,8 +346,7 @@ fn push_tile_waterfall(frame: &mut UiFrame, progress: f32, window: (f32, f32)) {
 
     frame.quad(GpuInstance {
         rect: [0.0, 0.0, w, h],
-        color: color::alpha(color::WALNUT_INK, 0.10 + cover * 0.38),
-    });
+        color: color::alpha(color::WALNUT_INK, 0.10 + cover * 0.38), user: 0});
 
     let tile_w = grid_overlay_tile_short_px(w, 19.0, 28.0, 0.058);
     let tile_h = tile_w * 1.34;
@@ -409,8 +402,7 @@ fn push_shuffling_fan(frame: &mut UiFrame, progress: f32, window: (f32, f32)) {
 
     frame.quad(GpuInstance {
         rect: [0.0, 0.0, w, h],
-        color: color::alpha(color::WALNUT_INK, 0.13 + cover * 0.40),
-    });
+        color: color::alpha(color::WALNUT_INK, 0.13 + cover * 0.40), user: 0});
 
     let seq = tile_sequence();
     let fan_count = 4usize;
@@ -522,13 +514,11 @@ fn push_flat_tile(
             tile_w,
             tile_h,
         ],
-        color: color::alpha(color::WALNUT_INK, shadow_alpha.clamp(0.0, 1.0)),
-    });
-    quads.push(GpuInstance { rect, color: fill });
+        color: color::alpha(color::WALNUT_INK, shadow_alpha.clamp(0.0, 1.0)), user: 0});
+    quads.push(GpuInstance { rect, color: fill, user: 0});
     quads.push(GpuInstance {
         rect: [left, top, tile_w, tile_h * 0.08],
-        color: color::alpha(color::CHAMPAGNE, sheen_alpha.clamp(0.0, 1.0)),
-    });
+        color: color::alpha(color::CHAMPAGNE, sheen_alpha.clamp(0.0, 1.0)), user: 0});
 
     let inset_x = tile_w * 0.10;
     faces.push(TileFaceQuad {
@@ -540,8 +530,7 @@ fn push_flat_tile(
                 tile_w - inset_x * 2.0,
                 tile_h * 0.74,
             ],
-            color: [1.0, 1.0, 1.0, face_alpha.clamp(0.0, 1.0)],
-        },
+            color: [1.0, 1.0, 1.0, face_alpha.clamp(0.0, 1.0)], user: 0},
     });
 }
 

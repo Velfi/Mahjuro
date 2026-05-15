@@ -1,0 +1,65 @@
+[
+  {
+    "id": "pearl",
+    "name": "Pearl Talisman",
+    "description": "Every tile in hand: +100 chips when scored in a meld.",
+    "shop_price": 12,
+    "accent": [0.94, 0.95, 0.98, 1.0]
+  },
+  {
+    "id": "gilded",
+    "name": "Gilded Talisman",
+    "description": "Every tile in hand: +$1 when scored in a meld.",
+    "shop_price": 14,
+    "accent": [1.0, 0.84, 0.38, 1.0]
+  },
+  {
+    "id": "polychrome",
+    "name": "Polychrome Talisman",
+    "description": "Every tile in hand: ×1.2 mult when scored in a meld.",
+    "shop_price": 12,
+    "accent": [0.82, 0.55, 0.95, 1.0]
+  },
+  {
+    "id": "bamboo",
+    "name": "Bamboo Talisman",
+    "description": "Select tiles, then use: numbered tiles become bamboo; honors unchanged.",
+    "shop_price": 8,
+    "accent": [0.06, 0.55, 0.28, 1.0]
+  },
+  {
+    "id": "dots",
+    "name": "Dots Talisman",
+    "description": "Select tiles, then use: numbered tiles become dots; honors unchanged.",
+    "shop_price": 8,
+    "accent": [0.08, 0.22, 0.78, 1.0]
+  },
+  {
+    "id": "characters",
+    "name": "Characters Talisman",
+    "description": "Select tiles, then use: numbered tiles become characters; honors unchanged.",
+    "shop_price": 8,
+    "accent": [0.82, 0.08, 0.18, 1.0]
+  },
+  {
+    "id": "honors",
+    "name": "Honors Talisman",
+    "description": "Select tiles, then use: numbered tiles become random honors; honors unchanged.",
+    "shop_price": 8,
+    "accent": [0.78, 0.64, 0.28, 1.0]
+  },
+  {
+    "id": "wildflower",
+    "name": "Wildflower Talisman",
+    "description": "Select tiles, then use: every selected tile becomes a flower.",
+    "shop_price": 8,
+    "accent": [0.92, 0.48, 0.62, 1.0]
+  },
+  {
+    "id": "conformity",
+    "name": "Conformity Talisman",
+    "description": "Select tiles, then use: every selected tile becomes a copy of a random tile in your hand.",
+    "shop_price": 8,
+    "accent": [0.62, 0.60, 0.68, 1.0]
+  }
+]

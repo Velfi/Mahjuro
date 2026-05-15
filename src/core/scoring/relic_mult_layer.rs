@@ -5,7 +5,7 @@
 //! single place to audit "post-yaku" balance.
 
 use crate::core::hand::{DetectedMeld, MeldKind};
-use crate::core::relic::{RelicId, ScoreContext};
+use crate::core::relic::{RelicId, ScoreContext, TURTLE_SHELL_CHIPS};
 use crate::core::tile::{Suit, Tile};
 
 use super::effective_relic::EffectiveRelics;
@@ -191,9 +191,9 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     }
 
     if has(RelicId::MultiplierMaster) {
-        let bonus = 0.5 * ctx.relic.roster.enabled_len() as f64;
-        if bonus > 0.0 {
-            push_mult(steps, *chips, mult, "Multiplier Master", bonus);
+        let n = ctx.relic.roster.len() as f64;
+        if n > 0.0 {
+            push_mult(steps, *chips, mult, "Multiplier Master", n);
         }
     }
 
@@ -250,8 +250,8 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
         push_mult(steps, *chips, mult, "Minimalist", 4.0);
     }
 
-    if has(RelicId::TurtleShell) && *mult < 3.0 {
-        push_chips(steps, chips, *mult, "Turtle Shell", 50);
+    if has(RelicId::TurtleShell) && ctx.economy.gold > 0 {
+        push_chips(steps, chips, *mult, "Turtle Shell", TURTLE_SHELL_CHIPS);
     }
 
     if has(RelicId::SilkThread) {

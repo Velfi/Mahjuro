@@ -14,7 +14,7 @@ use crate::core::boss::BossKind;
 use crate::core::consumable::Consumable;
 use crate::core::hand::DetectedMeld;
 use crate::core::progression::PlayerProgress;
-use crate::core::relic::{RelicId, RelicState};
+use crate::core::relic::{RelicId, RelicState, apply_merchants_eye_discount};
 use crate::core::rules::BlindKind;
 use crate::core::scoring::ScoreBreakdown;
 use crate::core::structure::is_winning_structure_shape;
@@ -969,13 +969,13 @@ impl<'a> GameEngine<'a> {
                 CommandData::None
             }
             GameCommand::ApplyBlind { blind } => {
-                self.run.apply_blind(blind);
+                self.run.apply_blind(blind, Some(&mut self.bus));
                 CommandData::ApplyBlind { blind }
             }
             GameCommand::SkipUpcomingBlindWithTag => {
                 let tag = self.run.tag_for_blind(self.run.upcoming_blind);
                 if let Some(tag) = tag {
-                    self.run.apply_tag(tag);
+                    self.run.apply_tag(tag, Some(&mut self.bus));
                 }
                 self.run.skip_to_next_blind();
                 CommandData::SkipBlind { tag }
@@ -1004,7 +1004,8 @@ impl<'a> GameEngine<'a> {
                         ShopCommandRejection::InventoryFull,
                     );
                 }
-                self.run.gold -= price as i32;
+                self.run
+                    .apply_gold_delta(-(price as i32), Some(&mut self.bus));
                 self.run.relics.active.push(relic);
                 self.bus
                     .push(GameEvent::UiSound(crate::audio::SfxId::Purchase));
@@ -1060,22 +1061,6 @@ impl<'a> GameEngine<'a> {
                 }
                 let rid = self.run.relics.active[index];
                 let mut refund = crate::core::relic::relic_sell_price(rid);
-                if rid == RelicId::SmokeBomb
-                    && self.run.upcoming_blind == crate::core::rules::BlindKind::Boss
-                {
-                    self.run.relics.active.remove(index);
-                    self.run.ante += 1;
-                    self.run.base_target =
-                        (self.run.base_target as f32 * self.run.mode.target_scaling) as u32;
-                    self.run.upcoming_blind = crate::core::rules::BlindKind::Small;
-                    return self.finish_shop_outcome(
-                        command,
-                        before,
-                        queue_start,
-                        ShopCommandData::None,
-                        None,
-                    );
-                }
                 if rid == RelicId::NestEgg {
                     let rounds = self
                         .run
@@ -1084,32 +1069,6 @@ impl<'a> GameEngine<'a> {
                         .copied()
                         .unwrap_or(0);
                     refund = refund.saturating_add(2 * rounds as u32);
-                }
-                if rid == RelicId::PhantomRelic {
-                    let rounds = self
-                        .run
-                        .relic_counters
-                        .get(&RelicId::PhantomRelic)
-                        .copied()
-                        .unwrap_or(0);
-                    self.run.relics.active.remove(index);
-                    self.run.relic_counters.remove(&RelicId::PhantomRelic);
-                    if rounds >= 3 && !self.run.relics.is_full() {
-                        use rand::seq::IndexedRandom;
-                        let mut rng = rand::rng();
-                        if let Some(&dupe) = self.run.relics.active.choose(&mut rng) {
-                            self.run.relics.active.push(dupe);
-                        }
-                    } else {
-                        self.run.gold = self.run.gold.saturating_add(refund as i32);
-                    }
-                    return self.finish_shop_outcome(
-                        command,
-                        before,
-                        queue_start,
-                        ShopCommandData::None,
-                        None,
-                    );
                 }
                 if rid == RelicId::HungryGhost && index + 1 < self.run.relics.active.len() {
                     let victim_id = self.run.relics.active[index + 1];
@@ -1128,14 +1087,7 @@ impl<'a> GameEngine<'a> {
                     // Kintsugi counts the victim (involuntary destruction).
                     // The blade itself was sold, not destroyed, so don't
                     // credit it.
-                    if self.run.relics.has(RelicId::Kintsugi) {
-                        *self
-                            .run
-                            .relic_counters
-                            .entry(RelicId::Kintsugi)
-                            .or_insert(0) += 1;
-                        self.run.relic_activations.push(RelicId::Kintsugi);
-                    }
+                    self.run.note_relic_destroyed();
                     return self.finish_shop_outcome(
                         command,
                         before,
@@ -1151,7 +1103,8 @@ impl<'a> GameEngine<'a> {
                 if rid == RelicId::Snowball {
                     self.run.relic_counters.remove(&RelicId::Snowball);
                 }
-                self.run.gold = self.run.gold.saturating_add(refund as i32);
+                self.run
+                    .apply_gold_reward(refund as i32, Some(&mut self.bus));
                 self.bus.push(GameEvent::UiSound(crate::audio::SfxId::Sell));
                 *self.run.relic_counters.entry(RelicId::Bonfire).or_insert(0) += 1;
                 if self.run.relics.has(RelicId::Bonfire) {
@@ -1189,7 +1142,8 @@ impl<'a> GameEngine<'a> {
                         ShopCommandRejection::InsufficientGold,
                     );
                 }
-                self.run.gold -= price as i32;
+                self.run
+                    .apply_gold_delta(-(price as i32), Some(&mut self.bus));
                 self.bus
                     .push(GameEvent::UiSound(crate::audio::SfxId::Purchase));
                 let yaku = zodiac.yaku();
@@ -1215,7 +1169,8 @@ impl<'a> GameEngine<'a> {
                         ShopCommandRejection::InventoryFull,
                     );
                 }
-                self.run.gold -= price as i32;
+                self.run
+                    .apply_gold_delta(-(price as i32), Some(&mut self.bus));
                 self.run.consumables.items.push(Consumable::Talisman(kind));
                 self.bus
                     .push(GameEvent::UiSound(crate::audio::SfxId::Purchase));
@@ -1231,9 +1186,14 @@ impl<'a> GameEngine<'a> {
                     );
                 }
                 let consumable = self.run.consumables.items[index];
-                let refund = consumable_sell_price_for_mode(consumable, &self.run.mode);
+                let refund = consumable_sell_price_for_mode(
+                    consumable,
+                    &self.run.mode,
+                    &self.run.relics,
+                );
                 self.run.consumables.items.remove(index);
-                self.run.gold = self.run.gold.saturating_add(refund as i32);
+                self.run
+                    .apply_gold_reward(refund as i32, Some(&mut self.bus));
                 self.bus.push(GameEvent::UiSound(crate::audio::SfxId::Sell));
                 ShopCommandData::None
             }
@@ -1266,7 +1226,8 @@ impl<'a> GameEngine<'a> {
                         ShopCommandRejection::InsufficientGold,
                     );
                 }
-                self.run.gold -= price as i32;
+                self.run
+                    .apply_gold_delta(-(price as i32), Some(&mut self.bus));
                 let pack_idx = self.run.tile_packs.len();
                 let start_id = PACK_TILE_ID_BASE + (pack_idx as u32) * PACK_ID_STRIDE;
                 let mut tiles = kind.generate_tiles(start_id);
@@ -1308,7 +1269,8 @@ impl<'a> GameEngine<'a> {
                         ShopCommandRejection::InsufficientGold,
                     );
                 }
-                self.run.gold -= gold_cost as i32;
+                self.run
+                    .apply_gold_delta(-(gold_cost as i32), Some(&mut self.bus));
                 ShopCommandData::Rerolled
             }
         };
@@ -1502,12 +1464,13 @@ impl<'a> GameEngine<'a> {
 pub(crate) fn consumable_sell_price_for_mode(
     c: Consumable,
     mode: &crate::game::game_mode::GameMode,
+    relics: &RelicState,
 ) -> u32 {
     let base = match c {
         Consumable::Zodiac(_) => crate::core::zodiac::ZodiacKind::shop_price(),
         Consumable::Talisman(t) => t.shop_price(),
     };
-    let paid = mode.scale_shop_price(base);
+    let paid = mode.scale_shop_price(apply_merchants_eye_discount(base, relics));
     (paid / 2).max(1)
 }
 

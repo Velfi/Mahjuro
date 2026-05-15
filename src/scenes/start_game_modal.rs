@@ -496,6 +496,7 @@ impl SceneBehavior for TileSelectScene {
                     color: color::STONE,
                     padding: 0.0,
                     align: TextAlign::Left,
+                    ..Default::default()
                 },
                 h,
             );
@@ -510,6 +511,7 @@ impl SceneBehavior for TileSelectScene {
                     color: color::PARCHMENT,
                     padding: 0.0,
                     align: TextAlign::Left,
+                    ..Default::default()
                 },
                 h,
             );

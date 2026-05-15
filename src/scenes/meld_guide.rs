@@ -181,8 +181,7 @@ impl SceneBehavior for MeldGuideScene {
             let underline_y = ml.y - underline_h - 2.0 * scale;
             frame.quad(GpuInstance {
                 rect: [ml.x, underline_y, ml.w, underline_h],
-                color: ml.color,
-            });
+                color: ml.color, user: 0});
             // Label text
             frame.text(TextLabel {
                 rect: [ml.x, ml.y, ml.w, label_h],
@@ -247,8 +246,7 @@ impl SceneBehavior for MeldGuideScene {
         };
         frame.quad(GpuInstance {
             rect: [prev_x, btn_y, btn_w, btn_h],
-            color: prev_color,
-        });
+            color: prev_color, user: 0});
         frame.text(TextLabel {
             rect: [prev_x, btn_y, btn_w, btn_h],
             text: "< Prev".into(),
@@ -271,8 +269,7 @@ impl SceneBehavior for MeldGuideScene {
         let back_x = prev_x + btn_w + btn_gap;
         frame.quad(GpuInstance {
             rect: [back_x, btn_y, btn_w, btn_h],
-            color: color::WALNUT_INK,
-        });
+            color: color::WALNUT_INK, user: 0});
         frame.text(TextLabel {
             rect: [back_x, btn_y, btn_w, btn_h],
             text: "Back".into(),
@@ -295,8 +292,7 @@ impl SceneBehavior for MeldGuideScene {
         };
         frame.quad(GpuInstance {
             rect: [next_x, btn_y, btn_w, btn_h],
-            color: next_color,
-        });
+            color: next_color, user: 0});
         frame.text(TextLabel {
             rect: [next_x, btn_y, btn_w, btn_h],
             text: "Next >".into(),

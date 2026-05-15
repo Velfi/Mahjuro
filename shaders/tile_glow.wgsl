@@ -20,6 +20,7 @@ fn vs_main(
     @location(0) corner: vec2<f32>,
     @location(1) rect: vec4<f32>,
     @location(2) color: vec4<f32>,
+    @location(3) _user: u32,
 ) -> VsOut {
     let p = vec2<f32>(rect.x + corner.x * rect.z, rect.y + corner.y * rect.w);
     let ndc = vec2<f32>(

@@ -17,17 +17,13 @@ pub const COLORED_KEYWORD_TABLE: &[(&str, [f32; 4])] = &[
     ("seasons", Suit::Season.keyword_color()),
     ("trigger", color::BRASS),
     ("bamboo", Suit::Bamboos.keyword_color()),
-    ("relics", color::RELIC_GOLD),
     ("honors", color::CHAMPAGNE),
     ("chips", color::LAPIS),
-    ("relic", color::RELIC_GOLD),
     ("winds", Suit::Wind.keyword_color()),
     ("mult", color::RUBY),
     ("dots", Suit::Dots.keyword_color()),
     ("gold", color::RELIC_GOLD),
     ("play", color::BRASS),
-    ("boss", color::RUBY),
-    ("yaku", color::GOLD),
 ];
 
 /// Needles that also read as ordinary English words (often title-cased in
@@ -56,7 +52,7 @@ fn looks_like_title_cased_word(s: &str) -> bool {
     if !first.is_uppercase() {
         return false;
     }
-    // Reject ALL CAPS ("BOSS", "CPU") so those still tint as jargon.
+    // Reject ALL CAPS ("WINDS", "CPU") so those still tint as jargon.
     it.any(|c| c.is_lowercase())
 }
 

@@ -3,6 +3,9 @@
 pub struct GpuInstance {
     pub rect: [f32; 4],
     pub color: [f32; 4],
+    /// Text quad effects: low byte = [`crate::render::text_effect::TextEffectId`].
+    /// Solid colour quads keep `0`.
+    pub user: u32,
 }
 
 /// Per-frame settings threaded from the app into `WgpuRenderer::render`:

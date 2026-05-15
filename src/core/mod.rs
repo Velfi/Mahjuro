@@ -7,6 +7,7 @@ pub mod hand_intent;
 mod json_asset;
 pub mod progression;
 pub mod relic;
+pub mod relic_desc_template;
 pub mod rules;
 pub mod scoring;
 pub mod stake;

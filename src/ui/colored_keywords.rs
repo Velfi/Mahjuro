@@ -21,13 +21,14 @@
 //! | `Mult`, `mult` | `RUBY` | Score rail (warm) |
 //! | `Gold`, `gold` | `RELIC_GOLD` | Currency |
 //! | `Play`, `Trigger` | `BRASS` | Primary HUD verbs |
-//! | `Relic`, `Relics`, `relics` | `RELIC_GOLD` | Run modifiers |
-//! | `Yaku`, `yaku` | `GOLD` | Pattern mult source |
-//! | `Boss`, `boss` | `RUBY` | Boss shrine |
 //!
 //! 3D cascade labels and streaming score popups reuse `LAPIS` / `RUBY` /
 //! `RELIC_GOLD` / `TALLOW` for chips, mult, gold, and final totals — see
 //! [`crate::render::score_popups`] and [`crate::scenes::gameplay::cascade_hud`].
+//!
+//! For paragraphs that use **safe inline markup** (`**`, `{{effect:…}}`, …)
+//! together with the same per-word tinting, use [`crate::ui::widget::push_text_block`]
+//! (`glossary_tint: true`) instead of this module’s plain-text wrappers.
 
 use crate::render::decal::load_ui_font;
 pub use crate::render::vocabulary_colors::color_for_token;

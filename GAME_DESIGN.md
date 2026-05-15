@@ -90,7 +90,7 @@ A large **relic** pool is implemented (see `assets/data/relics.json`), spanning 
 * **Retrigger, polish, lanterns, mirror** — LastBreath, TilePolisher, PaperLantern, SilverFiligreeLantern, MirrorTile, Geese, VoiceOfThePeople, VoiceOfTheElite, TeaCeremony, GhostHand
 * **Ramp, fragile evolutions, inventory tricks** — Humility, Obsession, Bonfire, RiverRunner, MeltingIce, Taotie, SilkThread, SilkMoth, ShadowHand, SolitarySage, Disgust
 * **Hand-shape mult** — WayOfPairs, WayOfTriplets, WayOfSequences, WayOfPurity
-* **Chance mult & sell effects** — FortunesFavor, CrackedTile, StarTile, SmokeBomb, PhantomRelic, HungryGhost
+* **Chance mult & sell effects** — FortunesFavor, CrackedTile, StarTile, HungryGhost
 * **Run-wide payouts & rule bends** — CurioCabinet, LotusBloom, WallWeaver, KongCollector, NoHonorButWealth, Sweepstakes, BeggarsCup, Cosmopolitan, Heirloom, Tourist, Kintsugi, AntTrail, BrocadePouch
 
 Relics use **Common / Uncommon / Rare / Legendary** tiers (see `relics.json`) for shop presentation and pricing.

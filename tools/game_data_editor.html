@@ -1,0 +1,1147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mahjuro — game data JSON editor</title>
+  <style>
+    :root {
+      --bg: #12141a;
+      --panel: #1a1d26;
+      --border: #2d3340;
+      --text: #e8e6e3;
+      --muted: #8b919c;
+      --accent: #c9a227;
+      --warn: #c97a27;
+      --btn: #2a3142;
+      --btn-hi: #3d4658;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Instrument Serif", "Georgia", serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 1.25rem;
+      line-height: 1.45;
+      max-width: 52rem;
+    }
+    h1 {
+      font-size: 1.35rem;
+      font-weight: normal;
+      color: var(--accent);
+      margin: 0 0 0.5rem;
+    }
+    p.hint {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin: 0 0 1rem;
+    }
+    label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.25rem; }
+    select, button, input[type="file"], input[type="text"], input[type="number"], textarea {
+      font: inherit;
+      font-size: 0.9rem;
+    }
+    select, input[type="text"], input[type="number"], textarea {
+      width: 100%;
+      max-width: 100%;
+      padding: 0.45rem 0.5rem;
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+    textarea { font-family: ui-monospace, monospace; font-size: 0.8rem; min-height: 8rem; resize: vertical; }
+    .row { margin-bottom: 1rem; }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      align-items: center;
+      margin-bottom: 0.5rem;
+    }
+    button {
+      padding: 0.4rem 0.75rem;
+      background: var(--btn);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover { background: var(--btn-hi); }
+    button.primary { border-color: var(--accent); color: var(--accent); }
+    button.warn { border-color: var(--warn); color: var(--warn); }
+    #flavor-editor {
+      min-height: 7rem;
+      padding: 0.75rem 1rem;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      outline: none;
+      font-size: 1.05rem;
+    }
+    #flavor-editor:focus { border-color: var(--accent); }
+    #flavor-editor:empty::before {
+      content: attr(data-placeholder);
+      color: var(--muted);
+      pointer-events: none;
+    }
+    pre.preview {
+      font-family: ui-monospace, monospace;
+      font-size: 0.72rem;
+      background: #0d0f14;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.75rem;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: #a8b8c8;
+    }
+    .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
+    code { font-family: ui-monospace, monospace; font-size: 0.85em; color: #b8c4d4; }
+    body.drag-files {
+      outline: 3px dashed var(--accent);
+      outline-offset: -8px;
+    }
+    .banner-warn {
+      background: #2a2218;
+      border: 1px solid var(--warn);
+      color: #e8c8a8;
+      padding: 0.5rem 0.75rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      margin-bottom: 1rem;
+    }
+    .hidden { display: none !important; }
+    #generic-fields .field-row { margin-bottom: 0.65rem; }
+    #generic-fields .field-row.file-level > label { color: var(--accent); }
+    #generic-fields textarea.field-json { min-height: 5rem; font-family: ui-monospace, monospace; font-size: 0.78rem; }
+    details.raw-panel { margin-top: 0.5rem; }
+    details.raw-panel summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; }
+    #load-status { font-size: 0.85rem; color: var(--muted); margin-bottom: 0.5rem; }
+  </style>
+</head>
+<body>
+  <h1>Mahjuro — game data JSON editor</h1>
+  <p class="hint">
+    Load ship data from <code>assets/data/</code> (e.g. <code>relics.json</code>, <code>bosses.json</code>, <code>yaku.json</code>, <code>stakes.json</code>, <code>tags.json</code>, <code>talismans.json</code>, <code>tile_packs.json</code>, <code>zodiacs.json</code>) via the file picker or <strong>drag and drop</strong>.
+    Row pick is by <code>id</code>. Save writes the full document (array or <code>zodiacs.json</code> wrapper). Browsers with <code>showSaveFilePicker</code> get a save dialog; others download using the loaded filename.
+  </p>
+
+  <div id="banner-unknown" class="banner-warn hidden"></div>
+
+  <div class="row">
+    <label for="file">JSON file</label>
+    <input type="file" id="file" accept=".json,application/json" />
+  </div>
+  <div id="load-status"></div>
+
+  <div class="row">
+    <label for="dataset">Dataset (editor mode)</label>
+    <select id="dataset" disabled>
+      <option value="auto">Auto (from filename / shape)</option>
+      <option value="relics">Relics — flavor_spans</option>
+      <option value="bosses">Bosses — table fields</option>
+      <option value="yaku">Yaku — table fields</option>
+      <option value="stakes">Stakes — table fields</option>
+      <option value="tags">Tags — table fields</option>
+      <option value="talismans">Talismans — table fields</option>
+      <option value="tile_packs">Tile packs — table fields</option>
+      <option value="zodiacs">Zodiacs — table + ribbon price</option>
+    </select>
+  </div>
+
+  <div class="row">
+    <label for="row">Row</label>
+    <select id="row" disabled></select>
+  </div>
+
+  <div id="panel-relics" class="hidden">
+    <div class="row">
+      <label>Flavor (rich text)</label>
+      <div class="toolbar">
+        <button type="button" id="btnBold" title="Bold">B</button>
+        <button type="button" id="btnItalic" title="Italic"><em>I</em></button>
+        <button type="button" id="btnClearFmt">Clear format</button>
+        <span style="color:var(--muted);font-size:0.8rem;">Line breaks become <code>\n</code> in JSON.</span>
+      </div>
+      <div id="flavor-editor" contenteditable="true" data-placeholder="Type flavor text…"></div>
+    </div>
+    <div class="row">
+      <label>Preview <code>flavor_spans</code> (this relic only)</label>
+      <pre id="preview-flavor" class="preview">{}</pre>
+    </div>
+  </div>
+
+  <div id="panel-generic" class="hidden">
+    <div class="row" id="generic-fields"></div>
+    <div class="row">
+      <label>Current row (JSON preview)</label>
+      <pre id="preview-row" class="preview">{}</pre>
+    </div>
+    <details class="raw-panel">
+      <summary>Raw JSON — current row</summary>
+      <div class="row">
+        <textarea id="raw-row" spellcheck="false"></textarea>
+        <div class="toolbar" style="margin-top:0.5rem;">
+          <button type="button" id="btnApplyRawRow">Apply row JSON</button>
+        </div>
+      </div>
+    </details>
+  </div>
+
+  <details class="raw-panel">
+    <summary>Raw JSON — entire file (escape hatch)</summary>
+    <div class="row">
+      <textarea id="raw-file" spellcheck="false"></textarea>
+      <div class="toolbar" style="margin-top:0.5rem;">
+        <button type="button" class="warn" id="btnApplyRawFile">Replace data from file JSON</button>
+      </div>
+      <p class="hint" style="margin-top:0.5rem;">Parses either a top-level JSON array of objects with <code>id</code>, or <code>zodiacs.json</code> shape <code>{ "ribbon_shop_price", "zodiacs": [...] }</code>. Current editor mode and manifest still apply on save.</p>
+    </div>
+  </details>
+
+  <div class="actions">
+    <button type="button" class="primary" id="btnSave" disabled>Save</button>
+    <button type="button" id="btnCopy" disabled>Copy</button>
+  </div>
+
+  <script>
+    /** Embedded fallback if `data_editor_manifest.json` cannot be fetched (e.g. some file:// setups). Keep in sync with tools/data_editor_manifest.json */
+    const MANIFEST_FALLBACK = {
+  "bosses": {
+    "suggestedFilename": "bosses.json",
+    "fields": [
+      {
+        "key": "id",
+        "type": "string",
+        "readonly": true
+      },
+      {
+        "key": "name",
+        "type": "string"
+      },
+      {
+        "key": "description",
+        "type": "string"
+      },
+      {
+        "key": "tier",
+        "type": "enum",
+        "options": [
+          "soft",
+          "medium",
+          "hard",
+          "final"
+        ]
+      },
+      {
+        "key": "min_ante",
+        "type": "number",
+        "step": 1
+      }
+    ]
+  },
+  "yaku": {
+    "suggestedFilename": "yaku.json",
+    "fields": [
+      {
+        "key": "id",
+        "type": "string",
+        "readonly": true
+      },
+      {
+        "key": "name",
+        "type": "string"
+      },
+      {
+        "key": "mult_bonus",
+        "type": "number",
+        "step": "any"
+      },
+      {
+        "key": "chip_bonus",
+        "type": "number",
+        "step": 1
+      }
+    ]
+  },
+  "stakes": {
+    "suggestedFilename": "stakes.json",
+    "fields": [
+      {
+        "key": "id",
+        "type": "string",
+        "readonly": true
+      },
+      {
+        "key": "label",
+        "type": "string"
+      },
+      {
+        "key": "description",
+        "type": "string"
+      },
+      {
+        "key": "base_target_mult",
+        "type": "number",
+        "step": "any"
+      },
+      {
+        "key": "price_multiplier",
+        "type": "number",
+        "step": "any"
+      },
+      {
+        "key": "reroll_base_cost",
+        "type": "number",
+        "step": 1
+      },
+      {
+        "key": "boss_min_ante_floor",
+        "type": "number",
+        "step": 1
+      },
+      {
+        "key": "starting_rules",
+        "type": "json"
+      }
+    ]
+  },
+  "tags": {
+    "suggestedFilename": "tags.json",
+    "fields": [
+      {
+        "key": "id",
+        "type": "string",
+        "readonly": true
+      },
+      {
+        "key": "name",
+        "type": "string"
+      },
+      {
+        "key": "description",
+        "type": "string"
+      },
+      {
+        "key": "rarity",
+        "type": "enum",
+        "options": [
+          "common",
+          "uncommon",
+          "rare"
+        ]
+      },
+      {
+        "key": "min_ante",
+        "type": "number",
+        "step": 1
+      },
+      {
+        "key": "gold_value",
+        "type": "number",
+        "step": 1
+      }
+    ]
+  },
+  "talismans": {
+    "suggestedFilename": "talismans.json",
+    "fields": [
+      {
+        "key": "id",
+        "type": "string",
+        "readonly": true
+      },
+      {
+        "key": "name",
+        "type": "string"
+      },
+      {
+        "key": "description",
+        "type": "string"
+      },
+      {
+        "key": "shop_price",
+        "type": "number",
+        "step": 1
+      },
+      {
+        "key": "accent",
+        "type": "json"
+      }
+    ]
+  },
+  "tile_packs": {
+    "suggestedFilename": "tile_packs.json",
+    "fields": [
+      {
+        "key": "id",
+        "type": "string",
+        "readonly": true
+      },
+      {
+        "key": "name",
+        "type": "string"
+      },
+      {
+        "key": "description",
+        "type": "string"
+      },
+      {
+        "key": "shop_price",
+        "type": "number",
+        "step": 1
+      },
+      {
+        "key": "texture_file",
+        "type": "string"
+      }
+    ]
+  },
+  "zodiacs": {
+    "suggestedFilename": "zodiacs.json",
+    "defaultRibbonShopPrice": 6,
+    "fileLevelFields": [
+      {
+        "key": "ribbon_shop_price",
+        "type": "number",
+        "step": 1
+      }
+    ],
+    "fields": [
+      {
+        "key": "id",
+        "type": "string",
+        "readonly": true
+      },
+      {
+        "key": "name",
+        "type": "string"
+      },
+      {
+        "key": "slug",
+        "type": "string"
+      },
+      {
+        "key": "yaku",
+        "type": "string"
+      }
+    ]
+  }
+};
+
+    let manifest = null;
+    let data = null;
+    let loadedFilename = "";
+    let effectiveMode = null;
+    let currentRowId = null;
+    let genericFieldEls = [];
+    /** Set when editing `zodiacs.json` (object root); `data` aliases `parsedRoot.zodiacs`. */
+    let parsedRoot = null;
+
+    const $ = (id) => document.getElementById(id);
+
+    async function loadManifest() {
+      if (manifest) return manifest;
+      try {
+        const res = await fetch(new URL("data_editor_manifest.json", document.baseURI || location.href));
+        if (!res.ok) throw new Error(res.status);
+        manifest = await res.json();
+      } catch {
+        manifest = MANIFEST_FALLBACK;
+      }
+      return manifest;
+    }
+
+    function escapeHtml(s) {
+      return s
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function spansToHtml(spans) {
+      if (!spans || !spans.length) return "";
+      return spans
+        .map((s) => {
+          const t = escapeHtml(s.text).replace(/\n/g, "<br>");
+          const b = s.bold;
+          const i = s.italic;
+          if (b && i) return `<b><i>${t}</i></b>`;
+          if (b) return `<b>${t}</b>`;
+          if (i) return `<i>${t}</i>`;
+          return t;
+        })
+        .join("");
+    }
+
+    function editorToSpans(root) {
+      const chunks = [];
+      function flushText(str, bold, italic) {
+        if (!str) return;
+        const last = chunks[chunks.length - 1];
+        if (last && last.bold === bold && last.italic === italic) {
+          last.text += str;
+        } else {
+          chunks.push({ text: str, bold, italic });
+        }
+      }
+      function walk(node, bold, italic) {
+        if (node.nodeType === Node.TEXT_NODE) {
+          flushText(node.textContent.replace(/\r\n/g, "\n"), bold, italic);
+          return;
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE) return;
+        const el = node;
+        if (el.tagName === "BR") {
+          flushText("\n", bold, italic);
+          return;
+        }
+        let b = bold;
+        let i = italic;
+        const t = el.tagName.toLowerCase();
+        if (t === "b" || t === "strong") b = true;
+        if (t === "i" || t === "em") i = true;
+        for (const c of el.childNodes) walk(c, b, i);
+      }
+      for (const c of root.childNodes) walk(c, false, false);
+      return chunks
+        .map((c) => ({
+          text: c.text,
+          bold: !!c.bold,
+          italic: !!c.italic,
+        }))
+        .filter((c) => c.text.length > 0);
+    }
+
+    function basenameLower(name) {
+      if (!name) return "";
+      const parts = name.replace(/\\/g, "/").split("/");
+      return parts[parts.length - 1].toLowerCase();
+    }
+
+    function basenameOriginal(name) {
+      if (!name) return "";
+      const parts = name.replace(/\\/g, "/").split("/");
+      return parts[parts.length - 1];
+    }
+
+    function detectModeFromFilename(name) {
+      const b = basenameLower(name);
+      const map = {
+        "relics.json": "relics",
+        "bosses.json": "bosses",
+        "yaku.json": "yaku",
+        "stakes.json": "stakes",
+        "tags.json": "tags",
+        "talismans.json": "talismans",
+        "tile_packs.json": "tile_packs",
+        "zodiacs.json": "zodiacs",
+      };
+      if (map[b]) return map[b];
+      if (b.endsWith("/relics.json")) return "relics";
+      return null;
+    }
+
+    function inferModeFromSampleRow(s) {
+      if (!s || typeof s !== "object") return null;
+      if ("mult_bonus" in s && "chip_bonus" in s) return "yaku";
+      if ("tier" in s && "min_ante" in s) return "bosses";
+      if ("label" in s && "base_target_mult" in s) return "stakes";
+      if ("texture_file" in s) return "tile_packs";
+      if (Array.isArray(s.accent) && s.accent.length) return "talismans";
+      if ("gold_value" in s) return "tags";
+      if ("rarity" in s || "flavor_spans" in s) return "relics";
+      if ("slug" in s && "yaku" in s && typeof s.yaku === "string") return "zodiacs";
+      return null;
+    }
+
+    function detectModeFromShape(arr) {
+      if (!Array.isArray(arr) || !arr.length) return null;
+      return inferModeFromSampleRow(arr[0]);
+    }
+
+    function isZodiacRoot(p) {
+      return (
+        p &&
+        typeof p === "object" &&
+        !Array.isArray(p) &&
+        Array.isArray(p.zodiacs) &&
+        p.zodiacs.every((x) => x && typeof x === "object" && typeof x.id === "string")
+      );
+    }
+
+    function isValidDatasetArray(arr) {
+      return Array.isArray(arr) && arr.every((x) => x && typeof x === "object" && typeof x.id === "string");
+    }
+
+    function resolveMode(userChoice, fileName, arr) {
+      const fromFile = detectModeFromFilename(fileName);
+      const fromShape = detectModeFromShape(arr);
+      if (userChoice === "auto") {
+        return fromFile || fromShape || null;
+      }
+      return userChoice;
+    }
+
+    function isGenericTableMode(m) {
+      return !!(m && m !== "relics" && manifest && manifest[m] && Array.isArray(manifest[m].fields) && manifest[m].fields.length);
+    }
+
+    function ensureZodiacParsedRoot() {
+      if (effectiveMode !== "zodiacs" || !data || parsedRoot) return;
+      const sample = data[0];
+      if (!sample || typeof sample.slug !== "string" || typeof sample.yaku !== "string") return;
+      const d = manifest?.zodiacs?.defaultRibbonShopPrice ?? 6;
+      parsedRoot = { ribbon_shop_price: d, zodiacs: data };
+    }
+
+    function suggestedSaveName(mode) {
+      if (loadedFilename) return basenameOriginal(loadedFilename);
+      const spec = mode && manifest?.[mode];
+      if (spec?.suggestedFilename) return spec.suggestedFilename;
+      if (mode === "relics") return "relics.json";
+      return "data.json";
+    }
+
+    function commitRelicFlavor() {
+      if (effectiveMode !== "relics" || !data || !currentRowId) return;
+      const idx = data.findIndex((x) => x.id === currentRowId);
+      if (idx < 0) return;
+      const spans = editorToSpans($("flavor-editor"));
+      data[idx].flavor_spans = spans;
+    }
+
+    function updateFlavorPreview() {
+      const spans = editorToSpans($("flavor-editor"));
+      $("preview-flavor").textContent = JSON.stringify({ flavor_spans: spans }, null, 2);
+    }
+
+    function updateGenericPreview() {
+      const row = getCurrentRow();
+      $("preview-row").textContent = row ? JSON.stringify(row, null, 2) : "{}";
+      const rawTa = $("raw-row");
+      if (document.activeElement !== rawTa) {
+        rawTa.value = row ? JSON.stringify(row, null, 2) : "";
+      }
+    }
+
+    function syncRawFileTextarea() {
+      const root = getSerializableRoot();
+      $("raw-file").value = root ? JSON.stringify(root, null, 2) : "";
+    }
+
+    function getSerializableRoot() {
+      if (effectiveMode === "zodiacs" && parsedRoot) {
+        parsedRoot.zodiacs = data;
+        return parsedRoot;
+      }
+      return data;
+    }
+
+    function getCurrentRow() {
+      if (!data || !currentRowId) return null;
+      return data.find((x) => x.id === currentRowId) || null;
+    }
+
+    function populateRowSelect() {
+      const sel = $("row");
+      sel.innerHTML = "";
+      for (const r of data) {
+        const opt = document.createElement("option");
+        opt.value = r.id;
+        const label =
+          r.name != null ? String(r.name) : r.label != null ? String(r.label) : r.id;
+        opt.textContent = `${label} (${r.id})`;
+        sel.appendChild(opt);
+      }
+      sel.disabled = false;
+    }
+
+    function applyPanelsVisibility() {
+      const relics = effectiveMode === "relics";
+      $("panel-relics").classList.toggle("hidden", !relics);
+      $("panel-generic").classList.toggle("hidden", relics || !effectiveMode);
+      $("btnCopy").textContent = relics ? "Copy flavor_spans JSON" : "Copy row JSON";
+    }
+
+    function buildGenericFields() {
+      const host = $("generic-fields");
+      host.innerHTML = "";
+      genericFieldEls = [];
+      if (!isGenericTableMode(effectiveMode)) return;
+      const spec = manifest[effectiveMode];
+      if (!spec || !spec.fields) return;
+
+      function appendField(f, fileLevel) {
+        const def = fileLevel ? { ...f, fileLevel: true } : f;
+        const wrap = document.createElement("div");
+        wrap.className = "field-row" + (fileLevel ? " file-level" : "");
+        const lab = document.createElement("label");
+        lab.textContent = fileLevel
+          ? `${f.key} (file-level)`
+          : f.readonly
+            ? `${f.key} (read-only)`
+            : f.key;
+        lab.setAttribute("for", `fld-${fileLevel ? "f-" : ""}${f.key}`);
+        wrap.appendChild(lab);
+
+        let input;
+        if (f.type === "enum") {
+          input = document.createElement("select");
+          input.id = `fld-${fileLevel ? "f-" : ""}${f.key}`;
+          for (const optv of f.options || []) {
+            const o = document.createElement("option");
+            o.value = optv;
+            o.textContent = optv;
+            input.appendChild(o);
+          }
+        } else if (f.type === "number") {
+          input = document.createElement("input");
+          input.type = "number";
+          input.id = `fld-${fileLevel ? "f-" : ""}${f.key}`;
+          if (f.step === "any") input.step = "any";
+          else if (f.step != null) input.step = String(f.step);
+        } else if (f.type === "json") {
+          input = document.createElement("textarea");
+          input.id = `fld-${fileLevel ? "f-" : ""}${f.key}`;
+          input.className = "field-json";
+          input.spellcheck = false;
+        } else {
+          input = document.createElement("input");
+          input.type = "text";
+          input.id = `fld-${fileLevel ? "f-" : ""}${f.key}`;
+        }
+        if (f.readonly) input.disabled = true;
+        wrap.appendChild(input);
+        host.appendChild(wrap);
+        genericFieldEls.push({ def, el: input });
+      }
+
+      if (effectiveMode === "zodiacs" && parsedRoot && spec.fileLevelFields?.length) {
+        for (const f of spec.fileLevelFields) appendField(f, true);
+      }
+
+      for (const f of spec.fields) appendField(f, false);
+
+      for (const { def, el } of genericFieldEls) {
+        if (def.readonly) continue;
+        if (def.type === "json") {
+          el.addEventListener("change", () => syncFieldToRow(def, el));
+          el.addEventListener("blur", () => syncFieldToRow(def, el));
+        } else {
+          const ev = () => syncFieldToRow(def, el);
+          el.addEventListener("input", ev);
+          el.addEventListener("change", ev);
+        }
+      }
+    }
+
+    function loadGenericFormFromRow() {
+      const row = getCurrentRow();
+      for (const { def, el } of genericFieldEls) {
+        const source = def.fileLevel ? parsedRoot : row;
+        const v = source ? source[def.key] : undefined;
+        if (def.type === "enum") {
+          const opts = def.options || [];
+          el.innerHTML = "";
+          for (const optv of opts) {
+            const o = document.createElement("option");
+            o.value = optv;
+            o.textContent = optv;
+            el.appendChild(o);
+          }
+          const s = v != null ? String(v) : "";
+          if (s && !opts.includes(s)) {
+            const o = document.createElement("option");
+            o.value = s;
+            o.textContent = `${s} (from file)`;
+            el.appendChild(o);
+          }
+          el.value = s && [...el.options].some((o) => o.value === s) ? s : opts[0] ?? "";
+        } else if (def.type === "number") {
+          el.value = v != null && v !== "" ? String(v) : "";
+        } else if (def.type === "json") {
+          if (document.activeElement !== el) {
+            try {
+              el.value = v !== undefined ? JSON.stringify(v, null, 2) : "";
+            } catch {
+              el.value = "";
+            }
+          }
+        } else {
+          el.value = v != null ? String(v) : "";
+        }
+      }
+      updateGenericPreview();
+    }
+
+    function syncFieldToRow(def, el) {
+      const target = def.fileLevel ? parsedRoot : getCurrentRow();
+      if (!target) return;
+      if (def.readonly) return;
+      if (def.type === "number") {
+        const raw = el.value.trim();
+        if (raw === "") {
+          delete target[def.key];
+        } else {
+          const n = Number(raw);
+          target[def.key] = Number.isFinite(n) ? n : raw;
+        }
+      } else if (def.type === "json") {
+        const raw = el.value.trim();
+        if (raw === "") {
+          delete target[def.key];
+        } else {
+          try {
+            target[def.key] = JSON.parse(raw);
+          } catch (err) {
+            alert(`${def.key}: invalid JSON — ${err.message}`);
+            return;
+          }
+        }
+      } else {
+        target[def.key] = el.value;
+      }
+      updateGenericPreview();
+      syncRawFileTextarea();
+    }
+
+    function loadRowIntoEditors(id) {
+      currentRowId = id;
+      if (effectiveMode === "relics") {
+        const r = data.find((x) => x.id === id);
+        const spans = (r && r.flavor_spans) || [];
+        $("flavor-editor").innerHTML = spansToHtml(spans);
+        updateFlavorPreview();
+      } else {
+        loadGenericFormFromRow();
+      }
+      syncRawFileTextarea();
+    }
+
+    function onRowChange(newId) {
+      if (effectiveMode === "relics") commitRelicFlavor();
+      loadRowIntoEditors(newId);
+    }
+
+    function refreshAfterModeChange() {
+      applyPanelsVisibility();
+      if (isGenericTableMode(effectiveMode)) {
+        if (effectiveMode === "zodiacs") ensureZodiacParsedRoot();
+        buildGenericFields();
+        loadGenericFormFromRow();
+      }
+      $("btnSave").disabled = !effectiveMode;
+      $("btnCopy").disabled = !data || !effectiveMode;
+      $("banner-unknown").classList.add("hidden");
+      if (!effectiveMode) {
+        $("banner-unknown").textContent =
+          "Could not detect dataset. Pick a mode in “Dataset (editor mode)” (or Auto), then choose a row.";
+        $("banner-unknown").classList.remove("hidden");
+      }
+    }
+
+    function setStatus(msg) {
+      $("load-status").textContent = msg || "";
+    }
+
+    async function ingestJsonText(text, fileName) {
+      await loadManifest();
+      let parsed;
+      try {
+        parsed = JSON.parse(text);
+      } catch (err) {
+        alert("Invalid JSON: " + err.message);
+        return false;
+      }
+      parsedRoot = null;
+      if (isZodiacRoot(parsed)) {
+        parsedRoot = parsed;
+        data = parsedRoot.zodiacs;
+      } else if (isValidDatasetArray(parsed)) {
+        data = parsed;
+      } else {
+        alert(
+          "Expected a top-level JSON array of objects with a string id, or zodiacs.json shape { \"ribbon_shop_price\", \"zodiacs\": [...] }."
+        );
+        return false;
+      }
+      loadedFilename = fileName || "";
+      $("dataset").disabled = false;
+      $("file").disabled = false;
+
+      const userSel = $("dataset").value;
+      if (parsedRoot) {
+        effectiveMode = userSel === "auto" ? detectModeFromFilename(loadedFilename) || "zodiacs" : userSel;
+        if (userSel !== "auto") effectiveMode = userSel;
+      } else {
+        effectiveMode = resolveMode(userSel, loadedFilename, data);
+        if (userSel !== "auto") effectiveMode = userSel;
+      }
+
+      populateRowSelect();
+      currentRowId = null;
+      const firstId = data[0].id;
+      $("row").value = firstId;
+      refreshAfterModeChange();
+      loadRowIntoEditors(firstId);
+      setStatus(
+        loadedFilename
+          ? `Loaded ${loadedFilename} — ${data.length} row(s). Mode: ${effectiveMode || "unset"}.`
+          : `Loaded ${data.length} row(s). Mode: ${effectiveMode || "unset"}.`
+      );
+      return true;
+    }
+
+    $("dataset").addEventListener("change", () => {
+      if (!data) return;
+      commitRelicFlavor();
+      const v = $("dataset").value;
+      const prev = effectiveMode;
+      let next =
+        v === "auto"
+          ? detectModeFromFilename(loadedFilename) ||
+            detectModeFromShape(data) ||
+            (parsedRoot ? "zodiacs" : null) ||
+            inferModeFromSampleRow(data?.[0])
+          : v;
+      if (prev === "zodiacs" && next !== "zodiacs") parsedRoot = null;
+      effectiveMode = next;
+      refreshAfterModeChange();
+      const id = $("row").value;
+      if (data.some((x) => x.id === id)) loadRowIntoEditors(id);
+      else loadRowIntoEditors(data[0].id);
+    });
+
+    $("row").addEventListener("change", () => {
+      onRowChange($("row").value);
+    });
+
+    $("file").addEventListener("change", async (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      const text = await f.text();
+      await ingestJsonText(text, f.name);
+    });
+
+    function hasFilePayload(dt) {
+      return dt && dt.types && [...dt.types].includes("Files");
+    }
+
+    document.addEventListener(
+      "dragenter",
+      (e) => {
+        if (!hasFilePayload(e.dataTransfer)) return;
+        e.preventDefault();
+        document.body.classList.add("drag-files");
+      },
+      true
+    );
+    document.addEventListener(
+      "dragover",
+      (e) => {
+        if (!hasFilePayload(e.dataTransfer)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+      },
+      true
+    );
+    document.addEventListener(
+      "drop",
+      async (e) => {
+        if (!hasFilePayload(e.dataTransfer)) return;
+        const files = e.dataTransfer.files;
+        if (!files || !files.length) return;
+        e.preventDefault();
+        e.stopPropagation();
+        document.body.classList.remove("drag-files");
+
+        const f = files[0];
+        const lower = f.name.toLowerCase();
+        const okType = !f.type || f.type.includes("json") || f.type === "text/plain";
+        if (!lower.endsWith(".json") && !okType) {
+          alert("Drop a .json file.");
+          return;
+        }
+        const text = await f.text();
+        await ingestJsonText(text, f.name);
+      },
+      true
+    );
+    window.addEventListener("blur", () => document.body.classList.remove("drag-files"));
+
+    $("flavor-editor").addEventListener("input", () => {
+      updateFlavorPreview();
+      syncRawFileTextarea();
+    });
+
+    function exec(cmd, val = null) {
+      document.execCommand(cmd, false, val);
+      $("flavor-editor").focus();
+      updateFlavorPreview();
+      syncRawFileTextarea();
+    }
+    $("btnBold").addEventListener("click", () => exec("bold"));
+    $("btnItalic").addEventListener("click", () => exec("italic"));
+    $("btnClearFmt").addEventListener("click", () => {
+      exec("removeFormat");
+      exec("unlink");
+      updateFlavorPreview();
+      syncRawFileTextarea();
+    });
+
+    $("flavor-editor").addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        exec("bold");
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "i") {
+        e.preventDefault();
+        exec("italic");
+      }
+    });
+
+    $("btnApplyRawRow").addEventListener("click", () => {
+      if (!data || !currentRowId) return;
+      let obj;
+      try {
+        obj = JSON.parse($("raw-row").value);
+      } catch (err) {
+        alert("Row JSON: " + err.message);
+        return;
+      }
+      if (!obj || typeof obj !== "object") {
+        alert("Row JSON must be an object.");
+        return;
+      }
+      const idx = data.findIndex((x) => x.id === currentRowId);
+      if (idx < 0) return;
+      const prevId = currentRowId;
+      data[idx] = obj;
+      if (obj.id !== prevId) {
+        populateRowSelect();
+        $("row").value = String(obj.id);
+        currentRowId = String(obj.id);
+      }
+      if (effectiveMode !== "relics" && isGenericTableMode(effectiveMode)) loadGenericFormFromRow();
+      if (effectiveMode === "relics") {
+        const spans = obj.flavor_spans || [];
+        $("flavor-editor").innerHTML = spansToHtml(spans);
+        updateFlavorPreview();
+      }
+      updateGenericPreview();
+      syncRawFileTextarea();
+    });
+
+    $("btnApplyRawFile").addEventListener("click", async () => {
+      await loadManifest();
+      let parsed;
+      try {
+        parsed = JSON.parse($("raw-file").value);
+      } catch (err) {
+        alert("File JSON: " + err.message);
+        return;
+      }
+      parsedRoot = null;
+      if (isZodiacRoot(parsed)) {
+        parsedRoot = parsed;
+        data = parsedRoot.zodiacs;
+      } else if (isValidDatasetArray(parsed)) {
+        data = parsed;
+      } else {
+        alert(
+          "Expected a top-level JSON array of objects with string id, or zodiacs.json shape { ribbon_shop_price, zodiacs: [...] }."
+        );
+        return;
+      }
+      populateRowSelect();
+      $("row").value = data[0].id;
+      const modePick = $("dataset").value;
+      if (parsedRoot) {
+        effectiveMode =
+          modePick === "auto" ? detectModeFromFilename(loadedFilename) || "zodiacs" : modePick;
+        if (modePick !== "auto") effectiveMode = modePick;
+      } else {
+        effectiveMode =
+          modePick === "auto"
+            ? detectModeFromFilename(loadedFilename) || detectModeFromShape(data)
+            : modePick;
+      }
+      refreshAfterModeChange();
+      loadRowIntoEditors(data[0].id);
+      setStatus(`Replaced in memory — ${data.length} row(s). Save to write out.`);
+    });
+
+    $("btnCopy").addEventListener("click", async () => {
+      let snippet;
+      if (effectiveMode === "relics") {
+        const spans = editorToSpans($("flavor-editor"));
+        snippet = JSON.stringify(spans, null, 2);
+      } else {
+        const row = getCurrentRow();
+        snippet = row ? JSON.stringify(row, null, 2) : "{}";
+      }
+      try {
+        await navigator.clipboard.writeText(snippet);
+        alert(effectiveMode === "relics" ? "Copied flavor_spans array." : "Copied row JSON.");
+      } catch {
+        prompt("Copy:", snippet);
+      }
+    });
+
+    async function saveFullJson() {
+      if (!data) return;
+      if (effectiveMode === "relics") commitRelicFlavor();
+      let outObj;
+      if (effectiveMode === "zodiacs") {
+        if (parsedRoot) {
+          parsedRoot.zodiacs = data;
+          outObj = parsedRoot;
+        } else {
+          const d = manifest?.zodiacs?.defaultRibbonShopPrice ?? 6;
+          outObj = { ribbon_shop_price: d, zodiacs: data };
+        }
+      } else {
+        outObj = data;
+      }
+      const out = JSON.stringify(outObj, null, 2) + "\n";
+      const name = suggestedSaveName(effectiveMode);
+
+      if (window.showSaveFilePicker) {
+        try {
+          const h = await showSaveFilePicker({
+            suggestedName: name,
+            types: [
+              {
+                description: "JSON",
+                accept: { "application/json": [".json"] },
+              },
+            ],
+          });
+          const w = await h.createWritable();
+          await w.write(out);
+          await w.close();
+          alert("Saved.");
+          return;
+        } catch (e) {
+          if (e.name === "AbortError") return;
+          console.warn(e);
+        }
+      }
+      const blob = new Blob([out], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      alert(`Downloaded ${name} — copy into assets/data/ if needed.`);
+    }
+
+    $("btnSave").addEventListener("click", saveFullJson);
+  </script>
+</body>
+</html>

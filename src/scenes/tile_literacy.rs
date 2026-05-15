@@ -60,8 +60,7 @@ impl SceneBehavior for TileLiteracyScene {
         // ── Background ──────────────────────────────────────────
         frame.quad(GpuInstance {
             rect: [0.0, 0.0, w, h],
-            color: [0.0, 0.0, 0.0, 1.0],
-        });
+            color: [0.0, 0.0, 0.0, 1.0], user: 0});
         if ctx.effect_layers.starfield {
             frame.starfield();
         }
@@ -76,27 +75,22 @@ impl SceneBehavior for TileLiteracyScene {
         let cy = (h - card_h) * 0.5 - 10.0 * scale;
         frame.quad(GpuInstance {
             rect: [cx, cy, card_w, card_h],
-            color: color::WALNUT_DEEP,
-        });
+            color: color::WALNUT_DEEP, user: 0});
 
         // Gold border.
         let bw = (2.0 * scale).max(1.0);
         frame.quad(GpuInstance {
             rect: [cx, cy, card_w, bw],
-            color: color::BRASS,
-        });
+            color: color::BRASS, user: 0});
         frame.quad(GpuInstance {
             rect: [cx, cy + card_h - bw, card_w, bw],
-            color: color::BRASS,
-        });
+            color: color::BRASS, user: 0});
         frame.quad(GpuInstance {
             rect: [cx, cy, bw, card_h],
-            color: color::BRASS,
-        });
+            color: color::BRASS, user: 0});
         frame.quad(GpuInstance {
             rect: [cx + card_w - bw, cy, bw, card_h],
-            color: color::BRASS,
-        });
+            color: color::BRASS, user: 0});
 
         // ── Title ───────────────────────────────────────────────
         let title_h = 34.0 * scale;
@@ -115,8 +109,7 @@ impl SceneBehavior for TileLiteracyScene {
         let div_inset = card_w * 0.12;
         frame.quad(GpuInstance {
             rect: [cx + div_inset, div_y, card_w - div_inset * 2.0, bw],
-            color: color::alpha(color::BRASS, 0.5),
-        });
+            color: color::alpha(color::BRASS, 0.5), user: 0});
 
         // ── Content lines ───────────────────────────────────────
         let content_font = 16.0 * scale;

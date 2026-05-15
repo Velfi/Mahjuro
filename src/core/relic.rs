@@ -187,10 +187,6 @@ pub enum RelicId {
     /// 1-in-4 chance to level up a scored yaku after each play.
     StarTile,
     // Sell-to-activate
-    /// Sell to skip the current boss blind.
-    SmokeBomb,
-    /// After 3 rounds, sell to duplicate a random owned relic.
-    PhantomRelic,
     /// Destroy the relic to the right; gain permanent mult equal to
     /// double its sell value.
     HungryGhost,
@@ -372,8 +368,6 @@ impl RelicId {
             RelicId::FortunesFavor => "fortunes_favor.png",
             RelicId::CrackedTile => "cracked_tile.png",
             RelicId::StarTile => "star_tile.png",
-            RelicId::SmokeBomb => "smoke_bomb.png",
-            RelicId::PhantomRelic => "phantom_relic.png",
             RelicId::HungryGhost => "hungry_ghost.png",
             RelicId::Disgust => "disgust.png",
             RelicId::CurioCabinet => "curio_cabinet.png",
@@ -572,14 +566,20 @@ pub fn relic_buy_price(id: RelicId) -> u32 {
     }
 }
 
+/// Catalog shop price with Merchant's Eye's 25% discount (before stake scaling).
+/// Floors to at least 1 gold.
+pub fn apply_merchants_eye_discount(base: u32, relics: &RelicState) -> u32 {
+    if relics.has(RelicId::MerchantsEye) {
+        (base * 3 / 4).max(1)
+    } else {
+        base
+    }
+}
+
 /// Effective gold cost to buy a relic in the shop after active price
 /// modifiers are applied.
 pub fn relic_shop_price(id: RelicId, relics: &RelicState) -> u32 {
-    let mut price = relic_buy_price(id);
-    if relics.has(RelicId::MerchantsEye) {
-        price = (price * 3 / 4).max(1);
-    }
-    price
+    apply_merchants_eye_discount(relic_buy_price(id), relics)
 }
 
 /// Find the relic whose display name exactly matches `name`. The scoring
@@ -738,14 +738,6 @@ pub fn relic_description_live(
             let perm = counters.get(&RelicId::HungryGhost).copied().unwrap_or(0);
             format!("{base} [+{:.1} mult stored]", perm as f64 / 10.0)
         }
-        RelicId::PhantomRelic => {
-            let rounds = counters.get(&RelicId::PhantomRelic).copied().unwrap_or(0);
-            if rounds >= 3 {
-                format!("{base} [ready to duplicate!]")
-            } else {
-                format!("{base} [{rounds}/3 rounds]")
-            }
-        }
         RelicId::NestEgg => {
             let rounds = counters.get(&RelicId::NestEgg).copied().unwrap_or(0);
             let sell = relic_sell_price_live(id, counters);
@@ -835,12 +827,8 @@ pub fn relic_description_live(
         }
         RelicId::MultiplierMaster => {
             if let Some((relics, _)) = inventory_focus {
-                let n = relics.enabled_len();
-                format!(
-                    "{base} [{n} relic{}, +{:.1} mult]",
-                    if n == 1 { "" } else { "s" },
-                    0.5 * n as f64
-                )
+                let n = relics.len();
+                format!("{base} [+{n} mult]")
             } else {
                 base.to_string()
             }
@@ -1268,6 +1256,10 @@ pub const SNOWBALL_STACK_CAP: i32 = 15;
 /// Chips added per scored hand for each blind clear counted on Snowball (before mult).
 pub const SNOWBALL_CHIPS_PER_CLEAR: i32 = 15;
 
+/// Flat chips from Turtle Shell while the run still holds gold (`gold > 0` at score time).
+/// The relic is removed when run gold hits zero or below (handled in the run gold-change hook).
+pub const TURTLE_SHELL_CHIPS: i32 = 200;
+
 /// Chips from Snowball for one scored hand (`stacks` = blind clears while owned, capped).
 #[inline]
 pub fn snowball_score_chips(stacks: i32) -> i32 {
@@ -1295,8 +1287,8 @@ pub struct ScoreContext<'a> {
 #[cfg(test)]
 mod tests {
     use super::{
-        RelicId, RelicState, SNOWBALL_CHIPS_PER_CLEAR, SNOWBALL_STACK_CAP, relic_buy_price,
-        relic_shop_price, snowball_score_chips,
+        RelicId, RelicState, SNOWBALL_CHIPS_PER_CLEAR, SNOWBALL_STACK_CAP, apply_merchants_eye_discount,
+        relic_buy_price, relic_shop_price, snowball_score_chips,
     };
 
     #[test]
@@ -1328,6 +1320,15 @@ mod tests {
             relic_shop_price(RelicId::TripletBoost, &relics),
             (base * 3 / 4).max(1)
         );
+    }
+
+    #[test]
+    fn merchants_eye_discount_applies_to_non_relic_catalog_prices() {
+        let mut relics = RelicState::default();
+        relics.active.push(RelicId::MerchantsEye);
+        assert_eq!(apply_merchants_eye_discount(8, &relics), 6);
+        let no_eye = RelicState::default();
+        assert_eq!(apply_merchants_eye_discount(8, &no_eye), 8);
     }
 
     /// `assets/data/relics.json` must have exactly one entry per `RelicId`
@@ -1419,8 +1420,6 @@ mod tests {
                     | RelicId::FortunesFavor
                     | RelicId::CrackedTile
                     | RelicId::StarTile
-                    | RelicId::SmokeBomb
-                    | RelicId::PhantomRelic
                     | RelicId::HungryGhost
                     | RelicId::Disgust
                     | RelicId::CurioCabinet
@@ -1518,8 +1517,6 @@ mod tests {
                 RelicId::FortunesFavor,
                 RelicId::CrackedTile,
                 RelicId::StarTile,
-                RelicId::SmokeBomb,
-                RelicId::PhantomRelic,
                 RelicId::HungryGhost,
                 RelicId::Disgust,
                 RelicId::CurioCabinet,

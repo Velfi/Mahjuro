@@ -287,20 +287,31 @@ fn dragon_rage_fires_on_any_dragon_triplet() {
 }
 
 #[test]
-fn multiplier_master_scales_with_relic_count() {
+fn multiplier_master_adds_one_mult_per_relic() {
     let hand = vec![
         Tile::new(Suit::Characters, 9, 0),
         Tile::new(Suit::Characters, 9, 1),
         Tile::new(Suit::Characters, 9, 2),
     ];
     let sets = find_pairs_and_triplets(&hand);
-    let r = relics(vec![
-        RelicId::MultiplierMaster,
-        RelicId::SetMagnet,
-        RelicId::QuickDraw,
-    ]);
+    let r = relics(vec![RelicId::MultiplierMaster]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_mult, 2.5);
+    assert_eq!(breakdown.final_mult, 2.0);
+
+    let r2 = relics(vec![
+        RelicId::MultiplierMaster,
+        RelicId::ChainReaction,
+    ]);
+    let breakdown2 = score_sets(&hand, &sets, &ctx_with(&r2, false), &[]);
+    assert_eq!(breakdown2.final_mult, 3.0);
+
+    let mut r3 = relics(vec![
+        RelicId::MultiplierMaster,
+        RelicId::ChainReaction,
+    ]);
+    r3.set_debuffed([RelicId::ChainReaction]);
+    let breakdown3 = score_sets(&hand, &sets, &ctx_with(&r3, false), &[]);
+    assert_eq!(breakdown3.final_mult, 3.0);
 }
 
 #[test]

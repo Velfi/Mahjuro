@@ -32,8 +32,10 @@ pub struct GameMode {
     #[serde(default)]
     pub stake: Stake,
     /// Shop price multiplier derived from `stake` at run creation. Cached on
-    /// the mode so every shop-side pricing call (in `scenes/shop.rs` and in
-    /// `relic_shop_price`) can multiply without reaching for the stake enum.
+    /// the mode so every shop-side pricing call (after catalog price + run
+    /// modifiers such as [`crate::core::relic::apply_merchants_eye_discount`]
+    /// and [`crate::core::relic::relic_shop_price`]) can multiply without
+    /// reaching for the stake enum.
     #[serde(default = "default_price_multiplier")]
     pub price_multiplier: f32,
 }

@@ -558,8 +558,7 @@ impl ModalQueue {
         let [or_, og, ob, _] = crate::render::theme::color::WALNUT_INK;
         instances.push(GpuInstance {
             rect: [0.0, 0.0, window_w, window_h],
-            color: [or_, og, ob, 0.65 * alpha],
-        });
+            color: [or_, og, ob, 0.65 * alpha], user: 0});
 
         if modal.has_pages() {
             let (pag_i, pag_l, pag_r, mut pag_g) =
@@ -636,15 +635,13 @@ impl ModalQueue {
                 card_w + border * 2.0,
                 card_h + border * 2.0,
             ],
-            color: [br, bg, bb, ba * alpha],
-        });
+            color: [br, bg, bb, ba * alpha], user: 0});
 
         // Card background.
         let [cr, cg, cb, ca] = modal.theme.bg_color();
         instances.push(GpuInstance {
             rect: [card_x, card_y, card_w, card_h],
-            color: [cr, cg, cb, ca * alpha],
-        });
+            color: [cr, cg, cb, ca * alpha], user: 0});
 
         // Title.
         let title_y = card_y + padding;
@@ -727,13 +724,11 @@ fn draw_modal_paginated_unlock(
         // Top band.
         instances.push(GpuInstance {
             rect: [0.0, i as f32 * strip_h, window_w, strip_h],
-            color: [vr, vg, vb, a],
-        });
+            color: [vr, vg, vb, a], user: 0});
         // Bottom band.
         instances.push(GpuInstance {
             rect: [0.0, window_h - (i + 1) as f32 * strip_h, window_w, strip_h],
-            color: [vr, vg, vb, a],
-        });
+            color: [vr, vg, vb, a], user: 0});
     }
 
     // ── Hero stage layout ────────────────────────────────────────

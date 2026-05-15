@@ -236,7 +236,8 @@ fn tribute_play(run: &mut RunState) {
     // Tax fires after the play has resolved. Gold is allowed to go negative
     // during boss rounds — the player can still finish the round but will
     // need to earn it back in the shop/payout phase.
-    run.gold -= run.boss.gold_cost_per_play as i32;
+    let cost = run.boss.gold_cost_per_play as i32;
+    run.apply_gold_delta(-cost, None);
 }
 
 // ── Reactive boss hooks ───────────────────────────────────────────────────

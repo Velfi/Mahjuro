@@ -160,8 +160,7 @@ impl SceneBehavior for MaterialViewerScene {
         let btn_x = (w - btn_w) * 0.5;
         frame.quad(GpuInstance {
             rect: [btn_x, btn_y, btn_w, btn_h],
-            color: color::WALNUT_INK,
-        });
+            color: color::WALNUT_INK, user: 0});
         frame.text(TextLabel {
             rect: [btn_x, btn_y, btn_w, btn_h],
             text: "Back".into(),

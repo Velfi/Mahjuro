@@ -139,9 +139,6 @@ pub(crate) fn relic_eligible_for_shop_stock(
     if relics.owns(id) {
         return false;
     }
-    if id == RelicId::PhantomRelic {
-        return false;
-    }
     if crate::core::progression::is_transformation_successor_relic(id) {
         return transformation_successor_shop_eligible(id, available_relics, ex);
     }
@@ -783,7 +780,6 @@ pub struct RunState {
     ///   TeaCeremony  → principle index 0–3 (four scored hands, then transforms)
     ///   Rakuware     → (no counter; all four Tea beats when conditions hold)
     ///   MonarchButterfly → cumulative absorbed excess (post-target); tiers for chip bonus
-    ///   PhantomRelic → rounds held
     ///   HungryGhost  → permanent mult bonus ×10
     ///   TilePolisher → accumulated +chip bonus (each scored tile +3)
     ///   RiverRunner  → accumulated +chip bonus (each scored sequence +20)
@@ -910,23 +906,23 @@ impl RunState {
         }
     }
 
-    /// Canonical *relic destroyed* trigger.
+    /// Canonical *relic destroyed* trigger (Kintsugi keyword).
     ///
-    /// The "destroyed" keyword is the
-    /// player-facing name for permanent removal of a relic from a run; this
-    /// function is the single code-side anchor the keyword refers to. Every
-    /// path that destroys a relic should call this *after* removing the
-    /// victim from `relics.active`. Kintsugi converts each invocation into
-    /// a permanent +1 mult via its counter — adding a new destruction site
-    /// without going through here will silently break that synergy.
+    /// The "destroyed" keyword is the player-facing name for permanent removal
+    /// of a relic from a run; Kintsugi converts each invocation into a permanent
+    /// +1 mult via its counter — skipping this after a qualifying removal breaks
+    /// that synergy.
     ///
-    /// Gros-Michel-style relic burns (Paper Lantern, Silk Thread, Melting Ice,
-    /// XXXL Egg, Glass Cannon after its scoring use) remove the relic from inventory and call this so Kintsugi
-    /// can react; successors enter the shop pool via [`RelicShopPoolExtinction`].
-    /// Tea Ceremony instead transforms into Rakuware in-slot and also invokes this
-    /// so Kintsugi can count the finished ritual. Chrysalis transforms into
-    /// Monarch Butterfly the same way when excess crosses the hatch threshold.
-    fn note_relic_destroyed(&mut self) {
+    /// Inventory teardown is handled by [`Self::destroy_relic_removed_from_run`],
+    /// which clears debuffs/counters for `relic_id`, removes it from
+    /// [`RelicState::active`], then calls this.
+    ///
+    /// Call this directly only when `relics.active` was already updated (in-slot
+    /// transforms such as Tea Ceremony → Rakuware or Chrysalis → Monarch Butterfly,
+    /// or the Hungry Ghost victim after `active.remove`) — still exactly once per
+    /// qualifying destruction. Successors enter the shop pool via
+    /// [`RelicShopPoolExtinction`] where applicable.
+    pub(crate) fn note_relic_destroyed(&mut self) {
         if self.relics.has(crate::core::relic::RelicId::Kintsugi) {
             *self
                 .relic_counters
@@ -934,6 +930,96 @@ impl RunState {
                 .or_insert(0) += 1;
             self.relic_activations
                 .push(crate::core::relic::RelicId::Kintsugi);
+        }
+    }
+
+    /// Permanent removal of `relic_id` from the run inventory (slot emptied).
+    ///
+    /// Clears [`RelicState::debuffed`] and [`RunState::relic_counters`] entries keyed
+    /// by `relic_id`, removes all copies from [`RelicState::active`], then
+    /// [`Self::note_relic_destroyed`] for Kintsugi.
+    ///
+    /// Does **not** push [`GameEvent`]s, set shop extinction flags, or append to
+    /// [`RunState::relic_activations`] for `relic_id` — callers keep those semantics.
+    ///
+    /// In-slot transforms (Tea Ceremony → Rakuware, Chrysalis → Monarch Butterfly)
+    /// must **not** use this; swap the active entry, then call [`Self::note_relic_destroyed`]
+    /// alone.
+    ///
+    /// Returns whether at least one copy was present (and removed).
+    pub(crate) fn destroy_relic_removed_from_run(&mut self, relic_id: RelicId) -> bool {
+        if !self.relics.active.iter().any(|&r| r == relic_id) {
+            return false;
+        }
+        self.relics.active.retain(|&r| r != relic_id);
+        self.relics.debuffed.remove(&relic_id);
+        self.relic_counters.remove(&relic_id);
+        self.note_relic_destroyed();
+        true
+    }
+
+    /// Apply a signed gold change (shop spend, boss tax). Balance may go negative.
+    pub(crate) fn apply_gold_delta(&mut self, delta: i32, bus: Option<&mut EventBus>) {
+        if delta == 0 {
+            return;
+        }
+        self.gold += delta;
+        self.notify_run_gold_changed(delta, bus);
+    }
+
+    /// Apply a non-negative gold gain with saturation at `i32::MAX`.
+    pub(crate) fn apply_gold_reward(&mut self, delta: i32, bus: Option<&mut EventBus>) {
+        if delta <= 0 {
+            if delta < 0 {
+                self.apply_gold_delta(delta, bus);
+            }
+            return;
+        }
+        let old = self.gold;
+        self.gold = self.gold.saturating_add(delta);
+        let applied = self.gold - old;
+        if applied != 0 {
+            self.notify_run_gold_changed(applied, bus);
+        }
+    }
+
+    /// Set run gold to an absolute value (debug / tooling). Emits the net delta.
+    pub(crate) fn set_run_gold_direct(&mut self, new_gold: i32, bus: Option<&mut EventBus>) {
+        let old = self.gold;
+        if new_gold == old {
+            return;
+        }
+        self.gold = new_gold;
+        self.notify_run_gold_changed(new_gold - old, bus);
+    }
+
+    /// Push [`GameEvent::GoldChanged`] and run gold-reactive relic hooks.
+    pub(crate) fn notify_run_gold_changed(&mut self, delta: i32, mut bus: Option<&mut EventBus>) {
+        if delta == 0 {
+            return;
+        }
+        if let Some(b) = bus.as_mut() {
+            b.push(GameEvent::GoldChanged { delta });
+        }
+        self.relic_hooks_on_run_gold_changed(bus);
+    }
+
+    /// Extensible hook for relics that care about the bank after any gold mutation.
+    fn relic_hooks_on_run_gold_changed(&mut self, bus: Option<&mut EventBus>) {
+        self.turtle_shell_on_gold_broke(bus);
+    }
+
+    fn turtle_shell_on_gold_broke(&mut self, bus: Option<&mut EventBus>) {
+        if self.gold > 0 {
+            return;
+        }
+        if !self.relics.has(RelicId::TurtleShell) {
+            return;
+        }
+        let _ = self.destroy_relic_removed_from_run(RelicId::TurtleShell);
+        self.relic_activations.push(RelicId::TurtleShell);
+        if let Some(bus) = bus {
+            bus.push(GameEvent::RelicActivated(RelicId::TurtleShell));
         }
     }
 
@@ -1646,7 +1732,7 @@ mod tests {
         run.tag_bonus_plays = 1;
         run.tag_bonus_discards = 1;
 
-        run.apply_blind(BlindKind::Small);
+        run.apply_blind(BlindKind::Small, None);
 
         assert_eq!(run.plays_remaining, STARTING_PLAYS + 1);
         assert_eq!(run.plays_max, STARTING_PLAYS + 1);
@@ -1715,7 +1801,7 @@ mod tests {
     #[test]
     fn second_wind_plays_used_uses_effective_round_cap() {
         let mut run = test_run();
-        run.apply_blind(BlindKind::Small);
+        run.apply_blind(BlindKind::Small, None);
         run.plays_remaining -= 2;
 
         let rw = Some(BlindKind::round_wind_for_ante(run.ante));
@@ -1758,7 +1844,7 @@ mod tests {
         run.discards_remaining = 0;
         run.tag_bonus_discards = 1;
 
-        run.apply_blind(BlindKind::Small);
+        run.apply_blind(BlindKind::Small, None);
 
         assert_eq!(run.discards_remaining, 6);
         assert_eq!(run.discards_max, 6);
@@ -1772,7 +1858,7 @@ mod tests {
             &crate::core::boss::BossKind::Drought.def().effect,
         ));
 
-        run.apply_blind(BlindKind::Boss);
+        run.apply_blind(BlindKind::Boss, None);
 
         assert_eq!(run.discards_remaining, STARTING_DISCARDS / 2);
         assert_eq!(run.discards_max, STARTING_DISCARDS / 2);
@@ -1819,9 +1905,9 @@ mod tests {
     #[test]
     fn apply_blind_promotes_wide_hand_bonus_to_round_hand_size() {
         let mut run = test_run();
-        run.apply_tag(crate::core::tag::TagKind::WideHand);
+        run.apply_tag(crate::core::tag::TagKind::WideHand, None);
 
-        run.apply_blind(BlindKind::Small);
+        run.apply_blind(BlindKind::Small, None);
 
         assert_eq!(run.hand.len(), HAND_SIZE + 2);
         assert_eq!(boss::effective_hand_size(&run), HAND_SIZE + 2);
@@ -1832,12 +1918,12 @@ mod tests {
     fn skipping_with_wide_hand_carries_bonus_into_next_blind() {
         let mut run = test_run();
 
-        run.apply_tag(crate::core::tag::TagKind::WideHand);
+        run.apply_tag(crate::core::tag::TagKind::WideHand, None);
         run.skip_to_next_blind();
 
         assert_eq!(run.tag_bonus_hand_size, 2);
 
-        run.apply_blind(BlindKind::Big);
+        run.apply_blind(BlindKind::Big, None);
 
         assert_eq!(run.hand.len(), HAND_SIZE + 2);
         assert_eq!(boss::effective_hand_size(&run), HAND_SIZE + 2);

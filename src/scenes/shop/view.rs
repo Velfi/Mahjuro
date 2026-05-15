@@ -635,6 +635,10 @@ fn push_shop_inspect_overlay_chrome(out: &mut Vec<TextLabel>, ctx: &DrawCtx<'_>,
         no_glossary: false,
         scroll_offset: 0.0,
         flavor_spans: None,
+        bold: false,
+        italic: false,
+        underline: false,
+        text_effect: crate::render::text_effect::TextEffectId::Flat,
     });
 }
 
@@ -655,8 +659,7 @@ pub(crate) fn render_shop_inspect_isolated_frame(
 
     frame.quad(GpuInstance {
         rect: [0.0, 0.0, w, h],
-        color: [0.0, 0.0, 0.0, 1.0],
-    });
+        color: [0.0, 0.0, 0.0, 1.0], user: 0});
 
     let inspect_rig = InspectRig::shop(h, env_h);
     let o = resolve_shop_orbit_target_for_draw(shop, orbit, &shop_rm, w, h, env_h);
@@ -751,8 +754,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
     let mut frame = UiFrame::new();
     frame.quad(GpuInstance {
         rect: [0.0, 0.0, w, h],
-        color: color::LACQUER,
-    });
+        color: color::LACQUER, user: 0});
     if with_shop_glb_cpu(|opt| opt.is_some()) {
         frame.shop_environment();
     }
@@ -1075,8 +1077,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
     let bh = credits_rect[3] + pad * 1.05;
     frame.quad(GpuInstance {
         rect: [bx - 4.0, by - 3.0, bw + 8.0, bh + 7.0],
-        color: color::alpha(color::LACQUER, 0.48),
-    });
+        color: color::alpha(color::LACQUER, 0.48), user: 0});
     frame.quad(GpuInstance {
         rect: [bx, by, bw, bh],
         color: [
@@ -1084,8 +1085,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
             color::WALNUT_DEEP[1],
             color::WALNUT_DEEP[2],
             0.88,
-        ],
-    });
+        ], user: 0});
     frame.texts([TextLabel {
         rect: credits_rect,
         text: gold_text,
@@ -1095,6 +1095,10 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
         no_glossary: false,
         scroll_offset: 0.0,
         flavor_spans: None,
+        bold: false,
+        italic: false,
+        underline: false,
+        text_effect: crate::render::text_effect::TextEffectId::Flat,
     }]);
 
     // Shelf focus ring uses shelf-slot screen rects.
@@ -1180,8 +1184,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
             let a = smoothed * 0.72;
             frame.quad(GpuInstance {
                 rect: [0.0, 0.0, w, h],
-                color: [0.03, 0.04, 0.06, a],
-            });
+                color: [0.03, 0.04, 0.06, a], user: 0});
         }
     }
     let (journal_zoom, journal_pos) = match shop.journal_transition {
@@ -1410,8 +1413,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                     pill_w,
                     legend_line_h + pill_pad_y * 2.0,
                 ],
-                color: pill_bg,
-            });
+                color: pill_bg, user: 0});
             let action = match i {
                 0 => crate::ui::input::UiAction::Cancel,
                 1 => crate::ui::input::UiAction::Confirm,
@@ -1426,8 +1428,7 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                 icon_cmds.push(PromptIconQuad {
                     inst: GpuInstance {
                         rect: [ix, iy, icon_px, icon_px],
-                        color: color::alpha(color::PORCELAIN_AGED, 0.96),
-                    },
+                        color: color::alpha(color::PORCELAIN_AGED, 0.96), user: 0},
                     source,
                 });
             }
@@ -1440,6 +1441,10 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                 no_glossary: false,
                 scroll_offset: 0.0,
                 flavor_spans: None,
+                bold: false,
+                italic: false,
+                underline: false,
+                text_effect: crate::render::text_effect::TextEffectId::Flat,
             });
         }
 
@@ -1486,6 +1491,10 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
                 no_glossary: false,
                 scroll_offset: 0.0,
                 flavor_spans: None,
+                bold: false,
+                italic: false,
+                underline: false,
+                text_effect: crate::render::text_effect::TextEffectId::Flat,
             });
         }
 
@@ -1566,7 +1575,7 @@ fn hover_tooltip_content(
         }
         ShopHit::Ribbon(i) if i < n_for_sale_zodiacs => {
             let item = &scene.zodiac_items[i];
-            let price = item.price(mode);
+            let price = item.price(mode, &shop.relic_state);
             let can_afford = shop.gold >= price as i32 && !item.sold;
             let cta = if item.sold {
                 "SOLD".to_string()
@@ -1602,7 +1611,7 @@ fn hover_tooltip_content(
         }
         ShopHit::Talisman(i) if i < n_for_sale_talismans => {
             let item = &scene.talisman_items[i];
-            let price = item.price(mode);
+            let price = item.price(mode, &shop.relic_state);
             let can_afford = shop.gold >= price as i32 && !shop.consumables_full && !item.sold;
             let cta = if item.sold {
                 "SOLD".to_string()
@@ -1636,7 +1645,10 @@ fn hover_tooltip_content(
             Some((
                 item.name(),
                 item.description(),
-                format!("Sell {}g", consumable_sell_price_for_mode(c, mode)),
+                format!(
+                    "Sell {}g",
+                    consumable_sell_price_for_mode(c, mode, &shop.relic_state)
+                ),
                 color::CHAMPAGNE,
             ))
         }
@@ -1701,7 +1713,10 @@ fn hover_tooltip_content(
         ShopHit::Dish(id) if is_tile_pack_pick(id) => {
             let idx = tile_pack_index_from_pick(id).unwrap_or(0);
             scene.pack_items.get(idx).map(|pack| {
-                let price = pack.kind.shop_price();
+                let price = mode.scale_shop_price(crate::core::relic::apply_merchants_eye_discount(
+                    pack.kind.shop_price(),
+                    &shop.relic_state,
+                ));
                 let can_afford = shop.gold >= price as i32 && !pack.sold;
                 let cta = if pack.sold {
                     "SOLD".to_string()
@@ -1729,7 +1744,10 @@ fn hover_tooltip_content(
         ShopHit::TilePack(id) => {
             let idx = tile_pack_index_from_pick(id).unwrap_or(0);
             scene.pack_items.get(idx).map(|pack| {
-                let price = pack.kind.shop_price();
+                let price = mode.scale_shop_price(crate::core::relic::apply_merchants_eye_discount(
+                    pack.kind.shop_price(),
+                    &shop.relic_state,
+                ));
                 let can_afford = shop.gold >= price as i32 && !pack.sold;
                 let cta = if pack.sold {
                     "SOLD".to_string()
