@@ -46,6 +46,15 @@ impl App {
                     }
                 }
             }
+            DebugAction::UnlockAllTransformationsAndSuccessors => {
+                self.progress.cheat_unlock_all_transformation_chains_meta();
+                self.run.cheat_force_all_transform_extinctions();
+                self.run.apply_progression(&self.progress);
+                let _ = persistence::save_profile(self.active_profile, &self.progress);
+                log::debug!(
+                    "Unlocked all transformation chains (meta + run extinction flags)"
+                );
+            }
             DebugAction::SetGold(amount) => {
                 self.run
                     .set_run_gold_direct(amount as i32, None);
