@@ -155,6 +155,10 @@ impl WgpuRenderer {
             ssr_enabled,
             vhs_enabled,
         } = settings;
+        let flatten_time_text_fx = matches!(
+            effects_quality,
+            crate::persistence::EffectsQuality::Off | crate::persistence::EffectsQuality::Low
+        );
         // Master Options-toggle override: when the user has VHS off we kill
         // the per-scene branch even if the per-scene tuning has non-zero
         // amplitudes. Computed locally — `self.tonemap_vhs_enabled` keeps
@@ -329,8 +333,7 @@ impl WgpuRenderer {
             // Tile background.
             tile_quads.push(GpuInstance {
                 rect: [sx, sy, sw, sh],
-                color: [0.0, 0.0, 0.0, alpha],
-            });
+                color: [0.0, 0.0, 0.0, alpha], user: 0});
 
             // Main label.
             let inset_x = sw * 0.10;
@@ -412,9 +415,13 @@ impl WgpuRenderer {
             let flavor = lbl
                 .flavor_spans
                 .and_then(|s| if s.is_empty() { None } else { Some(s) });
+            let inline_face_bits = (lbl.bold as u8)
+                | ((lbl.italic as u8) << 1)
+                | ((lbl.underline as u8) << 2);
             let shape_key = TextLabelShapeKey {
                 emoji_path: emoji_fallback.is_some(),
                 flavor_spans: flavor.is_some(),
+                inline_face_bits,
                 font_px: lbl.font_px.map(|p| p.round() as u32),
                 width_px: tw,
                 height_px: th,
@@ -441,6 +448,25 @@ impl WgpuRenderer {
                         px,
                         align,
                     )
+                } else if lbl.bold || lbl.italic || lbl.underline {
+                    let italic = font_italic.unwrap_or(font);
+                    let px = lbl.font_px.unwrap_or(13.0).max(8.0);
+                    let syn = [crate::render::decal::RasterStyleSpan {
+                        text: lbl.text.as_str(),
+                        bold: lbl.bold,
+                        italic: lbl.italic,
+                        underline: lbl.underline,
+                    }];
+                    crate::render::decal::rasterize_label_raster_spans(
+                        font,
+                        italic,
+                        emoji_fallback,
+                        &syn,
+                        tw,
+                        th,
+                        px,
+                        align,
+                    )
                 } else {
                     rasterize_label_styled_with_fallback(
                         font,
@@ -452,6 +478,7 @@ impl WgpuRenderer {
                             font_px: lbl.font_px,
                             align,
                             scroll_offset: lbl.scroll_offset,
+                            underline: lbl.underline,
                         },
                     )
                 }
@@ -510,9 +537,15 @@ impl WgpuRenderer {
                 (bg, Some(tex))
             };
 
+            let packed_effect = if flatten_time_text_fx && lbl.text_effect.uses_time_in_fragment() {
+                crate::render::text_effect::TextEffectId::Flat
+            } else {
+                lbl.text_effect
+            };
             let inst = GpuInstance {
                 rect: lbl.rect,
                 color: lbl.color,
+                user: packed_effect.pack(),
             };
             let inst_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("text-inst"),
@@ -621,8 +654,7 @@ impl WgpuRenderer {
                     let wh = self.size.height.max(1) as f32;
                     let bg_inst = GpuInstance {
                         rect: [0.0, 0.0, ww, wh],
-                        color: id.image_vertex_color(),
-                    };
+                        color: id.image_vertex_color(), user: 0};
                     let slice = self.frame_buffer_pool.alloc(
                         &self.device,
                         &self.queue,

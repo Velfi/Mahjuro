@@ -698,7 +698,7 @@ impl SceneBehavior for GameplayScene {
         // them. Move to `hover_quads` if a future design wants particles
         // to fly over tile faces.
         for (rect, color) in self.particles.instances() {
-            hud_quads.push(GpuInstance { rect, color });
+            hud_quads.push(GpuInstance { rect, color, user: 0});
         }
 
         // Hint: compute tile indices that would complete a meld with current selection.
@@ -1211,8 +1211,7 @@ impl SceneBehavior for GameplayScene {
                 let alpha = 0.22 * env;
                 frame.quad(GpuInstance {
                     rect: [0.0, 0.0, layout.window_w, layout.window_h],
-                    color: [1.0, 0.85, 0.45, alpha],
-                });
+                    color: [1.0, 0.85, 0.45, alpha], user: 0});
             }
         }
         if let Some(undo_rect) = discard_undo_rect {
@@ -1224,8 +1223,7 @@ impl SceneBehavior for GameplayScene {
             };
             hud_quads.push(GpuInstance {
                 rect: undo_rect,
-                color: bg,
-            });
+                color: bg, user: 0});
             buttons.push(ButtonDef::scene(
                 (undo_rect[0], undo_rect[1], undo_rect[2], undo_rect[3]),
                 super::UNDO_DISCARD_CLICK_ID,
@@ -1322,8 +1320,7 @@ impl SceneBehavior for GameplayScene {
                 let a = smoothed * 0.72;
                 frame.quad(GpuInstance {
                     rect: [0.0, 0.0, layout.window_w, layout.window_h],
-                    color: [0.03, 0.04, 0.06, a],
-                });
+                    color: [0.03, 0.04, 0.06, a], user: 0});
             }
         }
         if let Some(book) = journal_book {

@@ -192,6 +192,10 @@ pub fn push_floating_relic_flavor_labels(
         no_glossary: true,
         scroll_offset: 0.0,
         flavor_spans: Some(flavor),
+        bold: false,
+        italic: false,
+        underline: false,
+        text_effect: crate::render::text_effect::TextEffectId::Flat,
     });
 }
 

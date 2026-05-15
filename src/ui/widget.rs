@@ -28,7 +28,7 @@ pub fn push_panel_colored(
     border: [f32; 4],
 ) {
     // Background fill.
-    out.push(GpuInstance { rect, color: bg });
+    out.push(GpuInstance { rect, color: bg, user: 0});
     let bt = border_thickness(rect);
     push_inset_border(out, rect, border, bt);
     // Bevel: one pixel of highlight on the inner top/left edges, shadow on
@@ -55,23 +55,19 @@ pub fn push_inset_border(
     // Top
     out.push(GpuInstance {
         rect: [x, y, w, t],
-        color,
-    });
+        color, user: 0});
     // Bottom
     out.push(GpuInstance {
         rect: [x, y + h - t, w, t],
-        color,
-    });
+        color, user: 0});
     // Left
     out.push(GpuInstance {
         rect: [x, y + t, t, h - 2.0 * t],
-        color,
-    });
+        color, user: 0});
     // Right
     out.push(GpuInstance {
         rect: [x + w - t, y + t, t, h - 2.0 * t],
-        color,
-    });
+        color, user: 0});
 }
 
 /// Draw a one-pixel raised-panel bevel just inside the inset border.
@@ -93,24 +89,20 @@ fn push_bevel(out: &mut Vec<GpuInstance>, rect: [f32; 4], border_t: f32) {
     // Highlight: top inner edge
     out.push(GpuInstance {
         rect: [x + o, y + o, w - 2.0 * o, bw],
-        color: hi,
-    });
+        color: hi, user: 0});
     // Highlight: left inner edge (skip the top-left corner already covered)
     out.push(GpuInstance {
         rect: [x + o, y + o + bw, bw, h - 2.0 * o - bw],
-        color: hi,
-    });
+        color: hi, user: 0});
 
     // Shadow: bottom inner edge
     out.push(GpuInstance {
         rect: [x + o, y + h - o - bw, w - 2.0 * o, bw],
-        color: sh,
-    });
+        color: sh, user: 0});
     // Shadow: right inner edge (skip the bottom-right corner)
     out.push(GpuInstance {
         rect: [x + w - o - bw, y + o, bw, h - 2.0 * o - bw],
-        color: sh,
-    });
+        color: sh, user: 0});
 }
 
 /// A button: rect + label + visual style + action fired on click.
@@ -174,6 +166,8 @@ pub struct TextStyle {
     pub padding: f32,
     /// Horizontal alignment for each wrapped line.
     pub align: TextAlign,
+    /// Per-word vocabulary tint ([`crate::ui::colored_keywords::color_for_token`]).
+    pub glossary_tint: bool,
 }
 
 impl Default for TextStyle {
@@ -183,14 +177,13 @@ impl Default for TextStyle {
             color: color::PARCHMENT,
             padding: 0.0,
             align: TextAlign::Center,
+            glossary_tint: false,
         }
     }
 }
 
 /// Wrap `text` into multiple lines that fit `rect` (minus padding) and push
-/// a single multi-line `TextLabel`. The label carries an explicit `font_px`
-/// so every line in the paragraph rasterises at exactly the same size — no
-/// per-line auto-shrink, no jagged sizing across the block.
+/// styled `TextLabel`s (safe inline markup + optional glossary tint).
 ///
 /// This is the helper that ensures long descriptions don't get crammed into
 /// raw slot rects — the explicit fix for prior text-readability feedback.
@@ -201,33 +194,13 @@ pub fn push_text_block(
     style: TextStyle,
     window_h: f32,
 ) {
-    let [x, y, w, h] = rect;
-    let pad = style.padding;
-    let inner_w = (w - 2.0 * pad).max(1.0);
-    let inner_h = (h - 2.0 * pad).max(1.0);
-    let line_h = typography::size(style.tier, window_h);
-    // The rasteriser pins font_px directly, so it doesn't depend on the
-    // rect's aspect ratio anymore. Use line_h as the pinned font_px.
-    let font_px = line_h.max(8.0);
-    let line_step = line_h * 1.4;
-    let max_lines = ((inner_h / line_step).floor() as usize).max(1);
-
-    let lines = wrap_text(text, inner_w, line_h);
-    let drawn: Vec<&String> = lines.iter().take(max_lines).collect();
-    let joined = drawn
-        .iter()
-        .map(|s| s.as_str())
-        .collect::<Vec<&str>>()
-        .join("\n");
-
-    out.push(TextLabel {
-        rect: [x + pad, y + pad, inner_w, inner_h],
-        text: joined,
-        color: style.color,
-        font_px: Some(font_px),
-        align: style.align,
-        ..Default::default()
-    });
+    crate::ui::styled_text::push_styled_text_block(
+        out,
+        rect,
+        text,
+        style.into(),
+        window_h,
+    );
 }
 
 /// Greedy word-wrap at a fixed target font size.

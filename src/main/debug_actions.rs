@@ -47,7 +47,8 @@ impl App {
                 }
             }
             DebugAction::SetGold(amount) => {
-                self.run.gold = amount as i32;
+                self.run
+                    .set_run_gold_direct(amount as i32, None);
                 log::debug!("Set gold to {}", amount);
             }
             DebugAction::AddRelic(relic_id) => {

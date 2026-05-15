@@ -578,8 +578,7 @@ impl WgpuRenderer {
                                         rw + pad_x * 2.0,
                                         rh + pad_y * 2.0,
                                     ],
-                                    color: [1.00, 0.82, 0.36, 1.20 * g],
-                                });
+                                    color: [1.00, 0.82, 0.36, 1.20 * g], user: 0});
                             }
                             if *debuffed && !*silhouette {
                                 let [rx, ry, rw, rh] = projected_rect;
@@ -588,8 +587,7 @@ impl WgpuRenderer {
                                 let cy = ry + rh * 0.48;
                                 relic_debuff_markers.push(GpuInstance {
                                     rect: [cx - side * 0.5, cy - side * 0.5, side, side],
-                                    color: [1.0, 1.0, 1.0, 1.0],
-                                });
+                                    color: [1.0, 1.0, 1.0, 1.0], user: 0});
                             }
                             object3d_draw_list.push((DrawKind::Relic, slot_i));
                         }
@@ -715,8 +713,7 @@ impl WgpuRenderer {
                                         rw + pad_x * 2.0,
                                         rh + pad_y * 2.0,
                                     ],
-                                    color: [halo_r, halo_g, halo_b, 0.85 * hover_g],
-                                });
+                                    color: [halo_r, halo_g, halo_b, 0.85 * hover_g], user: 0});
                             }
                             object3d_draw_list.push((DrawKind::Pack, slot_i));
                         }

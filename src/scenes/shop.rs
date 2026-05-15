@@ -46,7 +46,9 @@ use rand::seq::SliceRandom;
 use std::time::Instant;
 
 use crate::core::consumable::Consumable;
-use crate::core::relic::{Rarity, RelicId, RelicState, all_relic_defs, relic_shop_price};
+use crate::core::relic::{
+    Rarity, RelicId, RelicState, all_relic_defs, apply_merchants_eye_discount, relic_shop_price,
+};
 use crate::core::talisman::TalismanKind;
 use crate::core::tile::Tile;
 use crate::core::zodiac::ZodiacKind;

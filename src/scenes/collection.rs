@@ -1713,8 +1713,7 @@ impl CollectionScene {
         let back_focused = ring_focus == Some(CollectionAction::Back);
         quads.push(GpuInstance {
             rect: back_rect,
-            color: chrome_btn_color(back_focused),
-        });
+            color: chrome_btn_color(back_focused), user: 0});
         text_labels.push(TextLabel {
             rect: back_rect,
             text: "< Back".into(),
@@ -1732,8 +1731,7 @@ impl CollectionScene {
         let switch_focused = ring_focus == Some(CollectionAction::SwitchSave);
         quads.push(GpuInstance {
             rect: switch_rect,
-            color: chrome_btn_color(switch_focused),
-        });
+            color: chrome_btn_color(switch_focused), user: 0});
         text_labels.push(TextLabel {
             rect: switch_rect,
             text: "Switch save".into(),
@@ -1776,8 +1774,7 @@ impl CollectionScene {
             let rect = [x, arrow_y, arrow_w, arrow_h];
             quads.push(GpuInstance {
                 rect,
-                color: chrome_btn_color(focused),
-            });
+                color: chrome_btn_color(focused), user: 0});
             text_labels.push(TextLabel {
                 rect,
                 text: sym.into(),

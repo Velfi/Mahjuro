@@ -674,8 +674,6 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::GoldenEngine,
                 RelicId::Snowball,
                 RelicId::Obsession,
-                RelicId::SmokeBomb,
-                RelicId::PhantomRelic,
                 RelicId::KanDrum,
             ],
             rules: vec![],

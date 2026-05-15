@@ -938,16 +938,13 @@ impl SceneBehavior for TutorialCampaignScene {
         let panel_h = h * 0.84;
         bg_quads.push(GpuInstance {
             rect: [panel_x, panel_y, panel_w, panel_h],
-            color: color::WALNUT_DEEP,
-        });
+            color: color::WALNUT_DEEP, user: 0});
         bg_quads.push(GpuInstance {
             rect: [panel_x, panel_y, panel_w, (2.0 * scale).max(1.0)],
-            color: color::BRASS,
-        });
+            color: color::BRASS, user: 0});
         bg_quads.push(GpuInstance {
             rect: [panel_x, panel_y, (2.0 * scale).max(1.0), panel_h],
-            color: color::BRASS,
-        });
+            color: color::BRASS, user: 0});
         bg_quads.push(GpuInstance {
             rect: [
                 panel_x + panel_w - (2.0 * scale).max(1.0),
@@ -955,8 +952,7 @@ impl SceneBehavior for TutorialCampaignScene {
                 (2.0 * scale).max(1.0),
                 panel_h,
             ],
-            color: color::BRASS,
-        });
+            color: color::BRASS, user: 0});
         bg_quads.push(GpuInstance {
             rect: [
                 panel_x,
@@ -964,8 +960,7 @@ impl SceneBehavior for TutorialCampaignScene {
                 panel_w,
                 (2.0 * scale).max(1.0),
             ],
-            color: color::BRASS,
-        });
+            color: color::BRASS, user: 0});
 
         texts.push(TextLabel {
             rect: [
@@ -1003,6 +998,7 @@ impl SceneBehavior for TutorialCampaignScene {
                 color: color::PARCHMENT,
                 padding: 0.0,
                 align: TextAlign::Center,
+                ..Default::default()
             },
             h,
         );
@@ -1018,8 +1014,7 @@ impl SceneBehavior for TutorialCampaignScene {
             let gx = panel_x + panel_w * 0.13 + idx as f32 * group_w;
             fg_quads.push(GpuInstance {
                 rect: [gx + group_w * 0.14, label_y, group_w * 0.72, 4.0 * scale],
-                color: group.accent,
-            });
+                color: group.accent, user: 0});
             texts.push(TextLabel {
                 rect: [gx, label_y + 10.0 * scale, group_w, 22.0 * scale],
                 text: group.label.to_string(),
@@ -1208,12 +1203,10 @@ impl SceneBehavior for TutorialCampaignScene {
             let note_y = layout.play_rect[1] - 10.0 * scale;
             fg_quads.push(GpuInstance {
                 rect: [note_x, note_y, note_w, note_h],
-                color: color::alpha(color::CHAMPAGNE, 0.16),
-            });
+                color: color::alpha(color::CHAMPAGNE, 0.16), user: 0});
             fg_quads.push(GpuInstance {
                 rect: [note_x, note_y, 3.0 * scale, note_h],
-                color: color::GOLD,
-            });
+                color: color::GOLD, user: 0});
             widget::push_text_block(
                 &mut texts,
                 [
@@ -1228,6 +1221,7 @@ impl SceneBehavior for TutorialCampaignScene {
                     color: color::CHAMPAGNE,
                     padding: 0.0,
                     align: TextAlign::Left,
+                    ..Default::default()
                 },
                 h,
             );
@@ -1246,6 +1240,7 @@ impl SceneBehavior for TutorialCampaignScene {
                         color: color::CHAMPAGNE,
                         padding: 0.0,
                         align: TextAlign::Center,
+                        ..Default::default()
                     },
                     h,
                 );
@@ -1299,6 +1294,7 @@ impl SceneBehavior for TutorialCampaignScene {
                     color: color::STONE,
                     padding: 0.0,
                     align: TextAlign::Left,
+                    ..Default::default()
                 },
                 h,
             );
@@ -1328,12 +1324,10 @@ impl SceneBehavior for TutorialCampaignScene {
                 .max(112.0 * scale);
             fg_quads.push(GpuInstance {
                 rect: [callout_x, callout_y, callout_w, callout_h],
-                color: color::alpha(color::WALNUT_INK, 0.85),
-            });
+                color: color::alpha(color::WALNUT_INK, 0.85), user: 0});
             fg_quads.push(GpuInstance {
                 rect: [callout_x, callout_y, 4.0 * scale, callout_h],
-                color: color::GOLD,
-            });
+                color: color::GOLD, user: 0});
             colored_keywords::push_colored_text_block(
                 &mut texts,
                 [
@@ -1348,6 +1342,7 @@ impl SceneBehavior for TutorialCampaignScene {
                     color: color::CHAMPAGNE,
                     padding: 0.0,
                     align: TextAlign::Left,
+                    ..Default::default()
                 },
                 h,
             );

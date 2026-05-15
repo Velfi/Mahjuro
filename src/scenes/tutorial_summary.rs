@@ -124,8 +124,7 @@ impl SceneBehavior for TutorialSummaryScene {
         let mut frame = UiFrame::new();
         frame.quad(GpuInstance {
             rect: [0.0, 0.0, w, h],
-            color: color::WALNUT_INK,
-        });
+            color: color::WALNUT_INK, user: 0});
         if ctx.effect_layers.starfield {
             frame.starfield();
         }
@@ -141,24 +140,19 @@ impl SceneBehavior for TutorialSummaryScene {
 
         frame.quad(GpuInstance {
             rect: [card_x, card_y, card_w, card_h],
-            color: color::WALNUT_DEEP,
-        });
+            color: color::WALNUT_DEEP, user: 0});
         frame.quad(GpuInstance {
             rect: [card_x, card_y, card_w, border],
-            color: color::BRASS,
-        });
+            color: color::BRASS, user: 0});
         frame.quad(GpuInstance {
             rect: [card_x, card_y + card_h - border, card_w, border],
-            color: color::BRASS,
-        });
+            color: color::BRASS, user: 0});
         frame.quad(GpuInstance {
             rect: [card_x, card_y, border, card_h],
-            color: color::BRASS,
-        });
+            color: color::BRASS, user: 0});
         frame.quad(GpuInstance {
             rect: [card_x + card_w - border, card_y, border, card_h],
-            color: color::BRASS,
-        });
+            color: color::BRASS, user: 0});
 
         texts.push(TextLabel {
             rect: [
@@ -189,6 +183,7 @@ impl SceneBehavior for TutorialSummaryScene {
                 color: color::PARCHMENT,
                 padding: 0.0,
                 align: TextAlign::Center,
+                ..Default::default()
             },
             h,
         );
@@ -209,6 +204,7 @@ impl SceneBehavior for TutorialSummaryScene {
                     color: color::STONE,
                     padding: 0.0,
                     align: TextAlign::Left,
+                    ..Default::default()
                 },
                 h,
             );

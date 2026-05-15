@@ -44,23 +44,19 @@ impl WgpuRenderer {
                 // top
                 GpuInstance {
                     rect: [rx, ry, rw, t],
-                    color,
-                },
+                    color, user: 0},
                 // bottom
                 GpuInstance {
                     rect: [rx, ry + rh - t, rw, t],
-                    color,
-                },
+                    color, user: 0},
                 // left
                 GpuInstance {
                     rect: [rx, ry, t, rh],
-                    color,
-                },
+                    color, user: 0},
                 // right
                 GpuInstance {
                     rect: [rx + rw - t, ry, t, rh],
-                    color,
-                },
+                    color, user: 0},
             ];
             let slice = pool.alloc(device, queue, &border_quads);
             let buf_idx = quad_buffers.len();
@@ -90,12 +86,10 @@ impl WgpuRenderer {
                     [
                         GpuInstance {
                             rect: [lo_px - lo_thick * 0.5, 0.0, lo_thick, h],
-                            color: lo_color,
-                        },
+                            color: lo_color, user: 0},
                         GpuInstance {
                             rect: [hi_px - hi_thick * 0.5, 0.0, hi_thick, h],
-                            color: hi_color,
-                        },
+                            color: hi_color, user: 0},
                     ]
                 }
             };

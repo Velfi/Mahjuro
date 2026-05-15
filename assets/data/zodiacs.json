@@ -1,0 +1,19 @@
+{
+  "ribbon_shop_price": 6,
+  "zodiacs": [
+    { "id": "mouse", "name": "Mouse", "slug": "mouse", "yaku": "honitsu" },
+    { "id": "rat", "name": "Rat", "slug": "rat", "yaku": "chinitsu" },
+    { "id": "ox", "name": "Ox", "slug": "ox", "yaku": "toitoi" },
+    { "id": "tiger", "name": "Tiger", "slug": "tiger", "yaku": "honroutou" },
+    { "id": "rabbit", "name": "Rabbit", "slug": "rabbit", "yaku": "iipeikou" },
+    { "id": "dragon", "name": "Dragon", "slug": "dragon", "yaku": "full_hand" },
+    { "id": "snake", "name": "Snake", "slug": "snake", "yaku": "ittsu" },
+    { "id": "horse", "name": "Horse", "slug": "horse", "yaku": "sanshoku_doujun" },
+    { "id": "goat", "name": "Goat", "slug": "goat", "yaku": "junchan" },
+    { "id": "monkey", "name": "Monkey", "slug": "monkey", "yaku": "tanyao" },
+    { "id": "rooster", "name": "Rooster", "slug": "rooster", "yaku": "chicken_hand" },
+    { "id": "dog", "name": "Dog", "slug": "dog", "yaku": "yakuhai" },
+    { "id": "pig", "name": "Pig", "slug": "pig", "yaku": "chiitoitsu" },
+    { "id": "qilin", "name": "Qilin", "slug": "qilin", "yaku": "kokushi_musou" }
+  ]
+}

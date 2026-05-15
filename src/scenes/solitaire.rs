@@ -287,8 +287,7 @@ impl SceneBehavior for SolitaireScene {
         frame.background(BackgroundId::Black);
         frame.quad(GpuInstance {
             rect: [0.0, 0.0, w, h],
-            color: [0.92, 0.89, 0.82, 1.0], // warm parchment
-        });
+            color: [0.92, 0.89, 0.82, 1.0], // warm parchment, user: 0});
 
         // Top-down-ish camera so the board reads as a flat layout with
         // visible 3D stacking between layers.
@@ -422,8 +421,7 @@ impl SceneBehavior for SolitaireScene {
         let back_x = w * 0.04;
         frame.quad(GpuInstance {
             rect: [back_x, btn_y, btn_w, btn_h],
-            color: [0.60, 0.30, 0.25, 0.90], // muted red-brown
-        });
+            color: [0.60, 0.30, 0.25, 0.90], // muted red-brown, user: 0});
         frame.text(TextLabel {
             rect: [back_x, btn_y, btn_w, btn_h],
             text: "< Back".into(),
@@ -435,8 +433,7 @@ impl SceneBehavior for SolitaireScene {
         let new_x = w - btn_w - w * 0.04;
         frame.quad(GpuInstance {
             rect: [new_x, btn_y, btn_w, btn_h],
-            color: [0.35, 0.55, 0.35, 0.90], // sage green
-        });
+            color: [0.35, 0.55, 0.35, 0.90], // sage green, user: 0});
         frame.text(TextLabel {
             rect: [new_x, btn_y, btn_w, btn_h],
             text: "New Deal".into(),
@@ -465,12 +462,10 @@ impl SceneBehavior for SolitaireScene {
             let by = (h - banner_h) * 0.5;
             frame.quad(GpuInstance {
                 rect: [bx - 4.0, by - 4.0, banner_w + 8.0, banner_h + 8.0],
-                color: [0.85, 0.75, 0.20, 0.90],
-            });
+                color: [0.85, 0.75, 0.20, 0.90], user: 0});
             frame.quad(GpuInstance {
                 rect: [bx, by, banner_w, banner_h],
-                color: color::alpha(color::TWILIGHT_INK, 0.97),
-            });
+                color: color::alpha(color::TWILIGHT_INK, 0.97), user: 0});
             let (title, subtitle) = match state {
                 Finished::Won => ("You Win!", "All tiles cleared."),
                 Finished::Stuck => ("No Moves", "No matching free pairs remain."),

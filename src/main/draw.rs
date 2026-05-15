@@ -48,7 +48,10 @@ impl App {
                 reached_target,
             } => {
                 if self.run.onboarding_active() && reached_target {
-                    self.run.gold = self.run.gold.saturating_add(payout.total as i32);
+                    self.run.apply_gold_reward(
+                        payout.total as i32,
+                        Some(&mut self.bus),
+                    );
                     self.progress.tutorial_completed = true;
                     let _ = persistence::save_profile(self.active_profile, &self.progress);
                     persistence::delete_saved_run(self.active_profile);
@@ -89,7 +92,10 @@ impl App {
                     .unlock_achievement(crate::steam::Achievement::FirstBlindCleared);
                 // Apply the gold payout now that the scoring cascade has
                 // finished — kept deferred so the UI doesn't jump early.
-                self.run.gold = self.run.gold.saturating_add(payout.total as i32);
+                self.run.apply_gold_reward(
+                    payout.total as i32,
+                    Some(&mut self.bus),
+                );
                 self.audio.play_sfx(audio::SfxId::RoundWin);
                 // Win jingle owns the music sink for the celebration; the
                 // pending scene transition will queue Shop/Gameplay BGM
@@ -673,8 +679,7 @@ impl App {
             let margin = label_h * 0.3;
             frame.quad(GpuInstance {
                 rect: [w - label_w - margin, margin, label_w, label_h],
-                color: [0.0, 0.0, 0.0, 0.55],
-            });
+                color: [0.0, 0.0, 0.0, 0.55], user: 0});
             frame.text(TextLabel {
                 rect: [w - label_w - margin, margin, label_w, label_h],
                 text: format!("{:.0} FPS", self.debug.fps_smoothed),
@@ -743,8 +748,7 @@ impl App {
             };
             frame.quad(GpuInstance {
                 rect: [margin, y, label_w, label_h],
-                color: [0.0, 0.0, 0.0, 0.6],
-            });
+                color: [0.0, 0.0, 0.0, 0.6], user: 0});
             frame.text(TextLabel {
                 rect: [margin + label_h * 0.2, y, label_w, label_h],
                 text,

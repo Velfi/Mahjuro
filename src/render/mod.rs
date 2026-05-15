@@ -45,6 +45,7 @@ pub mod showcase_decal_atlas;
 pub mod showcase_tile_layout;
 pub mod table_mesh;
 pub mod table_transform;
+pub mod text_effect;
 pub mod talisman_mesh;
 pub mod tally_stick_mesh;
 pub mod theme;

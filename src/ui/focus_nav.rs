@@ -160,8 +160,7 @@ pub fn push_focus_ring(
     if rw <= bt * 2.0 || rh <= bt * 2.0 {
         quads.push(GpuInstance {
             rect: clamped,
-            color: color::RELIC_GOLD,
-        });
+            color: color::RELIC_GOLD, user: 0});
         return;
     }
 
@@ -175,7 +174,6 @@ pub fn push_focus_ring(
     for border in borders {
         quads.push(GpuInstance {
             rect: border,
-            color: ring,
-        });
+            color: ring, user: 0});
     }
 }

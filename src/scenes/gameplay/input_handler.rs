@@ -794,7 +794,7 @@ pub(super) fn process_focus_and_actions(
                     && scene.pending_refill.is_none()
                     && let Some(snap) = scene.discard_undo.take()
                 {
-                    ctx.run.apply_discard_undo(snap);
+                    ctx.run.apply_discard_undo(snap, Some(ctx.bus));
                     ctx.bus.push(crate::game::event_bus::GameEvent::UiSound(
                         crate::audio::SfxId::TilePlace,
                     ));
@@ -1317,19 +1317,7 @@ pub(super) fn build_consumable_dish(
                 // pick up the talisman's enhancement family color.
                 let pendant_color = match item {
                     crate::core::consumable::Consumable::Zodiac(_) => [0.45, 0.78, 0.55, 1.0],
-                    crate::core::consumable::Consumable::Talisman(tk) => match tk {
-                        crate::core::talisman::TalismanKind::Pearl => [0.94, 0.95, 0.98, 1.0],
-                        crate::core::talisman::TalismanKind::Gilded => {
-                            crate::render::theme::color::RELIC_GOLD
-                        }
-                        crate::core::talisman::TalismanKind::Polychrome => [0.82, 0.55, 0.95, 1.0],
-                        crate::core::talisman::TalismanKind::Bamboo => [0.06, 0.55, 0.28, 1.0], // emerald
-                        crate::core::talisman::TalismanKind::Dots => [0.08, 0.22, 0.78, 1.0], // sapphire
-                        crate::core::talisman::TalismanKind::Characters => [0.82, 0.08, 0.18, 1.0], // ruby
-                        crate::core::talisman::TalismanKind::Honors => [0.78, 0.64, 0.28, 1.0],
-                        crate::core::talisman::TalismanKind::Wildflower => [0.92, 0.48, 0.62, 1.0],
-                        crate::core::talisman::TalismanKind::Conformity => [0.62, 0.60, 0.68, 1.0],
-                    },
+                    crate::core::consumable::Consumable::Talisman(tk) => tk.accent_color(),
                 };
                 // Rest the pendant on the dish's rim. The dish is
                 // centered at `mm(td.lift_mm)` with full rim extent

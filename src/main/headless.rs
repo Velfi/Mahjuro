@@ -225,7 +225,7 @@ fn force_boss_blind(run: &mut RunState, kind: crate::core::boss::BossKind) {
     run.ante = kind.def().min_ante.max(run.ante);
     run.boss.upcoming = Some(kind);
     run.resolve_upcoming_boss();
-    run.apply_blind(crate::core::rules::BlindKind::Boss);
+    run.apply_blind(crate::core::rules::BlindKind::Boss, None);
 }
 
 pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> {

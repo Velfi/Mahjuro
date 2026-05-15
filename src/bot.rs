@@ -24,7 +24,7 @@ use crate::core::deck::Wall;
 use crate::core::hand::{MeldKind, detect_all_sets, validate_selection_with_rules};
 use crate::core::relic::{
     RelicId, RelicState, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
-    ScoreRoundBundle, ScoreTileBundle, all_relic_defs, relic_shop_price,
+    ScoreRoundBundle, ScoreTileBundle, all_relic_defs, apply_merchants_eye_discount, relic_shop_price,
 };
 use crate::core::rules::{BlindKind, RuleModifier};
 use crate::core::scoring::score_sets_with_original;
@@ -1101,7 +1101,7 @@ fn drain_post_action_bus(
                 payout,
                 reached_target: true,
             } => {
-                run.gold = run.gold.saturating_add(payout.total as i32);
+                run.apply_gold_reward(payout.total as i32, Some(bus));
             }
             GameEvent::RoundComplete {
                 reached_target: false,
@@ -2274,6 +2274,7 @@ fn visit_shop(
     strategy: &BotStrategy,
     deadline: Option<Instant>,
     qilin_ribbon_unlocked: bool,
+    bus: &mut crate::game::event_bus::EventBus,
 ) -> ShopVisitOutcome {
     // Consume tag-granted shop modifiers (headless analogue of ShopScene::new).
     let extra_relics: usize = if run.tag_rich_stock { 2 } else { 0 };
@@ -2396,9 +2397,18 @@ fn visit_shop(
                         run.mode.scale_shop_price(relic_shop_price(id, &run.relics))
                     }
                 }
-                ShopOffer::Zodiac(_) => run.mode.scale_shop_price(ZodiacKind::shop_price()),
-                ShopOffer::Talisman(kind) => run.mode.scale_shop_price(kind.shop_price()),
-                ShopOffer::Pack(kind) => run.mode.scale_shop_price(kind.shop_price()),
+                ShopOffer::Zodiac(_) => run.mode.scale_shop_price(apply_merchants_eye_discount(
+                    ZodiacKind::shop_price(),
+                    &run.relics,
+                )),
+                ShopOffer::Talisman(kind) => run.mode.scale_shop_price(apply_merchants_eye_discount(
+                    kind.shop_price(),
+                    &run.relics,
+                )),
+                ShopOffer::Pack(kind) => run.mode.scale_shop_price(apply_merchants_eye_discount(
+                    kind.shop_price(),
+                    &run.relics,
+                )),
             };
             if price as i32 > run.gold {
                 continue;
@@ -2450,7 +2460,7 @@ fn visit_shop(
                     run.mode.scale_shop_price(relic_shop_price(id, &run.relics))
                 };
                 free_relic = false;
-                run.gold -= price as i32;
+                run.apply_gold_delta(-(price as i32), Some(bus));
                 acquire_relic(run, id);
                 stats.relics_bought += 1;
                 let rname = relic_display_name(id);
@@ -2471,8 +2481,11 @@ fn visit_shop(
                 );
             }
             ShopOffer::Zodiac(zodiac) => {
-                let price = run.mode.scale_shop_price(ZodiacKind::shop_price());
-                run.gold -= price as i32;
+                let price = run.mode.scale_shop_price(apply_merchants_eye_discount(
+                    ZodiacKind::shop_price(),
+                    &run.relics,
+                ));
+                run.apply_gold_delta(-(price as i32), Some(bus));
                 let new_level = run.yaku_levels.level_up(zodiac.yaku());
                 stats.gold_spent += price;
                 *stats.zodiacs_picked.entry(zodiac.name()).or_insert(0) += 1;
@@ -2487,8 +2500,11 @@ fn visit_shop(
                 );
             }
             ShopOffer::Talisman(kind) => {
-                let price = run.mode.scale_shop_price(kind.shop_price());
-                run.gold -= price as i32;
+                let price = run.mode.scale_shop_price(apply_merchants_eye_discount(
+                    kind.shop_price(),
+                    &run.relics,
+                ));
+                run.apply_gold_delta(-(price as i32), Some(bus));
                 run.consumables.items.push(Consumable::Talisman(kind));
                 stats.gold_spent += price;
                 *stats.talismans_picked.entry(kind.name()).or_insert(0) += 1;
@@ -2502,8 +2518,11 @@ fn visit_shop(
                 );
             }
             ShopOffer::Pack(kind) => {
-                let price = run.mode.scale_shop_price(kind.shop_price());
-                run.gold -= price as i32;
+                let price = run.mode.scale_shop_price(apply_merchants_eye_discount(
+                    kind.shop_price(),
+                    &run.relics,
+                ));
+                run.apply_gold_delta(-(price as i32), Some(bus));
                 // Mirror the real shop: pre-stamp any enhancement from the
                 // pack kind onto the tiles' IDs, then append the pack. The
                 // wall gets rebuilt with these packs at the start of every
@@ -2626,7 +2645,7 @@ fn play_run_with_options(
             bot_log!(log, "    action: skip {}", blind.name());
             if let Some(tag) = run.tag_for_blind(blind) {
                 let gold_before = run.gold;
-                run.apply_tag(tag);
+                run.apply_tag(tag, Some(&mut bus));
                 let gold_after = run.gold;
                 let realized_gold = gold_after.saturating_sub(gold_before).max(0) as u32;
                 stats.gold_from_skip_tags += realized_gold;
@@ -2647,7 +2666,7 @@ fn play_run_with_options(
         }
 
         stats.total_target_score += run.target_score as u64;
-        run.apply_blind(blind);
+        run.apply_blind(blind, Some(&mut bus));
         let boss_for_this_blind = if matches!(blind, BlindKind::Boss) {
             current_boss_name(&run).map(|name| name.to_string())
         } else {
@@ -2728,6 +2747,7 @@ fn play_run_with_options(
                 &strategy,
                 deadline,
                 qilin_unlocked,
+                &mut bus,
             ) {
                 ShopVisitOutcome::Completed => {}
                 ShopVisitOutcome::TimedOut => {
@@ -2789,6 +2809,7 @@ fn play_run_with_options(
             &strategy,
             deadline,
             qilin_unlocked,
+            &mut bus,
         ) {
             ShopVisitOutcome::Completed => {}
             ShopVisitOutcome::TimedOut => {

@@ -1008,22 +1008,6 @@ RELICS = [
         "Warm ivory tile body, gold star accents, deep navy details, soft amber highlights.",
     ),
     (
-        "smoke_bomb",
-        "Smoke Bomb",
-        "A compact old-style smoke bomb with a pull ring and a curling cloud "
-        "bursting from one side, simplified into a clear emblem.",
-        "Dark iron shell, pale grey smoke, warm brass ring, charcoal accents.",
-    ),
-    (
-        "phantom_relic",
-        "Phantom Relic",
-        "An ornate jeweled treasure chest resting on a dark stone pedestal, "
-        "with a translucent ghostly duplicate of the same chest drifting out "
-        "of it like vapor, slightly offset and hovering. Faint wisps of mist "
-        "curl from the seam.",
-        "Aged gold chest, deep mahogany wood, pale cyan phantom glow, cool indigo shadows.",
-    ),
-    (
         "hungry_ghost",
         "Hungry Ghost",
         "A translucent gaunt ghost-figure looming over an emerald felt "
