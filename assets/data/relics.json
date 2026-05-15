@@ -1421,17 +1421,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "countless",
-        "bold": true,
-        "italic": true
-      },
-      {
-        "text": " late-night rounds.",
+        "text": "A loss at the tables stings less with your treasures at hand.",
         "bold": false,
         "italic": false
       }
