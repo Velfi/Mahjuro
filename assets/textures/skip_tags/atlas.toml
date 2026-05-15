@@ -1,0 +1,10 @@
+image = "atlas.png"
+tile_width = 128
+tile_height = 128
+columns = 3
+
+layout = [
+    "gold_ingot","treasure_chest","free_reroll",
+    "patron_gift","rich_stock","zodiac_blessing",
+    "bonus_play","bonus_discard","wide_hand",
+]
