@@ -56,9 +56,11 @@ pub enum RelicId {
     /// Bamboo-suit tiles in scored sets: +8 chips each.
     JadeSerpent,
     /// Characters-suit tiles in scored sets: +8 chips each.
-    RedSerpent,
-    /// Dots-suit tiles in scored sets: +8 chips each.
-    BlueSerpent,
+    #[serde(alias = "red_serpent")]
+    RubySerpent,
+    /// Dots tiles in scored sets: +8 chips each.
+    #[serde(alias = "blue_serpent")]
+    LapisSerpent,
     /// Tiles ranked 1–3 in scored sets: +6 chips each.
     LowTide,
     /// Tiles ranked 7–9 in scored sets: +6 chips each.
@@ -321,8 +323,8 @@ impl RelicId {
             RelicId::Ikebana => "ikebana.png",
             RelicId::Hanami => "hanami.png",
             RelicId::JadeSerpent => "jade_serpent.png",
-            RelicId::RedSerpent => "red_serpent.png",
-            RelicId::BlueSerpent => "blue_serpent.png",
+            RelicId::RubySerpent => "ruby_serpent.png",
+            RelicId::LapisSerpent => "lapis_serpent.png",
             RelicId::LowTide => "low_tide.png",
             RelicId::HighTide => "high_tide.png",
             RelicId::MerchantsEye => "merchants_eye.png",
@@ -658,7 +660,10 @@ pub fn relic_description_live(
             format!("{base} [${paid} produced]")
         }
         RelicId::RustlingGooseEgg => {
-            let charges = counters.get(&RelicId::RustlingGooseEgg).copied().unwrap_or(3);
+            let charges = counters
+                .get(&RelicId::RustlingGooseEgg)
+                .copied()
+                .unwrap_or(3);
             format!(
                 "{base} [{charges} charge{} left]",
                 if charges == 1 { "" } else { "s" }
@@ -672,7 +677,11 @@ pub fn relic_description_live(
             )
         }
         RelicId::TeaCeremony => {
-            let phase = counters.get(&RelicId::TeaCeremony).copied().unwrap_or(0).clamp(0, 3);
+            let phase = counters
+                .get(&RelicId::TeaCeremony)
+                .copied()
+                .unwrap_or(0)
+                .clamp(0, 3);
             let names = ["Harmony", "Respect", "Purity", "Tranquility"];
             let label = names[phase as usize];
             let remain = 4 - phase as i32;
@@ -701,7 +710,9 @@ pub fn relic_description_live(
                 .max(0);
             let tier = monarch_butterfly_tier(excess);
             let chips = monarch_butterfly_bonus_chips(excess);
-            let next = monarch_next_tier_excess_floor(excess).map(|n| format!("next tier ≥{n}")).unwrap_or_else(|| "max tier".to_string());
+            let next = monarch_next_tier_excess_floor(excess)
+                .map(|n| format!("next tier ≥{n}"))
+                .unwrap_or_else(|| "max tier".to_string());
             format!("{base} [tier {tier}, +{chips} chips, {excess} excess, {next}]")
         }
         RelicId::Humility => {
@@ -757,7 +768,11 @@ pub fn relic_description_live(
             format!("{base} [+{broken} mult]")
         }
         RelicId::Heirloom => {
-            let blinds = counters.get(&RelicId::Heirloom).copied().unwrap_or(0).max(0);
+            let blinds = counters
+                .get(&RelicId::Heirloom)
+                .copied()
+                .unwrap_or(0)
+                .max(0);
             format!(
                 "{base} [{blinds} blind{}, +{blinds} mult]",
                 if blinds == 1 { "" } else { "s" }
@@ -872,8 +887,7 @@ pub fn relic_description_live(
             s
         }
         RelicId::Sweepstakes => {
-            let ff = inventory_focus
-                .is_some_and(|(relics, _)| relics.has(RelicId::FortunesFavor));
+            let ff = inventory_focus.is_some_and(|(relics, _)| relics.has(RelicId::FortunesFavor));
             if ff {
                 format!(
                     "{base}\n\nFortune's Favor: round start becomes 1/3 +$2, 1/3 +$4, 1/3 nothing."
@@ -1019,7 +1033,11 @@ const COPY_RELIC_COMPATIBLE_SCORING_LINE: &str =
     "Compatible: hand scoring treats this relic as duplicated for chips and mult.";
 
 #[inline]
-fn push_debuffed_self_copy_relic_line(parts: &mut Vec<String>, relics: &RelicState, self_id: RelicId) {
+fn push_debuffed_self_copy_relic_line(
+    parts: &mut Vec<String>,
+    relics: &RelicState,
+    self_id: RelicId,
+) {
     if relics.is_debuffed(self_id) {
         let name = relic_display_name(self_id);
         parts.push(format!("Debuffed: {name} does nothing while suppressed."));
@@ -1144,8 +1162,8 @@ fn relic_scoring_copy_dup_is_compatible(target: RelicId) -> bool {
             | RelicId::HonorFury
             | RelicId::KongsBlessing
             | RelicId::JadeSerpent
-            | RelicId::RedSerpent
-            | RelicId::BlueSerpent
+            | RelicId::RubySerpent
+            | RelicId::LapisSerpent
             | RelicId::EdgeRunner
             | RelicId::LowTide
             | RelicId::HighTide
@@ -1277,8 +1295,8 @@ pub struct ScoreContext<'a> {
 #[cfg(test)]
 mod tests {
     use super::{
-        RelicId, RelicState, relic_buy_price, relic_shop_price, snowball_score_chips,
-        SNOWBALL_CHIPS_PER_CLEAR, SNOWBALL_STACK_CAP,
+        RelicId, RelicState, SNOWBALL_CHIPS_PER_CLEAR, SNOWBALL_STACK_CAP, relic_buy_price,
+        relic_shop_price, snowball_score_chips,
     };
 
     #[test]
@@ -1352,8 +1370,8 @@ mod tests {
                     | RelicId::Ikebana
                     | RelicId::Hanami
                     | RelicId::JadeSerpent
-                    | RelicId::RedSerpent
-                    | RelicId::BlueSerpent
+                    | RelicId::RubySerpent
+                    | RelicId::LapisSerpent
                     | RelicId::LowTide
                     | RelicId::HighTide
                     | RelicId::MerchantsEye
@@ -1451,8 +1469,8 @@ mod tests {
                 RelicId::Ikebana,
                 RelicId::Hanami,
                 RelicId::JadeSerpent,
-                RelicId::RedSerpent,
-                RelicId::BlueSerpent,
+                RelicId::RubySerpent,
+                RelicId::LapisSerpent,
                 RelicId::LowTide,
                 RelicId::HighTide,
                 RelicId::MerchantsEye,

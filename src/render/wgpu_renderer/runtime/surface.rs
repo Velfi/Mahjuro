@@ -511,25 +511,24 @@ impl WgpuRenderer {
                 },
             ],
         });
-        self.tonemap_bind_group_scene =
-            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("tonemap-pass-scene-bg"),
-                layout: &self.tonemap_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: self.tonemap_params_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::TextureView(&self.scene_color_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
-                    },
-                ],
-            });
+        self.tonemap_bind_group_scene = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("tonemap-pass-scene-bg"),
+            layout: &self.tonemap_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.tonemap_params_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&self.scene_color_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
+                },
+            ],
+        });
 
         self.queue.write_buffer(
             &self.globals_buffer,

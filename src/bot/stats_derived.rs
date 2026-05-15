@@ -1,18 +1,18 @@
 //! Build export `derived` views from [`AggregateStats`] (schema v3+).
 
 use super::export_schema::{
-    AggregateMaps, AggregateSums, AvgTurnsClearRow, BotAggregateV2, BotIssuesDerived, BotReportDerived,
-    DeathAnteHazardRow, DeathAnteRow, KpiTile, LossBreakdownDerived, MapTable, NamedCount,
-    NamedCountPct, NamedPerRun, PerRunAverages, RelicBuyRow, RelicShopTimingRow, RelicWinRateRow,
-    SurplusSlotRow, WilsonCiPct, YakuDerived, YakuRow,
+    AggregateMaps, AggregateSums, AvgTurnsClearRow, BotAggregateV2, BotIssuesDerived,
+    BotReportDerived, DeathAnteHazardRow, DeathAnteRow, KpiTile, LossBreakdownDerived, MapTable,
+    NamedCount, NamedCountPct, NamedPerRun, PerRunAverages, RelicBuyRow, RelicShopTimingRow,
+    RelicWinRateRow, SurplusSlotRow, WilsonCiPct, YakuDerived, YakuRow,
 };
 use super::reporting::human_readable_score;
 use super::stats::{
-    aggregate_stats_slot_sort_key, AggregateStats, MIN_SHOP_TIMING_SPLIT_PER_BUCKET,
-    RELIC_SHOP_TIMING_EARLY_ANTE_MAX,
+    AggregateStats, MIN_SHOP_TIMING_SPLIT_PER_BUCKET, RELIC_SHOP_TIMING_EARLY_ANTE_MAX,
+    aggregate_stats_slot_sort_key,
 };
 use super::stats_wilson::wilson_95_pct;
-use crate::core::relic::{all_relic_defs, Rarity};
+use crate::core::relic::{Rarity, all_relic_defs};
 use crate::core::yaku::YakuKind;
 
 const MIN_SAMPLES_FOR_WIN_CORR: u32 = 20;
@@ -21,13 +21,15 @@ fn relic_rarity_slug(display_name: &str) -> Option<String> {
     all_relic_defs()
         .iter()
         .find(|d| d.name == display_name)
-        .map(|d| match d.rarity {
-            Rarity::Common => "common",
-            Rarity::Uncommon => "uncommon",
-            Rarity::Rare => "rare",
-            Rarity::Legendary => "legendary",
-        }
-        .to_string())
+        .map(|d| {
+            match d.rarity {
+                Rarity::Common => "common",
+                Rarity::Uncommon => "uncommon",
+                Rarity::Rare => "rare",
+                Rarity::Legendary => "legendary",
+            }
+            .to_string()
+        })
 }
 
 fn top_string_u32(m: &std::collections::BTreeMap<String, u32>, n: usize) -> Vec<(String, u32)> {
@@ -197,8 +199,8 @@ pub fn derived_from_aggregate(a: &AggregateStats, yaku_kind_count: usize) -> Bot
     };
     let relic_act: u64 = a.relic_activations.values().sum();
 
-    let overall_win_rate_wilson_95 = wilson_95_pct(a.victories as u64, rn as u64)
-        .map(|(lo, hi)| WilsonCiPct { lo, hi });
+    let overall_win_rate_wilson_95 =
+        wilson_95_pct(a.victories as u64, rn as u64).map(|(lo, hi)| WilsonCiPct { lo, hi });
 
     let per_run = PerRunAverages {
         win_rate_pct: a.victories as f64 * 100.0 / r,

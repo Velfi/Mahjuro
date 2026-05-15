@@ -57,12 +57,7 @@ impl SceneBehavior for GameplayScene {
         // Update tutorial overlay each frame.
         if let Some(ref mut overlay) = self.tutorial_overlay {
             overlay.cascade_active = !self.cascade_queue.is_empty();
-            overlay.update(
-                ctx.run,
-                dt,
-                ctx.layout.window_w,
-                ctx.layout.window_h,
-            );
+            overlay.update(ctx.run, dt, ctx.layout.window_w, ctx.layout.window_h);
         }
         // Compute tutorial affinity glow indices.
         if GameEngine::tutorial_affinity_glow(ctx.run) {
@@ -445,12 +440,8 @@ impl SceneBehavior for GameplayScene {
         let has_structure = gameplay.has_structure;
         let cascade_showcase_ref = self.cascade_queue.front().and_then(|(_, sc)| sc.as_ref());
         let showcase_present = has_structure || cascade_showcase_ref.is_some();
-        let hud_layout = compute_gameplay_hud_layout(
-            layout,
-            &hand_slots,
-            has_structure,
-            showcase_present,
-        );
+        let hud_layout =
+            compute_gameplay_hud_layout(layout, &hand_slots, has_structure, showcase_present);
         let yaku_panel_h = hud_layout.yaku_panel_h;
         let structure_tag_h = hud_layout.structure_tag_h;
         let structure_meld_h = hud_layout.structure_meld_h;
@@ -725,10 +716,11 @@ impl SceneBehavior for GameplayScene {
             let mut cache = self.suggest_hint_cache.borrow_mut();
             if !cache.matches(&interaction.hand, selection_mask) {
                 cache.hand_uids.clear();
-                cache.hand_uids.extend(interaction.hand.iter().map(|t| t.id));
+                cache
+                    .hand_uids
+                    .extend(interaction.hand.iter().map(|t| t.id));
                 cache.selection_mask = selection_mask;
-                cache.hints =
-                    suggest_completions(&interaction.hand, &interaction.selected_indices);
+                cache.hints = suggest_completions(&interaction.hand, &interaction.selected_indices);
             }
             cache.hints.clone()
         } else {

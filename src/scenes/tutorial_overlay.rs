@@ -55,13 +55,7 @@ impl TutorialOverlay {
     }
 
     /// Update the overlay from the current run state. Call once per frame.
-    pub fn update(
-        &mut self,
-        run: &RunState,
-        dt: f32,
-        _window_w: f32,
-        _window_h: f32,
-    ) {
+    pub fn update(&mut self, run: &RunState, dt: f32, _window_w: f32, _window_h: f32) {
         self.pulse_time += dt;
 
         // Fade in over 0.5s.

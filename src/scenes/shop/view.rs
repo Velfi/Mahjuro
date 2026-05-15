@@ -1234,7 +1234,6 @@ pub(crate) fn render_shop_frame(shop: &ShopScene, ctx: DrawCtx<'_>) -> UiFrame {
             ctx.picked_shop_object,
             ctx.debug_visibility,
             ctx.modal_active,
-            ctx.arrange_preview.clone(),
             ctx.room_gltf_height_scale,
             ctx.shop_env_lighting,
             ctx.effect_layers,

@@ -998,9 +998,9 @@ fn signature_tiles(yk: YakuKind, id: &mut u32) -> Vec<Tile> {
         YakuKind::Tanyao => &[
             (Suit::Characters, 4),
             (Suit::Bamboos, 5),
-            (Suit::Circles, 7),
+            (Suit::Dots, 7),
         ],
-        YakuKind::Toitoi => &[(Suit::Circles, 5), (Suit::Circles, 5), (Suit::Circles, 5)],
+        YakuKind::Toitoi => &[(Suit::Dots, 5), (Suit::Dots, 5), (Suit::Dots, 5)],
         YakuKind::Honroutou => &[(Suit::Characters, 1), (Suit::Bamboos, 9), (Suit::Dragon, 1)],
         YakuKind::Iipeikou => &[(Suit::Bamboos, 1), (Suit::Bamboos, 2), (Suit::Bamboos, 3)],
         YakuKind::FullHand => &[
@@ -1012,9 +1012,9 @@ fn signature_tiles(yk: YakuKind, id: &mut u32) -> Vec<Tile> {
         YakuKind::SanshokuDoujun => &[
             (Suit::Characters, 5),
             (Suit::Bamboos, 5),
-            (Suit::Circles, 5),
+            (Suit::Dots, 5),
         ],
-        YakuKind::Junchan => &[(Suit::Circles, 1), (Suit::Circles, 2), (Suit::Circles, 3)],
+        YakuKind::Junchan => &[(Suit::Dots, 1), (Suit::Dots, 2), (Suit::Dots, 3)],
         YakuKind::Ittsu => &[(Suit::Bamboos, 1), (Suit::Bamboos, 5), (Suit::Bamboos, 9)],
         YakuKind::Honitsu => &[(Suit::Bamboos, 3), (Suit::Bamboos, 7), (Suit::Wind, 1)],
         YakuKind::Yakuhai => &[(Suit::Dragon, 1), (Suit::Dragon, 1), (Suit::Dragon, 1)],
@@ -1023,11 +1023,7 @@ fn signature_tiles(yk: YakuKind, id: &mut u32) -> Vec<Tile> {
             (Suit::Characters, 1),
             (Suit::Bamboos, 5),
         ],
-        YakuKind::KokushiMusou => &[
-            (Suit::Characters, 1),
-            (Suit::Wind, 1),
-            (Suit::Dragon, 1),
-        ],
+        YakuKind::KokushiMusou => &[(Suit::Characters, 1), (Suit::Wind, 1), (Suit::Dragon, 1)],
         YakuKind::ChickenHand => &[
             (Suit::Characters, 1),
             (Suit::Characters, 2),

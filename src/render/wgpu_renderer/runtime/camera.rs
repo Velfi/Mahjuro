@@ -223,13 +223,14 @@ impl WgpuRenderer {
                 .cmds
                 .iter()
                 .any(|c| matches!(c, DrawCmd::ShowcaseTileBatch(_)))
-            && !frame
-                .cmds
-                .iter()
-                .any(|c| matches!(
+            && !frame.cmds.iter().any(|c| {
+                matches!(
                     c,
-                    DrawCmd::ShopEnvironment | DrawCmd::HallwayEnvironment | DrawCmd::ArchiveEnvironment
-                ));
+                    DrawCmd::ShopEnvironment
+                        | DrawCmd::HallwayEnvironment
+                        | DrawCmd::ArchiveEnvironment
+                )
+            });
         if shop_showcase_without_env {
             let linear_hdr = self.shop_env_linear_exposure;
             return [1.0, linear_hdr, self.shop_env_ambient_scale, 0.0];
@@ -247,8 +248,7 @@ impl WgpuRenderer {
             (
                 self.shop_env_linear_exposure
                     * crate::render::shop_glb::GAMEPLAY_TABLE_HDR_LINEAR_MUL,
-                self
-                    .shop_env_ambient_scale
+                self.shop_env_ambient_scale
                     .max(crate::render::shop_glb::GAMEPLAY_TABLE_AMBIENT_MIN),
             )
         };
@@ -265,9 +265,7 @@ impl WgpuRenderer {
                 e *= crate::render::hallway_glb::HALLWAY_ENV_LINEAR_EXPOSURE_MUL;
                 a = a.max(crate::render::hallway_glb::HALLWAY_ENV_AMBIENT_SCALE_MIN);
             }
-            if k == Some("collection")
-                || (k == Some("showcase") && h.collection_tonemap_context)
-            {
+            if k == Some("collection") || (k == Some("showcase") && h.collection_tonemap_context) {
                 e *= crate::render::archive_glb::ARCHIVE_ENV_LINEAR_EXPOSURE_MUL;
                 a = a.max(crate::render::archive_glb::ARCHIVE_ENV_AMBIENT_SCALE_MIN);
             }

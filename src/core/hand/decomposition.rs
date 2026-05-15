@@ -72,7 +72,7 @@ pub fn find_pairs_and_triplets(tiles: &[Tile]) -> Vec<DetectedMeld> {
 /// Find all length-3 straight sequences in numbered suits (same suit, consecutive ranks).
 pub fn find_sequences(tiles: &[Tile]) -> Vec<DetectedMeld> {
     let mut out = Vec::new();
-    let suits = [Suit::Characters, Suit::Bamboos, Suit::Circles];
+    let suits = [Suit::Characters, Suit::Bamboos, Suit::Dots];
 
     for suit in suits {
         for start in 1..=7 {

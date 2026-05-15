@@ -17,6 +17,7 @@ use crate::render::table_transform::euler_xyz_rad_from_deg;
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::render::world_space::LayoutAnchorPx;
+use crate::ui::colored_keywords;
 use crate::ui::focus_nav;
 use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
@@ -95,9 +96,9 @@ const PART1_SUITS_GROUPS: &[TileGroup] = &[
         debuffed_visual: false,
     },
     TileGroup {
-        label: "Circles",
+        label: "Dots",
         accent: color::CHAMPAGNE,
-        tiles: &[(Suit::Circles, 3), (Suit::Circles, 5), (Suit::Circles, 7)],
+        tiles: &[(Suit::Dots, 3), (Suit::Dots, 5), (Suit::Dots, 7)],
         rows: &[],
         layout: TileGroupLayout::Flat,
         debuffed_visual: false,
@@ -130,8 +131,8 @@ const PART1_NUMBER_GROUPS: &[TileGroup] = &[
         label: "Terminals",
         accent: color::GOLD,
         tiles: &[
-            (Suit::Circles, 1),
-            (Suit::Circles, 9),
+            (Suit::Dots, 1),
+            (Suit::Dots, 9),
             (Suit::Characters, 9),
         ],
         rows: &[],
@@ -201,9 +202,9 @@ const FULL_HAND_ROW_TOP: &[(Suit, u8)] = &[
 ];
 
 const FULL_HAND_ROW_BOTTOM: &[(Suit, u8)] = &[
-    (Suit::Circles, 7),
-    (Suit::Circles, 7),
-    (Suit::Circles, 7),
+    (Suit::Dots, 7),
+    (Suit::Dots, 7),
+    (Suit::Dots, 7),
     (Suit::Characters, 7),
     (Suit::Characters, 8),
     (Suit::Characters, 9),
@@ -216,8 +217,8 @@ const FULL_HAND_ROWS: &[&[(Suit, u8)]] = &[FULL_HAND_ROW_TOP, FULL_HAND_ROW_BOTT
 const CHIITOITSU_ROW_TOP: &[(Suit, u8)] = &[
     (Suit::Bamboos, 1),
     (Suit::Bamboos, 1),
-    (Suit::Circles, 2),
-    (Suit::Circles, 2),
+    (Suit::Dots, 2),
+    (Suit::Dots, 2),
     (Suit::Characters, 3),
     (Suit::Characters, 3),
     (Suit::Bamboos, 5),
@@ -225,8 +226,8 @@ const CHIITOITSU_ROW_TOP: &[(Suit, u8)] = &[
 ];
 
 const CHIITOITSU_ROW_BOTTOM: &[(Suit, u8)] = &[
-    (Suit::Circles, 7),
-    (Suit::Circles, 7),
+    (Suit::Dots, 7),
+    (Suit::Dots, 7),
     (Suit::Characters, 8),
     (Suit::Characters, 8),
     (Suit::Dragon, 1),
@@ -239,9 +240,9 @@ const BOSS_SAFE_FULL_HAND_ROW_TOP: &[(Suit, u8)] = &[
     (Suit::Bamboos, 2),
     (Suit::Bamboos, 3),
     (Suit::Bamboos, 4),
-    (Suit::Circles, 4),
-    (Suit::Circles, 5),
-    (Suit::Circles, 6),
+    (Suit::Dots, 4),
+    (Suit::Dots, 5),
+    (Suit::Dots, 6),
 ];
 
 const BOSS_SAFE_FULL_HAND_ROW_BOTTOM: &[(Suit, u8)] = &[
@@ -251,8 +252,8 @@ const BOSS_SAFE_FULL_HAND_ROW_BOTTOM: &[(Suit, u8)] = &[
     (Suit::Bamboos, 6),
     (Suit::Bamboos, 7),
     (Suit::Bamboos, 8),
-    (Suit::Circles, 9),
-    (Suit::Circles, 9),
+    (Suit::Dots, 9),
+    (Suit::Dots, 9),
 ];
 
 const BOSS_SAFE_FULL_HAND_ROWS: &[&[(Suit, u8)]] =
@@ -261,8 +262,8 @@ const BOSS_SAFE_FULL_HAND_ROWS: &[&[(Suit, u8)]] =
 const BOSS_SAFE_CHIITOITSU_ROW_TOP: &[(Suit, u8)] = &[
     (Suit::Bamboos, 1),
     (Suit::Bamboos, 1),
-    (Suit::Circles, 2),
-    (Suit::Circles, 2),
+    (Suit::Dots, 2),
+    (Suit::Dots, 2),
     (Suit::Characters, 3),
     (Suit::Characters, 3),
     (Suit::Bamboos, 5),
@@ -270,8 +271,8 @@ const BOSS_SAFE_CHIITOITSU_ROW_TOP: &[(Suit, u8)] = &[
 ];
 
 const BOSS_SAFE_CHIITOITSU_ROW_BOTTOM: &[(Suit, u8)] = &[
-    (Suit::Circles, 7),
-    (Suit::Circles, 7),
+    (Suit::Dots, 7),
+    (Suit::Dots, 7),
     (Suit::Characters, 8),
     (Suit::Characters, 8),
     (Suit::Bamboos, 9),
@@ -350,7 +351,7 @@ const PART4_GROUPS: &[TileGroup] = &[
     TileGroup {
         label: "Relic",
         accent: color::GOLD,
-        tiles: &[(Suit::Circles, 5), (Suit::Circles, 5), (Suit::Circles, 5)],
+        tiles: &[(Suit::Dots, 5), (Suit::Dots, 5), (Suit::Dots, 5)],
         rows: &[],
         layout: TileGroupLayout::Flat,
         debuffed_visual: false,
@@ -380,7 +381,7 @@ const PART4_GROUPS: &[TileGroup] = &[
         accent: color::CHAMPAGNE,
         tiles: &[
             (Suit::Bamboos, 2),
-            (Suit::Circles, 3),
+            (Suit::Dots, 3),
             (Suit::Characters, 4),
             (Suit::Bamboos, 8),
         ],
@@ -421,10 +422,10 @@ const TUTORIAL_PAGE_SHOP: usize = 6;
 const PAGES: &[TutorialPage] = &[
     TutorialPage {
         title: "Part 1 — The Three Suits",
-        subtitle: "Numbered tiles belong to three suits: Bamboos, Circles, and Characters. Each suit runs from 1 to 9. Sequences and most scoring rules stay inside one suit at a time.",
+        subtitle: "Numbered tiles belong to three suits: Bamboos, Dots, and Characters. Each suit runs from 1 to 9. Sequences and most scoring rules stay inside one suit at a time.",
         glossary: &[
             "Bamboos = green bamboo-stick suit",
-            "Circles = dotted suit",
+            "Dots = dotted suit",
             "Characters = red chinese character suit",
             "1–9 = ranks within a suit",
         ],
@@ -436,7 +437,7 @@ const PAGES: &[TutorialPage] = &[
         title: "Part 2 — Simples & Terminals",
         subtitle: "Within each numbered suit, simples are ranks 2 through 8 — the middle tiles. Terminals are 1 and 9 at the ends. Many bosses and relics refer to “simples” or “terminals” as a group.",
         glossary: &[
-            "Simples = ranks 2–8 in bamboo, circles, or characters",
+            "Simples = ranks 2–8 in bamboo, dots, or characters",
             "Terminals = 1 or 9 in those suits",
             "Sequences use simples or terminals in order",
         ],
@@ -446,7 +447,7 @@ const PAGES: &[TutorialPage] = &[
     },
     TutorialPage {
         title: "Part 3 — Winds, Dragons & Flowers",
-        subtitle: "There are fours winds; dragons are the three red, green, and white tiles. Together they are honors (no bamboo, circles, or characters on those faces).",
+        subtitle: "There are fours winds; dragons are the three red, green, and white tiles. Together they are honors (no bamboo, dots, or characters on those faces).",
         glossary: &[
             "Winds = East, South, West, North",
             "Dragons = Red, Green, White",
@@ -495,7 +496,7 @@ const PAGES: &[TutorialPage] = &[
     },
     TutorialPage {
         title: "Part 6 — Relics And Bosses",
-        subtitle: "Relics are passive upgrades for the whole run. Bosses add a special rule for one shrine (one scoring round). A debuff does not make tiles illegal — they can still complete melds, but may be worth less when scored. The Iconoclast debuffs honors, so bamboo, circles, and characters are the safer plan.",
+        subtitle: "Relics are passive upgrades for the whole run. Bosses add a special rule for one shrine (one scoring round). A debuff does not make tiles illegal — they can still complete melds, but may be worth less when scored. The Iconoclast debuffs honors, so bamboo, dots, and characters are the safer plan.",
         glossary: &[
             "Relic = passive run bonus",
             "Shrine = one round with a score target (Small, Big, or Boss)",
@@ -526,7 +527,7 @@ const PAGES: &[TutorialPage] = &[
     },
     TutorialPage {
         title: "Part 8 — Tutorial Boss",
-        subtitle: "The tutorial boss is The Iconoclast: honors (winds and dragons) are debuffed — they still form melds, but score for much less. Prefer bamboo, circles, and characters: triplets, sequences, Full Hand, or seven pairs (Chiitoitsu) still work. The deal is fair: you can miss the target, read the hint, and try again.",
+        subtitle: "The tutorial boss is The Iconoclast: honors (winds and dragons) are debuffed — they still form melds, but score for much less. Prefer bamboo, dots, and characters: triplets, sequences, Full Hand, or seven pairs (Chiitoitsu) still work. The deal is fair: you can miss the target, read the hint, and try again.",
         glossary: &[
             "Boss shrine = higher target + boss rule",
             "Debuff = less value from those tiles",
@@ -594,8 +595,13 @@ impl TutorialCampaignScene {
         let mut heights = Vec::with_capacity(glossary.len());
         let mut total_h = 0.0;
         for term in glossary {
-            let lines = widget::wrap_text(term, term_w, term_font);
-            let term_h = lines.len().max(1) as f32 * term_font * 1.25;
+            let lines_n = colored_keywords::colored_wrapped_line_count(
+                term,
+                term_w,
+                term_font,
+                color::STONE,
+            );
+            let term_h = lines_n as f32 * term_font * 1.25;
             heights.push(term_h);
             total_h += term_h;
         }
@@ -667,8 +673,13 @@ impl TutorialCampaignScene {
         let subtitle_w = panel_w - 60.0 * scale;
         let subtitle_font = typography::size(typography::BODY, h).max(15.0);
         let subtitle_h = {
-            let subtitle_lines = widget::wrap_text(page.subtitle, subtitle_w, subtitle_font);
-            (subtitle_lines.len().max(1) as f32 * subtitle_font * 1.35)
+            let subtitle_lines_n = colored_keywords::colored_wrapped_line_count(
+                page.subtitle,
+                subtitle_w,
+                subtitle_font,
+                color::PARCHMENT,
+            );
+            (subtitle_lines_n as f32 * subtitle_font * 1.35)
                 .max(70.0 * scale)
                 .min(128.0 * scale)
         };
@@ -690,8 +701,7 @@ impl TutorialCampaignScene {
         let panel_x = w * 0.06;
         let panel_w = w * 0.88;
         let panel_y = h * 0.07;
-        let (_, label_y) =
-            Self::page_content_metrics(page, w, h, panel_x, panel_y, panel_w);
+        let (_, label_y) = Self::page_content_metrics(page, w, h, panel_x, panel_y, panel_w);
 
         let mut items = Vec::new();
         if self.page > 0 {
@@ -975,11 +985,16 @@ impl SceneBehavior for TutorialCampaignScene {
         let subtitle_y = panel_y + 70.0 * scale;
         let subtitle_w = panel_w - 60.0 * scale;
         let subtitle_font = typography::size(typography::BODY, h).max(15.0);
-        let subtitle_lines = widget::wrap_text(page.subtitle, subtitle_w, subtitle_font);
-        let subtitle_h = (subtitle_lines.len().max(1) as f32 * subtitle_font * 1.35)
+        let subtitle_lines_n = colored_keywords::colored_wrapped_line_count(
+            page.subtitle,
+            subtitle_w,
+            subtitle_font,
+            color::PARCHMENT,
+        );
+        let subtitle_h = (subtitle_lines_n as f32 * subtitle_font * 1.35)
             .max(70.0 * scale)
             .min(128.0 * scale);
-        widget::push_text_block(
+        colored_keywords::push_colored_text_block(
             &mut texts,
             [subtitle_x, subtitle_y, subtitle_w, subtitle_h],
             page.subtitle,
@@ -990,7 +1005,7 @@ impl SceneBehavior for TutorialCampaignScene {
                 align: TextAlign::Center,
             },
             h,
-            );
+        );
 
         let (_tile_area_y, label_y) =
             Self::page_content_metrics(page, w, h, panel_x, panel_y, panel_w);
@@ -1214,22 +1229,26 @@ impl SceneBehavior for TutorialCampaignScene {
                     padding: 0.0,
                     align: TextAlign::Left,
                 },
-                h
+                h,
             );
             if let Some(line) = Self::try_it_demo_line(self.page, self.try_it_phase) {
-                texts.push(TextLabel {
-                    rect: [
+                colored_keywords::push_colored_text_block(
+                    &mut texts,
+                    [
                         panel_x + 24.0 * scale,
                         layout.demo_line_y,
                         panel_w - 48.0 * scale,
                         22.0 * scale,
                     ],
-                    text: line.to_string(),
-                    color: color::CHAMPAGNE,
-                    align: TextAlign::Center,
-                    font_px: Some(15.0 * scale),
-                    ..Default::default()
-                });
+                    line,
+                    TextStyle {
+                        tier: typography::CAPTION,
+                        color: color::CHAMPAGNE,
+                        padding: 0.0,
+                        align: TextAlign::Center,
+                    },
+                    h,
+                );
             }
         }
 
@@ -1271,7 +1290,7 @@ impl SceneBehavior for TutorialCampaignScene {
         let mut gy = glossary_y + 28.0 * scale;
         for (idx, term) in page.glossary.iter().enumerate() {
             let term_h = term_heights.get(idx).copied().unwrap_or(term_font * 1.25);
-            widget::push_text_block(
+            colored_keywords::push_colored_text_block(
                 &mut texts,
                 [panel_x + 36.0 * scale, gy, term_w, term_h],
                 term,
@@ -1281,7 +1300,7 @@ impl SceneBehavior for TutorialCampaignScene {
                     padding: 0.0,
                     align: TextAlign::Left,
                 },
-                h
+                h,
             );
             gy += term_h + 6.0 * scale;
         }
@@ -1299,8 +1318,13 @@ impl SceneBehavior for TutorialCampaignScene {
                 panel_w * 0.45
             };
             let callout_font = typography::size(typography::BODY, h).max(15.0);
-            let callout_lines = widget::wrap_text(callout, callout_w - 32.0 * scale, callout_font);
-            let callout_h = (callout_lines.len().max(1) as f32 * callout_font * 1.3 + 36.0 * scale)
+            let callout_lines_n = colored_keywords::colored_wrapped_line_count(
+                callout,
+                callout_w - 32.0 * scale,
+                callout_font,
+                color::CHAMPAGNE,
+            );
+            let callout_h = (callout_lines_n as f32 * callout_font * 1.3 + 36.0 * scale)
                 .max(112.0 * scale);
             fg_quads.push(GpuInstance {
                 rect: [callout_x, callout_y, callout_w, callout_h],
@@ -1310,7 +1334,7 @@ impl SceneBehavior for TutorialCampaignScene {
                 rect: [callout_x, callout_y, 4.0 * scale, callout_h],
                 color: color::GOLD,
             });
-            widget::push_text_block(
+            colored_keywords::push_colored_text_block(
                 &mut texts,
                 [
                     callout_x + 18.0 * scale,
@@ -1325,7 +1349,7 @@ impl SceneBehavior for TutorialCampaignScene {
                     padding: 0.0,
                     align: TextAlign::Left,
                 },
-                h
+                h,
             );
         }
 

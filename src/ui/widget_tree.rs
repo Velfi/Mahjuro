@@ -1,11 +1,9 @@
-#![allow(dead_code)]
 //! Generic, immediate-mode widget tree for scene UIs.
 //!
 //! Each frame a scene builds a [`Tree`] from its current state, hands it to a
 //! tiny persistent [`TreeState`], and gets back a single `Option<A>` describing
 //! what (if anything) the user activated this frame. The tree owns layout,
-//! hit-testing, hover-follow, keyboard navigation, slider/toggle/cycle
-//! adjustment, and rendering — so scenes never duplicate layout math between
+//! hit-testing, hover-follow, keyboard navigation, and rendering — so scenes never duplicate layout math between
 //! `update()` and `draw()`, never juggle named const indices, and never lose
 //! sync between hover hit-tests and rendered rects.
 //!
@@ -36,13 +34,13 @@
 //!
 //! // In Scene::draw():
 //! let tree = self.build_tree_from_draw(&ctx); // same shape
-//! self.tree_state.draw(&tree, &mut frame, &noop_render_custom);
+//! self.tree_state.draw(&tree, &mut frame);
 //! ```
 //!
 //! The layout cache built during `update()` is reused by `draw()` so the
 //! layout pass runs exactly once per frame.
 
-use crate::render::theme::{self, ButtonState, ButtonVariant, color, metrics, typography};
+use crate::render::theme::{ButtonState, ButtonVariant, metrics};
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::scenes::ButtonDef;
 use crate::ui::focus_nav::push_focus_ring;
@@ -60,11 +58,6 @@ use std::borrow::Cow;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct FocusId(pub u32);
 
-/// Custom-decoration callback type for `Tree::draw`. Given the rect, node id,
-/// and current focus state, the callback pushes its own quads/labels onto
-/// the `TreeFrame`.
-pub type RenderCustomFn<'a> = dyn Fn(&mut TreeFrame<'_>, [f32; 4], u32, FocusState) + 'a;
-
 // ─── Tree shape ─────────────────────────────────────────────────────────────
 
 /// A complete UI tree for a scene. Cheap to construct each frame.
@@ -76,123 +69,37 @@ pub struct Tree<A: Copy> {
 }
 
 pub enum Node<A: Copy> {
-    /// Vertical stack of children.
     Column {
         gap: f32,
         align: HAlign,
         children: Vec<Node<A>>,
     },
-    /// Horizontal stack of children.
     Row {
         gap: f32,
         align: VAlign,
         children: Vec<Node<A>>,
     },
-    /// Fixed-column grid (children flow into rows).
-    Grid {
-        cols: usize,
-        gap: (f32, f32),
-        children: Vec<Node<A>>,
-    },
     Item(Item<A>),
-    Decoration(Decoration),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HAlign {
     Center,
-    Left,
-    Right,
-    /// Stretch children to fill the container width.
     Stretch,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VAlign {
     Center,
-    Top,
-    Bottom,
-    Stretch,
-}
-
-/// Sizing hint for a node.
-#[derive(Clone, Copy, Debug)]
-pub enum Size {
-    /// Use the node's natural size (defaults to typical button dimensions).
-    Auto,
-    /// Fixed pixel size.
-    Fixed(f32, f32),
-    /// Width derived from a fraction of the container's width.
-    FracW(f32),
-    /// Height derived from a fraction of the container's height.
-    FracH(f32),
 }
 
 pub struct Item<A: Copy> {
     pub id: FocusId,
-    pub size: Size,
     pub enabled: bool,
-    /// Cursor-hover tooltip text; [`None`] means no tooltip for this focusable.
     pub tooltip: Option<Cow<'static, str>>,
-    pub kind: ItemKind<A>,
-}
-
-pub enum ItemKind<A: Copy> {
-    Button {
-        label: String,
-        variant: ButtonVariant,
-        on_activate: A,
-    },
-    Slider {
-        label: String,
-        value: f32,
-        range: (f32, f32),
-        step: f32,
-        /// Pure mapping from new value → action. No closures so the kind stays
-        /// `Copy`-friendly for trivial scenes.
-        on_change: fn(f32) -> A,
-    },
-    Toggle {
-        label: String,
-        value: bool,
-        on_toggle: A,
-    },
-    Cycle {
-        label: String,
-        options: Vec<String>,
-        index: usize,
-        on_next: A,
-        on_prev: A,
-    },
-    Tab {
-        label: String,
-        active: bool,
-        on_select: A,
-    },
-    /// Escape hatch: tree owns the rect, scene owns the visual. The
-    /// `kind_tag` is a scene-defined u32 (typically a discriminant) that the
-    /// scene's `render_custom` callback matches against to draw the contents.
-    Custom { kind_tag: u32, on_activate: A },
-}
-
-/// Non-interactive node: titles, hint text, spacers.
-pub enum Decoration {
-    Title {
-        text: String,
-        tier: f32,
-        color: [f32; 4],
-    },
-    Body {
-        text: String,
-        tier: f32,
-        color: [f32; 4],
-    },
-    Hint {
-        text: String,
-        tier: f32,
-        color: [f32; 4],
-    },
-    Spacer(f32),
+    pub label: String,
+    pub variant: ButtonVariant,
+    pub on_activate: A,
 }
 
 // ─── Tree builders (ergonomic shortcuts) ────────────────────────────────────
@@ -209,228 +116,21 @@ impl<A: Copy> Tree<A> {
         }
     }
 
-    pub fn anchored(rect: [f32; 4], child: Node<A>) -> Self {
-        Self {
-            root: child,
-            anchor: Some(rect),
-        }
-    }
-
     pub fn with_anchor(mut self, rect: [f32; 4]) -> Self {
         self.anchor = Some(rect);
         self
     }
 }
 
-pub fn button<A: Copy>(label: &str, action: A, variant: ButtonVariant) -> Node<A> {
-    let id = FocusId(action_id(action));
-    Node::Item(Item {
-        id,
-        size: Size::Auto,
-        enabled: true,
-        tooltip: None,
-        kind: ItemKind::Button {
-            label: label.into(),
-            variant,
-            on_activate: action,
-        },
-    })
-}
-
 pub fn button_id<A: Copy>(id: FocusId, label: &str, action: A, variant: ButtonVariant) -> Node<A> {
     Node::Item(Item {
         id,
-        size: Size::Auto,
         enabled: true,
         tooltip: None,
-        kind: ItemKind::Button {
-            label: label.into(),
-            variant,
-            on_activate: action,
-        },
+        label: label.into(),
+        variant,
+        on_activate: action,
     })
-}
-
-/// Like [`button_id`], but registers a cursor-hover tooltip (e.g. extra
-/// context when the visible label is short or iconic).
-pub fn button_id_tooltip<A: Copy>(
-    id: FocusId,
-    label: &str,
-    action: A,
-    variant: ButtonVariant,
-    tooltip: impl Into<Cow<'static, str>>,
-) -> Node<A> {
-    Node::Item(Item {
-        id,
-        size: Size::Auto,
-        enabled: true,
-        tooltip: Some(tooltip.into()),
-        kind: ItemKind::Button {
-            label: label.into(),
-            variant,
-            on_activate: action,
-        },
-    })
-}
-
-/// Like [`button`], but with a cursor-hover tooltip.
-pub fn button_tooltip<A: Copy>(
-    label: &str,
-    action: A,
-    variant: ButtonVariant,
-    tooltip: impl Into<Cow<'static, str>>,
-) -> Node<A> {
-    let id = FocusId(action_id(action));
-    Node::Item(Item {
-        id,
-        size: Size::Auto,
-        enabled: true,
-        tooltip: Some(tooltip.into()),
-        kind: ItemKind::Button {
-            label: label.into(),
-            variant,
-            on_activate: action,
-        },
-    })
-}
-
-pub fn slider<A: Copy>(
-    id: FocusId,
-    label: &str,
-    value: f32,
-    range: (f32, f32),
-    step: f32,
-    on_change: fn(f32) -> A,
-) -> Node<A> {
-    Node::Item(Item {
-        id,
-        size: Size::Auto,
-        enabled: true,
-        tooltip: None,
-        kind: ItemKind::Slider {
-            label: label.into(),
-            value,
-            range,
-            step,
-            on_change,
-        },
-    })
-}
-
-pub fn toggle<A: Copy>(id: FocusId, label: &str, value: bool, on_toggle: A) -> Node<A> {
-    Node::Item(Item {
-        id,
-        size: Size::Auto,
-        enabled: true,
-        tooltip: None,
-        kind: ItemKind::Toggle {
-            label: label.into(),
-            value,
-            on_toggle,
-        },
-    })
-}
-
-pub fn cycle<A: Copy>(
-    id: FocusId,
-    label: &str,
-    options: Vec<String>,
-    index: usize,
-    on_prev: A,
-    on_next: A,
-) -> Node<A> {
-    Node::Item(Item {
-        id,
-        size: Size::Auto,
-        enabled: true,
-        tooltip: None,
-        kind: ItemKind::Cycle {
-            label: label.into(),
-            options,
-            index,
-            on_next,
-            on_prev,
-        },
-    })
-}
-
-pub fn tab<A: Copy>(id: FocusId, label: &str, active: bool, on_select: A) -> Node<A> {
-    Node::Item(Item {
-        id,
-        size: Size::Auto,
-        enabled: true,
-        tooltip: None,
-        kind: ItemKind::Tab {
-            label: label.into(),
-            active,
-            on_select,
-        },
-    })
-}
-
-pub fn custom<A: Copy>(id: FocusId, size: Size, kind_tag: u32, on_activate: A) -> Node<A> {
-    Node::Item(Item {
-        id,
-        size,
-        enabled: true,
-        tooltip: None,
-        kind: ItemKind::Custom {
-            kind_tag,
-            on_activate,
-        },
-    })
-}
-
-pub fn title<A: Copy>(text: &str, tier: f32, color: [f32; 4]) -> Node<A> {
-    Node::Decoration(Decoration::Title {
-        text: text.into(),
-        tier,
-        color,
-    })
-}
-
-pub fn body<A: Copy>(text: &str, tier: f32, color: [f32; 4]) -> Node<A> {
-    Node::Decoration(Decoration::Body {
-        text: text.into(),
-        tier,
-        color,
-    })
-}
-
-pub fn hint<A: Copy>(text: &str, tier: f32, color: [f32; 4]) -> Node<A> {
-    Node::Decoration(Decoration::Hint {
-        text: text.into(),
-        tier,
-        color,
-    })
-}
-
-pub fn spacer<A: Copy>(px: f32) -> Node<A> {
-    Node::Decoration(Decoration::Spacer(px))
-}
-
-/// Convenience: derive a `FocusId` from any `Copy` action via raw pointer
-/// hashing. Returns a unique, stable id per discriminant *value* (not memory
-/// address) by interpreting the action's bytes. Reliable only for actions
-/// that fit in `u64`; falls back to a typeid-derived hash otherwise.
-fn action_id<A: Copy>(action: A) -> u32 {
-    use std::mem::size_of;
-    // Read the first up-to-8 bytes of the action and fold them into a u32.
-    // For C-style enums and small variant payloads this is stable and unique
-    // per (variant, payload) combination, which is exactly what we want.
-    let size = size_of::<A>().min(8);
-    if size == 0 {
-        return 0;
-    }
-    let mut buf = [0u8; 8];
-    // SAFETY: A is Copy, we read at most size_of::<A>() bytes.
-    unsafe {
-        std::ptr::copy_nonoverlapping(&action as *const A as *const u8, buf.as_mut_ptr(), size);
-    }
-    let v = u64::from_le_bytes(buf);
-    // Mix with a small prime so the low bits aren't all clustered at zero.
-    let mixed = v.wrapping_mul(0x9E3779B97F4A7C15);
-    (mixed ^ (mixed >> 32)) as u32
 }
 
 // ─── Persistent tree state ──────────────────────────────────────────────────
@@ -443,8 +143,7 @@ pub struct TreeState {
     /// Latched true during `update()` / `update_flat()` when user input moves
     /// focus to a different item. Cleared by `take_focus_changed()`.
     focus_changed: bool,
-    /// Layout cache built during `update()` and reused by `draw()`. Each entry
-    /// is `(item id, rect, kind tag)`. Decorations are not cached.
+    /// Layout cache built during `update()` and reused by `draw()`.
     layout: Vec<LaidOut>,
     last_window: (f32, f32),
     /// Smooth-scroll state for autoscroll when content overflows anchor.
@@ -614,11 +313,6 @@ impl<A: Copy> FlatItem<A> {
             tooltip: None,
         }
     }
-
-    pub fn with_tooltip(mut self, text: impl Into<Cow<'static, str>>) -> Self {
-        self.tooltip = Some(text.into());
-        self
-    }
 }
 
 // ─── Frame: where the tree pushes its output ────────────────────────────────
@@ -627,23 +321,6 @@ pub struct TreeFrame<'a> {
     pub instances: &'a mut Vec<GpuInstance>,
     pub labels: &'a mut Vec<TextLabel>,
     pub buttons: &'a mut Vec<ButtonDef>,
-    pub window: (f32, f32),
-}
-
-/// Focus state passed to a `render_custom` callback.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FocusState {
-    Rest,
-    Hover,
-}
-
-/// No-op `render_custom` for trees that don't use the `Custom` escape hatch.
-pub fn noop_render_custom(
-    _frame: &mut TreeFrame<'_>,
-    _rect: [f32; 4],
-    _kind_tag: u32,
-    _state: FocusState,
-) {
 }
 
 // ─── Input bundle ───────────────────────────────────────────────────────────
@@ -662,49 +339,31 @@ pub struct TreeInput<'a> {
 
 // ─── Layout pass ────────────────────────────────────────────────────────────
 
-/// Walk the tree and compute item rects. Decorations get their rects too but
-/// we don't cache them (they're never hit-tested).
 /// Result of a layout pass, used for autoscroll calculations.
 struct LayoutInfo {
-    rects: Vec<NodeRect>,
-    /// Total natural content height of the root node's children.
     content_height: f32,
-    /// Height of the anchor rect the content was laid out into.
     anchor_height: f32,
 }
 
-fn layout_tree<A: Copy>(
-    tree: &Tree<A>,
-    window: (f32, f32),
-    out: &mut Vec<LaidOut>,
-) -> LayoutInfo {
+fn layout_tree<A: Copy>(tree: &Tree<A>, window: (f32, f32), out: &mut Vec<LaidOut>) -> LayoutInfo {
     out.clear();
     let (w, h) = window;
     let scale = metrics::scene_scale(w, h);
 
-    // Resolve the root anchor. Defaults to centered, narrow column for
-    // vertical menus; full screen for everything else.
-    let anchor = tree.anchor.unwrap_or_else(|| {
-        match &tree.root {
-            Node::Column { .. } => {
-                let cw = (260.0 * scale).min(w * 0.7);
-                let cx = (w - cw) * 0.5;
-                // Centered vertically with a comfortable top margin.
-                let cy = h * 0.10;
-                let ch = h * 0.85;
-                [cx, cy, cw, ch]
-            }
-            _ => [0.0, 0.0, w, h],
+    let anchor = tree.anchor.unwrap_or_else(|| match &tree.root {
+        Node::Column { .. } => {
+            let cw = (260.0 * scale).min(w * 0.7);
+            let cx = (w - cw) * 0.5;
+            let cy = h * 0.10;
+            let ch = h * 0.85;
+            [cx, cy, cw, ch]
         }
+        _ => [0.0, 0.0, w, h],
     });
 
-    // Measure the natural content height of the root column for autoscroll.
     let content_height = root_content_height(&tree.root, anchor[2], h, scale);
-
-    let mut rects = Vec::new();
-    layout_node(&tree.root, anchor, scale, h, out, &mut rects);
+    layout_node(&tree.root, anchor, scale, h, out);
     LayoutInfo {
-        rects,
         content_height,
         anchor_height: anchor[3],
     }
@@ -733,14 +392,8 @@ fn root_content_height<A: Copy>(
             }
             total
         }
-        _ => 0.0, // non-column roots don't autoscroll
+        _ => 0.0,
     }
-}
-
-/// Per-node resolved rect, parallel to the tree walk order. Used by `draw`.
-#[derive(Clone, Copy)]
-struct NodeRect {
-    rect: [f32; 4],
 }
 
 fn natural_item_height(scale: f32) -> f32 {
@@ -751,28 +404,13 @@ fn natural_item_width(container_w: f32, scale: f32) -> f32 {
     (220.0 * scale).min(container_w)
 }
 
-fn natural_decoration_height(
-    decoration: &Decoration,
-    window_h: f32,
-    scale: f32,
-) -> f32 {
-    match decoration {
-        Decoration::Title { tier, .. } => typography::size(*tier, window_h) * 1.2,
-        Decoration::Body { tier, .. } => typography::size(*tier, window_h) * 1.1,
-        Decoration::Hint { tier, .. } => typography::size(*tier, window_h) * 1.1,
-        Decoration::Spacer(px) => *px * scale,
-    }
-}
-
 fn layout_node<A: Copy>(
     node: &Node<A>,
     rect: [f32; 4],
     scale: f32,
     window_h: f32,
     out: &mut Vec<LaidOut>,
-    rects: &mut Vec<NodeRect>,
 ) {
-    rects.push(NodeRect { rect });
     let [x, y, w, h] = rect;
     match node {
         Node::Column {
@@ -785,8 +423,6 @@ fn layout_node<A: Copy>(
             } else {
                 (12.0 * scale).max(6.0)
             };
-            // Compute each child's natural height, then center the stack
-            // vertically inside the container.
             let mut child_heights = Vec::with_capacity(children.len());
             for c in children {
                 child_heights.push(child_height(c, w, window_h, scale));
@@ -797,27 +433,19 @@ fn layout_node<A: Copy>(
             for (child, ch) in children.iter().zip(child_heights.iter()) {
                 let cw = match align {
                     HAlign::Stretch => w,
-                    _ => child_width(child, w, scale),
+                    HAlign::Center => child_width(child, w, scale),
                 };
                 let cx = match align {
-                    HAlign::Left => x,
-                    HAlign::Right => x + w - cw,
-                    HAlign::Center | HAlign::Stretch => x + (w - cw) * 0.5,
+                    HAlign::Stretch => x,
+                    HAlign::Center => x + (w - cw) * 0.5,
                 };
-                layout_node(
-                    child,
-                    [cx, cy, cw, *ch],
-                    scale,
-                    window_h,
-                    out,
-                    rects,
-                );
+                layout_node(child, [cx, cy, cw, *ch], scale, window_h, out);
                 cy += *ch + gap_px;
             }
         }
         Node::Row {
             gap,
-            align,
+            align: _align,
             children,
         } => {
             let gap_px = if *gap > 0.0 {
@@ -825,61 +453,15 @@ fn layout_node<A: Copy>(
             } else {
                 (10.0 * scale).max(4.0)
             };
-            // Equal-width split for now. Each child gets the row height.
             let n = children.len().max(1) as f32;
             let total_gap = gap_px * (children.len().saturating_sub(1) as f32);
             let cw = ((w - total_gap) / n).max(0.0);
             let mut cx = x;
             for child in children {
                 let ch = child_height(child, cw, window_h, scale).min(h);
-                let cy = match align {
-                    VAlign::Top => y,
-                    VAlign::Bottom => y + h - ch,
-                    VAlign::Center | VAlign::Stretch => y + (h - ch) * 0.5,
-                };
-                let final_h = if matches!(align, VAlign::Stretch) {
-                    h
-                } else {
-                    ch
-                };
-                layout_node(
-                    child,
-                    [cx, cy, cw, final_h],
-                    scale,
-                    window_h,
-                    out,
-                    rects,
-                );
+                let cy = y + (h - ch) * 0.5;
+                layout_node(child, [cx, cy, cw, ch], scale, window_h, out);
                 cx += cw + gap_px;
-            }
-        }
-        Node::Grid {
-            cols,
-            gap,
-            children,
-        } => {
-            let cols = (*cols).max(1);
-            let (gx, gy) = *gap;
-            let cell_w = ((w - gx * (cols as f32 - 1.0)) / cols as f32).max(0.0);
-            let rows = children.len().div_ceil(cols);
-            let cell_h = if rows > 0 {
-                ((h - gy * (rows as f32 - 1.0)) / rows as f32).max(0.0)
-            } else {
-                0.0
-            };
-            for (i, child) in children.iter().enumerate() {
-                let r = i / cols;
-                let c = i % cols;
-                let cx = x + c as f32 * (cell_w + gx);
-                let cy = y + r as f32 * (cell_h + gy);
-                layout_node(
-                    child,
-                    [cx, cy, cell_w, cell_h],
-                    scale,
-                    window_h,
-                    out,
-                    rects,
-                );
             }
         }
         Node::Item(item) => {
@@ -889,47 +471,24 @@ fn layout_node<A: Copy>(
                 enabled: item.enabled,
             });
         }
-        Node::Decoration(_) => {
-            // Decorations don't go in the focus cache.
-        }
     }
 }
 
 fn child_width<A: Copy>(node: &Node<A>, container_w: f32, scale: f32) -> f32 {
     match node {
-        Node::Item(item) => match item.size {
-            Size::Fixed(w, _) => w,
-            Size::FracW(f) => container_w * f,
-            Size::FracH(_) | Size::Auto => natural_item_width(container_w, scale),
-        },
-        Node::Decoration(_) => container_w,
-        Node::Column { .. } | Node::Row { .. } | Node::Grid { .. } => container_w,
+        Node::Item(_) => natural_item_width(container_w, scale),
+        Node::Column { .. } | Node::Row { .. } => container_w,
     }
 }
 
-fn child_height<A: Copy>(
-    node: &Node<A>,
-    container_w: f32,
-    window_h: f32,
-    scale: f32,
-) -> f32 {
+fn child_height<A: Copy>(node: &Node<A>, container_w: f32, window_h: f32, scale: f32) -> f32 {
     match node {
-        Node::Item(item) => match item.size {
-            Size::Fixed(_, h) => h,
-            Size::FracH(f) => window_h * f,
-            Size::FracW(f) => container_w * f,
-            Size::Auto => natural_item_height(scale),
-        },
-        Node::Decoration(d) => natural_decoration_height(d, window_h, scale),
-        // A Row nested inside a Column needs to report a real height so the
-        // Column's vertical layout reserves space for it; we use the tallest
-        // child's natural height. Column/Grid still defer to the parent rect
-        // (anchor or grid cell).
+        Node::Item(_) => natural_item_height(scale),
         Node::Row { children, .. } => children
             .iter()
             .map(|c| child_height(c, container_w, window_h, scale))
             .fold(0.0f32, f32::max),
-        Node::Column { .. } | Node::Grid { .. } => 0.0,
+        Node::Column { .. } => 0.0,
     }
 }
 
@@ -1115,10 +674,8 @@ impl TreeState {
 fn find_item<A: Copy>(node: &Node<A>, id: FocusId) -> Option<&Item<A>> {
     match node {
         Node::Item(item) if item.id == id => Some(item),
-        Node::Item(_) | Node::Decoration(_) => None,
-        Node::Column { children, .. }
-        | Node::Row { children, .. }
-        | Node::Grid { children, .. } => {
+        Node::Item(_) => None,
+        Node::Column { children, .. } | Node::Row { children, .. } => {
             for c in children {
                 if let Some(found) = find_item(c, id) {
                     return Some(found);
@@ -1133,65 +690,25 @@ fn activate_item<A: Copy>(item: &Item<A>, _id: FocusId) -> Option<A> {
     if !item.enabled {
         return None;
     }
-    match &item.kind {
-        ItemKind::Button { on_activate, .. } => Some(*on_activate),
-        ItemKind::Toggle { on_toggle, .. } => Some(*on_toggle),
-        ItemKind::Tab { on_select, .. } => Some(*on_select),
-        ItemKind::Custom { on_activate, .. } => Some(*on_activate),
-        ItemKind::Slider {
-            value,
-            range,
-            step,
-            on_change,
-            ..
-        } => {
-            // Activate (Confirm) on a slider increments by one step, wrapping
-            // back to min when past max. This is the same affordance as
-            // clicking a slider — and matches what scenes' Confirm handlers
-            // do today (start_screen / pause_menu / options).
-            let next = value + step;
-            let snapped = if next > range.1 + 1e-4 {
-                range.0
-            } else {
-                next.min(range.1)
-            };
-            Some(on_change(snapped))
-        }
-        ItemKind::Cycle { on_next, .. } => Some(*on_next),
-    }
+    Some(item.on_activate)
 }
 
 // ─── Draw pass ──────────────────────────────────────────────────────────────
 
 impl TreeState {
-    pub fn draw<A: Copy>(
-        &self,
-        tree: &Tree<A>,
-        frame: &mut TreeFrame<'_>,
-        render_custom: &RenderCustomFn<'_>,
-    ) {
-        // Re-walk the tree using the cached layout. We rebuild the rects in
-        // the same order as `update()` did, then draw each node.
+    pub fn draw<A: Copy>(&self, tree: &Tree<A>, frame: &mut TreeFrame<'_>) {
         let mut layout_scratch = Vec::with_capacity(self.layout.len());
-        let _ = layout_tree(
-            tree,
-            self.last_window,
-            &mut layout_scratch,
-        );
+        let _ = layout_tree(tree, self.last_window, &mut layout_scratch);
 
-        // Apply the same scroll offset that update() computed.
         if self.scroll_offset_px.abs() > 0.001 {
             for l in &mut layout_scratch {
                 l.rect[1] -= self.scroll_offset_px;
             }
         }
 
-        // The cache from update() and the cache we just built must match.
-        // (They will, because the tree shape is identical.)
         let mut idx = 0;
         let mut ctx = DrawNodeCtx {
             focused: self.focused,
-            render_custom,
             layout: &layout_scratch,
             idx: &mut idx,
             window: self.last_window,
@@ -1200,12 +717,8 @@ impl TreeState {
     }
 }
 
-/// Per-traversal context for `draw_node`: the focused id, the laid-out
-/// rects array + cursor, and the window size. Grouped so the
-/// recursion only threads one borrow.
 struct DrawNodeCtx<'a, 'b> {
     focused: Option<FocusId>,
-    render_custom: &'a RenderCustomFn<'a>,
     layout: &'a [LaidOut],
     idx: &'b mut usize,
     window: (f32, f32),
@@ -1213,15 +726,12 @@ struct DrawNodeCtx<'a, 'b> {
 
 fn draw_node<A: Copy>(node: &Node<A>, frame: &mut TreeFrame<'_>, ctx: &mut DrawNodeCtx<'_, '_>) {
     match node {
-        Node::Column { children, .. }
-        | Node::Row { children, .. }
-        | Node::Grid { children, .. } => {
+        Node::Column { children, .. } | Node::Row { children, .. } => {
             for c in children {
                 draw_node(c, frame, ctx);
             }
         }
         Node::Item(item) => {
-            // The next entry in `layout` corresponds to this item.
             let rect = ctx
                 .layout
                 .get(*ctx.idx)
@@ -1229,76 +739,8 @@ fn draw_node<A: Copy>(node: &Node<A>, frame: &mut TreeFrame<'_>, ctx: &mut DrawN
                 .unwrap_or([0.0, 0.0, 0.0, 0.0]);
             *ctx.idx += 1;
             let is_focused = ctx.focused == Some(item.id);
-            draw_item(
-                item,
-                rect,
-                is_focused,
-                frame,
-                ctx.render_custom,
-                ctx.window,
-            );
+            draw_item(item, rect, is_focused, frame, ctx.window);
         }
-        Node::Decoration(d) => {
-            // Decorations need their own rect; we recompute it from the
-            // bounding box of the parent walk by tracking parent rects in
-            // a separate pass. Simpler: just use the *last* parent rect we
-            // saw — the layout pass already centered text labels by writing
-            // a label rect that spans the parent's width. To stay simple,
-            // we use the parent's anchor for decorations by reading the
-            // last container rect from `layout` if available, but since
-            // decorations aren't cached we instead embed them inline next
-            // to their parent column. We re-derive the rect via a small
-            // re-layout against the current parent context.
-            //
-            // The simpler implementation: decorations only ever appear inside
-            // a Column or Row. We recompute their rect on the fly here using
-            // the same heuristics layout_node does. To keep things consistent
-            // we just draw the decoration centered horizontally in the window
-            // at a y-position chosen by where we are in the column. For the
-            // first migration scenes (start_screen), decorations are always
-            // a Title at the top — so we use a window-relative top position.
-            draw_decoration_top(d, frame, ctx.window);
-        }
-    }
-}
-
-fn draw_decoration_top(
-    d: &Decoration,
-    frame: &mut TreeFrame<'_>,
-    window: (f32, f32),
-) {
-    let (w, h) = window;
-    match d {
-        Decoration::Title { text, tier, color } => {
-            let th = typography::size(*tier, h);
-            frame.labels.push(TextLabel {
-                rect: [0.0, h * 0.08, w, th],
-                text: text.clone(),
-                color: *color,
-                ..Default::default()
-            });
-        }
-        Decoration::Body { text, tier, color } => {
-            let th = typography::size(*tier, h);
-            frame.labels.push(TextLabel {
-                rect: [0.0, h * 0.16, w, th],
-                text: text.clone(),
-                color: *color,
-                ..Default::default()
-            });
-        }
-        Decoration::Hint { text, tier, color } => {
-            let th = typography::size(*tier, h);
-            let scale = metrics::scene_scale(w, h);
-            let hint_y = h - th - (12.0 * scale);
-            frame.labels.push(TextLabel {
-                rect: [0.0, hint_y, w, th],
-                text: text.clone(),
-                color: *color,
-                ..Default::default()
-            });
-        }
-        Decoration::Spacer(_) => {}
     }
 }
 
@@ -1320,7 +762,6 @@ fn draw_item<A: Copy>(
     rect: [f32; 4],
     focused: bool,
     frame: &mut TreeFrame<'_>,
-    render_custom: &RenderCustomFn<'_>,
     window: (f32, f32),
 ) {
     let state = if !item.enabled {
@@ -1330,174 +771,26 @@ fn draw_item<A: Copy>(
     } else {
         ButtonState::Rest
     };
-    let focus_state = if focused {
-        FocusState::Hover
-    } else {
-        FocusState::Rest
-    };
 
-    // Draw a gold focus ring around the focused item — the 2D equivalent
-    // of the 3D tile outline shell that selected in-game tiles get.
     if focused {
         let scale = metrics::scene_scale(window.0, window.1);
         push_focus_ring(rect, scale, window.0, window.1, frame.instances);
     }
 
-    match &item.kind {
-        ItemKind::Button { label, variant, .. } => {
-            widget::push_button(
-                frame.instances,
-                frame.labels,
-                frame.buttons,
-                widget::ButtonSpec {
-                    rect,
-                    label,
-                    variant: *variant,
-                    state,
-                    action: UiAction::Confirm, // not used — we override below
-                },
-            );
-            // Override the just-pushed button so its action is the stable id.
-            // push_button already pushed a ButtonDef::ui(...) — pop it and
-            // replace with a ButtonDef::scene so the main loop routes the
-            // click back as a button_clicks id.
-            frame.buttons.pop();
-            push_scene_button_for_item(frame, rect, item.id, &item.tooltip);
-        }
-        ItemKind::Toggle { label, value, .. } => {
-            let display = if *value {
-                format!("{label}: ON")
-            } else {
-                format!("{label}: OFF")
-            };
-            let variant = if *value {
-                ButtonVariant::Primary
-            } else {
-                ButtonVariant::Default
-            };
-            widget::push_button(
-                frame.instances,
-                frame.labels,
-                frame.buttons,
-                widget::ButtonSpec {
-                    rect,
-                    label: &display,
-                    variant,
-                    state,
-                    action: UiAction::Confirm,
-                },
-            );
-            frame.buttons.pop();
-            push_scene_button_for_item(frame, rect, item.id, &item.tooltip);
-        }
-        ItemKind::Slider {
-            label,
-            value,
-            range,
-            ..
-        } => {
-            draw_slider_row(frame, rect, label, *value, *range, state);
-            push_scene_button_for_item(frame, rect, item.id, &item.tooltip);
-        }
-        ItemKind::Cycle {
-            label,
-            options,
-            index,
-            ..
-        } => {
-            let current = options.get(*index).map(|s| s.as_str()).unwrap_or("");
-            let display = format!("{label}: {current}");
-            widget::push_button(
-                frame.instances,
-                frame.labels,
-                frame.buttons,
-                widget::ButtonSpec {
-                    rect,
-                    label: &display,
-                    variant: ButtonVariant::Default,
-                    state,
-                    action: UiAction::Confirm,
-                },
-            );
-            frame.buttons.pop();
-            push_scene_button_for_item(frame, rect, item.id, &item.tooltip);
-        }
-        ItemKind::Tab { label, active, .. } => {
-            let variant = if *active {
-                ButtonVariant::Primary
-            } else {
-                ButtonVariant::Subtle
-            };
-            widget::push_button(
-                frame.instances,
-                frame.labels,
-                frame.buttons,
-                widget::ButtonSpec {
-                    rect,
-                    label,
-                    variant,
-                    state,
-                    action: UiAction::Confirm,
-                },
-            );
-            frame.buttons.pop();
-            push_scene_button_for_item(frame, rect, item.id, &item.tooltip);
-        }
-        ItemKind::Custom { kind_tag, .. } => {
-            render_custom(frame, rect, *kind_tag, focus_state);
-            push_scene_button_for_item(frame, rect, item.id, &item.tooltip);
-        }
-    }
-    let _ = (metrics::BUTTON_GAP, color::PARCHMENT, theme::button_colors); // silence dead-import warnings if any
-}
-
-fn draw_slider_row(
-    frame: &mut TreeFrame<'_>,
-    rect: [f32; 4],
-    label: &str,
-    value: f32,
-    range: (f32, f32),
-    state: ButtonState,
-) {
-    // Background panel.
-    let colors = theme::button_colors(ButtonVariant::Default, state);
-    widget::push_panel_colored(frame.instances, rect, colors.bg, colors.border);
-
-    let [x, y, w, h] = rect;
-    let label_w = w * 0.45;
-    let track_x = x + label_w + 8.0;
-    let track_w = (x + w) - track_x - 8.0;
-    let track_h = (h * 0.35).max(4.0);
-    let track_y = y + (h - track_h) * 0.5;
-
-    // Label on the left.
-    frame.labels.push(TextLabel {
-        rect: [x + 8.0, y, label_w, h],
-        text: label.into(),
-        color: colors.text,
-        ..Default::default()
-    });
-
-    // Track background.
-    frame.instances.push(GpuInstance {
-        rect: [track_x, track_y, track_w, track_h],
-        color: color::WALNUT_INK,
-    });
-    // Filled portion.
-    let t = ((value - range.0) / (range.1 - range.0)).clamp(0.0, 1.0);
-    frame.instances.push(GpuInstance {
-        rect: [track_x, track_y, track_w * t, track_h],
-        color: color::GOLD,
-    });
-
-    // Numeric readout on the far right of the track.
-    let pct = (t * 100.0).round() as i32;
-    frame.labels.push(TextLabel {
-        rect: [track_x + track_w - 60.0, y, 60.0, h],
-        text: format!("{pct}%"),
-        color: colors.text,
-        ..Default::default()
-    });
+    widget::push_button(
+        frame.instances,
+        frame.labels,
+        frame.buttons,
+        widget::ButtonSpec {
+            rect,
+            label: &item.label,
+            variant: item.variant,
+            state,
+            action: UiAction::Confirm,
+        },
+    );
+    frame.buttons.pop();
+    push_scene_button_for_item(frame, rect, item.id, &item.tooltip);
 }
 
 #[cfg(test)]

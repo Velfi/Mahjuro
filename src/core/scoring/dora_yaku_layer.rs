@@ -80,8 +80,13 @@ pub(crate) fn apply_dora_yaku_and_structure(
     {
         detected_yaku.push(YakuKind::ChickenHand);
     }
-    let level_of =
-        |y: YakuKind| -> u32 { ctx.pattern.yaku_levels.as_ref().map(|m| m.level_of(y)).unwrap_or(1) };
+    let level_of = |y: YakuKind| -> u32 {
+        ctx.pattern
+            .yaku_levels
+            .as_ref()
+            .map(|m| m.level_of(y))
+            .unwrap_or(1)
+    };
     for yaku in &detected_yaku {
         let level = level_of(*yaku);
         let mut mult_bonus = yaku.mult_bonus_at(level);

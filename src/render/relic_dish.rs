@@ -1702,7 +1702,7 @@ mod silhouette_tests {
         for name in &[
             "joker_tile",
             "beggars_cup",
-            "blue_serpent",
+            "lapis_serpent",
             "eight_treasures",
             "glass_cannon",
             "cosmopolitan",

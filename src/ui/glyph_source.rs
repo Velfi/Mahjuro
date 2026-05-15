@@ -242,9 +242,16 @@ mod tests {
 
     #[test]
     fn playstation_west_face_press_is_square() {
-        let sprite =
-            static_glyph_sprite(GamepadStyle::PlayStation, UiAction::WestFacePress, false, false);
-        assert_eq!(sprite, Some((PLAYSTATION_SHEET, "playstation_button_color_square")));
+        let sprite = static_glyph_sprite(
+            GamepadStyle::PlayStation,
+            UiAction::WestFacePress,
+            false,
+            false,
+        );
+        assert_eq!(
+            sprite,
+            Some((PLAYSTATION_SHEET, "playstation_button_color_square"))
+        );
     }
 
     #[test]
@@ -259,7 +266,13 @@ mod tests {
     #[test]
     fn every_static_glyph_resolves_in_atlas() {
         use UiAction::*;
-        let actions = [Confirm, Cancel, WestFacePress, NorthFacePress, TriggerStructure];
+        let actions = [
+            Confirm,
+            Cancel,
+            WestFacePress,
+            NorthFacePress,
+            TriggerStructure,
+        ];
         let styles = [
             GamepadStyle::Xbox,
             GamepadStyle::PlayStation,

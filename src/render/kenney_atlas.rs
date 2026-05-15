@@ -47,13 +47,16 @@ pub fn extract_sprite_rgba(sheet_asset: &str, sprite_name: &str) -> Option<(Vec<
     }
     let sheet = cache.get(sheet_asset)?;
     let Some(rect) = sheet.sub_textures.get(sprite_name).copied() else {
-        warn_once(format!("{sheet_asset}|{sprite_name}|missing-sub-texture"), || {
-            format!(
-                "kenney_atlas: '{sprite_name}' not in '{sheet_asset}' \
+        warn_once(
+            format!("{sheet_asset}|{sprite_name}|missing-sub-texture"),
+            || {
+                format!(
+                    "kenney_atlas: '{sprite_name}' not in '{sheet_asset}' \
                  ({} entries indexed)",
-                sheet.sub_textures.len()
-            )
-        });
+                    sheet.sub_textures.len()
+                )
+            },
+        );
         return None;
     };
     match crop_rgba(&sheet.rgba, sheet.width, rect) {
@@ -131,7 +134,9 @@ static MISS_LOG: LazyLock<Mutex<FxHashSet<String>>> =
     LazyLock::new(|| Mutex::new(FxHashSet::default()));
 
 fn warn_once<F: FnOnce() -> String>(key: String, msg: F) {
-    let Ok(mut seen) = MISS_LOG.lock() else { return };
+    let Ok(mut seen) = MISS_LOG.lock() else {
+        return;
+    };
     if seen.insert(key) {
         log::warn!("{}", msg());
     }
@@ -242,9 +247,13 @@ mod tests {
     /// the pack index, and the cropper without booting wgpu.
     #[test]
     fn live_keyboard_atlas_extracts_q() {
-        let sheet = "textures/kenney_input-prompts/Keyboard & Mouse/keyboard-&-mouse_sheet_double.png";
+        let sheet =
+            "textures/kenney_input-prompts/Keyboard & Mouse/keyboard-&-mouse_sheet_double.png";
         let got = extract_sprite_rgba(sheet, "keyboard_q");
-        assert!(got.is_some(), "extract_sprite_rgba returned None for keyboard_q");
+        assert!(
+            got.is_some(),
+            "extract_sprite_rgba returned None for keyboard_q"
+        );
         let (rgba, w, h) = got.unwrap();
         assert!(w > 0 && h > 0);
         assert_eq!(rgba.len(), (w * h * 4) as usize);

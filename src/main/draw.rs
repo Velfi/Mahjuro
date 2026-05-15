@@ -393,25 +393,6 @@ impl App {
             _ => None,
         };
 
-        let arrange_preview = if let Some(Some(ref state)) = self.debug.arrange_mode {
-            let ww = size.width as f32;
-            let wh = size.height as f32;
-            Some(crate::ui::placement::ArrangePreview {
-                name: state.object_name.clone(),
-                dnx: if ww > 0.0 { state.delta_px / ww } else { 0.0 },
-                dny: if wh > 0.0 { state.delta_py / wh } else { 0.0 },
-                // Match the live preview in `sample_arrange_placement`
-                // (see HUD code in this file): convert the world-unit
-                // lift step back to mm at the canonical window.
-                d_lift_mm: state.delta_lift * crate::ui::scene_layout::HFRAC_TO_MM
-                    / crate::ui::scene_layout::CANONICAL_WINDOW_W,
-                d_rx_deg: state.delta_rx_deg,
-                d_ry_deg: state.delta_ry_deg,
-                d_rz_deg: state.delta_rz_deg,
-            })
-        } else {
-            None
-        };
         let p = self.active_profile.min(2);
         let archive_has_new_chronicle =
             self.progress.run_history.len() as u32 > self.archive_last_seen_run_len[p];
@@ -424,8 +405,7 @@ impl App {
         let prompt_style = settings.glyph_prompt.resolve(detected);
         let swap_ab = self.input.as_ref().map(|i| i.swap_ab).unwrap_or(false);
         let swap_xy = self.input.as_ref().map(|i| i.swap_xy).unwrap_or(false);
-        let glyphs =
-            crate::ui::glyph_source::GlyphResolver::new(prompt_style, swap_ab, swap_xy);
+        let glyphs = crate::ui::glyph_source::GlyphResolver::new(prompt_style, swap_ab, swap_xy);
         let ctx = DrawCtx::new(
             &layout,
             &self.anim,
@@ -444,7 +424,6 @@ impl App {
                 hide_blind_plaque: self.debug.hide_blind_plaque,
             },
             modal_active,
-            arrange_preview,
             self.debug.room_gltf_height_scale,
             self.debug.shop_env_lighting,
             self.effect_layers,
@@ -531,9 +510,7 @@ impl App {
             modal_buttons,
             modal_relic_objects,
             modal_gradient_quads,
-        )) = self
-            .modals
-            .draw(size.width as f32, size.height as f32)
+        )) = self.modals.draw(size.width as f32, size.height as f32)
         {
             frame.quads(modal_insts);
             frame.texts(modal_labels);
@@ -552,8 +529,7 @@ impl App {
 
         // Tuning overlay — on top of modals.
         if let Some(ref overlay) = self.debug.tuning_overlay {
-            let (tuning_insts, tuning_labels) =
-                overlay.draw(size.width as f32, size.height as f32);
+            let (tuning_insts, tuning_labels) = overlay.draw(size.width as f32, size.height as f32);
             append_fullscreen_debug_panel(
                 &mut frame,
                 &mut self.active_buttons,
@@ -564,30 +540,26 @@ impl App {
 
         // SFX test overlay — on top of modals.
         if let Some(ref mut overlay) = self.debug.sfx_test_overlay {
-            let (insts, lbls) =
-                overlay.draw(size.width as f32, size.height as f32);
+            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
         // Camera debug overlay — on top of modals.
         if let Some(ref overlay) = self.debug.camera_debug_overlay {
             frame.camera_override = Some(overlay.to_camera_params());
-            let (insts, lbls) =
-                overlay.draw(size.width as f32, size.height as f32);
+            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
         // Shop env scale debug overlay — on top of modals.
         if let Some(ref overlay) = self.debug.shop_env_debug_overlay {
-            let (insts, lbls) =
-                overlay.draw(size.width as f32, size.height as f32);
+            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
         // Debug visibility overlay — on top of modals.
         if let Some(ref overlay) = self.debug.visibility_overlay {
-            let (insts, lbls) =
-                overlay.draw(size.width as f32, size.height as f32);
+            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
@@ -595,8 +567,7 @@ impl App {
         // already pushed via `set_tonemap_tuning` near the top of `draw`,
         // so this draw call is the panel UI only.
         if let Some(ref overlay) = self.debug.tonemap_debug_overlay {
-            let (insts, lbls) =
-                overlay.draw(size.width as f32, size.height as f32);
+            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
@@ -619,15 +590,34 @@ impl App {
                 }) {
                     if let Some(ref label) = btn.hover_label {
                         let pad = (h * 0.012 * scale).max(6.0);
-                        let tooltip_h = ((h * 0.035 * scale).max(22.0)).min(h * 0.12);
+                        let min_outer_h =
+                            ((h * 0.035 * scale).max(22.0)).min(h * 0.12);
                         let est_chars = label.chars().count().max(1);
-                        let tooltip_w = ((est_chars as f32 * tooltip_h * 0.52 + pad * 2.0)
-                            .max(72.0))
-                        .min(w * 0.5);
+                        let line_h = (min_outer_h * 0.52).max(8.0);
+                        let tooltip_w = ((est_chars as f32 * line_h + pad * 2.0).max(72.0))
+                            .min(w * 0.5);
                         let (bx, by, bw, bh) = btn.rect;
                         let cx = bx + bw * 0.5;
                         let mut tip_x = cx - tooltip_w * 0.5;
                         tip_x = tip_x.max(pad).min(w - tooltip_w - pad);
+
+                        let parchment = crate::render::theme::color::PARCHMENT;
+                        let inner_w = (tooltip_w - 2.0 * pad).max(40.0);
+                        let color_lines = crate::ui::colored_keywords::wrap_colored_text_multiline(
+                            label.as_ref(),
+                            inner_w,
+                            line_h,
+                            parchment,
+                        );
+                        let content_h = crate::ui::colored_keywords::colored_multiline_block_height(
+                            color_lines.len(),
+                            line_h,
+                        );
+                        let inner_h = (content_h).max(min_outer_h - 2.0 * pad);
+                        let tooltip_h = (inner_h + 2.0 * pad)
+                            .max(min_outer_h)
+                            .min(h * 0.35);
+
                         let mut tip_y = by - tooltip_h - pad;
                         if tip_y < pad {
                             tip_y = by + bh + pad;
@@ -647,15 +637,22 @@ impl App {
                         for q in tip_quads {
                             frame.quad(q);
                         }
-                        frame.text(TextLabel {
-                            rect: [tip_x, tip_y, tooltip_w, tooltip_h],
-                            text: label.as_ref().to_owned(),
-                            color: crate::render::theme::color::PARCHMENT,
-                            font_px: Some(tooltip_h * 0.52),
-                            align: crate::render::wgpu_renderer::TextAlign::Center,
-                            no_glossary: true,
-                            ..Default::default()
-                        });
+                        let text_top =
+                            tip_y + pad + ((tooltip_h - 2.0 * pad - content_h) * 0.5).max(0.0);
+                        let mut tip_texts: Vec<crate::render::wgpu_renderer::TextLabel> =
+                            Vec::new();
+                        crate::ui::colored_keywords::push_colored_rows_in_width(
+                            &mut tip_texts,
+                            tip_x + pad,
+                            text_top,
+                            inner_w,
+                            &color_lines,
+                            line_h,
+                            crate::render::wgpu_renderer::TextAlign::Center,
+                            label.as_ref(),
+                            parchment,
+                        );
+                        frame.texts(tip_texts);
                     }
                 }
             }
@@ -940,4 +937,3 @@ pub(crate) fn build_level_up_modal(
         .with_fireworks(window_w * 0.5, window_h * 0.92, window_w * 0.85, 24),
     )
 }
-

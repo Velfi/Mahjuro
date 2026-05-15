@@ -439,8 +439,6 @@ pub(super) fn load_zodiac_ribbon_textures(
 pub(super) fn load_pack_textures(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-    text_layout: &wgpu::BindGroupLayout,
-    sampler: &wgpu::Sampler,
     default_relief_view: &wgpu::TextureView,
 ) -> FxHashMap<TilePackKind, RelicTextureGpu> {
     let mut map = FxHashMap::default();
@@ -461,28 +459,11 @@ pub(super) fn load_pack_textures(
             }
         };
         let (w, h) = img.dimensions();
-        let (tex, view) = upload_rgba_texture(device, queue, kind.name(), img.as_raw(), w, h);
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(kind.name()),
-            layout: text_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(sampler),
-                },
-            ],
-        });
+        let (_tex, view) = upload_rgba_texture(device, queue, kind.name(), img.as_raw(), w, h);
         map.insert(
             kind,
             RelicTextureGpu {
                 view,
-                texture: tex,
-                bind_group,
-                relief_texture: None,
                 relief_view: default_relief_view.clone(),
             },
         );

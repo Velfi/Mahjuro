@@ -311,9 +311,13 @@ impl SceneBehavior for PickBlindScene {
                 });
             }
             if can_skip {
-                if let Some(r) =
-                    hallway_button_screen_rect(w, h, &cam, ctx.room_gltf_height_scale, BTN_SKIP_ROUND)
-                {
+                if let Some(r) = hallway_button_screen_rect(
+                    w,
+                    h,
+                    &cam,
+                    ctx.room_gltf_height_scale,
+                    BTN_SKIP_ROUND,
+                ) {
                     let cx = r[0] + r[2] * 0.5;
                     let cy = r[1] + r[3] * 0.5;
                     point_lights.push(PointLight {
@@ -324,11 +328,7 @@ impl SceneBehavior for PickBlindScene {
                     });
                 }
             }
-            inverse_punctual.extend(
-                point_lights
-                    .into_iter()
-                    .map(ScenePunctualLight::Smooth),
-            );
+            inverse_punctual.extend(point_lights.into_iter().map(ScenePunctualLight::Smooth));
             frame.scene_lighting.punctual = inverse_punctual;
         } else {
             frame.scene_lighting.embedded_gltf_punctual = false;
@@ -362,8 +362,9 @@ impl SceneBehavior for PickBlindScene {
         let skip_focused_label = self.skip_focused();
 
         let (play_anchor_rect, skip_anchor_rect) = {
-            let pr = hallway_button_screen_rect(w, h, &cam, ctx.room_gltf_height_scale, BTN_PLAY_ROUND)
-                .unwrap_or_else(|| [w * 0.12, h * 0.50, w * 0.14, h * 0.10]);
+            let pr =
+                hallway_button_screen_rect(w, h, &cam, ctx.room_gltf_height_scale, BTN_PLAY_ROUND)
+                    .unwrap_or_else(|| [w * 0.12, h * 0.50, w * 0.14, h * 0.10]);
             let sr = if can_skip {
                 hallway_button_screen_rect(w, h, &cam, ctx.room_gltf_height_scale, BTN_SKIP_ROUND)
                     .unwrap_or_else(|| [w * 0.74, h * 0.50, w * 0.14, h * 0.10])
@@ -382,7 +383,9 @@ impl SceneBehavior for PickBlindScene {
             let base_target = pick.base_target;
             let upcoming_run_number = pick.run_number;
             let blind_display = if upcoming == BlindKind::Boss {
-                pick.boss_name.clone().unwrap_or_else(|| "Boss Blind".to_string())
+                pick.boss_name
+                    .clone()
+                    .unwrap_or_else(|| "Boss Blind".to_string())
             } else {
                 upcoming.name().to_string()
             };
@@ -408,7 +411,11 @@ impl SceneBehavior for PickBlindScene {
             texts.push(TextLabel {
                 rect: [lx_play, ly_play, side_w, h_blind],
                 text: blind_display,
-                color: if play_focused_label { color::GOLD } else { color::STONE },
+                color: if play_focused_label {
+                    color::GOLD
+                } else {
+                    color::STONE
+                },
                 no_glossary: true,
                 font_px: Some(px_blind),
                 ..Default::default()
@@ -422,7 +429,11 @@ impl SceneBehavior for PickBlindScene {
                     crate::game::run::FINAL_ANTE,
                     target_value,
                 ),
-                color: if play_focused_label { color::GOLD } else { color::STONE },
+                color: if play_focused_label {
+                    color::GOLD
+                } else {
+                    color::STONE
+                },
                 no_glossary: true,
                 font_px: Some(px_detail),
                 ..Default::default()
@@ -431,7 +442,11 @@ impl SceneBehavior for PickBlindScene {
             texts.push(TextLabel {
                 rect: [lx_play, ly_play, side_w, h_detail],
                 text: format!("Reward ${}{}", upcoming.clear_reward(), stake_suffix),
-                color: if play_focused_label { color::GOLD } else { color::STONE },
+                color: if play_focused_label {
+                    color::GOLD
+                } else {
+                    color::STONE
+                },
                 no_glossary: true,
                 font_px: Some(px_detail),
                 ..Default::default()
@@ -477,7 +492,11 @@ impl SceneBehavior for PickBlindScene {
                     texts.push(TextLabel {
                         rect: [lx_skip, ly_skip, side_w, h_blind],
                         text: tag.name().to_string(),
-                        color: if skip_focused_label { color::GOLD } else { color::STONE },
+                        color: if skip_focused_label {
+                            color::GOLD
+                        } else {
+                            color::STONE
+                        },
                         font_px: Some(px_blind),
                         ..Default::default()
                     });
@@ -485,7 +504,11 @@ impl SceneBehavior for PickBlindScene {
                     texts.push(TextLabel {
                         rect: [lx_skip, ly_skip, side_w, h_detail * 1.45],
                         text: tag.description().to_string(),
-                        color: if skip_focused_label { color::GOLD } else { color::STONE },
+                        color: if skip_focused_label {
+                            color::GOLD
+                        } else {
+                            color::STONE
+                        },
                         font_px: Some(px_detail),
                         ..Default::default()
                     });
@@ -505,7 +528,11 @@ impl SceneBehavior for PickBlindScene {
                     texts.push(TextLabel {
                         rect: [lx_skip, ly_skip, side_w, h_detail],
                         text: "Tribute · Esc".to_string(),
-                        color: if skip_focused_label { color::GOLD } else { color::STONE },
+                        color: if skip_focused_label {
+                            color::GOLD
+                        } else {
+                            color::STONE
+                        },
                         font_px: Some(px_detail),
                         ..Default::default()
                     });

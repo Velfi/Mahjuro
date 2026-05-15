@@ -8,7 +8,7 @@
 //! A short dashboard prints first (mask counts and how many reach scoring). Throughput
 //! on substeps is **per candidate mask** so you can compare steps fairly.
 
-use criterion::{black_box, Criterion, Throughput};
+use criterion::{Criterion, Throughput, black_box};
 use mahjuro::bot::{
     bench_count_masks_positive_score, bench_count_masks_validate_structure,
     bench_enumerate_play_masks, bench_evaluate_play_masks, bench_fixture_run, pick_best_play,

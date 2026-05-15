@@ -519,9 +519,7 @@ impl App {
         // override under the captured scene key.
         if let Some(ref mut overlay) = self.debug.tonemap_debug_overlay {
             use crate::debug_overlays::TonemapDebugResult;
-            use crate::game::tonemap_tuning::{
-                FALLBACK_SCENE_KEY, TonemapTuning, storage_key,
-            };
+            use crate::game::tonemap_tuning::{FALLBACK_SCENE_KEY, TonemapTuning, storage_key};
             let scene_key_owned = overlay.scene_key.clone();
             let scene_key_persist = scene_key_owned.as_deref().unwrap_or(FALLBACK_SCENE_KEY);
             let scene_key_lookup = scene_key_owned.as_deref();
@@ -816,9 +814,7 @@ impl App {
         // Only drive shop-hold rumble on the unobstructed shop face. When `hold`
         // is false, sync stops motors — if we ran that every frame globally it
         // would cancel rumble lab / scoring pulses the same tick they fire.
-        if shop_ready
-            && let Some(input) = self.input.as_ref()
-        {
+        if shop_ready && let Some(input) = self.input.as_ref() {
             let hold = matches!(&self.scene, Scene::Shop(s) if s.sell_hold_in_progress());
             let progress = match &self.scene {
                 Scene::Shop(s) if hold => s.sell_hold_progress(now).unwrap_or(0.0),

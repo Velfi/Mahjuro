@@ -361,7 +361,7 @@ impl DebugMenuBar {
         for (suit_label, suit, max_rank) in [
             ("Characters (m)", Suit::Characters, 9u8),
             ("Bamboos (s)", Suit::Bamboos, 9u8),
-            ("Circles (p)", Suit::Circles, 9u8),
+            ("Dots (p)", Suit::Dots, 9u8),
             ("Winds", Suit::Wind, 4u8),
             ("Dragons", Suit::Dragon, 3u8),
         ] {

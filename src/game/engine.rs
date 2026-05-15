@@ -1029,14 +1029,10 @@ impl<'a> GameEngine<'a> {
                         self.run.relic_counters.insert(RelicId::TeaCeremony, 0);
                     }
                     RelicId::Chrysalis => {
-                        self.run
-                            .relic_counters
-                            .insert(RelicId::MonarchButterfly, 0);
+                        self.run.relic_counters.insert(RelicId::MonarchButterfly, 0);
                     }
                     RelicId::MonarchButterfly => {
-                        self.run
-                            .relic_counters
-                            .insert(RelicId::MonarchButterfly, 0);
+                        self.run.relic_counters.insert(RelicId::MonarchButterfly, 0);
                     }
                     RelicId::IGotAGuy => {
                         self.run.relic_counters.insert(RelicId::IGotAGuy, 3);
@@ -1583,7 +1579,7 @@ mod tests {
         *run.hand_mut() = vec![
             tile(Suit::Characters, 1, 0),
             tile(Suit::Bamboos, 4, 1),
-            tile(Suit::Circles, 9, 2),
+            tile(Suit::Dots, 9, 2),
         ];
         *run.selected_mut() = vec![true, true, true];
         let mut bus = EventBus::default();
@@ -1668,9 +1664,9 @@ mod tests {
             tile(Suit::Characters, 2, 3),
             tile(Suit::Characters, 3, 4),
             tile(Suit::Characters, 4, 5),
-            tile(Suit::Circles, 2, 6),
-            tile(Suit::Circles, 3, 7),
-            tile(Suit::Circles, 4, 8),
+            tile(Suit::Dots, 2, 6),
+            tile(Suit::Dots, 3, 7),
+            tile(Suit::Dots, 4, 8),
             tile(Suit::Bamboos, 5, 9),
             tile(Suit::Bamboos, 6, 10),
             tile(Suit::Bamboos, 7, 11),
@@ -1843,8 +1839,11 @@ mod tests {
     fn reroll_shop_spends_i_got_a_guy_charge_when_gold_is_low() {
         let mut run = deterministic_run();
         run.gold = 0;
-        run.relics.active.push(crate::core::relic::RelicId::IGotAGuy);
-        run.relic_counters.insert(crate::core::relic::RelicId::IGotAGuy, 2);
+        run.relics
+            .active
+            .push(crate::core::relic::RelicId::IGotAGuy);
+        run.relic_counters
+            .insert(crate::core::relic::RelicId::IGotAGuy, 2);
         let mut bus = EventBus::default();
 
         let outcome =
@@ -1864,8 +1863,11 @@ mod tests {
     fn reroll_shop_rejects_when_gold_low_and_no_i_got_a_guy_charges() {
         let mut run = deterministic_run();
         run.gold = 0;
-        run.relics.active.push(crate::core::relic::RelicId::IGotAGuy);
-        run.relic_counters.insert(crate::core::relic::RelicId::IGotAGuy, 0);
+        run.relics
+            .active
+            .push(crate::core::relic::RelicId::IGotAGuy);
+        run.relic_counters
+            .insert(crate::core::relic::RelicId::IGotAGuy, 0);
         let before_gold = run.gold;
         let mut bus = EventBus::default();
 
@@ -1883,8 +1885,11 @@ mod tests {
     fn reroll_shop_zero_cost_does_not_spend_i_got_a_guy_charge() {
         let mut run = deterministic_run();
         run.gold = 0;
-        run.relics.active.push(crate::core::relic::RelicId::IGotAGuy);
-        run.relic_counters.insert(crate::core::relic::RelicId::IGotAGuy, 3);
+        run.relics
+            .active
+            .push(crate::core::relic::RelicId::IGotAGuy);
+        run.relic_counters
+            .insert(crate::core::relic::RelicId::IGotAGuy, 3);
         let mut bus = EventBus::default();
 
         let outcome =

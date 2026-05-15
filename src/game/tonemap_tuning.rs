@@ -15,8 +15,8 @@
 //! toggle. The Options "VHS overlay: ON/OFF" gate still wins — when it's
 //! off, every per-scene VHS amount is ignored.
 
-use serde::{Deserialize, Serialize};
 use rustc_hash::FxHashMap;
+use serde::{Deserialize, Serialize};
 
 /// Per-scene tonemap + VHS knobs. All terms are read by
 /// `shaders/tonemap_composite.wgsl`; ranges chosen so the slider in the
@@ -141,7 +141,8 @@ impl TonemapTuningSet {
             // is absent; we only want entries that actually live on disk
             // so the overlay can show "(default)" for untouched scenes.
             if crate::persistence::has_tuning_override(&storage_key(key)) {
-                let t = crate::persistence::load_tuning_override::<TonemapTuning>(&storage_key(key));
+                let t =
+                    crate::persistence::load_tuning_override::<TonemapTuning>(&storage_key(key));
                 per_scene.insert(key.to_string(), t);
             }
         }

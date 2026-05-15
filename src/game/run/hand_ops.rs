@@ -150,7 +150,9 @@ impl RunState {
                 self.relics.active.retain(|&r| r != RelicId::SilkThread);
                 self.silk_thread_extinct = true;
                 self.note_relic_destroyed();
-                bus.push(GameEvent::TransformationSuccessorDiscovered(RelicId::SilkMoth));
+                bus.push(GameEvent::TransformationSuccessorDiscovered(
+                    RelicId::SilkMoth,
+                ));
                 bus.push(GameEvent::AchievementUnlocked(
                     crate::steam::Achievement::SilkMothEmerged,
                 ));

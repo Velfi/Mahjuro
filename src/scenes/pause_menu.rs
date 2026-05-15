@@ -7,9 +7,7 @@ use crate::game::run::RunState;
 use crate::render::theme::{ButtonVariant, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::ui::input::UiAction;
-use crate::ui::widget_tree::{
-    self as wt, FocusId, Tree, TreeFrame, TreeInput, TreeState, noop_render_custom,
-};
+use crate::ui::widget_tree::{self as wt, FocusId, Tree, TreeFrame, TreeInput, TreeState};
 
 use super::main_menu_exterior::MainMenuExteriorScene;
 use super::options::OptionsScene;
@@ -248,10 +246,7 @@ impl PauseMenu {
             input_mode,
             mouse_left_down,
         } = input;
-        let crate::ui::layout::ViewportCtx {
-            window_w,
-            window_h,
-        } = viewport;
+        let crate::ui::layout::ViewportCtx { window_w, window_h } = viewport;
         // If the options sub-overlay is open, all input goes to it. When it
         // signals close, drop back to the pause root rather than resuming
         // the underlying scene — the player explicitly hit Pause.
@@ -368,9 +363,7 @@ impl PauseMenu {
     ) -> PauseUpdate {
         let settings = crate::persistence::load_settings();
         GameEngine::reset_to_demo(run, progress, &settings);
-        PauseUpdate::Transition(Box::new(Some(Scene::Shop(ShopScene::new(
-            run, progress,
-        )))))
+        PauseUpdate::Transition(Box::new(Some(Scene::Shop(ShopScene::new(run, progress)))))
     }
 
     /// Append pause-overlay draw elements to the given vectors.
@@ -382,10 +375,7 @@ impl PauseMenu {
         text_labels: &mut Vec<TextLabel>,
         buttons: &mut Vec<ButtonDef>,
     ) {
-        let crate::ui::layout::ViewportCtx {
-            window_w,
-            window_h,
-        } = viewport;
+        let crate::ui::layout::ViewportCtx { window_w, window_h } = viewport;
         if !self.paused {
             return;
         }
@@ -428,8 +418,7 @@ impl PauseMenu {
             instances,
             labels: text_labels,
             buttons,
-            window: (window_w, window_h),
         };
-        self.tree.draw(&tree, &mut frame, &noop_render_custom);
+        self.tree.draw(&tree, &mut frame);
     }
 }

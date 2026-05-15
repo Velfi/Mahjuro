@@ -30,7 +30,7 @@ Mahjuro is a mahjong-inspired roguelite that makes mahjong approachable for west
 
 ### **A. Tile Types**
 
-* **Number Tiles:** 1–9 in 3 suits — Characters, Bamboos, Circles
+* **Number Tiles:** 1–9 in 3 suits — Characters, Bamboos, Dots
 * **Honor Tiles:** Winds (East, South, West, North), Dragons (Red, Green, White)
 * **Flowers:** Act as wildcards — one flower can substitute for a missing tile in a meld (max one substitution per meld); flowers themselves contribute no base chips
 * **Seasons:** Solitaire-only bonus tiles
@@ -83,7 +83,7 @@ A large **relic** pool is implemented (see `assets/data/relics.json`), spanning 
 * **Meld-type & dragon base** — TripletBoost, SequenceSurge, PairPower, HonorFury, DragonRage, GreenLuck, WhiteDragonsHush, JokerTile, StrengthInNumbers, QuickDraw, ChainReaction, MultiplierMaster, SetMagnet, WildWinds, DragonEcho
 * **Wall & scoring infrastructure** — ShantenShove, KanDrum, KongsBlessing, DoraCrown, RoundCompass, EightTreasures
 * **Flowers** — GardenKeeper, Ikebana, Hanami
-* **Suit, rank, terminal, shop** — JadeSerpent, RedSerpent, BlueSerpent, LowTide, HighTide, MerchantsEye, EdgeRunner, LuckySeven
+* **Suit, rank, terminal, shop** — JadeSerpent, RubySerpent, LapisSerpent, LowTide, HighTide, MerchantsEye, EdgeRunner, LuckySeven
 * **Plays per round & conditional mult** — Momentum, Minimalist, TurtleShell, ClosedGate, GoldenEngine, SecondWind, GlassCannon
 * **Plays per round & scaling chips** — Snowball
 * **Interest & passive gold** — GoldIdol, JadeAbacus, NestEgg, Patience

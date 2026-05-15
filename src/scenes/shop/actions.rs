@@ -1,7 +1,5 @@
 use crate::core::tile_pack::TilePackKind;
-use crate::scenes::{
-    ShowcasePresenter, ShowcaseScene, TilePackPresenter, ZodiacPresenter,
-};
+use crate::scenes::{ShowcasePresenter, ShowcaseScene, TilePackPresenter, ZodiacPresenter};
 
 use super::view::{default_shop_focus_for_stock, snap_focus_after_shop_purchase};
 use super::*;

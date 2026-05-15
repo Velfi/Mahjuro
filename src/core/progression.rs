@@ -359,7 +359,8 @@ impl PlayerProgress {
         let mut available = Vec::new();
         for l in 1..=level {
             for r in unlocks_for_level(l).relics {
-                if is_transformation_successor_relic(r) && !self.transformation_successor_visible(r) {
+                if is_transformation_successor_relic(r) && !self.transformation_successor_visible(r)
+                {
                     continue;
                 }
                 available.push(r);
@@ -494,9 +495,7 @@ fn level_14_relics() -> Vec<RelicId> {
     crate::core::relic::all_relic_defs()
         .iter()
         .map(|d| d.id)
-        .filter(|id| {
-            !earlier.contains(id) && !is_transformation_successor_relic(*id)
-        })
+        .filter(|id| !earlier.contains(id) && !is_transformation_successor_relic(*id))
         .collect()
 }
 
@@ -522,8 +521,8 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
         2 => LevelUnlocks {
             relics: vec![
                 RelicId::JadeSerpent,
-                RelicId::RedSerpent,
-                RelicId::BlueSerpent,
+                RelicId::RubySerpent,
+                RelicId::LapisSerpent,
                 RelicId::LowTide,
                 RelicId::HighTide,
                 RelicId::CrackedTile,
@@ -609,11 +608,7 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
         },
         // ── L8: Mid scaling specialists + Sanshoku/Honroutou ─────────────
         8 => LevelUnlocks {
-            relics: vec![
-                RelicId::Humility,
-                RelicId::Bonfire,
-                RelicId::StarTile,
-            ],
+            relics: vec![RelicId::Humility, RelicId::Bonfire, RelicId::StarTile],
             rules: vec![],
             yaku: vec![YakuKind::SanshokuDoujun, YakuKind::Honroutou],
             dora: false,
@@ -714,7 +709,9 @@ mod tests {
         let ay = p.available_yaku();
         assert!(!ay.contains(&YakuKind::KokushiMusou));
         assert_eq!(ay.len(), YakuKind::all().len() - 1);
-        *p.yaku_times_scored.entry(YakuKind::KokushiMusou).or_insert(0) += 1;
+        *p.yaku_times_scored
+            .entry(YakuKind::KokushiMusou)
+            .or_insert(0) += 1;
         let ay2 = p.available_yaku();
         assert!(ay2.contains(&YakuKind::KokushiMusou));
         assert_eq!(ay2.len(), YakuKind::all().len());
@@ -781,8 +778,10 @@ mod tests {
         use rustc_hash::FxHashSet;
         let unlocked: FxHashSet<RelicId> =
             (1..=14).flat_map(|l| unlocks_for_level(l).relics).collect();
-        let successors: FxHashSet<RelicId> =
-            transformation_successor_relic_ids().iter().copied().collect();
+        let successors: FxHashSet<RelicId> = transformation_successor_relic_ids()
+            .iter()
+            .copied()
+            .collect();
         let missing: Vec<RelicId> = all_relic_defs()
             .iter()
             .map(|d| d.id)

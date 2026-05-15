@@ -112,9 +112,7 @@ impl WgpuRenderer {
                             | Object3dKind::Talisman { .. }
                             | Object3dKind::Primitive { .. }
                     );
-                    if cull_eligible
-                        && camera.aabb_outside_frustum(model, [1.5, 1.5, 1.5])
-                    {
+                    if cull_eligible && camera.aabb_outside_frustum(model, [1.5, 1.5, 1.5]) {
                         continue;
                     }
                     match &obj.kind {

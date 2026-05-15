@@ -1,24 +1,10 @@
-#![allow(dead_code)]
 //! Chinese Zodiac consumable cards — Mahjuro's planet-card analogue.
 //!
 //! Each Zodiac card is mapped 1:1 to one yaku in [`crate::core::yaku`]
-//! (including Kokushi Musō via the Qilin ribbon). Using a card increments the *level* of its yaku for
 //! the rest of the run, scaling both the chip and mult contributions per the
-//! formula in `YakuKind::mult_bonus_at` / `chip_bonus_at`:
-//!
-//!   mult_bonus(level) = base_mult + 0.5 × (level - 1)
-//!   chip_bonus(level) = base_chips + 20 × (level - 1)
-//!
-//! Drop economy:
-//!   * Small Blind clear → 1 random Zodiac
-//!   * Big Blind clear   → 1 random Zodiac
-//!   * Boss Blind clear  → 2 random Zodiacs (or one Festival pack of 3 → pick 1)
-//!   * Shop              → 4 gold per single, 6 gold per Festival pack
-//!     (Qilin is omitted from shop zodiac rolls until Kokushi Musō has been
-//!     cashed in at least once — see [`crate::core::progression::PlayerProgress::kokushi_musou_discovered`].)
-//!
-//! The consumable inventory holds 2 cards by default and is expandable via
-//! the Brocade Pouch (+1) relic.
+//! formula in `YakuKind::mult_bonus_at` / `chip_bonus_at`. Zodiacs are
+//! consumed when used on a tile, boosting the level of the yaku bound to that
+//! tile for the rest of the run.
 
 use serde::{Deserialize, Serialize};
 
@@ -42,7 +28,6 @@ pub enum ZodiacKind {
     Rooster,
     Dog,
     Pig,
-    /// Mythical auspicious beast; levels Kokushi Musō (thirteen orphans).
     Qilin,
 }
 

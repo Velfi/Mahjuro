@@ -8,13 +8,10 @@ pub(super) struct ProcessOpCtx<'a> {
     /// `crate::render::wgpu_renderer::frame_pool`). The four slice
     /// arrays below index into this single buffer via `(offset, byte_len)`.
     pub frame_pool_buffer: &'a wgpu::Buffer,
-    pub bg_inst_buffers:
-        &'a [crate::render::wgpu_renderer::frame_pool::PoolSlice],
+    pub bg_inst_buffers: &'a [crate::render::wgpu_renderer::frame_pool::PoolSlice],
     pub quad_buffers: &'a [crate::render::wgpu_renderer::frame_pool::PoolSlice],
-    pub gradient_quad_buffers:
-        &'a [crate::render::wgpu_renderer::frame_pool::PoolSlice],
-    pub squircle_quad_buffers:
-        &'a [crate::render::wgpu_renderer::frame_pool::PoolSlice],
+    pub gradient_quad_buffers: &'a [crate::render::wgpu_renderer::frame_pool::PoolSlice],
+    pub squircle_quad_buffers: &'a [crate::render::wgpu_renderer::frame_pool::PoolSlice],
     pub flame_buffers: &'a [wgpu::Buffer],
     pub text_draws: &'a [TextDraw],
     pub tile_face_inst_buffers: &'a [wgpu::Buffer],

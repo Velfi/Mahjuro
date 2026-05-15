@@ -203,7 +203,7 @@ at y = 0, {tile_h}, {tile_h}*2, … — match the reference atlas exactly.
 reference atlas precisely — one suit per row:
   * Row 1: bamboos B1 through B9 left to right
   * Row 2: characters 一萬 through 九萬 left to right (C1–C9)
-  * Row 3: circles/dots D1 through D9 left to right
+  * Row 3: dots D1 through D9 left to right
   * Row 4: winds 東 南 西 北 then dragons 中 發 白 (7 tiles), then 2 empty cells
   * Row 5: flowers 梅 蘭 菊 竹 (4 tiles), then four season tiles 春 夏 秋 冬 \
 with recognizable spring/summer/autumn/winter motifs, then 1 empty cell

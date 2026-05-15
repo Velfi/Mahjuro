@@ -50,8 +50,8 @@ pub use reporting::{
     run_headless_aggregate, run_strategy_sweep, run_sweep,
 };
 use stats::clear_payout_breakdown;
-use stats::{BotScoringAction, PeakBlindSnapshot};
 pub use stats::{AggregateStats, RunStats, RunTimeoutSnapshot};
+use stats::{BotScoringAction, PeakBlindSnapshot};
 
 fn relic_display_name(id: RelicId) -> &'static str {
     all_relic_defs()
@@ -385,8 +385,7 @@ fn structure_commit_fits(
         .chain(new_sets.iter())
         .filter(|s| s.kind == MeldKind::Kong)
         .count();
-    run.structure_tiles().len() + scoring_tile_count
-        <= crate::game::run::HAND_SIZE + kongs_after
+    run.structure_tiles().len() + scoring_tile_count <= crate::game::run::HAND_SIZE + kongs_after
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -432,13 +431,8 @@ fn evaluate_play_masks(
             meld_count: merged_sets.len() as u32,
             inject_chicken_if_no_yaku: true,
         });
-        let breakdown = score_sets_with_original(
-            &merged_tiles,
-            &merged_sets,
-            &ctx,
-            &run.round_rules,
-            &tiles,
-        );
+        let breakdown =
+            score_sets_with_original(&merged_tiles, &merged_sets, &ctx, &run.round_rules, &tiles);
         if breakdown.total == 0 {
             continue;
         }
@@ -513,13 +507,8 @@ fn masks_with_positive_score(
             meld_count: merged_sets.len() as u32,
             inject_chicken_if_no_yaku: true,
         });
-        let breakdown = score_sets_with_original(
-            &merged_tiles,
-            &merged_sets,
-            &ctx,
-            &run.round_rules,
-            &tiles,
-        );
+        let breakdown =
+            score_sets_with_original(&merged_tiles, &merged_sets, &ctx, &run.round_rules, &tiles);
         if breakdown.total > 0 {
             hits += 1;
         }
@@ -537,13 +526,7 @@ fn best_play_in_hand(
 ) -> Option<(u64, Vec<usize>)> {
     let commit_rules = run.validation_rules_for_structure_commits();
     let masks = enumerate_candidate_play_masks(hand, &commit_rules);
-    evaluate_play_masks(
-        run,
-        hand,
-        relics_override,
-        yaku_levels_override,
-        &masks,
-    )
+    evaluate_play_masks(run, hand, relics_override, yaku_levels_override, &masks)
 }
 
 #[derive(Clone, Copy)]
@@ -624,9 +607,7 @@ fn push_kokushi_play_masks(
     }
     let mut pos: Vec<usize> = (0..14).collect();
     loop {
-        let mask: u32 = pos
-            .iter()
-            .fold(0u32, |acc, &pi| acc | (1u32 << pool[pi]));
+        let mask: u32 = pos.iter().fold(0u32, |acc, &pi| acc | (1u32 << pool[pi]));
         let tiles: Vec<Tile> = pos.iter().map(|&pi| hand[pool[pi]]).collect();
         if validate_selection_with_rules(&tiles, rules).is_some() {
             out.insert(mask);
@@ -1009,21 +990,13 @@ pub fn bench_evaluate_play_masks(
 
 /// Count masks that pass validation + structure-bank checks (before scoring).
 #[doc(hidden)]
-pub fn bench_count_masks_validate_structure(
-    run: &RunState,
-    hand: &[Tile],
-    masks: &[u32],
-) -> usize {
+pub fn bench_count_masks_validate_structure(run: &RunState, hand: &[Tile], masks: &[u32]) -> usize {
     masks_passing_validate_and_structure(run, hand, masks)
 }
 
 /// Count masks that yield a positive score (includes full scoring work).
 #[doc(hidden)]
-pub fn bench_count_masks_positive_score(
-    run: &RunState,
-    hand: &[Tile],
-    masks: &[u32],
-) -> usize {
+pub fn bench_count_masks_positive_score(run: &RunState, hand: &[Tile], masks: &[u32]) -> usize {
     masks_with_positive_score(run, hand, masks, None, None)
 }
 
@@ -1211,9 +1184,7 @@ fn play_blind(
         let slot = blind_slot_key(run);
         *stats.turns_by_blind_slot.entry(slot).or_insert(0) += 1;
         stats.turns_total += 1;
-        stats.peak_hand_size = stats
-            .peak_hand_size
-            .max(run.hand().len() as u32);
+        stats.peak_hand_size = stats.peak_hand_size.max(run.hand().len() as u32);
 
         bot_log!(
             log,
@@ -1429,9 +1400,9 @@ fn play_blind(
 #[cfg(test)]
 mod tests {
     use super::{
-        best_play_in_hand, enumerate_candidate_play_masks, pick_best_play,
-        remaining_antes_including_current, scale_long_term_value_for_ante, talisman_marginal_value,
-        use_bot_consumables, zodiac_marginal_value_with_base, RunStats, ShopMarginalBase,
+        RunStats, ShopMarginalBase, best_play_in_hand, enumerate_candidate_play_masks,
+        pick_best_play, remaining_antes_including_current, scale_long_term_value_for_ante,
+        talisman_marginal_value, use_bot_consumables, zodiac_marginal_value_with_base,
     };
     use crate::core::consumable::Consumable;
     use crate::core::hand::{DetectedMeld, MeldKind};
@@ -1530,9 +1501,9 @@ mod tests {
             t(Suit::Bamboos, 6, 4),
             t(Suit::Bamboos, 6, 5),
             t(Suit::Bamboos, 6, 6),
-            t(Suit::Circles, 2, 7),
-            t(Suit::Circles, 3, 8),
-            t(Suit::Circles, 4, 9),
+            t(Suit::Dots, 2, 7),
+            t(Suit::Dots, 3, 8),
+            t(Suit::Dots, 4, 9),
         ];
         run.hand_mut().sort();
         run
@@ -1586,8 +1557,8 @@ mod tests {
             t(Suit::Characters, 9, 1),
             t(Suit::Bamboos, 1, 2),
             t(Suit::Bamboos, 9, 3),
-            t(Suit::Circles, 1, 4),
-            t(Suit::Circles, 9, 5),
+            t(Suit::Dots, 1, 4),
+            t(Suit::Dots, 9, 5),
             t(Suit::Wind, 1, 6),
             t(Suit::Wind, 2, 7),
             t(Suit::Wind, 3, 8),
@@ -1776,7 +1747,11 @@ mod tests {
             Consumable::Talisman(TalismanKind::Pearl),
         ];
 
-        assert!(use_bot_consumables(&mut run, &mut RunStats::default(), false));
+        assert!(use_bot_consumables(
+            &mut run,
+            &mut RunStats::default(),
+            false
+        ));
         assert_eq!(run.yaku_levels.level_of(ZodiacKind::Ox.yaku()), 2);
         assert!(
             run.hand().iter().all(|tile| tile.enhancement.is_some()),
@@ -1974,7 +1949,7 @@ fn best_selection_for_talisman_on_hand(
         TalismanKind::Bamboo | TalismanKind::Dots | TalismanKind::Characters => {
             let target = match kind {
                 TalismanKind::Bamboo => Suit::Bamboos,
-                TalismanKind::Dots => Suit::Circles,
+                TalismanKind::Dots => Suit::Dots,
                 TalismanKind::Characters => Suit::Characters,
                 _ => unreachable!(),
             };
@@ -2084,9 +2059,7 @@ fn best_selection_for_talisman_on_hand(
             Some((sel, after - base))
         }
         // Buff talismans should never reach this function.
-        TalismanKind::Pearl
-        | TalismanKind::Gilded
-        | TalismanKind::Polychrome => None,
+        TalismanKind::Pearl | TalismanKind::Gilded | TalismanKind::Polychrome => None,
     }
 }
 
@@ -2314,9 +2287,7 @@ fn visit_shop(
     let pool_x = run.relic_shop_pool_extinction();
     let mut pool: Vec<RelicId> = defs
         .iter()
-        .filter(|d| {
-            relic_eligible_for_shop_stock(d.id, &run.relics, &run.available_relics, pool_x)
-        })
+        .filter(|d| relic_eligible_for_shop_stock(d.id, &run.relics, &run.available_relics, pool_x))
         .map(|d| d.id)
         .collect();
     pool.shuffle(&mut rand::rng());
@@ -2634,14 +2605,7 @@ fn play_run_with_options(
             break;
         }
         if run_deadline_expired(deadline) {
-            record_timeout_snapshot(
-                &mut stats,
-                &run,
-                "outer",
-                run.upcoming_blind,
-                None,
-                started,
-            );
+            record_timeout_snapshot(&mut stats, &run, "outer", run.upcoming_blind, None, started);
             break;
         }
         let blind = run.upcoming_blind;
@@ -2848,12 +2812,7 @@ fn play_run_with_options(
         .iter()
         .map(|&id| relic_display_name(id).to_string())
         .collect();
-    stats.final_consumables = run
-        .consumables
-        .items
-        .iter()
-        .map(|c| c.name())
-        .collect();
+    stats.final_consumables = run.consumables.items.iter().map(|c| c.name()).collect();
     stats.final_yaku_levels = run.yaku_levels.clone();
     stats.final_gold = run.gold;
     bot_log!(log, "== bot run stats: {:?} ==", stats);

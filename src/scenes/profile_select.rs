@@ -10,7 +10,10 @@ use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use crate::render::draw_cmd::UiFrame;
 
-use super::{scene_collection_archive, scene_options_menu, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+use super::{
+    DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx, scene_collection_archive,
+    scene_options_menu,
+};
 
 const PROFILE_COUNT: usize = 3;
 

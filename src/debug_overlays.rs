@@ -92,11 +92,7 @@ impl DebugVisibilityOverlay {
         }
     }
 
-    pub fn draw(
-        &self,
-        window_w: f32,
-        window_h: f32,
-    ) -> (Vec<GpuInstance>, Vec<TextLabel>) {
+    pub fn draw(&self, window_w: f32, window_h: f32) -> (Vec<GpuInstance>, Vec<TextLabel>) {
         let scale = metrics::scene_scale(window_w, window_h);
         let mut instances = Vec::new();
         let mut labels = Vec::new();
@@ -293,11 +289,7 @@ impl TuningOverlay {
         *field = (*field as i64 + delta).clamp(TUNING_MIN_MS as i64, TUNING_MAX_MS as i64) as u64;
     }
 
-    pub fn draw(
-        &self,
-        window_w: f32,
-        window_h: f32,
-    ) -> (Vec<GpuInstance>, Vec<TextLabel>) {
+    pub fn draw(&self, window_w: f32, window_h: f32) -> (Vec<GpuInstance>, Vec<TextLabel>) {
         let scale = metrics::scene_scale(window_w, window_h);
         let mut instances = Vec::new();
         let mut labels = Vec::new();
@@ -674,11 +666,7 @@ impl SfxTestOverlay {
         false
     }
 
-    pub fn draw(
-        &mut self,
-        window_w: f32,
-        window_h: f32,
-    ) -> (Vec<GpuInstance>, Vec<TextLabel>) {
+    pub fn draw(&mut self, window_w: f32, window_h: f32) -> (Vec<GpuInstance>, Vec<TextLabel>) {
         let scale = metrics::scene_scale(window_w, window_h);
         let mut instances = Vec::new();
         let mut labels = Vec::new();
@@ -907,11 +895,7 @@ impl CameraDebugOverlay {
         false
     }
 
-    pub fn draw(
-        &self,
-        window_w: f32,
-        window_h: f32,
-    ) -> (Vec<GpuInstance>, Vec<TextLabel>) {
+    pub fn draw(&self, window_w: f32, window_h: f32) -> (Vec<GpuInstance>, Vec<TextLabel>) {
         let scale = metrics::scene_scale(window_w, window_h);
         let mut instances = Vec::new();
         let mut labels = Vec::new();
@@ -1427,11 +1411,7 @@ impl ShopEnvDebugOverlay {
         }
     }
 
-    pub fn draw(
-        &self,
-        window_w: f32,
-        window_h: f32,
-    ) -> (Vec<GpuInstance>, Vec<TextLabel>) {
+    pub fn draw(&self, window_w: f32, window_h: f32) -> (Vec<GpuInstance>, Vec<TextLabel>) {
         let layout = ShopEnvDebugLayout::compute(window_w, window_h, self.row_count());
         let mut instances = Vec::new();
         let mut labels = Vec::new();

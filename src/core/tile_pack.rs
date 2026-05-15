@@ -43,7 +43,7 @@ pub enum TilePackKind {
     Flowers,
     /// +8 bamboo suit tiles (ranks 1–8).
     BambooGrove,
-    /// +8 circle suit tiles (ranks 1–8).
+    /// +8 dots suit tiles (ranks 1–8).
     CoinCache,
     /// +8 character suit tiles (ranks 1–8).
     ScrollLibrary,
@@ -167,7 +167,7 @@ impl TilePackKind {
                 // 6 terminal tiles — still all 1s and 9s, but the suit
                 // distribution is randomized (could be 3 bamboo-1s and no
                 // character-1, etc.)
-                let suits = [Suit::Characters, Suit::Bamboos, Suit::Circles];
+                let suits = [Suit::Characters, Suit::Bamboos, Suit::Dots];
                 for &terminal_rank in &[1u8, 9] {
                     for _ in 0..3 {
                         let suit = suits[(pack_rng_next(&mut rng_state) as usize) % 3];
@@ -191,7 +191,7 @@ impl TilePackKind {
                 let mut ranks: Vec<u8> = (1..=9).collect();
                 seeded_shuffle(&mut ranks, rng_state);
                 for &rank in ranks.iter().take(8) {
-                    push(Suit::Circles, rank, &mut out);
+                    push(Suit::Dots, rank, &mut out);
                 }
             }
             Self::ScrollLibrary => {

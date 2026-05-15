@@ -27,7 +27,7 @@ pub enum TalismanKind {
     Polychrome,
     /// Convert selected numbered tiles to bamboo; winds and dragons unchanged.
     Bamboo,
-    /// Convert selected numbered tiles to dots (circles); honors unchanged.
+    /// Convert selected numbered tiles to dots; honors unchanged.
     Dots,
     /// Convert selected numbered tiles to characters; honors unchanged.
     Characters,
@@ -152,7 +152,7 @@ impl TalismanKind {
             | TalismanKind::Characters
             | TalismanKind::Honors
             | TalismanKind::Wildflower
-            |             TalismanKind::Conformity => 8,
+            | TalismanKind::Conformity => 8,
             TalismanKind::Pearl => 12,
             TalismanKind::Gilded => 14,
             TalismanKind::Polychrome => 12,
@@ -183,7 +183,7 @@ mod tests {
     fn apply_stamps_every_tile() {
         let mut hand = vec![
             Tile::new(Suit::Bamboos, 3, 0),
-            Tile::new(Suit::Circles, 7, 1),
+            Tile::new(Suit::Dots, 7, 1),
             Tile::new(Suit::Dragon, 1, 2),
         ];
         apply_to_hand(&mut hand, TalismanKind::Pearl);
