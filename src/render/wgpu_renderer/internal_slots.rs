@@ -63,6 +63,13 @@ pub struct TextLabel {
     pub underline: bool,
     /// Fragment shader preset (rainbow, pulse, …). Ignored for image quads.
     pub text_effect: crate::render::text_effect::TextEffectId,
+    /// Clockwise quarter-turns applied when drawing (0 = 0°, 1 = 90°, …).
+    /// When odd, the label is rasterized with swapped width/height so auto-fit
+    /// fills the on-screen rect after rotation.
+    pub rotation_quarters: u8,
+    /// Added to the single-line raster baseline (negative nudges glyphs up in
+    /// the texture short axis). Used for optical centering (e.g. hallway PLAY).
+    pub baseline_shift_px: f32,
 }
 
 impl Default for TextLabel {
@@ -80,6 +87,8 @@ impl Default for TextLabel {
             italic: false,
             underline: false,
             text_effect: crate::render::text_effect::TextEffectId::Flat,
+            rotation_quarters: 0,
+            baseline_shift_px: 0.0,
         }
     }
 }
@@ -107,6 +116,9 @@ pub(crate) struct TextLabelShapeKey {
     /// Scroll offset in px, quantized to int. Distinct values still rasterize
     /// distinct entries; identical-offset frames collide.
     pub scroll_offset_px: i32,
+    pub rotation_quarters: u8,
+    /// `baseline_shift_px * 8`, rounded — cache key for raster vertical nudge.
+    pub baseline_shift_q: i16,
 }
 
 /// Cached GPU resources for a rasterized text label. The texture is owned

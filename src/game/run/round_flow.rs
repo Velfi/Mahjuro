@@ -142,36 +142,7 @@ impl RunState {
     /// We only grow `base_target` when the player defeats the Boss and rolls into the
     /// next ante; within an ante, the base stays put.
     pub fn advance_round(&mut self, bus: &mut EventBus) {
-        // Fortune's Favor halves destruction chances (doubles survival).
-        let fortunes = self.relics.has(RelicId::FortunesFavor);
-        // Paper Lantern: 1-in-5 chance to burn up at round end. When it
-        // burns, the slot empties and Paper goes extinct for the rest of
-        // the run — Silver Filigree Lantern then enters the shop pool.
-        // Fortune's Favor: 1-in-10 instead.
-        if self.relics.has(RelicId::PaperLantern) {
-            use rand::RngExt;
-
-            let mut rng = rand::rng();
-            let denom = if fortunes { 10 } else { 5 };
-            if rng.random_ratio(1, denom) {
-                self.paper_lantern_extinct = true;
-                let _ = self.destroy_relic_removed_from_run(RelicId::PaperLantern);
-                bus.push(GameEvent::TransformationSuccessorDiscovered(
-                    RelicId::SilverFiligreeLantern,
-                ));
-            }
-        }
-        // Silver Filigree Lantern: 1-in-1000 chance to shatter at round end.
-        // Fortune's Favor: 1-in-2000.
-        if self.relics.has(RelicId::SilverFiligreeLantern) {
-            use rand::RngExt;
-
-            let mut rng = rand::rng();
-            let denom = if fortunes { 2000 } else { 1000 };
-            if rng.random_ratio(1, denom) {
-                let _ = self.destroy_relic_removed_from_run(RelicId::SilverFiligreeLantern);
-            }
-        }
+        self.roll_lantern_maybe_shatter(bus);
         // Nest Egg: increment rounds held (affects sell value).
         if self.relics.has(RelicId::NestEgg) {
             *self.relic_counters.entry(RelicId::NestEgg).or_insert(0) += 1;
@@ -284,29 +255,7 @@ impl RunState {
     /// / ante credit. Relic hooks that run at a normal round end (Paper Lantern,
     /// Nest Egg, Obsession, …) still apply; Heirloom does not (blind was not cleared).
     pub(crate) fn forfeit_current_blind_second_wind(&mut self, bus: &mut EventBus) {
-        let fortunes = self.relics.has(RelicId::FortunesFavor);
-        if self.relics.has(RelicId::PaperLantern) {
-            use rand::RngExt;
-
-            let mut rng = rand::rng();
-            let denom = if fortunes { 10 } else { 5 };
-            if rng.random_ratio(1, denom) {
-                self.paper_lantern_extinct = true;
-                let _ = self.destroy_relic_removed_from_run(RelicId::PaperLantern);
-                bus.push(GameEvent::TransformationSuccessorDiscovered(
-                    RelicId::SilverFiligreeLantern,
-                ));
-            }
-        }
-        if self.relics.has(RelicId::SilverFiligreeLantern) {
-            use rand::RngExt;
-
-            let mut rng = rand::rng();
-            let denom = if fortunes { 2000 } else { 1000 };
-            if rng.random_ratio(1, denom) {
-                let _ = self.destroy_relic_removed_from_run(RelicId::SilverFiligreeLantern);
-            }
-        }
+        self.roll_lantern_maybe_shatter(bus);
         if self.relics.has(RelicId::NestEgg) {
             *self.relic_counters.entry(RelicId::NestEgg).or_insert(0) += 1;
             self.relic_activations.push(RelicId::NestEgg);

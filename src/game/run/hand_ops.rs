@@ -1,3 +1,4 @@
+use super::relic_removal::TransformationPrimaryRelic;
 use super::*;
 
 impl RunState {
@@ -146,15 +147,7 @@ impl RunState {
             let v = self.relic_counters.entry(RelicId::SilkThread).or_insert(40);
             *v = (*v - 3).max(0);
             if *v == 0 {
-                self.relic_counters.remove(&RelicId::SilkThread);
-                self.silk_thread_extinct = true;
-                let _ = self.destroy_relic_removed_from_run(RelicId::SilkThread);
-                bus.push(GameEvent::TransformationSuccessorDiscovered(
-                    RelicId::SilkMoth,
-                ));
-                bus.push(GameEvent::AchievementUnlocked(
-                    crate::steam::Achievement::SilkMothEmerged,
-                ));
+                self.on_transformation_primary_burned(TransformationPrimaryRelic::SilkThread, bus);
             }
         }
 

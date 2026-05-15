@@ -512,6 +512,14 @@ impl RelicId {
         format!("textures/relics/source/{}_height.png", stem)
     }
 
+    /// Optional offline-generated grayscale specular mask for soft-enamel pins.
+    /// Loaded into the relief texture G channel at runtime; derived from height
+    /// when this file is missing.
+    pub fn source_specular_path(self) -> String {
+        let stem = self.asset_filename().trim_end_matches(".png");
+        format!("textures/relics/source/{}_specular.png", stem)
+    }
+
     /// Derived runtime silhouette used when the offline workflow emits a
     /// cleaned-up alpha mask alongside the visible relic texture.
     pub fn render_mask_path(self) -> String {

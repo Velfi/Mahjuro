@@ -440,15 +440,12 @@ impl WgpuRenderer {
         for (model, _rid) in &self.last_relic_models {
             self.proj.relic_rects.push(project_unit_cube_rect(*model));
         }
-        // Ribbons: mesh local AABB is x ∈ [-0.5, 0.5], y ∈ [-1, 0],
-        // z ∈ [-0.05, 0.05] — not the unit cube. Project those bounds so the
-        // screen rect lines up with the actual ribbon (otherwise it ends up
-        // half-height and shifted up by half the ribbon length).
+        // Ribbons: mesh local AABB is x/y ∈ [-0.5, 0.5], z ∈ [-0.05, 0.05].
         self.proj.ribbon_rects.clear();
         for model in &self.last_ribbon_models {
             self.proj
                 .ribbon_rects
-                .push(project_aabb_rect(*model, [0.5, 0.5, 0.05], -0.5));
+                .push(project_aabb_rect(*model, [0.5, 0.5, 0.05], 0.0));
         }
         // Talismans: local mesh AABB is `TALISMAN_LOCAL_HALF` (y=0.7, z=0.09),
         // not ±0.5. The model already bakes the world scale (see sx/sy/sz

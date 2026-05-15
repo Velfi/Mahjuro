@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Generate a new mahjong tile-set atlas via a single OpenAI image edit call.
+"""Generate a new mahjong tile-set atlas via a single Gemini image-edit call.
 
-**Default workflow:** pass a **reference atlas** image (default: the repo’s
+**Default workflow:** pass a **reference atlas** image (default: the repo's
 procedural layout at `assets/textures/tile_sets/classic/atlas.png`) plus style
-instructions; the model restyles the full 9×5 grid in one shot while preserving
-layout and tile identity. Output goes to
+instructions; Nano Banana 2 restyles the full 9×5 grid in one shot while
+preserving layout and tile identity. Output goes to
 `assets/textures/tile_sets/<name>/atlas.png` + `atlas.toml`.
 
 Why one call: generating dozens of tiles individually is expensive; one
-whole-atlas edit is typically ~$0.04–0.10 and keeps the grid aligned.
+whole-atlas edit keeps the grid aligned.
 
 Usage:
-    pip install openai pillow
-    export OPENAI_API_KEY="sk-..."
+    pip install google-genai pillow
+    export GEMINI_API_KEY="..."
 
     # list built-in themes
     python3 scripts/generate_tile_atlas.py --list
@@ -35,19 +35,19 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import base64
 import io
-import os
 import sys
 from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 
-try:
-    from openai import OpenAI
-except ImportError:
-    print("Error: openai package not installed. Run: pip install openai")
-    sys.exit(1)
+sys.path.insert(0, str(SCRIPTS_DIR))
+from _image_gen import (  # noqa: E402
+    DEFAULT_MODEL,
+    generate_image_bytes,
+    init_client,
+    parse_size,
+)
 
 try:
     from PIL import Image
@@ -196,7 +196,7 @@ Hard requirements — follow these verbatim:
 row and {rows} rows total.
 - Each illustrated tile face occupies one {tile_w}x{tile_h} pixel cell; \
 all cells are identical in width and height; the 9×5 grid is perfectly \
-rectilinear (no curved rows, no drifting seams, no variable gutters).
+rectilinear with straight rows, even seams, and uniform gutters.
 - Column boundaries are at x = 0, {tile_w}, {tile_w}*2, …; row boundaries \
 at y = 0, {tile_h}, {tile_h}*2, … — match the reference atlas exactly.
 - The set of tiles depicted and their grid positions must match the \
@@ -212,13 +212,12 @@ center; 7-dot red top-diagonal; 9-dot red top+bottom rows with green \
 middle; 3-bamboo, 5-bamboo, 7-bamboo, 9-bamboo have red accents in the \
 traditional positions; 一萬 is red; 中 is red; 發 is green; 白 is blank \
 with a thin blue frame.
-- No text, numbers, watermarks, or labels outside the tile faces. No \
-tabletop, no drop shadows beneath tiles, no perspective, no 3D tile \
-thickness — each cell is a flat orthographic tile face.
-- Tiles do not overlap or bleed into neighbors; a small consistent gap \
-or clean tile edge between neighbors is fine.
-- Empty cells (row 4 columns 8–9 and row 5 column 9) should be left as \
-transparent or neutral background, matching the reference.
+- Each cell is a flat orthographic tile face filling its grid slot — \
+front-on portrait view, flat ink on the face plane.
+- Each tile stays inside its cell with a small consistent gap or clean \
+edge between neighbors.
+- Empty cells (row 4 columns 8–9 and row 5 column 9) use pure flat \
+black or neutral background matching the reference.
 """
 
 
@@ -288,12 +287,13 @@ def main() -> None:
                     help="List available themes and exit.")
     ap.add_argument("--dry-run", action="store_true",
                     help="Print the prompt, don't call the API.")
-    ap.add_argument("--model", default="gpt-image-2",
-                    help="OpenAI image model.")
+    ap.add_argument("--model", default=DEFAULT_MODEL,
+                    help=f"Gemini image model (default: {DEFAULT_MODEL}).")
     ap.add_argument("--size", default=f"{ATLAS_W}x{ATLAS_H}",
-                    help="API output size. Default matches the atlas "
-                         f"({ATLAS_W}x{ATLAS_H}); the model may clamp to a "
-                         "supported size and Pillow resizes back.")
+                    help="Generation size — Gemini ASPECT@TIER (e.g. "
+                         "'4:3@4K'). Default auto-translates from the atlas "
+                         f"pixel dims ({ATLAS_W}x{ATLAS_H}); Pillow scales "
+                         "back to the canonical size after.")
     ap.add_argument("--force", action="store_true",
                     help="Overwrite existing atlas.png/atlas.toml.")
     ap.add_argument(
@@ -332,27 +332,21 @@ def main() -> None:
     if atlas_out.exists() and not args.force:
         ap.error(f"{atlas_out} exists; pass --force to overwrite")
 
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        print("Error: OPENAI_API_KEY not set.", file=sys.stderr)
-        sys.exit(1)
-    client = OpenAI(api_key=api_key)
+    client = init_client()
 
     set_dir.mkdir(parents=True, exist_ok=True)
     print(f"Restyling {args.template.relative_to(REPO_ROOT)} → {atlas_out}")
     print(f"Theme: {args.theme or 'custom'}")
 
-    with args.template.open("rb") as image_file:
-        response = client.images.edit(
-            model=args.model,
-            image=image_file,
-            prompt=prompt,
-            size=args.size,
-            n=1,
-        )
-
-    b64 = response.data[0].b64_json
-    img_bytes = base64.b64decode(b64)
+    aspect_ratio, image_size = parse_size(args.size)
+    img_bytes = generate_image_bytes(
+        client,
+        prompt,
+        model=args.model,
+        aspect_ratio=aspect_ratio,
+        image_size=image_size,
+        refs=[args.template],
+    )
     img = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
     # Model size may differ; uniform scale + crop preserves square tile aspect.
     if img.size != (ATLAS_W, ATLAS_H):

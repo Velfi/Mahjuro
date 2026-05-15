@@ -1450,34 +1450,40 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     });
     let bloom_w = (size.width.max(1) / 2).max(1);
     let bloom_h = (size.height.max(1) / 2).max(1);
+
+    let bloom_bundle = super::bloom::build_bloom(
+        &device,
+        &queue,
+        bloom_w,
+        bloom_h,
+        scene_hdr_format,
+        &bloom_extract_shader,
+        &bloom_blur_shader,
+        &bloom_composite_shader,
+        &shop_linear_bloom_view,
+        &scene_color_view,
+    );
+    let bloom_extract_pipeline = bloom_bundle.extract_pipeline;
+    let bloom_blur_pipeline = bloom_bundle.blur_pipeline;
+    let bloom_composite_pipeline = bloom_bundle.composite_pipeline;
+    let bloom_bind_group_layout = bloom_bundle.bind_group_layout;
+    let bloom_extract_bind_group_layout = bloom_bundle.extract_bind_group_layout;
+    let bloom_composite_bind_group_layout = bloom_bundle.composite_bind_group_layout;
+    let bloom_extract_params_buffer = bloom_bundle.extract_params_buffer;
+    let bloom_blur_h_params_buffer = bloom_bundle.blur_h_params_buffer;
+    let bloom_blur_v_params_buffer = bloom_bundle.blur_v_params_buffer;
+    let bloom_composite_params_buffer = bloom_bundle.composite_params_buffer;
+    let bloom_sampler = bloom_bundle.sampler;
+    let bloom_scene_bind_group = bloom_bundle.scene_bind_group;
+    let bloom_ping_bind_group = bloom_bundle.ping_bind_group;
+    let bloom_pong_bind_group = bloom_bundle.pong_bind_group;
+    let bloom_composite_bind_group = bloom_bundle.composite_bind_group;
+    let bloom_ping_texture = bloom_bundle.ping_texture;
+    let bloom_ping_view = bloom_bundle.ping_view;
+    let bloom_pong_texture = bloom_bundle.pong_texture;
+    let bloom_pong_view = bloom_bundle.pong_view;
     let (emissive_gi_texture, emissive_gi_view) =
         create_post_texture(&device, scene_hdr_format, bloom_w, bloom_h, "emissive-gi");
-    let (bloom_ping_texture, bloom_ping_view) =
-        create_post_texture(&device, scene_hdr_format, bloom_w, bloom_h, "bloom-ping");
-    let (bloom_pong_texture, bloom_pong_view) =
-        create_post_texture(&device, scene_hdr_format, bloom_w, bloom_h, "bloom-pong");
-    let bloom_ub = |label: &'static str| {
-        device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(label),
-            size: std::mem::size_of::<BloomParams>() as wgpu::BufferAddress,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        })
-    };
-    let bloom_extract_params_buffer = bloom_ub("bloom-extract-params");
-    let bloom_blur_h_params_buffer = bloom_ub("bloom-blur-h-params");
-    let bloom_blur_v_params_buffer = bloom_ub("bloom-blur-v-params");
-    let bloom_composite_params_buffer = bloom_ub("bloom-composite-params");
-    let bloom_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-        label: Some("bloom-sampler"),
-        address_mode_u: wgpu::AddressMode::ClampToEdge,
-        address_mode_v: wgpu::AddressMode::ClampToEdge,
-        address_mode_w: wgpu::AddressMode::ClampToEdge,
-        mag_filter: wgpu::FilterMode::Linear,
-        min_filter: wgpu::FilterMode::Linear,
-        mipmap_filter: wgpu::MipmapFilterMode::Nearest,
-        ..Default::default()
-    });
     let lit_mesh_spot_ssr_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("lit-mesh-spot-ssr-bg"),
         layout: &lit_mesh_spot_ssr_layout,
@@ -1823,214 +1829,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         cache: None,
     });
 
-    let bloom_bind_group_layout =
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("bloom-bg-layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
-    let bloom_extract_bind_group_layout =
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("bloom-extract-bg-layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
-    let bloom_composite_bind_group_layout =
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("bloom-composite-bg-layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
-    let bloom_blur_pipeline_layout =
-        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("bloom-blur-pl"),
-            bind_group_layouts: &[Some(&bloom_bind_group_layout)],
-            immediate_size: 0,
-        });
-    let bloom_extract_pipeline_layout =
-        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("bloom-extract-pl"),
-            bind_group_layouts: &[Some(&bloom_extract_bind_group_layout)],
-            immediate_size: 0,
-        });
-    let bloom_extract_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("bloom-extract-pipeline"),
-        layout: Some(&bloom_extract_pipeline_layout),
-        vertex: wgpu::VertexState {
-            module: &bloom_extract_shader,
-            entry_point: Some("vs_main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            buffers: &[],
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &bloom_extract_shader,
-            entry_point: Some("fs_main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            targets: &[Some(wgpu::ColorTargetState {
-                format: scene_hdr_format,
-                blend: None,
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-        }),
-        primitive: wgpu::PrimitiveState::default(),
-        depth_stencil: None,
-        multisample: wgpu::MultisampleState::default(),
-        multiview_mask: None,
-        cache: None,
-    });
-    let bloom_blur_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("bloom-blur-pipeline"),
-        layout: Some(&bloom_blur_pipeline_layout),
-        vertex: wgpu::VertexState {
-            module: &bloom_blur_shader,
-            entry_point: Some("vs_main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            buffers: &[],
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &bloom_blur_shader,
-            entry_point: Some("fs_main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            targets: &[Some(wgpu::ColorTargetState {
-                format: scene_hdr_format,
-                blend: None,
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-        }),
-        primitive: wgpu::PrimitiveState::default(),
-        depth_stencil: None,
-        multisample: wgpu::MultisampleState::default(),
-        multiview_mask: None,
-        cache: None,
-    });
-    let bloom_composite_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("bloom-composite-pl"),
-        bind_group_layouts: &[Some(&bloom_composite_bind_group_layout)],
-        immediate_size: 0,
-    });
-    let bloom_composite_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("bloom-composite-pipeline"),
-        layout: Some(&bloom_composite_layout),
-        vertex: wgpu::VertexState {
-            module: &bloom_composite_shader,
-            entry_point: Some("vs_main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            buffers: &[],
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &bloom_composite_shader,
-            entry_point: Some("fs_main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            targets: &[Some(wgpu::ColorTargetState {
-                format: scene_hdr_format,
-                blend: None,
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-        }),
-        primitive: wgpu::PrimitiveState::default(),
-        depth_stencil: None,
-        multisample: wgpu::MultisampleState::default(),
-        multiview_mask: None,
-        cache: None,
-    });
 
     let tonemap_bind_group_layout =
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -2148,86 +1946,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         ],
     });
 
-    let bloom_scene_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("bloom-scene-bg"),
-        layout: &bloom_extract_bind_group_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: bloom_extract_params_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::TextureView(&scene_color_view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: wgpu::BindingResource::TextureView(&shop_linear_bloom_view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: wgpu::BindingResource::Sampler(&bloom_sampler),
-            },
-        ],
-    });
-    let bloom_ping_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("bloom-ping-bg"),
-        layout: &bloom_bind_group_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: bloom_blur_h_params_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::TextureView(&bloom_ping_view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: wgpu::BindingResource::Sampler(&bloom_sampler),
-            },
-        ],
-    });
-    let bloom_pong_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("bloom-pong-bg"),
-        layout: &bloom_bind_group_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: bloom_blur_v_params_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::TextureView(&bloom_pong_view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: wgpu::BindingResource::Sampler(&bloom_sampler),
-            },
-        ],
-    });
-    let bloom_composite_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("bloom-composite-bg"),
-        layout: &bloom_composite_bind_group_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: bloom_composite_params_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::TextureView(&scene_color_view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: wgpu::BindingResource::TextureView(&bloom_ping_view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: wgpu::BindingResource::Sampler(&bloom_sampler),
-            },
-        ],
-    });
 
     let probe_gi_frame_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("probe-gi-frame-uniform"),
@@ -3797,41 +3515,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
 
     log::info!("WgpuRenderer::new() total: {:?}", t_total.elapsed());
 
-    let inv_bw = 1.0 / bloom_w as f32;
-    let inv_bh = 1.0 / bloom_h as f32;
-    let bloom_data0 = [1.1_f32, 0.0, inv_bw, inv_bh];
-    queue.write_buffer(
-        &bloom_extract_params_buffer,
-        0,
-        bytemuck::bytes_of(&BloomParams {
-            data0: bloom_data0,
-            data1: [0.0; 4],
-        }),
-    );
-    queue.write_buffer(
-        &bloom_blur_h_params_buffer,
-        0,
-        bytemuck::bytes_of(&BloomParams {
-            data0: bloom_data0,
-            data1: [1.0, 0.0, 0.0, 0.0],
-        }),
-    );
-    queue.write_buffer(
-        &bloom_blur_v_params_buffer,
-        0,
-        bytemuck::bytes_of(&BloomParams {
-            data0: bloom_data0,
-            data1: [0.0, 1.0, 0.0, 0.0],
-        }),
-    );
-    queue.write_buffer(
-        &bloom_composite_params_buffer,
-        0,
-        bytemuck::bytes_of(&BloomParams {
-            data0: bloom_data0,
-            data1: [0.0; 4],
-        }),
-    );
     queue.write_buffer(
         &tonemap_params_buffer,
         0,

@@ -1075,6 +1075,7 @@ impl<'a> GameEngine<'a> {
                     let victim_value = crate::core::relic::relic_sell_price(victim_id) as i32;
                     self.run.relics.active.remove(index + 1);
                     self.run.relics.active.remove(index);
+                    self.run.clear_relic_run_metadata(victim_id);
                     if !self.run.relics.has(RelicId::IGotAGuy) {
                         self.run.relic_counters.remove(&RelicId::IGotAGuy);
                     }
@@ -1097,11 +1098,9 @@ impl<'a> GameEngine<'a> {
                     );
                 }
                 self.run.relics.active.remove(index);
+                self.run.clear_relic_run_metadata(rid);
                 if !self.run.relics.has(RelicId::IGotAGuy) {
                     self.run.relic_counters.remove(&RelicId::IGotAGuy);
-                }
-                if rid == RelicId::Snowball {
-                    self.run.relic_counters.remove(&RelicId::Snowball);
                 }
                 self.run
                     .apply_gold_reward(refund as i32, Some(&mut self.bus));

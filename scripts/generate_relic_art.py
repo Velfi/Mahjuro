@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Generate relic **source** art for Mahjuro via the OpenAI image API.
+Generate relic **source** art for Mahjuro via Google's Nano Banana 2 image API.
 
 Relic list matches `RelicId` / `asset_filename` in `src/core/relic.rs`. Art
-direction: enamel-pin badges (readable silhouette, metal rims, enamel fills).
+direction: realistic soft-enamel lapel pins (custom die-cut silhouettes, raised metal lines, recessed fills).
 
 **Writes (under `assets/textures/relics/source/` by default)**
 
@@ -12,6 +12,10 @@ direction: enamel-pin badges (readable silhouette, metal rims, enamel fills).
     `src/render/relic_pipeline.rs`.
   • `{slug}_height.png` — grayscale **relief guide**. At runtime this path is
     the linear height / `relief_tex` bind (same stem as `RelicId::source_heightmap_path`).
+  • `{slug}_specular.png` — grayscale **specular mask** (L-mode). White = shiny
+    raised metal; dark gray = matte soft-enamel wells. Loaded into the relief
+    texture G channel at runtime (`RelicId::source_specular_path`). Derived from
+    the height map by default; optional AI pass via `--specular-mode reference`.
   • `{slug}_mask.png` — binary silhouette (L-mode PNG) derived from the cleaned
     object alpha. Matches `RelicId::source_mask_path` and feeds the mesh
     extrusion path in `src/render/relic_pipeline.rs`. Rewritten whenever the
@@ -31,12 +35,13 @@ with `--force` regenerates the mask from the height map without ever
 touching the object.
 
 Usage:
-    pip install openai requests pillow
-    export OPENAI_API_KEY="sk-..."
+    pip install google-genai pillow
+    export GEMINI_API_KEY="..."
     python scripts/generate_relic_art.py                       # all missing source assets
     python scripts/generate_relic_art.py --artifact object     # only object renders
     python scripts/generate_relic_art.py --artifact height     # only relief/height sources
     python scripts/generate_relic_art.py --artifact mask       # only rewrite masks from existing heights
+    python scripts/generate_relic_art.py --artifact specular   # only rewrite specular from existing heights
     python scripts/generate_relic_art.py --artifact both --name strength_in_numbers
     python scripts/generate_relic_art.py --force               # regenerate all
     python scripts/generate_relic_art.py --relic 17            # one relic by index
@@ -46,7 +51,6 @@ Usage:
 """
 
 import argparse
-import base64
 import json
 import os
 import re
@@ -55,11 +59,13 @@ import tempfile
 import time
 from pathlib import Path
 
-try:
-    from openai import OpenAI
-except ImportError:
-    print("Error: openai package not installed. Run: pip install openai")
-    sys.exit(1)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _image_gen import (  # noqa: E402
+    DEFAULT_MODEL,
+    generate_image_bytes,
+    init_client,
+    parse_size,
+)
 
 
 OUTPUT_DIR = (
@@ -71,7 +77,7 @@ OUTPUT_DIR = (
 )
 
 # Shared style description injected into every prompt. Tuned for isolated
-# cloisonné-enamel-pin relic renders that can be reviewed directly and fed
+# soft-enamel-pin relic renders that can be reviewed directly and fed
 # into silhouette / relief derivation.
 #
 # The core describes construction, material, and lighting in metal-agnostic
@@ -79,57 +85,66 @@ OUTPUT_DIR = (
 # Legendary pins read as Iron/Copper/Silver/Gold — matching the canonical
 # mapping in src/core/relic.rs (see material_for_rarity).
 STYLE_CORE = (
-    "A single isolated collectible cloisonné enamel pin relic rendered as a "
-    "hero badge for a game asset pipeline. Front-facing near-orthographic "
-    "presentation, pin plane parallel to the camera, centered inside a "
-    "rounded-square bezel with a raised polished outer frame and a stepped "
-    "inner lip.\n\n"
-    "Construction: every color region is a champlevé cell recessed slightly "
-    "below raised cloisonné wires. The wires have visible cross-section, "
-    "catch a crisp specular highlight along their top edge, and cast a "
-    "hairline shadow down into the enamel below. Enamel fills sit at a "
-    "consistent recessed depth across the whole pin.\n\n"
-    "Material: vitreous glass enamel with faint subsurface depth — light "
-    "enters each fill, bounces off the polished metal substrate beneath, and "
-    "returns slightly desaturated toward the center of the cell, giving a "
-    "jewel-like inner glow. Strong silhouette readability at game-camera "
-    "scale; proportions stay clean under the near-orthographic camera."
+    "A single isolated collectible soft-enamel lapel pin rendered as a "
+    "realistic product photograph for a game asset pipeline. Front-facing "
+    "near-orthographic presentation, pin plane parallel to the camera.\n\n"
+    "Silhouette: the outer pin outline follows the natural shape of the "
+    "subject — organic, asymmetric, circular, crest-shaped, or irregular as "
+    "the motif demands. Do NOT force every pin into the same rounded-square "
+    "frame; each relic gets its own custom die-cut outline. A continuous "
+    "raised metal rim traces the entire outer edge of that individual "
+    "silhouette.\n\n"
+    "Construction: classic soft-enamel manufacture — colored enamel paint "
+    "filled into recessed wells and air-dried, sitting noticeably below "
+    "raised metal divider lines and the die-cut outer rim. Metal lines have "
+    "visible height above the fill, catching crisp specular highlights along "
+    "their top edge while casting a hairline shadow onto the enamel below. "
+    "Enamel fills read matte to semi-gloss with slight meniscus pooling "
+    "against the metal walls; the surface is textured and stepped, not "
+    "polished flush like hard enamel.\n\n"
+    "Material: opaque soft enamel with a slightly satin finish — colors stay "
+    "rich but not glassy; subtle pooled depth in each well without vitreous "
+    "shine or mirror-smooth polish.\n\n"
+    "Composition: believable pin proportions — overlapping elements, subtle "
+    "depth layering within the pin plane, and natural spacing rather than "
+    "flat icon-badge layout. Photographic studio realism, not graphic logo art. "
+    "Strong silhouette readability at game-camera scale."
 )
 
 
 # Per-rarity metal profile. Keys match src/core/relic.rs Rarity variants.
-# The bezel, cloisonné wires, and any negative-space substrate all read as
-# this metal; only the enamel fills vary per badge.
+# The outer rim, raised metal lines, and any negative-space substrate all read
+# as this metal; only the recessed soft-enamel fills vary per pin.
 METAL_PROFILES = {
     "Common": (
-        "Metal tier (Common — Iron): the wire inlay and bezel read as "
-        "blackened wrought iron with a subtle hammered texture along the "
-        "outer frame. Highlights are cool steely white; negative-space "
-        "substrate shows as dark gunmetal with a soft brushed grain. Wire "
-        "tops catch a narrow hard specular line."
+        "Metal tier (Common — Iron): the raised divider lines and die-cut outer "
+        "rim read as blackened wrought iron with a subtle hammered texture "
+        "along the pin edge. Highlights are cool steely white; negative-space "
+        "substrate shows as dark gunmetal with a soft brushed grain. Metal "
+        "line tops catch a narrow hard specular."
     ),
     "Uncommon": (
-        "Metal tier (Uncommon — Copper): the wire inlay and bezel read as "
-        "polished rose copper with a warm amber patina settling into "
-        "recesses. Highlights are warm peach-white; negative-space substrate "
-        "shows as burnished copper with a soft radial brush. Wire tops hold "
-        "a long warm specular roll."
+        "Metal tier (Uncommon — Copper): the raised divider lines and die-cut "
+        "outer rim read as polished rose copper with a warm amber patina "
+        "settling into recesses. Highlights are warm peach-white; "
+        "negative-space substrate shows as burnished copper with a soft radial "
+        "brush. Metal line tops hold a long warm specular roll."
     ),
     "Rare": (
-        "Metal tier (Rare — Silver): the wire inlay and bezel read as "
-        "polished sterling silver with a cool white sheen. Highlights are "
-        "bright cool-white; negative-space substrate shows as brushed silver "
-        "with a faint radial burnish. Wire tops catch a crisp cool specular, "
-        "and enamel cells pick up a subtle cool reflection near the wire "
-        "edges."
+        "Metal tier (Rare — Silver): the raised divider lines and die-cut outer "
+        "rim read as polished sterling silver with a cool white sheen. "
+        "Highlights are bright cool-white; negative-space substrate shows as "
+        "brushed silver with a faint radial burnish. Metal line tops catch a "
+        "crisp cool specular, and recessed enamel wells pick up a subtle cool "
+        "reflection near the walls."
     ),
     "Legendary": (
-        "Metal tier (Legendary — Gold): the wire inlay and bezel read as "
-        "polished jeweler's gold with a warm buttery tone. Highlights are "
-        "warm ivory-gold; negative-space substrate shows as brushed gold "
-        "with a soft radial burnish warming from the center outward. Wire "
-        "tops hold a long luminous specular, and enamel cells carry a faint "
-        "gold reflection along their inner edges."
+        "Metal tier (Legendary — Gold): the raised divider lines and die-cut "
+        "outer rim read as polished jeweler's gold with a warm buttery tone. "
+        "Highlights are warm ivory-gold; negative-space substrate shows as "
+        "brushed gold with a soft radial burnish warming from the center "
+        "outward. Metal line tops hold a long luminous specular, and recessed "
+        "enamel wells carry a faint gold reflection along their inner edges."
     ),
 }
 
@@ -218,16 +233,6 @@ def rarity_for(slug: str) -> str:
     return rarity
 
 
-# OpenAI Images API `n` (parallel samples per request; first image is kept).
-RELIC_IMAGE_SAMPLES: dict[str, int] = {
-    "dragon_rage": 3,
-}
-
-
-def image_samples_for(slug: str) -> int:
-    return RELIC_IMAGE_SAMPLES.get(slug, 1)
-
-
 # Each tuple: (filename_slug, display_name, visual_description, palette_hint)
 # Order and slugs MUST match RelicId::asset_filename in src/core/relic.rs.
 RELICS = [
@@ -275,15 +280,15 @@ RELICS = [
     (
         "dragon_rage",
         "Dragon Rage",
-        "A compact cloisonné enamel pin crest: three upright dragon honor "
+        "A soft-enamel pin shaped like three upright dragon honor "
         "tiles locked in a tight triplet — center chun (red dragon glyph) "
         "flanked by green and white dragon marks. Each tile reads as its own "
-        "enamel cell behind raised metal wires; the center cell reads hottest "
-        "with saturated crimson vitreous glass and tiny separate wire-locked "
-        "spark cells. A coiled eastern dragon is only hinted in the routing of "
-        "wires and negative metal space between the tiles — graphic badge "
-        "language at pin scale, not a full illustrated scene. Thick outer "
-        "bezel; bold flat color fields; no felt tabletop or scroll painting.",
+        "recessed enamel well bounded by raised metal lines; the center well "
+        "reads hottest with saturated crimson soft enamel and tiny separate "
+        "spark cells. A coiled eastern dragon is hinted in the routing of "
+        "metal lines and negative metal space between the tiles. The pin outline "
+        "follows the triplet's natural rectangular silhouette; realistic "
+        "pin proportions, not a generic square frame.",
         "Crimson, jade, and cool white-blue honor enamels; soft amber rim light.",
     ),
     (
@@ -475,17 +480,16 @@ RELICS = [
     (
         "hanami",
         "Hanami",
-        "A miniature cherry tree growing from a small lacquered pot at "
-        "the center of an emerald felt table — gnarled dark trunk, "
-        "delicate spreading branches — where every blossom on the tree "
-        "is actually a small upright mahjong flower tile clipped to the "
-        "branch like a pink bloom, ivory faces painted with plum, orchid, "
-        "bamboo, and chrysanthemum motifs. A few flower tiles have fallen "
-        "and lie scattered face-up on the felt below, with stacks of warm "
-        "gold coins gathered beneath the tree where the tiles have "
-        "dropped. Loose pink petals drift through the air. A few stray "
-        "face-down wall tiles lie blurred in the background.",
-        "Dark gnarled cherry trunk and branches, ivory mahjong flower tiles clipped on as blossoms, soft pastel pink and jade flower glyphs, deep emerald felt, lacquered black pot, warm gold coin stacks beneath fallen tiles, drifting pink petals, soft amber rim light.",
+        "A soft-enamel pin shaped like a miniature cherry tree growing "
+        "from a small lacquered black pot — gnarled dark trunk, delicate "
+        "spreading branches. Every blossom is a small upright mahjong flower "
+        "tile clipped to the branch, ivory enamel faces painted with plum, "
+        "orchid, bamboo, and chrysanthemum motifs in soft pastel pink and "
+        "jade. A few fallen flower tiles and neat stacks of warm gold coins "
+        "rest at the tree base. Loose pink petals drift around the canopy. "
+        "The pin outline follows the tree's organic canopy silhouette; "
+        "realistic depth and layering within the pin plane.",
+        "Dark gnarled cherry trunk and branches, lacquered black pot, ivory mahjong flower-tile blossoms with pastel pink and jade glyphs, warm gold coin stacks, drifting pink petal accents, soft amber rim light.",
     ),
     (
         "jade_serpent",
@@ -549,10 +553,9 @@ RELICS = [
     (
         "i_got_a_guy",
         "I Got A Guy",
-        "A creased paper business card and a scrap with a phone number scribbled "
-        "in ink, clipped together with a bent paperclip, resting on emerald "
-        "felt beside a mahjong wall tile edge. Slightly comedic noir mood, "
-        "small prop readable at icon scale.",
+        "A creased paper business card for Otto's Pawn Shop and a scrap "
+        "with strange symbols scribbled in ink, clipped together with a bent paperclip."
+        "Phone number is not readable.",
         "Cream paper, black ink scrawl, steel paperclip, emerald felt, warm counter light.",
     ),
     (
@@ -602,14 +605,16 @@ RELICS = [
     (
         "closed_gate",
         "Closed Gate",
-        "A short row of mahjong tiles standing upright at the center of an "
-        "emerald felt table — only terminals and honors: a 1 of bamboo, a "
-        "9 of dots, a red dragon, an East wind. Between them a heavy "
-        "ornamental gate is etched into the felt in faint gold lines, its "
-        "doors drawn shut behind the row as if barring the middle ranks "
-        "from entry. A few stray face-down wall tiles lie blurred in the "
-        "background.",
-        "Ivory tile faces, deep emerald felt, deep blue dot and crimson dragon marks, etched gold gate lines, warm amber rim light.",
+        "A soft-enamel pin: four upright mahjong tiles in a tight row — "
+        "1 of bamboo, 9 of dots, red dragon (chun), East wind — each tile "
+        "its own recessed enamel well bounded by raised metal lines. Behind "
+        "the row rises a heavy ornamental Chinese gate with a curved roof "
+        "and lattice panels; its two doors are fully closed and flush in "
+        "the center with no gap or opening, barred shut as if blocking "
+        "middle ranks from passing. The gate frame and tile row define the "
+        "pin's crest-shaped silhouette; worn smooth at the edges from "
+        "countless late-night rounds.",
+        "Ivory tile faces, deep blue dot and wind glyphs, crimson dragon enamel, muted bamboo-green 1-bam, antique gold gate filigree, soft amber rim light.",
     ),
     (
         "golden_engine",
@@ -702,8 +707,8 @@ RELICS = [
         "mirror_tile",
         "Mirror Tile",
         "A mahjong tile paired with a polished circular mirror inset, the "
-        "reflective face framed by a crisp geometric border. Symmetrical, "
-        "iconic, and badge-readable.",
+        "reflective face framed by a crisp geometric border. Symmetrical "
+        "and readable at pin scale.",
         "Ivory tile body, bright silver mirror, muted jade details, pale blue reflections.",
     ),
     (
@@ -767,7 +772,8 @@ RELICS = [
         "reads shallow and bowl-shaped, not a tidy woven basket. The shell has a "
         "hairline crack with a sliver of down showing through. Something inside shifts — "
         "faint motion blur on the shell; a loose pale feather or two beside the rim. "
-        "Warm amber rim light; compact enamel-badge composition.",
+        "Warm amber rim light; natural pin composition with the nest "
+        "defining the outer silhouette.",
         "Matte white goose egg, grassy bowl nest with moss and lichen, down-lined cup, "
         "straw and olive tones, warm amber rim light, subtle motion hint.",
     ),
@@ -775,16 +781,16 @@ RELICS = [
         "tea_ceremony",
         "Tea Ceremony",
         "Paired chanoyu set (1 of 2 — the other pin is the Rakuware relic): use "
-        "the **same rounded-square badge crop, bowl scale, and three-quarter "
-        "view from slightly above** as the companion pin so they line up side "
-        "by side as one story. Subject: a **smooth refined chawan** (porcelain "
-        "or soft celadon), centered — the bowl that **precedes** the rustic "
-        "raku piece in the pair. **Four** delicate rising steam wisps (not "
-        "three), each whisper-tinted a different muted hue — sage green, pale "
-        "shell pink, cool mist blue, warm ivory — suggesting the four guiding "
-        "spirits of the ceremony without text or symbols. No wooden rest, no "
-        "kiln drama; calm, luminous, **still steaming**. Formal ceremonial "
-        "enamel badge — subject only, no tabletop scene.",
+        "the **same bowl scale and three-quarter view from slightly above** as "
+        "the companion pin so they line up side by side as one story. Subject: "
+        "a **smooth refined chawan** (porcelain or soft celadon), centered — "
+        "the bowl that **precedes** the rustic raku piece in the pair. **Four** "
+        "delicate rising steam wisps (not three), each whisper-tinted a "
+        "different muted hue — sage green, pale shell pink, cool mist blue, "
+        "warm ivory — suggesting the four guiding spirits of the ceremony "
+        "without text or symbols. No wooden rest, no kiln drama; calm, "
+        "luminous, **still steaming**. The pin outline follows the bowl and "
+        "steam plume; subject only, no tabletop scene.",
         "Cream porcelain, muted celadon glaze, four subtly tinted steam wisps, "
         "soft gold lip line, pale warm neutral void — **must match the void "
         "tone and framing of the Rakuware pin** in the same matched pair.",
@@ -793,16 +799,16 @@ RELICS = [
         "rakuware",
         "Rakuware",
         "Paired chanoyu set (2 of 2 — the other pin is the Tea Ceremony relic): "
-        "use the **same rounded-square badge crop, bowl scale, and three-quarter "
-        "view from slightly above** as the companion pin so they line up side "
-        "by side as one story. Subject: a **hand-built raku chawan** — the bowl "
-        "that **follows** the refined steaming bowl in the pair: bold crackle "
-        "glaze, warm charcoal reduction, soft coppery flash at the rim. **No "
-        "steam** — the tea is finished; the clay has cooled. A single hairline "
-        "crack traced in fine metallic gold — kintsugi hint, not a full repair. "
-        "Optional **small dark wooden rest** only if it stays inside the badge "
-        "silhouette without clutter. Compact enamel composition; same calm "
-        "negative space as the Tea Ceremony pin.",
+        "use the **same bowl scale and three-quarter view from slightly above** "
+        "as the companion pin so they line up side by side as one story. "
+        "Subject: a **hand-built raku chawan** — the bowl that **follows** "
+        "the refined steaming bowl in the pair: bold crackle glaze, warm "
+        "charcoal reduction, soft coppery flash at the rim. **No steam** — "
+        "the tea is finished; the clay has cooled. A single hairline crack "
+        "traced in fine metallic gold — kintsugi hint, not a full repair. "
+        "Optional **small dark wooden rest** tucked beneath the bowl. The pin "
+        "outline follows the bowl shape; same calm negative space as the "
+        "Tea Ceremony pin.",
         "Matte black raku glaze, gold kintsugi line in one crack, warm copper "
         "rim flash, deep walnut rest if present, **same pale warm neutral void "
         "as Tea Ceremony** — second chapter of the same two-pin tea story.",
@@ -831,40 +837,36 @@ RELICS = [
         "obsession",
         "Obsession",
         "An eye motif locked onto a single ornate yaku sigil, intense and "
-        "focused, but simplified into badge language.",
+        "focused, rendered as a realistic soft-enamel pin with natural depth.",
         "Muted ivory eye, crimson focal ring, dark navy outlines, warm brass accents.",
     ),
     (
         "bonfire",
         "Bonfire",
-        "A stacked pyre of tiles and wood burning upward in a stylized flame "
-        "shape, compact and iconic.",
+        "A stacked pyre of tiles and wood burning upward, flame shape defining "
+        "the pin's outer silhouette.",
         "Orange flame, charcoal black embers, warm wood browns, gold highlights.",
     ),
     (
         "river_runner",
         "River Runner",
         "A swift river current curling around a sequence of tiles, showing "
-        "flow and forward motion in one bold emblem.",
+        "flow and forward motion; the meandering stream defines the pin outline.",
         "Teal water ribbons, ivory tiles, deep blue shadows, silver highlights.",
     ),
     (
         "melting_ice",
         "Melting Ice",
-        "Abstract pin emblem, not a scene: a **stylized faceted ice shard or "
-        "hex crystal** built from a few bold cloisonné planes — sharp geometry "
-        "only, no realistic cube or plinth. The lower edge **breaks into "
-        "graphic drip and bead shapes** (enamel teardrops) reading as melt, "
-        "not water simulation. At the heart, **suggest** something sleeping "
-        "through **symbolic negative space** — twin shallow crescent horn "
-        "curves and two small bronze enamel dots for eyes inside one pale "
-        "recessed cell; no body, no muzzle, no illustration of a beast. "
-        "Hairline wire cracks divide facets like a badge crest. Flat graphic "
-        "silhouette; readable at icon scale.",
+        "A faceted ice crystal or hex shard as a soft-enamel pin — sharp "
+        "geometry with believable ice translucency and depth. The lower edge "
+        "breaks into melting drip and bead shapes (enamel teardrops). At the "
+        "heart, suggest something sleeping through negative space — twin "
+        "shallow crescent horn curves and two small bronze enamel dots for "
+        "eyes inside one pale recessed cell. Hairline wire cracks divide "
+        "facets. The crystal's irregular silhouette defines the pin outline.",
         "Pale arctic blue and frost-white enamel facets, cool grey crack lines "
-        "in wire, copper-bronze horn curves and eye dots as minimal glyphs, "
-        "translucent aqua drip beads along the lower rim, soft amber pin "
-        "rim light — **graphic enamel**, not painterly ice.",
+        "in wire, copper-bronze horn curves and eye dots, translucent aqua "
+        "drip beads along the lower edge, soft amber rim light.",
     ),
     (
         "taotie",
@@ -966,22 +968,22 @@ RELICS = [
     (
         "way_of_pairs",
         "Way of Pairs",
-        "Two matched mahjong tiles mirrored side by side inside a formal crest, "
-        "simple and symmetrical.",
+        "Two matched mahjong tiles mirrored side by side, simple and symmetrical; "
+        "the paired tiles define the pin outline.",
         "Ivory tiles, warm gold crest border, deep navy accents, soft amber highlights.",
     ),
     (
         "way_of_triplets",
         "Way of Triplets",
-        "Three matching mahjong tiles arranged in a tight triangular crest, "
-        "bold and balanced.",
+        "Three matching mahjong tiles arranged in a tight triangle, "
+        "bold and balanced; the triplet cluster defines the pin outline.",
         "Ivory tiles, gold border, dark ink details, muted crimson accents.",
     ),
     (
         "way_of_sequences",
         "Way of Sequences",
-        "Three consecutive mahjong tiles stepping upward in order, designed "
-        "as a clean progression emblem.",
+        "Three consecutive mahjong tiles stepping upward in order; the "
+        "diagonal run defines the pin silhouette.",
         "Ivory tiles, pale gold frame, deep teal accents, soft cream highlights.",
     ),
     (
@@ -995,16 +997,16 @@ RELICS = [
         "cracked_tile",
         "Cracked Tile",
         "A weathered mahjong tile split by a jagged crack, still holding "
-        "together but visibly unstable. Keep it iconic rather than scenic.",
+        "together but visibly unstable. Realistic tile proportions and wear.",
         "Aged ivory tile, charcoal crack, dusty ochre debris, faded ink.",
     ),
     (
         "star_tile",
         "Star Tile",
         "A mahjong tile transformed into a lucky celestial enamel pin, with "
-        "a bold five-pointed star emblem centered on the face and small "
-        "radiant accent marks around it. Clean, iconic badge language rather "
-        "than a full environmental scene.",
+        "a bold five-pointed star centered on the face and small radiant "
+        "accent marks around it. The tile's natural rectangular silhouette "
+        "defines the pin outline.",
         "Warm ivory tile body, gold star accents, deep navy details, soft amber highlights.",
     ),
     (
@@ -1037,8 +1039,8 @@ RELICS = [
         "Curio Cabinet",
         "A miniature glass-fronted display cabinet crammed with tiny assorted "
         "relics on stepped shelves, each visible through the door pane. A small "
-        "brass keyhole sits at the center. Collector-shelf vibe compressed to a "
-        "single badge silhouette.",
+        "brass keyhole sits at the center. The cabinet's rectangular glass "
+        "front defines the pin outline.",
         "Warm mahogany frame, pale amber glass, brass fittings, muted multicolor shelf contents.",
     ),
     (
@@ -1046,23 +1048,23 @@ RELICS = [
         "Lotus Bloom",
         "A single stylized lotus flower in full bloom, layered petals radiating "
         "outward from a gold seedpod center, with a trailing stem curling below. "
-        "Iconic badge framing, symmetrical.",
+        "The flower and stem define the organic pin silhouette; symmetrical.",
         "Soft pink petals, cream inner tones, gold seedpod, deep jade leaf accents.",
     ),
     (
         "wall_weaver",
         "Wall Weaver",
         "A loom frame weaving a tight lattice of tiny mahjong tiles together like "
-        "fabric, with a shuttle paused mid-pass. Render as a clean crest showing "
-        "a densely packed tile-wall weave.",
+        "fabric, with a shuttle paused mid-pass. The loom frame defines the "
+        "pin's outer silhouette.",
         "Warm wood loom, ivory woven tiles, dark ink grid lines, muted gold shuttle.",
     ),
     (
         "kong_collector",
         "Kong Collector",
         "Four matching mahjong tiles stacked in a perfect square bundle, bound "
-        "together by a tight gold cord with a hanging coin tassel. Trophy-like, "
-        "compact, iconic.",
+        "together by a tight gold cord with a hanging coin tassel. Trophy-like "
+        "with the square bundle defining the pin outline.",
         "Ivory tiles, dark ink faces, warm gold cord, polished coin tassel.",
     ),
     (
@@ -1103,8 +1105,8 @@ RELICS = [
         "cosmopolitan",
         "Cosmopolitan",
         "A compact travel trunk plastered with small yaku-symbol stamps like "
-        "passport stickers, a pair of leather straps crossing the lid. Worldly, "
-        "well-traveled, badge-readable.",
+        "passport stickers, a pair of leather straps crossing the lid. Worldly "
+        "and well-traveled; the trunk shape defines the pin silhouette.",
         "Warm tan leather, dark brass corners, muted multicolor stamps, ivory highlights.",
     ),
     (
@@ -1122,7 +1124,8 @@ RELICS = [
         "tourist",
         "Tourist",
         "A small brass compass lying atop a folded paper map, with a tiny camera "
-        "and a luggage tag beside it. Travelogue motif packed into a single crest.",
+        "and a luggage tag beside it. Travelogue motif with the compass-and-map "
+        "cluster defining the pin outline.",
         "Warm brass compass, cream paper map, muted teal tag, soft tan luggage tones.",
     ),
     (
@@ -1156,15 +1159,15 @@ RELICS = [
     (
         "eulers_number",
         "Euler's Number",
-        "A small ivory plaque-style badge dominated by a single large engraved "
+        "A small ivory plaque pin dominated by a single large engraved "
         "lowercase e in an upright classical serif, open counter, even stroke "
         "weight. Include a miniature visual proof in the same engraved draftsmanship: "
         "the curve y = 1/x from x = 1 toward e with cross-hatched or stippled area "
         "under that curve between 1 and e reading as exactly one unit square — the "
         "classic 'ln(e) = 1' picture. Along a margin or ribbon, tiny step marks can "
         "suggest (1 + 1/n)^n converging toward e. A fine spiral may still unwind "
-        "from the letter as a secondary motif. Resting flat; letter plus proof read "
-        "as one crest.",
+        "from the letter as a secondary motif. The plaque's natural rectangular "
+        "silhouette defines the pin outline.",
         "Warm aged ivory, deep umber letter and diagram scoring, soft brass corner caps, muted ink shadows, subtle hatched enamel for the unit-area band under the hyperbola.",
     ),
     (
@@ -1183,41 +1186,40 @@ RELICS = [
     (
         "big_hands",
         "Big Hands",
-        "A pair of stylized open hands — palms forward, fingers spread wide — "
-        "carved in raised relief on a single enamel pin crest, as if offering "
-        "or catching an oversized fan of mahjong tiles fanned above them. "
-        "Generous scale, broad gesture, readable silhouette.",
-        "Warm copper cloisonné wires, cream and jade enamel fills, ivory tile hints, soft amber rim light.",
+        "A pair of open hands — palms forward, fingers spread wide — "
+        "carved in raised relief, as if offering or catching an oversized fan "
+        "of mahjong tiles fanned above them. Generous scale, broad gesture; "
+        "the hands and tile fan define the pin's outer silhouette.",
+        "Warm copper raised metal lines, cream and jade soft-enamel fills, ivory tile hints, soft amber rim light.",
     ),
     (
         "tiny_hands",
         "Tiny Hands",
-        "The same crest motif as Big Hands but at doll or Lilliputian scale: "
+        "The same motif as Big Hands but at doll or Lilliputian scale: "
         "two minuscule delicate hands — short thin fingers, tiny palms — "
         "clearly dwarfed beneath a cluster of mahjong tiles that read large "
-        "relative to the hands. Hands occupy only a small fraction of the "
-        "badge height; gestures tight and nimble, fingers close together. "
-        "Same framing and metal tier as its twin for a matched set, "
+        "relative to the hands. Gestures tight and nimble, fingers close "
+        "together. Same scale and metal tier as its twin for a matched set, "
         "unmistakably tinier than Big Hands.",
-        "Warm copper cloisonné wires, cream and jade enamel fills, ivory tile hints, soft amber rim light.",
+        "Warm copper raised metal lines, cream and jade soft-enamel fills, ivory tile hints, soft amber rim light.",
     ),
     (
         "chrysalis",
         "Chrysalis",
         "A monarch butterfly chrysalis — jade-green and gold-speckled pupa "
         "hanging from a short silk pad stem, matte shell with subtle "
-        "segment lines, contained and still; no wings yet. Cloisonné pin, "
+        "segment lines, contained and still; no wings yet. Soft-enamel pin, "
         "centered, readable silhouette.",
         "Matte jade-green enamel, warm gold speckles, dark umber stem wrap, soft amber rim light.",
     ),
     (
         "monarch_butterfly",
         "Monarch Butterfly",
-        "An open-wing monarch butterfly as a cloisonné pin — vivid orange "
+        "An open-wing monarch butterfly as a soft-enamel pin — vivid orange "
         "wings with black veins and white dots at the wing edges, wings "
         "spread symmetric, body slim and black. Product-shot centered, "
         "wings filling the frame.",
-        "Bright orange and black enamel wing bands, cream wing spots, copper cloisonné wires, soft amber rim light.",
+        "Bright orange and black soft-enamel wing bands, cream wing spots, copper raised metal lines, soft amber rim light.",
     ),
 ]
 
@@ -1239,18 +1241,18 @@ def build_object_prompt(
     """
     base = (
         f"{style_prefix(rarity)}\n\n"
-        f"Asset type: cloisonné enamel pin relic color render, product-shot framing.\n"
+        f"Asset type: soft-enamel lapel pin relic color render, product-shot framing.\n"
         f"Relic name: '{name}'.\n"
-        f"Subject: use only the central subject from this description; ignore any environment, scene, or setting words: {visual}\n"
-        f"Enamel palette (colors apply to the recessed champlevé cells only; the wires and negative-space substrate follow the metal tier above): {palette}\n"
-        "Composition/framing: centered square, badge fills most of the frame with a small uniform margin, pin plane parallel to the camera.\n"
+        f"Subject: isolated soft-enamel lapel pin depicting: {visual}\n"
+        f"Enamel palette (colors apply to the recessed soft-enamel wells only; the raised metal lines, die-cut outer rim, and negative-space substrate follow the metal tier above): {palette}\n"
+        "Composition/framing: pin centered on a square canvas with a small uniform margin; the pin's outer silhouette may be any natural shape (not forced square). Pin plane parallel to the camera.\n"
         "Lighting/mood: neutral studio key plus a soft warm rim, gentle radial burnish on the substrate.\n"
-        "Materials: vitreous glass enamel fills recessed below raised cloisonné wires in the metal tier above; the outer bezel reads as a thick legible frame in that same metal.\n"
-        "Background: a perfectly flat, uniform, pure black archival backdrop — the solid matte black of a museum archival photography plate, with no gradient, no vignette, no texture, and no shadow cast onto the surface. Every region inside the outer silhouette resolves as solid opaque material — either enamel fill or metal wire."
+        "Materials: matte-to-satin soft enamel fills sitting below raised metal divider lines in the metal tier above; a continuous raised outer rim traces the pin's individual die-cut outline in that same metal. Not hard enamel — no flush polish, no glassy vitreous surface.\n"
+        "Background: a perfectly flat, uniform, pure black archival backdrop — the solid matte black of a museum archival photography plate. Every region inside the outer silhouette resolves as solid opaque material — either enamel fill or raised metal line."
     )
     if from_reference:
         base += (
-            "\nRelief guide usage: the accompanying grayscale relief guide defines SHAPE, SILHOUETTE, and internal divider layout. Match its outer silhouette, centered placement, divider structure, major shapes, and orientation exactly; add color and material on top. Any gray region INSIDE the silhouette resolves as a solid opaque enamel fill. Transparency applies only to the area outside the outer silhouette.\n"
+            "\nRelief guide usage: the accompanying grayscale relief guide defines SHAPE, SILHOUETTE, and internal divider layout. Match its outer silhouette, centered placement, divider structure, major shapes, and orientation exactly; add color and material on top. Any gray region INSIDE the silhouette resolves as a solid opaque enamel fill. Areas outside the outer silhouette resolve as pure flat black (#000000).\n"
             "Keep the proportions, parts, and framing of the relief guide intact."
         )
     return base
@@ -1259,16 +1261,78 @@ def build_object_prompt(
 def build_height_prompt(name: str, visual: str) -> str:
     """Prompt for `*_height.png` — matches input silhouette; bound as linear GPU relief."""
     return (
-        f"Grayscale relief guide for the cloisonné enamel pin relic '{name}'.\n"
+        f"Grayscale relief guide for the soft-enamel lapel pin relic '{name}'.\n"
         f"Subject: {visual}\n"
-        "Output: centered square, pure black background, front-facing near-orthographic enamel pin silhouette with clean internal partitions.\n"
+        "Composition/framing: pin centered on a square canvas with a small uniform margin; outer silhouette may be any natural shape (not forced square). Pin plane parallel to the camera.\n"
+        "Output: pure black background, front-facing near-orthographic soft-enamel pin silhouette with clean internal partitions.\n"
         "Tonal key (each region is a single flat tone with a hard edge to its neighbor):\n"
-        "  - White: highest raised metal — outer bezel rim and cloisonné wire dividers.\n"
-        "  - Mid-grays: recessed champlevé enamel fill surface inside the silhouette.\n"
+        "  - White: highest raised metal — die-cut outer rim tracing the pin's custom silhouette and raised metal divider lines.\n"
+        "  - Mid-grays: recessed soft-enamel fill surface inside the silhouette (below the metal lines).\n"
         "  - Black: the area outside the outer silhouette.\n"
         "Every area inside the outer silhouette resolves to gray or white, so the later color pass treats it as a solid opaque enamel fill.\n"
         "A clean monochrome grayscale relief, matching the input in proportion."
     )
+
+
+def build_specular_prompt(name: str, visual: str) -> str:
+    """Prompt for `*_specular.png` — specular mask aligned to the color render."""
+    return (
+        f"Grayscale specular reflectivity map for the soft-enamel lapel pin relic '{name}'.\n"
+        f"Subject: {visual}\n"
+        "Composition/framing: pin centered on a square canvas with a small uniform margin; outer silhouette may be any natural shape (not forced square). Pin plane parallel to the camera.\n"
+        "Output: pure black background, front-facing near-orthographic pin silhouette with clean internal partitions.\n"
+        "Tonal key (each region is a single flat tone with a hard edge to its neighbor):\n"
+        "  - White: highest specularity — die-cut outer rim and raised metal divider lines (polished metal catching sharp highlights).\n"
+        "  - Dark grays: low specularity — matte-to-satin soft-enamel wells (rougher, diffuse fills).\n"
+        "  - Black: the area outside the outer silhouette.\n"
+        "This is a reflectivity map, not a height map or color render. Match the input silhouette and internal partitions exactly.\n"
+        "A clean monochrome grayscale specular mask, matching the input in proportion."
+    )
+
+
+# Soft-enamel specular defaults (0–255). Raised metal ≈ height white; fills ≈ matte.
+SPECULAR_ENAMEL = 36
+SPECULAR_METAL = 255
+SPECULAR_METAL_THRESHOLD = 200
+SPECULAR_RAMP_START = 168
+
+
+def specular_from_height_luma(luma: int) -> int:
+    """Map relief height luma → specular mask luma for soft-enamel pins."""
+    if luma < HEIGHT_ALPHA_LO:
+        return 0
+    if luma >= SPECULAR_METAL_THRESHOLD:
+        return SPECULAR_METAL
+    if luma >= SPECULAR_RAMP_START:
+        t = (luma - SPECULAR_RAMP_START) / max(
+            1, SPECULAR_METAL_THRESHOLD - SPECULAR_RAMP_START
+        )
+        return int(SPECULAR_ENAMEL + t * (SPECULAR_METAL - SPECULAR_ENAMEL))
+    if luma >= HEIGHT_ALPHA_HI:
+        t = (luma - HEIGHT_ALPHA_HI) / max(1, SPECULAR_RAMP_START - HEIGHT_ALPHA_HI)
+        return int(SPECULAR_ENAMEL * (0.65 + 0.35 * t))
+    return SPECULAR_ENAMEL
+
+
+def write_specular_from_height(height_path: Path, specular_path: Path) -> bool:
+    """Derive a specular mask PNG from the height relief guide.
+
+    Returns False if the height map does not exist.
+    """
+    from PIL import Image
+
+    if not height_path.exists():
+        return False
+    with Image.open(height_path) as im:
+        height = im.convert("L")
+    spec = height.point(specular_from_height_luma, mode="L")
+    spec.save(specular_path, format="PNG")
+    return True
+
+
+def flatten_specular_to_black_bg(path: Path) -> None:
+    """Force outside-silhouette pixels to true black on a specular mask."""
+    flatten_height_to_black_bg(path)
 
 
 _REMBG_SESSION = None
@@ -1319,7 +1383,7 @@ def clean_object_background(object_path: Path, height_path: Path) -> None:
       2. Fall back to rembg (u2net) if the height map is missing or mismatched.
 
     rembg is fragile on dark-on-dark subjects (e.g. iron pins on dark vignettes
-    where salient-object matting reads the bezel as background and shreds it).
+    where salient-object matting reads the outer rim as background and shreds it).
     The height-derived path sidesteps that failure entirely.
     """
     if alpha_from_height(object_path, height_path):
@@ -1332,8 +1396,9 @@ def clean_object_background(object_path: Path, height_path: Path) -> None:
 def alpha_from_height(object_path: Path, height_path: Path) -> bool:
     """Use the height map's silhouette as the alpha channel for the object render.
 
-    gpt-image-2 refuses transparent backgrounds, and u2net's salient-object
-    matter fails on dark-on-dark subjects (e.g. iron-tier pins rendered against
+    Image-gen models tend to bake in some background tone, and u2net's
+    salient-object matte fails on dark-on-dark subjects (e.g. iron-tier
+    pins rendered against
     a dark vignette). The height map already encodes the silhouette we want:
     pure black outside, gray/white inside. Threshold the height map and use it
     as alpha on the object render — no ML, deterministic, already aligned
@@ -1427,86 +1492,37 @@ def write_mask_from_object(object_path: Path, mask_path: Path) -> bool:
 
 
 def generate_image(
-    client: OpenAI,
+    client,
     prompt: str,
     output_path: Path,
     model: str,
     size: str,
-    *,
-    n: int = 1,
 ) -> None:
-    """Call the image API and save the resulting PNG.
-
-    When ``n`` > 1, requests multiple parallel samples and keeps the first
-    returned image (cheaper than serial retries for finicky enamel subjects).
-    If the model rejects ``n`` > 1, falls back to a single sample.
-    """
-    n = max(1, min(n, 10))
-    attempt_ns = [n, 1] if n > 1 else [1]
-    response = None
-    for attempt_n in attempt_ns:
-        try:
-            response = client.images.generate(
-                model=model,
-                prompt=prompt,
-                n=attempt_n,
-                size=size,
-                quality="high",
-            )
-            if attempt_n < n:
-                print(f"  note: used n={attempt_n} (n={n} was rejected)")
-            break
-        except BaseException as e:
-            if attempt_n > 1:
-                print(f"  warn: images.generate n={attempt_n} failed ({e}); retrying n=1")
-                continue
-            raise
-    if response is None:
-        raise RuntimeError("images.generate returned no response")
-    save_response_image(response.data[0], output_path)
-
-
-def save_response_image(data, output_path: Path) -> None:
-    image_url = getattr(data, "url", None)
-    if image_url is None:
-        b64 = getattr(data, "b64_json", None)
-        if b64 is None:
-            print("  Error: No image URL or b64 data returned.")
-            return
-        img_bytes = base64.b64decode(b64)
-    else:
-        import requests
-
-        img_response = requests.get(image_url, timeout=120)
-        img_response.raise_for_status()
-        img_bytes = img_response.content
-
+    """Call Gemini Nano Banana 2 and save the resulting PNG."""
+    aspect_ratio, image_size = parse_size(size)
+    img_bytes = generate_image_bytes(
+        client,
+        prompt,
+        model=model,
+        aspect_ratio=aspect_ratio,
+        image_size=image_size,
+    )
     output_path.write_bytes(img_bytes)
     print(f"  Saved: {output_path}")
 
 
-# OpenAI's DALL-E 2 edits endpoint used the convention alpha=0 (transparent)
-# → editable, alpha=255 (opaque) → preserved. gpt-image-2's documentation
-# describes masks as "guidance... the model may not follow the exact shape
-# with complete precision" but does not explicitly state which alpha value
-# marks editable regions. Exposed as a module constant so this can be flipped
-# from the CLI / env if the DALL-E 2 convention turns out to be wrong for
-# gpt-image-2.
-EDIT_MASK_TRANSPARENT_IS_EDITABLE = True
+# OpenAI's DALL-E 2 edits endpoint used alpha to mark editable regions. Gemini
+# has no first-class mask parameter; we instead pass the silhouette mask as a
+# second reference image and describe the convention in the prompt.
+# `MASK_ALPHA_THRESHOLD` (defined elsewhere in this file) still drives where the
+# binary cut between silhouette and background lands when we build the mask.
 
 
 def build_edit_mask(reference_path: Path, mask_out: Path) -> bool:
-    """Build an RGBA mask that asks the model to preserve the reference's silhouette.
+    """Build a binary L-mode silhouette mask for `reference_path` (white = subject).
 
-    The mask marks the reference's silhouette as the editable region (so the
-    model can repaint interior detail) and the surround as the preserved
-    region (so the outer shape stays put). The alpha values used are driven
-    by `EDIT_MASK_TRANSPARENT_IS_EDITABLE` since gpt-image-2's exact mask
-    semantics are not documented.
-
-    Requires the reference to already have a cutout alpha (i.e. the surround
-    is transparent). Returns False if the reference is fully opaque — with no
-    silhouette to lock onto there's nothing this mask can usefully convey.
+    Returns False if the reference is fully opaque (nothing to derive a
+    silhouette from), since a full-white mask would convey no information.
     """
     from PIL import Image
 
@@ -1517,52 +1533,40 @@ def build_edit_mask(reference_path: Path, mask_out: Path) -> bool:
     alpha = ref.split()[-1]
     lo, hi = alpha.getextrema()
     if lo == 255 and hi == 255:
-        # Reference has no transparent surround — no silhouette to lock.
         return False
 
-    if EDIT_MASK_TRANSPARENT_IS_EDITABLE:
-        # Silhouette → transparent (editable), surround → opaque (preserved).
-        mask_alpha = alpha.point(
-            lambda a: 0 if a >= MASK_ALPHA_THRESHOLD else 255, mode="L"
-        )
-    else:
-        # Silhouette → opaque (editable), surround → transparent (preserved).
-        mask_alpha = alpha.point(
-            lambda a: 255 if a >= MASK_ALPHA_THRESHOLD else 0, mode="L"
-        )
-
-    # Fill RGB with mid-gray; edits API ignores RGB under an alpha mask but
-    # some servers reject pure-black RGB.
-    gray = Image.new("RGB", ref.size, (128, 128, 128))
-    gray.putalpha(mask_alpha)
-    gray.save(mask_out, format="PNG")
+    # Silhouette → white (subject region), surround → black (background).
+    mask_alpha = alpha.point(
+        lambda a: 255 if a >= MASK_ALPHA_THRESHOLD else 0, mode="L"
+    )
+    mask_alpha.save(mask_out, format="PNG")
     return True
 
 
+_MASK_INSTRUCTION = (
+    "\n\nReference inputs: image #1 is the structural reference to edit; "
+    "image #2 is a binary silhouette mask where WHITE marks the subject "
+    "region and BLACK marks the background. Keep the output silhouette "
+    "aligned to the white region of the mask."
+)
+
+
 def generate_from_reference(
-    client: OpenAI,
+    client,
     prompt: str,
     output_path: Path,
     model: str,
     reference_path: Path,
-    input_fidelity: str,
     try_lock_silhouette: bool = False,
 ) -> None:
-    """Use an existing source image as the structural reference for a new output.
+    """Edit an existing source image into the requested artifact via Gemini.
 
-    When `try_lock_silhouette=True`, attempt to derive a mask from the
-    reference's alpha and pass it to the edits endpoint. If the reference
-    has no usable alpha (e.g. it hasn't been background-removed yet), the
-    call silently proceeds without a mask — the name makes that fallback
-    explicit. The mask is written to a process-local temp file and cleaned
-    up even if the edit call raises.
+    When `try_lock_silhouette=True` and the reference has a usable alpha, a
+    binary mask is built and passed as a second reference image, with prompt
+    instructions describing the convention (white = subject region).
     """
-    # `input_fidelity` is a gpt-image-1-only knob; gpt-image-2 rejects it with
-    # `invalid_input_fidelity_model`. Pass it only for models that accept it.
-    edit_kwargs = {"model": model, "prompt": prompt}
-    if model == "gpt-image-1":
-        edit_kwargs["input_fidelity"] = input_fidelity
-
+    refs: list[Path] = [reference_path]
+    full_prompt = prompt
     mask_path: Path | None = None
     if try_lock_silhouette:
         fd, mask_str = tempfile.mkstemp(prefix="editmask_", suffix=".png")
@@ -1570,6 +1574,8 @@ def generate_from_reference(
         candidate = Path(mask_str)
         if build_edit_mask(reference_path, candidate):
             mask_path = candidate
+            refs.append(candidate)
+            full_prompt = prompt + _MASK_INSTRUCTION
         else:
             candidate.unlink(missing_ok=True)
             print(
@@ -1578,39 +1584,47 @@ def generate_from_reference(
             )
 
     try:
-        with reference_path.open("rb") as image_file:
-            if mask_path is not None:
-                with mask_path.open("rb") as mask_file:
-                    response = client.images.edit(
-                        image=image_file, mask=mask_file, **edit_kwargs
-                    )
-            else:
-                response = client.images.edit(image=image_file, **edit_kwargs)
-        save_response_image(response.data[0], output_path)
+        img_bytes = generate_image_bytes(
+            client,
+            full_prompt,
+            model=model,
+            aspect_ratio="1:1",
+            image_size="1K",
+            refs=refs,
+        )
+        output_path.write_bytes(img_bytes)
+        print(f"  Saved: {output_path}")
     finally:
         if mask_path is not None:
             mask_path.unlink(missing_ok=True)
 
 
-def artifact_targets(base_dir: Path, slug: str, artifact: str) -> list[tuple[str, Path]]:
+def artifact_targets(
+    base_dir: Path, slug: str, artifact: str, *, specular_mode: str
+) -> list[tuple[str, Path]]:
     if artifact == "object":
         return [("object", base_dir / f"{slug}_object.png")]
     if artifact == "height":
         return [("height", base_dir / f"{slug}_height.png")]
     if artifact == "mask":
         return [("mask", base_dir / f"{slug}_mask.png")]
+    if artifact == "specular":
+        return [("specular", base_dir / f"{slug}_specular.png")]
     # Object-first ordering: the object render is the authoritative pass
     # (text-prompted, most context), and the height pass edits it into a
     # relief guide with the object's silhouette as a hard constraint.
-    return [
+    targets = [
         ("object", base_dir / f"{slug}_object.png"),
         ("height", base_dir / f"{slug}_height.png"),
     ]
+    if specular_mode == "reference":
+        targets.append(("specular", base_dir / f"{slug}_specular.png"))
+    return targets
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate Mahjuro relic 3D source art via the OpenAI image API"
+        description="Generate Mahjuro relic 3D source art via Google Nano Banana 2"
     )
     parser.add_argument(
         "--relic",
@@ -1639,11 +1653,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--artifact",
-        choices=("object", "height", "mask", "both"),
+        choices=("object", "height", "specular", "mask", "both"),
         default="both",
         help=(
             "Which asset artifact to generate per relic (default: both → "
-            "height+object+mask). 'mask' only re-derives masks from existing objects."
+            "object+height+specular+mask). 'mask' / 'specular' only re-derive "
+            "from existing heights."
         ),
     )
     parser.add_argument(
@@ -1654,14 +1669,18 @@ def main() -> None:
     parser.add_argument(
         "--model",
         type=str,
-        default="gpt-image-2",
-        help="Image model to use (default: gpt-image-2).",
+        default=DEFAULT_MODEL,
+        help=f"Gemini image model (default: {DEFAULT_MODEL}).",
     )
     parser.add_argument(
         "--size",
         type=str,
-        default="1024x1024",
-        help="Image size (default: 1024x1024).",
+        default="1:1@1K",
+        help=(
+            "Generation size — Gemini ASPECT@TIER (default: 1:1@1K). "
+            "Legacy WxH like '1024x1024' is auto-translated to the closest "
+            "Gemini aspect/size."
+        ),
     )
     parser.add_argument(
         "--output-dir",
@@ -1686,12 +1705,6 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--height-input-fidelity",
-        choices=("low", "high"),
-        default="high",
-        help="Input fidelity for reference-based height generation (default: high, gpt-image-1 only).",
-    )
-    parser.add_argument(
         "--object-mode",
         choices=("reference", "generate"),
         default="generate",
@@ -1702,12 +1715,13 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--object-input-fidelity",
-        choices=("low", "high"),
-        default="high",
+        "--specular-mode",
+        choices=("derive", "reference"),
+        default="derive",
         help=(
-            "Input fidelity for reference-based object generation "
-            "(default: high, gpt-image-1 only, only used with --object-mode=reference)."
+            "How to make *_specular.png assets: derive from the height map "
+            "(default — matte enamel vs shiny metal) or edit the object render "
+            "into a specular mask via the API."
         ),
     )
     args = parser.parse_args()
@@ -1717,7 +1731,8 @@ def main() -> None:
             rarity = SLUG_TO_RARITY.get(slug, "?")
             print(
                 f"  {i:2d}. {name:<22s}  [{rarity:<9s}]  "
-                f"source/{slug}_object.png, source/{slug}_height.png, source/{slug}_mask.png"
+                f"source/{slug}_object.png, source/{slug}_height.png, "
+                f"source/{slug}_specular.png, source/{slug}_mask.png"
             )
         print(
             "\n  Runtime albedo: relics/{slug}.png (derived separately)."
@@ -1772,13 +1787,36 @@ def main() -> None:
         print(f"\nDone. wrote={wrote} missing={missing} → {out_dir}")
         return
 
+    if args.artifact == "specular":
+        wrote = 0
+        missing = 0
+        for idx, (slug, name, _, _) in targets:
+            height_path = out_dir / f"{slug}_height.png"
+            specular_path = out_dir / f"{slug}_specular.png"
+            if specular_path.exists() and not args.force:
+                print(
+                    f"[{idx + 1}] {name}: specular exists — use --force to regenerate"
+                )
+                continue
+            if args.specular_mode == "reference":
+                print(
+                    f"[{idx + 1}] {name}: --specular-mode reference requires the "
+                    "main generation loop; run without --artifact specular."
+                )
+                missing += 1
+                continue
+            if write_specular_from_height(height_path, specular_path):
+                print(f"[{idx + 1}] {name}: wrote {specular_path.name}")
+                wrote += 1
+            else:
+                print(f"[{idx + 1}] {name}: no height map — skipping")
+                missing += 1
+        print(f"\nDone. wrote={wrote} missing={missing} → {out_dir}")
+        return
+
     client = None
     if not args.dry_run:
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            print("Error: OPENAI_API_KEY environment variable not set.")
-            sys.exit(1)
-        client = OpenAI(api_key=api_key)
+        client = init_client()
 
     generated = 0
     skipped = 0
@@ -1786,7 +1824,6 @@ def main() -> None:
 
     for idx, (slug, name, visual, palette) in targets:
         rarity = rarity_for(slug)
-        api_n = image_samples_for(slug)
         print(f"\n[{idx + 1}/{len(RELICS)}] {name} [{rarity}]")
 
         object_output_path = out_dir / f"{slug}_object.png"
@@ -1799,16 +1836,21 @@ def main() -> None:
         # the mask.
         height_ready = height_output_path.exists()
 
-        for artifact_name, output_path in artifact_targets(out_dir, slug, args.artifact):
+        for artifact_name, output_path in artifact_targets(
+            out_dir, slug, args.artifact, specular_mode=args.specular_mode
+        ):
             object_ref_prompt = build_object_prompt(
                 name, visual, palette, rarity,
                 from_reference=(args.object_mode == "reference"),
             )
-            prompt = (
-                object_ref_prompt
-                if artifact_name == "object"
-                else build_height_prompt(name, visual)
-            )
+            if artifact_name == "object":
+                prompt = object_ref_prompt
+            elif artifact_name == "height":
+                prompt = build_height_prompt(name, visual)
+            elif artifact_name == "specular":
+                prompt = build_specular_prompt(name, visual)
+            else:
+                prompt = object_ref_prompt
 
             if args.dry_run:
                 print(f"  {artifact_name} prompt:\n    {prompt}\n")
@@ -1837,7 +1879,6 @@ def main() -> None:
                             object_output_path,
                             args.model,
                             args.size,
-                            n=api_n,
                         )
                         generated += 1
                     # The object ships with a full-alpha seamless backdrop
@@ -1851,9 +1892,30 @@ def main() -> None:
                         output_path,
                         args.model,
                         object_output_path,
-                        args.height_input_fidelity,
                     )
                     flatten_height_to_black_bg(output_path)
+                    print(f"  Black bg: {output_path.name}")
+                elif artifact_name == "specular" and args.specular_mode == "reference":
+                    if not object_output_path.exists():
+                        print(
+                            "  Specular needs an object reference first; generating object pass."
+                        )
+                        generate_image(
+                            client,
+                            build_object_prompt(name, visual, palette, rarity),
+                            object_output_path,
+                            args.model,
+                            args.size,
+                        )
+                        generated += 1
+                    generate_from_reference(
+                        client,
+                        prompt,
+                        output_path,
+                        args.model,
+                        object_output_path,
+                    )
+                    flatten_specular_to_black_bg(output_path)
                     print(f"  Black bg: {output_path.name}")
                 elif artifact_name == "object" and args.object_mode == "reference":
                     if not height_output_path.exists():
@@ -1866,7 +1928,6 @@ def main() -> None:
                             height_output_path,
                             args.model,
                             args.size,
-                            n=api_n,
                         )
                         flatten_height_to_black_bg(height_output_path)
                         print(f"  Black bg: {height_output_path.name}")
@@ -1878,14 +1939,16 @@ def main() -> None:
                         output_path,
                         args.model,
                         height_output_path,
-                        args.object_input_fidelity,
                     )
                 else:
                     generate_image(
-                        client, prompt, output_path, args.model, args.size, n=api_n
+                        client, prompt, output_path, args.model, args.size
                     )
                     if artifact_name == "height":
                         flatten_height_to_black_bg(output_path)
+                        print(f"  Black bg: {output_path.name}")
+                    elif artifact_name == "specular":
+                        flatten_specular_to_black_bg(output_path)
                         print(f"  Black bg: {output_path.name}")
                 generated += 1
                 if artifact_name == "height":
@@ -1904,6 +1967,16 @@ def main() -> None:
             mask_path = out_dir / f"{slug}_mask.png"
             if write_mask_from_height(height_output_path, mask_path):
                 print(f"  Wrote mask: {mask_path.name}")
+
+        if (
+            height_ready
+            and args.specular_mode == "derive"
+            and args.artifact in ("both", "height", "specular")
+        ):
+            specular_path = out_dir / f"{slug}_specular.png"
+            if args.force or not specular_path.exists():
+                if write_specular_from_height(height_output_path, specular_path):
+                    print(f"  Wrote specular: {specular_path.name}")
 
         if len(targets) > 1:
             time.sleep(args.delay)

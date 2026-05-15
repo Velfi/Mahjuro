@@ -145,6 +145,21 @@ impl TagKind {
     pub fn gold_value(self) -> u32 {
         tag_presentation(self).gold_value
     }
+
+    /// Stable atlas / JSON id (`assets/data/tags.json`, `textures/skip_tags/atlas.toml`).
+    pub fn atlas_slug(self) -> &'static str {
+        match self {
+            TagKind::GoldIngot => "gold_ingot",
+            TagKind::TreasureChest => "treasure_chest",
+            TagKind::FreeReroll => "free_reroll",
+            TagKind::PatronGift => "patron_gift",
+            TagKind::RichStock => "rich_stock",
+            TagKind::ZodiacBlessing => "zodiac_blessing",
+            TagKind::BonusPlay => "bonus_play",
+            TagKind::BonusDiscard => "bonus_discard",
+            TagKind::WideHand => "wide_hand",
+        }
+    }
 }
 
 /// Pick a random tag from the eligible pool, excluding `exclude` (used to

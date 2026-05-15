@@ -2,6 +2,7 @@
 /// quad in screen space.  The `rect` instance attribute positions the quad in
 /// pixel coordinates; the text bitmap is sampled as an alpha channel.
 /// `user` low byte: 0=flat, 1=rainbow, 2=pulse, 3=shimmer, 4=gold tint.
+/// bits 8–9: clockwise quarter-turns (0 = upright, 1 = 90°, …).
 
 const TAU: f32 = 6.2831855;
 const RAINBOW_TIME_SCALE: f32 = 0.22;
@@ -32,6 +33,23 @@ struct VsOut {
     @location(2) effect_id: u32,
 };
 
+fn rotate_local(local: vec2<f32>, quarters: u32) -> vec2<f32> {
+    switch quarters {
+        case 1u: {
+            return vec2<f32>(-local.y, local.x);
+        }
+        case 2u: {
+            return vec2<f32>(-local.x, -local.y);
+        }
+        case 3u: {
+            return vec2<f32>(local.y, -local.x);
+        }
+        default: {
+            return local;
+        }
+    }
+}
+
 @vertex
 fn vs_main(
     @location(0) corner: vec2<f32>,
@@ -39,8 +57,13 @@ fn vs_main(
     @location(2) color: vec4<f32>,
     @location(3) user: u32,
 ) -> VsOut {
-    let x = rect.x + corner.x * rect.z;
-    let y = rect.y + corner.y * rect.w;
+    let quarters = (user >> 8u) & 0x3u;
+    let local = vec2<f32>((corner.x - 0.5) * rect.z, (corner.y - 0.5) * rect.w);
+    let rotated = rotate_local(local, quarters);
+    let cx = rect.x + rect.z * 0.5;
+    let cy = rect.y + rect.w * 0.5;
+    let x = cx + rotated.x;
+    let y = cy + rotated.y;
     let nx = (x / globals.screen.x) * 2.0 - 1.0;
     let ny = 1.0 - (y / globals.screen.y) * 2.0;
     var out: VsOut;

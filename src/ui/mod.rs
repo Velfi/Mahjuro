@@ -11,6 +11,7 @@ pub mod modal;
 pub mod placement;
 pub mod prompt_hold_ring;
 pub mod scene_layout;
+pub mod skip_tag_icons;
 pub mod smooth_scroll;
 pub mod styled_text;
 pub mod tooltip;

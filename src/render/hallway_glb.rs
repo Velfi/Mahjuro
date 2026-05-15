@@ -145,23 +145,28 @@ pub fn hallway_camera_from_glb_if_present(
 
 /// Camera for pick-blind: embedded perspective when present, else fit bounds.
 pub fn hallway_camera_base(w: f32, h: f32, env_h: f32) -> CameraParams {
+    // Resolve embedded camera outside `with_hallway_glb_cpu` — the inner path also
+    // calls it and would deadlock on first load (read lock held while init writes).
     let from_glb = hallway_camera_from_glb_if_present(h, env_h);
-    let cam = from_glb.unwrap_or_else(|| CameraParams {
-        eye: [0.0, -h * 1.25, h * 0.50],
-        target: [0.0, h * 0.05, h * 0.18],
-        up: [0.0, 0.0, 1.0],
-        fovy_deg: 55.0,
-    });
-    if from_glb.is_some() {
-        return cam;
-    }
     with_hallway_glb_cpu(|opt| {
-        if let Some(cpu) = opt {
-            let corners = shop_glb::shop_world_bounds_corners_centered(h, env_h, cpu);
-            shop_glb::shop_camera_fit_fovy_for_corners(w, h, cam, &corners, 0.94)
-        } else {
-            cam
+        let mut cam = from_glb.unwrap_or_else(|| CameraParams {
+            eye: [0.0, -h * 1.25, h * 0.50],
+            target: [0.0, h * 0.05, h * 0.18],
+            up: [0.0, 0.0, 1.0],
+            fovy_deg: 55.0,
+            clip_near: None,
+            clip_far: None,
+        });
+        if from_glb.is_none() {
+            if let Some(cpu) = opt {
+                let corners = shop_glb::shop_world_bounds_corners_centered(h, env_h, cpu);
+                cam = shop_glb::shop_camera_fit_fovy_for_corners(w, h, cam, &corners, 0.94);
+            }
         }
+        if let Some(cpu) = opt {
+            cam = shop_glb::shop_camera_with_room_clip_planes(cam, h, env_h, cpu);
+        }
+        cam
     })
 }
 
@@ -294,6 +299,29 @@ mod tests {
 
     /// Pick-blind room (`hallway.glb`) — documents how many environment primitives carry glTF
     /// emissive; re-run after authoring so the count reflects `emissiveTexture` / factor.
+    #[test]
+    fn pick_blind_camera_uses_tight_clip_planes() {
+        let w = 1920.0;
+        let h = 1080.0;
+        let cam = super::hallway_camera_base(w, h, 1.0);
+        let (near, far) = cam.clip_planes(h);
+        let ratio = far / near;
+        let legacy_ratio =
+            (h * crate::render::draw_cmd::SCENE_PERSPECTIVE_FAR_MUL) / 1.0;
+        assert!(
+            near >= crate::render::room_env_gltf::ROOM_CAMERA_CLIP_NEAR_MIN,
+            "inside-room camera should keep a low near plane, got {near}"
+        );
+        assert!(
+            near <= 500.0,
+            "near must not use far AABB corners when the camera is inside the room, got {near}"
+        );
+        assert!(
+            ratio < legacy_ratio * 0.05,
+            "far/near ratio should be much tighter than legacy {legacy_ratio:.0}, got {ratio:.1}"
+        );
+    }
+
     #[test]
     fn pick_blind_room_emissive_material_summary() {
         let data = match crate::asset_path::get("3d/hallway.glb") {

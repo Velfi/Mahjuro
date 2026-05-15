@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Generate flower tile face decal PNGs via OpenAI image generation.
+"""Generate flower tile face decal PNGs via Google Nano Banana 2.
 
 Run:
-    OPENAI_API_KEY=sk-... python3 tools/gen_flower_decals.py
+    GEMINI_API_KEY=... python3 tools/gen_flower_decals.py
 
     # Or generate a single flower:
-    OPENAI_API_KEY=sk-... python3 tools/gen_flower_decals.py plum
+    GEMINI_API_KEY=... python3 tools/gen_flower_decals.py plum
 
 Outputs 192x256 RGBA PNGs into assets/textures/:
     flower_1_plum.png
@@ -19,16 +19,18 @@ the wood albedo the same way it handles the rasterised Unicode decals for
 regular suits.
 
 Requires:
-    pip install openai Pillow
+    pip install google-genai Pillow
 """
 
 import argparse
-import base64
 import io
 import os
 import sys
+from pathlib import Path
 
-from openai import OpenAI
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _image_gen import generate_image_bytes, init_client  # noqa: E402
+
 from PIL import Image
 
 # ---------------------------------------------------------------------------
@@ -57,9 +59,9 @@ STYLE_PREFIX = (
     "traditional East Asian woodblock print / ink-wash style. The motif is "
     "rendered as a monochrome engraved relief: solid white lines and shapes "
     "on a pure flat black background. Centered, front-facing, orthographic, "
-    "high contrast, clean carved-tile feel. Fill only with plain black outside "
-    "the motif — treat the background as a single flat black region with no "
-    "decoration, no lettering, no framing border. "
+    "high contrast, clean carved-tile feel. Plain black fills the area outside "
+    "the motif — a single uniform flat black region behind the centered "
+    "botanical relief. "
 )
 
 # Per-flower prompts describing the specific botanical motif.
@@ -99,26 +101,19 @@ RANK_NAME = {1: "plum", 2: "orchid", 3: "chrysanthemum", 4: "bamboo"}
 # ---------------------------------------------------------------------------
 
 
-def generate_decal(client: OpenAI, kind: str) -> Image.Image:
-    """Call the OpenAI API and return a PIL Image (RGBA, WIDTH x HEIGHT)."""
+def generate_decal(client, kind: str) -> Image.Image:
+    """Call Gemini and return a PIL Image (RGBA, WIDTH x HEIGHT)."""
     prompt = STYLE_PREFIX + FLOWER_PROMPTS[kind]
 
-    print(f"  [{kind}] requesting image from OpenAI...")
-    response = client.images.generate(
-        model="gpt-image-2",
-        prompt=prompt,
-        n=1,
-        size="1024x1024",
-        quality="high",
+    print(f"  [{kind}] requesting image from Gemini...")
+    img_bytes = generate_image_bytes(
+        client,
+        prompt,
+        aspect_ratio="3:4",
+        image_size="1K",
     )
-
-    b64 = response.data[0].b64_json
-    img_bytes = base64.b64decode(b64)
     img = Image.open(io.BytesIO(img_bytes))
-
-    # Resize to target dimensions (tall rectangle).
     img = img.resize((WIDTH, HEIGHT), Image.LANCZOS)
-
     return img
 
 
@@ -155,7 +150,7 @@ def tint_image(img: Image.Image, color: tuple[int, int, int]) -> Image.Image:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate flower tile decals via OpenAI image generation."
+        description="Generate flower tile decals via Google Nano Banana 2."
     )
     parser.add_argument(
         "kinds",
@@ -173,12 +168,7 @@ def main():
 
     kinds = args.kinds if args.kinds else list(FLOWER_PROMPTS.keys())
 
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        print("Error: set OPENAI_API_KEY environment variable.", file=sys.stderr)
-        sys.exit(1)
-
-    client = OpenAI(api_key=api_key)
+    client = init_client()
 
     os.makedirs(OUT_DIR, exist_ok=True)
     print(f"Generating flower decals for: {', '.join(kinds)}")

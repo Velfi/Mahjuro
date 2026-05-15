@@ -600,6 +600,7 @@ pub fn rasterize_tablet_label_decal(
             align: LabelAlign::Center,
             scroll_offset: 0.0,
             underline: false,
+            baseline_shift_px: 0.0,
         },
     );
 
@@ -1052,9 +1053,9 @@ fn rasterize_plaque_walnut_ink_colored_keywords(
             if idx > 0 {
                 chunks.push((" ".to_string(), DEFAULT_INK));
             }
-            chunks.push((
-                word.to_string(),
-                super::vocabulary_colors::color_for_token(word, DEFAULT_INK),
+            chunks.extend(super::vocabulary_colors::colored_token_segments(
+                word,
+                DEFAULT_INK,
             ));
         }
         if chunks.is_empty() {
@@ -1087,6 +1088,7 @@ fn rasterize_plaque_walnut_ink_colored_keywords(
                     align: LabelAlign::Left,
                     scroll_offset: 0.0,
                     underline: false,
+                    baseline_shift_px: 0.0,
                 },
             );
             let dst_x = pad_x + cx.floor() as u32;
@@ -1781,6 +1783,7 @@ pub fn rasterize_label_styled(
             align,
             scroll_offset: 0.0,
             underline: false,
+            baseline_shift_px: 0.0,
         },
     )
 }
@@ -1793,6 +1796,8 @@ pub struct LabelStyle {
     pub align: LabelAlign,
     pub scroll_offset: f32,
     pub underline: bool,
+    /// Single-line path: added to baseline_y (negative moves ink up in bitmap).
+    pub baseline_shift_px: f32,
 }
 
 /// Like [`rasterize_label_styled`] but with an optional emoji fallback font.
@@ -1810,6 +1815,7 @@ pub fn rasterize_label_styled_with_fallback(
         align,
         scroll_offset,
         underline,
+        baseline_shift_px,
     } = style;
     // Multi-line: lay out each line at the same font size, stacked vertically.
     let lines: Vec<&str> = text.split('\n').collect();
@@ -1853,7 +1859,7 @@ pub fn rasterize_label_styled_with_fallback(
     // [`rasterize_block`]) so every substring shares one baseline. Per-string
     // glyph-extent centring would shift short runs (coloured keyword splits)
     // vertically relative to their neighbours.
-    let baseline_y = if font_px_opt.is_some() {
+    let baseline_y = (if font_px_opt.is_some() {
         if let Some(lm) = font.horizontal_line_metrics(font_px) {
             let line_h = lm.new_line_size.max(1.0);
             ((height as f32 - line_h) * 0.5).max(0.0) + lm.ascent
@@ -1862,7 +1868,7 @@ pub fn rasterize_label_styled_with_fallback(
         }
     } else {
         single_line_baseline_from_glyphs(&glyphs, height)
-    };
+    }) + baseline_shift_px;
 
     // Horizontal start depends on alignment, then shifted by scroll_offset.
     let start_x = match align {

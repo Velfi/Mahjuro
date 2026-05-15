@@ -110,6 +110,8 @@ impl RoomGltfEmbeddedCamera {
             target: ((self.target - center_doc) * s).to_array(),
             up: up.to_array(),
             fovy_deg: self.fovy_deg,
+            clip_near: None,
+            clip_far: None,
         }
     }
 }
@@ -194,6 +196,107 @@ pub fn room_environment_bounds(prims: &[RoomEnvPrimitiveCpu]) -> Option<RoomEnvi
     compute_room_environment_bounds(prims)
 }
 
+/// World-unit slack in front of the AABB entry when the camera is **outside** the room.
+pub const ROOM_CAMERA_CLIP_NEAR_INSET: f32 = 400.0;
+/// Minimum near plane in world units after room scale (also used when the camera sits inside the AABB).
+pub const ROOM_CAMERA_CLIP_NEAR_MIN: f32 = 80.0;
+/// World-unit slack beyond the farthest bounds exit / corner along the view ray.
+pub const ROOM_CAMERA_CLIP_FAR_PAD: f32 = 1200.0;
+/// Cap `far / near` so long corridors keep usable depth precision.
+pub const ROOM_CAMERA_CLIP_MAX_RATIO: f32 = 2000.0;
+
+fn aabb_from_corners(corners_world: &[Vec3]) -> Option<(Vec3, Vec3)> {
+    let mut mn = Vec3::splat(f32::INFINITY);
+    let mut mx = Vec3::splat(f32::NEG_INFINITY);
+    for p in corners_world {
+        mn = mn.min(*p);
+        mx = mx.max(*p);
+    }
+    if !mn.x.is_finite() || !mx.x.is_finite() {
+        return None;
+    }
+    Some((mn, mx))
+}
+
+/// Ray–slab entry / exit distances along `dir` (world units). Returns `None` when the ray misses.
+fn ray_aabb_t_enter_exit(origin: Vec3, dir: Vec3, bmin: Vec3, bmax: Vec3) -> Option<(f32, f32)> {
+    let mut t_min = f32::NEG_INFINITY;
+    let mut t_max = f32::INFINITY;
+    for i in 0..3 {
+        let o = origin[i];
+        let d = dir[i];
+        let mn = bmin[i];
+        let mx = bmax[i];
+        if d.abs() < 1e-8 {
+            if o < mn || o > mx {
+                return None;
+            }
+            continue;
+        }
+        let t1 = (mn - o) / d;
+        let t2 = (mx - o) / d;
+        let (t_near, t_far) = if t1 <= t2 { (t1, t2) } else { (t2, t1) };
+        t_min = t_min.max(t_near);
+        t_max = t_max.min(t_far);
+    }
+    if t_min > t_max || t_max < 0.0 {
+        return None;
+    }
+    Some((t_min, t_max))
+}
+
+/// Tighten [`CameraParams::clip_near`] / [`CameraParams::clip_far`] from the room AABB.
+/// Embedded GLB rooms scale ~with `window_h`; the legacy `near = 1` / `far = h × 32` range
+/// wastes depth precision. When the authored camera sits **inside** the bounds (hallway),
+/// AABB corners are all behind or beyond the nearby walls — keep a low near plane and fit
+/// far to the forward ray exit instead.
+pub fn room_camera_fit_clip_planes(mut cam: CameraParams, corners_world: &[Vec3]) -> CameraParams {
+    let eye = Vec3::from_array(cam.eye);
+    let target = Vec3::from_array(cam.target);
+    let forward = (target - eye).normalize_or_zero();
+    if forward.length_squared() < 1e-12 || corners_world.is_empty() {
+        return cam;
+    }
+
+    let Some((bmin, bmax)) = aabb_from_corners(corners_world) else {
+        return cam;
+    };
+    let Some((t_enter, t_exit)) = ray_aabb_t_enter_exit(eye, forward, bmin, bmax) else {
+        return cam;
+    };
+
+    let inside = eye.x >= bmin.x
+        && eye.x <= bmax.x
+        && eye.y >= bmin.y
+        && eye.y <= bmax.y
+        && eye.z >= bmin.z
+        && eye.z <= bmax.z;
+
+    let near = if inside || t_enter <= 0.0 {
+        ROOM_CAMERA_CLIP_NEAR_MIN
+    } else {
+        (t_enter - ROOM_CAMERA_CLIP_NEAR_INSET).max(ROOM_CAMERA_CLIP_NEAR_MIN)
+    };
+
+    let mut max_corner_d = f32::NEG_INFINITY;
+    for p in corners_world {
+        let d = (*p - eye).dot(forward);
+        if d > 0.01 {
+            max_corner_d = max_corner_d.max(d);
+        }
+    }
+    let mut far = (t_exit + ROOM_CAMERA_CLIP_FAR_PAD).max(max_corner_d + ROOM_CAMERA_CLIP_FAR_PAD);
+    if !far.is_finite() {
+        far = t_exit + ROOM_CAMERA_CLIP_FAR_PAD;
+    }
+    far = far.max(near + 1000.0);
+    far = far.min(near * ROOM_CAMERA_CLIP_MAX_RATIO);
+
+    cam.clip_near = Some(near);
+    cam.clip_far = Some(far);
+    cam
+}
+
 /// World-space AABB corners after centering and scale (for FOV fitting).
 pub fn room_world_bounds_corners_centered(
     bounds_doc: RoomEnvironmentBounds,
@@ -233,13 +336,13 @@ pub fn room_camera_fit_fovy_for_corners(
 
     let h = window_h.max(1e-6);
     let aspect = window_w / h;
-    let far_p = h * 12.0;
+    let (near_p, far_p) = cam.clip_planes(h);
 
     let projects_ok = |fovy_deg: f32| -> bool {
         let fov_y = fovy_deg.to_radians();
         let up = Vec3::from_array(cam.up);
         let view = Mat4::look_at_rh(eye, target, up);
-        let proj = Mat4::perspective_rh(fov_y, aspect, 1.0, far_p);
+        let proj = Mat4::perspective_rh(fov_y, aspect, near_p, far_p);
         let vp = proj * view;
         for p in &test_pts {
             let clip = vp * Vec4::new(p.x, p.y, p.z, 1.0);

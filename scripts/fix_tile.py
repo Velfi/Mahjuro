@@ -5,18 +5,18 @@ Workflow:
   1. Read `assets/textures/tile_sets/<name>/atlas.png` + `atlas.toml`.
   2. For each requested tile code, find its cell rect in the atlas, crop it,
      and write the crop to a temp PNG.
-  3. Call the OpenAI image-edit API on that crop with a tile-specific content
-     prompt (or a user-supplied `--prompt`). The crop is used as BOTH the
-     style reference and the subject — the model corrects the composition
-     while preserving the existing visual treatment.
+  3. Call Gemini Nano Banana 2 with the crop as a reference image and a
+     tile-specific content prompt (or a user-supplied `--prompt`). The crop
+     is used as BOTH the style reference and the subject — the model
+     corrects the composition while preserving the existing visual treatment.
   4. Paste the corrected tile back into the same cell of the atlas.
   5. Save the atlas in place; atlas.toml is left untouched.
 
-Cost: one `images.edit` call per tile (~$0.01–0.03). Cheap enough to iterate.
+Cost: one `generate_content` call per tile. Cheap enough to iterate.
 
 Usage:
-    pip install openai pillow
-    export OPENAI_API_KEY="sk-..."
+    pip install google-genai pillow
+    export GEMINI_API_KEY="..."
 
     # dry-run: show the prompt, touch nothing
     python3 scripts/fix_tile.py classic B5 --dry-run
@@ -38,20 +38,20 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import base64
 import io
-import os
 import re
 import shutil
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-try:
-    from openai import OpenAI
-except ImportError:
-    print("Error: openai package not installed. Run: pip install openai")
-    sys.exit(1)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _image_gen import (  # noqa: E402
+    DEFAULT_MODEL,
+    generate_image_bytes,
+    init_client,
+    parse_size,
+)
 
 try:
     from PIL import Image
@@ -114,19 +114,18 @@ def build_prompt(code: str, tw: int, th: int, user_prompt: str | None) -> str:
     return FIX_PROMPT_TEMPLATE.format(spec=spec, tw=tw, th=th)
 
 
-def call_edit(client: OpenAI, crop_path: Path, prompt: str,
+def call_edit(client, crop_path: Path, prompt: str,
               model: str, size: str) -> Image.Image:
-    with crop_path.open("rb") as fh:
-        resp = client.images.edit(
-            model=model,
-            image=fh,
-            prompt=prompt,
-            size=size,
-            n=1,
-        )
-    b64 = resp.data[0].b64_json
-    img = Image.open(io.BytesIO(base64.b64decode(b64)))
-    return img.convert("RGBA")
+    aspect_ratio, image_size = parse_size(size)
+    img_bytes = generate_image_bytes(
+        client,
+        prompt,
+        model=model,
+        aspect_ratio=aspect_ratio,
+        image_size=image_size,
+        refs=[crop_path],
+    )
+    return Image.open(io.BytesIO(img_bytes)).convert("RGBA")
 
 
 def main() -> None:
@@ -139,8 +138,8 @@ def main() -> None:
     ap.add_argument("--prompt", default=None,
                     help="Override the built-in content spec with a custom "
                          "instruction. Applied to every code in this call.")
-    ap.add_argument("--model", default="gpt-image-2",
-                    help="OpenAI image model (default: gpt-image-2).")
+    ap.add_argument("--model", default=DEFAULT_MODEL,
+                    help=f"Gemini image model (default: {DEFAULT_MODEL}).")
     ap.add_argument("--dry-run", action="store_true",
                     help="Print prompts, don't call the API or modify the atlas.")
     ap.add_argument("--backup", action="store_true",
@@ -161,9 +160,10 @@ def main() -> None:
 
     tw, th, cols, layout = parse_atlas_toml(toml_path.read_text())
 
-    # Determine API size: the API supports a few fixed sizes; the closest
-    # 2:3-portrait option is 1024x1536. Post-resize back to (tw, th).
-    api_size = "1024x1536"
+    # Gemini Nano Banana 2 takes (aspect_ratio, image_size) tiers — the
+    # 2:3 portrait at 1K is the closest match to mahjong tile faces.
+    # Post-resize back to (tw, th) regardless of what the model returns.
+    api_size = "2:3@1K"
 
     # Validate codes early so we don't call the API for the first N valid
     # codes before finding an invalid one.
@@ -178,10 +178,7 @@ def main() -> None:
             print()
         return
 
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        sys.exit("Error: OPENAI_API_KEY not set.")
-    client = OpenAI(api_key=api_key)
+    client = init_client()
 
     if args.backup:
         shutil.copy2(atlas_path, atlas_path.with_suffix(".png.bak"))

@@ -829,6 +829,8 @@ impl SceneBehavior for GameplayScene {
                 ],
                 up: [0.0, 0.0, 1.0],
                 fovy_deg: gp.camera_fovy_deg,
+                clip_near: None,
+                clip_far: None,
             };
             camera.fovy_deg = (camera.fovy_deg - fov_pop_offset).max(35.0);
             frame.camera_override = Some(camera);

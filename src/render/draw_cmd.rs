@@ -16,11 +16,16 @@ use crate::core::tile::Tile;
 use crate::core::tile_pack::TilePackKind;
 use crate::render::lit_mesh::MaterialParams;
 use crate::render::theme::color;
+use crate::render::world_space::pixel_to_world;
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, SpotLight, TextLabel};
 use crate::scenes::{BackgroundId, ButtonDef};
 use glam;
 use std::borrow::Cow;
 use std::sync::Arc;
+
+/// `far = window_h × this` for [`CameraParams::frustum_x_range_at`], [`CameraParams::project_world_to_screen`],
+/// and the renderer’s perspective matrix. glTF room verts scale ~with `window_h`, so long corridors need >12×.
+pub const SCENE_PERSPECTIVE_FAR_MUL: f32 = 32.0;
 
 /// Per-frame camera override supplied by a scene that wants to draw the 3D
 /// world from a perspective other than the renderer's default "person at the
@@ -36,6 +41,11 @@ pub struct CameraParams {
     pub up: [f32; 3],
     /// Vertical field of view in degrees.
     pub fovy_deg: f32,
+    /// Perspective near plane in **world units**. `None` → `1.0` (table / legacy default).
+    pub clip_near: Option<f32>,
+    /// Perspective far plane in **world units**. `None` → `window_h ×`
+    /// [`SCENE_PERSPECTIVE_FAR_MUL`] (table / legacy default).
+    pub clip_far: Option<f32>,
 }
 
 /// One punctual entry in [`SceneLighting`]. Smooth lights match legacy gameplay/candle
@@ -98,6 +108,18 @@ pub struct ShowcaseRenderHints {
 }
 
 impl CameraParams {
+    /// `(near, far)` for [`glam::Mat4::perspective_rh`], in world units.
+    #[inline]
+    pub fn clip_planes(&self, window_h: f32) -> (f32, f32) {
+        let h = window_h.max(1e-6);
+        let near = self.clip_near.unwrap_or(1.0).max(1e-3);
+        let far = self
+            .clip_far
+            .unwrap_or(h * SCENE_PERSPECTIVE_FAR_MUL)
+            .max(near + 1.0);
+        (near, far)
+    }
+
     /// Returns the visible world-X range `(min_x, max_x)` at a given world
     /// position `(world_y, world_z)` by unprojecting the left and right NDC
     /// edges through the same view-projection matrix the renderer uses.
@@ -106,8 +128,8 @@ impl CameraParams {
     /// frustum.  Pass the shelf's world Y and Z so the frustum width is
     /// evaluated at the correct depth.
     ///
-    /// Uses the same near/far planes as the renderer (`near = 1.0`,
-    /// `far = h * 12.0`) and the same right-handed convention.
+    /// Uses the same near/far planes as the renderer ([`Self::clip_planes`]) and the same
+    /// right-handed convention.
     pub fn frustum_x_range_at(&self, w: f32, h: f32, world_y: f32, world_z: f32) -> (f32, f32) {
         use glam::{Mat4, Vec3, Vec4};
 
@@ -116,9 +138,10 @@ impl CameraParams {
         let eye = Vec3::from_array(self.eye);
         let target = Vec3::from_array(self.target);
         let up = Vec3::from_array(self.up);
+        let (near, far) = self.clip_planes(h);
 
         let view = Mat4::look_at_rh(eye, target, up);
-        let proj = Mat4::perspective_rh(fov_y, aspect, 1.0, h * 12.0);
+        let proj = Mat4::perspective_rh(fov_y, aspect, near, far);
         let view_proj = proj * view;
         let inv_vp = view_proj.inverse();
 
@@ -152,6 +175,8 @@ impl CameraParams {
             target: [0.0 * cs, -39.6 * cs, 105.2 * cs],
             up: [0.0, 0.0, 1.0],
             fovy_deg: 55.0,
+            clip_near: None,
+            clip_far: None,
         }
     }
 
@@ -167,8 +192,8 @@ impl CameraParams {
         let target = glam::Vec3::from_array(self.target);
         let up = glam::Vec3::from_array(self.up);
         let view = glam::Mat4::look_at_rh(eye, target, up);
-        let proj =
-            glam::Mat4::perspective_rh(self.fovy_deg.to_radians(), aspect, 1.0, window_h * 12.0);
+        let (near, far) = self.clip_planes(window_h);
+        let proj = glam::Mat4::perspective_rh(self.fovy_deg.to_radians(), aspect, near, far);
         let view_proj = proj * view;
         let clip = view_proj * glam::Vec4::new(world.x, world.y, world.z, 1.0);
         let inv_w = 1.0 / clip.w.max(1e-6);
@@ -356,6 +381,12 @@ pub enum PromptIconSource {
         sheet: &'static str,
         name: &'static str,
     },
+    /// Sub-rectangle of a Mahjuro `atlas.toml` + `atlas.png` grid (skip tags, …).
+    /// `sheet` is the asset-relative PNG path; `name` is a layout cell id.
+    PackedAtlas {
+        sheet: &'static str,
+        name: &'static str,
+    },
     /// Absolute filesystem path to an SVG or PNG (rasterized at draw time).
     #[allow(dead_code)] // No current producer; renderer path kept for tooling / experiments.
     Filesystem(std::path::PathBuf),
@@ -365,6 +396,7 @@ impl PromptIconSource {
     pub fn cache_key(&self) -> String {
         match self {
             Self::AtlasSprite { sheet, name } => format!("atlas:{sheet}:{name}"),
+            Self::PackedAtlas { sheet, name } => format!("packed-atlas:{sheet}:{name}"),
             Self::Filesystem(path) => format!("file:{}", path.display()),
         }
     }
@@ -466,7 +498,7 @@ pub enum Object3dKind {
         kind: TilePackKind,
         pick_id: Option<u32>,
     },
-    /// Silken zodiac ribbon hanging from an anchor.
+    /// Silken zodiac ribbon; `Object3d::pos` is the mesh centroid.
     ZodiacRibbon {
         kind: Option<crate::core::zodiac::ZodiacKind>,
     },
@@ -664,6 +696,7 @@ pub enum DrawCmd {
     /// Procedural constellation starfield (fullscreen triangle, no data).
     Starfield,
     /// Procedural rising-ember vignette (fullscreen triangle, no data).
+    #[allow(dead_code)]
     EmberDrift,
     /// Procedural golden-dust with god-rays vignette (fullscreen triangle, no data).
     GoldenDust,
@@ -896,6 +929,7 @@ impl UiFrame {
     pub fn starfield(&mut self) {
         self.cmds.push(DrawCmd::Starfield);
     }
+    #[allow(dead_code)]
     pub fn ember_drift(&mut self) {
         self.cmds.push(DrawCmd::EmberDrift);
     }
@@ -1037,6 +1071,8 @@ pub fn apply_modal_relic_staging(
         target: [0.0, 0.0, 0.0],
         up: [0.0, 0.0, 1.0],
         fovy_deg: 20.0,
+        clip_near: None,
+        clip_far: None,
     });
     frame.scene_lighting.set_smooth_points(vec![
         PointLight {
@@ -1058,6 +1094,31 @@ pub fn apply_modal_relic_staging(
             intensity: 1.0,
         },
     ]);
+    let relic = &modal_relic_objects[0];
+    let cx = relic.pos[0];
+    let cy = relic.pos[1];
+    let lift = relic.pos[2];
+    let cos_outer = (36.0_f32).to_radians().cos();
+    let cos_inner = (22.0_f32).to_radians().cos();
+    let spot_lift = lift + h * 0.42;
+    let spot_pos = [cx, cy - h * 0.06, spot_lift];
+    let tw = pixel_to_world(w, h, cx, cy, lift);
+    let lw = pixel_to_world(w, h, spot_pos[0], spot_pos[1], spot_pos[2]);
+    let dir = (tw - lw).normalize_or_zero();
+    let dir = if dir.length_squared() < 1e-4 {
+        glam::Vec3::new(0.0, 0.4, -1.0).normalize()
+    } else {
+        dir
+    };
+    frame.scene_lighting.spot_lights = vec![SpotLight {
+        pos: spot_pos,
+        dir: dir.to_array(),
+        radius: w.max(h) * 2.2,
+        cos_outer,
+        cos_inner,
+        color: color::rgb(color::TALLOW),
+        intensity: 6.0,
+    }];
     frame.object3d_batch(modal_relic_objects);
 }
 

@@ -158,6 +158,8 @@ impl SceneBehavior for YakuJournalScene {
             target: [0.0, 0.0, 0.0],
             up: [0.0, 1.0, 0.0],
             fovy_deg: 45.0,
+            clip_near: None,
+            clip_far: None,
         });
 
         // One soft high fill light. The previous two-light setup created

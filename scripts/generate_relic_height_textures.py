@@ -7,7 +7,10 @@ files are the **linear height / relief** inputs for the 3D renderer (see
 `src/render/relic_pipeline.rs`). Run `derive_relic_runtime_textures.py` afterward
 if you need `relics/<slug>.png` or masks.
 
+Like the underlying script, this calls Google's Nano Banana 2 image API.
+
 Usage:
+    export GEMINI_API_KEY=...
     python scripts/generate_relic_height_textures.py --dry-run
     python scripts/generate_relic_height_textures.py --name mirror_tile
     python scripts/generate_relic_height_textures.py --force
@@ -23,7 +26,7 @@ from pathlib import Path
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate only relic relief-guide textures via the shared OpenAI relic generator."
+        description="Generate only relic relief-guide textures via the shared Gemini relic generator."
     )
     parser.add_argument("--relic", type=int, default=None)
     parser.add_argument("--name", type=str, default=None)

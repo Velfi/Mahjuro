@@ -283,22 +283,25 @@ pub fn archive_camera_from_glb_if_present(
 
 pub fn archive_camera_base(w: f32, h: f32, env_h: f32) -> CameraParams {
     let from_glb = archive_camera_from_glb_if_present(h, env_h);
-    let cam = from_glb.unwrap_or_else(|| CameraParams {
-        eye: [0.0, -h * 1.15, h * 0.48],
-        target: [0.0, h * 0.02, h * 0.12],
-        up: [0.0, 0.0, 1.0],
-        fovy_deg: 50.0,
-    });
-    if from_glb.is_some() {
-        return cam;
-    }
     with_archive_glb_cpu(|opt| {
-        if let Some(cpu) = opt {
-            let corners = shop_glb::shop_world_bounds_corners_centered(h, env_h, cpu);
-            shop_glb::shop_camera_fit_fovy_for_corners(w, h, cam, &corners, 0.94)
-        } else {
-            cam
+        let mut cam = from_glb.unwrap_or_else(|| CameraParams {
+            eye: [0.0, -h * 1.15, h * 0.48],
+            target: [0.0, h * 0.02, h * 0.12],
+            up: [0.0, 0.0, 1.0],
+            fovy_deg: 50.0,
+            clip_near: None,
+            clip_far: None,
+        });
+        if from_glb.is_none() {
+            if let Some(cpu) = opt {
+                let corners = shop_glb::shop_world_bounds_corners_centered(h, env_h, cpu);
+                cam = shop_glb::shop_camera_fit_fovy_for_corners(w, h, cam, &corners, 0.94);
+            }
         }
+        if let Some(cpu) = opt {
+            cam = shop_glb::shop_camera_with_room_clip_planes(cam, h, env_h, cpu);
+        }
+        cam
     })
 }
 

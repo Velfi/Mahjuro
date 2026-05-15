@@ -783,6 +783,8 @@ impl CameraDebugOverlay {
             target: self.target,
             up: self.up,
             fovy_deg: self.fovy_deg,
+            clip_near: None,
+            clip_far: None,
         }
     }
 

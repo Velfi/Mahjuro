@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Run the full OpenAI → derived runtime textures pipeline for one or more relics.
+Run the full Gemini → derived runtime textures pipeline for one or more relics.
 
 Steps:
 
@@ -17,8 +17,8 @@ Runtime loading is implemented in `src/render/relic_pipeline.rs`: albedo
 `source/<slug>_height.png` for 3D relief.
 
 Usage:
-    export OPENAI_API_KEY=sk-...
-    pip install openai pillow requests
+    export GEMINI_API_KEY=...
+    pip install google-genai pillow
     python scripts/pipeline_relic_ai.py --list
     python scripts/pipeline_relic_ai.py                  # all relics (long; many API calls)
     python scripts/pipeline_relic_ai.py star_tile
@@ -39,7 +39,7 @@ def main() -> None:
     derive = root / "scripts" / "derive_relic_runtime_textures.py"
 
     parser = argparse.ArgumentParser(
-        description="Chain OpenAI relic generation + derive runtime textures."
+        description="Chain Gemini relic generation + derive runtime textures."
     )
     parser.add_argument(
         "names",
@@ -65,13 +65,16 @@ def main() -> None:
     parser.add_argument(
         "--skip-derive",
         action="store_true",
-        help="Only run OpenAI generation.",
+        help="Only run Gemini generation.",
     )
     parser.add_argument(
         "--model",
         type=str,
-        default="gpt-image-2",
-        help="Image model for generate_relic_art.py (default: gpt-image-2).",
+        default="gemini-3.1-flash-image-preview",
+        help=(
+            "Gemini image model for generate_relic_art.py "
+            "(default: gemini-3.1-flash-image-preview)."
+        ),
     )
     parser.add_argument(
         "--delay",

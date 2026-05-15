@@ -40,7 +40,12 @@ impl CameraFrame {
             .map(|c| glam::Vec3::from_array(c.up))
             .unwrap_or(glam::Vec3::Z);
         let view_mat = Mat4::look_at_rh(cam_pos, look_target, up_v);
-        let proj = Mat4::perspective_rh(fov_y, aspect, 1.0, h * 12.0);
+        let (near, far) = frame
+            .camera_override
+            .as_ref()
+            .map(|c| c.clip_planes(h))
+            .unwrap_or((1.0, h * crate::render::draw_cmd::SCENE_PERSPECTIVE_FAR_MUL));
+        let proj = Mat4::perspective_rh(fov_y, aspect, near, far);
         let view_proj = proj * view_mat;
         let view_proj_arr = view_proj.to_cols_array();
         Self {
@@ -405,7 +410,12 @@ mod tests {
         let h = 800.0;
         let aspect = w / h;
         let view_mat = Mat4::look_at_rh(cam_pos, look_target, up_v);
-        let proj = Mat4::perspective_rh(fov_y, aspect, 1.0, h * 12.0);
+        let proj = Mat4::perspective_rh(
+            fov_y,
+            aspect,
+            1.0,
+            h * crate::render::draw_cmd::SCENE_PERSPECTIVE_FAR_MUL,
+        );
         let view_proj = proj * view_mat;
         CameraFrame {
             cam_pos,

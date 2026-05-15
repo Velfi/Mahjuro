@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate plain flat-color booster-pack covers via OpenAI image API.
+"""Generate plain flat-color booster-pack covers via Google Nano Banana 2.
 
 These are deliberately effect-free: solid color regions only, no
 gradients, no shading, no holographic sheen, no textures, no text, no
@@ -8,8 +8,8 @@ illustration detail. Art direction applies effects in a later pass.
 Outputs `pack_<slug>.png` into assets/textures/tile_packs/plain/.
 
 Usage:
-    pip install openai pillow
-    export OPENAI_API_KEY="sk-..."
+    pip install google-genai pillow
+    export GEMINI_API_KEY="..."
     python3 scripts/generate_plain_pack_covers.py                # all missing
     python3 scripts/generate_plain_pack_covers.py --force        # regenerate
     python3 scripts/generate_plain_pack_covers.py --name honors  # one slug
@@ -18,19 +18,19 @@ Usage:
 """
 
 import argparse
-import base64
 import io
 import json
-import os
 import sys
 import time
 from pathlib import Path
 
-try:
-    from openai import OpenAI
-except ImportError:
-    print("Error: openai package not installed. Run: pip install openai")
-    sys.exit(1)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _image_gen import (  # noqa: E402
+    DEFAULT_MODEL,
+    generate_image_bytes,
+    init_client,
+    parse_size,
+)
 
 try:
     from PIL import Image
@@ -192,37 +192,28 @@ def build_prompt(bg_color: str, composition: str) -> str:
     )
 
 
-def generate_image(client: OpenAI, prompt: str, model: str, size: str) -> Image.Image:
-    response = client.images.generate(
+def generate_image(client, prompt: str, model: str, size: str) -> Image.Image:
+    aspect_ratio, image_size = parse_size(size)
+    img_bytes = generate_image_bytes(
+        client,
+        prompt,
         model=model,
-        prompt=prompt,
-        n=1,
-        size=size,
-        quality="high",
+        aspect_ratio=aspect_ratio,
+        image_size=image_size,
     )
-    data = response.data[0]
-    b64 = getattr(data, "b64_json", None)
-    if b64 is not None:
-        img_bytes = base64.b64decode(b64)
-    else:
-        url = getattr(data, "url", None)
-        if url is None:
-            raise RuntimeError("No image URL or b64 data returned.")
-        import requests
-        img_bytes = requests.get(url, timeout=120).content
     return Image.open(io.BytesIO(img_bytes)).convert("RGBA")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate plain booster-pack covers via OpenAI image API."
+        description="Generate plain booster-pack covers via Google Nano Banana 2."
     )
     parser.add_argument("--name", type=str, default=None, help="Single pack slug.")
     parser.add_argument("--list", action="store_true", help="List slugs and exit.")
     parser.add_argument("--dry-run", action="store_true", help="Print prompts only.")
     parser.add_argument("--force", action="store_true", help="Overwrite existing.")
-    parser.add_argument("--model", type=str, default="gpt-image-2")
-    parser.add_argument("--size", type=str, default="1024x1536")
+    parser.add_argument("--model", type=str, default=DEFAULT_MODEL)
+    parser.add_argument("--size", type=str, default="2:3@2K")
     parser.add_argument(
         "--preview", action="store_true",
         help="Keep generation resolution instead of downscaling to 256x384.",
@@ -248,11 +239,7 @@ def main() -> None:
 
     client = None
     if not args.dry_run:
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            print("Error: OPENAI_API_KEY environment variable not set.")
-            sys.exit(1)
-        client = OpenAI(api_key=api_key)
+        client = init_client()
 
     generated = skipped = failed = 0
 

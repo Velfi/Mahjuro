@@ -24,7 +24,7 @@ use crate::render::decal::{load_ui_font, load_ui_font_italic};
 use crate::render::text_effect::TextEffectId;
 use crate::render::theme::typography;
 use crate::ui::widget::TextStyle;
-use crate::render::vocabulary_colors::color_for_token;
+use crate::render::vocabulary_colors::colored_token_segments;
 use crate::render::wgpu_renderer::{TextAlign, TextLabel};
 
 /// Max UTF-8 bytes accepted by the parser.
@@ -299,16 +299,17 @@ fn runs_to_cells_with_glossary(runs: &[StyledRun], default_color: [f32; 4], glos
                     });
                 }
                 first_word = false;
-                let col = color_for_token(word, default_color);
-                for ch in word.chars() {
-                    cells.push(Cell {
-                        ch,
-                        bold: run.bold,
-                        italic: run.italic,
-                        underline: run.underline,
-                        effect: run.effect,
-                        color: col,
-                    });
+                for (segment, col) in colored_token_segments(word, default_color) {
+                    for ch in segment.chars() {
+                        cells.push(Cell {
+                            ch,
+                            bold: run.bold,
+                            italic: run.italic,
+                            underline: run.underline,
+                            effect: run.effect,
+                            color: col,
+                        });
+                    }
                 }
             }
         }
