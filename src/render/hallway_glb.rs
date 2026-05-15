@@ -12,12 +12,12 @@ use std::sync::RwLock;
 use glam::Vec3;
 
 use crate::render::draw_cmd::CameraParams;
-use crate::render::room_env_gltf::{RoomEnvWalkHooks, RoomMeshPolicy, glb_punctual_range_world_upload};
-use crate::render::shop_glb::{
-    self, RoomGlbCpu, ShopEnvLightingTune, load_room_glb_from_bytes,
+use crate::render::room_env_gltf::{
+    RoomEnvWalkHooks, RoomMeshPolicy, glb_punctual_range_world_upload,
 };
-use crate::render::world_space::surface_anchor_from_world_xyz;
+use crate::render::shop_glb::{self, RoomGlbCpu, ShopEnvLightingTune, load_room_glb_from_bytes};
 use crate::render::wgpu_renderer::{MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, PointLight, SpotLight};
+use crate::render::world_space::surface_anchor_from_world_xyz;
 
 /// glTF node names for pick-blind actions (must match Blender objects).
 pub const BTN_PLAY_ROUND: &str = "btn_play_round";

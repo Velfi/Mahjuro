@@ -13,9 +13,7 @@ use crate::render::theme::{ButtonVariant, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::ui::input::UiAction;
 use crate::ui::widget::{self, TextStyle};
-use crate::ui::widget_tree::{
-    self as wt, FocusId, Tree, TreeFrame, TreeInput, TreeState, noop_render_custom,
-};
+use crate::ui::widget_tree::{self as wt, FocusId, Tree, TreeFrame, TreeInput, TreeState};
 
 use super::main_menu_exterior::MainMenuExteriorScene;
 use super::shop::ShopScene;
@@ -195,14 +193,11 @@ impl TileSelectScene {
                     let label = stake_glyph(s).to_string();
                     wt::Node::Item(wt::Item {
                         id: ModalAction::StakeSelect(s).id(),
-                        size: wt::Size::Auto,
                         enabled: unlocked,
                         tooltip: None,
-                        kind: wt::ItemKind::Button {
-                            label,
-                            variant,
-                            on_activate: ModalAction::StakeSelect(s),
-                        },
+                        label,
+                        variant,
+                        on_activate: ModalAction::StakeSelect(s),
                     })
                 })
                 .collect();
@@ -290,7 +285,7 @@ impl TileSelectScene {
 fn preview_tiles() -> Vec<Tile> {
     let mut tiles = Vec::with_capacity(38);
     let mut id = 50_000u32;
-    for suit in [Suit::Characters, Suit::Bamboos, Suit::Circles] {
+    for suit in [Suit::Characters, Suit::Bamboos, Suit::Dots] {
         for rank in 1..=9 {
             tiles.push(Tile::new(suit, rank, id));
             id += 1;
@@ -315,7 +310,7 @@ fn preview_tiles() -> Vec<Tile> {
 const GRID_ROWS: [(usize, usize); 5] = [
     (0, 9),  // Characters 1–9
     (9, 9),  // Bamboos 1–9
-    (18, 9), // Circles 1–9
+    (18, 9), // Dots 1–9
     (27, 7), // Winds 1–4 + Dragons 1–3
     (34, 4), // Flowers 1–4
 ];
@@ -472,12 +467,8 @@ impl SceneBehavior for TileSelectScene {
         let hint_h = hint_px * 1.4;
 
         let text_x = self.positions.left_panel.nx * w;
-        let mut cursor_y = self.positions.left_panel.ny * h
-            + if self.tutorial_mode {
-                0.12 * h
-            } else {
-                0.0
-            };
+        let mut cursor_y =
+            self.positions.left_panel.ny * h + if self.tutorial_mode { 0.12 * h } else { 0.0 };
         let text_w = panel_w * 0.90;
 
         let title_text = if self.tutorial_mode {
@@ -592,9 +583,8 @@ impl SceneBehavior for TileSelectScene {
             instances: &mut instances,
             labels: &mut text_labels,
             buttons: &mut buttons,
-            window: (w, h),
         };
-        self.tree.draw(&tree, &mut tree_frame, &noop_render_custom);
+        self.tree.draw(&tree, &mut tree_frame);
 
         // ── Tile preview grid on the right ─────────────────────────
         let (grid_x, grid_y, grid_w, grid_h) = self.preview_grid_rect(w, h);

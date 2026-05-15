@@ -345,7 +345,10 @@ fn t(suit: Suit, rank: u8, id: u32) -> Tile {
 }
 
 /// Returns `(title, description, groups)` for the given page index.
-fn page_content(page: usize, progress: &PlayerProgress) -> (&'static str, &'static str, Vec<TileGroup>) {
+fn page_content(
+    page: usize,
+    progress: &PlayerProgress,
+) -> (&'static str, &'static str, Vec<TileGroup>) {
     match page {
         PAGE_BASIC_MELDS => (
             "Basic melds",
@@ -368,9 +371,9 @@ fn page_content(page: usize, progress: &PlayerProgress) -> (&'static str, &'stat
                 TileGroup {
                     label: "Triplet",
                     tiles: vec![
-                        t(Suit::Circles, 7, 5),
-                        t(Suit::Circles, 7, 6),
-                        t(Suit::Circles, 7, 7),
+                        t(Suit::Dots, 7, 5),
+                        t(Suit::Dots, 7, 6),
+                        t(Suit::Dots, 7, 7),
                     ],
                     accent: color::GOLD,
                 },
@@ -395,7 +398,7 @@ fn page_content(page: usize, progress: &PlayerProgress) -> (&'static str, &'stat
                     tiles: vec![
                         t(Suit::Characters, 3, 0),
                         t(Suit::Bamboos, 6, 1),
-                        t(Suit::Circles, 8, 2),
+                        t(Suit::Dots, 8, 2),
                     ],
                     accent: [0.35, 0.70, 0.85, 0.9],
                 },
@@ -472,11 +475,17 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
                 (
                     "Triplet",
                     MeldKind::Triplet,
-                    Suit::Circles,
+                    Suit::Dots,
                     &[8, 8, 8],
                     trip_color,
                 ),
-                ("Pair", MeldKind::Pair, Suit::Characters, &[5, 5], pair_color),
+                (
+                    "Pair",
+                    MeldKind::Pair,
+                    Suit::Characters,
+                    &[5, 5],
+                    pair_color,
+                ),
             ]),
         ),
         YakuKind::Toitoi => (
@@ -499,7 +508,7 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
                 (
                     "Triplet",
                     MeldKind::Triplet,
-                    Suit::Circles,
+                    Suit::Dots,
                     &[9, 9, 9],
                     trip_color,
                 ),
@@ -530,7 +539,7 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
                     &[1, 1, 1],
                     trip_color,
                 ),
-                ("Pair", MeldKind::Pair, Suit::Circles, &[1, 1], pair_color),
+                ("Pair", MeldKind::Pair, Suit::Dots, &[1, 1], pair_color),
             ]),
         ),
         YakuKind::Iipeikou => (
@@ -553,11 +562,17 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
                 (
                     "Triplet",
                     MeldKind::Triplet,
-                    Suit::Circles,
+                    Suit::Dots,
                     &[4, 4, 4],
                     trip_color,
                 ),
-                ("Pair", MeldKind::Pair, Suit::Characters, &[9, 9], pair_color),
+                (
+                    "Pair",
+                    MeldKind::Pair,
+                    Suit::Characters,
+                    &[9, 9],
+                    pair_color,
+                ),
             ]),
         ),
         YakuKind::FullHand => (
@@ -580,7 +595,7 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
                 (
                     "Triplet",
                     MeldKind::Triplet,
-                    Suit::Circles,
+                    Suit::Dots,
                     &[7, 7, 7],
                     trip_color,
                 ),
@@ -641,7 +656,7 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
                 (
                     "Sequence",
                     MeldKind::Sequence,
-                    Suit::Circles,
+                    Suit::Dots,
                     &[4, 5, 6],
                     seq_color,
                 ),
@@ -668,11 +683,17 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
                 (
                     "Triplet",
                     MeldKind::Triplet,
-                    Suit::Circles,
+                    Suit::Dots,
                     &[1, 1, 1],
                     trip_color,
                 ),
-                ("Pair", MeldKind::Pair, Suit::Characters, &[9, 9], pair_color),
+                (
+                    "Pair",
+                    MeldKind::Pair,
+                    Suit::Characters,
+                    &[9, 9],
+                    pair_color,
+                ),
             ]),
         ),
         YakuKind::Ittsu => (
@@ -699,7 +720,13 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
                     &[7, 8, 9],
                     seq_color,
                 ),
-                ("Pair", MeldKind::Pair, Suit::Characters, &[5, 5], pair_color),
+                (
+                    "Pair",
+                    MeldKind::Pair,
+                    Suit::Characters,
+                    &[5, 5],
+                    pair_color,
+                ),
             ]),
         ),
         YakuKind::Honitsu => (
@@ -752,24 +779,72 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
         YakuKind::Chiitoitsu => (
             "Seven distinct pairs \u{2014} an alternate hand shape (no melds).",
             meld_groups(&[
-                ("Pair", MeldKind::Pair, Suit::Characters, &[1, 1], pair_color),
-                ("Pair", MeldKind::Pair, Suit::Characters, &[3, 3], pair_color),
+                (
+                    "Pair",
+                    MeldKind::Pair,
+                    Suit::Characters,
+                    &[1, 1],
+                    pair_color,
+                ),
+                (
+                    "Pair",
+                    MeldKind::Pair,
+                    Suit::Characters,
+                    &[3, 3],
+                    pair_color,
+                ),
                 ("Pair", MeldKind::Pair, Suit::Bamboos, &[5, 5], pair_color),
                 ("Pair", MeldKind::Pair, Suit::Bamboos, &[7, 7], pair_color),
-                ("Pair", MeldKind::Pair, Suit::Circles, &[2, 2], pair_color),
-                ("Pair", MeldKind::Pair, Suit::Circles, &[4, 4], pair_color),
+                ("Pair", MeldKind::Pair, Suit::Dots, &[2, 2], pair_color),
+                ("Pair", MeldKind::Pair, Suit::Dots, &[4, 4], pair_color),
                 ("Pair", MeldKind::Pair, Suit::Wind, &[1, 1], pair_color),
             ]),
         ),
         YakuKind::KokushiMusou => (
             "One of each terminal and honor (13 types), plus one duplicate \u{2014} twelve singles and one pair.",
             meld_groups(&[
-                ("Pair", MeldKind::Pair, Suit::Characters, &[1, 1], pair_color),
-                ("Single", MeldKind::Single, Suit::Characters, &[9], single_color),
-                ("Single", MeldKind::Single, Suit::Bamboos, &[1], single_color),
-                ("Single", MeldKind::Single, Suit::Bamboos, &[9], single_color),
-                ("Single", MeldKind::Single, Suit::Circles, &[1], single_color),
-                ("Single", MeldKind::Single, Suit::Circles, &[9], single_color),
+                (
+                    "Pair",
+                    MeldKind::Pair,
+                    Suit::Characters,
+                    &[1, 1],
+                    pair_color,
+                ),
+                (
+                    "Single",
+                    MeldKind::Single,
+                    Suit::Characters,
+                    &[9],
+                    single_color,
+                ),
+                (
+                    "Single",
+                    MeldKind::Single,
+                    Suit::Bamboos,
+                    &[1],
+                    single_color,
+                ),
+                (
+                    "Single",
+                    MeldKind::Single,
+                    Suit::Bamboos,
+                    &[9],
+                    single_color,
+                ),
+                (
+                    "Single",
+                    MeldKind::Single,
+                    Suit::Dots,
+                    &[1],
+                    single_color,
+                ),
+                (
+                    "Single",
+                    MeldKind::Single,
+                    Suit::Dots,
+                    &[9],
+                    single_color,
+                ),
                 ("Single", MeldKind::Single, Suit::Wind, &[1], single_color),
                 ("Single", MeldKind::Single, Suit::Wind, &[2], single_color),
                 ("Single", MeldKind::Single, Suit::Wind, &[3], single_color),
@@ -799,7 +874,7 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
                 (
                     "Triplet",
                     MeldKind::Triplet,
-                    Suit::Circles,
+                    Suit::Dots,
                     &[3, 3, 3],
                     trip_color,
                 ),

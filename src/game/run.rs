@@ -123,15 +123,9 @@ fn transformation_successor_shop_eligible(
         }
         RelicId::SilkMoth => ex.silk_thread && available_relics.contains(&RelicId::SilkThread),
         RelicId::Taotie => ex.melting_ice && available_relics.contains(&RelicId::MeltingIce),
-        RelicId::Geese => {
-            available_relics.contains(&RelicId::RustlingGooseEgg) && ex.xxxl_egg
-        }
-        RelicId::Rakuware => {
-            available_relics.contains(&RelicId::TeaCeremony) && ex.tea_ceremony
-        }
-        RelicId::MonarchButterfly => {
-            available_relics.contains(&RelicId::Chrysalis) && ex.chrysalis
-        }
+        RelicId::Geese => available_relics.contains(&RelicId::RustlingGooseEgg) && ex.xxxl_egg,
+        RelicId::Rakuware => available_relics.contains(&RelicId::TeaCeremony) && ex.tea_ceremony,
+        RelicId::MonarchButterfly => available_relics.contains(&RelicId::Chrysalis) && ex.chrysalis,
         _ => false,
     }
 }
@@ -1191,7 +1185,10 @@ impl RunState {
 mod tests {
     use super::*;
     use crate::core::deck::build_wall;
-    use crate::core::relic::{RelicId, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle, ScoreRoundBundle, ScoreTileBundle};
+    use crate::core::relic::{
+        RelicId, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
+        ScoreRoundBundle, ScoreTileBundle,
+    };
 
     /// Standard mode starting plays (Bamboo: 4 base + 1 bonus).
     const STARTING_PLAYS: u32 = 5;
@@ -1298,9 +1295,9 @@ mod tests {
             Tile::new(Suit::Characters, 2, 3),
             Tile::new(Suit::Characters, 3, 4),
             Tile::new(Suit::Characters, 4, 5),
-            Tile::new(Suit::Circles, 2, 6),
-            Tile::new(Suit::Circles, 3, 7),
-            Tile::new(Suit::Circles, 4, 8),
+            Tile::new(Suit::Dots, 2, 6),
+            Tile::new(Suit::Dots, 3, 7),
+            Tile::new(Suit::Dots, 4, 8),
             Tile::new(Suit::Bamboos, 5, 9),
             Tile::new(Suit::Bamboos, 6, 10),
             Tile::new(Suit::Bamboos, 7, 11),
@@ -1674,9 +1671,9 @@ mod tests {
             Tile::new(Suit::Bamboos, 4, 7),
             Tile::new(Suit::Bamboos, 6, 8),
             Tile::new(Suit::Bamboos, 8, 9),
-            Tile::new(Suit::Circles, 1, 10),
-            Tile::new(Suit::Circles, 3, 11),
-            Tile::new(Suit::Circles, 5, 12),
+            Tile::new(Suit::Dots, 1, 10),
+            Tile::new(Suit::Dots, 3, 11),
+            Tile::new(Suit::Dots, 5, 12),
             Tile::new(Suit::Wind, 1, 13),
             Tile::new(Suit::Dragon, 1, 14),
         ];
@@ -1689,7 +1686,9 @@ mod tests {
         run.refill_hand(&mut bus);
 
         assert!(
-            !bus.queue.iter().any(|ev| matches!(ev, GameEvent::GameOver { .. })),
+            !bus.queue
+                .iter()
+                .any(|ev| matches!(ev, GameEvent::GameOver { .. })),
             "Second Wind should prevent GameOver"
         );
         assert!(
@@ -1947,7 +1946,10 @@ mod tests {
         dragon.structure_sets = sets;
         let mut dragon_bus = bus();
         let dragon_earned = dragon.trigger_structure_manual(&mut dragon_bus);
-        assert!(dragon_earned > 0, "Dragon should still allow structure cash-in");
+        assert!(
+            dragon_earned > 0,
+            "Dragon should still allow structure cash-in"
+        );
         assert!(
             dragon.round_score > 0,
             "debuffed Dragon cash-in should still score something"
@@ -2050,9 +2052,9 @@ mod tests {
             Tile::new(Suit::Bamboos, 4, 7),
             Tile::new(Suit::Bamboos, 6, 8),
             Tile::new(Suit::Bamboos, 8, 9),
-            Tile::new(Suit::Circles, 1, 10),
-            Tile::new(Suit::Circles, 3, 11),
-            Tile::new(Suit::Circles, 5, 12),
+            Tile::new(Suit::Dots, 1, 10),
+            Tile::new(Suit::Dots, 3, 11),
+            Tile::new(Suit::Dots, 5, 12),
             Tile::new(Suit::Wind, 1, 13),
             Tile::new(Suit::Dragon, 1, 14),
         ];
@@ -2086,9 +2088,9 @@ mod tests {
             Tile::new(Suit::Bamboos, 4, 7),
             Tile::new(Suit::Bamboos, 6, 8),
             Tile::new(Suit::Bamboos, 8, 9),
-            Tile::new(Suit::Circles, 1, 10),
-            Tile::new(Suit::Circles, 3, 11),
-            Tile::new(Suit::Circles, 5, 12),
+            Tile::new(Suit::Dots, 1, 10),
+            Tile::new(Suit::Dots, 3, 11),
+            Tile::new(Suit::Dots, 5, 12),
             Tile::new(Suit::Wind, 1, 13),
             Tile::new(Suit::Dragon, 1, 14),
         ];
@@ -2236,7 +2238,7 @@ mod tests {
 const ALL_FACES: [(Suit, u8); 34] = {
     let mut faces = [(Suit::Characters, 0u8); 34];
     let mut i = 0;
-    let suits = [Suit::Characters, Suit::Bamboos, Suit::Circles];
+    let suits = [Suit::Characters, Suit::Bamboos, Suit::Dots];
     let mut si = 0;
     while si < 3 {
         let mut r = 1u8;
@@ -2285,7 +2287,7 @@ fn try_joker_substitution(
 fn wind_candidate_faces(tiles: &[Tile]) -> Vec<(Suit, u8)> {
     use std::collections::BTreeSet;
     let mut candidates = BTreeSet::new();
-    let number_suits = [Suit::Characters, Suit::Bamboos, Suit::Circles];
+    let number_suits = [Suit::Characters, Suit::Bamboos, Suit::Dots];
     for t in tiles {
         // Exact face: could pair/triplet with existing tiles.
         candidates.insert((t.suit, t.rank));
@@ -2442,8 +2444,8 @@ mod joker_tile_tests {
     fn joker_completes_triplet() {
         // 7p 7p 1s — joker should turn 1s into 7p
         let tiles = vec![
-            tile(Suit::Circles, 7, 0),
-            tile(Suit::Circles, 7, 1),
+            tile(Suit::Dots, 7, 0),
+            tile(Suit::Dots, 7, 1),
             tile(Suit::Bamboos, 1, 2),
         ];
         let result = try_joker_substitution(&tiles, &[]);
@@ -2468,7 +2470,7 @@ mod joker_tile_tests {
         let tiles = vec![
             tile(Suit::Characters, 1, 0),
             tile(Suit::Bamboos, 5, 1),
-            tile(Suit::Circles, 9, 2),
+            tile(Suit::Dots, 9, 2),
         ];
         assert!(try_joker_substitution(&tiles, &[]).is_none());
     }
@@ -2513,8 +2515,8 @@ mod wild_wind_tests {
             tile(Suit::Bamboos, 4, 7),
             tile(Suit::Bamboos, 5, 8),
             tile(Suit::Bamboos, 6, 9),
-            tile(Suit::Circles, 7, 10),
-            tile(Suit::Circles, 8, 11),
+            tile(Suit::Dots, 7, 10),
+            tile(Suit::Dots, 8, 11),
             tile(Suit::Wind, 3, 12), // West, should become 9p (or 6p)
         ];
         let result = try_wind_substitution(&tiles, &[]);
@@ -2594,7 +2596,7 @@ mod wild_wind_tests {
         use super::*;
         use proptest::prelude::*;
 
-        const NUMBER_SUITS: [Suit; 3] = [Suit::Characters, Suit::Bamboos, Suit::Circles];
+        const NUMBER_SUITS: [Suit; 3] = [Suit::Characters, Suit::Bamboos, Suit::Dots];
 
         fn arb_number_tile(id: u32) -> BoxedStrategy<Tile> {
             (0..3usize, 1..=9u8)

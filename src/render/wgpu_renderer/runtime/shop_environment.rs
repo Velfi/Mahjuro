@@ -126,7 +126,8 @@ impl WgpuRenderer {
         model: Mat4,
         gpu: &ShopEnvironmentGpu,
     ) {
-        let s = crate::render::shop_glb::shop_env_world_scale(camera.h, self.room_gltf_height_scale);
+        let s =
+            crate::render::shop_glb::shop_env_world_scale(camera.h, self.room_gltf_height_scale);
         let inv_doc_scale = if embedded_gltf_punctual || frame.shop_inspect_lit_mesh_hdr {
             1.0 / s.max(1e-6)
         } else {
@@ -193,7 +194,8 @@ impl WgpuRenderer {
         let Some(ref gpu) = self.shop_environment else {
             return;
         };
-        let s = crate::render::shop_glb::shop_env_world_scale(camera.h, self.room_gltf_height_scale);
+        let s =
+            crate::render::shop_glb::shop_env_world_scale(camera.h, self.room_gltf_height_scale);
         let model = crate::render::shop_glb::with_shop_glb_cpu(|opt| {
             opt.map(|cpu| {
                 crate::render::shop_glb::shop_env_model_matrix_from_cpu(
@@ -225,7 +227,8 @@ impl WgpuRenderer {
         let Some(ref gpu) = self.hallway_environment else {
             return;
         };
-        let s = crate::render::shop_glb::shop_env_world_scale(camera.h, self.room_gltf_height_scale);
+        let s =
+            crate::render::shop_glb::shop_env_world_scale(camera.h, self.room_gltf_height_scale);
         let model = crate::render::hallway_glb::with_hallway_glb_cpu(|opt| {
             opt.map(|cpu| {
                 crate::render::shop_glb::shop_env_model_matrix_from_cpu(
@@ -262,8 +265,7 @@ impl WgpuRenderer {
         };
         use crate::render::archive_glb::archive_sign_description_decal_extents;
         use crate::render::decal::{
-            decal_dimensions, rasterize_plaque_decal_styled, PlaqueDecalStyle,
-            PLAQUE_DECAL_HEIGHT,
+            PLAQUE_DECAL_HEIGHT, PlaqueDecalStyle, decal_dimensions, rasterize_plaque_decal_styled,
         };
         use crate::render::primitive::DecalLayout;
 
@@ -321,7 +323,8 @@ impl WgpuRenderer {
         let Some(ref gpu) = self.archive_environment else {
             return;
         };
-        let s = crate::render::shop_glb::shop_env_world_scale(camera.h, self.room_gltf_height_scale);
+        let s =
+            crate::render::shop_glb::shop_env_world_scale(camera.h, self.room_gltf_height_scale);
         let model = crate::render::archive_glb::with_archive_glb_cpu(|opt| {
             opt.map(|cpu| {
                 crate::render::shop_glb::shop_env_model_matrix_from_cpu(

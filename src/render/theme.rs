@@ -33,8 +33,6 @@
 //! existing `GpuInstance.color` and `TextLabel.color` formats. Hex values in
 //! the doc comments are the source-of-truth design tokens.
 
-#![allow(dead_code)]
-
 /// Named color tokens. Pull from here in scenes via `theme::color::GOLD` etc.
 pub mod color {
     // ── Walnut ladder: dark → light, backgrounds, panels, modals, tooltips ─
@@ -69,7 +67,7 @@ pub mod color {
 
     // ── Semantic colors (desaturated to sit on warm wood panels) ──────────
     /// `#5FD4A8` — success / target met / positive. **Semantic**, not the
-    /// tabletop color (use `FELT` for that).
+    /// tabletop color (use `FELT_LIT` / `FELT_DEEP` for that).
     pub const JADE: [f32; 4] = [0.373, 0.831, 0.659, 1.0];
     /// `#E85A6B` — danger / exit / negative. **Semantic**, not ceremonial
     /// red (use `CINNABAR` for that).
@@ -83,8 +81,6 @@ pub mod color {
     /// `#1A2A20` — in-shadow felt, e.g. cubby corners.
     pub const FELT_DEEP: [f32; 4] = [0.102, 0.165, 0.129, 1.0];
     /// `#2D4A38` — lit tabletop, archive cubby lining.
-    pub const FELT: [f32; 4] = [0.176, 0.290, 0.220, 1.0];
-    /// `#4A6B52` — felt directly under a candle/lamp.
     pub const FELT_LIT: [f32; 4] = [0.290, 0.420, 0.322, 1.0];
 
     // ── Twilight: the cool counterpoint. The world *outside* the House.
@@ -97,6 +93,19 @@ pub mod color {
     pub const TWILIGHT: [f32; 4] = [0.118, 0.165, 0.251, 1.0];
     /// `#5A6E94` — distant lit window, hint text on cool surfaces.
     pub const TWILIGHT_GLOW: [f32; 4] = [0.353, 0.431, 0.580, 1.0];
+
+    // ── Chronicle dashboard (Archive tab only): Evangelion / Nerv-style HUD
+    //    readouts — deep indigo field, hazard orange rules, cool trace ink.
+    //    Kept separate from walnut/brass “House” UI so the screen reads as
+    //    instrumentation, not parlor wood.
+    /// Near-black indigo field (`#0A0818` linear).
+    pub const CHRONICLE_INK: [f32; 4] = [0.039, 0.031, 0.094, 1.0];
+    /// Hazard rule / header accent (`#FF4A1A` linear).
+    pub const CHRONICLE_ORANGE: [f32; 4] = [1.0, 0.290, 0.102, 1.0];
+    /// Faint CRT grid / bezel line.
+    pub const CHRONICLE_GRID: [f32; 4] = [0.282, 0.365, 0.529, 0.42];
+    /// “Sync ratio” trace for score columns (`#5EE8C8` linear, slightly hot).
+    pub const CHRONICLE_TRACE: [f32; 4] = [0.369, 0.910, 0.784, 0.92];
 
     // ── Lacquer & Cinnabar: deep contrast and ceremony.
     /// `#0A0608` — true black-with-warmth. Counter tops, deepest shadow,
@@ -152,10 +161,6 @@ pub mod color {
     /// just the fixture.
     pub const RELIC_GOLD: [f32; 4] = [0.94, 0.78, 0.28, 1.0];
 
-    /// Fully transparent — used for spacers and invisible hit targets.
-    pub const CLEAR: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
-
-    /// Helper: same color but with the alpha channel replaced.
     pub const fn alpha(c: [f32; 4], a: f32) -> [f32; 4] {
         [c[0], c[1], c[2], a]
     }
@@ -228,8 +233,6 @@ pub mod typography {
         (window_h * 0.028).clamp(14.0, 36.0)
     }
 
-    /// Hero numerals: score panel display number. ~3x base.
-    pub const DISPLAY: f32 = 3.0;
     /// Screen titles, modal headers. ~1.75x base.
     pub const TITLE: f32 = 1.75;
     /// Section headings, card names, button labels. ~1.25x base.
@@ -254,9 +257,7 @@ mod typography_tests {
 
     #[test]
     fn smallest_tier_meets_1080_floor() {
-        assert!(
-            typography::size(typography::MICRO, 1080.0) >= typography::MIN_READABLE_PX_AT_1080
-        );
+        assert!(typography::size(typography::MICRO, 1080.0) >= typography::MIN_READABLE_PX_AT_1080);
     }
 
     #[test]
@@ -270,18 +271,6 @@ mod typography_tests {
 /// Standard layout metrics — padding, borders, button heights. Helps every
 /// scene look proportionally consistent.
 pub mod metrics {
-    /// Standard padding inside a panel, in window-h units. Multiply by
-    /// `window_h` to get pixels: e.g. `PANEL_PADDING * window_h`.
-    pub const PANEL_PADDING: f32 = 0.018;
-    /// Inner padding inside a text rect — keeps text from kissing edges.
-    pub const TEXT_PADDING: f32 = 0.012;
-    /// Standard button height as a ratio of window height.
-    pub const BUTTON_HEIGHT: f32 = 0.064;
-    /// Standard button corner inset (mock rounded look using inset border quads).
-    pub const BORDER_INSET: f32 = 0.0025;
-    /// Standard gap between stacked menu buttons.
-    pub const BUTTON_GAP: f32 = 0.022;
-
     /// Scene layout scale factor from the smaller window dimension.
     pub fn scene_scale(w: f32, h: f32) -> f32 {
         w.min(h) / 600.0
@@ -306,7 +295,6 @@ pub enum ButtonVariant {
 pub enum ButtonState {
     Rest,
     Hover,
-    Press,
     Disabled,
 }
 
@@ -334,7 +322,6 @@ pub fn button_colors(variant: ButtonVariant, state: ButtonState) -> ButtonColors
     let (bg, border, text) = match state {
         ButtonState::Rest => (bg_rest, border_rest, text_rest),
         ButtonState::Hover => (lighten(bg_rest, 0.15), GOLD, CHAMPAGNE),
-        ButtonState::Press => (darken(bg_rest, 0.18), BRASS, text_rest),
         ButtonState::Disabled => (
             darken(bg_rest, 0.35),
             darken(border_rest, 0.4),

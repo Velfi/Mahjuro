@@ -241,7 +241,7 @@ mod tests {
     fn core_state_round_trips_through_run() {
         let mut run = RunState::new_demo();
         *run.hand_mut() = vec![
-            Tile::new(Suit::Circles, 9, 1),
+            Tile::new(Suit::Dots, 9, 1),
             Tile::new(Suit::Characters, 2, 2),
             Tile::new(Suit::Bamboos, 4, 3),
         ];

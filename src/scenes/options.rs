@@ -108,10 +108,7 @@ impl Row {
     }
 
     fn is_slider(self) -> bool {
-        matches!(
-            self,
-            Row::Master | Row::Music | Row::Sfx | Row::Gamma
-        )
+        matches!(self, Row::Master | Row::Music | Row::Sfx | Row::Gamma)
     }
 }
 
@@ -1278,10 +1275,7 @@ impl OptionsScene {
                         format!("Hints: {}", if self.hints_enabled { "ON" } else { "OFF" })
                     }
                     Row::GlyphPrompts => {
-                        format!(
-                            "Button prompt icons: {}",
-                            self.glyph_prompt.label()
-                        )
+                        format!("Button prompt icons: {}", self.glyph_prompt.label())
                     }
                     Row::UndoDiscard => format!(
                         "Discard undo: {}",
@@ -1291,15 +1285,9 @@ impl OptionsScene {
                             "OFF"
                         }
                     ),
-                    Row::RebindController => {
-                        "Controller mapping help — Space / click".into()
-                    }
-                    Row::ExportPlayStats => {
-                        "Export play stats (HTML) — Space / click".into()
-                    }
-                    Row::SaveAndProfiles => {
-                        "Save & profiles — switch slot or delete save".into()
-                    }
+                    Row::RebindController => "Controller mapping help — Space / click".into(),
+                    Row::ExportPlayStats => "Export play stats (HTML) — Space / click".into(),
+                    Row::SaveAndProfiles => "Save & profiles — switch slot or delete save".into(),
                     _ => unreachable!(),
                 };
                 text_labels.push(TextLabel {

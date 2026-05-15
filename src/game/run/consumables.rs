@@ -67,7 +67,7 @@ impl RunState {
             TalismanKind::Bamboo | TalismanKind::Dots | TalismanKind::Characters => {
                 let target = match kind {
                     TalismanKind::Bamboo => Suit::Bamboos,
-                    TalismanKind::Dots => Suit::Circles,
+                    TalismanKind::Dots => Suit::Dots,
                     TalismanKind::Characters => Suit::Characters,
                     _ => unreachable!(),
                 };
@@ -143,9 +143,7 @@ impl RunState {
                 self.hand.sort();
                 self.restamp_hand_enhancements();
             }
-            TalismanKind::Pearl
-            | TalismanKind::Gilded
-            | TalismanKind::Polychrome => {
+            TalismanKind::Pearl | TalismanKind::Gilded | TalismanKind::Polychrome => {
                 unreachable!("selection-only path");
             }
         }

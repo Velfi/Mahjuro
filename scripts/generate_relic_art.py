@@ -294,7 +294,7 @@ RELICS = [
         "stylized peacock with jade plumage. Small gold coins are stacked "
         "in a neat pile beside the tile, with a few more spilling toward "
         "the foreground catching warm light. A scatter of numbered suit "
-        "tiles — bamboos and circles, no honors — lies blurred in the "
+        "tiles — bamboos and dots, no honors — lies blurred in the "
         "background.",
         "Ivory tile face, deep emerald felt, jade-green peacock mark, warm gold coins, soft amber rim light.",
     ),
@@ -317,11 +317,11 @@ RELICS = [
         "A single mahjong tile standing upright at the center of an emerald "
         "felt table, its face split into four uneven quadrants showing "
         "ghostly impressions of different tile faces — a bamboo stick, a "
-        "circle dot, a character glyph, and a wind arrow — overlapping like "
+        "dot pips, a character glyph, and a wind arrow — overlapping like "
         "shifting reflections. A faint prismatic shimmer plays across the "
         "ivory surface as if the tile cannot decide what it is. A few stray "
         "face-down wall tiles lie blurred in the background.",
-        "Ivory tile face, deep emerald felt, prismatic shimmer, muted bamboo green / circle blue / character crimson marks.",
+        "Ivory tile face, deep emerald felt, prismatic shimmer, muted bamboo green / dots blue / character crimson marks.",
     ),
     (
         "strength_in_numbers",
@@ -499,8 +499,8 @@ RELICS = [
         "Cream porcelain body, polished jade scales, faceted emerald eyes, dark lacquer plinth, neutral studio backdrop.",
     ),
     (
-        "red_serpent",
-        "Red Serpent",
+        "ruby_serpent",
+        "Ruby Serpent",
         "A glazed porcelain serpent figurine coiled around a single mahjong "
         "character tile, its body sculpted from creamy white china with "
         "fine crackle glaze and inlaid scales of polished carved ruby and "
@@ -510,10 +510,10 @@ RELICS = [
         "Cream porcelain body, polished ruby and carnelian scales, faceted ruby eyes, ivory tile with dark ink character, dark lacquer plinth, neutral studio backdrop.",
     ),
     (
-        "blue_serpent",
-        "Blue Serpent",
+        "lapis_serpent",
+        "Lapis Serpent",
         "A glazed porcelain serpent figurine coiled around a single mahjong "
-        "circles/dots tile, its body sculpted from creamy white china with "
+        "dots tile, its body sculpted from creamy white china with "
         "fine crackle glaze and inlaid scales of polished lapis lazuli and "
         "sapphire. Its eyes are tiny faceted sapphires catching the light. "
         "The figurine rests on a dark lacquer plinth against a soft, "
@@ -559,12 +559,12 @@ RELICS = [
         "edge_runner",
         "Edge Runner",
         "Two mahjong tiles standing upright at opposite ends of an emerald "
-        "felt table — a '1 of circles' on the left and a '9 of circles' on "
+        "felt table — a '1 of dots' on the left and a '9 of dots' on "
         "the right — with a taut line of light arcing between them across "
         "the felt like a tightrope. The middle of the table is empty save "
         "for soft shadow; faint gold sparks trail along the light. A few "
         "stray face-down wall tiles lie blurred in the background.",
-        "Ivory tile faces, deep emerald felt, deep blue circle marks, warm gold light arc, subtle amber sparks.",
+        "Ivory tile faces, deep emerald felt, deep blue dot marks, warm gold light arc, subtle amber sparks.",
     ),
     (
         "lucky_seven",
@@ -604,12 +604,12 @@ RELICS = [
         "Closed Gate",
         "A short row of mahjong tiles standing upright at the center of an "
         "emerald felt table — only terminals and honors: a 1 of bamboo, a "
-        "9 of circles, a red dragon, an East wind. Between them a heavy "
+        "9 of dots, a red dragon, an East wind. Between them a heavy "
         "ornamental gate is etched into the felt in faint gold lines, its "
         "doors drawn shut behind the row as if barring the middle ranks "
         "from entry. A few stray face-down wall tiles lie blurred in the "
         "background.",
-        "Ivory tile faces, deep emerald felt, deep blue circle and crimson dragon marks, etched gold gate lines, warm amber rim light.",
+        "Ivory tile faces, deep emerald felt, deep blue dot and crimson dragon marks, etched gold gate lines, warm amber rim light.",
     ),
     (
         "golden_engine",
@@ -629,7 +629,7 @@ RELICS = [
         "Snowball",
         "A massive sphere built entirely from packed mahjong tiles, "
         "rolling across an emerald felt table. Tiles of every suit — "
-        "bamboos, circles, characters, winds, dragons — are jammed "
+        "bamboos, dots, characters, winds, dragons — are jammed "
         "together at every angle, ivory faces and lacquered backs "
         "pressed into the curve, with a few loose tiles tumbling along "
         "to be absorbed at the leading edge. A widening trail of fallen "
@@ -665,7 +665,7 @@ RELICS = [
         "emerald felt, its carved glyph blazing molten gold as if lit from "
         "within. Behind it, the rest of the final hand is fanned outward "
         "in a theatrical kabuki-pose arc, each tile angled to catch the "
-        "light — deep blue circles, jade-green bamboo, crimson characters. "
+        "light — deep blue dots, jade-green bamboo, crimson characters. "
         "Sharp gold rays radiate outward from the hero tile across the "
         "felt, and a translucent ghost echo of each tile rises just beside "
         "it, scoring a second time. Drifting gold sparks hang in the air "

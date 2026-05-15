@@ -202,11 +202,7 @@ pub fn room_world_bounds_corners_centered(
 ) -> Vec<Vec3> {
     let s = room_env_world_scale(window_h, env_height_scale);
     let c = bounds_doc.center();
-    bounds_doc
-        .corners()
-        .iter()
-        .map(|p| (*p - c) * s)
-        .collect()
+    bounds_doc.corners().iter().map(|p| (*p - c) * s).collect()
 }
 
 /// Widen vertical FOV (only upward) so corners **in front of** the camera project inside `±margin_ndc`.
@@ -303,7 +299,10 @@ pub fn merge_marker_mesh_bounds(
     use std::collections::hash_map::Entry;
     match map.entry(node_name.to_string()) {
         Entry::Vacant(e) => {
-            e.insert(RoomEnvironmentBounds { min: min_v, max: max_v });
+            e.insert(RoomEnvironmentBounds {
+                min: min_v,
+                max: max_v,
+            });
         }
         Entry::Occupied(mut e) => {
             let b = e.get_mut();
@@ -495,8 +494,16 @@ pub fn decode_env_primitive(
         }
         let span = max - min;
         let inv = Vec2::new(
-            if span.x.abs() > 1e-6 { 1.0 / span.x } else { 0.0 },
-            if span.y.abs() > 1e-6 { 1.0 / span.y } else { 0.0 },
+            if span.x.abs() > 1e-6 {
+                1.0 / span.x
+            } else {
+                0.0
+            },
+            if span.y.abs() > 1e-6 {
+                1.0 / span.y
+            } else {
+                0.0
+            },
         );
         Some((min, inv))
     } else {
@@ -780,8 +787,7 @@ pub fn walk_room_env_node(
                         Ok(chunk) => tris.extend(chunk),
                         Err(e) => log::warn!("{label} node {:?} collision: {e:#}", name),
                     }
-                    let decoded =
-                        decode_env_primitive(prim, world, buffers, images, label, name)?;
+                    let decoded = decode_env_primitive(prim, world, buffers, images, label, name)?;
                     merge_marker_mesh_bounds(marker_mesh_bounds_doc, name, &decoded);
                     env_primitives.push(decoded);
                 }
@@ -794,8 +800,7 @@ pub fn walk_room_env_node(
             }
             RoomMeshPolicy::EnvironmentDraw => {
                 for prim in mesh.primitives() {
-                    let decoded =
-                        decode_env_primitive(prim, world, buffers, images, label, name)?;
+                    let decoded = decode_env_primitive(prim, world, buffers, images, label, name)?;
                     if hooks.is_marker(name) {
                         merge_marker_mesh_bounds(marker_mesh_bounds_doc, name, &decoded);
                     }

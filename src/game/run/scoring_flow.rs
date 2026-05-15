@@ -8,7 +8,8 @@ use crate::core::relic::{
 impl RunState {
     /// The House boss: structure cash-in is locked until every discard for the round is spent.
     pub(crate) fn cash_in_blocked_until_discards_spent(&self) -> bool {
-        self.round_rules.contains(&RuleModifier::CashInRequiresNoDiscards)
+        self.round_rules
+            .contains(&RuleModifier::CashInRequiresNoDiscards)
             && self.discards_remaining > 0
     }
 
@@ -73,18 +74,25 @@ impl RunState {
                 self.relics.active.retain(|&r| r != RelicId::MeltingIce);
                 self.melting_ice_extinct = true;
                 self.note_relic_destroyed();
-                bus.push(GameEvent::TransformationSuccessorDiscovered(RelicId::Taotie));
+                bus.push(GameEvent::TransformationSuccessorDiscovered(
+                    RelicId::Taotie,
+                ));
                 bus.push(GameEvent::AchievementUnlocked(
                     crate::steam::Achievement::TaotieAwakened,
                 ));
             }
         }
         if self.relics.has(RelicId::RustlingGooseEgg) {
-            let v = self.relic_counters.entry(RelicId::RustlingGooseEgg).or_insert(3);
+            let v = self
+                .relic_counters
+                .entry(RelicId::RustlingGooseEgg)
+                .or_insert(3);
             *v -= 1;
             if *v <= 0 {
                 self.relic_counters.remove(&RelicId::RustlingGooseEgg);
-                self.relics.active.retain(|&r| r != RelicId::RustlingGooseEgg);
+                self.relics
+                    .active
+                    .retain(|&r| r != RelicId::RustlingGooseEgg);
                 self.xxxl_egg_extinct = true;
                 self.note_relic_destroyed();
                 bus.push(GameEvent::TransformationSuccessorDiscovered(RelicId::Geese));
@@ -230,13 +238,11 @@ impl RunState {
         let breakdown_total = breakdown.total;
         let pre_round = self.round_score;
         let absorb_excess = (self.relics.has(crate::core::relic::RelicId::Chrysalis)
-            || self.relics.has(crate::core::relic::RelicId::MonarchButterfly))
+            || self
+                .relics
+                .has(crate::core::relic::RelicId::MonarchButterfly))
             && pre_round >= self.target_score as u64;
-        let applied = if absorb_excess {
-            0u64
-        } else {
-            breakdown_total
-        };
+        let applied = if absorb_excess { 0u64 } else { breakdown_total };
 
         self.round_score = self.round_score.saturating_add(applied);
         self.total_score_earned = self.total_score_earned.saturating_add(applied);
@@ -257,7 +263,10 @@ impl RunState {
                 self.relic_activations
                     .push(crate::core::relic::RelicId::Chrysalis);
             }
-            if self.relics.has(crate::core::relic::RelicId::MonarchButterfly) {
+            if self
+                .relics
+                .has(crate::core::relic::RelicId::MonarchButterfly)
+            {
                 self.relic_activations
                     .push(crate::core::relic::RelicId::MonarchButterfly);
             }
@@ -426,7 +435,9 @@ impl RunState {
                 self.tea_ceremony_extinct = true;
                 self.note_relic_destroyed();
                 self.relic_activations.push(RelicId::Rakuware);
-                bus.push(GameEvent::TransformationSuccessorDiscovered(RelicId::Rakuware));
+                bus.push(GameEvent::TransformationSuccessorDiscovered(
+                    RelicId::Rakuware,
+                ));
             } else {
                 self.relic_counters.insert(RelicId::TeaCeremony, phase + 1);
             }
@@ -451,7 +462,7 @@ impl RunState {
                 .iter()
                 .any(|t| matches!(t.suit, Suit::Wind | Suit::Dragon));
         if dragon_without_honors {
-            for suit in [Suit::Characters, Suit::Bamboos, Suit::Circles, Suit::Flower] {
+            for suit in [Suit::Characters, Suit::Bamboos, Suit::Dots, Suit::Flower] {
                 if scoring_tiles.iter().any(|t| t.suit == suit) {
                     debuffs.push(TileDebuff::Suit(suit));
                 }

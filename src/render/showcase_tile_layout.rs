@@ -51,7 +51,11 @@ pub fn showcase_tile_projected_width_px(
     let ly = tile_thickness_px * 0.5;
     let lz = tile_short_px * 0.5;
 
-    let base_rotation = rot_euler_xyz_rad(rotation_xyz_rad[0], rotation_xyz_rad[1], rotation_xyz_rad[2]);
+    let base_rotation = rot_euler_xyz_rad(
+        rotation_xyz_rad[0],
+        rotation_xyz_rad[1],
+        rotation_xyz_rad[2],
+    );
     let oriented = base_rotation * tile_mesh_local_to_world();
 
     let corners = [
@@ -104,16 +108,7 @@ pub fn compute_pack_reveal_row_layout(
     let max_cap = h * PACK_REVEAL_TILE_SIZE_MAX_H_FRAC;
 
     let width_at = |size: f32| {
-        showcase_tile_projected_width_px(
-            w,
-            h,
-            cam,
-            preset,
-            center_ref,
-            rotation_xyz_rad,
-            1.0,
-            size,
-        )
+        showcase_tile_projected_width_px(w, h, cam, preset, center_ref, rotation_xyz_rad, 1.0, size)
     };
 
     let mut tile_size = max_cap;

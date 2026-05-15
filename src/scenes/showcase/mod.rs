@@ -32,10 +32,7 @@ pub enum ShowcasePresenter {
 
 impl ShowcasePresenter {
     pub fn wants_orbit_input(&self) -> bool {
-        matches!(
-            self,
-            Self::ShopInspect(_) | Self::CollectionInspect(_)
-        )
+        matches!(self, Self::ShopInspect(_) | Self::CollectionInspect(_))
     }
 
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {

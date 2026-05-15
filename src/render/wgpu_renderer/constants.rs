@@ -91,8 +91,10 @@ pub const MAX_TALLY_FAN_SLOTS: usize = 2;
 pub const MAX_TALLY_STICK_SLOTS: usize = 32;
 /// Maximum number of facedown wall tiles drawn at the back of the table.
 pub const MAX_WALL_TILE_SLOTS: usize = 80;
-/// Cascade scoring bone pool (modifier strip + structure tier preview batches).
-pub use crate::render::gpu_types::MAX_CASCADE_TOKEN_SLOTS;
+/// Maximum number of cascade scoring tokens per frame across all batches.
+/// Structure HUD can show up to 5 chip-tier + 4 mult-tier bones; the modifier
+/// strip adds 2 more during an active cascade.
+pub const MAX_CASCADE_TOKEN_SLOTS: usize = 32;
 /// Maximum number of in-flight 3D extruded-glyph score popups. A single
 /// cascade rarely fires more than 8-10 steps, so 32 is plenty for the
 /// per-step popups plus the running-total readout that holds across the

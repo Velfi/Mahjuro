@@ -472,21 +472,21 @@
     ]
   },
   {
-    "id": "red_serpent",
-    "name": "Red Serpent",
+    "id": "ruby_serpent",
+    "name": "Ruby Serpent",
     "description": "Characters tiles in scored sets: +8 chips each",
     "rarity": "common",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Red Serpent wherever it rests.",
+        "text": "A quiet rumor follows Ruby Serpent wherever it rests.",
         "bold": false,
         "italic": true
       }
     ]
   },
   {
-    "id": "blue_serpent",
-    "name": "Blue Serpent",
+    "id": "lapis_serpent",
+    "name": "Lapis Serpent",
     "description": "Dots tiles in scored sets: +8 chips each",
     "rarity": "common",
     "flavor_spans": [
@@ -496,7 +496,7 @@
         "italic": false
       },
       {
-        "text": "Blue",
+        "text": "Lapis",
         "bold": true,
         "italic": false
       },

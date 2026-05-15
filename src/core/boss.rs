@@ -333,10 +333,10 @@ fn blight_reveal(run: &mut RunState) -> ResolvedBossEffect {
                 .count(),
         ),
         (
-            TileDebuff::Suit(crate::core::tile::Suit::Circles),
+            TileDebuff::Suit(crate::core::tile::Suit::Dots),
             run.hand()
                 .iter()
-                .filter(|t| t.suit == crate::core::tile::Suit::Circles)
+                .filter(|t| t.suit == crate::core::tile::Suit::Dots)
                 .count(),
         ),
         (
@@ -379,16 +379,16 @@ fn blight_reveal(run: &mut RunState) -> ResolvedBossEffect {
 fn counterweight_reveal(run: &mut RunState) -> ResolvedBossEffect {
     let mut characters = 0u32;
     let mut bamboos = 0u32;
-    let mut circles = 0u32;
+    let mut dots = 0u32;
     let mut honors = 0u32;
     let mut terminals = 0u32;
     let mut flowers = 0u32;
 
     for &relic in &run.relics.active {
         match relic {
-            RelicId::RedSerpent => characters += 3,
+            RelicId::RubySerpent => characters += 3,
             RelicId::JadeSerpent => bamboos += 3,
-            RelicId::BlueSerpent => circles += 3,
+            RelicId::LapisSerpent => dots += 3,
             RelicId::HonorFury
             | RelicId::DragonRage
             | RelicId::GreenLuck
@@ -415,8 +415,8 @@ fn counterweight_reveal(run: &mut RunState) -> ResolvedBossEffect {
                     crate::core::tile::Suit::Bamboos => {
                         TileDebuff::Suit(crate::core::tile::Suit::Bamboos)
                     }
-                    crate::core::tile::Suit::Circles => {
-                        TileDebuff::Suit(crate::core::tile::Suit::Circles)
+                    crate::core::tile::Suit::Dots => {
+                        TileDebuff::Suit(crate::core::tile::Suit::Dots)
                     }
                     crate::core::tile::Suit::Flower => {
                         TileDebuff::Suit(crate::core::tile::Suit::Flower)
@@ -442,7 +442,7 @@ fn counterweight_reveal(run: &mut RunState) -> ResolvedBossEffect {
             characters,
         ),
         (TileDebuff::Suit(crate::core::tile::Suit::Bamboos), bamboos),
-        (TileDebuff::Suit(crate::core::tile::Suit::Circles), circles),
+        (TileDebuff::Suit(crate::core::tile::Suit::Dots), dots),
         (TileDebuff::Class(TileDebuffClass::Honors), honors),
         (TileDebuff::Class(TileDebuffClass::Terminals), terminals),
         (TileDebuff::Suit(crate::core::tile::Suit::Flower), flowers),
@@ -532,11 +532,7 @@ pub fn effective_hand_size_components(
 
 /// Effective hand size for `run` (see [`effective_hand_size_components`]).
 pub fn effective_hand_size(run: &RunState) -> usize {
-    effective_hand_size_components(
-        run.mode.hand_size,
-        run.boss.bonus_hand_size,
-        &run.relics,
-    )
+    effective_hand_size_components(run.mode.hand_size, run.boss.bonus_hand_size, &run.relics)
 }
 
 // ── Boss catalog ─────────────────────────────────────────────────────────
@@ -589,7 +585,7 @@ fn boss_behavior(kind: BossKind) -> BossBehavior {
         }
         B::Gate => b.tile_debuffs = &[TileDebuff::Suit(Suit::Characters)],
         B::Grove => b.tile_debuffs = &[TileDebuff::Suit(Suit::Bamboos)],
-        B::Coin => b.tile_debuffs = &[TileDebuff::Suit(Suit::Circles)],
+        B::Coin => b.tile_debuffs = &[TileDebuff::Suit(Suit::Dots)],
         B::Bloom => b.tile_debuffs = &[TileDebuff::Suit(Suit::Flower)],
         B::Hermit => b.rule_pushes = &[RuleModifier::PairsScoreZero],
         B::Forest => b.rule_pushes = &[RuleModifier::SequencesHalved],
@@ -647,9 +643,8 @@ static BOSS_DEF_CACHES: OnceLock<BossDefCaches> = OnceLock::new();
 fn boss_def_caches() -> &'static BossDefCaches {
     BOSS_DEF_CACHES.get_or_init(|| {
         let all = load_boss_defs();
-        let (regular, final_): (Vec<_>, Vec<_>) = all
-            .into_iter()
-            .partition(|d| d.tier != BossTier::Final);
+        let (regular, final_): (Vec<_>, Vec<_>) =
+            all.into_iter().partition(|d| d.tier != BossTier::Final);
         BossDefCaches { regular, final_ }
     })
 }

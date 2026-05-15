@@ -401,17 +401,20 @@ mod tests {
         for _ in 0..48 {
             let (_, zodiacs, _, _) =
                 actions::generate_shop_stock(&relics, &available, 0, ex, &mode, false);
-            assert!(!zodiacs.iter().any(|item| {
-                matches!(item.consumable, Consumable::Zodiac(ZodiacKind::Qilin))
-            }));
+            assert!(
+                !zodiacs.iter().any(|item| {
+                    matches!(item.consumable, Consumable::Zodiac(ZodiacKind::Qilin))
+                })
+            );
         }
         let mut saw_qilin = false;
         for _ in 0..64 {
             let (_, zodiacs, _, _) =
                 actions::generate_shop_stock(&relics, &available, 0, ex, &mode, true);
-            if zodiacs.iter().any(|item| {
-                matches!(item.consumable, Consumable::Zodiac(ZodiacKind::Qilin))
-            }) {
+            if zodiacs
+                .iter()
+                .any(|item| matches!(item.consumable, Consumable::Zodiac(ZodiacKind::Qilin)))
+            {
                 saw_qilin = true;
                 break;
             }

@@ -3,11 +3,11 @@ use crate::core::tile::{Suit, Tile};
 use proptest::prelude::*;
 use rustc_hash::FxHashSet;
 
-const NUMBER_SUITS: [Suit; 3] = [Suit::Characters, Suit::Bamboos, Suit::Circles];
+const NUMBER_SUITS: [Suit; 3] = [Suit::Characters, Suit::Bamboos, Suit::Dots];
 const ALL_SUITS: [Suit; 5] = [
     Suit::Characters,
     Suit::Bamboos,
-    Suit::Circles,
+    Suit::Dots,
     Suit::Wind,
     Suit::Dragon,
 ];

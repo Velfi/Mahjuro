@@ -785,10 +785,7 @@ pub fn play_stats_export_path(profile_index: usize) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    base.join(format!(
-        "play_stats_profile{}_{ts}.html",
-        profile_index + 1
-    ))
+    base.join(format!("play_stats_profile{}_{ts}.html", profile_index + 1))
 }
 
 /// Wrapper that stamps each saved run with the build version. On load we

@@ -229,7 +229,10 @@ pub fn push_gameplay_action_prompts(
             },
         });
         let icon_tint = if cash_in_disabled {
-            color::alpha(color::darken(color::alpha(color::PORCELAIN_AGED, 0.96), 0.45), 0.5)
+            color::alpha(
+                color::darken(color::alpha(color::PORCELAIN_AGED, 0.96), 0.45),
+                0.5,
+            )
         } else {
             color::alpha(color::PORCELAIN_AGED, 0.96)
         };

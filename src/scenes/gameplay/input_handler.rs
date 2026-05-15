@@ -1319,7 +1319,9 @@ pub(super) fn build_consumable_dish(
                     crate::core::consumable::Consumable::Zodiac(_) => [0.45, 0.78, 0.55, 1.0],
                     crate::core::consumable::Consumable::Talisman(tk) => match tk {
                         crate::core::talisman::TalismanKind::Pearl => [0.94, 0.95, 0.98, 1.0],
-                        crate::core::talisman::TalismanKind::Gilded => crate::render::theme::color::RELIC_GOLD,
+                        crate::core::talisman::TalismanKind::Gilded => {
+                            crate::render::theme::color::RELIC_GOLD
+                        }
                         crate::core::talisman::TalismanKind::Polychrome => [0.82, 0.55, 0.95, 1.0],
                         crate::core::talisman::TalismanKind::Bamboo => [0.06, 0.55, 0.28, 1.0], // emerald
                         crate::core::talisman::TalismanKind::Dots => [0.08, 0.22, 0.78, 1.0], // sapphire
@@ -1347,9 +1349,10 @@ pub(super) fn build_consumable_dish(
                                 crate::render::ribbon_mesh::ZodiacRibbonSpec {
                                     pos: [zx + slot_w * 0.5, zy, pendant_y],
                                     length: slot_h * 0.85,
-                                    rotation: crate::render::table_transform::euler_xyz_rad_from_deg(
-                                        -90.0, 0.0, 0.0,
-                                    ),
+                                    rotation:
+                                        crate::render::table_transform::euler_xyz_rad_from_deg(
+                                            -90.0, 0.0, 0.0,
+                                        ),
                                     color: [1.0, 1.0, 1.0, 1.0],
                                     kind: Some(z),
                                     hover_target: 0.0,

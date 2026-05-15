@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 mod decomposition;
 mod validation;
 
-pub use decomposition::{detect_all_sets, enumerate_decompositions};
 #[cfg(test)]
 pub use decomposition::find_pairs_and_triplets;
+pub use decomposition::{detect_all_sets, enumerate_decompositions};
 pub use validation::{suggest_completions, validate_selection, validate_selection_with_rules};
 
 /// Player-facing meld variant. `Single` is a decomposition artefact (only

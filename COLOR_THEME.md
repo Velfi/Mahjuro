@@ -126,7 +126,7 @@ Live in [`src/core/tile.rs`](src/core/tile.rs). Spread across the wheel for inst
 |---|---|---|---|
 | Characters | `[0.85, 0.25, 0.20, 1.0]` | `#D94033` | Cinnabar — ink-stamped on ivory. |
 | Bamboos | `[0.20, 0.65, 0.30, 1.0]` | `#33A64D` | Felt-adjacent green. |
-| Circles | `[0.20, 0.40, 0.80, 1.0]` | `#3366CC` | Sapphire. |
+| Dots | `[0.20, 0.40, 0.80, 1.0]` | `#3366CC` | Sapphire. |
 | Wind | `[0.70, 0.60, 0.20, 1.0]` | `#B39933` | Faded gold leaf. |
 | Dragon (Chun, rank 1) | `[0.85, 0.20, 0.18, 1.0]` | `#D9332E` | Red dragon — `中`. |
 | Dragon (Hatsu, rank 2) | `[0.20, 0.65, 0.30, 1.0]` | `#33A64D` | Green dragon — `發`. |

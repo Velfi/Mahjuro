@@ -2,10 +2,10 @@
 
 use std::time::{Duration, Instant};
 
-use crate::render::draw_cmd::{apply_modal_relic_staging, ShowcaseRenderHints, UiFrame};
+use crate::render::draw_cmd::{ShowcaseRenderHints, UiFrame, apply_modal_relic_staging};
 use crate::scenes::celebration_overlay;
 use crate::ui::input::UiAction;
-use crate::ui::modal::{modal_paginated_unlock_layer_vecs, Modal};
+use crate::ui::modal::{Modal, modal_paginated_unlock_layer_vecs};
 
 use crate::scenes::{BackgroundId, ButtonDef, DrawCtx, OverlayRequest, SceneTransition, UpdateCtx};
 
@@ -114,7 +114,8 @@ impl MetaLevelUpPresenter {
         let card_alpha = self.modal.card_fade_alpha() * intro_a;
         let (instances, labels, relic_objects, mut gradient_quads) =
             modal_paginated_unlock_layer_vecs(&self.modal, card_alpha, w, h);
-        self.modal.append_fireworks_gradient_quads(&mut gradient_quads);
+        self.modal
+            .append_fireworks_gradient_quads(&mut gradient_quads);
 
         frame.quads(instances);
         frame.texts(labels);
@@ -126,7 +127,9 @@ impl MetaLevelUpPresenter {
         let t = Instant::now()
             .saturating_duration_since(self.started_at)
             .as_secs_f32();
-        frame.text(celebration_overlay::label_confirm_to_continue(h, w, t, intro_a));
+        frame.text(celebration_overlay::label_confirm_to_continue(
+            h, w, t, intro_a,
+        ));
 
         if self.intro_gate.intro.is_done_for(&ctx.effect_layers) {
             frame.buttons = vec![ButtonDef::scene((0.0, 0.0, w, h), u32::MAX)];

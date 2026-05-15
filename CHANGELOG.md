@@ -196,7 +196,7 @@ commit history.
 - Relic tooltips for Star Tile, Paper Lantern, and Iron Lantern now show their doubled probabilities while Fortune's Favor is owned.
 - The unlock ladder has been filled out through levels 2–7 so the relic pool expands gradually with account progression instead of starting mostly unlocked.
 - Relics now wear Iron / Copper / Silver / Gold finishes based on rarity, replacing the old Metal / Plastic / Glass / Wax materials.
-- **Ink Brush** is now **Red Serpent** (Characters chip bonus), and **Pearl Diver** is now **Blue Serpent** (Circles chip bonus). Both relics have new art.
+- **Ink Brush** is now **Ruby Serpent** (Characters chip bonus), and **Pearl Diver** is now **Lapis Serpent** (Dots chip bonus). Both relics have new art.
 - **Shanten Shove** reworked: no longer triggers solely at tenpai. After a refill, if your hand holds an "invested partial" (a pair hoping for a third, a triplet hoping for a kong, or two same-suit numbered tiles within 2 ranks), you draw one extra tile from the wall.
 - Rounds now open behind the smoke curtain: hand, target, and on-round-start effects (Sweepstakes coin showers, Dora Crown reveals, etc.) animate into view as the curtain clears, instead of popping in pre-faded.
 - Smoke settings have been consolidated: the old Smoke / Smoke Detail / Smoke Sim rows are replaced with **Smoke Quality** (Off / Low / Medium / High / Ultra) and **Smoke Amount** (Light / Medium / Heavy). Existing settings default to Quality: High, Amount: Medium.

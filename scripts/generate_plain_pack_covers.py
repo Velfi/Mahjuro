@@ -103,7 +103,7 @@ _COMPOSITIONS = [
         "pointing up, right, down, and left in ice-blue (#7ec8e3), "
         "ember-orange (#e07a3c), jade-green (#4ea87a), and "
         "storm-violet (#7a4ea8); in the lower half, three solid "
-        "circles in red (#e23b3b), green (#3aa84e), and white "
+        "round dragon marks in red (#e23b3b), green (#3aa84e), and white "
         "(#f8f8f8) with a thin navy outline on the white one. All "
         "symbols are plain flat shapes.",
     ),

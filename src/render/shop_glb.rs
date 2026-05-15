@@ -319,8 +319,8 @@ pub type ShopGlbEmbeddedPointLight = renv::RoomGltfEmbeddedPointLight;
 pub type ShopGlbEmbeddedSpotLight = renv::RoomGltfEmbeddedSpotLight;
 pub type ShopGlbEmbeddedCamera = renv::RoomGltfEmbeddedCamera;
 
-pub(crate) use crate::render::room_env_gltf::room_environment_bounds;
 pub use crate::render::room_env_gltf::glb_punctual_range_world_upload;
+pub(crate) use crate::render::room_env_gltf::room_environment_bounds;
 
 #[inline]
 pub fn shop_env_world_scale(window_h: f32, height_scale: f32) -> f32 {

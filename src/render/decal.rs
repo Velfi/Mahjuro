@@ -47,7 +47,7 @@ fn finish_tile_decal_rgba(mut rgba: Vec<u8>, width: u32, height: u32, flip_h: bo
 /// Mahjong Unicode glyph is unavailable — no `m`/`s`/`p`, wind initials, or kanji.
 pub fn tile_face_display_label(tile: &Tile) -> String {
     match tile.suit {
-        Suit::Characters | Suit::Bamboos | Suit::Circles => format!("{}", tile.rank),
+        Suit::Characters | Suit::Bamboos | Suit::Dots => format!("{}", tile.rank),
         Suit::Wind => match tile.rank {
             1 => "East".into(),
             2 => "South".into(),
@@ -70,7 +70,7 @@ pub fn tile_suit_emoji(tile: &Tile) -> &'static str {
     match tile.suit {
         Suit::Characters => "\u{1F3B4}", // 🎴 flower card
         Suit::Bamboos => "\u{1F38B}",    // 🎋 tanabata tree / bamboo
-        Suit::Circles => "\u{1F534}",    // 🔴 red circle / disc
+        Suit::Dots => "\u{1F534}",    // 🔴 red circle / disc
         Suit::Wind => "\u{1F32C}",       // 🌬 wind face
         Suit::Dragon => "\u{1F409}",     // 🐉 dragon
         Suit::Flower => "\u{1F33A}",     // 🌺 hibiscus
@@ -81,14 +81,14 @@ pub fn tile_suit_emoji(tile: &Tile) -> &'static str {
 /// Return the asset filename stem for a tile inside a tileset directory.
 ///
 /// Maps `(Suit, rank)` to the naming convention used in `assets/textures/tile_sets/`:
-///   Bamboos 1–9 → B1..B9, Characters → C1..C9, Circles → D1..D9,
+///   Bamboos 1–9 → B1..B9, Characters → C1..C9, Dots → D1..D9,
 ///   Winds → EWind/SWind/WWind/NWind, Dragons → DRed/DGreen/DWhite,
 ///   Flowers → Flower1..Flower4, Seasons → Season1..Season4.
 fn tile_set_filename(tile: &Tile) -> Option<String> {
     match tile.suit {
         Suit::Bamboos => Some(format!("B{}", tile.rank)),
         Suit::Characters => Some(format!("C{}", tile.rank)),
-        Suit::Circles => Some(format!("D{}", tile.rank)),
+        Suit::Dots => Some(format!("D{}", tile.rank)),
         Suit::Wind => {
             let prefix = match tile.rank {
                 1 => "E",
@@ -124,7 +124,8 @@ struct Atlas {
 }
 
 fn atlas_cache() -> &'static Mutex<FxHashMap<String, Option<std::sync::Arc<Atlas>>>> {
-    static CACHE: OnceLock<Mutex<FxHashMap<String, Option<std::sync::Arc<Atlas>>>>> = OnceLock::new();
+    static CACHE: OnceLock<Mutex<FxHashMap<String, Option<std::sync::Arc<Atlas>>>>> =
+        OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(FxHashMap::default()))
 }
 
@@ -760,6 +761,9 @@ pub fn rasterize_plaque_decal_styled(
     if text.trim().is_empty() {
         return rgba;
     }
+    if matches!(style, PlaqueDecalStyle::WalnutInkOnLight) {
+        return rasterize_plaque_walnut_ink_colored_keywords(text, font, emoji_font, w, h);
+    }
 
     // Horizontal padding so glyphs don't run into the engraved-edge silhouette
     // of the plaque face. Vertical padding is kept tight so the text fills
@@ -1002,6 +1006,120 @@ fn advance_width(
                 .advance_width
         })
         .sum()
+}
+
+/// Archive description plaque: same auto-fit + wrap as [`rasterize_plaque_decal_styled`]
+/// ([`PlaqueDecalStyle::WalnutInkOnLight`]), with per-token keyword tints.
+fn rasterize_plaque_walnut_ink_colored_keywords(
+    text: &str,
+    font: &fontdue::Font,
+    emoji_font: Option<&fontdue::Font>,
+    w: u32,
+    h: u32,
+) -> Vec<u8> {
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    const DEFAULT_INK: [f32; 4] = [0.22_f32, 0.13, 0.09, 1.0];
+    const SHADOW_TINT: [f32; 4] = [0.10_f32, 0.06, 0.04, 0.32];
+
+    let pad_x = (w as f32 * 0.05) as u32;
+    let pad_y = (h as f32 * 0.05) as u32;
+    let inner_w = w.saturating_sub(pad_x * 2).max(1);
+    let inner_h = h.saturating_sub(pad_y * 2).max(1);
+
+    let (chosen_px, chosen_lines) =
+        fit_plaque_text(font, emoji_font, text, inner_w as f32, inner_h as f32);
+
+    let line_metrics = font.horizontal_line_metrics(chosen_px);
+    let line_h = line_metrics
+        .map(|lm| lm.new_line_size)
+        .unwrap_or(chosen_px * 1.2);
+    let ascender_px = line_metrics
+        .map(|m| m.ascent)
+        .unwrap_or(chosen_px * 0.8);
+    let line_cell_h = line_h.ceil() as u32 + 2;
+    let baseline_in_band =
+        ((line_cell_h as f32 - line_h) * 0.5).max(0.0) + ascender_px;
+
+    let n_lines = chosen_lines.len().max(1);
+    let total_text_h = line_h * n_lines as f32;
+    let block_top = ((inner_h as f32 - total_text_h) * 0.5).max(0.0);
+
+    for (i, line) in chosen_lines.iter().enumerate() {
+        let mut chunks: Vec<(String, [f32; 4])> = Vec::new();
+        for (idx, word) in line.split_whitespace().enumerate() {
+            if idx > 0 {
+                chunks.push((" ".to_string(), DEFAULT_INK));
+            }
+            chunks.push((
+                word.to_string(),
+                super::vocabulary_colors::color_for_token(word, DEFAULT_INK),
+            ));
+        }
+        if chunks.is_empty() {
+            continue;
+        }
+
+        let total_adv: f32 = chunks
+            .iter()
+            .map(|(s, _)| advance_width(font, emoji_font, s, chosen_px))
+            .sum();
+        let mut cx = (inner_w as f32 - total_adv) * 0.5;
+        let line_baseline_global = pad_y as f32 + block_top + i as f32 * line_h + ascender_px;
+        let dst_y = (line_baseline_global - baseline_in_band).floor().max(0.0) as u32;
+
+        for (s, tint) in &chunks {
+            let aw = advance_width(font, emoji_font, s, chosen_px);
+            if aw <= 0.0 {
+                continue;
+            }
+            let rw = aw.ceil() as u32 + 3;
+            let rh = line_cell_h.max(1);
+            let band = rasterize_label_styled_with_fallback(
+                font,
+                emoji_font,
+                s,
+                rw.max(1),
+                rh,
+                LabelStyle {
+                    font_px: Some(chosen_px),
+                    align: LabelAlign::Left,
+                    scroll_offset: 0.0,
+                },
+            );
+            let dst_x = pad_x + cx.floor() as u32;
+            blit_tinted(
+                TintedSrc {
+                    pixels: &band,
+                    width: rw.max(1),
+                    height: rh,
+                },
+                TintedDst {
+                    pixels: &mut rgba,
+                    width: w,
+                    x: dst_x.saturating_add(1),
+                    y: dst_y.saturating_add(1),
+                },
+                SHADOW_TINT,
+            );
+            blit_tinted(
+                TintedSrc {
+                    pixels: &band,
+                    width: rw.max(1),
+                    height: rh,
+                },
+                TintedDst {
+                    pixels: &mut rgba,
+                    width: w,
+                    x: dst_x,
+                    y: dst_y,
+                },
+                *tint,
+            );
+            cx += aw;
+        }
+    }
+
+    rgba
 }
 
 /// Reference height (in texels) for the plaque decal texture. The actual
@@ -1682,18 +1800,18 @@ pub fn rasterize_label_styled_with_fallback(
     style: LabelStyle,
 ) -> Vec<u8> {
     let LabelStyle {
-        font_px,
+        font_px: font_px_opt,
         align,
         scroll_offset,
     } = style;
     // Multi-line: lay out each line at the same font size, stacked vertically.
     let lines: Vec<&str> = text.split('\n').collect();
     if lines.len() > 1 {
-        return rasterize_block(font, emoji_font, &lines, width, height, font_px, align);
+        return rasterize_block(font, emoji_font, &lines, width, height, font_px_opt, align);
     }
 
     // Single-line fast path retains the historical centring behaviour.
-    let font_px = match font_px {
+    let font_px = match font_px_opt {
         Some(px) => px.max(8.0),
         None => (height as f32 * 0.55)
             .min(width as f32 * 1.5 / text.chars().count().max(1) as f32)
@@ -1715,21 +1833,20 @@ pub fn rasterize_label_styled_with_fallback(
 
     let total_advance: f32 = glyphs.iter().map(|g| g.metrics.advance_width).sum();
 
-    // The typographic ascender is the highest point above the baseline.
-    // Use the tallest glyph's (height + ymin) as a proxy.
-    let ascender_px: f32 = glyphs
-        .iter()
-        .map(|g| g.metrics.height as f32 + g.metrics.ymin as f32)
-        .fold(0.0_f32, f32::max);
-    let descender_px: f32 = glyphs
-        .iter()
-        .map(|g| (-g.metrics.ymin as f32).max(0.0))
-        .fold(0.0_f32, f32::max);
-    let text_block_h = ascender_px + descender_px;
-
-    // Place the baseline so the text block is vertically centred.
-    // In the pixel buffer Y increases downward, while fontdue uses Y-up from baseline.
-    let baseline_y = (height as f32 - text_block_h) * 0.5 + ascender_px;
+    // When `font_px` is pinned, centre using the font's line box (same idea as
+    // [`rasterize_block`]) so every substring shares one baseline. Per-string
+    // glyph-extent centring would shift short runs (coloured keyword splits)
+    // vertically relative to their neighbours.
+    let baseline_y = if font_px_opt.is_some() {
+        if let Some(lm) = font.horizontal_line_metrics(font_px) {
+            let line_h = lm.new_line_size.max(1.0);
+            ((height as f32 - line_h) * 0.5).max(0.0) + lm.ascent
+        } else {
+            single_line_baseline_from_glyphs(&glyphs, height)
+        }
+    } else {
+        single_line_baseline_from_glyphs(&glyphs, height)
+    };
 
     // Horizontal start depends on alignment, then shifted by scroll_offset.
     let start_x = match align {
@@ -1847,6 +1964,21 @@ fn pick_font<'a>(
 struct GlyphData {
     metrics: fontdue::Metrics,
     bitmap: Vec<u8>,
+}
+
+/// Vertical centre for a single raster line from measured glyph extents
+/// (auto-shrink labels and pinned-size fallback when line metrics are missing).
+fn single_line_baseline_from_glyphs(glyphs: &[GlyphData], height: u32) -> f32 {
+    let ascender_px: f32 = glyphs
+        .iter()
+        .map(|g| g.metrics.height as f32 + g.metrics.ymin as f32)
+        .fold(0.0_f32, f32::max);
+    let descender_px: f32 = glyphs
+        .iter()
+        .map(|g| (-g.metrics.ymin as f32).max(0.0))
+        .fold(0.0_f32, f32::max);
+    let text_block_h = ascender_px + descender_px;
+    (height as f32 - text_block_h) * 0.5 + ascender_px
 }
 
 struct GlyphRef<'a> {
@@ -1996,8 +2128,7 @@ fn flavor_line_advance(
     line: &[FlavorCell],
     font_px: f32,
 ) -> f32 {
-    line
-        .iter()
+    line.iter()
         .map(|c| flavor_cell_advance(regular, italic, emoji, *c, font_px))
         .sum()
 }

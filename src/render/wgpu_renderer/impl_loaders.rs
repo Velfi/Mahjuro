@@ -52,7 +52,7 @@ impl WgpuRenderer {
                             ),
                         );
                     }
-                    let (tex, view) = upload_rgba_texture(
+                    let (_tex, view) = upload_rgba_texture(
                         &self.device,
                         &self.queue,
                         img.name,
@@ -60,7 +60,7 @@ impl WgpuRenderer {
                         img.width,
                         img.height,
                     );
-                    let (relief_tex, relief_view) = upload_rgba_texture_linear(
+                    let (_relief_tex, relief_view) = upload_rgba_texture_linear(
                         &self.device,
                         &self.queue,
                         &format!("{}-relief", img.name),
@@ -68,30 +68,8 @@ impl WgpuRenderer {
                         img.relief_width,
                         img.relief_height,
                     );
-                    let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some(img.name),
-                        layout: &self.text_bind_group_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: wgpu::BindingResource::TextureView(&view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::Sampler(&self.tile_sampler),
-                            },
-                        ],
-                    });
-                    self.relic_textures.insert(
-                        img.id,
-                        RelicTextureGpu {
-                            view,
-                            texture: tex,
-                            bind_group,
-                            relief_texture: Some(relief_tex),
-                            relief_view,
-                        },
-                    );
+                    self.relic_textures
+                        .insert(img.id, RelicTextureGpu { view, relief_view });
                 }
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => {
@@ -188,14 +166,7 @@ impl WgpuRenderer {
         );
         let label = format!("bg-fallback-{id:?}");
         let rgba = vec![10u8, 10u8, 14u8, 255u8];
-        let (_tex, view) = upload_rgba_texture(
-            &self.device,
-            &self.queue,
-            &label,
-            &rgba,
-            1,
-            1,
-        );
+        let (_tex, view) = upload_rgba_texture(&self.device, &self.queue, &label, &rgba, 1, 1);
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some(&label),
             layout: &self.text_bind_group_layout,

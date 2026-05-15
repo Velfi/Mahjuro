@@ -425,7 +425,7 @@ fn is_iipeikou(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
 
 /// Sanshoku Doujun: same numerical run in all three number suits. The hand
 /// must contain three sequences whose `(low_rank)` matches across
-/// Characters / Bamboos / Circles.
+/// Characters / Bamboos / Dots.
 fn is_sanshoku_doujun(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
     let mut by_low: FxHashMap<u8, Vec<Suit>> = FxHashMap::default();
     for s in sets.iter().filter(|s| s.kind == MeldKind::Sequence) {
@@ -444,7 +444,7 @@ fn is_sanshoku_doujun(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
     by_low.values().any(|suits| {
         suits.contains(&Suit::Characters)
             && suits.contains(&Suit::Bamboos)
-            && suits.contains(&Suit::Circles)
+            && suits.contains(&Suit::Dots)
     })
 }
 
@@ -463,7 +463,7 @@ fn is_ittsu(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
         }
         if !matches!(
             tile_refs[0].suit,
-            Suit::Characters | Suit::Bamboos | Suit::Circles
+            Suit::Characters | Suit::Bamboos | Suit::Dots
         ) {
             continue;
         }
@@ -488,7 +488,7 @@ fn is_chinitsu(tiles: &[Tile]) -> bool {
         return false;
     }
     let suit = regular[0].suit;
-    if !matches!(suit, Suit::Characters | Suit::Bamboos | Suit::Circles) {
+    if !matches!(suit, Suit::Characters | Suit::Bamboos | Suit::Dots) {
         return false;
     }
     regular.iter().all(|t| t.suit == suit)
@@ -581,7 +581,12 @@ fn is_full_hand(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
     }
     let melds = sets
         .iter()
-        .filter(|s| matches!(s.kind, MeldKind::Triplet | MeldKind::Sequence | MeldKind::Kong))
+        .filter(|s| {
+            matches!(
+                s.kind,
+                MeldKind::Triplet | MeldKind::Sequence | MeldKind::Kong
+            )
+        })
         .count();
     let pairs = sets.iter().filter(|s| s.kind == MeldKind::Pair).count();
     melds == 4 && pairs == 1
@@ -602,9 +607,9 @@ mod tests {
             t(Suit::Bamboos, 1, 0),
             t(Suit::Bamboos, 1, 1),
             t(Suit::Bamboos, 1, 2),
-            t(Suit::Circles, 5, 3),
-            t(Suit::Circles, 5, 4),
-            t(Suit::Circles, 5, 5),
+            t(Suit::Dots, 5, 3),
+            t(Suit::Dots, 5, 4),
+            t(Suit::Dots, 5, 5),
             t(Suit::Wind, 1, 6),
             t(Suit::Wind, 1, 7),
         ];
@@ -633,8 +638,8 @@ mod tests {
             t(Suit::Bamboos, 2, 0),
             t(Suit::Bamboos, 3, 1),
             t(Suit::Bamboos, 4, 2),
-            t(Suit::Circles, 5, 3),
-            t(Suit::Circles, 5, 4),
+            t(Suit::Dots, 5, 3),
+            t(Suit::Dots, 5, 4),
         ];
         let sets = vec![
             DetectedMeld {
@@ -656,8 +661,8 @@ mod tests {
             t(Suit::Bamboos, 1, 0), // rank 1 = terminal
             t(Suit::Bamboos, 2, 1),
             t(Suit::Bamboos, 3, 2),
-            t(Suit::Circles, 5, 3),
-            t(Suit::Circles, 5, 4),
+            t(Suit::Dots, 5, 3),
+            t(Suit::Dots, 5, 4),
         ];
         let sets = vec![
             DetectedMeld {
@@ -682,9 +687,9 @@ mod tests {
             t(Suit::Characters, 4, 3),
             t(Suit::Characters, 5, 4),
             t(Suit::Characters, 6, 5),
-            t(Suit::Circles, 9, 6),
-            t(Suit::Circles, 9, 7),
-            t(Suit::Circles, 9, 8),
+            t(Suit::Dots, 9, 6),
+            t(Suit::Dots, 9, 7),
+            t(Suit::Dots, 9, 8),
             t(Suit::Bamboos, 5, 9),
             t(Suit::Bamboos, 6, 10),
             t(Suit::Bamboos, 7, 11),
@@ -742,8 +747,8 @@ mod tests {
             t(Suit::Bamboos, 3, 3),
             t(Suit::Characters, 5, 4),
             t(Suit::Characters, 5, 5),
-            t(Suit::Circles, 7, 6),
-            t(Suit::Circles, 7, 7),
+            t(Suit::Dots, 7, 6),
+            t(Suit::Dots, 7, 7),
             t(Suit::Wind, 1, 8),
             t(Suit::Wind, 1, 9),
             t(Suit::Wind, 3, 10),
@@ -813,12 +818,12 @@ mod tests {
     fn detect_honitsu_two_sequences_dragon_pair() {
         // D123 + D456 + White White — one number suit with a dragon pair.
         let tiles = vec![
-            t(Suit::Circles, 1, 0),
-            t(Suit::Circles, 2, 1),
-            t(Suit::Circles, 3, 2),
-            t(Suit::Circles, 4, 3),
-            t(Suit::Circles, 5, 4),
-            t(Suit::Circles, 6, 5),
+            t(Suit::Dots, 1, 0),
+            t(Suit::Dots, 2, 1),
+            t(Suit::Dots, 3, 2),
+            t(Suit::Dots, 4, 3),
+            t(Suit::Dots, 5, 4),
+            t(Suit::Dots, 6, 5),
             t(Suit::Dragon, 3, 6), // White dragon
             t(Suit::Dragon, 3, 7),
         ];
@@ -873,9 +878,9 @@ mod tests {
             t(Suit::Bamboos, 4, 3),
             t(Suit::Bamboos, 5, 4),
             t(Suit::Bamboos, 6, 5),
-            t(Suit::Circles, 4, 6),
-            t(Suit::Circles, 5, 7),
-            t(Suit::Circles, 6, 8),
+            t(Suit::Dots, 4, 6),
+            t(Suit::Dots, 5, 7),
+            t(Suit::Dots, 6, 8),
         ];
         let sets = vec![
             DetectedMeld {
@@ -898,15 +903,15 @@ mod tests {
     #[test]
     fn detect_ittsu_full_straight_one_suit() {
         let tiles = vec![
-            t(Suit::Circles, 1, 0),
-            t(Suit::Circles, 2, 1),
-            t(Suit::Circles, 3, 2),
-            t(Suit::Circles, 4, 3),
-            t(Suit::Circles, 5, 4),
-            t(Suit::Circles, 6, 5),
-            t(Suit::Circles, 7, 6),
-            t(Suit::Circles, 8, 7),
-            t(Suit::Circles, 9, 8),
+            t(Suit::Dots, 1, 0),
+            t(Suit::Dots, 2, 1),
+            t(Suit::Dots, 3, 2),
+            t(Suit::Dots, 4, 3),
+            t(Suit::Dots, 5, 4),
+            t(Suit::Dots, 6, 5),
+            t(Suit::Dots, 7, 6),
+            t(Suit::Dots, 8, 7),
+            t(Suit::Dots, 9, 8),
         ];
         let sets = vec![
             DetectedMeld {
@@ -961,8 +966,8 @@ mod tests {
             t(Suit::Bamboos, 3, 3),
             t(Suit::Characters, 5, 4),
             t(Suit::Characters, 5, 5),
-            t(Suit::Circles, 7, 6),
-            t(Suit::Circles, 7, 7),
+            t(Suit::Dots, 7, 6),
+            t(Suit::Dots, 7, 7),
             t(Suit::Wind, 1, 8),
             t(Suit::Wind, 1, 9),
             t(Suit::Wind, 3, 10),

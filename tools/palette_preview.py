@@ -178,7 +178,7 @@ def parse_suit_colors() -> list[Swatch]:
     suit_order = [
         "Characters",
         "Bamboos",
-        "Circles",
+        "Dots",
         "Wind",
         "Dragon Chun (中)",
         "Dragon Hatsu (發)",

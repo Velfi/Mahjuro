@@ -663,11 +663,7 @@ impl AudioManager {
         }
 
         if self.jingle_active {
-            let finished = self
-                .music_sink
-                .as_ref()
-                .map(|s| s.empty())
-                .unwrap_or(true);
+            let finished = self.music_sink.as_ref().map(|s| s.empty()).unwrap_or(true);
             if finished {
                 self.jingle_active = false;
                 if let Some(sink) = self.music_sink.take() {

@@ -26,8 +26,6 @@
 //! is `CINNABAR`), the constant references that token directly so the
 //! relationship survives a re-skin.
 
-#![allow(dead_code)]
-
 use crate::core::tile_pack::TilePackKind;
 use crate::render::theme::color;
 
@@ -58,12 +56,6 @@ pub struct PackPalette {
     /// fallback font always renders.
     pub insignia: &'static str,
 }
-
-/// Shared gold hairline color that frames every pack (`#D9B35A`).
-/// Slightly cooler / more muted than `theme::color::GOLD` so it reads
-/// as a metallic foil edge against the dark backgrounds rather than a
-/// UI accent on a walnut panel.
-pub const BORDER_GOLD: [f32; 4] = [0.851, 0.702, 0.353, 1.0];
 
 pub const HONORS: PackPalette = PackPalette {
     slug: "honors",
@@ -137,25 +129,56 @@ pub const fn for_kind(kind: TilePackKind) -> PackPalette {
     }
 }
 
-/// All palettes in the canonical `TilePackKind::all()` order. Used for
-/// JSON export and the round-trip test.
-pub fn all_palettes() -> Vec<PackPalette> {
-    TilePackKind::all().iter().copied().map(for_kind).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::Value;
+    use crate::render::theme;
+    use serde_json::{Map, Number, Value, json};
     use std::path::PathBuf;
+
+    fn all_palettes() -> Vec<PackPalette> {
+        TilePackKind::all().iter().copied().map(for_kind).collect()
+    }
+
+    fn canonical_json() -> String {
+        fn round4(v: f32) -> Value {
+            let n = ((v as f64) * 10_000.0).round() / 10_000.0;
+            Number::from_f64(n)
+                .map(Value::Number)
+                .unwrap_or(Value::Null)
+        }
+
+        fn rgba(c: [f32; 4]) -> Value {
+            Value::Array(c.iter().map(|v| round4(*v)).collect())
+        }
+
+        let mut packs = Map::new();
+        for p in all_palettes() {
+            let mut entry = Map::new();
+            entry.insert("display_name".into(), Value::String(p.display_name.into()));
+            entry.insert("foil".into(), rgba(p.foil));
+            entry.insert("seal".into(), rgba(p.seal));
+            entry.insert("bg".into(), rgba(p.bg));
+            entry.insert("bg_name".into(), Value::String(p.bg_name.into()));
+            entry.insert("insignia".into(), Value::String(p.insignia.into()));
+            packs.insert(p.slug.to_string(), Value::Object(entry));
+        }
+
+        let root = json!({
+            "_generated_by": "src/render/pack_palette.rs (cargo test pack_palette::tests::dump_pack_palette -- --nocapture)",
+            "_kind_order": TilePackKind::all().iter().map(|k| for_kind(*k).slug).collect::<Vec<_>>(),
+            "border_gold": rgba(theme::color::GOLD),
+            "packs": Value::Object(packs),
+        });
+
+        serde_json::to_string_pretty(&root)
+            .expect("pack_palette JSON serialization should never fail")
+    }
 
     fn json_path() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tools/pack_palette.json")
     }
 
-    /// Compare a `[f32; 4]` from the Rust source to a JSON array. Allows
-    /// 1e-6 absolute slack for the parse-and-print round-trip but no
-    /// looser — the JSON should be byte-identical to the Rust intent.
     fn assert_rgba_eq(field: &str, slug: &str, rust: [f32; 4], json: &Value) {
         let arr = json
             .as_array()
@@ -178,8 +201,9 @@ mod tests {
 
     #[test]
     fn json_mirror_matches_rust_constants() {
-        let raw = std::fs::read_to_string(json_path())
-            .expect("tools/pack_palette.json must exist; regenerate via the dump_pack_palette test");
+        let raw = std::fs::read_to_string(json_path()).expect(
+            "tools/pack_palette.json must exist; regenerate via the dump_pack_palette test",
+        );
         let parsed: Value = serde_json::from_str(&raw).expect("pack_palette.json is invalid JSON");
         let packs = parsed
             .get("packs")
@@ -214,13 +238,11 @@ mod tests {
             assert_rgba_eq("bg", palette.slug, palette.bg, &entry["bg"]);
         }
 
-        // Border gold is shared, not per-pack.
         let border = parsed
             .get("border_gold")
             .expect("pack_palette.json missing top-level `border_gold`");
-        assert_rgba_eq("border_gold", "_shared", BORDER_GOLD, border);
+        assert_rgba_eq("border_gold", "_shared", theme::color::GOLD, border);
 
-        // Slug count guard: catches accidental orphan or missing entries.
         assert_eq!(
             packs.len(),
             all_palettes().len(),
@@ -230,56 +252,8 @@ mod tests {
         );
     }
 
-    /// Print the canonical JSON for `tools/pack_palette.json`. Run
-    /// manually with `cargo test --quiet pack_palette::tests::dump -- --nocapture`
-    /// after editing Rust constants, then redirect or copy the output
-    /// over the JSON file. Always passes.
     #[test]
     fn dump_pack_palette() {
-        println!("{}", crate::render::pack_palette::canonical_json());
+        println!("{}", canonical_json());
     }
-}
-
-/// Format the canonical pack palette as pretty-printed JSON. Used by
-/// the `dump_pack_palette` test to regenerate `tools/pack_palette.json`
-/// when the Rust constants change.
-///
-/// Floats are rounded to 4 decimal places so the JSON reads as the
-/// source-of-truth values (`0.92`, not `0.9200000166893005` from the
-/// raw f32). The constants in this file are all authored to ≤4
-/// decimals, so rounding is loss-free for our intent.
-pub fn canonical_json() -> String {
-    use serde_json::{Map, Number, Value, json};
-
-    fn round4(v: f32) -> Value {
-        let n = ((v as f64) * 10_000.0).round() / 10_000.0;
-        Number::from_f64(n)
-            .map(Value::Number)
-            .unwrap_or(Value::Null)
-    }
-
-    fn rgba(c: [f32; 4]) -> Value {
-        Value::Array(c.iter().map(|v| round4(*v)).collect())
-    }
-
-    let mut packs = Map::new();
-    for p in all_palettes() {
-        let mut entry = Map::new();
-        entry.insert("display_name".into(), Value::String(p.display_name.into()));
-        entry.insert("foil".into(), rgba(p.foil));
-        entry.insert("seal".into(), rgba(p.seal));
-        entry.insert("bg".into(), rgba(p.bg));
-        entry.insert("bg_name".into(), Value::String(p.bg_name.into()));
-        entry.insert("insignia".into(), Value::String(p.insignia.into()));
-        packs.insert(p.slug.to_string(), Value::Object(entry));
-    }
-
-    let root = json!({
-        "_generated_by": "src/render/pack_palette.rs (cargo test pack_palette::tests::dump_pack_palette -- --nocapture)",
-        "_kind_order": TilePackKind::all().iter().map(|k| for_kind(*k).slug).collect::<Vec<_>>(),
-        "border_gold": rgba(BORDER_GOLD),
-        "packs": Value::Object(packs),
-    });
-
-    serde_json::to_string_pretty(&root).expect("pack_palette JSON serialization should never fail")
 }

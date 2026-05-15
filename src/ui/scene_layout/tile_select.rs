@@ -171,9 +171,12 @@ pub fn load_tile_select_positions() -> TileSelectPositions {
 }
 
 pub fn sanitize_tile_select_positions(p: &mut TileSelectPositions) {
-    sanitize_placements("tile_select", p, TileSelectField::ALL, |positions, field| {
-        positions.field_mut(field)
-    });
+    sanitize_placements(
+        "tile_select",
+        p,
+        TileSelectField::ALL,
+        |positions, field| positions.field_mut(field),
+    );
 }
 
 pub fn save_tile_select_positions(pos: &TileSelectPositions) -> anyhow::Result<()> {

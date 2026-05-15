@@ -98,7 +98,7 @@ const C_MAX_LINES: u32 = 10u;
 // Flat storage: stars[constellation][star] = vec2
 // Lines[constellation][line] = vec2(index_a, index_b)
 
-// 0: Three Circles (San Pin) — triangle of dots
+// 0: Three Dots (San Pin) — triangle of dots
 const C0_STARS = array<vec2<f32>, 8>(
     vec2<f32>(0.14, 0.23),
     vec2<f32>(0.17, 0.28),

@@ -152,9 +152,9 @@ fn stacked_yaku_score_full_value_without_loadout_gating() {
 #[test]
 fn yaku_levels_scale_chip_and_mult() {
     let hand = vec![
-        Tile::new(Suit::Circles, 5, 0),
-        Tile::new(Suit::Circles, 5, 1),
-        Tile::new(Suit::Circles, 5, 2),
+        Tile::new(Suit::Dots, 5, 0),
+        Tile::new(Suit::Dots, 5, 1),
+        Tile::new(Suit::Dots, 5, 2),
         Tile::new(Suit::Bamboos, 7, 3),
         Tile::new(Suit::Bamboos, 7, 4),
         Tile::new(Suit::Bamboos, 7, 5),
@@ -191,8 +191,8 @@ fn yaku_levels_scale_chip_and_mult() {
 #[test]
 fn pair_power_grants_chips_and_mult() {
     let hand = vec![
-        Tile::new(Suit::Circles, 7, 0),
-        Tile::new(Suit::Circles, 7, 1),
+        Tile::new(Suit::Dots, 7, 0),
+        Tile::new(Suit::Dots, 7, 1),
     ];
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::PairPower]);
@@ -205,8 +205,8 @@ fn pair_power_grants_chips_and_mult() {
 #[test]
 fn debuffed_terminal_tiles_keep_pair_bonus_but_lose_tile_points() {
     let hand = vec![
-        Tile::new(Suit::Circles, 1, 0),
-        Tile::new(Suit::Circles, 1, 1),
+        Tile::new(Suit::Dots, 1, 0),
+        Tile::new(Suit::Dots, 1, 1),
     ];
     let sets = find_pairs_and_triplets(&hand);
     let r = RelicState::default();
@@ -222,8 +222,8 @@ fn debuffed_terminal_tiles_keep_pair_bonus_but_lose_tile_points() {
 #[test]
 fn debuffed_relic_is_disabled_for_scoring() {
     let hand = vec![
-        Tile::new(Suit::Circles, 7, 0),
-        Tile::new(Suit::Circles, 7, 1),
+        Tile::new(Suit::Dots, 7, 0),
+        Tile::new(Suit::Dots, 7, 1),
     ];
     let sets = find_pairs_and_triplets(&hand);
     let mut r = relics(vec![RelicId::PairPower]);
@@ -283,12 +283,7 @@ fn dragon_rage_fires_on_any_dragon_triplet() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::DragonRage]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert!(
-        breakdown
-            .steps
-            .iter()
-            .any(|s| s.source == "Dragon Rage")
-    );
+    assert!(breakdown.steps.iter().any(|s| s.source == "Dragon Rage"));
 }
 
 #[test]
@@ -407,8 +402,8 @@ fn chain_reaction_inactive_when_not_scored_last_turn() {
 #[test]
 fn pair_double_rule_adds_chips() {
     let hand = vec![
-        Tile::new(Suit::Circles, 5, 0),
-        Tile::new(Suit::Circles, 5, 1),
+        Tile::new(Suit::Dots, 5, 0),
+        Tile::new(Suit::Dots, 5, 1),
     ];
     let sets = find_pairs_and_triplets(&hand);
     let breakdown = score_sets(
@@ -587,8 +582,8 @@ fn kokushi_musou_scores_when_omitted_from_available_yaku() {
         Tile::new(Suit::Characters, 9, 1),
         Tile::new(Suit::Bamboos, 1, 2),
         Tile::new(Suit::Bamboos, 9, 3),
-        Tile::new(Suit::Circles, 1, 4),
-        Tile::new(Suit::Circles, 9, 5),
+        Tile::new(Suit::Dots, 1, 4),
+        Tile::new(Suit::Dots, 9, 5),
         Tile::new(Suit::Wind, 1, 6),
         Tile::new(Suit::Wind, 2, 7),
         Tile::new(Suit::Wind, 3, 8),

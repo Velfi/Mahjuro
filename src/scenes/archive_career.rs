@@ -15,9 +15,7 @@ pub fn chronicle_indices_recent_first(progress: &PlayerProgress) -> Vec<usize> {
         .filter(|(_, r)| !r.tutorial_run)
         .map(|(i, _)| i)
         .collect();
-    v.sort_by_key(|&idx| {
-        std::cmp::Reverse(progress.run_history[idx].timestamp_unix)
-    });
+    v.sort_by_key(|&idx| std::cmp::Reverse(progress.run_history[idx].timestamp_unix));
     v
 }
 
@@ -27,7 +25,9 @@ fn serious_records<'a>(progress: &'a PlayerProgress) -> impl Iterator<Item = &'a
 
 /// Best total score across non-tutorial runs (for PR pins).
 pub fn max_total_score_serious(progress: &PlayerProgress) -> Option<u64> {
-    serious_records(progress).map(|r| r.total_score_earned).max()
+    serious_records(progress)
+        .map(|r| r.total_score_earned)
+        .max()
 }
 
 fn max_structure_score_serious(progress: &PlayerProgress) -> Option<u64> {
@@ -92,18 +92,18 @@ pub fn chronicle_run_stats(rec: &RunRecord) -> String {
         format!("Discarded: {}", rec.tiles_discarded),
         format!("Restocks: {}", rec.times_restocked),
         format!("Gold: {}", rec.final_gold),
-        format!(
-            "Plays left: {} / {}",
-            rec.plays_remaining, rec.plays_max
-        ),
+        format!("Plays left: {} / {}", rec.plays_remaining, rec.plays_max),
         format!(
             "Discards left: {} / {}",
             rec.discards_remaining, rec.discards_max
         ),
     ];
     if !rec.yaku_times_played.is_empty() {
-        let mut pairs: Vec<(YakuKind, u32)> =
-            rec.yaku_times_played.iter().map(|(k, v)| (*k, *v)).collect();
+        let mut pairs: Vec<(YakuKind, u32)> = rec
+            .yaku_times_played
+            .iter()
+            .map(|(k, v)| (*k, *v))
+            .collect();
         pairs.sort_by(|a, b| b.1.cmp(&a.1));
         for (k, n) in pairs.into_iter().take(6) {
             lines.push(format!("{}: {}", k.name(), n));
@@ -142,18 +142,16 @@ pub fn career_frieze_lines(progress: &PlayerProgress) -> Vec<String> {
         .unwrap_or(0);
     let board_best = progress.high_scores.first().copied().unwrap_or(0);
     let primary_score = best_run.max(board_best);
-    out.push(format!("Personal best — {} pts (run total / board)", primary_score));
+    out.push(format!(
+        "Personal best — {} pts (run total / board)",
+        primary_score
+    ));
 
     // Signature structure
     let sig = serious
         .iter()
         .max_by_key(|r| r.best_structure_score)
-        .map(|r| {
-            (
-                r.best_structure_score,
-                r.best_structure_name.as_str(),
-            )
-        });
+        .map(|r| (r.best_structure_score, r.best_structure_name.as_str()));
     if let Some((sc, name)) = sig
         && sc > 0
     {
@@ -161,11 +159,7 @@ pub fn career_frieze_lines(progress: &PlayerProgress) -> Vec<String> {
     }
 
     // Signature yaku (lifetime)
-    if let Some((yk, n)) = progress
-        .yaku_times_scored
-        .iter()
-        .max_by_key(|(_, c)| *c)
-    {
+    if let Some((yk, n)) = progress.yaku_times_scored.iter().max_by_key(|(_, c)| *c) {
         out.push(format!("Favorite yaku — {} ({})", yk.name(), n));
     }
 
@@ -178,10 +172,7 @@ pub fn career_frieze_lines(progress: &PlayerProgress) -> Vec<String> {
             .iter()
             .find(|d| d.id == *rid)
     {
-        out.push(format!(
-            "Most-triggered relic — {} ({})",
-            def.name, n
-        ));
+        out.push(format!("Most-triggered relic — {} ({})", def.name, n));
     }
 
     // Nemesis (guardrails: ≥3 losses on that boss; pair with wins)
@@ -193,13 +184,20 @@ pub fn career_frieze_lines(progress: &PlayerProgress) -> Vec<String> {
     }
 
     // Stakes teaser
-    let stake_bits: Vec<String> = [TileMaterial::Bamboo, TileMaterial::Plastic, TileMaterial::TortoiseShell]
-        .iter()
-        .filter_map(|m| {
-            let cleared = progress.stakes_cleared_for(*m);
-            cleared.iter().max().map(|s| format!("{}: {}", m.label(), s.label()))
-        })
-        .collect();
+    let stake_bits: Vec<String> = [
+        TileMaterial::Bamboo,
+        TileMaterial::Plastic,
+        TileMaterial::TortoiseShell,
+    ]
+    .iter()
+    .filter_map(|m| {
+        let cleared = progress.stakes_cleared_for(*m);
+        cleared
+            .iter()
+            .max()
+            .map(|s| format!("{}: {}", m.label(), s.label()))
+    })
+    .collect();
     if !stake_bits.is_empty() {
         out.push(format!("Stakes — {}", stake_bits.join(" · ")));
     }
@@ -245,5 +243,4 @@ fn nemesis_line(progress: &PlayerProgress) -> Option<(BossKind, u32, u32)> {
 }
 
 /// Explain Chronicle omission in UI copy.
-pub const CHRONICLE_TUTORIAL_NOTE: &str =
-    "Practice tutorial runs are not listed in the Chronicle.";
+pub const CHRONICLE_TUTORIAL_NOTE: &str = "Practice tutorial runs are not listed in the Chronicle.";

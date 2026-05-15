@@ -21,7 +21,9 @@ fn win32_maybe_clear_vulkan_env_after_probe() {
     if std::env::var_os("MAHJURO_SKIP_VULKAN_WSI_PROBE").is_some() {
         return;
     }
-    let wb = std::env::var("WGPU_BACKEND").unwrap_or_default().to_lowercase();
+    let wb = std::env::var("WGPU_BACKEND")
+        .unwrap_or_default()
+        .to_lowercase();
     if !wb.contains("vulkan") && wb != "vk" {
         return;
     }
@@ -228,8 +230,7 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
     #[cfg(target_os = "windows")]
     win32_maybe_clear_vulkan_env_after_probe();
 
-    let mut instance_desc =
-        wgpu::InstanceDescriptor::new_without_display_handle_from_env();
+    let mut instance_desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
     if cfg!(target_os = "windows") && std::env::var_os("WGPU_BACKEND").is_none() {
         // Vulkan + Win32 swapchain still faults on some AMD stacks; DX12 is the safe default.
         // Set `WGPU_BACKEND=vulkan` (or `vk`) to test Vulkan.
@@ -307,8 +308,8 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
         }
     }
 
-    let win32_vulkan = cfg!(target_os = "windows")
-        && adapter.get_info().backend == wgpu::Backend::Vulkan;
+    let win32_vulkan =
+        cfg!(target_os = "windows") && adapter.get_info().backend == wgpu::Backend::Vulkan;
 
     let (format, swapchain_sdr_format, swapchain_hdr_available) = match surface_opt.as_ref() {
         Some(surface) => {
@@ -409,8 +410,8 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
     // `encoder.write_timestamp()` outside of render passes.
     let mut required_features = wgpu::Features::CLEAR_TEXTURE;
     // TIMESTAMP_QUERY + Win32 Vulkan + some AMD stacks: sporadic faults around swapchain setup.
-    let timestamp_supported = adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY)
-        && !win32_vulkan;
+    let timestamp_supported =
+        adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY) && !win32_vulkan;
     if timestamp_supported {
         required_features |= wgpu::Features::TIMESTAMP_QUERY;
         #[cfg(debug_assertions)]

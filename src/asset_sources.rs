@@ -241,7 +241,9 @@ fn index_archive(archive: &mut zip::ZipArchive<File>, pack_idx: usize, index: &m
         let lk = normalize_lookup_key(&name);
         if let Some((prev, _)) = index.insert(lk.clone(), (pack_idx, name.clone())) {
             if prev != pack_idx {
-                log::warn!("duplicate asset key after case-fold: {lk} (pack indices {prev} vs {pack_idx})");
+                log::warn!(
+                    "duplicate asset key after case-fold: {lk} (pack indices {prev} vs {pack_idx})"
+                );
             }
         }
     }

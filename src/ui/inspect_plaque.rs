@@ -6,6 +6,7 @@ use crate::core::relic::RelicFlavorSpan;
 use crate::core::tile::{Suit, Tile, TileEnhancement};
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
+use crate::ui::colored_keywords;
 use crate::ui::tooltip::{self, push_tooltip_frame_quads};
 use crate::ui::widget;
 
@@ -44,6 +45,8 @@ pub fn push_focus_tooltip_panel_2d(
     enum Tier {
         Heading,
         Body,
+        /// Keyword-tinted description (matches [`colored_keywords`]).
+        Desc,
     }
 
     let mut blocks: Vec<(&str, [f32; 4], Tier)> = Vec::new();
@@ -54,7 +57,7 @@ pub fn push_focus_tooltip_panel_2d(
         }
     }
     if !desc_trim.is_empty() {
-        blocks.push((desc_trim.as_str(), color::PARCHMENT, Tier::Body));
+        blocks.push((desc_trim.as_str(), color::PARCHMENT, Tier::Desc));
     }
 
     if blocks.is_empty() {
@@ -64,11 +67,20 @@ pub fn push_focus_tooltip_panel_2d(
     let block_height = |text: &str, tier: Tier| -> f32 {
         let line_h = match tier {
             Tier::Heading => heading_px,
-            Tier::Body => body_px,
+            Tier::Body | Tier::Desc => body_px,
         };
-        let lines = widget::wrap_text(text, inner_w, line_h);
         let line_step = line_h * 1.4;
-        lines.len() as f32 * line_step
+        let n = match tier {
+            Tier::Desc => colored_keywords::wrap_colored_text_multiline(
+                text,
+                inner_w,
+                line_h,
+                color::PARCHMENT,
+            )
+            .len(),
+            _ => widget::wrap_text(text, inner_w, line_h).len(),
+        };
+        n as f32 * line_step
     };
 
     let mut total_h = pad * 2.0 + border * 2.0;
@@ -102,21 +114,43 @@ pub fn push_focus_tooltip_panel_2d(
     for (i, (text, col, tier)) in blocks.iter().enumerate() {
         let line_h = match tier {
             Tier::Heading => heading_px,
-            Tier::Body => body_px,
+            Tier::Body | Tier::Desc => body_px,
         };
         let h_block = block_height(text, *tier);
-        let lines = widget::wrap_text(text, inner_w, line_h);
-        let joined = lines.join("\n");
         let font_px = line_h.max(8.0);
-        texts.push(TextLabel {
-            rect: [text_left, y, text_w, h_block],
-            text: joined,
-            color: *col,
-            font_px: Some(font_px),
-            align: TextAlign::Left,
-            no_glossary: true,
-            ..Default::default()
-        });
+        match tier {
+            Tier::Desc => {
+                let lines = colored_keywords::wrap_colored_text_multiline(
+                    text,
+                    inner_w,
+                    line_h,
+                    *col,
+                );
+                colored_keywords::push_colored_rows_left(
+                    texts,
+                    text_left,
+                    y,
+                    inner_w,
+                    &lines,
+                    line_h,
+                    text,
+                    *col,
+                );
+            }
+            _ => {
+                let lines = widget::wrap_text(text, inner_w, line_h);
+                let joined = lines.join("\n");
+                texts.push(TextLabel {
+                    rect: [text_left, y, text_w, h_block],
+                    text: joined,
+                    color: *col,
+                    font_px: Some(font_px),
+                    align: TextAlign::Left,
+                    no_glossary: true,
+                    ..Default::default()
+                });
+            }
+        }
         y += h_block;
         if i + 1 < blocks.len() {
             y += section_gap;

@@ -52,8 +52,8 @@ use crate::render::decal::{
 };
 use crate::render::dora_plinth_mesh::build_dora_plinth_mesh;
 use crate::render::draw_cmd::{
-    CascadeTokenKind, DrawCmd, ShowcaseTilePlacement, TallyFanKind, TileFaceQuad,
-    UiFrame, WallStackPlacement, YakuTabletPlacement,
+    CascadeTokenKind, DrawCmd, ShowcaseTilePlacement, TallyFanKind, TileFaceQuad, UiFrame,
+    WallStackPlacement, YakuTabletPlacement,
 };
 use crate::render::gpu_types::{DecodedRelicImage, RelicTextureGpu};
 use crate::render::lit_mesh::Aabb;
@@ -244,10 +244,8 @@ pub struct WgpuRenderer {
     /// when the tile identity changes.
     showcase_tiles: Vec<ShowcaseTileGpu>,
     /// Cached 2D tile-face overlays keyed by tile identity.
-    tile_face_overlays: FxHashMap<
-        (Suit, u8, Option<crate::core::tile::TileEnhancement>, bool),
-        TileFaceOverlayGpu,
-    >,
+    tile_face_overlays:
+        FxHashMap<(Suit, u8, Option<crate::core::tile::TileEnhancement>, bool), TileFaceOverlayGpu>,
     /// Cached prompt icons keyed by source path (`asset:...` or `file:...`).
     prompt_icon_overlays: FxHashMap<String, TileFaceOverlayGpu>,
     /// Negative cache for [`Self::prompt_icon_overlays`]: keys whose upload

@@ -42,9 +42,9 @@ fn validate_pair() {
 #[test]
 fn validate_triplet() {
     let tiles = vec![
-        t(Suit::Circles, 7, 0),
-        t(Suit::Circles, 7, 1),
-        t(Suit::Circles, 7, 2),
+        t(Suit::Dots, 7, 0),
+        t(Suit::Dots, 7, 1),
+        t(Suit::Dots, 7, 2),
     ];
     let sets = validate_selection(&tiles).unwrap();
     assert_eq!(sets.len(), 1);
@@ -70,7 +70,7 @@ fn validate_rejects_leftover() {
         t(Suit::Bamboos, 3, 0),
         t(Suit::Bamboos, 3, 1),
         t(Suit::Bamboos, 3, 2),
-        t(Suit::Circles, 9, 3),
+        t(Suit::Dots, 9, 3),
     ];
     assert!(validate_selection(&tiles).is_none());
 }
@@ -114,9 +114,9 @@ fn validate_full_hand() {
         t(Suit::Characters, 5, 4),
         t(Suit::Characters, 6, 5),
         // triplet
-        t(Suit::Circles, 9, 6),
-        t(Suit::Circles, 9, 7),
-        t(Suit::Circles, 9, 8),
+        t(Suit::Dots, 9, 6),
+        t(Suit::Dots, 9, 7),
+        t(Suit::Dots, 9, 8),
         // sequence
         t(Suit::Bamboos, 5, 9),
         t(Suit::Bamboos, 6, 10),
@@ -147,10 +147,10 @@ fn validate_kong_four_of_a_kind() {
 #[test]
 fn find_pairs_and_triplets_emits_kong() {
     let tiles = vec![
-        t(Suit::Circles, 7, 0),
-        t(Suit::Circles, 7, 1),
-        t(Suit::Circles, 7, 2),
-        t(Suit::Circles, 7, 3),
+        t(Suit::Dots, 7, 0),
+        t(Suit::Dots, 7, 1),
+        t(Suit::Dots, 7, 2),
+        t(Suit::Dots, 7, 3),
     ];
     let sets = find_pairs_and_triplets(&tiles);
     assert!(sets.iter().any(|s| s.kind == MeldKind::Kong));
@@ -181,7 +181,7 @@ fn suggest_completions_finds_pair_partner() {
     let hand = vec![
         t(Suit::Bamboos, 3, 0),
         t(Suit::Bamboos, 3, 1),
-        t(Suit::Circles, 5, 2),
+        t(Suit::Dots, 5, 2),
     ];
     let selected = vec![0]; // selected tile id 0 (Bamboos 3)
     let hints = suggest_completions(&hand, &selected);
@@ -267,9 +267,9 @@ fn flower_max_one_per_meld() {
 fn flower_in_multi_meld_hand() {
     // pair + flower-assisted triplet = valid 5-tile hand
     let tiles = vec![
-        t(Suit::Circles, 7, 0),
-        t(Suit::Circles, 7, 1),
-        t(Suit::Circles, 7, 2),
+        t(Suit::Dots, 7, 0),
+        t(Suit::Dots, 7, 1),
+        t(Suit::Dots, 7, 2),
         t(Suit::Bamboos, 3, 3),
         t(Suit::Bamboos, 3, 4),
         t(Suit::Flower, 1, 100),
@@ -442,8 +442,8 @@ fn tricky_chiitoitsu_seven_distinct_pairs() {
         t(Suit::Bamboos, 3, 3),
         t(Suit::Characters, 5, 4),
         t(Suit::Characters, 5, 5),
-        t(Suit::Circles, 7, 6),
-        t(Suit::Circles, 7, 7),
+        t(Suit::Dots, 7, 6),
+        t(Suit::Dots, 7, 7),
         t(Suit::Wind, 1, 8),
         t(Suit::Wind, 1, 9),
         t(Suit::Wind, 3, 10),
@@ -467,8 +467,8 @@ fn tricky_kokushi_musou_decomposed() {
         t(Suit::Characters, 9, 1),
         t(Suit::Bamboos, 1, 2),
         t(Suit::Bamboos, 9, 3),
-        t(Suit::Circles, 1, 4),
-        t(Suit::Circles, 9, 5),
+        t(Suit::Dots, 1, 4),
+        t(Suit::Dots, 9, 5),
         t(Suit::Wind, 1, 6),
         t(Suit::Wind, 2, 7),
         t(Suit::Wind, 3, 8),
@@ -480,7 +480,10 @@ fn tricky_kokushi_musou_decomposed() {
     ];
     let sets = validate_selection(&tiles).expect("kokushi");
     assert_eq!(sets.len(), 13);
-    assert_eq!(sets.iter().filter(|s| s.kind == MeldKind::Single).count(), 12);
+    assert_eq!(
+        sets.iter().filter(|s| s.kind == MeldKind::Single).count(),
+        12
+    );
     assert_eq!(sets.iter().filter(|s| s.kind == MeldKind::Pair).count(), 1);
     let yaku = crate::core::yaku::detect_yaku_with_wind(&tiles, &sets, None, None);
     assert!(yaku.contains(&crate::core::yaku::YakuKind::KokushiMusou));

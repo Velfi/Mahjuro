@@ -383,115 +383,85 @@ impl WgpuRenderer {
         // cheap and animates freely. Marquee labels (non-zero scroll_offset)
         // bypass the cache because the offset is baked into the raster and
         // would otherwise fill the cache with single-use entries.
-        let make_text_draw =
-            |device: &wgpu::Device,
-             queue: &wgpu::Queue,
-             text_bgl: &wgpu::BindGroupLayout,
-             sampler: &wgpu::Sampler,
-             cache: &mut rustc_hash::FxHashMap<
-                TextLabelShapeKey,
-                rustc_hash::FxHashMap<String, CachedTextLabel>,
-            >,
-             frame_id: u64,
-             lbl: &TextLabel,
-             font: &fontdue::Font,
-             font_italic: Option<&fontdue::Font>,
-             emoji_fallback: Option<&fontdue::Font>|
-             -> TextDraw {
-                // Clamp before casting: `f32 as u32` saturates negatives/NaN to u32::MAX,
-                // which blows past wgpu's 16384 texture limit and panics. Seen in arrange mode
-                // when layout math produces a negative rect width.
-                let tw = (lbl.rect[2].clamp(1.0, 16384.0) as u32).max(1);
-                let th = (lbl.rect[3].clamp(1.0, 16384.0) as u32).max(1);
-                let align = match lbl.align {
-                    TextAlign::Left => LabelAlign::Left,
-                    TextAlign::Center => LabelAlign::Center,
-                    TextAlign::Right => LabelAlign::Right,
-                };
-                let scroll_offset_px = lbl.scroll_offset.round() as i32;
-                let cacheable = scroll_offset_px == 0;
-                let flavor = lbl
-                    .flavor_spans
-                    .and_then(|s| if s.is_empty() { None } else { Some(s) });
-                let shape_key = TextLabelShapeKey {
-                    emoji_path: emoji_fallback.is_some(),
-                    flavor_spans: flavor.is_some(),
-                    font_px: lbl.font_px.map(|p| p.round() as u32),
-                    width_px: tw,
-                    height_px: th,
-                    align: lbl.align,
-                    scroll_offset_px,
-                };
-                let cache_inner_key: String = if let Some(spans) = flavor {
-                    crate::core::relic::flavor_spans_cache_key(spans)
+        let make_text_draw = |device: &wgpu::Device,
+                              queue: &wgpu::Queue,
+                              text_bgl: &wgpu::BindGroupLayout,
+                              sampler: &wgpu::Sampler,
+                              cache: &mut rustc_hash::FxHashMap<
+            TextLabelShapeKey,
+            rustc_hash::FxHashMap<String, CachedTextLabel>,
+        >,
+                              frame_id: u64,
+                              lbl: &TextLabel,
+                              font: &fontdue::Font,
+                              font_italic: Option<&fontdue::Font>,
+                              emoji_fallback: Option<&fontdue::Font>|
+         -> TextDraw {
+            // Clamp before casting: `f32 as u32` saturates negatives/NaN to u32::MAX,
+            // which blows past wgpu's 16384 texture limit and panics. Seen in arrange mode
+            // when layout math produces a negative rect width.
+            let tw = (lbl.rect[2].clamp(1.0, 16384.0) as u32).max(1);
+            let th = (lbl.rect[3].clamp(1.0, 16384.0) as u32).max(1);
+            let align = match lbl.align {
+                TextAlign::Left => LabelAlign::Left,
+                TextAlign::Center => LabelAlign::Center,
+                TextAlign::Right => LabelAlign::Right,
+            };
+            let scroll_offset_px = lbl.scroll_offset.round() as i32;
+            let cacheable = scroll_offset_px == 0;
+            let flavor = lbl
+                .flavor_spans
+                .and_then(|s| if s.is_empty() { None } else { Some(s) });
+            let shape_key = TextLabelShapeKey {
+                emoji_path: emoji_fallback.is_some(),
+                flavor_spans: flavor.is_some(),
+                font_px: lbl.font_px.map(|p| p.round() as u32),
+                width_px: tw,
+                height_px: th,
+                align: lbl.align,
+                scroll_offset_px,
+            };
+            let cache_inner_key: String = if let Some(spans) = flavor {
+                crate::core::relic::flavor_spans_cache_key(spans)
+            } else {
+                lbl.text.clone()
+            };
+
+            let rasterize = || -> Vec<u8> {
+                if let Some(spans) = flavor {
+                    let italic = font_italic.unwrap_or(font);
+                    let px = lbl.font_px.unwrap_or(13.0).max(8.0);
+                    crate::render::decal::rasterize_label_flavor_spans(
+                        font,
+                        italic,
+                        emoji_fallback,
+                        spans,
+                        tw,
+                        th,
+                        px,
+                        align,
+                    )
                 } else {
-                    lbl.text.clone()
-                };
-
-                let rasterize = || -> Vec<u8> {
-                    if let Some(spans) = flavor {
-                        let italic = font_italic.unwrap_or(font);
-                        let px = lbl.font_px.unwrap_or(13.0).max(8.0);
-                        crate::render::decal::rasterize_label_flavor_spans(
-                            font,
-                            italic,
-                            emoji_fallback,
-                            spans,
-                            tw,
-                            th,
-                            px,
+                    rasterize_label_styled_with_fallback(
+                        font,
+                        emoji_fallback,
+                        &lbl.text,
+                        tw,
+                        th,
+                        crate::render::decal::LabelStyle {
+                            font_px: lbl.font_px,
                             align,
-                        )
-                    } else {
-                        rasterize_label_styled_with_fallback(
-                            font,
-                            emoji_fallback,
-                            &lbl.text,
-                            tw,
-                            th,
-                            crate::render::decal::LabelStyle {
-                                font_px: lbl.font_px,
-                                align,
-                                scroll_offset: lbl.scroll_offset,
-                            },
-                        )
-                    }
-                };
+                            scroll_offset: lbl.scroll_offset,
+                        },
+                    )
+                }
+            };
 
-                let (bind_group, owned_tex) = if cacheable {
-                    let inner = cache.entry(shape_key).or_default();
-                    if let Some(entry) = inner.get_mut(&cache_inner_key) {
-                        entry.last_used = frame_id;
-                        (entry.bind_group.clone(), None)
-                    } else {
-                        let rgba = rasterize();
-                        let (tex, view) =
-                            upload_rgba_texture(device, queue, "text-lbl", &rgba, tw, th);
-                        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some("text-lbl-bg"),
-                            layout: text_bgl,
-                            entries: &[
-                                wgpu::BindGroupEntry {
-                                    binding: 0,
-                                    resource: wgpu::BindingResource::TextureView(&view),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 1,
-                                    resource: wgpu::BindingResource::Sampler(sampler),
-                                },
-                            ],
-                        });
-                        let bg_clone = bg.clone();
-                        inner.insert(
-                            cache_inner_key,
-                            CachedTextLabel {
-                                tex,
-                                bind_group: bg,
-                                last_used: frame_id,
-                            },
-                        );
-                        (bg_clone, None)
-                    }
+            let (bind_group, owned_tex) = if cacheable {
+                let inner = cache.entry(shape_key).or_default();
+                if let Some(entry) = inner.get_mut(&cache_inner_key) {
+                    entry.last_used = frame_id;
+                    (entry.bind_group.clone(), None)
                 } else {
                     let rgba = rasterize();
                     let (tex, view) = upload_rgba_texture(device, queue, "text-lbl", &rgba, tw, th);
@@ -509,24 +479,52 @@ impl WgpuRenderer {
                             },
                         ],
                     });
-                    (bg, Some(tex))
-                };
-
-                let inst = GpuInstance {
-                    rect: lbl.rect,
-                    color: lbl.color,
-                };
-                let inst_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("text-inst"),
-                    contents: bytemuck::cast_slice(&[inst]),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-                TextDraw {
-                    inst_buf,
-                    bind_group,
-                    _tex: owned_tex,
+                    let bg_clone = bg.clone();
+                    inner.insert(
+                        cache_inner_key,
+                        CachedTextLabel {
+                            tex,
+                            bind_group: bg,
+                            last_used: frame_id,
+                        },
+                    );
+                    (bg_clone, None)
                 }
+            } else {
+                let rgba = rasterize();
+                let (tex, view) = upload_rgba_texture(device, queue, "text-lbl", &rgba, tw, th);
+                let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("text-lbl-bg"),
+                    layout: text_bgl,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(sampler),
+                        },
+                    ],
+                });
+                (bg, Some(tex))
             };
+
+            let inst = GpuInstance {
+                rect: lbl.rect,
+                color: lbl.color,
+            };
+            let inst_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("text-inst"),
+                contents: bytemuck::cast_slice(&[inst]),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+            TextDraw {
+                inst_buf,
+                bind_group,
+                _tex: owned_tex,
+            }
+        };
 
         // ── Hand tile face/emoji label GPU draws (consumed by HandTileFaces) ──
         // Bump the cache frame stamp once per render() so make_text_draw can
@@ -590,8 +588,7 @@ impl WgpuRenderer {
         // backing storage lives in `self.frame_buffer_pool`; each
         // `PoolSlice` is `(offset, byte_len)` into that single
         // persistent buffer. See `frame_pool.rs`.
-        let mut quad_buffers: Vec<crate::render::wgpu_renderer::frame_pool::PoolSlice> =
-            Vec::new();
+        let mut quad_buffers: Vec<crate::render::wgpu_renderer::frame_pool::PoolSlice> = Vec::new();
         let mut gradient_quad_buffers: Vec<crate::render::wgpu_renderer::frame_pool::PoolSlice> =
             Vec::new();
         let mut squircle_quad_buffers: Vec<crate::render::wgpu_renderer::frame_pool::PoolSlice> =
@@ -702,7 +699,9 @@ impl WgpuRenderer {
                         batch.push(*inst);
                         i += 1;
                     }
-                    let slice = self.frame_buffer_pool.alloc(&self.device, &self.queue, &batch);
+                    let slice = self
+                        .frame_buffer_pool
+                        .alloc(&self.device, &self.queue, &batch);
                     let buf_idx = quad_buffers.len();
                     quad_buffers.push(slice);
                     ops.push(RenderOp::QuadBatch {
@@ -716,7 +715,9 @@ impl WgpuRenderer {
                         batch.push(*inst);
                         i += 1;
                     }
-                    let slice = self.frame_buffer_pool.alloc(&self.device, &self.queue, &batch);
+                    let slice = self
+                        .frame_buffer_pool
+                        .alloc(&self.device, &self.queue, &batch);
                     let buf_idx = gradient_quad_buffers.len();
                     gradient_quad_buffers.push(slice);
                     ops.push(RenderOp::GradientQuadBatch {
@@ -730,7 +731,9 @@ impl WgpuRenderer {
                         batch.push(*inst);
                         i += 1;
                     }
-                    let slice = self.frame_buffer_pool.alloc(&self.device, &self.queue, &batch);
+                    let slice = self
+                        .frame_buffer_pool
+                        .alloc(&self.device, &self.queue, &batch);
                     let buf_idx = squircle_quad_buffers.len();
                     squircle_quad_buffers.push(slice);
                     ops.push(RenderOp::SquircleQuadBatch {
@@ -1597,50 +1600,47 @@ impl WgpuRenderer {
         // clear-only pass + redundant composite when there's no room
         // (loading frames, scenes that pull in `glb_room_bloom_linear`
         // before the GLB has parsed, etc.).
-        let room_gi_aabb: Option<(glam::Vec3, glam::Vec3)> =
-            if glb_room_bloom_linear && !is_prepass {
-                if ops_flags.shop_env {
-                    crate::render::shop_glb::with_shop_glb_cpu(|cpu| {
-                        cpu.and_then(|c| {
-                            let corners =
-                                crate::render::shop_glb::shop_world_bounds_corners_centered(
-                                    camera.h,
-                                    self.room_gltf_height_scale,
-                                    c,
-                                );
-                            crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
-                        })
+        let room_gi_aabb: Option<(glam::Vec3, glam::Vec3)> = if glb_room_bloom_linear && !is_prepass
+        {
+            if ops_flags.shop_env {
+                crate::render::shop_glb::with_shop_glb_cpu(|cpu| {
+                    cpu.and_then(|c| {
+                        let corners = crate::render::shop_glb::shop_world_bounds_corners_centered(
+                            camera.h,
+                            self.room_gltf_height_scale,
+                            c,
+                        );
+                        crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
                     })
-                } else if ops_flags.hallway_env {
-                    crate::render::hallway_glb::with_hallway_glb_cpu(|cpu| {
-                        cpu.and_then(|c| {
-                            let corners =
-                                crate::render::shop_glb::shop_world_bounds_corners_centered(
-                                    camera.h,
-                                    self.room_gltf_height_scale,
-                                    c,
-                                );
-                            crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
-                        })
+                })
+            } else if ops_flags.hallway_env {
+                crate::render::hallway_glb::with_hallway_glb_cpu(|cpu| {
+                    cpu.and_then(|c| {
+                        let corners = crate::render::shop_glb::shop_world_bounds_corners_centered(
+                            camera.h,
+                            self.room_gltf_height_scale,
+                            c,
+                        );
+                        crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
                     })
-                } else if ops_flags.archive_env {
-                    crate::render::archive_glb::with_archive_glb_cpu(|cpu| {
-                        cpu.and_then(|c| {
-                            let corners =
-                                crate::render::shop_glb::shop_world_bounds_corners_centered(
-                                    camera.h,
-                                    self.room_gltf_height_scale,
-                                    c,
-                                );
-                            crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
-                        })
+                })
+            } else if ops_flags.archive_env {
+                crate::render::archive_glb::with_archive_glb_cpu(|cpu| {
+                    cpu.and_then(|c| {
+                        let corners = crate::render::shop_glb::shop_world_bounds_corners_centered(
+                            camera.h,
+                            self.room_gltf_height_scale,
+                            c,
+                        );
+                        crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
                     })
-                } else {
-                    None
-                }
+                })
             } else {
                 None
-            };
+            }
+        } else {
+            None
+        };
         let gi_runs_this_frame = room_gi_aabb.is_some();
 
         if gi_runs_this_frame {
@@ -1937,8 +1937,7 @@ impl WgpuRenderer {
         // composite still wants `post_bloom_view` as a stable target
         // (it `LoadOp::Load`s and adds), so when GI runs we keep the
         // copy.
-        let skip_scene_composite =
-            !bloom_active && fisheye_strength == 0.0 && !gi_runs_this_frame;
+        let skip_scene_composite = !bloom_active && fisheye_strength == 0.0 && !gi_runs_this_frame;
         if !skip_scene_composite {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene-composite-pass"),

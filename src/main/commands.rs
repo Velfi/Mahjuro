@@ -85,11 +85,8 @@ pub fn run_cli_command(command: Option<Command>) -> anyhow::Result<bool> {
                 .clone()
                 .unwrap_or_else(|| default_snapshot_label(&mode, bot_graph.runs))
                 .replace("\\n", "\n");
-            let batch = bot::run_headless_aggregate(
-                bot_graph.runs,
-                config,
-                bot_graph.bot_run_options(),
-            );
+            let batch =
+                bot::run_headless_aggregate(bot_graph.runs, config, bot_graph.bot_run_options());
             batch.aggregate.print_summary();
 
             let snapshot = build_bot_graph_snapshot(&batch.aggregate, slug.clone(), label);

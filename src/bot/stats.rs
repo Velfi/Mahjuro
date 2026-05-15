@@ -557,10 +557,7 @@ impl AggregateStats {
             *self.relic_activations.entry(name).or_insert(0) += *count as u64;
         }
         for (name, count) in &s.transformations_successor {
-            *self
-                .transformations_successor
-                .entry(name)
-                .or_insert(0) += *count as u64;
+            *self.transformations_successor.entry(name).or_insert(0) += *count as u64;
         }
         for (name, count) in &s.yaku_scored {
             *self.yaku_scored.entry(name).or_insert(0) += *count as u64;
@@ -571,7 +568,10 @@ impl AggregateStats {
         crate::bot::stats_derived::aggregate_to_v2(self)
     }
 
-    pub fn to_derived(&self, yaku_kind_count: usize) -> crate::bot::export_schema::BotReportDerived {
+    pub fn to_derived(
+        &self,
+        yaku_kind_count: usize,
+    ) -> crate::bot::export_schema::BotReportDerived {
         crate::bot::stats_derived::derived_from_aggregate(self, yaku_kind_count)
     }
 
@@ -590,13 +590,12 @@ impl AggregateStats {
         let pr = &d.per_run;
         out!(
             "victories:           {} / {} ({:.1}%)",
-            self.victories, self.runs, pr.win_rate_pct
+            self.victories,
+            self.runs,
+            pr.win_rate_pct
         );
         if let Some(ref w) = d.overall_win_rate_wilson_95 {
-            out!(
-                "  win rate 95% CI:   {:.1}% – {:.1}% (Wilson)",
-                w.lo, w.hi
-            );
+            out!("  win rate 95% CI:   {:.1}% – {:.1}% (Wilson)", w.lo, w.hi);
         }
         if self.timed_out_runs > 0 {
             out!(
@@ -607,16 +606,22 @@ impl AggregateStats {
         out!("avg blinds cleared:  {:.2}", pr.blinds_cleared);
         out!("avg antes cleared:   {:.2}", pr.antes_cleared);
         out!("max ante reached:    {}", self.max_ante_reached);
-        out!("avg total score:     {}", human_readable_score(pr.total_score));
+        out!(
+            "avg total score:     {}",
+            human_readable_score(pr.total_score)
+        );
         out!("avg plays used:      {:.2}", pr.plays);
         out!(
             "avg discards used:   {:.2} ({:.2} strategic, {:.2} random)",
-            pr.discards, pr.strategic_discards, pr.random_discards
+            pr.discards,
+            pr.strategic_discards,
+            pr.random_discards
         );
         out!("avg blinds skipped:  {:.2}", pr.blinds_skipped);
         out!(
             "avg relics bought:   {:.2} (avg gold spent: {:.1})",
-            pr.relics_bought, pr.gold_spent
+            pr.relics_bought,
+            pr.gold_spent
         );
         out!(
             "avg gold earned:     {:.1} clears + {:.1} skip-tags = {:.1}",
@@ -646,15 +651,18 @@ impl AggregateStats {
         );
         out!(
             "avg turns / run:     {:.2} (avg peak hand size {:.2})",
-            pr.turns, pr.peak_hand_size
+            pr.turns,
+            pr.peak_hand_size
         );
         out!(
             "tiles destroyed:     {:.2}/run | relic activations: {:.0}/run",
-            pr.tiles_destroyed, pr.relic_activations
+            pr.tiles_destroyed,
+            pr.relic_activations
         );
         out!(
             "avg final gold:      {:.1} (avg skip-tag value taken: {:.1})",
-            pr.final_gold, pr.skip_tag_gold_value
+            pr.final_gold,
+            pr.skip_tag_gold_value
         );
         out!(
             "avg targets faced:   {} (score/target {:.2}x, avg overscore {}, peak blind score {})",
@@ -691,7 +699,14 @@ impl AggregateStats {
 
         if !d.deaths_by_ante_hazard.is_empty() {
             out!("\ndeath hazard P(die on ante | reached ante), Wilson 95% CI:");
-            out!("  {:>4} {:>8} {:>8} {:>8} {:>14}", "ante", "reached", "deaths", "hazard", "95% CI");
+            out!(
+                "  {:>4} {:>8} {:>8} {:>8} {:>14}",
+                "ante",
+                "reached",
+                "deaths",
+                "hazard",
+                "95% CI"
+            );
             for row in &d.deaths_by_ante_hazard {
                 out!(
                     "  {:>4} {:>8} {:>8} {:>7.1}% [{:>5.1}–{:>5.1}]",
@@ -709,7 +724,9 @@ impl AggregateStats {
         for row in &d.deaths_by_blind {
             out!(
                 "  {:<12} {:>4} ({:>5.1}%)",
-                row.name, row.count, row.pct_of_runs
+                row.name,
+                row.count,
+                row.pct_of_runs
             );
         }
 
@@ -740,7 +757,9 @@ impl AggregateStats {
             for row in &d.skip_tags {
                 out!(
                     "  {:<16} {:>4} ({:>5.1}%)",
-                    row.name, row.count, row.pct_of_runs
+                    row.name,
+                    row.count,
+                    row.pct_of_runs
                 );
             }
         }
@@ -780,7 +799,9 @@ impl AggregateStats {
             const MIN_SAMPLES_FOR_WIN_CORR: u32 = 20;
             let overall_win_rate = pr.win_rate_pct;
             let ante_mx = d.relic_shop_timing_early_ante_max;
-            out!("\nrelics bought (sorted by total purchases; Wilson 95% CI on win% when bought ≥ 1):");
+            out!(
+                "\nrelics bought (sorted by total purchases; Wilson 95% CI on win% when bought ≥ 1):"
+            );
             out!(
                 "  %late = share of buys when run.ante > {} at the shop visit.",
                 ante_mx
@@ -815,11 +836,18 @@ impl AggregateStats {
             if !d.relics_by_win_rate.is_empty() {
                 out!(
                     "\nrelics by win-rate (≥{} samples, baseline {:.1}%):",
-                    MIN_SAMPLES_FOR_WIN_CORR, overall_win_rate
+                    MIN_SAMPLES_FOR_WIN_CORR,
+                    overall_win_rate
                 );
                 out!(
                     "  {:<22} {:>7} {:>7} {:>8} {:>16} {:>8} {:>8}",
-                    "relic", "bought", "won", "win%", "95% CI", "Δ", "%late"
+                    "relic",
+                    "bought",
+                    "won",
+                    "win%",
+                    "95% CI",
+                    "Δ",
+                    "%late"
                 );
                 for row in &d.relics_by_win_rate {
                     let late_s = row
@@ -876,14 +904,24 @@ impl AggregateStats {
         if !d.talismans_shop.is_empty() {
             out!("\ntalismans bought:");
             for row in &d.talismans_shop {
-                out!("  {:<22} {:>5} ({:.2}/run)", row.name, row.count, row.per_run);
+                out!(
+                    "  {:<22} {:>5} ({:.2}/run)",
+                    row.name,
+                    row.count,
+                    row.per_run
+                );
             }
         }
 
         if !d.zodiacs_shop.is_empty() {
             out!("\nzodiacs acquired:");
             for row in &d.zodiacs_shop {
-                out!("  {:<22} {:>5} ({:.2}/run)", row.name, row.count, row.per_run);
+                out!(
+                    "  {:<22} {:>5} ({:.2}/run)",
+                    row.name,
+                    row.count,
+                    row.per_run
+                );
             }
         }
 
@@ -898,7 +936,11 @@ impl AggregateStats {
             );
             out!(
                 "  {:<22} {:>8} {:>8} {:>8} {:>8}",
-                "yaku", "awards", "/run", "share%", "Δuni%"
+                "yaku",
+                "awards",
+                "/run",
+                "share%",
+                "Δuni%"
             );
             for row in &y.rows {
                 out!(
@@ -924,7 +966,12 @@ impl AggregateStats {
         if !d.packs_shop.is_empty() {
             out!("\npacks bought:");
             for row in &d.packs_shop {
-                out!("  {:<22} {:>5} ({:.2}/run)", row.name, row.count, row.per_run);
+                out!(
+                    "  {:<22} {:>5} ({:.2}/run)",
+                    row.name,
+                    row.count,
+                    row.per_run
+                );
             }
         }
 
@@ -942,10 +989,7 @@ impl AggregateStats {
                 );
             }
             if bi.lost_with_lines > 0 {
-                out!(
-                    "  lost with lines available: {}",
-                    bi.lost_with_lines
-                );
+                out!("  lost with lines available: {}", bi.lost_with_lines);
             }
             if !bi.hottest_blinds.is_empty() {
                 let s = bi
@@ -978,7 +1022,6 @@ impl AggregateStats {
 
         Ok(())
     }
-
 
     pub fn print_summary(&self) {
         let _ = self.write_summary(&mut std::io::stdout().lock());
