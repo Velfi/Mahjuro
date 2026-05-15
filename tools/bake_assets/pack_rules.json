@@ -1,16 +1,26 @@
 {
-  "_comment": "assign_pack precedence: see bake_assets.py. shared (eager) = cross-scene: fonts, sets/, all audio/ SFX. gameplay (eager) = bulk 3D/UI. scene_main_menu (lazy) = main menu façade + future scene-only assets under scenes/main_menu/. music (lazy) = BGM under music/.",
+  "_comment": "assign_pack precedence: see bake_assets.py. Order matters: earlier packs win for path_prefixes. music (lazy) is listed before shared so audio/music/ files route there even though they share the audio/ prefix. scene_main_menu (lazy) is listed before shared/gameplay so textures/scenes/main_menu/ wins over the broader textures/. shared (eager) = cross-scene: fonts/, textures/tile_sets/ (atlases), all other audio/ SFX. gameplay (eager) = bulk 3D/UI: data/, the rest of textures/, steam_assets/, and 3d/ models.",
   "packs": [
+    {
+      "id": "music",
+      "file": "mahjuro-pack-music.zip",
+      "load_tier": "lazy",
+      "path_prefixes": ["audio/music/"]
+    },
+    {
+      "id": "scene_main_menu",
+      "file": "mahjuro-pack-scene-main_menu.zip",
+      "load_tier": "lazy",
+      "path_prefixes": ["textures/scenes/main_menu/"]
+    },
     {
       "id": "shared",
       "file": "mahjuro-pack-shared.zip",
       "load_tier": "eager",
       "path_prefixes": [
-        "sets/",
+        "textures/tile_sets/",
         "audio/",
-        "Instrument_Serif/",
-        "Cormorant_Garamond/",
-        "Noto_Emoji/"
+        "fonts/"
       ],
       "root_files": []
     },
@@ -21,22 +31,10 @@
       "path_prefixes": [
         "data/",
         "textures/",
-        "kenney_input-prompts/",
-        "steam_assets/"
+        "steam_assets/",
+        "3d/"
       ],
-      "root_globs": ["*.glb", "*.png"]
-    },
-    {
-      "id": "scene_main_menu",
-      "file": "mahjuro-pack-scene-main_menu.zip",
-      "load_tier": "lazy",
-      "path_prefixes": ["scenes/main_menu/"]
-    },
-    {
-      "id": "music",
-      "file": "mahjuro-pack-music.zip",
-      "load_tier": "lazy",
-      "path_prefixes": ["music/"]
+      "root_globs": []
     }
   ]
 }

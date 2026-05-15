@@ -4,6 +4,7 @@ Follow-up tasks that are scoped but not scheduled. Each entry links to a doc wit
 
 ## Refactors
 
+- [Event-driven run mutations (subscribers beyond gold)](event-driven-run-mutations.md) — centralize relic destruction, optional plays/discards and tile-supply hooks the same way gold now uses `notify_run_gold_changed` + `GameEvent::GoldChanged`.
 - [Finish the wgpu render-runtime split](render-runtime-finish-split.md) — Object3d dispatch + encoder/passes are still in one ~5,000-line `render()`; first pass landed seven sibling modules.
 
 ## Rendering / shaders
@@ -15,6 +16,7 @@ Follow-up tasks that are scoped but not scheduled. Each entry links to a doc wit
 
 ## Catalog / content
 
+- [Unified HTML editor for ship game data JSON](game-data-json-editor.md) — extend the relic flavor editor shell to `bosses.json` / `yaku.json` (row pick + manifest-driven fields) while keeping `flavor_spans` WYSIWYG for relics.
 - [Silk Moth successor relic](silk-moth-successor-relic.md) — post-destruction successor for Silk Thread; cocoon → moth transformation, art rewrite for the parent, and a Steam achievement for the emergence.
 - [Taotie successor relic](taotie-successor-relic.md) — post-destruction successor for Melting Ice; ice-thaws-to-bronze-glutton transformation, art rewrite for the parent, and a Steam achievement for the awakening.
 

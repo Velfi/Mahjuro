@@ -1,4 +1,4 @@
-//! Frozen Archive grid + [`ItemInspectScene`] orbit on the showcase overlay.
+//! Frozen Archive grid + [`ItemInspectScene`] turntable on the showcase overlay.
 
 use std::time::Instant;
 

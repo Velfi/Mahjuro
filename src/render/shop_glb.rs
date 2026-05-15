@@ -1,4 +1,4 @@
-//! Load [`Shop.glb`](../../../assets/Shop.glb): named empties/meshes for UI anchors + merged environment geometry.
+//! Load [`Shop.glb`](../../../assets/3d/Shop.glb): named empties/meshes for UI anchors + merged environment geometry.
 //!
 //! Marker object names (Blender object names → glTF node names):
 //! - `exit_btn`, `restock_btn`, `journal_btn`
@@ -20,10 +20,10 @@
 //! into texels. Tangents come from the glTF `TANGENT` attribute when present, otherwise from
 //! [`crate::render::tile_glb::compute_vertex_tangents`] using the normal map TEXCOORD when it
 //! differs from base color. Metallic–roughness, emissive, alpha modes, `COLOR_0`, and glTF sampler
-//! settings follow [`crate::render::tile_glb::LoadedPrimitive`] (shared with `Tile.glb`).
+//! settings follow [`crate::render::tile_glb::LoadedPrimitive`] (shared with `tile.glb`).
 //!
 //! ## Export (Blender / glTF)
-//! Ship **`Shop.glb` without Draco** (`KHR_draco_mesh_compression`). This crate uses
+//! Ship **`shop.glb` without Draco** (`KHR_draco_mesh_compression`). This crate uses
 //! [`gltf::import_slice`](https://docs.rs/gltf), which does not decode Draco — compressed files fail
 //! validation (`accessor.bufferView: Missing data`, unsupported extension).
 //!
@@ -70,8 +70,9 @@
 //!
 //! Shared glTF room decode (meshes, lights, cameras, collision) lives in [`crate::render::room_env_gltf`].
 
-use std::collections::HashMap;
 use std::sync::RwLock;
+
+use rustc_hash::FxHashMap;
 
 use crate::render::draw_cmd::CameraParams;
 use crate::render::room_env_gltf::{
@@ -95,11 +96,11 @@ fn ensure_shop_glb_loaded() {
     if !matches!(*w, ShopGlbCache::Uninit) {
         return;
     }
-    let ready = if let Some(file) = crate::asset_path::get("Shop.glb") {
+    let ready = if let Some(file) = crate::asset_path::get("3d/Shop.glb") {
         match load_shop_glb_from_bytes(&file.data) {
             Ok(cpu) => {
                 log::debug!(
-                    "Shop.glb: {} marker node(s), {} draw primitive(s), {} collision mesh(es)",
+                    "shop.glb: {} marker node(s), {} draw primitive(s), {} collision mesh(es)",
                     cpu.markers.len(),
                     cpu.environment_primitives.len(),
                     cpu.collision_meshes.len(),
@@ -109,7 +110,7 @@ fn ensure_shop_glb_loaded() {
                     || !cpu.embedded_spot_lights.is_empty()
                 {
                     log::debug!(
-                        "Shop.glb scene extras: perspective_camera={} point_lights={} spot_lights={}",
+                        "shop.glb scene extras: perspective_camera={} point_lights={} spot_lights={}",
                         cpu.embedded_perspective_camera.is_some(),
                         cpu.embedded_point_lights.len(),
                         cpu.embedded_spot_lights.len(),
@@ -117,7 +118,7 @@ fn ensure_shop_glb_loaded() {
                     if !cpu.embedded_point_lights.is_empty() || !cpu.embedded_spot_lights.is_empty()
                     {
                         log::debug!(
-                            "Shop.glb punctual lights: re-export from Blender glTF with Lighting Mode **Standard** (cd/lx); validate in https://gltf-viewer.donmccurdy.com/"
+                            "shop.glb punctual lights: re-export from Blender glTF with Lighting Mode **Standard** (cd/lx); validate in https://gltf-viewer.donmccurdy.com/"
                         );
                     }
                 }
@@ -125,17 +126,17 @@ fn ensure_shop_glb_loaded() {
             }
             Err(e) => {
                 let msg = format!("{e:#}");
-                log::error!("Shop.glb failed to load: {msg}");
+                log::error!("shop.glb failed to load: {msg}");
                 if msg.contains("KHR_draco_mesh_compression") {
                     log::warn!(
-                        "Re-export Shop.glb with Draco compression disabled (Blender glTF: turn off mesh compression / Draco)."
+                        "Re-export shop.glb with Draco compression disabled (Blender glTF: turn off mesh compression / Draco)."
                     );
                 }
                 None
             }
         }
     } else {
-        log::warn!("Shop.glb not embedded; using PNG storeroom backdrop");
+        log::warn!("shop.glb not embedded; using PNG storeroom backdrop");
         None
     };
     *w = ShopGlbCache::Ready(ready);
@@ -173,7 +174,7 @@ pub fn release_shop_environment_cpu_sources_after_gpu_upload() {
 pub const SHOP_ENV_HEIGHT_SCALE: f32 = 1.0;
 
 /// Multiplies glTF punctual **intensity** before upload (document-space inverse-square; see
-/// `decal_atlas_uv.y` / `SsrGlobals.shop_punctual`). Default `1` uses authored intensities.
+/// `decal_atlas_uv.y` / `SsrGlobals.shop_punctual.x` (inverse doc scale for attenuation).
 pub const SHOP_GLTF_LIGHT_INTENSITY_SCALE: f32 = 0.6;
 
 /// Linear HDR gain for **shop** only: `2^-9` ≈ Don McCurdy glTF viewer exposure **−9** (EV on linear HDR).
@@ -277,7 +278,8 @@ pub const SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX: &str = "light_candle_";
 
 /// Linear RGB multiplier for punctual lights on nodes matching [`SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX`].
 /// Warm shift for candle reads; other lights keep glTF linear RGB.
-pub const SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL: [f32; 3] = [1.0, 0.91, 0.74];
+pub const SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL: [f32; 3] =
+    crate::render::theme::color::rgb(crate::render::theme::color::TALLOW);
 
 /// Runtime shop lighting matching the `SHOP_*` source constants. Carried on [`DrawCtx`](crate::scenes::DrawCtx)
 /// and editable from the debug overlay.
@@ -317,8 +319,8 @@ pub type ShopGlbEmbeddedPointLight = renv::RoomGltfEmbeddedPointLight;
 pub type ShopGlbEmbeddedSpotLight = renv::RoomGltfEmbeddedSpotLight;
 pub type ShopGlbEmbeddedCamera = renv::RoomGltfEmbeddedCamera;
 
-pub(crate) use crate::render::room_env_gltf::room_environment_bounds;
 pub use crate::render::room_env_gltf::glb_punctual_range_world_upload;
+pub(crate) use crate::render::room_env_gltf::room_environment_bounds;
 
 #[inline]
 pub fn shop_env_world_scale(window_h: f32, height_scale: f32) -> f32 {
@@ -360,14 +362,28 @@ pub fn shop_camera_fit_fovy_for_corners(
 
 /// Decoded room GLB (shop, hallway, …): shared layout for [`shop_glb.wgsl`] and punctual uploads.
 pub struct RoomGlbCpu {
-    pub markers: HashMap<String, Mat4>,
+    pub markers: FxHashMap<String, Mat4>,
     pub environment_primitives: Vec<ShopEnvPrimitiveCpu>,
     pub environment_bounds_doc: Option<ShopEnvironmentBounds>,
-    pub marker_mesh_bounds_doc: HashMap<String, ShopEnvironmentBounds>,
+    pub marker_mesh_bounds_doc: FxHashMap<String, ShopEnvironmentBounds>,
     pub collision_meshes: Vec<ShopCollisionMesh>,
     pub embedded_perspective_camera: Option<ShopGlbEmbeddedCamera>,
     pub embedded_point_lights: Vec<ShopGlbEmbeddedPointLight>,
     pub embedded_spot_lights: Vec<ShopGlbEmbeddedSpotLight>,
+}
+
+impl RoomGlbCpu {
+    /// glTF node local transform in **document** space (before [`shop_env_model_matrix_from_cpu`]).
+    #[inline]
+    pub fn marker_node_transform_doc(&self, node_name: &str) -> Option<Mat4> {
+        self.markers.get(node_name).copied()
+    }
+
+    /// Document-space AABB for the marker node's mesh (when decoded), for bounds / screen projection.
+    #[inline]
+    pub fn marker_mesh_bounds_doc_for(&self, node_name: &str) -> Option<&ShopEnvironmentBounds> {
+        self.marker_mesh_bounds_doc.get(node_name)
+    }
 }
 
 /// Back-compat name — shop and hallway both decode to [`RoomGlbCpu`].
@@ -393,7 +409,7 @@ impl RoomEnvWalkHooks for ShopRoomWalkHooks {
     }
 
     fn log_asset_label(&self) -> &'static str {
-        "Shop.glb"
+        "shop.glb"
     }
 }
 
@@ -463,7 +479,7 @@ pub fn screen_rect_for_marker_mesh_bounds(
     min_rw: f32,
     min_rh: f32,
 ) -> Option<[f32; 4]> {
-    let bounds = cpu.marker_mesh_bounds_doc.get(node_name)?;
+    let bounds = cpu.marker_mesh_bounds_doc_for(node_name)?;
     let s = shop_env_world_scale(win_h, env_height_scale);
     let center_doc = cpu
         .environment_bounds_doc
@@ -504,9 +520,9 @@ pub fn load_room_glb_from_bytes(
 
     let buffers: Vec<Vec<u8>> = buffers_vec.into_iter().map(|b| b.0).collect();
 
-    let mut markers = HashMap::new();
+    let mut markers = FxHashMap::default();
     let mut environment_primitives = Vec::new();
-    let mut marker_mesh_bounds_doc = HashMap::new();
+    let mut marker_mesh_bounds_doc = FxHashMap::default();
     let mut collision_meshes = Vec::new();
     let mut embedded_cameras = EmbeddedCameraHarvest::default();
     let mut embedded_point_lights = Vec::new();
@@ -548,8 +564,8 @@ pub fn load_room_glb_from_bytes(
 pub fn load_shop_glb_from_bytes(data: &[u8]) -> anyhow::Result<RoomGlbCpu> {
     load_room_glb_from_bytes(
         data,
-        "gltf::import_slice(Shop.glb)",
-        "Shop.glb has no scenes",
+        "gltf::import_slice(shop.glb)",
+        "shop.glb has no scenes",
         &ShopRoomWalkHooks,
     )
 }

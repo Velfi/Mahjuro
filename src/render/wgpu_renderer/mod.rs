@@ -1,6 +1,7 @@
 //! WGPU: depth-tested 3D tile meshes for the hand + 2D UI quads on top.
 
 mod embedded_wgsl;
+mod frame_pool;
 mod init;
 mod init_phases;
 pub(crate) mod resources;
@@ -25,9 +26,10 @@ mod tile_pipeline;
 mod ui_instances;
 mod uniforms;
 
-use std::collections::HashMap;
 use std::sync::mpsc;
 use std::time::Instant;
+
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use glam::Mat4;
 use wgpu::util::DeviceExt;
@@ -50,8 +52,8 @@ use crate::render::decal::{
 };
 use crate::render::dora_plinth_mesh::build_dora_plinth_mesh;
 use crate::render::draw_cmd::{
-    CascadeTokenKind, DrawCmd, ShowcaseTilePlacement, ShrinePlacement, TallyFanKind, TileFaceQuad,
-    UiFrame, WallStackPlacement, YakuTabletPlacement,
+    CascadeTokenKind, DrawCmd, ShowcaseTilePlacement, TallyFanKind, TileFaceQuad, UiFrame,
+    WallStackPlacement, YakuTabletPlacement,
 };
 use crate::render::gpu_types::{DecodedRelicImage, RelicTextureGpu};
 use crate::render::lit_mesh::Aabb;
@@ -78,7 +80,6 @@ use crate::render::river_mesh::{
     build_river_mesh,
 };
 use crate::render::shop_bell_mesh::build_shop_bell_mesh;
-use crate::render::shrine_mesh::build_shrine_mesh;
 use crate::render::table_mesh::build_table_mesh;
 use crate::render::table_transform::{
     mesh_y_thickness_along_local_y_to_z_up, ribbon_submesh, rot_euler_xyz_rad,
@@ -92,6 +93,7 @@ use crate::render::wood_tablet_mesh::build_wood_tablet_mesh;
 use crate::render::world_space::pixel_to_world;
 use crate::scenes::BackgroundId;
 
+use self::frame_pool::FrameBufferPool;
 use self::resources::*;
 use self::showcase::*;
 
@@ -132,9 +134,6 @@ pub struct WgpuRenderer {
     // Owns the GPU resource that `moon_albedo_bind_group` samples from.
     moon_albedo_bind_group: wgpu::BindGroup,
     sunlit_water_pipeline: wgpu::RenderPipeline,
-    mountain_haze_pipeline: wgpu::RenderPipeline,
-    haze_uniform_buffer: wgpu::Buffer,
-    haze_uniform_bind_group: wgpu::BindGroup,
     /// Expensive shooting-star cascade transition renders into a half-res
     /// offscreen target to keep costs bounded at large resolutions; these
     /// fields own that target plus the two pipelines involved.
@@ -145,11 +144,19 @@ pub struct WgpuRenderer {
     cascade_offscreen_texture: wgpu::Texture,
     cascade_offscreen_view: wgpu::TextureView,
     cascade_composite_bind_group: wgpu::BindGroup,
+    /// Half-res downsample blit that publishes `scene_color_view` →
+    /// `scene_prev_view` once per frame as the new SSR history input.
+    /// Replaces the old full-res `copy_texture_to_texture` of color
+    /// (~12 MB/frame at 1080p → ~3 MB/frame). Reuses
+    /// `cascade_composite_layout` (texture + sampler) and the
+    /// `cascade_composite_sampler`. See `scene_color_downsample.wgsl`.
+    scene_color_downsample_pipeline: wgpu::RenderPipeline,
+    scene_color_downsample_bind_group: wgpu::BindGroup,
     tile_pipeline_opaque_double: wgpu::RenderPipeline,
     tile_pipeline_opaque_cull: wgpu::RenderPipeline,
     tile_pipeline_blend_double: wgpu::RenderPipeline,
     tile_pipeline_blend_cull: wgpu::RenderPipeline,
-    /// Shop.glb only — glTF punctual + metallic-roughness + ACES (`shop_glb.wgsl`).
+    /// shop.glb only — glTF punctual + metallic-roughness + ACES (`shop_glb.wgsl`).
     shop_pipeline_opaque_double: wgpu::RenderPipeline,
     shop_pipeline_opaque_cull: wgpu::RenderPipeline,
     shop_pipeline_blend_double: wgpu::RenderPipeline,
@@ -197,15 +204,23 @@ pub struct WgpuRenderer {
     tile_outline_vertex_buffer: wgpu::Buffer,
     tile_outline_index_buffer: wgpu::Buffer,
     tile_outline_index_count: u32,
-    /// [`Shop.glb`](../../assets/Shop.glb) environment primitives (tile vertex layout + materials).
+    /// [`Shop.glb`](../../assets/3d/Shop.glb) environment primitives (tile vertex layout + materials).
     shop_env_primitives: Vec<TilePrimitiveGpu>,
     shop_environment: Option<ShopEnvironmentGpu>,
-    /// [`hallway.glb`](../../assets/hallway.glb) pick-blind room.
+    /// [`hallway.glb`](../../assets/3d/hallway.glb) pick-blind room.
     hallway_env_primitives: Vec<TilePrimitiveGpu>,
     hallway_environment: Option<ShopEnvironmentGpu>,
-    /// Multiplier for `Shop.glb` environment scale (`window_h *` this). Set each frame from the app
-    /// (debug overlay may override [`crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE`]).
-    shop_env_height_scale: f32,
+    /// [`archive.glb`](../../assets/3d/archive.glb) Archive room.
+    archive_env_primitives: Vec<TilePrimitiveGpu>,
+    archive_environment: Option<ShopEnvironmentGpu>,
+    /// GPU primitive index of `sign_description_left` in `archive_env_primitives` (for culling).
+    archive_sign_left_prim_idx: Option<usize>,
+    archive_sign_right_prim_idx: Option<usize>,
+    /// Last-uploaded description decal (`archive_sign_decal_texture`); `u64::MAX` = cleared / none.
+    archive_sign_decal_upload_key: u64,
+    /// Multiplier for embedded glTF **room** scale (`window_h *` this): shop, hallway, archive, etc.
+    /// Set each frame from the app (debug overlay may override [`crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE`]).
+    room_gltf_height_scale: f32,
     /// Debug HDR multiplier; shop applies [`crate::render::shop_glb::SHOP_ENV_LINEAR_EXPOSURE_BASE`]
     /// × this before ACES (`CameraUniform.tile_seed` + `SsrGlobals.felt.z`).
     shop_env_linear_exposure: f32,
@@ -215,12 +230,12 @@ pub struct WgpuRenderer {
     shop_lit_mesh_gltf_punctual_scale: f32,
     /// Scales glTF mesh emissive on `Shop.glb` / `hallway.glb` (`CameraUniform.decal_atlas_uv.z`).
     shop_gltf_emissive_scale: f32,
-    /// CPU triangle soups from invisible marker meshes in [`Shop.glb`](../../assets/Shop.glb).
+    /// CPU triangle soups from invisible marker meshes in [`Shop.glb`](../../assets/3d/Shop.glb).
     pub(super) shop_env_collision_meshes: Vec<crate::render::shop_glb::ShopCollisionMesh>,
     /// Identity factor used by every primitive (kept for the cam uniform).
     tile_base_color_factor: [f32; 4],
     /// Active tileset directory name (e.g. `"original"`). When `Some`, tile
-    /// decals are loaded from `assets/sets/<name>/` instead of rasterized.
+    /// decals are loaded from `assets/textures/tile_sets/<name>/` instead of rasterized.
     tile_set: Option<String>,
     /// Per-hand-tile GPU resources; kept in sync with the hand via `update_hand_tiles`.
     hand_tiles: Vec<HandTileGpu>,
@@ -230,9 +245,13 @@ pub struct WgpuRenderer {
     showcase_tiles: Vec<ShowcaseTileGpu>,
     /// Cached 2D tile-face overlays keyed by tile identity.
     tile_face_overlays:
-        HashMap<(Suit, u8, Option<crate::core::tile::TileEnhancement>, bool), TileFaceOverlayGpu>,
+        FxHashMap<(Suit, u8, Option<crate::core::tile::TileEnhancement>, bool), TileFaceOverlayGpu>,
     /// Cached prompt icons keyed by source path (`asset:...` or `file:...`).
-    prompt_icon_overlays: HashMap<String, TileFaceOverlayGpu>,
+    prompt_icon_overlays: FxHashMap<String, TileFaceOverlayGpu>,
+    /// Negative cache for [`Self::prompt_icon_overlays`]: keys whose upload
+    /// already failed. Re-trying every frame would re-decode the sheet and
+    /// flood the log; we warn once and skip thereafter.
+    prompt_icon_missing: FxHashSet<String>,
     /// Lazily built texture + bind group for [`Object3dKind::Relic::debuffed`] overlays.
     debuff_marker_overlay: Option<TileFaceOverlayGpu>,
     /// Cached text-label rasterizations. Two-level map so the hit path can
@@ -242,7 +261,7 @@ pub struct WgpuRenderer {
     /// per-frame instance buffer instead. Entries are evicted when their
     /// `last_used` frame stamp falls more than `TEXT_CACHE_TTL_FRAMES` behind
     /// `text_cache_frame`.
-    text_label_cache: HashMap<TextLabelShapeKey, HashMap<String, CachedTextLabel>>,
+    text_label_cache: FxHashMap<TextLabelShapeKey, FxHashMap<String, CachedTextLabel>>,
     /// Monotonically increasing frame counter for `text_label_cache` eviction.
     text_cache_frame: u64,
     vertex_buffer: wgpu::Buffer,
@@ -300,26 +319,31 @@ pub struct WgpuRenderer {
     /// (≈ 70 ms time constant) so lift/tilt animations run in both directions
     /// instead of snapping. Entries are created on first use and never removed
     /// (the map stays tiny — one entry per interactive 3D object in the game).
-    obj3d_hover_state: HashMap<u64, f32>,
+    obj3d_hover_state: FxHashMap<u64, f32>,
     /// Creation time — used as a stable reference for cyclic animations.
     creation_time: Instant,
     /// Cached relic icon textures, populated asynchronously from the loader thread.
-    relic_textures: HashMap<RelicId, RelicTextureGpu>,
+    relic_textures: FxHashMap<RelicId, RelicTextureGpu>,
     /// Receives decoded relic RGBA data from the background loader thread.
     relic_rx: Option<mpsc::Receiver<DecodedRelicImage>>,
     /// Wall-clock start of the relic load pipeline (spawn → last GPU upload).
     relic_load_start: Option<Instant>,
     /// Cached tile-pack box art textures, keyed by `TilePackKind`.
-    pack_textures: HashMap<TilePackKind, RelicTextureGpu>,
+    pack_textures: FxHashMap<TilePackKind, RelicTextureGpu>,
     /// Cached background textures, populated asynchronously.
-    background_textures: HashMap<BackgroundId, BackgroundTextureGpu>,
+    background_textures: FxHashMap<BackgroundId, BackgroundTextureGpu>,
     /// Receives decoded background image data from the background loader thread.
     background_rx: Option<mpsc::Receiver<DecodedBackgroundImage>>,
     /// Wall-clock start of the background load pipeline (spawn → last GPU upload).
     background_load_start: Option<Instant>,
     /// Per-hand-tile last-known world position keyed by tile uid (hand tiles
     /// with pick ids). Used for motion-aware effects and projection caching.
-    prev_tile_world: HashMap<u32, glam::Vec3>,
+    prev_tile_world: FxHashMap<u32, glam::Vec3>,
+    /// Reusable scratch set holding the live tile uids during the per-frame
+    /// `prev_tile_world` GC. Cleared and re-populated each frame so the
+    /// allocation amortizes across frames rather than churning a fresh
+    /// `HashSet` every call.
+    tile_uid_scratch: FxHashSet<u32>,
     /// Previous frame's shadow toggle — forces a shadow-map redraw when shadows enable.
     prev_frame_shadows_enabled: bool,
     /// Pre-rasterized showcase tile decals + UV lookup (`showcase_decal_atlas.rs`).
@@ -409,14 +433,33 @@ pub struct WgpuRenderer {
     tonemap_bind_group_layout: wgpu::BindGroupLayout,
     tonemap_params_buffer: wgpu::Buffer,
     tonemap_bind_group: wgpu::BindGroup,
+    /// Alt tonemap bind group whose binding 1 points at `scene_color_view`
+    /// (instead of `post_bloom_view`). Used to skip the scene-composite
+    /// pass when bloom + fisheye + GI are all inactive. See `render.rs`.
+    tonemap_bind_group_scene: wgpu::BindGroup,
+    /// Per-frame bump-allocated GPU buffer pool. Reset at the top of
+    /// every `render()` and used by `runtime/render.rs` for quad-batch,
+    /// gradient/squircle quad, background and text-instance vertex
+    /// uploads. See [`crate::render::wgpu_renderer::frame_pool`].
+    frame_buffer_pool: FrameBufferPool,
     tonemap_shader_module: wgpu::ShaderModule,
     tonemap_pipeline_layout: wgpu::PipelineLayout,
     /// Surface format used when HDR is off (or unavailable).
     swapchain_sdr_format: wgpu::TextureFormat,
     /// Whether `Rgba16Float` was in the surface capabilities at init.
     swapchain_hdr_available: bool,
-    /// Global exposure applied in the tonemap pass (linear HDR → display).
+    /// Effective tonemap + VHS knobs for the next `render` call. Resolved
+    /// per scene by the app (see `crate::game::tonemap_tuning`); pushed
+    /// here once per frame and read in `render.rs` when assembling the
+    /// `TonemapParams` upload. `tonemap_vhs_enabled` gates the VHS branch
+    /// independently — when off, the per-amount values are still preserved
+    /// so re-enabling restores the previous look without round-tripping.
     pub tonemap_exposure: f32,
+    pub tonemap_vhs_enabled: bool,
+    pub tonemap_vhs_chromatic: f32,
+    pub tonemap_vhs_scanline: f32,
+    pub tonemap_vhs_grain: f32,
+    pub tonemap_vhs_vignette: f32,
     /// Pipeline for procedural scene props (candles, table). Shares the
     /// `point_lights_layout` (group 1) with the tile pipeline.
     lit_mesh_pipeline: wgpu::RenderPipeline,
@@ -450,7 +493,7 @@ pub struct WgpuRenderer {
     /// Per-relic silhouette-derived meshes generated from the loaded relic
     /// texture alpha. Falls back to `relic_box_mesh` when no usable silhouette
     /// can be derived.
-    relic_meshes: HashMap<RelicId, LitMeshGpu>,
+    relic_meshes: FxHashMap<RelicId, LitMeshGpu>,
     /// CPU-side triangle lists for the fallback relic box, used by the
     /// trimesh ray-picker when a relic's per-ID mesh isn't loaded yet.
     /// Built once at renderer init from `build_relic_mesh()`.
@@ -459,7 +502,7 @@ pub struct WgpuRenderer {
     /// used to build `relic_meshes`. Drives per-triangle trimesh picking so
     /// the click silhouette matches the visible relic outline instead of a
     /// loose AABB slab.
-    pub(super) relic_tri_lists: HashMap<RelicId, Vec<[glam::Vec3; 3]>>,
+    pub(super) relic_tri_lists: FxHashMap<RelicId, Vec<[glam::Vec3; 3]>>,
     /// Pre-allocated per-candle uniform buffers + bind groups (one per
     /// primitive). Indexed by candle slot, then 0=wax/1=wick.
     candle_instances: Vec<[LitMeshInstance; 2]>,
@@ -496,20 +539,18 @@ pub struct WgpuRenderer {
     // ── Shop scene meshes (curio cabinet + ribbons + talismans) ─
     ribbon_mesh: LitMeshGpu,
     talisman_mesh: LitMeshGpu,
-    /// Procedural shrine mesh used by the pick-blind scene.
-    shrine_mesh: LitMeshGpu,
     /// Procedural ornate brass plinth used by the gameplay scene to hold
     /// the dora indicator tile(s).
     dora_plinth_mesh: LitMeshGpu,
-    /// Per-ribbon draw-slot instances (shop scene). Each textured ribbon uses
-    /// up to 3 slots (top/mid/bot); untextured ribbons use 1. Truncated at
+    /// Per-ribbon draw-slot instances (shop scene). One slot per ribbon —
+    /// the whole ribbon is a single textured mesh now. Truncated at
     /// `MAX_RIBBON_SLOTS`.
     ribbon_instances: Vec<LitMeshInstance>,
-    /// Currently bound zodiac texture per ribbon slot. `Some((zodiac_idx, part))`
-    /// where part is 0=top, 1=mid, 2=bot. `None` means the flat-white
+    /// Currently bound zodiac texture per ribbon slot. `Some(zodiac_idx)`
+    /// maps to `ribbon_zodiac_tex.views[idx]`; `None` means the flat-white
     /// fallback is bound. Used to skip redundant bind-group rebuilds.
-    ribbon_slot_zodiac: Vec<Option<(u8, u8)>>,
-    /// Three-part zodiac silk textures (top/mid/bot per zodiac).
+    ribbon_slot_zodiac: Vec<Option<u8>>,
+    /// Per-zodiac silk ribbon textures (one tall portrait per zodiac).
     ribbon_zodiac_tex: ZodiacRibbonTextures,
     /// Per-talisman instances (shop scene). Indexed sequentially by
     /// `TalismanBatch` placement order; truncated at `MAX_TALISMAN_SLOTS`.
@@ -552,9 +593,6 @@ pub struct WgpuRenderer {
     /// render flat, previewing the shading model rather than any per-asset
     /// heightmap.
     orb_instances: Vec<LitMeshInstance>,
-    /// Per-shrine instances (pick-blind scene). Indexed sequentially by
-    /// `ShrineBatch` placement order; truncated at `MAX_SHRINE_SLOTS`.
-    shrine_instances: Vec<LitMeshInstance>,
     /// Per-dora-plinth instances (gameplay scene). Truncated at
     /// `MAX_DORA_PLINTH_SLOTS`. The gameplay scene only ever pushes one
     /// plinth per frame, but the slot pool tolerates more without allocation.
@@ -614,25 +652,25 @@ pub struct WgpuRenderer {
     /// the renderer can build a mesh on first sight of a new label string
     /// and reuse it on every subsequent frame the same string appears.
     glyph_cpu_cache: crate::render::glyph_mesh::GlyphMeshCache,
-    extruded_glyph_meshes: HashMap<String, LitMeshGpu>,
+    extruded_glyph_meshes: FxHashMap<String, LitMeshGpu>,
     /// Shape registry for `Object3dKind::Primitive`. During the Phase-1
     /// migration, entries share GPU allocations with the legacy named
     /// fields (`plaque_mesh`, `cabinet_mesh`, …) via `Arc`. Once a
     /// legacy kind is deleted, the registry entry becomes the sole
     /// owner.
-    primitive_meshes: HashMap<crate::render::primitive::MeshId, std::sync::Arc<LitMeshGpu>>,
+    primitive_meshes: FxHashMap<crate::render::primitive::MeshId, std::sync::Arc<LitMeshGpu>>,
     /// Per-shape instance pools for `Object3dKind::Primitive`. Keyed by
     /// `MeshId`; each `Vec` grows on-demand via `ensure_lit_mesh_pool`.
-    primitive_instances: HashMap<crate::render::primitive::MeshId, Vec<LitMeshInstance>>,
+    primitive_instances: FxHashMap<crate::render::primitive::MeshId, Vec<LitMeshInstance>>,
     /// Per-shape texture overrides for primitive instances. When a
     /// shape has an entry here, `dispatch_primitive` binds the
     /// specified albedo + relief textures at instance creation instead
     /// of the default white + flat relief. Used by meshes whose
     /// material samples a heightmap (e.g. engraved coin faces).
     primitive_textures:
-        HashMap<crate::render::primitive::MeshId, (wgpu::TextureView, wgpu::TextureView)>,
+        FxHashMap<crate::render::primitive::MeshId, (wgpu::TextureView, wgpu::TextureView)>,
     /// Per-pick-id model matrix snapshot for primitive hit-testing.
-    pub(super) last_primitive_pick_models: HashMap<u32, Mat4>,
+    pub(super) last_primitive_pick_models: FxHashMap<u32, Mat4>,
     /// Three reusable lit-mesh instances for the debug world-axes overlay
     /// (one per axis: 0 = X red, 1 = Y green, 2 = Z blue). Drawn through
     /// the shared `relic_box_mesh` unit cube; per-frame uniforms position
@@ -656,10 +694,6 @@ pub struct WgpuRenderer {
     /// renderer walks the frame's draw cmds; consumed by
     /// `pick_debug_object`.
     pub(super) last_debug_pickables: Vec<(String, Mat4, glam::Vec3, f32)>,
-    /// Latest gameplay fog-wall horizon (normalized screen Y). Used for arrange-mode
-    /// screen-band picking when the cursor ray misses the invisible pick slab.
-    pub(super) last_gameplay_fog_wall_horizon_y: Option<f32>,
-    pub(super) last_gameplay_fog_wall_center_x: Option<f32>,
     /// Canonical scene-path prefix for the currently active scene — e.g.
     /// `"shop"` or `"gameplay"`. Set per-frame by `App` so the renderer can
     /// disambiguate shared mesh pipelines (e.g. `Object3dKind::Ofuda` is used
@@ -674,7 +708,7 @@ pub struct WgpuRenderer {
     /// draw picks up `rx_deg/ry_deg/rz_deg` without each construction site
     /// having to wire them through. Degrees, applied in Z→Y→X order, world
     /// space (left-multiplied onto the model's rotation+scale block).
-    committed_arrange_rotations: std::collections::HashMap<String, [f32; 3]>,
+    committed_arrange_rotations: FxHashMap<String, [f32; 3]>,
 
     // ── Shadow mapping ─────────────────────────────────────────────────
     /// Fixed-size depth texture written by the shadow pre-pass and sampled
@@ -714,7 +748,7 @@ pub use constants::{
     MAIN_MENU_PICK_OPTIONS, MAIN_MENU_PICK_PLAY, MAIN_MENU_PICK_QUIT, MAX_BOOK_SLOTS,
     MAX_BOWL_SLOTS, MAX_BUG_SLOTS, MAX_CASCADE_TOKEN_SLOTS, MAX_DORA_PLINTH_SLOTS,
     MAX_EXTRUDED_GLYPH_SLOTS, MAX_MIRROR_SLOTS, MAX_ORB_SLOTS, MAX_POINT_LIGHTS, MAX_RELIC_SLOTS,
-    MAX_RIBBON_SLOTS, MAX_SHRINE_SLOTS, MAX_SPOT_LIGHTS, MAX_TALISMAN_SLOTS, MAX_TALLY_FAN_SLOTS,
+    MAX_RIBBON_SLOTS, MAX_SPOT_LIGHTS, MAX_TALISMAN_SLOTS, MAX_TALLY_FAN_SLOTS,
     MAX_TALLY_STICK_SLOTS, MAX_TILE_OCCLUDERS, MAX_WALL_TILE_SLOTS, MAX_WOOD_TABLET_SLOTS,
     MAX_YAKU_TABLET_SLOTS,
 };
@@ -737,7 +771,7 @@ pub(crate) use screenshot::ScreenshotStaging;
 pub(crate) use targets::RenderTarget;
 pub(crate) use tile_pipeline::{TileGlbPipelineKey, TilePrimitiveGpu};
 pub(crate) use uniforms::{
-    BloomParams, CameraUniform, FlameViewUniform, Globals, HazeUniform, ProbeGiFrameUniform,
+    BloomParams, CameraUniform, FlameViewUniform, Globals, ProbeGiFrameUniform,
     TileOutlineFrameUniform, TileOutlineInstance, TonemapParams,
 };
 

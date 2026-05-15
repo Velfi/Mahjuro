@@ -1,4 +1,4 @@
-//! Waterfront façade backdrop (`assets/scenes/main_menu/exterior.png`) with a flat hub menu.
+//! Waterfront façade backdrop (`assets/textures/scenes/main_menu/exterior.png`) with a flat hub menu.
 //! Replaces the legacy candlelit start screen (`start_screen.rs`, removed).
 
 use std::cell::RefCell;
@@ -206,9 +206,7 @@ impl SceneBehavior for MainMenuExteriorScene {
             // gates live in `TileSelectScene::update`.
             let needs_gpu_ready = match self.focus {
                 Some(HubFocus::Continue) => true,
-                Some(HubFocus::NewGame) => {
-                    !ctx.tutorial_eligible && !ctx.multiple_materials
-                }
+                Some(HubFocus::NewGame) => !ctx.tutorial_eligible && !ctx.multiple_materials,
                 _ => false,
             };
             if needs_gpu_ready && !ctx.loading_done {
@@ -290,11 +288,7 @@ impl SceneBehavior for MainMenuExteriorScene {
         let active = ctx.active_profile;
         let summary = &summaries[active];
         let prof_text = if summary.exists {
-            format!(
-                "Profile {}  —  Level {}",
-                active + 1,
-                summary.level,
-            )
+            format!("Profile {}  —  Level {}", active + 1, summary.level,)
         } else {
             format!("Profile {}  —  New", active + 1)
         };

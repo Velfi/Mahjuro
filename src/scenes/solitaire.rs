@@ -9,6 +9,7 @@
 
 use crate::core::tile::{Suit, Tile};
 use crate::render::draw_cmd::{CameraParams, DrawCmd, ShowcaseTilePlacement, UiFrame};
+use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextLabel};
 use crate::ui::input::UiAction;
 
@@ -36,7 +37,7 @@ const GRID_ROWS: i32 = 8;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Face {
-    /// Standard tile (Characters/Bamboos/Circles/Wind/Dragon).
+    /// Standard tile (Characters/Bamboos/Dots/Wind/Dragon).
     Standard(Suit, u8),
     /// Bonus flower 1..=4. All flowers match each other.
     Flower(u8),
@@ -286,8 +287,7 @@ impl SceneBehavior for SolitaireScene {
         frame.background(BackgroundId::Black);
         frame.quad(GpuInstance {
             rect: [0.0, 0.0, w, h],
-            color: [0.92, 0.89, 0.82, 1.0], // warm parchment
-        });
+            color: [0.92, 0.89, 0.82, 1.0], // warm parchment, user: 0});
 
         // Top-down-ish camera so the board reads as a flat layout with
         // visible 3D stacking between layers.
@@ -317,7 +317,7 @@ impl SceneBehavior for SolitaireScene {
             frame.scene_lighting.push_smooth(PointLight {
                 pos: [lx, ly, light_y],
                 radius: h * 1.2,
-                color: [1.0, 0.97, 0.90], // warm daylight
+                color: color::rgb(color::PARCHMENT), // warm daylight
                 intensity: 2.2,
             });
         }
@@ -421,12 +421,11 @@ impl SceneBehavior for SolitaireScene {
         let back_x = w * 0.04;
         frame.quad(GpuInstance {
             rect: [back_x, btn_y, btn_w, btn_h],
-            color: [0.60, 0.30, 0.25, 0.90], // muted red-brown
-        });
+            color: [0.60, 0.30, 0.25, 0.90], // muted red-brown, user: 0});
         frame.text(TextLabel {
             rect: [back_x, btn_y, btn_w, btn_h],
             text: "< Back".into(),
-            color: [1.0, 0.97, 0.92, 1.0],
+            color: color::PARCHMENT,
             ..Default::default()
         });
         buttons.push(ButtonDef::scene((back_x, btn_y, btn_w, btn_h), CLICK_BACK));
@@ -434,12 +433,11 @@ impl SceneBehavior for SolitaireScene {
         let new_x = w - btn_w - w * 0.04;
         frame.quad(GpuInstance {
             rect: [new_x, btn_y, btn_w, btn_h],
-            color: [0.35, 0.55, 0.35, 0.90], // sage green
-        });
+            color: [0.35, 0.55, 0.35, 0.90], // sage green, user: 0});
         frame.text(TextLabel {
             rect: [new_x, btn_y, btn_w, btn_h],
             text: "New Deal".into(),
-            color: [1.0, 0.97, 0.92, 1.0],
+            color: color::PARCHMENT,
             ..Default::default()
         });
         buttons.push(ButtonDef::scene(
@@ -464,12 +462,10 @@ impl SceneBehavior for SolitaireScene {
             let by = (h - banner_h) * 0.5;
             frame.quad(GpuInstance {
                 rect: [bx - 4.0, by - 4.0, banner_w + 8.0, banner_h + 8.0],
-                color: [0.85, 0.75, 0.20, 0.90],
-            });
+                color: [0.85, 0.75, 0.20, 0.90], user: 0});
             frame.quad(GpuInstance {
                 rect: [bx, by, banner_w, banner_h],
-                color: [0.08, 0.10, 0.18, 0.97],
-            });
+                color: color::alpha(color::TWILIGHT_INK, 0.97), user: 0});
             let (title, subtitle) = match state {
                 Finished::Won => ("You Win!", "All tiles cleared."),
                 Finished::Stuck => ("No Moves", "No matching free pairs remain."),
@@ -478,7 +474,7 @@ impl SceneBehavior for SolitaireScene {
             frame.text(TextLabel {
                 rect: [bx, by + banner_h * 0.18, banner_w, title_font],
                 text: title.into(),
-                color: [1.0, 0.95, 0.7, 1.0],
+                color: color::TALLOW,
                 ..Default::default()
             });
             let sub_font = (14.0 * scale).max(10.0);
@@ -502,7 +498,7 @@ impl SceneBehavior for SolitaireScene {
 /// dragons + 4 flowers + 4 seasons.
 fn standard_faces() -> Vec<Face> {
     let mut faces = Vec::with_capacity(144);
-    for suit in [Suit::Characters, Suit::Bamboos, Suit::Circles] {
+    for suit in [Suit::Characters, Suit::Bamboos, Suit::Dots] {
         for rank in 1..=9u8 {
             for _ in 0..4 {
                 faces.push(Face::Standard(suit, rank));

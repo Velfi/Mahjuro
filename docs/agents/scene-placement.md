@@ -10,7 +10,6 @@ Authors usually think in **layout pixels** `(px, py)` with `py` downward, plus *
 |-----------|----------|
 | **[`Placement`](../../src/ui/placement.rs)** (`nx`, `ny`, `lift_mm`) | Saved in JSON; resized with window; drives **arrange mode** and hierarchy picker. |
 | **Offsets on a Cassowary anchor** | Same `Placement` fields, interpreted as **fractional offsets** from a rect (hand strip, score panel, etc.). |
-| **[`ScreenAnchor`](../../src/render/screen_space_3d.rs)** | One-off responsive props: norm vs px per axis, pixel nudge, [`ScreenLift`](../../src/render/screen_space_3d.rs). Resolves → [`LayoutAnchorPx`](../../src/render/world_space.rs). |
 
 **Pipeline:** screen fractions / pixels + lift → **[`Object3d::pos`](../../src/render/draw_cmd.rs)** as `[px, py, lift]` (packed “surface anchor” — see [world-space](world-space.md)).
 
@@ -37,7 +36,6 @@ For camera‑facing props, use **`camera_facing_euler_xyz_rad`** ([`draw_cmd`](.
 2. Implement **`placement_mut` / `placement`** for the canonical dotted name (e.g. `gameplay.score_panel.plaque`).
 3. At the draw site, use **`PlacementAnchor::new(...)`** so position uses `nx`/`ny`/`lift_mm` and **`arrange_name`** matches the hierarchy leaf.
 4. **Groups** in the hierarchy let players nudge **many leaves at once** ([`apply_arrange`](../../src/ui/placement.rs)).
-5. Non‑mesh effects (smoke, wind) use **`ArrangePreview::applied_to`** with the same hierarchy so preview matches commit.
 
 Confirm in arrange mode runs **`apply_arrange_to_layout`** ([`main/arrange.rs`](../../src/main/arrange.rs)); deltas are normalized there and saved per scene layout file.
 

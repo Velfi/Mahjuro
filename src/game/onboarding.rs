@@ -69,7 +69,7 @@ pub fn finale_failure_feedback(
 
     if discards_left >= 2 {
         return format!(
-            "You scored {} / {} ({}%) but had {} discards left. The Iconoclast weakens honors — favor triplets and runs in bamboo, circles, or characters, then cash in with a yaku.",
+            "You scored {} / {} ({}%) but had {} discards left. The Iconoclast weakens honors — favor triplets and runs in bamboo, dots, or characters, then cash in with a yaku.",
             round_score, target, score_pct, discards_left,
         );
     }
@@ -82,7 +82,7 @@ pub fn finale_failure_feedback(
     }
 
     format!(
-        "You scored {} / {} — {} short of the target. The Iconoclast debuffs winds and dragons; build melds in bamboo, circles, and characters, bank with Play, then Trigger. Chips × mult: Full Hand or Chiitoitsu is your main mult lever here.",
+        "You scored {} / {} — {} short of the target. The Iconoclast debuffs winds and dragons; build melds in bamboo, dots, and characters, bank with Play, then Trigger. Chips × mult: Full Hand or Chiitoitsu is your main mult lever here.",
         round_score, target, gap,
     )
 }

@@ -6,7 +6,7 @@ impl RunState {
     pub fn try_validate_with_wildcards(
         &self,
         tiles: &[Tile],
-    ) -> Option<(Vec<DetectedSet>, Vec<Tile>)> {
+    ) -> Option<(Vec<DetectedMeld>, Vec<Tile>)> {
         let validation_rules = self.validation_rules_for_structure_commits();
         // Try standard validation first.
         if let Some(sets) = validate_selection_with_rules(tiles, &validation_rules) {
@@ -125,7 +125,7 @@ impl RunState {
         }
 
         if honor_gold > 0 {
-            self.gold = self.gold.saturating_add(honor_gold);
+            self.apply_gold_reward(honor_gold, Some(bus));
             self.relic_activations.push(RelicId::NoHonorButWealth);
         }
         for _ in &selected_indices {
@@ -147,10 +147,11 @@ impl RunState {
             *v = (*v - 3).max(0);
             if *v == 0 {
                 self.relic_counters.remove(&RelicId::SilkThread);
-                self.relics.active.retain(|&r| r != RelicId::SilkThread);
                 self.silk_thread_extinct = true;
-                self.note_relic_destroyed();
-                bus.push(GameEvent::TransformationSuccessorDiscovered(RelicId::SilkMoth));
+                let _ = self.destroy_relic_removed_from_run(RelicId::SilkThread);
+                bus.push(GameEvent::TransformationSuccessorDiscovered(
+                    RelicId::SilkMoth,
+                ));
                 bus.push(GameEvent::AchievementUnlocked(
                     crate::steam::Achievement::SilkMothEmerged,
                 ));
@@ -160,7 +161,7 @@ impl RunState {
         // Silk Moth: produce $1 per discard action and accumulate the lifetime
         // total in `relic_counters[SilkMoth]` so the live tooltip can show it.
         if self.relics.has(RelicId::SilkMoth) {
-            self.gold = self.gold.saturating_add(1);
+            self.apply_gold_reward(1, Some(bus));
             *self.relic_counters.entry(RelicId::SilkMoth).or_insert(0) += 1;
             self.relic_activations.push(RelicId::SilkMoth);
         }

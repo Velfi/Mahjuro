@@ -228,12 +228,12 @@ impl App {
                     // no bespoke audio file.
                     self.audio.play_relic_trigger(rid);
                     *self.progress.relic_times_activated.entry(rid).or_insert(0) += 1;
-                    let _ = persistence::save_profile(self.active_profile, &self.progress);
+                    self.mark_profile_dirty();
                 }
                 GameEvent::BossEncountered(bk) => {
                     self.audio.play_sfx(audio::SfxId::BossEncountered);
                     *self.progress.boss_times_encountered.entry(bk).or_insert(0) += 1;
-                    let _ = persistence::save_profile(self.active_profile, &self.progress);
+                    self.mark_profile_dirty();
                     // "All bosses seen" — the regular (non-final)
                     // pool is the breadth-of-content signal we want.
                     // Beating Dragon is implied by `FirstRunCompleted`,
@@ -250,7 +250,7 @@ impl App {
                 GameEvent::BossDefeated(bk) => {
                     self.audio.play_sfx(audio::SfxId::BossDefeated);
                     *self.progress.boss_times_defeated.entry(bk).or_insert(0) += 1;
-                    let _ = persistence::save_profile(self.active_profile, &self.progress);
+                    self.mark_profile_dirty();
                     self.steam
                         .unlock_achievement(crate::steam::Achievement::FirstBossDefeated);
                     if bk == crate::core::boss::BossKind::House {
@@ -265,16 +265,16 @@ impl App {
                         .talisman_times_purchased
                         .entry(tk)
                         .or_insert(0) += 1;
-                    let _ = persistence::save_profile(self.active_profile, &self.progress);
+                    self.mark_profile_dirty();
                 }
                 GameEvent::TalismanUsed(tk) => {
                     self.audio.play_sfx(audio::SfxId::TalismanUsed);
                     *self.progress.talisman_times_used.entry(tk).or_insert(0) += 1;
-                    let _ = persistence::save_profile(self.active_profile, &self.progress);
+                    self.mark_profile_dirty();
                 }
                 GameEvent::YakuScored(yk) => {
                     *self.progress.yaku_times_scored.entry(yk).or_insert(0) += 1;
-                    let _ = persistence::save_profile(self.active_profile, &self.progress);
+                    self.mark_profile_dirty();
                     const YAKU_STINGER_SPACING_MS: u64 = 200;
                     let offset = std::time::Duration::from_millis(
                         (yaku_stinger_index as u64) * YAKU_STINGER_SPACING_MS,
@@ -288,7 +288,7 @@ impl App {
                 }
                 GameEvent::TransformationSuccessorDiscovered(rid) => {
                     let _ = self.progress.note_transformation_successor_discovered(rid);
-                    let _ = persistence::save_profile(self.active_profile, &self.progress);
+                    self.mark_profile_dirty();
                 }
                 GameEvent::InfoModal { title, body } => {
                     self.modals.push(Modal::new(title, body, ModalTheme::Info));
@@ -483,7 +483,7 @@ impl App {
             });
             let close = overlay.update(&actions, mouse, ww, wh);
             self.mouse_clicked = false;
-            self.debug.shop_env_height_scale = overlay.height_scale;
+            self.debug.room_gltf_height_scale = overlay.height_scale;
             self.debug.shop_env_lighting = overlay.lighting;
             if !close {
                 self.debug.shop_env_debug_overlay = Some(overlay);
@@ -514,36 +514,49 @@ impl App {
             button_clicks.clear();
         }
 
-        // 3b'''''. Volumetric tuning overlay (haze / fog wall)
-        // Live-copy so `renderer.set_haze_tuning` picks up edits on the next frame.
-        if let Some(ref mut overlay) = self.debug.volumetric_debug_overlay {
+        // 3b''''''. Tonemap tuning overlay (per-scene exposure + VHS knobs)
+        // Edits are live; Save/Reset persist to / clear the per-scene
+        // override under the captured scene key.
+        if let Some(ref mut overlay) = self.debug.tonemap_debug_overlay {
+            use crate::debug_overlays::TonemapDebugResult;
+            use crate::game::tonemap_tuning::{FALLBACK_SCENE_KEY, TonemapTuning, storage_key};
+            let scene_key_owned = overlay.scene_key.clone();
+            let scene_key_persist = scene_key_owned.as_deref().unwrap_or(FALLBACK_SCENE_KEY);
+            let scene_key_lookup = scene_key_owned.as_deref();
             match overlay.update(&actions) {
-                VolumetricDebugResult::Stay => {
-                    self.volumetric_tuning = overlay.tuning;
+                TonemapDebugResult::Stay => {
+                    self.tonemap_tuning.set(scene_key_lookup, overlay.tuning);
                 }
-                VolumetricDebugResult::Reset => {
-                    overlay.tuning = VolumetricTuning::default();
-                    self.volumetric_tuning = overlay.tuning;
-                    match persistence::clear_tuning_override("VolumetricTuning") {
-                        Ok(()) => log::debug!("Cleared VolumetricTuning override"),
-                        Err(e) => {
-                            log::warn!("Failed to clear VolumetricTuning override: {e}")
-                        }
+                TonemapDebugResult::Reset => {
+                    overlay.tuning = TonemapTuning::default();
+                    self.tonemap_tuning.clear(scene_key_lookup);
+                    match persistence::clear_tuning_override(&storage_key(scene_key_persist)) {
+                        Ok(()) => log::debug!(
+                            "Cleared TonemapTuning override for scene '{scene_key_persist}'"
+                        ),
+                        Err(e) => log::warn!(
+                            "Failed to clear TonemapTuning override for '{scene_key_persist}': {e}"
+                        ),
                     }
                 }
-                VolumetricDebugResult::SaveAsDefault => {
-                    self.volumetric_tuning = overlay.tuning;
-                    match persistence::save_tuning_override("VolumetricTuning", &overlay.tuning) {
-                        Ok(()) => log::debug!("Saved VolumetricTuning override"),
-                        Err(e) => {
-                            log::warn!("Failed to save VolumetricTuning override: {e}")
-                        }
+                TonemapDebugResult::SaveAsDefault => {
+                    self.tonemap_tuning.set(scene_key_lookup, overlay.tuning);
+                    match persistence::save_tuning_override(
+                        &storage_key(scene_key_persist),
+                        &overlay.tuning,
+                    ) {
+                        Ok(()) => log::debug!(
+                            "Saved TonemapTuning override for scene '{scene_key_persist}'"
+                        ),
+                        Err(e) => log::warn!(
+                            "Failed to save TonemapTuning override for '{scene_key_persist}': {e}"
+                        ),
                     }
                 }
-                VolumetricDebugResult::Close => {
-                    self.volumetric_tuning = overlay.tuning;
-                    self.debug.volumetric_debug_overlay = None;
-                    log::debug!("Closed volumetric debug overlay");
+                TonemapDebugResult::Close => {
+                    self.tonemap_tuning.set(scene_key_lookup, overlay.tuning);
+                    self.debug.tonemap_debug_overlay = None;
+                    log::debug!("Closed tonemap debug overlay");
                 }
             }
             actions.clear();
@@ -609,32 +622,46 @@ impl App {
             .map(|i| i.last_cursor)
             .unwrap_or((0.0, 0.0));
         let loading_done = match &self.scene {
-            // Splash may dismiss as soon as the window has a renderer; relic and menu-backdrop
-            // decode continue in parallel (solid fallback until the façade texture lands).
-            Scene::Splash(_) => self.renderer.is_some(),
+            // Splash may dismiss as soon as the window has a renderer AND the
+            // showcase decal atlas has been pre-baked. Relic and menu-backdrop
+            // decode continue in parallel (solid fallback until the façade
+            // texture lands). The atlas bake is the largest one-shot CPU
+            // cost in the renderer (~3 s of image resize + PNG decode); the
+            // bake itself is kicked at the bottom of this frame_tick when
+            // the splash is the active scene, so the splash plate is shown
+            // for at least one full frame before the freeze.
+            Scene::Splash(_) => self
+                .renderer
+                .as_ref()
+                .is_some_and(|r| r.showcase_decal_atlas_baked()),
             _ => self.renderer.as_ref().is_none_or(|r| !r.is_loading()),
         };
-        let picked_shop_object = self
-            .renderer
-            .as_ref()
-            .and_then(|r| r.pick_shop_object(cursor_pos.0, cursor_pos.1));
-        let picked_gameplay_object = self
-            .renderer
-            .as_ref()
-            .and_then(|r| r.pick_gameplay_object(cursor_pos.0, cursor_pos.1));
-        let picked_collection_object = self
-            .renderer
-            .as_ref()
-            .and_then(|r| r.pick_collection_object(cursor_pos.0, cursor_pos.1));
-        let picked_hand_tile_for_update = self
-            .renderer
-            .as_ref()
-            .and_then(|r| r.pick_hand_tile(cursor_pos.0, cursor_pos.1));
+        // Compute every scene pick once per frame. The same four results
+        // are consumed below for `update` and again later by `draw` (via
+        // `App::frame_picks`). Without this caching, each gameplay frame
+        // pays for two full walks of the per-class matrix lists for
+        // shop/gameplay objects in particular.
+        self.frame_picks = if let Some(r) = self.renderer.as_ref() {
+            FramePicks {
+                hand: r.pick_hand_tile(cursor_pos.0, cursor_pos.1),
+                shop: r.pick_shop_object(cursor_pos.0, cursor_pos.1),
+                gameplay: r.pick_gameplay_object(cursor_pos.0, cursor_pos.1),
+                collection: r.pick_collection_object(cursor_pos.0, cursor_pos.1),
+            }
+        } else {
+            FramePicks::default()
+        };
+        let picked_shop_object = self.frame_picks.shop;
+        let picked_gameplay_object = self.frame_picks.gameplay;
+        let picked_collection_object = self.frame_picks.collection;
+        let picked_hand_tile_for_update = self.frame_picks.hand;
         let scroll_lines = std::mem::take(&mut self.scroll_delta);
         let mut overlay_request: Option<scenes::OverlayRequest> = None;
         let mut rumble_lab_ops: Vec<crate::ui::input::RumbleLabOp> = Vec::new();
         let mut bump_archive_chronicle_seen: Option<u32> = None;
         let updated_overlay = !self.overlay_stack.is_empty();
+        self.cpu_profiler
+            .begin(crate::render::cpu_profiler::CpuStage::Update);
         let update_result = if self.overlay_stack.is_empty() {
             self.scene.update(UpdateCtx {
                 actions: &actions,
@@ -684,7 +711,7 @@ impl App {
                     .unwrap_or(0.0),
                 rumble_lab_ops: &mut rumble_lab_ops,
                 suspended_shop: None,
-                shop_env_height_scale: self.debug.shop_env_height_scale,
+                room_gltf_height_scale: self.debug.room_gltf_height_scale,
                 bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
             })
         } else {
@@ -754,10 +781,12 @@ impl App {
                         .unwrap_or(0.0),
                     rumble_lab_ops: &mut rumble_lab_ops,
                     suspended_shop,
-                    shop_env_height_scale: self.debug.shop_env_height_scale,
+                    room_gltf_height_scale: self.debug.room_gltf_height_scale,
                     bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
                 })
         };
+        self.cpu_profiler
+            .end(crate::render::cpu_profiler::CpuStage::Update);
         if let Some(n) = bump_archive_chronicle_seen {
             let p = self.active_profile.min(2);
             let mut s = persistence::load_settings();
@@ -785,9 +814,7 @@ impl App {
         // Only drive shop-hold rumble on the unobstructed shop face. When `hold`
         // is false, sync stops motors — if we ran that every frame globally it
         // would cancel rumble lab / scoring pulses the same tick they fire.
-        if shop_ready
-            && let Some(input) = self.input.as_ref()
-        {
+        if shop_ready && let Some(input) = self.input.as_ref() {
             let hold = matches!(&self.scene, Scene::Shop(s) if s.sell_hold_in_progress());
             let progress = match &self.scene {
                 Scene::Shop(s) if hold => s.sell_hold_progress(now).unwrap_or(0.0),
@@ -815,7 +842,7 @@ impl App {
 
         if complete_onboarding {
             self.progress.tutorial_completed = true;
-            let _ = persistence::save_profile(self.active_profile, &self.progress);
+            self.mark_profile_dirty();
         }
 
         // Sync live audio/graphics settings whenever the player has
@@ -986,5 +1013,38 @@ impl App {
         }
 
         self.draw(shell);
+
+        // Hand any progress mutations from this frame's event handlers to
+        // the background saver. Cheap (one clone). The cache is updated
+        // synchronously inside `enqueue` so subsequent loads see fresh data.
+        self.flush_dirty_profile();
+
+        // After the splash plate has been presented, run the showcase decal
+        // atlas pre-bake. The bake is a synchronous ~3 s of image-resize +
+        // PNG decode; doing it here means the splash is on screen during the
+        // freeze instead of the first gameplay frame stalling for 3 s. Splash
+        // dismissal in `loading_done` (above) waits on
+        // `renderer.showcase_decal_atlas_baked()`.
+        if matches!(self.scene, Scene::Splash(_)) {
+            let tileset = self.gfx.tileset_name.clone();
+            if let Some(renderer) = self.renderer.as_mut() {
+                if !renderer.showcase_decal_atlas_baked() {
+                    renderer.prebake_showcase_decal_atlas(&tileset);
+                }
+            }
+        }
+
+        // Profile capture completion chime: each profiler latches a one-shot
+        // flag the frame its report is logged. Both latches are polled here
+        // so a CPU-only run, a GPU-only run, or back-to-back captures each
+        // ring once.
+        let cpu_done = self.cpu_profiler.take_just_completed();
+        let gpu_done = self
+            .renderer
+            .as_mut()
+            .is_some_and(|r| r.take_gpu_profile_just_completed());
+        if cpu_done || gpu_done {
+            self.audio.play_sfx(audio::SfxId::UiConfirm);
+        }
     }
 }

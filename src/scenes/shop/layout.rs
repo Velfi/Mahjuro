@@ -23,10 +23,7 @@ pub(super) fn live_shop_hit(
         ShopHit::Dish(id) => {
             if matches!(
                 id,
-                PICK_COIN_DISH
-                    | PICK_JOURNAL_BOOK
-                    | PICK_LEAVE_PROP
-                    | PICK_REROLL_PROP
+                PICK_COIN_DISH | PICK_JOURNAL_BOOK | PICK_LEAVE_PROP | PICK_REROLL_PROP
             ) {
                 true
             } else if let Some(idx) = tile_pack_index_from_pick(id) {
@@ -103,7 +100,6 @@ impl ShopLayout {
 #[derive(Clone, Copy)]
 pub(crate) struct ShopInventoryCounts {
     pub n_for_sale: usize,
-    pub n_for_sale_zodiacs: usize,
     pub n_for_sale_talismans: usize,
     pub n_owned_relics: usize,
 }
@@ -116,7 +112,6 @@ impl ShopLayout {
     ) -> Self {
         let ShopInventoryCounts {
             n_for_sale,
-            n_for_sale_zodiacs,
             n_for_sale_talismans,
             n_owned_relics,
             ..
@@ -152,8 +147,6 @@ impl ShopLayout {
         let pack_wz = layout.mm(positions.packs.lift_mm);
         let talisman_pixel_y = positions.talismans.ny * h;
         let talisman_wz = layout.mm(positions.talismans.lift_mm);
-        let ribbon_pixel_y = positions.ribbons.ny * h;
-        let ribbon_wz = layout.mm(positions.ribbons.lift_mm);
 
         let mut niche_centers_px = [(0.0, 0.0, 0.0); KIOSK_RELIC_SLOTS];
         let n_niches = n_for_sale.min(KIOSK_RELIC_SLOTS);
@@ -165,16 +158,6 @@ impl ShopLayout {
                 (i as f32 - (n_niches as f32 - 1.0) * 0.5) * relic_spread
             };
             *slot = (col_px_x[0] + off, relic_pixel_y, relic_wz);
-        }
-
-        let ribbon_width = h * 0.055;
-        let ribbon_length = ribbon_width * 2.0;
-        let ribbon_pin_wz = ribbon_wz + ribbon_length;
-        let mut ribbon_anchors_px = [(0.0, 0.0, 0.0); 8];
-        let n_ribbons = n_for_sale_zodiacs.min(8);
-        for (i, slot) in ribbon_anchors_px.iter_mut().enumerate().take(n_ribbons) {
-            let off = (i as f32 - (n_ribbons as f32 - 1.0) * 0.5) * positions.ribbon_spread_nx * w;
-            *slot = (col_px_x[3] + off, ribbon_pixel_y, ribbon_pin_wz);
         }
 
         let talisman_wall_width = h * 0.072;
@@ -255,13 +238,7 @@ impl ShopLayout {
 }
 
 pub(super) fn rarity_color(rarity: Rarity) -> [f32; 4] {
-    let tier = match rarity {
-        Rarity::Common => 0,
-        Rarity::Uncommon => 1,
-        Rarity::Rare => 2,
-        Rarity::Legendary => 3,
-    };
-    color::rarity(tier)
+    color::rarity(rarity.tier())
 }
 
 pub(super) fn relic_half_extents(id: RelicId, base: f32) -> [f32; 3] {
@@ -273,11 +250,12 @@ pub(super) fn relic_half_extents(id: RelicId, base: f32) -> [f32; 3] {
 }
 
 pub(super) fn consumable_color(c: Consumable) -> [f32; 4] {
+    use crate::render::theme::color;
     match c {
         Consumable::Zodiac(z) => {
             let palette = [
                 [0.96, 0.62, 0.42, 1.0],
-                [0.95, 0.78, 0.32, 1.0],
+                color::RELIC_GOLD,
                 [0.78, 0.42, 0.34, 1.0],
                 [0.50, 0.78, 0.55, 1.0],
                 [0.55, 0.62, 0.92, 1.0],

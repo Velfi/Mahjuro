@@ -6,7 +6,7 @@ use crate::core::rules::RuleModifier;
 use crate::core::tile::Tile;
 
 use super::decomposition;
-use super::{DetectedSet, SetKind};
+use super::{DetectedMeld, MeldKind};
 
 /// Like `validate_selection`, but respects active rule modifiers:
 /// - `SequenceWrap`: allows wrapping sequences (8-9-1, 9-1-2)
@@ -16,7 +16,7 @@ use super::{DetectedSet, SetKind};
 pub fn validate_selection_with_rules(
     tiles: &[Tile],
     rules: &[RuleModifier],
-) -> Option<Vec<DetectedSet>> {
+) -> Option<Vec<DetectedMeld>> {
     if tiles.is_empty() {
         return None;
     }
@@ -56,7 +56,7 @@ pub fn validate_selection_with_rules(
             &mut result,
             allow_wrap,
         ) {
-            if no_sequences && result.iter().any(|s| s.kind == SetKind::Sequence) {
+            if no_sequences && result.iter().any(|s| s.kind == MeldKind::Sequence) {
                 continue;
             }
             if rules.contains(&RuleModifier::RequireHonor)
@@ -107,7 +107,7 @@ pub fn validate_selection_with_rules(
 /// or sequence (max one flower per meld). Flowers can also form their own melds with
 /// each other regardless of rank: any 2 flowers make a pair, any 3 a triplet, and any
 /// 4 form two pairs. Flowers cannot pair with regular tiles.
-pub fn validate_selection(tiles: &[Tile]) -> Option<Vec<DetectedSet>> {
+pub fn validate_selection(tiles: &[Tile]) -> Option<Vec<DetectedMeld>> {
     validate_selection_with_rules(tiles, &[])
 }
 

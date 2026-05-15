@@ -484,18 +484,11 @@ impl SceneBehavior for TransitionPlaygroundScene {
         let mut frame = UiFrame::new();
         frame.quad(GpuInstance {
             rect: [0.0, 0.0, w, h],
-            color: color::WALNUT_INK,
-        });
+            color: color::WALNUT_INK, user: 0});
 
         for (scene, pose) in self.poses(layout.viewport) {
             if pose.alpha > 0.001 {
-                draw_demo_scene(
-                    &mut frame,
-                    layout.viewport,
-                    scene,
-                    pose,
-                    self.preview_time,
-                );
+                draw_demo_scene(&mut frame, layout.viewport, scene, pose, self.preview_time);
             }
         }
         if let Some(kind) = match self.style {
@@ -636,10 +629,7 @@ fn draw_controls(
         ],
         text: "Transition Playground".into(),
         color: color::CHAMPAGNE,
-        font_px: Some(typography::size(
-            typography::HEADING,
-            layout.panel[3],
-        )),
+        font_px: Some(typography::size(typography::HEADING, layout.panel[3])),
         ..Default::default()
     });
     frame.text(TextLabel {
@@ -651,10 +641,7 @@ fn draw_controls(
         ],
         text: "Progress".into(),
         color: color::STONE,
-        font_px: Some(typography::size(
-            typography::CAPTION,
-            layout.panel[3],
-        )),
+        font_px: Some(typography::size(typography::CAPTION, layout.panel[3])),
         ..Default::default()
     });
     frame.text(TextLabel {
@@ -666,10 +653,7 @@ fn draw_controls(
         ],
         text: "Duration".into(),
         color: color::STONE,
-        font_px: Some(typography::size(
-            typography::CAPTION,
-            layout.panel[3],
-        )),
+        font_px: Some(typography::size(typography::CAPTION, layout.panel[3])),
         ..Default::default()
     });
 
@@ -700,22 +684,10 @@ fn draw_controls(
                 );
             }
             TransitionAction::StylePrev => {
-                draw_button(
-                    frame,
-                    item.rect,
-                    "<",
-                    ButtonVariant::Subtle,
-                    is_focus,
-                );
+                draw_button(frame, item.rect, "<", ButtonVariant::Subtle, is_focus);
             }
             TransitionAction::StyleNext => {
-                draw_button(
-                    frame,
-                    item.rect,
-                    ">",
-                    ButtonVariant::Subtle,
-                    is_focus,
-                );
+                draw_button(frame, item.rect, ">", ButtonVariant::Subtle, is_focus);
             }
             TransitionAction::PlayForward => {
                 draw_button(
@@ -745,31 +717,13 @@ fn draw_controls(
                 );
             }
             TransitionAction::Back => {
-                draw_button(
-                    frame,
-                    item.rect,
-                    "Back",
-                    ButtonVariant::Subtle,
-                    is_focus,
-                );
+                draw_button(frame, item.rect, "Back", ButtonVariant::Subtle, is_focus);
             }
             TransitionAction::SnapA => {
-                draw_button(
-                    frame,
-                    item.rect,
-                    "Jump A",
-                    ButtonVariant::Default,
-                    is_focus,
-                );
+                draw_button(frame, item.rect, "Jump A", ButtonVariant::Default, is_focus);
             }
             TransitionAction::SnapB => {
-                draw_button(
-                    frame,
-                    item.rect,
-                    "Jump B",
-                    ButtonVariant::Default,
-                    is_focus,
-                );
+                draw_button(frame, item.rect, "Jump B", ButtonVariant::Default, is_focus);
             }
         }
     }
@@ -784,10 +738,7 @@ fn draw_controls(
         text: style.label().into(),
         color: color::PARCHMENT,
         align: TextAlign::Center,
-        font_px: Some(typography::size(
-            typography::BODY,
-            layout.panel[3],
-        )),
+        font_px: Some(typography::size(typography::BODY, layout.panel[3])),
         ..Default::default()
     });
     frame.text(TextLabel {
@@ -800,10 +751,7 @@ fn draw_controls(
         text: format!("{}x", (1.0 / duration_secs).max(0.1) * 1.1),
         color: color::UMBER,
         align: TextAlign::Right,
-        font_px: Some(typography::size(
-            typography::MICRO,
-            layout.panel[3],
-        )),
+        font_px: Some(typography::size(typography::MICRO, layout.panel[3])),
         ..Default::default()
     });
 
@@ -814,8 +762,7 @@ fn draw_controls(
             layout.panel[2] - 28.0 * scale,
             1.0,
         ],
-        color: color::alpha(color::UMBER, 0.45),
-    });
+        color: color::alpha(color::UMBER, 0.45), user: 0});
 }
 
 fn draw_button(
@@ -870,8 +817,7 @@ fn draw_bar(
             rect[2] - inset * 2.0,
             rect[3] - inset * 2.0,
         ],
-        color: color::alpha(color::WALNUT_INK, 0.95),
-    });
+        color: color::alpha(color::WALNUT_INK, 0.95), user: 0});
     frame.quad(GpuInstance {
         rect: [
             rect[0] + inset,
@@ -879,8 +825,7 @@ fn draw_bar(
             (rect[2] - inset * 2.0) * t.clamp(0.0, 1.0),
             rect[3] - inset * 2.0,
         ],
-        color: fill,
-    });
+        color: fill, user: 0});
     if focused {
         push_focus_outline(frame, rect);
     }
@@ -1105,33 +1050,27 @@ fn push_scene_panel(
     let rect = transform_rect(viewport, [0.025, 0.03, 0.95, 0.92], pose);
     frame.quad(GpuInstance {
         rect: [rect[0], rect[1], rect[2], 2.0],
-        color: border,
-    });
+        color: border, user: 0});
     frame.quad(GpuInstance {
         rect: [rect[0], rect[1] + rect[3] - 2.0, rect[2], 2.0],
-        color: border,
-    });
+        color: border, user: 0});
 }
 
 fn push_panel(frame: &mut UiFrame, rect: [f32; 4], bg: [f32; 4], border: [f32; 4]) {
-    frame.quad(GpuInstance { rect, color: bg });
+    frame.quad(GpuInstance { rect, color: bg, user: 0});
     let t = (rect[3] * 0.018).clamp(1.0, 2.0);
     frame.quad(GpuInstance {
         rect: [rect[0], rect[1], rect[2], t],
-        color: border,
-    });
+        color: border, user: 0});
     frame.quad(GpuInstance {
         rect: [rect[0], rect[1] + rect[3] - t, rect[2], t],
-        color: border,
-    });
+        color: border, user: 0});
     frame.quad(GpuInstance {
         rect: [rect[0], rect[1] + t, t, rect[3] - t * 2.0],
-        color: border,
-    });
+        color: border, user: 0});
     frame.quad(GpuInstance {
         rect: [rect[0] + rect[2] - t, rect[1] + t, t, rect[3] - t * 2.0],
-        color: border,
-    });
+        color: border, user: 0});
 }
 
 fn push_focus_outline(frame: &mut UiFrame, rect: [f32; 4]) {
@@ -1145,20 +1084,16 @@ fn push_focus_outline(frame: &mut UiFrame, rect: [f32; 4]) {
     let t = pad.max(2.0);
     frame.quad(GpuInstance {
         rect: [outer[0], outer[1], outer[2], t],
-        color: color::CHAMPAGNE,
-    });
+        color: color::CHAMPAGNE, user: 0});
     frame.quad(GpuInstance {
         rect: [outer[0], outer[1] + outer[3] - t, outer[2], t],
-        color: color::CHAMPAGNE,
-    });
+        color: color::CHAMPAGNE, user: 0});
     frame.quad(GpuInstance {
         rect: [outer[0], outer[1] + t, t, outer[3] - t * 2.0],
-        color: color::CHAMPAGNE,
-    });
+        color: color::CHAMPAGNE, user: 0});
     frame.quad(GpuInstance {
         rect: [outer[0] + outer[2] - t, outer[1] + t, t, outer[3] - t * 2.0],
-        color: color::CHAMPAGNE,
-    });
+        color: color::CHAMPAGNE, user: 0});
 }
 
 fn push_rect(
@@ -1170,8 +1105,7 @@ fn push_rect(
 ) {
     frame.quad(GpuInstance {
         rect: transform_rect(viewport, local, pose),
-        color: color_rgba,
-    });
+        color: color_rgba, user: 0});
 }
 
 /// Visual style for a single playground `push_label` call: base RGBA

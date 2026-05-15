@@ -6,5 +6,5 @@ pub mod game_mode;
 pub mod onboarding;
 pub mod run;
 pub mod state;
+pub mod tonemap_tuning;
 pub mod tutorial;
-pub mod volumetric_tuning;

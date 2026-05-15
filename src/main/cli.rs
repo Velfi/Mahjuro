@@ -105,7 +105,7 @@ pub struct ScreenshotCli {
     /// `TilePackKind` debug strings (`Honors`, `ScrollLibrary`). Default: honors.
     #[arg(long)]
     pub pack: Option<String>,
-    /// Push the item-inspect overlay (orbit camera) before capture. Shop
+    /// Push the item-inspect overlay (turntable + zoom) before capture. Shop
     /// requires `--shop-focus` on an inspectable target (`relic:N`,
     /// `ribbon:N`, `talisman:N`, `pack:N`). Only valid with `--scene shop`
     /// or `collection` (not full-screen showcase pack scenes).

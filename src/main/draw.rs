@@ -15,6 +15,26 @@ fn append_fullscreen_debug_panel(
 }
 
 impl App {
+    /// Canonical scene-key string for the renderer (`active_scene_key`).
+    /// Mirrors the match in [`Self::draw`]; pulled out so the per-scene
+    /// tonemap resolver and the debug-action handler that opens the
+    /// tonemap overlay see the exact same key the renderer does. `None`
+    /// for scenes that don't register one — those fall back to the
+    /// `_default` slot in [`crate::game::tonemap_tuning::TonemapTuningSet`].
+    pub(super) fn active_scene_key_for_renderer(&self) -> Option<&'static str> {
+        let scene_for_renderer = self.overlay_stack.last().unwrap_or(&self.scene);
+        match scene_for_renderer {
+            Scene::Showcase(_) => Some("showcase"),
+            Scene::Shop(_) => Some("shop"),
+            Scene::Gameplay(_) => Some("gameplay"),
+            Scene::Collection(_) => Some("collection"),
+            Scene::PickBlind(_) => Some("pick_blind"),
+            Scene::MainMenuExterior(_) => Some("main_menu_exterior"),
+            Scene::TutorialCampaign(_) => Some("tutorial"),
+            _ => None,
+        }
+    }
+
     /// Process a `RoundComplete` or `GameOver` event that was held while the
     /// scoring cascade was still playing. Pushes celebration modals, plays the
     /// appropriate sting, and queues the next scene.
@@ -28,7 +48,10 @@ impl App {
                 reached_target,
             } => {
                 if self.run.onboarding_active() && reached_target {
-                    self.run.gold = self.run.gold.saturating_add(payout.total as i32);
+                    self.run.apply_gold_reward(
+                        payout.total as i32,
+                        Some(&mut self.bus),
+                    );
                     self.progress.tutorial_completed = true;
                     let _ = persistence::save_profile(self.active_profile, &self.progress);
                     persistence::delete_saved_run(self.active_profile);
@@ -69,8 +92,21 @@ impl App {
                     .unlock_achievement(crate::steam::Achievement::FirstBlindCleared);
                 // Apply the gold payout now that the scoring cascade has
                 // finished — kept deferred so the UI doesn't jump early.
-                self.run.gold = self.run.gold.saturating_add(payout.total as i32);
+                self.run.apply_gold_reward(
+                    payout.total as i32,
+                    Some(&mut self.bus),
+                );
                 self.audio.play_sfx(audio::SfxId::RoundWin);
+                // Win jingle owns the music sink for the celebration; the
+                // pending scene transition will queue Shop/Gameplay BGM
+                // behind it via `set_music_track`, and `AudioManager::tick`
+                // resumes that loop once the jingle finishes.
+                let won_jingle = if self.run.blind == crate::core::rules::BlindKind::Boss {
+                    audio::MusicId::BossWin
+                } else {
+                    audio::MusicId::BlindWin
+                };
+                self.audio.play_music_jingle(won_jingle);
                 // Capture the tutorial lesson *before* advancing so the
                 // recap scene can show what was just learned.
                 let tutorial_lesson_before = self
@@ -296,6 +332,16 @@ impl App {
                 }
 
                 self.audio.play_sfx(audio::SfxId::GameOver);
+                // Loss jingle takes over the music sink while the GameOver
+                // scene fades in; `sync_music_for_scene` will call
+                // `stop_background_music`, which defers until the jingle
+                // empties so the stinger isn't truncated mid-fade.
+                let loss_jingle = if self.run.blind == crate::core::rules::BlindKind::Boss {
+                    audio::MusicId::BossLoss
+                } else {
+                    audio::MusicId::BlindLoss
+                };
+                self.audio.play_music_jingle(loss_jingle);
                 self.pending_scene = Some(Scene::GameOver(GameOverScene::new(&self.run, reason)));
                 self.transition_alpha = 1.0;
             }
@@ -325,7 +371,7 @@ impl App {
             || self.debug.sfx_test_overlay.is_some()
             || self.debug.camera_debug_overlay.is_some()
             || self.debug.shop_env_debug_overlay.is_some()
-            || self.debug.volumetric_debug_overlay.is_some();
+            || self.debug.tonemap_debug_overlay.is_some();
         let preserve_overlay_stack_buttons = matches!(
             self.overlay_stack.last(),
             Some(Scene::RumbleLab(_) | Scene::MaterialViewer(_) | Scene::TransitionPlayground(_))
@@ -353,25 +399,6 @@ impl App {
             _ => None,
         };
 
-        let arrange_preview = if let Some(Some(ref state)) = self.debug.arrange_mode {
-            let ww = size.width as f32;
-            let wh = size.height as f32;
-            Some(crate::ui::placement::ArrangePreview {
-                name: state.object_name.clone(),
-                dnx: if ww > 0.0 { state.delta_px / ww } else { 0.0 },
-                dny: if wh > 0.0 { state.delta_py / wh } else { 0.0 },
-                // Match the live preview in `sample_arrange_placement`
-                // (see HUD code in this file): convert the world-unit
-                // lift step back to mm at the canonical window.
-                d_lift_mm: state.delta_lift * crate::ui::scene_layout::HFRAC_TO_MM
-                    / crate::ui::scene_layout::CANONICAL_WINDOW_W,
-                d_rx_deg: state.delta_rx_deg,
-                d_ry_deg: state.delta_ry_deg,
-                d_rz_deg: state.delta_rz_deg,
-            })
-        } else {
-            None
-        };
         let p = self.active_profile.min(2);
         let archive_has_new_chronicle =
             self.progress.run_history.len() as u32 > self.archive_last_seen_run_len[p];
@@ -384,8 +411,7 @@ impl App {
         let prompt_style = settings.glyph_prompt.resolve(detected);
         let swap_ab = self.input.as_ref().map(|i| i.swap_ab).unwrap_or(false);
         let swap_xy = self.input.as_ref().map(|i| i.swap_xy).unwrap_or(false);
-        let glyphs =
-            crate::ui::glyph_source::GlyphResolver::new(prompt_style, swap_ab, swap_xy);
+        let glyphs = crate::ui::glyph_source::GlyphResolver::new(prompt_style, swap_ab, swap_xy);
         let ctx = DrawCtx::new(
             &layout,
             &self.anim,
@@ -394,19 +420,17 @@ impl App {
             self.active_profile,
             self.run.is_in_progress(),
             renderer.projections(),
-            self.input
-                .as_ref()
-                .and_then(|i| renderer.pick_gameplay_object(i.last_cursor.0, i.last_cursor.1)),
-            self.input
-                .as_ref()
-                .and_then(|i| renderer.pick_shop_object(i.last_cursor.0, i.last_cursor.1)),
+            // Reuse the frame_tick pick cache; both are computed against
+            // the same cursor and frame matrices, and walking the AABB
+            // tests twice per frame for free was the prior behavior.
+            self.frame_picks.gameplay,
+            self.frame_picks.shop,
             scenes::DebugVisibility {
                 hide_candles: self.debug.hide_candles,
                 hide_blind_plaque: self.debug.hide_blind_plaque,
             },
             modal_active,
-            arrange_preview,
-            self.debug.shop_env_height_scale,
+            self.debug.room_gltf_height_scale,
             self.debug.shop_env_lighting,
             self.effect_layers,
             self.input
@@ -431,35 +455,28 @@ impl App {
         // for legacy scenes the default impl forwards through `draw()` +
         // `into_frame()`. Either way we get back a single ordered
         // `UiFrame.cmds` list whose push order is z-order.
+        self.cpu_profiler
+            .begin(crate::render::cpu_profiler::CpuStage::DrawFrame);
         let mut frame: UiFrame = if let Some(top) = self.overlay_stack.last() {
             top.draw_frame(ctx)
         } else {
             self.scene.draw_frame(ctx)
         };
-
-        // Fold fog-wall arrange preview here (same `ArrangePreview` math as `ctx`)
-        // so mountain-haze `horizon_y` and the pick slab respond immediately.
-        if self.overlay_stack.is_empty() {
-            if let Scene::Gameplay(ref gp) = self.scene {
-                let ww = size.width as f32;
-                let wh = size.height as f32;
-                let fog = gameplay_fog_wall_placement_for_tune(
-                    &gp.positions.fog_wall,
-                    &self.debug.arrange_mode,
-                    ww,
-                    wh,
-                );
-                frame.gameplay_fog_wall_horizon_y = Some(fog.ny.clamp(0.0, 1.0));
-                frame.gameplay_fog_wall_center_x = Some(fog.nx.clamp(0.0, 1.0));
-            }
-        }
+        self.cpu_profiler
+            .end(crate::render::cpu_profiler::CpuStage::DrawFrame);
 
         let h = size.height as f32;
         self.debug.last_effective_camera = frame
             .camera_override
             .unwrap_or_else(|| CameraParams::default_table_camera(h));
 
-        let _ = shell.window.set_title(&frame.window_title);
+        // SDL3 → Wayland/X11 charges a syscall on every set_title; only
+        // call when the title actually changes. The title rarely moves
+        // outside of debug toggles or scene transitions.
+        if frame.window_title != self.last_window_title {
+            let _ = shell.window.set_title(&frame.window_title);
+            self.last_window_title = frame.window_title.clone();
+        }
         self.active_buttons = frame.buttons.clone();
 
         // Click-safety wipe: if any modal-like overlay is up, scene buttons
@@ -499,9 +516,7 @@ impl App {
             modal_buttons,
             modal_relic_objects,
             modal_gradient_quads,
-        )) = self
-            .modals
-            .draw(size.width as f32, size.height as f32)
+        )) = self.modals.draw(size.width as f32, size.height as f32)
         {
             frame.quads(modal_insts);
             frame.texts(modal_labels);
@@ -520,8 +535,7 @@ impl App {
 
         // Tuning overlay — on top of modals.
         if let Some(ref overlay) = self.debug.tuning_overlay {
-            let (tuning_insts, tuning_labels) =
-                overlay.draw(size.width as f32, size.height as f32);
+            let (tuning_insts, tuning_labels) = overlay.draw(size.width as f32, size.height as f32);
             append_fullscreen_debug_panel(
                 &mut frame,
                 &mut self.active_buttons,
@@ -532,37 +546,34 @@ impl App {
 
         // SFX test overlay — on top of modals.
         if let Some(ref mut overlay) = self.debug.sfx_test_overlay {
-            let (insts, lbls) =
-                overlay.draw(size.width as f32, size.height as f32);
+            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
         // Camera debug overlay — on top of modals.
         if let Some(ref overlay) = self.debug.camera_debug_overlay {
             frame.camera_override = Some(overlay.to_camera_params());
-            let (insts, lbls) =
-                overlay.draw(size.width as f32, size.height as f32);
+            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
         // Shop env scale debug overlay — on top of modals.
         if let Some(ref overlay) = self.debug.shop_env_debug_overlay {
-            let (insts, lbls) =
-                overlay.draw(size.width as f32, size.height as f32);
+            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
         // Debug visibility overlay — on top of modals.
         if let Some(ref overlay) = self.debug.visibility_overlay {
-            let (insts, lbls) =
-                overlay.draw(size.width as f32, size.height as f32);
+            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
-        // Volumetric tuning overlay — on top of modals.
-        if let Some(ref overlay) = self.debug.volumetric_debug_overlay {
-            let (insts, lbls) =
-                overlay.draw(size.width as f32, size.height as f32);
+        // Tonemap tuning overlay — on top of modals. Uploaded value is
+        // already pushed via `set_tonemap_tuning` near the top of `draw`,
+        // so this draw call is the panel UI only.
+        if let Some(ref overlay) = self.debug.tonemap_debug_overlay {
+            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
@@ -585,15 +596,34 @@ impl App {
                 }) {
                     if let Some(ref label) = btn.hover_label {
                         let pad = (h * 0.012 * scale).max(6.0);
-                        let tooltip_h = ((h * 0.035 * scale).max(22.0)).min(h * 0.12);
+                        let min_outer_h =
+                            ((h * 0.035 * scale).max(22.0)).min(h * 0.12);
                         let est_chars = label.chars().count().max(1);
-                        let tooltip_w = ((est_chars as f32 * tooltip_h * 0.52 + pad * 2.0)
-                            .max(72.0))
-                        .min(w * 0.5);
+                        let line_h = (min_outer_h * 0.52).max(8.0);
+                        let tooltip_w = ((est_chars as f32 * line_h + pad * 2.0).max(72.0))
+                            .min(w * 0.5);
                         let (bx, by, bw, bh) = btn.rect;
                         let cx = bx + bw * 0.5;
                         let mut tip_x = cx - tooltip_w * 0.5;
                         tip_x = tip_x.max(pad).min(w - tooltip_w - pad);
+
+                        let parchment = crate::render::theme::color::PARCHMENT;
+                        let inner_w = (tooltip_w - 2.0 * pad).max(40.0);
+                        let color_lines = crate::ui::colored_keywords::wrap_colored_text_multiline(
+                            label.as_ref(),
+                            inner_w,
+                            line_h,
+                            parchment,
+                        );
+                        let content_h = crate::ui::colored_keywords::colored_multiline_block_height(
+                            color_lines.len(),
+                            line_h,
+                        );
+                        let inner_h = (content_h).max(min_outer_h - 2.0 * pad);
+                        let tooltip_h = (inner_h + 2.0 * pad)
+                            .max(min_outer_h)
+                            .min(h * 0.35);
+
                         let mut tip_y = by - tooltip_h - pad;
                         if tip_y < pad {
                             tip_y = by + bh + pad;
@@ -613,15 +643,22 @@ impl App {
                         for q in tip_quads {
                             frame.quad(q);
                         }
-                        frame.text(TextLabel {
-                            rect: [tip_x, tip_y, tooltip_w, tooltip_h],
-                            text: label.as_ref().to_owned(),
-                            color: crate::render::theme::color::PARCHMENT,
-                            font_px: Some(tooltip_h * 0.52),
-                            align: crate::render::wgpu_renderer::TextAlign::Center,
-                            no_glossary: true,
-                            ..Default::default()
-                        });
+                        let text_top =
+                            tip_y + pad + ((tooltip_h - 2.0 * pad - content_h) * 0.5).max(0.0);
+                        let mut tip_texts: Vec<crate::render::wgpu_renderer::TextLabel> =
+                            Vec::new();
+                        crate::ui::colored_keywords::push_colored_rows_in_width(
+                            &mut tip_texts,
+                            tip_x + pad,
+                            text_top,
+                            inner_w,
+                            &color_lines,
+                            line_h,
+                            crate::render::wgpu_renderer::TextAlign::Center,
+                            label.as_ref(),
+                            parchment,
+                        );
+                        frame.texts(tip_texts);
                     }
                 }
             }
@@ -642,8 +679,7 @@ impl App {
             let margin = label_h * 0.3;
             frame.quad(GpuInstance {
                 rect: [w - label_w - margin, margin, label_w, label_h],
-                color: [0.0, 0.0, 0.0, 0.55],
-            });
+                color: [0.0, 0.0, 0.0, 0.55], user: 0});
             frame.text(TextLabel {
                 rect: [w - label_w - margin, margin, label_w, label_h],
                 text: format!("{:.0} FPS", self.debug.fps_smoothed),
@@ -712,8 +748,7 @@ impl App {
             };
             frame.quad(GpuInstance {
                 rect: [margin, y, label_w, label_h],
-                color: [0.0, 0.0, 0.0, 0.6],
-            });
+                color: [0.0, 0.0, 0.0, 0.6], user: 0});
             frame.text(TextLabel {
                 rect: [margin + label_h * 0.2, y, label_w, label_h],
                 text,
@@ -760,6 +795,9 @@ impl App {
         // Tell the renderer which scene is active so shared mesh pipelines
         // (Object3dKind::Ofuda, coin/gold piles, etc.) can emit correctly-
         // prefixed canonical pickable names for arrange mode.
+        // Inlined (rather than calling `active_scene_key_for_renderer`)
+        // because `renderer` already holds a mutable borrow of
+        // `self.renderer`; an `&self` helper here would clash.
         let scene_for_renderer = self.overlay_stack.last().unwrap_or(&self.scene);
         let active_scene_key: Option<&'static str> = match scene_for_renderer {
             Scene::Showcase(_) => Some("showcase"),
@@ -773,6 +811,16 @@ impl App {
         };
         renderer.set_active_scene(active_scene_key);
 
+        // Resolve and push the per-scene tonemap + VHS knobs. The debug
+        // Tonemap overlay (when open) edits the in-memory tuning live;
+        // when closed, this just re-uploads the saved values each frame.
+        let active_tonemap = if let Some(ref overlay) = self.debug.tonemap_debug_overlay {
+            overlay.tuning
+        } else {
+            self.tonemap_tuning.resolve(active_scene_key)
+        };
+        renderer.set_tonemap_tuning(&active_tonemap);
+
         // Push the committed rotation map so every arrange-tagged draw picks
         // up its Placement's rx/ry/rz_deg without each scene site having to
         // wire it into its own rotation matrix.
@@ -782,38 +830,13 @@ impl App {
         };
         renderer.set_committed_arrange_rotations(collect_committed_rotations(rotations_scene));
 
-        renderer.set_shop_env_height_scale(self.debug.shop_env_height_scale);
+        renderer.set_room_gltf_height_scale(self.debug.room_gltf_height_scale);
         let sl = self.debug.shop_env_lighting;
         renderer.set_shop_env_render_tune(
             sl.linear_exposure,
             sl.ambient_scale,
             sl.lit_mesh_gltf_punctual_scale,
             sl.gltf_emissive_scale,
-        );
-        // Push mountain-haze art-direction knobs into the haze shader's
-        // uniform — lets the Volumetric debug overlay drive density,
-        // colour, horizon band, and wind speed live.
-        let haze_horizon_y = frame
-            .gameplay_fog_wall_horizon_y
-            .unwrap_or(self.volumetric_tuning.haze_horizon_y);
-        let wall_center_x = frame
-            .gameplay_fog_wall_center_x
-            .unwrap_or(0.5)
-            .clamp(0.0, 1.0);
-        let wall_half_width_uv = if frame.gameplay_fog_wall_horizon_y.is_some() {
-            crate::ui::scene_layout::GAMEPLAY_FOG_WALL_HALF_WIDTH_UV
-        } else {
-            0.0
-        };
-        renderer.set_haze_tuning(
-            self.volumetric_tuning.haze_density,
-            self.volumetric_tuning.haze_color_r,
-            self.volumetric_tuning.haze_color_g,
-            self.volumetric_tuning.haze_color_b,
-            haze_horizon_y,
-            self.volumetric_tuning.haze_drift_speed,
-            wall_center_x,
-            wall_half_width_uv,
         );
 
         // Push arrange-mode override so the renderer draws the selected object
@@ -858,9 +881,14 @@ impl App {
             }
         }
 
+        self.cpu_profiler
+            .begin(crate::render::cpu_profiler::CpuStage::Render);
         if let Err(e) = renderer.render(&frame, render_settings) {
             log::error!("render: {e:?}");
         }
+        self.cpu_profiler
+            .end(crate::render::cpu_profiler::CpuStage::Render);
+        self.cpu_profiler.end_frame();
     }
 }
 
@@ -875,12 +903,7 @@ pub(crate) fn build_level_up_modal(
     let relic_defs = core::relic::all_relic_defs();
     for rid in &result.relics {
         if let Some(def) = relic_defs.iter().find(|d| d.id == *rid) {
-            let accent = match def.rarity {
-                core::relic::Rarity::Common => render::theme::color::rarity(0),
-                core::relic::Rarity::Uncommon => render::theme::color::rarity(1),
-                core::relic::Rarity::Rare => render::theme::color::rarity(2),
-                core::relic::Rarity::Legendary => render::theme::color::rarity(3),
-            };
+            let accent = render::theme::color::rarity(def.rarity.tier());
             pages.push(UnlockPage {
                 category: "New Relic".into(),
                 name: def.name.into(),
@@ -917,35 +940,4 @@ pub(crate) fn build_level_up_modal(
         // swarm without spammy callsites.
         .with_fireworks(window_w * 0.5, window_h * 0.92, window_w * 0.85, 24),
     )
-}
-
-/// Effective [`gameplay.fog_wall`] placement: committed layout plus staged
-/// arrange deltas when that leaf is selected.
-fn gameplay_fog_wall_placement_for_tune(
-    fog_wall: &crate::ui::placement::Placement,
-    arrange_mode: &Option<Option<crate::main_debug_state::ArrangeModeState>>,
-    ww: f32,
-    wh: f32,
-) -> crate::ui::placement::Placement {
-    let base = *fog_wall;
-    match arrange_mode {
-        Some(Some(st)) => {
-            let ap = crate::ui::placement::ArrangePreview {
-                name: st.object_name.clone(),
-                dnx: if ww > 0.0 { st.delta_px / ww } else { 0.0 },
-                dny: if wh > 0.0 { st.delta_py / wh } else { 0.0 },
-                d_lift_mm: st.delta_lift * crate::ui::scene_layout::HFRAC_TO_MM
-                    / crate::ui::scene_layout::CANONICAL_WINDOW_W,
-                d_rx_deg: st.delta_rx_deg,
-                d_ry_deg: st.delta_ry_deg,
-                d_rz_deg: st.delta_rz_deg,
-            };
-            ap.applied_to(
-                crate::ui::scene_layout::GAMEPLAY_HIERARCHY,
-                "gameplay.fog_wall",
-                base,
-            )
-        }
-        _ => base,
-    }
 }

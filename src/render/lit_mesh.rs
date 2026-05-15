@@ -10,6 +10,7 @@ use std::cell::RefCell;
 
 use wgpu::util::DeviceExt;
 
+use crate::render::theme::color;
 use crate::render::tile_glb::Vertex3dTex;
 
 /// Axis-aligned box extents for the `push_box` family of mesh builders.
@@ -147,7 +148,7 @@ impl MaterialParams {
     pub fn wick() -> Self {
         Self {
             kind: MaterialKind::Wick,
-            base_color: [0.12, 0.08, 0.05, 1.0],
+            base_color: color::WALNUT_RAISED,
             specular_strength: 0.0,
             specular_power: 8.0,
         }
@@ -165,7 +166,7 @@ impl MaterialParams {
             kind: MaterialKind::FeltGreen,
             // Fallback tint if the procedural sampler is bypassed; the shader
             // recolours from its own palette on the felt branch.
-            base_color: [0.07, 0.20, 0.10, 1.0],
+            base_color: color::FELT_DEEP,
             // Felt has no pinpoint highlight — broad soft sheen only.
             specular_strength: 0.04,
             specular_power: 8.0,
@@ -684,8 +685,9 @@ pub struct SsrGlobals {
     /// z = linear exposure before ACES (shop env tuning).
     /// w = hemispheric ambient scale (shop env tuning).
     pub felt: [f32; 4],
-    /// x = `1/shop_env_world_scale` for shop glTF punctual attenuation (document-space distance);
-    /// **0** = use world-space distance (gameplay). yzw unused.
+    /// x = `1/shop_env_world_scale` for embedded glTF punctual attenuation in `lit_mesh`
+    /// (document-space distance; **0** = world-space / gameplay).
+    /// y = shop vitrine material tuning (1 = shop + embedded punctual only); zw unused.
     pub shop_punctual: [f32; 4],
 }
 

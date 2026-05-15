@@ -16,7 +16,7 @@ and a rarity-tied edge:
   even when the wrapper is otherwise occluded.
 
 Idempotent: on first run, the unbaked PNG is moved to
-`assets/textures/packs/source/`; subsequent runs re-bake from source
+`assets/textures/tile_packs/source/`; subsequent runs re-bake from source
 and overwrite the live PNG. Re-runs do not double-stamp.
 
 Usage:
@@ -26,6 +26,7 @@ Usage:
 """
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -36,31 +37,42 @@ except ImportError:
     sys.exit(1)
 
 
-PACK_DIR = (
-    Path(__file__).resolve().parent.parent / "assets" / "textures" / "packs"
-)
+REPO_ROOT = Path(__file__).resolve().parent.parent
+PACK_DIR = REPO_ROOT / "assets" / "textures" / "tile_packs"
 SOURCE_DIR = PACK_DIR / "source"
+PALETTE_JSON = REPO_ROOT / "tools" / "pack_palette.json"
 
-# (slug, seal_rgba, foil_rgba, insignia)
-# seal_rgba mirrors TilePackKind::seal_color (deep wax reds, shifted per
-# kind so the seal contrasts the wrapper rather than disappearing into it).
-# foil_rgba mirrors TilePackKind::foil_tint and is used for the right-edge
-# spine stripe so the rarity tint survives even at thumbnail size.
-# insignia is a single character drawn in inset on the seal — a small
-# pictogram that distinguishes packs at a glance without needing legible
-# text. Matches the calligraphic register of the shrine plaques.
-PACKS = [
-    # Insignia chars are picked from a stable ASCII subset so the default
-    # Arial Bold (or Pillow's bundled font as a last-resort fallback)
-    # always renders them. Each one is on-vocabulary for the pack theme.
-    ("honors",         (189,  46,  41), (235, 199,  97), "H"),  # Honor
-    ("terminals",      (143,  36,  31), (199, 133,  82), "9"),  # 1/9 terminal
-    ("flowers",        (133,  36,  77), (235, 158, 179), "F"),  # Flower
-    ("bamboo_grove",   (199,  46,  36), (122, 199, 133), "B"),  # Bamboo
-    ("coin_cache",     (148,  26,  46), (199, 209, 224), "C"),  # Coin / Circles
-    ("scroll_library", (184,  46,  46), (107, 122, 199), "S"),  # Scroll
-    ("polychrome",     (148,  26,  46), (235, 235, 235), "P"),  # Polychrome
-]
+
+def _rgba_to_8bit(rgba: list[float]) -> tuple[int, int, int]:
+    """Drop alpha and round 0..1 floats to 0..255 ints for PIL."""
+    return tuple(max(0, min(255, round(c * 255))) for c in rgba[:3])
+
+
+def _load_packs() -> list[tuple[str, tuple, tuple, str]]:
+    """Read the canonical pack palette and project it into the
+    (slug, seal_rgb, foil_rgb, insignia) tuple shape that the rest of
+    this script expects.
+
+    The JSON is generated from `src/render/pack_palette.rs`. Editing it
+    by hand will diverge from the runtime palette — the Rust unit test
+    `pack_palette::tests::json_mirror_matches_rust_constants` catches
+    the drift on the next `cargo test`.
+    """
+    raw = json.loads(PALETTE_JSON.read_text(encoding="utf-8"))
+    order = raw.get("_kind_order") or list(raw["packs"].keys())
+    out: list[tuple[str, tuple, tuple, str]] = []
+    for slug in order:
+        entry = raw["packs"][slug]
+        out.append((
+            slug,
+            _rgba_to_8bit(entry["seal"]),
+            _rgba_to_8bit(entry["foil"]),
+            entry["insignia"],
+        ))
+    return out
+
+
+PACKS = _load_packs()
 
 
 def stage_source(slug: str) -> Path:

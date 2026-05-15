@@ -113,7 +113,7 @@ impl SceneBehavior for MaterialViewerScene {
             frame.scene_lighting.push_smooth(PointLight {
                 pos: [w * dx, h * dy, h * 0.6],
                 radius: h * 1.5,
-                color: [1.0, 0.97, 0.90],
+                color: color::rgb(color::PARCHMENT),
                 intensity: 2.2,
             });
         }
@@ -160,8 +160,7 @@ impl SceneBehavior for MaterialViewerScene {
         let btn_x = (w - btn_w) * 0.5;
         frame.quad(GpuInstance {
             rect: [btn_x, btn_y, btn_w, btn_h],
-            color: color::WALNUT_INK,
-        });
+            color: color::WALNUT_INK, user: 0});
         frame.text(TextLabel {
             rect: [btn_x, btn_y, btn_w, btn_h],
             text: "Back".into(),
@@ -250,7 +249,7 @@ fn material_entries() -> Vec<MaterialEntry> {
         },
         MaterialEntry {
             label: "Gold Nugget",
-            material: mk(GoldNugget, [0.95, 0.78, 0.30], 1.0, 96.0),
+            material: mk(GoldNugget, color::rgb(color::RELIC_GOLD), 1.0, 96.0),
         },
         MaterialEntry {
             label: "Polychrome",
@@ -258,14 +257,14 @@ fn material_entries() -> Vec<MaterialEntry> {
         },
         MaterialEntry {
             label: "Porcelain",
-            material: mk(Porcelain, [0.95, 0.94, 0.92], 0.7, 128.0),
+            material: mk(Porcelain, color::rgb(color::PARCHMENT), 0.7, 128.0),
         },
         // Crazing reads off `base_color.r` (1.0 → pristine, lower → more
         // crackle + tea-stain). These three surface the spectrum so the
         // tuning is visible while iterating on the porcelain branch.
         MaterialEntry {
             label: "Porcelain (Aged)",
-            material: mk(Porcelain, [0.85, 0.81, 0.74], 0.7, 128.0),
+            material: mk(Porcelain, color::rgb(color::PORCELAIN_AGED), 0.7, 128.0),
         },
         MaterialEntry {
             label: "Porcelain (Antique)",

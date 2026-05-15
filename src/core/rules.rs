@@ -65,9 +65,7 @@ impl RuleModifier {
             RuleModifier::MustPlayFive => "Must play exactly 5 tiles",
             RuleModifier::RequireHonor => "Structure must contain an honor tile",
             RuleModifier::CensorRepeats => "Repeated yaku score at half",
-            RuleModifier::CashInRequiresNoDiscards => {
-                "Cannot cash in until all discards are used"
-            }
+            RuleModifier::CashInRequiresNoDiscards => "Cannot cash in until all discards are used",
         }
     }
 }

@@ -8,7 +8,8 @@ use crate::core::relic::{
 impl RunState {
     /// The House boss: structure cash-in is locked until every discard for the round is spent.
     pub(crate) fn cash_in_blocked_until_discards_spent(&self) -> bool {
-        self.round_rules.contains(&RuleModifier::CashInRequiresNoDiscards)
+        self.round_rules
+            .contains(&RuleModifier::CashInRequiresNoDiscards)
             && self.discards_remaining > 0
     }
 
@@ -37,8 +38,8 @@ impl RunState {
         let sets = self.pick_best_decomposition(sets, &scoring_tiles, &selected_tiles);
 
         {
-            let set_kinds: Vec<SetKind> = sets.iter().map(|s| s.kind).collect();
-            if self.tutorial_validate_sets(&set_kinds).is_err() {
+            let meld_kinds: Vec<MeldKind> = sets.iter().map(|s| s.kind).collect();
+            if self.tutorial_validate_melds(&meld_kinds).is_err() {
                 bus.push(GameEvent::InvalidAction);
                 return 0;
             }
@@ -54,7 +55,7 @@ impl RunState {
             .structure_sets
             .iter()
             .chain(sets.iter())
-            .filter(|s| s.kind == SetKind::Kong)
+            .filter(|s| s.kind == MeldKind::Kong)
             .count();
         if current_tile_count + scoring_tiles.len() > HAND_SIZE + kongs_after {
             bus.push(GameEvent::InvalidAction);
@@ -70,23 +71,26 @@ impl RunState {
             *v = (*v - 8).max(0);
             if *v == 0 {
                 self.relic_counters.remove(&RelicId::MeltingIce);
-                self.relics.active.retain(|&r| r != RelicId::MeltingIce);
                 self.melting_ice_extinct = true;
-                self.note_relic_destroyed();
-                bus.push(GameEvent::TransformationSuccessorDiscovered(RelicId::Taotie));
+                let _ = self.destroy_relic_removed_from_run(RelicId::MeltingIce);
+                bus.push(GameEvent::TransformationSuccessorDiscovered(
+                    RelicId::Taotie,
+                ));
                 bus.push(GameEvent::AchievementUnlocked(
                     crate::steam::Achievement::TaotieAwakened,
                 ));
             }
         }
         if self.relics.has(RelicId::RustlingGooseEgg) {
-            let v = self.relic_counters.entry(RelicId::RustlingGooseEgg).or_insert(3);
+            let v = self
+                .relic_counters
+                .entry(RelicId::RustlingGooseEgg)
+                .or_insert(3);
             *v -= 1;
             if *v <= 0 {
                 self.relic_counters.remove(&RelicId::RustlingGooseEgg);
-                self.relics.active.retain(|&r| r != RelicId::RustlingGooseEgg);
                 self.xxxl_egg_extinct = true;
-                self.note_relic_destroyed();
+                let _ = self.destroy_relic_removed_from_run(RelicId::RustlingGooseEgg);
                 bus.push(GameEvent::TransformationSuccessorDiscovered(RelicId::Geese));
                 bus.push(GameEvent::AchievementUnlocked(
                     crate::steam::Achievement::GeeseTakeFlight,
@@ -115,7 +119,7 @@ impl RunState {
             }
         }
         if self.relics.has(RelicId::KongCollector) {
-            let kong_count = sets.iter().filter(|s| s.kind == SetKind::Kong).count() as i32;
+            let kong_count = sets.iter().filter(|s| s.kind == MeldKind::Kong).count() as i32;
             if kong_count > 0 {
                 *self
                     .relic_counters
@@ -184,7 +188,7 @@ impl RunState {
     /// Core scoring path for resolved melds (structure cash-in).
     pub(super) fn apply_scored_melds(
         &mut self,
-        sets: Vec<DetectedSet>,
+        sets: Vec<DetectedMeld>,
         scoring_tiles: Vec<Tile>,
         original_for_wildcard: Vec<Tile>,
         structure_meta: Option<StructureTriggerMeta>,
@@ -230,13 +234,11 @@ impl RunState {
         let breakdown_total = breakdown.total;
         let pre_round = self.round_score;
         let absorb_excess = (self.relics.has(crate::core::relic::RelicId::Chrysalis)
-            || self.relics.has(crate::core::relic::RelicId::MonarchButterfly))
+            || self
+                .relics
+                .has(crate::core::relic::RelicId::MonarchButterfly))
             && pre_round >= self.target_score as u64;
-        let applied = if absorb_excess {
-            0u64
-        } else {
-            breakdown_total
-        };
+        let applied = if absorb_excess { 0u64 } else { breakdown_total };
 
         self.round_score = self.round_score.saturating_add(applied);
         self.total_score_earned = self.total_score_earned.saturating_add(applied);
@@ -257,7 +259,10 @@ impl RunState {
                 self.relic_activations
                     .push(crate::core::relic::RelicId::Chrysalis);
             }
-            if self.relics.has(crate::core::relic::RelicId::MonarchButterfly) {
+            if self
+                .relics
+                .has(crate::core::relic::RelicId::MonarchButterfly)
+            {
                 self.relic_activations
                     .push(crate::core::relic::RelicId::MonarchButterfly);
             }
@@ -297,7 +302,7 @@ impl RunState {
             self.relic_activations.push(RelicId::TilePolisher);
         }
         if self.relics.has(RelicId::RiverRunner) {
-            let seq_count = sets.iter().filter(|s| s.kind == SetKind::Sequence).count() as i32;
+            let seq_count = sets.iter().filter(|s| s.kind == MeldKind::Sequence).count() as i32;
             if seq_count > 0 {
                 *self.relic_counters.entry(RelicId::RiverRunner).or_insert(0) += 20 * seq_count;
                 self.relic_activations.push(RelicId::RiverRunner);
@@ -348,10 +353,7 @@ impl RunState {
             }
         }
         if breakdown.flower_gold > 0 {
-            self.gold = self.gold.saturating_add(breakdown.flower_gold);
-            bus.push(GameEvent::GoldChanged {
-                delta: breakdown.flower_gold,
-            });
+            self.apply_gold_reward(breakdown.flower_gold, Some(bus));
         }
         let scored_full_hand = breakdown
             .detected_yaku
@@ -360,7 +362,7 @@ impl RunState {
             self.full_hand_played_this_round = true;
         }
         if self.relics.has(RelicId::KanDrum) {
-            let kong_count = sets.iter().filter(|s| s.kind == SetKind::Kong).count() as u32;
+            let kong_count = sets.iter().filter(|s| s.kind == MeldKind::Kong).count() as u32;
             if kong_count > 0 {
                 self.plays_remaining = self.plays_remaining.saturating_add(kong_count);
                 self.relic_activations.push(RelicId::KanDrum);
@@ -426,16 +428,16 @@ impl RunState {
                 self.tea_ceremony_extinct = true;
                 self.note_relic_destroyed();
                 self.relic_activations.push(RelicId::Rakuware);
-                bus.push(GameEvent::TransformationSuccessorDiscovered(RelicId::Rakuware));
+                bus.push(GameEvent::TransformationSuccessorDiscovered(
+                    RelicId::Rakuware,
+                ));
             } else {
                 self.relic_counters.insert(RelicId::TeaCeremony, phase + 1);
             }
         }
 
         if destroy_glass_cannon {
-            self.relics.active.retain(|&r| r != RelicId::GlassCannon);
-            self.relics.debuffed.remove(&RelicId::GlassCannon);
-            self.note_relic_destroyed();
+            let _ = self.destroy_relic_removed_from_run(RelicId::GlassCannon);
             self.relic_activations.push(RelicId::GlassCannon);
             bus.push(GameEvent::RelicActivated(RelicId::GlassCannon));
         }
@@ -451,7 +453,7 @@ impl RunState {
                 .iter()
                 .any(|t| matches!(t.suit, Suit::Wind | Suit::Dragon));
         if dragon_without_honors {
-            for suit in [Suit::Characters, Suit::Bamboos, Suit::Circles, Suit::Flower] {
+            for suit in [Suit::Characters, Suit::Bamboos, Suit::Dots, Suit::Flower] {
                 if scoring_tiles.iter().any(|t| t.suit == suit) {
                     debuffs.push(TileDebuff::Suit(suit));
                 }
@@ -638,8 +640,7 @@ impl RunState {
         if !self.relics.has(RelicId::SecondWind) {
             return false;
         }
-        self.relics.active.retain(|&r| r != RelicId::SecondWind);
-        self.note_relic_destroyed();
+        let _ = self.destroy_relic_removed_from_run(RelicId::SecondWind);
         self.relic_activations.push(RelicId::SecondWind);
         bus.push(GameEvent::RelicActivated(RelicId::SecondWind));
         bus.push(GameEvent::RoundComplete {
@@ -761,14 +762,14 @@ impl RunState {
     /// decomposition found.
     fn pick_best_decomposition(
         &self,
-        default_sets: Vec<DetectedSet>,
+        default_sets: Vec<DetectedMeld>,
         scoring_tiles: &[Tile],
         original_tiles: &[Tile],
-    ) -> Vec<DetectedSet> {
+    ) -> Vec<DetectedMeld> {
         // A full hand has 14 + kong_count tiles (kongs use 4 tiles each).
         let kongs = default_sets
             .iter()
-            .filter(|s| s.kind == SetKind::Kong)
+            .filter(|s| s.kind == MeldKind::Kong)
             .count();
         let is_full_hand =
             scoring_tiles.len() >= HAND_SIZE && scoring_tiles.len() == HAND_SIZE + kongs;
@@ -887,7 +888,7 @@ impl RunState {
                 .structure_sets
                 .iter()
                 .chain(new_sets.iter())
-                .filter(|s| s.kind == SetKind::Kong)
+                .filter(|s| s.kind == MeldKind::Kong)
                 .count();
             if self.structure_tiles.len() + scoring_tiles.len() > HAND_SIZE + kongs_after {
                 continue;

@@ -1,4 +1,4 @@
-//! [`hallway.glb`](../../../assets/hallway.glb) — pick-blind hallway room.
+//! [`hallway.glb`](../../../assets/3d/hallway.glb) — pick-blind hallway room.
 //!
 //! Marker object names (Blender → glTF):
 //! - `btn_play_round` — commit to the upcoming blind (same as legacy Play altar).
@@ -12,12 +12,12 @@ use std::sync::RwLock;
 use glam::Vec3;
 
 use crate::render::draw_cmd::CameraParams;
-use crate::render::room_env_gltf::{RoomEnvWalkHooks, RoomMeshPolicy, glb_punctual_range_world_upload};
-use crate::render::shop_glb::{
-    self, RoomGlbCpu, ShopEnvLightingTune, load_room_glb_from_bytes,
+use crate::render::room_env_gltf::{
+    RoomEnvWalkHooks, RoomMeshPolicy, glb_punctual_range_world_upload,
 };
-use crate::render::world_space::surface_anchor_from_world_xyz;
+use crate::render::shop_glb::{self, RoomGlbCpu, ShopEnvLightingTune, load_room_glb_from_bytes};
 use crate::render::wgpu_renderer::{MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, PointLight, SpotLight};
+use crate::render::world_space::surface_anchor_from_world_xyz;
 
 /// glTF node names for pick-blind actions (must match Blender objects).
 pub const BTN_PLAY_ROUND: &str = "btn_play_round";
@@ -42,7 +42,7 @@ fn ensure_hallway_glb_loaded() {
     if !matches!(*w, HallwayGlbCache::Uninit) {
         return;
     }
-    let ready = if let Some(file) = crate::asset_path::get("hallway.glb") {
+    let ready = if let Some(file) = crate::asset_path::get("3d/hallway.glb") {
         match load_hallway_glb_from_bytes(&file.data) {
             Ok(cpu) => {
                 log::debug!(
@@ -143,7 +143,7 @@ pub fn hallway_camera_from_glb_if_present(
     })
 }
 
-/// Camera for pick-blind: embedded perspective when present, else fit bounds (legacy shrine framing).
+/// Camera for pick-blind: embedded perspective when present, else fit bounds.
 pub fn hallway_camera_base(w: f32, h: f32, env_h: f32) -> CameraParams {
     let from_glb = hallway_camera_from_glb_if_present(h, env_h);
     let cam = from_glb.unwrap_or_else(|| CameraParams {
@@ -296,11 +296,11 @@ mod tests {
     /// emissive; re-run after authoring so the count reflects `emissiveTexture` / factor.
     #[test]
     fn pick_blind_room_emissive_material_summary() {
-        let data = match crate::asset_path::get("hallway.glb") {
+        let data = match crate::asset_path::get("3d/hallway.glb") {
             Some(f) => f.data,
             None => {
                 eprintln!(
-                    "skip pick_blind_room_emissive_material_summary: no hallway.glb (bake packs or set MAHJURO_ASSETS)"
+                    "skip pick_blind_room_emissive_material_summary: no 3d/hallway.glb (bake packs or set MAHJURO_ASSETS)"
                 );
                 return;
             }

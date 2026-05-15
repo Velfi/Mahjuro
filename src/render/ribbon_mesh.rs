@@ -10,11 +10,73 @@
 //!
 //! UVs run 0→1 along y for future texturing/animation.
 
+use crate::render::draw_cmd::{Object3d, Object3dEuler, Object3dKind};
 use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu};
 use crate::render::tile_glb::Vertex3dTex;
 
 const SEGMENTS: usize = 12;
 const HALF_THICKNESS: f32 = 0.05;
+
+/// Length-to-width aspect of a zodiac ribbon, matching the source textures
+/// at `assets/textures/zodiacs/zodiac_*.png` (1024 × 3072 px → 1:3). Every
+/// ribbon `Object3d` in the game derives its width from its length via this
+/// constant so the texture renders without stretching.
+pub const RIBBON_LENGTH_OVER_WIDTH: f32 = 3.0;
+
+/// Ribbon depth (front-to-back thickness) as a fraction of width — the silk
+/// reads as a thin slab with a sliver of side strip visible at glancing
+/// angles. Matches the `±HALF_THICKNESS` extent of [`build_ribbon_mesh`]
+/// after the standard `extents = (width, length, depth)` scale, so the
+/// modeled side strip stays visually consistent with the painted silk.
+pub const RIBBON_DEPTH_OVER_WIDTH: f32 = 0.15;
+
+/// Inputs for the canonical zodiac-ribbon [`Object3d`] constructor.
+///
+/// Width and depth are derived from `length` so every ribbon placement uses
+/// the same aspect (and the same texture mapping) regardless of the scene
+/// it's drawn in. Use [`zodiac_ribbon_object3d`] to build the placement.
+#[derive(Clone, Debug)]
+pub struct ZodiacRibbonSpec {
+    /// Anchor position passed straight through to `Object3d::pos`.
+    pub pos: [f32; 3],
+    /// Drives the rendered ribbon size: width = `length /
+    /// RIBBON_LENGTH_OVER_WIDTH`, depth = `width * RIBBON_DEPTH_OVER_WIDTH`.
+    pub length: f32,
+    pub rotation: Object3dEuler,
+    pub color: [f32; 4],
+    pub kind: Option<crate::core::zodiac::ZodiacKind>,
+    pub hover_target: f32,
+    pub anim_id: u64,
+    pub arrange_name: Option<&'static str>,
+}
+
+/// Build the standard zodiac-ribbon [`Object3d`] from `spec`. Width and
+/// depth are derived from `spec.length` via [`RIBBON_LENGTH_OVER_WIDTH`] and
+/// [`RIBBON_DEPTH_OVER_WIDTH`]; this is the only place ribbon proportions
+/// should be set so all scenes stay matched to the source texture aspect.
+pub fn zodiac_ribbon_object3d(spec: ZodiacRibbonSpec) -> Object3d {
+    let width = spec.length / RIBBON_LENGTH_OVER_WIDTH;
+    let depth = width * RIBBON_DEPTH_OVER_WIDTH;
+    Object3d {
+        pos: spec.pos,
+        extents: [width, spec.length, depth],
+        rotation: spec.rotation,
+        color: spec.color,
+        kind: Object3dKind::ZodiacRibbon { kind: spec.kind },
+        hover_target: spec.hover_target,
+        anim_id: spec.anim_id,
+        arrange_name: spec.arrange_name,
+    }
+}
+
+/// Largest ribbon length whose 3:1 footprint (width = length / 3) fits
+/// inside the given screen-rect envelope `(rect_w, rect_h)`. Used by the
+/// shop inspect path so ribbons stay 3:1 even when the slot rect's aspect
+/// would otherwise stretch them.
+#[inline]
+pub fn ribbon_length_fitting_rect(rect_w: f32, rect_h: f32) -> f32 {
+    rect_h.min(rect_w * RIBBON_LENGTH_OVER_WIDTH).max(0.0)
+}
 
 /// Build a hanging-ribbon mesh. Front face (toward +Z) has many segments
 /// for smooth lighting; back face is a single quad. Two side strips close

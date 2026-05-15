@@ -13,7 +13,7 @@ Balatro booster packs) rather than '90s foil wrappers. Shiny effects,
 if wanted, are applied later as an in-engine shader pass — not baked
 into the PNG.
 
-Outputs `pack_<slug>.png` into assets/textures/packs/.
+Outputs `pack_<slug>.png` into assets/textures/tile_packs/.
 
 Usage:
     pip install openai pillow
@@ -28,6 +28,7 @@ Usage:
 import argparse
 import base64
 import io
+import json
 import os
 import sys
 import time
@@ -46,10 +47,33 @@ except ImportError:
     sys.exit(1)
 
 
-OUTPUT_DIR = (
-    Path(__file__).resolve().parent.parent / "assets" / "textures" / "packs"
-)
+REPO_ROOT = Path(__file__).resolve().parent.parent
+OUTPUT_DIR = REPO_ROOT / "assets" / "textures" / "tile_packs"
+PALETTE_JSON = REPO_ROOT / "tools" / "pack_palette.json"
 FINAL_SIZE = (256, 384)  # tall portrait, matches a booster-pack aspect ratio
+
+
+def _rgba_to_hex(rgba: list[float]) -> str:
+    """`[0..1, 0..1, 0..1, _]` → `"#rrggbb"` for prompt interpolation."""
+    r, g, b = (max(0, min(255, round(c * 255))) for c in rgba[:3])
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+# Loaded once at module import; the runtime palette and the prompt
+# strings can't drift because they share this single source of truth.
+_PALETTE = json.loads(PALETTE_JSON.read_text(encoding="utf-8"))
+
+
+def _bg_phrase_for(slug: str) -> str:
+    """Synthesize the `Pack background:` sentence from the canonical
+    palette JSON. The descriptive name ("deep navy", "warm obsidian",
+    …) is kept alongside the hex so the prompt stays semantically rich.
+    """
+    entry = _PALETTE["packs"][slug]
+    return (
+        f"Pack background: {entry['bg_name']} {_rgba_to_hex(entry['bg'])}, "
+        "one flat fill edge-to-edge."
+    )
 
 # ---------------------------------------------------------------------------
 # Shared style
@@ -103,8 +127,11 @@ STYLE_PREFIX = (
 # Each pack owns ONE background color and ONE sigil. Silhouette-first:
 # the sigil must be identifiable at 32×32. No scenes, no painterly detail.
 #
-# (slug, display_name, sigil_prompt, background_color)
-PACKS = [
+# Background colors come from `tools/pack_palette.json` via
+# `_bg_phrase_for(slug)`; only the per-pack sigil description lives here.
+#
+# (slug, display_name, sigil_prompt)
+_SIGILS = [
     (
         "honors",
         "Honors Pack",
@@ -113,19 +140,6 @@ PACKS = [
         "shorter diagonal points, all crisp straight triangles meeting "
         "at a small ivory circle at the center. The compass is large "
         "and centered, filling most of the sigil area.",
-        "Pack background: deep navy #0e1838, one flat fill edge-to-edge.",
-    ),
-    (
-        "polychrome",
-        "Polychrome Pack",
-        "Sigil: a single upright rounded-rectangle mahjong-tile "
-        "silhouette, flat white (#f8f8f8), centered, roughly half the "
-        "sigil-area height. From behind the tile, a symmetric starburst "
-        "of flat triangular shards radiates outward in rainbow colors "
-        "— warm hues on one side transitioning through yellow, green, "
-        "teal, blue, and violet around to magenta — each shard a single "
-        "saturated flat fill with hard triangular edges.",
-        "Pack background: pure black #000000, one flat fill edge-to-edge.",
     ),
     (
         "terminals",
@@ -136,8 +150,6 @@ PACKS = [
         "bridges the tops. The overall shape reads as a torii gate. "
         "Strong bilateral symmetry. One amber color against the "
         "background, nothing else.",
-        "Pack background: warm obsidian #1a1412, one flat fill "
-        "edge-to-edge.",
     ),
     (
         "flowers",
@@ -148,7 +160,6 @@ PACKS = [
         "around the center, each petal a simple convex flat shape. "
         "The blossom is large and centered, filling most of the sigil "
         "area — a single blossom, not a spray or pattern.",
-        "Pack background: plum-black #1c0f1e, one flat fill edge-to-edge.",
     ),
     (
         "bamboo_grove",
@@ -159,8 +170,6 @@ PACKS = [
         "darker green (#1a6a2e) horizontal bands at even intervals. A "
         "pair of small flat jade-green pointed leaf shapes angle "
         "outward from near the top. A single stalk, not a grove.",
-        "Pack background: deep forest-black #0a1a0e, one flat fill "
-        "edge-to-edge.",
     ),
     (
         "coin_cache",
@@ -171,8 +180,6 @@ PACKS = [
         "revealing the burgundy-black pack background through it. The "
         "coin's outer edge is a clean circle; the inner square is "
         "axis-aligned. A single coin, not a pile.",
-        "Pack background: burgundy-black #1a0e12, one flat fill "
-        "edge-to-edge.",
     ),
     (
         "scroll_library",
@@ -184,9 +191,15 @@ PACKS = [
         "slightly taller than the rolls. Thin amber (#e8b86a) end-caps "
         "on each roll. The sheet surface is a single uniform flat "
         "cream fill with nothing on it. A single scroll, not a stack.",
-        "Pack background: sepia-black #1a140a, one flat fill "
-        "edge-to-edge.",
     ),
+]
+
+
+# (slug, display_name, sigil_prompt, background_phrase) — the bg phrase
+# is synthesized from the canonical palette JSON so it can't drift.
+PACKS = [
+    (slug, name, sigil, _bg_phrase_for(slug))
+    for slug, name, sigil in _SIGILS
 ]
 
 

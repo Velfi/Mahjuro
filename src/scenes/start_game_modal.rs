@@ -13,9 +13,7 @@ use crate::render::theme::{ButtonVariant, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::ui::input::UiAction;
 use crate::ui::widget::{self, TextStyle};
-use crate::ui::widget_tree::{
-    self as wt, FocusId, Tree, TreeFrame, TreeInput, TreeState, noop_render_custom,
-};
+use crate::ui::widget_tree::{self as wt, FocusId, Tree, TreeFrame, TreeInput, TreeState};
 
 use super::main_menu_exterior::MainMenuExteriorScene;
 use super::shop::ShopScene;
@@ -23,7 +21,6 @@ use crate::render::draw_cmd::UiFrame;
 use crate::render::world_space::{LayoutAnchorPx, layout_px_py_from_norm};
 
 use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
-use std::borrow::Cow;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ModalAction {
@@ -194,17 +191,13 @@ impl TileSelectScene {
                     // desaturation (handled by the theme) — no padlock glyph,
                     // the dimmed treatment is enough to read "locked".
                     let label = stake_glyph(s).to_string();
-                    let tooltip = Some(Cow::Owned(format!("{} — {}", s.label(), s.description())));
                     wt::Node::Item(wt::Item {
                         id: ModalAction::StakeSelect(s).id(),
-                        size: wt::Size::Auto,
                         enabled: unlocked,
-                        tooltip,
-                        kind: wt::ItemKind::Button {
-                            label,
-                            variant,
-                            on_activate: ModalAction::StakeSelect(s),
-                        },
+                        tooltip: None,
+                        label,
+                        variant,
+                        on_activate: ModalAction::StakeSelect(s),
                     })
                 })
                 .collect();
@@ -292,7 +285,7 @@ impl TileSelectScene {
 fn preview_tiles() -> Vec<Tile> {
     let mut tiles = Vec::with_capacity(38);
     let mut id = 50_000u32;
-    for suit in [Suit::Characters, Suit::Bamboos, Suit::Circles] {
+    for suit in [Suit::Characters, Suit::Bamboos, Suit::Dots] {
         for rank in 1..=9 {
             tiles.push(Tile::new(suit, rank, id));
             id += 1;
@@ -317,7 +310,7 @@ fn preview_tiles() -> Vec<Tile> {
 const GRID_ROWS: [(usize, usize); 5] = [
     (0, 9),  // Characters 1–9
     (9, 9),  // Bamboos 1–9
-    (18, 9), // Circles 1–9
+    (18, 9), // Dots 1–9
     (27, 7), // Winds 1–4 + Dragons 1–3
     (34, 4), // Flowers 1–4
 ];
@@ -463,23 +456,19 @@ impl SceneBehavior for TileSelectScene {
         let title_px = typography::size(2.25, h);
         let name_px = typography::size(typography::TITLE, h);
         let bonus_px = typography::size(typography::HEADING, h);
-        let body_px = typography::size(typography::BODY, h);
+        let stake_desc_px = typography::size(typography::HEADING, h);
         let hint_px = typography::size(typography::CAPTION, h);
 
         // Rect heights need room above the font size for line padding.
         let title_h = title_px * 1.4;
         let name_h = name_px * 1.4;
         let bonus_h = bonus_px * 1.4;
-        let body_h = body_px * 1.4;
+        let stake_desc_h = stake_desc_px * 1.4;
         let hint_h = hint_px * 1.4;
 
         let text_x = self.positions.left_panel.nx * w;
-        let mut cursor_y = self.positions.left_panel.ny * h
-            + if self.tutorial_mode {
-                0.12 * h
-            } else {
-                0.0
-            };
+        let mut cursor_y =
+            self.positions.left_panel.ny * h + if self.tutorial_mode { 0.12 * h } else { 0.0 };
         let text_w = panel_w * 0.90;
 
         let title_text = if self.tutorial_mode {
@@ -507,6 +496,7 @@ impl SceneBehavior for TileSelectScene {
                     color: color::STONE,
                     padding: 0.0,
                     align: TextAlign::Left,
+                    ..Default::default()
                 },
                 h,
             );
@@ -521,6 +511,7 @@ impl SceneBehavior for TileSelectScene {
                     color: color::PARCHMENT,
                     padding: 0.0,
                     align: TextAlign::Left,
+                    ..Default::default()
                 },
                 h,
             );
@@ -558,7 +549,7 @@ impl SceneBehavior for TileSelectScene {
             cursor_y += hint_h + gap_sm * 0.25;
 
             text_labels.push(TextLabel {
-                rect: [text_x, cursor_y, text_w, body_h],
+                rect: [text_x, cursor_y, text_w, stake_desc_h],
                 text: format!(
                     "{} \u{2014} {}",
                     self.stake.label(),
@@ -566,7 +557,7 @@ impl SceneBehavior for TileSelectScene {
                 )
                 .into(),
                 color: color::STONE,
-                font_px: Some(body_px),
+                font_px: Some(stake_desc_px),
                 ..Default::default()
             });
         }
@@ -594,9 +585,8 @@ impl SceneBehavior for TileSelectScene {
             instances: &mut instances,
             labels: &mut text_labels,
             buttons: &mut buttons,
-            window: (w, h),
         };
-        self.tree.draw(&tree, &mut tree_frame, &noop_render_custom);
+        self.tree.draw(&tree, &mut tree_frame);
 
         // ── Tile preview grid on the right ─────────────────────────
         let (grid_x, grid_y, grid_w, grid_h) = self.preview_grid_rect(w, h);

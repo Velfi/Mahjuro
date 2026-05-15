@@ -24,6 +24,7 @@
 //! ```
 
 use crate::render::lit_mesh::{Aabb, MaterialKind, MaterialParams, MeshCpu, push_box};
+use crate::render::theme::color;
 use crate::render::tile_glb::Vertex3dTex;
 
 /// Build the dora plinth mesh in local space (-0.5..+0.5 on each axis).
@@ -107,9 +108,10 @@ pub fn build_dora_plinth_mesh() -> MeshCpu {
         default_material: MaterialParams {
             kind: MaterialKind::Metal,
             // Warm brass — the per-instance color overrides this and tints
-            // the metallic specular lobe. Default here is a polished
-            // antique brass.
-            base_color: [0.88, 0.70, 0.34, 1.0],
+            // the metallic specular lobe. Default here is the canonical
+            // `BRASS` token, slightly lifted toward `GOLD` by the metal
+            // shader's Fresnel highlights.
+            base_color: color::GOLD,
             specular_strength: 0.85,
             specular_power: 64.0,
         },

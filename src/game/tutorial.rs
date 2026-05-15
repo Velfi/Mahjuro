@@ -4,11 +4,11 @@
 //! It introduces mechanics one lesson at a time across 9 blinds (3 antes),
 //! then hands off to the normal progression system.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::core::hand::SetKind;
+use crate::core::hand::MeldKind;
 use crate::core::yaku::YakuKind;
 
 // ── Tutorial milestones (first-time celebrations) ─────────────────────
@@ -79,7 +79,7 @@ pub struct TutorialState {
     /// Current lesson (1-indexed). Lessons advance when a blind is beaten.
     pub current_lesson: u32,
     /// Lessons whose blind has been beaten.
-    pub completed_lessons: HashSet<u32>,
+    pub completed_lessons: FxHashSet<u32>,
     /// Whether the player dismissed the current hint banner.
     pub hint_dismissed: bool,
     /// Sub-step within the current lesson (drives contextual prompts).
@@ -89,13 +89,13 @@ pub struct TutorialState {
     /// Consecutive failures on the current blind (drives adaptive difficulty).
     pub retry_count: u32,
     /// Milestones already celebrated (prevents repeat fireworks).
-    pub celebrated: HashSet<TutorialMilestone>,
+    pub celebrated: FxHashSet<TutorialMilestone>,
     /// Whether the annotated (slow-mo) cascade has been shown this lesson.
     pub cascade_annotated: bool,
     /// Whether the player has opened the Meld Guide during this lesson.
     pub meld_guide_opened: bool,
     /// First-encounter tooltips already shown (persists across lessons).
-    pub encounters_shown: HashSet<FirstEncounter>,
+    pub encounters_shown: FxHashSet<FirstEncounter>,
 }
 
 impl Default for TutorialState {
@@ -108,15 +108,15 @@ impl TutorialState {
     pub fn new(starting_lesson: u32) -> Self {
         Self {
             current_lesson: starting_lesson,
-            completed_lessons: HashSet::new(),
+            completed_lessons: FxHashSet::default(),
             hint_dismissed: false,
             sub_step: 0,
             finished: false,
             retry_count: 0,
-            celebrated: HashSet::new(),
+            celebrated: FxHashSet::default(),
             cascade_annotated: false,
             meld_guide_opened: false,
-            encounters_shown: HashSet::new(),
+            encounters_shown: FxHashSet::default(),
         }
     }
 
@@ -186,7 +186,7 @@ pub struct LessonDef {
     /// Contextual sub-step prompts (indexed by `sub_step`).
     pub step_prompts: &'static [&'static str],
     /// Which meld types are accepted when scoring this lesson.
-    pub allowed_sets: &'static [SetKind],
+    pub allowed_melds: &'static [MeldKind],
     /// Whether the discard action is available.
     pub discard_enabled: bool,
     /// Whether the shop scene appears after beating this blind.
@@ -233,7 +233,7 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
             "Press Play to bank your pair into the structure!",
             "Press Trigger to cash in your structure and score!",
         ],
-        allowed_sets: &[SetKind::Pair],
+        allowed_melds: &[MeldKind::Pair],
         discard_enabled: false,
         shop_enabled: false,
         hand_size: Some(8),
@@ -260,7 +260,7 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
             "Press Play to bank your meld!",
             "Press Trigger to cash in your structure and score!",
         ],
-        allowed_sets: &[SetKind::Pair, SetKind::Triplet, SetKind::Kong],
+        allowed_melds: &[MeldKind::Pair, MeldKind::Triplet, MeldKind::Kong],
         discard_enabled: false,
         shop_enabled: false,
         hand_size: Some(10),
@@ -291,11 +291,11 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
             "Now open the Pause menu and check the Meld Guide \u{2014} it\u{2019}s your pattern cheat sheet!",
             "Nice! The Meld Guide has every pattern you\u{2019}ll need. Keep scoring to beat this blind!",
         ],
-        allowed_sets: &[
-            SetKind::Pair,
-            SetKind::Triplet,
-            SetKind::Kong,
-            SetKind::Sequence,
+        allowed_melds: &[
+            MeldKind::Pair,
+            MeldKind::Triplet,
+            MeldKind::Kong,
+            MeldKind::Sequence,
         ],
         discard_enabled: false,
         shop_enabled: false,
@@ -325,11 +325,11 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
             "Good \u{2014} now build melds and press Play to bank them!",
             "Press Trigger to cash in your structure and score!",
         ],
-        allowed_sets: &[
-            SetKind::Pair,
-            SetKind::Triplet,
-            SetKind::Kong,
-            SetKind::Sequence,
+        allowed_melds: &[
+            MeldKind::Pair,
+            MeldKind::Triplet,
+            MeldKind::Kong,
+            MeldKind::Sequence,
         ],
         discard_enabled: true,
         shop_enabled: false,
@@ -359,11 +359,11 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
             "Press Trigger to cash in \u{2014} watch the score panel and the two rough piles as they build.",
             "Chips build on the left, mult builds on the right, and the panel carries the exact running score. More melds banked = a bigger mult pile. Next lesson: Yaku!",
         ],
-        allowed_sets: &[
-            SetKind::Pair,
-            SetKind::Triplet,
-            SetKind::Kong,
-            SetKind::Sequence,
+        allowed_melds: &[
+            MeldKind::Pair,
+            MeldKind::Triplet,
+            MeldKind::Kong,
+            MeldKind::Sequence,
         ],
         discard_enabled: true,
         shop_enabled: false,
@@ -395,11 +395,11 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
             "FullHand is one yaku, and Chiitoitsu is the seven-pairs yaku \u{2014} check the Meld Guide (Pause menu) for all pattern bonuses!",
             "Great \u{2014} the Meld Guide lists all 13 yaku. Keep banking and scoring to beat this blind!",
         ],
-        allowed_sets: &[
-            SetKind::Pair,
-            SetKind::Triplet,
-            SetKind::Kong,
-            SetKind::Sequence,
+        allowed_melds: &[
+            MeldKind::Pair,
+            MeldKind::Triplet,
+            MeldKind::Kong,
+            MeldKind::Sequence,
         ],
         discard_enabled: true,
         shop_enabled: false,
@@ -425,11 +425,11 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
             "Look for Wind or Dragon tiles \u{2014} rare but powerful. A triplet triggers Yakuhai!",
             "Press Play to bank your melds, then Trigger to score!",
         ],
-        allowed_sets: &[
-            SetKind::Pair,
-            SetKind::Triplet,
-            SetKind::Kong,
-            SetKind::Sequence,
+        allowed_melds: &[
+            MeldKind::Pair,
+            MeldKind::Triplet,
+            MeldKind::Kong,
+            MeldKind::Sequence,
         ],
         discard_enabled: true,
         shop_enabled: true,
@@ -455,11 +455,11 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
             "Use your new shop upgrades to build your best melds.",
             "Press Play to bank, then Trigger to score with your upgraded run!",
         ],
-        allowed_sets: &[
-            SetKind::Pair,
-            SetKind::Triplet,
-            SetKind::Kong,
-            SetKind::Sequence,
+        allowed_melds: &[
+            MeldKind::Pair,
+            MeldKind::Triplet,
+            MeldKind::Kong,
+            MeldKind::Sequence,
         ],
         discard_enabled: true,
         shop_enabled: true,
@@ -481,11 +481,11 @@ static LESSONS: [LessonDef; LESSON_COUNT] = [
         flavor_text: "The apprentice becomes the player.",
         intro_text: "You know the basics! From here on, explore yaku patterns, collect relics, and defeat bosses.",
         step_prompts: &[],
-        allowed_sets: &[
-            SetKind::Pair,
-            SetKind::Triplet,
-            SetKind::Kong,
-            SetKind::Sequence,
+        allowed_melds: &[
+            MeldKind::Pair,
+            MeldKind::Triplet,
+            MeldKind::Kong,
+            MeldKind::Sequence,
         ],
         discard_enabled: true,
         shop_enabled: true,
@@ -562,34 +562,34 @@ pub fn failure_feedback(
 
 /// Given a set of detected meld kinds, return which milestone (if any)
 /// should be celebrated.
-pub fn milestone_for_sets(set_kinds: &[SetKind]) -> Option<TutorialMilestone> {
+pub fn milestone_for_melds(meld_kinds: &[MeldKind]) -> Option<TutorialMilestone> {
     // Priority: sequence > triplet > pair (celebrate the most complex new thing).
-    if set_kinds.contains(&SetKind::Sequence) {
+    if meld_kinds.contains(&MeldKind::Sequence) {
         return Some(TutorialMilestone::FirstSequence);
     }
-    if set_kinds.contains(&SetKind::Triplet) || set_kinds.contains(&SetKind::Kong) {
+    if meld_kinds.contains(&MeldKind::Triplet) || meld_kinds.contains(&MeldKind::Kong) {
         return Some(TutorialMilestone::FirstTriplet);
     }
-    if set_kinds.contains(&SetKind::Pair) {
+    if meld_kinds.contains(&MeldKind::Pair) {
         return Some(TutorialMilestone::FirstPair);
     }
     None
 }
 
 /// Check if a play's detected sets are all within the lesson's allowed set kinds.
-pub fn validate_sets_for_lesson(
-    detected: &[SetKind],
+pub fn validate_melds_for_lesson(
+    detected: &[MeldKind],
     lesson: &LessonDef,
 ) -> Result<(), &'static str> {
     for kind in detected {
-        if !lesson.allowed_sets.contains(kind) {
+        if !lesson.allowed_melds.contains(kind) {
             return Err(match kind {
-                SetKind::Triplet | SetKind::Kong => {
+                MeldKind::Triplet | MeldKind::Kong => {
                     "Triplets aren't unlocked yet — try scoring a pair!"
                 }
-                SetKind::Sequence => "Sequences aren't unlocked yet — try pairs or triplets!",
-                SetKind::Pair => "Pairs aren't available in this lesson.",
-                SetKind::Single => "That shape isn't used in this lesson.",
+                MeldKind::Sequence => "Sequences aren't unlocked yet — try pairs or triplets!",
+                MeldKind::Pair => "Pairs aren't available in this lesson.",
+                MeldKind::Single => "That shape isn't used in this lesson.",
             });
         }
     }
@@ -597,12 +597,12 @@ pub fn validate_sets_for_lesson(
 }
 
 /// Compute which hand tile indices could extend the current selection into
-/// a valid meld of any of the `allowed_sets` types. Used for the affinity
+/// a valid meld of any of the `allowed_melds` types. Used for the affinity
 /// glow in early tutorial lessons.
 pub fn affinity_tile_indices(
     hand: &[crate::core::tile::Tile],
     selected: &[bool],
-    allowed_sets: &[SetKind],
+    allowed_melds: &[MeldKind],
 ) -> Vec<usize> {
     let sel_tiles: Vec<&crate::core::tile::Tile> = hand
         .iter()
@@ -623,7 +623,7 @@ pub fn affinity_tile_indices(
         }
 
         // Check if this tile could form a pair or triplet with selected tiles.
-        if (allowed_sets.contains(&SetKind::Pair) || allowed_sets.contains(&SetKind::Triplet))
+        if (allowed_melds.contains(&MeldKind::Pair) || allowed_melds.contains(&MeldKind::Triplet))
             && sel_tiles
                 .iter()
                 .any(|s| s.suit == tile.suit && s.rank == tile.rank)
@@ -633,7 +633,7 @@ pub fn affinity_tile_indices(
         }
 
         // Check if this tile could extend a sequence with selected tiles.
-        if allowed_sets.contains(&SetKind::Sequence) && tile.is_number_tile() {
+        if allowed_melds.contains(&MeldKind::Sequence) && tile.is_number_tile() {
             for &s in &sel_tiles {
                 if s.suit == tile.suit && s.is_number_tile() {
                     let diff = (tile.rank as i8 - s.rank as i8).unsigned_abs();
@@ -695,17 +695,17 @@ mod tests {
     }
 
     #[test]
-    fn validate_sets_rejects_disallowed() {
+    fn validate_melds_rejects_disallowed() {
         let lesson1 = lesson_def(1);
-        assert!(validate_sets_for_lesson(&[SetKind::Pair], lesson1).is_ok());
-        assert!(validate_sets_for_lesson(&[SetKind::Triplet], lesson1).is_err());
-        assert!(validate_sets_for_lesson(&[SetKind::Sequence], lesson1).is_err());
+        assert!(validate_melds_for_lesson(&[MeldKind::Pair], lesson1).is_ok());
+        assert!(validate_melds_for_lesson(&[MeldKind::Triplet], lesson1).is_err());
+        assert!(validate_melds_for_lesson(&[MeldKind::Sequence], lesson1).is_err());
     }
 
     #[test]
     fn lesson_progression_unlocks() {
         // Lesson 1: only pairs
-        assert_eq!(lesson_def(1).allowed_sets, &[SetKind::Pair]);
+        assert_eq!(lesson_def(1).allowed_melds, &[MeldKind::Pair]);
         assert!(!lesson_def(1).discard_enabled);
         assert!(!lesson_def(1).shop_enabled);
 

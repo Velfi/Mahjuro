@@ -11,10 +11,60 @@
 //! Talismans live in the same inventory as Zodiacs (see
 //! [`crate::core::consumable::ConsumableInventory`]) — they share slot space
 //! so the player chooses how to spend their consumable budget each round.
+//!
+//! Shop copy, prices, and tablet tint live in `assets/data/talismans.json`.
+//! Behaviour (`enhancement`, selection transforms) stays in this module.
+
+use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
+use crate::core::json_asset::load_json_asset;
 use crate::core::tile::{Tile, TileEnhancement};
+
+#[derive(Deserialize)]
+struct TalismanPresentationRaw {
+    id: TalismanKind,
+    name: String,
+    description: String,
+    shop_price: u32,
+    accent: [f32; 4],
+}
+
+struct TalismanPresentation {
+    name: &'static str,
+    description: &'static str,
+    shop_price: u32,
+    accent: [f32; 4],
+}
+
+fn talisman_presentations() -> &'static HashMap<TalismanKind, TalismanPresentation> {
+    static MAP: OnceLock<HashMap<TalismanKind, TalismanPresentation>> = OnceLock::new();
+    MAP.get_or_init(|| {
+        const PATH: &str = "data/talismans.json";
+        let raw: Vec<TalismanPresentationRaw> = load_json_asset(PATH, "talisman data");
+        raw.into_iter()
+            .map(|r| {
+                (
+                    r.id,
+                    TalismanPresentation {
+                        name: Box::leak(r.name.into_boxed_str()),
+                        description: Box::leak(r.description.into_boxed_str()),
+                        shop_price: r.shop_price,
+                        accent: r.accent,
+                    },
+                )
+            })
+            .collect()
+    })
+}
+
+fn talisman_presentation(kind: TalismanKind) -> &'static TalismanPresentation {
+    talisman_presentations()
+        .get(&kind)
+        .unwrap_or_else(|| panic!("talisman data missing for {kind:?}"))
+}
 
 /// One talisman variant. Each maps to a single [`TileEnhancement`] kind that
 /// gets stamped onto every tile in the hand.
@@ -27,7 +77,7 @@ pub enum TalismanKind {
     Polychrome,
     /// Convert selected numbered tiles to bamboo; winds and dragons unchanged.
     Bamboo,
-    /// Convert selected numbered tiles to dots (circles); honors unchanged.
+    /// Convert selected numbered tiles to dots; honors unchanged.
     Dots,
     /// Convert selected numbered tiles to characters; honors unchanged.
     Characters,
@@ -35,7 +85,7 @@ pub enum TalismanKind {
     Honors,
     /// Convert every selected tile to a flower tile.
     Wildflower,
-    /// Make every selected tile match the leftmost selected tile's face.
+    /// Make every selected tile a copy of a random tile already in the hand.
     Conformity,
 }
 
@@ -69,46 +119,12 @@ impl TalismanKind {
     }
 
     pub fn name(self) -> &'static str {
-        match self {
-            TalismanKind::Pearl => "Pearl Talisman",
-            TalismanKind::Gilded => "Gilded Talisman",
-            TalismanKind::Polychrome => "Polychrome Talisman",
-            TalismanKind::Bamboo => "Bamboo Talisman",
-            TalismanKind::Dots => "Dots Talisman",
-            TalismanKind::Characters => "Characters Talisman",
-            TalismanKind::Honors => "Honors Talisman",
-            TalismanKind::Wildflower => "Wildflower Talisman",
-            TalismanKind::Conformity => "Conformity Talisman",
-        }
+        talisman_presentation(self).name
     }
 
     /// One-line shop tooltip.
     pub fn description(self) -> &'static str {
-        match self {
-            TalismanKind::Pearl => {
-                "Every tile in hand: each scored meld that includes a stamp gains +100 flat chips."
-            }
-            TalismanKind::Gilded => "Every tile in hand: +$1 when scored in a meld.",
-            TalismanKind::Polychrome => "Every meld played from this hand gets \u{00d7}1.2 mult.",
-            TalismanKind::Bamboo => {
-                "Select tiles, then use: numbered tiles become bamboo; honors unchanged."
-            }
-            TalismanKind::Dots => {
-                "Select tiles, then use: numbered tiles become dots; honors unchanged."
-            }
-            TalismanKind::Characters => {
-                "Select tiles, then use: numbered tiles become characters; honors unchanged."
-            }
-            TalismanKind::Honors => {
-                "Select tiles, then use: numbered tiles become random honors; honors unchanged."
-            }
-            TalismanKind::Wildflower => {
-                "Select tiles, then use: every selected tile becomes a flower."
-            }
-            TalismanKind::Conformity => {
-                "Select tiles, then use: every selected tile becomes a copy of a random tile in your hand."
-            }
-        }
+        talisman_presentation(self).description
     }
 
     /// The enhancement this talisman stamps onto each hand tile.
@@ -131,32 +147,12 @@ impl TalismanKind {
     /// passed to `talisman_material`, so the jade/pearl/gilded/etc.
     /// materials each read with their intended hue.
     pub fn accent_color(self) -> [f32; 4] {
-        match self {
-            TalismanKind::Pearl => [0.94, 0.95, 0.98, 1.0],
-            TalismanKind::Gilded => [1.0, 0.84, 0.38, 1.0],
-            TalismanKind::Polychrome => [0.82, 0.55, 0.95, 1.0],
-            TalismanKind::Bamboo => [0.06, 0.55, 0.28, 1.0],
-            TalismanKind::Dots => [0.08, 0.22, 0.78, 1.0],
-            TalismanKind::Characters => [0.82, 0.08, 0.18, 1.0],
-            TalismanKind::Honors => [0.78, 0.64, 0.28, 1.0],
-            TalismanKind::Wildflower => [0.92, 0.48, 0.62, 1.0],
-            TalismanKind::Conformity => [0.62, 0.60, 0.68, 1.0],
-        }
+        talisman_presentation(self).accent
     }
 
     /// Flat shop price in gold. Suit / transform selection talismans share one tier.
     pub fn shop_price(self) -> u32 {
-        match self {
-            TalismanKind::Bamboo
-            | TalismanKind::Dots
-            | TalismanKind::Characters
-            | TalismanKind::Honors
-            | TalismanKind::Wildflower
-            |             TalismanKind::Conformity => 8,
-            TalismanKind::Pearl => 12,
-            TalismanKind::Gilded => 14,
-            TalismanKind::Polychrome => 12,
-        }
+        talisman_presentation(self).shop_price
     }
 }
 
@@ -183,7 +179,7 @@ mod tests {
     fn apply_stamps_every_tile() {
         let mut hand = vec![
             Tile::new(Suit::Bamboos, 3, 0),
-            Tile::new(Suit::Circles, 7, 1),
+            Tile::new(Suit::Dots, 7, 1),
             Tile::new(Suit::Dragon, 1, 2),
         ];
         apply_to_hand(&mut hand, TalismanKind::Pearl);
@@ -204,7 +200,7 @@ mod tests {
 
     #[test]
     fn each_enhancement_kind_has_unique_enhancement() {
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = rustc_hash::FxHashSet::default();
         for &k in TalismanKind::all() {
             if let Some(e) = k.enhancement() {
                 assert!(seen.insert(e), "duplicate for {:?}", k);
@@ -215,5 +211,30 @@ mod tests {
     #[test]
     fn bamboo_has_no_enhancement() {
         assert_eq!(TalismanKind::Bamboo.enhancement(), None);
+    }
+
+    /// Every `TalismanKind` variant must appear exactly once in `talismans.json`.
+    #[test]
+    fn every_talisman_variant_has_one_data_entry() {
+        const ALL: &[TalismanKind] = &[
+            TalismanKind::Pearl,
+            TalismanKind::Gilded,
+            TalismanKind::Polychrome,
+            TalismanKind::Bamboo,
+            TalismanKind::Dots,
+            TalismanKind::Characters,
+            TalismanKind::Honors,
+            TalismanKind::Wildflower,
+            TalismanKind::Conformity,
+        ];
+        let map = talisman_presentations();
+        assert_eq!(
+            map.len(),
+            ALL.len(),
+            "talismans.json entry count does not match TalismanKind variant count"
+        );
+        for &k in ALL {
+            let _ = talisman_presentation(k);
+        }
     }
 }

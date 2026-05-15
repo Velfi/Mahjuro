@@ -2,9 +2,10 @@
 """Generate a new mahjong tile-set atlas via a single OpenAI image edit call.
 
 **Default workflow:** pass a **reference atlas** image (default: the repo’s
-procedural layout at `assets/sets/classic/atlas.png`) plus style instructions;
-the model restyles the full 9×5 grid in one shot while preserving layout and tile
-identity. Output goes to `assets/sets/<name>/atlas.png` + `atlas.toml`.
+procedural layout at `assets/textures/tile_sets/classic/atlas.png`) plus style
+instructions; the model restyles the full 9×5 grid in one shot while preserving
+layout and tile identity. Output goes to
+`assets/textures/tile_sets/<name>/atlas.png` + `atlas.toml`.
 
 Why one call: generating dozens of tiles individually is expensive; one
 whole-atlas edit is typically ~$0.04–0.10 and keeps the grid aligned.
@@ -25,7 +26,7 @@ Usage:
 
     # use another reference image (same grid geometry)
     python3 scripts/generate_tile_atlas.py --theme lacquer --name lacquer \\
-        --template assets/sets/original/atlas.png
+        --template assets/textures/tile_sets/original/atlas.png
 
     # preview the prompt, don't call the API
     python3 scripts/generate_tile_atlas.py --theme jade --dry-run
@@ -78,7 +79,7 @@ ATLAS_W = TILE_W * COLUMNS                            # 2304
 ATLAS_H = TILE_H * ((len(LAYOUT) + COLUMNS - 1) // COLUMNS)  # 1920
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SETS_DIR = REPO_ROOT / "assets" / "sets"
+SETS_DIR = REPO_ROOT / "assets" / "textures" / "tile_sets"
 # Default reference: procedural atlas shipped in-repo (9×5 layout). Override with --template.
 DEFAULT_TEMPLATE = SETS_DIR / "classic" / "atlas.png"
 
@@ -202,7 +203,7 @@ at y = 0, {tile_h}, {tile_h}*2, … — match the reference atlas exactly.
 reference atlas precisely — one suit per row:
   * Row 1: bamboos B1 through B9 left to right
   * Row 2: characters 一萬 through 九萬 left to right (C1–C9)
-  * Row 3: circles/dots D1 through D9 left to right
+  * Row 3: dots D1 through D9 left to right
   * Row 4: winds 東 南 西 北 then dragons 中 發 白 (7 tiles), then 2 empty cells
   * Row 5: flowers 梅 蘭 菊 竹 (4 tiles), then four season tiles 春 夏 秋 冬 \
 with recognizable spring/summer/autumn/winter motifs, then 1 empty cell
@@ -277,7 +278,7 @@ def main() -> None:
              "Alias: --prompt",
     )
     ap.add_argument("--name",
-                    help="Output set directory name under assets/sets/. "
+                    help="Output set directory name under assets/textures/tile_sets/. "
                          "Defaults to the theme name.")
     ap.add_argument("--template", type=Path, default=DEFAULT_TEMPLATE,
                     help=f"Reference atlas image passed to the model as the "

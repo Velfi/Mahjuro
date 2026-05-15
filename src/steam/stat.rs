@@ -35,10 +35,7 @@ fn u64_to_i32_saturating(n: u64) -> i32 {
 fn serious_run_records<'a>(
     progress: &'a PlayerProgress,
 ) -> impl Iterator<Item = &'a RunRecord> + 'a {
-    progress
-        .run_history
-        .iter()
-        .filter(|r| !r.tutorial_run)
+    progress.run_history.iter().filter(|r| !r.tutorial_run)
 }
 
 /// Snapshot of profile stats for Steam (all non-negative `i32`).

@@ -1,7 +1,7 @@
 //! Pre-rasterized atlas for showcase tile face decals — avoids CPU raster + texture
 //! upload when tile identities churn during sorts.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::core::tile::{Suit, Tile, TileEnhancement};
 use crate::render::decal::rasterize_tile_face_decal;
@@ -16,7 +16,7 @@ const ATLAS_ROWS: u32 = 16;
 
 fn all_base_faces() -> Vec<(Suit, u8)> {
     let mut v = Vec::with_capacity(42);
-    for suit in [Suit::Characters, Suit::Bamboos, Suit::Circles] {
+    for suit in [Suit::Characters, Suit::Bamboos, Suit::Dots] {
         for rank in 1..=9 {
             v.push((suit, rank));
         }
@@ -73,7 +73,7 @@ pub struct ShowcaseDecalAtlasGpu {
     #[allow(dead_code)]
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
-    pub lookup: HashMap<ShowcaseDecalKey, [f32; 4]>,
+    pub lookup: FxHashMap<ShowcaseDecalKey, [f32; 4]>,
 }
 
 pub fn build_showcase_decal_atlas_texture(
@@ -86,7 +86,7 @@ pub fn build_showcase_decal_atlas_texture(
     let atlas_w = ATLAS_COLS * DECAL_W;
     let atlas_h = ATLAS_ROWS * DECAL_H;
     let mut atlas_rgba = vec![0u8; (atlas_w * atlas_h * 4) as usize];
-    let mut lookup = HashMap::new();
+    let mut lookup = FxHashMap::default();
 
     let bases = all_base_faces();
     let enh = enhancements();

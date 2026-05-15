@@ -4,7 +4,7 @@
 //! Frame is laid out in the local XZ plane (X = horizontal, Z = vertical).
 //! Each bead is a **thin right cylinder with axis +Y** (circular profile in
 //! XZ) sitting just in front of the frame — toward the camera after the
-//! shop's [`crate::render::draw_cmd::camera_facing_rotation`] — so disks read
+//! shop's [`crate::render::draw_cmd::camera_facing_euler_xyz_rad`] — so disks read
 //! as round beads, not thick rectangular slabs.
 //! Local space spans `-0.5..+0.5` on each axis; per-instance `extents` size it.
 //!
@@ -28,6 +28,7 @@
 use crate::render::lit_mesh::{
     Aabb, MaterialKind, MaterialParams, MeshCpu, push_box, push_cylinder_y,
 };
+use crate::render::theme::color;
 use crate::render::tile_glb::Vertex3dTex;
 
 /// Number of vertical bead rods (columns).
@@ -212,7 +213,7 @@ fn push_earth_beads(vertices: &mut Vec<Vertex3dTex>, indices: &mut Vec<u32>) {
 fn bead_mesh_cpu() -> MaterialParams {
     MaterialParams {
         kind: MaterialKind::Porcelain,
-        base_color: [0.94, 0.93, 0.91, 1.0],
+        base_color: color::PARCHMENT,
         specular_strength: 0.7,
         specular_power: 128.0,
     }

@@ -13,3 +13,5 @@
 - controller rumble broken
   - We switched to SDL to avoid gilrs problems. Let's make sure everything we think we got out of the switch is actually real.
 - can we get back to dynamically linking SDL3 instead of statically? There was some issue with the build script that was causing problems. Is linking still an issue?
+- Change inspect to rotate object instead of camera, show shop/collection in background, but put blur filter on everything but the showcased object
+- 

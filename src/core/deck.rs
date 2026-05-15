@@ -16,7 +16,7 @@ pub fn build_wall() -> Vec<Tile> {
     let mut id = 0u32;
     let mut tiles = Vec::with_capacity(140);
 
-    for suit in [Suit::Characters, Suit::Bamboos, Suit::Circles] {
+    for suit in [Suit::Characters, Suit::Bamboos, Suit::Dots] {
         for rank in 1..=9 {
             for _ in 0..4 {
                 tiles.push(Tile::new(suit, rank, id));
@@ -56,7 +56,7 @@ pub fn build_overflow_extras() -> Vec<Tile> {
     // 34 tile faces × 2 extra copies = 68 tiles (no extra flowers).
     let mut tiles = Vec::with_capacity(68);
 
-    for suit in [Suit::Characters, Suit::Bamboos, Suit::Circles] {
+    for suit in [Suit::Characters, Suit::Bamboos, Suit::Dots] {
         for rank in 1..=9 {
             for _ in 0..2 {
                 tiles.push(Tile::new(suit, rank, id));
@@ -102,7 +102,7 @@ pub struct Wall {
 /// work).
 fn dora_from_wall_pick(t: Tile) -> Tile {
     let next_rank = match t.suit {
-        Suit::Characters | Suit::Bamboos | Suit::Circles => {
+        Suit::Characters | Suit::Bamboos | Suit::Dots => {
             if t.rank >= 9 {
                 1
             } else {
@@ -168,13 +168,13 @@ impl Wall {
     }
 
     /// Build a wall with tile-pack extras injected, then filter removed IDs.
-    /// Pack tiles get pre-stamped enhancements from `enhancements` (e.g.
-    /// Polychrome pack tiles carry their ×1.2 mult enhancement).
+    /// Pack tiles get pre-stamped enhancements from `enhancements` if any
+    /// pack opts in via `TilePackKind::pre_enhancement`.
     /// When `overflow` is true, 2 extra copies per tile face are added with
     /// IDs starting at [`OVERFLOW_TILE_ID_BASE`] so they can be stripped
     /// mid-round if the relic is lost.
     pub fn from_filtered_with_packs(
-        removed: &std::collections::HashSet<u32>,
+        removed: &rustc_hash::FxHashSet<u32>,
         packs: &[crate::core::tile_pack::TilePackKind],
         enhancements: &std::collections::BTreeMap<u32, super::tile::TileEnhancement>,
         overflow: bool,

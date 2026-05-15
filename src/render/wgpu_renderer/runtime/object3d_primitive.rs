@@ -16,10 +16,7 @@ impl WgpuRenderer {
         material: &crate::render::primitive::MaterialSpec,
         pick_id: &Option<u32>,
         silhouette: &bool,
-        obj3d_primitive_slot: &mut std::collections::HashMap<
-            crate::render::primitive::MeshId,
-            usize,
-        >,
+        obj3d_primitive_slot: &mut rustc_hash::FxHashMap<crate::render::primitive::MeshId, usize>,
         object3d_draw_list: &mut Vec<(DrawKind, usize)>,
     ) {
         let view_proj_arr = camera.view_proj_arr;

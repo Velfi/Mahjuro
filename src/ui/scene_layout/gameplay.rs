@@ -4,17 +4,6 @@ use crate::ui::placement::{ArrangeTarget, Node, Placement};
 
 use super::fs::{load_positions, sanitize_placements, save_positions};
 
-/// Horizontal half-extent of the gameplay procedural fog slab in normalized UV.
-/// `0` in the shader means full-screen width (non-gameplay / legacy wash).
-pub const GAMEPLAY_FOG_WALL_HALF_WIDTH_UV: f32 = 0.44;
-
-fn default_fog_wall_placement() -> Placement {
-    // Match `VolumetricTuning::legacy_default().haze_horizon_y` (0.55) so the
-    // band stays visible; `Placement::default()` is all-zero which pins the
-    // haze to the top edge and reads as “missing” vs shop.
-    Placement::at(0.5, 0.55, 0.0)
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GameplayPositions {
@@ -45,11 +34,6 @@ pub struct GameplayPositions {
     pub camera_target_y_mul: f32,
     pub camera_target_z_mul: f32,
     pub camera_fovy_deg: f32,
-    /// Procedural fog-wall slab: `ny` is band height (0 = top, 1 = bottom),
-    /// `nx` is horizontal center (0 = left, 1 = right). Other fields are unused
-    /// but kept so arrange mode stores one consistent struct.
-    #[serde(default = "default_fog_wall_placement")]
-    pub fog_wall: Placement,
 }
 
 impl Default for GameplayPositions {
@@ -152,7 +136,6 @@ impl Default for GameplayPositions {
             camera_target_y_mul: 1.0,
             camera_target_z_mul: 1.0,
             camera_fovy_deg: 55.0,
-            fog_wall: Placement::at(0.5, 0.55, 0.0),
         }
     }
 }
@@ -253,10 +236,6 @@ pub const GAMEPLAY_HIERARCHY: &[Node] = &[Node::Group {
             name: "gameplay.consumable_dish.talisman",
             label: "Talisman pendant",
         },
-        Node::Leaf {
-            name: "gameplay.fog_wall",
-            label: "Fog wall",
-        },
     ],
 }];
 
@@ -279,7 +258,6 @@ pub enum GameplayField {
     TabletJournal,
     TalismanDish,
     ConsumableDishTalisman,
-    FogWall,
 }
 
 pub fn lookup_gameplay_field(name: &str) -> Option<GameplayField> {
@@ -301,7 +279,6 @@ pub fn lookup_gameplay_field(name: &str) -> Option<GameplayField> {
         "gameplay.hand.yaku_tablet" => GameplayField::YakuTablet,
         "gameplay.talisman_dish" => GameplayField::TalismanDish,
         "gameplay.consumable_dish.talisman" => GameplayField::ConsumableDishTalisman,
-        "gameplay.fog_wall" => GameplayField::FogWall,
         _ => return None,
     })
 }
@@ -326,7 +303,6 @@ pub fn gameplay_field_path(field: GameplayField) -> &'static str {
         GameplayField::YakuTablet => "gameplay.hand.yaku_tablet",
         GameplayField::TalismanDish => "gameplay.talisman_dish",
         GameplayField::ConsumableDishTalisman => "gameplay.consumable_dish.talisman",
-        GameplayField::FogWall => "gameplay.fog_wall",
     }
 }
 
@@ -349,7 +325,6 @@ impl GameplayField {
         GameplayField::TabletJournal,
         GameplayField::TalismanDish,
         GameplayField::ConsumableDishTalisman,
-        GameplayField::FogWall,
     ];
 }
 
@@ -373,7 +348,6 @@ impl GameplayPositions {
             GameplayField::TabletJournal => &mut self.tablet_journal,
             GameplayField::TalismanDish => &mut self.talisman_dish,
             GameplayField::ConsumableDishTalisman => &mut self.consumable_dish_talisman,
-            GameplayField::FogWall => &mut self.fog_wall,
         }
     }
 
@@ -396,7 +370,6 @@ impl GameplayPositions {
             GameplayField::TabletJournal => &self.tablet_journal,
             GameplayField::TalismanDish => &self.talisman_dish,
             GameplayField::ConsumableDishTalisman => &self.consumable_dish_talisman,
-            GameplayField::FogWall => &self.fog_wall,
         }
     }
 }
@@ -425,11 +398,6 @@ pub fn sanitize_gameplay_positions(p: &mut GameplayPositions) {
     sanitize_placements("gameplay", p, GameplayField::ALL, |positions, field| {
         positions.field_mut(field)
     });
-    // Older saves / partial JSON could deserialize `fog_wall` as `Placement::default()`
-    // (all zeros), which hides the band along the top rim — restore art defaults.
-    if p.fog_wall == Placement::default() {
-        p.fog_wall = default_fog_wall_placement();
-    }
 }
 
 pub fn save_gameplay_positions(pos: &GameplayPositions) -> anyhow::Result<()> {

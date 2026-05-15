@@ -94,7 +94,6 @@ impl WgpuRenderer {
         camera: &CameraFrame,
         light_view_proj_arr: [f32; 16],
         tile_pick_models: &[(usize, Mat4)],
-        shrine_batches: &[&[ShrinePlacement]],
         shadow_uniforms_changed: &mut bool,
     ) {
         let w = camera.w;
@@ -145,37 +144,6 @@ impl WgpuRenderer {
                 }
             }
         }
-        // Shrine shadow casters (pick-blind scene). Same model as the main
-        // pass: scale by extents, lift base by half-height.
-        {
-            let mut shrine_shadow_cursor: usize = 0;
-            for batch in shrine_batches.iter() {
-                for s in batch.iter() {
-                    if shrine_shadow_cursor >= MAX_SHRINE_SLOTS {
-                        break;
-                    }
-                    let slot_i = shrine_shadow_cursor;
-                    shrine_shadow_cursor += 1;
-                    let center = pixel_to_world(
-                        w,
-                        h,
-                        s.world_pos[0],
-                        s.world_pos[1],
-                        s.world_pos[2] + s.extents[1] * 0.5,
-                    );
-                    let model = translate_rot_scale(
-                        center,
-                        Mat4::IDENTITY,
-                        glam::Vec3::new(s.extents[0], s.extents[1], s.extents[2]),
-                    );
-                    *shadow_uniforms_changed |= self.shrine_instances[slot_i].write_shadow_uniform(
-                        &self.queue,
-                        light_view_proj_arr,
-                        model,
-                    );
-                }
-            }
-        }
         // Ribbon shadow casters — walk Object3dKind::ZodiacRibbon.
         {
             let mut ribbon_shadow_cursor: usize = 0;
@@ -186,7 +154,7 @@ impl WgpuRenderer {
                     _ => Box::new(std::iter::empty()),
                 };
                 for o in objs {
-                    if let crate::render::draw_cmd::Object3dKind::ZodiacRibbon { kind } = &o.kind {
+                    if let crate::render::draw_cmd::Object3dKind::ZodiacRibbon { .. } = &o.kind {
                         if ribbon_shadow_cursor >= MAX_RIBBON_SLOTS {
                             break;
                         }
@@ -199,46 +167,14 @@ impl WgpuRenderer {
                             o.rotation_matrix(),
                             glam::Vec3::splat(1.0),
                         );
-                        if kind.is_some() {
-                            let seg_h = eff_l / 3.0;
-                            let slots_needed = 3;
-                            if ribbon_shadow_cursor + slots_needed > MAX_RIBBON_SLOTS {
-                                break;
-                            }
-                            let top_model = ribbon_submesh(
-                                base_transform,
-                                0.0,
-                                glam::Vec3::new(eff_w, seg_h, depth),
-                            );
-                            *shadow_uniforms_changed |= self.ribbon_instances[ribbon_shadow_cursor]
-                                .write_shadow_uniform(&self.queue, light_view_proj_arr, top_model);
-                            ribbon_shadow_cursor += 1;
-                            let mid_model = ribbon_submesh(
-                                base_transform,
-                                -seg_h,
-                                glam::Vec3::new(eff_w, seg_h, depth),
-                            );
-                            *shadow_uniforms_changed |= self.ribbon_instances[ribbon_shadow_cursor]
-                                .write_shadow_uniform(&self.queue, light_view_proj_arr, mid_model);
-                            ribbon_shadow_cursor += 1;
-                            let bot_model = ribbon_submesh(
-                                base_transform,
-                                -(2.0 * seg_h),
-                                glam::Vec3::new(eff_w, seg_h, depth),
-                            );
-                            *shadow_uniforms_changed |= self.ribbon_instances[ribbon_shadow_cursor]
-                                .write_shadow_uniform(&self.queue, light_view_proj_arr, bot_model);
-                            ribbon_shadow_cursor += 1;
-                        } else {
-                            let model = ribbon_submesh(
-                                base_transform,
-                                0.0,
-                                glam::Vec3::new(eff_w, eff_l, depth),
-                            );
-                            *shadow_uniforms_changed |= self.ribbon_instances[ribbon_shadow_cursor]
-                                .write_shadow_uniform(&self.queue, light_view_proj_arr, model);
-                            ribbon_shadow_cursor += 1;
-                        }
+                        let model = ribbon_submesh(
+                            base_transform,
+                            0.0,
+                            glam::Vec3::new(eff_w, eff_l, depth),
+                        );
+                        *shadow_uniforms_changed |= self.ribbon_instances[ribbon_shadow_cursor]
+                            .write_shadow_uniform(&self.queue, light_view_proj_arr, model);
+                        ribbon_shadow_cursor += 1;
                     }
                 }
             }
@@ -284,7 +220,8 @@ impl WgpuRenderer {
         // instance the draw-pass will select.
         {
             use crate::render::primitive::{MeshId, shape_orientation};
-            let mut cursors: HashMap<MeshId, usize> = HashMap::new();
+            let mut cursors: rustc_hash::FxHashMap<MeshId, usize> =
+                rustc_hash::FxHashMap::default();
             for cmd in frame.cmds.iter() {
                 let objs: Box<dyn Iterator<Item = &crate::render::draw_cmd::Object3d>> = match cmd {
                     DrawCmd::Object3d(o) => Box::new(std::iter::once(o)),

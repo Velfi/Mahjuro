@@ -4,10 +4,14 @@ use super::*;
 /// Built fresh inside `render()` and passed to each pass that dispatches ops.
 pub(super) struct ProcessOpCtx<'a> {
     pub frame: &'a UiFrame,
-    pub bg_inst_buffers: &'a [wgpu::Buffer],
-    pub quad_buffers: &'a [wgpu::Buffer],
-    pub gradient_quad_buffers: &'a [wgpu::Buffer],
-    pub squircle_quad_buffers: &'a [wgpu::Buffer],
+    /// Backing buffer for the per-frame bump pool (see
+    /// `crate::render::wgpu_renderer::frame_pool`). The four slice
+    /// arrays below index into this single buffer via `(offset, byte_len)`.
+    pub frame_pool_buffer: &'a wgpu::Buffer,
+    pub bg_inst_buffers: &'a [crate::render::wgpu_renderer::frame_pool::PoolSlice],
+    pub quad_buffers: &'a [crate::render::wgpu_renderer::frame_pool::PoolSlice],
+    pub gradient_quad_buffers: &'a [crate::render::wgpu_renderer::frame_pool::PoolSlice],
+    pub squircle_quad_buffers: &'a [crate::render::wgpu_renderer::frame_pool::PoolSlice],
     pub flame_buffers: &'a [wgpu::Buffer],
     pub text_draws: &'a [TextDraw],
     pub tile_face_inst_buffers: &'a [wgpu::Buffer],
@@ -66,7 +70,7 @@ impl WgpuRenderer {
                 // Marker only: split for `SsrGlobals` upload between subpasses.
             }
             RenderOp::Background { id, buf_idx } => {
-                if let (Some(bg_tex), Some(inst_buf)) = (
+                if let (Some(bg_tex), Some(slice)) = (
                     self.background_textures.get(id),
                     bg_inst_buffers.get(*buf_idx),
                 ) {
@@ -78,7 +82,11 @@ impl WgpuRenderer {
                     pass.set_bind_group(0, &self.globals_bind_group, &[]);
                     pass.set_bind_group(1, &bg_tex.bind_group, &[]);
                     pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                    pass.set_vertex_buffer(1, inst_buf.slice(..));
+                    pass.set_vertex_buffer(
+                        1,
+                        ctx.frame_pool_buffer
+                            .slice(slice.offset..slice.offset + slice.byte_len),
+                    );
                     pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                     pass.draw_indexed(0..6, 0, 0..1);
                 }
@@ -102,12 +110,6 @@ impl WgpuRenderer {
                 pass.set_pipeline(&self.moonlit_water_pipeline);
                 pass.set_bind_group(0, &self.globals_bind_group, &[]);
                 pass.set_bind_group(1, &self.moon_albedo_bind_group, &[]);
-                pass.draw(0..3, 0..1);
-            }
-            RenderOp::MountainHaze => {
-                pass.set_pipeline(&self.mountain_haze_pipeline);
-                pass.set_bind_group(0, &self.globals_bind_group, &[]);
-                pass.set_bind_group(1, &self.haze_uniform_bind_group, &[]);
                 pass.draw(0..3, 0..1);
             }
             RenderOp::SunlitWater => {
@@ -251,7 +253,6 @@ impl WgpuRenderer {
                         DrawKind::Talisman => {
                             (&self.talisman_mesh, self.talisman_instances.get(slot_i))
                         }
-                        DrawKind::Shrine => (&self.shrine_mesh, self.shrine_instances.get(slot_i)),
                         DrawKind::BugBody => {
                             (&self.bug_body_mesh, self.bug_body_instances.get(slot_i))
                         }
@@ -351,6 +352,11 @@ impl WgpuRenderer {
                     self.draw_hallway_environment_meshes(pass, frame, false);
                 }
             }
+            RenderOp::ArchiveEnvironment => {
+                if self.archive_environment.is_some() {
+                    self.draw_archive_environment_meshes(pass, frame, false);
+                }
+            }
             RenderOp::ShowcaseTileBatch(batch_idx) => {
                 if !self.tile_primitives.is_empty() {
                     let batch = showcase_tile_batches[*batch_idx];
@@ -440,26 +446,41 @@ impl WgpuRenderer {
                 }
             }
             RenderOp::QuadBatch { buf_idx, count } => {
+                let slice = quad_buffers[*buf_idx];
                 pass.set_pipeline(&self.quad_pipeline);
                 pass.set_bind_group(0, &self.globals_bind_group, &[]);
                 pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                pass.set_vertex_buffer(1, quad_buffers[*buf_idx].slice(..));
+                pass.set_vertex_buffer(
+                    1,
+                    ctx.frame_pool_buffer
+                        .slice(slice.offset..slice.offset + slice.byte_len),
+                );
                 pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 pass.draw_indexed(0..6, 0, 0..*count);
             }
             RenderOp::GradientQuadBatch { buf_idx, count } => {
+                let slice = gradient_quad_buffers[*buf_idx];
                 pass.set_pipeline(&self.gradient_quad_pipeline);
                 pass.set_bind_group(0, &self.globals_bind_group, &[]);
                 pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                pass.set_vertex_buffer(1, gradient_quad_buffers[*buf_idx].slice(..));
+                pass.set_vertex_buffer(
+                    1,
+                    ctx.frame_pool_buffer
+                        .slice(slice.offset..slice.offset + slice.byte_len),
+                );
                 pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 pass.draw_indexed(0..6, 0, 0..*count);
             }
             RenderOp::SquircleQuadBatch { buf_idx, count } => {
+                let slice = squircle_quad_buffers[*buf_idx];
                 pass.set_pipeline(&self.squircle_quad_pipeline);
                 pass.set_bind_group(0, &self.globals_bind_group, &[]);
                 pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                pass.set_vertex_buffer(1, squircle_quad_buffers[*buf_idx].slice(..));
+                pass.set_vertex_buffer(
+                    1,
+                    ctx.frame_pool_buffer
+                        .slice(slice.offset..slice.offset + slice.byte_len),
+                );
                 pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 pass.draw_indexed(0..6, 0, 0..*count);
             }

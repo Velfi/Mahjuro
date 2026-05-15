@@ -2,8 +2,9 @@
 //!
 //! Supports multiple tween kinds per entity: scale, offset, rotation, opacity, shake.
 
-use std::collections::HashMap;
 use std::time::{Duration, Instant};
+
+use rustc_hash::FxHashMap;
 
 /// Entity ids for HUD regions.
 pub const ENTITY_HAND_STRIP: u32 = 1;
@@ -106,14 +107,14 @@ pub struct Transform2D {
 }
 
 pub struct AnimationController {
-    tweens: HashMap<(u32, TweenKind), Tween>,
+    tweens: FxHashMap<(u32, TweenKind), Tween>,
     now: Instant,
 }
 
 impl AnimationController {
     pub fn new() -> Self {
         Self {
-            tweens: HashMap::new(),
+            tweens: FxHashMap::default(),
             now: Instant::now(),
         }
     }

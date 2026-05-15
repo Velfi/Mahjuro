@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::mpsc;
 use std::time::Instant;
 
@@ -6,6 +6,7 @@ use super::*;
 
 use crate::core::tile_pack::TilePackKind;
 use crate::render::gpu_types::RelicTextureGpu;
+use crate::render::theme::color;
 
 /// Linear HDR color format for the main 3D scene, bloom chain, and journal
 /// GPU scene target — independent of swapchain (SDR vs HDR).
@@ -36,51 +37,32 @@ pub(super) fn relic_material_params(
 ) -> MaterialParams {
     let visual = relic_visual(relic_id);
     let g = glow.clamp(0.0, 1.0);
-    match visual.material {
-        RelicRenderMaterial::Iron => MaterialParams {
-            kind: MaterialKind::Enamel,
-            base_color: [
-                0.42 + base_color[0] * 0.14,
-                0.44 + base_color[1] * 0.14,
-                0.48 + base_color[2] * 0.14,
-                base_color[3],
-            ],
-            specular_strength: 0.38 + 0.18 * g,
-            specular_power: 26.0,
-        },
-        RelicRenderMaterial::Copper => MaterialParams {
-            kind: MaterialKind::Enamel,
-            base_color: [
-                0.78 + base_color[0] * 0.16,
-                0.46 + base_color[1] * 0.14,
-                0.26 + base_color[2] * 0.10,
-                base_color[3],
-            ],
-            specular_strength: 0.52 + 0.22 * g,
-            specular_power: 34.0,
-        },
-        RelicRenderMaterial::Silver => MaterialParams {
-            kind: MaterialKind::Enamel,
-            base_color: [
-                0.82 + base_color[0] * 0.14,
-                0.84 + base_color[1] * 0.14,
-                0.88 + base_color[2] * 0.12,
-                base_color[3],
-            ],
-            specular_strength: 0.78 + 0.22 * g,
-            specular_power: 64.0,
-        },
-        RelicRenderMaterial::Gold => MaterialParams {
-            kind: MaterialKind::Enamel,
-            base_color: [
-                0.94 + base_color[0] * 0.14,
-                0.78 + base_color[1] * 0.14,
-                0.28 + base_color[2] * 0.10,
-                base_color[3],
-            ],
-            specular_strength: 0.88 + 0.24 * g,
-            specular_power: 80.0,
-        },
+
+    // Each metal tier is `RELIC_<METAL>` (the rarity-keyed body color, see
+    // `theme::color`) plus a small per-channel admixture of the per-relic
+    // `base_color`, so individual relics in the same tier shift slightly
+    // around the canonical metal hue without leaving the palette.
+    //
+    // Per-channel scales bias each tier toward its character: copper-bronze
+    // and gold push red harder and cap blue, silver lifts blue a touch less,
+    // iron is symmetric. Pulled from the original literals so the visual
+    // baseline is unchanged by the token switch.
+    let (metal, scale, spec_base, spec_glow, spec_pow) = match visual.material {
+        RelicRenderMaterial::Iron => (color::RELIC_IRON, [0.14, 0.14, 0.14], 0.38, 0.18, 26.0),
+        RelicRenderMaterial::Copper => (color::RELIC_COPPER, [0.16, 0.14, 0.10], 0.52, 0.22, 34.0),
+        RelicRenderMaterial::Silver => (color::RELIC_SILVER, [0.14, 0.14, 0.12], 0.78, 0.22, 64.0),
+        RelicRenderMaterial::Gold => (color::RELIC_GOLD, [0.14, 0.14, 0.10], 0.88, 0.24, 80.0),
+    };
+    MaterialParams {
+        kind: MaterialKind::Enamel,
+        base_color: [
+            metal[0] + base_color[0] * scale[0],
+            metal[1] + base_color[1] * scale[1],
+            metal[2] + base_color[2] * scale[2],
+            base_color[3],
+        ],
+        specular_strength: spec_base + spec_glow * g,
+        specular_power: spec_pow,
     }
 }
 
@@ -402,20 +384,19 @@ pub(super) fn load_metal_heightmap(
     }
 }
 
-/// Decoded three-part zodiac ribbon textures (top cap, tileable middle, bottom cap).
-/// One set of three textures per `ZodiacKind` in `ZodiacKind::all()` order.
+/// Decoded full-ribbon zodiac textures — one tall portrait image per zodiac.
+/// Indexed by position in `ZodiacKind::all()`.
 pub(super) struct ZodiacRibbonTextures {
     /// Keeps GPU textures alive so the views remain valid.
     #[allow(dead_code)]
     pub textures: Vec<wgpu::Texture>,
-    pub top_views: Vec<wgpu::TextureView>,
-    pub mid_views: Vec<wgpu::TextureView>,
-    pub bot_views: Vec<wgpu::TextureView>,
+    pub views: Vec<wgpu::TextureView>,
 }
 
-/// Decode the zodiac silk ribbon PNGs (three parts each: `_top`, `_mid`, `_bot`)
-/// and upload them as sRGB textures. Each missing or undecodeable file falls
-/// back to a flat 1×1 white texture so the slot still renders (just untextured).
+/// Decode the zodiac silk ribbon PNGs (one tall portrait per zodiac at
+/// `textures/zodiacs/zodiac_<slug>.png`) and upload them as sRGB textures.
+/// Missing or undecodeable files fall back to a flat 1×1 white texture so
+/// the slot still renders (just untextured).
 pub(super) fn load_zodiac_ribbon_textures(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -423,17 +404,13 @@ pub(super) fn load_zodiac_ribbon_textures(
     use crate::core::zodiac::ZodiacKind;
     let zodiacs = ZodiacKind::all();
     let cap = zodiacs.len();
-    let mut textures = Vec::with_capacity(cap * 3);
-    let mut top_views = Vec::with_capacity(cap);
-    let mut mid_views = Vec::with_capacity(cap);
-    let mut bot_views = Vec::with_capacity(cap);
+    let mut textures = Vec::with_capacity(cap);
+    let mut views = Vec::with_capacity(cap);
 
-    let load_one = |textures: &mut Vec<wgpu::Texture>,
-                    slug: &str,
-                    part: &str|
-     -> wgpu::TextureView {
-        let path = format!("textures/zodiacs/zodiac_{}_{}.png", slug, part);
-        let label = format!("zodiac-ribbon-{}-{}", slug, part);
+    for &z in zodiacs {
+        let slug = z.slug();
+        let path = format!("textures/zodiacs/zodiac_{}.png", slug);
+        let label = format!("zodiac-ribbon-{}", slug);
         let (tex, view) = match crate::asset_path::get(&path) {
             Some(file) => match image::load_from_memory(&file.data) {
                 Ok(img) => {
@@ -452,21 +429,9 @@ pub(super) fn load_zodiac_ribbon_textures(
             }
         };
         textures.push(tex);
-        view
-    };
-
-    for &z in zodiacs {
-        let slug = z.slug();
-        top_views.push(load_one(&mut textures, slug, "top"));
-        mid_views.push(load_one(&mut textures, slug, "mid"));
-        bot_views.push(load_one(&mut textures, slug, "bot"));
+        views.push(view);
     }
-    ZodiacRibbonTextures {
-        textures,
-        top_views,
-        mid_views,
-        bot_views,
-    }
+    ZodiacRibbonTextures { textures, views }
 }
 
 /// Load tile-pack box art textures synchronously at init. There are at most 7
@@ -474,13 +439,11 @@ pub(super) fn load_zodiac_ribbon_textures(
 pub(super) fn load_pack_textures(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-    text_layout: &wgpu::BindGroupLayout,
-    sampler: &wgpu::Sampler,
     default_relief_view: &wgpu::TextureView,
-) -> HashMap<TilePackKind, RelicTextureGpu> {
-    let mut map = HashMap::new();
+) -> FxHashMap<TilePackKind, RelicTextureGpu> {
+    let mut map = FxHashMap::default();
     for &kind in TilePackKind::all() {
-        let asset_path = format!("textures/packs/{}", kind.asset_filename());
+        let asset_path = format!("textures/tile_packs/{}", kind.asset_filename());
         let bytes = match crate::asset_path::get(&asset_path) {
             Some(file) => file.data.to_vec(),
             None => {
@@ -496,28 +459,11 @@ pub(super) fn load_pack_textures(
             }
         };
         let (w, h) = img.dimensions();
-        let (tex, view) = upload_rgba_texture(device, queue, kind.name(), img.as_raw(), w, h);
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(kind.name()),
-            layout: text_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(sampler),
-                },
-            ],
-        });
+        let (_tex, view) = upload_rgba_texture(device, queue, kind.name(), img.as_raw(), w, h);
         map.insert(
             kind,
             RelicTextureGpu {
                 view,
-                texture: tex,
-                bind_group,
-                relief_texture: None,
                 relief_view: default_relief_view.clone(),
             },
         );
@@ -611,6 +557,12 @@ pub(crate) fn create_depth(
 /// before the candles each frame, so it has to reflect *last* frame's
 /// composited candles + flames + tiles. The camera is fixed, so the
 /// one-frame stale image is essentially correct.
+///
+/// Allocated at half the visible resolution (`width / 2`, `height / 2`)
+/// — see `scene_color_downsample.wgsl`. The lit_mesh SSR sampler reads
+/// it with normalized UVs so any size works. Texture is a render
+/// attachment because the downsample blit writes to it directly
+/// (the old full-res `copy_texture_to_texture` path is gone).
 pub(super) fn create_scene_prev(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
@@ -628,11 +580,18 @@ pub(super) fn create_scene_prev(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
         view_formats: &[],
     });
     let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
     (tex, view)
+}
+
+/// Returns the `(width, height)` to allocate `scene_prev_texture` at,
+/// given the swapchain's full size. Centralised so the init path and
+/// the resize path can't drift.
+pub(super) fn scene_prev_size(full_width: u32, full_height: u32) -> (u32, u32) {
+    ((full_width / 2).max(1), (full_height / 2).max(1))
 }
 
 pub(super) fn create_scene_color(

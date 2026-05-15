@@ -39,13 +39,13 @@ const LIFT_ARC_PEAK: f32 = 80.0;
 
 /// Sky-blue base tint for Chips popups. The Polychrome shader adds a
 /// rainbow thin-film sheen on top of this as the light sweeps across.
-const CHIPS_COLOR: [f32; 4] = [0.55, 0.78, 1.00, 1.0];
+const CHIPS_COLOR: [f32; 4] = crate::render::theme::color::LAPIS;
 /// Red base tint for Mult popups.
-const MULT_COLOR: [f32; 4] = [1.00, 0.42, 0.38, 1.0];
+const MULT_COLOR: [f32; 4] = crate::render::theme::color::RUBY;
 /// Warm gold base tint for Gold popups.
-const GOLD_COLOR: [f32; 4] = [1.00, 0.84, 0.35, 1.0];
+const GOLD_COLOR: [f32; 4] = crate::render::theme::color::RELIC_GOLD;
 /// Cream tint for the Final landing number.
-const FINAL_COLOR: [f32; 4] = [1.00, 0.95, 0.76, 1.0];
+const FINAL_COLOR: [f32; 4] = crate::render::theme::color::TALLOW;
 
 #[derive(Clone, Debug)]
 struct ScorePopup {

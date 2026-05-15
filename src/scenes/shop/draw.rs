@@ -4,7 +4,7 @@ use crate::render::draw_cmd::UiFrame;
 impl ShopScene {
     pub(super) fn push_shop_particle_quads(&self, frame: &mut UiFrame) {
         for (rect, color) in self.particles.instances() {
-            frame.quad(GpuInstance { rect, color });
+            frame.quad(GpuInstance { rect, color, user: 0});
         }
     }
 

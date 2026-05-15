@@ -1428,8 +1428,8 @@ def main() -> None:
     parser.add_argument(
         "--out",
         type=Path,
-        default=Path("assets/sets/classic"),
-        help="Output set directory (default: assets/sets/classic)",
+        default=Path("assets/textures/tile_sets/classic"),
+        help="Output set directory (default: assets/textures/tile_sets/classic)",
     )
     parser.add_argument(
         "--with-tiles",

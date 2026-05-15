@@ -17,7 +17,8 @@ impl EffectiveRelics {
             None
         };
         let shadowed = if ctx.relic.roster.has(RelicId::ShadowHand) {
-            ctx.relic.roster
+            ctx.relic
+                .roster
                 .active
                 .first()
                 .filter(|&&id| id != RelicId::ShadowHand)
@@ -25,10 +26,7 @@ impl EffectiveRelics {
         } else {
             None
         };
-        Self {
-            mirrored,
-            shadowed,
-        }
+        Self { mirrored, shadowed }
     }
 
     #[inline]

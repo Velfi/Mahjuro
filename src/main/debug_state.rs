@@ -6,8 +6,8 @@
 
 use crate::debug_menu::DebugMenuBar;
 use crate::debug_overlays::{
-    CameraDebugOverlay, DebugVisibilityOverlay, SfxTestOverlay, ShopEnvDebugOverlay, TuningOverlay,
-    VolumetricDebugOverlay,
+    CameraDebugOverlay, DebugVisibilityOverlay, SfxTestOverlay, ShopEnvDebugOverlay,
+    TonemapDebugOverlay, TuningOverlay,
 };
 use crate::render::draw_cmd::CameraParams;
 use crate::render::shop_glb::ShopEnvLightingTune;
@@ -66,7 +66,10 @@ pub struct DebugState {
     pub sfx_test_overlay: Option<SfxTestOverlay>,
     pub camera_debug_overlay: Option<CameraDebugOverlay>,
     pub shop_env_debug_overlay: Option<ShopEnvDebugOverlay>,
-    pub volumetric_debug_overlay: Option<VolumetricDebugOverlay>,
+    /// Per-scene tonemap + VHS tuning overlay. Edits the in-memory
+    /// `App.tonemap_tuning` live; Save persists under
+    /// `TonemapTuning:<scene_key>` (or `_default`); Reset clears that key.
+    pub tonemap_debug_overlay: Option<TonemapDebugOverlay>,
     /// One-shot debug picker armed by the "Object Hit Test" debug menu
     /// item.
     pub object_hit_test_armed: bool,
@@ -81,8 +84,8 @@ pub struct DebugState {
     /// Effective 3D camera after the scene's `draw_frame` (override or table
     /// default), updated each paint — used to seed camera debug overlay.
     pub last_effective_camera: CameraParams,
-    /// `Shop.glb` room scale multiplier (`window_h *` this). Debug overlay can edit live.
-    pub shop_env_height_scale: f32,
+    /// `shop.glb` / hallway / archive room scale multiplier (`window_h *` this). Debug overlay can edit live.
+    pub room_gltf_height_scale: f32,
     /// glTF punctual + `shop_glb` tonemap tuning. Debug overlay edits live.
     pub shop_env_lighting: ShopEnvLightingTune,
 }
@@ -103,11 +106,11 @@ impl DebugState {
             sfx_test_overlay: None,
             camera_debug_overlay: None,
             shop_env_debug_overlay: None,
-            volumetric_debug_overlay: None,
+            tonemap_debug_overlay: None,
             object_hit_test_armed: false,
             arrange_mode: None,
             last_effective_camera: CameraParams::default_table_camera(800.0),
-            shop_env_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
+            room_gltf_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
             shop_env_lighting: ShopEnvLightingTune::SOURCE_DEFAULTS,
         }
     }
@@ -119,6 +122,6 @@ impl DebugState {
             || self.camera_debug_overlay.is_some()
             || self.shop_env_debug_overlay.is_some()
             || self.visibility_overlay.is_some()
-            || self.volumetric_debug_overlay.is_some()
+            || self.tonemap_debug_overlay.is_some()
     }
 }

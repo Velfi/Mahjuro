@@ -14,8 +14,9 @@
 //! Each label mesh is recentred so the rendered string sits around the
 //! world origin with a height of ~1.0 unit.
 
-use std::collections::HashMap;
 use std::sync::OnceLock;
+
+use rustc_hash::FxHashMap;
 
 use lyon_path::Path;
 use lyon_path::math::Point;
@@ -228,12 +229,10 @@ fn tessellate_glyph(path: &Path) -> Option<GlyphCap> {
 /// used by exactly one triangle; boundary edges chain head-to-tail into
 /// loops because the triangulation is a manifold with boundary.
 fn extract_boundary_loops(triangles: &[[u32; 3]]) -> Vec<Vec<u32>> {
-    use std::collections::HashMap;
-
     // Count how many times each directed edge appears. In a consistently
     // oriented manifold each interior edge appears once forward and once
     // reversed; boundary edges appear only in one direction.
-    let mut edge_count: HashMap<(u32, u32), i32> = HashMap::new();
+    let mut edge_count: FxHashMap<(u32, u32), i32> = FxHashMap::default();
     for tri in triangles {
         for (a, b) in [(tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])] {
             let key = if a < b { (a, b) } else { (b, a) };
@@ -243,7 +242,7 @@ fn extract_boundary_loops(triangles: &[[u32; 3]]) -> Vec<Vec<u32>> {
     }
 
     // Collect boundary edges in their original (oriented) direction.
-    let mut boundary: HashMap<u32, Vec<u32>> = HashMap::new();
+    let mut boundary: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
     for tri in triangles {
         for (a, b) in [(tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])] {
             let key = if a < b { (a, b) } else { (b, a) };
@@ -495,13 +494,13 @@ fn build_walls(pts: &[(f32, f32)], vertices: &mut Vec<Vertex3dTex>, indices: &mu
 /// by the number of distinct popups the gameplay scene actually emits in a
 /// session — typically a few dozen.
 pub struct GlyphMeshCache {
-    cache: HashMap<String, MeshCpu>,
+    cache: FxHashMap<String, MeshCpu>,
 }
 
 impl GlyphMeshCache {
     pub fn new() -> Self {
         Self {
-            cache: HashMap::new(),
+            cache: FxHashMap::default(),
         }
     }
 

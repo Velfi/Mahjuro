@@ -33,6 +33,7 @@ use crate::render::flying_coins::FlyingCoinSystem;
 use crate::render::particles::ParticleSystem;
 use crate::render::score_popups::ScorePopupSystem;
 use crate::render::score_reel::ScoreReel;
+use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel, build_instances_from_layout};
 use crate::ui::input::UiAction;
 use crate::ui::scene_layout::GameplayPositions;
@@ -60,6 +61,35 @@ use hand_layout::hand_slots_for_count;
 const PICK_CONSUMABLE_DISH: u32 = 1;
 
 use crate::ui::focus_nav::push_focus_ring;
+
+/// Memoized inputs + result for `suggest_completions`. The lookup key is a
+/// cheap fingerprint of the hand identities and the selection bitmask so we
+/// can decide whether to reuse the cached `hints`.
+#[derive(Default)]
+struct SuggestHintCache {
+    /// Hand tile uids (`Tile.id`) at the time the cache was last filled.
+    /// Cheaper to compare than copying full `Tile` values.
+    hand_uids: Vec<u32>,
+    /// Bitmask of selected hand indices. Hands max out at 16 tiles, so a
+    /// `u32` is plenty of headroom.
+    selection_mask: u32,
+    hints: Vec<usize>,
+}
+
+impl SuggestHintCache {
+    fn matches(&self, hand: &[crate::core::tile::Tile], selection_mask: u32) -> bool {
+        if self.selection_mask != selection_mask {
+            return false;
+        }
+        if self.hand_uids.len() != hand.len() {
+            return false;
+        }
+        self.hand_uids
+            .iter()
+            .zip(hand.iter())
+            .all(|(uid, tile)| *uid == tile.id)
+    }
+}
 
 pub struct GameplayScene {
     /// Queue of scoring cascade animations. The front entry is the active
@@ -109,6 +139,12 @@ pub struct GameplayScene {
     /// a `RefCell` because `draw_frame` takes `&self` but needs to update
     /// this stash.
     last_focus_rects: std::cell::RefCell<Vec<(FocusTarget, [f32; 4])>>,
+    /// Memoized result of [`crate::core::hand::suggest_completions`]. The
+    /// hint computation runs `validate_selection` for every unselected tile
+    /// (each call performs full backtracking validation), so we cache it
+    /// against the inputs that affect its output. `draw_frame` takes `&self`
+    /// so we use a `RefCell` to update the cache from the read path.
+    suggest_hint_cache: std::cell::RefCell<SuggestHintCache>,
     /// Tile indices that should depart this frame (set during update, consumed during draw).
     pending_departures: Vec<usize>,
     /// When set, the hand has been discarded-from but not yet refilled. The
@@ -127,7 +163,7 @@ pub struct GameplayScene {
     /// Per-relic glow start times. Populated as the cascade reveals each step
     /// whose source matches a relic display name. The glow fades over
     /// `RELIC_GLOW_LIFETIME` and the entry is evicted afterward.
-    relic_glow_starts: std::collections::HashMap<crate::core::relic::RelicId, Instant>,
+    relic_glow_starts: rustc_hash::FxHashMap<crate::core::relic::RelicId, Instant>,
     /// Tracks the most recent step index whose reveal edge we've already
     /// processed (relic glow + ScoreStepRevealed bus event). Prevents
     /// re-firing reveal-edge effects every frame while the cascade holds
@@ -410,6 +446,7 @@ impl GameplayScene {
             pause_menu: PauseMenu::new(),
             focus: None,
             last_focus_rects: std::cell::RefCell::new(Vec::new()),
+            suggest_hint_cache: std::cell::RefCell::new(SuggestHintCache::default()),
             pending_departures: Vec::new(),
             pending_refill: None,
             cursor_pos: (0.0, 0.0),
@@ -423,7 +460,7 @@ impl GameplayScene {
                 CandleState::new(2.6),
             ],
             candle_time: 0.0,
-            relic_glow_starts: std::collections::HashMap::new(),
+            relic_glow_starts: rustc_hash::FxHashMap::default(),
             last_revealed_step: None,
             cascade_final_emitted: false,
             cascade_hud: None,
@@ -490,7 +527,7 @@ impl GameplayScene {
             return;
         }
         if let Some(ref breakdown) = GameEngine::last_breakdown(ctx.run) {
-            let set_kinds = breakdown.scored_set_kinds.clone();
+            let meld_kinds = breakdown.scored_meld_kinds.clone();
             let is_full_hand = ctx
                 .run
                 .available_yaku
@@ -505,7 +542,7 @@ impl GameplayScene {
                 && breakdown
                     .detected_yaku
                     .contains(&crate::core::yaku::YakuKind::Yakuhai);
-            if let Some(milestone) = crate::game::tutorial::milestone_for_sets(&set_kinds) {
+            if let Some(milestone) = crate::game::tutorial::milestone_for_melds(&meld_kinds) {
                 let _ = GameEngine::celebrate_tutorial_milestone(ctx.run, ctx.bus, milestone);
             }
             if is_full_hand {
@@ -562,7 +599,7 @@ impl GameplayScene {
                 self.particles
                     .explode(px, py, count, [1.0, 0.86, 0.32, 1.0], 1.1);
                 self.particles
-                    .explode(px, py, count / 3, [1.0, 0.97, 0.85, 1.0], 0.9);
+                    .explode(px, py, count / 3, color::PARCHMENT, 0.9);
                 if self.candle_flare > 0.0 {
                     self.particles
                         .explode(px, py, count * 2, [1.0, 0.55, 0.15, 1.0], 1.6);

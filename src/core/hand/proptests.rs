@@ -1,13 +1,13 @@
 use super::*;
 use crate::core::tile::{Suit, Tile};
 use proptest::prelude::*;
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
-const NUMBER_SUITS: [Suit; 3] = [Suit::Characters, Suit::Bamboos, Suit::Circles];
+const NUMBER_SUITS: [Suit; 3] = [Suit::Characters, Suit::Bamboos, Suit::Dots];
 const ALL_SUITS: [Suit; 5] = [
     Suit::Characters,
     Suit::Bamboos,
-    Suit::Circles,
+    Suit::Dots,
     Suit::Wind,
     Suit::Dragon,
 ];
@@ -119,12 +119,12 @@ proptest! {
     #[test]
     fn accepted_covers_all_ids(tiles in arb_random_hand()) {
         if let Some(sets) = validate_selection(&tiles) {
-            let input_ids: HashSet<u32> = tiles.iter().map(|t| t.id).collect();
+            let input_ids: FxHashSet<u32> = tiles.iter().map(|t| t.id).collect();
             let mut output_ids = Vec::new();
             for s in &sets {
                 output_ids.extend(&s.tile_ids);
             }
-            let output_set: HashSet<u32> = output_ids.iter().copied().collect();
+            let output_set: FxHashSet<u32> = output_ids.iter().copied().collect();
 
             // Every input tile accounted for.
             prop_assert_eq!(&input_ids, &output_set, "tile IDs mismatch");
@@ -146,19 +146,19 @@ proptest! {
                     .collect();
 
                 match s.kind {
-                    SetKind::Pair => {
+                    MeldKind::Pair => {
                         prop_assert_eq!(set_tiles.len(), 2);
                         prop_assert_eq!(set_tiles[0].suit, set_tiles[1].suit);
                         prop_assert_eq!(set_tiles[0].rank, set_tiles[1].rank);
                     }
-                    SetKind::Triplet => {
+                    MeldKind::Triplet => {
                         prop_assert_eq!(set_tiles.len(), 3);
                         prop_assert_eq!(set_tiles[0].suit, set_tiles[1].suit);
                         prop_assert_eq!(set_tiles[0].suit, set_tiles[2].suit);
                         prop_assert_eq!(set_tiles[0].rank, set_tiles[1].rank);
                         prop_assert_eq!(set_tiles[0].rank, set_tiles[2].rank);
                     }
-                    SetKind::Sequence => {
+                    MeldKind::Sequence => {
                         prop_assert_eq!(set_tiles.len(), 3);
                         let mut ranks: Vec<u8> = set_tiles.iter().map(|t| t.rank).collect();
                         ranks.sort();
@@ -167,14 +167,14 @@ proptest! {
                         prop_assert_eq!(ranks[1], ranks[0] + 1, "sequence not consecutive");
                         prop_assert_eq!(ranks[2], ranks[1] + 1, "sequence not consecutive");
                     }
-                    SetKind::Kong => {
+                    MeldKind::Kong => {
                         prop_assert_eq!(set_tiles.len(), 4);
                         for i in 1..4 {
                             prop_assert_eq!(set_tiles[0].suit, set_tiles[i].suit);
                             prop_assert_eq!(set_tiles[0].rank, set_tiles[i].rank);
                         }
                     }
-                    SetKind::Single => {
+                    MeldKind::Single => {
                         prop_assert_eq!(set_tiles.len(), 1);
                     }
                 }

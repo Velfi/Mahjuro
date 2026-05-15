@@ -4,7 +4,7 @@
   { "id": "tribute",       "name": "The Tribute",       "description": "Pay 1 gold each play",                                  "tier": "soft",   "min_ante": 1 },
   { "id": "gate",          "name": "The Ink Gate",      "description": "Characters are debuffed",                               "tier": "soft",   "min_ante": 2 },
   { "id": "grove",         "name": "The Jade Grove",    "description": "Bamboos are debuffed",                                  "tier": "soft",   "min_ante": 2 },
-  { "id": "coin",          "name": "The Copper Wheel",  "description": "Circles are debuffed",                                  "tier": "soft",   "min_ante": 2 },
+  { "id": "coin",          "name": "The Copper Wheel",  "description": "Dots are debuffed",                                  "tier": "soft",   "min_ante": 2 },
   { "id": "bloom",         "name": "The Bloom Rot",     "description": "Flowers are debuffed",                                  "tier": "soft",   "min_ante": 2 },
   { "id": "hermit",        "name": "The Hermit",        "description": "Pairs score 0",                                         "tier": "medium", "min_ante": 3 },
   { "id": "forest",        "name": "The Forest",        "description": "Sequences score half base chips",                       "tier": "medium", "min_ante": 3 },

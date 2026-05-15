@@ -1,10 +1,11 @@
 //! Runtime asset loading: multi-pack ZIP (manifest), or a loose tree if `MAHJURO_ASSETS` is set.
 //!
-//! **Boot loading:** **`shared`** (fonts, `sets/`, all `audio/` SFX) and **`gameplay`** packs are
-//! **eager** — opened and indexed during `PacksState::new` (before `WgpuRenderer::new` pulls the
-//! tree). **`scenes/main_menu/`** (lazy `scene_main_menu` pack) and **`music/`** are **lazy** —
-//! those zips stay closed until first read (menu façade, BGM on first play), or until
-//! [`prefetch_lazy_packs`] / [`prefetch_lazy_packs_after_menu_once`].
+//! **Boot loading:** **`shared`** (`fonts/`, `textures/tile_sets/`, all `audio/` SFX) and
+//! **`gameplay`** packs are **eager** — opened and indexed during `PacksState::new` (before
+//! `WgpuRenderer::new` pulls the tree). **`textures/scenes/main_menu/`** (lazy `scene_main_menu`
+//! pack) and **`audio/music/`** are **lazy** — those zips stay closed until first read (menu
+//! façade, BGM on first play), or until [`prefetch_lazy_packs`] /
+//! [`prefetch_lazy_packs_after_menu_once`].
 
 use serde::Deserialize;
 use std::collections::{BTreeSet, HashMap};
@@ -240,7 +241,9 @@ fn index_archive(archive: &mut zip::ZipArchive<File>, pack_idx: usize, index: &m
         let lk = normalize_lookup_key(&name);
         if let Some((prev, _)) = index.insert(lk.clone(), (pack_idx, name.clone())) {
             if prev != pack_idx {
-                log::warn!("duplicate asset key after case-fold: {lk} (pack indices {prev} vs {pack_idx})");
+                log::warn!(
+                    "duplicate asset key after case-fold: {lk} (pack indices {prev} vs {pack_idx})"
+                );
             }
         }
     }
@@ -363,8 +366,10 @@ impl PacksState {
         idx.values()
             .filter_map(|(_, name)| {
                 let mut it = name.split('/');
-                let root = it.next()?;
-                if !root.eq_ignore_ascii_case("sets") {
+                if !it.next()?.eq_ignore_ascii_case("textures") {
+                    return None;
+                }
+                if !it.next()?.eq_ignore_ascii_case("tile_sets") {
                     return None;
                 }
                 let set_name = it.next()?;
@@ -499,8 +504,9 @@ pub fn log_all_assets() {
     }
 }
 
-/// Enumerate tileset names (`sets/*/atlas.toml` + `atlas.png`). With packs, `sets/` lives in the
-/// eager **shared** pack, so this does not mount lazy packs in normal layouts.
+/// Enumerate tileset names (`textures/tile_sets/*/atlas.toml` + `atlas.png`). With packs,
+/// `textures/tile_sets/` lives in the eager **shared** pack, so this does not mount lazy packs
+/// in normal layouts.
 pub fn list_tilesets() -> Vec<String> {
     init();
     let Some(state) = STATE.get() else {
@@ -508,7 +514,7 @@ pub fn list_tilesets() -> Vec<String> {
     };
     let names_src: Vec<String> = match state {
         AssetsState::Loose(root) => {
-            let sets = root.join("sets");
+            let sets = root.join("textures").join("tile_sets");
             let Ok(rd) = std::fs::read_dir(&sets) else {
                 return Vec::new();
             };
@@ -520,7 +526,7 @@ pub fn list_tilesets() -> Vec<String> {
     };
     let mut names: Vec<String> = names_src
         .into_iter()
-        .filter(|name| get(&format!("sets/{name}/atlas.png")).is_some())
+        .filter(|name| get(&format!("textures/tile_sets/{name}/atlas.png")).is_some())
         .collect();
     names.sort();
     names.dedup();

@@ -11,20 +11,6 @@ pub(crate) struct Globals {
     pub _globals_pad: [f32; 3],
 }
 
-/// Per-frame art-direction knobs for the procedural mountain-haze shader.
-/// `density = 0` turns the haze off; see
-/// [`crate::game::volumetric_tuning::VolumetricTuning`] for the slider
-/// ranges that drive these values from the debug overlay.
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub(crate) struct HazeUniform {
-    /// RGB haze colour (linear) + density multiplier in the alpha slot.
-    pub color_density: [f32; 4],
-    /// `x` = horizon y (0..1), `y` = drift-speed multiplier,
-    /// `z` = fog-wall center x (0..1), `w` = wall half-width in UV (0 = full width).
-    pub params: [f32; 4],
-}
-
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub(crate) struct BloomParams {
@@ -35,10 +21,25 @@ pub(crate) struct BloomParams {
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub(crate) struct TonemapParams {
+    /// Linear HDR multiplier applied before ACES.
     pub exposure: f32,
     /// 0 = ACES fitted (SDR or HDR swapchain); 1 = linear × exposure (journal prepass float target).
     pub mode: f32,
-    pub _pad: [f32; 2],
+    /// 1.0 = VHS branch enabled; 0.0 = clean tonemap. Independent of the
+    /// per-component amounts so the Options toggle can hard-gate everything
+    /// without zeroing the per-scene values the player tuned.
+    pub vhs_enabled: f32,
+    /// Seconds since renderer start. Drives the VHS noise animation; when
+    /// `vhs_enabled = 0` the shader short-circuits before reading it.
+    pub time: f32,
+    /// Chromatic-aberration UV split (R + B channels).
+    pub vhs_chromatic: f32,
+    /// Peak scanline darkening (0..~0.2 sensible).
+    pub vhs_scanline: f32,
+    /// Animated grain amplitude (0..~0.1 sensible).
+    pub vhs_grain: f32,
+    /// Vignette corner darkening (0..~0.4 sensible).
+    pub vhs_vignette: f32,
 }
 
 /// Shared by `emissive_probe_update.wgsl` and `emissive_probe_apply.wgsl` (must match WGSL layout).

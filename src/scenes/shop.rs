@@ -1,4 +1,4 @@
-//! Shop scene — between rounds; player can buy relics with gold (`THEME.md` storeroom + `Shop.glb`).
+//! Shop scene — between rounds; player can buy relics with gold (`THEME.md` storeroom + `shop.glb`).
 //!
 //! **[`ShopScene`]** is the [`crate::scenes::Scene`] variant; rendering and hit layout live in the internal `view` module.
 
@@ -46,7 +46,9 @@ use rand::seq::SliceRandom;
 use std::time::Instant;
 
 use crate::core::consumable::Consumable;
-use crate::core::relic::{Rarity, RelicId, RelicState, all_relic_defs, relic_shop_price};
+use crate::core::relic::{
+    Rarity, RelicId, RelicState, all_relic_defs, apply_merchants_eye_discount, relic_shop_price,
+};
 use crate::core::talisman::TalismanKind;
 use crate::core::tile::Tile;
 use crate::core::zodiac::ZodiacKind;
@@ -138,12 +140,12 @@ pub struct ShopScene {
     /// Per-relic glow start times. Populated when `relic_activations` is
     /// drained from the run state (e.g. Bonfire on relic sell, HungryGhost
     /// on destroy). Drives glow + wiggle on owned relics in the shop.
-    relic_glow_starts: std::collections::HashMap<RelicId, Instant>,
+    relic_glow_starts: rustc_hash::FxHashMap<RelicId, Instant>,
     /// Normalized screen-relative positions for the shop scene.
     /// Loaded from JSON on construction; falls back to compiled defaults.
     pub positions: crate::ui::scene_layout::ShopPositions,
-    /// Last `DrawCtx::shop_env_height_scale` from `draw_frame` (updated each draw). Used when building focus rects from `update()` so marker math matches the GPU pass (possibly one frame behind).
-    drawn_env_height_scale: std::cell::Cell<f32>,
+    /// Last `DrawCtx::room_gltf_height_scale` from `draw_frame` (updated each draw). Used when building focus rects from `update()` so marker math matches the GPU pass (possibly one frame behind).
+    drawn_room_gltf_height_scale: std::cell::Cell<f32>,
     /// West-face hold-to-sell (gamepad West / **Q**): press time when a hold is in progress.
     west_sell_hold_started: Option<std::time::Instant>,
 }
@@ -218,7 +220,6 @@ impl ShopScene {
         let shop_rm = GameEngine::read_shop(run);
         ShopInventoryCounts {
             n_for_sale: self.items.len(),
-            n_for_sale_zodiacs: self.zodiac_items.len(),
             n_for_sale_talismans: self.talisman_items.len(),
             n_owned_relics: shop_rm.owned_relics.len(),
         }
@@ -304,7 +305,7 @@ impl ShopScene {
         if !shop_focus_inspectable(focus) {
             return None;
         }
-        let env_h = self.drawn_env_height_scale.get();
+        let env_h = self.drawn_room_gltf_height_scale.get();
         let shop = GameEngine::read_shop(run);
         view::shop_item_inspect_orbit_for_focus(self, w, h, env_h, &shop, focus)
     }
@@ -402,17 +403,20 @@ mod tests {
         for _ in 0..48 {
             let (_, zodiacs, _, _) =
                 actions::generate_shop_stock(&relics, &available, 0, ex, &mode, false);
-            assert!(!zodiacs.iter().any(|item| {
-                matches!(item.consumable, Consumable::Zodiac(ZodiacKind::Qilin))
-            }));
+            assert!(
+                !zodiacs.iter().any(|item| {
+                    matches!(item.consumable, Consumable::Zodiac(ZodiacKind::Qilin))
+                })
+            );
         }
         let mut saw_qilin = false;
         for _ in 0..64 {
             let (_, zodiacs, _, _) =
                 actions::generate_shop_stock(&relics, &available, 0, ex, &mode, true);
-            if zodiacs.iter().any(|item| {
-                matches!(item.consumable, Consumable::Zodiac(ZodiacKind::Qilin))
-            }) {
+            if zodiacs
+                .iter()
+                .any(|item| matches!(item.consumable, Consumable::Zodiac(ZodiacKind::Qilin)))
+            {
                 saw_qilin = true;
                 break;
             }

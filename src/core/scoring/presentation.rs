@@ -11,10 +11,7 @@ use super::{ScoreStep, StepKind, combine};
 /// Rebuild `steps` with `Chips` first, then `Mult`, then `Gold`, preserving the
 /// delta contributed by each step. Running chips/mult/total are recomputed from
 /// `base_chips` and mult base `1.0`.
-pub(crate) fn reorder_steps_chips_then_mult_then_gold(
-    steps: &mut Vec<ScoreStep>,
-    base_chips: i32,
-) {
+pub(crate) fn reorder_steps_chips_then_mult_then_gold(steps: &mut Vec<ScoreStep>, base_chips: i32) {
     #[derive(Clone)]
     struct Delta {
         source: String,

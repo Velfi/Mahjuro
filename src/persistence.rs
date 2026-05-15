@@ -2,6 +2,8 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::sync::mpsc;
+use std::sync::{Mutex, OnceLock};
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -366,6 +368,13 @@ pub struct AppSettings {
     pub ssr_enabled: bool,
     #[serde(default)]
     pub hdr_enabled: bool,
+    /// Master kill-switch for the per-scene VHS overlay. Defaults to `true`
+    /// so the per-scene Tonemap debug overlay's amounts apply directly;
+    /// per-scene amounts of 0 already short-circuit the shader, so this
+    /// toggle is mainly for an "everything off" emergency exit. Not yet
+    /// surfaced in the Options scene — flip via `app_settings.json`.
+    #[serde(default = "default_true")]
+    pub vhs_enabled: bool,
     /// Borderless fullscreen when true; windowed (resizable) when false.
     #[serde(default = "default_true")]
     pub borderless_fullscreen: bool,
@@ -436,6 +445,7 @@ impl Default for AppSettings {
             shadows_enabled: true,
             ssr_enabled: true,
             hdr_enabled: false,
+            vhs_enabled: true,
             borderless_fullscreen: true,
             glyph_prompt: GlyphPromptSetting::default(),
             swap_ab: false,
@@ -455,7 +465,34 @@ fn settings_path() -> PathBuf {
     data_dir().join(SETTINGS_NAME)
 }
 
+/// Process-local cache for [`load_settings`]. The settings file is only ever
+/// mutated by this process via [`save_settings`], so a single in-memory copy
+/// is always authoritative once loaded — no file watcher or stat-on-read
+/// needed. Profiling showed `load_settings` was being called 5–7 times per
+/// gameplay frame from update / draw paths (discard-undo eligibility checks,
+/// etc.), each doing a stat + read + JSON parse + asset-pack tileset scan;
+/// caching turned that into a clone of an `Arc<...>`-free `AppSettings`
+/// (only `String` allocations) gated by a single mutex acquire.
+static SETTINGS_CACHE: OnceLock<Mutex<Option<AppSettings>>> = OnceLock::new();
+
+fn settings_cache() -> &'static Mutex<Option<AppSettings>> {
+    SETTINGS_CACHE.get_or_init(|| Mutex::new(None))
+}
+
 pub fn load_settings() -> AppSettings {
+    if let Ok(guard) = settings_cache().lock() {
+        if let Some(cached) = guard.as_ref() {
+            return cached.clone();
+        }
+    }
+    let settings = load_settings_uncached();
+    if let Ok(mut guard) = settings_cache().lock() {
+        *guard = Some(settings.clone());
+    }
+    settings
+}
+
+fn load_settings_uncached() -> AppSettings {
     let path = settings_path();
     if !path.exists() {
         return AppSettings::default();
@@ -481,7 +518,13 @@ pub fn load_settings() -> AppSettings {
 
 pub fn save_settings(settings: &AppSettings) -> anyhow::Result<()> {
     let json = serde_json::to_string_pretty(settings).context("serialize settings")?;
-    fs::write(settings_path(), json).context("write settings")
+    fs::write(settings_path(), json).context("write settings")?;
+    // Update the cache so the next `load_settings` (often the very next
+    // frame) sees the new values without re-reading or re-parsing.
+    if let Ok(mut guard) = settings_cache().lock() {
+        *guard = Some(settings.clone());
+    }
+    Ok(())
 }
 
 // ── Tuning overrides ────────────────────────────────────────────────────
@@ -530,6 +573,13 @@ pub fn load_tuning_override<T: serde::de::DeserializeOwned + Default>(name: &str
     }
 }
 
+/// True iff a tuning override exists on disk for `name`. Used by the
+/// per-scene tonemap loader to distinguish "no entry" (fall back to the
+/// default tuning) from "entry that happens to match defaults".
+pub fn has_tuning_override(name: &str) -> bool {
+    read_tuning_overrides().contains_key(name)
+}
+
 /// Promote the current value of `T` to the persistent override.
 pub fn save_tuning_override<T: serde::Serialize>(name: &str, value: &T) -> anyhow::Result<()> {
     let mut map = read_tuning_overrides();
@@ -552,7 +602,37 @@ fn profile_path(index: usize) -> PathBuf {
     data_dir().join(format!("profile_{index}.json"))
 }
 
+/// Process-local cache for [`load_profile`], one slot per profile index.
+/// Callers churn through `load_profile` on profile switches and during
+/// gameplay-event bookkeeping; the in-memory copy is authoritative because
+/// the app is the only writer (via [`save_profile`]).
+///
+/// Note: [`load_run`] is intentionally *not* cached. `RunState` does not
+/// derive `Clone` and threading `Clone` through the deep tree is invasive,
+/// while `load_run` is only invoked at scene transitions and profile
+/// switches — well off the per-frame hot path that motivated the
+/// settings-cache fix.
+static PROFILE_CACHE: OnceLock<Mutex<[Option<PlayerProgress>; MAX_PROFILES]>> = OnceLock::new();
+
+fn profile_cache() -> &'static Mutex<[Option<PlayerProgress>; MAX_PROFILES]> {
+    PROFILE_CACHE.get_or_init(|| Mutex::new([const { None }; MAX_PROFILES]))
+}
+
 pub fn load_profile(index: usize) -> PlayerProgress {
+    let idx = index.min(MAX_PROFILES - 1);
+    if let Ok(guard) = profile_cache().lock() {
+        if let Some(cached) = guard[idx].as_ref() {
+            return cached.clone();
+        }
+    }
+    let progress = load_profile_uncached(idx);
+    if let Ok(mut guard) = profile_cache().lock() {
+        guard[idx] = Some(progress.clone());
+    }
+    progress
+}
+
+fn load_profile_uncached(index: usize) -> PlayerProgress {
     let path = profile_path(index);
     if !path.exists() {
         return PlayerProgress::new();
@@ -571,8 +651,101 @@ pub fn load_profile(index: usize) -> PlayerProgress {
 }
 
 pub fn save_profile(index: usize, progress: &PlayerProgress) -> anyhow::Result<()> {
+    write_profile_to_disk(index, progress)?;
+    update_profile_cache(index, progress);
+    Ok(())
+}
+
+fn write_profile_to_disk(index: usize, progress: &PlayerProgress) -> anyhow::Result<()> {
     let json = serde_json::to_string_pretty(progress).context("serialize")?;
-    fs::write(profile_path(index), json).context("write save")
+    fs::write(profile_path(index), json).context("write save")?;
+    Ok(())
+}
+
+fn update_profile_cache(index: usize, progress: &PlayerProgress) {
+    let idx = index.min(MAX_PROFILES - 1);
+    if let Ok(mut guard) = profile_cache().lock() {
+        guard[idx] = Some(progress.clone());
+    }
+}
+
+/// Background-thread profile saver. Pairs with `App::mark_profile_dirty`
+/// + a frame-end flush so per-event saves (relic activation, boss
+/// bookkeeping, yaku tally, …) don't stall the frame on slow disks
+/// (Steam Deck SD card installs are the motivating case).
+///
+/// `enqueue` updates the in-process [`profile_cache`] synchronously so
+/// any subsequent `load_profile` sees fresh state immediately, then
+/// hands a snapshot to the worker for serialization + write. The
+/// worker coalesces back-to-back queued saves per profile index — a
+/// scoring cascade that fires N save events the same frame turns into
+/// at most one write per profile.
+pub struct ProfileSaver {
+    tx: Option<mpsc::Sender<(usize, PlayerProgress)>>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ProfileSaver {
+    pub fn spawn() -> Self {
+        let (tx, rx) = mpsc::channel::<(usize, PlayerProgress)>();
+        let handle = std::thread::Builder::new()
+            .name("profile-saver".to_string())
+            .spawn(move || profile_saver_loop(rx))
+            .expect("spawn profile-saver thread");
+        Self {
+            tx: Some(tx),
+            handle: Some(handle),
+        }
+    }
+
+    /// Update the in-memory cache synchronously, then send a snapshot
+    /// for background disk write. Best-effort — channel send failure
+    /// (worker exited) is logged but never propagated.
+    pub fn enqueue(&self, index: usize, progress: &PlayerProgress) {
+        update_profile_cache(index, progress);
+        if let Some(tx) = self.tx.as_ref()
+            && let Err(e) = tx.send((index.min(MAX_PROFILES - 1), progress.clone()))
+        {
+            log::warn!("profile-saver enqueue failed: {e}");
+        }
+    }
+
+    /// Drop the sender and join the worker so any pending writes land
+    /// before the process exits. Idempotent; called from `Drop`.
+    pub fn shutdown(&mut self) {
+        self.tx.take();
+        if let Some(handle) = self.handle.take()
+            && let Err(e) = handle.join()
+        {
+            log::warn!("profile-saver thread join failed: {e:?}");
+        }
+    }
+}
+
+impl Drop for ProfileSaver {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+fn profile_saver_loop(rx: mpsc::Receiver<(usize, PlayerProgress)>) {
+    while let Ok((idx, progress)) = rx.recv() {
+        // Coalesce: drain anything already buffered and keep the
+        // latest snapshot per profile index. Multiple saves landing
+        // on the same frame collapse into one write.
+        let mut latest: [Option<PlayerProgress>; MAX_PROFILES] = [const { None }; MAX_PROFILES];
+        latest[idx.min(MAX_PROFILES - 1)] = Some(progress);
+        while let Ok((idx2, progress2)) = rx.try_recv() {
+            latest[idx2.min(MAX_PROFILES - 1)] = Some(progress2);
+        }
+        for (j, snap) in latest.iter().enumerate() {
+            if let Some(p) = snap
+                && let Err(e) = write_profile_to_disk(j, p)
+            {
+                log::warn!("profile-saver: write_profile_to_disk({j}) failed: {e}");
+            }
+        }
+    }
 }
 
 /// Check if a profile has any save data on disk.
@@ -612,10 +785,7 @@ pub fn play_stats_export_path(profile_index: usize) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    base.join(format!(
-        "play_stats_profile{}_{ts}.html",
-        profile_index + 1
-    ))
+    base.join(format!("play_stats_profile{}_{ts}.html", profile_index + 1))
 }
 
 /// Wrapper that stamps each saved run with the build version. On load we

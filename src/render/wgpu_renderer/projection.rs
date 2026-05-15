@@ -17,7 +17,6 @@ pub struct ProjectionCache {
     pub hand_rects: Vec<(usize, [f32; 4])>,
     pub relic_rects: Vec<[f32; 4]>,
     pub pack_rects: Vec<([f32; 4], Option<u32>)>,
-    pub shrine_rects: Vec<[f32; 4]>,
     pub ribbon_rects: Vec<[f32; 4]>,
     pub talisman_rects: Vec<[f32; 4]>,
     pub plaque_rects: Vec<[f32; 4]>,

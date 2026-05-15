@@ -13,7 +13,6 @@ impl WgpuRenderer {
         shadows_enabled: bool,
         shadow_uniforms_changed: bool,
         showcase_tile_batches: &[&[ShowcaseTilePlacement]],
-        shrine_batches: &[&[ShrinePlacement]],
         tile_3d_rects: &[(usize, [f32; 4])],
     ) {
         // ── Shadow pre-pass ─────────────────────────────────────────────
@@ -79,29 +78,6 @@ impl WgpuRenderer {
                         wgpu::IndexFormat::Uint32,
                     );
                     shadow_pass.draw_indexed(0..self.candle_wick_mesh.index_count, 0, 0..1);
-                }
-            }
-
-            // Shrines (pick-blind scene).
-            {
-                let total_shrines = shrine_batches
-                    .iter()
-                    .map(|b| b.len())
-                    .sum::<usize>()
-                    .min(MAX_SHRINE_SLOTS);
-                if total_shrines > 0 {
-                    shadow_pass.set_vertex_buffer(0, self.shrine_mesh.vertex_buffer.slice(..));
-                    shadow_pass.set_index_buffer(
-                        self.shrine_mesh.index_buffer.slice(..),
-                        wgpu::IndexFormat::Uint32,
-                    );
-                    for slot_i in 0..total_shrines {
-                        let Some(inst) = self.shrine_instances.get(slot_i) else {
-                            break;
-                        };
-                        shadow_pass.set_bind_group(0, &inst.shadow_bind_group, &[]);
-                        shadow_pass.draw_indexed(0..self.shrine_mesh.index_count, 0, 0..1);
-                    }
                 }
             }
 
@@ -171,8 +147,8 @@ impl WgpuRenderer {
             // uniform-upload pass above).
             {
                 use crate::render::primitive::MeshId;
-                let mut cursors: std::collections::HashMap<MeshId, usize> =
-                    std::collections::HashMap::new();
+                let mut cursors: rustc_hash::FxHashMap<MeshId, usize> =
+                    rustc_hash::FxHashMap::default();
                 for cmd in frame.cmds.iter() {
                     let objs: Box<dyn Iterator<Item = &crate::render::draw_cmd::Object3d>> =
                         match cmd {

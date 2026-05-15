@@ -15,6 +15,7 @@ use crate::core::relic::RelicId;
 use crate::core::tile::Tile;
 use crate::core::tile_pack::TilePackKind;
 use crate::render::lit_mesh::MaterialParams;
+use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, SpotLight, TextLabel};
 use crate::scenes::{BackgroundId, ButtonDef};
 use glam;
@@ -265,6 +266,20 @@ pub enum CascadeTokenKind {
     Mult,
 }
 
+impl CascadeTokenKind {
+    /// Canonical RGBA tint for this cascade token kind. Centralized so
+    /// the score-popup glyphs, the cascade HUD label, and the 3D
+    /// cascade-token meshes all stay in sync — any one of those reading
+    /// the wrong color would break the warm-vs-cool reading of the
+    /// score breakdown.
+    pub fn color(self) -> [f32; 4] {
+        match self {
+            CascadeTokenKind::Chips => crate::render::theme::color::LAPIS,
+            CascadeTokenKind::Mult => crate::render::theme::color::RUBY,
+        }
+    }
+}
+
 /// Material selector for the extruded-glyph score popup. Maps to the lit-mesh
 /// shader's `MaterialKind` branch at render time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -362,26 +377,6 @@ pub struct PromptIconQuad {
     pub source: PromptIconSource,
 }
 
-/// One shrine placement (used by the pick-blind scene to draw the three
-/// blind shrines side by side, each scaled by `extents`). Geometry is the
-/// procedural shrine mesh in normalized -0.5..+0.5 local space, scaled by
-/// `extents` and translated to `world_pos`.
-#[derive(Clone, Copy, Debug)]
-pub struct ShrinePlacement {
-    /// `(pixel_x, pixel_y, lift)` for the shrine's *base center*.
-    pub world_pos: WorldSurfaceAnchor,
-    /// Full extents in world units (width × height × depth). Per-instance
-    /// scaling is how the Small / Big / Boss shrines get visibly distinct
-    /// sizes.
-    pub extents: [f32; 3],
-    /// Linear-space RGBA tint applied to every face of the mesh.
-    pub color: [f32; 4],
-    /// Brighten multiplier in [0, 1]. The upcoming shrine pushes this above
-    /// 0 so it reads as the active choice even before the spotlight
-    /// `PointLight` adds its bloom on top.
-    pub glow: f32,
-}
-
 // ── General-purpose 3D placement ─────────────────────────────────────────
 
 /// Euler **XYZ** radians for [`Object3d::rotation`] — same convention as
@@ -394,15 +389,6 @@ pub fn camera_facing_euler_xyz_rad(cam_eye: [f32; 3], look_target: [f32; 3]) -> 
     let look = glam::Vec3::from(look_target) - glam::Vec3::from(cam_eye);
     let pitch = look.z.atan2(look.y.abs()) + std::f32::consts::PI;
     [pitch, 0.0, 0.0]
-}
-
-/// [`Mat4`] view of [`camera_facing_euler_xyz_rad`] — for legacy compose-on-left math.
-///
-/// Prefer storing [`Object3dEuler`] via [`camera_facing_euler_xyz_rad`] on new code paths.
-#[inline]
-pub fn camera_facing_rotation(cam_eye: [f32; 3], look_target: [f32; 3]) -> glam::Mat4 {
-    let e = camera_facing_euler_xyz_rad(cam_eye, look_target);
-    glam::Mat4::from_rotation_x(e[0])
 }
 
 /// Mesh-specific data carried alongside the common [`Object3d`] fields.
@@ -450,8 +436,6 @@ pub enum Object3dKind {
     },
 
     // ── Props ────────────────────────────────────────────────────────
-    /// Procedural shrine altar (Small / Big / Boss scale via `extents`).
-    Shrine { glow: f32 },
     /// Procedural ornate brass plinth used by the gameplay scene to display
     /// the dora indicator tile(s). The mesh has no roof; the indicator
     /// tile face(s) are pushed separately as `ShowcaseTilePlacement`s
@@ -687,10 +671,6 @@ pub enum DrawCmd {
     MoonlitWater,
     /// Procedural sun hovering above rippling water (fullscreen triangle, no data).
     SunlitWater,
-    /// Procedural mountain-haze atmosphere (fullscreen triangle, no data).
-    /// FBM scrolling noise + vertical gradient, additively blended — reads as
-    /// slow drifting mountain fog without the cost of a volumetric sim.
-    MountainHaze,
     /// Procedural shooting-star cascade transition (fullscreen triangle, no data).
     /// Brightness driven by `UiFrame::transition_progress`.
     ShootingStarCascade,
@@ -714,10 +694,12 @@ pub enum DrawCmd {
     /// instanced from the renderer's pre-allocated coin slot pool. Used by
     /// the shop scene to display the player's gold as a pile of coins in a
     /// dish.
-    /// Imported `Shop.glb` room mesh (tile-textured pipeline, world-space vertices).
+    /// Imported `shop.glb` room mesh (tile-textured pipeline, world-space vertices).
     ShopEnvironment,
     /// Imported `hallway.glb` pick-blind room (same GPU path as [`DrawCmd::ShopEnvironment`]).
     HallwayEnvironment,
+    /// Imported `archive.glb` Archive room (same GPU path as [`DrawCmd::ShopEnvironment`]).
+    ArchiveEnvironment,
     /// Reset the main scene depth target while keeping the HDR color buffer. Later 3D
     /// draws (same camera) composite by depth among themselves but no longer test
     /// against geometry drawn before this marker — e.g. pack celebration meshes over
@@ -826,14 +808,6 @@ pub struct UiFrame {
     /// Arrange-mode clamp hints. Drawn as a faint band when the named
     /// pickable is the current selection — see [`ArrangeClamp`].
     pub arrange_clamps: Vec<ArrangeClamp>,
-    /// Gameplay only: [`MountainHaze`] horizon height in normalized screen Y
-    /// (0 = top, 1 = bottom). Overrides volumetric `haze_horizon_y` for this
-    /// frame; sourced from gameplay scene layout `fog_wall.ny`.
-    pub gameplay_fog_wall_horizon_y: Option<f32>,
-    /// Gameplay only: horizontal center of the fog slab in normalized screen X
-    /// (0 = left, 1 = right). From `fog_wall.nx`; drives `set_haze_tuning` with
-    /// [`GAMEPLAY_FOG_WALL_HALF_WIDTH_UV`](crate::ui::scene_layout::GAMEPLAY_FOG_WALL_HALF_WIDTH_UV).
-    pub gameplay_fog_wall_center_x: Option<f32>,
     /// Barrel / fisheye lens distortion applied in the final composite.
     /// 0.0 = off (no distortion). Positive = outward barrel (center
     /// magnified, edges compressed). Typical range 0.0..=0.6. Scenes
@@ -850,12 +824,18 @@ pub struct UiFrame {
     /// post-transition scene.
     pub journal_prepass_frame: Option<Box<UiFrame>>,
     /// Shop [`ItemInspectScene`] uses synthetic point lights only (GLB punctual off). Those
-    /// lights are tuned for table-scale HDR — not the `/512` crush used for bright `Shop.glb`.
+    /// lights are tuned for table-scale HDR — not the `/512` crush used for bright `shop.glb`.
     /// When set, [`crate::render::wgpu_renderer::runtime::camera::WgpuRenderer::tile_hdr_tonemap`]
     /// applies gameplay-style linear exposure for `lit_mesh` so shelf props stay visible.
     pub shop_inspect_lit_mesh_hdr: bool,
     /// Set by showcase overlay presenters; read by shadow / placement / tonemap paths.
     pub showcase_render_hints: ShowcaseRenderHints,
+    /// Archive description quads: `Some(true)` = show left sign only; `Some(false)` = right only;
+    /// `None` = draw both (or procedural Archive). Renderer culls the hidden GLB primitive index.
+    pub archive_description_sign_use_left: Option<bool>,
+    /// When set, description copy is rasterized into the archive room decal atlas and composited
+    /// on the `sign_description_left` / `sign_description_right` meshes in `shop_glb.wgsl`.
+    pub archive_sign_description_decal_text: Option<String>,
 }
 
 impl UiFrame {
@@ -876,10 +856,10 @@ impl UiFrame {
             arrange_clamps: Vec::new(),
             fisheye_strength: 0.0,
             journal_prepass_frame: None,
-            gameplay_fog_wall_horizon_y: None,
-            gameplay_fog_wall_center_x: None,
             shop_inspect_lit_mesh_hdr: false,
             showcase_render_hints: ShowcaseRenderHints::default(),
+            archive_description_sign_use_left: None,
+            archive_sign_description_decal_text: None,
         }
     }
 
@@ -893,13 +873,17 @@ impl UiFrame {
     pub fn background(&mut self, bg: BackgroundId) {
         self.cmds.push(DrawCmd::Background(bg));
     }
-    /// Draw the 3D shop from embedded [`Shop.glb`](../../assets/Shop.glb). No-op if the asset failed to load.
+    /// Draw the 3D shop from embedded [`Shop.glb`](../../assets/3d/Shop.glb). No-op if the asset failed to load.
     pub fn shop_environment(&mut self) {
         self.cmds.push(DrawCmd::ShopEnvironment);
     }
-    /// Draw the pick-blind hallway from embedded [`hallway.glb`](../../assets/hallway.glb).
+    /// Draw the pick-blind hallway from embedded [`hallway.glb`](../../assets/3d/hallway.glb).
     pub fn hallway_environment(&mut self) {
         self.cmds.push(DrawCmd::HallwayEnvironment);
+    }
+    /// Draw [`archive.glb`](../../assets/3d/archive.glb). No-op if the asset failed to load.
+    pub fn archive_environment(&mut self) {
+        self.cmds.push(DrawCmd::ArchiveEnvironment);
     }
     /// See [`DrawCmd::ClearSceneDepth`].
     pub fn clear_scene_depth(&mut self) {
@@ -923,9 +907,6 @@ impl UiFrame {
     }
     pub fn sunlit_water(&mut self) {
         self.cmds.push(DrawCmd::SunlitWater);
-    }
-    pub fn mountain_haze(&mut self) {
-        self.cmds.push(DrawCmd::MountainHaze);
     }
     pub fn shooting_star_cascade(&mut self) {
         self.cmds.push(DrawCmd::ShootingStarCascade);
@@ -1010,13 +991,13 @@ impl UiFrame {
                 | DrawCmd::ShootingStarCascade
                 | DrawCmd::ShopEnvironment
                 | DrawCmd::HallwayEnvironment
+                | DrawCmd::ArchiveEnvironment
                 | DrawCmd::ClearSceneDepth
                 | DrawCmd::ShopInspectLitMeshSubjectHdr
                 | DrawCmd::Table
                 | DrawCmd::ShowcaseTileBatch(_)
                 | DrawCmd::Object3d(_)
-                | DrawCmd::Object3dBatch(_)
-                | DrawCmd::MountainHaze => {}
+                | DrawCmd::Object3dBatch(_) => {}
             }
         }
     }
@@ -1045,6 +1026,7 @@ pub fn apply_modal_relic_staging(
                 | DrawCmd::TileFaceQuad(_)
                 | DrawCmd::ShopEnvironment
                 | DrawCmd::HallwayEnvironment
+                | DrawCmd::ArchiveEnvironment
                 | DrawCmd::Table
         )
     });
@@ -1072,7 +1054,7 @@ pub fn apply_modal_relic_staging(
         PointLight {
             pos: [w * 0.5, h * 0.5 - h * 0.30, h * 0.05],
             radius: h * 1.0,
-            color: [1.00, 0.78, 0.42],
+            color: color::rgb(color::CHAMPAGNE),
             intensity: 1.0,
         },
     ]);
