@@ -77,7 +77,7 @@ OUTPUT_DIR = (
 # The core describes construction, material, and lighting in metal-agnostic
 # terms. A per-rarity METAL_PROFILE is appended so Common/Uncommon/Rare/
 # Legendary pins read as Iron/Copper/Silver/Gold — matching the canonical
-# mapping in src/core/relic.rs `relic_visual` (see METAL_PROMPT_OVERRIDES).
+# mapping in src/core/relic.rs `relic_visual`.
 STYLE_CORE = (
     "A single isolated collectible cloisonné enamel pin relic rendered as a "
     "hero badge for a game asset pipeline. Front-facing near-orthographic "
@@ -206,42 +206,6 @@ def load_slug_to_rarity() -> dict:
 
 SLUG_TO_RARITY = load_slug_to_rarity()
 
-# Cloisonné bezel / wire metal in prompts only — gameplay rarity (shop price,
-# loot tier) stays in relics.json. Must stay aligned with `relic_visual` in
-# src/core/relic.rs.
-METAL_PROMPT_OVERRIDES = {
-    "chrysalis": "Legendary",
-}
-
-# Appended to `build_height_prompt` for subjects that need non-flat enamel
-# relief (most relics use the default two-level metal vs enamel key only).
-HEIGHT_PROMPT_ADDENDA: dict[str, str] = {
-    "chrysalis": (
-        "Chrysalis shell relief: show the pupa in a mild three-quarter turn "
-        "so longitudinal ridges read in profile as stacked curved bands — not "
-        "a smooth oval or flat sticker. Use **two distinct mid-gray enamel "
-        "values** (each a single flat fill with hard edges to its neighbor, "
-        "no soft gradients): a **lighter mid-gray** on the outward-facing "
-        "ridge crests between wires, and a **darker mid-gray** in the "
-        "inter-ridge grooves — both recessed below every white metal wire and "
-        "below the outer bezel. Narrow continuous white cloisonné wires trace "
-        "ridge crests and ring shell segments; aim for at least five readable "
-        "segment bands around the curved shell. Stem and silk pad: bounded by "
-        "white wire; pad cells stay mid-gray enamel like the shell."
-    ),
-}
-
-# Extra lines for `build_object_prompt` (color pass) when the global template
-# is not enough for a specific silhouette.
-OBJECT_PROMPT_ADDENDA: dict[str, str] = {
-    "chrysalis": (
-        "Hard enamel-pin read: wires are visibly raised above recessed "
-        "vitreous cells with crisp specular on wire tops; the pupa reads as "
-        "modeled champlevé relief — ridges and grooves catch light — not "
-        "painted segment stripes on a flat dome."
-    ),
-}
-
 
 def rarity_for(slug: str) -> str:
     """Look up the rarity tier for a relic slug, failing loud on drift."""
@@ -252,15 +216,6 @@ def rarity_for(slug: str) -> str:
             "Add a RelicDef or remove it from the RELICS list."
         )
     return rarity
-
-
-def metal_prompt_tier(slug: str) -> str:
-    """`METAL_PROFILES` key for image prompts; may differ from gameplay rarity."""
-    return METAL_PROMPT_OVERRIDES.get(slug, rarity_for(slug))
-
-
-def height_prompt_addendum_for(slug: str) -> str:
-    return HEIGHT_PROMPT_ADDENDA.get(slug, "")
 
 
 # OpenAI Images API `n` (parallel samples per request; first image is kept).
@@ -1863,7 +1818,6 @@ def main() -> None:
 
     for idx, (slug, name, visual, palette) in targets:
         rarity = rarity_for(slug)
-        object_metal_tier = metal_prompt_tier(slug)
         api_n = image_samples_for(slug)
         print(f"\n[{idx + 1}/{len(RELICS)}] {name} [{rarity}]")
 
@@ -1882,16 +1836,13 @@ def main() -> None:
                 name,
                 visual,
                 palette,
-                object_metal_tier,
+                rarity,
                 from_reference=(args.object_mode == "reference"),
-                extra=OBJECT_PROMPT_ADDENDA.get(slug, ""),
             )
             prompt = (
                 object_ref_prompt
                 if artifact_name == "object"
-                else build_height_prompt(
-                    name, visual, height_prompt_addendum_for(slug)
-                )
+                else build_height_prompt(name, visual)
             )
 
             if args.dry_run:
@@ -1917,13 +1868,7 @@ def main() -> None:
                         )
                         generate_image(
                             client,
-                            build_object_prompt(
-                                name,
-                                visual,
-                                palette,
-                                object_metal_tier,
-                                extra=OBJECT_PROMPT_ADDENDA.get(slug, ""),
-                            ),
+                            build_object_prompt(name, visual, palette, rarity),
                             object_output_path,
                             args.model,
                             args.size,
@@ -1952,9 +1897,7 @@ def main() -> None:
                         )
                         generate_image(
                             client,
-                            build_height_prompt(
-                                name, visual, height_prompt_addendum_for(slug)
-                            ),
+                            build_height_prompt(name, visual),
                             height_output_path,
                             args.model,
                             args.size,
