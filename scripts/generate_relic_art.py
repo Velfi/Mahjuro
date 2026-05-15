@@ -77,7 +77,7 @@ OUTPUT_DIR = (
 # The core describes construction, material, and lighting in metal-agnostic
 # terms. A per-rarity METAL_PROFILE is appended so Common/Uncommon/Rare/
 # Legendary pins read as Iron/Copper/Silver/Gold — matching the canonical
-# mapping in src/core/relic.rs (see material_for_rarity).
+# mapping in src/core/relic.rs `relic_visual`.
 STYLE_CORE = (
     "A single isolated collectible cloisonné enamel pin relic rendered as a "
     "hero badge for a game asset pipeline. Front-facing near-orthographic "
@@ -689,14 +689,16 @@ RELICS = [
         "Warm cream paper, amber inner glow, muted red tassel, dark bronze hook.",
     ),
     (
-        "silver_filigree_lantern",
-        "Silver Filigree Lantern",
-        "An ornate silver lantern wrapped in delicate filigree scrollwork — "
-        "fine pierced silver vinework forms the cage around a steady inner "
-        "flame. Heirloom craftsmanship, like a temple votive elevated to "
-        "treasure. The successor to a humble paper lantern.",
-        "Polished silver filigree, cool argent highlights, warm gold flame, "
-        "soft pearl-white inner glow, faint indigo shadow in the recesses.",
+        "stone_lantern",
+        "Stone Lantern",
+        "A traditional Japanese ishidōrō stone lantern — stacked carved "
+        "stone roof and pillar, hollow light chamber with openings, weathered "
+        "granite texture."
+        "readable as a single centered badge.",
+        "Weathered gray granite and mossy stone, warm amber and soft gold "
+        "candlelight glowing from the chamber interior, muted moonlit sage "
+        "and jade moss with small fern fronds clustered at the stone base "
+        "as part of the pin composition, cool blue-gray rim light on stone edges.",
     ),
     (
         "mirror_tile",
@@ -1204,11 +1206,19 @@ RELICS = [
     (
         "chrysalis",
         "Chrysalis",
-        "A monarch butterfly chrysalis — jade-green and gold-speckled pupa "
-        "hanging from a short silk pad stem, matte shell with subtle "
-        "segment lines, contained and still; no wings yet. Cloisonné pin, "
-        "centered, readable silhouette.",
-        "Matte jade-green enamel, warm gold speckles, dark umber stem wrap, soft amber rim light.",
+        "A monarch butterfly chrysalis as a **champlevé cloisonné enamel pin**: "
+        "short pupa body hanging from a small silk pad and stem at the top, "
+        "**no wings**. Show a **mild three-quarter turn** (not dead front-on) "
+        "so the shell's **longitudinal ridges and segment bands read clearly in "
+        "profile** — stacked curved lobes like corrugated jewelry, each band "
+        "bounded by **raised metal wires** at the crests. Recessed **matte "
+        "jade-green enamel cells** between wires with **fine warm gold "
+        "speckle** denser in the grooves; stem wrap in narrow wire-framed cells. "
+        "Centered badge, generous margin, strong pin silhouette.",
+        "Discrete jade-green vitreous enamel cells separated by the metal tier's "
+        "raised wires; warm gold micro-fleck; dark umber only where the brief "
+        "stem shows through small cells; soft amber rim — must read as fired "
+        "cloisonné, not a printed illustration.",
     ),
     (
         "monarch_butterfly",
@@ -1229,6 +1239,7 @@ def build_object_prompt(
     rarity: str,
     *,
     from_reference: bool = False,
+    extra: str = "",
 ) -> str:
     """Prompt for the transparent color render (`*_object.png` — albedo fallback for the loader).
 
@@ -1248,6 +1259,8 @@ def build_object_prompt(
         "Materials: vitreous glass enamel fills recessed below raised cloisonné wires in the metal tier above; the outer bezel reads as a thick legible frame in that same metal.\n"
         "Background: a perfectly flat, uniform, pure black archival backdrop — the solid matte black of a museum archival photography plate, with no gradient, no vignette, no texture, and no shadow cast onto the surface. Every region inside the outer silhouette resolves as solid opaque material — either enamel fill or metal wire."
     )
+    if extra:
+        base += f"\nAdditional subject direction: {extra}"
     if from_reference:
         base += (
             "\nRelief guide usage: the accompanying grayscale relief guide defines SHAPE, SILHOUETTE, and internal divider layout. Match its outer silhouette, centered placement, divider structure, major shapes, and orientation exactly; add color and material on top. Any gray region INSIDE the silhouette resolves as a solid opaque enamel fill. Transparency applies only to the area outside the outer silhouette.\n"
@@ -1256,9 +1269,9 @@ def build_object_prompt(
     return base
 
 
-def build_height_prompt(name: str, visual: str) -> str:
+def build_height_prompt(name: str, visual: str, addendum: str = "") -> str:
     """Prompt for `*_height.png` — matches input silhouette; bound as linear GPU relief."""
-    return (
+    base = (
         f"Grayscale relief guide for the cloisonné enamel pin relic '{name}'.\n"
         f"Subject: {visual}\n"
         "Output: centered square, pure black background, front-facing near-orthographic enamel pin silhouette with clean internal partitions.\n"
@@ -1269,6 +1282,9 @@ def build_height_prompt(name: str, visual: str) -> str:
         "Every area inside the outer silhouette resolves to gray or white, so the later color pass treats it as a solid opaque enamel fill.\n"
         "A clean monochrome grayscale relief, matching the input in proportion."
     )
+    if addendum:
+        base += f"\n\nSubject-specific relief:\n{addendum}"
+    return base
 
 
 _REMBG_SESSION = None
@@ -1801,7 +1817,10 @@ def main() -> None:
 
         for artifact_name, output_path in artifact_targets(out_dir, slug, args.artifact):
             object_ref_prompt = build_object_prompt(
-                name, visual, palette, rarity,
+                name,
+                visual,
+                palette,
+                rarity,
                 from_reference=(args.object_mode == "reference"),
             )
             prompt = (

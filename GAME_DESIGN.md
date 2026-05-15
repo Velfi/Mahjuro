@@ -87,7 +87,7 @@ A large **relic** pool is implemented (see `assets/data/relics.json`), spanning 
 * **Plays per round & conditional mult** — Momentum, Minimalist, TurtleShell, ClosedGate, GoldenEngine, SecondWind, GlassCannon
 * **Plays per round & scaling chips** — Snowball
 * **Interest & passive gold** — GoldIdol, JadeAbacus, NestEgg, Patience
-* **Retrigger, polish, lanterns, mirror** — LastBreath, TilePolisher, PaperLantern, SilverFiligreeLantern, MirrorTile, Geese, VoiceOfThePeople, VoiceOfTheElite, TeaCeremony, GhostHand
+* **Retrigger, polish, lanterns, mirror** — LastBreath, TilePolisher, PaperLantern, StoneLantern, MirrorTile, Geese, VoiceOfThePeople, VoiceOfTheElite, TeaCeremony, GhostHand
 * **Ramp, fragile evolutions, inventory tricks** — Humility, Obsession, Bonfire, RiverRunner, MeltingIce, Taotie, SilkThread, SilkMoth, ShadowHand, SolitarySage, Disgust
 * **Hand-shape mult** — WayOfPairs, WayOfTriplets, WayOfSequences, WayOfPurity
 * **Chance mult & sell effects** — FortunesFavor, CrackedTile, StarTile, HungryGhost
