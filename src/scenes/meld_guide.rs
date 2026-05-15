@@ -987,58 +987,57 @@ fn layout_tile_groups(
     (placements, labels)
 }
 
-/// Short hand-shape description for each yaku. Moved here from the old
-/// glossary module; still used by the shop yaku list and journal overlay.
+/// Short structure-shape description for each yaku
 pub(crate) fn yaku_shape_text(yk: YakuKind) -> &'static str {
     match yk {
         YakuKind::Tanyao => {
-            "All tiles 2\u{2013}8, no honors/terminals (e.g. \u{1f3b4}234 \u{1f38b}567 \u{1f534}88)"
+            "All tiles 2\u{2013}8, no honors/terminals"
         }
         YakuKind::Toitoi => {
-            "All triplets/kongs, no sequences (e.g. \u{1f3b4}222 \u{1f38b}555 \u{1f534}999)"
+            "All triplets/kongs, no sequences"
         }
-        YakuKind::FullHand => "Complete 14-tile hand: 4+4+4+4+2 (4 melds + 1 pair), not 2x7",
+        YakuKind::FullHand => "Complete 14-tile hand: 4+4+4+4+2 (4 melds + 1 pair)",
         YakuKind::Yakuhai => {
-            "Triplet of any dragon or round wind (e.g. \u{1f409}\u{1f409}\u{1f409})"
+            "Triplet of any dragon or round wind"
         }
         YakuKind::Iipeikou => {
-            "Two identical sequences in one suit (e.g. \u{1f38b}123 \u{1f38b}123)"
+            "Two identical sequences in one suit"
         }
         YakuKind::SanshokuDoujun => {
-            "Same sequence in all 3 suits (e.g. \u{1f3b4}456 \u{1f38b}456 \u{1f534}456)"
+            "Same sequence in all 3 suits"
         }
         YakuKind::Ittsu => {
-            "1\u{2013}9 straight in one suit (e.g. \u{1f38b}123 \u{1f38b}456 \u{1f38b}789)"
+            "1\u{2013}9 straight in one suit"
         }
         YakuKind::Honitsu => {
-            "One number suit + honors only (e.g. \u{1f38b}234 \u{1f38b}678 \u{1f32c}\u{1f32c}\u{1f32c})"
+            "One number suit + honors only"
         }
         YakuKind::Chinitsu => {
-            "All one number suit, no honors (e.g. \u{1f38b}123 \u{1f38b}456 \u{1f38b}789 \u{1f38b}11)"
+            "All one number suit, no honors"
         }
         YakuKind::Junchan => {
-            "Every meld has a 1 or 9 (e.g. \u{1f38b}123 \u{1f3b4}789 \u{1f534}111 \u{1f38b}99)"
+            "Every meld has a 1 or 9"
         }
         YakuKind::Honroutou => {
-            "Only 1s, 9s, and honors (e.g. \u{1f38b}111 \u{1f3b4}999 \u{1f32c}\u{1f32c}\u{1f32c})"
+            "Only 1s, 9s, and honors"
         }
         YakuKind::Chiitoitsu => {
-            "Seven distinct pairs (e.g. \u{1f3b4}11 \u{1f3b4}33 \u{1f38b}55 \u{1f38b}77 \u{1f534}22 \u{1f534}44 \u{1f32c}\u{1f32c})"
+            "Seven distinct pairs"
         }
         YakuKind::KokushiMusou => {
-            "Thirteen orphans: one of each 1/9 and honor, plus one extra copy of any of those tiles"
+            "One of each 1/9 and honor, plus one extra copy of any of those tiles"
         }
         YakuKind::ChickenHand => {
-            "Valid hand with no yaku \u{2014} scores base chips \u{00d7} 1 mult"
+            "Legal hand with no yaku"
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::core::hand::validate_selection;
-    use crate::core::yaku::detect_yaku_with_wind;
+    use crate::core::yaku::{YakuKind, detect_yaku_with_wind};
+    use crate::scenes::meld_guide::yaku_page;
 
     /// Every `yaku_page()` canonical hand must actually score as its named
     /// yaku in the real detector. The yaku journal draws these hands as
