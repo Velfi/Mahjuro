@@ -689,7 +689,27 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Golden Engine wherever it rests.",
+        "text": "\"",
+        "bold": false,
+        "italic": true
+      },
+      {
+        "text": "Before you sits the Alchemist's magnum opus, whirring and shaking as it accomplishes the impossible\"",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": "- An excerpt from \"",
+        "bold": false,
+        "italic": true
+      },
+      {
+        "text": "Tales of the Not Believed!",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": "\"",
         "bold": false,
         "italic": true
       }
@@ -1205,7 +1225,17 @@
     "rarity": "common",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Gold Idol wherever it rests.",
+        "text": "\"Rumored to have been stolen from the ancient temple of  ",
+        "bold": false,
+        "italic": true
+      },
+      {
+        "text": "Borobudur. ",
+        "bold": true,
+        "italic": true
+      },
+      {
+        "text": "The doorman thinks it's fake\" - E.V Dropper",
         "bold": false,
         "italic": true
       }
