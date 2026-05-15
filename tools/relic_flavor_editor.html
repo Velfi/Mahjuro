@@ -221,9 +221,46 @@
       margin: 0 0 0.65rem;
       min-height: 1.25em;
     }
+    #saveIndicator {
+      position: fixed;
+      top: 0.65rem;
+      right: 0.75rem;
+      z-index: 20;
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: #4a5160;
+      box-shadow: 0 0 6px rgba(0, 0, 0, 0.35);
+      pointer-events: none;
+    }
+    #saveIndicator.is-dirty {
+      background: #e85d4a;
+      border-color: #ffb4a8;
+      box-shadow: 0 0 10px rgba(232, 93, 74, 0.55);
+      animation: save-indicator-blink 1.1s step-end infinite;
+    }
+    #saveIndicator.is-saved {
+      background: #4caf6a;
+      border-color: #8ee4a8;
+      box-shadow: 0 0 8px rgba(76, 175, 106, 0.45);
+      animation: none;
+    }
+    @keyframes save-indicator-blink {
+      50% { opacity: 0.2; }
+    }
   </style>
 </head>
 <body>
+  <div
+    id="saveIndicator"
+    class="save-indicator"
+    role="status"
+    aria-live="polite"
+    aria-label="No unsaved changes"
+    title="No unsaved changes"
+  ></div>
+
   <header class="page-header">
     <h1>Relic text → <code>description</code> &amp; <code>flavor_spans</code></h1>
     <details class="hint-details">
@@ -290,12 +327,52 @@
     </div>
   </div>
 
+  <script src="editor_assets.js"></script>
   <script>
-    const DEFAULT_RELICS_JSON_URL = "../assets/data/relics.json";
 
     let relics = null;
     let currentId = null;
+    let saveIndicatorSavedTimer = null;
     const $ = (id) => document.getElementById(id);
+
+    function setSaveIndicator(state) {
+      const el = $("saveIndicator");
+      if (!el) return;
+      el.classList.remove("is-dirty", "is-saved");
+      if (state === "dirty") {
+        el.classList.add("is-dirty");
+        el.setAttribute("aria-label", "Unsaved changes — save relics.json");
+        el.title = "Unsaved changes — save relics.json";
+      } else if (state === "saved") {
+        el.classList.add("is-saved");
+        el.setAttribute("aria-label", "relics.json saved");
+        el.title = "relics.json saved";
+      } else {
+        el.setAttribute("aria-label", "No unsaved changes");
+        el.title = "No unsaved changes";
+      }
+    }
+
+    function markDirty() {
+      if (!relics) return;
+      if (saveIndicatorSavedTimer) {
+        clearTimeout(saveIndicatorSavedTimer);
+        saveIndicatorSavedTimer = null;
+      }
+      setSaveIndicator("dirty");
+    }
+
+    function markSaved() {
+      if (saveIndicatorSavedTimer) {
+        clearTimeout(saveIndicatorSavedTimer);
+        saveIndicatorSavedTimer = null;
+      }
+      setSaveIndicator("saved");
+      saveIndicatorSavedTimer = setTimeout(() => {
+        saveIndicatorSavedTimer = null;
+        setSaveIndicator("clean");
+      }, 2400);
+    }
 
     function escapeHtml(s) {
       return s
@@ -371,6 +448,11 @@
       $("preview").textContent = JSON.stringify({ description, flavor_spans: spans }, null, 2);
     }
 
+    function updatePreviewAndDirty() {
+      updatePreview();
+      markDirty();
+    }
+
     function commitCurrentRelicEdits() {
       if (!relics || currentId == null) return;
       const idx = relics.findIndex((x) => x.id === currentId);
@@ -399,39 +481,20 @@
       const workArea = $("workArea");
       const img = $("relicObjectArt");
       const hint = $("relicObjectArtHint");
-      if (!id || !relics) {
+      const assets = window.MahjuroEditorAssets;
+      if (!id || !relics || !assets) {
         aside.hidden = true;
         workArea.classList.remove("has-art");
-        img.removeAttribute("src");
-        img.removeAttribute("title");
-        img.onload = null;
-        img.onerror = null;
-        img.classList.remove("is-hidden");
-        hint.textContent = "";
+        if (assets) assets.resetRelicObjectArt(img, hint);
+        else {
+          img.removeAttribute("src");
+          hint.textContent = "";
+        }
         return;
       }
       aside.hidden = false;
       workArea.classList.add("has-art");
-      const rel = `../assets/textures/relics/source/${id}_object.png`;
-      img.alt = `Relic object art: ${id}`;
-      img.classList.remove("is-hidden");
-      hint.textContent = "Loading…";
-
-      img.onload = () => {
-        img.onload = null;
-        img.onerror = null;
-        img.title = rel;
-        hint.textContent = `${id}_object.png`;
-      };
-      img.onerror = () => {
-        img.onload = null;
-        img.onerror = null;
-        img.removeAttribute("title");
-        img.classList.add("is-hidden");
-        hint.textContent =
-          `Missing ${rel}. From repo root: python3 -m http.server → open …/tools/relic_flavor_editor.html`;
-      };
-      img.src = rel;
+      assets.loadRelicObjectArt(img, hint, id);
     }
 
     /** Stable display order for the relic dropdown (does not reorder `relics` on save). */
@@ -473,6 +536,7 @@
         $("ruleEditor").disabled = true;
         $("ruleEditor").value = "";
         updateObjectArt(null);
+        setSaveIndicator("clean");
         return false;
       }
       if (!Array.isArray(relics)) {
@@ -481,10 +545,12 @@
         $("ruleEditor").disabled = true;
         $("ruleEditor").value = "";
         updateObjectArt(null);
+        setSaveIndicator("clean");
         return false;
       }
       const firstId = populateRelicSelect();
       if (firstId) loadRelicIntoEditor(firstId);
+      setSaveIndicator("clean");
       return true;
     }
 
@@ -493,15 +559,24 @@
       const set = (t) => {
         if (el) el.textContent = t;
       };
+      const assets = window.MahjuroEditorAssets;
+      if (!assets) {
+        set("editor_assets.js failed to load — object art and auto-load are unavailable.");
+        return;
+      }
       try {
-        const res = await fetch(DEFAULT_RELICS_JSON_URL, { credentials: "same-origin" });
+        const base = await assets.resolveAssetsBase();
+        const url = new URL("data/relics.json", base);
+        const res = await fetch(url, { credentials: "same-origin", cache: "no-store" });
         if (!res.ok) {
-          set("Auto-load skipped — use file picker or open this page via http:// from the repo root.");
+          set(
+            "Auto-load skipped — use file picker or serve the repo from its root (python3 -m http.server) and open …/tools/relic_flavor_editor.html."
+          );
           return;
         }
         const text = await res.text();
         if (loadRelicsFromJsonText(text)) {
-          set("Loaded " + DEFAULT_RELICS_JSON_URL + ".");
+          set("Loaded " + url.pathname + ".");
         }
       } catch (e) {
         set("Auto-load unavailable — use file picker or serve the repo (e.g. python3 -m http.server).");
@@ -572,20 +647,20 @@
       loadRelicIntoEditor($("relic").value);
     });
 
-    $("editor").addEventListener("input", updatePreview);
-    $("ruleEditor").addEventListener("input", updatePreview);
+    $("editor").addEventListener("input", updatePreviewAndDirty);
+    $("ruleEditor").addEventListener("input", updatePreviewAndDirty);
 
     function exec(cmd, val = null) {
       document.execCommand(cmd, false, val);
       $("editor").focus();
-      updatePreview();
+      updatePreviewAndDirty();
     }
     $("btnBold").addEventListener("click", () => exec("bold"));
     $("btnItalic").addEventListener("click", () => exec("italic"));
     $("btnClearFmt").addEventListener("click", () => {
       exec("removeFormat");
       exec("unlink");
-      updatePreview();
+      updatePreviewAndDirty();
     });
 
     $("editor").addEventListener("keydown", (e) => {
@@ -635,6 +710,7 @@
           const w = await h.createWritable();
           await w.write(out);
           await w.close();
+          markSaved();
           alert("Saved.");
           return;
         } catch (e) {
@@ -648,6 +724,7 @@
       a.download = name;
       a.click();
       URL.revokeObjectURL(a.href);
+      markSaved();
       alert("Downloaded relics.json — replace assets/data/relics.json if needed.");
     }
 
