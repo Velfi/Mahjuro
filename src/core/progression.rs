@@ -74,7 +74,7 @@ pub struct PlayerProgress {
     #[serde(default)]
     pub run_history: Vec<RunRecord>,
     /// Successor relics unlocked only after a fragile primary burns (Silk Moth,
-    /// Taotie, Geese, Rakuware, Silver Filigree, Monarch Butterfly). Shops, runs, and Collection consult this.
+    /// Taotie, Geese, Rakuware, Stone Lantern, Monarch Butterfly). Shops, runs, and Collection consult this.
     #[serde(default)]
     pub discovered_transformation_successors: HashSet<RelicId>,
     /// Per-material ladder of cleared stakes. `Spring` is implicitly unlocked
@@ -97,7 +97,7 @@ pub fn transformation_successor_relic_ids() -> &'static [RelicId] {
         RelicId::Taotie,
         RelicId::Geese,
         RelicId::Rakuware,
-        RelicId::SilverFiligreeLantern,
+        RelicId::StoneLantern,
         RelicId::MonarchButterfly,
     ]
 }
@@ -351,7 +351,7 @@ impl PlayerProgress {
     }
 
     /// Relics available for this player's progression level (shop / run stock).
-    /// Transformation successors (Silk Moth, Taotie, Geese, Rakuware, Silver Filigree)
+    /// Transformation successors (Silk Moth, Taotie, Geese, Rakuware, Stone Lantern)
     /// are omitted — they only enter the shop after a primary burns on the
     /// current run; see [`crate::game::run::relic_eligible_for_shop_stock`].
     pub fn available_relics(&self) -> Vec<RelicId> {
@@ -385,6 +385,21 @@ impl PlayerProgress {
             return false;
         }
         self.discovered_transformation_successors.insert(id)
+    }
+
+    /// Debug / cheat: reveal every transformation successor in the Collection
+    /// and raise `runs_completed` to at least level 11 so all fragile
+    /// primaries (through Chrysalis) appear in [`Self::available_relics`].
+    /// Does not call [`Self::check_level_up`] (avoids level-up modals).
+    pub fn cheat_unlock_all_transformation_chains_meta(&mut self) {
+        for &id in transformation_successor_relic_ids() {
+            self.discovered_transformation_successors.insert(id);
+        }
+        // Minimum `runs_completed` for `current_level() >= 11` (Chrysalis tier).
+        const MIN_RUNS_FOR_ALL_FRAGILE_PRIMARIES: u32 = 15;
+        if self.runs_completed < MIN_RUNS_FOR_ALL_FRAGILE_PRIMARIES {
+            self.runs_completed = MIN_RUNS_FOR_ALL_FRAGILE_PRIMARIES;
+        }
     }
 
     /// Rules available for this player's progression level.
@@ -768,6 +783,41 @@ mod tests {
         );
         assert!(p.transformation_successor_visible(RelicId::SilkMoth));
         assert!(!p.note_transformation_successor_discovered(RelicId::SilkMoth));
+    }
+
+    #[test]
+    fn cheat_unlock_all_transformation_chains_meta_discovers_and_lists_primaries() {
+        let mut p = PlayerProgress::new();
+        p.cheat_unlock_all_transformation_chains_meta();
+        assert_eq!(p.runs_completed, 15);
+        for &id in transformation_successor_relic_ids() {
+            assert!(
+                p.transformation_successor_visible(id),
+                "expected successor {id:?} visible after cheat",
+            );
+        }
+        let avail = p.available_relics();
+        for prim in [
+            RelicId::PaperLantern,
+            RelicId::SilkThread,
+            RelicId::MeltingIce,
+            RelicId::RustlingGooseEgg,
+            RelicId::TeaCeremony,
+            RelicId::Chrysalis,
+        ] {
+            assert!(
+                avail.contains(&prim),
+                "expected fragile primary {prim:?} in available_relics",
+            );
+        }
+    }
+
+    #[test]
+    fn cheat_unlock_transformation_meta_does_not_lower_runs_completed() {
+        let mut p = PlayerProgress::new();
+        p.runs_completed = 100;
+        p.cheat_unlock_all_transformation_chains_meta();
+        assert_eq!(p.runs_completed, 100);
     }
 
     #[test]

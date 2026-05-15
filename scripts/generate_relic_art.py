@@ -83,7 +83,7 @@ OUTPUT_DIR = (
 # The core describes construction, material, and lighting in metal-agnostic
 # terms. A per-rarity METAL_PROFILE is appended so Common/Uncommon/Rare/
 # Legendary pins read as Iron/Copper/Silver/Gold — matching the canonical
-# mapping in src/core/relic.rs (see material_for_rarity).
+# mapping in src/core/relic.rs `relic_visual`.
 STYLE_CORE = (
     "A single isolated collectible soft-enamel lapel pin rendered as a "
     "realistic product photograph for a game asset pipeline. Front-facing "
@@ -694,14 +694,16 @@ RELICS = [
         "Warm cream paper, amber inner glow, muted red tassel, dark bronze hook.",
     ),
     (
-        "silver_filigree_lantern",
-        "Silver Filigree Lantern",
-        "An ornate silver lantern wrapped in delicate filigree scrollwork — "
-        "fine pierced silver vinework forms the cage around a steady inner "
-        "flame. Heirloom craftsmanship, like a temple votive elevated to "
-        "treasure. The successor to a humble paper lantern.",
-        "Polished silver filigree, cool argent highlights, warm gold flame, "
-        "soft pearl-white inner glow, faint indigo shadow in the recesses.",
+        "stone_lantern",
+        "Stone Lantern",
+        "A traditional Japanese ishidōrō stone lantern — stacked carved "
+        "stone roof and pillar, hollow light chamber with openings, weathered "
+        "granite texture."
+        "readable as a single centered badge.",
+        "Weathered gray granite and mossy stone, warm amber and soft gold "
+        "candlelight glowing from the chamber interior, muted moonlit sage "
+        "and jade moss with small fern fronds clustered at the stone base "
+        "as part of the pin composition, cool blue-gray rim light on stone edges.",
     ),
     (
         "mirror_tile",
@@ -1231,6 +1233,7 @@ def build_object_prompt(
     rarity: str,
     *,
     from_reference: bool = False,
+    extra: str = "",
 ) -> str:
     """Prompt for the transparent color render (`*_object.png` — albedo fallback for the loader).
 
@@ -1250,6 +1253,8 @@ def build_object_prompt(
         "Materials: matte-to-satin soft enamel fills sitting below raised metal divider lines in the metal tier above; a continuous raised outer rim traces the pin's individual die-cut outline in that same metal. Not hard enamel — no flush polish, no glassy vitreous surface.\n"
         "Background: a perfectly flat, uniform, pure black archival backdrop — the solid matte black of a museum archival photography plate. Every region inside the outer silhouette resolves as solid opaque material — either enamel fill or raised metal line."
     )
+    if extra:
+        base += f"\nAdditional subject direction: {extra}"
     if from_reference:
         base += (
             "\nRelief guide usage: the accompanying grayscale relief guide defines SHAPE, SILHOUETTE, and internal divider layout. Match its outer silhouette, centered placement, divider structure, major shapes, and orientation exactly; add color and material on top. Any gray region INSIDE the silhouette resolves as a solid opaque enamel fill. Areas outside the outer silhouette resolve as pure flat black (#000000).\n"
@@ -1258,7 +1263,7 @@ def build_object_prompt(
     return base
 
 
-def build_height_prompt(name: str, visual: str) -> str:
+def build_height_prompt(name: str, visual: str, addendum: str = "") -> str:
     """Prompt for `*_height.png` — matches input silhouette; bound as linear GPU relief."""
     return (
         f"Grayscale relief guide for the soft-enamel lapel pin relic '{name}'.\n"
@@ -1272,6 +1277,9 @@ def build_height_prompt(name: str, visual: str) -> str:
         "Every area inside the outer silhouette resolves to gray or white, so the later color pass treats it as a solid opaque enamel fill.\n"
         "A clean monochrome grayscale relief, matching the input in proportion."
     )
+    if addendum:
+        base += f"\n\nSubject-specific relief:\n{addendum}"
+    return base
 
 
 def build_specular_prompt(name: str, visual: str) -> str:
@@ -1840,7 +1848,10 @@ def main() -> None:
             out_dir, slug, args.artifact, specular_mode=args.specular_mode
         ):
             object_ref_prompt = build_object_prompt(
-                name, visual, palette, rarity,
+                name,
+                visual,
+                palette,
+                rarity,
                 from_reference=(args.object_mode == "reference"),
             )
             if artifact_name == "object":
