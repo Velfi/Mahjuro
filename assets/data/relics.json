@@ -376,17 +376,17 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
+        "text": "\"The Green Thumb's karma is surely paying off this evening!\" - ",
         "bold": false,
         "italic": false
       },
       {
-        "text": "countless",
-        "bold": true,
+        "text": "Member of the ch",
+        "bold": false,
         "italic": true
       },
       {
-        "text": " late-night rounds.",
+        "text": "eering crowd",
         "bold": false,
         "italic": false
       }
