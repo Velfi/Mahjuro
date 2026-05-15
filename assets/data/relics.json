@@ -29,7 +29,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -88,7 +88,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -147,7 +147,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -196,17 +196,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "Chain",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": "With ever link in the chain , the power of your tiles grow.",
         "bold": false,
         "italic": false
       }
@@ -265,7 +255,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -324,7 +314,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -383,7 +373,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -442,7 +432,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -491,17 +481,17 @@
     "rarity": "common",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
+        "text": "With ever link in the chain , the power of your tiles grow.",
         "bold": false,
         "italic": false
       },
       {
-        "text": "Lapis",
+        "text": "intertwines",
         "bold": true,
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " itself with the blue tiles you have played.",
         "bold": false,
         "italic": false
       }
@@ -560,7 +550,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -619,7 +609,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -678,7 +668,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -737,7 +727,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -769,7 +759,7 @@
   {
     "id": "glass_cannon",
     "name": "Glass Cannon",
-    "description": "\u00d73 final mult the next time you cash in. Then this relic is destroyed",
+    "description": "×3 final mult on your next scored hand, then destroyed",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -796,7 +786,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -839,23 +829,23 @@
     ]
   },
   {
-    "id": "silver_filigree_lantern",
-    "name": "Silver Filigree Lantern",
+    "id": "stone_lantern",
+    "name": "Stone Lantern",
     "description": "+2 mult; 1-in-1000 chance to be destroyed at round end",
     "rarity": "legendary",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
+        "text": "What paper promised in a night, ",
         "bold": false,
         "italic": false
       },
       {
-        "text": "Silver",
+        "text": "stone",
         "bold": true,
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " keeps in the garden after.",
         "bold": false,
         "italic": false
       }
@@ -887,7 +877,7 @@
   {
     "id": "way_of_purity",
     "name": "Way of Purity",
-    "description": "+2.5 mult if the structure you cash in is all one suit",
+    "description": "All scored tiles are one suit: ×2.5 mult",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -914,7 +904,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -973,7 +963,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -1009,7 +999,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Rakuware wherever it rests.",
+        "text": "\"Spun of no wheel, Forged by fleeting flame, Cold scorched surface, Yet in these humble hands I feel the hot monsoon rain\"                                                             - The Tanuki",
         "bold": false,
         "italic": true
       }
@@ -1022,17 +1012,7 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "Ghost",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": "A disembodied hand beckons you forward, coins fall from it's palm.",
         "bold": false,
         "italic": false
       }
@@ -1081,17 +1061,17 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
+        "text": "Flames warm your bones, the ",
         "bold": false,
         "italic": false
       },
       {
-        "text": "Bonfire",
+        "text": "Bulgae",
         "bold": true,
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " dances in your favor.",
         "bold": false,
         "italic": false
       }
@@ -1150,7 +1130,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -1209,7 +1189,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -1268,7 +1248,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -1281,17 +1261,7 @@
     "rarity": "common",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "countless",
-        "bold": true,
-        "italic": true
-      },
-      {
-        "text": " late-night rounds.",
+        "text": "With every round your egg comes one breath closer to hatching.",
         "bold": false,
         "italic": false
       }
@@ -1313,7 +1283,7 @@
   {
     "id": "way_of_pairs",
     "name": "Way of Pairs",
-    "description": "+2 mult if the structure you cash in is all pairs",
+    "description": "All pairs scored: ×2 mult",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1327,7 +1297,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -1336,7 +1306,7 @@
   {
     "id": "way_of_triplets",
     "name": "Way of Triplets",
-    "description": "+2.5 mult if the structure you cash in is all triplets and kongs",
+    "description": "All triplets/kongs scored: ×2.5 mult",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1359,7 +1329,7 @@
   {
     "id": "way_of_sequences",
     "name": "Way of Sequences",
-    "description": "+2 mult if the structure you cash in is all sequences",
+    "description": "All sequences scored: ×2 mult",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1386,7 +1356,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -1448,19 +1418,14 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
+        "text": "\"The courtyard pond is choked with rotten slime.A thousand petals fall before their time.The gate bears the fetid cloak of rust.A staggering scent of rot.The painting of lingering disgust.\"                                                             - ",
         "bold": false,
         "italic": false
       },
       {
-        "text": "Disgust",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": "A hope-shattered gambler.",
         "bold": false,
-        "italic": false
+        "italic": true
       }
     ]
   },
@@ -1517,7 +1482,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -1576,7 +1541,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -1589,19 +1554,14 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
+        "text": "\"Is a vessel made not in some part by the worth of it's content? Modest in appearance, a heart of gold within.\"                                                                                        -",
         "bold": false,
         "italic": false
       },
       {
-        "text": "countless",
-        "bold": true,
+        "text": "Guru Pakba.",
+        "bold": false,
         "italic": true
-      },
-      {
-        "text": " late-night rounds.",
-        "bold": false,
-        "italic": false
       }
     ]
   },
@@ -1635,7 +1595,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -1694,7 +1654,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -1707,17 +1667,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "countless",
-        "bold": true,
-        "italic": true
-      },
-      {
-        "text": " late-night rounds.",
+        "text": "Gold and silk thread flow together , forming the wind, clouds , and sky. Inside the pouch, the happy coins let out a chorus.",
         "bold": false,
         "italic": false
       }
@@ -1726,7 +1676,7 @@
   {
     "id": "eulers_number",
     "name": "Euler's Number",
-    "description": "Flat +e mult\n(\u2248 2.71828\u2026)",
+    "description": "Flat +e mult (Euler's constant ≈ 2.71828…)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1739,7 +1689,7 @@
   {
     "id": "pi_constant",
     "name": "Pi",
-    "description": "Flat +\u03c0 mult\n(\u2248 3.14159\u2026)",
+    "description": "Flat +π mult (≈ 3.14159…)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1753,7 +1703,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }
@@ -1766,19 +1716,14 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
+        "text": "\"They look like big, good, strong hands, don't they? I alway thought that's what they were.\"                                                     - ",
         "bold": false,
         "italic": false
       },
       {
-        "text": "countless",
-        "bold": true,
+        "text": "Pyornkrachzark.",
+        "bold": false,
         "italic": true
-      },
-      {
-        "text": " late-night rounds.",
-        "bold": false,
-        "italic": false
       }
     ]
   },
@@ -1812,7 +1757,7 @@
         "italic": false
       },
       {
-        "text": " \u2014 never the tile, always the tale.",
+        "text": " — never the tile, always the tale.",
         "bold": false,
         "italic": false
       }

@@ -519,9 +519,9 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
         push_mult(steps, *chips, mult, "Way of Sequences", delta);
     }
 
-    for _ in 0..count(RelicId::SilverFiligreeLantern) {
+    for _ in 0..count(RelicId::StoneLantern) {
         let delta = *mult;
-        push_mult(steps, *chips, mult, "Silver Filigree Lantern", delta);
+        push_mult(steps, *chips, mult, "Stone Lantern", delta);
     }
 
     for _ in 0..count(RelicId::GlassCannon) {

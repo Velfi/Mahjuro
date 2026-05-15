@@ -1711,7 +1711,7 @@ mod silhouette_tests {
             "gold_idol",
             "green_luck",
             "honor_fury",
-            "silver_filigree_lantern",
+            "stone_lantern",
             "multiplier_master",
         ] {
             let p = asset_dir.join(format!("{name}_mask.png"));
