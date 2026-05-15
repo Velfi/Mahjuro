@@ -37,7 +37,7 @@
   {
     "id": "scroll_library",
     "name": "Scroll Library",
-    "description": "+8 character tiles to the wall",
+    "description": "+8 characters tiles to the wall",
     "shop_price": 7,
     "texture_file": "pack_scroll_library.png"
   }
