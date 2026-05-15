@@ -49,7 +49,7 @@ impl RunState {
         bus.push(GameEvent::AchievementUnlocked(kind.achievement()));
     }
 
-    /// Paper / Silver Filigree rolls at a blind / round boundary (shared by normal advance and
+    /// Paper / Stone Lantern rolls at a blind / round boundary (shared by normal advance and
     /// Second Wind forfeit).
     pub(crate) fn roll_lantern_maybe_shatter(&mut self, bus: &mut EventBus) {
         let fortunes = self.relics.has(RelicId::FortunesFavor);
@@ -62,17 +62,17 @@ impl RunState {
                 self.paper_lantern_extinct = true;
                 let _ = self.destroy_relic_removed_from_run(RelicId::PaperLantern);
                 bus.push(GameEvent::TransformationSuccessorDiscovered(
-                    RelicId::SilverFiligreeLantern,
+                    RelicId::StoneLantern,
                 ));
             }
         }
-        if self.relics.has(RelicId::SilverFiligreeLantern) {
+        if self.relics.has(RelicId::StoneLantern) {
             use rand::RngExt;
 
             let mut rng = rand::rng();
             let denom = if fortunes { 2000 } else { 1000 };
             if rng.random_ratio(1, denom) {
-                let _ = self.destroy_relic_removed_from_run(RelicId::SilverFiligreeLantern);
+                let _ = self.destroy_relic_removed_from_run(RelicId::StoneLantern);
             }
         }
     }

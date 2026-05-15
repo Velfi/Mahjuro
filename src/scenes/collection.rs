@@ -8,7 +8,6 @@ use std::time::Instant;
 use crate::audio::SfxId;
 use crate::core::boss::{all_bosses, final_bosses};
 use crate::core::progression::is_transformation_successor_relic;
-use crate::core::relic::{Rarity, RelicId, all_relic_defs};
 use crate::core::relic::{RelicId, all_relic_defs};
 use crate::core::talisman::TalismanKind;
 use crate::core::yaku::YakuKind;
