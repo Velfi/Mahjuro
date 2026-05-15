@@ -340,9 +340,9 @@
     "rarity": "legendary",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Eight Treasures wherever it rests.",
+        "text": "A chest marked clearly in auspicious symbols, every translation the same. \"Good fortune smiles upon the holder of the Eight Treasures!\"",
         "bold": false,
-        "italic": true
+        "italic": false
       }
     ]
   },
