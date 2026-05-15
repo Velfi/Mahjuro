@@ -78,17 +78,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "Dragon",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " — never the tile, always the tale.",
+        "text": "The house has crossed the Dragon, his rage will carry you to a most deserved victory.",
         "bold": false,
         "italic": false
       }
@@ -268,17 +258,17 @@
     "rarity": "legendary",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
+        "text": "The roar has passed but it's ",
         "bold": false,
         "italic": false
       },
       {
-        "text": "countless",
+        "text": "power ",
         "bold": true,
-        "italic": true
+        "italic": false
       },
       {
-        "text": " late-night rounds.",
+        "text": "still rings out from the mountain to the sea.",
         "bold": false,
         "italic": false
       }
