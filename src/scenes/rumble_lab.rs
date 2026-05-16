@@ -281,7 +281,9 @@ impl SceneBehavior for RumbleLabScene {
             };
             frame.quad(GpuInstance {
                 rect: it.rect,
-                color: bg, user: 0});
+                color: bg,
+                user: 0,
+            });
             frame.text(TextLabel {
                 rect: it.rect,
                 text: it.action.label().into(),

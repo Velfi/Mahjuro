@@ -935,15 +935,25 @@ fn fs_main(
         // space so the texture shows regardless of how the placement
         // orients the mesh in world space (collection uses a Y-up
         // overhead camera; shop/gameplay use the Z-up table camera).
-        let cap_mask = smoothstep(0.55, 0.82, abs(in.local_n.y));
+        // Object albedo applies only on the front cap (+local Y); the
+        // back stays base metal tint (no mirrored art / height read).
+        let relic_front_tex = smoothstep(0.55, 0.82, in.local_n.y);
+        // Relic albedo alpha is cut at decode time against `*_mask.png`
+        // (white = relic, black = void). The enamel branch only lerped
+        // `tex_rgb`, so void texels still drew as opaque caps. This pass
+        // is opaque (no alpha blend), so discard cut-out fragments on the
+        // front cap where alpha hit zero — sides and back skip discard.
+        if (relic_front_tex > 0.48 && tex_sample.a < (16.0 / 255.0)) {
+            discard;
+        }
         // Shop GLB vitrine: caps used `tex_rgb` alone — under punctual + key shadow,
         // dark tex reads as a black slab while foil/talisman spec stays hot. Tint caps
         // by `base_color` like the sides so material + rarity survive.
         if (shop_vitrine_tuning) {
             let tinted = mesh.base_color.rgb * tex_rgb;
-            albedo = mix(mesh.base_color.rgb, tinted, cap_mask);
+            albedo = mix(mesh.base_color.rgb, tinted, relic_front_tex);
         } else {
-            albedo = mix(mesh.base_color.rgb, tex_rgb, cap_mask);
+            albedo = mix(mesh.base_color.rgb, tex_rgb, relic_front_tex);
         }
     }
     var wood_grain = 0.0;
@@ -1474,29 +1484,34 @@ fn fs_main(
     }
     if (is_enamel) {
         let face_flat = abs(n.y);
-        // Relief is bound separately (linear): R = height, G = specular mask.
-        let relief_sample = textureSampleLevel(relief_tex, albedo_samp, in.uv, 0.0);
-        let hr = relief_sample.r;
-        enamel_spec_mask = relief_sample.g;
-        let h_c = clamp((hr - 0.62) / 0.33, 0.0, 1.0);
-        enamel_height = h_c;
-        enamel_ridge = smoothstep(0.70, 0.92, h_c);
-        if (face_flat > 0.6) {
-            let dim = vec2<f32>(textureDimensions(relief_tex, 0));
-            let texel = vec2<f32>(1.0 / max(dim.x, 1.0), 1.0 / max(dim.y, 1.0));
-            let h_l = clamp((textureSampleLevel(relief_tex, albedo_samp, in.uv + vec2<f32>(-texel.x, 0.0), 0.0).r - 0.62) / 0.33, 0.0, 1.0);
-            let h_r = clamp((textureSampleLevel(relief_tex, albedo_samp, in.uv + vec2<f32>( texel.x, 0.0), 0.0).r - 0.62) / 0.33, 0.0, 1.0);
-            let h_d = clamp((textureSampleLevel(relief_tex, albedo_samp, in.uv + vec2<f32>(0.0, -texel.y), 0.0).r - 0.62) / 0.33, 0.0, 1.0);
-            let h_u = clamp((textureSampleLevel(relief_tex, albedo_samp, in.uv + vec2<f32>(0.0,  texel.y), 0.0).r - 0.62) / 0.33, 0.0, 1.0);
-            let bump = 3.6;
-            let dhdu = (h_r - h_l) * bump;
-            let dhdv = (h_u - h_d) * bump;
-            let sgn = sign(n.y);
-            let perturbed = normalize(vec3<f32>(-dhdu, sgn, -dhdv));
-            var n_face = vec3<f32>(perturbed.x, perturbed.y * sgn, perturbed.z);
-            n_face = normalize(n_face);
-            let blend = smoothstep(0.6, 0.95, face_flat);
-            n = normalize(mix(n, n_face, blend));
+        // Relief (object height + spec mask) only on the front cap; back
+        // stays smooth metal with no mirrored height field.
+        let relic_front_relief = smoothstep(0.55, 0.82, in.local_n.y);
+        if (relic_front_relief > 0.001) {
+            // Relief is bound separately (linear): R = height, G = specular mask.
+            let relief_sample = textureSampleLevel(relief_tex, albedo_samp, in.uv, 0.0);
+            let hr = relief_sample.r;
+            enamel_spec_mask = mix(1.0, relief_sample.g, relic_front_relief);
+            let h_c = clamp((hr - 0.62) / 0.33, 0.0, 1.0);
+            enamel_height = h_c * relic_front_relief;
+            enamel_ridge = smoothstep(0.70, 0.92, h_c) * relic_front_relief;
+            if (face_flat > 0.6) {
+                let dim = vec2<f32>(textureDimensions(relief_tex, 0));
+                let texel = vec2<f32>(1.0 / max(dim.x, 1.0), 1.0 / max(dim.y, 1.0));
+                let h_l = clamp((textureSampleLevel(relief_tex, albedo_samp, in.uv + vec2<f32>(-texel.x, 0.0), 0.0).r - 0.62) / 0.33, 0.0, 1.0);
+                let h_r = clamp((textureSampleLevel(relief_tex, albedo_samp, in.uv + vec2<f32>( texel.x, 0.0), 0.0).r - 0.62) / 0.33, 0.0, 1.0);
+                let h_d = clamp((textureSampleLevel(relief_tex, albedo_samp, in.uv + vec2<f32>(0.0, -texel.y), 0.0).r - 0.62) / 0.33, 0.0, 1.0);
+                let h_u = clamp((textureSampleLevel(relief_tex, albedo_samp, in.uv + vec2<f32>(0.0,  texel.y), 0.0).r - 0.62) / 0.33, 0.0, 1.0);
+                let bump = 3.6;
+                let dhdu = (h_r - h_l) * bump;
+                let dhdv = (h_u - h_d) * bump;
+                let sgn = sign(n.y);
+                let perturbed = normalize(vec3<f32>(-dhdu, sgn, -dhdv));
+                var n_face = vec3<f32>(perturbed.x, perturbed.y * sgn, perturbed.z);
+                n_face = normalize(n_face);
+                let blend = smoothstep(0.6, 0.95, face_flat) * relic_front_relief;
+                n = normalize(mix(n, n_face, blend));
+            }
         }
     }
 

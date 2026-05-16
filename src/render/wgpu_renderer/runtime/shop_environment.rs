@@ -249,6 +249,12 @@ impl WgpuRenderer {
             model,
             gpu,
         );
+        let mut dist = frame
+            .hallway_distortion
+            .unwrap_or_else(crate::render::hallway_glb::HallwayDistortion::default);
+        dist.time_pulse[0] = self.creation_time.elapsed().as_secs_f32();
+        self.queue
+            .write_buffer(&gpu.distortion_buffer, 0, bytemuck::bytes_of(&dist));
     }
 
     /// Rasterize focused catalog copy into the archive room decal atlas (bound at group0

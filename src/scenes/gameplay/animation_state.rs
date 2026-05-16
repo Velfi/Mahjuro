@@ -414,7 +414,9 @@ pub(super) fn build_candles_and_spotlights(
                 rect: [flame_x, flame_y, flame_w, flame_h],
                 // .b = brightness (light_ramp + flare boost so the flame
                 //       visibly surges beyond its normal ceiling).
-                color: [0.0, 0.0, scene.light_ramp + scene.candle_flare, phase01], user: 0});
+                color: [0.0, 0.0, scene.light_ramp + scene.candle_flare, phase01],
+                user: 0,
+            });
 
             // Point light at the wick tip — sits at world_y =
             // WICK_TIP_Y * candle_scale above the table, at the candle's

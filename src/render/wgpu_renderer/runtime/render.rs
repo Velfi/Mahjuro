@@ -333,7 +333,9 @@ impl WgpuRenderer {
             // Tile background.
             tile_quads.push(GpuInstance {
                 rect: [sx, sy, sw, sh],
-                color: [0.0, 0.0, 0.0, alpha], user: 0});
+                color: [0.0, 0.0, 0.0, alpha],
+                user: 0,
+            });
 
             // Main label.
             let inset_x = sw * 0.10;
@@ -421,9 +423,8 @@ impl WgpuRenderer {
             let flavor = lbl
                 .flavor_spans
                 .and_then(|s| if s.is_empty() { None } else { Some(s) });
-            let inline_face_bits = (lbl.bold as u8)
-                | ((lbl.italic as u8) << 1)
-                | ((lbl.underline as u8) << 2);
+            let inline_face_bits =
+                (lbl.bold as u8) | ((lbl.italic as u8) << 1) | ((lbl.underline as u8) << 2);
             let shape_key = TextLabelShapeKey {
                 emoji_path: emoji_fallback.is_some(),
                 flavor_spans: flavor.is_some(),
@@ -445,7 +446,7 @@ impl WgpuRenderer {
             let rasterize = || -> Vec<u8> {
                 if let Some(spans) = flavor {
                     let italic = font_italic.unwrap_or(font);
-                    let px = lbl.font_px.unwrap_or(13.0).max(8.0);
+                    let px = lbl.font_px.unwrap_or(24.0).max(24.0);
                     crate::render::decal::rasterize_label_flavor_spans(
                         font,
                         italic,
@@ -663,7 +664,9 @@ impl WgpuRenderer {
                     let wh = self.size.height.max(1) as f32;
                     let bg_inst = GpuInstance {
                         rect: [0.0, 0.0, ww, wh],
-                        color: id.image_vertex_color(), user: 0};
+                        color: id.image_vertex_color(),
+                        user: 0,
+                    };
                     let slice = self.frame_buffer_pool.alloc(
                         &self.device,
                         &self.queue,

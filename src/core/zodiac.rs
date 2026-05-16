@@ -257,8 +257,7 @@ mod tests {
             assert_eq!(
                 row.id, all[i],
                 "zodiacs.json row {i}: id {:?} does not match ZodiacKind::all()[{i}] {:?}",
-                row.id,
-                all[i]
+                row.id, all[i]
             );
         }
     }

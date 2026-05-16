@@ -258,7 +258,7 @@
     "rarity": "legendary",
     "flavor_spans": [
       {
-        "text": "The roar has passed but it's ",
+        "text": "The roar has passed but its ",
         "bold": false,
         "italic": false
       },
@@ -390,7 +390,7 @@
   {
     "id": "ikebana",
     "name": "Ikebana",
-    "description": "Scoring 2+ flowers in one hand scores an additional +6 mult",
+    "description": "scoring 2+ flowers in a structure: +6 mult",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -403,7 +403,7 @@
   {
     "id": "hanami",
     "name": "Hanami",
-    "description": "+$3 gold each time a flower is scored",
+    "description": "+$3 gold each time flowers score",
     "rarity": "common",
     "flavor_spans": [
       {

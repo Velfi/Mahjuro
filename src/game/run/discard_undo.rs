@@ -41,7 +41,11 @@ impl DiscardUndoSnapshot {
 }
 
 impl super::RunState {
-    pub fn apply_discard_undo(&mut self, snap: DiscardUndoSnapshot, bus: Option<&mut crate::game::event_bus::EventBus>) {
+    pub fn apply_discard_undo(
+        &mut self,
+        snap: DiscardUndoSnapshot,
+        bus: Option<&mut crate::game::event_bus::EventBus>,
+    ) {
         let gold_delta = snap.gold - self.gold;
         self.discards_remaining = snap.discards_remaining;
         self.wall = snap.wall;

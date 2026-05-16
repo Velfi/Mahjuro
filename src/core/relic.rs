@@ -1301,8 +1301,8 @@ pub struct ScoreContext<'a> {
 #[cfg(test)]
 mod tests {
     use super::{
-        RelicId, RelicState, SNOWBALL_CHIPS_PER_CLEAR, SNOWBALL_STACK_CAP, apply_merchants_eye_discount,
-        relic_buy_price, relic_shop_price, snowball_score_chips,
+        RelicId, RelicState, SNOWBALL_CHIPS_PER_CLEAR, SNOWBALL_STACK_CAP,
+        apply_merchants_eye_discount, relic_buy_price, relic_shop_price, snowball_score_chips,
     };
 
     #[test]

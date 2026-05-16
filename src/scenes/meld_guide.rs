@@ -183,7 +183,9 @@ impl SceneBehavior for MeldGuideScene {
             let underline_y = ml.y - underline_h - 2.0 * scale;
             frame.quad(GpuInstance {
                 rect: [ml.x, underline_y, ml.w, underline_h],
-                color: ml.color, user: 0});
+                color: ml.color,
+                user: 0,
+            });
             // Label text
             frame.text(TextLabel {
                 rect: [ml.x, ml.y, ml.w, label_h],
@@ -248,7 +250,9 @@ impl SceneBehavior for MeldGuideScene {
         };
         frame.quad(GpuInstance {
             rect: [prev_x, btn_y, btn_w, btn_h],
-            color: prev_color, user: 0});
+            color: prev_color,
+            user: 0,
+        });
         frame.text(TextLabel {
             rect: [prev_x, btn_y, btn_w, btn_h],
             text: "< Prev".into(),
@@ -271,7 +275,9 @@ impl SceneBehavior for MeldGuideScene {
         let back_x = prev_x + btn_w + btn_gap;
         frame.quad(GpuInstance {
             rect: [back_x, btn_y, btn_w, btn_h],
-            color: color::WALNUT_INK, user: 0});
+            color: color::WALNUT_INK,
+            user: 0,
+        });
         frame.text(TextLabel {
             rect: [back_x, btn_y, btn_w, btn_h],
             text: "Back".into(),
@@ -294,7 +300,9 @@ impl SceneBehavior for MeldGuideScene {
         };
         frame.quad(GpuInstance {
             rect: [next_x, btn_y, btn_w, btn_h],
-            color: next_color, user: 0});
+            color: next_color,
+            user: 0,
+        });
         frame.text(TextLabel {
             rect: [next_x, btn_y, btn_w, btn_h],
             text: "Next >".into(),
@@ -829,20 +837,8 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
                     &[9],
                     single_color,
                 ),
-                (
-                    "Single",
-                    MeldKind::Single,
-                    Suit::Dots,
-                    &[1],
-                    single_color,
-                ),
-                (
-                    "Single",
-                    MeldKind::Single,
-                    Suit::Dots,
-                    &[9],
-                    single_color,
-                ),
+                ("Single", MeldKind::Single, Suit::Dots, &[1], single_color),
+                ("Single", MeldKind::Single, Suit::Dots, &[9], single_color),
                 ("Single", MeldKind::Single, Suit::Wind, &[1], single_color),
                 ("Single", MeldKind::Single, Suit::Wind, &[2], single_color),
                 ("Single", MeldKind::Single, Suit::Wind, &[3], single_color),
@@ -988,46 +984,22 @@ fn layout_tile_groups(
 /// Short structure-shape description for each yaku
 pub(crate) fn yaku_shape_text(yk: YakuKind) -> &'static str {
     match yk {
-        YakuKind::Tanyao => {
-            "All tiles 2\u{2013}8, no honors/terminals"
-        }
-        YakuKind::Toitoi => {
-            "All triplets/kongs, no sequences"
-        }
+        YakuKind::Tanyao => "All tiles 2\u{2013}8, no honors/terminals",
+        YakuKind::Toitoi => "All triplets/kongs, no sequences",
         YakuKind::FullHand => "Complete 14-tile hand: 4+4+4+4+2 (4 melds + 1 pair)",
-        YakuKind::Yakuhai => {
-            "Triplet of any dragon or round wind"
-        }
-        YakuKind::Iipeikou => {
-            "Two identical sequences in one suit"
-        }
-        YakuKind::SanshokuDoujun => {
-            "Same sequence in all 3 suits"
-        }
-        YakuKind::Ittsu => {
-            "1\u{2013}9 straight in one suit"
-        }
-        YakuKind::Honitsu => {
-            "One number suit + honors only"
-        }
-        YakuKind::Chinitsu => {
-            "All one number suit, no honors"
-        }
-        YakuKind::Junchan => {
-            "Every meld has a 1 or 9"
-        }
-        YakuKind::Honroutou => {
-            "Only 1s, 9s, and honors"
-        }
-        YakuKind::Chiitoitsu => {
-            "Seven distinct pairs"
-        }
+        YakuKind::Yakuhai => "Triplet of any dragon or round wind",
+        YakuKind::Iipeikou => "Two identical sequences in one suit",
+        YakuKind::SanshokuDoujun => "Same sequence in all 3 suits",
+        YakuKind::Ittsu => "1\u{2013}9 straight in one suit",
+        YakuKind::Honitsu => "One number suit + honors only",
+        YakuKind::Chinitsu => "All one number suit, no honors",
+        YakuKind::Junchan => "Every meld has a 1 or 9",
+        YakuKind::Honroutou => "Only 1s, 9s, and honors",
+        YakuKind::Chiitoitsu => "Seven distinct pairs",
         YakuKind::KokushiMusou => {
             "One of each 1/9 and honor, plus one extra copy of any of those tiles"
         }
-        YakuKind::ChickenHand => {
-            "Legal hand with no yaku"
-        }
+        YakuKind::ChickenHand => "Legal hand with no yaku",
     }
 }
 

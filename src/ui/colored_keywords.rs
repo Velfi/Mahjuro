@@ -32,11 +32,12 @@
 //! (`glossary_tint: true`) instead of this module’s plain-text wrappers.
 
 use crate::render::decal::load_ui_font;
-#[allow(unused_imports)] // Re-exported for API parity; implementation lives in `vocabulary_colors`.
-pub use crate::render::vocabulary_colors::color_for_token;
-pub use crate::render::vocabulary_colors::colored_token_segments;
 #[allow(unused_imports)] // Re-exported for API parity; table lives in `vocabulary_colors`.
 pub use crate::render::vocabulary_colors::COLORED_KEYWORD_TABLE;
+#[allow(unused_imports)]
+// Re-exported for API parity; implementation lives in `vocabulary_colors`.
+pub use crate::render::vocabulary_colors::color_for_token;
+pub use crate::render::vocabulary_colors::colored_token_segments;
 use crate::render::wgpu_renderer::{TextAlign, TextLabel};
 use crate::ui::widget::{self, TextStyle};
 
@@ -131,12 +132,7 @@ pub fn wrap_colored_text_multiline(
             out.push(vec![(String::new(), default)]);
             continue;
         }
-        out.extend(wrap_colored_words(
-            paragraph,
-            max_width_px,
-            line_h,
-            default,
-        ));
+        out.extend(wrap_colored_words(paragraph, max_width_px, line_h, default));
     }
     if out.is_empty() {
         out.push(vec![(String::new(), default)]);

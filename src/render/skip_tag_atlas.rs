@@ -31,16 +31,13 @@ pub fn extract_sprite_rgba(sheet_png: &str, sprite_name: &str) -> Option<(Vec<u8
     }
     let atlas = cache.get(sheet_png)?;
     let Some((x, y)) = atlas.origins.get(sprite_name).copied() else {
-        warn_once(
-            format!("{sheet_png}|{sprite_name}|missing-cell"),
-            || {
-                format!(
-                    "skip_tag_atlas: '{sprite_name}' not in '{sheet_png}' \
+        warn_once(format!("{sheet_png}|{sprite_name}|missing-cell"), || {
+            format!(
+                "skip_tag_atlas: '{sprite_name}' not in '{sheet_png}' \
                      ({} cells indexed)",
-                    atlas.origins.len()
-                )
-            },
-        );
+                atlas.origins.len()
+            )
+        });
         return None;
     };
     crop_rgba(&atlas.rgba, atlas.width, x, y, atlas.tile_w, atlas.tile_h)
@@ -156,14 +153,7 @@ fn parse_atlas_toml(src: &str) -> Option<(u32, u32, u32, Vec<String>)> {
     Some((tile_w?, tile_h?, columns?, layout))
 }
 
-fn crop_rgba(
-    rgba: &[u8],
-    src_width: u32,
-    x: u32,
-    y: u32,
-    w: u32,
-    h: u32,
-) -> Option<Vec<u8>> {
+fn crop_rgba(rgba: &[u8], src_width: u32, x: u32, y: u32, w: u32, h: u32) -> Option<Vec<u8>> {
     const BPP: u32 = 4;
     let mut out = Vec::with_capacity((w * h * BPP) as usize);
     for row in 0..h {

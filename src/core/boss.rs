@@ -183,15 +183,6 @@ impl BossTier {
             BossTier::Final => color::RUBY,
         }
     }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            BossTier::Soft => "Soft",
-            BossTier::Medium => "Medium",
-            BossTier::Hard => "Hard",
-            BossTier::Final => "Final",
-        }
-    }
 }
 
 // ── Effect helpers ───────────────────────────────────────────────────────

@@ -190,10 +190,7 @@ fn yaku_levels_scale_chip_and_mult() {
 
 #[test]
 fn pair_power_grants_chips_and_mult() {
-    let hand = vec![
-        Tile::new(Suit::Dots, 7, 0),
-        Tile::new(Suit::Dots, 7, 1),
-    ];
+    let hand = vec![Tile::new(Suit::Dots, 7, 0), Tile::new(Suit::Dots, 7, 1)];
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::PairPower]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
@@ -204,10 +201,7 @@ fn pair_power_grants_chips_and_mult() {
 
 #[test]
 fn debuffed_terminal_tiles_keep_pair_bonus_but_lose_tile_points() {
-    let hand = vec![
-        Tile::new(Suit::Dots, 1, 0),
-        Tile::new(Suit::Dots, 1, 1),
-    ];
+    let hand = vec![Tile::new(Suit::Dots, 1, 0), Tile::new(Suit::Dots, 1, 1)];
     let sets = find_pairs_and_triplets(&hand);
     let r = RelicState::default();
     let mut ctx = ctx_with(&r, false);
@@ -221,10 +215,7 @@ fn debuffed_terminal_tiles_keep_pair_bonus_but_lose_tile_points() {
 
 #[test]
 fn debuffed_relic_is_disabled_for_scoring() {
-    let hand = vec![
-        Tile::new(Suit::Dots, 7, 0),
-        Tile::new(Suit::Dots, 7, 1),
-    ];
+    let hand = vec![Tile::new(Suit::Dots, 7, 0), Tile::new(Suit::Dots, 7, 1)];
     let sets = find_pairs_and_triplets(&hand);
     let mut r = relics(vec![RelicId::PairPower]);
     r.debuffed.insert(RelicId::PairPower);
@@ -298,17 +289,11 @@ fn multiplier_master_adds_one_mult_per_relic() {
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
     assert_eq!(breakdown.final_mult, 2.0);
 
-    let r2 = relics(vec![
-        RelicId::MultiplierMaster,
-        RelicId::ChainReaction,
-    ]);
+    let r2 = relics(vec![RelicId::MultiplierMaster, RelicId::ChainReaction]);
     let breakdown2 = score_sets(&hand, &sets, &ctx_with(&r2, false), &[]);
     assert_eq!(breakdown2.final_mult, 3.0);
 
-    let mut r3 = relics(vec![
-        RelicId::MultiplierMaster,
-        RelicId::ChainReaction,
-    ]);
+    let mut r3 = relics(vec![RelicId::MultiplierMaster, RelicId::ChainReaction]);
     r3.set_debuffed([RelicId::ChainReaction]);
     let breakdown3 = score_sets(&hand, &sets, &ctx_with(&r3, false), &[]);
     assert_eq!(breakdown3.final_mult, 3.0);
@@ -412,10 +397,7 @@ fn chain_reaction_inactive_when_not_scored_last_turn() {
 
 #[test]
 fn pair_double_rule_adds_chips() {
-    let hand = vec![
-        Tile::new(Suit::Dots, 5, 0),
-        Tile::new(Suit::Dots, 5, 1),
-    ];
+    let hand = vec![Tile::new(Suit::Dots, 5, 0), Tile::new(Suit::Dots, 5, 1)];
     let sets = find_pairs_and_triplets(&hand);
     let breakdown = score_sets(
         &hand,

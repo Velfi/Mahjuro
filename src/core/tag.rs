@@ -214,8 +214,7 @@ mod tests {
             assert_eq!(
                 row.id, all[i],
                 "tags.json row {i}: id {:?} does not match TagKind::all()[{i}] {:?}",
-                row.id,
-                all[i]
+                row.id, all[i]
             );
         }
     }

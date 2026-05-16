@@ -13,13 +13,17 @@
 //!    [`SpotLight`](crate::render::wgpu_renderer::SpotLight); optionally shop storeroom lighting overrides).
 //! 5. **Meshes** — Push `object3d` / `object3d_batch` for the subject; compose yaw/pitch with
 //!    [`prepend_inspect_orbit_subject_rotation`] on the hero mesh so it orbits under the fixed camera.
-//! 6. **Overlay** — Shop and collection **only** use the shared
-//!    [`Scene::Showcase`](crate::scenes::Scene::Showcase) inspect presenters (never an in-scene inspect mode).
-//!    Parent snapshots live in `suspended_*` [`DrawCtx`](crate::scenes::DrawCtx) / [`UpdateCtx`](crate::scenes::UpdateCtx);
-//!    the overlay owns input (see [`crate::scenes::ShopInspectPresenter`] / [`crate::scenes::CollectionInspectPresenter`]).
+//! 6. **Overlay** — Collection and shop item inspect use [`Scene::Showcase`](crate::scenes::Scene::Showcase)
+//!    presenters with `suspended_*` [`DrawCtx`](crate::scenes::DrawCtx) snapshots; the overlay owns input.
+//!    Camera motion uses [`tick_inspect_dolly`] + [`lerp_camera`] to ease between the resting scene camera
+//!    and [`inspect_orbit_camera`] (Archive always; shop storeroom since the dolly path landed).
 //!
-//! For per-frame pivot correction under a moving camera (shop shelves), run your sync before draw and
-//! update `orbit.target_world`, then call `apply_inspect_view_to_frame` with the resolved target.
+//! Shop storeroom pivot sync uses the **resting** storeroom camera only — shelf anchors are
+//! perspective-corrected with `world_on_camera_ray_plane_z`, so re-projecting under the inspect
+//! camera while also moving the look target creates a feedback loop (visible tremble).
+
+use std::cell::Cell;
+use std::time::Instant;
 
 use glam::{Mat3, Mat4, Vec3};
 
@@ -85,7 +89,7 @@ impl InspectRig {
         let h = window_h.max(1.0);
         let s = crate::render::shop_glb::shop_env_world_scale(h, room_gltf_height_scale);
         Self {
-            base_dir: Vec3::new(0.32_f32, -0.74, 0.59).normalize(),
+            base_dir: Vec3::new(0.0_f32, -0.74, 0.59).normalize(),
             base_distance: 0.52 * s,
             fovy_deg: 32.0,
             light_preset: InspectLightPreset::SHOP,
@@ -141,6 +145,16 @@ fn inspect_orbit_offset_mat3(ins: &ItemInspectOrbitState, rig: &InspectRig) -> M
     rot_p * rot_z
 }
 
+/// Near/far for close-up inspect — avoids the default `far = window_h × 32` band that shimmers
+/// when the eye is only a few hundred world units from the subject (shop storeroom scale).
+#[inline]
+fn inspect_orbit_clip_planes(eye_to_target_dist: f32) -> (f32, f32) {
+    let d = eye_to_target_dist.max(8.0);
+    let near = (d * 0.04).clamp(6.0, d * 0.8);
+    let far = (d * 10.0).max(near + d * 3.0);
+    (near, far)
+}
+
 /// Close-up inspect camera: offset from pivot along [`InspectRig::base_dir`] with zoom only.
 /// Yaw / pitch spin the subject via [`prepend_inspect_orbit_subject_rotation`], not the camera.
 pub fn inspect_orbit_camera(ins: &ItemInspectOrbitState, rig: &InspectRig) -> CameraParams {
@@ -149,13 +163,14 @@ pub fn inspect_orbit_camera(ins: &ItemInspectOrbitState, rig: &InspectRig) -> Ca
 
     let v = inspect_orbit_unrotated_offset_vec(ins, rig);
     let new_eye = target + v;
+    let (clip_near, clip_far) = inspect_orbit_clip_planes(v.length());
     CameraParams {
         eye: new_eye.to_array(),
         target: ins.target_world,
         up,
         fovy_deg: rig.fovy_deg,
-        clip_near: None,
-        clip_far: None,
+        clip_near: Some(clip_near),
+        clip_far: Some(clip_far),
     }
 }
 
@@ -315,4 +330,78 @@ pub fn apply_inspect_view_to_frame(
     if env == InspectFrameEnv::ShopStoreroomInspect {
         frame.scene_lighting.embedded_gltf_punctual = false;
     }
+}
+
+// ── Inspect camera dolly (Archive grid, shop storeroom) ─────────────────────
+
+/// Linear phase state for easing between a resting camera and orbit inspect.
+#[derive(Clone, Copy)]
+pub struct InspectDolly {
+    pub phase: f32,
+    pub last_tick: Instant,
+}
+
+/// Wall-clock duration for [`tick_inspect_dolly`] to travel `0 ↔ 1`.
+pub const INSPECT_DOLLY_DURATION: f32 = 0.34;
+
+/// Cubic ease-in-out on t ∈ [0,1].
+pub fn ease_in_out_cubic(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    if t < 0.5 {
+        4.0 * t * t * t
+    } else {
+        let u = -2.0 * t + 2.0;
+        1.0 - u * u * u * 0.5
+    }
+}
+
+/// Component-wise lerp between two [`CameraParams`]. Up vector is taken from `a`.
+///
+/// Near/far use [`CameraParams::clip_planes`] per endpoint (so `None` matches the renderer’s
+/// defaults) and interpolate numerically. This avoids sticking to one side’s clip when the other
+/// has `None` — e.g. shop storeroom room-tight planes with an inspect camera that omits clips.
+pub fn lerp_camera(a: &CameraParams, b: &CameraParams, t: f32, window_h: f32) -> CameraParams {
+    fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+        [
+            a[0] + (b[0] - a[0]) * t,
+            a[1] + (b[1] - a[1]) * t,
+            a[2] + (b[2] - a[2]) * t,
+        ]
+    }
+    let h = window_h.max(1e-6);
+    let (near_a, far_a) = a.clip_planes(h);
+    let (near_b, far_b) = b.clip_planes(h);
+    let near = near_a + (near_b - near_a) * t;
+    let far = far_a + (far_b - far_a) * t;
+    CameraParams {
+        eye: lerp3(a.eye, b.eye, t),
+        target: lerp3(a.target, b.target, t),
+        up: a.up,
+        fovy_deg: a.fovy_deg + (b.fovy_deg - a.fovy_deg) * t,
+        clip_near: Some(near),
+        clip_far: Some(far),
+    }
+}
+
+/// Advance `cell`'s dolly toward `target_phase` (`1.0` while inspect is active, `0.0` after pop)
+/// and return the eased blend factor used to lerp cameras. `dt` is clamped so a stalled frame cannot
+/// teleport the phase.
+pub fn tick_inspect_dolly(cell: &Cell<InspectDolly>, target_phase: f32) -> f32 {
+    let now = Instant::now();
+    let mut anim = cell.get();
+    let dt = now
+        .saturating_duration_since(anim.last_tick)
+        .as_secs_f32()
+        .min(0.10);
+    anim.last_tick = now;
+    let delta = target_phase - anim.phase;
+    if delta.abs() > 0.0 {
+        let step = (dt / INSPECT_DOLLY_DURATION).max(0.0);
+        anim.phase = (anim.phase + delta.signum() * step).clamp(0.0, 1.0);
+        if (anim.phase - target_phase).abs() < 1e-4 {
+            anim.phase = target_phase;
+        }
+    }
+    cell.set(anim);
+    ease_in_out_cubic(anim.phase)
 }

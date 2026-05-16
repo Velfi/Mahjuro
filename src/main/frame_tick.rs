@@ -71,6 +71,17 @@ impl App {
         self.anim.update(now);
         self.audio.tick(now);
 
+        let drawn = self.overlay_stack.last().unwrap_or(&self.scene);
+        let brownout_room = crate::main_room_gltf_brownout::RoomGltfBrownout::scene_eligible(drawn);
+        let brownout_freeze = self.debug.shop_env_debug_overlay.is_some()
+            || self.scene.has_blocking_overlay()
+            || self
+                .overlay_stack
+                .iter()
+                .any(|s| s.has_blocking_overlay());
+        self.room_gltf_brownout
+            .tick(self.last_frame_dt, brownout_room, brownout_freeze);
+
         // Refresh opened gamepads before any rumble this frame. `tick_scoring_rumble_keepalive`
         // and bus handlers run before `gamepad_frame_tick`; without this, `shell.pads` can
         // still be empty on the first frames after connect or if ordering ever regresses.
@@ -462,6 +473,31 @@ impl App {
                 self.debug.camera_debug_overlay = Some(overlay);
             } else {
                 log::debug!("Closed camera debug overlay");
+            }
+            actions.clear();
+            button_clicks.clear();
+        }
+
+        // Pick-blind hallway hall FX overlay (sliders; drawn above shop env panel).
+        if let Some(mut overlay) = self.debug.hallway_distortion_debug_overlay.take() {
+            let (ww, wh) = (
+                self.last_drawable_px.width as f32,
+                self.last_drawable_px.height as f32,
+            );
+            let mouse = self.input.as_ref().map(|i| {
+                (
+                    i.last_cursor.0,
+                    i.last_cursor.1,
+                    self.mouse_clicked,
+                    self.mouse_left_down,
+                )
+            });
+            let close = overlay.update(&actions, mouse, ww, wh);
+            self.mouse_clicked = false;
+            if !close {
+                self.debug.hallway_distortion_debug_overlay = Some(overlay);
+            } else {
+                log::debug!("Closed hallway hall FX debug overlay");
             }
             actions.clear();
             button_clicks.clear();

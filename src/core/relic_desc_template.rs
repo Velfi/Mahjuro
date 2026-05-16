@@ -72,7 +72,9 @@ mod tests {
         let s = "a {{ff_paper_destroy_without}} b {{ff_star_numer_with}}/{{ff_star_denom}} c";
         assert_eq!(
             expand_relic_description_templates(s),
-            format!("a {PAPER_LANTERN_DESTROY_DENOM} b {STAR_TILE_LEVELUP_NUMER_WITH_FF}/{STAR_TILE_LEVELUP_DENOM} c")
+            format!(
+                "a {PAPER_LANTERN_DESTROY_DENOM} b {STAR_TILE_LEVELUP_NUMER_WITH_FF}/{STAR_TILE_LEVELUP_DENOM} c"
+            )
         );
     }
 

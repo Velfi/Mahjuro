@@ -920,6 +920,7 @@ impl HeadlessApp {
             suspended_collection,
             self.gfx.tile_preset,
             false,
+            None,
         );
         let mut frame: UiFrame = if let Some(top) = self.overlay_stack.last() {
             top.draw_frame(ctx)

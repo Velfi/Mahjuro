@@ -33,8 +33,9 @@ use super::main_menu_exterior::MainMenuExteriorScene;
 use super::profile_select::ProfileSelectScene;
 use super::{DrawCtx, OverlayRequest, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 use crate::scenes::object3d_inspect::{
-    InspectFrameEnv, InspectRig, ItemInspectOrbitState, apply_inspect_view_to_frame,
-    inspect_orbit_camera, prepend_inspect_orbit_subject_rotation,
+    InspectDolly, InspectFrameEnv, InspectRig, ItemInspectOrbitState, apply_inspect_view_to_frame,
+    ease_in_out_cubic, inspect_orbit_camera, lerp_camera, prepend_inspect_orbit_subject_rotation,
+    tick_inspect_dolly,
 };
 /// 2D chrome sizes shared by [`CollectionScene::draw_collection_frame`] and
 /// [`CollectionScene::flat_items`] — tuned for legibility at TV distance.
@@ -239,58 +240,6 @@ struct CamAnim {
     duration: f32,
 }
 
-/// Inspect dolly state: linear phase plus the wall-clock used to advance it. The
-/// build-frame call samples [`ease_in_out_cubic`] on `phase` to lerp the camera so
-/// open / close are symmetric and direction reversals don't kink.
-#[derive(Clone, Copy)]
-struct InspectDolly {
-    phase: f32,
-    last_tick: Instant,
-}
-
-/// Time over which the inspect dolly travels from grid to orbit (or back). Tuned long
-/// enough to register as a deliberate "lean in" without delaying input.
-const INSPECT_DOLLY_DURATION: f32 = 0.34;
-
-/// Component-wise lerp between two `CameraParams`. Up vector is taken from `a` since
-/// both grid and inspect cameras use Z-up; lerping a unit vector and not renormalising
-/// would slowly shrink it.
-fn lerp_camera(a: &CameraParams, b: &CameraParams, t: f32) -> CameraParams {
-    fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
-        [
-            a[0] + (b[0] - a[0]) * t,
-            a[1] + (b[1] - a[1]) * t,
-            a[2] + (b[2] - a[2]) * t,
-        ]
-    }
-    fn lerp_opt(a: Option<f32>, b: Option<f32>, t: f32) -> Option<f32> {
-        match (a, b) {
-            (Some(av), Some(bv)) => Some(av + (bv - av) * t),
-            (Some(v), None) | (None, Some(v)) => Some(v),
-            (None, None) => None,
-        }
-    }
-    CameraParams {
-        eye: lerp3(a.eye, b.eye, t),
-        target: lerp3(a.target, b.target, t),
-        up: a.up,
-        fovy_deg: a.fovy_deg + (b.fovy_deg - a.fovy_deg) * t,
-        clip_near: lerp_opt(a.clip_near, b.clip_near, t),
-        clip_far: lerp_opt(a.clip_far, b.clip_far, t),
-    }
-}
-
-/// Cubic ease-in-out on t ∈ [0,1]. Matches the score-popup formula.
-fn ease_in_out_cubic(t: f32) -> f32 {
-    let t = t.clamp(0.0, 1.0);
-    if t < 0.5 {
-        4.0 * t * t * t
-    } else {
-        let u = -2.0 * t + 2.0;
-        1.0 - u * u * u * 0.5
-    }
-}
-
 impl CollectionScene {
     pub fn new() -> Self {
         Self {
@@ -314,31 +263,6 @@ impl CollectionScene {
             focused_chrome: None,
             chronicle_dashboard_scroll: std::cell::Cell::new(0.0),
         }
-    }
-
-    /// Advance the inspect dolly toward `target_phase` (`1.0` while inspect is active,
-    /// `0.0` once it has popped) and return the eased blend factor used to lerp between
-    /// the grid camera and the orbit camera. `dt` is clamped so a stalled frame can't
-    /// teleport the camera; the linear phase ↔ cubic ease layout matches `tick_cam_focus`
-    /// so reversals mid-flight read smoothly.
-    fn tick_inspect_dolly(&self, target_phase: f32) -> f32 {
-        let now = Instant::now();
-        let mut anim = self.inspect_dolly.get();
-        let dt = now
-            .saturating_duration_since(anim.last_tick)
-            .as_secs_f32()
-            .min(0.10);
-        anim.last_tick = now;
-        let delta = target_phase - anim.phase;
-        if delta.abs() > 0.0 {
-            let step = (dt / INSPECT_DOLLY_DURATION).max(0.0);
-            anim.phase = (anim.phase + delta.signum() * step).clamp(0.0, 1.0);
-            if (anim.phase - target_phase).abs() < 1e-4 {
-                anim.phase = target_phase;
-            }
-        }
-        self.inspect_dolly.set(anim);
-        ease_in_out_cubic(anim.phase)
     }
 
     /// Resolve the camera's current (col, row) focus, advancing any
@@ -856,10 +780,10 @@ impl CollectionScene {
         // blend factor drives a per-component camera lerp so eye / target / fovy all
         // glide together.
         let target_phase = if inspect.is_some() { 1.0 } else { 0.0 };
-        let eased = self.tick_inspect_dolly(target_phase);
+        let eased = tick_inspect_dolly(&self.inspect_dolly, target_phase);
         let inspect_cam_for_lerp = inspect_cam_now.or_else(|| self.last_inspect_cam.get());
         let final_cam = match (inspect_cam_for_lerp, eased > 1e-4) {
-            (Some(ic), true) => lerp_camera(&base_cam, &ic, eased),
+            (Some(ic), true) => lerp_camera(&base_cam, &ic, eased, h),
             _ => base_cam,
         };
         frame.camera_override = Some(final_cam);
@@ -1253,7 +1177,7 @@ impl CollectionScene {
                         let silhouette = !boss.unlocked;
                         let visual = crate::core::relic::relic_visual(*relic_id);
                         let face = closeup_size;
-                        let thick = face * 0.12 * visual.thickness_scale;
+                        let thick = face * 0.06 * visual.thickness_scale;
                         let color = if silhouette {
                             [
                                 boss.accent[0] * 0.22 + 0.02,
@@ -1725,7 +1649,9 @@ impl CollectionScene {
         let back_focused = ring_focus == Some(CollectionAction::Back);
         quads.push(GpuInstance {
             rect: back_rect,
-            color: chrome_btn_color(back_focused), user: 0});
+            color: chrome_btn_color(back_focused),
+            user: 0,
+        });
         text_labels.push(TextLabel {
             rect: back_rect,
             text: "< Back".into(),
@@ -1743,7 +1669,9 @@ impl CollectionScene {
         let switch_focused = ring_focus == Some(CollectionAction::SwitchSave);
         quads.push(GpuInstance {
             rect: switch_rect,
-            color: chrome_btn_color(switch_focused), user: 0});
+            color: chrome_btn_color(switch_focused),
+            user: 0,
+        });
         text_labels.push(TextLabel {
             rect: switch_rect,
             text: "Switch save".into(),
@@ -1786,7 +1714,9 @@ impl CollectionScene {
             let rect = [x, arrow_y, arrow_w, arrow_h];
             quads.push(GpuInstance {
                 rect,
-                color: chrome_btn_color(focused), user: 0});
+                color: chrome_btn_color(focused),
+                user: 0,
+            });
             text_labels.push(TextLabel {
                 rect,
                 text: sym.into(),
@@ -1816,7 +1746,7 @@ impl CollectionScene {
         let hint_font_px = typography::size(typography::BODY, h).max(22.0);
         let hint_line_h = (hint_font_px / 0.55).ceil() + 4.0;
         let hint_text: String = if inspect.is_some() {
-            "Right stick: orbit item\nTriggers / scroll: zoom   ·   E / North: close   ·   Esc: menu"
+            "Right stick or WASD / arrows: orbit item\nTriggers / scroll or Shift+W/↑ / Shift+S/↓: zoom   ·   E / North: close   ·   Esc: menu"
                 .to_string()
         } else if matches!(self.active_tab, Tab::Chronicle) && all_count_hint == 0 {
             "Finish a non-tutorial run to add folios here.\nTab / Shift+Tab: tabs   ·   Esc: back"
@@ -2533,9 +2463,7 @@ fn tab_artifacts(tab: Tab, progress: &crate::core::progression::PlayerProgress) 
             let available = progress.available_relics();
             defs.iter()
                 .filter(|d| progress.transformation_successor_visible(d.id))
-                .filter(|d| {
-                    available.contains(&d.id) || is_transformation_successor_relic(d.id)
-                })
+                .filter(|d| available.contains(&d.id) || is_transformation_successor_relic(d.id))
                 .map(|d| Artifact {
                     name: d.name.to_string(),
                     unlocked: true,
@@ -2764,7 +2692,7 @@ fn collection_push_grid_cell_object3d(
             let silhouette = !boss.unlocked;
             let visual = crate::core::relic::relic_visual(*relic_id);
             let face = plate_w;
-            let thick = face * 0.12 * visual.thickness_scale;
+            let thick = face * 0.06 * visual.thickness_scale;
             let color = if silhouette {
                 [
                     boss.accent[0] * 0.22 + 0.02,

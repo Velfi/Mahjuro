@@ -67,14 +67,46 @@ impl App {
                     r.resize(self.last_drawable_px);
                 }
             }
-            if shell.window_is_foreground() {
+            // Splash dismissal runs in `frame_tick` (`SplashScene::update` + scene switch).
+            // If we only pre-baked the showcase atlas while backgrounded, `loading_done`
+            // becomes true but the splash never advances — keep ticking through splash even
+            // when the window has no input/mouse focus (and no gamepad).
+            //
+            // Also keep ticking while a scene fade is in flight. Without this, a launch that
+            // starts unfocused can swap Splash -> MainMenu at `transition_alpha == 0` and then
+            // stop ticking, leaving the menu covered by a frozen black fade until refocus.
+            let transition_in_flight = self.pending_scene.is_some() || self.transition_alpha < 1.0;
+            if shell.window_is_foreground()
+                || matches!(self.scene, Scene::Splash(_))
+                || transition_in_flight
+            {
                 self.frame_tick(shell);
             } else {
-                // Idle cheaply while backgrounded: no catch-up simulation tick, no GPU work.
+                // Idle cheaply while backgrounded: no catch-up simulation tick, no draw.
+                // Still drain async relic/background uploads and run the splash decal
+                // atlas pre-bake so boot loading does not stall until the window refocuses.
+                let mut did_loader_work = false;
+                if let Some(renderer) = self.renderer.as_mut() {
+                    if renderer.is_loading() {
+                        renderer.poll_pending_texture_uploads();
+                        did_loader_work = true;
+                    }
+                    let splash_atlas_pending = matches!(self.scene, Scene::Splash(_))
+                        && !renderer.showcase_decal_atlas_baked();
+                    if splash_atlas_pending {
+                        let tileset = self.gfx.tileset_name.clone();
+                        renderer.prebake_showcase_decal_atlas(&tileset);
+                        did_loader_work = true;
+                    }
+                }
                 let now = Instant::now();
                 self.last_frame = now;
                 self.last_frame_dt = 1.0 / 60.0;
-                std::thread::sleep(Duration::from_millis(50));
+                if did_loader_work {
+                    std::thread::sleep(Duration::from_millis(16));
+                } else {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
             }
         }
 
@@ -462,7 +494,7 @@ impl App {
                 }
             }
             input.update_pointer_hover(input.last_cursor, &slots);
-            // Showcase inspect (shop / collection): orbit with LMB drag — same stick channel as gamepad.
+            // Showcase inspect (shop / collection): orbit with LMB drag — same stick channel as gamepad / WASD / arrows.
             let showcase_orbit = self
                 .overlay_stack
                 .last()
@@ -491,6 +523,12 @@ impl App {
         if self.wants_fullscreen_shortcut(scancode, keymod, repeat) {
             let _ = self.toggle_fullscreen(shell);
             return Ok(());
+        }
+        if let Some(ref mut o) = self.debug.hallway_distortion_debug_overlay {
+            let ctrl = mod_ctrl(self.modifiers) || mod_gui(self.modifiers);
+            if o.feed_key_event(scancode, ctrl) {
+                return Ok(());
+            }
         }
         if let Some(ref mut o) = self.debug.shop_env_debug_overlay {
             let ctrl = mod_ctrl(self.modifiers) || mod_gui(self.modifiers);

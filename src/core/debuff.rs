@@ -33,8 +33,7 @@ impl TileDebuffClass {
                     && matches!(tile.rank, 2..=8)
             }
             TileDebuffClass::MiddleTiles => {
-                matches!(tile.suit, Suit::Characters | Suit::Bamboos | Suit::Dots)
-                    && tile.rank == 5
+                matches!(tile.suit, Suit::Characters | Suit::Bamboos | Suit::Dots) && tile.rank == 5
             }
         }
     }

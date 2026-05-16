@@ -98,5 +98,7 @@ fn thick_segment_bbox(
     }
     out.push(GpuInstance {
         rect: [min_x, min_y, max_x - min_x, max_y - min_y],
-        color, user: 0});
+        color,
+        user: 0,
+    });
 }

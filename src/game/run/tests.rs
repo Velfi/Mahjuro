@@ -1528,4 +1528,3 @@ mod disgust_tests {
         assert!(try_disgust_substitution(&tiles, &[], false).is_none());
     }
 }
-

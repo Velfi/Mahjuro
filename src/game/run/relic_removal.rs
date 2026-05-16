@@ -45,7 +45,9 @@ impl RunState {
         if !self.destroy_relic_removed_from_run(relic_id) {
             return;
         }
-        bus.push(GameEvent::TransformationSuccessorDiscovered(kind.successor()));
+        bus.push(GameEvent::TransformationSuccessorDiscovered(
+            kind.successor(),
+        ));
         bus.push(GameEvent::AchievementUnlocked(kind.achievement()));
     }
 
@@ -83,18 +85,26 @@ impl RunState {
         self.chrysalis_extinct = true;
         self.note_relic_destroyed();
         self.relic_activations.push(RelicId::MonarchButterfly);
-        bus.push(GameEvent::TransformationSuccessorDiscovered(RelicId::MonarchButterfly));
+        bus.push(GameEvent::TransformationSuccessorDiscovered(
+            RelicId::MonarchButterfly,
+        ));
     }
 
     /// Tea Ceremony → Rakuware in `active[slot]`; ceremony leaves the shop pool; Kintsugi counts the vessel.
-    pub(crate) fn complete_tea_ceremony_graduation_in_slot(&mut self, slot: usize, bus: &mut EventBus) {
+    pub(crate) fn complete_tea_ceremony_graduation_in_slot(
+        &mut self,
+        slot: usize,
+        bus: &mut EventBus,
+    ) {
         self.relics.active[slot] = RelicId::Rakuware;
         self.relic_counters.remove(&RelicId::TeaCeremony);
         self.relic_counters.remove(&RelicId::Rakuware);
         self.tea_ceremony_extinct = true;
         self.note_relic_destroyed();
         self.relic_activations.push(RelicId::Rakuware);
-        bus.push(GameEvent::TransformationSuccessorDiscovered(RelicId::Rakuware));
+        bus.push(GameEvent::TransformationSuccessorDiscovered(
+            RelicId::Rakuware,
+        ));
     }
 }
 

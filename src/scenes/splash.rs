@@ -56,7 +56,9 @@ impl SceneBehavior for SplashScene {
 
         frame.quad(GpuInstance {
             rect: [0.0, 0.0, w, h],
-            color: [0.0, 0.0, 0.0, 1.0], user: 0});
+            color: [0.0, 0.0, 0.0, 1.0],
+            user: 0,
+        });
 
         if !ctx.modal_active {
             let label_h = (32.0 * scale).max(18.0);

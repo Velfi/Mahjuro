@@ -381,6 +381,8 @@ pub struct RoomGlbCpu {
     pub marker_mesh_bounds_doc: FxHashMap<String, ShopEnvironmentBounds>,
     pub collision_meshes: Vec<ShopCollisionMesh>,
     pub embedded_perspective_camera: Option<ShopGlbEmbeddedCamera>,
+    /// All embedded perspective cameras keyed by lowercase glTF node name (e.g. hallway `default` / `boss`).
+    pub embedded_cameras_by_name: FxHashMap<String, ShopGlbEmbeddedCamera>,
     pub embedded_point_lights: Vec<ShopGlbEmbeddedPointLight>,
     pub embedded_spot_lights: Vec<ShopGlbEmbeddedSpotLight>,
 }
@@ -559,7 +561,7 @@ pub fn load_room_glb_from_bytes(
         )?;
     }
 
-    let embedded_perspective_camera = embedded_cameras.pick();
+    let (embedded_perspective_camera, embedded_cameras_by_name) = embedded_cameras.into_parts();
     let environment_bounds_doc = room_environment_bounds(&environment_primitives);
 
     Ok(RoomGlbCpu {
@@ -569,6 +571,7 @@ pub fn load_room_glb_from_bytes(
         marker_mesh_bounds_doc,
         collision_meshes,
         embedded_perspective_camera,
+        embedded_cameras_by_name,
         embedded_point_lights,
         embedded_spot_lights,
     })

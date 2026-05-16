@@ -38,6 +38,115 @@ struct GltfPbrUniform {
 @group(0) @binding(6) var metallic_roughness_tex: texture_2d<f32>;
 @group(0) @binding(7) var emissive_tex: texture_2d<f32>;
 
+/// Parity with `shop_glb.wgsl` @binding(8); zeroed for tiles — pick-blind hallway only uploads data there.
+struct HallwayDistortion {
+    bow: vec4<f32>,
+    breathe: vec4<f32>,
+    ceiling: vec4<f32>,
+    stretch: vec4<f32>,
+    twist: vec4<f32>,
+    mask: vec4<f32>,
+    time_pulse: vec4<f32>,
+    flags: vec4<f32>,
+};
+@group(0) @binding(8) var<uniform> hd: HallwayDistortion;
+
+/// Same factor as `shop_glb.wgsl` — scales wall-clock time inside the hallway warp.
+const HALLWAY_ANIM_TIME_SCALE: f32 = 0.5;
+
+fn hallway_depth_axis_sel(idx: f32) -> vec3<f32> {
+    if (idx < 0.5) {
+        return vec3<f32>(1.0, 0.0, 0.0);
+    }
+    if (idx < 1.5) {
+        return vec3<f32>(0.0, 1.0, 0.0);
+    }
+    return vec3<f32>(0.0, 0.0, 1.0);
+}
+
+fn apply_hallway_distortion(world_in: vec3<f32>, h: HallwayDistortion) -> vec3<f32> {
+    if (h.flags.x < 0.5) {
+        return world_in;
+    }
+    let axis = hallway_depth_axis_sel(h.mask.x) * vec3<f32>(h.mask.y);
+    let up = vec3<f32>(0.0, 0.0, 1.0);
+    var lateral = cross(axis, up);
+    let ll = length(lateral);
+    if (ll < 1e-5) {
+        lateral = vec3<f32>(1.0, 0.0, 0.0);
+    } else {
+        lateral = lateral / ll;
+    }
+    let depth = dot(world_in, axis);
+    let d0 = h.mask.z;
+    let d1 = h.mask.w;
+    let span = max(d1 - d0, 1e-4);
+    let u = clamp((depth - d0) / span, 0.0, 1.0);
+    let depth_mid = (d0 + d1) * 0.5;
+    let y_rel = depth - depth_mid;
+    var sm0: f32;
+    if (h.twist.z > 0.5) {
+        let edge = 0.20;
+        sm0 = smoothstep(0.0, edge, u) * smoothstep(1.0, 1.0 - edge, u);
+    } else {
+        sm0 = smoothstep(d0, d1, depth);
+    }
+    let g = h.flags.z;
+    let t = h.time_pulse.x * HALLWAY_ANIM_TIME_SCALE;
+    let drift = h.time_pulse.y * t;
+    let pulse = 1.0 + h.time_pulse.w * sin(t * h.time_pulse.z + h.bow.w);
+    let mask_f = sm0 * g * pulse;
+    let bp = h.flags.y * 0.25;
+    let ramp = mix(1.0, 1.0 + bp * 1.45, sm0);
+
+    var w = world_in;
+
+    w = w + lateral * (h.bow.x * h.bow.z * sin(y_rel * h.bow.y + h.bow.w + drift) * mask_f * ramp);
+
+    let side = dot(w, lateral);
+    let sgn = select(-1.0, 1.0, side >= 0.0);
+    let af = pow(max(abs(side), 1e-4), h.breathe.w);
+    w = w + lateral * (sgn * af * h.breathe.x * sin(t * h.breathe.y + h.breathe.z + y_rel * 0.42) * mask_f);
+
+    let z_above = w.z - h.ceiling.y;
+    if (z_above > 0.0) {
+        let cp = 1.0 + h.ceiling.z * sin(t * h.ceiling.w);
+        let sag = z_above * h.ceiling.x * cp * mask_f * mix(1.0, 1.0 + bp * 1.1, sm0);
+        w = w - vec3<f32>(0.0, 0.0, 1.0) * sag;
+    }
+
+    let stretch_k = h.stretch.x * h.stretch.w * mask_f * mix(1.0, 1.0 + bp * 0.9, sm0);
+    w = w + axis * stretch_k;
+
+    let twist_dir = select(-1.0, 1.0, h.twist.w >= 0.0);
+    let ang = h.twist.x * twist_dir * pow(mask_f, h.twist.y) * mix(1.0, 1.0 + bp * 1.25, sm0);
+    let proj_len = dot(w, axis);
+    let p_perp = w - axis * proj_len;
+    let c = cos(ang);
+    let s = sin(ang);
+    let p_rot = p_perp * c + cross(axis, p_perp) * s;
+    w = axis * proj_len + p_rot;
+
+    return w;
+}
+
+fn world_normal_after_distortion(
+    world0: vec3<f32>,
+    t_u: vec3<f32>,
+    t_v: vec3<f32>,
+    h: HallwayDistortion,
+    n0: vec3<f32>,
+) -> vec3<f32> {
+    let e = 0.06;
+    let d_u = (apply_hallway_distortion(world0 + t_u * e, h) - apply_hallway_distortion(world0 - t_u * e, h)) / (2.0 * e);
+    let d_v = (apply_hallway_distortion(world0 + t_v * e, h) - apply_hallway_distortion(world0 - t_v * e, h)) / (2.0 * e);
+    let raw = cross(d_u, d_v);
+    let len = length(raw);
+    let nd = raw / max(len, 1e-10);
+    let oriented = select(nd, -nd, dot(nd, n0) < 0.0);
+    return select(n0, oriented, len > 1e-7);
+}
+
 struct PointLight {
     // xyz = world position after upload; w = smooth radius or inverse-square range.
     pos: vec4<f32>,
@@ -294,21 +403,35 @@ fn vs_main(
     @location(4) uv_emr_in: vec2<f32>,
     @location(5) v_color_in: vec4<f32>,
 ) -> VsOut {
-    let world = cam.model * vec4<f32>(pos, 1.0);
-    let N = normalize((cam.model * vec4<f32>(n, 0.0)).xyz);
+    let world_h = (cam.model * vec4<f32>(pos, 1.0)).xyz;
+    let N0 = normalize((cam.model * vec4<f32>(n, 0.0)).xyz);
     let Tw = (cam.model * vec4<f32>(tangent.xyz, 0.0)).xyz;
-    let Torth = normalize(Tw - N * dot(N, Tw));
-    let Borth = normalize(cross(N, Torth)) * tangent.w;
+    let Torth = normalize(Tw - N0 * dot(N0, Tw));
+    let Borth = normalize(cross(N0, Torth)) * tangent.w;
+
+    let world = select(
+        world_h,
+        apply_hallway_distortion(world_h, hd),
+        hd.flags.x > 0.5,
+    );
+    let N = select(
+        N0,
+        world_normal_after_distortion(world_h, Torth, Borth, hd, N0),
+        hd.flags.x > 0.5,
+    );
+    let Tw2 = (cam.model * vec4<f32>(tangent.xyz, 0.0)).xyz;
+    let Torth2 = normalize(Tw2 - N * dot(N, Tw2));
+    let Borth2 = normalize(cross(N, Torth2)) * tangent.w;
 
     var o: VsOut;
-    o.clip_pos = cam.view_proj * world;
+    o.clip_pos = cam.view_proj * vec4<f32>(world, 1.0);
     o.wn = N;
     o.uv = uv;
     o.local_pos = pos;
     o.local_n = n;
-    o.world_pos = world.xyz;
-    o.t_w = Torth;
-    o.b_w = Borth;
+    o.world_pos = world;
+    o.t_w = Torth2;
+    o.b_w = Borth2;
     o.uv_emr = uv_emr_in;
     o.v_color = v_color_in;
     return o;
@@ -497,11 +620,17 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
 
     var point_contrib = vec3<f32>(0.0);
     var sheen_acc = vec3<f32>(0.0);
+    let boss_press = clamp(hd.flags.y, 0.0, 1.0);
+    let punc_rgb_mul = mix(
+        vec3<f32>(1.0),
+        vec3<f32>(1.14, 0.42, 0.36),
+        boss_press,
+    );
     let light_count = lights.count.x;
     for (var i: u32 = 0u; i < light_count; i = i + 1u) {
         let lp = lights.lights[i].pos.xyz;
         let radius = lights.lights[i].pos.w;
-        let lc = lights.lights[i].color.rgb;
+        let lc = lights.lights[i].color.rgb * punc_rgb_mul;
         let intensity = lights.lights[i].color.a;
         let kind = lights.lights[i].params.x;
         let to_light = lp - in.world_pos;
@@ -591,7 +720,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let nl = max(dot(n_world, to_light), 0.0);
         let lambert = 0.35 + 0.65 * nl;
         point_contrib = point_contrib
-            + s.color.rgb * s.color.a * atten * spot_factor * lambert;
+            + s.color.rgb * punc_rgb_mul * s.color.a * atten * spot_factor * lambert;
     }
 
     // ── Enhancement fresnel albedo tint ─────────────────────────────────

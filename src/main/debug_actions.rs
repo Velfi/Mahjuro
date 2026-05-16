@@ -1,7 +1,9 @@
 use super::*;
 
 use crate::core::tile_pack::TilePackKind;
-use crate::debug_overlays::{ShopEnvDebugOverlay, TonemapDebugOverlay};
+use crate::debug_overlays::{
+    HallwayDistortionDebugOverlay, ShopEnvDebugOverlay, TonemapDebugOverlay,
+};
 use crate::game::engine::GameEngine;
 use crate::scenes::reload_scene_layout_from_disk;
 use crate::scenes::shop::PackCelebration;
@@ -51,13 +53,10 @@ impl App {
                 self.run.cheat_force_all_transform_extinctions();
                 self.run.apply_progression(&self.progress);
                 let _ = persistence::save_profile(self.active_profile, &self.progress);
-                log::debug!(
-                    "Unlocked all transformation chains (meta + run extinction flags)"
-                );
+                log::debug!("Unlocked all transformation chains (meta + run extinction flags)");
             }
             DebugAction::SetGold(amount) => {
-                self.run
-                    .set_run_gold_direct(amount as i32, None);
+                self.run.set_run_gold_direct(amount as i32, None);
                 log::debug!("Set gold to {}", amount);
             }
             DebugAction::AddRelic(relic_id) => {
@@ -142,6 +141,16 @@ impl App {
                         self.debug.shop_env_lighting,
                     ));
                     log::debug!("Opened shop env & lighting debug overlay");
+                }
+            }
+            DebugAction::OpenHallwayHallFxDebug => {
+                if self.debug.hallway_distortion_debug_overlay.is_some() {
+                    self.debug.hallway_distortion_debug_overlay = None;
+                    log::debug!("Closed hallway hall FX debug overlay");
+                } else {
+                    self.debug.hallway_distortion_debug_overlay =
+                        Some(HallwayDistortionDebugOverlay::new());
+                    log::debug!("Opened hallway hall FX debug overlay");
                 }
             }
             DebugAction::OpenTonemapDebug => {

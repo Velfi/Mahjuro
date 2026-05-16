@@ -120,15 +120,16 @@ impl RoomGltfEmbeddedCamera {
 pub(crate) struct EmbeddedCameraHarvest {
     named: Option<RoomGltfEmbeddedCamera>,
     fallback: Option<RoomGltfEmbeddedCamera>,
+    /// Lowercase glTF node names → perspective cameras (hallway `default` / `boss`, etc.).
+    by_name: FxHashMap<String, RoomGltfEmbeddedCamera>,
 }
 
 impl EmbeddedCameraHarvest {
-    pub(crate) fn pick(self) -> Option<RoomGltfEmbeddedCamera> {
-        self.named.or(self.fallback)
-    }
-
     pub(crate) fn insert(&mut self, name: &str, cam: RoomGltfEmbeddedCamera) {
         let key = name.to_ascii_lowercase();
+        if self.by_name.insert(key.clone(), cam).is_some() {
+            log::warn!("room glTF: duplicate embedded camera `{name}` — using last");
+        }
         let preferred = matches!(key.as_str(), "camera" | "shopcamera" | "shop_camera");
         if preferred {
             if self.named.replace(cam).is_some() {
@@ -137,6 +138,16 @@ impl EmbeddedCameraHarvest {
         } else if self.fallback.is_none() {
             self.fallback = Some(cam);
         }
+    }
+
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        Option<RoomGltfEmbeddedCamera>,
+        FxHashMap<String, RoomGltfEmbeddedCamera>,
+    ) {
+        let picked = self.named.or(self.fallback);
+        (picked, self.by_name)
     }
 }
 

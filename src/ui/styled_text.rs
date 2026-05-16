@@ -23,9 +23,9 @@
 use crate::render::decal::{load_ui_font, load_ui_font_italic};
 use crate::render::text_effect::TextEffectId;
 use crate::render::theme::typography;
-use crate::ui::widget::TextStyle;
 use crate::render::vocabulary_colors::colored_token_segments;
 use crate::render::wgpu_renderer::{TextAlign, TextLabel};
+use crate::ui::widget::TextStyle;
 
 /// Max UTF-8 bytes accepted by the parser.
 pub const MAX_STYLED_INPUT_BYTES: usize = 12_000;
@@ -41,10 +41,7 @@ const TAG_EFFECT_OPEN_PREFIX_LEN: usize = 9;
 
 #[inline]
 fn active_effect(effect_stack: &[TextEffectId]) -> TextEffectId {
-    effect_stack
-        .last()
-        .copied()
-        .unwrap_or(TextEffectId::Flat)
+    effect_stack.last().copied().unwrap_or(TextEffectId::Flat)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -259,7 +256,11 @@ struct Cell {
     color: [f32; 4],
 }
 
-fn runs_to_cells_with_glossary(runs: &[StyledRun], default_color: [f32; 4], glossary: bool) -> Vec<Cell> {
+fn runs_to_cells_with_glossary(
+    runs: &[StyledRun],
+    default_color: [f32; 4],
+    glossary: bool,
+) -> Vec<Cell> {
     let mut cells: Vec<Cell> = Vec::new();
     for run in runs {
         if !glossary {
@@ -359,8 +360,7 @@ fn cell_token_advance(
     regular: Option<&fontdue::Font>,
     italic_f: Option<&fontdue::Font>,
 ) -> f32 {
-    tok
-        .iter()
+    tok.iter()
         .map(|c| char_advance_styled(c.ch, c.italic, font_px, regular, italic_f))
         .sum()
 }
@@ -655,10 +655,8 @@ mod tests {
 
     #[test]
     fn nested_effect_inner_wins() {
-        let r = parse_styled_text(
-            "{{effect:rainbow}}{{effect:pulse}}x{{/effect}}{{/effect}}",
-        )
-        .unwrap();
+        let r =
+            parse_styled_text("{{effect:rainbow}}{{effect:pulse}}x{{/effect}}{{/effect}}").unwrap();
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].text, "x");
         assert_eq!(r[0].effect, TextEffectId::Pulse);

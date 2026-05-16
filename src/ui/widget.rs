@@ -28,7 +28,11 @@ pub fn push_panel_colored(
     border: [f32; 4],
 ) {
     // Background fill.
-    out.push(GpuInstance { rect, color: bg, user: 0});
+    out.push(GpuInstance {
+        rect,
+        color: bg,
+        user: 0,
+    });
     let bt = border_thickness(rect);
     push_inset_border(out, rect, border, bt);
     // Bevel: one pixel of highlight on the inner top/left edges, shadow on
@@ -55,19 +59,27 @@ pub fn push_inset_border(
     // Top
     out.push(GpuInstance {
         rect: [x, y, w, t],
-        color, user: 0});
+        color,
+        user: 0,
+    });
     // Bottom
     out.push(GpuInstance {
         rect: [x, y + h - t, w, t],
-        color, user: 0});
+        color,
+        user: 0,
+    });
     // Left
     out.push(GpuInstance {
         rect: [x, y + t, t, h - 2.0 * t],
-        color, user: 0});
+        color,
+        user: 0,
+    });
     // Right
     out.push(GpuInstance {
         rect: [x + w - t, y + t, t, h - 2.0 * t],
-        color, user: 0});
+        color,
+        user: 0,
+    });
 }
 
 /// Draw a one-pixel raised-panel bevel just inside the inset border.
@@ -89,20 +101,28 @@ fn push_bevel(out: &mut Vec<GpuInstance>, rect: [f32; 4], border_t: f32) {
     // Highlight: top inner edge
     out.push(GpuInstance {
         rect: [x + o, y + o, w - 2.0 * o, bw],
-        color: hi, user: 0});
+        color: hi,
+        user: 0,
+    });
     // Highlight: left inner edge (skip the top-left corner already covered)
     out.push(GpuInstance {
         rect: [x + o, y + o + bw, bw, h - 2.0 * o - bw],
-        color: hi, user: 0});
+        color: hi,
+        user: 0,
+    });
 
     // Shadow: bottom inner edge
     out.push(GpuInstance {
         rect: [x + o, y + h - o - bw, w - 2.0 * o, bw],
-        color: sh, user: 0});
+        color: sh,
+        user: 0,
+    });
     // Shadow: right inner edge (skip the bottom-right corner)
     out.push(GpuInstance {
         rect: [x + w - o - bw, y + o, bw, h - 2.0 * o - bw],
-        color: sh, user: 0});
+        color: sh,
+        user: 0,
+    });
 }
 
 /// A button: rect + label + visual style + action fired on click.
@@ -194,13 +214,7 @@ pub fn push_text_block(
     style: TextStyle,
     window_h: f32,
 ) {
-    crate::ui::styled_text::push_styled_text_block(
-        out,
-        rect,
-        text,
-        style.into(),
-        window_h,
-    );
+    crate::ui::styled_text::push_styled_text_block(out, rect, text, style.into(), window_h);
 }
 
 /// Greedy word-wrap at a fixed target font size.

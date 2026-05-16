@@ -9,8 +9,8 @@ pub mod discard_undo;
 
 mod consumables;
 mod hand_ops;
-mod relic_removal;
 mod onboarding;
+mod relic_removal;
 mod round_flow;
 mod scoring_flow;
 mod tags;
@@ -1279,7 +1279,6 @@ impl RunState {
     }
 }
 
-
 /// All tile faces for substitution attempts.
 const ALL_FACES: [(Suit, u8); 34] = {
     let mut faces = [(Suit::Characters, 0u8); 34];
@@ -1459,10 +1458,6 @@ fn try_disgust_substitution(
     }
     None
 }
-
-
-
-
 
 #[cfg(test)]
 mod tests;

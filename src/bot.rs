@@ -24,7 +24,8 @@ use crate::core::deck::Wall;
 use crate::core::hand::{MeldKind, detect_all_sets, validate_selection_with_rules};
 use crate::core::relic::{
     RelicId, RelicState, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
-    ScoreRoundBundle, ScoreTileBundle, all_relic_defs, apply_merchants_eye_discount, relic_shop_price,
+    ScoreRoundBundle, ScoreTileBundle, all_relic_defs, apply_merchants_eye_discount,
+    relic_shop_price,
 };
 use crate::core::rules::{BlindKind, RuleModifier};
 use crate::core::scoring::score_sets_with_original;
@@ -2401,14 +2402,12 @@ fn visit_shop(
                     ZodiacKind::shop_price(),
                     &run.relics,
                 )),
-                ShopOffer::Talisman(kind) => run.mode.scale_shop_price(apply_merchants_eye_discount(
-                    kind.shop_price(),
-                    &run.relics,
-                )),
-                ShopOffer::Pack(kind) => run.mode.scale_shop_price(apply_merchants_eye_discount(
-                    kind.shop_price(),
-                    &run.relics,
-                )),
+                ShopOffer::Talisman(kind) => run
+                    .mode
+                    .scale_shop_price(apply_merchants_eye_discount(kind.shop_price(), &run.relics)),
+                ShopOffer::Pack(kind) => run
+                    .mode
+                    .scale_shop_price(apply_merchants_eye_discount(kind.shop_price(), &run.relics)),
             };
             if price as i32 > run.gold {
                 continue;
@@ -2500,10 +2499,9 @@ fn visit_shop(
                 );
             }
             ShopOffer::Talisman(kind) => {
-                let price = run.mode.scale_shop_price(apply_merchants_eye_discount(
-                    kind.shop_price(),
-                    &run.relics,
-                ));
+                let price = run
+                    .mode
+                    .scale_shop_price(apply_merchants_eye_discount(kind.shop_price(), &run.relics));
                 run.apply_gold_delta(-(price as i32), Some(bus));
                 run.consumables.items.push(Consumable::Talisman(kind));
                 stats.gold_spent += price;
@@ -2518,10 +2516,9 @@ fn visit_shop(
                 );
             }
             ShopOffer::Pack(kind) => {
-                let price = run.mode.scale_shop_price(apply_merchants_eye_discount(
-                    kind.shop_price(),
-                    &run.relics,
-                ));
+                let price = run
+                    .mode
+                    .scale_shop_price(apply_merchants_eye_discount(kind.shop_price(), &run.relics));
                 run.apply_gold_delta(-(price as i32), Some(bus));
                 // Mirror the real shop: pre-stamp any enhancement from the
                 // pack kind onto the tiles' IDs, then append the pack. The

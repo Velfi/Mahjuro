@@ -169,6 +169,8 @@ pub(crate) struct ShowcaseTileGpu {
 /// Uses the same tile textured pipeline as hand tiles; vertices are already in world space (`model = I`).
 pub(crate) struct ShopEnvironmentGpu {
     pub uniform_buffer: wgpu::Buffer,
+    /// Shared by all room primitives; pick-blind uploads [`crate::render::hallway_glb::HallwayDistortion`].
+    pub distortion_buffer: wgpu::Buffer,
     pub bind_groups: Vec<wgpu::BindGroup>,
     /// Archive room only: CPU-updated decal atlas at `@group(0) @binding(3)`.
     pub archive_sign_decal_texture: Option<wgpu::Texture>,
