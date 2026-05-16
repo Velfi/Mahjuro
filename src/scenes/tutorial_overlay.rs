@@ -177,8 +177,8 @@ impl TutorialOverlay {
         }
 
         // ── Font sizes (pinned via font_px for readability) ──────────
-        let flavor_px = typography::size(typography::HEADING, window_h);
-        let hint_px = typography::size(typography::TITLE, window_h);
+        let flavor_px = typography::size(typography::H28, window_h);
+        let hint_px = typography::size(typography::H20, window_h);
         let pad = 16.0_f32.max(10.0);
 
         // ── Word-wrap hint text to fit the banner width ──────────────

@@ -6,7 +6,7 @@
 use crate::audio::SfxId;
 use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::UiFrame;
-use crate::render::theme::color;
+use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
@@ -105,13 +105,14 @@ impl SceneBehavior for TileLiteracyScene {
         });
 
         // ── Title ───────────────────────────────────────────────
-        let title_h = 34.0 * scale;
+        let title_px = typography::size(typography::H32, h);
+        let title_h = title_px * 1.4;
         let title_y = cy + 18.0 * scale;
         frame.text(TextLabel {
             rect: [cx, title_y, card_w, title_h],
             text: "Know Your Tiles".to_string(),
             color: color::CHAMPAGNE,
-            font_px: Some(title_h * 0.8),
+            font_px: Some(title_px),
             align: TextAlign::Center,
             ..Default::default()
         });
@@ -126,7 +127,7 @@ impl SceneBehavior for TileLiteracyScene {
         });
 
         // ── Content lines ───────────────────────────────────────
-        let content_font = 16.0 * scale;
+        let content_font = typography::size(typography::H36, h);
         let line_h = content_font * 1.5;
         let content_x = cx + 28.0 * scale;
         let content_w = card_w - 56.0 * scale;
@@ -188,7 +189,7 @@ impl SceneBehavior for TileLiteracyScene {
             rect: [0.0, hint_y, w, 22.0 * scale],
             text: "Press Enter to start".to_string(),
             color: color::STONE,
-            font_px: Some(16.0 * scale),
+            font_px: Some(typography::size(typography::H36, h)),
             align: TextAlign::Center,
             ..Default::default()
         });

@@ -66,9 +66,6 @@ impl WgpuRenderer {
             RenderOp::ClearSceneDepth => {
                 // Marker only: Pass A is split into subpasses at this op; never drawn here.
             }
-            RenderOp::ShopInspectLitMeshSubjectHdr => {
-                // Marker only: split for `SsrGlobals` upload between subpasses.
-            }
             RenderOp::Background { id, buf_idx } => {
                 if let (Some(bg_tex), Some(slice)) = (
                     self.background_textures.get(id),

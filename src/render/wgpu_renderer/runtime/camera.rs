@@ -182,8 +182,6 @@ impl CameraFrame {
 pub(super) enum ShopInspectLitMeshFelt {
     /// Matches storeroom proportion — shelf props + coins + journal before the hero mesh.
     Dim,
-    /// Full inspect exposure for the focused prop.
-    Subject,
 }
 
 impl WgpuRenderer {
@@ -325,10 +323,6 @@ impl WgpuRenderer {
                             felt_w = 0.0;
                         }
                     }
-                    ShopInspectLitMeshFelt::Subject => {
-                        felt_z = if felt_y > 0.5 { tm[1] } else { 0.0 };
-                        felt_w = if felt_y > 0.5 { tm[2] } else { 0.0 };
-                    }
                 }
             }
         }
@@ -378,22 +372,6 @@ impl WgpuRenderer {
                 view_pos: [cam.cam_pos.x, cam.cam_pos.y, cam.cam_pos.z, 1.0],
             }),
         );
-    }
-
-    pub(super) fn upload_shop_inspect_lit_mesh_subject_ssr(
-        &self,
-        cam: &CameraFrame,
-        ssr_enabled: bool,
-        frame: &crate::render::draw_cmd::UiFrame,
-    ) {
-        let g = self.lit_mesh_ssr_globals(
-            cam,
-            ssr_enabled,
-            frame,
-            Some(ShopInspectLitMeshFelt::Subject),
-        );
-        self.queue
-            .write_buffer(&self.lit_mesh_ssr_buffer, 0, bytemuck::bytes_of(&g));
     }
 }
 

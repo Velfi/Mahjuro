@@ -35,8 +35,8 @@ pub fn push_focus_tooltip_panel_2d(
     let panel_w = (window_w * 0.38).min(520.0);
     let inner_w = (panel_w - pad * 2.0 - border * 2.0).max(80.0);
 
-    let heading_px = typography::size(typography::HEADING, window_h).max(15.0);
-    let body_px = typography::size(typography::BODY, window_h).max(13.0);
+    let heading_px = typography::size(typography::H28, window_h);
+    let body_px = typography::size(typography::H36, window_h);
     let section_gap = 6.0_f32;
 
     let desc_trim = truncate_inspect_text(desc, 400);
@@ -117,7 +117,7 @@ pub fn push_focus_tooltip_panel_2d(
             Tier::Body | Tier::Desc => body_px,
         };
         let h_block = block_height(text, *tier);
-        let font_px = line_h.max(8.0);
+        let font_px = typography::tier_at_most(line_h, window_h);
         match tier {
             Tier::Desc => {
                 let lines =
@@ -164,7 +164,7 @@ pub fn push_floating_relic_flavor_labels(
     let margin_x = window_w * 0.06;
     let band_w = (window_w - 2.0 * margin_x).min(760.0);
     let left = (window_w - band_w) * 0.5;
-    let body_px = typography::size(typography::BODY, window_h).max(24.0);
+    let body_px = typography::size(typography::H45, window_h);
     let line_step = body_px * 1.4;
     let max_lines = 5usize;
     let band_h = (line_step * max_lines as f32 + body_px * 0.5)

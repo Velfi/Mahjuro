@@ -975,6 +975,7 @@ impl<'a> GameEngine<'a> {
                     self.run.apply_tag(tag, Some(&mut self.bus));
                 }
                 self.run.skip_to_next_blind();
+                self.bus.push(GameEvent::RoomGltfBrownout);
                 CommandData::SkipBlind { tag }
             }
         };

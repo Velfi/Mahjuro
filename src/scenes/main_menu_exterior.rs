@@ -297,7 +297,7 @@ impl SceneBehavior for MainMenuExteriorScene {
             format!("Profile {}  —  New", active + 1)
         };
 
-        let profile_h = (typography::size(typography::CAPTION, h) * 1.45).max(15.0);
+        let profile_h = typography::size(typography::H28, h);
         let profile_y = focus_rects
             .first()
             .map(|(_, r)| r[1] - profile_h - h * 0.022)
@@ -311,7 +311,7 @@ impl SceneBehavior for MainMenuExteriorScene {
             focus_nav::push_focus_ring(rect, scale, w, h, &mut quads);
         }
 
-        let menu_font = typography::size(typography::HEADING, h).max(20.0);
+        let menu_font = typography::size(typography::H28, h);
         let label_color = color::PARCHMENT;
         let mut text_labels = vec![
             TextLabel {

@@ -267,6 +267,8 @@ pub enum SfxId {
     FocusDora,
     /// A gameplay round begins.
     RoundStart,
+    /// Player skipped a blind on pick_blind (lights brownout).
+    BlindSkipped,
     /// The shooting-star cascade transition fires (dramatic scene change).
     StarShimmer,
     /// Relic / zodiac / talisman purchased in the shop.
@@ -370,6 +372,7 @@ pub fn all_sfx_ids() -> &'static [SfxId] {
         SfxId::FocusYakuTablet,
         SfxId::FocusDora,
         SfxId::RoundStart,
+        SfxId::BlindSkipped,
         SfxId::StarShimmer,
         SfxId::Purchase,
         SfxId::Sell,
@@ -444,6 +447,7 @@ impl SfxId {
             SfxId::FocusYakuTablet => "kenney_interface-sounds/Audio/scroll_003.ogg",
             SfxId::FocusDora => "kenney_interface-sounds/Audio/glass_001.ogg",
             SfxId::RoundStart => "kenney_interface-sounds/Audio/confirmation_004.ogg",
+            SfxId::BlindSkipped => "kenney_interface-sounds/Audio/glitch_004.ogg",
             SfxId::StarShimmer => "kenney_interface-sounds/Audio/glass_005.ogg",
             SfxId::Purchase => "coindrop.ogg",
             SfxId::Sell => "kenney_interface-sounds/Audio/confirmation_002.ogg",

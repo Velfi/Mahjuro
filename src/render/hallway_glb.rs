@@ -28,6 +28,24 @@ pub const BTN_PLAY_ROUND: &str = "btn_play_round";
 pub const BTN_PLAY_BOSS: &str = "btn_play_boss";
 pub const BTN_SKIP_ROUND: &str = "btn_skip_round";
 
+/// glTF mesh node for pick-blind hallway wall panels (tinted per run via [`HallwayDistortion::bow`]).
+pub const HALLWAY_WALLS_NODE: &str = "walls";
+
+/// `COLOR_0.a` on [`HALLWAY_WALLS_NODE`] — `shop_glb.wgsl` multiplies albedo by `bow.rgb` (alpha treated as 1).
+pub const HALLWAY_WALL_TINT_COLOR_TAG: f32 = 3.0;
+
+/// Linear RGB tints (blue, yellow, green, red, purple, orange, pink, brown).
+const HALLWAY_WALL_TINTS: [[f32; 3]; 8] = [
+    [0.35, 0.55, 0.95],
+    [0.95, 0.82, 0.28],
+    [0.38, 0.78, 0.42],
+    [0.92, 0.35, 0.32],
+    [0.68, 0.42, 0.88],
+    [0.95, 0.52, 0.22],
+    [0.95, 0.55, 0.75],
+    [0.72, 0.48, 0.32],
+];
+
 #[inline]
 fn pick_blind_embedded_camera_doc(
     cpu: &RoomGlbCpu,
@@ -75,21 +93,17 @@ pub const HALLWAY_ENV_AMBIENT_SCALE_MIN: f32 = 0.085;
 
 // ── Pick-blind hallway vertex distortion (`shop_glb.wgsl` / `tile_3d.wgsl` @group(0) @binding(8)) ──
 
-/// Base bend amplitude along the lateral axis (world units, scaled by mask / intensity).
-pub const HALLWAY_BOW_AMOUNT: f32 = 0.070;
-/// Spatial frequency of the bow along corridor depth (1 / world unit).
-pub const HALLWAY_BOW_FREQ: f32 = 0.50;
 /// Inward/outward wall pulse amplitude (world units).
 pub const HALLWAY_BREATHE_AMOUNT: f32 = 0.011;
 pub const HALLWAY_BREATHE_FREQ: f32 = 0.78;
 /// How strongly ceiling vertices drop toward the floor (per unit above threshold Z).
-pub const HALLWAY_CEILING_SQUEEZE: f32 = 0.055;
+pub const HALLWAY_CEILING_SQUEEZE: f32 = 0.11;
 /// World Z above which ceiling squeeze starts (see `HallwayDistortion::ceiling[1]`).
 pub const HALLWAY_CEILING_THRESHOLD_Z: f32 = 0.72;
 /// Push vertices along the depth axis (fake length).
 pub const HALLWAY_STRETCH_AMOUNT: f32 = 0.07;
 /// Max twist angle (radians) at the far mask.
-pub const HALLWAY_TWIST_RAD: f32 = 0.095;
+pub const HALLWAY_TWIST_RAD: f32 = 0.19;
 /// `smoothstep` depth range in world units along the chosen depth axis (+Y for hallway.glb).
 /// Used as a fallback until [`hallway_distortion_apply_glb_depth_extent`] overwrites [`HallwayDistortion::mask`].z/w.
 pub const HALLWAY_DEPTH_MASK_START: f32 = 0.12;
@@ -97,11 +111,37 @@ pub const HALLWAY_DEPTH_MASK_END: f32 = 14.0;
 /// Depth axis selector for `mask[0]`: 0 = +X, 1 = +Y, 2 = +Z (after applying `mask[1]` sign).
 pub const HALLWAY_DEPTH_AXIS: f32 = 1.0;
 pub const HALLWAY_DEPTH_SIGN: f32 = 1.0;
-pub const HALLWAY_DRIFT_SPEED: f32 = 0.018;
+pub const HALLWAY_DRIFT_SPEED: f32 = 0.036;
 pub const HALLWAY_PULSE_SPEED: f32 = 0.9;
-pub const HALLWAY_PULSE_AMOUNT: f32 = 0.12;
-pub const HALLWAY_CEILING_PULSE_AMT: f32 = 0.22;
+pub const HALLWAY_PULSE_AMOUNT: f32 = 0.24;
+pub const HALLWAY_CEILING_PULSE_AMT: f32 = 0.44;
 pub const HALLWAY_CEILING_PULSE_FREQ: f32 = 1.4;
+/// Fallback lateral half-width (world units) for twist until GLB bounds overwrite [`HallwayDistortion::flags`].w.
+pub const HALLWAY_LATERAL_HALF_WIDTH: f32 = 2.0;
+/// Lateral wall ripple amplitude (world units along corridor `lateral` axis).
+pub const HALLWAY_RIPPLE_AMOUNT: f32 = 0.019;
+/// Wave count along normalized corridor depth `u` (see `ripple.y` in WGSL).
+pub const HALLWAY_RIPPLE_WAVES: f32 = 5.0;
+/// Traveling ripple speed (rad/s; scaled by `HALLWAY_ANIM_TIME_SCALE` in shader).
+pub const HALLWAY_RIPPLE_SPEED: f32 = 1.2;
+/// `mix(standing, traveling, w)` — higher = more travel down the hall.
+pub const HALLWAY_RIPPLE_TRAVEL_MIX: f32 = 0.7;
+/// Wall barrel-bow displacement at the wall surface (world units; shader `bow.w`).
+pub const HALLWAY_BALLOON_AMOUNT: f32 = 0.065;
+/// World Z for vertical barrel midline in WGSL (`mix(floor, ceiling, 0.5)`); keep in sync with shaders.
+#[allow(dead_code)]
+pub const HALLWAY_BALLOON_FLOOR_Z: f32 = 0.08;
+
+// Left/right in `shop_glb.wgsl` / `tile_3d.wgsl` (all use the same lateral frame):
+// - `lateral = normalize(cross(depth_axis, world_up))` (handedness follows depth sign in `mask.y`).
+// - `side_c = dot(world, lateral) - stretch.y` with `stretch.y` = glTF root lateral coord (not AABB center).
+// - `side_n = clamp(side_c / flags.w, −1, 1)`; `flags.w` = lateral corridor half-width (bounds span).
+// - Twist: normalized `side_n`; breathe uses world `side_c` (same center, world-unit amplitude).
+// - `twist.w` flips rotation hand; breathe/pulse depth phase uses normalized `u` along `mask` span.
+// - `stretch.z` stores glTF root depth (CPU). `bow.rgb` = per-run wall tint; `bow.w` = balloon amp.
+// - `ripple` = lateral waves.
+// - Stretch displaces along depth × `u` (not a rigid translate).
+// - `ripple`: x = amplitude, y = waves along `u`, z = travel speed, w = travel mix (0 standing .. 1 travel).
 
 #[inline]
 fn hallway_depth_axis_doc() -> Vec3 {
@@ -120,13 +160,15 @@ fn hallway_depth_axis_doc() -> Vec3 {
 #[repr(C)]
 #[derive(Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct HallwayDistortion {
-    /// x = bow lateral scale, y = spatial frequency, z = bow direction sign (±1), w = bow phase (rad).
+    /// Pick-blind wall tint (linear RGB). `w` = wall barrel-bow strength (× lateral half-width).
+    /// Only meshes tagged with [`HALLWAY_WALL_TINT_COLOR_TAG`] multiply albedo by `bow.rgb`.
     pub bow: [f32; 4],
     /// x = breathe amplitude, y = angular frequency, z = phase (rad), w = side falloff power.
     pub breathe: [f32; 4],
     /// x = squeeze strength, y = ceiling Z threshold, z = ceiling pulse amount, w = ceiling pulse freq.
     pub ceiling: [f32; 4],
-    /// x = stretch along depth axis, y = mask start, z = mask end, w = stretch bias scale.
+    /// x = stretch along depth axis, y = glTF-root lateral coord (`dot(origin, lateral)` in world),
+    /// z = glTF-root depth coord (`dot(origin, depth_axis)` for `y_rel`), w = stretch bias scale.
     pub stretch: [f32; 4],
     /// x = max twist magnitude (rad), y = twist mask power, z = depth mask profile (0 = legacy
     /// smoothstep ramp along +depth; 1 = bell curve centered on [`HallwayDistortion::mask`] z/w
@@ -141,8 +183,11 @@ pub struct HallwayDistortion {
     pub time_pulse: [f32; 4],
     /// x = enabled (1), y = boss pressure 0..1 (`1` on boss blind — red-shifted punctual lights;
     /// vertex warp scales this by 0.25 in WGSL so distortion strength stays tuned), z =
-    /// global_intensity, w = seed hash unit 0..1 (unused in shaders; keeps GPU block layout).
+    /// global_intensity, w = corridor lateral half-width in world units (`(lat_max − lat_min) / 2`).
     pub flags: [f32; 4],
+    /// x = lateral ripple amplitude, y = wave count along depth `u`, z = travel speed (rad/s),
+    /// w = travel mix (`0` = standing corrugation, `1` = waves march down the hall).
+    pub ripple: [f32; 4],
 }
 
 #[inline]
@@ -166,16 +211,46 @@ fn u01(x: u32) -> f32 {
     (x as f32) * (1.0 / 4294967296.0)
 }
 
+#[inline]
+fn wall_tint_seed_hash(run_number: u32, ante: u32) -> u32 {
+    let mut x = run_number.wrapping_mul(0x7F4A_7C15u32) ^ ante.wrapping_mul(0x1656_67B1u32);
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    x
+}
+
+/// Number of preset wall tints in [`hallway_wall_tint_rgb`].
+pub const HALLWAY_WALL_TINT_COUNT: usize = HALLWAY_WALL_TINTS.len();
+
+/// One of eight hallway wall tints, stable for a given run and ante.
+#[inline]
+pub fn hallway_wall_tint_rgb(run_number: u32, ante: u32) -> [f32; 3] {
+    hallway_wall_tint_by_index((wall_tint_seed_hash(run_number, ante) as usize) % HALLWAY_WALL_TINT_COUNT)
+}
+
+/// Preset wall tint by index `0..[`HALLWAY_WALL_TINT_COUNT`]`.
+#[inline]
+pub fn hallway_wall_tint_by_index(idx: usize) -> [f32; 3] {
+    HALLWAY_WALL_TINTS[idx % HALLWAY_WALL_TINT_COUNT]
+}
+
+fn tag_hallway_walls_for_runtime_tint(cpu: &mut RoomGlbCpu) {
+    for ep in &mut cpu.environment_primitives {
+        if ep.gltf_node_name.as_deref() == Some(HALLWAY_WALLS_NODE) {
+            for v in &mut ep.mesh.vertices {
+                v.color[3] = HALLWAY_WALL_TINT_COLOR_TAG;
+            }
+        }
+    }
+}
+
 impl HallwayDistortion {
     /// Build distortion parameters for the pick-blind hallway. Wall-clock time (seconds) is
     /// merged in [`WgpuRenderer::write_hallway_environment_uniforms`](crate::render::wgpu_renderer::WgpuRenderer).
     pub fn from_pick_blind(blind: BlindKind, run_number: u32, ante: u32) -> Self {
         let h = loop_seed_hash(run_number, ante, blind);
-        let bow_dir = if h & 1 == 0 { -1.0 } else { 1.0 };
-        let bow_phase = u01(h.rotate_left(3)) * std::f32::consts::TAU;
         let breathe_phase = u01(h.rotate_left(7)) * std::f32::consts::TAU;
-        let pulse_phase_off = u01(h.rotate_left(11)) * std::f32::consts::TAU;
-        let bow_freq_jitter = 0.88 + u01(h.rotate_left(13)) * 0.28;
         let breathe_freq_jitter = 0.88 + u01(h.rotate_left(17)) * 0.22;
         let stretch_bias = 0.82 + u01(h.rotate_left(19)) * 0.36;
         let twist_bias_pow = 0.72 + u01(h.rotate_left(23)) * 0.38;
@@ -184,24 +259,27 @@ impl HallwayDistortion {
         } else {
             -1.0f32
         };
+        let ripple_waves = HALLWAY_RIPPLE_WAVES * (0.9 + u01(h.rotate_left(11)) * 0.2);
+        let ripple_travel_mix =
+            (HALLWAY_RIPPLE_TRAVEL_MIX + (u01(h.rotate_left(13)) - 0.5) * 0.12).clamp(0.55, 0.85);
 
-        let (global_intensity, bow_mul, breathe_mul, stretch_mul, twist_mul) = match blind {
-            BlindKind::Small => (0.58, 0.85, 0.58, 0.7, 0.52),
-            BlindKind::Big => (0.74, 0.95, 0.68, 0.85, 0.72),
-            BlindKind::Boss => (0.25, 1.12, 0.82, 1.15, 1.08),
-        };
+        let (global_intensity, breathe_mul, stretch_mul, twist_mul, ripple_mul, balloon_mul) =
+            match blind {
+                BlindKind::Small => (0.58, 0.58, 0.7, 0.52, 0.5, 0.5),
+                BlindKind::Big => (0.74, 0.68, 0.85, 0.72, 0.75, 0.75),
+                BlindKind::Boss => (0.25, 0.82, 1.15, 1.08, 0.4, 1.0),
+            };
         let boss_pressure = match blind {
             BlindKind::Boss => 1.0,
             BlindKind::Small | BlindKind::Big => 0.0,
         };
+        let wall_tint = hallway_wall_tint_rgb(run_number, ante);
+        let ripple_amp = (HALLWAY_RIPPLE_AMOUNT * ripple_mul * global_intensity)
+            .max(HALLWAY_RIPPLE_AMOUNT * 0.4);
+        let balloon_amp = HALLWAY_BALLOON_AMOUNT * balloon_mul * global_intensity;
 
         Self {
-            bow: [
-                HALLWAY_BOW_AMOUNT * bow_mul * global_intensity,
-                HALLWAY_BOW_FREQ * bow_freq_jitter,
-                bow_dir,
-                bow_phase + pulse_phase_off * 0.15,
-            ],
+            bow: [wall_tint[0], wall_tint[1], wall_tint[2], balloon_amp],
             breathe: [
                 HALLWAY_BREATHE_AMOUNT * breathe_mul * global_intensity,
                 HALLWAY_BREATHE_FREQ * breathe_freq_jitter,
@@ -216,8 +294,8 @@ impl HallwayDistortion {
             ],
             stretch: [
                 HALLWAY_STRETCH_AMOUNT * stretch_mul * global_intensity,
-                HALLWAY_DEPTH_MASK_START,
-                HALLWAY_DEPTH_MASK_END,
+                0.0,
+                0.0,
                 stretch_bias,
             ],
             twist: [
@@ -238,18 +316,41 @@ impl HallwayDistortion {
                 HALLWAY_PULSE_SPEED,
                 HALLWAY_PULSE_AMOUNT * global_intensity,
             ],
-            flags: [1.0, boss_pressure, global_intensity, u01(h.rotate_left(29))],
+            flags: [
+                1.0,
+                boss_pressure,
+                global_intensity,
+                HALLWAY_LATERAL_HALF_WIDTH,
+            ],
+            ripple: [
+                ripple_amp,
+                ripple_waves,
+                HALLWAY_RIPPLE_SPEED,
+                ripple_travel_mix,
+            ],
         }
     }
 
     /// Extra amplitude / timing scales from the debug hallway overlay (`HallwayDistortionDebugSnapshot`).
     pub fn apply_debug_snapshot_scales(&mut self, s: HallwayDistortionDebugSnapshot) {
         let g = s.global_mul.max(0.0);
-        self.bow[0] *= s.bow_mul.max(0.0) * g;
+        if s.wall_tint > 0 {
+            let idx = (s.wall_tint as usize).saturating_sub(1) % HALLWAY_WALL_TINT_COUNT;
+            let tint = hallway_wall_tint_by_index(idx);
+            self.bow[0] = tint[0];
+            self.bow[1] = tint[1];
+            self.bow[2] = tint[2];
+        }
         self.breathe[0] *= s.breathe_mul.max(0.0) * g;
         self.ceiling[0] *= s.ceiling_mul.max(0.0) * g;
         self.stretch[0] *= s.stretch_mul.max(0.0) * g;
         self.twist[0] *= s.twist_mul.max(0.0) * g;
+        self.flags[2] *= g;
+        self.ripple[0] *= s.ripple_mul.max(0.0) * g;
+        self.ripple[1] *= s.ripple_waves_mul.max(0.1);
+        self.ripple[2] *= s.ripple_mul.max(0.0).sqrt().max(0.25);
+        self.ripple[3] = (self.ripple[3] * s.ripple_travel_mul.max(0.0)).clamp(0.0, 1.0);
+        self.bow[3] *= s.balloon_mul.max(0.0) * g;
         self.time_pulse[3] *= s.pulse_mul.max(0.0);
         self.time_pulse[1] *= s.drift_mul.max(0.0);
         self.ceiling[2] *= s.pulse_mul.max(0.0).min(3.0);
@@ -264,13 +365,19 @@ pub struct HallwayDistortionDebugSnapshot {
     pub seed_run: u32,
     pub seed_ante: u32,
     pub global_mul: f32,
-    pub bow_mul: f32,
     pub breathe_mul: f32,
     pub ceiling_mul: f32,
     pub stretch_mul: f32,
     pub twist_mul: f32,
     pub pulse_mul: f32,
     pub drift_mul: f32,
+    pub ripple_mul: f32,
+    pub balloon_mul: f32,
+    /// `0` = seed tint; `1..=`[`HALLWAY_WALL_TINT_COUNT`] = forced palette index + 1.
+    pub wall_tint: u8,
+    pub ripple_waves_mul: f32,
+    /// Scales `ripple.w` travel mix (`0` = standing, `1` = marching).
+    pub ripple_travel_mul: f32,
 }
 
 impl HallwayDistortionDebugSnapshot {
@@ -337,9 +444,47 @@ pub fn with_hallway_glb_cpu<R>(f: impl FnOnce(Option<&RoomGlbCpu>) -> R) -> R {
     }
 }
 
-/// Overwrites [`HallwayDistortion::mask`] `.z`/`.w` with world-space depth extent of the
-/// hallway GLB (along [`hallway_depth_axis_doc`]) and sets [`HallwayDistortion::twist`].z to 1
-/// so shaders apply a **center-weighted** mask along that span. No-op if bounds are missing.
+/// Lateral normalization for `side_n` from the `walls` mesh: max |offset| from `lat_ref`
+/// (glTF-root lateral plane). Using mesh width or env AABB span inflates `flags[3]` when the
+/// walls geometry includes center trim or oversized quads, which zeros ripple/twist on panels.
+fn hallway_walls_lateral_half_width(
+    cpu: &RoomGlbCpu,
+    model: glam::Mat4,
+    lateral_n: Vec3,
+    lat_ref: f32,
+) -> Option<f32> {
+    let walls = cpu
+        .environment_primitives
+        .iter()
+        .find(|ep| ep.gltf_node_name.as_deref() == Some(HALLWAY_WALLS_NODE))?;
+    let mut dists: Vec<f32> = walls
+        .mesh
+        .vertices
+        .iter()
+        .map(|v| {
+            let side_c = model.transform_point3(Vec3::from(v.position)).dot(lateral_n) - lat_ref;
+            side_c.abs()
+        })
+        .collect();
+    if dists.is_empty() {
+        return None;
+    }
+    dists.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let p50 = dists[dists.len() / 2];
+    let p90_idx = ((dists.len() as f32 * 0.9).floor() as usize).min(dists.len() - 1);
+    let p90 = dists[p90_idx];
+    // Bimodal walls mesh (panel verts near the corridor + stray far verts): prefer the inner cluster.
+    let half = if p90 > p50 * 4.0 { p50 } else { p90 };
+    if half > 1e-4 {
+        Some(half.max(0.25).min(24.0))
+    } else {
+        None
+    }
+}
+
+/// Fills depth mask span from env bounds, sets lateral/depth reference to the **glTF root**
+/// (`model_matrix * vec3(0)` — not the AABB center used to center the drawn mesh), and sets
+/// lateral half-width from the [`HALLWAY_WALLS_NODE`] mesh when present (else env bounds span).
 pub fn hallway_distortion_apply_glb_depth_extent(
     dist: &mut HallwayDistortion,
     window_h: f32,
@@ -349,32 +494,57 @@ pub fn hallway_distortion_apply_glb_depth_extent(
         let Some(cpu) = opt else {
             return;
         };
-        let Some(bounds) = cpu.environment_bounds_doc else {
-            return;
-        };
         let m = shop_glb::shop_env_model_matrix_from_cpu(window_h, env_height_scale, cpu);
+        let origin_world = m.transform_point3(Vec3::ZERO);
+
         let axis_w = m.transform_vector3(hallway_depth_axis_doc());
         let an = axis_w.length();
         if an < 1e-8 {
             return;
         }
         let axis_n = axis_w / an;
+        let mut lateral_n = axis_n.cross(Vec3::Z);
+        if lateral_n.length_squared() < 1e-8 {
+            lateral_n = Vec3::X;
+        } else {
+            lateral_n = lateral_n.normalize();
+        }
+
+        // Symmetry plane for breathe / twist: glTF local origin, not bounds midpoint.
+        dist.stretch[1] = origin_world.dot(lateral_n);
+        dist.stretch[2] = origin_world.dot(axis_n);
+
+        let Some(bounds) = cpu.environment_bounds_doc else {
+            return;
+        };
+
         let mut d_min = f32::INFINITY;
         let mut d_max = f32::NEG_INFINITY;
+        let mut lat_min = f32::INFINITY;
+        let mut lat_max = f32::NEG_INFINITY;
         for c in bounds.corners() {
             let p = m.transform_point3(c);
             let d = p.dot(axis_n);
             d_min = d_min.min(d);
             d_max = d_max.max(d);
+            let lat = p.dot(lateral_n);
+            lat_min = lat_min.min(lat);
+            lat_max = lat_max.max(lat);
         }
-        if !(d_max > d_min + 1e-4) {
-            return;
+        if d_max > d_min + 1e-4 {
+            let span = d_max - d_min;
+            let pad = span * 0.04;
+            dist.mask[2] = d_min - pad;
+            dist.mask[3] = d_max + pad;
+            dist.twist[2] = 1.0;
         }
-        let span = d_max - d_min;
-        let pad = span * 0.04;
-        dist.mask[2] = d_min - pad;
-        dist.mask[3] = d_max + pad;
-        dist.twist[2] = 1.0;
+        if let Some(wall_half) =
+            hallway_walls_lateral_half_width(cpu, m, lateral_n, dist.stretch[1])
+        {
+            dist.flags[3] = wall_half;
+        } else if lat_max > lat_min + 1e-4 {
+            dist.flags[3] = (lat_max - lat_min) * 0.5;
+        }
     });
 }
 
@@ -419,6 +589,7 @@ pub fn load_hallway_glb_from_bytes(data: &[u8]) -> anyhow::Result<RoomGlbCpu> {
         &HallwayRoomWalkHooks,
     )?;
     cpu.collision_meshes.clear();
+    tag_hallway_walls_for_runtime_tint(&mut cpu);
     Ok(cpu)
 }
 
@@ -633,7 +804,113 @@ mod tests {
     use glam::Vec3;
 
     use super::load_hallway_glb_from_bytes;
+    use crate::core::rules::BlindKind;
     use crate::render::shop_glb;
+    use crate::render::hallway_glb::{
+        HallwayDistortion, HALLWAY_RIPPLE_AMOUNT, HALLWAY_RIPPLE_SPEED, HALLWAY_RIPPLE_WAVES,
+    };
+
+    #[test]
+    fn hallway_walls_vertices_have_ripple_wall_weight() {
+        let Some(file) = crate::asset_path::get("3d/hallway.glb") else {
+            eprintln!("skip: no hallway.glb");
+            return;
+        };
+        let cpu = load_hallway_glb_from_bytes(&file.data).expect("decode");
+        let walls = cpu
+            .environment_primitives
+            .iter()
+            .find(|ep| ep.gltf_node_name.as_deref() == Some(super::HALLWAY_WALLS_NODE))
+            .expect("walls primitive");
+        let window_h = 1080.0f32;
+        let env_h = 1.0f32;
+        let mut dist = HallwayDistortion::from_pick_blind(BlindKind::Big, 1, 1);
+        super::hallway_distortion_apply_glb_depth_extent(&mut dist, window_h, env_h);
+        let m = shop_glb::shop_env_model_matrix_from_cpu(window_h, env_h, &cpu);
+        let axis_doc = super::hallway_depth_axis_doc();
+        let axis_n = m.transform_vector3(axis_doc).normalize();
+        let mut lateral_n = axis_n.cross(Vec3::Z);
+        if lateral_n.length_squared() < 1e-8 {
+            lateral_n = Vec3::X;
+        } else {
+            lateral_n = lateral_n.normalize();
+        }
+        let lat_half = dist.flags[3].max(0.25);
+        let lat_ref = dist.stretch[1];
+        let d0 = dist.mask[2];
+        let d1 = dist.mask[3];
+        let span = (d1 - d0).max(1e-4);
+        let ripple_wall_power = 1.28f32;
+        let mut min_ripple_wall = f32::INFINITY;
+        let mut max_ripple_wall = 0.0f32;
+        let mut min_u = f32::INFINITY;
+        let mut max_u = 0.0f32;
+        for v in &walls.mesh.vertices {
+            let p = m.transform_point3(Vec3::from(v.position));
+            let side_c = p.dot(lateral_n) - lat_ref;
+            let ripple_wall = side_c.abs().max(1e-4).powf(ripple_wall_power);
+            min_ripple_wall = min_ripple_wall.min(ripple_wall);
+            max_ripple_wall = max_ripple_wall.max(ripple_wall);
+            let u = ((p.dot(axis_n) - d0) / span).clamp(0.0, 1.0);
+            min_u = min_u.min(u);
+            max_u = max_u.max(u);
+        }
+        eprintln!(
+            "walls ripple_wall [{min_ripple_wall:.4}, {max_ripple_wall:.4}] u [{min_u:.4}, {max_u:.4}] lat_half={lat_half}"
+        );
+        assert!(
+            lat_half <= 48.0,
+            "flags.w should be p90 |side_c| capped; got {lat_half}"
+        );
+        assert!(
+            max_ripple_wall > 0.5,
+            "walls should reach meaningful ripple weight; got max_ripple_wall={max_ripple_wall}"
+        );
+        assert!(
+            max_u - min_u > 0.05,
+            "u should vary along corridor on wall mesh; span={}",
+            max_u - min_u
+        );
+        let balloon_amp = dist.bow[3];
+        let mut max_bulge = 0.0f32;
+        for v in &walls.mesh.vertices {
+            let p = m.transform_point3(Vec3::from(v.position));
+            let wall_dist = (p.dot(lateral_n) - lat_ref).abs();
+            let on_wall = test_smoothstep(0.12, 1.35, wall_dist);
+            let u = ((p.dot(axis_n) - d0) / span).clamp(0.0, 1.0);
+            let depth_barrel = (u * std::f32::consts::PI).sin().max(0.22);
+            let z_mid = (super::HALLWAY_BALLOON_FLOOR_Z + dist.ceiling[1]) * 0.5;
+            let z_half = ((dist.ceiling[1] - super::HALLWAY_BALLOON_FLOOR_Z) * 0.5).max(0.18);
+            let z_n = ((p.z - z_mid) / z_half).clamp(-1.0, 1.0);
+            let vert_barrel = (1.0 - z_n * z_n).max(0.4);
+            max_bulge = max_bulge.max(balloon_amp * on_wall * depth_barrel * vert_barrel);
+        }
+        assert!(
+            max_bulge > 0.002,
+            "wall barrel bow should displace wall verts; max_bulge={max_bulge} bow.w={balloon_amp}"
+        );
+    }
+
+    #[inline]
+    fn test_smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+        let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    }
+
+    #[test]
+    fn pick_blind_distortion_populates_lateral_ripple() {
+        let d = HallwayDistortion::from_pick_blind(BlindKind::Big, 3, 2);
+        assert!(d.ripple[0] > 1e-5, "ripple amplitude");
+        assert!(d.ripple[1] >= HALLWAY_RIPPLE_WAVES * 0.89);
+        assert!((d.ripple[2] - HALLWAY_RIPPLE_SPEED).abs() < 1e-5);
+        assert!(d.ripple[3] >= 0.55 && d.ripple[3] <= 0.85);
+        let boss = HallwayDistortion::from_pick_blind(BlindKind::Boss, 3, 2);
+        assert!(
+            boss.ripple[0] >= HALLWAY_RIPPLE_AMOUNT * 0.39,
+            "boss ripple keeps a visibility floor"
+        );
+        assert!(boss.ripple[0] < d.ripple[0]);
+    }
 
     /// Pick-blind room (`hallway.glb`) — documents how many environment primitives carry glTF
     /// emissive; re-run after authoring so the count reflects `emissiveTexture` / factor.
@@ -656,6 +933,35 @@ mod tests {
         assert!(
             ratio < legacy_ratio * 0.05,
             "far/near ratio should be much tighter than legacy {legacy_ratio:.0}, got {ratio:.1}"
+        );
+    }
+
+    #[test]
+    fn pick_blind_hallway_has_walls_primitive() {
+        let Some(file) = crate::asset_path::get("3d/hallway.glb") else {
+            eprintln!(
+                "skip pick_blind_hallway_has_walls_primitive: no 3d/hallway.glb (bake packs or set MAHJURO_ASSETS)"
+            );
+            return;
+        };
+        let cpu = load_hallway_glb_from_bytes(&file.data).expect("hallway.glb decode");
+        let walls = cpu
+            .environment_primitives
+            .iter()
+            .find(|ep| ep.gltf_node_name.as_deref() == Some(super::HALLWAY_WALLS_NODE));
+        assert!(
+            walls.is_some(),
+            "hallway.glb must include a mesh node named `{}`",
+            super::HALLWAY_WALLS_NODE
+        );
+        assert!(
+            walls
+                .unwrap()
+                .mesh
+                .vertices
+                .iter()
+                .all(|v| (v.color[3] - super::HALLWAY_WALL_TINT_COLOR_TAG).abs() < 1e-4),
+            "walls vertices must carry the hallway wall tint tag"
         );
     }
 

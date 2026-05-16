@@ -1,15 +1,14 @@
-//! Scrollable 2D stats panel for Archive Chronicle (no 3D folio plaques).
+//! Scrollable 2D career stats for Archive Chronicle (no 3D folio plaques).
 //!
-//! **Art direction** — “Nerv instrument panel” over the dimmed archive room:
-//! deep indigo field, hazard-orange corner frame + rules, capped-resolution
-//! score trace (no hundred-column spaghetti), and semantic cool green / red
-//! for wins vs losses. Tokens live in [`crate::render::theme::color`] as
-//! `CHRONICLE_*` so the House walnut palette stays intact elsewhere.
+//! Uses the House walnut / brass palette ([`crate::render::theme::color`]) so the
+//! panel matches modals, tooltips, and the rest of the game. Career summary lines
+//! that used to float over the archive room live here exclusively.
 
 use crate::core::progression::{PlayerProgress, RunOutcome, RunRecord};
 use crate::core::yaku::YakuKind;
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, TextAlign, TextLabel};
+use crate::scenes::archive_career;
 
 /// Cap score history columns so wide profiles stay legible on TV.
 const MAX_SCORE_BUCKETS: usize = 48;
@@ -48,14 +47,24 @@ fn bucket_peak_scores(runs: &[&RunRecord]) -> (Vec<u64>, u64) {
 }
 
 fn layout_constants(h: f32) -> (f32, f32, f32, f32, f32, f32, f32) {
-    let body = typography::size(typography::BODY, h).max(22.0);
-    let title_px = (body * 1.05).max(23.0);
+    let body = typography::size(typography::H36, h);
+    let title_px = typography::size(typography::H32, h);
     let line_h = (body / 0.55).ceil() + 4.0;
     let title_h = (title_px / 0.55).ceil() + 4.0;
     let gap = (h * 0.018).max(12.0);
     let chart_h = (h * 0.13).max(96.0);
     let bar_row_h = (h * 0.032).max(24.0);
     (body, title_px, line_h, title_h, gap, chart_h, bar_row_h)
+}
+
+/// Vertical space for the career summary block (header, frieze lines, tutorial note).
+fn career_section_height(progress: &PlayerProgress, line_h: f32, title_h: f32, gap: f32) -> f32 {
+    let line_count = archive_career::career_frieze_lines(progress).len().max(1);
+    title_h
+        + gap * 0.85
+        + line_count as f32 * (line_h + gap * 0.45)
+        + line_h * 1.05
+        + gap * 1.35
 }
 
 /// Inner inset from panel edges — must match [`push_chronicle_dashboard`].
@@ -71,9 +80,10 @@ pub fn chronicle_dashboard_content_height(w: f32, h: f32, progress: &PlayerProgr
     let scale = metrics::scene_scale(w, h);
     let (_body, _title_px, line_h, title_h, gap, chart_h, bar_row_h) = layout_constants(h);
     let bottom_pad = (scale * 10.0).max(8.0);
-    let mut doc_y = gap + line_h * 0.85;
+    let mut doc_y = gap;
+    doc_y += career_section_height(progress, line_h, title_h, gap);
     if runs.is_empty() {
-        doc_y += line_h * 1.05 + line_h * 2.4;
+        doc_y += title_h + gap * 0.85 + line_h * 2.4;
         return doc_y + bottom_pad;
     }
     doc_y += line_h * 1.05;
@@ -116,8 +126,8 @@ fn push_quad(out: &mut Vec<GpuInstance>, rect: [f32; 4], color: [f32; 4]) {
     });
 }
 
-/// Fixed Eva-style corner ticks on the **viewport** panel (not scrolled).
-fn push_eva_viewport_frame(
+/// Brass corner ticks on the **viewport** panel (not scrolled).
+fn push_panel_viewport_frame(
     out: &mut Vec<GpuInstance>,
     px: f32,
     py: f32,
@@ -128,24 +138,19 @@ fn push_eva_viewport_frame(
 ) {
     let t = (14.0 * metrics::scene_scale(w, h)).clamp(9.0, 22.0);
     let th = 2.5_f32.max(h * 0.0028);
-    let c = color::CHRONICLE_ORANGE;
-    // Top-left
+    let c = color::alpha(color::BRASS, 0.85);
     push_quad(out, [px, py, t, th], c);
     push_quad(out, [px, py, th, t], c);
-    // Top-right
     push_quad(out, [px + pw - t, py, t, th], c);
     push_quad(out, [px + pw - th, py, th, t], c);
-    // Bottom-left
     push_quad(out, [px, py + ph - th, t, th], c);
     push_quad(out, [px, py + ph - t, th, t], c);
-    // Bottom-right
     push_quad(out, [px + pw - t, py + ph - th, t, th], c);
     push_quad(out, [px + pw - th, py + ph - t, th, t], c);
-    // Top + bottom rules
     push_quad(
         out,
         [px + t * 0.35, py, (pw - t * 0.7).max(0.0), th * 0.65],
-        color::alpha(c, 0.55),
+        color::alpha(color::BRASS, 0.4),
     );
     push_quad(
         out,
@@ -155,8 +160,57 @@ fn push_eva_viewport_frame(
             (pw - t * 0.7).max(0.0),
             th * 0.65,
         ],
-        color::alpha(c, 0.55),
+        color::alpha(color::BRASS, 0.4),
     );
+}
+
+/// Career summary formerly drawn as a left frieze over the archive room.
+fn push_career_section(
+    inner_x: f32,
+    inner_top: f32,
+    inner_w: f32,
+    scroll_y: f32,
+    progress: &PlayerProgress,
+    title_px: f32,
+    body: f32,
+    caption_px: f32,
+    line_h: f32,
+    title_h: f32,
+    gap: f32,
+    doc_y: &mut f32,
+    out_labels: &mut Vec<TextLabel>,
+) {
+    out_labels.push(TextLabel {
+        rect: [inner_x, inner_top + *doc_y - scroll_y, inner_w, title_h],
+        text: "CAREER".into(),
+        color: color::GOLD,
+        font_px: Some(title_px),
+        align: TextAlign::Left,
+        ..Default::default()
+    });
+    *doc_y += title_h + gap * 0.85;
+
+    for line in archive_career::career_frieze_lines(progress) {
+        out_labels.push(TextLabel {
+            rect: [inner_x, inner_top + *doc_y - scroll_y, inner_w, line_h],
+            text: line,
+            color: color::alpha(color::PARCHMENT, 0.96),
+            font_px: Some(body),
+            align: TextAlign::Left,
+            ..Default::default()
+        });
+        *doc_y += line_h + gap * 0.45;
+    }
+
+    out_labels.push(TextLabel {
+        rect: [inner_x, inner_top + *doc_y - scroll_y, inner_w, line_h * 1.05],
+        text: archive_career::CHRONICLE_TUTORIAL_NOTE.into(),
+        color: color::alpha(color::STONE, 0.95),
+        font_px: Some(caption_px),
+        align: TextAlign::Left,
+        ..Default::default()
+    });
+    *doc_y += line_h * 1.05 + gap * 1.35;
 }
 
 /// Pushes chart quads and labels into `out_quads` / `out_labels`. Does not push the dimming gradient.
@@ -176,11 +230,12 @@ pub fn push_chronicle_dashboard(
     let inner_top = py + margin;
 
     let (body, title_px, line_h, title_h, gap, chart_h, bar_row_h) = layout_constants(h);
+    let caption_px = typography::size(typography::H42, h);
     let content_h = chronicle_dashboard_content_height(w, h, progress);
+    let grid_line = color::alpha(color::UMBER, 0.55);
 
     let runs = serious_runs_chronological(progress);
 
-    // Solid scrolled substrate — kills translucency stacking with frieze / 3D.
     push_quad(
         out_quads,
         [
@@ -189,21 +244,36 @@ pub fn push_chronicle_dashboard(
             inner_w,
             content_h.max(ph - margin * 2.0),
         ],
-        color::alpha(color::CHRONICLE_INK, 0.96),
+        color::alpha(color::WALNUT_DEEP, 0.96),
     );
 
-    let mut doc_y = gap + line_h * 0.85;
+    let mut doc_y = gap;
+    push_career_section(
+        inner_x,
+        inner_top,
+        inner_w,
+        scroll_y,
+        progress,
+        title_px,
+        body,
+        caption_px,
+        line_h,
+        title_h,
+        gap,
+        &mut doc_y,
+        out_labels,
+    );
 
     if runs.is_empty() {
         out_labels.push(TextLabel {
-            rect: [inner_x, inner_top + doc_y - scroll_y, inner_w, line_h * 0.9],
-            text: "CHRONICLE · NO DATA".into(),
-            color: color::alpha(color::CHRONICLE_ORANGE, 0.95),
-            font_px: Some(title_px * 0.92),
+            rect: [inner_x, inner_top + doc_y - scroll_y, inner_w, title_h],
+            text: "RUN LOG".into(),
+            color: color::GOLD,
+            font_px: Some(title_px),
             align: TextAlign::Left,
             ..Default::default()
         });
-        doc_y += line_h * 1.05;
+        doc_y += title_h + gap * 0.85;
         out_labels.push(TextLabel {
             rect: [
                 inner_x,
@@ -211,18 +281,17 @@ pub fn push_chronicle_dashboard(
                 inner_w,
                 line_h * 2.4,
             ],
-            text: "Complete a non-tutorial run to populate this panel.\nTutorial runs are excluded from the index."
+            text: "Complete a non-tutorial run to populate charts below.\nTutorial runs are excluded from the index."
                 .into(),
             color: color::alpha(color::STONE, 0.98),
             font_px: Some(body),
             align: TextAlign::Left,
             ..Default::default()
         });
-        push_eva_viewport_frame(out_quads, px, py, pw, ph, w, h);
+        push_panel_viewport_frame(out_quads, px, py, pw, ph, w, h);
         return;
     }
 
-    // Eyebrow / tape label
     out_labels.push(TextLabel {
         rect: [
             inner_x,
@@ -235,18 +304,17 @@ pub fn push_chronicle_dashboard(
             runs.len(),
             MAX_SCORE_BUCKETS
         ),
-        color: color::alpha(color::TWILIGHT_GLOW, 0.88),
-        font_px: Some(body * 0.82),
+        color: color::alpha(color::STONE, 0.92),
+        font_px: Some(caption_px),
         align: TextAlign::Left,
         ..Default::default()
     });
     doc_y += line_h * 1.05;
 
-    // ── Score trace ─────────────────────────────────────────────────────
     out_labels.push(TextLabel {
         rect: [inner_x, inner_top + doc_y - scroll_y, inner_w, title_h],
         text: "RUN SCORE — CHRONOLOGICAL PEAK".into(),
-        color: color::CHRONICLE_ORANGE,
+        color: color::GOLD,
         font_px: Some(title_px),
         align: TextAlign::Left,
         ..Default::default()
@@ -259,14 +327,9 @@ pub fn push_chronicle_dashboard(
     let slot = inner_w / bn as f32;
     let col_w = (slot - 3.0).max(2.0);
 
-    // Faint horizontal grid in chart
     for frac in [0.25_f32, 0.5, 0.75] {
         let gy = chart_top + chart_h * frac;
-        push_quad(
-            out_quads,
-            [inner_x, gy, inner_w, 1.0],
-            color::CHRONICLE_GRID,
-        );
+        push_quad(out_quads, [inner_x, gy, inner_w, 1.0], grid_line);
     }
 
     for (i, pk) in peaks.iter().enumerate() {
@@ -277,23 +340,21 @@ pub fn push_chronicle_dashboard(
         push_quad(
             out_quads,
             [x, y0, col_w, bar_h],
-            color::alpha(color::CHRONICLE_TRACE, 0.88),
+            color::alpha(color::BRASS, 0.82),
         );
-        // Hot cap line
         push_quad(
             out_quads,
             [x, y0, col_w, 1.5],
-            color::alpha(color::TALLOW, 0.55),
+            color::alpha(color::CHAMPAGNE, 0.5),
         );
     }
     push_quad(
         out_quads,
         [inner_x, chart_top + chart_h, inner_w, 2.0],
-        color::alpha(color::CHRONICLE_ORANGE, 0.65),
+        color::alpha(color::GOLD, 0.55),
     );
     doc_y += chart_h + gap * 1.75;
 
-    // ── Outcomes ───────────────────────────────────────────────────────
     let mut wins = 0u32;
     let mut losses = 0u32;
     for r in &runs {
@@ -307,7 +368,7 @@ pub fn push_chronicle_dashboard(
     out_labels.push(TextLabel {
         rect: [inner_x, inner_top + doc_y - scroll_y, inner_w, title_h],
         text: "OUTCOME SPLIT".into(),
-        color: color::CHRONICLE_ORANGE,
+        color: color::GOLD,
         font_px: Some(title_px),
         align: TextAlign::Left,
         ..Default::default()
@@ -324,7 +385,7 @@ pub fn push_chronicle_dashboard(
     push_quad(
         out_quads,
         [track_x, bar_y + bar_h * 0.5 - 1.0, track_w, 2.0],
-        color::alpha(color::CHRONICLE_GRID, 0.9),
+        grid_line,
     );
     push_quad(
         out_quads,
@@ -341,13 +402,12 @@ pub fn push_chronicle_dashboard(
         rect: [inner_x, inner_top + doc_y - scroll_y, inner_w, line_h],
         text: format!("WIN {wins}  ·  LOSS {losses}  ·  TOTAL {total_o}"),
         color: color::alpha(color::PARCHMENT, 0.94),
-        font_px: Some(body * 0.92),
+        font_px: Some(caption_px),
         align: TextAlign::Left,
         ..Default::default()
     });
     doc_y += line_h + gap * 1.35;
 
-    // ── Yaku ladder ─────────────────────────────────────────────────────
     let mut yaku: Vec<(YakuKind, u32)> = progress
         .yaku_times_scored
         .iter()
@@ -359,7 +419,7 @@ pub fn push_chronicle_dashboard(
     out_labels.push(TextLabel {
         rect: [inner_x, inner_top + doc_y - scroll_y, inner_w, title_h],
         text: "YAKU FREQUENCY — CAREER".into(),
-        color: color::CHRONICLE_ORANGE,
+        color: color::GOLD,
         font_px: Some(title_px),
         align: TextAlign::Left,
         ..Default::default()
@@ -374,13 +434,13 @@ pub fn push_chronicle_dashboard(
         push_quad(
             out_quads,
             [inner_x, row_top + bar_row_h, inner_w, 1.0],
-            color::alpha(color::CHRONICLE_GRID, 0.45),
+            color::alpha(color::UMBER, 0.45),
         );
         out_labels.push(TextLabel {
             rect: [inner_x, row_top, label_w, bar_row_h],
             text: yk.name().to_uppercase(),
             color: color::alpha(color::STONE, 0.98),
-            font_px: Some(body * 0.88),
+            font_px: Some(caption_px),
             align: TextAlign::Left,
             ..Default::default()
         });
@@ -409,21 +469,26 @@ pub fn push_chronicle_dashboard(
             ],
             text: format!("{count}"),
             color: color::alpha(color::PARCHMENT, 0.95),
-            font_px: Some(body * 0.95),
+            font_px: Some(body),
             align: TextAlign::Left,
             ..Default::default()
         });
         doc_y += bar_row_h + 5.0;
     }
 
-    push_eva_viewport_frame(out_quads, px, py, pw, ph, w, h);
+    push_panel_viewport_frame(out_quads, px, py, pw, ph, w, h);
 }
 
 /// Dimming panel over the scroll band (single gradient quad).
 pub fn chronicle_dim_gradient(panel: [f32; 4]) -> GradientQuadInstance {
     GradientQuadInstance {
         rect: panel,
-        color: [0.02, 0.025, 0.08, 0.88],
+        color: [
+            color::WALNUT_INK[0],
+            color::WALNUT_INK[1],
+            color::WALNUT_INK[2],
+            0.82,
+        ],
         feather: [0.08, 0.0, 0.0, 0.0],
     }
 }

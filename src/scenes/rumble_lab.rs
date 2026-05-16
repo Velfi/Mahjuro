@@ -221,9 +221,9 @@ impl SceneBehavior for RumbleLabScene {
         let mut frame = UiFrame::new();
         frame.background(BackgroundId::Black);
 
-        let title_font = typography::size(typography::TITLE, h).max(22.0);
-        let body_font = typography::size(typography::BODY, h).max(14.0);
-        let hint_font = typography::size(typography::CAPTION, h).max(12.0);
+        let title_font = typography::size(typography::H20, h);
+        let body_font = typography::size(typography::H36, h);
+        let hint_font = typography::size(typography::H42, h);
 
         frame.text(TextLabel {
             rect: [0.0, h * 0.03, w, title_font * 1.5],
@@ -289,7 +289,7 @@ impl SceneBehavior for RumbleLabScene {
                 text: it.action.label().into(),
                 color: fg,
                 align: TextAlign::Center,
-                font_px: Some(typography::size(typography::BODY, h).max(14.0)),
+                font_px: Some(typography::size(typography::H36, h)),
                 ..Default::default()
             });
         }

@@ -8,7 +8,7 @@
 
 use crate::audio::SfxId;
 use crate::game::event_bus::GameEvent;
-use crate::render::theme::color;
+use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::smooth_scroll::SmoothScroll;
@@ -1091,7 +1091,7 @@ impl OptionsScene {
         } else {
             format!("v{}", env!("CARGO_PKG_VERSION"))
         };
-        let version_font = (12.0 * layout.scale).max(10.0);
+        let version_font = typography::size(typography::H45, h);
         text_labels.push(TextLabel {
             rect: [0.0, layout.version_y, w, layout.version_h],
             text: version_text,

@@ -18,7 +18,7 @@ use crate::audio::SfxId;
 use crate::effect_layers::EffectLayers;
 use crate::game::event_bus::{EventBus, GameEvent};
 use crate::render::draw_cmd::UiFrame;
-use crate::render::theme::color;
+use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 
 /// Semi-transparent black dimmer (shop pack + zodiac overlay).
@@ -117,12 +117,10 @@ pub fn prompt_pulse_alpha(t_secs: f32) -> f32 {
     0.5 + 0.5 * (t_secs * 3.0).sin()
 }
 
-const PROMPT_FONT_SCALE: f32 = 0.028;
-const PROMPT_MIN_PX: f32 = 18.0;
 const PROMPT_NY: f32 = 0.88;
 
 fn bottom_prompt_label(h: f32, w: f32, text: impl Into<String>, alpha: f32) -> TextLabel {
-    let prompt_font = (h * PROMPT_FONT_SCALE).max(PROMPT_MIN_PX);
+    let prompt_font = typography::size(typography::H42, h);
     let prompt_y = h * PROMPT_NY;
     TextLabel {
         text: text.into(),
@@ -154,7 +152,7 @@ pub fn label_confirm_to_open(h: f32, w: f32, t_secs: f32) -> TextLabel {
 
 /// Tile-pack celebration header (champagne, upper band).
 pub fn label_pack_title(h: f32, w: f32, title: String) -> TextLabel {
-    let title_font = (h * 0.045).max(28.0);
+    let title_font = typography::size(typography::H24, h);
     let title_y = h * 0.18;
     TextLabel {
         text: title,
@@ -168,7 +166,7 @@ pub fn label_pack_title(h: f32, w: f32, title: String) -> TextLabel {
 
 /// Zodiac level-up header (warm gold, fades with `alpha`).
 pub fn label_zodiac_level_title(h: f32, w: f32, text: String, alpha: f32) -> TextLabel {
-    let title_font = (h * 0.04).max(24.0);
+    let title_font = typography::size(typography::H24, h);
     let title_y = h * 0.10;
     TextLabel {
         text,

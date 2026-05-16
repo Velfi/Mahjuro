@@ -15,7 +15,6 @@ fn scene_viewport_clear() -> wgpu::Color {
 enum PassAShopInspectHdrUpload {
     #[default]
     None,
-    Subject,
 }
 
 /// Per-frame summary of which `RenderOp` variants appear in the current ops
@@ -68,7 +67,7 @@ fn split_pass_a_chunks(ops: &[RenderOp]) -> Vec<PassAChunk<'_>> {
     for (i, op) in ops.iter().enumerate() {
         let split = matches!(
             op,
-            RenderOp::ClearSceneDepth | RenderOp::ShopInspectLitMeshSubjectHdr
+            RenderOp::ClearSceneDepth
         );
         if !split {
             continue;
@@ -79,9 +78,6 @@ fn split_pass_a_chunks(ops: &[RenderOp]) -> Vec<PassAChunk<'_>> {
                 shop_inspect_hdr_upload: upload_before_next,
             });
             upload_before_next = PassAShopInspectHdrUpload::None;
-        }
-        if matches!(op, RenderOp::ShopInspectLitMeshSubjectHdr) {
-            upload_before_next = PassAShopInspectHdrUpload::Subject;
         }
         start = i + 1;
     }
@@ -388,6 +384,7 @@ impl WgpuRenderer {
         // cheap and animates freely. Marquee labels (non-zero scroll_offset)
         // bypass the cache because the offset is baked into the raster and
         // would otherwise fill the cache with single-use entries.
+        let window_h = h;
         let make_text_draw = |device: &wgpu::Device,
                               queue: &wgpu::Queue,
                               text_bgl: &wgpu::BindGroupLayout,
@@ -446,7 +443,8 @@ impl WgpuRenderer {
             let rasterize = || -> Vec<u8> {
                 if let Some(spans) = flavor {
                     let italic = font_italic.unwrap_or(font);
-                    let px = lbl.font_px.unwrap_or(24.0).max(24.0);
+                    let floor = crate::render::theme::typography::readable_floor_px(window_h);
+                    let px = lbl.font_px.unwrap_or(floor).max(floor);
                     crate::render::decal::rasterize_label_flavor_spans(
                         font,
                         italic,
@@ -459,7 +457,8 @@ impl WgpuRenderer {
                     )
                 } else if lbl.bold || lbl.italic || lbl.underline {
                     let italic = font_italic.unwrap_or(font);
-                    let px = lbl.font_px.unwrap_or(13.0).max(8.0);
+                    let floor = crate::render::theme::typography::readable_floor_px(window_h);
+                    let px = lbl.font_px.unwrap_or(floor).max(floor);
                     let syn = [crate::render::decal::RasterStyleSpan {
                         text: lbl.text.as_str(),
                         bold: lbl.bold,
@@ -733,10 +732,6 @@ impl WgpuRenderer {
                     ops.push(RenderOp::ClearSceneDepth);
                     i += 1;
                 }
-                DrawCmd::ShopInspectLitMeshSubjectHdr => {
-                    ops.push(RenderOp::ShopInspectLitMeshSubjectHdr);
-                    i += 1;
-                }
                 DrawCmd::Quad(_) => {
                     let mut batch: Vec<GpuInstance> = Vec::new();
                     while let Some(DrawCmd::Quad(inst)) = frame.cmds.get(i) {
@@ -951,7 +946,10 @@ impl WgpuRenderer {
             && let Some(ref font) = self.ui_font
         {
             let length = h * 0.35;
-            let label_size = (h * 0.04).max(18.0);
+            let label_size = crate::render::theme::typography::size(
+                crate::render::theme::typography::H24,
+                h,
+            );
             let label_w = label_size * 3.5;
             let label_h = label_size * 1.5;
             let labels: [(glam::Vec3, &str, [f32; 4]); 3] = [
@@ -1394,13 +1392,6 @@ impl WgpuRenderer {
                         let is_last_scene_chunk = ci + 1 == n_scene_chunks;
                         match chunk.shop_inspect_hdr_upload {
                             PassAShopInspectHdrUpload::None => {}
-                            PassAShopInspectHdrUpload::Subject => {
-                                self.upload_shop_inspect_lit_mesh_subject_ssr(
-                                    &camera,
-                                    ssr_enabled,
-                                    frame,
-                                );
-                            }
                         }
                         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                             label: Some("main-pass-scene"),
@@ -1451,13 +1442,6 @@ impl WgpuRenderer {
                         let is_last_chunk = ci + 1 == n_chunks;
                         match chunk.shop_inspect_hdr_upload {
                             PassAShopInspectHdrUpload::None => {}
-                            PassAShopInspectHdrUpload::Subject => {
-                                self.upload_shop_inspect_lit_mesh_subject_ssr(
-                                    &camera,
-                                    ssr_enabled,
-                                    frame,
-                                );
-                            }
                         }
                         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                             label: Some("main-pass"),
@@ -2034,6 +2018,8 @@ impl WgpuRenderer {
         // resamples a buffer with overlay artifacts baked in.
         let vhs_on_now = if is_prepass { false } else { effective_vhs_on };
         let tonemap_time = self.creation_time.elapsed().as_secs_f32();
+        let grain_frame = self.film_grain_frame as f32;
+        self.film_grain_frame = self.film_grain_frame.wrapping_add(1);
         self.queue.write_buffer(
             &self.tonemap_params_buffer,
             0,
@@ -2046,6 +2032,8 @@ impl WgpuRenderer {
                 vhs_scanline: self.tonemap_vhs_scanline,
                 vhs_grain: self.tonemap_vhs_grain,
                 vhs_vignette: self.tonemap_vhs_vignette,
+                film_grain: self.tonemap_film_grain,
+                grain_frame,
             }),
         );
         let tonemap_pipe = if is_prepass {

@@ -146,11 +146,11 @@ impl App {
             DebugAction::OpenHallwayHallFxDebug => {
                 if self.debug.hallway_distortion_debug_overlay.is_some() {
                     self.debug.hallway_distortion_debug_overlay = None;
-                    log::debug!("Closed hallway hall FX debug overlay");
+                    log::debug!("Closed hallway vertex warp debug overlay");
                 } else {
                     self.debug.hallway_distortion_debug_overlay =
                         Some(HallwayDistortionDebugOverlay::new());
-                    log::debug!("Opened hallway hall FX debug overlay");
+                    log::debug!("Opened hallway vertex warp debug overlay");
                 }
             }
             DebugAction::OpenTonemapDebug => {

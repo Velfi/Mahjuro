@@ -179,7 +179,7 @@ fn push_button_visuals(
 /// Style hint for [`push_text_block`].
 #[derive(Clone, Copy, Debug)]
 pub struct TextStyle {
-    /// Typography tier ratio (e.g. `typography::BODY`). Used to size lines.
+    /// Typography tier ratio (e.g. `typography::H36`). Used to size lines.
     pub tier: f32,
     pub color: [f32; 4],
     /// Padding inside the rect, in pixels.
@@ -193,7 +193,7 @@ pub struct TextStyle {
 impl Default for TextStyle {
     fn default() -> Self {
         Self {
-            tier: typography::BODY,
+            tier: typography::H36,
             color: color::PARCHMENT,
             padding: 0.0,
             align: TextAlign::Center,
@@ -231,7 +231,7 @@ pub fn wrap_text(text: &str, max_width_px: f32, line_h: f32) -> Vec<String> {
         // No font loaded — don't crash, just return the input as one line.
         return vec![text.to_string()];
     };
-    let font_px = (line_h * 0.99).max(8.0);
+    let font_px = line_h * 0.99;
     let space_w = font.metrics(' ', font_px).advance_width;
     let word_w = |w: &str| -> f32 {
         w.chars()

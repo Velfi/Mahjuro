@@ -8,7 +8,7 @@ use crate::game::event_bus::{GameEvent, GameOverReason};
 use crate::game::run::RunState;
 use crate::persistence;
 use crate::render::decal::{load_ui_font_bytes, measure_label_advances};
-use crate::render::theme::color;
+use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
@@ -219,7 +219,7 @@ impl SceneBehavior for GameOverScene {
         // Layout — left-of-centre composition.  The panel is compact: just tall
         // enough for the current set of tight rows.  All sizes derive from h
         // so they scale.
-        let row_font_px = (h * 0.026).max(11.0);
+        let row_font_px = typography::size(typography::H36, h);
         let row_h = row_font_px * 2.0; // 2× leading — dense but breathable
         let n_rows = if self.won { 7.0 } else { 8.0 };
         let pad_v = row_font_px * 0.8; // top/bottom padding inside panel
@@ -227,20 +227,27 @@ impl SceneBehavior for GameOverScene {
         let panel_h = row_h * n_rows + pad_v * 2.0;
         // Victory sits on the right, defeat on the left — contrasting compositions.
         let panel_x = if self.won { w * 0.67 } else { w * 0.08 };
-        let panel_y = h * 0.50 - panel_h * 0.5; // vertically centred in lower half
-        let panel_rect = [panel_x, panel_y, panel_w, panel_h];
 
         // Build upward from panel_y so nothing overlaps:
         //   panel_y - gap - sub_h - gap - headline_h  = headline top
         let gap = row_font_px * 0.5;
-        let sub_font = h * 0.032;
+        let sub_font = typography::size(typography::H32, h);
         let sub_h = sub_font * 1.3;
-        let headline_font = h * 0.198;
+        let headline_font = typography::size(typography::H5, h);
         let headline_h = headline_font * 1.25;
+        let top_pad = (h * 0.04).max(row_font_px * 0.6);
 
+        // Centre the stats card, then nudge the whole stack down if the H5 headline
+        // would clip above the window (common at 1080p with eight stat rows).
+        let mut panel_y = h * 0.50 - panel_h * 0.5;
+        let headline_y = panel_y - gap - sub_h - gap - headline_h;
+        if headline_y < top_pad {
+            panel_y += top_pad - headline_y;
+        }
+
+        let panel_rect = [panel_x, panel_y, panel_w, panel_h];
         let sub_y = panel_y - gap - sub_h;
         let subtitle_rect = [panel_x, sub_y, panel_w, sub_h];
-
         let headline_y = sub_y - gap - headline_h;
         // On victory (right side) the headline extends leftward from the panel
         // right edge; on defeat it extends rightward from the panel left edge.
@@ -263,7 +270,7 @@ impl SceneBehavior for GameOverScene {
         ];
 
         // Hint sits below the panel, left-aligned.
-        let hint_font = h * 0.024;
+        let hint_font = typography::size(typography::H42, h);
         let hint_h = hint_font * 1.4;
         let hint_rect = [
             panel_x,

@@ -118,6 +118,8 @@ pub enum GameEvent {
     /// Show in-game help for remapping controllers (SDL reads the OS / Steam
     /// driver layout; the Options menu can swap face-button semantics).
     OpenControllerMappingHelp,
+    /// Brief hallway bulb flicker + brownout (`RoomGltfBrownout` on the App).
+    RoomGltfBrownout,
 }
 
 #[derive(Default)]

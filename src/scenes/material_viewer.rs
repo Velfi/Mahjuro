@@ -77,7 +77,7 @@ impl SceneBehavior for MaterialViewerScene {
         });
 
         // ── Title ─────────────────────────────────────────────────
-        let title_font = typography::size(typography::TITLE, h).max(24.0);
+        let title_font = typography::size(typography::H20, h);
         let title_h = title_font * 1.6;
         let title_y = h * 0.04;
         frame.text(TextLabel {
@@ -107,7 +107,7 @@ impl SceneBehavior for MaterialViewerScene {
         // Orb diameter sized to a comfortable fraction of cell width; caption
         // sits under the orb in pixel space.
         let orb_diameter = (cell_w.min(cell_h) * 0.62).max(40.0);
-        let label_font = typography::size(typography::CAPTION, h).max(12.0);
+        let label_font = typography::size(typography::H42, h);
         let label_h = label_font * 1.3;
 
         // Lights arranged above the grid so every orb gets similar illumination.
@@ -155,7 +155,7 @@ impl SceneBehavior for MaterialViewerScene {
         frame.object3d_batch(orbs);
 
         // ── Back button ───────────────────────────────────────────
-        let btn_font = typography::size(typography::BODY, h).max(16.0);
+        let btn_font = typography::size(typography::H36, h);
         let btn_h = (44.0 * scale).max(32.0);
         let btn_w = (160.0 * scale).max(100.0);
         let btn_y = h * 0.91;

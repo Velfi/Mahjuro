@@ -738,8 +738,6 @@ pub enum DrawCmd {
     /// against geometry drawn before this marker — e.g. pack celebration meshes over
     /// the shop room without hiding the room in color.
     ClearSceneDepth,
-    /// Marker: next Pass A `lit_mesh` subpass uses full inspect HDR (dim vs subject split).
-    ShopInspectLitMeshSubjectHdr,
     /// Batch of showcase tiles with explicit 3D transforms — used for hand
     /// tiles, pack-opening celebrations, and any other 3D tile placement.
     ShowcaseTileBatch(Vec<ShowcaseTilePlacement>),
@@ -1024,7 +1022,6 @@ impl UiFrame {
                 | DrawCmd::HallwayEnvironment
                 | DrawCmd::ArchiveEnvironment
                 | DrawCmd::ClearSceneDepth
-                | DrawCmd::ShopInspectLitMeshSubjectHdr
                 | DrawCmd::Table
                 | DrawCmd::ShowcaseTileBatch(_)
                 | DrawCmd::Object3d(_)

@@ -1,5 +1,6 @@
 use super::super::*;
 
+use crate::game::tonemap_tuning::TonemapTuning;
 use crate::render::gltf_helpers::{GltfPbrUniform, build_sampler_descriptor};
 use crate::render::moths_to_a_light::{
     build_bug_body_mesh, build_bug_wing_blur_mesh, build_bug_wing_mesh,
@@ -3580,6 +3581,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             vhs_scanline: 0.0,
             vhs_grain: 0.0,
             vhs_vignette: 0.0,
+            film_grain: TonemapTuning::shipping_default().film_grain,
+            grain_frame: 0.0,
         }),
     );
 
@@ -3774,6 +3777,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         frame_dt: 0.0,
         obj3d_hover_state: rustc_hash::FxHashMap::default(),
         creation_time: Instant::now(),
+        film_grain_frame: 0,
         relic_textures: rustc_hash::FxHashMap::default(),
         relic_rx,
         relic_load_start,
@@ -3853,6 +3857,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         tonemap_vhs_scanline: 0.040,
         tonemap_vhs_grain: 0.020,
         tonemap_vhs_vignette: 0.100,
+        tonemap_film_grain: TonemapTuning::shipping_default().film_grain,
         lit_mesh_pipeline,
         lit_mesh_blended_pipeline,
         lit_mesh_white_view,

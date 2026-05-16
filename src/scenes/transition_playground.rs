@@ -580,7 +580,7 @@ fn draw_top_banner(
             if is_playing { "playing" } else { "paused" }
         ),
         color: color::CHAMPAGNE,
-        font_px: Some(typography::size(typography::HEADING, viewport[3])),
+        font_px: Some(typography::size(typography::H28, viewport[3])),
         ..Default::default()
     });
     frame.text(TextLabel {
@@ -592,7 +592,7 @@ fn draw_top_banner(
         ],
         text: "Scene A lives at t=0. Scene B lives at t=1. Click the bars to scrub.".into(),
         color: color::STONE,
-        font_px: Some(typography::size(typography::CAPTION, viewport[3])),
+        font_px: Some(typography::size(typography::H42, viewport[3])),
         ..Default::default()
     });
 }
@@ -631,7 +631,7 @@ fn draw_controls(
         ],
         text: "Transition Playground".into(),
         color: color::CHAMPAGNE,
-        font_px: Some(typography::size(typography::HEADING, layout.panel[3])),
+        font_px: Some(typography::size(typography::H28, layout.panel[3])),
         ..Default::default()
     });
     frame.text(TextLabel {
@@ -643,7 +643,7 @@ fn draw_controls(
         ],
         text: "Progress".into(),
         color: color::STONE,
-        font_px: Some(typography::size(typography::CAPTION, layout.panel[3])),
+        font_px: Some(typography::size(typography::H42, layout.panel[3])),
         ..Default::default()
     });
     frame.text(TextLabel {
@@ -655,7 +655,7 @@ fn draw_controls(
         ],
         text: "Duration".into(),
         color: color::STONE,
-        font_px: Some(typography::size(typography::CAPTION, layout.panel[3])),
+        font_px: Some(typography::size(typography::H42, layout.panel[3])),
         ..Default::default()
     });
 
@@ -740,7 +740,7 @@ fn draw_controls(
         text: style.label().into(),
         color: color::PARCHMENT,
         align: TextAlign::Center,
-        font_px: Some(typography::size(typography::BODY, layout.panel[3])),
+        font_px: Some(typography::size(typography::H36, layout.panel[3])),
         ..Default::default()
     });
     frame.text(TextLabel {
@@ -753,7 +753,7 @@ fn draw_controls(
         text: format!("{}x", (1.0 / duration_secs).max(0.1) * 1.1),
         color: color::UMBER,
         align: TextAlign::Right,
-        font_px: Some(typography::size(typography::MICRO, layout.panel[3])),
+        font_px: Some(typography::size(typography::H45, layout.panel[3])),
         ..Default::default()
     });
 
@@ -791,7 +791,7 @@ fn draw_button(
         text: label.into(),
         color: colors.text,
         align: TextAlign::Center,
-        font_px: Some(typography::size(typography::BODY, rect[3] * 10.0)),
+        font_px: Some(typography::size(typography::H36, rect[3] * 10.0)),
         ..Default::default()
     });
 }
@@ -842,7 +842,7 @@ fn draw_bar(
         text: value_label,
         color: color::PARCHMENT,
         align: TextAlign::Center,
-        font_px: Some(typography::size(typography::BODY, rect[3] * 10.0)),
+        font_px: Some(typography::size(typography::H36, rect[3] * 10.0)),
         ..Default::default()
     });
 }
@@ -914,7 +914,7 @@ fn draw_scene_a(frame: &mut UiFrame, viewport: [f32; 4], pose: Pose, time: f32) 
         "Scene A — ember hall",
         LabelStyle {
             color_rgba: color::CHAMPAGNE,
-            font_px: typography::size(typography::TITLE, viewport[3]),
+            font_px: typography::size(typography::H20, viewport[3]),
             align: TextAlign::Center,
         },
         pose,
@@ -926,7 +926,7 @@ fn draw_scene_a(frame: &mut UiFrame, viewport: [f32; 4], pose: Pose, time: f32) 
         "Warm, chunky shapes and strong contrast are useful for testing fades.",
         LabelStyle {
             color_rgba: color::PARCHMENT,
-            font_px: typography::size(typography::BODY, viewport[3]),
+            font_px: typography::size(typography::H36, viewport[3]),
             align: TextAlign::Left,
         },
         pose,
@@ -938,7 +938,7 @@ fn draw_scene_a(frame: &mut UiFrame, viewport: [f32; 4], pose: Pose, time: f32) 
         "Queue",
         LabelStyle {
             color_rgba: color::AMBER,
-            font_px: typography::size(typography::CAPTION, viewport[3]),
+            font_px: typography::size(typography::H42, viewport[3]),
             align: TextAlign::Center,
         },
         pose,
@@ -950,7 +950,7 @@ fn draw_scene_a(frame: &mut UiFrame, viewport: [f32; 4], pose: Pose, time: f32) 
         "Status",
         LabelStyle {
             color_rgba: color::STONE,
-            font_px: typography::size(typography::CAPTION, viewport[3]),
+            font_px: typography::size(typography::H42, viewport[3]),
             align: TextAlign::Center,
         },
         pose,
@@ -1010,7 +1010,7 @@ fn draw_scene_b(frame: &mut UiFrame, viewport: [f32; 4], pose: Pose, time: f32) 
         "Scene B — tide terminal",
         LabelStyle {
             color_rgba: color::PARCHMENT,
-            font_px: typography::size(typography::TITLE, viewport[3]),
+            font_px: typography::size(typography::H20, viewport[3]),
             align: TextAlign::Center,
         },
         pose,
@@ -1022,7 +1022,7 @@ fn draw_scene_b(frame: &mut UiFrame, viewport: [f32; 4], pose: Pose, time: f32) 
         "Cool hues, offset cards, and animated rows help reveal sliding transforms.",
         LabelStyle {
             color_rgba: color::STONE,
-            font_px: typography::size(typography::BODY, viewport[3]),
+            font_px: typography::size(typography::H36, viewport[3]),
             align: TextAlign::Left,
         },
         pose,
@@ -1034,7 +1034,7 @@ fn draw_scene_b(frame: &mut UiFrame, viewport: [f32; 4], pose: Pose, time: f32) 
         "Telemetry ribbon",
         LabelStyle {
             color_rgba: color::CHAMPAGNE,
-            font_px: typography::size(typography::CAPTION, viewport[3]),
+            font_px: typography::size(typography::H42, viewport[3]),
             align: TextAlign::Center,
         },
         pose,
@@ -1169,7 +1169,10 @@ fn push_label(
         rect: transform_rect(viewport, local, pose),
         text: text.into(),
         color: color_rgba,
-        font_px: Some(font_px * pose.scale.max(0.7)),
+        font_px: Some(typography::tier_at_most(
+            font_px * pose.scale.max(0.7),
+            viewport[3],
+        )),
         align,
         ..Default::default()
     });

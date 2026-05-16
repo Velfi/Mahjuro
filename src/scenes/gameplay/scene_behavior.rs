@@ -1351,16 +1351,14 @@ impl SceneBehavior for GameplayScene {
             && self.cascade_queue.is_empty()
             && self.journal_transition.is_none()
         {
-            let body_px = crate::render::theme::typography::size(
-                crate::render::theme::typography::BODY,
-                layout.window_h,
-            )
-            .max(11.0);
+            use crate::render::theme::typography;
+            let body_px = typography::size(typography::H36, layout.window_h);
             let push_centered = |out: &mut Vec<TextLabel>, rect: [f32; 4], copy: &'static str| {
                 if rect[2] <= 1.0 || rect[3] <= 1.0 {
                     return;
                 }
-                let fs = body_px.min(rect[3] * 0.24).min(rect[2] * 0.14).max(10.0);
+                let cap = body_px.min(rect[3] * 0.24).min(rect[2] * 0.14);
+                let fs = typography::tier_at_most(cap, layout.window_h);
                 out.push(TextLabel {
                     rect,
                     text: copy.into(),
@@ -1391,7 +1389,8 @@ impl SceneBehavior for GameplayScene {
                     if rect[2] <= 1.0 || rect[3] <= 1.0 {
                         continue;
                     }
-                    let fs = body_px.min(rect[3] * 0.22).min(rect[2] * 0.35).max(9.0);
+                    let cap = body_px.min(rect[3] * 0.22).min(rect[2] * 0.35);
+                    let fs = typography::tier_at_most(cap, layout.window_h);
                     let label_h = (fs * 1.25).min(rect[3] * 0.45);
                     let chip_rect = [
                         rect[0],
@@ -1438,7 +1437,7 @@ impl SceneBehavior for GameplayScene {
             );
             if let Some(undo_rect) = discard_undo_rect {
                 let is_focus = matches!(self.focus, Some(FocusTarget::DiscardUndo));
-                let fs = body_px.min(undo_rect[3] * 0.55).max(10.0);
+                let fs = typography::tier_at_most(body_px.min(undo_rect[3] * 0.55), layout.window_h);
                 hud_text.push(TextLabel {
                     rect: undo_rect,
                     text: "Undo".into(),

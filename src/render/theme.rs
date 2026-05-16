@@ -97,19 +97,6 @@ pub mod color {
     /// `#5A6E94` — distant lit window, hint text on cool surfaces.
     pub const TWILIGHT_GLOW: [f32; 4] = [0.353, 0.431, 0.580, 1.0];
 
-    // ── Chronicle dashboard (Archive tab only): Evangelion / Nerv-style HUD
-    //    readouts — deep indigo field, hazard orange rules, cool trace ink.
-    //    Kept separate from walnut/brass “House” UI so the screen reads as
-    //    instrumentation, not parlor wood.
-    /// Near-black indigo field (`#0A0818` linear).
-    pub const CHRONICLE_INK: [f32; 4] = [0.039, 0.031, 0.094, 1.0];
-    /// Hazard rule / header accent (`#FF4A1A` linear).
-    pub const CHRONICLE_ORANGE: [f32; 4] = [1.0, 0.290, 0.102, 1.0];
-    /// Faint CRT grid / bezel line.
-    pub const CHRONICLE_GRID: [f32; 4] = [0.282, 0.365, 0.529, 0.42];
-    /// “Sync ratio” trace for score columns (`#5EE8C8` linear, slightly hot).
-    pub const CHRONICLE_TRACE: [f32; 4] = [0.369, 0.910, 0.784, 0.92];
-
     // ── Lacquer & Cinnabar: deep contrast and ceremony.
     /// `#0A0608` — true black-with-warmth. Counter tops, deepest shadow,
     /// frames around precious things. Distinct from `WALNUT_INK`: lacquer is
@@ -207,20 +194,22 @@ pub mod color {
     }
 }
 
-/// Typography scale. All sizes are computed against a base derived from the
-/// window's smaller dimension so the UI stays readable at any resolution.
+/// Typography scale. Every named tier is a *fraction of window height*; the
+/// rasterized cap-height in pixels is `tier * window_h`, floored at the
+/// readable minimum (24 px at 1080p, scaled linearly below that).
 ///
-/// Usage: `let scale = theme::typography::scale(window_h);` then multiply by
-/// the named tier ratio:
+/// Constants are named `H<N>` where `N` is the divisor — `H20` rasterizes to
+/// `window_h / 20`. Tiers span half the window height (`H2`) down to the
+/// legibility floor (`H45`). Adjacent steps are roughly 1.2–1.5×, so you can
+/// walk one tier up/down without layouts falling apart.
 ///
 /// ```ignore
-/// let title_h = theme::typography::TITLE * scale;
+/// let title_px = theme::typography::size(theme::typography::H20, window_h);
 /// ```
 pub mod typography {
     /// Couch-distance rule of thumb: at 1080p reference height, no UI tier
     /// should rasterize below this many CSS pixels. Scales down on shorter
-    /// windows (`h/1080`); does not grow past this value on taller displays
-    /// (base/tiers already scale up via [`base`]).
+    /// windows (`h/1080`); does not grow past this value on taller displays.
     pub const MIN_READABLE_PX_AT_1080: f32 = 24.0;
 
     /// Minimum font size (px) for on-screen copy at the current window height.
@@ -230,27 +219,58 @@ pub mod typography {
         MIN_READABLE_PX_AT_1080 * (window_h / 1080.0).min(1.0)
     }
 
-    /// Base unit derived from window height. ~18px at 600px tall, ~30px at
-    /// 1080p. Other tiers are ratios of this.
-    pub fn base(window_h: f32) -> f32 {
-        (window_h * 0.028).clamp(14.0, 36.0)
-    }
+    // ── Scale ratios (window-height fractions) ──────────────────────────
+    // Constant name encodes the divisor: `H_N` rasterizes to `window_h / N`.
+    // 1080p column shows the resulting pixel size before the readable floor.
 
-    /// Screen titles, modal headers. ~1.75x base.
-    pub const TITLE: f32 = 1.75;
-    /// Section headings, card names, button labels. ~1.25x base.
-    pub const HEADING: f32 = 1.25;
-    /// Default body text. 1.0x base.
-    pub const BODY: f32 = 1.0;
-    /// Captions, secondary info, tooltip subtext. ~0.85x base.
-    pub const CAPTION: f32 = 0.85;
-    /// Smallest readable text — version strings, debug labels. ~0.7x base.
-    pub const MICRO: f32 = 0.7;
+    /// `window_h / 2` — splash hero, end-of-act glyph. (540 px @ 1080p)
+    pub const H2: f32 = 1.0 / 2.0;
+    /// `window_h / 4` — celebration numerals, run-end totals. (270 px)
+    pub const H4: f32 = 1.0 / 4.0;
+    /// `window_h / 5` — victory/defeat headline. (216 px)
+    pub const H5: f32 = 1.0 / 5.0;
+    /// `window_h / 6` — oversized scene-transition text. (180 px)
+    pub const H6: f32 = 1.0 / 6.0;
+    /// `window_h / 12` — primary score display, big numerals. (90 px)
+    pub const H12: f32 = 1.0 / 12.0;
+    /// `window_h / 16` — large modal title. (~68 px)
+    pub const H16: f32 = 1.0 / 16.0;
+    /// `window_h / 20` — standard screen titles. (54 px)
+    pub const H20: f32 = 1.0 / 20.0;
+    /// `window_h / 24` — subtitles, secondary modal headers. (45 px)
+    pub const H24: f32 = 1.0 / 24.0;
+    /// `window_h / 28` — section heads, card names, button labels. (~39 px)
+    pub const H28: f32 = 1.0 / 28.0;
+    /// `window_h / 32` — large body, sub-headings. (~34 px)
+    pub const H32: f32 = 1.0 / 32.0;
+    /// `window_h / 36` — default body text. (30 px)
+    pub const H36: f32 = 1.0 / 36.0;
+    /// `window_h / 42` — captions, secondary info. (~26 px)
+    pub const H42: f32 = 1.0 / 42.0;
+    /// `window_h / 45` — smallest readable text (sits at the floor at 1080p). (24 px)
+    pub const H45: f32 = 1.0 / 45.0;
 
     /// Compute the absolute pixel height for a tier at a given window height.
+    /// Floors the result at the readable minimum so even `H45` stays legible.
     pub fn size(tier: f32, window_h: f32) -> f32 {
-        let px = tier * base(window_h);
-        px.max(readable_floor_px(window_h))
+        (window_h * tier).max(readable_floor_px(window_h))
+    }
+
+    /// All tiers, largest cap-height → smallest.
+    pub const LADDER: &[f32] = &[
+        H2, H4, H5, H6, H12, H16, H20, H24, H28, H32, H36, H42, H45,
+    ];
+
+    /// Largest [`size`] on the ladder that still fits within `max_px`.
+    pub fn tier_at_most(max_px: f32, window_h: f32) -> f32 {
+        let mut best = size(H45, window_h);
+        for &tier in LADDER {
+            let px = size(tier, window_h);
+            if px <= max_px + 0.01 {
+                best = px;
+            }
+        }
+        best
     }
 }
 
@@ -260,14 +280,21 @@ mod typography_tests {
 
     #[test]
     fn smallest_tier_meets_1080_floor() {
-        assert!(typography::size(typography::MICRO, 1080.0) >= typography::MIN_READABLE_PX_AT_1080);
+        assert!(typography::size(typography::H45, 1080.0) >= typography::MIN_READABLE_PX_AT_1080);
     }
 
     #[test]
     fn floor_scales_down_below_1080p() {
         let at_720 = typography::readable_floor_px(720.0);
         assert!((at_720 - 16.0).abs() < 0.01);
-        assert!(typography::size(typography::MICRO, 720.0) >= at_720);
+        assert!(typography::size(typography::H45, 720.0) >= at_720);
+    }
+
+    #[test]
+    fn tier_at_most_picks_largest_fitting_step() {
+        let h = 1080.0;
+        assert!((typography::tier_at_most(30.0, h) - typography::size(typography::H36, h)).abs() < 1.0);
+        assert!((typography::tier_at_most(200.0, h) - typography::size(typography::H6, h)).abs() < 1.0);
     }
 }
 

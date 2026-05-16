@@ -194,10 +194,10 @@ impl SceneBehavior for YakuJournalScene {
         // width regardless of count — row 1 (5 wide) defines the cell.
         let cell_w = (w - side_margin * 2.0) / 5.0;
 
-        let name_font = typography::size(typography::HEADING, h).max(24.0 * jr);
-        let stat_font = typography::size(typography::BODY, h).max(20.0 * jr);
+        let name_font = typography::size(typography::H28, h);
+        let stat_font = typography::size(typography::H36, h);
         // Slightly larger than the name's stat line so "Lv N" scans on the felt.
-        let grid_lvl_font = stat_font.max(22.0 * jr);
+        let grid_lvl_font = typography::size(typography::H28, h);
         let name_h = name_font * 1.1;
         let stat_h = stat_font * 1.1;
         let caption_block_h = name_h + stat_h;
@@ -550,7 +550,7 @@ fn draw_sealed_slab(
 
     // "?" stamp — larger glyph, champagne ink so it reads as pressed
     // metal into the wax rather than a flat typeface.
-    let glyph_font = typography::size(typography::TITLE, window_h).max(30.0 * read_boost);
+    let glyph_font = typography::size(typography::H20, window_h);
     frame.text(TextLabel {
         rect: [
             cx - seal_d * 0.5,
@@ -561,7 +561,7 @@ fn draw_sealed_slab(
         text: "?".into(),
         color: color::alpha(color::CHAMPAGNE, 0.92),
         align: TextAlign::Center,
-        font_px: Some(glyph_font * 1.2),
+        font_px: Some(typography::size(typography::H16, window_h)),
         ..Default::default()
     });
 }
@@ -599,7 +599,7 @@ fn draw_mystery_name_pill(
         text: "???".into(),
         color: text_color,
         align: TextAlign::Center,
-        font_px: Some(font_px * 1.08),
+        font_px: Some(font_px),
         ..Default::default()
     });
 }
@@ -719,7 +719,7 @@ fn draw_plaque(
     // footer strip (which carries the control hint).
     let pad_scale = 1.0 - 0.14 * jc;
     let pad = ((14.0 * shadow_scale).max(10.0)) * pad_scale;
-    let hint_font = typography::size(typography::CAPTION, h).max(17.0 * jr);
+    let hint_font = typography::size(typography::H42, h);
     let footer_h = hint_font * (2.35 - 0.28 * jc);
     let face_x = plaque_x + pad;
     let face_y = plaque_y + pad;
@@ -751,7 +751,7 @@ fn draw_plaque(
 
     // Title — full name once cashed in; until then a `???` pill (matches
     // gameplay bone tablets).
-    let title_font = typography::size(typography::TITLE, h).max(38.0 * jr);
+    let title_font = typography::size(typography::H20, h);
     let title_h = title_font * 1.05;
     let title_lane_w = header_w * 0.5;
     if matches!(state, ProgressionState::Unseen) {
@@ -782,7 +782,7 @@ fn draw_plaque(
     // underneath the title (not beside it) so variable name widths
     // can't crash into it. Visually it tags the title and pairs
     // with the stat strip's right-aligned neighborhood.
-    let pill_font = typography::size(typography::CAPTION, h).max(17.0 * jr);
+    let pill_font = typography::size(typography::H42, h);
     let pill_h = pill_font * 1.75;
     let pill_text = format!("Lv  {lvl}");
     let pill_w = pill_font * 5.6;
@@ -817,7 +817,7 @@ fn draw_plaque(
         text: pill_text,
         color: pill_fg,
         align: TextAlign::Center,
-        font_px: Some(pill_font * 1.22),
+        font_px: Some(typography::size(typography::H36, h)),
         ..Default::default()
     });
 
@@ -825,7 +825,7 @@ fn draw_plaque(
     // Shares the header row with the title, with its own 50%-width
     // lane on the right. Locked yaku hide score numbers (no spoilers
     // on bonus scaling until the player has unlocked the yaku).
-    let stat_font = typography::size(typography::HEADING, h).max(28.0 * jr);
+    let stat_font = typography::size(typography::H28, h);
     let stat_y = header_y + (title_h - stat_font * 1.05) * 0.45;
     let stat_text = match state {
         ProgressionState::Unseen => "— — —".into(),
@@ -846,7 +846,7 @@ fn draw_plaque(
         text: stat_text,
         color: stat_color,
         align: TextAlign::Right,
-        font_px: Some(stat_font * 0.95),
+        font_px: Some(stat_font),
         ..Default::default()
     });
 
@@ -863,7 +863,7 @@ fn draw_plaque(
     });
 
     // ── Description ──────────────────────────────────────────────
-    let desc_font = typography::size(typography::BODY, h).max(23.0 * jr);
+    let desc_font = typography::size(typography::H36, h);
     // Room for two wrapped lines; slightly shorter band on handheld → larger tile strip.
     let desc_h = desc_font * (2.35 - 0.22 * jc);
     let desc_y = rule_y + rule_h + header_pad * 0.35;
@@ -987,7 +987,7 @@ fn draw_plaque(
         text: "← → ↑ ↓  browse".into(),
         color: label_champagne_soft,
         align: TextAlign::Left,
-        font_px: Some(hint_font * 1.12),
+        font_px: Some(typography::size(typography::H36, h)),
         ..Default::default()
     });
     frame.text(TextLabel {
@@ -1000,7 +1000,7 @@ fn draw_plaque(
         text: "Esc  return".into(),
         color: label_champagne_soft,
         align: TextAlign::Right,
-        font_px: Some(hint_font * 1.12),
+        font_px: Some(typography::size(typography::H36, h)),
         ..Default::default()
     });
     // Make the right-aligned "Esc  return" hint a real click target so a

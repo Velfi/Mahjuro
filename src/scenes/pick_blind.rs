@@ -332,25 +332,21 @@ impl SceneBehavior for PickBlindScene {
 
         if hallway {
             frame.hallway_environment();
-            // Vertex "hall FX" / scene-focus treatment: skip while the pause menu
-            // (or embedded options on top of it) is up so the backdrop stays sharp.
-            if !self.pause_menu.paused {
-                frame.hallway_distortion = Some(if let Some(snap) = ctx.hallway_distortion_debug {
-                    snap.resolve(upcoming)
-                } else {
-                    hallway_glb::HallwayDistortion::from_pick_blind(
-                        upcoming,
-                        pick.run_number,
-                        pick.ante,
-                    )
-                });
-                if let Some(ref mut dist) = frame.hallway_distortion {
-                    hallway_glb::hallway_distortion_apply_glb_depth_extent(
-                        dist,
-                        h,
-                        ctx.room_gltf_height_scale,
-                    );
-                }
+            frame.hallway_distortion = Some(if let Some(snap) = ctx.hallway_distortion_debug {
+                snap.resolve(upcoming)
+            } else {
+                hallway_glb::HallwayDistortion::from_pick_blind(
+                    upcoming,
+                    pick.run_number,
+                    pick.ante,
+                )
+            });
+            if let Some(ref mut dist) = frame.hallway_distortion {
+                hallway_glb::hallway_distortion_apply_glb_depth_extent(
+                    dist,
+                    h,
+                    ctx.room_gltf_height_scale,
+                );
             }
             let room_glb = hallway_glb::hallway_glb_has_embedded_lights();
             frame.scene_lighting.embedded_gltf_punctual = room_glb;
@@ -459,8 +455,10 @@ impl SceneBehavior for PickBlindScene {
         let mut icon_cmds: Vec<PromptIconQuad> = Vec::new();
         let mut buttons: Vec<ButtonDef> = Vec::new();
         let scale = metrics::scene_scale(w, h);
+        let hide_scene_hud =
+            self.pause_menu.paused || ctx.hallway_distortion_debug.is_some();
 
-        if !self.pause_menu.paused {
+        if !hide_scene_hud {
             // ── Caption labels: hallway side panels ─
             let play_focused_label = self.play_focused();
             let skip_focused_label = self.skip_focused();
@@ -488,10 +486,10 @@ impl SceneBehavior for PickBlindScene {
                 };
                 // Pin `font_px` so long lines (ante / rewards) are not crushed by the legacy
                 // auto-shrink width/char cap (see font-scaling agent note).
-                let px_blind = typography::size(typography::TITLE, h) * 1.12;
-                let px_detail = typography::size(typography::BODY, h) * 1.18;
-                let h_blind = (px_blind * 1.42).max(26.0);
-                let h_detail = (px_detail * 1.36).max(22.0);
+                let px_blind = typography::size(typography::H20, h);
+                let px_detail = typography::size(typography::H32, h);
+                let h_blind = px_blind * 1.42;
+                let h_detail = px_detail * 1.36;
                 let base_target = pick.base_target;
                 let upcoming_run_number = pick.run_number;
                 let blind_display = if upcoming == BlindKind::Boss {
