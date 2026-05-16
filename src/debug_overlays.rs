@@ -1026,7 +1026,7 @@ impl CameraDebugOverlay {
     }
 }
 
-// ── Shop environment + lighting debug (height scale + `shop_glb` tunables) ─
+// ── Shop environment + lighting debug (height scale + `room_glb` tunables) ─
 
 const SHOP_ENV_DEBUG_ROW_META: [(&'static str, f32, f32, f32); 9] = [
     ("Height scale", 0.001, 40.0, 0.005),
@@ -1108,7 +1108,7 @@ fn shop_env_point_in_rect(mx: f32, my: f32, r: (f32, f32, f32, f32)) -> bool {
 pub struct ShopEnvDebugOverlay {
     cursor: usize,
     pub height_scale: f32,
-    pub lighting: crate::render::shop_glb::ShopEnvLightingTune,
+    pub lighting: crate::render::room_glb::RoomEnvLightingTune,
     /// Typing buffer for the value column (numeric).
     editing: bool,
     edit_buffer: String,
@@ -1117,7 +1117,7 @@ pub struct ShopEnvDebugOverlay {
 }
 
 impl ShopEnvDebugOverlay {
-    pub fn new(height_scale: f32, lighting: crate::render::shop_glb::ShopEnvLightingTune) -> Self {
+    pub fn new(height_scale: f32, lighting: crate::render::room_glb::RoomEnvLightingTune) -> Self {
         Self {
             cursor: 0,
             height_scale,
@@ -1218,7 +1218,7 @@ impl ShopEnvDebugOverlay {
         self.edit_buffer.push(c);
     }
 
-    /// Copy `shop_glb` constant block to the clipboard.
+    /// Copy `room_glb` constant block to the clipboard.
     pub fn copy_to_clipboard(&self) {
         let l = self.lighting;
         let text = format!(
@@ -1234,7 +1234,7 @@ impl ShopEnvDebugOverlay {
                 "[{:.6}, {:.6}, {:.6}];",
             ),
             self.height_scale,
-            crate::render::shop_glb::SHOP_ENV_LINEAR_EXPOSURE_BASE,
+            crate::render::room_glb::SHOP_ENV_LINEAR_EXPOSURE_BASE,
             l.gltf_light_intensity_scale,
             l.linear_exposure,
             l.ambient_scale,

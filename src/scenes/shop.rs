@@ -139,8 +139,8 @@ pub struct ShopScene {
     /// advances at a different speed each frame.
     bug_phases: [f32; BUG_COUNT],
     /// Per-relic glow start times. Populated when `relic_activations` is
-    /// drained from the run state (e.g. Bonfire on relic sell, HungryGhost
-    /// on destroy). Drives glow + wiggle on owned relics in the shop.
+    /// drained from the run state (e.g. Bonfire on relic sell). Drives glow +
+    /// wiggle on owned relics in the shop.
     relic_glow_starts: rustc_hash::FxHashMap<RelicId, Instant>,
     /// Normalized screen-relative positions for the shop scene.
     /// Loaded from JSON on construction; falls back to compiled defaults.

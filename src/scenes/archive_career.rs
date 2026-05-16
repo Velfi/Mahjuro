@@ -4,7 +4,31 @@
 use crate::core::boss::BossKind;
 use crate::core::progression::{PlayerProgress, RunOutcome, RunRecord};
 use crate::core::yaku::YakuKind;
-use crate::persistence::TileMaterial;
+/// Run-log rows: index `0` = Summary, `1..` = runs newest-first.
+pub fn chronicle_list_entry_count(progress: &PlayerProgress) -> usize {
+    chronicle_indices_recent_first(progress).len() + 1
+}
+
+/// `list_index` `0` → summary; `1..` → `run_history` index.
+pub fn chronicle_hist_index_at_list(list_index: usize, progress: &PlayerProgress) -> Option<usize> {
+    if list_index == 0 {
+        return None;
+    }
+    chronicle_indices_recent_first(progress).get(list_index - 1).copied()
+}
+
+/// Display number for a run row (`1` = oldest … `N` = newest).
+pub fn chronicle_display_run_number(list_index: usize, progress: &PlayerProgress) -> Option<u32> {
+    let run_count = chronicle_indices_recent_first(progress).len();
+    if list_index == 0 || run_count == 0 {
+        return None;
+    }
+    let ord = list_index - 1;
+    if ord >= run_count {
+        return None;
+    }
+    Some((run_count - ord) as u32)
+}
 
 /// Indices into `progress.run_history`, most recent finished run first.
 pub fn chronicle_indices_recent_first(progress: &PlayerProgress) -> Vec<usize> {
@@ -36,8 +60,12 @@ fn max_structure_score_serious(progress: &PlayerProgress) -> Option<u64> {
         .max()
 }
 
-/// Title line for one folio in the Chronicle grid (includes pin glyphs).
-pub fn chronicle_folio_title(progress: &PlayerProgress, rec: &RunRecord) -> String {
+/// Title line for one run-log row (descending display number, pin glyphs).
+pub fn chronicle_run_log_title(
+    progress: &PlayerProgress,
+    display_num: u32,
+    rec: &RunRecord,
+) -> String {
     let mut pins = String::new();
     if matches!(rec.outcome, RunOutcome::Victory) {
         pins.push_str("★ ");
@@ -58,7 +86,7 @@ pub fn chronicle_folio_title(progress: &PlayerProgress, rec: &RunRecord) -> Stri
         .final_boss
         .map(|b| format!(" — {}", b.name()))
         .unwrap_or_default();
-    format!("{}Run {} — {}{}", pins, rec.run_number, outcome, boss)
+    format!("{pins}Run {display_num} — {outcome}{boss}")
 }
 
 /// Multi-line plaque for inspect / description.
@@ -125,86 +153,6 @@ pub fn chronicle_run_stats(rec: &RunRecord) -> String {
     lines.join("\n")
 }
 
-/// One primary frieze line + optional secondary lines (keep short for layout).
-pub fn career_frieze_lines(progress: &PlayerProgress) -> Vec<String> {
-    let serious: Vec<&RunRecord> = serious_records(progress).collect();
-    if serious.is_empty() {
-        return vec!["Your chronicle begins after your first run.".into()];
-    }
-
-    let mut out = Vec::new();
-
-    // Primary: personal best run total score (or high_scores board).
-    let best_run = serious
-        .iter()
-        .map(|r| r.total_score_earned)
-        .max()
-        .unwrap_or(0);
-    let board_best = progress.high_scores.first().copied().unwrap_or(0);
-    let primary_score = best_run.max(board_best);
-    out.push(format!(
-        "Personal best — {} pts (run total / board)",
-        primary_score
-    ));
-
-    // Signature structure
-    let sig = serious
-        .iter()
-        .max_by_key(|r| r.best_structure_score)
-        .map(|r| (r.best_structure_score, r.best_structure_name.as_str()));
-    if let Some((sc, name)) = sig
-        && sc > 0
-    {
-        out.push(format!("Signature hand — {} ({})", name, sc));
-    }
-
-    // Signature yaku (lifetime)
-    if let Some((yk, n)) = progress.yaku_times_scored.iter().max_by_key(|(_, c)| *c) {
-        out.push(format!("Favorite yaku — {} ({})", yk.name(), n));
-    }
-
-    // Signature relic activations
-    if let Some((rid, n)) = progress
-        .relic_times_activated
-        .iter()
-        .max_by_key(|(_, c)| *c)
-        && let Some(def) = crate::core::relic::all_relic_defs()
-            .iter()
-            .find(|d| d.id == *rid)
-    {
-        out.push(format!("Most-triggered relic — {} ({})", def.name, n));
-    }
-
-    // Nemesis (guardrails: ≥3 losses on that boss; pair with wins)
-    if let Some((boss, losses, wins)) = nemesis_line(progress) {
-        out.push(format!(
-            "Rivalry — {name}: {losses} losses, {wins} wins",
-            name = boss.name()
-        ));
-    }
-
-    // Stakes teaser
-    let stake_bits: Vec<String> = [
-        TileMaterial::Bamboo,
-        TileMaterial::Plastic,
-        TileMaterial::TortoiseShell,
-    ]
-    .iter()
-    .filter_map(|m| {
-        let cleared = progress.stakes_cleared_for(*m);
-        cleared
-            .iter()
-            .max()
-            .map(|s| format!("{}: {}", m.label(), s.label()))
-    })
-    .collect();
-    if !stake_bits.is_empty() {
-        out.push(format!("Stakes — {}", stake_bits.join(" · ")));
-    }
-
-    out
-}
-
 /// Optional nemesis only when the player lost to the same boss at least 3 times.
 fn nemesis_line(progress: &PlayerProgress) -> Option<(BossKind, u32, u32)> {
     const MIN_LOSSES: u32 = 3;
@@ -242,5 +190,93 @@ fn nemesis_line(progress: &PlayerProgress) -> Option<(BossKind, u32, u32)> {
     best
 }
 
-/// Explain Chronicle omission in UI copy.
-pub const CHRONICLE_TUTORIAL_NOTE: &str = "Practice tutorial runs are not listed in the Chronicle.";
+/// One-line subtitle under a run-log title (ante, score, boss).
+pub fn chronicle_run_log_subtitle(rec: &RunRecord) -> String {
+    let boss = rec
+        .final_boss
+        .map(|b| format!(" · {}", b.name()))
+        .unwrap_or_default();
+    format!(
+        "Ante {} · {} pts{}",
+        rec.final_ante, rec.total_score_earned, boss
+    )
+}
+
+/// Compact career tile for the Chronicle ledger (right pane).
+#[derive(Clone, Debug)]
+pub struct CareerTile {
+    pub label: &'static str,
+    pub value: String,
+    pub detail: Option<String>,
+}
+
+/// Up to four career highlights for the 2×2 tile grid.
+pub fn career_tiles(progress: &PlayerProgress) -> Vec<CareerTile> {
+    let serious: Vec<&RunRecord> = serious_records(progress).collect();
+    if serious.is_empty() {
+        return vec![CareerTile {
+            label: "Chronicle",
+            value: "Awaiting first run".into(),
+            detail: None,
+        }];
+    }
+
+    let mut tiles = Vec::new();
+
+    let best_run = serious
+        .iter()
+        .map(|r| r.total_score_earned)
+        .max()
+        .unwrap_or(0);
+    let board_best = progress.high_scores.first().copied().unwrap_or(0);
+    let primary_score = best_run.max(board_best);
+    tiles.push(CareerTile {
+        label: "Personal best",
+        value: format!("{primary_score}"),
+        detail: Some("run total / board".into()),
+    });
+
+    if let Some(rec) = serious
+        .iter()
+        .max_by_key(|r| r.best_structure_score)
+        .filter(|r| r.best_structure_score > 0)
+    {
+        tiles.push(CareerTile {
+            label: "Signature hand",
+            value: rec.best_structure_name.clone(),
+            detail: Some(format!("{}", rec.best_structure_score)),
+        });
+    }
+
+    if let Some((yk, n)) = progress.yaku_times_scored.iter().max_by_key(|(_, c)| *c) {
+        tiles.push(CareerTile {
+            label: "Favorite yaku",
+            value: yk.name().into(),
+            detail: Some(format!("{n} scored")),
+        });
+    }
+
+    if let Some((boss, losses, wins)) = nemesis_line(progress) {
+        tiles.push(CareerTile {
+            label: "Rivalry",
+            value: boss.name().into(),
+            detail: Some(format!("{losses}L · {wins}W")),
+        });
+    } else if let Some((rid, n)) = progress
+        .relic_times_activated
+        .iter()
+        .max_by_key(|(_, c)| *c)
+        && let Some(def) = crate::core::relic::all_relic_defs()
+            .iter()
+            .find(|d| d.id == *rid)
+    {
+        tiles.push(CareerTile {
+            label: "Most-triggered relic",
+            value: def.name.into(),
+            detail: Some(format!("{n}×")),
+        });
+    }
+
+    tiles.truncate(4);
+    tiles
+}

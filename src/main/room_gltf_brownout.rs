@@ -3,7 +3,7 @@
 //! Ticks only while that scene is on-screen and nothing is blocking
 //! gameplay-style overlays (pause, shop env debug, …).
 
-use crate::render::shop_glb::ShopEnvLightingTune;
+use crate::render::room_glb::RoomEnvLightingTune;
 use crate::scenes::Scene;
 use rand::RngExt;
 
@@ -117,7 +117,7 @@ impl RoomGltfBrownout {
     }
 
     /// Multiply punctual / exposure / emissive tuning. Inactive → `base` unchanged.
-    pub fn apply(&self, base: ShopEnvLightingTune) -> ShopEnvLightingTune {
+    pub fn apply(&self, base: RoomEnvLightingTune) -> RoomEnvLightingTune {
         let Some(ref a) = self.active else {
             return base;
         };
@@ -162,7 +162,7 @@ impl RoomGltfBrownout {
             (gltf, exp, amb, em, punct, candle)
         };
 
-        ShopEnvLightingTune {
+        RoomEnvLightingTune {
             gltf_light_intensity_scale: base.gltf_light_intensity_scale * gltf_mul,
             linear_exposure: base.linear_exposure * exp_mul,
             ambient_scale: base.ambient_scale * amb_mul,

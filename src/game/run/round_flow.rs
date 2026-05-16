@@ -14,22 +14,12 @@ impl RunState {
         // Target scales linearly with the blind's precedence: the Nth blind
         // (skipped or played) targets `base_target * N`. Base is 200 by default,
         // so blind 5 = 1000, blind 16 = 3200.
-        let mut target = self.base_target.saturating_mul(self.run_number);
-        // Tutorial adaptive difficulty: lower the target after repeated failures.
-        if let Some(ref tut) = self.tutorial
-            && tut.is_active()
-        {
-            target = (target as f32 * tut.retry_target_factor()) as u32;
-        }
+        let target = self.base_target.saturating_mul(self.run_number);
         self.target_score = target;
         // Boss dispatch — push rule modifiers and run the on_apply hook so
         // category-C taxers (zero discards, hand-size shrink, gold cost) take
         // effect before the player draws their first hand.
-        let simplified = self
-            .tutorial
-            .as_ref()
-            .is_some_and(|t| t.is_active() && t.current_lesson_def().simplified_boss);
-        if blind == BlindKind::Boss && !simplified {
+        if blind == BlindKind::Boss {
             // Read from the resolved effect (built at reveal time) so reactive
             // bosses' chosen variants land correctly. Take/restore to dodge
             // the &mut self conflict when calling on_apply.
@@ -47,6 +37,7 @@ impl RunState {
                 self.boss.effect = Some(eff);
             }
         }
+        self.feed_hungry_ghosts_at_round_start();
         // Ant Trail: when held, sequences may wrap 9→1 (9-1-2, 8-9-1). The
         // validator already supports this via RuleModifier::SequenceWrap, so
         // we just inject it here.
@@ -175,13 +166,6 @@ impl RunState {
             if self.relics.has(RelicId::BeggarsCup) {
                 *self.relic_counters.entry(RelicId::BeggarsCup).or_insert(0) += 1;
             }
-            if let Some(ref mut tut) = self.tutorial
-                && tut.celebrate(crate::game::tutorial::TutorialMilestone::FirstBossCleared)
-            {
-                bus.push(GameEvent::TutorialMilestone(
-                    crate::game::tutorial::TutorialMilestone::FirstBossCleared,
-                ));
-            }
         }
         // Heirloom: +1 mult per blind *played* (skips don't count — this
         // path only runs when a blind was cleared).
@@ -214,12 +198,6 @@ impl RunState {
             core.clear_hand_structure_bank();
         });
         self.tag_bonus_hand_size = 0;
-
-        // Tutorial: advance to the next lesson and apply its overrides.
-        // This may resize the hand and adjust the target.
-        if self.tutorial.as_ref().is_some_and(|t| t.is_active()) {
-            self.advance_tutorial_lesson();
-        }
 
         // Roll the next ante's boss when we cross an ante boundary. Final
         // ante draws from the dedicated final pool; everyone else draws

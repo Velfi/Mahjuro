@@ -90,19 +90,6 @@ const HANDOFF_MS: u64 = 520;
 const HANDOFF_MERGE_FRAC: f32 = 0.35;
 
 impl CascadeTuning {
-    /// Slow-motion cascade for tutorial lesson 5. Kept intentionally
-    /// generous so the player can read each step while the gameplay
-    /// scene injects annotation text into the `CascadeFrame`.
-    pub fn tutorial_slow() -> Self {
-        Self {
-            base_hold_ms: 1200,
-            step_hold_ms: 1000,
-            total_hold_ms: 1800,
-            tick_duration_ms: 700,
-            ..Self::default()
-        }
-    }
-
     pub fn base_hold(&self) -> Duration {
         Duration::from_millis(self.base_hold_ms)
     }

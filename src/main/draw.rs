@@ -75,11 +75,7 @@ impl App {
                         ModalTheme::Info,
                     );
                     self.modals.push(modal);
-                    self.pending_scene = Some(if !self.run.tutorial_shop_enabled() {
-                        Scene::Gameplay(GameplayScene::with_pending_blind(self.run.upcoming_blind))
-                    } else {
-                        Scene::Shop(crate::scenes::ShopScene::new(&mut self.run, &self.progress))
-                    });
+                    self.pending_scene = Some(Scene::Shop(crate::scenes::ShopScene::new(&mut self.run, &self.progress)));
                     self.transition_alpha = 1.0;
                     return;
                 }
@@ -103,60 +99,13 @@ impl App {
                     audio::MusicId::BlindWin
                 };
                 self.audio.play_music_jingle(won_jingle);
-                // Capture the tutorial lesson *before* advancing so the
-                // recap scene can show what was just learned.
-                let tutorial_lesson_before = self
-                    .run
-                    .tutorial
-                    .as_ref()
-                    .filter(|t| t.is_active())
-                    .map(|t| t.current_lesson);
                 // Capture round_score / target_score before advance_round
                 // clobbers target_score with base_target for the next blind.
                 let cleared_round_score = self.run.round_score;
                 let cleared_target_score = self.run.target_score;
                 self.run.advance_round(&mut self.bus);
 
-                // First-encounter tooltip: gold payout.
-                if let Some(ref mut tut) = self.run.tutorial
-                    && tut.is_active()
-                    && payout.total > 0
-                    && tut.encounter(crate::game::tutorial::FirstEncounter::GoldPayout)
                 {
-                    self.modals.push(Modal::new(
-                        crate::game::tutorial::FirstEncounter::GoldPayout.title(),
-                        crate::game::tutorial::FirstEncounter::GoldPayout.message(),
-                        ModalTheme::Success,
-                    ));
-                }
-
-                // After Lesson 5 (Chips x Mult), grant a free relic to
-                // introduce the concept before the shop appears. This
-                // bridges the gap between learning scoring and discovering
-                // the relic/shop meta-loop.
-                if tutorial_lesson_before == Some(5)
-                    && !self
-                        .run
-                        .relics
-                        .active
-                        .contains(&crate::core::relic::RelicId::PairPower)
-                {
-                    self.run
-                        .relics
-                        .active
-                        .push(crate::core::relic::RelicId::PairPower);
-                    let modal = Modal::new(
-                        "Relic Earned!",
-                        "You found Pair Power! Relics give passive bonuses for the rest of your run. Pairs now score +30 chips and +1 mult.",
-                        ModalTheme::Success,
-                    );
-                    self.modals.push(modal);
-                }
-
-                // Skip the "Round Complete" modal during tutorials — the
-                // TutorialRecap scene already shows the round outcome and
-                // rendering both causes them to overlap.
-                if tutorial_lesson_before.is_none() {
                     let mut lines = vec![format!(
                         "Score: {} / {}",
                         cleared_round_score, cleared_target_score
@@ -223,12 +172,6 @@ impl App {
                     }
 
                     Scene::GameOver(GameOverScene::victory(&self.run))
-                } else if let Some(lesson) = tutorial_lesson_before {
-                    // Tutorial: show a recap of the completed lesson.
-                    let shop_follows = self.run.tutorial_shop_enabled();
-                    Scene::TutorialRecap(TutorialRecapScene::new(lesson, shop_follows))
-                } else if !self.run.tutorial_shop_enabled() {
-                    Scene::Gameplay(GameplayScene::with_pending_blind(self.run.upcoming_blind))
                 } else {
                     Scene::Shop(crate::scenes::ShopScene::new(&mut self.run, &self.progress))
                 });
@@ -256,53 +199,6 @@ impl App {
                     )));
                     self.transition_alpha = 1.0;
                     return;
-                }
-                // Tutorial retry: if the tutorial is active and the player
-                // hasn't reached the graduation zone, restart the current
-                // blind with adaptive difficulty instead of ending the run.
-                let tutorial_retry = self
-                    .run
-                    .tutorial
-                    .as_ref()
-                    .is_some_and(|t| t.is_active() && t.current_lesson < 8);
-                if tutorial_retry {
-                    // Capture stats before retry resets them.
-                    let round_score = self.run.round_score;
-                    let target_score = self.run.target_score;
-                    let plays_left = self.run.plays_remaining;
-                    let discards_left = self.run.discards_remaining;
-                    let lesson = self
-                        .run
-                        .tutorial
-                        .as_ref()
-                        .map(|t| t.current_lesson)
-                        .unwrap_or(1);
-
-                    self.run.retry_tutorial_blind();
-
-                    let feedback = crate::game::tutorial::failure_feedback(
-                        round_score.min(u32::MAX as u64) as u32,
-                        target_score,
-                        plays_left,
-                        discards_left,
-                        lesson,
-                    );
-                    let modal = Modal::new("Try Again!", &feedback, ModalTheme::Success);
-                    self.modals.push(modal);
-                    let retry_blind = self.run.blind;
-                    self.pending_scene = Some(Scene::Gameplay(GameplayScene::with_pending_blind(
-                        retry_blind,
-                    )));
-                    self.transition_alpha = 1.0;
-                    return;
-                }
-
-                // Mark tutorial as completed if the player reached graduation
-                // (or finished the tutorial run regardless of outcome).
-                if let Some(ref tutorial) = self.run.tutorial
-                    && (tutorial.finished || tutorial.current_lesson >= 8)
-                {
-                    self.progress.tutorial_completed = true;
                 }
                 self.progress.runs_completed += 1;
                 self.progress.record_score(self.run.round_score);

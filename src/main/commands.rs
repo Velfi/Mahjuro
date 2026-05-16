@@ -106,6 +106,10 @@ pub fn run_cli_command(command: Option<Command>) -> anyhow::Result<bool> {
             main_headless::run_screenshot_command(s)?;
             Ok(true)
         }
+        Some(Command::BakeRoomGi(b)) => {
+            main_headless::run_bake_room_gi_command(b)?;
+            Ok(true)
+        }
         Some(Command::VulkanWsiProbe) => {
             crate::render::wgpu_renderer::run_vulkan_wsi_probe_smoke()?;
             Ok(true)

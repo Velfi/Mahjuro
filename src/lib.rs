@@ -74,7 +74,6 @@ use scenes::material_viewer::MaterialViewerScene;
 use scenes::rumble_lab::RumbleLabScene;
 use scenes::splash::SplashScene;
 use scenes::transition_playground::TransitionPlaygroundScene;
-use scenes::tutorial_recap::TutorialRecapScene;
 use scenes::tutorial_summary::TutorialSummaryScene;
 use scenes::{ButtonAction, ButtonDef, DrawCtx, Scene, SceneBehavior, UpdateCtx};
 use serde::{Deserialize, Serialize};

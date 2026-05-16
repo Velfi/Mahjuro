@@ -224,11 +224,6 @@ impl GameplayCoreState {
         self.structure_tiles.clear();
     }
 
-    /// Sort the hand and extend `selected` with `false` for new indices (tutorial lesson grow).
-    pub fn sort_hand_resize_selection_false(&mut self) {
-        self.hand.sort();
-        self.selected.resize(self.hand.len(), false);
-    }
 }
 
 #[cfg(test)]

@@ -281,6 +281,7 @@ pub fn push_gameplay_action_prompts(
             text_effect: crate::render::text_effect::TextEffectId::Flat,
             rotation_quarters: 0,
             baseline_shift_px: 0.0,
+            clip_rect: None,
         });
     }
 

@@ -25,7 +25,6 @@ impl RunState {
         state.run_number = 1;
         state.blind = BlindKind::Small;
         state.upcoming_blind = BlindKind::Small;
-        state.tutorial = None;
         state.onboarding = Some(OnboardingState::new());
         state.boss.upcoming = Some(TUTORIAL_BOSS);
         state.resolve_upcoming_boss();

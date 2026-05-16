@@ -2,41 +2,87 @@
 //!
 //! Activated on demand from the Debug menu. While a profile session is
 //! active the renderer wraps each major render pass in
-//! `RenderPassTimestampWrites` so the GPU records start/end timestamps into
-//! a shared `QuerySet`. After every frame's submit we resolve the queries
-//! into a CPU-readable buffer, accumulate per-pass durations, and once the
-//! requested frame count has been reached we log the averages.
+//! `RenderPassTimestampWrites` (or compute-pass equivalents) so the GPU
+//! records start/end timestamps into a shared `QuerySet`. After every
+//! frame's submit we resolve the queries into a CPU-readable buffer,
+//! accumulate per-pass durations, and once the requested frame count has
+//! been reached we log the averages.
 //!
 //! Sessions block on `device.poll(Wait)` between frames so the readback is
 //! synchronous and frame-accurate at the cost of throughput — fine for a
 //! one-shot debug capture.
 //!
-//! Pass slots (each pair = begin/end timestamps):
-//!   shadow, main (single Pass A),
-//!   main-table, main-scene — last two are used only when Pass A is split
-//!   during a GPU profile session (table timed separately from the rest).
+//! Pass slots (see [`PassSlot`]):
+//!   shadow, main, main-table, main-scene — Pass A (table split only while profiling)
+//!   cascade — shooting-star offscreen pre-pass
+//!   room-bloom — second GLB draw for linear HDR bloom / emissive (shop, hallway, archive)
+//!   gi-compute, gi-apply, gi-composite — emissive probe indirect
+//!   ssr-history — half-res scene-color downsample for lacquered-table SSR
+//!   bloom-extract, bloom-blur-h, bloom-blur-v, scene-composite
+//!   tonemap, overlay — final display + 2D HUD text
+//!
+//! On Metal / Apple Silicon, per-pass begin/end pairs in one encoder are unreliable
+//! (later passes report cumulative GPU time). Those backends use **chained fences**:
+//! one timestamp at the end of each pass, duration = `fence[i+1] - fence[i]`.
 
 use std::cell::Cell;
 use std::sync::{Arc, Mutex};
 
-const NUM_PASSES: usize = 4;
-const NUM_TIMESTAMPS: u32 = (NUM_PASSES * 2) as u32;
+const NUM_PASSES: usize = 16;
+/// Pairwise begin/end indices (Vulkan / DX12).
+const PAIRWISE_TIMESTAMPS: u32 = (NUM_PASSES * 2) as u32;
+const QUERY_COUNT: u32 = PAIRWISE_TIMESTAMPS; // 32 slots; Metal chained mode uses ≤17
 const TIMESTAMP_BYTES: u64 = 8;
-const BUFFER_SIZE: u64 = NUM_TIMESTAMPS as u64 * TIMESTAMP_BYTES;
+const BUFFER_SIZE: u64 = QUERY_COUNT as u64 * TIMESTAMP_BYTES;
 
-const PASS_LABELS: [&str; NUM_PASSES] = ["shadow", "main", "main-table", "main-scene"];
+const PASS_LABELS: [&str; NUM_PASSES] = [
+    "shadow",
+    "main",
+    "main-table",
+    "main-scene",
+    "cascade",
+    "room-bloom",
+    "gi-compute",
+    "gi-apply",
+    "gi-composite",
+    "ssr-history",
+    "bloom-extract",
+    "bloom-blur-h",
+    "bloom-blur-v",
+    "scene-composite",
+    "tonemap",
+    "overlay",
+];
 
 /// Per-pass timestamp slot indices into the shared query set.
-
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
+#[repr(usize)]
 pub enum PassSlot {
     Shadow = 0,
+    /// Pass A when not split for profiling.
     Main = 1,
-    /// Pass A — table mesh. Mutually exclusive timestamp with
-    /// [`PassSlot::Main`] when the renderer splits Pass A for GPU profiling.
+    /// Pass A — table mesh. Mutually exclusive with [`PassSlot::Main`] when
+    /// Pass A is split during a GPU profile session.
     MainTable = 2,
     /// Pass A — everything in Pass A except the table draw.
     MainScene = 3,
+    Cascade = 4,
+    /// `shop-linear-bloom-pass` / hallway / archive linear HDR room redraw.
+    RoomBloom = 5,
+    /// `emissive-probe-update-pass` compute dispatch.
+    GiCompute = 6,
+    /// `emissive-probe-apply-pass` fullscreen apply.
+    GiApply = 7,
+    /// `emissive-gi-composite-pass` additive composite.
+    GiComposite = 8,
+    /// `scene-color-downsample-pass` (SSR history colour half-res blit).
+    SsrHistory = 9,
+    BloomExtract = 10,
+    BloomBlurH = 11,
+    BloomBlurV = 12,
+    SceneComposite = 13,
+    Tonemap = 14,
+    Overlay = 15,
 }
 
 pub struct GpuProfiler {
@@ -67,6 +113,16 @@ pub struct GpuProfiler {
     /// because callers hold an immutable borrow of `self` (closures
     /// capturing `&self` for other fields) while encoding the frame.
     last_frame_passes: [Cell<bool>; NUM_PASSES],
+    /// When false, [`Self::pass_writes`] / submit readback are skipped for
+    /// this `render_to` call (e.g. shop journal pre-pass into an offscreen
+    /// target). Only the swapchain submission advances the capture.
+    primary_submit: Cell<bool>,
+    /// Metal: chained end timestamps; other backends: per-pass begin/end pairs.
+    chained_fences: bool,
+    /// Chained mode: number of instrumented passes this submit (reset in [`Self::begin_submit`]).
+    frame_fence_count: Cell<u32>,
+    /// Chained mode: pass slot per fence, in submission order.
+    frame_fence_slots: Cell<[u8; NUM_PASSES]>,
     /// Latched on the frame the session ends (after `report()`). Polled by
     /// the app once per frame via [`Self::take_just_completed`] to play a
     /// confirmation SFX, so the player knows the capture is done without
@@ -75,14 +131,20 @@ pub struct GpuProfiler {
 }
 
 impl GpuProfiler {
-    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, supported: bool) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        supported: bool,
+        backend: wgpu::Backend,
+    ) -> Self {
         if !supported {
             return Self::disabled();
         }
+        let chained_fences = backend == wgpu::Backend::Metal;
         let query_set = device.create_query_set(&wgpu::QuerySetDescriptor {
             label: Some("gpu-profiler-timestamps"),
             ty: wgpu::QueryType::Timestamp,
-            count: NUM_TIMESTAMPS,
+            count: QUERY_COUNT,
         });
         let resolve_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("gpu-profiler-resolve"),
@@ -110,6 +172,10 @@ impl GpuProfiler {
             accum_ms: [0.0; NUM_PASSES],
             pass_frame_counts: [0; NUM_PASSES],
             last_frame_passes: [const { Cell::new(false) }; NUM_PASSES],
+            primary_submit: Cell::new(true),
+            chained_fences,
+            frame_fence_count: Cell::new(0),
+            frame_fence_slots: Cell::new([0u8; NUM_PASSES]),
             just_completed: false,
         }
     }
@@ -129,6 +195,10 @@ impl GpuProfiler {
             accum_ms: [0.0; NUM_PASSES],
             pass_frame_counts: [0; NUM_PASSES],
             last_frame_passes: [const { Cell::new(false) }; NUM_PASSES],
+            primary_submit: Cell::new(true),
+            chained_fences: false,
+            frame_fence_count: Cell::new(0),
+            frame_fence_slots: Cell::new([0u8; NUM_PASSES]),
             just_completed: false,
         }
     }
@@ -165,34 +235,103 @@ impl GpuProfiler {
         log::debug!("Starting GPU profile capture over {frames} frames");
     }
 
-    #[cfg(debug_assertions)]
     pub fn is_sampling(&self) -> bool {
         self.sampling
+    }
+
+    /// Mark whether this `render_to` submission owns the active capture
+    /// (swapchain) or is a secondary target (journal pre-pass).
+    pub fn begin_submit(&self, primary: bool) {
+        self.primary_submit.set(primary);
+        if primary {
+            self.frame_fence_count.set(0);
+        }
+    }
+
+    fn profile_this_submit(&self) -> bool {
+        self.sampling && self.primary_submit.get()
     }
 
     /// Build the timestamp_writes descriptor for a render pass slot. Returns
     /// `None` when no session is active so callers can pass it straight into
     /// `RenderPassDescriptor`. Records that the pass ran this frame.
     pub fn pass_writes(&self, slot: PassSlot) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
-        if !self.sampling {
+        if !self.profile_this_submit() {
             return None;
         }
         let qs = self.query_set.as_ref()?;
         let idx = slot as usize;
         self.last_frame_passes[idx].set(true);
-        let begin = (idx * 2) as u32;
-        Some(wgpu::RenderPassTimestampWrites {
-            query_set: qs,
-            beginning_of_pass_write_index: Some(begin),
-            end_of_pass_write_index: Some(begin + 1),
-        })
+        if self.chained_fences {
+            let f = self.frame_fence_count.get();
+            if f as usize >= NUM_PASSES {
+                log::warn!("GPU profiler: too many passes in one submit; dropping timestamp for {slot:?}");
+                return None;
+            }
+            let mut slots = self.frame_fence_slots.get();
+            slots[f as usize] = idx as u8;
+            self.frame_fence_slots.set(slots);
+            self.frame_fence_count.set(f + 1);
+            let end_idx = f + 1;
+            let begin_idx = if f == 0 { Some(0) } else { None };
+            Some(wgpu::RenderPassTimestampWrites {
+                query_set: qs,
+                beginning_of_pass_write_index: begin_idx,
+                end_of_pass_write_index: Some(end_idx),
+            })
+        } else {
+            let begin = (idx * 2) as u32;
+            Some(wgpu::RenderPassTimestampWrites {
+                query_set: qs,
+                beginning_of_pass_write_index: Some(begin),
+                end_of_pass_write_index: Some(begin + 1),
+            })
+        }
+    }
+
+    /// Same as [`Self::pass_writes`] for compute passes.
+    pub fn compute_pass_writes(
+        &self,
+        slot: PassSlot,
+    ) -> Option<wgpu::ComputePassTimestampWrites<'_>> {
+        if !self.profile_this_submit() {
+            return None;
+        }
+        let qs = self.query_set.as_ref()?;
+        let idx = slot as usize;
+        self.last_frame_passes[idx].set(true);
+        if self.chained_fences {
+            let f = self.frame_fence_count.get();
+            if f as usize >= NUM_PASSES {
+                log::warn!("GPU profiler: too many passes in one submit; dropping timestamp for {slot:?}");
+                return None;
+            }
+            let mut slots = self.frame_fence_slots.get();
+            slots[f as usize] = idx as u8;
+            self.frame_fence_slots.set(slots);
+            self.frame_fence_count.set(f + 1);
+            let end_idx = f + 1;
+            let begin_idx = if f == 0 { Some(0) } else { None };
+            Some(wgpu::ComputePassTimestampWrites {
+                query_set: qs,
+                beginning_of_pass_write_index: begin_idx,
+                end_of_pass_write_index: Some(end_idx),
+            })
+        } else {
+            let begin = (idx * 2) as u32;
+            Some(wgpu::ComputePassTimestampWrites {
+                query_set: qs,
+                beginning_of_pass_write_index: Some(begin),
+                end_of_pass_write_index: Some(begin + 1),
+            })
+        }
     }
 
     /// Called once per frame after all passes have been encoded but before
     /// `queue.submit`. Resolves the query set and stages a copy into the
     /// CPU-readable buffer.
     pub fn before_submit(&self, encoder: &mut wgpu::CommandEncoder) {
-        if !self.sampling {
+        if !self.profile_this_submit() {
             return;
         }
         let (Some(qs), Some(resolve), Some(readback)) = (
@@ -202,7 +341,12 @@ impl GpuProfiler {
         ) else {
             return;
         };
-        encoder.resolve_query_set(qs, 0..NUM_TIMESTAMPS, resolve, 0);
+        let resolve_end = if self.chained_fences {
+            self.frame_fence_count.get() + 1
+        } else {
+            PAIRWISE_TIMESTAMPS
+        };
+        encoder.resolve_query_set(qs, 0..resolve_end, resolve, 0);
         encoder.copy_buffer_to_buffer(resolve, 0, readback, 0, BUFFER_SIZE);
     }
 
@@ -210,7 +354,7 @@ impl GpuProfiler {
     /// the readback buffer, accumulates per-pass timings, and logs the
     /// averages on the final frame.
     pub fn after_submit(&mut self, device: &wgpu::Device) {
-        if !self.sampling {
+        if !self.profile_this_submit() {
             return;
         }
         let Some(readback) = self.readback_buffer.as_ref() else {
@@ -233,22 +377,39 @@ impl GpuProfiler {
             Some(Ok(())) => {
                 let view = readback.slice(..).get_mapped_range();
                 let raw: &[u64] = bytemuck::cast_slice(&view);
-                debug_assert_eq!(raw.len(), NUM_PASSES * 2);
-                for (i, label) in PASS_LABELS.iter().enumerate() {
-                    if !self.last_frame_passes[i].get() {
-                        continue;
+                if self.chained_fences {
+                    let n = self.frame_fence_count.get() as usize;
+                    for f in 0..n {
+                        let begin = raw[f];
+                        let end = raw[f + 1];
+                        if end <= begin || begin == 0 || end == 0 {
+                            continue;
+                        }
+                        let i = self.frame_fence_slots.get()[f] as usize;
+                        if i >= NUM_PASSES {
+                            continue;
+                        }
+                        let ticks = end - begin;
+                        let ns = ticks as f64 * self.period_ns as f64;
+                        self.accum_ms[i] += ns / 1.0e6;
+                        self.pass_frame_counts[i] += 1;
                     }
-                    let begin = raw[i * 2];
-                    let end = raw[i * 2 + 1];
-                    // Guard against wraparound or unwritten queries (both 0).
-                    if end < begin || (begin == 0 && end == 0) {
-                        continue;
+                } else {
+                    debug_assert_eq!(raw.len(), PAIRWISE_TIMESTAMPS as usize);
+                    for (i, _label) in PASS_LABELS.iter().enumerate() {
+                        if !self.last_frame_passes[i].get() {
+                            continue;
+                        }
+                        let begin = raw[i * 2];
+                        let end = raw[i * 2 + 1];
+                        if end <= begin || begin == 0 || end == 0 {
+                            continue;
+                        }
+                        let ticks = end - begin;
+                        let ns = ticks as f64 * self.period_ns as f64;
+                        self.accum_ms[i] += ns / 1.0e6;
+                        self.pass_frame_counts[i] += 1;
                     }
-                    let ticks = end - begin;
-                    let ns = ticks as f64 * self.period_ns as f64;
-                    self.accum_ms[i] += ns / 1.0e6;
-                    self.pass_frame_counts[i] += 1;
-                    let _ = label;
                 }
                 drop(view);
                 readback.unmap();
@@ -277,24 +438,28 @@ impl GpuProfiler {
     fn report(&self) {
         let mut acc = String::new();
         acc.push_str(&format!(
-            "=== GPU pass timings averaged over {} frames ({}×{}) ===",
+            "=== GPU pass timings averaged over {} frames ({}×{})",
             self.total_frames, self.capture_width, self.capture_height,
         ));
+        if self.chained_fences {
+            acc.push_str(" [Metal chained fences]");
+        }
+        acc.push('\n');
         let mut total = 0.0_f64;
         for (i, label) in PASS_LABELS.iter().enumerate() {
             let frames = self.pass_frame_counts[i];
             if frames == 0 {
-                acc.push_str(&format!("   {label:<12} (not run)\n"));
+                acc.push_str(&format!("   {label:<16} (not run)\n"));
                 continue;
             }
             let avg = self.accum_ms[i] / frames as f64;
             total += avg;
             acc.push_str(&format!(
-                "   {label:<12} {avg:>7.3} ms  ({frames} frames)\n"
+                "   {label:<16} {avg:>7.3} ms  ({frames} frames)\n"
             ));
         }
         acc.push_str(&format!(
-            "   {:<12} {total:>7.3} ms (sum of averages)\n",
+            "   {:<16} {total:>7.3} ms (sum of averages)\n",
             "TOTAL"
         ));
         log::debug!("{}", acc);

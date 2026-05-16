@@ -5,7 +5,7 @@
 //! - `sign_description_left` / `sign_description_right` — description boards; runtime draws one
 //!   mesh (see `archive_env_skip_description_prim`) based on cursor so the active board is away
 //!   from the pointer; catalog copy is CPU-rasterized into a shared decal atlas and composited in
-//!   `shop_glb.wgsl` on those meshes (vertex `COLOR_0.a = 2` tag from `decode_env_primitive`).
+//!   `room_glb.wgsl` on those meshes (vertex `COLOR_0.a = 2` tag from `decode_env_primitive`).
 //! - `archive_spawn_item.001` … `archive_spawn_item.021` — 21 item anchors (3×7 window into the tab catalogue).
 //! - `section_buttons_left_bound` / `section_buttons_right_bound` — bounds volumes for tab plaques.
 //! - `archive_spawn_focused_item` — large featured / inspect anchor.
@@ -20,7 +20,7 @@
 //! Export **without Draco** (`KHR_draco_mesh_compression`). Use Blender glTF **Lighting Mode → Standard**
 //! when using `KHR_lights_punctual`.
 //!
-//! Decodes through [`crate::render::room_env_gltf`]; GPU path matches shop/hallway (`shop_glb.wgsl`).
+//! Decodes through [`crate::render::room_env_gltf`]; GPU path matches shop/hallway (`room_glb.wgsl`).
 
 use std::sync::RwLock;
 
@@ -30,7 +30,7 @@ use crate::render::draw_cmd::CameraParams;
 use crate::render::room_env_gltf::{
     RoomEnvWalkHooks, RoomMeshPolicy, glb_punctual_range_world_upload,
 };
-use crate::render::shop_glb::{self, RoomGlbCpu, ShopEnvLightingTune, load_room_glb_from_bytes};
+use crate::render::room_glb::{self, RoomGlbCpu, RoomEnvLightingTune, load_room_glb_from_bytes};
 use crate::render::wgpu_renderer::{MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, PointLight, SpotLight};
 use crate::render::world_space::surface_anchor_from_world_xyz;
 
@@ -181,7 +181,7 @@ pub fn with_archive_glb_cpu<R>(f: impl FnOnce(Option<&RoomGlbCpu>) -> R) -> R {
 pub fn release_archive_environment_cpu_sources_after_gpu_upload() {
     let mut g = ARCHIVE_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
     if let ArchiveGlbCache::Ready(Some(cpu)) = &mut *g {
-        shop_glb::release_room_environment_primitives_cpu(cpu);
+        room_glb::release_room_environment_primitives_cpu(cpu);
     }
 }
 
@@ -249,8 +249,8 @@ pub fn archive_marker_world(
     cpu: &RoomGlbCpu,
     name: &str,
 ) -> Option<Vec3> {
-    let t = shop_glb::marker_translation(cpu, name)?;
-    let s = shop_glb::shop_env_world_scale(window_h, env_height_scale);
+    let t = room_glb::marker_translation(cpu, name)?;
+    let s = room_glb::room_env_world_scale(window_h, env_height_scale);
     Some(t * s)
 }
 
@@ -261,7 +261,7 @@ pub fn archive_marker_world_mat4(
     cpu: &RoomGlbCpu,
     name: &str,
 ) -> Option<Mat4> {
-    let m = shop_glb::shop_env_model_matrix_from_cpu(window_h, env_height_scale, cpu);
+    let m = room_glb::room_env_model_matrix_from_cpu(window_h, env_height_scale, cpu);
     let node = cpu.marker_node_transform_doc(name)?;
     Some(m * node)
 }
@@ -294,12 +294,12 @@ pub fn archive_camera_base(w: f32, h: f32, env_h: f32) -> CameraParams {
         });
         if from_glb.is_none() {
             if let Some(cpu) = opt {
-                let corners = shop_glb::shop_world_bounds_corners_centered(h, env_h, cpu);
-                cam = shop_glb::shop_camera_fit_fovy_for_corners(w, h, cam, &corners, 0.94);
+                let corners = room_glb::room_world_bounds_corners_centered(h, env_h, cpu);
+                cam = room_glb::room_camera_fit_fovy_for_corners(w, h, cam, &corners, 0.94);
             }
         }
         if let Some(cpu) = opt {
-            cam = shop_glb::shop_camera_with_room_clip_planes(cam, h, env_h, cpu);
+            cam = room_glb::room_camera_with_room_clip_planes(cam, h, env_h, cpu);
         }
         cam
     })
@@ -319,7 +319,7 @@ pub fn archive_description_sign_use_left_for_ref_x(
     ref_x: f32,
     cpu: &RoomGlbCpu,
 ) -> Option<bool> {
-    let rl = shop_glb::screen_rect_for_marker_mesh_bounds(
+    let rl = room_glb::screen_rect_for_marker_mesh_bounds(
         win_w,
         win_h,
         cam,
@@ -329,7 +329,7 @@ pub fn archive_description_sign_use_left_for_ref_x(
         8.0,
         8.0,
     );
-    let rr = shop_glb::screen_rect_for_marker_mesh_bounds(
+    let rr = room_glb::screen_rect_for_marker_mesh_bounds(
         win_w,
         win_h,
         cam,
@@ -380,7 +380,7 @@ pub fn archive_glb_has_embedded_lights() -> bool {
 fn gltf_punctual_linear_rgb(
     raw: [f32; 3],
     is_candle: bool,
-    tune: &ShopEnvLightingTune,
+    tune: &RoomEnvLightingTune,
 ) -> [f32; 3] {
     if is_candle {
         [
@@ -397,7 +397,7 @@ pub fn archive_embedded_point_lights_runtime(
     w: f32,
     h: f32,
     env_h: f32,
-    tune: &ShopEnvLightingTune,
+    tune: &RoomEnvLightingTune,
 ) -> Vec<PointLight> {
     with_archive_glb_cpu(|opt| {
         let Some(cpu) = opt else {
@@ -406,7 +406,7 @@ pub fn archive_embedded_point_lights_runtime(
         if cpu.embedded_point_lights.is_empty() {
             return Vec::new();
         }
-        let s = shop_glb::shop_env_world_scale(h, env_h);
+        let s = room_glb::room_env_world_scale(h, env_h);
         let center_doc = cpu
             .environment_bounds_doc
             .map(|b| b.center())
@@ -440,7 +440,7 @@ pub fn archive_embedded_spot_lights_runtime(
     w: f32,
     h: f32,
     env_h: f32,
-    tune: &ShopEnvLightingTune,
+    tune: &RoomEnvLightingTune,
 ) -> Vec<SpotLight> {
     if !archive_glb_has_embedded_lights() {
         return Vec::new();
@@ -452,7 +452,7 @@ pub fn archive_embedded_spot_lights_runtime(
         if cpu.embedded_spot_lights.is_empty() {
             return Vec::new();
         }
-        let s = shop_glb::shop_env_world_scale(h, env_h);
+        let s = room_glb::room_env_world_scale(h, env_h);
         let center_doc = cpu
             .environment_bounds_doc
             .map(|b| b.center())

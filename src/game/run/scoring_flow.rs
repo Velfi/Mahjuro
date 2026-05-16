@@ -38,13 +38,6 @@ impl RunState {
         };
         let sets = self.pick_best_decomposition(sets, &scoring_tiles, &selected_tiles);
 
-        {
-            let meld_kinds: Vec<MeldKind> = sets.iter().map(|s| s.kind).collect();
-            if self.tutorial_validate_melds(&meld_kinds).is_err() {
-                bus.push(GameEvent::InvalidAction);
-                return 0;
-            }
-        }
         if scoring_tiles != selected_tiles && self.relics.has(RelicId::JokerTile) {
             self.joker_used = true;
             self.relic_activations.push(RelicId::JokerTile);
@@ -152,7 +145,6 @@ impl RunState {
         crate::game::engine_state::GameplayCoreState::with_run_mut(self, |core| {
             core.finalize_hand_after_draw();
         });
-        self.seed_tutorial_hand();
         self.restamp_hand_enhancements();
 
         if self.blind == BlindKind::Boss
@@ -875,7 +867,7 @@ impl RunState {
         }
 
         let can_discard =
-            self.discards_remaining > 0 && !self.hand.is_empty() && self.tutorial_discard_allowed();
+            self.discards_remaining > 0 && !self.hand.is_empty();
         !self.has_any_committable_play() && !self.can_trigger_structure_now() && !can_discard
     }
 

@@ -17,7 +17,6 @@ pub(crate) enum TransitionKind {
     ForestOfTiles,
     GalaxyOfTiles,
     Maelstrom,
-    TileWaterfall,
     ShufflingFan,
 }
 
@@ -49,10 +48,8 @@ pub(crate) enum SceneTag {
     MaterialViewer,
     Options,
     Collection,
-    TutorialRecap,
     TutorialCampaign,
     TutorialSummary,
-    TileLiteracy,
     TransitionPlayground,
     RumbleLab,
     YakuJournal,
@@ -74,10 +71,8 @@ impl From<&Scene> for SceneTag {
             Scene::MaterialViewer(_) => SceneTag::MaterialViewer,
             Scene::Options(_) => SceneTag::Options,
             Scene::Collection(_) => SceneTag::Collection,
-            Scene::TutorialRecap(_) => SceneTag::TutorialRecap,
             Scene::TutorialCampaign(_) => SceneTag::TutorialCampaign,
             Scene::TutorialSummary(_) => SceneTag::TutorialSummary,
-            Scene::TileLiteracy(_) => SceneTag::TileLiteracy,
             Scene::TransitionPlayground(_) => SceneTag::TransitionPlayground,
             Scene::RumbleLab(_) => SceneTag::RumbleLab,
             Scene::YakuJournal(_) => SceneTag::YakuJournal,
@@ -111,12 +106,6 @@ pub(crate) fn transition_spec_for_edge(from: SceneTag, to: SceneTag) -> Transiti
         return TransitionSpec {
             kind: TransitionKind::Maelstrom,
             speed: 0.032,
-        };
-    }
-    if undirected_edge(from, to, MainMenuExterior, TileLiteracy) {
-        return TransitionSpec {
-            kind: TransitionKind::TileWaterfall,
-            speed: 0.034,
         };
     }
     if undirected_edge(from, to, MainMenuExterior, ProfileSelect)
@@ -155,7 +144,6 @@ pub(crate) fn overlay_kind_for_transition(kind: TransitionKind) -> Option<Overla
         TransitionKind::ForestOfTiles => Some(OverlayTransitionKind::ForestOfTiles),
         TransitionKind::GalaxyOfTiles => Some(OverlayTransitionKind::GalaxyOfTiles),
         TransitionKind::Maelstrom => Some(OverlayTransitionKind::Maelstrom),
-        TransitionKind::TileWaterfall => Some(OverlayTransitionKind::TileWaterfall),
         TransitionKind::ShufflingFan => Some(OverlayTransitionKind::ShufflingFan),
     }
 }

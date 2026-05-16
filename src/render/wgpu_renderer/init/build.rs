@@ -20,6 +20,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         swapchain_sdr_format,
         swapchain_hdr_available,
         timestamp_supported,
+        gpu_profiler_backend,
         depth_texture,
         depth_view,
         ssr_prev_depth_texture,
@@ -1970,12 +1971,14 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         mapped_at_creation: false,
     });
     let probe_sh_stride = 9 * std::mem::size_of::<glam::Vec4>();
-    let probe_sh_bytes = (crate::render::shop_glb::ROOM_EMISSIVE_PROBE_MAX as usize
+    let probe_sh_bytes = (crate::render::room_glb::ROOM_EMISSIVE_PROBE_MAX as usize
         * probe_sh_stride) as wgpu::BufferAddress;
     let probe_sh_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("emissive-probe-sh"),
         size: probe_sh_bytes,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     });
     let emissive_probe_update_bind_group_layout =
@@ -2435,7 +2438,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     log::info!("tile mesh loaded in {:?}", t0.elapsed());
 
     let (shop_env_primitives, shop_environment) =
-        crate::render::shop_glb::with_shop_glb_cpu(|cpu_opt| {
+        crate::render::room_glb::with_shop_glb_cpu(|cpu_opt| {
             let mut prims = Vec::new();
             let mut gpu_wrap = None;
             let Some(cpu) = cpu_opt else {
@@ -2632,7 +2635,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             (prims, gpu_wrap)
         });
 
-    crate::render::shop_glb::release_shop_environment_cpu_sources_after_gpu_upload();
+    crate::render::room_glb::release_shop_environment_cpu_sources_after_gpu_upload();
 
     let (hallway_env_primitives, hallway_environment) =
         crate::render::hallway_glb::with_hallway_glb_cpu(|cpu_opt| {
@@ -3088,7 +3091,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
 
     crate::render::archive_glb::release_archive_environment_cpu_sources_after_gpu_upload();
 
-    let shop_env_collision_meshes = crate::render::shop_glb::with_shop_glb_cpu(|opt| {
+    let shop_env_collision_meshes = crate::render::room_glb::with_shop_glb_cpu(|opt| {
         opt.map(|c| c.collision_meshes.clone()).unwrap_or_default()
     });
 
@@ -3564,8 +3567,12 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
 
     // Build the GPU profiler up-front while we still have a borrow of
     // device/queue (the struct literal below moves them).
-    let gpu_profiler =
-        crate::render::gpu_profiler::GpuProfiler::new(&device, &queue, timestamp_supported);
+    let gpu_profiler = crate::render::gpu_profiler::GpuProfiler::new(
+        &device,
+        &queue,
+        timestamp_supported,
+        gpu_profiler_backend,
+    );
 
     log::info!("WgpuRenderer::new() total: {:?}", t_total.elapsed());
 
@@ -3670,12 +3677,12 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         archive_sign_left_prim_idx,
         archive_sign_right_prim_idx,
         archive_sign_decal_upload_key: 0,
-        room_gltf_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
-        shop_env_linear_exposure: crate::render::shop_glb::SHOP_ENV_LINEAR_EXPOSURE,
-        shop_env_ambient_scale: crate::render::shop_glb::SHOP_ENV_AMBIENT_SCALE,
+        room_gltf_height_scale: crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
+        shop_env_linear_exposure: crate::render::room_glb::SHOP_ENV_LINEAR_EXPOSURE,
+        shop_env_ambient_scale: crate::render::room_glb::SHOP_ENV_AMBIENT_SCALE,
         shop_lit_mesh_gltf_punctual_scale:
-            crate::render::shop_glb::SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE,
-        shop_gltf_emissive_scale: crate::render::shop_glb::SHOP_GLTF_EMISSIVE_SCALE,
+            crate::render::room_glb::SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE,
+        shop_gltf_emissive_scale: crate::render::room_glb::SHOP_GLTF_EMISSIVE_SCALE,
         shop_env_collision_meshes,
         tile_base_color_factor,
         // Populated on first render() from RenderSettings.tileset_name.
@@ -3813,6 +3820,14 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         emissive_probe_apply_bind_group,
         probe_gi_frame_uniform_buffer,
         probe_sh_buffer,
+        probe_gi_tick: 0,
+        probe_gi_last_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
+        probe_gi_last_size: (0, 0),
+        probe_gi_had_room: false,
+        probe_gi_gpu_room: None,
+        room_gi_capture_pending: None,
+        room_gi_capture_meta: None,
+        room_gi_captured: None,
         emissive_gi_composite_pipeline,
         emissive_gi_composite_bind_group_layout,
         emissive_gi_composite_bind_group,

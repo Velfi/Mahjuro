@@ -12,6 +12,10 @@ use crate::ui::widget;
 
 /// Focus inspect: title, optional accent line (price/tier/CTA), and description in a screen-space
 /// panel ([`tooltip`] brass + midnight frame), anchored to `anchor_rect` when provided.
+///
+/// `avoid_rect`: an optional screen-space rect the panel should not overlap (e.g. the gold label
+/// in the shop). When a horizontal shift can resolve the collision the panel is moved; otherwise
+/// it stays at its computed position.
 pub fn push_focus_tooltip_panel_2d(
     quads: &mut Vec<GpuInstance>,
     texts: &mut Vec<TextLabel>,
@@ -24,6 +28,7 @@ pub fn push_focus_tooltip_panel_2d(
     accent_color: [f32; 4],
     hover_is_owned: bool,
     skip_title_block: bool,
+    avoid_rect: Option<[f32; 4]>,
 ) {
     if title.is_empty() {
         return;
@@ -104,6 +109,24 @@ pub fn push_focus_tooltip_panel_2d(
         top = ay + ah + gap;
     }
     top = top.clamp(margin, window_h - margin - total_h);
+
+    // Shift the panel horizontally when it would overlap the avoid_rect (e.g. the gold label).
+    if let Some(ar) = avoid_rect {
+        let panel_right = left + panel_w;
+        let panel_bottom = top + total_h;
+        let ar_right = ar[0] + ar[2];
+        let ar_bottom = ar[1] + ar[3];
+        let overlaps = left < ar_right && panel_right > ar[0] && top < ar_bottom && panel_bottom > ar[1];
+        if overlaps {
+            let left_candidate = ar[0] - panel_w - margin;
+            let right_candidate = ar_right + margin;
+            if left_candidate >= margin {
+                left = left_candidate;
+            } else if right_candidate + panel_w <= window_w - margin {
+                left = right_candidate;
+            }
+        }
+    }
 
     push_tooltip_frame_quads(quads, left, top, panel_w, total_h);
 
@@ -187,6 +210,7 @@ pub fn push_floating_relic_flavor_labels(
         text_effect: crate::render::text_effect::TextEffectId::Flat,
         rotation_quarters: 0,
         baseline_shift_px: 0.0,
+        clip_rect: None,
     });
 }
 

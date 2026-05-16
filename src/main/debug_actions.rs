@@ -55,6 +55,21 @@ impl App {
                 let _ = persistence::save_profile(self.active_profile, &self.progress);
                 log::debug!("Unlocked all transformation chains (meta + run extinction flags)");
             }
+            DebugAction::SeedChronicleFromBotRuns(count) => {
+                let n = count as usize;
+                log::info!("Seeding chronicle from {n} bot run(s)…");
+                let added = crate::bot::seed_progress_from_bot_runs(&mut self.progress, n);
+                self.run.apply_progression(&self.progress);
+                let _ = persistence::save_profile(self.active_profile, &self.progress);
+                log::info!(
+                    "Chronicle seed complete: {added} run(s) in history ({} total serious)",
+                    self.progress
+                        .run_history
+                        .iter()
+                        .filter(|r| !r.tutorial_run)
+                        .count()
+                );
+            }
             DebugAction::SetGold(amount) => {
                 self.run.set_run_gold_direct(amount as i32, None);
                 log::debug!("Set gold to {}", amount);
@@ -245,10 +260,8 @@ impl App {
                         Scene::MaterialViewer(_) => "MaterialViewer",
                         Scene::Options(_) => "Options",
                         Scene::Collection(_) => "Collection",
-                        Scene::TutorialRecap(_) => "TutorialRecap",
                         Scene::TutorialCampaign(_) => "TutorialCampaign",
                         Scene::TutorialSummary(_) => "TutorialSummary",
-                        Scene::TileLiteracy(_) => "TileLiteracy",
                         Scene::TransitionPlayground(_) => "TransitionPlayground",
                         Scene::RumbleLab(_) => "RumbleLab",
                         Scene::YakuJournal(_) => "YakuJournal",

@@ -16,7 +16,7 @@ use crate::game::event_bus::GameEvent;
 use crate::render::archive_glb;
 use crate::render::draw_cmd::{CameraParams, Object3d, Object3dKind, ScenePunctualLight, UiFrame};
 use crate::render::ribbon_mesh::{ZodiacRibbonSpec, zodiac_ribbon_object3d};
-use crate::render::shop_glb;
+use crate::render::room_glb;
 use crate::render::table_transform::{euler_xyz_rad_from_deg, rot_fixed_axes_deg};
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{
@@ -125,6 +125,8 @@ enum ArtifactKind {
     PlaqueOnly,
     /// Index into [`crate::core::progression::PlayerProgress::run_history`].
     ChronicleRun(usize),
+    /// Aggregate career view (run-log row 0).
+    ChronicleSummary,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -226,8 +228,10 @@ pub struct CollectionScene {
     /// selection in `focused_row` is preserved so direction-reversal lands on
     /// the same cell.
     focused_chrome: Option<CollectionAction>,
-    /// Vertical scroll (px) for the Chronicle tab 2D dashboard content.
+    /// Vertical scroll (px) for the Chronicle career pane (right).
     chronicle_dashboard_scroll: std::cell::Cell<f32>,
+    /// Vertical scroll (px) for the Chronicle run log (left).
+    chronicle_run_log_scroll: std::cell::Cell<f32>,
 }
 
 #[derive(Clone, Copy)]
@@ -271,6 +275,7 @@ impl CollectionScene {
             last_inspect_cam: std::cell::Cell::new(None),
             focused_chrome: None,
             chronicle_dashboard_scroll: std::cell::Cell::new(0.0),
+            chronicle_run_log_scroll: std::cell::Cell::new(0.0),
         }
     }
 
@@ -357,6 +362,7 @@ impl CollectionScene {
         self.archive_page = 0;
         self.cam_anim.set(None);
         self.chronicle_dashboard_scroll.set(0.0);
+        self.chronicle_run_log_scroll.set(0.0);
     }
 
     /// Advance `scroll_rows` toward `target_scroll_rows` with the same
@@ -465,7 +471,7 @@ impl CollectionScene {
                     let Some(cpu) = opt else {
                         return out;
                     };
-                    let model = shop_glb::shop_env_model_matrix_from_cpu(h, env_h, cpu);
+                    let model = room_glb::room_env_model_matrix_from_cpu(h, env_h, cpu);
                     for slot in 0..archive_glb::ARCHIVE_SLOT_COUNT {
                         let name = archive_glb::archive_spawn_item_marker_name(slot);
                         let Some(node) = cpu.markers.get(name) else {
@@ -505,7 +511,26 @@ impl CollectionScene {
                     ));
                 }
             }
-        } else if !matches!(self.active_tab, Tab::Chronicle) {
+        } else if matches!(self.active_tab, Tab::Chronicle) {
+            let panel = chronicle_panel_rect(w, h, progress);
+            let scroll = self.chronicle_run_log_scroll.get();
+            let entry_count = archive_career::chronicle_list_entry_count(progress);
+            for (i, rect) in crate::ui::chronicle_dashboard::chronicle_run_log_hit_rects(
+                w, h, panel, scroll, entry_count,
+            )
+            .into_iter()
+            .enumerate()
+            {
+                if !flat_rect_xywh_is_finite(rect) {
+                    continue;
+                }
+                items.push(FlatItem::new(
+                    CollectionAction::SelectArtifact(i).id(),
+                    rect,
+                    CollectionAction::SelectArtifact(i),
+                ));
+            }
+        } else {
             // Per-artifact hit rects. Apply current scroll offset and clip
             // to the visible band so off-screen rows can't catch clicks.
             let scroll = self.scroll_rows.get();
@@ -635,16 +660,13 @@ impl CollectionScene {
         layout: &crate::ui::layout::LayoutResult,
         progress: &crate::core::progression::PlayerProgress,
     ) -> Option<ItemInspectOrbitState> {
-        if matches!(self.active_tab, Tab::Chronicle) {
-            return None;
-        }
         let bosses = tab_artifacts(self.active_tab, progress);
         self.collection_inspect_orbit_for_focus(
             w,
             h,
             &bosses,
             layout,
-            crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
+            crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
         )
     }
 
@@ -854,7 +876,7 @@ impl CollectionScene {
             }
             let room_glb = archive_glb::archive_glb_has_embedded_lights();
             frame.scene_lighting.embedded_gltf_punctual = room_glb;
-            frame.scene_lighting.room_shop_glb_brdf = room_glb;
+            frame.scene_lighting.room_glb_brdf = room_glb;
             frame.scene_lighting.spot_lights = if room_glb {
                 archive_glb::archive_embedded_spot_lights_runtime(
                     w,
@@ -1062,7 +1084,7 @@ impl CollectionScene {
                 let Some(cpu) = opt else {
                     return out;
                 };
-                let model = shop_glb::shop_env_model_matrix_from_cpu(h, env_scale, cpu);
+                let model = room_glb::room_env_model_matrix_from_cpu(h, env_scale, cpu);
                 for slot in 0..archive_glb::ARCHIVE_SLOT_COUNT {
                     let name = archive_glb::archive_spawn_item_marker_name(slot);
                     let Some(node) = cpu.markers.get(name) else {
@@ -1298,6 +1320,7 @@ impl CollectionScene {
                             arrange_name: Some(closeup_anchor.arrange_name),
                         }));
                     }
+                    ArtifactKind::ChronicleSummary => {}
                     ArtifactKind::ChronicleRun(_) => {
                         let label = boss.name.clone();
                         use crate::render::primitive::{
@@ -1553,7 +1576,11 @@ impl CollectionScene {
                 w,
                 h,
                 panel,
-                self.chronicle_dashboard_scroll.get(),
+                crate::ui::chronicle_dashboard::ChronicleView {
+                    focused_run: self.focused_row,
+                    run_log_scroll: self.chronicle_run_log_scroll.get(),
+                    career_scroll: self.chronicle_dashboard_scroll.get(),
+                },
                 ctx.progress,
                 &mut chart_quads,
                 text_labels,
@@ -1628,7 +1655,7 @@ impl CollectionScene {
         text_labels.push(TextLabel {
             rect: back_rect,
             text: "< Back".into(),
-            color: [0.92, 0.92, 0.98, 1.0],
+            color: color::PARCHMENT,
             font_px: Some(btn_label_px),
             ..Default::default()
         });
@@ -1648,7 +1675,7 @@ impl CollectionScene {
         text_labels.push(TextLabel {
             rect: switch_rect,
             text: "Switch save".into(),
-            color: [0.92, 0.92, 0.98, 1.0],
+            color: color::PARCHMENT,
             font_px: Some(btn_label_px),
             ..Default::default()
         });
@@ -1693,7 +1720,7 @@ impl CollectionScene {
             text_labels.push(TextLabel {
                 rect,
                 text: sym.into(),
-                color: [0.92, 0.92, 0.98, 1.0],
+                color: color::PARCHMENT,
                 font_px: Some(typography::size(typography::H28, h)),
                 ..Default::default()
             });
@@ -1725,7 +1752,7 @@ impl CollectionScene {
             "Finish a non-tutorial run to add folios here.\nTab / Shift+Tab: tabs   ·   Esc: back"
                 .to_string()
         } else if matches!(self.active_tab, Tab::Chronicle) && all_count_hint > 0 {
-            "Tab / Shift+Tab: section   ·   Scroll or PgUp / PgDn: career stats   ·   Esc: back"
+            "Tab / Shift+Tab: section   ·   ↑↓: run log   ·   PgUp / PgDn: detail pane   ·   E / North: inspect run   ·   Esc: back"
                 .to_string()
         } else if archive_path {
             if archive_multi_page {
@@ -1813,24 +1840,6 @@ impl CollectionScene {
             });
         }
 
-        // Stake ladder readout: highest stake cleared per tile material.
-        // Uses the same caption size as the hint line and sits just above
-        // it. Materials the player has never cleared even Spring on are
-        // omitted — the line is decorative, not a checklist.
-        let ladder_line = stake_ladder_summary(ctx.progress);
-        if !ladder_line.is_empty() {
-            let ladder_band_h = hint_line_h + 8.0;
-            let ladder_y = hint_y - ladder_band_h - (h * 0.014).max(10.0);
-            text_labels.push(TextLabel {
-                rect: [margin_x * 0.5, ladder_y, w - margin_x, ladder_band_h],
-                text: ladder_line.into(),
-                color: [0.90, 0.80, 0.52, 0.95],
-                font_px: Some(hint_font_px),
-                align: TextAlign::Center,
-                ..Default::default()
-            });
-        }
-
         let all_artifacts = tab_artifacts(self.active_tab, ctx.progress);
 
         // Grid layout, focus close-up, and description plaque.
@@ -1906,7 +1915,14 @@ impl SceneBehavior for CollectionScene {
             if matches!(self.active_tab, Tab::Chronicle) {
                 let w = ctx.layout.window_w;
                 let h = ctx.layout.window_h;
-                let max_s = chronicle_dashboard_scroll_max(w, h, ctx.progress);
+                let panel = chronicle_panel_rect(w, h, ctx.progress);
+                let max_s = crate::ui::chronicle_dashboard::chronicle_right_pane_scroll_max(
+                    w,
+                    h,
+                    panel,
+                    ctx.progress,
+                    self.focused_row,
+                );
                 let next = (self.chronicle_dashboard_scroll.get() - ctx.scroll_lines * 42.0)
                     .clamp(0.0, max_s);
                 self.chronicle_dashboard_scroll.set(next);
@@ -1968,7 +1984,15 @@ impl SceneBehavior for CollectionScene {
                     if matches!(self.active_tab, Tab::Chronicle) {
                         let w = ctx.layout.window_w;
                         let h = ctx.layout.window_h;
-                        let max_s = chronicle_dashboard_scroll_max(w, h, ctx.progress);
+                        let panel = chronicle_panel_rect(w, h, ctx.progress);
+                        let max_s =
+                            crate::ui::chronicle_dashboard::chronicle_right_pane_scroll_max(
+                                w,
+                                h,
+                                panel,
+                                ctx.progress,
+                                self.focused_row,
+                            );
                         let step = h * 0.22;
                         let next = (self.chronicle_dashboard_scroll.get() + step).min(max_s);
                         self.chronicle_dashboard_scroll.set(next);
@@ -1987,7 +2011,15 @@ impl SceneBehavior for CollectionScene {
                     if matches!(self.active_tab, Tab::Chronicle) {
                         let w = ctx.layout.window_w;
                         let h = ctx.layout.window_h;
-                        let max_s = chronicle_dashboard_scroll_max(w, h, ctx.progress);
+                        let panel = chronicle_panel_rect(w, h, ctx.progress);
+                        let max_s =
+                            crate::ui::chronicle_dashboard::chronicle_right_pane_scroll_max(
+                                w,
+                                h,
+                                panel,
+                                ctx.progress,
+                                self.focused_row,
+                            );
                         let step = h * 0.22;
                         let next = (self.chronicle_dashboard_scroll.get() - step)
                             .max(0.0)
@@ -2065,6 +2097,21 @@ impl SceneBehavior for CollectionScene {
                         collection_chrome_directional(self, ctx.bus, &items, FocusDir::Up);
                         continue;
                     }
+                    if matches!(self.active_tab, Tab::Chronicle) && all_count > 0 {
+                        let idx = self.focused_row.unwrap_or(0);
+                        if idx > 0 {
+                            apply_artifact_focus(self, ctx.bus, idx - 1);
+                            chronicle_sync_run_log_scroll(
+                                self,
+                                ctx.layout.window_w,
+                                ctx.layout.window_h,
+                                ctx.progress,
+                            );
+                        } else {
+                            collection_enter_chrome(self, ctx.bus, &items, FocusDir::Up);
+                        }
+                        continue;
+                    }
                     if archive_path {
                         if all_count == 0
                             || !archive_directional_step(
@@ -2103,6 +2150,21 @@ impl SceneBehavior for CollectionScene {
                 UiAction::FocusDown => {
                     if self.focused_chrome.is_some() {
                         collection_chrome_directional(self, ctx.bus, &items, FocusDir::Down);
+                        continue;
+                    }
+                    if matches!(self.active_tab, Tab::Chronicle) && all_count > 0 {
+                        let idx = self.focused_row.unwrap_or(0);
+                        if idx + 1 < all_count {
+                            apply_artifact_focus(self, ctx.bus, idx + 1);
+                            chronicle_sync_run_log_scroll(
+                                self,
+                                ctx.layout.window_w,
+                                ctx.layout.window_h,
+                                ctx.progress,
+                            );
+                        } else {
+                            collection_enter_chrome(self, ctx.bus, &items, FocusDir::Down);
+                        }
                         continue;
                     }
                     if archive_path {
@@ -2195,10 +2257,10 @@ impl SceneBehavior for CollectionScene {
                         }
                         continue;
                     }
-                    if archive_path && !matches!(self.active_tab, Tab::Chronicle) {
-                        // Plinth already mirrors focus, so Confirm has no separate
-                        // "select" semantics — open the inspect orbit instead, matching
-                        // E / North. Keeps Enter/A useful from keyboard + gamepad.
+                    if (archive_path && !matches!(self.active_tab, Tab::Chronicle))
+                        || (matches!(self.active_tab, Tab::Chronicle)
+                            && self.focused_row.is_some_and(|i| i > 0))
+                    {
                         let w = ctx.layout.window_w;
                         let h = ctx.layout.window_h;
                         let bosses = tab_artifacts(self.active_tab, ctx.progress);
@@ -2227,13 +2289,15 @@ impl SceneBehavior for CollectionScene {
                     }
                 }
                 UiAction::NorthFacePress => {
-                    if matches!(self.active_tab, Tab::Chronicle) {
-                        continue;
-                    }
                     let w = ctx.layout.window_w;
                     let h = ctx.layout.window_h;
                     let bosses = tab_artifacts(self.active_tab, ctx.progress);
                     if bosses.is_empty() {
+                        continue;
+                    }
+                    if matches!(self.active_tab, Tab::Chronicle)
+                        && self.focused_row.is_some_and(|i| i == 0)
+                    {
                         continue;
                     }
                     if let Some(orbit) = self.collection_inspect_orbit_for_focus(
@@ -2315,6 +2379,7 @@ impl SceneBehavior for CollectionScene {
                     self.archive_page = 0;
                     self.cam_anim.set(None);
                     self.chronicle_dashboard_scroll.set(0.0);
+        self.chronicle_run_log_scroll.set(0.0);
                 }
             }
             Some(CollectionAction::SelectArtifact(idx)) => {
@@ -2348,6 +2413,14 @@ impl SceneBehavior for CollectionScene {
                         max_scroll,
                         visible_rows,
                     );
+                    if matches!(self.active_tab, Tab::Chronicle) {
+                        chronicle_sync_run_log_scroll(
+                            self,
+                            ctx.layout.window_w,
+                            ctx.layout.window_h,
+                            ctx.progress,
+                        );
+                    }
                 }
             }
             None => {}
@@ -2356,9 +2429,31 @@ impl SceneBehavior for CollectionScene {
         if matches!(self.active_tab, Tab::Chronicle) {
             let w = ctx.layout.window_w;
             let h = ctx.layout.window_h;
-            let max_s = chronicle_dashboard_scroll_max(w, h, ctx.progress);
+            let panel = chronicle_panel_rect(w, h, ctx.progress);
+            let entry_count = archive_career::chronicle_list_entry_count(ctx.progress);
+            let right_max = crate::ui::chronicle_dashboard::chronicle_right_pane_scroll_max(
+                w,
+                h,
+                panel,
+                ctx.progress,
+                self.focused_row,
+            );
             self.chronicle_dashboard_scroll
-                .set(self.chronicle_dashboard_scroll.get().clamp(0.0, max_s));
+                .set(self.chronicle_dashboard_scroll.get().clamp(0.0, right_max));
+            let run_max = crate::ui::chronicle_dashboard::chronicle_run_log_scroll_max(
+                w,
+                h,
+                panel,
+                entry_count,
+            );
+            let panes = crate::ui::chronicle_dashboard::chronicle_pane_layout(w, h, panel);
+            let scroll = crate::ui::chronicle_dashboard::chronicle_clamp_run_log_scroll(
+                self.chronicle_run_log_scroll.get(),
+                self.focused_row,
+                entry_count,
+                panes,
+            );
+            self.chronicle_run_log_scroll.set(scroll.clamp(0.0, run_max));
         }
 
         if archive_glb::archive_room_draw_ready() {
@@ -2375,31 +2470,6 @@ impl SceneBehavior for CollectionScene {
 
     fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         self.draw_collection_frame(ctx, None)
-    }
-}
-
-// ── Stake ladder readout ────────────────────────────────────────────
-
-/// Format a single-line "highest stake cleared per material" summary for
-/// the footer of the Collection scene. Materials with no cleared stakes
-/// are omitted so the line stays compact on fresh profiles.
-fn stake_ladder_summary(progress: &crate::core::progression::PlayerProgress) -> String {
-    let materials = [
-        crate::persistence::TileMaterial::Bamboo,
-        crate::persistence::TileMaterial::Plastic,
-        crate::persistence::TileMaterial::TortoiseShell,
-    ];
-    let mut parts: Vec<String> = Vec::new();
-    for m in materials {
-        let cleared = progress.stakes_cleared_for(m);
-        if let Some(highest) = cleared.iter().max() {
-            parts.push(format!("{}: {}", m.label(), highest.label()));
-        }
-    }
-    if parts.is_empty() {
-        String::new()
-    } else {
-        format!("Stakes cleared — {}", parts.join("   ·   "))
     }
 }
 
@@ -2476,18 +2546,30 @@ fn tab_artifacts(tab: Tab, progress: &crate::core::progression::PlayerProgress) 
                 accent: tk.accent_color(),
             })
             .collect(),
-        Tab::Chronicle => archive_career::chronicle_indices_recent_first(progress)
-            .into_iter()
-            .filter_map(|idx| {
-                let rec = progress.run_history.get(idx)?;
-                Some(Artifact {
-                    name: archive_career::chronicle_folio_title(progress, rec),
+        Tab::Chronicle => {
+            let indices = archive_career::chronicle_indices_recent_first(progress);
+            let mut out = Vec::with_capacity(indices.len() + 1);
+            out.push(Artifact {
+                name: "Summary".into(),
+                unlocked: true,
+                kind: ArtifactKind::ChronicleSummary,
+                accent: color::CHAMPAGNE,
+            });
+            for (list_i, &idx) in indices.iter().enumerate() {
+                let Some(rec) = progress.run_history.get(idx) else {
+                    continue;
+                };
+                let display = archive_career::chronicle_display_run_number(list_i + 1, progress)
+                    .unwrap_or(0);
+                out.push(Artifact {
+                    name: archive_career::chronicle_run_log_title(progress, display, rec),
                     unlocked: true,
                     kind: ArtifactKind::ChronicleRun(idx),
                     accent: color::PARCHMENT,
-                })
-            })
-            .collect(),
+                });
+            }
+            out
+        }
     }
 }
 
@@ -2534,6 +2616,13 @@ fn description_for(
             boss_by_name(&art.name)
                 .map(str::to_string)
                 .unwrap_or_default()
+        }
+        ArtifactKind::ChronicleSummary => {
+            let n = archive_career::chronicle_indices_recent_first(progress).len();
+            format!(
+                "Career overview across {n} recorded run{}.\nUse ↑↓ to select a run for its full record.",
+                if n == 1 { "" } else { "s" }
+            )
         }
         ArtifactKind::ChronicleRun(idx) => progress
             .run_history
@@ -2593,6 +2682,7 @@ fn stats_for(art: &Artifact, progress: &crate::core::progression::PlayerProgress
                 }
             }
         }
+        ArtifactKind::ChronicleSummary => {}
         ArtifactKind::ChronicleRun(idx) => {
             if let Some(rec) = progress.run_history.get(*idx) {
                 return archive_career::chronicle_run_stats(rec);
@@ -2750,6 +2840,7 @@ fn collection_push_grid_cell_object3d(
                 arrange_name: None,
             });
         }
+        ArtifactKind::ChronicleSummary => {}
         ArtifactKind::ChronicleRun(_) => {
             use crate::render::primitive::{DecalLayout, DecalSpec, MaterialSpec, MeshId};
             plaques.push(Object3d {
@@ -2783,7 +2874,7 @@ fn collection_sanitized_room_gltf_height_scale(env_h: f32) -> f32 {
     if env_h.is_finite() && env_h > 1e-4 {
         env_h.clamp(0.03, 25.0)
     } else {
-        crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE
+        crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE
     }
 }
 
@@ -2879,7 +2970,11 @@ fn collection_sync_artifact_focus_to_idx(
     max_scroll: f32,
     visible_rows: usize,
 ) {
+    let prev = scene.focused_row;
     scene.focused_row = Some(idx);
+    if matches!(scene.active_tab, Tab::Chronicle) && prev != Some(idx) {
+        scene.chronicle_dashboard_scroll.set(0.0);
+    }
     scene
         .tree
         .set_focus(CollectionAction::SelectArtifact(idx).id());
@@ -3018,6 +3113,44 @@ fn collection_chrome_rects(
 }
 
 #[inline]
+fn chronicle_panel_rect(
+    w: f32,
+    h: f32,
+    progress: &crate::core::progression::PlayerProgress,
+) -> [f32; 4] {
+    let ch = archive_chrome_layout(w, h);
+    let count = tab_artifacts(Tab::Chronicle, progress).len().max(1);
+    let layout = compute_layout(w, h, ch.scale, Tab::Chronicle, count);
+    [
+        ch.margin_x,
+        layout.band_top_y,
+        w - ch.margin_x * 2.0,
+        (layout.band_bottom_y - layout.band_top_y).max(1.0),
+    ]
+}
+
+#[inline]
+fn chronicle_sync_run_log_scroll(
+    scene: &mut CollectionScene,
+    w: f32,
+    h: f32,
+    progress: &crate::core::progression::PlayerProgress,
+) {
+    let panel = chronicle_panel_rect(w, h, progress);
+    let entry_count = archive_career::chronicle_list_entry_count(progress);
+    let panes = crate::ui::chronicle_dashboard::chronicle_pane_layout(w, h, panel);
+    let scroll = crate::ui::chronicle_dashboard::chronicle_clamp_run_log_scroll(
+        scene.chronicle_run_log_scroll.get(),
+        scene.focused_row,
+        entry_count,
+        panes,
+    );
+    let max_s =
+        crate::ui::chronicle_dashboard::chronicle_run_log_scroll_max(w, h, panel, entry_count);
+    scene.chronicle_run_log_scroll.set(scroll.clamp(0.0, max_s));
+}
+
+#[inline]
 fn chronicle_apply_footer_page_scroll(
     scene: &mut CollectionScene,
     w: f32,
@@ -3025,23 +3158,17 @@ fn chronicle_apply_footer_page_scroll(
     progress: &crate::core::progression::PlayerProgress,
     direction: f32,
 ) {
-    let max_s = chronicle_dashboard_scroll_max(w, h, progress);
+    let panel = chronicle_panel_rect(w, h, progress);
+    let max_s = crate::ui::chronicle_dashboard::chronicle_right_pane_scroll_max(
+        w,
+        h,
+        panel,
+        progress,
+        scene.focused_row,
+    );
     let step = h * 0.22 * direction;
     let next = (scene.chronicle_dashboard_scroll.get() + step).clamp(0.0, max_s);
     scene.chronicle_dashboard_scroll.set(next);
-}
-
-#[inline]
-fn chronicle_dashboard_scroll_max(
-    w: f32,
-    h: f32,
-    progress: &crate::core::progression::PlayerProgress,
-) -> f32 {
-    let ch = archive_chrome_layout(w, h);
-    let count = tab_artifacts(Tab::Chronicle, progress).len().max(1);
-    let layout = compute_layout(w, h, ch.scale, Tab::Chronicle, count);
-    let panel_h = (layout.band_bottom_y - layout.band_top_y).max(1.0);
-    crate::ui::chronicle_dashboard::chronicle_dashboard_scroll_max(w, h, panel_h, progress)
 }
 
 #[inline]
@@ -3073,9 +3200,9 @@ fn rect_center_x(rect: [f32; 4]) -> f32 {
 #[inline]
 fn chrome_btn_color(focused: bool) -> [f32; 4] {
     if focused {
-        [0.28, 0.30, 0.42, 0.96]
+        color::alpha(color::WALNUT_BRIGHT, 0.98)
     } else {
-        [0.18, 0.20, 0.30, 0.92]
+        color::alpha(color::WALNUT_SOFT, 0.94)
     }
 }
 
@@ -3215,7 +3342,7 @@ fn archive_section_tab_hit_rects(
 ) -> Option<Vec<(usize, [f32; 4])>> {
     archive_glb::with_archive_glb_cpu(|opt| {
         let cpu = opt?;
-        let left = shop_glb::screen_rect_for_marker_mesh_bounds(
+        let left = room_glb::screen_rect_for_marker_mesh_bounds(
             w,
             h,
             cam,
@@ -3225,7 +3352,7 @@ fn archive_section_tab_hit_rects(
             48.0,
             32.0,
         )?;
-        let right = shop_glb::screen_rect_for_marker_mesh_bounds(
+        let right = room_glb::screen_rect_for_marker_mesh_bounds(
             w,
             h,
             cam,

@@ -14,7 +14,6 @@ mod relic_removal;
 mod round_flow;
 mod scoring_flow;
 mod tags;
-mod tutorial;
 
 use std::collections::BTreeMap;
 
@@ -43,7 +42,6 @@ use crate::core::yaku::YakuKind;
 use crate::game::event_bus::{EventBus, GameEvent, GameOverReason};
 use crate::game::game_mode::GameMode;
 use crate::game::onboarding::{OnboardingPhase, OnboardingState, TUTORIAL_BOSS, tutorial_yaku};
-use crate::game::tutorial::TutorialState;
 pub use discard_undo::DiscardUndoSnapshot;
 
 /// Boss-blind state for the current run.  Extracted from `RunState` so
@@ -787,10 +785,6 @@ pub struct RunState {
     ///   IGotAGuy     → shop restock waivers remaining (starts 3 on buy)
     #[serde(default)]
     pub relic_counters: std::collections::BTreeMap<RelicId, i32>,
-    /// Tutorial state. `None` for normal (non-tutorial) runs. Present
-    /// during the player's very first run to gate mechanics by lesson.
-    #[serde(default)]
-    pub tutorial: Option<TutorialState>,
     /// Curated onboarding-campaign state for the revamped first-time tutorial.
     #[serde(default)]
     pub onboarding: Option<OnboardingState>,
@@ -1171,7 +1165,6 @@ impl RunState {
             finished_zodiac_celebration: None,
             pending_shop_focus_snap_after_pack_celebration: false,
             relic_counters: std::collections::BTreeMap::new(),
-            tutorial: None,
             onboarding: None,
             relic_activations: Vec::new(),
         };

@@ -48,7 +48,7 @@ pub const TILE_3D: &str = concat!(
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/tile_3d.wgsl")),
 );
 
-/// `scene_pbr_lights` + `scene_hdr_tonemap` + `shop_glb`
+/// `scene_pbr_lights` + `scene_hdr_tonemap` + `room_glb`
 pub const SHOP_GLB: &str = concat!(
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -62,7 +62,7 @@ pub const SHOP_GLB: &str = concat!(
     "\n",
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/shaders/shop_glb.wgsl"
+        "/shaders/room_glb.wgsl"
     )),
 );
 

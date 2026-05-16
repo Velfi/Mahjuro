@@ -1,5 +1,5 @@
 //! Load mesh + PBR data from a GLB by walking the **default scene** (same idea as
-//! [`crate::render::shop_glb`]): every node that carries a mesh contributes **all** of that mesh's
+//! [`crate::render::room_glb`]): every node that carries a mesh contributes **all** of that mesh's
 //! primitives, each transformed by the node's accumulated world matrix.
 //!
 //! Decodes align with glTF 2.0 where practical: base color (+ factor), normal map (+ scale),
@@ -7,7 +7,7 @@
 //! `KHR_texture_transform` on textures, optional `COLOR_0`, and sampler-driven mips/wrap/filter
 //! for GPU upload (see [`crate::render::gltf_helpers`]).
 //!
-//! [`crate::render::shop_glb`] shares [`LoadedPrimitive`] / [`Vertex3dTex`] for the shop room mesh.
+//! [`crate::render::room_glb`] shares [`LoadedPrimitive`] / [`Vertex3dTex`] for the shop room mesh.
 //!
 //! **Blender:** **Z-up** (default) + built-in glTF 2.0 exporter. The file is still stored **Y-up**
 //! per glTF. Depending on object rotation / apply, thickness can end up on glTF **+Z** instead of

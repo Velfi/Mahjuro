@@ -482,7 +482,7 @@ impl RunRecord {
             consumables_owned: run.consumables.items.clone(),
             tile_material: run.mode.tile_material,
             stake: run.mode.stake,
-            tutorial_run: run.tutorial.is_some(),
+            tutorial_run: false,
         }
     }
 }

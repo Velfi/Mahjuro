@@ -9,7 +9,7 @@
 
 use crate::persistence::TileMaterial;
 
-/// `base_color_factor.w` for [`crate::render::shop_glb`] — sample bound base color, **no**
+/// `base_color_factor.w` for [`crate::render::room_glb`] — sample bound base color, **no**
 /// projected tile decal (shop geometry shares the tile pipeline).
 pub const TEXTURED_BASE_MAP_BODY_KIND: f32 = 4.0;
 

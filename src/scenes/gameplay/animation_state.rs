@@ -14,7 +14,6 @@ use crate::render::candle_mesh::WICK_TIP_Y;
 use crate::render::draw_cmd::{Object3d, Object3dKind};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, SpotLight};
 use crate::scenes::UpdateCtx;
-use crate::scenes::tutorial_overlay::HighlightTarget;
 
 /// Tick particles, flying coins, score popups, score reel target, and
 /// per-slot hand tile tweens. Returns the freshly read interaction snapshot
@@ -242,8 +241,8 @@ pub(super) fn build_candles_and_spotlights(
     gameplay: &crate::game::engine::GameplayReadModel,
     hand_slots: &[(f32, f32, f32, f32)],
     hint_indices: &[usize],
-    discard_bowl_placement: Option<&Object3d>,
-    bronze_mirror_placement: Option<&Object3d>,
+    _discard_bowl_placement: Option<&Object3d>,
+    _bronze_mirror_placement: Option<&Object3d>,
     debug_visibility_hide_candles: bool,
     progress_dora_enabled: bool,
 ) -> CandleAndLightBuffers {
@@ -572,47 +571,6 @@ pub(super) fn build_candles_and_spotlights(
                         intensity: 9.0 * pulse,
                     });
                 }
-            }
-        }
-    }
-
-    // ── Tutorial pulse light on the Play mirror ───────────────────────
-    // When the tutorial overlay is highlighting the Play button, add a
-    // pulsing blue-white point light over the bronze mirror so the
-    // player's eye is drawn to it.
-    if let Some(ref overlay) = scene.tutorial_overlay {
-        if overlay.highlight == Some(HighlightTarget::PlayButton)
-            && let Some(mirror) = bronze_mirror_placement
-        {
-            let pulse = 0.5 + 0.5 * (overlay.pulse_time * 2.5).sin();
-            let budget =
-                crate::render::wgpu_renderer::MAX_POINT_LIGHTS.saturating_sub(point_lights.len());
-            if budget > 0 {
-                let diam = mirror.extents[0];
-                point_lights.push(PointLight {
-                    pos: [mirror.pos[0], mirror.pos[1], diam * 0.6],
-                    radius: diam * 3.0 + pulse * diam * 1.0,
-                    color: crate::render::theme::color::rgb(crate::render::theme::color::LAPIS),
-                    intensity: 3.5 + pulse * 4.0,
-                });
-            }
-        }
-
-        // ── Tutorial pulse light on the Discard bowl ──────────────────
-        if overlay.highlight == Some(HighlightTarget::DiscardBowl)
-            && let Some(bowl) = discard_bowl_placement
-        {
-            let pulse = 0.5 + 0.5 * (overlay.pulse_time * 2.5).sin();
-            let budget =
-                crate::render::wgpu_renderer::MAX_POINT_LIGHTS.saturating_sub(point_lights.len());
-            if budget > 0 {
-                let diam = bowl.extents[0];
-                point_lights.push(PointLight {
-                    pos: [bowl.pos[0], bowl.pos[1], diam * 0.6],
-                    radius: diam * 3.0 + pulse * diam * 1.0,
-                    color: crate::render::theme::color::rgb(crate::render::theme::color::LAPIS),
-                    intensity: 3.5 + pulse * 4.0,
-                });
             }
         }
     }

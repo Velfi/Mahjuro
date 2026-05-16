@@ -61,8 +61,8 @@ pub enum ScenePunctualLight {
 pub struct SceneLighting {
     pub punctual: Vec<ScenePunctualLight>,
     pub spot_lights: Vec<SpotLight>,
-    /// Room environment mesh uses `shop_glb.wgsl` when true, else `tile_3d.wgsl`.
-    pub room_shop_glb_brdf: bool,
+    /// Room environment mesh uses `room_glb.wgsl` when true, else `tile_3d.wgsl`.
+    pub room_glb_brdf: bool,
     /// Embedded `KHR_lights_punctual` active for this room (inverse-square lights + exposure path).
     pub embedded_gltf_punctual: bool,
 }
@@ -72,7 +72,7 @@ impl Default for SceneLighting {
         Self {
             punctual: Vec::new(),
             spot_lights: Vec::new(),
-            room_shop_glb_brdf: false,
+            room_glb_brdf: false,
             embedded_gltf_punctual: false,
         }
     }
@@ -863,10 +863,13 @@ pub struct UiFrame {
     /// `None` = draw both (or procedural Archive). Renderer culls the hidden GLB primitive index.
     pub archive_description_sign_use_left: Option<bool>,
     /// When set, description copy is rasterized into the archive room decal atlas and composited
-    /// on the `sign_description_left` / `sign_description_right` meshes in `shop_glb.wgsl`.
+    /// on the `sign_description_left` / `sign_description_right` meshes in `room_glb.wgsl`.
     pub archive_sign_description_decal_text: Option<String>,
-    /// Pick-blind hallway vertex warp (`shop_glb.wgsl` @group(0) @binding(8)); `None` elsewhere.
+    /// Pick-blind hallway vertex warp (`room_glb.wgsl` @group(0) @binding(8)); `None` elsewhere.
     pub hallway_distortion: Option<crate::render::hallway_glb::HallwayDistortion>,
+    /// When true, skip offline room GI probe bake and run dynamic `emissive-probe-update`.
+    /// Shop sets this during item-inspect camera dolly / orbit.
+    pub room_gi_dynamic: bool,
 }
 
 impl UiFrame {
@@ -892,13 +895,14 @@ impl UiFrame {
             archive_description_sign_use_left: None,
             archive_sign_description_decal_text: None,
             hallway_distortion: None,
+            room_gi_dynamic: false,
         }
     }
 
-    /// `shop_glb.wgsl` for room meshes vs `tile_3d` (includes shop inspect storeroom path).
+    /// `room_glb.wgsl` for room meshes vs `tile_3d` (includes shop inspect storeroom path).
     #[inline]
-    pub fn room_uses_shop_glb_shader(&self) -> bool {
-        self.scene_lighting.room_shop_glb_brdf || self.shop_inspect_lit_mesh_hdr
+    pub fn uses_room_glb_shader(&self) -> bool {
+        self.scene_lighting.room_glb_brdf || self.shop_inspect_lit_mesh_hdr
     }
 
     // ── Push helpers ────────────────────────────────────────────────────
