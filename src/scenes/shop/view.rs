@@ -22,12 +22,12 @@ use crate::render::draw_cmd::{
 use crate::render::ribbon_mesh::{
     ZodiacRibbonSpec, ribbon_length_fitting_rect, zodiac_ribbon_object3d,
 };
-use crate::render::shop_glb::{
-    ShopEnvLightingTune, marker_translation, player_consumable_marker_name,
+use crate::render::room_glb::{
+    RoomEnvLightingTune, marker_translation, player_consumable_marker_name,
     player_gold_dish_marker_translation, player_relic_marker_name,
-    screen_rect_for_marker_mesh_bounds, shop_camera_fit_fovy_for_corners,
-    shop_camera_from_glb_if_present, shop_camera_with_room_clip_planes, shop_env_world_scale,
-    shop_world_bounds_corners_centered, spawn_relic_marker_name, with_shop_glb_cpu,
+    screen_rect_for_marker_mesh_bounds, room_camera_fit_fovy_for_corners,
+    shop_camera_from_glb_if_present, room_camera_with_room_clip_planes, room_env_world_scale,
+    room_world_bounds_corners_centered, spawn_relic_marker_name, with_shop_glb_cpu,
 };
 use crate::render::table_transform::euler_xyz_rad_from_deg;
 use crate::render::table_transform::mat4_to_euler_xyz_rad;
@@ -114,7 +114,7 @@ fn shop_glb_has_embedded_lights() -> bool {
 fn gltf_punctual_linear_rgb(
     raw: [f32; 3],
     is_candle: bool,
-    tune: &ShopEnvLightingTune,
+    tune: &RoomEnvLightingTune,
 ) -> [f32; 3] {
     if is_candle {
         [
@@ -131,7 +131,7 @@ fn embedded_point_lights_runtime(
     w: f32,
     h: f32,
     env_h: f32,
-    tune: &ShopEnvLightingTune,
+    tune: &RoomEnvLightingTune,
 ) -> Vec<PointLight> {
     with_shop_glb_cpu(|opt| {
         let Some(cpu) = opt else {
@@ -140,7 +140,7 @@ fn embedded_point_lights_runtime(
         if cpu.embedded_point_lights.is_empty() {
             return Vec::new();
         }
-        let s = shop_env_world_scale(h, env_h);
+        let s = room_env_world_scale(h, env_h);
         let center_doc = cpu
             .environment_bounds_doc
             .map(|b| b.center())
@@ -159,7 +159,7 @@ fn embedded_point_lights_runtime(
             .map(|l| {
                 let world = (l.pos_doc - center_doc) * s;
                 let radius =
-                    crate::render::shop_glb::glb_punctual_range_world_upload(h, s, l.range_doc);
+                    crate::render::room_glb::glb_punctual_range_world_upload(h, s, l.range_doc);
                 PointLight {
                     pos: surface_anchor_from_world_xyz(w, h, world),
                     radius,
@@ -171,7 +171,7 @@ fn embedded_point_lights_runtime(
     })
 }
 
-fn spot_lights_from_glb(w: f32, h: f32, env_h: f32, tune: &ShopEnvLightingTune) -> Vec<SpotLight> {
+fn spot_lights_from_glb(w: f32, h: f32, env_h: f32, tune: &RoomEnvLightingTune) -> Vec<SpotLight> {
     if !shop_glb_has_embedded_lights() {
         return Vec::new();
     }
@@ -182,7 +182,7 @@ fn spot_lights_from_glb(w: f32, h: f32, env_h: f32, tune: &ShopEnvLightingTune) 
         if cpu.embedded_spot_lights.is_empty() {
             return Vec::new();
         }
-        let s = shop_env_world_scale(h, env_h);
+        let s = room_env_world_scale(h, env_h);
         let center_doc = cpu
             .environment_bounds_doc
             .map(|b| b.center())
@@ -204,7 +204,7 @@ fn spot_lights_from_glb(w: f32, h: f32, env_h: f32, tune: &ShopEnvLightingTune) 
                 }
                 let world = (l.pos_doc - center_doc) * s;
                 let radius =
-                    crate::render::shop_glb::glb_punctual_range_world_upload(h, s, l.range_doc);
+                    crate::render::room_glb::glb_punctual_range_world_upload(h, s, l.range_doc);
                 let cos_outer = l.outer_cone_rad.cos();
                 let cos_inner = l.inner_cone_rad.cos().max(cos_outer);
                 Some(SpotLight {
@@ -239,12 +239,12 @@ pub(super) fn shop_camera_base(w: f32, h: f32, env_h: f32) -> CameraParams {
         // Auto-fit widens vertical FOV past the authored value; keep GLB eye / target / up / fovy intact.
         if from_glb.is_none() {
             if let Some(cpu) = opt {
-                let corners = shop_world_bounds_corners_centered(h, env_h, cpu);
-                cam = shop_camera_fit_fovy_for_corners(w, h, cam, &corners, 0.94);
+                let corners = room_world_bounds_corners_centered(h, env_h, cpu);
+                cam = room_camera_fit_fovy_for_corners(w, h, cam, &corners, 0.94);
             }
         }
         if let Some(cpu) = opt {
-            cam = shop_camera_with_room_clip_planes(cam, h, env_h, cpu);
+            cam = room_camera_with_room_clip_planes(cam, h, env_h, cpu);
         }
         cam
     })
@@ -441,13 +441,13 @@ fn marker_screen_rect(
             return Some(r);
         }
         let tw =
-            marker_translation(cpu, node_name)? * shop_env_world_scale(win_h, env_height_scale);
+            marker_translation(cpu, node_name)? * room_env_world_scale(win_h, env_height_scale);
         let (cx, cy) = cam.project_world_to_screen(win_w, win_h, tw);
         Some([cx - rw * 0.5, cy - rh * 0.5, rw, rh])
     })
 }
 
-/// [`Object3d::pos`] for the gameplay-style coin pile: [`crate::render::shop_glb::PLAYER_GOLD_DISH_MARKER`]
+/// [`Object3d::pos`] for the gameplay-style coin pile: [`crate::render::room_glb::PLAYER_GOLD_DISH_MARKER`]
 /// (or legacy `PlayerGoldDish`) when the room loads, otherwise [`ShopLayout::coin_dish_center_px`]
 /// with a perspective-correct lift.
 fn player_gold_dish_object3d_anchor(
@@ -457,7 +457,7 @@ fn player_gold_dish_object3d_anchor(
     env_h: f32,
     layout: &ShopLayout,
 ) -> [f32; 3] {
-    let scale = shop_env_world_scale(h, env_h);
+    let scale = room_env_world_scale(h, env_h);
     if let Some(tw) =
         with_shop_glb_cpu(|opt| opt.and_then(|cpu| player_gold_dish_marker_translation(cpu)))
     {
@@ -636,6 +636,7 @@ pub(crate) fn render_shop_frame(
         _ => base,
     };
     frame.camera_override = Some(final_cam);
+    frame.room_gi_dynamic = inspect.is_some() || eased > 0.02;
     let cam = final_cam;
 
     let layout = ShopLayout::build(
@@ -687,7 +688,7 @@ pub(crate) fn render_shop_frame(
     let room_glb_lights = shop_glb_has_embedded_lights();
     {
         frame.scene_lighting.embedded_gltf_punctual = room_glb_lights;
-        frame.scene_lighting.room_shop_glb_brdf = room_glb_lights;
+        frame.scene_lighting.room_glb_brdf = room_glb_lights;
         let use_glb_lights = room_glb_lights;
         let mut merged_punctual: Vec<ScenePunctualLight> = if use_glb_lights {
             embedded_point_lights_runtime(w, h, env_h, &ctx.shop_env_lighting)
@@ -938,7 +939,7 @@ pub(crate) fn render_shop_frame(
     };
     let mut credits_rect = with_shop_glb_cpu(|opt| {
         let cpu = opt?;
-        let tw = player_gold_dish_marker_translation(cpu)? * shop_env_world_scale(h, env_h);
+        let tw = player_gold_dish_marker_translation(cpu)? * room_env_world_scale(h, env_h);
         let (cx, cy) = cam.project_world_to_screen(w, h, tw);
         Some([
             cx - credits_rw * 0.5,
@@ -955,6 +956,7 @@ pub(crate) fn render_shop_frame(
     let by = credits_rect[1] - pad * 0.4;
     let bw = credits_rect[2] + pad * 2.0;
     let bh = credits_rect[3] + pad * 1.05;
+    let gold_label_rect: [f32; 4] = [bx - 4.0, by - 3.0, bw + 8.0, bh + 7.0];
     frame.quad(GpuInstance {
         rect: [bx - 4.0, by - 3.0, bw + 8.0, bh + 7.0],
         color: color::alpha(color::LACQUER, 0.48),
@@ -985,6 +987,7 @@ pub(crate) fn render_shop_frame(
         text_effect: crate::render::text_effect::TextEffectId::Flat,
         rotation_quarters: 0,
         baseline_shift_px: 0.0,
+        clip_rect: None,
     }]);
 
     // Shelf focus ring uses shelf-slot screen rects.
@@ -1055,6 +1058,7 @@ pub(crate) fn render_shop_frame(
             col,
             hover_is_owned,
             skip_title,
+            Some(gold_label_rect),
         );
         // Relic: hover = name + mechanical; E inspect = name + flavor (no mechanical).
         frame.quads(tip_quads);
@@ -1341,6 +1345,7 @@ pub(crate) fn render_shop_frame(
                 text_effect: crate::render::text_effect::TextEffectId::Flat,
                 rotation_quarters: 0,
                 baseline_shift_px: 0.0,
+                clip_rect: None,
             });
         }
 
@@ -1393,6 +1398,7 @@ pub(crate) fn render_shop_frame(
                 text_effect: crate::render::text_effect::TextEffectId::Flat,
                 rotation_quarters: 0,
                 baseline_shift_px: 0.0,
+                clip_rect: None,
             });
         }
 
@@ -1912,7 +1918,7 @@ fn inv_marker_surface_anchor(
         .and_then(|name| {
             with_shop_glb_cpu(|opt| opt.and_then(|cpu| marker_translation(cpu, &name)))
         })
-        .map(|tw| surface_anchor_from_world_xyz(w, h, tw * shop_env_world_scale(h, env_h)))
+        .map(|tw| surface_anchor_from_world_xyz(w, h, tw * room_env_world_scale(h, env_h)))
         .unwrap_or_else(|| lit_anchor(cam, w, h, cx, cy, cz_fallback))
 }
 
@@ -1927,7 +1933,7 @@ fn sale_anchor_at_slot(
     cy: f32,
     cz_fallback: f32,
 ) -> [f32; 3] {
-    let scale = shop_env_world_scale(h, env_h);
+    let scale = room_env_world_scale(h, env_h);
     if let Some(tw) = with_shop_glb_cpu(|opt| {
         opt.and_then(|cpu| marker_translation(cpu, &spawn_relic_marker_name(slot_i)))
     }) {

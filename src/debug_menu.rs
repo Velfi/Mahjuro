@@ -69,9 +69,10 @@ pub enum DebugAction {
     /// `pick_blind`, …) — like arrange mode but for the post-process pass.
     OpenTonemapDebug,
     BlowWindGust,
-    /// Capture GPU pass timings (shadow, main, …) averaged over the next 100
-    /// rendered frames and log the result. Only meaningful on backends that
-    /// support `wgpu::Features::TIMESTAMP_QUERY`. The synchronous readback
+    /// Capture GPU pass timings (shadow, main, room-bloom, GI, bloom, tonemap,
+    /// …) averaged over the next 100 rendered frames and log the result. Only
+    /// meaningful on backends that support `wgpu::Features::TIMESTAMP_QUERY`.
+    /// The synchronous readback
     /// inflates the CPU `render` stage if the CPU profile runs at the same
     /// time, so this is split from [`DebugAction::ProfileCpu`].
     ProfileGpu,
@@ -118,6 +119,9 @@ pub enum DebugAction {
     /// all fragile primaries. Run: mark every burn chain as extinct so
     /// successors can appear in the shop pool.
     UnlockAllTransformationsAndSuccessors,
+    /// Play N headless bot runs and append each terminal state to
+    /// `run_history` + career counters (Chronicle debug fill).
+    SeedChronicleFromBotRuns(u32),
 }
 
 /// Holds the menu bar and maps MenuIds to DebugActions.
@@ -313,6 +317,17 @@ impl DebugMenuBar {
             let _ = level_sub.append(&item);
         }
         let _ = cheats_sub.append(&level_sub);
+
+        let chronicle_sub = Submenu::new("Seed Chronicle (bot runs)", true);
+        for &n in &[5u32, 15, 30, 60] {
+            let item = MenuItem::new(format!("{n} bot runs"), true, None);
+            mappings.push((
+                item.id().clone(),
+                DebugAction::SeedChronicleFromBotRuns(n),
+            ));
+            let _ = chronicle_sub.append(&item);
+        }
+        let _ = cheats_sub.append(&chronicle_sub);
 
         // Set Gold submenu.
         let gold_sub = Submenu::new("Set Gold", true);

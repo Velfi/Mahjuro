@@ -186,7 +186,7 @@ pub(super) enum ShopInspectLitMeshFelt {
 
 impl WgpuRenderer {
     /// Shop-style ACES tonemap knobs for `tile_3d` / `tile_outline` (`CameraUniform.hdr_tonemap`)
-    /// and `lit_mesh` (`SsrGlobals.felt`). Same `ShopEnvLightingTune` as the room.
+    /// and `lit_mesh` (`SsrGlobals.felt`). Same `RoomEnvLightingTune` as the room.
     pub(super) fn tile_hdr_tonemap(&self, frame: &crate::render::draw_cmd::UiFrame) -> [f32; 4] {
         use crate::render::draw_cmd::DrawCmd;
         let k = self.active_scene_key;
@@ -201,19 +201,19 @@ impl WgpuRenderer {
             || (k == Some("showcase") && h.tile_pack_celebration_tonemap);
         if shop_scene && frame.shop_inspect_lit_mesh_hdr {
             let linear_hdr = self.shop_env_linear_exposure
-                * crate::render::shop_glb::SHOP_INSPECT_LIT_MESH_HDR_LINEAR_MUL;
+                * crate::render::room_glb::SHOP_INSPECT_LIT_MESH_HDR_LINEAR_MUL;
             let ambient = (self.shop_env_ambient_scale
-                + crate::render::shop_glb::SHOP_INSPECT_LIT_MESH_AMBIENT)
+                + crate::render::room_glb::SHOP_INSPECT_LIT_MESH_AMBIENT)
                 .min(0.30);
             return [1.0, linear_hdr, ambient, 0.0];
         }
         if tile_pack_celebration {
             let ambient = (self.shop_env_ambient_scale * 0.45)
-                .max(crate::render::shop_glb::TILE_PACK_CELEBRATION_LIT_MESH_AMBIENT_MIN);
+                .max(crate::render::room_glb::TILE_PACK_CELEBRATION_LIT_MESH_AMBIENT_MIN);
             return [
                 1.0,
                 self.shop_env_linear_exposure
-                    * crate::render::shop_glb::TILE_PACK_CELEBRATION_HDR_LINEAR_EXPOSURE,
+                    * crate::render::room_glb::TILE_PACK_CELEBRATION_HDR_LINEAR_EXPOSURE,
                 ambient,
                 0.0,
             ];
@@ -244,15 +244,15 @@ impl WgpuRenderer {
         let (mut linear_hdr, mut ambient) = if shop_scene {
             (
                 self.shop_env_linear_exposure
-                    * crate::render::shop_glb::SHOP_ENV_LINEAR_EXPOSURE_BASE,
+                    * crate::render::room_glb::SHOP_ENV_LINEAR_EXPOSURE_BASE,
                 self.shop_env_ambient_scale,
             )
         } else {
             (
                 self.shop_env_linear_exposure
-                    * crate::render::shop_glb::GAMEPLAY_TABLE_HDR_LINEAR_MUL,
+                    * crate::render::room_glb::GAMEPLAY_TABLE_HDR_LINEAR_MUL,
                 self.shop_env_ambient_scale
-                    .max(crate::render::shop_glb::GAMEPLAY_TABLE_AMBIENT_MIN),
+                    .max(crate::render::room_glb::GAMEPLAY_TABLE_AMBIENT_MIN),
             )
         };
 
@@ -262,7 +262,7 @@ impl WgpuRenderer {
         // not the gameplay-table multiplier meant for mahjong tiles on felt.
         if frame.scene_lighting.embedded_gltf_punctual && !shop_scene {
             let mut e = self.shop_env_linear_exposure
-                * crate::render::shop_glb::SHOP_ENV_LINEAR_EXPOSURE_BASE;
+                * crate::render::room_glb::SHOP_ENV_LINEAR_EXPOSURE_BASE;
             let mut a = self.shop_env_ambient_scale;
             if k == Some("pick_blind") {
                 e *= crate::render::hallway_glb::HALLWAY_ENV_LINEAR_EXPOSURE_MUL;
@@ -295,14 +295,14 @@ impl WgpuRenderer {
                     .showcase_render_hints
                     .shop_tonemap_and_lit_mesh_context);
         // `KHR_lights_punctual`: `.x` = inverse document scale for attenuation
-        // (matches `shop_glb` `decal_atlas_uv.y`) whenever embedded punctual is
+        // (matches `room_glb` `decal_atlas_uv.y`) whenever embedded punctual is
         // on — archive/collection need this too, not only `shop_like` scenes.
         // `.y` = shop vitrine material tuning (albedo/ambient/shadow tweaks);
         // keep that shop-only so archive relics do not stack extra fill on top
         // of corrected punctual.
         let shop_punctual_inv_doc = if frame.scene_lighting.embedded_gltf_punctual {
             let s =
-                crate::render::shop_glb::shop_env_world_scale(cam.h, self.room_gltf_height_scale);
+                crate::render::room_glb::room_env_world_scale(cam.h, self.room_gltf_height_scale);
             1.0 / s.max(1e-6)
         } else {
             0.0
@@ -316,8 +316,8 @@ impl WgpuRenderer {
             if let Some(phase) = shop_inspect_felt {
                 match phase {
                     ShopInspectLitMeshFelt::Dim => {
-                        felt_z = tm[1] * crate::render::shop_glb::SHOP_INSPECT_ENV_VS_LIT_LINEAR;
-                        felt_w = tm[2] * crate::render::shop_glb::SHOP_INSPECT_ENV_VS_LIT_AMBIENT;
+                        felt_z = tm[1] * crate::render::room_glb::SHOP_INSPECT_ENV_VS_LIT_LINEAR;
+                        felt_w = tm[2] * crate::render::room_glb::SHOP_INSPECT_ENV_VS_LIT_AMBIENT;
                         if felt_y <= 0.5 {
                             felt_z = 0.0;
                             felt_w = 0.0;

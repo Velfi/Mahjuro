@@ -10,7 +10,7 @@ use crate::debug_overlays::{
     ShopEnvDebugOverlay, TonemapDebugOverlay, TuningOverlay,
 };
 use crate::render::draw_cmd::CameraParams;
-use crate::render::shop_glb::ShopEnvLightingTune;
+use crate::render::room_glb::RoomEnvLightingTune;
 
 /// State for the arrange-mode debug feature. Activated via Debug > Arrange
 /// Mode. The user clicks an object to select it, then uses WASD to nudge
@@ -88,8 +88,8 @@ pub struct DebugState {
     pub last_effective_camera: CameraParams,
     /// `shop.glb` / hallway / archive room scale multiplier (`window_h *` this). Debug overlay can edit live.
     pub room_gltf_height_scale: f32,
-    /// glTF punctual + `shop_glb` tonemap tuning. Debug overlay edits live.
-    pub shop_env_lighting: ShopEnvLightingTune,
+    /// glTF punctual + `room_glb` tonemap tuning. Debug overlay edits live.
+    pub shop_env_lighting: RoomEnvLightingTune,
 }
 
 impl DebugState {
@@ -113,8 +113,8 @@ impl DebugState {
             object_hit_test_armed: false,
             arrange_mode: None,
             last_effective_camera: CameraParams::default_table_camera(800.0),
-            room_gltf_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
-            shop_env_lighting: ShopEnvLightingTune::SOURCE_DEFAULTS,
+            room_gltf_height_scale: crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
+            shop_env_lighting: RoomEnvLightingTune::SOURCE_DEFAULTS,
         }
     }
 

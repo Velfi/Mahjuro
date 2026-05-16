@@ -33,9 +33,29 @@ pub enum Command {
     /// Use `--scene showcase` without `--pack` for the zodiac ribbon (same as `zodiac_celebration`).
     /// Use `--scene game_over_level_up` for meta profile level-up (`Showcase` / `MetaLevelUpPresenter`).
     Screenshot(ScreenshotCli),
+    /// Bake offline emissive probe SH for a static room GLB (shop / hallway / archive).
+    ///
+    /// Writes `assets/data/room_gi/<room>.mgi` for packaging into the gameplay asset pack.
+    /// Prefer **`cargo build --release`** — same cold-start cost as `screenshot`.
+    BakeRoomGi(BakeRoomGiCli),
     /// Internal: Win32 Vulkan WSI smoke test (parent uses this to fall back to DX12 on fault).
     #[command(hide = true, name = "vulkan-wsi-probe")]
     VulkanWsiProbe,
+}
+
+/// Offline probe GI bake at the resting room camera (1920×1080 by default).
+#[derive(Debug, Args)]
+pub struct BakeRoomGiCli {
+    /// Room to bake: `shop`, `hallway`, or `archive`.
+    pub room: String,
+    #[arg(long, default_value = "assets/data/room_gi")]
+    pub output_dir: PathBuf,
+    #[arg(long, default_value_t = 1920)]
+    pub width: u32,
+    #[arg(long, default_value_t = 1080)]
+    pub height: u32,
+    #[arg(long, default_value_t = 24)]
+    pub warmup_frames: u32,
 }
 
 /// Headless one-shot capture: runs `warmup_frames` settle ticks offscreen, then writes `--output`.
@@ -83,7 +103,7 @@ pub struct ScreenshotCli {
     /// when `--scene shop`.
     #[arg(long)]
     pub journal_transition: Option<f32>,
-    /// Override `ShopEnvLightingTune::gltf_emissive_scale` for this capture
+    /// Override `RoomEnvLightingTune::gltf_emissive_scale` for this capture
     /// (glTF room mesh emissive gain). Compare e.g. `1` vs `12` on `--scene pick_blind`.
     #[arg(long)]
     pub gltf_emissive_scale: Option<f32>,

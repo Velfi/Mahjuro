@@ -219,6 +219,7 @@ pub(super) struct EarlyGpuState {
     pub swapchain_sdr_format: wgpu::TextureFormat,
     pub swapchain_hdr_available: bool,
     pub timestamp_supported: bool,
+    pub gpu_profiler_backend: wgpu::Backend,
     pub depth_texture: wgpu::Texture,
     pub depth_view: wgpu::TextureView,
     pub ssr_prev_depth_texture: wgpu::Texture,
@@ -410,6 +411,7 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
     // `encoder.write_timestamp()` outside of render passes.
     let mut required_features = wgpu::Features::CLEAR_TEXTURE;
     // TIMESTAMP_QUERY + Win32 Vulkan + some AMD stacks: sporadic faults around swapchain setup.
+    let gpu_profiler_backend = adapter.get_info().backend;
     let timestamp_supported =
         adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY) && !win32_vulkan;
     if timestamp_supported {
@@ -525,6 +527,7 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
         swapchain_sdr_format,
         swapchain_hdr_available,
         timestamp_supported,
+        gpu_profiler_backend,
         depth_texture,
         depth_view,
         ssr_prev_depth_texture,

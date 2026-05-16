@@ -1,4 +1,6 @@
-//! Load [`Shop.glb`](../../../assets/3d/Shop.glb): named empties/meshes for UI anchors + merged environment geometry.
+//! Generic room GLB infrastructure ([`RoomGlbCpu`], [`RoomEnvLightingTune`], shared camera/transform helpers)
+//! shared by shop, hallway, and archive scenes; also owns the shop-specific static loader for
+//! [`Shop.glb`](../../../assets/3d/Shop.glb).
 //!
 //! Marker object names (Blender object names → glTF node names):
 //! - `exit_btn`, `restock_btn`, `journal_btn`
@@ -9,7 +11,7 @@
 //!
 //! **Spawn / inventory anchor** nodes (`shop_spawn_relic_*`, `shop_player_*`) may carry mesh
 //! geometry that exists only for authoring (invisible hit volumes). That mesh is **skipped** at
-//! decode time so it does not draw, but it is still decoded into **[`ShopCollisionMesh`]** triangle
+//! decode time so it does not draw, but it is still decoded into **[`RoomCollisionMesh`]** triangle
 //! soups for cursor ray picking (`pick_shop_object`). **Shop buttons** (`exit_btn`, `restock_btn`,
 //! `journal_btn`) still record marker transforms **and** decode their meshes for drawing.
 //!
@@ -43,12 +45,12 @@
 //! The perspective camera (embedded or fallback) is offset the same way; vertical FOV is **raised**
 //! only when needed so the bounds’ corners stay inside the frustum at the current aspect ratio.
 //! Default multiplier is [`SHOP_ENV_HEIGHT_SCALE`]; Debug → Tuning → **Shop Env & Lighting…**
-//! overrides height scale and [`ShopEnvLightingTune`] fields live (typical height range `0.001`–`2.0`).
+//! overrides height scale and [`RoomEnvLightingTune`] fields live (typical height range `0.001`–`2.0`).
 //!
 //! ## Optional perspective camera
 //! If the default scene contains a **perspective** camera node, the shop uses it for
 //! [`crate::render::draw_cmd::CameraParams`] (eye / target / up / vertical FOV). Transforms are read
-//! in glTF camera convention (−Z forward, +Y up); positions are scaled by [`shop_env_world_scale`]
+//! in glTF camera convention (−Z forward, +Y up); positions are scaled by [`room_env_world_scale`]
 //! like marker geometry. If multiple cameras exist, a node named `ShopCamera`, `shop_camera`, or
 //! `Camera` wins; otherwise the first perspective camera in depth-first order is used. Orthographic
 //! cameras are ignored (hardcoded fallback camera applies).
@@ -57,12 +59,12 @@
 //! **Point** and **spot** lights on scene nodes drive shop lighting when present: hardcoded lamp +
 //! fill point lights are omitted so only glTF punctual lights apply (hover highlights may still add
 //! extras). **Directional** lights are skipped. With embedded lights, the room draws through
-//! `shop_glb.wgsl`: inverse-square attenuation (Khronos range window),
+//! `room_glb.wgsl`: inverse-square attenuation (Khronos range window),
 //! metallic–roughness, ACES (fitted) tonemap, and linear HDR exposure:
 //! [`SHOP_ENV_LINEAR_EXPOSURE_BASE`] × debug tune (see [`SHOP_ENV_LINEAR_EXPOSURE`]) before tonemap;
 //! [`SHOP_ENV_AMBIENT_SCALE`] defaults to `0` for this interior.
 //! glTF punctual intensity is scaled by [`SHOP_GLTF_LIGHT_INTENSITY_SCALE`] (default `1`). Shop punctual
-//! points use a separate uniform buffer, bound as group 1 binding 0 for [`shop_glb.wgsl`] and binding 2
+//! points use a separate uniform buffer, bound as group 1 binding 0 for [`room_glb.wgsl`] and binding 2
 //! for [`lit_mesh.wgsl`] (inverse-square on props; stays within WebGPU `max_bind_groups` on Metal).
 //! Punctual lights on nodes whose names start with [`SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX`] use
 //! [`SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL`] for a warm candle read; other lights keep glTF-authored color.
@@ -77,23 +79,22 @@ use rustc_hash::FxHashMap;
 use crate::render::draw_cmd::CameraParams;
 use crate::render::room_env_gltf::{
     self as renv, EmbeddedCameraHarvest, RoomEnvWalkHooks, RoomMeshPolicy, marker_translation_doc,
-    room_camera_fit_clip_planes, room_camera_fit_fovy_for_corners,
-    room_env_model_matrix_from_bounds_doc, room_world_bounds_corners_centered, walk_room_env_node,
+    room_env_model_matrix_from_bounds_doc, walk_room_env_node,
 };
 use crate::render::tile_glb::release_loaded_primitive_gpu_source_buffers;
 use anyhow::Context;
 use glam::{Mat4, Vec3};
 
-enum ShopGlbCache {
+enum RoomGlbCache {
     Uninit,
     Ready(Option<RoomGlbCpu>),
 }
 
-static SHOP_GLB_CPU: RwLock<ShopGlbCache> = RwLock::new(ShopGlbCache::Uninit);
+static ROOM_GLB_CPU: RwLock<RoomGlbCache> = RwLock::new(RoomGlbCache::Uninit);
 
 fn ensure_shop_glb_loaded() {
-    let mut w = SHOP_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
-    if !matches!(*w, ShopGlbCache::Uninit) {
+    let mut w = ROOM_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
+    if !matches!(*w, RoomGlbCache::Uninit) {
         return;
     }
     let ready = if let Some(file) = crate::asset_path::get("3d/Shop.glb") {
@@ -133,18 +134,18 @@ fn ensure_shop_glb_loaded() {
         log::warn!("shop.glb not embedded; using PNG storeroom backdrop");
         None
     };
-    *w = ShopGlbCache::Ready(ready);
+    *w = RoomGlbCache::Ready(ready);
 }
 
 /// Read-only access to decoded shop data (markers, lights, collision, …).  
 /// Do not call [`release_shop_environment_cpu_sources_after_gpu_upload`] from inside `f` (deadlock).
 pub fn with_shop_glb_cpu<R>(f: impl FnOnce(Option<&RoomGlbCpu>) -> R) -> R {
     ensure_shop_glb_loaded();
-    let g = SHOP_GLB_CPU.read().unwrap_or_else(|e| e.into_inner());
+    let g = ROOM_GLB_CPU.read().unwrap_or_else(|e| e.into_inner());
     match &*g {
-        ShopGlbCache::Ready(Some(cpu)) => f(Some(cpu)),
-        ShopGlbCache::Ready(None) => f(None),
-        ShopGlbCache::Uninit => unreachable!(),
+        RoomGlbCache::Ready(Some(cpu)) => f(Some(cpu)),
+        RoomGlbCache::Ready(None) => f(None),
+        RoomGlbCache::Uninit => unreachable!(),
     }
 }
 
@@ -158,13 +159,13 @@ pub fn release_room_environment_primitives_cpu(cpu: &mut RoomGlbCpu) {
 }
 
 pub fn release_shop_environment_cpu_sources_after_gpu_upload() {
-    let mut g = SHOP_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
-    if let ShopGlbCache::Ready(Some(cpu)) = &mut *g {
+    let mut g = ROOM_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
+    if let RoomGlbCache::Ready(Some(cpu)) = &mut *g {
         release_room_environment_primitives_cpu(cpu);
     }
 }
 
-/// Default height multiplier for [`shop_env_world_scale`] when no debug override is active.
+/// Default height multiplier for [`room_env_world_scale`] when no debug override is active.
 pub const SHOP_ENV_HEIGHT_SCALE: f32 = 1.0;
 
 /// Multiplies glTF punctual **intensity** before upload (document-space inverse-square; see
@@ -172,7 +173,7 @@ pub const SHOP_ENV_HEIGHT_SCALE: f32 = 1.0;
 pub const SHOP_GLTF_LIGHT_INTENSITY_SCALE: f32 = 0.6;
 
 /// Linear HDR gain for **shop** only: `2^-9` ≈ Don McCurdy glTF viewer exposure **−9** (EV on linear HDR).
-/// Multiplied with [`ShopEnvLightingTune::linear_exposure`] and written to `shop_glb` / shop `lit_mesh` path.
+/// Multiplied with [`RoomEnvLightingTune::linear_exposure`] and written to `room_glb` / shop `lit_mesh` path.
 pub const SHOP_ENV_LINEAR_EXPOSURE_BASE: f32 = 1.0 / 512.0; // 2^-9
 
 /// Extra multiplier on room glTF emissive (`CameraUniform.decal_atlas_uv.z`), after
@@ -194,6 +195,49 @@ pub const ROOM_EMISSIVE_PROBE_MARCH_STEPS: u32 = 14;
 
 /// Max ray length in world units for probe → emissive screen-space march.
 pub const ROOM_EMISSIVE_PROBE_MARCH_WORLD: f32 = 28.0;
+
+/// Recompute volumetric probe SH every N GI frames unless the view or resolution changed.
+pub const ROOM_EMISSIVE_PROBE_UPDATE_INTERVAL: u32 = 2;
+
+/// Element-wise view_proj delta above which probes refresh immediately (camera nudge / cut).
+pub const ROOM_EMISSIVE_PROBE_VIEW_EPS: f32 = 2e-4;
+
+/// Whether to run `emissive-probe-update` this frame (amortized GI). Resets when GI is inactive.
+pub fn probe_gi_should_update_probes(
+    tick: &mut u32,
+    last_view_proj: &mut [f32; 16],
+    last_size: &mut (u32, u32),
+    had_room: &mut bool,
+    view_proj: &[f32; 16],
+    size: (u32, u32),
+    gi_active: bool,
+    update_interval: u32,
+) -> bool {
+    if !gi_active {
+        *tick = 0;
+        *had_room = false;
+        return false;
+    }
+
+    let first_room_frame = !*had_room;
+    *had_room = true;
+
+    let view_moved = view_proj
+        .iter()
+        .zip(last_view_proj.iter())
+        .any(|(a, b)| (*a - *b).abs() > ROOM_EMISSIVE_PROBE_VIEW_EPS);
+    let resized = *last_size != size;
+    let interval = update_interval.max(1);
+    let on_interval = *tick % interval == 0;
+    let update = first_room_frame || view_moved || resized || on_interval;
+
+    if update {
+        *last_view_proj = *view_proj;
+        *last_size = size;
+    }
+    *tick = tick.wrapping_add(1);
+    update
+}
 
 /// Tighten or expand the room AABB used for probe placement (`pad_frac` of the box size per axis).
 pub fn room_probe_world_aabb(corners: &[Vec3], pad_frac: f32) -> Option<(Vec3, Vec3)> {
@@ -244,11 +288,11 @@ pub const SHOP_INSPECT_ENV_VS_LIT_LINEAR: f32 =
 /// Room hemispheric fill vs subject `hdr_tonemap.z` during inspect (`tile_3d.wgsl`).
 pub const SHOP_INSPECT_ENV_VS_LIT_AMBIENT: f32 = 0.45;
 
-/// Item inspect disables GLB punctual and drives `shop_glb.wgsl` via `tile_seed` / ambient.
+/// Item inspect disables GLB punctual and drives `room_glb.wgsl` via `tile_seed` / ambient.
 /// The storeroom BRDF stacks different radiance than `lit_mesh`; without this boost the room reads black.
 pub const SHOP_INSPECT_STOREROOM_GLB_TILE_SEED_MUL: f32 = 12.0;
 
-/// Hemispheric fill in `shop_glb.wgsl` (`decal_atlas_uv.x`).
+/// Hemispheric fill in `room_glb.wgsl` (`decal_atlas_uv.x`).
 pub const SHOP_ENV_AMBIENT_SCALE: f32 = 0.0;
 
 /// Lower bound for `hdr_tonemap.z` on candle-key **table** scenes (`gameplay`, `tutorial`,
@@ -257,13 +301,13 @@ pub const SHOP_ENV_AMBIENT_SCALE: f32 = 0.0;
 /// lit areas clip warm, which feels flat and hyper-saturated.
 pub const GAMEPLAY_TABLE_AMBIENT_MIN: f32 = 0.52;
 
-/// Linear HDR multiplier for table scenes only (after [`ShopEnvLightingTune::linear_exposure`];
+/// Linear HDR multiplier for table scenes only (after [`RoomEnvLightingTune::linear_exposure`];
 /// shop still applies [`SHOP_ENV_LINEAR_EXPOSURE_BASE`]). Slightly <1 reins in peak energy
 /// before ACES so highlights retain separation from midtones.
 pub const GAMEPLAY_TABLE_HDR_LINEAR_MUL: f32 = 0.88;
 
 /// Applied in `lit_mesh.wgsl` as the punctual buffer `extras.w` when
-/// [`crate::render::draw_cmd::SceneLighting::embedded_gltf_punctual`] is set (`shop_glb.wgsl` ignores it).
+/// [`crate::render::draw_cmd::SceneLighting::embedded_gltf_punctual`] is set (`room_glb.wgsl` ignores it).
 /// Defaults to `1` so embedded punctual lights match the room; debug tuning may lower it.
 pub const SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE: f32 = 0.55;
 
@@ -278,7 +322,7 @@ pub const SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL: [f32; 3] =
 /// Runtime shop lighting matching the `SHOP_*` source constants. Carried on [`DrawCtx`](crate::scenes::DrawCtx)
 /// and editable from the debug overlay.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ShopEnvLightingTune {
+pub struct RoomEnvLightingTune {
     pub gltf_light_intensity_scale: f32,
     pub linear_exposure: f32,
     pub ambient_scale: f32,
@@ -288,13 +332,13 @@ pub struct ShopEnvLightingTune {
     pub candle_light_color_mul: [f32; 3],
 }
 
-impl Default for ShopEnvLightingTune {
+impl Default for RoomEnvLightingTune {
     fn default() -> Self {
         Self::SOURCE_DEFAULTS
     }
 }
 
-impl ShopEnvLightingTune {
+impl RoomEnvLightingTune {
     pub const SOURCE_DEFAULTS: Self = Self {
         gltf_light_intensity_scale: SHOP_GLTF_LIGHT_INTENSITY_SCALE,
         linear_exposure: SHOP_ENV_LINEAR_EXPOSURE,
@@ -306,34 +350,34 @@ impl ShopEnvLightingTune {
 }
 
 // --- Stable `Shop*` names (shared decode in `room_env_gltf`) ---
-pub type ShopEnvPrimitiveCpu = renv::RoomEnvPrimitiveCpu;
-pub type ShopCollisionMesh = renv::RoomCollisionMesh;
-pub type ShopEnvironmentBounds = renv::RoomEnvironmentBounds;
-pub type ShopGlbEmbeddedPointLight = renv::RoomGltfEmbeddedPointLight;
-pub type ShopGlbEmbeddedSpotLight = renv::RoomGltfEmbeddedSpotLight;
-pub type ShopGlbEmbeddedCamera = renv::RoomGltfEmbeddedCamera;
+pub type RoomEnvPrimitiveCpu = renv::RoomEnvPrimitiveCpu;
+pub type RoomCollisionMesh = renv::RoomCollisionMesh;
+pub type RoomEnvironmentBounds = renv::RoomEnvironmentBounds;
+pub type RoomGlbEmbeddedPointLight = renv::RoomGltfEmbeddedPointLight;
+pub type RoomGlbEmbeddedSpotLight = renv::RoomGltfEmbeddedSpotLight;
+pub type RoomGlbEmbeddedCamera = renv::RoomGltfEmbeddedCamera;
 
 pub use crate::render::room_env_gltf::glb_punctual_range_world_upload;
 pub(crate) use crate::render::room_env_gltf::room_environment_bounds;
 
 #[inline]
-pub fn shop_env_world_scale(window_h: f32, height_scale: f32) -> f32 {
+pub fn room_env_world_scale(window_h: f32, height_scale: f32) -> f32 {
     renv::room_env_world_scale(window_h, height_scale)
 }
 
 /// `translate(-center_doc * s) * uniformScale(s)` — matches centered room mesh + picking.
 #[allow(dead_code)]
 #[inline]
-pub fn shop_env_model_matrix(window_h: f32, height_scale: f32, center_doc: Vec3) -> Mat4 {
+pub fn room_env_model_matrix(window_h: f32, height_scale: f32, center_doc: Vec3) -> Mat4 {
     renv::room_env_model_matrix(window_h, height_scale, center_doc)
 }
 
 #[inline]
-pub fn shop_env_model_matrix_from_cpu(window_h: f32, height_scale: f32, cpu: &RoomGlbCpu) -> Mat4 {
+pub fn room_env_model_matrix_from_cpu(window_h: f32, height_scale: f32, cpu: &RoomGlbCpu) -> Mat4 {
     room_env_model_matrix_from_bounds_doc(window_h, height_scale, cpu.environment_bounds_doc)
 }
 
-pub fn shop_world_bounds_corners_centered(
+pub fn room_world_bounds_corners_centered(
     window_h: f32,
     env_height_scale: f32,
     cpu: &RoomGlbCpu,
@@ -341,54 +385,54 @@ pub fn shop_world_bounds_corners_centered(
     let Some(bounds) = cpu.environment_bounds_doc else {
         return Vec::new();
     };
-    room_world_bounds_corners_centered(bounds, window_h, env_height_scale)
+    renv::room_world_bounds_corners_centered(bounds, window_h, env_height_scale)
 }
 
-pub fn shop_camera_fit_fovy_for_corners(
+pub fn room_camera_fit_fovy_for_corners(
     window_w: f32,
     window_h: f32,
     cam: CameraParams,
     corners_world: &[Vec3],
     margin_ndc: f32,
 ) -> CameraParams {
-    room_camera_fit_fovy_for_corners(window_w, window_h, cam, corners_world, margin_ndc)
+    renv::room_camera_fit_fovy_for_corners(window_w, window_h, cam, corners_world, margin_ndc)
 }
 
-pub fn shop_camera_fit_clip_planes(cam: CameraParams, corners_world: &[Vec3]) -> CameraParams {
-    room_camera_fit_clip_planes(cam, corners_world)
+pub fn room_camera_fit_clip_planes(cam: CameraParams, corners_world: &[Vec3]) -> CameraParams {
+    renv::room_camera_fit_clip_planes(cam, corners_world)
 }
 
 /// Embedded-room camera with bounds-tight clip planes (hallway / shop / archive).
-pub fn shop_camera_with_room_clip_planes(
+pub fn room_camera_with_room_clip_planes(
     mut cam: CameraParams,
     window_h: f32,
     env_height_scale: f32,
     cpu: &RoomGlbCpu,
 ) -> CameraParams {
-    let corners = shop_world_bounds_corners_centered(window_h, env_height_scale, cpu);
+    let corners = room_world_bounds_corners_centered(window_h, env_height_scale, cpu);
     if corners.is_empty() {
         return cam;
     }
-    cam = shop_camera_fit_clip_planes(cam, &corners);
+    cam = room_camera_fit_clip_planes(cam, &corners);
     cam
 }
 
-/// Decoded room GLB (shop, hallway, …): shared layout for [`shop_glb.wgsl`] and punctual uploads.
+/// Decoded room GLB (shop, hallway, …): shared layout for [`room_glb.wgsl`] and punctual uploads.
 pub struct RoomGlbCpu {
     pub markers: FxHashMap<String, Mat4>,
-    pub environment_primitives: Vec<ShopEnvPrimitiveCpu>,
-    pub environment_bounds_doc: Option<ShopEnvironmentBounds>,
-    pub marker_mesh_bounds_doc: FxHashMap<String, ShopEnvironmentBounds>,
-    pub collision_meshes: Vec<ShopCollisionMesh>,
-    pub embedded_perspective_camera: Option<ShopGlbEmbeddedCamera>,
+    pub environment_primitives: Vec<RoomEnvPrimitiveCpu>,
+    pub environment_bounds_doc: Option<RoomEnvironmentBounds>,
+    pub marker_mesh_bounds_doc: FxHashMap<String, RoomEnvironmentBounds>,
+    pub collision_meshes: Vec<RoomCollisionMesh>,
+    pub embedded_perspective_camera: Option<RoomGlbEmbeddedCamera>,
     /// All embedded perspective cameras keyed by lowercase glTF node name (e.g. hallway `default` / `boss`).
-    pub embedded_cameras_by_name: FxHashMap<String, ShopGlbEmbeddedCamera>,
-    pub embedded_point_lights: Vec<ShopGlbEmbeddedPointLight>,
-    pub embedded_spot_lights: Vec<ShopGlbEmbeddedSpotLight>,
+    pub embedded_cameras_by_name: FxHashMap<String, RoomGlbEmbeddedCamera>,
+    pub embedded_point_lights: Vec<RoomGlbEmbeddedPointLight>,
+    pub embedded_spot_lights: Vec<RoomGlbEmbeddedSpotLight>,
 }
 
 impl RoomGlbCpu {
-    /// glTF node local transform in **document** space (before [`shop_env_model_matrix_from_cpu`]).
+    /// glTF node local transform in **document** space (before [`room_env_model_matrix_from_cpu`]).
     #[inline]
     pub fn marker_node_transform_doc(&self, node_name: &str) -> Option<Mat4> {
         self.markers.get(node_name).copied()
@@ -396,25 +440,22 @@ impl RoomGlbCpu {
 
     /// Document-space AABB for the marker node's mesh (when decoded), for bounds / screen projection.
     #[inline]
-    pub fn marker_mesh_bounds_doc_for(&self, node_name: &str) -> Option<&ShopEnvironmentBounds> {
+    pub fn marker_mesh_bounds_doc_for(&self, node_name: &str) -> Option<&RoomEnvironmentBounds> {
         self.marker_mesh_bounds_doc.get(node_name)
     }
 }
 
-/// Back-compat name — shop and hallway both decode to [`RoomGlbCpu`].
-#[allow(dead_code)]
-pub type ShopGlbCpu = RoomGlbCpu;
 
 #[derive(Copy, Clone)]
-struct ShopRoomWalkHooks;
+struct RoomWalkHooks;
 
-impl RoomEnvWalkHooks for ShopRoomWalkHooks {
+impl RoomEnvWalkHooks for RoomWalkHooks {
     fn is_marker(&self, name: &str) -> bool {
         is_marker_name(name)
     }
 
     fn mesh_policy(&self, name: &str) -> RoomMeshPolicy {
-        if skip_shop_env_mesh_for_node_name(name) {
+        if skip_room_env_mesh_for_node_name(name) {
             RoomMeshPolicy::SkipDrawCollisionIfMarker
         } else if is_shop_counter_button_node(name) {
             RoomMeshPolicy::EnvironmentDrawWithCollision
@@ -475,7 +516,7 @@ fn is_shop_counter_button_node(name: &str) -> bool {
 
 /// Environment draw skip: anchor nodes often have collision/helper meshes that should not render.
 /// Button markers are excluded — their mesh is a visible control and may bind focus UI.
-fn skip_shop_env_mesh_for_node_name(name: &str) -> bool {
+fn skip_room_env_mesh_for_node_name(name: &str) -> bool {
     name.starts_with("shop_spawn_relic_")
         || name.starts_with("shop_player_relic_")
         || name.starts_with("shop_player_consumable_")
@@ -495,7 +536,7 @@ pub fn screen_rect_for_marker_mesh_bounds(
     min_rh: f32,
 ) -> Option<[f32; 4]> {
     let bounds = cpu.marker_mesh_bounds_doc_for(node_name)?;
-    let s = shop_env_world_scale(win_h, env_height_scale);
+    let s = room_env_world_scale(win_h, env_height_scale);
     let center_doc = cpu
         .environment_bounds_doc
         .map(|b| b.center())
@@ -582,7 +623,7 @@ pub fn load_shop_glb_from_bytes(data: &[u8]) -> anyhow::Result<RoomGlbCpu> {
         data,
         "gltf::import_slice(shop.glb)",
         "shop.glb has no scenes",
-        &ShopRoomWalkHooks,
+        &RoomWalkHooks,
     )
 }
 
@@ -603,7 +644,7 @@ pub fn shop_camera_from_glb_if_present(
     })
 }
 
-/// Document-space marker origin minus environment AABB center (multiply by [`shop_env_world_scale`]
+/// Document-space marker origin minus environment AABB center (multiply by [`room_env_world_scale`]
 /// for world space consistent with the centered shop model matrix).
 pub fn marker_translation(cpu: &RoomGlbCpu, name: &str) -> Option<Vec3> {
     marker_translation_doc(&cpu.markers, cpu.environment_bounds_doc, name)

@@ -5,7 +5,6 @@ use crate::core::relic::{all_relic_defs, relic_description_live};
 use crate::render::table_transform::{mat4_to_euler_xyz_rad, rot_euler_xyz_rad};
 use crate::render::theme::color;
 use crate::scenes::options;
-use crate::scenes::tutorial_overlay::TutorialOverlay;
 use crate::scenes::{BackgroundId, MeldGuideScene, OverlayRequest};
 use crate::ui::inspect_plaque::{
     dora_focus_tooltip_strings, gameplay_consumable_description_full, hand_tile_inspect_lines,
@@ -40,7 +39,6 @@ impl SceneBehavior for GameplayScene {
             let _g = crate::render::cpu_profiler::scope("update.tick_basic_animations");
             animation_state::tick_basic_animations(self, &mut ctx, now, dt);
         }
-        let interaction = GameEngine::read_interaction(ctx.run);
         // Cursor position is captured every frame for cursor-mode hit-test
         // and tooltip placement. The legacy `cursor_moved` guard that used
         // to drop stale controller focus on mouse motion is gone — Phase A
@@ -49,22 +47,6 @@ impl SceneBehavior for GameplayScene {
         // same race (mouse click on tile while controller focus was on a
         // consumable) without the heuristic.
         self.cursor_pos = ctx.cursor_pos;
-
-        // Tutorial overlay: initialize lazily on first update if tutorial is active.
-        if interaction.tutorial_active && self.tutorial_overlay.is_none() {
-            self.tutorial_overlay = Some(TutorialOverlay::new());
-        }
-        // Update tutorial overlay each frame.
-        if let Some(ref mut overlay) = self.tutorial_overlay {
-            overlay.cascade_active = !self.cascade_queue.is_empty();
-            overlay.update(ctx.run, dt, ctx.layout.window_w, ctx.layout.window_h);
-        }
-        // Compute tutorial affinity glow indices.
-        if GameEngine::tutorial_affinity_glow(ctx.run) {
-            self.tutorial_affinity_indices = GameEngine::tutorial_affinity_indices(ctx.run);
-        } else {
-            self.tutorial_affinity_indices.clear();
-        }
 
         {
             let _g = crate::render::cpu_profiler::scope("update.tick_wind_and_deal_detection");
@@ -118,7 +100,6 @@ impl SceneBehavior for GameplayScene {
         // Help action opens the Meld Guide scene (replaces the old glossary overlay).
         for &cid in ctx.button_clicks {
             if cid == HELP_BADGE_ID {
-                GameEngine::mark_tutorial_meld_guide_opened(ctx.run);
                 *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::MeldGuide(
                     MeldGuideScene::new(),
                 ))));
@@ -127,7 +108,6 @@ impl SceneBehavior for GameplayScene {
         }
         for a in ctx.actions {
             if matches!(a, UiAction::Help) {
-                GameEngine::mark_tutorial_meld_guide_opened(ctx.run);
                 *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::MeldGuide(
                     MeldGuideScene::new(),
                 ))));
@@ -141,7 +121,6 @@ impl SceneBehavior for GameplayScene {
             // The pause menu's "Meld Guide" entry sets a one-shot flag and
             // closes itself; drain the flag to push the Meld Guide as an overlay.
             if self.pause_menu.take_meld_guide_request() {
-                GameEngine::mark_tutorial_meld_guide_opened(ctx.run);
                 *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::MeldGuide(
                     MeldGuideScene::new(),
                 ))));
@@ -709,7 +688,7 @@ impl SceneBehavior for GameplayScene {
         // `suggest_completions` runs full backtracking validation per unselected
         // tile, so memoize against the inputs that affect its result (hand uids
         // + selection bitmask). Same hand+selection across frames → reuse.
-        let mut hint_indices = if interaction.hints_enabled
+        let hint_indices = if interaction.hints_enabled
             && !interaction.selected_indices.is_empty()
             && self.cascade_queue.is_empty()
         {
@@ -730,15 +709,6 @@ impl SceneBehavior for GameplayScene {
         } else {
             vec![]
         };
-        // Tutorial affinity glow: merge tutorial hints into hint_indices.
-        if !self.tutorial_affinity_indices.is_empty() {
-            for &idx in &self.tutorial_affinity_indices {
-                if !hint_indices.contains(&idx) {
-                    hint_indices.push(idx);
-                }
-            }
-        }
-
         // Phase 8: the `?` glossary badge has been removed from the
         // gameplay HUD. The glossary is now reachable from the pause menu's
         // "Glossary" entry. The keyboard `Help` action shortcut still works
@@ -1550,6 +1520,7 @@ impl SceneBehavior for GameplayScene {
                                     color::STONE,
                                     false,
                                     false,
+                                    None,
                                 );
                             }
                         }
@@ -1573,6 +1544,7 @@ impl SceneBehavior for GameplayScene {
                                     color::GOLD,
                                     false,
                                     false,
+                                    None,
                                 );
                             }
                         }
@@ -1605,6 +1577,7 @@ impl SceneBehavior for GameplayScene {
                                     color::BRASS,
                                     false,
                                     false,
+                                    None,
                                 );
                             }
                         }
@@ -1625,6 +1598,7 @@ impl SceneBehavior for GameplayScene {
                                 color::GOLD,
                                 false,
                                 false,
+                                None,
                             );
                         }
                         FocusTarget::DiscardUndo => {
@@ -1640,6 +1614,7 @@ impl SceneBehavior for GameplayScene {
                                 color::CHAMPAGNE,
                                 false,
                                 false,
+                                None,
                             );
                         }
                         _ => {}
@@ -1735,20 +1710,6 @@ impl SceneBehavior for GameplayScene {
                 GAMEPLAY_3D_HIT_ID,
             ));
         }
-        // Tutorial overlay: draw hint banner on top of HUD.
-        if let Some(ref overlay) = self.tutorial_overlay {
-            let mut tut_quads = Vec::new();
-            let mut tut_labels = Vec::new();
-            overlay.draw(
-                ctx.layout.window_w,
-                ctx.layout.window_h,
-                &mut tut_quads,
-                &mut tut_labels,
-            );
-            frame.quads(tut_quads);
-            frame.texts(tut_labels);
-        }
-
         frame.buttons = buttons;
         frame.window_title = window_title;
         frame.debug_axes = self.debug_show_axes;

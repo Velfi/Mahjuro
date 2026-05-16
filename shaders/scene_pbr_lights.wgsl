@@ -1,4 +1,4 @@
-// Shared punctual attenuation for `shop_glb.wgsl` and `tile_3d.wgsl`.
+// Shared punctual attenuation for `room_glb.wgsl` and `tile_3d.wgsl`.
 // Prepended at shader creation in `wgpu_renderer/init.rs`.
 
 fn khr_spot_angle_attenuation_scene(cos_a: f32, cos_inner: f32, cos_outer: f32) -> f32 {

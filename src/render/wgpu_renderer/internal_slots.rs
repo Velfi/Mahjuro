@@ -70,6 +70,9 @@ pub struct TextLabel {
     /// Added to the single-line raster baseline (negative nudges glyphs up in
     /// the texture short axis). Used for optical centering (e.g. hallway PLAY).
     pub baseline_shift_px: f32,
+    /// Optional clip rectangle in screen pixels `[x, y, w, h]`.
+    /// When set, the renderer applies a scissor rect for this label draw.
+    pub clip_rect: Option<[f32; 4]>,
 }
 
 impl Default for TextLabel {
@@ -89,6 +92,7 @@ impl Default for TextLabel {
             text_effect: crate::render::text_effect::TextEffectId::Flat,
             rotation_quarters: 0,
             baseline_shift_px: 0.0,
+            clip_rect: None,
         }
     }
 }

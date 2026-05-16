@@ -47,8 +47,9 @@ mod stats_wilson;
 
 pub use reporting::{
     BotConfig, BotOutputFormat, BotOutputTarget, BotRunOptions, BotStrategy, BotTimeoutDiag,
-    HeadlessBotBatch, StrategyFile, export_play_history_html, run_forced_relic_sweep, run_headless,
-    run_headless_aggregate, run_strategy_sweep, run_sweep,
+    HeadlessBotBatch, StrategyFile, append_bot_run_to_progress, export_play_history_html,
+    run_forced_relic_sweep, run_headless, run_headless_aggregate, run_strategy_sweep, run_sweep,
+    seed_progress_from_bot_runs,
 };
 use stats::clear_payout_breakdown;
 pub use stats::{AggregateStats, RunStats, RunTimeoutSnapshot};
@@ -2573,11 +2574,20 @@ fn should_skip_blind(run: &RunState, blind: BlindKind, strategy: &BotStrategy) -
     projected >= threshold
 }
 
+/// Play one headless bot run; returns terminal [`RunState`] and aggregate stats.
+pub fn play_bot_run(
+    config: BotConfig,
+    options: BotRunOptions,
+    run_number: Option<u32>,
+) -> (RunState, RunStats) {
+    play_run_with_options(config, options, run_number)
+}
+
 fn play_run_with_options(
     config: BotConfig,
     options: BotRunOptions,
     run_number: Option<u32>,
-) -> RunStats {
+) -> (RunState, RunStats) {
     let strategy = BotStrategy::from_config(&config);
     let forced_relic = config.forced_relic;
     let mode = config.into_mode();
@@ -2834,5 +2844,5 @@ fn play_run_with_options(
     stats.final_yaku_levels = run.yaku_levels.clone();
     stats.final_gold = run.gold;
     bot_log!(log, "== bot run stats: {:?} ==", stats);
-    stats
+    (run, stats)
 }

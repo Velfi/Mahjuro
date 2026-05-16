@@ -1,8 +1,8 @@
 //! Shared glTF **room environment** decode: PBR meshes, bounds, embedded perspective cameras,
 //! [`KHR_lights_punctual`], collision triangle soups, and world-space framing helpers.
 //!
-//! [`crate::render::shop_glb`] and [`crate::render::hallway_glb`] load different assets but share
-//! this pipeline and GPU path (`shop_glb.wgsl`).
+//! [`crate::render::room_glb`] and [`crate::render::hallway_glb`] load different assets but share
+//! this pipeline and GPU path (`room_glb.wgsl`).
 
 use rustc_hash::FxHashMap;
 
@@ -156,7 +156,7 @@ pub fn room_env_world_scale(window_h: f32, height_scale: f32) -> f32 {
     window_h.max(1e-6) * height_scale
 }
 
-/// KHR punctual `range` in **world units** for point/spot `pos.w` (`shop_glb.wgsl`).
+/// KHR punctual `range` in **world units** for point/spot `pos.w` (`room_glb.wgsl`).
 #[inline]
 pub fn glb_punctual_range_world_upload(window_h: f32, scale: f32, range_doc: Option<f32>) -> f32 {
     match range_doc {
@@ -652,7 +652,7 @@ pub fn decode_env_primitive(
             }
         })
         .collect();
-    // `shop_glb.wgsl` composites `@binding(3)` decal_tex when `COLOR_0.a > 1`.
+    // `room_glb.wgsl` composites `@binding(3)` decal_tex when `COLOR_0.a > 1`.
     if is_archive_sign {
         for v in &mut vertices {
             v.color[3] = 2.0;

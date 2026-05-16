@@ -93,10 +93,6 @@ impl RunState {
     pub fn discard_selected_no_refill(&mut self, bus: &mut EventBus) -> usize {
         use crate::game::engine_state::GameplayCoreState;
 
-        if !self.tutorial_discard_allowed() {
-            return 0;
-        }
-
         // Snapshot selected indices and honor count *before* removal so the
         // engine-owned mutation can return tiles without losing slot info.
         let selected_indices: Vec<usize> = self
@@ -134,13 +130,6 @@ impl RunState {
         }
         self.tiles_discarded = self.tiles_discarded.saturating_add(count as u32);
 
-        if let Some(ref mut tut) = self.tutorial
-            && tut.celebrate(crate::game::tutorial::TutorialMilestone::FirstDiscard)
-        {
-            bus.push(GameEvent::TutorialMilestone(
-                crate::game::tutorial::TutorialMilestone::FirstDiscard,
-            ));
-        }
 
         if self.relics.has(RelicId::SilkThread) {
             self.relic_activations.push(RelicId::SilkThread);
@@ -195,7 +184,6 @@ impl RunState {
             core.finalize_hand_after_draw();
         });
 
-        self.seed_tutorial_hand();
         self.restamp_hand_enhancements();
         self.try_autotrigger_structure_full(bus);
         self.emit_round_resolution_events(bus);

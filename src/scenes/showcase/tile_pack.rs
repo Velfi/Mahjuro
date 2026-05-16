@@ -279,7 +279,7 @@ impl TilePackPresenter {
         let cam = shop_celebration_camera(w, h, env_h);
         frame.camera_override = Some(cam);
         frame.scene_lighting.embedded_gltf_punctual = false;
-        frame.scene_lighting.room_shop_glb_brdf = false;
+        frame.scene_lighting.room_glb_brdf = false;
         frame
             .scene_lighting
             .set_smooth_points(pack_celebration_isolation_lights(

@@ -38,7 +38,7 @@ struct GltfPbrUniform {
 @group(0) @binding(6) var metallic_roughness_tex: texture_2d<f32>;
 @group(0) @binding(7) var emissive_tex: texture_2d<f32>;
 
-/// Parity with `shop_glb.wgsl` @binding(8); zeroed for tiles — pick-blind hallway only uploads data there.
+/// Parity with `room_glb.wgsl` @binding(8); zeroed for tiles — pick-blind hallway only uploads data there.
 struct HallwayDistortion {
     bow: vec4<f32>,
     breathe: vec4<f32>,
@@ -52,7 +52,7 @@ struct HallwayDistortion {
 };
 @group(0) @binding(8) var<uniform> hd: HallwayDistortion;
 
-/// Same factor as `shop_glb.wgsl` — scales wall-clock time inside the hallway warp.
+/// Same factor as `room_glb.wgsl` — scales wall-clock time inside the hallway warp.
 const HALLWAY_ANIM_TIME_SCALE: f32 = 0.5;
 const HALLWAY_TAU: f32 = 6.283185307;
 const HALLWAY_RIPPLE_STAND_FREQ_RATIO: f32 = 2.37;
@@ -501,7 +501,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         if (pbr.alpha_mode == 2u) {
             out_alpha = tex_a;
         }
-        // See `shop_glb.wgsl`: alpha-mask base colour with zero RGB (common on text meshes).
+        // See `room_glb.wgsl`: alpha-mask base colour with zero RGB (common on text meshes).
         var tex_rgb = base_s.rgb;
         let tex_lum = dot(tex_rgb, vec3<f32>(0.299, 0.587, 0.114));
         if ((pbr.alpha_mode == 1u || pbr.alpha_mode == 2u)
@@ -778,7 +778,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     // Tile albedo × candle/spot contribution, modulated by the mesh shadow
     // map so casters darken tiles on the table like the lit-mesh path.
     // `use_textured_env` = imported shop room (`shop.glb`): same table shadow map
-    // mismatch as `shop_glb.wgsl` — skip gameplay shadow for that path only.
+    // mismatch as `room_glb.wgsl` — skip gameplay shadow for that path only.
     let mesh_shadow_vis = sample_shadow_visibility(in.world_pos);
     let mesh_shadow = select(mesh_shadow_vis, 1.0, use_textured_env);
     var lit_rgb = (rgb * point_contrib + sheen_acc) * mesh_shadow;
@@ -845,7 +845,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         // glTF emissive is authored as outgoing radiance — if it goes through the same multiplier,
         // bright point lights on the same mesh (e.g. hallway lamp bulbs) swamp it and changing
         // emissive scale is invisible. Keep emissive out of that multiply (same idea as
-        // `shop_glb.wgsl`: emissive is not scaled by `tile_seed`).
+        // `room_glb.wgsl`: emissive is not scaled by `tile_seed`).
         let hem = cam.hdr_tonemap.z * rgb * vec3<f32>(0.08);
         var hdr = (lit_rgb - gltf_emissive_hdr + hem) * cam.hdr_tonemap.y;
         hdr = hdr + gltf_emissive_hdr;

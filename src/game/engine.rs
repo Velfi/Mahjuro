@@ -27,7 +27,6 @@ use crate::game::engine_state::GameplayCoreState;
 use crate::game::event_bus::{EventBus, GameEvent, GameOverReason};
 use crate::game::onboarding::OnboardingPhase;
 use crate::game::run::{ConsumableUseResult, RunState};
-use crate::game::tutorial::TutorialMilestone;
 use crate::persistence::{AppSettings, TileMaterial};
 use crate::ui::input::MarqueeSelect;
 
@@ -52,7 +51,6 @@ pub enum CommandRejection {
     NoDiscardsRemaining,
     TriggerUnavailable,
     ConsumableUnavailable,
-    TutorialLocked,
     NoEffect,
 }
 
@@ -83,7 +81,6 @@ pub enum EngineEvent {
     TagApplied { tag: TagKind },
     RoundComplete { reached_target: bool },
     GameOver { reason: GameOverReason },
-    TutorialMilestone(TutorialMilestone),
     RelicActivated(RelicId),
     TalismanUsed(TalismanKind),
     ZodiacLevelUp,
@@ -301,17 +298,7 @@ pub struct GameplayInteractionReadModel {
     pub consumable_capacity: usize,
     pub consumable_count: usize,
     pub relic_count: usize,
-    pub tutorial_active: bool,
     pub hints_enabled: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TutorialLessonReadModel {
-    pub current_lesson: u32,
-    pub flavor_text: &'static str,
-    pub intro_text: &'static str,
-    pub step_prompts: &'static [&'static str],
-    pub meld_guide_opened: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -347,15 +334,6 @@ pub struct PickBlindReadModel {
     pub boss_kind: Option<BossKind>,
     pub boss_name: Option<String>,
     pub boss_description: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TutorialOverlayReadModel {
-    pub selected_count: usize,
-    pub discards_remaining: u32,
-    pub round_score: u64,
-    pub has_structure: bool,
-    pub blind: BlindKind,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -594,16 +572,6 @@ impl<'a> GameEngine<'a> {
         }
     }
 
-    pub fn read_tutorial_overlay(run: &RunState) -> TutorialOverlayReadModel {
-        TutorialOverlayReadModel {
-            selected_count: run.selected_count(),
-            discards_remaining: run.discards_remaining,
-            round_score: run.round_score,
-            has_structure: !run.structure_sets().is_empty(),
-            blind: run.blind,
-        }
-    }
-
     pub fn read_yaku_progress(run: &RunState) -> YakuProgressReadModel {
         YakuProgressReadModel {
             levels: run.yaku_levels.levels.clone(),
@@ -629,20 +597,8 @@ impl<'a> GameEngine<'a> {
             consumable_capacity: core.consumables.capacity,
             consumable_count: core.consumables.items.len(),
             relic_count: run.relics.len(),
-            tutorial_active: run
-                .tutorial
-                .as_ref()
-                .is_some_and(|tutorial| tutorial.is_active()),
             hints_enabled: run.hints_enabled,
         }
-    }
-
-    pub fn tutorial_affinity_glow(run: &RunState) -> bool {
-        run.tutorial_affinity_glow()
-    }
-
-    pub fn tutorial_annotated_cascade(run: &RunState) -> bool {
-        run.tutorial_annotated_cascade()
     }
 
     pub fn structure_banked_meld_chips(run: &RunState) -> i32 {
@@ -738,64 +694,6 @@ impl<'a> GameEngine<'a> {
         }
     }
 
-    pub fn tutorial_affinity_indices(run: &RunState) -> Vec<usize> {
-        let Some(tutorial) = run
-            .tutorial
-            .as_ref()
-            .filter(|tutorial| tutorial.is_active())
-        else {
-            return Vec::new();
-        };
-        let lesson = tutorial.current_lesson_def();
-        crate::game::tutorial::affinity_tile_indices(
-            run.hand(),
-            run.selected_slice(),
-            lesson.allowed_melds,
-        )
-    }
-
-    pub fn tutorial_lesson(run: &RunState) -> Option<TutorialLessonReadModel> {
-        let tutorial = run
-            .tutorial
-            .as_ref()
-            .filter(|tutorial| tutorial.is_active())?;
-        let lesson = tutorial.current_lesson_def();
-        Some(TutorialLessonReadModel {
-            current_lesson: tutorial.current_lesson,
-            flavor_text: lesson.flavor_text,
-            intro_text: lesson.intro_text,
-            step_prompts: lesson.step_prompts,
-            meld_guide_opened: tutorial.meld_guide_opened,
-        })
-    }
-
-    pub fn mark_tutorial_cascade_annotated(run: &mut RunState) {
-        if let Some(ref mut tutorial) = run.tutorial {
-            tutorial.cascade_annotated = true;
-        }
-    }
-
-    pub fn mark_tutorial_meld_guide_opened(run: &mut RunState) {
-        if let Some(ref mut tutorial) = run.tutorial {
-            tutorial.meld_guide_opened = true;
-        }
-    }
-
-    pub fn celebrate_tutorial_milestone(
-        run: &mut RunState,
-        bus: &mut EventBus,
-        milestone: TutorialMilestone,
-    ) -> bool {
-        let Some(tutorial) = run.tutorial.as_mut() else {
-            return false;
-        };
-        if !tutorial.celebrate(milestone) {
-            return false;
-        }
-        bus.push(GameEvent::TutorialMilestone(milestone));
-        true
-    }
-
     pub fn last_breakdown(run: &RunState) -> Option<ScoreBreakdown> {
         run.last_breakdown.clone()
     }
@@ -887,13 +785,6 @@ impl<'a> GameEngine<'a> {
                 CommandData::TriggerStructure { earned }
             }
             GameCommand::DiscardSelectionNoRefill => {
-                if !self.run.tutorial_discard_allowed() {
-                    return CommandOutcome::rejected(
-                        command,
-                        before,
-                        CommandRejection::TutorialLocked,
-                    );
-                }
                 if self.run.discards_remaining == 0 {
                     return CommandOutcome::rejected(
                         command,
@@ -1040,13 +931,6 @@ impl<'a> GameEngine<'a> {
                     _ => {}
                 }
                 self.run.recompute_capacities();
-                if let Some(ref mut tut) = self.run.tutorial
-                    && tut.celebrate(crate::game::tutorial::TutorialMilestone::FirstShopBuy)
-                {
-                    self.bus.push(GameEvent::TutorialMilestone(
-                        crate::game::tutorial::TutorialMilestone::FirstShopBuy,
-                    ));
-                }
                 ShopCommandData::None
             }
             ShopCommand::SellRelic { index } => {
@@ -1067,33 +951,6 @@ impl<'a> GameEngine<'a> {
                         .copied()
                         .unwrap_or(0);
                     refund = refund.saturating_add(2 * rounds as u32);
-                }
-                if rid == RelicId::HungryGhost && index + 1 < self.run.relics.active.len() {
-                    let victim_id = self.run.relics.active[index + 1];
-                    let victim_value = crate::core::relic::relic_sell_price(victim_id) as i32;
-                    self.run.relics.active.remove(index + 1);
-                    self.run.relics.active.remove(index);
-                    self.run.clear_relic_run_metadata(victim_id);
-                    if !self.run.relics.has(RelicId::IGotAGuy) {
-                        self.run.relic_counters.remove(&RelicId::IGotAGuy);
-                    }
-                    *self
-                        .run
-                        .relic_counters
-                        .entry(RelicId::HungryGhost)
-                        .or_insert(0) += victim_value * 2 * 10;
-                    self.run.relic_activations.push(RelicId::HungryGhost);
-                    // Kintsugi counts the victim (involuntary destruction).
-                    // The blade itself was sold, not destroyed, so don't
-                    // credit it.
-                    self.run.note_relic_destroyed();
-                    return self.finish_shop_outcome(
-                        command,
-                        before,
-                        queue_start,
-                        ShopCommandData::None,
-                        None,
-                    );
                 }
                 self.run.relics.active.remove(index);
                 self.run.clear_relic_run_metadata(rid);
@@ -1361,9 +1218,6 @@ impl<'a> GameEngine<'a> {
                 }
                 GameEvent::StructureCommitted => {
                     engine_events.push(EngineEvent::StructureCommitted)
-                }
-                GameEvent::TutorialMilestone(milestone) => {
-                    engine_events.push(EngineEvent::TutorialMilestone(*milestone));
                 }
                 GameEvent::RelicActivated(id) => {
                     engine_events.push(EngineEvent::RelicActivated(*id));

@@ -579,8 +579,8 @@ struct HeadlessApp {
     /// progress during warmup.
     input_mode_override: Option<crate::ui::input::InputMode>,
     /// Same knobs as interactive `App` debug shop env; headless defaults to
-    /// [`ShopEnvLightingTune::SOURCE_DEFAULTS`] unless CLI overrides emissive scale.
-    shop_env_lighting: crate::render::shop_glb::ShopEnvLightingTune,
+    /// [`RoomEnvLightingTune::SOURCE_DEFAULTS`] unless CLI overrides emissive scale.
+    shop_env_lighting: crate::render::room_glb::RoomEnvLightingTune,
 }
 
 impl HeadlessApp {
@@ -638,7 +638,7 @@ impl HeadlessApp {
             queued_actions: Vec::new(),
             modal_overlay: None,
             input_mode_override: None,
-            shop_env_lighting: crate::render::shop_glb::ShopEnvLightingTune::SOURCE_DEFAULTS,
+            shop_env_lighting: crate::render::room_glb::RoomEnvLightingTune::SOURCE_DEFAULTS,
         })
     }
 
@@ -910,7 +910,7 @@ impl HeadlessApp {
                 item_inspect_zoom_triggers: 0.0,
                 rumble_lab_ops: &mut rumble_lab_ops,
                 suspended_shop: None,
-                room_gltf_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
+                room_gltf_height_scale: crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
                 bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
             })
         } else {
@@ -967,7 +967,7 @@ impl HeadlessApp {
                     item_inspect_zoom_triggers: 0.0,
                     rumble_lab_ops: &mut rumble_lab_ops,
                     suspended_shop,
-                    room_gltf_height_scale: crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
+                    room_gltf_height_scale: crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
                     bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
                 })
         };
@@ -1012,7 +1012,7 @@ impl HeadlessApp {
                 hide_blind_plaque: false,
             },
             false,
-            crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
+            crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
             self.shop_env_lighting,
             self.effect_layers,
             (0.0, 0.0),
@@ -1080,7 +1080,7 @@ impl HeadlessApp {
         self.renderer
             .set_committed_arrange_rotations(collect_committed_rotations(rotations_scene));
         self.renderer
-            .set_room_gltf_height_scale(crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE);
+            .set_room_gltf_height_scale(crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE);
         let sl = self.shop_env_lighting;
         self.renderer.set_shop_env_render_tune(
             sl.linear_exposure,
@@ -1142,4 +1142,93 @@ impl HeadlessApp {
         }
         Ok(())
     }
+
+    /// Warm up the room scene, run one dynamic GI probe update, read back SH, return bake bytes.
+    fn run_room_gi_bake(
+        mut self,
+        room: crate::render::room_gi_bake::RoomGiRoom,
+        warmup_frames: u32,
+    ) -> anyhow::Result<crate::render::room_gi_bake::RoomGiBake> {
+        self.gfx.effects_quality = crate::persistence::EffectsQuality::High;
+        self.renderer.request_room_gi_capture(room);
+        for _ in 0..warmup_frames {
+            self.tick();
+        }
+        let mut extra = 0u32;
+        while self.renderer.is_loading() && extra < 600 {
+            self.tick();
+            std::thread::sleep(std::time::Duration::from_millis(16));
+            extra += 1;
+        }
+        self.tick();
+        self.renderer
+            .take_room_gi_capture()
+            .ok_or_else(|| anyhow::anyhow!("room GI bake: GPU readback missing (was probe compute dispatched?)"))
+    }
+}
+
+fn parse_bake_room_slug(slug: &str) -> anyhow::Result<crate::render::room_gi_bake::RoomGiRoom> {
+    match slug.trim().to_ascii_lowercase().as_str() {
+        "shop" => Ok(crate::render::room_gi_bake::RoomGiRoom::Shop),
+        "hallway" | "pick_blind" => Ok(crate::render::room_gi_bake::RoomGiRoom::Hallway),
+        "archive" | "collection" => Ok(crate::render::room_gi_bake::RoomGiRoom::Archive),
+        other => anyhow::bail!(
+            "unknown room '{other}' (use shop, hallway, or archive)"
+        ),
+    }
+}
+
+fn scene_for_room_gi_bake(
+    room: crate::render::room_gi_bake::RoomGiRoom,
+) -> anyhow::Result<(Scene, RunState, bool)> {
+    let mut run = RunState::new_demo();
+    Ok(match room {
+        crate::render::room_gi_bake::RoomGiRoom::Shop => {
+            setup_shop_state(&mut run);
+            let progress = screenshot_profile_for_shop_stock(false);
+            (
+                Scene::Shop(ShopScene::new(&mut run, &progress)),
+                run,
+                false,
+            )
+        }
+        crate::render::room_gi_bake::RoomGiRoom::Hallway => {
+            (Scene::PickBlind(scenes::PickBlindScene::new()), run, true)
+        }
+        crate::render::room_gi_bake::RoomGiRoom::Archive => {
+            let mut coll = scenes::CollectionScene::new();
+            coll.prepare_chronicle_for_screenshot();
+            (Scene::Collection(coll), run, false)
+        }
+    })
+}
+
+pub fn run_bake_room_gi_command(b: main_cli::BakeRoomGiCli) -> anyhow::Result<()> {
+    asset_path::init();
+    asset_path::log_all_assets();
+    let room = parse_bake_room_slug(&b.room)?;
+    let (scene, run, game_in_progress) = scene_for_room_gi_bake(room)?;
+    let app = HeadlessApp::with_run(scene, run, b.width, b.height, game_in_progress, false)?;
+    let bake = app.run_room_gi_bake(room, b.warmup_frames)?;
+    let out_name = match room {
+        crate::render::room_gi_bake::RoomGiRoom::Shop => "shop.mgi",
+        crate::render::room_gi_bake::RoomGiRoom::Hallway => "hallway.mgi",
+        crate::render::room_gi_bake::RoomGiRoom::Archive => "archive.mgi",
+    };
+    let out_path = b.output_dir.join(out_name);
+    if let Some(parent) = out_path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&out_path, bake.encode())?;
+    log::info!(
+        "room GI bake {:?} → {} ({} probes, {}×{})",
+        room,
+        out_path.display(),
+        bake.probe_count,
+        bake.bake_width,
+        bake.bake_height
+    );
+    Ok(())
 }

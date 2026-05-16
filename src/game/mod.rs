@@ -7,4 +7,3 @@ pub mod onboarding;
 pub mod run;
 pub mod state;
 pub mod tonemap_tuning;
-pub mod tutorial;

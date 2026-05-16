@@ -2123,7 +2123,7 @@ fn fs_main(
     }
 
     // ── Spotlights (same cone + falloff as `tile_3d.wgsl`) ─────────────
-    // Unified shop path matches `shop_glb.wgsl` punctual attenuation and omits
+    // Unified shop path matches `room_glb.wgsl` punctual attenuation and omits
     // the dual-buffer intensity product.
     let lm_punctual_scale = select(lights.extras.w, 1.0, phys_hdr > 0.5);
     let spot_count_fs = spot_lights.count.x;

@@ -156,12 +156,12 @@ pub struct WgpuRenderer {
     tile_pipeline_opaque_cull: wgpu::RenderPipeline,
     tile_pipeline_blend_double: wgpu::RenderPipeline,
     tile_pipeline_blend_cull: wgpu::RenderPipeline,
-    /// shop.glb only — glTF punctual + metallic-roughness + ACES (`shop_glb.wgsl`).
+    /// shop.glb only — glTF punctual + metallic-roughness + ACES (`room_glb.wgsl`).
     shop_pipeline_opaque_double: wgpu::RenderPipeline,
     shop_pipeline_opaque_cull: wgpu::RenderPipeline,
     shop_pipeline_blend_double: wgpu::RenderPipeline,
     shop_pipeline_blend_cull: wgpu::RenderPipeline,
-    /// Shop linear-HDR MRT pass: bloom RT0 + emissive-only RT1 (`shop_glb` `fs_main_mrt`).
+    /// Shop linear-HDR MRT pass: bloom RT0 + emissive-only RT1 (`room_glb` `fs_main_mrt`).
     shop_pipeline_mrt_opaque_double: wgpu::RenderPipeline,
     shop_pipeline_mrt_opaque_cull: wgpu::RenderPipeline,
     shop_pipeline_mrt_blend_double: wgpu::RenderPipeline,
@@ -221,9 +221,9 @@ pub struct WgpuRenderer {
     /// Last-uploaded description decal (`archive_sign_decal_texture`); `u64::MAX` = cleared / none.
     archive_sign_decal_upload_key: u64,
     /// Multiplier for embedded glTF **room** scale (`window_h *` this): shop, hallway, archive, etc.
-    /// Set each frame from the app (debug overlay may override [`crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE`]).
+    /// Set each frame from the app (debug overlay may override [`crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE`]).
     room_gltf_height_scale: f32,
-    /// Debug HDR multiplier; shop applies [`crate::render::shop_glb::SHOP_ENV_LINEAR_EXPOSURE_BASE`]
+    /// Debug HDR multiplier; shop applies [`crate::render::room_glb::SHOP_ENV_LINEAR_EXPOSURE_BASE`]
     /// × this before ACES (`CameraUniform.tile_seed` + `SsrGlobals.felt.z`).
     shop_env_linear_exposure: f32,
     /// Hemispheric ambient scale (`CameraUniform.decal_atlas_uv.x`).
@@ -233,7 +233,7 @@ pub struct WgpuRenderer {
     /// Scales glTF mesh emissive on `Shop.glb` / `hallway.glb` (`CameraUniform.decal_atlas_uv.z`).
     shop_gltf_emissive_scale: f32,
     /// CPU triangle soups from invisible marker meshes in [`Shop.glb`](../../assets/3d/Shop.glb).
-    pub(super) shop_env_collision_meshes: Vec<crate::render::shop_glb::ShopCollisionMesh>,
+    pub(super) shop_env_collision_meshes: Vec<crate::render::room_glb::RoomCollisionMesh>,
     /// Identity factor used by every primitive (kept for the cam uniform).
     tile_base_color_factor: [f32; 4],
     /// Active tileset directory name (e.g. `"original"`). When `Some`, tile
@@ -374,10 +374,10 @@ pub struct WgpuRenderer {
     /// before bloom, tonemap, and final composite into the swapchain.
     scene_color_texture: wgpu::Texture,
     scene_color_view: wgpu::TextureView,
-    /// Linear HDR shop-only redraw for bloom (`shop_glb` `hdr_tonemap.w` path).
+    /// Linear HDR shop-only redraw for bloom (`room_glb` `hdr_tonemap.w` path).
     shop_linear_bloom_texture: wgpu::Texture,
     shop_linear_bloom_view: wgpu::TextureView,
-    /// Emissive-only linear RGB (`shop_glb` MRT) for GI gather — excludes BRDF / punctual.
+    /// Emissive-only linear RGB (`room_glb` MRT) for GI gather — excludes BRDF / punctual.
     room_emissive_texture: wgpu::Texture,
     room_emissive_view: wgpu::TextureView,
     /// Half-res emissive indirect estimate (linear HDR).
@@ -391,6 +391,17 @@ pub struct WgpuRenderer {
     emissive_probe_apply_bind_group: wgpu::BindGroup,
     probe_gi_frame_uniform_buffer: wgpu::Buffer,
     probe_sh_buffer: wgpu::Buffer,
+    /// GI frames since room GI became active (drives amortized probe compute).
+    probe_gi_tick: u32,
+    probe_gi_last_view_proj: [f32; 16],
+    probe_gi_last_size: (u32, u32),
+    probe_gi_had_room: bool,
+    /// Which room's baked SH coefficients are currently in [`Self::probe_sh_buffer`].
+    probe_gi_gpu_room: Option<crate::render::room_gi_bake::RoomGiRoom>,
+    /// Set by `mahjuro bake-room-gi` to read back probes after one dynamic GI frame.
+    room_gi_capture_pending: Option<crate::render::room_gi_bake::RoomGiRoom>,
+    room_gi_capture_meta: Option<crate::render::room_gi_bake::RoomGiBake>,
+    room_gi_captured: Option<crate::render::room_gi_bake::RoomGiBake>,
     emissive_gi_composite_pipeline: wgpu::RenderPipeline,
     emissive_gi_composite_bind_group_layout: wgpu::BindGroupLayout,
     emissive_gi_composite_bind_group: wgpu::BindGroup,
@@ -747,6 +758,7 @@ mod impl_arrange;
 mod impl_loaders;
 mod impl_pipelines;
 mod impl_public;
+mod impl_room_gi;
 mod impl_screenshot;
 
 pub use constants::{

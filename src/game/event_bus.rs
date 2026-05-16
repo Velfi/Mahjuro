@@ -77,8 +77,6 @@ pub enum GameEvent {
     CandleFlare,
     /// Melds were committed into the structure (mirror).
     StructureCommitted,
-    /// Tutorial milestone celebration (first pair, first triplet, etc.).
-    TutorialMilestone(crate::game::tutorial::TutorialMilestone),
     /// An action was rejected as invalid (e.g. bad meld, structure full).
     InvalidAction,
     /// Play a one-shot UI / tutorial sound (no gameplay side effects).

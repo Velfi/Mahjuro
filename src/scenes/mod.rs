@@ -21,11 +21,8 @@ pub mod showcase;
 pub mod showcase_stage;
 pub mod splash;
 pub mod start_game_modal;
-pub mod tile_literacy;
 pub mod transition_playground;
 pub mod tutorial_campaign;
-pub mod tutorial_overlay;
-pub mod tutorial_recap;
 pub mod tutorial_summary;
 pub mod yaku_journal;
 pub use collection::CollectionScene;
@@ -46,10 +43,8 @@ pub use showcase::{
 };
 pub use splash::SplashScene;
 pub use start_game_modal::TileSelectScene;
-pub use tile_literacy::TileLiteracyScene;
 pub use transition_playground::TransitionPlaygroundScene;
 pub use tutorial_campaign::TutorialCampaignScene;
-pub use tutorial_recap::TutorialRecapScene;
 pub use tutorial_summary::TutorialSummaryScene;
 pub use yaku_journal::YakuJournalScene;
 
@@ -252,8 +247,8 @@ pub struct DrawCtx<'a> {
     /// Vertical scale for embedded glTF room scenes (`shop.glb`, `hallway.glb`, `archive.glb`, …):
     /// authored room height is multiplied by `window_h *` this. Debug tuning can override.
     pub room_gltf_height_scale: f32,
-    /// Shop punctual + tonemap tuning (debug overlay / defaults from `shop_glb` constants).
-    pub shop_env_lighting: crate::render::shop_glb::ShopEnvLightingTune,
+    /// Shop punctual + tonemap tuning (debug overlay / defaults from `room_glb` constants).
+    pub shop_env_lighting: crate::render::room_glb::RoomEnvLightingTune,
     /// Master switches for layered visuals — start from [`EffectLayers::BASELINE`]
     /// and enable fields incrementally (see `effect_layers.rs`).
     pub effect_layers: EffectLayers,
@@ -300,7 +295,7 @@ impl<'a> DrawCtx<'a> {
         debug_visibility: DebugVisibility,
         modal_active: bool,
         room_gltf_height_scale: f32,
-        shop_env_lighting: crate::render::shop_glb::ShopEnvLightingTune,
+        shop_env_lighting: crate::render::room_glb::RoomEnvLightingTune,
         effect_layers: EffectLayers,
         cursor_pos: (f32, f32),
         input_mode: InputMode,
@@ -474,10 +469,8 @@ pub enum Scene {
     MaterialViewer(MaterialViewerScene),
     Options(OptionsScene),
     Collection(CollectionScene),
-    TutorialRecap(TutorialRecapScene),
     TutorialCampaign(TutorialCampaignScene),
     TutorialSummary(TutorialSummaryScene),
-    TileLiteracy(TileLiteracyScene),
     TransitionPlayground(TransitionPlaygroundScene),
     RumbleLab(RumbleLabScene),
     YakuJournal(YakuJournalScene),

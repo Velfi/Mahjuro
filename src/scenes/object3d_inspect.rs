@@ -84,10 +84,10 @@ pub struct InspectRig {
 }
 
 impl InspectRig {
-    /// Storeroom close-up: distance scales with [`crate::render::shop_glb::shop_env_world_scale`].
+    /// Storeroom close-up: distance scales with [`crate::render::room_glb::room_env_world_scale`].
     pub fn shop(window_h: f32, room_gltf_height_scale: f32) -> Self {
         let h = window_h.max(1.0);
-        let s = crate::render::shop_glb::shop_env_world_scale(h, room_gltf_height_scale);
+        let s = crate::render::room_glb::room_env_world_scale(h, room_gltf_height_scale);
         Self {
             base_dir: Vec3::new(0.0_f32, -0.74, 0.59).normalize(),
             base_distance: 0.52 * s,

@@ -306,7 +306,8 @@ fn run_scheduled_bot_slot(
     let mut diags = Vec::new();
     let mut last = RunStats::default();
     for attempt in 0..max_attempts {
-        let s = super::play_run_with_options(config.clone(), options.clone(), Some(run_index));
+        let (_run, s) =
+            super::play_run_with_options(config.clone(), options.clone(), Some(run_index));
         if !s.run_timed_out {
             return (s, diags);
         }
@@ -968,6 +969,117 @@ pub fn run_stats_from_progress_record(rec: &crate::core::progression::RunRecord)
         boss_beaten,
         ..RunStats::default()
     }
+}
+
+fn boss_kind_by_display_name(name: &str) -> Option<crate::core::boss::BossKind> {
+    use crate::core::boss::{all_bosses, final_bosses};
+    all_bosses()
+        .iter()
+        .chain(final_bosses().iter())
+        .find(|d| d.name == name)
+        .map(|d| d.kind)
+}
+
+/// Merge one finished bot run into profile progression (chronicle + career counters).
+pub fn append_bot_run_to_progress(
+    progress: &mut crate::core::progression::PlayerProgress,
+    run: &crate::game::run::RunState,
+    stats: &RunStats,
+    history_index: u64,
+) {
+    use crate::core::progression::{RunOutcome, RunRecord};
+    use crate::core::relic::all_relic_defs;
+    use crate::core::talisman::TalismanKind;
+    use crate::core::yaku::YakuKind;
+    use crate::game::event_bus::GameOverReason;
+
+    let outcome = if stats.victory {
+        RunOutcome::Victory
+    } else {
+        RunOutcome::Defeat {
+            reason: stats
+                .death_reason
+                .unwrap_or(GameOverReason::OutOfPlays),
+        }
+    };
+    let mut record = RunRecord::from_run(run, outcome);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    record.timestamp_unix = now.saturating_sub(history_index.saturating_mul(86_400));
+    record.tutorial_run = false;
+
+    progress.run_history.push(record);
+    progress.runs_completed = progress.runs_completed.saturating_add(1);
+    progress.record_score(stats.total_score);
+    if stats.victory {
+        progress.has_won = true;
+        let _ = progress.record_stake_victory(run.mode.tile_material, run.mode.stake);
+    }
+
+    for (&name, &count) in &stats.yaku_scored {
+        if let Some(yk) = YakuKind::all().iter().find(|yk| yk.name() == name) {
+            *progress.yaku_times_scored.entry(*yk).or_insert(0) += count;
+        }
+    }
+    for (name, &faced) in &stats.boss_faced {
+        if let Some(kind) = boss_kind_by_display_name(name) {
+            *progress
+                .boss_times_encountered
+                .entry(kind)
+                .or_insert(0) += u32::from(faced);
+        }
+    }
+    for (name, &beaten) in &stats.boss_beaten {
+        if let Some(kind) = boss_kind_by_display_name(name) {
+            *progress.boss_times_defeated.entry(kind).or_insert(0) += u32::from(beaten);
+        }
+    }
+    for (&name, &n) in &stats.relic_activations {
+        if let Some(def) = all_relic_defs().iter().find(|d| d.name == name) {
+            *progress
+                .relic_times_activated
+                .entry(def.id)
+                .or_insert(0) += n;
+        }
+    }
+    for (&name, &n) in &stats.talismans_picked {
+        if let Some(kind) = TalismanKind::all().iter().find(|tk| tk.name() == name) {
+            *progress
+                .talisman_times_purchased
+                .entry(*kind)
+                .or_insert(0) += n;
+        }
+    }
+    for (&name, &n) in &stats.talismans_used {
+        if let Some(kind) = TalismanKind::all().iter().find(|tk| tk.name() == name) {
+            *progress.talisman_times_used.entry(*kind).or_insert(0) += n;
+        }
+    }
+}
+
+/// Play `count` headless bot runs and append each to `progress.run_history` (and related career stats).
+/// Returns how many runs were recorded (timeouts still count if they produced terminal state).
+pub fn seed_progress_from_bot_runs(
+    progress: &mut crate::core::progression::PlayerProgress,
+    count: usize,
+) -> usize {
+    if count == 0 {
+        return 0;
+    }
+    let config = BotConfig::default();
+    let options = BotRunOptions {
+        log: false,
+        ..BotRunOptions::default()
+    };
+    let base_index = progress.run_history.len() as u64;
+    for i in 0..count {
+        let run_idx = progress.runs_completed.saturating_add(1).max(1);
+        let (run, stats) = super::play_bot_run(config.clone(), options.clone(), Some(run_idx));
+        append_bot_run_to_progress(progress, &run, &stats, base_index + i as u64);
+    }
+    count
 }
 
 /// Write the same interactive HTML report as `mahjuro bot -o …html`, using

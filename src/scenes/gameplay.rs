@@ -243,11 +243,6 @@ pub struct GameplayScene {
     /// movement updates `current_slot` and re-applies the marquee against
     /// the snapshot taken at press time. Released on `ConfirmRelease`.
     marquee: Option<crate::ui::input::MarqueeSelect>,
-    /// Tutorial hint overlay — shows banners and highlights during the
-    /// onboarding flow. `None` for non-tutorial runs.
-    tutorial_overlay: Option<super::tutorial_overlay::TutorialOverlay>,
-    /// Hand tile indices that should glow (affinity hint for tutorial).
-    tutorial_affinity_indices: Vec<usize>,
     /// One-shot FoV pop triggered when a placement completes the structure.
     final_tiles_fov_pop_at: Option<Instant>,
     /// Per-slot tile identity tracker for pop-in animation. Each entry is
@@ -482,8 +477,6 @@ impl GameplayScene {
             candle_flare: 0.0,
             held_relic_drag: None,
             marquee: None,
-            tutorial_overlay: None,
-            tutorial_affinity_indices: Vec::new(),
             final_tiles_fov_pop_at: None,
             hand_tile_uids: Vec::new(),
             hand_slide_y: Vec::new(),
@@ -526,56 +519,13 @@ impl GameplayScene {
             self.displayed_score = gameplay.round_score;
             return;
         }
-        if let Some(ref breakdown) = GameEngine::last_breakdown(ctx.run) {
-            let meld_kinds = breakdown.scored_meld_kinds.clone();
-            let is_full_hand = ctx
-                .run
-                .available_yaku
-                .contains(&crate::core::yaku::YakuKind::FullHand)
-                && breakdown
-                    .detected_yaku
-                    .contains(&crate::core::yaku::YakuKind::FullHand);
-            let is_yakuhai = ctx
-                .run
-                .available_yaku
-                .contains(&crate::core::yaku::YakuKind::Yakuhai)
-                && breakdown
-                    .detected_yaku
-                    .contains(&crate::core::yaku::YakuKind::Yakuhai);
-            if let Some(milestone) = crate::game::tutorial::milestone_for_melds(&meld_kinds) {
-                let _ = GameEngine::celebrate_tutorial_milestone(ctx.run, ctx.bus, milestone);
-            }
-            if is_full_hand {
-                let _ = GameEngine::celebrate_tutorial_milestone(
-                    ctx.run,
-                    ctx.bus,
-                    crate::game::tutorial::TutorialMilestone::FirstFullHand,
-                );
-            }
-            if is_yakuhai {
-                let _ = GameEngine::celebrate_tutorial_milestone(
-                    ctx.run,
-                    ctx.bus,
-                    crate::game::tutorial::TutorialMilestone::FirstYakuhai,
-                );
-            }
-        }
         if gained >= gameplay.target_score as u64 {
             self.candle_flare = CANDLE_FLARE_PEAK;
             ctx.bus.push(crate::game::event_bus::GameEvent::CandleFlare);
         }
         if let Some(breakdown) = GameEngine::last_breakdown(ctx.run) {
             if !breakdown.steps.is_empty() || breakdown.base_points > 0 {
-                let use_tutorial_cascade = GameEngine::tutorial_annotated_cascade(ctx.run);
-                let tuning = if use_tutorial_cascade {
-                    crate::game::cascade::CascadeTuning::tutorial_slow()
-                } else {
-                    ctx.cascade_tuning.clone()
-                };
-                let cascade = ScoringCascade::with_tuning(breakdown, score_before, gained, tuning);
-                if use_tutorial_cascade {
-                    GameEngine::mark_tutorial_cascade_annotated(ctx.run);
-                }
+                let cascade = ScoringCascade::with_tuning(breakdown, score_before, gained, ctx.cascade_tuning.clone());
                 let starting_fresh = self.cascade_queue.is_empty();
                 log::info!(
                     "[score] begin_scoring_cascade: gained={} starting_fresh={} queue_len_before={}",

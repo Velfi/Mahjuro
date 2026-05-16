@@ -25,6 +25,13 @@
 //! `target/<profile>/` (or `target/<triple>/<profile>/` when cross-compiling) so
 //! `pack_manifest.json` and the zip packs sit next to the game binary. Set
 //! `MAHJURO_SKIP_ASSET_BAKE=1` to skip (you must supply packs or `MAHJURO_ASSETS`).
+//!
+//! **Room GI bakes:** when inputs change, `build/room_gi_bake.rs` may run
+//! `mahjuro bake-room-gi` (release builds only unless `MAHJURO_ROOM_GI_BAKE=1`).
+//! Skip with `MAHJURO_SKIP_ROOM_GI_BAKE=1`. See `AGENTS.md`.
+
+#[path = "build/room_gi_bake.rs"]
+mod room_gi_bake;
 
 use std::env;
 use std::fs;
@@ -59,8 +66,13 @@ fn main() {
     println!("cargo:rerun-if-changed=tools/bake_assets/pack_rules.json");
     println!("cargo:rerun-if-changed=assets");
 
+    room_gi_bake::emit_rerun_if_changed();
+
     if let Some(out_dir) = env::var_os("OUT_DIR").map(PathBuf::from) {
         if let Some(profile_dir) = profile_dir(&out_dir) {
+            if let Some(repo) = env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from) {
+                room_gi_bake::maybe_bake_room_gi(&repo, &profile_dir);
+            }
             bake_asset_packs(&profile_dir);
         }
     }

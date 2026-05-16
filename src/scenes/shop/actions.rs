@@ -281,7 +281,7 @@ impl ShopScene {
             relic_glow_starts: rustc_hash::FxHashMap::default(),
             positions: crate::ui::scene_layout::load_shop_positions(),
             drawn_room_gltf_height_scale: std::cell::Cell::new(
-                crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
+                crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
             ),
             inspect_dolly: std::cell::Cell::new(crate::scenes::object3d_inspect::InspectDolly {
                 phase: 0.0,

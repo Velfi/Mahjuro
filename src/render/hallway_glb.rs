@@ -7,8 +7,8 @@
 //! - Perspective cameras named `default` and `boss` select pick-blind framing (see
 //!   [`hallway_camera_pick_blind`]); legacy single-camera files still use the first embedded camera.
 //!
-//! Decodes through [`crate::render::room_env_gltf`]; decoded layout matches [`crate::render::shop_glb::RoomGlbCpu`]
-//! for the shared GPU path (`shop_glb.wgsl` / embedded lights).
+//! Decodes through [`crate::render::room_env_gltf`]; decoded layout matches [`crate::render::room_glb::RoomGlbCpu`]
+//! for the shared GPU path (`room_glb.wgsl` / embedded lights).
 
 use std::sync::RwLock;
 
@@ -19,7 +19,7 @@ use crate::render::draw_cmd::CameraParams;
 use crate::render::room_env_gltf::{
     RoomEnvWalkHooks, RoomMeshPolicy, glb_punctual_range_world_upload,
 };
-use crate::render::shop_glb::{self, RoomGlbCpu, ShopEnvLightingTune, load_room_glb_from_bytes};
+use crate::render::room_glb::{self, RoomGlbCpu, RoomEnvLightingTune, load_room_glb_from_bytes};
 use crate::render::wgpu_renderer::{MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, PointLight, SpotLight};
 use crate::render::world_space::surface_anchor_from_world_xyz;
 
@@ -31,7 +31,7 @@ pub const BTN_SKIP_ROUND: &str = "btn_skip_round";
 /// glTF mesh node for pick-blind hallway wall panels (tinted per run via [`HallwayDistortion::bow`]).
 pub const HALLWAY_WALLS_NODE: &str = "walls";
 
-/// `COLOR_0.a` on [`HALLWAY_WALLS_NODE`] — `shop_glb.wgsl` multiplies albedo by `bow.rgb` (alpha treated as 1).
+/// `COLOR_0.a` on [`HALLWAY_WALLS_NODE`] — `room_glb.wgsl` multiplies albedo by `bow.rgb` (alpha treated as 1).
 pub const HALLWAY_WALL_TINT_COLOR_TAG: f32 = 3.0;
 
 /// Linear RGB tints (blue, yellow, green, red, purple, orange, pink, brown).
@@ -50,7 +50,7 @@ const HALLWAY_WALL_TINTS: [[f32; 3]; 8] = [
 fn pick_blind_embedded_camera_doc(
     cpu: &RoomGlbCpu,
     boss_blind: bool,
-) -> Option<shop_glb::ShopGlbEmbeddedCamera> {
+) -> Option<room_glb::RoomGlbEmbeddedCamera> {
     let by = &cpu.embedded_cameras_by_name;
     if boss_blind {
         by.get("boss")
@@ -74,7 +74,7 @@ pub fn hallway_pick_blind_play_button_node(boss_blind: bool) -> &'static str {
         let Some(cpu) = opt else {
             return BTN_PLAY_ROUND;
         };
-        let has_boss_btn = shop_glb::marker_translation(cpu, BTN_PLAY_BOSS).is_some()
+        let has_boss_btn = room_glb::marker_translation(cpu, BTN_PLAY_BOSS).is_some()
             || cpu.marker_mesh_bounds_doc_for(BTN_PLAY_BOSS).is_some();
         if has_boss_btn {
             BTN_PLAY_BOSS
@@ -88,10 +88,10 @@ pub fn hallway_pick_blind_play_button_node(boss_blind: bool) -> &'static str {
 /// multiplies `tile_seed` on top of the shared shop/storeroom exposure path.
 pub const HALLWAY_ENV_LINEAR_EXPOSURE_MUL: f32 = 2.35;
 
-/// Minimum `decal_atlas_uv.x` (hemispheric fill in `shop_glb.wgsl`) for this room; `max` with debug tune.
+/// Minimum `decal_atlas_uv.x` (hemispheric fill in `room_glb.wgsl`) for this room; `max` with debug tune.
 pub const HALLWAY_ENV_AMBIENT_SCALE_MIN: f32 = 0.085;
 
-// ── Pick-blind hallway vertex distortion (`shop_glb.wgsl` / `tile_3d.wgsl` @group(0) @binding(8)) ──
+// ── Pick-blind hallway vertex distortion (`room_glb.wgsl` / `tile_3d.wgsl` @group(0) @binding(8)) ──
 
 /// Inward/outward wall pulse amplitude (world units).
 pub const HALLWAY_BREATHE_AMOUNT: f32 = 0.011;
@@ -132,7 +132,7 @@ pub const HALLWAY_BALLOON_AMOUNT: f32 = 0.065;
 #[allow(dead_code)]
 pub const HALLWAY_BALLOON_FLOOR_Z: f32 = 0.08;
 
-// Left/right in `shop_glb.wgsl` / `tile_3d.wgsl` (all use the same lateral frame):
+// Left/right in `room_glb.wgsl` / `tile_3d.wgsl` (all use the same lateral frame):
 // - `lateral = normalize(cross(depth_axis, world_up))` (handedness follows depth sign in `mask.y`).
 // - `side_c = dot(world, lateral) - stretch.y` with `stretch.y` = glTF root lateral coord (not AABB center).
 // - `side_n = clamp(side_c / flags.w, −1, 1)`; `flags.w` = lateral corridor half-width (bounds span).
@@ -155,7 +155,7 @@ fn hallway_depth_axis_doc() -> Vec3 {
     v * HALLWAY_DEPTH_SIGN
 }
 
-/// Uniform block consumed by `shop_glb.wgsl` / `tile_3d.wgsl` vertex stage (`binding(8)`).
+/// Uniform block consumed by `room_glb.wgsl` / `tile_3d.wgsl` vertex stage (`binding(8)`).
 /// When `flags[0] < 0.5`, distortion is a no-op (shop / archive / tiles use a zeroed buffer).
 #[repr(C)]
 #[derive(Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -173,7 +173,7 @@ pub struct HallwayDistortion {
     /// x = max twist magnitude (rad), y = twist mask power, z = depth mask profile (0 = legacy
     /// smoothstep ramp along +depth; 1 = bell curve centered on [`HallwayDistortion::mask`] z/w
     /// span from GLB bounds). w = twist sign (+1 or −1); negates rotation so the hall can twist
-    /// either way around the depth axis (see `shop_glb.wgsl` / `tile_3d.wgsl`).
+    /// either way around the depth axis (see `room_glb.wgsl` / `tile_3d.wgsl`).
     pub twist: [f32; 4],
     /// x = depth axis index (0..2), y = depth sign (±1), z/w = depth span along that axis in
     /// world units (see [`hallway_distortion_apply_glb_depth_extent`]; shaders interpret with
@@ -494,7 +494,7 @@ pub fn hallway_distortion_apply_glb_depth_extent(
         let Some(cpu) = opt else {
             return;
         };
-        let m = shop_glb::shop_env_model_matrix_from_cpu(window_h, env_height_scale, cpu);
+        let m = room_glb::room_env_model_matrix_from_cpu(window_h, env_height_scale, cpu);
         let origin_world = m.transform_point3(Vec3::ZERO);
 
         let axis_w = m.transform_vector3(hallway_depth_axis_doc());
@@ -552,7 +552,7 @@ pub fn hallway_distortion_apply_glb_depth_extent(
 pub fn release_hallway_environment_cpu_sources_after_gpu_upload() {
     let mut g = HALLWAY_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
     if let HallwayGlbCache::Ready(Some(cpu)) = &mut *g {
-        shop_glb::release_room_environment_primitives_cpu(cpu);
+        room_glb::release_room_environment_primitives_cpu(cpu);
     }
 }
 
@@ -600,8 +600,8 @@ pub fn hallway_marker_world(
     cpu: &RoomGlbCpu,
     name: &str,
 ) -> Option<Vec3> {
-    let t = shop_glb::marker_translation(cpu, name)?;
-    let s = shop_glb::shop_env_world_scale(window_h, env_height_scale);
+    let t = room_glb::marker_translation(cpu, name)?;
+    let s = room_glb::room_env_world_scale(window_h, env_height_scale);
     Some(t * s)
 }
 
@@ -651,12 +651,12 @@ fn hallway_camera_resolve(w: f32, h: f32, env_h: f32, from_glb: Option<CameraPar
         });
         if from_glb.is_none() {
             if let Some(cpu) = opt {
-                let corners = shop_glb::shop_world_bounds_corners_centered(h, env_h, cpu);
-                cam = shop_glb::shop_camera_fit_fovy_for_corners(w, h, cam, &corners, 0.94);
+                let corners = room_glb::room_world_bounds_corners_centered(h, env_h, cpu);
+                cam = room_glb::room_camera_fit_fovy_for_corners(w, h, cam, &corners, 0.94);
             }
         }
         if let Some(cpu) = opt {
-            cam = shop_glb::shop_camera_with_room_clip_planes(cam, h, env_h, cpu);
+            cam = room_glb::room_camera_with_room_clip_planes(cam, h, env_h, cpu);
         }
         cam
     })
@@ -687,7 +687,7 @@ pub fn hallway_glb_has_embedded_lights() -> bool {
 fn gltf_punctual_linear_rgb(
     raw: [f32; 3],
     is_candle: bool,
-    tune: &ShopEnvLightingTune,
+    tune: &RoomEnvLightingTune,
 ) -> [f32; 3] {
     if is_candle {
         [
@@ -705,7 +705,7 @@ pub fn hallway_embedded_point_lights_runtime(
     w: f32,
     h: f32,
     env_h: f32,
-    tune: &ShopEnvLightingTune,
+    tune: &RoomEnvLightingTune,
 ) -> Vec<PointLight> {
     with_hallway_glb_cpu(|opt| {
         let Some(cpu) = opt else {
@@ -714,7 +714,7 @@ pub fn hallway_embedded_point_lights_runtime(
         if cpu.embedded_point_lights.is_empty() {
             return Vec::new();
         }
-        let s = shop_glb::shop_env_world_scale(h, env_h);
+        let s = room_glb::room_env_world_scale(h, env_h);
         let center_doc = cpu
             .environment_bounds_doc
             .map(|b| b.center())
@@ -749,7 +749,7 @@ pub fn hallway_embedded_spot_lights_runtime(
     w: f32,
     h: f32,
     env_h: f32,
-    tune: &ShopEnvLightingTune,
+    tune: &RoomEnvLightingTune,
 ) -> Vec<SpotLight> {
     if !hallway_glb_has_embedded_lights() {
         return Vec::new();
@@ -761,7 +761,7 @@ pub fn hallway_embedded_spot_lights_runtime(
         if cpu.embedded_spot_lights.is_empty() {
             return Vec::new();
         }
-        let s = shop_glb::shop_env_world_scale(h, env_h);
+        let s = room_glb::room_env_world_scale(h, env_h);
         let center_doc = cpu
             .environment_bounds_doc
             .map(|b| b.center())
@@ -805,7 +805,7 @@ mod tests {
 
     use super::load_hallway_glb_from_bytes;
     use crate::core::rules::BlindKind;
-    use crate::render::shop_glb;
+    use crate::render::room_glb;
     use crate::render::hallway_glb::{
         HallwayDistortion, HALLWAY_RIPPLE_AMOUNT, HALLWAY_RIPPLE_SPEED, HALLWAY_RIPPLE_WAVES,
     };
@@ -826,7 +826,7 @@ mod tests {
         let env_h = 1.0f32;
         let mut dist = HallwayDistortion::from_pick_blind(BlindKind::Big, 1, 1);
         super::hallway_distortion_apply_glb_depth_extent(&mut dist, window_h, env_h);
-        let m = shop_glb::shop_env_model_matrix_from_cpu(window_h, env_h, &cpu);
+        let m = room_glb::room_env_model_matrix_from_cpu(window_h, env_h, &cpu);
         let axis_doc = super::hallway_depth_axis_doc();
         let axis_n = m.transform_vector3(axis_doc).normalize();
         let mut lateral_n = axis_n.cross(Vec3::Z);
@@ -1043,7 +1043,7 @@ mod tests {
             "hallway `default` and `boss` cameras should differ in eye/target for pick_blind; got eye_sum_abs_diff={diff_eye} target_sum_abs_diff={diff_tgt}"
         );
 
-        let has_boss_play = shop_glb::marker_translation(&cpu, super::BTN_PLAY_BOSS).is_some()
+        let has_boss_play = room_glb::marker_translation(&cpu, super::BTN_PLAY_BOSS).is_some()
             || cpu
                 .marker_mesh_bounds_doc_for(super::BTN_PLAY_BOSS)
                 .is_some();

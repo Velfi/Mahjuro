@@ -14,7 +14,7 @@ use crate::game::engine::{GameCommand, GameEngine};
 use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::{PromptIconQuad, ScenePunctualLight, UiFrame};
 use crate::render::hallway_glb::{self, BTN_SKIP_ROUND};
-use crate::render::shop_glb;
+use crate::render::room_glb;
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::ui::focus_nav::push_focus_ring;
@@ -113,7 +113,7 @@ fn hallway_button_screen_rect(
     let min_rh = (win_h * 0.07).max(52.0);
     hallway_glb::with_hallway_glb_cpu(|opt| {
         let cpu = opt?;
-        if let Some(r) = shop_glb::screen_rect_for_marker_mesh_bounds(
+        if let Some(r) = room_glb::screen_rect_for_marker_mesh_bounds(
             win_w,
             win_h,
             cam,
@@ -350,7 +350,7 @@ impl SceneBehavior for PickBlindScene {
             }
             let room_glb = hallway_glb::hallway_glb_has_embedded_lights();
             frame.scene_lighting.embedded_gltf_punctual = room_glb;
-            frame.scene_lighting.room_shop_glb_brdf = room_glb;
+            frame.scene_lighting.room_glb_brdf = room_glb;
             frame.scene_lighting.spot_lights = if room_glb {
                 hallway_glb::hallway_embedded_spot_lights_runtime(
                     w,
@@ -430,7 +430,7 @@ impl SceneBehavior for PickBlindScene {
             frame.scene_lighting.punctual = inverse_punctual;
         } else {
             frame.scene_lighting.embedded_gltf_punctual = false;
-            frame.scene_lighting.room_shop_glb_brdf = false;
+            frame.scene_lighting.room_glb_brdf = false;
             frame.scene_lighting.spot_lights.clear();
             frame.scene_lighting.set_smooth_points(vec![
                 PointLight {

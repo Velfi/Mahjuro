@@ -1,7 +1,7 @@
 //! Shared helpers for permanent relic removal, shop-pool extinction, and
 //! round-boundary lantern rolls — see `docs/todo/event-driven-run-mutations.md`.
 
-use crate::core::relic::RelicId;
+use crate::core::relic::{RelicId, relic_sell_price_live};
 use crate::game::event_bus::{EventBus, GameEvent};
 use crate::steam::Achievement;
 
@@ -10,7 +10,7 @@ use super::RunState;
 impl RunState {
     /// Clears [`crate::core::relic::RelicState::debuffed`] and [`RunState::relic_counters`]
     /// entries keyed by `relic_id`. Does not touch [`crate::core::relic::RelicState::active`]
-    /// or Kintsugi — use when inventory was already updated (shop sell, Hungry Ghost victim).
+    /// or Kintsugi — use when inventory was already updated (e.g. shop sell).
     pub(crate) fn clear_relic_run_metadata(&mut self, relic_id: RelicId) {
         self.relics.debuffed.remove(&relic_id);
         self.relic_counters.remove(&relic_id);
@@ -49,6 +49,38 @@ impl RunState {
             kind.successor(),
         ));
         bus.push(GameEvent::AchievementUnlocked(kind.achievement()));
+    }
+
+    /// At round start, each enabled Hungry Ghost destroys the relic immediately to its
+    /// right and banks permanent mult equal to that relic's sell value.
+    pub(crate) fn feed_hungry_ghosts_at_round_start(&mut self) {
+        loop {
+            let Some(hg_idx) = self
+                .relics
+                .active
+                .iter()
+                .position(|&id| id == RelicId::HungryGhost)
+            else {
+                break;
+            };
+            if self.relics.is_debuffed(RelicId::HungryGhost) {
+                break;
+            }
+            if hg_idx + 1 >= self.relics.active.len() {
+                break;
+            }
+            let victim_id = self.relics.active[hg_idx + 1];
+            let victim_value =
+                relic_sell_price_live(victim_id, &self.relic_counters) as i32;
+            self.relics.active.remove(hg_idx + 1);
+            self.clear_relic_run_metadata(victim_id);
+            self.note_relic_destroyed();
+            *self
+                .relic_counters
+                .entry(RelicId::HungryGhost)
+                .or_insert(0) += victim_value * 10;
+            self.relic_activations.push(RelicId::HungryGhost);
+        }
     }
 
     /// Paper / Stone Lantern rolls at a blind / round boundary (shared by normal advance and

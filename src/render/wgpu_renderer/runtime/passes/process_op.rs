@@ -62,6 +62,28 @@ impl WgpuRenderer {
         let relic_debuff_markers = ctx.relic_debuff_markers;
         let relic_debuff_buffer = ctx.relic_debuff_buffer;
         let scene_hdr_attachment = ctx.scene_hdr_attachment;
+        let full_scissor = [0, 0, self.size.width.max(1), self.size.height.max(1)];
+        let to_scissor = |rect: [f32; 4]| -> Option<[u32; 4]> {
+            let [x, y, w, h] = rect;
+            if !(w > 0.0 && h > 0.0) {
+                return None;
+            }
+            let max_w = self.size.width.max(1) as f32;
+            let max_h = self.size.height.max(1) as f32;
+            let x0 = x.max(0.0).min(max_w);
+            let y0 = y.max(0.0).min(max_h);
+            let x1 = (x + w).max(0.0).min(max_w);
+            let y1 = (y + h).max(0.0).min(max_h);
+            if !(x1 > x0 && y1 > y0) {
+                return None;
+            }
+            Some([
+                x0.floor() as u32,
+                y0.floor() as u32,
+                (x1.ceil() - x0.floor()).max(1.0) as u32,
+                (y1.ceil() - y0.floor()).max(1.0) as u32,
+            ])
+        };
         match op {
             RenderOp::ClearSceneDepth => {
                 // Marker only: Pass A is split into subpasses at this op; never drawn here.
@@ -494,6 +516,16 @@ impl WgpuRenderer {
             }
             RenderOp::TextDraw(idx) => {
                 let td = &text_draws[*idx];
+                if let Some(sc) = td.scissor_rect.and_then(to_scissor) {
+                    pass.set_scissor_rect(sc[0], sc[1], sc[2], sc[3]);
+                } else {
+                    pass.set_scissor_rect(
+                        full_scissor[0],
+                        full_scissor[1],
+                        full_scissor[2],
+                        full_scissor[3],
+                    );
+                }
                 pass.set_pipeline(if scene_hdr_attachment {
                     &self.text_pipeline_scene_hdr
                 } else {
@@ -505,6 +537,12 @@ impl WgpuRenderer {
                 pass.set_vertex_buffer(1, td.inst_buf.slice(..));
                 pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 pass.draw_indexed(0..6, 0, 0..1);
+                pass.set_scissor_rect(
+                    full_scissor[0],
+                    full_scissor[1],
+                    full_scissor[2],
+                    full_scissor[3],
+                );
             }
             RenderOp::TileFaceQuad(idx) => {
                 let face = &tile_face_quads[*idx];

@@ -125,6 +125,16 @@ impl SdlShell {
         self._sdl.mouse().show_cursor(show);
     }
 
+    /// Whether this window currently owns keyboard input (`SDL_WINDOW_INPUT_FOCUS`).
+    pub fn has_input_focus(&self) -> bool {
+        self.window.has_input_focus()
+    }
+
+    /// Whether this window currently owns mouse focus (`SDL_WINDOW_MOUSE_FOCUS`).
+    pub fn has_mouse_focus(&self) -> bool {
+        self.window.has_mouse_focus()
+    }
+
     pub fn prepare_gamepad_frame(&mut self) {
         self.gamepad.update();
         self.joystick.update();

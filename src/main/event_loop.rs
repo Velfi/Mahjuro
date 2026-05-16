@@ -22,6 +22,10 @@ fn mod_gui(m: Mod) -> bool {
 
 impl App {
     pub fn run_sdl_main(mut self, shell: &mut SdlShell) -> anyhow::Result<()> {
+        // Keep the window hidden during heavy renderer startup. Showing it only
+        // once we're about to enter the pump avoids launch-time activation races
+        // where macOS reports Shown without input focus and never delivers FocusGained.
+        shell.window.hide();
         // Match [`draw::App::draw`]: HDR swapchain is only used when both the
         // options toggle and `EffectLayers::hdr` allow it. Baseline builds keep
         // `hdr` off, so seeding the surface from `gfx.hdr_enabled` alone forced
@@ -40,6 +44,7 @@ impl App {
         {
             self.debug.menu = Some(DebugMenuBar::new(&shell.window));
         }
+        shell.window.show();
         log::debug!("SDL shell: window + wgpu + input ready");
 
         'running: loop {
@@ -159,12 +164,29 @@ impl App {
                             r.resize(sz);
                         }
                     }
+                    WindowEvent::Shown
+                    | WindowEvent::FocusGained
+                    | WindowEvent::MouseEnter => {
+                        log::debug!(
+                            "window event {:?}: input={} mouse={}",
+                            win_event,
+                            shell.has_input_focus(),
+                            shell.has_mouse_focus()
+                        );
+                    }
+                    WindowEvent::FocusLost => {
+                        log::debug!(
+                            "window event FocusLost: input={} mouse={}",
+                            shell.has_input_focus(),
+                            shell.has_mouse_focus()
+                        );
+                    }
                     _ => {}
                 }
             }
             Event::MouseMotion {
                 window_id, x, y, ..
-            } if window_id == our_win => {
+            } if window_id == our_win || window_id == 0 => {
                 let (px, py) = shell.event_xy_to_pixels(x, y);
                 self.sdl_handle_mouse_motion(shell, px, py);
             }
@@ -172,7 +194,7 @@ impl App {
                 window_id,
                 mouse_btn,
                 ..
-            } if window_id == our_win => {
+            } if window_id == our_win || window_id == 0 => {
                 if mouse_btn == SdlMouseButton::Left {
                     self.sdl_handle_left_button(shell, true);
                 }
@@ -181,12 +203,12 @@ impl App {
                 window_id,
                 mouse_btn,
                 ..
-            } if window_id == our_win => {
+            } if window_id == our_win || window_id == 0 => {
                 if mouse_btn == SdlMouseButton::Left {
                     self.sdl_handle_left_button(shell, false);
                 }
             }
-            Event::MouseWheel { window_id, y, .. } if window_id == our_win => {
+            Event::MouseWheel { window_id, y, .. } if window_id == our_win || window_id == 0 => {
                 self.scroll_delta += y;
             }
             Event::KeyDown {

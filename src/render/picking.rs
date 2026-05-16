@@ -379,13 +379,13 @@ impl WgpuRenderer {
         }
 
         // shop.glb invisible marker colliders (spawn slots, inventory anchors, …).
-        let env_s = crate::render::shop_glb::shop_env_world_scale(
+        let env_s = crate::render::room_glb::room_env_world_scale(
             cam.viewport_h,
             self.room_gltf_height_scale(),
         );
-        let env_model = crate::render::shop_glb::with_shop_glb_cpu(|opt| {
+        let env_model = crate::render::room_glb::with_shop_glb_cpu(|opt| {
             opt.map(|cpu| {
-                crate::render::shop_glb::shop_env_model_matrix_from_cpu(
+                crate::render::room_glb::room_env_model_matrix_from_cpu(
                     cam.viewport_h,
                     self.room_gltf_height_scale(),
                     cpu,

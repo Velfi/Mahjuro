@@ -177,6 +177,7 @@ impl WgpuRenderer {
         // capture is also skipped on this path — only the final swapchain
         // pass produces a presentable image.
         let is_prepass = output_override.is_some();
+        self.gpu_profiler.begin_submit(!is_prepass);
         let (surface_frame, frame_texture_opt): (
             Option<wgpu::SurfaceTexture>,
             Option<wgpu::Texture>,
@@ -564,6 +565,7 @@ impl WgpuRenderer {
             TextDraw {
                 inst_buf,
                 bind_group,
+                scissor_rect: lbl.clip_rect,
                 _tex: owned_tex,
             }
         };
@@ -1253,6 +1255,9 @@ impl WgpuRenderer {
         // cascade op is queued so the clear isn't paid for on every frame.
         let cascade_active = ops_flags.cascade;
         if cascade_active {
+            let cascade_ts = self
+                .gpu_profiler
+                .pass_writes(crate::render::gpu_profiler::PassSlot::Cascade);
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("cascade-offscreen-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1266,7 +1271,7 @@ impl WgpuRenderer {
                 })],
                 depth_stencil_attachment: None,
                 occlusion_query_set: None,
-                timestamp_writes: None,
+                timestamp_writes: cascade_ts,
                 multiview_mask: None,
             });
             pass.set_pipeline(&self.shooting_star_cascade_pipeline);
@@ -1279,7 +1284,7 @@ impl WgpuRenderer {
             #[cfg(debug_assertions)]
             let split_main_for_profile = self.gpu_profiler.is_sampling() && ops_flags.needs_table;
             #[cfg(not(debug_assertions))]
-            let split_main_for_profile = false;
+            let split_main_for_profile = self.gpu_profiler.is_sampling() && ops_flags.needs_table;
 
             let mut pass_a_chunks = split_pass_a_chunks(&ops);
             if pass_a_chunks.is_empty() && !ops.is_empty() {
@@ -1482,10 +1487,10 @@ impl WgpuRenderer {
             }
         }
 
-        // Linear HDR bloom source for `shop_glb` — emissive + bright BRDF survive
+        // Linear HDR bloom source for `room_glb` — emissive + bright BRDF survive
         // thresholding (bloom extract still keys off tonemapped `scene_color` elsewhere).
         let glb_room_bloom_linear = bloom_active
-            && frame.room_uses_shop_glb_shader()
+            && frame.uses_room_glb_shader()
             && (ops_flags.shop_env || ops_flags.hallway_env || ops_flags.archive_env);
         if glb_room_bloom_linear {
             if ops_flags.shop_env
@@ -1494,6 +1499,9 @@ impl WgpuRenderer {
             {
                 self.write_shop_environment_uniforms(frame, &camera, true);
                 {
+                    let room_bloom_ts = self
+                        .gpu_profiler
+                        .pass_writes(crate::render::gpu_profiler::PassSlot::RoomBloom);
                     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("shop-linear-bloom-pass"),
                         color_attachments: &[
@@ -1525,7 +1533,7 @@ impl WgpuRenderer {
                             stencil_ops: None,
                         }),
                         occlusion_query_set: None,
-                        timestamp_writes: None,
+                        timestamp_writes: room_bloom_ts,
                         multiview_mask: None,
                     });
                     self.draw_shop_environment_meshes(&mut pass, frame, true);
@@ -1538,6 +1546,9 @@ impl WgpuRenderer {
             {
                 self.write_hallway_environment_uniforms(frame, &camera, true);
                 {
+                    let room_bloom_ts = self
+                        .gpu_profiler
+                        .pass_writes(crate::render::gpu_profiler::PassSlot::RoomBloom);
                     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("hallway-linear-bloom-pass"),
                         color_attachments: &[
@@ -1569,7 +1580,7 @@ impl WgpuRenderer {
                             stencil_ops: None,
                         }),
                         occlusion_query_set: None,
-                        timestamp_writes: None,
+                        timestamp_writes: room_bloom_ts,
                         multiview_mask: None,
                     });
                     self.draw_hallway_environment_meshes(&mut pass, frame, true);
@@ -1582,6 +1593,9 @@ impl WgpuRenderer {
             {
                 self.write_archive_environment_uniforms(frame, &camera, true);
                 {
+                    let room_bloom_ts = self
+                        .gpu_profiler
+                        .pass_writes(crate::render::gpu_profiler::PassSlot::RoomBloom);
                     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("archive-linear-bloom-pass"),
                         color_attachments: &[
@@ -1613,7 +1627,7 @@ impl WgpuRenderer {
                             stencil_ops: None,
                         }),
                         occlusion_query_set: None,
-                        timestamp_writes: None,
+                        timestamp_writes: room_bloom_ts,
                         multiview_mask: None,
                     });
                     self.draw_archive_environment_meshes(&mut pass, frame, true);
@@ -1628,39 +1642,41 @@ impl WgpuRenderer {
         // clear-only pass + redundant composite when there's no room
         // (loading frames, scenes that pull in `glb_room_bloom_linear`
         // before the GLB has parsed, etc.).
-        let room_gi_aabb: Option<(glam::Vec3, glam::Vec3)> = if glb_room_bloom_linear && !is_prepass
+        let room_gi_aabb: Option<(glam::Vec3, glam::Vec3)> = if glb_room_bloom_linear
+            && !is_prepass
+            && effects_quality >= crate::persistence::EffectsQuality::Medium
         {
             if ops_flags.shop_env {
-                crate::render::shop_glb::with_shop_glb_cpu(|cpu| {
+                crate::render::room_glb::with_shop_glb_cpu(|cpu| {
                     cpu.and_then(|c| {
-                        let corners = crate::render::shop_glb::shop_world_bounds_corners_centered(
+                        let corners = crate::render::room_glb::room_world_bounds_corners_centered(
                             camera.h,
                             self.room_gltf_height_scale,
                             c,
                         );
-                        crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
+                        crate::render::room_glb::room_probe_world_aabb(&corners, 0.035)
                     })
                 })
             } else if ops_flags.hallway_env {
                 crate::render::hallway_glb::with_hallway_glb_cpu(|cpu| {
                     cpu.and_then(|c| {
-                        let corners = crate::render::shop_glb::shop_world_bounds_corners_centered(
+                        let corners = crate::render::room_glb::room_world_bounds_corners_centered(
                             camera.h,
                             self.room_gltf_height_scale,
                             c,
                         );
-                        crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
+                        crate::render::room_glb::room_probe_world_aabb(&corners, 0.035)
                     })
                 })
             } else if ops_flags.archive_env {
                 crate::render::archive_glb::with_archive_glb_cpu(|cpu| {
                     cpu.and_then(|c| {
-                        let corners = crate::render::shop_glb::shop_world_bounds_corners_centered(
+                        let corners = crate::render::room_glb::room_world_bounds_corners_centered(
                             camera.h,
                             self.room_gltf_height_scale,
                             c,
                         );
-                        crate::render::shop_glb::room_probe_world_aabb(&corners, 0.035)
+                        crate::render::room_glb::room_probe_world_aabb(&corners, 0.035)
                     })
                 })
             } else {
@@ -1671,14 +1687,103 @@ impl WgpuRenderer {
         };
         let gi_runs_this_frame = room_gi_aabb.is_some();
 
+        let gi_room = if gi_runs_this_frame {
+            crate::render::room_gi_bake::RoomGiRoom::from_ops(
+                ops_flags.shop_env,
+                ops_flags.hallway_env,
+                ops_flags.archive_env,
+            )
+        } else {
+            None
+        };
+        let mut gi_clear_gpu_probes = !gi_runs_this_frame && self.probe_gi_had_room;
+        let mut gi_baked_upload: Option<(
+            crate::render::room_gi_bake::RoomGiRoom,
+            std::sync::Arc<[u8]>,
+        )> = None;
+
+        // Quality-dependent GI tuning: Medium cuts dir samples and march steps to ~1/3 of
+        // High and doubles the amortization interval, for roughly 6× cheaper compute.
+        let gi_is_high = effects_quality >= crate::persistence::EffectsQuality::High;
+        let gi_dir_samples = if gi_is_high {
+            crate::render::room_glb::ROOM_EMISSIVE_PROBE_DIR_SAMPLES
+        } else {
+            8
+        };
+        let gi_march_steps = if gi_is_high {
+            crate::render::room_glb::ROOM_EMISSIVE_PROBE_MARCH_STEPS
+        } else {
+            6
+        };
+        let gi_update_interval = if gi_is_high {
+            crate::render::room_glb::ROOM_EMISSIVE_PROBE_UPDATE_INTERVAL
+        } else {
+            4
+        };
+
+        let gw = self.size.width.max(1) as f32;
+        let gh = self.size.height.max(1) as f32;
+        let use_baked_probes = if gi_runs_this_frame && !frame.room_gi_dynamic {
+            if let (Some(room), Some((mn, mx))) = (gi_room, room_gi_aabb) {
+                if let Some(bake) = crate::render::room_gi_bake::cached_room_gi_bake(room) {
+                    if bake.aabb_matches(mn, mx) {
+                        if self.probe_gi_gpu_room != Some(room) {
+                            gi_baked_upload =
+                                Some((room, std::sync::Arc::clone(&bake.probe_sh_bytes)));
+                        }
+                        true
+                    } else {
+                        gi_clear_gpu_probes = true;
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            if gi_runs_this_frame
+                && frame.room_gi_dynamic
+                && self.probe_gi_gpu_room.is_some()
+            {
+                gi_clear_gpu_probes = true;
+            }
+            false
+        };
+        if gi_clear_gpu_probes {
+            self.probe_gi_gpu_room = None;
+        }
+        if let Some((room, bytes)) = gi_baked_upload {
+            self.queue
+                .write_buffer(&self.probe_sh_buffer, 0, &bytes);
+            self.probe_gi_gpu_room = Some(room);
+        }
+        let mut gi_update_probes = if use_baked_probes {
+            self.probe_gi_had_room = true;
+            false
+        } else {
+            crate::render::room_glb::probe_gi_should_update_probes(
+                &mut self.probe_gi_tick,
+                &mut self.probe_gi_last_view_proj,
+                &mut self.probe_gi_last_size,
+                &mut self.probe_gi_had_room,
+                &camera.view_proj_arr,
+                (gw as u32, gh as u32),
+                gi_runs_this_frame,
+                gi_update_interval,
+            )
+        };
+        if self.room_gi_capture_pending.is_some() && gi_runs_this_frame {
+            gi_update_probes = true;
+        }
+
         if gi_runs_this_frame {
-            let [nx, ny, nz] = crate::render::shop_glb::ROOM_EMISSIVE_PROBE_GRID;
+            let [nx, ny, nz] = crate::render::room_glb::ROOM_EMISSIVE_PROBE_GRID;
             let probe_count = nx * ny * nz;
-            debug_assert!(probe_count <= crate::render::shop_glb::ROOM_EMISSIVE_PROBE_MAX);
+            debug_assert!(probe_count <= crate::render::room_glb::ROOM_EMISSIVE_PROBE_MAX);
 
             let inv_vp = glam::Mat4::from_cols_array(&camera.view_proj_arr).inverse();
-            let gw = self.size.width.max(1) as f32;
-            let gh = self.size.height.max(1) as f32;
 
             let (mn, mx) = room_gi_aabb.expect("gi_runs_this_frame implies Some");
             let gi = crate::render::wgpu_renderer::ProbeGiFrameUniform {
@@ -1690,16 +1795,11 @@ impl WgpuRenderer {
                 screen_march: [
                     gw,
                     gh,
-                    crate::render::shop_glb::ROOM_EMISSIVE_PROBE_MARCH_WORLD,
-                    crate::render::shop_glb::SHOP_ROOM_EMISSIVE_GI_STRENGTH,
+                    crate::render::room_glb::ROOM_EMISSIVE_PROBE_MARCH_WORLD,
+                    crate::render::room_glb::SHOP_ROOM_EMISSIVE_GI_STRENGTH,
                 ],
                 cam_pos: [camera.cam_pos.x, camera.cam_pos.y, camera.cam_pos.z, 1.0],
-                sample_params: [
-                    crate::render::shop_glb::ROOM_EMISSIVE_PROBE_DIR_SAMPLES,
-                    crate::render::shop_glb::ROOM_EMISSIVE_PROBE_MARCH_STEPS,
-                    0,
-                    0,
-                ],
+                sample_params: [gi_dir_samples, gi_march_steps, 0, 0],
             };
             self.queue.write_buffer(
                 &self.probe_gi_frame_uniform_buffer,
@@ -1708,17 +1808,38 @@ impl WgpuRenderer {
             );
 
             if probe_count > 0 {
-                {
+                if gi_update_probes {
+                    let gi_compute_ts = self.gpu_profiler.compute_pass_writes(
+                        crate::render::gpu_profiler::PassSlot::GiCompute,
+                    );
                     let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                         label: Some("emissive-probe-update-pass"),
-                        timestamp_writes: None,
+                        timestamp_writes: gi_compute_ts,
                     });
                     cpass.set_pipeline(&self.emissive_probe_update_pipeline);
                     cpass.set_bind_group(0, &self.emissive_probe_update_bind_group, &[]);
                     let wg = probe_count.div_ceil(64);
                     cpass.dispatch_workgroups(wg, 1, 1);
+                    if let Some(room) = self.room_gi_capture_pending {
+                        if gi_room == Some(room) {
+                            let (mn, mx) = room_gi_aabb.expect("gi frame");
+                            self.room_gi_capture_meta = Some(
+                                crate::render::room_gi_bake::probe_sh_meta(
+                                    room,
+                                    mn,
+                                    mx,
+                                    camera.view_proj_arr,
+                                    gw as u32,
+                                    gh as u32,
+                                ),
+                            );
+                        }
+                    }
                 }
                 {
+                    let gi_apply_ts = self
+                        .gpu_profiler
+                        .pass_writes(crate::render::gpu_profiler::PassSlot::GiApply);
                     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("emissive-probe-apply-pass"),
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1732,7 +1853,7 @@ impl WgpuRenderer {
                         })],
                         depth_stencil_attachment: None,
                         occlusion_query_set: None,
-                        timestamp_writes: None,
+                        timestamp_writes: gi_apply_ts,
                         multiview_mask: None,
                     });
                     pass.set_pipeline(&self.emissive_probe_apply_pipeline);
@@ -1772,6 +1893,9 @@ impl WgpuRenderer {
             // little softer than the previous exact copy, but SSR
             // already integrates over reflection rays so the loss is
             // imperceptible. Bandwidth: ~16 MB → ~4 MB at 1080p.
+            let ssr_history_ts = self
+                .gpu_profiler
+                .pass_writes(crate::render::gpu_profiler::PassSlot::SsrHistory);
             let mut ds_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene-color-downsample-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1784,7 +1908,7 @@ impl WgpuRenderer {
                     },
                 })],
                 depth_stencil_attachment: None,
-                timestamp_writes: None,
+                timestamp_writes: ssr_history_ts,
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
@@ -1891,6 +2015,9 @@ impl WgpuRenderer {
 
         if bloom_active {
             {
+                let bloom_extract_ts = self.gpu_profiler.pass_writes(
+                    crate::render::gpu_profiler::PassSlot::BloomExtract,
+                );
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("bloom-extract-pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1904,7 +2031,7 @@ impl WgpuRenderer {
                     })],
                     depth_stencil_attachment: None,
                     occlusion_query_set: None,
-                    timestamp_writes: None,
+                    timestamp_writes: bloom_extract_ts,
                     multiview_mask: None,
                 });
                 pass.set_pipeline(&self.bloom_extract_pipeline);
@@ -1912,6 +2039,9 @@ impl WgpuRenderer {
                 pass.draw(0..3, 0..1);
             }
             {
+                let bloom_blur_h_ts = self.gpu_profiler.pass_writes(
+                    crate::render::gpu_profiler::PassSlot::BloomBlurH,
+                );
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("bloom-blur-h-pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1925,7 +2055,7 @@ impl WgpuRenderer {
                     })],
                     depth_stencil_attachment: None,
                     occlusion_query_set: None,
-                    timestamp_writes: None,
+                    timestamp_writes: bloom_blur_h_ts,
                     multiview_mask: None,
                 });
                 pass.set_pipeline(&self.bloom_blur_pipeline);
@@ -1933,6 +2063,9 @@ impl WgpuRenderer {
                 pass.draw(0..3, 0..1);
             }
             {
+                let bloom_blur_v_ts = self.gpu_profiler.pass_writes(
+                    crate::render::gpu_profiler::PassSlot::BloomBlurV,
+                );
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("bloom-blur-v-pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1946,7 +2079,7 @@ impl WgpuRenderer {
                     })],
                     depth_stencil_attachment: None,
                     occlusion_query_set: None,
-                    timestamp_writes: None,
+                    timestamp_writes: bloom_blur_v_ts,
                     multiview_mask: None,
                 });
                 pass.set_pipeline(&self.bloom_blur_pipeline);
@@ -1967,6 +2100,9 @@ impl WgpuRenderer {
         // copy.
         let skip_scene_composite = !bloom_active && fisheye_strength == 0.0 && !gi_runs_this_frame;
         if !skip_scene_composite {
+            let scene_composite_ts = self.gpu_profiler.pass_writes(
+                crate::render::gpu_profiler::PassSlot::SceneComposite,
+            );
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene-composite-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1980,7 +2116,7 @@ impl WgpuRenderer {
                 })],
                 depth_stencil_attachment: None,
                 occlusion_query_set: None,
-                timestamp_writes: None,
+                timestamp_writes: scene_composite_ts,
                 multiview_mask: None,
             });
             pass.set_pipeline(&self.bloom_composite_pipeline);
@@ -1989,6 +2125,9 @@ impl WgpuRenderer {
         }
 
         if gi_runs_this_frame {
+            let gi_composite_ts = self.gpu_profiler.pass_writes(
+                crate::render::gpu_profiler::PassSlot::GiComposite,
+            );
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("emissive-gi-composite-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -2002,7 +2141,7 @@ impl WgpuRenderer {
                 })],
                 depth_stencil_attachment: None,
                 occlusion_query_set: None,
-                timestamp_writes: None,
+                timestamp_writes: gi_composite_ts,
                 multiview_mask: None,
             });
             pass.set_pipeline(&self.emissive_gi_composite_pipeline);
@@ -2042,6 +2181,9 @@ impl WgpuRenderer {
             &self.tonemap_pipeline
         };
         {
+            let tonemap_ts = self
+                .gpu_profiler
+                .pass_writes(crate::render::gpu_profiler::PassSlot::Tonemap);
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("tonemap-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -2055,7 +2197,7 @@ impl WgpuRenderer {
                 })],
                 depth_stencil_attachment: None,
                 occlusion_query_set: None,
-                timestamp_writes: None,
+                timestamp_writes: tonemap_ts,
                 multiview_mask: None,
             });
             pass.set_pipeline(tonemap_pipe);
@@ -2078,6 +2220,9 @@ impl WgpuRenderer {
             .iter()
             .any(|o| matches!(o, RenderOp::TextDraw(_) | RenderOp::PromptIconQuad(_)))
         {
+            let overlay_ts = self
+                .gpu_profiler
+                .pass_writes(crate::render::gpu_profiler::PassSlot::Overlay);
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("text-overlay-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -2098,7 +2243,7 @@ impl WgpuRenderer {
                     stencil_ops: None,
                 }),
                 occlusion_query_set: None,
-                timestamp_writes: None,
+                timestamp_writes: overlay_ts,
                 multiview_mask: None,
             });
             for op in &ops {
@@ -2143,6 +2288,10 @@ impl WgpuRenderer {
             }
             _ => None,
         };
+        let room_gi_capture_staging = self
+            .room_gi_capture_meta
+            .take()
+            .map(|meta| self.encode_room_gi_capture_copy(&mut encoder, meta));
 
         self.queue.submit(std::iter::once(encoder.finish()));
 
@@ -2150,6 +2299,15 @@ impl WgpuRenderer {
             match self.finalize_screenshot(staging, &path) {
                 Ok(()) => log::info!("screenshot saved → {}", path.display()),
                 Err(e) => log::error!("screenshot finalize failed: {e:?}"),
+            }
+        }
+        if let Some(staging) = room_gi_capture_staging {
+            match self.finalize_room_gi_capture(staging) {
+                Ok(bake) => {
+                    self.room_gi_captured = Some(bake);
+                    self.room_gi_capture_pending = None;
+                }
+                Err(e) => log::error!("room GI capture readback failed: {e:?}"),
             }
         }
 

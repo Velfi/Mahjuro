@@ -681,11 +681,11 @@ pub struct SsrGlobals {
     pub params: [f32; 4],
     /// x = felt procedural LOD (`EffectsQuality::felt_shader_lod`): 0 =
     /// minimal (effects Off), 1 = Low, 2 = Medium/High full detail.
-    /// y = ACES HDR path (`shop_glb` / `tile_3d` match) when **1** (shop, gameplay, collection, …).
+    /// y = ACES HDR path (`room_glb` / `tile_3d` match) when **1** (shop, gameplay, collection, …).
     /// z = linear exposure before ACES (shop env tuning).
     /// w = hemispheric ambient scale (shop env tuning).
     pub felt: [f32; 4],
-    /// x = `1/shop_env_world_scale` for embedded glTF punctual attenuation in `lit_mesh`
+    /// x = `1/room_env_world_scale` for embedded glTF punctual attenuation in `lit_mesh`
     /// (document-space distance; **0** = world-space / gameplay).
     /// y = shop vitrine material tuning (1 = shop + embedded punctual only); zw unused.
     pub shop_punctual: [f32; 4],

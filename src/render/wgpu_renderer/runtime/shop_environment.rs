@@ -28,7 +28,7 @@ impl WgpuRenderer {
                     continue;
                 }
                 if last_key != Some(prim.pipeline_key) {
-                    let pipe = if frame.room_uses_shop_glb_shader() {
+                    let pipe = if frame.uses_room_glb_shader() {
                         if room_hdr_mrt_emissive {
                             self.shop_env_pipeline_mrt(prim.pipeline_key)
                         } else {
@@ -54,7 +54,7 @@ impl WgpuRenderer {
         }
     }
 
-    /// Draw [`shop.glb`] environment primitives through `shop_glb.wgsl` / `tile_3d.wgsl`
+    /// Draw [`shop.glb`] environment primitives through `room_glb.wgsl` / `tile_3d.wgsl`
     /// (same routing as [`RenderOp::ShopEnvironment`]).
     pub(super) fn draw_shop_environment_meshes(
         &self,
@@ -127,7 +127,7 @@ impl WgpuRenderer {
         gpu: &ShopEnvironmentGpu,
     ) {
         let s =
-            crate::render::shop_glb::shop_env_world_scale(camera.h, self.room_gltf_height_scale);
+            crate::render::room_glb::room_env_world_scale(camera.h, self.room_gltf_height_scale);
         let inv_doc_scale = if embedded_gltf_punctual || frame.shop_inspect_lit_mesh_hdr {
             1.0 / s.max(1e-6)
         } else {
@@ -135,8 +135,8 @@ impl WgpuRenderer {
         };
         let lit_base = self.tile_hdr_tonemap(frame);
         let mut hdr_tonemap = if frame.shop_inspect_lit_mesh_hdr {
-            let linear_hdr = lit_base[1] * crate::render::shop_glb::SHOP_INSPECT_ENV_VS_LIT_LINEAR;
-            let ambient = lit_base[2] * crate::render::shop_glb::SHOP_INSPECT_ENV_VS_LIT_AMBIENT;
+            let linear_hdr = lit_base[1] * crate::render::room_glb::SHOP_INSPECT_ENV_VS_LIT_LINEAR;
+            let ambient = lit_base[2] * crate::render::room_glb::SHOP_INSPECT_ENV_VS_LIT_AMBIENT;
             [1.0, linear_hdr, ambient, 0.0]
         } else {
             lit_base
@@ -146,7 +146,7 @@ impl WgpuRenderer {
         }
         let (exposure, ambient_x) = if embedded_gltf_punctual {
             let mut e = self.shop_env_linear_exposure
-                * crate::render::shop_glb::SHOP_ENV_LINEAR_EXPOSURE_BASE;
+                * crate::render::room_glb::SHOP_ENV_LINEAR_EXPOSURE_BASE;
             let mut a = self.shop_env_ambient_scale;
             if hallway_env {
                 e *= crate::render::hallway_glb::HALLWAY_ENV_LINEAR_EXPOSURE_MUL;
@@ -159,7 +159,7 @@ impl WgpuRenderer {
             (e, a)
         } else if frame.shop_inspect_lit_mesh_hdr {
             (
-                lit_base[1] * crate::render::shop_glb::SHOP_INSPECT_STOREROOM_GLB_TILE_SEED_MUL,
+                lit_base[1] * crate::render::room_glb::SHOP_INSPECT_STOREROOM_GLB_TILE_SEED_MUL,
                 hdr_tonemap[2],
             )
         } else {
@@ -195,10 +195,10 @@ impl WgpuRenderer {
             return;
         };
         let s =
-            crate::render::shop_glb::shop_env_world_scale(camera.h, self.room_gltf_height_scale);
-        let model = crate::render::shop_glb::with_shop_glb_cpu(|opt| {
+            crate::render::room_glb::room_env_world_scale(camera.h, self.room_gltf_height_scale);
+        let model = crate::render::room_glb::with_shop_glb_cpu(|opt| {
             opt.map(|cpu| {
-                crate::render::shop_glb::shop_env_model_matrix_from_cpu(
+                crate::render::room_glb::room_env_model_matrix_from_cpu(
                     camera.h,
                     self.room_gltf_height_scale,
                     cpu,
@@ -228,10 +228,10 @@ impl WgpuRenderer {
             return;
         };
         let s =
-            crate::render::shop_glb::shop_env_world_scale(camera.h, self.room_gltf_height_scale);
+            crate::render::room_glb::room_env_world_scale(camera.h, self.room_gltf_height_scale);
         let model = crate::render::hallway_glb::with_hallway_glb_cpu(|opt| {
             opt.map(|cpu| {
-                crate::render::shop_glb::shop_env_model_matrix_from_cpu(
+                crate::render::room_glb::room_env_model_matrix_from_cpu(
                     camera.h,
                     self.room_gltf_height_scale,
                     cpu,
@@ -330,10 +330,10 @@ impl WgpuRenderer {
             return;
         };
         let s =
-            crate::render::shop_glb::shop_env_world_scale(camera.h, self.room_gltf_height_scale);
+            crate::render::room_glb::room_env_world_scale(camera.h, self.room_gltf_height_scale);
         let model = crate::render::archive_glb::with_archive_glb_cpu(|opt| {
             opt.map(|cpu| {
-                crate::render::shop_glb::shop_env_model_matrix_from_cpu(
+                crate::render::room_glb::room_env_model_matrix_from_cpu(
                     camera.h,
                     self.room_gltf_height_scale,
                     cpu,

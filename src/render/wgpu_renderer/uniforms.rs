@@ -78,7 +78,7 @@ pub(crate) struct CameraUniform {
     /// xy = atlas origin, zw = scale — maps face UV 0..1 into the showcase decal atlas.
     pub decal_atlas_uv: [f32; 4],
     /// x = use shop-style ACES HDR path (`1`/`0`); y = linear exposure; z = hemispheric ambient scale;
-    /// w = `shop_glb` linear-HDR bloom pre-pass (`1` = output linear `hdr` RGB, skip ACES/γ).
+    /// w = `room_glb` linear-HDR bloom pre-pass (`1` = output linear `hdr` RGB, skip ACES/γ).
     /// Matches `SsrGlobals.felt.yzw` on `lit_mesh` for the same frame (except `w`).
     pub hdr_tonemap: [f32; 4],
 }

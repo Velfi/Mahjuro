@@ -3,7 +3,6 @@
 use crate::core::deck::Wall;
 use crate::core::relic::{RelicId, RelicState};
 use crate::game::engine_state::GameplayCoreState;
-use crate::game::tutorial::TutorialState;
 
 /// Captures enough of [`super::RunState`] to restore hand, wall, counters,
 /// and relic tutorial flags after a discard (+ refill) while no other action ran.
@@ -19,7 +18,6 @@ pub struct DiscardUndoSnapshot {
     relic_counters: std::collections::BTreeMap<RelicId, i32>,
     relics: RelicState,
     relic_activations_len: usize,
-    tutorial: Option<TutorialState>,
 }
 
 impl DiscardUndoSnapshot {
@@ -35,7 +33,6 @@ impl DiscardUndoSnapshot {
             relic_counters: run.relic_counters.clone(),
             relics: run.relics.clone(),
             relic_activations_len: run.relic_activations.len(),
-            tutorial: run.tutorial.clone(),
         }
     }
 }
@@ -54,7 +51,6 @@ impl super::RunState {
         self.times_restocked = snap.times_restocked;
         self.relic_counters = snap.relic_counters;
         self.relics = snap.relics;
-        self.tutorial = snap.tutorial;
         self.relic_activations.truncate(snap.relic_activations_len);
         let hand = snap.hand;
         let selected = snap.selected;

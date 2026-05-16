@@ -393,59 +393,8 @@ impl ShopScene {
                 continue;
             }
 
-            // LB / `[` sells the focused owned relic or consumable. RB keeps
-            // the legacy relic reordering affordance for Mirror Tile setups.
+            // LB / `[` and RB / `]` swap focused owned relics (Mirror Tile order).
             if matches!(a, UiAction::NavigateHudNext | UiAction::NavigateHudPrev) {
-                if matches!(a, UiAction::NavigateHudPrev) {
-                    match self.focus {
-                        Some(ShopFocus::Relic(i)) => {
-                            let n_for_sale = self.items.len();
-                            if i >= n_for_sale {
-                                let owned_idx = i - n_for_sale;
-                                self.apply_sell_action(
-                                    ShopAction::SellRelic(owned_idx),
-                                    ctx.run,
-                                    ctx.bus,
-                                    ctx.cursor_pos,
-                                    ctx.overlay_request,
-                                    (w, h),
-                                );
-                            }
-                            continue;
-                        }
-                        Some(ShopFocus::Ribbon(i)) => {
-                            if let Some(inv_idx) =
-                                owned_ribbon_inventory_index(i, &self.zodiac_items, &shop)
-                            {
-                                self.apply_sell_action(
-                                    ShopAction::SellConsumable(inv_idx),
-                                    ctx.run,
-                                    ctx.bus,
-                                    ctx.cursor_pos,
-                                    ctx.overlay_request,
-                                    (w, h),
-                                );
-                            }
-                            continue;
-                        }
-                        Some(ShopFocus::Talisman(i)) => {
-                            if let Some(inv_idx) =
-                                owned_talisman_inventory_index(i, &self.talisman_items, &shop)
-                            {
-                                self.apply_sell_action(
-                                    ShopAction::SellConsumable(inv_idx),
-                                    ctx.run,
-                                    ctx.bus,
-                                    ctx.cursor_pos,
-                                    ctx.overlay_request,
-                                    (w, h),
-                                );
-                            }
-                            continue;
-                        }
-                        _ => {}
-                    }
-                }
                 if let Some(ShopFocus::Relic(i)) = self.focus {
                     let n_for_sale = self.items.len();
                     if i >= n_for_sale {

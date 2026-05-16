@@ -182,53 +182,6 @@ impl App {
                 GameEvent::UiSound(id) => {
                     self.audio.play_sfx(id);
                 }
-                GameEvent::TutorialMilestone(milestone) => {
-                    use crate::game::tutorial::TutorialMilestone;
-                    let (title, body) = match milestone {
-                        TutorialMilestone::FirstPair => (
-                            "First Pair!",
-                            "Two matching tiles \u{2014} the foundation of every hand.",
-                        ),
-                        TutorialMilestone::FirstTriplet => (
-                            "First Triplet!",
-                            "Three of a kind scores big chips. Keep building!",
-                        ),
-                        TutorialMilestone::FirstSequence => (
-                            "First Sequence!",
-                            "Three in a row, same suit. Smooth and versatile.",
-                        ),
-                        TutorialMilestone::FirstDiscard => {
-                            ("First Discard!", "Out with the old, in with the new.")
-                        }
-                        TutorialMilestone::FirstFullHand => (
-                            "First Full Hand!",
-                            "4 melds + 1 pair \u{2014} the ultimate yaku. Huge multiplier!",
-                        ),
-                        TutorialMilestone::FirstYakuhai => (
-                            "First Yakuhai!",
-                            "A wind or dragon triplet fired a yaku bonus \u{2014} honor tiles reward bigger mult than suit melds.",
-                        ),
-                        TutorialMilestone::FirstShopBuy => (
-                            "First Relic!",
-                            "Relics power up your scoring for the rest of the run.",
-                        ),
-                        TutorialMilestone::FirstBossCleared => (
-                            "Boss Defeated!",
-                            "You cleared your first boss blind. Antes rise from here \u{2014} each one introduces tougher bosses and bigger targets.",
-                        ),
-                    };
-                    let win_size = self.last_drawable_px;
-                    let ww = win_size.width as f32;
-                    let wh = win_size.height as f32;
-                    let modal = crate::ui::modal::Modal::new(
-                        title,
-                        body,
-                        crate::ui::modal::ModalTheme::Success,
-                    )
-                    .with_fireworks(ww * 0.5, wh * 0.8, ww * 0.5, 3);
-                    self.modals.push(modal);
-                    self.audio.play_sfx(audio::SfxId::ScoreFinal);
-                }
                 GameEvent::PlayRelicStinger(rid) => {
                     self.audio.play_relic_trigger(rid);
                 }

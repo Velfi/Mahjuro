@@ -96,7 +96,6 @@ mod tests {
             finished_zodiac_celebration: None,
             pending_shop_focus_snap_after_pack_celebration: false,
             relic_counters: BTreeMap::new(),
-            tutorial: None,
             onboarding: None,
             relic_activations: Vec::new(),
         }
@@ -454,6 +453,25 @@ mod tests {
         assert_eq!(run.selected_count(), 0);
         assert_eq!(run.selected.len(), run.hand.len());
         assert_eq!(run.discards_remaining, STARTING_DISCARDS);
+    }
+
+    #[test]
+    fn apply_blind_feeds_hungry_ghost_the_next_relic() {
+        use crate::core::relic::relic_sell_price;
+
+        let mut run = test_run();
+        run.relics.active.push(RelicId::HungryGhost);
+        run.relics.active.push(RelicId::PairPower);
+
+        run.apply_blind(BlindKind::Small, None);
+
+        assert_eq!(run.relics.active, vec![RelicId::HungryGhost]);
+        let expected = relic_sell_price(RelicId::PairPower) as i32 * 10;
+        assert_eq!(
+            run.relic_counters.get(&RelicId::HungryGhost),
+            Some(&expected)
+        );
+        assert!(run.relic_activations.contains(&RelicId::HungryGhost));
     }
 
     #[test]
