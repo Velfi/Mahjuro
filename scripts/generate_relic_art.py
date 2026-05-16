@@ -354,13 +354,11 @@ RELICS = [
     (
         "chain_reaction",
         "Chain Reaction",
-        "Two short rows of mahjong tiles laid face-up on an emerald felt "
-        "table, one row behind the other. The back row glows softly as if "
-        "just scored, with a single arc of warm light leaping forward "
-        "from its last tile to ignite the first tile of the front row, "
-        "kindling that one in turn. Faint gold sparks trail along the arc. "
-        "A few stray face-down wall tiles lie blurred in the background.",
-        "Ivory tile faces, deep emerald felt, warm gold arc of light, soft amber afterglow on the back row, drifting gold sparks.",
+        "A flat top-down chain-reaction diagram on emerald felt: one scored "
+        "row of face-up tiles triggers branching energy paths, blast rings, "
+        "dotted trajectories, and tile-fragment sparks. Crisp graphic "
+        "schematic, everything sharp and in focus.",
+        "Ivory tile faces, deep emerald felt, amber-gold energy arcs, blast rings, dotted paths, bright sparks.",
     ),
     (
         "multiplier_master",
