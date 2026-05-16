@@ -208,7 +208,9 @@ impl TutorialOverlay {
                 color::BRASS[1],
                 color::BRASS[2],
                 0.4 * alpha,
-            ], user: 0});
+            ],
+            user: 0,
+        });
 
         // Semi-transparent dark panel.
         quads.push(GpuInstance {
@@ -218,7 +220,9 @@ impl TutorialOverlay {
                 color::WALNUT_DEEP[1],
                 color::WALNUT_DEEP[2],
                 0.88 * alpha,
-            ], user: 0});
+            ],
+            user: 0,
+        });
 
         // ── Text ───────────────────────────────────────────────────────
         // Flavor text (smaller heading, gold).

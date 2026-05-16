@@ -6,6 +6,7 @@ use crate::audio;
 use crate::game::cascade::CascadeTuning;
 use crate::game::tonemap_tuning::{TONEMAP_SLIDER_META, TonemapTuning};
 use crate::render::draw_cmd::CameraParams;
+use crate::render::hallway_glb::HallwayDistortionDebugSnapshot;
 use crate::render::theme::{color, metrics};
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::ui::input::UiAction;
@@ -100,7 +101,9 @@ impl DebugVisibilityOverlay {
         // Dim full-screen backdrop.
         instances.push(GpuInstance {
             rect: [0.0, 0.0, window_w, window_h],
-            color: color::alpha(color::LACQUER, 0.7), user: 0});
+            color: color::alpha(color::LACQUER, 0.7),
+            user: 0,
+        });
 
         let panel_w = (440.0 * scale).min(window_w * 0.90);
         let row_h = (44.0 * scale).max(28.0);
@@ -124,11 +127,15 @@ impl DebugVisibilityOverlay {
                 panel_w + border * 2.0,
                 panel_h + border * 2.0,
             ],
-            color: color::alpha(color::TWILIGHT_GLOW, 0.85), user: 0});
+            color: color::alpha(color::TWILIGHT_GLOW, 0.85),
+            user: 0,
+        });
         // Panel.
         instances.push(GpuInstance {
             rect: [panel_x, panel_y, panel_w, panel_h],
-            color: color::alpha(color::TWILIGHT_INK, 0.95), user: 0});
+            color: color::alpha(color::TWILIGHT_INK, 0.95),
+            user: 0,
+        });
 
         // Title.
         labels.push(TextLabel {
@@ -153,17 +160,23 @@ impl DebugVisibilityOverlay {
             };
             instances.push(GpuInstance {
                 rect: [panel_x + 4.0, row_y, panel_w - 8.0, row_h],
-                color: bg, user: 0});
+                color: bg,
+                user: 0,
+            });
 
             // Checkbox border.
             let cb_x = panel_x + row_pad;
             let cb_y = row_y + (row_h - check_size) * 0.5;
             instances.push(GpuInstance {
                 rect: [cb_x - 2.0, cb_y - 2.0, check_size + 4.0, check_size + 4.0],
-                color: color::alpha(color::STONE, 0.9), user: 0});
+                color: color::alpha(color::STONE, 0.9),
+                user: 0,
+            });
             instances.push(GpuInstance {
                 rect: [cb_x, cb_y, check_size, check_size],
-                color: color::TWILIGHT_INK, user: 0});
+                color: color::TWILIGHT_INK,
+                user: 0,
+            });
             // Filled square when checked.
             if checked {
                 let pad = check_size * 0.18;
@@ -174,7 +187,9 @@ impl DebugVisibilityOverlay {
                         check_size - pad * 2.0,
                         check_size - pad * 2.0,
                     ],
-                    color: color::GOLD, user: 0});
+                    color: color::GOLD,
+                    user: 0,
+                });
             }
 
             // Label.
@@ -290,7 +305,9 @@ impl TuningOverlay {
         // Dim overlay background.
         instances.push(GpuInstance {
             rect: [0.0, 0.0, window_w, window_h],
-            color: color::alpha(color::LACQUER, 0.7), user: 0});
+            color: color::alpha(color::LACQUER, 0.7),
+            user: 0,
+        });
 
         // Panel dimensions.
         let panel_w = (520.0 * scale).min(window_w * 0.90);
@@ -311,7 +328,9 @@ impl TuningOverlay {
         // Panel background.
         instances.push(GpuInstance {
             rect: [panel_x, panel_y, panel_w, panel_h],
-            color: color::alpha(color::TWILIGHT_INK, 0.95), user: 0});
+            color: color::alpha(color::TWILIGHT_INK, 0.95),
+            user: 0,
+        });
         // Panel border.
         let border = 3.0;
         instances.push(GpuInstance {
@@ -321,11 +340,15 @@ impl TuningOverlay {
                 panel_w + border * 2.0,
                 panel_h + border * 2.0,
             ],
-            color: color::alpha(color::TWILIGHT_GLOW, 0.8), user: 0});
+            color: color::alpha(color::TWILIGHT_GLOW, 0.8),
+            user: 0,
+        });
         // Re-draw panel on top of border.
         instances.push(GpuInstance {
             rect: [panel_x, panel_y, panel_w, panel_h],
-            color: color::alpha(color::TWILIGHT_INK, 0.95), user: 0});
+            color: color::alpha(color::TWILIGHT_INK, 0.95),
+            user: 0,
+        });
 
         // Title.
         labels.push(TextLabel {
@@ -346,7 +369,9 @@ impl TuningOverlay {
                 panel_w - diag_pad * 2.0,
                 diagram_h,
             ],
-            color: color::alpha(color::TWILIGHT_INK, 0.9), user: 0});
+            color: color::alpha(color::TWILIGHT_INK, 0.9),
+            user: 0,
+        });
         // Draw timeline segments proportional to actual values.
         let total_ms =
             self.tuning.base_hold_ms + self.tuning.step_hold_ms * 2 + self.tuning.total_hold_ms;
@@ -372,7 +397,9 @@ impl TuningOverlay {
             let seg_w = bar_w * (ms as f32 / total_ms as f32);
             instances.push(GpuInstance {
                 rect: [seg_x, bar_y, seg_w, bar_h],
-                color: colors[i], user: 0});
+                color: colors[i],
+                user: 0,
+            });
             // Segment label (centered in segment).
             if seg_w > 20.0 {
                 labels.push(TextLabel {
@@ -480,7 +507,9 @@ impl TuningOverlay {
             };
             instances.push(GpuInstance {
                 rect: [panel_x + 4.0, row_y, panel_w - 8.0, row_h + desc_h],
-                color: bg, user: 0});
+                color: bg,
+                user: 0,
+            });
 
             // Label.
             let tc = if is_focused {
@@ -514,7 +543,9 @@ impl TuningOverlay {
             let track_y = row_y + (row_h - track_h) * 0.5;
             instances.push(GpuInstance {
                 rect: [track_x, track_y, slider_w, track_h],
-                color: color::TWILIGHT_INK, user: 0});
+                color: color::TWILIGHT_INK,
+                user: 0,
+            });
 
             // Slider fill.
             let t = (*value as f32 - TUNING_MIN_MS as f32) / (TUNING_MAX_MS - TUNING_MIN_MS) as f32;
@@ -526,7 +557,9 @@ impl TuningOverlay {
             };
             instances.push(GpuInstance {
                 rect: [track_x, track_y, fill_w, track_h],
-                color: fill_color, user: 0});
+                color: fill_color,
+                user: 0,
+            });
 
             // Knob.
             let knob_size = track_h * 2.5;
@@ -538,7 +571,9 @@ impl TuningOverlay {
                     color::PARCHMENT
                 } else {
                     color::alpha(color::STONE, 0.9)
-                }, user: 0});
+                },
+                user: 0,
+            });
 
             // Value text.
             let value_x = panel_x + label_w + slider_w + 4.0;
@@ -560,7 +595,9 @@ impl TuningOverlay {
         };
         instances.push(GpuInstance {
             rect: [panel_x + 4.0, export_y, panel_w - 8.0, row_h],
-            color: bg, user: 0});
+            color: bg,
+            user: 0,
+        });
         labels.push(TextLabel {
             rect: [panel_x, export_y, panel_w, row_h],
             text: "Export as JSON".into(),
@@ -656,7 +693,9 @@ impl SfxTestOverlay {
         // Dim overlay background.
         instances.push(GpuInstance {
             rect: [0.0, 0.0, window_w, window_h],
-            color: color::alpha(color::LACQUER, 0.7), user: 0});
+            color: color::alpha(color::LACQUER, 0.7),
+            user: 0,
+        });
 
         let ids = audio::all_sfx_ids();
         let row_h = (36.0 * scale).max(24.0);
@@ -680,11 +719,15 @@ impl SfxTestOverlay {
                 panel_w + border * 2.0,
                 panel_h + border * 2.0,
             ],
-            color: color::alpha(color::ANTIQUE, 0.85), user: 0});
+            color: color::alpha(color::ANTIQUE, 0.85),
+            user: 0,
+        });
         // Panel background (theme WALNUT_DEEP — dark walnut).
         instances.push(GpuInstance {
             rect: [panel_x, panel_y, panel_w, panel_h],
-            color: color::alpha(color::TWILIGHT_INK, 0.97), user: 0});
+            color: color::alpha(color::TWILIGHT_INK, 0.97),
+            user: 0,
+        });
 
         // Title.
         labels.push(TextLabel {
@@ -710,7 +753,9 @@ impl SfxTestOverlay {
             };
             instances.push(GpuInstance {
                 rect: [panel_x + 4.0, row_y, panel_w - 8.0, row_h],
-                color: bg, user: 0});
+                color: bg,
+                user: 0,
+            });
 
             let tc = if is_focused {
                 color::TALLOW
@@ -903,11 +948,15 @@ impl CameraDebugOverlay {
                 panel_w + border * 2.0,
                 panel_h + border * 2.0,
             ],
-            color: color::alpha(color::ANTIQUE, 0.85), user: 0});
+            color: color::alpha(color::ANTIQUE, 0.85),
+            user: 0,
+        });
         // Panel background.
         instances.push(GpuInstance {
             rect: [panel_x, panel_y, panel_w, panel_h],
-            color: color::alpha(color::TWILIGHT_INK, 0.97), user: 0});
+            color: color::alpha(color::TWILIGHT_INK, 0.97),
+            user: 0,
+        });
 
         // Title.
         labels.push(TextLabel {
@@ -930,7 +979,9 @@ impl CameraDebugOverlay {
             };
             instances.push(GpuInstance {
                 rect: [panel_x + 4.0, row_y, panel_w - 8.0, row_h],
-                color: bg, user: 0});
+                color: bg,
+                user: 0,
+            });
 
             let tc = if is_focused {
                 color::TALLOW
@@ -1412,10 +1463,14 @@ impl ShopEnvDebugOverlay {
                 layout.panel_w + border * 2.0,
                 panel_h + border * 2.0,
             ],
-            color: color::alpha(color::FELT_LIT, 0.85), user: 0});
+            color: color::alpha(color::FELT_LIT, 0.85),
+            user: 0,
+        });
         instances.push(GpuInstance {
             rect: [layout.panel_x, layout.panel_y, layout.panel_w, panel_h],
-            color: color::alpha(color::TWILIGHT_INK, 0.97), user: 0});
+            color: color::alpha(color::TWILIGHT_INK, 0.97),
+            user: 0,
+        });
 
         labels.push(TextLabel {
             rect: [
@@ -1447,7 +1502,9 @@ impl ShopEnvDebugOverlay {
                     layout.panel_w - 8.0,
                     layout.row_h,
                 ],
-                color: bg, user: 0});
+                color: bg,
+                user: 0,
+            });
 
             let tc = if is_focused {
                 color::PARCHMENT
@@ -1469,7 +1526,9 @@ impl ShopEnvDebugOverlay {
             let (track_x, track_y, tw, th) = layout.slider_track(i);
             instances.push(GpuInstance {
                 rect: [track_x, track_y, tw, th],
-                color: color::TWILIGHT_INK, user: 0});
+                color: color::TWILIGHT_INK,
+                user: 0,
+            });
             let t = ((v - min) / (max - min).max(1e-8)).clamp(0.0, 1.0);
             let fill_w = tw * t;
             let fill_color = if is_focused {
@@ -1479,7 +1538,9 @@ impl ShopEnvDebugOverlay {
             };
             instances.push(GpuInstance {
                 rect: [track_x, track_y, fill_w, th],
-                color: fill_color, user: 0});
+                color: fill_color,
+                user: 0,
+            });
             let knob_size = th * 2.5;
             let knob_x = track_x + fill_w - knob_size * 0.5;
             let knob_y = track_y + (th - knob_size) * 0.5;
@@ -1489,7 +1550,9 @@ impl ShopEnvDebugOverlay {
                     color::PARCHMENT
                 } else {
                     color::alpha(color::STONE, 0.95)
-                }, user: 0});
+                },
+                user: 0,
+            });
 
             let (vx, vy, vw, vh) = layout.value_cell(i);
             let value_text = if self.editing && i == self.cursor {
@@ -1507,7 +1570,9 @@ impl ShopEnvDebugOverlay {
                     color::alpha(color::TWILIGHT_INK, 0.95)
                 } else {
                     color::alpha(color::TWILIGHT_INK, 0.75)
-                }, user: 0});
+                },
+                user: 0,
+            });
             labels.push(TextLabel {
                 rect: [vx + 2.0 * layout.scale, vy, vw - 4.0 * layout.scale, vh],
                 text: value_text,
@@ -1662,10 +1727,14 @@ impl TonemapDebugOverlay {
                 panel_w + border * 2.0,
                 panel_h + border * 2.0,
             ],
-            color: color::alpha(color::ANTIQUE, 0.85), user: 0});
+            color: color::alpha(color::ANTIQUE, 0.85),
+            user: 0,
+        });
         instances.push(GpuInstance {
             rect: [panel_x, panel_y, panel_w, panel_h],
-            color: color::alpha(color::TWILIGHT_INK, 0.92), user: 0});
+            color: color::alpha(color::TWILIGHT_INK, 0.92),
+            user: 0,
+        });
 
         labels.push(TextLabel {
             rect: [panel_x, panel_y + row_gap, panel_w, title_h],
@@ -1705,7 +1774,9 @@ impl TonemapDebugOverlay {
             };
             instances.push(GpuInstance {
                 rect: [panel_x + 4.0, row_y, panel_w - 8.0, row_h],
-                color: bg, user: 0});
+                color: bg,
+                user: 0,
+            });
 
             let tc = if is_focused {
                 color::PARCHMENT
@@ -1724,7 +1795,9 @@ impl TonemapDebugOverlay {
             let track_y = row_y + (row_h - track_h) * 0.5;
             instances.push(GpuInstance {
                 rect: [track_x, track_y, slider_w, track_h],
-                color: color::TWILIGHT_INK, user: 0});
+                color: color::TWILIGHT_INK,
+                user: 0,
+            });
 
             let v = self.tuning.field_at(i);
             let t = ((v - min) / (max - min)).clamp(0.0, 1.0);
@@ -1736,7 +1809,9 @@ impl TonemapDebugOverlay {
             };
             instances.push(GpuInstance {
                 rect: [track_x, track_y, fill_w, track_h],
-                color: fill_color, user: 0});
+                color: fill_color,
+                user: 0,
+            });
 
             let knob_size = track_h * 2.5;
             let knob_x = track_x + fill_w - knob_size * 0.5;
@@ -1747,7 +1822,9 @@ impl TonemapDebugOverlay {
                     color::TALLOW
                 } else {
                     color::alpha(color::STONE, 0.9)
-                }, user: 0});
+                },
+                user: 0,
+            });
 
             let value_x = panel_x + label_w + slider_w + 4.0;
             labels.push(TextLabel {
@@ -1767,7 +1844,9 @@ impl TonemapDebugOverlay {
         };
         instances.push(GpuInstance {
             rect: [panel_x + 4.0, save_y, panel_w - 8.0, row_h],
-            color: save_bg, user: 0});
+            color: save_bg,
+            user: 0,
+        });
         labels.push(TextLabel {
             rect: [panel_x, save_y, panel_w, row_h],
             text: "Save for this scene".into(),
@@ -1788,7 +1867,9 @@ impl TonemapDebugOverlay {
         };
         instances.push(GpuInstance {
             rect: [panel_x + 4.0, reset_y, panel_w - 8.0, row_h],
-            color: reset_bg, user: 0});
+            color: reset_bg,
+            user: 0,
+        });
         labels.push(TextLabel {
             rect: [panel_x, reset_y, panel_w, row_h],
             text: "Reset scene to default".into(),
@@ -1806,6 +1887,592 @@ impl TonemapDebugOverlay {
             text:
                 "\u{2191}/\u{2193} select   \u{2190}/\u{2192} adjust   \u{23ce} confirm   Esc close"
                     .into(),
+            color: color::alpha(color::STONE, 0.85),
+            ..Default::default()
+        });
+
+        (instances, labels)
+    }
+}
+
+// ── Pick-blind hallway distortion debug (vertex warp tuning) ─────────────
+
+const HALL_DIST_DEBUG_ROW_COUNT: usize = 11;
+
+const HALL_DIST_DEBUG_ROW_META: &[(&str, f32, f32, f32)] = &[
+    ("Blind (0 Auto 1S 2B 3Boss)", 0.0, 3.0, 0.25),
+    ("Seed run #", 1.0, 30.0, 0.5),
+    ("Seed ante", 1.0, 12.0, 0.25),
+    ("Global ×", 0.0, 2.5, 0.02),
+    ("Bow ×", 0.0, 3.0, 0.02),
+    ("Breathe ×", 0.0, 3.0, 0.02),
+    ("Ceiling ×", 0.0, 3.0, 0.02),
+    ("Stretch ×", 0.0, 3.0, 0.02),
+    ("Twist ×", 0.0, 3.0, 0.02),
+    ("Pulse ×", 0.0, 3.0, 0.02),
+    ("Drift ×", 0.0, 3.0, 0.02),
+];
+
+#[derive(Clone, Copy)]
+struct HallDistDebugLayout {
+    panel_x: f32,
+    panel_y: f32,
+    panel_w: f32,
+    rows_y0: f32,
+    row_h: f32,
+    row_gap: f32,
+    label_w: f32,
+    slider_w: f32,
+    value_w: f32,
+    scale: f32,
+}
+
+impl HallDistDebugLayout {
+    fn compute(window_w: f32, window_h: f32, row_count: usize) -> Self {
+        let scale = metrics::scene_scale(window_w, window_h);
+        let row_h = (22.0 * scale).max(16.0);
+        let row_gap = (3.0 * scale).max(2.0);
+        let title_h = (24.0 * scale).max(16.0);
+        let pad = (8.0 * scale).max(5.0);
+        let margin = (10.0 * scale).max(6.0);
+        let panel_w = (340.0 * scale).min(window_w * 0.46);
+        let panel_x = margin;
+        let panel_y = margin;
+        let rows_y0 = panel_y + pad + title_h + pad;
+        let label_w = panel_w * 0.42;
+        let slider_w = panel_w * 0.32;
+        let value_w = (panel_w - label_w - slider_w - 12.0 * scale).max(36.0);
+        let _ = row_count;
+        Self {
+            panel_x,
+            panel_y,
+            panel_w,
+            rows_y0,
+            row_h,
+            row_gap,
+            label_w,
+            slider_w,
+            value_w,
+            scale,
+        }
+    }
+
+    fn slider_track(&self, row: usize) -> (f32, f32, f32, f32) {
+        let row_y = self.rows_y0 + row as f32 * (self.row_h + self.row_gap);
+        let track_x = self.panel_x + self.label_w;
+        let track_h = (5.0 * self.scale).max(3.0);
+        let track_y = row_y + (self.row_h - track_h) * 0.5;
+        (track_x, track_y, self.slider_w, track_h)
+    }
+
+    fn value_cell(&self, row: usize) -> (f32, f32, f32, f32) {
+        let row_y = self.rows_y0 + row as f32 * (self.row_h + self.row_gap);
+        let x = self.panel_x + self.label_w + self.slider_w + 4.0 * self.scale;
+        (x, row_y, self.value_w, self.row_h)
+    }
+}
+
+#[inline]
+fn hall_dist_point_in_rect(mx: f32, my: f32, r: (f32, f32, f32, f32)) -> bool {
+    mx >= r.0 && mx <= r.0 + r.2 && my >= r.1 && my <= r.1 + r.3
+}
+
+pub struct HallwayDistortionDebugOverlay {
+    cursor: usize,
+    blind_row: u8,
+    run_number: f32,
+    ante: f32,
+    global_mul: f32,
+    bow_mul: f32,
+    breathe_mul: f32,
+    ceiling_mul: f32,
+    stretch_mul: f32,
+    twist_mul: f32,
+    pulse_mul: f32,
+    drift_mul: f32,
+    editing: bool,
+    edit_buffer: String,
+    dragging_slider: Option<usize>,
+}
+
+impl HallwayDistortionDebugOverlay {
+    pub fn new() -> Self {
+        Self {
+            cursor: 0,
+            blind_row: 0,
+            run_number: 1.0,
+            ante: 1.0,
+            global_mul: 1.0,
+            bow_mul: 1.0,
+            breathe_mul: 1.0,
+            ceiling_mul: 1.0,
+            stretch_mul: 1.0,
+            twist_mul: 1.0,
+            pulse_mul: 1.0,
+            drift_mul: 1.0,
+            editing: false,
+            edit_buffer: String::new(),
+            dragging_slider: None,
+        }
+    }
+
+    pub fn to_snapshot(&self) -> HallwayDistortionDebugSnapshot {
+        HallwayDistortionDebugSnapshot {
+            blind_mode: self.blind_row.min(3),
+            seed_run: self.run_number.round().clamp(1.0, 999.0) as u32,
+            seed_ante: self.ante.round().clamp(1.0, 99.0) as u32,
+            global_mul: self.global_mul,
+            bow_mul: self.bow_mul,
+            breathe_mul: self.breathe_mul,
+            ceiling_mul: self.ceiling_mul,
+            stretch_mul: self.stretch_mul,
+            twist_mul: self.twist_mul,
+            pulse_mul: self.pulse_mul,
+            drift_mul: self.drift_mul,
+        }
+    }
+
+    fn row_count(&self) -> usize {
+        HALL_DIST_DEBUG_ROW_COUNT
+    }
+
+    fn row_value(&self, row: usize) -> f32 {
+        match row {
+            0 => self.blind_row as f32,
+            1 => self.run_number,
+            2 => self.ante,
+            3 => self.global_mul,
+            4 => self.bow_mul,
+            5 => self.breathe_mul,
+            6 => self.ceiling_mul,
+            7 => self.stretch_mul,
+            8 => self.twist_mul,
+            9 => self.pulse_mul,
+            10 => self.drift_mul,
+            _ => 0.0,
+        }
+    }
+
+    fn set_row_value(&mut self, row: usize, v: f32) {
+        let (_, lo, hi, _) = HALL_DIST_DEBUG_ROW_META[row];
+        let v = v.clamp(lo, hi);
+        match row {
+            0 => self.blind_row = (v.round() as i32).clamp(0, 3) as u8,
+            1 => self.run_number = v,
+            2 => self.ante = v,
+            3 => self.global_mul = v,
+            4 => self.bow_mul = v,
+            5 => self.breathe_mul = v,
+            6 => self.ceiling_mul = v,
+            7 => self.stretch_mul = v,
+            8 => self.twist_mul = v,
+            9 => self.pulse_mul = v,
+            10 => self.drift_mul = v,
+            _ => {}
+        }
+    }
+
+    fn apply_slider_mx(&mut self, row: usize, mx: f32, layout: &HallDistDebugLayout) {
+        let (tx, _, tw, _) = layout.slider_track(row);
+        let (_, min, max, _) = HALL_DIST_DEBUG_ROW_META[row];
+        let t = ((mx - tx) / tw.max(1e-6)).clamp(0.0, 1.0);
+        self.set_row_value(row, min + t * (max - min));
+    }
+
+    fn adjust_row(&mut self, dir: f32) {
+        if self.editing {
+            return;
+        }
+        let row = self.cursor.min(self.row_count().saturating_sub(1));
+        let (_, _, _, step) = HALL_DIST_DEBUG_ROW_META[row];
+        let v = self.row_value(row) + dir * step;
+        self.set_row_value(row, v);
+    }
+
+    fn clear_edit(&mut self) {
+        self.editing = false;
+        self.edit_buffer.clear();
+    }
+
+    fn begin_editing(&mut self) {
+        let v = self.row_value(self.cursor);
+        let mut s = if self.cursor == 0 {
+            format!("{}", self.blind_row)
+        } else {
+            format!("{:.6}", v)
+        };
+        while s.contains('.') && (s.ends_with('0') || s.ends_with('.')) {
+            s.pop();
+        }
+        self.edit_buffer = s;
+        self.editing = true;
+    }
+
+    fn commit_edit(&mut self) {
+        let row = self.cursor.min(self.row_count().saturating_sub(1));
+        let t = self.edit_buffer.trim();
+        if let Ok(v) = t.parse::<f32>() {
+            self.set_row_value(row, v);
+        }
+        self.clear_edit();
+    }
+
+    fn push_edit_char(&mut self, c: char) {
+        if self.edit_buffer.len() >= 32 {
+            return;
+        }
+        if c == '-' && !self.edit_buffer.is_empty() {
+            return;
+        }
+        if c == '.' && self.edit_buffer.contains('.') {
+            return;
+        }
+        self.edit_buffer.push(c);
+    }
+
+    pub fn feed_key_event(&mut self, scancode: Option<Scancode>, ctrl: bool) -> bool {
+        let Some(code) = scancode else {
+            return false;
+        };
+
+        if ctrl && matches!(code, Scancode::C) && !self.editing {
+            let s = self.to_snapshot();
+            let text = format!(
+                "HallwayDistortionDebugSnapshot {{ blind_mode: {}, seed_run: {}, seed_ante: {}, global_mul: {:.4}, bow_mul: {:.4}, breathe_mul: {:.4}, ceiling_mul: {:.4}, stretch_mul: {:.4}, twist_mul: {:.4}, pulse_mul: {:.4}, drift_mul: {:.4} }}",
+                s.blind_mode,
+                s.seed_run,
+                s.seed_ante,
+                s.global_mul,
+                s.bow_mul,
+                s.breathe_mul,
+                s.ceiling_mul,
+                s.stretch_mul,
+                s.twist_mul,
+                s.pulse_mul,
+                s.drift_mul,
+            );
+            match arboard::Clipboard::new() {
+                Ok(mut cb) => {
+                    if let Err(e) = cb.set_text(&text) {
+                        log::error!("Clipboard write failed: {e}");
+                    } else {
+                        log::info!("Hallway hall FX snapshot copied to clipboard");
+                    }
+                }
+                Err(e) => log::error!("Could not open clipboard: {e}"),
+            }
+            return true;
+        }
+
+        if !self.editing {
+            return false;
+        }
+
+        match code {
+            Scancode::Backspace => {
+                let _ = self.edit_buffer.pop();
+                true
+            }
+            Scancode::Escape => {
+                self.clear_edit();
+                true
+            }
+            Scancode::Return | Scancode::KpEnter => {
+                self.commit_edit();
+                true
+            }
+            Scancode::_0 | Scancode::Kp0 => {
+                self.push_edit_char('0');
+                true
+            }
+            Scancode::_1 | Scancode::Kp1 => {
+                self.push_edit_char('1');
+                true
+            }
+            Scancode::_2 | Scancode::Kp2 => {
+                self.push_edit_char('2');
+                true
+            }
+            Scancode::_3 | Scancode::Kp3 => {
+                self.push_edit_char('3');
+                true
+            }
+            Scancode::_4 | Scancode::Kp4 => {
+                self.push_edit_char('4');
+                true
+            }
+            Scancode::_5 | Scancode::Kp5 => {
+                self.push_edit_char('5');
+                true
+            }
+            Scancode::_6 | Scancode::Kp6 => {
+                self.push_edit_char('6');
+                true
+            }
+            Scancode::_7 | Scancode::Kp7 => {
+                self.push_edit_char('7');
+                true
+            }
+            Scancode::_8 | Scancode::Kp8 => {
+                self.push_edit_char('8');
+                true
+            }
+            Scancode::_9 | Scancode::Kp9 => {
+                self.push_edit_char('9');
+                true
+            }
+            Scancode::Period | Scancode::KpPeriod => {
+                self.push_edit_char('.');
+                true
+            }
+            Scancode::Minus | Scancode::KpMinus => {
+                self.push_edit_char('-');
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Returns `true` when the overlay should close.
+    pub fn update(
+        &mut self,
+        actions: &[UiAction],
+        mouse: Option<(f32, f32, bool, bool)>,
+        window_w: f32,
+        window_h: f32,
+    ) -> bool {
+        let layout = HallDistDebugLayout::compute(window_w, window_h, self.row_count());
+        let n = self.row_count();
+
+        if let Some((mx, my, clicked, held)) = mouse {
+            if let Some(di) = self.dragging_slider {
+                if held {
+                    self.apply_slider_mx(di, mx, &layout);
+                }
+            }
+
+            if (clicked || held) && self.dragging_slider.is_none() {
+                for i in 0..n {
+                    let track = layout.slider_track(i);
+                    if hall_dist_point_in_rect(mx, my, track) {
+                        self.cursor = i;
+                        self.clear_edit();
+                        self.apply_slider_mx(i, mx, &layout);
+                        if held {
+                            self.dragging_slider = Some(i);
+                        }
+                        break;
+                    }
+                }
+            }
+
+            if clicked && self.dragging_slider.is_none() {
+                for i in 0..n {
+                    let cell = layout.value_cell(i);
+                    if hall_dist_point_in_rect(mx, my, cell) {
+                        self.cursor = i;
+                        self.begin_editing();
+                        break;
+                    }
+                }
+            }
+        }
+
+        if let Some((_, _, _, held)) = mouse {
+            if !held {
+                self.dragging_slider = None;
+            }
+        } else {
+            self.dragging_slider = None;
+        }
+
+        for a in actions {
+            match a {
+                UiAction::FocusDown => {
+                    self.cursor = (self.cursor + 1) % self.row_count();
+                    self.clear_edit();
+                }
+                UiAction::FocusUp => {
+                    self.cursor = (self.cursor + self.row_count() - 1) % self.row_count();
+                    self.clear_edit();
+                }
+                UiAction::FocusNext
+                | UiAction::FocusPrev
+                | UiAction::NavigateHudNext
+                | UiAction::NavigateHudPrev => {
+                    if self.editing {
+                        continue;
+                    }
+                    let dir = match a {
+                        UiAction::FocusPrev | UiAction::NavigateHudPrev => -1.0,
+                        _ => 1.0,
+                    };
+                    self.adjust_row(dir);
+                }
+                UiAction::Confirm | UiAction::CommitDiscard => {
+                    if self.editing {
+                        self.commit_edit();
+                    } else {
+                        self.begin_editing();
+                    }
+                }
+                UiAction::Cancel | UiAction::Pause => {
+                    if self.editing {
+                        self.clear_edit();
+                    } else {
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        false
+    }
+
+    fn format_row_display(&self, row: usize) -> String {
+        if self.editing && self.cursor == row {
+            return self.edit_buffer.clone();
+        }
+        if row == 0 {
+            return match self.blind_row {
+                0 => "0 Auto".into(),
+                1 => "1 Small".into(),
+                2 => "2 Big".into(),
+                _ => "3 Boss".into(),
+            };
+        }
+        let v = self.row_value(row);
+        let mut s = format!("{:.4}", v);
+        while s.contains('.') && (s.ends_with('0') || s.ends_with('.')) {
+            s.pop();
+        }
+        s
+    }
+
+    pub fn draw(&self, window_w: f32, window_h: f32) -> (Vec<GpuInstance>, Vec<TextLabel>) {
+        let layout = HallDistDebugLayout::compute(window_w, window_h, self.row_count());
+        let scale = layout.scale;
+        let mut instances = Vec::new();
+        let mut labels = Vec::new();
+
+        let title_h = (24.0 * scale).max(16.0);
+        let pad = (8.0 * scale).max(5.0);
+        let row_gap = layout.row_gap;
+        let hint_h = (20.0 * scale).max(14.0);
+        let panel_h = layout.panel_y
+            + pad
+            + title_h
+            + pad
+            + self.row_count() as f32 * (layout.row_h + row_gap)
+            + hint_h
+            + row_gap * 2.0
+            - layout.panel_y;
+
+        let border = 2.0;
+        let px = layout.panel_x;
+        let py = layout.panel_y;
+        let pw = layout.panel_w;
+        instances.push(GpuInstance {
+            rect: [
+                px - border,
+                py - border,
+                pw + border * 2.0,
+                panel_h + border * 2.0,
+            ],
+            color: color::alpha(color::ANTIQUE, 0.85),
+            user: 0,
+        });
+        instances.push(GpuInstance {
+            rect: [px, py, pw, panel_h],
+            color: color::alpha(color::TWILIGHT_INK, 0.92),
+            user: 0,
+        });
+
+        labels.push(TextLabel {
+            rect: [px, py + row_gap, pw, title_h],
+            text: "Hallway hall FX".into(),
+            color: color::TALLOW,
+            ..Default::default()
+        });
+
+        for i in 0..self.row_count() {
+            let (name, _, _, _) = HALL_DIST_DEBUG_ROW_META[i];
+            let row_y = layout.rows_y0 + i as f32 * (layout.row_h + row_gap);
+            let is_focused = self.cursor == i;
+
+            let bg = if is_focused {
+                color::alpha(color::WALNUT_BRIGHT, 0.95)
+            } else {
+                color::alpha(color::WALNUT_SOFT, 0.78)
+            };
+            instances.push(GpuInstance {
+                rect: [px + 4.0, row_y, pw - 8.0, layout.row_h],
+                color: bg,
+                user: 0,
+            });
+
+            let tc = if is_focused {
+                color::PARCHMENT
+            } else {
+                color::alpha(color::STONE, 0.9)
+            };
+            labels.push(TextLabel {
+                rect: [px + 6.0 * scale, row_y, layout.label_w, layout.row_h],
+                text: (*name).into(),
+                color: tc,
+                ..Default::default()
+            });
+
+            let (track_x, track_y, tw, th) = layout.slider_track(i);
+            instances.push(GpuInstance {
+                rect: [track_x, track_y, tw, th],
+                color: color::TWILIGHT_INK,
+                user: 0,
+            });
+
+            let (_, min, max, _) = HALL_DIST_DEBUG_ROW_META[i];
+            let v = self.row_value(i);
+            let t = ((v - min) / (max - min)).clamp(0.0, 1.0);
+            let fill_w = tw * t;
+            let fill_color = if is_focused {
+                color::AMBER
+            } else {
+                color::alpha(color::ANTIQUE, 0.95)
+            };
+            instances.push(GpuInstance {
+                rect: [track_x, track_y, fill_w, th],
+                color: fill_color,
+                user: 0,
+            });
+
+            let knob_size = th * 2.5;
+            let knob_x = track_x + fill_w - knob_size * 0.5;
+            let knob_y = track_y + (th - knob_size) * 0.5;
+            instances.push(GpuInstance {
+                rect: [knob_x, knob_y, knob_size, knob_size],
+                color: if is_focused {
+                    color::TALLOW
+                } else {
+                    color::alpha(color::STONE, 0.9)
+                },
+                user: 0,
+            });
+
+            let (vx, vy, vw, vh) = layout.value_cell(i);
+            labels.push(TextLabel {
+                rect: [vx, vy, vw, vh],
+                text: self.format_row_display(i),
+                color: tc,
+                ..Default::default()
+            });
+        }
+
+        let hint_y = layout.rows_y0 + self.row_count() as f32 * (layout.row_h + row_gap) + row_gap;
+        labels.push(TextLabel {
+            rect: [px, hint_y, pw, hint_h],
+            text: "\u{2191}/\u{2193} row   \u{2190}/\u{2192} adjust   \u{23ce} type value   Esc close   Ctrl+C copy"
+                .into(),
             color: color::alpha(color::STONE, 0.85),
             ..Default::default()
         });

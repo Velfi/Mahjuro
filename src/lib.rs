@@ -39,6 +39,8 @@ mod main_frame_tick;
 mod main_headless;
 #[path = "main/render_settings.rs"]
 mod main_render_settings;
+#[path = "main/room_gltf_brownout.rs"]
+mod main_room_gltf_brownout;
 mod persistence;
 mod physical_size;
 mod render;
@@ -181,6 +183,8 @@ struct App {
     /// we only call `set_title` when it actually changes — Wayland/X11
     /// charges a syscall for each call.
     last_window_title: String,
+    /// Rare flicker + brownout on shop / pick_blind / collection room lighting.
+    room_gltf_brownout: main_room_gltf_brownout::RoomGltfBrownout,
     /// Frame-scoped scene-pick cache. Computed once at the top of
     /// `frame_tick` and reused by both `frame_tick` (for `update`) and
     /// `draw` (for `DrawCtx::new`). Without this, every gameplay frame
@@ -358,6 +362,7 @@ impl App {
             profile_saver: persistence::ProfileSaver::spawn(),
             profile_dirty: false,
             last_window_title: String::new(),
+            room_gltf_brownout: main_room_gltf_brownout::RoomGltfBrownout::new(),
             frame_picks: FramePicks::default(),
         }
     }

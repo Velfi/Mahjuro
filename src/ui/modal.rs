@@ -558,7 +558,9 @@ impl ModalQueue {
         let [or_, og, ob, _] = crate::render::theme::color::WALNUT_INK;
         instances.push(GpuInstance {
             rect: [0.0, 0.0, window_w, window_h],
-            color: [or_, og, ob, 0.65 * alpha], user: 0});
+            color: [or_, og, ob, 0.65 * alpha],
+            user: 0,
+        });
 
         if modal.has_pages() {
             let (pag_i, pag_l, pag_r, mut pag_g) =
@@ -635,13 +637,17 @@ impl ModalQueue {
                 card_w + border * 2.0,
                 card_h + border * 2.0,
             ],
-            color: [br, bg, bb, ba * alpha], user: 0});
+            color: [br, bg, bb, ba * alpha],
+            user: 0,
+        });
 
         // Card background.
         let [cr, cg, cb, ca] = modal.theme.bg_color();
         instances.push(GpuInstance {
             rect: [card_x, card_y, card_w, card_h],
-            color: [cr, cg, cb, ca * alpha], user: 0});
+            color: [cr, cg, cb, ca * alpha],
+            user: 0,
+        });
 
         // Title.
         let title_y = card_y + padding;
@@ -724,11 +730,15 @@ fn draw_modal_paginated_unlock(
         // Top band.
         instances.push(GpuInstance {
             rect: [0.0, i as f32 * strip_h, window_w, strip_h],
-            color: [vr, vg, vb, a], user: 0});
+            color: [vr, vg, vb, a],
+            user: 0,
+        });
         // Bottom band.
         instances.push(GpuInstance {
             rect: [0.0, window_h - (i + 1) as f32 * strip_h, window_w, strip_h],
-            color: [vr, vg, vb, a], user: 0});
+            color: [vr, vg, vb, a],
+            user: 0,
+        });
     }
 
     // ── Hero stage layout ────────────────────────────────────────
@@ -773,7 +783,7 @@ fn draw_modal_paginated_unlock(
     if let Some(relic_id) = page.relic_id {
         let visual = relic_visual(relic_id);
         let face_size = icon_size * 0.80;
-        let thick = face_size * 0.12 * visual.thickness_scale;
+        let thick = face_size * 0.06 * visual.thickness_scale;
         // Camera in main/draw.rs looks along +Y with up=+Z, so
         // screen-vertical comes from world Z (lift) — not pixel Y.
         // Park depth at the camera target plane and move the

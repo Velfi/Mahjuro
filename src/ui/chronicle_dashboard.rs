@@ -109,7 +109,11 @@ pub fn chronicle_dashboard_scroll_max(
 }
 
 fn push_quad(out: &mut Vec<GpuInstance>, rect: [f32; 4], color: [f32; 4]) {
-    out.push(GpuInstance { rect, color, user: 0});
+    out.push(GpuInstance {
+        rect,
+        color,
+        user: 0,
+    });
 }
 
 /// Fixed Eva-style corner ticks on the **viewport** panel (not scrolled).

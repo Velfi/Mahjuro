@@ -70,7 +70,7 @@ pub fn tile_suit_emoji(tile: &Tile) -> &'static str {
     match tile.suit {
         Suit::Characters => "\u{1F3B4}", // 🎴 flower card
         Suit::Bamboos => "\u{1F38B}",    // 🎋 tanabata tree / bamboo
-        Suit::Dots => "\u{1F534}",    // 🔴 red circle / disc
+        Suit::Dots => "\u{1F534}",       // 🔴 red circle / disc
         Suit::Wind => "\u{1F32C}",       // 🌬 wind face
         Suit::Dragon => "\u{1F409}",     // 🐉 dragon
         Suit::Flower => "\u{1F33A}",     // 🌺 hibiscus
@@ -1036,12 +1036,9 @@ fn rasterize_plaque_walnut_ink_colored_keywords(
     let line_h = line_metrics
         .map(|lm| lm.new_line_size)
         .unwrap_or(chosen_px * 1.2);
-    let ascender_px = line_metrics
-        .map(|m| m.ascent)
-        .unwrap_or(chosen_px * 0.8);
+    let ascender_px = line_metrics.map(|m| m.ascent).unwrap_or(chosen_px * 0.8);
     let line_cell_h = line_h.ceil() as u32 + 2;
-    let baseline_in_band =
-        ((line_cell_h as f32 - line_h) * 0.5).max(0.0) + ascender_px;
+    let baseline_in_band = ((line_cell_h as f32 - line_h) * 0.5).max(0.0) + ascender_px;
 
     let n_lines = chosen_lines.len().max(1);
     let total_text_h = line_h * n_lines as f32;

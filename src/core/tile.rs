@@ -213,7 +213,7 @@ impl Tile {
         match self.suit {
             Suit::Characters => [0.85, 0.25, 0.20, 1.0], // red
             Suit::Bamboos => [0.20, 0.65, 0.30, 1.0],    // green
-            Suit::Dots => [0.20, 0.40, 0.80, 1.0],    // blue
+            Suit::Dots => [0.20, 0.40, 0.80, 1.0],       // blue
             Suit::Wind => [0.70, 0.60, 0.20, 1.0],       // gold
             // Dragons are coloured per rank in the traditional set:
             //   1 = Chun  (中) → red
@@ -264,10 +264,7 @@ mod sort_order_tests {
 
     #[test]
     fn cmp_sort_order_places_dots_before_dragons() {
-        let mut v = vec![
-            Tile::new(Suit::Dragon, 1, 1),
-            Tile::new(Suit::Dots, 5, 2),
-        ];
+        let mut v = vec![Tile::new(Suit::Dragon, 1, 1), Tile::new(Suit::Dots, 5, 2)];
         v.sort_by(cmp_sort_order);
         assert_eq!(v[0].suit, Suit::Dots);
         assert_eq!(v[1].suit, Suit::Dragon);

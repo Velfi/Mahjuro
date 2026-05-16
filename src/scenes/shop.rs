@@ -10,9 +10,10 @@ mod shared;
 mod update;
 mod view;
 
-pub(crate) use self::view::render_shop_inspect_isolated_frame;
+pub(crate) use self::view::render_shop_frame;
 
 use crate::render::draw_cmd::CameraParams;
+use crate::scenes::object3d_inspect::InspectDolly;
 
 pub(crate) use self::layout::{ShopInventoryCounts, ShopLayout};
 pub(crate) use self::shared::{CelebPhase, PackCelebration};
@@ -146,6 +147,10 @@ pub struct ShopScene {
     pub positions: crate::ui::scene_layout::ShopPositions,
     /// Last `DrawCtx::room_gltf_height_scale` from `draw_frame` (updated each draw). Used when building focus rects from `update()` so marker math matches the GPU pass (possibly one frame behind).
     drawn_room_gltf_height_scale: std::cell::Cell<f32>,
+    /// Eased blend between storeroom base camera and orbit inspect ([`crate::scenes::object3d_inspect::tick_inspect_dolly`]).
+    inspect_dolly: std::cell::Cell<InspectDolly>,
+    /// Last orbit inspect camera — used to ease out after the showcase overlay pops.
+    last_inspect_cam: std::cell::Cell<Option<CameraParams>>,
     /// West-face hold-to-sell (gamepad West / **Q**): press time when a hold is in progress.
     west_sell_hold_started: Option<std::time::Instant>,
 }

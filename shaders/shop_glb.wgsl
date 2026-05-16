@@ -11,6 +11,8 @@
 // or `0` for infinite range (pure inverse-square with a minimum distance clamp).
 
 const PI: f32 = 3.14159265358979323846;
+/// Scales wall-clock `time_pulse.x` for pick-blind hallway warp (1 = authored rate).
+const HALLWAY_ANIM_TIME_SCALE: f32 = 0.5;
 
 struct CameraUniform {
     view_proj: mat4x4<f32>,
@@ -46,6 +48,118 @@ struct GltfPbrUniform {
 @group(0) @binding(5) var<uniform> pbr: GltfPbrUniform;
 @group(0) @binding(6) var metallic_roughness_tex: texture_2d<f32>;
 @group(0) @binding(7) var emissive_tex: texture_2d<f32>;
+
+/// Pick-blind hallway warp (disabled when `flags.x` = 0 — zero buffer for shop/tiles).
+struct HallwayDistortion {
+    bow: vec4<f32>,
+    breathe: vec4<f32>,
+    ceiling: vec4<f32>,
+    stretch: vec4<f32>,
+    twist: vec4<f32>,
+    mask: vec4<f32>,
+    time_pulse: vec4<f32>,
+    flags: vec4<f32>,
+};
+@group(0) @binding(8) var<uniform> hd: HallwayDistortion;
+
+fn hallway_depth_axis_sel(idx: f32) -> vec3<f32> {
+    if (idx < 0.5) {
+        return vec3<f32>(1.0, 0.0, 0.0);
+    }
+    if (idx < 1.5) {
+        return vec3<f32>(0.0, 1.0, 0.0);
+    }
+    return vec3<f32>(0.0, 0.0, 1.0);
+}
+
+fn apply_hallway_distortion(world_in: vec3<f32>, h: HallwayDistortion) -> vec3<f32> {
+    if (h.flags.x < 0.5) {
+        return world_in;
+    }
+    let axis = hallway_depth_axis_sel(h.mask.x) * vec3<f32>(h.mask.y);
+    let up = vec3<f32>(0.0, 0.0, 1.0);
+    var lateral = cross(axis, up);
+    let ll = length(lateral);
+    if (ll < 1e-5) {
+        lateral = vec3<f32>(1.0, 0.0, 0.0);
+    } else {
+        lateral = lateral / ll;
+    }
+    let depth = dot(world_in, axis);
+    let d0 = h.mask.z;
+    let d1 = h.mask.w;
+    let span = max(d1 - d0, 1e-4);
+    let u = clamp((depth - d0) / span, 0.0, 1.0);
+    // Depth along corridor axis, relative to GLB span midpoint (e.g. −25..+25 instead of 0..50).
+    let depth_mid = (d0 + d1) * 0.5;
+    let y_rel = depth - depth_mid;
+    var sm0: f32;
+    if (h.twist.z > 0.5) {
+        // Bell curve: strongest mid-corridor, tapering toward both ends of the GLB span.
+        let edge = 0.20;
+        sm0 = smoothstep(0.0, edge, u) * smoothstep(1.0, 1.0 - edge, u);
+    } else {
+        sm0 = smoothstep(d0, d1, depth);
+    }
+    let g = h.flags.z;
+    let t = h.time_pulse.x * HALLWAY_ANIM_TIME_SCALE;
+    let drift = h.time_pulse.y * t;
+    let pulse = 1.0 + h.time_pulse.w * sin(t * h.time_pulse.z + h.bow.w);
+    let mask_f = sm0 * g * pulse;
+    // Full boss blind sets `flags.y` = 1; warp uses 0.25× so amplitude matches prior tuning.
+    let bp = h.flags.y * 0.25;
+    let ramp = mix(1.0, 1.0 + bp * 1.45, sm0);
+
+    var w = world_in;
+
+    w = w + lateral * (h.bow.x * h.bow.z * sin(y_rel * h.bow.y + h.bow.w + drift) * mask_f * ramp);
+
+    let side = dot(w, lateral);
+    let sgn = select(-1.0, 1.0, side >= 0.0);
+    let af = pow(max(abs(side), 1e-4), h.breathe.w);
+    w = w + lateral * (sgn * af * h.breathe.x * sin(t * h.breathe.y + h.breathe.z + y_rel * 0.42) * mask_f);
+
+    let z_above = w.z - h.ceiling.y;
+    if (z_above > 0.0) {
+        let cp = 1.0 + h.ceiling.z * sin(t * h.ceiling.w);
+        let sag = z_above * h.ceiling.x * cp * mask_f * mix(1.0, 1.0 + bp * 1.1, sm0);
+        w = w - vec3<f32>(0.0, 0.0, 1.0) * sag;
+    }
+
+    let stretch_k = h.stretch.x * h.stretch.w * mask_f * mix(1.0, 1.0 + bp * 0.9, sm0);
+    w = w + axis * stretch_k;
+
+    let twist_dir = select(-1.0, 1.0, h.twist.w >= 0.0);
+    let ang = h.twist.x * twist_dir * pow(mask_f, h.twist.y) * mix(1.0, 1.0 + bp * 1.25, sm0);
+    let proj_len = dot(w, axis);
+    let p_perp = w - axis * proj_len;
+    let c = cos(ang);
+    let s = sin(ang);
+    let p_rot = p_perp * c + cross(axis, p_perp) * s;
+    w = axis * proj_len + p_rot;
+
+    return w;
+}
+
+fn world_normal_after_distortion(
+    world0: vec3<f32>,
+    t_u: vec3<f32>,
+    t_v: vec3<f32>,
+    h: HallwayDistortion,
+    n0: vec3<f32>,
+) -> vec3<f32> {
+    // Large enough epsilon vs bow/breathe wavelengths to reduce numeric cancellation;
+    // when the cross is tiny or points into the surface, fall back so punctual BRDF
+    // does not go uniformly dark.
+    let e = 0.06;
+    let d_u = (apply_hallway_distortion(world0 + t_u * e, h) - apply_hallway_distortion(world0 - t_u * e, h)) / (2.0 * e);
+    let d_v = (apply_hallway_distortion(world0 + t_v * e, h) - apply_hallway_distortion(world0 - t_v * e, h)) / (2.0 * e);
+    let raw = cross(d_u, d_v);
+    let len = length(raw);
+    let nd = raw / max(len, 1e-10);
+    let oriented = select(nd, -nd, dot(nd, n0) < 0.0);
+    return select(n0, oriented, len > 1e-7);
+}
 
 struct PointLight {
     pos: vec4<f32>,
@@ -149,21 +263,35 @@ fn vs_main(
     @location(4) uv_emr_in: vec2<f32>,
     @location(5) v_color_in: vec4<f32>,
 ) -> VsOut {
-    let world = cam.model * vec4<f32>(pos, 1.0);
-    let N = normalize((cam.model * vec4<f32>(n, 0.0)).xyz);
+    let world_h = (cam.model * vec4<f32>(pos, 1.0)).xyz;
+    let N0 = normalize((cam.model * vec4<f32>(n, 0.0)).xyz);
     let Tw = (cam.model * vec4<f32>(tangent.xyz, 0.0)).xyz;
-    let Torth = normalize(Tw - N * dot(N, Tw));
-    let Borth = normalize(cross(N, Torth)) * tangent.w;
+    let Torth = normalize(Tw - N0 * dot(N0, Tw));
+    let Borth = normalize(cross(N0, Torth)) * tangent.w;
+
+    let world = select(
+        world_h,
+        apply_hallway_distortion(world_h, hd),
+        hd.flags.x > 0.5,
+    );
+    let N = select(
+        N0,
+        world_normal_after_distortion(world_h, Torth, Borth, hd, N0),
+        hd.flags.x > 0.5,
+    );
+    let Tw2 = (cam.model * vec4<f32>(tangent.xyz, 0.0)).xyz;
+    let Torth2 = normalize(Tw2 - N * dot(N, Tw2));
+    let Borth2 = normalize(cross(N, Torth2)) * tangent.w;
 
     var o: VsOut;
-    o.clip_pos = cam.view_proj * world;
+    o.clip_pos = cam.view_proj * vec4<f32>(world, 1.0);
     o.wn = N;
     o.uv = uv;
     o.local_pos = pos;
     o.local_n = n;
-    o.world_pos = world.xyz;
-    o.t_w = Torth;
-    o.b_w = Borth;
+    o.world_pos = world;
+    o.t_w = Torth2;
+    o.b_w = Borth2;
     o.uv_emr = uv_emr_in;
     o.v_color = v_color_in;
     return o;
@@ -239,6 +367,13 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     let F0 = mix(vec3<f32>(0.04), f0_base, metallic);
 
     var Lo = vec3<f32>(0.0);
+    // Boss blind (`hd.flags.y` ≈ 1): wash punctual + spots toward red without touching emissive.
+    let boss_press = clamp(hd.flags.y, 0.0, 1.0);
+    let punctual_rgb_mul = mix(
+        vec3<f32>(1.0),
+        vec3<f32>(1.14, 0.42, 0.36),
+        boss_press,
+    );
 
     let light_count = lights.count.x;
     for (var i: u32 = 0u; i < light_count; i = i + 1u) {
@@ -254,7 +389,7 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
             punctual_attenuation_with_inv_doc_scale(dist, range_w, cam.decal_atlas_uv.y),
             kind > 0.5,
         );
-        let radiance = pl.color.rgb * pl.color.a * atten;
+        let radiance = pl.color.rgb * punctual_rgb_mul * pl.color.a * atten;
         let NdotL = max(dot(n_world, L), 0.0);
         if (NdotL <= 0.0 || length(radiance) <= 0.0) {
             continue;
@@ -296,7 +431,7 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         if (spot_factor <= 0.0) {
             continue;
         }
-        let radiance = s.color.rgb * s.color.a * atten_spot * spot_factor;
+        let radiance = s.color.rgb * punctual_rgb_mul * s.color.a * atten_spot * spot_factor;
         let NdotL = max(dot(n_world, L), 0.0);
         if (NdotL <= 0.0) {
             continue;

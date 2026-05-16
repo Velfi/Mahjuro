@@ -183,7 +183,9 @@ impl SceneBehavior for ProfileSelectScene {
 
         frame.quad(GpuInstance {
             rect: [0.0, 0.0, w, h],
-            color: color::WALNUT_INK, user: 0});
+            color: color::WALNUT_INK,
+            user: 0,
+        });
 
         let showing_dialog = self.confirm_delete != ConfirmDelete::None;
 
@@ -222,14 +224,18 @@ impl SceneBehavior for ProfileSelectScene {
                 };
                 frame.quad(GpuInstance {
                     rect: [card_x, card_y, card_w, card_h],
-                    color: bg_color, user: 0});
+                    color: bg_color,
+                    user: 0,
+                });
 
                 // Active indicator stripe on left edge.
                 if is_active {
                     let stripe_w = 4.0 * scale;
                     frame.quad(GpuInstance {
                         rect: [card_x, card_y, stripe_w, card_h],
-                        color: color::JADE, user: 0});
+                        color: color::JADE,
+                        user: 0,
+                    });
                 }
 
                 // Selection highlight border (top and bottom gold lines).
@@ -237,10 +243,14 @@ impl SceneBehavior for ProfileSelectScene {
                     let border = 2.0 * scale;
                     frame.quad(GpuInstance {
                         rect: [card_x, card_y, card_w, border],
-                        color: color::GOLD, user: 0});
+                        color: color::GOLD,
+                        user: 0,
+                    });
                     frame.quad(GpuInstance {
                         rect: [card_x, card_y + card_h - border, card_w, border],
-                        color: color::GOLD, user: 0});
+                        color: color::GOLD,
+                        user: 0,
+                    });
                 }
             }
 
@@ -335,7 +345,9 @@ impl SceneBehavior for ProfileSelectScene {
             // Fully opaque overlay so card text underneath is completely hidden.
             frame.quad(GpuInstance {
                 rect: [0.0, 0.0, w, h],
-                color: color::WALNUT_INK, user: 0});
+                color: color::WALNUT_INK,
+                user: 0,
+            });
 
             let dialog_w = (300.0 * scale).min(w * 0.85);
             let dialog_h = (120.0 * scale).max(80.0);
@@ -351,11 +363,15 @@ impl SceneBehavior for ProfileSelectScene {
                     dialog_w + b * 2.0,
                     dialog_h + b * 2.0,
                 ],
-                color: color::RUBY, user: 0});
+                color: color::RUBY,
+                user: 0,
+            });
             // Dialog background.
             frame.quad(GpuInstance {
                 rect: [dialog_x, dialog_y, dialog_w, dialog_h],
-                color: color::WALNUT_INK, user: 0});
+                color: color::WALNUT_INK,
+                user: 0,
+            });
 
             let msg_h = (24.0 * scale).max(16.0);
             let msg_y = dialog_y + dialog_h * 0.25;

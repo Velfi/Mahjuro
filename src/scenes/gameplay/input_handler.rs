@@ -916,7 +916,7 @@ pub(super) fn build_relic_tray_and_wind(
         // and the cylinder height to the (much smaller) badge thickness.
         for (i, &rid) in active_ids.iter().enumerate() {
             let visual = relic_visual(rid);
-            let thick = face * 0.12 * visual.thickness_scale;
+            let thick = face * 0.06 * visual.thickness_scale;
 
             // Color tracks the relic's rarity tier.
             let rarity = defs
@@ -1337,11 +1337,7 @@ pub(super) fn build_consumable_dish(
                         ribbon_dish_placements.push(
                             crate::render::ribbon_mesh::zodiac_ribbon_object3d(
                                 crate::render::ribbon_mesh::ZodiacRibbonSpec {
-                                    pos: [
-                                        zx + slot_w * 0.5,
-                                        zy,
-                                        pendant_y - ribbon_length * 0.5,
-                                    ],
+                                    pos: [zx + slot_w * 0.5, zy, pendant_y - ribbon_length * 0.5],
                                     length: ribbon_length,
                                     rotation:
                                         crate::render::table_transform::euler_xyz_rad_from_deg(

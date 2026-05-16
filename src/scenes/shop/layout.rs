@@ -248,7 +248,7 @@ pub(super) fn relic_half_extents(id: RelicId, base: f32) -> [f32; 3] {
     let r0 = ((seed >> 8) & 0xFF) as f32 / 255.0;
     let r2 = ((seed >> 24) & 0xFF) as f32 / 255.0;
     let face = base * (0.65 + r0 * 0.45);
-    [face, base * (0.08 + r2 * 0.04), face]
+    [face, base * (0.04 + r2 * 0.02), face]
 }
 
 pub(super) fn consumable_color(c: Consumable) -> [f32; 4] {

@@ -226,7 +226,9 @@ pub fn push_gameplay_action_prompts(
                 pill_bg_disabled
             } else {
                 pill_bg
-            }, user: 0});
+            },
+            user: 0,
+        });
         let icon_tint = if cash_in_disabled {
             color::alpha(
                 color::darken(color::alpha(color::PORCELAIN_AGED, 0.96), 0.45),
@@ -253,7 +255,9 @@ pub fn push_gameplay_action_prompts(
             icon_cmds.push(PromptIconQuad {
                 inst: GpuInstance {
                     rect: [ix, iy, icon_px, icon_px],
-                    color: icon_tint, user: 0},
+                    color: icon_tint,
+                    user: 0,
+                },
                 source,
             });
         }

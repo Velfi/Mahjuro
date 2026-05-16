@@ -283,9 +283,6 @@ impl PauseMenu {
                         }),
                     }
                 }
-                if opts.take_rebind_controller_requested() {
-                    bus.push(GameEvent::OpenControllerMappingHelp);
-                }
             }
             if self.options_overlay.is_none() {
                 bus.push(GameEvent::UiSound(SfxId::UiCancel));
@@ -383,7 +380,9 @@ impl PauseMenu {
         // Dim background — theme WALNUT_INK (deepest walnut base), not pure black.
         instances.push(GpuInstance {
             rect: [0.0, 0.0, window_w, window_h],
-            color: color::alpha(color::WALNUT_INK, 0.78), user: 0});
+            color: color::alpha(color::WALNUT_INK, 0.78),
+            user: 0,
+        });
 
         // If the options sub-overlay is open, draw it instead of the pause
         // menu root. The dim quad above already provides the backdrop.

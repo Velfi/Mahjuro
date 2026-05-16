@@ -279,7 +279,9 @@ impl SceneBehavior for GameOverScene {
         let mut frame = UiFrame::new();
         frame.quad(GpuInstance {
             rect: [0.0, 0.0, w, h],
-            color: color::WALNUT_INK, user: 0});
+            color: color::WALNUT_INK,
+            user: 0,
+        });
         if ctx.effect_layers.fullscreen_water_backdrop {
             if self.won {
                 frame.moonlit_water();
@@ -291,11 +293,15 @@ impl SceneBehavior for GameOverScene {
         // Panel body — slightly deeper than before so it reads as a card.
         frame.quad(GpuInstance {
             rect: panel_rect,
-            color: color::alpha(color::WALNUT_DEEP, 0.88), user: 0});
+            color: color::alpha(color::WALNUT_DEEP, 0.88),
+            user: 0,
+        });
         // 1-px border in WALNUT_BRIGHT gives the card a crisp edge.
         frame.quad(GpuInstance {
             rect: border_rect,
-            color: color::alpha(color::WALNUT_BRIGHT, 0.60), user: 0});
+            color: color::alpha(color::WALNUT_BRIGHT, 0.60),
+            user: 0,
+        });
         // Overprint the interior so the border is just the thin rim.
         frame.quad(GpuInstance {
             rect: [
@@ -304,7 +310,9 @@ impl SceneBehavior for GameOverScene {
                 panel_rect[2] - 6.0,
                 panel_rect[3] - 6.0,
             ],
-            color: color::alpha(color::WALNUT_DEEP, 0.88), user: 0});
+            color: color::alpha(color::WALNUT_DEEP, 0.88),
+            user: 0,
+        });
 
         let text_align = if self.won {
             TextAlign::Right
@@ -338,7 +346,9 @@ impl SceneBehavior for GameOverScene {
         };
         frame.quad(GpuInstance {
             rect: rule_rect,
-            color: rule_color, user: 0});
+            color: rule_color,
+            user: 0,
+        });
 
         let mut rows = vec![
             (
@@ -383,7 +393,9 @@ impl SceneBehavior for GameOverScene {
             if idx % 2 == 0 {
                 frame.quad(GpuInstance {
                     rect: [panel_rect[0] + 3.0, y, panel_rect[2] - 6.0, row_h],
-                    color: color::alpha(color::WALNUT_RAISED, 0.25), user: 0});
+                    color: color::alpha(color::WALNUT_RAISED, 0.25),
+                    user: 0,
+                });
             }
 
             // Label — left-aligned, muted.

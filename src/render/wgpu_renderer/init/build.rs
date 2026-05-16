@@ -271,8 +271,25 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 },
                 count: None,
             },
+            wgpu::BindGroupLayoutEntry {
+                binding: 8,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ],
     });
+
+    let tile_env_distortion_placeholder =
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("tile-env-distortion-disabled"),
+            contents: bytemuck::bytes_of(&crate::render::hallway_glb::HallwayDistortion::default()),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
 
     // Outline shell: frame uniform only — per-tile model/colour use a second
     // vertex buffer (Instance step) so we never need storage buffers in VS
@@ -1829,7 +1846,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         cache: None,
     });
 
-
     let tonemap_bind_group_layout =
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("tonemap-bg-layout"),
@@ -1945,7 +1961,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             },
         ],
     });
-
 
     let probe_gi_frame_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("probe-gi-frame-uniform"),
@@ -2547,6 +2562,14 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     }),
                     usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 });
+                let distortion_buffer =
+                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("shop-env-distortion"),
+                        contents: bytemuck::bytes_of(
+                            &crate::render::hallway_glb::HallwayDistortion::default(),
+                        ),
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    });
                 let bind_groups: Vec<wgpu::BindGroup> = prims
                     .iter()
                     .enumerate()
@@ -2589,12 +2612,17 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                                     binding: 7,
                                     resource: wgpu::BindingResource::TextureView(&p.emissive_view),
                                 },
+                                wgpu::BindGroupEntry {
+                                    binding: 8,
+                                    resource: distortion_buffer.as_entire_binding(),
+                                },
                             ],
                         })
                     })
                     .collect();
                 gpu_wrap = Some(ShopEnvironmentGpu {
                     uniform_buffer,
+                    distortion_buffer,
                     bind_groups,
                     archive_sign_decal_texture: None,
                 });
@@ -2734,6 +2762,14 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     }),
                     usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 });
+                let distortion_buffer =
+                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("hallway-env-distortion"),
+                        contents: bytemuck::bytes_of(
+                            &crate::render::hallway_glb::HallwayDistortion::default(),
+                        ),
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    });
                 let bind_groups: Vec<wgpu::BindGroup> = prims
                     .iter()
                     .enumerate()
@@ -2778,12 +2814,17 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                                     binding: 7,
                                     resource: wgpu::BindingResource::TextureView(&p.emissive_view),
                                 },
+                                wgpu::BindGroupEntry {
+                                    binding: 8,
+                                    resource: distortion_buffer.as_entire_binding(),
+                                },
                             ],
                         })
                     })
                     .collect();
                 gpu_wrap = Some(ShopEnvironmentGpu {
                     uniform_buffer,
+                    distortion_buffer,
                     bind_groups,
                     archive_sign_decal_texture: None,
                 });
@@ -2976,6 +3017,13 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 }),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
+            let distortion_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("archive-env-distortion"),
+                contents: bytemuck::bytes_of(
+                    &crate::render::hallway_glb::HallwayDistortion::default(),
+                ),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
             let bind_groups: Vec<wgpu::BindGroup> = prims
                 .iter()
                 .enumerate()
@@ -3018,12 +3066,17 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                                 binding: 7,
                                 resource: wgpu::BindingResource::TextureView(&p.emissive_view),
                             },
+                            wgpu::BindGroupEntry {
+                                binding: 8,
+                                resource: distortion_buffer.as_entire_binding(),
+                            },
                         ],
                     })
                 })
                 .collect();
             gpu_wrap = Some(ShopEnvironmentGpu {
                 uniform_buffer,
+                distortion_buffer,
                 bind_groups,
                 archive_sign_decal_texture: Some(archive_sign_decal_tex),
             });
@@ -3586,6 +3639,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         globals_buffer,
         globals_bind_group,
         tile_material_layout,
+        tile_env_distortion_placeholder,
         tile_outline_frame_uniform_buffer,
         tile_outline_instance_buffer,
         tile_outline_frame_bind_group,

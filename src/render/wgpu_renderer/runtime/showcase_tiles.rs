@@ -82,6 +82,7 @@ impl WgpuRenderer {
                         shadow_caster_layout: &self.shadow_caster_layout,
                         primitives: &self.tile_primitives,
                         decal_atlas,
+                        distortion_placeholder: &self.tile_env_distortion_placeholder,
                     };
                     let stg = make_showcase_tile_gpu(&ctx, self.tile_base_color_factor, tile);
                     self.showcase_tiles.push(stg);
@@ -165,6 +166,7 @@ impl WgpuRenderer {
                             shadow_caster_layout: &self.shadow_caster_layout,
                             primitives: &self.tile_primitives,
                             decal_atlas,
+                            distortion_placeholder: &self.tile_env_distortion_placeholder,
                         };
                         self.showcase_tiles[slot_cursor] =
                             make_showcase_tile_gpu(&ctx, self.tile_base_color_factor, &p.tile);
@@ -282,7 +284,9 @@ impl WgpuRenderer {
                             let gy = overlay_y + (overlay_h - gh) * 0.5;
                             tile_glows.push(GpuInstance {
                                 rect: [gx, gy, gw, gh],
-                                color: p.glow_color.unwrap_or([1.00, 0.38, 0.05, 0.62]), user: 0});
+                                color: p.glow_color.unwrap_or([1.00, 0.38, 0.05, 0.62]),
+                                user: 0,
+                            });
                         }
                     }
 

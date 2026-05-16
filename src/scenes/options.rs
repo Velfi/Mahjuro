@@ -93,7 +93,6 @@ enum Row {
     AutoCashInOnFullStructure,
     Hints,
     GlyphPrompts,
-    RebindController,
     ExportPlayStats,
     SaveAndProfiles,
 }
@@ -135,7 +134,6 @@ const ROWS: &[Row] = &[
     Row::AutoCashInOnFullStructure,
     Row::Hints,
     Row::GlyphPrompts,
-    Row::RebindController,
     Row::ExportPlayStats,
     Row::SaveAndProfiles,
 ];
@@ -176,7 +174,6 @@ const CONTENT: &[ContentSlot] = &[
     ContentSlot::Row(Row::AutoCashInOnFullStructure),
     ContentSlot::Row(Row::Hints),
     ContentSlot::Row(Row::GlyphPrompts),
-    ContentSlot::Row(Row::RebindController),
     ContentSlot::Header(Section::Data),
     ContentSlot::Row(Row::ExportPlayStats),
     ContentSlot::Row(Row::SaveAndProfiles),
@@ -322,9 +319,6 @@ pub struct OptionsScene {
     export_requested: bool,
     /// User chose Save & profiles — open profile picker then return here.
     profile_select_requested: bool,
-    /// User activated "Rebind controller" this frame — owner pushes
-    /// [`GameEvent::OpenControllerMappingHelp`] on the next drain.
-    rebind_controller_requested: bool,
     /// Smooth-scrolling state for the content pane.
     scroll: SmoothScroll,
     /// While `Some`, LMB is held after pressing on this row's slider track.
@@ -381,7 +375,6 @@ impl OptionsScene {
             cancel_requested: false,
             export_requested: false,
             profile_select_requested: false,
-            rebind_controller_requested: false,
             scroll: SmoothScroll::new(),
             dragging_slider: None,
             master_volume: settings.master_volume,
@@ -486,12 +479,6 @@ impl OptionsScene {
     pub fn take_profile_select_requested(&mut self) -> bool {
         let v = self.profile_select_requested;
         self.profile_select_requested = false;
-        v
-    }
-
-    pub fn take_rebind_controller_requested(&mut self) -> bool {
-        let v = self.rebind_controller_requested;
-        self.rebind_controller_requested = false;
         v
     }
 
@@ -610,7 +597,7 @@ impl OptionsScene {
             Row::Hints => self.hints_enabled = !self.hints_enabled,
             Row::GlyphPrompts => self.glyph_prompt = self.glyph_prompt.next(),
             Row::UndoDiscard => self.discard_undo_enabled = !self.discard_undo_enabled,
-            Row::RebindController | Row::ExportPlayStats | Row::SaveAndProfiles => return,
+            Row::ExportPlayStats | Row::SaveAndProfiles => return,
             _ => return,
         }
         self.save_settings();
@@ -649,7 +636,7 @@ impl OptionsScene {
             Row::Hints => self.hints_enabled = !self.hints_enabled,
             Row::GlyphPrompts => self.glyph_prompt = self.glyph_prompt.prev(),
             Row::UndoDiscard => self.discard_undo_enabled = !self.discard_undo_enabled,
-            Row::RebindController | Row::ExportPlayStats | Row::SaveAndProfiles => return,
+            Row::ExportPlayStats | Row::SaveAndProfiles => return,
             _ => return,
         }
         self.save_settings();
@@ -733,9 +720,6 @@ impl OptionsScene {
             Row::UndoDiscard => {
                 self.discard_undo_enabled = !self.discard_undo_enabled;
                 self.save_settings();
-            }
-            Row::RebindController => {
-                self.rebind_controller_requested = true;
             }
             Row::ExportPlayStats => {
                 self.export_requested = true;
@@ -955,7 +939,9 @@ impl OptionsScene {
             if is_active {
                 instances.push(GpuInstance {
                     rect: [layout.toc_x, y, layout.toc_w, layout.toc_item_h],
-                    color: color::WALNUT_SOFT, user: 0});
+                    color: color::WALNUT_SOFT,
+                    user: 0,
+                });
             }
 
             let text_color = if is_active {
@@ -1019,7 +1005,9 @@ impl OptionsScene {
                             layout.content_w,
                             (2.0 * layout.scale).max(1.0),
                         ],
-                        color: color::WALNUT_SOFT, user: 0});
+                        color: color::WALNUT_SOFT,
+                        user: 0,
+                    });
                 }
                 ContentSlot::Row(row) => {
                     let is_focused = !self.back_focused && row == self.focused;
@@ -1050,13 +1038,17 @@ impl OptionsScene {
             let indicator_h = layout.visible_slots as f32 * (layout.slot_h + layout.slot_gap);
             instances.push(GpuInstance {
                 rect: [indicator_x, indicator_y, indicator_w, indicator_h],
-                color: color::WALNUT_INK, user: 0});
+                color: color::WALNUT_INK,
+                user: 0,
+            });
             let thumb_h = (indicator_h * (layout.visible_slots as f32 / CONTENT.len() as f32))
                 .max(12.0 * layout.scale);
             let thumb_y = indicator_y + (indicator_h - thumb_h) * (smooth / max_scroll);
             instances.push(GpuInstance {
                 rect: [indicator_x, thumb_y, indicator_w, thumb_h],
-                color: color::GOLD, user: 0});
+                color: color::GOLD,
+                user: 0,
+            });
         }
 
         // ── Back button ────────────────────────────────────────────────
@@ -1067,7 +1059,9 @@ impl OptionsScene {
         };
         instances.push(GpuInstance {
             rect: [layout.back_x, layout.back_y, layout.back_w, layout.back_h],
-            color: back_bg, user: 0});
+            color: back_bg,
+            user: 0,
+        });
         let back_text = if self.back_focused {
             color::CHAMPAGNE
         } else {
@@ -1144,7 +1138,9 @@ impl OptionsScene {
                 };
                 instances.push(GpuInstance {
                     rect: [row_x, row_y, row_w, row_h],
-                    color: bg_color, user: 0});
+                    color: bg_color,
+                    user: 0,
+                });
 
                 let text_color = if is_focused {
                     [1.0, 1.0, 1.0, 1.0]
@@ -1164,7 +1160,9 @@ impl OptionsScene {
                 let track_y = row_y + (row_h - track_h) * 0.5;
                 instances.push(GpuInstance {
                     rect: [slider_x, track_y, slider_w, track_h],
-                    color: color::WALNUT_INK, user: 0});
+                    color: color::WALNUT_INK,
+                    user: 0,
+                });
                 let fill_w = slider_w * fill_ratio;
                 let fill_color = if is_focused {
                     color::GOLD
@@ -1173,7 +1171,9 @@ impl OptionsScene {
                 };
                 instances.push(GpuInstance {
                     rect: [slider_x, track_y, fill_w, track_h],
-                    color: fill_color, user: 0});
+                    color: fill_color,
+                    user: 0,
+                });
                 let knob_size = track_h * 2.5;
                 let knob_x = slider_x + fill_w - knob_size * 0.5;
                 let knob_y = track_y + (track_h - knob_size) * 0.5;
@@ -1184,7 +1184,9 @@ impl OptionsScene {
                 };
                 instances.push(GpuInstance {
                     rect: [knob_x, knob_y, knob_size, knob_size],
-                    color: knob_color, user: 0});
+                    color: knob_color,
+                    user: 0,
+                });
                 let readout = match row {
                     Row::Gamma => format!("{:.2}", value),
                     _ => format!("{}%", (value * 100.0).round() as u32),
@@ -1205,7 +1207,9 @@ impl OptionsScene {
                 };
                 instances.push(GpuInstance {
                     rect: [row_x, row_y, row_w, row_h],
-                    color: bg_color, user: 0});
+                    color: bg_color,
+                    user: 0,
+                });
                 let text_color = if is_focused {
                     color::CHAMPAGNE
                 } else {
@@ -1275,7 +1279,6 @@ impl OptionsScene {
                             "OFF"
                         }
                     ),
-                    Row::RebindController => "Controller mapping help — Space / click".into(),
                     Row::ExportPlayStats => "Export play stats (HTML) — Space / click".into(),
                     Row::SaveAndProfiles => "Save & profiles — switch slot or delete save".into(),
                     _ => unreachable!(),
@@ -1329,9 +1332,6 @@ impl SceneBehavior for OptionsScene {
                 }),
             }
         }
-        if self.take_rebind_controller_requested() {
-            ctx.bus.push(GameEvent::OpenControllerMappingHelp);
-        }
         if self.take_profile_select_requested() {
             return Some(Scene::ProfileSelect(ProfileSelectScene::from_options_menu()));
         }
@@ -1344,7 +1344,9 @@ impl SceneBehavior for OptionsScene {
 
         let mut instances = vec![GpuInstance {
             rect: [0.0, 0.0, w, h],
-            color: color::WALNUT_INK, user: 0}];
+            color: color::WALNUT_INK,
+            user: 0,
+        }];
         let mut text_labels = Vec::new();
         let mut buttons = Vec::new();
 

@@ -99,7 +99,7 @@ impl Default for ShopPositions {
             owned_talismans: Placement {
                 nx: 0.0,
                 ny: 0.0,
-                lift_mm: 3.574_346_5,
+                lift_mm: 3.57,
                 rx_deg: -34.0,
                 ry_deg: 0.0,
                 rz_deg: 0.0,
@@ -111,7 +111,14 @@ impl Default for ShopPositions {
             camera_target_z_frac: 0.10,
             celeb_pack_closeup: Placement::at(0.358_506_95, 0.010_361_195, -47.252_86),
             celeb_pack_reveal: Placement::at(-3.352_761_3e-8, 0.55, 36.887_23),
-            celeb_zodiac: Placement::at(0.5, 0.78963876, 134.33585),
+            celeb_zodiac: Placement {
+                nx: 0.0,
+                ny: 0.0,
+                lift_mm: -523.66,
+                rx_deg: -12.0,
+                ry_deg: 0.0,
+                rz_deg: 0.0,
+            },
         }
     }
 }

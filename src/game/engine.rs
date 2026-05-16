@@ -347,7 +347,6 @@ pub struct PickBlindReadModel {
     pub boss_kind: Option<BossKind>,
     pub boss_name: Option<String>,
     pub boss_description: Option<String>,
-    pub boss_tier_label: Option<&'static str>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -568,7 +567,7 @@ impl<'a> GameEngine<'a> {
 
     pub fn read_pick_blind(run: &RunState) -> PickBlindReadModel {
         let boss_kind = run.boss.upcoming;
-        let (boss_name, boss_description, boss_tier_label) = if let Some(kind) = boss_kind {
+        let (boss_name, boss_description) = if let Some(kind) = boss_kind {
             let def = kind.def();
             let description = run
                 .boss
@@ -579,10 +578,9 @@ impl<'a> GameEngine<'a> {
             (
                 Some(def.name.to_string()),
                 Some(description),
-                Some(def.tier.label()),
             )
         } else {
-            (None, None, None)
+            (None, None)
         };
         PickBlindReadModel {
             upcoming_blind: run.upcoming_blind,
@@ -593,7 +591,6 @@ impl<'a> GameEngine<'a> {
             boss_kind,
             boss_name,
             boss_description,
-            boss_tier_label,
         }
     }
 
@@ -1185,11 +1182,8 @@ impl<'a> GameEngine<'a> {
                     );
                 }
                 let consumable = self.run.consumables.items[index];
-                let refund = consumable_sell_price_for_mode(
-                    consumable,
-                    &self.run.mode,
-                    &self.run.relics,
-                );
+                let refund =
+                    consumable_sell_price_for_mode(consumable, &self.run.mode, &self.run.relics);
                 self.run.consumables.items.remove(index);
                 self.run
                     .apply_gold_reward(refund as i32, Some(&mut self.bus));

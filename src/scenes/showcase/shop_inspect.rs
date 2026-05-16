@@ -1,10 +1,10 @@
-//! Frozen shop storeroom + item turntable inspect on the showcase overlay.
+//! Shop storeroom + camera dolly into orbit inspect on the showcase overlay.
 
 use std::time::Instant;
 
 use crate::render::draw_cmd::{ShowcaseRenderHints, UiFrame};
 use crate::scenes::object3d_inspect::ItemInspectOrbitState;
-use crate::scenes::shop::{self, render_shop_inspect_isolated_frame};
+use crate::scenes::shop::{self, render_shop_frame};
 use crate::ui::input::UiAction;
 
 use crate::scenes::{BackgroundId, DrawCtx, OverlayRequest, SceneTransition, UpdateCtx};
@@ -24,11 +24,9 @@ impl ShopInspectPresenter {
 
     pub fn render_hints() -> ShowcaseRenderHints {
         ShowcaseRenderHints {
-            // Storeroom anchors are authored for `pixel_to_world` + shelf layout; ray-plane
-            // placement is for full-screen pack/zodiac subjects, not the GLB room + vitrine.
             object3d_use_camera_ray_plane_z: false,
-            showcase_tiles_use_camera_ray_plane_z: true,
-            suppress_table_shadows: true,
+            showcase_tiles_use_camera_ray_plane_z: false,
+            suppress_table_shadows: false,
             tile_pack_celebration_tonemap: false,
             shop_tonemap_and_lit_mesh_context: true,
             collection_tonemap_context: false,
@@ -77,7 +75,7 @@ impl ShopInspectPresenter {
 
     pub fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         if let Some(shop) = ctx.suspended_shop {
-            let mut frame = render_shop_inspect_isolated_frame(shop, ctx, &self.orbit);
+            let mut frame = render_shop_frame(shop, ctx, Some(&self.orbit));
             frame.showcase_render_hints = Self::render_hints();
             return frame;
         }

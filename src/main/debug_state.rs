@@ -6,8 +6,8 @@
 
 use crate::debug_menu::DebugMenuBar;
 use crate::debug_overlays::{
-    CameraDebugOverlay, DebugVisibilityOverlay, SfxTestOverlay, ShopEnvDebugOverlay,
-    TonemapDebugOverlay, TuningOverlay,
+    CameraDebugOverlay, DebugVisibilityOverlay, HallwayDistortionDebugOverlay, SfxTestOverlay,
+    ShopEnvDebugOverlay, TonemapDebugOverlay, TuningOverlay,
 };
 use crate::render::draw_cmd::CameraParams;
 use crate::render::shop_glb::ShopEnvLightingTune;
@@ -66,6 +66,8 @@ pub struct DebugState {
     pub sfx_test_overlay: Option<SfxTestOverlay>,
     pub camera_debug_overlay: Option<CameraDebugOverlay>,
     pub shop_env_debug_overlay: Option<ShopEnvDebugOverlay>,
+    /// Pick-blind hallway vertex warp tuning (left panel).
+    pub hallway_distortion_debug_overlay: Option<HallwayDistortionDebugOverlay>,
     /// Per-scene tonemap + VHS tuning overlay. Edits the in-memory
     /// `App.tonemap_tuning` live; Save persists under
     /// `TonemapTuning:<scene_key>` (or `_default`); Reset clears that key.
@@ -106,6 +108,7 @@ impl DebugState {
             sfx_test_overlay: None,
             camera_debug_overlay: None,
             shop_env_debug_overlay: None,
+            hallway_distortion_debug_overlay: None,
             tonemap_debug_overlay: None,
             object_hit_test_armed: false,
             arrange_mode: None,
@@ -121,6 +124,7 @@ impl DebugState {
             || self.sfx_test_overlay.is_some()
             || self.camera_debug_overlay.is_some()
             || self.shop_env_debug_overlay.is_some()
+            || self.hallway_distortion_debug_overlay.is_some()
             || self.visibility_overlay.is_some()
             || self.tonemap_debug_overlay.is_some()
     }

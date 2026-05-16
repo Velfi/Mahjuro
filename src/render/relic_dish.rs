@@ -1194,6 +1194,7 @@ pub fn build_relic_mesh_from_rgba(rgba: &[u8], width: u32, height: u32) -> Optio
     // outer contours or interior holes. Each loop captures concave edges that
     // the old radial sweep would have convex-hulled over.
     let contours = trace_silhouette_contours(&solid, w as i32, h as i32);
+    let contours = filter_border_noise_loops(contours, width as f32, height as f32);
     let polygons = group_contours_into_polygons(contours);
     if polygons.is_empty() {
         return None;
@@ -1382,6 +1383,56 @@ pub fn build_relic_mesh_from_rgba(rgba: &[u8], width: u32, height: u32) -> Optio
             specular_power: 28.0,
         },
     })
+}
+
+/// Drop marching-squares loops that ride the image border when at least one
+/// interior outer loop exists.
+///
+/// Some authored masks contain faint anti-aliased edge noise that crosses the
+/// luma threshold and creates a giant border-hugging contour. Extruding that
+/// contour builds bogus side walls in 3D (often seen as white wire/triangle
+/// artifacts in inspect mode). We keep border loops only when they are the only
+/// outer silhouette available so full-bleed masks still work.
+fn filter_border_noise_loops(
+    loops: Vec<Vec<(f32, f32)>>,
+    width: f32,
+    height: f32,
+) -> Vec<Vec<(f32, f32)>> {
+    if loops.is_empty() {
+        return loops;
+    }
+    let x_max = width.max(1.0);
+    let y_max = height.max(1.0);
+    // Marching-squares loops sit on edge midpoints, so border-adjacent loops
+    // often land at ~0.5 and ~(w-0.5)/(h-0.5), not exactly 0 and w/h.
+    const EDGE_EPS: f32 = 1.0;
+    let touches_border = |ring: &[(f32, f32)]| -> bool {
+        let (xmin, ymin, xmax, ymax) = bbox(ring);
+        xmin <= EDGE_EPS
+            || ymin <= EDGE_EPS
+            || xmax >= (x_max - EDGE_EPS)
+            || ymax >= (y_max - EDGE_EPS)
+    };
+    let has_non_border_outer = loops
+        .iter()
+        .any(|ring| ring.len() >= 3 && signed_area_f32(ring) > 0.0 && !touches_border(ring));
+    if !has_non_border_outer {
+        return loops;
+    }
+    let total_loops = loops.len();
+    let filtered: Vec<Vec<(f32, f32)>> = loops
+        .into_iter()
+        .filter(|ring| !touches_border(ring))
+        .collect();
+    let dropped = total_loops.saturating_sub(filtered.len());
+    if dropped > 0 {
+        log::warn!(
+            "relic silhouette: dropped {dropped} border contour loop(s) as mask noise (image {}x{})",
+            width as u32,
+            height as u32
+        );
+    }
+    filtered
 }
 
 /// A closed polygon in pixel coords: one outer contour and zero or more holes.
@@ -1783,5 +1834,23 @@ mod silhouette_tests {
         let polys = group_contours_into_polygons(loops);
         assert_eq!(polys.len(), 1, "expected one polygon");
         assert_eq!(polys[0].holes.len(), 1, "expected one hole");
+    }
+
+    #[test]
+    fn border_noise_loop_is_filtered_when_interior_outer_exists() {
+        let border_outer = vec![(0.0, 0.0), (16.0, 0.0), (16.0, 16.0), (0.0, 16.0)];
+        let interior_outer = vec![(4.0, 4.0), (12.0, 4.0), (12.0, 12.0), (4.0, 12.0)];
+        let loops = vec![border_outer, interior_outer.clone()];
+        let filtered = filter_border_noise_loops(loops, 16.0, 16.0);
+        assert_eq!(filtered.len(), 1, "border loop should be dropped");
+        assert_eq!(filtered[0], interior_outer);
+    }
+
+    #[test]
+    fn border_loop_kept_when_it_is_only_outer() {
+        let border_outer = vec![(0.0, 0.0), (16.0, 0.0), (16.0, 16.0), (0.0, 16.0)];
+        let filtered = filter_border_noise_loops(vec![border_outer.clone()], 16.0, 16.0);
+        assert_eq!(filtered.len(), 1, "single full-bleed loop should be kept");
+        assert_eq!(filtered[0], border_outer);
     }
 }

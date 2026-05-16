@@ -62,6 +62,8 @@ pub enum DebugAction {
     OpenCameraDebug,
     /// Live-edit `shop.glb` room scale (`window_h *` multiplier).
     OpenShopEnvDebug,
+    /// Pick-blind hallway vertex warp (sliders; Ctrl+C copies a Rust snapshot).
+    OpenHallwayHallFxDebug,
     /// Open the per-scene tonemap + VHS tuning overlay. Edits apply live
     /// and Save persists for the active scene only (`gameplay`, `shop`,
     /// `pick_blind`, …) — like arrange mode but for the post-process pass.
@@ -190,6 +192,13 @@ impl DebugMenuBar {
         let shop_env_item = MenuItem::new("Shop Env & Lighting...", true, None);
         mappings.push((shop_env_item.id().clone(), DebugAction::OpenShopEnvDebug));
         let _ = tuning_sub.append(&shop_env_item);
+
+        let hall_fx_item = MenuItem::new("Hallway hall FX…", true, None);
+        mappings.push((
+            hall_fx_item.id().clone(),
+            DebugAction::OpenHallwayHallFxDebug,
+        ));
+        let _ = tuning_sub.append(&hall_fx_item);
 
         let tonemap_item = MenuItem::new("Tonemap (per scene)...", true, None);
         mappings.push((tonemap_item.id().clone(), DebugAction::OpenTonemapDebug));
@@ -360,7 +369,7 @@ impl DebugMenuBar {
         // run states without rerolling antes until the right boss appears.
         let boss_sub = Submenu::new("Set Current Boss", true);
         for def in all_bosses().iter().chain(final_bosses().iter()) {
-            let item = MenuItem::new(format!("{} [{}]", def.name, def.tier.label()), true, None);
+            let item = MenuItem::new(def.name, true, None);
             mappings.push((item.id().clone(), DebugAction::SetBoss(def.kind)));
             let _ = boss_sub.append(&item);
         }

@@ -283,6 +283,11 @@ impl ShopScene {
             drawn_room_gltf_height_scale: std::cell::Cell::new(
                 crate::render::shop_glb::SHOP_ENV_HEIGHT_SCALE,
             ),
+            inspect_dolly: std::cell::Cell::new(crate::scenes::object3d_inspect::InspectDolly {
+                phase: 0.0,
+                last_tick: Instant::now(),
+            }),
+            last_inspect_cam: std::cell::Cell::new(None),
             west_sell_hold_started: None,
         }
     }

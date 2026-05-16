@@ -396,7 +396,9 @@ pub(super) fn push_free_badge(
 
     quads.push(GpuInstance {
         rect: [badge_x, badge_y, badge_w, badge_h],
-        color: [color::BRASS[0], color::BRASS[1], color::BRASS[2], 0.95], user: 0});
+        color: [color::BRASS[0], color::BRASS[1], color::BRASS[2], 0.95],
+        user: 0,
+    });
     quads.push(GpuInstance {
         rect: [badge_x + 2.0, badge_y + 2.0, badge_w - 4.0, badge_h - 4.0],
         color: [
@@ -404,7 +406,9 @@ pub(super) fn push_free_badge(
             color::WALNUT_DEEP[1],
             color::WALNUT_DEEP[2],
             0.96,
-        ], user: 0});
+        ],
+        user: 0,
+    });
     texts.push(TextLabel {
         rect: [badge_x + 4.0, badge_y, badge_w - 8.0, badge_h],
         text: "FREE".to_string(),

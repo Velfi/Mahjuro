@@ -43,8 +43,8 @@ fn specular_from_height_luma(luma: u8) -> u8 {
             as u8;
     }
     if luma >= HEIGHT_ALPHA_HI {
-        let t = (luma - HEIGHT_ALPHA_HI) as f32
-            / (SPECULAR_RAMP_START - HEIGHT_ALPHA_HI).max(1) as f32;
+        let t =
+            (luma - HEIGHT_ALPHA_HI) as f32 / (SPECULAR_RAMP_START - HEIGHT_ALPHA_HI).max(1) as f32;
         return (SPECULAR_ENAMEL as f32 * (0.65 + 0.35 * t)).round() as u8;
     }
     SPECULAR_ENAMEL
@@ -71,7 +71,10 @@ fn pack_relief_rgba(
                 .map(|s| {
                     let mx = ((x as u64) * (s.width() as u64) / (w as u64)) as u32;
                     let my = ((y as u64) * (s.height() as u64) / (h as u64)) as u32;
-                    s.get_pixel(mx.min(s.width().saturating_sub(1)), my.min(s.height().saturating_sub(1)))[0]
+                    s.get_pixel(
+                        mx.min(s.width().saturating_sub(1)),
+                        my.min(s.height().saturating_sub(1)),
+                    )[0]
                 })
                 .unwrap_or_else(|| specular_from_height_luma(height_l));
             let i = ((y * w + x) * 4) as usize;
@@ -157,32 +160,31 @@ pub(crate) fn decode_relic_assets(id: RelicId, name: &'static str) -> Option<Dec
 
     let relief_path = id.source_heightmap_path();
     let specular_path = id.source_specular_path();
-    let (relief_rgba, relief_width, relief_height) =
-        if let Some(file) = crate::asset_path::get(&relief_path) {
-            match image::load_from_memory(&file.data) {
-                Ok(himg) => {
-                    let height = himg.into_rgba8();
-                    let specular = crate::asset_path::get(&specular_path).and_then(|spec_file| {
-                        match image::load_from_memory(&spec_file.data) {
-                            Ok(sim) => Some(sim.into_luma8()),
-                            Err(e) => {
-                                log::warn!(
-                                    "failed to decode relic specular map {specular_path}: {e}"
-                                );
-                                None
-                            }
+    let (relief_rgba, relief_width, relief_height) = if let Some(file) =
+        crate::asset_path::get(&relief_path)
+    {
+        match image::load_from_memory(&file.data) {
+            Ok(himg) => {
+                let height = himg.into_rgba8();
+                let specular = crate::asset_path::get(&specular_path).and_then(|spec_file| {
+                    match image::load_from_memory(&spec_file.data) {
+                        Ok(sim) => Some(sim.into_luma8()),
+                        Err(e) => {
+                            log::warn!("failed to decode relic specular map {specular_path}: {e}");
+                            None
                         }
-                    });
-                    pack_relief_rgba(&height, specular.as_ref())
-                }
-                Err(e) => {
-                    log::warn!("failed to decode relic heightmap {relief_path}: {e}");
-                    flat_relief_rgba()
-                }
+                    }
+                });
+                pack_relief_rgba(&height, specular.as_ref())
             }
-        } else {
-            flat_relief_rgba()
-        };
+            Err(e) => {
+                log::warn!("failed to decode relic heightmap {relief_path}: {e}");
+                flat_relief_rgba()
+            }
+        }
+    } else {
+        flat_relief_rgba()
+    };
 
     Some(DecodedRelicImage {
         id,

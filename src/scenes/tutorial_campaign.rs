@@ -130,11 +130,7 @@ const PART1_NUMBER_GROUPS: &[TileGroup] = &[
     TileGroup {
         label: "Terminals",
         accent: color::GOLD,
-        tiles: &[
-            (Suit::Dots, 1),
-            (Suit::Dots, 9),
-            (Suit::Characters, 9),
-        ],
+        tiles: &[(Suit::Dots, 1), (Suit::Dots, 9), (Suit::Characters, 9)],
         rows: &[],
         layout: TileGroupLayout::Flat,
         debuffed_visual: false,
@@ -595,12 +591,8 @@ impl TutorialCampaignScene {
         let mut heights = Vec::with_capacity(glossary.len());
         let mut total_h = 0.0;
         for term in glossary {
-            let lines_n = colored_keywords::colored_wrapped_line_count(
-                term,
-                term_w,
-                term_font,
-                color::STONE,
-            );
+            let lines_n =
+                colored_keywords::colored_wrapped_line_count(term, term_w, term_font, color::STONE);
             let term_h = lines_n as f32 * term_font * 1.25;
             heights.push(term_h);
             total_h += term_h;
@@ -941,13 +933,19 @@ impl SceneBehavior for TutorialCampaignScene {
         let panel_h = h * 0.84;
         bg_quads.push(GpuInstance {
             rect: [panel_x, panel_y, panel_w, panel_h],
-            color: color::WALNUT_DEEP, user: 0});
+            color: color::WALNUT_DEEP,
+            user: 0,
+        });
         bg_quads.push(GpuInstance {
             rect: [panel_x, panel_y, panel_w, (2.0 * scale).max(1.0)],
-            color: color::BRASS, user: 0});
+            color: color::BRASS,
+            user: 0,
+        });
         bg_quads.push(GpuInstance {
             rect: [panel_x, panel_y, (2.0 * scale).max(1.0), panel_h],
-            color: color::BRASS, user: 0});
+            color: color::BRASS,
+            user: 0,
+        });
         bg_quads.push(GpuInstance {
             rect: [
                 panel_x + panel_w - (2.0 * scale).max(1.0),
@@ -955,7 +953,9 @@ impl SceneBehavior for TutorialCampaignScene {
                 (2.0 * scale).max(1.0),
                 panel_h,
             ],
-            color: color::BRASS, user: 0});
+            color: color::BRASS,
+            user: 0,
+        });
         bg_quads.push(GpuInstance {
             rect: [
                 panel_x,
@@ -963,7 +963,9 @@ impl SceneBehavior for TutorialCampaignScene {
                 panel_w,
                 (2.0 * scale).max(1.0),
             ],
-            color: color::BRASS, user: 0});
+            color: color::BRASS,
+            user: 0,
+        });
 
         texts.push(TextLabel {
             rect: [
@@ -1017,7 +1019,9 @@ impl SceneBehavior for TutorialCampaignScene {
             let gx = panel_x + panel_w * 0.13 + idx as f32 * group_w;
             fg_quads.push(GpuInstance {
                 rect: [gx + group_w * 0.14, label_y, group_w * 0.72, 4.0 * scale],
-                color: group.accent, user: 0});
+                color: group.accent,
+                user: 0,
+            });
             texts.push(TextLabel {
                 rect: [gx, label_y + 10.0 * scale, group_w, 22.0 * scale],
                 text: group.label.to_string(),
@@ -1036,7 +1040,7 @@ impl SceneBehavior for TutorialCampaignScene {
             let relic_id = RelicId::MerchantsEye;
             let visual = crate::core::relic::relic_visual(relic_id);
             let face_size = relic_size * 0.82;
-            let thick = face_size * 0.28 * visual.thickness_scale;
+            let thick = face_size * 0.14 * visual.thickness_scale;
             let rp = &self.positions.shop_relic;
             relic_objects.push(Object3d {
                 pos: [
@@ -1084,7 +1088,7 @@ impl SceneBehavior for TutorialCampaignScene {
             let relic_id = RelicId::MerchantsEye;
             let visual = crate::core::relic::relic_visual(relic_id);
             let face_size = relic_size * 0.88;
-            let thick = face_size * 0.30 * visual.thickness_scale;
+            let thick = face_size * 0.15 * visual.thickness_scale;
             let rp = &self.positions.shop_relic;
             relic_objects.push(Object3d {
                 pos: [
@@ -1206,10 +1210,14 @@ impl SceneBehavior for TutorialCampaignScene {
             let note_y = layout.play_rect[1] - 10.0 * scale;
             fg_quads.push(GpuInstance {
                 rect: [note_x, note_y, note_w, note_h],
-                color: color::alpha(color::CHAMPAGNE, 0.16), user: 0});
+                color: color::alpha(color::CHAMPAGNE, 0.16),
+                user: 0,
+            });
             fg_quads.push(GpuInstance {
                 rect: [note_x, note_y, 3.0 * scale, note_h],
-                color: color::GOLD, user: 0});
+                color: color::GOLD,
+                user: 0,
+            });
             widget::push_text_block(
                 &mut texts,
                 [
@@ -1323,14 +1331,18 @@ impl SceneBehavior for TutorialCampaignScene {
                 callout_font,
                 color::CHAMPAGNE,
             );
-            let callout_h = (callout_lines_n as f32 * callout_font * 1.3 + 36.0 * scale)
-                .max(112.0 * scale);
+            let callout_h =
+                (callout_lines_n as f32 * callout_font * 1.3 + 36.0 * scale).max(112.0 * scale);
             fg_quads.push(GpuInstance {
                 rect: [callout_x, callout_y, callout_w, callout_h],
-                color: color::alpha(color::WALNUT_INK, 0.85), user: 0});
+                color: color::alpha(color::WALNUT_INK, 0.85),
+                user: 0,
+            });
             fg_quads.push(GpuInstance {
                 rect: [callout_x, callout_y, 4.0 * scale, callout_h],
-                color: color::GOLD, user: 0});
+                color: color::GOLD,
+                user: 0,
+            });
             colored_keywords::push_colored_text_block(
                 &mut texts,
                 [

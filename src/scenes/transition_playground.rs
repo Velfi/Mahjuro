@@ -484,7 +484,9 @@ impl SceneBehavior for TransitionPlaygroundScene {
         let mut frame = UiFrame::new();
         frame.quad(GpuInstance {
             rect: [0.0, 0.0, w, h],
-            color: color::WALNUT_INK, user: 0});
+            color: color::WALNUT_INK,
+            user: 0,
+        });
 
         for (scene, pose) in self.poses(layout.viewport) {
             if pose.alpha > 0.001 {
@@ -762,7 +764,9 @@ fn draw_controls(
             layout.panel[2] - 28.0 * scale,
             1.0,
         ],
-        color: color::alpha(color::UMBER, 0.45), user: 0});
+        color: color::alpha(color::UMBER, 0.45),
+        user: 0,
+    });
 }
 
 fn draw_button(
@@ -817,7 +821,9 @@ fn draw_bar(
             rect[2] - inset * 2.0,
             rect[3] - inset * 2.0,
         ],
-        color: color::alpha(color::WALNUT_INK, 0.95), user: 0});
+        color: color::alpha(color::WALNUT_INK, 0.95),
+        user: 0,
+    });
     frame.quad(GpuInstance {
         rect: [
             rect[0] + inset,
@@ -825,7 +831,9 @@ fn draw_bar(
             (rect[2] - inset * 2.0) * t.clamp(0.0, 1.0),
             rect[3] - inset * 2.0,
         ],
-        color: fill, user: 0});
+        color: fill,
+        user: 0,
+    });
     if focused {
         push_focus_outline(frame, rect);
     }
@@ -1050,27 +1058,43 @@ fn push_scene_panel(
     let rect = transform_rect(viewport, [0.025, 0.03, 0.95, 0.92], pose);
     frame.quad(GpuInstance {
         rect: [rect[0], rect[1], rect[2], 2.0],
-        color: border, user: 0});
+        color: border,
+        user: 0,
+    });
     frame.quad(GpuInstance {
         rect: [rect[0], rect[1] + rect[3] - 2.0, rect[2], 2.0],
-        color: border, user: 0});
+        color: border,
+        user: 0,
+    });
 }
 
 fn push_panel(frame: &mut UiFrame, rect: [f32; 4], bg: [f32; 4], border: [f32; 4]) {
-    frame.quad(GpuInstance { rect, color: bg, user: 0});
+    frame.quad(GpuInstance {
+        rect,
+        color: bg,
+        user: 0,
+    });
     let t = (rect[3] * 0.018).clamp(1.0, 2.0);
     frame.quad(GpuInstance {
         rect: [rect[0], rect[1], rect[2], t],
-        color: border, user: 0});
+        color: border,
+        user: 0,
+    });
     frame.quad(GpuInstance {
         rect: [rect[0], rect[1] + rect[3] - t, rect[2], t],
-        color: border, user: 0});
+        color: border,
+        user: 0,
+    });
     frame.quad(GpuInstance {
         rect: [rect[0], rect[1] + t, t, rect[3] - t * 2.0],
-        color: border, user: 0});
+        color: border,
+        user: 0,
+    });
     frame.quad(GpuInstance {
         rect: [rect[0] + rect[2] - t, rect[1] + t, t, rect[3] - t * 2.0],
-        color: border, user: 0});
+        color: border,
+        user: 0,
+    });
 }
 
 fn push_focus_outline(frame: &mut UiFrame, rect: [f32; 4]) {
@@ -1084,16 +1108,24 @@ fn push_focus_outline(frame: &mut UiFrame, rect: [f32; 4]) {
     let t = pad.max(2.0);
     frame.quad(GpuInstance {
         rect: [outer[0], outer[1], outer[2], t],
-        color: color::CHAMPAGNE, user: 0});
+        color: color::CHAMPAGNE,
+        user: 0,
+    });
     frame.quad(GpuInstance {
         rect: [outer[0], outer[1] + outer[3] - t, outer[2], t],
-        color: color::CHAMPAGNE, user: 0});
+        color: color::CHAMPAGNE,
+        user: 0,
+    });
     frame.quad(GpuInstance {
         rect: [outer[0], outer[1] + t, t, outer[3] - t * 2.0],
-        color: color::CHAMPAGNE, user: 0});
+        color: color::CHAMPAGNE,
+        user: 0,
+    });
     frame.quad(GpuInstance {
         rect: [outer[0] + outer[2] - t, outer[1] + t, t, outer[3] - t * 2.0],
-        color: color::CHAMPAGNE, user: 0});
+        color: color::CHAMPAGNE,
+        user: 0,
+    });
 }
 
 fn push_rect(
@@ -1105,7 +1137,9 @@ fn push_rect(
 ) {
     frame.quad(GpuInstance {
         rect: transform_rect(viewport, local, pose),
-        color: color_rgba, user: 0});
+        color: color_rgba,
+        user: 0,
+    });
 }
 
 /// Visual style for a single playground `push_label` call: base RGBA

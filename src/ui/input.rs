@@ -143,7 +143,7 @@ pub struct GamepadPollCtx {
     pub shop_face_buttons: bool,
     /// Collection scene: route gamepad North (and **E**) to inspect, same as shop North.
     pub collection_uses_north_for_inspect: bool,
-    /// Showcase **orbit** overlay ([`crate::scenes::Scene::Showcase`] inspect presenters) — sample right stick + triggers for orbit/zoom.
+    /// Showcase **orbit** overlay ([`crate::scenes::Scene::Showcase`] inspect presenters) — right stick, WASD / arrows, LMB drag, triggers + wheel for orbit/zoom.
     pub item_inspect_overlay: bool,
 }
 
@@ -788,6 +788,49 @@ impl InputState {
                 (self.item_inspect_orbit_stick.0 + sx).clamp(-1.0, 1.0);
             self.item_inspect_orbit_stick.1 =
                 (self.item_inspect_orbit_stick.1 + sy).clamp(-1.0, 1.0);
+
+            // Keyboard / arrows: same axes as the right stick (WASD + arrows).
+            // Shift+W/↑ / Shift+S/↓ feed zoom (same sign as RT−LT in [`Self::sample_item_inspect_analog`]),
+            // not pitch orbit.
+            let ks = shell.pump.keyboard_state();
+            let shift = ks.is_scancode_pressed(Scancode::LShift)
+                || ks.is_scancode_pressed(Scancode::RShift);
+            let up_orbit = ks.is_scancode_pressed(Scancode::Up) || ks.is_scancode_pressed(Scancode::W);
+            let down_orbit =
+                ks.is_scancode_pressed(Scancode::Down) || ks.is_scancode_pressed(Scancode::S);
+            if shift {
+                if up_orbit {
+                    self.item_inspect_zoom_triggers += 1.0;
+                }
+                if down_orbit {
+                    self.item_inspect_zoom_triggers -= 1.0;
+                }
+            }
+            self.item_inspect_zoom_triggers = self.item_inspect_zoom_triggers.clamp(-3.0, 3.0);
+
+            let mut kx = 0.0f32;
+            let mut ky = 0.0f32;
+            if ks.is_scancode_pressed(Scancode::Right) || ks.is_scancode_pressed(Scancode::D) {
+                kx += 1.0;
+            }
+            if ks.is_scancode_pressed(Scancode::Left) || ks.is_scancode_pressed(Scancode::A) {
+                kx -= 1.0;
+            }
+            if up_orbit && !shift {
+                ky += 1.0;
+            }
+            if down_orbit && !shift {
+                ky -= 1.0;
+            }
+            let k_len = (kx * kx + ky * ky).sqrt();
+            if k_len > 1e-4 {
+                kx /= k_len;
+                ky /= k_len;
+            }
+            self.item_inspect_orbit_stick.0 =
+                (self.item_inspect_orbit_stick.0 + kx).clamp(-1.0, 1.0);
+            self.item_inspect_orbit_stick.1 =
+                (self.item_inspect_orbit_stick.1 + ky).clamp(-1.0, 1.0);
         }
         Self::emit_held_navigation_repeats(
             shell,

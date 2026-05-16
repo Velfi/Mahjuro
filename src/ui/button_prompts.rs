@@ -178,7 +178,8 @@ impl ButtonPrompt {
         match surface {
             PromptInputSurface::Controller => Self::inspect_camera_extras(style),
             PromptInputSurface::MouseOrKeyboard => {
-                "Drag to orbit item · Mouse wheel: zoom (inspect)".to_string()
+                "WASD / arrows or drag: orbit item · Shift+W/↑ zoom in · Shift+S/↓ zoom out · Mouse wheel: zoom (inspect)"
+                    .to_string()
             }
         }
     }

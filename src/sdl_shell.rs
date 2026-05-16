@@ -184,14 +184,19 @@ impl SdlShell {
         self.window.size_in_pixels()
     }
 
-    /// True when this window should simulate and render (focused, visible, not minimized).
+    /// True when this window should simulate and render.
+    ///
+    /// We only gate on **actual occlusion** (minimized / hidden). Using keyboard or mouse
+    /// focus here is too strict on macOS: the window can be fully visible behind another app
+    /// with neither `INPUT_FOCUS` nor `MOUSE_FOCUS` until the user clicks in — skipping
+    /// `frame_tick` in that state never presented a swapchain frame, so the Metal layer stayed
+    /// black through splash → main menu. Gamepad presence used to paper over the same gap.
     ///
     /// When false, the SDL main loop skips per-frame simulation and rendering so the game does
-    /// not keep running while backgrounded.
+    /// not keep running while minimized or hidden.
     pub fn window_is_foreground(&self) -> bool {
         let flags = WindowFlags::from(self.window.window_flags());
-        self.window.has_input_focus()
-            && !flags.intersects(WindowFlags::MINIMIZED | WindowFlags::HIDDEN)
+        !flags.intersects(WindowFlags::MINIMIZED | WindowFlags::HIDDEN)
     }
 
     /// Map SDL window-coordinate mouse position to drawable pixels (HiDPI).

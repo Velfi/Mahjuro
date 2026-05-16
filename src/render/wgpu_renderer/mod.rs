@@ -176,6 +176,8 @@ pub struct WgpuRenderer {
     globals_buffer: wgpu::Buffer,
     globals_bind_group: wgpu::BindGroup,
     tile_material_layout: wgpu::BindGroupLayout,
+    /// Zeroed [`crate::render::hallway_glb::HallwayDistortion`] for `tile_3d` / showcase bind groups (binding 8).
+    tile_env_distortion_placeholder: wgpu::Buffer,
     /// Group 0 for `tile_outline_pipeline`: frame uniform (instances are VB slot 1).
     tile_outline_frame_uniform_buffer: wgpu::Buffer,
     tile_outline_instance_buffer: wgpu::Buffer,

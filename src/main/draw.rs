@@ -48,10 +48,8 @@ impl App {
                 reached_target,
             } => {
                 if self.run.onboarding_active() && reached_target {
-                    self.run.apply_gold_reward(
-                        payout.total as i32,
-                        Some(&mut self.bus),
-                    );
+                    self.run
+                        .apply_gold_reward(payout.total as i32, Some(&mut self.bus));
                     self.progress.tutorial_completed = true;
                     let _ = persistence::save_profile(self.active_profile, &self.progress);
                     persistence::delete_saved_run(self.active_profile);
@@ -92,10 +90,8 @@ impl App {
                     .unlock_achievement(crate::steam::Achievement::FirstBlindCleared);
                 // Apply the gold payout now that the scoring cascade has
                 // finished — kept deferred so the UI doesn't jump early.
-                self.run.apply_gold_reward(
-                    payout.total as i32,
-                    Some(&mut self.bus),
-                );
+                self.run
+                    .apply_gold_reward(payout.total as i32, Some(&mut self.bus));
                 self.audio.play_sfx(audio::SfxId::RoundWin);
                 // Win jingle owns the music sink for the celebration; the
                 // pending scene transition will queue Shop/Gameplay BGM
@@ -371,6 +367,7 @@ impl App {
             || self.debug.sfx_test_overlay.is_some()
             || self.debug.camera_debug_overlay.is_some()
             || self.debug.shop_env_debug_overlay.is_some()
+            || self.debug.hallway_distortion_debug_overlay.is_some()
             || self.debug.tonemap_debug_overlay.is_some();
         let preserve_overlay_stack_buttons = matches!(
             self.overlay_stack.last(),
@@ -412,6 +409,9 @@ impl App {
         let swap_ab = self.input.as_ref().map(|i| i.swap_ab).unwrap_or(false);
         let swap_xy = self.input.as_ref().map(|i| i.swap_xy).unwrap_or(false);
         let glyphs = crate::ui::glyph_source::GlyphResolver::new(prompt_style, swap_ab, swap_xy);
+        let shop_env_for_frame = self
+            .room_gltf_brownout
+            .apply(self.debug.shop_env_lighting);
         let ctx = DrawCtx::new(
             &layout,
             &self.anim,
@@ -431,7 +431,7 @@ impl App {
             },
             modal_active,
             self.debug.room_gltf_height_scale,
-            self.debug.shop_env_lighting,
+            shop_env_for_frame,
             self.effect_layers,
             self.input
                 .as_ref()
@@ -449,6 +449,10 @@ impl App {
             suspended_collection,
             self.gfx.tile_preset,
             archive_has_new_chronicle,
+            self.debug
+                .hallway_distortion_debug_overlay
+                .as_ref()
+                .map(|o| o.to_snapshot()),
         );
         // Build the scene's frame in canonical push-order. For migrated
         // scenes (gameplay) this calls their direct `draw_frame` impl;
@@ -563,6 +567,12 @@ impl App {
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
+        // Pick-blind hallway warp debug (left panel; shop env uses right).
+        if let Some(ref overlay) = self.debug.hallway_distortion_debug_overlay {
+            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
+            append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
+        }
+
         // Debug visibility overlay — on top of modals.
         if let Some(ref overlay) = self.debug.visibility_overlay {
             let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
@@ -596,12 +606,11 @@ impl App {
                 }) {
                     if let Some(ref label) = btn.hover_label {
                         let pad = (h * 0.012 * scale).max(6.0);
-                        let min_outer_h =
-                            ((h * 0.035 * scale).max(22.0)).min(h * 0.12);
+                        let min_outer_h = ((h * 0.035 * scale).max(22.0)).min(h * 0.12);
                         let est_chars = label.chars().count().max(1);
                         let line_h = (min_outer_h * 0.52).max(8.0);
-                        let tooltip_w = ((est_chars as f32 * line_h + pad * 2.0).max(72.0))
-                            .min(w * 0.5);
+                        let tooltip_w =
+                            ((est_chars as f32 * line_h + pad * 2.0).max(72.0)).min(w * 0.5);
                         let (bx, by, bw, bh) = btn.rect;
                         let cx = bx + bw * 0.5;
                         let mut tip_x = cx - tooltip_w * 0.5;
@@ -620,9 +629,7 @@ impl App {
                             line_h,
                         );
                         let inner_h = (content_h).max(min_outer_h - 2.0 * pad);
-                        let tooltip_h = (inner_h + 2.0 * pad)
-                            .max(min_outer_h)
-                            .min(h * 0.35);
+                        let tooltip_h = (inner_h + 2.0 * pad).max(min_outer_h).min(h * 0.35);
 
                         let mut tip_y = by - tooltip_h - pad;
                         if tip_y < pad {
@@ -679,7 +686,9 @@ impl App {
             let margin = label_h * 0.3;
             frame.quad(GpuInstance {
                 rect: [w - label_w - margin, margin, label_w, label_h],
-                color: [0.0, 0.0, 0.0, 0.55], user: 0});
+                color: [0.0, 0.0, 0.0, 0.55],
+                user: 0,
+            });
             frame.text(TextLabel {
                 rect: [w - label_w - margin, margin, label_w, label_h],
                 text: format!("{:.0} FPS", self.debug.fps_smoothed),
@@ -748,7 +757,9 @@ impl App {
             };
             frame.quad(GpuInstance {
                 rect: [margin, y, label_w, label_h],
-                color: [0.0, 0.0, 0.0, 0.6], user: 0});
+                color: [0.0, 0.0, 0.0, 0.6],
+                user: 0,
+            });
             frame.text(TextLabel {
                 rect: [margin + label_h * 0.2, y, label_w, label_h],
                 text,
@@ -831,7 +842,7 @@ impl App {
         renderer.set_committed_arrange_rotations(collect_committed_rotations(rotations_scene));
 
         renderer.set_room_gltf_height_scale(self.debug.room_gltf_height_scale);
-        let sl = self.debug.shop_env_lighting;
+        let sl = shop_env_for_frame;
         renderer.set_shop_env_render_tune(
             sl.linear_exposure,
             sl.ambient_scale,

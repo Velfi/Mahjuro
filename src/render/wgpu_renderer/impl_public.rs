@@ -86,6 +86,15 @@ impl WgpuRenderer {
     pub fn is_loading(&self) -> bool {
         self.relic_rx.is_some() || self.background_rx.is_some()
     }
+
+    /// Drain relic / background decode queues and queue GPU uploads. Normally
+    /// invoked from [`Self::render`]; also called while the SDL window is
+    /// backgrounded so boot-time loading keeps progressing without simulating
+    /// gameplay.
+    pub fn poll_pending_texture_uploads(&mut self) {
+        self.poll_relic_textures();
+        self.poll_background_textures();
+    }
     /// Returns true while any tile animation (spin or lift lerp) is still running.
     #[allow(dead_code)] // Was used for redraw gating; kept for diagnostics / future idle paths.
     pub fn is_spinning(&self) -> bool {

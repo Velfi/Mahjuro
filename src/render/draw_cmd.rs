@@ -16,8 +16,8 @@ use crate::core::tile::Tile;
 use crate::core::tile_pack::TilePackKind;
 use crate::render::lit_mesh::MaterialParams;
 use crate::render::theme::color;
-use crate::render::world_space::pixel_to_world;
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, SpotLight, TextLabel};
+use crate::render::world_space::pixel_to_world;
 use crate::scenes::{BackgroundId, ButtonDef};
 use glam;
 use std::borrow::Cow;
@@ -738,9 +738,7 @@ pub enum DrawCmd {
     /// against geometry drawn before this marker — e.g. pack celebration meshes over
     /// the shop room without hiding the room in color.
     ClearSceneDepth,
-    /// After this marker, following `lit_mesh` draws use full shop inspect HDR on
-    /// [`SsrGlobals.felt`]; earlier draws use a dimmed row. Splits Pass A so the
-    /// GPU buffer can be updated between subpasses. See [`UiFrame::shop_inspect_lit_mesh_subject_hdr`].
+    /// Marker: next Pass A `lit_mesh` subpass uses full inspect HDR (dim vs subject split).
     ShopInspectLitMeshSubjectHdr,
     /// Batch of showcase tiles with explicit 3D transforms — used for hand
     /// tiles, pack-opening celebrations, and any other 3D tile placement.
@@ -869,6 +867,8 @@ pub struct UiFrame {
     /// When set, description copy is rasterized into the archive room decal atlas and composited
     /// on the `sign_description_left` / `sign_description_right` meshes in `shop_glb.wgsl`.
     pub archive_sign_description_decal_text: Option<String>,
+    /// Pick-blind hallway vertex warp (`shop_glb.wgsl` @group(0) @binding(8)); `None` elsewhere.
+    pub hallway_distortion: Option<crate::render::hallway_glb::HallwayDistortion>,
 }
 
 impl UiFrame {
@@ -893,6 +893,7 @@ impl UiFrame {
             showcase_render_hints: ShowcaseRenderHints::default(),
             archive_description_sign_use_left: None,
             archive_sign_description_decal_text: None,
+            hallway_distortion: None,
         }
     }
 
@@ -921,10 +922,6 @@ impl UiFrame {
     /// See [`DrawCmd::ClearSceneDepth`].
     pub fn clear_scene_depth(&mut self) {
         self.cmds.push(DrawCmd::ClearSceneDepth);
-    }
-    /// Dimmed vs full inspect HDR boundary for shop [`ItemInspectScene`] (see [`DrawCmd::ShopInspectLitMeshSubjectHdr`]).
-    pub fn shop_inspect_lit_mesh_subject_hdr(&mut self) {
-        self.cmds.push(DrawCmd::ShopInspectLitMeshSubjectHdr);
     }
     pub fn starfield(&mut self) {
         self.cmds.push(DrawCmd::Starfield);

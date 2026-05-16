@@ -241,7 +241,8 @@ mod tests {
         assert_eq!(raw.len(), Stake::ALL.len(), "stakes.json row count");
         for (i, row) in raw.iter().enumerate() {
             assert_eq!(
-                row.id, Stake::ALL[i],
+                row.id,
+                Stake::ALL[i],
                 "stakes.json row {i}: id {:?} does not match Stake::ALL[{i}] {:?}",
                 row.id,
                 Stake::ALL[i]

@@ -120,21 +120,10 @@ pub fn push_focus_tooltip_panel_2d(
         let font_px = line_h.max(8.0);
         match tier {
             Tier::Desc => {
-                let lines = colored_keywords::wrap_colored_text_multiline(
-                    text,
-                    inner_w,
-                    line_h,
-                    *col,
-                );
+                let lines =
+                    colored_keywords::wrap_colored_text_multiline(text, inner_w, line_h, *col);
                 colored_keywords::push_colored_rows_left(
-                    texts,
-                    text_left,
-                    y,
-                    inner_w,
-                    &lines,
-                    line_h,
-                    text,
-                    *col,
+                    texts, text_left, y, inner_w, &lines, line_h, text, *col,
                 );
             }
             _ => {
@@ -175,7 +164,7 @@ pub fn push_floating_relic_flavor_labels(
     let margin_x = window_w * 0.06;
     let band_w = (window_w - 2.0 * margin_x).min(760.0);
     let left = (window_w - band_w) * 0.5;
-    let body_px = typography::size(typography::BODY, window_h).max(13.0);
+    let body_px = typography::size(typography::BODY, window_h).max(24.0);
     let line_step = body_px * 1.4;
     let max_lines = 5usize;
     let band_h = (line_step * max_lines as f32 + body_px * 0.5)

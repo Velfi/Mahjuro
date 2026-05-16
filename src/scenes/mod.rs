@@ -270,7 +270,7 @@ pub struct DrawCtx<'a> {
     /// Resolves a controller-prompt glyph for a given [`UiAction`] (Kenney
     /// Input Prompts atlases). See [`crate::ui::glyph_source::GlyphResolver`].
     pub glyphs: crate::ui::glyph_source::GlyphResolver,
-    /// Frozen [`ShopScene`] under shop showcase inspect — fed to [`crate::scenes::shop::render_shop_inspect_isolated_frame`].
+    /// Frozen [`ShopScene`] under shop showcase inspect — drawn via [`crate::scenes::shop::render_shop_frame`] with orbit dolly.
     pub suspended_shop: Option<&'a ShopScene>,
     /// Suspended collection beneath collection showcase inspect for pedestal orbit.
     pub suspended_collection: Option<&'a CollectionScene>,
@@ -278,6 +278,11 @@ pub struct DrawCtx<'a> {
     pub tile_preset: crate::persistence::TilePreset,
     /// True when `run_history` has grown since the player last opened Archive (this profile).
     pub archive_has_new_chronicle: bool,
+    /// When set (Debug → Hallway hall FX…), pick-blind hallway uses
+    /// [`HallwayDistortionDebugSnapshot::resolve`] (see `hallway_glb.rs`) instead of
+    /// [`HallwayDistortion::from_pick_blind`] alone.
+    pub hallway_distortion_debug:
+        Option<crate::render::hallway_glb::HallwayDistortionDebugSnapshot>,
 }
 
 impl<'a> DrawCtx<'a> {
@@ -307,6 +312,9 @@ impl<'a> DrawCtx<'a> {
         suspended_collection: Option<&'a CollectionScene>,
         tile_preset: crate::persistence::TilePreset,
         archive_has_new_chronicle: bool,
+        hallway_distortion_debug: Option<
+            crate::render::hallway_glb::HallwayDistortionDebugSnapshot,
+        >,
     ) -> Self {
         Self {
             layout,
@@ -333,6 +341,7 @@ impl<'a> DrawCtx<'a> {
             suspended_collection,
             tile_preset,
             archive_has_new_chronicle,
+            hallway_distortion_debug,
         }
     }
 }

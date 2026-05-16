@@ -8,6 +8,7 @@ pub(super) struct ShowcaseTileCtx<'a> {
     pub(super) shadow_caster_layout: &'a wgpu::BindGroupLayout,
     pub(super) primitives: &'a [TilePrimitiveGpu],
     pub(super) decal_atlas: &'a crate::render::showcase_decal_atlas::ShowcaseDecalAtlasGpu,
+    pub(super) distortion_placeholder: &'a wgpu::Buffer,
 }
 
 pub(super) fn make_showcase_tile_gpu(
@@ -21,6 +22,7 @@ pub(super) fn make_showcase_tile_gpu(
         shadow_caster_layout,
         primitives,
         decal_atlas,
+        distortion_placeholder,
     } = *ctx;
     let key = (tile.suit, tile.rank, tile.enhancement, tile.debuffed_visual);
     let decal_atlas_uv = decal_atlas
@@ -82,6 +84,10 @@ pub(super) fn make_showcase_tile_gpu(
                     wgpu::BindGroupEntry {
                         binding: 7,
                         resource: wgpu::BindingResource::TextureView(&prim.emissive_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: distortion_placeholder.as_entire_binding(),
                     },
                 ],
             })

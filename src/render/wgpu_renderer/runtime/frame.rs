@@ -72,24 +72,45 @@ impl WgpuRenderer {
 
     pub(super) fn acquire_render_frame(&self) -> anyhow::Result<RenderFrame> {
         match &self.target {
-            RenderTarget::Surface(surface) => match surface.get_current_texture() {
-                wgpu::CurrentSurfaceTexture::Success(t) => Ok(RenderFrame::Draw(Some(t))),
-                wgpu::CurrentSurfaceTexture::Suboptimal(t) => Ok(RenderFrame::Draw(Some(t))),
-                wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
-                    Ok(RenderFrame::Skip)
+            RenderTarget::Surface(surface) => {
+                // When acquisition fails we skip the whole frame (no `present()`). On Metal
+                // that often reads as a persistent black window after launch unfocused /
+                // occlusion, or right after `configure` — poll + extra acquire attempts usually
+                // land a drawable the same tick.
+                let try_once = |s: &wgpu::Surface| match s.get_current_texture() {
+                    wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => {
+                        Some(t)
+                    }
+                    wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                        None
+                    }
+                    wgpu::CurrentSurfaceTexture::Outdated => {
+                        s.configure(&self.device, &self.config);
+                        None
+                    }
+                    wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Validation => {
+                        log::warn!(
+                            "swapchain surface lost or invalid — reconfiguring (next frame should recover)"
+                        );
+                        s.configure(&self.device, &self.config);
+                        None
+                    }
+                };
+
+                if let Some(t) = try_once(surface) {
+                    return Ok(RenderFrame::Draw(Some(t)));
                 }
-                wgpu::CurrentSurfaceTexture::Outdated => {
-                    surface.configure(&self.device, &self.config);
-                    Ok(RenderFrame::Skip)
+                let _ = self.device.poll(wgpu::PollType::Poll);
+                if let Some(t) = try_once(surface) {
+                    return Ok(RenderFrame::Draw(Some(t)));
                 }
-                wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Validation => {
-                    log::warn!(
-                        "swapchain surface lost or invalid — reconfiguring (next frame should recover)"
-                    );
-                    surface.configure(&self.device, &self.config);
-                    Ok(RenderFrame::Skip)
+                std::thread::yield_now();
+                let _ = self.device.poll(wgpu::PollType::Poll);
+                if let Some(t) = try_once(surface) {
+                    return Ok(RenderFrame::Draw(Some(t)));
                 }
-            },
+                Ok(RenderFrame::Skip)
+            }
             RenderTarget::Offscreen { .. } => Ok(RenderFrame::Draw(None)),
         }
     }
