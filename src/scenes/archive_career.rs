@@ -1,5 +1,5 @@
-//! Career stats for the Archive (Collection + Chronicle): frieze copy, Chronicle
-//! folio labels, and personal-record / rivalry helpers.
+//! Career stats for the Archive: Chronicle dashboard copy, folio labels, and
+//! personal-record / rivalry helpers.
 
 use crate::core::boss::BossKind;
 use crate::core::progression::{PlayerProgress, RunOutcome, RunRecord};

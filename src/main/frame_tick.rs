@@ -317,6 +317,10 @@ impl App {
                         ModalTheme::Info,
                     ));
                 }
+                GameEvent::RoomGltfBrownout => {
+                    self.room_gltf_brownout.trigger();
+                    self.audio.play_sfx(audio::SfxId::BlindSkipped);
+                }
             }
         }
 
@@ -497,7 +501,7 @@ impl App {
             if !close {
                 self.debug.hallway_distortion_debug_overlay = Some(overlay);
             } else {
-                log::debug!("Closed hallway hall FX debug overlay");
+                log::debug!("Closed hallway vertex warp debug overlay");
             }
             actions.clear();
             button_clicks.clear();

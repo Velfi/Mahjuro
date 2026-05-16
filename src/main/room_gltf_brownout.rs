@@ -1,6 +1,7 @@
 //! Rare random bulb flicker + brief brownout for room-glTF scenes (shop,
-//! pick_blind, collection). Ticks only while that scene is on-screen and
-//! nothing is blocking gameplay-style overlays (pause, shop env debug, …).
+//! pick_blind, collection). Also fires when the player skips a blind.
+//! Ticks only while that scene is on-screen and nothing is blocking
+//! gameplay-style overlays (pause, shop env debug, …).
 
 use crate::render::shop_glb::ShopEnvLightingTune;
 use crate::scenes::Scene;
@@ -52,6 +53,12 @@ impl RoomGltfBrownout {
     #[inline]
     fn total_event_secs(a: &ActiveBrownout) -> f32 {
         a.flicker_secs + a.dip_secs + a.recover_secs
+    }
+
+    /// Start flicker + dip immediately (e.g. player skipped a blind on pick_blind).
+    pub fn trigger(&mut self) {
+        self.active = Some(Self::roll_active());
+        self.secs_to_next = 0.0;
     }
 
     /// `freeze`: pause menu, shop lighting debug overlay, or scene blocking overlay.

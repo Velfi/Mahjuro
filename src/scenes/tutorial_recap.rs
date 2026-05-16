@@ -8,7 +8,7 @@ use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;
 use crate::game::tutorial::{LESSON_COUNT, lesson_def};
 use crate::render::draw_cmd::UiFrame;
-use crate::render::theme::color;
+use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
@@ -133,19 +133,21 @@ impl SceneBehavior for TutorialRecapScene {
         });
 
         // ── Lesson number ────────────────────────────────────────
-        let lesson_num_h = 24.0 * scale;
+        let lesson_num_px = typography::size(typography::H42, h);
+        let lesson_num_h = lesson_num_px * 1.4;
         frame.text(TextLabel {
             rect: [cx, cy + 16.0 * scale, card_w, lesson_num_h],
             text: format!("Lesson {} / {}", self.completed_lesson, LESSON_COUNT),
             color: color::UMBER,
-            font_px: Some(lesson_num_h * 0.7),
+            font_px: Some(lesson_num_px),
             align: TextAlign::Center,
             ..Default::default()
         });
 
         // ── Headline (first recap line) ──────────────────────────
         let headline = lesson.recap.first().copied().unwrap_or("Lesson Complete");
-        let headline_h = 38.0 * scale;
+        let headline_px = typography::size(typography::H16, h);
+        let headline_h = headline_px * 1.4;
         let headline_y = cy + 44.0 * scale;
         frame.text(TextLabel {
             rect: [
@@ -156,7 +158,7 @@ impl SceneBehavior for TutorialRecapScene {
             ],
             text: headline.to_string(),
             color: color::CHAMPAGNE,
-            font_px: Some(headline_h * 0.75),
+            font_px: Some(headline_px),
             align: TextAlign::Center,
             ..Default::default()
         });
@@ -172,7 +174,7 @@ impl SceneBehavior for TutorialRecapScene {
 
         // ── Bullet points (remaining recap lines) ────────────────
         let bullet_y_start = div_y + 16.0 * scale;
-        let bullet_font = 16.8 * scale;
+        let bullet_font = typography::size(typography::H36, h);
         let bullet_line_h = bullet_font * 1.3;
         let bullet_pad = 6.0 * scale;
         let bullet_w = card_w - 60.0 * scale;
@@ -217,12 +219,12 @@ impl SceneBehavior for TutorialRecapScene {
                 ],
                 text: preview_title.to_string(),
                 color: color::GOLD,
-                font_px: Some(18.0 * scale),
+                font_px: Some(typography::size(typography::H32, h)),
                 align: TextAlign::Center,
                 ..Default::default()
             });
 
-            let intro_font = 15.0 * scale;
+            let intro_font = typography::size(typography::H42, h);
             let intro_w = card_w - 60.0 * scale;
             // Rough chars-per-line: rect width / (font_px * 0.5).
             let chars_per_line = ((intro_w / (intro_font * 0.5)) as usize).max(20);
@@ -251,7 +253,7 @@ impl SceneBehavior for TutorialRecapScene {
             rect: [cx, flavor_y, card_w, 20.0 * scale],
             text: format!("\u{201c}{}\u{201d}", lesson.flavor_text),
             color: color::alpha(color::STONE, 0.6),
-            font_px: Some(13.0 * scale),
+            font_px: Some(typography::size(typography::H45, h)),
             align: TextAlign::Center,
             ..Default::default()
         });
@@ -262,7 +264,7 @@ impl SceneBehavior for TutorialRecapScene {
             rect: [0.0, hint_y, w, 22.0 * scale],
             text: "Press Enter to continue".to_string(),
             color: color::STONE,
-            font_px: Some(16.0 * scale),
+            font_px: Some(typography::size(typography::H36, h)),
             align: TextAlign::Center,
             ..Default::default()
         });

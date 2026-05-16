@@ -193,7 +193,7 @@ impl DebugMenuBar {
         mappings.push((shop_env_item.id().clone(), DebugAction::OpenShopEnvDebug));
         let _ = tuning_sub.append(&shop_env_item);
 
-        let hall_fx_item = MenuItem::new("Hallway hall FX…", true, None);
+        let hall_fx_item = MenuItem::new("Hallway vertex warp…", true, None);
         mappings.push((
             hall_fx_item.id().clone(),
             DebugAction::OpenHallwayHallFxDebug,

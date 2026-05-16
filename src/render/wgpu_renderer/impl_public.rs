@@ -36,6 +36,7 @@ impl WgpuRenderer {
         self.tonemap_vhs_scanline = tuning.vhs_scanline;
         self.tonemap_vhs_grain = tuning.vhs_grain;
         self.tonemap_vhs_vignette = tuning.vhs_vignette;
+        self.tonemap_film_grain = tuning.film_grain;
         // Per-scene "VHS on" comes from any non-zero amplitude — a scene
         // that tunes every amount to 0 reads as "VHS effectively off"
         // here even when the Options master toggle is on. This lets

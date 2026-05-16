@@ -232,7 +232,8 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
     asset_path::init();
     asset_path::log_all_assets();
     let shop_like = matches!(s.scene.as_str(), "shop");
-    let collection_like = matches!(s.scene.as_str(), "collection");
+    let collection_like =
+        matches!(s.scene.as_str(), "collection" | "chronicle" | "archive_chronicle");
     if s.item_inspect && !shop_like && !collection_like {
         anyhow::bail!(
             "--item-inspect requires --scene shop or collection (full-screen pack/showcase captures do not use it)"
@@ -301,6 +302,12 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
         "collection" => {
             unlock_collection = true;
             (Scene::Collection(scenes::CollectionScene::new()), false)
+        }
+        "chronicle" | "archive_chronicle" => {
+            unlock_collection = true;
+            let mut coll = scenes::CollectionScene::new();
+            coll.prepare_chronicle_for_screenshot();
+            (Scene::Collection(coll), false)
         }
         "yaku_journal" => {
             unlock_yaku = true;
@@ -448,7 +455,7 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
         }
         other => {
             anyhow::bail!(
-                "unsupported --scene '{other}' (supported: collection, \
+                "unsupported --scene '{other}' (supported: collection, chronicle, \
                 yaku_journal, gameplay, gameplay_hero, pick_blind, shop, \
                 main_menu_exterior, tile_select, transition_playground, \
                 material_viewer, relic_unlock, game_over_level_up, meta_level_up, \
@@ -716,19 +723,32 @@ impl HeadlessApp {
     /// runner's progress; never persisted.
     fn unlock_all_for_collection_screenshot(&mut self) {
         use crate::core::boss::all_bosses;
+        use crate::core::boss::BossKind;
+        use crate::core::progression::{RunOutcome, RunRecord};
+        use crate::core::rules::BlindKind;
+        use crate::game::event_bus::GameOverReason;
+        use crate::core::stake::Stake;
         use crate::core::talisman::TalismanKind;
         use crate::core::yaku::YakuKind;
+        use crate::persistence::TileMaterial;
+        use rustc_hash::FxHashMap as HashMap;
+
         self.progress.runs_completed = 100;
         self.progress.has_won = true;
         for yk in YakuKind::all() {
-            *self.progress.yaku_times_scored.entry(*yk).or_insert(0) += 1;
+            *self.progress.yaku_times_scored.entry(*yk).or_insert(0) += 3;
         }
         for def in all_bosses() {
             *self
                 .progress
                 .boss_times_encountered
                 .entry(def.kind)
-                .or_insert(0) += 1;
+                .or_insert(0) += 5;
+            *self
+                .progress
+                .boss_times_defeated
+                .entry(def.kind)
+                .or_insert(0) += 2;
         }
         for tk in TalismanKind::all() {
             *self
@@ -736,6 +756,91 @@ impl HeadlessApp {
                 .talisman_times_purchased
                 .entry(*tk)
                 .or_insert(0) += 1;
+        }
+        if self.progress.run_history.is_empty() {
+            let mut yaku_mix = HashMap::default();
+            yaku_mix.insert(YakuKind::Tanyao, 6u32);
+            yaku_mix.insert(YakuKind::Yakuhai, 4u32);
+            yaku_mix.insert(YakuKind::Honitsu, 2u32);
+            let samples: [(RunOutcome, u64, u64, &str); 10] = [
+                (RunOutcome::Victory, 4200, 880, "Tanyao"),
+                (
+                    RunOutcome::Defeat {
+                        reason: GameOverReason::OutOfPlays,
+                    },
+                    1800,
+                    620,
+                    "Tanyao",
+                ),
+                (RunOutcome::Victory, 9100, 1200, "Honitsu"),
+                (
+                    RunOutcome::Defeat {
+                        reason: GameOverReason::NoActionsRemaining,
+                    },
+                    2400,
+                    540,
+                    "Pair",
+                ),
+                (RunOutcome::Victory, 15600, 2100, "Chinitsu"),
+                (RunOutcome::Victory, 6800, 960, "Toitoi"),
+                (
+                    RunOutcome::Defeat {
+                        reason: GameOverReason::OutOfPlays,
+                    },
+                    3100,
+                    710,
+                    "Tanyao",
+                ),
+                (RunOutcome::Victory, 11200, 1450, "FullHand"),
+                (
+                    RunOutcome::Defeat {
+                        reason: GameOverReason::NoActionsRemaining,
+                    },
+                    5200,
+                    980,
+                    "Yakuhai",
+                ),
+                (RunOutcome::Victory, 7400, 1100, "SanshokuDoujun"),
+            ];
+            let base_ts = 1_700_000_000u64;
+            for (i, (outcome, total, best_struct, struct_name)) in samples.into_iter().enumerate() {
+                self.progress.run_history.push(RunRecord {
+                    timestamp_unix: base_ts + i as u64 * 86_400,
+                    run_number: (i + 1) as u32,
+                    outcome,
+                    final_ante: 4 + (i as u32 % 4),
+                    final_blind: if i % 3 == 0 {
+                        BlindKind::Boss
+                    } else {
+                        BlindKind::Big
+                    },
+                    final_boss: if i % 3 == 0 {
+                        Some(BossKind::TaxCollector)
+                    } else {
+                        None
+                    },
+                    round_score: total / 3,
+                    target_score: 900,
+                    total_score_earned: total,
+                    final_gold: 12,
+                    plays_remaining: 1,
+                    discards_remaining: 2,
+                    plays_max: 4,
+                    discards_max: 4,
+                    tiles_played: 80 + i as u32 * 4,
+                    tiles_discarded: 20 + i as u32,
+                    times_restocked: (i % 2) as u32,
+                    best_structure_score: best_struct,
+                    best_structure_name: struct_name.into(),
+                    yaku_times_played: yaku_mix.clone(),
+                    relics_owned: vec![],
+                    consumables_owned: vec![],
+                    tile_material: TileMaterial::Bamboo,
+                    stake: Stake::Spring,
+                    tutorial_run: false,
+                });
+            }
+            self.progress.high_scores = vec![15600, 11200, 9100];
         }
     }
 

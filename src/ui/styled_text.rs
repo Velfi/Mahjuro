@@ -519,7 +519,7 @@ pub struct StyledBlockStyle {
 impl Default for StyledBlockStyle {
     fn default() -> Self {
         Self {
-            tier: typography::BODY,
+            tier: typography::H36,
             color: crate::render::theme::color::PARCHMENT,
             padding: 0.0,
             align: TextAlign::Center,
@@ -555,7 +555,7 @@ pub fn push_styled_text_block(
     let inner_w = (w - 2.0 * pad).max(1.0);
     let inner_h = (h - 2.0 * pad).max(1.0);
     let line_h = typography::size(style.tier, window_h);
-    let font_px = line_h.max(8.0);
+    let font_px = line_h;
     let line_step = line_h * 1.4;
     let max_lines = ((inner_h / line_step).floor() as usize).max(1);
 

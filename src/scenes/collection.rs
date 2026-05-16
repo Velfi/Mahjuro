@@ -242,10 +242,19 @@ struct CamAnim {
 
 impl CollectionScene {
     pub fn new() -> Self {
+        Self::with_active_tab(Tab::Relics)
+    }
+
+    /// Headless screenshot: open the Chronicle tab with a clean scroll/camera state.
+    pub fn prepare_chronicle_for_screenshot(&mut self) {
+        *self = Self::with_active_tab(Tab::Chronicle);
+    }
+
+    fn with_active_tab(active_tab: Tab) -> Self {
         Self {
             tree: TreeState::new(),
             positions: crate::ui::scene_layout::load_collection_positions(),
-            active_tab: Tab::Relics,
+            active_tab,
             selected_artifact: None,
             focused_row: Some(0),
             scroll_rows: std::cell::Cell::new(0.0),
@@ -1591,7 +1600,7 @@ impl CollectionScene {
         let mut text_labels: Vec<TextLabel> = Vec::new();
 
         // Title — pinned font so long couch viewing doesn't auto-shrink glyphs.
-        let title_font_px = typography::size(typography::TITLE, h).max(30.0);
+        let title_font_px = typography::size(typography::H20, h);
         let title_h = (title_font_px / 0.55).ceil() + 8.0;
         text_labels.push(TextLabel {
             rect: [0.0, title_y, w, title_h],
@@ -1601,49 +1610,13 @@ impl CollectionScene {
             ..Default::default()
         });
 
-        // Career frieze: body tier + generous line height (TV / wide couch).
-        let frieze_font_px = typography::size(typography::BODY, h).max(22.0);
-        let frieze_line_h = (frieze_font_px / 0.55).ceil() + 6.0;
-        let frieze_gap = (h * 0.018).max(12.0);
-        let frieze_top = title_y + title_h + h * 0.012;
-        for (i, line) in archive_career::career_frieze_lines(ctx.progress)
-            .into_iter()
-            .take(4)
-            .enumerate()
-        {
-            text_labels.push(TextLabel {
-                rect: [
-                    margin_x,
-                    frieze_top + i as f32 * (frieze_line_h + frieze_gap),
-                    w - margin_x * 2.0,
-                    frieze_line_h,
-                ],
-                text: line,
-                color: color::alpha(color::PORCELAIN_AGED, 0.96),
-                font_px: Some(frieze_font_px),
-                align: TextAlign::Left,
-                ..Default::default()
-            });
-        }
-        if matches!(self.active_tab, Tab::Chronicle) {
-            let note_y = frieze_top + 4.0 * (frieze_line_h + frieze_gap) + (h * 0.014).max(10.0);
-            text_labels.push(TextLabel {
-                rect: [margin_x, note_y, w - margin_x * 2.0, frieze_line_h],
-                text: archive_career::CHRONICLE_TUTORIAL_NOTE.into(),
-                color: [0.74, 0.76, 0.84, 0.92],
-                font_px: Some(frieze_font_px),
-                align: TextAlign::Left,
-                ..Default::default()
-            });
-        }
-
         // Back / Switch save buttons. Controller / keyboard focus draws a
         // brass ring via `focused_chrome`; cursor hover reads the tree focus
         // so mouse users get the same affordance even though they don't drive
         // `focused_chrome` directly.
         let back_w = ch.back_w;
         let back_h = ch.chrome_btn_h;
-        let btn_label_px = typography::size(typography::BODY, h).max(21.0);
+        let btn_label_px = typography::size(typography::H36, h);
         let ring_focus = self.chrome_focus_for_draw(ctx.input_mode);
         let back_rect = [margin_x, title_y, back_w, back_h];
         let back_focused = ring_focus == Some(CollectionAction::Back);
@@ -1721,7 +1694,7 @@ impl CollectionScene {
                 rect,
                 text: sym.into(),
                 color: [0.92, 0.92, 0.98, 1.0],
-                font_px: Some(btn_label_px * 1.15),
+                font_px: Some(typography::size(typography::H28, h)),
                 ..Default::default()
             });
             if focused {
@@ -1743,7 +1716,7 @@ impl CollectionScene {
         let archive_multi_page = archive_path && archive_page_count_now > 1;
         // TV: pinned body size + multi-line copy so width-based auto-shrink
         // never drives hints to microtext.
-        let hint_font_px = typography::size(typography::BODY, h).max(22.0);
+        let hint_font_px = typography::size(typography::H36, h);
         let hint_line_h = (hint_font_px / 0.55).ceil() + 4.0;
         let hint_text: String = if inspect.is_some() {
             "Right stick or WASD / arrows: orbit item\nTriggers / scroll or Shift+W/↑ / Shift+S/↓: zoom   ·   E / North: close   ·   Esc: menu"
@@ -3380,7 +3353,7 @@ fn compute_layout(w: f32, h: f32, scale: f32, _tab: Tab, item_count: usize) -> S
     // Tight top margin + smaller footer reserve → taller scroll band →
     // larger cells. Browsing is the primary verb; orbit inspect should not
     // dominate the layout.
-    let grid_y_top_band = title_y + title_h + h * 0.14;
+    let grid_y_top_band = title_y + title_h + h * 0.06;
     let footer_band_h = h * 0.10;
     let grid_y_bottom_band = arrow_y - footer_band_h;
     let band_h = (grid_y_bottom_band - grid_y_top_band).max(1.0);

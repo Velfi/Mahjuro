@@ -462,6 +462,9 @@ pub struct WgpuRenderer {
     pub tonemap_vhs_scanline: f32,
     pub tonemap_vhs_grain: f32,
     pub tonemap_vhs_vignette: f32,
+    pub tonemap_film_grain: f32,
+    /// Increments each `render` call; re-rolls film grain without UV scroll.
+    film_grain_frame: u32,
     /// Pipeline for procedural scene props (candles, table). Shares the
     /// `point_lights_layout` (group 1) with the tile pipeline.
     lit_mesh_pipeline: wgpu::RenderPipeline,

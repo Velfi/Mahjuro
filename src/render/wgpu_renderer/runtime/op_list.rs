@@ -58,8 +58,6 @@ pub(super) enum RenderOp {
     /// Emitted from [`crate::render::draw_cmd::DrawCmd::ClearSceneDepth`]. Never dispatched
     /// through [`super::process_op::WgpuRenderer::process_op`].
     ClearSceneDepth,
-    /// Marker: next Pass A subpass uses full shop inspect `lit_mesh` HDR (see [`DrawCmd::ShopInspectLitMeshSubjectHdr`]).
-    ShopInspectLitMeshSubjectHdr,
     // Skeuomorphic gameplay HUD (phase 1).
     ShowcaseTileBatch(usize), // index into `showcase_tile_batches`
     Object3dBatch {

@@ -3,7 +3,7 @@
 use crate::audio::SfxId;
 use crate::game::event_bus::GameEvent;
 use crate::persistence;
-use crate::render::theme::color;
+use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::ui::input::UiAction;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
@@ -201,6 +201,7 @@ impl SceneBehavior for ProfileSelectScene {
                 rect: [0.0, title_y, w, title_h],
                 text: title.into(),
                 color: color::CHAMPAGNE,
+                font_px: Some(typography::size(typography::H20, h)),
                 ..Default::default()
             });
         }

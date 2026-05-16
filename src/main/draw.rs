@@ -569,7 +569,11 @@ impl App {
 
         // Pick-blind hallway warp debug (left panel; shop env uses right).
         if let Some(ref overlay) = self.debug.hallway_distortion_debug_overlay {
-            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
+            let (insts, lbls) = overlay.draw(
+                size.width as f32,
+                size.height as f32,
+                self.debug.room_gltf_height_scale,
+            );
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
@@ -693,6 +697,10 @@ impl App {
                 rect: [w - label_w - margin, margin, label_w, label_h],
                 text: format!("{:.0} FPS", self.debug.fps_smoothed),
                 color: [0.9, 0.9, 0.3, 1.0],
+                font_px: Some(crate::render::theme::typography::size(
+                    crate::render::theme::typography::H42,
+                    h,
+                )),
                 ..Default::default()
             });
         }
@@ -764,6 +772,10 @@ impl App {
                 rect: [margin + label_h * 0.2, y, label_w, label_h],
                 text,
                 color,
+                font_px: Some(crate::render::theme::typography::size(
+                    crate::render::theme::typography::H24,
+                    h,
+                )),
                 ..Default::default()
             });
         }

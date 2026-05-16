@@ -920,7 +920,7 @@ pub(crate) fn render_shop_frame(
         frame.object3d_batch(bugs);
     }
 
-    let credits_font_px = typography::size(typography::BODY, h).max(18.0) * 2.0;
+    let credits_font_px = typography::size(typography::H20, h);
     let gold_text = format!("{}g", shop_rm.display_gold);
     let h_px = credits_font_px.max(1.0).round().max(1.0) as u32;
     let (credits_rw, credits_rh) = if let Some(ref font) = load_ui_font() {
@@ -1217,8 +1217,8 @@ pub(crate) fn render_shop_frame(
         let inner_right = x + bw * 0.98;
         let inner_w = (inner_right - inner_left).max(8.0);
 
-        let font_px = typography::size(typography::CAPTION, h).max(14.0);
-        let legend_font_px = font_px * 2.0;
+        let font_px = typography::size(typography::H42, h);
+        let legend_font_px = typography::size(typography::H20, h);
 
         // Primary row: four equal columns, each `[icon][label]` for Exit → Select → Sell → Inspect.
         // Icons are ~3× the old bar-relative size; each prompt gets its own backer (no full-width bar).
@@ -1252,7 +1252,7 @@ pub(crate) fn render_shop_frame(
 
         let primary_h = (icon_px * 1.06).max(legend_line_h).max(font_px * 1.35);
         let inspect_line_h = if inspect_active {
-            (font_px * 0.92).max(12.0) * 1.4 + h * 0.008
+            typography::size(typography::H42, h) * 1.4 + h * 0.008
         } else {
             0.0
         };
@@ -1382,7 +1382,7 @@ pub(crate) fn render_shop_frame(
                 ],
                 text: ButtonPrompt::shop_inspect_mode_hint(surface, ctx.gamepad_style),
                 color: [0.82, 0.78, 0.72, 0.94],
-                font_px: Some((font_px * 0.92)),
+                font_px: Some(typography::size(typography::H42, h)),
                 align: TextAlign::Center,
                 no_glossary: false,
                 scroll_offset: 0.0,

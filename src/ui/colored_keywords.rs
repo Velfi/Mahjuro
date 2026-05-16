@@ -59,7 +59,7 @@ pub fn wrap_colored_words(
     let Some(font) = load_ui_font() else {
         return vec![vec![(text.to_string(), default)]];
     };
-    let font_px = (line_h * 0.99).max(8.0);
+    let font_px = line_h * 0.99;
     let space_w = font.metrics(' ', font_px).advance_width;
 
     let words: Vec<&str> = text.split_whitespace().collect();
@@ -157,7 +157,7 @@ pub fn push_colored_rows_left(
     fallback_plain: &str,
     fallback_color: [f32; 4],
 ) {
-    let font_px = line_h.max(8.0);
+    let font_px = line_h;
     let line_step = line_h * 1.4;
     let Some(font) = load_ui_font() else {
         let wrapped = widget::wrap_text(fallback_plain, inner_w, line_h);
@@ -206,7 +206,7 @@ pub fn push_colored_rows_in_width(
     fallback_plain: &str,
     fallback_color: [f32; 4],
 ) {
-    let font_px = line_h.max(8.0);
+    let font_px = line_h;
     let line_step = line_h * 1.4;
     let Some(font) = load_ui_font() else {
         let wrapped = widget::wrap_text(fallback_plain, inner_w, line_h);
@@ -278,7 +278,7 @@ pub fn push_colored_text_block(
     let inner_w = (w - 2.0 * pad).max(1.0);
     let inner_h = (h - 2.0 * pad).max(1.0);
     let line_h = crate::render::theme::typography::size(style.tier, window_h);
-    let font_px = line_h.max(8.0);
+    let font_px = line_h;
     let line_step = line_h * 1.4;
     let max_lines = ((inner_h / line_step).floor() as usize).max(1);
 

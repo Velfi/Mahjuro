@@ -35,14 +35,19 @@ pub struct TonemapTuning {
     pub vhs_grain: f32,
     /// Maximum corner darkening from the radial vignette.
     pub vhs_vignette: f32,
+    /// 70s photochemical film grain (luminance-masked, animated). Not gated on
+    /// the Options VHS toggle.
+    #[serde(default = "default_film_grain_for_deserialize")]
+    pub film_grain: f32,
+}
+
+fn default_film_grain_for_deserialize() -> f32 {
+    TonemapTuning::shipping_default().film_grain
 }
 
 impl TonemapTuning {
-    /// Shipped default: clean ACES tonemap, VHS branch dormant. Scenes
-    /// opt into the home-video look by tuning amounts in the debug overlay
-    /// and saving — out of the box no scene has any VHS amount, so the
-    /// shader short-circuits the entire VHS branch (see
-    /// `WgpuRenderer::set_tonemap_tuning`).
+    /// Shipped default: clean ACES tonemap with subtle 70s film grain; VHS
+    /// branch dormant unless a scene tunes chromatic / scanline / tape grain.
     pub const fn shipping_default() -> Self {
         Self {
             exposure: 1.0,
@@ -50,6 +55,7 @@ impl TonemapTuning {
             vhs_scanline: 0.0,
             vhs_grain: 0.0,
             vhs_vignette: 0.0,
+            film_grain: 0.038,
         }
     }
 }
@@ -69,6 +75,7 @@ pub const TONEMAP_SLIDER_META: &[(&str, f32, f32, f32)] = &[
     ("VHS Scanline", 0.0, 0.20, 0.005),
     ("VHS Grain", 0.0, 0.10, 0.002),
     ("VHS Vignette", 0.0, 0.40, 0.005),
+    ("Film Grain", 0.0, 0.12, 0.002),
 ];
 
 impl TonemapTuning {
@@ -79,6 +86,7 @@ impl TonemapTuning {
             2 => self.vhs_scanline,
             3 => self.vhs_grain,
             4 => self.vhs_vignette,
+            5 => self.film_grain,
             _ => 0.0,
         }
     }
@@ -92,6 +100,7 @@ impl TonemapTuning {
             2 => self.vhs_scanline = v,
             3 => self.vhs_grain = v,
             4 => self.vhs_vignette = v,
+            5 => self.film_grain = v,
             _ => {}
         }
     }

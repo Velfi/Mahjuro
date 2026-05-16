@@ -48,11 +48,16 @@ struct HallwayDistortion {
     mask: vec4<f32>,
     time_pulse: vec4<f32>,
     flags: vec4<f32>,
+    ripple: vec4<f32>,
 };
 @group(0) @binding(8) var<uniform> hd: HallwayDistortion;
 
 /// Same factor as `shop_glb.wgsl` — scales wall-clock time inside the hallway warp.
 const HALLWAY_ANIM_TIME_SCALE: f32 = 0.5;
+const HALLWAY_TAU: f32 = 6.283185307;
+const HALLWAY_RIPPLE_STAND_FREQ_RATIO: f32 = 2.37;
+const HALLWAY_RIPPLE_WALL_POWER: f32 = 1.28;
+const HALLWAY_BALLOON_FLOOR_Z: f32 = 0.08;
 
 fn hallway_depth_axis_sel(idx: f32) -> vec3<f32> {
     if (idx < 0.5) {
@@ -82,8 +87,8 @@ fn apply_hallway_distortion(world_in: vec3<f32>, h: HallwayDistortion) -> vec3<f
     let d1 = h.mask.w;
     let span = max(d1 - d0, 1e-4);
     let u = clamp((depth - d0) / span, 0.0, 1.0);
-    let depth_mid = (d0 + d1) * 0.5;
-    let y_rel = depth - depth_mid;
+    let t = h.time_pulse.x * HALLWAY_ANIM_TIME_SCALE;
+    let drift = h.time_pulse.y * t;
     var sm0: f32;
     if (h.twist.z > 0.5) {
         let edge = 0.20;
@@ -92,21 +97,40 @@ fn apply_hallway_distortion(world_in: vec3<f32>, h: HallwayDistortion) -> vec3<f
         sm0 = smoothstep(d0, d1, depth);
     }
     let g = h.flags.z;
-    let t = h.time_pulse.x * HALLWAY_ANIM_TIME_SCALE;
-    let drift = h.time_pulse.y * t;
-    let pulse = 1.0 + h.time_pulse.w * sin(t * h.time_pulse.z + h.bow.w);
+    let pulse = 1.0 + h.time_pulse.w * sin(t * h.time_pulse.z + h.breathe.z + drift);
     let mask_f = sm0 * g * pulse;
     let bp = h.flags.y * 0.25;
-    let ramp = mix(1.0, 1.0 + bp * 1.45, sm0);
+
+    let side_c = dot(world_in, lateral) - h.stretch.y;
+    let lat_half = max(h.flags.w, 0.25);
+    let side_n = clamp(side_c / lat_half, -1.0, 1.0);
 
     var w = world_in;
 
-    w = w + lateral * (h.bow.x * h.bow.z * sin(y_rel * h.bow.y + h.bow.w + drift) * mask_f * ramp);
+    let breathe_af = pow(max(abs(side_c), 1e-4), h.breathe.w);
+    w = w + lateral * (sign(side_c) * breathe_af * h.breathe.x * sin(t * h.breathe.y + h.breathe.z + u * HALLWAY_TAU * 0.42 + drift) * mask_f);
 
-    let side = dot(w, lateral);
-    let sgn = select(-1.0, 1.0, side >= 0.0);
-    let af = pow(max(abs(side), 1e-4), h.breathe.w);
-    w = w + lateral * (sgn * af * h.breathe.x * sin(t * h.breathe.y + h.breathe.z + y_rel * 0.42) * mask_f);
+    if (h.ripple.x > 1e-6) {
+        let wc = max(h.ripple.y, 0.5);
+        let travel_ph = u * wc * HALLWAY_TAU - t * h.ripple.z + h.breathe.z;
+        let stand_ph = u * wc * HALLWAY_TAU * HALLWAY_RIPPLE_STAND_FREQ_RATIO + h.breathe.z;
+        let ripple_h = mix(sin(stand_ph), sin(travel_ph), clamp(h.ripple.w, 0.0, 1.0));
+        let ripple_wall = pow(max(abs(side_c), 1e-4), HALLWAY_RIPPLE_WALL_POWER);
+        w = w + lateral * (sign(side_c) * h.ripple.x * ripple_h * ripple_wall * mask_f);
+    }
+
+    if (h.bow.w > 1e-6) {
+        let balloon_k = h.bow.w * mask_f * mix(1.0, 1.0 + bp * 0.65, sm0);
+        let wall_dist = abs(side_c);
+        let on_wall = smoothstep(0.12, 1.35, wall_dist);
+        let depth_barrel = max(sin(u * HALLWAY_TAU * 0.5), 0.22);
+        let z_mid = mix(HALLWAY_BALLOON_FLOOR_Z, h.ceiling.y, 0.5);
+        let z_half = max((h.ceiling.y - HALLWAY_BALLOON_FLOOR_Z) * 0.5, 0.18);
+        let z_n = clamp((w.z - z_mid) / z_half, -1.0, 1.0);
+        let vert_barrel = max(1.0 - z_n * z_n, 0.4);
+        let bulge = balloon_k * on_wall * depth_barrel * vert_barrel;
+        w = w + lateral * (sign(side_c) * bulge);
+    }
 
     let z_above = w.z - h.ceiling.y;
     if (z_above > 0.0) {
@@ -116,10 +140,10 @@ fn apply_hallway_distortion(world_in: vec3<f32>, h: HallwayDistortion) -> vec3<f
     }
 
     let stretch_k = h.stretch.x * h.stretch.w * mask_f * mix(1.0, 1.0 + bp * 0.9, sm0);
-    w = w + axis * stretch_k;
+    w = w + axis * (stretch_k * u);
 
     let twist_dir = select(-1.0, 1.0, h.twist.w >= 0.0);
-    let ang = h.twist.x * twist_dir * pow(mask_f, h.twist.y) * mix(1.0, 1.0 + bp * 1.25, sm0);
+    let ang = h.twist.x * twist_dir * side_n * pow(mask_f, h.twist.y) * mix(1.0, 1.0 + bp * 1.25, sm0);
     let proj_len = dot(w, axis);
     let p_perp = w - axis * proj_len;
     let c = cos(ang);

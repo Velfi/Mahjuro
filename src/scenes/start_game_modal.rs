@@ -453,11 +453,11 @@ impl SceneBehavior for TileSelectScene {
         let gap_sm = (16.0 * scale).max(8.0);
         let gap_lg = (28.0 * scale).max(14.0);
 
-        let title_px = typography::size(2.25, h);
-        let name_px = typography::size(typography::TITLE, h);
-        let bonus_px = typography::size(typography::HEADING, h);
-        let stake_desc_px = typography::size(typography::HEADING, h);
-        let hint_px = typography::size(typography::CAPTION, h);
+        let title_px = typography::size(typography::H16, h);
+        let name_px = typography::size(typography::H20, h);
+        let bonus_px = typography::size(typography::H28, h);
+        let stake_desc_px = typography::size(typography::H28, h);
+        let hint_px = typography::size(typography::H42, h);
 
         // Rect heights need room above the font size for line padding.
         let title_h = title_px * 1.4;
@@ -492,7 +492,7 @@ impl SceneBehavior for TileSelectScene {
                 [text_x, cursor_y, text_w, intro_h],
                 "A short guided campaign teaches melds, structure scoring, relics, bosses, and the shop before one final practice fight.",
                 TextStyle {
-                    tier: typography::HEADING,
+                    tier: typography::H28,
                     color: color::STONE,
                     padding: 0.0,
                     align: TextAlign::Left,
@@ -507,7 +507,7 @@ impl SceneBehavior for TileSelectScene {
                 [text_x, cursor_y, text_w, skip_h],
                 "Skip marks the tutorial complete for this profile and starts a normal run immediately.",
                 TextStyle {
-                    tier: typography::CAPTION,
+                    tier: typography::H42,
                     color: color::PARCHMENT,
                     padding: 0.0,
                     align: TextAlign::Left,

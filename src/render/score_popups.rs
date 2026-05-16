@@ -12,6 +12,7 @@ use rand::RngExt;
 
 use crate::core::scoring::StepKind;
 use crate::render::draw_cmd::{GlyphMaterial, Object3d, Object3dKind};
+use crate::render::theme::typography;
 use crate::render::wgpu_renderer::{TextAlign, TextLabel};
 
 /// Total lifetime of a popup from spawn to despawn (seconds).
@@ -175,8 +176,10 @@ impl ScorePopupSystem {
                 let (_px, py, _lift_z, scale_mul, alpha, _emissive) = popup_frame_sample(p, now);
                 let mut color = p.color;
                 color[3] *= alpha;
-                let font_px =
-                    (p.base_scale * scale_mul * screen_scale * 0.38).clamp(24.0, h * 0.14);
+                let font_px = typography::tier_at_most(
+                    (p.base_scale * scale_mul * screen_scale * 0.38).min(h * 0.14),
+                    h,
+                );
                 let line_h = font_px * 1.35;
                 let top = (py - line_h * 0.5).clamp(0.0, (h - line_h).max(0.0));
                 TextLabel {

@@ -136,7 +136,7 @@ impl SceneBehavior for MeldGuideScene {
         let (title, description, groups) = page_content(self.page, progress);
 
         // Title
-        let title_font = typography::size(typography::TITLE, h).max(24.0);
+        let title_font = typography::size(typography::H20, h);
         let title_h = title_font * 1.6;
         let title_y = h * 0.06;
         frame.text(TextLabel {
@@ -149,7 +149,7 @@ impl SceneBehavior for MeldGuideScene {
         });
 
         // Description
-        let desc_font = typography::size(typography::BODY, h).max(15.0);
+        let desc_font = typography::size(typography::H36, h);
         let desc_lines = if self.page < YAKU_PAGE_START {
             5.2
         } else {
@@ -175,7 +175,7 @@ impl SceneBehavior for MeldGuideScene {
         }
 
         // Meld group labels below each group
-        let label_font = typography::size(typography::CAPTION, h).max(13.0);
+        let label_font = typography::size(typography::H42, h);
         let label_h = label_font * 1.4;
         for ml in &labels {
             // Colored underline
@@ -201,7 +201,7 @@ impl SceneBehavior for MeldGuideScene {
         if self.page >= YAKU_PAGE_START {
             let yaku_idx = self.page - YAKU_PAGE_START;
             if let Some(&yk) = progress.available_yaku().get(yaku_idx) {
-                let score_font = typography::size(typography::BODY, h).max(16.0);
+                let score_font = typography::size(typography::H36, h);
                 let score_h = score_font * 1.5;
                 let score_y = h * 0.78;
                 let score_text =
@@ -219,7 +219,7 @@ impl SceneBehavior for MeldGuideScene {
 
         // ── Page indicator ────────────────────────────────────────
         let pages = total_pages(progress);
-        let page_font = typography::size(typography::CAPTION, h).max(13.0);
+        let page_font = typography::size(typography::H42, h);
         let page_h = page_font * 1.4;
         let page_y = h * 0.84;
         frame.text(TextLabel {
@@ -232,7 +232,7 @@ impl SceneBehavior for MeldGuideScene {
         });
 
         // ── Navigation buttons ────────────────────────────────────
-        let btn_font = typography::size(typography::BODY, h).max(16.0);
+        let btn_font = typography::size(typography::H36, h);
         let btn_h = (44.0 * scale).max(32.0);
         let btn_w = (140.0 * scale).max(90.0);
         let btn_y = h * 0.89;

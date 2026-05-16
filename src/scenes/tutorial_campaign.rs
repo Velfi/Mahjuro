@@ -664,7 +664,7 @@ impl TutorialCampaignScene {
         let scale = metrics::scene_scale(w, h);
         let subtitle_y = panel_y + 70.0 * scale;
         let subtitle_w = panel_w - 60.0 * scale;
-        let subtitle_font = typography::size(typography::BODY, h).max(15.0);
+        let subtitle_font = typography::size(typography::H36, h);
         let subtitle_h = {
             let subtitle_lines_n = colored_keywords::colored_wrapped_line_count(
                 page.subtitle,
@@ -977,14 +977,14 @@ impl SceneBehavior for TutorialCampaignScene {
             text: page.title.to_string(),
             color: color::CHAMPAGNE,
             align: TextAlign::Center,
-            font_px: Some(30.0 * scale),
+            font_px: Some(typography::size(typography::H36, h)),
             ..Default::default()
         });
 
         let subtitle_x = panel_x + 30.0 * scale;
         let subtitle_y = panel_y + 70.0 * scale;
         let subtitle_w = panel_w - 60.0 * scale;
-        let subtitle_font = typography::size(typography::BODY, h).max(15.0);
+        let subtitle_font = typography::size(typography::H36, h);
         let subtitle_lines_n = colored_keywords::colored_wrapped_line_count(
             page.subtitle,
             subtitle_w,
@@ -999,7 +999,7 @@ impl SceneBehavior for TutorialCampaignScene {
             [subtitle_x, subtitle_y, subtitle_w, subtitle_h],
             page.subtitle,
             TextStyle {
-                tier: typography::BODY,
+                tier: typography::H36,
                 color: color::PARCHMENT,
                 padding: 0.0,
                 align: TextAlign::Center,
@@ -1027,7 +1027,7 @@ impl SceneBehavior for TutorialCampaignScene {
                 text: group.label.to_string(),
                 color: color::PARCHMENT,
                 align: TextAlign::Center,
-                font_px: Some(15.0 * scale),
+                font_px: Some(typography::size(typography::H42, h)),
                 ..Default::default()
             });
         }
@@ -1201,7 +1201,7 @@ impl SceneBehavior for TutorialCampaignScene {
                 text: "Try it (demo)".to_string(),
                 color: color::GOLD,
                 align: TextAlign::Center,
-                font_px: Some(16.0 * scale),
+                font_px: Some(typography::size(typography::H36, h)),
                 ..Default::default()
             });
             let note_w = (150.0 * scale).max(120.0);
@@ -1228,7 +1228,7 @@ impl SceneBehavior for TutorialCampaignScene {
                 ],
                 "Note: a bronze mirror is an old round metal mirror. Here, it is the \"Commit Meld\" button.",
                 TextStyle {
-                    tier: typography::CAPTION,
+                    tier: typography::H42,
                     color: color::CHAMPAGNE,
                     padding: 0.0,
                     align: TextAlign::Left,
@@ -1247,7 +1247,7 @@ impl SceneBehavior for TutorialCampaignScene {
                     ],
                     line,
                     TextStyle {
-                        tier: typography::CAPTION,
+                        tier: typography::H42,
                         color: color::CHAMPAGNE,
                         padding: 0.0,
                         align: TextAlign::Center,
@@ -1272,7 +1272,7 @@ impl SceneBehavior for TutorialCampaignScene {
             text: "Key Terms".to_string(),
             color: color::GOLD,
             align: TextAlign::Left,
-            font_px: Some(18.0 * scale),
+            font_px: Some(typography::size(typography::H32, h)),
             ..Default::default()
         });
         let term_w = if page.try_it_demo {
@@ -1281,18 +1281,10 @@ impl SceneBehavior for TutorialCampaignScene {
             panel_w * 0.34
         };
         let glossary_floor = panel_y + panel_h - 86.0 * scale;
-        let glossary_available_h = (glossary_floor - (glossary_y + 28.0 * scale)).max(0.0);
-        let mut term_font = (14.0 * scale).max(12.0);
-        let min_term_font = (11.0 * scale).max(10.0);
-        let (mut term_heights, mut glossary_total_h) =
+        let _glossary_available_h = (glossary_floor - (glossary_y + 28.0 * scale)).max(0.0);
+        let term_font = typography::size(typography::H42, h);
+        let (term_heights, _glossary_total_h) =
             Self::glossary_term_metrics(page.glossary, term_w, term_font, scale);
-        while glossary_total_h > glossary_available_h && term_font > min_term_font {
-            term_font = (term_font - 1.0).max(min_term_font);
-            let (next_heights, next_total_h) =
-                Self::glossary_term_metrics(page.glossary, term_w, term_font, scale);
-            term_heights = next_heights;
-            glossary_total_h = next_total_h;
-        }
         let mut gy = glossary_y + 28.0 * scale;
         for (idx, term) in page.glossary.iter().enumerate() {
             let term_h = term_heights.get(idx).copied().unwrap_or(term_font * 1.25);
@@ -1301,7 +1293,7 @@ impl SceneBehavior for TutorialCampaignScene {
                 [panel_x + 36.0 * scale, gy, term_w, term_h],
                 term,
                 TextStyle {
-                    tier: typography::CAPTION,
+                    tier: typography::H42,
                     color: color::STONE,
                     padding: 0.0,
                     align: TextAlign::Left,
@@ -1324,7 +1316,7 @@ impl SceneBehavior for TutorialCampaignScene {
             } else {
                 panel_w * 0.45
             };
-            let callout_font = typography::size(typography::BODY, h).max(15.0);
+            let callout_font = typography::size(typography::H36, h);
             let callout_lines_n = colored_keywords::colored_wrapped_line_count(
                 callout,
                 callout_w - 32.0 * scale,
@@ -1353,7 +1345,7 @@ impl SceneBehavior for TutorialCampaignScene {
                 ],
                 callout,
                 TextStyle {
-                    tier: typography::BODY,
+                    tier: typography::H36,
                     color: color::CHAMPAGNE,
                     padding: 0.0,
                     align: TextAlign::Left,

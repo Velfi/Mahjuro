@@ -176,14 +176,14 @@ impl SceneBehavior for TutorialSummaryScene {
             text: title.to_string(),
             color: color::CHAMPAGNE,
             align: TextAlign::Center,
-            font_px: Some(28.0 * scale),
+            font_px: Some(typography::size(typography::H28, h)),
             ..Default::default()
         });
 
         let subtitle_x = card_x + 34.0 * scale;
         let subtitle_y = card_y + 78.0 * scale;
         let subtitle_w = card_w - 68.0 * scale;
-        let subtitle_font = typography::size(typography::BODY, h).max(16.0);
+        let subtitle_font = typography::size(typography::H36, h);
         let subtitle_lines = widget::wrap_text(subtitle, subtitle_w, subtitle_font);
         let subtitle_h = subtitle_lines.len().max(1) as f32 * subtitle_font * 1.3;
         widget::push_text_block(
@@ -191,7 +191,7 @@ impl SceneBehavior for TutorialSummaryScene {
             [subtitle_x, subtitle_y, subtitle_w, subtitle_h],
             subtitle,
             TextStyle {
-                tier: typography::BODY,
+                tier: typography::H36,
                 color: color::PARCHMENT,
                 padding: 0.0,
                 align: TextAlign::Center,
@@ -204,7 +204,7 @@ impl SceneBehavior for TutorialSummaryScene {
         for bullet in bullets {
             let bullet_text = format!("• {bullet}");
             let bullet_w = card_w - 72.0 * scale;
-            let bullet_font = typography::size(typography::BODY, h).max(15.0);
+            let bullet_font = typography::size(typography::H36, h);
             let bullet_lines = widget::wrap_text(&bullet_text, bullet_w, bullet_font);
             let bullet_h = bullet_lines.len().max(1) as f32 * bullet_font * 1.25;
             widget::push_text_block(
@@ -212,7 +212,7 @@ impl SceneBehavior for TutorialSummaryScene {
                 [card_x + 36.0 * scale, bullet_y, bullet_w, bullet_h],
                 &bullet_text,
                 TextStyle {
-                    tier: typography::BODY,
+                    tier: typography::H36,
                     color: color::STONE,
                     padding: 0.0,
                     align: TextAlign::Left,
@@ -233,7 +233,7 @@ impl SceneBehavior for TutorialSummaryScene {
             text: "Meld Guide — full visual reference".to_string(),
             color: color::STONE,
             align: TextAlign::Center,
-            font_px: Some(13.0 * scale),
+            font_px: Some(typography::size(typography::H45, h)),
             ..Default::default()
         });
 

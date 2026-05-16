@@ -6,7 +6,10 @@ use crate::audio;
 use crate::game::cascade::CascadeTuning;
 use crate::game::tonemap_tuning::{TONEMAP_SLIDER_META, TonemapTuning};
 use crate::render::draw_cmd::CameraParams;
-use crate::render::hallway_glb::HallwayDistortionDebugSnapshot;
+use crate::core::rules::BlindKind;
+use crate::render::hallway_glb::{
+    HallwayDistortion, HallwayDistortionDebugSnapshot, hallway_distortion_apply_glb_depth_extent,
+};
 use crate::render::theme::{color, metrics};
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::ui::input::UiAction;
@@ -1577,7 +1580,10 @@ impl ShopEnvDebugOverlay {
                 rect: [vx + 2.0 * layout.scale, vy, vw - 4.0 * layout.scale, vh],
                 text: value_text,
                 color: [tc[0] * 0.92, tc[1] * 0.92, tc[2] * 0.92, 1.0],
-                font_px: Some((layout.row_h * 0.48).max(10.0)),
+                font_px: Some(crate::render::theme::typography::tier_at_most(
+                    layout.row_h * 0.48,
+                    window_h,
+                )),
                 ..Default::default()
             });
         }
@@ -1611,7 +1617,7 @@ impl ShopEnvDebugOverlay {
 // `TonemapTuning:_default` for the no-scene fallback). Reset clears the
 // scene's override so the resolver falls back to the default tuning.
 
-const TONEMAP_SLIDER_ROWS: usize = 5;
+const TONEMAP_SLIDER_ROWS: usize = 6;
 const TONEMAP_SAVE_ROW: usize = TONEMAP_SLIDER_ROWS;
 const TONEMAP_RESET_ROW: usize = TONEMAP_SLIDER_ROWS + 1;
 const TONEMAP_ROW_COUNT: usize = TONEMAP_SLIDER_ROWS + 2;
@@ -1897,20 +1903,24 @@ impl TonemapDebugOverlay {
 
 // ── Pick-blind hallway distortion debug (vertex warp tuning) ─────────────
 
-const HALL_DIST_DEBUG_ROW_COUNT: usize = 11;
+const HALL_DIST_DEBUG_ROW_COUNT: usize = 15;
 
 const HALL_DIST_DEBUG_ROW_META: &[(&str, f32, f32, f32)] = &[
     ("Blind (0 Auto 1S 2B 3Boss)", 0.0, 3.0, 0.25),
     ("Seed run #", 1.0, 30.0, 0.5),
     ("Seed ante", 1.0, 12.0, 0.25),
-    ("Global ×", 0.0, 2.5, 0.02),
-    ("Bow ×", 0.0, 3.0, 0.02),
-    ("Breathe ×", 0.0, 3.0, 0.02),
-    ("Ceiling ×", 0.0, 3.0, 0.02),
-    ("Stretch ×", 0.0, 3.0, 0.02),
-    ("Twist ×", 0.0, 3.0, 0.02),
-    ("Pulse ×", 0.0, 3.0, 0.02),
-    ("Drift ×", 0.0, 3.0, 0.02),
+    ("Global intensity ×", 0.0, 10.0, 0.02),
+    ("Breathe amp ×", 0.0, 10.0, 0.05),
+    ("Ripple amp ×", 0.0, 10.0, 0.05),
+    ("Ripple waves ×", 0.0, 3.0, 0.05),
+    ("Ripple travel ×", 0.0, 3.0, 0.05),
+    ("Wall barrel bow ×", 0.0, 10.0, 0.05),
+    ("Wall tint (0 Auto 1–8)", 0.0, 8.0, 1.0),
+    ("Ceiling squeeze ×", 0.0, 10.0, 0.05),
+    ("Depth stretch × (×u)", 0.0, 10.0, 0.05),
+    ("Twist × (walls)", 0.0, 10.0, 0.05),
+    ("Mask pulse ×", 0.0, 10.0, 0.05),
+    ("Phase drift ×", 0.0, 10.0, 0.05),
 ];
 
 #[derive(Clone, Copy)]
@@ -1933,15 +1943,16 @@ impl HallDistDebugLayout {
         let row_h = (22.0 * scale).max(16.0);
         let row_gap = (3.0 * scale).max(2.0);
         let title_h = (24.0 * scale).max(16.0);
+        let subtitle_h = (18.0 * scale).max(13.0);
         let pad = (8.0 * scale).max(5.0);
         let margin = (10.0 * scale).max(6.0);
-        let panel_w = (340.0 * scale).min(window_w * 0.46);
+        let panel_w = (420.0 * scale).min(window_w * 0.56);
         let panel_x = margin;
         let panel_y = margin;
-        let rows_y0 = panel_y + pad + title_h + pad;
-        let label_w = panel_w * 0.42;
-        let slider_w = panel_w * 0.32;
-        let value_w = (panel_w - label_w - slider_w - 12.0 * scale).max(36.0);
+        let rows_y0 = panel_y + pad + title_h + subtitle_h + pad;
+        let label_w = panel_w * 0.48;
+        let slider_w = panel_w * 0.26;
+        let value_w = (panel_w - label_w - slider_w - 12.0 * scale).max(88.0);
         let _ = row_count;
         Self {
             panel_x,
@@ -1983,13 +1994,17 @@ pub struct HallwayDistortionDebugOverlay {
     run_number: f32,
     ante: f32,
     global_mul: f32,
-    bow_mul: f32,
     breathe_mul: f32,
     ceiling_mul: f32,
     stretch_mul: f32,
     twist_mul: f32,
     pulse_mul: f32,
     drift_mul: f32,
+    ripple_mul: f32,
+    balloon_mul: f32,
+    wall_tint: f32,
+    ripple_waves_mul: f32,
+    ripple_travel_mul: f32,
     editing: bool,
     edit_buffer: String,
     dragging_slider: Option<usize>,
@@ -2003,13 +2018,17 @@ impl HallwayDistortionDebugOverlay {
             run_number: 1.0,
             ante: 1.0,
             global_mul: 1.0,
-            bow_mul: 1.0,
             breathe_mul: 1.0,
             ceiling_mul: 1.0,
             stretch_mul: 1.0,
             twist_mul: 1.0,
             pulse_mul: 1.0,
             drift_mul: 1.0,
+            ripple_mul: 1.0,
+            balloon_mul: 1.0,
+            wall_tint: 0.0,
+            ripple_waves_mul: 1.0,
+            ripple_travel_mul: 1.0,
             editing: false,
             edit_buffer: String::new(),
             dragging_slider: None,
@@ -2022,13 +2041,17 @@ impl HallwayDistortionDebugOverlay {
             seed_run: self.run_number.round().clamp(1.0, 999.0) as u32,
             seed_ante: self.ante.round().clamp(1.0, 99.0) as u32,
             global_mul: self.global_mul,
-            bow_mul: self.bow_mul,
             breathe_mul: self.breathe_mul,
             ceiling_mul: self.ceiling_mul,
             stretch_mul: self.stretch_mul,
             twist_mul: self.twist_mul,
             pulse_mul: self.pulse_mul,
             drift_mul: self.drift_mul,
+            ripple_mul: self.ripple_mul,
+            balloon_mul: self.balloon_mul,
+            wall_tint: self.wall_tint.round().clamp(0.0, 6.0) as u8,
+            ripple_waves_mul: self.ripple_waves_mul,
+            ripple_travel_mul: self.ripple_travel_mul,
         }
     }
 
@@ -2042,13 +2065,17 @@ impl HallwayDistortionDebugOverlay {
             1 => self.run_number,
             2 => self.ante,
             3 => self.global_mul,
-            4 => self.bow_mul,
-            5 => self.breathe_mul,
-            6 => self.ceiling_mul,
-            7 => self.stretch_mul,
-            8 => self.twist_mul,
-            9 => self.pulse_mul,
-            10 => self.drift_mul,
+            4 => self.breathe_mul,
+            5 => self.ripple_mul,
+            6 => self.ripple_waves_mul,
+            7 => self.ripple_travel_mul,
+            8 => self.balloon_mul,
+            9 => self.wall_tint,
+            10 => self.ceiling_mul,
+            11 => self.stretch_mul,
+            12 => self.twist_mul,
+            13 => self.pulse_mul,
+            14 => self.drift_mul,
             _ => 0.0,
         }
     }
@@ -2061,13 +2088,17 @@ impl HallwayDistortionDebugOverlay {
             1 => self.run_number = v,
             2 => self.ante = v,
             3 => self.global_mul = v,
-            4 => self.bow_mul = v,
-            5 => self.breathe_mul = v,
-            6 => self.ceiling_mul = v,
-            7 => self.stretch_mul = v,
-            8 => self.twist_mul = v,
-            9 => self.pulse_mul = v,
-            10 => self.drift_mul = v,
+            4 => self.breathe_mul = v,
+            5 => self.ripple_mul = v,
+            6 => self.ripple_waves_mul = v,
+            7 => self.ripple_travel_mul = v,
+            8 => self.balloon_mul = v,
+            9 => self.wall_tint = v.round(),
+            10 => self.ceiling_mul = v,
+            11 => self.stretch_mul = v,
+            12 => self.twist_mul = v,
+            13 => self.pulse_mul = v,
+            14 => self.drift_mul = v,
             _ => {}
         }
     }
@@ -2098,6 +2129,8 @@ impl HallwayDistortionDebugOverlay {
         let v = self.row_value(self.cursor);
         let mut s = if self.cursor == 0 {
             format!("{}", self.blind_row)
+        } else if self.cursor == 9 {
+            format!("{}", self.wall_tint.round() as u8)
         } else {
             format!("{:.6}", v)
         };
@@ -2138,25 +2171,29 @@ impl HallwayDistortionDebugOverlay {
         if ctrl && matches!(code, Scancode::C) && !self.editing {
             let s = self.to_snapshot();
             let text = format!(
-                "HallwayDistortionDebugSnapshot {{ blind_mode: {}, seed_run: {}, seed_ante: {}, global_mul: {:.4}, bow_mul: {:.4}, breathe_mul: {:.4}, ceiling_mul: {:.4}, stretch_mul: {:.4}, twist_mul: {:.4}, pulse_mul: {:.4}, drift_mul: {:.4} }}",
+                "HallwayDistortionDebugSnapshot {{ blind_mode: {}, seed_run: {}, seed_ante: {}, global_mul: {:.4}, breathe_mul: {:.4}, ripple_mul: {:.4}, ceiling_mul: {:.4}, stretch_mul: {:.4}, twist_mul: {:.4}, pulse_mul: {:.4}, drift_mul: {:.4}, balloon_mul: {:.4}, wall_tint: {}, ripple_waves_mul: {:.4}, ripple_travel_mul: {:.4} }}",
                 s.blind_mode,
                 s.seed_run,
                 s.seed_ante,
                 s.global_mul,
-                s.bow_mul,
                 s.breathe_mul,
+                s.ripple_mul,
                 s.ceiling_mul,
                 s.stretch_mul,
                 s.twist_mul,
                 s.pulse_mul,
                 s.drift_mul,
+                s.balloon_mul,
+                s.wall_tint,
+                s.ripple_waves_mul,
+                s.ripple_travel_mul,
             );
             match arboard::Clipboard::new() {
                 Ok(mut cb) => {
                     if let Err(e) = cb.set_text(&text) {
                         log::error!("Clipboard write failed: {e}");
                     } else {
-                        log::info!("Hallway hall FX snapshot copied to clipboard");
+                        log::info!("Hallway vertex warp snapshot copied to clipboard");
                     }
                 }
                 Err(e) => log::error!("Could not open clipboard: {e}"),
@@ -2330,19 +2367,22 @@ impl HallwayDistortionDebugOverlay {
         false
     }
 
-    fn format_row_display(&self, row: usize) -> String {
-        if self.editing && self.cursor == row {
-            return self.edit_buffer.clone();
+    fn preview_blind(&self) -> BlindKind {
+        match self.blind_row {
+            0 => BlindKind::Big,
+            1 => BlindKind::Small,
+            2 => BlindKind::Big,
+            _ => BlindKind::Boss,
         }
-        if row == 0 {
-            return match self.blind_row {
-                0 => "0 Auto".into(),
-                1 => "1 Small".into(),
-                2 => "2 Big".into(),
-                _ => "3 Boss".into(),
-            };
-        }
-        let v = self.row_value(row);
+    }
+
+    fn preview_distortion(&self, window_h: f32, env_height_scale: f32) -> HallwayDistortion {
+        let mut d = self.to_snapshot().resolve(self.preview_blind());
+        hallway_distortion_apply_glb_depth_extent(&mut d, window_h, env_height_scale);
+        d
+    }
+
+    fn trim_f32(v: f32) -> String {
         let mut s = format!("{:.4}", v);
         while s.contains('.') && (s.ends_with('0') || s.ends_with('.')) {
             s.pop();
@@ -2350,22 +2390,82 @@ impl HallwayDistortionDebugOverlay {
         s
     }
 
-    pub fn draw(&self, window_w: f32, window_h: f32) -> (Vec<GpuInstance>, Vec<TextLabel>) {
+    fn format_row_display(&self, row: usize, preview: &HallwayDistortion) -> String {
+        if self.editing && self.cursor == row {
+            return self.edit_buffer.clone();
+        }
+        if row == 0 {
+            return match self.blind_row {
+                0 => "0 Auto → Big".into(),
+                1 => "1 Small".into(),
+                2 => "2 Big".into(),
+                _ => "3 Boss".into(),
+            };
+        }
+        if row == 9 {
+            let idx = self.wall_tint.round() as u8;
+            let names = [
+                "Auto", "Blue", "Gold", "Green", "Red", "Purple", "Orange", "Pink", "Brown",
+            ];
+            let label = names.get(idx as usize).copied().unwrap_or("?");
+            if self.editing && self.cursor == row {
+                return self.edit_buffer.clone();
+            }
+            let rgb = if idx == 0 {
+                [preview.bow[0], preview.bow[1], preview.bow[2]]
+            } else {
+                crate::render::hallway_glb::hallway_wall_tint_by_index(idx as usize - 1)
+            };
+            return format!(
+                "{idx} {label} ({},{},{})",
+                Self::trim_f32(rgb[0]),
+                Self::trim_f32(rgb[1]),
+                Self::trim_f32(rgb[2]),
+            );
+        }
+        let v = self.row_value(row);
+        let mul = Self::trim_f32(v);
+        let eff = match row {
+            3 => Self::trim_f32(preview.flags[2]),
+            4 => Self::trim_f32(preview.breathe[0]),
+            5 => Self::trim_f32(preview.ripple[0]),
+            6 => Self::trim_f32(preview.ripple[1]),
+            7 => Self::trim_f32(preview.ripple[3]),
+            8 => Self::trim_f32(preview.bow[3]),
+            10 => Self::trim_f32(preview.ceiling[0]),
+            11 => Self::trim_f32(preview.stretch[0]),
+            12 => Self::trim_f32(preview.twist[0]),
+            13 => Self::trim_f32(preview.time_pulse[3]),
+            14 => Self::trim_f32(preview.time_pulse[1]),
+            _ => return mul,
+        };
+        format!("{mul} ({eff})")
+    }
+
+    pub fn draw(
+        &self,
+        window_w: f32,
+        window_h: f32,
+        env_height_scale: f32,
+    ) -> (Vec<GpuInstance>, Vec<TextLabel>) {
         let layout = HallDistDebugLayout::compute(window_w, window_h, self.row_count());
         let scale = layout.scale;
         let mut instances = Vec::new();
         let mut labels = Vec::new();
 
+        let preview = self.preview_distortion(window_h, env_height_scale);
         let title_h = (24.0 * scale).max(16.0);
+        let subtitle_h = (18.0 * scale).max(13.0);
         let pad = (8.0 * scale).max(5.0);
         let row_gap = layout.row_gap;
-        let hint_h = (20.0 * scale).max(14.0);
+        let hint_h = (18.0 * scale).max(13.0);
         let panel_h = layout.panel_y
             + pad
             + title_h
+            + subtitle_h
             + pad
             + self.row_count() as f32 * (layout.row_h + row_gap)
-            + hint_h
+            + hint_h * 2.0
             + row_gap * 2.0
             - layout.panel_y;
 
@@ -2393,6 +2493,13 @@ impl HallwayDistortionDebugOverlay {
             rect: [px, py + row_gap, pw, title_h],
             text: "Hallway hall FX".into(),
             color: color::TALLOW,
+            ..Default::default()
+        });
+        labels.push(TextLabel {
+            rect: [px, py + row_gap + title_h, pw, subtitle_h],
+            text: "breathe · ripple · wall bow (bow.w world units) · tint (bow.rgb) · squeeze/stretch"
+                .into(),
+            color: color::alpha(color::STONE, 0.88),
             ..Default::default()
         });
 
@@ -2462,7 +2569,7 @@ impl HallwayDistortionDebugOverlay {
             let (vx, vy, vw, vh) = layout.value_cell(i);
             labels.push(TextLabel {
                 rect: [vx, vy, vw, vh],
-                text: self.format_row_display(i),
+                text: self.format_row_display(i, &preview),
                 color: tc,
                 ..Default::default()
             });
@@ -2474,6 +2581,12 @@ impl HallwayDistortionDebugOverlay {
             text: "\u{2191}/\u{2193} row   \u{2190}/\u{2192} adjust   \u{23ce} type value   Esc close   Ctrl+C copy"
                 .into(),
             color: color::alpha(color::STONE, 0.85),
+            ..Default::default()
+        });
+        labels.push(TextLabel {
+            rect: [px, hint_y + hint_h, pw, hint_h],
+            text: "Value (eff): slider × resolved GPU amp for preview blind".into(),
+            color: color::alpha(color::STONE, 0.75),
             ..Default::default()
         });
 
