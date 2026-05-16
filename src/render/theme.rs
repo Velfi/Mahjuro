@@ -263,14 +263,13 @@ pub mod typography {
 
     /// Largest [`size`] on the ladder that still fits within `max_px`.
     pub fn tier_at_most(max_px: f32, window_h: f32) -> f32 {
-        let mut best = size(H45, window_h);
         for &tier in LADDER {
             let px = size(tier, window_h);
             if px <= max_px + 0.01 {
-                best = px;
+                return px;
             }
         }
-        best
+        size(H45, window_h)
     }
 }
 
