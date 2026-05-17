@@ -336,7 +336,7 @@ impl WgpuRenderer {
                 // after the relic meshes so the falloff spills past the
                 // silhouette. Fires whenever any relic in the scene this
                 // frame had glow > 0 (Object3dKind::Relic accumulates).
-                if let Some(ref rgb) = relic_glow_buffer {
+                if let Some(rgb) = relic_glow_buffer {
                     pass.set_pipeline(&self.tile_glow_pipeline);
                     pass.set_bind_group(0, &self.globals_bind_group, &[]);
                     pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
@@ -344,7 +344,7 @@ impl WgpuRenderer {
                     pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                     pass.draw_indexed(0..6, 0, 0..relic_glows.len() as u32);
                 }
-                if let (Some(ref buf), Some(ref gpu)) =
+                if let (Some(buf), Some(gpu)) =
                     (relic_debuff_buffer, self.debuff_marker_overlay.as_ref())
                     && !relic_debuff_markers.is_empty()
                 {
@@ -391,7 +391,7 @@ impl WgpuRenderer {
 
                         // Glow halos for selected hand tiles (additive, drawn before mesh).
                         let has_glow = batch.iter().any(|p| p.glow);
-                        if has_glow && let Some(ref tgb) = tile_glow_buffer {
+                        if has_glow && let Some(tgb) = tile_glow_buffer {
                             pass.set_pipeline(&self.tile_glow_pipeline);
                             pass.set_bind_group(0, &self.globals_bind_group, &[]);
                             pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));

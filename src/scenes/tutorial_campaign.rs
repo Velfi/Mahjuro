@@ -315,7 +315,7 @@ impl TutorialCampaignScene {
                 let total_w = tile_size + (row.len().saturating_sub(1) as f32) * step;
                 let mut x = center_x - total_w * 0.5 + tile_size * 0.5;
                 let row_y = top_row_y + row_idx as f32 * row_gap;
-                for (_idx, (suit, rank)) in row.iter().copied().enumerate() {
+                for (suit, rank) in row.iter().copied() {
                     let mut tile = Tile::new(suit, rank, next_id);
                     tile.debuffed_visual = group.debuffed_visual;
                     placements.push(ShowcaseTilePlacement {

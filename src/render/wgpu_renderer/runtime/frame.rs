@@ -204,7 +204,7 @@ impl WgpuRenderer {
             1.0
         };
         let point_lights_buf = match (
-            self.active_scene_key.as_deref(),
+            self.active_scene_key,
             frame.camera_override.as_ref(),
         ) {
             // Pack closeup has no showcase tiles; lights must still use the same
@@ -283,7 +283,7 @@ impl WgpuRenderer {
         );
 
         // Upload spotlights (tile + `lit_mesh` group 3).
-        let spot_cam = match self.active_scene_key.as_deref() {
+        let spot_cam = match self.active_scene_key {
             Some("tile_pack_celebration") => frame.camera_override.as_ref(),
             Some("showcase") if frame.showcase_render_hints.object3d_use_camera_ray_plane_z => {
                 frame.camera_override.as_ref()

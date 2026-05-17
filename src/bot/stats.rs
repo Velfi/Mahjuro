@@ -262,6 +262,7 @@ impl Default for RunStats {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[derive(Default)]
 pub struct AggregateStats {
     pub runs: u32,
     pub blinds_cleared_total: u64,
@@ -337,82 +338,6 @@ pub struct AggregateStats {
     pub timed_out_runs: u32,
 }
 
-impl Default for AggregateStats {
-    fn default() -> Self {
-        Self {
-            runs: 0,
-            blinds_cleared_total: 0,
-            antes_cleared_total: 0,
-            victories: 0,
-            max_ante_reached: 0,
-            total_score: 0,
-            total_plays: 0,
-            total_discards: 0,
-            total_strategic_discards: 0,
-            total_blinds_skipped: 0,
-            total_relics_bought: 0,
-            total_gold_spent: 0,
-            total_final_gold: 0,
-            total_gold_from_clears: 0,
-            total_gold_from_clear_base: 0,
-            total_gold_from_unused_plays: 0,
-            total_gold_from_interest: 0,
-            total_gold_from_clear_relics: 0,
-            total_gold_from_skip_tags: 0,
-            total_skip_tag_gold_value: 0,
-            total_target_score: 0,
-            total_overscore: 0,
-            peak_blind_score: 0,
-            peak_blind_detail: None,
-            total_bot_issue_no_valid_hand: 0,
-            total_bot_issue_only_valid_unplayable: 0,
-            total_bot_issue_only_valid_no_score: 0,
-            total_bot_issue_other_stuck: 0,
-            total_bot_issue_lost_with_available_lines: 0,
-            bot_issues_by_reason: std::collections::BTreeMap::new(),
-            deaths_by_ante: std::collections::BTreeMap::new(),
-            deaths_by_blind: std::collections::BTreeMap::new(),
-            skipped_tags: std::collections::BTreeMap::new(),
-            relics_picked: std::collections::BTreeMap::new(),
-            relics_picked_victories: std::collections::BTreeMap::new(),
-            relics_picked_shop_early: std::collections::BTreeMap::new(),
-            relics_picked_shop_early_victories: std::collections::BTreeMap::new(),
-            relics_picked_shop_late: std::collections::BTreeMap::new(),
-            relics_picked_shop_late_victories: std::collections::BTreeMap::new(),
-            talismans_picked: std::collections::BTreeMap::new(),
-            zodiacs_picked: std::collections::BTreeMap::new(),
-            packs_picked: std::collections::BTreeMap::new(),
-            bot_issues_by_blind: std::collections::BTreeMap::new(),
-            bot_issues_by_boss: std::collections::BTreeMap::new(),
-            overscore_by_slot: std::collections::BTreeMap::new(),
-            cleared_by_slot: std::collections::BTreeMap::new(),
-            boss_faced: std::collections::BTreeMap::new(),
-            boss_beaten: std::collections::BTreeMap::new(),
-            deaths_by_ante_cause: std::collections::BTreeMap::new(),
-            yaku_scored: std::collections::BTreeMap::new(),
-            total_zodiacs_used: std::collections::BTreeMap::new(),
-            total_talismans_used: std::collections::BTreeMap::new(),
-            total_structure_triggers: 0,
-            total_structure_trigger_points: 0,
-            total_second_wind_forfeits: 0,
-            deaths_out_of_plays: 0,
-            deaths_no_actions_remaining: 0,
-            total_gold_clear_green_luck: 0,
-            total_gold_clear_gold_idol: 0,
-            total_gold_clear_jade_abacus: 0,
-            total_gold_clear_patience: 0,
-            total_turns: 0,
-            sum_peak_hand_size: 0,
-            turns_by_blind_slot: std::collections::BTreeMap::new(),
-            turns_cleared_by_slot: std::collections::BTreeMap::new(),
-            discards_by_blind_slot: std::collections::BTreeMap::new(),
-            relic_activations: std::collections::BTreeMap::new(),
-            total_tiles_destroyed: 0,
-            transformations_successor: std::collections::BTreeMap::new(),
-            timed_out_runs: 0,
-        }
-    }
-}
 
 impl AggregateStats {
     pub(crate) fn record(&mut self, s: &RunStats) {

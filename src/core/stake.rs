@@ -26,8 +26,10 @@ use crate::core::rules::RuleModifier;
 /// Ordered list of stakes from easiest to hardest.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum Stake {
     #[serde(alias = "Spring")]
+    #[default]
     Spring,
     #[serde(alias = "Summer")]
     Summer,
@@ -37,11 +39,6 @@ pub enum Stake {
     Winter,
 }
 
-impl Default for Stake {
-    fn default() -> Self {
-        Stake::Spring
-    }
-}
 
 #[derive(Deserialize)]
 struct StakePresentationRaw {

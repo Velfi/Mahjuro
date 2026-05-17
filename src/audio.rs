@@ -845,12 +845,11 @@ impl AudioManager {
             return;
         }
         let path = id.asset_path();
-        if let Some(file) = crate::asset_path::get(path) {
-            if let Some(clip) = decode_rodio(path, file.data.as_ref()) {
+        if let Some(file) = crate::asset_path::get(path)
+            && let Some(clip) = decode_rodio(path, file.data.as_ref()) {
                 log::debug!("Loaded BGM {path} ({id:?})");
                 self.music_data.insert(id, clip);
             }
-        }
     }
 
     fn start_music_track(&mut self, id: MusicId) {
@@ -862,12 +861,11 @@ impl AudioManager {
         let Some(handle) = &self.handle else {
             return;
         };
-        if let Some(sink) = self.music_sink.as_ref() {
-            if !sink.empty() && self.music_active_id == Some(id) {
+        if let Some(sink) = self.music_sink.as_ref()
+            && !sink.empty() && self.music_active_id == Some(id) {
                 self.refresh_music_sink_volume();
                 return;
             }
-        }
         if let Some(sink) = self.music_sink.take() {
             sink.stop();
         }

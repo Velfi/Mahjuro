@@ -282,7 +282,7 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
     let size = clamp_render_physical_size(size);
 
     let power_preference =
-        wgpu::PowerPreference::from_env().unwrap_or(wgpu::PowerPreference::default());
+        wgpu::PowerPreference::from_env().unwrap_or_default();
     let t_adapter = Instant::now();
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference,

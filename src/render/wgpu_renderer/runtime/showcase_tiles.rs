@@ -177,7 +177,7 @@ impl WgpuRenderer {
                     // ray → `plane_z` hit as `Object3d` anchors (`world_on_camera_ray_plane_z`),
                     // not flat `pixel_to_world`, or celebration tiles miss the frustum.
                     let mut center = match (
-                        self.active_scene_key.as_deref(),
+                        self.active_scene_key,
                         frame.camera_override.as_ref(),
                     ) {
                         (Some("shop") | Some("tile_pack_celebration"), Some(cam)) => {

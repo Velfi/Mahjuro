@@ -19,11 +19,10 @@ pub fn sync_onboarding_step(run: &mut RunState) {
     }
     let advance = run.onboarding.as_ref().is_some_and(|o| o.step == 0)
         && crate::game::engine::GameEngine::read(run).selected_count > 0;
-    if advance {
-        if let Some(ref mut onboarding) = run.onboarding {
+    if advance
+        && let Some(ref mut onboarding) = run.onboarding {
             onboarding.step = 1;
         }
-    }
 }
 
 pub fn lessons_hint_indices(run: &RunState) -> Option<Vec<usize>> {

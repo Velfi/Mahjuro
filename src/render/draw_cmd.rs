@@ -58,6 +58,7 @@ pub enum ScenePunctualLight {
 
 /// Unified per-frame lights for tiles, `lit_mesh`, and GLB room passes.
 #[derive(Clone, Debug)]
+#[derive(Default)]
 pub struct SceneLighting {
     pub punctual: Vec<ScenePunctualLight>,
     pub spot_lights: Vec<SpotLight>,
@@ -67,16 +68,6 @@ pub struct SceneLighting {
     pub embedded_gltf_punctual: bool,
 }
 
-impl Default for SceneLighting {
-    fn default() -> Self {
-        Self {
-            punctual: Vec::new(),
-            spot_lights: Vec::new(),
-            room_glb_brdf: false,
-            embedded_gltf_punctual: false,
-        }
-    }
-}
 
 impl SceneLighting {
     pub fn set_smooth_points(&mut self, v: Vec<PointLight>) {

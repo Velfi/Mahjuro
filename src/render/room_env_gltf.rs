@@ -866,14 +866,13 @@ pub fn walk_room_env_node(
         }
     }
 
-    if hooks.is_marker(name) {
-        if markers.insert(name.to_string(), world).is_some() {
+    if hooks.is_marker(name)
+        && markers.insert(name.to_string(), world).is_some() {
             log::warn!(
                 "{label}: duplicate marker node name {:?} — using last transform",
                 name
             );
         }
-    }
 
     if let Some(mesh) = node.mesh() {
         match hooks.mesh_policy(name) {

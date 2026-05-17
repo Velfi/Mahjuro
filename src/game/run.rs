@@ -954,7 +954,7 @@ impl RunState {
     ///
     /// Returns whether at least one copy was present (and removed).
     pub(crate) fn destroy_relic_removed_from_run(&mut self, relic_id: RelicId) -> bool {
-        if !self.relics.active.iter().any(|&r| r == relic_id) {
+        if !self.relics.active.contains(&relic_id) {
             return false;
         }
         self.relics.active.retain(|&r| r != relic_id);

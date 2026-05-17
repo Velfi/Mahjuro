@@ -67,11 +67,10 @@ impl App {
             let prev = self.last_drawable_px;
             let (dw, dh) = shell.drawable_size();
             self.last_drawable_px = PhysicalSize::new(dw.max(1), dh.max(1));
-            if prev != self.last_drawable_px {
-                if let Some(r) = self.renderer.as_mut() {
+            if prev != self.last_drawable_px
+                && let Some(r) = self.renderer.as_mut() {
                     r.resize(self.last_drawable_px);
                 }
-            }
             // Splash dismissal runs in `frame_tick` (`SplashScene::update` + scene switch).
             // If we only pre-baked the showcase atlas while backgrounded, `loading_done`
             // becomes true but the splash never advances — keep ticking through splash even

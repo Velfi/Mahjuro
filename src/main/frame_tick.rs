@@ -1020,11 +1020,10 @@ impl App {
         // `renderer.showcase_decal_atlas_baked()`.
         if matches!(self.scene, Scene::Splash(_)) {
             let tileset = self.gfx.tileset_name.clone();
-            if let Some(renderer) = self.renderer.as_mut() {
-                if !renderer.showcase_decal_atlas_baked() {
+            if let Some(renderer) = self.renderer.as_mut()
+                && !renderer.showcase_decal_atlas_baked() {
                     renderer.prebake_showcase_decal_atlas(&tileset);
                 }
-            }
         }
 
         // Profile capture completion chime: each profiler latches a one-shot

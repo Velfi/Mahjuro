@@ -2576,8 +2576,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     });
                 let bind_groups: Vec<wgpu::BindGroup> = prims
                     .iter()
-                    .enumerate()
-                    .map(|(_bi, p)| {
+                    
+                    .map(|p| {
                         device.create_bind_group(&wgpu::BindGroupDescriptor {
                             label: Some("shop-env-bg"),
                             layout: &tile_material_layout,
@@ -2776,8 +2776,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     });
                 let bind_groups: Vec<wgpu::BindGroup> = prims
                     .iter()
-                    .enumerate()
-                    .map(|(_bi, p)| {
+                    
+                    .map(|p| {
                         device.create_bind_group(&wgpu::BindGroupDescriptor {
                             label: Some("hallway-env-bg"),
                             layout: &tile_material_layout,
@@ -3030,8 +3030,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             });
             let bind_groups: Vec<wgpu::BindGroup> = prims
                 .iter()
-                .enumerate()
-                .map(|(_bi, p)| {
+                
+                .map(|p| {
                     device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("archive-env-bg"),
                         layout: &tile_material_layout,

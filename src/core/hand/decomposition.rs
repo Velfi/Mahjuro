@@ -23,7 +23,7 @@ fn face_groups(tiles: &[Tile]) -> FxHashMap<(Suit, u8), Vec<u32>> {
             continue;
         }
         m.entry((t.suit, t.rank))
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(t.id);
     }
     m
