@@ -1,5 +1,6 @@
 use super::*;
 
+use crate::game::engine::GameEngine;
 use crate::scene_transition::overlay_kind_for_transition;
 
 #[inline]
@@ -50,16 +51,43 @@ impl App {
                 if self.run.onboarding_active() && reached_target {
                     self.run
                         .apply_gold_reward(payout.total as i32, Some(&mut self.bus));
-                    self.progress.tutorial_completed = true;
-                    let _ = persistence::save_profile(self.active_profile, &self.progress);
-                    persistence::delete_saved_run(self.active_profile);
-                    self.steam.sync_profile_stats(&self.progress);
-                    self.steam
-                        .unlock_achievement(crate::steam::Achievement::TutorialComplete);
-                    self.pending_scene =
-                        Some(Scene::TutorialSummary(TutorialSummaryScene::new(true)));
-                    self.transition_alpha = 1.0;
-                    return;
+                    match self.run.onboarding_phase() {
+                        Some(crate::game::onboarding::OnboardingPhase::Lessons) => {
+                            self.audio.play_sfx(audio::SfxId::RoundWin);
+                            let cleared_round_score = self.run.round_score;
+                            let cleared_target_score = self.run.target_score;
+                            let mut lines = vec![format!(
+                                "Score: {} / {}",
+                                cleared_round_score, cleared_target_score
+                            )];
+                            lines.push("Nice work — you cleared your first blind.".to_string());
+                            lines.push("Next: browse the shop, then face the boss.".to_string());
+                            self.modals.push(
+                                Modal::new("Lesson Complete!", lines.join("\n"), ModalTheme::Success)
+                                    .with_fireworks(ww * 0.5, wh * 0.8, ww * 0.6, 4),
+                            );
+                            GameEngine::set_onboarding_shop_phase(&mut self.run);
+                            self.pending_scene = Some(Scene::Shop(
+                                crate::scenes::ShopScene::new_tutorial(&mut self.run),
+                            ));
+                            self.transition_alpha = 1.0;
+                            return;
+                        }
+                        Some(crate::game::onboarding::OnboardingPhase::Finale) => {
+                            self.progress.tutorial_completed = true;
+                            let _ = persistence::save_profile(self.active_profile, &self.progress);
+                            persistence::delete_saved_run(self.active_profile);
+                            self.steam.sync_profile_stats(&self.progress);
+                            self.steam.unlock_achievement(
+                                crate::steam::Achievement::TutorialComplete,
+                            );
+                            self.pending_scene =
+                                Some(Scene::TutorialSummary(TutorialSummaryScene::new(true)));
+                            self.transition_alpha = 1.0;
+                            return;
+                        }
+                        _ => {}
+                    }
                 }
                 if !reached_target {
                     let cleared_round_score = self.run.round_score;
@@ -182,18 +210,33 @@ impl App {
                     let round_score = self.run.round_score;
                     let target_score = self.run.target_score;
                     let discards_left = self.run.discards_remaining;
+                    let plays_left = self.run.plays_remaining;
                     let last = self.run.last_breakdown.as_ref();
-                    let feedback = crate::game::onboarding::finale_failure_feedback(
-                        round_score,
-                        target_score,
-                        discards_left,
-                        last,
-                    );
-                    self.run.retry_onboarding_finale();
+                    let (feedback, retry_blind) =
+                        match self.run.onboarding_phase() {
+                            Some(crate::game::onboarding::OnboardingPhase::Lessons) => {
+                                let feedback = crate::game::onboarding::lessons_failure_feedback(
+                                    round_score,
+                                    target_score,
+                                    plays_left,
+                                );
+                                self.run.retry_onboarding_lessons();
+                                (feedback, self.run.blind)
+                            }
+                            _ => {
+                                let feedback = crate::game::onboarding::finale_failure_feedback(
+                                    round_score,
+                                    target_score,
+                                    discards_left,
+                                    last,
+                                );
+                                self.run.retry_onboarding_finale();
+                                (feedback, self.run.blind)
+                            }
+                        };
                     self.audio.play_sfx(audio::SfxId::GameOver);
                     let modal = Modal::new("Try Again!", &feedback, ModalTheme::Info);
                     self.modals.push(modal);
-                    let retry_blind = self.run.blind;
                     self.pending_scene = Some(Scene::Gameplay(GameplayScene::with_pending_blind(
                         retry_blind,
                     )));

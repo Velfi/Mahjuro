@@ -37,6 +37,11 @@ impl RunState {
             }
         };
         let sets = self.pick_best_decomposition(sets, &scoring_tiles, &selected_tiles);
+        let meld_kinds: Vec<MeldKind> = sets.iter().map(|s| s.kind).collect();
+        if let Err(_) = self.onboarding_validate_melds(&meld_kinds) {
+            bus.push(GameEvent::InvalidAction);
+            return 0;
+        }
 
         if scoring_tiles != selected_tiles && self.relics.has(RelicId::JokerTile) {
             self.joker_used = true;
@@ -59,6 +64,7 @@ impl RunState {
             core.commit_sets_to_structure(&sets, &scoring_tiles);
         });
         bus.push(GameEvent::StructureCommitted);
+        self.onboarding_notify_structure_committed();
 
         if self.relics.has(RelicId::MeltingIce) {
             let v = self.relic_counters.entry(RelicId::MeltingIce).or_insert(80);
@@ -710,6 +716,9 @@ impl RunState {
     /// Manual structure cash-in (no play cost) + round resolution events.
     pub fn trigger_structure_manual(&mut self, bus: &mut EventBus) -> u64 {
         let earned = self.trigger_structure(StructureTriggerKind::Manual, bus);
+        if earned > 0 {
+            self.onboarding_notify_cash_in();
+        }
         self.emit_round_resolution_events(bus);
         earned
     }

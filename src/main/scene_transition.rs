@@ -152,7 +152,10 @@ pub(crate) fn should_clear_smoke_on_transition(from: SceneTag, to: SceneTag) -> 
     use SceneTag::*;
     matches!(
         (from, to),
-        (TileSelect, Shop) | (TutorialCampaign, Shop) | (Shop, PickBlind)
+        (TileSelect, Shop)
+            | (TutorialCampaign, Shop)
+            | (TutorialCampaign, Gameplay)
+            | (Shop, PickBlind)
     )
 }
 

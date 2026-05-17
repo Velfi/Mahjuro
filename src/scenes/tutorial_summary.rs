@@ -116,7 +116,7 @@ impl SceneBehavior for TutorialSummaryScene {
         let bullets = [
             "Pairs, triplets, and sequences become melds when you bank them into your structure.",
             "Full Hand and Chiitoitsu (seven pairs) are the two tutorial patterns to learn first.",
-            "Score is chips × mult; yaku are the usual way to grow mult early.",
+            "Play banks melds; Cash In scores them (chips × mult). Yaku are the usual way to grow mult early.",
             "Relics passively help all shrines; ribbons level yaku; talismans stamp tiles; packs reshape the wall.",
             "Any time: open Pause → Meld Guide for pictures of every meld and yaku.",
         ];

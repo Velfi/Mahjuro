@@ -148,6 +148,7 @@ impl RunState {
             self.relic_activations.push(RelicId::SilkMoth);
         }
 
+        self.onboarding_notify_discard();
         count
     }
 

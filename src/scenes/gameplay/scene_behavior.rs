@@ -79,9 +79,14 @@ impl SceneBehavior for GameplayScene {
             if self.light_ramp >= 1.0 {
                 let mut engine = GameEngine::new(ctx.run, ctx.bus);
                 let _ = engine.dispatch(GameCommand::ApplyBlind { blind });
+                if ctx.run.onboarding_lessons_active() {
+                    ctx.run.seed_onboarding_hand();
+                }
                 self.pending_blind = None;
             }
         }
+
+        onboarding_hints::sync_onboarding_step(ctx.run);
 
         // Scene transition in progress — keep animations running but block
         // all input so the player can't alter game state during the fade-out.
@@ -692,20 +697,25 @@ impl SceneBehavior for GameplayScene {
             && !interaction.selected_indices.is_empty()
             && self.cascade_queue.is_empty()
         {
-            let selection_mask: u32 = interaction
-                .selected_indices
-                .iter()
-                .fold(0u32, |acc, &i| acc | (1u32 << i.min(31)));
-            let mut cache = self.suggest_hint_cache.borrow_mut();
-            if !cache.matches(&interaction.hand, selection_mask) {
-                cache.hand_uids.clear();
-                cache
-                    .hand_uids
-                    .extend(interaction.hand.iter().map(|t| t.id));
-                cache.selection_mask = selection_mask;
-                cache.hints = suggest_completions(&interaction.hand, &interaction.selected_indices);
+            if let Some(affinity) = onboarding_hints::lessons_hint_indices(ctx.run) {
+                affinity
+            } else {
+                let selection_mask: u32 = interaction
+                    .selected_indices
+                    .iter()
+                    .fold(0u32, |acc, &i| acc | (1u32 << i.min(31)));
+                let mut cache = self.suggest_hint_cache.borrow_mut();
+                if !cache.matches(&interaction.hand, selection_mask) {
+                    cache.hand_uids.clear();
+                    cache
+                        .hand_uids
+                        .extend(interaction.hand.iter().map(|t| t.id));
+                    cache.selection_mask = selection_mask;
+                    cache.hints =
+                        suggest_completions(&interaction.hand, &interaction.selected_indices);
+                }
+                cache.hints.clone()
             }
-            cache.hints.clone()
         } else {
             vec![]
         };
@@ -1710,6 +1720,11 @@ impl SceneBehavior for GameplayScene {
                 GAMEPLAY_3D_HIT_ID,
             ));
         }
+        if !self.pause_menu.paused && self.cascade_queue.is_empty() {
+            onboarding_hints::push_lessons_banner(&mut frame, &ctx, ctx.run);
+            onboarding_hints::push_finale_intro_banner(&mut frame, &ctx, ctx.run);
+        }
+
         frame.buttons = buttons;
         frame.window_title = window_title;
         frame.debug_axes = self.debug_show_axes;

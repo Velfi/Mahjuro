@@ -17,6 +17,7 @@ mod cascade_hud;
 mod focus;
 mod hand_layout;
 mod input_handler;
+mod onboarding_hints;
 mod scene_behavior;
 
 use std::collections::VecDeque;

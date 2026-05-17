@@ -41,7 +41,7 @@ use crate::core::tile::{Suit, Tile, TileEnhancement};
 use crate::core::yaku::YakuKind;
 use crate::game::event_bus::{EventBus, GameEvent, GameOverReason};
 use crate::game::game_mode::GameMode;
-use crate::game::onboarding::{OnboardingPhase, OnboardingState, TUTORIAL_BOSS, tutorial_yaku};
+use crate::game::onboarding::{OnboardingState, TUTORIAL_BOSS, tutorial_yaku};
 pub use discard_undo::DiscardUndoSnapshot;
 
 /// Boss-blind state for the current run.  Extracted from `RunState` so
