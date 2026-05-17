@@ -25,7 +25,7 @@ use crate::core::tile_pack::{PACK_ID_STRIDE, PACK_TILE_ID_BASE, TilePackKind};
 use crate::core::yaku::YakuKind;
 use crate::game::engine_state::GameplayCoreState;
 use crate::game::event_bus::{EventBus, GameEvent, GameOverReason};
-use crate::game::onboarding::OnboardingPhase;
+use crate::game::onboarding::{OnboardingPhase, tutorial_yaku};
 use crate::game::run::{ConsumableUseResult, RunState};
 use crate::persistence::{AppSettings, TileMaterial};
 use crate::ui::input::MarqueeSelect;
@@ -415,10 +415,21 @@ impl<'a> GameEngine<'a> {
         run.begin_onboarding_finale();
     }
 
+    pub fn begin_onboarding_lessons(run: &mut RunState) {
+        run.begin_onboarding_lessons();
+    }
+
     pub fn set_onboarding_shop_phase(run: &mut RunState) {
         if let Some(ref mut onboarding) = run.onboarding {
             onboarding.phase = OnboardingPhase::Shop;
         }
+        run.mode.hand_size = crate::game::run::HAND_SIZE;
+        run.mode.starting_plays = 5;
+        run.mode.starting_discards = 4;
+        run.mode.base_target = 220;
+        run.base_target = 220;
+        run.target_score = 220;
+        run.available_yaku = tutorial_yaku();
     }
 
     pub fn consume_shop_tags(run: &mut RunState) -> ConsumedShopTags {
@@ -785,6 +796,13 @@ impl<'a> GameEngine<'a> {
                 CommandData::TriggerStructure { earned }
             }
             GameCommand::DiscardSelectionNoRefill => {
+                if !self.run.onboarding_discard_allowed() {
+                    return CommandOutcome::rejected(
+                        command,
+                        before,
+                        CommandRejection::NoDiscardsRemaining,
+                    );
+                }
                 if self.run.discards_remaining == 0 {
                     return CommandOutcome::rejected(
                         command,

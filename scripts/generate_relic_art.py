@@ -259,11 +259,12 @@ RELICS = [
     (
         "pair_power",
         "Pair Power",
-        "Two identical mahjong tiles standing upright side by side on a felt "
-        "table, touching at the edge, with a subtle shockwave ring rippling "
-        "outward from the seam between them. A few stray tiles lie blurred "
-        "in the background.",
-        "Ivory tile faces, deep emerald felt, warm gold shockwave, muted bamboo green marks.",
+        "A soft-enamel pin. Two mirror-twin magical girls mid-transformation: "
+        "stylized enamel-glyph silhouettes in frilled battle dresses and long twin "
+        "ponytails, arms raised as ribbon-light and sparkle halos burst from their "
+        "shoulders. Wands cross at a vertical radiant seam; shockwave rings ripple "
+        "outward in perfect symmetry. Crest-shaped die-cut with deep indigo void.",
+        "gradient from deep indigo to hot magenta, lavender halos, gold shockwave rings, rose ribbon light, copper spark flares.",
     ),
     (
         "honor_fury",
@@ -294,27 +295,27 @@ RELICS = [
     (
         "green_luck",
         "Green Luck",
-        "A single mahjong tile standing upright at the center of an emerald "
-        "felt table, its face carved with the green bamboo 'one bam' — a "
-        "stylized peacock with jade plumage. Small gold coins are stacked "
-        "in a neat pile beside the tile, with a few more spilling toward "
-        "the foreground catching warm light. A scatter of numbered suit "
-        "tiles — bamboos and dots, no honors — lies blurred in the "
-        "background.",
-        "Ivory tile face, deep emerald felt, jade-green peacock mark, warm gold coins, soft amber rim light.",
+        "A single upright mahjong tile with the green bamboo 1 tile: the peacock,"
+        " beside a neat stack of gold coins and a few loose coins. "
+        "Lucky green-and-gold charm. Crisp pin, everything sharp and in "
+        "focus.",
+        "Ivory tile face, jade-green peacock mark, warm gold coins, soft amber rim light.",
     ),
     (
         "white_dragons_hush",
         "White Dragon's Hush",
-        "A pair of blank-faced white dragon mahjong tiles standing upright "
-        "side by side at the center of an emerald felt table, their ivory "
-        "faces unmarked except for the carved blue-edged border of the "
-        "haku tile. A faint cool moonlit halo rings the pair, and the "
-        "felt around them is utterly still — even the stray face-down "
-        "wall tiles in the blurred background seem to hush. A single "
-        "small zodiac tile lies face-up just beside the pair, as if "
-        "drawn from quiet.",
-        "Ivory tile faces, deep emerald felt, blue-edged white dragon borders, cool pale moonlit rim light, hushed muted shadows.",
+        "A soft-enamel pin of a giant eastern serpent asleep in a loose "
+        "coil, its long body filling the die-cut silhouette from horned "
+        "head to tapering tail. Scales are pale ivory and pearl white, "
+        "each scale outlined in deep blue enamel like the carved border "
+        "of a blank white-dragon (haku) mahjong tile. Eyes closed; no "
+        "menace — only stillness. A faint cool moonlit halo traces the "
+        "coil. Two small upright blank-faced white dragon tiles nestle "
+        "in the curve of its neck. A single face-up zodiac tile rests "
+        "beside the lowest loop, as if drawn from quiet. The pin outline "
+        "follows the serpent's resting silhouette — organic, elongated, "
+        "asymmetric.",
+        "Pale ivory and pearl-white scale fills, deep blue scale-edge enamel, cool moonlit rim highlights, muted jade shadow in coil recesses, ivory white-dragon tile wells.",
     ),
     (
         "joker_tile",
@@ -331,34 +332,47 @@ RELICS = [
     (
         "strength_in_numbers",
         "Strength in Numbers",
-        "A double-stacked mahjong wall sitting at the center of an emerald "
-        "felt table, far taller than a normal four-row wall — six rows "
-        "high, face-down tiles packed tight. The top is bowing outward "
-        "and tiles are spilling off the back edges in slow cascades, "
-        "tumbling down onto the felt and pooling at the base of the wall. "
-        "A few loose tiles have rolled forward into the foreground. Soft "
-        "amber rim light catches the lacquered tile backs.",
-        "Lacquered face-down mahjong tiles, deep emerald felt, towering double-stacked wall, tumbling cascade of tiles spilling off the edges, soft amber rim light, dark warm shadows.",
+        "A beetle phalanx rendered as a tight military formation — no table, "
+        "no felt, no ground plane. Dozens of glossy scarab beetles "
+        "lock shields in overlapping ranks — a tall front wall of upright "
+        "beetles, side files angled outward like hoplite wings, and a "
+        "curving carapace roof of beetles on top in testudo formation. "
+        "Each beetle is a separate recessed enamel cell with raised metal "
+        "dividers; iridescent green-gold elytra catch crisp specular "
+        "highlights. A few stragglers crawl toward the formation at the "
+        "base. Strong silhouette readability at pin scale.",
+        "Iridescent jade-green and warm gold beetle elytra, dark umber legs and antennae, soft amber rim light, cool pale shadows between ranks.",
     ),
     (
         "quick_draw",
         "Quick Draw",
-        "A neat row of face-down mahjong wall tiles along the back of an "
-        "emerald felt table, with one tile mid-flight in a freeze-frame "
-        "arc as it lifts from the wall toward the foreground — a streak "
-        "of warm light trailing behind it. The tile is just starting to "
-        "rotate face-up, hinting at the glyph beneath. A few stray "
-        "face-up tiles rest blurred in the foreground.",
-        "Ivory tile faces, deep emerald felt, motion-blurred warm gold light streak, dark lacquered tile backs, soft amber rim light.",
+        "A vintage editorial caricature pin — bold pen-and-ink exaggeration "
+        "in the spirit of nineteenth-century political cartoons and Wild "
+        "West broadsheets. A lanky gunslinger figure frozen mid-draw: "
+        "impossibly long spurred legs, a tiny tilted hat, a beak-like nose, "
+        "and enormous gloved hands. One hand blurs toward a low row of "
+        "face-down mahjong wall tiles treated like a holstered belt; a single "
+        "tile rockets out in a speed-line arc, spinning face-up with its "
+        "glyph just visible — the tile is the 'pistol.' Squiggly motion "
+        "hatching and starburst speed marks fill the negative space. "
+        "Grotesque, funny, readable silhouette; not realistic photography.",
+        "Ink-black linework enamel, warm cream and ivory tile, deep emerald "
+        "felt band, copper-rim speed lines, muted sepia shadows, small crimson "
+        "accent on the spur or hat band.",
     ),
     (
         "chain_reaction",
         "Chain Reaction",
-        "A flat top-down chain-reaction diagram on emerald felt: one scored "
-        "row of face-up tiles triggers branching energy paths, blast rings, "
-        "dotted trajectories, and tile-fragment sparks. Crisp graphic "
-        "schematic, everything sharp and in focus.",
-        "Ivory tile faces, deep emerald felt, amber-gold energy arcs, blast rings, dotted paths, bright sparks.",
+        "A vintage atomic-age nuclear chain-reaction schematic as a soft-enamel "
+        "pin: a large Bohr-model atom at center — dense copper-red nucleus, "
+        "three crisp electron orbit rings in cool teal enamel — with neutron "
+        "dots racing along branching dotted trajectories to two smaller "
+        "satellite atoms at the corners. Each impact triggers amber-gold "
+        "fission sparks and concentric blast rings that link the atoms in a "
+        "cascading cascade. Clean mid-century science-poster diagram fills, "
+        "strong silhouette readability, everything sharp and in focus.",
+        "Copper-red nucleus, cool teal orbital rings, amber-gold fission sparks "
+        "and blast rings, ivory neutron paths, muted slate diagram background.",
     ),
     (
         "multiplier_master",
@@ -380,29 +394,25 @@ RELICS = [
     (
         "wild_winds",
         "Wild Winds",
-        "Three mahjong tiles standing upright in a tight row at the center "
-        "of an emerald felt table — a 4 of bamboo on the left, a 6 of "
-        "bamboo on the right, and a wind tile in the middle slot. The "
-        "wind tile's carved glyph is heavily motion-blurred, smeared "
-        "sideways into ghostly streaks as if shifting between forms "
-        "faster than the eye can fix. Strong horizontal motion-blur lines "
-        "rake across the wind tile and trail off both edges of the row, "
-        "with petals and dust caught in the streaking blur. The 4 and 6 "
-        "stand sharp and still in contrast. A few stray face-down wall "
-        "tiles lie blurred in the background.",
-        "Ivory tile faces, deep emerald felt, bamboo green marks, deep blue wind glyph smeared in heavy horizontal motion blur, pale wind-streak light, drifting motion-blur petals and dust, sharp focus on the flanking number tiles.",
+        "Two kabuki wind-spirits in perfect left-right mirror symmetry on a "
+        "vertical axis — identical mie poses and proportions, each the mirror "
+        "twin of the other. White oshiroi base faces with bold red kumadori "
+        "paint, arched brows, and exaggerated puffed cheeks; long black stage "
+        "wigs and flowing indigo happi coats whip outward. They face inward, "
+        "blowing fierce opposing gales that meet in a turbulent center swirl. "
+        "The colliding gusts and crest silhouette read with 180-degree "
+        "rotational symmetry. Ukiyo-e poster boldness translated into soft enamel.",
+        "Pearl white oshiroi, crimson kumadori, deep indigo coats and wind "
+        "streaks, jet-black wig enamel, warm gold gust highlights, drifting petals.",
     ),
     (
         "dragon_echo",
         "Dragon Echo",
-        "A triplet of red dragon mahjong tiles standing upright at the "
-        "center of an emerald felt table, their crimson 'chun' glyphs "
-        "burning with inner light. Ghostly translucent echoes of the same "
-        "triplet recede behind it in three progressively fainter arcs, as "
-        "if a dragon's roar reverberating across the felt. Faint embers "
-        "drift between the layers. A few stray face-down wall tiles lie "
-        "blurred in the background.",
-        "Ivory tile faces, deep emerald felt, glowing crimson dragon glyphs, ghostly amber echo arcs, drifting ember sparks.",
+        "A triplet of upright red dragon mahjong tiles with glowing "
+        "crimson chun glyphs. Ghostly echo copies stagger behind in "
+        "fading arcs, like a reverberating roar. Crisp pin, everything "
+        "sharp and in focus.",
+        "Ivory tile faces, glowing crimson dragon glyphs, ghostly amber echo arcs, ember sparks.",
     ),
     (
         "kan_drum",
@@ -415,36 +425,33 @@ RELICS = [
     (
         "dora_crown",
         "Dora Crown",
-        "A single mahjong tile lying face-up at the center of an emerald "
-        "felt table — a dora indicator with its glyph carved in red — "
-        "wearing a small Chinese imperial mianguan crown hovering just "
-        "above its face: a flat rectangular gold-and-lacquer board with "
-        "rows of beaded jade tassels hanging from its front and back "
-        "edges, accented by ornate carved dragon and cloud motifs. A "
-        "second dora indicator tile lies face-up just behind it, slightly "
-        "offset. Soft warm light glows from beneath both tiles, and a few "
-        "flecks of gold drift across the felt. A few stray face-down "
-        "wall tiles lie blurred in the background.",
-        "Ivory tile faces, deep emerald felt, crimson dora glyphs, gold-and-black-lacquer mianguan crown, jade beaded tassels, carved dragon and cloud motifs, warm amber underglow, drifting gold flecks.",
+        "A mahjong-tile princess doll: a face-up dora indicator tile is her "
+        "dress, with a small painted porcelain head, tiny arms, and a gold "
+        "crown. Cute 1920s figurine, crisp and fully in focus.",
+        "Ivory tile dress, crimson dora glyph, porcelain skin, gold crown, pastel pink accents.",
     ),
     (
         "round_compass",
         "Round Compass",
-        "Four wind mahjong tiles — East, South, West, North — laid face-up "
-        "in a ring at the cardinal points of an emerald felt table, their "
-        "glyphs aligned outward like a compass rose. A faint golden "
-        "wind-rose is etched into the felt between them, and a glowing "
+        "A circular compass-pin face: four wind mahjong tiles — East, South, "
+        "West, North — in a ring at the cardinal points on a recessed emerald "
+        "enamel dial, glyphs aligned outward like a compass rose. A faint "
+        "golden wind-rose is etched into the dial between them, and a glowing "
         "needle of warm light arcs from the center toward the East tile. "
-        "A few stray face-down wall tiles lie blurred in the background.",
+        "Crisp pin, everything sharp and in focus — no depth-of-field blur.",
         "Ivory tile faces, deep emerald felt, deep blue wind glyphs, etched gold wind-rose, warm amber needle of light.",
+        "Macro product shot with infinite depth of field: every tile, metal rim, "
+        "dial line, and needle equally tack-sharp edge to edge.",
     ),
     (
         "eight_treasures",
         "Eight Treasures",
-        "An ornate reliquary chest — dark wood with gold filigree — cracked "
-        "open to reveal a warm amber glow from within. Eight small objects "
-        "are barely visible inside. Cathedral crypt setting.",
-        "Dark wood chest, gold filigree, warm amber interior glow, stone.",
+        "An ornate open treasure chest ringed with the eight ba-bao auspicious "
+        "emblems — pearl, double coins, coral, stone chime, knot, vase, fan, "
+        "and cloud — each a tiny distinct charm on the rim. Warm light spills "
+        "from inside; curling zodiac ribbons spill over the edge. Crisp pin, "
+        "everything sharp and in focus.",
+        "Dark lacquer chest, gold filigree, eight colored treasure charms, warm amber glow, curling ribbon accents.",
     ),
     (
         "kongs_blessing",
@@ -525,28 +532,37 @@ RELICS = [
     (
         "low_tide",
         "Low Tide",
-        "A small coastal survey boat resting on its keel on exposed tidal "
-        "mud flats, the waterline far away. Measuring stakes driven into the "
-        "mud at intervals. Flat grey estuary light.",
-        "Dark hull on brown mud, white measuring stakes, grey flat light.",
+        "Landscape-oriented wide horizontal pin badge: a small coastal "
+        "survey boat in profile on exposed tidal mud flats, spanning left "
+        "to right. Squat workboat hull, cabin roof with a compact radar "
+        "dome and short survey antenna — no tall sail mast. Measuring "
+        "stakes in the mud under a pale open sky. Flat grey estuary light. "
+        "Crisp pin, everything sharp and in focus.",
+        "Dark hull, brown mud, white measuring stakes, small radar dome, short antenna, pale sky, grey flat light.",
     ),
     (
         "high_tide",
         "High Tide",
-        "A small coastal survey boat afloat on the same tidal estuary, the "
-        "waterline risen to swallow the mud flats. Measuring stakes driven into "
-        "the bed at intervals, only their tops still showing above the water. "
-        "Flat grey estuary light.",
-        "Dark hull on grey water, white measuring stakes barely showing above the surface, grey flat light.",
+        "Landscape-oriented wide horizontal pin badge: a small coastal "
+        "survey boat in profile afloat on a risen tidal estuary, spanning "
+        "left to right. Squat workboat hull, cabin roof with a compact "
+        "radar dome and short survey antenna — no tall sail mast. "
+        "Measuring-stake tops barely show above the water under a pale "
+        "open sky. Flat grey estuary light. Crisp pin, everything sharp "
+        "and in focus.",
+        "Dark hull, grey water, white stake tips, small radar dome, short antenna, pale sky, grey flat light.",
     ),
     (
         "merchants_eye",
         "Merchant's Eye",
-        "A brass jeweler's loupe hovering over a single mahjong tile lying "
-        "face-up on an emerald felt table, magnifying its carved glyph "
-        "into sharp focus. A few scattered gold coins and stray face-down wall "
-        "tiles lie blurred in the background.",
-        "Polished brass loupe, ivory tile face, deep emerald felt, paper price tag with red string, warm gold coin accents, soft amber lamplight.",
+        "A Victorian pawn-shop curio: a glossy blown-glass prosthetic eye "
+        "with a vivid painted amber-hazel iris and pinprick pupil, resting "
+        "on emerald felt beside a single face-up mahjong tile. The glass "
+        "orb catches a sharp studio highlight as if appraising the tile. "
+        "A tiny cream price tag on red string dangles from a short brass "
+        "display hook. A few scattered gold coins and face-down wall tiles "
+        "around the edges. Crisp pin, everything sharp and in focus.",
+        "Milky glass sclera, amber-hazel iris, jet pupil highlight, ivory tile face, deep emerald felt, warm gold coins, cream price tag, red string, brass hook, soft amber lamplight on the glass.",
     ),
     (
         "i_got_a_guy",
@@ -559,13 +575,13 @@ RELICS = [
     (
         "edge_runner",
         "Edge Runner",
-        "Two mahjong tiles standing upright at opposite ends of an emerald "
-        "felt table — a '1 of dots' on the left and a '9 of dots' on "
-        "the right — with a taut line of light arcing between them across "
-        "the felt like a tightrope. The middle of the table is empty save "
-        "for soft shadow; faint gold sparks trail along the light. A few "
-        "stray face-down wall tiles lie blurred in the background.",
-        "Ivory tile faces, deep emerald felt, deep blue dot marks, warm gold light arc, subtle amber sparks.",
+        "Two upright mahjong circle-suit tiles at opposite ends, linked by a "
+        "taut gold light arc like a tightrope with sparks along the span. "
+        "Left tile: exactly one large centered blue dot (pinzu 1). Right "
+        "tile: exactly nine blue dots in a perfect 3×3 grid — three rows of "
+        "three, no extra dots (pinzu 9). Small corner numerals 1 and 9. "
+        "Crisp pin, everything sharp and in focus.",
+        "Ivory tile faces, one large center dot, nine dots in 3×3 grid, deep blue pips, warm gold light arc, amber sparks.",
     ),
     (
         "lucky_seven",
@@ -595,10 +611,18 @@ RELICS = [
     (
         "turtle_shell",
         "Turtle Shell",
-        "A compact armored personnel carrier with an unusually domed, "
-        "turtle-like hull and small viewports. Parked behind a sandbag wall, "
-        "hatches sealed. Defensive posture, not built for speed.",
-        "Olive-drab domed hull, dark viewports, tan sandbags, grey sky.",
+        "A soft-enamel pin of a colossal ancient swamp turtle half-sunk in "
+        "misty bog water — the Morla-style great old turtle from classic "
+        "fantasy cinema. Its domed carapace reads as a weathered earthen "
+        "hill: layered moss, ferns, twisted roots, and pale driftwood "
+        "caught along the rim. One massive wrinkled head breaks the "
+        "surface beside the shell, deep-set patient eyes half-lidded with "
+        "indifference. Reeds and lily pads ring the waterline; grey-green "
+        "fog softens the background. The pin's die-cut silhouette follows "
+        "the turtle's organic mound-and-head outline.",
+        "Mossy olive and peat-brown shell hill, jade fern and root enamel, "
+        "bleached bone ivory accents, muddy grey-green swamp water, reedy "
+        "chartreuse highlights, wrinkled grey-olive skin, soft amber rim light.",
     ),
     (
         "closed_gate",
@@ -631,14 +655,13 @@ RELICS = [
         "snowball",
         "Snowball",
         "A massive sphere built entirely from packed mahjong tiles, "
-        "rolling across an emerald felt table. Tiles of every suit — "
+        "rolling forward in a freeze-frame burst. Tiles of every suit — "
         "bamboos, dots, characters, winds, dragons — are jammed "
         "together at every angle, ivory faces and lacquered backs "
         "pressed into the curve, with a few loose tiles tumbling along "
         "to be absorbed at the leading edge. A widening trail of fallen "
-        "tiles curves across the felt behind it. A few stray face-down "
-        "wall tiles lie blurred in the background.",
-        "Ivory tile faces, lacquered tile backs, deep emerald felt, multicolored suit marks, warm amber rim light, drifting motion blur on the trail.",
+        "tiles curves behind it in the dark background.",
+        "Ivory tile faces, lacquered tile backs, multicolored suit marks, warm amber rim light, cool pale shadows.",
     ),
     (
         "second_wind",
@@ -664,16 +687,18 @@ RELICS = [
     (
         "last_breath",
         "Last Breath",
-        "A single hero mahjong tile stands front and center on deep "
-        "emerald felt, its carved glyph blazing molten gold as if lit from "
-        "within. Behind it, the rest of the final hand is fanned outward "
-        "in a theatrical kabuki-pose arc, each tile angled to catch the "
-        "light — deep blue dots, jade-green bamboo, crimson characters. "
-        "Sharp gold rays radiate outward from the hero tile across the "
-        "felt, and a translucent ghost echo of each tile rises just beside "
-        "it, scoring a second time. Drifting gold sparks hang in the air "
-        "around the pose.",
-        "Ivory tile faces, deep emerald felt, molten gold glyph, sharp radiating gold rays, fanned kabuki arc, ghostly translucent echo tiles, drifting gold sparks.",
+        "An abstract soft-enamel pin — no felt table, no fanned hand. At the "
+        "center, the traditional Chinese character 氣 (qi — breath, vital "
+        "energy) rendered as a bold molten-gold brushstroke sigil, not inside "
+        "a tile rectangle. Three concentric echo-rings orbit it: each ring "
+        "bears a simplified ghost-outline of the same 氣 character, "
+        "progressively fainter toward the outside, telegraphing one final "
+        "exhale that repeats. Pale jade and warm-gold vapor ribbons curl "
+        "counterclockwise through the rings like breath on cold air. The "
+        "die-cut silhouette follows the spiral and rings organically — "
+        "asymmetric, crest-shaped, with deep midnight-teal void between the "
+        "curls. A few drifting gold sparks catch the silver rim.",
+        "Midnight-teal void, molten-gold 氣 character, pale jade breath ribbons, fading gold echo rings, translucent ghost 氣 strata, drifting gold sparks, cool silver rim light.",
     ),
     (
         "tile_polisher",
@@ -706,18 +731,40 @@ RELICS = [
     (
         "mirror_tile",
         "Mirror Tile",
-        "A mahjong tile paired with a polished circular mirror inset, the "
-        "reflective face framed by a crisp geometric border. Symmetrical "
-        "and readable at pin scale.",
-        "Ivory tile body, bright silver mirror, muted jade details, pale blue reflections.",
+        "One oversized blank mahjong tile as a soft-enamel pin — a tall "
+        "rounded rectangle, ivory face completely empty (no suit mark on "
+        "the giant tile). Its entire front is skinned over by a tight "
+        "mosaic of miniature mirror tiles: hundreds of tiny square "
+        "mirror-facet cells with thin gold grout, each cell a bright "
+        "silver reflective square catching sharp diagonal glints — like "
+        "a wall of tiny mirrored mahjong chips laid flat on the blank "
+        "carrier. No dots, bamboo, or characters on the mosaic cells "
+        "themselves — only mirror shine. A few pale blue reflections and "
+        "white star sparkles where the mirrors catch the light. Raised "
+        "gold die-cut rim around the giant tile. Upright, symmetrical, "
+        "readable at pin scale.",
+        "Pearl ivory blank giant carrier, bright silver mirror mosaic "
+        "cells, warm gold grout and outer rim, pale blue glints, soft "
+        "amber rim light.",
     ),
     (
         "way_of_purity",
         "Way of Purity",
-        "Three identical suited mahjong tiles arranged in a tight vertical "
-        "stack, each bearing the same clean numeric mark, haloed by a thin "
-        "luminous ring that signals a flawless single-suit hand.",
-        "Crisp ivory tile faces, deep bamboo green marks, pale jade halo, warm gold rim light.",
+        "A soft-enamel pin in the Funerary Row set — match the sculptural "
+        "punch of Way of Pairs: late-Ming woodblock engraving translated into "
+        "raised metal lines, Holbein Dance of Death austerity. A tall narrow "
+        "tomb-crest silhouette of four identical stone funeral masks stacked "
+        "vertically, each mask carved with the same calm closed-eye expression "
+        "and the same deep cinnabar-red lacquer shroud draped over brow and "
+        "cheek — one funeral hue only, no mixed colors. Forehead name cartouches "
+        "are chiseled blank ivory voids. A single silver burial cord threads "
+        "through all four masks. Rain-slick blue-grey stone plinth; a black "
+        "enamel puddle at the foot. Deep undercut shadows in eye sockets and "
+        "mouth; moss in carved creases. No living figure, no flat drawer-stack "
+        "geometry, no English text.",
+        "Sculpted blue-grey stone masks, deep cinnabar shroud enamel, blank "
+        "ivory forehead wells, hollow charcoal eye sockets, cool silver cord and "
+        "rim, black rain pool, moss-green crevice accents.",
     ),
     (
         "geese",
@@ -871,18 +918,14 @@ RELICS = [
     (
         "taotie",
         "Taotie",
-        "A green-patinated bronze taotie ritual mask centered on a cool grey "
-        "stone plinth — broad bulging eyes, twin curling horns "
-        "rising over the brow, jaws cracked open in a hungry grin baring "
-        "blunt bronze teeth. A single mahjong tile is captured mid-flight "
-        "just above the open mouth, tilted and being drawn down into it; "
-        "faint motion-blur lines trail behind the tile to read the pull "
-        "as gravitational, not gentle. A shallow pool of meltwater still "
-        "glistens beneath the mask's chin. Soft dark out-of-focus backdrop.",
-        "Green-patinated bronze, deep jade highlights, warm bronze "
-        "underglow in the recessed eye sockets, ivory tile face with "
-        "crimson dragon glyph being devoured, cool grey stone plinth, "
-        "glistening meltwater puddle, soft amber rim light.",
+        "A soft-enamel pin of a broad taotie mask with curling horns and a "
+        "wide malicious grin. Three honor mahjong tiles — red dragon, green "
+        "dragon, white dragon — sit in its open jaws only, each a small "
+        "recessed enamel well with raised metal outlines. The "
+        "mask defines the die-cut pin silhouette.",
+        "Warm jade-green and bronze enamel fills, ivory tile faces, crimson "
+        "and emerald dragon glyphs, copper raised metal lines, soft amber rim "
+        "light.",
     ),
     (
         "silk_thread",
@@ -961,30 +1004,73 @@ RELICS = [
     (
         "patience",
         "Patience",
-        "An hourglass resting beside a tidy stack of unused tiles, communicating "
-        "calm restraint and waiting.",
-        "Warm sand gold, ivory glass frame, pale blue highlights, dark bronze accents.",
+        "A Northern Renaissance allegory pin after Hans Sebald Beham's 1540 "
+        "engraving Pacientia (Patience): a calm winged woman seated in three-quarter "
+        "view, gently cradling a small lamb — the traditional attribute of gentleness "
+        "and docile endurance. Behind her shoulder, a small horned imp or demon "
+        "taunts with a grimace but cannot break her composure; above, two tiny putti "
+        "hover as one lowers a laurel victory wreath toward her head. Compact vertical "
+        "cameo silhouette like the original print (~10×7 cm proportions), with fine "
+        "cross-hatched shading suggested in recessed enamel wells rather than flat "
+        "cartoon fills. At her feet, a short neat stack of unused face-down mahjong "
+        "tiles nods to waiting out the round. Moralizing, sculptural, legible at "
+        "pin scale — engraved draftsmanship translated into raised metal lines.",
+        "Warm aged ivory flesh and lamb wool, deep umber cross-hatch enamel, muted "
+        "slate-blue demon, pale laurel-green wreath, soft cream wing feathers, cool "
+        "iron rim highlights on the figures.",
     ),
     (
         "way_of_pairs",
         "Way of Pairs",
-        "Two matched mahjong tiles mirrored side by side, simple and symmetrical; "
-        "the paired tiles define the pin outline.",
-        "Ivory tiles, warm gold crest border, deep navy accents, soft amber highlights.",
+        "A soft-enamel pin in the Funerary Row set, late-Ming woodblock "
+        "staging with Holbein Dance of Death symmetry: a crest-shaped "
+        "silhouette of two weathered stone guardian lions seated in perfect "
+        "mirror symmetry on rain-slick flagstones, flanking a narrow sealed "
+        "tomb door with no gap — no face, no figure, only the paired beasts "
+        "and the shut lintel. Each lion bears the same worn collar crest; "
+        "moss in paw creases. Fine drizzle streaks on stone; a hairline crack "
+        "on one base only, not breaking the symmetry of pose.",
+        "Blue-grey wet stone, muted moss-green recesses, pale ivory worn "
+        "carving highlights, dark charcoal door well, cool silver outer rim, "
+        "soft amber rim light on rain.",
     ),
     (
         "way_of_triplets",
         "Way of Triplets",
-        "Three matching mahjong tiles arranged in a tight triangle, "
-        "bold and balanced; the triplet cluster defines the pin outline.",
-        "Ivory tiles, gold border, dark ink details, muted crimson accents.",
+        "A soft-enamel pin in the Funerary Row set — match Way of Pairs "
+        "exactly: same rain-slick flagstone base, same architectural tomb "
+        "staging, late-Ming woodblock engraving, Holbein austerity. EXACTLY "
+        "THREE closed bronze funeral urns and nothing else — no fourth urn, "
+        "no human face, no bust, no commemorative plaque frame. The three "
+        "urns sit in a tight equilateral triangle on wet stone, each urn "
+        "identical: squat round body, domed lid, and the same cast taotie "
+        "beast knocker ring on the front. A single silver burial wire threads "
+        "through all three rings as one offering. A small black enamel void "
+        "gapes in the center between the three urns. Identical cinnabar seal "
+        "stamps on each lid. Moss in stone cracks, fine drizzle, worn metal "
+        "patina. Triangular silhouette comes from the three round urn bodies "
+        "only — not a pyramid of heads.",
+        "Weathered bronze urn bodies, deep cinnabar lid seals, charcoal "
+        "center void, blue-grey wet flagstone, cool silver wire and rim, "
+        "moss-green stone cracks, soft amber rim light on rain.",
     ),
     (
         "way_of_sequences",
         "Way of Sequences",
-        "Three consecutive mahjong tiles stepping upward in order; the "
-        "diagonal run defines the pin silhouette.",
-        "Ivory tiles, pale gold frame, deep teal accents, soft cream highlights.",
+        "A soft-enamel pin in the Funerary Row set — match the sculptural "
+        "punch of Way of Pairs: late-Ming woodblock diagonal staging, Holbein "
+        "Dance of Death descent. A wedge-shaped silhouette of three steep "
+        "rain-slick tomb steps descending left to right, each tread carved "
+        "with a single Chinese grave numeral (一, 二, 三) in deep ivory inlay "
+        "— NOT English words. A long skeletal bone-white handprint stain "
+        "trails down the center of all three treads as if something was "
+        "dragged downward into a black enamel pool at the bottom step. Worn "
+        "stone undercut, moss in tread corners, cool silver step lips. No "
+        "figure visible — only the descending numerals, the handprint trail, "
+        "and the dark pool. No flat infographic stairs, no English text.",
+        "Wet blue-grey stone treads, deep teal moss wells, pale ivory "
+        "Chinese numeral inlays, bone-white handprint streak, black pool at "
+        "base, cool silver step edging and outer rim.",
     ),
     (
         "fortunes_favor",
@@ -1083,7 +1169,8 @@ RELICS = [
         "from the other. The two hands are clearly mirror-opposites of "
         "each other, not duplicates — anatomically correct opposing "
         "right and left hands. The transaction is frozen mid-motion. A "
-        "few stray face-down wall tiles lie blurred in the background.",
+        "few stray face-down wall tiles rest in the background. Crisp pin, "
+        "everything sharp and in focus.",
         "Anatomically opposing right-hand and left-hand pair (mirror images, NOT two right hands), distinct dark embroidered sleeve versus plain pale sleeve, ivory honor tile faces with deep blue wind and crimson dragon glyphs, deep emerald felt, warm gold coins in an open palm-up right hand, palm-down left hand sweeping tiles, soft amber rim light.",
     ),
     (
@@ -1112,13 +1199,10 @@ RELICS = [
     (
         "heirloom",
         "Heirloom",
-        "A single antique mahjong tile standing upright at the center of an "
-        "emerald felt table, its ivory face yellowed with age and its "
-        "carved glyph rubbed soft and shallow from generations of handling. "
-        "A faint warm patina glow rims the edges, and tiny notches along "
-        "the sides hint at decades of play. A few stray face-down wall "
-        "tiles lie blurred in the background.",
-        "Aged ivory tile face, deep emerald felt, soft worn glyph, warm amber patina rim light, muted dark wood accents.",
+        "A single antique upright mahjong tile: yellowed ivory face, worn "
+        "shallow glyph, warm patina along the edges, tiny play notches on "
+        "the sides. Crisp pin, everything sharp and in focus.",
+        "Aged ivory tile face, soft worn glyph, warm amber patina, muted dark wood accents.",
     ),
     (
         "tourist",

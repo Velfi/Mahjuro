@@ -3,17 +3,12 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::audio::SfxId;
-use crate::core::relic::RelicId;
-use crate::core::talisman::TalismanKind;
 use crate::core::tile::{Suit, Tile};
-use crate::core::tile_pack::TilePackKind;
-use crate::core::zodiac::ZodiacKind;
 use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;
 use crate::render::draw_cmd::{
     CameraParams, DrawCmd, Object3d, Object3dKind, ShowcaseTilePlacement, UiFrame,
 };
-use crate::render::table_transform::euler_xyz_rad_from_deg;
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::render::world_space::LayoutAnchorPx;
@@ -22,7 +17,6 @@ use crate::ui::focus_nav;
 use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
-use super::shop::ShopScene;
 use super::{BackgroundId, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,15 +58,7 @@ struct TileGroup {
     accent: [f32; 4],
     tiles: &'static [(Suit, u8)],
     rows: &'static [&'static [(Suit, u8)]],
-    layout: TileGroupLayout,
     debuffed_visual: bool,
-}
-
-#[derive(Clone, Copy)]
-enum TileGroupLayout {
-    Flat,
-    FullHand,
-    Pairs,
 }
 
 struct TutorialPage {
@@ -92,7 +78,6 @@ const PART1_SUITS_GROUPS: &[TileGroup] = &[
         accent: color::WALNUT_BRIGHT,
         tiles: &[(Suit::Bamboos, 2), (Suit::Bamboos, 5), (Suit::Bamboos, 8)],
         rows: &[],
-        layout: TileGroupLayout::Flat,
         debuffed_visual: false,
     },
     TileGroup {
@@ -100,7 +85,6 @@ const PART1_SUITS_GROUPS: &[TileGroup] = &[
         accent: color::CHAMPAGNE,
         tiles: &[(Suit::Dots, 3), (Suit::Dots, 5), (Suit::Dots, 7)],
         rows: &[],
-        layout: TileGroupLayout::Flat,
         debuffed_visual: false,
     },
     TileGroup {
@@ -112,429 +96,47 @@ const PART1_SUITS_GROUPS: &[TileGroup] = &[
             (Suit::Characters, 9),
         ],
         rows: &[],
-        layout: TileGroupLayout::Flat,
         debuffed_visual: false,
     },
 ];
 
-/// Ranks 2–8 (simples) and 1 / 9 (terminals) within the three suits.
-const PART1_NUMBER_GROUPS: &[TileGroup] = &[
-    TileGroup {
-        label: "Simples",
-        accent: color::WALNUT_BRIGHT,
-        tiles: &[(Suit::Bamboos, 3), (Suit::Bamboos, 5), (Suit::Bamboos, 7)],
-        rows: &[],
-        layout: TileGroupLayout::Flat,
-        debuffed_visual: false,
-    },
-    TileGroup {
-        label: "Terminals",
-        accent: color::GOLD,
-        tiles: &[(Suit::Dots, 1), (Suit::Dots, 9), (Suit::Characters, 9)],
-        rows: &[],
-        layout: TileGroupLayout::Flat,
-        debuffed_visual: false,
-    },
-];
+/// Part 2 — How to Score (0-based index into `PAGES`).
+const TUTORIAL_PAGE_SCORING: usize = 1;
 
-/// Winds, dragons, honors umbrella, and flower bonus tiles.
-const PART1_HONOR_GROUPS: &[TileGroup] = &[
-    TileGroup {
-        label: "Winds",
-        accent: color::STONE,
-        tiles: &[
-            (Suit::Wind, 1),
-            (Suit::Wind, 2),
-            (Suit::Wind, 3),
-            (Suit::Wind, 4),
-        ],
-        rows: &[],
-        layout: TileGroupLayout::Flat,
-        debuffed_visual: false,
-    },
-    TileGroup {
-        label: "Dragons",
-        accent: color::RUBY,
-        tiles: &[(Suit::Dragon, 1), (Suit::Dragon, 2), (Suit::Dragon, 3)],
-        rows: &[],
-        layout: TileGroupLayout::Flat,
-        debuffed_visual: false,
-    },
-    TileGroup {
-        label: "Honors",
-        accent: color::CHAMPAGNE,
-        tiles: &[
-            (Suit::Wind, 1),
-            (Suit::Dragon, 1),
-            (Suit::Wind, 4),
-            (Suit::Dragon, 3),
-        ],
-        rows: &[],
-        layout: TileGroupLayout::Flat,
-        debuffed_visual: false,
-    },
-    TileGroup {
-        label: "Flowers",
-        accent: color::GOLD,
-        tiles: &[
-            (Suit::Flower, 1),
-            (Suit::Flower, 2),
-            (Suit::Flower, 3),
-            (Suit::Flower, 4),
-        ],
-        rows: &[],
-        layout: TileGroupLayout::Flat,
-        debuffed_visual: false,
-    },
-];
-
-const FULL_HAND_ROW_TOP: &[(Suit, u8)] = &[
-    (Suit::Characters, 1),
-    (Suit::Characters, 2),
-    (Suit::Characters, 3),
-    (Suit::Bamboos, 4),
-    (Suit::Bamboos, 5),
-    (Suit::Bamboos, 6),
-];
-
-const FULL_HAND_ROW_BOTTOM: &[(Suit, u8)] = &[
-    (Suit::Dots, 7),
-    (Suit::Dots, 7),
-    (Suit::Dots, 7),
-    (Suit::Characters, 7),
-    (Suit::Characters, 8),
-    (Suit::Characters, 9),
-    (Suit::Dragon, 1),
-    (Suit::Dragon, 1),
-];
-
-const FULL_HAND_ROWS: &[&[(Suit, u8)]] = &[FULL_HAND_ROW_TOP, FULL_HAND_ROW_BOTTOM];
-
-const CHIITOITSU_ROW_TOP: &[(Suit, u8)] = &[
-    (Suit::Bamboos, 1),
-    (Suit::Bamboos, 1),
-    (Suit::Dots, 2),
-    (Suit::Dots, 2),
-    (Suit::Characters, 3),
-    (Suit::Characters, 3),
-    (Suit::Bamboos, 5),
-    (Suit::Bamboos, 5),
-];
-
-const CHIITOITSU_ROW_BOTTOM: &[(Suit, u8)] = &[
-    (Suit::Dots, 7),
-    (Suit::Dots, 7),
-    (Suit::Characters, 8),
-    (Suit::Characters, 8),
-    (Suit::Dragon, 1),
-    (Suit::Dragon, 1),
-];
-
-const CHIITOITSU_ROWS: &[&[(Suit, u8)]] = &[CHIITOITSU_ROW_TOP, CHIITOITSU_ROW_BOTTOM];
-
-const BOSS_SAFE_FULL_HAND_ROW_TOP: &[(Suit, u8)] = &[
-    (Suit::Bamboos, 2),
-    (Suit::Bamboos, 3),
-    (Suit::Bamboos, 4),
-    (Suit::Dots, 4),
-    (Suit::Dots, 5),
-    (Suit::Dots, 6),
-];
-
-const BOSS_SAFE_FULL_HAND_ROW_BOTTOM: &[(Suit, u8)] = &[
-    (Suit::Characters, 7),
-    (Suit::Characters, 7),
-    (Suit::Characters, 7),
-    (Suit::Bamboos, 6),
-    (Suit::Bamboos, 7),
-    (Suit::Bamboos, 8),
-    (Suit::Dots, 9),
-    (Suit::Dots, 9),
-];
-
-const BOSS_SAFE_FULL_HAND_ROWS: &[&[(Suit, u8)]] =
-    &[BOSS_SAFE_FULL_HAND_ROW_TOP, BOSS_SAFE_FULL_HAND_ROW_BOTTOM];
-
-const BOSS_SAFE_CHIITOITSU_ROW_TOP: &[(Suit, u8)] = &[
-    (Suit::Bamboos, 1),
-    (Suit::Bamboos, 1),
-    (Suit::Dots, 2),
-    (Suit::Dots, 2),
-    (Suit::Characters, 3),
-    (Suit::Characters, 3),
-    (Suit::Bamboos, 5),
-    (Suit::Bamboos, 5),
-];
-
-const BOSS_SAFE_CHIITOITSU_ROW_BOTTOM: &[(Suit, u8)] = &[
-    (Suit::Dots, 7),
-    (Suit::Dots, 7),
-    (Suit::Characters, 8),
-    (Suit::Characters, 8),
-    (Suit::Bamboos, 9),
-    (Suit::Bamboos, 9),
-];
-
-const BOSS_SAFE_CHIITOITSU_ROWS: &[&[(Suit, u8)]] = &[
-    BOSS_SAFE_CHIITOITSU_ROW_TOP,
-    BOSS_SAFE_CHIITOITSU_ROW_BOTTOM,
-];
-
-const PART1_GROUPS: &[TileGroup] = &[
-    TileGroup {
-        label: "Full Hand",
-        accent: color::CHAMPAGNE,
-        tiles: &[],
-        rows: FULL_HAND_ROWS,
-        layout: TileGroupLayout::FullHand,
-        debuffed_visual: false,
-    },
-    TileGroup {
-        label: "Chiitoitsu",
-        accent: color::STONE,
-        tiles: &[],
-        rows: CHIITOITSU_ROWS,
-        layout: TileGroupLayout::Pairs,
-        debuffed_visual: false,
-    },
-];
-
-const PART2_GROUPS: &[TileGroup] = &[
-    TileGroup {
-        label: "Full Hand",
-        accent: color::CHAMPAGNE,
-        tiles: &[],
-        rows: FULL_HAND_ROWS,
-        layout: TileGroupLayout::FullHand,
-        debuffed_visual: false,
-    },
-    TileGroup {
-        label: "Chiitoitsu",
-        accent: color::STONE,
-        tiles: &[],
-        rows: CHIITOITSU_ROWS,
-        layout: TileGroupLayout::Pairs,
-        debuffed_visual: false,
-    },
-];
-
-const PART3_GROUPS: &[TileGroup] = &[
-    TileGroup {
-        label: "Relic",
-        accent: color::GOLD,
-        tiles: &[(Suit::Bamboos, 4), (Suit::Bamboos, 4), (Suit::Bamboos, 4)],
-        rows: &[],
-        layout: TileGroupLayout::Flat,
-        debuffed_visual: false,
-    },
-    TileGroup {
-        label: "Boss Debuff",
-        accent: color::RUBY,
-        tiles: &[
-            (Suit::Wind, 1),
-            (Suit::Wind, 1),
-            (Suit::Wind, 1),
-            (Suit::Dragon, 2),
-            (Suit::Dragon, 2),
-        ],
-        rows: &[],
-        layout: TileGroupLayout::Flat,
-        debuffed_visual: true,
-    },
-];
-
-const PART4_GROUPS: &[TileGroup] = &[
-    TileGroup {
-        label: "Relic",
-        accent: color::GOLD,
-        tiles: &[(Suit::Dots, 5), (Suit::Dots, 5), (Suit::Dots, 5)],
-        rows: &[],
-        layout: TileGroupLayout::Flat,
-        debuffed_visual: false,
-    },
-    TileGroup {
-        label: "Zodiac ribbon",
-        accent: color::WALNUT_BRIGHT,
-        tiles: &[
-            (Suit::Characters, 1),
-            (Suit::Characters, 9),
-            (Suit::Characters, 5),
-        ],
-        rows: &[],
-        layout: TileGroupLayout::Flat,
-        debuffed_visual: false,
-    },
-    TileGroup {
-        label: "Talisman",
-        accent: color::STONE,
-        tiles: &[(Suit::Dragon, 1), (Suit::Dragon, 1), (Suit::Bamboos, 6)],
-        rows: &[],
-        layout: TileGroupLayout::Flat,
-        debuffed_visual: false,
-    },
-    TileGroup {
-        label: "Tile pack",
-        accent: color::CHAMPAGNE,
-        tiles: &[
-            (Suit::Bamboos, 2),
-            (Suit::Dots, 3),
-            (Suit::Characters, 4),
-            (Suit::Bamboos, 8),
-        ],
-        rows: &[],
-        layout: TileGroupLayout::Flat,
-        debuffed_visual: false,
-    },
-];
-
-const PART5_GROUPS: &[TileGroup] = &[
-    TileGroup {
-        label: "Boss-safe Full Hand",
-        accent: color::WALNUT_BRIGHT,
-        tiles: &[],
-        rows: BOSS_SAFE_FULL_HAND_ROWS,
-        layout: TileGroupLayout::FullHand,
-        debuffed_visual: false,
-    },
-    TileGroup {
-        label: "Boss-safe Chiitoitsu",
-        accent: color::CHAMPAGNE,
-        tiles: &[],
-        rows: BOSS_SAFE_CHIITOITSU_ROWS,
-        layout: TileGroupLayout::Pairs,
-        debuffed_visual: false,
-    },
-];
-
-/// Part 5 — Structure And Scoring (0-based index into `PAGES`).
-const TUTORIAL_PAGE_STRUCTURE: usize = 4;
-/// Part 6 — Relics and bosses overview.
-const TUTORIAL_PAGE_RELICS: usize = 5;
-/// Part 8 — Tutorial Boss.
-const TUTORIAL_PAGE_BOSS: usize = 7;
-/// Part 7 — Shop overview.
-const TUTORIAL_PAGE_SHOP: usize = 6;
+const SCORING_DEMO_GROUPS: &[TileGroup] = &[TileGroup {
+    label: "Pair",
+    accent: color::CHAMPAGNE,
+    tiles: &[(Suit::Dots, 5), (Suit::Dots, 5)],
+    rows: &[],
+    debuffed_visual: false,
+}];
 
 const PAGES: &[TutorialPage] = &[
     TutorialPage {
-        title: "Part 1 — The Three Suits",
-        subtitle: "Numbered tiles belong to three suits: Bamboos, Dots, and Characters. Each suit runs from 1 to 9. Sequences and most scoring rules stay inside one suit at a time.",
+        title: "Part 1 — Tiles",
+        subtitle: "Mahjuro uses three numbered suits: Bamboos, Dots, and Characters. Each suit has ranks 1 through 9. Most melds stay inside one suit.",
         glossary: &[
-            "Bamboos = green bamboo-stick suit",
-            "Dots = dotted suit",
-            "Characters = red chinese character suit",
-            "1–9 = ranks within a suit",
+            "Bamboos = green bamboo sticks",
+            "Dots = circles",
+            "Characters = red kanji",
+            "Matching = same suit and rank",
         ],
-        callout: Some("These are the tiles you will build melds from most often."),
+        callout: Some("You'll learn the rest by playing — starting with pairs."),
         try_it_demo: false,
         groups: PART1_SUITS_GROUPS,
     },
     TutorialPage {
-        title: "Part 2 — Simples & Terminals",
-        subtitle: "Within each numbered suit, simples are ranks 2 through 8 — the middle tiles. Terminals are 1 and 9 at the ends. Many bosses and relics refer to “simples” or “terminals” as a group.",
+        title: "Part 2 — How to Score",
+        subtitle: "Select tiles, press Play to bank them into your structure, then Cash In to score. Your round score is chips × mult.",
         glossary: &[
-            "Simples = ranks 2–8 in bamboo, dots, or characters",
-            "Terminals = 1 or 9 in those suits",
-            "Sequences use simples or terminals in order",
-        ],
-        callout: Some("Next: winds, dragons, honors, and flowers — different families of tiles."),
-        try_it_demo: false,
-        groups: PART1_NUMBER_GROUPS,
-    },
-    TutorialPage {
-        title: "Part 3 — Winds, Dragons & Flowers",
-        subtitle: "There are fours winds; dragons are the three red, green, and white tiles. Together they are honors (no bamboo, dots, or characters on those faces).",
-        glossary: &[
-            "Winds = East, South, West, North",
-            "Dragons = Red, Green, White",
-            "Honors = every wind and dragon tile",
-            "Flowers = bonus tiles that act as wildcards",
-        ],
-        callout: Some(
-            "Bosses and relics can target honors or terminals — make sure to read their descriptions",
-        ),
-        try_it_demo: false,
-        groups: PART1_HONOR_GROUPS,
-    },
-    TutorialPage {
-        title: "Part 4 — Tile Combinations",
-        subtitle: "Tiles work like classic mahjong: pairs, triplets, and sequences are your basic groups. Any valid group you bank into your build area is called a meld. Start by learning two common winning shapes: Full Hand (four melds and one pair) and Chiitoitsu (seven pairs). Extra pattern bonuses are called yaku. A complete hand with no yaku is a Chicken Hand — legal, but barely worth scoring.",
-        glossary: &[
-            "Pair = 2 matching tiles",
-            "Triplet = 3 matching tiles",
-            "Sequence = 3 consecutive tiles, same suit",
-            "Yaku = pattern bonus (raises mult)",
-            "Chiitoitsu = seven pairs (Japanese name)",
-            "Chicken Hand = valid hand, no yaku",
-        ],
-        callout: Some(
-            "Focus on Full Hand and seven pairs (Chiitoitsu) first. They are the easiest ways to see what “finished” looks like.",
-        ),
-        try_it_demo: false,
-        groups: PART1_GROUPS,
-    },
-    TutorialPage {
-        title: "Part 5 — Structure And Scoring",
-        subtitle: "Playing melds doesn't cause you to score in Mahjuro. Instead, it banks them into your structure. When you are ready, press Trigger to cash in. Chips come from the tiles and melds you banked. Mult comes mostly from yaku and relics. The final score is chips × mult.",
-        glossary: &[
-            "Structure = where banked melds sit until you cash in",
+            "Structure = banked melds until you cash in",
             "Play = bank selected melds",
-            "Trigger = score your structure",
-            "Chips = base value",
-            "Mult = score multiplier",
-            "Full Hand / Chiitoitsu = strong early goals",
+            "Cash In = score your structure",
+            "Chips × mult = round score",
         ],
-        callout: Some(
-            "Mult usually matters more than raw chips. Early on, land a real yaku before chasing exotic tiles.",
-        ),
+        callout: Some("Try the demo below, then you'll play a short guided blind."),
         try_it_demo: true,
-        groups: PART2_GROUPS,
-    },
-    TutorialPage {
-        title: "Part 6 — Relics And Bosses",
-        subtitle: "Relics are passive upgrades for the whole run. Bosses add a special rule for one shrine (one scoring round). A debuff does not make tiles illegal — they can still complete melds, but may be worth less when scored. The Iconoclast debuffs honors, so bamboo, dots, and characters are the safer plan.",
-        glossary: &[
-            "Relic = passive run bonus",
-            "Shrine = one round with a score target (Small, Big, or Boss)",
-            "Boss = extra rule on the Boss shrine",
-            "Debuff = tile scores 0 but still counts toward the hand",
-            "Honors = wind and dragon tiles",
-        ],
-        callout: Some("Next you will browse the shop: buy upgrades, then face the tutorial boss."),
-        try_it_demo: false,
-        groups: PART3_GROUPS,
-    },
-    TutorialPage {
-        title: "Part 7 — The Shop",
-        subtitle: "Spend gold on relics (passive run bonuses), zodiac ribbons (level up a yaku for the run), talismans (stamp enhancements onto tiles), and tile packs (change what the wall contains). You can sell owned relics back for gold. When you are ready, Next Round continues the run.",
-        glossary: &[
-            "Relic = passive bonus for the run",
-            "Zodiac ribbon = level one yaku",
-            "Talisman = tile enhancement stamp",
-            "Tile pack = wall modifier",
-            "Sell = refund some gold",
-            "Wall = the tiles you draw from",
-        ],
-        callout: Some(
-            "Hover items to read what they do. You do not need to buy everything — pick what fits your plan.",
-        ),
-        try_it_demo: false,
-        groups: PART4_GROUPS,
-    },
-    TutorialPage {
-        title: "Part 8 — Tutorial Boss",
-        subtitle: "The tutorial boss is The Iconoclast: honors (winds and dragons) are debuffed — they still form melds, but score for much less. Prefer bamboo, dots, and characters: triplets, sequences, Full Hand, or seven pairs (Chiitoitsu) still work. The deal is fair: you can miss the target, read the hint, and try again.",
-        glossary: &[
-            "Boss shrine = higher target + boss rule",
-            "Debuff = less value from those tiles",
-            "Honors = winds + dragons",
-            "Full Hand / Chiitoitsu = your tutorial yakus",
-        ],
-        callout: Some(
-            "After this lesson: open the shop, then press Next Round to enter the Boss shrine.",
-        ),
-        try_it_demo: true,
-        groups: PART5_GROUPS,
+        groups: SCORING_DEMO_GROUPS,
     },
 ];
 
@@ -554,12 +156,9 @@ impl TutorialCampaignScene {
 
     fn try_it_demo_line(page_index: usize, phase: u8) -> Option<&'static str> {
         match (page_index, phase) {
-            (TUTORIAL_PAGE_STRUCTURE, 0) => Some("Tap Play (bank), then Trigger (cash in)."),
-            (TUTORIAL_PAGE_STRUCTURE, 1) => Some("Banked — structure is locked in."),
-            (TUTORIAL_PAGE_STRUCTURE, 2) => Some("Demo: 4 chips × 3 mult = 12"),
-            (TUTORIAL_PAGE_BOSS, 0) => Some("Tap Play (bank), then Trigger (cash in)."),
-            (TUTORIAL_PAGE_BOSS, 1) => Some("Banked — boss debuff still applies."),
-            (TUTORIAL_PAGE_BOSS, 2) => Some("Demo: 5 chips × 2 mult = 10"),
+            (TUTORIAL_PAGE_SCORING, 0) => Some("Tap Play (bank), then Cash In."),
+            (TUTORIAL_PAGE_SCORING, 1) => Some("Banked — structure is locked in."),
+            (TUTORIAL_PAGE_SCORING, 2) => Some("Demo: 4 chips × 3 mult = 12"),
             _ => None,
         }
     }
@@ -601,55 +200,6 @@ impl TutorialCampaignScene {
             total_h += (glossary.len().saturating_sub(1) as f32) * 6.0 * scale;
         }
         (heights, total_h)
-    }
-
-    fn shop_preview_ribbon(center_x: f32, item_y: f32, h: f32, scale: f32) -> Object3d {
-        let length = 46.0 * scale;
-        crate::render::ribbon_mesh::zodiac_ribbon_object3d(
-            crate::render::ribbon_mesh::ZodiacRibbonSpec {
-                pos: [center_x, item_y + 2.0 * scale + length * 0.5, h * 0.18],
-                length,
-                rotation: [0.0, 0.0, 0.0],
-                color: [1.0, 1.0, 1.0, 1.0],
-                kind: Some(ZodiacKind::Dragon),
-                hover_target: 0.0,
-                anim_id: 0,
-                arrange_name: Some("tutorial.shop.ribbon"),
-            },
-        )
-    }
-
-    fn shop_preview_talisman(center_x: f32, item_y: f32, h: f32, scale: f32) -> Object3d {
-        Object3d {
-            pos: [center_x, item_y + 22.0 * scale, h * 0.13],
-            extents: [22.0 * scale, 32.0 * scale, 4.5 * scale],
-            // Match the normal shop's upright wall display pose.
-            rotation: [0.0, 0.0, 0.0],
-            color: [0.42, 0.82, 0.55, 1.0],
-            kind: Object3dKind::Talisman {
-                kind: TalismanKind::Pearl,
-            },
-            hover_target: 0.0,
-            anim_id: 0,
-            arrange_name: Some("tutorial.shop.talisman"),
-        }
-    }
-
-    fn shop_preview_pack(center_x: f32, item_y: f32, h: f32, scale: f32) -> Object3d {
-        Object3d {
-            pos: [center_x, item_y + 24.0 * scale, h * 0.14],
-            extents: [36.0 * scale, 48.0 * scale, 11.0 * scale],
-            // Match the normal shop's gentle shelf lean.
-            rotation: euler_xyz_rad_from_deg(-5.0, 0.0, 0.0),
-            color: [1.0, 1.0, 1.0, 1.0],
-            kind: Object3dKind::Pack {
-                kind: TilePackKind::CoinCache,
-                pick_id: None,
-            },
-            hover_target: 0.0,
-            anim_id: 0,
-            arrange_name: Some("tutorial.shop.pack"),
-        }
     }
 
     /// Matches `draw_frame` subtitle + tile row metrics so Try-it rects align with visuals.
@@ -728,7 +278,7 @@ impl TutorialCampaignScene {
     }
 
     fn preview_tile_placements(
-        page_index: usize,
+        _page_index: usize,
         page: &TutorialPage,
         panel_x: f32,
         panel_w: f32,
@@ -742,9 +292,6 @@ impl TutorialCampaignScene {
         let mut placements = Vec::new();
 
         for (group_idx, group) in page.groups.iter().enumerate() {
-            if page_index == TUTORIAL_PAGE_RELICS && group_idx == 0 {
-                continue;
-            }
             let center_x = start_x + group_idx as f32 * group_w;
             let rows: Vec<&[(Suit, u8)]> = if group.rows.is_empty() {
                 vec![group.tiles]
@@ -755,35 +302,20 @@ impl TutorialCampaignScene {
                 .iter()
                 .map(|row| {
                     let tiles = row.len() as f32;
-                    let accent_gaps = match group.layout {
-                        TileGroupLayout::Flat => 0.0,
-                        TileGroupLayout::FullHand => {
-                            (row.len().saturating_sub(1) / 3) as f32 * 0.24
-                        }
-                        TileGroupLayout::Pairs => (row.len().saturating_sub(1) / 2) as f32 * 0.24,
-                    };
-                    tiles + (tiles - 1.0) * 0.02 + accent_gaps
+                    tiles + (tiles - 1.0) * 0.02
                 })
                 .fold(1.0, f32::max);
             let tile_size = ((group_w * 0.68) / widest_row_units).clamp(18.0 * scale, 34.0 * scale);
             let step = tile_size * 1.02;
-            let cluster_gap = tile_size * 0.24;
             let row_gap = tile_size * 0.94;
             let base_row_y = label_y - tile_size * 0.80 - 8.0 * scale;
             let top_row_y = base_row_y - row_gap * (rows.len().saturating_sub(1) as f32);
 
             for (row_idx, row) in rows.iter().enumerate() {
-                let extra_gaps = match group.layout {
-                    TileGroupLayout::Flat => 0,
-                    TileGroupLayout::FullHand => row.len().saturating_sub(1) / 3,
-                    TileGroupLayout::Pairs => row.len().saturating_sub(1) / 2,
-                };
-                let total_w = tile_size
-                    + (row.len().saturating_sub(1) as f32) * step
-                    + extra_gaps as f32 * cluster_gap;
+                let total_w = tile_size + (row.len().saturating_sub(1) as f32) * step;
                 let mut x = center_x - total_w * 0.5 + tile_size * 0.5;
                 let row_y = top_row_y + row_idx as f32 * row_gap;
-                for (idx, (suit, rank)) in row.iter().copied().enumerate() {
+                for (_idx, (suit, rank)) in row.iter().copied().enumerate() {
                     let mut tile = Tile::new(suit, rank, next_id);
                     tile.debuffed_visual = group.debuffed_visual;
                     placements.push(ShowcaseTilePlacement {
@@ -802,14 +334,6 @@ impl TutorialCampaignScene {
                     });
                     next_id += 1;
                     x += step;
-                    let end_of_cluster = match group.layout {
-                        TileGroupLayout::Flat => false,
-                        TileGroupLayout::FullHand => (idx + 1) % 3 == 0 && idx + 1 < row.len(),
-                        TileGroupLayout::Pairs => (idx + 1) % 2 == 0 && idx + 1 < row.len(),
-                    };
-                    if end_of_cluster {
-                        x += cluster_gap;
-                    }
                 }
             }
         }
@@ -854,8 +378,10 @@ impl SceneBehavior for TutorialCampaignScene {
                     None
                 } else {
                     ctx.bus.push(GameEvent::UiSound(SfxId::RelicPickup));
-                    GameEngine::set_onboarding_shop_phase(ctx.run);
-                    Some(Scene::Shop(ShopScene::new_tutorial(ctx.run)))
+                    GameEngine::begin_onboarding_lessons(ctx.run);
+                    Some(Scene::Gameplay(super::gameplay::GameplayScene::with_pending_blind(
+                        crate::core::rules::BlindKind::Small,
+                    )))
                 }
             }
             Some(TutorialNav::TryPlay) => {
@@ -902,11 +428,6 @@ impl SceneBehavior for TutorialCampaignScene {
         let mut bg_quads = Vec::new();
         let mut fg_quads = Vec::new();
         let mut texts = Vec::new();
-        let mut relic_objects: Vec<Object3d> = Vec::new();
-        let mut ribbon_placements: Vec<Object3d> = Vec::new();
-        let mut talisman_placements: Vec<Object3d> = Vec::new();
-        let mut pack_placements: Vec<Object3d> = Vec::new();
-        let mut showcase_tiles = Vec::new();
         let mut wood_tablet_placements: Vec<Object3d> = Vec::new();
         let mut mirror_placement: Option<Object3d> = None;
         let mut frame = UiFrame::new();
@@ -1010,10 +531,8 @@ impl SceneBehavior for TutorialCampaignScene {
 
         let (_tile_area_y, label_y) =
             Self::page_content_metrics(page, w, h, panel_x, panel_y, panel_w);
-        if self.page != TUTORIAL_PAGE_SHOP {
-            showcase_tiles =
-                Self::preview_tile_placements(self.page, page, panel_x, panel_w, label_y, scale);
-        }
+        let showcase_tiles =
+            Self::preview_tile_placements(self.page, page, panel_x, panel_w, label_y, scale);
         let group_w = panel_w * 0.74 / page.groups.len().max(1) as f32;
         for (idx, group) in page.groups.iter().enumerate() {
             let gx = panel_x + panel_w * 0.13 + idx as f32 * group_w;
@@ -1029,86 +548,6 @@ impl SceneBehavior for TutorialCampaignScene {
                 align: TextAlign::Center,
                 font_px: Some(typography::size(typography::H42, h)),
                 ..Default::default()
-            });
-        }
-
-        if self.page == TUTORIAL_PAGE_SHOP {
-            let item_y = label_y - 56.0 * scale;
-            let center_x =
-                |idx: usize| panel_x + panel_w * 0.13 + idx as f32 * group_w + group_w * 0.5;
-            let relic_size = 42.0 * scale;
-            let relic_id = RelicId::MerchantsEye;
-            let visual = crate::core::relic::relic_visual(relic_id);
-            let face_size = relic_size * 0.82;
-            let thick = face_size * 0.14 * visual.thickness_scale;
-            let rp = &self.positions.shop_relic;
-            relic_objects.push(Object3d {
-                pos: [
-                    center_x(0) + w * rp.nx,
-                    item_y + relic_size * 0.55 + h * rp.ny,
-                    relic_size * 0.35 + ctx.layout.mm(rp.lift_mm),
-                ],
-                extents: [face_size, thick, face_size],
-                rotation: euler_xyz_rad_from_deg(90.0 + visual.ui_tilt_x_deg, 30.0, 0.0),
-                color: crate::render::theme::color::rarity(0),
-                kind: Object3dKind::Relic {
-                    relic_id,
-                    glow: 0.0,
-                    silhouette: false,
-                    debuffed: false,
-                    pick_id: None,
-                },
-                hover_target: 0.0,
-                anim_id: 0,
-                arrange_name: Some("tutorial.shop.relic"),
-            });
-            let rib_p = &self.positions.shop_ribbon;
-            let mut ribbon = Self::shop_preview_ribbon(center_x(1), item_y, h, scale);
-            ribbon.pos[0] += w * rib_p.nx;
-            ribbon.pos[1] += h * rib_p.ny;
-            ribbon.pos[2] += ctx.layout.mm(rib_p.lift_mm);
-            ribbon_placements.push(ribbon);
-            let tal_p = &self.positions.shop_talisman;
-            let mut tal = Self::shop_preview_talisman(center_x(2), item_y, h, scale);
-            tal.pos[0] += w * tal_p.nx;
-            tal.pos[1] += h * tal_p.ny;
-            tal.pos[2] += ctx.layout.mm(tal_p.lift_mm);
-            talisman_placements.push(tal);
-            let pk_p = &self.positions.shop_pack;
-            let mut pk = Self::shop_preview_pack(center_x(3), item_y, h, scale);
-            pk.pos[0] += w * pk_p.nx;
-            pk.pos[1] += h * pk_p.ny;
-            pk.pos[2] += ctx.layout.mm(pk_p.lift_mm);
-            pack_placements.push(pk);
-        } else if self.page == TUTORIAL_PAGE_RELICS {
-            let item_y = label_y - 56.0 * scale;
-            let center_x =
-                |idx: usize| panel_x + panel_w * 0.13 + idx as f32 * group_w + group_w * 0.5;
-            let relic_size = 48.0 * scale;
-            let relic_id = RelicId::MerchantsEye;
-            let visual = crate::core::relic::relic_visual(relic_id);
-            let face_size = relic_size * 0.88;
-            let thick = face_size * 0.15 * visual.thickness_scale;
-            let rp = &self.positions.shop_relic;
-            relic_objects.push(Object3d {
-                pos: [
-                    center_x(0) + w * rp.nx,
-                    item_y + relic_size * 0.5 + h * rp.ny,
-                    relic_size * 0.38 + ctx.layout.mm(rp.lift_mm),
-                ],
-                extents: [face_size, thick, face_size],
-                rotation: euler_xyz_rad_from_deg(90.0 + visual.ui_tilt_x_deg, 24.0, 0.0),
-                color: crate::render::theme::color::rarity(0),
-                kind: Object3dKind::Relic {
-                    relic_id,
-                    glow: 0.0,
-                    silhouette: false,
-                    debuffed: false,
-                    pick_id: None,
-                },
-                hover_target: 0.0,
-                anim_id: 0,
-                arrange_name: Some("tutorial.shop.relic"),
             });
         }
 
@@ -1184,7 +623,7 @@ impl SceneBehavior for TutorialCampaignScene {
                 rotation: [0.0, 0.0, 0.0],
                 color: [1.0, 1.0, 1.0, 1.0],
                 kind: Object3dKind::WoodTablet {
-                    label: std::borrow::Cow::Borrowed("Trigger"),
+                    label: std::borrow::Cow::Borrowed("Cash In"),
                     pick_id: None,
                 },
                 hover_target: 0.0,
@@ -1364,7 +803,7 @@ impl SceneBehavior for TutorialCampaignScene {
             let (label, variant, state) = match item.action {
                 TutorialNav::Next => {
                     let label = if self.page + 1 == PAGES.len() {
-                        "Open Shop"
+                        "Start Lesson"
                     } else {
                         "Next"
                     };
@@ -1402,18 +841,6 @@ impl SceneBehavior for TutorialCampaignScene {
         frame.quads(bg_quads);
         if !showcase_tiles.is_empty() {
             frame.cmds.push(DrawCmd::ShowcaseTileBatch(showcase_tiles));
-        }
-        if !relic_objects.is_empty() {
-            frame.object3d_batch(relic_objects);
-        }
-        if !ribbon_placements.is_empty() {
-            frame.object3d_batch(ribbon_placements);
-        }
-        if !talisman_placements.is_empty() {
-            frame.object3d_batch(talisman_placements);
-        }
-        if !pack_placements.is_empty() {
-            frame.object3d_batch(pack_placements);
         }
         if let Some(mirror) = mirror_placement {
             frame.object3d(mirror);

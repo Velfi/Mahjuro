@@ -244,6 +244,13 @@ pub(super) fn process_focus_and_actions(
     // gameplay action handlers below (ScoreHand, SortBySuit, etc.).
     let mut actions_for_scene: Vec<UiAction> = Vec::new();
     for &a in ctx.actions.iter() {
+        if !matches!(a, UiAction::Help | UiAction::Pause)
+            && ctx.run.onboarding.as_ref().is_some_and(|o| {
+                o.phase == crate::game::onboarding::OnboardingPhase::Finale && !o.finale_intro_shown
+            })
+        {
+            super::onboarding_hints::mark_finale_intro_seen(ctx.run);
+        }
         // Map FocusNext/Prev → Right/Left for back-compat with the
         // existing keymap (Tab / arrows still cycle).
         let dir: Option<FocusDir> = match a {
@@ -499,7 +506,13 @@ pub(super) fn process_focus_and_actions(
                 continue;
             }
             UiAction::WestFacePress => {
-                actions_for_scene.push(UiAction::CommitDiscard);
+                if ctx.run.onboarding_discard_allowed() {
+                    actions_for_scene.push(UiAction::CommitDiscard);
+                } else {
+                    ctx.bus.push(crate::game::event_bus::GameEvent::UiSound(
+                        crate::audio::SfxId::InvalidAction,
+                    ));
+                }
                 continue;
             }
             UiAction::NorthFacePress => {
@@ -744,6 +757,12 @@ pub(super) fn process_focus_and_actions(
                 ctx.anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
             }
             UiAction::CommitDiscard => {
+                if !ctx.run.onboarding_discard_allowed() {
+                    ctx.bus.push(crate::game::event_bus::GameEvent::UiSound(
+                        crate::audio::SfxId::InvalidAction,
+                    ));
+                    continue;
+                }
                 let gameplay = GameEngine::read(ctx.run);
                 let settings_on = crate::persistence::load_settings().discard_undo_enabled;
                 if !settings_on {
