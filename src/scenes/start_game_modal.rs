@@ -528,7 +528,7 @@ impl SceneBehavior for TileSelectScene {
 
             text_labels.push(TextLabel {
                 rect: [text_x, cursor_y, text_w, bonus_h],
-                text: format!("\u{2022}  {}", self.material.bonus_description()).into(),
+                text: format!("\u{2022}  {}", self.material.bonus_description()),
                 color: color::BRASS,
                 font_px: Some(bonus_px),
                 ..Default::default()
@@ -554,8 +554,7 @@ impl SceneBehavior for TileSelectScene {
                     "{} \u{2014} {}",
                     self.stake.label(),
                     self.stake.description()
-                )
-                .into(),
+                ),
                 color: color::STONE,
                 font_px: Some(stake_desc_px),
                 ..Default::default()

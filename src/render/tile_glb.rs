@@ -97,8 +97,8 @@ pub const GLTF_TEXTURE_MAX_DIMENSION: u32 = 256;
 fn box_downsample_half_rgba8(src: &[u8], w: u32, h: u32) -> (Vec<u8>, u32, u32) {
     let w_us = w as usize;
     let h_us = h as usize;
-    let ow = ((w_us + 1) / 2) as u32;
-    let oh = ((h_us + 1) / 2) as u32;
+    let ow = w_us.div_ceil(2) as u32;
+    let oh = h_us.div_ceil(2) as u32;
     let ow_us = ow as usize;
     let oh_us = oh as usize;
     let mut dst = vec![0u8; ow_us.saturating_mul(oh_us).saturating_mul(4)];

@@ -216,13 +216,13 @@ pub fn build_bloom(
         label: Some("bloom-extract-pipeline"),
         layout: Some(&bloom_extract_pipeline_layout),
         vertex: wgpu::VertexState {
-            module: &bloom_extract_shader,
+            module: bloom_extract_shader,
             entry_point: Some("vs_main"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             buffers: &[],
         },
         fragment: Some(wgpu::FragmentState {
-            module: &bloom_extract_shader,
+            module: bloom_extract_shader,
             entry_point: Some("fs_main"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             targets: &[Some(wgpu::ColorTargetState {
@@ -242,13 +242,13 @@ pub fn build_bloom(
         label: Some("bloom-blur-pipeline"),
         layout: Some(&bloom_blur_pipeline_layout),
         vertex: wgpu::VertexState {
-            module: &bloom_blur_shader,
+            module: bloom_blur_shader,
             entry_point: Some("vs_main"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             buffers: &[],
         },
         fragment: Some(wgpu::FragmentState {
-            module: &bloom_blur_shader,
+            module: bloom_blur_shader,
             entry_point: Some("fs_main"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             targets: &[Some(wgpu::ColorTargetState {
@@ -274,13 +274,13 @@ pub fn build_bloom(
         label: Some("bloom-composite-pipeline"),
         layout: Some(&bloom_composite_layout),
         vertex: wgpu::VertexState {
-            module: &bloom_composite_shader,
+            module: bloom_composite_shader,
             entry_point: Some("vs_main"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             buffers: &[],
         },
         fragment: Some(wgpu::FragmentState {
-            module: &bloom_composite_shader,
+            module: bloom_composite_shader,
             entry_point: Some("fs_main"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             targets: &[Some(wgpu::ColorTargetState {
@@ -306,11 +306,11 @@ pub fn build_bloom(
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: wgpu::BindingResource::TextureView(&scene_color_view),
+                resource: wgpu::BindingResource::TextureView(scene_color_view),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: wgpu::BindingResource::TextureView(&shop_linear_bloom_view),
+                resource: wgpu::BindingResource::TextureView(shop_linear_bloom_view),
             },
             wgpu::BindGroupEntry {
                 binding: 3,
@@ -367,7 +367,7 @@ pub fn build_bloom(
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: wgpu::BindingResource::TextureView(&scene_color_view),
+                resource: wgpu::BindingResource::TextureView(scene_color_view),
             },
             wgpu::BindGroupEntry {
                 binding: 2,

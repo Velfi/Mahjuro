@@ -169,11 +169,10 @@ fn compute_inputs_hash(repo: &Path) -> String {
     for path in stamp_input_paths(repo) {
         h.write(path.to_string_lossy().as_bytes());
         h.write(b"\0");
-        if path.is_file() {
-            if let Ok(bytes) = fs::read(&path) {
+        if path.is_file()
+            && let Ok(bytes) = fs::read(&path) {
                 h.write(&bytes);
             }
-        }
     }
     format!("{:016x}", h.finish())
 }

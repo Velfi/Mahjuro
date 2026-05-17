@@ -841,7 +841,7 @@ pub fn build_porcelain_dish_mesh() -> MeshCpu {
     // continuous — only the cross-section perimeter is non-circular.
     let wobble = |seg: usize| -> f32 {
         let s = seg as f32;
-        let h = ((s * 12.9898).sin() * 43758.5453).fract();
+        let h = ((s * 12.9898).sin() * 43_758.547).fract();
         (h - 0.5) * 2.0 * WOBBLE_AMP
     };
 

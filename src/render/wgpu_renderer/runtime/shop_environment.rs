@@ -251,7 +251,7 @@ impl WgpuRenderer {
         );
         let mut dist = frame
             .hallway_distortion
-            .unwrap_or_else(crate::render::hallway_glb::HallwayDistortion::default);
+            .unwrap_or_default();
         dist.time_pulse[0] = self.creation_time.elapsed().as_secs_f32();
         self.queue
             .write_buffer(&gpu.distortion_buffer, 0, bytemuck::bytes_of(&dist));

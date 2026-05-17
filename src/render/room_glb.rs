@@ -228,7 +228,7 @@ pub fn probe_gi_should_update_probes(
         .any(|(a, b)| (*a - *b).abs() > ROOM_EMISSIVE_PROBE_VIEW_EPS);
     let resized = *last_size != size;
     let interval = update_interval.max(1);
-    let on_interval = *tick % interval == 0;
+    let on_interval = (*tick).is_multiple_of(interval);
     let update = first_room_frame || view_moved || resized || on_interval;
 
     if update {

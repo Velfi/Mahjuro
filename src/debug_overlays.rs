@@ -1028,7 +1028,7 @@ impl CameraDebugOverlay {
 
 // ── Shop environment + lighting debug (height scale + `room_glb` tunables) ─
 
-const SHOP_ENV_DEBUG_ROW_META: [(&'static str, f32, f32, f32); 9] = [
+const SHOP_ENV_DEBUG_ROW_META: [(&str, f32, f32, f32); 9] = [
     ("Height scale", 0.001, 40.0, 0.005),
     ("glTF light intensity", 0.0, 40.0, 0.0025),
     ("Linear exposure", 0.001, 40.0, 0.0025),
@@ -1351,11 +1351,10 @@ impl ShopEnvDebugOverlay {
         let n = self.row_count();
 
         if let Some((mx, my, clicked, held)) = mouse {
-            if let Some(di) = self.dragging_slider {
-                if held {
+            if let Some(di) = self.dragging_slider
+                && held {
                     self.apply_slider_mx(di, mx, &layout);
                 }
-            }
 
             if (clicked || held) && self.dragging_slider.is_none() {
                 for i in 0..n {
@@ -2282,11 +2281,10 @@ impl HallwayDistortionDebugOverlay {
         let n = self.row_count();
 
         if let Some((mx, my, clicked, held)) = mouse {
-            if let Some(di) = self.dragging_slider {
-                if held {
+            if let Some(di) = self.dragging_slider
+                && held {
                     self.apply_slider_mx(di, mx, &layout);
                 }
-            }
 
             if (clicked || held) && self.dragging_slider.is_none() {
                 for i in 0..n {

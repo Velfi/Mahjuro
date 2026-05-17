@@ -408,8 +408,8 @@ impl SceneBehavior for PickBlindScene {
                     intensity: (if room_glb { 0.42 } else { 1.22 }) * play_b,
                 });
             }
-            if can_skip {
-                if let Some(r) = hallway_button_screen_rect(
+            if can_skip
+                && let Some(r) = hallway_button_screen_rect(
                     w,
                     h,
                     &cam,
@@ -425,7 +425,6 @@ impl SceneBehavior for PickBlindScene {
                         intensity: (if room_glb { 0.36 } else { 1.05 }) * skip_b,
                     });
                 }
-            }
             inverse_punctual.extend(point_lights.into_iter().map(ScenePunctualLight::Smooth));
             frame.scene_lighting.punctual = inverse_punctual;
         } else {
@@ -471,7 +470,7 @@ impl SceneBehavior for PickBlindScene {
                     ctx.room_gltf_height_scale,
                     play_node,
                 )
-                .unwrap_or_else(|| [w * 0.12, h * 0.50, w * 0.14, h * 0.10]);
+                .unwrap_or([w * 0.12, h * 0.50, w * 0.14, h * 0.10]);
                 let sr = if can_skip {
                     hallway_button_screen_rect(
                         w,
@@ -480,7 +479,7 @@ impl SceneBehavior for PickBlindScene {
                         ctx.room_gltf_height_scale,
                         BTN_SKIP_ROUND,
                     )
-                    .unwrap_or_else(|| [w * 0.74, h * 0.50, w * 0.14, h * 0.10])
+                    .unwrap_or([w * 0.74, h * 0.50, w * 0.14, h * 0.10])
                 } else {
                     [0.0, 0.0, 1.0, 1.0]
                 };
@@ -532,12 +531,11 @@ impl SceneBehavior for PickBlindScene {
                             px_detail,
                             h_detail,
                         );
-                if upcoming == BlindKind::Boss {
-                    if let Some(desc) = pick.boss_description.as_deref() {
+                if upcoming == BlindKind::Boss
+                    && let Some(desc) = pick.boss_description.as_deref() {
                         play_stack_h +=
                             4.0 + wrapped_text_height(desc, play_col_w, px_detail, h_detail * 1.35);
                     }
-                }
                 let play_cy = pr[1] + pr[3] * 0.5;
                 // Side-wall PLAY AABB sits low; lift the label onto SKIP's row for visual centering.
                 let hud_row_cy = if can_skip {
@@ -631,10 +629,10 @@ impl SceneBehavior for PickBlindScene {
                     let skip_stack_h = if let Some(tag) = skip_tag {
                         let text_col_w = (skip_col_w - skip_icon_px - skip_icon_gap).max(80.0);
                         let text_block_h =
-                            wrapped_text_height(&tag.name(), text_col_w, px_blind, h_blind)
+                            wrapped_text_height(tag.name(), text_col_w, px_blind, h_blind)
                                 + 6.0
                                 + wrapped_text_height(
-                                    &tag.description(),
+                                    tag.description(),
                                     text_col_w,
                                     px_detail,
                                     h_detail,
@@ -662,9 +660,9 @@ impl SceneBehavior for PickBlindScene {
                     if let Some(tag) = skip_tag {
                         let text_col_w = (skip_col_w - skip_icon_px - skip_icon_gap).max(80.0);
                         let name_h =
-                            wrapped_text_height(&tag.name(), text_col_w, px_blind, h_blind);
+                            wrapped_text_height(tag.name(), text_col_w, px_blind, h_blind);
                         let desc_h = wrapped_text_height(
-                            &tag.description(),
+                            tag.description(),
                             text_col_w,
                             px_detail,
                             h_detail,
@@ -689,7 +687,7 @@ impl SceneBehavior for PickBlindScene {
                             text_col_w,
                             px_blind,
                             h_blind,
-                            &tag.name(),
+                            tag.name(),
                             skip_color,
                             TextAlign::Left,
                         );
@@ -701,7 +699,7 @@ impl SceneBehavior for PickBlindScene {
                             text_col_w,
                             px_detail,
                             h_detail,
-                            &tag.description(),
+                            tag.description(),
                             skip_color,
                             TextAlign::Left,
                         );

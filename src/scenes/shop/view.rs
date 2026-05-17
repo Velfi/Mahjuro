@@ -237,12 +237,11 @@ pub(super) fn shop_camera_base(w: f32, h: f32, env_h: f32) -> CameraParams {
             }
         });
         // Auto-fit widens vertical FOV past the authored value; keep GLB eye / target / up / fovy intact.
-        if from_glb.is_none() {
-            if let Some(cpu) = opt {
+        if from_glb.is_none()
+            && let Some(cpu) = opt {
                 let corners = room_world_bounds_corners_centered(h, env_h, cpu);
                 cam = room_camera_fit_fovy_for_corners(w, h, cam, &corners, 0.94);
             }
-        }
         if let Some(cpu) = opt {
             cam = room_camera_with_room_clip_planes(cam, h, env_h, cpu);
         }
@@ -459,7 +458,7 @@ fn player_gold_dish_object3d_anchor(
 ) -> [f32; 3] {
     let scale = room_env_world_scale(h, env_h);
     if let Some(tw) =
-        with_shop_glb_cpu(|opt| opt.and_then(|cpu| player_gold_dish_marker_translation(cpu)))
+        with_shop_glb_cpu(|opt| opt.and_then(player_gold_dish_marker_translation))
     {
         let world = tw * scale;
         return surface_anchor_from_world_xyz(w, h, world);
@@ -551,11 +550,10 @@ impl SceneBehavior for ShopScene {
         self.stash_focus_rects(w, h, ctx.run);
 
         for &cid in ctx.button_clicks {
-            if let Some(hit) = map_shop_ui_click_to_hit(cid, self, &shop_rm) {
-                if let Some(next) = self.dispatch_shop_pick_from_hit(hit, &mut ctx) {
+            if let Some(hit) = map_shop_ui_click_to_hit(cid, self, &shop_rm)
+                && let Some(next) = self.dispatch_shop_pick_from_hit(hit, &mut ctx) {
                     return Some(next);
                 }
-            }
         }
 
         self.update_impl(ctx)
@@ -1004,15 +1002,14 @@ pub(crate) fn render_shop_frame(
         let mut free_quads = Vec::new();
         let mut free_texts = Vec::new();
         for (slot_i, sf) in for_sale_slots(shop).into_iter().enumerate() {
-            if let Some(ShopFocus::Relic(idx)) = sf {
-                if let Some(item) = shop.items.get(idx)
+            if let Some(ShopFocus::Relic(idx)) = sf
+                && let Some(item) = shop.items.get(idx)
                     && !item.sold
                     && item.price == 0
                 {
                     let r = shop_shelf_slot_rect(w, h, &cam, slot_i, env_h);
                     push_free_badge(&mut free_quads, &mut free_texts, r, h);
                 }
-            }
         }
         if !free_quads.is_empty() {
             frame.quads(free_quads);
@@ -1404,8 +1401,8 @@ pub(crate) fn render_shop_frame(
 
         frame.texts(legend_texts);
 
-        if inspect_active {
-            if let Some(ShopFocus::Relic(i)) = shop.focus {
+        if inspect_active
+            && let Some(ShopFocus::Relic(i)) = shop.focus {
                 let n_sale = shop.items.len();
                 let def_opt = if i < n_sale {
                     shop.items
@@ -1431,7 +1428,6 @@ pub(crate) fn render_shop_frame(
                     frame.texts(flavor_texts);
                 }
             }
-        }
     }
 
     frame
@@ -1741,16 +1737,11 @@ fn cursor_hover_rect(
             return Some(r);
         }
     }
-    for r in [
+    [
         journal_btn_rect(w, h, cam, env_h),
         reroll_btn_rect(w, h, cam, env_h),
         leave_btn_rect(w, h, cam, env_h),
-    ] {
-        if pt_in_rect(cx, cy, r) {
-            return Some(r);
-        }
-    }
-    None
+    ].into_iter().find(|&r| pt_in_rect(cx, cy, r))
 }
 
 fn ring_target_rect(
@@ -1988,11 +1979,10 @@ fn object3d_pos_for_shop_inspect_focus(
     h: f32,
     fallback: [f32; 3],
 ) -> [f32; 3] {
-    if let Some((ifoc, tw)) = inspect_anchor {
-        if ifoc == foc {
+    if let Some((ifoc, tw)) = inspect_anchor
+        && ifoc == foc {
             return object3d_pos_triple_for_world_center(w, h, Vec3::from_array(tw));
         }
-    }
     fallback
 }
 
@@ -2004,12 +1994,11 @@ fn partition_shop_inspect_stock_mesh(
     dim: &mut Vec<Object3d>,
     subject: &mut Option<Object3d>,
 ) {
-    if let Some((ifoc, _)) = inspect_anchor {
-        if ifoc == foc {
+    if let Some((ifoc, _)) = inspect_anchor
+        && ifoc == foc {
             *subject = Some(mesh);
             return;
         }
-    }
     dim.push(mesh);
 }
 
@@ -2392,11 +2381,10 @@ fn inv_slot_rect(
 ) -> [f32; 4] {
     let rw = w * 0.058;
     let rh = h * 0.108;
-    if let Some(name) = inv_slot_glb_marker_name(scene, shop, index) {
-        if let Some(r) = marker_screen_rect(w, h, cam, &name, rw, rh, env_h) {
+    if let Some(name) = inv_slot_glb_marker_name(scene, shop, index)
+        && let Some(r) = marker_screen_rect(w, h, cam, &name, rw, rh, env_h) {
             return r;
         }
-    }
     let nx = 0.268 + index as f32 * 0.072;
     // Slightly below prior ny — matches painted inventory recess on storeroom art + hover ring.
     let ny = 0.824;

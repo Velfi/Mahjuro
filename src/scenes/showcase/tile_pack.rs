@@ -219,12 +219,11 @@ impl TilePackPresenter {
     }
 
     pub fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
-        if ctx.headless && !self.celebration.headless_hold_pack_closeup {
-            if matches!(self.celebration.phase, CelebPhase::Closeup) {
+        if ctx.headless && !self.celebration.headless_hold_pack_closeup
+            && matches!(self.celebration.phase, CelebPhase::Closeup) {
                 self.celebration.phase = CelebPhase::Reveal;
                 self.celebration.started_at = std::time::Instant::now();
             }
-        }
 
         let has_input = ctx.actions.iter().any(|a| {
             matches!(
@@ -275,7 +274,7 @@ impl TilePackPresenter {
 
         let mut frame = UiFrame::new();
         frame.background(BackgroundId::Black);
-        let layout = ShopLayout::build(ctx.layout, &self.positions, self.inventory.clone());
+        let layout = ShopLayout::build(ctx.layout, &self.positions, self.inventory);
         let cam = shop_celebration_camera(w, h, env_h);
         frame.camera_override = Some(cam);
         frame.scene_lighting.embedded_gltf_punctual = false;

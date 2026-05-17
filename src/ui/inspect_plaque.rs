@@ -300,7 +300,7 @@ pub fn hand_tile_keyword_lines(
     }
 
     let face = (tile.suit, tile.rank);
-    if dora_faces.iter().any(|d| *d == face) {
+    if dora_faces.contains(&face) {
         lines.push(("Dora · +25 chips".into(), color::GOLD));
     }
 

@@ -11,7 +11,7 @@ pub const INTERNAL_ONLY_TILESETS: &[&str] = &[];
 
 #[inline]
 pub fn is_internal_only_tileset(name: &str) -> bool {
-    INTERNAL_ONLY_TILESETS.iter().any(|&s| s == name)
+    INTERNAL_ONLY_TILESETS.contains(&name)
 }
 
 /// Like [`list_tilesets`] but excludes [`INTERNAL_ONLY_TILESETS`].

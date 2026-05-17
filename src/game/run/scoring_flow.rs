@@ -38,7 +38,7 @@ impl RunState {
         };
         let sets = self.pick_best_decomposition(sets, &scoring_tiles, &selected_tiles);
         let meld_kinds: Vec<MeldKind> = sets.iter().map(|s| s.kind).collect();
-        if let Err(_) = self.onboarding_validate_melds(&meld_kinds) {
+        if self.onboarding_validate_melds(&meld_kinds).is_err() {
             bus.push(GameEvent::InvalidAction);
             return 0;
         }
@@ -262,8 +262,7 @@ impl RunState {
                 .unwrap_or(0);
             if self.relics.has(crate::core::relic::RelicId::Chrysalis)
                 && excess >= crate::core::relic::CHRYSALIS_HATCH_EXCESS_THRESHOLD
-            {
-                if let Some(pos) = self
+                && let Some(pos) = self
                     .relics
                     .active
                     .iter()
@@ -271,7 +270,6 @@ impl RunState {
                 {
                     self.complete_chrysalis_hatch_in_slot(pos, bus);
                 }
-            }
         }
 
         if self.relics.has(RelicId::TilePolisher) {
@@ -597,11 +595,10 @@ impl RunState {
             {
                 bus.push(GameEvent::BossDefeated(bk));
             }
-        } else if let Some(reason) = self.round_failure_reason() {
-            if !self.try_second_wind_salvage(reason, bus) {
+        } else if let Some(reason) = self.round_failure_reason()
+            && !self.try_second_wind_salvage(reason, bus) {
                 bus.push(GameEvent::GameOver { reason });
             }
-        }
     }
 
     /// When a round would end in defeat, Second Wind is destroyed and the blind

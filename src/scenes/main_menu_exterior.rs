@@ -153,36 +153,31 @@ impl SceneBehavior for MainMenuExteriorScene {
                 None
             };
 
-        if ctx.input_mode == crate::ui::input::InputMode::Cursor {
-            if let Some(m) = pointer_pick {
+        if ctx.input_mode == crate::ui::input::InputMode::Cursor
+            && let Some(m) = pointer_pick {
                 self.focus = Some(m);
             }
-        }
 
         let mut activated = false;
         for action in ctx.actions {
             match action {
                 UiAction::FocusUp | UiAction::FocusPrev => {
-                    if let Some(cur) = self.focus {
-                        if let Some(&(_, rect)) = focus_rects.iter().find(|(t, _)| *t == cur) {
-                            if let Some(next) =
+                    if let Some(cur) = self.focus
+                        && let Some(&(_, rect)) = focus_rects.iter().find(|(t, _)| *t == cur)
+                            && let Some(next) =
                                 focus_nav::pick_neighbor(rect, FocusDir::Up, &focus_rects)
                             {
                                 self.focus = Some(next);
                             }
-                        }
-                    }
                 }
                 UiAction::FocusDown | UiAction::FocusNext => {
-                    if let Some(cur) = self.focus {
-                        if let Some(&(_, rect)) = focus_rects.iter().find(|(t, _)| *t == cur) {
-                            if let Some(next) =
+                    if let Some(cur) = self.focus
+                        && let Some(&(_, rect)) = focus_rects.iter().find(|(t, _)| *t == cur)
+                            && let Some(next) =
                                 focus_nav::pick_neighbor(rect, FocusDir::Down, &focus_rects)
                             {
                                 self.focus = Some(next);
                             }
-                        }
-                    }
                 }
                 UiAction::Confirm => activated = true,
                 UiAction::Cancel | UiAction::Pause => {
@@ -193,12 +188,11 @@ impl SceneBehavior for MainMenuExteriorScene {
             }
         }
 
-        if !ctx.button_clicks.is_empty() {
-            if let Some(m) = pointer_pick {
+        if !ctx.button_clicks.is_empty()
+            && let Some(m) = pointer_pick {
                 self.focus = Some(m);
                 activated = true;
             }
-        }
 
         if self.focus != prev_focus {
             ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));

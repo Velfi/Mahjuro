@@ -312,8 +312,8 @@ impl WgpuRenderer {
         } else {
             0.0
         };
-        if shop_like && frame.shop_inspect_lit_mesh_hdr {
-            if let Some(phase) = shop_inspect_felt {
+        if shop_like && frame.shop_inspect_lit_mesh_hdr
+            && let Some(phase) = shop_inspect_felt {
                 match phase {
                     ShopInspectLitMeshFelt::Dim => {
                         felt_z = tm[1] * crate::render::room_glb::SHOP_INSPECT_ENV_VS_LIT_LINEAR;
@@ -325,7 +325,6 @@ impl WgpuRenderer {
                     }
                 }
             }
-        }
         let ssr_max_distance = cam.h * 2.0;
         let ssr_stride = cam.h * 0.04;
         let ssr_max_steps = 24.0;

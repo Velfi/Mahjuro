@@ -840,12 +840,11 @@ impl OptionsScene {
             }
         }
 
-        if mouse_left_down {
-            if let Some(row) = self.dragging_slider {
+        if mouse_left_down
+            && let Some(row) = self.dragging_slider {
                 self.set_slider_from_cursor(row, &layout, cursor_pos);
                 self.save_settings();
             }
-        }
 
         // ── Keyboard / gamepad ─────────────────────────────────────────
         for a in actions {

@@ -1496,8 +1496,8 @@ impl SceneBehavior for GameplayScene {
             && self.cascade_queue.is_empty()
             && self.journal_transition.is_none()
         {
-            if let Some(target) = self.focus {
-                if let Some(rect) = focus_rect_graph
+            if let Some(target) = self.focus
+                && let Some(rect) = focus_rect_graph
                     .iter()
                     .find_map(|(t, r)| (*t == target).then_some(*r))
                 {
@@ -1630,7 +1630,6 @@ impl SceneBehavior for GameplayScene {
                         _ => {}
                     }
                 }
-            }
             if !inspect_tooltip_quads.is_empty() || !inspect_tooltip_texts.is_empty() {
                 frame.quads(inspect_tooltip_quads);
                 frame.texts(inspect_tooltip_texts);

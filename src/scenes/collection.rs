@@ -332,19 +332,14 @@ impl CollectionScene {
             return None;
         }
         let f = self.tree.focused()?;
-        for chrome in [
+        [
             CollectionAction::Back,
             CollectionAction::SwitchSave,
             CollectionAction::PrevPage,
             CollectionAction::NextPage,
             CollectionAction::PrevTab,
             CollectionAction::NextTab,
-        ] {
-            if chrome.id() == f {
-                return Some(chrome);
-            }
-        }
-        None
+        ].into_iter().find(|&chrome| chrome.id() == f)
     }
 
     fn cycle_tab(&mut self, forward: bool) {
@@ -1127,8 +1122,8 @@ impl CollectionScene {
         let mut hud_plaques: Vec<Object3d> = Vec::new();
         let mut gradient_backers: Vec<GradientQuadInstance> = Vec::new();
 
-        if !chronicle_dashboard {
-            if let Some(boss) = bosses.get(focus_flat as usize) {
+        if !chronicle_dashboard
+            && let Some(boss) = bosses.get(focus_flat as usize) {
                 let with_inspect_spin = |o: Object3d| -> Object3d {
                     if let Some(ins) = inspect {
                         prepend_inspect_orbit_subject_rotation(o, ins, &coll_rig)
@@ -1498,8 +1493,8 @@ impl CollectionScene {
                 // makes the face span XZ) through the camera view-proj,
                 // then pads the screen-space bbox so the gradient feathers
                 // beyond the panel edges.
-                if let Some(cam) = frame.camera_override {
-                    if archive_feat_plane_z.is_none() {
+                if let Some(cam) = frame.camera_override
+                    && archive_feat_plane_z.is_none() {
                         let vp = camera_view_proj(w, h, &cam);
                         let closeup_half_face = closeup_size * 0.65;
                         let card_half_w = card_w * 0.65;
@@ -1553,9 +1548,7 @@ impl CollectionScene {
                             });
                         }
                     }
-                }
             }
-        }
 
         // Assemble the frame. 2D chrome from the caller (`quads` / `text_labels`)
         // is merged here with the grid and focus plaques.
@@ -2050,12 +2043,10 @@ impl SceneBehavior for CollectionScene {
                     }
                     if let Some(ni) =
                         collection_spatial_artifact_step(&items, self.focused_row, FocusDir::Right)
-                    {
-                        if Some(ni) != self.focused_row {
+                        && Some(ni) != self.focused_row {
                             apply_artifact_focus(self, ctx.bus, ni);
                             continue;
                         }
-                    }
                     let (row, col) = cur_row_col.unwrap_or((0, 0));
                     let next_col = (col + 1).min(cols - 1);
                     if next_col != col
@@ -2079,12 +2070,10 @@ impl SceneBehavior for CollectionScene {
                     }
                     if let Some(ni) =
                         collection_spatial_artifact_step(&items, self.focused_row, FocusDir::Left)
-                    {
-                        if Some(ni) != self.focused_row {
+                        && Some(ni) != self.focused_row {
                             apply_artifact_focus(self, ctx.bus, ni);
                             continue;
                         }
-                    }
                     let (row, col) = cur_row_col.unwrap_or((0, 0));
                     if col > 0
                         && let Some(i) = global_idx(row, col - 1)
@@ -2132,12 +2121,10 @@ impl SceneBehavior for CollectionScene {
                     }
                     if let Some(ni) =
                         collection_spatial_artifact_step(&items, self.focused_row, FocusDir::Up)
-                    {
-                        if Some(ni) != self.focused_row {
+                        && Some(ni) != self.focused_row {
                             apply_artifact_focus(self, ctx.bus, ni);
                             continue;
                         }
-                    }
                     let (row, col) = cur_row_col.unwrap_or((0, 0));
                     if row > 0
                         && let Some(i) = global_idx(row - 1, col)
@@ -2187,12 +2174,10 @@ impl SceneBehavior for CollectionScene {
                     }
                     if let Some(ni) =
                         collection_spatial_artifact_step(&items, self.focused_row, FocusDir::Down)
-                    {
-                        if Some(ni) != self.focused_row {
+                        && Some(ni) != self.focused_row {
                             apply_artifact_focus(self, ctx.bus, ni);
                             continue;
                         }
-                    }
                     let (row, col) = cur_row_col.unwrap_or((0, 0));
                     let next_row = (row + 1).min(total_rows - 1);
                     if next_row != row
@@ -3061,8 +3046,8 @@ fn archive_directional_step(
     if all_count == 0 {
         return false;
     }
-    if let Some(ni) = collection_spatial_artifact_step(items, scene.focused_row, dir) {
-        if Some(ni) != scene.focused_row {
+    if let Some(ni) = collection_spatial_artifact_step(items, scene.focused_row, dir)
+        && Some(ni) != scene.focused_row {
             bus.push(GameEvent::UiSound(SfxId::TilePlace));
             scene.focused_row = Some(ni);
             scene.archive_page = archive_page_for_idx(ni);
@@ -3071,7 +3056,6 @@ fn archive_directional_step(
                 .set_focus(CollectionAction::SelectArtifact(ni).id());
             return true;
         }
-    }
     // No spatial neighbour exists in the requested direction. For Left/Right that
     // means we're at a page edge column — flip the page so navigation feels
     // continuous, preserving the row so → then ← (or vice versa) returns the

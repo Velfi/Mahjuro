@@ -441,8 +441,8 @@ impl App {
         frame.apply_alpha(alpha);
 
         // Overlay fullscreen transition shaders (not zodiac’s in-scene cascade).
-        if self.transition_timer > 0.0 && self.effect_layers.transition_fullscreen_fx {
-            if let Some(kind) = overlay_kind_for_transition(self.transition_kind) {
+        if self.transition_timer > 0.0 && self.effect_layers.transition_fullscreen_fx
+            && let Some(kind) = overlay_kind_for_transition(self.transition_kind) {
                 crate::render::transition_fx::push_overlay_transition(
                     &mut frame,
                     kind,
@@ -450,7 +450,6 @@ impl App {
                     (size.width as f32, size.height as f32),
                 );
             }
-        }
 
         self.modals.update();
         if let Some((
@@ -533,8 +532,8 @@ impl App {
         // Cursor hover labels for `ButtonDef::hover_label`. Scan in vec order (same as
         // click hit-test): first matching rect with a label wins — so smaller rects
         // pushed before a fullscreen catch-all still show tooltips.
-        if let Some(ref input) = self.input {
-            if input.mode == crate::ui::input::InputMode::Cursor {
+        if let Some(ref input) = self.input
+            && input.mode == crate::ui::input::InputMode::Cursor {
                 let cursor = input.last_cursor;
                 let w = size.width as f32;
                 let h = size.height as f32;
@@ -546,8 +545,8 @@ impl App {
                         && cursor.1 >= by
                         && cursor.1 <= by + bh;
                     inside && b.hover_label.is_some()
-                }) {
-                    if let Some(ref label) = btn.hover_label {
+                })
+                    && let Some(ref label) = btn.hover_label {
                         let pad = (h * 0.012 * scale).max(6.0);
                         let min_outer_h = ((h * 0.035 * scale).max(22.0)).min(h * 0.12);
                         let est_chars = label.chars().count().max(1);
@@ -610,9 +609,7 @@ impl App {
                         );
                         frame.texts(tip_texts);
                     }
-                }
             }
-        }
 
         // FPS counter overlay (debug) — pushed last so it's always on top.
         if self.debug.show_fps {
@@ -837,11 +834,10 @@ impl App {
         // the embedded yaku-journal scene rather than a flat decal.
         // That path must not update lacquer SSR history (`scene_prev` /
         // depth prev); only `renderer.render` below publishes those.
-        if let Some(prepass) = frame.journal_prepass_frame.take() {
-            if let Err(e) = renderer.render_journal_prepass(&prepass, render_settings.clone()) {
+        if let Some(prepass) = frame.journal_prepass_frame.take()
+            && let Err(e) = renderer.render_journal_prepass(&prepass, render_settings.clone()) {
                 log::error!("journal prepass: {e:?}");
             }
-        }
 
         self.cpu_profiler
             .begin(crate::render::cpu_profiler::CpuStage::Render);

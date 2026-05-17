@@ -43,7 +43,7 @@ pub fn chronicle_indices_recent_first(progress: &PlayerProgress) -> Vec<usize> {
     v
 }
 
-fn serious_records<'a>(progress: &'a PlayerProgress) -> impl Iterator<Item = &'a RunRecord> {
+fn serious_records(progress: &PlayerProgress) -> impl Iterator<Item = &RunRecord> {
     progress.run_history.iter().filter(|r| !r.tutorial_run)
 }
 

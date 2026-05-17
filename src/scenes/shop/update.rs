@@ -345,8 +345,8 @@ impl ShopScene {
             if matches!(a, UiAction::WestFaceRelease) {
                 if let Some(start) = self.west_sell_hold_started.take() {
                     let hold = super::SHOP_SELL_HOLD_SECONDS;
-                    if now.saturating_duration_since(start).as_secs_f32() >= hold {
-                        if let Some(action) = focused_sell_action(
+                    if now.saturating_duration_since(start).as_secs_f32() >= hold
+                        && let Some(action) = focused_sell_action(
                             self.focus,
                             self.items.len(),
                             &self.zodiac_items,
@@ -362,7 +362,6 @@ impl ShopScene {
                                 (w, h),
                             );
                         }
-                    }
                 }
                 continue;
             }

@@ -282,7 +282,7 @@ fn push_galaxy_of_tiles(frame: &mut UiFrame, progress: f32, window: (f32, f32)) 
 
     let arms = 4usize;
     let total_spiral = scaled_overlay_tile_count(104.0, w, h, 48, 220);
-    let per_arm = ((total_spiral + arms - 1) / arms).max(12);
+    let per_arm = total_spiral.div_ceil(arms).max(12);
     let seq = tile_sequence();
     let max_radius = w.max(h) * 0.62;
     let spin = t * PI * 1.6;
@@ -423,7 +423,7 @@ fn push_shuffling_fan(frame: &mut UiFrame, progress: f32, window: (f32, f32)) {
     let seq = tile_sequence();
     let fan_count = 4usize;
     let total_fan = scaled_overlay_tile_count(68.0, w, h, 36, 160);
-    let per_fan = ((total_fan + fan_count - 1) / fan_count).max(8);
+    let per_fan = total_fan.div_ceil(fan_count).max(8);
     let min_d = w.min(h);
     let base_size = (min_d * 0.075).clamp(34.0, min_d * 0.102);
     let mut quads = Vec::with_capacity(fan_count * per_fan * 3);

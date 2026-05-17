@@ -1683,14 +1683,13 @@ fn noto_sans_symbols_font() -> Option<&'static fontdue::Font> {
     CELL.get_or_init(|| {
         let candidates = ["fonts/Noto_Sans_Math/NotoSansMath-Regular.ttf"];
         for path in candidates {
-            if let Some(file) = crate::asset_path::get(path) {
-                if let Ok(f) =
+            if let Some(file) = crate::asset_path::get(path)
+                && let Ok(f) =
                     fontdue::Font::from_bytes(file.data.as_ref(), fontdue::FontSettings::default())
                 {
                     log::debug!("decal: loaded Noto Sans Math (symbol fallback) from {path}");
                     return Some(f);
                 }
-            }
         }
         log::debug!("decal: Noto Sans Math symbol fallback not found in embedded assets.");
         None
@@ -1718,13 +1717,12 @@ pub fn load_ui_font_italic() -> Option<fontdue::Font> {
     CACHE
         .get_or_init(|| {
             let path = "fonts/Instrument_Serif/InstrumentSerif-Italic.ttf";
-            if let Some(file) = crate::asset_path::get(path) {
-                if let Ok(f) =
+            if let Some(file) = crate::asset_path::get(path)
+                && let Ok(f) =
                     fontdue::Font::from_bytes(file.data.as_ref(), fontdue::FontSettings::default())
                 {
                     return Some(f);
                 }
-            }
             log::debug!("decal: italic UI font missing at {path}, using regular");
             load_ui_font()
         })
@@ -1992,11 +1990,10 @@ fn pick_font<'a>(
     if primary.has_glyph(ch) {
         return primary;
     }
-    if let Some(symbols) = noto_sans_symbols_font() {
-        if symbols.has_glyph(ch) {
+    if let Some(symbols) = noto_sans_symbols_font()
+        && symbols.has_glyph(ch) {
             return symbols;
         }
-    }
     if let Some(fb) = fallback {
         return fb;
     }
@@ -2185,11 +2182,10 @@ fn pick_face_for_flavor<'a>(
     ch: char,
     use_italic: bool,
 ) -> &'a fontdue::Font {
-    if let Some(e) = emoji {
-        if !regular.has_glyph(ch) && e.has_glyph(ch) {
+    if let Some(e) = emoji
+        && !regular.has_glyph(ch) && e.has_glyph(ch) {
             return e;
         }
-    }
     if use_italic && italic.has_glyph(ch) {
         return italic;
     }

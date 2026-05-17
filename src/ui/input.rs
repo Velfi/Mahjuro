@@ -376,8 +376,8 @@ impl InputState {
     pub fn shop_sell_hold_rumble_params(hold_progress: f32) -> (u16, u16, u32, f32) {
         let curve = shop_hold_rumble_gain_curve(hold_progress);
         let gain = SHOP_HOLD_RUMBLE_PEAK_GAIN * curve;
-        let weak = ((5_000u32 as f32) * gain).min(65535.0) as u16;
-        let strong = ((18_000u32 as f32) * gain).min(65535.0) as u16;
+        let weak = (5_000_f32 * gain).min(65535.0) as u16;
+        let strong = (18_000_f32 * gain).min(65535.0) as u16;
         const HOLD_REFRESH_MS: u32 = 120;
         (weak, strong, HOLD_REFRESH_MS, 1.0)
     }

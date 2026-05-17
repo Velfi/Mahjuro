@@ -1820,8 +1820,8 @@ impl WgpuRenderer {
                     cpass.set_bind_group(0, &self.emissive_probe_update_bind_group, &[]);
                     let wg = probe_count.div_ceil(64);
                     cpass.dispatch_workgroups(wg, 1, 1);
-                    if let Some(room) = self.room_gi_capture_pending {
-                        if gi_room == Some(room) {
+                    if let Some(room) = self.room_gi_capture_pending
+                        && gi_room == Some(room) {
                             let (mn, mx) = room_gi_aabb.expect("gi frame");
                             self.room_gi_capture_meta = Some(
                                 crate::render::room_gi_bake::probe_sh_meta(
@@ -1834,7 +1834,6 @@ impl WgpuRenderer {
                                 ),
                             );
                         }
-                    }
                 }
                 {
                     let gi_apply_ts = self
@@ -2270,8 +2269,8 @@ impl WgpuRenderer {
         } else {
             self.pending_screenshot.take()
         };
-        if let Some(ref path) = screenshot_path {
-            if matches!(self.target, RenderTarget::Surface(_))
+        if let Some(ref path) = screenshot_path
+            && matches!(self.target, RenderTarget::Surface(_))
                 && !self.config.usage.contains(wgpu::TextureUsages::COPY_SRC)
             {
                 log::warn!(
@@ -2280,7 +2279,6 @@ impl WgpuRenderer {
                 );
                 screenshot_path = None;
             }
-        }
         let screenshot_staging = match (&screenshot_path, &frame_texture_opt) {
             (Some(path), Some(ft)) => {
                 log::debug!("screenshot: encoding capture for {}", path.display());

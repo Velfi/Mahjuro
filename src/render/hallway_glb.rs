@@ -649,12 +649,11 @@ fn hallway_camera_resolve(w: f32, h: f32, env_h: f32, from_glb: Option<CameraPar
             clip_near: None,
             clip_far: None,
         });
-        if from_glb.is_none() {
-            if let Some(cpu) = opt {
+        if from_glb.is_none()
+            && let Some(cpu) = opt {
                 let corners = room_glb::room_world_bounds_corners_centered(h, env_h, cpu);
                 cam = room_glb::room_camera_fit_fovy_for_corners(w, h, cam, &corners, 0.94);
             }
-        }
         if let Some(cpu) = opt {
             cam = room_glb::room_camera_with_room_clip_planes(cam, h, env_h, cpu);
         }

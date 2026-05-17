@@ -698,7 +698,7 @@ pub fn relic_description_live(
                 .clamp(0, 3);
             let names = ["Harmony", "Respect", "Purity", "Tranquility"];
             let label = names[phase as usize];
-            let remain = 4 - phase as i32;
+            let remain = 4 - phase;
             format!(
                 "{base} [next: {label}, {remain} hand{}]",
                 if remain == 1 { "" } else { "s" }
@@ -802,10 +802,8 @@ pub fn relic_description_live(
                 .copied()
                 .unwrap_or(0)
                 .max(0);
-            let overflow = inventory_focus
-                .is_some_and(|(relics, _)| relics.has(RelicId::StrengthInNumbers))
-                .then_some(68)
-                .unwrap_or(0);
+            let overflow = if inventory_focus
+                .is_some_and(|(relics, _)| relics.has(RelicId::StrengthInNumbers)) { 68 } else { 0 };
             let excess = overflow + added;
             if excess > 0 {
                 format!("{base} [+{:.1} mult]", 0.2 * excess as f64)

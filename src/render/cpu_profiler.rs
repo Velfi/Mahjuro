@@ -205,8 +205,8 @@ impl CpuProfiler {
         // not per-frame, since the same scope can fire multiple times in one
         // frame (e.g. one per Object3d batch). `total/frames` gives the
         // per-frame share, which is what matters for the budget.
-        if let Ok(mut map) = scope_accum().lock() {
-            if !map.is_empty() {
+        if let Ok(mut map) = scope_accum().lock()
+            && !map.is_empty() {
                 let mut entries: Vec<(&'static str, f64, u32)> = map
                     .drain()
                     .map(|(k, v)| (k, v.total_ms, v.samples))
@@ -230,7 +230,6 @@ impl CpuProfiler {
                     ));
                 }
             }
-        }
         log::debug!("{}", acc);
     }
 }

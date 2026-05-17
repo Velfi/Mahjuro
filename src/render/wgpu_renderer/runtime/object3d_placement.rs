@@ -71,7 +71,7 @@ impl WgpuRenderer {
                 for obj in batch.iter() {
                     use crate::render::draw_cmd::Object3dKind;
                     let use_ray_plane = match (
-                        self.active_scene_key.as_deref(),
+                        self.active_scene_key,
                         frame.camera_override.as_ref(),
                     ) {
                         (Some("tile_pack_celebration"), Some(_)) => true,
@@ -125,7 +125,7 @@ impl WgpuRenderer {
                         } => {
                             self.place_object3d_primitive(
                                 frame,
-                                &camera,
+                                camera,
                                 obj,
                                 shape,
                                 material,
@@ -786,7 +786,7 @@ impl WgpuRenderer {
                         }
                         Object3dKind::ZodiacRibbon { kind } => {
                             self.place_object3d_ribbon(
-                                &camera,
+                                camera,
                                 obj,
                                 center,
                                 kind,

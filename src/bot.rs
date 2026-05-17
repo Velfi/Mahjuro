@@ -280,7 +280,7 @@ fn record_terminal_hand_issue(stats: &mut RunStats, run: &RunState, cause: Termi
             .or_insert(0) += 1;
     }
 
-    let analysis = analyze_hand_options(run, &run.hand());
+    let analysis = analyze_hand_options(run, run.hand());
     let issue_key = if analysis.valid_count == 0 {
         "no-valid".to_string()
     } else if analysis.valid_count == 1 && analysis.committable_count == 0 {
@@ -961,7 +961,7 @@ fn wrap_sequence_ranks(rank: u8) -> &'static [[u8; 2]] {
 /// Search for the highest-scoring playable selection in the current hand.
 /// Returns `(score, indices)`, or `None` if no positive-scoring play exists.
 pub fn pick_best_play(run: &RunState) -> Option<(u64, Vec<usize>)> {
-    best_play_in_hand(run, &run.hand(), None, None)
+    best_play_in_hand(run, run.hand(), None, None)
 }
 
 /// Demo [`RunState`] with `tiles` as the current hand (sorted). For benches/tests only.
@@ -1254,7 +1254,7 @@ fn play_blind(
         let can_discard = run.discards_remaining > 0 && run.plays_remaining > 1;
         let mut did_discard = false;
         if can_discard {
-            let candidates = discard_candidates(&run.hand(), 5);
+            let candidates = discard_candidates(run.hand(), 5);
             // Margin scales with how far we are from target — late in the round we
             // need bigger swings to be worth losing a play.
             let need = (run.target_score as u64).saturating_sub(run.round_score);
@@ -2068,7 +2068,7 @@ fn best_selection_for_talisman_on_hand(
 /// Convenience wrapper that picks a selection on the bot's current hand.
 /// Used at talisman-use time (the hand is populated then).
 fn best_selection_for_talisman(run: &RunState, kind: TalismanKind) -> Option<(Vec<usize>, i64)> {
-    best_selection_for_talisman_on_hand(run, &run.hand(), kind)
+    best_selection_for_talisman_on_hand(run, run.hand(), kind)
 }
 
 /// Estimate the score improvement from using a selection talisman on a

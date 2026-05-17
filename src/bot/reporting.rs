@@ -942,15 +942,14 @@ pub fn run_stats_from_progress_record(rec: &crate::core::progression::RunRecord)
     let final_consumables: Vec<String> = rec.consumables_owned.iter().map(|c| c.name()).collect();
     let mut boss_faced: BTreeMap<String, u8> = BTreeMap::new();
     let mut boss_beaten: BTreeMap<String, u8> = BTreeMap::new();
-    if rec.final_blind == BlindKind::Boss {
-        if let Some(bk) = rec.final_boss {
+    if rec.final_blind == BlindKind::Boss
+        && let Some(bk) = rec.final_boss {
             let key = bk.name().to_string();
             boss_faced.insert(key.clone(), 1);
             if victory {
                 boss_beaten.insert(key, 1);
             }
         }
-    }
     RunStats {
         blinds_cleared,
         antes_cleared,
