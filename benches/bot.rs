@@ -72,8 +72,8 @@ fn print_dashboard(fixtures: &[(&'static str, RunState)]) {
         let commit_rules = run.validation_rules_for_structure_commits();
         let masks = bench_enumerate_play_masks(hand, &commit_rules);
         let n = masks.len();
-        let v = bench_count_masks_validate_structure(&run, hand, &masks);
-        let p = bench_count_masks_positive_score(&run, hand, &masks);
+        let v = bench_count_masks_validate_structure(run, hand, &masks);
+        let p = bench_count_masks_positive_score(run, hand, &masks);
         eprintln!(
             "{:<16} {:>4} {:>10} {:>12} {:>12}",
             slug,

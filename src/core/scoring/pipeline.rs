@@ -83,42 +83,51 @@ fn score_sets_inner(
     chips = base_chips;
 
     let has_triplet_boost = eff.has(ctx.relic.roster, RelicId::TripletBoost);
-    super::pre_yaku_layer::apply_pre_yaku_scoring(
+    let layer_input = super::layer_input::ScoringLayerInput {
         ctx,
         tiles,
         sets,
         eff,
-        pair_double,
-        has_triplet_boost,
-        &mut chips,
-        &mut mult,
-        &mut steps,
-        &mut flower_gold,
+    };
+    super::pre_yaku_layer::apply_pre_yaku_scoring(
+        &layer_input,
+        super::layer_input::ScoringLayerOut {
+            chips: &mut chips,
+            mult: &mut mult,
+            steps: &mut steps,
+        },
+        super::layer_input::PreYakuLayerOpts {
+            pair_double,
+            has_triplet_boost,
+            flower_gold: &mut flower_gold,
+        },
     );
 
     let detected_yaku = super::dora_yaku_layer::apply_dora_yaku_and_structure(
-        ctx,
-        tiles,
-        sets,
-        eff,
-        censor_repeats,
-        original_tiles,
-        &mut chips,
-        &mut mult,
-        &mut steps,
+        &layer_input,
+        super::layer_input::ScoringLayerOut {
+            chips: &mut chips,
+            mult: &mut mult,
+            steps: &mut steps,
+        },
+        super::layer_input::DoraYakuLayerOpts {
+            censor_repeats,
+            original_tiles,
+        },
     );
 
     super::relic_mult_layer::apply_post_yaku_relic_modifiers(
-        ctx,
-        tiles,
-        sets,
-        eff,
-        honor_triple,
-        no_seq_bonus,
-        has_triplet_boost,
-        &mut chips,
-        &mut mult,
-        &mut steps,
+        &layer_input,
+        super::layer_input::ScoringLayerOut {
+            chips: &mut chips,
+            mult: &mut mult,
+            steps: &mut steps,
+        },
+        super::layer_input::PostYakuRelicLayerOpts {
+            honor_triple,
+            no_seq_bonus,
+            has_triplet_boost,
+        },
     );
 
     reorder_steps_chips_then_mult_then_gold(&mut steps, base_chips);

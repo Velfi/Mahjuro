@@ -1596,7 +1596,7 @@ mod tests {
             t(Suit::Flower, 2, 11),
         ];
         run.hand_mut().sort();
-        let new_best = best_play_in_hand(&run, &run.hand(), None, None);
+        let new_best = best_play_in_hand(&run, run.hand(), None, None);
         let old_best = brute_force_best_play_in_hand(&run);
         assert_eq!(new_best, old_best);
     }
@@ -1621,7 +1621,7 @@ mod tests {
         run.hand_mut().sort();
 
         let commit_rules = run.validation_rules_for_structure_commits();
-        for mask in enumerate_candidate_play_masks(&run.hand(), &commit_rules) {
+        for mask in enumerate_candidate_play_masks(run.hand(), &commit_rules) {
             let tiles: Vec<_> = run
                 .hand()
                 .iter()
@@ -1648,7 +1648,7 @@ mod tests {
         run.hand_mut().sort();
 
         let commit_rules = run.validation_rules_for_structure_commits();
-        let masks = enumerate_candidate_play_masks(&run.hand(), &commit_rules);
+        let masks = enumerate_candidate_play_masks(run.hand(), &commit_rules);
         let selected_ids: Vec<Vec<u32>> = masks
             .iter()
             .map(|mask| {

@@ -91,25 +91,69 @@ fn score_chart_columns(runs: &[&RunRecord]) -> (Vec<u64>, u64) {
     }
     let b = n.min(MAX_SCORE_BUCKETS);
     let mut peak = vec![0u64; b];
-    for i in 0..n {
+    for (i, run) in runs.iter().enumerate().take(n) {
         let bi = ((i as u64 * b as u64) / n as u64) as usize;
         let bi = bi.min(b - 1);
-        peak[bi] = peak[bi].max(runs[i].total_score_earned);
+        peak[bi] = peak[bi].max(run.total_score_earned);
     }
     let mx = peak.iter().copied().max().unwrap_or(1).max(1);
     (peak, mx)
 }
 
-fn layout_constants(h: f32) -> (f32, f32, f32, f32, f32, f32, f32) {
+#[derive(Clone, Copy, Debug)]
+struct ChronicleLayoutMetrics {
+    body: f32,
+    line_h: f32,
+    title_h: f32,
+    gap: f32,
+    chart_h: f32,
+    bar_row_h: f32,
+}
+
+fn layout_constants(h: f32) -> ChronicleLayoutMetrics {
     let body = typography::size(typography::H36, h);
-    let hero_px = typography::size(typography::H16, h);
     let line_h = (body / 0.55).ceil() + 4.0;
     let section_px = typography::size(typography::H32, h);
     let title_h = (section_px / 0.55).ceil() + 4.0;
     let gap = (h * 0.016).max(10.0);
     let chart_h = (h * 0.11).max(72.0);
     let bar_row_h = (h * 0.030).max(22.0);
-    (body, hero_px, line_h, title_h, gap, chart_h, bar_row_h)
+    ChronicleLayoutMetrics {
+        body,
+        line_h,
+        title_h,
+        gap,
+        chart_h,
+        bar_row_h,
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ChronicleTypeScale {
+    section_px: f32,
+    body: f32,
+    caption_px: f32,
+    metrics: ChronicleLayoutMetrics,
+}
+
+struct ChronicleEmit<'a> {
+    quads: &'a mut Vec<GpuInstance>,
+    labels: &'a mut Vec<TextLabel>,
+}
+
+struct ChroniclePaneDraw<'a> {
+    progress: &'a PlayerProgress,
+    panes: ChroniclePaneLayout,
+    scroll: f32,
+    type_scale: ChronicleTypeScale,
+    emit: ChronicleEmit<'a>,
+}
+
+struct CareerContentMeasure<'a> {
+    w: f32,
+    h: f32,
+    progress: &'a PlayerProgress,
+    metrics: ChronicleLayoutMetrics,
 }
 
 fn run_log_list_viewport_h(layout: ChroniclePaneLayout, title_h: f32, gap: f32) -> f32 {
@@ -130,16 +174,20 @@ fn career_tile_height(h: f32) -> f32 {
     (cap_h * 2.0 + val_h + 18.0).max(h * 0.13).max(96.0)
 }
 
-fn career_content_height(
-    w: f32,
-    h: f32,
-    progress: &PlayerProgress,
-    _pane_w: f32,
-    title_h: f32,
-    gap: f32,
-    chart_h: f32,
-    bar_row_h: f32,
-) -> f32 {
+fn career_content_height(measure: CareerContentMeasure<'_>) -> f32 {
+    let CareerContentMeasure {
+        w,
+        h,
+        progress,
+        metrics,
+    } = measure;
+    let ChronicleLayoutMetrics {
+        title_h,
+        gap,
+        chart_h,
+        bar_row_h,
+        ..
+    } = metrics;
     let runs = serious_runs_chronological(progress);
     let scale = metrics::scene_scale(w, h);
     let tile_h = career_tile_height(h);
@@ -167,9 +215,9 @@ fn career_content_height(
 
 pub fn chronicle_run_log_scroll_max(w: f32, h: f32, panel: [f32; 4], entry_count: usize) -> f32 {
     let panes = chronicle_pane_layout(w, h, panel);
-    let (_body, _hero, _line_h, title_h, gap, _ch, _br) = layout_constants(h);
+    let m = layout_constants(h);
     let list_h = run_log_list_content_height(entry_count, panes);
-    let view_h = run_log_list_viewport_h(panes, title_h, gap);
+    let view_h = run_log_list_viewport_h(panes, m.title_h, m.gap);
     (list_h - view_h).max(0.0)
 }
 
@@ -180,8 +228,8 @@ pub fn chronicle_run_detail_scroll_max(
     rec: &RunRecord,
 ) -> f32 {
     let panes = chronicle_pane_layout(w, h, panel);
-    let (_body, _hero, line_h, title_h, gap, _ch, _br) = layout_constants(h);
-    let content = run_detail_content_height(rec, title_h, gap, line_h);
+    let m = layout_constants(h);
+    let content = run_detail_content_height(rec, m.title_h, m.gap, m.line_h);
     (content - panes.inner_h).max(0.0)
 }
 
@@ -207,17 +255,13 @@ pub fn chronicle_right_pane_scroll_max(
 
 pub fn chronicle_career_scroll_max(w: f32, h: f32, panel: [f32; 4], progress: &PlayerProgress) -> f32 {
     let panes = chronicle_pane_layout(w, h, panel);
-    let (_body, _hero, _line_h, title_h, gap, chart_h, bar_row_h) = layout_constants(h);
-    let content = career_content_height(
+    let m = layout_constants(h);
+    let content = career_content_height(CareerContentMeasure {
         w,
         h,
         progress,
-        panes.right_w,
-        title_h,
-        gap,
-        chart_h,
-        bar_row_h,
-    );
+        metrics: m,
+    });
     (content - panes.inner_h).max(0.0)
 }
 
@@ -270,8 +314,8 @@ pub fn chronicle_run_log_hit_rects(
         return Vec::new();
     }
     let panes = chronicle_pane_layout(w, h, panel);
-    let (_body, _hero, _line_h, title_h, gap, _ch, _br) = layout_constants(h);
-    let list_top = panes.inner_y + title_h + gap * 0.75;
+    let m = layout_constants(h);
+    let list_top = panes.inner_y + m.title_h + m.gap * 0.75;
     (0..entry_count)
         .map(|i| {
             let y = list_top + i as f32 * panes.run_row_h - scroll;
@@ -388,19 +432,26 @@ fn push_ruled_lines(
     }
 }
 
-fn push_run_log(
-    progress: &PlayerProgress,
-    panes: ChroniclePaneLayout,
-    scroll: f32,
-    focused: Option<usize>,
-    section_px: f32,
-    body: f32,
-    caption_px: f32,
-    title_h: f32,
-    gap: f32,
-    out_quads: &mut Vec<GpuInstance>,
-    out_labels: &mut Vec<TextLabel>,
-) {
+fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
+    let ChroniclePaneDraw {
+        progress,
+        panes,
+        scroll,
+        type_scale,
+        emit,
+    } = draw;
+    let ChronicleTypeScale {
+        section_px,
+        body,
+        caption_px,
+        metrics,
+        ..
+    } = type_scale;
+    let ChronicleLayoutMetrics { title_h, gap, .. } = metrics;
+    let ChronicleEmit {
+        quads: out_quads,
+        labels: out_labels,
+    } = emit;
     let (clip_top, clip_bottom) = pane_clip_y(panes);
     let indices = archive_career::chronicle_indices_recent_first(progress);
     let run_count = indices.len();
@@ -539,19 +590,30 @@ fn push_run_log(
     }
 }
 
-fn push_run_detail_pane(
-    progress: &PlayerProgress,
-    list_index: usize,
-    panes: ChroniclePaneLayout,
-    scroll: f32,
-    section_px: f32,
-    body: f32,
-    caption_px: f32,
-    title_h: f32,
-    gap: f32,
-    line_h: f32,
-    out_labels: &mut Vec<TextLabel>,
-) {
+fn push_run_detail_pane(draw: ChroniclePaneDraw<'_>, list_index: usize) {
+    let ChroniclePaneDraw {
+        progress,
+        panes,
+        scroll,
+        type_scale,
+        emit,
+    } = draw;
+    let ChronicleTypeScale {
+        section_px,
+        body,
+        caption_px,
+        metrics,
+        ..
+    } = type_scale;
+    let ChronicleLayoutMetrics {
+        title_h,
+        gap,
+        line_h,
+        ..
+    } = metrics;
+    let ChronicleEmit {
+        labels: out_labels, ..
+    } = emit;
     let Some(hist_idx) = archive_career::chronicle_hist_index_at_list(list_index, progress) else {
         return;
     };
@@ -700,23 +762,32 @@ fn push_run_detail_pane(
     }
 }
 
-fn push_career_pane(
-    _w: f32,
-    h: f32,
-    progress: &PlayerProgress,
-    panes: ChroniclePaneLayout,
-    scroll: f32,
-    section_px: f32,
-    body: f32,
-    caption_px: f32,
-    _hero_px: f32,
-    title_h: f32,
-    gap: f32,
-    chart_h: f32,
-    bar_row_h: f32,
-    out_quads: &mut Vec<GpuInstance>,
-    out_labels: &mut Vec<TextLabel>,
-) {
+fn push_career_pane(h: f32, draw: ChroniclePaneDraw<'_>) {
+    let ChroniclePaneDraw {
+        progress,
+        panes,
+        scroll,
+        type_scale,
+        emit,
+    } = draw;
+    let ChronicleTypeScale {
+        section_px,
+        body,
+        caption_px,
+        metrics,
+        ..
+    } = type_scale;
+    let ChronicleLayoutMetrics {
+        title_h,
+        gap,
+        chart_h,
+        bar_row_h,
+        ..
+    } = metrics;
+    let ChronicleEmit {
+        quads: out_quads,
+        labels: out_labels,
+    } = emit;
     let runs = serious_runs_chronological(progress);
     let grid_line = color::alpha(color::UMBER, 0.45);
     let (clip_top, clip_bottom) = pane_clip_y(panes);
@@ -1138,12 +1209,20 @@ pub fn push_chronicle_dashboard(
     out_labels: &mut Vec<TextLabel>,
 ) {
     let panes = chronicle_pane_layout(w, h, panel);
-    let (body, hero_px, line_h, title_h, gap, chart_h, bar_row_h) = layout_constants(h);
-    let section_px = typography::size(typography::H28, h);
-    let caption_px = typography::size(typography::H42, h);
+    let metrics = layout_constants(h);
+    let type_scale = ChronicleTypeScale {
+        section_px: typography::size(typography::H28, h),
+        body: metrics.body,
+        caption_px: typography::size(typography::H42, h),
+        metrics,
+    };
+    let emit = ChronicleEmit {
+        quads: out_quads,
+        labels: out_labels,
+    };
 
     push_ledger_sheet(
-        out_quads,
+        emit.quads,
         panes.inner_x,
         panes.inner_y,
         panes.inner_w,
@@ -1151,57 +1230,50 @@ pub fn push_chronicle_dashboard(
     );
 
     push_quad(
-        out_quads,
+        emit.quads,
         [panes.left_x + panes.left_w, panes.inner_y, panes.gutter, panes.inner_h],
         color::alpha(color::UMBER, 0.35),
     );
 
     push_run_log(
-        progress,
-        panes,
-        view.run_log_scroll,
+        ChroniclePaneDraw {
+            progress,
+            panes,
+            scroll: view.run_log_scroll,
+            type_scale,
+            emit,
+        },
         view.focused_run,
-        section_px,
-        body,
-        caption_px,
-        title_h,
-        gap,
-        out_quads,
-        out_labels,
     );
 
     let show_summary = view.focused_run.is_none() || view.focused_run == Some(0);
     if show_summary {
         push_career_pane(
-            w,
             h,
-            progress,
-            panes,
-            view.career_scroll,
-            section_px,
-            body,
-            caption_px,
-            hero_px,
-            title_h,
-            gap,
-            chart_h,
-            bar_row_h,
-            out_quads,
-            out_labels,
+            ChroniclePaneDraw {
+                progress,
+                panes,
+                scroll: view.career_scroll,
+                type_scale,
+                emit: ChronicleEmit {
+                    quads: out_quads,
+                    labels: out_labels,
+                },
+            },
         );
     } else if let Some(list_i) = view.focused_run {
         push_run_detail_pane(
-            progress,
+            ChroniclePaneDraw {
+                progress,
+                panes,
+                scroll: view.career_scroll,
+                type_scale,
+                emit: ChronicleEmit {
+                    quads: out_quads,
+                    labels: out_labels,
+                },
+            },
             list_i,
-            panes,
-            view.career_scroll,
-            section_px,
-            body,
-            caption_px,
-            title_h,
-            gap,
-            line_h,
-            out_labels,
         );
     }
 }

@@ -4,29 +4,38 @@
 //! Keeping this in one module makes the main pipeline easier to read and gives a
 //! single place to audit "post-yaku" balance.
 
-use crate::core::hand::{DetectedMeld, MeldKind};
-use crate::core::relic::{RelicId, ScoreContext, TURTLE_SHELL_CHIPS};
-use crate::core::tile::{Suit, Tile};
+use crate::core::hand::MeldKind;
+use crate::core::relic::{RelicId, TURTLE_SHELL_CHIPS};
+use crate::core::tile::Suit;
 
-use super::effective_relic::EffectiveRelics;
+use super::layer_input::{PostYakuRelicLayerOpts, ScoringLayerInput, ScoringLayerOut};
 use super::push_steps::{push_chips, push_mult};
 use super::tea_bonus::{
     tea_harmony_chips, tea_purity_mult, tea_respect_chips, tea_tranquility_chips,
 };
-use super::{ScoreStep, tile_by_id, tile_is_debuffed};
+use super::{tile_by_id, tile_is_debuffed};
 
 pub(crate) fn apply_post_yaku_relic_modifiers(
-    ctx: &ScoreContext<'_>,
-    tiles: &[Tile],
-    sets: &[DetectedMeld],
-    eff: EffectiveRelics,
-    honor_triple: bool,
-    no_seq_bonus: bool,
-    has_triplet_boost: bool,
-    chips: &mut i32,
-    mult: &mut f64,
-    steps: &mut Vec<ScoreStep>,
+    input: &ScoringLayerInput<'_>,
+    out: ScoringLayerOut<'_>,
+    opts: PostYakuRelicLayerOpts,
 ) {
+    let ScoringLayerInput {
+        ctx,
+        tiles,
+        sets,
+        eff,
+    } = *input;
+    let ScoringLayerOut {
+        chips,
+        mult,
+        steps,
+    } = out;
+    let PostYakuRelicLayerOpts {
+        honor_triple,
+        no_seq_bonus,
+        has_triplet_boost,
+    } = opts;
     let has = |id: RelicId| eff.has(ctx.relic.roster, id);
     let count = |id: RelicId| eff.count(ctx.relic.roster, id);
 

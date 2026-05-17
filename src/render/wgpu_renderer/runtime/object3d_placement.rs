@@ -13,7 +13,7 @@ impl WgpuRenderer {
         object3d_cmds: &[&[crate::render::draw_cmd::Object3d]],
         wall_stack_cmds: &[&WallStackPlacement],
         object3d_draw_list: &mut Vec<(DrawKind, usize)>,
-        ops: &mut Vec<RenderOp>,
+        ops: &mut [RenderOp],
         relic_glows: &mut Vec<GpuInstance>,
         relic_debuff_markers: &mut Vec<GpuInstance>,
     ) {

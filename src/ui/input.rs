@@ -46,6 +46,15 @@ pub enum RumbleLabOp {
     },
 }
 
+struct RumbleEnvelopeParams {
+    gain: f32,
+    weak: u16,
+    strong: u16,
+    duration_ms: u32,
+    attack_ms: u32,
+    fade_ms: u32,
+}
+
 /// Rumble strength vs normalized hold progress: rises through most of the hold,
 /// then decays sharply in the final segment before completion.
 fn shop_hold_rumble_gain_curve(t: f32) -> f32 {
@@ -410,12 +419,14 @@ impl InputState {
                 } => self.play_rumble_envelope(
                     shell,
                     now,
-                    gain,
-                    weak,
-                    strong,
-                    duration_ms,
-                    attack_ms,
-                    fade_ms,
+                    RumbleEnvelopeParams {
+                        gain,
+                        weak,
+                        strong,
+                        duration_ms,
+                        attack_ms,
+                        fade_ms,
+                    },
                 ),
             }
         }
@@ -443,13 +454,16 @@ impl InputState {
         &mut self,
         shell: &mut SdlShell,
         now: Instant,
-        gain: f32,
-        weak: u16,
-        strong: u16,
-        duration_ms: u32,
-        attack_ms: u32,
-        fade_ms: u32,
+        params: RumbleEnvelopeParams,
     ) {
+        let RumbleEnvelopeParams {
+            gain,
+            weak,
+            strong,
+            duration_ms,
+            attack_ms,
+            fade_ms,
+        } = params;
         let min_gap_ticks = 3u32;
         let dur_tick_u32 = duration_ms.max(60).div_ceil(50).max(2);
         let atk_tick_u32 = attack_ms.div_ceil(50);
@@ -1218,6 +1232,64 @@ impl InputState {
     }
 }
 
+/// Apply actions to run + animations (stub hooks).
+pub fn apply_ui_actions(
+    actions: &[UiAction],
+    run: &mut RunState,
+    bus: &mut crate::game::event_bus::EventBus,
+    anim: &mut AnimationController,
+    focus_tile_index: usize,
+) {
+    for a in actions {
+        match a {
+            UiAction::ScoreHand => {
+                run.commit_selection_to_structure(bus);
+                anim.pulse(crate::render::animation::ENTITY_SCORE_PANEL);
+            }
+            UiAction::Confirm => {
+                // Toggle-select the focused tile for discard.
+                if !run.hand().is_empty() {
+                    let idx = focus_tile_index.min(run.hand().len() - 1);
+                    run.toggle_select(idx);
+                }
+            }
+            UiAction::ConfirmRelease => {}
+            UiAction::CommitDiscard => {
+                let discarded = run.discard_selected(bus);
+                if discarded > 0 {
+                    anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
+                }
+            }
+            UiAction::Cancel => {
+                run.clear_selection();
+            }
+            UiAction::SortBySuit
+            | UiAction::SortByRank
+            | UiAction::TriggerStructure
+            | UiAction::UndoDiscard
+            | UiAction::Pause
+            | UiAction::Help
+            | UiAction::DebugBlowWind
+            | UiAction::DebugToggleAxes
+            | UiAction::Delete => {}
+            UiAction::FocusNext
+            | UiAction::FocusPrev
+            | UiAction::FocusDown
+            | UiAction::FocusUp
+            | UiAction::FocusPlayButton
+            | UiAction::FocusDiscardButton
+            | UiAction::NavigateHudNext
+            | UiAction::NavigateHudPrev
+            | UiAction::TabNext
+            | UiAction::TabPrev
+            | UiAction::PageNext
+            | UiAction::PagePrev => {}
+            UiAction::NorthFacePress | UiAction::WestFacePress | UiAction::WestFaceRelease => {}
+            UiAction::CancelRelease => {}
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{InputState, MarqueeSelect, UiAction};
@@ -1288,63 +1360,5 @@ mod tests {
         input.wrap_focus_slot(UiAction::FocusPrev, 16);
 
         assert_eq!(input.focus_slot, 15);
-    }
-}
-
-/// Apply actions to run + animations (stub hooks).
-pub fn apply_ui_actions(
-    actions: &[UiAction],
-    run: &mut RunState,
-    bus: &mut crate::game::event_bus::EventBus,
-    anim: &mut AnimationController,
-    focus_tile_index: usize,
-) {
-    for a in actions {
-        match a {
-            UiAction::ScoreHand => {
-                run.commit_selection_to_structure(bus);
-                anim.pulse(crate::render::animation::ENTITY_SCORE_PANEL);
-            }
-            UiAction::Confirm => {
-                // Toggle-select the focused tile for discard.
-                if !run.hand().is_empty() {
-                    let idx = focus_tile_index.min(run.hand().len() - 1);
-                    run.toggle_select(idx);
-                }
-            }
-            UiAction::ConfirmRelease => {}
-            UiAction::CommitDiscard => {
-                let discarded = run.discard_selected(bus);
-                if discarded > 0 {
-                    anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
-                }
-            }
-            UiAction::Cancel => {
-                run.clear_selection();
-            }
-            UiAction::SortBySuit
-            | UiAction::SortByRank
-            | UiAction::TriggerStructure
-            | UiAction::UndoDiscard
-            | UiAction::Pause
-            | UiAction::Help
-            | UiAction::DebugBlowWind
-            | UiAction::DebugToggleAxes
-            | UiAction::Delete => {}
-            UiAction::FocusNext
-            | UiAction::FocusPrev
-            | UiAction::FocusDown
-            | UiAction::FocusUp
-            | UiAction::FocusPlayButton
-            | UiAction::FocusDiscardButton
-            | UiAction::NavigateHudNext
-            | UiAction::NavigateHudPrev
-            | UiAction::TabNext
-            | UiAction::TabPrev
-            | UiAction::PageNext
-            | UiAction::PagePrev => {}
-            UiAction::NorthFacePress | UiAction::WestFacePress | UiAction::WestFaceRelease => {}
-            UiAction::CancelRelease => {}
-        }
     }
 }

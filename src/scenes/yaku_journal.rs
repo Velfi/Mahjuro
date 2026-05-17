@@ -334,13 +334,15 @@ impl SceneBehavior for YakuJournalScene {
                         let bamboo_face = color::darken(color::JADE, 0.76);
                         draw_mystery_name_pill(
                             &mut frame,
-                            cell_cx,
-                            caption_y + name_h * 0.02,
-                            name_h * 0.92,
-                            name_font * 1.05,
-                            shadow_scale,
-                            color::darken(bamboo_face, 0.28),
-                            color::alpha(color::CHAMPAGNE, 0.88),
+                            MysteryNamePillStyle {
+                                pill_center_x: cell_cx,
+                                top_y: caption_y + name_h * 0.02,
+                                pill_h: name_h * 0.92,
+                                font_px: name_font * 1.05,
+                                shadow_scale,
+                                pill_bg: color::darken(bamboo_face, 0.28),
+                                text_color: color::alpha(color::CHAMPAGNE, 0.88),
+                            },
                         );
                     }
                     _ => {
@@ -566,9 +568,7 @@ fn draw_sealed_slab(
     });
 }
 
-/// Caption / header pill hiding the yaku name until the first cash-in.
-fn draw_mystery_name_pill(
-    frame: &mut UiFrame,
+struct MysteryNamePillStyle {
     pill_center_x: f32,
     top_y: f32,
     pill_h: f32,
@@ -576,7 +576,19 @@ fn draw_mystery_name_pill(
     shadow_scale: f32,
     pill_bg: [f32; 4],
     text_color: [f32; 4],
-) {
+}
+
+/// Caption / header pill hiding the yaku name until the first cash-in.
+fn draw_mystery_name_pill(frame: &mut UiFrame, style: MysteryNamePillStyle) {
+    let MysteryNamePillStyle {
+        pill_center_x,
+        top_y,
+        pill_h,
+        font_px,
+        shadow_scale,
+        pill_bg,
+        text_color,
+    } = style;
     let pill_w = font_px * 2.38;
     let pill_x = pill_center_x - pill_w * 0.5;
     frame.quad(GpuInstance {
@@ -759,13 +771,15 @@ fn draw_plaque(
         let title_pill_w = title_glyph * 2.38;
         draw_mystery_name_pill(
             frame,
-            header_x + title_pill_w * 0.5,
-            header_y + title_h * 0.02,
-            title_h * 0.88,
-            title_glyph,
-            shadow_scale,
-            color::darken(bamboo_face, 0.28),
-            label_champagne_soft,
+            MysteryNamePillStyle {
+                pill_center_x: header_x + title_pill_w * 0.5,
+                top_y: header_y + title_h * 0.02,
+                pill_h: title_h * 0.88,
+                font_px: title_glyph,
+                shadow_scale,
+                pill_bg: color::darken(bamboo_face, 0.28),
+                text_color: label_champagne_soft,
+            },
         );
     } else {
         frame.text(TextLabel {

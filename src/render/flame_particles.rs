@@ -363,7 +363,7 @@ mod tests {
         }
         let n = sys.live_count();
         assert!(
-            n >= PER_EMITTER_CAP / 2 && n <= PER_EMITTER_CAP + 2,
+            (PER_EMITTER_CAP / 2..=PER_EMITTER_CAP + 2).contains(&n),
             "expected steady-state near {PER_EMITTER_CAP}, got {n}"
         );
     }

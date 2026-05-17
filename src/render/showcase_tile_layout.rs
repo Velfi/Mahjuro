@@ -27,34 +27,57 @@ pub struct PackRevealRowLayout {
     pub step_px: f32,
 }
 
+/// Inputs for [`showcase_tile_projected_width_px`].
+pub struct ShowcaseTileProjectParams<'a> {
+    pub win_w: f32,
+    pub win_h: f32,
+    pub cam: &'a CameraParams,
+    pub preset: TilePreset,
+    pub center_px: [f32; 3],
+    pub rotation_xyz_rad: [f32; 3],
+    pub placement_scale: f32,
+    pub size_px: f32,
+}
+
+/// Inputs for [`compute_pack_reveal_row_layout`].
+pub struct PackRevealRowLayoutParams<'a> {
+    pub win_w: f32,
+    pub win_h: f32,
+    pub cam: &'a CameraParams,
+    pub preset: TilePreset,
+    pub n: usize,
+    pub row_lift: f32,
+    pub nx: f32,
+    pub ny: f32,
+    pub rotation_xyz_rad: [f32; 3],
+}
+
 /// Horizontal span in layout pixels of a showcase tile's axis-aligned screen bounds.
 ///
 /// Uses the same ray→`plane_z` center mapping, `0.85` short-edge factor, preset ratios,
 /// and `tile_mesh_local_to_world` × Euler basis as the GPU showcase path.
-pub fn showcase_tile_projected_width_px(
-    w: f32,
-    h: f32,
-    cam: &CameraParams,
-    preset: TilePreset,
-    center_px: [f32; 3],
-    rotation_xyz_rad: [f32; 3],
-    placement_scale: f32,
-    size_px: f32,
-) -> f32 {
-    let center = world_on_camera_ray_plane_z(w, h, cam, center_px[0], center_px[1], center_px[2]);
+pub fn showcase_tile_projected_width_px(p: &ShowcaseTileProjectParams<'_>) -> f32 {
+    let center = world_on_camera_ray_plane_z(
+        p.win_w,
+        p.win_h,
+        p.cam,
+        p.center_px[0],
+        p.center_px[1],
+        p.center_px[2],
+    );
 
-    let tile_short_px = size_px * 0.85 * placement_scale;
-    let tile_long_px = tile_short_px * preset.face_long_ratio();
-    let tile_thickness_px = tile_short_px * preset.thickness_ratio();
+    let tile_short_px = p.size_px * 0.85 * p.placement_scale;
+    let tile_long_px = tile_short_px * p.preset.face_long_ratio();
+    let tile_thickness_px = tile_short_px * p.preset.thickness_ratio();
 
     let lx = tile_long_px * 0.5;
     let ly = tile_thickness_px * 0.5;
     let lz = tile_short_px * 0.5;
 
     let base_rotation = rot_euler_xyz_rad(
-        rotation_xyz_rad[0],
-        rotation_xyz_rad[1],
-        rotation_xyz_rad[2],
+        p.rotation_xyz_rad[0],
+        p.rotation_xyz_rad[1],
+        p.rotation_xyz_rad[2],
     );
     let oriented = base_rotation * tile_mesh_local_to_world();
 
@@ -73,7 +96,7 @@ pub fn showcase_tile_projected_width_px(
     let mut max_x = f32::NEG_INFINITY;
     for c in corners {
         let world_c = center + oriented.transform_point3(c);
-        let (sx, _) = cam.project_world_to_screen(w, h, world_c);
+        let (sx, _) = p.cam.project_world_to_screen(p.win_w, p.win_h, world_c);
         min_x = min_x.min(sx);
         max_x = max_x.max(sx);
     }
@@ -82,24 +105,14 @@ pub fn showcase_tile_projected_width_px(
 
 /// Row geometry for pack opening: largest `size_px` such that projected silhouettes fit in
 /// [`PACK_REVEAL_ROW_MAX_W_FRAC`] of the window with [`PACK_REVEAL_SILHOUETTE_GAP_FRAC`] spacing.
-pub fn compute_pack_reveal_row_layout(
-    w: f32,
-    h: f32,
-    cam: &CameraParams,
-    preset: TilePreset,
-    n: usize,
-    row_lift: f32,
-    nx: f32,
-    ny: f32,
-    rotation_xyz_rad: [f32; 3],
-) -> PackRevealRowLayout {
-    let h = h.max(1.0);
-    let w = w.max(1.0);
-    let n_tiles = n.max(1) as f32;
+pub fn compute_pack_reveal_row_layout(p: &PackRevealRowLayoutParams<'_>) -> PackRevealRowLayout {
+    let h = p.win_h.max(1.0);
+    let w = p.win_w.max(1.0);
+    let n_tiles = p.n.max(1) as f32;
 
-    let cy = h * ny;
-    let cx_ref = w * 0.5 + w * nx;
-    let center_ref = [cx_ref, cy, row_lift];
+    let cy = h * p.ny;
+    let cx_ref = w * 0.5 + w * p.nx;
+    let center_ref = [cx_ref, cy, p.row_lift];
 
     let gap_frac = PACK_REVEAL_SILHOUETTE_GAP_FRAC;
     let denom = n_tiles + (n_tiles - 1.0).max(0.0) * gap_frac;
@@ -108,7 +121,16 @@ pub fn compute_pack_reveal_row_layout(
     let max_cap = h * PACK_REVEAL_TILE_SIZE_MAX_H_FRAC;
 
     let width_at = |size: f32| {
-        showcase_tile_projected_width_px(w, h, cam, preset, center_ref, rotation_xyz_rad, 1.0, size)
+        showcase_tile_projected_width_px(&ShowcaseTileProjectParams {
+            win_w: w,
+            win_h: h,
+            cam: p.cam,
+            preset: p.preset,
+            center_px: center_ref,
+            rotation_xyz_rad: p.rotation_xyz_rad,
+            placement_scale: 1.0,
+            size_px: size,
+        })
     };
 
     let mut tile_size = max_cap;
@@ -130,7 +152,7 @@ pub fn compute_pack_reveal_row_layout(
     let gap_px = silhouette_w * gap_frac;
     let step_px = silhouette_w + gap_px;
     let total_w = n_tiles * silhouette_w + (n_tiles - 1.0).max(0.0) * gap_px;
-    let row_x0 = (w - total_w) * 0.5 + w * nx;
+    let row_x0 = (w - total_w) * 0.5 + w * p.nx;
 
     PackRevealRowLayout {
         tile_size,

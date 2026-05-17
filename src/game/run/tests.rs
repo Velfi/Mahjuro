@@ -1,6 +1,6 @@
 use super::*;
 #[cfg(test)]
-mod tests {
+mod cases {
     use super::*;
     use crate::core::deck::build_wall;
     use crate::core::relic::{

@@ -104,14 +104,16 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     let point_lights_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("point-lights"),
         contents: bytemuck::bytes_of(&PointLightsBuf::from_scene_punctual(
-            &[],
-            0,
-            0.0,
-            1.0,
-            1.0,
-            1.0,
-            1.0,
-            0.0,
+            &PunctualLightBakeParams {
+                src: &[],
+                candle_count: 0,
+                flame_height_world: 0.0,
+                lit_mesh_punctual_intensity_scale: 1.0,
+                screen_w: 1.0,
+                screen_h: 1.0,
+                gamma: 1.0,
+                time: 0.0,
+            },
         )),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
@@ -1470,18 +1472,18 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     let bloom_w = (size.width.max(1) / 2).max(1);
     let bloom_h = (size.height.max(1) / 2).max(1);
 
-    let bloom_bundle = super::bloom::build_bloom(
-        &device,
-        &queue,
-        bloom_w,
-        bloom_h,
+    let bloom_bundle = super::bloom::build_bloom(&super::bloom::BloomBuildParams {
+        device: &device,
+        queue: &queue,
+        width: bloom_w,
+        height: bloom_h,
         scene_hdr_format,
-        &bloom_extract_shader,
-        &bloom_blur_shader,
-        &bloom_composite_shader,
-        &shop_linear_bloom_view,
-        &scene_color_view,
-    );
+        extract_shader: &bloom_extract_shader,
+        blur_shader: &bloom_blur_shader,
+        composite_shader: &bloom_composite_shader,
+        shop_linear_bloom_view: &shop_linear_bloom_view,
+        scene_color_view: &scene_color_view,
+    });
     let bloom_extract_pipeline = bloom_bundle.extract_pipeline;
     let bloom_blur_pipeline = bloom_bundle.blur_pipeline;
     let bloom_composite_pipeline = bloom_bundle.composite_pipeline;
@@ -2299,62 +2301,62 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 });
                 let mips = crate::render::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
                 let (_albedo_texture, albedo_view) = match &prim.albedo_rgba {
-                    Some((rgba, w, h)) => upload_rgba_texture_with_mips(
-                        &device,
-                        &queue,
-                        "tile-prim-albedo",
-                        rgba,
-                        *w,
-                        *h,
-                        wgpu::TextureFormat::Rgba8UnormSrgb,
+                    Some((rgba, w, h)) => upload_rgba_texture_with_mips(&TextureUploadParams {
+                        device: &device,
+                        queue: &queue,
+                        label: "tile-prim-albedo".to_string(),
+                        rgba: rgba,
+                        width: *w,
+                        height: *h,
+                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
                         mips,
-                    ),
+                    }),
                     None => white_albedo(&device, &queue),
                 };
                 let normal_view = match &prim.normal_rgba {
                     Some((rgba, w, h)) => {
-                        upload_rgba_texture_with_mips(
-                            &device,
-                            &queue,
-                            &format!("tile-prim-normal-{i}"),
-                            rgba,
-                            *w,
-                            *h,
-                            wgpu::TextureFormat::Rgba8Unorm,
-                            mips,
-                        )
+                        upload_rgba_texture_with_mips(&TextureUploadParams {
+                        device: &device,
+                        queue: &queue,
+                        label: format!("tile-prim-normal-{i}"),
+                        rgba: rgba,
+                        width: *w,
+                        height: *h,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        mips,
+                    })
                         .1
                     }
                     None => tile_default_normal_view.clone(),
                 };
                 let metallic_roughness_view = match &prim.metallic_roughness_rgba {
                     Some((rgba, w, h)) => {
-                        upload_rgba_texture_with_mips(
-                            &device,
-                            &queue,
-                            &format!("tile-prim-mr-{i}"),
-                            rgba,
-                            *w,
-                            *h,
-                            wgpu::TextureFormat::Rgba8Unorm,
-                            mips,
-                        )
+                        upload_rgba_texture_with_mips(&TextureUploadParams {
+                        device: &device,
+                        queue: &queue,
+                        label: format!("tile-prim-mr-{i}"),
+                        rgba: rgba,
+                        width: *w,
+                        height: *h,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        mips,
+                    })
                         .1
                     }
                     None => tile_glb_default_mr_view.clone(),
                 };
                 let emissive_view = match &prim.emissive_rgba {
                     Some((rgba, w, h)) => {
-                        upload_rgba_texture_with_mips(
-                            &device,
-                            &queue,
-                            &format!("tile-prim-emissive-{i}"),
-                            rgba,
-                            *w,
-                            *h,
-                            wgpu::TextureFormat::Rgba8UnormSrgb,
-                            mips,
-                        )
+                        upload_rgba_texture_with_mips(&TextureUploadParams {
+                        device: &device,
+                        queue: &queue,
+                        label: format!("tile-prim-emissive-{i}"),
+                        rgba: rgba,
+                        width: *w,
+                        height: *h,
+                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                        mips,
+                    })
                         .1
                     }
                     None => tile_glb_default_emissive_view.clone(),
@@ -2459,62 +2461,62 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     });
                     let mips = crate::render::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
                     let (_albedo_texture, albedo_view) = match &prim.albedo_rgba {
-                        Some((rgba, aw, ah)) => upload_rgba_texture_with_mips(
-                            &device,
-                            &queue,
-                            &format!("shop-env-albedo-{i}"),
-                            rgba,
-                            *aw,
-                            *ah,
-                            wgpu::TextureFormat::Rgba8UnormSrgb,
-                            mips,
-                        ),
+                        Some((rgba, aw, ah)) => upload_rgba_texture_with_mips(&TextureUploadParams {
+                        device: &device,
+                        queue: &queue,
+                        label: format!("shop-env-albedo-{i}"),
+                        rgba: rgba,
+                        width: *aw,
+                        height: *ah,
+                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                        mips,
+                    }),
                         None => white_albedo(&device, &queue),
                     };
                     let normal_view = match &prim.normal_rgba {
                         Some((rgba, nw, nh)) => {
-                            upload_rgba_texture_with_mips(
-                                &device,
-                                &queue,
-                                &format!("shop-env-normal-{i}"),
-                                rgba,
-                                *nw,
-                                *nh,
-                                wgpu::TextureFormat::Rgba8Unorm,
-                                mips,
-                            )
+                            upload_rgba_texture_with_mips(&TextureUploadParams {
+                        device: &device,
+                        queue: &queue,
+                        label: format!("shop-env-normal-{i}"),
+                        rgba: rgba,
+                        width: *nw,
+                        height: *nh,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        mips,
+                    })
                             .1
                         }
                         None => tile_default_normal_view.clone(),
                     };
                     let metallic_roughness_view = match &prim.metallic_roughness_rgba {
                         Some((rgba, w, h)) => {
-                            upload_rgba_texture_with_mips(
-                                &device,
-                                &queue,
-                                &format!("shop-env-mr-{i}"),
-                                rgba,
-                                *w,
-                                *h,
-                                wgpu::TextureFormat::Rgba8Unorm,
-                                mips,
-                            )
+                            upload_rgba_texture_with_mips(&TextureUploadParams {
+                        device: &device,
+                        queue: &queue,
+                        label: format!("shop-env-mr-{i}"),
+                        rgba: rgba,
+                        width: *w,
+                        height: *h,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        mips,
+                    })
                             .1
                         }
                         None => tile_glb_default_mr_view.clone(),
                     };
                     let emissive_view = match &prim.emissive_rgba {
                         Some((rgba, w, h)) => {
-                            upload_rgba_texture_with_mips(
-                                &device,
-                                &queue,
-                                &format!("shop-env-emissive-{i}"),
-                                rgba,
-                                *w,
-                                *h,
-                                wgpu::TextureFormat::Rgba8UnormSrgb,
-                                mips,
-                            )
+                            upload_rgba_texture_with_mips(&TextureUploadParams {
+                        device: &device,
+                        queue: &queue,
+                        label: format!("shop-env-emissive-{i}"),
+                        rgba: rgba,
+                        width: *w,
+                        height: *h,
+                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                        mips,
+                    })
                             .1
                         }
                         None => tile_glb_default_emissive_view.clone(),
@@ -2659,62 +2661,62 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     });
                     let mips = crate::render::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
                     let (_albedo_texture, albedo_view) = match &prim.albedo_rgba {
-                        Some((rgba, aw, ah)) => upload_rgba_texture_with_mips(
-                            &device,
-                            &queue,
-                            &format!("hallway-env-albedo-{i}"),
-                            rgba,
-                            *aw,
-                            *ah,
-                            wgpu::TextureFormat::Rgba8UnormSrgb,
-                            mips,
-                        ),
+                        Some((rgba, aw, ah)) => upload_rgba_texture_with_mips(&TextureUploadParams {
+                        device: &device,
+                        queue: &queue,
+                        label: format!("hallway-env-albedo-{i}"),
+                        rgba: rgba,
+                        width: *aw,
+                        height: *ah,
+                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                        mips,
+                    }),
                         None => white_albedo(&device, &queue),
                     };
                     let normal_view = match &prim.normal_rgba {
                         Some((rgba, nw, nh)) => {
-                            upload_rgba_texture_with_mips(
-                                &device,
-                                &queue,
-                                &format!("hallway-env-normal-{i}"),
-                                rgba,
-                                *nw,
-                                *nh,
-                                wgpu::TextureFormat::Rgba8Unorm,
-                                mips,
-                            )
+                            upload_rgba_texture_with_mips(&TextureUploadParams {
+                        device: &device,
+                        queue: &queue,
+                        label: format!("hallway-env-normal-{i}"),
+                        rgba: rgba,
+                        width: *nw,
+                        height: *nh,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        mips,
+                    })
                             .1
                         }
                         None => tile_default_normal_view.clone(),
                     };
                     let metallic_roughness_view = match &prim.metallic_roughness_rgba {
                         Some((rgba, w, h)) => {
-                            upload_rgba_texture_with_mips(
-                                &device,
-                                &queue,
-                                &format!("hallway-env-mr-{i}"),
-                                rgba,
-                                *w,
-                                *h,
-                                wgpu::TextureFormat::Rgba8Unorm,
-                                mips,
-                            )
+                            upload_rgba_texture_with_mips(&TextureUploadParams {
+                        device: &device,
+                        queue: &queue,
+                        label: format!("hallway-env-mr-{i}"),
+                        rgba: rgba,
+                        width: *w,
+                        height: *h,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        mips,
+                    })
                             .1
                         }
                         None => tile_glb_default_mr_view.clone(),
                     };
                     let emissive_view = match &prim.emissive_rgba {
                         Some((rgba, w, h)) => {
-                            upload_rgba_texture_with_mips(
-                                &device,
-                                &queue,
-                                &format!("hallway-env-emissive-{i}"),
-                                rgba,
-                                *w,
-                                *h,
-                                wgpu::TextureFormat::Rgba8UnormSrgb,
-                                mips,
-                            )
+                            upload_rgba_texture_with_mips(&TextureUploadParams {
+                        device: &device,
+                        queue: &queue,
+                        label: format!("hallway-env-emissive-{i}"),
+                        rgba: rgba,
+                        width: *w,
+                        height: *h,
+                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                        mips,
+                    })
                             .1
                         }
                         None => tile_glb_default_emissive_view.clone(),
@@ -2874,62 +2876,62 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 });
                 let mips = crate::render::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
                 let (_albedo_texture, albedo_view) = match &prim.albedo_rgba {
-                    Some((rgba, aw, ah)) => upload_rgba_texture_with_mips(
-                        &device,
-                        &queue,
-                        &format!("archive-env-albedo-{i}"),
-                        rgba,
-                        *aw,
-                        *ah,
-                        wgpu::TextureFormat::Rgba8UnormSrgb,
+                    Some((rgba, aw, ah)) => upload_rgba_texture_with_mips(&TextureUploadParams {
+                        device: &device,
+                        queue: &queue,
+                        label: format!("archive-env-albedo-{i}"),
+                        rgba: rgba,
+                        width: *aw,
+                        height: *ah,
+                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
                         mips,
-                    ),
+                    }),
                     None => white_albedo(&device, &queue),
                 };
                 let normal_view = match &prim.normal_rgba {
                     Some((rgba, nw, nh)) => {
-                        upload_rgba_texture_with_mips(
-                            &device,
-                            &queue,
-                            &format!("archive-env-normal-{i}"),
-                            rgba,
-                            *nw,
-                            *nh,
-                            wgpu::TextureFormat::Rgba8Unorm,
-                            mips,
-                        )
+                        upload_rgba_texture_with_mips(&TextureUploadParams {
+                        device: &device,
+                        queue: &queue,
+                        label: format!("archive-env-normal-{i}"),
+                        rgba: rgba,
+                        width: *nw,
+                        height: *nh,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        mips,
+                    })
                         .1
                     }
                     None => tile_default_normal_view.clone(),
                 };
                 let metallic_roughness_view = match &prim.metallic_roughness_rgba {
                     Some((rgba, w, h)) => {
-                        upload_rgba_texture_with_mips(
-                            &device,
-                            &queue,
-                            &format!("archive-env-mr-{i}"),
-                            rgba,
-                            *w,
-                            *h,
-                            wgpu::TextureFormat::Rgba8Unorm,
-                            mips,
-                        )
+                        upload_rgba_texture_with_mips(&TextureUploadParams {
+                        device: &device,
+                        queue: &queue,
+                        label: format!("archive-env-mr-{i}"),
+                        rgba: rgba,
+                        width: *w,
+                        height: *h,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        mips,
+                    })
                         .1
                     }
                     None => tile_glb_default_mr_view.clone(),
                 };
                 let emissive_view = match &prim.emissive_rgba {
                     Some((rgba, w, h)) => {
-                        upload_rgba_texture_with_mips(
-                            &device,
-                            &queue,
-                            &format!("archive-env-emissive-{i}"),
-                            rgba,
-                            *w,
-                            *h,
-                            wgpu::TextureFormat::Rgba8UnormSrgb,
-                            mips,
-                        )
+                        upload_rgba_texture_with_mips(&TextureUploadParams {
+                        device: &device,
+                        queue: &queue,
+                        label: format!("archive-env-emissive-{i}"),
+                        rgba: rgba,
+                        width: *w,
+                        height: *h,
+                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                        mips,
+                    })
                         .1
                     }
                     None => tile_glb_default_emissive_view.clone(),

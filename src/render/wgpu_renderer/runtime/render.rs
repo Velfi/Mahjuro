@@ -447,14 +447,18 @@ impl WgpuRenderer {
                     let floor = crate::render::theme::typography::readable_floor_px(window_h);
                     let px = lbl.font_px.unwrap_or(floor).max(floor);
                     crate::render::decal::rasterize_label_flavor_spans(
-                        font,
-                        italic,
-                        emoji_fallback,
+                        &crate::render::decal::DecalFonts {
+                            regular: font,
+                            italic: Some(italic),
+                            emoji: emoji_fallback,
+                        },
                         spans,
-                        tw,
-                        th,
-                        px,
-                        align,
+                        &crate::render::decal::LabelRasterParams {
+                            width: tw,
+                            height: th,
+                            font_px: px,
+                            align,
+                        },
                     )
                 } else if lbl.bold || lbl.italic || lbl.underline {
                     let italic = font_italic.unwrap_or(font);
@@ -467,14 +471,18 @@ impl WgpuRenderer {
                         underline: lbl.underline,
                     }];
                     crate::render::decal::rasterize_label_raster_spans(
-                        font,
-                        italic,
-                        emoji_fallback,
+                        &crate::render::decal::DecalFonts {
+                            regular: font,
+                            italic: Some(italic),
+                            emoji: emoji_fallback,
+                        },
                         &syn,
-                        tw,
-                        th,
-                        px,
-                        align,
+                        &crate::render::decal::LabelRasterParams {
+                            width: tw,
+                            height: th,
+                            font_px: px,
+                            align,
+                        },
                     )
                 } else {
                     rasterize_label_styled_with_fallback(
@@ -856,16 +864,16 @@ impl WgpuRenderer {
                         face.tile.debuffed_visual,
                     );
                     if !self.tile_face_overlays.contains_key(&key) {
-                        let overlay = make_tile_face_overlay_gpu(
-                            &self.device,
-                            &self.queue,
-                            &self.text_bind_group_layout,
-                            &self.tile_sampler,
-                            self.ui_font.as_ref(),
-                            self.emoji_font.as_ref(),
-                            &face.tile,
-                            self.tile_set.as_deref(),
-                        );
+                        let overlay = make_tile_face_overlay_gpu(&TileFaceOverlayGpuParams {
+                            device: &self.device,
+                            queue: &self.queue,
+                            layout: &self.text_bind_group_layout,
+                            sampler: &self.tile_sampler,
+                            ui_font: self.ui_font.as_ref(),
+                            emoji_font: self.emoji_font.as_ref(),
+                            tile: &face.tile,
+                            tile_set: self.tile_set.as_deref(),
+                        });
                         self.tile_face_overlays.insert(key, overlay);
                     }
                     let buf = self
@@ -1763,16 +1771,28 @@ impl WgpuRenderer {
             self.probe_gi_had_room = true;
             false
         } else {
-            crate::render::room_glb::probe_gi_should_update_probes(
-                &mut self.probe_gi_tick,
-                &mut self.probe_gi_last_view_proj,
-                &mut self.probe_gi_last_size,
-                &mut self.probe_gi_had_room,
-                &camera.view_proj_arr,
-                (gw as u32, gh as u32),
-                gi_runs_this_frame,
-                gi_update_interval,
-            )
+            {
+                let mut gi_state = crate::render::room_glb::ProbeGiUpdateState {
+                    tick: self.probe_gi_tick,
+                    last_view_proj: self.probe_gi_last_view_proj,
+                    last_size: self.probe_gi_last_size,
+                    had_room: self.probe_gi_had_room,
+                };
+                let update = crate::render::room_glb::probe_gi_should_update_probes(
+                    &mut gi_state,
+                    &crate::render::room_glb::ProbeGiUpdateParams {
+                        view_proj: &camera.view_proj_arr,
+                        size: (gw as u32, gh as u32),
+                        gi_active: gi_runs_this_frame,
+                        update_interval: gi_update_interval,
+                    },
+                );
+                self.probe_gi_tick = gi_state.tick;
+                self.probe_gi_last_view_proj = gi_state.last_view_proj;
+                self.probe_gi_last_size = gi_state.last_size;
+                self.probe_gi_had_room = gi_state.had_room;
+                update
+            }
         };
         if self.room_gi_capture_pending.is_some() && gi_runs_this_frame {
             gi_update_probes = true;

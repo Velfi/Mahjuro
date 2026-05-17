@@ -54,18 +54,32 @@ const GAMEPLAY_ACTION_PROMPT_LABELS: [&str; 3] = ["Discard", "Draw", "Cash in"];
 const LABEL_PAD_X: f32 = 4.0;
 const LABEL_PAD_Y: f32 = 3.0;
 
+pub struct GameplayActionPromptInput<'a> {
+    pub discard_btn_rect: (f32, f32, f32, f32),
+    pub play_btn_rect: (f32, f32, f32, f32),
+    pub trigger_btn_rect: (f32, f32, f32, f32),
+    pub cash_in_enabled: bool,
+    pub show_discard_legend: bool,
+    pub show_play_legend: bool,
+    pub discard_undo_bottom_y: Option<f32>,
+    pub hud_text: &'a mut Vec<TextLabel>,
+}
+
 pub fn push_gameplay_action_prompts(
     frame: &mut UiFrame,
     ctx: &DrawCtx<'_>,
-    discard_btn_rect: (f32, f32, f32, f32),
-    play_btn_rect: (f32, f32, f32, f32),
-    trigger_btn_rect: (f32, f32, f32, f32),
-    cash_in_enabled: bool,
-    show_discard_legend: bool,
-    show_play_legend: bool,
-    discard_undo_bottom_y: Option<f32>,
-    hud_text: &mut Vec<TextLabel>,
+    input: GameplayActionPromptInput<'_>,
 ) {
+    let GameplayActionPromptInput {
+        discard_btn_rect,
+        play_btn_rect,
+        trigger_btn_rect,
+        cash_in_enabled,
+        show_discard_legend,
+        show_play_legend,
+        discard_undo_bottom_y,
+        hud_text,
+    } = input;
     let h = ctx.layout.window_h;
     let w = ctx.layout.window_w;
 
@@ -127,8 +141,8 @@ pub fn push_gameplay_action_prompts(
     // each cluster on its button stacks Draw and Cash-in. Flow into columns like the shop legend.
     let mut visible: [usize; 3] = [0; 3];
     let mut n_visible = 0usize;
-    for i in 0..3 {
-        let (_dx, _dy, dw, dh) = rects[i];
+    for (i, rect) in rects.iter().enumerate() {
+        let (_dx, _dy, dw, dh) = *rect;
         if dw <= 1.0 || dh <= 1.0 {
             continue;
         }
@@ -146,8 +160,7 @@ pub fn push_gameplay_action_prompts(
     }
 
     let mut measured_full: [f32; 3] = [1.0, 1.0, 1.0];
-    for k in 0..n_visible {
-        let i = visible[k];
+    for &i in visible.iter().take(n_visible) {
         let m: f32 = if let Some(ref font) = ui_font {
             let (_, _, advances) = measure_label_advances(
                 font,
@@ -168,15 +181,14 @@ pub fn push_gameplay_action_prompts(
     let inner_right = w * 0.95;
     let inner_w = (inner_right - inner_left).max(8.0);
     let col_w = inner_w / n_visible as f32;
-    let col_pad = (col_w * 0.045).min(8.0_f32).max(2.0);
+    let col_pad = (col_w * 0.045).clamp(2.0, 8.0);
 
     let label_block_h = legend_line_h + LABEL_PAD_Y * 2.0;
     let mut icon_px_mut = icon_px;
     let mut gap_mut = gap_after_icon;
     loop {
         let mut fits = true;
-        for k in 0..n_visible {
-            let i = visible[k];
+        for &i in visible.iter().take(n_visible) {
             let label_inner = measured_full[i] + LABEL_PAD_X * 2.0;
             let cluster = icon_px_mut + gap_mut + label_inner;
             if cluster > col_w - col_pad * 2.0 {
@@ -201,8 +213,7 @@ pub fn push_gameplay_action_prompts(
     let mut pill_quads: Vec<GpuInstance> = Vec::with_capacity(n_visible);
     let mut icon_cmds: Vec<PromptIconQuad> = Vec::with_capacity(n_visible);
 
-    for k in 0..n_visible {
-        let i = visible[k];
+    for (k, &i) in visible.iter().take(n_visible).enumerate() {
         let cash_in_disabled = i == 2 && !cash_in_enabled;
 
         let col_x = inner_left + k as f32 * col_w;

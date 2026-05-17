@@ -305,6 +305,18 @@ fn compute_layout(w: f32, h: f32) -> PanelLayout {
     }
 }
 
+/// Frame input for [`OptionsScene::update_input`].
+pub struct OptionsInput<'a> {
+    pub actions: &'a [UiAction],
+    pub button_clicks: &'a [u32],
+    pub cursor_pos: (f32, f32),
+    pub window_w: f32,
+    pub window_h: f32,
+    pub scroll_lines: f32,
+    pub input_mode: InputMode,
+    pub mouse_left_down: bool,
+}
+
 // ── OptionsScene ───────────────────────────────────────────────────────
 
 pub struct OptionsScene {
@@ -735,17 +747,17 @@ impl OptionsScene {
 
     /// Process one frame of input. Returns `true` if the user requested to
     /// close (Back / Cancel / Pause).
-    pub fn update_input(
-        &mut self,
-        actions: &[UiAction],
-        button_clicks: &[u32],
-        cursor_pos: (f32, f32),
-        window_w: f32,
-        window_h: f32,
-        scroll_lines: f32,
-        input_mode: InputMode,
-        mouse_left_down: bool,
-    ) -> bool {
+    pub fn update_input(&mut self, input: OptionsInput<'_>) -> bool {
+        let OptionsInput {
+            actions,
+            button_clicks,
+            cursor_pos,
+            window_w,
+            window_h,
+            scroll_lines,
+            input_mode,
+            mouse_left_down,
+        } = input;
         self.focus_changed = false;
         self.confirm_requested = false;
         self.cancel_requested = false;
@@ -1297,16 +1309,16 @@ impl OptionsScene {
 
 impl SceneBehavior for OptionsScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
-        if self.update_input(
-            ctx.actions,
-            ctx.button_clicks,
-            ctx.cursor_pos,
-            ctx.layout.window_w,
-            ctx.layout.window_h,
-            ctx.scroll_lines,
-            ctx.input_mode,
-            ctx.mouse_left_down,
-        ) {
+        if self.update_input(OptionsInput {
+            actions: ctx.actions,
+            button_clicks: ctx.button_clicks,
+            cursor_pos: ctx.cursor_pos,
+            window_w: ctx.layout.window_w,
+            window_h: ctx.layout.window_h,
+            scroll_lines: ctx.scroll_lines,
+            input_mode: ctx.input_mode,
+            mouse_left_down: ctx.mouse_left_down,
+        }) {
             if self.take_cancel_requested() {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
             }

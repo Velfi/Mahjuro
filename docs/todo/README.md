@@ -7,6 +7,11 @@ Follow-up tasks that are scoped but not scheduled. Each entry links to a doc wit
 - [Event-driven run mutations (subscribers beyond gold)](event-driven-run-mutations.md) — centralize relic destruction, optional plays/discards and tile-supply hooks the same way gold now uses `notify_run_gold_changed` + `GameEvent::GoldChanged`.
 - [Finish the wgpu render-runtime split](render-runtime-finish-split.md) — Object3d dispatch + encoder/passes are still in one ~5,000-line `render()`; first pass landed seven sibling modules.
 
+## Tooling / quality
+
+- [Clippy — large enum variants](clippy-large-enum-variants.md) — box heavy `Scene`, GLB caches, and `ShowcasePresenter` variants to shrink enum size.
+- [Clippy — mechanical fixes](clippy-mechanical-fixes.md) — one-line / `clippy --fix` lints: clamp, needless borrow, docs, test module order, etc.
+
 ## Rendering / shaders
 
 - [Emissive materials — global illumination transport](emissive-materials-gi-transport.md) — glTF emissive should contribute incident light via SSGI / bake / area-light techniques, not only self-emission and bloom; shop/hallway first.

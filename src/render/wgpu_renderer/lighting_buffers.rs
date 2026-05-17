@@ -83,6 +83,22 @@ pub(crate) struct PointLightsBuf {
     pub lights: [PointLightGpu; MAX_POINT_LIGHTS],
 }
 
+pub(crate) struct PunctualLightBakeParams<'a> {
+    pub src: &'a [ScenePunctualLight],
+    pub candle_count: u32,
+    pub flame_height_world: f32,
+    pub lit_mesh_punctual_intensity_scale: f32,
+    pub screen_w: f32,
+    pub screen_h: f32,
+    pub gamma: f32,
+    pub time: f32,
+}
+
+pub(crate) struct PunctualLightBakeShopCameraParams<'a> {
+    pub bake: &'a PunctualLightBakeParams<'a>,
+    pub cam: &'a crate::render::draw_cmd::CameraParams,
+}
+
 /// CPU-side description of a spotlight. A spotlight has a direction + cone
 /// half-angle, so it pools light onto a specific surface region rather than
 /// radiating omnidirectionally. Used to draw focused visual-highlight pools
@@ -212,47 +228,44 @@ impl PointLightsBuf {
     }
 
     /// Unified punctual upload (smooth + inverse-square in one buffer).
-    pub(crate) fn from_scene_punctual(
-        src: &[ScenePunctualLight],
-        candle_count: u32,
-        flame_height_world: f32,
-        lit_mesh_punctual_intensity_scale: f32,
-        screen_w: f32,
-        screen_h: f32,
-        gamma: f32,
-        time: f32,
-    ) -> Self {
+    pub(crate) fn from_scene_punctual(p: &PunctualLightBakeParams<'_>) -> Self {
         let mut lights = [PointLightGpu {
             pos: [0.0; 4],
             color: [0.0; 4],
             params: [0.0; 4],
         }; MAX_POINT_LIGHTS];
-        let n = src.len().min(MAX_POINT_LIGHTS);
-        for (i, ent) in src.iter().take(n).enumerate() {
+        let n = p.src.len().min(MAX_POINT_LIGHTS);
+        for (i, ent) in p.src.iter().take(n).enumerate() {
             match ent {
                 ScenePunctualLight::Smooth(l) => {
-                    let p = pixel_to_world(screen_w, screen_h, l.pos[0], l.pos[1], l.pos[2]);
-                    Self::push_scene_punctual_entry(&mut lights, i, l, p, SCENE_POINT_KIND_SMOOTH);
+                    let world = pixel_to_world(
+                        p.screen_w, p.screen_h, l.pos[0], l.pos[1], l.pos[2],
+                    );
+                    Self::push_scene_punctual_entry(
+                        &mut lights, i, l, world, SCENE_POINT_KIND_SMOOTH,
+                    );
                 }
                 ScenePunctualLight::InverseSquare(l) => {
-                    let p = pixel_to_world(screen_w, screen_h, l.pos[0], l.pos[1], l.pos[2]);
+                    let world = pixel_to_world(
+                        p.screen_w, p.screen_h, l.pos[0], l.pos[1], l.pos[2],
+                    );
                     Self::push_scene_punctual_entry(
                         &mut lights,
                         i,
                         l,
-                        p,
+                        world,
                         SCENE_POINT_KIND_INVERSE_SQUARE,
                     );
                 }
             }
         }
         Self {
-            count: [n as u32, candle_count.min(n as u32), 0, 0],
+            count: [n as u32, p.candle_count.min(n as u32), 0, 0],
             extras: [
-                gamma.max(0.01),
-                time,
-                flame_height_world,
-                lit_mesh_punctual_intensity_scale,
+                p.gamma.max(0.01),
+                p.time,
+                p.flame_height_world,
+                p.lit_mesh_punctual_intensity_scale,
             ],
             lights,
         }
@@ -261,32 +274,36 @@ impl PointLightsBuf {
     /// Same as [`Self::from_scene_punctual`] but smooth lights use the shop camera ray /
     /// horizontal-plane hit; inverse-square lights keep `pixel_to_world` (embedded anchors).
     pub(crate) fn from_scene_punctual_shop_camera(
-        src: &[ScenePunctualLight],
-        cam: &crate::render::draw_cmd::CameraParams,
-        candle_count: u32,
-        flame_height_world: f32,
-        lit_mesh_punctual_intensity_scale: f32,
-        screen_w: f32,
-        screen_h: f32,
-        gamma: f32,
-        time: f32,
+        p: &PunctualLightBakeShopCameraParams<'_>,
     ) -> Self {
+        let PunctualLightBakeShopCameraParams { bake, cam } = p;
         let mut lights = [PointLightGpu {
             pos: [0.0; 4],
             color: [0.0; 4],
             params: [0.0; 4],
         }; MAX_POINT_LIGHTS];
-        let n = src.len().min(MAX_POINT_LIGHTS);
-        for (i, ent) in src.iter().take(n).enumerate() {
+        let n = bake.src.len().min(MAX_POINT_LIGHTS);
+        for (i, ent) in bake.src.iter().take(n).enumerate() {
             match ent {
                 ScenePunctualLight::Smooth(l) => {
                     let p = crate::render::world_space::world_on_camera_ray_plane_z(
-                        screen_w, screen_h, cam, l.pos[0], l.pos[1], l.pos[2],
+                        bake.screen_w,
+                        bake.screen_h,
+                        cam,
+                        l.pos[0],
+                        l.pos[1],
+                        l.pos[2],
                     );
                     Self::push_scene_punctual_entry(&mut lights, i, l, p, SCENE_POINT_KIND_SMOOTH);
                 }
                 ScenePunctualLight::InverseSquare(l) => {
-                    let p = pixel_to_world(screen_w, screen_h, l.pos[0], l.pos[1], l.pos[2]);
+                    let p = pixel_to_world(
+                        bake.screen_w,
+                        bake.screen_h,
+                        l.pos[0],
+                        l.pos[1],
+                        l.pos[2],
+                    );
                     Self::push_scene_punctual_entry(
                         &mut lights,
                         i,
@@ -298,12 +315,12 @@ impl PointLightsBuf {
             }
         }
         Self {
-            count: [n as u32, candle_count.min(n as u32), 0, 0],
+            count: [n as u32, bake.candle_count.min(n as u32), 0, 0],
             extras: [
-                gamma.max(0.01),
-                time,
-                flame_height_world,
-                lit_mesh_punctual_intensity_scale,
+                bake.gamma.max(0.01),
+                bake.time,
+                bake.flame_height_world,
+                bake.lit_mesh_punctual_intensity_scale,
             ],
             lights,
         }

@@ -1486,8 +1486,11 @@ impl ShopEnvDebugOverlay {
             ..Default::default()
         });
 
-        for i in 0..layout.row_count {
-            let (name, min, max, _) = SHOP_ENV_DEBUG_ROW_META[i];
+        for (i, (name, min, max, _)) in SHOP_ENV_DEBUG_ROW_META
+            .iter()
+            .enumerate()
+            .take(layout.row_count)
+        {
             let row_y = layout.rows_y0 + i as f32 * (layout.row_h + layout.row_gap);
             let is_focused = self.cursor == i;
             let v = self.row_value(i);
@@ -1520,7 +1523,7 @@ impl ShopEnvDebugOverlay {
                     layout.label_w - 4.0 * layout.scale,
                     layout.row_h,
                 ],
-                text: name.into(),
+                text: (*name).into(),
                 color: tc,
                 ..Default::default()
             });
@@ -1531,7 +1534,7 @@ impl ShopEnvDebugOverlay {
                 color: color::TWILIGHT_INK,
                 user: 0,
             });
-            let t = ((v - min) / (max - min).max(1e-8)).clamp(0.0, 1.0);
+            let t = ((v - *min) / (*max - *min).max(1e-8)).clamp(0.0, 1.0);
             let fill_w = tw * t;
             let fill_color = if is_focused {
                 color::JADE
@@ -2501,8 +2504,11 @@ impl HallwayDistortionDebugOverlay {
             ..Default::default()
         });
 
-        for i in 0..self.row_count() {
-            let (name, _, _, _) = HALL_DIST_DEBUG_ROW_META[i];
+        for (i, (name, _, _, _)) in HALL_DIST_DEBUG_ROW_META
+            .iter()
+            .enumerate()
+            .take(self.row_count())
+        {
             let row_y = layout.rows_y0 + i as f32 * (layout.row_h + row_gap);
             let is_focused = self.cursor == i;
 

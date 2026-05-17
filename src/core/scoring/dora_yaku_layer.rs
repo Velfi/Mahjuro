@@ -2,28 +2,35 @@
 //! block between early relics ([`super::pre_yaku_layer`]) and post-yaku relics
 //! ([`super::relic_mult_layer`]).
 
-use crate::core::hand::DetectedMeld;
-use crate::core::relic::{RelicId, ScoreContext};
+use crate::core::relic::RelicId;
 use crate::core::structure::structure_depth_mult_bonus;
-use crate::core::tile::Tile;
 use crate::core::yaku::{YakuKind, detect_yaku_with_wind};
 
-use super::effective_relic::EffectiveRelics;
+use super::layer_input::{DoraYakuLayerOpts, ScoringLayerInput, ScoringLayerOut};
 use super::push_steps::{push_chips, push_mult};
 use super::{ScoreStep, StepKind, combine, tile_is_debuffed};
 
 /// Apply Dora, scored yaku, and structure depth mult. Returns the yaku list used for the breakdown.
 pub(crate) fn apply_dora_yaku_and_structure(
-    ctx: &ScoreContext<'_>,
-    tiles: &[Tile],
-    sets: &[DetectedMeld],
-    eff: EffectiveRelics,
-    censor_repeats: bool,
-    original_tiles: Option<&[Tile]>,
-    chips: &mut i32,
-    mult: &mut f64,
-    steps: &mut Vec<ScoreStep>,
+    input: &ScoringLayerInput<'_>,
+    out: ScoringLayerOut<'_>,
+    opts: DoraYakuLayerOpts<'_>,
 ) -> Vec<YakuKind> {
+    let ScoringLayerInput {
+        ctx,
+        tiles,
+        sets,
+        eff,
+    } = *input;
+    let ScoringLayerOut {
+        chips,
+        mult,
+        steps,
+    } = out;
+    let DoraYakuLayerOpts {
+        censor_repeats,
+        original_tiles,
+    } = opts;
     if !ctx.pattern.dora_faces.is_empty() {
         let dora_count = tiles
             .iter()

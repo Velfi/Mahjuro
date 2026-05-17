@@ -16,20 +16,36 @@ use crate::ui::widget;
 /// `avoid_rect`: an optional screen-space rect the panel should not overlap (e.g. the gold label
 /// in the shop). When a horizontal shift can resolve the collision the panel is moved; otherwise
 /// it stays at its computed position.
+pub struct FocusTooltipPanelParams<'a> {
+    pub window_w: f32,
+    pub window_h: f32,
+    pub anchor_rect: Option<[f32; 4]>,
+    pub title: &'a str,
+    pub desc: &'a str,
+    pub cta: &'a str,
+    pub accent_color: [f32; 4],
+    pub hover_is_owned: bool,
+    pub skip_title_block: bool,
+    pub avoid_rect: Option<[f32; 4]>,
+}
+
 pub fn push_focus_tooltip_panel_2d(
     quads: &mut Vec<GpuInstance>,
     texts: &mut Vec<TextLabel>,
-    window_w: f32,
-    window_h: f32,
-    anchor_rect: Option<[f32; 4]>,
-    title: &str,
-    desc: &str,
-    cta: &str,
-    accent_color: [f32; 4],
-    hover_is_owned: bool,
-    skip_title_block: bool,
-    avoid_rect: Option<[f32; 4]>,
+    params: FocusTooltipPanelParams<'_>,
 ) {
+    let FocusTooltipPanelParams {
+        window_w,
+        window_h,
+        anchor_rect,
+        title,
+        desc,
+        cta,
+        accent_color,
+        hover_is_owned,
+        skip_title_block,
+        avoid_rect,
+    } = params;
     if title.is_empty() {
         return;
     }
@@ -146,7 +162,16 @@ pub fn push_focus_tooltip_panel_2d(
                 let lines =
                     colored_keywords::wrap_colored_text_multiline(text, inner_w, line_h, *col);
                 colored_keywords::push_colored_rows_left(
-                    texts, text_left, y, inner_w, &lines, line_h, text, *col,
+                    texts,
+                    colored_keywords::ColoredRowsLayout {
+                        text_left,
+                        top_y: y,
+                        inner_w,
+                        line_h,
+                        fallback_plain: text,
+                        fallback_color: *col,
+                    },
+                    &lines,
                 );
             }
             _ => {

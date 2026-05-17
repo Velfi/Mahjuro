@@ -481,12 +481,12 @@ fn child_width<A: Copy>(node: &Node<A>, container_w: f32, scale: f32) -> f32 {
     }
 }
 
-fn child_height<A: Copy>(node: &Node<A>, container_w: f32, window_h: f32, scale: f32) -> f32 {
+fn child_height<A: Copy>(node: &Node<A>, _container_w: f32, _window_h: f32, scale: f32) -> f32 {
     match node {
         Node::Item(_) => natural_item_height(scale),
         Node::Row { children, .. } => children
             .iter()
-            .map(|c| child_height(c, container_w, window_h, scale))
+            .map(|c| child_height(c, _container_w, _window_h, scale))
             .fold(0.0f32, f32::max),
         Node::Column { .. } => 0.0,
     }

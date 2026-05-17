@@ -7,8 +7,8 @@ use crate::render::theme::color;
 use crate::scenes::options;
 use crate::scenes::{BackgroundId, MeldGuideScene, OverlayRequest};
 use crate::ui::inspect_plaque::{
-    dora_focus_tooltip_strings, gameplay_consumable_description_full, hand_tile_inspect_lines,
-    push_focus_tooltip_panel_2d,
+    FocusTooltipPanelParams, dora_focus_tooltip_strings,
+    gameplay_consumable_description_full, hand_tile_inspect_lines, push_focus_tooltip_panel_2d,
 };
 
 impl SceneBehavior for GameplayScene {
@@ -663,7 +663,11 @@ impl SceneBehavior for GameplayScene {
         let mut buttons: Vec<ButtonDef> = Vec::new();
         let _ = paused;
 
-        let (talisman_dish_placements, ribbon_dish_placements, talisman_dish_strip) = {
+        let input_handler::ConsumableDishBuild {
+            talisman_dish_placements,
+            ribbon_dish_placements,
+            talisman_dish_strip,
+        } = {
             let _g = crate::render::cpu_profiler::scope("draw_frame.build_consumable_dish");
             input_handler::build_consumable_dish(
                 self,
@@ -1406,14 +1410,16 @@ impl SceneBehavior for GameplayScene {
             super::action_prompts::push_gameplay_action_prompts(
                 &mut frame,
                 &ctx,
-                discard_btn_rect,
-                play_btn_rect,
-                trigger_btn_rect,
-                has_structure,
-                show_discard_legend,
-                show_play_legend,
-                undo_bottom_y,
-                &mut hud_text,
+                super::action_prompts::GameplayActionPromptInput {
+                    discard_btn_rect,
+                    play_btn_rect,
+                    trigger_btn_rect,
+                    cash_in_enabled: has_structure,
+                    show_discard_legend,
+                    show_play_legend,
+                    discard_undo_bottom_y: undo_bottom_y,
+                    hud_text: &mut hud_text,
+                },
             );
             if let Some(undo_rect) = discard_undo_rect {
                 let is_focus = matches!(self.focus, Some(FocusTarget::DiscardUndo));
@@ -1521,16 +1527,18 @@ impl SceneBehavior for GameplayScene {
                                 push_focus_tooltip_panel_2d(
                                     &mut inspect_tooltip_quads,
                                     &mut inspect_tooltip_texts,
-                                    layout.window_w,
-                                    layout.window_h,
-                                    Some(rect),
-                                    &name,
-                                    &desc,
-                                    &format!("Tier · {rare}"),
-                                    color::STONE,
-                                    false,
-                                    false,
-                                    None,
+                                    FocusTooltipPanelParams {
+                                        window_w: layout.window_w,
+                                        window_h: layout.window_h,
+                                        anchor_rect: Some(rect),
+                                        title: &name,
+                                        desc: &desc,
+                                        cta: &format!("Tier · {rare}"),
+                                        accent_color: color::STONE,
+                                        hover_is_owned: false,
+                                        skip_title_block: false,
+                                        avoid_rect: None,
+                                    },
                                 );
                             }
                         }
@@ -1545,16 +1553,18 @@ impl SceneBehavior for GameplayScene {
                                 push_focus_tooltip_panel_2d(
                                     &mut inspect_tooltip_quads,
                                     &mut inspect_tooltip_texts,
-                                    layout.window_w,
-                                    layout.window_h,
-                                    Some(rect),
-                                    &title,
-                                    &desc,
-                                    "",
-                                    color::GOLD,
-                                    false,
-                                    false,
-                                    None,
+                                    FocusTooltipPanelParams {
+                                        window_w: layout.window_w,
+                                        window_h: layout.window_h,
+                                        anchor_rect: Some(rect),
+                                        title: &title,
+                                        desc: &desc,
+                                        cta: "",
+                                        accent_color: color::GOLD,
+                                        hover_is_owned: false,
+                                        skip_title_block: false,
+                                        avoid_rect: None,
+                                    },
                                 );
                             }
                         }
@@ -1578,16 +1588,18 @@ impl SceneBehavior for GameplayScene {
                                 push_focus_tooltip_panel_2d(
                                     &mut inspect_tooltip_quads,
                                     &mut inspect_tooltip_texts,
-                                    layout.window_w,
-                                    layout.window_h,
-                                    Some(rect),
-                                    title,
-                                    &desc,
-                                    "",
-                                    color::BRASS,
-                                    false,
-                                    false,
-                                    None,
+                                    FocusTooltipPanelParams {
+                                        window_w: layout.window_w,
+                                        window_h: layout.window_h,
+                                        anchor_rect: Some(rect),
+                                        title,
+                                        desc: &desc,
+                                        cta: "",
+                                        accent_color: color::BRASS,
+                                        hover_is_owned: false,
+                                        skip_title_block: false,
+                                        avoid_rect: None,
+                                    },
                                 );
                             }
                         }
@@ -1599,32 +1611,36 @@ impl SceneBehavior for GameplayScene {
                             push_focus_tooltip_panel_2d(
                                 &mut inspect_tooltip_quads,
                                 &mut inspect_tooltip_texts,
-                                layout.window_w,
-                                layout.window_h,
-                                Some(rect),
-                                &title,
-                                &desc,
-                                &cta,
-                                color::GOLD,
-                                false,
-                                false,
-                                None,
+                                FocusTooltipPanelParams {
+                                    window_w: layout.window_w,
+                                    window_h: layout.window_h,
+                                    anchor_rect: Some(rect),
+                                    title: &title,
+                                    desc: &desc,
+                                    cta: &cta,
+                                    accent_color: color::GOLD,
+                                    hover_is_owned: false,
+                                    skip_title_block: false,
+                                    avoid_rect: None,
+                                },
                             );
                         }
                         FocusTarget::DiscardUndo => {
                             push_focus_tooltip_panel_2d(
                                 &mut inspect_tooltip_quads,
                                 &mut inspect_tooltip_texts,
-                                layout.window_w,
-                                layout.window_h,
-                                Some(rect),
-                                "Undo discard",
-                                "Confirm to restore your previous hand and wall before the last discard. Clears when you play, sort, use a consumable, or discard again.",
-                                "D-pad Up: Discard · [ ] / LB RB: HUD cycle",
-                                color::CHAMPAGNE,
-                                false,
-                                false,
-                                None,
+                                FocusTooltipPanelParams {
+                                    window_w: layout.window_w,
+                                    window_h: layout.window_h,
+                                    anchor_rect: Some(rect),
+                                    title: "Undo discard",
+                                    desc: "Confirm to restore your previous hand and wall before the last discard. Clears when you play, sort, use a consumable, or discard again.",
+                                    cta: "D-pad Up: Discard · [ ] / LB RB: HUD cycle",
+                                    accent_color: color::CHAMPAGNE,
+                                    hover_is_owned: false,
+                                    skip_title_block: false,
+                                    avoid_rect: None,
+                                },
                             );
                         }
                         _ => {}
@@ -1758,5 +1774,23 @@ impl SceneBehavior for GameplayScene {
         debug_assert_marker_uniqueness(&frame);
 
         insert_structure_before_hand(frame, structure_showcase, structure_pile_tokens)
+    }
+}
+
+impl SceneBehavior for Box<GameplayScene> {
+    fn pause_options_overlay(&self) -> Option<&options::OptionsScene> {
+        (**self).pause_options_overlay()
+    }
+
+    fn has_blocking_overlay(&self) -> bool {
+        (**self).has_blocking_overlay()
+    }
+
+    fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
+        (**self).update(ctx)
+    }
+
+    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
+        (**self).draw_frame(ctx)
     }
 }

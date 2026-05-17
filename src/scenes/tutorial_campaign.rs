@@ -379,8 +379,10 @@ impl SceneBehavior for TutorialCampaignScene {
                 } else {
                     ctx.bus.push(GameEvent::UiSound(SfxId::RelicPickup));
                     GameEngine::begin_onboarding_lessons(ctx.run);
-                    Some(Scene::Gameplay(super::gameplay::GameplayScene::with_pending_blind(
-                        crate::core::rules::BlindKind::Small,
+                    Some(Scene::Gameplay(Box::new(
+                        super::gameplay::GameplayScene::with_pending_blind(
+                            crate::core::rules::BlindKind::Small,
+                        ),
                     )))
                 }
             }

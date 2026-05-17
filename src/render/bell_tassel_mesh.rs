@@ -2,7 +2,9 @@
 //! [`crate::scenes::shop::draw`] anchors [`super::shop_bell_mesh::LIP_Z`] and
 //! applies a gentle wind sway on the instance rotation.
 
-use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu, push_cylinder_z};
+use crate::render::lit_mesh::{
+    push_cylinder_z, CylinderZParams, LitMeshBuffers, MaterialKind, MaterialParams, MeshCpu,
+};
 use crate::render::tile_glb::Vertex3dTex;
 
 fn push_sphere(
@@ -57,18 +59,33 @@ pub fn build_bell_tassel_mesh() -> MeshCpu {
     let mut indices: Vec<u32> = Vec::new();
 
     // Braid / cord body.
-    push_cylinder_z(&mut vertices, &mut indices, 0.0, 0.0, -0.42, 0.0, 0.034, 12);
+    let mut buffers = LitMeshBuffers {
+        vertices: &mut vertices,
+        indices: &mut indices,
+    };
+    push_cylinder_z(
+        &mut buffers,
+        &CylinderZParams {
+            cx: 0.0,
+            cy: 0.0,
+            z0: -0.42,
+            z1: 0.0,
+            radius: 0.034,
+            segments: 12,
+        },
+    );
 
     // Waist knot (slightly wider cylinder).
     push_cylinder_z(
-        &mut vertices,
-        &mut indices,
-        0.0,
-        0.0,
-        -0.36,
-        -0.28,
-        0.058,
-        14,
+        &mut buffers,
+        &CylinderZParams {
+            cx: 0.0,
+            cy: 0.0,
+            z0: -0.36,
+            z1: -0.28,
+            radius: 0.058,
+            segments: 14,
+        },
     );
 
     // Pom ball — weighted bundle below the knot.

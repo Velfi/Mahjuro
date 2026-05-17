@@ -1139,6 +1139,13 @@ pub(super) fn build_relic_tray_and_wind(
     (relic_objects, wind_gusts)
 }
 
+/// Outputs of [`build_consumable_dish`].
+pub(super) struct ConsumableDishBuild {
+    pub talisman_dish_placements: Vec<crate::render::draw_cmd::Object3d>,
+    pub ribbon_dish_placements: Vec<crate::render::draw_cmd::Object3d>,
+    pub talisman_dish_strip: Option<(f32, f32, f32, f32)>,
+}
+
 /// Build the consumable inventory dish (Zodiacs + Talismans) — brass dish,
 /// pendant placements, focus rects, click buttons.
 #[allow(clippy::too_many_arguments)]
@@ -1150,11 +1157,7 @@ pub(super) fn build_consumable_dish(
     paused: bool,
     focus_rect_graph: &mut Vec<(FocusTarget, [f32; 4])>,
     buttons: &mut Vec<crate::scenes::ButtonDef>,
-) -> (
-    Vec<crate::render::draw_cmd::Object3d>,
-    Vec<crate::render::draw_cmd::Object3d>,
-    Option<(f32, f32, f32, f32)>,
-) {
+) -> ConsumableDishBuild {
     use super::PICK_CONSUMABLE_DISH;
     use super::ZODIAC_USE_BASE;
     use crate::render::draw_cmd::{Object3d, Object3dKind};
@@ -1407,11 +1410,11 @@ pub(super) fn build_consumable_dish(
         }
     }
 
-    (
+    ConsumableDishBuild {
         talisman_dish_placements,
         ribbon_dish_placements,
         talisman_dish_strip,
-    )
+    }
 }
 
 /// Outputs of the action row + journal book builder.

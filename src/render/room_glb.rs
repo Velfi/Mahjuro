@@ -79,7 +79,7 @@ use rustc_hash::FxHashMap;
 use crate::render::draw_cmd::CameraParams;
 use crate::render::room_env_gltf::{
     self as renv, EmbeddedCameraHarvest, RoomEnvWalkHooks, RoomMeshPolicy, marker_translation_doc,
-    room_env_model_matrix_from_bounds_doc, walk_room_env_node,
+    room_env_model_matrix_from_bounds_doc, walk_room_env_node, RoomEnvWalkState,
 };
 use crate::render::tile_glb::release_loaded_primitive_gpu_source_buffers;
 use anyhow::Context;
@@ -87,7 +87,7 @@ use glam::{Mat4, Vec3};
 
 enum RoomGlbCache {
     Uninit,
-    Ready(Option<RoomGlbCpu>),
+    Ready(Option<Box<RoomGlbCpu>>),
 }
 
 static ROOM_GLB_CPU: RwLock<RoomGlbCache> = RwLock::new(RoomGlbCache::Uninit);
@@ -134,7 +134,7 @@ fn ensure_shop_glb_loaded() {
         log::warn!("shop.glb not embedded; using PNG storeroom backdrop");
         None
     };
-    *w = RoomGlbCache::Ready(ready);
+    *w = RoomGlbCache::Ready(ready.map(Box::new));
 }
 
 /// Read-only access to decoded shop data (markers, lights, collision, …).  
@@ -202,40 +202,51 @@ pub const ROOM_EMISSIVE_PROBE_UPDATE_INTERVAL: u32 = 2;
 /// Element-wise view_proj delta above which probes refresh immediately (camera nudge / cut).
 pub const ROOM_EMISSIVE_PROBE_VIEW_EPS: f32 = 2e-4;
 
+/// Amortized GI probe refresh state (tick, last view, last size).
+pub struct ProbeGiUpdateState {
+    pub tick: u32,
+    pub last_view_proj: [f32; 16],
+    pub last_size: (u32, u32),
+    pub had_room: bool,
+}
+
+/// Frame inputs for [`probe_gi_should_update_probes`].
+pub struct ProbeGiUpdateParams<'a> {
+    pub view_proj: &'a [f32; 16],
+    pub size: (u32, u32),
+    pub gi_active: bool,
+    pub update_interval: u32,
+}
+
 /// Whether to run `emissive-probe-update` this frame (amortized GI). Resets when GI is inactive.
 pub fn probe_gi_should_update_probes(
-    tick: &mut u32,
-    last_view_proj: &mut [f32; 16],
-    last_size: &mut (u32, u32),
-    had_room: &mut bool,
-    view_proj: &[f32; 16],
-    size: (u32, u32),
-    gi_active: bool,
-    update_interval: u32,
+    state: &mut ProbeGiUpdateState,
+    params: &ProbeGiUpdateParams<'_>,
 ) -> bool {
-    if !gi_active {
-        *tick = 0;
-        *had_room = false;
+    if !params.gi_active {
+        state.tick = 0;
+        state.had_room = false;
         return false;
     }
 
-    let first_room_frame = !*had_room;
-    *had_room = true;
+    let first_room_frame = !state.had_room;
+    state.had_room = true;
 
-    let view_moved = view_proj
+    let view_moved = params
+        .view_proj
         .iter()
-        .zip(last_view_proj.iter())
+        .zip(state.last_view_proj.iter())
         .any(|(a, b)| (*a - *b).abs() > ROOM_EMISSIVE_PROBE_VIEW_EPS);
-    let resized = *last_size != size;
-    let interval = update_interval.max(1);
-    let on_interval = (*tick).is_multiple_of(interval);
+    let resized = state.last_size != params.size;
+    let interval = params.update_interval.max(1);
+    let on_interval = state.tick.is_multiple_of(interval);
     let update = first_room_frame || view_moved || resized || on_interval;
 
     if update {
-        *last_view_proj = *view_proj;
-        *last_size = size;
+        state.last_view_proj = *params.view_proj;
+        state.last_size = params.size;
     }
-    *tick = tick.wrapping_add(1);
+    state.tick = state.tick.wrapping_add(1);
     update
 }
 
@@ -522,22 +533,26 @@ fn skip_room_env_mesh_for_node_name(name: &str) -> bool {
         || name.starts_with("shop_player_consumable_")
 }
 
+/// Screen projection inputs for [`screen_rect_for_marker_mesh_bounds`].
+pub struct MarkerScreenRectParams<'a> {
+    pub win_w: f32,
+    pub win_h: f32,
+    pub cam: &'a crate::render::draw_cmd::CameraParams,
+    pub env_height_scale: f32,
+    pub cpu: &'a RoomGlbCpu,
+    pub node_name: &'a str,
+    pub min_rw: f32,
+    pub min_rh: f32,
+}
+
 /// Project the eight corners of a named marker's decoded mesh AABB to screen pixels (same centering
 /// / scale as the uploaded room). Returns `None` if bounds are missing. Clamps size to at least
 /// `min_rw` × `min_rh` while keeping the projected center.
-pub fn screen_rect_for_marker_mesh_bounds(
-    win_w: f32,
-    win_h: f32,
-    cam: &crate::render::draw_cmd::CameraParams,
-    env_height_scale: f32,
-    cpu: &RoomGlbCpu,
-    node_name: &str,
-    min_rw: f32,
-    min_rh: f32,
-) -> Option<[f32; 4]> {
-    let bounds = cpu.marker_mesh_bounds_doc_for(node_name)?;
-    let s = room_env_world_scale(win_h, env_height_scale);
-    let center_doc = cpu
+pub fn screen_rect_for_marker_mesh_bounds(p: &MarkerScreenRectParams<'_>) -> Option<[f32; 4]> {
+    let bounds = p.cpu.marker_mesh_bounds_doc_for(p.node_name)?;
+    let s = room_env_world_scale(p.win_h, p.env_height_scale);
+    let center_doc = p
+        .cpu
         .environment_bounds_doc
         .map(|b| b.center())
         .unwrap_or(Vec3::ZERO);
@@ -547,7 +562,7 @@ pub fn screen_rect_for_marker_mesh_bounds(
     let mut mx_y = f32::NEG_INFINITY;
     for c in bounds.corners() {
         let world = (c - center_doc) * s;
-        let (sx, sy) = cam.project_world_to_screen(win_w, win_h, world);
+        let (sx, sy) = p.cam.project_world_to_screen(p.win_w, p.win_h, world);
         mn_x = mn_x.min(sx);
         mn_y = mn_y.min(sy);
         mx_x = mx_x.max(sx);
@@ -555,8 +570,8 @@ pub fn screen_rect_for_marker_mesh_bounds(
     }
     let cx = (mn_x + mx_x) * 0.5;
     let cy = (mn_y + mx_y) * 0.5;
-    let rw = ((mx_x - mn_x).max(1.0)).max(min_rw);
-    let rh = ((mx_y - mn_y).max(1.0)).max(min_rh);
+    let rw = ((mx_x - mn_x).max(1.0)).max(p.min_rw);
+    let rh = ((mx_y - mn_y).max(1.0)).max(p.min_rh);
     Some([cx - rw * 0.5, cy - rh * 0.5, rw, rh])
 }
 
@@ -584,22 +599,20 @@ pub fn load_room_glb_from_bytes(
     let mut embedded_point_lights = Vec::new();
     let mut embedded_spot_lights = Vec::new();
 
+    let mut walk_state = RoomEnvWalkState {
+        candle_node_prefix: SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX,
+        markers: &mut markers,
+        env_primitives: &mut environment_primitives,
+        marker_mesh_bounds_doc: &mut marker_mesh_bounds_doc,
+        collision_meshes: &mut collision_meshes,
+        embedded_cameras: &mut embedded_cameras,
+        embedded_point_lights: &mut embedded_point_lights,
+        embedded_spot_lights: &mut embedded_spot_lights,
+        buffers: &buffers,
+        images: &images,
+    };
     for node in scene.nodes() {
-        walk_room_env_node(
-            node,
-            Mat4::IDENTITY,
-            hooks,
-            SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX,
-            &mut markers,
-            &mut environment_primitives,
-            &mut marker_mesh_bounds_doc,
-            &mut collision_meshes,
-            &mut embedded_cameras,
-            &mut embedded_point_lights,
-            &mut embedded_spot_lights,
-            &buffers,
-            &images,
-        )?;
+        walk_room_env_node(node, Mat4::IDENTITY, hooks, &mut walk_state)?;
     }
 
     let (embedded_perspective_camera, embedded_cameras_by_name) = embedded_cameras.into_parts();

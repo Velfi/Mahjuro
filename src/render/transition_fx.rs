@@ -126,16 +126,18 @@ fn push_tile_teeth(frame: &mut UiFrame, progress: f32, window: (f32, f32)) {
                 &mut faces,
                 tile,
                 [left, top, tile_w, tile_h],
-                [shadow_dx, shadow_dy],
-                [
-                    face[0] * brightness,
-                    face[1] * brightness,
-                    face[2] * brightness,
-                    0.98,
-                ],
-                shadow_alpha,
-                edge_alpha,
-                0.14 + local_cover * 0.10,
+                FlatTileStyle {
+                    shadow_offset: [shadow_dx, shadow_dy],
+                    fill: [
+                        face[0] * brightness,
+                        face[1] * brightness,
+                        face[2] * brightness,
+                        0.98,
+                    ],
+                    shadow_alpha,
+                    face_alpha: edge_alpha,
+                    sheen_alpha: 0.14 + local_cover * 0.10,
+                },
             );
         }
     }
@@ -191,11 +193,13 @@ fn push_forest_of_tiles(frame: &mut UiFrame, progress: f32, window: (f32, f32)) 
                 &mut faces,
                 tile,
                 [left, top, tile_w, tile_h],
-                [tile_w * 0.05, tile_h * 0.07],
-                [face[0], face[1], face[2], alpha],
-                0.10 + local_cover * 0.12,
-                alpha,
-                0.06 + (1.0 - depth) * 0.10,
+                FlatTileStyle {
+                    shadow_offset: [tile_w * 0.05, tile_h * 0.07],
+                    fill: [face[0], face[1], face[2], alpha],
+                    shadow_alpha: 0.10 + local_cover * 0.12,
+                    face_alpha: alpha,
+                    sheen_alpha: 0.06 + (1.0 - depth) * 0.10,
+                },
             );
         }
     }
@@ -246,11 +250,13 @@ fn push_maelstrom(frame: &mut UiFrame, progress: f32, window: (f32, f32)) {
             &mut faces,
             seq[(i * 7) % seq.len()],
             [left, top, tile_w, tile_h],
-            [angle.cos() * tile_w * 0.08, angle.sin() * tile_h * 0.08],
-            [face[0], face[1], face[2], alpha],
-            0.12 + cover * 0.12,
-            alpha,
-            0.08 + cover * 0.10,
+            FlatTileStyle {
+                shadow_offset: [angle.cos() * tile_w * 0.08, angle.sin() * tile_h * 0.08],
+                fill: [face[0], face[1], face[2], alpha],
+                shadow_alpha: 0.12 + cover * 0.12,
+                face_alpha: alpha,
+                sheen_alpha: 0.08 + cover * 0.10,
+            },
         );
     }
 
@@ -317,11 +323,13 @@ fn push_galaxy_of_tiles(frame: &mut UiFrame, progress: f32, window: (f32, f32)) 
                 &mut faces,
                 seq[(arm * 7 + i * 3) % seq.len()],
                 [left, top, tile_w, tile_h],
-                [shadow_dx, shadow_dy],
-                [face[0], face[1], face[2], alpha],
-                0.10 + arm_cover * 0.10,
-                alpha,
-                0.08 + arm_cover * 0.10,
+                FlatTileStyle {
+                    shadow_offset: [shadow_dx, shadow_dy],
+                    fill: [face[0], face[1], face[2], alpha],
+                    shadow_alpha: 0.10 + arm_cover * 0.10,
+                    face_alpha: alpha,
+                    sheen_alpha: 0.08 + arm_cover * 0.10,
+                },
             );
         }
     }
@@ -394,11 +402,13 @@ fn push_tile_waterfall(frame: &mut UiFrame, progress: f32, window: (f32, f32)) {
                 &mut faces,
                 tile,
                 [x + spray, top, tile_w, tile_h],
-                [0.0, tile_h * 0.09],
-                [face[0], face[1], face[2], alpha],
-                0.10 + local_cover * 0.10,
-                alpha,
-                0.08 + local_cover * 0.08,
+                FlatTileStyle {
+                    shadow_offset: [0.0, tile_h * 0.09],
+                    fill: [face[0], face[1], face[2], alpha],
+                    shadow_alpha: 0.10 + local_cover * 0.10,
+                    face_alpha: alpha,
+                    sheen_alpha: 0.08 + local_cover * 0.08,
+                },
             );
         }
     }
@@ -465,11 +475,13 @@ fn push_shuffling_fan(frame: &mut UiFrame, progress: f32, window: (f32, f32)) {
                 &mut faces,
                 seq[(fan * 5 + i) % seq.len()],
                 [left, top, tile_w, tile_h],
-                [side * tile_w * 0.09, tile_h * 0.05],
-                [face[0], face[1], face[2], alpha],
-                0.10 + fan_t * 0.10,
-                alpha,
-                0.08 + fan_t * 0.08,
+                FlatTileStyle {
+                    shadow_offset: [side * tile_w * 0.09, tile_h * 0.05],
+                    fill: [face[0], face[1], face[2], alpha],
+                    shadow_alpha: 0.10 + fan_t * 0.10,
+                    face_alpha: alpha,
+                    sheen_alpha: 0.08 + fan_t * 0.08,
+                },
             );
         }
     }
@@ -511,36 +523,41 @@ fn smoothstep(t: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-fn push_flat_tile(
-    quads: &mut Vec<GpuInstance>,
-    faces: &mut Vec<TileFaceQuad>,
-    tile: Tile,
-    rect: [f32; 4],
+#[derive(Clone, Copy)]
+struct FlatTileStyle {
     shadow_offset: [f32; 2],
     fill: [f32; 4],
     shadow_alpha: f32,
     face_alpha: f32,
     sheen_alpha: f32,
+}
+
+fn push_flat_tile(
+    quads: &mut Vec<GpuInstance>,
+    faces: &mut Vec<TileFaceQuad>,
+    tile: Tile,
+    rect: [f32; 4],
+    style: FlatTileStyle,
 ) {
     let [left, top, tile_w, tile_h] = rect;
     quads.push(GpuInstance {
         rect: [
-            left + shadow_offset[0],
-            top + shadow_offset[1],
+            left + style.shadow_offset[0],
+            top + style.shadow_offset[1],
             tile_w,
             tile_h,
         ],
-        color: color::alpha(color::WALNUT_INK, shadow_alpha.clamp(0.0, 1.0)),
+        color: color::alpha(color::WALNUT_INK, style.shadow_alpha.clamp(0.0, 1.0)),
         user: 0,
     });
     quads.push(GpuInstance {
         rect,
-        color: fill,
+        color: style.fill,
         user: 0,
     });
     quads.push(GpuInstance {
         rect: [left, top, tile_w, tile_h * 0.08],
-        color: color::alpha(color::CHAMPAGNE, sheen_alpha.clamp(0.0, 1.0)),
+        color: color::alpha(color::CHAMPAGNE, style.sheen_alpha.clamp(0.0, 1.0)),
         user: 0,
     });
 
@@ -554,7 +571,7 @@ fn push_flat_tile(
                 tile_w - inset_x * 2.0,
                 tile_h * 0.74,
             ],
-            color: [1.0, 1.0, 1.0, face_alpha.clamp(0.0, 1.0)],
+            color: [1.0, 1.0, 1.0, style.face_alpha.clamp(0.0, 1.0)],
             user: 0,
         },
     });

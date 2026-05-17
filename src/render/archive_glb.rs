@@ -128,7 +128,7 @@ pub fn archive_spawn_item_marker_name(slot: usize) -> &'static str {
 
 enum ArchiveGlbCache {
     Uninit,
-    Ready(Option<RoomGlbCpu>),
+    Ready(Option<Box<RoomGlbCpu>>),
 }
 
 static ARCHIVE_GLB_CPU: RwLock<ArchiveGlbCache> = RwLock::new(ArchiveGlbCache::Uninit);
@@ -157,7 +157,7 @@ fn ensure_archive_glb_loaded() {
         log::debug!("archive.glb not embedded — Archive uses procedural layout");
         None
     };
-    *w = ArchiveGlbCache::Ready(ready);
+    *w = ArchiveGlbCache::Ready(ready.map(Box::new));
 }
 
 /// `true` when `archive.glb` loaded and has drawable environment geometry.
@@ -318,26 +318,26 @@ pub fn archive_description_sign_use_left_for_ref_x(
     ref_x: f32,
     cpu: &RoomGlbCpu,
 ) -> Option<bool> {
-    let rl = room_glb::screen_rect_for_marker_mesh_bounds(
+    let rl = room_glb::screen_rect_for_marker_mesh_bounds(&room_glb::MarkerScreenRectParams {
         win_w,
         win_h,
         cam,
-        env_h,
+        env_height_scale: env_h,
         cpu,
-        SIGN_DESCRIPTION_LEFT,
-        8.0,
-        8.0,
-    );
-    let rr = room_glb::screen_rect_for_marker_mesh_bounds(
+        node_name: SIGN_DESCRIPTION_LEFT,
+        min_rw: 8.0,
+        min_rh: 8.0,
+    });
+    let rr = room_glb::screen_rect_for_marker_mesh_bounds(&room_glb::MarkerScreenRectParams {
         win_w,
         win_h,
         cam,
-        env_h,
+        env_height_scale: env_h,
         cpu,
-        SIGN_DESCRIPTION_RIGHT,
-        8.0,
-        8.0,
-    );
+        node_name: SIGN_DESCRIPTION_RIGHT,
+        min_rw: 8.0,
+        min_rh: 8.0,
+    });
     match (rl, rr) {
         (Some(l), Some(r)) => {
             let mid_l = l[0] + l[2] * 0.5;

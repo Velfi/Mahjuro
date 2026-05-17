@@ -146,17 +146,30 @@ pub fn colored_multiline_block_height(line_count: usize, line_h: f32) -> f32 {
     line_count as f32 * line_step
 }
 
+/// Layout for [`push_colored_rows_left`] / [`push_colored_rows_in_width`].
+pub struct ColoredRowsLayout<'a> {
+    pub text_left: f32,
+    pub top_y: f32,
+    pub inner_w: f32,
+    pub line_h: f32,
+    pub fallback_plain: &'a str,
+    pub fallback_color: [f32; 4],
+}
+
 /// Left-aligned rows (focus inspect, shop tooltips).
 pub fn push_colored_rows_left(
     out: &mut Vec<TextLabel>,
-    text_left: f32,
-    top_y: f32,
-    inner_w: f32,
+    layout: ColoredRowsLayout<'_>,
     lines: &[Vec<(String, [f32; 4])>],
-    line_h: f32,
-    fallback_plain: &str,
-    fallback_color: [f32; 4],
 ) {
+    let ColoredRowsLayout {
+        text_left,
+        top_y,
+        inner_w,
+        line_h,
+        fallback_plain,
+        fallback_color,
+    } = layout;
     let font_px = line_h;
     let line_step = line_h * 1.4;
     let Some(font) = load_ui_font() else {
@@ -197,15 +210,18 @@ pub fn push_colored_rows_left(
 /// Horizontally aligned colored rows inside `[block_left, top_y, inner_w, …]`.
 pub fn push_colored_rows_in_width(
     out: &mut Vec<TextLabel>,
-    block_left: f32,
-    top_y: f32,
-    inner_w: f32,
+    layout: ColoredRowsLayout<'_>,
     lines: &[Vec<(String, [f32; 4])>],
-    line_h: f32,
     align: TextAlign,
-    fallback_plain: &str,
-    fallback_color: [f32; 4],
 ) {
+    let ColoredRowsLayout {
+        text_left: block_left,
+        top_y,
+        inner_w,
+        line_h,
+        fallback_plain,
+        fallback_color,
+    } = layout;
     let font_px = line_h;
     let line_step = line_h * 1.4;
     let Some(font) = load_ui_font() else {

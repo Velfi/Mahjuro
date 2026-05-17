@@ -30,24 +30,37 @@ pub fn push_hold_prompt_ring(
         let n = (((SEGMENTS as f32) * (sweep_track / tau)).ceil() as usize).clamp(4, SEGMENTS);
         push_arc_stroke(
             out,
-            cx,
-            cy,
-            radius,
-            half,
-            start + sweep_fill,
-            sweep_track,
-            track,
-            n,
+            ArcStrokeParams {
+                cx,
+                cy,
+                r: radius,
+                half_w: half,
+                start: start + sweep_fill,
+                sweep: sweep_track,
+                color: track,
+                segments: n,
+            },
         );
     }
     if sweep_fill > 1e-3 {
         let n = (((SEGMENTS as f32) * (sweep_fill / tau)).ceil() as usize).clamp(4, SEGMENTS);
-        push_arc_stroke(out, cx, cy, radius, half, start, sweep_fill, fill, n);
+        push_arc_stroke(
+            out,
+            ArcStrokeParams {
+                cx,
+                cy,
+                r: radius,
+                half_w: half,
+                start,
+                sweep: sweep_fill,
+                color: fill,
+                segments: n,
+            },
+        );
     }
 }
 
-fn push_arc_stroke(
-    out: &mut Vec<GpuInstance>,
+struct ArcStrokeParams {
     cx: f32,
     cy: f32,
     r: f32,
@@ -56,7 +69,19 @@ fn push_arc_stroke(
     sweep: f32,
     color: [f32; 4],
     segments: usize,
-) {
+}
+
+fn push_arc_stroke(out: &mut Vec<GpuInstance>, params: ArcStrokeParams) {
+    let ArcStrokeParams {
+        cx,
+        cy,
+        r,
+        half_w,
+        start,
+        sweep,
+        color,
+        segments,
+    } = params;
     let n = segments.max(8);
     let d_theta = sweep / n as f32;
     for i in 0..n {

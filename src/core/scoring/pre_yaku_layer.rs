@@ -1,16 +1,16 @@
 //! Meld bonuses, early relic chips/mults, talismans, flowers, and Dragon Echo —
 //! everything applied before [`super::dora_yaku_layer`] (Dora, yaku, structure depth).
 
-use crate::core::hand::{DetectedMeld, MeldKind};
+use crate::core::hand::MeldKind;
 use crate::core::relic::{RelicId, ScoreContext};
 use crate::core::tile::{Suit, Tile};
 
-use super::effective_relic::EffectiveRelics;
+use super::layer_input::{PreYakuLayerOpts, ScoringLayerInput, ScoringLayerOut};
 use super::push_steps::{push_chips, push_gold, push_mult};
 use super::tea_bonus::{
     tea_harmony_chips, tea_purity_mult, tea_respect_chips, tea_tranquility_chips,
 };
-use super::{ScoreStep, meld_chip_bonus, tile_by_id, tile_is_debuffed};
+use super::{meld_chip_bonus, tile_by_id, tile_is_debuffed};
 
 #[inline]
 fn effective_point_value(t: &Tile, ctx: &ScoreContext<'_>) -> i32 {
@@ -22,17 +22,26 @@ fn effective_point_value(t: &Tile, ctx: &ScoreContext<'_>) -> i32 {
 }
 
 pub(crate) fn apply_pre_yaku_scoring(
-    ctx: &ScoreContext<'_>,
-    tiles: &[Tile],
-    sets: &[DetectedMeld],
-    eff: EffectiveRelics,
-    pair_double: bool,
-    has_triplet_boost: bool,
-    chips: &mut i32,
-    mult: &mut f64,
-    steps: &mut Vec<ScoreStep>,
-    flower_gold: &mut i32,
+    input: &ScoringLayerInput<'_>,
+    out: ScoringLayerOut<'_>,
+    opts: PreYakuLayerOpts<'_>,
 ) {
+    let ScoringLayerInput {
+        ctx,
+        tiles,
+        sets,
+        eff,
+    } = *input;
+    let ScoringLayerOut {
+        chips,
+        mult,
+        steps,
+    } = out;
+    let PreYakuLayerOpts {
+        pair_double,
+        has_triplet_boost,
+        flower_gold,
+    } = opts;
     let has_sequence_surge = eff.has(ctx.relic.roster, RelicId::SequenceSurge);
     let has_pair_power = eff.has(ctx.relic.roster, RelicId::PairPower);
     let has_honor_fury = eff.has(ctx.relic.roster, RelicId::HonorFury);

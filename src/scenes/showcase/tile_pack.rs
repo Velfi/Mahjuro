@@ -10,7 +10,7 @@ use crate::render::draw_cmd::{
     CameraParams, DrawCmd, Object3d, Object3dKind, ShowcaseRenderHints, ShowcaseTilePlacement,
     UiFrame,
 };
-use crate::render::showcase_tile_layout::compute_pack_reveal_row_layout;
+use crate::render::showcase_tile_layout::{compute_pack_reveal_row_layout, PackRevealRowLayoutParams};
 use crate::render::table_transform::mat4_to_euler_xyz_rad;
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{PointLight, SpotLight};
@@ -164,17 +164,17 @@ impl TilePackPresenter {
                 let row_py = h * self.positions.celeb_pack_reveal.ny;
                 let row_lift = layout.mm(self.positions.celeb_pack_reveal.lift_mm);
                 let rotation = pack_reveal_euler_rad(&self.positions);
-                let row = compute_pack_reveal_row_layout(
-                    w,
-                    h,
+                let row = compute_pack_reveal_row_layout(&PackRevealRowLayoutParams {
+                    win_w: w,
+                    win_h: h,
                     cam,
-                    tile_preset,
+                    preset: tile_preset,
                     n,
                     row_lift,
-                    self.positions.celeb_pack_reveal.nx,
-                    self.positions.celeb_pack_reveal.ny,
-                    rotation,
-                );
+                    nx: self.positions.celeb_pack_reveal.nx,
+                    ny: self.positions.celeb_pack_reveal.ny,
+                    rotation_xyz_rad: rotation,
+                });
                 let src_px = w * 0.5;
                 let src_py = h * self.positions.celeb_pack_closeup.ny;
                 let src_lift = row_lift + h * 0.15;
@@ -365,17 +365,17 @@ fn pack_celebration_subject_spotlight(
             }
             let row_lift = layout.mm(positions.celeb_pack_reveal.lift_mm);
             let rotation = pack_reveal_euler_rad(positions);
-            let row = compute_pack_reveal_row_layout(
-                w,
-                h,
+            let row = compute_pack_reveal_row_layout(&PackRevealRowLayoutParams {
+                win_w: w,
+                win_h: h,
                 cam,
-                tile_preset,
+                preset: tile_preset,
                 n,
                 row_lift,
-                positions.celeb_pack_reveal.nx,
-                positions.celeb_pack_reveal.ny,
-                rotation,
-            );
+                nx: positions.celeb_pack_reveal.nx,
+                ny: positions.celeb_pack_reveal.ny,
+                rotation_xyz_rad: rotation,
+            });
             let total_w = n as f32 * row.silhouette_w + (n.saturating_sub(1)) as f32 * row.gap_px;
             let cx = row.row_x0 + total_w * 0.5;
             let row_py = h * positions.celeb_pack_reveal.ny;

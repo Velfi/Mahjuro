@@ -669,8 +669,8 @@ fn update_profile_cache(index: usize, progress: &PlayerProgress) {
 
 /// Background-thread profile saver. Pairs with `App::mark_profile_dirty`
 /// + a frame-end flush so per-event saves (relic activation, boss
-/// bookkeeping, yaku tally, …) don't stall the frame on slow disks
-/// (Steam Deck SD card installs are the motivating case).
+///   bookkeeping, yaku tally, …) don't stall the frame on slow disks
+///   (Steam Deck SD card installs are the motivating case).
 ///
 /// `enqueue` updates the in-process [`profile_cache`] synchronously so
 /// any subsequent `load_profile` sees fresh state immediately, then
