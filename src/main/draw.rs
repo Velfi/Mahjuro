@@ -237,8 +237,8 @@ impl App {
                     self.audio.play_sfx(audio::SfxId::GameOver);
                     let modal = Modal::new("Try Again!", &feedback, ModalTheme::Info);
                     self.modals.push(modal);
-                    self.pending_scene = Some(Scene::Gameplay(GameplayScene::with_pending_blind(
-                        retry_blind,
+                    self.pending_scene = Some(Scene::Gameplay(Box::new(
+                        GameplayScene::with_pending_blind(retry_blind),
                     )));
                     self.transition_alpha = 1.0;
                     return;
@@ -598,14 +598,16 @@ impl App {
                             Vec::new();
                         crate::ui::colored_keywords::push_colored_rows_in_width(
                             &mut tip_texts,
-                            tip_x + pad,
-                            text_top,
-                            inner_w,
+                            crate::ui::colored_keywords::ColoredRowsLayout {
+                                text_left: tip_x + pad,
+                                top_y: text_top,
+                                inner_w,
+                                line_h,
+                                fallback_plain: label.as_ref(),
+                                fallback_color: parchment,
+                            },
                             &color_lines,
-                            line_h,
                             crate::render::wgpu_renderer::TextAlign::Center,
-                            label.as_ref(),
-                            parchment,
                         );
                         frame.texts(tip_texts);
                     }
@@ -816,13 +818,15 @@ impl App {
 
         let active_tileset_name = self.gfx.tileset_name.clone();
         let render_settings = self.effect_layers.wgpu_render_settings(
-            &self.gfx,
-            self.gfx.tile_preset,
-            active_material,
-            self.gfx.surface_kind,
-            active_tileset_name,
-            draw_settle_speed,
-            sort_settle_speed,
+            &crate::effect_layers::WgpuRenderSettingsParams {
+                gfx: &self.gfx,
+                tile_preset: self.gfx.tile_preset,
+                tile_material: active_material,
+                surface_kind: self.gfx.surface_kind,
+                tileset_name: active_tileset_name,
+                draw_settle_speed,
+                sort_settle_speed,
+            },
         );
 
         renderer.set_hdr_enabled(self.effect_layers.hdr_enabled(&self.gfx));

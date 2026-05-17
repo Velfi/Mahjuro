@@ -315,12 +315,12 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
         }
         "gameplay" => {
             setup_gameplay_screenshot_state(&mut run);
-            (Scene::Gameplay(GameplayScene::new()), true)
+            (Scene::Gameplay(Box::new(GameplayScene::new())), true)
         }
         "gameplay_hero" => {
             setup_hero_state(&mut run);
             hero_play = true;
-            (Scene::Gameplay(GameplayScene::new()), true)
+            (Scene::Gameplay(Box::new(GameplayScene::new())), true)
         }
         "pick_blind" => (Scene::PickBlind(scenes::PickBlindScene::new()), true),
         "shop" => {
@@ -413,9 +413,9 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
                 let shop = ShopScene::new(&mut run, &progress);
                 let counts = shop.tile_pack_celeb_inventory_counts(&run);
                 (
-                    Scene::Showcase(ShowcaseScene::new(ShowcasePresenter::TilePack(
+                    Scene::Showcase(ShowcaseScene::new(ShowcasePresenter::TilePack(Box::new(
                         TilePackPresenter::new_headless_with_shop_counts(&run, pack, counts),
-                    ))),
+                    )))),
                     true,
                 )
             } else {
@@ -447,9 +447,9 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
             let shop = ShopScene::new(&mut run, &progress);
             let counts = shop.tile_pack_celeb_inventory_counts(&run);
             (
-                Scene::Showcase(ShowcaseScene::new(ShowcasePresenter::TilePack(
+                Scene::Showcase(ShowcaseScene::new(ShowcasePresenter::TilePack(Box::new(
                     TilePackPresenter::new_headless_with_shop_counts(&run, pack, counts),
-                ))),
+                )))),
                 true,
             )
         }
@@ -1095,13 +1095,15 @@ impl HeadlessApp {
 
         let active_tileset_name = self.gfx.tileset_name.clone();
         let render_settings = self.effect_layers.wgpu_render_settings(
-            &self.gfx,
-            self.gfx.tile_preset,
-            active_material,
-            self.gfx.surface_kind,
-            active_tileset_name,
-            8.0,
-            10.0,
+            &crate::effect_layers::WgpuRenderSettingsParams {
+                gfx: &self.gfx,
+                tile_preset: self.gfx.tile_preset,
+                tile_material: active_material,
+                surface_kind: self.gfx.surface_kind,
+                tileset_name: active_tileset_name,
+                draw_settle_speed: 8.0,
+                sort_settle_speed: 10.0,
+            },
         );
         if let Err(e) = self.renderer.render(&frame, render_settings) {
             log::error!("headless render: {e:?}");

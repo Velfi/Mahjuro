@@ -2,6 +2,19 @@ use std::mem::size_of;
 
 use super::super::*;
 
+pub struct BloomBuildParams<'a> {
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub width: u32,
+    pub height: u32,
+    pub scene_hdr_format: wgpu::TextureFormat,
+    pub extract_shader: &'a wgpu::ShaderModule,
+    pub blur_shader: &'a wgpu::ShaderModule,
+    pub composite_shader: &'a wgpu::ShaderModule,
+    pub shop_linear_bloom_view: &'a wgpu::TextureView,
+    pub scene_color_view: &'a wgpu::TextureView,
+}
+
 pub struct BloomBundle {
     pub extract_pipeline: wgpu::RenderPipeline,
     pub blur_pipeline: wgpu::RenderPipeline,
@@ -24,18 +37,19 @@ pub struct BloomBundle {
     pub pong_view: wgpu::TextureView,
 }
 
-pub fn build_bloom(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    bloom_w: u32,
-    bloom_h: u32,
-    scene_hdr_format: wgpu::TextureFormat,
-    bloom_extract_shader: &wgpu::ShaderModule,
-    bloom_blur_shader: &wgpu::ShaderModule,
-    bloom_composite_shader: &wgpu::ShaderModule,
-    shop_linear_bloom_view: &wgpu::TextureView,
-    scene_color_view: &wgpu::TextureView,
-) -> BloomBundle {
+pub fn build_bloom(p: &BloomBuildParams<'_>) -> BloomBundle {
+    let BloomBuildParams {
+        device,
+        queue,
+        width: bloom_w,
+        height: bloom_h,
+        scene_hdr_format,
+        extract_shader: bloom_extract_shader,
+        blur_shader: bloom_blur_shader,
+        composite_shader: bloom_composite_shader,
+        shop_linear_bloom_view,
+        scene_color_view,
+    } = *p;
     let (bloom_ping_texture, bloom_ping_view) =
         crate::render::wgpu_renderer::resources::create_post_texture(
             device,

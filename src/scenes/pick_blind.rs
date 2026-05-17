@@ -114,14 +114,16 @@ fn hallway_button_screen_rect(
     hallway_glb::with_hallway_glb_cpu(|opt| {
         let cpu = opt?;
         if let Some(r) = room_glb::screen_rect_for_marker_mesh_bounds(
-            win_w,
-            win_h,
-            cam,
-            env_height_scale,
-            cpu,
-            node_name,
-            min_rw,
-            min_rh,
+            &room_glb::MarkerScreenRectParams {
+                win_w,
+                win_h,
+                cam,
+                env_height_scale,
+                cpu,
+                node_name,
+                min_rw,
+                min_rh,
+            },
         ) {
             return Some(r);
         }
@@ -136,17 +138,30 @@ fn wrapped_text_height(text: &str, col_w: f32, font_px: f32, line_h: f32) -> f32
     line_h * lines.len().max(1) as f32
 }
 
-fn push_wrapped_column_line(
-    texts: &mut Vec<TextLabel>,
+struct WrappedColumnLine<'a> {
+    texts: &'a mut Vec<TextLabel>,
     x: f32,
-    y: &mut f32,
+    y: &'a mut f32,
     col_w: f32,
     font_px: f32,
     line_h: f32,
-    text: &str,
+    text: &'a str,
     color: [f32; 4],
     align: TextAlign,
-) {
+}
+
+fn push_wrapped_column_line(line: WrappedColumnLine<'_>) {
+    let WrappedColumnLine {
+        texts,
+        x,
+        y,
+        col_w,
+        font_px,
+        line_h,
+        text,
+        color,
+        align,
+    } = line;
     let lines = wrap_text(text, col_w, font_px / 0.99);
     let block_h = line_h * lines.len().max(1) as f32;
     texts.push(TextLabel {
@@ -296,7 +311,9 @@ impl SceneBehavior for PickBlindScene {
                 {
                     ctx.bus.push(GameEvent::BossEncountered(bk));
                 }
-                Some(Scene::Gameplay(GameplayScene::with_pending_blind(upcoming)))
+                Some(Scene::Gameplay(Box::new(GameplayScene::with_pending_blind(
+                    upcoming,
+                ))))
             }
             Some(BlindAction::SkipBlind) => None,
             None => None,
@@ -565,60 +582,60 @@ impl SceneBehavior for PickBlindScene {
                 } else {
                     color::STONE
                 };
-                push_wrapped_column_line(
-                    &mut texts,
-                    lx_play,
-                    &mut ly_play,
-                    play_col_w,
-                    px_blind,
-                    h_blind,
-                    &blind_display,
-                    play_color,
-                    TextAlign::Right,
-                );
+                push_wrapped_column_line(WrappedColumnLine {
+                    texts: &mut texts,
+                    x: lx_play,
+                    y: &mut ly_play,
+                    col_w: play_col_w,
+                    font_px: px_blind,
+                    line_h: h_blind,
+                    text: &blind_display,
+                    color: play_color,
+                    align: TextAlign::Right,
+                });
                 ly_play += 6.0;
-                push_wrapped_column_line(
-                    &mut texts,
-                    lx_play,
-                    &mut ly_play,
-                    play_col_w,
-                    px_detail,
-                    h_detail,
-                    &format!(
+                push_wrapped_column_line(WrappedColumnLine {
+                    texts: &mut texts,
+                    x: lx_play,
+                    y: &mut ly_play,
+                    col_w: play_col_w,
+                    font_px: px_detail,
+                    line_h: h_detail,
+                    text: &format!(
                         "Ante {}/{} · Target {}",
                         pick.ante,
                         crate::game::run::FINAL_ANTE,
                         target_value,
                     ),
-                    play_color,
-                    TextAlign::Right,
-                );
+                    color: play_color,
+                    align: TextAlign::Right,
+                });
                 ly_play += 4.0;
-                push_wrapped_column_line(
-                    &mut texts,
-                    lx_play,
-                    &mut ly_play,
-                    play_col_w,
-                    px_detail,
-                    h_detail,
-                    &format!("Reward ${}{}", upcoming.clear_reward(), stake_suffix),
-                    play_color,
-                    TextAlign::Right,
-                );
+                push_wrapped_column_line(WrappedColumnLine {
+                    texts: &mut texts,
+                    x: lx_play,
+                    y: &mut ly_play,
+                    col_w: play_col_w,
+                    font_px: px_detail,
+                    line_h: h_detail,
+                    text: &format!("Reward ${}{}", upcoming.clear_reward(), stake_suffix),
+                    color: play_color,
+                    align: TextAlign::Right,
+                });
                 if upcoming == BlindKind::Boss {
                     ly_play += 4.0;
                     if let Some(desc) = pick.boss_description.as_deref() {
-                        push_wrapped_column_line(
-                            &mut texts,
-                            lx_play,
-                            &mut ly_play,
-                            play_col_w,
-                            px_detail,
-                            h_detail * 1.35,
-                            desc,
-                            color::AMBER,
-                            TextAlign::Right,
-                        );
+                        push_wrapped_column_line(WrappedColumnLine {
+                            texts: &mut texts,
+                            x: lx_play,
+                            y: &mut ly_play,
+                            col_w: play_col_w,
+                            font_px: px_detail,
+                            line_h: h_detail * 1.35,
+                            text: desc,
+                            color: color::AMBER,
+                            align: TextAlign::Right,
+                        });
                     }
                 }
                 if can_skip {
@@ -680,41 +697,41 @@ impl SceneBehavior for PickBlindScene {
                             },
                             source: skip_tag_icon_source(tag),
                         });
-                        push_wrapped_column_line(
-                            &mut texts,
-                            text_x,
-                            &mut ly_text,
-                            text_col_w,
-                            px_blind,
-                            h_blind,
-                            tag.name(),
-                            skip_color,
-                            TextAlign::Left,
-                        );
+                        push_wrapped_column_line(WrappedColumnLine {
+                            texts: &mut texts,
+                            x: text_x,
+                            y: &mut ly_text,
+                            col_w: text_col_w,
+                            font_px: px_blind,
+                            line_h: h_blind,
+                            text: tag.name(),
+                            color: skip_color,
+                            align: TextAlign::Left,
+                        });
                         ly_text += 6.0;
-                        push_wrapped_column_line(
-                            &mut texts,
-                            text_x,
-                            &mut ly_text,
-                            text_col_w,
-                            px_detail,
-                            h_detail,
-                            tag.description(),
-                            skip_color,
-                            TextAlign::Left,
-                        );
+                        push_wrapped_column_line(WrappedColumnLine {
+                            texts: &mut texts,
+                            x: text_x,
+                            y: &mut ly_text,
+                            col_w: text_col_w,
+                            font_px: px_detail,
+                            line_h: h_detail,
+                            text: tag.description(),
+                            color: skip_color,
+                            align: TextAlign::Left,
+                        });
                     } else {
-                        push_wrapped_column_line(
-                            &mut texts,
-                            lx_skip,
-                            &mut ly_skip,
-                            skip_col_w,
-                            px_detail,
-                            h_detail,
-                            "Tribute · Esc",
-                            skip_color,
-                            TextAlign::Left,
-                        );
+                        push_wrapped_column_line(WrappedColumnLine {
+                            texts: &mut texts,
+                            x: lx_skip,
+                            y: &mut ly_skip,
+                            col_w: skip_col_w,
+                            font_px: px_detail,
+                            line_h: h_detail,
+                            text: "Tribute · Esc",
+                            color: skip_color,
+                            align: TextAlign::Left,
+                        });
                     }
                 }
                 (pr, sr)

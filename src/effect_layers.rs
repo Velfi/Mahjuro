@@ -5,8 +5,19 @@
 //! individual fields on, or assign [`EffectLayers::FULL`], to restore visuals.
 
 use crate::main_render_settings::RenderSettings as AppRenderSettings;
-use crate::persistence::EffectsQuality;
+use crate::persistence::{EffectsQuality, SurfaceKind, TileMaterial, TilePreset};
 use crate::render::wgpu_renderer::RenderSettings as WgpuRenderSettings;
+
+/// Inputs for [`EffectLayers::wgpu_render_settings`].
+pub struct WgpuRenderSettingsParams<'a> {
+    pub gfx: &'a AppRenderSettings,
+    pub tile_preset: TilePreset,
+    pub tile_material: TileMaterial,
+    pub surface_kind: SurfaceKind,
+    pub tileset_name: String,
+    pub draw_settle_speed: f32,
+    pub sort_settle_speed: f32,
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct EffectLayers {
@@ -48,32 +59,23 @@ impl EffectLayers {
         fullscreen_water_backdrop: true,
     };
 
-    pub fn wgpu_render_settings(
-        self,
-        gfx: &AppRenderSettings,
-        tile_preset: crate::persistence::TilePreset,
-        tile_material: crate::persistence::TileMaterial,
-        surface_kind: crate::persistence::SurfaceKind,
-        tileset_name: String,
-        draw_settle_speed: f32,
-        sort_settle_speed: f32,
-    ) -> WgpuRenderSettings {
+    pub fn wgpu_render_settings(self, p: &WgpuRenderSettingsParams<'_>) -> WgpuRenderSettings {
         WgpuRenderSettings {
             effects_quality: if self.procedural_surface_quality {
-                gfx.effects_quality
+                p.gfx.effects_quality
             } else {
                 EffectsQuality::Off
             },
-            tile_preset,
-            tile_material,
-            surface_kind,
-            tileset_name,
-            draw_settle_speed,
-            sort_settle_speed,
-            gamma: gfx.gamma,
-            shadows_enabled: gfx.shadows_enabled && self.shadows,
-            ssr_enabled: gfx.ssr_enabled && self.ssr,
-            vhs_enabled: gfx.vhs_enabled,
+            tile_preset: p.tile_preset,
+            tile_material: p.tile_material,
+            surface_kind: p.surface_kind,
+            tileset_name: p.tileset_name.clone(),
+            draw_settle_speed: p.draw_settle_speed,
+            sort_settle_speed: p.sort_settle_speed,
+            gamma: p.gfx.gamma,
+            shadows_enabled: p.gfx.shadows_enabled && self.shadows,
+            ssr_enabled: p.gfx.ssr_enabled && self.ssr,
+            vhs_enabled: p.gfx.vhs_enabled,
         }
     }
 

@@ -665,7 +665,7 @@ mod tests {
                 mesh.vertices.len()
             );
             assert!(
-                mesh.indices.len() % 3 == 0,
+                mesh.indices.len().is_multiple_of(3),
                 "mesh_for({label:?}) index count not divisible by 3"
             );
         }

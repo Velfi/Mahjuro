@@ -47,7 +47,7 @@ impl ShopScene {
         ctx: &mut UpdateCtx<'_>,
     ) -> SceneTransition {
         let shop = GameEngine::read_shop(ctx.run);
-        let Some(hit) = live_shop_hit(
+        let hit = live_shop_hit(
             hit,
             self,
             &self.items,
@@ -55,9 +55,7 @@ impl ShopScene {
             &self.talisman_items,
             &self.pack_items,
             &shop,
-        ) else {
-            return None;
-        };
+        )?;
         if matches!(hit, ShopHit::Dish(id) if id == PICK_JOURNAL_BOOK) {
             if self.journal_transition.is_none() {
                 self.journal_transition = Some(JournalTransition {

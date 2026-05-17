@@ -232,7 +232,9 @@ impl App {
                     let celeb = PackCelebration::new(tiles, kind.name(), kind);
                     let inventory = s.tile_pack_celeb_inventory_counts(&self.run);
                     self.overlay_stack.push(Scene::Showcase(ShowcaseScene::new(
-                        ShowcasePresenter::TilePack(TilePackPresenter::new(celeb, inventory)),
+                        ShowcasePresenter::TilePack(Box::new(TilePackPresenter::new(
+                            celeb, inventory,
+                        ))),
                     )));
                     log::debug!("Opened tile pack celebration overlay");
                 }

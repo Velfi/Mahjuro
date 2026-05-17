@@ -203,78 +203,44 @@ impl WgpuRenderer {
         } else {
             1.0
         };
+        let punctual_bake = PunctualLightBakeParams {
+            src: &frame.scene_lighting.punctual,
+            candle_count: frame.candle_light_count,
+            flame_height_world: frame.flame_height_world,
+            lit_mesh_punctual_intensity_scale: lit_mesh_inv_scale,
+            screen_w: pl_w,
+            screen_h: pl_h,
+            gamma,
+            time: time_s,
+        };
+        let shop_camera_punctual =
+            |cam: &crate::render::draw_cmd::CameraParams| {
+                PointLightsBuf::from_scene_punctual_shop_camera(
+                    &PunctualLightBakeShopCameraParams {
+                        bake: &punctual_bake,
+                        cam,
+                    },
+                )
+            };
         let point_lights_buf = match (
             self.active_scene_key,
             frame.camera_override.as_ref(),
         ) {
             // Pack closeup has no showcase tiles; lights must still use the same
             // ray → plane_z mapping as perspective `Object3d` / showcase placement.
-            (Some("tile_pack_celebration"), Some(cam)) => {
-                PointLightsBuf::from_scene_punctual_shop_camera(
-                    &frame.scene_lighting.punctual,
-                    cam,
-                    frame.candle_light_count,
-                    frame.flame_height_world,
-                    lit_mesh_inv_scale,
-                    pl_w,
-                    pl_h,
-                    gamma,
-                    time_s,
-                )
-            }
+            (Some("tile_pack_celebration"), Some(cam)) => shop_camera_punctual(cam),
             (Some("showcase"), Some(cam))
                 if h.object3d_use_camera_ray_plane_z
                     || (h.showcase_tiles_use_camera_ray_plane_z && has_showcase_tiles) =>
             {
-                PointLightsBuf::from_scene_punctual_shop_camera(
-                    &frame.scene_lighting.punctual,
-                    cam,
-                    frame.candle_light_count,
-                    frame.flame_height_world,
-                    lit_mesh_inv_scale,
-                    pl_w,
-                    pl_h,
-                    gamma,
-                    time_s,
-                )
+                shop_camera_punctual(cam)
             }
-            (Some("shop"), Some(cam)) if has_showcase_tiles => {
-                PointLightsBuf::from_scene_punctual_shop_camera(
-                    &frame.scene_lighting.punctual,
-                    cam,
-                    frame.candle_light_count,
-                    frame.flame_height_world,
-                    lit_mesh_inv_scale,
-                    pl_w,
-                    pl_h,
-                    gamma,
-                    time_s,
-                )
-            }
+            (Some("shop"), Some(cam)) if has_showcase_tiles => shop_camera_punctual(cam),
             // Pick-blind always uses a perspective `camera_override` (hallway GLB).
             // Smooth fills must use the same ray → plane_z mapping as the env mesh;
             // `pixel_to_world` is not the inverse of that projection (see `world_space.rs`).
-            (Some("pick_blind"), Some(cam)) => PointLightsBuf::from_scene_punctual_shop_camera(
-                &frame.scene_lighting.punctual,
-                cam,
-                frame.candle_light_count,
-                frame.flame_height_world,
-                lit_mesh_inv_scale,
-                pl_w,
-                pl_h,
-                gamma,
-                time_s,
-            ),
-            _ => PointLightsBuf::from_scene_punctual(
-                &frame.scene_lighting.punctual,
-                frame.candle_light_count,
-                frame.flame_height_world,
-                lit_mesh_inv_scale,
-                pl_w,
-                pl_h,
-                gamma,
-                time_s,
-            ),
+            (Some("pick_blind"), Some(cam)) => shop_camera_punctual(cam),
+            _ => PointLightsBuf::from_scene_punctual(&punctual_bake),
         };
         self.queue.write_buffer(
             &self.point_lights_buffer,

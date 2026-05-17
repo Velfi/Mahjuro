@@ -747,6 +747,16 @@ pub enum PlaqueDecalStyle {
     WalnutInkOnLight,
 }
 
+/// Shadow / body / highlight tints and per-pass pixel offsets for plaque engraving.
+#[derive(Clone, Copy, Debug)]
+pub struct LabelStyleColors {
+    pub shadow: [f32; 4],
+    pub base: [f32; 4],
+    pub highlight: [f32; 4],
+    pub shadow_off: (u32, u32),
+    pub highlight_off: (i32, i32),
+}
+
 /// Same layout pipeline as [`rasterize_plaque_decal`] with a selectable ink palette.
 pub fn rasterize_plaque_decal_styled(
     text: &str,
@@ -790,49 +800,54 @@ pub fn rasterize_plaque_decal_styled(
     // handles multi-line layout (stable line-height, per-line alignment).
     let line_refs: Vec<&str> = chosen_lines.iter().map(|s| s.as_str()).collect();
     let block = rasterize_block(
-        font,
-        emoji_font,
+        &DecalFonts {
+            regular: font,
+            italic: None,
+            emoji: emoji_font,
+        },
         &line_refs,
-        inner_w,
-        inner_h,
-        Some(chosen_px),
-        LabelAlign::Center,
-        false,
+        &LabelBlockRasterParams {
+            width: inner_w,
+            height: inner_h,
+            font_px: Some(chosen_px),
+            align: LabelAlign::Center,
+            underline: false,
+        },
     );
 
     // Shadow / body / highlight tints + per-pass pixel offset (relative to the body pass).
     // Tighter offsets read as ink on a flat ground; larger offsets read as carved engraving.
-    let (shadow, base, highlight, shadow_off, highlight_off): (
-        [f32; 4],
-        [f32; 4],
-        [f32; 4],
-        (u32, u32),
-        (i32, i32),
-    ) = match style {
+    let LabelStyleColors {
+        shadow,
+        base,
+        highlight,
+        shadow_off,
+        highlight_off,
+    } = match style {
         PlaqueDecalStyle::GildedEngraving => {
             // Gilded letters: a deep umber drop-shadow under a rich gold body, topped
             // by a bright pale-gold highlight offset up-left. Three passes give the
             // engraving a metallic, leafed-gold read at any size.
-            (
-                [0.18_f32, 0.12, 0.04, 0.92], // burnt umber recess
-                [0.92_f32, 0.74, 0.28, 1.0],  // rich antique gold
-                [1.00_f32, 0.96, 0.74, 1.0],  // pale champagne sheen
-                (3, 3),
-                (-1, -1),
-            )
+            LabelStyleColors {
+                shadow: [0.18_f32, 0.12, 0.04, 0.92], // burnt umber recess
+                base: [0.92_f32, 0.74, 0.28, 1.0],    // rich antique gold
+                highlight: [1.00_f32, 0.96, 0.74, 1.0], // pale champagne sheen
+                shadow_off: (3, 3),
+                highlight_off: (-1, -1),
+            }
         }
         PlaqueDecalStyle::WalnutInkOnLight => {
             // Walnut / iron-gall ink on off-white board: keep the shadow tight and
             // soft so it reads as paper bleed instead of a second silhouette. No
             // bright top-pass — on white grounds a champagne lift would wash the
             // body out.
-            (
-                [0.10_f32, 0.06, 0.04, 0.32],
-                [0.22_f32, 0.13, 0.09, 1.0],
-                [0.0_f32, 0.0, 0.0, 0.0],
-                (1, 1),
-                (0, 0),
-            )
+            LabelStyleColors {
+                shadow: [0.10_f32, 0.06, 0.04, 0.32],
+                base: [0.22_f32, 0.13, 0.09, 1.0],
+                highlight: [0.0_f32, 0.0, 0.0, 0.0],
+                shadow_off: (1, 1),
+                highlight_off: (0, 0),
+            }
         }
     };
 
@@ -1816,14 +1831,19 @@ pub fn rasterize_label_styled_with_fallback(
     let lines: Vec<&str> = text.split('\n').collect();
     if lines.len() > 1 {
         return rasterize_block(
-            font,
-            emoji_font,
+            &DecalFonts {
+                regular: font,
+                italic: None,
+                emoji: emoji_font,
+            },
             &lines,
-            width,
-            height,
-            font_px_opt,
-            align,
-            underline,
+            &LabelBlockRasterParams {
+                width,
+                height,
+                font_px: font_px_opt,
+                align,
+                underline,
+            },
         );
     }
 
@@ -1888,18 +1908,44 @@ pub fn rasterize_label_styled_with_fallback(
     rgba
 }
 
+/// Primary / optional italic / emoji faces used by CPU label raster paths.
+pub struct DecalFonts<'a> {
+    pub regular: &'a fontdue::Font,
+    pub italic: Option<&'a fontdue::Font>,
+    pub emoji: Option<&'a fontdue::Font>,
+}
+
+/// Bitmap size and layout for [`rasterize_block`].
+pub struct LabelBlockRasterParams {
+    pub width: u32,
+    pub height: u32,
+    pub font_px: Option<f32>,
+    pub align: LabelAlign,
+    pub underline: bool,
+}
+
+/// Bitmap size and layout for mixed-style span rasterizers.
+pub struct LabelRasterParams {
+    pub width: u32,
+    pub height: u32,
+    pub font_px: f32,
+    pub align: LabelAlign,
+}
+
 /// Multi-line block layout. Lines are stacked vertically, all rendered at the
 /// same `font_px` so the paragraph reads as a coherent block.
 fn rasterize_block(
-    font: &fontdue::Font,
-    emoji_font: Option<&fontdue::Font>,
+    fonts: &DecalFonts<'_>,
     lines: &[&str],
-    width: u32,
-    height: u32,
-    font_px: Option<f32>,
-    align: LabelAlign,
-    underline: bool,
+    params: &LabelBlockRasterParams,
 ) -> Vec<u8> {
+    let LabelBlockRasterParams {
+        width,
+        height,
+        font_px,
+        align,
+        underline,
+    } = *params;
     // For multi-line blocks the font size MUST be pinned — auto-shrink would
     // produce different sizes per line which defeats the purpose. If the
     // caller didn't pin one, derive it from height / line_count.
@@ -1918,7 +1964,7 @@ fn rasterize_block(
         .map(|line| {
             let glyphs: Vec<(fontdue::Metrics, Vec<u8>)> = line
                 .chars()
-                .map(|ch| pick_font(font, emoji_font, ch).rasterize(ch, font_px))
+                .map(|ch| pick_font(fonts.regular, fonts.emoji, ch).rasterize(ch, font_px))
                 .collect();
             let advance: f32 = glyphs.iter().map(|(m, _)| m.advance_width).sum();
             LineGlyphs { glyphs, advance }
@@ -1926,7 +1972,7 @@ fn rasterize_block(
         .collect();
 
     // Use font.line_metrics for a stable line height across lines.
-    let line_metrics = font.horizontal_line_metrics(font_px);
+    let line_metrics = fonts.regular.horizontal_line_metrics(font_px);
     let (line_h, ascender_px) = if let Some(lm) = line_metrics {
         (lm.new_line_size, lm.ascent)
     } else {
@@ -2192,26 +2238,19 @@ fn pick_face_for_flavor<'a>(
     regular
 }
 
-fn flavor_cell_advance(
-    regular: &fontdue::Font,
-    italic: &fontdue::Font,
-    emoji: Option<&fontdue::Font>,
-    c: FlavorCell,
-    font_px: f32,
-) -> f32 {
-    let face = pick_face_for_flavor(regular, italic, emoji, c.ch, c.italic);
+fn flavor_italic_face<'a>(fonts: &DecalFonts<'a>) -> &'a fontdue::Font {
+    fonts.italic.unwrap_or(fonts.regular)
+}
+
+fn flavor_cell_advance(fonts: &DecalFonts<'_>, c: FlavorCell, font_px: f32) -> f32 {
+    let italic = flavor_italic_face(fonts);
+    let face = pick_face_for_flavor(fonts.regular, italic, fonts.emoji, c.ch, c.italic);
     face.metrics(c.ch, font_px).advance_width
 }
 
-fn flavor_line_advance(
-    regular: &fontdue::Font,
-    italic: &fontdue::Font,
-    emoji: Option<&fontdue::Font>,
-    line: &[FlavorCell],
-    font_px: f32,
-) -> f32 {
+fn flavor_line_advance(fonts: &DecalFonts<'_>, line: &[FlavorCell], font_px: f32) -> f32 {
     line.iter()
-        .map(|c| flavor_cell_advance(regular, italic, emoji, *c, font_px))
+        .map(|c| flavor_cell_advance(fonts, *c, font_px))
         .sum()
 }
 
@@ -2240,14 +2279,12 @@ fn trim_trailing_flavor_ws(line: &mut Vec<FlavorCell>) {
 }
 
 fn wrap_flavor_hard_line(
+    fonts: &DecalFonts<'_>,
     cells: &[FlavorCell],
     max_w: f32,
-    regular: &fontdue::Font,
-    italic: &fontdue::Font,
-    emoji: Option<&fontdue::Font>,
     font_px: f32,
 ) -> Vec<Vec<FlavorCell>> {
-    let space_w = regular.metrics(' ', font_px).advance_width;
+    let space_w = fonts.regular.metrics(' ', font_px).advance_width;
     let tokens = tokenize_flavor_cells(cells);
     if tokens.is_empty() {
         return vec![Vec::new()];
@@ -2258,7 +2295,7 @@ fn wrap_flavor_hard_line(
 
     for tok in &tokens {
         let is_ws = tok[0].ch.is_whitespace();
-        let tw = flavor_line_advance(regular, italic, emoji, tok, font_px);
+        let tw = flavor_line_advance(fonts, tok, font_px);
         if is_ws {
             if line.is_empty() {
                 continue;
@@ -2333,10 +2370,17 @@ fn flatten_raster_style_to_hard_lines(spans: &[RasterStyleSpan<'_>]) -> Vec<Vec<
     lines
 }
 
-fn blit_one_flavor_glyph(
-    rgba: &mut [u8],
+/// Destination bitmap + faces for mixed-style flavor glyph blits.
+struct FlavorBlitCtx<'a> {
+    rgba: &'a mut [u8],
     width: u32,
     height: u32,
+    fonts: &'a DecalFonts<'a>,
+    font_px: f32,
+}
+
+fn blit_one_flavor_glyph(
+    ctx: &mut FlavorBlitCtx<'_>,
     cx: f32,
     baseline_y: f32,
     m: fontdue::Metrics,
@@ -2357,9 +2401,9 @@ fn blit_one_flavor_glyph(
                 left: glyph_left,
                 top: glyph_top,
             },
-            rgba,
-            width,
-            height,
+            ctx.rgba,
+            ctx.width,
+            ctx.height,
         );
     };
     draw(0.0);
@@ -2368,18 +2412,8 @@ fn blit_one_flavor_glyph(
     }
 }
 
-fn blit_flavor_line(
-    line: &[FlavorCell],
-    rgba: &mut [u8],
-    width: u32,
-    height: u32,
-    start_x: f32,
-    baseline_y: f32,
-    regular: &fontdue::Font,
-    italic: &fontdue::Font,
-    emoji: Option<&fontdue::Font>,
-    font_px: f32,
-) {
+fn blit_flavor_line(ctx: &mut FlavorBlitCtx<'_>, line: &[FlavorCell], start_x: f32, baseline_y: f32) {
+    let italic = flavor_italic_face(ctx.fonts);
     let mut cx = start_x;
     let mut u_start: Option<f32> = None;
     for c in line {
@@ -2388,30 +2422,53 @@ fn blit_flavor_line(
                 u_start = Some(cx);
             }
         } else if let Some(sx) = u_start.take() {
-            draw_underline_span(rgba, width, height, sx, cx, baseline_y, font_px);
+            draw_underline_span(
+                ctx.rgba,
+                ctx.width,
+                ctx.height,
+                sx,
+                cx,
+                baseline_y,
+                ctx.font_px,
+            );
         }
-        let face = pick_face_for_flavor(regular, italic, emoji, c.ch, c.italic);
-        let (m, bmp) = face.rasterize(c.ch, font_px);
-        blit_one_flavor_glyph(rgba, width, height, cx, baseline_y, m, &bmp, c.bold);
+        let face = pick_face_for_flavor(
+            ctx.fonts.regular,
+            italic,
+            ctx.fonts.emoji,
+            c.ch,
+            c.italic,
+        );
+        let (m, bmp) = face.rasterize(c.ch, ctx.font_px);
+        blit_one_flavor_glyph(ctx, cx, baseline_y, m, &bmp, c.bold);
         cx += m.advance_width;
     }
     if let Some(sx) = u_start {
-        draw_underline_span(rgba, width, height, sx, cx, baseline_y, font_px);
+        draw_underline_span(
+            ctx.rgba,
+            ctx.width,
+            ctx.height,
+            sx,
+            cx,
+            baseline_y,
+            ctx.font_px,
+        );
     }
 }
 
 /// Multi-line mixed-style text (bold / italic / underline) at a fixed `font_px`,
 /// bottom-aligned in `height`. Used by relic flavor and UI styled labels.
 pub fn rasterize_label_raster_spans(
-    font: &fontdue::Font,
-    font_italic: &fontdue::Font,
-    emoji_font: Option<&fontdue::Font>,
+    fonts: &DecalFonts<'_>,
     spans: &[RasterStyleSpan<'_>],
-    width: u32,
-    height: u32,
-    font_px: f32,
-    align: LabelAlign,
+    params: &LabelRasterParams,
 ) -> Vec<u8> {
+    let LabelRasterParams {
+        width,
+        height,
+        font_px,
+        align,
+    } = *params;
     if spans.is_empty() {
         return vec![0u8; (width * height * 4) as usize];
     }
@@ -2424,13 +2481,13 @@ pub fn rasterize_label_raster_spans(
             soft_lines.push(Vec::new());
             continue;
         }
-        let mut wrapped = wrap_flavor_hard_line(hl, max_w, font, font_italic, emoji_font, font_px);
+        let mut wrapped = wrap_flavor_hard_line(fonts, hl, max_w, font_px);
         soft_lines.append(&mut wrapped);
     }
     if soft_lines.is_empty() {
         return vec![0u8; (width * height * 4) as usize];
     }
-    let line_metrics = font.horizontal_line_metrics(font_px);
+    let line_metrics = fonts.regular.horizontal_line_metrics(font_px);
     let (line_h, ascender_px) = if let Some(lm) = line_metrics {
         (lm.new_line_size, lm.ascent)
     } else {
@@ -2444,24 +2501,20 @@ pub fn rasterize_label_raster_spans(
             continue;
         }
         let baseline_y = block_top + i as f32 * line_h + ascender_px;
-        let adv = flavor_line_advance(font, font_italic, emoji_font, line, font_px);
+        let adv = flavor_line_advance(fonts, line, font_px);
         let start_x = match align {
             LabelAlign::Left => 0.0,
             LabelAlign::Center => (width as f32 - adv) * 0.5,
             LabelAlign::Right => width as f32 - adv,
         };
-        blit_flavor_line(
-            line,
-            &mut rgba,
+        let mut ctx = FlavorBlitCtx {
+            rgba: &mut rgba,
             width,
             height,
-            start_x,
-            baseline_y,
-            font,
-            font_italic,
-            emoji_font,
+            fonts,
             font_px,
-        );
+        };
+        blit_flavor_line(&mut ctx, line, start_x, baseline_y);
     }
     rgba
 }
@@ -2469,16 +2522,13 @@ pub fn rasterize_label_raster_spans(
 /// Multi-line relic inspect flavor: mixed regular/italic and faux-bold at a
 /// fixed `font_px`, bottom-aligned in `height`.
 pub fn rasterize_label_flavor_spans(
-    font: &fontdue::Font,
-    font_italic: &fontdue::Font,
-    emoji_font: Option<&fontdue::Font>,
+    fonts: &DecalFonts<'_>,
     spans: &[RelicFlavorSpan],
-    width: u32,
-    height: u32,
-    font_px: f32,
-    align: LabelAlign,
+    params: &LabelRasterParams,
 ) -> Vec<u8> {
     if spans.is_empty() {
+        let width = params.width;
+        let height = params.height;
         return vec![0u8; (width * height * 4) as usize];
     }
     let mapped: Vec<RasterStyleSpan> = spans
@@ -2490,16 +2540,7 @@ pub fn rasterize_label_flavor_spans(
             underline: false,
         })
         .collect();
-    rasterize_label_raster_spans(
-        font,
-        font_italic,
-        emoji_font,
-        &mapped,
-        width,
-        height,
-        font_px,
-        align,
-    )
+    rasterize_label_raster_spans(fonts, &mapped, params)
 }
 
 /// Compute per-character advance widths for text rendered in a rect.

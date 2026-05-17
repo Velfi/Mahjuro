@@ -780,7 +780,8 @@ pub(crate) use constants::clamp_render_physical_size;
 pub(crate) use hash_util::tablet_label_hash;
 pub use lighting_buffers::{PointLight, SpotLight};
 pub(crate) use lighting_buffers::{
-    PointLightsBuf, SpotLightsBuf, TileOccluderGpu, TileOccludersBuf,
+    PointLightsBuf, PunctualLightBakeParams, PunctualLightBakeShopCameraParams, SpotLightsBuf,
+    TileOccluderGpu, TileOccludersBuf,
 };
 pub(crate) use moon::current_moon_phase;
 pub(crate) use resources::{create_depth, create_depth_copy};

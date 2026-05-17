@@ -799,7 +799,7 @@ mod tests {
         // Force-compile-error if a new variant is added without classifying it.
         for &kind in ALL {
             #[allow(unused)]
-            let _exhaust_check = match kind {
+            match kind {
                 BossKind::Drought
                 | BossKind::Whisper
                 | BossKind::Tribute
@@ -823,8 +823,8 @@ mod tests {
                 | BossKind::Counterweight
                 | BossKind::TaxCollector
                 | BossKind::Dragon
-                | BossKind::House => (),
-            };
+                | BossKind::House => {}
+            }
             // Both presentation lookup and behaviour lookup must succeed.
             let _ = kind.def();
             let _ = boss_behavior(kind);

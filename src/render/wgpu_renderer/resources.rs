@@ -204,62 +204,66 @@ pub(super) fn upload_rgba_texture_linear(
     (tex, view)
 }
 
+pub(super) struct TextureUploadParams<'a> {
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub label: String,
+    pub rgba: &'a [u8],
+    pub width: u32,
+    pub height: u32,
+    pub format: wgpu::TextureFormat,
+    pub mips: bool,
+}
+
 /// Upload RGBA8 with optional CPU-generated mip chain (box filter).
 pub(super) fn upload_rgba_texture_with_mips(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    label: &str,
-    rgba: &[u8],
-    width: u32,
-    height: u32,
-    format: wgpu::TextureFormat,
-    mips: bool,
+    p: &TextureUploadParams<'_>,
 ) -> (wgpu::Texture, wgpu::TextureView) {
     use crate::render::gltf_helpers::{cpu_mip_chain_rgba8, mip_level_count};
-    let mip_levels = if mips && width.max(height) > 1 {
-        mip_level_count(width, height)
+    let mip_levels = if p.mips && p.width.max(p.height) > 1 {
+        mip_level_count(p.width, p.height)
     } else {
         1
     };
-    let tex = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some(label),
+    let tex = p.device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(p.label.as_str()),
         size: wgpu::Extent3d {
-            width,
-            height,
+            width: p.width,
+            height: p.height,
             depth_or_array_layers: 1,
         },
         mip_level_count: mip_levels,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format,
+        format: p.format,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
     if mip_levels == 1 {
-        queue.write_texture(
+        p.queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &tex,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            rgba,
+            p.rgba,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(width * 4),
-                rows_per_image: Some(height),
+                bytes_per_row: Some(p.width * 4),
+                rows_per_image: Some(p.height),
             },
             wgpu::Extent3d {
-                width,
-                height,
+                width: p.width,
+                height: p.height,
                 depth_or_array_layers: 1,
             },
         );
     } else {
-        let chain = cpu_mip_chain_rgba8(rgba.to_vec(), width, height);
+        let chain = cpu_mip_chain_rgba8(p.rgba.to_vec(), p.width, p.height);
         for (level, (data, mw, mh)) in chain.into_iter().enumerate() {
             let level = level as u32;
-            queue.write_texture(
+            p.queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
                     texture: &tex,
                     mip_level: level,

@@ -353,7 +353,7 @@ impl HallwayDistortion {
         self.bow[3] *= s.balloon_mul.max(0.0) * g;
         self.time_pulse[3] *= s.pulse_mul.max(0.0);
         self.time_pulse[1] *= s.drift_mul.max(0.0);
-        self.ceiling[2] *= s.pulse_mul.max(0.0).min(3.0);
+        self.ceiling[2] *= s.pulse_mul.clamp(0.0, 3.0);
     }
 }
 
@@ -401,7 +401,7 @@ impl HallwayDistortionDebugSnapshot {
 
 enum HallwayGlbCache {
     Uninit,
-    Ready(Option<RoomGlbCpu>),
+    Ready(Option<Box<RoomGlbCpu>>),
 }
 
 static HALLWAY_GLB_CPU: RwLock<HallwayGlbCache> = RwLock::new(HallwayGlbCache::Uninit);
@@ -430,7 +430,7 @@ fn ensure_hallway_glb_loaded() {
         log::warn!("hallway.glb not embedded");
         None
     };
-    *w = HallwayGlbCache::Ready(ready);
+    *w = HallwayGlbCache::Ready(ready.map(Box::new));
 }
 
 /// Read-only access to decoded hallway data.
@@ -476,7 +476,7 @@ fn hallway_walls_lateral_half_width(
     // Bimodal walls mesh (panel verts near the corridor + stray far verts): prefer the inner cluster.
     let half = if p90 > p50 * 4.0 { p50 } else { p90 };
     if half > 1e-4 {
-        Some(half.max(0.25).min(24.0))
+        Some(half.clamp(0.25, 24.0))
     } else {
         None
     }

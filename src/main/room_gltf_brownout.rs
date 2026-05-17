@@ -139,7 +139,7 @@ impl RoomGltfBrownout {
             let exp = (0.94 + 0.06 * fast2.abs()).clamp(0.88, 1.0);
             (gltf, exp, 1.0, 1.0, 1.0, 1.0)
         } else if t < tf + td {
-            let u = ((t - tf) / td).max(0.0).min(1.0);
+            let u = ((t - tf) / td).clamp(0.0, 1.0);
             let dip_k = Self::smoothstep01(u);
             let (b0, e0, a0, em0, p0, c0) = Self::dip_full(sev);
             let gltf = Self::lerp_f(1.0, b0, dip_k);
@@ -150,7 +150,7 @@ impl RoomGltfBrownout {
             let candle = Self::lerp_f(1.0, c0, dip_k);
             (gltf, exp, amb, em, punct, candle)
         } else {
-            let u = ((t - tf - td) / tr).max(0.0).min(1.0);
+            let u = ((t - tf - td) / tr).clamp(0.0, 1.0);
             let rec = Self::smoothstep01(u);
             let (b0, e0, a0, em0, p0, c0) = Self::dip_full(sev);
             let gltf = Self::lerp_f(b0, 1.0, rec);

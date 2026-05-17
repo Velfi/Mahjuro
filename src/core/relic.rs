@@ -762,7 +762,7 @@ pub fn relic_description_live(
         }
         RelicId::Snowball => {
             let raw = counters.get(&RelicId::Snowball).copied().unwrap_or(0);
-            let stacks = raw.max(0).min(SNOWBALL_STACK_CAP);
+            let stacks = raw.clamp(0, SNOWBALL_STACK_CAP);
             let chips = snowball_score_chips(raw);
             format!(
                 "{base} [{stacks}/{cap} clears, +{chips} chips this hand]",
@@ -974,6 +974,10 @@ impl RelicState {
 
     pub fn len(&self) -> usize {
         self.active.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn enabled_len(&self) -> usize {
@@ -1278,7 +1282,7 @@ pub fn snowball_score_chips(stacks: i32) -> i32 {
     if stacks <= 0 {
         return 0;
     }
-    let s = stacks.max(0).min(SNOWBALL_STACK_CAP);
+    let s = stacks.clamp(0, SNOWBALL_STACK_CAP);
     s * SNOWBALL_CHIPS_PER_CLEAR
 }
 

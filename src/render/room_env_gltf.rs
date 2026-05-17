@@ -93,7 +93,7 @@ pub struct RoomGltfEmbeddedCamera {
 
 impl RoomGltfEmbeddedCamera {
     pub fn to_camera_params(
-        &self,
+        self,
         window_h: f32,
         env_height_scale: f32,
         center_doc: Vec3,
@@ -821,20 +821,25 @@ pub trait RoomEnvWalkHooks {
     fn log_asset_label(&self) -> &'static str;
 }
 
+/// Mutable harvest targets for [`walk_room_env_node`].
+pub struct RoomEnvWalkState<'a> {
+    pub candle_node_prefix: &'a str,
+    pub markers: &'a mut FxHashMap<String, Mat4>,
+    pub env_primitives: &'a mut Vec<RoomEnvPrimitiveCpu>,
+    pub marker_mesh_bounds_doc: &'a mut FxHashMap<String, RoomEnvironmentBounds>,
+    pub collision_meshes: &'a mut Vec<RoomCollisionMesh>,
+    pub embedded_cameras: &'a mut EmbeddedCameraHarvest,
+    pub embedded_point_lights: &'a mut Vec<RoomGltfEmbeddedPointLight>,
+    pub embedded_spot_lights: &'a mut Vec<RoomGltfEmbeddedSpotLight>,
+    pub buffers: &'a [Vec<u8>],
+    pub images: &'a [gltf::image::Data],
+}
+
 pub fn walk_room_env_node(
     node: gltf::Node<'_>,
     parent: Mat4,
     hooks: &impl RoomEnvWalkHooks,
-    candle_node_prefix: &str,
-    markers: &mut FxHashMap<String, Mat4>,
-    env_primitives: &mut Vec<RoomEnvPrimitiveCpu>,
-    marker_mesh_bounds_doc: &mut FxHashMap<String, RoomEnvironmentBounds>,
-    collision_meshes: &mut Vec<RoomCollisionMesh>,
-    embedded_cameras: &mut EmbeddedCameraHarvest,
-    embedded_point_lights: &mut Vec<RoomGltfEmbeddedPointLight>,
-    embedded_spot_lights: &mut Vec<RoomGltfEmbeddedSpotLight>,
-    buffers: &[Vec<u8>],
-    images: &[gltf::image::Data],
+    state: &mut RoomEnvWalkState<'_>,
 ) -> anyhow::Result<()> {
     let label = hooks.log_asset_label();
     let local = Mat4::from_cols_array_2d(&node.transform().matrix());
@@ -846,10 +851,10 @@ pub fn walk_room_env_node(
             world,
             light,
             name,
-            candle_node_prefix,
+            state.candle_node_prefix,
             label,
-            embedded_point_lights,
-            embedded_spot_lights,
+            state.embedded_point_lights,
+            state.embedded_spot_lights,
         );
     }
 
@@ -857,7 +862,7 @@ pub fn walk_room_env_node(
         match cam.projection() {
             gltf::camera::Projection::Perspective(_) => {
                 if let Some(ec) = room_embedded_camera_from_node(world, cam) {
-                    embedded_cameras.insert(name, ec);
+                    state.embedded_cameras.insert(name, ec);
                 }
             }
             gltf::camera::Projection::Orthographic(_) => {
@@ -867,7 +872,7 @@ pub fn walk_room_env_node(
     }
 
     if hooks.is_marker(name)
-        && markers.insert(name.to_string(), world).is_some() {
+        && state.markers.insert(name.to_string(), world).is_some() {
             log::warn!(
                 "{label}: duplicate marker node name {:?} — using last transform",
                 name
@@ -880,13 +885,13 @@ pub fn walk_room_env_node(
                 if hooks.is_marker(name) {
                     let mut tris = Vec::new();
                     for prim in mesh.primitives() {
-                        match decode_collision_triangles(prim, world, buffers) {
+                        match decode_collision_triangles(prim, world, state.buffers) {
                             Ok(chunk) => tris.extend(chunk),
                             Err(e) => log::warn!("{label} node {:?} collision: {e:#}", name),
                         }
                     }
                     if !tris.is_empty() {
-                        collision_meshes.push(RoomCollisionMesh {
+                        state.collision_meshes.push(RoomCollisionMesh {
                             node_name: name.to_string(),
                             triangles: tris,
                         });
@@ -896,16 +901,17 @@ pub fn walk_room_env_node(
             RoomMeshPolicy::EnvironmentDrawWithCollision => {
                 let mut tris: Vec<[Vec3; 3]> = Vec::new();
                 for prim in mesh.primitives() {
-                    match decode_collision_triangles(prim.clone(), world, buffers) {
+                    match decode_collision_triangles(prim.clone(), world, state.buffers) {
                         Ok(chunk) => tris.extend(chunk),
                         Err(e) => log::warn!("{label} node {:?} collision: {e:#}", name),
                     }
-                    let decoded = decode_env_primitive(prim, world, buffers, images, label, name)?;
-                    merge_marker_mesh_bounds(marker_mesh_bounds_doc, name, &decoded);
-                    env_primitives.push(decoded);
+                    let decoded =
+                        decode_env_primitive(prim, world, state.buffers, state.images, label, name)?;
+                    merge_marker_mesh_bounds(state.marker_mesh_bounds_doc, name, &decoded);
+                    state.env_primitives.push(decoded);
                 }
                 if !tris.is_empty() {
-                    collision_meshes.push(RoomCollisionMesh {
+                    state.collision_meshes.push(RoomCollisionMesh {
                         node_name: name.to_string(),
                         triangles: tris,
                     });
@@ -913,32 +919,19 @@ pub fn walk_room_env_node(
             }
             RoomMeshPolicy::EnvironmentDraw => {
                 for prim in mesh.primitives() {
-                    let decoded = decode_env_primitive(prim, world, buffers, images, label, name)?;
+                    let decoded =
+                        decode_env_primitive(prim, world, state.buffers, state.images, label, name)?;
                     if hooks.is_marker(name) {
-                        merge_marker_mesh_bounds(marker_mesh_bounds_doc, name, &decoded);
+                        merge_marker_mesh_bounds(state.marker_mesh_bounds_doc, name, &decoded);
                     }
-                    env_primitives.push(decoded);
+                    state.env_primitives.push(decoded);
                 }
             }
         }
     }
 
     for child in node.children() {
-        walk_room_env_node(
-            child,
-            world,
-            hooks,
-            candle_node_prefix,
-            markers,
-            env_primitives,
-            marker_mesh_bounds_doc,
-            collision_meshes,
-            embedded_cameras,
-            embedded_point_lights,
-            embedded_spot_lights,
-            buffers,
-            images,
-        )?;
+        walk_room_env_node(child, world, hooks, state)?;
     }
     Ok(())
 }

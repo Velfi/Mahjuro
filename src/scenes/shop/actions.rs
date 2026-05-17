@@ -295,9 +295,9 @@ impl ShopScene {
     pub(super) fn continue_scene(&self, run: &mut crate::game::run::RunState) -> Scene {
         if self.mode == ShopMode::Tutorial {
             GameEngine::transition_to_onboarding_finale(run);
-            Scene::Gameplay(GameplayScene::with_pending_blind(
+            Scene::Gameplay(Box::new(GameplayScene::with_pending_blind(
                 crate::core::rules::BlindKind::Boss,
-            ))
+            )))
         } else {
             Scene::PickBlind(PickBlindScene::new())
         }
@@ -407,8 +407,8 @@ impl ShopScene {
                     n_owned_relics: shop_rm.owned_relics.len(),
                 };
                 *overlay_request = Some(OverlayRequest::Push(Box::new(Scene::Showcase(
-                    ShowcaseScene::new(ShowcasePresenter::TilePack(TilePackPresenter::new(
-                        celeb, inventory,
+                    ShowcaseScene::new(ShowcasePresenter::TilePack(Box::new(
+                        TilePackPresenter::new(celeb, inventory),
                     ))),
                 ))));
             }

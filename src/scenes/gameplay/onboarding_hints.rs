@@ -57,17 +57,18 @@ pub fn push_lessons_banner(frame: &mut UiFrame, ctx: &DrawCtx<'_>, run: &RunStat
     let banner_x = (w - banner_w) * 0.5;
     let banner_y = h * 0.055;
 
-    let mut quads = Vec::new();
-    quads.push(GpuInstance {
-        rect: [banner_x, banner_y, banner_w, banner_h],
-        color: color::alpha(color::WALNUT_INK, 0.92),
-        user: 0,
-    });
-    quads.push(GpuInstance {
-        rect: [banner_x, banner_y, banner_w, 3.0 * scale],
-        color: color::GOLD,
-        user: 0,
-    });
+    let quads = vec![
+        GpuInstance {
+            rect: [banner_x, banner_y, banner_w, banner_h],
+            color: color::alpha(color::WALNUT_INK, 0.92),
+            user: 0,
+        },
+        GpuInstance {
+            rect: [banner_x, banner_y, banner_w, 3.0 * scale],
+            color: color::GOLD,
+            user: 0,
+        },
+    ];
 
     let mut texts = Vec::new();
     widget::push_text_block(
@@ -127,17 +128,18 @@ pub fn push_finale_intro_banner(frame: &mut UiFrame, ctx: &DrawCtx<'_>, run: &Ru
     let panel_x = (w - panel_w) * 0.5;
     let panel_y = h * 0.12;
 
-    let mut quads = Vec::new();
-    quads.push(GpuInstance {
-        rect: [panel_x, panel_y, panel_w, panel_h],
-        color: color::alpha(color::WALNUT_DEEP, 0.94),
-        user: 0,
-    });
-    quads.push(GpuInstance {
-        rect: [panel_x, panel_y, 4.0 * scale, panel_h],
-        color: color::RUBY,
-        user: 0,
-    });
+    let quads = vec![
+        GpuInstance {
+            rect: [panel_x, panel_y, panel_w, panel_h],
+            color: color::alpha(color::WALNUT_DEEP, 0.94),
+            user: 0,
+        },
+        GpuInstance {
+            rect: [panel_x, panel_y, 4.0 * scale, panel_h],
+            color: color::RUBY,
+            user: 0,
+        },
+    ];
 
     let mut texts = Vec::new();
     widget::push_text_block(

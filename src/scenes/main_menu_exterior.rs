@@ -83,7 +83,7 @@ pub(crate) fn scene_from_resume(
     progress: &PlayerProgress,
 ) -> Scene {
     match resume_scene {
-        ResumeScene::Gameplay => Scene::Gameplay(GameplayScene::new()),
+        ResumeScene::Gameplay => Scene::Gameplay(Box::new(GameplayScene::new())),
         ResumeScene::Shop => {
             if GameEngine::resumes_to_tutorial_shop(run) {
                 Scene::Shop(ShopScene::new_tutorial(run))

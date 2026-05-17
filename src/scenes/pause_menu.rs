@@ -251,7 +251,7 @@ impl PauseMenu {
         // signals close, drop back to the pause root rather than resuming
         // the underlying scene — the player explicitly hit Pause.
         if let Some(opts) = self.options_overlay.as_mut() {
-            if opts.update_input(
+            if opts.update_input(crate::scenes::options::OptionsInput {
                 actions,
                 button_clicks,
                 cursor_pos,
@@ -260,7 +260,7 @@ impl PauseMenu {
                 scroll_lines,
                 input_mode,
                 mouse_left_down,
-            ) {
+            }) {
                 self.options_overlay = None;
             }
             if let Some(opts) = self.options_overlay.as_mut() {

@@ -9,7 +9,7 @@
 
 use glam::Vec3;
 
-use crate::render::lit_mesh::push_cylinder_z;
+use crate::render::lit_mesh::{push_cylinder_z, CylinderZParams, LitMeshBuffers};
 use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu};
 use crate::render::tile_glb::Vertex3dTex;
 
@@ -340,27 +340,33 @@ pub fn build_shop_bell_mesh() -> MeshCpu {
     );
 
     // ── Kasagata bead + suspension stem (bronze rod along +Z) ────────────
+    let mut buffers = LitMeshBuffers {
+        vertices: &mut vertices,
+        indices: &mut indices,
+    };
     push_cylinder_z(
-        &mut vertices,
-        &mut indices,
-        0.0,
-        0.0,
-        CAP_Z + 0.002,
-        CAP_Z + 0.095,
-        CAP_R * 0.72,
-        14,
+        &mut buffers,
+        &CylinderZParams {
+            cx: 0.0,
+            cy: 0.0,
+            z0: CAP_Z + 0.002,
+            z1: CAP_Z + 0.095,
+            radius: CAP_R * 0.72,
+            segments: 14,
+        },
     );
 
     // ── Shu-moku cord stub (thin braided hemp toward lamp smoke) ─────────
     push_cylinder_z(
-        &mut vertices,
-        &mut indices,
-        0.0,
-        0.0,
-        CAP_Z + 0.095,
-        CAP_Z + 0.26,
-        0.022,
-        10,
+        &mut buffers,
+        &CylinderZParams {
+            cx: 0.0,
+            cy: 0.0,
+            z0: CAP_Z + 0.095,
+            z1: CAP_Z + 0.26,
+            radius: 0.022,
+            segments: 10,
+        },
     );
 
     for v in vertices.iter_mut() {

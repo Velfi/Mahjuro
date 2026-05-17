@@ -23,7 +23,7 @@ use super::{DrawCtx, SceneBehavior, SceneTransition, UpdateCtx};
 
 /// Which flow is running on the showcase overlay.
 pub enum ShowcasePresenter {
-    TilePack(TilePackPresenter),
+    TilePack(Box<TilePackPresenter>),
     Zodiac(ZodiacPresenter),
     MetaLevelUp(MetaLevelUpPresenter),
     ShopInspect(ShopInspectPresenter),

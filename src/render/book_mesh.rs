@@ -31,7 +31,7 @@
 //!   * `≈ PAGE_UV_X`       : page-stack edge (cream stratified paper)
 //!   * `≈ RIBBON_UV_X`     : silk ribbon bookmark
 //!   * `≥ PAGE_CONTENT_UV_X`: page-content surface, sample journal
-//!                            target at (uv.x − 4.0, uv.y).
+//!     target at (uv.x − 4.0, uv.y).
 
 use crate::render::lit_mesh::{Aabb, MaterialKind, MaterialParams, MeshCpu, push_box};
 use crate::render::tile_glb::Vertex3dTex;

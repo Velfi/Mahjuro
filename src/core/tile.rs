@@ -251,7 +251,7 @@ mod sort_order_tests {
 
     #[test]
     fn cmp_sort_order_ranks_ascending_within_suit() {
-        let mut v = vec![
+        let mut v = [
             Tile::new(Suit::Dots, 7, 1),
             Tile::new(Suit::Dots, 2, 2),
             Tile::new(Suit::Dots, 5, 3),
@@ -264,7 +264,7 @@ mod sort_order_tests {
 
     #[test]
     fn cmp_sort_order_places_dots_before_dragons() {
-        let mut v = vec![Tile::new(Suit::Dragon, 1, 1), Tile::new(Suit::Dots, 5, 2)];
+        let mut v = [Tile::new(Suit::Dragon, 1, 1), Tile::new(Suit::Dots, 5, 2)];
         v.sort_by(cmp_sort_order);
         assert_eq!(v[0].suit, Suit::Dots);
         assert_eq!(v[1].suit, Suit::Dragon);

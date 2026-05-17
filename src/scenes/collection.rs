@@ -467,13 +467,13 @@ impl CollectionScene {
                         return out;
                     };
                     let model = room_glb::room_env_model_matrix_from_cpu(h, env_h, cpu);
-                    for slot in 0..archive_glb::ARCHIVE_SLOT_COUNT {
+                    for (slot, anchor_slot) in out.iter_mut().enumerate() {
                         let name = archive_glb::archive_spawn_item_marker_name(slot);
                         let Some(node) = cpu.markers.get(name) else {
                             continue;
                         };
                         let p = model.transform_point3(node.transform_point3(Vec3::ZERO));
-                        out[slot] = Some(surface_anchor_from_world_xyz(w, h, p));
+                        *anchor_slot = Some(surface_anchor_from_world_xyz(w, h, p));
                     }
                     out
                 });
@@ -486,8 +486,8 @@ impl CollectionScene {
                 let rect_w = cell_pitch * 0.95;
                 let rect_h = cell_pitch * 0.95;
                 let vp = camera_view_proj(w, h, &cam);
-                for slot in 0..page_size {
-                    let Some(anchor) = anchors[slot] else {
+                for (slot, anchor) in anchors.iter().enumerate().take(page_size) {
+                    let Some(anchor) = anchor else {
                         continue;
                     };
                     let global_idx = page * page_size + slot;
@@ -1060,17 +1060,17 @@ impl CollectionScene {
                     // world Y < 0 (closer). We want nameplates CLOSER than
                     // the grid plane, so add to cab_px_y.
                     let is_focus = col == focus_col && row == focus_row;
-                    collection_push_grid_cell_object3d(
-                        &mut plaques,
+                    collection_push_grid_cell_object3d(CollectionGridCellObject3d {
+                        plaques: &mut plaques,
                         boss,
-                        [cx, cab_px_y, cz],
+                        anchor: [cx, cab_px_y, cz],
                         cell,
                         fade,
                         is_focus,
                         boss_i,
-                        &self.positions.cubby_zodiac,
-                        ctx.layout,
-                    );
+                        cubby_zodiac: &self.positions.cubby_zodiac,
+                        layout: ctx.layout,
+                    });
                 }
             }
         } else if !chronicle_dashboard {
@@ -1080,21 +1080,21 @@ impl CollectionScene {
                     return out;
                 };
                 let model = room_glb::room_env_model_matrix_from_cpu(h, env_scale, cpu);
-                for slot in 0..archive_glb::ARCHIVE_SLOT_COUNT {
+                for (slot, anchor_slot) in out.iter_mut().enumerate() {
                     let name = archive_glb::archive_spawn_item_marker_name(slot);
                     let Some(node) = cpu.markers.get(name) else {
                         continue;
                     };
                     let p = model.transform_point3(node.transform_point3(Vec3::ZERO));
-                    out[slot] = Some(surface_anchor_from_world_xyz(w, h, p));
+                    *anchor_slot = Some(surface_anchor_from_world_xyz(w, h, p));
                 }
                 out
             });
             let page_size = archive_page_size();
             let page_count = archive_page_count(bosses.len());
             let page = self.archive_page.min(page_count.saturating_sub(1));
-            for slot in 0..page_size {
-                let Some(anchor) = anchors[slot] else {
+            for (slot, anchor) in anchors.iter().enumerate().take(page_size) {
+                let Some(anchor) = anchor else {
                     continue;
                 };
                 let global_idx = page * page_size + slot;
@@ -1103,17 +1103,17 @@ impl CollectionScene {
                 }
                 let boss = &bosses[global_idx];
                 let is_focus = focus_flat as usize == global_idx;
-                collection_push_grid_cell_object3d(
-                    &mut plaques,
+                collection_push_grid_cell_object3d(CollectionGridCellObject3d {
+                    plaques: &mut plaques,
                     boss,
-                    anchor,
+                    anchor: *anchor,
                     cell,
-                    1.0,
+                    fade: 1.0,
                     is_focus,
-                    global_idx as i32,
-                    &self.positions.cubby_zodiac,
-                    ctx.layout,
-                );
+                    boss_i: global_idx as i32,
+                    cubby_zodiac: &self.positions.cubby_zodiac,
+                    layout: ctx.layout,
+                });
             }
         }
 
@@ -2708,17 +2708,30 @@ fn collection_hud_anchor_on_cam_plane(
 /// `cubby_zodiac` is folded in for `ArtifactKind::Zodiac` only so the ribbon
 /// can be re-centred inside its cubby via arrange mode (shared target so
 /// every cubby ribbon moves together).
-fn collection_push_grid_cell_object3d(
-    plaques: &mut Vec<Object3d>,
-    boss: &Artifact,
+struct CollectionGridCellObject3d<'a> {
+    plaques: &'a mut Vec<Object3d>,
+    boss: &'a Artifact,
     anchor: [f32; 3],
     cell: f32,
     fade: f32,
     is_focus: bool,
     boss_i: i32,
-    cubby_zodiac: &crate::ui::placement::Placement,
-    layout: &crate::ui::layout::LayoutResult,
-) {
+    cubby_zodiac: &'a crate::ui::placement::Placement,
+    layout: &'a crate::ui::layout::LayoutResult,
+}
+
+fn collection_push_grid_cell_object3d(p: CollectionGridCellObject3d<'_>) {
+    let CollectionGridCellObject3d {
+        plaques,
+        boss,
+        anchor,
+        cell,
+        fade,
+        is_focus,
+        boss_i,
+        cubby_zodiac,
+        layout,
+    } = p;
     let cx = anchor[0];
     let cz = anchor[2];
     let nameplate_py = anchor[1] + if is_focus { cell * 0.5 } else { cell * 0.15 };
@@ -3326,26 +3339,26 @@ fn archive_section_tab_hit_rects(
 ) -> Option<Vec<(usize, [f32; 4])>> {
     archive_glb::with_archive_glb_cpu(|opt| {
         let cpu = opt?;
-        let left = room_glb::screen_rect_for_marker_mesh_bounds(
-            w,
-            h,
+        let left = room_glb::screen_rect_for_marker_mesh_bounds(&room_glb::MarkerScreenRectParams {
+            win_w: w,
+            win_h: h,
             cam,
-            env_h,
+            env_height_scale: env_h,
             cpu,
-            archive_glb::SECTION_BUTTONS_LEFT_BOUND,
-            48.0,
-            32.0,
-        )?;
-        let right = room_glb::screen_rect_for_marker_mesh_bounds(
-            w,
-            h,
+            node_name: archive_glb::SECTION_BUTTONS_LEFT_BOUND,
+            min_rw: 48.0,
+            min_rh: 32.0,
+        })?;
+        let right = room_glb::screen_rect_for_marker_mesh_bounds(&room_glb::MarkerScreenRectParams {
+            win_w: w,
+            win_h: h,
             cam,
-            env_h,
+            env_height_scale: env_h,
             cpu,
-            archive_glb::SECTION_BUTTONS_RIGHT_BOUND,
-            48.0,
-            32.0,
-        )?;
+            node_name: archive_glb::SECTION_BUTTONS_RIGHT_BOUND,
+            min_rw: 48.0,
+            min_rh: 32.0,
+        })?;
         let mut out = Vec::new();
         let distribute = |parent: [f32; 4], tabs: &[usize], out: &mut Vec<(usize, [f32; 4])>| {
             if tabs.is_empty() {

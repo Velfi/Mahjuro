@@ -812,19 +812,48 @@ pub fn push_box(vertices: &mut Vec<Vertex3dTex>, indices: &mut Vec<u32>, aabb: A
     }
 }
 
+/// Vertex/index targets for procedural lit-mesh builders.
+pub struct LitMeshBuffers<'a> {
+    pub vertices: &'a mut Vec<Vertex3dTex>,
+    pub indices: &'a mut Vec<u32>,
+}
+
+/// Right circular cylinder with axis parallel to **+Y**.
+#[derive(Clone, Copy, Debug)]
+pub struct CylinderYParams {
+    pub cx: f32,
+    pub cz: f32,
+    pub y0: f32,
+    pub y1: f32,
+    pub radius: f32,
+    pub segments: usize,
+}
+
+/// Right circular cylinder with axis parallel to **+Z**.
+#[derive(Clone, Copy, Debug)]
+pub struct CylinderZParams {
+    pub cx: f32,
+    pub cy: f32,
+    pub z0: f32,
+    pub z1: f32,
+    pub radius: f32,
+    pub segments: usize,
+}
+
 /// Right circular cylinder with axis parallel to **+Y**, spanning `y0..y1`,
 /// circular footprint centered at `(cx, cz)` in XZ. Includes both caps and a
 /// smooth-shaded barrel (radial normals). UVs zeroed.
-pub fn push_cylinder_y(
-    vertices: &mut Vec<Vertex3dTex>,
-    indices: &mut Vec<u32>,
-    cx: f32,
-    cz: f32,
-    y0: f32,
-    y1: f32,
-    radius: f32,
-    segments: usize,
-) {
+pub fn push_cylinder_y(buffers: &mut LitMeshBuffers<'_>, params: &CylinderYParams) {
+    let CylinderYParams {
+        cx,
+        cz,
+        y0,
+        y1,
+        radius,
+        segments,
+    } = *params;
+    let vertices = &mut *buffers.vertices;
+    let indices = &mut *buffers.indices;
     debug_assert!(y1 > y0);
     let n = segments.max(4);
     let two_pi = std::f32::consts::TAU;
@@ -928,16 +957,17 @@ pub fn push_cylinder_y(
 /// Right circular cylinder with axis parallel to **+Z**, spanning `z0..z1`,
 /// circular footprint centered at `(cx, cy)` in XY. Includes both caps and a
 /// smooth-shaded barrel (radial XY normals). UVs zeroed.
-pub fn push_cylinder_z(
-    vertices: &mut Vec<Vertex3dTex>,
-    indices: &mut Vec<u32>,
-    cx: f32,
-    cy: f32,
-    z0: f32,
-    z1: f32,
-    radius: f32,
-    segments: usize,
-) {
+pub fn push_cylinder_z(buffers: &mut LitMeshBuffers<'_>, params: &CylinderZParams) {
+    let CylinderZParams {
+        cx,
+        cy,
+        z0,
+        z1,
+        radius,
+        segments,
+    } = *params;
+    let vertices = &mut *buffers.vertices;
+    let indices = &mut *buffers.indices;
     debug_assert!(z1 > z0);
     let n = segments.max(4);
     let two_pi = std::f32::consts::TAU;

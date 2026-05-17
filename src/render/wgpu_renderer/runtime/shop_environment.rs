@@ -1,6 +1,17 @@
 use super::camera::CameraFrame;
 use super::*;
 
+struct GltfRoomEnvUniformParams<'a> {
+    frame: &'a crate::render::draw_cmd::UiFrame,
+    camera: &'a CameraFrame,
+    embedded_gltf_punctual: bool,
+    hallway_env: bool,
+    archive_env: bool,
+    bloom_linear_hdr_output: bool,
+    model: Mat4,
+    gpu: &'a ShopEnvironmentGpu,
+}
+
 impl WgpuRenderer {
     fn draw_gltf_room_env_meshes(
         &self,
@@ -115,17 +126,17 @@ impl WgpuRenderer {
         );
     }
 
-    fn write_gltf_room_env_uniforms(
-        &self,
-        frame: &crate::render::draw_cmd::UiFrame,
-        camera: &CameraFrame,
-        embedded_gltf_punctual: bool,
-        hallway_env: bool,
-        archive_env: bool,
-        bloom_linear_hdr_output: bool,
-        model: Mat4,
-        gpu: &ShopEnvironmentGpu,
-    ) {
+    fn write_gltf_room_env_uniforms(&self, p: GltfRoomEnvUniformParams<'_>) {
+        let GltfRoomEnvUniformParams {
+            frame,
+            camera,
+            embedded_gltf_punctual,
+            hallway_env,
+            archive_env,
+            bloom_linear_hdr_output,
+            model,
+            gpu,
+        } = p;
         let s =
             crate::render::room_glb::room_env_world_scale(camera.h, self.room_gltf_height_scale);
         let inv_doc_scale = if embedded_gltf_punctual || frame.shop_inspect_lit_mesh_hdr {
@@ -206,16 +217,16 @@ impl WgpuRenderer {
             })
         })
         .unwrap_or_else(|| Mat4::from_scale(glam::Vec3::splat(s)));
-        self.write_gltf_room_env_uniforms(
+        self.write_gltf_room_env_uniforms(GltfRoomEnvUniformParams {
             frame,
             camera,
-            frame.scene_lighting.embedded_gltf_punctual,
-            false,
-            false,
+            embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
+            hallway_env: false,
+            archive_env: false,
             bloom_linear_hdr_output,
             model,
             gpu,
-        );
+        });
     }
 
     pub(super) fn write_hallway_environment_uniforms(
@@ -239,16 +250,16 @@ impl WgpuRenderer {
             })
         })
         .unwrap_or_else(|| Mat4::from_scale(glam::Vec3::splat(s)));
-        self.write_gltf_room_env_uniforms(
+        self.write_gltf_room_env_uniforms(GltfRoomEnvUniformParams {
             frame,
             camera,
-            frame.scene_lighting.embedded_gltf_punctual,
-            true,
-            false,
+            embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
+            hallway_env: true,
+            archive_env: false,
             bloom_linear_hdr_output,
             model,
             gpu,
-        );
+        });
         let mut dist = frame
             .hallway_distortion
             .unwrap_or_default();
@@ -341,16 +352,16 @@ impl WgpuRenderer {
             })
         })
         .unwrap_or_else(|| Mat4::from_scale(glam::Vec3::splat(s)));
-        self.write_gltf_room_env_uniforms(
+        self.write_gltf_room_env_uniforms(GltfRoomEnvUniformParams {
             frame,
             camera,
-            frame.scene_lighting.embedded_gltf_punctual,
-            false,
-            true,
+            embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
+            hallway_env: false,
+            archive_env: true,
             bloom_linear_hdr_output,
             model,
             gpu,
-        );
+        });
     }
 
     #[inline]

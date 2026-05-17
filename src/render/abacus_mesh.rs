@@ -26,7 +26,8 @@
 //! No decal texture is bound — the abacus is purely geometric.
 
 use crate::render::lit_mesh::{
-    Aabb, MaterialKind, MaterialParams, MeshCpu, push_box, push_cylinder_y,
+    Aabb, CylinderYParams, LitMeshBuffers, MaterialKind, MaterialParams, MeshCpu, push_box,
+    push_cylinder_y,
 };
 use crate::render::theme::color;
 use crate::render::tile_glb::Vertex3dTex;
@@ -171,14 +172,15 @@ fn push_heaven_beads(vertices: &mut Vec<Vertex3dTex>, indices: &mut Vec<u32>) {
         for row in 0..HEAVEN_BEADS {
             let cz = heaven_z_top - row as f32 * bead_step_z;
             push_cylinder_y(
-                vertices,
-                indices,
-                cx,
-                cz,
-                BEAD_Y0,
-                BEAD_Y1,
-                BEAD_RADIUS,
-                BEAD_SEGMENTS,
+                &mut LitMeshBuffers { vertices, indices },
+                &CylinderYParams {
+                    cx,
+                    cz,
+                    y0: BEAD_Y0,
+                    y1: BEAD_Y1,
+                    radius: BEAD_RADIUS,
+                    segments: BEAD_SEGMENTS,
+                },
             );
         }
     }
@@ -197,14 +199,15 @@ fn push_earth_beads(vertices: &mut Vec<Vertex3dTex>, indices: &mut Vec<u32>) {
         for row in 0..EARTH_BEADS {
             let cz = earth_z_bot + row as f32 * bead_step_z;
             push_cylinder_y(
-                vertices,
-                indices,
-                cx,
-                cz,
-                BEAD_Y0,
-                BEAD_Y1,
-                BEAD_RADIUS,
-                BEAD_SEGMENTS,
+                &mut LitMeshBuffers { vertices, indices },
+                &CylinderYParams {
+                    cx,
+                    cz,
+                    y0: BEAD_Y0,
+                    y1: BEAD_Y1,
+                    radius: BEAD_RADIUS,
+                    segments: BEAD_SEGMENTS,
+                },
             );
         }
     }

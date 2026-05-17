@@ -124,16 +124,28 @@ pub(super) fn make_showcase_tile_gpu(
     }
 }
 
-pub(super) fn make_tile_face_overlay_gpu(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    layout: &wgpu::BindGroupLayout,
-    sampler: &wgpu::Sampler,
-    ui_font: Option<&fontdue::Font>,
-    emoji_font: Option<&fontdue::Font>,
-    tile: &Tile,
-    tile_set: Option<&str>,
-) -> TileFaceOverlayGpu {
+pub(super) struct TileFaceOverlayGpuParams<'a> {
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub layout: &'a wgpu::BindGroupLayout,
+    pub sampler: &'a wgpu::Sampler,
+    pub ui_font: Option<&'a fontdue::Font>,
+    pub emoji_font: Option<&'a fontdue::Font>,
+    pub tile: &'a Tile,
+    pub tile_set: Option<&'a str>,
+}
+
+pub(super) fn make_tile_face_overlay_gpu(p: &TileFaceOverlayGpuParams<'_>) -> TileFaceOverlayGpu {
+    let TileFaceOverlayGpuParams {
+        device,
+        queue,
+        layout,
+        sampler,
+        ui_font,
+        emoji_font,
+        tile,
+        tile_set,
+    } = *p;
     const DECAL_W: u32 = 192;
     const DECAL_H: u32 = 256;
     let rgba =

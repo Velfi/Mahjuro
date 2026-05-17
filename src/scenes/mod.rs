@@ -463,7 +463,7 @@ pub enum Scene {
     Shop(ShopScene),
     Showcase(ShowcaseScene),
     PickBlind(PickBlindScene),
-    Gameplay(GameplayScene),
+    Gameplay(Box<GameplayScene>),
     GameOver(GameOverScene),
     MeldGuide(MeldGuideScene),
     MaterialViewer(MaterialViewerScene),
