@@ -12,7 +12,7 @@ use crate::audio::SfxId;
 use crate::core::rules::BlindKind;
 use crate::game::engine::{GameCommand, GameEngine};
 use crate::game::event_bus::GameEvent;
-use crate::render::draw_cmd::{PromptIconQuad, ScenePunctualLight, UiFrame};
+use crate::render::draw_cmd::{ImageQuad, ScenePunctualLight, UiFrame};
 use crate::render::hallway_glb::{self, BTN_SKIP_ROUND};
 use crate::render::room_glb;
 use crate::render::theme::{color, metrics, typography};
@@ -468,7 +468,7 @@ impl SceneBehavior for PickBlindScene {
         // Outer edge columns: blind details (left), skip tag (right).
         let mut quads: Vec<GpuInstance> = Vec::new();
         let mut texts: Vec<TextLabel> = Vec::new();
-        let mut icon_cmds: Vec<PromptIconQuad> = Vec::new();
+        let mut icon_cmds: Vec<ImageQuad> = Vec::new();
         let mut buttons: Vec<ButtonDef> = Vec::new();
         let scale = metrics::scene_scale(w, h);
         let hide_scene_hud =
@@ -506,8 +506,7 @@ impl SceneBehavior for PickBlindScene {
                 let px_detail = typography::size(typography::H32, h);
                 let h_blind = px_blind * 1.42;
                 let h_detail = px_detail * 1.36;
-                let base_target = pick.base_target;
-                let upcoming_run_number = pick.run_number;
+                let target_value = pick.upcoming_target;
                 let blind_display = if upcoming == BlindKind::Boss {
                     pick.boss_name
                         .clone()
@@ -515,7 +514,6 @@ impl SceneBehavior for PickBlindScene {
                 } else {
                     upcoming.name().to_string()
                 };
-                let target_value = base_target.saturating_mul(upcoming_run_number);
                 let stake_suffix = match ctx.run.mode.stake {
                     crate::core::stake::Stake::Spring => String::new(),
                     other => format!(" · {}", other.label()),
@@ -689,7 +687,7 @@ impl SceneBehavior for PickBlindScene {
                         let icon_y = block_top + (skip_stack_h - skip_icon_px) * 0.5;
                         let text_x = lx_skip + skip_icon_px + skip_icon_gap;
                         let mut ly_text = block_top + (skip_stack_h - text_block_h) * 0.5;
-                        icon_cmds.push(PromptIconQuad {
+                        icon_cmds.push(ImageQuad {
                             inst: GpuInstance {
                                 rect: [lx_skip, icon_y, skip_icon_px, skip_icon_px],
                                 color: color::alpha(skip_color, 0.98),
@@ -784,7 +782,7 @@ impl SceneBehavior for PickBlindScene {
         frame.quads(quads);
         frame.texts(texts);
         if !icon_cmds.is_empty() {
-            frame.prompt_icon_quads(icon_cmds);
+            frame.image_quads(icon_cmds);
         }
 
         frame.buttons = buttons;

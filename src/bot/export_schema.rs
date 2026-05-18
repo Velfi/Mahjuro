@@ -113,6 +113,10 @@ pub struct PerRunAverages {
     pub relics_bought: f64,
     pub gold_spent: f64,
     pub gold_from_clears: f64,
+    /// `total_gold_from_clears / blinds_cleared_total` (batch ratio; 0 if no clears).
+    pub gold_per_blind_cleared: f64,
+    /// `(clears + skip-tags) / blinds_cleared_total`.
+    pub gold_per_blind_incl_skips: f64,
     pub gold_from_skip_tags: f64,
     pub skip_tag_gold_value: f64,
     pub gold_clear_base: f64,
@@ -203,10 +207,35 @@ pub struct SurplusSlotRow {
     pub bar_pct: f64,
 }
 
+/// OHLC-style bucket from a batch of per-run samples (body = Q1–Q3, wicks = min–max).
+#[derive(Serialize)]
+pub struct DistributionCandleRow {
+    pub label: String,
+    pub n: u32,
+    pub open: f64,
+    pub high: f64,
+    pub low: f64,
+    pub close: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<f64>,
+}
+
 #[derive(Serialize)]
 pub struct AvgTurnsClearRow {
     pub slot: String,
     pub avg_turns: f64,
+}
+
+/// Boss blind target vs mean round score per ante (overlaid bar chart).
+#[derive(Serialize)]
+pub struct BossBlindChartRow {
+    pub ante: u32,
+    pub target: u32,
+    pub avg_score: f64,
+    pub attempts: u32,
+    /// 0–100 vs max(target, avg) in the chart.
+    pub target_bar_pct: f64,
+    pub avg_bar_pct: f64,
 }
 
 #[derive(Serialize)]
@@ -329,7 +358,14 @@ pub struct BotReportDerived {
     /// Conditional death hazard: P(die on ante a | reached ante a).
     pub deaths_by_ante_hazard: Vec<DeathAnteHazardRow>,
     pub deaths_by_blind: Vec<NamedCountPct>,
+    /// Per-ante boss target (from `blind_target`) vs mean boss round score in this batch.
+    pub boss_blind_chart: Vec<BossBlindChartRow>,
+    pub target_scaling: f32,
     pub surplus_by_slot: Vec<SurplusSlotRow>,
+    /// Per blind-slot surplus distribution across runs (Q1/Q3 body, min/max wicks).
+    pub surplus_candles: Vec<DistributionCandleRow>,
+    /// Per-ante boss round-score distribution across runs; `target` = boss blind target.
+    pub boss_score_candles: Vec<DistributionCandleRow>,
     pub avg_turns_to_clear: Vec<AvgTurnsClearRow>,
     pub skip_tags: Vec<NamedCountPct>,
     pub consumable_zodiacs: Vec<NamedCount>,
@@ -359,7 +395,11 @@ impl Default for BotReportDerived {
             deaths_by_ante: Vec::new(),
             deaths_by_ante_hazard: Vec::new(),
             deaths_by_blind: Vec::new(),
+            boss_blind_chart: Vec::new(),
+            target_scaling: crate::core::blind_target::TARGET_SCALING,
             surplus_by_slot: Vec::new(),
+            surplus_candles: Vec::new(),
+            boss_score_candles: Vec::new(),
             avg_turns_to_clear: Vec::new(),
             skip_tags: Vec::new(),
             consumable_zodiacs: Vec::new(),

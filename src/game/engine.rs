@@ -264,7 +264,8 @@ pub struct GameplayReadModel {
     pub boss_ofuda_rule_text: String,
     pub run_number: u32,
     pub round_wind_rank: u8,
-    pub round_wind_label: &'static str,
+    pub bonus_round_wind_rank: Option<u8>,
+    pub round_wind_label: String,
     pub tiles_left: usize,
     pub dora_faces: Vec<(Suit, u8)>,
     pub dora_indicator_tiles: Vec<Tile>,
@@ -320,7 +321,7 @@ pub struct ShopReadModel {
     pub owned_talismans: Vec<ShopOwnedConsumable>,
     pub relic_counters: std::collections::BTreeMap<RelicId, i32>,
     pub total_score_earned: u64,
-    /// Score target for the next fight (`base_target * run_number`), for relic tooltips.
+    /// Score target for the upcoming blind (per-ante scaling), for relic tooltips.
     pub next_blind_target: u32,
 }
 
@@ -330,6 +331,7 @@ pub struct PickBlindReadModel {
     pub ante: u32,
     pub run_number: u32,
     pub base_target: u32,
+    pub upcoming_target: u32,
     pub skip_tag: Option<TagKind>,
     pub boss_kind: Option<BossKind>,
     pub boss_name: Option<String>,
@@ -423,9 +425,11 @@ impl<'a> GameEngine<'a> {
         if let Some(ref mut onboarding) = run.onboarding {
             onboarding.phase = OnboardingPhase::Shop;
         }
-        run.mode.hand_size = crate::game::run::HAND_SIZE;
-        run.mode.starting_plays = 5;
-        run.mode.starting_discards = 4;
+        use crate::game::game_mode::{HAND_SIZE, STARTING_PLAYS, STARTING_DISCARDS};
+        
+        run.mode.hand_size = HAND_SIZE;
+        run.mode.starting_plays = STARTING_PLAYS;
+        run.mode.starting_discards = STARTING_DISCARDS;
         run.mode.base_target = 220;
         run.base_target = 220;
         run.target_score = 220;
@@ -453,7 +457,11 @@ impl<'a> GameEngine<'a> {
     pub fn take_pending_zodiac_celebration(
         run: &mut RunState,
     ) -> Option<(crate::core::zodiac::ZodiacKind, YakuKind, u32)> {
-        run.pending_zodiac_celebration.take()
+        if run.pending_zodiac_celebrations.is_empty() {
+            None
+        } else {
+            Some(run.pending_zodiac_celebrations.remove(0))
+        }
     }
 
     pub fn set_finished_zodiac_celebration(
@@ -537,7 +545,7 @@ impl<'a> GameEngine<'a> {
             owned_talismans,
             relic_counters: run.relic_counters.clone(),
             total_score_earned: run.total_score_earned,
-            next_blind_target: run.base_target.saturating_mul(run.run_number),
+            next_blind_target: run.blind_score_target(run.upcoming_blind),
         }
     }
 
@@ -576,6 +584,7 @@ impl<'a> GameEngine<'a> {
             ante: run.ante,
             run_number: run.run_number,
             base_target: run.base_target,
+            upcoming_target: run.blind_score_target(run.upcoming_blind),
             skip_tag: run.tag_for_blind(run.upcoming_blind),
             boss_kind,
             boss_name,
@@ -671,6 +680,8 @@ impl<'a> GameEngine<'a> {
             (String::new(), String::new())
         };
         let round_wind = BlindKind::round_wind_for_ante(run.ante);
+        let bonus_round_wind = run.bonus_round_wind_for_yaku();
+        let round_wind_label = BlindKind::round_winds_label(round_wind, bonus_round_wind);
         GameplayReadModel {
             blind: run.blind,
             blind_label,
@@ -678,7 +689,8 @@ impl<'a> GameEngine<'a> {
             boss_ofuda_rule_text,
             run_number: run.run_number,
             round_wind_rank: round_wind,
-            round_wind_label: BlindKind::wind_name(round_wind),
+            bonus_round_wind_rank: bonus_round_wind,
+            round_wind_label,
             tiles_left: run.wall.remaining(),
             dora_faces: run.wall.dora_faces(),
             dora_indicator_tiles: run.wall.dora_indicator_tiles().to_vec(),

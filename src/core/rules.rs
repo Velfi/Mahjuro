@@ -97,6 +97,29 @@ impl BlindKind {
         }
     }
 
+    /// Random wind rank (1–4) other than the ante's round wind.
+    pub fn roll_bonus_round_wind_for_ante(ante: u32) -> u8 {
+        use rand::seq::IndexedRandom;
+
+        let primary = Self::round_wind_for_ante(ante);
+        let pool: Vec<u8> = (1u8..=4).filter(|w| *w != primary).collect();
+        *pool
+            .choose(&mut rand::rng())
+            .expect("three bonus winds exist")
+    }
+
+    /// HUD label for the active round wind(s).
+    pub fn round_winds_label(primary: u8, bonus: Option<u8>) -> String {
+        match bonus {
+            Some(b) => format!(
+                "{}+{}",
+                Self::wind_name(primary),
+                Self::wind_name(b)
+            ),
+            None => Self::wind_name(primary).to_string(),
+        }
+    }
+
     /// Flat gold reward for clearing this blind. Balatro-style: a fixed
     /// payout per blind, not scaled by overscoring. Late-run income comes
     /// from interest on banked gold and unused-plays payout, not from

@@ -10,14 +10,15 @@ pub(super) struct ProcessOpCtx<'a> {
     pub frame_pool_buffer: &'a wgpu::Buffer,
     pub bg_inst_buffers: &'a [crate::render::wgpu_renderer::frame_pool::PoolSlice],
     pub quad_buffers: &'a [crate::render::wgpu_renderer::frame_pool::PoolSlice],
+    pub overlay_quad_buffers: &'a [crate::render::wgpu_renderer::frame_pool::PoolSlice],
     pub gradient_quad_buffers: &'a [crate::render::wgpu_renderer::frame_pool::PoolSlice],
     pub squircle_quad_buffers: &'a [crate::render::wgpu_renderer::frame_pool::PoolSlice],
     pub flame_buffers: &'a [wgpu::Buffer],
     pub text_draws: &'a [TextDraw],
     pub tile_face_inst_buffers: &'a [wgpu::Buffer],
     pub tile_face_quads: &'a [TileFaceQuad],
-    pub prompt_icon_inst_buffers: &'a [wgpu::Buffer],
-    pub prompt_icon_quads: &'a [crate::render::draw_cmd::PromptIconQuad],
+    pub image_quad_inst_buffers: &'a [wgpu::Buffer],
+    pub image_quads: &'a [crate::render::draw_cmd::ImageQuad],
     pub object3d_draw_list: &'a [(DrawKind, usize)],
     pub showcase_tile_batches: &'a [&'a [ShowcaseTilePlacement]],
     pub tile_glows: &'a [GpuInstance],
@@ -45,14 +46,15 @@ impl WgpuRenderer {
         let frame = ctx.frame;
         let bg_inst_buffers = ctx.bg_inst_buffers;
         let quad_buffers = ctx.quad_buffers;
+        let overlay_quad_buffers = ctx.overlay_quad_buffers;
         let gradient_quad_buffers = ctx.gradient_quad_buffers;
         let squircle_quad_buffers = ctx.squircle_quad_buffers;
         let flame_buffers = ctx.flame_buffers;
         let text_draws = ctx.text_draws;
         let tile_face_inst_buffers = ctx.tile_face_inst_buffers;
         let tile_face_quads = ctx.tile_face_quads;
-        let prompt_icon_inst_buffers = ctx.prompt_icon_inst_buffers;
-        let prompt_icon_quads = ctx.prompt_icon_quads;
+        let image_quad_inst_buffers = ctx.image_quad_inst_buffers;
+        let image_quads = ctx.image_quads;
         let object3d_draw_list = ctx.object3d_draw_list;
         let showcase_tile_batches = ctx.showcase_tile_batches;
         let tile_glows = ctx.tile_glows;
@@ -117,6 +119,11 @@ impl WgpuRenderer {
             }
             RenderOp::EmberDrift => {
                 pass.set_pipeline(&self.ember_drift_pipeline);
+                pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                pass.draw(0..3, 0..1);
+            }
+            RenderOp::Rain => {
+                pass.set_pipeline(&self.rain_pipeline);
                 pass.set_bind_group(0, &self.globals_bind_group, &[]);
                 pass.draw(0..3, 0..1);
             }
@@ -376,6 +383,11 @@ impl WgpuRenderer {
                     self.draw_archive_environment_meshes(pass, frame, false);
                 }
             }
+            RenderOp::MainMenuEnvironment => {
+                if self.main_menu_environment.is_some() {
+                    self.draw_main_menu_environment_meshes(pass, frame, false);
+                }
+            }
             RenderOp::ShowcaseTileBatch(batch_idx) => {
                 if !self.tile_primitives.is_empty() {
                     let batch = showcase_tile_batches[*batch_idx];
@@ -466,7 +478,25 @@ impl WgpuRenderer {
             }
             RenderOp::QuadBatch { buf_idx, count } => {
                 let slice = quad_buffers[*buf_idx];
-                pass.set_pipeline(&self.quad_pipeline);
+                let pipe = if ctx.scene_hdr_attachment {
+                    &self.quad_pipeline
+                } else {
+                    &self.quad_pipeline_display
+                };
+                pass.set_pipeline(pipe);
+                pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                pass.set_vertex_buffer(
+                    1,
+                    ctx.frame_pool_buffer
+                        .slice(slice.offset..slice.offset + slice.byte_len),
+                );
+                pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                pass.draw_indexed(0..6, 0, 0..*count);
+            }
+            RenderOp::OverlayQuadBatch { buf_idx, count } => {
+                let slice = overlay_quad_buffers[*buf_idx];
+                pass.set_pipeline(&self.quad_pipeline_display);
                 pass.set_bind_group(0, &self.globals_bind_group, &[]);
                 pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                 pass.set_vertex_buffer(
@@ -505,13 +535,14 @@ impl WgpuRenderer {
             }
             RenderOp::FlameBatch { buf_idx, count } => {
                 if *count > 0 && *buf_idx != usize::MAX {
+                    let mesh = &self.flame_volume_mesh;
                     pass.set_pipeline(&self.flame_pipeline);
                     pass.set_bind_group(0, &self.globals_bind_group, &[]);
                     pass.set_bind_group(1, &self.flame_view_bind_group, &[]);
-                    pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                    pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                     pass.set_vertex_buffer(1, flame_buffers[*buf_idx].slice(..));
-                    pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    pass.draw_indexed(0..6, 0, 0..*count);
+                    pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..mesh.index_count, 0, 0..*count);
                 }
             }
             RenderOp::TextDraw(idx) => {
@@ -553,35 +584,48 @@ impl WgpuRenderer {
                     face.tile.debuffed_visual,
                 );
                 if let Some(gpu) = self.tile_face_overlays.get(&key) {
-                    pass.set_pipeline(if scene_hdr_attachment {
-                        &self.image_pipeline_scene_hdr
-                    } else {
-                        &self.image_pipeline
-                    });
-                    pass.set_bind_group(0, &self.globals_bind_group, &[]);
-                    pass.set_bind_group(1, &gpu.bind_group, &[]);
-                    pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                    pass.set_vertex_buffer(1, tile_face_inst_buffers[*idx].slice(..));
-                    pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    pass.draw_indexed(0..6, 0, 0..1);
+                    self.draw_image_textured_quad(
+                        pass,
+                        scene_hdr_attachment,
+                        gpu,
+                        &tile_face_inst_buffers[*idx],
+                    );
                 }
             }
-            RenderOp::PromptIconQuad(idx) => {
-                let icon = &prompt_icon_quads[*idx];
-                if let Some(gpu) = self.prompt_icon_overlays.get(&icon.source.cache_key()) {
-                    pass.set_pipeline(if scene_hdr_attachment {
-                        &self.image_pipeline_scene_hdr
-                    } else {
-                        &self.image_pipeline
-                    });
-                    pass.set_bind_group(0, &self.globals_bind_group, &[]);
-                    pass.set_bind_group(1, &gpu.bind_group, &[]);
-                    pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                    pass.set_vertex_buffer(1, prompt_icon_inst_buffers[*idx].slice(..));
-                    pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    pass.draw_indexed(0..6, 0, 0..1);
+            RenderOp::ImageQuad(idx) => {
+                let quad = &image_quads[*idx];
+                if let Some(gpu) = self
+                    .image_quad_overlays
+                    .get(&quad.source.cache_key())
+                {
+                    self.draw_image_textured_quad(
+                        pass,
+                        scene_hdr_attachment,
+                        gpu,
+                        &image_quad_inst_buffers[*idx],
+                    );
                 }
             }
         }
+    }
+
+    fn draw_image_textured_quad(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        scene_hdr_attachment: bool,
+        gpu: &TileFaceOverlayGpu,
+        inst_buffer: &wgpu::Buffer,
+    ) {
+        pass.set_pipeline(if scene_hdr_attachment {
+            &self.image_pipeline_scene_hdr
+        } else {
+            &self.image_pipeline
+        });
+        pass.set_bind_group(0, &self.globals_bind_group, &[]);
+        pass.set_bind_group(1, &gpu.bind_group, &[]);
+        pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+        pass.set_vertex_buffer(1, inst_buffer.slice(..));
+        pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+        pass.draw_indexed(0..6, 0, 0..1);
     }
 }

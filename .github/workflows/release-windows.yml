@@ -188,7 +188,6 @@ jobs:
           Copy-Item "baked-packs\pack_manifest.json" "$stage\"
           Copy-Item "baked-packs\mahjuro-pack-shared.zip" "$stage\"
           Copy-Item "baked-packs\mahjuro-pack-gameplay.zip" "$stage\"
-          Copy-Item "baked-packs\mahjuro-pack-scene-main_menu.zip" "$stage\"
           Copy-Item "baked-packs\mahjuro-pack-music.zip" "$stage\"
           # Generate multi-resolution icon.ico from icon.png. ImageMagick is
           # preinstalled on GitHub Windows runners as `magick`.
@@ -243,7 +242,6 @@ jobs:
             "$ROOT/baked-packs/pack_manifest.json" \
             "$ROOT/baked-packs/mahjuro-pack-shared.zip" \
             "$ROOT/baked-packs/mahjuro-pack-gameplay.zip" \
-            "$ROOT/baked-packs/mahjuro-pack-scene-main_menu.zip" \
             "$ROOT/baked-packs/mahjuro-pack-music.zip"
           cd ../../..
           echo "filename=${ARCHIVE}" >> "$GITHUB_OUTPUT"

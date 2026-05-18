@@ -163,23 +163,6 @@ impl App {
                             r.resize(sz);
                         }
                     }
-                    WindowEvent::Shown
-                    | WindowEvent::FocusGained
-                    | WindowEvent::MouseEnter => {
-                        log::debug!(
-                            "window event {:?}: input={} mouse={}",
-                            win_event,
-                            shell.has_input_focus(),
-                            shell.has_mouse_focus()
-                        );
-                    }
-                    WindowEvent::FocusLost => {
-                        log::debug!(
-                            "window event FocusLost: input={} mouse={}",
-                            shell.has_input_focus(),
-                            shell.has_mouse_focus()
-                        );
-                    }
                     _ => {}
                 }
             }
@@ -551,7 +534,7 @@ impl App {
                 return Ok(());
             }
         }
-        if let Some(ref mut o) = self.debug.shop_env_debug_overlay {
+        if let Some(ref mut o) = self.debug.scene_look_debug_overlay {
             let ctrl = mod_ctrl(self.modifiers) || mod_gui(self.modifiers);
             if o.feed_key_event(scancode, ctrl) {
                 return Ok(());

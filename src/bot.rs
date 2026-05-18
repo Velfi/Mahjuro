@@ -28,7 +28,7 @@ use crate::core::relic::{
     relic_shop_price,
 };
 use crate::core::rules::{BlindKind, RuleModifier};
-use crate::core::scoring::score_sets_with_original;
+use crate::core::scoring::{format_meld_groups, score_sets_with_original};
 use crate::core::structure::StructureTriggerMeta;
 use crate::core::talisman::TalismanKind;
 use crate::core::tile::{Suit, Tile};
@@ -36,7 +36,7 @@ use crate::core::tile_pack::TilePackKind;
 use crate::core::zodiac::{YakuLevels, ZodiacKind};
 use crate::game::event_bus::GameOverReason;
 use crate::game::event_bus::{EventBus, GameEvent};
-use crate::game::game_mode::GameMode;
+use crate::game::game_mode::{GameMode, HAND_SIZE};
 use crate::game::run::{FINAL_ANTE, RunState, relic_eligible_for_shop_stock};
 
 mod export_schema;
@@ -103,30 +103,6 @@ macro_rules! bot_log {
 
 fn blind_slot_key(run: &RunState) -> String {
     format!("{:02}-{}", run.ante, run.blind.name())
-}
-
-fn fmt_play_tiles(hand: &[Tile], indices: &[usize]) -> String {
-    let mut idx: Vec<usize> = indices.to_vec();
-    idx.sort_unstable();
-    idx.iter()
-        .filter_map(|&i| hand.get(i))
-        .map(|t| t.label())
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// Compact labels for the structure bank at cash-in (same `Tile::label` as plays).
-fn fmt_structure_cash_in(tiles: &[Tile]) -> Option<String> {
-    if tiles.is_empty() {
-        return None;
-    }
-    Some(
-        tiles
-            .iter()
-            .map(|t| t.label())
-            .collect::<Vec<_>>()
-            .join(" "),
-    )
 }
 
 fn blind_log_label(run: &RunState, blind: BlindKind) -> String {
@@ -340,6 +316,7 @@ fn bot_score_context_base<'a>(
             scored_last_turn: run.scored_last_turn,
             plays_used: plays_used_after,
             round_wind: Some(BlindKind::round_wind_for_ante(run.ante)),
+            bonus_round_wind: run.bonus_round_wind_for_yaku(),
             played_yaku_this_round: run.played_yaku_this_round.clone(),
             is_final_play: plays_rem_after == 0,
         },
@@ -387,7 +364,7 @@ fn structure_commit_fits(
         .chain(new_sets.iter())
         .filter(|s| s.kind == MeldKind::Kong)
         .count();
-    run.structure_tiles().len() + scoring_tile_count <= crate::game::run::HAND_SIZE + kongs_after
+    run.structure_tiles().len() + scoring_tile_count <= HAND_SIZE + kongs_after
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -397,15 +374,27 @@ struct PlayRank {
     tile_count: usize,
 }
 
+/// Convert immediate gold (Gilded, flowers, etc.) into shop-comparable score units.
+/// Uses the upcoming blind's chip target vs its flat clear payout as the exchange rate.
+fn shop_payoff_units(run: &RunState, score: u64, gold: i32) -> i64 {
+    let score_part = score as i64;
+    if gold <= 0 {
+        return score_part;
+    }
+    let target = run.target_score.max(1) as i64;
+    let clear_gold = run.blind.clear_reward().max(1) as i64;
+    score_part + gold as i64 * target / clear_gold
+}
+
 /// Best play from an explicit candidate mask list (used by [`best_play_in_hand`] and benches).
 /// Masks must be enumerated for **structure commits** (see [`RunState::validation_rules_for_structure_commits`]).
-fn evaluate_play_masks(
+fn evaluate_play_masks_payoff(
     run: &RunState,
     hand: &[Tile],
     relics_override: Option<&RelicState>,
     yaku_levels_override: Option<&YakuLevels>,
     masks: &[u32],
-) -> Option<(u64, Vec<usize>)> {
+) -> Option<(u64, i32, Vec<usize>)> {
     let n = hand.len();
     if !(2..=20).contains(&n) {
         return None;
@@ -416,7 +405,7 @@ fn evaluate_play_masks(
     let base_tile_len = run.structure_tiles().len();
     let mut merged_sets = run.structure_sets().to_vec();
     let mut merged_tiles = run.structure_tiles().to_vec();
-    let mut best: Option<(PlayRank, Vec<usize>)> = None;
+    let mut best: Option<(PlayRank, i32, Vec<usize>)> = None;
     for &mask in masks {
         let tiles = tiles_from_play_mask(hand, n, mask);
         let Some((sets, scoring_tiles)) = run.try_validate_with_wildcards(&tiles) else {
@@ -435,7 +424,7 @@ fn evaluate_play_masks(
         });
         let breakdown =
             score_sets_with_original(&merged_tiles, &merged_sets, &ctx, &run.round_rules, &tiles);
-        if breakdown.total == 0 {
+        if breakdown.total == 0 && breakdown.flower_gold <= 0 {
             continue;
         }
         let rank = PlayRank {
@@ -444,15 +433,27 @@ fn evaluate_play_masks(
             tile_count: scoring_tiles.len(),
         };
         let indices = indices_from_play_mask(n, mask);
+        let gold = breakdown.flower_gold;
         if best
             .as_ref()
-            .map(|(best_rank, _)| rank > *best_rank)
+            .map(|(best_rank, _, _)| rank > *best_rank)
             .unwrap_or(true)
         {
-            best = Some((rank, indices));
+            best = Some((rank, gold, indices));
         }
     }
-    best.map(|(rank, indices)| (rank.score, indices))
+    best.map(|(rank, gold, indices)| (rank.score, gold, indices))
+}
+
+fn evaluate_play_masks(
+    run: &RunState,
+    hand: &[Tile],
+    relics_override: Option<&RelicState>,
+    yaku_levels_override: Option<&YakuLevels>,
+    masks: &[u32],
+) -> Option<(u64, Vec<usize>)> {
+    evaluate_play_masks_payoff(run, hand, relics_override, yaku_levels_override, masks)
+        .map(|(score, _, indices)| (score, indices))
 }
 
 /// Masks that pass meld validation and structure-bank checks (still may score to zero).
@@ -791,7 +792,7 @@ fn emit_leaf_masks(
     must_play_five: bool,
     out: &mut rustc_hash::FxHashSet<u32>,
 ) {
-    for extra_mask in flower_only_masks(flowers) {
+    for extra_mask in flower_meld_partition_masks(flowers) {
         let total_mask = current_mask | extra_mask;
         let total_count = total_mask.count_ones() as usize;
         if total_count == 0 {
@@ -807,37 +808,12 @@ fn emit_leaf_masks(
     }
 }
 
-fn flower_only_masks(flowers: &[IndexedTile]) -> Vec<u32> {
-    let mut masks = vec![0];
-
-    for select_count in 2..=flowers.len().min(4) {
-        collect_flower_masks(flowers, select_count, 0, 0, &mut masks);
-    }
-
-    masks
-}
-
-fn collect_flower_masks(
-    flowers: &[IndexedTile],
-    select_count: usize,
-    start: usize,
-    current_mask: u32,
-    out: &mut Vec<u32>,
-) {
-    if select_count == 0 {
-        out.push(current_mask);
-        return;
-    }
-
-    for idx in start..=flowers.len() - select_count {
-        collect_flower_masks(
-            flowers,
-            select_count - 1,
-            idx + 1,
-            current_mask | (1 << flowers[idx].hand_index),
-            out,
-        );
-    }
+fn flower_meld_partition_masks(flowers: &[IndexedTile]) -> Vec<u32> {
+    let indexed: Vec<(usize, u32)> = flowers
+        .iter()
+        .map(|f| (f.hand_index, f.tile.id))
+        .collect();
+    crate::core::hand::decomposition::flower_meld_partition_masks(&indexed)
 }
 
 fn remove_flower(flowers: &[IndexedTile], remove_idx: usize) -> Vec<IndexedTile> {
@@ -1217,6 +1193,7 @@ fn play_blind(
         if trigger_preview > 0 && (best_score == 0 || trigger_preview >= best_score) {
             let score_before_structure = run.round_score;
             let cash_in_tiles = run.structure_tiles().to_vec();
+            let cash_in_sets = run.structure_sets().to_vec();
             let earned = run.trigger_structure_manual(&mut bus);
             stats.structure_triggers += 1;
             stats.structure_trigger_points += earned;
@@ -1238,7 +1215,7 @@ fn play_blind(
                 scoring_log.push(BotScoringAction {
                     kind: "structure".into(),
                     points: structure_delta,
-                    tiles: fmt_structure_cash_in(&cash_in_tiles),
+                    tiles: format_meld_groups(&cash_in_tiles, &cash_in_sets),
                 });
             }
             if earned > 0 {
@@ -1311,10 +1288,11 @@ fn play_blind(
             let hand_before = run.hand().to_vec();
             let mut idx_sorted: Vec<usize> = indices.to_vec();
             idx_sorted.sort_unstable();
-            let committed_tiles: Vec<Tile> = idx_sorted
+            let selected_tiles: Vec<Tile> = idx_sorted
                 .iter()
                 .filter_map(|&i| hand_before.get(i).copied())
                 .collect();
+            let commit_melds = run.try_validate_with_wildcards(&selected_tiles);
             run.clear_selection();
             for i in &indices {
                 run.toggle_select(*i);
@@ -1346,10 +1324,17 @@ fn play_blind(
             if play_delta > 0 {
                 let tiles = if run.structure_tiles().is_empty() {
                     let mut full = bank_before_commit;
-                    full.extend(committed_tiles);
-                    fmt_structure_cash_in(&full)
+                    if let Some((_, scoring_tiles)) = &commit_melds {
+                        full.extend(scoring_tiles.iter().copied());
+                    } else {
+                        full.extend(selected_tiles.iter().copied());
+                    }
+                    run.try_validate_with_wildcards(&full)
+                        .and_then(|(sets, _)| format_meld_groups(&full, &sets))
                 } else {
-                    Some(fmt_play_tiles(&hand_before, &indices))
+                    commit_melds.and_then(|(sets, scoring_tiles)| {
+                        format_meld_groups(&scoring_tiles, &sets)
+                    })
                 };
                 scoring_log.push(BotScoringAction {
                     kind: "play".into(),
@@ -1411,7 +1396,8 @@ mod tests {
     use crate::core::talisman::TalismanKind;
     use crate::core::tile::{Suit, Tile};
     use crate::core::zodiac::ZodiacKind;
-    use crate::game::run::{FINAL_ANTE, HAND_SIZE, RunState};
+    use crate::game::game_mode::HAND_SIZE;
+use crate::game::run::{FINAL_ANTE, RunState};
 
     fn brute_force_best_play_in_hand(run: &RunState) -> Option<(u64, Vec<usize>)> {
         #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -1449,7 +1435,7 @@ mod tests {
                 .filter(|s| s.kind == MeldKind::Kong)
                 .count();
             if run.structure_tiles().len() + scoring_tiles.len()
-                > crate::game::run::HAND_SIZE + kongs_after
+                > HAND_SIZE + kongs_after
             {
                 continue;
             }
@@ -1637,6 +1623,28 @@ mod tests {
     }
 
     #[test]
+    fn all_flower_hand_enumeration_matches_brute_force() {
+        let mut run = RunState::new_demo();
+        *run.hand_mut() = (1..=14)
+            .map(|i| t(Suit::Flower, ((i - 1) % 4) + 1, i as u32))
+            .collect();
+        run.hand_mut().sort();
+        assert_eq!(
+            best_play_in_hand(&run, run.hand(), None, None),
+            brute_force_best_play_in_hand(&run)
+        );
+    }
+
+    #[test]
+    fn wildflower_marginal_value_is_positive() {
+        let run = scoring_test_run();
+        assert!(
+            talisman_marginal_value(&run, TalismanKind::Wildflower) > 0,
+            "wildflower should score well on sampled hands"
+        );
+    }
+
+    #[test]
     fn candidate_masks_include_each_flower_identity_for_wildcard_melds() {
         let mut run = RunState::new_demo();
         *run.hand_mut() = vec![
@@ -1704,6 +1712,38 @@ mod tests {
     fn talisman_value_is_positive_when_it_buffs_a_scoring_hand() {
         let run = scoring_test_run();
         assert!(talisman_marginal_value(&run, TalismanKind::Pearl) > 0);
+    }
+
+    #[test]
+    fn gilded_talisman_shop_value_counts_gold_from_scored_melds() {
+        let run = scoring_test_run();
+        let pearl = talisman_marginal_value(&run, TalismanKind::Pearl);
+        let gilded = talisman_marginal_value(&run, TalismanKind::Gilded);
+        assert!(
+            gilded > 0,
+            "gilded should contribute shop value via gold (pearl={pearl}, gilded={gilded})"
+        );
+    }
+
+    #[test]
+    fn honors_talisman_values_hands_with_few_numbered_tiles() {
+        let mut run = scoring_test_run();
+        *run.hand_mut() = vec![
+            t(Suit::Characters, 3, 1),
+            t(Suit::Characters, 4, 2),
+            t(Suit::Characters, 5, 3),
+            t(Suit::Wind, 1, 4),
+            t(Suit::Wind, 1, 5),
+            t(Suit::Dragon, 1, 6),
+            t(Suit::Dragon, 1, 7),
+            t(Suit::Dragon, 1, 8),
+        ];
+        run.hand_mut().sort();
+        assert!(
+            super::transform_talisman_lift_on_hand(&run, run.hand(), TalismanKind::Honors)
+                .is_some(),
+            "honors should value hands with any numbered tiles"
+        );
     }
 
     #[test]
@@ -1824,6 +1864,21 @@ fn best_play_score_for_hand(
         .unwrap_or(0)
 }
 
+/// Best-play value for shop/talisman estimates: blind chips plus gold converted at
+/// target÷clear_reward so Gilded and other gold sources compete with score upgrades.
+fn best_play_shop_value_for_hand(
+    run: &RunState,
+    hand: &[Tile],
+    relics_override: Option<&RelicState>,
+    yaku_levels_override: Option<&YakuLevels>,
+) -> i64 {
+    let commit_rules = run.validation_rules_for_structure_commits();
+    let masks = enumerate_candidate_play_masks(hand, &commit_rules);
+    evaluate_play_masks_payoff(run, hand, relics_override, yaku_levels_override, &masks)
+        .map(|(score, gold, _)| shop_payoff_units(run, score, gold))
+        .unwrap_or(0)
+}
+
 /// Synthetic random hands per shop valuation (plus the real current hand).
 /// Late antes use fewer samples — each one runs `best_play_in_hand`.
 fn relic_eval_sample_count(ante: u32) -> usize {
@@ -1930,15 +1985,14 @@ fn zodiac_marginal_value_with_base(
     scale_long_term_value_for_ante((delta_sum / sample_count) as i32, run.ante)
 }
 
-/// Given a hand slice, pick a tile selection (indices into `hand`) for a
-/// selection-acting talisman and return the expected best-play score delta.
-/// Returns `None` for stochastic talismans (Honors/Wildflower/Conformity) or
-/// when no meaningful selection exists — the bot leaves those on the shelf.
-fn best_selection_for_talisman_on_hand(
+/// Simulate applying a transform talisman to every tile in `hand` and return
+/// the expected best-play score delta. Returns `None` when the transform would
+/// not change the hand.
+fn transform_talisman_lift_on_hand(
     run: &RunState,
     hand: &[Tile],
     kind: TalismanKind,
-) -> Option<(Vec<usize>, i64)> {
+) -> Option<i64> {
     use crate::core::tile::Suit;
     if hand.is_empty() {
         return None;
@@ -1972,13 +2026,11 @@ fn best_selection_for_talisman_on_hand(
             }
             simulated.sort();
             let after = best_play_score_for_hand(run, &simulated, None, None) as i64;
-            Some((sel, after - base))
+            Some(after - base)
         }
-        // Wildflower: selected tiles become flowers. Flowers are
-        // wildcards that score any meld, so the value comes from flooding
-        // the hand with them. Select every non-flower tile and simulate
-        // the transform — rank is randomized per tile but doesn't affect
-        // scoring (flowers are wildcards). Rank 1 is a fine placeholder.
+        // Wildflower: selected tiles become flowers. Flood the hand and
+        // simulate — ranks are randomized in-game but distinct ranks help
+        // the play enumerator distinguish flower identities.
         TalismanKind::Wildflower => {
             let sel: Vec<usize> = hand
                 .iter()
@@ -1990,20 +2042,17 @@ fn best_selection_for_talisman_on_hand(
                 return None;
             }
             let mut simulated = hand.to_vec();
-            for &i in &sel {
+            for (n, &i) in sel.iter().enumerate() {
                 simulated[i].suit = Suit::Flower;
-                simulated[i].rank = 1;
+                simulated[i].rank = ((n % 4) + 1) as u8;
             }
             simulated.sort();
             let after = best_play_score_for_hand(run, &simulated, None, None) as i64;
-            Some((sel, after - base))
+            Some(after - base)
         }
-        // Conformity: selected tiles become copies of a random hand tile
-        // (game-picked, including the selected set). Since the template is
-        // random, average the score delta over every possible template
-        // pick to get expected value. For the returned selection we just
-        // select every tile — any template then produces 14 copies of
-        // that template, which trivially scores Toitoi or similar.
+        // Conformity: every tile becomes a copy of a random hand tile. Since
+        // the template is random, average the score delta over every possible
+        // template pick to get expected value.
         TalismanKind::Conformity => {
             if hand.len() < 2 {
                 return None;
@@ -2020,66 +2069,49 @@ fn best_selection_for_talisman_on_hand(
                 let after = best_play_score_for_hand(run, &simulated, None, None) as i64;
                 total_delta += after - base;
             }
-            let avg_delta = total_delta / hand.len() as i64;
-            let sel: Vec<usize> = (0..hand.len()).collect();
-            Some((sel, avg_delta))
+            Some(total_delta / hand.len() as i64)
         }
-        // Honors: selected numbered tiles become random honors. The
-        // honors need to pair up to score, and the RNG outcome is wide,
-        // but the rule-of-thumb is that converting ~5 tiles produces
-        // roughly 2 scoring melds (a triplet + a pair). Simulate a
-        // deterministic "one dragon triplet + one wind triplet" outcome
-        // on 6 low-participation numbered tiles and measure the delta.
+        // Honors: every numbered tile becomes a random honor. Average several
+        // RNG draws to match in-game variance.
         TalismanKind::Honors => {
             use crate::core::tile::Suit;
-            let counts = tile_meld_participation(hand);
-            let mut indexed: Vec<(usize, u32)> = hand
+            let sel: Vec<usize> = hand
                 .iter()
                 .enumerate()
                 .filter(|(_, t)| t.is_number_tile())
-                .map(|(i, _)| (i, counts[i]))
+                .map(|(i, _)| i)
                 .collect();
-            if indexed.len() < 6 {
+            if sel.is_empty() {
                 return None;
             }
-            indexed.sort_by_key(|(_, c)| *c);
-            let sel: Vec<usize> = indexed.iter().take(6).map(|(i, _)| *i).collect();
-            let mut simulated = hand.to_vec();
-            // First 3 → Red Dragon, next 3 → East Wind. Deterministic
-            // stand-in for the "2 honor triplets" typical outcome.
-            for (n, &i) in sel.iter().enumerate() {
-                if n < 3 {
-                    simulated[i].suit = Suit::Dragon;
-                    simulated[i].rank = 1;
-                } else {
-                    simulated[i].suit = Suit::Wind;
-                    simulated[i].rank = 1;
+            const HONORS_SAMPLES: i64 = 8;
+            let honor_suits = [Suit::Wind, Suit::Dragon];
+            let mut total_delta: i64 = 0;
+            for _ in 0..HONORS_SAMPLES {
+                let mut rng = rand::rng();
+                let mut simulated = hand.to_vec();
+                for &i in &sel {
+                    let suit = honor_suits[rng.random_range(0..honor_suits.len())];
+                    simulated[i].suit = suit;
+                    simulated[i].rank = if suit == Suit::Wind {
+                        rng.random_range(1..=4)
+                    } else {
+                        rng.random_range(1..=3)
+                    };
                 }
+                simulated.sort();
+                let after = best_play_score_for_hand(run, &simulated, None, None) as i64;
+                total_delta += after - base;
             }
-            simulated.sort();
-            let after = best_play_score_for_hand(run, &simulated, None, None) as i64;
-            Some((sel, after - base))
+            Some(total_delta / HONORS_SAMPLES)
         }
         // Buff talismans should never reach this function.
         TalismanKind::Pearl | TalismanKind::Gilded | TalismanKind::Polychrome => None,
     }
 }
 
-/// Convenience wrapper that picks a selection on the bot's current hand.
-/// Used at talisman-use time (the hand is populated then).
-fn best_selection_for_talisman(run: &RunState, kind: TalismanKind) -> Option<(Vec<usize>, i64)> {
-    best_selection_for_talisman_on_hand(run, run.hand(), kind)
-}
-
-/// Estimate the score improvement from using a selection talisman on a
-/// typical future hand. Used at shop-time where the current hand is empty.
-///
-/// Selection talismans are **one-shot**: they fire on one hand and vanish.
-/// Relics, by contrast, apply to every future blind. To make the two
-/// valuations comparable, we discount the raw delta by roughly the number
-/// of blinds still ahead — a talisman worth +X on one hand is only worth
-/// +X/blinds_remaining versus a relic worth +X/blind on every blind.
-fn sampled_selection_talisman_value_with_base(
+/// Average per-hand lift from a transform talisman across the shop sample batch.
+fn sampled_transform_talisman_raw_avg(
     run: &RunState,
     kind: TalismanKind,
     base: &ShopMarginalBase,
@@ -2087,7 +2119,7 @@ fn sampled_selection_talisman_value_with_base(
     let mut delta_sum: i64 = 0;
     let mut count: i64 = 0;
     for hand in &base.hands {
-        if let Some((_, delta)) = best_selection_for_talisman_on_hand(run, hand, kind) {
+        if let Some(delta) = transform_talisman_lift_on_hand(run, hand, kind) {
             delta_sum += delta;
             count += 1;
         }
@@ -2095,9 +2127,33 @@ fn sampled_selection_talisman_value_with_base(
     if count == 0 {
         return 0;
     }
-    let avg = (delta_sum / count).max(0);
-    let remaining_blinds = (remaining_antes_including_current(run.ante) as i64 * 3).max(1);
-    (avg / remaining_blinds) as i32
+    (delta_sum / count).max(0) as i32
+}
+
+/// One-shot consumables only pay out once; scale down vs relics that persist every blind.
+fn talisman_one_shot_shop_value(raw_avg: i32, ante: u32) -> i32 {
+    if raw_avg <= 0 {
+        return 0;
+    }
+    let remaining_blinds = (remaining_antes_including_current(ante) as i64 * 3).max(1);
+    (raw_avg as i64 / remaining_blinds) as i32
+}
+
+fn buff_talisman_lift_on_hand(run: &RunState, hand: &[Tile], talisman: TalismanKind) -> i32 {
+    let baseline = best_play_shop_value_for_hand(run, hand, None, None);
+    let mut enhanced = hand.to_vec();
+    crate::core::talisman::apply_to_hand(&mut enhanced, talisman);
+    let buffed = best_play_shop_value_for_hand(run, &enhanced, None, None);
+    (buffed - baseline).max(0) as i32
+}
+
+fn buff_talisman_raw_avg(run: &RunState, talisman: TalismanKind, base: &ShopMarginalBase) -> i32 {
+    let mut delta_sum: i64 = 0;
+    for hand in &base.hands {
+        delta_sum += buff_talisman_lift_on_hand(run, hand, talisman) as i64;
+    }
+    let sample_count = base.hands.len() as i64;
+    (delta_sum / sample_count) as i32
 }
 
 fn talisman_marginal_value_with_base(
@@ -2105,30 +2161,22 @@ fn talisman_marginal_value_with_base(
     talisman: TalismanKind,
     base: &ShopMarginalBase,
 ) -> i32 {
-    if talisman.acts_on_selection() {
-        return sampled_selection_talisman_value_with_base(run, talisman, base);
-    }
-    if talisman.enhancement().is_none() {
-        return 0;
-    }
-    let mut delta_sum: i64 = 0;
-    for (h, hand) in base.hands.iter().enumerate() {
-        let mut enhanced = hand.clone();
-        crate::core::talisman::apply_to_hand(&mut enhanced, talisman);
-        let buffed = best_play_score_for_hand(run, &enhanced, None, None) as i64;
-        delta_sum += buffed - base.baseline[h] as i64;
-    }
-    let sample_count = base.hands.len() as i64;
-    let raw = (delta_sum / sample_count) as i32;
+    let raw_avg = if let Some(_) = talisman.enhancement() {
+        buff_talisman_raw_avg(run, talisman, base)
+    } else {
+        sampled_transform_talisman_raw_avg(run, talisman, base)
+    };
     if run.relics.has(RelicId::BrocadePouch) {
-        return scale_long_term_value_for_ante(raw, run.ante);
+        return scale_long_term_value_for_ante(raw_avg, run.ante);
     }
+    let mut mv = talisman_one_shot_shop_value(raw_avg, run.ante);
     if matches!(talisman, TalismanKind::Polychrome | TalismanKind::Pearl) {
-        return raw.saturating_mul(2);
+        mv = mv.saturating_mul(2);
     }
-    raw
+    mv
 }
 
+#[cfg(test)]
 fn talisman_marginal_value(run: &RunState, talisman: TalismanKind) -> i32 {
     talisman_marginal_value_with_base(run, talisman, &ShopMarginalBase::new(run))
 }
@@ -2209,16 +2257,14 @@ fn use_bot_consumables(run: &mut RunState, stats: &mut RunStats, log: bool) -> b
         let Consumable::Talisman(kind) = consumable else {
             continue;
         };
-        // At use-time, evaluate against the actual current hand rather
-        // than the sampled shop-time estimate. Selection talismans score
-        // their real score lift on this specific hand; buff talismans use
-        // the existing marginal-value function.
-        let delta = if kind.acts_on_selection() {
-            best_selection_for_talisman(run, kind)
-                .map(|(_, d)| d.max(0) as i32)
+        // At use-time, evaluate against the actual current hand (not the
+        // shop's sampled / discounted estimate).
+        let delta = if kind.enhancement().is_none() {
+            transform_talisman_lift_on_hand(run, run.hand(), kind)
+                .map(|d| d.max(0) as i32)
                 .unwrap_or(0)
         } else {
-            talisman_marginal_value(run, kind)
+            buff_talisman_lift_on_hand(run, run.hand(), kind)
         };
         if delta <= 0 {
             continue;
@@ -2233,24 +2279,6 @@ fn use_bot_consumables(run: &mut RunState, stats: &mut RunStats, log: bool) -> b
     }
 
     if let Some((idx, kind, delta)) = best_talisman {
-        if kind.acts_on_selection() {
-            let Some((selection, _)) = best_selection_for_talisman(run, kind) else {
-                // Valuation returned >0 but no usable selection — bail
-                // rather than consuming with an empty selection, which the
-                // run-state guards against anyway.
-                return used_any;
-            };
-            // Clear any stale selection, then select the chosen tiles.
-            let existing: Vec<usize> = (0..run.hand().len())
-                .filter(|&i| run.selected_slice().get(i).copied().unwrap_or(false))
-                .collect();
-            for i in existing {
-                run.toggle_select(i);
-            }
-            for i in &selection {
-                run.toggle_select(*i);
-            }
-        }
         let _ = run.use_consumable(idx, &mut crate::game::event_bus::EventBus::default());
         *stats.talismans_used.entry(kind.name()).or_insert(0) += 1;
         bot_log!(
@@ -2560,7 +2588,7 @@ fn should_skip_blind(run: &RunState, blind: BlindKind, strategy: &BotStrategy) -
     if matches!(blind, BlindKind::Boss) {
         return false;
     }
-    let target = run.base_target.saturating_mul(run.run_number);
+    let target = run.blind_score_target(blind);
     let best = pick_best_play(run).map(|(s, _)| s).unwrap_or(0);
     if best == 0 {
         return false;
@@ -2658,7 +2686,7 @@ fn play_run_with_options(
                 stats.gold_from_skip_tags += realized_gold;
                 stats.skip_tag_gold_value += tag.gold_value();
                 *stats.skipped_tags.entry(tag.name()).or_insert(0) += 1;
-                if let Some((zodiac, _, _)) = run.pending_zodiac_celebration {
+                for (zodiac, _, _) in &run.pending_zodiac_celebrations {
                     *stats.zodiacs_picked.entry(zodiac.name()).or_insert(0) += 1;
                 }
             }
@@ -2686,6 +2714,13 @@ fn play_run_with_options(
         let (outcome, blind_turns) =
             play_blind(&mut run, &mut stats, log, deadline, &mut blind_scoring);
         let blind_score = run.round_score;
+        if matches!(blind, BlindKind::Boss) {
+            *stats
+                .boss_score_by_ante
+                .entry(run.ante)
+                .or_insert(0) += blind_score;
+            *stats.boss_attempts_by_ante.entry(run.ante).or_insert(0) += 1;
+        }
         stats.total_score += blind_score;
         if blind_score > stats.peak_blind_score {
             stats.peak_blind_detail = Some(PeakBlindSnapshot {

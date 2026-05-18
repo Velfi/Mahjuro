@@ -387,7 +387,7 @@ fn counterweight_reveal(run: &mut RunState) -> ResolvedBossEffect {
             | RelicId::WhiteDragonsHush
             | RelicId::WildWinds
             | RelicId::DragonEcho
-            | RelicId::RoundCompass => honors += 2,
+            | RelicId::WindReader => honors += 2,
             RelicId::EdgeRunner | RelicId::ClosedGate => terminals += 2,
             RelicId::GardenKeeper | RelicId::Ikebana | RelicId::Hanami => flowers += 2,
             _ => {}

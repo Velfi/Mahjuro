@@ -141,10 +141,6 @@ impl ShopScene {
             self.leave_bell_hover_anim += (target - self.leave_bell_hover_anim) * k;
         }
         self.particles.update(dt);
-        // Advance bug orbit phases.
-        for (i, phase) in self.bug_phases.iter_mut().enumerate() {
-            *phase = (*phase + BUG_PARAMS[i].2 * dt) % std::f32::consts::TAU;
-        }
 
         // Yaku-Journal cover-open tween. Skip entirely when the
         // screenshot CLI has pinned the value with `--journal-open`.

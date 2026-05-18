@@ -7,6 +7,7 @@ pub mod collection;
 pub mod game_over;
 pub mod gameplay;
 pub mod journal_transition;
+pub mod lamp_moths;
 pub mod main_menu_exterior;
 pub mod material_viewer;
 pub mod meld_guide;
@@ -81,8 +82,6 @@ pub enum BackgroundId {
     /// Quad-based fills get reordered into the late HUD overlay pass and
     /// would paint over the smoke instead.
     Black,
-    /// Diegetic main menu: waterfront gambling house façade at dusk.
-    MainMenuExterior,
 }
 
 impl BackgroundId {
@@ -91,7 +90,6 @@ impl BackgroundId {
         match self {
             BackgroundId::None => None,
             BackgroundId::Black => None,
-            BackgroundId::MainMenuExterior => Some("textures/scenes/main_menu/exterior.png"),
         }
     }
 
@@ -99,10 +97,7 @@ impl BackgroundId {
     /// Values above 1.0 are allowed when drawing into the HDR scene buffer. Used to tune
     /// individual backdrops without re-authoring source art.
     pub fn image_vertex_color(self) -> [f32; 4] {
-        match self {
-            BackgroundId::MainMenuExterior => [1.0, 1.0, 1.0, 1.0],
-            _ => [1.0, 1.0, 1.0, 1.0],
-        }
+        [1.0, 1.0, 1.0, 1.0]
     }
 }
 

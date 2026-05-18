@@ -123,6 +123,7 @@ impl WgpuRenderer {
                     | DrawCmd::ShopEnvironment
                     | DrawCmd::HallwayEnvironment
                     | DrawCmd::ArchiveEnvironment
+                    | DrawCmd::MainMenuEnvironment
                     | DrawCmd::EmberDrift
             )
         })
@@ -240,6 +241,7 @@ impl WgpuRenderer {
             // Smooth fills must use the same ray → plane_z mapping as the env mesh;
             // `pixel_to_world` is not the inverse of that projection (see `world_space.rs`).
             (Some("pick_blind"), Some(cam)) => shop_camera_punctual(cam),
+            (Some("main_menu_exterior"), Some(cam)) => shop_camera_punctual(cam),
             _ => PointLightsBuf::from_scene_punctual(&punctual_bake),
         };
         self.queue.write_buffer(

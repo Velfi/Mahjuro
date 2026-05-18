@@ -50,7 +50,6 @@ pub struct BotOutputTarget {
 #[derive(Clone, Debug, Default)]
 pub struct BotConfig {
     pub base_target: Option<u32>,
-    pub target_scaling: Option<f32>,
     pub starting_plays: Option<u32>,
     pub starting_discards: Option<u32>,
     pub starting_gold: Option<u32>,
@@ -158,6 +157,7 @@ fn bot_export_value(
     runs: u32,
     mode: &GameMode,
     agg: &AggregateStats,
+    run_stats: &[RunStats],
 ) -> anyhow::Result<serde_json::Value> {
     let ykc = crate::core::yaku::YakuKind::all().len();
     let payload = BotExportPayload {
@@ -169,7 +169,7 @@ fn bot_export_value(
         runs,
         mode,
         aggregate: agg.to_aggregate_v2(),
-        derived: agg.to_derived(ykc),
+        derived: agg.to_derived(ykc, mode.base_target, Some(run_stats)),
     };
     Ok(serde_json::to_value(&payload)?)
 }
@@ -190,7 +190,6 @@ fn write_runs_jsonl(path: &Path, runs: &[RunStats]) -> anyhow::Result<()> {
 #[derive(Serialize)]
 struct SweepCellExport {
     base_target: u32,
-    target_scaling: f32,
     starting_plays: u32,
     aggregate: AggregateStats,
 }
@@ -230,13 +229,14 @@ fn write_bot_export(
     runs: u32,
     mode: &GameMode,
     agg: &AggregateStats,
+    run_stats: &[RunStats],
 ) -> anyhow::Result<()> {
     if let Some(parent) = target.path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     match target.format {
         BotOutputFormat::Json => {
-            let v = bot_export_value(runs, mode, agg)?;
+            let v = bot_export_value(runs, mode, agg, run_stats)?;
             let json = serde_json::to_string_pretty(&v)?;
             std::fs::write(&target.path, json)?;
             Ok(())
@@ -248,7 +248,7 @@ fn write_bot_export(
             Ok(())
         }
         BotOutputFormat::Html => {
-            let v = bot_export_value(runs, mode, agg)?;
+            let v = bot_export_value(runs, mode, agg, run_stats)?;
             let json_compact = serde_json::to_string(&v)?;
             let embedded = escape_json_for_html_script(&json_compact);
             write_bot_html(&target.path, &embedded)
@@ -267,9 +267,6 @@ impl BotConfig {
             GameMode::with_material_and_stake(crate::persistence::TileMaterial::default(), stake);
         if let Some(v) = self.base_target {
             mode.base_target = v;
-        }
-        if let Some(v) = self.target_scaling {
-            mode.target_scaling = v;
         }
         if let Some(v) = self.starting_plays {
             mode.starting_plays = v;
@@ -409,7 +406,7 @@ pub fn run_headless_aggregate(
         "Running bot for {} runs (base_target={}, target_scaling={}, plays={}, discards={}, gold={}, log={}, run_timeout={}, timeout_retries={})...",
         n,
         mode.base_target,
-        mode.target_scaling,
+        crate::core::blind_target::TARGET_SCALING,
         mode.starting_plays,
         mode.starting_discards,
         mode.starting_gold,
@@ -496,7 +493,7 @@ pub fn run_headless(n: u32, config: BotConfig, options: BotRunOptions) {
         }
     }
     if let Some(ref target) = options.output {
-        match write_bot_export(target, n, &mode, &batch.aggregate) {
+        match write_bot_export(target, n, &mode, &batch.aggregate, &batch.runs) {
             Ok(()) => println!(
                 "exported bot {} to {}",
                 target.format.export_label(),
@@ -514,18 +511,17 @@ pub fn run_headless(n: u32, config: BotConfig, options: BotRunOptions) {
 pub fn run_sweep(
     runs_per_cell: u32,
     base_targets: &[u32],
-    scalings: &[f32],
     plays_values: &[u32],
     export_json: Option<&Path>,
 ) {
     let mut export_cells = Vec::new();
     println!(
-        "Sweep: {} bases × {} scalings × {} plays-values × {} runs/cell = {} runs total",
+        "Sweep: {} bases × {} plays-values × {} runs/cell = {} runs total (target_scaling={})",
         base_targets.len(),
-        scalings.len(),
         plays_values.len(),
         runs_per_cell,
-        base_targets.len() * scalings.len() * plays_values.len() * runs_per_cell as usize,
+        base_targets.len() * plays_values.len() * runs_per_cell as usize,
+        crate::core::blind_target::TARGET_SCALING,
     );
     println!();
     println!(
@@ -534,59 +530,37 @@ pub fn run_sweep(
 
     for &plays in plays_values {
         println!("\n── starting_plays = {} ──", plays);
-        print!("{:>10} |", "base \\ sc");
-        for s in scalings {
-            print!(" {:^22} |", format!("{:.2}", s));
-        }
-        println!();
+        print!("{:>10} |", "base");
+        println!(" {:^30} |", "win% / antes / blinds / score");
         print!("{:->10}-+", "");
-        for _ in scalings {
-            print!("{:->24}+", "");
-        }
-        println!();
+        println!("{:->32}+", "");
 
         for &base in base_targets {
-            let cells: Vec<(String, AggregateStats, f32)> = scalings
-                .par_iter()
-                .map(|&scaling| {
-                    let cfg = BotConfig {
-                        base_target: Some(base),
-                        target_scaling: Some(scaling),
-                        starting_plays: Some(plays),
-                        ..Default::default()
-                    };
-                    let agg = run_with_sequential(runs_per_cell, cfg, BotRunOptions::default());
-                    let avg_antes = agg.antes_cleared_total as f64 / agg.runs as f64;
-                    let win_pct = agg.victories as f64 * 100.0 / agg.runs as f64;
-                    let avg_blinds = agg.blinds_cleared_total as f64 / agg.runs as f64;
-                    let avg_score = agg.total_score as f64 / agg.runs as f64;
-                    (
-                        format!(
-                            " {:>4.1}/{:>4.1}% ({:>3.1} blinds, {}) |",
-                            avg_antes,
-                            win_pct,
-                            avg_blinds,
-                            human_readable_score(avg_score)
-                        ),
-                        agg,
-                        scaling,
-                    )
-                })
-                .collect();
+            let cfg = BotConfig {
+                base_target: Some(base),
+                starting_plays: Some(plays),
+                ..Default::default()
+            };
+            let agg = run_with_sequential(runs_per_cell, cfg, BotRunOptions::default());
+            let avg_antes = agg.antes_cleared_total as f64 / agg.runs as f64;
+            let win_pct = agg.victories as f64 * 100.0 / agg.runs as f64;
+            let avg_blinds = agg.blinds_cleared_total as f64 / agg.runs as f64;
+            let avg_score = agg.total_score as f64 / agg.runs as f64;
+            let cell = format!(
+                " {:>4.1}/{:>4.1}% ({:>3.1} blinds, {}) |",
+                avg_antes,
+                win_pct,
+                avg_blinds,
+                human_readable_score(avg_score)
+            );
             if export_json.is_some() {
-                for (_, agg, scaling) in &cells {
-                    export_cells.push(SweepCellExport {
-                        base_target: base,
-                        target_scaling: *scaling,
-                        starting_plays: plays,
-                        aggregate: agg.clone(),
-                    });
-                }
+                export_cells.push(SweepCellExport {
+                    base_target: base,
+                    starting_plays: plays,
+                    aggregate: agg.clone(),
+                });
             }
-            print!("{:>10} |", base);
-            for (cell, _, _) in cells {
-                print!("{cell}");
-            }
+            print!("{:>10} |{cell}", base);
             println!();
         }
     }
@@ -629,8 +603,6 @@ pub struct StrategyDef {
     #[serde(default)]
     pub base_target: Option<u32>,
     #[serde(default)]
-    pub target_scaling: Option<f32>,
-    #[serde(default)]
     pub starting_plays: Option<u32>,
     #[serde(default)]
     pub starting_discards: Option<u32>,
@@ -642,7 +614,6 @@ impl StrategyDef {
     pub fn to_bot_config(&self) -> BotConfig {
         BotConfig {
             base_target: self.base_target,
-            target_scaling: self.target_scaling,
             starting_plays: self.starting_plays,
             starting_discards: self.starting_discards,
             starting_gold: self.starting_gold,
@@ -1103,11 +1074,14 @@ pub fn export_play_history_html(
     let last = records.last().expect("non-empty");
     let mode = GameMode::with_material_and_stake(last.tile_material, last.stake);
     let mut agg = AggregateStats::default();
+    let mut run_stats: Vec<RunStats> = Vec::with_capacity(records.len());
     for rec in &records {
-        agg.record(&run_stats_from_progress_record(rec));
+        let s = run_stats_from_progress_record(rec);
+        agg.record(&s);
+        run_stats.push(s);
     }
     let runs = records.len() as u32;
-    let v = bot_export_value(runs, &mode, &agg)?;
+    let v = bot_export_value(runs, &mode, &agg, &run_stats)?;
     let json_compact = serde_json::to_string(&v)?;
     let embedded = escape_json_for_html_script(&json_compact);
     write_bot_html(path, &embedded)?;

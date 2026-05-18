@@ -1,10 +1,7 @@
 use super::relic_removal::TransformationPrimaryRelic;
-use super::*;
-
-use crate::core::relic::{
-    ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle, ScoreRoundBundle,
-    ScoreTileBundle,
-};
+use crate::{audio::SfxId, core::{boss::{self, BossKind}, debuff::TileDebuff, hand::{DetectedMeld, MeldKind, enumerate_decompositions}, hand_intent::{DecompositionBias, decomposition_affinity, infer_decomposition_bias}, relic::{
+    RelicId, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle, ScoreRoundBundle, ScoreTileBundle
+}, rules::{BlindKind, RuleModifier}, scoring::{ScoreBreakdown, score_sets_with_original}, structure::{StructureTriggerKind, StructureTriggerMeta, banked_meld_chips, can_trigger_structure, is_winning_structure_shape}, tile::{Suit, Tile}}, game::{event_bus::{EventBus, GameEvent, GameOverReason}, game_mode::HAND_SIZE, run::{RunState, enumerate_candidate_play_masks, structure_label_from_yaku}}};
 
 impl RunState {
     /// The House boss: structure cash-in is locked until every discard for the round is spent.
@@ -184,6 +181,7 @@ impl RunState {
     ) -> u64 {
         let destroy_glass_cannon = self.relics.has(RelicId::GlassCannon);
         let rw = Some(BlindKind::round_wind_for_ante(self.ante));
+        let bonus_rw = self.bonus_round_wind_for_yaku();
         let scoring_tile_debuffs = self.scoring_tile_debuffs(&scoring_tiles);
         let ctx = ScoreContext {
             relic: ScoreRelicBundle {
@@ -198,6 +196,7 @@ impl RunState {
                 scored_last_turn: self.scored_last_turn,
                 plays_used: self.round_play_cap().saturating_sub(self.plays_remaining),
                 round_wind: rw,
+                bonus_round_wind: bonus_rw,
                 played_yaku_this_round: self.played_yaku_this_round.clone(),
                 is_final_play: self.plays_remaining == 0,
             },
@@ -295,7 +294,7 @@ impl RunState {
             // primitive as other permanent destruction). The wall has 28 honors
             // total, so we skip any removal budget check.
             //
-            // Anti-synergy with Honor Fury / Round Compass / Yakuhai is
+            // Anti-synergy with Honor Fury / Windreader / Yakuhai is
             // deliberate — feeding the mask drains the supply those relics
             // depend on, which gives the build a real shape.
             const CHIPS_PER_DEVOURED: i32 = 20;
@@ -439,11 +438,13 @@ impl RunState {
             return 0;
         }
         let rw = Some(BlindKind::round_wind_for_ante(self.ante));
+        let bonus_rw = self.bonus_round_wind_for_yaku();
         if kind == StructureTriggerKind::Manual
             && !can_trigger_structure(
                 &self.structure_tiles,
                 &self.structure_sets,
                 rw,
+                bonus_rw,
                 &self.available_yaku,
                 &self.round_rules,
             )
@@ -481,6 +482,7 @@ impl RunState {
             return;
         }
         let rw = Some(BlindKind::round_wind_for_ante(self.ante));
+        let bonus_rw = self.bonus_round_wind_for_yaku();
         if !is_winning_structure_shape(&self.structure_tiles, &self.structure_sets) {
             return;
         }
@@ -488,6 +490,7 @@ impl RunState {
             &self.structure_tiles,
             &self.structure_sets,
             rw,
+            bonus_rw,
             &self.available_yaku,
             &self.round_rules,
         ) {
@@ -630,10 +633,12 @@ impl RunState {
             return false;
         }
         let rw = Some(BlindKind::round_wind_for_ante(self.ante));
+        let bonus_rw = self.bonus_round_wind_for_yaku();
         can_trigger_structure(
             &self.structure_tiles,
             &self.structure_sets,
             rw,
+            bonus_rw,
             &self.available_yaku,
             &self.round_rules,
         )
@@ -649,10 +654,12 @@ impl RunState {
             return None;
         }
         let rw = Some(BlindKind::round_wind_for_ante(self.ante));
+        let bonus_rw = self.bonus_round_wind_for_yaku();
         if !can_trigger_structure(
             &self.structure_tiles,
             &self.structure_sets,
             rw,
+            bonus_rw,
             &self.available_yaku,
             &self.round_rules,
         ) {
@@ -679,6 +686,7 @@ impl RunState {
                 scored_last_turn: self.scored_last_turn,
                 plays_used: self.round_play_cap().saturating_sub(self.plays_remaining),
                 round_wind: rw,
+                bonus_round_wind: bonus_rw,
                 played_yaku_this_round: self.played_yaku_this_round.clone(),
                 is_final_play: self.plays_remaining == 0,
             },
@@ -769,6 +777,7 @@ impl RunState {
         }
         let scoring_tile_debuffs = self.scoring_tile_debuffs(scoring_tiles);
         let rw = Some(BlindKind::round_wind_for_ante(self.ante));
+        let bonus_rw = self.bonus_round_wind_for_yaku();
         let ctx = ScoreContext {
             relic: ScoreRelicBundle {
                 roster: &self.relics,
@@ -782,6 +791,7 @@ impl RunState {
                 scored_last_turn: self.scored_last_turn,
                 plays_used: self.round_play_cap().saturating_sub(self.plays_remaining),
                 round_wind: rw,
+                bonus_round_wind: bonus_rw,
                 played_yaku_this_round: self.played_yaku_this_round.clone(),
                 is_final_play: self.plays_remaining == 0,
             },

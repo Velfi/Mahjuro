@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mahjuro — blind target calculator</title>
+  <style>
+    :root {
+      --bg: #12141a;
+      --panel: #1a1d26;
+      --border: #2d3340;
+      --text: #e8e6e3;
+      --muted: #8b919c;
+      --accent: #c9a227;
+      --small: #7eb8da;
+      --big: #b8a07e;
+      --boss: #d47a6a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 1rem 1.25rem 2rem;
+      line-height: 1.45;
+      max-width: 52rem;
+      margin-inline: auto;
+    }
+    h1 {
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: var(--accent);
+      margin: 0 0 0.25rem;
+    }
+    .sub {
+      color: var(--muted);
+      font-size: 0.85rem;
+      margin: 0 0 1.25rem;
+    }
+    .sub code {
+      font-size: 0.8rem;
+      background: var(--panel);
+      padding: 0.1em 0.35em;
+      border-radius: 3px;
+    }
+    .controls {
+      display: grid;
+      gap: 1rem 1.25rem;
+      grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.1rem;
+      margin-bottom: 1.25rem;
+    }
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      font-size: 0.75rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    label span.val {
+      font-size: 1rem;
+      color: var(--text);
+      text-transform: none;
+      letter-spacing: 0;
+      font-variant-numeric: tabular-nums;
+    }
+    input[type="number"],
+    input[type="range"],
+    select {
+      width: 100%;
+      font: inherit;
+      font-size: 0.95rem;
+    }
+    input[type="number"],
+    select {
+      padding: 0.4rem 0.5rem;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+    input[type="range"] { accent-color: var(--accent); }
+    .row-check {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.9rem;
+      color: var(--text);
+      text-transform: none;
+      letter-spacing: 0;
+    }
+    .row-check input { width: auto; accent-color: var(--accent); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-variant-numeric: tabular-nums;
+      font-size: 0.9rem;
+    }
+    th, td {
+      padding: 0.45rem 0.6rem;
+      text-align: right;
+      border-bottom: 1px solid var(--border);
+    }
+    th:first-child, td:first-child { text-align: left; }
+    th {
+      color: var(--muted);
+      font-weight: 500;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    tr:hover td { background: rgba(255, 255, 255, 0.03); }
+    .num-small { color: var(--small); }
+    .num-big { color: var(--big); }
+    .num-boss { color: var(--boss); }
+    .chart {
+      margin-top: 1.5rem;
+    }
+    .chart h2 {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin: 0 0 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .bar-row {
+      display: grid;
+      grid-template-columns: 3.5rem 1fr 5rem;
+      align-items: center;
+      gap: 0.6rem;
+      margin-bottom: 0.4rem;
+      font-size: 0.8rem;
+    }
+    .bar-row label { color: var(--muted); font-size: 0.8rem; }
+    .bar-track {
+      height: 1.25rem;
+      background: var(--panel);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--boss), #a85a4d);
+      border-radius: 3px;
+      min-width: 2px;
+      transition: width 0.15s ease;
+    }
+    .bar-val {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      color: var(--text);
+    }
+    details {
+      margin-top: 1.25rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    details summary { cursor: pointer; color: var(--accent); }
+    details pre {
+      background: var(--panel);
+      padding: 0.75rem 1rem;
+      border-radius: 6px;
+      overflow-x: auto;
+      font-size: 0.8rem;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <h1>Blind target calculator</h1>
+  <p class="sub">
+    Matches <code>core::blind_target</code> — ante base
+    <code>B × r^(ante−1)</code>, then ×1 / ×1.5 / ×2 for Small / Big / Boss.
+  </p>
+
+  <div class="controls">
+    <label>
+      Stake preset
+      <select id="stake">
+        <option value="500">Spring (×1.0) — 500</option>
+        <option value="575">Summer (×1.15) — 575</option>
+        <option value="650">Autumn (×1.3) — 650</option>
+        <option value="750">Winter (×1.5) — 750</option>
+        <option value="custom">Custom base…</option>
+      </select>
+    </label>
+    <label>
+      Base target (B)
+      <input type="number" id="base" min="1" max="999999" step="1" value="500" />
+    </label>
+    <label>
+      Per-ante scaling (r)
+      <span class="val" id="scaleVal">1.60</span>
+      <input type="range" id="scale" min="1" max="2.5" step="0.01" value="1.60" />
+      <input type="number" id="scaleNum" min="1" max="3" step="0.01" value="1.60" />
+    </label>
+    <label>
+      Max ante
+      <input type="number" id="maxAnte" min="1" max="24" step="1" value="8" />
+    </label>
+    <label class="row-check">
+      <span style="visibility:hidden">.</span>
+      <span>
+        <input type="checkbox" id="famine" />
+        Show Famine boss (×2)
+      </span>
+    </label>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Ante</th>
+        <th>Chip base</th>
+        <th class="num-small">Small</th>
+        <th class="num-big">Big</th>
+        <th class="num-boss">Boss</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+
+  <div class="chart">
+    <h2>Boss blind targets</h2>
+    <div id="bars"></div>
+  </div>
+
+  <details>
+    <summary>Desmos</summary>
+    <pre>r = [your scaling]
+B = [your base]
+y = 2·B·r^(x−1)   {1 ≤ x ≤ 8}</pre>
+  </details>
+
+  <script>
+    const SMALL = 1;
+    const BIG = 1.5;
+    const BOSS = 2;
+    const DEFAULT_SCALE = 1.6;
+
+    const stakeEl = document.getElementById("stake");
+    const baseEl = document.getElementById("base");
+    const scaleEl = document.getElementById("scale");
+    const scaleNumEl = document.getElementById("scaleNum");
+    const scaleValEl = document.getElementById("scaleVal");
+    const maxAnteEl = document.getElementById("maxAnte");
+    const famineEl = document.getElementById("famine");
+    const tbody = document.getElementById("tbody");
+    const bars = document.getElementById("bars");
+
+    function anteChipBase(ante, baseTarget, scaling) {
+      const a = Math.max(1, Math.floor(ante));
+      const factor = Math.pow(scaling, a - 1);
+      return Math.max(1, Math.round(baseTarget * factor));
+    }
+
+    function scoreFor(ante, mult, baseTarget, scaling) {
+      const base = anteChipBase(ante, baseTarget, scaling);
+      return Math.max(1, Math.round(base * mult));
+    }
+
+    function fmt(n) {
+      return n.toLocaleString("en-US");
+    }
+
+    function readScale() {
+      const v = parseFloat(scaleNumEl.value);
+      return Number.isFinite(v) && v >= 1 ? v : DEFAULT_SCALE;
+    }
+
+    function syncScale(fromRange) {
+      const v = readScale();
+      if (fromRange) scaleNumEl.value = v.toFixed(2);
+      else {
+        const clamped = Math.min(2.5, Math.max(1, v));
+        scaleEl.value = clamped;
+        scaleNumEl.value = clamped.toFixed(2);
+      }
+      scaleValEl.textContent = readScale().toFixed(2);
+    }
+
+    function render() {
+      const base = Math.max(1, parseInt(baseEl.value, 10) || 500);
+      const scaling = readScale();
+      const maxAnte = Math.min(24, Math.max(1, parseInt(maxAnteEl.value, 10) || 8));
+      const famine = famineEl.checked;
+
+      const rows = [];
+      let maxBoss = 0;
+      for (let a = 1; a <= maxAnte; a++) {
+        const chip = anteChipBase(a, base, scaling);
+        const small = scoreFor(a, SMALL, base, scaling);
+        const big = scoreFor(a, BIG, base, scaling);
+        let boss = scoreFor(a, BOSS, base, scaling);
+        if (famine) boss *= 2;
+        maxBoss = Math.max(maxBoss, boss);
+        rows.push({ a, chip, small, big, boss });
+      }
+
+      tbody.innerHTML = rows
+        .map(
+          (r) => `<tr>
+        <td>${r.a}</td>
+        <td>${fmt(r.chip)}</td>
+        <td class="num-small">${fmt(r.small)}</td>
+        <td class="num-big">${fmt(r.big)}</td>
+        <td class="num-boss">${fmt(r.boss)}</td>
+      </tr>`
+        )
+        .join("");
+
+      bars.innerHTML = rows
+        .map((r) => {
+          const pct = maxBoss > 0 ? (r.boss / maxBoss) * 100 : 0;
+          return `<div class="bar-row">
+        <label>Ante ${r.a}</label>
+        <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+        <div class="bar-val">${fmt(r.boss)}</div>
+      </div>`;
+        })
+        .join("");
+    }
+
+    stakeEl.addEventListener("change", () => {
+      const v = stakeEl.value;
+      if (v !== "custom") {
+        baseEl.value = v;
+        baseEl.disabled = true;
+      } else {
+        baseEl.disabled = false;
+      }
+      render();
+    });
+
+    baseEl.addEventListener("input", render);
+    scaleEl.addEventListener("input", () => {
+      scaleNumEl.value = scaleEl.value;
+      syncScale(true);
+      render();
+    });
+    scaleNumEl.addEventListener("input", () => {
+      syncScale(false);
+      render();
+    });
+    maxAnteEl.addEventListener("input", render);
+    famineEl.addEventListener("change", render);
+
+    syncScale(true);
+    render();
+  </script>
+</body>
+</html>

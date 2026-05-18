@@ -4,7 +4,7 @@
 use std::borrow::Cow;
 use std::time::Instant;
 
-use glam::{Mat4, Vec3};
+use glam::{Vec2, Vec3};
 
 use crate::core::consumable::Consumable;
 use crate::core::relic::{
@@ -16,25 +16,26 @@ use crate::game::game_mode::GameMode;
 use crate::game::run::RunState;
 use crate::render::decal::{load_ui_font, measure_label_advances};
 use crate::render::draw_cmd::{
-    CameraParams, Object3d, Object3dKind, PromptIconQuad, ScenePunctualLight, UiFrame,
+    CameraParams, Object3d, Object3dKind, ImageQuad, ScenePunctualLight, UiFrame,
     camera_facing_euler_xyz_rad,
 };
 use crate::render::ribbon_mesh::{
     ZodiacRibbonSpec, ribbon_length_fitting_rect, zodiac_ribbon_object3d,
 };
+use crate::render::flame_volume::FlameEmitter;
 use crate::render::room_glb::{
-    RoomEnvLightingTune, marker_translation, player_consumable_marker_name,
-    player_gold_dish_marker_translation, player_relic_marker_name,
-    room_camera_fit_fovy_for_corners, MarkerScreenRectParams, screen_rect_for_marker_mesh_bounds,
-    shop_camera_from_glb_if_present, room_camera_with_room_clip_planes, room_env_world_scale,
+    marker_translation, player_consumable_marker_name,
+    player_gold_dish_marker_translation, player_relic_marker_name, room_camera_fit_fovy_for_corners,
+    MarkerScreenRectParams, screen_rect_for_marker_mesh_bounds, shop_camera_from_glb_if_present,
+    shop_embedded_point_lights_runtime, shop_embedded_spot_lights_runtime,
+    shop_glb_has_embedded_lights, room_camera_with_room_clip_planes, room_env_world_scale,
     room_world_bounds_corners_centered, spawn_relic_marker_name, with_shop_glb_cpu,
 };
 use crate::render::table_transform::euler_xyz_rad_from_deg;
-use crate::render::table_transform::mat4_to_euler_xyz_rad;
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::GpuInstance;
 use crate::render::wgpu_renderer::{
-    MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, PointLight, ShopHit, SpotLight, TextAlign, TextLabel,
+    PointLight, ShopHit, TextAlign, TextLabel,
 };
 use crate::render::world_space::{
     object3d_pos_for_screen_at_world_z, object3d_pos_triple_for_world_center,
@@ -63,8 +64,7 @@ use super::layout::{
 };
 use super::shared::shop_focus_inspectable;
 use super::{
-    BUG_COUNT, BUG_PARAMS, ConsumableShopItem, ShopFocus, ShopItem, ShopMode, ShopScene,
-    TilePackShopItem, push_free_badge,
+    ConsumableShopItem, ShopFocus, ShopItem, ShopMode, ShopScene, TilePackShopItem, push_free_badge,
 };
 
 /// Matches [`super::RELIC_GLOW_LIFETIME`] — keep glow envelope in sync.
@@ -102,122 +102,48 @@ fn default_fill_point_lights(w: f32, h: f32) -> Vec<PointLight> {
     ]
 }
 
-/// True when `shop.glb` carries `KHR_lights_punctual` lights — then we use **only** those (no lamp / default fills).
-fn shop_glb_has_embedded_lights() -> bool {
-    with_shop_glb_cpu(|opt| {
-        opt.is_some_and(|cpu| {
-            !cpu.embedded_point_lights.is_empty() || !cpu.embedded_spot_lights.is_empty()
-        })
-    })
-}
-
-/// Point lights from glTF only (`KHR_lights_punctual`). Empty when the GLB has spots but no points.
-#[inline]
-fn gltf_punctual_linear_rgb(
-    raw: [f32; 3],
-    is_candle: bool,
-    tune: &RoomEnvLightingTune,
-) -> [f32; 3] {
-    if is_candle {
-        [
-            (raw[0] * tune.candle_light_color_mul[0]).clamp(0.0, 1.0),
-            (raw[1] * tune.candle_light_color_mul[1]).clamp(0.0, 1.0),
-            (raw[2] * tune.candle_light_color_mul[2]).clamp(0.0, 1.0),
-        ]
-    } else {
-        raw
-    }
-}
-
-fn embedded_point_lights_runtime(
-    w: f32,
+/// Procedural flame particles at each `light_candle*` punctual light in `shop.glb`.
+fn shop_gltf_candle_flame_emitters(
+    _w: f32,
     h: f32,
     env_h: f32,
-    tune: &RoomEnvLightingTune,
-) -> Vec<PointLight> {
+    _age_secs: f32,
+    lamp_flicker: f32,
+    _layout: &crate::ui::layout::LayoutResult,
+) -> Vec<FlameEmitter> {
     with_shop_glb_cpu(|opt| {
         let Some(cpu) = opt else {
             return Vec::new();
         };
-        if cpu.embedded_point_lights.is_empty() {
-            return Vec::new();
-        }
         let s = room_env_world_scale(h, env_h);
         let center_doc = cpu
             .environment_bounds_doc
             .map(|b| b.center())
-            .unwrap_or(glam::Vec3::ZERO);
-        let budget = MAX_POINT_LIGHTS.saturating_sub(2);
-        if cpu.embedded_point_lights.len() > budget {
-            log::warn!(
-                "shop.glb: {} point lights exceed usable budget ({}) — truncating",
-                cpu.embedded_point_lights.len(),
-                budget
-            );
-        }
+            .unwrap_or(Vec3::ZERO);
+        let flame_scale = crate::render::flame_volume::shop_gltf_flame_emitter_scale(s);
         cpu.embedded_point_lights
             .iter()
-            .take(budget)
-            .map(|l| {
-                let world = (l.pos_doc - center_doc) * s;
-                let radius =
-                    crate::render::room_glb::glb_punctual_range_world_upload(h, s, l.range_doc);
-                PointLight {
-                    pos: surface_anchor_from_world_xyz(w, h, world),
-                    radius,
-                    color: gltf_punctual_linear_rgb(l.color_linear, l.is_candle, tune),
-                    intensity: (l.intensity * tune.gltf_light_intensity_scale).max(0.0),
+            .filter(|l| l.is_candle)
+            .enumerate()
+            .map(|(i, l)| {
+                let light_world = (l.pos_doc - center_doc) * s;
+                let seed = (i as u32).wrapping_mul(0x9E37_79B9).wrapping_add(0xA5A5_A5A5);
+                let scale_jitter = 0.88 + (seed & 0x3f) as f32 / 63.0 * 0.24;
+                let emitter_scale = flame_scale * scale_jitter;
+                let world = crate::render::flame_volume::shop_gltf_wick_from_light(
+                    light_world,
+                    emitter_scale,
+                );
+                let phase = (seed as f32 * 2.328_306e-10).fract();
+                let brightness = lamp_flicker;
+                FlameEmitter {
+                    wick_world: world,
+                    scale: emitter_scale,
+                    wind: Vec2::ZERO,
+                    brightness,
+                    phase,
+                    flicker_amp: crate::render::flame_volume::SHOP_CANDLE_FLICKER_AMP,
                 }
-            })
-            .collect()
-    })
-}
-
-fn spot_lights_from_glb(w: f32, h: f32, env_h: f32, tune: &RoomEnvLightingTune) -> Vec<SpotLight> {
-    if !shop_glb_has_embedded_lights() {
-        return Vec::new();
-    }
-    with_shop_glb_cpu(|opt| {
-        let Some(cpu) = opt else {
-            return Vec::new();
-        };
-        if cpu.embedded_spot_lights.is_empty() {
-            return Vec::new();
-        }
-        let s = room_env_world_scale(h, env_h);
-        let center_doc = cpu
-            .environment_bounds_doc
-            .map(|b| b.center())
-            .unwrap_or(glam::Vec3::ZERO);
-        if cpu.embedded_spot_lights.len() > MAX_SPOT_LIGHTS {
-            log::warn!(
-                "shop.glb: {} spot lights exceed {} — truncating",
-                cpu.embedded_spot_lights.len(),
-                MAX_SPOT_LIGHTS
-            );
-        }
-        cpu.embedded_spot_lights
-            .iter()
-            .take(MAX_SPOT_LIGHTS)
-            .filter_map(|l| {
-                let dir_w = l.dir_doc.normalize_or_zero();
-                if dir_w.length_squared() < 1e-12 {
-                    return None;
-                }
-                let world = (l.pos_doc - center_doc) * s;
-                let radius =
-                    crate::render::room_glb::glb_punctual_range_world_upload(h, s, l.range_doc);
-                let cos_outer = l.outer_cone_rad.cos();
-                let cos_inner = l.inner_cone_rad.cos().max(cos_outer);
-                Some(SpotLight {
-                    pos: surface_anchor_from_world_xyz(w, h, world),
-                    dir: dir_w.to_array(),
-                    radius,
-                    cos_outer,
-                    cos_inner,
-                    color: gltf_punctual_linear_rgb(l.color_linear, l.is_candle, tune),
-                    intensity: (l.intensity * tune.gltf_light_intensity_scale).max(0.0),
-                })
             })
             .collect()
     })
@@ -554,79 +480,6 @@ fn player_gold_dish_object3d_anchor(
     object3d_pos_for_screen_at_world_z(w, h, cam, cx, cy, lift)
 }
 
-/// Settled metal coin cylinders matching gameplay (`animation_state` pile), without a procedural
-/// dish mesh — the GLB supplies the tray.
-fn shop_gameplay_style_gold_pile(
-    layout: &ShopLayout,
-    gold: u32,
-    anchor: [f32; 3],
-) -> Vec<Object3d> {
-    if gold == 0 {
-        return Vec::new();
-    }
-    let coin_count = (gold as usize).min(48);
-    let coin_radius = layout.mm(11.3);
-    let coin_thickness = layout.mm(3.5).max(2.0);
-    let scatter_half = coin_radius * 3.0;
-    let pile_cx = anchor[0];
-    let pile_cy = anchor[1];
-    // Nudge above the marker / dish interior so coins don’t sink into or z-fight the GLB mesh.
-    let dish_floor_z = anchor[2] + layout.mm(3.0);
-    let overlap_r = coin_radius * 2.0;
-    let overlap_r2 = overlap_r * overlap_r;
-    const CANDIDATES_PER_COIN: u32 = 12;
-
-    use rand::rngs::StdRng;
-    use rand::{RngExt, SeedableRng};
-
-    let mut rng = StdRng::seed_from_u64(0x5EED_E0D1_D151_0001);
-    let mut coins: Vec<Object3d> = Vec::with_capacity(coin_count);
-    let mut placed: Vec<(f32, f32, f32)> = Vec::with_capacity(coin_count);
-    for _ in 0..coin_count {
-        let mut best: Option<(f32, f32, f32, f32)> = None;
-        for _ in 0..CANDIDATES_PER_COIN {
-            let lx = rng.random_range(-scatter_half..scatter_half);
-            let lz = rng.random_range(-scatter_half..scatter_half);
-            let rot_y = rng.random_range(-std::f32::consts::PI..std::f32::consts::PI);
-            let mut support_y = dish_floor_z;
-            for (ox, oz, top_y) in &placed {
-                let ddx = lx - ox;
-                let ddz = lz - oz;
-                if ddx * ddx + ddz * ddz < overlap_r2 && *top_y > support_y {
-                    support_y = *top_y;
-                }
-            }
-            match best {
-                None => best = Some((lx, lz, support_y, rot_y)),
-                Some((_, _, by, _)) if support_y < by => {
-                    best = Some((lx, lz, support_y, rot_y));
-                }
-                _ => {}
-            }
-        }
-        let (lx, lz, support_y, rot_y) = best.unwrap();
-        let world_y = support_y + coin_thickness * 0.5;
-        placed.push((lx, lz, world_y + coin_thickness * 0.5));
-        coins.push(Object3d {
-            pos: [pile_cx + lx, pile_cy + lz, world_y],
-            extents: [coin_radius * 2.0, coin_thickness, coin_radius * 2.0],
-            rotation: [0.0, rot_y, 0.0],
-            color: color::RELIC_GOLD,
-            kind: Object3dKind::Primitive {
-                shape: crate::render::primitive::MeshId::Cylinder,
-                material: crate::render::primitive::MaterialSpec::metal(),
-                pick_id: None,
-                shadow_caster: true,
-                silhouette: false,
-            },
-            hover_target: 0.0,
-            anim_id: 0,
-            arrange_name: Some("shop.shelf.coin_dish"),
-        });
-    }
-    coins
-}
-
 impl SceneBehavior for ShopScene {
     fn update(&mut self, mut ctx: UpdateCtx<'_>) -> SceneTransition {
         let w = ctx.layout.window_w;
@@ -734,15 +587,14 @@ pub(crate) fn render_shop_frame(
     let gold_dish_anchor = player_gold_dish_object3d_anchor(w, h, &cam, env_h, &layout);
 
     let lp = layout.lamp_center_px;
-    let lamp_mesh_h = h * 0.30;
     let tf = shop.age_secs;
-    let flick_fast = (tf * 37.3).sin() * 0.04 + (tf * 61.7).sin() * 0.025;
-    let flick_slow = (tf * 4.1).sin() * 0.06;
+    let flick_fast = (tf * 37.3).sin() * 0.022 + (tf * 61.7).sin() * 0.014;
+    let flick_slow = (tf * 4.1).sin() * 0.034;
     let brownout = {
         let d = (tf * 0.73).sin() * (tf * 1.19).sin();
-        (d - 0.55).max(0.0) * 0.35
+        (d - 0.55).max(0.0) * 0.22
     };
-    let lamp_flicker = (1.0 + flick_fast + flick_slow - brownout).clamp(0.55, 1.12);
+    let lamp_flicker = (1.0 + flick_fast + flick_slow - brownout).clamp(0.68, 1.08);
 
     let journal_cx = shop.positions.book.nx * w;
     let journal_cy = shop.positions.book.ny * h;
@@ -774,7 +626,14 @@ pub(crate) fn render_shop_frame(
         frame.scene_lighting.room_glb_brdf = room_glb_lights;
         let use_glb_lights = room_glb_lights;
         let mut merged_punctual: Vec<ScenePunctualLight> = if use_glb_lights {
-            embedded_point_lights_runtime(w, h, env_h, &ctx.shop_env_lighting)
+            shop_embedded_point_lights_runtime(
+                w,
+                h,
+                env_h,
+                &ctx.shop_env_lighting,
+                shop.age_secs,
+                lamp_flicker,
+            )
                 .into_iter()
                 .map(ScenePunctualLight::InverseSquare)
                 .collect()
@@ -898,10 +757,36 @@ pub(crate) fn render_shop_frame(
         merged_punctual.extend(point_lights.into_iter().map(ScenePunctualLight::Smooth));
         frame.scene_lighting.punctual = merged_punctual;
         frame.scene_lighting.spot_lights =
-            spot_lights_from_glb(w, h, env_h, &ctx.shop_env_lighting);
+            shop_embedded_spot_lights_runtime(w, h, env_h, &ctx.shop_env_lighting);
+        if use_glb_lights {
+            let candle_flames = shop_gltf_candle_flame_emitters(
+                w,
+                h,
+                env_h,
+                shop.age_secs,
+                lamp_flicker,
+                ctx.layout,
+            );
+            frame.candle_light_count = candle_flames.len() as u32;
+            frame.flame_height_world = crate::render::flame_volume::shop_gltf_flame_height_world(
+                room_env_world_scale(h, env_h),
+            );
+            frame.procedural_flame_emitters = candle_flames;
+        }
     }
 
-    let gold_pile = shop_gameplay_style_gold_pile(&layout, shop_rm.display_gold, gold_dish_anchor);
+    let gold_pile_anchor = [
+        gold_dish_anchor[0],
+        gold_dish_anchor[1],
+        gold_dish_anchor[2] + layout.mm(3.0),
+    ];
+    let gold_pile = crate::render::gold_display::build_settled_gold_coin_pile(
+        |n| layout.mm(n),
+        shop_rm.display_gold as i32,
+        gold_pile_anchor,
+        "shop.shelf.coin_dish",
+        crate::render::gold_display::SHOP_GOLD_PILE_SEED,
+    );
 
     let (stock_dim, stock_subj) = push_stock_meshes(shop, &shop_rm, w, h, &cam, inspect_anchor);
 
@@ -917,161 +802,31 @@ pub(crate) fn render_shop_frame(
         frame.object3d_batch(stock_all);
     }
 
-    // Moths orbiting the pendant lamp.
-    {
-        let lamp_w = h * 0.22;
-        let lamp_h = lamp_mesh_h;
-        let lamp_hang_z = lp.2;
-        let bulb_wz = lamp_hang_z * lamp_h;
-        let t_now = shop.age_secs;
-        let bulb_wx = lp.0 - w * 0.5;
-        let bulb_wy = h * 0.5 - lp.1;
-        let bug_body_len = h * 0.022;
-        let flap_hz: f32 = 25.0;
-        let flap_amp: f32 = 1.1;
-
-        let sample_bug =
-            |scene: &ShopScene, i: usize, t_back: f32| -> ([f32; 3], [f32; 3], Mat4, f32) {
-                let (r_frac, z_frac, speed, size_frac) = BUG_PARAMS[i];
-                let fi = i as f32;
-                let t = t_now - t_back;
-                let phase = scene.bug_phases[i] - speed * t_back;
-
-                let bob_freq = 2.3 + fi * 0.71;
-                let drift_freq = 1.1 + fi * 0.43;
-                let pitch_freq = 3.7 + fi * 0.57;
-
-                let bob = (t * bob_freq + fi * 1.3).sin() * lamp_h * 0.15;
-                let r_nom = lamp_w * r_frac;
-                let r_drift = (t * drift_freq + fi * 2.1).sin() * r_nom * 0.20;
-                let bug_wz = bulb_wz + lamp_h * z_frac + bob;
-
-                let wing_half_span = 1.13 * size_frac * bug_body_len;
-                let orbit_r =
-                    (r_nom + r_drift).max(lamp_w * 0.72 + bug_body_len * 0.6 + wing_half_span);
-
-                let bug_wx = bulb_wx + orbit_r * phase.cos();
-                let bug_wy = bulb_wy + orbit_r * phase.sin();
-                let bug_px = bug_wx + w * 0.5;
-                let bug_py = h * 0.5 - bug_wy;
-                let bug_sz = bug_body_len * size_frac;
-
-                let tx = -phase.sin();
-                let ty = phase.cos();
-                let bank = std::f32::consts::FRAC_PI_4 * 0.5 + (t * 1.9 + fi * 0.8).sin() * 0.30;
-                let pitch = (t * pitch_freq + fi * 0.5).sin() * 0.25;
-                let yaw = Mat4::from_cols(
-                    glam::Vec4::new(tx, ty, 0.0, 0.0),
-                    glam::Vec4::new(-ty, tx, 0.0, 0.0),
-                    glam::Vec4::new(0.0, 0.0, 1.0, 0.0),
-                    glam::Vec4::new(0.0, 0.0, 0.0, 1.0),
-                );
-                let rot = yaw * Mat4::from_rotation_x(bank) * Mat4::from_rotation_y(pitch);
-                let flap = flap_amp * (t * flap_hz * std::f32::consts::TAU + fi * 1.3).sin();
-                (
-                    [bug_px, bug_py, bug_wz],
-                    [bug_sz, bug_sz, bug_sz],
-                    rot,
-                    flap,
-                )
-            };
-
-        let mut bugs: Vec<Object3d> = Vec::with_capacity(BUG_COUNT);
-        for i in 0..BUG_COUNT {
-            let (pos, extents, rot, flap_rad) = sample_bug(shop, i, 0.0);
-            let fi = i as f32;
-            let speed_factor = (t_now * flap_hz * std::f32::consts::TAU + fi * 1.3)
-                .cos()
-                .abs();
-            let live_wing_alpha = 1.0 - 0.7 * speed_factor;
-            let blur_alpha = 0.6 * speed_factor;
-            bugs.push(Object3d {
-                pos,
-                extents,
-                rotation: mat4_to_euler_xyz_rad(rot),
-                color: [1.0, 1.0, 1.0, 1.0],
-                kind: Object3dKind::Bug {
-                    slot: i,
-                    flap_rad,
-                    live_wing_alpha,
-                    blur_alpha,
-                },
-                hover_target: 0.0,
-                anim_id: 0,
-                arrange_name: None,
-            });
-        }
-        frame.object3d_batch(bugs);
+    // Volumetric candle flames: after shelf/env meshes (depth buffer) but before
+    // any 2D HUD (tooltips, focus rings, pause). `frame.flames` at end of draw
+    // stamped additive fire over tooltip panels.
+    if !frame.procedural_flame_emitters.is_empty() {
+        frame.flames(std::iter::once(GpuInstance {
+            rect: [0.0, 0.0, 1.0, 1.0],
+            color: [0.0, 0.0, 1.0, 0.0],
+            user: 0,
+        }));
     }
 
-    let credits_font_px = typography::size(typography::H20, h);
-    let gold_text = format!("{}g", shop_rm.display_gold);
-    let h_px = credits_font_px.max(1.0).round().max(1.0) as u32;
-    let (credits_rw, credits_rh) = if let Some(ref font) = load_ui_font() {
-        let (_, _, advances) =
-            measure_label_advances(font, &gold_text, 8192, h_px, Some(credits_font_px));
-        let text_w: f32 = advances.iter().sum();
-        let rw = text_w.max(credits_font_px * 1.2).min(w * 0.92);
-        let rh = credits_font_px * 1.38;
-        (rw, rh)
-    } else {
-        let est_ch = gold_text.chars().count().max(1) as f32;
-        let rw = (credits_font_px * 0.62 * est_ch).min(w * 0.92);
-        let rh = credits_font_px * 1.38;
-        (rw, rh)
-    };
-    let mut credits_rect = with_shop_glb_cpu(|opt| {
+    let gold_label_center = with_shop_glb_cpu(|opt| {
         let cpu = opt?;
         let tw = player_gold_dish_marker_translation(cpu)? * room_env_world_scale(h, env_h);
         let (cx, cy) = cam.project_world_to_screen(w, h, tw);
-        Some([
-            cx - credits_rw * 0.5,
-            cy - credits_rh * 0.5,
-            credits_rw,
-            credits_rh,
-        ])
+        Some((cx, cy))
     })
-    .unwrap_or_else(|| rect_center_n(w, h, 0.88, 0.595, credits_rw, credits_rh));
-    // Marker sits in the dish; float the label above it.
-    credits_rect[1] -= credits_rh * 0.52 + h * 0.014;
-    let pad = credits_font_px * 0.24;
-    let bx = credits_rect[0] - pad;
-    let by = credits_rect[1] - pad * 0.4;
-    let bw = credits_rect[2] + pad * 2.0;
-    let bh = credits_rect[3] + pad * 1.05;
-    let gold_label_rect: [f32; 4] = [bx - 4.0, by - 3.0, bw + 8.0, bh + 7.0];
-    frame.quad(GpuInstance {
-        rect: [bx - 4.0, by - 3.0, bw + 8.0, bh + 7.0],
-        color: color::alpha(color::LACQUER, 0.48),
-        user: 0,
-    });
-    frame.quad(GpuInstance {
-        rect: [bx, by, bw, bh],
-        color: [
-            color::WALNUT_DEEP[0],
-            color::WALNUT_DEEP[1],
-            color::WALNUT_DEEP[2],
-            0.88,
-        ],
-        user: 0,
-    });
-    frame.texts([TextLabel {
-        rect: credits_rect,
-        text: gold_text,
-        color: color::CHAMPAGNE,
-        font_px: Some(credits_font_px),
-        align: TextAlign::Center,
-        no_glossary: false,
-        scroll_offset: 0.0,
-        flavor_spans: None,
-        bold: false,
-        italic: false,
-        underline: false,
-        text_effect: crate::render::text_effect::TextEffectId::Flat,
-        rotation_quarters: 0,
-        baseline_shift_px: 0.0,
-        clip_rect: None,
-    }]);
+    .unwrap_or((gold_dish_anchor[0], gold_dish_anchor[1]));
+    let gold_label_rect = crate::render::gold_display::push_gold_amount_label(
+        &mut frame,
+        w,
+        h,
+        shop_rm.display_gold as i32,
+        gold_label_center,
+    );
 
     // Shelf focus ring uses shelf-slot screen rects.
     if !shop.pause_menu.paused && inspect.is_none() {
@@ -1145,7 +900,7 @@ pub(crate) fn render_shop_frame(
             },
         );
         // Relic: hover = name + mechanical; E inspect = name + flavor (no mechanical).
-        frame.quads(tip_quads);
+        frame.overlay_quads(tip_quads);
         frame.texts(tip_texts);
     }
 
@@ -1359,7 +1114,7 @@ pub(crate) fn render_shop_frame(
         let legend_text_y = primary_y0 + (primary_h - legend_line_h) * 0.5;
 
         let mut pill_quads: Vec<GpuInstance> = Vec::with_capacity(4);
-        let mut icon_cmds: Vec<PromptIconQuad> = Vec::with_capacity(4);
+        let mut icon_cmds: Vec<ImageQuad> = Vec::with_capacity(4);
         let mut legend_texts: Vec<TextLabel> =
             Vec::with_capacity(if inspect_active { 5 } else { 4 });
 
@@ -1405,7 +1160,7 @@ pub(crate) fn render_shop_frame(
                 PromptInputSurface::MouseOrKeyboard => Some(keyboard_icons[i].clone()),
             };
             if let Some(source) = source {
-                icon_cmds.push(PromptIconQuad {
+                icon_cmds.push(ImageQuad {
                     inst: GpuInstance {
                         rect: [ix, iy, icon_px, icon_px],
                         color: color::alpha(color::PORCELAIN_AGED, 0.96),
@@ -1459,7 +1214,7 @@ pub(crate) fn render_shop_frame(
             frame.quads(ring_quads);
         }
 
-        frame.prompt_icon_quads(icon_cmds);
+        frame.image_quads(icon_cmds);
 
         if inspect_active {
             legend_texts.push(TextLabel {

@@ -1,7 +1,16 @@
-use super::*;
 #[cfg(test)]
 mod cases {
-    use super::*;
+    use std::collections::BTreeMap;
+
+use crate::core::boss::{self, BossKind};
+use crate::game::event_bus::{EventBus, GameEvent, GameOverReason};
+use crate::game::run::{BlindKind, BossState, RunState, default_available_relics};
+    use crate::game::game_mode::{GameMode, HAND_SIZE};
+    use crate::core::deck::Wall;
+    use crate::core::hand::{DetectedMeld, MeldKind};
+    use crate::core::tile::{Suit, Tile};
+    use crate::core::relic::RelicState;
+    use crate::core::rules::RuleModifier;
     use crate::core::deck::build_wall;
     use crate::core::relic::{
         RelicId, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
@@ -54,6 +63,7 @@ mod cases {
             played_yaku_this_round: vec![],
             tile_debuffs: vec![],
             honors_scored_this_round: false,
+            windreader_bonus_wind: None,
             yaku_times_played: rustc_hash::FxHashMap::default(),
             tiles_played: 0,
             tiles_discarded: 0,
@@ -92,7 +102,7 @@ mod cases {
             tag_bonus_plays: 0,
             tag_bonus_discards: 0,
             tag_bonus_hand_size: 0,
-            pending_zodiac_celebration: None,
+            pending_zodiac_celebrations: Vec::new(),
             finished_zodiac_celebration: None,
             pending_shop_focus_snap_after_pack_celebration: false,
             relic_counters: BTreeMap::new(),
@@ -568,6 +578,7 @@ mod cases {
                 scored_last_turn: run.scored_last_turn,
                 plays_used: run.round_play_cap().saturating_sub(run.plays_remaining),
                 round_wind: rw,
+                bonus_round_wind: run.bonus_round_wind_for_yaku(),
                 played_yaku_this_round: run.played_yaku_this_round.clone(),
                 is_final_play: run.plays_remaining == 0,
             },
@@ -1072,7 +1083,7 @@ mod cases {
 
 #[cfg(test)]
 mod joker_tile_tests {
-    use super::*;
+    use crate::{core::{hand::MeldKind, rules::RuleModifier, tile::{Suit, Tile}}, game::run::try_joker_substitution};
 
     fn tile(suit: Suit, rank: u8, id: u32) -> Tile {
         Tile::new(suit, rank, id)
@@ -1151,7 +1162,7 @@ mod joker_tile_tests {
 
 #[cfg(test)]
 mod wild_wind_tests {
-    use super::*;
+    use crate::{core::{hand::MeldKind, tile::{Suit, Tile}}, game::run::{try_wind_substitution, wind_candidate_faces}};
 
     fn tile(suit: Suit, rank: u8, id: u32) -> Tile {
         Tile::new(suit, rank, id)
@@ -1249,7 +1260,9 @@ mod wild_wind_tests {
     }
 
     mod proptests {
-        use super::*;
+        use crate::{core::tile::Suit, game::run::try_wind_substitution};
+
+use super::*;
         use proptest::prelude::*;
 
         const NUMBER_SUITS: [Suit; 3] = [Suit::Characters, Suit::Bamboos, Suit::Dots];
@@ -1453,7 +1466,8 @@ mod wild_wind_tests {
 
 #[cfg(test)]
 mod progression_snapshot_tests {
-    use super::*;
+    use crate::{core::relic::RelicId, game::run::RunState};
+    use crate::core::progression::PlayerProgress;
 
     #[test]
     fn run_relic_unlocks_only_change_when_a_new_run_applies_progression() {
@@ -1461,7 +1475,7 @@ mod progression_snapshot_tests {
         // step (`check_level_up` only re-emits the current level's relics)
         // and make sure `apply_progression` only refreshes the run's
         // available pool when a fresh `RunState` is created.
-        let mut progress = crate::core::progression::PlayerProgress::new();
+        let mut progress = PlayerProgress::new();
         progress.runs_completed = 6;
         progress.check_level_up();
 
@@ -1484,7 +1498,7 @@ mod progression_snapshot_tests {
 
 #[cfg(test)]
 mod disgust_tests {
-    use super::*;
+    use crate::{core::{hand::MeldKind, tile::{Suit, Tile}}, game::run::try_disgust_substitution};
 
     fn tile(suit: Suit, rank: u8, id: u32) -> Tile {
         Tile::new(suit, rank, id)

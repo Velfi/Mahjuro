@@ -10,6 +10,9 @@ use super::layer_input::{DoraYakuLayerOpts, ScoringLayerInput, ScoringLayerOut};
 use super::push_steps::{push_chips, push_mult};
 use super::{ScoreStep, StepKind, combine, tile_is_debuffed};
 
+/// Chips added per matching tile when a face is on the dora plinth.
+pub const DORA_CHIPS_PER_TILE: i32 = 100;
+
 /// Apply Dora, scored yaku, and structure depth mult. Returns the yaku list used for the breakdown.
 pub(crate) fn apply_dora_yaku_and_structure(
     input: &ScoringLayerInput<'_>,
@@ -38,7 +41,7 @@ pub(crate) fn apply_dora_yaku_and_structure(
             .filter(|t| ctx.pattern.dora_faces.contains(&(t.suit, t.rank)))
             .count() as i32;
         if dora_count > 0 {
-            let delta = 25 * dora_count;
+            let delta = DORA_CHIPS_PER_TILE * dora_count;
             *chips += delta;
             steps.push(ScoreStep {
                 source: format!("Dora ×{dora_count}"),
@@ -65,7 +68,13 @@ pub(crate) fn apply_dora_yaku_and_structure(
         }
     }
 
-    let all_yaku = detect_yaku_with_wind(tiles, sets, ctx.round.round_wind, original_tiles);
+    let all_yaku = detect_yaku_with_wind(
+        tiles,
+        sets,
+        ctx.round.round_wind,
+        ctx.round.bonus_round_wind,
+        original_tiles,
+    );
     let mut detected_yaku: Vec<YakuKind> = if ctx.pattern.available_yaku.is_empty() {
         all_yaku
     } else {

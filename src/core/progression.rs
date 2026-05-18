@@ -583,7 +583,7 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
                 RelicId::SetMagnet,
                 RelicId::EdgeRunner,
                 RelicId::ChainReaction,
-                RelicId::RoundCompass,
+                RelicId::WindReader,
                 RelicId::TurtleShell,
                 RelicId::Ikebana,
             ],

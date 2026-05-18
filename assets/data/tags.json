@@ -42,7 +42,7 @@
   {
     "id": "zodiac_blessing",
     "name": "Zodiac Blessing",
-    "description": "Gain a random Zodiac",
+    "description": "Gain 2 random Zodiacs",
     "rarity": "uncommon",
     "min_ante": 1,
     "gold_value": 6

@@ -1,7 +1,7 @@
 //! Row-major sprite atlas for skip-tag icons (`textures/skip_tags/atlas.toml`).
 //!
 //! Same fixed schema as tile-set atlases (see `scripts/pack_atlas.py` and
-//! `src/render/decal.rs`). Used by [`crate::render::draw_cmd::PromptIconSource::PackedAtlas`].
+//! `src/render/decal.rs`). Used by [`crate::render::draw_cmd::ImageQuadSource::PackedAtlas`].
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::{LazyLock, Mutex};

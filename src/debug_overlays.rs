@@ -4,7 +4,10 @@
 
 use crate::audio;
 use crate::game::cascade::CascadeTuning;
-use crate::game::tonemap_tuning::{TONEMAP_SLIDER_META, TonemapTuning};
+use crate::game::scene_look_tuning::{
+    self, SceneLookTuning, SceneLookTuningSet, SCENE_LOOK_SLIDER_COUNT, SCENE_LOOK_SLIDER_META,
+};
+use crate::game::tonemap_tuning::FALLBACK_SCENE_KEY;
 use crate::render::draw_cmd::CameraParams;
 use crate::core::rules::BlindKind;
 use crate::render::hallway_glb::{
@@ -1026,22 +1029,16 @@ impl CameraDebugOverlay {
     }
 }
 
-// ── Shop environment + lighting debug (height scale + `room_glb` tunables) ─
+// ── Per-scene look: tonemap / post-FX + room GLB lighting ─────────────────
 
-const SHOP_ENV_DEBUG_ROW_META: [(&str, f32, f32, f32); 9] = [
-    ("Height scale", 0.001, 40.0, 0.005),
-    ("glTF light intensity", 0.0, 40.0, 0.0025),
-    ("Linear exposure", 0.001, 40.0, 0.0025),
-    ("Ambient scale", 0.0, 10.0, 0.0025),
-    ("Lit-mesh glTF scale", 0.0, 20.0, 0.005),
-    ("glTF emissive scale", 0.1, 48.0, 0.05),
-    ("Candle tint R", 0.0, 15.0, 0.0025),
-    ("Candle tint G", 0.0, 15.0, 0.0025),
-    ("Candle tint B", 0.0, 15.0, 0.0025),
-];
+const SCENE_LOOK_SAVE_ROW: usize = SCENE_LOOK_SLIDER_COUNT;
+const SCENE_LOOK_RESET_ROW: usize = SCENE_LOOK_SLIDER_COUNT + 1;
+const SCENE_LOOK_SCENE_PREV_ROW: usize = SCENE_LOOK_SLIDER_COUNT + 2;
+const SCENE_LOOK_SCENE_NEXT_ROW: usize = SCENE_LOOK_SLIDER_COUNT + 3;
+const SCENE_LOOK_ROW_COUNT: usize = SCENE_LOOK_SLIDER_COUNT + 4;
 
 #[derive(Clone, Copy)]
-struct ShopEnvDebugLayout {
+struct SceneLookDebugLayout {
     panel_x: f32,
     panel_y: f32,
     panel_w: f32,
@@ -1055,18 +1052,19 @@ struct ShopEnvDebugLayout {
     row_count: usize,
 }
 
-impl ShopEnvDebugLayout {
+impl SceneLookDebugLayout {
     fn compute(window_w: f32, window_h: f32, row_count: usize) -> Self {
         let scale = metrics::scene_scale(window_w, window_h);
         let row_h = (22.0 * scale).max(16.0);
         let row_gap = (3.0 * scale).max(2.0);
         let title_h = (24.0 * scale).max(16.0);
+        let scene_h = (16.0 * scale).max(12.0);
         let pad = (8.0 * scale).max(5.0);
         let margin = (10.0 * scale).max(6.0);
         let panel_w = (320.0 * scale).min(window_w * 0.44);
         let panel_x = window_w - panel_w - margin;
         let panel_y = margin;
-        let rows_y0 = panel_y + pad + title_h + pad;
+        let rows_y0 = panel_y + pad + title_h + scene_h + pad;
         let label_w = panel_w * 0.38;
         let slider_w = panel_w * 0.34;
         let value_w = (panel_w - label_w - slider_w - 12.0 * scale).max(36.0);
@@ -1101,82 +1099,88 @@ impl ShopEnvDebugLayout {
 }
 
 #[inline]
-fn shop_env_point_in_rect(mx: f32, my: f32, r: (f32, f32, f32, f32)) -> bool {
+fn scene_look_point_in_rect(mx: f32, my: f32, r: (f32, f32, f32, f32)) -> bool {
     mx >= r.0 && mx <= r.0 + r.2 && my >= r.1 && my <= r.1 + r.3
 }
 
-pub struct ShopEnvDebugOverlay {
+pub struct SceneLookDebugOverlay {
     cursor: usize,
-    pub height_scale: f32,
-    pub lighting: crate::render::room_glb::RoomEnvLightingTune,
-    /// Typing buffer for the value column (numeric).
+    scene_index: usize,
+    pub look: SceneLookTuning,
     editing: bool,
     edit_buffer: String,
-    /// `Some(row)` while LMB drags that slider track.
     dragging_slider: Option<usize>,
 }
 
-impl ShopEnvDebugOverlay {
-    pub fn new(height_scale: f32, lighting: crate::render::room_glb::RoomEnvLightingTune) -> Self {
+pub enum SceneLookDebugResult {
+    Stay,
+    Close,
+    Reset,
+    Save,
+}
+
+impl SceneLookDebugOverlay {
+    pub fn new(scene_index: usize, look: SceneLookTuning) -> Self {
         Self {
             cursor: 0,
-            height_scale,
-            lighting,
+            scene_index,
+            look,
             editing: false,
             edit_buffer: String::new(),
             dragging_slider: None,
         }
     }
 
+    pub fn scene_key(&self) -> Option<&str> {
+        let key = scene_look_tuning::overlay_scene_keys()[self.scene_index];
+        if key == FALLBACK_SCENE_KEY {
+            None
+        } else {
+            Some(key)
+        }
+    }
+
+    pub fn scene_key_persist(&self) -> &str {
+        scene_look_tuning::overlay_scene_keys()[self.scene_index]
+    }
+
+    pub fn editing_active_scene(&self, active_scene_key: Option<&str>) -> bool {
+        self.scene_key() == active_scene_key
+    }
+
     fn row_count(&self) -> usize {
-        SHOP_ENV_DEBUG_ROW_META.len()
+        SCENE_LOOK_ROW_COUNT
     }
 
     fn row_value(&self, row: usize) -> f32 {
-        match row {
-            0 => self.height_scale,
-            1 => self.lighting.gltf_light_intensity_scale,
-            2 => self.lighting.linear_exposure,
-            3 => self.lighting.ambient_scale,
-            4 => self.lighting.lit_mesh_gltf_punctual_scale,
-            5 => self.lighting.gltf_emissive_scale,
-            6 => self.lighting.candle_light_color_mul[0],
-            7 => self.lighting.candle_light_color_mul[1],
-            8 => self.lighting.candle_light_color_mul[2],
-            _ => 0.0,
-        }
+        scene_look_tuning::scene_look_row_value(&self.look, row)
     }
 
     fn set_row_value(&mut self, row: usize, v: f32) {
-        let (_, lo, hi, _) = SHOP_ENV_DEBUG_ROW_META[row];
-        let v = v.clamp(lo, hi);
-        match row {
-            0 => self.height_scale = v,
-            1 => self.lighting.gltf_light_intensity_scale = v,
-            2 => self.lighting.linear_exposure = v,
-            3 => self.lighting.ambient_scale = v,
-            4 => self.lighting.lit_mesh_gltf_punctual_scale = v,
-            5 => self.lighting.gltf_emissive_scale = v,
-            6 => self.lighting.candle_light_color_mul[0] = v,
-            7 => self.lighting.candle_light_color_mul[1] = v,
-            8 => self.lighting.candle_light_color_mul[2] = v,
-            _ => {}
-        }
+        scene_look_tuning::scene_look_row_set(&mut self.look, row, v);
     }
 
-    fn apply_slider_mx(&mut self, row: usize, mx: f32, layout: &ShopEnvDebugLayout) {
+    fn step_scene(&mut self, delta: i32, set: &SceneLookTuningSet) {
+        let keys = scene_look_tuning::overlay_scene_keys();
+        let n = keys.len() as i32;
+        self.scene_index = ((self.scene_index as i32 + delta).rem_euclid(n)) as usize;
+        self.look = set.resolve(self.scene_key());
+        self.clear_edit();
+    }
+
+    fn apply_slider_mx(&mut self, row: usize, mx: f32, layout: &SceneLookDebugLayout) {
         let (tx, _, tw, _) = layout.slider_track(row);
-        let (_, min, max, _) = SHOP_ENV_DEBUG_ROW_META[row];
+        let (_, min, max, _) = SCENE_LOOK_SLIDER_META[row];
         let t = ((mx - tx) / tw.max(1e-6)).clamp(0.0, 1.0);
         self.set_row_value(row, min + t * (max - min));
     }
 
     fn adjust_row(&mut self, dir: f32) {
-        if self.editing {
+        if self.editing || self.cursor >= SCENE_LOOK_SLIDER_COUNT {
             return;
         }
-        let row = self.cursor.min(self.row_count().saturating_sub(1));
-        let (_, _, _, step) = SHOP_ENV_DEBUG_ROW_META[row];
+        let row = self.cursor;
+        let (_, _, _, step) = SCENE_LOOK_SLIDER_META[row];
         let v = self.row_value(row) + dir * step;
         self.set_row_value(row, v);
     }
@@ -1218,38 +1222,61 @@ impl ShopEnvDebugOverlay {
         self.edit_buffer.push(c);
     }
 
-    /// Copy `room_glb` constant block to the clipboard.
+    /// Copy tonemap + room look as a `SceneLookTuning` Rust snapshot.
     pub fn copy_to_clipboard(&self) {
-        let l = self.lighting;
+        let look = self.look;
+        let t = look.tonemap;
+        let r = look.room;
         let text = format!(
             concat!(
-                "pub const SHOP_ENV_HEIGHT_SCALE: f32 = {:.6};\n",
-                "pub const SHOP_ENV_LINEAR_EXPOSURE_BASE: f32 = {:.6};\n",
-                "pub const SHOP_GLTF_LIGHT_INTENSITY_SCALE: f32 = {:.6};\n",
-                "pub const SHOP_ENV_LINEAR_EXPOSURE: f32 = {:.6};\n",
-                "pub const SHOP_ENV_AMBIENT_SCALE: f32 = {:.6};\n",
-                "pub const SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE: f32 = {:.6};\n",
-                "pub const SHOP_GLTF_EMISSIVE_SCALE: f32 = {:.6};\n",
-                "pub const SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL: [f32; 3] = ",
-                "[{:.6}, {:.6}, {:.6}];",
+                "// scene: {}\n",
+                "SceneLookTuning {{\n",
+                "    tonemap: TonemapTuning {{\n",
+                "        exposure: {:.6},\n",
+                "        vhs_chromatic: {:.6},\n",
+                "        vhs_scanline: {:.6},\n",
+                "        vhs_grain: {:.6},\n",
+                "        vhs_vignette: {:.6},\n",
+                "        film_grain: {:.6},\n",
+                "    }},\n",
+                "    room_gltf_height_scale: {:.6},\n",
+                "    room: RoomEnvLightingTune {{\n",
+                "        gltf_light_intensity_scale: {:.6},\n",
+                "        linear_exposure: {:.6},\n",
+                "        ambient_scale: {:.6},\n",
+                "        lit_mesh_gltf_punctual_scale: {:.6},\n",
+                "        gltf_emissive_scale: {:.6},\n",
+                "        candle_light_color_mul: [{:.6}, {:.6}, {:.6}],\n",
+                "        ..RoomEnvLightingTune::SOURCE_DEFAULTS\n",
+                "    }},\n",
+                "}}\n",
             ),
-            self.height_scale,
-            crate::render::room_glb::SHOP_ENV_LINEAR_EXPOSURE_BASE,
-            l.gltf_light_intensity_scale,
-            l.linear_exposure,
-            l.ambient_scale,
-            l.lit_mesh_gltf_punctual_scale,
-            l.gltf_emissive_scale,
-            l.candle_light_color_mul[0],
-            l.candle_light_color_mul[1],
-            l.candle_light_color_mul[2],
+            self.scene_key_persist(),
+            t.exposure,
+            t.vhs_chromatic,
+            t.vhs_scanline,
+            t.vhs_grain,
+            t.vhs_vignette,
+            t.film_grain,
+            look.room_gltf_height_scale,
+            r.gltf_light_intensity_scale,
+            r.linear_exposure,
+            r.ambient_scale,
+            r.lit_mesh_gltf_punctual_scale,
+            r.gltf_emissive_scale,
+            r.candle_light_color_mul[0],
+            r.candle_light_color_mul[1],
+            r.candle_light_color_mul[2],
         );
         match arboard::Clipboard::new() {
             Ok(mut cb) => {
                 if let Err(e) = cb.set_text(&text) {
                     log::error!("Clipboard write failed: {e}");
                 } else {
-                    log::info!("Shop env + lighting constants copied to clipboard");
+                    log::info!(
+                        "Scene look snapshot copied (scene: {})",
+                        self.scene_key_persist()
+                    );
                 }
             }
             Err(e) => log::error!("Could not open clipboard: {e}"),
@@ -1338,28 +1365,29 @@ impl ShopEnvDebugOverlay {
     }
 
     /// `mouse`: `(x, y, clicked_this_frame, left_button_held)`.
-    ///
-    /// Returns `true` if the overlay should close.
     pub fn update(
         &mut self,
         actions: &[UiAction],
         mouse: Option<(f32, f32, bool, bool)>,
         window_w: f32,
         window_h: f32,
-    ) -> bool {
-        let layout = ShopEnvDebugLayout::compute(window_w, window_h, self.row_count());
-        let n = self.row_count();
+        set: &SceneLookTuningSet,
+    ) -> SceneLookDebugResult {
+        let layout = SceneLookDebugLayout::compute(window_w, window_h, self.row_count());
+        let slider_rows = SCENE_LOOK_SLIDER_COUNT;
 
         if let Some((mx, my, clicked, held)) = mouse {
             if let Some(di) = self.dragging_slider
-                && held {
-                    self.apply_slider_mx(di, mx, &layout);
-                }
+                && held
+                && di < slider_rows
+            {
+                self.apply_slider_mx(di, mx, &layout);
+            }
 
             if (clicked || held) && self.dragging_slider.is_none() {
-                for i in 0..n {
+                for i in 0..slider_rows {
                     let track = layout.slider_track(i);
-                    if shop_env_point_in_rect(mx, my, track) {
+                    if scene_look_point_in_rect(mx, my, track) {
                         self.cursor = i;
                         self.clear_edit();
                         self.apply_slider_mx(i, mx, &layout);
@@ -1372,9 +1400,9 @@ impl ShopEnvDebugOverlay {
             }
 
             if clicked && self.dragging_slider.is_none() {
-                for i in 0..n {
+                for i in 0..slider_rows {
                     let cell = layout.value_cell(i);
-                    if shop_env_point_in_rect(mx, my, cell) {
+                    if scene_look_point_in_rect(mx, my, cell) {
                         self.cursor = i;
                         self.begin_editing();
                         break;
@@ -1412,12 +1440,26 @@ impl ShopEnvDebugOverlay {
                         UiAction::FocusPrev | UiAction::NavigateHudPrev => -1.0,
                         _ => 1.0,
                     };
-                    self.adjust_row(dir);
+                    if self.cursor == SCENE_LOOK_SCENE_PREV_ROW {
+                        self.step_scene(-1, set);
+                    } else if self.cursor == SCENE_LOOK_SCENE_NEXT_ROW {
+                        self.step_scene(1, set);
+                    } else {
+                        self.adjust_row(dir);
+                    }
                 }
                 UiAction::Confirm | UiAction::CommitDiscard => {
                     if self.editing {
                         self.commit_edit();
-                    } else {
+                    } else if self.cursor == SCENE_LOOK_SAVE_ROW {
+                        return SceneLookDebugResult::Save;
+                    } else if self.cursor == SCENE_LOOK_RESET_ROW {
+                        return SceneLookDebugResult::Reset;
+                    } else if self.cursor == SCENE_LOOK_SCENE_PREV_ROW {
+                        self.step_scene(-1, set);
+                    } else if self.cursor == SCENE_LOOK_SCENE_NEXT_ROW {
+                        self.step_scene(1, set);
+                    } else if self.cursor < SCENE_LOOK_SLIDER_COUNT {
                         self.begin_editing();
                     }
                 }
@@ -1425,32 +1467,70 @@ impl ShopEnvDebugOverlay {
                     if self.editing {
                         self.clear_edit();
                     } else {
-                        return true;
+                        return SceneLookDebugResult::Close;
                     }
                 }
                 _ => {}
             }
         }
-        false
+        SceneLookDebugResult::Stay
     }
 
     fn format_row_display(row: usize, v: f32) -> String {
+        let (_, _, _, step) = SCENE_LOOK_SLIDER_META[row];
         match row {
-            6..=8 => format!("{:.3}", v),
-            _ => format!("{:.4}", v),
+            12..=14 => format!("{:.3}", v),
+            1 => format!("{v:.4}"),
+            _ if step >= 0.01 => format!("{v:.2}"),
+            _ if step >= 0.001 => format!("{v:.3}"),
+            _ => format!("{v:.4}"),
         }
     }
 
+    fn draw_action_row(
+        &self,
+        layout: &SceneLookDebugLayout,
+        row: usize,
+        label: &str,
+        instances: &mut Vec<GpuInstance>,
+        labels: &mut Vec<TextLabel>,
+        focused_bg: [f32; 4],
+        idle_bg: [f32; 4],
+        focused_tc: [f32; 4],
+        idle_tc: [f32; 4],
+    ) {
+        let row_y = layout.rows_y0 + row as f32 * (layout.row_h + layout.row_gap);
+        let is_focused = self.cursor == row;
+        instances.push(GpuInstance {
+            rect: [
+                layout.panel_x + 4.0,
+                row_y,
+                layout.panel_w - 8.0,
+                layout.row_h,
+            ],
+            color: if is_focused { focused_bg } else { idle_bg },
+            user: 0,
+        });
+        labels.push(TextLabel {
+            rect: [layout.panel_x, row_y, layout.panel_w, layout.row_h],
+            text: label.into(),
+            color: if is_focused { focused_tc } else { idle_tc },
+            ..Default::default()
+        });
+    }
+
     pub fn draw(&self, window_w: f32, window_h: f32) -> (Vec<GpuInstance>, Vec<TextLabel>) {
-        let layout = ShopEnvDebugLayout::compute(window_w, window_h, self.row_count());
+        let layout = SceneLookDebugLayout::compute(window_w, window_h, self.row_count());
         let mut instances = Vec::new();
         let mut labels = Vec::new();
 
         let pad = (8.0 * layout.scale).max(5.0);
         let title_h = (24.0 * layout.scale).max(16.0);
+        let scene_h = (16.0 * layout.scale).max(12.0);
         let hint_h = (13.0 * layout.scale).max(9.0);
         let panel_h = pad
             + title_h
+            + scene_h
             + pad
             + layout.row_count as f32 * (layout.row_h + layout.row_gap)
             + pad
@@ -1481,15 +1561,32 @@ impl ShopEnvDebugOverlay {
                 layout.panel_w,
                 title_h,
             ],
-            text: "Shop Env & Lighting".into(),
+            text: "Scene Look".into(),
             color: color::JADE,
             ..Default::default()
         });
 
-        for (i, (name, min, max, _)) in SHOP_ENV_DEBUG_ROW_META
+        let scene_label = if self.scene_key_persist() == FALLBACK_SCENE_KEY {
+            "scene: (default / no key)".to_string()
+        } else {
+            format!("scene: {}", self.scene_key_persist())
+        };
+        labels.push(TextLabel {
+            rect: [
+                layout.panel_x,
+                layout.panel_y + pad + title_h,
+                layout.panel_w,
+                scene_h,
+            ],
+            text: scene_label,
+            color: color::alpha(color::CHAMPAGNE, 0.75),
+            ..Default::default()
+        });
+
+        for (i, (name, min, max, _)) in SCENE_LOOK_SLIDER_META
             .iter()
             .enumerate()
-            .take(layout.row_count)
+            .take(SCENE_LOOK_SLIDER_COUNT)
         {
             let row_y = layout.rows_y0 + i as f32 * (layout.row_h + layout.row_gap);
             let is_focused = self.cursor == i;
@@ -1590,6 +1687,51 @@ impl ShopEnvDebugOverlay {
             });
         }
 
+        self.draw_action_row(
+            &layout,
+            SCENE_LOOK_SAVE_ROW,
+            "Save for this scene",
+            &mut instances,
+            &mut labels,
+            color::alpha(color::FELT_LIT, 0.95),
+            color::alpha(color::FELT_DEEP, 0.85),
+            color::PARCHMENT,
+            color::alpha(color::JADE, 0.7),
+        );
+        self.draw_action_row(
+            &layout,
+            SCENE_LOOK_RESET_ROW,
+            "Reset scene to default",
+            &mut instances,
+            &mut labels,
+            color::alpha(color::RUBY, 0.55),
+            color::alpha(color::WALNUT_BRIGHT, 0.85),
+            color::PARCHMENT,
+            color::alpha(color::RUBY, 0.7),
+        );
+        self.draw_action_row(
+            &layout,
+            SCENE_LOOK_SCENE_PREV_ROW,
+            "\u{2190} Previous scene",
+            &mut instances,
+            &mut labels,
+            color::alpha(color::WALNUT_BRIGHT, 0.9),
+            color::alpha(color::WALNUT_SOFT, 0.78),
+            color::PARCHMENT,
+            color::alpha(color::STONE, 0.9),
+        );
+        self.draw_action_row(
+            &layout,
+            SCENE_LOOK_SCENE_NEXT_ROW,
+            "Next scene \u{2192}",
+            &mut instances,
+            &mut labels,
+            color::alpha(color::WALNUT_BRIGHT, 0.9),
+            color::alpha(color::WALNUT_SOFT, 0.78),
+            color::PARCHMENT,
+            color::alpha(color::STONE, 0.9),
+        );
+
         let hint_y =
             layout.rows_y0 + layout.row_count as f32 * (layout.row_h + layout.row_gap) + pad;
         labels.push(TextLabel {
@@ -1600,302 +1742,9 @@ impl ShopEnvDebugOverlay {
         });
         labels.push(TextLabel {
             rect: [layout.panel_x, hint_y + hint_h, layout.panel_w, hint_h],
-            text:
-                "\u{2191}\u{2193} row  \u{2190}\u{2192} nudge  Enter edit/apply  Esc  Ctrl+C copy"
-                    .into(),
+            text: "\u{2191}\u{2193} row  \u{2190}\u{2192} nudge/switch scene  Enter  Esc  Ctrl+C"
+                .into(),
             color: color::alpha(color::STONE, 0.75),
-            ..Default::default()
-        });
-
-        (instances, labels)
-    }
-}
-
-// ── Tonemap tuning overlay ──────────────────────────────────────────────
-//
-// Per-scene exposure + VHS knobs. Edits apply via
-// `WgpuRenderer::set_tonemap_tuning` on the next frame. Save persists the
-// current scene's tuning under `TonemapTuning:<scene_key>` (or
-// `TonemapTuning:_default` for the no-scene fallback). Reset clears the
-// scene's override so the resolver falls back to the default tuning.
-
-const TONEMAP_SLIDER_ROWS: usize = 6;
-const TONEMAP_SAVE_ROW: usize = TONEMAP_SLIDER_ROWS;
-const TONEMAP_RESET_ROW: usize = TONEMAP_SLIDER_ROWS + 1;
-const TONEMAP_ROW_COUNT: usize = TONEMAP_SLIDER_ROWS + 2;
-
-pub struct TonemapDebugOverlay {
-    cursor: usize,
-    /// Live-edited tuning for the active scene. Read-back into the app's
-    /// `TonemapTuningSet` happens in the close/save path so partial edits
-    /// don't leak into other scenes via the resolver.
-    pub tuning: TonemapTuning,
-    /// Active scene this overlay edits — `None` selects the `_default`
-    /// fallback slot. Captured at open time so the overlay's title /
-    /// persistence path is stable even if the player swaps scenes mid-edit.
-    pub scene_key: Option<String>,
-}
-
-pub enum TonemapDebugResult {
-    Stay,
-    Close,
-    Reset,
-    SaveAsDefault,
-}
-
-impl TonemapDebugOverlay {
-    pub fn new(tuning: TonemapTuning, scene_key: Option<String>) -> Self {
-        Self {
-            cursor: 0,
-            tuning,
-            scene_key,
-        }
-    }
-
-    pub fn update(&mut self, actions: &[UiAction]) -> TonemapDebugResult {
-        for a in actions {
-            match a {
-                UiAction::FocusDown => {
-                    self.cursor = (self.cursor + 1) % TONEMAP_ROW_COUNT;
-                }
-                UiAction::FocusUp => {
-                    self.cursor = (self.cursor + TONEMAP_ROW_COUNT - 1) % TONEMAP_ROW_COUNT;
-                }
-                UiAction::FocusNext | UiAction::NavigateHudNext => {
-                    self.adjust(1.0);
-                }
-                UiAction::FocusPrev | UiAction::NavigateHudPrev => {
-                    self.adjust(-1.0);
-                }
-                UiAction::Confirm => {
-                    if self.cursor == TONEMAP_SAVE_ROW {
-                        return TonemapDebugResult::SaveAsDefault;
-                    } else if self.cursor == TONEMAP_RESET_ROW {
-                        return TonemapDebugResult::Reset;
-                    }
-                }
-                UiAction::Cancel | UiAction::Pause => {
-                    return TonemapDebugResult::Close;
-                }
-                _ => {}
-            }
-        }
-        TonemapDebugResult::Stay
-    }
-
-    fn adjust(&mut self, dir: f32) {
-        if self.cursor >= TONEMAP_SLIDER_ROWS {
-            return;
-        }
-        let (_, _, _, step) = TONEMAP_SLIDER_META[self.cursor];
-        let cur = self.tuning.field_at(self.cursor);
-        self.tuning.set_field_at(self.cursor, cur + dir * step);
-    }
-
-    fn format_value(&self, i: usize) -> String {
-        let v = self.tuning.field_at(i);
-        // Match precision to the slider's step so tiny increments visibly
-        // change the displayed value (chromatic step is 1e-4).
-        let (_, _, _, step) = TONEMAP_SLIDER_META[i];
-        if step >= 0.01 {
-            format!("{v:.2}")
-        } else if step >= 0.001 {
-            format!("{v:.3}")
-        } else {
-            format!("{v:.4}")
-        }
-    }
-
-    pub fn draw(&self, window_w: f32, window_h: f32) -> (Vec<GpuInstance>, Vec<TextLabel>) {
-        let scale = metrics::scene_scale(window_w, window_h);
-        let mut instances = Vec::new();
-        let mut labels = Vec::new();
-
-        let margin = (10.0 * scale).max(6.0);
-        let panel_w = (320.0 * scale).min(window_w * 0.42);
-        let row_h = (22.0 * scale).max(16.0);
-        let row_gap = (3.0 * scale).max(2.0);
-        let title_h = (24.0 * scale).max(16.0);
-        let scene_h = (16.0 * scale).max(12.0);
-        let hint_h = (14.0 * scale).max(10.0);
-        let panel_h = title_h
-            + scene_h
-            + row_gap
-            + TONEMAP_ROW_COUNT as f32 * (row_h + row_gap)
-            + hint_h
-            + row_gap * 2.0;
-        let panel_x = window_w - panel_w - margin;
-        let panel_y = margin;
-
-        let border = 2.0;
-        instances.push(GpuInstance {
-            rect: [
-                panel_x - border,
-                panel_y - border,
-                panel_w + border * 2.0,
-                panel_h + border * 2.0,
-            ],
-            color: color::alpha(color::ANTIQUE, 0.85),
-            user: 0,
-        });
-        instances.push(GpuInstance {
-            rect: [panel_x, panel_y, panel_w, panel_h],
-            color: color::alpha(color::TWILIGHT_INK, 0.92),
-            user: 0,
-        });
-
-        labels.push(TextLabel {
-            rect: [panel_x, panel_y + row_gap, panel_w, title_h],
-            text: "Tonemap".into(),
-            color: color::TALLOW,
-            ..Default::default()
-        });
-
-        let scene_label = match self.scene_key.as_deref() {
-            Some(k) => format!("scene: {k}"),
-            None => "scene: (default)".into(),
-        };
-        labels.push(TextLabel {
-            rect: [panel_x, panel_y + row_gap + title_h, panel_w, scene_h],
-            text: scene_label,
-            color: color::alpha(color::CHAMPAGNE, 0.7),
-            ..Default::default()
-        });
-
-        let cursor_y = panel_y + row_gap + title_h + scene_h + row_gap;
-        let label_w = panel_w * 0.44;
-        let slider_w = panel_w * 0.32;
-        let value_w = panel_w * 0.20;
-
-        for (i, &(name, min, max, _step)) in TONEMAP_SLIDER_META
-            .iter()
-            .enumerate()
-            .take(TONEMAP_SLIDER_ROWS)
-        {
-            let row_y = cursor_y + i as f32 * (row_h + row_gap);
-            let is_focused = self.cursor == i;
-
-            let bg = if is_focused {
-                color::alpha(color::WALNUT_BRIGHT, 0.95)
-            } else {
-                color::alpha(color::WALNUT_SOFT, 0.78)
-            };
-            instances.push(GpuInstance {
-                rect: [panel_x + 4.0, row_y, panel_w - 8.0, row_h],
-                color: bg,
-                user: 0,
-            });
-
-            let tc = if is_focused {
-                color::PARCHMENT
-            } else {
-                color::alpha(color::STONE, 0.9)
-            };
-            labels.push(TextLabel {
-                rect: [panel_x + 6.0 * scale, row_y, label_w, row_h],
-                text: name.into(),
-                color: tc,
-                ..Default::default()
-            });
-
-            let track_x = panel_x + label_w;
-            let track_h = (5.0 * scale).max(3.0);
-            let track_y = row_y + (row_h - track_h) * 0.5;
-            instances.push(GpuInstance {
-                rect: [track_x, track_y, slider_w, track_h],
-                color: color::TWILIGHT_INK,
-                user: 0,
-            });
-
-            let v = self.tuning.field_at(i);
-            let t = ((v - min) / (max - min)).clamp(0.0, 1.0);
-            let fill_w = slider_w * t;
-            let fill_color = if is_focused {
-                color::AMBER
-            } else {
-                color::alpha(color::ANTIQUE, 0.95)
-            };
-            instances.push(GpuInstance {
-                rect: [track_x, track_y, fill_w, track_h],
-                color: fill_color,
-                user: 0,
-            });
-
-            let knob_size = track_h * 2.5;
-            let knob_x = track_x + fill_w - knob_size * 0.5;
-            let knob_y = track_y + (track_h - knob_size) * 0.5;
-            instances.push(GpuInstance {
-                rect: [knob_x, knob_y, knob_size, knob_size],
-                color: if is_focused {
-                    color::TALLOW
-                } else {
-                    color::alpha(color::STONE, 0.9)
-                },
-                user: 0,
-            });
-
-            let value_x = panel_x + label_w + slider_w + 4.0;
-            labels.push(TextLabel {
-                rect: [value_x, row_y, value_w, row_h],
-                text: self.format_value(i),
-                color: tc,
-                ..Default::default()
-            });
-        }
-
-        let save_y = cursor_y + TONEMAP_SLIDER_ROWS as f32 * (row_h + row_gap);
-        let save_focused = self.cursor == TONEMAP_SAVE_ROW;
-        let save_bg = if save_focused {
-            color::alpha(color::FELT_LIT, 0.95)
-        } else {
-            color::alpha(color::FELT_DEEP, 0.85)
-        };
-        instances.push(GpuInstance {
-            rect: [panel_x + 4.0, save_y, panel_w - 8.0, row_h],
-            color: save_bg,
-            user: 0,
-        });
-        labels.push(TextLabel {
-            rect: [panel_x, save_y, panel_w, row_h],
-            text: "Save for this scene".into(),
-            color: if save_focused {
-                color::PARCHMENT
-            } else {
-                color::alpha(color::JADE, 0.7)
-            },
-            ..Default::default()
-        });
-
-        let reset_y = save_y + row_h + row_gap;
-        let reset_focused = self.cursor == TONEMAP_RESET_ROW;
-        let reset_bg = if reset_focused {
-            color::alpha(color::RUBY, 0.55)
-        } else {
-            color::alpha(color::WALNUT_BRIGHT, 0.85)
-        };
-        instances.push(GpuInstance {
-            rect: [panel_x + 4.0, reset_y, panel_w - 8.0, row_h],
-            color: reset_bg,
-            user: 0,
-        });
-        labels.push(TextLabel {
-            rect: [panel_x, reset_y, panel_w, row_h],
-            text: "Reset scene to default".into(),
-            color: if reset_focused {
-                color::PARCHMENT
-            } else {
-                color::alpha(color::RUBY, 0.7)
-            },
-            ..Default::default()
-        });
-
-        let hint_y = reset_y + row_h + row_gap;
-        labels.push(TextLabel {
-            rect: [panel_x, hint_y, panel_w, hint_h],
-            text:
-                "\u{2191}/\u{2193} select   \u{2190}/\u{2192} adjust   \u{23ce} confirm   Esc close"
-                    .into(),
-            color: color::alpha(color::STONE, 0.85),
             ..Default::default()
         });
 

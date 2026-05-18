@@ -169,7 +169,7 @@
   {
     "id": "quick_draw",
     "name": "Quick Draw",
-    "description": "Draw +1 tile after each play (max 3 per round)",
+    "description": "Draw +1 tile after each play",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -311,23 +311,23 @@
     ]
   },
   {
-    "id": "round_compass",
-    "name": "Round Compass",
-    "description": "Round wind triplets/kongs: +6 mult",
+    "id": "wind_reader",
+    "name": "Windreader",
+    "description": "Each round, also treat a second wind as round wind; round wind triplets/kongs: +6 mult",
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
+        "text": "The needle never settles on ",
         "bold": false,
         "italic": false
       },
       {
-        "text": "countless",
+        "text": "one",
         "bold": true,
         "italic": true
       },
       {
-        "text": " late-night rounds.",
+        "text": " direction for long.",
         "bold": false,
         "italic": false
       }

@@ -12,10 +12,8 @@ use crate::render::theme::color;
 /// GPU scene target — independent of swapchain (SDR vs HDR).
 pub(crate) const SCENE_HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
-/// Backgrounds decoded in `spawn_background_loader`. Keep in sync with that thread:
-/// if every decode fails, the renderer still inserts a solid GPU fallback (see `impl_loaders`)
-/// so the hub is drawable while the lazy scene pack mounts; splash does not wait on this.
-pub(crate) const ASYNC_LOADED_BACKGROUNDS: &[BackgroundId] = &[BackgroundId::MainMenuExterior];
+/// Backgrounds decoded in `spawn_background_loader`. Keep in sync with that thread.
+pub(crate) const ASYNC_LOADED_BACKGROUNDS: &[BackgroundId] = &[];
 
 /// Pre-loaded background texture + bind group for the image pipeline.
 pub(crate) struct BackgroundTextureGpu {
@@ -286,6 +284,34 @@ pub(super) fn upload_rgba_texture_with_mips(
     }
     let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
     (tex, view)
+}
+
+/// Load a loose PNG from the asset pack for room-env `decal_tex` binds (e.g. shop candle SSS bake).
+pub(super) fn load_room_env_png_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    asset_path: &str,
+    label: &str,
+    format: wgpu::TextureFormat,
+) -> Option<(wgpu::Texture, wgpu::TextureView)> {
+    let file = crate::asset_path::get(asset_path)?;
+    let img = image::load_from_memory(&file.data).ok()?;
+    let rgba = img.to_rgba8();
+    let (w, h) = rgba.dimensions();
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let mips = w > 1 && h > 1;
+    Some(upload_rgba_texture_with_mips(&TextureUploadParams {
+        device,
+        queue,
+        label: label.to_string(),
+        rgba: rgba.as_raw(),
+        width: w,
+        height: h,
+        format,
+        mips,
+    }))
 }
 
 /// glTF default metallic–roughness texel: roughness = 1 (G), metallic = 0 (B).

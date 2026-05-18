@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mahjuro bot balance</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --navy0: #0b1220;
+    --surface: #151f33;
+    --surface-raised: #1c2840;
+    --border: rgba(255, 255, 255, 0.12);
+    --border-soft: rgba(255, 255, 255, 0.08);
+    --text: #f2f5fa;
+    --muted: #b6c5db;
+    --faint: #8a9db5;
+    --accent: #4db8e8;
+    --accent2: #e8a06e;
+    --positive: #6fcf97;
+    --danger: #f08090;
+    --radius: 8px;
+    --font: "Atkinson Hyperlegible", ui-sans-serif, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { font-family: var(--font); font-size: 15px; color: var(--text); background: var(--navy0); }
+  body { margin: 0; min-height: 100vh; }
+  .root { max-width: 1280px; margin: 0 auto; padding: 1rem 1rem 2.5rem; }
+  .header {
+    display: flex; flex-wrap: wrap; gap: 1rem; justify-content: space-between; align-items: flex-end;
+    margin-bottom: 1rem; padding-bottom: 0.85rem; border-bottom: 1px solid var(--border);
+  }
+  .header h1 { margin: 0; font-size: 1.5rem; }
+  .header h1 em { font-style: normal; color: var(--accent); }
+  .header p { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.9rem; max-width: 36rem; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+  .toolbar label, .toolbar button {
+    font: inherit; font-size: 0.85rem; padding: 0.4rem 0.65rem;
+    background: var(--surface-raised); color: var(--text); border: 1px solid var(--border); border-radius: 6px;
+  }
+  .toolbar button { cursor: pointer; }
+  .toolbar button:hover { border-color: var(--accent); color: var(--accent); }
+  .empty { color: var(--muted); padding: 2rem; text-align: center; }
+  .section { margin-top: 1.25rem; }
+  .section__title { margin: 0 0 0.65rem; font-size: 1.1rem; color: var(--accent2); }
+  .grid { display: grid; gap: 0.75rem; }
+  @media (min-width: 900px) {
+    .grid--overview { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid--overview .span-2 { grid-column: span 2; }
+    .grid--duo { grid-template-columns: 1fr 1fr; }
+  }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
+  }
+  .card__head { padding: 0.55rem 0.75rem; background: var(--surface-raised); border-bottom: 1px solid var(--border-soft); }
+  .card__title { margin: 0; font-size: 0.95rem; font-weight: 700; }
+  .card__sub { margin: 0.25rem 0 0; font-size: 0.8rem; color: var(--muted); line-height: 1.4; }
+  .card__body { padding: 0.65rem 0.75rem 0.75rem; }
+  .card__panels { display: flex; flex-direction: column; gap: 0.85rem; }
+  .card__panel-title {
+    margin: 0 0 0.35rem; font-size: 0.82rem; font-weight: 700; color: var(--muted);
+  }
+  .card__panel-title + .card__panel-title,
+  .card__panels > svg + .card__panel-title,
+  .card__panels > .compare-bars + .card__panel-title,
+  .card__panels > .legend + .card__panel-title {
+    margin-top: 0.15rem; padding-top: 0.75rem; border-top: 1px solid var(--border-soft);
+  }
+  .legend { display: flex; flex-wrap: wrap; gap: 0.35rem 0.75rem; margin-bottom: 0.5rem; font-size: 0.78rem; color: var(--muted); }
+  .legend__item { display: inline-flex; align-items: center; gap: 0.35rem; }
+  .legend__swatch { width: 0.65rem; height: 0.65rem; border-radius: 2px; flex-shrink: 0; }
+  .compare-bars { display: flex; flex-direction: column; gap: 0.55rem; }
+  .compare-row { display: grid; grid-template-columns: minmax(5rem, 7.5rem) 1fr minmax(3rem, auto); gap: 0.4rem; align-items: center; font-size: 0.8rem; }
+  .compare-row__label { color: var(--muted); line-height: 1.25; white-space: pre-line; }
+  .compare-row__track { display: flex; gap: 2px; height: 1.1rem; align-items: stretch; }
+  .compare-row__bar { border-radius: 3px; min-width: 2px; transition: width 0.2s; }
+  .compare-row__val { font-variant-numeric: tabular-nums; color: var(--faint); font-size: 0.78rem; text-align: right; }
+  .stacked-econ { display: flex; align-items: flex-end; gap: 0.35rem; min-height: 7rem; padding-top: 0.25rem; }
+  .stacked-econ__col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.25rem; min-width: 0; }
+  .stacked-econ__stack { width: 100%; max-width: 3.5rem; display: flex; flex-direction: column-reverse; border-radius: 4px; overflow: hidden; border: 1px solid var(--border-soft); }
+  .stacked-econ__seg { width: 100%; min-height: 2px; }
+  .stacked-econ__lbl { font-size: 0.65rem; color: var(--muted); text-align: center; line-height: 1.2; max-width: 5rem; word-break: break-word; }
+  .heatmap { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  .heatmap th, .heatmap td { border: 1px solid var(--border-soft); padding: 0.35rem 0.45rem; text-align: center; }
+  .heatmap th { background: var(--surface-raised); color: var(--muted); font-weight: 700; }
+  .heatmap .row-label { text-align: left; color: var(--text); white-space: pre-line; max-width: 8rem; }
+  .cause-grid { display: flex; gap: 0.35rem; align-items: flex-end; overflow-x: auto; padding-bottom: 0.25rem; min-height: 9rem; }
+  .cause-group { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; flex: 0 0 auto; }
+  .cause-group__label { font-size: 0.72rem; color: var(--muted); }
+  .cause-stack { display: flex; flex-direction: column-reverse; width: 2.2rem; border-radius: 4px; overflow: hidden; border: 1px solid var(--border-soft); }
+  .cause-stack__seg { width: 100%; min-height: 1px; }
+  .cause-run-label { font-size: 0.6rem; color: var(--faint); writing-mode: vertical-rl; max-height: 3rem; overflow: hidden; }
+  .boss-list { display: flex; flex-direction: column; gap: 0.35rem; max-height: 28rem; overflow-y: auto; }
+  .boss-row { display: grid; grid-template-columns: minmax(6rem, 8rem) 1fr; gap: 0.35rem; align-items: center; font-size: 0.78rem; }
+  .boss-row__name { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .boss-row__bars { display: flex; flex-direction: column; gap: 2px; }
+  .boss-bar-line { display: grid; grid-template-columns: 1fr auto; gap: 0.35rem; align-items: center; }
+  .boss-bar-line__track { height: 0.55rem; background: var(--surface-raised); border-radius: 3px; overflow: hidden; }
+  .boss-bar-line__fill { height: 100%; border-radius: 3px; min-width: 2px; }
+  .boss-bar-line__txt { font-size: 0.7rem; color: var(--faint); white-space: nowrap; }
+  svg.chart { width: 100%; height: auto; display: block; }
+  .chart-axis { stroke: var(--border); stroke-width: 1; }
+  .chart-label { fill: var(--muted); font-size: 10px; font-family: var(--font); }
+  .chart-tick { fill: var(--faint); font-size: 9px; font-family: var(--font); }
+</style>
+</head>
+<body>
+<div class="root">
+  <header class="header"></header>
+  <div id="app"></div>
+</div>
+<script>
+const EMBEDDED_SNAPSHOTS = null;
+
+const RUN_COLORS = ['#4db8e8', '#e8a06e', '#6fcf97', '#f08090', '#c9a227', '#9b8ec4', '#7aa874'];
+const DEATH_CAUSE_ORDER = ['target-miss', 'no-legal-hand', 'only-unplayable', 'only-no-score', 'stuck-other'];
+const DEATH_CAUSE_COLORS = {
+  'target-miss': '#457b9d',
+  'no-legal-hand': '#c96f3b',
+  'only-unplayable': '#e27d60',
+  'only-no-score': '#f2c14e',
+  'stuck-other': '#8a8a8a',
+};
+const PAYOUT_COLORS = { base: '#7aa874', plays: '#f2c14e', interest: '#e27d60', relics: '#85dcb8' };
+const BLIND_ORDER = { 'Small Blind': 0, 'Big Blind': 1, 'Boss Blind': 2 };
+const BLIND_SHORT = { 'Small Blind': 'S', 'Big Blind': 'B', 'Boss Blind': 'X' };
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+}
+
+function runColor(i) { return RUN_COLORS[i % RUN_COLORS.length]; }
+function labelLine(label) { return String(label || '').split('\n')[0]; }
+function num(v, d) { return Number(v ?? 0).toFixed(d ?? 1); }
+function hasEcon(r) { return r.avg_gold_earned != null; }
+
+function slotSortKey(slot) {
+  const [anteStr, , blind] = slot.split('-');
+  const ante = parseInt(anteStr, 10);
+  return [(Number.isFinite(ante) ? ante : 99), BLIND_ORDER[blind] ?? 99];
+}
+
+function allAnteKeys(runs) {
+  const s = new Set();
+  for (const r of runs) {
+    for (const k of Object.keys(r.deaths_by_ante || {})) s.add(parseInt(k, 10));
+  }
+  return [...s].filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+}
+
+function card(title, sub) {
+  const c = el('div', 'card');
+  const h = el('div', 'card__head');
+  h.appendChild(el('h3', 'card__title', title));
+  if (sub) h.appendChild(el('p', 'card__sub', sub));
+  c.appendChild(h);
+  c.appendChild(el('div', 'card__body'));
+  return { section: c, body: c.lastElementChild };
+}
+
+function runLegend(runs, parent) {
+  const leg = el('div', 'legend');
+  runs.forEach((r, i) => {
+    const item = el('span', 'legend__item');
+    const sw = el('span', 'legend__swatch');
+    sw.style.background = runColor(i);
+    item.appendChild(sw);
+    item.appendChild(document.createTextNode(labelLine(r.label)));
+    leg.appendChild(item);
+  });
+  parent.appendChild(leg);
+  return leg;
+}
+
+function lineChartPanel(parent, runs, title, series, h, pad) {
+  if (title) parent.appendChild(el('h4', 'card__panel-title', title));
+  const svg = svgChart(300, h ?? 150, pad ?? { l: 36, r: 8, t: 8, b: 48 });
+  svgLineSeries(svg, runs, series);
+  parent.appendChild(svg);
+}
+
+function compareMetricBars(parent, runs, specs, maxOverride) {
+  const box = el('div', 'compare-bars');
+  let gMax = maxOverride ?? 0;
+  if (!maxOverride) {
+    for (const r of runs) {
+      for (const s of specs) gMax = Math.max(gMax, Number(r[s.key] ?? 0));
+    }
+  }
+  gMax = Math.max(gMax, 1e-9);
+  for (const r of runs) {
+    const row = el('div', 'compare-row');
+    row.appendChild(el('span', 'compare-row__label', r.label));
+    const track = el('div', 'compare-row__track');
+    const vals = [];
+    specs.forEach((s, si) => {
+      const v = Number(r[s.key] ?? 0);
+      vals.push(s.fmt ? s.fmt(v) : num(v, s.decimals ?? 1));
+      const bar = el('div', 'compare-row__bar');
+      bar.style.width = (100 * v / gMax) + '%';
+      bar.style.background = s.color || runColor(si);
+      bar.title = s.label + ': ' + vals[vals.length - 1];
+      track.appendChild(bar);
+    });
+    row.appendChild(track);
+    row.appendChild(el('span', 'compare-row__val', vals.join(' / ')));
+    box.appendChild(row);
+  }
+  parent.appendChild(box);
+}
+
+function svgChart(w, h, pad) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  svg.setAttribute('class', 'chart');
+  svg._pad = pad;
+  svg._w = w;
+  svg._h = h;
+  return svg;
+}
+
+function svgLineSeries(svg, runs, series, opts) {
+  const pad = svg._pad;
+  const iw = svg._w - pad.l - pad.r;
+  const ih = svg._h - pad.t - pad.b;
+  let yMax = opts?.yMax ?? 0;
+  if (!opts?.yMax) {
+    for (const r of runs) {
+      for (const s of series) yMax = Math.max(yMax, Number(r[s.key] ?? 0));
+    }
+  }
+  yMax = Math.max(yMax, 1e-9);
+  const n = runs.length;
+  const xAt = (i) => pad.l + (n <= 1 ? iw / 2 : (i * iw) / (n - 1));
+
+  const axis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  axis.setAttribute('x1', pad.l);
+  axis.setAttribute('x2', pad.l + iw);
+  axis.setAttribute('y1', pad.t + ih);
+  axis.setAttribute('y2', pad.t + ih);
+  axis.setAttribute('class', 'chart-axis');
+  svg.appendChild(axis);
+
+  series.forEach((s, si) => {
+    const pts = runs.map((r, i) => {
+      const v = Number(r[s.key] ?? 0);
+      return `${xAt(i)},${pad.t + ih - (v / yMax) * ih}`;
+    }).join(' ');
+    const pl = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    pl.setAttribute('points', pts);
+    pl.setAttribute('fill', 'none');
+    pl.setAttribute('stroke', s.color || runColor(si));
+    pl.setAttribute('stroke-width', '2.5');
+    pl.setAttribute('stroke-linejoin', 'round');
+    svg.appendChild(pl);
+    runs.forEach((r, i) => {
+      const v = Number(r[s.key] ?? 0);
+      const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      c.setAttribute('cx', xAt(i));
+      c.setAttribute('cy', pad.t + ih - (v / yMax) * ih);
+      c.setAttribute('r', '4');
+      c.setAttribute('fill', s.color || runColor(si));
+      svg.appendChild(c);
+    });
+  });
+
+  runs.forEach((r, i) => {
+    const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    t.setAttribute('x', xAt(i));
+    t.setAttribute('y', svg._h - 4);
+    t.setAttribute('text-anchor', 'middle');
+    t.setAttribute('class', 'chart-tick');
+    t.textContent = labelLine(r.label);
+    svg.appendChild(t);
+  });
+}
+
+function svgScatter(parent, runs) {
+  const w = 320, h = 220, pad = { l: 42, r: 12, t: 12, b: 52 };
+  const svg = svgChart(w, h, pad);
+  const iw = w - pad.l - pad.r;
+  const ih = h - pad.t - pad.b;
+  const xs = runs.map((r) => Number(r.avg_total_score_m ?? 0));
+  const ys = runs.map((r) => Number(r.win_rate ?? 0));
+  const cs = runs.map((r) => Number(r.avg_antes ?? 0));
+  const xMin = Math.min(...xs), xMax = Math.max(...xs);
+  const yMin = Math.min(...ys), yMax = Math.max(...ys);
+  const cMin = Math.min(...cs), cMax = Math.max(...cs);
+  const xR = Math.max(xMax - xMin, 1e-9);
+  const yR = Math.max(yMax - yMin, 1e-9);
+  const xAt = (v) => pad.l + ((v - xMin) / xR) * iw;
+  const yAt = (v) => pad.t + ih - ((v - yMin) / yR) * ih;
+  const colorAt = (v) => {
+    const t = cMax === cMin ? 0.5 : (v - cMin) / (cMax - cMin);
+    const r = Math.round(69 + t * (201 - 69));
+    const g = Math.round(123 + t * (160 - 123));
+    const b = Math.round(157 + t * (110 - 157));
+    return `rgb(${r},${g},${b})`;
+  };
+
+  runs.forEach((r, i) => {
+    const x = xAt(Number(r.avg_total_score_m ?? 0));
+    const y = yAt(Number(r.win_rate ?? 0));
+    const rad = Math.max(6, Math.min(18, Number(r.avg_final_gold ?? 0) * 0.4 + 6));
+    const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    c.setAttribute('cx', x);
+    c.setAttribute('cy', y);
+    c.setAttribute('r', rad);
+    c.setAttribute('fill', colorAt(Number(r.avg_antes ?? 0)));
+    c.setAttribute('fill-opacity', '0.85');
+    c.setAttribute('stroke', '#1f1f1f');
+    c.setAttribute('stroke-width', '1');
+    svg.appendChild(c);
+    const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    t.setAttribute('x', x + rad + 3);
+    t.setAttribute('y', y + 3);
+    t.setAttribute('class', 'chart-label');
+    t.textContent = labelLine(r.label);
+    svg.appendChild(t);
+  });
+  parent.appendChild(svg);
+}
+
+function renderStackedEcon(parent, runs) {
+  const econ = runs.filter(hasEcon);
+  if (!econ.length) return;
+  const cols = el('div', 'stacked-econ');
+  let maxTotal = 1;
+  for (const r of econ) {
+    const t = Number(r.clear_base ?? 0) + Number(r.clear_plays ?? 0) + Number(r.clear_interest ?? 0) + Number(r.clear_relics ?? 0);
+    maxTotal = Math.max(maxTotal, t);
+  }
+  for (const r of econ) {
+    const col = el('div', 'stacked-econ__col');
+    const stack = el('div', 'stacked-econ__stack');
+    const segs = [
+      ['base', r.clear_base],
+      ['plays', r.clear_plays],
+      ['interest', r.clear_interest],
+      ['relics', r.clear_relics],
+    ];
+    for (const [k, v] of segs) {
+      const seg = el('div', 'stacked-econ__seg');
+      const h = (100 * Number(v ?? 0)) / maxTotal;
+      seg.style.height = h + '%';
+      seg.style.background = PAYOUT_COLORS[k];
+      seg.title = k + ': ' + num(v, 1);
+      stack.appendChild(seg);
+    }
+    col.appendChild(stack);
+    col.appendChild(el('span', 'stacked-econ__lbl', labelLine(r.label)));
+    cols.appendChild(col);
+  }
+  parent.appendChild(cols);
+}
+
+function renderHeatmap(parent, runs, anteKeys) {
+  const table = el('table', 'heatmap');
+  const hr = el('tr');
+  hr.appendChild(el('th', null, ''));
+  for (const a of anteKeys) hr.appendChild(el('th', null, 'Ante ' + a));
+  table.appendChild(hr);
+
+  let gMax = 0;
+  const rows = runs.map((r) => {
+    const n = Math.max(Number(r.runs) || 1, 1);
+    const cells = anteKeys.map((a) => {
+      const pct = (100 * (r.deaths_by_ante?.[String(a)] ?? r.deaths_by_ante?.[a] ?? 0)) / n;
+      gMax = Math.max(gMax, pct);
+      return pct;
+    });
+    return { r, cells };
+  });
+  gMax = Math.max(gMax, 1e-9);
+
+  for (const { r, cells } of rows) {
+    const tr = el('tr');
+    tr.appendChild(el('td', 'row-label', r.label));
+    cells.forEach((pct) => {
+      const td = el('td');
+      const t = pct / gMax;
+      const red = Math.round(255 - t * 60);
+      const green = Math.round(255 - t * 140);
+      const blue = Math.round(220 - t * 180);
+      td.style.background = `rgb(${red},${green},${blue})`;
+      td.style.color = pct > 14 ? '#fff' : '#111';
+      td.textContent = pct > 0 ? num(pct, 1) : '';
+      tr.appendChild(td);
+    });
+    table.appendChild(tr);
+  }
+  parent.appendChild(table);
+}
+
+function renderDeathCauses(parent, runs) {
+  const causeRuns = runs.filter((r) => r.deaths_by_ante_cause && Object.keys(r.deaths_by_ante_cause).length);
+  if (!causeRuns.length) return;
+  const antes = [...new Set(causeRuns.flatMap((r) => Object.keys(r.deaths_by_ante_cause).map((k) => parseInt(k.split('|')[0], 10))))]
+    .filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+  if (!antes.length) return;
+
+  const grid = el('div', 'cause-grid');
+  let gMax = 1;
+  const groups = [];
+  for (const ante of antes) {
+    for (let ri = 0; ri < causeRuns.length; ri++) {
+      const r = causeRuns[ri];
+      const totals = {};
+      for (const [key, count] of Object.entries(r.deaths_by_ante_cause)) {
+        const [aStr, , cause] = key.split('|');
+        if (parseInt(aStr, 10) !== ante) continue;
+        totals[cause] = (totals[cause] || 0) + count;
+      }
+      const total = Object.values(totals).reduce((a, b) => a + b, 0);
+      gMax = Math.max(gMax, total);
+      groups.push({ ante, r, ri, totals, total });
+    }
+  }
+
+  for (const g of groups) {
+    const wrap = el('div', 'cause-group');
+    const stack = el('div', 'cause-stack');
+    let bottom = 0;
+    for (const cause of DEATH_CAUSE_ORDER) {
+      const h = g.totals[cause] || 0;
+      if (!h) continue;
+      const seg = el('div', 'cause-stack__seg');
+      seg.style.height = (100 * h / gMax) + 'px';
+      seg.style.background = DEATH_CAUSE_COLORS[cause] || '#bbb';
+      seg.title = cause + ': ' + h;
+      stack.appendChild(seg);
+    }
+    wrap.appendChild(stack);
+    wrap.appendChild(el('span', 'cause-group__label', 'A' + g.ante));
+    if (causeRuns.length > 1) wrap.appendChild(el('span', 'cause-run-label', labelLine(g.r.label)));
+    grid.appendChild(wrap);
+  }
+  parent.appendChild(grid);
+
+  const leg = el('div', 'legend');
+  for (const cause of DEATH_CAUSE_ORDER) {
+    const item = el('span', 'legend__item');
+    const sw = el('span', 'legend__swatch');
+    sw.style.background = DEATH_CAUSE_COLORS[cause];
+    item.appendChild(sw);
+    item.appendChild(document.createTextNode(cause));
+    leg.appendChild(item);
+  }
+  parent.insertBefore(leg, grid);
+}
+
+function renderSurplusSvg(parent, runs) {
+  const surplusRuns = runs.filter((r) => r.cleared_by_slot && Object.keys(r.cleared_by_slot).length);
+  if (!surplusRuns.length) return;
+  const slots = [...new Set(surplusRuns.flatMap((r) => Object.keys(r.cleared_by_slot)))].sort((a, b) => {
+    const ka = slotSortKey(a), kb = slotSortKey(b);
+    return ka[0] - kb[0] || ka[1] - kb[1];
+  });
+  const labels = slots.map((s) => {
+    const [a, , b] = s.split('-');
+    return 'A' + parseInt(a, 10) + (BLIND_SHORT[b] || '?');
+  });
+  const w = Math.max(480, slots.length * 14);
+  const h = 200;
+  const pad = { l: 48, r: 12, t: 12, b: 44 };
+  const svg = svgChart(w, h, pad);
+  const iw = w - pad.l - pad.r;
+  const ih = h - pad.t - pad.b;
+  let yMax = 1;
+  const series = surplusRuns.map((r, ri) => {
+    const ys = slots.map((slot) => {
+      const cleared = r.cleared_by_slot[slot] || 0;
+      const over = r.overscore_by_slot?.[slot] || 0;
+      return cleared ? over / cleared : 0;
+    });
+    yMax = Math.max(yMax, ...ys.filter((v) => v > 0));
+    return { ys, color: runColor(ri), label: labelLine(r.label) };
+  });
+  const logMax = Math.log10(Math.max(yMax, 10));
+  const logMin = 4;
+  const yAt = (v) => {
+    if (v <= 0) return pad.t + ih;
+    const lv = Math.max(logMin, Math.log10(v));
+    return pad.t + ih - ((lv - logMin) / (logMax - logMin)) * ih;
+  };
+  const xAt = (i) => pad.l + (slots.length <= 1 ? iw / 2 : (i * iw) / (slots.length - 1));
+
+  series.forEach((s) => {
+    const pts = s.ys.map((v, i) => (v > 0 ? `${xAt(i)},${yAt(v)}` : null)).filter(Boolean).join(' ');
+    if (!pts) return;
+    const pl = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    pl.setAttribute('points', pts);
+    pl.setAttribute('fill', 'none');
+    pl.setAttribute('stroke', s.color);
+    pl.setAttribute('stroke-width', '2');
+    svg.appendChild(pl);
+  });
+  const step = Math.max(1, Math.ceil(slots.length / 24));
+  slots.forEach((_, i) => {
+    if (i % step !== 0 && i !== slots.length - 1) return;
+    const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    t.setAttribute('x', xAt(i));
+    t.setAttribute('y', h - 6);
+    t.setAttribute('text-anchor', 'middle');
+    t.setAttribute('class', 'chart-tick');
+    t.textContent = labels[i];
+    svg.appendChild(t);
+  });
+  parent.appendChild(svg);
+}
+
+function renderBossList(parent, runs) {
+  const bossRuns = runs.filter((r) => r.boss_faced && Object.keys(r.boss_faced).length);
+  if (!bossRuns.length) return;
+  const bosses = [...new Set(bossRuns.flatMap((r) => Object.keys(r.boss_faced)))].sort();
+  const list = el('div', 'boss-list');
+  for (const boss of bosses) {
+    const row = el('div', 'boss-row');
+    row.appendChild(el('span', 'boss-row__name', boss));
+    const bars = el('div', 'boss-row__bars');
+    bossRuns.forEach((r, ri) => {
+      const f = r.boss_faced[boss] || 0;
+      const b = r.boss_beaten?.[boss] || 0;
+      const rate = f ? (100 * b / f) : 0;
+      const line = el('div', 'boss-bar-line');
+      const track = el('div', 'boss-bar-line__track');
+      const fill = el('div', 'boss-bar-line__fill');
+      fill.style.width = rate + '%';
+      fill.style.background = runColor(ri);
+      track.appendChild(fill);
+      line.appendChild(track);
+      line.appendChild(el('span', 'boss-bar-line__txt', f ? `${num(rate, 0)}% (${b}/${f})` : '—'));
+      bars.appendChild(line);
+    });
+    row.appendChild(bars);
+    list.appendChild(row);
+  }
+  parent.appendChild(list);
+}
+
+function renderOverview(app, runs) {
+  const sec = el('section', 'section');
+  sec.appendChild(el('h2', 'section__title', 'Overview'));
+  const grid = el('div', 'grid grid--overview');
+
+  const diff = card('Difficulty', 'Win rate % vs avg antes cleared');
+  compareMetricBars(diff.body, runs, [
+    { key: 'win_rate', label: 'Win %', color: '#c96f3b', decimals: 1 },
+    { key: 'avg_antes', label: 'Antes', color: '#4f6d4a', decimals: 2 },
+  ], 100);
+  grid.appendChild(diff.section);
+
+  const score = card('Average total score', 'Millions per run');
+  const scoreSvg = svgChart(300, 160, { l: 36, r: 8, t: 8, b: 48 });
+  svgLineSeries(scoreSvg, runs, [{ key: 'avg_total_score_m', label: 'Score M', color: '#355c7d' }]);
+  score.body.appendChild(scoreSvg);
+  grid.appendChild(score.section);
+
+  if (runs.length >= 3) {
+    const trade = card('Win rate vs score', 'Color = antes; point size ≈ final gold');
+    svgScatter(trade.body, runs);
+    grid.appendChild(trade.section);
+  } else {
+    const shop = card('Shop pressure', 'Relics bought vs gold spent');
+    compareMetricBars(shop.body, runs, [
+      { key: 'avg_relics', label: 'Relics', color: '#6c5b7b', decimals: 2 },
+      { key: 'avg_gold_spent', label: 'Spent', color: '#457b9d', decimals: 1 },
+    ]);
+    grid.appendChild(shop.section);
+  }
+
+  const pacing = card('Action & blind pace', 'Plays, discards, clears, and skips per run');
+  const pacingPanels = el('div', 'card__panels');
+  runLegend(runs, pacingPanels);
+  lineChartPanel(pacingPanels, runs, 'Action economy', [
+    { key: 'avg_plays', label: 'Plays', color: '#6c5b7b' },
+    { key: 'avg_discards', label: 'Discards', color: '#f08a5d' },
+  ]);
+  lineChartPanel(pacingPanels, runs, 'Blind pace', [
+    { key: 'avg_blinds', label: 'Cleared', color: '#2a9d8f' },
+    { key: 'avg_skips', label: 'Skipped', color: '#e76f51' },
+  ]);
+  pacing.body.appendChild(pacingPanels);
+  grid.appendChild(pacing.section);
+
+  if (runs.length >= 3) {
+    const shop = card('Shop pressure', 'Relics bought vs gold spent');
+    compareMetricBars(shop.body, runs, [
+      { key: 'avg_relics', label: 'Relics', color: '#6c5b7b', decimals: 2 },
+      { key: 'avg_gold_spent', label: 'Spent', color: '#457b9d', decimals: 1 },
+    ]);
+    grid.appendChild(shop.section);
+  }
+
+  if (runs.some(hasEcon)) {
+    const payout = card('Gold economy', 'Clear-payout mix and earned vs final gold');
+    const leg = el('div', 'legend');
+    for (const [k, c] of Object.entries(PAYOUT_COLORS)) {
+      const item = el('span', 'legend__item');
+      const sw = el('span', 'legend__swatch');
+      sw.style.background = c;
+      item.appendChild(sw);
+      item.appendChild(document.createTextNode(k));
+      leg.appendChild(item);
+    }
+    const econPanels = el('div', 'card__panels');
+    econPanels.appendChild(el('h4', 'card__panel-title', 'Clear-payout mix'));
+    econPanels.appendChild(leg);
+    renderStackedEcon(econPanels, runs);
+    econPanels.appendChild(el('h4', 'card__panel-title', 'Gold outcomes'));
+    compareMetricBars(econPanels, runs.filter(hasEcon), [
+      { key: 'avg_gold_earned', label: 'Earned', color: '#457b9d', decimals: 1 },
+      { key: 'avg_final_gold', label: 'Final', color: '#a8dadc', decimals: 1 },
+    ]);
+    payout.body.appendChild(econPanels);
+    payout.section.classList.add('span-2');
+    grid.appendChild(payout.section);
+  }
+
+  sec.appendChild(grid);
+  app.appendChild(sec);
+}
+
+function renderSurvival(app, runs) {
+  const anteKeys = allAnteKeys(runs);
+  const hasHeat = anteKeys.length > 0;
+  const hasCauses = runs.some((r) => r.deaths_by_ante_cause && Object.keys(r.deaths_by_ante_cause).length);
+  if (!hasHeat && !hasCauses) return;
+
+  const sec = el('section', 'section');
+  sec.appendChild(el('h2', 'section__title', 'Survival'));
+  const surv = card('Deaths by ante', 'Marginal death rate and cause mix per ante');
+  const panels = el('div', 'card__panels');
+
+  if (hasHeat) {
+    panels.appendChild(el('h4', 'card__panel-title', 'Death rate'));
+    runLegend(runs, panels);
+    renderHeatmap(panels, runs, anteKeys);
+  }
+
+  if (hasCauses) {
+    panels.appendChild(el('h4', 'card__panel-title', 'Death causes'));
+    renderDeathCauses(panels, runs);
+  }
+
+  surv.body.appendChild(panels);
+  sec.appendChild(surv.section);
+  app.appendChild(sec);
+}
+
+function renderProgression(app, runs) {
+  const hasSurplus = runs.some((r) => r.cleared_by_slot && Object.keys(r.cleared_by_slot).length);
+  const hasBoss = runs.some((r) => r.boss_faced && Object.keys(r.boss_faced).length);
+  if (!hasSurplus && !hasBoss) return;
+
+  const sec = el('section', 'section');
+  sec.appendChild(el('h2', 'section__title', 'Progression'));
+  const prog = card('Blind & boss progression', 'Score cushion over target and boss win rates');
+  const panels = el('div', 'card__panels');
+
+  if (hasSurplus) {
+    panels.appendChild(el('h4', 'card__panel-title', 'Score surplus per blind'));
+    runLegend(runs, panels);
+    renderSurplusSvg(panels, runs);
+  }
+
+  if (hasBoss) {
+    panels.appendChild(el('h4', 'card__panel-title', 'Boss win rate'));
+    if (!hasSurplus) runLegend(runs, panels);
+    renderBossList(panels, runs);
+  }
+
+  prog.body.appendChild(panels);
+  sec.appendChild(prog.section);
+  app.appendChild(sec);
+}
+
+function renderDashboard(snapshots) {
+  const app = document.getElementById('app');
+  app.replaceChildren();
+  if (!snapshots || !snapshots.length) {
+    app.appendChild(el('p', 'empty', 'No snapshots loaded. Use “Load JSON” to open a snapshot array.'));
+    return;
+  }
+  const runs = snapshots.slice().sort((a, b) => String(a.slug).localeCompare(String(b.slug)));
+  renderOverview(app, runs);
+  renderSurvival(app, runs);
+  renderProgression(app, runs);
+}
+
+function buildHeader() {
+  const header = document.querySelector('.header');
+  header.replaceChildren();
+  const brand = el('div');
+  const h1 = el('h1');
+  h1.innerHTML = 'Mahjuro <em>bot</em> balance';
+  brand.appendChild(h1);
+  brand.appendChild(el('p', null,
+    'Compare balance snapshots side by side. Load a JSON array of snapshot objects.'));
+  header.appendChild(brand);
+
+  const toolbar = el('div', 'toolbar');
+  const fileLabel = el('label');
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = '.json,application/json';
+  fileInput.hidden = true;
+  const loadBtn = el('button', null, 'Load JSON…');
+  loadBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    const f = fileInput.files?.[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        const list = Array.isArray(data) ? data : [data];
+        renderDashboard(list);
+      } catch (e) {
+        alert('Invalid JSON: ' + e);
+      }
+    };
+    reader.readAsText(f);
+  });
+  fileLabel.appendChild(loadBtn);
+  fileLabel.appendChild(fileInput);
+  toolbar.appendChild(fileLabel);
+
+  header.appendChild(toolbar);
+}
+
+buildHeader();
+if (Array.isArray(EMBEDDED_SNAPSHOTS) && EMBEDDED_SNAPSHOTS.length) {
+  renderDashboard(EMBEDDED_SNAPSHOTS);
+} else {
+  renderDashboard(null);
+}
+</script>
+</body>
+</html>

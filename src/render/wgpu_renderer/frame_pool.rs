@@ -21,7 +21,7 @@
 //!
 //! Not all per-frame buffers are routed through the pool yet; see the
 //! TODO in `runtime/render.rs` near `flame_buffers` /
-//! `tile_face_inst_buffers` / `prompt_icon_inst_buffers` /
+//! `tile_face_inst_buffers` / `image_quad_inst_buffers` /
 //! `tile_glow_buffer` / `relic_glow_buffer` / `relic_debuff_buffer`.
 //! Those are smaller and rarer per-frame, so prioritising the high-
 //! frequency offenders (quad batches and text label vertex instances)

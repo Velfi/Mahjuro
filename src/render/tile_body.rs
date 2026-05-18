@@ -4,7 +4,7 @@
 //! stay aligned with the chosen [`crate::persistence::TileMaterial`].
 //!
 //! `tile_3d.wgsl` also recognizes [`TEXTURED_BASE_MAP_BODY_KIND`] for imported meshes
-//! (e.g. [`Shop.glb`](../../../assets/3d/Shop.glb)) that should sample the bound base-color
+//! (e.g. [`shop.glb`](../../../assets/3d/shop.glb)) that should sample the bound base-color
 //! texture instead of procedural tile bodies.
 
 use crate::persistence::TileMaterial;

@@ -7,8 +7,8 @@ use crate::render::theme::color;
 use crate::scenes::options;
 use crate::scenes::{BackgroundId, MeldGuideScene, OverlayRequest};
 use crate::ui::inspect_plaque::{
-    FocusTooltipPanelParams, dora_focus_tooltip_strings,
-    gameplay_consumable_description_full, hand_tile_inspect_lines, push_focus_tooltip_panel_2d,
+    FocusTooltipPanelParams, dora_focus_tooltip_strings, round_wind_focus_tooltip_strings,
+    gameplay_consumable_description_full, hand_tile_focus_tooltip, push_focus_tooltip_panel_2d,
 };
 
 impl SceneBehavior for GameplayScene {
@@ -302,22 +302,6 @@ impl SceneBehavior for GameplayScene {
 
         let hand_slots = hand_slots_for_count(layout, interaction.hand_len);
 
-        // Score panel text.
-        let tiles_left = gameplay.tiles_left;
-        let dora_section = if ctx.progress.dora_enabled() {
-            let face_text: String = gameplay
-                .dora_faces
-                .iter()
-                .map(|(suit, rank)| {
-                    use crate::core::tile::Tile;
-                    Tile::new(*suit, *rank, 0).full_name()
-                })
-                .collect::<Vec<_>>()
-                .join(",");
-            format!("   Dora: {}", face_text)
-        } else {
-            String::new()
-        };
         // Score header is split into two lines so it doesn't get auto-shrunk
         // into the cartouche. The cartouche is only ~38% of the score panel
         // width and the rasterizer's width-based fallback would otherwise
@@ -326,16 +310,6 @@ impl SceneBehavior for GameplayScene {
             "{}  ·  R{}  ·  / {}",
             gameplay.blind_label, gameplay.run_number, gameplay.target_score,
         );
-        let score_text_bot = format!(
-            "${}  ·  Wall {}  ·  Wind {}{}",
-            gameplay.gold, tiles_left, gameplay.round_wind_label, dora_section
-        );
-        // Captured for the hanging plaque cmd built later in `frame.cmds`.
-        // The plaque carries the same two-line payload as a per-instance
-        // decal texture engraved onto the wood face — no 2D overlay text
-        // sits on top of the wood anymore, so the smoke composite can
-        // drift over the plaque without text bleeding through it.
-        let plaque_bot_text = score_text_bot.clone();
         // Boss-rule ofuda payload: derived independently from `run` so the
         // hanging paper always reflects the active boss rule, regardless of
         // whether a cascade is currently animating in the modifier strip.
@@ -409,18 +383,18 @@ impl SceneBehavior for GameplayScene {
         // No 2D relic badge strip here — `RelicIcon` GPU path stays empty.
         let relic_icons: Vec<crate::render::wgpu_renderer::RelicIcon> = Vec::new();
 
-        // Bottom button bar: sort tablets, discard bowl, bronze mirror — see
+        // Bottom button bar: discard bowl, bronze mirror, journal — see
         // [`action_bar_layout`] for spacing, lift, and rects.
         let layout_scale = (layout.window_w.min(layout.window_h)) / 600.0;
         let selected_count = gameplay.selected_count;
         let selection_valid = GameEngine::selection_is_valid(run);
 
-        // Bowl + mirror: own row below the hand tile slots, above sort+journal
+        // Bowl + mirror: own row below the hand tile slots, above the journal
         // (discard left, play right within the centered playfield). Click rects
         // match diameter.
         //
         // Vertical order: structure strip, yaku tablets, hand rack, bowl/mirror
-        // row, then sort + journal.
+        // row, then journal.
         let has_structure = gameplay.has_structure;
         let cascade_showcase_ref = self.cascade_queue.front().and_then(|(_, sc)| sc.as_ref());
         let showcase_present = has_structure || cascade_showcase_ref.is_some();
@@ -436,10 +410,8 @@ impl SceneBehavior for GameplayScene {
             scale,
             container_w,
             container_x,
-            suit_btn_rect,
-            rank_btn_rect,
+            journal_btn_rect,
             journal_btn_cx,
-            journal_btn_w,
             discard_btn_rect,
             play_btn_rect,
             trigger_btn_rect,
@@ -537,8 +509,6 @@ impl SceneBehavior for GameplayScene {
             None
         };
         let btn_rects = [
-            suit_btn_rect,
-            rank_btn_rect,
             discard_btn_rect,
             play_btn_rect,
             trigger_btn_rect,
@@ -559,9 +529,8 @@ impl SceneBehavior for GameplayScene {
                 &ctx,
                 &gameplay,
                 &btn_rects,
-                rank_btn_rect,
+                journal_btn_rect,
                 journal_btn_cx,
-                journal_btn_w,
                 action_world_z_py,
                 action_hud_table_lift,
                 cam_euler,
@@ -585,13 +554,6 @@ impl SceneBehavior for GameplayScene {
         let cart_x = sp.x + (sp.w - cart_w) * 0.5;
         let cart_y = sp.y + (sp.h - cart_h) * 0.5;
 
-        // Coin pile screen rect — kept in sync with the actual 3D pile
-        // draw down at the bottom of `draw_frame` (search "Coin pile —"
-        // around the dish_explicit call). We compute it up here so the
-        // `FocusTarget::Gold` focus rect and the pile draw all use exactly
-        // the same screen-space footprint — keeping the focus ring and
-        // visually locked together as the score panel resizes. `None`
-        // when there's no gold to display (no pile is drawn).
         // Dora indicator screen rect. Pre-computed up here so the focus
         // rect graph entry can both use it.
         // Prefer the renderer's projected plinth rect (one frame stale,
@@ -605,30 +567,22 @@ impl SceneBehavior for GameplayScene {
             let dora_h = layout.mm(34.0);
             [dora_x - dora_w * 0.5, dora_y - dora_h * 0.5, dora_w, dora_h]
         });
+        let round_wind_rect: [f32; 4] = ctx.proj.round_wind_plinth_rect.unwrap_or_else(|| {
+            let rw_x = self.positions.round_wind.nx * layout.window_w;
+            let rw_y = self.positions.round_wind.ny * layout.window_h;
+            let rw_w = layout.mm(48.0);
+            let rw_h = layout.mm(34.0);
+            [rw_x - rw_w * 0.5, rw_y - rw_h * 0.5, rw_w, rw_h]
+        });
 
-        let coin_pile_rect: Option<[f32; 4]> = if gameplay.gold > 0 {
-            let coin_radius = layout.mm(11.3);
-            let scatter_half = coin_radius * 3.0;
-            let coin_back_z_push = scatter_half * 0.5;
-            let pile_cx = self.positions.coin_pile.nx * layout.window_w;
-            let pile_cy = sp.y + sp.h * 0.5
-                - coin_back_z_push
-                - layout.window_h * self.positions.coin_pile.ny;
-            let pile_half_w = scatter_half + coin_radius * 2.0;
-            let pile_half_h = scatter_half + coin_radius * 2.0;
-            Some([
-                pile_cx - pile_half_w,
-                pile_cy - pile_half_h,
-                pile_half_w * 2.0,
-                pile_half_h * 2.0,
-            ])
-        } else {
-            None
-        };
+        let gold_anchor = crate::render::gold_display::gameplay_gold_pile_anchor(
+            layout,
+            &self.positions.coin_pile,
+        );
         let (ctx_x, ctx_y, ctx_w, ctx_h) =
             crate::render::animation::apply_transform_rect(cart_x, cart_y, cart_w, cart_h, ts);
-        // Two-line stack inside the cartouche: top = blind/round/score, bot =
-        // status row (gold/wall/wind). Each line gets its own pinned
+        // Two-line stack inside the cartouche: top = blind/round/score (bot line
+        // reserved on plaque for the score reel). Gold is the floating label + coin pile.
         // font_px so they render at the same readable size regardless of how
         // long the strings are. The cartouche header text + the modifier
         // strip cascade/idle text are kept in their own dedicated buffers
@@ -638,17 +592,16 @@ impl SceneBehavior for GameplayScene {
         // +Z face via the per-instance decal pipeline (see the plaque draw
         // path in `wgpu_renderer.rs` and `rasterize_plaque_decal` in
         // `decal.rs`). The two-line payload travels in `plaque_top_text` /
-        // `plaque_bot_text` on the `PlaquePlacement` cmd pushed below — no
-        // 2D overlay text is emitted for the header anymore, so the smoke
-        // composite can drift over the wood face without text floating
-        // on top of it.
-        let _ = (ctx_x, ctx_y, ctx_w, ctx_h, &score_text_top, &score_text_bot);
-        // The Sort/Play labels are engraved on the wood tablets (per-instance decals).
+        // Plaque bottom band is left blank for the score reel — no 2D overlay
+        // text is emitted for the header anymore, so the smoke composite can
+        // drift over the wood face without text floating on top of it.
+        let _ = (ctx_x, ctx_y, ctx_w, ctx_h, &score_text_top);
+        // Cash-in / play labels are engraved on the wood tablets (per-instance decals).
         // Discard river + play mirror use centered text in their projected rects in the
         // persistent HUD pass (see `hud_text` just before `frame.texts(hud_text)`).
 
-        // The 3D action objects (sort suit / sort rank / play hand wood
-        // tablets + discard bowl) no longer go through `frame.buttons`.
+        // The 3D action objects (cash-in tablet + discard bowl) no longer go
+        // through `frame.buttons`.
         // Their click routing is driven by `pick_gameplay_object` in
         // `main.rs`'s `MouseInput` handler — clicks land on whichever 3D
         // object the cursor is *actually* over per raycast, not whichever
@@ -763,7 +716,7 @@ impl SceneBehavior for GameplayScene {
         // this function, so it does not appear here.
 
         let animation_state::CandleAndLightBuffers {
-            flame_instances,
+            flame_emitters,
             point_lights,
             spot_lights,
             candle_placements,
@@ -788,9 +741,9 @@ impl SceneBehavior for GameplayScene {
         // tile_outline_pipeline (which catches candlelight), so no 2D
         // selection overlay is added here.
 
-        let (relic_objects, wind_gusts) = {
-            let _g = crate::render::cpu_profiler::scope("draw_frame.build_relic_tray_and_wind");
-            input_handler::build_relic_tray_and_wind(self, layout, run, now, &hand_slots)
+        let relic_objects= {
+            let _g = crate::render::cpu_profiler::scope("draw_frame.build_relic_tray");
+            input_handler::build_relic_tray(self, layout, run)
         };
 
         // ── Frame assembly ──────────────────────────────────────────────
@@ -826,6 +779,20 @@ impl SceneBehavior for GameplayScene {
         frame.background(BackgroundId::Black);
         frame.table();
 
+        let gold_label_rect = crate::render::gold_display::push_gold_amount_label(
+            &mut frame,
+            layout.window_w,
+            layout.window_h,
+            gameplay.gold,
+            (gold_anchor[0], gold_anchor[1]),
+        );
+        crate::render::wall_display::push_wall_remaining_hud(
+            &mut frame,
+            layout.window_w,
+            layout.window_h,
+            gameplay.tiles_left,
+        );
+
         // Build hand tile placements for the showcase pipeline.
         // Each slot becomes one ShowcaseTilePlacement; the renderer draws,
         // picks, and projects them with no separate hand-tile GPU path.
@@ -841,12 +808,6 @@ impl SceneBehavior for GameplayScene {
             let hand = &interaction.hand;
             // Dora face set for highlighting matching hand tiles. Empty
             // before dora unlocks (level 4) so the marker only appears
-            // once the player can read the indicator.
-            let dora_faces: Vec<(crate::core::tile::Suit, u8)> = if ctx.progress.dora_enabled() {
-                gameplay.dora_faces.clone()
-            } else {
-                Vec::new()
-            };
             let mut hand_placements: Vec<crate::render::draw_cmd::ShowcaseTilePlacement> =
                 Vec::with_capacity(hand.len());
             for (i, &tile) in hand.iter().enumerate() {
@@ -857,7 +818,6 @@ impl SceneBehavior for GameplayScene {
                 let is_selected = interaction.selected.get(i).copied().unwrap_or(false);
                 let is_focused = focus == i;
                 let is_hinted = hint_indices.contains(&i);
-                let is_dora = dora_faces.contains(&(tile.suit, tile.rank));
                 // Pop-in: slide_y 0→1, offset pixels downward (large py = nearer player).
                 let slide_y_frac = self.hand_slide_y.get(i).copied().unwrap_or(1.0);
                 let pop_offset = (1.0 - slide_y_frac) * sh * 0.3;
@@ -871,15 +831,6 @@ impl SceneBehavior for GameplayScene {
                 // Tile standing upright: center is at half the long dimension above the table.
                 // Chinese tile: 30mm long, half = 15mm. layout.mm() converts mm → world units.
                 let lift = layout.mm(15.0) + layout.mm(self.positions.hand_strip.lift_mm);
-                let glow_on = is_selected || is_hinted || is_dora;
-                // Selection / hint take priority over the dora marker so
-                // the player's active intent stays visible. Dora-only
-                // tiles glow red.
-                let glow_color = if is_dora && !(is_selected || is_hinted) {
-                    Some([1.00, 0.25, 0.20, 0.55])
-                } else {
-                    None
-                };
                 hand_placements.push(crate::render::draw_cmd::ShowcaseTilePlacement {
                     tile,
                     center_pos: [cx, cy, lift],
@@ -894,8 +845,8 @@ impl SceneBehavior for GameplayScene {
                     selected: is_selected,
                     hovered: is_focused,
                     outline: is_selected || is_focused,
-                    glow: glow_on,
-                    glow_color,
+                    glow: is_selected || is_hinted,
+                    glow_color: None,
                     pick_id: Some(i),
                 });
             }
@@ -955,14 +906,9 @@ impl SceneBehavior for GameplayScene {
                 kind: Object3dKind::Primitive {
                     shape: crate::render::primitive::MeshId::BeveledSlab,
                     // Top line is replaced by a blank: the floating score
-                    // reel occupies that band of the plaque face. The blank
-                    // line keeps the bot line (gold/wall/wind) sized
-                    // to ~half-height so it lives in the bottom band.
+                    // reel occupies that band of the plaque face.
                     material: crate::render::primitive::MaterialSpec::lacquered_wood_flat()
-                        .with_decal(crate::render::primitive::plaque_decal(format!(
-                            "\n{}",
-                            plaque_bot_text
-                        ))),
+                        .with_decal(crate::render::primitive::plaque_decal("\n")),
                     pick_id: None,
                     shadow_caster: false,
                     silhouette: false,
@@ -977,12 +923,12 @@ impl SceneBehavior for GameplayScene {
         // score-panel bounds: perspective projection pulls taller / higher
         // objects inward on screen, so a naive "some pixels left of
         // score_panel.x" anchor can still drift back over the wood plaque
-        // and obscure the gold count.
+        // and obscure the plaque text.
         if !ofuda_title_text.is_empty() {
             let sp = layout.score_panel;
             let ms_rect = layout.modifier_strip;
             // Keep the gameplay ofuda slimmer than the shrine-screen paper:
-            // the main plaque also needs room for score + gold + wind, so a
+            // the main plaque also needs room for score line, so a
             // full-width warning card feels crowding here. Width set so the
             // wrapped rule body reads at table distance — too narrow and the
             // body shrinks to unreadable per-glyph sizes.
@@ -1125,7 +1071,7 @@ impl SceneBehavior for GameplayScene {
             let reel_px = sp.x + sp.w * 0.5;
             // Sit the reel in the top half of the plaque face. The plaque
             // decal leaves the top line blank for the reel and renders the
-            // gold/wall/wind line in the bottom band; anchoring the
+            // bottom band left for the reel; anchoring the
             // reel a quarter-height above center lines it up with the
             // vacated top band instead of painting over the bottom line.
             let reel_py = sp.y + sp.h * 0.25;
@@ -1293,7 +1239,6 @@ impl SceneBehavior for GameplayScene {
                 layout,
                 &gameplay,
                 ctx.progress.dora_enabled(),
-                coin_pile_rect,
                 &mut frame,
             );
         }
@@ -1323,11 +1268,15 @@ impl SceneBehavior for GameplayScene {
             frame.object3d(book);
         }
 
-        // Additive 2D flame quads. Submitted last among the 3D-pass
-        // draws so the coin pile, flying coins, and every other mesh
-        // are already in the depth buffer when the flame pipeline
-        // (depth-test Always, depth-write off) stamps pixels on top.
-        frame.flames(flame_instances);
+        frame.procedural_flame_emitters = flame_emitters;
+        if !frame.procedural_flame_emitters.is_empty() {
+            // One `DrawCmd::Flame` triggers the volume batch (same path as shop).
+            frame.flames(std::iter::once(crate::render::wgpu_renderer::GpuInstance {
+                rect: [0.0, 0.0, 1.0, 1.0],
+                color: [0.0, 0.0, 1.0, 0.0],
+                user: 0,
+            }));
+        }
 
         // Play mirror + discard river: labels centered in projected rects (not cursor hover tooltips).
         if !paused
@@ -1393,7 +1342,6 @@ impl SceneBehavior for GameplayScene {
                     });
                 }
             }
-            let undo_bottom_y = discard_undo_rect.map(|r| r[1] + r[3]);
             let settings = crate::persistence::load_settings();
             let show_discard_legend = super::action_prompts::gameplay_west_north_legend_active(
                 ctx.input_mode,
@@ -1417,7 +1365,6 @@ impl SceneBehavior for GameplayScene {
                     cash_in_enabled: has_structure,
                     show_discard_legend,
                     show_play_legend,
-                    discard_undo_bottom_y: undo_bottom_y,
                     hud_text: &mut hud_text,
                 },
             );
@@ -1479,9 +1426,7 @@ impl SceneBehavior for GameplayScene {
         // there is gold to display). The pile rect was computed up at
         // the top of `draw_frame` so the focus ring and
         // physical pile draw all share one source of truth.
-        if let Some(rect) = coin_pile_rect {
-            focus_rect_graph.push((FocusTarget::Gold, rect));
-        }
+        focus_rect_graph.push((FocusTarget::Gold, gold_label_rect));
         // Yaku tablets — push the projected rects into the focus graph
         // so spatial nav can land on them. We use the projected rects
         // (one frame stale) to match where the player actually sees the
@@ -1495,6 +1440,7 @@ impl SceneBehavior for GameplayScene {
         // Dora indicator — display-only focus target so a controller
         // player can read what the brass plinth represents.
         focus_rect_graph.push((FocusTarget::Dora, dora_rect));
+        focus_rect_graph.push((FocusTarget::RoundWind, round_wind_rect));
 
         // Focus inspect: [`crate::ui::tooltip`] frame + wrapped text (shop uses the same helper).
         if !self.pause_menu.paused
@@ -1571,20 +1517,12 @@ impl SceneBehavior for GameplayScene {
                         FocusTarget::HandTile(i) => {
                             if let Some(&tile) = interaction.hand.get(i) {
                                 let tile = Self::display_tile(tile, run);
-                                let lines = hand_tile_inspect_lines(
+                                let (title, desc) = hand_tile_focus_tooltip(
                                     &tile,
                                     &gameplay.dora_faces,
                                     &run.tile_debuffs,
                                     interaction.selected.get(i).copied().unwrap_or(false),
                                 );
-                                let title =
-                                    lines.first().map(|(s, _)| s.as_str()).unwrap_or("Tile");
-                                let desc = lines
-                                    .iter()
-                                    .skip(1)
-                                    .map(|(s, _)| s.as_str())
-                                    .collect::<Vec<_>>()
-                                    .join("\n");
                                 push_focus_tooltip_panel_2d(
                                     &mut inspect_tooltip_quads,
                                     &mut inspect_tooltip_texts,
@@ -1592,7 +1530,7 @@ impl SceneBehavior for GameplayScene {
                                         window_w: layout.window_w,
                                         window_h: layout.window_h,
                                         anchor_rect: Some(rect),
-                                        title,
+                                        title: &title,
                                         desc: &desc,
                                         cta: "",
                                         accent_color: color::BRASS,
@@ -1625,6 +1563,46 @@ impl SceneBehavior for GameplayScene {
                                 },
                             );
                         }
+                        FocusTarget::RoundWind => {
+                            let (title, cta, desc) = round_wind_focus_tooltip_strings(
+                                gameplay.round_wind_rank,
+                                gameplay.bonus_round_wind_rank,
+                            );
+                            push_focus_tooltip_panel_2d(
+                                &mut inspect_tooltip_quads,
+                                &mut inspect_tooltip_texts,
+                                FocusTooltipPanelParams {
+                                    window_w: layout.window_w,
+                                    window_h: layout.window_h,
+                                    anchor_rect: Some(rect),
+                                    title: &title,
+                                    desc: &desc,
+                                    cta: &cta,
+                                    accent_color: color::BRASS,
+                                    hover_is_owned: false,
+                                    skip_title_block: false,
+                                    avoid_rect: None,
+                                },
+                            );
+                        }
+                        FocusTarget::Gold => {
+                            push_focus_tooltip_panel_2d(
+                                &mut inspect_tooltip_quads,
+                                &mut inspect_tooltip_texts,
+                                FocusTooltipPanelParams {
+                                    window_w: layout.window_w,
+                                    window_h: layout.window_h,
+                                    anchor_rect: Some(rect),
+                                    title: "Gold",
+                                    desc: "Your current treasure",
+                                    cta: &format!("{}g", gameplay.gold),
+                                    accent_color: color::GOLD,
+                                    hover_is_owned: false,
+                                    skip_title_block: false,
+                                    avoid_rect: None,
+                                },
+                            );
+                        }
                         FocusTarget::DiscardUndo => {
                             push_focus_tooltip_panel_2d(
                                 &mut inspect_tooltip_quads,
@@ -1647,7 +1625,7 @@ impl SceneBehavior for GameplayScene {
                     }
                 }
             if !inspect_tooltip_quads.is_empty() || !inspect_tooltip_texts.is_empty() {
-                frame.quads(inspect_tooltip_quads);
+                frame.overlay_quads(inspect_tooltip_quads);
                 frame.texts(inspect_tooltip_texts);
             }
         }
@@ -1686,13 +1664,9 @@ impl SceneBehavior for GameplayScene {
         frame.texts(pause_text);
 
         frame.candle_light_count = candle_placements.len() as u32;
-        // Real candle flame: ~30 mm tall. The renderer passes this through
-        // to the volumetric lightbake shader as the analytic flame envelope
-        // height in world units.
-        frame.flame_height_world = layout.mm(30.0);
+        frame.flame_height_world = crate::render::flame_volume::flame_height_world(&layout);
         frame.scene_lighting.set_smooth_points(point_lights);
         frame.scene_lighting.spot_lights = spot_lights;
-        frame.wind_gusts = wind_gusts;
         // Projected rects for the discard river + play mirror: hit-test order
         // before the fullscreen 3D catch-all (same id — dispatcher uses
         // `picked_gameplay_object`). Labels render centered in these rects in the

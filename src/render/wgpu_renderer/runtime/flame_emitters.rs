@@ -1,6 +1,6 @@
 use super::*;
 
-/// Walk the cmd list and build one [`FlameEmitter`] per Candle, in cmd
+/// Walk the cmd list and build one [`crate::render::flame_volume::FlameEmitter`] per Candle, in cmd
 /// submission order so the matching `DrawCmd::Flame` batch loop downstream
 /// consumes them in lockstep.
 ///
@@ -16,8 +16,11 @@ pub(super) fn build_flame_emitters(
     frame: &UiFrame,
     w: f32,
     h: f32,
-) -> Vec<crate::render::flame_particles::FlameEmitter> {
-    let mut out: Vec<crate::render::flame_particles::FlameEmitter> = Vec::new();
+) -> Vec<crate::render::flame_volume::FlameEmitter> {
+    if !frame.procedural_flame_emitters.is_empty() {
+        return frame.procedural_flame_emitters.iter().copied().collect();
+    }
+    let mut out: Vec<crate::render::flame_volume::FlameEmitter> = Vec::new();
     // Candles in submission order.
     let candles: Vec<(&crate::render::draw_cmd::Object3d, f32, f32)> = frame
         .cmds
@@ -62,36 +65,15 @@ pub(super) fn build_flame_emitters(
             .map(|inst| (inst.color[2], inst.color[3]))
             .unwrap_or((1.0, 0.0));
 
-        // Sample scene wind gusts at the wick, weighted by a soft falloff
-        // around each gust's world-space radius.
-        let mut wind_world = glam::Vec3::ZERO;
-        for g in frame.wind_gusts.iter() {
-            let g_world = pixel_to_world(w, h, g.center_px.0, g.center_px.1, g.lift);
-            let dist = (g_world - tip_world).length();
-            let r = (g.radius * 3.0).max(1.0);
-            let falloff = (1.0 - (dist / r).clamp(0.0, 1.0)).powf(1.5);
-            if falloff <= 0.0 {
-                continue;
-            }
-            wind_world += glam::Vec3::new(g.velocity[0], g.velocity[1], g.velocity[2]) * falloff;
-        }
-        // Flame-relative wind: 300 units/s → 1.0 is the heuristic that
-        // matches the previous 2D behaviour.
-        let wind_scale = 1.0 / 300.0;
-        let wind = glam::Vec2::new(
-            (wind_world.x * wind_scale).clamp(-1.5, 1.5),
-            (wind_world.z * wind_scale).clamp(-1.5, 1.5),
-        );
-
-        out.push(crate::render::flame_particles::FlameEmitter {
+        out.push(crate::render::flame_volume::FlameEmitter {
             wick_world: tip_world,
-            // Particle size scales with the candle's physical scale; 0.22
-            // matches the previous 2D flame's visual width.
-            scale: p_scale * p_height * 0.22,
-            wind,
+            scale: crate::render::flame_volume::flame_emitter_scale(p_scale, p_height),
+            wind: glam::Vec2::ZERO,
             brightness,
             phase,
+            flicker_amp: crate::render::flame_volume::FLAME_FLICKER_AMP,
         });
     }
+    out.extend(frame.procedural_flame_emitters.iter().copied());
     out
 }

@@ -182,6 +182,16 @@ pub(crate) fn sync_music_for_scene(audio: &mut crate::audio::AudioManager, tag: 
     }
 }
 
+pub(crate) fn sync_ambient_for_scene(audio: &mut crate::audio::AudioManager, tag: SceneTag) {
+    use crate::audio::AmbientId;
+    match tag {
+        SceneTag::MainMenuExterior => {
+            audio.set_ambient_track(Some(AmbientId::MainMenuRain));
+        }
+        _ => audio.set_ambient_track(None),
+    }
+}
+
 pub(crate) fn apply_post_scene_transition_effects(ctx: PostSceneTransitionCtx<'_>) {
     if should_clear_smoke_on_transition(ctx.from, ctx.to)
         && let Some(r) = ctx.renderer {
@@ -194,6 +204,7 @@ pub(crate) fn apply_post_scene_transition_effects(ctx: PostSceneTransitionCtx<'_
         crate::asset_path::prefetch_lazy_packs_after_menu_once();
     }
     sync_music_for_scene(ctx.audio, ctx.to);
+    sync_ambient_for_scene(ctx.audio, ctx.to);
     if let Some(input) = ctx.input {
         input.focus_slot = 0;
     }

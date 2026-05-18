@@ -4,20 +4,20 @@
 //! (Kenney Input Prompts atlases keyed by [`crate::ui::button_prompts::GamepadStyle`]).
 //! This module owns the keyboard / mouse glyphs that neither path provides.
 
-use crate::render::draw_cmd::PromptIconSource;
+use crate::render::draw_cmd::ImageQuadSource;
 
 const KEYBOARD_SHEET: &str =
     "textures/kenney_input-prompts/Keyboard & Mouse/keyboard-&-mouse_sheet_double.png";
 
-const fn key(name: &'static str) -> PromptIconSource {
-    PromptIconSource::AtlasSprite {
+const fn key(name: &'static str) -> ImageQuadSource {
+    ImageQuadSource::AtlasSprite {
         sheet: KEYBOARD_SHEET,
         name,
     }
 }
 
 /// Four keyboard icons matching the shop legend (Exit, Select, Sell, Inspect).
-pub fn shop_keyboard_prompt_icons() -> [PromptIconSource; 4] {
+pub fn shop_keyboard_prompt_icons() -> [ImageQuadSource; 4] {
     [
         key("keyboard_backspace"),
         key("keyboard_space"),
@@ -27,7 +27,7 @@ pub fn shop_keyboard_prompt_icons() -> [PromptIconSource; 4] {
 }
 
 /// Three keyboard icons under the discard bowl, play mirror, and cash-in tablet.
-pub fn gameplay_keyboard_prompt_icons() -> [PromptIconSource; 3] {
+pub fn gameplay_keyboard_prompt_icons() -> [ImageQuadSource; 3] {
     [key("keyboard_q"), key("keyboard_e"), key("keyboard_t")]
 }
 
@@ -39,8 +39,8 @@ mod tests {
         "../../assets/textures/kenney_input-prompts/Keyboard & Mouse/keyboard-&-mouse_sheet_double.xml"
     );
 
-    fn expect_resolves(icon: &PromptIconSource) {
-        let PromptIconSource::AtlasSprite { sheet, name } = icon else {
+    fn expect_resolves(icon: &ImageQuadSource) {
+        let ImageQuadSource::AtlasSprite { sheet, name } = icon else {
             panic!("expected AtlasSprite, got {icon:?}");
         };
         assert_eq!(*sheet, KEYBOARD_SHEET);

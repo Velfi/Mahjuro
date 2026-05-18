@@ -343,7 +343,8 @@ struct ShopHdrMrtOut {
 fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     let base_s = textureSample(base_color, base_sampler, in.uv);
     let is_hallway_wall_tint = abs(in.v_color.a - 3.0) < 0.01;
-    let vtx_alpha = select(in.v_color.a, 1.0, is_hallway_wall_tint);
+    let is_candle_sss_bake = abs(in.v_color.a - 4.0) < 0.01;
+    let vtx_alpha = select(in.v_color.a, 1.0, is_hallway_wall_tint || is_candle_sss_bake);
     let tex_a = base_s.a * vtx_alpha;
     if (pbr.alpha_mode == 1u) {
         if (tex_a < pbr.alpha_cutoff) {
@@ -370,7 +371,8 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         albedo = albedo * hd.bow.rgb;
     }
     // Archive `sign_description_*` meshes tag `COLOR_0.a = 2` in `room_env_gltf` (see `decode_env_primitive`).
-    if (in.v_color.a > 1.5 && !is_hallway_wall_tint) {
+    let is_archive_decal = abs(in.v_color.a - 2.0) < 0.01;
+    if (is_archive_decal) {
         let dec = textureSample(decal_tex, base_sampler, in.uv);
         albedo = mix(albedo, dec.rgb, dec.a);
     }
@@ -520,6 +522,12 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     // already outgoing radiance; scaling it by the same crush makes lamps invisible.
     var hdr = (ambient + Lo + metal_hemi) * cam.tile_seed;
     hdr = hdr + emissive;
+
+    // Shop candle wax: offline SSS bake on `TEXCOORD_1` stored in `in.uv` (`decal_tex`, linear RGB).
+    if (is_candle_sss_bake) {
+        let baked_sss = textureSample(decal_tex, base_sampler, in.uv).rgb;
+        hdr = hdr + baked_sss * cam.tile_seed;
+    }
 
     // Gameplay shadow map is ortho-fit around the mahjong table near the origin.
     // shop.glb uses the same Z-up frame but geometry is scaled by `window_h`, so

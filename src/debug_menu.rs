@@ -60,14 +60,10 @@ pub enum DebugAction {
     OpenTuning,
     OpenSfxTest,
     OpenCameraDebug,
-    /// Live-edit `shop.glb` room scale (`window_h *` multiplier).
-    OpenShopEnvDebug,
+    /// Per-scene tonemap / post-FX + room GLB lighting (right panel).
+    OpenSceneLookDebug,
     /// Pick-blind hallway vertex warp (sliders; Ctrl+C copies a Rust snapshot).
     OpenHallwayHallFxDebug,
-    /// Open the per-scene tonemap + VHS tuning overlay. Edits apply live
-    /// and Save persists for the active scene only (`gameplay`, `shop`,
-    /// `pick_blind`, …) — like arrange mode but for the post-process pass.
-    OpenTonemapDebug,
     BlowWindGust,
     /// Capture GPU pass timings (shadow, main, room-bloom, GI, bloom, tonemap,
     /// …) averaged over the next 100 rendered frames and log the result. Only
@@ -193,9 +189,9 @@ impl DebugMenuBar {
         mappings.push((camera_item.id().clone(), DebugAction::OpenCameraDebug));
         let _ = tuning_sub.append(&camera_item);
 
-        let shop_env_item = MenuItem::new("Shop Env & Lighting...", true, None);
-        mappings.push((shop_env_item.id().clone(), DebugAction::OpenShopEnvDebug));
-        let _ = tuning_sub.append(&shop_env_item);
+        let scene_look_item = MenuItem::new("Scene look (per scene)...", true, None);
+        mappings.push((scene_look_item.id().clone(), DebugAction::OpenSceneLookDebug));
+        let _ = tuning_sub.append(&scene_look_item);
 
         let hall_fx_item = MenuItem::new("Hallway vertex warp…", true, None);
         mappings.push((
@@ -203,10 +199,6 @@ impl DebugMenuBar {
             DebugAction::OpenHallwayHallFxDebug,
         ));
         let _ = tuning_sub.append(&hall_fx_item);
-
-        let tonemap_item = MenuItem::new("Tonemap (per scene)...", true, None);
-        mappings.push((tonemap_item.id().clone(), DebugAction::OpenTonemapDebug));
-        let _ = tuning_sub.append(&tonemap_item);
 
         let sfx_item = MenuItem::new("Sound Effects Test...", true, None);
         mappings.push((sfx_item.id().clone(), DebugAction::OpenSfxTest));

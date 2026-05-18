@@ -1,7 +1,7 @@
-//! Waterfront façade backdrop (`assets/textures/scenes/main_menu/exterior.png`) with a flat hub menu.
-//! Replaces the legacy candlelit start screen (`start_screen.rs`, removed).
+//! Main-menu hub: [`main_menu.glb`](../../assets/3d/main_menu.glb) when embedded, else black.
 
 use std::cell::RefCell;
+use std::time::Instant;
 
 use crate::audio::SfxId;
 use crate::core::progression::PlayerProgress;
@@ -9,18 +9,22 @@ use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;
 use crate::game::run::RunState;
 use crate::persistence::{self, ResumeScene, TileMaterial};
-use crate::render::draw_cmd::UiFrame;
+use crate::render::draw_cmd::{ImageQuad, ImageQuadSource, ScenePunctualLight, UiFrame};
+use crate::render::main_menu_glb;
 use crate::render::theme::{color, metrics, typography};
-use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
+use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::ui::focus_nav::{self, FocusDir};
 use crate::ui::input::UiAction;
 
 use super::collection::CollectionScene;
 use super::gameplay::GameplayScene;
+use super::lamp_moths::{self, BUG_COUNT};
 use super::options::OptionsScene;
 use super::shop::ShopScene;
 use super::start_game_modal::TileSelectScene;
 use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+
+const MAIN_MENU_LOGO_ASSET: &str = "textures/main_menu_logo.png";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HubFocus {
@@ -77,6 +81,57 @@ fn default_focus(in_progress: bool) -> HubFocus {
     }
 }
 
+fn push_main_menu_room_frame(
+    frame: &mut UiFrame,
+    w: f32,
+    h: f32,
+    env_scale: f32,
+    tune: &crate::render::room_glb::RoomEnvLightingTune,
+) {
+    if !main_menu_glb::main_menu_room_draw_ready() {
+        return;
+    }
+    frame.background(BackgroundId::Black);
+    frame.main_menu_environment();
+    frame.camera_override = Some(main_menu_glb::main_menu_camera_base(w, h, env_scale));
+    let room_glb = main_menu_glb::main_menu_glb_has_embedded_lights();
+    frame.scene_lighting.embedded_gltf_punctual = room_glb;
+    frame.scene_lighting.room_glb_brdf = room_glb;
+    frame.scene_lighting.spot_lights = if room_glb {
+        main_menu_glb::main_menu_embedded_spot_lights_runtime(w, h, env_scale, tune)
+    } else {
+        Vec::new()
+    };
+    let mut punctual: Vec<ScenePunctualLight> = if room_glb {
+        main_menu_glb::main_menu_embedded_point_lights_runtime(w, h, env_scale, tune)
+            .into_iter()
+            .map(ScenePunctualLight::InverseSquare)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let fill: Vec<PointLight> = if room_glb {
+        Vec::new()
+    } else {
+        vec![
+            PointLight {
+                pos: [w * 0.42, h * 0.38, h * 0.55],
+                radius: h * 1.4,
+                color: [1.0, 0.92, 0.78],
+                intensity: 1.35,
+            },
+            PointLight {
+                pos: [w * 0.62, h * 0.72, h * 0.28],
+                radius: h * 1.8,
+                color: [0.45, 0.58, 0.92],
+                intensity: 0.42,
+            },
+        ]
+    };
+    punctual.extend(fill.into_iter().map(ScenePunctualLight::Smooth));
+    frame.scene_lighting.punctual = punctual;
+}
+
 pub(crate) fn scene_from_resume(
     resume_scene: ResumeScene,
     run: &mut RunState,
@@ -99,6 +154,9 @@ pub struct MainMenuExteriorScene {
     focus: Option<HubFocus>,
     last_focus_rects: RefCell<Vec<(HubFocus, [f32; 4])>>,
     cursor_pos: (f32, f32),
+    last_frame: Instant,
+    age_secs: f32,
+    bug_phases: [f32; BUG_COUNT],
     pub positions: crate::ui::scene_layout::MainMenuExteriorPositions,
 }
 
@@ -108,33 +166,68 @@ impl MainMenuExteriorScene {
             focus: None,
             last_focus_rects: RefCell::new(Vec::new()),
             cursor_pos: (0.0, 0.0),
+            last_frame: Instant::now(),
+            age_secs: 0.0,
+            bug_phases: lamp_moths::initial_bug_phases(),
             positions: crate::ui::scene_layout::load_main_menu_exterior_positions(),
         }
     }
 
-    fn hub_layout_rects(w: f32, h: f32, items: &[HubFocus]) -> Vec<(HubFocus, [f32; 4])> {
-        let row_h = (h * 0.046).max(28.0);
-        let gap = h * 0.014;
+    /// Logo (A) on the left; menu (B) below A, left-aligned with A.
+    /// Menu rows get horizontal inset inside the logo column; the logo image does not.
+    /// The A+B block is vertically centered on screen and scales with window size.
+    fn hub_layout(w: f32, h: f32, items: &[HubFocus]) -> HubLayout {
+        let scale = metrics::scene_scale(w, h);
+        let margin_x = (w * 0.04).max(16.0 * scale);
+        let margin_y = (h * 0.04).max(12.0 * scale);
+        let row_h = (h * 0.046).max(28.0 * scale);
+        let row_gap = (h * 0.014).max(6.0 * scale);
         let n = items.len() as f32;
-        let stack_h = n * row_h + (n - 1.0).max(0.0) * gap;
-        let mut y = (h - stack_h) * 0.5;
-        let rw = (w * 0.52).min(520.0);
-        let x0 = (w - rw) * 0.5;
-        items
+        let menu_stack_h = n * row_h + (n - 1.0).max(0.0) * row_gap;
+        let max_block_h = (h - 2.0 * margin_y).max(1.0);
+        let logo_by_h = h * 0.5;
+        let logo_by_w = (w - 2.0 * margin_x) * 0.42;
+        let logo_room = (max_block_h - menu_stack_h).max(row_h * 2.0);
+        let logo_size = logo_by_h
+            .min(logo_by_w)
+            .min(logo_room)
+            .max(96.0 * scale);
+        let block_h = logo_size + menu_stack_h;
+        let logo_y = ((h - block_h) * 0.5).max(margin_y);
+        let logo_x = margin_x;
+        let menu_margin_h = (logo_size * 0.04).max(8.0 * scale);
+        let menu_x = logo_x + menu_margin_h;
+        let menu_w = (logo_size - menu_margin_h * 2.0).max(row_h);
+        let mut menu_y = logo_y + logo_size;
+        let menu_rects = items
             .iter()
             .copied()
             .map(|item| {
-                let r = [x0, y, rw, row_h];
-                y += row_h + gap;
+                let r = [menu_x, menu_y, menu_w, row_h];
+                menu_y += row_h + row_gap;
                 (item, r)
             })
-            .collect()
+            .collect();
+        HubLayout {
+            logo_rect: [logo_x, logo_y, logo_size, logo_size],
+            menu_rects,
+        }
     }
+}
+
+struct HubLayout {
+    logo_rect: [f32; 4],
+    menu_rects: Vec<(HubFocus, [f32; 4])>,
 }
 
 impl SceneBehavior for MainMenuExteriorScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
         self.cursor_pos = ctx.cursor_pos;
+        let now = Instant::now();
+        let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
+        self.last_frame = now;
+        self.age_secs += dt;
+        lamp_moths::advance_bug_phases(&mut self.bug_phases, dt);
 
         let in_progress = GameEngine::run_in_progress(ctx.run);
         let items = menu_items(in_progress, ctx.progress);
@@ -261,7 +354,26 @@ impl SceneBehavior for MainMenuExteriorScene {
         // dismisses (see `SplashScene` and `DrawCtx::modal_active`).
         if ctx.modal_active {
             let mut frame = UiFrame::new();
-            frame.background(BackgroundId::MainMenuExterior);
+            frame.background(BackgroundId::Black);
+            let env_scale = main_menu_glb::main_menu_env_height_scale(ctx.room_gltf_height_scale);
+            if main_menu_glb::main_menu_room_draw_ready() {
+                push_main_menu_room_frame(&mut frame, w, h, env_scale, &ctx.shop_env_lighting);
+                if let Some(door_light) =
+                    main_menu_glb::main_menu_door_light_object3d_anchor(w, h, env_scale)
+                {
+                    lamp_moths::push_moths_around_lamp(
+                        &mut frame,
+                        w,
+                        h,
+                        door_light,
+                        h * 0.16,
+                        h * 0.20,
+                        self.age_secs,
+                        &self.bug_phases,
+                    );
+                }
+                frame.rain();
+            }
             if ctx.effect_layers.starfield {
                 frame.starfield();
             }
@@ -279,24 +391,9 @@ impl SceneBehavior for MainMenuExteriorScene {
 
         let in_progress = ctx.game_in_progress;
         let items = menu_items(in_progress, ctx.progress);
-        let focus_rects = Self::hub_layout_rects(w, h, &items);
+        let layout = Self::hub_layout(w, h, &items);
+        let focus_rects = layout.menu_rects.clone();
         *self.last_focus_rects.borrow_mut() = focus_rects.clone();
-
-        let summaries = persistence::all_profile_summaries();
-        let active = ctx.active_profile;
-        let summary = &summaries[active];
-        let prof_text = if summary.exists {
-            format!("Profile {}  —  Level {}", active + 1, summary.level,)
-        } else {
-            format!("Profile {}  —  New", active + 1)
-        };
-
-        let profile_h = typography::size(typography::H28, h);
-        let profile_y = focus_rects
-            .first()
-            .map(|(_, r)| r[1] - profile_h - h * 0.022)
-            .unwrap_or(h * 0.12)
-            .max(h * 0.06);
 
         let mut quads: Vec<GpuInstance> = Vec::new();
         if let Some(focus) = self.focus
@@ -305,24 +402,9 @@ impl SceneBehavior for MainMenuExteriorScene {
             focus_nav::push_focus_ring(rect, scale, w, h, &mut quads);
         }
 
-        let menu_font = typography::size(typography::H28, h);
+        let menu_font = typography::size(typography::H36, h);
         let label_color = color::PARCHMENT;
-        let mut text_labels = vec![
-            TextLabel {
-                rect: [0.0, profile_y, w, profile_h],
-                text: prof_text,
-                color: color::UMBER,
-                align: TextAlign::Center,
-                ..Default::default()
-            },
-            TextLabel {
-                rect: [0.0, h - (menu_font * 2.2).max(36.0), w, menu_font * 1.5],
-                text: "Arrow keys to navigate  |  Enter/Space to select".into(),
-                color: color::UMBER,
-                align: TextAlign::Center,
-                ..Default::default()
-            },
-        ];
+        let mut text_labels = Vec::with_capacity(focus_rects.len());
 
         for &(item, rect) in &focus_rects {
             text_labels.push(TextLabel {
@@ -330,7 +412,7 @@ impl SceneBehavior for MainMenuExteriorScene {
                 text: label_for(item, in_progress, ctx.archive_has_new_chronicle),
                 font_px: Some(menu_font),
                 color: label_color,
-                align: TextAlign::Center,
+                align: TextAlign::Left,
                 ..Default::default()
             });
         }
@@ -338,11 +420,39 @@ impl SceneBehavior for MainMenuExteriorScene {
         let buttons = vec![ButtonDef::scene((0.0, 0.0, w, h), 0)];
 
         let mut frame = UiFrame::new();
-        frame.background(BackgroundId::MainMenuExterior);
+        frame.background(BackgroundId::Black);
+        let env_scale = main_menu_glb::main_menu_env_height_scale(ctx.room_gltf_height_scale);
+        if main_menu_glb::main_menu_room_draw_ready() {
+            push_main_menu_room_frame(&mut frame, w, h, env_scale, &ctx.shop_env_lighting);
+            if let Some(door_light) = main_menu_glb::main_menu_door_light_object3d_anchor(w, h, env_scale)
+            {
+                lamp_moths::push_moths_around_lamp(
+                    &mut frame,
+                    w,
+                    h,
+                    door_light,
+                    h * 0.16,
+                    h * 0.20,
+                    self.age_secs,
+                    &self.bug_phases,
+                );
+            }
+            frame.rain();
+        }
         if ctx.effect_layers.starfield {
             frame.starfield();
         }
         frame.quads(quads);
+        frame.image_quads([ImageQuad {
+            inst: GpuInstance {
+                rect: layout.logo_rect,
+                color: [1.0, 1.0, 1.0, 1.0],
+                user: 0,
+            },
+            source: ImageQuadSource::Asset {
+                path: MAIN_MENU_LOGO_ASSET,
+            },
+        }]);
         frame.texts(text_labels);
         frame.buttons = buttons;
         frame.cursor_pos = Some(self.cursor_pos);

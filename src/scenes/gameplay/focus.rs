@@ -3,8 +3,6 @@ use crate::ui::input::UiAction;
 /// Bottom-row gameplay buttons. Order in `ALL_BUTTONS` is the keyboard nav order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum GameplayButton {
-    SortSuit,
-    SortRank,
     /// Commit selected melds into the structure (mirror).
     Play,
     /// Cash in structure for score (wood tablet above mirror).
@@ -23,8 +21,6 @@ impl GameplayButton {
     /// — currently only `Journal` (transition + overlay push from `Confirm`).
     pub(super) fn ui_action(self) -> Option<UiAction> {
         Some(match self {
-            GameplayButton::SortSuit => UiAction::SortBySuit,
-            GameplayButton::SortRank => UiAction::SortByRank,
             GameplayButton::Play => UiAction::ScoreHand,
             GameplayButton::Trigger => UiAction::TriggerStructure,
             GameplayButton::Discard => UiAction::CommitDiscard,
@@ -61,13 +57,13 @@ pub(super) enum FocusTarget {
     YakuTablet(usize),
     /// The brass dora indicator stand at the back-right of the table.
     Dora,
+    /// The brass round-wind stand beside the dora plinth.
+    RoundWind,
     /// Optional post-discard undo control (accessibility).
     DiscardUndo,
 }
 
-pub(super) const ALL_BUTTONS: [GameplayButton; 5] = [
-    GameplayButton::SortSuit,
-    GameplayButton::SortRank,
+pub(super) const ALL_BUTTONS: [GameplayButton; 3] = [
     GameplayButton::Discard,
     GameplayButton::Play,
     GameplayButton::Trigger,
@@ -151,6 +147,7 @@ pub(super) enum FocusKind {
     Gold,
     YakuTablet,
     Dora,
+    RoundWind,
 }
 
 pub(super) fn focus_kind(f: Option<FocusTarget>) -> Option<FocusKind> {
@@ -163,6 +160,7 @@ pub(super) fn focus_kind(f: Option<FocusTarget>) -> Option<FocusKind> {
         FocusTarget::Gold => Some(FocusKind::Gold),
         FocusTarget::YakuTablet(_) => Some(FocusKind::YakuTablet),
         FocusTarget::Dora => Some(FocusKind::Dora),
+        FocusTarget::RoundWind => Some(FocusKind::RoundWind),
         FocusTarget::DiscardUndo => Some(FocusKind::Button),
     }
 }
@@ -178,5 +176,6 @@ pub(super) fn focus_kind_sfx(k: FocusKind) -> Option<crate::audio::SfxId> {
         FocusKind::Gold => SfxId::FocusGold,
         FocusKind::YakuTablet => SfxId::FocusYakuTablet,
         FocusKind::Dora => SfxId::FocusDora,
+        FocusKind::RoundWind => SfxId::FocusDora,
     })
 }

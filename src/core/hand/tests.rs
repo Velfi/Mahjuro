@@ -485,7 +485,7 @@ fn tricky_kokushi_musou_decomposed() {
         12
     );
     assert_eq!(sets.iter().filter(|s| s.kind == MeldKind::Pair).count(), 1);
-    let yaku = crate::core::yaku::detect_yaku_with_wind(&tiles, &sets, None, None);
+    let yaku = crate::core::yaku::detect_yaku_with_wind(&tiles, &sets, None, None, None);
     assert!(yaku.contains(&crate::core::yaku::YakuKind::KokushiMusou));
     assert!(!yaku.contains(&crate::core::yaku::YakuKind::Honroutou));
 }

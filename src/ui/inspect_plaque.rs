@@ -53,7 +53,7 @@ pub fn push_focus_tooltip_panel_2d(
     let pad = 14.0_f32.max(10.0);
     let border = tooltip::FRAME_BORDER_PX;
     let margin = window_w * 0.02;
-    let panel_w = (window_w * 0.38).min(520.0);
+    let panel_w = (window_w * 0.45).min(640.0);
     let inner_w = (panel_w - pad * 2.0 - border * 2.0).max(80.0);
 
     let heading_px = typography::size(typography::H28, window_h);
@@ -209,10 +209,10 @@ pub fn push_floating_relic_flavor_labels(
     if flavor.is_empty() {
         return;
     }
-    let margin_x = window_w * 0.06;
-    let band_w = (window_w - 2.0 * margin_x).min(760.0);
+    let margin_x = window_w * 0.035;
+    let band_w = (window_w - 2.0 * margin_x).min(1040.0);
     let left = (window_w - band_w) * 0.5;
-    let body_px = typography::size(typography::H45, window_h);
+    let body_px = typography::size(typography::H32, window_h);
     let line_step = body_px * 1.4;
     let max_lines = 5usize;
     let band_h = (line_step * max_lines as f32 + body_px * 0.5)
@@ -245,21 +245,20 @@ pub fn hand_tile_decal_title(tile: &Tile) -> String {
     tile.full_name()
 }
 
-/// Full gameplay hover: identity + keyword scoring lines.
-pub fn hand_tile_inspect_lines(
+/// Gameplay hand-tile focus panel: full name title and scoring keyword body.
+pub fn hand_tile_focus_tooltip(
     tile: &Tile,
     dora_faces: &[(crate::core::tile::Suit, u8)],
     boss_debuffs: &[TileDebuff],
     selected: bool,
-) -> Vec<(String, [f32; 4])> {
-    let mut lines = vec![(hand_tile_decal_title(tile), color::CHAMPAGNE)];
-    lines.extend(hand_tile_keyword_lines(
-        tile,
-        dora_faces,
-        boss_debuffs,
-        selected,
-    ));
-    lines
+) -> (String, String) {
+    let title = hand_tile_decal_title(tile);
+    let desc: String = hand_tile_keyword_lines(tile, dora_faces, boss_debuffs, selected)
+        .into_iter()
+        .map(|(s, _)| s)
+        .collect::<Vec<_>>()
+        .join("\n");
+    (title, desc)
 }
 
 /// Full ribbon/talisman body for gameplay focus panel (aligned with collection catalog tone).
@@ -273,30 +272,71 @@ pub fn gameplay_consumable_description_full(c: Consumable) -> String {
     }
 }
 
-/// Title, optional accent line (current faces when dora is active), and rules body for the dora plinth.
+/// Title and rules body for the dora plinth (cta is always empty).
 pub fn dora_focus_tooltip_strings(
     dora_enabled: bool,
     dora_faces: &[(crate::core::tile::Suit, u8)],
 ) -> (String, String, String) {
+    use crate::core::scoring::DORA_CHIPS_PER_TILE;
     use crate::core::tile::Tile;
-    let title = "Dora bonus".to_string();
-    let cta = if dora_enabled && !dora_faces.is_empty() {
-        let s = dora_faces
-            .iter()
-            .map(|(suit, rank)| Tile::new(*suit, *rank, 0).full_name())
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("Current faces: {s}")
-    } else {
-        String::new()
+
+    let desc = format!("Dora tiles score +{DORA_CHIPS_PER_TILE} extra.");
+    if !dora_enabled {
+        return (
+            "Dora".to_string(),
+            String::new(),
+            format!("Unlocks at Ante 4. {desc}"),
+        );
+    }
+    if dora_faces.is_empty() {
+        return ("Dora".to_string(), String::new(), desc);
+    }
+    let names: Vec<String> = dora_faces
+        .iter()
+        .map(|(suit, rank)| Tile::new(*suit, *rank, 0).full_name())
+        .collect();
+    let title = match names.as_slice() {
+        [one] => format!("{one} is dora!"),
+        [a, b] => format!("{a} and {b} are dora!"),
+        _ => {
+            let last = names.last().expect("non-empty");
+            let head = names[..names.len() - 1].join(", ");
+            format!("{head}, and {last} are dora!")
+        }
     };
-    let desc = if !dora_enabled {
-        "Unlocks at Ante 4. When active, the plinth shows bonus tile faces; each match in your scored hand is worth +25 chips.".to_string()
-    } else {
-        "Bonus faces appear on the plinth. Each tile in your hand that matches a bonus face scores +25 chips when you cash out. Relics can reveal extra faces.\n\nMatching tiles in your hand glow."
-            .to_string()
+    (title, String::new(), desc)
+}
+
+/// Title and rules body for the round-wind plinth (cta is always empty).
+pub fn round_wind_focus_tooltip_strings(
+    primary: u8,
+    bonus: Option<u8>,
+) -> (String, String, String) {
+    use crate::core::tile::{Suit, Tile};
+
+    let desc = "Triplets and kongs score Yakuhai.".to_string();
+    let mut ranks = vec![primary];
+    if let Some(b) = bonus {
+        ranks.push(b);
+    }
+    let names: Vec<String> = ranks
+        .iter()
+        .map(|rank| Tile::new(Suit::Wind, *rank, 0).full_name())
+        .collect();
+    let title = match names.as_slice() {
+        [one] => format!("a {one} is blowing!"),
+        [a, b] => format!("a {a} and a {b} are blowing!"),
+        _ => {
+            let last = names.last().expect("non-empty");
+            let head = names[..names.len() - 1]
+                .iter()
+                .map(|n| format!("a {n}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{head}, and a {last} are blowing!")
+        }
     };
-    (title, cta, desc)
+    (title, String::new(), desc)
 }
 
 /// Scoring and status keywords for hand tiles — joined into the focus panel body.
@@ -326,7 +366,11 @@ pub fn hand_tile_keyword_lines(
 
     let face = (tile.suit, tile.rank);
     if dora_faces.contains(&face) {
-        lines.push(("Dora · +25 chips".into(), color::GOLD));
+        use crate::core::scoring::DORA_CHIPS_PER_TILE;
+        lines.push((
+            format!("Dora · +{DORA_CHIPS_PER_TILE} chips"),
+            color::GOLD,
+        ));
     }
 
     if let Some(e) = tile.enhancement {

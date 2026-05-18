@@ -1,6 +1,6 @@
 //! Generic room GLB infrastructure ([`RoomGlbCpu`], [`RoomEnvLightingTune`], shared camera/transform helpers)
 //! shared by shop, hallway, and archive scenes; also owns the shop-specific static loader for
-//! [`Shop.glb`](../../../assets/3d/Shop.glb).
+//! [`shop.glb`](../../../assets/3d/shop.glb).
 //!
 //! Marker object names (Blender object names → glTF node names):
 //! - `exit_btn`, `restock_btn`, `journal_btn`
@@ -14,6 +14,11 @@
 //! decode time so it does not draw, but it is still decoded into **[`RoomCollisionMesh`]** triangle
 //! soups for cursor ray picking (`pick_shop_object`). **Shop buttons** (`exit_btn`, `restock_btn`,
 //! `journal_btn`) still record marker transforms **and** decode their meshes for drawing.
+//!
+//! ## Shop candle wax (baked SSS)
+//! `Candle*` meshes with material **Wax SSS translucent shader** use glTF `TEXCOORD_1` to sample
+//! [`SHOP_CANDLE_SSS_BAKE_TEXTURE`](crate::render::room_env_gltf::SHOP_CANDLE_SSS_BAKE_TEXTURE)
+//! in `room_glb.wgsl` (`decal_tex` bind). Rebake with Blender or `scripts/bake_shop_candle_sss.py`.
 //!
 //! ## Materials
 //! Each primitive uses glTF PBR **base color texture** (if present) and multiplies by
@@ -61,13 +66,13 @@
 //! extras). **Directional** lights are skipped. With embedded lights, the room draws through
 //! `room_glb.wgsl`: inverse-square attenuation (Khronos range window),
 //! metallic–roughness, ACES (fitted) tonemap, and linear HDR exposure:
-//! [`SHOP_ENV_LINEAR_EXPOSURE_BASE`] × debug tune (see [`SHOP_ENV_LINEAR_EXPOSURE`]) before tonemap;
+//! [`ROOM_GLB_LINEAR_EXPOSURE_BASE`] × debug tune (see [`SHOP_ENV_LINEAR_EXPOSURE`]) before tonemap;
 //! [`SHOP_ENV_AMBIENT_SCALE`] defaults to `0` for this interior.
 //! glTF punctual intensity is scaled by [`SHOP_GLTF_LIGHT_INTENSITY_SCALE`] (default `1`). Shop punctual
 //! points use a separate uniform buffer, bound as group 1 binding 0 for [`room_glb.wgsl`] and binding 2
 //! for [`lit_mesh.wgsl`] (inverse-square on props; stays within WebGPU `max_bind_groups` on Metal).
 //! Punctual lights on nodes whose names start with [`SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX`] use
-//! [`SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL`] for a warm candle read; other lights keep glTF-authored color.
+//! [`crate::render::room_gltf_punctual::gltf_punctual_linear_rgb`] (black-body wick × [`SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL`]); other lights keep glTF color.
 //! `range` maps to glTF max distance (`0` = infinite).
 //!
 //! Shared glTF room decode (meshes, lights, cameras, collision) lives in [`crate::render::room_env_gltf`].
@@ -97,7 +102,7 @@ fn ensure_shop_glb_loaded() {
     if !matches!(*w, RoomGlbCache::Uninit) {
         return;
     }
-    let ready = if let Some(file) = crate::asset_path::get("3d/Shop.glb") {
+    let ready = if let Some(file) = crate::asset_path::get("3d/shop.glb") {
         match load_shop_glb_from_bytes(&file.data) {
             Ok(cpu) => {
                 log::trace!(
@@ -172,9 +177,11 @@ pub const SHOP_ENV_HEIGHT_SCALE: f32 = 1.0;
 /// `decal_atlas_uv.y` / `SsrGlobals.shop_punctual.x` (inverse doc scale for attenuation).
 pub const SHOP_GLTF_LIGHT_INTENSITY_SCALE: f32 = 0.6;
 
-/// Linear HDR gain for **shop** only: `2^-9` ≈ Don McCurdy glTF viewer exposure **−9** (EV on linear HDR).
-/// Multiplied with [`RoomEnvLightingTune::linear_exposure`] and written to `room_glb` / shop `lit_mesh` path.
-pub const SHOP_ENV_LINEAR_EXPOSURE_BASE: f32 = 1.0 / 512.0; // 2^-9
+/// Shared linear HDR gain for embedded GLB rooms (shop, hallway, archive, main menu): `2^-9` ≈
+/// Don McCurdy glTF viewer exposure **−9** (EV on linear HDR). Multiplied with
+/// [`RoomEnvLightingTune::linear_exposure`] and per-room [`crate::render::hallway_glb::HALLWAY_ENV_LINEAR_EXPOSURE_MUL`]
+/// (etc.) before tonemap in `room_glb.wgsl` / matching `lit_mesh` paths.
+pub const ROOM_GLB_LINEAR_EXPOSURE_BASE: f32 = 1.0 / 512.0; // 2^-9
 
 /// Extra multiplier on room glTF emissive (`CameraUniform.decal_atlas_uv.z`), after
 /// `KHR_materials_emissive_strength` and `emissiveFactor × emissiveTexture`. Keep near `1` when
@@ -266,14 +273,14 @@ pub fn room_probe_world_aabb(corners: &[Vec3], pad_frac: f32) -> Option<(Vec3, V
     Some((mn - pad, mx + pad))
 }
 
-/// Default **tuning** multiplier for linear HDR (debug overlay); shop applies [`SHOP_ENV_LINEAR_EXPOSURE_BASE`]
+/// Default **tuning** multiplier for linear HDR (debug overlay); shop applies [`ROOM_GLB_LINEAR_EXPOSURE_BASE`]
 /// on top. Table scenes use this value alone (no shop base).
 pub const SHOP_ENV_LINEAR_EXPOSURE: f32 = 1.0;
 
 /// Linear HDR multiplier for tile-pack celebration (`Scene::TilePackCelebration`): no
 /// [`crate::render::draw_cmd::DrawCmd::ShopEnvironment`], but showcase tiles still use shop-style
 /// punctual lights — without this, `tile_hdr_tonemap` falls back to `linear_hdr ≈ 1` and faces clip.
-/// Between full shop (`×`[`SHOP_ENV_LINEAR_EXPOSURE_BASE`]) and isolation showcase.
+/// Between full shop (`×`[`ROOM_GLB_LINEAR_EXPOSURE_BASE`]) and isolation showcase.
 /// `lit_mesh` (pack box) shares this with showcase tiles; too low reads as black with zero ambient.
 pub const TILE_PACK_CELEBRATION_HDR_LINEAR_EXPOSURE: f32 = 1.0 / 3.8;
 
@@ -282,7 +289,7 @@ pub const TILE_PACK_CELEBRATION_HDR_LINEAR_EXPOSURE: f32 = 1.0 / 3.8;
 pub const TILE_PACK_CELEBRATION_LIT_MESH_AMBIENT_MIN: f32 = 0.62;
 
 /// Shop [`ItemInspectScene`] `lit_mesh` path: synthetic inspect lights only (no GLB punctual).
-/// [`SHOP_ENV_LINEAR_EXPOSURE_BASE`] is too dark; [`GAMEPLAY_TABLE_HDR_LINEAR_MUL`] reads blown out.
+/// [`ROOM_GLB_LINEAR_EXPOSURE_BASE`] is too dark; [`GAMEPLAY_TABLE_HDR_LINEAR_MUL`] reads blown out.
 pub const SHOP_INSPECT_LIT_MESH_HDR_LINEAR_MUL: f32 = 1.0 / 52.0;
 
 /// Hemispheric fill term in `lit_mesh.wgsl` (`felt.w * 0.08` before ACES). Keep below
@@ -290,11 +297,11 @@ pub const SHOP_INSPECT_LIT_MESH_HDR_LINEAR_MUL: f32 = 1.0 / 52.0;
 pub const SHOP_INSPECT_LIT_MESH_AMBIENT: f32 = 0.29;
 
 /// Storeroom linear HDR during shop inspect = subject linear × this. Using the ratio of
-/// legacy shop crush ([`SHOP_ENV_LINEAR_EXPOSURE_BASE`]) to subject inspect gain
+/// legacy shop crush ([`ROOM_GLB_LINEAR_EXPOSURE_BASE`]) to subject inspect gain
 /// ([`SHOP_INSPECT_LIT_MESH_HDR_LINEAR_MUL`]) ties both to the same tuning multiplier and
 /// composite path (SDR and HDR swapchains share `tonemap_composite.wgsl`).
 pub const SHOP_INSPECT_ENV_VS_LIT_LINEAR: f32 =
-    SHOP_ENV_LINEAR_EXPOSURE_BASE / SHOP_INSPECT_LIT_MESH_HDR_LINEAR_MUL;
+    ROOM_GLB_LINEAR_EXPOSURE_BASE / SHOP_INSPECT_LIT_MESH_HDR_LINEAR_MUL;
 
 /// Room hemispheric fill vs subject `hdr_tonemap.z` during inspect (`tile_3d.wgsl`).
 pub const SHOP_INSPECT_ENV_VS_LIT_AMBIENT: f32 = 0.45;
@@ -313,26 +320,27 @@ pub const SHOP_ENV_AMBIENT_SCALE: f32 = 0.0;
 pub const GAMEPLAY_TABLE_AMBIENT_MIN: f32 = 0.52;
 
 /// Linear HDR multiplier for table scenes only (after [`RoomEnvLightingTune::linear_exposure`];
-/// shop still applies [`SHOP_ENV_LINEAR_EXPOSURE_BASE`]). Slightly <1 reins in peak energy
+/// shop still applies [`ROOM_GLB_LINEAR_EXPOSURE_BASE`]). Slightly <1 reins in peak energy
 /// before ACES so highlights retain separation from midtones.
-pub const GAMEPLAY_TABLE_HDR_LINEAR_MUL: f32 = 0.88;
+pub const GAMEPLAY_TABLE_HDR_LINEAR_MUL: f32 = 1.0;
 
 /// Applied in `lit_mesh.wgsl` as the punctual buffer `extras.w` when
 /// [`crate::render::draw_cmd::SceneLighting::embedded_gltf_punctual`] is set (`room_glb.wgsl` ignores it).
 /// Defaults to `1` so embedded punctual lights match the room; debug tuning may lower it.
 pub const SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE: f32 = 0.55;
 
-/// glTF **node** name prefix for punctual lights that should read as warm candles (`light_candle_00`, …).
-pub const SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX: &str = "light_candle_";
+/// glTF **node** name prefix for punctual lights that should read as warm candles
+/// (`light_candle`, `light_candle.001`, `light_candle_06`, …).
+pub const SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX: &str = "light_candle";
 
-/// Linear RGB multiplier for punctual lights on nodes matching [`SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX`].
-/// Warm shift for candle reads; other lights keep glTF linear RGB.
+/// Fine-tune multiplier on [`crate::render::blackbody::candle_punctual_rgb_linear`] for `light_candle*`
+/// punctuals (defaults to [`crate::render::theme::color::TALLOW`]).
 pub const SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL: [f32; 3] =
     crate::render::theme::color::rgb(crate::render::theme::color::TALLOW);
 
 /// Runtime shop lighting matching the `SHOP_*` source constants. Carried on [`DrawCtx`](crate::scenes::DrawCtx)
 /// and editable from the debug overlay.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RoomEnvLightingTune {
     pub gltf_light_intensity_scale: f32,
     pub linear_exposure: f32,
@@ -638,6 +646,57 @@ pub fn load_shop_glb_from_bytes(data: &[u8]) -> anyhow::Result<RoomGlbCpu> {
         "shop.glb has no scenes",
         &RoomWalkHooks,
     )
+}
+
+/// `true` when `shop.glb` carries `KHR_lights_punctual` lights.
+#[inline]
+pub fn shop_glb_has_embedded_lights() -> bool {
+    with_shop_glb_cpu(|opt| opt.is_some_and(crate::render::room_gltf_punctual::room_glb_has_embedded_lights))
+}
+
+/// glTF punctual points for the shop (candle flicker envelope).
+pub fn shop_embedded_point_lights_runtime(
+    w: f32,
+    h: f32,
+    env_h: f32,
+    tune: &RoomEnvLightingTune,
+    flame_time_s: f32,
+    lamp_flicker: f32,
+) -> Vec<crate::render::wgpu_renderer::PointLight> {
+    with_shop_glb_cpu(|opt| {
+        opt.map(|cpu| {
+            crate::render::room_gltf_punctual::embedded_point_lights_runtime(
+                cpu,
+                w,
+                h,
+                env_h,
+                tune,
+                crate::render::room_gltf_punctual::RoomPunctualProfile::ShopCandles {
+                    flame_time_s,
+                    lamp_flicker,
+                },
+                "shop.glb",
+            )
+        })
+        .unwrap_or_default()
+    })
+}
+
+/// glTF spot lights for the shop room.
+pub fn shop_embedded_spot_lights_runtime(
+    w: f32,
+    h: f32,
+    env_h: f32,
+    tune: &RoomEnvLightingTune,
+) -> Vec<crate::render::wgpu_renderer::SpotLight> {
+    with_shop_glb_cpu(|opt| {
+        opt.map(|cpu| {
+            crate::render::room_gltf_punctual::embedded_spot_lights_runtime(
+                cpu, w, h, env_h, tune, "shop.glb",
+            )
+        })
+        .unwrap_or_default()
+    })
 }
 
 /// Shop camera from embedded GLB perspective camera, scaled like marker geometry.

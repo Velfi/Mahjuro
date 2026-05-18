@@ -11,10 +11,14 @@ use super::focus::{
     FocusTarget, GameplayButton, focus_after_consumable_use, focus_kind, focus_kind_sfx,
     play_select_sfx, wrap_hand_tile_focus,
 };
+use crate::core::relic::relic_visual;
 use crate::core::scoring::StepKind;
 use crate::game::engine::{CommandData, GameCommand, GameEngine};
 use crate::game::run::DiscardUndoSnapshot;
 use crate::render::animation::ENTITY_SCORE_PANEL;
+use crate::render::draw_cmd::{CameraParams, Object3d, Object3dKind};
+use crate::render::table_transform::euler_xyz_rad_from_deg;
+use crate::scenes::gameplay::RELIC_GLOW_LIFETIME;
 use crate::scenes::journal_transition::{
     BOOK_SPINE_THICKNESS_MM, JournalDirection, JournalTransition, YAKU_JOURNAL_BOOK_PICK_ID,
     book_cover_face_extents_xy,
@@ -145,7 +149,8 @@ pub(super) fn process_focus_and_actions(
             | FocusTarget::Peg(_)
             | FocusTarget::Gold
             | FocusTarget::YakuTablet(_)
-            | FocusTarget::Dora => true,
+            | FocusTarget::Dora
+            | FocusTarget::RoundWind => true,
             FocusTarget::DiscardUndo => {
                 crate::persistence::load_settings().discard_undo_enabled
                     && scene.discard_undo.is_some()
@@ -454,7 +459,8 @@ pub(super) fn process_focus_and_actions(
                     Some(FocusTarget::Peg(_))
                     | Some(FocusTarget::Gold)
                     | Some(FocusTarget::YakuTablet(_))
-                    | Some(FocusTarget::Dora) => {}
+                    | Some(FocusTarget::Dora)
+                    | Some(FocusTarget::RoundWind) => {}
                     None => {}
                 }
                 continue;
@@ -563,9 +569,7 @@ pub(super) fn process_focus_and_actions(
             return Some(None);
         }
         let action = match ctx.picked_gameplay_object {
-            Some(GameplayPick::WoodTablet(0)) => Some(UiAction::SortBySuit),
-            Some(GameplayPick::WoodTablet(1)) => Some(UiAction::SortByRank),
-            Some(GameplayPick::WoodTablet(2)) if has_structure => Some(UiAction::TriggerStructure),
+            Some(GameplayPick::WoodTablet(0)) if has_structure => Some(UiAction::TriggerStructure),
             Some(GameplayPick::BronzeMirror) => Some(UiAction::ScoreHand),
             Some(GameplayPick::DiscardBowl) => Some(UiAction::CommitDiscard),
             _ => None,
@@ -856,25 +860,12 @@ pub(super) fn process_focus_and_actions(
     None
 }
 
-/// Build the relic tray (3D enamel medallions across the top of the
-/// screen) and the post-deal smoke breath / debug `B` wind gust impulses.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn build_relic_tray_and_wind(
+/// Build the relic tray
+pub(super) fn build_relic_tray(
     scene: &GameplayScene,
     layout: &crate::ui::layout::LayoutResult,
     run: &crate::game::run::RunState,
-    now: Instant,
-    hand_slots: &[(f32, f32, f32, f32)],
-) -> (
-    Vec<crate::render::draw_cmd::Object3d>,
-    Vec<crate::render::draw_cmd::WindGust>,
-) {
-    use super::DEBUG_WIND_DURATION;
-    use super::RELIC_GLOW_LIFETIME;
-    use crate::core::relic::relic_visual;
-    use crate::render::draw_cmd::{CameraParams, Object3d, Object3dKind};
-    use crate::render::table_transform::euler_xyz_rad_from_deg;
-
+) -> Vec<Object3d> {
     // ── Relic tray (horizontal row across the top of the screen) ────
     // Each active relic renders as a face-on enamel medallion using the
     // showcase path — same mesh/material as the collection screen.
@@ -988,155 +979,7 @@ pub(super) fn build_relic_tray_and_wind(
         }
     }
 
-    // Post-deal smoke breath. `wind_delay_secs` after the most
-    // recent deal we exhale a soft sweep of impulses across the hand
-    // strip — a few evenly spaced points pushed back-and-up — so the
-    // smoke that built up while the tiles were sliding in drifts off
-    // toward the back of the table. The strength follows a 4t(1-t)
-    // bell so the breath fades in and out instead of snapping on.
-    let mut wind_gusts: Vec<crate::render::draw_cmd::WindGust> = Vec::new();
-    let wind_delay = scene.wind_delay_secs;
-    let wind_duration = scene.wind_duration_secs.max(0.001);
-    {
-        if let Some(deal_at) = scene.last_deal_at {
-            let elapsed = now.saturating_duration_since(deal_at).as_secs_f32();
-            if elapsed >= wind_delay && elapsed < wind_delay + wind_duration {
-                let t = (elapsed - wind_delay) / wind_duration;
-                let envelope = (4.0 * t * (1.0 - t)).clamp(0.0, 1.0);
-                if !hand_slots.is_empty() {
-                    // Sweep a 2D grid of impulses across the screen so
-                    // the breath covers both the hand strip *and* the
-                    // table interior above it. Horizontal axis: full
-                    // window width with edge overshoot, so corner smoke
-                    // gets shoved off-stage. Vertical axis: starts just
-                    // below the hand strip (where smoke pools above the
-                    // tile faces) and extends upward into the table all
-                    // the way to the candle row, with each row lifted a
-                    // bit higher off the table than the last so the
-                    // sweep catches smoke pooling higher up as well.
-                    let sw = hand_slots[0].2;
-                    let sy = hand_slots[0].1;
-                    // 6×4 = 24 impulses keeps us under MAX_INJECTIONS
-                    // with headroom for tile motion impulses and the
-                    // cursor puffs that share the same per-frame
-                    // budget on the fluid sim.
-                    const COLS: usize = 6;
-                    const ROWS: usize = 4;
-                    let win_w = layout.window_w;
-                    let win_h = layout.window_h;
-                    let x_pad = win_w * 0.12;
-                    let span_min = -x_pad;
-                    let span_max = win_w + x_pad;
-                    // Vertical span: from a touch under the hand strip
-                    // up to the back of the playable table area (~22%
-                    // of window height from the top, where the candles
-                    // and dish sit). Anything further back is outside
-                    // the smoke grid anyway.
-                    let y_bottom = sy + sw * 0.5;
-                    let y_top = win_h * 0.22;
-                    let radius =
-                        ((win_w / COLS as f32) * 1.55).max((sy - y_top) / ROWS as f32 * 1.6);
-                    for r in 0..ROWS {
-                        // 0..1 across rows, 0 = nearest the player
-                        let rf = (r as f32 + 0.5) / ROWS as f32;
-                        let cy = y_bottom + (y_top - y_bottom) * rf;
-                        // Lift higher for back rows so the gust also
-                        // reaches smoke that has drifted upward, not
-                        // just the table surface.
-                        let lift = 18.0 + 32.0 * rf;
-                        // Back rows fade slightly so the sweep reads
-                        // as a directional breath rolling forward, not
-                        // a uniform wall of wind.
-                        let row_strength = 1.0 - 0.25 * rf;
-                        for c in 0..COLS {
-                            let f = (c as f32 + 0.5) / COLS as f32;
-                            let cx = span_min + (span_max - span_min) * f;
-                            let edge_bias = (f - 0.5) * 2.0; // -1..1
-                            // Velocity tuned against the curtain density
-                            // below: previous values (28 lateral / -55 z)
-                            // were too gentle to push the curtain off-
-                            // grid before the overlay finished fading,
-                            // leaving the round draped in residual smoke
-                            // that took the natural dissipation many
-                            // seconds to clear. The debug `B` gust uses
-                            // 1400 lateral / -120 z; we sit well below
-                            // that so this still reads as a soft breath
-                            // rather than a hurricane, but well above the
-                            // old values so the field actually clears.
-                            let lateral = 220.0 * edge_bias * envelope * row_strength;
-                            wind_gusts.push(crate::render::draw_cmd::WindGust {
-                                center_px: (cx, cy),
-                                lift,
-                                velocity: [
-                                    lateral,
-                                    -180.0 * envelope * row_strength,
-                                    (6.0 + 4.0 * rf) * envelope * row_strength,
-                                ],
-                                radius,
-                                density: -0.10 * envelope * row_strength,
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Debug: while the `B` gust timer is live, sweep a strong lateral
-    // gust across the *same* grid the opening smoke curtain and the
-    // post-deal breath use, so the wind footprint matches the smoke
-    // footprint exactly — every cell that can hold smoke gets a
-    // negative-density impulse with a big lateral velocity, instead of
-    // only the four candle bases. The shape envelope is a 4t(1-t) bell
-    // so the gust ramps in/out instead of popping. Velocity is
-    // intentionally large compared to the post-deal sweep (~28 lateral)
-    // — this is a "did the wiring work?" hammer, not a subtle ambient
-    // effect, and the radius * 3.0 falloff inside
-    // `wgpu_renderer::flame_anchors` still picks the grid impulses up
-    // to bend the flames as the gust rolls across the candle row.
-    if let Some(debug_at) = scene.debug_wind_at {
-        let elapsed = now.saturating_duration_since(debug_at).as_secs_f32();
-        if elapsed < DEBUG_WIND_DURATION {
-            let t = (elapsed / DEBUG_WIND_DURATION).clamp(0.0, 1.0);
-            let envelope = (4.0 * t * (1.0 - t)).clamp(0.0, 1.0);
-            // Mirror the curtain grid in `initial_smoke_fill_active`
-            // above: same COLS/ROWS, same x_pad, same y_top/y_bottom,
-            // same radius formula. If you change one, change both.
-            const COLS: usize = 6;
-            const ROWS: usize = 4;
-            let win_w = layout.window_w;
-            let win_h = layout.window_h;
-            let x_pad = win_w * 0.15;
-            let span_min = -x_pad;
-            let span_max = win_w + x_pad;
-            let y_top = win_h * 0.22;
-            let y_bottom = if !hand_slots.is_empty() {
-                hand_slots[0].1 + hand_slots[0].3
-            } else {
-                win_h * 0.85
-            };
-            let radius = ((span_max - span_min) / COLS as f32 * 0.95)
-                .max((y_bottom - y_top) / ROWS as f32 * 1.6);
-            for r in 0..ROWS {
-                let rf = (r as f32 + 0.5) / ROWS as f32;
-                let cy = y_bottom + (y_top - y_bottom) * rf;
-                let lift = 22.0 + 30.0 * rf;
-                for c in 0..COLS {
-                    let f = (c as f32 + 0.5) / COLS as f32;
-                    let cx = span_min + (span_max - span_min) * f;
-                    wind_gusts.push(crate::render::draw_cmd::WindGust {
-                        center_px: (cx, cy),
-                        lift,
-                        velocity: [1400.0 * envelope, -120.0 * envelope, 0.0],
-                        radius,
-                        density: -0.04 * envelope,
-                    });
-                }
-            }
-        }
-    }
-
-    (relic_objects, wind_gusts)
+    relic_objects
 }
 
 /// Outputs of [`build_consumable_dish`].
@@ -1425,8 +1268,8 @@ pub(super) struct ActionRowOutputs {
     pub(super) journal_book: Option<crate::render::draw_cmd::Object3d>,
 }
 
-/// Build the action-row 3D objects (sort tablets, discard bowl, bronze
-/// mirror, optional cash-in tablet) plus the Yaku Journal book tablet.
+/// Build the action-row 3D objects (discard bowl, bronze mirror, optional
+/// cash-in tablet) plus the Yaku Journal book.
 /// Pushes button focus rects into `focus_rect_graph`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_action_row_and_journal(
@@ -1435,10 +1278,9 @@ pub(super) fn build_action_row_and_journal(
     run: &crate::game::run::RunState,
     ctx: &crate::scenes::DrawCtx<'_>,
     gameplay: &crate::game::engine::GameplayReadModel,
-    btn_rects: &[(f32, f32, f32, f32); 5],
-    rank_btn_rect: (f32, f32, f32, f32),
+    btn_rects: &[(f32, f32, f32, f32); 3],
+    journal_btn_rect: (f32, f32, f32, f32),
     journal_btn_cx: f32,
-    _journal_btn_w: f32,
     action_world_z_py: f32,
     action_hud_table_lift: f32,
     cam_euler: [f32; 3],
@@ -1453,9 +1295,8 @@ pub(super) fn build_action_row_and_journal(
     use crate::render::table_transform::{mat4_to_euler_xyz_rad, rot_euler_xyz_rad};
     use crate::render::world_space::LayoutAnchorPx;
     // Phase 4: action row is now physical objects.
-    //   - Sort by Suit / Sort by Rank → carved wood tablets
-    //   - Discard / Play              → bowl + mirror (row below hand, above sort;
-    //                                    mirror play left, discard bowl right)
+    //   - Discard / Play → bowl + mirror (row below hand, above journal;
+    //                      mirror play left, discard bowl right)
     // The flat slate-blue button background quads are gone; only the
     // focus-highlight border remains as a 2D affordance for keyboard
     // navigation.
@@ -1465,7 +1306,7 @@ pub(super) fn build_action_row_and_journal(
     // `action_hud_table_lift`: third component of [`crate::render::draw_cmd::WorldSurfaceAnchor`]
     // (height above felt); set in [`action_bar_layout::compute_action_bar`].
     for (i, &(bx, by, bw, bh)) in btn_rects.iter().enumerate() {
-        if i == 4 && !has_structure {
+        if i == 2 && !has_structure {
             continue;
         }
         // Register this button in the focus rect graph so the unified
@@ -1479,11 +1320,9 @@ pub(super) fn build_action_row_and_journal(
         // focus picker tolerates absent targets and the next frame
         // repopulates.
         let proj = match ALL_BUTTONS[i] {
-            GameplayButton::SortSuit => ctx.proj.wood_tablet_rects.first().copied(),
-            GameplayButton::SortRank => ctx.proj.wood_tablet_rects.get(1).copied(),
             GameplayButton::Discard => ctx.proj.bowl_rect,
             GameplayButton::Play => ctx.proj.mirror_rect,
-            GameplayButton::Trigger => ctx.proj.wood_tablet_rects.get(2).copied(),
+            GameplayButton::Trigger => ctx.proj.wood_tablet_rects.first().copied(),
             // Pushed separately alongside the journal placement
             // block further down — its slot index in the wood
             // tablet rect vec isn't known until then.
@@ -1508,30 +1347,22 @@ pub(super) fn build_action_row_and_journal(
             _ => None,
         };
         let hovered = match i {
-            0 => matches!(
-                pick,
-                Some(crate::render::wgpu_renderer::GameplayPick::WoodTablet(0)),
-            ),
-            1 => matches!(
-                pick,
-                Some(crate::render::wgpu_renderer::GameplayPick::WoodTablet(1)),
-            ),
-            2 => {
+            0 => {
                 matches!(
                     pick,
                     Some(crate::render::wgpu_renderer::GameplayPick::DiscardBowl),
                 ) || focused_btn == Some(GameplayButton::Discard)
             }
-            3 => {
+            1 => {
                 matches!(
                     pick,
                     Some(crate::render::wgpu_renderer::GameplayPick::BronzeMirror),
                 ) || focused_btn == Some(GameplayButton::Play)
             }
-            4 => {
+            2 => {
                 matches!(
                     pick,
-                    Some(crate::render::wgpu_renderer::GameplayPick::WoodTablet(2)),
+                    Some(crate::render::wgpu_renderer::GameplayPick::WoodTablet(0)),
                 ) || focused_btn == Some(GameplayButton::Trigger)
             }
             _ => false,
@@ -1546,40 +1377,8 @@ pub(super) fn build_action_row_and_journal(
             py: center_py + action_world_z_py,
             lift_z: action_hud_table_lift,
         };
-        let tablet_thickness = (bh * 0.35).max(8.0);
         match i {
-            0 | 1 => {
-                let (label, tp) = match i {
-                    0 => ("Sort by Suit", &scene.positions.tablet_sort_suit),
-                    _ => ("Sort by Rank", &scene.positions.tablet_sort_rank),
-                };
-                let _tablet_idx = wood_tablet_placements.len();
-                let anchor = action_anchor.to_draw_cmd_triple();
-                wood_tablet_placements.push(Object3d {
-                    pos: [
-                        anchor[0] + tp.nx * layout.window_w,
-                        anchor[1] + tp.ny * layout.window_h,
-                        anchor[2] + layout.mm(tp.lift_mm),
-                    ],
-                    extents: [bw, tablet_thickness, bh],
-                    // Placement rotation applied centrally via
-                    // `committed_arrange_rotations`.
-                    rotation: cam_euler,
-                    color: [1.0, 1.0, 1.0, 1.0],
-                    kind: Object3dKind::WoodTablet {
-                        label: std::borrow::Cow::Borrowed(label),
-                        pick_id: None,
-                    },
-                    hover_target: 0.0,
-                    anim_id: 0,
-                    arrange_name: None,
-                });
-                // Gold overlay label superimposed on the sort tablet
-                // when it's the active selection. Anchored on the
-                // The label is engraved directly on the wood tablet
-                // via a per-instance decal texture — no 2D overlay.
-            }
-            2 => {
+            0 => {
                 // Discard bowl — right side of the discard/play row under the rack.
                 // The synthesized
                 // `discard_btn_rect` above is already a square sized to
@@ -1629,7 +1428,7 @@ pub(super) fn build_action_row_and_journal(
                 // on the very first frame after a scene transition
                 // the label briefly doesn't appear.
             }
-            3 => {
+            1 => {
                 // Bronze mirror — left side of that same row (paired with the bowl).
                 // Same square `play_btn_rect` convention as the bowl,
                 // and the same binary-target → renderer-eased envelope
@@ -1664,7 +1463,7 @@ pub(super) fn build_action_row_and_journal(
                 // anchoring as the river label above (no layout-rect
                 // fallback).
             }
-            4 => {
+            2 => {
                 let tablet_thickness = (bh * 0.35).max(8.0);
                 let structure_full = gameplay.structure_complete;
                 let wiggle_deg =
@@ -1703,7 +1502,7 @@ pub(super) fn build_action_row_and_journal(
     }
 
     // Yaku Journal — same leather-bound book mesh + zoom transition as the shop.
-    let (_, rby, _, rbh) = rank_btn_rect;
+    let (_, rby, _, rbh) = journal_btn_rect;
     let book_cy = rby + rbh * 0.5;
     let book_cx = journal_btn_cx;
     let w = layout.window_w;
@@ -1828,6 +1627,7 @@ pub(super) fn build_yaku_panel_and_tablets(
         .map(|(t, _)| *t)
         .collect();
     let round_wind_for_yaku = Some(gameplay.round_wind_rank);
+    let bonus_round_wind_for_yaku = run.bonus_round_wind_for_yaku();
     let wildcard_result = if selected_tiles_for_yaku.is_empty() {
         None
     } else {
@@ -1867,6 +1667,7 @@ pub(super) fn build_yaku_panel_and_tablets(
             &yaku_preview_original_tiles,
             &gameplay.available_yaku,
             round_wind_for_yaku,
+            bonus_round_wind_for_yaku,
             Some((
                 yaku_preview_sets.as_slice(),
                 yaku_preview_effective_tiles.as_slice(),

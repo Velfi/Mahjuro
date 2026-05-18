@@ -39,8 +39,9 @@ pub enum RelicId {
     KanDrum,
     /// Reveal an extra dora indicator at round start; dora chips become +35.
     DoraCrown,
-    /// Round Wind triplets/kongs grant +6 mult instead of the base +3.
-    RoundCompass,
+    /// Each round, also treats a second wind as round wind; round-wind triplets/kongs grant +6 mult.
+    #[serde(alias = "round_compass")]
+    WindReader,
     /// Scoring a FullHand grants 1 random Zodiac card (ignores slot cap).
     EightTreasures,
     /// Kongs grant +120 chips and +2 mult each when scored.
@@ -313,7 +314,7 @@ impl RelicId {
             // Filenames for icons; loader falls back to the relic slug if missing.
             RelicId::KanDrum => "kan_drum.png",
             RelicId::DoraCrown => "dora_crown.png",
-            RelicId::RoundCompass => "round_compass.png",
+            RelicId::WindReader => "wind_reader.png",
             RelicId::EightTreasures => "eight_treasures.png",
             RelicId::KongsBlessing => "kongs_blessing.png",
             RelicId::GardenKeeper => "garden_keeper.png",
@@ -1190,7 +1191,7 @@ fn relic_scoring_copy_dup_is_compatible(target: RelicId) -> bool {
             | RelicId::DragonRage
             | RelicId::WhiteDragonsHush
             | RelicId::KanDrum
-            | RelicId::RoundCompass
+            | RelicId::WindReader
             | RelicId::Ikebana
             | RelicId::LuckySeven
             | RelicId::PaperLantern
@@ -1248,6 +1249,8 @@ pub struct ScoreRoundBundle {
     pub plays_used: u32,
     /// Round wind (1=East … 4=North) for Yakuhai; `None` outside a run.
     pub round_wind: Option<u8>,
+    /// Second round wind from Windreader (1–4); `None` when inactive.
+    pub bonus_round_wind: Option<u8>,
     /// Yaku already scored this round (The Censor halves repeats).
     pub played_yaku_this_round: Vec<crate::core::yaku::YakuKind>,
     /// Last play of the round (`plays_remaining == 0`); powers Last Breath with structure.
@@ -1380,7 +1383,7 @@ mod tests {
                     | RelicId::DragonEcho
                     | RelicId::KanDrum
                     | RelicId::DoraCrown
-                    | RelicId::RoundCompass
+                    | RelicId::WindReader
                     | RelicId::EightTreasures
                     | RelicId::KongsBlessing
                     | RelicId::GardenKeeper
@@ -1477,7 +1480,7 @@ mod tests {
                 RelicId::DragonEcho,
                 RelicId::KanDrum,
                 RelicId::DoraCrown,
-                RelicId::RoundCompass,
+                RelicId::WindReader,
                 RelicId::EightTreasures,
                 RelicId::KongsBlessing,
                 RelicId::GardenKeeper,

@@ -63,8 +63,8 @@ pub enum GameplayPick {
     /// Index into the most recent `YakuTabletBatch` (hover only — yaku
     /// tablets aren't clickable, just informational).
     YakuTablet(usize),
-    /// Index into the most recent `WoodTabletBatch` — 0 = sort suit,
-    /// 1 = sort rank, 2 = cash-in tablet when structure is committed.
+    /// Index into the most recent `WoodTabletBatch` — 0 = cash-in tablet
+    /// when structure is committed.
     WoodTablet(usize),
     /// Leather-bound Yaku Journal book (same mesh as the shop).
     JournalBook,

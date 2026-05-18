@@ -12,9 +12,17 @@ pub const QUAD: &str = wgsl_file!("quad.wgsl");
 pub const TEXT_QUAD: &str = wgsl_file!("text_quad.wgsl");
 pub const GRADIENT_QUAD: &str = wgsl_file!("gradient_quad.wgsl");
 pub const SQUIRCLE_QUAD: &str = wgsl_file!("squircle_quad.wgsl");
-pub const FLAME: &str = wgsl_file!("flame.wgsl");
+pub const FLAME: &str = concat!(
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/shaders/blackbody.wgsl"
+    )),
+    "\n",
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/flame.wgsl")),
+);
 pub const STARFIELD: &str = wgsl_file!("starfield.wgsl");
 pub const EMBER_DRIFT: &str = wgsl_file!("ember_drift.wgsl");
+pub const RAIN: &str = wgsl_file!("rain.wgsl");
 pub const GOLDEN_DUST: &str = wgsl_file!("golden_dust.wgsl");
 pub const MOONLIT_WATER: &str = wgsl_file!("moonlit_water.wgsl");
 pub const SUNLIT_WATER: &str = wgsl_file!("sunlit_water.wgsl");

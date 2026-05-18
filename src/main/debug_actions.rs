@@ -2,7 +2,7 @@ use super::*;
 
 use crate::core::tile_pack::TilePackKind;
 use crate::debug_overlays::{
-    HallwayDistortionDebugOverlay, ShopEnvDebugOverlay, TonemapDebugOverlay,
+    HallwayDistortionDebugOverlay, SceneLookDebugOverlay,
 };
 use crate::game::engine::GameEngine;
 use crate::scenes::reload_scene_layout_from_disk;
@@ -149,13 +149,20 @@ impl App {
                     log::debug!("Opened camera debug overlay");
                 }
             }
-            DebugAction::OpenShopEnvDebug => {
-                if self.debug.shop_env_debug_overlay.is_none() {
-                    self.debug.shop_env_debug_overlay = Some(ShopEnvDebugOverlay::new(
-                        self.debug.room_gltf_height_scale,
-                        self.debug.shop_env_lighting,
-                    ));
-                    log::debug!("Opened shop env & lighting debug overlay");
+            DebugAction::OpenSceneLookDebug => {
+                if self.debug.scene_look_debug_overlay.is_none() {
+                    let keys = crate::game::scene_look_tuning::overlay_scene_keys();
+                    let active = self.active_scene_key_for_renderer();
+                    let scene_index = active
+                        .and_then(|k| keys.iter().position(|&x| x == k))
+                        .unwrap_or(0);
+                    let look = self.scene_look.resolve(active);
+                    self.debug.scene_look_debug_overlay =
+                        Some(SceneLookDebugOverlay::new(scene_index, look));
+                    log::debug!(
+                        "Opened scene look debug overlay (scene: {})",
+                        keys[scene_index]
+                    );
                 }
             }
             DebugAction::OpenHallwayHallFxDebug => {
@@ -166,20 +173,6 @@ impl App {
                     self.debug.hallway_distortion_debug_overlay =
                         Some(HallwayDistortionDebugOverlay::new());
                     log::debug!("Opened hallway vertex warp debug overlay");
-                }
-            }
-            DebugAction::OpenTonemapDebug => {
-                if self.debug.tonemap_debug_overlay.is_none() {
-                    let scene_key = self.active_scene_key_for_renderer();
-                    let tuning = self.tonemap_tuning.resolve(scene_key);
-                    self.debug.tonemap_debug_overlay = Some(TonemapDebugOverlay::new(
-                        tuning,
-                        scene_key.map(str::to_string),
-                    ));
-                    log::debug!(
-                        "Opened tonemap debug overlay (scene: {})",
-                        scene_key.unwrap_or("_default")
-                    );
                 }
             }
             DebugAction::ProfileGpu => {

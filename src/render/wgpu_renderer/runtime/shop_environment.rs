@@ -7,6 +7,7 @@ struct GltfRoomEnvUniformParams<'a> {
     embedded_gltf_punctual: bool,
     hallway_env: bool,
     archive_env: bool,
+    main_menu_env: bool,
     bloom_linear_hdr_output: bool,
     model: Mat4,
     gpu: &'a ShopEnvironmentGpu,
@@ -133,12 +134,17 @@ impl WgpuRenderer {
             embedded_gltf_punctual,
             hallway_env,
             archive_env,
+            main_menu_env,
             bloom_linear_hdr_output,
             model,
             gpu,
         } = p;
-        let s =
-            crate::render::room_glb::room_env_world_scale(camera.h, self.room_gltf_height_scale);
+        let height_scale = if main_menu_env {
+            crate::render::main_menu_glb::main_menu_env_height_scale(self.room_gltf_height_scale)
+        } else {
+            self.room_gltf_height_scale
+        };
+        let s = crate::render::room_glb::room_env_world_scale(camera.h, height_scale);
         let inv_doc_scale = if embedded_gltf_punctual || frame.shop_inspect_lit_mesh_hdr {
             1.0 / s.max(1e-6)
         } else {
@@ -157,7 +163,7 @@ impl WgpuRenderer {
         }
         let (exposure, ambient_x) = if embedded_gltf_punctual {
             let mut e = self.shop_env_linear_exposure
-                * crate::render::room_glb::SHOP_ENV_LINEAR_EXPOSURE_BASE;
+                * crate::render::room_glb::ROOM_GLB_LINEAR_EXPOSURE_BASE;
             let mut a = self.shop_env_ambient_scale;
             if hallway_env {
                 e *= crate::render::hallway_glb::HALLWAY_ENV_LINEAR_EXPOSURE_MUL;
@@ -166,6 +172,10 @@ impl WgpuRenderer {
             if archive_env {
                 e *= crate::render::archive_glb::ARCHIVE_ENV_LINEAR_EXPOSURE_MUL;
                 a = a.max(crate::render::archive_glb::ARCHIVE_ENV_AMBIENT_SCALE_MIN);
+            }
+            if main_menu_env {
+                e *= crate::render::main_menu_glb::MAIN_MENU_ENV_LINEAR_EXPOSURE_MUL;
+                a = a.max(crate::render::main_menu_glb::MAIN_MENU_ENV_AMBIENT_SCALE_MIN);
             }
             (e, a)
         } else if frame.shop_inspect_lit_mesh_hdr {
@@ -223,6 +233,7 @@ impl WgpuRenderer {
             embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
             hallway_env: false,
             archive_env: false,
+            main_menu_env: false,
             bloom_linear_hdr_output,
             model,
             gpu,
@@ -256,6 +267,7 @@ impl WgpuRenderer {
             embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
             hallway_env: true,
             archive_env: false,
+            main_menu_env: false,
             bloom_linear_hdr_output,
             model,
             gpu,
@@ -358,6 +370,58 @@ impl WgpuRenderer {
             embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
             hallway_env: false,
             archive_env: true,
+            main_menu_env: false,
+            bloom_linear_hdr_output,
+            model,
+            gpu,
+        });
+    }
+
+    /// Draw [`main_menu.glb`] hub waterfront.
+    pub(super) fn draw_main_menu_environment_meshes(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        frame: &crate::render::draw_cmd::UiFrame,
+        room_hdr_mrt_emissive: bool,
+    ) {
+        let Some(ref gpu) = self.main_menu_environment else {
+            return;
+        };
+        self.draw_gltf_room_env_meshes(
+            pass,
+            frame,
+            &self.main_menu_env_primitives,
+            gpu,
+            room_hdr_mrt_emissive,
+            |_| false,
+        );
+    }
+
+    pub(super) fn write_main_menu_environment_uniforms(
+        &self,
+        frame: &crate::render::draw_cmd::UiFrame,
+        camera: &CameraFrame,
+        bloom_linear_hdr_output: bool,
+    ) {
+        let Some(ref gpu) = self.main_menu_environment else {
+            return;
+        };
+        let env_h =
+            crate::render::main_menu_glb::main_menu_env_height_scale(self.room_gltf_height_scale);
+        let s = crate::render::room_glb::room_env_world_scale(camera.h, env_h);
+        let model = crate::render::main_menu_glb::with_main_menu_glb_cpu(|opt| {
+            opt.map(|cpu| {
+                crate::render::room_glb::room_env_model_matrix_from_cpu(camera.h, env_h, cpu)
+            })
+        })
+        .unwrap_or_else(|| Mat4::from_scale(glam::Vec3::splat(s)));
+        self.write_gltf_room_env_uniforms(GltfRoomEnvUniformParams {
+            frame,
+            camera,
+            embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
+            hallway_env: false,
+            archive_env: false,
+            main_menu_env: true,
             bloom_linear_hdr_output,
             model,
             gpu,

@@ -20,7 +20,7 @@ pub struct MainMenuExteriorPositions {
 impl Default for MainMenuExteriorPositions {
     fn default() -> Self {
         Self {
-            // Tuned for `assets/textures/scenes/main_menu/exterior.png` (no-text 3D mockup).
+            // Legacy arrange anchors from the flat exterior mockup; unused by the GLB hub UI.
             door_hit: Placement::at(0.54, 0.445, 180.0),
             // Options: wall beside the doorway (lantern / plaster), not the blank board above.
             sign_hit: Placement::at(0.375, 0.435, 170.0),

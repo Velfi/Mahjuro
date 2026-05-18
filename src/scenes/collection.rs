@@ -14,7 +14,10 @@ use crate::core::yaku::YakuKind;
 use crate::core::zodiac::ZodiacKind;
 use crate::game::event_bus::GameEvent;
 use crate::render::archive_glb;
-use crate::render::draw_cmd::{CameraParams, Object3d, Object3dKind, ScenePunctualLight, UiFrame};
+use crate::render::draw_cmd::{
+    CameraParams, Object3d, Object3dKind, ScenePunctualLight, UiFrame,
+    camera_facing_euler_xyz_rad,
+};
 use crate::render::ribbon_mesh::{ZodiacRibbonSpec, zodiac_ribbon_object3d};
 use crate::render::room_glb;
 use crate::render::table_transform::{euler_xyz_rad_from_deg, rot_fixed_axes_deg};
@@ -22,7 +25,9 @@ use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{
     GpuInstance, GradientQuadInstance, PointLight, TextAlign, TextLabel,
 };
-use crate::render::world_space::{surface_anchor_from_world_xyz, world_on_camera_ray_plane_z};
+use crate::render::world_space::{
+    object3d_pos_for_screen_at_world_z, surface_anchor_from_world_xyz, world_on_camera_ray_plane_z,
+};
 use crate::ui::focus_nav::{FocusDir, pick_neighbor, push_focus_ring};
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
@@ -1586,6 +1591,43 @@ impl CollectionScene {
         if !hud_plaques.is_empty() {
             frame.object3d_batch(hud_plaques);
         }
+        // Title-bar wood tablets last so they depth-test in front of the room + HUD props.
+        {
+            let ch = archive_chrome_layout(w, h);
+            let margin_x = ch.margin_x;
+            let title_y = ch.title_y;
+            let back_rect = [margin_x, title_y, ch.back_w, ch.chrome_btn_h];
+            let switch_rect = [
+                w - margin_x - ch.switch_w,
+                title_y,
+                ch.switch_w,
+                ch.chrome_btn_h,
+            ];
+            let ring_focus = self.chrome_focus_for_draw(ctx.input_mode);
+            let chrome_plane_z = collection_chrome_tablet_plane_z(&final_cam);
+            frame.object3d_batch(vec![
+                collection_chrome_wood_tablet(
+                    w,
+                    h,
+                    back_rect,
+                    "Back",
+                    &final_cam,
+                    chrome_plane_z,
+                    ring_focus == Some(CollectionAction::Back),
+                    "collection.chrome.back",
+                ),
+                collection_chrome_wood_tablet(
+                    w,
+                    h,
+                    switch_rect,
+                    "Switch save",
+                    &final_cam,
+                    chrome_plane_z,
+                    ring_focus == Some(CollectionAction::SwitchSave),
+                    "collection.chrome.switch_save",
+                ),
+            ]);
+        }
         frame.texts(std::mem::take(text_labels));
 
         // Hit rects for 2D chrome — skipped while [`ItemInspectScene`] owns input.
@@ -1630,49 +1672,20 @@ impl CollectionScene {
             ..Default::default()
         });
 
-        // Back / Switch save buttons. Controller / keyboard focus draws a
-        // brass ring via `focused_chrome`; cursor hover reads the tree focus
-        // so mouse users get the same affordance even though they don't drive
-        // `focused_chrome` directly.
+        // Back / Switch save — lacquered wood tablets (see `build_archive_grid_frame`);
+        // brass focus rings stay 2D so keyboard / controller affordance matches the footer.
         let back_w = ch.back_w;
         let back_h = ch.chrome_btn_h;
-        let btn_label_px = typography::size(typography::H36, h);
         let ring_focus = self.chrome_focus_for_draw(ctx.input_mode);
         let back_rect = [margin_x, title_y, back_w, back_h];
-        let back_focused = ring_focus == Some(CollectionAction::Back);
-        quads.push(GpuInstance {
-            rect: back_rect,
-            color: chrome_btn_color(back_focused),
-            user: 0,
-        });
-        text_labels.push(TextLabel {
-            rect: back_rect,
-            text: "< Back".into(),
-            color: color::PARCHMENT,
-            font_px: Some(btn_label_px),
-            ..Default::default()
-        });
-        if back_focused {
+        if ring_focus == Some(CollectionAction::Back) {
             push_focus_ring(back_rect, scale, w, h, &mut quads);
         }
 
         let switch_w = ch.switch_w;
         let switch_x = w - margin_x - switch_w;
         let switch_rect = [switch_x, title_y, switch_w, back_h];
-        let switch_focused = ring_focus == Some(CollectionAction::SwitchSave);
-        quads.push(GpuInstance {
-            rect: switch_rect,
-            color: chrome_btn_color(switch_focused),
-            user: 0,
-        });
-        text_labels.push(TextLabel {
-            rect: switch_rect,
-            text: "Switch save".into(),
-            color: color::PARCHMENT,
-            font_px: Some(btn_label_px),
-            ..Default::default()
-        });
-        if switch_focused {
+        if ring_focus == Some(CollectionAction::SwitchSave) {
             push_focus_ring(switch_rect, scale, w, h, &mut quads);
         }
 
@@ -2684,6 +2697,48 @@ fn stats_for(art: &Artifact, progress: &crate::core::progression::PlayerProgress
 /// module while ensuring positions agree with what the renderer emits.
 fn pixel_to_world_xy(w: f32, h: f32, px: f32, py: f32, lift: f32) -> glam::Vec3 {
     glam::Vec3::new(px - w * 0.5, h * 0.5 - py, lift)
+}
+
+/// Horizontal `world_z` for title-bar wood tablets — a short step from the look
+/// target back toward the camera so the HUD sits over the cabinet, not on the
+/// featured-item / ceiling plane deep in the room.
+#[inline]
+fn collection_chrome_tablet_plane_z(cam: &CameraParams) -> f32 {
+    let eye_z = cam.eye[2];
+    let target_z = cam.target[2];
+    target_z + (eye_z - target_z) * 0.12
+}
+
+/// Lacquered wood push-button for Archive title-bar chrome (`Back`, `Switch save`).
+#[inline]
+fn collection_chrome_wood_tablet(
+    w: f32,
+    h: f32,
+    rect: [f32; 4],
+    label: &'static str,
+    cam: &CameraParams,
+    plane_z: f32,
+    focused: bool,
+    arrange_name: &'static str,
+) -> Object3d {
+    let cx = rect[0] + rect[2] * 0.5;
+    let cy = rect[1] + rect[3] * 0.5;
+    let rw = rect[2];
+    let rh = rect[3];
+    let thickness = (rh * 0.35).max(8.0);
+    Object3d {
+        pos: object3d_pos_for_screen_at_world_z(w, h, cam, cx, cy, plane_z),
+        extents: [rw, thickness, rh],
+        rotation: camera_facing_euler_xyz_rad(cam.eye, cam.target),
+        color: [1.0, 1.0, 1.0, 1.0],
+        kind: Object3dKind::WoodTablet {
+            label: std::borrow::Cow::Borrowed(label),
+            pick_id: None,
+        },
+        hover_target: if focused { 1.0 } else { 0.0 },
+        anim_id: 0,
+        arrange_name: Some(arrange_name),
+    }
 }
 
 /// Screen pixel → world on `z = plane_z` using the same view-proj as the frame, then packed for
