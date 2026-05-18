@@ -706,6 +706,11 @@ impl App {
                         if matches!(s.presenter, scenes::ShowcasePresenter::ShopInspect(_))
                 )
             });
+            if showcase_shop_inspect {
+                if let Scene::Shop(shop) = &mut self.scene {
+                    shop.tick_suspended_animation_clock();
+                }
+            }
             let suspended_shop = if showcase_shop_inspect {
                 match &self.scene {
                     Scene::Shop(shop) => Some(shop),

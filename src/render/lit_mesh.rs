@@ -127,6 +127,13 @@ pub enum MaterialKind {
     Emissive = 20,
 }
 
+/// Whether instances using this material should participate in the
+/// directional shadow map (lamps, filaments, and other pure emitters opt out).
+#[inline]
+pub fn material_casts_shadow(kind: MaterialKind) -> bool {
+    !matches!(kind, MaterialKind::Emissive)
+}
+
 /// Compact per-mesh material parameters.
 #[derive(Clone, Copy, Debug)]
 pub struct MaterialParams {
@@ -602,6 +609,33 @@ impl LitMeshInstance {
 /// Bind-group layout for the per-caster shadow uniform consumed by
 /// `shaders/shadow.wgsl` during the shadow pre-pass. A single uniform
 /// containing `(light_view_proj, model)`.
+/// Per-room-GLB shadow caster buffer + bind group (shared model matrix for all primitives).
+pub fn create_room_env_shadow_gpu(
+    device: &wgpu::Device,
+    shadow_caster_layout: &wgpu::BindGroupLayout,
+    label: &str,
+) -> (wgpu::Buffer, wgpu::BindGroup) {
+    let identity = glam::Mat4::IDENTITY.to_cols_array();
+    let initial = ShadowCasterUniform {
+        light_view_proj: identity,
+        model: identity,
+    };
+    let shadow_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some(label),
+        contents: bytemuck::bytes_of(&initial),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    });
+    let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some(label),
+        layout: shadow_caster_layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: shadow_uniform_buffer.as_entire_binding(),
+        }],
+    });
+    (shadow_uniform_buffer, shadow_bind_group)
+}
+
 pub fn create_shadow_caster_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("shadow-caster-layout"),

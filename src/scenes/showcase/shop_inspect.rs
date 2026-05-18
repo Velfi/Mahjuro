@@ -26,7 +26,6 @@ impl ShopInspectPresenter {
         ShowcaseRenderHints {
             object3d_use_camera_ray_plane_z: false,
             showcase_tiles_use_camera_ray_plane_z: false,
-            suppress_table_shadows: false,
             tile_pack_celebration_tonemap: false,
             shop_tonemap_and_lit_mesh_context: true,
             collection_tonemap_context: false,

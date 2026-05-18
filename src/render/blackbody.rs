@@ -53,16 +53,3 @@ pub fn blackbody_rgb_linear(temp_k: f32) -> [f32; 3] {
         srgb_channel_to_linear(s[2]),
     ]
 }
-
-/// Bright flame body — matches `CORE_K` in `candle_blackbody_rgb_srgb` (`blackbody.wgsl`).
-pub const CANDLE_PUNCTUAL_TEMP_K: f32 = 2100.0;
-
-/// `light_candle*` punctual tint: Planck wick chromaticity × debug [`crate::render::room_glb::RoomEnvLightingTune::candle_light_color_mul`].
-pub fn candle_punctual_rgb_linear(color_mul: [f32; 3]) -> [f32; 3] {
-    let base = blackbody_rgb_linear(CANDLE_PUNCTUAL_TEMP_K);
-    [
-        (base[0] * color_mul[0]).clamp(0.0, 1.0),
-        (base[1] * color_mul[1]).clamp(0.0, 1.0),
-        (base[2] * color_mul[2]).clamp(0.0, 1.0),
-    ]
-}

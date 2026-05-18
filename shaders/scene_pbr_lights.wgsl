@@ -37,3 +37,27 @@ fn scene_smooth_point_atten(dist: f32, radius: f32) -> f32 {
     let t = clamp(1.0 - dist / max(radius, 1.0), 0.0, 1.0);
     return t * t;
 }
+
+// Jorge Jimenez's interleaved gradient noise — stable screen-space jitter for punctual
+// occlusion rays (`lit_mesh.wgsl`, `room_glb.wgsl`).
+fn scene_ign(p: vec2<f32>) -> f32 {
+    return fract(52.9829189 * fract(0.06711056 * p.x + 0.00583715 * p.y));
+}
+
+// Slab test: segment from `light_pos` to `frag_pos` pierces the AABB between t≈0 and t≈1.
+fn scene_segment_hits_aabb(
+    light_pos: vec3<f32>,
+    inv_dir: vec3<f32>,
+    c: vec3<f32>,
+    h: vec3<f32>,
+    near_bias: f32,
+    far_bias: f32,
+) -> bool {
+    let t1 = (c - h - light_pos) * inv_dir;
+    let t2 = (c + h - light_pos) * inv_dir;
+    let tmin = min(t1, t2);
+    let tmax = max(t1, t2);
+    let near_t = max(max(tmin.x, tmin.y), tmin.z);
+    let far_t = min(min(tmax.x, tmax.y), tmax.z);
+    return far_t > near_t && near_t > near_bias && near_t < far_bias;
+}

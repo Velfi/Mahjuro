@@ -34,7 +34,6 @@ impl MetaLevelUpPresenter {
         ShowcaseRenderHints {
             object3d_use_camera_ray_plane_z: false,
             showcase_tiles_use_camera_ray_plane_z: true,
-            suppress_table_shadows: true,
             tile_pack_celebration_tonemap: false,
             shop_tonemap_and_lit_mesh_context: false,
             collection_tonemap_context: true,

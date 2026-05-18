@@ -31,9 +31,10 @@ struct VsOut {
 const FLAME_HEIGHT: f32 = 1.72 * 2.0;
 const FLAME_WIDTH: f32 = 0.82;
 const TAPER_FACTOR: f32 = 0.88;
-const HEIGHT_RW_RATE: f32 = 42.0;
+const HEIGHT_RW_RATE: f32 = 17.0;
 const HEIGHT_RW_AMP: f32 = 0.016;
-const BRIGHT_RW_RATE: f32 = 38.0;
+const BRIGHT_RW_RATE: f32 = 15.0;
+const MICRO_RW_RATE: f32 = 19.0;
 const BRIGHT_RW_AMP: f32 = 0.018;
 const EMISSION_GAIN: f32 = 10.5;
 const MAX_ALPHA: f32 = 0.72;
@@ -158,7 +159,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     );
     let flame_noise = fbm(flow_uv) * 0.5 + fbm(flow_uv * 1.9 + 2.7) * 0.5;
     alpha *= mix(0.78, 1.06, smoothstep(0.32, 0.68, flame_noise));
-    let micro_rw = flame_rw_1d(in.uv.y * 2.0 + in.uv.x * 0.4, t, 48.0);
+    let micro_rw = flame_rw_1d(in.uv.y * 2.0 + in.uv.x * 0.4, t, MICRO_RW_RATE);
     alpha *= 1.0 + micro_rw * BRIGHT_RW_AMP * in.dance_w;
     alpha = clamp(alpha, 0.0, MAX_ALPHA);
     if (alpha < 0.004) {

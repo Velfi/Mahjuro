@@ -19,6 +19,7 @@ impl WgpuRenderer {
         kind: &Option<crate::core::zodiac::ZodiacKind>,
         ribbon_slot: &mut usize,
         object3d_draw_list: &mut Vec<(DrawKind, usize)>,
+        shadow: &mut Option<&mut super::shadow_setup::Object3dShadowCtx<'_>>,
     ) {
         let view_proj_arr = camera.view_proj_arr;
         // Ribbon mesh local y ∈ [-0.5, 0.5] with origin at centroid; z half
@@ -107,6 +108,12 @@ impl WgpuRenderer {
             view_proj_arr,
             full_ribbon_model,
             silk_mat,
+        );
+        self.write_lit_mesh_shadow(
+            shadow,
+            &self.ribbon_instances[slot_i],
+            full_ribbon_model,
+            silk_mat.kind,
         );
         object3d_draw_list.push((DrawKind::Ribbon, slot_i));
     }

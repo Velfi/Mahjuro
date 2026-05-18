@@ -18,6 +18,7 @@ impl WgpuRenderer {
         silhouette: &bool,
         obj3d_primitive_slot: &mut rustc_hash::FxHashMap<crate::render::primitive::MeshId, usize>,
         object3d_draw_list: &mut Vec<(DrawKind, usize)>,
+        shadow: &mut Option<&mut super::shadow_setup::Object3dShadowCtx<'_>>,
     ) {
         let view_proj_arr = camera.view_proj_arr;
         let w = camera.w;
@@ -143,6 +144,12 @@ impl WgpuRenderer {
         } else {
             inst.write_uniform_with_decal(&self.queue, view_proj_arr, model, params, has_decal);
         }
+        self.write_lit_mesh_shadow(
+            shadow,
+            &self.primitive_instances.get(shape).unwrap()[slot_i],
+            model,
+            params.kind,
+        );
         self.last_debug_pickables
             .push((arrange_name, model, glam::Vec3::splat(0.5), 0.0));
         // Screen-space rect for focus/hover hit
@@ -247,6 +254,13 @@ impl WgpuRenderer {
                 model,
                 rails_mesh.default_material,
                 false,
+            );
+            let rails_kind = rails_mesh.default_material.kind;
+            self.write_lit_mesh_shadow(
+                shadow,
+                &self.primitive_instances[&MeshId::CabinetRails][rails_slot],
+                model,
+                rails_kind,
             );
             object3d_draw_list.push((DrawKind::Primitive(MeshId::CabinetRails), rails_slot));
         }

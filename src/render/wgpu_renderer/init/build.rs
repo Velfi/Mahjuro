@@ -1734,9 +1734,9 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             module: &shadow_shader,
             entry_point: Some("vs_main"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
-            // Match the lit_mesh / tile_glb vertex stride so a single
-            // pipeline can render either caster type. Only attribute 0
-            // (position) is read by the shader.
+            // Match lit_mesh / tile_glb / room-GLB vertex stride so one
+            // pipeline can render any caster. Only attribute 0 (position)
+            // is read by the shader.
             buffers: &[wgpu::VertexBufferLayout {
                 array_stride: std::mem::size_of::<Vertex3dTex>() as wgpu::BufferAddress,
                 step_mode: wgpu::VertexStepMode::Vertex,
@@ -2702,9 +2702,13 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                         })
                     })
                     .collect();
+                let (shadow_uniform_buffer, shadow_bind_group) =
+                    create_room_env_shadow_gpu(&device, &shadow_caster_layout, "shop-env-shadow");
                 gpu_wrap = Some(ShopEnvironmentGpu {
                     uniform_buffer,
                     distortion_buffer,
+                    shadow_uniform_buffer,
+                    shadow_bind_group,
                     bind_groups,
                     archive_sign_decal_texture: None,
                     shop_candle_sss_texture: shop_candle_sss_tex.map(|(t, _)| t),
@@ -2905,9 +2909,16 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                         })
                     })
                     .collect();
+                let (shadow_uniform_buffer, shadow_bind_group) = create_room_env_shadow_gpu(
+                    &device,
+                    &shadow_caster_layout,
+                    "hallway-env-shadow",
+                );
                 gpu_wrap = Some(ShopEnvironmentGpu {
                     uniform_buffer,
                     distortion_buffer,
+                    shadow_uniform_buffer,
+                    shadow_bind_group,
                     bind_groups,
                     archive_sign_decal_texture: None,
                     shop_candle_sss_texture: None,
@@ -3158,9 +3169,13 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     })
                 })
                 .collect();
+            let (shadow_uniform_buffer, shadow_bind_group) =
+                create_room_env_shadow_gpu(&device, &shadow_caster_layout, "archive-env-shadow");
             gpu_wrap = Some(ShopEnvironmentGpu {
                 uniform_buffer,
                 distortion_buffer,
+                shadow_uniform_buffer,
+                shadow_bind_group,
                 bind_groups,
                 archive_sign_decal_texture: Some(archive_sign_decal_tex),
                 shop_candle_sss_texture: None,
@@ -3361,9 +3376,16 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                         })
                     })
                     .collect();
+                let (shadow_uniform_buffer, shadow_bind_group) = create_room_env_shadow_gpu(
+                    &device,
+                    &shadow_caster_layout,
+                    "main_menu-env-shadow",
+                );
                 gpu_wrap = Some(ShopEnvironmentGpu {
                     uniform_buffer,
                     distortion_buffer,
+                    shadow_uniform_buffer,
+                    shadow_bind_group,
                     bind_groups,
                     archive_sign_decal_texture: None,
                     shop_candle_sss_texture: None,

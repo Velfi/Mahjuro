@@ -34,6 +34,62 @@ impl TileOccludersBuf {
             }; MAX_TILE_OCCLUDERS],
         }
     }
+
+    /// World-space AABBs from imported room collision meshes for punctual ray tests in
+    /// `room_glb.wgsl` (largest volumes first, capped at [`MAX_TILE_OCCLUDERS`]).
+    pub(crate) fn from_room_collision_meshes(
+        model: glam::Mat4,
+        meshes: &[crate::render::room_env_gltf::RoomCollisionMesh],
+    ) -> Self {
+        let mut ranked: Vec<(f32, TileOccluderGpu)> = Vec::new();
+        for mesh in meshes {
+            if mesh.node_name.starts_with("light_") {
+                continue;
+            }
+            let (center, half) = room_collision_mesh_world_aabb(mesh, model);
+            if !half.is_finite() || half.max_element() < 1e-5 {
+                continue;
+            }
+            let volume = half.x * half.y * half.z;
+            ranked.push((
+                volume,
+                TileOccluderGpu {
+                    center: [center.x, center.y, center.z, 0.0],
+                    half_extents: [half.x, half.y, half.z, 0.0],
+                },
+            ));
+        }
+        ranked.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let mut occ = Self::empty();
+        let take = ranked.len().min(MAX_TILE_OCCLUDERS);
+        for (i, (_, b)) in ranked.into_iter().take(take).enumerate() {
+            occ.boxes[i] = b;
+        }
+        occ.count[0] = take as u32;
+        occ
+    }
+}
+
+#[inline]
+fn room_collision_mesh_world_aabb(
+    mesh: &crate::render::room_env_gltf::RoomCollisionMesh,
+    model: glam::Mat4,
+) -> (glam::Vec3, glam::Vec3) {
+    let mut lo = glam::Vec3::splat(f32::INFINITY);
+    let mut hi = glam::Vec3::splat(f32::NEG_INFINITY);
+    for tri in &mesh.triangles {
+        for p in tri {
+            let w = model.transform_point3(*p);
+            lo = lo.min(w);
+            hi = hi.max(w);
+        }
+    }
+    if !lo.is_finite() {
+        return (glam::Vec3::ZERO, glam::Vec3::ZERO);
+    }
+    let half = (hi - lo) * 0.5 * 1.03;
+    let center = (lo + hi) * 0.5;
+    (center, half)
 }
 
 /// CPU-side description of a point light. Scenes add these via

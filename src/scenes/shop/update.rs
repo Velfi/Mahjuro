@@ -102,6 +102,15 @@ impl ShopScene {
         None
     }
 
+    /// Advance [`ShopScene::age_secs`] while the storeroom is suspended under
+    /// [`ShopInspectPresenter`] so stock bob keeps running on non-inspected items.
+    pub fn tick_suspended_animation_clock(&mut self) {
+        let now = Instant::now();
+        let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
+        self.last_frame = now;
+        self.age_secs += dt;
+    }
+
     pub(super) fn update_impl(&mut self, mut ctx: UpdateCtx<'_>) -> SceneTransition {
         let shop = GameEngine::read_shop(ctx.run);
         let now = Instant::now();

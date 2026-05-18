@@ -5,10 +5,27 @@ use crate::core::debuff::TileDebuff;
 use crate::core::relic::RelicFlavorSpan;
 use crate::core::tile::{Suit, Tile, TileEnhancement};
 use crate::render::theme::{color, typography};
-use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
+use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, TextAlign, TextLabel};
 use crate::ui::colored_keywords;
 use crate::ui::tooltip::{self, push_tooltip_frame_quads};
 use crate::ui::widget;
+
+/// Rough line count for relic flavor layout (matches bottom-aligned raster band).
+fn estimated_flavor_line_count(
+    spans: &[RelicFlavorSpan],
+    band_w: f32,
+    body_px: f32,
+    max_lines: usize,
+) -> usize {
+    let char_count: usize = spans.iter().map(|s| s.text.chars().count()).sum();
+    let explicit_lines: usize = spans
+        .iter()
+        .map(|s| s.text.matches('\n').count() + 1)
+        .sum();
+    let chars_per_line = (band_w / (body_px * 0.52)).max(18.0) as usize;
+    let wrapped_lines = char_count.div_ceil(chars_per_line).max(1);
+    explicit_lines.max(wrapped_lines).clamp(1, max_lines)
+}
 
 /// Focus inspect: title, optional accent line (price/tier/CTA), and description in a screen-space
 /// panel ([`tooltip`] brass + midnight frame), anchored to `anchor_rect` when provided.
@@ -200,6 +217,7 @@ pub fn push_focus_tooltip_panel_2d(
 ///
 /// `extra_bottom_reserve` lifts the band upward (e.g. leave room for shop inspect hints).
 pub fn push_floating_relic_flavor_labels(
+    gradient_quads: &mut Vec<GradientQuadInstance>,
     texts: &mut Vec<TextLabel>,
     window_w: f32,
     window_h: f32,
@@ -220,6 +238,28 @@ pub fn push_floating_relic_flavor_labels(
         .max(body_px * 2.0);
     let bottom_margin = window_h * 0.055 + extra_bottom_reserve.max(0.0);
     let top = window_h - bottom_margin - band_h;
+
+    // Flavor rasterizes bottom-aligned in `band_h`; size the shadow to the copy,
+    // not the full band, so diffuse ink does not float above short quotes.
+    let content_lines = estimated_flavor_line_count(flavor, band_w, body_px, max_lines);
+    let content_h = line_step * content_lines as f32 + body_px * 0.2;
+    let pad_x = band_w * 0.10;
+    let pad_top = body_px * 0.45;
+    let pad_bottom = band_h * 0.22;
+    let shadow_h = content_h + pad_top + pad_bottom;
+    let shadow_bottom = top + band_h + pad_bottom * 0.25 + line_step;
+    let shadow_top = shadow_bottom - shadow_h;
+    gradient_quads.push(GradientQuadInstance {
+        rect: [
+            left - pad_x,
+            shadow_top,
+            band_w + 2.0 * pad_x,
+            shadow_h,
+        ],
+        color: color::alpha(color::LACQUER, 0.82),
+        feather: [0.48, 0.12, 0.0, 0.0],
+    });
+
     texts.push(TextLabel {
         rect: [left, top, band_w, band_h],
         text: String::new(),

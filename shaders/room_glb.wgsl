@@ -207,6 +207,49 @@ struct PointLights {
 
 @group(1) @binding(0) var<uniform> lights: PointLights;
 
+// Collision-mesh AABBs (group 1 binding 1 — same buffer as table tile occluders).
+struct RoomOccluder {
+    center: vec4<f32>,
+    half_extents: vec4<f32>,
+};
+struct RoomOccluders {
+    count: vec4<u32>,
+    boxes: array<RoomOccluder, 16>,
+};
+@group(1) @binding(1) var<uniform> room_occluders: RoomOccluders;
+
+fn room_punctual_occlusion(light_pos: vec3<f32>, frag_pos: vec3<f32>, frag_scr: vec2<f32>) -> f32 {
+    let n = room_occluders.count.x;
+    if (n == 0u) {
+        return 1.0;
+    }
+    let dir = frag_pos - light_pos;
+    let dist = length(dir);
+    if (dist < 1e-4) {
+        return 1.0;
+    }
+    let l = dir / dist;
+    // Small tangent-plane jitter so shelf edges don't alias as a hard screen-space seam.
+    let up = select(vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(0.0, 1.0, 0.0), abs(l.z) > 0.92);
+    let t1 = normalize(cross(up, l));
+    let t2 = cross(l, t1);
+    let jitter = (scene_ign(frag_scr) - 0.5) * min(dist * 0.04, 2.5);
+    let lp = light_pos + (t1 * cos(jitter * 6.2831853) + t2 * sin(jitter * 6.2831853)) * jitter;
+    let ray = frag_pos - lp;
+    let safe = ray + vec3<f32>(1e-6);
+    let inv = vec3<f32>(1.0) / safe;
+    let near_bias = 0.015;
+    let far_bias = 0.985;
+    for (var k: u32 = 0u; k < n; k = k + 1u) {
+        let c = room_occluders.boxes[k].center.xyz;
+        let h = room_occluders.boxes[k].half_extents.xyz;
+        if (scene_segment_hits_aabb(lp, inv, c, h, near_bias, far_bias)) {
+            return 0.0;
+        }
+    }
+    return 1.0;
+}
+
 struct SpotLight {
     pos: vec4<f32>,
     dir: vec4<f32>,
@@ -441,12 +484,14 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         let kS = F;
         let kD = (vec3<f32>(1.0) - kS) * (1.0 - metallic);
 
-        let diffuse = kD * albedo / PI * radiance * NdotL;
+        let has_room_occluders = select(0.0, 1.0, room_occluders.count.x > 0u);
+        let punc_vis = mix(1.0, mix(0.14, 1.0, room_punctual_occlusion(light_pos, in.world_pos, in.clip_pos.xy)), has_room_occluders);
+        let diffuse = kD * albedo / PI * radiance * NdotL * punc_vis;
 
         let D = distribution_ggx(NdotH, roughness);
         let G = geometry_smith(NdotV, NdotL, roughness);
         let spec_brdf = D * G * F / max(4.0 * NdotV * NdotL, 1e-6);
-        let specular = spec_brdf * radiance * NdotL;
+        let specular = spec_brdf * radiance * NdotL * punc_vis;
 
         Lo = Lo + diffuse + specular;
     }
@@ -483,12 +528,14 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         let kS = F;
         let kD = (vec3<f32>(1.0) - kS) * (1.0 - metallic);
 
-        let diffuse = kD * albedo / PI * radiance * NdotL;
+        let has_room_occluders = select(0.0, 1.0, room_occluders.count.x > 0u);
+        let punc_vis = mix(1.0, mix(0.14, 1.0, room_punctual_occlusion(s.pos.xyz, in.world_pos, in.clip_pos.xy)), has_room_occluders);
+        let diffuse = kD * albedo / PI * radiance * NdotL * punc_vis;
 
         let D = distribution_ggx(NdotH, roughness);
         let G = geometry_smith(NdotV, NdotL, roughness);
         let spec_brdf = D * G * F / max(4.0 * NdotV * NdotL, 1e-6);
-        let specular = spec_brdf * radiance * NdotL;
+        let specular = spec_brdf * radiance * NdotL * punc_vis;
 
         Lo = Lo + diffuse + specular;
     }
@@ -519,24 +566,17 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     );
 
     // `tile_seed` is scene exposure for punctual/ambient PBR (often ≪ 1). glTF emissive is
-    // already outgoing radiance; scaling it by the same crush makes lamps invisible.
-    var hdr = (ambient + Lo + metal_hemi) * cam.tile_seed;
-    hdr = hdr + emissive;
+    // already outgoing radiance — do not shadow it.
+    var lit_hdr = (ambient + Lo + metal_hemi) * cam.tile_seed;
+    // Shared directional shadow map (props + room self-shadow in key-light space).
+    lit_hdr = lit_hdr * sample_shadow_visibility(in.world_pos);
+    var hdr = lit_hdr + emissive;
 
     // Shop candle wax: offline SSS bake on `TEXCOORD_1` stored in `in.uv` (`decal_tex`, linear RGB).
     if (is_candle_sss_bake) {
         let baked_sss = textureSample(decal_tex, base_sampler, in.uv).rgb;
         hdr = hdr + baked_sss * cam.tile_seed;
     }
-
-    // Gameplay shadow map is ortho-fit around the mahjong table near the origin.
-    // shop.glb uses the same Z-up frame but geometry is scaled by `window_h`, so
-    // light-space coverage is meaningless here and PCF often zeros the room.
-    let gameplay_shadow = sample_shadow_visibility(in.world_pos);
-    // `clamp(gs+1,1,2) - gs` is always 1.0 but keeps the shadow sample live for the layout.
-    let shadow_neutral =
-        clamp(gameplay_shadow + 1.0, 1.0, 2.0) - gameplay_shadow;
-    hdr = hdr * shadow_neutral;
 
     return ShopShaded(hdr, emissive, out_alpha);
 }

@@ -1,7 +1,7 @@
 // Procedural rainfall vignette for the main-menu exterior.
 //
-// Fullscreen triangle — no vertex buffers. Cool streaks fall down-screen with
-// a steady rightward lean (wind); a faint lower mist softens the waterfront mood.
+// Fullscreen triangle — no vertex buffers. Mostly vertical streaks with a
+// slight random lean per drop; faint lower mist softens the waterfront mood.
 
 struct Globals {
     screen: vec2<f32>,
@@ -43,7 +43,7 @@ fn hash22(p: vec2<f32>) -> vec2<f32> {
     return fract(sin(h) * 43758.5453);
 }
 
-// Streak aligned to `fall_dir` (down-screen + wind lean).
+// Streak aligned to `fall_dir` (mostly down, slight random lean).
 fn streak_intensity(
     frac_uv: vec2<f32>,
     center: vec2<f32>,
@@ -61,11 +61,18 @@ fn streak_intensity(
     return along_mask * across_mask;
 }
 
-// Apparent fall speed in UV/s along `fall_dir` (y=0 bottom). Moderate shower:
-// near ~2.5s across frame height, mid ~3.5s, far ~5.5s (parallax).
-const SCROLL_NEAR: f32 = 0.28;
-const SCROLL_MID: f32 = 0.20;
-const SCROLL_FAR: f32 = 0.12;
+// Apparent fall speed in UV/s along `fall_dir` (y=0 bottom). Steady shower:
+// near ~1.6s across frame height, mid ~2.3s, far ~3.8s (parallax).
+const SCROLL_NEAR: f32 = 0.45;
+const SCROLL_MID: f32 = 0.32;
+const SCROLL_FAR: f32 = 0.20;
+
+// Per-drop lean in UV space (±~3°); no global wind bias.
+fn drop_fall_dir(cell: vec2<f32>, aspect: f32) -> vec2<f32> {
+    let h = hash21(cell + 59.2);
+    let lean = (h - 0.5) * 0.06 * aspect;
+    return normalize(vec2<f32>(lean, -1.0));
+}
 
 fn rain_layer(
     uv: vec2<f32>,
@@ -75,11 +82,10 @@ fn rain_layer(
     half_w: f32,
     scroll: f32,
     time: f32,
-    fall_dir: vec2<f32>,
+    aspect: f32,
 ) -> f32 {
-    // `fall_dir` is velocity (down = −Y in UV). Advect field: uv + v*t.
-    let d = normalize(fall_dir);
-    let scrolled = uv + time * scroll * d;
+    // Vertical advection; streak tilt is per-drop below.
+    let scrolled = uv + time * scroll * vec2<f32>(0.0, -1.0);
     let grid_uv = scrolled * scale;
     let cell = floor(grid_uv);
     let frac_uv = fract(grid_uv);
@@ -89,6 +95,7 @@ fn rain_layer(
         return 0.0;
     }
 
+    let drop_dir = drop_fall_dir(cell, aspect);
     let phase = hash21(cell + 91.7) * 6.2831853;
     let sway = sin(time * (0.5 + rng.y * 0.7) + phase) * (0.02 + hash21(cell + 33.1) * 0.02);
     // In-cell drift tracks layer scroll (no extra speed on top of field motion).
@@ -98,7 +105,7 @@ fn rain_layer(
     let center = vec2<f32>(0.12 + rng.x * 0.76 + sway, local_y);
 
     let fade = smoothstep(0.0, 0.2, local_y) * smoothstep(1.0, 0.78, local_y);
-    let streak = streak_intensity(frac_uv, center, half_len, half_w, fall_dir);
+    let streak = streak_intensity(frac_uv, center, half_len, half_w, drop_dir);
     let shimmer = 0.82 + 0.18 * sin(time * (4.0 + rng.x * 3.0) + phase);
     return streak * fade * shimmer;
 }
@@ -139,12 +146,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let uv = in.uv;
     let t = globals.time;
     let aspect = globals.screen.x / max(globals.screen.y, 1.0);
-    // UV: y=0 bottom, y=1 top. Velocity down-screen + wind lean right.
-    let fall_dir = vec2<f32>(0.20 * aspect, -1.0);
 
-    let r0 = rain_layer(uv, 22.0, 0.42, 0.24, 0.008, SCROLL_NEAR, t, fall_dir);
-    let r1 = rain_layer(uv, 38.0, 0.48, 0.17, 0.006, SCROLL_MID, t, fall_dir);
-    let r2 = rain_layer(uv, 58.0, 0.52, 0.11, 0.004, SCROLL_FAR, t, fall_dir);
+    let r0 = rain_layer(uv, 22.0, 0.42, 0.24, 0.008, SCROLL_NEAR, t, aspect);
+    let r1 = rain_layer(uv, 38.0, 0.48, 0.17, 0.006, SCROLL_MID, t, aspect);
+    let r2 = rain_layer(uv, 58.0, 0.52, 0.11, 0.004, SCROLL_FAR, t, aspect);
 
     let col0 = vec3<f32>(0.82, 0.88, 0.96);
     let col1 = vec3<f32>(0.68, 0.76, 0.88);
