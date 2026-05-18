@@ -2,8 +2,7 @@
 //!
 //! Probes are filled once by `mahjuro bake-room-gi` and uploaded at runtime so the
 //! per-frame `emissive-probe-update` compute pass can be skipped on static room views.
-//! Dynamic updates resume when [`crate::render::draw_cmd::UiFrame::room_gi_dynamic`] is set
-//! (shop item inspect dolly / orbit).
+//! Dynamic updates resume when [`crate::render::draw_cmd::UiFrame::room_gi_dynamic`] is set.
 //!
 //! **Rebake** after changing room GLB layout, probe grid, or
 //! [`crate::render::room_glb::ROOM_EMISSIVE_PROBE_DIR_SAMPLES`] /

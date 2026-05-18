@@ -540,6 +540,12 @@ impl App {
                 return Ok(());
             }
         }
+        if let Some(ref mut o) = self.debug.rain_debug_overlay {
+            let ctrl = mod_ctrl(self.modifiers) || mod_gui(self.modifiers);
+            if o.feed_key_event(scancode, ctrl) {
+                return Ok(());
+            }
+        }
 
         // Arrange mode: Escape while waiting for a click exits the
         // mode entirely.

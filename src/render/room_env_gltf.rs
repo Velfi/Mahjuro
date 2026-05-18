@@ -98,6 +98,7 @@ pub struct RoomGltfEmbeddedPointLight {
     pub pos_doc: Vec3,
     pub color_linear: [f32; 3],
     pub is_candle: bool,
+    pub is_lantern: bool,
     pub intensity: f32,
     pub range_doc: Option<f32>,
 }
@@ -109,6 +110,7 @@ pub struct RoomGltfEmbeddedSpotLight {
     pub dir_doc: Vec3,
     pub color_linear: [f32; 3],
     pub is_candle: bool,
+    pub is_lantern: bool,
     pub intensity: f32,
     pub range_doc: Option<f32>,
     pub inner_cone_rad: f32,
@@ -836,6 +838,7 @@ pub fn harvest_khr_punctual_light(
     light: gltf::khr_lights_punctual::Light<'_>,
     node_name: &str,
     candle_node_prefix: &str,
+    lantern_node_prefix: &str,
     log_asset_label: &str,
     points: &mut Vec<RoomGltfEmbeddedPointLight>,
     spots: &mut Vec<RoomGltfEmbeddedSpotLight>,
@@ -844,6 +847,7 @@ pub fn harvest_khr_punctual_light(
 
     let color_linear = light.color();
     let is_candle = node_name.starts_with(candle_node_prefix);
+    let is_lantern = node_name.starts_with(lantern_node_prefix);
     let intensity = light.intensity();
     let range_doc = light.range();
 
@@ -855,6 +859,7 @@ pub fn harvest_khr_punctual_light(
                 pos_doc,
                 color_linear,
                 is_candle,
+                is_lantern,
                 intensity,
                 range_doc,
             });
@@ -881,6 +886,7 @@ pub fn harvest_khr_punctual_light(
                 dir_doc,
                 color_linear,
                 is_candle,
+                is_lantern,
                 intensity,
                 range_doc,
                 inner_cone_rad: inner_rad,
@@ -911,6 +917,8 @@ pub enum RoomMeshPolicy {
     SkipDrawCollisionIfMarker,
     /// Visible mesh plus collision tris + marker bounds union (diegetic buttons).
     EnvironmentDrawWithCollision,
+    /// Invisible rain-impact shell (`rain_hit_*` nodes): collision tris only, no draw.
+    RainSurfaceCollision,
 }
 
 /// Per-asset rules for [`walk_room_env_node`].
@@ -927,10 +935,12 @@ pub trait RoomEnvWalkHooks {
 /// Mutable harvest targets for [`walk_room_env_node`].
 pub struct RoomEnvWalkState<'a> {
     pub candle_node_prefix: &'a str,
+    pub lantern_node_prefix: &'a str,
     pub markers: &'a mut FxHashMap<String, Mat4>,
     pub env_primitives: &'a mut Vec<RoomEnvPrimitiveCpu>,
     pub marker_mesh_bounds_doc: &'a mut FxHashMap<String, RoomEnvironmentBounds>,
     pub collision_meshes: &'a mut Vec<RoomCollisionMesh>,
+    pub rain_surface_meshes: &'a mut Vec<RoomCollisionMesh>,
     pub embedded_cameras: &'a mut EmbeddedCameraHarvest,
     pub embedded_point_lights: &'a mut Vec<RoomGltfEmbeddedPointLight>,
     pub embedded_spot_lights: &'a mut Vec<RoomGltfEmbeddedSpotLight>,
@@ -955,6 +965,7 @@ pub fn walk_room_env_node(
             light,
             name,
             state.candle_node_prefix,
+            state.lantern_node_prefix,
             label,
             state.embedded_point_lights,
             state.embedded_spot_lights,
@@ -1029,6 +1040,21 @@ pub fn walk_room_env_node(
                         merge_marker_mesh_bounds(state.marker_mesh_bounds_doc, name, &decoded);
                     }
                     state.env_primitives.push(decoded);
+                }
+            }
+            RoomMeshPolicy::RainSurfaceCollision => {
+                let mut tris = Vec::new();
+                for prim in mesh.primitives() {
+                    match decode_collision_triangles(prim, world, state.buffers) {
+                        Ok(chunk) => tris.extend(chunk),
+                        Err(e) => log::warn!("{label} node {:?} rain surface: {e:#}", name),
+                    }
+                }
+                if !tris.is_empty() {
+                    state.rain_surface_meshes.push(RoomCollisionMesh {
+                        node_name: name.to_string(),
+                        triangles: tris,
+                    });
                 }
             }
         }

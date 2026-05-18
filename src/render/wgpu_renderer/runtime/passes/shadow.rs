@@ -40,9 +40,11 @@ impl WgpuRenderer {
         });
         shadow_pass.set_pipeline(&self.shadow_pipeline);
 
+        let shop_inspect_shadow_only = frame.shop_inspect_shadow_target.is_some();
+
         // Imported room GLB — opaque primitives only (blend/glass skipped).
         match super::shadow_setup::active_room_env(frame) {
-            Some(ActiveRoomEnv::Shop) => {
+            Some(ActiveRoomEnv::Shop) if !shop_inspect_shadow_only => {
                 if let Some(ref gpu) = self.shop_environment {
                     self.draw_gltf_room_env_shadow(
                         &mut shadow_pass,
@@ -52,6 +54,7 @@ impl WgpuRenderer {
                     );
                 }
             }
+            Some(ActiveRoomEnv::Shop) => {}
             Some(ActiveRoomEnv::Hallway) => {
                 if let Some(ref gpu) = self.hallway_environment {
                     self.draw_gltf_room_env_shadow(
@@ -85,7 +88,13 @@ impl WgpuRenderer {
             None => {}
         }
 
+        shadow_pass.set_pipeline(&self.shadow_pipeline);
         for &(kind, slot_i) in object3d_draw_list {
+            if shop_inspect_shadow_only
+                && self.shop_inspect_subject_shadow_slot != Some((kind, slot_i))
+            {
+                continue;
+            }
             self.draw_object3d_shadow_entry(&mut shadow_pass, frame, kind, slot_i);
         }
 

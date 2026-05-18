@@ -1109,7 +1109,9 @@ impl WgpuRenderer {
         let light_view_proj_arr = shadow_frame.light_view_proj_arr;
         let shadow_just_enabled = shadows_enabled && !self.prev_frame_shadows_enabled;
         self.prev_frame_shadows_enabled = shadows_enabled;
-        let mut shadow_uniforms_changed = shadow_just_enabled;
+        let shadow_light_changed = self.cached_shadow_light_view_proj != light_view_proj_arr;
+        self.cached_shadow_light_view_proj = light_view_proj_arr;
+        let mut shadow_uniforms_changed = shadow_just_enabled || shadow_light_changed;
         let mut object3d_shadow = shadows_enabled.then(|| super::shadow_setup::Object3dShadowCtx {
             light_view_proj: light_view_proj_arr,
             changed: &mut shadow_uniforms_changed,
@@ -1208,11 +1210,14 @@ impl WgpuRenderer {
         );
 
         if ops_flags.shop_env {
+            let shop_room_shadow = (shadows_enabled
+                && frame.shop_inspect_shadow_target.is_none())
+            .then(|| (light_view_proj_arr, &mut shadow_uniforms_changed));
             self.write_shop_environment_uniforms(
                 frame,
                 &camera,
                 false,
-                shadows_enabled.then(|| (light_view_proj_arr, &mut shadow_uniforms_changed)),
+                shop_room_shadow,
             );
             if frame.scene_lighting.embedded_gltf_punctual {
                 self.write_shop_room_punctual_occluders(&camera);

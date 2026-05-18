@@ -189,6 +189,11 @@ impl WgpuRenderer {
                 _globals_pad: [0.0; 3],
             }),
         );
+        self.queue.write_buffer(
+            &self.rain_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&self.rain_tuning.to_gpu()),
+        );
 
         // Gameplay / artist-style point lights (group 1 for tiles + lit_mesh).
         let pl_w = self.size.width.max(1) as f32;

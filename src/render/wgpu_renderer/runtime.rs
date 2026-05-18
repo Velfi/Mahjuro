@@ -16,7 +16,8 @@ use passes_process_op::ProcessOpCtx;
 mod op_list;
 #[path = "runtime/passes/shadow.rs"]
 mod passes_shadow;
-use op_list::{DrawKind, RenderOp, TextDraw};
+pub(crate) use op_list::DrawKind;
+use op_list::{RenderOp, TextDraw};
 mod frame;
 use frame::RenderFrame;
 mod render;

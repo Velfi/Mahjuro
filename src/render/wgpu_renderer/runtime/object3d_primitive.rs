@@ -32,6 +32,7 @@ impl WgpuRenderer {
         let cursor = obj3d_primitive_slot.entry(*shape).or_insert(0);
         let slot_i = *cursor;
         *cursor += 1;
+        self.shadow_placement_anim_id = obj.anim_id;
         // Lazily grow the per-shape instance pool.
         // When a per-shape texture override is
         // registered, bind it to the instance's
@@ -144,12 +145,15 @@ impl WgpuRenderer {
         } else {
             inst.write_uniform_with_decal(&self.queue, view_proj_arr, model, params, has_decal);
         }
-        self.write_lit_mesh_shadow(
-            shadow,
-            &self.primitive_instances.get(shape).unwrap()[slot_i],
-            model,
-            params.kind,
-        );
+        self.register_placement_shadow_slot(DrawKind::Primitive(*shape), slot_i);
+        if self.placement_shadow_writes(frame) {
+            self.write_lit_mesh_shadow(
+                shadow,
+                &self.primitive_instances.get(shape).unwrap()[slot_i],
+                model,
+                params.kind,
+            );
+        }
         self.last_debug_pickables
             .push((arrange_name, model, glam::Vec3::splat(0.5), 0.0));
         // Screen-space rect for focus/hover hit
@@ -256,12 +260,15 @@ impl WgpuRenderer {
                 false,
             );
             let rails_kind = rails_mesh.default_material.kind;
-            self.write_lit_mesh_shadow(
-                shadow,
-                &self.primitive_instances[&MeshId::CabinetRails][rails_slot],
-                model,
-                rails_kind,
-            );
+            self.register_placement_shadow_slot(DrawKind::Primitive(MeshId::CabinetRails), rails_slot);
+            if self.placement_shadow_writes(frame) {
+                self.write_lit_mesh_shadow(
+                    shadow,
+                    &self.primitive_instances[&MeshId::CabinetRails][rails_slot],
+                    model,
+                    rails_kind,
+                );
+            }
             object3d_draw_list.push((DrawKind::Primitive(MeshId::CabinetRails), rails_slot));
         }
     }

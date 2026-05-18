@@ -369,6 +369,44 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         bind_group_layouts: &[Some(&globals_layout), Some(&moon_albedo_tex_layout)],
         immediate_size: 0,
     });
+    let rain_uniform_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("rain-uniform-layout"),
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }],
+    });
+    let rain_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("rain-pl"),
+        bind_group_layouts: &[Some(&globals_layout), Some(&rain_uniform_layout)],
+        immediate_size: 0,
+    });
+    let rain_uniform_default = crate::render::rain_tuning::RainTuning::shipping_default().to_gpu();
+    let rain_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("rain-uniform-buffer"),
+        size: std::mem::size_of::<crate::render::rain_tuning::RainGpuUniform>() as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    queue.write_buffer(
+        &rain_uniform_buffer,
+        0,
+        bytemuck::bytes_of(&rain_uniform_default),
+    );
+    let rain_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("rain-uniform-bg"),
+        layout: &rain_uniform_layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: rain_uniform_buffer.as_entire_binding(),
+        }],
+    });
     let (_moon_albedo_texture, moon_albedo_view) =
         load_metal_heightmap(&device, &queue, "textures/moon_albedo.png", "moon-albedo");
     let moon_albedo_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -889,7 +927,47 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
 
     let starfield_pipeline = vignette_pipeline("starfield-pipeline", &starfield_shader);
     let ember_drift_pipeline = vignette_pipeline("ember-drift-pipeline", &ember_drift_shader);
-    let rain_pipeline = vignette_pipeline("rain-pipeline", &rain_shader);
+    let rain_pipeline = {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("rain-pipeline"),
+            layout: Some(&rain_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &rain_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &rain_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: scene_hdr_format,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: Some(depth_ui.clone()),
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        })
+    };
     let golden_dust_pipeline = vignette_pipeline("golden-dust-pipeline", &golden_dust_shader);
     // moonlit_water gets its own pipeline so it can bind the moon albedo
     // texture at group 1 in addition to the globals at group 0.
@@ -1752,6 +1830,35 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             topology: wgpu::PrimitiveTopology::TriangleList,
             front_face: wgpu::FrontFace::Ccw,
             cull_mode: Some(wgpu::Face::Front),
+            ..Default::default()
+        },
+        depth_stencil: Some(shadow_depth_state.clone()),
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    });
+    let shadow_pipeline_room_env = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("shadow-pipeline-room-env"),
+        layout: Some(&shadow_pl),
+        vertex: wgpu::VertexState {
+            module: &shadow_shader,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<Vertex3dTex>() as wgpu::BufferAddress,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &[wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 0,
+                    format: wgpu::VertexFormat::Float32x3,
+                }],
+            }],
+        },
+        fragment: None,
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: None,
             ..Default::default()
         },
         depth_stencil: Some(shadow_depth_state),
@@ -3934,6 +4041,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         starfield_pipeline,
         ember_drift_pipeline,
         rain_pipeline,
+        rain_uniform_buffer,
+        rain_bind_group,
         golden_dust_pipeline,
         moonlit_water_pipeline,
         moon_albedo_bind_group,
@@ -4060,7 +4169,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         orb_instances,
         dora_plinth_instances,
         last_ribbon_models: Vec::new(),
-        last_ribbon_slot_count: 0,
         last_ribbon_batch_slot_counts: Vec::new(),
         last_talisman_models: Vec::new(),
         last_aux_dish_aabbs: Vec::new(),
@@ -4112,6 +4220,9 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         prev_tile_world: rustc_hash::FxHashMap::default(),
         tile_uid_scratch: rustc_hash::FxHashSet::default(),
         prev_frame_shadows_enabled: false,
+        cached_shadow_light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
+        shop_inspect_subject_shadow_slot: None,
+        shadow_placement_anim_id: 0,
         showcase_decal_atlas: None,
         showcase_decal_atlas_tileset: None,
         lit_mesh_material_layout,
@@ -4190,6 +4301,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         tonemap_vhs_grain: 0.020,
         tonemap_vhs_vignette: 0.100,
         tonemap_film_grain: TonemapTuning::shipping_default().film_grain,
+        rain_tuning: crate::render::rain_tuning::RainTuning::load(),
         lit_mesh_pipeline,
         lit_mesh_blended_pipeline,
         lit_mesh_white_view,
@@ -4216,6 +4328,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         shadow_globals_buffer,
         shadow_sample_bind_group,
         shadow_pipeline,
+        shadow_pipeline_room_env,
         gpu_profiler,
         pending_screenshot: std::cell::Cell::new(None),
     })

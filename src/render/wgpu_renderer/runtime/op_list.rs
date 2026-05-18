@@ -80,7 +80,7 @@ pub(super) enum RenderOp {
 /// Keeping this as an enum (rather than raw u8 ids) means the compiler
 /// catches any collision or missing dispatch arm.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum DrawKind {
+pub(crate) enum DrawKind {
     YakuTablet,
     WoodTablet,
     Book,

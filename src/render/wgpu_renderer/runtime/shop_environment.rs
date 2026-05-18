@@ -222,6 +222,7 @@ impl WgpuRenderer {
         if prims.is_empty() {
             return;
         }
+        pass.set_pipeline(&self.shadow_pipeline_room_env);
         pass.set_bind_group(0, &gpu.shadow_bind_group, &[]);
         for (pi, prim) in prims.iter().enumerate() {
             if skip_prim(pi) || prim.pipeline_key.is_blend() {

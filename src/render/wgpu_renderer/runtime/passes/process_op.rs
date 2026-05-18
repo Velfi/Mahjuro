@@ -123,8 +123,14 @@ impl WgpuRenderer {
                 pass.draw(0..3, 0..1);
             }
             RenderOp::Rain => {
+                self.queue.write_buffer(
+                    &self.rain_uniform_buffer,
+                    0,
+                    bytemuck::bytes_of(&self.rain_tuning.to_gpu()),
+                );
                 pass.set_pipeline(&self.rain_pipeline);
                 pass.set_bind_group(0, &self.globals_bind_group, &[]);
+                pass.set_bind_group(1, &self.rain_bind_group, &[]);
                 pass.draw(0..3, 0..1);
             }
             RenderOp::GoldenDust => {

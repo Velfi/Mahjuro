@@ -5,7 +5,8 @@
 use crate::audio;
 use crate::game::cascade::CascadeTuning;
 use crate::game::scene_look_tuning::{
-    self, SceneLookTuning, SceneLookTuningSet, SCENE_LOOK_SLIDER_COUNT, SCENE_LOOK_SLIDER_META,
+    self, hue_wheel_preview_linear, SceneLookTuning,
+    SceneLookTuningSet, SCENE_LOOK_SLIDER_COUNT, SCENE_LOOK_SLIDER_META,
 };
 use crate::game::tonemap_tuning::FALLBACK_SCENE_KEY;
 use crate::render::draw_cmd::CameraParams;
@@ -1191,19 +1192,39 @@ impl SceneLookDebugOverlay {
     }
 
     fn begin_editing(&mut self) {
-        let v = self.row_value(self.cursor);
-        let mut s = format!("{:.6}", v);
-        while s.contains('.') && (s.ends_with('0') || s.ends_with('.')) {
-            s.pop();
-        }
-        self.edit_buffer = s;
+        let row = self.cursor;
+        let v = self.row_value(row);
+        self.edit_buffer = if scene_look_tuning::scene_look_row_is_hue(row) {
+            format!("{}", (v * 360.0).round() as i32)
+        } else if scene_look_tuning::scene_look_row_is_saturation(row) {
+            format!("{:.0}", v * 100.0)
+        } else {
+            let mut s = format!("{:.6}", v);
+            while s.contains('.') && (s.ends_with('0') || s.ends_with('.')) {
+                s.pop();
+            }
+            s
+        };
         self.editing = true;
     }
 
     fn commit_edit(&mut self) {
         let row = self.cursor.min(self.row_count().saturating_sub(1));
         let t = self.edit_buffer.trim();
-        if let Ok(v) = t.parse::<f32>() {
+        let parsed = if scene_look_tuning::scene_look_row_is_hue(row) {
+            t.parse::<f32>()
+                .ok()
+                .map(|deg| (deg / 360.0).fract())
+                .or_else(|| t.parse::<f32>().ok().map(|h| h.fract()))
+        } else if scene_look_tuning::scene_look_row_is_saturation(row) {
+            t.trim_end_matches('%')
+                .parse::<f32>()
+                .ok()
+                .map(|pct| (pct / 100.0).clamp(0.0, 1.0))
+        } else {
+            t.parse::<f32>().ok()
+        };
+        if let Some(v) = parsed {
             self.set_row_value(row, v);
         }
         self.clear_edit();
@@ -1247,6 +1268,7 @@ impl SceneLookDebugOverlay {
                 "        lit_mesh_gltf_punctual_scale: {:.6},\n",
                 "        gltf_emissive_scale: {:.6},\n",
                 "        candle_light_color_mul: [{:.6}, {:.6}, {:.6}],\n",
+                "        lantern_light_color_mul: [{:.6}, {:.6}, {:.6}],\n",
                 "        ..RoomEnvLightingTune::SOURCE_DEFAULTS\n",
                 "    }},\n",
                 "}}\n",
@@ -1267,6 +1289,9 @@ impl SceneLookDebugOverlay {
             r.candle_light_color_mul[0],
             r.candle_light_color_mul[1],
             r.candle_light_color_mul[2],
+            r.lantern_light_color_mul[0],
+            r.lantern_light_color_mul[1],
+            r.lantern_light_color_mul[2],
         );
         match arboard::Clipboard::new() {
             Ok(mut cb) => {
@@ -1478,12 +1503,38 @@ impl SceneLookDebugOverlay {
 
     fn format_row_display(row: usize, v: f32) -> String {
         let (_, _, _, step) = SCENE_LOOK_SLIDER_META[row];
+        if scene_look_tuning::scene_look_row_is_hue(row) {
+            return format!("{}°", (v * 360.0).round() as i32);
+        }
+        if scene_look_tuning::scene_look_row_is_saturation(row) {
+            return format!("{:.0}%", v * 100.0);
+        }
         match row {
-            12..=14 => format!("{:.3}", v),
+            14 | 17 => format!("{v:.2}"),
             1 => format!("{v:.4}"),
             _ if step >= 0.01 => format!("{v:.2}"),
             _ if step >= 0.001 => format!("{v:.3}"),
             _ => format!("{v:.4}"),
+        }
+    }
+
+    fn draw_hue_slider_track(
+        track_x: f32,
+        track_y: f32,
+        tw: f32,
+        th: f32,
+        instances: &mut Vec<GpuInstance>,
+    ) {
+        const SEGMENTS: usize = 12;
+        let seg_w = tw / SEGMENTS as f32;
+        for i in 0..SEGMENTS {
+            let h = i as f32 / SEGMENTS as f32;
+            let preview = hue_wheel_preview_linear(h);
+            instances.push(GpuInstance {
+                rect: [track_x + seg_w * i as f32, track_y, seg_w + 0.5, th],
+                color: [preview[0], preview[1], preview[2], 1.0],
+                user: 0,
+            });
         }
     }
 
@@ -1613,36 +1664,64 @@ impl SceneLookDebugOverlay {
             } else {
                 color::alpha(color::STONE, 0.95)
             };
+
+            let swatch = (14.0 * layout.scale).max(10.0);
+            let mut label_x = layout.panel_x + 6.0 * layout.scale;
+            let mut label_w = layout.label_w - 4.0 * layout.scale;
+            if let Some(rgb) = scene_look_tuning::scene_look_tint_swatch_rgb(&self.look, i) {
+                let sw_y = row_y + (layout.row_h - swatch) * 0.5;
+                instances.push(GpuInstance {
+                    rect: [label_x, sw_y, swatch, swatch],
+                    color: [rgb[0], rgb[1], rgb[2], 1.0],
+                    user: 0,
+                });
+                instances.push(GpuInstance {
+                    rect: [label_x - 1.0, sw_y - 1.0, swatch + 2.0, swatch + 2.0],
+                    color: color::alpha(color::PARCHMENT, if is_focused { 0.55 } else { 0.28 }),
+                    user: 0,
+                });
+                label_x += swatch + 4.0 * layout.scale;
+                label_w -= swatch + 4.0 * layout.scale;
+            }
             labels.push(TextLabel {
-                rect: [
-                    layout.panel_x + 6.0 * layout.scale,
-                    row_y,
-                    layout.label_w - 4.0 * layout.scale,
-                    layout.row_h,
-                ],
+                rect: [label_x, row_y, label_w, layout.row_h],
                 text: (*name).into(),
                 color: tc,
                 ..Default::default()
             });
 
             let (track_x, track_y, tw, th) = layout.slider_track(i);
-            instances.push(GpuInstance {
-                rect: [track_x, track_y, tw, th],
-                color: color::TWILIGHT_INK,
-                user: 0,
-            });
             let t = ((v - *min) / (*max - *min).max(1e-8)).clamp(0.0, 1.0);
             let fill_w = tw * t;
-            let fill_color = if is_focused {
-                color::JADE
+            if scene_look_tuning::scene_look_row_is_hue(i) {
+                Self::draw_hue_slider_track(track_x, track_y, tw, th, &mut instances);
             } else {
-                color::alpha(color::JADE, 0.7)
-            };
-            instances.push(GpuInstance {
-                rect: [track_x, track_y, fill_w, th],
-                color: fill_color,
-                user: 0,
-            });
+                instances.push(GpuInstance {
+                    rect: [track_x, track_y, tw, th],
+                    color: color::TWILIGHT_INK,
+                    user: 0,
+                });
+                let fill_color = scene_look_tuning::scene_look_tint_swatch_rgb(&self.look, i)
+                    .map(|[r, g, b]| {
+                        if is_focused {
+                            [r, g, b, 0.95]
+                        } else {
+                            [r * 0.85, g * 0.85, b * 0.85, 0.75]
+                        }
+                    })
+                    .unwrap_or_else(|| {
+                        if is_focused {
+                            color::JADE
+                        } else {
+                            color::alpha(color::JADE, 0.7)
+                        }
+                    });
+                instances.push(GpuInstance {
+                    rect: [track_x, track_y, fill_w, th],
+                    color: fill_color,
+                    user: 0,
+                });
+            }
             let knob_size = th * 2.5;
             let knob_x = track_x + fill_w - knob_size * 0.5;
             let knob_y = track_y + (th - knob_size) * 0.5;
@@ -2446,3 +2525,4 @@ impl HallwayDistortionDebugOverlay {
         (instances, labels)
     }
 }
+
