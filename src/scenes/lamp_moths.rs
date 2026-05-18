@@ -49,7 +49,7 @@ pub fn push_moths_around_lamp(
     let bulb_wz = lp[2];
     let bulb_wx = lp[0] - w * 0.5;
     let bulb_wy = h * 0.5 - lp[1];
-    let bug_body_len = h * 0.012;
+    let bug_body_len = h * 0.003;
     let flap_hz: f32 = 25.0;
     let flap_amp: f32 = 0.82;
 

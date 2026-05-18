@@ -30,6 +30,17 @@ pub const RIBBON_LENGTH_OVER_WIDTH: f32 = 3.0;
 /// modeled side strip stays visually consistent with the painted silk.
 pub const RIBBON_DEPTH_OVER_WIDTH: f32 = 0.15;
 
+/// Global size multiplier for every zodiac ribbon placement (shop, dish HUD,
+/// collection, showcase). Applied in [`zodiac_ribbon_object3d`]; use
+/// [`ribbon_display_length`] when positioning from a logical length.
+pub const RIBBON_WORLD_SCALE: f32 = 2.0;
+
+/// Logical ribbon length → world length after [`RIBBON_WORLD_SCALE`].
+#[inline]
+pub fn ribbon_display_length(length: f32) -> f32 {
+    length * RIBBON_WORLD_SCALE
+}
+
 /// Inputs for the canonical zodiac-ribbon [`Object3d`] constructor.
 ///
 /// Width and depth are derived from `length` so every ribbon placement uses
@@ -55,11 +66,12 @@ pub struct ZodiacRibbonSpec {
 /// [`RIBBON_DEPTH_OVER_WIDTH`]; this is the only place ribbon proportions
 /// should be set so all scenes stay matched to the source texture aspect.
 pub fn zodiac_ribbon_object3d(spec: ZodiacRibbonSpec) -> Object3d {
-    let width = spec.length / RIBBON_LENGTH_OVER_WIDTH;
+    let length = ribbon_display_length(spec.length);
+    let width = length / RIBBON_LENGTH_OVER_WIDTH;
     let depth = width * RIBBON_DEPTH_OVER_WIDTH;
     Object3d {
         pos: spec.pos,
-        extents: [width, spec.length, depth],
+        extents: [width, length, depth],
         rotation: spec.rotation,
         color: spec.color,
         kind: Object3dKind::ZodiacRibbon { kind: spec.kind },

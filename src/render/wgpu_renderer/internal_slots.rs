@@ -175,6 +175,9 @@ pub(crate) struct ShopEnvironmentGpu {
     pub uniform_buffer: wgpu::Buffer,
     /// Shared by all room primitives; pick-blind uploads [`crate::render::hallway_glb::HallwayDistortion`].
     pub distortion_buffer: wgpu::Buffer,
+    /// `(light_view_proj, model)` for [`shaders/shadow.wgsl`] — one matrix for all env prims.
+    pub shadow_uniform_buffer: wgpu::Buffer,
+    pub shadow_bind_group: wgpu::BindGroup,
     pub bind_groups: Vec<wgpu::BindGroup>,
     /// Archive room only: CPU-updated decal atlas at `@group(0) @binding(3)`.
     pub archive_sign_decal_texture: Option<wgpu::Texture>,

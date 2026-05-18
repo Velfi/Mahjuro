@@ -16,6 +16,7 @@ impl WgpuRenderer {
         ops: &mut [RenderOp],
         relic_glows: &mut Vec<GpuInstance>,
         relic_debuff_markers: &mut Vec<GpuInstance>,
+        mut shadow: Option<&mut super::shadow_setup::Object3dShadowCtx<'_>>,
     ) {
         let cam_pos = camera.cam_pos;
         let look_target = camera.look_target;
@@ -133,6 +134,7 @@ impl WgpuRenderer {
                                 silhouette,
                                 &mut obj3d_primitive_slot,
                                 object3d_draw_list,
+                                &mut shadow,
                             );
                         }
                         Object3dKind::YakuTablet {
@@ -189,6 +191,12 @@ impl WgpuRenderer {
                                 material,
                                 true,
                             );
+                            self.write_lit_mesh_shadow(
+                                &mut shadow,
+                                &self.yaku_tablet_instances[slot_i],
+                                model,
+                                material.kind,
+                            );
                             self.last_debug_pickables.push((
                                 yaku_name.to_string(),
                                 model,
@@ -244,6 +252,12 @@ impl WgpuRenderer {
                                 model,
                                 self.wood_tablet_mesh.default_material,
                                 true,
+                            );
+                            self.write_lit_mesh_shadow(
+                                &mut shadow,
+                                &self.wood_tablet_instances[slot_i],
+                                model,
+                                self.wood_tablet_mesh.default_material.kind,
                             );
                             self.proj
                                 .wood_tablet_rects
@@ -335,6 +349,12 @@ impl WgpuRenderer {
                                 body_material,
                                 false,
                             );
+                            self.write_lit_mesh_shadow(
+                                &mut shadow,
+                                &self.book_instances[slot_i],
+                                base_model,
+                                body_material.kind,
+                            );
                             self.last_debug_pickables.push((
                                 book_name.clone(),
                                 base_model,
@@ -412,6 +432,12 @@ impl WgpuRenderer {
                                 cover_model,
                                 self.book_cover_mesh.default_material,
                                 true,
+                            );
+                            self.write_lit_mesh_shadow(
+                                &mut shadow,
+                                &self.book_cover_instances[slot_i],
+                                cover_model,
+                                self.book_cover_mesh.default_material.kind,
                             );
                             object3d_draw_list.push((DrawKind::BookCover, slot_i));
                         }
@@ -500,6 +526,12 @@ impl WgpuRenderer {
                                     false,
                                 );
                             }
+                            self.write_lit_mesh_shadow(
+                                &mut shadow,
+                                &self.relic_instances[slot_i],
+                                model,
+                                material.kind,
+                            );
                             // Silhouette pass skips the relic albedo/relief
                             // texture — we want the shape only, not the
                             // engraved artwork.
@@ -632,6 +664,12 @@ impl WgpuRenderer {
                                 model,
                                 material,
                                 false,
+                            );
+                            self.write_lit_mesh_shadow(
+                                &mut shadow,
+                                &self.pack_instances[slot_i],
+                                model,
+                                material.kind,
                             );
                             let want_tex = if self.pack_textures.contains_key(kind) {
                                 Some(*kind)
@@ -770,6 +808,12 @@ impl WgpuRenderer {
                                 material,
                                 kind_idx as f32,
                             );
+                            self.write_lit_mesh_shadow(
+                                &mut shadow,
+                                &self.talisman_instances[slot_i],
+                                talisman_model,
+                                material.kind,
+                            );
                             self.last_talisman_models.push(talisman_model);
                             self.proj
                                 .talisman_rects
@@ -790,6 +834,7 @@ impl WgpuRenderer {
                                 kind,
                                 &mut obj3d_ribbon_slot,
                                 object3d_draw_list,
+                                &mut shadow,
                             );
                         }
                         Object3dKind::DoraPlinth { glow } => {
@@ -845,6 +890,12 @@ impl WgpuRenderer {
                                 plinth_model,
                                 material,
                                 false,
+                            );
+                            self.write_lit_mesh_shadow(
+                                &mut shadow,
+                                &self.dora_plinth_instances[slot_i],
+                                plinth_model,
+                                material.kind,
                             );
                             // Project AABB → screen rect for hover/focus.
                             let plinth_world_center = plinth_model.w_axis.truncate();
@@ -907,6 +958,12 @@ impl WgpuRenderer {
                                 bug_model,
                                 self.bug_body_mesh.default_material,
                                 false,
+                            );
+                            self.write_lit_mesh_shadow(
+                                &mut shadow,
+                                &self.bug_body_instances[slot],
+                                bug_model,
+                                self.bug_body_mesh.default_material.kind,
                             );
                             object3d_draw_list.push((DrawKind::BugBody, slot));
                             let flap_l = glam::Mat4::from_rotation_x(*flap_rad);
@@ -973,6 +1030,12 @@ impl WgpuRenderer {
                                 model,
                                 *material,
                             );
+                            self.write_lit_mesh_shadow(
+                                &mut shadow,
+                                &self.orb_instances[slot_i],
+                                model,
+                                material.kind,
+                            );
                             object3d_draw_list.push((DrawKind::Orb, slot_i));
                         }
                         Object3dKind::Mirror {
@@ -1014,6 +1077,12 @@ impl WgpuRenderer {
                                 view_proj_arr,
                                 hover_model,
                                 self.mirror_mesh.default_material,
+                            );
+                            self.write_lit_mesh_shadow(
+                                &mut shadow,
+                                &self.mirror_instances[slot_i],
+                                hover_model,
+                                self.mirror_mesh.default_material.kind,
                             );
                             if slot_i == 0 {
                                 self.proj.mirror_rect = Some(project_aabb_rect(
@@ -1101,6 +1170,12 @@ impl WgpuRenderer {
                                 glyph_model,
                                 material,
                             );
+                            self.write_lit_mesh_shadow(
+                                &mut shadow,
+                                &self.extruded_glyph_instances[slot_i],
+                                glyph_model,
+                                material.kind,
+                            );
                             self.last_debug_pickables.push((
                                 "gameplay.score_popup".to_string(),
                                 glyph_model,
@@ -1145,6 +1220,12 @@ impl WgpuRenderer {
                                 model,
                                 material,
                             );
+                            self.write_lit_mesh_shadow(
+                                &mut shadow,
+                                &self.cascade_token_instances[slot_i],
+                                model,
+                                material.kind,
+                            );
                             self.last_debug_pickables.push((
                                 cascade_token_name.to_string(),
                                 model,
@@ -1178,11 +1259,23 @@ impl WgpuRenderer {
                                 candle_model,
                                 self.candle_wax_mesh.default_material,
                             );
+                            self.write_lit_mesh_shadow(
+                                &mut shadow,
+                                &self.candle_instances[slot_i][0],
+                                candle_model,
+                                self.candle_wax_mesh.default_material.kind,
+                            );
                             self.candle_instances[slot_i][1].write_uniform(
                                 &self.queue,
                                 view_proj_arr,
                                 candle_model,
                                 self.candle_wick_mesh.default_material,
+                            );
+                            self.write_lit_mesh_shadow(
+                                &mut shadow,
+                                &self.candle_instances[slot_i][1],
+                                candle_model,
+                                self.candle_wick_mesh.default_material.kind,
                             );
                             self.last_debug_pickables.push((
                                 candle_name,
@@ -1267,8 +1360,20 @@ impl WgpuRenderer {
                                     model,
                                     base_material,
                                 );
+                                self.write_lit_mesh_shadow(
+                                    &mut shadow,
+                                    &self.tally_stick_instances[obj3d_tally_stick_cursor],
+                                    model,
+                                    base_material.kind,
+                                );
                                 self.tally_stick_instances[obj3d_tally_stick_cursor + 1]
                                     .write_uniform(&self.queue, view_proj_arr, model, tip_material);
+                                self.write_lit_mesh_shadow(
+                                    &mut shadow,
+                                    &self.tally_stick_instances[obj3d_tally_stick_cursor + 1],
+                                    model,
+                                    tip_material.kind,
+                                );
                                 object3d_draw_list
                                     .push((DrawKind::TallyStickBase, obj3d_tally_stick_cursor));
                                 object3d_draw_list
@@ -1332,6 +1437,12 @@ impl WgpuRenderer {
                                 view_proj_arr,
                                 hover_model,
                                 self.bowl_mesh.default_material,
+                            );
+                            self.write_lit_mesh_shadow(
+                                &mut shadow,
+                                &self.bowl_instances[slot_i],
+                                hover_model,
+                                self.bowl_mesh.default_material.kind,
                             );
                             if slot_i == 0 {
                                 self.proj.bowl_rect = Some(project_aabb_rect(
@@ -1414,6 +1525,12 @@ impl WgpuRenderer {
                     view_proj_arr,
                     model,
                     material,
+                );
+                self.write_lit_mesh_shadow(
+                    &mut shadow,
+                    &self.wall_tile_instances[wall_tile_slot_cursor],
+                    model,
+                    material.kind,
                 );
                 // Wall tiles aren't arrangeable — keep the legacy name so
                 // the hit-test debug overlay still identifies them.

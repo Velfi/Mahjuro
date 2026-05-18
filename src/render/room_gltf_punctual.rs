@@ -15,7 +15,7 @@ use crate::render::world_space::surface_anchor_from_world_xyz;
 #[derive(Clone, Copy, Debug)]
 pub enum RoomPunctualProfile {
     Standard,
-    /// `light_candle*`: wick black-body + per-candle flicker envelope.
+    /// `light_candle*`: glTF white × [`RoomEnvLightingTune::candle_light_color_mul`] + flicker.
     ShopCandles {
         flame_time_s: f32,
         lamp_flicker: f32,
@@ -29,7 +29,8 @@ pub fn room_glb_has_embedded_lights(cpu: &RoomGlbCpu) -> bool {
     !cpu.embedded_point_lights.is_empty() || !cpu.embedded_spot_lights.is_empty()
 }
 
-/// Linear RGB for embedded glTF punctuals. `light_candle*` nodes use black-body wick chromaticity.
+/// Linear RGB for embedded glTF punctuals. `light_candle*` nodes multiply glTF color by
+/// [`RoomEnvLightingTune::candle_light_color_mul`] (typically unit white × Tallow).
 #[inline]
 pub fn gltf_punctual_linear_rgb(
     raw: [f32; 3],
@@ -37,7 +38,11 @@ pub fn gltf_punctual_linear_rgb(
     tune: &RoomEnvLightingTune,
 ) -> [f32; 3] {
     if is_candle {
-        blackbody::candle_punctual_rgb_linear(tune.candle_light_color_mul)
+        [
+            (raw[0] * tune.candle_light_color_mul[0]).clamp(0.0, 1.0),
+            (raw[1] * tune.candle_light_color_mul[1]).clamp(0.0, 1.0),
+            (raw[2] * tune.candle_light_color_mul[2]).clamp(0.0, 1.0),
+        ]
     } else {
         raw
     }

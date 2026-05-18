@@ -1105,6 +1105,16 @@ impl WgpuRenderer {
 
         // Wood tablets migrated to Object3dKind::WoodTablet.
 
+        let shadow_frame = self.setup_shadow_frame(&camera, shadows_enabled, frame);
+        let light_view_proj_arr = shadow_frame.light_view_proj_arr;
+        let shadow_just_enabled = shadows_enabled && !self.prev_frame_shadows_enabled;
+        self.prev_frame_shadows_enabled = shadows_enabled;
+        let mut shadow_uniforms_changed = shadow_just_enabled;
+        let mut object3d_shadow = shadows_enabled.then(|| super::shadow_setup::Object3dShadowCtx {
+            light_view_proj: light_view_proj_arr,
+            changed: &mut shadow_uniforms_changed,
+        });
+
         self.run_object3d_placement(
             frame,
             &camera,
@@ -1114,6 +1124,7 @@ impl WgpuRenderer {
             &mut ops,
             &mut relic_glows,
             &mut relic_debuff_markers,
+            object3d_shadow.as_mut(),
         );
 
         if !relic_debuff_markers.is_empty() && self.debuff_marker_overlay.is_none() {
@@ -1174,14 +1185,6 @@ impl WgpuRenderer {
 
         self.garbage_collect_prev_tile_world();
 
-        // ── Shadow map setup ────────────────────────────────────────────
-        let shadow_frame = self.setup_shadow_frame(&camera, shadows_enabled, frame);
-        let light_view_proj_arr = shadow_frame.light_view_proj_arr;
-
-        let shadow_just_enabled = shadows_enabled && !self.prev_frame_shadows_enabled;
-        self.prev_frame_shadows_enabled = shadows_enabled;
-        let mut shadow_uniforms_changed = shadow_just_enabled;
-
         self.write_per_instance_shadow_casters(
             frame,
             &camera,
@@ -1205,19 +1208,42 @@ impl WgpuRenderer {
         );
 
         if ops_flags.shop_env {
-            self.write_shop_environment_uniforms(frame, &camera, false);
+            self.write_shop_environment_uniforms(
+                frame,
+                &camera,
+                false,
+                shadows_enabled.then(|| (light_view_proj_arr, &mut shadow_uniforms_changed)),
+            );
+            if frame.scene_lighting.embedded_gltf_punctual {
+                self.write_shop_room_punctual_occluders(&camera);
+            }
         }
         if ops_flags.hallway_env {
-            self.write_hallway_environment_uniforms(frame, &camera, false);
+            self.write_hallway_environment_uniforms(
+                frame,
+                &camera,
+                false,
+                shadows_enabled.then(|| (light_view_proj_arr, &mut shadow_uniforms_changed)),
+            );
         }
         if self.archive_environment.is_some() {
             self.sync_archive_description_decal_texture(frame);
         }
         if ops_flags.archive_env {
-            self.write_archive_environment_uniforms(frame, &camera, false);
+            self.write_archive_environment_uniforms(
+                frame,
+                &camera,
+                false,
+                shadows_enabled.then(|| (light_view_proj_arr, &mut shadow_uniforms_changed)),
+            );
         }
         if ops_flags.main_menu_env {
-            self.write_main_menu_environment_uniforms(frame, &camera, false);
+            self.write_main_menu_environment_uniforms(
+                frame,
+                &camera,
+                false,
+                shadows_enabled.then(|| (light_view_proj_arr, &mut shadow_uniforms_changed)),
+            );
         }
 
         let mut encoder = self
@@ -1231,6 +1257,7 @@ impl WgpuRenderer {
             frame,
             shadows_enabled,
             shadow_uniforms_changed,
+            &object3d_draw_list,
             &showcase_tile_batches,
             &tile_3d_rects,
         );
@@ -1554,7 +1581,7 @@ impl WgpuRenderer {
                 && self.shop_environment.is_some()
                 && !self.shop_env_primitives.is_empty()
             {
-                self.write_shop_environment_uniforms(frame, &camera, true);
+                self.write_shop_environment_uniforms(frame, &camera, true, None);
                 {
                     let room_bloom_ts = self
                         .gpu_profiler
@@ -1595,13 +1622,13 @@ impl WgpuRenderer {
                     });
                     self.draw_shop_environment_meshes(&mut pass, frame, true);
                 }
-                self.write_shop_environment_uniforms(frame, &camera, false);
+                self.write_shop_environment_uniforms(frame, &camera, false, None);
             }
             if ops_flags.hallway_env
                 && self.hallway_environment.is_some()
                 && !self.hallway_env_primitives.is_empty()
             {
-                self.write_hallway_environment_uniforms(frame, &camera, true);
+                self.write_hallway_environment_uniforms(frame, &camera, true, None);
                 {
                     let room_bloom_ts = self
                         .gpu_profiler
@@ -1642,13 +1669,13 @@ impl WgpuRenderer {
                     });
                     self.draw_hallway_environment_meshes(&mut pass, frame, true);
                 }
-                self.write_hallway_environment_uniforms(frame, &camera, false);
+                self.write_hallway_environment_uniforms(frame, &camera, false, None);
             }
             if ops_flags.archive_env
                 && self.archive_environment.is_some()
                 && !self.archive_env_primitives.is_empty()
             {
-                self.write_archive_environment_uniforms(frame, &camera, true);
+                self.write_archive_environment_uniforms(frame, &camera, true, None);
                 {
                     let room_bloom_ts = self
                         .gpu_profiler
@@ -1689,13 +1716,13 @@ impl WgpuRenderer {
                     });
                     self.draw_archive_environment_meshes(&mut pass, frame, true);
                 }
-                self.write_archive_environment_uniforms(frame, &camera, false);
+                self.write_archive_environment_uniforms(frame, &camera, false, None);
             }
             if ops_flags.main_menu_env
                 && self.main_menu_environment.is_some()
                 && !self.main_menu_env_primitives.is_empty()
             {
-                self.write_main_menu_environment_uniforms(frame, &camera, true);
+                self.write_main_menu_environment_uniforms(frame, &camera, true, None);
                 {
                     let room_bloom_ts = self
                         .gpu_profiler
@@ -1736,7 +1763,7 @@ impl WgpuRenderer {
                     });
                     self.draw_main_menu_environment_meshes(&mut pass, frame, true);
                 }
-                self.write_main_menu_environment_uniforms(frame, &camera, false);
+                self.write_main_menu_environment_uniforms(frame, &camera, false, None);
             }
         }
 

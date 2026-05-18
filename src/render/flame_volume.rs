@@ -38,7 +38,7 @@ pub const SHOP_FLAME_LIGHTBAKE_HEIGHT_FRAC: f32 = 0.48;
 pub const FLAME_FLICKER_AMP: f32 = 0.032;
 /// Shop `light_candle*` punctuals + flames — same rate, gentler swing.
 pub const SHOP_CANDLE_FLICKER_AMP: f32 = 0.019;
-const FLAME_FLICKER_RATE_HZ: f32 = 38.0;
+const FLAME_FLICKER_RATE_HZ: f32 = 24.0;
 
 // ── Scene-facing types ───────────────────────────────────────────────────────
 

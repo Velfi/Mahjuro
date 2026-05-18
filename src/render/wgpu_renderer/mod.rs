@@ -62,7 +62,7 @@ use crate::render::lit_mesh::push_box;
 use crate::render::lit_mesh::{
     LitMeshGpu, LitMeshInstance, MaterialKind, MaterialParams, ShadowCasterUniform, ShadowGlobals,
     SsrGlobals, create_lit_mesh_material_layout, create_lit_mesh_spot_ssr_layout,
-    create_shadow_caster_layout, create_shadow_sample_layout,
+    create_room_env_shadow_gpu, create_shadow_caster_layout, create_shadow_sample_layout,
 };
 use crate::render::mirror_mesh::{MIRROR_LOCAL_CENTER_Y, MIRROR_LOCAL_HALF, build_mirror_mesh};
 use crate::render::ofuda_mesh::build_ofuda_mesh;

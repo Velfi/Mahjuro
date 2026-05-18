@@ -72,7 +72,7 @@
 //! points use a separate uniform buffer, bound as group 1 binding 0 for [`room_glb.wgsl`] and binding 2
 //! for [`lit_mesh.wgsl`] (inverse-square on props; stays within WebGPU `max_bind_groups` on Metal).
 //! Punctual lights on nodes whose names start with [`SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX`] use
-//! [`crate::render::room_gltf_punctual::gltf_punctual_linear_rgb`] (black-body wick × [`SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL`]); other lights keep glTF color.
+//! [`SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL`] for a warm candle read; other lights keep glTF-authored color.
 //! `range` maps to glTF max distance (`0` = infinite).
 //!
 //! Shared glTF room decode (meshes, lights, cameras, collision) lives in [`crate::render::room_env_gltf`].
@@ -333,8 +333,8 @@ pub const SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE: f32 = 0.55;
 /// (`light_candle`, `light_candle.001`, `light_candle_06`, …).
 pub const SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX: &str = "light_candle";
 
-/// Fine-tune multiplier on [`crate::render::blackbody::candle_punctual_rgb_linear`] for `light_candle*`
-/// punctuals (defaults to [`crate::render::theme::color::TALLOW`]).
+/// Linear RGB multiplier for punctual lights on nodes matching [`SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX`].
+/// Warm shift for candle reads; other lights keep glTF linear RGB.
 pub const SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL: [f32; 3] =
     crate::render::theme::color::rgb(crate::render::theme::color::TALLOW);
 

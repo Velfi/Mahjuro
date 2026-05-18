@@ -88,8 +88,6 @@ pub struct ShowcaseRenderHints {
     pub object3d_use_camera_ray_plane_z: bool,
     /// [`DrawCmd::ShowcaseTileBatch`] uses the same ray→plane mapping when `camera_override` is set.
     pub showcase_tiles_use_camera_ray_plane_z: bool,
-    /// Suppress gameplay table shadow map (legacy `shop` / `tile_pack_celebration`).
-    pub suppress_table_shadows: bool,
     /// [`crate::render::wgpu_renderer::runtime::camera::WgpuRenderer::tile_hdr_tonemap`] pack-celebration path.
     pub tile_pack_celebration_tonemap: bool,
     /// Shop storeroom tonemap + lit_mesh inspect / glTF punctual branches.
@@ -594,8 +592,10 @@ pub enum Object3dKind {
         shape: crate::render::primitive::MeshId,
         material: crate::render::primitive::MaterialSpec,
         pick_id: Option<u32>,
-        /// When true, this primitive is walked by the shadow pre-pass.
-        /// Default off — thin slabs look better without self-shadow.
+        /// Legacy flag — shadow participation is driven by
+        /// [`crate::render::lit_mesh::material_casts_shadow`] on `material.kind`
+        /// (everything except [`MaterialKind::Emissive`] casts).
+        #[allow(dead_code)]
         shadow_caster: bool,
         /// When true, render as a near-black matte silhouette
         /// (locked-collection lock state). Decal and material kind

@@ -11,6 +11,7 @@ struct GltfRoomEnvUniformParams<'a> {
     bloom_linear_hdr_output: bool,
     model: Mat4,
     gpu: &'a ShopEnvironmentGpu,
+    shadow_upload: Option<([f32; 16], &'a mut bool)>,
 }
 
 impl WgpuRenderer {
@@ -127,7 +128,7 @@ impl WgpuRenderer {
         );
     }
 
-    fn write_gltf_room_env_uniforms(&self, p: GltfRoomEnvUniformParams<'_>) {
+    fn write_gltf_room_env_uniforms<'a>(&self, p: GltfRoomEnvUniformParams<'a>) {
         let GltfRoomEnvUniformParams {
             frame,
             camera,
@@ -138,6 +139,7 @@ impl WgpuRenderer {
             bloom_linear_hdr_output,
             model,
             gpu,
+            shadow_upload,
         } = p;
         let height_scale = if main_menu_env {
             crate::render::main_menu_glb::main_menu_env_height_scale(self.room_gltf_height_scale)
@@ -204,6 +206,34 @@ impl WgpuRenderer {
                 hdr_tonemap,
             }),
         );
+        if let Some((lvp, changed)) = shadow_upload {
+            self.write_room_env_shadow_caster(gpu, lvp, model, changed);
+        }
+    }
+
+    /// Depth-only draws for imported room GLB opaque primitives.
+    pub(super) fn draw_gltf_room_env_shadow(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        prims: &[TilePrimitiveGpu],
+        gpu: &ShopEnvironmentGpu,
+        skip_prim: impl Fn(usize) -> bool,
+    ) {
+        if prims.is_empty() {
+            return;
+        }
+        pass.set_bind_group(0, &gpu.shadow_bind_group, &[]);
+        for (pi, prim) in prims.iter().enumerate() {
+            if skip_prim(pi) || prim.pipeline_key.is_blend() {
+                continue;
+            }
+            pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+            pass.set_index_buffer(
+                prim.index_buffer.slice(..),
+                wgpu::IndexFormat::Uint32,
+            );
+            pass.draw_indexed(0..prim.index_count, 0, 0..1);
+        }
     }
 
     pub(super) fn write_shop_environment_uniforms(
@@ -211,6 +241,7 @@ impl WgpuRenderer {
         frame: &crate::render::draw_cmd::UiFrame,
         camera: &CameraFrame,
         bloom_linear_hdr_output: bool,
+        shadow_upload: Option<([f32; 16], &mut bool)>,
     ) {
         let Some(ref gpu) = self.shop_environment else {
             return;
@@ -237,6 +268,7 @@ impl WgpuRenderer {
             bloom_linear_hdr_output,
             model,
             gpu,
+            shadow_upload,
         });
     }
 
@@ -245,6 +277,7 @@ impl WgpuRenderer {
         frame: &crate::render::draw_cmd::UiFrame,
         camera: &CameraFrame,
         bloom_linear_hdr_output: bool,
+        shadow_upload: Option<([f32; 16], &mut bool)>,
     ) {
         let Some(ref gpu) = self.hallway_environment else {
             return;
@@ -271,6 +304,7 @@ impl WgpuRenderer {
             bloom_linear_hdr_output,
             model,
             gpu,
+            shadow_upload,
         });
         let mut dist = frame
             .hallway_distortion
@@ -348,6 +382,7 @@ impl WgpuRenderer {
         frame: &crate::render::draw_cmd::UiFrame,
         camera: &CameraFrame,
         bloom_linear_hdr_output: bool,
+        shadow_upload: Option<([f32; 16], &mut bool)>,
     ) {
         let Some(ref gpu) = self.archive_environment else {
             return;
@@ -374,6 +409,7 @@ impl WgpuRenderer {
             bloom_linear_hdr_output,
             model,
             gpu,
+            shadow_upload,
         });
     }
 
@@ -402,6 +438,7 @@ impl WgpuRenderer {
         frame: &crate::render::draw_cmd::UiFrame,
         camera: &CameraFrame,
         bloom_linear_hdr_output: bool,
+        shadow_upload: Option<([f32; 16], &mut bool)>,
     ) {
         let Some(ref gpu) = self.main_menu_environment else {
             return;
@@ -425,7 +462,40 @@ impl WgpuRenderer {
             bloom_linear_hdr_output,
             model,
             gpu,
+            shadow_upload,
         });
+    }
+
+    /// Upload shop collision AABBs for per-punctual ray occlusion in `room_glb.wgsl`.
+    pub(super) fn write_shop_room_punctual_occluders(&self, camera: &CameraFrame) {
+        if self.shop_env_collision_meshes.is_empty() {
+            return;
+        }
+        let model = crate::render::room_glb::with_shop_glb_cpu(|opt| {
+            opt.map(|cpu| {
+                crate::render::room_glb::room_env_model_matrix_from_cpu(
+                    camera.h,
+                    self.room_gltf_height_scale,
+                    cpu,
+                )
+            })
+        })
+        .unwrap_or_else(|| {
+            let s = crate::render::room_glb::room_env_world_scale(
+                camera.h,
+                self.room_gltf_height_scale,
+            );
+            glam::Mat4::from_scale(glam::Vec3::splat(s))
+        });
+        let occ = TileOccludersBuf::from_room_collision_meshes(
+            model,
+            &self.shop_env_collision_meshes,
+        );
+        self.queue.write_buffer(
+            &self.tile_occluders_buffer,
+            0,
+            bytemuck::bytes_of(&occ),
+        );
     }
 
     #[inline]

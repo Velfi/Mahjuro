@@ -20,7 +20,7 @@ use crate::render::draw_cmd::{
     camera_facing_euler_xyz_rad,
 };
 use crate::render::ribbon_mesh::{
-    ZodiacRibbonSpec, ribbon_length_fitting_rect, zodiac_ribbon_object3d,
+    ZodiacRibbonSpec, ribbon_display_length, ribbon_length_fitting_rect, zodiac_ribbon_object3d,
 };
 use crate::render::flame_volume::FlameEmitter;
 use crate::render::room_glb::{
@@ -69,6 +69,24 @@ use super::{
 
 /// Matches [`super::RELIC_GLOW_LIFETIME`] — keep glow envelope in sync.
 const RELIC_GLOW_SECS: f32 = 0.9;
+
+/// Vertical bob for for-sale / inventory stock (mm at 1080p ref height).
+const SHOP_STOCK_BOB_AMP_MM: f32 = 3.8;
+/// ~0.95 Hz — slow enough to read as floating, not jittery.
+const SHOP_STOCK_BOB_HZ: f32 = 0.95;
+
+#[inline]
+fn shop_stock_bob_lift_z(h: f32, bob_seed: u32, age_secs: f32) -> f32 {
+    let phase = (bob_seed as f32 * 2.399_9632).fract() * std::f32::consts::TAU;
+    let t = age_secs * SHOP_STOCK_BOB_HZ * std::f32::consts::TAU;
+    let amp = h * (SHOP_STOCK_BOB_AMP_MM / 1080.0);
+    (t + phase).sin() * amp
+}
+
+#[inline]
+fn apply_shop_stock_bob(pos: &mut [f32; 3], h: f32, bob_seed: u32, age_secs: f32) {
+    pos[2] += shop_stock_bob_lift_z(h, bob_seed, age_secs);
+}
 
 /// Screen-space hit ids (processed in `update` before the main shop pick pass).
 const SHOP_SHELF_CLICK_BASE: u32 = 0xD000;
@@ -247,7 +265,8 @@ fn shop_inspect_pivot_world(
             ShopFocus::Ribbon(i) => {
                 scene.zodiac_items.get(i)?;
                 let ribbon_len = ribbon_length_fitting_rect(r[2] * 0.38, r[3] * 0.62);
-                let cz = wz + ribbon_len * 0.35 - ribbon_len * 0.5;
+                let ribbon_world = ribbon_display_length(ribbon_len);
+                let cz = wz + ribbon_world * 0.35 - ribbon_world * 0.5;
                 sale_anchor_at_slot(SaleAnchorAtSlot {
                     screen: ShopScreenAnchor {
                         w,
@@ -320,7 +339,8 @@ fn shop_inspect_pivot_world(
                 let oi = i.saturating_sub(zodiac_for_sale);
                 shop.owned_zodiacs.get(oi)?;
                 let ribbon_len = ribbon_length_fitting_rect(r[2] * 0.36, r[3] * 0.58);
-                let cz = wz + ribbon_len * 0.32 - ribbon_len * 0.5;
+                let ribbon_world = ribbon_display_length(ribbon_len);
+                let cz = wz + ribbon_world * 0.32 - ribbon_world * 0.5;
                 inv_marker_surface_anchor(InvMarkerSurfaceAnchor {
                     screen: ShopScreenAnchor {
                         w,
@@ -1259,14 +1279,17 @@ pub(crate) fn render_shop_frame(
                 if let Some(d) = def_opt
                     && !d.flavor.is_empty()
                 {
+                    let mut flavor_gradients = Vec::new();
                     let mut flavor_texts = Vec::new();
                     push_floating_relic_flavor_labels(
+                        &mut flavor_gradients,
                         &mut flavor_texts,
                         w,
                         h,
                         d.flavor,
                         pad_bottom + block_h,
                     );
+                    frame.gradient_quads(flavor_gradients);
                     frame.texts(flavor_texts);
                 }
             }
@@ -1901,6 +1924,11 @@ fn push_stock_meshes(
     let mut subject = None;
     let niche_base = w * 0.048;
     let env_h = scene.drawn_room_gltf_height_scale.get();
+    let stock_bobs = |foc: ShopFocus| {
+        !inspect_anchor
+            .map(|(ifoc, _)| ifoc == foc)
+            .unwrap_or(false)
+    };
 
     let sale = for_sale_slots(scene);
     for (slot_i, foc_opt) in sale.iter().enumerate() {
@@ -1923,7 +1951,7 @@ fn push_stock_meshes(
                         rarity_color(item.rarity)
                     };
                     let cz = wz + half[2];
-                    let relic_pos = object3d_pos_for_shop_inspect_focus(
+                    let mut relic_pos = object3d_pos_for_shop_inspect_focus(
                         inspect_anchor,
                         *foc,
                         w,
@@ -1941,6 +1969,9 @@ fn push_stock_meshes(
                     slot_i,
                 }),
                     );
+                    if stock_bobs(*foc) {
+                        apply_shop_stock_bob(&mut relic_pos, h, slot_i as u32, scene.age_secs);
+                    }
                     partition_shop_inspect_stock_mesh(
                         inspect_anchor,
                         *foc,
@@ -1982,7 +2013,7 @@ fn push_stock_meshes(
                 let pack_t = pack_h * 0.11;
                 let ext = [pack_w, pack_t, pack_h];
                 let cz = wz + ext[2] * 0.5;
-                let pack_pos = object3d_pos_for_shop_inspect_focus(
+                let mut pack_pos = object3d_pos_for_shop_inspect_focus(
                     inspect_anchor,
                     *foc,
                     w,
@@ -2000,6 +2031,9 @@ fn push_stock_meshes(
                     slot_i,
                 }),
                 );
+                if stock_bobs(*foc) {
+                    apply_shop_stock_bob(&mut pack_pos, h, slot_i as u32 + 16, scene.age_secs);
+                }
                 partition_shop_inspect_stock_mesh(
                     inspect_anchor,
                     *foc,
@@ -2032,13 +2066,14 @@ fn push_stock_meshes(
                 // (0.38 × 0.62) envelope — width-bound when the slot is
                 // very tall, length-bound otherwise.
                 let ribbon_len = ribbon_length_fitting_rect(r[2] * 0.38, r[3] * 0.62);
+                let ribbon_world = ribbon_display_length(ribbon_len);
                 let z_k = if let Consumable::Zodiac(z) = item.consumable {
                     Some(z)
                 } else {
                     None
                 };
-                let cz = wz + ribbon_len * 0.35 - ribbon_len * 0.5;
-                let ribbon_pos = object3d_pos_for_shop_inspect_focus(
+                let cz = wz + ribbon_world * 0.35 - ribbon_world * 0.5;
+                let mut ribbon_pos = object3d_pos_for_shop_inspect_focus(
                     inspect_anchor,
                     *foc,
                     w,
@@ -2056,6 +2091,9 @@ fn push_stock_meshes(
                     slot_i,
                 }),
                 );
+                if stock_bobs(*foc) {
+                    apply_shop_stock_bob(&mut ribbon_pos, h, slot_i as u32 + 32, scene.age_secs);
+                }
                 partition_shop_inspect_stock_mesh(
                     inspect_anchor,
                     *foc,
@@ -2087,7 +2125,7 @@ fn push_stock_meshes(
                     // one mass under the shared for-sale talisman tilt.
                     let tw = r[2] * 0.40;
                     let cz = wz + tw * 0.55;
-                    let tal_pos = object3d_pos_for_shop_inspect_focus(
+                    let mut tal_pos = object3d_pos_for_shop_inspect_focus(
                         inspect_anchor,
                         *foc,
                         w,
@@ -2105,6 +2143,9 @@ fn push_stock_meshes(
                     slot_i,
                 }),
                     );
+                    if stock_bobs(*foc) {
+                        apply_shop_stock_bob(&mut tal_pos, h, slot_i as u32 + 48, scene.age_secs);
+                    }
                     partition_shop_inspect_stock_mesh(
                         inspect_anchor,
                         *foc,
@@ -2155,7 +2196,7 @@ fn push_stock_meshes(
                 let half = relic_half_extents(rid, niche_base * 0.92);
                 let glow = relic_glow(scene, rid);
                 let cz = wz + half[2];
-                let relic_pos = object3d_pos_for_shop_inspect_focus(
+                let mut relic_pos = object3d_pos_for_shop_inspect_focus(
                     inspect_anchor,
                     *foc,
                     w,
@@ -2175,6 +2216,9 @@ fn push_stock_meshes(
                     slot_i,
                 }),
                 );
+                if stock_bobs(*foc) {
+                    apply_shop_stock_bob(&mut relic_pos, h, slot_i as u32 + 64, scene.age_secs);
+                }
                 let base_rot = euler_xyz_rad_from_deg(super::SHOP_RELIC_LEAN_INVENTORY, 0.0, 0.0);
                 partition_shop_inspect_stock_mesh(
                     inspect_anchor,
@@ -2209,8 +2253,9 @@ fn push_stock_meshes(
                     // Largest 3:1 ribbon that fits the inventory slot's
                     // (0.36 × 0.58) envelope.
                     let ribbon_len = ribbon_length_fitting_rect(r[2] * 0.36, r[3] * 0.58);
-                    let cz = wz + ribbon_len * 0.32 - ribbon_len * 0.5;
-                    let pos = object3d_pos_for_shop_inspect_focus(
+                    let ribbon_world = ribbon_display_length(ribbon_len);
+                    let cz = wz + ribbon_world * 0.32 - ribbon_world * 0.5;
+                    let mut pos = object3d_pos_for_shop_inspect_focus(
                         inspect_anchor,
                         *foc,
                         w,
@@ -2230,6 +2275,9 @@ fn push_stock_meshes(
                             slot_i,
                         }),
                     );
+                    if stock_bobs(*foc) {
+                        apply_shop_stock_bob(&mut pos, h, slot_i as u32 + 80, scene.age_secs);
+                    }
                     let base_rot = euler_xyz_rad_from_deg(-90.0, 0.0, 0.0);
                     partition_shop_inspect_stock_mesh(
                         inspect_anchor,
@@ -2261,7 +2309,7 @@ fn push_stock_meshes(
                 if let Consumable::Talisman(tk) = owned.consumable {
                     let tw = r[2] * 0.36;
                     let cz = wz + tw * 0.45;
-                    let pos = object3d_pos_for_shop_inspect_focus(
+                    let mut pos = object3d_pos_for_shop_inspect_focus(
                         inspect_anchor,
                         *foc,
                         w,
@@ -2281,6 +2329,9 @@ fn push_stock_meshes(
                             slot_i,
                         }),
                     );
+                    if stock_bobs(*foc) {
+                        apply_shop_stock_bob(&mut pos, h, slot_i as u32 + 96, scene.age_secs);
+                    }
                     let base_rot = euler_xyz_rad_from_deg(-90.0, 0.0, 0.0);
                     partition_shop_inspect_stock_mesh(
                         inspect_anchor,
