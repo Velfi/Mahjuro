@@ -62,6 +62,8 @@ pub enum DebugAction {
     OpenCameraDebug,
     /// Per-scene tonemap / post-FX + room GLB lighting (right panel).
     OpenSceneLookDebug,
+    /// Main-menu rain vignette + CPU field tuning.
+    OpenRainDebug,
     /// Pick-blind hallway vertex warp (sliders; Ctrl+C copies a Rust snapshot).
     OpenHallwayHallFxDebug,
     BlowWindGust,
@@ -192,6 +194,10 @@ impl DebugMenuBar {
         let scene_look_item = MenuItem::new("Scene look (per scene)...", true, None);
         mappings.push((scene_look_item.id().clone(), DebugAction::OpenSceneLookDebug));
         let _ = tuning_sub.append(&scene_look_item);
+
+        let rain_item = MenuItem::new("Rain (main menu)...", true, None);
+        mappings.push((rain_item.id().clone(), DebugAction::OpenRainDebug));
+        let _ = tuning_sub.append(&rain_item);
 
         let hall_fx_item = MenuItem::new("Hallway vertex warp…", true, None);
         mappings.push((

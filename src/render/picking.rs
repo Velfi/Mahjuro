@@ -45,53 +45,14 @@ fn shop_env_collision_node_to_hit(node_name: &str) -> Option<ShopHit> {
     }
 }
 
-/// Möller–Trumbore against triangles in local mesh space; compares hits by world-space ray
-/// distance along `world_dir` (consistent with mixed pick candidates).
+#[inline]
 fn trimesh_hit_world_t_tris(
     tris: &[[Vec3; 3]],
     model: Mat4,
     world_origin: Vec3,
     world_dir: Vec3,
 ) -> Option<f32> {
-    let inv = model.inverse();
-    let lo = inv.transform_point3(world_origin);
-    let ld = inv.transform_vector3(world_dir);
-    const EPS: f32 = 1e-7;
-    let mut best_wt: Option<f32> = None;
-    for [a, b, c] in tris {
-        let e1 = *b - *a;
-        let e2 = *c - *a;
-        let p = ld.cross(e2);
-        let det = e1.dot(p);
-        if det.abs() < EPS {
-            continue;
-        }
-        let inv_det = 1.0 / det;
-        let s = lo - *a;
-        let u = s.dot(p) * inv_det;
-        if !(0.0..=1.0).contains(&u) {
-            continue;
-        }
-        let q = s.cross(e1);
-        let v = ld.dot(q) * inv_det;
-        if v < 0.0 || u + v > 1.0 {
-            continue;
-        }
-        let t_loc = e2.dot(q) * inv_det;
-        if t_loc <= EPS {
-            continue;
-        }
-        let local_hit = lo + ld * t_loc;
-        let world_hit = model.transform_point3(local_hit);
-        let wt = (world_hit - world_origin).dot(world_dir);
-        if wt > EPS {
-            best_wt = Some(match best_wt {
-                Some(b) if b <= wt => b,
-                _ => wt,
-            });
-        }
-    }
-    best_wt
+    crate::render::raycast::ray_hit_trimesh(tris, model, world_origin, world_dir).map(|h| h.t)
 }
 
 impl WgpuRenderer {

@@ -173,6 +173,11 @@ impl RoomGltfBrownout {
                 base.candle_light_color_mul[1] * candle_dim,
                 base.candle_light_color_mul[2] * candle_dim,
             ],
+            lantern_light_color_mul: [
+                base.lantern_light_color_mul[0] * candle_dim,
+                base.lantern_light_color_mul[1] * candle_dim,
+                base.lantern_light_color_mul[2] * candle_dim,
+            ],
         }
     }
 }

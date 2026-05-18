@@ -71,8 +71,10 @@
 //! glTF punctual intensity is scaled by [`SHOP_GLTF_LIGHT_INTENSITY_SCALE`] (default `1`). Shop punctual
 //! points use a separate uniform buffer, bound as group 1 binding 0 for [`room_glb.wgsl`] and binding 2
 //! for [`lit_mesh.wgsl`] (inverse-square on props; stays within WebGPU `max_bind_groups` on Metal).
-//! Punctual lights on nodes whose names start with [`SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX`] use
-//! [`SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL`] for a warm candle read; other lights keep glTF-authored color.
+//! Punctual lights on nodes whose names start with [`SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX`] or
+//! [`SHOP_GLTF_LANTERN_LIGHT_NODE_PREFIX`] multiply glTF color by
+//! [`RoomEnvLightingTune::candle_light_color_mul`] / [`RoomEnvLightingTune::lantern_light_color_mul`];
+//! other lights keep glTF-authored color.
 //! `range` maps to glTF max distance (`0` = infinite).
 //!
 //! Shared glTF room decode (meshes, lights, cameras, collision) lives in [`crate::render::room_env_gltf`].
@@ -338,6 +340,15 @@ pub const SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX: &str = "light_candle";
 pub const SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL: [f32; 3] =
     crate::render::theme::color::rgb(crate::render::theme::color::TALLOW);
 
+/// glTF **node** name prefix for punctual lights that should read as lanterns
+/// (`light_lantern`, `light_lantern.001`, `light_lantern_06`, …).
+pub const SHOP_GLTF_LANTERN_LIGHT_NODE_PREFIX: &str = "light_lantern";
+
+/// Linear RGB multiplier for punctual lights on nodes matching [`SHOP_GLTF_LANTERN_LIGHT_NODE_PREFIX`].
+/// Warm shift for lantern reads; other lights keep glTF linear RGB.
+pub const SHOP_GLTF_LANTERN_LIGHT_COLOR_MUL: [f32; 3] =
+    crate::render::theme::color::rgb(crate::render::theme::color::GOLD);
+
 /// Runtime shop lighting matching the `SHOP_*` source constants. Carried on [`DrawCtx`](crate::scenes::DrawCtx)
 /// and editable from the debug overlay.
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -349,6 +360,12 @@ pub struct RoomEnvLightingTune {
     /// Room glTF emissive strength ([`SHOP_GLTF_EMISSIVE_SCALE`] default).
     pub gltf_emissive_scale: f32,
     pub candle_light_color_mul: [f32; 3],
+    #[serde(default = "lantern_light_color_mul_default")]
+    pub lantern_light_color_mul: [f32; 3],
+}
+
+fn lantern_light_color_mul_default() -> [f32; 3] {
+    SHOP_GLTF_LANTERN_LIGHT_COLOR_MUL
 }
 
 impl Default for RoomEnvLightingTune {
@@ -365,6 +382,7 @@ impl RoomEnvLightingTune {
         lit_mesh_gltf_punctual_scale: SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE,
         gltf_emissive_scale: SHOP_GLTF_EMISSIVE_SCALE,
         candle_light_color_mul: SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL,
+        lantern_light_color_mul: SHOP_GLTF_LANTERN_LIGHT_COLOR_MUL,
     };
 }
 
@@ -443,6 +461,8 @@ pub struct RoomGlbCpu {
     pub environment_bounds_doc: Option<RoomEnvironmentBounds>,
     pub marker_mesh_bounds_doc: FxHashMap<String, RoomEnvironmentBounds>,
     pub collision_meshes: Vec<RoomCollisionMesh>,
+    /// Invisible `rain_hit_*` shells for CPU rain splashes (main menu, etc.).
+    pub rain_surface_meshes: Vec<RoomCollisionMesh>,
     pub embedded_perspective_camera: Option<RoomGlbEmbeddedCamera>,
     /// All embedded perspective cameras keyed by lowercase glTF node name (e.g. hallway `default` / `boss`).
     pub embedded_cameras_by_name: FxHashMap<String, RoomGlbEmbeddedCamera>,
@@ -603,16 +623,19 @@ pub fn load_room_glb_from_bytes(
     let mut environment_primitives = Vec::new();
     let mut marker_mesh_bounds_doc = FxHashMap::default();
     let mut collision_meshes = Vec::new();
+    let mut rain_surface_meshes = Vec::new();
     let mut embedded_cameras = EmbeddedCameraHarvest::default();
     let mut embedded_point_lights = Vec::new();
     let mut embedded_spot_lights = Vec::new();
 
     let mut walk_state = RoomEnvWalkState {
         candle_node_prefix: SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX,
+        lantern_node_prefix: SHOP_GLTF_LANTERN_LIGHT_NODE_PREFIX,
         markers: &mut markers,
         env_primitives: &mut environment_primitives,
         marker_mesh_bounds_doc: &mut marker_mesh_bounds_doc,
         collision_meshes: &mut collision_meshes,
+        rain_surface_meshes: &mut rain_surface_meshes,
         embedded_cameras: &mut embedded_cameras,
         embedded_point_lights: &mut embedded_point_lights,
         embedded_spot_lights: &mut embedded_spot_lights,
@@ -632,6 +655,7 @@ pub fn load_room_glb_from_bytes(
         environment_bounds_doc,
         marker_mesh_bounds_doc,
         collision_meshes,
+        rain_surface_meshes,
         embedded_perspective_camera,
         embedded_cameras_by_name,
         embedded_point_lights,

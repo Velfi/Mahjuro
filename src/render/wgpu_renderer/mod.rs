@@ -128,6 +128,8 @@ pub struct WgpuRenderer {
     starfield_pipeline: wgpu::RenderPipeline,
     ember_drift_pipeline: wgpu::RenderPipeline,
     rain_pipeline: wgpu::RenderPipeline,
+    rain_uniform_buffer: wgpu::Buffer,
+    rain_bind_group: wgpu::BindGroup,
     golden_dust_pipeline: wgpu::RenderPipeline,
     moonlit_water_pipeline: wgpu::RenderPipeline,
     // Owns the GPU resource that `moon_albedo_bind_group` samples from.
@@ -350,6 +352,12 @@ pub struct WgpuRenderer {
     tile_uid_scratch: FxHashSet<u32>,
     /// Previous frame's shadow toggle — forces a shadow-map redraw when shadows enable.
     prev_frame_shadows_enabled: bool,
+    /// Last uploaded directional shadow matrix — redraw when the room frustum moves.
+    cached_shadow_light_view_proj: [f32; 16],
+    /// Lit-mesh slot for [`crate::scenes::shop::shared::SHOP_INSPECT_SUBJECT_ANIM_ID`] this frame.
+    shop_inspect_subject_shadow_slot: Option<(runtime::DrawKind, usize)>,
+    /// Current `Object3d::anim_id` while [`runtime::object3d_placement::WgpuRenderer::run_object3d_placement`] walks a batch.
+    shadow_placement_anim_id: u64,
     /// Pre-rasterized showcase tile decals + UV lookup (`showcase_decal_atlas.rs`).
     showcase_decal_atlas: Option<crate::render::showcase_decal_atlas::ShowcaseDecalAtlasGpu>,
     /// Tileset name the atlas was baked for; rebuilt when Options tileset changes.
@@ -478,6 +486,8 @@ pub struct WgpuRenderer {
     pub tonemap_film_grain: f32,
     /// Increments each `render` call; re-rolls film grain without UV scroll.
     film_grain_frame: u32,
+    /// Procedural rain vignette (`shaders/rain.wgsl`). Live-tuned via Debug > Rain.
+    pub rain_tuning: crate::render::rain_tuning::RainTuning,
     /// Pipeline for procedural scene props (candles, table). Shares the
     /// `point_lights_layout` (group 1) with the tile pipeline.
     lit_mesh_pipeline: wgpu::RenderPipeline,
@@ -617,9 +627,6 @@ pub struct WgpuRenderer {
     dora_plinth_instances: Vec<LitMeshInstance>,
     /// Per-ribbon world-space model matrices for `pick_shop_object`.
     pub(super) last_ribbon_models: Vec<Mat4>,
-    /// Total number of ribbon draw-slots populated this frame (across all
-    /// `ZodiacBatch` cmds). Used by the shadow pass.
-    last_ribbon_slot_count: usize,
     /// Per-batch ribbon slot counts: `last_ribbon_batch_slot_counts[batch_idx]`
     /// is how many draw-slots that batch consumed (3 per textured ribbon,
     /// 1 per untextured).
@@ -746,6 +753,8 @@ pub struct WgpuRenderer {
     /// casters and hand tiles share this pipeline because both vertex
     /// layouts start with `position : vec3<f32>` at offset 0.
     shadow_pipeline: wgpu::RenderPipeline,
+    /// Room GLB shadow pass — double-sided so thin shelves / panels cast.
+    shadow_pipeline_room_env: wgpu::RenderPipeline,
     /// Optional GPU timestamp profiler. Built once at startup; activated
     /// on demand from the Debug menu via `start_gpu_profile`.
     gpu_profiler: crate::render::gpu_profiler::GpuProfiler,

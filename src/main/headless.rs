@@ -912,6 +912,7 @@ impl HeadlessApp {
                 rumble_lab_ops: &mut rumble_lab_ops,
                 suspended_shop: None,
                 room_gltf_height_scale: crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
+                rain_tuning: self.renderer.rain_tuning,
                 bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
             })
         } else {
@@ -974,6 +975,7 @@ impl HeadlessApp {
                     rumble_lab_ops: &mut rumble_lab_ops,
                     suspended_shop,
                     room_gltf_height_scale: crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
+                    rain_tuning: self.renderer.rain_tuning,
                     bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
                 })
         };
@@ -1032,6 +1034,7 @@ impl HeadlessApp {
             self.gfx.tile_preset,
             false,
             None,
+            self.renderer.rain_tuning,
         );
         let mut frame: UiFrame = if let Some(top) = self.overlay_stack.last() {
             top.draw_frame(ctx)

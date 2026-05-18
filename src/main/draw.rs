@@ -318,6 +318,7 @@ impl App {
             || self.debug.sfx_test_overlay.is_some()
             || self.debug.camera_debug_overlay.is_some()
             || self.debug.scene_look_debug_overlay.is_some()
+            || self.debug.rain_debug_overlay.is_some()
             || self.debug.hallway_distortion_debug_overlay.is_some();
         let preserve_overlay_stack_buttons = matches!(
             self.overlay_stack.last(),
@@ -402,6 +403,7 @@ impl App {
                 .hallway_distortion_debug_overlay
                 .as_ref()
                 .map(|o| o.to_snapshot()),
+            renderer.rain_tuning,
         );
         // Build the scene's frame in canonical push-order. For migrated
         // scenes (gameplay) this calls their direct `draw_frame` impl;
@@ -511,6 +513,11 @@ impl App {
 
         // Scene look debug overlay — on top of modals (right panel).
         if let Some(ref overlay) = self.debug.scene_look_debug_overlay {
+            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
+            append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
+        }
+
+        if let Some(ref overlay) = self.debug.rain_debug_overlay {
             let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }

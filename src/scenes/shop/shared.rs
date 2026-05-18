@@ -21,6 +21,8 @@ pub(super) enum ShopAction {
     MoveRelicRight(usize),
 }
 
+pub(crate) use crate::render::draw_cmd::SHOP_INSPECT_SUBJECT_ANIM_ID;
+
 #[inline]
 pub(crate) fn shop_focus_inspectable(f: ShopFocus) -> bool {
     matches!(

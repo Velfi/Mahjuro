@@ -10,6 +10,7 @@ use crate::game::event_bus::GameEvent;
 use crate::game::run::RunState;
 use crate::persistence::{self, ResumeScene, TileMaterial};
 use crate::render::draw_cmd::{ImageQuad, ImageQuadSource, ScenePunctualLight, UiFrame};
+use crate::render::rain_field::RainField;
 use crate::render::main_menu_glb;
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
@@ -25,6 +26,27 @@ use super::start_game_modal::TileSelectScene;
 use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 const MAIN_MENU_LOGO_ASSET: &str = "textures/main_menu_logo.png";
+
+/// 3D rain quads when the field is on; optional procedural vignette when it is off.
+fn push_main_menu_rain(
+    frame: &mut UiFrame,
+    rain_field: &RainField,
+    ctx: &DrawCtx<'_>,
+    w: f32,
+    h: f32,
+    env_scale: f32,
+) {
+    if !ctx.effect_layers.rain {
+        return;
+    }
+    if !ctx.rain_tuning.field_active() {
+        frame.rain();
+    }
+    let cam = frame
+        .camera_override
+        .unwrap_or_else(|| main_menu_glb::main_menu_camera_base(w, h, env_scale));
+    rain_field.push_quads(frame, &cam, w, h);
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HubFocus {
@@ -157,6 +179,7 @@ pub struct MainMenuExteriorScene {
     last_frame: Instant,
     age_secs: f32,
     bug_phases: [f32; BUG_COUNT],
+    rain_field: RainField,
     pub positions: crate::ui::scene_layout::MainMenuExteriorPositions,
 }
 
@@ -169,6 +192,7 @@ impl MainMenuExteriorScene {
             last_frame: Instant::now(),
             age_secs: 0.0,
             bug_phases: lamp_moths::initial_bug_phases(),
+            rain_field: RainField::new(),
             positions: crate::ui::scene_layout::load_main_menu_exterior_positions(),
         }
     }
@@ -228,7 +252,23 @@ impl SceneBehavior for MainMenuExteriorScene {
         self.last_frame = now;
         self.age_secs += dt;
         lamp_moths::advance_bug_phases(&mut self.bug_phases, dt);
-
+        if ctx.effect_layers.rain {
+            let w = ctx.layout.window_w;
+            let h = ctx.layout.window_h;
+            let env_scale =
+                main_menu_glb::main_menu_env_height_scale(ctx.room_gltf_height_scale);
+            let cam = main_menu_glb::main_menu_camera_base(w, h, env_scale);
+            let meshes = main_menu_glb::main_menu_rain_surface_meshes();
+            self.rain_field.update(
+                dt,
+                &ctx.rain_tuning,
+                &cam,
+                w,
+                h,
+                env_scale,
+                &meshes,
+            );
+        }
         let in_progress = GameEngine::run_in_progress(ctx.run);
         let items = menu_items(in_progress, ctx.progress);
 
@@ -372,8 +412,8 @@ impl SceneBehavior for MainMenuExteriorScene {
                         &self.bug_phases,
                     );
                 }
-                frame.rain();
             }
+            push_main_menu_rain(&mut frame, &self.rain_field, &ctx, w, h, env_scale);
             if ctx.effect_layers.starfield {
                 frame.starfield();
             }
@@ -437,8 +477,8 @@ impl SceneBehavior for MainMenuExteriorScene {
                     &self.bug_phases,
                 );
             }
-            frame.rain();
         }
+        push_main_menu_rain(&mut frame, &self.rain_field, &ctx, w, h, env_scale);
         if ctx.effect_layers.starfield {
             frame.starfield();
         }

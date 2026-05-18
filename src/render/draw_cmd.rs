@@ -604,6 +604,9 @@ pub enum Object3dKind {
     },
 }
 
+/// `Object3d::anim_id` on the inspected stock mesh — sole shadow caster during storeroom inspect.
+pub const SHOP_INSPECT_SUBJECT_ANIM_ID: u64 = 0x5348_4F50_5F49; // "SHOPI"
+
 /// A single lit mesh placed in the world.
 ///
 /// Replaces all individual `XxxPlacement` structs for objects rendered through
@@ -676,6 +679,7 @@ pub enum DrawCmd {
     EmberDrift,
     /// Procedural rainfall vignette (fullscreen triangle, no data).
     Rain,
+    /// Distant rain sheet only — sparse far-layer shader mist behind particles.
     /// Procedural golden-dust with god-rays vignette (fullscreen triangle, no data).
     GoldenDust,
     /// Procedural moon hovering above rippling water (fullscreen triangle, no data).
@@ -848,8 +852,10 @@ pub struct UiFrame {
     /// Pick-blind hallway vertex warp (`room_glb.wgsl` @group(0) @binding(8)); `None` elsewhere.
     pub hallway_distortion: Option<crate::render::hallway_glb::HallwayDistortion>,
     /// When true, skip offline room GI probe bake and run dynamic `emissive-probe-update`.
-    /// Shop sets this during item-inspect camera dolly / orbit.
     pub room_gi_dynamic: bool,
+    /// Shop item inspect: baked GI stays on; shadow pre-pass uses a tight frustum at this
+    /// pivot and only draws the mesh tagged with [`SHOP_INSPECT_SUBJECT_ANIM_ID`].
+    pub shop_inspect_shadow_target: Option<[f32; 3]>,
     /// World-space flame emitters without a [`Object3dKind::Candle`] mesh (e.g. shop
     /// `light_candle_*` punctual lights). Merged into the particle system each frame.
     pub procedural_flame_emitters: Vec<crate::render::flame_volume::FlameEmitter>,
@@ -878,6 +884,7 @@ impl UiFrame {
             archive_sign_description_decal_text: None,
             hallway_distortion: None,
             room_gi_dynamic: false,
+            shop_inspect_shadow_target: None,
             procedural_flame_emitters: Vec::new(),
         }
     }

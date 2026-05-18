@@ -29,23 +29,28 @@ pub fn room_glb_has_embedded_lights(cpu: &RoomGlbCpu) -> bool {
     !cpu.embedded_point_lights.is_empty() || !cpu.embedded_spot_lights.is_empty()
 }
 
-/// Linear RGB for embedded glTF punctuals. `light_candle*` nodes multiply glTF color by
-/// [`RoomEnvLightingTune::candle_light_color_mul`] (typically unit white × Tallow).
+/// Linear RGB for embedded glTF punctuals. `light_candle*` / `light_lantern*` nodes multiply glTF
+/// color by [`RoomEnvLightingTune::candle_light_color_mul`] /
+/// [`RoomEnvLightingTune::lantern_light_color_mul`].
 #[inline]
 pub fn gltf_punctual_linear_rgb(
     raw: [f32; 3],
     is_candle: bool,
+    is_lantern: bool,
     tune: &RoomEnvLightingTune,
 ) -> [f32; 3] {
-    if is_candle {
-        [
-            (raw[0] * tune.candle_light_color_mul[0]).clamp(0.0, 1.0),
-            (raw[1] * tune.candle_light_color_mul[1]).clamp(0.0, 1.0),
-            (raw[2] * tune.candle_light_color_mul[2]).clamp(0.0, 1.0),
-        ]
+    let mul = if is_candle {
+        tune.candle_light_color_mul
+    } else if is_lantern {
+        tune.lantern_light_color_mul
     } else {
-        raw
-    }
+        return raw;
+    };
+    [
+        (raw[0] * mul[0]).clamp(0.0, 1.0),
+        (raw[1] * mul[1]).clamp(0.0, 1.0),
+        (raw[2] * mul[2]).clamp(0.0, 1.0),
+    ]
 }
 
 const MAIN_MENU_MOONLIGHT_TEMP_K: f32 = 5500.0;
@@ -57,7 +62,7 @@ fn is_near_unit_white(rgb: [f32; 3]) -> bool {
 }
 
 fn main_menu_point_color(l: &RoomGltfEmbeddedPointLight, tune: &RoomEnvLightingTune) -> [f32; 3] {
-    let base = gltf_punctual_linear_rgb(l.color_linear, l.is_candle, tune);
+    let base = gltf_punctual_linear_rgb(l.color_linear, l.is_candle, l.is_lantern, tune);
     if !is_near_unit_white(base) {
         return base;
     }
@@ -75,7 +80,7 @@ fn point_color(
 ) -> [f32; 3] {
     match profile {
         RoomPunctualProfile::MainMenu => main_menu_point_color(l, tune),
-        _ => gltf_punctual_linear_rgb(l.color_linear, l.is_candle, tune),
+        _ => gltf_punctual_linear_rgb(l.color_linear, l.is_candle, l.is_lantern, tune),
     }
 }
 
@@ -199,7 +204,7 @@ fn spot_from_embedded(
         radius,
         cos_outer,
         cos_inner,
-        color: gltf_punctual_linear_rgb(l.color_linear, l.is_candle, tune),
+        color: gltf_punctual_linear_rgb(l.color_linear, l.is_candle, l.is_lantern, tune),
         intensity: (l.intensity * tune.gltf_light_intensity_scale).max(0.0),
     })
 }

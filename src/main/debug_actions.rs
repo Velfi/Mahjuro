@@ -149,6 +149,18 @@ impl App {
                     log::debug!("Opened camera debug overlay");
                 }
             }
+            DebugAction::OpenRainDebug => {
+                if self.debug.rain_debug_overlay.is_none() {
+                    let tuning = self
+                        .renderer
+                        .as_ref()
+                        .map(|r| r.rain_tuning)
+                        .unwrap_or_else(crate::render::rain_tuning::RainTuning::load);
+                    self.debug.rain_debug_overlay =
+                        Some(crate::render::rain_debug_overlay::RainDebugOverlay::new(tuning));
+                    log::debug!("Opened rain debug overlay");
+                }
+            }
             DebugAction::OpenSceneLookDebug => {
                 if self.debug.scene_look_debug_overlay.is_none() {
                     let keys = crate::game::scene_look_tuning::overlay_scene_keys();

@@ -1,6 +1,7 @@
 use super::*;
 use crate::render::draw_cmd::{DrawCmd, UiFrame};
 use crate::render::lit_mesh::{material_casts_shadow, LitMeshInstance, MaterialKind, ShadowCasterUniform};
+use crate::render::draw_cmd::SHOP_INSPECT_SUBJECT_ANIM_ID;
 
 /// Which imported room mesh is active this frame (at most one is drawn).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,6 +35,28 @@ pub(super) struct Object3dShadowCtx<'a> {
 }
 
 impl WgpuRenderer {
+    #[inline]
+    pub(super) fn reset_shop_inspect_shadow_slot(&mut self) {
+        self.shop_inspect_subject_shadow_slot = None;
+    }
+
+    #[inline]
+    pub(super) fn register_placement_shadow_slot(
+        &mut self,
+        draw_kind: super::DrawKind,
+        slot_i: usize,
+    ) {
+        if self.shadow_placement_anim_id == SHOP_INSPECT_SUBJECT_ANIM_ID {
+            self.shop_inspect_subject_shadow_slot = Some((draw_kind, slot_i));
+        }
+    }
+
+    #[inline]
+    pub(super) fn placement_shadow_writes(&self, frame: &UiFrame) -> bool {
+        frame.shop_inspect_shadow_target.is_none()
+            || self.shadow_placement_anim_id == SHOP_INSPECT_SUBJECT_ANIM_ID
+    }
+
     #[inline]
     pub(super) fn write_lit_mesh_shadow(
         &self,
@@ -120,7 +143,21 @@ impl WgpuRenderer {
                         | "collection"
                 )
             );
-        let (shadow_half_x, shadow_half_z, scene_height, depth_bias) = if room_frustum {
+        let inspect_subject = frame.shop_inspect_shadow_target.map(glam::Vec3::from_array);
+        let (shadow_half_x, shadow_half_z, scene_height, depth_bias) =
+            if inspect_subject.is_some() {
+                let env_height_scale = if self.active_scene_key == Some("main_menu_exterior") {
+                    crate::render::main_menu_glb::main_menu_env_height_scale(
+                        self.room_gltf_height_scale,
+                    )
+                } else {
+                    self.room_gltf_height_scale
+                };
+                let extent = camera.h * env_height_scale;
+                let half = extent * 0.11;
+                let depth = extent * 0.42;
+                (half, half, depth, TABLE_SHADOW_DEPTH_BIAS)
+            } else if room_frustum {
             // Room GLBs are centered and scaled by `window_h` — extend the light
             // frustum in depth so shelf props cast contact shadows on the env.
             let env_height_scale = if self.active_scene_key == Some("main_menu_exterior") {
@@ -133,7 +170,9 @@ impl WgpuRenderer {
             let extent = camera.h * env_height_scale;
             let half = extent * 0.62;
             let depth = extent * 1.45;
-            let bias = TABLE_SHADOW_DEPTH_BIAS * (depth / TABLE_SHADOW_SCENE_DEPTH).max(1.0);
+            // PCF bias is in light clip Z (≈ texels), not world depth — scaling with the
+            // room ortho span was ~20× too large and washed out GLB self-shadow.
+            let bias = TABLE_SHADOW_DEPTH_BIAS;
             (half, half, depth, bias)
         } else {
             let half = (camera.w * 0.6).max(camera.h * 0.6);
@@ -146,7 +185,7 @@ impl WgpuRenderer {
         };
         // Light eye sits along +key_dir from the play-area center. Table scenes
         // keep a tight depth range for texel resolution; room scenes need more.
-        let shadow_center = glam::Vec3::ZERO;
+        let shadow_center = inspect_subject.unwrap_or(glam::Vec3::ZERO);
         let eye_dist = scene_height * 0.5;
         let shadow_eye = shadow_center + key_dir * eye_dist;
         let shadow_view = Mat4::look_at_rh(shadow_eye, shadow_center, glam::Vec3::Y);

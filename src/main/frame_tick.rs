@@ -74,6 +74,7 @@ impl App {
         let drawn = self.overlay_stack.last().unwrap_or(&self.scene);
         let brownout_room = crate::main_room_gltf_brownout::RoomGltfBrownout::scene_eligible(drawn);
         let brownout_freeze = self.debug.scene_look_debug_overlay.is_some()
+            || self.debug.rain_debug_overlay.is_some()
             || self.scene.has_blocking_overlay()
             || self
                 .overlay_stack
@@ -526,6 +527,54 @@ impl App {
             button_clicks.clear();
         }
 
+        if let Some(mut overlay) = self.debug.rain_debug_overlay.take() {
+            use crate::render::rain_debug_overlay::RainDebugResult;
+            use crate::render::rain_tuning::RainTuning;
+            let (ww, wh) = (
+                self.last_drawable_px.width as f32,
+                self.last_drawable_px.height as f32,
+            );
+            let mouse = self.input.as_ref().map(|i| {
+                (
+                    i.last_cursor.0,
+                    i.last_cursor.1,
+                    self.mouse_clicked,
+                    self.mouse_left_down,
+                )
+            });
+            let mut close = false;
+            match overlay.update(&actions, mouse, ww, wh) {
+                RainDebugResult::Stay => {}
+                RainDebugResult::Reset => {
+                    overlay.tuning = RainTuning::shipping_default();
+                    if let Err(e) = RainTuning::clear_saved() {
+                        log::warn!("Failed to clear RainTuning override: {e}");
+                    } else {
+                        log::debug!("Cleared RainTuning override");
+                    }
+                }
+                RainDebugResult::Save => {
+                    if let Err(e) = overlay.tuning.save() {
+                        log::warn!("Failed to save RainTuning override: {e}");
+                    } else {
+                        log::debug!("Saved RainTuning override");
+                    }
+                }
+                RainDebugResult::Close => close = true,
+            }
+            if let Some(renderer) = self.renderer.as_mut() {
+                renderer.rain_tuning = overlay.tuning;
+            }
+            self.mouse_clicked = false;
+            if !close {
+                self.debug.rain_debug_overlay = Some(overlay);
+            } else {
+                log::debug!("Closed rain debug overlay");
+            }
+            actions.clear();
+            button_clicks.clear();
+        }
+
         // 3b''. If the debug visibility overlay is open, intercept
         // input. Mirror the toggle state back to App fields each
         // frame so the gameplay scene + retain filter pick up live
@@ -696,6 +745,11 @@ impl App {
                 rumble_lab_ops: &mut rumble_lab_ops,
                 suspended_shop: None,
                 room_gltf_height_scale: room_gltf_height_for_update,
+                rain_tuning: self
+                    .renderer
+                    .as_ref()
+                    .map(|r| r.rain_tuning)
+                    .unwrap_or_else(crate::render::rain_tuning::RainTuning::load),
                 bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
             })
         } else {
@@ -771,9 +825,17 @@ impl App {
                     rumble_lab_ops: &mut rumble_lab_ops,
                     suspended_shop,
                     room_gltf_height_scale: room_gltf_height_for_update,
+                    rain_tuning: self
+                        .renderer
+                        .as_ref()
+                        .map(|r| r.rain_tuning)
+                        .unwrap_or_else(crate::render::rain_tuning::RainTuning::load),
                     bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
                 })
         };
+        if matches!(&self.scene, crate::Scene::MainMenuExterior(_)) {
+            self.effect_layers.rain = true;
+        }
         self.cpu_profiler
             .end(crate::render::cpu_profiler::CpuStage::Update);
         if let Some(n) = bump_archive_chronicle_seen {

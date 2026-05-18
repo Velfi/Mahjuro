@@ -55,6 +55,26 @@ fn ensure_main_menu_glb_loaded() {
     let ready = if let Some(file) = crate::asset_path::get("3d/main_menu.glb") {
         match load_main_menu_glb_from_bytes(&file.data) {
             Ok(cpu) => {
+                let rain_tris: usize = cpu
+                    .rain_surface_meshes
+                    .iter()
+                    .map(|m| m.triangles.len())
+                    .sum();
+                if cpu.rain_surface_meshes.is_empty() {
+                    log::warn!(
+                        "main_menu.glb: no rain_hit_* collision meshes — CPU rain splashes need invisible shells named rain_hit_* (export to assets/3d/main_menu.glb)"
+                    );
+                } else {
+                    log::info!(
+                        "main_menu.glb: {} rain surface mesh(es), {} triangle(s): {:?}",
+                        cpu.rain_surface_meshes.len(),
+                        rain_tris,
+                        cpu.rain_surface_meshes
+                            .iter()
+                            .map(|m| m.node_name.as_str())
+                            .collect::<Vec<_>>(),
+                    );
+                }
                 log::debug!(
                     "main_menu.glb: {} marker(s), {} draw primitive(s), named cameras: {:?}",
                     cpu.markers.len(),
@@ -79,6 +99,21 @@ fn ensure_main_menu_glb_loaded() {
 ///
 /// After init, CPU mesh buffers may be released while GPU draws remain; bounds
 /// stay populated so do not gate on [`RoomGlbCpu::environment_primitives`].
+/// Env model matrix for rain collision (same centering/scale as the drawn room).
+pub fn main_menu_rain_env_model_matrix(window_h: f32, env_scale: f32) -> Option<glam::Mat4> {
+    with_main_menu_glb_cpu(|opt| {
+        opt.map(|cpu| room_glb::room_env_model_matrix_from_cpu(window_h, env_scale, cpu))
+    })
+}
+
+/// Decoded `rain_hit_*` triangle soups (empty until meshes are authored in Blender).
+pub fn main_menu_rain_surface_meshes() -> Vec<crate::render::room_env_gltf::RoomCollisionMesh> {
+    with_main_menu_glb_cpu(|opt| {
+        opt.map(|c| c.rain_surface_meshes.clone())
+            .unwrap_or_default()
+    })
+}
+
 pub fn main_menu_room_draw_ready() -> bool {
     with_main_menu_glb_cpu(|opt| {
         opt.is_some_and(|c| {
@@ -117,8 +152,12 @@ impl RoomEnvWalkHooks for MainMenuRoomWalkHooks {
         false
     }
 
-    fn mesh_policy(&self, _name: &str) -> RoomMeshPolicy {
-        RoomMeshPolicy::EnvironmentDraw
+    fn mesh_policy(&self, name: &str) -> RoomMeshPolicy {
+        if name.starts_with("rain_hit") {
+            RoomMeshPolicy::RainSurfaceCollision
+        } else {
+            RoomMeshPolicy::EnvironmentDraw
+        }
     }
 
     fn log_asset_label(&self) -> &'static str {

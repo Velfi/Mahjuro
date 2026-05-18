@@ -30,7 +30,7 @@ impl Default for SceneLookTuning {
 }
 
 /// Slider rows for [`SceneLookDebugOverlay`](crate::debug_overlays::SceneLookDebugOverlay).
-/// Order: tonemap (6) then room / height (9). Must match [`scene_look_row_value`] /
+/// Order: tonemap (6) then room / height (12). Must match [`scene_look_row_value`] /
 /// [`scene_look_row_set`].
 pub const SCENE_LOOK_SLIDER_META: &[(&str, f32, f32, f32)] = &[
     ("Exposure (post)", 0.25, 2.50, 0.01),
@@ -45,12 +45,19 @@ pub const SCENE_LOOK_SLIDER_META: &[(&str, f32, f32, f32)] = &[
     ("Room ambient", 0.0, 10.0, 0.0025),
     ("Lit-mesh glTF scale", 0.0, 20.0, 0.005),
     ("glTF emissive scale", 0.1, 48.0, 0.05),
-    ("Candle tint R", 0.0, 15.0, 0.0025),
-    ("Candle tint G", 0.0, 15.0, 0.0025),
-    ("Candle tint B", 0.0, 15.0, 0.0025),
+    ("Candle hue", 0.0, 1.0, 1.0 / 360.0),
+    ("Candle saturation", 0.0, 1.0, 0.01),
+    ("Candle intensity", 0.0, 15.0, 0.05),
+    ("Lantern hue", 0.0, 1.0, 1.0 / 360.0),
+    ("Lantern saturation", 0.0, 1.0, 0.01),
+    ("Lantern intensity", 0.0, 15.0, 0.05),
 ];
 
-pub const SCENE_LOOK_SLIDER_COUNT: usize = 15;
+/// First row of each punctual-tint HSL group — used for color swatches in the overlay.
+pub const SCENE_LOOK_CANDLE_TINT_ROW: usize = 12;
+pub const SCENE_LOOK_LANTERN_TINT_ROW: usize = 15;
+
+pub const SCENE_LOOK_SLIDER_COUNT: usize = 18;
 
 pub fn scene_look_row_value(look: &SceneLookTuning, row: usize) -> f32 {
     match row {
@@ -61,9 +68,10 @@ pub fn scene_look_row_value(look: &SceneLookTuning, row: usize) -> f32 {
         9 => look.room.ambient_scale,
         10 => look.room.lit_mesh_gltf_punctual_scale,
         11 => look.room.gltf_emissive_scale,
-        12 => look.room.candle_light_color_mul[0],
-        13 => look.room.candle_light_color_mul[1],
-        14 => look.room.candle_light_color_mul[2],
+        12..=14 => punctual_tint_mul_to_hsv(look.room.candle_light_color_mul)
+            .component_at(row - 12),
+        15..=17 => punctual_tint_mul_to_hsv(look.room.lantern_light_color_mul)
+            .component_at(row - 15),
         _ => 0.0,
     }
 }
@@ -79,9 +87,16 @@ pub fn scene_look_row_set(look: &mut SceneLookTuning, row: usize, v: f32) {
         9 => look.room.ambient_scale = v,
         10 => look.room.lit_mesh_gltf_punctual_scale = v,
         11 => look.room.gltf_emissive_scale = v,
-        12 => look.room.candle_light_color_mul[0] = v,
-        13 => look.room.candle_light_color_mul[1] = v,
-        14 => look.room.candle_light_color_mul[2] = v,
+        12..=14 => {
+            let (h, s, i) = punctual_tint_mul_to_hsv(look.room.candle_light_color_mul);
+            let (h, s, i) = (h, s, i).with_component(row - 12, v);
+            look.room.candle_light_color_mul = hsv_to_punctual_tint_mul(h, s, i);
+        }
+        15..=17 => {
+            let (h, s, i) = punctual_tint_mul_to_hsv(look.room.lantern_light_color_mul);
+            let (h, s, i) = (h, s, i).with_component(row - 15, v);
+            look.room.lantern_light_color_mul = hsv_to_punctual_tint_mul(h, s, i);
+        }
         _ => {}
     }
 }
@@ -178,4 +193,151 @@ pub const OVERLAY_SCENE_KEYS: &[&str] = &[
 
 pub fn overlay_scene_keys() -> &'static [&'static str] {
     OVERLAY_SCENE_KEYS
+}
+
+pub fn scene_look_row_is_hue(row: usize) -> bool {
+    matches!(row, SCENE_LOOK_CANDLE_TINT_ROW | SCENE_LOOK_LANTERN_TINT_ROW)
+}
+
+pub fn scene_look_row_is_saturation(row: usize) -> bool {
+    matches!(row, 13 | 16)
+}
+
+/// Linear RGB preview (channels clamped to 0–1) for a punctual tint swatch.
+pub fn punctual_tint_preview_linear(rgb_mul: [f32; 3]) -> [f32; 3] {
+    let peak = rgb_mul[0].max(rgb_mul[1]).max(rgb_mul[2]);
+    if peak <= 1e-8 {
+        return [0.0; 3];
+    }
+    [
+        (rgb_mul[0] / peak).clamp(0.0, 1.0),
+        (rgb_mul[1] / peak).clamp(0.0, 1.0),
+        (rgb_mul[2] / peak).clamp(0.0, 1.0),
+    ]
+}
+
+pub fn scene_look_tint_swatch_rgb(look: &SceneLookTuning, row: usize) -> Option<[f32; 3]> {
+    let rgb = match row {
+        12..=14 => look.room.candle_light_color_mul,
+        15..=17 => look.room.lantern_light_color_mul,
+        _ => return None,
+    };
+    Some(punctual_tint_preview_linear(rgb))
+}
+
+/// Hue [0, 1), saturation [0, 1], intensity (max RGB channel, capped at 15).
+pub fn punctual_tint_mul_to_hsv(rgb_mul: [f32; 3]) -> (f32, f32, f32) {
+    let intensity = rgb_mul[0].max(rgb_mul[1]).max(rgb_mul[2]).clamp(0.0, 15.0);
+    if intensity <= 1e-8 {
+        return (0.0, 0.0, 0.0);
+    }
+    let (h, s, _) = rgb_unit_to_hsv(
+        rgb_mul[0] / intensity,
+        rgb_mul[1] / intensity,
+        rgb_mul[2] / intensity,
+    );
+    (h, s, intensity)
+}
+
+/// Full-saturation linear RGB at hue `h` (for hue-wheel slider art).
+pub fn hue_wheel_preview_linear(hue: f32) -> [f32; 3] {
+    let (r, g, b) = hsv_to_rgb_unit(hue.fract(), 1.0, 1.0);
+    [r, g, b]
+}
+
+/// Inverse of [`punctual_tint_mul_to_hsv`].
+pub fn hsv_to_punctual_tint_mul(hue: f32, saturation: f32, intensity: f32) -> [f32; 3] {
+    let intensity = intensity.clamp(0.0, 15.0);
+    if intensity <= 1e-8 {
+        return [0.0; 3];
+    }
+    let (r, g, b) = hsv_to_rgb_unit(
+        hue.fract(),
+        saturation.clamp(0.0, 1.0),
+        1.0,
+    );
+    [r * intensity, g * intensity, b * intensity]
+}
+
+trait HslTriple {
+    fn component_at(self, index: usize) -> f32;
+    fn with_component(self, index: usize, v: f32) -> Self;
+}
+
+impl HslTriple for (f32, f32, f32) {
+    fn component_at(self, index: usize) -> f32 {
+        match index {
+            0 => self.0,
+            1 => self.1,
+            _ => self.2,
+        }
+    }
+
+    fn with_component(self, index: usize, v: f32) -> Self {
+        match index {
+            0 => (v.fract(), self.1, self.2),
+            1 => (self.0, v.clamp(0.0, 1.0), self.2),
+            _ => (self.0, self.1, v),
+        }
+    }
+}
+
+fn rgb_unit_to_hsv(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    let v = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    if v <= 1e-8 {
+        return (0.0, 0.0, 0.0);
+    }
+    let d = v - min;
+    if d <= 1e-8 {
+        return (0.0, 0.0, v);
+    }
+    let s = d / v;
+    let h = if (v - r).abs() < 1e-8 {
+        (g - b) / d + if g < b { 6.0 } else { 0.0 }
+    } else if (v - g).abs() < 1e-8 {
+        (b - r) / d + 2.0
+    } else {
+        (r - g) / d + 4.0
+    } / 6.0;
+    (h.fract(), s, v)
+}
+
+fn hsv_to_rgb_unit(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
+    let h = (h.fract()) * 6.0;
+    let i = h.floor();
+    let f = h - i;
+    let p = v * (1.0 - s);
+    let q = v * (1.0 - s * f);
+    let t = v * (1.0 - s * (1.0 - f));
+    match i as i32 {
+        0 => (v, t, p),
+        1 => (q, v, p),
+        2 => (p, v, t),
+        3 => (p, q, v),
+        4 => (t, p, v),
+        _ => (v, p, q),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::render::room_glb::{
+        SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL, SHOP_GLTF_LANTERN_LIGHT_COLOR_MUL,
+    };
+
+    #[test]
+    fn punctual_tint_hsv_round_trip() {
+        for rgb in [SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL, SHOP_GLTF_LANTERN_LIGHT_COLOR_MUL] {
+            let (h, s, i) = punctual_tint_mul_to_hsv(rgb);
+            let back = hsv_to_punctual_tint_mul(h, s, i);
+            for c in 0..3 {
+                assert!(
+                    (back[c] - rgb[c]).abs() < 0.02,
+                    "channel {c}: {back:?} vs {rgb:?}"
+                );
+            }
+        }
+    }
 }

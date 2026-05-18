@@ -43,8 +43,9 @@ use crate::render::world_space::{
 };
 use crate::scenes::journal_transition;
 use crate::scenes::object3d_inspect::{
-    InspectRig, ItemInspectOrbitState, inspect_orbit_camera, lerp_camera,
-    prepend_inspect_orbit_subject_rotation, tick_inspect_dolly,
+    InspectRig, ItemInspectOrbitState, inspect_orbit_camera, inspect_point_lights,
+    inspect_subject_spotlight, lerp_camera, prepend_inspect_orbit_subject_rotation,
+    tick_inspect_dolly,
 };
 use crate::scenes::options::OptionsScene;
 use crate::scenes::{
@@ -66,6 +67,9 @@ use super::shared::shop_focus_inspectable;
 use super::{
     ConsumableShopItem, ShopFocus, ShopItem, ShopMode, ShopScene, TilePackShopItem, push_free_badge,
 };
+
+/// Extra gain on the dynamic inspect rig (additive over storeroom GLB lights).
+const SHOP_INSPECT_LIGHT_MUL: f32 = 10.0;
 
 /// Matches [`super::RELIC_GLOW_LIFETIME`] — keep glow envelope in sync.
 const RELIC_GLOW_SECS: f32 = 0.9;
@@ -592,7 +596,6 @@ pub(crate) fn render_shop_frame(
         _ => base,
     };
     frame.camera_override = Some(final_cam);
-    frame.room_gi_dynamic = inspect.is_some() || eased > 0.02;
     let cam = final_cam;
 
     let layout = ShopLayout::build(
@@ -620,25 +623,21 @@ pub(crate) fn render_shop_frame(
     let journal_cy = shop.positions.book.ny * h;
     let journal_cz = ctx.layout.mm(shop.positions.book.lift_mm);
 
-    let hover = if inspect.is_some() {
-        None
-    } else {
-        shop
-            .focus
-            .and_then(|f| f.to_hit())
-            .or(ctx.picked_shop_object)
-            .and_then(|hit| {
-                live_shop_hit(
-                    hit,
-                    shop,
-                    &shop.items,
-                    &shop.zodiac_items,
-                    &shop.talisman_items,
-                    &shop.pack_items,
-                    &shop_rm,
-                )
-            })
-    };
+    let hover = shop
+        .focus
+        .and_then(|f| f.to_hit())
+        .or(ctx.picked_shop_object)
+        .and_then(|hit| {
+            live_shop_hit(
+                hit,
+                shop,
+                &shop.items,
+                &shop.zodiac_items,
+                &shop.talisman_items,
+                &shop.pack_items,
+                &shop_rm,
+            )
+        });
 
     let room_glb_lights = shop_glb_has_embedded_lights();
     {
@@ -778,6 +777,25 @@ pub(crate) fn render_shop_frame(
         frame.scene_lighting.punctual = merged_punctual;
         frame.scene_lighting.spot_lights =
             shop_embedded_spot_lights_runtime(w, h, env_h, &ctx.shop_env_lighting);
+        if let Some(ins) = inspect {
+            let tw = inspect_anchor
+                .map(|(_, tw)| tw)
+                .unwrap_or(ins.target_world);
+            let k = eased.clamp(0.0, 1.0) * SHOP_INSPECT_LIGHT_MUL;
+            if k > 1e-4 {
+                let mut rig_lights = inspect_point_lights(w, h, &cam, tw, inspect_rig.light_preset);
+                for pl in &mut rig_lights {
+                    pl.intensity *= k;
+                }
+                frame
+                    .scene_lighting
+                    .punctual
+                    .extend(rig_lights.into_iter().map(ScenePunctualLight::Smooth));
+                let mut spot = inspect_subject_spotlight(w, h, &cam, tw);
+                spot.intensity *= k;
+                frame.scene_lighting.spot_lights.push(spot);
+            }
+        }
         if use_glb_lights {
             let candle_flames = shop_gltf_candle_flame_emitters(
                 w,
@@ -1003,6 +1021,7 @@ pub(crate) fn render_shop_frame(
             ctx.tile_preset,
             ctx.archive_has_new_chronicle,
             ctx.hallway_distortion_debug,
+            ctx.rain_tuning,
         );
         let prepass = SceneBehavior::draw_frame(&scratch, inner_ctx);
         frame.journal_prepass_frame = Some(Box::new(prepass));
@@ -1900,12 +1919,13 @@ fn object3d_pos_for_shop_inspect_focus(
 fn partition_shop_inspect_stock_mesh(
     inspect_anchor: Option<(ShopFocus, [f32; 3])>,
     foc: ShopFocus,
-    mesh: Object3d,
+    mut mesh: Object3d,
     dim: &mut Vec<Object3d>,
     subject: &mut Option<Object3d>,
 ) {
     if let Some((ifoc, _)) = inspect_anchor
         && ifoc == foc {
+            mesh.anim_id = super::shared::SHOP_INSPECT_SUBJECT_ANIM_ID;
             *subject = Some(mesh);
             return;
         }

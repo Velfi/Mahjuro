@@ -198,6 +198,8 @@ pub struct UpdateCtx<'a> {
     pub suspended_shop: Option<&'a ShopScene>,
     /// Same as [`DrawCtx::room_gltf_height_scale`] — vertical scale for embedded glTF rooms vs window height.
     pub room_gltf_height_scale: f32,
+    /// Main-menu rain vignette + CPU field tuning (from renderer / debug overlay).
+    pub rain_tuning: crate::render::rain_tuning::RainTuning,
     /// Archive scene sets this to `Some(progress.run_history.len())` when the count changes so
     /// the app can persist per-profile "seen" state for menu hints.
     pub bump_archive_chronicle_seen: &'a mut Option<u32>,
@@ -273,6 +275,7 @@ pub struct DrawCtx<'a> {
     /// [`HallwayDistortion::from_pick_blind`] alone.
     pub hallway_distortion_debug:
         Option<crate::render::hallway_glb::HallwayDistortionDebugSnapshot>,
+    pub rain_tuning: crate::render::rain_tuning::RainTuning,
 }
 
 impl<'a> DrawCtx<'a> {
@@ -305,6 +308,7 @@ impl<'a> DrawCtx<'a> {
         hallway_distortion_debug: Option<
             crate::render::hallway_glb::HallwayDistortionDebugSnapshot,
         >,
+        rain_tuning: crate::render::rain_tuning::RainTuning,
     ) -> Self {
         Self {
             layout,
@@ -332,6 +336,7 @@ impl<'a> DrawCtx<'a> {
             tile_preset,
             archive_has_new_chronicle,
             hallway_distortion_debug,
+            rain_tuning,
         }
     }
 }
