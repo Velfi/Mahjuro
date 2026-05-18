@@ -92,7 +92,10 @@ pub fn compute_action_bar(
     let btn_w = (120.0 * layout_scale).max(60.0);
     let btn_h = (32.0 * layout_scale).max(20.0);
     let btn_gap = 12.0 * layout_scale;
-    let container_w = (btn_w * 2.0 + btn_gap).min(layout.window_w * 0.92);
+    // Shared HUD content container. This is intentionally tied to the hand
+    // strip, not to the current number of bottom action objects; otherwise
+    // removing action buttons shrinks the structure showcase tiles.
+    let container_w = layout.hand_strip.w.min(layout.window_w * 0.92);
     // Anchor container left edge to hand strip left (HAND_X_PAD_RATIO = 16%) so
     // structure and hand share the same left margin.
     let container_x = layout.hand_strip.x;
