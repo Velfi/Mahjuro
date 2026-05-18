@@ -2,7 +2,7 @@
 //!
 //! Live builds start from [`EffectLayers::BASELINE`] (directional shadows + table
 //! SSR on; heavier effects off; game-over moonlit / sunlit water stays on). Turn
-//! individual fields on, or assign [`EffectLayers::FULL`], to restore visuals.
+//! individual fields on to restore heavier visuals.
 
 use crate::main_render_settings::RenderSettings as AppRenderSettings;
 use crate::persistence::{EffectsQuality, SurfaceKind, TileMaterial, TilePreset};
@@ -44,18 +44,6 @@ impl EffectLayers {
         ember_drift: false,
         hdr: false,
         transition_fullscreen_fx: false,
-        fullscreen_water_backdrop: true,
-    };
-
-    pub const FULL: Self = Self {
-        shadows: true,
-        ssr: true,
-        procedural_surface_quality: true,
-        starfield: true,
-        golden_dust: true,
-        ember_drift: true,
-        hdr: true,
-        transition_fullscreen_fx: true,
         fullscreen_water_backdrop: true,
     };
 

@@ -1,10 +1,12 @@
-use super::*;
-
+use crate::core::deck::Wall;
+use crate::core::hand::MeldKind;
+use crate::core::rules::BlindKind;
+use crate::game::game_mode::GameMode;
 use crate::game::onboarding::{
-    LESSONS_DISCARDS, LESSONS_HAND_SIZE, LESSONS_PLAYS, LESSONS_TARGET, OnboardingPhase,
-    lessons_allowed_melds,
+    LESSONS_DISCARDS, LESSONS_HAND_SIZE, LESSONS_PLAYS, LESSONS_TARGET, OnboardingPhase, OnboardingState, TUTORIAL_BOSS, lessons_allowed_melds, tutorial_yaku
 };
 use crate::game::engine_state::GameplayCoreState;
+use crate::game::run::RunState;
 
 impl RunState {
     /// Start the curated onboarding run used by the first-time tutorial
@@ -16,7 +18,6 @@ impl RunState {
         mode.starting_discards = LESSONS_DISCARDS;
         mode.hand_size = LESSONS_HAND_SIZE;
         mode.base_target = LESSONS_TARGET;
-        mode.target_scaling = 1.0;
         mode.starting_yaku = Vec::new();
         mode.consumable_capacity = 2;
 
@@ -102,7 +103,6 @@ impl RunState {
         self.round_score = 0;
         self.last_breakdown = None;
         self.scored_last_turn = false;
-        self.quickdraw_uses_remaining = crate::game::run::QUICKDRAW_USES_PER_ROUND;
         self.joker_used = false;
         self.full_hand_played_this_round = false;
         self.played_yaku_this_round.clear();
@@ -121,7 +121,6 @@ impl RunState {
         self.reset_round_resources();
         self.last_breakdown = None;
         self.scored_last_turn = false;
-        self.quickdraw_uses_remaining = crate::game::run::QUICKDRAW_USES_PER_ROUND;
         self.joker_used = false;
         self.full_hand_played_this_round = false;
         self.played_yaku_this_round.clear();

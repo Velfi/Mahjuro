@@ -14,6 +14,8 @@ mod relic_removal;
 mod round_flow;
 mod scoring_flow;
 mod tags;
+#[cfg(test)]
+mod tests;
 
 use std::collections::BTreeMap;
 
@@ -22,26 +24,15 @@ use serde::{Deserialize, Serialize};
 use crate::core::boss::{self, BossKind};
 use crate::core::debuff::TileDebuff;
 use crate::core::deck::Wall;
-use crate::core::hand::{
-    DetectedMeld, MeldKind, enumerate_decompositions, validate_selection_with_rules,
-};
-use crate::core::hand_intent::{
-    DecompositionBias, decomposition_affinity, infer_decomposition_bias,
-};
-use crate::core::structure::{
-    StructureTriggerKind, StructureTriggerMeta, banked_meld_chips, can_trigger_structure,
-    is_winning_structure_shape,
-};
-
-use crate::audio::SfxId;
+use crate::core::hand::{DetectedMeld, validate_selection_with_rules};
 use crate::core::relic::{RelicId, RelicState};
 use crate::core::rules::{BlindKind, RuleModifier};
-use crate::core::scoring::{ScoreBreakdown, score_sets_with_original};
+use crate::core::scoring::{ScoreBreakdown};
 use crate::core::tile::{Suit, Tile, TileEnhancement};
 use crate::core::yaku::YakuKind;
-use crate::game::event_bus::{EventBus, GameEvent, GameOverReason};
+use crate::game::event_bus::{EventBus, GameEvent};
 use crate::game::game_mode::GameMode;
-use crate::game::onboarding::{OnboardingState, TUTORIAL_BOSS, tutorial_yaku};
+use crate::game::onboarding::{OnboardingState};
 pub use discard_undo::DiscardUndoSnapshot;
 
 /// Boss-blind state for the current run.  Extracted from `RunState` so
@@ -76,11 +67,8 @@ pub enum ConsumableUseResult {
     },
 }
 
-pub const HAND_SIZE: usize = 14;
 /// Defeating the Boss of this ante completes the run (Balatro-style).
 pub const FINAL_ANTE: u32 = 7;
-/// Max number of QuickDraw bonus draws per round.
-pub const QUICKDRAW_USES_PER_ROUND: u8 = 3;
 
 fn default_auto_cash_in_on_full_structure() -> bool {
     true
@@ -384,7 +372,7 @@ fn emit_leaf_masks(
     must_play_five: bool,
     out: &mut rustc_hash::FxHashSet<u32>,
 ) {
-    for extra_mask in flower_only_masks(flowers) {
+    for extra_mask in flower_meld_partition_masks(flowers) {
         let total_mask = current_mask | extra_mask;
         let total_count = total_mask.count_ones() as usize;
         if total_count == 0 {
@@ -400,37 +388,12 @@ fn emit_leaf_masks(
     }
 }
 
-fn flower_only_masks(flowers: &[IndexedTile]) -> Vec<u32> {
-    let mut masks = vec![0];
-
-    for select_count in 2..=flowers.len().min(4) {
-        collect_flower_masks(flowers, select_count, 0, 0, &mut masks);
-    }
-
-    masks
-}
-
-fn collect_flower_masks(
-    flowers: &[IndexedTile],
-    select_count: usize,
-    start: usize,
-    current_mask: u32,
-    out: &mut Vec<u32>,
-) {
-    if select_count == 0 {
-        out.push(current_mask);
-        return;
-    }
-
-    for idx in start..=flowers.len() - select_count {
-        collect_flower_masks(
-            flowers,
-            select_count - 1,
-            idx + 1,
-            current_mask | (1 << flowers[idx].hand_index),
-            out,
-        );
-    }
+fn flower_meld_partition_masks(flowers: &[IndexedTile]) -> Vec<u32> {
+    let indexed: Vec<(usize, u32)> = flowers
+        .iter()
+        .map(|f| (f.hand_index, f.tile.id))
+        .collect();
+    crate::core::hand::decomposition::flower_meld_partition_masks(&indexed)
 }
 
 fn remove_flower(flowers: &[IndexedTile], remove_idx: usize) -> Vec<IndexedTile> {
@@ -661,6 +624,9 @@ pub struct RunState {
     /// `advance_round` and `skip_to_next_blind`.
     #[serde(skip)]
     pub honors_scored_this_round: bool,
+    /// Second round wind chosen by Windreader at blind start (1–4).
+    #[serde(default)]
+    pub windreader_bonus_wind: Option<u8>,
     /// Cumulative score earned across the entire run (metrics / Golden Engine).
     #[serde(default)]
     pub total_score_earned: u64,
@@ -751,10 +717,10 @@ pub struct RunState {
     /// Tag-granted bonus hand size for the next round.
     #[serde(default)]
     pub tag_bonus_hand_size: i32,
-    /// Pending zodiac activation from a ZodiacBlessing skip-reward tag.
-    /// Consumed by the pick-blind scene to trigger the celebration overlay.
+    /// Pending zodiac activations from a ZodiacBlessing skip-reward tag.
+    /// Consumed one at a time by the pick-blind scene for celebration overlays.
     #[serde(skip)]
-    pub pending_zodiac_celebration: Option<(
+    pub pending_zodiac_celebrations: Vec<(
         crate::core::zodiac::ZodiacKind,
         crate::core::yaku::YakuKind,
         u32,
@@ -1029,6 +995,25 @@ impl RunState {
         }
     }
 
+    /// Bonus round wind from Windreader, if the relic is owned this run.
+    pub fn bonus_round_wind_for_yaku(&self) -> Option<u8> {
+        if self.relics.has(RelicId::WindReader) {
+            self.windreader_bonus_wind
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn refresh_windreader_bonus_wind(&mut self) {
+        self.windreader_bonus_wind = if self.relics.has(RelicId::WindReader) {
+            Some(crate::core::rules::BlindKind::roll_bonus_round_wind_for_ante(
+                self.ante,
+            ))
+        } else {
+            None
+        };
+    }
+
     /// Rebuild round-start plays/discards from current mode + permanent
     /// round modifiers. This keeps all "per round" bonuses sourced from one
     /// place so shop-bought relics and material bonuses apply on the next blind.
@@ -1096,7 +1081,7 @@ impl RunState {
             structure_sets: Vec::new(),
             structure_tiles: Vec::new(),
             round_score: 0,
-            target_score: mode.base_target,
+            target_score: crate::core::blind_target::score_for(1, BlindKind::Small, mode.base_target),
             base_target: mode.base_target,
             relics,
             round_rules: mode.starting_rules.clone(),
@@ -1136,6 +1121,7 @@ impl RunState {
             played_yaku_this_round: Vec::new(),
             tile_debuffs: Vec::new(),
             honors_scored_this_round: false,
+            windreader_bonus_wind: None,
             total_score_earned: 0,
             paper_lantern_extinct: false,
             silk_thread_extinct: false,
@@ -1161,7 +1147,7 @@ impl RunState {
             tag_bonus_plays: 0,
             tag_bonus_discards: 0,
             tag_bonus_hand_size: 0,
-            pending_zodiac_celebration: None,
+            pending_zodiac_celebrations: Vec::new(),
             finished_zodiac_celebration: None,
             pending_shop_focus_snap_after_pack_celebration: false,
             relic_counters: std::collections::BTreeMap::new(),
@@ -1235,6 +1221,11 @@ impl RunState {
         stake: crate::core::stake::Stake,
     ) -> Self {
         Self::new(GameMode::with_material_and_stake(material, stake))
+    }
+
+    /// Score target for a blind at the current ante (see `core::blind_target`).
+    pub fn blind_score_target(&self, blind: crate::core::rules::BlindKind) -> u32 {
+        crate::core::blind_target::score_for(self.ante, blind, self.base_target)
     }
 
     /// Whether a run is in progress (not a fresh/default state).
@@ -1451,6 +1442,3 @@ fn try_disgust_substitution(
     }
     None
 }
-
-#[cfg(test)]
-mod tests;

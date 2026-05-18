@@ -232,6 +232,7 @@ impl WgpuRenderer {
                     DrawCmd::ShopEnvironment
                         | DrawCmd::HallwayEnvironment
                         | DrawCmd::ArchiveEnvironment
+                        | DrawCmd::MainMenuEnvironment
                 )
             });
         if shop_showcase_without_env {
@@ -244,7 +245,7 @@ impl WgpuRenderer {
         let (mut linear_hdr, mut ambient) = if shop_scene {
             (
                 self.shop_env_linear_exposure
-                    * crate::render::room_glb::SHOP_ENV_LINEAR_EXPOSURE_BASE,
+                    * crate::render::room_glb::ROOM_GLB_LINEAR_EXPOSURE_BASE,
                 self.shop_env_ambient_scale,
             )
         } else {
@@ -262,11 +263,15 @@ impl WgpuRenderer {
         // not the gameplay-table multiplier meant for mahjong tiles on felt.
         if frame.scene_lighting.embedded_gltf_punctual && !shop_scene {
             let mut e = self.shop_env_linear_exposure
-                * crate::render::room_glb::SHOP_ENV_LINEAR_EXPOSURE_BASE;
+                * crate::render::room_glb::ROOM_GLB_LINEAR_EXPOSURE_BASE;
             let mut a = self.shop_env_ambient_scale;
             if k == Some("pick_blind") {
                 e *= crate::render::hallway_glb::HALLWAY_ENV_LINEAR_EXPOSURE_MUL;
                 a = a.max(crate::render::hallway_glb::HALLWAY_ENV_AMBIENT_SCALE_MIN);
+            }
+            if k == Some("main_menu_exterior") {
+                e *= crate::render::main_menu_glb::MAIN_MENU_ENV_LINEAR_EXPOSURE_MUL;
+                a = a.max(crate::render::main_menu_glb::MAIN_MENU_ENV_AMBIENT_SCALE_MIN);
             }
             if k == Some("collection") || (k == Some("showcase") && h.collection_tonemap_context) {
                 e *= crate::render::archive_glb::ARCHIVE_ENV_LINEAR_EXPOSURE_MUL;
@@ -301,8 +306,12 @@ impl WgpuRenderer {
         // keep that shop-only so archive relics do not stack extra fill on top
         // of corrected punctual.
         let shop_punctual_inv_doc = if frame.scene_lighting.embedded_gltf_punctual {
-            let s =
-                crate::render::room_glb::room_env_world_scale(cam.h, self.room_gltf_height_scale);
+            let height_scale = if self.active_scene_key == Some("main_menu_exterior") {
+                crate::render::main_menu_glb::main_menu_env_height_scale(self.room_gltf_height_scale)
+            } else {
+                self.room_gltf_height_scale
+            };
+            let s = crate::render::room_glb::room_env_world_scale(cam.h, height_scale);
             1.0 / s.max(1e-6)
         } else {
             0.0

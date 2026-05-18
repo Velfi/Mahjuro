@@ -161,6 +161,8 @@ pub struct GameplayScene {
     /// game's `Instant::now()` references so the candles keep moving even if
     /// the game logic is paused).
     candle_time: f32,
+    /// Deal-wind snuff envelope in [~0.12, 1.0]; shared by flames and point lights.
+    candle_wind_dim: f32,
     /// Per-relic glow start times. Populated as the cascade reveals each step
     /// whose source matches a relic display name. The glow fades over
     /// `RELIC_GLOW_LIFETIME` and the entry is evicted afterward.
@@ -456,6 +458,7 @@ impl GameplayScene {
                 CandleState::new(2.6),
             ],
             candle_time: 0.0,
+            candle_wind_dim: 1.0,
             relic_glow_starts: rustc_hash::FxHashMap::default(),
             last_revealed_step: None,
             cascade_final_emitted: false,

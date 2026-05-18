@@ -12,9 +12,41 @@ use glam::{Mat4, Vec2, Vec3, Vec4};
 use crate::render::draw_cmd::CameraParams;
 use crate::render::gltf_helpers::{apply_texture_transform, sampler_cpu_from_material};
 use crate::render::tile_glb::{
-    GltfAlphaMode, LoadedPrimitive, Vertex3dTex, compute_vertex_tangents, gltf_image_to_rgba8,
+    GltfAlphaMode, LoadedPrimitive, Vertex3dTex, compute_vertex_tangents, gltf_image_to_rgba8_capped,
     multiply_rgba8_by_factor, solid_albedo_rgba8,
 };
+
+/// Longest edge for shop / hallway / archive / main-menu room glTF textures (tiles stay 256).
+pub const ROOM_ENV_TEXTURE_MAX_DIMENSION: u32 = 1024;
+
+#[inline]
+fn room_env_gltf_image_to_rgba8(img: &gltf::image::Data) -> Option<(Vec<u8>, u32, u32)> {
+    gltf_image_to_rgba8_capped(img, ROOM_ENV_TEXTURE_MAX_DIMENSION)
+}
+
+/// `COLOR_0.a` tag: archive sign description samples [`decal_tex`](../../shaders/room_glb.wgsl) at `uv`.
+pub const ROOM_ENV_COLOR_A_ARCHIVE_DECAL: f32 = 2.0;
+/// `COLOR_0.a` tag: shop candle wax samples baked SSS at `uv` (glTF `TEXCOORD_1`).
+pub const ROOM_ENV_COLOR_A_CANDLE_SSS_BAKE: f32 = 4.0;
+
+/// glTF node prefix for shop environment candle **meshes** (not `light_candle*` punctuals).
+pub const SHOP_CANDLE_WAX_NODE_PREFIX: &str = "Candle";
+/// Blender material name on exported shop candle geometry.
+pub const SHOP_CANDLE_WAX_MATERIAL_NAME: &str = "Wax SSS translucent shader";
+/// Baked subsurface pass (linear RGB) sampled with `TEXCOORD_1` — rebake after moving candles.
+pub const SHOP_CANDLE_SSS_BAKE_TEXTURE: &str = "textures/shop/candle_sss.png";
+
+/// Shop [`shop.glb`](../../../assets/3d/shop.glb) candle votive mesh (wax body).
+#[inline]
+pub fn is_shop_candle_wax_mesh(gltf_node_name: &str, material_name: Option<&str>) -> bool {
+    gltf_node_name.starts_with(SHOP_CANDLE_WAX_NODE_PREFIX)
+        || material_name == Some(SHOP_CANDLE_WAX_MATERIAL_NAME)
+}
+
+#[inline]
+pub fn is_shop_candle_wax_node_name(node: &str) -> bool {
+    node.starts_with(SHOP_CANDLE_WAX_NODE_PREFIX)
+}
 
 /// One environment mesh primitive plus embedded glTF sampler parameters for GPU samplers.
 pub struct RoomEnvPrimitiveCpu {
@@ -60,8 +92,9 @@ impl RoomEnvironmentBounds {
 }
 
 /// [`KHR_lights_punctual`] point light — positions in **document units** (same as mesh).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct RoomGltfEmbeddedPointLight {
+    pub node_name: String,
     pub pos_doc: Vec3,
     pub color_linear: [f32; 3],
     pub is_candle: bool,
@@ -509,6 +542,8 @@ pub fn decode_env_primitive(
 ) -> anyhow::Result<RoomEnvPrimitiveCpu> {
     let normal_xform = node_world.inverse().transpose();
     let material = primitive.material();
+    let material_name = material.name();
+    let is_candle_wax = is_shop_candle_wax_mesh(gltf_node_name, material_name);
     let sampler_cpu = sampler_cpu_from_material(&material);
 
     let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
@@ -531,6 +566,14 @@ pub fn decode_env_primitive(
 
     let pbr = material.pbr_metallic_roughness();
     let base_tex_coord = pbr.base_color_texture().map(|t| t.tex_coord()).unwrap_or(0);
+    let mr_tex_coord = pbr
+        .metallic_roughness_texture()
+        .map(|t| t.tex_coord())
+        .unwrap_or(base_tex_coord);
+    let normal_tex_coord = material
+        .normal_texture()
+        .map(|t| t.tex_coord())
+        .unwrap_or(mr_tex_coord);
 
     let mut uvs: Vec<[f32; 2]> = if let Some(tc) = reader.read_tex_coords(base_tex_coord) {
         tc.into_f32().collect()
@@ -547,7 +590,29 @@ pub fn decode_env_primitive(
         apply_texture_transform(&mut uvs, &tex_info);
     }
 
-    let mut uv_emr = uvs.clone();
+    // `room_glb.wgsl` samples MR / normal / emissive at `uv_emr` (see `VsOut.uv_emr`).
+    let emr_tex_coord = if normal_tex_coord == mr_tex_coord {
+        mr_tex_coord
+    } else {
+        log::warn!(
+            "{log_asset_label} {gltf_node_name}: normal texCoord {normal_tex_coord} != MR {mr_tex_coord} — using MR set"
+        );
+        mr_tex_coord
+    };
+
+    let mut uv_emr: Vec<[f32; 2]> = if let Some(tc) = reader.read_tex_coords(emr_tex_coord) {
+        tc.into_f32().collect()
+    } else {
+        uvs.clone()
+    };
+    anyhow::ensure!(
+        uv_emr.len() == positions_local.len(),
+        "EMR TEXCOORD count does not match POSITION count"
+    );
+    if let Some(tex_info) = pbr.metallic_roughness_texture() {
+        apply_texture_transform(&mut uv_emr, &tex_info);
+    }
+
     let mut tangents_local: Vec<[f32; 4]> = if let Some(t_iter) = reader.read_tangents() {
         let t: Vec<[f32; 4]> = t_iter.map(|a| [a[0], a[1], a[2], a[3]]).collect();
         anyhow::ensure!(
@@ -559,20 +624,8 @@ pub fn decode_env_primitive(
         Vec::new()
     };
 
-    if let Some(nt) = material.normal_texture() {
-        let set = nt.tex_coord();
-        if set != base_tex_coord {
-            uv_emr = if let Some(tc) = reader.read_tex_coords(set) {
-                tc.into_f32().collect()
-            } else {
-                uvs.clone()
-            };
-            anyhow::ensure!(
-                uv_emr.len() == positions_local.len(),
-                "normal TEXCOORD count does not match POSITION count"
-            );
-            tangents_local.clear();
-        }
+    if material.normal_texture().is_some() && normal_tex_coord != emr_tex_coord {
+        tangents_local.clear();
     }
 
     let indices: Vec<u32> = if let Some(ids) = reader.read_indices() {
@@ -584,6 +637,25 @@ pub fn decode_env_primitive(
     if tangents_local.is_empty() {
         tangents_local =
             compute_vertex_tangents(&positions_local, &normals_local, &uv_emr, &indices);
+    }
+
+    // Candle wax: `uv` = lightmap (`TEXCOORD_1`) for baked SSS; `uv_emr` stays on set 0 for defaults.
+    if is_candle_wax {
+        if let Some(tc1) = reader.read_tex_coords(1) {
+            let uv1: Vec<[f32; 2]> = tc1.into_f32().collect();
+            if uv1.len() == positions_local.len() {
+                uvs = uv1;
+            } else {
+                log::warn!(
+                    "{log_asset_label} {gltf_node_name}: TEXCOORD_1 count mismatch for candle SSS"
+                );
+            }
+        }
+        uv_emr = if let Some(tc0) = reader.read_tex_coords(0) {
+            tc0.into_f32().collect()
+        } else {
+            vec![[0.0, 0.0]; positions_local.len()]
+        };
     }
 
     let colors: Vec<[f32; 4]> = if let Some(iter) = reader.read_colors(0) {
@@ -652,17 +724,21 @@ pub fn decode_env_primitive(
             }
         })
         .collect();
-    // `room_glb.wgsl` composites `@binding(3)` decal_tex when `COLOR_0.a > 1`.
+    // `room_glb.wgsl` composites `@binding(3)` decal_tex when `COLOR_0.a` matches tags below.
     if is_archive_sign {
         for v in &mut vertices {
-            v.color[3] = 2.0;
+            v.color[3] = ROOM_ENV_COLOR_A_ARCHIVE_DECAL;
+        }
+    } else if is_candle_wax {
+        for v in &mut vertices {
+            v.color[3] = ROOM_ENV_COLOR_A_CANDLE_SSS_BAKE;
         }
     }
     let factor = pbr.base_color_factor();
 
     let mut albedo_rgba = pbr.base_color_texture().and_then(|tex_info| {
         let img_index = tex_info.texture().source().index();
-        images.get(img_index).and_then(gltf_image_to_rgba8)
+        images.get(img_index).and_then(room_env_gltf_image_to_rgba8)
     });
 
     if albedo_rgba.is_none() && pbr.base_color_texture().is_some() {
@@ -675,10 +751,16 @@ pub fn decode_env_primitive(
     match &mut albedo_rgba {
         Some((pix, _, _)) => multiply_rgba8_by_factor(pix, &factor),
         None => {
-            let want_fallback_tex =
-                factor != [1.0, 1.0, 1.0, 1.0] || pbr.base_color_texture().is_some();
+            let want_fallback_tex = is_candle_wax
+                || factor != [1.0, 1.0, 1.0, 1.0]
+                || pbr.base_color_texture().is_some();
             if want_fallback_tex {
-                albedo_rgba = Some(solid_albedo_rgba8(&factor));
+                let wax_factor = if is_candle_wax {
+                    [0.94, 0.86, 0.62, 1.0]
+                } else {
+                    factor
+                };
+                albedo_rgba = Some(solid_albedo_rgba8(&wax_factor));
             }
         }
     }
@@ -688,7 +770,7 @@ pub fn decode_env_primitive(
         let img_index = nt.texture().source().index();
         images
             .get(img_index)
-            .and_then(gltf_image_to_rgba8)
+            .and_then(room_env_gltf_image_to_rgba8)
             .map(|mut tex| {
                 apply_normal_scale_rgba8(&mut tex.0, scale);
                 tex
@@ -704,16 +786,26 @@ pub fn decode_env_primitive(
 
     let metallic_roughness_rgba = pbr.metallic_roughness_texture().and_then(|tex_info| {
         let img_index = tex_info.texture().source().index();
-        images.get(img_index).and_then(gltf_image_to_rgba8)
+        images.get(img_index).and_then(room_env_gltf_image_to_rgba8)
     });
 
     let emissive_rgba = material.emissive_texture().and_then(|tex_info| {
         let img_index = tex_info.texture().source().index();
-        images.get(img_index).and_then(gltf_image_to_rgba8)
+        images.get(img_index).and_then(room_env_gltf_image_to_rgba8)
     });
 
     let alpha_mode = GltfAlphaMode::from(material.alpha_mode());
     let alpha_cutoff = material.alpha_cutoff().unwrap_or(0.5);
+    let (metallic_factor, roughness_factor) = if is_candle_wax {
+        (0.0, 0.88)
+    } else {
+        (pbr.metallic_factor(), pbr.roughness_factor())
+    };
+    let emissive_factor = if is_candle_wax {
+        [0.0, 0.0, 0.0]
+    } else {
+        crate::render::gltf_helpers::effective_gltf_emissive_rgb(&material)
+    };
 
     Ok(RoomEnvPrimitiveCpu {
         gltf_node_name: if gltf_node_name.is_empty() {
@@ -728,9 +820,9 @@ pub fn decode_env_primitive(
             normal_rgba,
             metallic_roughness_rgba,
             emissive_rgba,
-            metallic_factor: pbr.metallic_factor(),
-            roughness_factor: pbr.roughness_factor(),
-            emissive_factor: crate::render::gltf_helpers::effective_gltf_emissive_rgb(&material),
+            metallic_factor,
+            roughness_factor,
+            emissive_factor,
             alpha_mode,
             alpha_cutoff,
             double_sided: material.double_sided(),
@@ -759,6 +851,7 @@ pub fn harvest_khr_punctual_light(
         Kind::Point => {
             let pos_doc = world.transform_point3(Vec3::ZERO);
             points.push(RoomGltfEmbeddedPointLight {
+                node_name: node_name.to_string(),
                 pos_doc,
                 color_linear,
                 is_candle,
@@ -803,6 +896,12 @@ pub fn harvest_khr_punctual_light(
     }
 }
 
+/// Boolean-operand meshes that stay in the glTF export but must not draw at runtime.
+#[inline]
+pub fn skip_room_env_authoring_mesh_node_name(name: &str) -> bool {
+    name == "subtractor"
+}
+
 /// How mesh geometry under a node contributes to environment draw + picking.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RoomMeshPolicy {
@@ -819,6 +918,10 @@ pub trait RoomEnvWalkHooks {
     fn is_marker(&self, name: &str) -> bool;
     fn mesh_policy(&self, name: &str) -> RoomMeshPolicy;
     fn log_asset_label(&self) -> &'static str;
+    /// Authoring-only instances (e.g. scattered foliage cards) that must not draw or affect bounds.
+    fn skip_env_mesh(&self, _name: &str) -> bool {
+        false
+    }
 }
 
 /// Mutable harvest targets for [`walk_room_env_node`].
@@ -880,6 +983,7 @@ pub fn walk_room_env_node(
         }
 
     if let Some(mesh) = node.mesh() {
+        if !skip_room_env_authoring_mesh_node_name(name) && !hooks.skip_env_mesh(name) {
         match hooks.mesh_policy(name) {
             RoomMeshPolicy::SkipDrawCollisionIfMarker => {
                 if hooks.is_marker(name) {
@@ -927,6 +1031,7 @@ pub fn walk_room_env_node(
                     state.env_primitives.push(decoded);
                 }
             }
+        }
         }
     }
 

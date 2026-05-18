@@ -200,26 +200,6 @@ impl CameraParams {
 /// Consumed by [`crate::render::world_space::pixel_to_world`].
 pub type WorldSurfaceAnchor = [f32; 3];
 
-/// One soft wind impulse sampled by the procedural candle-flame particle system.
-///
-/// Coordinates use the same `(pixel_x, pixel_y)` convention as the rest of the
-/// scene draw output: [`crate::render::world_space::pixel_to_world`] maps the
-/// center to world space. Velocity is in **world** units (**+Z** up from the felt).
-#[derive(Clone, Copy, Debug)]
-pub struct WindGust {
-    /// `(pixel_x, pixel_y)` center of the gust in layout-pixel space.
-    pub center_px: (f32, f32),
-    /// Height in world **+Z** above the felt.
-    pub lift: f32,
-    /// Velocity in world units per second (x, y, z).
-    pub velocity: [f32; 3],
-    /// Impulse radius in world units.
-    pub radius: f32,
-    /// Gameplay still supplies this for scripted gusts; flame bending uses `velocity` only.
-    #[allow(dead_code)]
-    pub density: f32,
-}
-
 // ── Skeuomorphic gameplay HUD placements ──────────────────────────────────
 //
 // Phase 1 of the in-game UI redesign: physical objects rendered through the
@@ -362,7 +342,7 @@ pub struct TileFaceQuad {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum PromptIconSource {
+pub enum ImageQuadSource {
     /// Sub-rectangle of a baked Kenney Input Prompts sheet PNG. `sheet` is the
     /// asset-relative path (under `assets/`) to the `_sheet_double.png`; `name`
     /// is the matching `SubTexture name="…"` from the sibling XML index. The
@@ -378,26 +358,31 @@ pub enum PromptIconSource {
         sheet: &'static str,
         name: &'static str,
     },
+    /// Full embedded PNG under `assets/` (via [`crate::asset_path::get`]).
+    Asset {
+        path: &'static str,
+    },
     /// Absolute filesystem path to an SVG or PNG (rasterized at draw time).
     #[allow(dead_code)] // No current producer; renderer path kept for tooling / experiments.
     Filesystem(std::path::PathBuf),
 }
 
-impl PromptIconSource {
+impl ImageQuadSource {
     pub fn cache_key(&self) -> String {
         match self {
             Self::AtlasSprite { sheet, name } => format!("atlas:{sheet}:{name}"),
             Self::PackedAtlas { sheet, name } => format!("packed-atlas:{sheet}:{name}"),
+            Self::Asset { path } => format!("asset:{path}"),
             Self::Filesystem(path) => format!("file:{}", path.display()),
         }
     }
 }
 
-/// Input prompt drawn as a tinted image quad (`shaders/image_quad.wgsl`).
+/// Screen-space RGBA texture quad (`shaders/image_quad.wgsl`).
 #[derive(Clone, Debug)]
-pub struct PromptIconQuad {
+pub struct ImageQuad {
     pub inst: GpuInstance,
-    pub source: PromptIconSource,
+    pub source: ImageQuadSource,
 }
 
 // ── General-purpose 3D placement ─────────────────────────────────────────
@@ -581,7 +566,7 @@ pub enum Object3dKind {
         /// Which counter this fan represents (drives arrange-name + peg_rects slot).
         kind: TallyFanKind,
     },
-    /// One hovering insect near a light source (e.g. shop lamp). The scene emits
+    /// One hovering insect near a light source (main-menu door light). The scene emits
     /// one `Bug` per insect per frame, with `slot` ∈ `0..MAX_BUG_SLOTS`.
     ///
     /// `flap_rad` is the wing flap angle in radians about the body's local +X.
@@ -689,6 +674,8 @@ pub enum DrawCmd {
     /// Procedural rising-ember vignette (fullscreen triangle, no data).
     #[allow(dead_code)]
     EmberDrift,
+    /// Procedural rainfall vignette (fullscreen triangle, no data).
+    Rain,
     /// Procedural golden-dust with god-rays vignette (fullscreen triangle, no data).
     GoldenDust,
     /// Procedural moon hovering above rippling water (fullscreen triangle, no data).
@@ -724,6 +711,8 @@ pub enum DrawCmd {
     HallwayEnvironment,
     /// Imported `archive.glb` Archive room (same GPU path as [`DrawCmd::ShopEnvironment`]).
     ArchiveEnvironment,
+    /// Imported `main_menu.glb` hub waterfront (same GPU path as [`DrawCmd::ShopEnvironment`]).
+    MainMenuEnvironment,
     /// Reset the main scene depth target while keeping the HDR color buffer. Later 3D
     /// draws (same camera) composite by depth among themselves but no longer test
     /// against geometry drawn before this marker — e.g. pack celebration meshes over
@@ -734,8 +723,11 @@ pub enum DrawCmd {
     ShowcaseTileBatch(Vec<ShowcaseTilePlacement>),
     /// Flat screen-space tile face using the real per-tile decal art.
     TileFaceQuad(TileFaceQuad),
-    /// Generic 2D quad (panels, dimmers, borders, tooltip backgrounds…).
+    /// Generic 2D quad (panels, dimmers, borders…).
     Quad(GpuInstance),
+    /// Screen-space quad drawn after tonemap (tooltip frames, etc.) so bright
+    /// HDR bloom cannot paint over UI panels.
+    OverlayQuad(GpuInstance),
     /// 2D quad with a superellipse (squircle) silhouette — same `GpuInstance`
     /// payload as [`DrawCmd::Quad`]. See `shaders/squircle_quad.wgsl`.
     SquircleQuad(GpuInstance),
@@ -749,10 +741,10 @@ pub enum DrawCmd {
     Flame(GpuInstance),
     /// Rasterized text label.
     Text(TextLabel),
-    /// Embedded SVG prompt icon (Kenney); rasterized once per `asset_rel_path`.
-    PromptIconQuad(PromptIconQuad),
+    /// Tinted RGBA texture quad (logos, Kenney prompts, atlas sprites, …).
+    ImageQuad(ImageQuad),
     // ── Skeuomorphic gameplay HUD ──
-    /// Batch of wood action tablets (sort suit / sort rank / play).
+    /// Batch of wood action tablets (cash-in).
     /// Floating 3D extruded-glyph score popups. Each placement carries its
     /// own label string; the renderer lazily builds a per-string mesh on
     /// first use and reuses it on subsequent frames.
@@ -799,9 +791,6 @@ pub struct UiFrame {
     pub flame_height_world: f32,
     /// Mouse cursor position in pixel coordinates, if the scene tracks one.
     pub cursor_pos: Option<(f32, f32)>,
-    /// Discrete wind impulses for candle flame particles (see [`WindGust`]).
-    /// Gameplay uses these for scripted "breath" across the table after dealing.
-    pub wind_gusts: Vec<WindGust>,
     /// Optional 3D camera override. When `Some`, the renderer uses this
     /// camera (eye/target/up/fovy) for all 3D draws this frame instead of
     /// the default "person at the table" gameplay camera. The shop scene
@@ -861,6 +850,9 @@ pub struct UiFrame {
     /// When true, skip offline room GI probe bake and run dynamic `emissive-probe-update`.
     /// Shop sets this during item-inspect camera dolly / orbit.
     pub room_gi_dynamic: bool,
+    /// World-space flame emitters without a [`Object3dKind::Candle`] mesh (e.g. shop
+    /// `light_candle_*` punctual lights). Merged into the particle system each frame.
+    pub procedural_flame_emitters: Vec<crate::render::flame_volume::FlameEmitter>,
 }
 
 impl UiFrame {
@@ -871,7 +863,6 @@ impl UiFrame {
             candle_light_count: 0,
             flame_height_world: 0.0,
             cursor_pos: None,
-            wind_gusts: Vec::new(),
             camera_override: None,
             debug_axes: false,
             tile_material_override: None,
@@ -887,6 +878,7 @@ impl UiFrame {
             archive_sign_description_decal_text: None,
             hallway_distortion: None,
             room_gi_dynamic: false,
+            procedural_flame_emitters: Vec::new(),
         }
     }
 
@@ -900,7 +892,7 @@ impl UiFrame {
     pub fn background(&mut self, bg: BackgroundId) {
         self.cmds.push(DrawCmd::Background(bg));
     }
-    /// Draw the 3D shop from embedded [`Shop.glb`](../../assets/3d/Shop.glb). No-op if the asset failed to load.
+    /// Draw the 3D shop from embedded [`shop.glb`](../../assets/3d/shop.glb). No-op if the asset failed to load.
     pub fn shop_environment(&mut self) {
         self.cmds.push(DrawCmd::ShopEnvironment);
     }
@@ -912,6 +904,10 @@ impl UiFrame {
     pub fn archive_environment(&mut self) {
         self.cmds.push(DrawCmd::ArchiveEnvironment);
     }
+    /// Draw [`main_menu.glb`](../../assets/3d/main_menu.glb). No-op if the asset failed to load.
+    pub fn main_menu_environment(&mut self) {
+        self.cmds.push(DrawCmd::MainMenuEnvironment);
+    }
     /// See [`DrawCmd::ClearSceneDepth`].
     pub fn clear_scene_depth(&mut self) {
         self.cmds.push(DrawCmd::ClearSceneDepth);
@@ -922,6 +918,9 @@ impl UiFrame {
     #[allow(dead_code)]
     pub fn ember_drift(&mut self) {
         self.cmds.push(DrawCmd::EmberDrift);
+    }
+    pub fn rain(&mut self) {
+        self.cmds.push(DrawCmd::Rain);
     }
     pub fn golden_dust(&mut self) {
         self.cmds.push(DrawCmd::GoldenDust);
@@ -943,6 +942,10 @@ impl UiFrame {
     }
     pub fn quads<I: IntoIterator<Item = GpuInstance>>(&mut self, iter: I) {
         self.cmds.extend(iter.into_iter().map(DrawCmd::Quad));
+    }
+    pub fn overlay_quads<I: IntoIterator<Item = GpuInstance>>(&mut self, iter: I) {
+        self.cmds
+            .extend(iter.into_iter().map(DrawCmd::OverlayQuad));
     }
 
     pub fn squircle_quads<I: IntoIterator<Item = GpuInstance>>(&mut self, iter: I) {
@@ -983,9 +986,8 @@ impl UiFrame {
             .extend(iter.into_iter().map(DrawCmd::TileFaceQuad));
     }
 
-    pub fn prompt_icon_quads<I: IntoIterator<Item = PromptIconQuad>>(&mut self, iter: I) {
-        self.cmds
-            .extend(iter.into_iter().map(DrawCmd::PromptIconQuad));
+    pub fn image_quads<I: IntoIterator<Item = ImageQuad>>(&mut self, iter: I) {
+        self.cmds.extend(iter.into_iter().map(DrawCmd::ImageQuad));
     }
 
     /// Apply a global alpha multiplier to every queued cmd's color.
@@ -997,9 +999,10 @@ impl UiFrame {
         for cmd in self.cmds.iter_mut() {
             match cmd {
                 DrawCmd::Quad(inst) => inst.color[3] *= alpha,
+                DrawCmd::OverlayQuad(inst) => inst.color[3] *= alpha,
                 DrawCmd::SquircleQuad(inst) => inst.color[3] *= alpha,
                 DrawCmd::TileFaceQuad(face) => face.inst.color[3] *= alpha,
-                DrawCmd::PromptIconQuad(icon) => icon.inst.color[3] *= alpha,
+                DrawCmd::ImageQuad(icon) => icon.inst.color[3] *= alpha,
                 DrawCmd::GradientQuad(inst) => inst.color[3] *= alpha,
                 // Flame `color.a` is a phase offset, not a transparency.
                 // Don't scale it on transitions — the flame fades naturally
@@ -1009,6 +1012,7 @@ impl UiFrame {
                 DrawCmd::Background(_)
                 | DrawCmd::Starfield
                 | DrawCmd::EmberDrift
+                | DrawCmd::Rain
                 | DrawCmd::GoldenDust
                 | DrawCmd::MoonlitWater
                 | DrawCmd::SunlitWater
@@ -1016,6 +1020,7 @@ impl UiFrame {
                 | DrawCmd::ShopEnvironment
                 | DrawCmd::HallwayEnvironment
                 | DrawCmd::ArchiveEnvironment
+                | DrawCmd::MainMenuEnvironment
                 | DrawCmd::ClearSceneDepth
                 | DrawCmd::Table
                 | DrawCmd::ShowcaseTileBatch(_)
@@ -1050,6 +1055,7 @@ pub fn apply_modal_relic_staging(
                 | DrawCmd::ShopEnvironment
                 | DrawCmd::HallwayEnvironment
                 | DrawCmd::ArchiveEnvironment
+                | DrawCmd::MainMenuEnvironment
                 | DrawCmd::Table
         )
     });

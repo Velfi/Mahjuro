@@ -63,7 +63,7 @@ pub const MAX_RELIC_SLOTS: usize = 128;
 pub const MAX_RIBBON_SLOTS: usize = 48;
 /// Maximum number of talisman tablets rendered per frame.
 pub const MAX_TALISMAN_SLOTS: usize = 8;
-/// Maximum number of 3D bugs (insects near the lamp) rendered per frame.
+/// Maximum number of 3D moths (main-menu door light) rendered per frame.
 /// Each live bug consumes one slot for body + two for live wings + two for
 /// blur-fan surrogates (L/R). The blur-fan slot pools share this same size.
 pub const MAX_BUG_SLOTS: usize = 8;
@@ -71,11 +71,11 @@ pub const MAX_BUG_SLOTS: usize = 8;
 /// material viewer debug scene uses these; 32 covers every `MaterialKind`
 /// with room to grow.
 pub const MAX_ORB_SLOTS: usize = 32;
-/// Maximum number of dora-plinth instances per frame (gameplay uses 1).
+/// Maximum number of dora-plinth instances per frame (gameplay: dora + round wind).
 pub const MAX_DORA_PLINTH_SLOTS: usize = 2;
 /// Maximum number of yaku tablets per frame (5 visible + headroom).
 pub const MAX_YAKU_TABLET_SLOTS: usize = 12;
-/// Maximum number of wood action tablets per frame (sort suit, sort rank, play).
+/// Maximum number of wood action tablets per frame (cash-in).
 pub const MAX_WOOD_TABLET_SLOTS: usize = 8;
 /// Maximum number of leather books per frame (shop uses 1: journal).
 pub const MAX_BOOK_SLOTS: usize = 2;

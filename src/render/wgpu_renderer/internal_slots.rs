@@ -169,7 +169,7 @@ pub(crate) struct ShowcaseTileGpu {
     pub tile_id: (Suit, u8, Option<crate::core::tile::TileEnhancement>, bool),
 }
 
-/// GPU uniforms + bind groups for the imported [`Shop.glb`](../../assets/3d/Shop.glb) environment mesh.
+/// GPU uniforms + bind groups for the imported [`shop.glb`](../../assets/3d/shop.glb) environment mesh.
 /// Uses the same tile textured pipeline as hand tiles; vertices are already in world space (`model = I`).
 pub(crate) struct ShopEnvironmentGpu {
     pub uniform_buffer: wgpu::Buffer,
@@ -178,6 +178,9 @@ pub(crate) struct ShopEnvironmentGpu {
     pub bind_groups: Vec<wgpu::BindGroup>,
     /// Archive room only: CPU-updated decal atlas at `@group(0) @binding(3)`.
     pub archive_sign_decal_texture: Option<wgpu::Texture>,
+    /// Retains the shop candle SSS bake GPU resource (`textures/shop/candle_sss.png`).
+    #[allow(dead_code)]
+    pub shop_candle_sss_texture: Option<wgpu::Texture>,
 }
 
 pub(crate) struct TileFaceOverlayGpu {

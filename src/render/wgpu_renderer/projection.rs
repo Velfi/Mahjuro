@@ -27,6 +27,7 @@ pub struct ProjectionCache {
     pub mirror_rect: Option<[f32; 4]>,
     pub aux_dish_rects: Vec<(Option<u32>, [f32; 4])>,
     pub dora_plinth_rect: Option<[f32; 4]>,
+    pub round_wind_plinth_rect: Option<[f32; 4]>,
 }
 
 /// Active arrange-mode override for the renderer. When set, the matching

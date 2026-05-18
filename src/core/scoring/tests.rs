@@ -21,6 +21,7 @@ fn ctx_with(relics: &RelicState, scored_last_turn: bool) -> ScoreContext<'_> {
             scored_last_turn,
             plays_used: 0,
             round_wind: None,
+            bonus_round_wind: None,
             played_yaku_this_round: vec![],
             is_final_play: false,
         },
@@ -433,7 +434,7 @@ fn dora_chips_per_matching_tile() {
         breakdown.steps[idx - 1].running_chips
     };
     let dora_delta = breakdown.steps[idx].running_chips - prev_chips;
-    assert_eq!(dora_delta, 75);
+    assert_eq!(dora_delta, 300);
 }
 
 #[test]
@@ -507,8 +508,8 @@ fn dora_crown_alone_adds_ten_per_dora() {
     let mut ctx = ctx_with(&r, false);
     ctx.pattern.dora_faces = vec![(Suit::Characters, 5)];
     let breakdown = score_sets(&hand, &sets, &ctx, &[]);
-    // 3 dora * (25 base + 10 crown bonus) = 105
-    assert_eq!(dora_chips_delta(&breakdown), 105);
+    // 3 dora * (100 base + 10 crown bonus) = 330
+    assert_eq!(dora_chips_delta(&breakdown), 330);
 }
 
 #[test]
@@ -523,8 +524,8 @@ fn mirror_tile_doubles_dora_crown_bonus() {
     let mut ctx = ctx_with(&r, false);
     ctx.pattern.dora_faces = vec![(Suit::Characters, 5)];
     let breakdown = score_sets(&hand, &sets, &ctx, &[]);
-    // 3 dora * 25 base + (3 dora * 10 crown bonus) * 2 (mirror) = 75 + 60 = 135
-    assert_eq!(dora_chips_delta(&breakdown), 135);
+    // 3 dora * 100 base + (3 dora * 10 crown bonus) * 2 (mirror) = 300 + 60 = 360
+    assert_eq!(dora_chips_delta(&breakdown), 360);
 }
 
 fn flower_chips_delta(breakdown: &ScoreBreakdown) -> i32 {
@@ -599,5 +600,24 @@ fn kokushi_musou_scores_when_omitted_from_available_yaku() {
         breakdown.detected_yaku.contains(&YakuKind::KokushiMusou),
         "expected Kokushi despite secret-yaku filter, got {:?}",
         breakdown.detected_yaku
+    );
+}
+
+#[test]
+fn format_meld_groups_matches_cascade_set_labels() {
+    use crate::core::hand::{DetectedMeld, MeldKind};
+    let tiles: Vec<Tile> = (0..16)
+        .map(|i| Tile::new(Suit::Dots, 9, i))
+        .collect();
+    let sets: Vec<DetectedMeld> = (0..4)
+        .map(|k| DetectedMeld {
+            kind: MeldKind::Kong,
+            tile_ids: (k * 4..k * 4 + 4).map(|i| i as u32).collect(),
+        })
+        .collect();
+    let out = format_meld_groups(&tiles, &sets).expect("labels");
+    assert_eq!(
+        out,
+        "Kong  9p 9p 9p 9p · Kong  9p 9p 9p 9p · Kong  9p 9p 9p 9p · Kong  9p 9p 9p 9p"
     );
 }

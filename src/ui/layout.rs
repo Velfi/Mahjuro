@@ -10,7 +10,7 @@ use cassowary::WeightedRelation::*;
 use cassowary::strength::{REQUIRED, STRONG};
 use cassowary::{Solver, Variable};
 
-use crate::game::run::HAND_SIZE;
+use crate::game::game_mode::HAND_SIZE;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Rect {

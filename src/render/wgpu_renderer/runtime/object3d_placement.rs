@@ -211,10 +211,8 @@ impl WgpuRenderer {
                                 name.to_string()
                             } else {
                                 match slot_i {
-                                    0 => "gameplay.action_bar.tablet_sort_suit".to_string(),
-                                    1 => "gameplay.action_bar.tablet_sort_rank".to_string(),
-                                    2 => "gameplay.action_bar.tablet_cash_in".to_string(),
-                                    3 => "gameplay.action_bar.tablet_journal".to_string(),
+                                    0 => "gameplay.action_bar.tablet_cash_in".to_string(),
+                                    1 => "gameplay.action_bar.tablet_journal".to_string(),
                                     _ => "gameplay.action_bar.tablet".to_string(),
                                 }
                             };
@@ -800,7 +798,9 @@ impl WgpuRenderer {
                             }
                             let slot_i = obj3d_dora_plinth_slot;
                             obj3d_dora_plinth_slot += 1;
-                            let plinth_name = "gameplay.dora_plinth";
+                            let plinth_name = obj
+                                .arrange_name
+                                .unwrap_or("gameplay.dora_plinth");
                             // Mesh is built Y-up centered; lift the world position
                             // by half-height so `obj.pos` describes the plinth's
                             // base sitting on the table felt.
@@ -872,8 +872,12 @@ impl WgpuRenderer {
                                     }
                                 }
                             }
-                            self.proj.dora_plinth_rect =
-                                Some([mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]);
+                            let rect = [mn_x, mn_y, mx_x - mn_x, mx_y - mn_y];
+                            if plinth_name.contains("round_wind") {
+                                self.proj.round_wind_plinth_rect = Some(rect);
+                            } else {
+                                self.proj.dora_plinth_rect = Some(rect);
+                            }
                             self.last_debug_pickables.push((
                                 plinth_name.to_string(),
                                 plinth_model,

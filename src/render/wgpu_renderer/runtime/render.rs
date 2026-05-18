@@ -27,6 +27,7 @@ struct OpsFlags {
     shop_env: bool,
     hallway_env: bool,
     archive_env: bool,
+    main_menu_env: bool,
     cascade: bool,
 }
 
@@ -39,11 +40,18 @@ impl OpsFlags {
                 RenderOp::ShopEnvironment => f.shop_env = true,
                 RenderOp::HallwayEnvironment => f.hallway_env = true,
                 RenderOp::ArchiveEnvironment => f.archive_env = true,
+                RenderOp::MainMenuEnvironment => f.main_menu_env = true,
                 RenderOp::ShootingStarCascade => f.cascade = true,
                 _ => {}
             }
             // Early-out: if every flag we care about is set, stop scanning.
-            if f.needs_table && f.shop_env && f.hallway_env && f.archive_env && f.cascade {
+            if f.needs_table
+                && f.shop_env
+                && f.hallway_env
+                && f.archive_env
+                && f.main_menu_env
+                && f.cascade
+            {
                 break;
             }
         }
@@ -641,6 +649,8 @@ impl WgpuRenderer {
         // `PoolSlice` is `(offset, byte_len)` into that single
         // persistent buffer. See `frame_pool.rs`.
         let mut quad_buffers: Vec<crate::render::wgpu_renderer::frame_pool::PoolSlice> = Vec::new();
+        let mut overlay_quad_buffers: Vec<crate::render::wgpu_renderer::frame_pool::PoolSlice> =
+            Vec::new();
         let mut gradient_quad_buffers: Vec<crate::render::wgpu_renderer::frame_pool::PoolSlice> =
             Vec::new();
         let mut squircle_quad_buffers: Vec<crate::render::wgpu_renderer::frame_pool::PoolSlice> =
@@ -654,8 +664,8 @@ impl WgpuRenderer {
         let mut text_draws: Vec<TextDraw> = Vec::new();
         let mut tile_face_quads: Vec<TileFaceQuad> = Vec::new();
         let mut tile_face_inst_buffers: Vec<wgpu::Buffer> = Vec::new();
-        let mut prompt_icon_quads: Vec<crate::render::draw_cmd::PromptIconQuad> = Vec::new();
-        let mut prompt_icon_inst_buffers: Vec<wgpu::Buffer> = Vec::new();
+        let mut image_quads: Vec<crate::render::draw_cmd::ImageQuad> = Vec::new();
+        let mut image_quad_inst_buffers: Vec<wgpu::Buffer> = Vec::new();
         let yaku_tablet_batches: Vec<&[YakuTabletPlacement]> = Vec::new();
         let wall_stack_cmds: Vec<&WallStackPlacement> = Vec::new();
         let mut showcase_tile_batches: Vec<&[ShowcaseTilePlacement]> = Vec::new();
@@ -698,6 +708,10 @@ impl WgpuRenderer {
                     }
                     i += 1;
                 }
+                DrawCmd::Rain => {
+                    ops.push(RenderOp::Rain);
+                    i += 1;
+                }
                 DrawCmd::GoldenDust => {
                     if effects_quality >= crate::persistence::EffectsQuality::Medium {
                         ops.push(RenderOp::GoldenDust);
@@ -738,6 +752,10 @@ impl WgpuRenderer {
                     ops.push(RenderOp::ArchiveEnvironment);
                     i += 1;
                 }
+                DrawCmd::MainMenuEnvironment => {
+                    ops.push(RenderOp::MainMenuEnvironment);
+                    i += 1;
+                }
                 DrawCmd::ClearSceneDepth => {
                     ops.push(RenderOp::ClearSceneDepth);
                     i += 1;
@@ -754,6 +772,22 @@ impl WgpuRenderer {
                     let buf_idx = quad_buffers.len();
                     quad_buffers.push(slice);
                     ops.push(RenderOp::QuadBatch {
+                        buf_idx,
+                        count: batch.len() as u32,
+                    });
+                }
+                DrawCmd::OverlayQuad(_) => {
+                    let mut batch: Vec<GpuInstance> = Vec::new();
+                    while let Some(DrawCmd::OverlayQuad(inst)) = frame.cmds.get(i) {
+                        batch.push(*inst);
+                        i += 1;
+                    }
+                    let slice = self
+                        .frame_buffer_pool
+                        .alloc(&self.device, &self.queue, &batch);
+                    let buf_idx = overlay_quad_buffers.len();
+                    overlay_quad_buffers.push(slice);
+                    ops.push(RenderOp::OverlayQuadBatch {
                         buf_idx,
                         count: batch.len() as u32,
                     });
@@ -799,15 +833,12 @@ impl WgpuRenderer {
                     while let Some(DrawCmd::Flame(_)) = frame.cmds.get(i) {
                         i += 1;
                     }
-                    // Step the particle system once per frame and upload
-                    // the live particles into a fresh instance buffer.
+                    // One Godot-style volume mesh per candle emitter.
                     let flame_time_s = self.creation_time.elapsed().as_secs_f32();
-                    self.flame_particles
-                        .step(&flame_emitters, self.frame_dt, flame_time_s);
-                    let count = self.flame_particles.fill_gpu_instances(
+                    let count = crate::render::flame_volume::fill_gpu_instances(
                         &flame_emitters,
                         flame_time_s,
-                        &mut self.flame_particle_staging,
+                        &mut self.flame_instance_staging,
                     );
                     if count == 0 {
                         // Nothing to draw yet (first frame, or all
@@ -824,7 +855,7 @@ impl WgpuRenderer {
                                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                                     label: Some("flame-particles"),
                                     contents: bytemuck::cast_slice(
-                                        &self.flame_particle_staging[..count],
+                                        &self.flame_instance_staging[..count],
                                     ),
                                     usage: wgpu::BufferUsages::VERTEX,
                                 });
@@ -889,26 +920,26 @@ impl WgpuRenderer {
                     ops.push(RenderOp::TileFaceQuad(idx));
                     i += 1;
                 }
-                DrawCmd::PromptIconQuad(icon) => {
-                    let key = icon.source.cache_key();
-                    if self.prompt_icon_missing.contains(&key) {
+                DrawCmd::ImageQuad(quad) => {
+                    let key = quad.source.cache_key();
+                    if self.image_quad_missing.contains(&key) {
                         i += 1;
                         continue;
                     }
-                    if !self.prompt_icon_overlays.contains_key(&key) {
-                        match make_prompt_icon_overlay_gpu(
+                    if !self.image_quad_overlays.contains_key(&key) {
+                        match make_image_quad_overlay_gpu(
                             &self.device,
                             &self.queue,
                             &self.text_bind_group_layout,
                             &self.tile_sampler,
-                            &icon.source,
+                            &quad.source,
                         ) {
                             Some(gpu) => {
-                                self.prompt_icon_overlays.insert(key.clone(), gpu);
+                                self.image_quad_overlays.insert(key.clone(), gpu);
                             }
                             None => {
-                                log::warn!("prompt icon missing or invalid: {key}");
-                                self.prompt_icon_missing.insert(key);
+                                log::warn!("image quad missing or invalid: {key}");
+                                self.image_quad_missing.insert(key);
                                 i += 1;
                                 continue;
                             }
@@ -917,14 +948,14 @@ impl WgpuRenderer {
                     let buf = self
                         .device
                         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("prompt-icon-quad"),
-                            contents: bytemuck::cast_slice(&[icon.inst]),
+                            label: Some("image-quad-inst"),
+                            contents: bytemuck::cast_slice(&[quad.inst]),
                             usage: wgpu::BufferUsages::VERTEX,
                         });
-                    let idx = prompt_icon_quads.len();
-                    prompt_icon_quads.push(icon.clone());
-                    prompt_icon_inst_buffers.push(buf);
-                    ops.push(RenderOp::PromptIconQuad(idx));
+                    let idx = image_quads.len();
+                    image_quads.push(quad.clone());
+                    image_quad_inst_buffers.push(buf);
+                    ops.push(RenderOp::ImageQuad(idx));
                     i += 1;
                 }
                 DrawCmd::ShowcaseTileBatch(placements) => {
@@ -1185,6 +1216,9 @@ impl WgpuRenderer {
         if ops_flags.archive_env {
             self.write_archive_environment_uniforms(frame, &camera, false);
         }
+        if ops_flags.main_menu_env {
+            self.write_main_menu_environment_uniforms(frame, &camera, false);
+        }
 
         let mut encoder = self
             .device
@@ -1210,14 +1244,15 @@ impl WgpuRenderer {
             frame_pool_buffer: self.frame_buffer_pool.buffer(),
             bg_inst_buffers: &bg_inst_buffers,
             quad_buffers: &quad_buffers,
+            overlay_quad_buffers: &overlay_quad_buffers,
             gradient_quad_buffers: &gradient_quad_buffers,
             squircle_quad_buffers: &squircle_quad_buffers,
             flame_buffers: &flame_buffers,
             text_draws: &text_draws,
             tile_face_inst_buffers: &tile_face_inst_buffers,
             tile_face_quads: &tile_face_quads,
-            prompt_icon_inst_buffers: &prompt_icon_inst_buffers,
-            prompt_icon_quads: &prompt_icon_quads,
+            image_quad_inst_buffers: &image_quad_inst_buffers,
+            image_quads: &image_quads,
             object3d_draw_list: &object3d_draw_list,
             showcase_tile_batches: &showcase_tile_batches,
             tile_glows: &tile_glows,
@@ -1237,14 +1272,15 @@ impl WgpuRenderer {
             frame_pool_buffer: self.frame_buffer_pool.buffer(),
             bg_inst_buffers: &bg_inst_buffers,
             quad_buffers: &quad_buffers,
+            overlay_quad_buffers: &overlay_quad_buffers,
             gradient_quad_buffers: &gradient_quad_buffers,
             squircle_quad_buffers: &squircle_quad_buffers,
             flame_buffers: &flame_buffers,
             text_draws: &text_draws,
             tile_face_inst_buffers: &tile_face_inst_buffers,
             tile_face_quads: &tile_face_quads,
-            prompt_icon_inst_buffers: &prompt_icon_inst_buffers,
-            prompt_icon_quads: &prompt_icon_quads,
+            image_quad_inst_buffers: &image_quad_inst_buffers,
+            image_quads: &image_quads,
             object3d_draw_list: &object3d_draw_list,
             showcase_tile_batches: &showcase_tile_batches,
             tile_glows: &tile_glows,
@@ -1311,7 +1347,12 @@ impl WgpuRenderer {
                         // lacquered-table SSR sample. Gameplay plaques are
                         // `Object3d` meshes (engraved decal on the mesh); they
                         // render here in Pass A like other lit meshes.
-                        if matches!(op, RenderOp::TextDraw(_) | RenderOp::PromptIconQuad(_)) {
+                        if matches!(
+                            op,
+                            RenderOp::TextDraw(_)
+                                | RenderOp::ImageQuad(_)
+                                | RenderOp::OverlayQuadBatch { .. }
+                        ) {
                             continue;
                         }
                         let is_table = matches!(op, RenderOp::Table);
@@ -1329,7 +1370,12 @@ impl WgpuRenderer {
             macro_rules! pass_a_draw_chunk {
                 ($pass:expr, $chunk:expr, $skip_table:expr, $only_table:expr) => {{
                     for op in $chunk.ops.iter() {
-                        if matches!(op, RenderOp::TextDraw(_) | RenderOp::PromptIconQuad(_)) {
+                        if matches!(
+                            op,
+                            RenderOp::TextDraw(_)
+                                | RenderOp::ImageQuad(_)
+                                | RenderOp::OverlayQuadBatch { .. }
+                        ) {
                             continue;
                         }
                         let is_table = matches!(op, RenderOp::Table);
@@ -1499,7 +1545,10 @@ impl WgpuRenderer {
         // thresholding (bloom extract still keys off tonemapped `scene_color` elsewhere).
         let glb_room_bloom_linear = bloom_active
             && frame.uses_room_glb_shader()
-            && (ops_flags.shop_env || ops_flags.hallway_env || ops_flags.archive_env);
+            && (ops_flags.shop_env
+                || ops_flags.hallway_env
+                || ops_flags.archive_env
+                || ops_flags.main_menu_env);
         if glb_room_bloom_linear {
             if ops_flags.shop_env
                 && self.shop_environment.is_some()
@@ -1642,6 +1691,53 @@ impl WgpuRenderer {
                 }
                 self.write_archive_environment_uniforms(frame, &camera, false);
             }
+            if ops_flags.main_menu_env
+                && self.main_menu_environment.is_some()
+                && !self.main_menu_env_primitives.is_empty()
+            {
+                self.write_main_menu_environment_uniforms(frame, &camera, true);
+                {
+                    let room_bloom_ts = self
+                        .gpu_profiler
+                        .pass_writes(crate::render::gpu_profiler::PassSlot::RoomBloom);
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("main-menu-linear-bloom-pass"),
+                        color_attachments: &[
+                            Some(wgpu::RenderPassColorAttachment {
+                                view: &self.shop_linear_bloom_view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                    store: wgpu::StoreOp::Store,
+                                },
+                                depth_slice: None,
+                            }),
+                            Some(wgpu::RenderPassColorAttachment {
+                                view: &self.room_emissive_view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                    store: wgpu::StoreOp::Store,
+                                },
+                                depth_slice: None,
+                            }),
+                        ],
+                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                            view: &self.depth_view,
+                            depth_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Load,
+                                store: wgpu::StoreOp::Store,
+                            }),
+                            stencil_ops: None,
+                        }),
+                        occlusion_query_set: None,
+                        timestamp_writes: room_bloom_ts,
+                        multiview_mask: None,
+                    });
+                    self.draw_main_menu_environment_meshes(&mut pass, frame, true);
+                }
+                self.write_main_menu_environment_uniforms(frame, &camera, false);
+            }
         }
 
         // GI compute / apply / composite are only meaningful when we have
@@ -1650,9 +1746,12 @@ impl WgpuRenderer {
         // clear-only pass + redundant composite when there's no room
         // (loading frames, scenes that pull in `glb_room_bloom_linear`
         // before the GLB has parsed, etc.).
+        let room_gi_bake_capture = self.room_gi_capture_pending.is_some();
+        let room_gi_effects_ok = effects_quality >= crate::persistence::EffectsQuality::Medium
+            || room_gi_bake_capture;
         let room_gi_aabb: Option<(glam::Vec3, glam::Vec3)> = if glb_room_bloom_linear
             && !is_prepass
-            && effects_quality >= crate::persistence::EffectsQuality::Medium
+            && room_gi_effects_ok
         {
             if ops_flags.shop_env {
                 crate::render::room_glb::with_shop_glb_cpu(|cpu| {
@@ -1687,6 +1786,18 @@ impl WgpuRenderer {
                         crate::render::room_glb::room_probe_world_aabb(&corners, 0.035)
                     })
                 })
+            } else if ops_flags.main_menu_env {
+                let env_h = crate::render::main_menu_glb::main_menu_env_height_scale(
+                    self.room_gltf_height_scale,
+                );
+                crate::render::main_menu_glb::with_main_menu_glb_cpu(|cpu| {
+                    cpu.and_then(|c| {
+                        let corners = crate::render::room_glb::room_world_bounds_corners_centered(
+                            camera.h, env_h, c,
+                        );
+                        crate::render::room_glb::room_probe_world_aabb(&corners, 0.035)
+                    })
+                })
             } else {
                 None
             }
@@ -1700,6 +1811,7 @@ impl WgpuRenderer {
                 ops_flags.shop_env,
                 ops_flags.hallway_env,
                 ops_flags.archive_env,
+                ops_flags.main_menu_env,
             )
         } else {
             None
@@ -1712,7 +1824,8 @@ impl WgpuRenderer {
 
         // Quality-dependent GI tuning: Medium cuts dir samples and march steps to ~1/3 of
         // High and doubles the amortization interval, for roughly 6× cheaper compute.
-        let gi_is_high = effects_quality >= crate::persistence::EffectsQuality::High;
+        let gi_is_high = effects_quality >= crate::persistence::EffectsQuality::High
+            || room_gi_bake_capture;
         let gi_dir_samples = if gi_is_high {
             crate::render::room_glb::ROOM_EMISSIVE_PROBE_DIR_SAMPLES
         } else {
@@ -1731,7 +1844,9 @@ impl WgpuRenderer {
 
         let gw = self.size.width.max(1) as f32;
         let gh = self.size.height.max(1) as f32;
-        let use_baked_probes = if gi_runs_this_frame && !frame.room_gi_dynamic {
+        let use_baked_probes = if room_gi_bake_capture {
+            false
+        } else if gi_runs_this_frame && !frame.room_gi_dynamic {
             if let (Some(room), Some((mn, mx))) = (gi_room, room_gi_aabb) {
                 if let Some(bake) = crate::render::room_gi_bake::cached_room_gi_bake(room) {
                     if bake.aabb_matches(mn, mx) {
@@ -2235,10 +2350,14 @@ impl WgpuRenderer {
         // ── Overlay pass: 2D HUD text labels ────────────────────────────
         // After tonemap, Load the final target so labels are not in the linear
         // HDR `scene_prev_texture` used for lacquered-table SSR.
-        if ops
-            .iter()
-            .any(|o| matches!(o, RenderOp::TextDraw(_) | RenderOp::PromptIconQuad(_)))
-        {
+        if ops.iter().any(|o| {
+            matches!(
+                o,
+                RenderOp::TextDraw(_)
+                    | RenderOp::ImageQuad(_)
+                    | RenderOp::OverlayQuadBatch { .. }
+            )
+        }) {
             let overlay_ts = self
                 .gpu_profiler
                 .pass_writes(crate::render::gpu_profiler::PassSlot::Overlay);
@@ -2266,7 +2385,12 @@ impl WgpuRenderer {
                 multiview_mask: None,
             });
             for op in &ops {
-                if matches!(op, RenderOp::TextDraw(_) | RenderOp::PromptIconQuad(_)) {
+                if matches!(
+                    op,
+                    RenderOp::TextDraw(_)
+                        | RenderOp::ImageQuad(_)
+                        | RenderOp::OverlayQuadBatch { .. }
+                ) {
                     self.process_op(&mut pass, op, &process_ctx_overlay);
                 }
             }

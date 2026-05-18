@@ -271,13 +271,6 @@ impl ShopScene {
             journal_transition: None,
             journal_transition_locked_at: None,
             journal_was_open: false,
-            bug_phases: {
-                let mut phases = [0.0_f32; BUG_COUNT];
-                for (i, p) in phases.iter_mut().enumerate() {
-                    *p = i as f32 * std::f32::consts::TAU / BUG_COUNT as f32;
-                }
-                phases
-            },
             relic_glow_starts: rustc_hash::FxHashMap::default(),
             positions: crate::ui::scene_layout::load_shop_positions(),
             drawn_room_gltf_height_scale: std::cell::Cell::new(

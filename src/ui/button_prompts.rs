@@ -103,45 +103,6 @@ impl GamepadStyle {
     }
 }
 
-/// Physical face positions in the SDL **semantic** layout (south =
-/// bottom, etc.), not vendor paint. Test-only; runtime glyphs come from
-/// [`crate::ui::glyph_source::GlyphResolver`].
-#[cfg(test)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum FaceButton {
-    South,
-    East,
-    West,
-    North,
-}
-
-#[cfg(test)]
-impl FaceButton {
-    /// Short text inside prompts, without wrapping parentheses.
-    pub fn glyph(self, style: GamepadStyle) -> &'static str {
-        use FaceButton::{East, North, South, West};
-        use GamepadStyle::{
-            Generic, Nintendo, NintendoSwitch2, PlayStation, SteamController, SteamDeck, Xbox,
-        };
-        match (style, self) {
-            (Xbox | Generic | SteamDeck | SteamController, South) => "A",
-            (Xbox | Generic | SteamDeck | SteamController, East) => "B",
-            (Xbox | Generic | SteamDeck | SteamController, West) => "X",
-            (Xbox | Generic | SteamDeck | SteamController, North) => "Y",
-
-            (PlayStation, South) => "Cross",
-            (PlayStation, East) => "Circle",
-            (PlayStation, West) => "Square",
-            (PlayStation, North) => "Triangle",
-
-            (Nintendo | NintendoSwitch2, South) => "B",
-            (Nintendo | NintendoSwitch2, East) => "A",
-            (Nintendo | NintendoSwitch2, West) => "Y",
-            (Nintendo | NintendoSwitch2, North) => "X",
-        }
-    }
-}
-
 /// Whether on-screen prompts should use controller glyphs or keyboard text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PromptInputSurface {
@@ -184,19 +145,59 @@ impl ButtonPrompt {
         }
     }
 
-    /// Wrapped face label, e.g. `(X)` or `(Square)`.
-    #[cfg(test)]
-    pub fn face(style: GamepadStyle, face: FaceButton) -> String {
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Physical face positions in the SDL **semantic** layout (south =
+    /// bottom, etc.), not vendor paint.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    enum FaceButton {
+        South,
+        East,
+        West,
+        North,
+    }
+
+    impl FaceButton {
+        fn label(self, style: GamepadStyle) -> &'static str {
+            use FaceButton::{East, North, South, West};
+            use GamepadStyle::{
+                Generic, Nintendo, NintendoSwitch2, PlayStation, SteamController, SteamDeck, Xbox,
+            };
+            match (style, self) {
+                (Xbox | Generic | SteamDeck | SteamController, South) => "A",
+                (Xbox | Generic | SteamDeck | SteamController, East) => "B",
+                (Xbox | Generic | SteamDeck | SteamController, West) => "X",
+                (Xbox | Generic | SteamDeck | SteamController, North) => "Y",
+
+                (PlayStation, South) => "Cross",
+                (PlayStation, East) => "Circle",
+                (PlayStation, West) => "Square",
+                (PlayStation, North) => "Triangle",
+
+                (Nintendo | NintendoSwitch2, South) => "B",
+                (Nintendo | NintendoSwitch2, East) => "A",
+                (Nintendo | NintendoSwitch2, West) => "Y",
+                (Nintendo | NintendoSwitch2, North) => "X",
+            }
+        }
+
+        fn glyph(self, style: GamepadStyle) -> &'static str {
+            self.label(style)
+        }
+    }
+
+    fn face(style: GamepadStyle, face: FaceButton) -> String {
         format!("({})", face.glyph(style))
     }
 
-    /// `{face} {verb}` — e.g. `(X) Grab`; for other scenes building hint lines.
-    #[cfg(test)]
-    pub fn face_then(style: GamepadStyle, face: FaceButton, rest: &str) -> String {
-        format!("{} {}", Self::face(style, face), rest)
+    fn face_then(style: GamepadStyle, button: FaceButton, rest: &str) -> String {
+        format!("{} {}", face(style, button), rest)
     }
 
-    #[cfg(test)]
     fn shop_core_inline(surface: PromptInputSurface, style: GamepadStyle, swap_ab: bool) -> String {
         match surface {
             PromptInputSurface::Controller => {
@@ -207,10 +208,10 @@ impl ButtonPrompt {
                 };
                 format!(
                     "{} Exit  ·  {} Select  ·  {} Sell  ·  {} Inspect",
-                    Self::face(style, exit_face),
-                    Self::face(style, select_face),
-                    Self::face(style, FaceButton::West),
-                    Self::face(style, FaceButton::North),
+                    face(style, exit_face),
+                    face(style, select_face),
+                    face(style, FaceButton::West),
+                    face(style, FaceButton::North),
                 )
             }
             PromptInputSurface::MouseOrKeyboard => {
@@ -219,14 +220,7 @@ impl ButtonPrompt {
         }
     }
 
-    #[cfg(test)]
-    fn shop_core_verbs_only() -> &'static str {
-        "Exit  ·  Select  ·  Sell  ·  Inspect"
-    }
-
-    /// Full bottom-bar copy for the shop (two lines when `inspect_active`) — unit-test helper only.
-    #[cfg(test)]
-    pub fn shop_floating_legend(
+    fn shop_floating_legend(
         surface: PromptInputSurface,
         style: GamepadStyle,
         swap_ab: bool,
@@ -234,21 +228,18 @@ impl ButtonPrompt {
         text_style: ShopLegendTextStyle,
     ) -> String {
         let core = match text_style {
-            ShopLegendTextStyle::InlineGlyphs => Self::shop_core_inline(surface, style, swap_ab),
-            ShopLegendTextStyle::VerbsOnly => Self::shop_core_verbs_only().to_string(),
+            ShopLegendTextStyle::InlineGlyphs => shop_core_inline(surface, style, swap_ab),
+            ShopLegendTextStyle::VerbsOnly => {
+                "Exit  ·  Select  ·  Sell  ·  Inspect".to_string()
+            }
         };
         if inspect_active {
-            let inspect_line = Self::shop_inspect_mode_hint(surface, style);
+            let inspect_line = ButtonPrompt::shop_inspect_mode_hint(surface, style);
             format!("{core}\n{inspect_line}")
         } else {
             core
         }
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     #[test]
     fn infer_vendor_microsoft() {
@@ -312,7 +303,7 @@ mod tests {
 
     #[test]
     fn shop_legend_inline_vs_verbs_only() {
-        let inline = ButtonPrompt::shop_floating_legend(
+        let inline = shop_floating_legend(
             PromptInputSurface::Controller,
             GamepadStyle::Xbox,
             false,
@@ -322,7 +313,7 @@ mod tests {
         assert!(inline.contains("(A)"));
         assert!(inline.contains("(B)"));
 
-        let verbs = ButtonPrompt::shop_floating_legend(
+        let verbs = shop_floating_legend(
             PromptInputSurface::Controller,
             GamepadStyle::Xbox,
             false,
@@ -335,7 +326,7 @@ mod tests {
 
     #[test]
     fn face_then_joins_glyph_and_rest() {
-        let s = ButtonPrompt::face_then(GamepadStyle::Xbox, FaceButton::South, "Confirm");
+        let s = face_then(GamepadStyle::Xbox, FaceButton::South, "Confirm");
         assert_eq!(s, "(A) Confirm");
     }
 }

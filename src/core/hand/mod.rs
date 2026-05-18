@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-mod decomposition;
+pub(crate) mod decomposition;
 mod validation;
 
 #[cfg(test)]

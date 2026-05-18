@@ -135,9 +135,6 @@ pub struct ShopScene {
     /// notice this flag and start the reverse animation, then clear
     /// it.
     journal_was_open: bool,
-    /// Per-bug orbit phase angles (radians). `BUG_COUNT` entries, each
-    /// advances at a different speed each frame.
-    bug_phases: [f32; BUG_COUNT],
     /// Per-relic glow start times. Populated when `relic_activations` is
     /// drained from the run state (e.g. Bonfire on relic sell). Drives glow +
     /// wiggle on owned relics in the shop.
@@ -158,19 +155,6 @@ pub struct ShopScene {
 /// Click id for the `?` glossary badge in the shop HUD.
 const SHOP_HELP_BADGE_ID: u32 = 0x9100;
 
-// ── Bug swarm constants ───────────────────────────────────────────────────────
-/// Number of 3D insects orbiting the lamp bulb (must be ≤ MAX_BUG_SLOTS).
-pub(super) const BUG_COUNT: usize = 6;
-/// Per-bug: (orbit_radius_frac, orbit_z_offset_frac, orbit_speed_rad_per_sec, body_size_frac)
-/// All fractions are relative to `lamp_h` (the lamp's Z scale).
-pub(super) const BUG_PARAMS: [(f32, f32, f32, f32); BUG_COUNT] = [
-    (0.55, -0.10, 3.60, 0.90), // fast, close
-    (0.80, -0.25, 2.25, 1.00), // medium
-    (0.45, -0.05, 5.10, 0.75), // fast, tiny
-    (0.90, -0.35, 1.65, 1.10), // slow, far
-    (0.60, -0.20, 4.20, 0.85),
-    (0.70, -0.15, 2.85, 0.95),
-];
 /// Click id for the catch-all 3D-hit dispatcher. When clicked, the shop's
 /// update() routes the click based on `UpdateCtx::picked_shop_object`.
 pub const SHOP_3D_HIT_ID: u32 = 0x9200;

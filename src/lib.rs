@@ -19,8 +19,6 @@ pub mod game;
 mod macos_fullscreen_shortcut;
 #[path = "main/arrange.rs"]
 mod main_arrange;
-#[path = "main/bot_graph.rs"]
-mod main_bot_graph;
 #[path = "main/cli.rs"]
 mod main_cli;
 #[path = "main/commands.rs"]
@@ -64,7 +62,7 @@ use debug_overlays::{
 use game::cascade::CascadeTuning;
 use game::event_bus::{EventBus, GameEvent};
 use game::run::RunState;
-use game::tonemap_tuning::TonemapTuningSet;
+use game::scene_look_tuning::SceneLookTuningSet;
 use render::animation::AnimationController;
 use render::draw_cmd::{CameraParams, UiFrame, apply_modal_relic_staging};
 use render::wgpu_renderer::{DebugArrangeOverride, GpuInstance, TextLabel, WgpuRenderer};
@@ -76,7 +74,6 @@ use scenes::splash::SplashScene;
 use scenes::transition_playground::TransitionPlaygroundScene;
 use scenes::tutorial_summary::TutorialSummaryScene;
 use scenes::{ButtonAction, ButtonDef, DrawCtx, Scene, SceneBehavior, UpdateCtx};
-use serde::{Deserialize, Serialize};
 use ui::input::{InputMode, InputState, UiAction};
 use ui::layout::UiLayout;
 use ui::modal::{Modal, ModalQueue, ModalTheme, UnlockPage};
@@ -151,11 +148,11 @@ struct App {
     effect_layers: crate::effect_layers::EffectLayers,
     debug: DebugState,
     cascade_tuning: CascadeTuning,
-    /// Per-scene tonemap + VHS tuning, resolved each frame from
+    /// Per-scene tonemap + room GLB look, resolved each frame from
     /// `active_scene_key`. Loaded from `tuning_overrides.json` on startup;
     /// the debug overlay edits this in place and writes back via
     /// [`persistence`].
-    tonemap_tuning: TonemapTuningSet,
+    scene_look: SceneLookTuningSet,
     deferred_round_end: Option<GameEvent>,
     modifiers: Mod,
     /// Steamworks integration. Either `Connected` (initialized successfully
@@ -353,7 +350,7 @@ impl App {
             effect_layers: crate::effect_layers::EffectLayers::BASELINE,
             debug: DebugState::new(),
             cascade_tuning: CascadeTuning::default(),
-            tonemap_tuning: TonemapTuningSet::load(),
+            scene_look: SceneLookTuningSet::load(),
             modifiers: Mod::NOMOD,
             steam,
             archive_last_seen_run_len: settings.archive_last_seen_run_len,

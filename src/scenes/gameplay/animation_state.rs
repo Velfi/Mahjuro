@@ -12,7 +12,9 @@ use super::{CANDLE_FLARE_DECAY, LIGHT_RAMP_DELAY_SECS, LIGHT_RAMP_DURATION_SECS}
 use crate::game::engine::GameEngine;
 use crate::render::candle_mesh::WICK_TIP_Y;
 use crate::render::draw_cmd::{Object3d, Object3dKind};
-use crate::render::wgpu_renderer::{GpuInstance, PointLight, SpotLight};
+use crate::render::flame_volume::{flame_emitter_scale, flame_flicker_multiplier, FlameEmitter};
+use crate::render::world_space::pixel_to_world;
+use crate::render::wgpu_renderer::{PointLight, SpotLight};
 use crate::scenes::UpdateCtx;
 
 /// Tick particles, flying coins, score popups, score reel target, and
@@ -27,6 +29,7 @@ pub(super) fn tick_basic_animations(
     if ctx.headless {
         scene.light_ramp = 1.0;
         scene.light_ramp_anchor = None;
+        scene.candle_wind_dim = 1.0;
     }
     scene.particles.update(dt);
     scene.flying_coins.update(dt);
@@ -111,15 +114,13 @@ pub(super) fn tick_gold_change_coins(scene: &mut GameplayScene, ctx: &mut Update
     if delta != 0 && scene.prev_gold != 0 {
         // Recompute the dish center from layout (mirrors draw_frame).
         let layout = ctx.layout;
-        let coin_radius = layout.mm(11.3);
-        let coin_thickness = layout.mm(3.5).max(2.0);
-        let scatter_half = coin_radius * 3.0;
-        let coin_back_z_push = scatter_half * 0.5;
-        let pile_cx = scene.positions.coin_pile.nx * layout.window_w;
-        let pile_cy = layout.score_panel.y + layout.score_panel.h * 0.5
-            - coin_back_z_push
-            - layout.window_h * scene.positions.coin_pile.ny;
-        let dish_rim = (coin_thickness * 2.5).max(18.0);
+        let anchor =
+            crate::render::gold_display::gameplay_gold_pile_anchor(layout, &scene.positions.coin_pile);
+        let (coin_radius, coin_thickness, _) =
+            crate::render::gold_display::gold_coin_dims(|n| layout.mm(n));
+        let pile_cx = anchor[0];
+        let pile_cy = anchor[1];
+        let dish_floor_z = anchor[2];
         // Scale coin count with the magnitude of the change so bigger
         // payouts produce a more dramatic shower.
         let count = (delta.unsigned_abs() as usize).clamp(1, 12);
@@ -127,7 +128,7 @@ pub(super) fn tick_gold_change_coins(scene: &mut GameplayScene, ctx: &mut Update
             scene.flying_coins.gain(
                 pile_cx,
                 pile_cy,
-                dish_rim,
+                dish_floor_z,
                 coin_radius,
                 coin_thickness,
                 count,
@@ -136,7 +137,7 @@ pub(super) fn tick_gold_change_coins(scene: &mut GameplayScene, ctx: &mut Update
             scene.flying_coins.lose(
                 pile_cx,
                 pile_cy,
-                dish_rim,
+                dish_floor_z,
                 coin_radius,
                 coin_thickness,
                 count,
@@ -148,16 +149,8 @@ pub(super) fn tick_gold_change_coins(scene: &mut GameplayScene, ctx: &mut Update
 
 /// Advance candle flicker, decay candle flare, and tick the light ramp.
 pub(super) fn tick_candle_and_light_ramp(scene: &mut GameplayScene, now: Instant, dt: f32) {
-    // Advance candle flicker. Each candle's `flicker` is a smoothed
-    // approach toward a target wave (sum of two sines per candle), so
-    // intensity wanders organically in roughly [0.7, 1.1].
-    //
-    // The post-deal wind gust also nearly snuffs the candles for its
-    // duration: we compute the same 4t(1-t) bell envelope used by the
-    // gust and multiply the flicker target down to ~12% at the peak,
-    // so the candles dim sharply as the breath hits them and recover
-    // as it tapers off.
-    let candle_dim = scene
+    // Post-deal wind snuffs flames/lights via brightness (shape stays upright indoors).
+    scene.candle_wind_dim = scene
         .last_deal_at
         .map(|d| {
             let elapsed = now.saturating_duration_since(d).as_secs_f32();
@@ -173,26 +166,7 @@ pub(super) fn tick_candle_and_light_ramp(scene: &mut GameplayScene, now: Instant
         })
         .unwrap_or(1.0);
     scene.candle_time += dt;
-    let candle_flare_boost = 1.0 + scene.candle_flare;
-    for c in scene.candles.iter_mut() {
-        let t = scene.candle_time;
-        let target =
-            (0.9 + 0.18 * (t * 7.3 + c.phase).sin() + 0.08 * (t * 13.1 + c.phase * 1.7).sin())
-                * candle_dim
-                * candle_flare_boost;
-        // Exponential smoothing — keeps the light from snapping. Bump
-        // the rate during a gust so the dim/recover edge reads as a
-        // wind hit instead of a slow fade.
-        let smooth_rate = if scene.candle_flare > 0.1 {
-            28.0
-        } else if candle_dim < 0.95 {
-            22.0
-        } else {
-            12.0
-        };
-        let k = (1.0 - (-dt * smooth_rate).exp()).clamp(0.0, 1.0);
-        c.flicker += (target - c.flicker) * k;
-    }
+    let _ = dt;
 
     // Decay the candle flare (exponential fall-off so it fades fast
     // at first then lingers subtly). Kill it once negligible.
@@ -224,20 +198,20 @@ pub(super) fn tick_candle_and_light_ramp(scene: &mut GameplayScene, now: Instant
 
 /// Buffers populated by [`build_candles_and_spotlights`].
 pub(super) struct CandleAndLightBuffers {
-    pub(super) flame_instances: Vec<GpuInstance>,
+    pub(super) flame_emitters: Vec<FlameEmitter>,
     pub(super) point_lights: Vec<PointLight>,
     pub(super) spot_lights: Vec<SpotLight>,
     pub(super) candle_placements: Vec<Object3d>,
 }
 
 /// Build candle 3D placements + flame additive quads + point lights, plus
-/// hint / dora / tutorial spotlight & point-light highlights. Identical to
+/// hint / plinth spotlight & point-light highlights. Identical to
 /// the inline draw_frame chunks; relocated for organisation.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_candles_and_spotlights(
     scene: &GameplayScene,
     layout: &crate::ui::layout::LayoutResult,
-    run: &crate::game::run::RunState,
+    _run: &crate::game::run::RunState,
     gameplay: &crate::game::engine::GameplayReadModel,
     hand_slots: &[(f32, f32, f32, f32)],
     hint_indices: &[usize],
@@ -249,7 +223,7 @@ pub(super) fn build_candles_and_spotlights(
     // ── Candles ─────────────────────────────────────────────────────
     // Score L/R, hand strip L/R (upper row), hand strip L/R (lower row),
     // footlight. Each: 3D wax + wick, additive `Flame` quad, `PointLight`.
-    let mut flame_instances: Vec<GpuInstance> = Vec::new();
+    let mut flame_emitters: Vec<FlameEmitter> = Vec::new();
     let mut point_lights: Vec<PointLight> = Vec::new();
     let mut spot_lights: Vec<SpotLight> = Vec::new();
     let mut candle_placements: Vec<Object3d> = Vec::new();
@@ -262,11 +236,11 @@ pub(super) fn build_candles_and_spotlights(
     // scale) is the height of the votive in world units. Sized in
     // real-world millimeters via `layout.mm()` so the candle stays
     // at true votive proportions next to the mahjong tiles.
-    let candle_h = layout.mm(78.0); // ~78mm tall votive
+    let candle_h = layout.mm(crate::render::flame_volume::CANDLE_HEIGHT_MM);
     let candle_w = candle_h * 0.72; // votive footprint, used for layout padding
-    let flame_w = layout.mm(16.0);
-    let flame_h = layout.mm(27.0);
     let radius_px = layout.mm(244.0); // candlelight pool radius
+    let win_w = layout.window_w;
+    let win_h = layout.window_h;
     let edge_pad = layout.mm(12.0);
     // Position centres for each candle: (cx, cy_base) where cy_base is
     // the bottom of the candle body. Order matches `self.candles[]`.
@@ -398,30 +372,26 @@ pub(super) fn build_candles_and_spotlights(
                 anim_id: 0,
                 arrange_name: None,
             });
-            let _ = candle.flicker;
-
-            // The flame sprite is still drawn by the additive 2D flame
-            // pipeline, so it lives in screen pixel space. The renderer
-            // overrides each flame's rect with the projected wick tip
-            // (using the jittered candle world_pos + scale we just
-            // pushed), so the values here are just sane defaults for
-            // any code path that bypasses the override.
             let phase01 = (candle.phase / std::f32::consts::TAU).fract().abs();
-            let flame_x = cx_j - flame_w * 0.5;
-            let flame_y = cy_j - flame_h * 1.2;
-            flame_instances.push(GpuInstance {
-                rect: [flame_x, flame_y, flame_w, flame_h],
-                // .b = brightness (light_ramp + flare boost so the flame
-                //       visibly surges beyond its normal ceiling).
-                color: [0.0, 0.0, scene.light_ramp + scene.candle_flare, phase01],
-                user: 0,
+            let flare_mul = 1.0 + scene.candle_flare;
+            let base_brightness = scene.light_ramp * flare_mul * scene.candle_wind_dim;
+            let wick_lift = WICK_TIP_Y * candle_scale * height_scale;
+            let wick_world =
+                pixel_to_world(win_w, win_h, cx_j, cy_j, wick_lift);
+            flame_emitters.push(FlameEmitter {
+                wick_world,
+                scale: flame_emitter_scale(candle_scale, height_scale),
+                wind: glam::Vec2::ZERO,
+                brightness: base_brightness,
+                phase: phase01,
+                flicker_amp: crate::render::flame_volume::FLAME_FLICKER_AMP,
             });
 
             // Point light at the wick tip — sits at world_y =
             // WICK_TIP_Y * candle_scale above the table, at the candle's
             // jittered table-plane (cx_j, cy_j) anchor. The renderer
             // maps the pixel-layout x/y onto the table.
-            let wick_world_y = WICK_TIP_Y * candle_scale * height_scale;
+            let wick_world_y = wick_lift;
             // The footlight (index 6) sits well behind the camera, so its
             // wick is much farther from the action row than any of the
             // table-edge candles — bump its radius and intensity to
@@ -429,13 +399,13 @@ pub(super) fn build_candles_and_spotlights(
             let (light_radius_mul, light_intensity) = if i == 6 { (2.2, 1.0) } else { (1.0, 2.05) };
             // Flare multiplier: boosts intensity and radius when a
             // monster hand clears the whole blind in one shot.
-            let flare_mul = 1.0 + scene.candle_flare;
+            let flick = flame_flicker_multiplier(phase01, scene.candle_time);
             point_lights.push(PointLight {
                 pos: [cx_j, cy_j, wick_world_y],
-                radius: radius_px * light_radius_mul * (1.05 + 0.3 * candle.flicker) * flare_mul,
+                radius: radius_px * light_radius_mul * 1.15 * flare_mul,
                 // Slightly desaturated vs pure amber so candle key doesn’t dye every albedo neon-warm.
                 color: [1.0, 0.62, 0.34],
-                intensity: light_intensity * candle.flicker * scene.light_ramp * flare_mul,
+                intensity: light_intensity * base_brightness * flick,
             });
             let _ = candle_w;
         }
@@ -495,88 +465,96 @@ pub(super) fn build_candles_and_spotlights(
         }
     }
 
-    // ── Dora spotlights ──────────────────────────────────────────────
-    // Red SpotLights hang over every hand tile whose face matches a
-    // dora indicator, and over the indicator tile(s) themselves on the
-    // plinth. Same cone geometry as the hint lights (tight 24°/36° cone
-    // aimed down and forward) so the dora pool reads as a focused
-    // highlight rather than a wash.
-    if progress_dora_enabled {
-        let dora_faces = gameplay.dora_faces.clone();
-        if !dora_faces.is_empty() {
-            let pulse = 0.80 + 0.20 * (scene.candle_time * 2.5).sin();
-            let dora_color = [1.00, 0.22, 0.18];
-            let cos_inner = (24.0_f32).to_radians().cos();
-            let cos_outer = (36.0_f32).to_radians().cos();
-            // Match the showcase placement offset (hand_strip.nx/ny).
-            let strip_dx = scene.positions.hand_strip.nx * layout.window_w;
-            let strip_dy = scene.positions.hand_strip.ny * layout.window_h;
-            // Hand tiles matching a dora face.
-            for i in GameEngine::dora_matching_hand_indices(run, &dora_faces) {
-                let Some(&(sx, sy, sw, sh)) = hand_slots.get(i) else {
-                    continue;
-                };
-                let budget =
-                    crate::render::wgpu_renderer::MAX_SPOT_LIGHTS.saturating_sub(spot_lights.len());
-                if budget == 0 {
-                    break;
-                }
-                let cx = sx + sw * 0.5 + strip_dx;
-                let cy = sy + sh * crate::ui::layout::HAND_TILE_MESH_Y_FRAC + strip_dy;
-                spot_lights.push(SpotLight {
-                    pos: [cx, cy - sh * 0.15, layout.mm(90.0)],
-                    dir: [0.0, -0.55, -1.0],
-                    radius: layout.mm(260.0),
-                    cos_outer,
-                    cos_inner,
-                    color: dora_color,
-                    intensity: 9.0 * pulse,
-                });
-            }
-            // Indicator tiles on the plinth.
-            let indicators = gameplay.dora_indicator_tiles.as_slice();
-            if !indicators.is_empty() {
-                let dora_p = &scene.positions.dora;
-                let plinth_h = layout.mm(20.0);
-                let plinth_cx = dora_p.nx * layout.window_w;
-                let plinth_cy = dora_p.ny * layout.window_h;
-                let plinth_lift = layout.mm(dora_p.lift_mm);
-                let platform_top = plinth_lift + plinth_h * (0.5 + 0.36);
-                let tile_lift = platform_top + layout.mm(15.0);
-                let tile_size_px = layout.mm(22.0);
-                let spacing = layout.mm(24.0);
-                let count = indicators.len().min(2);
-                for i in 0..count {
-                    let budget = crate::render::wgpu_renderer::MAX_SPOT_LIGHTS
-                        .saturating_sub(spot_lights.len());
-                    if budget == 0 {
-                        break;
-                    }
-                    let offset = if count == 1 {
-                        0.0
-                    } else {
-                        (i as f32 - 0.5) * spacing
-                    };
-                    spot_lights.push(SpotLight {
-                        pos: [
-                            plinth_cx + offset,
-                            plinth_cy - tile_size_px * 0.15,
-                            tile_lift + layout.mm(90.0),
-                        ],
-                        dir: [0.0, -0.55, -1.0],
-                        radius: layout.mm(260.0),
-                        cos_outer,
-                        cos_inner,
-                        color: dora_color,
-                        intensity: 9.0 * pulse,
-                    });
-                }
-            }
+    // ── Plinth spotlights (dora + round wind) ─────────────────────────
+    // Tight 24°/36° cones aimed down and forward
+    const PLINTH_SPOT_INTENSITY: f32 = 2.0;
+    let cos_inner = (24.0_f32).to_radians().cos();
+    let cos_outer = (36.0_f32).to_radians().cos();
+    let plinth_spot = |spot_lights: &mut Vec<SpotLight>,
+                       cx: f32,
+                       cy: f32,
+                       tile_lift: f32,
+                       tile_size_px: f32,
+                       color: [f32; 3],
+                       pulse: f32| {
+        let budget =
+            crate::render::wgpu_renderer::MAX_SPOT_LIGHTS.saturating_sub(spot_lights.len());
+        if budget == 0 {
+            return;
+        }
+        spot_lights.push(SpotLight {
+            pos: [cx, cy - tile_size_px * 0.15, tile_lift + layout.mm(90.0)],
+            dir: [0.0, -0.55, -1.0],
+            radius: layout.mm(260.0),
+            cos_outer,
+            cos_inner,
+            color,
+            intensity: PLINTH_SPOT_INTENSITY * pulse,
+        });
+    };
+
+    if progress_dora_enabled && !gameplay.dora_indicator_tiles.is_empty() {
+        let pulse = 0.80 + 0.20 * (scene.candle_time * 2.5).sin();
+        let dora_color = [1.00, 0.22, 0.18];
+        let dora_p = &scene.positions.dora;
+        let plinth_h = layout.mm(20.0);
+        let plinth_cx = dora_p.nx * layout.window_w;
+        let plinth_cy = dora_p.ny * layout.window_h;
+        let plinth_lift = layout.mm(dora_p.lift_mm);
+        let tile_lift = plinth_lift + plinth_h * (0.5 + 0.36) + layout.mm(15.0);
+        let tile_size_px = layout.mm(22.0);
+        let spacing = layout.mm(24.0);
+        let count = gameplay.dora_indicator_tiles.len().min(2);
+        for i in 0..count {
+            let offset = if count == 1 {
+                0.0
+            } else {
+                (i as f32 - 0.5) * spacing
+            };
+            plinth_spot(
+                &mut spot_lights,
+                plinth_cx + offset,
+                plinth_cy,
+                tile_lift,
+                tile_size_px,
+                dora_color,
+                pulse,
+            );
+        }
+    }
+
+    {
+        let pulse = 0.80 + 0.20 * (scene.candle_time * 2.5).sin();
+        let wind_color = [0.28, 0.52, 1.00];
+        let rw_p = &scene.positions.round_wind;
+        let plinth_h = layout.mm(20.0);
+        let plinth_cx = rw_p.nx * layout.window_w;
+        let plinth_cy = rw_p.ny * layout.window_h;
+        let plinth_lift = layout.mm(rw_p.lift_mm);
+        let tile_lift = plinth_lift + plinth_h * (0.5 + 0.36) + layout.mm(15.0);
+        let tile_size_px = layout.mm(22.0);
+        let spacing = layout.mm(24.0);
+        let wind_count = 1 + usize::from(gameplay.bonus_round_wind_rank.is_some());
+        for i in 0..wind_count.min(2) {
+            let offset = if wind_count == 1 {
+                0.0
+            } else {
+                (i as f32 - 0.5) * spacing
+            };
+            plinth_spot(
+                &mut spot_lights,
+                plinth_cx + offset,
+                plinth_cy,
+                tile_lift,
+                tile_size_px,
+                wind_color,
+                pulse,
+            );
         }
     }
 
     CandleAndLightBuffers {
-        flame_instances,
+        flame_emitters,
         point_lights,
         spot_lights,
         candle_placements,
@@ -592,14 +570,12 @@ pub(super) fn build_ambient_table_objects(
     layout: &crate::ui::layout::LayoutResult,
     gameplay: &crate::game::engine::GameplayReadModel,
     progress_dora_enabled: bool,
-    _coin_pile_rect: Option<[f32; 4]>,
     frame: &mut crate::render::draw_cmd::UiFrame,
 ) {
     use crate::render::draw_cmd::{Object3d, Object3dKind};
-    // Phase 7: ambient table objects — physical coin pile (gold),
-    // facedown wall stack (tiles remaining), and the dora indicator
-    // stand. None of these are clickable; they're pure atmosphere that
-    // makes the score line and wall counter physically present.
+    // Phase 7: ambient table objects — physical coin pile (gold) and the
+    // dora indicator stand. None of these are clickable; they're pure
+    // atmosphere. Wall tiles remaining are shown in the lower-right HUD.
     //
     // Dora indicator plinth — ornate brass pedestal at center-stage
     // (back of the table by default; user-arrangeable). Holds 1–2
@@ -692,129 +668,84 @@ pub(super) fn build_ambient_table_objects(
         }
     }
 
-    // Coin pile — sits at the back-right of the play area, just past
-    // the right-hand score-panel candle, so it shares the rear pool of
-    // candlelight with the score plaque. Coin count = min(gold,
-    // MAX_COIN_SLOTS) so the pile visibly grows as the player
-    // accumulates gold but caps before overflowing the slot pool.
-    if gameplay.gold > 0 {
-        let coin_count = (gameplay.gold.max(0) as usize).min(48);
-        // Size the coins at true real-world proportions: a Japanese
-        // 100-yen coin is 22.6mm × 1.7mm. We bump the thickness a bit
-        // (≈3.5mm) so the disc reads clearly under candlelight at
-        // typical viewing distances — at literal 1.7mm the coins
-        // disappear into the dish floor.
-        let coin_radius = layout.mm(11.3);
-        let coin_thickness = layout.mm(3.5).max(2.0);
-        // Brass dish under the pile so the coins read as resting in a
-        // tray rather than scattered loose on the table. The pile-build
-        // loop below seeds each coin's `support_y` at `dish_rim`, so the
-        // coins always land on top of the rim regardless of how tall it
-        // is — restoring the rim doesn't bury them. The scatter footprint
-        // is intentionally tight (only ~3 coin radii) so 48 coins build
-        // up into a visible mound rather than spreading out flat across
-        // a wide tray, while still leaving the settling pass enough
-        // room to lay the bottom layer down before stacking.
-        let scatter_half = coin_radius * 3.0;
-        // Mockup: GOLD right:14% top:3% width:12% height:12% — place the
-        // pile centered inside the score band on the right side.
-        // right:14% means center-x ≈ (1 - 0.14 - 0.06) = 0.80 of window_w.
-        let coin_back_z_push = scatter_half * 0.5;
-        let pile_cx = scene.positions.coin_pile.nx * layout.window_w;
-        let pile_cy = layout.score_panel.y + layout.score_panel.h * 0.5
-            - coin_back_z_push
-            - layout.window_h * scene.positions.coin_pile.ny;
-        let dish_rim = (coin_thickness * 2.5).max(18.0);
-        let dish_w = scatter_half * 2.0 + coin_radius * 4.0;
-        let dish_d = scatter_half * 2.0 + coin_radius * 4.0;
+    // Round wind plinth — same brass pedestal mesh as dora, parked beside
+    // it by default. Shows the ante's round wind (and a second face when
+    // Windreader is active).
+    {
+        use crate::core::tile::{Suit, Tile};
+        use crate::render::draw_cmd::ShowcaseTilePlacement;
+
+        let rw_p = &scene.positions.round_wind;
+        let plinth_w = layout.mm(48.0);
+        let plinth_h = layout.mm(20.0);
+        let plinth_d = layout.mm(34.0);
+        let plinth_cx = rw_p.nx * layout.window_w;
+        let plinth_cy = rw_p.ny * layout.window_h;
+        let plinth_lift = layout.mm(rw_p.lift_mm);
         frame.object3d(Object3d {
-            pos: [pile_cx, pile_cy, dish_rim * 0.5],
-            extents: [dish_w, dish_rim, dish_d],
+            pos: [plinth_cx, plinth_cy, plinth_lift],
+            extents: [plinth_w, plinth_h, plinth_d],
             rotation: crate::render::table_transform::mat4_to_euler_xyz_rad(
-                glam::Mat4::from_rotation_z(-50.0_f32.to_radians())
-                    * glam::Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2),
+                glam::Mat4::from_rotation_y(rw_p.ry_deg.to_radians())
+                    * glam::Mat4::from_rotation_x(rw_p.rx_deg.to_radians())
+                    * glam::Mat4::from_rotation_z(rw_p.rz_deg.to_radians()),
             ),
-            // Aged-porcelain cream tint drives a light crazing pattern in
-            // the shader so the dish reads as a temple-merchant ceramic
-            // piece (well-loved, not fresh from the kiln).
-            color: crate::render::theme::color::PORCELAIN_AGED,
-            kind: Object3dKind::Primitive {
-                shape: crate::render::primitive::MeshId::PorcelainDish,
-                material: crate::render::primitive::MaterialSpec::porcelain(),
-                pick_id: None,
-                shadow_caster: true,
-                silhouette: false,
-            },
+            color: [1.0, 1.0, 1.0, 1.0],
+            kind: Object3dKind::DoraPlinth { glow: 0.0 },
             hover_target: 0.0,
             anim_id: 0,
-            arrange_name: Some("gameplay.score_panel.coin_pile"),
+            arrange_name: Some("gameplay.round_wind_plinth"),
         });
-        // Settled pile on top of the dish. For each coin we generate
-        // several candidate (lx, lz) positions and pick the one with
-        // the *lowest* resulting support height — this causes the
-        // first coins to tile the dish floor before any stacking
-        // begins, killing the unrealistic vertical pillars the naive
-        // single-shot random placement produced. Two coin discs of
-        // radius `r` overlap whenever their centers are within `2r`,
-        // and overlapping coins must rest on each other rather than
-        // intersect, so the support test uses exactly `2r`.
-        let mut coins: Vec<Object3d> = Vec::with_capacity(coin_count);
-        let mut placed: Vec<(f32, f32, f32)> = Vec::with_capacity(coin_count);
-        let overlap_r = coin_radius * 2.0;
-        let overlap_r2 = overlap_r * overlap_r;
-        const CANDIDATES_PER_COIN: u32 = 12;
-        // Seed a stable RNG so the pile shape doesn't jitter every
-        // frame as `gold` stays constant. Using a fixed seed (rather
-        // than seeding from `coin_count`) means new coins drop into
-        // the existing pile instead of reshuffling the whole stack
-        // when gold ticks up.
-        use rand::rngs::StdRng;
-        use rand::{RngExt, SeedableRng};
-        let mut rng = StdRng::seed_from_u64(0xC01_C0FFEE);
-        for _ in 0..coin_count {
-            let mut best: Option<(f32, f32, f32, f32)> = None;
-            for _ in 0..CANDIDATES_PER_COIN {
-                let lx = rng.random_range(-scatter_half..scatter_half);
-                let lz = rng.random_range(-scatter_half..scatter_half);
-                let rot_y = rng.random_range(-std::f32::consts::PI..std::f32::consts::PI);
-                let mut support_y = dish_rim;
-                for (ox, oz, top_y) in &placed {
-                    let ddx = lx - ox;
-                    let ddz = lz - oz;
-                    if ddx * ddx + ddz * ddz < overlap_r2 && *top_y > support_y {
-                        support_y = *top_y;
-                    }
-                }
-                match best {
-                    None => best = Some((lx, lz, support_y, rot_y)),
-                    Some((_, _, by, _)) if support_y < by => {
-                        best = Some((lx, lz, support_y, rot_y));
-                    }
-                    _ => {}
-                }
-            }
-            let (lx, lz, support_y, rot_y) = best.unwrap();
-            let world_y = support_y + coin_thickness * 0.5;
-            placed.push((lx, lz, world_y + coin_thickness * 0.5));
-            coins.push(Object3d {
-                pos: [pile_cx + lx, pile_cy + lz, world_y],
-                extents: [coin_radius * 2.0, coin_thickness, coin_radius * 2.0],
-                rotation: [0.0, rot_y, 0.0],
-                color: crate::render::theme::color::RELIC_GOLD,
-                kind: Object3dKind::Primitive {
-                    shape: crate::render::primitive::MeshId::Cylinder,
-                    material: crate::render::primitive::MaterialSpec::metal(),
-                    pick_id: None,
-                    shadow_caster: true,
-                    silhouette: false,
-                },
-                hover_target: 0.0,
-                anim_id: 0,
-                arrange_name: Some("gameplay.score_panel.coin_pile"),
+
+        let mut winds = vec![Tile::new(Suit::Wind, gameplay.round_wind_rank, 0)];
+        if let Some(bonus) = gameplay.bonus_round_wind_rank {
+            winds.push(Tile::new(Suit::Wind, bonus, 1));
+        }
+        let tile_size_px = layout.mm(22.0);
+        let platform_top = plinth_lift + plinth_h * (0.5 + 0.36);
+        let tile_lift = platform_top + layout.mm(15.0);
+        let count = winds.len().min(2);
+        let spacing = layout.mm(24.0);
+        let mut tile_placements: Vec<ShowcaseTilePlacement> = Vec::with_capacity(count);
+        for (i, t) in winds.into_iter().take(count).enumerate() {
+            let offset = if count == 1 {
+                0.0
+            } else {
+                (i as f32 - 0.5) * spacing
+            };
+            tile_placements.push(ShowcaseTilePlacement {
+                tile: t,
+                center_pos: [plinth_cx + offset, plinth_cy, tile_lift],
+                rotation: [
+                    std::f32::consts::FRAC_PI_2 - 15.0_f32.to_radians(),
+                    0.0,
+                    std::f32::consts::PI,
+                ],
+                scale: 1.0,
+                size_px: tile_size_px,
+                brightness: 1.0,
+                selected: false,
+                hovered: false,
+                outline: false,
+                glow: false,
+                glow_color: None,
+                pick_id: None,
             });
         }
-        if !coins.is_empty() {
-            frame.object3d_batch(coins);
-        }
+        frame.showcase_tile_batch(tile_placements);
+    }
+
+    // Gold coin pile — same settled cylinders as the shop (no procedural dish).
+    let gold_anchor =
+        crate::render::gold_display::gameplay_gold_pile_anchor(layout, &scene.positions.coin_pile);
+    let coins = crate::render::gold_display::build_settled_gold_coin_pile(
+        |n| layout.mm(n),
+        gameplay.gold,
+        gold_anchor,
+        "gameplay.score_panel.coin_pile",
+        crate::render::gold_display::GAMEPLAY_GOLD_PILE_SEED,
+    );
+    if !coins.is_empty() {
+        frame.object3d_batch(coins);
     }
 }

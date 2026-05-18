@@ -1,4 +1,4 @@
-//! Procedural lit mesh for the floating bugs near the lamp.
+//! Procedural lit mesh for main-menu door-light moths.
 use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu};
 use crate::render::tile_glb::Vertex3dTex;
 
@@ -84,8 +84,8 @@ pub fn build_bug_body_mesh() -> MeshCpu {
             kind: MaterialKind::Enamel,
             // Dark iridescent chitin — deep olive-green, almost black.
             base_color: [0.08, 0.12, 0.06, 1.0],
-            specular_strength: 0.90,
-            specular_power: 64.0,
+            specular_strength: 0.35,
+            specular_power: 48.0,
         },
     }
 }
@@ -198,11 +198,11 @@ pub fn build_bug_wing_mesh() -> MeshCpu {
         vertices: verts,
         indices: idxs,
         default_material: MaterialParams {
-            kind: MaterialKind::Glass,
-            // Pale iridescent wings — warm translucent amber.
-            base_color: [0.80, 0.90, 0.70, 0.6],
-            specular_strength: 1.0,
-            specular_power: 96.0,
+            kind: MaterialKind::Plain,
+            // Dusty wing membrane — muted, not lamp-bright.
+            base_color: [0.28, 0.26, 0.22, 0.42],
+            specular_strength: 0.12,
+            specular_power: 28.0,
         },
     }
 }
@@ -303,13 +303,11 @@ pub fn build_bug_wing_blur_mesh() -> MeshCpu {
         vertices: verts,
         indices: idxs,
         default_material: MaterialParams {
-            kind: MaterialKind::Glass,
-            // Same warm amber as the live wing but extra-translucent;
-            // per-instance alpha is further scaled by flap speed at
-            // draw time. The fan mostly reads as a shimmer.
-            base_color: [0.80, 0.90, 0.70, 0.18],
-            specular_strength: 0.4,
-            specular_power: 48.0,
+            kind: MaterialKind::Plain,
+            // Motion-blur fan — same tint as live wings, very soft.
+            base_color: [0.28, 0.26, 0.22, 0.12],
+            specular_strength: 0.06,
+            specular_power: 20.0,
         },
     }
 }

@@ -137,12 +137,12 @@ fn box_downsample_half_rgba8(src: &[u8], w: u32, h: u32) -> (Vec<u8>, u32, u32) 
 }
 
 #[inline]
-pub fn clamp_gltf_rgba8_max_dimension(
+pub fn clamp_gltf_rgba8_max_dimension_with_cap(
     mut pixels: Vec<u8>,
     mut w: u32,
     mut h: u32,
+    cap: u32,
 ) -> (Vec<u8>, u32, u32) {
-    let cap = GLTF_TEXTURE_MAX_DIMENSION;
     if cap == 0 || (w <= cap && h <= cap) {
         return (pixels, w, h);
     }
@@ -167,9 +167,12 @@ fn scale_f32_to_u8(v: f32) -> u8 {
 
 /// Convert imported glTF image to RGBA8 for GPU upload.
 ///
-/// Decoded images larger than [`GLTF_TEXTURE_MAX_DIMENSION`] on either axis are halved with a 2×2
-/// box filter until both dimensions fit (preserves aspect ratio in a mip-like way).
-pub fn gltf_image_to_rgba8(img: &gltf::image::Data) -> Option<(Vec<u8>, u32, u32)> {
+/// Decoded images larger than `max_dimension` on either axis are halved with a 2×2 box filter
+/// until both dimensions fit (preserves aspect ratio in a mip-like way).
+pub fn gltf_image_to_rgba8_capped(
+    img: &gltf::image::Data,
+    max_dimension: u32,
+) -> Option<(Vec<u8>, u32, u32)> {
     let w = img.width;
     let h = img.height;
     let px = w as usize * h as usize;
@@ -284,7 +287,12 @@ pub fn gltf_image_to_rgba8(img: &gltf::image::Data) -> Option<(Vec<u8>, u32, u32
             }
         }
     };
-    decoded.map(|(p, ww, hh)| clamp_gltf_rgba8_max_dimension(p, ww, hh))
+    decoded.map(|(p, ww, hh)| clamp_gltf_rgba8_max_dimension_with_cap(p, ww, hh, max_dimension))
+}
+
+/// Tile / prop glTF decode — capped at [`GLTF_TEXTURE_MAX_DIMENSION`].
+pub fn gltf_image_to_rgba8(img: &gltf::image::Data) -> Option<(Vec<u8>, u32, u32)> {
+    gltf_image_to_rgba8_capped(img, GLTF_TEXTURE_MAX_DIMENSION)
 }
 
 #[inline]

@@ -22,6 +22,7 @@
 //! * [`presentation`] — optional regrouping of steps for the cascade (chips before mults).
 
 mod dora_yaku_layer;
+pub use dora_yaku_layer::DORA_CHIPS_PER_TILE;
 mod effective_relic;
 mod layer_input;
 mod pipeline;
@@ -86,6 +87,19 @@ pub(crate) fn meld_chip_bonus(kind: MeldKind) -> i32 {
         MeldKind::Kong => 80,
         MeldKind::Single => 0,
     }
+}
+
+/// Grouped meld labels for logs and reports (`Pair  3m 3m · Kong  9p 9p 9p 9p`).
+pub fn format_meld_groups(tiles: &[Tile], sets: &[DetectedMeld]) -> Option<String> {
+    if tiles.is_empty() || sets.is_empty() {
+        return None;
+    }
+    Some(
+        sets.iter()
+            .map(|s| describe_set(tiles, s))
+            .collect::<Vec<_>>()
+            .join(" · "),
+    )
 }
 
 pub(crate) fn describe_set(tiles: &[Tile], set: &DetectedMeld) -> String {

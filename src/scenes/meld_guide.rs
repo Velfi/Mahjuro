@@ -1036,7 +1036,7 @@ mod tests {
             // Yakuhai needs a round wind hint for wind triplets to count.
             // The Yakuhai example in yaku_page uses a dragon triplet, which
             // counts regardless, so round_wind=None is still correct.
-            let detected = detect_yaku_with_wind(&tiles, &sets, None, None);
+            let detected = detect_yaku_with_wind(&tiles, &sets, None, None, None);
             assert!(
                 detected.contains(&yk),
                 "{:?}: canonical hand did not score as {:?}. detected={:?}",

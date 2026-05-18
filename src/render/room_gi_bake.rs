@@ -1,4 +1,4 @@
-//! Offline baked emissive probe SH for static room GLB scenes (shop / hallway / archive).
+//! Offline baked emissive probe SH for static room GLB scenes (shop / hallway / archive / main menu).
 //!
 //! Probes are filled once by `mahjuro bake-room-gi` and uploaded at runtime so the
 //! per-frame `emissive-probe-update` compute pass can be skipped on static room views.
@@ -25,6 +25,7 @@ pub enum RoomGiRoom {
     Shop = 0,
     Hallway = 1,
     Archive = 2,
+    MainMenu = 3,
 }
 
 impl RoomGiRoom {
@@ -33,16 +34,19 @@ impl RoomGiRoom {
             Self::Shop => "data/room_gi/shop.mgi",
             Self::Hallway => "data/room_gi/hallway.mgi",
             Self::Archive => "data/room_gi/archive.mgi",
+            Self::MainMenu => "data/room_gi/main_menu.mgi",
         }
     }
 
-    pub fn from_ops(shop: bool, hallway: bool, archive: bool) -> Option<Self> {
+    pub fn from_ops(shop: bool, hallway: bool, archive: bool, main_menu: bool) -> Option<Self> {
         if shop {
             Some(Self::Shop)
         } else if hallway {
             Some(Self::Hallway)
         } else if archive {
             Some(Self::Archive)
+        } else if main_menu {
+            Some(Self::MainMenu)
         } else {
             None
         }
@@ -137,6 +141,7 @@ impl RoomGiBake {
             0 => RoomGiRoom::Shop,
             1 => RoomGiRoom::Hallway,
             2 => RoomGiRoom::Archive,
+            3 => RoomGiRoom::MainMenu,
             n => anyhow::bail!("room GI bake: unknown room id {n}"),
         };
         anyhow::ensure!(
@@ -217,14 +222,19 @@ fn load_room_gi_bake(room: RoomGiRoom) -> Option<Arc<RoomGiBake>> {
         })
 }
 
-static BAKE_CACHE: [OnceLock<Option<Arc<RoomGiBake>>>; 3] =
-    [OnceLock::new(), OnceLock::new(), OnceLock::new()];
+static BAKE_CACHE: [OnceLock<Option<Arc<RoomGiBake>>>; 4] = [
+    OnceLock::new(),
+    OnceLock::new(),
+    OnceLock::new(),
+    OnceLock::new(),
+];
 
 fn cache_slot(room: RoomGiRoom) -> &'static OnceLock<Option<Arc<RoomGiBake>>> {
     match room {
         RoomGiRoom::Shop => &BAKE_CACHE[0],
         RoomGiRoom::Hallway => &BAKE_CACHE[1],
         RoomGiRoom::Archive => &BAKE_CACHE[2],
+        RoomGiRoom::MainMenu => &BAKE_CACHE[3],
     }
 }
 

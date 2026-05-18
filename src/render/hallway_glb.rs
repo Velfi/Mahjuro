@@ -16,12 +16,9 @@ use glam::Vec3;
 
 use crate::core::rules::BlindKind;
 use crate::render::draw_cmd::CameraParams;
-use crate::render::room_env_gltf::{
-    RoomEnvWalkHooks, RoomMeshPolicy, glb_punctual_range_world_upload,
-};
+use crate::render::room_env_gltf::{RoomEnvWalkHooks, RoomMeshPolicy};
 use crate::render::room_glb::{self, RoomGlbCpu, RoomEnvLightingTune, load_room_glb_from_bytes};
-use crate::render::wgpu_renderer::{MAX_POINT_LIGHTS, MAX_SPOT_LIGHTS, PointLight, SpotLight};
-use crate::render::world_space::surface_anchor_from_world_xyz;
+use crate::render::wgpu_renderer::{PointLight, SpotLight};
 
 /// glTF node names for pick-blind actions (must match Blender objects).
 pub const BTN_PLAY_ROUND: &str = "btn_play_round";
@@ -86,10 +83,10 @@ pub fn hallway_pick_blind_play_button_node(boss_blind: bool) -> &'static str {
 
 /// Applied in [`crate::render::wgpu_renderer::WgpuRenderer`] when writing hallway env uniforms:
 /// multiplies `tile_seed` on top of the shared shop/storeroom exposure path.
-pub const HALLWAY_ENV_LINEAR_EXPOSURE_MUL: f32 = 2.35;
+pub const HALLWAY_ENV_LINEAR_EXPOSURE_MUL: f32 = 1.0;
 
-/// Minimum `decal_atlas_uv.x` (hemispheric fill in `room_glb.wgsl`) for this room; `max` with debug tune.
-pub const HALLWAY_ENV_AMBIENT_SCALE_MIN: f32 = 0.085;
+/// Hemispheric fill in `room_glb.wgsl` (`decal_atlas_uv.x`). Windowless interior — no sky ambient.
+pub const HALLWAY_ENV_AMBIENT_SCALE_MIN: f32 = 0.0;
 
 // ── Pick-blind hallway vertex distortion (`room_glb.wgsl` / `tile_3d.wgsl` @group(0) @binding(8)) ──
 
@@ -676,27 +673,7 @@ pub fn hallway_camera_base(w: f32, h: f32, env_h: f32) -> CameraParams {
 }
 
 pub fn hallway_glb_has_embedded_lights() -> bool {
-    with_hallway_glb_cpu(|opt| {
-        opt.is_some_and(|cpu| {
-            !cpu.embedded_point_lights.is_empty() || !cpu.embedded_spot_lights.is_empty()
-        })
-    })
-}
-
-fn gltf_punctual_linear_rgb(
-    raw: [f32; 3],
-    is_candle: bool,
-    tune: &RoomEnvLightingTune,
-) -> [f32; 3] {
-    if is_candle {
-        [
-            (raw[0] * tune.candle_light_color_mul[0]).clamp(0.0, 1.0),
-            (raw[1] * tune.candle_light_color_mul[1]).clamp(0.0, 1.0),
-            (raw[2] * tune.candle_light_color_mul[2]).clamp(0.0, 1.0),
-        ]
-    } else {
-        raw
-    }
+    with_hallway_glb_cpu(|opt| opt.is_some_and(crate::render::room_gltf_punctual::room_glb_has_embedded_lights))
 }
 
 /// glTF punctual points merged into [`crate::render::draw_cmd::SceneLighting::punctual`] (hallway room).
@@ -707,39 +684,18 @@ pub fn hallway_embedded_point_lights_runtime(
     tune: &RoomEnvLightingTune,
 ) -> Vec<PointLight> {
     with_hallway_glb_cpu(|opt| {
-        let Some(cpu) = opt else {
-            return Vec::new();
-        };
-        if cpu.embedded_point_lights.is_empty() {
-            return Vec::new();
-        }
-        let s = room_glb::room_env_world_scale(h, env_h);
-        let center_doc = cpu
-            .environment_bounds_doc
-            .map(|b| b.center())
-            .unwrap_or(Vec3::ZERO);
-        let budget = MAX_POINT_LIGHTS.saturating_sub(2);
-        if cpu.embedded_point_lights.len() > budget {
-            log::warn!(
-                "hallway.glb: {} point lights exceed budget ({}) — truncating",
-                cpu.embedded_point_lights.len(),
-                budget
-            );
-        }
-        cpu.embedded_point_lights
-            .iter()
-            .take(budget)
-            .map(|l| {
-                let world = (l.pos_doc - center_doc) * s;
-                let radius = glb_punctual_range_world_upload(h, s, l.range_doc);
-                PointLight {
-                    pos: surface_anchor_from_world_xyz(w, h, world),
-                    radius,
-                    color: gltf_punctual_linear_rgb(l.color_linear, l.is_candle, tune),
-                    intensity: (l.intensity * tune.gltf_light_intensity_scale).max(0.0),
-                }
-            })
-            .collect()
+        opt.map(|cpu| {
+            crate::render::room_gltf_punctual::embedded_point_lights_runtime(
+                cpu,
+                w,
+                h,
+                env_h,
+                tune,
+                crate::render::room_gltf_punctual::RoomPunctualProfile::Standard,
+                "hallway.glb",
+            )
+        })
+        .unwrap_or_default()
     })
 }
 
@@ -750,51 +706,13 @@ pub fn hallway_embedded_spot_lights_runtime(
     env_h: f32,
     tune: &RoomEnvLightingTune,
 ) -> Vec<SpotLight> {
-    if !hallway_glb_has_embedded_lights() {
-        return Vec::new();
-    }
     with_hallway_glb_cpu(|opt| {
-        let Some(cpu) = opt else {
-            return Vec::new();
-        };
-        if cpu.embedded_spot_lights.is_empty() {
-            return Vec::new();
-        }
-        let s = room_glb::room_env_world_scale(h, env_h);
-        let center_doc = cpu
-            .environment_bounds_doc
-            .map(|b| b.center())
-            .unwrap_or(Vec3::ZERO);
-        if cpu.embedded_spot_lights.len() > MAX_SPOT_LIGHTS {
-            log::warn!(
-                "hallway.glb: {} spot lights exceed {} — truncating",
-                cpu.embedded_spot_lights.len(),
-                MAX_SPOT_LIGHTS
-            );
-        }
-        cpu.embedded_spot_lights
-            .iter()
-            .take(MAX_SPOT_LIGHTS)
-            .filter_map(|l| {
-                let dir_w = l.dir_doc.normalize_or_zero();
-                if dir_w.length_squared() < 1e-12 {
-                    return None;
-                }
-                let world = (l.pos_doc - center_doc) * s;
-                let radius = glb_punctual_range_world_upload(h, s, l.range_doc);
-                let cos_outer = l.outer_cone_rad.cos();
-                let cos_inner = l.inner_cone_rad.cos().max(cos_outer);
-                Some(SpotLight {
-                    pos: surface_anchor_from_world_xyz(w, h, world),
-                    dir: dir_w.to_array(),
-                    radius,
-                    cos_outer,
-                    cos_inner,
-                    color: gltf_punctual_linear_rgb(l.color_linear, l.is_candle, tune),
-                    intensity: (l.intensity * tune.gltf_light_intensity_scale).max(0.0),
-                })
-            })
-            .collect()
+        opt.map(|cpu| {
+            crate::render::room_gltf_punctual::embedded_spot_lights_runtime(
+                cpu, w, h, env_h, tune, "hallway.glb",
+            )
+        })
+        .unwrap_or_default()
     })
 }
 

@@ -25,12 +25,18 @@ pub(super) enum RenderOp {
     },
     Starfield,
     EmberDrift,
+    Rain,
     GoldenDust,
     MoonlitWater,
     SunlitWater,
     ShootingStarCascade,
     Table,
     QuadBatch {
+        buf_idx: usize,
+        count: u32,
+    },
+    /// Post-tonemap tooltip / inspect panels (`DrawCmd::OverlayQuad`).
+    OverlayQuadBatch {
         buf_idx: usize,
         count: u32,
     },
@@ -48,13 +54,15 @@ pub(super) enum RenderOp {
     },
     TextDraw(usize),
     TileFaceQuad(usize),
-    PromptIconQuad(usize),
+    ImageQuad(usize),
     /// Imported shop room (`shop.glb`), drawn like showcase tiles with identity model.
     ShopEnvironment,
     /// Pick-blind hallway (`hallway.glb`).
     HallwayEnvironment,
     /// Archive room (`archive.glb`).
     ArchiveEnvironment,
+    /// Main-menu waterfront (`main_menu.glb`).
+    MainMenuEnvironment,
     /// Marker: start a new Pass A subpass with depth cleared (HDR color unchanged).
     /// Emitted from [`crate::render::draw_cmd::DrawCmd::ClearSceneDepth`]. Never dispatched
     /// through [`super::process_op::WgpuRenderer::process_op`].

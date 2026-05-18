@@ -110,25 +110,24 @@ pub struct WgpuRenderer {
     ssr_prev_depth_texture: wgpu::Texture,
     ssr_prev_depth_view: wgpu::TextureView,
     quad_pipeline: wgpu::RenderPipeline,
+    /// Same shader as `quad_pipeline`, targeting the swapchain format (post-tonemap UI).
+    quad_pipeline_display: wgpu::RenderPipeline,
     gradient_quad_pipeline: wgpu::RenderPipeline,
     squircle_quad_pipeline: wgpu::RenderPipeline,
-    /// 3D billboarded flame particle pipeline. See
-    /// [`crate::render::flame_particles`] and `shaders/flame.wgsl`.
+    /// Volumetric candle flame pipeline (`shaders/flame.wgsl` + `blackbody.wgsl`).
     flame_pipeline: wgpu::RenderPipeline,
+    /// Shared revolved teardrop mesh; instanced once per candle.
+    flame_volume_mesh: crate::render::lit_mesh::LitMeshGpu,
     /// Per-frame camera matrices uploaded for the flame vertex shader.
     /// Structurally identical to the view_proj + view_pos portion of
     /// `SsrGlobals`, but with a vertex-visible binding.
     flame_view_buffer: wgpu::Buffer,
     flame_view_bind_group: wgpu::BindGroup,
-    /// CPU pool backing the 3D flame pipeline. Owned by the renderer so it
-    /// persists across frames (the scene just supplies per-candle
-    /// emitters each draw).
-    flame_particles: crate::render::flame_particles::FlameParticleSystem,
-    /// Reusable staging vec for uploading live particles to the GPU each
-    /// frame. Kept here to avoid per-frame allocations.
-    flame_particle_staging: Vec<crate::render::flame_particles::GpuFlameParticle>,
+    /// Reusable staging buffer for [`crate::render::flame_volume::GpuFlameInstance`].
+    flame_instance_staging: Vec<crate::render::flame_volume::GpuFlameInstance>,
     starfield_pipeline: wgpu::RenderPipeline,
     ember_drift_pipeline: wgpu::RenderPipeline,
+    rain_pipeline: wgpu::RenderPipeline,
     golden_dust_pipeline: wgpu::RenderPipeline,
     moonlit_water_pipeline: wgpu::RenderPipeline,
     // Owns the GPU resource that `moon_albedo_bind_group` samples from.
@@ -206,7 +205,7 @@ pub struct WgpuRenderer {
     tile_outline_vertex_buffer: wgpu::Buffer,
     tile_outline_index_buffer: wgpu::Buffer,
     tile_outline_index_count: u32,
-    /// [`Shop.glb`](../../assets/3d/Shop.glb) environment primitives (tile vertex layout + materials).
+    /// [`shop.glb`](../../assets/3d/shop.glb) environment primitives (tile vertex layout + materials).
     shop_env_primitives: Vec<TilePrimitiveGpu>,
     shop_environment: Option<ShopEnvironmentGpu>,
     /// [`hallway.glb`](../../assets/3d/hallway.glb) pick-blind room.
@@ -215,6 +214,9 @@ pub struct WgpuRenderer {
     /// [`archive.glb`](../../assets/3d/archive.glb) Archive room.
     archive_env_primitives: Vec<TilePrimitiveGpu>,
     archive_environment: Option<ShopEnvironmentGpu>,
+    /// [`main_menu.glb`](../../assets/3d/main_menu.glb) hub waterfront.
+    main_menu_env_primitives: Vec<TilePrimitiveGpu>,
+    main_menu_environment: Option<ShopEnvironmentGpu>,
     /// GPU primitive index of `sign_description_left` in `archive_env_primitives` (for culling).
     archive_sign_left_prim_idx: Option<usize>,
     archive_sign_right_prim_idx: Option<usize>,
@@ -223,16 +225,16 @@ pub struct WgpuRenderer {
     /// Multiplier for embedded glTF **room** scale (`window_h *` this): shop, hallway, archive, etc.
     /// Set each frame from the app (debug overlay may override [`crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE`]).
     room_gltf_height_scale: f32,
-    /// Debug HDR multiplier; shop applies [`crate::render::room_glb::SHOP_ENV_LINEAR_EXPOSURE_BASE`]
+    /// Debug HDR tune; embedded GLB rooms apply [`crate::render::room_glb::ROOM_GLB_LINEAR_EXPOSURE_BASE`]
     /// × this before ACES (`CameraUniform.tile_seed` + `SsrGlobals.felt.z`).
     shop_env_linear_exposure: f32,
     /// Hemispheric ambient scale (`CameraUniform.decal_atlas_uv.x`).
     shop_env_ambient_scale: f32,
     /// Scales embedded glTF punctual contribution in `lit_mesh` (`PointLightsBuf.extras.w` when embedded).
     shop_lit_mesh_gltf_punctual_scale: f32,
-    /// Scales glTF mesh emissive on `Shop.glb` / `hallway.glb` (`CameraUniform.decal_atlas_uv.z`).
+    /// Scales glTF mesh emissive on `shop.glb` / `hallway.glb` (`CameraUniform.decal_atlas_uv.z`).
     shop_gltf_emissive_scale: f32,
-    /// CPU triangle soups from invisible marker meshes in [`Shop.glb`](../../assets/3d/Shop.glb).
+    /// CPU triangle soups from invisible marker meshes in [`shop.glb`](../../assets/3d/shop.glb).
     pub(super) shop_env_collision_meshes: Vec<crate::render::room_glb::RoomCollisionMesh>,
     /// Identity factor used by every primitive (kept for the cam uniform).
     tile_base_color_factor: [f32; 4],
@@ -248,12 +250,12 @@ pub struct WgpuRenderer {
     /// Cached 2D tile-face overlays keyed by tile identity.
     tile_face_overlays:
         FxHashMap<(Suit, u8, Option<crate::core::tile::TileEnhancement>, bool), TileFaceOverlayGpu>,
-    /// Cached prompt icons keyed by source path (`asset:...` or `file:...`).
-    prompt_icon_overlays: FxHashMap<String, TileFaceOverlayGpu>,
-    /// Negative cache for [`Self::prompt_icon_overlays`]: keys whose upload
+    /// Cached [`ImageQuadSource`] textures keyed by [`ImageQuadSource::cache_key`].
+    image_quad_overlays: FxHashMap<String, TileFaceOverlayGpu>,
+    /// Negative cache for [`Self::image_quad_overlays`]: keys whose upload
     /// already failed. Re-trying every frame would re-decode the sheet and
     /// flood the log; we warn once and skip thereafter.
-    prompt_icon_missing: FxHashSet<String>,
+    image_quad_missing: FxHashSet<String>,
     /// Lazily built texture + bind group for [`Object3dKind::Relic::debuffed`] overlays.
     debuff_marker_overlay: Option<TileFaceOverlayGpu>,
     /// Cached text-label rasterizations. Two-level map so the hit path can
@@ -571,9 +573,9 @@ pub struct WgpuRenderer {
     /// Per-talisman instances (shop scene). Indexed sequentially by
     /// `TalismanBatch` placement order; truncated at `MAX_TALISMAN_SLOTS`.
     talisman_instances: Vec<LitMeshInstance>,
-    /// Chitin ellipsoid body mesh for hovering insects near the lamp.
+    /// Chitin ellipsoid body mesh for main-menu door-light moths.
     bug_body_mesh: LitMeshGpu,
-    /// Flat wing-pair mesh for hovering insects.
+    /// Flat wing-pair mesh for main-menu door-light moths.
     bug_wing_mesh: LitMeshGpu,
     /// Per-bug body instance slots.
     bug_body_instances: Vec<LitMeshInstance>,
@@ -696,7 +698,7 @@ pub struct WgpuRenderer {
     /// Parallel with `last_projected_yaku_tablet_rects`.
     pub(super) last_yaku_tablet_models: Vec<Mat4>,
     /// Per-wood-tablet world-space model matrices for `pick_gameplay_object`.
-    /// Index 0 = sort suit, 1 = sort rank, 2 = play hand.
+    /// Index 0 = cash-in tablet when structure is committed.
     pub(super) last_wood_tablet_models: Vec<Mat4>,
     /// Discard bowl world-space model matrix for `pick_gameplay_object`.
     pub(super) last_bowl_model: Option<Mat4>,

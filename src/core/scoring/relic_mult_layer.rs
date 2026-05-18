@@ -127,9 +127,16 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
         }
     }
 
-    if has(RelicId::RoundCompass)
-        && let Some(wind) = ctx.round.round_wind
-    {
+    if has(RelicId::WindReader) {
+        let mut round_winds = Vec::new();
+        if let Some(w) = ctx.round.round_wind {
+            round_winds.push(w);
+        }
+        if let Some(w) = ctx.round.bonus_round_wind {
+            if !round_winds.contains(&w) {
+                round_winds.push(w);
+            }
+        }
         for s in sets {
             if !matches!(s.kind, MeldKind::Triplet | MeldKind::Kong) {
                 continue;
@@ -138,9 +145,9 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
                 .tile_ids
                 .first()
                 .and_then(|id| tile_by_id(tiles, *id))
-                .is_some_and(|t| t.suit == Suit::Wind && t.rank == wind);
+                .is_some_and(|t| t.suit == Suit::Wind && round_winds.contains(&t.rank));
             if is_round_wind {
-                push_mult(steps, *chips, mult, "Round Compass", 6.0);
+                push_mult(steps, *chips, mult, "Windreader", 6.0);
             }
         }
     }

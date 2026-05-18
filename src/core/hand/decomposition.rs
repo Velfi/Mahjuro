@@ -554,7 +554,7 @@ pub(super) fn try_kokushi_musou(tiles: &[Tile]) -> Option<Vec<DetectedMeld>> {
 /// triplets) vs leftover wildcards. Flowers can form melds with each other
 /// regardless of rank — any 2 flowers make a pair, any 3 make a triplet.
 /// Handles arbitrarily many flowers (e.g. from Wildflower talisman).
-pub(super) fn flower_meld_partitions(flower_ids: &[u32]) -> Vec<(Vec<DetectedMeld>, Vec<u32>)> {
+pub(crate) fn flower_meld_partitions(flower_ids: &[u32]) -> Vec<(Vec<DetectedMeld>, Vec<u32>)> {
     let mut results = Vec::new();
     // Push/pop into a single shared scratch buffer instead of cloning
     // `melds_so_far` at every recursion level — was O(2^n) cloning with
@@ -562,6 +562,32 @@ pub(super) fn flower_meld_partitions(flower_ids: &[u32]) -> Vec<(Vec<DetectedMel
     let mut scratch: Vec<DetectedMeld> = Vec::new();
     flower_meld_partitions_recurse(flower_ids, &mut scratch, &mut results);
     results
+}
+
+/// Hand-index bitmasks for every way to commit zero or more flower-only pairs /
+/// triplets from `flowers` (each entry is `(hand_index, tile_id)`).
+pub(crate) fn flower_meld_partition_masks(flowers: &[(usize, u32)]) -> Vec<u32> {
+    let ids: Vec<u32> = flowers.iter().map(|(_, id)| *id).collect();
+    let mut masks = vec![0u32];
+    for (melds, _) in flower_meld_partitions(&ids) {
+        if melds.is_empty() {
+            continue;
+        }
+        let mut mask = 0u32;
+        for meld in &melds {
+            for &tile_id in &meld.tile_ids {
+                if let Some(&(hand_index, _)) = flowers.iter().find(|(_, id)| *id == tile_id) {
+                    mask |= 1 << hand_index;
+                }
+            }
+        }
+        if mask.count_ones() >= 2 {
+            masks.push(mask);
+        }
+    }
+    masks.sort_unstable();
+    masks.dedup();
+    masks
 }
 
 fn flower_meld_partitions_recurse(

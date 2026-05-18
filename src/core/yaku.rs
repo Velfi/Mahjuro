@@ -188,6 +188,7 @@ pub fn yaku_preview(
     tiles: &[Tile],
     available: &[YakuKind],
     round_wind: Option<u8>,
+    bonus_round_wind: Option<u8>,
     wildcard_result: Option<(&[DetectedMeld], &[Tile])>,
 ) -> Vec<YakuPreview> {
     let (sets_opt, effective_tiles, original) = match wildcard_result {
@@ -197,10 +198,17 @@ pub fn yaku_preview(
             let v = validate_selection(tiles);
             // We need to return a reference to `tiles` in both arms, so
             // store the owned vec alongside the slice we actually iterate.
-            return yaku_preview_inner(tiles, &v, available, round_wind, None);
+            return yaku_preview_inner(tiles, &v, available, round_wind, bonus_round_wind, None);
         }
     };
-    yaku_preview_inner(effective_tiles, &sets_opt, available, round_wind, original)
+    yaku_preview_inner(
+        effective_tiles,
+        &sets_opt,
+        available,
+        round_wind,
+        bonus_round_wind,
+        original,
+    )
 }
 
 fn yaku_preview_inner(
@@ -208,10 +216,11 @@ fn yaku_preview_inner(
     sets_opt: &Option<Vec<DetectedMeld>>,
     available: &[YakuKind],
     round_wind: Option<u8>,
+    bonus_round_wind: Option<u8>,
     original_tiles: Option<&[Tile]>,
 ) -> Vec<YakuPreview> {
     let active_yaku: Vec<YakuKind> = match sets_opt {
-        Some(s) => detect_yaku_with_wind(tiles, s, round_wind, original_tiles),
+        Some(s) => detect_yaku_with_wind(tiles, s, round_wind, bonus_round_wind, original_tiles),
         None => Vec::new(),
     };
 
@@ -242,6 +251,7 @@ pub fn detect_yaku_with_wind(
     tiles: &[Tile],
     sets: &[DetectedMeld],
     round_wind: Option<u8>,
+    bonus_round_wind: Option<u8>,
     original_tiles: Option<&[Tile]>,
 ) -> Vec<YakuKind> {
     // Suit/rank composition checks use original (pre-substitution) tiles so
@@ -259,7 +269,7 @@ pub fn detect_yaku_with_wind(
     if is_full_hand(tiles, sets) {
         found.push(YakuKind::FullHand);
     }
-    if is_yakuhai(tiles, sets, round_wind) {
+    if is_yakuhai(tiles, sets, round_wind, bonus_round_wind) {
         found.push(YakuKind::Yakuhai);
     }
     if is_chiitoitsu(sets) {
@@ -347,7 +357,12 @@ fn is_toitoi(sets: &[DetectedMeld]) -> bool {
 /// Yakuhai: a triplet (or kong) of any dragon, or of the round wind. The
 /// round wind is the ante's wind (East/South/West/North) — passed in via
 /// `round_wind` (1..=4) or `None` if the caller doesn't track it.
-fn is_yakuhai(tiles: &[Tile], sets: &[DetectedMeld], round_wind: Option<u8>) -> bool {
+fn is_yakuhai(
+    tiles: &[Tile],
+    sets: &[DetectedMeld],
+    round_wind: Option<u8>,
+    bonus_round_wind: Option<u8>,
+) -> bool {
     sets.iter()
         .filter(|s| matches!(s.kind, MeldKind::Triplet | MeldKind::Kong))
         .any(|s| {
@@ -356,7 +371,10 @@ fn is_yakuhai(tiles: &[Tile], sets: &[DetectedMeld], round_wind: Option<u8>) -> 
                 .and_then(|id| tiles.iter().find(|t| t.id == *id))
                 .is_some_and(|t| match t.suit {
                     Suit::Dragon => true,
-                    Suit::Wind => round_wind.is_some_and(|w| t.rank == w),
+                    Suit::Wind => {
+                        round_wind.is_some_and(|w| t.rank == w)
+                            || bonus_round_wind.is_some_and(|w| t.rank == w)
+                    }
                     _ => false,
                 })
         })
@@ -627,7 +645,7 @@ mod tests {
                 tile_ids: vec![6, 7],
             },
         ];
-        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None);
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
         assert!(yaku.contains(&YakuKind::Toitoi));
         assert!(!yaku.contains(&YakuKind::Tanyao));
     }
@@ -651,7 +669,7 @@ mod tests {
                 tile_ids: vec![3, 4],
             },
         ];
-        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None);
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
         assert!(yaku.contains(&YakuKind::Tanyao));
     }
 
@@ -674,7 +692,7 @@ mod tests {
                 tile_ids: vec![3, 4],
             },
         ];
-        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None);
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
         assert!(!yaku.contains(&YakuKind::Tanyao));
     }
 
@@ -718,7 +736,7 @@ mod tests {
                 tile_ids: vec![12, 13],
             },
         ];
-        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None);
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
         assert!(yaku.contains(&YakuKind::FullHand));
     }
 
@@ -729,7 +747,7 @@ mod tests {
             kind: MeldKind::Pair,
             tile_ids: vec![0, 1],
         }];
-        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None);
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
         // A bare pair must not award any yaku — they all gate on a real hand.
         assert!(!yaku.contains(&YakuKind::Toitoi));
         assert!(!yaku.contains(&YakuKind::Tanyao));
@@ -762,7 +780,7 @@ mod tests {
                 tile_ids: vec![(i * 2) as u32, (i * 2 + 1) as u32],
             })
             .collect();
-        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None);
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
         assert!(yaku.contains(&YakuKind::Chiitoitsu));
     }
 
@@ -785,7 +803,7 @@ mod tests {
                 tile_ids: vec![3, 4],
             },
         ];
-        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None);
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
         assert!(yaku.contains(&YakuKind::Chinitsu));
         assert!(!yaku.contains(&YakuKind::Honitsu));
     }
@@ -809,7 +827,7 @@ mod tests {
                 tile_ids: vec![3, 4],
             },
         ];
-        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None);
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
         assert!(yaku.contains(&YakuKind::Honitsu));
         assert!(!yaku.contains(&YakuKind::Chinitsu));
     }
@@ -841,7 +859,7 @@ mod tests {
                 tile_ids: vec![6, 7],
             },
         ];
-        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None);
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
         assert!(yaku.contains(&YakuKind::Honitsu));
     }
 
@@ -865,7 +883,7 @@ mod tests {
                 tile_ids: vec![3, 4, 5],
             },
         ];
-        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None);
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
         assert!(yaku.contains(&YakuKind::Iipeikou));
     }
 
@@ -896,7 +914,7 @@ mod tests {
                 tile_ids: vec![6, 7, 8],
             },
         ];
-        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None);
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
         assert!(yaku.contains(&YakuKind::SanshokuDoujun));
     }
 
@@ -927,7 +945,7 @@ mod tests {
                 tile_ids: vec![6, 7, 8],
             },
         ];
-        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None);
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
         assert!(yaku.contains(&YakuKind::Ittsu));
     }
 
@@ -950,7 +968,7 @@ mod tests {
                 tile_ids: vec![3, 4],
             },
         ];
-        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None);
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
         assert!(yaku.contains(&YakuKind::Honroutou));
     }
 
@@ -992,8 +1010,23 @@ mod tests {
             kind: MeldKind::Triplet,
             tile_ids: vec![0, 1, 2],
         }];
-        assert!(detect_yaku_with_wind(&tiles, &sets, None, None).contains(&YakuKind::Yakuhai));
-        assert!(detect_yaku_with_wind(&tiles, &sets, Some(1), None).contains(&YakuKind::Yakuhai));
+        assert!(detect_yaku_with_wind(&tiles, &sets, None, None, None).contains(&YakuKind::Yakuhai));
+        assert!(detect_yaku_with_wind(&tiles, &sets, Some(1), None, None).contains(&YakuKind::Yakuhai));
+    }
+
+    #[test]
+    fn detect_yakuhai_bonus_round_wind_match() {
+        let tiles = vec![
+            t(Suit::Wind, 2, 0),
+            t(Suit::Wind, 2, 1),
+            t(Suit::Wind, 2, 2),
+        ];
+        let sets = vec![DetectedMeld {
+            kind: MeldKind::Triplet,
+            tile_ids: vec![0, 1, 2],
+        }];
+        assert!(!detect_yaku_with_wind(&tiles, &sets, Some(1), None, None).contains(&YakuKind::Yakuhai));
+        assert!(detect_yaku_with_wind(&tiles, &sets, Some(1), Some(2), None).contains(&YakuKind::Yakuhai));
     }
 
     #[test]
@@ -1009,11 +1042,11 @@ mod tests {
             tile_ids: vec![0, 1, 2],
         }];
         // Without wind context, wind triplets don't fire.
-        assert!(!detect_yaku_with_wind(&tiles, &sets, None, None).contains(&YakuKind::Yakuhai));
+        assert!(!detect_yaku_with_wind(&tiles, &sets, None, None, None).contains(&YakuKind::Yakuhai));
         // With matching round wind, fires.
-        assert!(detect_yaku_with_wind(&tiles, &sets, Some(1), None).contains(&YakuKind::Yakuhai));
+        assert!(detect_yaku_with_wind(&tiles, &sets, Some(1), None, None).contains(&YakuKind::Yakuhai));
         // With non-matching round wind, doesn't fire.
-        assert!(!detect_yaku_with_wind(&tiles, &sets, Some(2), None).contains(&YakuKind::Yakuhai));
+        assert!(!detect_yaku_with_wind(&tiles, &sets, Some(2), None, None).contains(&YakuKind::Yakuhai));
     }
 
     #[test]
@@ -1029,7 +1062,7 @@ mod tests {
             kind: MeldKind::Kong,
             tile_ids: vec![0, 1, 2, 3],
         }];
-        assert!(detect_yaku_with_wind(&tiles, &sets, None, None).contains(&YakuKind::Yakuhai));
+        assert!(detect_yaku_with_wind(&tiles, &sets, None, None, None).contains(&YakuKind::Yakuhai));
     }
 
     #[test]

@@ -202,27 +202,35 @@ pub(crate) fn make_debuff_marker_overlay_gpu(
     }
 }
 
-pub(super) fn make_prompt_icon_overlay_gpu(
+pub(super) fn make_image_quad_overlay_gpu(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
     sampler: &wgpu::Sampler,
-    source: &crate::render::draw_cmd::PromptIconSource,
+    source: &crate::render::draw_cmd::ImageQuadSource,
 ) -> Option<TileFaceOverlayGpu> {
     let (rgba, w, h) = match source {
-        crate::render::draw_cmd::PromptIconSource::AtlasSprite { sheet, name } => {
+        crate::render::draw_cmd::ImageQuadSource::AtlasSprite { sheet, name } => {
             crate::render::kenney_atlas::extract_sprite_rgba(sheet, name)?
         }
-        crate::render::draw_cmd::PromptIconSource::PackedAtlas { sheet, name } => {
+        crate::render::draw_cmd::ImageQuadSource::PackedAtlas { sheet, name } => {
             crate::render::skip_tag_atlas::extract_sprite_rgba(sheet, name)?
         }
-        crate::render::draw_cmd::PromptIconSource::Filesystem(path) => {
+        crate::render::draw_cmd::ImageQuadSource::Asset { path } => {
+            let file = crate::asset_path::get(path)?;
+            let img = image::load_from_memory(&file.data).ok()?;
+            let rgba = img.to_rgba8();
+            let w = rgba.width();
+            let h = rgba.height();
+            (rgba.into_raw(), w, h)
+        }
+        crate::render::draw_cmd::ImageQuadSource::Filesystem(path) => {
             crate::render::kenney_svg::rasterize_filesystem_svg_or_png_rgba(path)?
         }
     };
-    let (texture, view) = upload_rgba_texture(device, queue, "kenney-prompt-icon", &rgba, w, h);
+    let (texture, view) = upload_rgba_texture(device, queue, "image-quad", &rgba, w, h);
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("kenney-prompt-icon-bg"),
+        label: Some("image-quad-bg"),
         layout,
         entries: &[
             wgpu::BindGroupEntry {

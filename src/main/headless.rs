@@ -553,7 +553,7 @@ struct HeadlessApp {
     active_profile: usize,
     gfx: RenderSettings,
     effect_layers: crate::effect_layers::EffectLayers,
-    tonemap_tuning: crate::game::tonemap_tuning::TonemapTuningSet,
+    scene_look: crate::game::scene_look_tuning::SceneLookTuningSet,
     width: u32,
     height: u32,
     game_in_progress: bool,
@@ -624,13 +624,14 @@ impl HeadlessApp {
                 ssr_enabled: settings.ssr_enabled,
                 hdr_enabled: false,
                 // Headless screenshots stay on the clean tonemap path so
-                // captures don't pick up VHS overlay artifacts. Per-scene
-                // amounts can still be edited at runtime via the debug
-                // overlay; the headless path simply ignores them.
+                // captures don't pick up VHS overlay artifacts.
                 vhs_enabled: false,
             },
-            effect_layers: crate::effect_layers::EffectLayers::FULL,
-            tonemap_tuning: crate::game::tonemap_tuning::TonemapTuningSet::load(),
+            // Match interactive `App` defaults (`lib.rs`) so captures don't
+            // enable starfield, golden dust, transition FX, or HDR that the
+            // live game keeps off in baseline graphics.
+            effect_layers: crate::effect_layers::EffectLayers::BASELINE,
+            scene_look: crate::game::scene_look_tuning::SceneLookTuningSet::load(),
             width,
             height,
             game_in_progress,
@@ -1071,8 +1072,8 @@ impl HeadlessApp {
             _ => None,
         };
         self.renderer.set_active_scene(active_scene_key);
-        let tonemap = self.tonemap_tuning.resolve(active_scene_key);
-        self.renderer.set_tonemap_tuning(&tonemap);
+        let look = self.scene_look.resolve(active_scene_key);
+        self.renderer.set_tonemap_tuning(&look.tonemap);
         let rotations_scene = match self.overlay_stack.last() {
             Some(Scene::Showcase(s)) if s.wants_orbit_input() => &self.scene,
             _ => scene_for_renderer,
@@ -1080,7 +1081,7 @@ impl HeadlessApp {
         self.renderer
             .set_committed_arrange_rotations(collect_committed_rotations(rotations_scene));
         self.renderer
-            .set_room_gltf_height_scale(crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE);
+            .set_room_gltf_height_scale(look.room_gltf_height_scale);
         let sl = self.shop_env_lighting;
         self.renderer.set_shop_env_render_tune(
             sl.linear_exposure,
@@ -1151,6 +1152,9 @@ impl HeadlessApp {
         room: crate::render::room_gi_bake::RoomGiRoom,
         warmup_frames: u32,
     ) -> anyhow::Result<crate::render::room_gi_bake::RoomGiBake> {
+        // `EffectLayers::BASELINE` keeps `procedural_surface_quality` off, which
+        // forces `EffectsQuality::Off` in `wgpu_render_settings` and skips GI.
+        self.effect_layers.procedural_surface_quality = true;
         self.gfx.effects_quality = crate::persistence::EffectsQuality::High;
         self.renderer.request_room_gi_capture(room);
         for _ in 0..warmup_frames {
@@ -1174,8 +1178,11 @@ fn parse_bake_room_slug(slug: &str) -> anyhow::Result<crate::render::room_gi_bak
         "shop" => Ok(crate::render::room_gi_bake::RoomGiRoom::Shop),
         "hallway" | "pick_blind" => Ok(crate::render::room_gi_bake::RoomGiRoom::Hallway),
         "archive" | "collection" => Ok(crate::render::room_gi_bake::RoomGiRoom::Archive),
+        "main_menu" | "main-menu" | "main_menu_exterior" => {
+            Ok(crate::render::room_gi_bake::RoomGiRoom::MainMenu)
+        }
         other => anyhow::bail!(
-            "unknown room '{other}' (use shop, hallway, or archive)"
+            "unknown room '{other}' (use shop, hallway, archive, or main_menu)"
         ),
     }
 }
@@ -1202,6 +1209,11 @@ fn scene_for_room_gi_bake(
             coll.prepare_chronicle_for_screenshot();
             (Scene::Collection(coll), run, false)
         }
+        crate::render::room_gi_bake::RoomGiRoom::MainMenu => (
+            Scene::MainMenuExterior(scenes::MainMenuExteriorScene::new()),
+            run,
+            false,
+        ),
     })
 }
 
@@ -1216,6 +1228,7 @@ pub fn run_bake_room_gi_command(b: main_cli::BakeRoomGiCli) -> anyhow::Result<()
         crate::render::room_gi_bake::RoomGiRoom::Shop => "shop.mgi",
         crate::render::room_gi_bake::RoomGiRoom::Hallway => "hallway.mgi",
         crate::render::room_gi_bake::RoomGiRoom::Archive => "archive.mgi",
+        crate::render::room_gi_bake::RoomGiRoom::MainMenu => "main_menu.mgi",
     };
     let out_path = b.output_dir.join(out_name);
     if let Some(parent) = out_path.parent()

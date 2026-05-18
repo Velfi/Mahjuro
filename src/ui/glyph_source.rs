@@ -5,7 +5,7 @@
 //!
 //! Scenes always go through [`GlyphResolver::glyph_for`].
 
-use crate::render::draw_cmd::PromptIconSource;
+use crate::render::draw_cmd::ImageQuadSource;
 use crate::ui::button_prompts::GamepadStyle;
 use crate::ui::input::UiAction;
 
@@ -29,9 +29,9 @@ impl GlyphResolver {
 
     /// Returns `None` only when no glyph is defined for the action (most
     /// non-prompt actions).
-    pub fn glyph_for(&self, action: UiAction) -> Option<PromptIconSource> {
+    pub fn glyph_for(&self, action: UiAction) -> Option<ImageQuadSource> {
         static_glyph_sprite(self.style, action, self.swap_ab, self.swap_xy)
-            .map(|(sheet, name)| PromptIconSource::AtlasSprite { sheet, name })
+            .map(|(sheet, name)| ImageQuadSource::AtlasSprite { sheet, name })
     }
 }
 

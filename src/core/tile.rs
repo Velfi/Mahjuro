@@ -134,21 +134,21 @@ impl Tile {
         self.suit == Suit::Flower
     }
 
-    /// Compact notation for logs and fallback decals (`3m`/`7s`, winds `E`/`S`/…).
-    /// Prefer [`Self::full_name`] for player-visible UI copy.
+    /// Compact notation for logs, cascade lines, and tooltips (`3m`/`7s`, winds `E`/`S`/…).
+    /// Prefer [`Self::full_name`] for the primary player-facing name.
     pub fn label(&self) -> String {
         match self.suit {
             Suit::Wind => match self.rank {
-                1 => "East".into(),
-                2 => "South".into(),
-                3 => "West".into(),
-                4 => "North".into(),
+                1 => "E".into(),
+                2 => "S".into(),
+                3 => "W".into(),
+                4 => "N".into(),
                 _ => format!("W{}", self.rank),
             },
             Suit::Dragon => match self.rank {
-                1 => "Red".into(),
-                2 => "Green".into(),
-                3 => "White".into(),
+                1 => "R".into(),
+                2 => "G".into(),
+                3 => "Wh".into(),
                 _ => format!("D{}", self.rank),
             },
             Suit::Characters => format!("{}m", self.rank),
@@ -268,5 +268,12 @@ mod sort_order_tests {
         v.sort_by(cmp_sort_order);
         assert_eq!(v[0].suit, Suit::Dots);
         assert_eq!(v[1].suit, Suit::Dragon);
+    }
+
+    #[test]
+    fn label_uses_compact_honor_shorthand() {
+        assert_eq!(Tile::new(Suit::Dots, 9, 0).label(), "9p");
+        assert_eq!(Tile::new(Suit::Wind, 1, 0).label(), "E");
+        assert_eq!(Tile::new(Suit::Dragon, 3, 0).label(), "Wh");
     }
 }

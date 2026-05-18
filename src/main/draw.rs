@@ -21,7 +21,7 @@ impl App {
     /// tonemap resolver and the debug-action handler that opens the
     /// tonemap overlay see the exact same key the renderer does. `None`
     /// for scenes that don't register one — those fall back to the
-    /// `_default` slot in [`crate::game::tonemap_tuning::TonemapTuningSet`].
+    /// `_default` slot in [`crate::game::scene_look_tuning::SceneLookTuningSet`].
     pub(super) fn active_scene_key_for_renderer(&self) -> Option<&'static str> {
         let scene_for_renderer = self.overlay_stack.last().unwrap_or(&self.scene);
         match scene_for_renderer {
@@ -34,6 +34,18 @@ impl App {
             Scene::TutorialCampaign(_) => Some("tutorial"),
             _ => None,
         }
+    }
+
+    /// Tonemap + room GLB look for the active scene. When the scene-look
+    /// overlay is editing the active scene, returns its live draft.
+    pub(super) fn resolved_scene_look(&self) -> crate::game::scene_look_tuning::SceneLookTuning {
+        let active = self.active_scene_key_for_renderer();
+        if let Some(ref overlay) = self.debug.scene_look_debug_overlay {
+            if overlay.editing_active_scene(active) {
+                return overlay.look;
+            }
+        }
+        self.scene_look.resolve(active)
     }
 
     /// Process a `RoundComplete` or `GameOver` event that was held while the
@@ -305,13 +317,13 @@ impl App {
             || self.debug.tuning_overlay.is_some()
             || self.debug.sfx_test_overlay.is_some()
             || self.debug.camera_debug_overlay.is_some()
-            || self.debug.shop_env_debug_overlay.is_some()
-            || self.debug.hallway_distortion_debug_overlay.is_some()
-            || self.debug.tonemap_debug_overlay.is_some();
+            || self.debug.scene_look_debug_overlay.is_some()
+            || self.debug.hallway_distortion_debug_overlay.is_some();
         let preserve_overlay_stack_buttons = matches!(
             self.overlay_stack.last(),
             Some(Scene::RumbleLab(_) | Scene::MaterialViewer(_) | Scene::TransitionPlayground(_))
         );
+        let scene_look = self.resolved_scene_look();
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
@@ -348,9 +360,7 @@ impl App {
         let swap_ab = self.input.as_ref().map(|i| i.swap_ab).unwrap_or(false);
         let swap_xy = self.input.as_ref().map(|i| i.swap_xy).unwrap_or(false);
         let glyphs = crate::ui::glyph_source::GlyphResolver::new(prompt_style, swap_ab, swap_xy);
-        let shop_env_for_frame = self
-            .room_gltf_brownout
-            .apply(self.debug.shop_env_lighting);
+        let shop_env_for_frame = self.room_gltf_brownout.apply(scene_look.room);
         let ctx = DrawCtx::new(
             &layout,
             &self.anim,
@@ -369,7 +379,7 @@ impl App {
                 hide_blind_plaque: self.debug.hide_blind_plaque,
             },
             modal_active,
-            self.debug.room_gltf_height_scale,
+            scene_look.room_gltf_height_scale,
             shop_env_for_frame,
             self.effect_layers,
             self.input
@@ -499,18 +509,18 @@ impl App {
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
-        // Shop env scale debug overlay — on top of modals.
-        if let Some(ref overlay) = self.debug.shop_env_debug_overlay {
+        // Scene look debug overlay — on top of modals (right panel).
+        if let Some(ref overlay) = self.debug.scene_look_debug_overlay {
             let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
-        // Pick-blind hallway warp debug (left panel; shop env uses right).
+        // Pick-blind hallway warp debug (left panel).
         if let Some(ref overlay) = self.debug.hallway_distortion_debug_overlay {
             let (insts, lbls) = overlay.draw(
                 size.width as f32,
                 size.height as f32,
-                self.debug.room_gltf_height_scale,
+                scene_look.room_gltf_height_scale,
             );
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
@@ -521,13 +531,6 @@ impl App {
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
-        // Tonemap tuning overlay — on top of modals. Uploaded value is
-        // already pushed via `set_tonemap_tuning` near the top of `draw`,
-        // so this draw call is the panel UI only.
-        if let Some(ref overlay) = self.debug.tonemap_debug_overlay {
-            let (insts, lbls) = overlay.draw(size.width as f32, size.height as f32);
-            append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
-        }
 
         // Cursor hover labels for `ButtonDef::hover_label`. Scan in vec order (same as
         // click hit-test): first matching rect with a label wins — so smaller rects
@@ -589,9 +592,7 @@ impl App {
                             tooltip_w,
                             tooltip_h,
                         );
-                        for q in tip_quads {
-                            frame.quad(q);
-                        }
+                        frame.overlay_quads(tip_quads);
                         let text_top =
                             tip_y + pad + ((tooltip_h - 2.0 * pad - content_h) * 0.5).max(0.0);
                         let mut tip_texts: Vec<crate::render::wgpu_renderer::TextLabel> =
@@ -772,15 +773,7 @@ impl App {
         };
         renderer.set_active_scene(active_scene_key);
 
-        // Resolve and push the per-scene tonemap + VHS knobs. The debug
-        // Tonemap overlay (when open) edits the in-memory tuning live;
-        // when closed, this just re-uploads the saved values each frame.
-        let active_tonemap = if let Some(ref overlay) = self.debug.tonemap_debug_overlay {
-            overlay.tuning
-        } else {
-            self.tonemap_tuning.resolve(active_scene_key)
-        };
-        renderer.set_tonemap_tuning(&active_tonemap);
+        renderer.set_tonemap_tuning(&scene_look.tonemap);
 
         // Push the committed rotation map so every arrange-tagged draw picks
         // up its Placement's rx/ry/rz_deg without each scene site having to
@@ -791,7 +784,7 @@ impl App {
         };
         renderer.set_committed_arrange_rotations(collect_committed_rotations(rotations_scene));
 
-        renderer.set_room_gltf_height_scale(self.debug.room_gltf_height_scale);
+        renderer.set_room_gltf_height_scale(scene_look.room_gltf_height_scale);
         let sl = shop_env_for_frame;
         renderer.set_shop_env_render_tune(
             sl.linear_exposure,

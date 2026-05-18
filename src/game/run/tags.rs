@@ -51,17 +51,28 @@ impl RunState {
             }
             TagKind::ZodiacBlessing => {
                 use crate::core::zodiac::ZodiacKind;
-                use rand::seq::IndexedRandom;
+                use rand::RngExt;
 
-                let all = ZodiacKind::all();
+                let mut pool: Vec<ZodiacKind> = ZodiacKind::all().to_vec();
                 let mut rng = rand::rng();
-                if let Some(&z) = all.choose(&mut rng) {
+                let mut granted = 0u32;
+                for _ in 0..2 {
+                    if pool.is_empty() {
+                        break;
+                    }
+                    let idx = rng.random_range(0..pool.len());
+                    let z = pool.remove(idx);
                     let yaku = z.yaku();
                     let new_level = self.yaku_levels.level_up(yaku);
-                    self.pending_zodiac_celebration = Some((z, yaku, new_level));
-                    return "Zodiac activated";
+                    self.pending_zodiac_celebrations
+                        .push((z, yaku, new_level));
+                    granted += 1;
                 }
-                "No zodiac"
+                return match granted {
+                    0 => "No zodiac",
+                    1 => "Zodiac activated",
+                    _ => "2 zodiacs activated",
+                };
             }
             TagKind::BonusPlay => {
                 self.tag_bonus_plays += 1;

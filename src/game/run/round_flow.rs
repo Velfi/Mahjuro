@@ -1,6 +1,5 @@
-use super::*;
-
-use crate::game::engine_state::GameplayCoreState;
+use crate::{core::{boss, deck::Wall, relic::RelicId, rules::{BlindKind, RuleModifier}, tile::Suit}, game::{engine_state::GameplayCoreState, event_bus::EventBus, run::FINAL_ANTE}};
+use crate::game::run::RunState;
 
 impl RunState {
     /// Apply a blind choice: sets target score, dispatches boss effect on
@@ -11,11 +10,9 @@ impl RunState {
         self.reset_round_resources();
         self.tile_debuffs.clear();
         self.relics.clear_debuffs();
-        // Target scales linearly with the blind's precedence: the Nth blind
-        // (skipped or played) targets `base_target * N`. Base is 200 by default,
-        // so blind 5 = 1000, blind 16 = 3200.
-        let target = self.base_target.saturating_mul(self.run_number);
-        self.target_score = target;
+        // Per-ante exponential base × blind multiplier (Balatro-style); see
+        // `core::blind_target`. Skips do not inflate later targets.
+        self.target_score = self.blind_score_target(blind);
         // Boss dispatch — push rule modifiers and run the on_apply hook so
         // category-C taxers (zero discards, hand-size shrink, gold cost) take
         // effect before the player draws their first hand.
@@ -38,6 +35,7 @@ impl RunState {
             }
         }
         self.feed_hungry_ghosts_at_round_start();
+        self.refresh_windreader_bonus_wind();
         // Ant Trail: when held, sequences may wrap 9→1 (9-1-2, 8-9-1). The
         // validator already supports this via RuleModifier::SequenceWrap, so
         // we just inject it here.
@@ -128,10 +126,8 @@ impl RunState {
     /// Add the chosen relic, scale up the base target, and reset for the next round.
     /// The actual target_score is set later by `apply_blind`.
     ///
-    /// Balatro-style ante progression: `base_target` is the *ante's* base, and the
-    /// Small/Big/Boss multipliers in `apply_blind` derive each blind's actual target.
-    /// We only grow `base_target` when the player defeats the Boss and rolls into the
-    /// next ante; within an ante, the base stays put.
+    /// Balatro-style ante progression: chip base grows each ante; `apply_blind`
+    /// applies Small/Big/Boss multipliers for that ante.
     pub fn advance_round(&mut self, bus: &mut EventBus) {
         self.roll_lantern_maybe_shatter(bus);
         // Nest Egg: increment rounds held (affects sell value).
@@ -158,8 +154,7 @@ impl RunState {
             }
         }
 
-        // Defeating the Boss completes an ante. Target scaling is now driven
-        // by `run_number` in `apply_blind`, so `base_target` stays constant.
+        // Defeating the Boss completes an ante (`ante` increments below).
         let was_boss = self.blind == BlindKind::Boss;
         if was_boss {
             self.ante += 1;
@@ -185,7 +180,6 @@ impl RunState {
         self.reset_round_resources();
         self.last_breakdown = None;
         self.scored_last_turn = false;
-        self.quickdraw_uses_remaining = crate::game::run::QUICKDRAW_USES_PER_ROUND;
         self.joker_used = false;
         self.full_hand_played_this_round = false;
         self.boss.bonus_hand_size = 0;
@@ -260,7 +254,6 @@ impl RunState {
         self.reset_round_resources();
         self.last_breakdown = None;
         self.scored_last_turn = false;
-        self.quickdraw_uses_remaining = crate::game::run::QUICKDRAW_USES_PER_ROUND;
         self.joker_used = false;
         self.full_hand_played_this_round = false;
         self.boss.bonus_hand_size = 0;
@@ -286,7 +279,6 @@ impl RunState {
         self.reset_round_resources();
         self.last_breakdown = None;
         self.scored_last_turn = false;
-        self.quickdraw_uses_remaining = crate::game::run::QUICKDRAW_USES_PER_ROUND;
         self.joker_used = false;
         // Reset per-round boss-effect state. The ante's `upcoming_boss` is
         // unchanged — skipping a Small/Big still leaves the same boss waiting.

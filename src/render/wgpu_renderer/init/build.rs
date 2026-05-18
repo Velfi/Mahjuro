@@ -41,6 +41,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         flame: flame_shader,
         starfield: starfield_shader,
         ember_drift: ember_drift_shader,
+        rain: rain_shader,
         golden_dust: golden_dust_shader,
         moonlit_water: moonlit_water_shader,
         sunlit_water: sunlit_water_shader,
@@ -573,6 +574,34 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         multiview_mask: None,
         cache: None,
     });
+    let quad_pipeline_display = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("quad-pipeline-display"),
+        layout: Some(&quad_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[vertex_layout.clone(), instance_layout.clone()],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            ..Default::default()
+        },
+        depth_stencil: Some(depth_ui.clone()),
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    });
 
     // Gradient-quad pipeline — alpha-feathered panels behind HUD
     // content. Same `rect`/`color` payload as the base quad_pipeline
@@ -697,25 +726,50 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         bind_group_layouts: &[Some(&globals_layout), Some(&flame_view_layout)],
         immediate_size: 0,
     });
-    let flame_particle_layout = wgpu::VertexBufferLayout {
-        array_stride: std::mem::size_of::<crate::render::flame_particles::GpuFlameParticle>()
+    let flame_mesh_vertex_layout = wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<crate::render::tile_glb::Vertex3dTex>()
+            as wgpu::BufferAddress,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &[
+            wgpu::VertexAttribute {
+                offset: 0,
+                shader_location: 0,
+                format: wgpu::VertexFormat::Float32x3,
+            },
+            wgpu::VertexAttribute {
+                offset: 12,
+                shader_location: 1,
+                format: wgpu::VertexFormat::Float32x3,
+            },
+            wgpu::VertexAttribute {
+                offset: 24,
+                shader_location: 2,
+                format: wgpu::VertexFormat::Float32x2,
+            },
+        ],
+    };
+    let flame_instance_layout = wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<crate::render::flame_volume::GpuFlameInstance>()
             as wgpu::BufferAddress,
         step_mode: wgpu::VertexStepMode::Instance,
         attributes: &[
-            // pos (xyz) + age (w) packed into a vec4 for tidy layout.
             wgpu::VertexAttribute {
                 offset: 0,
-                shader_location: 1,
+                shader_location: 3,
                 format: wgpu::VertexFormat::Float32x4,
             },
-            // scale + phase + brightness + pad → vec4.
             wgpu::VertexAttribute {
                 offset: 16,
-                shader_location: 2,
+                shader_location: 4,
                 format: wgpu::VertexFormat::Float32x4,
             },
         ],
     };
+    let flame_volume_mesh = crate::render::lit_mesh::LitMeshGpu::new(
+        &device,
+        &crate::render::candle_flame_mesh::build_candle_flame_volume_mesh(),
+        "candle-flame-volume",
+    );
     let flame_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("flame-pipeline"),
         layout: Some(&flame_pl),
@@ -723,7 +777,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             module: &flame_shader,
             entry_point: Some("vs_main"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
-            buffers: &[vertex_layout.clone(), flame_particle_layout],
+            buffers: &[flame_mesh_vertex_layout, flame_instance_layout],
         },
         fragment: Some(wgpu::FragmentState {
             module: &flame_shader,
@@ -835,6 +889,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
 
     let starfield_pipeline = vignette_pipeline("starfield-pipeline", &starfield_shader);
     let ember_drift_pipeline = vignette_pipeline("ember-drift-pipeline", &ember_drift_shader);
+    let rain_pipeline = vignette_pipeline("rain-pipeline", &rain_shader);
     let golden_dust_pipeline = vignette_pipeline("golden-dust-pipeline", &golden_dust_shader);
     // moonlit_water gets its own pipeline so it can bind the moon albedo
     // texture at group 1 in addition to the globals at group 0.
@@ -2549,6 +2604,17 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     });
                 }
                 let (_white_tex, shop_decal_view) = white_albedo(&device, &queue);
+                let shop_candle_sss_tex = load_room_env_png_texture(
+                    &device,
+                    &queue,
+                    crate::render::room_env_gltf::SHOP_CANDLE_SSS_BAKE_TEXTURE,
+                    "shop-candle-sss-bake",
+                    wgpu::TextureFormat::Rgba8Unorm,
+                );
+                let shop_candle_sss_view = shop_candle_sss_tex
+                    .as_ref()
+                    .map(|(_, v)| v)
+                    .unwrap_or(&shop_decal_view);
                 let identity = Mat4::IDENTITY;
                 let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("shop-env-uniform"),
@@ -2578,8 +2644,18 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     });
                 let bind_groups: Vec<wgpu::BindGroup> = prims
                     .iter()
-                    
-                    .map(|p| {
+                    .enumerate()
+                    .map(|(i, p)| {
+                        let is_candle = cpu
+                            .environment_primitives
+                            .get(i)
+                            .and_then(|ep| ep.gltf_node_name.as_deref())
+                            .is_some_and(crate::render::room_env_gltf::is_shop_candle_wax_node_name);
+                        let decal_view = if is_candle {
+                            shop_candle_sss_view
+                        } else {
+                            &shop_decal_view
+                        };
                         device.create_bind_group(&wgpu::BindGroupDescriptor {
                             label: Some("shop-env-bg"),
                             layout: &tile_material_layout,
@@ -2598,7 +2674,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                                 },
                                 wgpu::BindGroupEntry {
                                     binding: 3,
-                                    resource: wgpu::BindingResource::TextureView(&shop_decal_view),
+                                    resource: wgpu::BindingResource::TextureView(decal_view),
                                 },
                                 wgpu::BindGroupEntry {
                                     binding: 4,
@@ -2631,6 +2707,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     distortion_buffer,
                     bind_groups,
                     archive_sign_decal_texture: None,
+                    shop_candle_sss_texture: shop_candle_sss_tex.map(|(t, _)| t),
                 });
                 log::info!("shop.glb GPU: {} primitive draw(s)", prims.len());
             }
@@ -2833,6 +2910,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     distortion_buffer,
                     bind_groups,
                     archive_sign_decal_texture: None,
+                    shop_candle_sss_texture: None,
                 });
                 log::info!("hallway.glb GPU: {} primitive draw(s)", prims.len());
             }
@@ -3085,6 +3163,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 distortion_buffer,
                 bind_groups,
                 archive_sign_decal_texture: Some(archive_sign_decal_tex),
+                shop_candle_sss_texture: None,
             });
             log::info!("archive.glb GPU: {} primitive draw(s)", prims.len());
         }
@@ -3092,6 +3171,210 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     });
 
     crate::render::archive_glb::release_archive_environment_cpu_sources_after_gpu_upload();
+
+    let (main_menu_env_primitives, main_menu_environment) =
+        crate::render::main_menu_glb::with_main_menu_glb_cpu(|cpu_opt| {
+            let mut prims = Vec::new();
+            let mut gpu_wrap = None;
+            let Some(cpu) = cpu_opt else {
+                return (prims, gpu_wrap);
+            };
+            if !cpu.environment_primitives.is_empty() {
+                for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
+                    let prim = &env_prim.mesh;
+                    let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("main_menu-env-verts-{i}")),
+                        contents: bytemuck::cast_slice(&prim.vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+                    let ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("main_menu-env-idx-{i}")),
+                        contents: bytemuck::cast_slice(&prim.indices),
+                        usage: wgpu::BufferUsages::INDEX,
+                    });
+                    let mips = crate::render::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
+                    let (_albedo_texture, albedo_view) = match &prim.albedo_rgba {
+                        Some((rgba, aw, ah)) => upload_rgba_texture_with_mips(&TextureUploadParams {
+                        device: &device,
+                        queue: &queue,
+                        label: format!("main_menu-env-albedo-{i}"),
+                        rgba: rgba,
+                        width: *aw,
+                        height: *ah,
+                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                        mips,
+                    }),
+                        None => white_albedo(&device, &queue),
+                    };
+                    let normal_view = match &prim.normal_rgba {
+                        Some((rgba, nw, nh)) => {
+                            upload_rgba_texture_with_mips(&TextureUploadParams {
+                        device: &device,
+                        queue: &queue,
+                        label: format!("main_menu-env-normal-{i}"),
+                        rgba: rgba,
+                        width: *nw,
+                        height: *nh,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        mips,
+                    })
+                            .1
+                        }
+                        None => tile_default_normal_view.clone(),
+                    };
+                    let metallic_roughness_view = match &prim.metallic_roughness_rgba {
+                        Some((rgba, w, h)) => {
+                            upload_rgba_texture_with_mips(&TextureUploadParams {
+                        device: &device,
+                        queue: &queue,
+                        label: format!("main_menu-env-mr-{i}"),
+                        rgba: rgba,
+                        width: *w,
+                        height: *h,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        mips,
+                    })
+                            .1
+                        }
+                        None => tile_glb_default_mr_view.clone(),
+                    };
+                    let emissive_view = match &prim.emissive_rgba {
+                        Some((rgba, w, h)) => {
+                            upload_rgba_texture_with_mips(&TextureUploadParams {
+                        device: &device,
+                        queue: &queue,
+                        label: format!("main_menu-env-emissive-{i}"),
+                        rgba: rgba,
+                        width: *w,
+                        height: *h,
+                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                        mips,
+                    })
+                            .1
+                        }
+                        None => tile_glb_default_emissive_view.clone(),
+                    };
+                    let pbr_uniform_buffer =
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some(&format!("main_menu-pbr-{i}")),
+                            contents: bytemuck::bytes_of(&GltfPbrUniform::from_loaded(
+                                prim.metallic_factor,
+                                prim.roughness_factor,
+                                prim.emissive_factor,
+                                prim.alpha_mode,
+                                prim.alpha_cutoff,
+                            )),
+                            usage: wgpu::BufferUsages::UNIFORM,
+                        });
+                    let sampler =
+                        device.create_sampler(&build_sampler_descriptor(prim.sampler, None));
+                    prims.push(TilePrimitiveGpu {
+                        vertex_buffer: vb,
+                        index_buffer: ib,
+                        index_count: prim.indices.len() as u32,
+                        albedo_view,
+                        normal_view,
+                        metallic_roughness_view,
+                        emissive_view,
+                        pbr_uniform_buffer,
+                        sampler,
+                        pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
+                    });
+                }
+                let (_white_tex, main_menu_decal_view) = white_albedo(&device, &queue);
+                let identity = Mat4::IDENTITY;
+                let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("main_menu-env-uniform"),
+                    contents: bytemuck::bytes_of(&CameraUniform {
+                        view_proj: identity.to_cols_array(),
+                        model: identity.to_cols_array(),
+                        base_color_factor: [
+                            1.0,
+                            0.0,
+                            0.0,
+                            crate::render::tile_body::TEXTURED_BASE_MAP_BODY_KIND,
+                        ],
+                        cam_pos: [0.0; 3],
+                        tile_seed: 0.0,
+                        decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
+                        hdr_tonemap: [0.0; 4],
+                    }),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+                let distortion_buffer =
+                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("main_menu-env-distortion"),
+                        contents: bytemuck::bytes_of(
+                            &crate::render::hallway_glb::HallwayDistortion::default(),
+                        ),
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    });
+                let bind_groups: Vec<wgpu::BindGroup> = prims
+                    .iter()
+                    
+                    .map(|p| {
+                        device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("main_menu-env-bg"),
+                            layout: &tile_material_layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: uniform_buffer.as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: wgpu::BindingResource::TextureView(&p.albedo_view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 2,
+                                    resource: wgpu::BindingResource::Sampler(&p.sampler),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 3,
+                                    resource: wgpu::BindingResource::TextureView(
+                                        &main_menu_decal_view,
+                                    ),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 4,
+                                    resource: wgpu::BindingResource::TextureView(&p.normal_view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 5,
+                                    resource: p.pbr_uniform_buffer.as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 6,
+                                    resource: wgpu::BindingResource::TextureView(
+                                        &p.metallic_roughness_view,
+                                    ),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 7,
+                                    resource: wgpu::BindingResource::TextureView(&p.emissive_view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 8,
+                                    resource: distortion_buffer.as_entire_binding(),
+                                },
+                            ],
+                        })
+                    })
+                    .collect();
+                gpu_wrap = Some(ShopEnvironmentGpu {
+                    uniform_buffer,
+                    distortion_buffer,
+                    bind_groups,
+                    archive_sign_decal_texture: None,
+                    shop_candle_sss_texture: None,
+                });
+                log::info!("main_menu.glb GPU: {} primitive draw(s)", prims.len());
+            }
+            (prims, gpu_wrap)
+        });
+
+    crate::render::main_menu_glb::release_main_menu_environment_cpu_sources_after_gpu_upload();
+
 
     let shop_env_collision_meshes = crate::render::room_glb::with_shop_glb_cpu(|opt| {
         opt.map(|c| c.collision_meshes.clone()).unwrap_or_default()
@@ -3103,9 +3386,15 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     let (_lit_mesh_relief_default_tex, lit_mesh_relief_default_view) =
         flat_relief_height(&device, &queue);
     let pack_textures_map = load_pack_textures(&device, &queue, &lit_mesh_relief_default_view);
-    // Kick off background image loading (non-blocking).
-    let background_load_start = Some(Instant::now());
-    let background_rx = Some(spawn_background_loader());
+    let (background_load_start, background_rx) =
+        if super::resources::ASYNC_LOADED_BACKGROUNDS.is_empty() {
+            (None, None)
+        } else {
+            (
+                Some(Instant::now()),
+                Some(spawn_background_loader()),
+            )
+        };
 
     // ---- Lit-mesh procedural geometry (candles + table) ----
     let candle_wax_mesh = LitMeshGpu::new(&device, &build_candle_wax_mesh(), "candle-wax");
@@ -3612,15 +3901,17 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         ssr_prev_depth_texture,
         ssr_prev_depth_view,
         quad_pipeline,
+        quad_pipeline_display,
         gradient_quad_pipeline,
         squircle_quad_pipeline,
         flame_pipeline,
+        flame_volume_mesh,
         flame_view_buffer,
         flame_view_bind_group,
-        flame_particles: crate::render::flame_particles::FlameParticleSystem::new(),
-        flame_particle_staging: Vec::with_capacity(512),
+        flame_instance_staging: Vec::with_capacity(32),
         starfield_pipeline,
         ember_drift_pipeline,
+        rain_pipeline,
         golden_dust_pipeline,
         moonlit_water_pipeline,
         moon_albedo_bind_group,
@@ -3676,6 +3967,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         hallway_environment,
         archive_env_primitives,
         archive_environment,
+        main_menu_env_primitives,
+        main_menu_environment,
         archive_sign_left_prim_idx,
         archive_sign_right_prim_idx,
         archive_sign_decal_upload_key: 0,
@@ -3692,8 +3985,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         hand_tiles: Vec::new(),
         showcase_tiles: Vec::new(),
         tile_face_overlays: rustc_hash::FxHashMap::default(),
-        prompt_icon_overlays: rustc_hash::FxHashMap::default(),
-        prompt_icon_missing: rustc_hash::FxHashSet::default(),
+        image_quad_overlays: rustc_hash::FxHashMap::default(),
+        image_quad_missing: rustc_hash::FxHashSet::default(),
         debuff_marker_overlay: None,
         text_label_cache: rustc_hash::FxHashMap::default(),
         text_cache_frame: 0,

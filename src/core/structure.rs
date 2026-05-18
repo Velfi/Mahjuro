@@ -63,9 +63,10 @@ fn yaku_non_empty_filtered(
     tiles: &[Tile],
     sets: &[DetectedMeld],
     round_wind: Option<u8>,
+    bonus_round_wind: Option<u8>,
     available: &[YakuKind],
 ) -> bool {
-    let all = detect_yaku_with_wind(tiles, sets, round_wind, None);
+    let all = detect_yaku_with_wind(tiles, sets, round_wind, bonus_round_wind, None);
     let filtered: Vec<YakuKind> = if available.is_empty() {
         all
     } else {
@@ -79,6 +80,7 @@ pub fn can_trigger_structure(
     tiles: &[Tile],
     sets: &[DetectedMeld],
     round_wind: Option<u8>,
+    bonus_round_wind: Option<u8>,
     available_yaku: &[YakuKind],
     rules: &[RuleModifier],
 ) -> bool {
@@ -88,7 +90,7 @@ pub fn can_trigger_structure(
     if rules.contains(&RuleModifier::RequireHonor) && !structure_contains_honor(tiles, sets) {
         return false;
     }
-    if yaku_non_empty_filtered(tiles, sets, round_wind, available_yaku) {
+    if yaku_non_empty_filtered(tiles, sets, round_wind, bonus_round_wind, available_yaku) {
         return true;
     }
     if is_winning_structure_shape(tiles, sets) {
@@ -121,6 +123,7 @@ mod tests {
             &tiles,
             &sets,
             None,
+            None,
             &[],
             &[RuleModifier::RequireHonor],
         ));
@@ -140,6 +143,7 @@ mod tests {
         assert!(can_trigger_structure(
             &tiles,
             &sets,
+            None,
             None,
             &[],
             &[RuleModifier::RequireHonor],
@@ -169,6 +173,7 @@ mod tests {
         assert!(can_trigger_structure(
             &tiles,
             &sets,
+            None,
             None,
             &[],
             &[RuleModifier::RequireHonor],

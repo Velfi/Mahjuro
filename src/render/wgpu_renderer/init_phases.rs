@@ -72,6 +72,7 @@ pub(super) struct RendererShaderPack {
     pub flame: wgpu::ShaderModule,
     pub starfield: wgpu::ShaderModule,
     pub ember_drift: wgpu::ShaderModule,
+    pub rain: wgpu::ShaderModule,
     pub golden_dust: wgpu::ShaderModule,
     pub moonlit_water: wgpu::ShaderModule,
     pub sunlit_water: wgpu::ShaderModule,
@@ -132,6 +133,10 @@ pub(super) fn create_renderer_shader_modules(device: &wgpu::Device) -> RendererS
         ember_drift: device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("ember-drift-pipeline"),
             source: wgpu::ShaderSource::Wgsl(embedded_wgsl::EMBER_DRIFT.into()),
+        }),
+        rain: device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("rain-pipeline"),
+            source: wgpu::ShaderSource::Wgsl(embedded_wgsl::RAIN.into()),
         }),
         golden_dust: device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("golden-dust-pipeline"),

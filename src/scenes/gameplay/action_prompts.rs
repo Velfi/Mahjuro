@@ -1,8 +1,8 @@
-//! Floating Kenney prompts under the discard bowl, play mirror, and cash-in tablet.
+//! Floating Kenney prompts along the bottom edge (Discard / Draw / Cash in).
 
 use super::focus::FocusTarget;
 use crate::render::decal::{load_ui_font, measure_label_advances};
-use crate::render::draw_cmd::{PromptIconQuad, UiFrame};
+use crate::render::draw_cmd::{ImageQuad, UiFrame};
 use crate::render::theme::color;
 use crate::render::theme::typography;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
@@ -39,6 +39,7 @@ pub fn gameplay_west_north_legend_active(
                     | FocusTarget::Gold
                     | FocusTarget::YakuTablet(_)
                     | FocusTarget::Dora
+                    | FocusTarget::RoundWind
                     | FocusTarget::Consumable(_),
                 ) => false,
                 Some(_) => true,
@@ -61,7 +62,6 @@ pub struct GameplayActionPromptInput<'a> {
     pub cash_in_enabled: bool,
     pub show_discard_legend: bool,
     pub show_play_legend: bool,
-    pub discard_undo_bottom_y: Option<f32>,
     pub hud_text: &'a mut Vec<TextLabel>,
 }
 
@@ -77,7 +77,6 @@ pub fn push_gameplay_action_prompts(
         cash_in_enabled,
         show_discard_legend,
         show_play_legend,
-        discard_undo_bottom_y,
         hud_text,
     } = input;
     let h = ctx.layout.window_h;
@@ -112,33 +111,7 @@ pub fn push_gameplay_action_prompts(
 
     let rects: [(f32, f32, f32, f32); 3] = [discard_btn_rect, play_btn_rect, trigger_btn_rect];
 
-    // One baseline for all three legends so cash-in stays aligned with discard/draw
-    // even when the trigger rect sits above the mirror (no structure yet).
-    let legend_row_top = {
-        let (_ddx, ddy, ddw, ddh) = discard_btn_rect;
-        let (_pdx, pdy, pdw, pdh) = play_btn_rect;
-        let mut row_top = f32::NEG_INFINITY;
-        if ddw > 1.0 && ddh > 1.0 {
-            let mut t = ddy + ddh + h * 0.008;
-            if let Some(ub) = discard_undo_bottom_y {
-                t = t.max(ub + h * 0.006);
-            }
-            row_top = row_top.max(t);
-        }
-        if pdw > 1.0 && pdh > 1.0 {
-            row_top = row_top.max(pdy + pdh + h * 0.008);
-        }
-        if row_top.is_finite() {
-            row_top
-        } else {
-            let (_dx, dy, _dw, dh) = trigger_btn_rect;
-            dy + dh + h * 0.008
-        }
-    };
-
     // Indices with valid hit targets, in Discard → Draw → Cash-in order.
-    // When there is no meld yet, cash-in uses the same screen center as the mirror; centering
-    // each cluster on its button stacks Draw and Cash-in. Flow into columns like the shop legend.
     let mut visible: [usize; 3] = [0; 3];
     let mut n_visible = 0usize;
     for (i, rect) in rects.iter().enumerate() {
@@ -177,8 +150,10 @@ pub fn push_gameplay_action_prompts(
         measured_full[i] = m.max(1.0);
     }
 
-    let inner_left = w * 0.05;
-    let inner_right = w * 0.95;
+    let x = w * 0.05;
+    let bw = w * 0.90;
+    let inner_left = x + bw * 0.02;
+    let inner_right = x + bw * 0.98;
     let inner_w = (inner_right - inner_left).max(8.0);
     let col_w = inner_w / n_visible as f32;
     let col_pad = (col_w * 0.045).clamp(2.0, 8.0);
@@ -206,12 +181,14 @@ pub fn push_gameplay_action_prompts(
     let gap_after_icon = gap_mut;
 
     let primary_h = (icon_px * 1.06).max(label_block_h).max(font_px * 1.35);
-    let row_top = legend_row_top;
+    let pad_bottom = h * 0.014;
+    let block_h = primary_h;
+    let row_top = h - pad_bottom - block_h;
     let iy = row_top + (primary_h - icon_px) * 0.5;
     let label_top = row_top + (primary_h - label_block_h) * 0.5;
 
     let mut pill_quads: Vec<GpuInstance> = Vec::with_capacity(n_visible);
-    let mut icon_cmds: Vec<PromptIconQuad> = Vec::with_capacity(n_visible);
+    let mut icon_cmds: Vec<ImageQuad> = Vec::with_capacity(n_visible);
 
     for (k, &i) in visible.iter().take(n_visible).enumerate() {
         let cash_in_disabled = i == 2 && !cash_in_enabled;
@@ -263,7 +240,7 @@ pub fn push_gameplay_action_prompts(
             PromptInputSurface::MouseOrKeyboard => Some(keyboard_icons[i].clone()),
         };
         if let Some(source) = source {
-            icon_cmds.push(PromptIconQuad {
+            icon_cmds.push(ImageQuad {
                 inst: GpuInstance {
                     rect: [ix, iy, icon_px, icon_px],
                     color: icon_tint,
@@ -298,6 +275,6 @@ pub fn push_gameplay_action_prompts(
 
     if !pill_quads.is_empty() {
         frame.squircle_quads(pill_quads);
-        frame.prompt_icon_quads(icon_cmds);
+        frame.image_quads(icon_cmds);
     }
 }

@@ -20,7 +20,3 @@ Pillow
 # onnxruntime is the ML runtime rembg loads u2net through.
 rembg
 onnxruntime
-
-# Balance-simulation plotting (plot_bot_balance.py).
-numpy
-matplotlib

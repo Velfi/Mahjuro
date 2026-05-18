@@ -57,8 +57,8 @@ pub struct RunTimeoutSnapshot {
 
 /// One scoring step toward [`PeakBlindSnapshot::total_score`] (a committed play or structure cash-in).
 ///
-/// `tiles`: compact `Tile::label` list — full structure bank on cash-in (`kind == "structure"` or
-/// auto cash-in after commit); otherwise tiles from the commit when only part of the bank scored.
+/// `tiles`: meld-grouped labels (same as cascade HUD, e.g. `Kong  9p 9p 9p 9p · Triplet  3m 3m 3m`) —
+/// full structure bank on cash-in; partial commits show only the melds just played.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BotScoringAction {
     pub kind: String,
@@ -139,6 +139,12 @@ pub struct RunStats {
     pub cleared_by_slot: std::collections::BTreeMap<String, u32>,
     pub boss_faced: std::collections::BTreeMap<String, u8>,
     pub boss_beaten: std::collections::BTreeMap<String, u8>,
+    /// Sum of round scores on boss blinds, keyed by ante (clears and losses).
+    #[serde(default)]
+    pub boss_score_by_ante: std::collections::BTreeMap<u32, u64>,
+    /// Boss blind attempts per ante.
+    #[serde(default)]
+    pub boss_attempts_by_ante: std::collections::BTreeMap<u32, u32>,
     /// Count of [`GameEvent::YakuScored`] per committed scoring action (one play may award several).
     pub yaku_scored: std::collections::BTreeMap<&'static str, u32>,
     /// Zodiac **consumes** from the dish during blinds (not shop purchases; see `zodiacs_picked`).
@@ -233,6 +239,8 @@ impl Default for RunStats {
             cleared_by_slot: std::collections::BTreeMap::new(),
             boss_faced: std::collections::BTreeMap::new(),
             boss_beaten: std::collections::BTreeMap::new(),
+            boss_score_by_ante: std::collections::BTreeMap::new(),
+            boss_attempts_by_ante: std::collections::BTreeMap::new(),
             yaku_scored: std::collections::BTreeMap::new(),
             zodiacs_used: std::collections::BTreeMap::new(),
             talismans_used: std::collections::BTreeMap::new(),
@@ -313,6 +321,10 @@ pub struct AggregateStats {
     pub cleared_by_slot: std::collections::BTreeMap<String, u64>,
     pub boss_faced: std::collections::BTreeMap<String, u32>,
     pub boss_beaten: std::collections::BTreeMap<String, u32>,
+    #[serde(default)]
+    pub boss_score_by_ante: std::collections::BTreeMap<u32, u64>,
+    #[serde(default)]
+    pub boss_attempts_by_ante: std::collections::BTreeMap<u32, u32>,
     pub deaths_by_ante_cause: std::collections::BTreeMap<String, u32>,
     pub yaku_scored: std::collections::BTreeMap<&'static str, u64>,
     pub total_zodiacs_used: std::collections::BTreeMap<&'static str, u64>,
@@ -452,6 +464,12 @@ impl AggregateStats {
         for boss in s.boss_beaten.keys() {
             *self.boss_beaten.entry(boss.clone()).or_insert(0) += 1;
         }
+        for (ante, score) in &s.boss_score_by_ante {
+            *self.boss_score_by_ante.entry(*ante).or_insert(0) += score;
+        }
+        for (ante, attempts) in &s.boss_attempts_by_ante {
+            *self.boss_attempts_by_ante.entry(*ante).or_insert(0) += attempts;
+        }
         if !s.victory && !s.run_timed_out {
             let cause = classify_run_death_cause(s);
             let key = format!("{}|{}", s.died_on_ante, cause);
@@ -496,8 +514,15 @@ impl AggregateStats {
     pub fn to_derived(
         &self,
         yaku_kind_count: usize,
+        base_target: u32,
+        runs: Option<&[RunStats]>,
     ) -> crate::bot::export_schema::BotReportDerived {
-        crate::bot::stats_derived::derived_from_aggregate(self, yaku_kind_count)
+        crate::bot::stats_derived::derived_from_batch(
+            self,
+            runs.unwrap_or(&[]),
+            yaku_kind_count,
+            base_target,
+        )
     }
 
     pub fn write_summary(&self, w: &mut dyn Write) -> std::io::Result<()> {
@@ -511,7 +536,11 @@ impl AggregateStats {
         if self.runs == 0 {
             return Ok(());
         }
-        let d = self.to_derived(YakuKind::all().len());
+        let d = self.to_derived(
+            YakuKind::all().len(),
+            crate::core::blind_target::DEFAULT_BASE_TARGET,
+            None,
+        );
         let pr = &d.per_run;
         out!(
             "victories:           {} / {} ({:.1}%)",

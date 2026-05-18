@@ -73,7 +73,7 @@ impl App {
 
         let drawn = self.overlay_stack.last().unwrap_or(&self.scene);
         let brownout_room = crate::main_room_gltf_brownout::RoomGltfBrownout::scene_eligible(drawn);
-        let brownout_freeze = self.debug.shop_env_debug_overlay.is_some()
+        let brownout_freeze = self.debug.scene_look_debug_overlay.is_some()
             || self.scene.has_blocking_overlay()
             || self
                 .overlay_stack
@@ -460,8 +460,12 @@ impl App {
             button_clicks.clear();
         }
 
-        // Shop env + lighting overlay (sliders, value typing, Ctrl+C copy).
-        if let Some(mut overlay) = self.debug.shop_env_debug_overlay.take() {
+        // Scene look overlay (tonemap + room GLB sliders, per-scene save).
+        if let Some(mut overlay) = self.debug.scene_look_debug_overlay.take() {
+            use crate::debug_overlays::SceneLookDebugResult;
+            use crate::game::scene_look_tuning::{
+                clear_scene_look, save_scene_look, SceneLookTuning,
+            };
             let (ww, wh) = (
                 self.last_drawable_px.width as f32,
                 self.last_drawable_px.height as f32,
@@ -474,14 +478,49 @@ impl App {
                     self.mouse_left_down,
                 )
             });
-            let close = overlay.update(&actions, mouse, ww, wh);
+            let scene_key_lookup = overlay.scene_key().map(str::to_string);
+            let persist_key = overlay.scene_key_persist().to_string();
+            let mut close = false;
+            match overlay.update(&actions, mouse, ww, wh, &self.scene_look) {
+                SceneLookDebugResult::Stay => {
+                    self.scene_look
+                        .set(scene_key_lookup.as_deref(), overlay.look);
+                }
+                SceneLookDebugResult::Reset => {
+                    overlay.look = SceneLookTuning::default();
+                    self.scene_look.clear(scene_key_lookup.as_deref());
+                    match clear_scene_look(&persist_key) {
+                        Ok(()) => log::debug!(
+                            "Cleared SceneLookTuning override for scene '{persist_key}'"
+                        ),
+                        Err(e) => log::warn!(
+                            "Failed to clear SceneLookTuning override for '{persist_key}': {e}"
+                        ),
+                    }
+                }
+                SceneLookDebugResult::Save => {
+                    self.scene_look
+                        .set(scene_key_lookup.as_deref(), overlay.look);
+                    match save_scene_look(&persist_key, &overlay.look) {
+                        Ok(()) => log::debug!(
+                            "Saved SceneLookTuning override for scene '{persist_key}'"
+                        ),
+                        Err(e) => log::warn!(
+                            "Failed to save SceneLookTuning override for '{persist_key}': {e}"
+                        ),
+                    }
+                }
+                SceneLookDebugResult::Close => {
+                    self.scene_look
+                        .set(scene_key_lookup.as_deref(), overlay.look);
+                    close = true;
+                }
+            }
             self.mouse_clicked = false;
-            self.debug.room_gltf_height_scale = overlay.height_scale;
-            self.debug.shop_env_lighting = overlay.lighting;
             if !close {
-                self.debug.shop_env_debug_overlay = Some(overlay);
+                self.debug.scene_look_debug_overlay = Some(overlay);
             } else {
-                log::debug!("Closed shop env & lighting debug overlay");
+                log::debug!("Closed scene look debug overlay");
             }
             actions.clear();
             button_clicks.clear();
@@ -502,55 +541,6 @@ impl App {
                 self.debug.visibility_overlay = Some(overlay);
             } else {
                 log::debug!("Closed debug visibility overlay");
-            }
-            actions.clear();
-            button_clicks.clear();
-        }
-
-        // 3b''''''. Tonemap tuning overlay (per-scene exposure + VHS knobs)
-        // Edits are live; Save/Reset persist to / clear the per-scene
-        // override under the captured scene key.
-        if let Some(ref mut overlay) = self.debug.tonemap_debug_overlay {
-            use crate::debug_overlays::TonemapDebugResult;
-            use crate::game::tonemap_tuning::{FALLBACK_SCENE_KEY, TonemapTuning, storage_key};
-            let scene_key_owned = overlay.scene_key.clone();
-            let scene_key_persist = scene_key_owned.as_deref().unwrap_or(FALLBACK_SCENE_KEY);
-            let scene_key_lookup = scene_key_owned.as_deref();
-            match overlay.update(&actions) {
-                TonemapDebugResult::Stay => {
-                    self.tonemap_tuning.set(scene_key_lookup, overlay.tuning);
-                }
-                TonemapDebugResult::Reset => {
-                    overlay.tuning = TonemapTuning::default();
-                    self.tonemap_tuning.clear(scene_key_lookup);
-                    match persistence::clear_tuning_override(&storage_key(scene_key_persist)) {
-                        Ok(()) => log::debug!(
-                            "Cleared TonemapTuning override for scene '{scene_key_persist}'"
-                        ),
-                        Err(e) => log::warn!(
-                            "Failed to clear TonemapTuning override for '{scene_key_persist}': {e}"
-                        ),
-                    }
-                }
-                TonemapDebugResult::SaveAsDefault => {
-                    self.tonemap_tuning.set(scene_key_lookup, overlay.tuning);
-                    match persistence::save_tuning_override(
-                        &storage_key(scene_key_persist),
-                        &overlay.tuning,
-                    ) {
-                        Ok(()) => log::debug!(
-                            "Saved TonemapTuning override for scene '{scene_key_persist}'"
-                        ),
-                        Err(e) => log::warn!(
-                            "Failed to save TonemapTuning override for '{scene_key_persist}': {e}"
-                        ),
-                    }
-                }
-                TonemapDebugResult::Close => {
-                    self.tonemap_tuning.set(scene_key_lookup, overlay.tuning);
-                    self.debug.tonemap_debug_overlay = None;
-                    log::debug!("Closed tonemap debug overlay");
-                }
             }
             actions.clear();
             button_clicks.clear();
@@ -652,6 +642,7 @@ impl App {
         let mut overlay_request: Option<scenes::OverlayRequest> = None;
         let mut rumble_lab_ops: Vec<crate::ui::input::RumbleLabOp> = Vec::new();
         let mut bump_archive_chronicle_seen: Option<u32> = None;
+        let room_gltf_height_for_update = self.resolved_scene_look().room_gltf_height_scale;
         let updated_overlay = !self.overlay_stack.is_empty();
         self.cpu_profiler
             .begin(crate::render::cpu_profiler::CpuStage::Update);
@@ -704,7 +695,7 @@ impl App {
                     .unwrap_or(0.0),
                 rumble_lab_ops: &mut rumble_lab_ops,
                 suspended_shop: None,
-                room_gltf_height_scale: self.debug.room_gltf_height_scale,
+                room_gltf_height_scale: room_gltf_height_for_update,
                 bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
             })
         } else {
@@ -774,7 +765,7 @@ impl App {
                         .unwrap_or(0.0),
                     rumble_lab_ops: &mut rumble_lab_ops,
                     suspended_shop,
-                    room_gltf_height_scale: self.debug.room_gltf_height_scale,
+                    room_gltf_height_scale: room_gltf_height_for_update,
                     bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
                 })
         };

@@ -90,8 +90,7 @@ STYLE_CORE = (
     "near-orthographic presentation, pin plane parallel to the camera.\n\n"
     "Silhouette: the outer pin outline follows the natural shape of the "
     "subject — organic, asymmetric, circular, crest-shaped, or irregular as "
-    "the motif demands. Do NOT force every pin into the same rounded-square "
-    "frame; each relic gets its own custom die-cut outline. A continuous "
+    "the motif demands. A continuous "
     "raised metal rim traces the entire outer edge of that individual "
     "silhouette.\n\n"
     "Construction: classic soft-enamel manufacture — colored enamel paint "
@@ -107,8 +106,8 @@ STYLE_CORE = (
     "shine or mirror-smooth polish.\n\n"
     "Composition: believable pin proportions — overlapping elements, subtle "
     "depth layering within the pin plane, and natural spacing rather than "
-    "flat icon-badge layout. Photographic studio realism, not graphic logo art. "
-    "Strong silhouette readability at game-camera scale."
+    "flat icon-badge layout. Photographic studio realism."
+    "Strong silhouette readability."
 )
 
 
@@ -243,7 +242,7 @@ RELICS = [
         "horizontal row on an emerald felt table, with crackling gold "
         "lightning arcing tile-to-tile between their faces in chained bolts. "
         "A few stray tiles lie blurred in the background.",
-        "Ivory tile faces, deep emerald felt, crackling gold lightning, muted crimson marks.",
+        "Ivory tile faces, crackling gold lightning, muted crimson marks.",
     ),
     (
         "sequence_surge",
@@ -254,7 +253,7 @@ RELICS = [
         "mid-rush. Faint motion blur on the felt behind the row, gold "
         "sparks flicking off the trailing edge. A few stray face-down "
         "wall tiles lie blurred in the background.",
-        "Ivory tile faces, deep emerald felt, bamboo green marks, warm gold light streak, subtle amber sparks.",
+        "Ivory tile faces, bamboo green marks, warm gold light streak, subtle amber sparks.",
     ),
     (
         "pair_power",
@@ -269,14 +268,12 @@ RELICS = [
     (
         "honor_fury",
         "Honor Fury",
-        "A triplet of honor tiles standing upright in a tight row at the "
-        "center of an emerald felt table — a wind tile flanked by a red "
-        "dragon and a green dragon — their faces glowing hot from within "
-        "as if forged. Embers and faint heat shimmer rise from the seams "
-        "between them, and concentric shockwave rings ripple outward across "
-        "the felt. A few stray face-down wall tiles lie blurred in the "
-        "background.",
-        "Ivory tile faces, deep emerald felt, glowing crimson and jade honor marks, warm ember sparks, faint gold shockwaves.",
+        "A pin of three eastern dragons in a triple ouroboros — each biting "
+        " the next dragon's tail in a closed ring with three-fold rotational "
+        "symmetry. One mother-of-pearl white dragon, one carnelian dragon, "
+        "one jade dragon.",
+        "Mother-of-pearl iridescent white dragon, carnelian dragon, and "
+        "jade dragon; orange-gold flame, spark accents.",
     ),
     (
         "dragon_rage",
@@ -327,7 +324,7 @@ RELICS = [
         "shifting reflections. A faint prismatic shimmer plays across the "
         "ivory surface as if the tile cannot decide what it is. A few stray "
         "face-down wall tiles lie blurred in the background.",
-        "Ivory tile face, deep emerald felt, prismatic shimmer, muted bamboo green / dots blue / character crimson marks.",
+        "Ivory tile face, prismatic shimmer, muted bamboo green / dots blue / character crimson marks.",
     ),
     (
         "strength_in_numbers",
@@ -431,17 +428,17 @@ RELICS = [
         "Ivory tile dress, crimson dora glyph, porcelain skin, gold crown, pastel pink accents.",
     ),
     (
-        "round_compass",
-        "Round Compass",
-        "A circular compass-pin face: four wind mahjong tiles — East, South, "
-        "West, North — in a ring at the cardinal points on a recessed emerald "
-        "enamel dial, glyphs aligned outward like a compass rose. A faint "
-        "golden wind-rose is etched into the dial between them, and a glowing "
-        "needle of warm light arcs from the center toward the East tile. "
-        "Crisp pin, everything sharp and in focus — no depth-of-field blur.",
-        "Ivory tile faces, deep emerald felt, deep blue wind glyphs, etched gold wind-rose, warm amber needle of light.",
-        "Macro product shot with infinite depth of field: every tile, metal rim, "
-        "dial line, and needle equally tack-sharp edge to edge.",
+        "wind_reader",
+        "Windreader",
+        "A woman in a flowing indigo and ivory robe floats above a low "
+        "lacquered plinth, one arm extended upward, index finger pointing "
+        "into layered storm clouds. Two distinct wind currents part the "
+        "clouds in different directions — one bearing a faint East wind "
+        "mahjong glyph, the other a South wind glyph — as if she reads "
+        "two round winds at once. Four tiny wind tiles ring the plinth "
+        "below. Macro product shot with infinite depth of field — figure, "
+        "clouds, glyphs, and fabric folds equally tack-sharp edge to edge.",
+        "Porcelain skin, indigo robe enamel, pearl cloud layers, deep blue wind glyphs, warm amber sky glow.",
     ),
     (
         "eight_treasures",
@@ -472,7 +469,7 @@ RELICS = [
         "Soft warm grow-light glows from beneath, and faint condensation "
         "beads the inside of the glass. A few stray face-down wall tiles "
         "lie blurred on the felt outside the dome.",
-        "Clear glass cloche dome with beaded condensation, ivory tile face, deep emerald felt, soft pastel pink plum and jade orchid blossoms, curling green leaves, warm amber grow-light underglow.",
+        "Clear glass cloche dome with beaded condensation, ivory tile face, soft pastel pink plum and jade orchid blossoms, curling green leaves, warm amber grow-light underglow.",
     ),
     (
         "ikebana",
@@ -562,7 +559,7 @@ RELICS = [
         "A tiny cream price tag on red string dangles from a short brass "
         "display hook. A few scattered gold coins and face-down wall tiles "
         "around the edges. Crisp pin, everything sharp and in focus.",
-        "Milky glass sclera, amber-hazel iris, jet pupil highlight, ivory tile face, deep emerald felt, warm gold coins, cream price tag, red string, brass hook, soft amber lamplight on the glass.",
+        "Milky glass sclera, amber-hazel iris, jet pupil highlight, ivory tile face, warm gold coins, cream price tag, red string, brass hook, soft amber lamplight on the glass.",
     ),
     (
         "i_got_a_guy",
@@ -649,7 +646,7 @@ RELICS = [
         "Warm golden exhaust vapor curls upward from the pipes, glittering "
         "with flecks of gold. A few stray face-down wall tiles lie blurred "
         "in the background.",
-        "Polished brass machine body, glass dome, deep emerald felt, warm gold coin stacks feeding the hopper, pinned brass pressure gauge, golden exhaust vapor with drifting gold flecks, soft amber rim light.",
+        "Polished brass machine body, glass dome, warm gold coin stacks feeding the hopper, pinned brass pressure gauge, golden exhaust vapor with drifting gold flecks, soft amber rim light.",
     ),
     (
         "snowball",
@@ -674,7 +671,7 @@ RELICS = [
         "light trailing behind. A single mahjong tile is pinned face-up "
         "under one wheel as it launches off. A few stray face-down wall "
         "tiles lie blurred in the background.",
-        "Painted tin toy car, chrome bumpers, rubber tires, deep emerald felt, ivory tile face, warm gold spark trail, motion-blur streak, soft amber rim light.",
+        "Painted tin toy car, chrome bumpers, rubber tires, ivory tile face, warm gold spark trail, motion-blur streak, soft amber rim light.",
     ),
     (
         "glass_cannon",
@@ -792,7 +789,7 @@ RELICS = [
         "felt at the tiles' feet, and warm amber rim light catches their "
         "edges. A few stray face-down wall tiles lie blurred in the "
         "background.",
-        "Ivory tile faces, deep emerald felt, traditional crimson man-zu numerals, pale teal echo silhouettes, soft gold ripples, warm amber rim light.",
+        "Ivory tile faces, traditional crimson man-zu numerals, pale teal echo silhouettes, soft gold ripples, warm amber rim light.",
     ),
     (
         "voice_of_the_elite",
@@ -807,7 +804,7 @@ RELICS = [
         "across the felt at the tiles' feet, and warm amber rim light "
         "catches their edges. A few stray face-down wall tiles lie blurred "
         "in the background.",
-        "Ivory tile faces, deep emerald felt, traditional crimson man-zu numerals, pale crimson echo silhouettes, soft gold ripples, warm amber rim light.",
+        "Ivory tile faces, traditional crimson man-zu numerals, pale crimson echo silhouettes, soft gold ripples, warm amber rim light.",
     ),
     (
         "xxxl_egg",
@@ -975,7 +972,7 @@ RELICS = [
         "gold sparks around him, and a single carved dragon glyph on the tile "
         "beneath glows softly in deep crimson. He plays alone because none "
         "remain worthy.",
-        "Faded crimson and umber silks, ivory tile face, deep emerald felt, warm amber rim light, soft gold sparks, muted crimson glyph glow.",
+        "Faded crimson and umber silks, ivory tile face, warm amber rim light, soft gold sparks, muted crimson glyph glow.",
     ),
     (
         "gold_idol",
@@ -992,7 +989,7 @@ RELICS = [
         "coins are grouped in fours, and a single mahjong tile carved with "
         "a jade-green character glyph leans against the frame. A few stray "
         "face-down wall tiles lie blurred in the background.",
-        "Polished jade beads, warm brass frame, deep emerald felt, warm gold coin stacks, ivory tile with jade-green glyph, dark wood accents.",
+        "Polished jade beads, warm brass frame, warm gold coin stacks, ivory tile with jade-green glyph, dark wood accents.",
     ),
     (
         "nest_egg",
@@ -1106,7 +1103,7 @@ RELICS = [
         "embers smolder around the ghost's edges, and the air shimmers "
         "with cold draft. A few stray face-down wall tiles lie blurred "
         "in the background.",
-        "Translucent pale ghost figure, distended belly, sunken hollow eyes, pinhole mouth, deep emerald felt, ivory tile dissolving into pale smoke, drifting gold sparks, smoldering red joss-paper embers, cool wraith-light, soft amber rim light.",
+        "Translucent pale ghost figure, distended belly, sunken hollow eyes, pinhole mouth, ivory tile dissolving into pale smoke, drifting gold sparks, smoldering red joss-paper embers, cool wraith-light, soft amber rim light.",
     ),
     (
         "disgust",
@@ -1118,7 +1115,7 @@ RELICS = [
         "leaning in, two stacked just behind. A faint sickly sheen plays "
         "across all four tile faces. A few stray face-down wall tiles lie "
         "blurred in the background.",
-        "Ivory tile faces, deep emerald felt, deep blue East and West wind glyphs, pale sickly green wisp, muted charcoal shadows.",
+        "Ivory tile faces, deep blue East and West wind glyphs, pale sickly green wisp, muted charcoal shadows.",
     ),
     (
         "curio_cabinet",
@@ -1171,7 +1168,7 @@ RELICS = [
         "right and left hands. The transaction is frozen mid-motion. A "
         "few stray face-down wall tiles rest in the background. Crisp pin, "
         "everything sharp and in focus.",
-        "Anatomically opposing right-hand and left-hand pair (mirror images, NOT two right hands), distinct dark embroidered sleeve versus plain pale sleeve, ivory honor tile faces with deep blue wind and crimson dragon glyphs, deep emerald felt, warm gold coins in an open palm-up right hand, palm-down left hand sweeping tiles, soft amber rim light.",
+        "Anatomically opposing right-hand and left-hand pair (mirror images, NOT two right hands), distinct dark embroidered sleeve versus plain pale sleeve, ivory honor tile faces with deep blue wind and crimson dragon glyphs, warm gold coins in an open palm-up right hand, palm-down left hand sweeping tiles, soft amber rim light.",
     ),
     (
         "sweepstakes",

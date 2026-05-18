@@ -17,14 +17,15 @@ const BAKE_HEIGHT: u32 = 1080;
 
 const STAMP_PATH: &str = "assets/data/room_gi/.inputs_stamp";
 const OUT_DIR: &str = "assets/data/room_gi";
-const ROOMS: &[&str] = &["shop", "hallway", "archive"];
+const ROOMS: &[&str] = &["shop", "hallway", "archive", "main_menu"];
 
 /// Paths whose bytes are mixed into the inputs stamp (keep in sync with `rerun-if-changed` in `build.rs`).
 pub fn stamp_input_paths(repo: &Path) -> Vec<PathBuf> {
     [
-        "assets/3d/Shop.glb",
+        "assets/3d/shop.glb",
         "assets/3d/hallway.glb",
         "assets/3d/archive.glb",
+        "assets/3d/main_menu.glb",
         "src/render/room_glb.rs",
         "shaders/emissive_probe_update.wgsl",
         "shaders/emissive_probe_apply.wgsl",
@@ -41,9 +42,10 @@ pub fn emit_rerun_if_changed() {
     println!("cargo:rerun-if-env-changed=MAHJURO_ROOM_GI_BAKE");
     println!("cargo:rerun-if-changed={STAMP_PATH}");
     for path in [
-        "assets/3d/Shop.glb",
+        "assets/3d/shop.glb",
         "assets/3d/hallway.glb",
         "assets/3d/archive.glb",
+        "assets/3d/main_menu.glb",
         "src/render/room_glb.rs",
         "shaders/emissive_probe_update.wgsl",
         "shaders/emissive_probe_apply.wgsl",
@@ -121,10 +123,19 @@ pub fn maybe_bake_room_gi(repo: &Path, profile_dir: &Path) {
         match status {
             Ok(s) if s.success() => {}
             Ok(s) => {
-                panic!(
-                    "room GI bake for {room} failed ({s}); fix GPU/headless init or set \
-                     MAHJURO_SKIP_ROOM_GI_BAKE=1"
-                );
+                let out_path = out_dir.join(format!("{room}.mgi"));
+                if out_path.is_file() {
+                    println!(
+                        "cargo:warning=room GI bake for {room} failed ({s}); keeping existing \
+                         {} — rebuild once with MAHJURO_SKIP_ROOM_GI_BAKE=1 if bakes stay stale",
+                        out_path.display()
+                    );
+                } else {
+                    panic!(
+                        "room GI bake for {room} failed ({s}); fix GPU/headless init or set \
+                         MAHJURO_SKIP_ROOM_GI_BAKE=1"
+                    );
+                }
             }
             Err(e) => panic!("failed to spawn room GI bake for {room}: {e}"),
         }

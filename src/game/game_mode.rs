@@ -2,11 +2,18 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::core::blind_target::DEFAULT_BASE_TARGET;
 use crate::core::relic::RelicId;
 use crate::core::rules::RuleModifier;
 use crate::core::stake::Stake;
 use crate::core::yaku::YakuKind;
 use crate::persistence::TileMaterial;
+
+pub const STARTING_GOLD: u32 = 8;
+pub const STARTING_PLAYS: u32 = 4;
+pub const STARTING_DISCARDS: u32 = 4;
+pub const HAND_SIZE: usize = 14;
+pub const CONSUMABLE_CAPACITY: usize = 2;
 
 /// All tuneable starting conditions for a run, bundled into one preset.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -16,7 +23,6 @@ pub struct GameMode {
     pub starting_discards: u32,
     pub hand_size: usize,
     pub base_target: u32,
-    pub target_scaling: f32,
     pub starting_relics: Vec<RelicId>,
     pub starting_rules: Vec<RuleModifier>,
     pub starting_yaku: Vec<YakuKind>,
@@ -73,22 +79,22 @@ impl GameMode {
             TileMaterial::Plastic => (0, 1, 0),
             TileMaterial::TortoiseShell => (0, 0, 10),
         };
-        // Apply the stake's base-target multiplier once here so the linear
-        // per-blind formula `base_target * run_number` composes cleanly.
-        let base_target = ((500_f32) * stake.base_target_mult()).round() as u32;
+        // Apply the stake's base-target multiplier once here; per-ante growth is
+        // `core::blind_target::TARGET_SCALING`.
+        let base_target =
+            ((DEFAULT_BASE_TARGET as f32) * stake.base_target_mult()).round() as u32;
         let mut starting_rules = vec![RuleModifier::PairDoubleScore];
         starting_rules.extend(stake.starting_rules());
         Self {
-            starting_gold: 8 + bonus_gold,
-            starting_plays: 4 + bonus_plays,
-            starting_discards: 4 + bonus_discards,
-            hand_size: 14,
+            starting_gold: STARTING_GOLD + bonus_gold,
+            starting_plays: STARTING_PLAYS + bonus_plays,
+            starting_discards: STARTING_DISCARDS + bonus_discards,
+            hand_size: HAND_SIZE,
             base_target,
-            target_scaling: 5.0,
             starting_relics: vec![],
             starting_rules,
             starting_yaku: crate::core::yaku::YakuKind::all().to_vec(),
-            consumable_capacity: 2,
+            consumable_capacity: CONSUMABLE_CAPACITY,
             tile_material: material,
             stake,
             price_multiplier: stake.price_multiplier(),
@@ -104,7 +110,7 @@ mod tests {
     fn spring_is_baseline() {
         let m = GameMode::standard();
         assert_eq!(m.stake, Stake::Spring);
-        assert_eq!(m.base_target, 500);
+        assert_eq!(m.base_target, DEFAULT_BASE_TARGET);
         assert!((m.price_multiplier - 1.0).abs() < 1e-6);
     }
 
@@ -112,7 +118,7 @@ mod tests {
     fn winter_scales_target_and_price() {
         let m = GameMode::with_material_and_stake(TileMaterial::Bamboo, Stake::Winter);
         assert_eq!(m.stake, Stake::Winter);
-        assert_eq!(m.base_target, 750); // 500 * 1.5
+        assert_eq!(m.base_target, 750); // DEFAULT_BASE_TARGET * 1.5
         assert!((m.price_multiplier - 1.5).abs() < 1e-6);
         // scale_shop_price: 10 * 1.5 = 15
         assert_eq!(m.scale_shop_price(10), 15);

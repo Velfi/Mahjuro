@@ -332,6 +332,134 @@
     font-size: 0.85rem;
   }
 
+  .target-chart {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+
+  .target-chart__legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1.25rem;
+    font-size: 0.82rem;
+    color: var(--muted);
+    margin-bottom: 0.15rem;
+  }
+
+  .target-chart__legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .target-chart__swatch {
+    width: 0.85rem;
+    height: 0.65rem;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+
+  .target-chart__swatch--target {
+    background: linear-gradient(90deg, rgba(232, 160, 110, 0.95), rgba(232, 160, 110, 0.65));
+    border: 1px solid rgba(232, 160, 110, 0.5);
+  }
+
+  .target-chart__swatch--avg {
+    background: rgba(77, 184, 232, 0.85);
+    border: 1px solid rgba(77, 184, 232, 0.45);
+  }
+
+  .target-chart__row {
+    display: grid;
+    grid-template-columns: 3.6rem 1fr minmax(5.5rem, auto);
+    gap: 0.45rem 0.55rem;
+    align-items: center;
+    font-size: 0.82rem;
+  }
+
+  .target-chart__label {
+    color: var(--muted);
+    font-weight: 700;
+    font-size: 0.78rem;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .target-chart__track {
+    position: relative;
+    height: 1.15rem;
+    border-radius: 4px;
+    background: var(--navy1);
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  .target-chart__fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    border-radius: 3px;
+    min-width: 2px;
+    transition: width 0.35s ease;
+  }
+
+  .target-chart__fill--target {
+    background: linear-gradient(90deg, rgba(232, 160, 110, 0.9), rgba(232, 160, 110, 0.55));
+    z-index: 0;
+  }
+
+  .target-chart__fill--avg {
+    background: rgba(77, 184, 232, 0.82);
+    z-index: 1;
+    box-shadow: inset 0 0 0 1px rgba(77, 184, 232, 0.35);
+  }
+
+  .target-chart__vals {
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
+    font-size: 0.78rem;
+    line-height: 1.35;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .target-chart__vals strong {
+    color: var(--text);
+    font-weight: 700;
+  }
+
+  svg.chart { width: 100%; height: auto; display: block; }
+  .chart-axis { stroke: var(--border); stroke-width: 1; }
+  .chart-grid { stroke: var(--border-soft); stroke-width: 1; stroke-dasharray: 3 3; }
+  .chart-tick { fill: var(--faint); font-size: 9px; font-family: var(--font); }
+  .chart-label { fill: var(--muted); font-size: 10px; font-family: var(--font); }
+  .candle-target { stroke: var(--accent2); stroke-width: 1.5; stroke-dasharray: 4 3; opacity: 0.85; }
+  .candle-wick { stroke: var(--muted); stroke-width: 1.5; stroke-linecap: round; }
+  .candle-body { stroke-width: 1; }
+  .candle-body--up { fill: rgba(111, 207, 151, 0.55); stroke: var(--positive); }
+  .candle-body--down { fill: rgba(240, 128, 144, 0.45); stroke: var(--danger); }
+  .candle-legend {
+    display: flex; flex-wrap: wrap; gap: 0.35rem 0.85rem;
+    margin-bottom: 0.5rem; font-size: 0.78rem; color: var(--muted);
+  }
+  .candle-legend__item { display: inline-flex; align-items: center; gap: 0.35rem; }
+  .candle-legend__swatch { width: 0.75rem; height: 0.65rem; border-radius: 2px; border: 1px solid var(--border); }
+  .chart-legend {
+    display: flex; flex-wrap: wrap; gap: 0.35rem 0.85rem;
+    margin-bottom: 0.45rem; font-size: 0.78rem; color: var(--muted);
+  }
+  .chart-legend__item { display: inline-flex; align-items: center; gap: 0.35rem; }
+  .chart-legend__swatch { width: 0.65rem; height: 0.65rem; border-radius: 2px; flex-shrink: 0; }
+  .table-details { margin-top: 0.65rem; font-size: 0.88rem; }
+  .table-details > summary {
+    cursor: pointer; color: var(--accent); font-weight: 700; list-style: none;
+  }
+  .table-details > summary::-webkit-details-marker { display: none; }
+  .table-details__body { margin-top: 0.5rem; }
+  .card__panels { display: flex; flex-direction: column; gap: 0.85rem; }
+
   .loss-list {
     margin: 0;
     padding-left: 1.15rem;
@@ -1121,6 +1249,286 @@
     return k0;
   }
 
+  function svgChart(w, h, pad) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+    svg.setAttribute('class', 'chart');
+    svg._pad = pad;
+    svg._w = w;
+    svg._h = h;
+    return svg;
+  }
+
+  function svgNs(tag) {
+    return document.createElementNS('http://www.w3.org/2000/svg', tag);
+  }
+
+  function candleLegend(parent) {
+    const leg = el('div', 'candle-legend');
+    function item(cls, txt) {
+      const it = el('span', 'candle-legend__item');
+      const sw = el('span', 'candle-legend__swatch ' + cls);
+      it.appendChild(sw);
+      it.appendChild(document.createTextNode(txt));
+      leg.appendChild(it);
+    }
+    item('candle-body--up', 'Q3 > Q1');
+    item('candle-body--down', 'Q3 < Q1');
+    leg.appendChild(el('span', 'candle-legend__item', 'Wicks = min–max · body = 25th–75th pct'));
+    parent.appendChild(leg);
+  }
+
+  function renderDistributionCandles(parent, rows, opts) {
+    if (!rows || !rows.length) return;
+    const fmt = (opts && opts.valueFmt) || function(v) { return String(Math.round(v)); };
+    const w = Math.max(520, rows.length * 22);
+    const h = (opts && opts.height) || 220;
+    const pad = { l: 52, r: 14, t: 14, b: 48 };
+    const svg = svgChart(w, h, pad);
+    const iw = w - pad.l - pad.r;
+    const ih = h - pad.t - pad.b;
+    let yMin = Infinity;
+    let yMax = -Infinity;
+    for (const r of rows) {
+      yMin = Math.min(yMin, r.low, r.open, r.close, r.target != null ? r.target : Infinity);
+      yMax = Math.max(yMax, r.high, r.open, r.close, r.target != null ? r.target : -Infinity);
+    }
+    if (!Number.isFinite(yMin) || !Number.isFinite(yMax)) return;
+    const yPad = Math.max((yMax - yMin) * 0.08, 1);
+    yMin -= yPad;
+    yMax += yPad;
+    const yR = Math.max(yMax - yMin, 1e-9);
+    const yAt = (v) => pad.t + ih - ((v - yMin) / yR) * ih;
+    const n = rows.length;
+    const slotW = n > 0 ? iw / n : iw;
+    const bodyW = Math.max(4, Math.min(14, slotW * 0.55));
+
+    const axis = svgNs('line');
+    axis.setAttribute('x1', pad.l);
+    axis.setAttribute('x2', pad.l + iw);
+    axis.setAttribute('y1', pad.t + ih);
+    axis.setAttribute('y2', pad.t + ih);
+    axis.setAttribute('class', 'chart-axis');
+    svg.appendChild(axis);
+
+    for (let gi = 0; gi <= 4; gi++) {
+      const v = yMin + (yR * gi) / 4;
+      const y = yAt(v);
+      const grid = svgNs('line');
+      grid.setAttribute('x1', pad.l);
+      grid.setAttribute('x2', pad.l + iw);
+      grid.setAttribute('y1', y);
+      grid.setAttribute('y2', y);
+      grid.setAttribute('class', 'chart-grid');
+      svg.appendChild(grid);
+      const t = svgNs('text');
+      t.setAttribute('x', pad.l - 6);
+      t.setAttribute('y', y + 3);
+      t.setAttribute('text-anchor', 'end');
+      t.setAttribute('class', 'chart-tick');
+      t.textContent = fmt(v);
+      svg.appendChild(t);
+    }
+
+    rows.forEach((row, i) => {
+      const cx = pad.l + slotW * (i + 0.5);
+      if (row.target != null && Number.isFinite(row.target)) {
+        const ty = yAt(row.target);
+        const tl = svgNs('line');
+        tl.setAttribute('x1', cx - slotW * 0.42);
+        tl.setAttribute('x2', cx + slotW * 0.42);
+        tl.setAttribute('y1', ty);
+        tl.setAttribute('y2', ty);
+        tl.setAttribute('class', 'candle-target');
+        tl.title = 'Target ' + fmt(row.target);
+        svg.appendChild(tl);
+      }
+      const wick = svgNs('line');
+      wick.setAttribute('x1', cx);
+      wick.setAttribute('x2', cx);
+      wick.setAttribute('y1', yAt(row.high));
+      wick.setAttribute('y2', yAt(row.low));
+      wick.setAttribute('class', 'candle-wick');
+      wick.title = 'low ' + fmt(row.low) + ' · high ' + fmt(row.high);
+      svg.appendChild(wick);
+      const top = yAt(Math.max(row.open, row.close));
+      const bot = yAt(Math.min(row.open, row.close));
+      const bodyH = Math.max(2, bot - top);
+      const body = svgNs('rect');
+      body.setAttribute('x', cx - bodyW / 2);
+      body.setAttribute('y', top);
+      body.setAttribute('width', bodyW);
+      body.setAttribute('height', bodyH);
+      body.setAttribute('class', 'candle-body ' + (row.close >= row.open ? 'candle-body--up' : 'candle-body--down'));
+      body.title = 'Q1 ' + fmt(row.open) + ' · Q3 ' + fmt(row.close) + ' (n=' + row.n + ')';
+      svg.appendChild(body);
+    });
+
+    const step = Math.max(1, Math.ceil(n / 28));
+    rows.forEach((row, i) => {
+      if (i % step !== 0 && i !== n - 1) return;
+      const t = svgNs('text');
+      t.setAttribute('x', pad.l + slotW * (i + 0.5));
+      t.setAttribute('y', h - 8);
+      t.setAttribute('text-anchor', 'middle');
+      t.setAttribute('class', 'chart-tick');
+      t.textContent = row.label;
+      svg.appendChild(t);
+    });
+
+    candleLegend(parent);
+    parent.appendChild(svg);
+  }
+
+
+  function slotLabelShort(slot) {
+    const parts = String(slot || '').split('-');
+    if (parts.length < 2) return slot;
+    const ante = parseInt(parts[0], 10);
+    const blind = parts.slice(1).join('-').trim();
+    const m = { 'Small Blind': 'S', 'Big Blind': 'B', 'Boss Blind': 'X' };
+    return 'A' + (Number.isFinite(ante) ? ante : '?') + ' ' + (m[blind] || blind.slice(0, 6));
+  }
+
+  function renderHorizontalBars(parent, items, opts) {
+    if (!items || !items.length) return;
+    const warm = opts && opts.warm;
+    const maxV = Math.max(1e-9, ...items.map((x) => x.v));
+    const box = el('div', 'mini-bars');
+    for (const it of items) {
+      const row = el('div', 'mini-bar');
+      row.appendChild(el('span', 'mini-bar__label', it.name));
+      row.appendChild(el('span', 'mini-bar__val', it.display != null ? it.display : String(it.v)));
+      const track = el('div', 'mini-bar__track');
+      track.setAttribute('aria-hidden', 'true');
+      const fill = el('div', 'mini-bar__fill' + (warm ? ' mini-bar__fill--warm' : ''));
+      fill.style.width = (100 * it.v / maxV).toFixed(1) + '%';
+      if (it.title) fill.title = it.title;
+      track.appendChild(fill);
+      row.appendChild(track);
+      box.appendChild(row);
+    }
+    parent.appendChild(box);
+  }
+
+  function chartLegend(parent, items) {
+    const leg = el('div', 'chart-legend');
+    for (const it of items) {
+      const row = el('span', 'chart-legend__item');
+      const sw = el('span', 'chart-legend__swatch');
+      sw.style.background = it.color;
+      row.appendChild(sw);
+      row.appendChild(document.createTextNode(it.label));
+      leg.appendChild(row);
+    }
+    parent.appendChild(leg);
+  }
+
+  function renderAnteDeathChart(parent, marginal, hazard) {
+    const marg = marginal || [];
+    const haz = hazard || [];
+    const margMap = new Map(marg.map((r) => [r.ante, r]));
+    const hazMap = new Map(haz.map((r) => [r.ante, r]));
+    const antes = [...new Set([...margMap.keys(), ...hazMap.keys()])].sort((a, b) => a - b);
+    if (!antes.length) return;
+    chartLegend(parent, [
+      { color: '#4db8e8', label: '% of all runs (marginal)' },
+      { color: '#e8a06e', label: 'Hazard | reached ante' }
+    ]);
+    const w = Math.max(440, antes.length * 38);
+    const h = 200;
+    const pad = { l: 44, r: 12, t: 10, b: 40 };
+    const svg = svgChart(w, h, pad);
+    const iw = w - pad.l - pad.r;
+    const ih = h - pad.t - pad.b;
+    const yMax = 100;
+    const groupW = iw / antes.length;
+    const barW = Math.max(4, Math.min(11, groupW * 0.2));
+    const gap = 2;
+    const axis = svgNs('line');
+    axis.setAttribute('x1', pad.l);
+    axis.setAttribute('x2', pad.l + iw);
+    axis.setAttribute('y1', pad.t + ih);
+    axis.setAttribute('y2', pad.t + ih);
+    axis.setAttribute('class', 'chart-axis');
+    svg.appendChild(axis);
+    for (let gi = 0; gi <= 4; gi++) {
+      const v = (yMax * gi) / 4;
+      const y = pad.t + ih - (v / yMax) * ih;
+      const grid = svgNs('line');
+      grid.setAttribute('x1', pad.l);
+      grid.setAttribute('x2', pad.l + iw);
+      grid.setAttribute('y1', y);
+      grid.setAttribute('y2', y);
+      grid.setAttribute('class', 'chart-grid');
+      svg.appendChild(grid);
+    }
+    antes.forEach((ante, i) => {
+      const cx = pad.l + groupW * (i + 0.5);
+      const m = margMap.get(ante);
+      const hz = hazMap.get(ante);
+      if (m) {
+        const bh = (m.pct_of_runs / yMax) * ih;
+        const r = svgNs('rect');
+        r.setAttribute('x', cx - barW - gap / 2);
+        r.setAttribute('y', pad.t + ih - bh);
+        r.setAttribute('width', barW);
+        r.setAttribute('height', Math.max(0, bh));
+        r.setAttribute('fill', '#4db8e8');
+        r.title = 'Marginal: ' + m.pct_of_runs.toFixed(1) + '% of runs (' + m.count + ' deaths)';
+        svg.appendChild(r);
+      }
+      if (hz) {
+        const bh = (hz.hazard_pct / yMax) * ih;
+        const r = svgNs('rect');
+        r.setAttribute('x', cx + gap / 2);
+        r.setAttribute('y', pad.t + ih - bh);
+        r.setAttribute('width', barW);
+        r.setAttribute('height', Math.max(0, bh));
+        r.setAttribute('fill', '#e8a06e');
+        r.title = 'Hazard: ' + hz.hazard_pct.toFixed(1) + '% (' + hz.deaths + '/' + hz.reached + ')';
+        svg.appendChild(r);
+      }
+      const t = svgNs('text');
+      t.setAttribute('x', cx);
+      t.setAttribute('y', h - 6);
+      t.setAttribute('text-anchor', 'middle');
+      t.setAttribute('class', 'chart-tick');
+      t.textContent = 'A' + ante;
+      svg.appendChild(t);
+    });
+    parent.appendChild(svg);
+  }
+
+  function renderSlotMetricBars(parent, rows, valueKey, opts) {
+    if (!rows || !rows.length) return;
+    const items = rows.map((row) => ({
+      name: slotLabelShort(row.slot),
+      v: row[valueKey],
+      display: (opts && opts.fmt) ? opts.fmt(row[valueKey]) : String(row[valueKey]),
+      title: row.slot
+    }));
+    renderHorizontalBars(parent, items, opts);
+  }
+
+  function addDetailsTable(parent, summary, fn) {
+    const det = el('details', 'table-details');
+    det.appendChild(el('summary', null, summary));
+    const body = el('div', 'table-details__body');
+    fn(body);
+    det.appendChild(body);
+    parent.appendChild(det);
+  }
+
+  function namedCountToBars(rows, displayFn) {
+    return (rows || []).map((r) => ({
+      name: r.name,
+      v: r.count,
+      display: displayFn ? displayFn(r) : String(r.count),
+      title: r.name + ': ' + r.count
+    }));
+  }
+
   function barCell(pct) {
     const track = el('div', 'bar-track');
     const fill = el('div', 'bar-fill');
@@ -1129,6 +1537,64 @@
     const wrap = el('div', 'bar-wrap');
     wrap.appendChild(track);
     return wrap;
+  }
+
+  function bossBlindChart(parent, rows, baseTarget, scaling, scoreCandles) {
+    const hasBars = rows && rows.length;
+    const hasCandles = scoreCandles && scoreCandles.length;
+    if (!hasBars && !hasCandles) return;
+    const sub = 'Target vs mean boss score (bars) and per-run score spread (candles). '
+      + 'Base ' + (baseTarget != null ? baseTarget.toLocaleString('en') : '—')
+      + ', scaling ×' + (scaling != null ? Number(scaling).toFixed(2) : '—')
+      + ' per ante.';
+    const w = widget('Boss blind scoring', sub);
+    const panels = el('div', 'card__panels');
+    if (hasBars) {
+      panels.appendChild(el('h4', 'dash-card__subhead', 'Targets vs batch mean'));
+      const legend = el('div', 'target-chart__legend');
+      function legItem(cls, txt) {
+        const item = el('span', 'target-chart__legend-item');
+        item.appendChild(el('span', 'target-chart__swatch ' + cls));
+        item.appendChild(document.createTextNode(txt));
+        legend.appendChild(item);
+      }
+      legItem('target-chart__swatch--target', 'Target');
+      legItem('target-chart__swatch--avg', 'Avg score');
+      panels.appendChild(legend);
+      const chart = el('div', 'target-chart');
+      for (const row of rows) {
+        const r = el('div', 'target-chart__row');
+        r.appendChild(el('span', 'target-chart__label', 'Ante ' + row.ante));
+        const track = el('div', 'target-chart__track');
+        const targetFill = el('div', 'target-chart__fill target-chart__fill--target');
+        targetFill.style.width = (row.target_bar_pct || 0) + '%';
+        track.appendChild(targetFill);
+        if (row.attempts > 0) {
+          const avgFill = el('div', 'target-chart__fill target-chart__fill--avg');
+          avgFill.style.width = (row.avg_bar_pct || 0) + '%';
+          avgFill.title = 'n=' + row.attempts;
+          track.appendChild(avgFill);
+        }
+        r.appendChild(track);
+        const vals = el('div', 'target-chart__vals');
+        if (row.attempts > 0) {
+          vals.innerHTML = '<strong>' + fmtCompact(row.avg_score) + '</strong> / ' + fmtCompact(row.target);
+          vals.title = row.attempts + ' boss attempt' + (row.attempts === 1 ? '' : 's');
+        } else {
+          vals.textContent = '— / ' + fmtCompact(row.target);
+          vals.title = 'No boss attempts at this ante in the batch';
+        }
+        r.appendChild(vals);
+        chart.appendChild(r);
+      }
+      panels.appendChild(chart);
+    }
+    if (hasCandles) {
+      panels.appendChild(el('h4', 'dash-card__subhead', 'Score distribution'));
+      renderDistributionCandles(panels, scoreCandles, { valueFmt: fmtCompact });
+    }
+    w.body.appendChild(panels);
+    parent.appendChild(w.section);
   }
 
   function miniBarList(parent, title, subtitle, items, warmFill) {
@@ -1154,19 +1620,58 @@
   function lossSidebar(parent, lb) {
     if (!lb || !lb.losses) return;
     const w = widget('When runs are lost', 'Engine stop reasons (losses only, counts and share of losses)');
-    const ul = el('ul', 'loss-list');
     const oop = lb.out_of_plays || 0;
     const na = lb.no_actions_remaining || 0;
     const other = Math.max(0, lb.losses - oop - na);
-    function item(label, count, pctOfLosses) {
-      const li = el('li');
-      li.textContent = label + ': ' + count + ' run' + (count === 1 ? '' : 's') + ' (' + pctOfLosses.toFixed(1) + '% of losses)';
-      ul.appendChild(li);
+    const lossBars = [];
+    if (oop > 0) lossBars.push({ name: 'Out of plays', v: oop, display: oop + ' (' + (lb.out_of_plays_pct_of_losses ?? (100 * oop / lb.losses)).toFixed(1) + '%)' });
+    if (na > 0) lossBars.push({ name: 'No actions remaining', v: na, display: na + ' (' + (lb.no_actions_pct_of_losses ?? (100 * na / lb.losses)).toFixed(1) + '%)' });
+    if (other > 0) lossBars.push({ name: 'Other or mixed', v: other, display: other + ' (' + ((100 * other) / lb.losses).toFixed(1) + '%)' });
+    renderHorizontalBars(w.body, lossBars, { warm: true });
+    parent.appendChild(w.section);
+  }
+
+  function tileMaterialLabel(material) {
+    if (material == null) return '—';
+    const s = String(material);
+    if (s === 'Bamboo') return 'Bamboo & Ivory';
+    if (s === 'TortoiseShell') return 'Tortoise Shell';
+    return s;
+  }
+
+  function gameModeSidebar(parent, mode, targetScaling) {
+    const w = widget('Game mode', 'Starting conditions for this batch (`data.mode` from the bot export)');
+    const dl = el('dl', 'stat-grid');
+    function modeRow(label, value, hint) {
+      const dt = el('dt', hint ? 'dt-with-help' : null);
+      dt.appendChild(document.createTextNode(label));
+      if (hint) dt.appendChild(fieldHelp(hint));
+      dl.appendChild(dt);
+      dl.appendChild(el('dd', null, value));
     }
-    item('Out of plays', oop, lb.out_of_plays_pct_of_losses ?? (100 * oop / lb.losses));
-    item('No actions remaining', na, lb.no_actions_pct_of_losses ?? (100 * na / lb.losses));
-    if (other > 0) item('Other or mixed', other, (100 * other) / lb.losses);
-    w.body.appendChild(ul);
+    modeRow('Stake', mode.stake != null ? String(mode.stake) : '—',
+      'Difficulty tier: scales base target, shop prices, and boss floor.');
+    modeRow('Base target', mode.base_target != null ? String(mode.base_target) : '—',
+      'Ante-1 small-blind target before per-ante scaling.');
+    modeRow('Target scaling', targetScaling != null ? String(targetScaling) : '—',
+      'Per-ante target growth multiplier (`TARGET_SCALING` in the build).');
+    modeRow('Starting gold', mode.starting_gold != null ? String(mode.starting_gold) : '—',
+      'Gold in wallet when the run begins (includes tile-material bonus).');
+    modeRow('Starting plays', mode.starting_plays != null ? String(mode.starting_plays) : '—',
+      'Play budget on the first blind of a run (material may add +1).');
+    modeRow('Starting discards', mode.starting_discards != null ? String(mode.starting_discards) : '—',
+      'Discard budget on the first blind (material may add +1).');
+    modeRow('Hand size', mode.hand_size != null ? String(mode.hand_size) : '—', null);
+    modeRow('Tile material', tileMaterialLabel(mode.tile_material),
+      'Bamboo +1 play, Plastic +1 discard, Tortoise Shell +10 starting gold.');
+    if (mode.price_multiplier != null) {
+      modeRow('Shop price mult.', Number(mode.price_multiplier).toFixed(2),
+        'Stake-driven shop multiplier baked into `GameMode`.');
+    }
+    if (mode.consumable_capacity != null) {
+      modeRow('Consumable slots', String(mode.consumable_capacity), 'Base dish capacity before relic bonuses.');
+    }
+    w.body.appendChild(dl);
     parent.appendChild(w.section);
   }
 
@@ -1206,13 +1711,19 @@
     tag.appendChild(document.createTextNode('.'));
     brand.appendChild(tag);
     header.appendChild(brand);
-    const chips = el('div', 'dash-header__chips');
-    chips.appendChild(el('span', 'chip chip--accent', 'schema v' + (data.schema_version ?? '?')));
-    if (meta.crate_version) chips.appendChild(el('span', 'chip', meta.crate_version));
-    chips.appendChild(el('span', 'chip chip--note', runs + ' runs'));
-    chips.appendChild(el('span', 'chip chip--warm', stake));
-    chips.appendChild(el('span', 'chip', 'target ' + (mode.base_target ?? '—')));
-    header.appendChild(chips);
+    const header_chips = el('div', 'dash-header__chips');
+    header_chips.appendChild(el('span', 'chip chip--accent', 'schema v' + (data.schema_version ?? '?')));
+    if (meta.crate_version) header_chips.appendChild(el('span', 'chip', meta.crate_version));
+    header_chips.appendChild(el('span', 'chip chip--note', runs + ' runs'));
+    header_chips.appendChild(el('span', 'chip chip--warm', stake));
+    header_chips.appendChild(el('span', 'chip', 'target ' + (mode.base_target ?? '—')));
+    if (mode.starting_gold != null) {
+      header_chips.appendChild(el('span', 'chip', '$' + mode.starting_gold + ' start'));
+    }
+    if (mode.tile_material != null) {
+      header_chips.appendChild(el('span', 'chip', tileMaterialLabel(mode.tile_material)));
+    }
+    header.appendChild(header_chips);
     app.appendChild(header);
 
     const ciHelp = el('details', 'ci-help');
@@ -1272,6 +1783,10 @@
       [{ cls: 'pill--muted', text: 'per run' }]));
     colM.appendChild(hero);
 
+    if ((d.boss_blind_chart || []).length || (d.boss_score_candles || []).length) {
+      bossBlindChart(colM, d.boss_blind_chart, mode.base_target, d.target_scaling, d.boss_score_candles);
+    }
+
     function fmtWilson(lo, hi) {
       if (lo == null || hi == null) return '—';
       return lo.toFixed(1) + '–' + hi.toFixed(1) + '%';
@@ -1292,56 +1807,61 @@
       return String(Number(v.toPrecision(12)));
     }
 
-    if ((d.deaths_by_ante || []).length) {
-      const anteC = card('Deaths by ante', 'Share of all runs; Wilson 95% CI on the binomial proportion. Bar = relative to busiest ante. Click column headers to sort.');
-      const rows = d.deaths_by_ante.map((row) => ({
-        cells: [
-          String(row.ante),
-          String(row.count),
-          row.pct_of_runs.toFixed(1) + '%',
-          fmtWilson(row.pct_ci_lo, row.pct_ci_hi),
-          barCell(row.dashboard_bar_pct || 0)
-        ],
-        keys: [Number(row.ante), row.count, row.pct_of_runs, null, row.dashboard_bar_pct || 0]
-      }));
-      addTable(anteC.body,
-        [
-          { label: 'Ante', sort: 'num' },
-          { label: 'Deaths', sort: 'num', align: 'right' },
-          { label: '% runs', sort: 'pct', align: 'right',
-            help: 'Deaths on this ante ÷ all runs in the batch (not conditioned on reaching the ante).' },
-          { label: '95% CI', sort: 'str', sortDefault: 'asc', align: 'right', help: HELP_WILSON_CI },
-          { label: 'Relative share', sort: 'pct', align: 'right',
-            help: 'Bar width vs the ante with the most deaths (visual only; shares need not sum to 100%).' }
-        ],
-        rows);
+    const hasDeathAnte = (d.deaths_by_ante || []).length;
+    const hasDeathHazard = (d.deaths_by_ante_hazard || []).length;
+    if (hasDeathAnte || hasDeathHazard) {
+      const anteC = card(
+        'Deaths by ante',
+        'Marginal % of all runs vs hazard given you reached the ante. Expand for counts and Wilson CIs.');
+      renderAnteDeathChart(anteC.body, d.deaths_by_ante, d.deaths_by_ante_hazard);
+      addDetailsTable(anteC.body, 'Table: counts and Wilson 95% CIs', (body) => {
+        if (hasDeathAnte) {
+          body.appendChild(el('h3', 'dash-card__subhead', 'Share of all runs'));
+          const rows = d.deaths_by_ante.map((row) => ({
+            cells: [
+              String(row.ante),
+              String(row.count),
+              row.pct_of_runs.toFixed(1) + '%',
+              fmtWilson(row.pct_ci_lo, row.pct_ci_hi)
+            ],
+            keys: [Number(row.ante), row.count, row.pct_of_runs, null]
+          }));
+          addTable(body,
+            [
+              { label: 'Ante', sort: 'num' },
+              { label: 'Deaths', sort: 'num', align: 'right' },
+              { label: '% runs', sort: 'pct', align: 'right',
+                help: 'Deaths on this ante ÷ all runs in the batch (not conditioned on reaching the ante).' },
+              { label: '95% CI', sort: 'str', sortDefault: 'asc', align: 'right', help: HELP_WILSON_CI }
+            ],
+            rows);
+        }
+        if (hasDeathHazard) {
+          body.appendChild(el('h3', 'dash-card__subhead', 'Death hazard (reached ante)'));
+          addTable(body,
+            [
+              { label: 'Ante', sort: 'num' },
+              { label: 'Reached', sort: 'num', align: 'right',
+                help: 'Runs that started this ante before winning or dying earlier.' },
+              { label: 'Deaths', sort: 'num', align: 'right',
+                help: 'Runs that died while playing this ante (numerator for hazard).' },
+              { label: 'Hazard', sort: 'pct', align: 'right',
+                help: 'Deaths ÷ reached: chance of dying on this ante given you got that far.' },
+              { label: '95% CI', sort: 'str', sortDefault: 'asc', align: 'right', help: HELP_WILSON_CI }
+            ],
+            d.deaths_by_ante_hazard.map((row) => ({
+              cells: [
+                String(row.ante),
+                String(row.reached),
+                String(row.deaths),
+                row.hazard_pct.toFixed(1) + '%',
+                fmtWilson(row.hazard_ci_lo, row.hazard_ci_hi)
+              ],
+              keys: [Number(row.ante), row.reached, row.deaths, row.hazard_pct, null]
+            })));
+        }
+      });
       colM.appendChild(anteC.section);
-    }
-
-    if ((d.deaths_by_ante_hazard || []).length) {
-      const hazC = card('Death hazard by ante', 'P(die on this ante | reached it): denominator is runs that started the ante. Wilson 95% CI.');
-      addTable(hazC.body,
-        [
-          { label: 'Ante', sort: 'num' },
-          { label: 'Reached', sort: 'num', align: 'right',
-            help: 'Runs that started this ante before winning or dying earlier.' },
-          { label: 'Deaths', sort: 'num', align: 'right',
-            help: 'Runs that died while playing this ante (numerator for hazard).' },
-          { label: 'Hazard', sort: 'pct', align: 'right',
-            help: 'Deaths ÷ reached: chance of dying on this ante given you got that far.' },
-          { label: '95% CI', sort: 'str', sortDefault: 'asc', align: 'right', help: HELP_WILSON_CI }
-        ],
-        d.deaths_by_ante_hazard.map((row) => ({
-          cells: [
-            String(row.ante),
-            String(row.reached),
-            String(row.deaths),
-            row.hazard_pct.toFixed(1) + '%',
-            fmtWilson(row.hazard_ci_lo, row.hazard_ci_hi)
-          ],
-          keys: [Number(row.ante), row.reached, row.deaths, row.hazard_pct, null]
-        })));
-      colM.appendChild(hazC.section);
     }
 
     const kpiRow = el('div', 'kpi-grid');
@@ -1377,7 +1897,7 @@
           ['#', null],
           ['Kind', 'Scoring step type (yaku, hook, structure cash-in, etc.).'],
           ['Points', 'Round-score delta from this step.'],
-          ['Tiles', 'Structure bank at cash-in (compact tile labels); on scoring commits without a full clear, tiles from that commit only.']
+          ['Tiles', 'Meld-grouped labels (same as in-game cascade: Pair / Sequence / Triplet / Kong + faces). Full bank on cash-in; partial commits show only melds just played.']
         ];
         for (const [lab, h] of peakCols) {
           hr.appendChild(h ? thPlain(lab, h) : el('th', null, lab));
@@ -1436,6 +1956,18 @@
       (pr.gold_from_clears ?? 0).toFixed(1) + ' clears + ' + (pr.gold_from_skip_tags ?? 0).toFixed(1) + ' skip-tags = ' +
       ((pr.gold_from_clears ?? 0) + (pr.gold_from_skip_tags ?? 0)).toFixed(1),
       'Gold from blind clears vs skip-tag payouts (value when you take a tag’s gold instead of skipping).');
+    const blindsClearedTotal = sums.blinds_cleared_total ?? 0;
+    const goldPerBlindClear = pr.gold_per_blind_cleared != null
+      ? pr.gold_per_blind_cleared
+      : (blindsClearedTotal > 0 ? (sums.total_gold_from_clears ?? 0) / blindsClearedTotal : 0);
+    const goldPerBlindInclSkips = pr.gold_per_blind_incl_skips != null
+      ? pr.gold_per_blind_incl_skips
+      : (blindsClearedTotal > 0
+        ? ((sums.total_gold_from_clears ?? 0) + (sums.total_gold_from_skip_tags ?? 0)) / blindsClearedTotal
+        : 0);
+    row('Avg gold per blind cleared',
+      goldPerBlindClear.toFixed(1) + ' (clears only) · ' + goldPerBlindInclSkips.toFixed(1) + ' incl. skip-tags',
+      'Batch ratio: total gold earned ÷ total blinds cleared. “Round” = one blind (small / big / boss). Skip-tag gold is optional income on top of clear payouts.');
     row('Avg clear payout',
       (pr.gold_clear_base ?? 0).toFixed(1) + ' base + ' + (pr.gold_clear_unused_plays ?? 0).toFixed(1) + ' plays + ' +
       (pr.gold_clear_interest ?? 0).toFixed(1) + ' interest + ' + (pr.gold_clear_relics ?? 0).toFixed(1) + ' relics',
@@ -1468,7 +2000,7 @@
     colM.appendChild(sumW.section);
 
     const when = new Date().toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-    const info = widget('Report metadata', 'This file is self-contained; fonts load from Google when online.');
+    const info = widget('Report metadata');
     const mb = el('div', 'meta-block');
     const s1 = el('div');
     const b1 = el('strong'); b1.textContent = 'Rendered: ';
@@ -1476,9 +2008,13 @@
     s1.appendChild(document.createTextNode(when));
     const s2 = el('div');
     s2.style.marginTop = '0.35rem';
-    const b2 = el('strong'); b2.textContent = 'Stake / target: ';
+    const b2 = el('strong'); b2.textContent = 'Mode: ';
     s2.appendChild(b2);
-    s2.appendChild(document.createTextNode(stake + ' · ' + (mode.base_target ?? '—')));
+    s2.appendChild(document.createTextNode(
+      stake + ' · target ' + (mode.base_target ?? '—') +
+      ' · $' + (mode.starting_gold ?? '—') + ' start · ' +
+      (mode.starting_plays ?? '—') + ' plays · ' +
+      (mode.starting_discards ?? '—') + ' discards'));
     const s3 = el('div');
     s3.style.marginTop = '0.35rem';
     const b3 = el('strong'); b3.textContent = 'Yaku kinds in build: ';
@@ -1490,6 +2026,8 @@
     info.body.appendChild(mb);
     colR.appendChild(info.section);
 
+    gameModeSidebar(colR, mode, d.target_scaling);
+
     if (d.loss_breakdown) lossSidebar(colR, d.loss_breakdown);
 
     const blindRows = (d.deaths_by_blind || []).slice(0, 6).map((r) => ({
@@ -1497,7 +2035,7 @@
       v: r.count,
       display: r.pct_of_runs.toFixed(1) + '%'
     }));
-    if (blindRows.length) miniBarList(colR, 'Deaths by blind (top)', 'Percent of all runs; full table below', blindRows, true);
+    if (blindRows.length) miniBarList(colR, 'Deaths by blind (top)', 'Percent of all runs', blindRows, true);
 
     const relicRows = (d.relics_bought || []).slice(0, 6).map((r) => ({
       name: r.name,
@@ -1518,109 +2056,118 @@
     const full = el('div', 'dash-full');
 
     if ((d.deaths_by_blind || []).length) {
-      const sec = card('Deaths by blind', 'All buckets');
-      addTable(sec.body,
-        [
-          { label: 'Blind', sort: 'str', sortDefault: 'asc' },
-          { label: 'Count', sort: 'num', align: 'right' },
-          { label: '% runs', sort: 'pct', align: 'right',
-            help: 'Deaths on this blind ÷ all runs (marginal, not conditional on seeing the blind).' }
-        ],
-        d.deaths_by_blind.map((row) => ({
-          cells: [row.name, String(row.count), row.pct_of_runs.toFixed(1) + '%'],
-          keys: [row.name.toLowerCase(), row.count, row.pct_of_runs]
-        })));
+      const sec = card('Deaths by blind', 'Percent of all runs ending on each blind type.');
+      const blindBars = d.deaths_by_blind.map((row) => ({
+        name: row.name,
+        v: row.pct_of_runs,
+        display: row.pct_of_runs.toFixed(1) + '% (' + row.count + ')',
+        title: row.count + ' deaths'
+      }));
+      renderHorizontalBars(sec.body, blindBars, { warm: true });
       full.appendChild(sec.section);
     }
 
     if ((d.surplus_by_slot || []).length) {
-      const sec = card('Score surplus by blind slot', 'Log-scaled bar (matches CLI)');
-      const rows = d.surplus_by_slot.map((row) => {
-        const fill = el('div', 'bar-fill');
-        fill.style.width = Math.min(100, row.bar_pct || 0) + '%';
-        const track = el('div', 'bar-track');
-        track.appendChild(fill);
-        const wrap = el('div', 'bar-wrap');
-        wrap.appendChild(track);
-        return {
-          cells: [row.slot, String(row.clears), fmtCompact(row.avg_surplus), wrap],
-          keys: [row.slot.toLowerCase(), row.clears, row.avg_surplus, row.bar_pct || 0]
-        };
-      });
-      addTable(sec.body,
-        [
-          { label: 'Slot', sort: 'str', sortDefault: 'asc' },
-          { label: 'n', sort: 'num', align: 'right',
-            help: 'Clears in this blind slot (denominator for average surplus).' },
-          { label: 'Avg surplus', sort: 'num', align: 'right',
-            help: 'Mean (score − target) on clears for this slot.' },
-          { label: 'Bar', sort: 'pct', align: 'right',
-            help: 'Log-scaled bar (same compression idea as the CLI bar).' }
-        ],
-        rows);
+      const sec = card('Score surplus by blind slot', 'Candles = per-run spread; table = batch averages.');
+      if ((d.surplus_candles || []).length) {
+        renderDistributionCandles(sec.body, d.surplus_candles, { valueFmt: fmtCompact });
+        sec.body.appendChild(el('h3', 'dash-card__subhead', 'Batch averages'));
+        addTable(sec.body,
+          [
+            { label: 'Slot', sort: 'str', sortDefault: 'asc' },
+            { label: 'n', sort: 'num', align: 'right',
+              help: 'Clears in this blind slot (denominator for average surplus).' },
+            { label: 'Avg surplus', sort: 'num', align: 'right',
+              help: 'Mean (score − target) on clears for this slot.' }
+          ],
+          d.surplus_by_slot.map((row) => ({
+            cells: [row.slot, String(row.clears), fmtCompact(row.avg_surplus)],
+            keys: [row.slot.toLowerCase(), row.clears, row.avg_surplus]
+          })));
+      } else {
+        renderSlotMetricBars(sec.body, d.surplus_by_slot.map((r) => ({ slot: r.slot, avg_surplus: r.avg_surplus })), 'avg_surplus', {
+          fmt: (v) => fmtCompact(v),
+          warm: false
+        });
+        addDetailsTable(sec.body, 'Table with log-scaled bars', (body) => {
+          const rows = d.surplus_by_slot.map((row) => {
+            const fill = el('div', 'bar-fill');
+            fill.style.width = Math.min(100, row.bar_pct || 0) + '%';
+            const track = el('div', 'bar-track');
+            track.appendChild(fill);
+            const wrap = el('div', 'bar-wrap');
+            wrap.appendChild(track);
+            return {
+              cells: [row.slot, String(row.clears), fmtCompact(row.avg_surplus), wrap],
+              keys: [row.slot.toLowerCase(), row.clears, row.avg_surplus, row.bar_pct || 0]
+            };
+          });
+          addTable(body,
+            [
+              { label: 'Slot', sort: 'str', sortDefault: 'asc' },
+              { label: 'n', sort: 'num', align: 'right' },
+              { label: 'Avg surplus', sort: 'num', align: 'right' },
+              { label: 'Bar', sort: 'pct', align: 'right' }
+            ],
+            rows);
+        });
+      }
       full.appendChild(sec.section);
     }
 
-    if ((d.avg_turns_to_clear || []).length) {
-      const sec = card('Avg turns to clear', 'Cleared blinds only (derived.avg_turns_to_clear)');
-      addTable(sec.body,
-        [
-          { label: 'Slot', sort: 'str', sortDefault: 'asc' },
-          { label: 'Avg turns', sort: 'num', align: 'right',
-            help: 'Mean player turns to clear this slot, counting only runs that cleared it.' }
-        ],
-        d.avg_turns_to_clear.map((row) => ({
-          cells: [row.slot, row.avg_turns.toFixed(2)],
-          keys: [row.slot.toLowerCase(), row.avg_turns]
-        })));
-      full.appendChild(sec.section);
-    }
-
-    if ((d.skip_tags || []).length) {
-      const sec = card('Skip tags', 'Per-run share');
-      addTable(sec.body,
-        [
-          { label: 'Tag', sort: 'str', sortDefault: 'asc' },
-          { label: 'Count', sort: 'num', align: 'right' },
-          { label: '% runs', sort: 'pct', align: 'right',
-            help: 'Runs where this skip tag appeared at least once ÷ all runs.' }
-        ],
-        d.skip_tags.map((row) => ({
-          cells: [row.name, String(row.count), row.pct_of_runs.toFixed(1) + '%'],
-          keys: [row.name.toLowerCase(), row.count, row.pct_of_runs]
-        })));
-      full.appendChild(sec.section);
+    const hasTurns = (d.avg_turns_to_clear || []).length;
+    const hasSkips = (d.skip_tags || []).length;
+    if (hasTurns || hasSkips) {
+      const pace = card('Blind pacing', 'Turns to clear and skip-tag uptake.');
+      if (hasTurns) {
+        pace.body.appendChild(el('h3', 'dash-card__subhead', 'Avg turns to clear'));
+        renderSlotMetricBars(pace.body, d.avg_turns_to_clear, 'avg_turns', {
+          fmt: (v) => v.toFixed(2),
+          warm: false
+        });
+      }
+      if (hasSkips) {
+        pace.body.appendChild(el('h3', 'dash-card__subhead', 'Skip tags'));
+        renderHorizontalBars(pace.body, d.skip_tags.map((row) => ({
+          name: row.name,
+          v: row.pct_of_runs,
+          display: row.pct_of_runs.toFixed(1) + '% (' + row.count + ')',
+          title: row.count + ' runs'
+        })), { warm: true });
+      }
+      full.appendChild(pace.section);
     }
 
     if ((d.consumable_zodiacs || []).length || (d.consumable_talismans || []).length) {
       const sec = card('Consumables used', 'In-round + scoring (not shop buys)');
       if ((d.consumable_zodiacs || []).length) {
-        const row = el('div', 'chip-row');
-        for (const x of d.consumable_zodiacs) row.appendChild(el('span', 'chip chip--tag', x.name + ' ×' + x.count));
-        sec.body.appendChild(el('p', 'prose', 'Zodiacs'));
-        sec.body.appendChild(row);
+        sec.body.appendChild(el('h3', 'dash-card__subhead', 'Zodiacs'));
+        renderHorizontalBars(sec.body, namedCountToBars(d.consumable_zodiacs, (r) => '×' + r.count));
       }
       if ((d.consumable_talismans || []).length) {
-        const row = el('div', 'chip-row');
-        for (const x of d.consumable_talismans) row.appendChild(el('span', 'chip chip--tag', x.name + ' ×' + x.count));
-        sec.body.appendChild(el('p', 'prose', 'Talismans'));
-        sec.body.appendChild(row);
+        sec.body.appendChild(el('h3', 'dash-card__subhead', 'Talismans'));
+        renderHorizontalBars(sec.body, namedCountToBars(d.consumable_talismans, (r) => '×' + r.count));
       }
       full.appendChild(sec.section);
     }
 
     if ((d.transformations_top || []).length) {
-      const sec = card('Transformation successors', null);
-      addTable(sec.body,
-        [
-          { label: 'Pattern', sort: 'str', sortDefault: 'asc',
-            help: 'Successor tile pattern key after a transformation (engine-internal label).' },
-          { label: 'Count', sort: 'num', align: 'right' }
-        ],
-        d.transformations_top.map((x) => ({
-          cells: [x.name, String(x.count)],
-          keys: [x.name.toLowerCase(), x.count]
-        })));
+      const sec = card('Transformation successors', 'Top successor patterns after transformation effects.');
+      renderHorizontalBars(sec.body, namedCountToBars(d.transformations_top.slice(0, 20)));
+      if (d.transformations_top.length > 20) {
+        addDetailsTable(sec.body, 'All patterns (' + d.transformations_top.length + ')', (body) => {
+          addTable(body,
+            [
+              { label: 'Pattern', sort: 'str', sortDefault: 'asc',
+                help: 'Successor tile pattern key after a transformation (engine-internal label).' },
+              { label: 'Count', sort: 'num', align: 'right' }
+            ],
+            d.transformations_top.map((x) => ({
+              cells: [x.name, String(x.count)],
+              keys: [x.name.toLowerCase(), x.count]
+            })));
+        });
+      }
       full.appendChild(sec.section);
     }
 
@@ -1829,31 +2376,45 @@
       full.appendChild(sec.section);
     }
 
-    function perRunTable(title, subtitle, rows) {
-      if (!rows || !rows.length) return;
-      const sec = card(title, subtitle);
-      addTable(sec.body,
-        [
-          { label: 'Item', sort: 'str', sortDefault: 'asc' },
-          { label: 'Count', sort: 'num', align: 'right' },
-          { label: '/run', sort: 'num', align: 'right',
-            help: 'Average per simulated run in this batch (Count ÷ runs).' }
-        ],
-        rows.map((row) => ({
-          cells: [row.name, String(row.count), row.per_run.toFixed(2)],
-          keys: [row.name.toLowerCase(), row.count, row.per_run]
-        })));
-      full.appendChild(sec.section);
+    const hasShop = (d.talismans_shop || []).length || (d.zodiacs_shop || []).length || (d.packs_shop || []).length;
+    if (hasShop) {
+      const shop = card('Shop purchases', 'Total buys per item; bar length = count (label shows per-run rate).');
+      function shopBars(rows) {
+        return (rows || []).map((row) => ({
+          name: row.name,
+          v: row.count,
+          display: row.per_run.toFixed(2) + '/run (' + row.count + ')',
+          title: row.count + ' total'
+        }));
+      }
+      if ((d.talismans_shop || []).length) {
+        shop.body.appendChild(el('h3', 'dash-card__subhead', 'Talismans'));
+        renderHorizontalBars(shop.body, shopBars(d.talismans_shop));
+      }
+      if ((d.zodiacs_shop || []).length) {
+        shop.body.appendChild(el('h3', 'dash-card__subhead', 'Zodiacs'));
+        renderHorizontalBars(shop.body, shopBars(d.zodiacs_shop));
+      }
+      if ((d.packs_shop || []).length) {
+        shop.body.appendChild(el('h3', 'dash-card__subhead', 'Packs'));
+        renderHorizontalBars(shop.body, shopBars(d.packs_shop));
+      }
+      full.appendChild(shop.section);
     }
-    perRunTable('Talismans bought', 'Shop', d.talismans_shop);
-    perRunTable('Zodiacs acquired', 'Shop', d.zodiacs_shop);
-    perRunTable('Packs bought', null, d.packs_shop);
 
     if (d.yaku) {
       const y = d.yaku;
       const sec = card('Yaku distribution',
         'Total ' + y.total_awards + ' awards (' + y.awards_per_run.toFixed(2) + '/run); uniform ' + y.uniform_baseline_pct.toFixed(1) + '% · ' + y.kind_count + ' kinds');
-      addTable(sec.body,
+      const yakuBars = y.rows.map((row) => ({
+        name: row.name,
+        v: row.share_pct,
+        display: row.share_pct.toFixed(1) + '% · ' + row.per_run.toFixed(2) + '/run',
+        title: row.awards + ' awards; Δ uni ' + (row.delta_uniform_pct >= 0 ? '+' : '') + row.delta_uniform_pct.toFixed(1) + '%'
+      }));
+      renderHorizontalBars(sec.body, yakuBars, { warm: true });
+      addDetailsTable(sec.body, 'Full yaku table (sortable)', (body) => {
+      addTable(body,
         [
           { label: 'Yaku', sort: 'str', sortDefault: 'asc' },
           { label: 'Awards', sort: 'num', align: 'right' },
@@ -1872,6 +2433,7 @@
             keys: [row.name.toLowerCase(), row.awards, row.per_run, row.share_pct, row.delta_uniform_pct]
           };
         }));
+      });
       if ((y.never_awarded || []).length) {
         sec.body.appendChild(el('p', 'prose', 'Never awarded (' + y.never_awarded.length + ' kinds): ' + y.never_awarded.join(', ')));
       }
@@ -1887,32 +2449,33 @@
           ' · no-score-only ' + bi.only_no_score + ' · other ' + bi.other));
       }
       if (bi.lost_with_lines > 0) sec.body.appendChild(el('p', 'prose', 'Lost with scoring lines available: ' + bi.lost_with_lines));
-      function chips(label, pairs) {
+      function barSection(label, pairs) {
         if (!pairs || !pairs.length) return;
-        sec.body.appendChild(el('p', 'prose', label));
-        const row = el('div', 'chip-row');
-        for (const [a, b] of pairs) row.appendChild(el('span', 'chip chip--tag', a + ': ' + b));
-        sec.body.appendChild(row);
+        sec.body.appendChild(el('h3', 'dash-card__subhead', label));
+        renderHorizontalBars(sec.body, pairs.map(([name, count]) => ({
+          name: name,
+          v: count,
+          display: String(count)
+        })));
       }
-      chips('Hottest blinds', bi.hottest_blinds);
-      chips('Hottest bosses', bi.hottest_bosses);
-      chips('Reasons', bi.reasons_top);
+      if (bi.dead_end_total > 0) {
+        barSection('Dead-end mix', [
+          ['No valid hand', bi.no_valid],
+          ['Only unplayable', bi.only_unplayable],
+          ['Only no-score', bi.only_no_score],
+          ['Other', bi.other]
+        ].filter(([, c]) => c > 0));
+      }
+      barSection('Hottest blinds', bi.hottest_blinds);
+      barSection('Hottest bosses', bi.hottest_bosses);
+      barSection('Reasons', bi.reasons_top);
       full.appendChild(sec.section);
     }
 
     for (const tbl of d.supplementary_tables || []) {
       if (!tbl.rows || !tbl.rows.length) continue;
       const sec = card(tbl.title, 'From aggregate.maps');
-      addTable(sec.body,
-        [
-          { label: 'Key', sort: 'str', sortDefault: 'asc' },
-          { label: 'Σ', sort: 'num', align: 'right',
-            help: 'Sum of this counter across all runs in the batch (see table title).' }
-        ],
-        tbl.rows.map((row) => ({
-          cells: [row.name, String(row.count)],
-          keys: [row.name.toLowerCase(), row.count]
-        })));
+      renderHorizontalBars(sec.body, namedCountToBars(tbl.rows));
       full.appendChild(sec.section);
     }
 

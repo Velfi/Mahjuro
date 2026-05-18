@@ -1,10 +1,9 @@
 //! Talismans — tarot-style consumables that buff every tile in the player's
 //! current hand at once.
 //!
-//! In Balatro, tarots target a few selected cards. Mahjuro's hands are 14
-//! tiles wide, so selecting 1–3 would never feel meaningful. Instead, every
-//! talisman applies its enhancement to the **whole hand**: one click, one big
-//! per-hand swing. The enhancement lives on each [`crate::core::tile::Tile`]
+//! Every talisman applies to the **whole hand** in one click — buff stamps or
+//! suit transforms across all tiles at once. The enhancement lives on each
+//! [`crate::core::tile::Tile`]
 //! while it sits in the hand and is dropped when the tile leaves (played or
 //! discarded).
 //!
@@ -13,7 +12,7 @@
 //! so the player chooses how to spend their consumable budget each round.
 //!
 //! Shop copy, prices, and tablet tint live in `assets/data/talismans.json`.
-//! Behaviour (`enhancement`, selection transforms) stays in this module.
+//! Behaviour (`enhancement`, hand transforms) stays in this module.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -75,17 +74,17 @@ pub enum TalismanKind {
     Pearl,
     Gilded,
     Polychrome,
-    /// Convert selected numbered tiles to bamboo; winds and dragons unchanged.
+    /// Every numbered tile in hand becomes bamboo; honors unchanged.
     Bamboo,
-    /// Convert selected numbered tiles to dots; honors unchanged.
+    /// Every numbered tile in hand becomes dots; honors unchanged.
     Dots,
-    /// Convert selected numbered tiles to characters; honors unchanged.
+    /// Every numbered tile in hand becomes characters; honors unchanged.
     Characters,
-    /// Convert selected numbered tiles to random honors; honors unchanged.
+    /// Every numbered tile in hand becomes a random honor; honors unchanged.
     Honors,
-    /// Convert every selected tile to a flower tile.
+    /// Every tile in hand becomes a flower tile.
     Wildflower,
-    /// Make every selected tile a copy of a random tile already in the hand.
+    /// Every tile in hand becomes a copy of a random tile already in hand.
     Conformity,
 }
 
@@ -102,20 +101,6 @@ impl TalismanKind {
             TalismanKind::Wildflower,
             TalismanKind::Conformity,
         ]
-    }
-
-    /// Talismans that apply to the current hand selection (at least one tile
-    /// must be selected to use).
-    pub fn acts_on_selection(self) -> bool {
-        matches!(
-            self,
-            TalismanKind::Bamboo
-                | TalismanKind::Dots
-                | TalismanKind::Characters
-                | TalismanKind::Honors
-                | TalismanKind::Wildflower
-                | TalismanKind::Conformity
-        )
     }
 
     pub fn name(self) -> &'static str {
@@ -150,7 +135,7 @@ impl TalismanKind {
         talisman_presentation(self).accent
     }
 
-    /// Flat shop price in gold. Suit / transform selection talismans share one tier.
+    /// Flat shop price in gold. Suit / transform talismans share one tier.
     pub fn shop_price(self) -> u32 {
         talisman_presentation(self).shop_price
     }

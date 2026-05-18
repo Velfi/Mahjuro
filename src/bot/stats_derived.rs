@@ -1,15 +1,18 @@
 //! Build export `derived` views from [`AggregateStats`] (schema v3+).
 
 use super::export_schema::{
-    AggregateMaps, AggregateSums, AvgTurnsClearRow, BotAggregateV2, BotIssuesDerived,
-    BotReportDerived, DeathAnteHazardRow, DeathAnteRow, KpiTile, LossBreakdownDerived, MapTable,
-    NamedCount, NamedCountPct, NamedPerRun, PerRunAverages, RelicBuyRow, RelicShopTimingRow,
-    RelicWinRateRow, SurplusSlotRow, WilsonCiPct, YakuDerived, YakuRow,
+    AggregateMaps, AggregateSums, AvgTurnsClearRow, BossBlindChartRow, BotAggregateV2,
+    BotIssuesDerived, BotReportDerived, DeathAnteHazardRow, DeathAnteRow, DistributionCandleRow,
+    KpiTile, LossBreakdownDerived, MapTable, NamedCount, NamedCountPct, NamedPerRun,
+    PerRunAverages, RelicBuyRow, RelicShopTimingRow, RelicWinRateRow, SurplusSlotRow,
+    WilsonCiPct, YakuDerived, YakuRow,
 };
+use crate::core::blind_target::{TARGET_SCALING, score_for};
+use crate::core::rules::BlindKind;
 use super::reporting::human_readable_score;
 use super::stats::{
     AggregateStats, MIN_SHOP_TIMING_SPLIT_PER_BUCKET, RELIC_SHOP_TIMING_EARLY_ANTE_MAX,
-    aggregate_stats_slot_sort_key,
+    RunStats, aggregate_stats_slot_sort_key,
 };
 use super::stats_wilson::wilson_95_pct;
 use crate::core::relic::{Rarity, all_relic_defs};
@@ -186,7 +189,186 @@ pub fn aggregate_to_v2(a: &AggregateStats) -> BotAggregateV2 {
     }
 }
 
-pub fn derived_from_aggregate(a: &AggregateStats, yaku_kind_count: usize) -> BotReportDerived {
+fn percentile(sorted: &[f64], p: f64) -> f64 {
+    let n = sorted.len();
+    if n == 0 {
+        return 0.0;
+    }
+    if n == 1 {
+        return sorted[0];
+    }
+    let idx = p * (n - 1) as f64;
+    let lo = idx.floor() as usize;
+    let hi = idx.ceil() as usize;
+    if lo == hi {
+        sorted[lo]
+    } else {
+        let t = idx - lo as f64;
+        sorted[lo].mul_add(1.0 - t, sorted[hi] * t)
+    }
+}
+
+fn distribution_candle(samples: &[f64]) -> Option<(f64, f64, f64, f64)> {
+    if samples.is_empty() {
+        return None;
+    }
+    let mut v: Vec<f64> = samples.to_vec();
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let low = v[0];
+    let high = v[v.len() - 1];
+    let open = percentile(&v, 0.25);
+    let close = percentile(&v, 0.75);
+    Some((open, high, low, close))
+}
+
+fn slot_label_compact(slot: &str) -> String {
+    let (ante_str, rest) = slot.split_once('-').unwrap_or((slot, ""));
+    let ante = ante_str.parse::<u32>().unwrap_or(0);
+    let blind = match rest.trim() {
+        "Small Blind" => "S",
+        "Big Blind" => "B",
+        "Boss Blind" => "X",
+        other => {
+            if other.is_empty() {
+                "?"
+            } else {
+                return format!("A{ante} {other}");
+            }
+        }
+    };
+    format!("A{ante} {blind}")
+}
+
+fn build_surplus_candles(runs: &[RunStats]) -> Vec<DistributionCandleRow> {
+    if runs.is_empty() {
+        return Vec::new();
+    }
+    let mut slots: Vec<String> = runs
+        .iter()
+        .flat_map(|s| s.cleared_by_slot.keys())
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    slots.sort_by(|a, b| aggregate_stats_slot_sort_key(a).cmp(&aggregate_stats_slot_sort_key(b)));
+
+    let mut rows = Vec::new();
+    for slot in slots {
+        let samples: Vec<f64> = runs
+            .iter()
+            .filter_map(|s| {
+                let clears = *s.cleared_by_slot.get(&slot)?;
+                if clears == 0 {
+                    return None;
+                }
+                let over = *s.overscore_by_slot.get(&slot).unwrap_or(&0);
+                Some(over as f64 / clears as f64)
+            })
+            .collect();
+        let Some((open, high, low, close)) = distribution_candle(&samples) else {
+            continue;
+        };
+        rows.push(DistributionCandleRow {
+            label: slot_label_compact(&slot),
+            n: samples.len() as u32,
+            open,
+            high,
+            low,
+            close,
+            target: None,
+        });
+    }
+    rows
+}
+
+fn build_boss_score_candles(runs: &[RunStats], base_target: u32) -> Vec<DistributionCandleRow> {
+    if runs.is_empty() {
+        return Vec::new();
+    }
+    let max_ante = runs
+        .iter()
+        .flat_map(|s| s.boss_attempts_by_ante.keys().copied())
+        .chain(runs.iter().map(|s| s.died_on_ante))
+        .max()
+        .unwrap_or(0);
+    if max_ante == 0 {
+        return Vec::new();
+    }
+
+    let mut rows = Vec::new();
+    for ante in 1..=max_ante {
+        let samples: Vec<f64> = runs
+            .iter()
+            .filter_map(|s| {
+                let attempts = *s.boss_attempts_by_ante.get(&ante)?;
+                if attempts == 0 {
+                    return None;
+                }
+                let score = *s.boss_score_by_ante.get(&ante).unwrap_or(&0);
+                Some(score as f64 / attempts as f64)
+            })
+            .collect();
+        let Some((open, high, low, close)) = distribution_candle(&samples) else {
+            continue;
+        };
+        rows.push(DistributionCandleRow {
+            label: format!("Ante {ante}"),
+            n: samples.len() as u32,
+            open,
+            high,
+            low,
+            close,
+            target: Some(score_for(ante, BlindKind::Boss, base_target) as f64),
+        });
+    }
+    rows
+}
+
+fn build_boss_blind_chart(a: &AggregateStats, base_target: u32) -> Vec<BossBlindChartRow> {
+    let max_ante = a
+        .max_ante_reached
+        .max(a.boss_attempts_by_ante.keys().max().copied().unwrap_or(0))
+        .max(a.deaths_by_ante.keys().max().copied().unwrap_or(0));
+    if max_ante == 0 {
+        return Vec::new();
+    }
+
+    let mut scratch: Vec<(u32, u32, f64, u32)> = Vec::new();
+    let mut scale_max = 1u64;
+    for ante in 1..=max_ante {
+        let target = score_for(ante, BlindKind::Boss, base_target);
+        let attempts = *a.boss_attempts_by_ante.get(&ante).unwrap_or(&0);
+        let avg_score = if attempts > 0 {
+            *a.boss_score_by_ante.get(&ante).unwrap_or(&0) as f64 / attempts as f64
+        } else {
+            0.0
+        };
+        scale_max = scale_max
+            .max(target as u64)
+            .max(avg_score.round() as u64);
+        scratch.push((ante, target, avg_score, attempts));
+    }
+
+    let scale = scale_max.max(1) as f64;
+    scratch
+        .into_iter()
+        .map(|(ante, target, avg_score, attempts)| BossBlindChartRow {
+            ante,
+            target,
+            avg_score,
+            attempts,
+            target_bar_pct: (target as f64 / scale * 100.0).min(100.0),
+            avg_bar_pct: (avg_score / scale * 100.0).min(100.0),
+        })
+        .collect()
+}
+
+pub fn derived_from_batch(
+    a: &AggregateStats,
+    runs: &[RunStats],
+    yaku_kind_count: usize,
+    base_target: u32,
+) -> BotReportDerived {
     if a.runs == 0 {
         return BotReportDerived::default();
     }
@@ -215,6 +397,17 @@ pub fn derived_from_aggregate(a: &AggregateStats, yaku_kind_count: usize) -> Bot
         relics_bought: a.total_relics_bought as f64 / r,
         gold_spent: a.total_gold_spent as f64 / r,
         gold_from_clears: a.total_gold_from_clears as f64 / r,
+        gold_per_blind_cleared: if a.blinds_cleared_total == 0 {
+            0.0
+        } else {
+            a.total_gold_from_clears as f64 / a.blinds_cleared_total as f64
+        },
+        gold_per_blind_incl_skips: if a.blinds_cleared_total == 0 {
+            0.0
+        } else {
+            (a.total_gold_from_clears + a.total_gold_from_skip_tags) as f64
+                / a.blinds_cleared_total as f64
+        },
         gold_from_skip_tags: a.total_gold_from_skip_tags as f64 / r,
         skip_tag_gold_value: a.total_skip_tag_gold_value as f64 / r,
         gold_clear_base: a.total_gold_from_clear_base as f64 / r,
@@ -379,6 +572,10 @@ pub fn derived_from_aggregate(a: &AggregateStats, yaku_kind_count: usize) -> Bot
         })
         .collect();
     blind_rows.sort_by(|x, y| y.count.cmp(&x.count).then_with(|| x.name.cmp(&y.name)));
+
+    let boss_blind_chart = build_boss_blind_chart(a, base_target);
+    let surplus_candles = build_surplus_candles(runs);
+    let boss_score_candles = build_boss_score_candles(runs, base_target);
 
     let mut surplus_tuples: Vec<(String, u64, f64)> = a
         .cleared_by_slot
@@ -755,7 +952,11 @@ pub fn derived_from_aggregate(a: &AggregateStats, yaku_kind_count: usize) -> Bot
         deaths_by_ante,
         deaths_by_ante_hazard,
         deaths_by_blind: blind_rows,
+        boss_blind_chart,
+        target_scaling: TARGET_SCALING,
         surplus_by_slot,
+        surplus_candles,
+        boss_score_candles,
         avg_turns_to_clear,
         skip_tags,
         consumable_zodiacs: zod,

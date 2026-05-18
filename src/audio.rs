@@ -146,6 +146,23 @@ impl MusicId {
     }
 }
 
+/// Looping scene ambience (under `assets/audio/ambient/`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AmbientId {
+    MainMenuRain,
+}
+
+impl AmbientId {
+    fn asset_path(self) -> &'static str {
+        match self {
+            AmbientId::MainMenuRain => "audio/ambient/main_menu_rain.ogg",
+        }
+    }
+}
+
+/// Scales [`AmbientId::MainMenuRain`] under main-menu BGM.
+const AMBIENT_RAIN_GAIN: f32 = 0.32;
+
 /// Loops a decoded clip without `repeat_infinite`'s extra buffering (important
 /// for long stereo tracks).
 struct LoopingPcmSource {
@@ -568,6 +585,10 @@ pub struct AudioManager {
     /// Background track to start once the active jingle finishes. `None`
     /// means "stop music when the jingle ends".
     pending_post_jingle_music: Option<MusicId>,
+    ambient_data: FxHashMap<AmbientId, Arc<PcmClip>>,
+    /// Dedicated sink for looping environmental beds (separate from BGM + SFX).
+    ambient_sink: Option<Sink>,
+    ambient_active: Option<AmbientId>,
 }
 
 impl AudioManager {
@@ -634,6 +655,9 @@ impl AudioManager {
             music_active_id: None,
             jingle_active: false,
             pending_post_jingle_music: None,
+            ambient_data: FxHashMap::default(),
+            ambient_sink: None,
+            ambient_active: None,
         }
     }
 
@@ -741,11 +765,13 @@ impl AudioManager {
     pub fn set_master_volume(&mut self, vol: f32) {
         self.master_volume = vol.clamp(0.0, 1.0);
         self.refresh_music_sink_volume();
+        self.refresh_ambient_sink_volume();
     }
 
     /// Set the sound effects volume (0.0 to 1.0).
     pub fn set_sfx_volume(&mut self, vol: f32) {
         self.sfx_volume = vol.clamp(0.0, 1.0);
+        self.refresh_ambient_sink_volume();
     }
 
     /// Set the music volume (0.0 to 1.0).
@@ -760,6 +786,13 @@ impl AudioManager {
             return;
         }
         self.sfx_enabled = enabled;
+        if enabled {
+            if let Some(id) = self.ambient_active {
+                self.start_ambient_track(id);
+            }
+        } else {
+            self.stop_ambient_sink();
+        }
     }
 
     fn refresh_music_sink_volume(&mut self) {
@@ -878,5 +911,82 @@ impl AudioManager {
         sink.append(source);
         self.music_sink = Some(sink);
         self.music_active_id = Some(id);
+    }
+
+    /// Start or stop a looping environmental bed. `None` stops any active ambient.
+    pub fn set_ambient_track(&mut self, id: Option<AmbientId>) {
+        match id {
+            Some(id) => self.start_ambient_track(id),
+            None => self.stop_ambient_track(),
+        }
+    }
+
+    fn ensure_ambient_loaded(&mut self, id: AmbientId) {
+        if self.ambient_data.contains_key(&id) {
+            return;
+        }
+        let path = id.asset_path();
+        if let Some(file) = crate::asset_path::get(path)
+            && let Some(clip) = decode_rodio(path, file.data.as_ref()) {
+                log::debug!("Loaded ambient {path} ({id:?})");
+                self.ambient_data.insert(id, clip);
+            }
+    }
+
+    fn ambient_effective_volume(&self) -> f32 {
+        if !self.sfx_enabled {
+            return 0.0;
+        }
+        self.master_volume * self.sfx_volume * AMBIENT_RAIN_GAIN
+    }
+
+    fn refresh_ambient_sink_volume(&mut self) {
+        let Some(sink) = self.ambient_sink.as_ref() else {
+            return;
+        };
+        sink.set_volume(self.ambient_effective_volume());
+    }
+
+    fn stop_ambient_sink(&mut self) {
+        if let Some(sink) = self.ambient_sink.take() {
+            sink.stop();
+        }
+    }
+
+    fn stop_ambient_track(&mut self) {
+        self.ambient_active = None;
+        self.stop_ambient_sink();
+    }
+
+    fn start_ambient_track(&mut self, id: AmbientId) {
+        self.ambient_active = Some(id);
+        if !self.sfx_enabled {
+            self.stop_ambient_sink();
+            return;
+        }
+        self.ensure_ambient_loaded(id);
+        let Some(clip) = self.ambient_data.get(&id).cloned() else {
+            log::debug!("start_ambient_track({id:?}): no data");
+            return;
+        };
+        let Some(handle) = &self.handle else {
+            return;
+        };
+        if let Some(sink) = self.ambient_sink.as_ref()
+            && !sink.empty() && self.ambient_active == Some(id) {
+                self.refresh_ambient_sink_volume();
+                return;
+            }
+        if let Some(sink) = self.ambient_sink.take() {
+            sink.stop();
+        }
+        let Ok(sink) = Sink::try_new(handle) else {
+            log::warn!("start_ambient_track({id:?}): sink creation failed");
+            return;
+        };
+        sink.set_volume(self.ambient_effective_volume());
+        sink.append(LoopingPcmSource::new(clip));
+        self.ambient_sink = Some(sink);
+        self.ambient_active = Some(id);
     }
 }

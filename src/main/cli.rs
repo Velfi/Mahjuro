@@ -19,7 +19,6 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     Bot(BotCli),
-    BotGraph(BotGraphCli),
     Sweep(SweepCli),
     StrategySweep(StrategySweepCli),
     ForcedRelicSweep(ForcedRelicSweepCli),
@@ -33,7 +32,7 @@ pub enum Command {
     /// Use `--scene showcase` without `--pack` for the zodiac ribbon (same as `zodiac_celebration`).
     /// Use `--scene game_over_level_up` for meta profile level-up (`Showcase` / `MetaLevelUpPresenter`).
     Screenshot(ScreenshotCli),
-    /// Bake offline emissive probe SH for a static room GLB (shop / hallway / archive).
+    /// Bake offline emissive probe SH for a static room GLB (shop / hallway / archive / main menu).
     ///
     /// Writes `assets/data/room_gi/<room>.mgi` for packaging into the gameplay asset pack.
     /// Prefer **`cargo build --release`** — same cold-start cost as `screenshot`.
@@ -46,7 +45,7 @@ pub enum Command {
 /// Offline probe GI bake at the resting room camera (1920×1080 by default).
 #[derive(Debug, Args)]
 pub struct BakeRoomGiCli {
-    /// Room to bake: `shop`, `hallway`, or `archive`.
+    /// Room to bake: `shop`, `hallway`, `archive`, or `main_menu`.
     pub room: String,
     #[arg(long, default_value = "assets/data/room_gi")]
     pub output_dir: PathBuf,
@@ -140,8 +139,6 @@ pub struct BotCli {
     #[arg(long)]
     pub base_target: Option<u32>,
     #[arg(long)]
-    pub target_scale: Option<f32>,
-    #[arg(long)]
     pub plays: Option<u32>,
     #[arg(long)]
     pub discards: Option<u32>,
@@ -203,40 +200,10 @@ pub struct ForcedRelicSweepCli {
     pub export_json: Option<PathBuf>,
 }
 
-#[derive(Debug, Args)]
-pub struct BotGraphCli {
-    #[arg(default_value_t = 10_000)]
-    pub runs: u32,
-    #[arg(long)]
-    pub slug: Option<String>,
-    #[arg(long)]
-    pub label: Option<String>,
-    #[arg(long)]
-    pub base_target: Option<u32>,
-    #[arg(long)]
-    pub target_scale: Option<f32>,
-    #[arg(long)]
-    pub plays: Option<u32>,
-    #[arg(long)]
-    pub discards: Option<u32>,
-    #[arg(long)]
-    pub gold: Option<u32>,
-    /// Difficulty stake for the balance snapshot.
-    #[arg(long)]
-    pub stake: Option<crate::core::stake::Stake>,
-    #[arg(long, action = ArgAction::SetTrue)]
-    pub bot_log: bool,
-    #[arg(long, default_value_t = 0)]
-    pub bot_run_timeout_secs: u32,
-    #[arg(long, default_value_t = 1)]
-    pub timeout_retries: u32,
-}
-
 impl BotCli {
     pub fn bot_config(&self) -> bot::BotConfig {
         bot::BotConfig {
             base_target: self.base_target,
-            target_scaling: self.target_scale,
             starting_plays: self.plays,
             starting_discards: self.discards,
             starting_gold: self.gold,
@@ -291,32 +258,3 @@ impl StrategySweepCli {
     }
 }
 
-impl BotGraphCli {
-    pub fn bot_config(&self) -> bot::BotConfig {
-        bot::BotConfig {
-            base_target: self.base_target,
-            target_scaling: self.target_scale,
-            starting_plays: self.plays,
-            starting_discards: self.discards,
-            starting_gold: self.gold,
-            stake: self.stake,
-            ..Default::default()
-        }
-    }
-
-    pub fn bot_run_options(&self) -> bot::BotRunOptions {
-        bot::BotRunOptions {
-            log: self.bot_log,
-            output: None,
-            output_runs: None,
-            run_timeout: if self.bot_run_timeout_secs == 0 {
-                None
-            } else {
-                Some(std::time::Duration::from_secs(
-                    self.bot_run_timeout_secs as u64,
-                ))
-            },
-            timeout_retries: self.timeout_retries,
-        }
-    }
-}

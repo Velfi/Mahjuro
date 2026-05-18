@@ -1,3 +1,4 @@
+pub mod blind_target;
 pub mod boss;
 pub mod consumable;
 pub mod debuff;
