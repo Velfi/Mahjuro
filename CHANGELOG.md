@@ -7,6 +7,11 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.5.0-12 — 2026-05-19
+
+### Fixed
+- Steam Deck game mode no longer caps the game to ~10 FPS. The Vulkan swapchain latency clamp was meant only for Windows AMD drivers; on Linux it forced a 2-image swapchain that gamescope's nested compositor could throttle to its own pacing.
+
 ## 0.5.0-11 — 2026-05-18
 
 ### Added
