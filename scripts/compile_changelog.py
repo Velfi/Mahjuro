@@ -6,7 +6,8 @@ Usage:
 
 On success:
   - Prepends a new `## <version> — <date>` section to CHANGELOG.md (creating
-    the file if absent).
+    the file if absent). With no `.changes/*.md` files, the section contains a
+    single placeholder line for non-user-facing releases.
   - Deletes the fragment files (unless --keep-fragments is passed).
 """
 
@@ -47,13 +48,6 @@ def main() -> int:
     args = parser.parse_args()
 
     fragments = load_fragments()
-    if not fragments:
-        print("error: no changelog fragments in .changes/", file=sys.stderr)
-        print(
-            "       add at least one `.changes/<slug>.md` before releasing",
-            file=sys.stderr,
-        )
-        return 1
 
     heading = f"{args.version} — {args.date}"
     new_section = render_section(heading, fragments)
@@ -81,10 +75,16 @@ def main() -> int:
         for fragment in fragments:
             fragment.path.unlink()
 
-    print(
-        f"compiled {len(fragments)} fragment(s) into {CHANGELOG_PATH.name} "
-        f"under '{heading}'"
-    )
+    if fragments:
+        print(
+            f"compiled {len(fragments)} fragment(s) into {CHANGELOG_PATH.name} "
+            f"under '{heading}'"
+        )
+    else:
+        print(
+            f"no fragments in .changes/ — appended placeholder entry to "
+            f"{CHANGELOG_PATH.name} under '{heading}'"
+        )
     return 0
 
 
