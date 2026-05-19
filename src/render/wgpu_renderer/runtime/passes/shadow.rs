@@ -43,7 +43,8 @@ impl WgpuRenderer {
         let shop_inspect_shadow_only = frame.shop_inspect_shadow_target.is_some();
 
         // Imported room GLB — opaque primitives only (blend/glass skipped).
-        match super::shadow_setup::active_room_env(frame) {
+        let active_room_env = super::shadow_setup::active_room_env(frame);
+        match active_room_env {
             Some(ActiveRoomEnv::Shop) if !shop_inspect_shadow_only => {
                 if let Some(ref gpu) = self.shop_environment {
                     self.draw_gltf_room_env_shadow(
@@ -88,14 +89,19 @@ impl WgpuRenderer {
             None => {}
         }
 
-        shadow_pass.set_pipeline(&self.shadow_pipeline);
-        for &(kind, slot_i) in object3d_draw_list {
-            if shop_inspect_shadow_only
-                && self.shop_inspect_subject_shadow_slot != Some((kind, slot_i))
-            {
-                continue;
+        // Archive catalog props are mounted inside authored cubbies and in front of
+        // readable sign boards. Let the room cast shadows, but don't project the
+        // whole relic grid back onto the description sign.
+        if !matches!(active_room_env, Some(ActiveRoomEnv::Archive)) {
+            shadow_pass.set_pipeline(&self.shadow_pipeline);
+            for &(kind, slot_i) in object3d_draw_list {
+                if shop_inspect_shadow_only
+                    && self.shop_inspect_subject_shadow_slot != Some((kind, slot_i))
+                {
+                    continue;
+                }
+                self.draw_object3d_shadow_entry(&mut shadow_pass, frame, kind, slot_i);
             }
-            self.draw_object3d_shadow_entry(&mut shadow_pass, frame, kind, slot_i);
         }
 
         // Hand tiles — one draw per (tile, primitive). Same multi-prim
@@ -113,6 +119,7 @@ impl WgpuRenderer {
                     continue;
                 };
                 shadow_pass.set_bind_group(0, &htg.shadow_bind_group, &[]);
+                shadow_pass.set_bind_group(1, &self.shadow_warp_disabled_bind_group, &[]);
                 shadow_pass.draw_indexed(0..self.tile_outline_index_count, 0, 0..1);
             }
 
@@ -127,6 +134,7 @@ impl WgpuRenderer {
                     break;
                 };
                 shadow_pass.set_bind_group(0, &stg.shadow_bind_group, &[]);
+                shadow_pass.set_bind_group(1, &self.shadow_warp_disabled_bind_group, &[]);
                 shadow_pass.draw_indexed(0..self.tile_outline_index_count, 0, 0..1);
             }
         }
@@ -296,10 +304,8 @@ impl WgpuRenderer {
                         _ => None,
                     })
                     .nth(slot_i);
-                let (Some(lbl), Some(inst)) = (
-                    label,
-                    self.extruded_glyph_instances.get(slot_i),
-                ) else {
+                let (Some(lbl), Some(inst)) = (label, self.extruded_glyph_instances.get(slot_i))
+                else {
                     return;
                 };
                 let Some(mesh) = self.extruded_glyph_meshes.get(lbl) else {
@@ -329,11 +335,9 @@ impl WgpuRenderer {
         inst: &LitMeshInstance,
     ) {
         pass.set_bind_group(0, &inst.shadow_bind_group, &[]);
+        pass.set_bind_group(1, &self.shadow_warp_disabled_bind_group, &[]);
         pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-        pass.set_index_buffer(
-            mesh.index_buffer.slice(..),
-            wgpu::IndexFormat::Uint32,
-        );
+        pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..mesh.index_count, 0, 0..1);
     }
 }

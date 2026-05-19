@@ -223,7 +223,6 @@ impl GameplayCoreState {
         self.structure_sets.clear();
         self.structure_tiles.clear();
     }
-
 }
 
 #[cfg(test)]

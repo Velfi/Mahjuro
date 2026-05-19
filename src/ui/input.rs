@@ -809,7 +809,8 @@ impl InputState {
             let ks = shell.pump.keyboard_state();
             let shift = ks.is_scancode_pressed(Scancode::LShift)
                 || ks.is_scancode_pressed(Scancode::RShift);
-            let up_orbit = ks.is_scancode_pressed(Scancode::Up) || ks.is_scancode_pressed(Scancode::W);
+            let up_orbit =
+                ks.is_scancode_pressed(Scancode::Up) || ks.is_scancode_pressed(Scancode::W);
             let down_orbit =
                 ks.is_scancode_pressed(Scancode::Down) || ks.is_scancode_pressed(Scancode::S);
             if shift {

@@ -21,8 +21,7 @@ pub fn push_wall_remaining_hud(
     let count_text = format!("{}", tiles_left);
     let h_px = font_px.max(1.0).round().max(1.0) as u32;
     let text_w = if let Some(ref font) = load_ui_font() {
-        let (_, _, advances) =
-            measure_label_advances(font, &count_text, 8192, h_px, Some(font_px));
+        let (_, _, advances) = measure_label_advances(font, &count_text, 8192, h_px, Some(font_px));
         advances.iter().sum::<f32>().max(font_px * 1.1)
     } else {
         font_px * count_text.chars().count().max(1) as f32 * 0.62
@@ -35,7 +34,12 @@ pub fn push_wall_remaining_hud(
     let block_top = window_h - margin_y - block_h;
 
     frame.quad(GpuInstance {
-        rect: [block_left - 4.0, block_top - 3.0, block_w + 8.0, block_h + 7.0],
+        rect: [
+            block_left - 4.0,
+            block_top - 3.0,
+            block_w + 8.0,
+            block_h + 7.0,
+        ],
         color: color::alpha(color::LACQUER, 0.42),
         user: 0,
     });
@@ -79,12 +83,7 @@ fn push_wall_tile_icon(frame: &mut UiFrame, left: f32, top: f32, tile_w: f32, ti
     let back = [0.86, 0.81, 0.69, 1.0];
     let offset = tile_w * 0.14;
     frame.quad(GpuInstance {
-        rect: [
-            left + offset * 0.5,
-            top - offset * 0.35,
-            tile_w,
-            tile_h,
-        ],
+        rect: [left + offset * 0.5, top - offset * 0.35, tile_w, tile_h],
         color: color::alpha(color::WALNUT_INK, 0.35),
         user: 0,
     });

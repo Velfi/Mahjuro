@@ -113,14 +113,16 @@ fn resolve_pack_dir() -> Option<PathBuf> {
         // `cargo test`: exe is under `target/.../deps/`; build.rs writes packs in the parent profile dir.
         if dir.file_name() == Some(std::ffi::OsStr::new("deps"))
             && let Some(parent) = dir.parent()
-                && parent.join(MANIFEST_NAME).is_file() {
-                    return Some(parent.to_path_buf());
-                }
+            && parent.join(MANIFEST_NAME).is_file()
+        {
+            return Some(parent.to_path_buf());
+        }
         if let Ok(exe) = std::env::current_exe()
             && let Some(res) = macos_resources_dir(&exe)
-                && res.join(MANIFEST_NAME).is_file() {
-                    return Some(res);
-                }
+            && res.join(MANIFEST_NAME).is_file()
+        {
+            return Some(res);
+        }
     }
     None
 }
@@ -235,11 +237,12 @@ fn index_archive(archive: &mut zip::ZipArchive<File>, pack_idx: usize, index: &m
         }
         let lk = normalize_lookup_key(&name);
         if let Some((prev, _)) = index.insert(lk.clone(), (pack_idx, name.clone()))
-            && prev != pack_idx {
-                log::warn!(
-                    "duplicate asset key after case-fold: {lk} (pack indices {prev} vs {pack_idx})"
-                );
-            }
+            && prev != pack_idx
+        {
+            log::warn!(
+                "duplicate asset key after case-fold: {lk} (pack indices {prev} vs {pack_idx})"
+            );
+        }
     }
 }
 

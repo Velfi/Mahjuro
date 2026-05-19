@@ -62,12 +62,16 @@ use crate::ui::layout::LayoutResult;
 /// Per-element visibility flags driven by the debug visibility modal.
 /// Plumbed through `DrawCtx` so scenes can skip pushing draw cmds at the
 /// call site (necessary for elements that share a `DrawCmd` variant — e.g.
-/// the blind plaque vs. the scoring placard, both of which are
-/// `DrawCmd::Plaque(_)` and so can't be told apart by a post-process filter).
+/// multiple plaques that are both `DrawCmd::Plaque(_)` and so can't be told
+/// apart by a post-process filter).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DebugVisibility {
     pub hide_candles: bool,
     pub hide_blind_plaque: bool,
+    /// When true, skip the gameplay score counter assembly (the prop that
+    /// replaced the legacy blind plaque mesh). Plumbed from the debug
+    /// visibility modal alongside `hide_blind_plaque` for separate toggles.
+    pub hide_scoring_placard: bool,
 }
 
 /// Which background image to display behind the scene.
@@ -198,11 +202,10 @@ pub struct UpdateCtx<'a> {
     pub suspended_shop: Option<&'a ShopScene>,
     /// Same as [`DrawCtx::room_gltf_height_scale`] — vertical scale for embedded glTF rooms vs window height.
     pub room_gltf_height_scale: f32,
-    /// Main-menu rain vignette + CPU field tuning (from renderer / debug overlay).
-    pub rain_tuning: crate::render::rain_tuning::RainTuning,
     /// Archive scene sets this to `Some(progress.run_history.len())` when the count changes so
     /// the app can persist per-profile "seen" state for menu hints.
     pub bump_archive_chronicle_seen: &'a mut Option<u32>,
+    pub rain_tuning: crate::render::rain_tuning::RainTuning,
 }
 
 /// Pushdown-stack action a scene's `update()` can request. Scenes do this

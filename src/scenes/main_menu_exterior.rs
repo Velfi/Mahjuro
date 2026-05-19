@@ -10,8 +10,8 @@ use crate::game::event_bus::GameEvent;
 use crate::game::run::RunState;
 use crate::persistence::{self, ResumeScene, TileMaterial};
 use crate::render::draw_cmd::{ImageQuad, ImageQuadSource, ScenePunctualLight, UiFrame};
-use crate::render::rain_field::RainField;
 use crate::render::main_menu_glb;
+use crate::render::rain_field::RainField;
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::ui::focus_nav::{self, FocusDir};
@@ -27,7 +27,7 @@ use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransit
 
 const MAIN_MENU_LOGO_ASSET: &str = "textures/main_menu_logo.png";
 
-/// 3D rain quads when the field is on; optional procedural vignette when it is off.
+/// CPU world rain streaks + splashes (see [`RainField`]).
 fn push_main_menu_rain(
     frame: &mut UiFrame,
     rain_field: &RainField,
@@ -39,13 +39,10 @@ fn push_main_menu_rain(
     if !ctx.effect_layers.rain {
         return;
     }
-    if !ctx.rain_tuning.field_active() {
-        frame.rain();
-    }
     let cam = frame
         .camera_override
         .unwrap_or_else(|| main_menu_glb::main_menu_camera_base(w, h, env_scale));
-    rain_field.push_quads(frame, &cam, w, h);
+    rain_field.push_quads(frame, &cam, w, h, ctx.rain_tuning.field.streak_len_px);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -212,10 +209,7 @@ impl MainMenuExteriorScene {
         let logo_by_h = h * 0.5;
         let logo_by_w = (w - 2.0 * margin_x) * 0.42;
         let logo_room = (max_block_h - menu_stack_h).max(row_h * 2.0);
-        let logo_size = logo_by_h
-            .min(logo_by_w)
-            .min(logo_room)
-            .max(96.0 * scale);
+        let logo_size = logo_by_h.min(logo_by_w).min(logo_room).max(96.0 * scale);
         let block_h = logo_size + menu_stack_h;
         let logo_y = ((h - block_h) * 0.5).max(margin_y);
         let logo_x = margin_x;
@@ -255,19 +249,11 @@ impl SceneBehavior for MainMenuExteriorScene {
         if ctx.effect_layers.rain {
             let w = ctx.layout.window_w;
             let h = ctx.layout.window_h;
-            let env_scale =
-                main_menu_glb::main_menu_env_height_scale(ctx.room_gltf_height_scale);
+            let env_scale = main_menu_glb::main_menu_env_height_scale(ctx.room_gltf_height_scale);
             let cam = main_menu_glb::main_menu_camera_base(w, h, env_scale);
             let meshes = main_menu_glb::main_menu_rain_surface_meshes();
-            self.rain_field.update(
-                dt,
-                &ctx.rain_tuning,
-                &cam,
-                w,
-                h,
-                env_scale,
-                &meshes,
-            );
+            self.rain_field
+                .update(dt, &ctx.rain_tuning, &cam, w, h, env_scale, &meshes);
         }
         let in_progress = GameEngine::run_in_progress(ctx.run);
         let items = menu_items(in_progress, ctx.progress);
@@ -287,9 +273,10 @@ impl SceneBehavior for MainMenuExteriorScene {
             };
 
         if ctx.input_mode == crate::ui::input::InputMode::Cursor
-            && let Some(m) = pointer_pick {
-                self.focus = Some(m);
-            }
+            && let Some(m) = pointer_pick
+        {
+            self.focus = Some(m);
+        }
 
         let mut activated = false;
         for action in ctx.actions {
@@ -297,20 +284,20 @@ impl SceneBehavior for MainMenuExteriorScene {
                 UiAction::FocusUp | UiAction::FocusPrev => {
                     if let Some(cur) = self.focus
                         && let Some(&(_, rect)) = focus_rects.iter().find(|(t, _)| *t == cur)
-                            && let Some(next) =
-                                focus_nav::pick_neighbor(rect, FocusDir::Up, &focus_rects)
-                            {
-                                self.focus = Some(next);
-                            }
+                        && let Some(next) =
+                            focus_nav::pick_neighbor(rect, FocusDir::Up, &focus_rects)
+                    {
+                        self.focus = Some(next);
+                    }
                 }
                 UiAction::FocusDown | UiAction::FocusNext => {
                     if let Some(cur) = self.focus
                         && let Some(&(_, rect)) = focus_rects.iter().find(|(t, _)| *t == cur)
-                            && let Some(next) =
-                                focus_nav::pick_neighbor(rect, FocusDir::Down, &focus_rects)
-                            {
-                                self.focus = Some(next);
-                            }
+                        && let Some(next) =
+                            focus_nav::pick_neighbor(rect, FocusDir::Down, &focus_rects)
+                    {
+                        self.focus = Some(next);
+                    }
                 }
                 UiAction::Confirm => activated = true,
                 UiAction::Cancel | UiAction::Pause => {
@@ -322,10 +309,11 @@ impl SceneBehavior for MainMenuExteriorScene {
         }
 
         if !ctx.button_clicks.is_empty()
-            && let Some(m) = pointer_pick {
-                self.focus = Some(m);
-                activated = true;
-            }
+            && let Some(m) = pointer_pick
+        {
+            self.focus = Some(m);
+            activated = true;
+        }
 
         if self.focus != prev_focus {
             ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));

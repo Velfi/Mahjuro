@@ -194,9 +194,10 @@ pub(crate) fn sync_ambient_for_scene(audio: &mut crate::audio::AudioManager, tag
 
 pub(crate) fn apply_post_scene_transition_effects(ctx: PostSceneTransitionCtx<'_>) {
     if should_clear_smoke_on_transition(ctx.from, ctx.to)
-        && let Some(r) = ctx.renderer {
-            r.clear_smoke();
-        }
+        && let Some(r) = ctx.renderer
+    {
+        r.clear_smoke();
+    }
     if ctx.to == SceneTag::MainMenuExterior && !ctx.pushed_meta_level_up {
         ctx.audio.play_sfx(crate::audio::SfxId::MainMenuEnter);
     }

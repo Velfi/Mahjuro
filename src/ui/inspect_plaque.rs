@@ -18,10 +18,7 @@ fn estimated_flavor_line_count(
     max_lines: usize,
 ) -> usize {
     let char_count: usize = spans.iter().map(|s| s.text.chars().count()).sum();
-    let explicit_lines: usize = spans
-        .iter()
-        .map(|s| s.text.matches('\n').count() + 1)
-        .sum();
+    let explicit_lines: usize = spans.iter().map(|s| s.text.matches('\n').count() + 1).sum();
     let chars_per_line = (band_w / (body_px * 0.52)).max(18.0) as usize;
     let wrapped_lines = char_count.div_ceil(chars_per_line).max(1);
     explicit_lines.max(wrapped_lines).clamp(1, max_lines)
@@ -149,7 +146,8 @@ pub fn push_focus_tooltip_panel_2d(
         let panel_bottom = top + total_h;
         let ar_right = ar[0] + ar[2];
         let ar_bottom = ar[1] + ar[3];
-        let overlaps = left < ar_right && panel_right > ar[0] && top < ar_bottom && panel_bottom > ar[1];
+        let overlaps =
+            left < ar_right && panel_right > ar[0] && top < ar_bottom && panel_bottom > ar[1];
         if overlaps {
             let left_candidate = ar[0] - panel_w - margin;
             let right_candidate = ar_right + margin;
@@ -250,12 +248,7 @@ pub fn push_floating_relic_flavor_labels(
     let shadow_bottom = top + band_h + pad_bottom * 0.25 + line_step;
     let shadow_top = shadow_bottom - shadow_h;
     gradient_quads.push(GradientQuadInstance {
-        rect: [
-            left - pad_x,
-            shadow_top,
-            band_w + 2.0 * pad_x,
-            shadow_h,
-        ],
+        rect: [left - pad_x, shadow_top, band_w + 2.0 * pad_x, shadow_h],
         color: color::alpha(color::LACQUER, 0.82),
         feather: [0.48, 0.12, 0.0, 0.0],
     });
@@ -347,6 +340,21 @@ pub fn dora_focus_tooltip_strings(
     (title, String::new(), desc)
 }
 
+/// Returns "a" or "an" based on the leading sound of `word`, optionally Title-cased.
+fn indefinite_article(word: &str, capitalize: bool) -> &'static str {
+    let leads_with_vowel = word
+        .chars()
+        .next()
+        .map(|c| matches!(c.to_ascii_lowercase(), 'a' | 'e' | 'i' | 'o' | 'u'))
+        .unwrap_or(false);
+    match (leads_with_vowel, capitalize) {
+        (true, true) => "An",
+        (true, false) => "an",
+        (false, true) => "A",
+        (false, false) => "a",
+    }
+}
+
 /// Title and rules body for the round-wind plinth (cta is always empty).
 pub fn round_wind_focus_tooltip_strings(
     primary: u8,
@@ -364,16 +372,24 @@ pub fn round_wind_focus_tooltip_strings(
         .map(|rank| Tile::new(Suit::Wind, *rank, 0).full_name())
         .collect();
     let title = match names.as_slice() {
-        [one] => format!("a {one} is blowing!"),
-        [a, b] => format!("a {a} and a {b} are blowing!"),
+        [one] => format!("{} {one} is blowing!", indefinite_article(one, true)),
+        [a, b] => format!(
+            "{} {a} and {} {b} are blowing!",
+            indefinite_article(a, true),
+            indefinite_article(b, false),
+        ),
         _ => {
             let last = names.last().expect("non-empty");
             let head = names[..names.len() - 1]
                 .iter()
-                .map(|n| format!("a {n}"))
+                .enumerate()
+                .map(|(i, n)| format!("{} {n}", indefinite_article(n, i == 0)))
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("{head}, and a {last} are blowing!")
+            format!(
+                "{head}, and {} {last} are blowing!",
+                indefinite_article(last, false),
+            )
         }
     };
     (title, String::new(), desc)
@@ -407,10 +423,7 @@ pub fn hand_tile_keyword_lines(
     let face = (tile.suit, tile.rank);
     if dora_faces.contains(&face) {
         use crate::core::scoring::DORA_CHIPS_PER_TILE;
-        lines.push((
-            format!("Dora · +{DORA_CHIPS_PER_TILE} chips"),
-            color::GOLD,
-        ));
+        lines.push((format!("Dora · +{DORA_CHIPS_PER_TILE} chips"), color::GOLD));
     }
 
     if let Some(e) = tile.enhancement {

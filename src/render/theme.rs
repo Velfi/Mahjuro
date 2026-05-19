@@ -257,9 +257,7 @@ pub mod typography {
     }
 
     /// All tiers, largest cap-height → smallest.
-    pub const LADDER: &[f32] = &[
-        H2, H4, H5, H6, H12, H16, H20, H24, H28, H32, H36, H42, H45,
-    ];
+    pub const LADDER: &[f32] = &[H2, H4, H5, H6, H12, H16, H20, H24, H28, H32, H36, H42, H45];
 
     /// Largest [`size`] on the ladder that still fits within `max_px`.
     pub fn tier_at_most(max_px: f32, window_h: f32) -> f32 {
@@ -292,8 +290,12 @@ mod typography_tests {
     #[test]
     fn tier_at_most_picks_largest_fitting_step() {
         let h = 1080.0;
-        assert!((typography::tier_at_most(30.0, h) - typography::size(typography::H36, h)).abs() < 1.0);
-        assert!((typography::tier_at_most(200.0, h) - typography::size(typography::H6, h)).abs() < 1.0);
+        assert!(
+            (typography::tier_at_most(30.0, h) - typography::size(typography::H36, h)).abs() < 1.0
+        );
+        assert!(
+            (typography::tier_at_most(200.0, h) - typography::size(typography::H6, h)).abs() < 1.0
+        );
     }
 }
 

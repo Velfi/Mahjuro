@@ -85,9 +85,9 @@ const PRE_TOTAL_FREEZE_MS: u64 = 70;
 /// Duration of the hand-off tween — the chips/×/mult trio merges into a
 /// single `= TOTAL` label, then physically flies up from under the plaque
 /// into the score reel while the reel ticks up to the new round score.
-const HANDOFF_MS: u64 = 520;
+const HANDOFF_MS: u64 = 540;
 /// Fraction of `HANDOFF_MS` spent on the in-place merge before flight begins.
-const HANDOFF_MERGE_FRAC: f32 = 0.35;
+const HANDOFF_MERGE_FRAC: f32 = 0.33;
 
 impl CascadeTuning {
     pub fn base_hold(&self) -> Duration {

@@ -1010,8 +1010,12 @@ mod tests {
             kind: MeldKind::Triplet,
             tile_ids: vec![0, 1, 2],
         }];
-        assert!(detect_yaku_with_wind(&tiles, &sets, None, None, None).contains(&YakuKind::Yakuhai));
-        assert!(detect_yaku_with_wind(&tiles, &sets, Some(1), None, None).contains(&YakuKind::Yakuhai));
+        assert!(
+            detect_yaku_with_wind(&tiles, &sets, None, None, None).contains(&YakuKind::Yakuhai)
+        );
+        assert!(
+            detect_yaku_with_wind(&tiles, &sets, Some(1), None, None).contains(&YakuKind::Yakuhai)
+        );
     }
 
     #[test]
@@ -1025,8 +1029,13 @@ mod tests {
             kind: MeldKind::Triplet,
             tile_ids: vec![0, 1, 2],
         }];
-        assert!(!detect_yaku_with_wind(&tiles, &sets, Some(1), None, None).contains(&YakuKind::Yakuhai));
-        assert!(detect_yaku_with_wind(&tiles, &sets, Some(1), Some(2), None).contains(&YakuKind::Yakuhai));
+        assert!(
+            !detect_yaku_with_wind(&tiles, &sets, Some(1), None, None).contains(&YakuKind::Yakuhai)
+        );
+        assert!(
+            detect_yaku_with_wind(&tiles, &sets, Some(1), Some(2), None)
+                .contains(&YakuKind::Yakuhai)
+        );
     }
 
     #[test]
@@ -1042,11 +1051,17 @@ mod tests {
             tile_ids: vec![0, 1, 2],
         }];
         // Without wind context, wind triplets don't fire.
-        assert!(!detect_yaku_with_wind(&tiles, &sets, None, None, None).contains(&YakuKind::Yakuhai));
+        assert!(
+            !detect_yaku_with_wind(&tiles, &sets, None, None, None).contains(&YakuKind::Yakuhai)
+        );
         // With matching round wind, fires.
-        assert!(detect_yaku_with_wind(&tiles, &sets, Some(1), None, None).contains(&YakuKind::Yakuhai));
+        assert!(
+            detect_yaku_with_wind(&tiles, &sets, Some(1), None, None).contains(&YakuKind::Yakuhai)
+        );
         // With non-matching round wind, doesn't fire.
-        assert!(!detect_yaku_with_wind(&tiles, &sets, Some(2), None, None).contains(&YakuKind::Yakuhai));
+        assert!(
+            !detect_yaku_with_wind(&tiles, &sets, Some(2), None, None).contains(&YakuKind::Yakuhai)
+        );
     }
 
     #[test]
@@ -1062,7 +1077,9 @@ mod tests {
             kind: MeldKind::Kong,
             tile_ids: vec![0, 1, 2, 3],
         }];
-        assert!(detect_yaku_with_wind(&tiles, &sets, None, None, None).contains(&YakuKind::Yakuhai));
+        assert!(
+            detect_yaku_with_wind(&tiles, &sets, None, None, None).contains(&YakuKind::Yakuhai)
+        );
     }
 
     #[test]

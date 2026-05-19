@@ -4,8 +4,8 @@ use crate::core::hand::DetectedMeld;
 use crate::core::relic::ScoreContext;
 use crate::core::tile::Tile;
 
-use super::effective_relic::EffectiveRelics;
 use super::ScoreStep;
+use super::effective_relic::EffectiveRelics;
 
 /// Hand tiles, melds, and relic mirror state for one scoring pass.
 pub(crate) struct ScoringLayerInput<'a> {

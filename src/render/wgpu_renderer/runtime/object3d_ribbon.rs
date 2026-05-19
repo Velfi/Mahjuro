@@ -120,6 +120,6 @@ impl WgpuRenderer {
                 silk_mat.kind,
             );
         }
-        object3d_draw_list.push((DrawKind::Ribbon, slot_i));
+        WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::Ribbon, slot_i);
     }
 }

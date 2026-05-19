@@ -12,9 +12,9 @@ use super::{CANDLE_FLARE_DECAY, LIGHT_RAMP_DELAY_SECS, LIGHT_RAMP_DURATION_SECS}
 use crate::game::engine::GameEngine;
 use crate::render::candle_mesh::WICK_TIP_Y;
 use crate::render::draw_cmd::{Object3d, Object3dKind};
-use crate::render::flame_volume::{flame_emitter_scale, flame_flicker_multiplier, FlameEmitter};
-use crate::render::world_space::pixel_to_world;
+use crate::render::flame_volume::{FlameEmitter, flame_emitter_scale, flame_flicker_multiplier};
 use crate::render::wgpu_renderer::{PointLight, SpotLight};
+use crate::render::world_space::pixel_to_world;
 use crate::scenes::UpdateCtx;
 
 /// Tick particles, flying coins, score popups, score reel target, and
@@ -114,8 +114,10 @@ pub(super) fn tick_gold_change_coins(scene: &mut GameplayScene, ctx: &mut Update
     if delta != 0 && scene.prev_gold != 0 {
         // Recompute the dish center from layout (mirrors draw_frame).
         let layout = ctx.layout;
-        let anchor =
-            crate::render::gold_display::gameplay_gold_pile_anchor(layout, &scene.positions.coin_pile);
+        let anchor = crate::render::gold_display::gameplay_gold_pile_anchor(
+            layout,
+            &scene.positions.coin_pile,
+        );
         let (coin_radius, coin_thickness, _) =
             crate::render::gold_display::gold_coin_dims(|n| layout.mm(n));
         let pile_cx = anchor[0];
@@ -376,8 +378,7 @@ pub(super) fn build_candles_and_spotlights(
             let flare_mul = 1.0 + scene.candle_flare;
             let base_brightness = scene.light_ramp * flare_mul * scene.candle_wind_dim;
             let wick_lift = WICK_TIP_Y * candle_scale * height_scale;
-            let wick_world =
-                pixel_to_world(win_w, win_h, cx_j, cy_j, wick_lift);
+            let wick_world = pixel_to_world(win_w, win_h, cx_j, cy_j, wick_lift);
             flame_emitters.push(FlameEmitter {
                 wick_world,
                 scale: flame_emitter_scale(candle_scale, height_scale),
@@ -602,7 +603,9 @@ pub(super) fn build_ambient_table_objects(
             kind: crate::render::draw_cmd::Object3dKind::DoraPlinth { glow: 0.0 },
             hover_target: 0.0,
             anim_id: 0,
-            arrange_name: Some("gameplay.dora_plinth"),
+            // Must match `GAMEPLAY_HIERARCHY` / `gameplay.json` key `gameplay.dora`
+            // so arrange pick, committed rotations, and Tab navigation agree.
+            arrange_name: Some("gameplay.dora"),
         });
 
         // Indicator tile face(s) sitting on the platform. The mesh
@@ -694,7 +697,7 @@ pub(super) fn build_ambient_table_objects(
             kind: Object3dKind::DoraPlinth { glow: 0.0 },
             hover_target: 0.0,
             anim_id: 0,
-            arrange_name: Some("gameplay.round_wind_plinth"),
+            arrange_name: Some("gameplay.round_wind"),
         });
 
         let mut winds = vec![Tile::new(Suit::Wind, gameplay.round_wind_rank, 0)];

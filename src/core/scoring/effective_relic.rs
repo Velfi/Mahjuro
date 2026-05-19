@@ -10,15 +10,15 @@ pub(crate) struct EffectiveRelics {
 }
 
 impl EffectiveRelics {
-    pub(crate) fn from_context(ctx: &ScoreContext<'_>) -> Self {
-        let mirrored = if ctx.relic.roster.has(RelicId::MirrorTile) {
-            ctx.relic.roster.relic_after(RelicId::MirrorTile)
+    /// Mirror Tile / Shadow Hand copy targets from inventory order alone (no score counters).
+    pub(crate) fn from_roster(roster: &RelicState) -> Self {
+        let mirrored = if roster.has(RelicId::MirrorTile) {
+            roster.relic_after(RelicId::MirrorTile)
         } else {
             None
         };
-        let shadowed = if ctx.relic.roster.has(RelicId::ShadowHand) {
-            ctx.relic
-                .roster
+        let shadowed = if roster.has(RelicId::ShadowHand) {
+            roster
                 .active
                 .first()
                 .filter(|&&id| id != RelicId::ShadowHand)
@@ -27,6 +27,10 @@ impl EffectiveRelics {
             None
         };
         Self { mirrored, shadowed }
+    }
+
+    pub(crate) fn from_context(ctx: &ScoreContext<'_>) -> Self {
+        Self::from_roster(ctx.relic.roster)
     }
 
     #[inline]

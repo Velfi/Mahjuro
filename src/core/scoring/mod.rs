@@ -24,6 +24,7 @@
 mod dora_yaku_layer;
 pub use dora_yaku_layer::DORA_CHIPS_PER_TILE;
 mod effective_relic;
+pub(crate) use effective_relic::EffectiveRelics;
 mod layer_input;
 mod pipeline;
 mod pre_yaku_layer;

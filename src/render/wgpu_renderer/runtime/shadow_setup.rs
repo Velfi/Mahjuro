@@ -1,7 +1,9 @@
 use super::*;
-use crate::render::draw_cmd::{DrawCmd, UiFrame};
-use crate::render::lit_mesh::{material_casts_shadow, LitMeshInstance, MaterialKind, ShadowCasterUniform};
 use crate::render::draw_cmd::SHOP_INSPECT_SUBJECT_ANIM_ID;
+use crate::render::draw_cmd::{DrawCmd, UiFrame};
+use crate::render::lit_mesh::{
+    LitMeshInstance, MaterialKind, ShadowCasterUniform, material_casts_shadow,
+};
 
 /// Which imported room mesh is active this frame (at most one is drawn).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -139,25 +141,28 @@ impl WgpuRenderer {
             || matches!(
                 self.active_scene_key,
                 Some(
-                    "shop" | "tile_pack_celebration" | "pick_blind" | "main_menu_exterior"
+                    "shop"
+                        | "tile_pack_celebration"
+                        | "pick_blind"
+                        | "main_menu_exterior"
                         | "collection"
                 )
             );
         let inspect_subject = frame.shop_inspect_shadow_target.map(glam::Vec3::from_array);
-        let (shadow_half_x, shadow_half_z, scene_height, depth_bias) =
-            if inspect_subject.is_some() {
-                let env_height_scale = if self.active_scene_key == Some("main_menu_exterior") {
-                    crate::render::main_menu_glb::main_menu_env_height_scale(
-                        self.room_gltf_height_scale,
-                    )
-                } else {
-                    self.room_gltf_height_scale
-                };
-                let extent = camera.h * env_height_scale;
-                let half = extent * 0.11;
-                let depth = extent * 0.42;
-                (half, half, depth, TABLE_SHADOW_DEPTH_BIAS)
-            } else if room_frustum {
+        let (shadow_half_x, shadow_half_z, scene_height, depth_bias) = if inspect_subject.is_some()
+        {
+            let env_height_scale = if self.active_scene_key == Some("main_menu_exterior") {
+                crate::render::main_menu_glb::main_menu_env_height_scale(
+                    self.room_gltf_height_scale,
+                )
+            } else {
+                self.room_gltf_height_scale
+            };
+            let extent = camera.h * env_height_scale;
+            let half = extent * 0.11;
+            let depth = extent * 0.42;
+            (half, half, depth, TABLE_SHADOW_DEPTH_BIAS)
+        } else if room_frustum {
             // Room GLBs are centered and scaled by `window_h` — extend the light
             // frustum in depth so shelf props cast contact shadows on the env.
             let env_height_scale = if self.active_scene_key == Some("main_menu_exterior") {
@@ -205,12 +210,7 @@ impl WgpuRenderer {
             0,
             bytemuck::bytes_of(&ShadowGlobals {
                 light_view_proj: light_view_proj_arr,
-                params: [
-                    shadow_enabled_flag,
-                    depth_bias,
-                    1.0 / SHADOW_MAP_SIZE,
-                    0.0,
-                ],
+                params: [shadow_enabled_flag, depth_bias, 1.0 / SHADOW_MAP_SIZE, 0.0],
             }),
         );
         ShadowFrame {

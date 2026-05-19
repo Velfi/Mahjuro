@@ -160,9 +160,12 @@ impl WgpuRenderer {
         } else {
             lit_base
         };
-        if bloom_linear_hdr_output {
-            hdr_tonemap[3] = 1.0;
-        }
+        // `hdr_tonemap.w` is reserved / no-op now: `room_glb.wgsl::fs_main` and
+        // `fs_main_emissive` both write linear HDR to their target, and
+        // `tonemap_composite.wgsl` is the single ACES pass. `bloom_linear_hdr_output`
+        // is informational only — the emissive pre-pass uses the same uniforms.
+        let _ = bloom_linear_hdr_output;
+        hdr_tonemap[3] = 1.0;
         let (exposure, ambient_x) = if embedded_gltf_punctual {
             let mut e = self.shop_env_linear_exposure
                 * crate::render::room_glb::ROOM_GLB_LINEAR_EXPOSURE_BASE;
@@ -224,15 +227,13 @@ impl WgpuRenderer {
         }
         pass.set_pipeline(&self.shadow_pipeline_room_env);
         pass.set_bind_group(0, &gpu.shadow_bind_group, &[]);
+        pass.set_bind_group(1, &gpu.shadow_warp_bind_group, &[]);
         for (pi, prim) in prims.iter().enumerate() {
             if skip_prim(pi) || prim.pipeline_key.is_blend() {
                 continue;
             }
             pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
-            pass.set_index_buffer(
-                prim.index_buffer.slice(..),
-                wgpu::IndexFormat::Uint32,
-            );
+            pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..prim.index_count, 0, 0..1);
         }
     }
@@ -307,9 +308,7 @@ impl WgpuRenderer {
             gpu,
             shadow_upload,
         });
-        let mut dist = frame
-            .hallway_distortion
-            .unwrap_or_default();
+        let mut dist = frame.hallway_distortion.unwrap_or_default();
         dist.time_pulse[0] = self.creation_time.elapsed().as_secs_f32();
         self.queue
             .write_buffer(&gpu.distortion_buffer, 0, bytemuck::bytes_of(&dist));
@@ -488,15 +487,10 @@ impl WgpuRenderer {
             );
             glam::Mat4::from_scale(glam::Vec3::splat(s))
         });
-        let occ = TileOccludersBuf::from_room_collision_meshes(
-            model,
-            &self.shop_env_collision_meshes,
-        );
-        self.queue.write_buffer(
-            &self.tile_occluders_buffer,
-            0,
-            bytemuck::bytes_of(&occ),
-        );
+        let occ =
+            TileOccludersBuf::from_room_collision_meshes(model, &self.shop_env_collision_meshes);
+        self.queue
+            .write_buffer(&self.tile_occluders_buffer, 0, bytemuck::bytes_of(&occ));
     }
 
     #[inline]

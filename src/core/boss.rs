@@ -18,8 +18,10 @@
 //!   for per-play taxers (gold cost, wall burn).
 //!
 //! Adding a new boss is purely a matter of appending to `bosses.json`
-//! (presentation), adding a `BossKind` variant, and supplying the right
-//! hook in `boss_behavior` — no other file needs to know the boss exists.
+//! (presentation), adding a `BossKind` variant, supplying the right
+//! hook in `boss_behavior`, and adding an atlas cell + slug in
+//! `assets/textures/boss_icons/atlas.toml` (`BossKind::ALL` / `atlas_slug`)
+//! — no other file needs to know the boss exists.
 
 use std::sync::OnceLock;
 
@@ -153,6 +155,34 @@ impl ResolvedBossEffect {
 }
 
 impl BossKind {
+    /// Every boss variant, in `assets/textures/boss_icons/atlas.toml` row-major order.
+    pub const ALL: &'static [BossKind] = &[
+        BossKind::Drought,
+        BossKind::Whisper,
+        BossKind::Tribute,
+        BossKind::Gate,
+        BossKind::Grove,
+        BossKind::Coin,
+        BossKind::Bloom,
+        BossKind::Hermit,
+        BossKind::Forest,
+        BossKind::Bureaucrat,
+        BossKind::Drunkard,
+        BossKind::Ash,
+        BossKind::Furnace,
+        BossKind::Relic,
+        BossKind::Blight,
+        BossKind::Hex,
+        BossKind::Famine,
+        BossKind::Tempest,
+        BossKind::Censor,
+        BossKind::Mirror,
+        BossKind::Counterweight,
+        BossKind::TaxCollector,
+        BossKind::Dragon,
+        BossKind::House,
+    ];
+
     pub fn def(self) -> &'static BossDef {
         all_bosses()
             .iter()
@@ -167,6 +197,36 @@ impl BossKind {
 
     pub fn tier(self) -> BossTier {
         self.def().tier
+    }
+
+    /// Stable atlas cell id (`assets/data/bosses.json` `id`, `textures/boss_icons/atlas.toml`).
+    pub fn atlas_slug(self) -> &'static str {
+        match self {
+            BossKind::Drought => "drought",
+            BossKind::Whisper => "whisper",
+            BossKind::Tribute => "tribute",
+            BossKind::Gate => "gate",
+            BossKind::Grove => "grove",
+            BossKind::Coin => "coin",
+            BossKind::Bloom => "bloom",
+            BossKind::Hermit => "hermit",
+            BossKind::Forest => "forest",
+            BossKind::Bureaucrat => "bureaucrat",
+            BossKind::Drunkard => "drunkard",
+            BossKind::Ash => "ash",
+            BossKind::Furnace => "furnace",
+            BossKind::Relic => "relic",
+            BossKind::Blight => "blight",
+            BossKind::Hex => "hex",
+            BossKind::Famine => "famine",
+            BossKind::Tempest => "tempest",
+            BossKind::Censor => "censor",
+            BossKind::Mirror => "mirror",
+            BossKind::Counterweight => "counterweight",
+            BossKind::TaxCollector => "tax_collector",
+            BossKind::Dragon => "dragon",
+            BossKind::House => "house",
+        }
     }
 }
 
@@ -770,34 +830,8 @@ mod tests {
     /// JSON entry trips `def()`.
     #[test]
     fn every_boss_variant_has_one_data_entry() {
-        const ALL: &[BossKind] = &[
-            BossKind::Drought,
-            BossKind::Whisper,
-            BossKind::Tribute,
-            BossKind::Gate,
-            BossKind::Grove,
-            BossKind::Coin,
-            BossKind::Bloom,
-            BossKind::Hermit,
-            BossKind::Forest,
-            BossKind::Bureaucrat,
-            BossKind::Drunkard,
-            BossKind::Ash,
-            BossKind::Furnace,
-            BossKind::Relic,
-            BossKind::Blight,
-            BossKind::Hex,
-            BossKind::Famine,
-            BossKind::Tempest,
-            BossKind::Censor,
-            BossKind::Mirror,
-            BossKind::Counterweight,
-            BossKind::TaxCollector,
-            BossKind::Dragon,
-            BossKind::House,
-        ];
         // Force-compile-error if a new variant is added without classifying it.
-        for &kind in ALL {
+        for &kind in BossKind::ALL {
             #[allow(unused)]
             match kind {
                 BossKind::Drought
@@ -832,9 +866,9 @@ mod tests {
         let count = all_bosses().len() + final_bosses().len();
         assert_eq!(
             count,
-            ALL.len(),
+            BossKind::ALL.len(),
             "bosses.json count ({count}) does not match BossKind variant count ({})",
-            ALL.len()
+            BossKind::ALL.len()
         );
     }
 }

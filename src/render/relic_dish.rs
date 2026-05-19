@@ -1152,6 +1152,51 @@ pub fn build_relic_mesh() -> MeshCpu {
     }
 }
 
+#[inline]
+fn triangle_signed_area_xz(a: &[f32; 3], b: &[f32; 3], c: &[f32; 3]) -> f32 {
+    let e1x = b[0] - a[0];
+    let e1z = b[2] - a[2];
+    let e2x = c[0] - a[0];
+    let e2z = c[2] - a[2];
+    0.5 * (e1x * e2z - e1z * e2x)
+}
+
+/// Sum signed areas of front-cap (+Y) triangles projected to XZ. Holes subtract
+/// from outers so the magnitude matches physical silhouette area.
+fn relic_front_cap_net_area_xz(vertices: &[Vertex3dTex], indices: &[u32]) -> f32 {
+    const HALF_Y: f32 = 0.5;
+    const EPS: f32 = 2e-3;
+    let mut sum = 0.0_f32;
+    for tri in indices.chunks_exact(3) {
+        let v0 = &vertices[tri[0] as usize];
+        let v1 = &vertices[tri[1] as usize];
+        let v2 = &vertices[tri[2] as usize];
+        if (v0.position[1] - HALF_Y).abs() > EPS {
+            continue;
+        }
+        if (v1.position[1] - HALF_Y).abs() > EPS {
+            continue;
+        }
+        if (v2.position[1] - HALF_Y).abs() > EPS {
+            continue;
+        }
+        sum += triangle_signed_area_xz(&v0.position, &v1.position, &v2.position);
+    }
+    sum
+}
+
+/// Target front-cap area in XZ used to equalize on-screen footprint across relics
+/// (disk of radius 0.5: same order as the legacy max-edge silhouette fit for a square).
+const RELIC_CAP_REFERENCE_AREA_XZ: f32 = std::f32::consts::PI * 0.25;
+
+fn scale_relic_mesh_vertex_positions(vertices: &mut [Vertex3dTex], scale: f32) {
+    for v in vertices.iter_mut() {
+        v.position[0] *= scale;
+        v.position[1] *= scale;
+        v.position[2] *= scale;
+    }
+}
+
 /// Build a relic mesh whose cap silhouette is extracted from the supplied
 /// RGBA. Normally we use the **alpha** channel (threshold 24). Many offline
 /// `*_mask.png` files keep **alpha fully opaque** and encode the silhouette only
@@ -1167,7 +1212,14 @@ pub fn build_relic_mesh() -> MeshCpu {
 /// 4. Lyon tessellates the resulting polygon-with-holes into triangles for the
 ///    front cap; the back cap mirrors those triangles with reversed winding,
 ///    and the side walls extrude every contour edge.
-pub fn build_relic_mesh_from_rgba(rgba: &[u8], width: u32, height: u32) -> Option<MeshCpu> {
+/// 5. A uniform scale adjusts all vertices so the front-cap footprint in XZ
+///    matches [`RELIC_CAP_REFERENCE_AREA_XZ`] (equal apparent “pin” size across relics).
+pub fn build_relic_mesh_from_rgba(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    source_label: &str,
+) -> Option<MeshCpu> {
     if width == 0 || height == 0 || rgba.len() < (width as usize * height as usize * 4) {
         return None;
     }
@@ -1194,7 +1246,7 @@ pub fn build_relic_mesh_from_rgba(rgba: &[u8], width: u32, height: u32) -> Optio
     // outer contours or interior holes. Each loop captures concave edges that
     // the old radial sweep would have convex-hulled over.
     let contours = trace_silhouette_contours(&solid, w as i32, h as i32);
-    let contours = filter_border_noise_loops(contours, width as f32, height as f32);
+    let contours = filter_border_noise_loops(contours, width as f32, height as f32, source_label);
     let polygons = group_contours_into_polygons(contours);
     if polygons.is_empty() {
         return None;
@@ -1373,6 +1425,17 @@ pub fn build_relic_mesh_from_rgba(rgba: &[u8], width: u32, height: u32) -> Optio
         return None;
     }
 
+    // Equalize projected footprint: sparse silhouettes (rings, tall narrow art)
+    // scale up so each relic's front cap has a similar XZ area in mesh space.
+    let cap_net = relic_front_cap_net_area_xz(&vertices, &indices);
+    let cap_mag = cap_net.abs().max(1e-10);
+    let scale = (RELIC_CAP_REFERENCE_AREA_XZ / cap_mag)
+        .sqrt()
+        .clamp(0.35_f32, 3.5_f32);
+    if (scale - 1.0).abs() > 1e-4 {
+        scale_relic_mesh_vertex_positions(&mut vertices, scale);
+    }
+
     Some(MeshCpu {
         vertices,
         indices,
@@ -1393,10 +1456,16 @@ pub fn build_relic_mesh_from_rgba(rgba: &[u8], width: u32, height: u32) -> Optio
 /// contour builds bogus side walls in 3D (often seen as white wire/triangle
 /// artifacts in inspect mode). We keep border loops only when they are the only
 /// outer silhouette available so full-bleed masks still work.
+///
+/// `source_label` identifies the mask in diagnostics (e.g. asset path). Tiny
+/// drop counts are logged at debug level since a stray rim pixel or two is
+/// usually sub-pixel anti-aliasing on an otherwise clean silhouette and not
+/// worth pestering the developer about.
 fn filter_border_noise_loops(
     loops: Vec<Vec<(f32, f32)>>,
     width: f32,
     height: f32,
+    source_label: &str,
 ) -> Vec<Vec<(f32, f32)>> {
     if loops.is_empty() {
         return loops;
@@ -1426,11 +1495,25 @@ fn filter_border_noise_loops(
         .collect();
     let dropped = total_loops.saturating_sub(filtered.len());
     if dropped > 0 {
-        log::warn!(
-            "relic silhouette: dropped {dropped} border contour loop(s) as mask noise (image {}x{})",
-            width as u32,
-            height as u32
-        );
+        // Heuristic: a handful of stray border loops is almost always sub-pixel
+        // anti-aliasing on the rim and there is nothing the developer can do.
+        // Hundreds of loops indicates a noisy mask edge that should be cleaned
+        // up — keep that loud.
+        const NOISY_LOOP_THRESHOLD: usize = 16;
+        let w = width as u32;
+        let h = height as u32;
+        if dropped >= NOISY_LOOP_THRESHOLD {
+            log::warn!(
+                "relic silhouette `{source_label}` ({w}x{h}): dropped {dropped} border contour \
+                 loop(s) as mask noise. Clean the mask: set the outermost border pixels to pure \
+                 black (0,0,0) or trim the silhouette so it no longer touches the image edge.",
+            );
+        } else {
+            log::debug!(
+                "relic silhouette `{source_label}` ({w}x{h}): dropped {dropped} border contour \
+                 loop(s) (likely sub-pixel rim anti-aliasing; not actionable)",
+            );
+        }
     }
     filtered
 }
@@ -1772,7 +1855,7 @@ mod silhouette_tests {
             }
             let img = image::open(&p).unwrap().into_rgba8();
             let (w, h) = img.dimensions();
-            let mesh = build_relic_mesh_from_rgba(img.as_raw(), w, h);
+            let mesh = build_relic_mesh_from_rgba(img.as_raw(), w, h, name);
             match mesh {
                 Some(m) => eprintln!(
                     "{name}: {}×{}  verts={}  tris={}",
@@ -1801,8 +1884,8 @@ mod silhouette_tests {
                 rgba[i + 3] = 255;
             }
         }
-        let mesh =
-            build_relic_mesh_from_rgba(&rgba, 16, 16).expect("mesh should build for solid block");
+        let mesh = build_relic_mesh_from_rgba(&rgba, 16, 16, "test:solid_block")
+            .expect("mesh should build for solid block");
         assert!(
             mesh.indices.len() >= 3,
             "mesh must have at least one triangle"
@@ -1841,7 +1924,7 @@ mod silhouette_tests {
         let border_outer = vec![(0.0, 0.0), (16.0, 0.0), (16.0, 16.0), (0.0, 16.0)];
         let interior_outer = vec![(4.0, 4.0), (12.0, 4.0), (12.0, 12.0), (4.0, 12.0)];
         let loops = vec![border_outer, interior_outer.clone()];
-        let filtered = filter_border_noise_loops(loops, 16.0, 16.0);
+        let filtered = filter_border_noise_loops(loops, 16.0, 16.0, "test");
         assert_eq!(filtered.len(), 1, "border loop should be dropped");
         assert_eq!(filtered[0], interior_outer);
     }
@@ -1849,7 +1932,7 @@ mod silhouette_tests {
     #[test]
     fn border_loop_kept_when_it_is_only_outer() {
         let border_outer = vec![(0.0, 0.0), (16.0, 0.0), (16.0, 16.0), (0.0, 16.0)];
-        let filtered = filter_border_noise_loops(vec![border_outer.clone()], 16.0, 16.0);
+        let filtered = filter_border_noise_loops(vec![border_outer.clone()], 16.0, 16.0, "test");
         assert_eq!(filtered.len(), 1, "single full-bleed loop should be kept");
         assert_eq!(filtered[0], border_outer);
     }

@@ -2,20 +2,20 @@
 mod cases {
     use std::collections::BTreeMap;
 
-use crate::core::boss::{self, BossKind};
-use crate::game::event_bus::{EventBus, GameEvent, GameOverReason};
-use crate::game::run::{BlindKind, BossState, RunState, default_available_relics};
-    use crate::game::game_mode::{GameMode, HAND_SIZE};
+    use crate::core::boss::{self, BossKind};
     use crate::core::deck::Wall;
-    use crate::core::hand::{DetectedMeld, MeldKind};
-    use crate::core::tile::{Suit, Tile};
-    use crate::core::relic::RelicState;
-    use crate::core::rules::RuleModifier;
     use crate::core::deck::build_wall;
+    use crate::core::hand::{DetectedMeld, MeldKind};
+    use crate::core::relic::RelicState;
     use crate::core::relic::{
         RelicId, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
         ScoreRoundBundle, ScoreTileBundle,
     };
+    use crate::core::rules::RuleModifier;
+    use crate::core::tile::{Suit, Tile};
+    use crate::game::event_bus::{EventBus, GameEvent, GameOverReason};
+    use crate::game::game_mode::{GameMode, HAND_SIZE};
+    use crate::game::run::{BlindKind, BossState, RunState, default_available_relics};
 
     /// Standard mode starting plays (Bamboo: 4 base + 1 bonus).
     const STARTING_PLAYS: u32 = 5;
@@ -1083,7 +1083,14 @@ use crate::game::run::{BlindKind, BossState, RunState, default_available_relics}
 
 #[cfg(test)]
 mod joker_tile_tests {
-    use crate::{core::{hand::MeldKind, rules::RuleModifier, tile::{Suit, Tile}}, game::run::try_joker_substitution};
+    use crate::{
+        core::{
+            hand::MeldKind,
+            rules::RuleModifier,
+            tile::{Suit, Tile},
+        },
+        game::run::try_joker_substitution,
+    };
 
     fn tile(suit: Suit, rank: u8, id: u32) -> Tile {
         Tile::new(suit, rank, id)
@@ -1162,7 +1169,13 @@ mod joker_tile_tests {
 
 #[cfg(test)]
 mod wild_wind_tests {
-    use crate::{core::{hand::MeldKind, tile::{Suit, Tile}}, game::run::{try_wind_substitution, wind_candidate_faces}};
+    use crate::{
+        core::{
+            hand::MeldKind,
+            tile::{Suit, Tile},
+        },
+        game::run::{try_wind_substitution, wind_candidate_faces},
+    };
 
     fn tile(suit: Suit, rank: u8, id: u32) -> Tile {
         Tile::new(suit, rank, id)
@@ -1262,7 +1275,7 @@ mod wild_wind_tests {
     mod proptests {
         use crate::{core::tile::Suit, game::run::try_wind_substitution};
 
-use super::*;
+        use super::*;
         use proptest::prelude::*;
 
         const NUMBER_SUITS: [Suit; 3] = [Suit::Characters, Suit::Bamboos, Suit::Dots];
@@ -1466,8 +1479,8 @@ use super::*;
 
 #[cfg(test)]
 mod progression_snapshot_tests {
-    use crate::{core::relic::RelicId, game::run::RunState};
     use crate::core::progression::PlayerProgress;
+    use crate::{core::relic::RelicId, game::run::RunState};
 
     #[test]
     fn run_relic_unlocks_only_change_when_a_new_run_applies_progression() {
@@ -1498,7 +1511,13 @@ mod progression_snapshot_tests {
 
 #[cfg(test)]
 mod disgust_tests {
-    use crate::{core::{hand::MeldKind, tile::{Suit, Tile}}, game::run::try_disgust_substitution};
+    use crate::{
+        core::{
+            hand::MeldKind,
+            tile::{Suit, Tile},
+        },
+        game::run::try_disgust_substitution,
+    };
 
     fn tile(suit: Suit, rank: u8, id: u32) -> Tile {
         Tile::new(suit, rank, id)

@@ -15,7 +15,7 @@ use glam::Vec3;
 
 use crate::render::draw_cmd::CameraParams;
 use crate::render::room_env_gltf::{RoomEnvWalkHooks, RoomMeshPolicy};
-use crate::render::room_glb::{self, RoomGlbCpu, RoomEnvLightingTune, load_room_glb_from_bytes};
+use crate::render::room_glb::{self, RoomEnvLightingTune, RoomGlbCpu, load_room_glb_from_bytes};
 use crate::render::wgpu_renderer::{PointLight, SpotLight};
 use crate::render::world_space::surface_anchor_from_world_xyz;
 
@@ -35,7 +35,8 @@ pub const MAIN_MENU_ENV_HEIGHT_SCALE: f32 = 8.0 / 43.0;
 /// Apply [`MAIN_MENU_ENV_HEIGHT_SCALE`] on top of the debug / global [`crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE`].
 #[inline]
 pub fn main_menu_env_height_scale(debug_room_gltf_height_scale: f32) -> f32 {
-    debug_room_gltf_height_scale * (MAIN_MENU_ENV_HEIGHT_SCALE / crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE)
+    debug_room_gltf_height_scale
+        * (MAIN_MENU_ENV_HEIGHT_SCALE / crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE)
 }
 
 enum MainMenuGlbCache {
@@ -46,9 +47,7 @@ enum MainMenuGlbCache {
 static MAIN_MENU_GLB_CPU: RwLock<MainMenuGlbCache> = RwLock::new(MainMenuGlbCache::Uninit);
 
 fn ensure_main_menu_glb_loaded() {
-    let mut w = MAIN_MENU_GLB_CPU
-        .write()
-        .unwrap_or_else(|e| e.into_inner());
+    let mut w = MAIN_MENU_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
     if !matches!(*w, MainMenuGlbCache::Uninit) {
         return;
     }
@@ -95,10 +94,6 @@ fn ensure_main_menu_glb_loaded() {
     *w = MainMenuGlbCache::Ready(ready.map(Box::new));
 }
 
-/// `true` when `main_menu.glb` loaded and the hub can draw the 3D room.
-///
-/// After init, CPU mesh buffers may be released while GPU draws remain; bounds
-/// stay populated so do not gate on [`RoomGlbCpu::environment_primitives`].
 /// Env model matrix for rain collision (same centering/scale as the drawn room).
 pub fn main_menu_rain_env_model_matrix(window_h: f32, env_scale: f32) -> Option<glam::Mat4> {
     with_main_menu_glb_cpu(|opt| {
@@ -114,6 +109,10 @@ pub fn main_menu_rain_surface_meshes() -> Vec<crate::render::room_env_gltf::Room
     })
 }
 
+/// `true` when `main_menu.glb` loaded and the hub can draw the 3D room.
+///
+/// After init, CPU mesh buffers may be released while GPU draws remain; bounds
+/// stay populated so do not gate on [`RoomGlbCpu::environment_primitives`].
 pub fn main_menu_room_draw_ready() -> bool {
     with_main_menu_glb_cpu(|opt| {
         opt.is_some_and(|c| {
@@ -136,9 +135,7 @@ pub fn with_main_menu_glb_cpu<R>(f: impl FnOnce(Option<&RoomGlbCpu>) -> R) -> R 
 }
 
 pub fn release_main_menu_environment_cpu_sources_after_gpu_upload() {
-    let mut g = MAIN_MENU_GLB_CPU
-        .write()
-        .unwrap_or_else(|e| e.into_inner());
+    let mut g = MAIN_MENU_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
     if let MainMenuGlbCache::Ready(Some(cpu)) = &mut *g {
         room_glb::release_room_environment_primitives_cpu(cpu);
     }
@@ -162,11 +159,6 @@ impl RoomEnvWalkHooks for MainMenuRoomWalkHooks {
 
     fn log_asset_label(&self) -> &'static str {
         "main_menu.glb"
-    }
-
-    fn skip_env_mesh(&self, name: &str) -> bool {
-        // Scattered Maya/Blender foliage cards (±6k doc units); they inflate bounds and never sit in view.
-        name.starts_with("LEAFS")
     }
 }
 
@@ -202,7 +194,12 @@ pub fn main_menu_camera_from_glb_if_present(
     })
 }
 
-fn main_menu_camera_resolve(w: f32, h: f32, env_h: f32, from_glb: Option<CameraParams>) -> CameraParams {
+fn main_menu_camera_resolve(
+    w: f32,
+    h: f32,
+    env_h: f32,
+    from_glb: Option<CameraParams>,
+) -> CameraParams {
     with_main_menu_glb_cpu(|opt| {
         let mut cam = from_glb.unwrap_or_else(|| CameraParams {
             eye: [0.0, -h * 1.2, h * 0.45],
@@ -233,10 +230,13 @@ pub fn main_menu_camera_base(w: f32, h: f32, env_h: f32) -> CameraParams {
 }
 
 pub fn main_menu_glb_has_embedded_lights() -> bool {
-    with_main_menu_glb_cpu(|opt| opt.is_some_and(crate::render::room_gltf_punctual::room_glb_has_embedded_lights))
+    with_main_menu_glb_cpu(|opt| {
+        opt.is_some_and(crate::render::room_gltf_punctual::room_glb_has_embedded_lights)
+    })
 }
 
 /// Object3d anchor `[px, py, lift]` for the `door_light` punctual node in `main_menu.glb`.
+#[allow(dead_code)]
 pub fn main_menu_door_light_object3d_anchor(w: f32, h: f32, env_h: f32) -> Option<[f32; 3]> {
     with_main_menu_glb_cpu(|opt| {
         let cpu = opt?;
@@ -285,7 +285,12 @@ pub fn main_menu_embedded_spot_lights_runtime(
     with_main_menu_glb_cpu(|opt| {
         opt.map(|cpu| {
             crate::render::room_gltf_punctual::embedded_spot_lights_runtime(
-                cpu, w, h, env_h, tune, "main_menu.glb",
+                cpu,
+                w,
+                h,
+                env_h,
+                tune,
+                "main_menu.glb",
             )
         })
         .unwrap_or_default()

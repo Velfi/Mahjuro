@@ -22,7 +22,6 @@ pub const FLAME: &str = concat!(
 );
 pub const STARFIELD: &str = wgsl_file!("starfield.wgsl");
 pub const EMBER_DRIFT: &str = wgsl_file!("ember_drift.wgsl");
-pub const RAIN: &str = wgsl_file!("rain.wgsl");
 pub const GOLDEN_DUST: &str = wgsl_file!("golden_dust.wgsl");
 pub const MOONLIT_WATER: &str = wgsl_file!("moonlit_water.wgsl");
 pub const SUNLIT_WATER: &str = wgsl_file!("sunlit_water.wgsl");
@@ -31,7 +30,14 @@ pub const SHOOTING_STAR_CASCADE_COMPOSITE: &str =
     wgsl_file!("shooting_star_cascade_composite.wgsl");
 pub const SCENE_COLOR_DOWNSAMPLE: &str = wgsl_file!("scene_color_downsample.wgsl");
 pub const TILE_GLOW: &str = wgsl_file!("tile_glow.wgsl");
-pub const SHADOW: &str = wgsl_file!("shadow.wgsl");
+pub const SHADOW: &str = concat!(
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/shaders/hallway_vertex_warp.wgsl"
+    )),
+    "\n",
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/shadow.wgsl")),
+);
 pub const IMAGE_QUAD: &str = wgsl_file!("image_quad.wgsl");
 pub const BLOOM_EXTRACT: &str = wgsl_file!("bloom_extract.wgsl");
 pub const BLOOM_BLUR: &str = wgsl_file!("bloom_blur.wgsl");
@@ -41,31 +47,35 @@ pub const EMISSIVE_PROBE_UPDATE: &str = wgsl_file!("emissive_probe_update.wgsl")
 pub const EMISSIVE_PROBE_APPLY: &str = wgsl_file!("emissive_probe_apply.wgsl");
 pub const EMISSIVE_GI_COMPOSITE: &str = wgsl_file!("emissive_gi_composite.wgsl");
 
-/// `scene_pbr_lights` + `scene_hdr_tonemap` + `tile_3d`
+// Scene shaders all write linear HDR to `scene_color` now —
+// `tonemap_composite.wgsl` owns the single ACES pass, so `scene_hdr_tonemap.wgsl`
+// no longer needs to be prepended here.
+
+/// `scene_pbr_lights` + `tile_3d`
 pub const TILE_3D: &str = concat!(
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/shaders/scene_pbr_lights.wgsl"
+        "/shaders/hallway_vertex_warp.wgsl"
     )),
     "\n",
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/shaders/scene_hdr_tonemap.wgsl"
+        "/shaders/scene_pbr_lights.wgsl"
     )),
     "\n",
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/tile_3d.wgsl")),
 );
 
-/// `scene_pbr_lights` + `scene_hdr_tonemap` + `room_glb`
+/// `scene_pbr_lights` + `room_glb`
 pub const SHOP_GLB: &str = concat!(
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/shaders/scene_pbr_lights.wgsl"
+        "/shaders/hallway_vertex_warp.wgsl"
     )),
     "\n",
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/shaders/scene_hdr_tonemap.wgsl"
+        "/shaders/scene_pbr_lights.wgsl"
     )),
     "\n",
     include_str!(concat!(
@@ -74,29 +84,17 @@ pub const SHOP_GLB: &str = concat!(
     )),
 );
 
-/// `scene_hdr_tonemap` + `tile_outline`
-pub const TILE_OUTLINE: &str = concat!(
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/shaders/scene_hdr_tonemap.wgsl"
-    )),
-    "\n",
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/shaders/tile_outline.wgsl"
-    )),
-);
+/// `tile_outline`
+pub const TILE_OUTLINE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/shaders/tile_outline.wgsl"
+));
 
-/// `scene_pbr_lights` + `scene_hdr_tonemap` + `lit_mesh`
+/// `scene_pbr_lights` + `lit_mesh`
 pub const LIT_MESH: &str = concat!(
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/shaders/scene_pbr_lights.wgsl"
-    )),
-    "\n",
-    include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/shaders/scene_hdr_tonemap.wgsl"
     )),
     "\n",
     include_str!(concat!(

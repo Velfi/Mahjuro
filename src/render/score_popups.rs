@@ -16,13 +16,13 @@ use crate::render::theme::typography;
 use crate::render::wgpu_renderer::{TextAlign, TextLabel};
 
 /// Total lifetime of a popup from spawn to despawn (seconds).
-const LIFETIME: f32 = 1.1;
+const LIFETIME: f32 = 1.18;
 
 /// Phase boundaries on the [0, 1] normalised lifetime axis. Streaming popups
 /// spend a brief moment at their source (birth + hover), then arc toward the
 /// score reel and shrink into it during the stream phase.
-const T_BIRTH_END: f32 = 0.12;
-const T_HOVER_END: f32 = 0.28;
+const T_BIRTH_END: f32 = 0.08;
+const T_HOVER_END: f32 = 0.36;
 
 /// Slight per-popup yaw jitter so a chain of popups doesn't read as a
 /// stamped row of identical objects.
@@ -32,11 +32,11 @@ const YAW_JITTER: f32 = 0.07;
 /// flight. The hover phase drifts this slightly upward; the stream phase
 /// arcs higher still via the bezier control point.
 const LIFT_BASE: f32 = 450.0;
-const LIFT_HOVER: f32 = 120.0;
+const LIFT_HOVER: f32 = 135.0;
 /// Extra lift applied at the midpoint of the streaming arc. Drives the
 /// "over the top" feel of popups flying into the reel. Kept modest so
 /// the arc stays within the camera frustum across screen sizes.
-const LIFT_ARC_PEAK: f32 = 80.0;
+const LIFT_ARC_PEAK: f32 = 148.0;
 
 /// Sky-blue base tint for Chips popups. The Polychrome shader adds a
 /// rainbow thin-film sheen on top of this as the light sweeps across.
@@ -107,7 +107,7 @@ impl ScorePopupSystem {
             StepKind::Final => (FINAL_COLOR, GlyphMaterial::Polychrome, PopupMotion::Settle),
         };
         let mag = magnitude.abs().max(1.0);
-        let scale = 185.0 * (1.0 + (mag.log2() / 12.0).clamp(0.0, 0.42));
+        let scale = 198.0 * (1.0 + (mag.log2() / 12.0).clamp(0.0, 0.48));
         let mut rng = rand::rng();
         let yaw = (rng.random::<f32>() - 0.5) * YAW_JITTER;
         self.popups.push(ScorePopup {
@@ -251,13 +251,13 @@ fn popup_frame_sample(p: &ScorePopup, now: Instant) -> (f32, f32, f32, f32, f32,
 fn stream_sample(p: &ScorePopup, t: f32) -> (f32, f32, f32, f32, f32, f32) {
     if t < T_BIRTH_END {
         let local = t / T_BIRTH_END;
-        let s = (local * std::f32::consts::FRAC_PI_2).sin() * 1.10;
-        return (p.source_xy.0, p.source_xy.1, LIFT_BASE, s, 1.0, 1.0);
+        let s = (local * std::f32::consts::FRAC_PI_2).sin() * 1.22;
+        return (p.source_xy.0, p.source_xy.1, LIFT_BASE, s, 1.0, 1.05);
     }
     if t < T_HOVER_END {
         let local = (t - T_BIRTH_END) / (T_HOVER_END - T_BIRTH_END);
-        let s = 1.10 + (1.0 - 1.10) * local;
-        let em = 1.0 - local * 0.6;
+        let s = 1.22 + (1.0 - 1.22) * local;
+        let em = 1.05 - local * 0.55;
         return (
             p.source_xy.0,
             p.source_xy.1,
@@ -276,9 +276,12 @@ fn stream_sample(p: &ScorePopup, t: f32) -> (f32, f32, f32, f32, f32, f32) {
     } else {
         1.0 - (-2.0 * local + 2.0).powi(3) * 0.5
     };
-    // Quadratic bezier control point: midpoint XY, lifted above both ends.
-    let ctrl_x = (p.source_xy.0 + p.dest_xy.0) * 0.5;
-    let ctrl_y = (p.source_xy.1 + p.dest_xy.1) * 0.5;
+    // Quadratic bezier control point: biased slightly toward the destination
+    // so the arc reads as deliberately feeding the counter, not a symmetric hump.
+    let dx = p.dest_xy.0 - p.source_xy.0;
+    let dy = p.dest_xy.1 - p.source_xy.1;
+    let ctrl_x = (p.source_xy.0 + p.dest_xy.0) * 0.5 + dx * 0.11;
+    let ctrl_y = (p.source_xy.1 + p.dest_xy.1) * 0.5 + dy * 0.14;
     let one_m = 1.0 - eased;
     let px =
         one_m * one_m * p.source_xy.0 + 2.0 * one_m * eased * ctrl_x + eased * eased * p.dest_xy.0;
@@ -292,13 +295,16 @@ fn stream_sample(p: &ScorePopup, t: f32) -> (f32, f32, f32, f32, f32, f32) {
     let lerp_lift = start_lift + (p.dest_lift - start_lift) * eased;
     let arc_env = 4.0 * one_m * eased;
     let lift_z = lerp_lift + LIFT_ARC_PEAK * arc_env;
-    // Shrink to zero over the last 30% so the popup "lands into" the reel.
-    let shrink = if local < 0.7 {
+    // Shrink to zero over the last 32% so the popup "lands into" the reel.
+    let shrink = if local < 0.68 {
         1.0
     } else {
-        ((1.0 - local) / 0.3).max(0.0)
+        ((1.0 - local) / 0.32).max(0.0)
     };
-    (px, py, lift_z, shrink, 1.0, 0.35)
+    // Emissive peaks mid-stream (thin-film read) then eases down into landing.
+    let stream_glow = 4.0 * one_m * eased;
+    let emissive = 0.48 + 0.52 * stream_glow;
+    (px, py, lift_z, shrink, 1.0, emissive)
 }
 
 /// In-place settle with fade-out. Used by the Final landing number.

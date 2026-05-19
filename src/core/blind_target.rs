@@ -53,7 +53,10 @@ mod tests {
     #[test]
     fn ante_one_matches_base_and_blind_mults() {
         assert_eq!(ante_chip_base(1, DEFAULT_BASE_TARGET), DEFAULT_BASE_TARGET);
-        assert_eq!(score_for(1, BlindKind::Small, DEFAULT_BASE_TARGET), DEFAULT_BASE_TARGET);
+        assert_eq!(
+            score_for(1, BlindKind::Small, DEFAULT_BASE_TARGET),
+            DEFAULT_BASE_TARGET
+        );
         assert_eq!(score_for(1, BlindKind::Big, DEFAULT_BASE_TARGET), 750);
         assert_eq!(score_for(1, BlindKind::Boss, DEFAULT_BASE_TARGET), 1000);
     }

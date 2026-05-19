@@ -62,7 +62,7 @@ pub enum DebugAction {
     OpenCameraDebug,
     /// Per-scene tonemap / post-FX + room GLB lighting (right panel).
     OpenSceneLookDebug,
-    /// Main-menu rain vignette + CPU field tuning.
+    /// Main-menu rain (CPU world field) tuning overlay.
     OpenRainDebug,
     /// Pick-blind hallway vertex warp (sliders; Ctrl+C copies a Rust snapshot).
     OpenHallwayHallFxDebug,
@@ -96,9 +96,10 @@ pub enum DebugAction {
     ShowVictoryScreen,
     /// Jump directly to the defeat scene for presentation/debugging.
     ShowDefeatScreen,
-    /// Enter (or exit) arrange mode: click an object, then use arrow keys to
-    /// nudge its position (X/Y) or Shift+arrow to rotate it (Z/X). Press
-    /// Enter to confirm and copy the result to the clipboard.
+    /// Enter (or exit) arrange mode: click an object, then WASD (+ Q/E lift)
+    /// to nudge; Shift+WASDQE to rotate. Tab walks the hierarchy in pre-order;
+    /// `[` / `]` parent / first child, PageUp/PageDown siblings. Enter confirms
+    /// and copies deltas to the clipboard while saving layout JSON.
     ToggleArrangeMode,
     /// Delete all `*.json` under the user `layouts/` folder and reload
     /// defaults into scenes that cache layout data.
@@ -192,7 +193,10 @@ impl DebugMenuBar {
         let _ = tuning_sub.append(&camera_item);
 
         let scene_look_item = MenuItem::new("Scene look (per scene)...", true, None);
-        mappings.push((scene_look_item.id().clone(), DebugAction::OpenSceneLookDebug));
+        mappings.push((
+            scene_look_item.id().clone(),
+            DebugAction::OpenSceneLookDebug,
+        ));
         let _ = tuning_sub.append(&scene_look_item);
 
         let rain_item = MenuItem::new("Rain (main menu)...", true, None);
@@ -319,10 +323,7 @@ impl DebugMenuBar {
         let chronicle_sub = Submenu::new("Seed Chronicle (bot runs)", true);
         for &n in &[5u32, 15, 30, 60] {
             let item = MenuItem::new(format!("{n} bot runs"), true, None);
-            mappings.push((
-                item.id().clone(),
-                DebugAction::SeedChronicleFromBotRuns(n),
-            ));
+            mappings.push((item.id().clone(), DebugAction::SeedChronicleFromBotRuns(n)));
             let _ = chronicle_sub.append(&item);
         }
         let _ = cheats_sub.append(&chronicle_sub);

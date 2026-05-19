@@ -25,11 +25,7 @@ pub(crate) fn apply_dora_yaku_and_structure(
         sets,
         eff,
     } = *input;
-    let ScoringLayerOut {
-        chips,
-        mult,
-        steps,
-    } = out;
+    let ScoringLayerOut { chips, mult, steps } = out;
     let DoraYakuLayerOpts {
         censor_repeats,
         original_tiles,

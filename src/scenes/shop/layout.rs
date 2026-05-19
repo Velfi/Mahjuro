@@ -162,7 +162,7 @@ impl ShopLayout {
             *slot = (col_px_x[0] + off, relic_pixel_y, relic_wz);
         }
 
-        let talisman_wall_width = h * 0.072;
+        let talisman_wall_width = h * 0.144;
         let mut talisman_anchors_px = [(0.0, 0.0, 0.0); 4];
         let n_talisman_anchors = n_for_sale_talismans.min(4);
         for (i, slot) in talisman_anchors_px
@@ -180,7 +180,7 @@ impl ShopLayout {
             );
         }
 
-        let pack_height = h * 0.090;
+        let pack_height = h * 0.180;
         let pack_width = pack_height * crate::core::tile_pack::PACK_ASPECT_W_OVER_H;
         let pack_gap = pack_width * 0.35;
         let pack_spacing = pack_width + pack_gap;

@@ -26,11 +26,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
         sets,
         eff,
     } = *input;
-    let ScoringLayerOut {
-        chips,
-        mult,
-        steps,
-    } = out;
+    let ScoringLayerOut { chips, mult, steps } = out;
     let PostYakuRelicLayerOpts {
         honor_triple,
         no_seq_bonus,

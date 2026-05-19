@@ -15,9 +15,7 @@ impl WgpuRenderer {
         self.room_gi_capture_meta = None;
     }
 
-    pub fn take_room_gi_capture(
-        &mut self,
-    ) -> Option<crate::render::room_gi_bake::RoomGiBake> {
+    pub fn take_room_gi_capture(&mut self) -> Option<crate::render::room_gi_bake::RoomGiBake> {
         self.room_gi_captured.take()
     }
 

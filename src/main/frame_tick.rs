@@ -76,10 +76,7 @@ impl App {
         let brownout_freeze = self.debug.scene_look_debug_overlay.is_some()
             || self.debug.rain_debug_overlay.is_some()
             || self.scene.has_blocking_overlay()
-            || self
-                .overlay_stack
-                .iter()
-                .any(|s| s.has_blocking_overlay());
+            || self.overlay_stack.iter().any(|s| s.has_blocking_overlay());
         self.room_gltf_brownout
             .tick(self.last_frame_dt, brownout_room, brownout_freeze);
 
@@ -465,7 +462,7 @@ impl App {
         if let Some(mut overlay) = self.debug.scene_look_debug_overlay.take() {
             use crate::debug_overlays::SceneLookDebugResult;
             use crate::game::scene_look_tuning::{
-                clear_scene_look, save_scene_look, SceneLookTuning,
+                SceneLookTuning, clear_scene_look, save_scene_look,
             };
             let (ww, wh) = (
                 self.last_drawable_px.width as f32,
@@ -503,9 +500,9 @@ impl App {
                     self.scene_look
                         .set(scene_key_lookup.as_deref(), overlay.look);
                     match save_scene_look(&persist_key, &overlay.look) {
-                        Ok(()) => log::debug!(
-                            "Saved SceneLookTuning override for scene '{persist_key}'"
-                        ),
+                        Ok(()) => {
+                            log::debug!("Saved SceneLookTuning override for scene '{persist_key}'")
+                        }
                         Err(e) => log::warn!(
                             "Failed to save SceneLookTuning override for '{persist_key}': {e}"
                         ),
@@ -745,12 +742,12 @@ impl App {
                 rumble_lab_ops: &mut rumble_lab_ops,
                 suspended_shop: None,
                 room_gltf_height_scale: room_gltf_height_for_update,
+                bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
                 rain_tuning: self
                     .renderer
                     .as_ref()
                     .map(|r| r.rain_tuning)
                     .unwrap_or_else(crate::render::rain_tuning::RainTuning::load),
-                bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
             })
         } else {
             let showcase_shop_inspect = self.overlay_stack.last().is_some_and(|top| {
@@ -825,15 +822,15 @@ impl App {
                     rumble_lab_ops: &mut rumble_lab_ops,
                     suspended_shop,
                     room_gltf_height_scale: room_gltf_height_for_update,
+                    bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
                     rain_tuning: self
                         .renderer
                         .as_ref()
                         .map(|r| r.rain_tuning)
                         .unwrap_or_else(crate::render::rain_tuning::RainTuning::load),
-                    bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
                 })
         };
-        if matches!(&self.scene, crate::Scene::MainMenuExterior(_)) {
+        if matches!(&self.scene, crate::scenes::Scene::MainMenuExterior(_)) {
             self.effect_layers.rain = true;
         }
         self.cpu_profiler
@@ -1079,9 +1076,10 @@ impl App {
         if matches!(self.scene, Scene::Splash(_)) {
             let tileset = self.gfx.tileset_name.clone();
             if let Some(renderer) = self.renderer.as_mut()
-                && !renderer.showcase_decal_atlas_baked() {
-                    renderer.prebake_showcase_decal_atlas(&tileset);
-                }
+                && !renderer.showcase_decal_atlas_baked()
+            {
+                renderer.prebake_showcase_decal_atlas(&tileset);
+            }
         }
 
         // Profile capture completion chime: each profiler latches a one-shot

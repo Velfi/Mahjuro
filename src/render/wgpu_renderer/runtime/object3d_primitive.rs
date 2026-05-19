@@ -224,7 +224,7 @@ impl WgpuRenderer {
             );
             self.last_aux_dish_aabbs.push((center, half));
         }
-        object3d_draw_list.push((DrawKind::Primitive(*shape), slot_i));
+        WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::Primitive(*shape), slot_i);
         // CabinetColumn emits a linked CabinetRails
         // instance sharing the same world-space
         // model matrix (post arrange override).
@@ -260,7 +260,10 @@ impl WgpuRenderer {
                 false,
             );
             let rails_kind = rails_mesh.default_material.kind;
-            self.register_placement_shadow_slot(DrawKind::Primitive(MeshId::CabinetRails), rails_slot);
+            self.register_placement_shadow_slot(
+                DrawKind::Primitive(MeshId::CabinetRails),
+                rails_slot,
+            );
             if self.placement_shadow_writes(frame) {
                 self.write_lit_mesh_shadow(
                     shadow,
@@ -269,7 +272,7 @@ impl WgpuRenderer {
                     rails_kind,
                 );
             }
-            object3d_draw_list.push((DrawKind::Primitive(MeshId::CabinetRails), rails_slot));
+            WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::Primitive(MeshId::CabinetRails), rails_slot);
         }
     }
 }

@@ -1,9 +1,7 @@
 use super::*;
 
 use crate::core::tile_pack::TilePackKind;
-use crate::debug_overlays::{
-    HallwayDistortionDebugOverlay, SceneLookDebugOverlay,
-};
+use crate::debug_overlays::{HallwayDistortionDebugOverlay, SceneLookDebugOverlay};
 use crate::game::engine::GameEngine;
 use crate::scenes::reload_scene_layout_from_disk;
 use crate::scenes::shop::PackCelebration;
@@ -156,8 +154,9 @@ impl App {
                         .as_ref()
                         .map(|r| r.rain_tuning)
                         .unwrap_or_else(crate::render::rain_tuning::RainTuning::load);
-                    self.debug.rain_debug_overlay =
-                        Some(crate::render::rain_debug_overlay::RainDebugOverlay::new(tuning));
+                    self.debug.rain_debug_overlay = Some(
+                        crate::render::rain_debug_overlay::RainDebugOverlay::new(tuning),
+                    );
                     log::debug!("Opened rain debug overlay");
                 }
             }

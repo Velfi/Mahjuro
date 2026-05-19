@@ -13,7 +13,8 @@ struct OutlineFrame {
     hdr_tonemap: vec4<f32>,
 }
 
-// `aces_fitted` — see `scene_hdr_tonemap.wgsl` (prepended at pipeline creation).
+// ACES tonemapping is applied once in `tonemap_composite.wgsl`. This shader
+// writes linear HDR to `scene_color` (`Rgba16Float`).
 
 @group(0) @binding(0) var<uniform> outline_frame: OutlineFrame;
 
@@ -144,9 +145,12 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     let inv_g = 1.0 / max(lights.extras.x, 0.01);
     var out_rgb: vec3<f32>;
     if (outline_frame.hdr_tonemap.x > 0.5) {
+        // Linear HDR path: write the un-tonemapped HDR; `tonemap_composite.wgsl`
+        // applies the single ACES pass + sRGB encode (per-shader `lights.extras.x`
+        // gamma slider is intentionally a no-op here).
         var hdr = lit + outline_frame.hdr_tonemap.z * base_color * vec3<f32>(0.08);
         hdr = hdr * outline_frame.hdr_tonemap.y;
-        out_rgb = pow(aces_fitted(hdr), vec3<f32>(inv_g));
+        out_rgb = hdr;
     } else {
         out_rgb = pow(lit, vec3<f32>(inv_g));
     }

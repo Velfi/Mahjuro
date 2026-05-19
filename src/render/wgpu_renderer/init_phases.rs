@@ -72,7 +72,6 @@ pub(super) struct RendererShaderPack {
     pub flame: wgpu::ShaderModule,
     pub starfield: wgpu::ShaderModule,
     pub ember_drift: wgpu::ShaderModule,
-    pub rain: wgpu::ShaderModule,
     pub golden_dust: wgpu::ShaderModule,
     pub moonlit_water: wgpu::ShaderModule,
     pub sunlit_water: wgpu::ShaderModule,
@@ -133,10 +132,6 @@ pub(super) fn create_renderer_shader_modules(device: &wgpu::Device) -> RendererS
         ember_drift: device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("ember-drift-pipeline"),
             source: wgpu::ShaderSource::Wgsl(embedded_wgsl::EMBER_DRIFT.into()),
-        }),
-        rain: device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("rain-pipeline"),
-            source: wgpu::ShaderSource::Wgsl(embedded_wgsl::RAIN.into()),
         }),
         golden_dust: device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("golden-dust-pipeline"),
@@ -286,8 +281,7 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
 
     let size = clamp_render_physical_size(size);
 
-    let power_preference =
-        wgpu::PowerPreference::from_env().unwrap_or_default();
+    let power_preference = wgpu::PowerPreference::from_env().unwrap_or_default();
     let t_adapter = Instant::now();
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference,

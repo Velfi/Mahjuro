@@ -78,12 +78,10 @@ impl WgpuRenderer {
                 // occlusion, or right after `configure` — poll + extra acquire attempts usually
                 // land a drawable the same tick.
                 let try_once = |s: &wgpu::Surface| match s.get_current_texture() {
-                    wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => {
-                        Some(t)
-                    }
-                    wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
-                        None
-                    }
+                    wgpu::CurrentSurfaceTexture::Success(t)
+                    | wgpu::CurrentSurfaceTexture::Suboptimal(t) => Some(t),
+                    wgpu::CurrentSurfaceTexture::Timeout
+                    | wgpu::CurrentSurfaceTexture::Occluded => None,
                     wgpu::CurrentSurfaceTexture::Outdated => {
                         s.configure(&self.device, &self.config);
                         None
@@ -123,7 +121,7 @@ impl WgpuRenderer {
                     | DrawCmd::ShopEnvironment
                     | DrawCmd::HallwayEnvironment
                     | DrawCmd::ArchiveEnvironment
-                    | DrawCmd::MainMenuEnvironment
+                    // Main menu stars / emissive sky read too hot with full HDR bloom.
                     | DrawCmd::EmberDrift
             )
         })
@@ -189,12 +187,6 @@ impl WgpuRenderer {
                 _globals_pad: [0.0; 3],
             }),
         );
-        self.queue.write_buffer(
-            &self.rain_uniform_buffer,
-            0,
-            bytemuck::bytes_of(&self.rain_tuning.to_gpu()),
-        );
-
         // Gameplay / artist-style point lights (group 1 for tiles + lit_mesh).
         let pl_w = self.size.width.max(1) as f32;
         let pl_h = self.size.height.max(1) as f32;
@@ -219,19 +211,13 @@ impl WgpuRenderer {
             gamma,
             time: time_s,
         };
-        let shop_camera_punctual =
-            |cam: &crate::render::draw_cmd::CameraParams| {
-                PointLightsBuf::from_scene_punctual_shop_camera(
-                    &PunctualLightBakeShopCameraParams {
-                        bake: &punctual_bake,
-                        cam,
-                    },
-                )
-            };
-        let point_lights_buf = match (
-            self.active_scene_key,
-            frame.camera_override.as_ref(),
-        ) {
+        let shop_camera_punctual = |cam: &crate::render::draw_cmd::CameraParams| {
+            PointLightsBuf::from_scene_punctual_shop_camera(&PunctualLightBakeShopCameraParams {
+                bake: &punctual_bake,
+                cam,
+            })
+        };
+        let point_lights_buf = match (self.active_scene_key, frame.camera_override.as_ref()) {
             // Pack closeup has no showcase tiles; lights must still use the same
             // ray → plane_z mapping as perspective `Object3d` / showcase placement.
             (Some("tile_pack_celebration"), Some(cam)) => shop_camera_punctual(cam),

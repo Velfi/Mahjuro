@@ -269,8 +269,7 @@ impl Default for RunStats {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct AggregateStats {
     pub runs: u32,
     pub blinds_cleared_total: u64,
@@ -349,7 +348,6 @@ pub struct AggregateStats {
     /// Runs that ended with `RunStats::run_timed_out` after all timeout retries.
     pub timed_out_runs: u32,
 }
-
 
 impl AggregateStats {
     pub(crate) fn record(&mut self, s: &RunStats) {

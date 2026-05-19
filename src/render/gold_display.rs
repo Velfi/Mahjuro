@@ -3,11 +3,11 @@
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 
-use crate::render::draw_cmd::{Object3d, Object3dKind, UiFrame};
-use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::render::decal::{load_ui_font, measure_label_advances};
+use crate::render::draw_cmd::{Object3d, Object3dKind, UiFrame};
 use crate::render::primitive::{MaterialSpec, MeshId};
 use crate::render::theme::{color, typography};
+use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::placement::Placement;
 
 /// RNG seed for the shop coin pile layout (stable across frames).
@@ -31,8 +31,7 @@ pub fn gameplay_gold_pile_anchor(
     let (_, _, scatter_half) = gold_coin_dims(|n| layout.mm(n));
     let coin_back_z_push = scatter_half * 0.5;
     let pile_cx = placement.nx * layout.window_w;
-    let pile_cy = layout.score_panel.y
-        + layout.score_panel.h * 0.5
+    let pile_cy = layout.score_panel.y + layout.score_panel.h * 0.5
         - coin_back_z_push
         - layout.window_h * placement.ny;
     let dish_floor_z = layout.mm(placement.lift_mm) + layout.mm(3.0);

@@ -207,11 +207,17 @@ mod tests {
     }
 
     #[test]
-    fn live_atlas_extracts_gold_ingot() {
-        let got = extract_sprite_rgba("textures/skip_tags/atlas.png", "gold_ingot");
-        assert!(got.is_some(), "gold_ingot crop failed");
-        let (rgba, w, h) = got.unwrap();
-        assert_eq!((w, h), (128, 128));
-        assert_eq!(rgba.len(), (128 * 128 * 4) as usize);
+    fn every_boss_kind_has_boss_icon_atlas_cell() {
+        use crate::core::boss::BossKind;
+
+        for kind in BossKind::ALL {
+            let got = extract_sprite_rgba("textures/boss_icons/atlas.png", kind.atlas_slug());
+            assert!(
+                got.is_some(),
+                "boss icon crop failed for {:?} ({})",
+                kind,
+                kind.atlas_slug()
+            );
+        }
     }
 }

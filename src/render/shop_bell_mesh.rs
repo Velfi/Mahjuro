@@ -9,7 +9,7 @@
 
 use glam::Vec3;
 
-use crate::render::lit_mesh::{push_cylinder_z, CylinderZParams, LitMeshBuffers};
+use crate::render::lit_mesh::{CylinderZParams, LitMeshBuffers, push_cylinder_z};
 use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu};
 use crate::render::tile_glb::Vertex3dTex;
 

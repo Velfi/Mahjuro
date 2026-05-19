@@ -200,7 +200,11 @@ fn career_content_height(measure: CareerContentMeasure<'_>) -> f32 {
         return doc_y + (scale * 10.0).max(8.0);
     }
     doc_y += title_h + gap * 0.75 + chart_h + gap * 1.35;
-    doc_y += title_h + gap * 0.75 + bar_row_h * 0.88 + gap * 0.5 + (typography::size(typography::H42, h) / 0.55).ceil();
+    doc_y += title_h
+        + gap * 0.75
+        + bar_row_h * 0.88
+        + gap * 0.5
+        + (typography::size(typography::H42, h) / 0.55).ceil();
     doc_y += gap + title_h + gap * 0.75;
     let mut yaku: Vec<(YakuKind, u32)> = progress
         .yaku_times_scored
@@ -221,12 +225,7 @@ pub fn chronicle_run_log_scroll_max(w: f32, h: f32, panel: [f32; 4], entry_count
     (list_h - view_h).max(0.0)
 }
 
-pub fn chronicle_run_detail_scroll_max(
-    w: f32,
-    h: f32,
-    panel: [f32; 4],
-    rec: &RunRecord,
-) -> f32 {
+pub fn chronicle_run_detail_scroll_max(w: f32, h: f32, panel: [f32; 4], rec: &RunRecord) -> f32 {
     let panes = chronicle_pane_layout(w, h, panel);
     let m = layout_constants(h);
     let content = run_detail_content_height(rec, m.title_h, m.gap, m.line_h);
@@ -243,9 +242,9 @@ pub fn chronicle_right_pane_scroll_max(
 ) -> f32 {
     if focused_run.is_none() || focused_run == Some(0) {
         chronicle_career_scroll_max(w, h, panel, progress)
-    } else if let Some(idx) = focused_run.and_then(|i| {
-        archive_career::chronicle_hist_index_at_list(i, progress)
-    }) && let Some(rec) = progress.run_history.get(idx)
+    } else if let Some(idx) =
+        focused_run.and_then(|i| archive_career::chronicle_hist_index_at_list(i, progress))
+        && let Some(rec) = progress.run_history.get(idx)
     {
         chronicle_run_detail_scroll_max(w, h, panel, rec)
     } else {
@@ -253,7 +252,12 @@ pub fn chronicle_right_pane_scroll_max(
     }
 }
 
-pub fn chronicle_career_scroll_max(w: f32, h: f32, panel: [f32; 4], progress: &PlayerProgress) -> f32 {
+pub fn chronicle_career_scroll_max(
+    w: f32,
+    h: f32,
+    panel: [f32; 4],
+    progress: &PlayerProgress,
+) -> f32 {
     let panes = chronicle_pane_layout(w, h, panel);
     let m = layout_constants(h);
     let content = career_content_height(CareerContentMeasure {
@@ -375,7 +379,14 @@ fn run_detail_content_height(rec: &RunRecord, title_h: f32, gap: f32, line_h: f3
         .filter(|l| !l.is_empty())
         .count()
         .max(1) as f32;
-    title_h + gap * 0.75 + title_h + gap * 0.5 + desc_lines * line_h + gap + title_h + gap * 0.5
+    title_h
+        + gap * 0.75
+        + title_h
+        + gap * 0.5
+        + desc_lines * line_h
+        + gap
+        + title_h
+        + gap * 0.5
         + stat_lines * line_h
         + gap
 }
@@ -398,7 +409,12 @@ fn push_ledger_sheet(
     let b = FRAME_BORDER_PX;
     push_quad(
         out,
-        [inner_x - b, inner_y - b, inner_w + b * 2.0, inner_h + b * 2.0],
+        [
+            inner_x - b,
+            inner_y - b,
+            inner_w + b * 2.0,
+            inner_h + b * 2.0,
+        ],
         color::alpha(color::BRASS, 0.5),
     );
     push_quad(
@@ -528,17 +544,14 @@ fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
         }
 
         let (title, subtitle) = if list_i == 0 {
-            (
-                "Summary".into(),
-                summary_sub.clone(),
-            )
+            ("Summary".into(), summary_sub.clone())
         } else {
             let hist_idx = indices[list_i - 1];
             let Some(rec) = progress.run_history.get(hist_idx) else {
                 continue;
             };
-            let display = archive_career::chronicle_display_run_number(list_i, progress)
-                .unwrap_or(0);
+            let display =
+                archive_career::chronicle_display_run_number(list_i, progress).unwrap_or(0);
             (
                 archive_career::chronicle_run_log_title(progress, display, rec),
                 archive_career::chronicle_run_log_subtitle(rec),
@@ -547,11 +560,21 @@ fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
 
         push_label_clipped(
             out_labels,
-            [panes.left_x + 8.0, row_y + 2.0, panes.left_w - 12.0, panes.run_row_h * 0.52],
+            [
+                panes.left_x + 8.0,
+                row_y + 2.0,
+                panes.left_w - 12.0,
+                panes.run_row_h * 0.52,
+            ],
             clip_top,
             clip_bottom,
             TextLabel {
-                rect: [panes.left_x + 8.0, row_y + 2.0, panes.left_w - 12.0, panes.run_row_h * 0.52],
+                rect: [
+                    panes.left_x + 8.0,
+                    row_y + 2.0,
+                    panes.left_w - 12.0,
+                    panes.run_row_h * 0.52,
+                ],
                 text: title,
                 color: if selected {
                     color::CHAMPAGNE
@@ -621,8 +644,7 @@ fn push_run_detail_pane(draw: ChroniclePaneDraw<'_>, list_index: usize) {
         return;
     };
     let (clip_top, clip_bottom) = pane_clip_y(panes);
-    let display = archive_career::chronicle_display_run_number(list_index, progress)
-        .unwrap_or(0);
+    let display = archive_career::chronicle_display_run_number(list_index, progress).unwrap_or(0);
     let mut doc_y = 0.0_f32;
 
     let heading = archive_career::chronicle_run_log_title(progress, display, rec);
@@ -733,7 +755,10 @@ fn push_run_detail_pane(draw: ChroniclePaneDraw<'_>, list_index: usize) {
     );
     doc_y += title_h + gap * 0.5;
 
-    for line in archive_career::chronicle_run_stats(rec).lines().filter(|l| !l.is_empty()) {
+    for line in archive_career::chronicle_run_stats(rec)
+        .lines()
+        .filter(|l| !l.is_empty())
+    {
         push_label_clipped(
             out_labels,
             [
@@ -952,7 +977,12 @@ fn push_career_pane(h: f32, draw: ChroniclePaneDraw<'_>) {
         for frac in [0.25_f32, 0.5, 0.75] {
             push_quad_clipped(
                 out_quads,
-                [panes.right_x, chart_top + chart_h * frac, panes.right_w, 1.0],
+                [
+                    panes.right_x,
+                    chart_top + chart_h * frac,
+                    panes.right_w,
+                    1.0,
+                ],
                 clip_top,
                 clip_bottom,
                 grid_line,
@@ -1082,7 +1112,12 @@ fn push_career_pane(h: f32, draw: ChroniclePaneDraw<'_>) {
         );
         push_quad_clipped(
             out_quads,
-            [track_x + track_w * w_frac, bar_y, track_w * (1.0 - w_frac), bar_h],
+            [
+                track_x + track_w * w_frac,
+                bar_y,
+                track_w * (1.0 - w_frac),
+                bar_h,
+            ],
             clip_top,
             clip_bottom,
             color::alpha(color::RUBY, 0.85),
@@ -1231,7 +1266,12 @@ pub fn push_chronicle_dashboard(
 
     push_quad(
         emit.quads,
-        [panes.left_x + panes.left_w, panes.inner_y, panes.gutter, panes.inner_h],
+        [
+            panes.left_x + panes.left_w,
+            panes.inner_y,
+            panes.gutter,
+            panes.inner_h,
+        ],
         color::alpha(color::UMBER, 0.35),
     );
 

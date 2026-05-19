@@ -218,10 +218,13 @@ pub(super) fn build_cascade_hud_placements(
     let flight_t = hud.flight_t.unwrap_or(0.0);
     // Quadratic bezier arc: control point raised above the midpoint in
     // world-Z so the label arcs up over the plaque rather than sliding
-    // flat through it.
-    let ctrl_px = (pad_px + reel_px) * 0.5;
-    let ctrl_py = (pad_py + reel_py) * 0.5;
-    let ctrl_lift = pad_lift.max(reel_lift) + 180.0;
+    // flat through it. XY is biased toward the reel so the path reads as
+    // feeding the counter.
+    let dx = reel_px - pad_px;
+    let dy = reel_py - pad_py;
+    let ctrl_px = (pad_px + reel_px) * 0.5 + dx * 0.12;
+    let ctrl_py = (pad_py + reel_py) * 0.5 + dy * 0.15;
+    let ctrl_lift = pad_lift.max(reel_lift) + 288.0;
     let one_m = 1.0 - flight_t;
     let total_px =
         one_m * one_m * pad_px + 2.0 * one_m * flight_t * ctrl_px + flight_t * flight_t * reel_px;
@@ -230,13 +233,13 @@ pub(super) fn build_cascade_hud_placements(
     let total_lift = one_m * one_m * pad_lift
         + 2.0 * one_m * flight_t * ctrl_lift
         + flight_t * flight_t * reel_lift;
-    // Shrink into the reel as it lands. Hold full size until ~60% of the
+    // Shrink into the reel as it lands. Hold full size until ~58% of the
     // flight, then taper so the label visibly "absorbs" into the reel.
-    let flight_scale_mul = if flight_t < 0.6 {
+    let flight_scale_mul = if flight_t < 0.58 {
         1.0
     } else {
-        let k = (flight_t - 0.6) / 0.4;
-        1.0 - k * 0.9
+        let k = (flight_t - 0.58) / 0.42;
+        1.0 - k * 0.94
     };
     // Final absorption fade near landing.
     let total_alpha_flight = if flight_t < 0.85 {
@@ -253,7 +256,7 @@ pub(super) fn build_cascade_hud_placements(
         // Collapse toward the center as merge_t → 1.
         let cx = lerp(chips_x, times_x, merge_t);
         let mx = lerp(mult_x, times_x, merge_t);
-        let scale_mul = 1.0 - merge_t * 0.35;
+        let scale_mul = 1.0 - merge_t * 0.42;
 
         out.push(make_extruded_glyph(
             chips_label,
@@ -261,6 +264,7 @@ pub(super) fn build_cascade_hud_placements(
             glyph_scale * scale_mul,
             with_alpha(CHIPS_COLOR, trio_alpha),
             GlyphMaterial::Polychrome,
+            0.9 + merge_t * 0.12,
         ));
         out.push(make_extruded_glyph(
             Arc::from("x"),
@@ -268,6 +272,7 @@ pub(super) fn build_cascade_hud_placements(
             glyph_scale * 0.85,
             with_alpha(FINAL_COLOR, trio_alpha),
             GlyphMaterial::Metal,
+            0.82 + merge_t * 0.1,
         ));
         out.push(make_extruded_glyph(
             mult_label,
@@ -275,6 +280,7 @@ pub(super) fn build_cascade_hud_placements(
             glyph_scale * scale_mul,
             with_alpha(MULT_COLOR, trio_alpha),
             GlyphMaterial::Polychrome,
+            0.9 + merge_t * 0.12,
         ));
     }
 
@@ -285,6 +291,11 @@ pub(super) fn build_cascade_hud_placements(
     } else {
         total_alpha_merge
     };
+    let total_emissive = if hud.flight_t.is_some() {
+        0.68 + 0.42 * (1.0 - flight_t).powf(1.15)
+    } else {
+        0.85 + 0.22 * merge_t
+    };
     if total_alpha > 0.001 {
         out.push(make_extruded_glyph(
             total_label,
@@ -292,6 +303,7 @@ pub(super) fn build_cascade_hud_placements(
             glyph_scale * flight_scale_mul * 1.1,
             with_alpha(FINAL_COLOR, total_alpha),
             GlyphMaterial::Metal,
+            total_emissive.clamp(0.35, 1.35),
         ));
     }
 
@@ -304,6 +316,7 @@ fn make_extruded_glyph(
     scale: f32,
     color: [f32; 4],
     material: GlyphMaterial,
+    emissive: f32,
 ) -> Object3d {
     Object3d {
         pos,
@@ -315,7 +328,7 @@ fn make_extruded_glyph(
             rotation_x: 0.08,
             rotation_y: 0.0,
             label,
-            emissive: 0.9,
+            emissive,
             material,
         },
         hover_target: 0.0,

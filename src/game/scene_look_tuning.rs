@@ -6,9 +6,7 @@
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
-use crate::game::tonemap_tuning::{
-    self, TonemapTuning, FALLBACK_SCENE_KEY, KNOWN_SCENE_KEYS,
-};
+use crate::game::tonemap_tuning::{self, FALLBACK_SCENE_KEY, KNOWN_SCENE_KEYS, TonemapTuning};
 use crate::render::room_glb::{RoomEnvLightingTune, SHOP_ENV_HEIGHT_SCALE};
 
 /// Full-screen look for one scene: composite tonemap + `room_glb` / `lit_mesh` lighting.
@@ -68,10 +66,12 @@ pub fn scene_look_row_value(look: &SceneLookTuning, row: usize) -> f32 {
         9 => look.room.ambient_scale,
         10 => look.room.lit_mesh_gltf_punctual_scale,
         11 => look.room.gltf_emissive_scale,
-        12..=14 => punctual_tint_mul_to_hsv(look.room.candle_light_color_mul)
-            .component_at(row - 12),
-        15..=17 => punctual_tint_mul_to_hsv(look.room.lantern_light_color_mul)
-            .component_at(row - 15),
+        12..=14 => {
+            punctual_tint_mul_to_hsv(look.room.candle_light_color_mul).component_at(row - 12)
+        }
+        15..=17 => {
+            punctual_tint_mul_to_hsv(look.room.lantern_light_color_mul).component_at(row - 15)
+        }
         _ => 0.0,
     }
 }
@@ -163,9 +163,9 @@ fn load_scene_look(scene_key: &str) -> SceneLookTuning {
         return crate::persistence::load_tuning_override(&unified);
     }
     SceneLookTuning {
-        tonemap: crate::persistence::load_tuning_override::<TonemapTuning>(&tonemap_tuning::storage_key(
-            scene_key,
-        )),
+        tonemap: crate::persistence::load_tuning_override::<TonemapTuning>(
+            &tonemap_tuning::storage_key(scene_key),
+        ),
         ..SceneLookTuning::default()
     }
 }
@@ -196,7 +196,10 @@ pub fn overlay_scene_keys() -> &'static [&'static str] {
 }
 
 pub fn scene_look_row_is_hue(row: usize) -> bool {
-    matches!(row, SCENE_LOOK_CANDLE_TINT_ROW | SCENE_LOOK_LANTERN_TINT_ROW)
+    matches!(
+        row,
+        SCENE_LOOK_CANDLE_TINT_ROW | SCENE_LOOK_LANTERN_TINT_ROW
+    )
 }
 
 pub fn scene_look_row_is_saturation(row: usize) -> bool {
@@ -251,11 +254,7 @@ pub fn hsv_to_punctual_tint_mul(hue: f32, saturation: f32, intensity: f32) -> [f
     if intensity <= 1e-8 {
         return [0.0; 3];
     }
-    let (r, g, b) = hsv_to_rgb_unit(
-        hue.fract(),
-        saturation.clamp(0.0, 1.0),
-        1.0,
-    );
+    let (r, g, b) = hsv_to_rgb_unit(hue.fract(), saturation.clamp(0.0, 1.0), 1.0);
     [r * intensity, g * intensity, b * intensity]
 }
 
@@ -329,7 +328,10 @@ mod tests {
 
     #[test]
     fn punctual_tint_hsv_round_trip() {
-        for rgb in [SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL, SHOP_GLTF_LANTERN_LIGHT_COLOR_MUL] {
+        for rgb in [
+            SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL,
+            SHOP_GLTF_LANTERN_LIGHT_COLOR_MUL,
+        ] {
             let (h, s, i) = punctual_tint_mul_to_hsv(rgb);
             let back = hsv_to_punctual_tint_mul(h, s, i);
             for c in 0..3 {

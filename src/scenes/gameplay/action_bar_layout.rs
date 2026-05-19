@@ -133,8 +133,8 @@ pub fn compute_action_bar(
     let journal_row_right = journal_btn_rect.0 + journal_btn_w;
     let side_gap = btn_gap * 2.0;
     let bowl_cx = (journal_row_left - side_gap - bowl_diam * 0.5).max(bowl_diam * 0.5 + 4.0);
-    let mirror_cx =
-        (journal_row_right + side_gap + bowl_diam * 0.5).min(layout.window_w - bowl_diam * 0.5 - 4.0);
+    let mirror_cx = (journal_row_right + side_gap + bowl_diam * 0.5)
+        .min(layout.window_w - bowl_diam * 0.5 - 4.0);
     let mirror_cy = bowl_cy;
 
     let discard_btn_rect = (
@@ -151,6 +151,7 @@ pub fn compute_action_bar(
     );
 
     let trigger_gap = 10.0 * layout_scale;
+    let trigger_right_nudge = (36.0 * layout_scale).max(24.0);
     let trigger_w = (btn_w * 1.15)
         .max(bowl_diam * 0.90)
         .max(84.0 * layout_scale);
@@ -160,7 +161,7 @@ pub fn compute_action_bar(
     let trigger_btn_rect = if has_structure {
         let meld_center_y = structure_strip_top + structure_tag_h + structure_meld_h * 0.5;
         // Trigger button sits just right of the mirror (which is at right:15%).
-        let mut bx = mirror_cx + bowl_diam * 0.5 + trigger_gap;
+        let mut bx = mirror_cx + bowl_diam * 0.5 + trigger_gap + trigger_right_nudge;
         let max_bx = layout.window_w - trigger_w - (8.0 * layout_scale).max(4.0);
         if bx > max_bx {
             bx = max_bx;

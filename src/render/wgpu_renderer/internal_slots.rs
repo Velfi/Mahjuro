@@ -178,6 +178,8 @@ pub(crate) struct ShopEnvironmentGpu {
     /// `(light_view_proj, model)` for [`shaders/shadow.wgsl`] — one matrix for all env prims.
     pub shadow_uniform_buffer: wgpu::Buffer,
     pub shadow_bind_group: wgpu::BindGroup,
+    /// Same `distortion_buffer` as `room_glb` @binding(8) — shadow VS group 1 (warp disabled when zeroed).
+    pub shadow_warp_bind_group: wgpu::BindGroup,
     pub bind_groups: Vec<wgpu::BindGroup>,
     /// Archive room only: CPU-updated decal atlas at `@group(0) @binding(3)`.
     pub archive_sign_decal_texture: Option<wgpu::Texture>,

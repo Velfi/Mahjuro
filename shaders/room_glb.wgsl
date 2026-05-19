@@ -11,16 +11,7 @@
 // or `0` for infinite range (pure inverse-square with a minimum distance clamp).
 
 const PI: f32 = 3.14159265358979323846;
-/// Scales wall-clock `time_pulse.x` for pick-blind hallway warp (1 = authored rate).
-const HALLWAY_ANIM_TIME_SCALE: f32 = 0.5;
-const HALLWAY_TAU: f32 = 6.283185307;
-/// Standing corrugation frequency vs traveling (`ripple.y` waves along depth `u`).
-const HALLWAY_RIPPLE_STAND_FREQ_RATIO: f32 = 2.37;
-/// `pow(abs(side_c), …)` in world units (same idea as breathe) — avoids `side_n` dying when
-/// env/walls AABB inflates `flags.w`.
-const HALLWAY_RIPPLE_WALL_POWER: f32 = 1.28;
-/// Floor Z for vertical barrel midline only (walls bow — floor/ceiling stay put).
-const HALLWAY_BALLOON_FLOOR_Z: f32 = 0.08;
+// Hallway vertex warp: `hallway_vertex_warp.wgsl` prepended in `embedded_wgsl::SHOP_GLB`.
 
 struct CameraUniform {
     view_proj: mat4x4<f32>,
@@ -30,8 +21,8 @@ struct CameraUniform {
     tile_seed: f32,
     decal_atlas_uv: vec4<f32>,
     /// Must match `wgpu_renderer::CameraUniform::hdr_tonemap` (layout parity with `lit_mesh` felt row).
-    /// `w` — when > 0.5, fragment outputs **linear HDR** (`hdr` before ACES/γ) for a bloom pre-pass;
-    /// normal shop draws keep this at 0.
+    /// `w` is **reserved / no-op** — the fragment always writes linear HDR to
+    /// `scene_color`, and `tonemap_composite.wgsl` is the single ACES pass.
     hdr_tonemap: vec4<f32>,
 };
 
@@ -57,141 +48,7 @@ struct GltfPbrUniform {
 @group(0) @binding(6) var metallic_roughness_tex: texture_2d<f32>;
 @group(0) @binding(7) var emissive_tex: texture_2d<f32>;
 
-/// Pick-blind hallway warp (disabled when `flags.x` = 0 — zero buffer for shop/tiles).
-struct HallwayDistortion {
-    bow: vec4<f32>,
-    breathe: vec4<f32>,
-    ceiling: vec4<f32>,
-    stretch: vec4<f32>,
-    twist: vec4<f32>,
-    mask: vec4<f32>,
-    time_pulse: vec4<f32>,
-    flags: vec4<f32>,
-    /// x = lateral amplitude, y = wave count along `u`, z = travel speed, w = travel mix 0..1.
-    ripple: vec4<f32>,
-};
 @group(0) @binding(8) var<uniform> hd: HallwayDistortion;
-
-fn hallway_depth_axis_sel(idx: f32) -> vec3<f32> {
-    if (idx < 0.5) {
-        return vec3<f32>(1.0, 0.0, 0.0);
-    }
-    if (idx < 1.5) {
-        return vec3<f32>(0.0, 1.0, 0.0);
-    }
-    return vec3<f32>(0.0, 0.0, 1.0);
-}
-
-fn apply_hallway_distortion(world_in: vec3<f32>, h: HallwayDistortion) -> vec3<f32> {
-    if (h.flags.x < 0.5) {
-        return world_in;
-    }
-    let axis = hallway_depth_axis_sel(h.mask.x) * vec3<f32>(h.mask.y);
-    let up = vec3<f32>(0.0, 0.0, 1.0);
-    var lateral = cross(axis, up);
-    let ll = length(lateral);
-    if (ll < 1e-5) {
-        lateral = vec3<f32>(1.0, 0.0, 0.0);
-    } else {
-        lateral = lateral / ll;
-    }
-    let depth = dot(world_in, axis);
-    let d0 = h.mask.z;
-    let d1 = h.mask.w;
-    let span = max(d1 - d0, 1e-4);
-    let u = clamp((depth - d0) / span, 0.0, 1.0);
-    let t = h.time_pulse.x * HALLWAY_ANIM_TIME_SCALE;
-    let drift = h.time_pulse.y * t;
-    var sm0: f32;
-    if (h.twist.z > 0.5) {
-        // Bell curve: strongest mid-corridor, tapering toward both ends of the GLB span.
-        let edge = 0.20;
-        sm0 = smoothstep(0.0, edge, u) * smoothstep(1.0, 1.0 - edge, u);
-    } else {
-        sm0 = smoothstep(d0, d1, depth);
-    }
-    let g = h.flags.z;
-    let pulse = 1.0 + h.time_pulse.w * sin(t * h.time_pulse.z + h.breathe.z + drift);
-    let mask_f = sm0 * g * pulse;
-    // Full boss blind sets `flags.y` = 1; warp uses 0.25× so amplitude matches prior tuning.
-    let bp = h.flags.y * 0.25;
-
-    let side_c = dot(world_in, lateral) - h.stretch.y;
-    let lat_half = max(h.flags.w, 0.25);
-    // Clamp so both walls reach full amp even when glTF root is off the lateral midline.
-    let side_n = clamp(side_c / lat_half, -1.0, 1.0);
-
-    var w = world_in;
-
-    // Breathe: world-space offset from glTF root (symmetric); `breathe.w` falloff is in world units.
-    let breathe_af = pow(max(abs(side_c), 1e-4), h.breathe.w);
-    w = w + lateral * (sign(side_c) * breathe_af * h.breathe.x * sin(t * h.breathe.y + h.breathe.z + u * HALLWAY_TAU * 0.42 + drift) * mask_f);
-
-    // Lateral wall ripple (traveling + standing); must match `tile_3d.wgsl`.
-    if (h.ripple.x > 1e-6) {
-        let wc = max(h.ripple.y, 0.5);
-        let travel_ph = u * wc * HALLWAY_TAU - t * h.ripple.z + h.breathe.z;
-        let stand_ph = u * wc * HALLWAY_TAU * HALLWAY_RIPPLE_STAND_FREQ_RATIO + h.breathe.z;
-        let ripple_h = mix(sin(stand_ph), sin(travel_ph), clamp(h.ripple.w, 0.0, 1.0));
-        let ripple_wall = pow(max(abs(side_c), 1e-4), HALLWAY_RIPPLE_WALL_POWER);
-        w = w + lateral * (sign(side_c) * h.ripple.x * ripple_h * ripple_wall * mask_f);
-    }
-
-    // Wall barrel bow (`bow.w` world units). `wall_dist = |side_c|` — not normalized by `flags.w`.
-    if (h.bow.w > 1e-6) {
-        let balloon_k = h.bow.w * mask_f * mix(1.0, 1.0 + bp * 0.65, sm0);
-        let wall_dist = abs(side_c);
-        let on_wall = smoothstep(0.12, 1.35, wall_dist);
-        let depth_barrel = max(sin(u * HALLWAY_TAU * 0.5), 0.22);
-        let z_mid = mix(HALLWAY_BALLOON_FLOOR_Z, h.ceiling.y, 0.5);
-        let z_half = max((h.ceiling.y - HALLWAY_BALLOON_FLOOR_Z) * 0.5, 0.18);
-        let z_n = clamp((w.z - z_mid) / z_half, -1.0, 1.0);
-        let vert_barrel = max(1.0 - z_n * z_n, 0.4);
-        let bulge = balloon_k * on_wall * depth_barrel * vert_barrel;
-        w = w + lateral * (sign(side_c) * bulge);
-    }
-
-    let z_above = w.z - h.ceiling.y;
-    if (z_above > 0.0) {
-        let cp = 1.0 + h.ceiling.z * sin(t * h.ceiling.w);
-        let sag = z_above * h.ceiling.x * cp * mask_f * mix(1.0, 1.0 + bp * 1.1, sm0);
-        w = w - vec3<f32>(0.0, 0.0, 1.0) * sag;
-    }
-
-    let stretch_k = h.stretch.x * h.stretch.w * mask_f * mix(1.0, 1.0 + bp * 0.9, sm0);
-    w = w + axis * (stretch_k * u);
-
-    let twist_dir = select(-1.0, 1.0, h.twist.w >= 0.0);
-    let ang = h.twist.x * twist_dir * side_n * pow(mask_f, h.twist.y) * mix(1.0, 1.0 + bp * 1.25, sm0);
-    let proj_len = dot(w, axis);
-    let p_perp = w - axis * proj_len;
-    let c = cos(ang);
-    let s = sin(ang);
-    let p_rot = p_perp * c + cross(axis, p_perp) * s;
-    w = axis * proj_len + p_rot;
-
-    return w;
-}
-
-fn world_normal_after_distortion(
-    world0: vec3<f32>,
-    t_u: vec3<f32>,
-    t_v: vec3<f32>,
-    h: HallwayDistortion,
-    n0: vec3<f32>,
-) -> vec3<f32> {
-    // Large enough epsilon vs breathe wavelengths to reduce numeric cancellation;
-    // when the cross is tiny or points into the surface, fall back so punctual BRDF
-    // does not go uniformly dark.
-    let e = 0.06;
-    let d_u = (apply_hallway_distortion(world0 + t_u * e, h) - apply_hallway_distortion(world0 - t_u * e, h)) / (2.0 * e);
-    let d_v = (apply_hallway_distortion(world0 + t_v * e, h) - apply_hallway_distortion(world0 - t_v * e, h)) / (2.0 * e);
-    let raw = cross(d_u, d_v);
-    let len = length(raw);
-    let nd = raw / max(len, 1e-10);
-    let oriented = select(nd, -nd, dot(nd, n0) < 0.0);
-    return select(n0, oriented, len > 1e-7);
-}
 
 struct PointLight {
     pos: vec4<f32>,
@@ -293,8 +150,6 @@ fn sample_shadow_visibility(world_pos: vec3<f32>) -> f32 {
     return sum / 9.0;
 }
 
-// `aces_fitted` — see `scene_hdr_tonemap.wgsl` (prepended at pipeline creation).
-
 fn fresnel_schlick(cos_theta: f32, F0: vec3<f32>) -> vec3<f32> {
     return F0 + (vec3<f32>(1.0) - F0) * pow(max(1.0 - cos_theta, 0.0), 5.0);
 }
@@ -378,10 +233,6 @@ struct ShopShaded {
     out_alpha: f32,
 }
 
-struct ShopHdrMrtOut {
-    @location(0) hdr: vec4<f32>,
-    @location(1) emissive: vec4<f32>,
-}
 
 fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     let base_s = textureSample(base_color, base_sampler, in.uv);
@@ -569,7 +420,10 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     // already outgoing radiance — do not shadow it.
     var lit_hdr = (ambient + Lo + metal_hemi) * cam.tile_seed;
     // Shared directional shadow map (props + room self-shadow in key-light space).
-    lit_hdr = lit_hdr * sample_shadow_visibility(in.world_pos);
+    // Archive description signs (`is_archive_decal`) hold readable copy and must not catch
+    // lantern / prop silhouettes from the key-light pass — keep them fully lit.
+    let shadow_vis = select(sample_shadow_visibility(in.world_pos), 1.0, is_archive_decal);
+    lit_hdr = lit_hdr * shadow_vis;
     var hdr = lit_hdr + emissive;
 
     // Shop candle wax: offline SSS bake on `TEXCOORD_1` stored in `in.uv` (`decal_tex`, linear RGB).
@@ -583,24 +437,15 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
 
 @fragment
 fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
+    // Always linear HDR. `tonemap_composite.wgsl` applies the single ACES pass.
     let s = shop_shade(in, front_facing);
-    if (cam.hdr_tonemap.w > 0.5) {
-        return vec4<f32>(s.hdr, s.out_alpha);
-    }
-
-    let mapped = aces_fitted(s.hdr);
-    let inv_g = 1.0 / max(lights.extras.x, 0.01);
-    let out_rgb = pow(mapped, vec3<f32>(inv_g));
-    return vec4<f32>(out_rgb, s.out_alpha);
+    return vec4<f32>(s.hdr, s.out_alpha);
 }
 
-/// Linear-HDR MRT pass (shop/hallway bloom pre-pass): RT0 matches `fs_main` linear path;
-/// RT1 is **emissive only** (texture × factor × strength) for screen-space GI, not BRDF.
+/// Emissive-only pre-pass for screen-space GI (writes `room_emissive_view`).
+/// `s.emissive` = texture × factor × strength (outgoing radiance), not BRDF.
 @fragment
-fn fs_main_mrt(in: VsOut, @builtin(front_facing) front_facing: bool) -> ShopHdrMrtOut {
+fn fs_main_emissive(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
     let s = shop_shade(in, front_facing);
-    return ShopHdrMrtOut(
-        vec4<f32>(s.hdr, s.out_alpha),
-        vec4<f32>(s.emissive, s.out_alpha),
-    );
+    return vec4<f32>(s.emissive, s.out_alpha);
 }

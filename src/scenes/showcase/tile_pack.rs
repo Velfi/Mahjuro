@@ -10,7 +10,9 @@ use crate::render::draw_cmd::{
     CameraParams, DrawCmd, Object3d, Object3dKind, ShowcaseRenderHints, ShowcaseTilePlacement,
     UiFrame,
 };
-use crate::render::showcase_tile_layout::{compute_pack_reveal_row_layout, PackRevealRowLayoutParams};
+use crate::render::showcase_tile_layout::{
+    PackRevealRowLayoutParams, compute_pack_reveal_row_layout,
+};
 use crate::render::table_transform::mat4_to_euler_xyz_rad;
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{PointLight, SpotLight};
@@ -23,6 +25,13 @@ use crate::ui::input::UiAction;
 use crate::ui::scene_layout::{ShopPositions, load_shop_positions};
 
 use super::super::{BackgroundId, ButtonDef, DrawCtx, OverlayRequest, SceneTransition, UpdateCtx};
+
+/// Pack mesh height vs window height (must match shop shelf “hero” scale).
+const PACK_CELEB_BOX_H_FRAC: f32 = 0.56;
+/// Nudge pack **down** in layout pixels so a tall box clears the title band and stays centered.
+const PACK_CELEB_SCREEN_Y_DOWN_FRAC: f32 = 0.055;
+/// Extra downward shift scaled with box height (keeps framing when [`PACK_CELEB_BOX_H_FRAC`] changes).
+const PACK_CELEB_SCREEN_Y_PER_BOX_H: f32 = 0.10;
 
 pub struct TilePackPresenter {
     pub celebration: PackCelebration,
@@ -98,9 +107,13 @@ impl TilePackPresenter {
             celeb.pack_name.to_string(),
         ));
 
+        let box_h = h * PACK_CELEB_BOX_H_FRAC;
+        let pack_py_base =
+            h * self.positions.celeb_pack_closeup.ny + h * PACK_CELEB_SCREEN_Y_DOWN_FRAC + box_h * PACK_CELEB_SCREEN_Y_PER_BOX_H;
+        let pack_lift_z = layout.mm(self.positions.celeb_pack_closeup.lift_mm) + box_h * 0.5;
+
         match celeb.phase {
             CelebPhase::Closeup => {
-                let box_h = h * 0.28;
                 let box_w = box_h * crate::core::tile_pack::PACK_ASPECT_W_OVER_H;
                 let box_d = box_h * 0.10;
                 let t = celeb.started_at.elapsed().as_secs_f32();
@@ -111,8 +124,8 @@ impl TilePackPresenter {
                 frame.object3d_batch(vec![Object3d {
                     pos: [
                         w * 0.5 + bob_x,
-                        h * self.positions.celeb_pack_closeup.ny + bob_y,
-                        layout.mm(self.positions.celeb_pack_closeup.lift_mm) + box_h * 0.5,
+                        pack_py_base + bob_y,
+                        pack_lift_z,
                     ],
                     extents: [box_w, box_d, box_h],
                     rotation: mat4_to_euler_xyz_rad(
@@ -132,7 +145,6 @@ impl TilePackPresenter {
                 frame.text(celebration_overlay::label_confirm_to_open(h, w, t));
             }
             CelebPhase::Reveal => {
-                let box_h = h * 0.28;
                 let box_w = box_h * crate::core::tile_pack::PACK_ASPECT_W_OVER_H;
                 let box_d = box_h * 0.10;
 
@@ -143,8 +155,8 @@ impl TilePackPresenter {
                 frame.object3d_batch(vec![Object3d {
                     pos: [
                         w * 0.5,
-                        h * self.positions.celeb_pack_closeup.ny,
-                        layout.mm(self.positions.celeb_pack_closeup.lift_mm) + box_h * 0.5,
+                        pack_py_base,
+                        pack_lift_z,
                     ],
                     extents: [box_w, box_d, box_h],
                     rotation: mat4_to_euler_xyz_rad(
@@ -175,8 +187,9 @@ impl TilePackPresenter {
                     rotation_xyz_rad: rotation,
                 });
                 let src_px = w * 0.5;
-                let src_py = h * self.positions.celeb_pack_closeup.ny;
-                let src_lift = row_lift + h * 0.15;
+                let src_py = pack_py_base;
+                // Spawn tiles from the upper half of the enlarged pack so the arc reads as “out of the box”.
+                let src_lift = row_lift + h * 0.15 + box_h * 0.42;
 
                 let mut placements = Vec::with_capacity(n);
                 for i in 0..n {
@@ -218,11 +231,13 @@ impl TilePackPresenter {
     }
 
     pub fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
-        if ctx.headless && !self.celebration.headless_hold_pack_closeup
-            && matches!(self.celebration.phase, CelebPhase::Closeup) {
-                self.celebration.phase = CelebPhase::Reveal;
-                self.celebration.started_at = std::time::Instant::now();
-            }
+        if ctx.headless
+            && !self.celebration.headless_hold_pack_closeup
+            && matches!(self.celebration.phase, CelebPhase::Closeup)
+        {
+            self.celebration.phase = CelebPhase::Reveal;
+            self.celebration.started_at = std::time::Instant::now();
+        }
 
         let has_input = ctx.actions.iter().any(|a| {
             matches!(
@@ -333,12 +348,14 @@ fn pack_celebration_subject_spotlight(
     let warm = [1.0_f32, 0.93, 0.78];
     match celeb.phase {
         CelebPhase::Closeup => {
-            let box_h = h * 0.28;
+            let box_h = h * PACK_CELEB_BOX_H_FRAC;
             let cx = w * 0.5;
-            let cy = h * positions.celeb_pack_closeup.ny;
+            let cy = h * positions.celeb_pack_closeup.ny
+                + h * PACK_CELEB_SCREEN_Y_DOWN_FRAC
+                + box_h * PACK_CELEB_SCREEN_Y_PER_BOX_H;
             let lift = layout.mm(positions.celeb_pack_closeup.lift_mm) + box_h * 0.5;
-            let light_lift = lift + h * 0.52;
-            let pos = [cx, cy - h * 0.14, light_lift];
+            let light_lift = lift + h * 0.52 + box_h * 0.38;
+            let pos = [cx, cy - h * 0.14 - box_h * 0.06, light_lift];
             let tw = world_on_camera_ray_plane_z(w, h, cam, cx, cy, lift);
             let lw = world_on_camera_ray_plane_z(w, h, cam, pos[0], pos[1], pos[2]);
             let dir = (tw - lw).normalize_or_zero();
@@ -350,7 +367,7 @@ fn pack_celebration_subject_spotlight(
             vec![SpotLight {
                 pos,
                 dir: dir.to_array(),
-                radius: h * 2.2,
+                radius: h * 2.2 + box_h * 0.85,
                 cos_outer,
                 cos_inner,
                 color: warm,
@@ -410,11 +427,13 @@ fn pack_celebration_isolation_lights(
     layout: &ShopLayout,
     positions: &ShopPositions,
 ) -> Vec<PointLight> {
-    let box_h = h * 0.28;
+    let box_h = h * PACK_CELEB_BOX_H_FRAC;
     let (cx, row_py, lift) = match phase {
         CelebPhase::Closeup => (
             w * 0.5,
-            h * positions.celeb_pack_closeup.ny,
+            h * positions.celeb_pack_closeup.ny
+                + h * PACK_CELEB_SCREEN_Y_DOWN_FRAC
+                + box_h * PACK_CELEB_SCREEN_Y_PER_BOX_H,
             layout.mm(positions.celeb_pack_closeup.lift_mm) + box_h * 0.5,
         ),
         CelebPhase::Reveal => (
@@ -428,22 +447,38 @@ fn pack_celebration_isolation_lights(
         // Wider radius + higher intensity so an 8-tile row still reads on the sides.
         CelebPhase::Reveal => (1.65, 1.12),
     };
+    let close_z_k = match phase {
+        CelebPhase::Closeup => box_h * 0.22,
+        CelebPhase::Reveal => 0.0,
+    };
     vec![
         PointLight {
-            pos: [cx + w * 0.14, row_py - h * 0.22, lift + h * 0.48],
-            radius: h * 3.2 * r_mul,
+            pos: [
+                cx + w * 0.14,
+                row_py - h * 0.22 - box_h * 0.04,
+                lift + h * 0.48 + close_z_k,
+            ],
+            radius: h * 3.2 * r_mul + box_h * 0.5 * r_mul,
             color: color::rgb(color::TALLOW),
             intensity: 1.55 * i_mul,
         },
         PointLight {
-            pos: [cx - w * 0.16, row_py + h * 0.06, lift + h * 0.32],
-            radius: h * 2.8 * r_mul,
+            pos: [
+                cx - w * 0.16,
+                row_py + h * 0.06 + box_h * 0.03,
+                lift + h * 0.32 + close_z_k * 0.7,
+            ],
+            radius: h * 2.8 * r_mul + box_h * 0.45 * r_mul,
             color: [0.70, 0.82, 1.0],
             intensity: 1.05 * i_mul,
         },
         PointLight {
-            pos: [cx, row_py - h * 0.38, lift + h * 0.62],
-            radius: h * 2.6 * r_mul,
+            pos: [
+                cx,
+                row_py - h * 0.38 - box_h * 0.08,
+                lift + h * 0.62 + close_z_k * 1.1,
+            ],
+            radius: h * 2.6 * r_mul + box_h * 0.4 * r_mul,
             color: color::rgb(color::PARCHMENT),
             intensity: 1.25 * i_mul,
         },

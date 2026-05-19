@@ -109,7 +109,9 @@ impl Default for ShopPositions {
             camera_eye_z_frac: 0.34,
             camera_target_y_frac: 0.18,
             camera_target_z_frac: 0.10,
-            celeb_pack_closeup: Placement::at(0.358_506_95, -0.488_688_23, -102.059_51),
+            // Pack celebration closeup (tile_pack showcase); includes arrange deltas
+            // from 2026-05-19 (ny −1.502852, lift −455 mm vs prior defaults).
+            celeb_pack_closeup: Placement::at(0.358_506_95, -1.991_540_2, -557.059_51),
             celeb_pack_reveal: Placement::at(-3.352_761_3e-8, 0.55, 36.887_23),
             celeb_zodiac: Placement {
                 nx: 0.0,

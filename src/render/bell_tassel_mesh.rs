@@ -3,7 +3,7 @@
 //! applies a gentle wind sway on the instance rotation.
 
 use crate::render::lit_mesh::{
-    push_cylinder_z, CylinderZParams, LitMeshBuffers, MaterialKind, MaterialParams, MeshCpu,
+    CylinderZParams, LitMeshBuffers, MaterialKind, MaterialParams, MeshCpu, push_cylinder_z,
 };
 use crate::render::tile_glb::Vertex3dTex;
 

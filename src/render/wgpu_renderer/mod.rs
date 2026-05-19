@@ -63,6 +63,7 @@ use crate::render::lit_mesh::{
     LitMeshGpu, LitMeshInstance, MaterialKind, MaterialParams, ShadowCasterUniform, ShadowGlobals,
     SsrGlobals, create_lit_mesh_material_layout, create_lit_mesh_spot_ssr_layout,
     create_room_env_shadow_gpu, create_shadow_caster_layout, create_shadow_sample_layout,
+    create_shadow_warp_bind_group, create_shadow_warp_layout,
 };
 use crate::render::mirror_mesh::{MIRROR_LOCAL_CENTER_Y, MIRROR_LOCAL_HALF, build_mirror_mesh};
 use crate::render::ofuda_mesh::build_ofuda_mesh;
@@ -127,9 +128,6 @@ pub struct WgpuRenderer {
     flame_instance_staging: Vec<crate::render::flame_volume::GpuFlameInstance>,
     starfield_pipeline: wgpu::RenderPipeline,
     ember_drift_pipeline: wgpu::RenderPipeline,
-    rain_pipeline: wgpu::RenderPipeline,
-    rain_uniform_buffer: wgpu::Buffer,
-    rain_bind_group: wgpu::BindGroup,
     golden_dust_pipeline: wgpu::RenderPipeline,
     moonlit_water_pipeline: wgpu::RenderPipeline,
     // Owns the GPU resource that `moon_albedo_bind_group` samples from.
@@ -162,7 +160,7 @@ pub struct WgpuRenderer {
     shop_pipeline_opaque_cull: wgpu::RenderPipeline,
     shop_pipeline_blend_double: wgpu::RenderPipeline,
     shop_pipeline_blend_cull: wgpu::RenderPipeline,
-    /// Shop linear-HDR MRT pass: bloom RT0 + emissive-only RT1 (`room_glb` `fs_main_mrt`).
+    /// Shop emissive-only pre-pass (`room_glb` `fs_main_emissive` → `room_emissive_view`).
     shop_pipeline_mrt_opaque_double: wgpu::RenderPipeline,
     shop_pipeline_mrt_opaque_cull: wgpu::RenderPipeline,
     shop_pipeline_mrt_blend_double: wgpu::RenderPipeline,
@@ -384,10 +382,8 @@ pub struct WgpuRenderer {
     /// before bloom, tonemap, and final composite into the swapchain.
     scene_color_texture: wgpu::Texture,
     scene_color_view: wgpu::TextureView,
-    /// Linear HDR shop-only redraw for bloom (`room_glb` `hdr_tonemap.w` path).
-    shop_linear_bloom_texture: wgpu::Texture,
-    shop_linear_bloom_view: wgpu::TextureView,
-    /// Emissive-only linear RGB (`room_glb` MRT) for GI gather — excludes BRDF / punctual.
+    /// Emissive-only linear RGB (`room_glb` emissive pre-pass) for GI gather —
+    /// excludes BRDF / punctual.
     room_emissive_texture: wgpu::Texture,
     room_emissive_view: wgpu::TextureView,
     /// Half-res emissive indirect estimate (linear HDR).
@@ -486,7 +482,7 @@ pub struct WgpuRenderer {
     pub tonemap_film_grain: f32,
     /// Increments each `render` call; re-rolls film grain without UV scroll.
     film_grain_frame: u32,
-    /// Procedural rain vignette (`shaders/rain.wgsl`). Live-tuned via Debug > Rain.
+    /// Main-menu world rain tuning (CPU field). Live-tuned via Debug > Rain.
     pub rain_tuning: crate::render::rain_tuning::RainTuning,
     /// Pipeline for procedural scene props (candles, table). Shares the
     /// `point_lights_layout` (group 1) with the tile pipeline.
@@ -743,6 +739,8 @@ pub struct WgpuRenderer {
     /// pipeline). Each `LitMeshInstance` and `HandTileGpu` owns one bind
     /// group built against this layout.
     shadow_caster_layout: wgpu::BindGroupLayout,
+    /// Group 1 of the shadow VS — `HallwayDistortion` (zeroed ⇒ no warp). Bound for every shadow draw.
+    shadow_warp_disabled_bind_group: wgpu::BindGroup,
     /// Frame-shared uniform: light_view_proj + (enabled, bias, texel size).
     shadow_globals_buffer: wgpu::Buffer,
     /// Frame-shared bind group bound as group 2 on every 3D draw in the

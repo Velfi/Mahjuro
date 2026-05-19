@@ -21,9 +21,21 @@ impl WgpuRenderer {
                         .as_deref()
                         .map(|rgba| (rgba, img.mesh_width, img.mesh_height))
                         .unwrap_or((&img.rgba, img.width, img.height));
-                    if let Some(cpu) =
-                        build_relic_mesh_from_rgba(mesh_source.0, mesh_source.1, mesh_source.2)
-                    {
+                    // Diagnostic label for `build_relic_mesh_from_rgba`: prefer
+                    // the actual mask asset path (where artists need to look)
+                    // and fall back to the albedo path when no mask file
+                    // exists and we're falling back to the albedo's alpha.
+                    let mesh_source_label = if img.mesh_rgba.is_some() {
+                        img.id.source_mask_path()
+                    } else {
+                        format!("{} (alpha fallback)", img.id.render_texture_path())
+                    };
+                    if let Some(cpu) = build_relic_mesh_from_rgba(
+                        mesh_source.0,
+                        mesh_source.1,
+                        mesh_source.2,
+                        &mesh_source_label,
+                    ) {
                         // Cache the CPU triangle list alongside the GPU mesh so
                         // `pick_collection_object` / `pick_shop_object` can do
                         // per-triangle ray casts against the real silhouette

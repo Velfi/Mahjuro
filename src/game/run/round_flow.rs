@@ -1,5 +1,14 @@
-use crate::{core::{boss, deck::Wall, relic::RelicId, rules::{BlindKind, RuleModifier}, tile::Suit}, game::{engine_state::GameplayCoreState, event_bus::EventBus, run::FINAL_ANTE}};
 use crate::game::run::RunState;
+use crate::{
+    core::{
+        boss,
+        deck::Wall,
+        relic::RelicId,
+        rules::{BlindKind, RuleModifier},
+        tile::Suit,
+    },
+    game::{engine_state::GameplayCoreState, event_bus::EventBus, run::FINAL_ANTE},
+};
 
 impl RunState {
     /// Apply a blind choice: sets target score, dispatches boss effect on

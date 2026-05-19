@@ -481,9 +481,10 @@ fn settings_cache() -> &'static Mutex<Option<AppSettings>> {
 
 pub fn load_settings() -> AppSettings {
     if let Ok(guard) = settings_cache().lock()
-        && let Some(cached) = guard.as_ref() {
-            return cached.clone();
-        }
+        && let Some(cached) = guard.as_ref()
+    {
+        return cached.clone();
+    }
     let settings = load_settings_uncached();
     if let Ok(mut guard) = settings_cache().lock() {
         *guard = Some(settings.clone());
@@ -620,9 +621,10 @@ fn profile_cache() -> &'static Mutex<[Option<PlayerProgress>; MAX_PROFILES]> {
 pub fn load_profile(index: usize) -> PlayerProgress {
     let idx = index.min(MAX_PROFILES - 1);
     if let Ok(guard) = profile_cache().lock()
-        && let Some(cached) = guard[idx].as_ref() {
-            return cached.clone();
-        }
+        && let Some(cached) = guard[idx].as_ref()
+    {
+        return cached.clone();
+    }
     let progress = load_profile_uncached(idx);
     if let Ok(mut guard) = profile_cache().lock() {
         guard[idx] = Some(progress.clone());

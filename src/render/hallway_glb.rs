@@ -17,7 +17,7 @@ use glam::Vec3;
 use crate::core::rules::BlindKind;
 use crate::render::draw_cmd::CameraParams;
 use crate::render::room_env_gltf::{RoomEnvWalkHooks, RoomMeshPolicy};
-use crate::render::room_glb::{self, RoomGlbCpu, RoomEnvLightingTune, load_room_glb_from_bytes};
+use crate::render::room_glb::{self, RoomEnvLightingTune, RoomGlbCpu, load_room_glb_from_bytes};
 use crate::render::wgpu_renderer::{PointLight, SpotLight};
 
 /// glTF node names for pick-blind actions (must match Blender objects).
@@ -152,7 +152,8 @@ fn hallway_depth_axis_doc() -> Vec3 {
     v * HALLWAY_DEPTH_SIGN
 }
 
-/// Uniform block consumed by `room_glb.wgsl` / `tile_3d.wgsl` vertex stage (`binding(8)`).
+/// Uniform block consumed by `room_glb.wgsl` / `tile_3d.wgsl` vertex stage (`binding(8)`)
+/// and by `shadow.wgsl` depth pass (`@group(1) @binding(0)`).
 /// When `flags[0] < 0.5`, distortion is a no-op (shop / archive / tiles use a zeroed buffer).
 #[repr(C)]
 #[derive(Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -223,7 +224,9 @@ pub const HALLWAY_WALL_TINT_COUNT: usize = HALLWAY_WALL_TINTS.len();
 /// One of eight hallway wall tints, stable for a given run and ante.
 #[inline]
 pub fn hallway_wall_tint_rgb(run_number: u32, ante: u32) -> [f32; 3] {
-    hallway_wall_tint_by_index((wall_tint_seed_hash(run_number, ante) as usize) % HALLWAY_WALL_TINT_COUNT)
+    hallway_wall_tint_by_index(
+        (wall_tint_seed_hash(run_number, ante) as usize) % HALLWAY_WALL_TINT_COUNT,
+    )
 }
 
 /// Preset wall tint by index `0..[`HALLWAY_WALL_TINT_COUNT`]`.
@@ -459,7 +462,10 @@ fn hallway_walls_lateral_half_width(
         .vertices
         .iter()
         .map(|v| {
-            let side_c = model.transform_point3(Vec3::from(v.position)).dot(lateral_n) - lat_ref;
+            let side_c = model
+                .transform_point3(Vec3::from(v.position))
+                .dot(lateral_n)
+                - lat_ref;
             side_c.abs()
         })
         .collect();
@@ -555,10 +561,7 @@ pub fn release_hallway_environment_cpu_sources_after_gpu_upload() {
 
 #[inline]
 fn is_hallway_marker_name(name: &str) -> bool {
-    matches!(
-        name,
-        BTN_PLAY_ROUND | BTN_PLAY_BOSS | BTN_SKIP_ROUND
-    )
+    matches!(name, BTN_PLAY_ROUND | BTN_PLAY_BOSS | BTN_SKIP_ROUND)
 }
 
 #[derive(Copy, Clone)]
@@ -636,7 +639,12 @@ pub fn hallway_pick_blind_embedded_camera_params(
     })
 }
 
-fn hallway_camera_resolve(w: f32, h: f32, env_h: f32, from_glb: Option<CameraParams>) -> CameraParams {
+fn hallway_camera_resolve(
+    w: f32,
+    h: f32,
+    env_h: f32,
+    from_glb: Option<CameraParams>,
+) -> CameraParams {
     with_hallway_glb_cpu(|opt| {
         let mut cam = from_glb.unwrap_or_else(|| CameraParams {
             eye: [0.0, -h * 1.25, h * 0.50],
@@ -647,10 +655,11 @@ fn hallway_camera_resolve(w: f32, h: f32, env_h: f32, from_glb: Option<CameraPar
             clip_far: None,
         });
         if from_glb.is_none()
-            && let Some(cpu) = opt {
-                let corners = room_glb::room_world_bounds_corners_centered(h, env_h, cpu);
-                cam = room_glb::room_camera_fit_fovy_for_corners(w, h, cam, &corners, 0.94);
-            }
+            && let Some(cpu) = opt
+        {
+            let corners = room_glb::room_world_bounds_corners_centered(h, env_h, cpu);
+            cam = room_glb::room_camera_fit_fovy_for_corners(w, h, cam, &corners, 0.94);
+        }
         if let Some(cpu) = opt {
             cam = room_glb::room_camera_with_room_clip_planes(cam, h, env_h, cpu);
         }
@@ -673,7 +682,9 @@ pub fn hallway_camera_base(w: f32, h: f32, env_h: f32) -> CameraParams {
 }
 
 pub fn hallway_glb_has_embedded_lights() -> bool {
-    with_hallway_glb_cpu(|opt| opt.is_some_and(crate::render::room_gltf_punctual::room_glb_has_embedded_lights))
+    with_hallway_glb_cpu(|opt| {
+        opt.is_some_and(crate::render::room_gltf_punctual::room_glb_has_embedded_lights)
+    })
 }
 
 /// glTF punctual points merged into [`crate::render::draw_cmd::SceneLighting::punctual`] (hallway room).
@@ -709,7 +720,12 @@ pub fn hallway_embedded_spot_lights_runtime(
     with_hallway_glb_cpu(|opt| {
         opt.map(|cpu| {
             crate::render::room_gltf_punctual::embedded_spot_lights_runtime(
-                cpu, w, h, env_h, tune, "hallway.glb",
+                cpu,
+                w,
+                h,
+                env_h,
+                tune,
+                "hallway.glb",
             )
         })
         .unwrap_or_default()
@@ -722,10 +738,10 @@ mod tests {
 
     use super::load_hallway_glb_from_bytes;
     use crate::core::rules::BlindKind;
-    use crate::render::room_glb;
     use crate::render::hallway_glb::{
-        HallwayDistortion, HALLWAY_RIPPLE_AMOUNT, HALLWAY_RIPPLE_SPEED, HALLWAY_RIPPLE_WAVES,
+        HALLWAY_RIPPLE_AMOUNT, HALLWAY_RIPPLE_SPEED, HALLWAY_RIPPLE_WAVES, HallwayDistortion,
     };
+    use crate::render::room_glb;
 
     #[test]
     fn hallway_walls_vertices_have_ripple_wall_weight() {

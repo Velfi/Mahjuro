@@ -28,7 +28,7 @@ use glam::{Mat4, Vec3};
 
 use crate::render::draw_cmd::CameraParams;
 use crate::render::room_env_gltf::{RoomEnvWalkHooks, RoomMeshPolicy};
-use crate::render::room_glb::{self, RoomGlbCpu, RoomEnvLightingTune, load_room_glb_from_bytes};
+use crate::render::room_glb::{self, RoomEnvLightingTune, RoomGlbCpu, load_room_glb_from_bytes};
 use crate::render::wgpu_renderer::{PointLight, SpotLight};
 
 pub const SIGN_DESCRIPTION_LEFT: &str = "sign_description_left";
@@ -290,12 +290,20 @@ pub fn archive_camera_base(w: f32, h: f32, env_h: f32) -> CameraParams {
             clip_far: None,
         });
         if from_glb.is_none()
-            && let Some(cpu) = opt {
-                let corners = room_glb::room_world_bounds_corners_centered(h, env_h, cpu);
-                cam = room_glb::room_camera_fit_fovy_for_corners(w, h, cam, &corners, 0.94);
-            }
+            && let Some(cpu) = opt
+        {
+            let corners = room_glb::room_world_bounds_corners_centered(h, env_h, cpu);
+            cam = room_glb::room_camera_fit_fovy_for_corners(w, h, cam, &corners, 0.94);
+        }
         if let Some(cpu) = opt {
             cam = room_glb::room_camera_with_room_clip_planes(cam, h, env_h, cpu);
+            // `room_camera_fit_clip_planes` sets `clip_near` near the room AABB entry along the
+            // look ray. [`CollectionScene`] pins camera-facing wood chrome (Back / Switch save)
+            // between the eye and the shell (`collection_chrome_tablet_plane_z`), so a fitted
+            // near plane vertex-clips those lit meshes (and they read as missing buttons). Keep
+            // the tuned `clip_far` for depth precision; use the default near from
+            // [`CameraParams::clip_planes`] instead (`clip_near: None` → 1 world unit at this scale).
+            cam.clip_near = None;
         }
         cam
     })
@@ -366,7 +374,9 @@ pub fn archive_marker_screen_x(
 }
 
 pub fn archive_glb_has_embedded_lights() -> bool {
-    with_archive_glb_cpu(|opt| opt.is_some_and(crate::render::room_gltf_punctual::room_glb_has_embedded_lights))
+    with_archive_glb_cpu(|opt| {
+        opt.is_some_and(crate::render::room_gltf_punctual::room_glb_has_embedded_lights)
+    })
 }
 
 pub fn archive_embedded_point_lights_runtime(
@@ -400,7 +410,12 @@ pub fn archive_embedded_spot_lights_runtime(
     with_archive_glb_cpu(|opt| {
         opt.map(|cpu| {
             crate::render::room_gltf_punctual::embedded_spot_lights_runtime(
-                cpu, w, h, env_h, tune, "archive.glb",
+                cpu,
+                w,
+                h,
+                env_h,
+                tune,
+                "archive.glb",
             )
         })
         .unwrap_or_default()

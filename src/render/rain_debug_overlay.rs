@@ -1,10 +1,10 @@
-//! Debug slider panel for [`super::rain_tuning::RainTuning`] (main menu rain).
+//! Debug slider panel for [`super::rain_tuning::RainTuning`] — main-menu CPU rain field.
 
 use sdl3::keyboard::Scancode;
 
 use crate::render::rain_tuning::{
-    rain_color_swatch_rgb, rain_hue_wheel_preview_linear, rain_row_is_hue, rain_row_is_saturation,
-    RainTuning, RAIN_DEBUG_ROW_META, RAIN_DEBUG_SLIDER_COUNT,
+    RAIN_DEBUG_ROW_META, RAIN_DEBUG_SLIDER_COUNT, RainTuning, rain_color_swatch_rgb,
+    rain_hue_wheel_preview_linear, rain_row_is_hue, rain_row_is_saturation,
 };
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
@@ -81,12 +81,7 @@ impl RainDebugLayout {
     fn row_rect(&self, row: usize) -> (f32, f32, f32, f32) {
         let vis = row.saturating_sub(self.scroll_row);
         let row_y = self.rows_y0 + vis as f32 * (self.row_h + self.row_gap);
-        (
-            self.panel_x + 4.0,
-            row_y,
-            self.panel_w - 8.0,
-            self.row_h,
-        )
+        (self.panel_x + 4.0, row_y, self.panel_w - 8.0, self.row_h)
     }
 }
 
@@ -358,7 +353,8 @@ impl RainDebugOverlay {
                 self.apply_slider_mx(di, mx, &layout);
             }
             if (clicked || held) && self.dragging_slider.is_none() {
-                for i in self.scroll_row..(self.scroll_row + VISIBLE_ROWS).min(RAIN_DEBUG_SLIDER_COUNT)
+                for i in
+                    self.scroll_row..(self.scroll_row + VISIBLE_ROWS).min(RAIN_DEBUG_SLIDER_COUNT)
                 {
                     if point_in_rect(mx, my, layout.slider_track(i)) {
                         self.cursor = i;
@@ -372,7 +368,8 @@ impl RainDebugOverlay {
                 }
             }
             if clicked && self.dragging_slider.is_none() {
-                for i in self.scroll_row..(self.scroll_row + VISIBLE_ROWS).min(RAIN_DEBUG_SLIDER_COUNT)
+                for i in
+                    self.scroll_row..(self.scroll_row + VISIBLE_ROWS).min(RAIN_DEBUG_SLIDER_COUNT)
                 {
                     if point_in_rect(mx, my, layout.value_cell(i)) {
                         self.cursor = i;
@@ -445,8 +442,7 @@ impl RainDebugOverlay {
         let pad = (8.0 * layout.scale).max(5.0);
         let title_h = (22.0 * layout.scale).max(14.0);
         let hint_h = (13.0 * layout.scale).max(9.0);
-        let vis_h =
-            VISIBLE_ROWS as f32 * (layout.row_h + layout.row_gap) + layout.row_h * 3.0;
+        let vis_h = VISIBLE_ROWS as f32 * (layout.row_h + layout.row_gap) + layout.row_h * 3.0;
         let panel_h = pad + title_h + pad + vis_h + pad + hint_h * 2.0 + pad * 2.0;
         let row_font = typography::tier_at_most(layout.row_h * 0.48, window_h);
 
@@ -468,8 +464,13 @@ impl RainDebugOverlay {
         });
 
         labels.push(TextLabel {
-            rect: [layout.panel_x, layout.panel_y + pad, layout.panel_w, title_h],
-            text: "Rain (main menu)".into(),
+            rect: [
+                layout.panel_x,
+                layout.panel_y + pad,
+                layout.panel_w,
+                title_h,
+            ],
+            text: "Rain field (main menu)".into(),
             color: color::JADE,
             ..Default::default()
         });
@@ -598,9 +599,8 @@ impl RainDebugOverlay {
             });
         }
 
-        let actions_y0 = layout.rows_y0
-            + VISIBLE_ROWS as f32 * (layout.row_h + layout.row_gap)
-            + pad;
+        let actions_y0 =
+            layout.rows_y0 + VISIBLE_ROWS as f32 * (layout.row_h + layout.row_gap) + pad;
         for (idx, (row, label)) in [
             (RAIN_SAVE_ROW, "Save for main menu"),
             (RAIN_RESET_ROW, "Reset to defaults"),
@@ -632,12 +632,7 @@ impl RainDebugOverlay {
             ..Default::default()
         });
         labels.push(TextLabel {
-            rect: [
-                layout.panel_x,
-                hint_y + hint_h,
-                layout.panel_w,
-                hint_h,
-            ],
+            rect: [layout.panel_x, hint_y + hint_h, layout.panel_w, hint_h],
             text: "Ctrl+C copy Rust literal".into(),
             font_px: Some(hint_font),
             color: color::alpha(color::PARCHMENT, 0.55),

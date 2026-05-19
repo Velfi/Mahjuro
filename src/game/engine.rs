@@ -425,8 +425,8 @@ impl<'a> GameEngine<'a> {
         if let Some(ref mut onboarding) = run.onboarding {
             onboarding.phase = OnboardingPhase::Shop;
         }
-        use crate::game::game_mode::{HAND_SIZE, STARTING_PLAYS, STARTING_DISCARDS};
-        
+        use crate::game::game_mode::{HAND_SIZE, STARTING_DISCARDS, STARTING_PLAYS};
+
         run.mode.hand_size = HAND_SIZE;
         run.mode.starting_plays = STARTING_PLAYS;
         run.mode.starting_discards = STARTING_DISCARDS;
@@ -572,10 +572,7 @@ impl<'a> GameEngine<'a> {
                 .as_ref()
                 .and_then(|effect| effect.description_override.clone())
                 .unwrap_or_else(|| def.description.to_string());
-            (
-                Some(def.name.to_string()),
-                Some(description),
-            )
+            (Some(def.name.to_string()), Some(description))
         } else {
             (None, None)
         };

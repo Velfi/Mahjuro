@@ -809,10 +809,7 @@ fn emit_leaf_masks(
 }
 
 fn flower_meld_partition_masks(flowers: &[IndexedTile]) -> Vec<u32> {
-    let indexed: Vec<(usize, u32)> = flowers
-        .iter()
-        .map(|f| (f.hand_index, f.tile.id))
-        .collect();
+    let indexed: Vec<(usize, u32)> = flowers.iter().map(|f| (f.hand_index, f.tile.id)).collect();
     crate::core::hand::decomposition::flower_meld_partition_masks(&indexed)
 }
 
@@ -1332,9 +1329,8 @@ fn play_blind(
                     run.try_validate_with_wildcards(&full)
                         .and_then(|(sets, _)| format_meld_groups(&full, &sets))
                 } else {
-                    commit_melds.and_then(|(sets, scoring_tiles)| {
-                        format_meld_groups(&scoring_tiles, &sets)
-                    })
+                    commit_melds
+                        .and_then(|(sets, scoring_tiles)| format_meld_groups(&scoring_tiles, &sets))
                 };
                 scoring_log.push(BotScoringAction {
                     kind: "play".into(),
@@ -1397,7 +1393,7 @@ mod tests {
     use crate::core::tile::{Suit, Tile};
     use crate::core::zodiac::ZodiacKind;
     use crate::game::game_mode::HAND_SIZE;
-use crate::game::run::{FINAL_ANTE, RunState};
+    use crate::game::run::{FINAL_ANTE, RunState};
 
     fn brute_force_best_play_in_hand(run: &RunState) -> Option<(u64, Vec<usize>)> {
         #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -1434,9 +1430,7 @@ use crate::game::run::{FINAL_ANTE, RunState};
                 .chain(sets.iter())
                 .filter(|s| s.kind == MeldKind::Kong)
                 .count();
-            if run.structure_tiles().len() + scoring_tiles.len()
-                > HAND_SIZE + kongs_after
-            {
+            if run.structure_tiles().len() + scoring_tiles.len() > HAND_SIZE + kongs_after {
                 continue;
             }
             let mut merged_sets = run.structure_sets().to_vec();
@@ -2715,10 +2709,7 @@ fn play_run_with_options(
             play_blind(&mut run, &mut stats, log, deadline, &mut blind_scoring);
         let blind_score = run.round_score;
         if matches!(blind, BlindKind::Boss) {
-            *stats
-                .boss_score_by_ante
-                .entry(run.ante)
-                .or_insert(0) += blind_score;
+            *stats.boss_score_by_ante.entry(run.ante).or_insert(0) += blind_score;
             *stats.boss_attempts_by_ante.entry(run.ante).or_insert(0) += 1;
         }
         stats.total_score += blind_score;

@@ -214,15 +214,6 @@ impl WgpuRenderer {
         );
         self.scene_color_texture = sct;
         self.scene_color_view = scv;
-        self.shop_linear_bloom_texture.destroy();
-        let (slb_t, slb_v) = create_scene_color(
-            &self.device,
-            SCENE_HDR_FORMAT,
-            new_size.width,
-            new_size.height,
-        );
-        self.shop_linear_bloom_texture = slb_t;
-        self.shop_linear_bloom_view = slb_v;
         self.room_emissive_texture.destroy();
         let (re_t, re_v) = create_scene_color(
             &self.device,
@@ -369,10 +360,6 @@ impl WgpuRenderer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&self.shop_linear_bloom_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
                     resource: wgpu::BindingResource::Sampler(&self.bloom_sampler),
                 },
             ],

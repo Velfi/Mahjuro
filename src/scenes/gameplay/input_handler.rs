@@ -1220,7 +1220,7 @@ pub(super) fn build_consumable_dish(
                         );
                     }
                     crate::core::consumable::Consumable::Talisman(tk) => {
-                        let talisman_half_height = slot_w * 0.55 * 0.5;
+                        let talisman_half_height = slot_w * 0.55;
                         let anchor = crate::ui::placement::PlacementAnchor::new(
                             [
                                 zx + slot_w * 0.5,
@@ -1232,7 +1232,7 @@ pub(super) fn build_consumable_dish(
                             "gameplay.consumable_dish.talisman",
                             layout,
                         );
-                        let tscale = slot_h * 0.78;
+                        let tscale = slot_h * 1.56;
                         talisman_dish_placements.push(Object3d {
                             pos: anchor.pos,
                             extents: [tscale, tscale * 1.28, tscale * 0.22],

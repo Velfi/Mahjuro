@@ -133,7 +133,10 @@ pub fn flame_height_world(layout: &LayoutResult) -> f32 {
 
 #[inline]
 pub fn shop_gltf_flame_emitter_scale(room_world_scale: f32) -> f32 {
-    flame_emitter_scale(SHOP_GLTF_CANDLE_HEIGHT_DOC_M * room_world_scale.max(1e-6), 1.0)
+    flame_emitter_scale(
+        SHOP_GLTF_CANDLE_HEIGHT_DOC_M * room_world_scale.max(1e-6),
+        1.0,
+    )
 }
 
 #[inline]
@@ -143,7 +146,9 @@ pub fn shop_gltf_wick_from_light(light_world: Vec3, emitter_scale: f32) -> Vec3 
 
 #[inline]
 pub fn shop_gltf_flame_height_world(room_world_scale: f32) -> f32 {
-    SHOP_GLTF_CANDLE_HEIGHT_DOC_M * room_world_scale.max(1e-6) * SHOP_FLAME_LIGHTBAKE_HEIGHT_FRAC
+    SHOP_GLTF_CANDLE_HEIGHT_DOC_M
+        * room_world_scale.max(1e-6)
+        * SHOP_FLAME_LIGHTBAKE_HEIGHT_FRAC
         * FLAME_MESH_HEIGHT_SCALE
 }
 

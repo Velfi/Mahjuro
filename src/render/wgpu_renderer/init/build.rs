@@ -41,7 +41,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         flame: flame_shader,
         starfield: starfield_shader,
         ember_drift: ember_drift_shader,
-        rain: rain_shader,
         golden_dust: golden_dust_shader,
         moonlit_water: moonlit_water_shader,
         sunlit_water: sunlit_water_shader,
@@ -369,44 +368,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         bind_group_layouts: &[Some(&globals_layout), Some(&moon_albedo_tex_layout)],
         immediate_size: 0,
     });
-    let rain_uniform_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("rain-uniform-layout"),
-        entries: &[wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        }],
-    });
-    let rain_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("rain-pl"),
-        bind_group_layouts: &[Some(&globals_layout), Some(&rain_uniform_layout)],
-        immediate_size: 0,
-    });
-    let rain_uniform_default = crate::render::rain_tuning::RainTuning::shipping_default().to_gpu();
-    let rain_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("rain-uniform-buffer"),
-        size: std::mem::size_of::<crate::render::rain_tuning::RainGpuUniform>() as u64,
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    queue.write_buffer(
-        &rain_uniform_buffer,
-        0,
-        bytemuck::bytes_of(&rain_uniform_default),
-    );
-    let rain_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("rain-uniform-bg"),
-        layout: &rain_uniform_layout,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: rain_uniform_buffer.as_entire_binding(),
-        }],
-    });
     let (_moon_albedo_texture, moon_albedo_view) =
         load_metal_heightmap(&device, &queue, "textures/moon_albedo.png", "moon-albedo");
     let moon_albedo_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -455,6 +416,18 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         ..Default::default()
     });
     let shadow_caster_layout = create_shadow_caster_layout(&device);
+    let shadow_warp_layout = create_shadow_warp_layout(&device);
+    let shadow_warp_dummy_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("shadow-warp-disabled-uniform"),
+        contents: bytemuck::bytes_of(&crate::render::hallway_glb::HallwayDistortion::default()),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    });
+    let shadow_warp_disabled_bind_group = create_shadow_warp_bind_group(
+        &device,
+        &shadow_warp_layout,
+        &shadow_warp_dummy_buffer,
+        "shadow-warp-disabled-bg",
+    );
     let shadow_sample_layout = create_shadow_sample_layout(&device);
     let shadow_globals_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("shadow-globals"),
@@ -927,47 +900,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
 
     let starfield_pipeline = vignette_pipeline("starfield-pipeline", &starfield_shader);
     let ember_drift_pipeline = vignette_pipeline("ember-drift-pipeline", &ember_drift_shader);
-    let rain_pipeline = {
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("rain-pipeline"),
-            layout: Some(&rain_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &rain_shader,
-                entry_point: Some("vs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &rain_shader,
-                entry_point: Some("fs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: scene_hdr_format,
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::One,
-                            dst_factor: wgpu::BlendFactor::One,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                        alpha: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::One,
-                            dst_factor: wgpu::BlendFactor::One,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                ..Default::default()
-            },
-            depth_stencil: Some(depth_ui.clone()),
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        })
-    };
     let golden_dust_pipeline = vignette_pipeline("golden-dust-pipeline", &golden_dust_shader);
     // moonlit_water gets its own pipeline so it can bind the moon albedo
     // texture at group 1 in addition to the globals at group 0.
@@ -1314,9 +1246,12 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         true,
     );
 
+    // Emissive-only pre-pass into `room_emissive_view` for screen-space GI.
+    // Single attachment now that the linear-HDR pre-pass was retired (scene
+    // shaders write linear HDR to `scene_color` directly — see
+    // `tonemap_composite.wgsl`).
     let mk_shop_mrt_pipeline = |label: &'static str,
                                 blend0: Option<wgpu::BlendState>,
-                                blend1: Option<wgpu::BlendState>,
                                 depth: &wgpu::DepthStencilState,
                                 cull_back: bool|
      -> wgpu::RenderPipeline {
@@ -1331,20 +1266,13 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shop_shader,
-                entry_point: Some("fs_main_mrt"),
+                entry_point: Some("fs_main_emissive"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[
-                    Some(wgpu::ColorTargetState {
-                        format: scene_hdr_format,
-                        blend: blend0,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
-                    Some(wgpu::ColorTargetState {
-                        format: scene_hdr_format,
-                        blend: blend1,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
-                ],
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: scene_hdr_format,
+                    blend: blend0,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -1364,24 +1292,14 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     };
 
     let shop_pipeline_mrt_opaque_double =
-        mk_shop_mrt_pipeline("shop-mrt-opaque-ds", None, None, &depth_3d, false);
+        mk_shop_mrt_pipeline("shop-emissive-opaque-ds", None, &depth_3d, false);
     let shop_pipeline_mrt_opaque_cull =
-        mk_shop_mrt_pipeline("shop-mrt-opaque-cull", None, None, &depth_3d, true);
+        mk_shop_mrt_pipeline("shop-emissive-opaque-cull", None, &depth_3d, true);
     let blend_mrt = Some(wgpu::BlendState::ALPHA_BLENDING);
-    let shop_pipeline_mrt_blend_double = mk_shop_mrt_pipeline(
-        "shop-mrt-blend-ds",
-        blend_mrt,
-        blend_mrt,
-        &depth_3d_blend,
-        false,
-    );
-    let shop_pipeline_mrt_blend_cull = mk_shop_mrt_pipeline(
-        "shop-mrt-blend-cull",
-        blend_mrt,
-        blend_mrt,
-        &depth_3d_blend,
-        true,
-    );
+    let shop_pipeline_mrt_blend_double =
+        mk_shop_mrt_pipeline("shop-emissive-blend-ds", blend_mrt, &depth_3d_blend, false);
+    let shop_pipeline_mrt_blend_cull =
+        mk_shop_mrt_pipeline("shop-emissive-blend-cull", blend_mrt, &depth_3d_blend, true);
 
     // ---- Gold outline shell pipeline (selected tiles) ----
     let tile_outline_instance_vertex_layout = wgpu::VertexBufferLayout {
@@ -1546,12 +1464,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         size.width.max(1),
         size.height.max(1),
     );
-    let (shop_linear_bloom_texture, shop_linear_bloom_view) = create_scene_color(
-        &device,
-        scene_hdr_format,
-        size.width.max(1),
-        size.height.max(1),
-    );
     let (room_emissive_texture, room_emissive_view) = create_scene_color(
         &device,
         scene_hdr_format,
@@ -1614,7 +1526,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         extract_shader: &bloom_extract_shader,
         blur_shader: &bloom_blur_shader,
         composite_shader: &bloom_composite_shader,
-        shop_linear_bloom_view: &shop_linear_bloom_view,
         scene_color_view: &scene_color_view,
     });
     let bloom_extract_pipeline = bloom_bundle.extract_pipeline;
@@ -1789,7 +1700,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     // offset 0, and the shader only reads location 0.
     let shadow_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("shadow-pl"),
-        bind_group_layouts: &[Some(&shadow_caster_layout)],
+        bind_group_layouts: &[Some(&shadow_caster_layout), Some(&shadow_warp_layout)],
         immediate_size: 0,
     });
     let shadow_depth_state = wgpu::DepthStencilState {
@@ -2478,15 +2389,15 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 let normal_view = match &prim.normal_rgba {
                     Some((rgba, w, h)) => {
                         upload_rgba_texture_with_mips(&TextureUploadParams {
-                        device: &device,
-                        queue: &queue,
-                        label: format!("tile-prim-normal-{i}"),
-                        rgba: rgba,
-                        width: *w,
-                        height: *h,
-                        format: wgpu::TextureFormat::Rgba8Unorm,
-                        mips,
-                    })
+                            device: &device,
+                            queue: &queue,
+                            label: format!("tile-prim-normal-{i}"),
+                            rgba: rgba,
+                            width: *w,
+                            height: *h,
+                            format: wgpu::TextureFormat::Rgba8Unorm,
+                            mips,
+                        })
                         .1
                     }
                     None => tile_default_normal_view.clone(),
@@ -2494,15 +2405,15 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 let metallic_roughness_view = match &prim.metallic_roughness_rgba {
                     Some((rgba, w, h)) => {
                         upload_rgba_texture_with_mips(&TextureUploadParams {
-                        device: &device,
-                        queue: &queue,
-                        label: format!("tile-prim-mr-{i}"),
-                        rgba: rgba,
-                        width: *w,
-                        height: *h,
-                        format: wgpu::TextureFormat::Rgba8Unorm,
-                        mips,
-                    })
+                            device: &device,
+                            queue: &queue,
+                            label: format!("tile-prim-mr-{i}"),
+                            rgba: rgba,
+                            width: *w,
+                            height: *h,
+                            format: wgpu::TextureFormat::Rgba8Unorm,
+                            mips,
+                        })
                         .1
                     }
                     None => tile_glb_default_mr_view.clone(),
@@ -2510,15 +2421,15 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 let emissive_view = match &prim.emissive_rgba {
                     Some((rgba, w, h)) => {
                         upload_rgba_texture_with_mips(&TextureUploadParams {
-                        device: &device,
-                        queue: &queue,
-                        label: format!("tile-prim-emissive-{i}"),
-                        rgba: rgba,
-                        width: *w,
-                        height: *h,
-                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                        mips,
-                    })
+                            device: &device,
+                            queue: &queue,
+                            label: format!("tile-prim-emissive-{i}"),
+                            rgba: rgba,
+                            width: *w,
+                            height: *h,
+                            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                            mips,
+                        })
                         .1
                     }
                     None => tile_glb_default_emissive_view.clone(),
@@ -2623,30 +2534,32 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     });
                     let mips = crate::render::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
                     let (_albedo_texture, albedo_view) = match &prim.albedo_rgba {
-                        Some((rgba, aw, ah)) => upload_rgba_texture_with_mips(&TextureUploadParams {
-                        device: &device,
-                        queue: &queue,
-                        label: format!("shop-env-albedo-{i}"),
-                        rgba: rgba,
-                        width: *aw,
-                        height: *ah,
-                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                        mips,
-                    }),
+                        Some((rgba, aw, ah)) => {
+                            upload_rgba_texture_with_mips(&TextureUploadParams {
+                                device: &device,
+                                queue: &queue,
+                                label: format!("shop-env-albedo-{i}"),
+                                rgba: rgba,
+                                width: *aw,
+                                height: *ah,
+                                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                                mips,
+                            })
+                        }
                         None => white_albedo(&device, &queue),
                     };
                     let normal_view = match &prim.normal_rgba {
                         Some((rgba, nw, nh)) => {
                             upload_rgba_texture_with_mips(&TextureUploadParams {
-                        device: &device,
-                        queue: &queue,
-                        label: format!("shop-env-normal-{i}"),
-                        rgba: rgba,
-                        width: *nw,
-                        height: *nh,
-                        format: wgpu::TextureFormat::Rgba8Unorm,
-                        mips,
-                    })
+                                device: &device,
+                                queue: &queue,
+                                label: format!("shop-env-normal-{i}"),
+                                rgba: rgba,
+                                width: *nw,
+                                height: *nh,
+                                format: wgpu::TextureFormat::Rgba8Unorm,
+                                mips,
+                            })
                             .1
                         }
                         None => tile_default_normal_view.clone(),
@@ -2654,15 +2567,15 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     let metallic_roughness_view = match &prim.metallic_roughness_rgba {
                         Some((rgba, w, h)) => {
                             upload_rgba_texture_with_mips(&TextureUploadParams {
-                        device: &device,
-                        queue: &queue,
-                        label: format!("shop-env-mr-{i}"),
-                        rgba: rgba,
-                        width: *w,
-                        height: *h,
-                        format: wgpu::TextureFormat::Rgba8Unorm,
-                        mips,
-                    })
+                                device: &device,
+                                queue: &queue,
+                                label: format!("shop-env-mr-{i}"),
+                                rgba: rgba,
+                                width: *w,
+                                height: *h,
+                                format: wgpu::TextureFormat::Rgba8Unorm,
+                                mips,
+                            })
                             .1
                         }
                         None => tile_glb_default_mr_view.clone(),
@@ -2670,15 +2583,15 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     let emissive_view = match &prim.emissive_rgba {
                         Some((rgba, w, h)) => {
                             upload_rgba_texture_with_mips(&TextureUploadParams {
-                        device: &device,
-                        queue: &queue,
-                        label: format!("shop-env-emissive-{i}"),
-                        rgba: rgba,
-                        width: *w,
-                        height: *h,
-                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                        mips,
-                    })
+                                device: &device,
+                                queue: &queue,
+                                label: format!("shop-env-emissive-{i}"),
+                                rgba: rgba,
+                                width: *w,
+                                height: *h,
+                                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                                mips,
+                            })
                             .1
                         }
                         None => tile_glb_default_emissive_view.clone(),
@@ -2757,7 +2670,9 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                             .environment_primitives
                             .get(i)
                             .and_then(|ep| ep.gltf_node_name.as_deref())
-                            .is_some_and(crate::render::room_env_gltf::is_shop_candle_wax_node_name);
+                            .is_some_and(
+                                crate::render::room_env_gltf::is_shop_candle_wax_node_name,
+                            );
                         let decal_view = if is_candle {
                             shop_candle_sss_view
                         } else {
@@ -2811,11 +2726,18 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     .collect();
                 let (shadow_uniform_buffer, shadow_bind_group) =
                     create_room_env_shadow_gpu(&device, &shadow_caster_layout, "shop-env-shadow");
+                let shadow_warp_bind_group = create_shadow_warp_bind_group(
+                    &device,
+                    &shadow_warp_layout,
+                    &distortion_buffer,
+                    "shop-env-shadow-warp",
+                );
                 gpu_wrap = Some(ShopEnvironmentGpu {
                     uniform_buffer,
                     distortion_buffer,
                     shadow_uniform_buffer,
                     shadow_bind_group,
+                    shadow_warp_bind_group,
                     bind_groups,
                     archive_sign_decal_texture: None,
                     shop_candle_sss_texture: shop_candle_sss_tex.map(|(t, _)| t),
@@ -2849,30 +2771,32 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     });
                     let mips = crate::render::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
                     let (_albedo_texture, albedo_view) = match &prim.albedo_rgba {
-                        Some((rgba, aw, ah)) => upload_rgba_texture_with_mips(&TextureUploadParams {
-                        device: &device,
-                        queue: &queue,
-                        label: format!("hallway-env-albedo-{i}"),
-                        rgba: rgba,
-                        width: *aw,
-                        height: *ah,
-                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                        mips,
-                    }),
+                        Some((rgba, aw, ah)) => {
+                            upload_rgba_texture_with_mips(&TextureUploadParams {
+                                device: &device,
+                                queue: &queue,
+                                label: format!("hallway-env-albedo-{i}"),
+                                rgba: rgba,
+                                width: *aw,
+                                height: *ah,
+                                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                                mips,
+                            })
+                        }
                         None => white_albedo(&device, &queue),
                     };
                     let normal_view = match &prim.normal_rgba {
                         Some((rgba, nw, nh)) => {
                             upload_rgba_texture_with_mips(&TextureUploadParams {
-                        device: &device,
-                        queue: &queue,
-                        label: format!("hallway-env-normal-{i}"),
-                        rgba: rgba,
-                        width: *nw,
-                        height: *nh,
-                        format: wgpu::TextureFormat::Rgba8Unorm,
-                        mips,
-                    })
+                                device: &device,
+                                queue: &queue,
+                                label: format!("hallway-env-normal-{i}"),
+                                rgba: rgba,
+                                width: *nw,
+                                height: *nh,
+                                format: wgpu::TextureFormat::Rgba8Unorm,
+                                mips,
+                            })
                             .1
                         }
                         None => tile_default_normal_view.clone(),
@@ -2880,15 +2804,15 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     let metallic_roughness_view = match &prim.metallic_roughness_rgba {
                         Some((rgba, w, h)) => {
                             upload_rgba_texture_with_mips(&TextureUploadParams {
-                        device: &device,
-                        queue: &queue,
-                        label: format!("hallway-env-mr-{i}"),
-                        rgba: rgba,
-                        width: *w,
-                        height: *h,
-                        format: wgpu::TextureFormat::Rgba8Unorm,
-                        mips,
-                    })
+                                device: &device,
+                                queue: &queue,
+                                label: format!("hallway-env-mr-{i}"),
+                                rgba: rgba,
+                                width: *w,
+                                height: *h,
+                                format: wgpu::TextureFormat::Rgba8Unorm,
+                                mips,
+                            })
                             .1
                         }
                         None => tile_glb_default_mr_view.clone(),
@@ -2896,15 +2820,15 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     let emissive_view = match &prim.emissive_rgba {
                         Some((rgba, w, h)) => {
                             upload_rgba_texture_with_mips(&TextureUploadParams {
-                        device: &device,
-                        queue: &queue,
-                        label: format!("hallway-env-emissive-{i}"),
-                        rgba: rgba,
-                        width: *w,
-                        height: *h,
-                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                        mips,
-                    })
+                                device: &device,
+                                queue: &queue,
+                                label: format!("hallway-env-emissive-{i}"),
+                                rgba: rgba,
+                                width: *w,
+                                height: *h,
+                                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                                mips,
+                            })
                             .1
                         }
                         None => tile_glb_default_emissive_view.clone(),
@@ -2966,7 +2890,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     });
                 let bind_groups: Vec<wgpu::BindGroup> = prims
                     .iter()
-                    
                     .map(|p| {
                         device.create_bind_group(&wgpu::BindGroupDescriptor {
                             label: Some("hallway-env-bg"),
@@ -3021,11 +2944,18 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     &shadow_caster_layout,
                     "hallway-env-shadow",
                 );
+                let shadow_warp_bind_group = create_shadow_warp_bind_group(
+                    &device,
+                    &shadow_warp_layout,
+                    &distortion_buffer,
+                    "hallway-env-shadow-warp",
+                );
                 gpu_wrap = Some(ShopEnvironmentGpu {
                     uniform_buffer,
                     distortion_buffer,
                     shadow_uniform_buffer,
                     shadow_bind_group,
+                    shadow_warp_bind_group,
                     bind_groups,
                     archive_sign_decal_texture: None,
                     shop_candle_sss_texture: None,
@@ -3087,15 +3017,15 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 let normal_view = match &prim.normal_rgba {
                     Some((rgba, nw, nh)) => {
                         upload_rgba_texture_with_mips(&TextureUploadParams {
-                        device: &device,
-                        queue: &queue,
-                        label: format!("archive-env-normal-{i}"),
-                        rgba: rgba,
-                        width: *nw,
-                        height: *nh,
-                        format: wgpu::TextureFormat::Rgba8Unorm,
-                        mips,
-                    })
+                            device: &device,
+                            queue: &queue,
+                            label: format!("archive-env-normal-{i}"),
+                            rgba: rgba,
+                            width: *nw,
+                            height: *nh,
+                            format: wgpu::TextureFormat::Rgba8Unorm,
+                            mips,
+                        })
                         .1
                     }
                     None => tile_default_normal_view.clone(),
@@ -3103,15 +3033,15 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 let metallic_roughness_view = match &prim.metallic_roughness_rgba {
                     Some((rgba, w, h)) => {
                         upload_rgba_texture_with_mips(&TextureUploadParams {
-                        device: &device,
-                        queue: &queue,
-                        label: format!("archive-env-mr-{i}"),
-                        rgba: rgba,
-                        width: *w,
-                        height: *h,
-                        format: wgpu::TextureFormat::Rgba8Unorm,
-                        mips,
-                    })
+                            device: &device,
+                            queue: &queue,
+                            label: format!("archive-env-mr-{i}"),
+                            rgba: rgba,
+                            width: *w,
+                            height: *h,
+                            format: wgpu::TextureFormat::Rgba8Unorm,
+                            mips,
+                        })
                         .1
                     }
                     None => tile_glb_default_mr_view.clone(),
@@ -3119,15 +3049,15 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 let emissive_view = match &prim.emissive_rgba {
                     Some((rgba, w, h)) => {
                         upload_rgba_texture_with_mips(&TextureUploadParams {
-                        device: &device,
-                        queue: &queue,
-                        label: format!("archive-env-emissive-{i}"),
-                        rgba: rgba,
-                        width: *w,
-                        height: *h,
-                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                        mips,
-                    })
+                            device: &device,
+                            queue: &queue,
+                            label: format!("archive-env-emissive-{i}"),
+                            rgba: rgba,
+                            width: *w,
+                            height: *h,
+                            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                            mips,
+                        })
                         .1
                     }
                     None => tile_glb_default_emissive_view.clone(),
@@ -3228,7 +3158,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             });
             let bind_groups: Vec<wgpu::BindGroup> = prims
                 .iter()
-                
                 .map(|p| {
                     device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("archive-env-bg"),
@@ -3278,11 +3207,18 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 .collect();
             let (shadow_uniform_buffer, shadow_bind_group) =
                 create_room_env_shadow_gpu(&device, &shadow_caster_layout, "archive-env-shadow");
+            let shadow_warp_bind_group = create_shadow_warp_bind_group(
+                &device,
+                &shadow_warp_layout,
+                &distortion_buffer,
+                "archive-env-shadow-warp",
+            );
             gpu_wrap = Some(ShopEnvironmentGpu {
                 uniform_buffer,
                 distortion_buffer,
                 shadow_uniform_buffer,
                 shadow_bind_group,
+                shadow_warp_bind_group,
                 bind_groups,
                 archive_sign_decal_texture: Some(archive_sign_decal_tex),
                 shop_candle_sss_texture: None,
@@ -3316,30 +3252,32 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     });
                     let mips = crate::render::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
                     let (_albedo_texture, albedo_view) = match &prim.albedo_rgba {
-                        Some((rgba, aw, ah)) => upload_rgba_texture_with_mips(&TextureUploadParams {
-                        device: &device,
-                        queue: &queue,
-                        label: format!("main_menu-env-albedo-{i}"),
-                        rgba: rgba,
-                        width: *aw,
-                        height: *ah,
-                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                        mips,
-                    }),
+                        Some((rgba, aw, ah)) => {
+                            upload_rgba_texture_with_mips(&TextureUploadParams {
+                                device: &device,
+                                queue: &queue,
+                                label: format!("main_menu-env-albedo-{i}"),
+                                rgba: rgba,
+                                width: *aw,
+                                height: *ah,
+                                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                                mips,
+                            })
+                        }
                         None => white_albedo(&device, &queue),
                     };
                     let normal_view = match &prim.normal_rgba {
                         Some((rgba, nw, nh)) => {
                             upload_rgba_texture_with_mips(&TextureUploadParams {
-                        device: &device,
-                        queue: &queue,
-                        label: format!("main_menu-env-normal-{i}"),
-                        rgba: rgba,
-                        width: *nw,
-                        height: *nh,
-                        format: wgpu::TextureFormat::Rgba8Unorm,
-                        mips,
-                    })
+                                device: &device,
+                                queue: &queue,
+                                label: format!("main_menu-env-normal-{i}"),
+                                rgba: rgba,
+                                width: *nw,
+                                height: *nh,
+                                format: wgpu::TextureFormat::Rgba8Unorm,
+                                mips,
+                            })
                             .1
                         }
                         None => tile_default_normal_view.clone(),
@@ -3347,15 +3285,15 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     let metallic_roughness_view = match &prim.metallic_roughness_rgba {
                         Some((rgba, w, h)) => {
                             upload_rgba_texture_with_mips(&TextureUploadParams {
-                        device: &device,
-                        queue: &queue,
-                        label: format!("main_menu-env-mr-{i}"),
-                        rgba: rgba,
-                        width: *w,
-                        height: *h,
-                        format: wgpu::TextureFormat::Rgba8Unorm,
-                        mips,
-                    })
+                                device: &device,
+                                queue: &queue,
+                                label: format!("main_menu-env-mr-{i}"),
+                                rgba: rgba,
+                                width: *w,
+                                height: *h,
+                                format: wgpu::TextureFormat::Rgba8Unorm,
+                                mips,
+                            })
                             .1
                         }
                         None => tile_glb_default_mr_view.clone(),
@@ -3363,15 +3301,15 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     let emissive_view = match &prim.emissive_rgba {
                         Some((rgba, w, h)) => {
                             upload_rgba_texture_with_mips(&TextureUploadParams {
-                        device: &device,
-                        queue: &queue,
-                        label: format!("main_menu-env-emissive-{i}"),
-                        rgba: rgba,
-                        width: *w,
-                        height: *h,
-                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                        mips,
-                    })
+                                device: &device,
+                                queue: &queue,
+                                label: format!("main_menu-env-emissive-{i}"),
+                                rgba: rgba,
+                                width: *w,
+                                height: *h,
+                                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                                mips,
+                            })
                             .1
                         }
                         None => tile_glb_default_emissive_view.clone(),
@@ -3433,7 +3371,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     });
                 let bind_groups: Vec<wgpu::BindGroup> = prims
                     .iter()
-                    
                     .map(|p| {
                         device.create_bind_group(&wgpu::BindGroupDescriptor {
                             label: Some("main_menu-env-bg"),
@@ -3488,11 +3425,18 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     &shadow_caster_layout,
                     "main_menu-env-shadow",
                 );
+                let shadow_warp_bind_group = create_shadow_warp_bind_group(
+                    &device,
+                    &shadow_warp_layout,
+                    &distortion_buffer,
+                    "main_menu-env-shadow-warp",
+                );
                 gpu_wrap = Some(ShopEnvironmentGpu {
                     uniform_buffer,
                     distortion_buffer,
                     shadow_uniform_buffer,
                     shadow_bind_group,
+                    shadow_warp_bind_group,
                     bind_groups,
                     archive_sign_decal_texture: None,
                     shop_candle_sss_texture: None,
@@ -3503,7 +3447,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         });
 
     crate::render::main_menu_glb::release_main_menu_environment_cpu_sources_after_gpu_upload();
-
 
     let shop_env_collision_meshes = crate::render::room_glb::with_shop_glb_cpu(|opt| {
         opt.map(|c| c.collision_meshes.clone()).unwrap_or_default()
@@ -3519,10 +3462,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         if super::resources::ASYNC_LOADED_BACKGROUNDS.is_empty() {
             (None, None)
         } else {
-            (
-                Some(Instant::now()),
-                Some(spawn_background_loader()),
-            )
+            (Some(Instant::now()), Some(spawn_background_loader()))
         };
 
     // ---- Lit-mesh procedural geometry (candles + table) ----
@@ -4040,9 +3980,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         flame_instance_staging: Vec::with_capacity(32),
         starfield_pipeline,
         ember_drift_pipeline,
-        rain_pipeline,
-        rain_uniform_buffer,
-        rain_bind_group,
         golden_dust_pipeline,
         moonlit_water_pipeline,
         moon_albedo_bind_group,
@@ -4234,8 +4171,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         scene_prev_view,
         scene_color_texture,
         scene_color_view,
-        shop_linear_bloom_texture,
-        shop_linear_bloom_view,
         room_emissive_texture,
         room_emissive_view,
         emissive_gi_texture,
@@ -4325,6 +4260,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         relic_instances,
         shadow_map_view,
         shadow_caster_layout,
+        shadow_warp_disabled_bind_group,
         shadow_globals_buffer,
         shadow_sample_bind_group,
         shadow_pipeline,
