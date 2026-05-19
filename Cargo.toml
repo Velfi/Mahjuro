@@ -58,8 +58,14 @@ human_format = "1.2.1"
 steamworks = { version = "0.13", features = ["raw-bindings"] }
 resvg = "0.44"
 
-# Patched wgpu-hal: clear stale Metal vertex buffer slots when switching pipelines
-# (fixes Metal validation "unused binding at Buffer index …"). See vendor/wgpu-hal.
+# Patched wgpu-hal:
+#   - Clear stale Metal vertex buffer slots when switching pipelines (fixes
+#     Metal validation "unused binding at Buffer index …").
+#   - Skip the `vkAcquireNextImage` fence wait on non-Windows targets, mirroring
+#     https://github.com/gfx-rs/wgpu/pull/9486 — the wait serialized acquire
+#     to the gamescope nested compositor on Steam Deck game mode and dropped
+#     the game to ~10 FPS.
+# See vendor/wgpu-hal.
 [patch.crates-io]
 wgpu-hal = { path = "vendor/wgpu-hal" }
 

@@ -463,9 +463,13 @@ impl Swapchain for NativeSwapchain {
         // https://github.com/gfx-rs/wgpu/issues/8310 and
         // https://github.com/gfx-rs/wgpu/issues/8354 for more details.
         //
-        // On other platforms, this wait may serve to slightly decrease frame
-        // latency, depending on how the platform implements waiting within
-        // acquire.
+        // On Linux this wait was supposed to be a no-op but has been observed
+        // to block on the previous frame under gamescope's nested compositor
+        // (Steam Deck game mode → game pinned at ~10 FPS while CPU/GPU sat
+        // idle) and on NVIDIA + Wayland (~10 ms stutter spikes). Mirror
+        // https://github.com/gfx-rs/wgpu/pull/9486 here and gate the wait
+        // behind `cfg(target_os = "windows")`.
+        #[cfg(target_os = "windows")]
         unsafe {
             // The `wait_all` argument must be `true` to avoid crash on some Android devices. See https://github.com/gfx-rs/wgpu/pull/8769
             self.device
