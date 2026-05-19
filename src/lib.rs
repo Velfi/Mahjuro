@@ -35,6 +35,8 @@ mod main_event_loop;
 mod main_frame_tick;
 #[path = "main/headless.rs"]
 mod main_headless;
+#[path = "main/perf_watchdog.rs"]
+mod main_perf_watchdog;
 #[path = "main/render_settings.rs"]
 mod main_render_settings;
 #[path = "main/room_gltf_brownout.rs"]
@@ -190,6 +192,10 @@ struct App {
     /// [`crate::main::event_loop`] are intentionally not cached — they
     /// run with a freshly-moved cursor and only test hand tiles.
     frame_picks: FramePicks,
+    /// One-shot watchdog that logs a single warning when frame pacing has
+    /// collapsed to <20 FPS for >3 s of steady-state rendering. See
+    /// [`main_perf_watchdog`] for the rationale.
+    perf_watchdog: main_perf_watchdog::FramePerfWatchdog,
 }
 
 /// Cached output of the four scene picks that `frame_tick` consumes.
@@ -361,6 +367,7 @@ impl App {
             last_window_title: String::new(),
             room_gltf_brownout: main_room_gltf_brownout::RoomGltfBrownout::new(),
             frame_picks: FramePicks::default(),
+            perf_watchdog: main_perf_watchdog::FramePerfWatchdog::new(),
         }
     }
 
