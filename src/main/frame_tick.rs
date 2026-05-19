@@ -68,6 +68,12 @@ impl App {
             .as_secs_f32()
             .max(0.0001);
         self.last_frame = now;
+        // Pause the watchdog during scene fades (`transition_alpha < 1.0` /
+        // `pending_scene` set): those frames legitimately stall on shader /
+        // texture loads and would otherwise false-fire on first launch.
+        let transitioning = self.pending_scene.is_some() || self.transition_alpha < 1.0;
+        self.perf_watchdog
+            .tick(self.last_frame_dt * 1000.0, transitioning, now);
         self.anim.update(now);
         self.audio.tick(now);
 

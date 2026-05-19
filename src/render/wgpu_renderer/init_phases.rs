@@ -484,7 +484,8 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
                 config.format
             );
             surface.configure(&device, &config);
-            log::debug!("wgpu: swapchain configured");
+            log_swapchain_summary(&ai, &config);
+            log_presentation_env();
             (RenderTarget::Surface(surface), config)
         }
         None => {
@@ -536,4 +537,70 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
         ssr_prev_depth_texture,
         ssr_prev_depth_view,
     })
+}
+
+/// One-shot info-level summary of the active swapchain, logged once at startup.
+///
+/// Captures the parameters that have historically been the root cause of
+/// "everything looks fine in the logs but the game runs at 10 FPS" reports:
+/// backend, adapter, surface format, present mode, frame latency, alpha mode.
+/// Compare against the matching [`log_presentation_env`] line to correlate
+/// e.g. `frame_latency=1` with a gamescope nested compositor.
+fn log_swapchain_summary(adapter_info: &wgpu::AdapterInfo, config: &wgpu::SurfaceConfiguration) {
+    log::info!(
+        "swapchain ready: backend={:?} adapter='{}' device={:?} vendor=0x{:04x} \
+         format={:?} present={:?} frame_latency={} alpha={:?} size={}×{}",
+        adapter_info.backend,
+        adapter_info.name,
+        adapter_info.device_type,
+        adapter_info.vendor,
+        config.format,
+        config.present_mode,
+        config.desired_maximum_frame_latency,
+        config.alpha_mode,
+        config.width,
+        config.height,
+    );
+}
+
+/// One-shot summary of presentation-relevant environment variables (Linux /
+/// SteamOS / gamescope detection). All variables are read once at startup —
+/// when set we record only their presence (or whitelisted short values) to
+/// avoid leaking unrelated paths into logs. Pair with [`log_swapchain_summary`]
+/// when triaging performance reports from Steam Deck game mode.
+fn log_presentation_env() {
+    fn present(name: &str) -> Option<String> {
+        std::env::var(name).ok()
+    }
+    let mut parts: Vec<String> = Vec::new();
+    for key in [
+        "SDL_VIDEODRIVER",
+        "XDG_SESSION_TYPE",
+        "XDG_CURRENT_DESKTOP",
+        "WAYLAND_DISPLAY",
+        "DISPLAY",
+    ] {
+        if let Some(v) = present(key) {
+            parts.push(format!("{key}={v}"));
+        }
+    }
+    for key in [
+        "SteamDeck",
+        "SteamGamepadUI",
+        "SteamTenfoot",
+        "GAMESCOPE_WAYLAND_DISPLAY",
+        "ENABLE_GAMESCOPE_WSI",
+        "MESA_VK_WSI_PRESENT_MODE",
+        "WGPU_BACKEND",
+        "DRI_PRIME",
+    ] {
+        if std::env::var_os(key).is_some() {
+            parts.push(format!("{key}=set"));
+        }
+    }
+    if parts.is_empty() {
+        log::info!("presentation env: (none of the tracked vars set)");
+    } else {
+        log::info!("presentation env: {}", parts.join(" "));
+    }
 }
