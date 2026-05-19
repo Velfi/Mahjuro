@@ -11,8 +11,7 @@ from _changelog import load_fragments, render_section
 def main() -> int:
     fragments = load_fragments()
     if not fragments:
-        print("(no fragments in .changes/ — nothing to preview)")
-        return 0
+        print("No fragments in .changes/ — next release would add:\n")
     print(render_section("UNRELEASED", fragments), end="")
     return 0
 

@@ -91,6 +91,14 @@ def load_fragments() -> list[Fragment]:
 
 def render_section(heading: str, fragments: list[Fragment]) -> str:
     """Render a CHANGELOG section. `heading` is the full '## ...' line body."""
+    if not fragments:
+        # Releases with only internal/CI/docs work still need a version section
+        # for the release workflow and for a coherent CHANGELOG history.
+        return (
+            f"## {heading}\n\n"
+            "- maintenance, development, and bugfixes.\n\n"
+        )
+
     lines = [f"## {heading}"]
     for category in CATEGORIES:
         entries = [f for f in fragments if f.category == category]

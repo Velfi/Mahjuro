@@ -454,11 +454,15 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
                 if let Some(&mode) = caps.alpha_modes.first() {
                     config.alpha_mode = mode;
                 }
-                // Dual-buffer swapchain (latency 1) avoids a class of AMD driver issues around
-                // triple-buffered present on Windows Vulkan.
-                config.desired_maximum_frame_latency = config.desired_maximum_frame_latency.min(1);
                 #[cfg(target_os = "windows")]
                 {
+                    // Dual-buffer swapchain (latency 1) avoids a class of AMD driver issues around
+                    // triple-buffered present on Windows Vulkan. Keep this Windows-only: on Linux
+                    // (Steam Deck game mode → gamescope nested compositor) a 2-image swapchain +
+                    // FIFO + wgpu's `vkAcquireNextImage` fence wait serializes every frame to
+                    // gamescope's pacing and collapses to ~10 FPS even though CPU/GPU are idle.
+                    config.desired_maximum_frame_latency =
+                        config.desired_maximum_frame_latency.min(1);
                     // AMD + Windows Vulkan: requesting TRANSFER_SRC on the swapchain has been
                     // observed to segfault inside the driver during/just after vkCreateSwapchainKHR.
                     // Opt back in with MAHJURO_VULKAN_WIN_SURFACE_COPY=1 (may crash on some stacks).

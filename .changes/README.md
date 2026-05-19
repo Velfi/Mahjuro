@@ -1,8 +1,8 @@
 # Changelog fragments
 
 Each file in this directory is a single **unreleased** changelog entry.
-At release time, `scripts/release.sh` compiles every fragment into a new
-section at the top of `CHANGELOG.md` and deletes the fragment files.
+At release time, `scripts/release.sh` compiles any fragments into a new section
+at the top of `CHANGELOG.md` and deletes those fragment files.
 
 ## Adding an entry
 
@@ -41,13 +41,21 @@ python3 scripts/preview_changelog.py
 Shows what the next `UNRELEASED` section would look like, without
 touching any files.
 
+## Releases with no player-facing work
+
+If everything since the last tag is internal (CI, refactors, docs, etc.), you
+do not need to add a fragment. `scripts/release.sh` will still append a version
+section to `CHANGELOG.md` with a short placeholder line so the release workflow
+has a body to publish.
+
 ## What happens at release
 
 `scripts/release.sh <version>` will:
 
 1. Compile `.changes/*.md` into a new `## <version> — YYYY-MM-DD` section
-   at the top of `CHANGELOG.md`.
-2. `git rm` the fragment files.
+   at the top of `CHANGELOG.md` (or add a short placeholder line if there are
+   no fragments).
+2. Remove any fragment files that were compiled.
 3. Bump `Cargo.toml`, commit, tag, and push.
 
 The GitHub Actions release workflow then extracts the section for this

@@ -11,7 +11,7 @@
 #
 # This will:
 #   1. Verify the working tree is clean and on `main`
-#   2. Compile .changes/*.md fragments into CHANGELOG.md under the new version
+#   2. Compile .changes/*.md fragments into CHANGELOG.md (or a placeholder if none)
 #   3. Update the version in Cargo.toml (and refresh Cargo.lock)
 #   4. Commit the version bump + changelog
 #   5. Create an annotated `v<version>` tag
@@ -72,9 +72,8 @@ if [[ "$LOCAL" != "$REMOTE" ]]; then
     exit 1
 fi
 
-# Compile changelog fragments into CHANGELOG.md. This also stages the deletion
-# of the fragment files. Fails if .changes/ has no fragments — every release
-# needs at least one entry.
+# Compile changelog fragments into CHANGELOG.md (or a single placeholder line
+# when .changes/ has no fragments). Stages deletion of any fragment files.
 python3 scripts/compile_changelog.py "$VERSION"
 
 # Bump version in the [package] section of Cargo.toml using a Python helper
