@@ -1,16 +1,12 @@
-//! Shared ray–triangle queries for picking and rain collision.
+//! Shared ray–triangle queries for picking and collision.
 
 use glam::{Mat4, Vec3};
-
-use crate::render::room_env_gltf::RoomCollisionMesh;
 
 /// World-space ray intersection result.
 #[derive(Clone, Copy, Debug)]
 pub struct RayHit {
     /// Distance along `world_dir` from `world_origin`.
     pub t: f32,
-    pub point: Vec3,
-    pub _normal: Vec3,
 }
 
 /// Möller–Trumbore against triangles in mesh-local space (`model` maps local → world).
@@ -24,7 +20,7 @@ pub fn ray_hit_trimesh(
     let lo = inv.transform_point3(world_origin);
     let ld = inv.transform_vector3(world_dir);
     const EPS: f32 = 1e-7;
-    let mut best: Option<(f32, Vec3, Vec3)> = None;
+    let mut best: Option<f32> = None;
     for [a, b, c] in tris {
         let e1 = *b - *a;
         let e2 = *c - *a;
@@ -54,53 +50,10 @@ pub fn ray_hit_trimesh(
         if wt <= EPS {
             continue;
         }
-        let normal = e1.cross(e2).normalize_or_zero();
-        let world_normal = model.transform_vector3(normal).normalize_or_zero();
         match best {
-            Some((bt, _, _)) if bt <= wt => {}
-            _ => best = Some((wt, world_hit, world_normal)),
+            Some(bt) if bt <= wt => {}
+            _ => best = Some(wt),
         }
     }
-        best.map(|(t, point, normal)| RayHit {
-            t,
-            point,
-            _normal: normal,
-        })
-}
-
-/// Closest hit along `world_dir` across decoded room collision meshes (same basis as picking).
-pub fn ray_hit_trimesh_meshes(
-    world_origin: Vec3,
-    world_dir: Vec3,
-    model: Mat4,
-    meshes: &[RoomCollisionMesh],
-) -> Option<RayHit> {
-    let mut best: Option<RayHit> = None;
-    for mesh in meshes {
-        if let Some(hit) = ray_hit_trimesh(&mesh.triangles, model, world_origin, world_dir) {
-            best = Some(match best {
-                Some(b) if b.t <= hit.t => b,
-                _ => hit,
-            });
-        }
-    }
-    best
-}
-
-/// Segment cast: returns the first hit with `t` in `(0, max_t]`.
-#[inline]
-pub fn ray_segment_hit_trimesh_meshes(
-    world_origin: Vec3,
-    world_dir: Vec3,
-    max_t: f32,
-    model: Mat4,
-    meshes: &[RoomCollisionMesh],
-) -> Option<RayHit> {
-    ray_hit_trimesh_meshes(world_origin, world_dir, model, meshes).and_then(|h| {
-        if h.t > max_t {
-            None
-        } else {
-            Some(h)
-        }
-    })
+    best.map(|t| RayHit { t })
 }

@@ -232,8 +232,10 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
     asset_path::init();
     asset_path::log_all_assets();
     let shop_like = matches!(s.scene.as_str(), "shop");
-    let collection_like =
-        matches!(s.scene.as_str(), "collection" | "chronicle" | "archive_chronicle");
+    let collection_like = matches!(
+        s.scene.as_str(),
+        "collection" | "chronicle" | "archive_chronicle"
+    );
     if s.item_inspect && !shop_like && !collection_like {
         anyhow::bail!(
             "--item-inspect requires --scene shop or collection (full-screen pack/showcase captures do not use it)"
@@ -299,7 +301,7 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
     let mut unlock_collection = false;
     let mut force_relic_modal = false;
     let (scene, game_in_progress) = match s.scene.as_str() {
-        "collection" => {
+        "collection" | "archive" => {
             unlock_collection = true;
             (Scene::Collection(scenes::CollectionScene::new()), false)
         }
@@ -455,7 +457,7 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
         }
         other => {
             anyhow::bail!(
-                "unsupported --scene '{other}' (supported: collection, chronicle, \
+                "unsupported --scene '{other}' (supported: collection, archive, chronicle, \
                 yaku_journal, gameplay, gameplay_hero, pick_blind, shop, \
                 main_menu_exterior, tile_select, transition_playground, \
                 material_viewer, relic_unlock, game_over_level_up, meta_level_up, \
@@ -723,14 +725,14 @@ impl HeadlessApp {
     /// art instead of locked placeholder dots. Only mutates the headless
     /// runner's progress; never persisted.
     fn unlock_all_for_collection_screenshot(&mut self) {
-        use crate::core::boss::all_bosses;
         use crate::core::boss::BossKind;
+        use crate::core::boss::all_bosses;
         use crate::core::progression::{RunOutcome, RunRecord};
         use crate::core::rules::BlindKind;
-        use crate::game::event_bus::GameOverReason;
         use crate::core::stake::Stake;
         use crate::core::talisman::TalismanKind;
         use crate::core::yaku::YakuKind;
+        use crate::game::event_bus::GameOverReason;
         use crate::persistence::TileMaterial;
         use rustc_hash::FxHashMap as HashMap;
 
@@ -912,8 +914,8 @@ impl HeadlessApp {
                 rumble_lab_ops: &mut rumble_lab_ops,
                 suspended_shop: None,
                 room_gltf_height_scale: crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
-                rain_tuning: self.renderer.rain_tuning,
                 bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
+                rain_tuning: self.renderer.rain_tuning,
             })
         } else {
             let showcase_shop_inspect = self.overlay_stack.last().is_some_and(|top| {
@@ -975,8 +977,8 @@ impl HeadlessApp {
                     rumble_lab_ops: &mut rumble_lab_ops,
                     suspended_shop,
                     room_gltf_height_scale: crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
-                    rain_tuning: self.renderer.rain_tuning,
                     bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
+                    rain_tuning: self.renderer.rain_tuning,
                 })
         };
         match overlay_request {
@@ -1018,6 +1020,7 @@ impl HeadlessApp {
             scenes::DebugVisibility {
                 hide_candles: false,
                 hide_blind_plaque: false,
+                hide_scoring_placard: false,
             },
             false,
             crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
@@ -1175,9 +1178,9 @@ impl HeadlessApp {
             extra += 1;
         }
         self.tick();
-        self.renderer
-            .take_room_gi_capture()
-            .ok_or_else(|| anyhow::anyhow!("room GI bake: GPU readback missing (was probe compute dispatched?)"))
+        self.renderer.take_room_gi_capture().ok_or_else(|| {
+            anyhow::anyhow!("room GI bake: GPU readback missing (was probe compute dispatched?)")
+        })
     }
 }
 
@@ -1189,9 +1192,7 @@ fn parse_bake_room_slug(slug: &str) -> anyhow::Result<crate::render::room_gi_bak
         "main_menu" | "main-menu" | "main_menu_exterior" => {
             Ok(crate::render::room_gi_bake::RoomGiRoom::MainMenu)
         }
-        other => anyhow::bail!(
-            "unknown room '{other}' (use shop, hallway, archive, or main_menu)"
-        ),
+        other => anyhow::bail!("unknown room '{other}' (use shop, hallway, archive, or main_menu)"),
     }
 }
 
@@ -1203,11 +1204,7 @@ fn scene_for_room_gi_bake(
         crate::render::room_gi_bake::RoomGiRoom::Shop => {
             setup_shop_state(&mut run);
             let progress = screenshot_profile_for_shop_stock(false);
-            (
-                Scene::Shop(ShopScene::new(&mut run, &progress)),
-                run,
-                false,
-            )
+            (Scene::Shop(ShopScene::new(&mut run, &progress)), run, false)
         }
         crate::render::room_gi_bake::RoomGiRoom::Hallway => {
             (Scene::PickBlind(scenes::PickBlindScene::new()), run, true)

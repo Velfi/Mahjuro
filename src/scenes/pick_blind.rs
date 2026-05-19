@@ -12,11 +12,13 @@ use crate::audio::SfxId;
 use crate::core::rules::BlindKind;
 use crate::game::engine::{GameCommand, GameEngine};
 use crate::game::event_bus::GameEvent;
+use crate::render::decal::{load_ui_font, measure_label_advances};
 use crate::render::draw_cmd::{ImageQuad, ScenePunctualLight, UiFrame};
 use crate::render::hallway_glb::{self, BTN_SKIP_ROUND};
 use crate::render::room_glb;
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
+use crate::ui::boss_icons::boss_icon_source;
 use crate::ui::focus_nav::push_focus_ring;
 use crate::ui::input::UiAction;
 use crate::ui::skip_tag_icons::skip_tag_icon_source;
@@ -113,8 +115,8 @@ fn hallway_button_screen_rect(
     let min_rh = (win_h * 0.07).max(52.0);
     hallway_glb::with_hallway_glb_cpu(|opt| {
         let cpu = opt?;
-        if let Some(r) = room_glb::screen_rect_for_marker_mesh_bounds(
-            &room_glb::MarkerScreenRectParams {
+        if let Some(r) =
+            room_glb::screen_rect_for_marker_mesh_bounds(&room_glb::MarkerScreenRectParams {
                 win_w,
                 win_h,
                 cam,
@@ -123,8 +125,8 @@ fn hallway_button_screen_rect(
                 node_name,
                 min_rw,
                 min_rh,
-            },
-        ) {
+            })
+        {
             return Some(r);
         }
         let tw = hallway_glb::hallway_marker_world(win_h, env_height_scale, cpu, node_name)?;
@@ -311,9 +313,9 @@ impl SceneBehavior for PickBlindScene {
                 {
                     ctx.bus.push(GameEvent::BossEncountered(bk));
                 }
-                Some(Scene::Gameplay(Box::new(GameplayScene::with_pending_blind(
-                    upcoming,
-                ))))
+                Some(Scene::Gameplay(Box::new(
+                    GameplayScene::with_pending_blind(upcoming),
+                )))
             }
             Some(BlindAction::SkipBlind) => None,
             None => None,
@@ -344,7 +346,8 @@ impl SceneBehavior for PickBlindScene {
         } else {
             hallway_glb::BTN_PLAY_ROUND
         };
-        let cam = hallway_glb::hallway_camera_pick_blind(w, h, ctx.room_gltf_height_scale, upcoming_boss);
+        let cam =
+            hallway_glb::hallway_camera_pick_blind(w, h, ctx.room_gltf_height_scale, upcoming_boss);
         frame.camera_override = Some(cam);
 
         if hallway {
@@ -432,16 +435,17 @@ impl SceneBehavior for PickBlindScene {
                     &cam,
                     ctx.room_gltf_height_scale,
                     BTN_SKIP_ROUND,
-                ) {
-                    let cx = r[0] + r[2] * 0.5;
-                    let cy = r[1] + r[3] * 0.5;
-                    point_lights.push(PointLight {
-                        pos: [cx, cy - 18.0, h * 0.19 + 50.0],
-                        radius: r[2].max(r[3]) * 2.2,
-                        color: [1.0, 0.86, 0.52],
-                        intensity: (if room_glb { 0.36 } else { 1.05 }) * skip_b,
-                    });
-                }
+                )
+            {
+                let cx = r[0] + r[2] * 0.5;
+                let cy = r[1] + r[3] * 0.5;
+                point_lights.push(PointLight {
+                    pos: [cx, cy - 18.0, h * 0.19 + 50.0],
+                    radius: r[2].max(r[3]) * 2.2,
+                    color: [1.0, 0.86, 0.52],
+                    intensity: (if room_glb { 0.36 } else { 1.05 }) * skip_b,
+                });
+            }
             inverse_punctual.extend(point_lights.into_iter().map(ScenePunctualLight::Smooth));
             frame.scene_lighting.punctual = inverse_punctual;
         } else {
@@ -471,8 +475,7 @@ impl SceneBehavior for PickBlindScene {
         let mut icon_cmds: Vec<ImageQuad> = Vec::new();
         let mut buttons: Vec<ButtonDef> = Vec::new();
         let scale = metrics::scene_scale(w, h);
-        let hide_scene_hud =
-            self.pause_menu.paused || ctx.hallway_distortion_debug.is_some();
+        let hide_scene_hud = self.pause_menu.paused || ctx.hallway_distortion_debug.is_some();
 
         if !hide_scene_hud {
             // ── Caption labels: hallway side panels ─
@@ -480,14 +483,9 @@ impl SceneBehavior for PickBlindScene {
             let skip_focused_label = self.skip_focused();
 
             let (play_anchor_rect, skip_anchor_rect) = {
-                let pr = hallway_button_screen_rect(
-                    w,
-                    h,
-                    &cam,
-                    ctx.room_gltf_height_scale,
-                    play_node,
-                )
-                .unwrap_or([w * 0.12, h * 0.50, w * 0.14, h * 0.10]);
+                let pr =
+                    hallway_button_screen_rect(w, h, &cam, ctx.room_gltf_height_scale, play_node)
+                        .unwrap_or([w * 0.12, h * 0.50, w * 0.14, h * 0.10]);
                 let sr = if can_skip {
                     hallway_button_screen_rect(
                         w,
@@ -525,8 +523,22 @@ impl SceneBehavior for PickBlindScene {
                 let play_col_right = pr[0] - play_desc_gap;
                 let play_col_w = (play_col_right - edge_margin).max(min_col_w);
                 let lx_play = play_col_right - play_col_w;
+                let boss_icon_px = if upcoming == BlindKind::Boss && pick.boss_kind.is_some() {
+                    Some((h * 0.072).clamp(48.0, 80.0))
+                } else {
+                    None
+                };
+                let boss_icon_gap = 10.0_f32;
+                let (text_x_play, text_w_play) = if let Some(ipx) = boss_icon_px {
+                    (
+                        lx_play + ipx + boss_icon_gap,
+                        (play_col_w - ipx - boss_icon_gap).max(80.0),
+                    )
+                } else {
+                    (lx_play, play_col_w)
+                };
                 let mut play_stack_h =
-                    wrapped_text_height(&blind_display, play_col_w, px_blind, h_blind)
+                    wrapped_text_height(&blind_display, text_w_play, px_blind, h_blind)
                         + 6.0
                         + wrapped_text_height(
                             &format!(
@@ -535,22 +547,23 @@ impl SceneBehavior for PickBlindScene {
                                 crate::game::run::FINAL_ANTE,
                                 target_value,
                             ),
-                            play_col_w,
+                            text_w_play,
                             px_detail,
                             h_detail,
                         )
                         + 4.0
                         + wrapped_text_height(
                             &format!("Reward ${}{}", upcoming.clear_reward(), stake_suffix),
-                            play_col_w,
+                            text_w_play,
                             px_detail,
                             h_detail,
                         );
                 if upcoming == BlindKind::Boss
-                    && let Some(desc) = pick.boss_description.as_deref() {
-                        play_stack_h +=
-                            4.0 + wrapped_text_height(desc, play_col_w, px_detail, h_detail * 1.35);
-                    }
+                    && let Some(desc) = pick.boss_description.as_deref()
+                {
+                    play_stack_h +=
+                        4.0 + wrapped_text_height(desc, text_w_play, px_detail, h_detail * 1.35);
+                }
                 let play_cy = pr[1] + pr[3] * 0.5;
                 // Side-wall PLAY AABB sits low; lift the label onto SKIP's row for visual centering.
                 let hud_row_cy = if can_skip {
@@ -580,11 +593,48 @@ impl SceneBehavior for PickBlindScene {
                 } else {
                     color::STONE
                 };
+                if let (Some(ipx), Some(bk)) = (boss_icon_px, pick.boss_kind) {
+                    // Right-aligned title leaves empty space on the left; pin the
+                    // icon to the measured left edge of the first line (like skip + tag).
+                    let title_lines = wrap_text(&blind_display, text_w_play, px_blind / 0.99);
+                    let first_line = title_lines
+                        .first()
+                        .map(|s| s.as_str())
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or(blind_display.as_str());
+                    let title_w: f32 = if let Some(font) = load_ui_font() {
+                        let (_, _, advances) = measure_label_advances(
+                            &font,
+                            first_line,
+                            8192,
+                            h_blind.max(1.0) as u32,
+                            Some(px_blind),
+                        );
+                        advances.iter().copied().sum::<f32>().min(text_w_play)
+                    } else {
+                        let n = first_line.chars().count().max(1) as f32;
+                        (px_blind * 0.52 * n).min(text_w_play)
+                    };
+                    let mut icon_x =
+                        text_x_play + text_w_play - title_w - boss_icon_gap - ipx;
+                    icon_x = icon_x.max(edge_margin);
+                    let title_line_count = title_lines.len().max(1) as f32;
+                    let name_block_h = h_blind * title_line_count;
+                    let icon_y = ly_play + (name_block_h - ipx) * 0.5;
+                    icon_cmds.push(ImageQuad {
+                        inst: GpuInstance {
+                            rect: [icon_x, icon_y, ipx, ipx],
+                            color: color::alpha(play_color, 0.98),
+                            user: 0,
+                        },
+                        source: boss_icon_source(bk),
+                    });
+                }
                 push_wrapped_column_line(WrappedColumnLine {
                     texts: &mut texts,
-                    x: lx_play,
+                    x: text_x_play,
                     y: &mut ly_play,
-                    col_w: play_col_w,
+                    col_w: text_w_play,
                     font_px: px_blind,
                     line_h: h_blind,
                     text: &blind_display,
@@ -594,9 +644,9 @@ impl SceneBehavior for PickBlindScene {
                 ly_play += 6.0;
                 push_wrapped_column_line(WrappedColumnLine {
                     texts: &mut texts,
-                    x: lx_play,
+                    x: text_x_play,
                     y: &mut ly_play,
-                    col_w: play_col_w,
+                    col_w: text_w_play,
                     font_px: px_detail,
                     line_h: h_detail,
                     text: &format!(
@@ -611,9 +661,9 @@ impl SceneBehavior for PickBlindScene {
                 ly_play += 4.0;
                 push_wrapped_column_line(WrappedColumnLine {
                     texts: &mut texts,
-                    x: lx_play,
+                    x: text_x_play,
                     y: &mut ly_play,
-                    col_w: play_col_w,
+                    col_w: text_w_play,
                     font_px: px_detail,
                     line_h: h_detail,
                     text: &format!("Reward ${}{}", upcoming.clear_reward(), stake_suffix),
@@ -625,9 +675,9 @@ impl SceneBehavior for PickBlindScene {
                     if let Some(desc) = pick.boss_description.as_deref() {
                         push_wrapped_column_line(WrappedColumnLine {
                             texts: &mut texts,
-                            x: lx_play,
+                            x: text_x_play,
                             y: &mut ly_play,
-                            col_w: play_col_w,
+                            col_w: text_w_play,
                             font_px: px_detail,
                             line_h: h_detail * 1.35,
                             text: desc,
@@ -674,14 +724,9 @@ impl SceneBehavior for PickBlindScene {
                     };
                     if let Some(tag) = skip_tag {
                         let text_col_w = (skip_col_w - skip_icon_px - skip_icon_gap).max(80.0);
-                        let name_h =
-                            wrapped_text_height(tag.name(), text_col_w, px_blind, h_blind);
-                        let desc_h = wrapped_text_height(
-                            tag.description(),
-                            text_col_w,
-                            px_detail,
-                            h_detail,
-                        );
+                        let name_h = wrapped_text_height(tag.name(), text_col_w, px_blind, h_blind);
+                        let desc_h =
+                            wrapped_text_height(tag.description(), text_col_w, px_detail, h_detail);
                         let text_block_h = name_h + 6.0 + desc_h;
                         let block_top = ly_skip;
                         let icon_y = block_top + (skip_stack_h - skip_icon_px) * 0.5;

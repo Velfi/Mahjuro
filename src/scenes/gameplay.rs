@@ -19,6 +19,7 @@ mod hand_layout;
 mod input_handler;
 mod onboarding_hints;
 mod scene_behavior;
+mod score_counter;
 
 use std::collections::VecDeque;
 use std::time::Instant;
@@ -334,9 +335,9 @@ impl GameplayScene {
         run: &crate::game::run::RunState,
     ) {
         let interaction = GameEngine::read_interaction(run);
-        let sp = layout.score_panel;
-        let dest = (sp.x + sp.w * 0.5, sp.y + sp.h * 0.25);
-        let dest_lift = Some(layout.mm(self.positions.plaque.lift_mm) * 1.08);
+        let counter = score_counter::score_counter_layout(layout, &self.positions);
+        let dest = (counter.reel.px, counter.reel.py);
+        let dest_lift = Some(counter.reel.lift_z);
 
         // Source positions: hand slot centers if available, else fall back
         // to a horizontal spread across the modifier strip.
@@ -529,7 +530,12 @@ impl GameplayScene {
         }
         if let Some(breakdown) = GameEngine::last_breakdown(ctx.run) {
             if !breakdown.steps.is_empty() || breakdown.base_points > 0 {
-                let cascade = ScoringCascade::with_tuning(breakdown, score_before, gained, ctx.cascade_tuning.clone());
+                let cascade = ScoringCascade::with_tuning(
+                    breakdown,
+                    score_before,
+                    gained,
+                    ctx.cascade_tuning.clone(),
+                );
                 let starting_fresh = self.cascade_queue.is_empty();
                 log::info!(
                     "[score] begin_scoring_cascade: gained={} starting_fresh={} queue_len_before={}",

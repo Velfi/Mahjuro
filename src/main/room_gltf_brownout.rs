@@ -134,7 +134,11 @@ impl RoomGltfBrownout {
             let fast2 = (ft * 21.0 + 0.7).sin();
             let slow = (ft * 2.6).sin() * 0.07;
             let chaos = 0.56 + 0.36 * (0.5 + 0.5 * fast1) * (0.5 + 0.5 * fast2) + slow;
-            let spike = if (ft * 13.1).fract() < 0.035 { 0.16 } else { 1.0 };
+            let spike = if (ft * 13.1).fract() < 0.035 {
+                0.16
+            } else {
+                1.0
+            };
             let gltf = (chaos * spike).clamp(0.09, 1.22);
             let exp = (0.94 + 0.06 * fast2.abs()).clamp(0.88, 1.0);
             (gltf, exp, 1.0, 1.0, 1.0, 1.0)

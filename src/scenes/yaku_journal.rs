@@ -449,6 +449,7 @@ impl SceneBehavior for YakuJournalScene {
             &mut tile_id,
             sel_yk,
             yaku_progress.level_of(sel_yk),
+            yaku_progress.played_this_run(sel_yk),
             sel_state,
             plaque_top,
             plaque_h,
@@ -650,6 +651,14 @@ fn progression_state(
     }
 }
 
+fn format_yaku_mult_bonus(mult: f64) -> String {
+    if (mult - mult.round()).abs() < 1e-6 {
+        format!("{}", mult.round() as i64)
+    } else {
+        format!("{mult:.1}")
+    }
+}
+
 /// Draw the floating plaque: a bamboo-lacquer panel across the bottom of the
 /// screen showing the selected yaku's canonical 14-tile hand, scoring
 /// values, name, and description. The hand comes from
@@ -657,12 +666,11 @@ fn progression_state(
 /// module — so whatever renders here is guaranteed to score as the named
 /// yaku.
 ///
-/// Header hierarchy is **identity-first**: yaku name is the title on the
-/// left with a brass level-pill tag; stat totals (`+N MULT · +N CHIPS`)
-/// sit right-aligned on the same line. A thin champagne rule separates
-/// header from description. The control hint sits in a darker bamboo strip
-/// inside the plaque's rim so it reads as an affordance rather than orphaned
-/// caption text.
+/// Header hierarchy is **identity-first**: yaku name is the title, followed
+/// by explicit stat cards for level, chips, mult, and this-run scoring count.
+/// A thin champagne rule separates header from description. The control hint
+/// sits in a darker bamboo strip inside the plaque's rim so it reads as an
+/// affordance rather than orphaned caption text.
 #[allow(clippy::too_many_arguments)]
 fn draw_plaque(
     frame: &mut UiFrame,
@@ -670,6 +678,7 @@ fn draw_plaque(
     tile_id: &mut u32,
     yk: YakuKind,
     lvl: u32,
+    scored_this_run: u32,
     state: ProgressionState,
     top_y: f32,
     plaque_h: f32,
@@ -750,9 +759,7 @@ fn draw_plaque(
     let label_champagne_muted = color::alpha(color::CHAMPAGNE, 0.52);
 
     // ── Header ───────────────────────────────────────────────────
-    // Left: yaku name as the title + a brass level-badge pill to its
-    // right. Right: stat strip "+N MULT · +N CHIPS". A thin antique
-    // rule separates header from description.
+    // Title first, then the current run stats as distinct cards.
     let header_pad = ((18.0 * shadow_scale).max(12.0)) * pad_scale;
     let header_x = face_x + header_pad;
     let header_w = face_w - header_pad * 2.0;
@@ -765,7 +772,6 @@ fn draw_plaque(
     // gameplay bone tablets).
     let title_font = typography::size(typography::H20, h);
     let title_h = title_font * 1.05;
-    let title_lane_w = header_w * 0.5;
     if matches!(state, ProgressionState::Unseen) {
         let title_glyph = title_font * 1.02;
         let title_pill_w = title_glyph * 2.38;
@@ -783,7 +789,7 @@ fn draw_plaque(
         );
     } else {
         frame.text(TextLabel {
-            rect: [header_x, header_y, title_lane_w, title_h],
+            rect: [header_x, header_y, header_w, title_h],
             text: yk.name().into(),
             color: label_champagne,
             align: TextAlign::Left,
@@ -792,82 +798,89 @@ fn draw_plaque(
         });
     }
 
-    // Level pill — brass background, bold mono text. Sits flush
-    // underneath the title (not beside it) so variable name widths
-    // can't crash into it. Visually it tags the title and pairs
-    // with the stat strip's right-aligned neighborhood.
-    let pill_font = typography::size(typography::H42, h);
-    let pill_h = pill_font * 1.75;
-    let pill_text = format!("Lv  {lvl}");
-    let pill_w = pill_font * 5.6;
-    let pill_x = header_x;
-    let pill_y = header_y + title_h * 0.94;
-    // Ink on metal badges: near-black so thin caption glyphs stay legible on
-    // bright brass/gold (WCAG-style contrast on TV/couch viewing).
+    // Stat cards — four equal columns so the requested values are always
+    // present and scannable instead of hidden in one long right-aligned line.
+    let card_label_font = typography::size(typography::H42, h);
+    let card_value_font = typography::size(typography::H36, h);
+    // `card_h` must leave each band tall enough for pinned `font_px`: the
+    // rasterizer vertically centers the font line box in the label rect, so
+    // if rect.h < line_h the ascenders clip (seen on Level / Chips / Mult).
+    let card_h = card_label_font * (3.05 - 0.20 * jc);
+    let card_gap = (10.0 * shadow_scale).max(6.0) * pad_scale;
+    let card_w = (header_w - card_gap * 3.0) / 4.0;
+    let card_y = header_y + title_h + header_pad * 0.32;
     let badge_ink = color::darken(color::WALNUT_INK, 0.12);
-    let (pill_bg, pill_fg) = match state {
-        ProgressionState::Leveled => (color::darken(color::GOLD, 0.06), badge_ink),
-        ProgressionState::Unseen => (color::darken(bamboo_face, 0.28), label_champagne_soft),
-        ProgressionState::Played => (color::darken(color::BRASS, 0.07), badge_ink),
+    let card_bg = match state {
+        ProgressionState::Leveled => color::darken(color::GOLD, 0.06),
+        ProgressionState::Unseen => color::darken(bamboo_face, 0.28),
+        ProgressionState::Played => color::darken(color::BRASS, 0.07),
     };
-    // Pill drop shadow.
-    frame.quad(GpuInstance {
-        rect: [
-            pill_x + 1.5 * shadow_scale,
-            pill_y + 2.0 * shadow_scale,
-            pill_w,
-            pill_h,
-        ],
-        color: color::alpha(color::WALNUT_DEEP, 0.35),
-        user: 0,
-    });
-    frame.quad(GpuInstance {
-        rect: [pill_x, pill_y, pill_w, pill_h],
-        color: pill_bg,
-        user: 0,
-    });
-    frame.text(TextLabel {
-        rect: [pill_x, pill_y + pill_h * 0.18, pill_w, pill_h * 0.8],
-        text: pill_text,
-        color: pill_fg,
-        align: TextAlign::Center,
-        font_px: Some(typography::size(typography::H36, h)),
-        ..Default::default()
-    });
-
-    // Stat strip — right-aligned, single line, "+N MULT · +N CHIPS".
-    // Shares the header row with the title, with its own 50%-width
-    // lane on the right. Locked yaku hide score numbers (no spoilers
-    // on bonus scaling until the player has unlocked the yaku).
-    let stat_font = typography::size(typography::H28, h);
-    let stat_y = header_y + (title_h - stat_font * 1.05) * 0.45;
-    let stat_text = match state {
-        ProgressionState::Unseen => "— — —".into(),
-        _ => format!("+{mult}  MULT   ·   +{chip}  CHIPS"),
-    };
-    let stat_color = match state {
+    let value_color = match state {
         ProgressionState::Unseen => label_champagne_muted,
-        ProgressionState::Leveled => color::lighten(color::GOLD, 0.06),
-        _ => label_champagne_soft,
+        _ => badge_ink,
     };
-    frame.text(TextLabel {
-        rect: [
-            header_x + header_w * 0.5,
-            stat_y,
-            header_w * 0.5,
-            stat_font * 1.2,
-        ],
-        text: stat_text,
-        color: stat_color,
-        align: TextAlign::Right,
-        font_px: Some(stat_font),
-        ..Default::default()
-    });
+    let stat_cards = [
+        (
+            "Level",
+            match state {
+                ProgressionState::Unseen => "—".to_string(),
+                _ => lvl.to_string(),
+            },
+        ),
+        (
+            "Chips",
+            match state {
+                ProgressionState::Unseen => "—".to_string(),
+                _ => format!("+{chip}"),
+            },
+        ),
+        (
+            "Mult",
+            match state {
+                ProgressionState::Unseen => "—".to_string(),
+                _ => format!("+{}", format_yaku_mult_bonus(mult)),
+            },
+        ),
+        ("This Run", format!("{scored_this_run}x scored")),
+    ];
+    for (i, (label, value)) in stat_cards.iter().enumerate() {
+        let x = header_x + i as f32 * (card_w + card_gap);
+        frame.quad(GpuInstance {
+            rect: [
+                x + 1.5 * shadow_scale,
+                card_y + 2.0 * shadow_scale,
+                card_w,
+                card_h,
+            ],
+            color: color::alpha(color::WALNUT_DEEP, 0.35),
+            user: 0,
+        });
+        frame.quad(GpuInstance {
+            rect: [x, card_y, card_w, card_h],
+            color: card_bg,
+            user: 0,
+        });
+        frame.text(TextLabel {
+            rect: [x, card_y + card_h * 0.06, card_w, card_h * 0.40],
+            text: (*label).into(),
+            color: color::alpha(badge_ink, 0.78),
+            align: TextAlign::Center,
+            font_px: Some(card_label_font),
+            ..Default::default()
+        });
+        frame.text(TextLabel {
+            rect: [x, card_y + card_h * 0.48, card_w, card_h * 0.44],
+            text: value.clone(),
+            color: value_color,
+            align: TextAlign::Center,
+            font_px: Some(card_value_font),
+            ..Default::default()
+        });
+    }
 
     // Rule line under the header — 1-2px ANTIQUE strip, separates the
-    // title + pill + stat row from the description/hand below. Must
-    // clear the pill's bottom (pill is stacked under the title now).
-    let header_bottom = (pill_y + pill_h).max(header_y + title_h);
+    // title + stat cards from the description/hand below.
+    let header_bottom = (card_y + card_h).max(header_y + title_h);
     let rule_y = header_bottom + header_pad * 0.4;
     let rule_h = (1.5 * shadow_scale).max(1.0);
     frame.quad(GpuInstance {

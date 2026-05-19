@@ -1,4 +1,8 @@
 //! Moths fluttering back and forth around the main-menu door light (`door_light` in `main_menu.glb`).
+//!
+//! Currently parked: the main-menu scene no longer spawns these. Kept available
+//! for re-enabling without restoring code.
+#![allow(dead_code)]
 
 use crate::render::draw_cmd::{Object3d, Object3dKind, UiFrame};
 use crate::render::table_transform::mat4_to_euler_xyz_rad;
@@ -69,8 +73,7 @@ pub fn push_moths_around_lamp(
         let bug_wz = bulb_wz + lamp_h * z_frac + bob;
 
         let wing_half_span = 1.13 * size_frac * bug_body_len;
-        let orbit_r =
-            (r_nom + r_drift).max(lamp_w * 0.72 + bug_body_len * 0.6 + wing_half_span);
+        let orbit_r = (r_nom + r_drift).max(lamp_w * 0.72 + bug_body_len * 0.6 + wing_half_span);
 
         let bug_wx = bulb_wx + orbit_r * phase.cos();
         let bug_wy = bulb_wy;
@@ -106,7 +109,9 @@ pub fn push_moths_around_lamp(
     for i in 0..BUG_COUNT {
         let (pos, extents, rot, flap_rad) = sample_bug(i, 0.0);
         let fi = i as f32;
-        let speed_factor = (t_now * flap_hz * std::f32::consts::TAU + fi * 1.3).cos().abs();
+        let speed_factor = (t_now * flap_hz * std::f32::consts::TAU + fi * 1.3)
+            .cos()
+            .abs();
         let live_wing_alpha = 0.92 - 0.55 * speed_factor;
         let blur_alpha = 0.32 * speed_factor;
         bugs.push(Object3d {

@@ -81,8 +81,7 @@ impl GameMode {
         };
         // Apply the stake's base-target multiplier once here; per-ante growth is
         // `core::blind_target::TARGET_SCALING`.
-        let base_target =
-            ((DEFAULT_BASE_TARGET as f32) * stake.base_target_mult()).round() as u32;
+        let base_target = ((DEFAULT_BASE_TARGET as f32) * stake.base_target_mult()).round() as u32;
         let mut starting_rules = vec![RuleModifier::PairDoubleScore];
         starting_rules.extend(stake.starting_rules());
         Self {

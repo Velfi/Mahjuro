@@ -14,7 +14,9 @@ pub fn chronicle_hist_index_at_list(list_index: usize, progress: &PlayerProgress
     if list_index == 0 {
         return None;
     }
-    chronicle_indices_recent_first(progress).get(list_index - 1).copied()
+    chronicle_indices_recent_first(progress)
+        .get(list_index - 1)
+        .copied()
 }
 
 /// Display number for a run row (`1` = oldest … `N` = newest).

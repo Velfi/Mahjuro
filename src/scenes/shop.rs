@@ -81,8 +81,8 @@ pub struct ShopScene {
     reroll_cost: u32,
     pause_menu: PauseMenu,
     /// Currently focused shop element. Starts on the first for-sale shelf item
-    /// (or the leave bell when the shelf is empty). In cursor mode, hover still
-    /// overrides focus each frame.
+    /// (or the leave bell when the shelf is empty). In cursor mode, hover follows
+    /// the 3D pick when present; otherwise screen rects (shelf slots + HUD buttons).
     focus: Option<ShopFocus>,
     /// Focus rect graph captured at the end of the previous `draw_frame`,
     /// consumed by `update()` for cursor hit-tests and spatial navigation.

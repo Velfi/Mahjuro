@@ -111,11 +111,7 @@ impl BlindKind {
     /// HUD label for the active round wind(s).
     pub fn round_winds_label(primary: u8, bonus: Option<u8>) -> String {
         match bonus {
-            Some(b) => format!(
-                "{}+{}",
-                Self::wind_name(primary),
-                Self::wind_name(b)
-            ),
+            Some(b) => format!("{}+{}", Self::wind_name(primary), Self::wind_name(b)),
             None => Self::wind_name(primary).to_string(),
         }
     }

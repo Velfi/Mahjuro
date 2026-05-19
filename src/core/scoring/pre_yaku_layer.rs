@@ -32,11 +32,7 @@ pub(crate) fn apply_pre_yaku_scoring(
         sets,
         eff,
     } = *input;
-    let ScoringLayerOut {
-        chips,
-        mult,
-        steps,
-    } = out;
+    let ScoringLayerOut { chips, mult, steps } = out;
     let PreYakuLayerOpts {
         pair_double,
         has_triplet_boost,

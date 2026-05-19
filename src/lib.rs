@@ -82,8 +82,9 @@ use crate::physical_size::PhysicalSize;
 use sdl3::keyboard::{Mod, Scancode};
 
 use main_arrange::{
-    ArrangeInput, apply_arrange_to_layout, arrange_hierarchy_flat, collect_committed_rotations,
-    reset_arrange_to_default, sample_arrange_placement,
+    ArrangeInput, apply_arrange_to_layout, arrange_hierarchy_first_child, arrange_hierarchy_flat,
+    arrange_hierarchy_index_of, arrange_hierarchy_parent, arrange_hierarchy_sibling_offset,
+    collect_committed_rotations, reset_arrange_to_default, sample_arrange_placement,
 };
 use main_cli::Cli;
 use main_debug_state::{ArrangeModeState, DebugState};

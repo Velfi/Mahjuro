@@ -1,3 +1,4 @@
+pub mod boss_icons;
 pub mod button_prompts;
 pub mod chronicle_dashboard;
 pub mod colored_keywords;

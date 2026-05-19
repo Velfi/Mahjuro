@@ -104,8 +104,8 @@ pub enum RelicId {
     /// chance to break at end of round.
     #[serde(alias = "silver_filigree_lantern")]
     StoneLantern,
-    /// Copies the scoring effect of the relic immediately after it in
-    /// the player's relic inventory. No effect if it's the last slot.
+    /// Copies the relic in the next slot to the right in the relic bar.
+    /// No effect if that slot is empty.
     MirrorTile,
     /// ×2.5 mult if every scored tile belongs to a single numbered suit.
     WayOfPurity,
@@ -631,8 +631,8 @@ pub fn relic_sell_price_live(
 /// Falls back to the static `RelicDef::description` when no counter applies.
 ///
 /// When `inventory_focus` is `Some((relics, slot_index))`, Mirror Tile and
-/// Shadow Hand append which relic they copy and a compatibility line (ordering
-/// matches gameplay).
+/// Shadow Hand append a short line about copy targets and (when relevant)
+/// the “extra copy for hand scoring” note.
 ///
 /// Live counter readouts are only shown when `inventory_focus` is `Some` — i.e.
 /// during gameplay or shop. Callers that render archive/collection entries pass
@@ -804,7 +804,12 @@ pub fn relic_description_live(
                 .unwrap_or(0)
                 .max(0);
             let overflow = if inventory_focus
-                .is_some_and(|(relics, _)| relics.has(RelicId::StrengthInNumbers)) { 68 } else { 0 };
+                .is_some_and(|(relics, _)| relics.has(RelicId::StrengthInNumbers))
+            {
+                68
+            } else {
+                0
+            };
             let excess = overflow + added;
             if excess > 0 {
                 format!("{base} [+{:.1} mult]", 0.2 * excess as f64)
@@ -1035,7 +1040,7 @@ fn relic_display_name(id: RelicId) -> String {
 }
 
 const COPY_RELIC_COMPATIBLE_SCORING_LINE: &str =
-    "Compatible: hand scoring treats this relic as duplicated for chips and mult.";
+    "Hand scoring counts this like a second copy of that relic.";
 
 #[inline]
 fn push_debuffed_self_copy_relic_line(
@@ -1045,7 +1050,7 @@ fn push_debuffed_self_copy_relic_line(
 ) {
     if relics.is_debuffed(self_id) {
         let name = relic_display_name(self_id);
-        parts.push(format!("Debuffed: {name} does nothing while suppressed."));
+        parts.push(format!("{name} is debuffed (off)."));
     }
 }
 
@@ -1060,17 +1065,16 @@ fn push_copy_target_line_with_debuff_note(
     let mut line = line_body;
     if relics.is_debuffed(target) {
         line.push_str(&format!(
-            " That relic is debuffed, but {copy_source_display_name} still duplicates its scoring bonuses."
+            " That relic is debuffed; {copy_source_display_name} copy still applies for scoring."
         ));
     }
     parts.push(line);
-    if relic_scoring_copy_dup_is_compatible(target) {
+    if !relic_scoring_copy_dup_is_incompatible(target) {
         parts.push(COPY_RELIC_COMPATIBLE_SCORING_LINE.to_string());
     }
 }
 
-/// Tooltip helper: explain Mirror Tile's neighbor, scoring driver slot,
-/// and rough compatibility with the copied relic.
+/// Tooltip helper: which relic Mirror Tile copies and when another mirror wins.
 pub fn format_mirror_tile_inventory_help(relics: &RelicState, mirror_slot: usize) -> String {
     let active = &relics.active;
     if active.get(mirror_slot) != Some(&RelicId::MirrorTile) {
@@ -1091,16 +1095,11 @@ pub fn format_mirror_tile_inventory_help(relics: &RelicState, mirror_slot: usize
                 &mut parts,
                 relics,
                 tid,
-                format!("Copying: {name}."),
+                format!("Copies {name}."),
                 &mirror_name,
             );
         }
-        None => {
-            parts.push(
-                "No relic to the right — reorder so another relic sits after this Mirror Tile."
-                    .to_string(),
-            );
-        }
+        None => parts.push("Put a relic in the slot to the right.".to_string()),
     }
 
     if let Some(fm) = first_mirror_slot {
@@ -1108,11 +1107,8 @@ pub fn format_mirror_tile_inventory_help(relics: &RelicState, mirror_slot: usize
             let tgt = active.get(fm + 1).copied().map(relic_display_name);
             let tgt_s = tgt.unwrap_or_else(|| "nothing".into());
             parts.push(format!(
-                "Scoring only uses the leftmost Mirror Tile (slot {} from the left). That one copies: {tgt_s}.",
-                fm + 1
+                "Only the leftmost mirror does anything (it copies {tgt_s})."
             ));
-        } else {
-            parts.push("This Mirror Tile is the one scoring checks use.".to_string());
         }
     }
 
@@ -1133,12 +1129,9 @@ pub fn format_shadow_hand_inventory_help(relics: &RelicState, shadow_slot: usize
     let shadow_name = relic_display_name(RelicId::ShadowHand);
 
     match active.first().copied() {
-        None => parts.push("No relics to copy.".to_string()),
+        None => parts.push("Nothing to copy.".to_string()),
         Some(RelicId::ShadowHand) => {
-            parts.push(
-                "Leftmost slot is Shadow Hand — move it right so another relic occupies the first slot; that relic is what gets copied."
-                    .to_string(),
-            );
+            parts.push("Move Shadow Hand right so a different relic is in the first slot.".to_string());
         }
         Some(tid) => {
             let name = relic_display_name(tid);
@@ -1146,7 +1139,7 @@ pub fn format_shadow_hand_inventory_help(relics: &RelicState, shadow_slot: usize
                 &mut parts,
                 relics,
                 tid,
-                format!("Copying: {name} (leftmost relic)."),
+                format!("Copies {name} (left slot)."),
                 &shadow_name,
             );
         }
@@ -1155,77 +1148,48 @@ pub fn format_shadow_hand_inventory_help(relics: &RelicState, shadow_slot: usize
     parts.join("\n")
 }
 
-/// True when Mirror Tile / Shadow Hand duplication routes through the scoring
-/// pipeline's `EffectiveRelics::has` / `count` for this relic. Anything checked only with
-/// raw `ctx.relic.roster.has` there (e.g. Strength in Numbers overflow) is excluded.
-fn relic_scoring_copy_dup_is_compatible(target: RelicId) -> bool {
+/// True when Mirror Tile / Shadow Hand should **not** show the “compatible” scoring
+/// tip (`COPY_RELIC_COMPATIBLE_SCORING_LINE`): meta copies, shop-only relics,
+/// draw/validation/wall hooks that do not go through [`EffectiveRelics`](crate::core::scoring::EffectiveRelics),
+/// **blind-clear round payout** gold only (Gold Idol, Jade Abacus, Patience, Green Luck,
+/// Beggar’s Cup, Cosmopolitan — see `RunState::emit_round_resolution_events`), sell-value
+/// growth (`NestEgg`), round-start rolls (`Sweepstakes`), or post-score bookkeeping unrelated
+/// to in-round play (`StarTile`, `Chrysalis`).
+///
+/// In-round economy wired to mirror/shadow includes Kong Collector (kong counter),
+/// No Honor But Wealth (discard), Eight Treasures (full-hand zodiac), and Quick Draw
+/// (post-commit draw size); those stay **off** this list.
+///
+/// New [`RelicId`] variants default to compatible; extend this list when the tooltip would
+/// mislead or integration is still missing.
+fn relic_scoring_copy_dup_is_incompatible(target: RelicId) -> bool {
     matches!(
         target,
-        RelicId::TripletBoost
-            | RelicId::SequenceSurge
-            | RelicId::PairPower
-            | RelicId::HonorFury
-            | RelicId::KongsBlessing
-            | RelicId::JadeSerpent
-            | RelicId::RubySerpent
-            | RelicId::LapisSerpent
-            | RelicId::EdgeRunner
-            | RelicId::LowTide
-            | RelicId::HighTide
-            | RelicId::TilePolisher
-            | RelicId::LastBreath
-            | RelicId::Geese
-            | RelicId::VoiceOfThePeople
-            | RelicId::VoiceOfTheElite
-            | RelicId::RustlingGooseEgg
-            | RelicId::TeaCeremony
-            | RelicId::Rakuware
-            | RelicId::GhostHand
-            | RelicId::RiverRunner
-            | RelicId::MeltingIce
-            | RelicId::Taotie
-            | RelicId::GardenKeeper
-            | RelicId::Hanami
-            | RelicId::DragonEcho
-            | RelicId::DoraCrown
-            | RelicId::DragonRage
-            | RelicId::WhiteDragonsHush
-            | RelicId::KanDrum
-            | RelicId::WindReader
-            | RelicId::Ikebana
-            | RelicId::LuckySeven
-            | RelicId::PaperLantern
-            | RelicId::MultiplierMaster
-            | RelicId::ChainReaction
-            | RelicId::ClosedGate
-            | RelicId::GoldenEngine
-            | RelicId::Snowball
-            | RelicId::Momentum
-            | RelicId::Minimalist
-            | RelicId::TurtleShell
-            | RelicId::SilkThread
-            | RelicId::SilkMoth
-            | RelicId::Humility
-            | RelicId::Obsession
-            | RelicId::Bonfire
-            | RelicId::Kintsugi
-            | RelicId::SolitarySage
-            | RelicId::CurioCabinet
-            | RelicId::LotusBloom
-            | RelicId::WallWeaver
-            | RelicId::Heirloom
-            | RelicId::Tourist
-            | RelicId::CrackedTile
-            | RelicId::HungryGhost
-            | RelicId::WayOfPurity
-            | RelicId::WayOfPairs
-            | RelicId::WayOfTriplets
-            | RelicId::WayOfSequences
-            | RelicId::StoneLantern
-            | RelicId::GlassCannon
-            | RelicId::EulersNumber
-            | RelicId::PiConstant
-            | RelicId::MonarchButterfly
+        RelicId::MirrorTile
+            | RelicId::ShadowHand
+            | RelicId::MerchantsEye
+            | RelicId::IGotAGuy
+            | RelicId::SecondWind
+            | RelicId::BigHands
+            | RelicId::TinyHands
+            | RelicId::BrocadePouch
+            | RelicId::GoldIdol
+            | RelicId::JadeAbacus
+            | RelicId::NestEgg
+            | RelicId::Patience
+            | RelicId::Sweepstakes
+            | RelicId::BeggarsCup
+            | RelicId::Cosmopolitan
+            | RelicId::GreenLuck
+            | RelicId::FortunesFavor
+            | RelicId::SetMagnet
+            | RelicId::JokerTile
+            | RelicId::WildWinds
+            | RelicId::StrengthInNumbers
+            | RelicId::Disgust
+            | RelicId::AntTrail
+            | RelicId::StarTile
+            | RelicId::Chrysalis
     )
 }
 

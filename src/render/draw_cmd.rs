@@ -57,8 +57,7 @@ pub enum ScenePunctualLight {
 }
 
 /// Unified per-frame lights for tiles, `lit_mesh`, and GLB room passes.
-#[derive(Clone, Debug)]
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub struct SceneLighting {
     pub punctual: Vec<ScenePunctualLight>,
     pub spot_lights: Vec<SpotLight>,
@@ -67,7 +66,6 @@ pub struct SceneLighting {
     /// Embedded `KHR_lights_punctual` active for this room (inverse-square lights + exposure path).
     pub embedded_gltf_punctual: bool,
 }
-
 
 impl SceneLighting {
     pub fn set_smooth_points(&mut self, v: Vec<PointLight>) {
@@ -278,6 +276,7 @@ impl CascadeTokenKind {
 /// shader's `MaterialKind` branch at render time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GlyphMaterial {
+    #[allow(dead_code)] // Score-reel digits (3D path); renderer arm kept in sync.
     Plain,
     Metal,
     Polychrome,
@@ -357,9 +356,7 @@ pub enum ImageQuadSource {
         name: &'static str,
     },
     /// Full embedded PNG under `assets/` (via [`crate::asset_path::get`]).
-    Asset {
-        path: &'static str,
-    },
+    Asset { path: &'static str },
     /// Absolute filesystem path to an SVG or PNG (rasterized at draw time).
     #[allow(dead_code)] // No current producer; renderer path kept for tooling / experiments.
     Filesystem(std::path::PathBuf),
@@ -677,9 +674,6 @@ pub enum DrawCmd {
     /// Procedural rising-ember vignette (fullscreen triangle, no data).
     #[allow(dead_code)]
     EmberDrift,
-    /// Procedural rainfall vignette (fullscreen triangle, no data).
-    Rain,
-    /// Distant rain sheet only — sparse far-layer shader mist behind particles.
     /// Procedural golden-dust with god-rays vignette (fullscreen triangle, no data).
     GoldenDust,
     /// Procedural moon hovering above rippling water (fullscreen triangle, no data).
@@ -926,9 +920,6 @@ impl UiFrame {
     pub fn ember_drift(&mut self) {
         self.cmds.push(DrawCmd::EmberDrift);
     }
-    pub fn rain(&mut self) {
-        self.cmds.push(DrawCmd::Rain);
-    }
     pub fn golden_dust(&mut self) {
         self.cmds.push(DrawCmd::GoldenDust);
     }
@@ -951,8 +942,7 @@ impl UiFrame {
         self.cmds.extend(iter.into_iter().map(DrawCmd::Quad));
     }
     pub fn overlay_quads<I: IntoIterator<Item = GpuInstance>>(&mut self, iter: I) {
-        self.cmds
-            .extend(iter.into_iter().map(DrawCmd::OverlayQuad));
+        self.cmds.extend(iter.into_iter().map(DrawCmd::OverlayQuad));
     }
 
     pub fn squircle_quads<I: IntoIterator<Item = GpuInstance>>(&mut self, iter: I) {
@@ -1019,7 +1009,6 @@ impl UiFrame {
                 DrawCmd::Background(_)
                 | DrawCmd::Starfield
                 | DrawCmd::EmberDrift
-                | DrawCmd::Rain
                 | DrawCmd::GoldenDust
                 | DrawCmd::MoonlitWater
                 | DrawCmd::SunlitWater

@@ -160,10 +160,15 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             color = color + vec3<f32>((n - 0.5) * params.vhs_grain);
         }
 
-        // Vignette: gentle corner darkening with smoothstep falloff.
+        // Vignette: corner darkening (aspect-correct so ultrawide isn't weak in
+        // the horizontal rails). Wider smoothstep than an inscribed circle in
+        // raw UV so moderate slider values read clearly on real aspect ratios.
         if params.vhs_vignette > 0.0 {
-            let d = distance(in.uv, vec2<f32>(0.5, 0.5));
-            let vig = smoothstep(0.45, 0.95, d);
+            let dim_u = textureDimensions(hdr_tex, 0);
+            let aspect = f32(dim_u.x) / max(f32(dim_u.y), 1.0);
+            let p = (in.uv - vec2<f32>(0.5, 0.5)) * vec2<f32>(aspect, 1.0);
+            let d = length(p);
+            let vig = smoothstep(0.28, 0.82, d);
             color = color * (1.0 - vig * params.vhs_vignette);
         }
     }

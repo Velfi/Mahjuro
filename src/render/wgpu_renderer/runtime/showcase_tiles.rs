@@ -176,10 +176,7 @@ impl WgpuRenderer {
                     // Shop uses a perspective camera; layout `(px, py, lift)` must match the same
                     // ray → `plane_z` hit as `Object3d` anchors (`world_on_camera_ray_plane_z`),
                     // not flat `pixel_to_world`, or celebration tiles miss the frustum.
-                    let mut center = match (
-                        self.active_scene_key,
-                        frame.camera_override.as_ref(),
-                    ) {
+                    let mut center = match (self.active_scene_key, frame.camera_override.as_ref()) {
                         (Some("shop") | Some("tile_pack_celebration"), Some(cam)) => {
                             crate::render::world_space::world_on_camera_ray_plane_z(
                                 w,

@@ -26,7 +26,7 @@ pub struct EffectLayers {
     /// Felt fluff / `EffectsQuality` tier (also scales procedural vignette layers).
     pub procedural_surface_quality: bool,
     pub starfield: bool,
-    /// Procedural rain vignette + CPU rain field (main menu exterior).
+    /// CPU world rain field (main menu exterior).
     pub rain: bool,
     pub golden_dust: bool,
     #[allow(dead_code)]

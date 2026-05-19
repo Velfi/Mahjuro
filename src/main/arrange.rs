@@ -270,3 +270,132 @@ pub fn arrange_hierarchy_flat(scene: &crate::Scene) -> Vec<HierarchyEntry> {
     walk(hierarchy, 0, &mut out);
     out
 }
+
+/// Index of `name` in [`arrange_hierarchy_flat`], if it appears in the active scene.
+pub fn arrange_hierarchy_index_of(flat: &[HierarchyEntry], name: &str) -> Option<usize> {
+    flat.iter().position(|e| e.name == name)
+}
+
+/// Parent node in the flat list. `None` at the root tier.
+pub fn arrange_hierarchy_parent(flat: &[HierarchyEntry], idx: usize) -> Option<usize> {
+    let d = flat.get(idx)?.depth;
+    if d == 0 {
+        return None;
+    }
+    let target = d - 1;
+    let mut j = idx;
+    while j > 0 {
+        j -= 1;
+        if flat[j].depth == target {
+            return Some(j);
+        }
+    }
+    None
+}
+
+/// Direct child **indices** in the flat pre-order list (immediate children only).
+fn arrange_hierarchy_direct_child_indices(flat: &[HierarchyEntry], parent_idx: usize) -> Vec<usize> {
+    let n = flat.len();
+    if parent_idx >= n || !flat[parent_idx].is_group {
+        return Vec::new();
+    }
+    let base_depth = flat[parent_idx].depth;
+    let mut out = Vec::new();
+    let mut i = parent_idx + 1;
+    while i < n && flat[i].depth > base_depth {
+        if flat[i].depth == base_depth + 1 {
+            out.push(i);
+            let child_depth = flat[i].depth;
+            i += 1;
+            while i < n && flat[i].depth > child_depth {
+                i += 1;
+            }
+        } else {
+            // Should not happen in a well-formed hierarchy walk.
+            i += 1;
+        }
+    }
+    out
+}
+
+fn arrange_hierarchy_root_indices(flat: &[HierarchyEntry]) -> Vec<usize> {
+    flat.iter()
+        .enumerate()
+        .filter(|(_, e)| e.depth == 0)
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// Previous / next **sibling** in the hierarchy (wraps). Roots (`depth == 0`) share
+/// one virtual parent. Returns `None` if `idx` is absent or is an only child.
+pub fn arrange_hierarchy_sibling_offset(flat: &[HierarchyEntry], idx: usize, next: bool) -> Option<usize> {
+    let parent = arrange_hierarchy_parent(flat, idx);
+    let siblings: Vec<usize> = match parent {
+        Some(p) => arrange_hierarchy_direct_child_indices(flat, p),
+        None => arrange_hierarchy_root_indices(flat),
+    };
+    let pos = siblings.iter().position(|&x| x == idx)?;
+    if siblings.len() <= 1 {
+        return None;
+    }
+    let len = siblings.len();
+    let p = if next {
+        (pos + 1) % len
+    } else {
+        (pos + len - 1) % len
+    };
+    Some(siblings[p])
+}
+
+/// First direct child of a group. `None` for leaves or empty groups.
+pub fn arrange_hierarchy_first_child(flat: &[HierarchyEntry], idx: usize) -> Option<usize> {
+    let ch = arrange_hierarchy_direct_child_indices(flat, idx);
+    ch.into_iter().next()
+}
+
+#[cfg(test)]
+mod hierarchy_nav_tests {
+    use super::*;
+
+    fn e(name: &'static str, depth: usize, is_group: bool) -> HierarchyEntry {
+        HierarchyEntry {
+            name,
+            label: name,
+            depth,
+            is_group,
+        }
+    }
+
+    /// Mirrors a small tree: A(g) -> B(g) -> C(leaf), D(leaf); A -> E(leaf).
+    fn sample_flat() -> Vec<HierarchyEntry> {
+        vec![
+            e("a", 0, true),
+            e("b", 1, true),
+            e("c", 2, false),
+            e("d", 2, false),
+            e("e", 1, false),
+        ]
+    }
+
+    #[test]
+    fn parent_and_first_child() {
+        let flat = sample_flat();
+        assert_eq!(arrange_hierarchy_parent(&flat, 0), None);
+        assert_eq!(arrange_hierarchy_first_child(&flat, 0), Some(1));
+        assert_eq!(arrange_hierarchy_parent(&flat, 1), Some(0));
+        assert_eq!(arrange_hierarchy_first_child(&flat, 1), Some(2));
+        assert_eq!(arrange_hierarchy_parent(&flat, 2), Some(1));
+        assert_eq!(arrange_hierarchy_first_child(&flat, 2), None);
+        assert_eq!(arrange_hierarchy_parent(&flat, 4), Some(0));
+    }
+
+    #[test]
+    fn siblings_wrap() {
+        let flat = sample_flat();
+        assert_eq!(arrange_hierarchy_sibling_offset(&flat, 2, true), Some(3));
+        assert_eq!(arrange_hierarchy_sibling_offset(&flat, 3, false), Some(2));
+        assert_eq!(arrange_hierarchy_sibling_offset(&flat, 1, true), Some(4));
+        assert_eq!(arrange_hierarchy_sibling_offset(&flat, 4, true), Some(1));
+        assert_eq!(arrange_hierarchy_sibling_offset(&flat, 0, true), None);
+    }
+}

@@ -68,9 +68,10 @@ impl App {
             let (dw, dh) = shell.drawable_size();
             self.last_drawable_px = PhysicalSize::new(dw.max(1), dh.max(1));
             if prev != self.last_drawable_px
-                && let Some(r) = self.renderer.as_mut() {
-                    r.resize(self.last_drawable_px);
-                }
+                && let Some(r) = self.renderer.as_mut()
+            {
+                r.resize(self.last_drawable_px);
+            }
             // Splash dismissal runs in `frame_tick` (`SplashScene::update` + scene switch).
             // If we only pre-baked the showcase atlas while backgrounded, `loading_done`
             // becomes true but the splash never advances — keep ticking through splash even
@@ -331,7 +332,7 @@ impl App {
                                 name,
                             );
                             log::info!(
-                                "[Arrange] Arrow keys: move X/Y | Shift+Arrow: rotate Z/X | Enter: confirm+copy | Esc: cancel"
+                                "[Arrange] WASD move | Shift+WASDQE rotate | Tab pre-order | [ ] tree | PgUp/PgDn siblings | Enter copy+save | Esc cancel"
                             );
                         }
                         Some((name, None)) => {
@@ -556,9 +557,9 @@ impl App {
         }
 
         // Arrange mode: Tab / Shift+Tab cycles through the active
-        // scene's placement hierarchy. Works whether an object is
-        // already selected or not — picking a group applies deltas
-        // to every descendant leaf on save.
+        // scene's placement hierarchy (flat pre-order). Tree moves:
+        // `[` parent, `]` first child (or next sibling on a leaf),
+        // PageUp / PageDown previous / next sibling.
         if self.debug.arrange_mode.is_some() && scancode == Some(Scancode::Tab) {
             let flat = arrange_hierarchy_flat(&self.scene);
             if flat.is_empty() {
@@ -568,7 +569,7 @@ impl App {
                     Some(Some(s)) => Some(s.object_name.as_str()),
                     _ => None,
                 };
-                let current_idx = current_name.and_then(|n| flat.iter().position(|e| e.name == n));
+                let current_idx = current_name.and_then(|n| arrange_hierarchy_index_of(&flat, n));
                 let reverse = mod_shift(self.modifiers);
                 let next_idx = match (current_idx, reverse) {
                     (None, false) => 0,
@@ -592,7 +593,7 @@ impl App {
                 let indent = "  ".repeat(entry.depth);
                 let marker = if entry.is_group { "▸" } else { "•" };
                 log::info!(
-                    "[Arrange] {}{} {} ({}) — {}/{} in hierarchy",
+                    "[Arrange] {}{} {} ({}) — {}/{} (Tab pre-order)",
                     indent,
                     marker,
                     entry.label,
@@ -600,6 +601,84 @@ impl App {
                     next_idx + 1,
                     flat.len(),
                 );
+            }
+            return Ok(());
+        }
+
+        if self.debug.arrange_mode.is_some()
+            && !repeat
+            && matches!(
+                scancode,
+                Some(
+                    Scancode::PageUp
+                        | Scancode::PageDown
+                        | Scancode::LeftBracket
+                        | Scancode::RightBracket
+                )
+            )
+        {
+            let flat = arrange_hierarchy_flat(&self.scene);
+            if flat.is_empty() {
+                log::info!("[Arrange] Current scene has no hierarchy");
+            } else {
+                let current_idx = match &self.debug.arrange_mode {
+                    Some(Some(s)) => arrange_hierarchy_index_of(&flat, s.object_name.as_str()),
+                    _ => None,
+                };
+                let next_idx = match scancode {
+                    Some(Scancode::PageUp) => match current_idx {
+                        None => flat.len().checked_sub(1),
+                        Some(i) => arrange_hierarchy_sibling_offset(&flat, i, false).or(Some(i)),
+                    },
+                    Some(Scancode::PageDown) => match current_idx {
+                        None => Some(0usize),
+                        Some(i) => arrange_hierarchy_sibling_offset(&flat, i, true).or(Some(i)),
+                    },
+                    Some(Scancode::LeftBracket) => match current_idx {
+                        None => Some(0usize),
+                        Some(i) => arrange_hierarchy_parent(&flat, i).or(Some(i)),
+                    },
+                    Some(Scancode::RightBracket) => match current_idx {
+                        None => Some(0usize),
+                        Some(i) => arrange_hierarchy_first_child(&flat, i)
+                            .or_else(|| arrange_hierarchy_sibling_offset(&flat, i, true))
+                            .or(Some(i)),
+                    },
+                    _ => None,
+                };
+                if let Some(next_idx) = next_idx {
+                    let entry = &flat[next_idx];
+                    self.debug.arrange_mode = Some(Some(ArrangeModeState {
+                        object_name: entry.name.to_string(),
+                        selected_world_origin: glam::Vec3::ZERO,
+                        delta_px: 0.0,
+                        delta_py: 0.0,
+                        delta_lift: 0.0,
+                        delta_rz_deg: 0.0,
+                        delta_rx_deg: 0.0,
+                        delta_ry_deg: 0.0,
+                        trans_step_px: 1.0,
+                        rot_step_deg: 1.0,
+                    }));
+                    let indent = "  ".repeat(entry.depth);
+                    let marker = if entry.is_group { "▸" } else { "•" };
+                    let via = match scancode {
+                        Some(Scancode::PageUp) => "PgUp sibling",
+                        Some(Scancode::PageDown) => "PgDn sibling",
+                        Some(Scancode::LeftBracket) => "[ parent",
+                        Some(Scancode::RightBracket) => "] child/sibling",
+                        _ => "tree",
+                    };
+                    log::info!(
+                        "[Arrange] {}{} {} ({}) — {} ({})",
+                        indent,
+                        marker,
+                        entry.label,
+                        entry.name,
+                        via,
+                        next_idx + 1,
+                    );
+                }
             }
             return Ok(());
         }

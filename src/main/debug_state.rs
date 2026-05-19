@@ -9,8 +9,8 @@ use crate::debug_overlays::{
     CameraDebugOverlay, DebugVisibilityOverlay, HallwayDistortionDebugOverlay,
     SceneLookDebugOverlay, SfxTestOverlay, TuningOverlay,
 };
-use crate::render::rain_debug_overlay::RainDebugOverlay;
 use crate::render::draw_cmd::CameraParams;
+use crate::render::rain_debug_overlay::RainDebugOverlay;
 /// State for the arrange-mode debug feature. Activated via Debug > Arrange
 /// Mode. The user clicks an object to select it, then uses WASD to nudge
 /// position (forward/back/left/right), Q/E to nudge up/down, Shift+WASD/QE
@@ -66,9 +66,9 @@ pub struct DebugState {
     pub camera_debug_overlay: Option<CameraDebugOverlay>,
     /// Per-scene tonemap / post-FX + room GLB lighting (right panel).
     pub scene_look_debug_overlay: Option<SceneLookDebugOverlay>,
-    pub rain_debug_overlay: Option<RainDebugOverlay>,
     /// Pick-blind hallway vertex warp tuning (left panel).
     pub hallway_distortion_debug_overlay: Option<HallwayDistortionDebugOverlay>,
+    pub rain_debug_overlay: Option<RainDebugOverlay>,
     /// One-shot debug picker armed by the "Object Hit Test" debug menu
     /// item.
     pub object_hit_test_armed: bool,
@@ -101,8 +101,8 @@ impl DebugState {
             sfx_test_overlay: None,
             camera_debug_overlay: None,
             scene_look_debug_overlay: None,
-            rain_debug_overlay: None,
             hallway_distortion_debug_overlay: None,
+            rain_debug_overlay: None,
             object_hit_test_armed: false,
             arrange_mode: None,
             last_effective_camera: CameraParams::default_table_camera(800.0),
@@ -115,8 +115,8 @@ impl DebugState {
             || self.sfx_test_overlay.is_some()
             || self.camera_debug_overlay.is_some()
             || self.scene_look_debug_overlay.is_some()
-            || self.rain_debug_overlay.is_some()
             || self.hallway_distortion_debug_overlay.is_some()
+            || self.rain_debug_overlay.is_some()
             || self.visibility_overlay.is_some()
     }
 }

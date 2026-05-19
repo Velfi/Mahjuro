@@ -77,6 +77,13 @@
 //! other lights keep glTF-authored color.
 //! `range` maps to glTF max distance (`0` = infinite).
 //!
+//! **Tonemap pipeline:** the room-env fragment shader (`room_glb.wgsl`) writes **linear HDR**
+//! into `scene_color` (`Rgba16Float`). The single ACES (fitted) tonemap is applied by
+//! `tonemap_composite.wgsl` after bloom composite. The in-shader ACES branch is preserved as
+//! the `hdr_tonemap.w < 0.5` path but is no longer reached by the renderer — see
+//! [`crate::render::wgpu_renderer::runtime::shop_environment`] which forces `hdr_tonemap.w = 1.0`
+//! for both the main pass and the bloom MRT pre-pass.
+//!
 //! Shared glTF room decode (meshes, lights, cameras, collision) lives in [`crate::render::room_env_gltf`].
 
 use std::sync::RwLock;
@@ -85,8 +92,8 @@ use rustc_hash::FxHashMap;
 
 use crate::render::draw_cmd::CameraParams;
 use crate::render::room_env_gltf::{
-    self as renv, EmbeddedCameraHarvest, RoomEnvWalkHooks, RoomMeshPolicy, marker_translation_doc,
-    room_env_model_matrix_from_bounds_doc, walk_room_env_node, RoomEnvWalkState,
+    self as renv, EmbeddedCameraHarvest, RoomEnvWalkHooks, RoomEnvWalkState, RoomMeshPolicy,
+    marker_translation_doc, room_env_model_matrix_from_bounds_doc, walk_room_env_node,
 };
 use crate::render::tile_glb::release_loaded_primitive_gpu_source_buffers;
 use anyhow::Context;
@@ -461,13 +468,13 @@ pub struct RoomGlbCpu {
     pub environment_bounds_doc: Option<RoomEnvironmentBounds>,
     pub marker_mesh_bounds_doc: FxHashMap<String, RoomEnvironmentBounds>,
     pub collision_meshes: Vec<RoomCollisionMesh>,
-    /// Invisible `rain_hit_*` shells for CPU rain splashes (main menu, etc.).
-    pub rain_surface_meshes: Vec<RoomCollisionMesh>,
     pub embedded_perspective_camera: Option<RoomGlbEmbeddedCamera>,
     /// All embedded perspective cameras keyed by lowercase glTF node name (e.g. hallway `default` / `boss`).
     pub embedded_cameras_by_name: FxHashMap<String, RoomGlbEmbeddedCamera>,
     pub embedded_point_lights: Vec<RoomGlbEmbeddedPointLight>,
     pub embedded_spot_lights: Vec<RoomGlbEmbeddedSpotLight>,
+    /// Invisible `rain_hit_*` shells for CPU rain splashes (main menu, etc.).
+    pub rain_surface_meshes: Vec<RoomCollisionMesh>,
 }
 
 impl RoomGlbCpu {
@@ -483,7 +490,6 @@ impl RoomGlbCpu {
         self.marker_mesh_bounds_doc.get(node_name)
     }
 }
-
 
 #[derive(Copy, Clone)]
 struct RoomWalkHooks;
@@ -623,10 +629,10 @@ pub fn load_room_glb_from_bytes(
     let mut environment_primitives = Vec::new();
     let mut marker_mesh_bounds_doc = FxHashMap::default();
     let mut collision_meshes = Vec::new();
-    let mut rain_surface_meshes = Vec::new();
     let mut embedded_cameras = EmbeddedCameraHarvest::default();
     let mut embedded_point_lights = Vec::new();
     let mut embedded_spot_lights = Vec::new();
+    let mut rain_surface_meshes = Vec::new();
 
     let mut walk_state = RoomEnvWalkState {
         candle_node_prefix: SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX,
@@ -655,11 +661,11 @@ pub fn load_room_glb_from_bytes(
         environment_bounds_doc,
         marker_mesh_bounds_doc,
         collision_meshes,
-        rain_surface_meshes,
         embedded_perspective_camera,
         embedded_cameras_by_name,
         embedded_point_lights,
         embedded_spot_lights,
+        rain_surface_meshes,
     })
 }
 
@@ -675,7 +681,9 @@ pub fn load_shop_glb_from_bytes(data: &[u8]) -> anyhow::Result<RoomGlbCpu> {
 /// `true` when `shop.glb` carries `KHR_lights_punctual` lights.
 #[inline]
 pub fn shop_glb_has_embedded_lights() -> bool {
-    with_shop_glb_cpu(|opt| opt.is_some_and(crate::render::room_gltf_punctual::room_glb_has_embedded_lights))
+    with_shop_glb_cpu(|opt| {
+        opt.is_some_and(crate::render::room_gltf_punctual::room_glb_has_embedded_lights)
+    })
 }
 
 /// glTF punctual points for the shop (candle flicker envelope).

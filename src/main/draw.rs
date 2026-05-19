@@ -44,6 +44,12 @@ impl App {
             if overlay.editing_active_scene(active) {
                 return overlay.look;
             }
+            // `_default` overlay uses `scene_key() == None`, so it never matches
+            // `active_scene_key == Some("…")` — still preview when the running scene
+            // falls back to the default bucket (no `SceneLookTuning:<scene>` file).
+            if overlay.scene_key().is_none() && !self.scene_look.has_override(active) {
+                return overlay.look;
+            }
         }
         self.scene_look.resolve(active)
     }
@@ -75,8 +81,17 @@ impl App {
                             lines.push("Nice work — you cleared your first blind.".to_string());
                             lines.push("Next: browse the shop, then face the boss.".to_string());
                             self.modals.push(
-                                Modal::new("Lesson Complete!", lines.join("\n"), ModalTheme::Success)
-                                    .with_fireworks(ww * 0.5, wh * 0.8, ww * 0.6, 4),
+                                Modal::new(
+                                    "Lesson Complete!",
+                                    lines.join("\n"),
+                                    ModalTheme::Success,
+                                )
+                                .with_fireworks(
+                                    ww * 0.5,
+                                    wh * 0.8,
+                                    ww * 0.6,
+                                    4,
+                                ),
                             );
                             GameEngine::set_onboarding_shop_phase(&mut self.run);
                             self.pending_scene = Some(Scene::Shop(
@@ -90,9 +105,8 @@ impl App {
                             let _ = persistence::save_profile(self.active_profile, &self.progress);
                             persistence::delete_saved_run(self.active_profile);
                             self.steam.sync_profile_stats(&self.progress);
-                            self.steam.unlock_achievement(
-                                crate::steam::Achievement::TutorialComplete,
-                            );
+                            self.steam
+                                .unlock_achievement(crate::steam::Achievement::TutorialComplete);
                             self.pending_scene =
                                 Some(Scene::TutorialSummary(TutorialSummaryScene::new(true)));
                             self.transition_alpha = 1.0;
@@ -115,7 +129,10 @@ impl App {
                         ModalTheme::Info,
                     );
                     self.modals.push(modal);
-                    self.pending_scene = Some(Scene::Shop(crate::scenes::ShopScene::new(&mut self.run, &self.progress)));
+                    self.pending_scene = Some(Scene::Shop(crate::scenes::ShopScene::new(
+                        &mut self.run,
+                        &self.progress,
+                    )));
                     self.transition_alpha = 1.0;
                     return;
                 }
@@ -224,28 +241,27 @@ impl App {
                     let discards_left = self.run.discards_remaining;
                     let plays_left = self.run.plays_remaining;
                     let last = self.run.last_breakdown.as_ref();
-                    let (feedback, retry_blind) =
-                        match self.run.onboarding_phase() {
-                            Some(crate::game::onboarding::OnboardingPhase::Lessons) => {
-                                let feedback = crate::game::onboarding::lessons_failure_feedback(
-                                    round_score,
-                                    target_score,
-                                    plays_left,
-                                );
-                                self.run.retry_onboarding_lessons();
-                                (feedback, self.run.blind)
-                            }
-                            _ => {
-                                let feedback = crate::game::onboarding::finale_failure_feedback(
-                                    round_score,
-                                    target_score,
-                                    discards_left,
-                                    last,
-                                );
-                                self.run.retry_onboarding_finale();
-                                (feedback, self.run.blind)
-                            }
-                        };
+                    let (feedback, retry_blind) = match self.run.onboarding_phase() {
+                        Some(crate::game::onboarding::OnboardingPhase::Lessons) => {
+                            let feedback = crate::game::onboarding::lessons_failure_feedback(
+                                round_score,
+                                target_score,
+                                plays_left,
+                            );
+                            self.run.retry_onboarding_lessons();
+                            (feedback, self.run.blind)
+                        }
+                        _ => {
+                            let feedback = crate::game::onboarding::finale_failure_feedback(
+                                round_score,
+                                target_score,
+                                discards_left,
+                                last,
+                            );
+                            self.run.retry_onboarding_finale();
+                            (feedback, self.run.blind)
+                        }
+                    };
                     self.audio.play_sfx(audio::SfxId::GameOver);
                     let modal = Modal::new("Try Again!", &feedback, ModalTheme::Info);
                     self.modals.push(modal);
@@ -378,6 +394,7 @@ impl App {
             scenes::DebugVisibility {
                 hide_candles: self.debug.hide_candles,
                 hide_blind_plaque: self.debug.hide_blind_plaque,
+                hide_scoring_placard: self.debug.hide_scoring_placard,
             },
             modal_active,
             scene_look.room_gltf_height_scale,
@@ -453,15 +470,17 @@ impl App {
         frame.apply_alpha(alpha);
 
         // Overlay fullscreen transition shaders (not zodiac’s in-scene cascade).
-        if self.transition_timer > 0.0 && self.effect_layers.transition_fullscreen_fx
-            && let Some(kind) = overlay_kind_for_transition(self.transition_kind) {
-                crate::render::transition_fx::push_overlay_transition(
-                    &mut frame,
-                    kind,
-                    self.transition_timer,
-                    (size.width as f32, size.height as f32),
-                );
-            }
+        if self.transition_timer > 0.0
+            && self.effect_layers.transition_fullscreen_fx
+            && let Some(kind) = overlay_kind_for_transition(self.transition_kind)
+        {
+            crate::render::transition_fx::push_overlay_transition(
+                &mut frame,
+                kind,
+                self.transition_timer,
+                (size.width as f32, size.height as f32),
+            );
+        }
 
         self.modals.update();
         if let Some((
@@ -538,88 +557,83 @@ impl App {
             append_fullscreen_debug_panel(&mut frame, &mut self.active_buttons, insts, lbls);
         }
 
-
         // Cursor hover labels for `ButtonDef::hover_label`. Scan in vec order (same as
         // click hit-test): first matching rect with a label wins — so smaller rects
         // pushed before a fullscreen catch-all still show tooltips.
         if let Some(ref input) = self.input
-            && input.mode == crate::ui::input::InputMode::Cursor {
-                let cursor = input.last_cursor;
-                let w = size.width as f32;
-                let h = size.height as f32;
-                let scale = crate::render::theme::metrics::scene_scale(w, h);
-                if let Some(btn) = self.active_buttons.iter().find(|b| {
-                    let (bx, by, bw, bh) = b.rect;
-                    let inside = cursor.0 >= bx
-                        && cursor.0 <= bx + bw
-                        && cursor.1 >= by
-                        && cursor.1 <= by + bh;
-                    inside && b.hover_label.is_some()
-                })
-                    && let Some(ref label) = btn.hover_label {
-                        let pad = (h * 0.012 * scale).max(6.0);
-                        let min_outer_h = ((h * 0.035 * scale).max(22.0)).min(h * 0.12);
-                        let est_chars = label.chars().count().max(1);
-                        let line_h = (min_outer_h * 0.52).max(8.0);
-                        let tooltip_w =
-                            ((est_chars as f32 * line_h + pad * 2.0).max(72.0)).min(w * 0.5);
-                        let (bx, by, bw, bh) = btn.rect;
-                        let cx = bx + bw * 0.5;
-                        let mut tip_x = cx - tooltip_w * 0.5;
-                        tip_x = tip_x.max(pad).min(w - tooltip_w - pad);
+            && input.mode == crate::ui::input::InputMode::Cursor
+        {
+            let cursor = input.last_cursor;
+            let w = size.width as f32;
+            let h = size.height as f32;
+            let scale = crate::render::theme::metrics::scene_scale(w, h);
+            if let Some(btn) = self.active_buttons.iter().find(|b| {
+                let (bx, by, bw, bh) = b.rect;
+                let inside =
+                    cursor.0 >= bx && cursor.0 <= bx + bw && cursor.1 >= by && cursor.1 <= by + bh;
+                inside && b.hover_label.is_some()
+            }) && let Some(ref label) = btn.hover_label
+            {
+                let pad = (h * 0.012 * scale).max(6.0);
+                let min_outer_h = ((h * 0.035 * scale).max(22.0)).min(h * 0.12);
+                let est_chars = label.chars().count().max(1);
+                let line_h = (min_outer_h * 0.52).max(8.0);
+                let tooltip_w = ((est_chars as f32 * line_h + pad * 2.0).max(72.0)).min(w * 0.5);
+                let (bx, by, bw, bh) = btn.rect;
+                let cx = bx + bw * 0.5;
+                let mut tip_x = cx - tooltip_w * 0.5;
+                tip_x = tip_x.max(pad).min(w - tooltip_w - pad);
 
-                        let parchment = crate::render::theme::color::PARCHMENT;
-                        let inner_w = (tooltip_w - 2.0 * pad).max(40.0);
-                        let color_lines = crate::ui::colored_keywords::wrap_colored_text_multiline(
-                            label.as_ref(),
-                            inner_w,
-                            line_h,
-                            parchment,
-                        );
-                        let content_h = crate::ui::colored_keywords::colored_multiline_block_height(
-                            color_lines.len(),
-                            line_h,
-                        );
-                        let inner_h = (content_h).max(min_outer_h - 2.0 * pad);
-                        let tooltip_h = (inner_h + 2.0 * pad).max(min_outer_h).min(h * 0.35);
+                let parchment = crate::render::theme::color::PARCHMENT;
+                let inner_w = (tooltip_w - 2.0 * pad).max(40.0);
+                let color_lines = crate::ui::colored_keywords::wrap_colored_text_multiline(
+                    label.as_ref(),
+                    inner_w,
+                    line_h,
+                    parchment,
+                );
+                let content_h = crate::ui::colored_keywords::colored_multiline_block_height(
+                    color_lines.len(),
+                    line_h,
+                );
+                let inner_h = (content_h).max(min_outer_h - 2.0 * pad);
+                let tooltip_h = (inner_h + 2.0 * pad).max(min_outer_h).min(h * 0.35);
 
-                        let mut tip_y = by - tooltip_h - pad;
-                        if tip_y < pad {
-                            tip_y = by + bh + pad;
-                        }
-                        if tip_y + tooltip_h > h - pad {
-                            tip_y = (h - tooltip_h - pad).max(pad);
-                        }
-                        // Same brass + midnight frame as [`crate::ui::tooltip`] / focus inspect panels.
-                        let mut tip_quads: Vec<GpuInstance> = Vec::with_capacity(2);
-                        crate::ui::tooltip::push_tooltip_frame_quads(
-                            &mut tip_quads,
-                            tip_x,
-                            tip_y,
-                            tooltip_w,
-                            tooltip_h,
-                        );
-                        frame.overlay_quads(tip_quads);
-                        let text_top =
-                            tip_y + pad + ((tooltip_h - 2.0 * pad - content_h) * 0.5).max(0.0);
-                        let mut tip_texts: Vec<crate::render::wgpu_renderer::TextLabel> =
-                            Vec::new();
-                        crate::ui::colored_keywords::push_colored_rows_in_width(
-                            &mut tip_texts,
-                            crate::ui::colored_keywords::ColoredRowsLayout {
-                                text_left: tip_x + pad,
-                                top_y: text_top,
-                                inner_w,
-                                line_h,
-                                fallback_plain: label.as_ref(),
-                                fallback_color: parchment,
-                            },
-                            &color_lines,
-                            crate::render::wgpu_renderer::TextAlign::Center,
-                        );
-                        frame.texts(tip_texts);
-                    }
+                let mut tip_y = by - tooltip_h - pad;
+                if tip_y < pad {
+                    tip_y = by + bh + pad;
+                }
+                if tip_y + tooltip_h > h - pad {
+                    tip_y = (h - tooltip_h - pad).max(pad);
+                }
+                // Same brass + midnight frame as [`crate::ui::tooltip`] / focus inspect panels.
+                let mut tip_quads: Vec<GpuInstance> = Vec::with_capacity(2);
+                crate::ui::tooltip::push_tooltip_frame_quads(
+                    &mut tip_quads,
+                    tip_x,
+                    tip_y,
+                    tooltip_w,
+                    tooltip_h,
+                );
+                frame.overlay_quads(tip_quads);
+                let text_top = tip_y + pad + ((tooltip_h - 2.0 * pad - content_h) * 0.5).max(0.0);
+                let mut tip_texts: Vec<crate::render::wgpu_renderer::TextLabel> = Vec::new();
+                crate::ui::colored_keywords::push_colored_rows_in_width(
+                    &mut tip_texts,
+                    crate::ui::colored_keywords::ColoredRowsLayout {
+                        text_left: tip_x + pad,
+                        top_y: text_top,
+                        inner_w,
+                        line_h,
+                        fallback_plain: label.as_ref(),
+                        fallback_color: parchment,
+                    },
+                    &color_lines,
+                    crate::render::wgpu_renderer::TextAlign::Center,
+                );
+                frame.texts(tip_texts);
             }
+        }
 
         // FPS counter overlay (debug) — pushed last so it's always on top.
         if self.debug.show_fps {
@@ -727,9 +741,9 @@ impl App {
         }
 
         // Debug: drop draw cmds for hidden HUD elements so we can inspect the
-        // procedural 3D scene underneath. The blind plaque, scoring placard,
-        // and candles are gated at the *call site* in `gameplay.rs` (via
-        // `DrawCtx::debug_visibility`) because (a) the two plaques share the
+        // procedural 3D scene underneath. The blind plaque / score counter and
+        // candles are gated at the *call site* in `scene_behavior.rs` (via
+        // `DrawCtx::debug_visibility`) because (a) multiple elements share the
         // same `DrawCmd::Plaque(_)` variant and can't be told apart by a
         // post-process filter, and (b) skipping candle pushes also skips the
         // attached `PointLight`s, which a cmd-only filter would leak. Tiles
@@ -839,9 +853,10 @@ impl App {
         // That path must not update lacquer SSR history (`scene_prev` /
         // depth prev); only `renderer.render` below publishes those.
         if let Some(prepass) = frame.journal_prepass_frame.take()
-            && let Err(e) = renderer.render_journal_prepass(&prepass, render_settings.clone()) {
-                log::error!("journal prepass: {e:?}");
-            }
+            && let Err(e) = renderer.render_journal_prepass(&prepass, render_settings.clone())
+        {
+            log::error!("journal prepass: {e:?}");
+        }
 
         self.cpu_profiler
             .begin(crate::render::cpu_profiler::CpuStage::Render);

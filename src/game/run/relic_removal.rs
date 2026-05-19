@@ -70,15 +70,11 @@ impl RunState {
                 break;
             }
             let victim_id = self.relics.active[hg_idx + 1];
-            let victim_value =
-                relic_sell_price_live(victim_id, &self.relic_counters) as i32;
+            let victim_value = relic_sell_price_live(victim_id, &self.relic_counters) as i32;
             self.relics.active.remove(hg_idx + 1);
             self.clear_relic_run_metadata(victim_id);
             self.note_relic_destroyed();
-            *self
-                .relic_counters
-                .entry(RelicId::HungryGhost)
-                .or_insert(0) += victim_value * 10;
+            *self.relic_counters.entry(RelicId::HungryGhost).or_insert(0) += victim_value * 10;
             self.relic_activations.push(RelicId::HungryGhost);
         }
     }

@@ -1,7 +1,29 @@
 use super::relic_removal::TransformationPrimaryRelic;
-use crate::{audio::SfxId, core::{boss::{self, BossKind}, debuff::TileDebuff, hand::{DetectedMeld, MeldKind, enumerate_decompositions}, hand_intent::{DecompositionBias, decomposition_affinity, infer_decomposition_bias}, relic::{
-    RelicId, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle, ScoreRoundBundle, ScoreTileBundle
-}, rules::{BlindKind, RuleModifier}, scoring::{ScoreBreakdown, score_sets_with_original}, structure::{StructureTriggerKind, StructureTriggerMeta, banked_meld_chips, can_trigger_structure, is_winning_structure_shape}, tile::{Suit, Tile}}, game::{event_bus::{EventBus, GameEvent, GameOverReason}, game_mode::HAND_SIZE, run::{RunState, enumerate_candidate_play_masks, structure_label_from_yaku}}};
+use crate::{
+    audio::SfxId,
+    core::{
+        boss::{self, BossKind},
+        debuff::TileDebuff,
+        hand::{DetectedMeld, MeldKind, enumerate_decompositions},
+        hand_intent::{DecompositionBias, decomposition_affinity, infer_decomposition_bias},
+        relic::{
+            RelicId, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
+            ScoreRoundBundle, ScoreTileBundle,
+        },
+        rules::{BlindKind, RuleModifier},
+        scoring::{EffectiveRelics, ScoreBreakdown, score_sets_with_original},
+        structure::{
+            StructureTriggerKind, StructureTriggerMeta, banked_meld_chips, can_trigger_structure,
+            is_winning_structure_shape,
+        },
+        tile::{Suit, Tile},
+    },
+    game::{
+        event_bus::{EventBus, GameEvent, GameOverReason},
+        game_mode::HAND_SIZE,
+        run::{RunState, enumerate_candidate_play_masks, structure_label_from_yaku},
+    },
+};
 
 impl RunState {
     /// The House boss: structure cash-in is locked until every discard for the round is spent.
@@ -104,13 +126,15 @@ impl RunState {
                 self.relic_activations.push(RelicId::LotusBloom);
             }
         }
-        if self.relics.has(RelicId::KongCollector) {
+        let copy_eff = EffectiveRelics::from_roster(&self.relics);
+        if copy_eff.has(&self.relics, RelicId::KongCollector) {
             let kong_count = sets.iter().filter(|s| s.kind == MeldKind::Kong).count() as i32;
             if kong_count > 0 {
+                let times = copy_eff.count(&self.relics, RelicId::KongCollector);
                 *self
                     .relic_counters
                     .entry(RelicId::KongCollector)
-                    .or_insert(0) += kong_count;
+                    .or_insert(0) += kong_count.saturating_mul(times as i32);
                 self.relic_activations.push(RelicId::KongCollector);
             }
         }
@@ -123,7 +147,7 @@ impl RunState {
 
         let effective = boss::effective_hand_size(self);
         let draw_target =
-            if self.relics.has(RelicId::QuickDraw) && self.quickdraw_uses_remaining > 0 {
+            if copy_eff.has(&self.relics, RelicId::QuickDraw) && self.quickdraw_uses_remaining > 0 {
                 self.quickdraw_uses_remaining -= 1;
                 self.relic_activations.push(RelicId::QuickDraw);
                 effective + 1
@@ -266,9 +290,9 @@ impl RunState {
                     .active
                     .iter()
                     .position(|&r| r == crate::core::relic::RelicId::Chrysalis)
-                {
-                    self.complete_chrysalis_hatch_in_slot(pos, bus);
-                }
+            {
+                self.complete_chrysalis_hatch_in_slot(pos, bus);
+            }
         }
 
         if self.relics.has(RelicId::TilePolisher) {
@@ -372,15 +396,19 @@ impl RunState {
             self.honors_scored_this_round = true;
         }
 
-        if scored_full_hand && self.relics.has(RelicId::EightTreasures) {
-            use rand::seq::IndexedRandom;
+        if scored_full_hand {
+            let treasures = EffectiveRelics::from_roster(&self.relics)
+                .count(&self.relics, RelicId::EightTreasures);
+            for _ in 0..treasures {
+                use rand::seq::IndexedRandom;
 
-            let mut rng = rand::rng();
-            if let Some(&z) = crate::core::zodiac::ZodiacKind::all().choose(&mut rng) {
-                self.consumables
-                    .items
-                    .push(crate::core::consumable::Consumable::Zodiac(z));
-                self.relic_activations.push(RelicId::EightTreasures);
+                let mut rng = rand::rng();
+                if let Some(&z) = crate::core::zodiac::ZodiacKind::all().choose(&mut rng) {
+                    self.consumables
+                        .items
+                        .push(crate::core::consumable::Consumable::Zodiac(z));
+                    self.relic_activations.push(RelicId::EightTreasures);
+                }
             }
         }
 
@@ -599,9 +627,10 @@ impl RunState {
                 bus.push(GameEvent::BossDefeated(bk));
             }
         } else if let Some(reason) = self.round_failure_reason()
-            && !self.try_second_wind_salvage(reason, bus) {
-                bus.push(GameEvent::GameOver { reason });
-            }
+            && !self.try_second_wind_salvage(reason, bus)
+        {
+            bus.push(GameEvent::GameOver { reason });
+        }
     }
 
     /// When a round would end in defeat, Second Wind is destroyed and the blind
@@ -882,8 +911,7 @@ impl RunState {
             return false;
         }
 
-        let can_discard =
-            self.discards_remaining > 0 && !self.hand.is_empty();
+        let can_discard = self.discards_remaining > 0 && !self.hand.is_empty();
         !self.has_any_committable_play() && !self.can_trigger_structure_now() && !can_discard
     }
 

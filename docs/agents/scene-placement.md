@@ -32,6 +32,8 @@ For camera‑facing props, use **`camera_facing_euler_xyz_rad`** ([`draw_cmd`](.
 
 ## 4. Arrange mode (move / rotate easily)
 
+**Hierarchy navigation (debug):** **Tab** / **Shift+Tab** walks the flat pre-order list. **PageUp** / **PageDown** moves among **siblings** only (wraps). **`[`** selects the **parent** node; **`]`** drills to the **first child** of a group, or on a leaf jumps to the **next sibling** (see [`arrange_hierarchy_*`](../../src/main/arrange.rs) in `main/arrange.rs` + `event_loop.rs`).
+
 1. Add a **`Placement`** field to the scene’s `*Positions` struct and register it in **`ArrangeTarget::hierarchy`** ([`Node`](../../src/ui/placement.rs) tree).
 2. Implement **`placement_mut` / `placement`** for the canonical dotted name (e.g. `gameplay.score_panel.plaque`).
 3. At the draw site, use **`PlacementAnchor::new(...)`** so position uses `nx`/`ny`/`lift_mm` and **`arrange_name`** matches the hierarchy leaf.
@@ -42,3 +44,7 @@ Confirm in arrange mode runs **`apply_arrange_to_layout`** ([`main/arrange.rs`](
 ## Name collision note
 
 **[`render::world_space::PlacementAnchor`](../../src/render/world_space.rs)** (anchor + `rot_y` + `scale`) is for score reel / cascade HUD–style widgets — **not** the same as **`ui::placement::PlacementAnchor`** (Placement → `Object3d`). Pick the type by domain; don’t rename casually.
+
+## 5. Blender authoring (table / props)
+
+For blocking layout in Blender, use **`assets/3d/tile_plastic.glb`** (or `Tile.glb`) for tiles and **`assets/3d/source/GamblingHouse.blend`** for the room. Table props (felt, river bowl, mirror, dora plinth, tablets, book, candles, etc.) are procedural meshes built in Rust under `src/render/*_mesh.rs` (and related modules); runtime positions come from [`GameplayPositions`](../../src/ui/scene_layout/gameplay.rs) and the renderer, not from a checked-in “kit” GLB.

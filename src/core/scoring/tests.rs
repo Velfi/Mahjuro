@@ -606,9 +606,7 @@ fn kokushi_musou_scores_when_omitted_from_available_yaku() {
 #[test]
 fn format_meld_groups_matches_cascade_set_labels() {
     use crate::core::hand::{DetectedMeld, MeldKind};
-    let tiles: Vec<Tile> = (0..16)
-        .map(|i| Tile::new(Suit::Dots, 9, i))
-        .collect();
+    let tiles: Vec<Tile> = (0..16).map(|i| Tile::new(Suit::Dots, 9, i)).collect();
     let sets: Vec<DetectedMeld> = (0..4)
         .map(|k| DetectedMeld {
             kind: MeldKind::Kong,

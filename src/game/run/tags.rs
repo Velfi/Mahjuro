@@ -64,8 +64,7 @@ impl RunState {
                     let z = pool.remove(idx);
                     let yaku = z.yaku();
                     let new_level = self.yaku_levels.level_up(yaku);
-                    self.pending_zodiac_celebrations
-                        .push((z, yaku, new_level));
+                    self.pending_zodiac_celebrations.push((z, yaku, new_level));
                     granted += 1;
                 }
                 return match granted {

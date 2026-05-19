@@ -18,12 +18,7 @@ pub fn run_cli_command(command: Option<Command>) -> anyhow::Result<bool> {
         Some(Command::Sweep(sweep)) => {
             let bases: &[u32] = &[400, 450, 500, 550, 600];
             let plays: &[u32] = &[4, 5];
-            bot::run_sweep(
-                sweep.runs,
-                bases,
-                plays,
-                sweep.export_json.as_deref(),
-            );
+            bot::run_sweep(sweep.runs, bases, plays, sweep.export_json.as_deref());
             Ok(true)
         }
         Some(Command::StrategySweep(args)) => {

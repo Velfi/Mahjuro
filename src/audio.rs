@@ -879,10 +879,11 @@ impl AudioManager {
         }
         let path = id.asset_path();
         if let Some(file) = crate::asset_path::get(path)
-            && let Some(clip) = decode_rodio(path, file.data.as_ref()) {
-                log::debug!("Loaded BGM {path} ({id:?})");
-                self.music_data.insert(id, clip);
-            }
+            && let Some(clip) = decode_rodio(path, file.data.as_ref())
+        {
+            log::debug!("Loaded BGM {path} ({id:?})");
+            self.music_data.insert(id, clip);
+        }
     }
 
     fn start_music_track(&mut self, id: MusicId) {
@@ -895,10 +896,12 @@ impl AudioManager {
             return;
         };
         if let Some(sink) = self.music_sink.as_ref()
-            && !sink.empty() && self.music_active_id == Some(id) {
-                self.refresh_music_sink_volume();
-                return;
-            }
+            && !sink.empty()
+            && self.music_active_id == Some(id)
+        {
+            self.refresh_music_sink_volume();
+            return;
+        }
         if let Some(sink) = self.music_sink.take() {
             sink.stop();
         }
@@ -927,10 +930,11 @@ impl AudioManager {
         }
         let path = id.asset_path();
         if let Some(file) = crate::asset_path::get(path)
-            && let Some(clip) = decode_rodio(path, file.data.as_ref()) {
-                log::debug!("Loaded ambient {path} ({id:?})");
-                self.ambient_data.insert(id, clip);
-            }
+            && let Some(clip) = decode_rodio(path, file.data.as_ref())
+        {
+            log::debug!("Loaded ambient {path} ({id:?})");
+            self.ambient_data.insert(id, clip);
+        }
     }
 
     fn ambient_effective_volume(&self) -> f32 {
@@ -973,10 +977,12 @@ impl AudioManager {
             return;
         };
         if let Some(sink) = self.ambient_sink.as_ref()
-            && !sink.empty() && self.ambient_active == Some(id) {
-                self.refresh_ambient_sink_volume();
-                return;
-            }
+            && !sink.empty()
+            && self.ambient_active == Some(id)
+        {
+            self.refresh_ambient_sink_volume();
+            return;
+        }
         if let Some(sink) = self.ambient_sink.take() {
             sink.stop();
         }

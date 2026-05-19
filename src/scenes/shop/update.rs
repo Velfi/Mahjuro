@@ -6,6 +6,18 @@ use crate::scenes::{
     YakuJournalScene, options,
 };
 
+/// Player inventory row is hit-tested via 3D picks only; exclude its rects from
+/// cursor-mode [`focus_target_at_cursor`] so empty padding does not steal focus.
+#[inline]
+fn shop_owned_inventory_focus(scene: &ShopScene, f: ShopFocus) -> bool {
+    match f {
+        ShopFocus::Relic(i) => i >= scene.items.len(),
+        ShopFocus::Ribbon(i) => i >= scene.zodiac_items.len(),
+        ShopFocus::Talisman(i) => i >= scene.talisman_items.len(),
+        _ => false,
+    }
+}
+
 impl ShopScene {
     pub(super) fn pause_options_overlay_impl(&self) -> Option<&options::OptionsScene> {
         self.pause_menu.options_overlay()
@@ -309,7 +321,12 @@ impl ShopScene {
                 )
                 .map(ShopFocus::from_hit)
             } else {
-                focus_target_at_cursor(&focus_rects, cx, cy)
+                let cursor_rects: Vec<(ShopFocus, [f32; 4])> = focus_rects
+                    .iter()
+                    .copied()
+                    .filter(|(f, _)| !shop_owned_inventory_focus(self, *f))
+                    .collect();
+                focus_target_at_cursor(&cursor_rects, cx, cy)
             };
             self.focus = new_focus;
         }
@@ -355,16 +372,17 @@ impl ShopScene {
                             &self.zodiac_items,
                             &self.talisman_items,
                             &shop,
-                        ) {
-                            self.apply_sell_action(
-                                action,
-                                ctx.run,
-                                ctx.bus,
-                                ctx.cursor_pos,
-                                ctx.overlay_request,
-                                (w, h),
-                            );
-                        }
+                        )
+                    {
+                        self.apply_sell_action(
+                            action,
+                            ctx.run,
+                            ctx.bus,
+                            ctx.cursor_pos,
+                            ctx.overlay_request,
+                            (w, h),
+                        );
+                    }
                 }
                 continue;
             }

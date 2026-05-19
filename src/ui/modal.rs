@@ -424,9 +424,10 @@ impl ModalQueue {
                 return true;
             }
             if let Some(ref fw) = modal.fireworks
-                && fw.is_active() {
-                    return true;
-                }
+                && fw.is_active()
+            {
+                return true;
+            }
         }
         false
     }
@@ -441,9 +442,10 @@ impl ModalQueue {
             .as_secs_f32();
         self.last_update = now;
         if let Some(modal) = self.queue.first_mut()
-            && let Some(ref mut fw) = modal.fireworks {
-                fw.update(dt);
-            }
+            && let Some(ref mut fw) = modal.fireworks
+        {
+            fw.update(dt);
+        }
         // Skim: while the cancel/back key is held over a paginated modal,
         // advance one page per `SKIM_REPEAT_INTERVAL`. The first scheduled
         // advance is `SKIM_INITIAL_DELAY` after the initial press (set by

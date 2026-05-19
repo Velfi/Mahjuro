@@ -16,27 +16,26 @@ use crate::game::game_mode::GameMode;
 use crate::game::run::RunState;
 use crate::render::decal::{load_ui_font, measure_label_advances};
 use crate::render::draw_cmd::{
-    CameraParams, Object3d, Object3dKind, ImageQuad, ScenePunctualLight, UiFrame,
+    CameraParams, ImageQuad, Object3d, Object3dKind, ScenePunctualLight, UiFrame,
     camera_facing_euler_xyz_rad,
 };
+use crate::render::flame_volume::FlameEmitter;
 use crate::render::ribbon_mesh::{
     ZodiacRibbonSpec, ribbon_display_length, ribbon_length_fitting_rect, zodiac_ribbon_object3d,
 };
-use crate::render::flame_volume::FlameEmitter;
 use crate::render::room_glb::{
-    marker_translation, player_consumable_marker_name,
-    player_gold_dish_marker_translation, player_relic_marker_name, room_camera_fit_fovy_for_corners,
-    MarkerScreenRectParams, screen_rect_for_marker_mesh_bounds, shop_camera_from_glb_if_present,
-    shop_embedded_point_lights_runtime, shop_embedded_spot_lights_runtime,
-    shop_glb_has_embedded_lights, room_camera_with_room_clip_planes, room_env_world_scale,
-    room_world_bounds_corners_centered, spawn_relic_marker_name, with_shop_glb_cpu,
+    MarkerScreenRectParams, marker_translation, player_consumable_marker_name,
+    player_gold_dish_marker_translation, player_relic_marker_name,
+    room_camera_fit_fovy_for_corners, room_camera_with_room_clip_planes, room_env_world_scale,
+    room_world_bounds_corners_centered, screen_rect_for_marker_mesh_bounds,
+    shop_camera_from_glb_if_present, shop_embedded_point_lights_runtime,
+    shop_embedded_spot_lights_runtime, shop_glb_has_embedded_lights, spawn_relic_marker_name,
+    with_shop_glb_cpu,
 };
 use crate::render::table_transform::euler_xyz_rad_from_deg;
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::GpuInstance;
-use crate::render::wgpu_renderer::{
-    PointLight, ShopHit, TextAlign, TextLabel,
-};
+use crate::render::wgpu_renderer::{PointLight, ShopHit, TextAlign, TextLabel};
 use crate::render::world_space::{
     object3d_pos_for_screen_at_world_z, object3d_pos_triple_for_world_center,
     surface_anchor_from_world_xyz,
@@ -96,7 +95,6 @@ fn apply_shop_stock_bob(pos: &mut [f32; 3], h: f32, bob_seed: u32, age_secs: f32
 const SHOP_SHELF_CLICK_BASE: u32 = 0xD000;
 /// One UI/hit slot per `shop_spawn_relic_00` … `shop_spawn_relic_08` in shop.glb.
 const SHOP_SPAWN_SLOT_COUNT: usize = 9;
-const SHOP_INV_CLICK_BASE: u32 = 0xD00A;
 const SHOP_CLICK_JOURNAL: u32 = 0xD011;
 const SHOP_CLICK_REROLL: u32 = 0xD012;
 const SHOP_CLICK_LEAVE: u32 = 0xD013;
@@ -149,7 +147,9 @@ fn shop_gltf_candle_flame_emitters(
             .enumerate()
             .map(|(i, l)| {
                 let light_world = (l.pos_doc - center_doc) * s;
-                let seed = (i as u32).wrapping_mul(0x9E37_79B9).wrapping_add(0xA5A5_A5A5);
+                let seed = (i as u32)
+                    .wrapping_mul(0x9E37_79B9)
+                    .wrapping_add(0xA5A5_A5A5);
                 let scale_jitter = 0.88 + (seed & 0x3f) as f32 / 63.0 * 0.24;
                 let emitter_scale = flame_scale * scale_jitter;
                 let world = crate::render::flame_volume::shop_gltf_wick_from_light(
@@ -188,10 +188,11 @@ pub(super) fn shop_camera_base(w: f32, h: f32, env_h: f32) -> CameraParams {
         });
         // Auto-fit widens vertical FOV past the authored value; keep GLB eye / target / up / fovy intact.
         if from_glb.is_none()
-            && let Some(cpu) = opt {
-                let corners = room_world_bounds_corners_centered(h, env_h, cpu);
-                cam = room_camera_fit_fovy_for_corners(w, h, cam, &corners, 0.94);
-            }
+            && let Some(cpu) = opt
+        {
+            let corners = room_world_bounds_corners_centered(h, env_h, cpu);
+            cam = room_camera_fit_fovy_for_corners(w, h, cam, &corners, 0.94);
+        }
         if let Some(cpu) = opt {
             cam = room_camera_with_room_clip_planes(cam, h, env_h, cpu);
         }
@@ -248,7 +249,7 @@ fn shop_inspect_pivot_world(
                 if pack.sold {
                     return None;
                 }
-                let pack_h = r[3] * 0.52;
+                let pack_h = r[3] * 1.04;
                 let pack_w = pack_h * PACK_ASPECT_W_OVER_H;
                 let pack_t = pack_h * 0.11;
                 let ext = [pack_w, pack_t, pack_h];
@@ -289,7 +290,7 @@ fn shop_inspect_pivot_world(
                 let Consumable::Talisman(_) = item.consumable else {
                     return None;
                 };
-                let tw = r[2] * 0.42;
+                let tw = r[2] * 0.84;
                 let cz = wz + tw * 0.55;
                 sale_anchor_at_slot(SaleAnchorAtSlot {
                     screen: ShopScreenAnchor {
@@ -367,7 +368,7 @@ fn shop_inspect_pivot_world(
                 let Consumable::Talisman(_) = owned.consumable else {
                     return None;
                 };
-                let tw = r[2] * 0.38;
+                let tw = r[2] * 0.76;
                 let cz = wz + tw * 0.45;
                 inv_marker_surface_anchor(InvMarkerSurfaceAnchor {
                     screen: ShopScreenAnchor {
@@ -492,9 +493,7 @@ fn player_gold_dish_object3d_anchor(
     layout: &ShopLayout,
 ) -> [f32; 3] {
     let scale = room_env_world_scale(h, env_h);
-    if let Some(tw) =
-        with_shop_glb_cpu(|opt| opt.and_then(player_gold_dish_marker_translation))
-    {
+    if let Some(tw) = with_shop_glb_cpu(|opt| opt.and_then(player_gold_dish_marker_translation)) {
         let world = tw * scale;
         return surface_anchor_from_world_xyz(w, h, world);
     }
@@ -513,9 +512,10 @@ impl SceneBehavior for ShopScene {
 
         for &cid in ctx.button_clicks {
             if let Some(hit) = map_shop_ui_click_to_hit(cid, self, &shop_rm)
-                && let Some(next) = self.dispatch_shop_pick_from_hit(hit, &mut ctx) {
-                    return Some(next);
-                }
+                && let Some(next) = self.dispatch_shop_pick_from_hit(hit, &mut ctx)
+            {
+                return Some(next);
+            }
         }
 
         self.update_impl(ctx)
@@ -653,9 +653,9 @@ pub(crate) fn render_shop_frame(
                 shop.age_secs,
                 lamp_flicker,
             )
-                .into_iter()
-                .map(ScenePunctualLight::InverseSquare)
-                .collect()
+            .into_iter()
+            .map(ScenePunctualLight::InverseSquare)
+            .collect()
         } else {
             Vec::new()
         };
@@ -778,9 +778,7 @@ pub(crate) fn render_shop_frame(
         frame.scene_lighting.spot_lights =
             shop_embedded_spot_lights_runtime(w, h, env_h, &ctx.shop_env_lighting);
         if let Some(ins) = inspect {
-            let tw = inspect_anchor
-                .map(|(_, tw)| tw)
-                .unwrap_or(ins.target_world);
+            let tw = inspect_anchor.map(|(_, tw)| tw).unwrap_or(ins.target_world);
             let k = eased.clamp(0.0, 1.0) * SHOP_INSPECT_LIGHT_MUL;
             if k > 1e-4 {
                 let mut rig_lights = inspect_point_lights(w, h, &cam, tw, inspect_rig.light_preset);
@@ -882,12 +880,12 @@ pub(crate) fn render_shop_frame(
         for (slot_i, sf) in for_sale_slots(shop).into_iter().enumerate() {
             if let Some(ShopFocus::Relic(idx)) = sf
                 && let Some(item) = shop.items.get(idx)
-                    && !item.sold
-                    && item.price == 0
-                {
-                    let r = shop_shelf_slot_rect(w, h, &cam, slot_i, env_h);
-                    push_free_badge(&mut free_quads, &mut free_texts, r, h);
-                }
+                && !item.sold
+                && item.price == 0
+            {
+                let r = shop_shelf_slot_rect(w, h, &cam, slot_i, env_h);
+                push_free_badge(&mut free_quads, &mut free_texts, r, h);
+            }
         }
         if !free_quads.is_empty() {
             frame.quads(free_quads);
@@ -1058,13 +1056,6 @@ pub(crate) fn render_shop_frame(
                 SHOP_SHELF_CLICK_BASE + i as u32,
             ));
         }
-        for i in 0..7 {
-            let r = inv_slot_rect(w, h, &cam, shop, &shop_rm, i, env_h);
-            frame.buttons.push(ButtonDef::scene(
-                (r[0], r[1], r[2], r[3]),
-                SHOP_INV_CLICK_BASE + i as u32,
-            ));
-        }
         let jr = journal_btn_rect(w, h, &cam, env_h);
         // No `hover_label` here — [`push_focus_tooltip_panel_2d`] already shows name /
         // description / action for these hits; main/draw would duplicate it as a second
@@ -1083,6 +1074,13 @@ pub(crate) fn render_shop_frame(
             (lr[0], lr[1], lr[2], lr[3]),
             SHOP_CLICK_LEAVE,
         ));
+        // Catch-all for Object3D / GLB collision picks (inventory + props). Pushed
+        // last so shelf + HUD rects win when they overlap the cursor.
+        if ctx.picked_shop_object.is_some() {
+            frame
+                .buttons
+                .push(ButtonDef::scene((0.0, 0.0, w, h), super::SHOP_3D_HIT_ID));
+        }
     }
 
     // Floating control hints — copy reflects [`DrawCtx::input_mode`] + swap toggles.
@@ -1282,36 +1280,35 @@ pub(crate) fn render_shop_frame(
 
         frame.texts(legend_texts);
 
-        if inspect_active
-            && let Some(ShopFocus::Relic(i)) = shop.focus {
-                let n_sale = shop.items.len();
-                let def_opt = if i < n_sale {
-                    shop.items
-                        .get(i)
-                        .and_then(|it| all_relic_defs().iter().find(|d| d.id == it.relic))
-                } else {
-                    shop_rm
-                        .owned_relics
-                        .get(i.saturating_sub(n_sale))
-                        .and_then(|rid| all_relic_defs().iter().find(|d| d.id == *rid))
-                };
-                if let Some(d) = def_opt
-                    && !d.flavor.is_empty()
-                {
-                    let mut flavor_gradients = Vec::new();
-                    let mut flavor_texts = Vec::new();
-                    push_floating_relic_flavor_labels(
-                        &mut flavor_gradients,
-                        &mut flavor_texts,
-                        w,
-                        h,
-                        d.flavor,
-                        pad_bottom + block_h,
-                    );
-                    frame.gradient_quads(flavor_gradients);
-                    frame.texts(flavor_texts);
-                }
+        if inspect_active && let Some(ShopFocus::Relic(i)) = shop.focus {
+            let n_sale = shop.items.len();
+            let def_opt = if i < n_sale {
+                shop.items
+                    .get(i)
+                    .and_then(|it| all_relic_defs().iter().find(|d| d.id == it.relic))
+            } else {
+                shop_rm
+                    .owned_relics
+                    .get(i.saturating_sub(n_sale))
+                    .and_then(|rid| all_relic_defs().iter().find(|d| d.id == *rid))
+            };
+            if let Some(d) = def_opt
+                && !d.flavor.is_empty()
+            {
+                let mut flavor_gradients = Vec::new();
+                let mut flavor_texts = Vec::new();
+                push_floating_relic_flavor_labels(
+                    &mut flavor_gradients,
+                    &mut flavor_texts,
+                    w,
+                    h,
+                    d.flavor,
+                    pad_bottom + block_h,
+                );
+                frame.gradient_quads(flavor_gradients);
+                frame.texts(flavor_texts);
             }
+        }
     }
 
     frame
@@ -1605,8 +1602,6 @@ struct CursorHoverCtx<'a> {
     w: f32,
     h: f32,
     cam: &'a CameraParams,
-    scene: &'a ShopScene,
-    shop: &'a ShopReadModel,
     env_h: f32,
 }
 
@@ -1617,8 +1612,6 @@ fn cursor_hover_rect(ctx: CursorHoverCtx<'_>) -> Option<[f32; 4]> {
         w,
         h,
         cam,
-        scene,
-        shop,
         env_h,
     } = ctx;
     for i in 0..SHOP_SPAWN_SLOT_COUNT {
@@ -1627,17 +1620,13 @@ fn cursor_hover_rect(ctx: CursorHoverCtx<'_>) -> Option<[f32; 4]> {
             return Some(r);
         }
     }
-    for i in 0..7 {
-        let r = inv_slot_rect(w, h, cam, scene, shop, i, env_h);
-        if pt_in_rect(cx, cy, r) {
-            return Some(r);
-        }
-    }
     [
         journal_btn_rect(w, h, cam, env_h),
         reroll_btn_rect(w, h, cam, env_h),
         leave_btn_rect(w, h, cam, env_h),
-    ].into_iter().find(|&r| pt_in_rect(cx, cy, r))
+    ]
+    .into_iter()
+    .find(|&r| pt_in_rect(cx, cy, r))
 }
 
 fn ring_target_rect(
@@ -1650,15 +1639,32 @@ fn ring_target_rect(
 ) -> Option<[f32; 4]> {
     if ctx.input_mode == InputMode::Cursor {
         let (cx, cy) = ctx.cursor_pos;
+        let env_h = ctx.room_gltf_height_scale;
         return cursor_hover_rect(CursorHoverCtx {
             cx,
             cy,
             w,
             h,
             cam,
-            scene,
-            shop,
-            env_h: ctx.room_gltf_height_scale,
+            env_h,
+        })
+        .or_else(|| {
+            ctx.picked_shop_object.and_then(|hit| {
+                let resolved = live_shop_hit(
+                    hit,
+                    scene,
+                    &scene.items,
+                    &scene.zodiac_items,
+                    &scene.talisman_items,
+                    &scene.pack_items,
+                    shop,
+                )?;
+                let foc = ShopFocus::from_hit(resolved);
+                build_focus_rects(scene, w, h, cam, shop)
+                    .into_iter()
+                    .find(|(t, _)| *t == foc)
+                    .map(|(_, r)| r)
+            })
         });
     }
     scene.focus.and_then(|f| {
@@ -1740,9 +1746,7 @@ fn inv_bar_index_for_consumable_ord(
     ord: usize,
 ) -> Option<usize> {
     let want = player_consumable_marker_name(ord);
-    (0..7).find(|&idx| {
-        inv_slot_glb_marker_name(scene, shop, idx).as_deref() == Some(want.as_str())
-    })
+    (0..7).find(|&idx| inv_slot_glb_marker_name(scene, shop, idx).as_deref() == Some(want.as_str()))
 }
 
 /// Map raw GLB collision [`ShopHit`] variants into flat shop hits using shelf/inventory slot tables.
@@ -1909,9 +1913,10 @@ fn object3d_pos_for_shop_inspect_focus(
     fallback: [f32; 3],
 ) -> [f32; 3] {
     if let Some((ifoc, tw)) = inspect_anchor
-        && ifoc == foc {
-            return object3d_pos_triple_for_world_center(w, h, Vec3::from_array(tw));
-        }
+        && ifoc == foc
+    {
+        return object3d_pos_triple_for_world_center(w, h, Vec3::from_array(tw));
+    }
     fallback
 }
 
@@ -1924,11 +1929,12 @@ fn partition_shop_inspect_stock_mesh(
     subject: &mut Option<Object3d>,
 ) {
     if let Some((ifoc, _)) = inspect_anchor
-        && ifoc == foc {
-            mesh.anim_id = super::shared::SHOP_INSPECT_SUBJECT_ANIM_ID;
-            *subject = Some(mesh);
-            return;
-        }
+        && ifoc == foc
+    {
+        mesh.anim_id = super::shared::SHOP_INSPECT_SUBJECT_ANIM_ID;
+        *subject = Some(mesh);
+        return;
+    }
     dim.push(mesh);
 }
 
@@ -1944,11 +1950,7 @@ fn push_stock_meshes(
     let mut subject = None;
     let niche_base = w * 0.048;
     let env_h = scene.drawn_room_gltf_height_scale.get();
-    let stock_bobs = |foc: ShopFocus| {
-        !inspect_anchor
-            .map(|(ifoc, _)| ifoc == foc)
-            .unwrap_or(false)
-    };
+    let stock_bobs = |foc: ShopFocus| !inspect_anchor.map(|(ifoc, _)| ifoc == foc).unwrap_or(false);
 
     let sale = for_sale_slots(scene);
     for (slot_i, foc_opt) in sale.iter().enumerate() {
@@ -1977,17 +1979,17 @@ fn push_stock_meshes(
                         w,
                         h,
                         sale_anchor_at_slot(SaleAnchorAtSlot {
-                    screen: ShopScreenAnchor {
-                        w,
-                        h,
-                        cam,
-                        env_h,
-                        cx,
-                        cy,
-                        cz_fallback: cz,
-                    },
-                    slot_i,
-                }),
+                            screen: ShopScreenAnchor {
+                                w,
+                                h,
+                                cam,
+                                env_h,
+                                cx,
+                                cy,
+                                cz_fallback: cz,
+                            },
+                            slot_i,
+                        }),
                     );
                     if stock_bobs(*foc) {
                         apply_shop_stock_bob(&mut relic_pos, h, slot_i as u32, scene.age_secs);
@@ -2028,7 +2030,7 @@ fn push_stock_meshes(
                 if pack.sold {
                     continue;
                 }
-                let pack_h = r[3] * 0.52;
+                let pack_h = r[3] * 1.04;
                 let pack_w = pack_h * PACK_ASPECT_W_OVER_H;
                 let pack_t = pack_h * 0.11;
                 let ext = [pack_w, pack_t, pack_h];
@@ -2039,17 +2041,17 @@ fn push_stock_meshes(
                     w,
                     h,
                     sale_anchor_at_slot(SaleAnchorAtSlot {
-                    screen: ShopScreenAnchor {
-                        w,
-                        h,
-                        cam,
-                        env_h,
-                        cx,
-                        cy,
-                        cz_fallback: cz,
-                    },
-                    slot_i,
-                }),
+                        screen: ShopScreenAnchor {
+                            w,
+                            h,
+                            cam,
+                            env_h,
+                            cx,
+                            cy,
+                            cz_fallback: cz,
+                        },
+                        slot_i,
+                    }),
                 );
                 if stock_bobs(*foc) {
                     apply_shop_stock_bob(&mut pack_pos, h, slot_i as u32 + 16, scene.age_secs);
@@ -2099,17 +2101,17 @@ fn push_stock_meshes(
                     w,
                     h,
                     sale_anchor_at_slot(SaleAnchorAtSlot {
-                    screen: ShopScreenAnchor {
-                        w,
-                        h,
-                        cam,
-                        env_h,
-                        cx,
-                        cy,
-                        cz_fallback: cz,
-                    },
-                    slot_i,
-                }),
+                        screen: ShopScreenAnchor {
+                            w,
+                            h,
+                            cam,
+                            env_h,
+                            cx,
+                            cy,
+                            cz_fallback: cz,
+                        },
+                        slot_i,
+                    }),
                 );
                 if stock_bobs(*foc) {
                     apply_shop_stock_bob(&mut ribbon_pos, h, slot_i as u32 + 32, scene.age_secs);
@@ -2143,7 +2145,7 @@ fn push_stock_meshes(
                     // Slightly smaller than ribbons/packs in the same row so
                     // adjacent buff tablets (e.g. Pearl + Gilded) don't read as
                     // one mass under the shared for-sale talisman tilt.
-                    let tw = r[2] * 0.40;
+                    let tw = r[2] * 0.80;
                     let cz = wz + tw * 0.55;
                     let mut tal_pos = object3d_pos_for_shop_inspect_focus(
                         inspect_anchor,
@@ -2151,17 +2153,17 @@ fn push_stock_meshes(
                         w,
                         h,
                         sale_anchor_at_slot(SaleAnchorAtSlot {
-                    screen: ShopScreenAnchor {
-                        w,
-                        h,
-                        cam,
-                        env_h,
-                        cx,
-                        cy,
-                        cz_fallback: cz,
-                    },
-                    slot_i,
-                }),
+                            screen: ShopScreenAnchor {
+                                w,
+                                h,
+                                cam,
+                                env_h,
+                                cx,
+                                cy,
+                                cz_fallback: cz,
+                            },
+                            slot_i,
+                        }),
                     );
                     if stock_bobs(*foc) {
                         apply_shop_stock_bob(&mut tal_pos, h, slot_i as u32 + 48, scene.age_secs);
@@ -2222,19 +2224,19 @@ fn push_stock_meshes(
                     w,
                     h,
                     inv_marker_surface_anchor(InvMarkerSurfaceAnchor {
-                    screen: ShopScreenAnchor {
-                        w,
-                        h,
-                        cam,
-                        env_h,
-                        cx,
-                        cy,
-                        cz_fallback: cz,
-                    },
-                    scene,
-                    shop,
-                    slot_i,
-                }),
+                        screen: ShopScreenAnchor {
+                            w,
+                            h,
+                            cam,
+                            env_h,
+                            cx,
+                            cy,
+                            cz_fallback: cz,
+                        },
+                        scene,
+                        shop,
+                        slot_i,
+                    }),
                 );
                 if stock_bobs(*foc) {
                     apply_shop_stock_bob(&mut relic_pos, h, slot_i as u32 + 64, scene.age_secs);
@@ -2327,7 +2329,7 @@ fn push_stock_meshes(
                     continue;
                 };
                 if let Consumable::Talisman(tk) = owned.consumable {
-                    let tw = r[2] * 0.36;
+                    let tw = r[2] * 0.72;
                     let cz = wz + tw * 0.45;
                     let mut pos = object3d_pos_for_shop_inspect_focus(
                         inspect_anchor,
@@ -2419,9 +2421,10 @@ fn inv_slot_rect(
     let rw = w * 0.058;
     let rh = h * 0.108;
     if let Some(name) = inv_slot_glb_marker_name(scene, shop, index)
-        && let Some(r) = marker_screen_rect(w, h, cam, &name, rw, rh, env_h) {
-            return r;
-        }
+        && let Some(r) = marker_screen_rect(w, h, cam, &name, rw, rh, env_h)
+    {
+        return r;
+    }
     let nx = 0.268 + index as f32 * 0.072;
     // Slightly below prior ny — matches painted inventory recess on storeroom art + hover ring.
     let ny = 0.824;
@@ -2672,7 +2675,7 @@ fn build_focus_rects(
     v
 }
 
-fn map_shop_ui_click_to_hit(cid: u32, scene: &ShopScene, shop: &ShopReadModel) -> Option<ShopHit> {
+fn map_shop_ui_click_to_hit(cid: u32, scene: &ShopScene, _shop: &ShopReadModel) -> Option<ShopHit> {
     match cid {
         SHOP_CLICK_JOURNAL => Some(ShopHit::Dish(super::PICK_JOURNAL_BOOK)),
         SHOP_CLICK_REROLL => Some(ShopHit::Dish(super::PICK_REROLL_PROP)),
@@ -2683,10 +2686,6 @@ fn map_shop_ui_click_to_hit(cid: u32, scene: &ShopScene, shop: &ShopReadModel) -
             {
                 let idx = (cid - SHOP_SHELF_CLICK_BASE) as usize;
                 return for_sale_slots(scene)[idx].and_then(|f| f.to_hit());
-            }
-            if (SHOP_INV_CLICK_BASE..SHOP_INV_CLICK_BASE + 7).contains(&cid) {
-                let idx = (cid - SHOP_INV_CLICK_BASE) as usize;
-                return inventory_slots(scene, shop)[idx].and_then(|f| f.to_hit());
             }
             None
         }

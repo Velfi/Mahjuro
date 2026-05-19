@@ -1,14 +1,13 @@
 use super::*;
 use super::{animation_state, cascade_controller, input_handler};
 use crate::core::consumable::Consumable;
-use crate::core::relic::{all_relic_defs, relic_description_live};
-use crate::render::table_transform::{mat4_to_euler_xyz_rad, rot_euler_xyz_rad};
+use crate::core::relic::{RelicId, all_relic_defs, relic_description_live};
 use crate::render::theme::color;
 use crate::scenes::options;
 use crate::scenes::{BackgroundId, MeldGuideScene, OverlayRequest};
 use crate::ui::inspect_plaque::{
-    FocusTooltipPanelParams, dora_focus_tooltip_strings, round_wind_focus_tooltip_strings,
-    gameplay_consumable_description_full, hand_tile_focus_tooltip, push_focus_tooltip_panel_2d,
+    FocusTooltipPanelParams, dora_focus_tooltip_strings, gameplay_consumable_description_full,
+    hand_tile_focus_tooltip, push_focus_tooltip_panel_2d, round_wind_focus_tooltip_strings,
 };
 
 impl SceneBehavior for GameplayScene {
@@ -275,11 +274,8 @@ impl SceneBehavior for GameplayScene {
             gameplay.discards_remaining,
         );
 
-        let ts = ctx.anim.transform_for(ENTITY_SCORE_PANEL);
-
-        // Score-panel cartouche + modifier strip backplane quads. Returned
-        // as a vec because they need to land in the persistent-HUD section
-        // of the frame, which is built further down.
+        // Score-panel overlay quads (plays/discard pips) — empty; fans on the
+        // table show remaining plays/discards. Kept as a vec for the HUD merge.
         let score_panel_quads = build_instances_from_layout(
             (
                 layout.score_panel.x,
@@ -293,7 +289,7 @@ impl SceneBehavior for GameplayScene {
                 layout.modifier_strip.w,
                 layout.modifier_strip.h,
             ),
-            ts.scale,
+            ctx.anim.transform_for(ENTITY_SCORE_PANEL).scale,
             gameplay.plays_remaining,
             gameplay.plays_max,
             gameplay.discards_remaining,
@@ -302,14 +298,6 @@ impl SceneBehavior for GameplayScene {
 
         let hand_slots = hand_slots_for_count(layout, interaction.hand_len);
 
-        // Score header is split into two lines so it doesn't get auto-shrunk
-        // into the cartouche. The cartouche is only ~38% of the score panel
-        // width and the rasterizer's width-based fallback would otherwise
-        // squeeze a 100-char single-line string to the 8px floor.
-        let score_text_top = format!(
-            "{}  ·  R{}  ·  / {}",
-            gameplay.blind_label, gameplay.run_number, gameplay.target_score,
-        );
         // Boss-rule ofuda payload: derived independently from `run` so the
         // hanging paper always reflects the active boss rule, regardless of
         // whether a cascade is currently animating in the modifier strip.
@@ -508,11 +496,7 @@ impl SceneBehavior for GameplayScene {
         } else {
             None
         };
-        let btn_rects = [
-            discard_btn_rect,
-            play_btn_rect,
-            trigger_btn_rect,
-        ];
+        let btn_rects = [discard_btn_rect, play_btn_rect, trigger_btn_rect];
         let play_enabled = selection_valid && gameplay.plays_remaining > 0;
         let discard_enabled = selected_count > 0 && gameplay.discards_remaining > 0;
         let input_handler::ActionRowOutputs {
@@ -543,17 +527,6 @@ impl SceneBehavior for GameplayScene {
         };
         let _ = &mut wood_tablet_placements;
 
-        // Score-panel text fits inside the narrow centered cartouche painted
-        // by `build_instances_from_layout`. Cartouche geometry mirrors that
-        // function: 38% width × 78% height of the score-panel region, applied
-        // to the same scale-pop transform so the text grows with the
-        // cartouche on score changes.
-        let sp = layout.score_panel;
-        let cart_w = sp.w * 0.38;
-        let cart_h = sp.h * 0.78;
-        let cart_x = sp.x + (sp.w - cart_w) * 0.5;
-        let cart_y = sp.y + (sp.h - cart_h) * 0.5;
-
         // Dora indicator screen rect. Pre-computed up here so the focus
         // rect graph entry can both use it.
         // Prefer the renderer's projected plinth rect (one frame stale,
@@ -579,26 +552,9 @@ impl SceneBehavior for GameplayScene {
             layout,
             &self.positions.coin_pile,
         );
-        let (ctx_x, ctx_y, ctx_w, ctx_h) =
-            crate::render::animation::apply_transform_rect(cart_x, cart_y, cart_w, cart_h, ts);
-        // Two-line stack inside the cartouche: top = blind/round/score (bot line
-        // reserved on plaque for the score reel). Gold is the floating label + coin pile.
-        // font_px so they render at the same readable size regardless of how
-        // long the strings are. The cartouche header text + the modifier
-        // strip cascade/idle text are kept in their own dedicated buffers
-        // so the final assembly can place them between the score-panel
-        // backplane quads and the rest of the HUD body.
-        // Score header text is engraved directly onto the hanging plaque's
-        // +Z face via the per-instance decal pipeline (see the plaque draw
-        // path in `wgpu_renderer.rs` and `rasterize_plaque_decal` in
-        // `decal.rs`). The two-line payload travels in `plaque_top_text` /
-        // Plaque bottom band is left blank for the score reel — no 2D overlay
-        // text is emitted for the header anymore, so the smoke composite can
-        // drift over the wood face without text floating on top of it.
-        let _ = (ctx_x, ctx_y, ctx_w, ctx_h, &score_text_top);
         // Cash-in / play labels are engraved on the wood tablets (per-instance decals).
         // Discard river + play mirror use centered text in their projected rects in the
-        // persistent HUD pass (see `hud_text` just before `frame.texts(hud_text)`).
+        // persistent HUD pass (see score readout + `hud_text` before `frame.texts`).
 
         // The 3D action objects (cash-in tablet + discard bowl) no longer go
         // through `frame.buttons`.
@@ -741,7 +697,7 @@ impl SceneBehavior for GameplayScene {
         // tile_outline_pipeline (which catches candlelight), so no 2D
         // selection overlay is added here.
 
-        let relic_objects= {
+        let relic_objects = {
             let _g = crate::render::cpu_profiler::scope("draw_frame.build_relic_tray");
             input_handler::build_relic_tray(self, layout, run)
         };
@@ -860,65 +816,16 @@ impl SceneBehavior for GameplayScene {
         if !relic_objects.is_empty() {
             frame.object3d_batch(relic_objects);
         }
-        // PERSISTENT HUD: hanging plaque + ofuda (3D wood/paper) → score
-        // panel pip indicators → score header text → modifier strip text →
-        // yaku card bodies + button bar quads + zodiac slots + particles +
-        // help badge → button labels + zodiac labels + help text.
-        // Persistent quads first, then text on top of them — exactly the
-        // behaviour the legacy flush had, just scoped to the persistent
-        // layer instead of mixing with hover content.
+        // PERSISTENT HUD: boss ofuda (3D) → score-panel overlay quads (none
+        // today) → modifier strip → tally fans → cascade tokens / popups /
+        // cascade HUD (3D) → gold flash → undo → `frame.quads` → texts.
         //
-        // The wooden plaque replaces the legacy slate-blue cartouche.
-        // Positioned in pixel space matching the score panel rect, with a
-        // modest world-Y lift so it reads as hanging above the table. The
-        // header text is engraved directly onto the +Z face via a
-        // per-instance decal — see the plaque draw path in
-        // `wgpu_renderer.rs` and `rasterize_plaque_decal` in `decal.rs`.
-        let sp = layout.score_panel;
-        let plaque_thickness = 8.0_f32;
-        // Lift is proportional to window height so the plaque tracks the
-        // camera (which also scales with `h` — see `eye_height = h * 0.55`
-        // in the renderer). A fixed world-unit lift drifts downward as the
-        // window grows because the table grows around a constant lift.
-        let plaque_lift = layout.mm(self.positions.plaque.lift_mm);
-        // Push the plaque deeper into the scene (more negative world_z) so
-        // it reads as hanging at the back of the room rather than right
-        // above the player. pixel_y → world_z is a direct mapping in the
-        // renderer's `pixel_to_world`, so subtracting from pixel_y here
-        // moves the plaque back along the table's depth axis.
-        let plaque_back_offset = layout.window_h * self.positions.plaque.ny;
-        // Debug visibility: gated at the call site (rather than post-filtered)
-        // because the status placard below also uses `DrawCmd::Plaque(_)` and
-        // a cmd-level `retain` couldn't tell them apart.
-        if !ctx.debug_visibility.hide_blind_plaque {
-            frame.object3d(Object3d {
-                pos: [
-                    sp.x + sp.w * 0.5,
-                    sp.y + sp.h * 0.5 - plaque_back_offset,
-                    plaque_lift,
-                ],
-                extents: [sp.w * 0.95, sp.h * 1.8, plaque_thickness],
-                rotation: mat4_to_euler_xyz_rad(
-                    glam::Mat4::from_rotation_x((-65.0_f32).to_radians())
-                        * rot_euler_xyz_rad(cam_euler[0], cam_euler[1], cam_euler[2]),
-                ),
-                color: [1.0, 1.0, 1.0, 1.0],
-                kind: Object3dKind::Primitive {
-                    shape: crate::render::primitive::MeshId::BeveledSlab,
-                    // Top line is replaced by a blank: the floating score
-                    // reel occupies that band of the plaque face.
-                    material: crate::render::primitive::MaterialSpec::lacquered_wood_flat()
-                        .with_decal(crate::render::primitive::plaque_decal("\n")),
-                    pick_id: None,
-                    shadow_caster: false,
-                    silhouette: false,
-                },
-                hover_target: 0.0,
-                anim_id: 0,
-                arrange_name: None,
-            });
-        }
-        // Ofuda only appears on boss blinds (where there's a rule to show).
+        // The score readout itself is **2D** (`TextLabel`s in the persistent
+        // text pass). Cascade popups and hand-off glyphs still use 3D meshes;
+        // their destinations use `score_counter_layout`.
+        let score_counter = super::score_counter::score_counter_layout(layout, &self.positions);
+        // Debug visibility: `hide_blind_plaque` / `hide_scoring_placard` gate
+        // the 2D score readout (same flags as the former plaque / counter).
         // Anchor it from the plaque's *actual* left edge instead of the raw
         // score-panel bounds: perspective projection pulls taller / higher
         // objects inward on screen, so a naive "some pixels left of
@@ -991,8 +898,6 @@ impl SceneBehavior for GameplayScene {
         // from the outermost stick inward as the count drops, so the
         // upright core stays intact and the consumption reads as a spent
         // stick rather than a re-deal.
-        let _ = score_panel_quads;
-        let _ = (sp, plaque_back_offset, plaque_lift); // formerly anchored from the plaque
         {
             let stick_len = layout.mm(28.0);
             let stick_wide = layout.mm(4.0);
@@ -1055,43 +960,10 @@ impl SceneBehavior for GameplayScene {
                 });
             }
         }
-        // (Score header text is now engraved on the plaque mesh as a
-        // per-instance decal — no overlay TextLabels are pushed here.)
         // Phase 6: cascade scoring tokens (engraved bone, chips + mult)
-        // pop in during a scoring cascade. Pushed before the cascade text
-        // labels so the numbers read on top of the wood.
+        // pop in during a scoring cascade.
         if !cascade_token_placements.is_empty() {
             frame.object3d_batch(cascade_token_placements);
-        }
-        // Score reel — odometer digits floating in front of the plaque.
-        // Always visible; anchor matches the plaque center but lifted a bit
-        // further forward so it reads in front of the wood.
-        {
-            let reel_lift = plaque_lift * 1.08;
-            let reel_px = sp.x + sp.w * 0.5;
-            // Sit the reel in the top half of the plaque face. The plaque
-            // decal leaves the top line blank for the reel and renders the
-            // bottom band left for the reel; anchoring the
-            // reel a quarter-height above center lines it up with the
-            // vacated top band instead of painting over the bottom line.
-            let reel_py = sp.y + sp.h * 0.25;
-            // Reel uses world-yaw 0 here; plaque tilt is handled on the plaque mesh.
-            let reel_placements = self.score_reel.placements(
-                now,
-                crate::render::world_space::PlacementAnchor {
-                    anchor: crate::render::world_space::LayoutAnchorPx {
-                        px: reel_px,
-                        py: reel_py,
-                        lift_z: reel_lift,
-                    },
-                    rot_y: 0.0,
-                    scale: sp.h / 200.0,
-                },
-                Some(gameplay.target_score as u64),
-            );
-            if !reel_placements.is_empty() {
-                frame.object3d_batch(reel_placements);
-            }
         }
         // Floating extruded-glyph score popups (per-step "+50" / "×3").
         if self.score_popups.is_active() {
@@ -1099,34 +971,16 @@ impl SceneBehavior for GameplayScene {
             let placements = self.score_popups.placements(now, popup_scale);
             frame.object3d_batch(placements);
         }
-        // Cascade HUD: chips × mult counter under the plaque. During the
-        // hand-off tween the trio merges into `= TOTAL` and physically
-        // flies up into the score reel.
+        // Cascade HUD: chips × mult counter under the score panel. During the
+        // hand-off tween the trio merges into `= TOTAL` and flies up toward
+        // the readout anchor (`score_counter.reel`).
         if let Some(hud) = self.cascade_hud {
-            let reel_px = sp.x + sp.w * 0.5;
-            let reel_py = sp.y + sp.h * 0.25;
-            let reel_lift = plaque_lift * 1.08;
-            // Pad anchor: centered under the plaque, a little below its
-            // bottom edge so it reads as a separate readout rather than
-            // competing with the plaque text.
-            let pad_px = sp.x + sp.w * 0.5;
-            let pad_py = sp.y + sp.h * 1.05;
-            let pad_lift = plaque_lift * 0.6;
-            let glyph_scale = (layout.window_w.min(layout.window_h) / 1080.0) * 180.0;
             let placements = build_cascade_hud_placements(
                 &hud,
-                crate::render::world_space::LayoutAnchorPx {
-                    px: pad_px,
-                    py: pad_py,
-                    lift_z: pad_lift,
-                },
-                crate::render::world_space::LayoutAnchorPx {
-                    px: reel_px,
-                    py: reel_py,
-                    lift_z: reel_lift,
-                },
-                glyph_scale,
-                sp.w,
+                score_counter.cascade_pad,
+                score_counter.reel,
+                score_counter.glyph_scale,
+                score_counter.plaque_w,
             );
             if !placements.is_empty() {
                 frame.object3d_batch(placements);
@@ -1169,7 +1023,13 @@ impl SceneBehavior for GameplayScene {
                 super::UNDO_DISCARD_CLICK_ID,
             ));
         }
-        frame.quads(hud_quads);
+        {
+            let cap = score_panel_quads.len().saturating_add(hud_quads.len());
+            let mut merged = Vec::with_capacity(cap);
+            merged.extend(score_panel_quads);
+            merged.append(&mut hud_quads);
+            frame.quads(merged);
+        }
         // Committed structure melds + tier tokens: inserted before the hand
         // `ShowcaseTileBatch` at end of `draw_frame` so they sit behind the rack (depth order).
         // Phase 3: bone yaku tablets (decal names on mesh).
@@ -1370,7 +1230,8 @@ impl SceneBehavior for GameplayScene {
             );
             if let Some(undo_rect) = discard_undo_rect {
                 let is_focus = matches!(self.focus, Some(FocusTarget::DiscardUndo));
-                let fs = typography::tier_at_most(body_px.min(undo_rect[3] * 0.55), layout.window_h);
+                let fs =
+                    typography::tier_at_most(body_px.min(undo_rect[3] * 0.55), layout.window_h);
                 hud_text.push(TextLabel {
                     rect: undo_rect,
                     text: "Undo".into(),
@@ -1387,6 +1248,56 @@ impl SceneBehavior for GameplayScene {
             }
         }
 
+        let hud_text = if !ctx.debug_visibility.hide_blind_plaque
+            && !ctx.debug_visibility.hide_scoring_placard
+        {
+            use crate::render::theme::typography;
+            let sp = layout.score_panel;
+            let zc = (layout.window_w / 900.0).max(0.55);
+            let ww = layout.window_w;
+            let wh = layout.window_h;
+
+            // The Cassowary score strip is only ~9% of window height (`layout.rs`).
+            // Basing font caps on that rect forces a microscopic ceiling; pin H6 from
+            // `window_h` and rasterize inside a wide, tall enough rect centered on
+            // the strip (see `font-scaling.md`).
+            let main_fs = typography::size(typography::H6, wh);
+            let label_w = (ww * 0.52).max(sp.w + 36.0 * zc).min(ww - 16.0).max(160.0);
+            let label_h = (main_fs * 1.48).clamp(64.0, wh * 0.22);
+            let anchor_x = sp.x + sp.w * 0.5;
+            let anchor_y = sp.y + sp.h * super::score_counter::readout_2d::ANCHOR_Y_FRAC;
+            let mut main_rect = [
+                anchor_x - label_w * 0.5,
+                anchor_y - label_h * 0.5,
+                label_w,
+                label_h,
+            ];
+            main_rect[0] = main_rect[0].clamp(8.0, (ww - main_rect[2] - 8.0).max(8.0));
+            main_rect[1] = main_rect[1].max(6.0);
+
+            let live_score = if !self.cascade_queue.is_empty() {
+                self.displayed_score
+            } else {
+                gameplay.round_score
+            };
+            let main_line = format!("{live_score} / {}", gameplay.target_score);
+
+            let mut v = Vec::with_capacity(1 + hud_text.len());
+            v.push(TextLabel {
+                rect: main_rect,
+                text: main_line,
+                color: color::CHAMPAGNE,
+                font_px: Some(main_fs),
+                align: crate::render::wgpu_renderer::TextAlign::Center,
+                no_glossary: true,
+                bold: true,
+                ..Default::default()
+            });
+            v.append(&mut hud_text);
+            v
+        } else {
+            hud_text
+        };
         frame.texts(hud_text);
 
         if let Some(undo_rect) = discard_undo_rect {
@@ -1452,100 +1363,56 @@ impl SceneBehavior for GameplayScene {
                 && let Some(rect) = focus_rect_graph
                     .iter()
                     .find_map(|(t, r)| (*t == target).then_some(*r))
-                {
-                    match target {
-                        FocusTarget::Relic(i) => {
-                            let ids = GameEngine::active_relics(run);
-                            if let Some(&rid) = ids.get(i) {
-                                let def = all_relic_defs().iter().find(|d| d.id == rid);
-                                let name = def
-                                    .map(|d| d.name.to_string())
-                                    .unwrap_or_else(|| "Relic".into());
-                                let rare =
-                                    def.map(|d| format!("{:?}", d.rarity)).unwrap_or_default();
-                                let desc = relic_description_live(
-                                    rid,
-                                    &run.relic_counters,
-                                    run.total_score_earned,
-                                    Some((&run.relics, i)),
-                                    Some(run.ghost_hand_preview_chips()),
-                                );
-                                push_focus_tooltip_panel_2d(
-                                    &mut inspect_tooltip_quads,
-                                    &mut inspect_tooltip_texts,
-                                    FocusTooltipPanelParams {
-                                        window_w: layout.window_w,
-                                        window_h: layout.window_h,
-                                        anchor_rect: Some(rect),
-                                        title: &name,
-                                        desc: &desc,
-                                        cta: &format!("Tier · {rare}"),
-                                        accent_color: color::STONE,
-                                        hover_is_owned: false,
-                                        skip_title_block: false,
-                                        avoid_rect: None,
-                                    },
-                                );
-                            }
-                        }
-                        FocusTarget::Consumable(i) => {
-                            if let Some(&c) = interaction.consumables.get(i) {
-                                let kind = match c {
-                                    Consumable::Zodiac(_) => "Ribbon",
-                                    Consumable::Talisman(_) => "Talisman",
-                                };
-                                let title = format!("{} · {}", kind, c.name());
-                                let desc = gameplay_consumable_description_full(c);
-                                push_focus_tooltip_panel_2d(
-                                    &mut inspect_tooltip_quads,
-                                    &mut inspect_tooltip_texts,
-                                    FocusTooltipPanelParams {
-                                        window_w: layout.window_w,
-                                        window_h: layout.window_h,
-                                        anchor_rect: Some(rect),
-                                        title: &title,
-                                        desc: &desc,
-                                        cta: "",
-                                        accent_color: color::GOLD,
-                                        hover_is_owned: false,
-                                        skip_title_block: false,
-                                        avoid_rect: None,
-                                    },
-                                );
-                            }
-                        }
-                        FocusTarget::HandTile(i) => {
-                            if let Some(&tile) = interaction.hand.get(i) {
-                                let tile = Self::display_tile(tile, run);
-                                let (title, desc) = hand_tile_focus_tooltip(
-                                    &tile,
-                                    &gameplay.dora_faces,
-                                    &run.tile_debuffs,
-                                    interaction.selected.get(i).copied().unwrap_or(false),
-                                );
-                                push_focus_tooltip_panel_2d(
-                                    &mut inspect_tooltip_quads,
-                                    &mut inspect_tooltip_texts,
-                                    FocusTooltipPanelParams {
-                                        window_w: layout.window_w,
-                                        window_h: layout.window_h,
-                                        anchor_rect: Some(rect),
-                                        title: &title,
-                                        desc: &desc,
-                                        cta: "",
-                                        accent_color: color::BRASS,
-                                        hover_is_owned: false,
-                                        skip_title_block: false,
-                                        avoid_rect: None,
-                                    },
-                                );
-                            }
-                        }
-                        FocusTarget::Dora => {
-                            let (title, cta, desc) = dora_focus_tooltip_strings(
-                                ctx.progress.dora_enabled(),
-                                &gameplay.dora_faces,
+            {
+                match target {
+                    FocusTarget::Relic(i) => {
+                        let ids = GameEngine::active_relics(run);
+                        if let Some(&rid) = ids.get(i) {
+                            let def = all_relic_defs().iter().find(|d| d.id == rid);
+                            let name = def
+                                .map(|d| d.name.to_string())
+                                .unwrap_or_else(|| "Relic".into());
+                            let rare = def.map(|d| format!("{:?}", d.rarity)).unwrap_or_default();
+                            let desc = relic_description_live(
+                                rid,
+                                &run.relic_counters,
+                                run.total_score_earned,
+                                Some((&run.relics, i)),
+                                Some(run.ghost_hand_preview_chips()),
                             );
+                            let cta = match rid {
+                                RelicId::MirrorTile => {
+                                    "[ ] reorder · copy = relic to the right".to_string()
+                                }
+                                RelicId::ShadowHand => "Copy = leftmost relic (not Shadow Hand)".to_string(),
+                                _ => format!("Tier · {rare}"),
+                            };
+                            push_focus_tooltip_panel_2d(
+                                &mut inspect_tooltip_quads,
+                                &mut inspect_tooltip_texts,
+                                FocusTooltipPanelParams {
+                                    window_w: layout.window_w,
+                                    window_h: layout.window_h,
+                                    anchor_rect: Some(rect),
+                                    title: &name,
+                                    desc: &desc,
+                                    cta: cta.as_str(),
+                                    accent_color: color::STONE,
+                                    hover_is_owned: false,
+                                    skip_title_block: false,
+                                    avoid_rect: None,
+                                },
+                            );
+                        }
+                    }
+                    FocusTarget::Consumable(i) => {
+                        if let Some(&c) = interaction.consumables.get(i) {
+                            let kind = match c {
+                                Consumable::Zodiac(_) => "Ribbon",
+                                Consumable::Talisman(_) => "Talisman",
+                            };
+                            let title = format!("{} · {}", kind, c.name());
+                            let desc = gameplay_consumable_description_full(c);
                             push_focus_tooltip_panel_2d(
                                 &mut inspect_tooltip_quads,
                                 &mut inspect_tooltip_texts,
@@ -1555,7 +1422,7 @@ impl SceneBehavior for GameplayScene {
                                     anchor_rect: Some(rect),
                                     title: &title,
                                     desc: &desc,
-                                    cta: &cta,
+                                    cta: "",
                                     accent_color: color::GOLD,
                                     hover_is_owned: false,
                                     skip_title_block: false,
@@ -1563,10 +1430,15 @@ impl SceneBehavior for GameplayScene {
                                 },
                             );
                         }
-                        FocusTarget::RoundWind => {
-                            let (title, cta, desc) = round_wind_focus_tooltip_strings(
-                                gameplay.round_wind_rank,
-                                gameplay.bonus_round_wind_rank,
+                    }
+                    FocusTarget::HandTile(i) => {
+                        if let Some(&tile) = interaction.hand.get(i) {
+                            let tile = Self::display_tile(tile, run);
+                            let (title, desc) = hand_tile_focus_tooltip(
+                                &tile,
+                                &gameplay.dora_faces,
+                                &run.tile_debuffs,
+                                interaction.selected.get(i).copied().unwrap_or(false),
                             );
                             push_focus_tooltip_panel_2d(
                                 &mut inspect_tooltip_quads,
@@ -1577,7 +1449,7 @@ impl SceneBehavior for GameplayScene {
                                     anchor_rect: Some(rect),
                                     title: &title,
                                     desc: &desc,
-                                    cta: &cta,
+                                    cta: "",
                                     accent_color: color::BRASS,
                                     hover_is_owned: false,
                                     skip_title_block: false,
@@ -1585,45 +1457,90 @@ impl SceneBehavior for GameplayScene {
                                 },
                             );
                         }
-                        FocusTarget::Gold => {
-                            push_focus_tooltip_panel_2d(
-                                &mut inspect_tooltip_quads,
-                                &mut inspect_tooltip_texts,
-                                FocusTooltipPanelParams {
-                                    window_w: layout.window_w,
-                                    window_h: layout.window_h,
-                                    anchor_rect: Some(rect),
-                                    title: "Gold",
-                                    desc: "Your current treasure",
-                                    cta: &format!("{}g", gameplay.gold),
-                                    accent_color: color::GOLD,
-                                    hover_is_owned: false,
-                                    skip_title_block: false,
-                                    avoid_rect: None,
-                                },
-                            );
-                        }
-                        FocusTarget::DiscardUndo => {
-                            push_focus_tooltip_panel_2d(
-                                &mut inspect_tooltip_quads,
-                                &mut inspect_tooltip_texts,
-                                FocusTooltipPanelParams {
-                                    window_w: layout.window_w,
-                                    window_h: layout.window_h,
-                                    anchor_rect: Some(rect),
-                                    title: "Undo discard",
-                                    desc: "Confirm to restore your previous hand and wall before the last discard. Clears when you play, sort, use a consumable, or discard again.",
-                                    cta: "D-pad Up: Discard · [ ] / LB RB: HUD cycle",
-                                    accent_color: color::CHAMPAGNE,
-                                    hover_is_owned: false,
-                                    skip_title_block: false,
-                                    avoid_rect: None,
-                                },
-                            );
-                        }
-                        _ => {}
                     }
+                    FocusTarget::Dora => {
+                        let (title, cta, desc) = dora_focus_tooltip_strings(
+                            ctx.progress.dora_enabled(),
+                            &gameplay.dora_faces,
+                        );
+                        push_focus_tooltip_panel_2d(
+                            &mut inspect_tooltip_quads,
+                            &mut inspect_tooltip_texts,
+                            FocusTooltipPanelParams {
+                                window_w: layout.window_w,
+                                window_h: layout.window_h,
+                                anchor_rect: Some(rect),
+                                title: &title,
+                                desc: &desc,
+                                cta: &cta,
+                                accent_color: color::GOLD,
+                                hover_is_owned: false,
+                                skip_title_block: false,
+                                avoid_rect: None,
+                            },
+                        );
+                    }
+                    FocusTarget::RoundWind => {
+                        let (title, cta, desc) = round_wind_focus_tooltip_strings(
+                            gameplay.round_wind_rank,
+                            gameplay.bonus_round_wind_rank,
+                        );
+                        push_focus_tooltip_panel_2d(
+                            &mut inspect_tooltip_quads,
+                            &mut inspect_tooltip_texts,
+                            FocusTooltipPanelParams {
+                                window_w: layout.window_w,
+                                window_h: layout.window_h,
+                                anchor_rect: Some(rect),
+                                title: &title,
+                                desc: &desc,
+                                cta: &cta,
+                                accent_color: color::BRASS,
+                                hover_is_owned: false,
+                                skip_title_block: false,
+                                avoid_rect: None,
+                            },
+                        );
+                    }
+                    FocusTarget::Gold => {
+                        push_focus_tooltip_panel_2d(
+                            &mut inspect_tooltip_quads,
+                            &mut inspect_tooltip_texts,
+                            FocusTooltipPanelParams {
+                                window_w: layout.window_w,
+                                window_h: layout.window_h,
+                                anchor_rect: Some(rect),
+                                title: "Gold",
+                                desc: "Your current treasure",
+                                cta: &format!("{}g", gameplay.gold),
+                                accent_color: color::GOLD,
+                                hover_is_owned: false,
+                                skip_title_block: false,
+                                avoid_rect: None,
+                            },
+                        );
+                    }
+                    FocusTarget::DiscardUndo => {
+                        push_focus_tooltip_panel_2d(
+                            &mut inspect_tooltip_quads,
+                            &mut inspect_tooltip_texts,
+                            FocusTooltipPanelParams {
+                                window_w: layout.window_w,
+                                window_h: layout.window_h,
+                                anchor_rect: Some(rect),
+                                title: "Undo discard",
+                                desc: "Confirm to restore your previous hand and wall before the last discard. Clears when you play, sort, use a consumable, or discard again.",
+                                cta: "D-pad Up: Discard · [ ] / LB RB: HUD cycle",
+                                accent_color: color::CHAMPAGNE,
+                                hover_is_owned: false,
+                                skip_title_block: false,
+                                avoid_rect: None,
+                            },
+                        );
+                    }
+                    _ => {}
                 }
+            }
             if !inspect_tooltip_quads.is_empty() || !inspect_tooltip_texts.is_empty() {
                 frame.overlay_quads(inspect_tooltip_quads);
                 frame.texts(inspect_tooltip_texts);

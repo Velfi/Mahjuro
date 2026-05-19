@@ -307,7 +307,9 @@ impl WgpuRenderer {
         // of corrected punctual.
         let shop_punctual_inv_doc = if frame.scene_lighting.embedded_gltf_punctual {
             let height_scale = if self.active_scene_key == Some("main_menu_exterior") {
-                crate::render::main_menu_glb::main_menu_env_height_scale(self.room_gltf_height_scale)
+                crate::render::main_menu_glb::main_menu_env_height_scale(
+                    self.room_gltf_height_scale,
+                )
             } else {
                 self.room_gltf_height_scale
             };
@@ -321,19 +323,21 @@ impl WgpuRenderer {
         } else {
             0.0
         };
-        if shop_like && frame.shop_inspect_lit_mesh_hdr
-            && let Some(phase) = shop_inspect_felt {
-                match phase {
-                    ShopInspectLitMeshFelt::Dim => {
-                        felt_z = tm[1] * crate::render::room_glb::SHOP_INSPECT_ENV_VS_LIT_LINEAR;
-                        felt_w = tm[2] * crate::render::room_glb::SHOP_INSPECT_ENV_VS_LIT_AMBIENT;
-                        if felt_y <= 0.5 {
-                            felt_z = 0.0;
-                            felt_w = 0.0;
-                        }
+        if shop_like
+            && frame.shop_inspect_lit_mesh_hdr
+            && let Some(phase) = shop_inspect_felt
+        {
+            match phase {
+                ShopInspectLitMeshFelt::Dim => {
+                    felt_z = tm[1] * crate::render::room_glb::SHOP_INSPECT_ENV_VS_LIT_LINEAR;
+                    felt_w = tm[2] * crate::render::room_glb::SHOP_INSPECT_ENV_VS_LIT_AMBIENT;
+                    if felt_y <= 0.5 {
+                        felt_z = 0.0;
+                        felt_w = 0.0;
                     }
                 }
             }
+        }
         let ssr_max_distance = cam.h * 2.0;
         let ssr_stride = cam.h * 0.04;
         let ssr_max_steps = 24.0;

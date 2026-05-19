@@ -1,0 +1,12 @@
+image = "atlas.png"
+tile_width = 128
+tile_height = 128
+columns = 5
+
+layout = [
+    "drought","whisper","tribute","gate","grove",
+    "coin","bloom","hermit","forest","bureaucrat",
+    "drunkard","ash","furnace","relic","blight",
+    "hex","famine","tempest","censor","mirror",
+    "counterweight","tax_collector","dragon","house","",
+]

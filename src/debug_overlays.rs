@@ -3,14 +3,14 @@
 //! intercept input while open.
 
 use crate::audio;
+use crate::core::rules::BlindKind;
 use crate::game::cascade::CascadeTuning;
 use crate::game::scene_look_tuning::{
-    self, hue_wheel_preview_linear, SceneLookTuning,
-    SceneLookTuningSet, SCENE_LOOK_SLIDER_COUNT, SCENE_LOOK_SLIDER_META,
+    self, SCENE_LOOK_SLIDER_COUNT, SCENE_LOOK_SLIDER_META, SceneLookTuning, SceneLookTuningSet,
+    hue_wheel_preview_linear,
 };
 use crate::game::tonemap_tuning::FALLBACK_SCENE_KEY;
 use crate::render::draw_cmd::CameraParams;
-use crate::core::rules::BlindKind;
 use crate::render::hallway_glb::{
     HallwayDistortion, HallwayDistortionDebugSnapshot, hallway_distortion_apply_glb_depth_extent,
 };
@@ -2213,9 +2213,10 @@ impl HallwayDistortionDebugOverlay {
 
         if let Some((mx, my, clicked, held)) = mouse {
             if let Some(di) = self.dragging_slider
-                && held {
-                    self.apply_slider_mx(di, mx, &layout);
-                }
+                && held
+            {
+                self.apply_slider_mx(di, mx, &layout);
+            }
 
             if (clicked || held) && self.dragging_slider.is_none() {
                 for i in 0..n {
@@ -2426,8 +2427,9 @@ impl HallwayDistortionDebugOverlay {
         });
         labels.push(TextLabel {
             rect: [px, py + row_gap + title_h, pw, subtitle_h],
-            text: "breathe · ripple · wall bow (bow.w world units) · tint (bow.rgb) · squeeze/stretch"
-                .into(),
+            text:
+                "breathe · ripple · wall bow (bow.w world units) · tint (bow.rgb) · squeeze/stretch"
+                    .into(),
             color: color::alpha(color::STONE, 0.88),
             ..Default::default()
         });
@@ -2525,4 +2527,3 @@ impl HallwayDistortionDebugOverlay {
         (instances, labels)
     }
 }
-

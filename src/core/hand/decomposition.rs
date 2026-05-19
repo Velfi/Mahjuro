@@ -22,9 +22,7 @@ fn face_groups(tiles: &[Tile]) -> FxHashMap<(Suit, u8), Vec<u32>> {
         if t.is_flower() {
             continue;
         }
-        m.entry((t.suit, t.rank))
-            .or_default()
-            .push(t.id);
+        m.entry((t.suit, t.rank)).or_default().push(t.id);
     }
     m
 }

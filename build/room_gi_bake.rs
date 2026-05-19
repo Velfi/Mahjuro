@@ -74,7 +74,9 @@ pub fn maybe_bake_room_gi(repo: &Path, profile_dir: &Path) {
     let out_dir = repo.join(OUT_DIR);
     let hash = compute_inputs_hash(repo);
     let stamp_ok = read_stamp(&stamp_file).is_some_and(|s| s == hash);
-    let outputs_ok = ROOMS.iter().all(|room| out_dir.join(format!("{room}.mgi")).is_file());
+    let outputs_ok = ROOMS
+        .iter()
+        .all(|room| out_dir.join(format!("{room}.mgi")).is_file());
 
     if stamp_ok && outputs_ok {
         println!("cargo:info=room GI bake: inputs unchanged, skipping GPU bake");
@@ -181,9 +183,10 @@ fn compute_inputs_hash(repo: &Path) -> String {
         h.write(path.to_string_lossy().as_bytes());
         h.write(b"\0");
         if path.is_file()
-            && let Ok(bytes) = fs::read(&path) {
-                h.write(&bytes);
-            }
+            && let Ok(bytes) = fs::read(&path)
+        {
+            h.write(&bytes);
+        }
     }
     format!("{:016x}", h.finish())
 }
@@ -215,7 +218,9 @@ impl Fnv64 {
     const PRIME: u64 = 0x100000001b3;
 
     fn new() -> Self {
-        Self { state: Self::OFFSET }
+        Self {
+            state: Self::OFFSET,
+        }
     }
 
     fn write(&mut self, bytes: &[u8]) {

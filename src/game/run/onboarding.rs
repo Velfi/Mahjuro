@@ -1,11 +1,12 @@
 use crate::core::deck::Wall;
 use crate::core::hand::MeldKind;
 use crate::core::rules::BlindKind;
+use crate::game::engine_state::GameplayCoreState;
 use crate::game::game_mode::GameMode;
 use crate::game::onboarding::{
-    LESSONS_DISCARDS, LESSONS_HAND_SIZE, LESSONS_PLAYS, LESSONS_TARGET, OnboardingPhase, OnboardingState, TUTORIAL_BOSS, lessons_allowed_melds, tutorial_yaku
+    LESSONS_DISCARDS, LESSONS_HAND_SIZE, LESSONS_PLAYS, LESSONS_TARGET, OnboardingPhase,
+    OnboardingState, TUTORIAL_BOSS, lessons_allowed_melds, tutorial_yaku,
 };
-use crate::game::engine_state::GameplayCoreState;
 use crate::game::run::RunState;
 
 impl RunState {
@@ -55,9 +56,7 @@ impl RunState {
     }
 
     pub fn onboarding_lessons_active(&self) -> bool {
-        self.onboarding
-            .as_ref()
-            .is_some_and(|o| o.lessons_active())
+        self.onboarding.as_ref().is_some_and(|o| o.lessons_active())
     }
 
     pub fn onboarding_discard_allowed(&self) -> bool {
@@ -192,7 +191,9 @@ impl RunState {
                     MeldKind::Triplet | MeldKind::Kong => {
                         "Try a pair first — select two matching tiles."
                     }
-                    MeldKind::Sequence => "Sequences aren't part of this lesson — use matching pairs.",
+                    MeldKind::Sequence => {
+                        "Sequences aren't part of this lesson — use matching pairs."
+                    }
                     MeldKind::Pair => "Pairs aren't available right now.",
                     MeldKind::Single => "That shape isn't used in this lesson.",
                 });

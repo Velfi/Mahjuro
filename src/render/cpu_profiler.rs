@@ -206,30 +206,31 @@ impl CpuProfiler {
         // frame (e.g. one per Object3d batch). `total/frames` gives the
         // per-frame share, which is what matters for the budget.
         if let Ok(mut map) = scope_accum().lock()
-            && !map.is_empty() {
-                let mut entries: Vec<(&'static str, f64, u32)> = map
-                    .drain()
-                    .map(|(k, v)| (k, v.total_ms, v.samples))
-                    .collect();
-                entries.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-                acc.push_str("\n   --- scopes (per-frame share, sorted by total) ---\n");
-                let frames_f = self.total_frames as f64;
-                for (name, total_ms, samples) in &entries {
-                    let per_frame = if frames_f > 0.0 {
-                        total_ms / frames_f
-                    } else {
-                        0.0
-                    };
-                    let per_call = if *samples > 0 {
-                        total_ms / *samples as f64
-                    } else {
-                        0.0
-                    };
-                    acc.push_str(&format!(
+            && !map.is_empty()
+        {
+            let mut entries: Vec<(&'static str, f64, u32)> = map
+                .drain()
+                .map(|(k, v)| (k, v.total_ms, v.samples))
+                .collect();
+            entries.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            acc.push_str("\n   --- scopes (per-frame share, sorted by total) ---\n");
+            let frames_f = self.total_frames as f64;
+            for (name, total_ms, samples) in &entries {
+                let per_frame = if frames_f > 0.0 {
+                    total_ms / frames_f
+                } else {
+                    0.0
+                };
+                let per_call = if *samples > 0 {
+                    total_ms / *samples as f64
+                } else {
+                    0.0
+                };
+                acc.push_str(&format!(
                         "   {name:<40} {per_frame:>7.3} ms/frame  ({samples:>6} calls × {per_call:>6.3} ms)\n"
                     ));
-                }
             }
+        }
         log::debug!("{}", acc);
     }
 }

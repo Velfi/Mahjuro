@@ -27,12 +27,12 @@ use crate::core::deck::Wall;
 use crate::core::hand::{DetectedMeld, validate_selection_with_rules};
 use crate::core::relic::{RelicId, RelicState};
 use crate::core::rules::{BlindKind, RuleModifier};
-use crate::core::scoring::{ScoreBreakdown};
+use crate::core::scoring::ScoreBreakdown;
 use crate::core::tile::{Suit, Tile, TileEnhancement};
 use crate::core::yaku::YakuKind;
 use crate::game::event_bus::{EventBus, GameEvent};
 use crate::game::game_mode::GameMode;
-use crate::game::onboarding::{OnboardingState};
+use crate::game::onboarding::OnboardingState;
 pub use discard_undo::DiscardUndoSnapshot;
 
 /// Boss-blind state for the current run.  Extracted from `RunState` so
@@ -389,10 +389,7 @@ fn emit_leaf_masks(
 }
 
 fn flower_meld_partition_masks(flowers: &[IndexedTile]) -> Vec<u32> {
-    let indexed: Vec<(usize, u32)> = flowers
-        .iter()
-        .map(|f| (f.hand_index, f.tile.id))
-        .collect();
+    let indexed: Vec<(usize, u32)> = flowers.iter().map(|f| (f.hand_index, f.tile.id)).collect();
     crate::core::hand::decomposition::flower_meld_partition_masks(&indexed)
 }
 
@@ -1006,9 +1003,7 @@ impl RunState {
 
     pub(crate) fn refresh_windreader_bonus_wind(&mut self) {
         self.windreader_bonus_wind = if self.relics.has(RelicId::WindReader) {
-            Some(crate::core::rules::BlindKind::roll_bonus_round_wind_for_ante(
-                self.ante,
-            ))
+            Some(crate::core::rules::BlindKind::roll_bonus_round_wind_for_ante(self.ante))
         } else {
             None
         };
@@ -1081,7 +1076,11 @@ impl RunState {
             structure_sets: Vec::new(),
             structure_tiles: Vec::new(),
             round_score: 0,
-            target_score: crate::core::blind_target::score_for(1, BlindKind::Small, mode.base_target),
+            target_score: crate::core::blind_target::score_for(
+                1,
+                BlindKind::Small,
+                mode.base_target,
+            ),
             base_target: mode.base_target,
             relics,
             round_rules: mode.starting_rules.clone(),

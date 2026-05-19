@@ -829,8 +829,8 @@ pub fn rasterize_plaque_decal_styled(
             // by a bright pale-gold highlight offset up-left. Three passes give the
             // engraving a metallic, leafed-gold read at any size.
             LabelStyleColors {
-                shadow: [0.18_f32, 0.12, 0.04, 0.92], // burnt umber recess
-                base: [0.92_f32, 0.74, 0.28, 1.0],    // rich antique gold
+                shadow: [0.18_f32, 0.12, 0.04, 0.92],   // burnt umber recess
+                base: [0.92_f32, 0.74, 0.28, 1.0],      // rich antique gold
                 highlight: [1.00_f32, 0.96, 0.74, 1.0], // pale champagne sheen
                 shadow_off: (3, 3),
                 highlight_off: (-1, -1),
@@ -1082,13 +1082,45 @@ fn rasterize_plaque_walnut_ink_colored_keywords(
         let line_baseline_global = pad_y as f32 + block_top + i as f32 * line_h + ascender_px;
         let dst_y = (line_baseline_global - baseline_in_band).floor().max(0.0) as u32;
 
+        // One soft shadow for the whole line. Per-token shadows used to call `blit_tinted`
+        // for every word; destination alpha is accumulated with `saturating_add`, so
+        // overlapping +1/+1 shadow passes stacked into opaque black slabs on dense copy.
+        let rh = line_cell_h.max(1);
+        let line_shadow_band = rasterize_label_styled_with_fallback(
+            font,
+            emoji_font,
+            line,
+            inner_w,
+            rh,
+            LabelStyle {
+                font_px: Some(chosen_px),
+                align: LabelAlign::Center,
+                scroll_offset: 0.0,
+                underline: false,
+                baseline_shift_px: 0.0,
+            },
+        );
+        blit_tinted(
+            TintedSrc {
+                pixels: &line_shadow_band,
+                width: inner_w,
+                height: rh,
+            },
+            TintedDst {
+                pixels: &mut rgba,
+                width: w,
+                x: pad_x.saturating_add(1),
+                y: dst_y.saturating_add(1),
+            },
+            SHADOW_TINT,
+        );
+
         for (s, tint) in &chunks {
             let aw = advance_width(font, emoji_font, s, chosen_px);
             if aw <= 0.0 {
                 continue;
             }
             let rw = aw.ceil() as u32 + 3;
-            let rh = line_cell_h.max(1);
             let band = rasterize_label_styled_with_fallback(
                 font,
                 emoji_font,
@@ -1104,20 +1136,6 @@ fn rasterize_plaque_walnut_ink_colored_keywords(
                 },
             );
             let dst_x = pad_x + cx.floor() as u32;
-            blit_tinted(
-                TintedSrc {
-                    pixels: &band,
-                    width: rw.max(1),
-                    height: rh,
-                },
-                TintedDst {
-                    pixels: &mut rgba,
-                    width: w,
-                    x: dst_x.saturating_add(1),
-                    y: dst_y.saturating_add(1),
-                },
-                SHADOW_TINT,
-            );
             blit_tinted(
                 TintedSrc {
                     pixels: &band,
@@ -1612,26 +1630,34 @@ struct TintedDst<'a> {
 }
 
 /// Blit a single-channel-in-alpha RGBA source onto an RGBA destination at
-/// `(dst.x, dst.y)`, replacing every pixel's RGB with `tint` weighted by source
-/// alpha. Used to recolour `rasterize_label`'s white-on-transparent output.
+/// `(dst.x, dst.y)`, compositing **straight-alpha** ink (`tint.rgb` with coverage
+/// from the source alpha channel) over existing pixels with Porter–Duff "over".
+///
+/// Historically this used `dst.a += src.a`, which stacks overlapping glyph passes
+/// (shadow + body, adjacent lines, per-token blits) into opaque black slabs on
+/// archive plaques and other dense decals.
 fn blit_tinted(src: TintedSrc<'_>, dst: TintedDst<'_>, tint: [f32; 4]) {
     let TintedSrc {
         pixels: src,
         width: sw,
         height: sh,
     } = src;
-    let dw = dst.width;
+    let dw = dst.width.max(1);
     let dst_x = dst.x;
     let dst_y = dst.y;
     let dst = &mut *dst.pixels;
-    let r = (tint[0] * 255.0) as u8;
-    let g = (tint[1] * 255.0) as u8;
-    let b = (tint[2] * 255.0) as u8;
+    let dst_h = (dst.len() / (dw as usize * 4)) as u32;
+
+    let sr = tint[0].clamp(0.0, 1.0);
+    let sg = tint[1].clamp(0.0, 1.0);
+    let sb = tint[2].clamp(0.0, 1.0);
+    let tint_a = tint[3].clamp(0.0, 1.0);
+
     for y in 0..sh {
         for x in 0..sw {
             let dx = dst_x + x;
             let dy = dst_y + y;
-            if dx >= dw {
+            if dx >= dw || dy >= dst_h {
                 continue;
             }
             let si = ((y * sw + x) * 4) as usize;
@@ -1639,15 +1665,27 @@ fn blit_tinted(src: TintedSrc<'_>, dst: TintedDst<'_>, tint: [f32; 4]) {
             if di + 3 >= dst.len() {
                 continue;
             }
-            let a = src[si + 3];
-            if a == 0 {
+            let a_src = (src[si + 3] as f32 / 255.0) * tint_a;
+            if a_src <= 1e-5 {
                 continue;
             }
-            // Source-over with the new pixel's tint.
-            dst[di] = r;
-            dst[di + 1] = g;
-            dst[di + 2] = b;
-            dst[di + 3] = dst[di + 3].saturating_add(a);
+            let da = dst[di + 3] as f32 / 255.0;
+            let dr = dst[di] as f32 / 255.0;
+            let dg = dst[di + 1] as f32 / 255.0;
+            let db = dst[di + 2] as f32 / 255.0;
+
+            let out_a = a_src + da * (1.0 - a_src);
+            if out_a <= 1e-5 {
+                continue;
+            }
+            let out_r = (sr * a_src + dr * da * (1.0 - a_src)) / out_a;
+            let out_g = (sg * a_src + dg * da * (1.0 - a_src)) / out_a;
+            let out_b = (sb * a_src + db * da * (1.0 - a_src)) / out_a;
+
+            dst[di] = (out_r * 255.0).clamp(0.0, 255.0) as u8;
+            dst[di + 1] = (out_g * 255.0).clamp(0.0, 255.0) as u8;
+            dst[di + 2] = (out_b * 255.0).clamp(0.0, 255.0) as u8;
+            dst[di + 3] = (out_a * 255.0).clamp(0.0, 255.0) as u8;
         }
     }
 }
@@ -1701,10 +1739,10 @@ fn noto_sans_symbols_font() -> Option<&'static fontdue::Font> {
             if let Some(file) = crate::asset_path::get(path)
                 && let Ok(f) =
                     fontdue::Font::from_bytes(file.data.as_ref(), fontdue::FontSettings::default())
-                {
-                    log::debug!("decal: loaded Noto Sans Math (symbol fallback) from {path}");
-                    return Some(f);
-                }
+            {
+                log::debug!("decal: loaded Noto Sans Math (symbol fallback) from {path}");
+                return Some(f);
+            }
         }
         log::debug!("decal: Noto Sans Math symbol fallback not found in embedded assets.");
         None
@@ -1735,9 +1773,9 @@ pub fn load_ui_font_italic() -> Option<fontdue::Font> {
             if let Some(file) = crate::asset_path::get(path)
                 && let Ok(f) =
                     fontdue::Font::from_bytes(file.data.as_ref(), fontdue::FontSettings::default())
-                {
-                    return Some(f);
-                }
+            {
+                return Some(f);
+            }
             log::debug!("decal: italic UI font missing at {path}, using regular");
             load_ui_font()
         })
@@ -2037,9 +2075,10 @@ fn pick_font<'a>(
         return primary;
     }
     if let Some(symbols) = noto_sans_symbols_font()
-        && symbols.has_glyph(ch) {
-            return symbols;
-        }
+        && symbols.has_glyph(ch)
+    {
+        return symbols;
+    }
     if let Some(fb) = fallback {
         return fb;
     }
@@ -2229,9 +2268,11 @@ fn pick_face_for_flavor<'a>(
     use_italic: bool,
 ) -> &'a fontdue::Font {
     if let Some(e) = emoji
-        && !regular.has_glyph(ch) && e.has_glyph(ch) {
-            return e;
-        }
+        && !regular.has_glyph(ch)
+        && e.has_glyph(ch)
+    {
+        return e;
+    }
     if use_italic && italic.has_glyph(ch) {
         return italic;
     }
@@ -2412,7 +2453,12 @@ fn blit_one_flavor_glyph(
     }
 }
 
-fn blit_flavor_line(ctx: &mut FlavorBlitCtx<'_>, line: &[FlavorCell], start_x: f32, baseline_y: f32) {
+fn blit_flavor_line(
+    ctx: &mut FlavorBlitCtx<'_>,
+    line: &[FlavorCell],
+    start_x: f32,
+    baseline_y: f32,
+) {
     let italic = flavor_italic_face(ctx.fonts);
     let mut cx = start_x;
     let mut u_start: Option<f32> = None;
@@ -2432,13 +2478,7 @@ fn blit_flavor_line(ctx: &mut FlavorBlitCtx<'_>, line: &[FlavorCell], start_x: f
                 ctx.font_px,
             );
         }
-        let face = pick_face_for_flavor(
-            ctx.fonts.regular,
-            italic,
-            ctx.fonts.emoji,
-            c.ch,
-            c.italic,
-        );
+        let face = pick_face_for_flavor(ctx.fonts.regular, italic, ctx.fonts.emoji, c.ch, c.italic);
         let (m, bmp) = face.rasterize(c.ch, ctx.font_px);
         blit_one_flavor_glyph(ctx, cx, baseline_y, m, &bmp, c.bold);
         cx += m.advance_width;

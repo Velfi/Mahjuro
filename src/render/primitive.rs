@@ -153,6 +153,7 @@ impl MaterialSpec {
 /// auto-fit layout used by every plaque in the game. Pairs with
 /// [`MaterialSpec::lacquered_wood_flat`] to reproduce the legacy
 /// `Object3dKind::Plaque { text, … }` ergonomics.
+#[allow(dead_code)] // Used when building plaque-style decals from gameplay props.
 pub fn plaque_decal(text: impl Into<String>) -> DecalSpec {
     DecalSpec {
         text: text.into(),

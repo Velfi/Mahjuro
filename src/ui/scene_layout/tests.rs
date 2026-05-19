@@ -325,6 +325,61 @@ fn tile_select_field_path_roundtrip() {
 }
 
 #[test]
+fn gameplay_dora_round_wind_accept_full_arrange_delta() {
+    let mut p = GameplayPositions::default();
+    let d0 = p.dora;
+    let rw0 = p.round_wind;
+    assert!(apply_arrange(
+        &mut p,
+        "gameplay.dora",
+        ArrangeDelta {
+            dnx: 0.01,
+            dny: -0.02,
+            d_lift_mm: 1.5,
+            d_rx_deg: 2.0,
+            d_ry_deg: -3.0,
+            d_rz_deg: 5.0,
+        },
+    ));
+    assert!(approx(p.dora.nx, d0.nx + 0.01));
+    assert!(approx(p.dora.ny, d0.ny - 0.02));
+    assert!(approx(p.dora.lift_mm, d0.lift_mm + 1.5));
+    assert!(approx(p.dora.rx_deg, d0.rx_deg + 2.0));
+    assert!(approx(p.dora.ry_deg, d0.ry_deg - 3.0));
+    assert!(approx(p.dora.rz_deg, d0.rz_deg + 5.0));
+
+    assert!(apply_arrange(
+        &mut p,
+        "gameplay.round_wind",
+        ArrangeDelta {
+            d_rx_deg: 1.0,
+            ..Default::default()
+        },
+    ));
+    assert!(approx(p.round_wind.rx_deg, rw0.rx_deg + 1.0));
+}
+
+/// `object3d_placement` applies arrange overrides under these names; they are
+/// not (yet) backed by `GameplayPositions` / `GAMEPLAY_HIERARCHY`, so debug
+/// arrange cannot persist nudges for them — only live preview if we added keys.
+#[test]
+fn gameplay_arrange_ephemeral_renderer_paths_not_in_hierarchy() {
+    use crate::ui::scene_layout::gameplay::lookup_gameplay_field;
+    for path in [
+        "gameplay.score_popup",
+        "gameplay.cascade_token.chips",
+        "gameplay.cascade_token.mult",
+        "gameplay.wall_tile",
+        "gameplay.action_bar.tablet",
+    ] {
+        assert!(
+            lookup_gameplay_field(path).is_none(),
+            "expected no persisted placement for {path}"
+        );
+    }
+}
+
+#[test]
 fn tile_select_hierarchy_leaves_all_resolve() {
     use crate::ui::placement::all_leaf_names;
     let mut p = TileSelectPositions::default();
@@ -332,3 +387,4 @@ fn tile_select_hierarchy_leaves_all_resolve() {
         assert!(p.placement_mut(leaf).is_some());
     }
 }
+

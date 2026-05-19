@@ -11,7 +11,6 @@ pub struct BloomBuildParams<'a> {
     pub extract_shader: &'a wgpu::ShaderModule,
     pub blur_shader: &'a wgpu::ShaderModule,
     pub composite_shader: &'a wgpu::ShaderModule,
-    pub shop_linear_bloom_view: &'a wgpu::TextureView,
     pub scene_color_view: &'a wgpu::TextureView,
 }
 
@@ -47,7 +46,6 @@ pub fn build_bloom(p: &BloomBuildParams<'_>) -> BloomBundle {
         extract_shader: bloom_extract_shader,
         blur_shader: bloom_blur_shader,
         composite_shader: bloom_composite_shader,
-        shop_linear_bloom_view,
         scene_color_view,
     } = *p;
     let (bloom_ping_texture, bloom_ping_view) =
@@ -152,16 +150,6 @@ pub fn build_bloom(p: &BloomBuildParams<'_>) -> BloomBundle {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
@@ -324,10 +312,6 @@ pub fn build_bloom(p: &BloomBuildParams<'_>) -> BloomBundle {
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: wgpu::BindingResource::TextureView(shop_linear_bloom_view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
                 resource: wgpu::BindingResource::Sampler(&bloom_sampler),
             },
         ],

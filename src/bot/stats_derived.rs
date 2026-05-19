@@ -4,18 +4,18 @@ use super::export_schema::{
     AggregateMaps, AggregateSums, AvgTurnsClearRow, BossBlindChartRow, BotAggregateV2,
     BotIssuesDerived, BotReportDerived, DeathAnteHazardRow, DeathAnteRow, DistributionCandleRow,
     KpiTile, LossBreakdownDerived, MapTable, NamedCount, NamedCountPct, NamedPerRun,
-    PerRunAverages, RelicBuyRow, RelicShopTimingRow, RelicWinRateRow, SurplusSlotRow,
-    WilsonCiPct, YakuDerived, YakuRow,
+    PerRunAverages, RelicBuyRow, RelicShopTimingRow, RelicWinRateRow, SurplusSlotRow, WilsonCiPct,
+    YakuDerived, YakuRow,
 };
-use crate::core::blind_target::{TARGET_SCALING, score_for};
-use crate::core::rules::BlindKind;
 use super::reporting::human_readable_score;
 use super::stats::{
-    AggregateStats, MIN_SHOP_TIMING_SPLIT_PER_BUCKET, RELIC_SHOP_TIMING_EARLY_ANTE_MAX,
-    RunStats, aggregate_stats_slot_sort_key,
+    AggregateStats, MIN_SHOP_TIMING_SPLIT_PER_BUCKET, RELIC_SHOP_TIMING_EARLY_ANTE_MAX, RunStats,
+    aggregate_stats_slot_sort_key,
 };
 use super::stats_wilson::wilson_95_pct;
+use crate::core::blind_target::{TARGET_SCALING, score_for};
 use crate::core::relic::{Rarity, all_relic_defs};
+use crate::core::rules::BlindKind;
 use crate::core::yaku::YakuKind;
 
 const MIN_SAMPLES_FOR_WIN_CORR: u32 = 20;
@@ -343,9 +343,7 @@ fn build_boss_blind_chart(a: &AggregateStats, base_target: u32) -> Vec<BossBlind
         } else {
             0.0
         };
-        scale_max = scale_max
-            .max(target as u64)
-            .max(avg_score.round() as u64);
+        scale_max = scale_max.max(target as u64).max(avg_score.round() as u64);
         scratch.push((ante, target, avg_score, attempts));
     }
 

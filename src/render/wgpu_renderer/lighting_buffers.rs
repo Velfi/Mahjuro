@@ -294,17 +294,19 @@ impl PointLightsBuf {
         for (i, ent) in p.src.iter().take(n).enumerate() {
             match ent {
                 ScenePunctualLight::Smooth(l) => {
-                    let world = pixel_to_world(
-                        p.screen_w, p.screen_h, l.pos[0], l.pos[1], l.pos[2],
-                    );
+                    let world =
+                        pixel_to_world(p.screen_w, p.screen_h, l.pos[0], l.pos[1], l.pos[2]);
                     Self::push_scene_punctual_entry(
-                        &mut lights, i, l, world, SCENE_POINT_KIND_SMOOTH,
+                        &mut lights,
+                        i,
+                        l,
+                        world,
+                        SCENE_POINT_KIND_SMOOTH,
                     );
                 }
                 ScenePunctualLight::InverseSquare(l) => {
-                    let world = pixel_to_world(
-                        p.screen_w, p.screen_h, l.pos[0], l.pos[1], l.pos[2],
-                    );
+                    let world =
+                        pixel_to_world(p.screen_w, p.screen_h, l.pos[0], l.pos[1], l.pos[2]);
                     Self::push_scene_punctual_entry(
                         &mut lights,
                         i,
@@ -353,13 +355,8 @@ impl PointLightsBuf {
                     Self::push_scene_punctual_entry(&mut lights, i, l, p, SCENE_POINT_KIND_SMOOTH);
                 }
                 ScenePunctualLight::InverseSquare(l) => {
-                    let p = pixel_to_world(
-                        bake.screen_w,
-                        bake.screen_h,
-                        l.pos[0],
-                        l.pos[1],
-                        l.pos[2],
-                    );
+                    let p =
+                        pixel_to_world(bake.screen_w, bake.screen_h, l.pos[0], l.pos[1], l.pos[2]);
                     Self::push_scene_punctual_entry(
                         &mut lights,
                         i,

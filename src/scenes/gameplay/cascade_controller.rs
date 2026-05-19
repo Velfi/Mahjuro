@@ -162,15 +162,15 @@ pub(super) fn tick_active_cascade(
                         cascade_showcase.as_ref(),
                         &scene.positions,
                     );
-                    let sp = ctx.layout.score_panel;
+                    let counter =
+                        super::score_counter::score_counter_layout(ctx.layout, &scene.positions);
                     // Chips popups stream into the left accumulator
                     // token, Mult popups into the right — mirroring
                     // the token geometry set up in the draw path
                     // around the `CascadeToken` placements. Gold and
                     // Final still land on the reel.
-                    let reel_xy = (sp.x + sp.w * 0.5, sp.y + sp.h * 0.25);
-                    let plaque_lift = ctx.layout.mm(scene.positions.plaque.lift_mm);
-                    let reel_lift = plaque_lift * 1.08;
+                    let reel_xy = (counter.reel.px, counter.reel.py);
+                    let reel_lift = counter.reel.lift_z;
                     let (dest_xy, dest_lift) = match step.kind {
                         StepKind::Chips | StepKind::Mult => {
                             let tokens = GameplayScene::cascade_token_layout(ctx.layout);

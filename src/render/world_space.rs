@@ -182,6 +182,7 @@ impl LayoutAnchorPx {
 /// the parent face) and a uniform scale multiplier. Shared by score reel,
 /// tooltip panels, and cascade HUD placements so each one doesn't reinvent
 /// its own 5-field param list.
+#[allow(dead_code)] // Built by `ScoreReel::placements` when the 3D reel draw path is enabled.
 #[derive(Clone, Copy, Debug)]
 pub struct PlacementAnchor {
     pub anchor: LayoutAnchorPx,

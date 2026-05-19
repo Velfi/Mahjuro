@@ -188,8 +188,16 @@ impl RoomGiBake {
             room,
             grid: [header.grid_nx, header.grid_ny, header.grid_nz],
             probe_count,
-            world_min: Vec3::new(header.world_min[0], header.world_min[1], header.world_min[2]),
-            world_max: Vec3::new(header.world_max[0], header.world_max[1], header.world_max[2]),
+            world_min: Vec3::new(
+                header.world_min[0],
+                header.world_min[1],
+                header.world_min[2],
+            ),
+            world_max: Vec3::new(
+                header.world_max[0],
+                header.world_max[1],
+                header.world_max[2],
+            ),
             bake_width: header.bake_width,
             bake_height: header.bake_height,
             dir_samples: header.dir_samples,
@@ -202,7 +210,8 @@ impl RoomGiBake {
     /// World AABB from the bake matches the live room bounds within a small tolerance.
     pub fn aabb_matches(&self, mn: Vec3, mx: Vec3) -> bool {
         const EPS: f32 = 0.08;
-        (self.world_min - mn).abs().max_element() < EPS && (self.world_max - mx).abs().max_element() < EPS
+        (self.world_min - mn).abs().max_element() < EPS
+            && (self.world_max - mx).abs().max_element() < EPS
     }
 }
 

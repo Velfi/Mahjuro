@@ -39,8 +39,8 @@ const BRIGHT_RW_AMP: f32 = 0.018;
 const EMISSION_GAIN: f32 = 10.5;
 const MAX_ALPHA: f32 = 0.72;
 const BORDER_WIDTH: f32 = 0.75;
-const BOTTOM_FADE_Y_START: f32 = 0.58;
-const BOTTOM_FADE_Y_END: f32 = 0.16;
+const BOTTOM_FADE_Y_START: f32 = 0.0;
+const BOTTOM_FADE_Y_END: f32 = 0.14;
 
 fn hash21(p: vec2<f32>) -> f32 {
     let h = dot(p, vec2<f32>(127.1, 311.7));
@@ -159,6 +159,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     );
     let flame_noise = fbm(flow_uv) * 0.5 + fbm(flow_uv * 1.9 + 2.7) * 0.5;
     alpha *= mix(0.78, 1.06, smoothstep(0.32, 0.68, flame_noise));
+    alpha *= smoothstep(BOTTOM_FADE_Y_START, BOTTOM_FADE_Y_END, in.uv.y);
     let micro_rw = flame_rw_1d(in.uv.y * 2.0 + in.uv.x * 0.4, t, MICRO_RW_RATE);
     alpha *= 1.0 + micro_rw * BRIGHT_RW_AMP * in.dance_w;
     alpha = clamp(alpha, 0.0, MAX_ALPHA);

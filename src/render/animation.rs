@@ -251,6 +251,7 @@ impl AnimationController {
 }
 
 /// Apply scale around rect center, with offset.
+#[allow(dead_code)] // Used when HUD text is transformed with the score-panel arrange tween.
 pub fn apply_transform_rect(
     x: f32,
     y: f32,

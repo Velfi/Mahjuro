@@ -914,13 +914,14 @@ pub fn run_stats_from_progress_record(rec: &crate::core::progression::RunRecord)
     let mut boss_faced: BTreeMap<String, u8> = BTreeMap::new();
     let mut boss_beaten: BTreeMap<String, u8> = BTreeMap::new();
     if rec.final_blind == BlindKind::Boss
-        && let Some(bk) = rec.final_boss {
-            let key = bk.name().to_string();
-            boss_faced.insert(key.clone(), 1);
-            if victory {
-                boss_beaten.insert(key, 1);
-            }
+        && let Some(bk) = rec.final_boss
+    {
+        let key = bk.name().to_string();
+        boss_faced.insert(key.clone(), 1);
+        if victory {
+            boss_beaten.insert(key, 1);
         }
+    }
     RunStats {
         blinds_cleared,
         antes_cleared,
@@ -967,9 +968,7 @@ pub fn append_bot_run_to_progress(
         RunOutcome::Victory
     } else {
         RunOutcome::Defeat {
-            reason: stats
-                .death_reason
-                .unwrap_or(GameOverReason::OutOfPlays),
+            reason: stats.death_reason.unwrap_or(GameOverReason::OutOfPlays),
         }
     };
     let mut record = RunRecord::from_run(run, outcome);
@@ -995,10 +994,7 @@ pub fn append_bot_run_to_progress(
     }
     for (name, &faced) in &stats.boss_faced {
         if let Some(kind) = boss_kind_by_display_name(name) {
-            *progress
-                .boss_times_encountered
-                .entry(kind)
-                .or_insert(0) += u32::from(faced);
+            *progress.boss_times_encountered.entry(kind).or_insert(0) += u32::from(faced);
         }
     }
     for (name, &beaten) in &stats.boss_beaten {
@@ -1008,18 +1004,12 @@ pub fn append_bot_run_to_progress(
     }
     for (&name, &n) in &stats.relic_activations {
         if let Some(def) = all_relic_defs().iter().find(|d| d.name == name) {
-            *progress
-                .relic_times_activated
-                .entry(def.id)
-                .or_insert(0) += n;
+            *progress.relic_times_activated.entry(def.id).or_insert(0) += n;
         }
     }
     for (&name, &n) in &stats.talismans_picked {
         if let Some(kind) = TalismanKind::all().iter().find(|tk| tk.name() == name) {
-            *progress
-                .talisman_times_purchased
-                .entry(*kind)
-                .or_insert(0) += n;
+            *progress.talisman_times_purchased.entry(*kind).or_insert(0) += n;
         }
     }
     for (&name, &n) in &stats.talismans_used {

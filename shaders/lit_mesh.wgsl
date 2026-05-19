@@ -72,7 +72,8 @@ struct TileOccluders {
 };
 @group(1) @binding(1) var<uniform> occluders: TileOccluders;
 
-// `aces_fitted` — see `scene_hdr_tonemap.wgsl` (prepended at pipeline creation).
+// ACES tonemapping is applied once in `tonemap_composite.wgsl`. This shader
+// writes linear HDR to `scene_color` (`Rgba16Float`).
 
 // Jorge Jimenez's interleaved gradient noise. Cheap, low-discrepancy,
 // stable in screen space — perfect for jittering shadow taps without
@@ -1435,10 +1436,9 @@ fn fs_main(
             vec3<f32>(0.032, 0.046, 0.090),
             is_water,
         );
-        var rgb_w = water_albedo * (lit_water + ambient) + spec_water;
-        let inv_g_w = 1.0 / max(lights.extras.x, 0.01);
-        let out_w = pow(rgb_w, vec3<f32>(inv_g_w));
-        return vec4<f32>(out_w, mesh.base_color.a);
+        // Linear HDR — `tonemap_composite.wgsl` applies the single ACES pass.
+        let rgb_w = water_albedo * (lit_water + ambient) + spec_water;
+        return vec4<f32>(rgb_w, mesh.base_color.a);
     }
 
     // ── Metal heightmap perturbation ─────────────────────────────────────
@@ -2552,14 +2552,19 @@ fn fs_main(
     let inv_g = 1.0 / max(lights.extras.x, 0.01);
     var out_rgb: vec3<f32>;
     if (phys_hdr > 0.5) {
+        // Linear HDR scene path: write `hdr` directly. `tonemap_composite.wgsl`
+        // applies ACES + sRGB encode for the swapchain. The per-shader
+        // `lights.extras.x` gamma slider is intentionally a no-op here — display
+        // encoding belongs at the composite stage now.
         var amb = ssr_globals.felt.w * 0.08;
         if (ssr_globals.shop_punctual.y > 0.5 && is_enamel) {
             amb = ssr_globals.felt.w * 0.20;
         }
         var hdr = rgb + albedo * vec3<f32>(amb) * diffuse_scale;
         hdr = hdr * ssr_globals.felt.z;
-        out_rgb = pow(aces_fitted(hdr), vec3<f32>(inv_g));
+        out_rgb = hdr;
     } else {
+        // Legacy non-HDR scenes still apply the user gamma slider in-shader.
         out_rgb = pow(rgb, vec3<f32>(inv_g));
     }
 

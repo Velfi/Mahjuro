@@ -7,6 +7,7 @@
 //! pipeline.
 
 use std::cell::RefCell;
+use std::num::NonZeroU64;
 
 use wgpu::util::DeviceExt;
 
@@ -648,6 +649,41 @@ pub fn create_shadow_caster_layout(device: &wgpu::Device) -> wgpu::BindGroupLayo
                 min_binding_size: None,
             },
             count: None,
+        }],
+    })
+}
+
+/// Group 1 of `shaders/shadow.wgsl` — same `HallwayDistortion` layout as `room_glb` @binding(8).
+/// Zeroed buffer ⇒ warp disabled (tiles, lit meshes, shop room, etc.).
+pub fn create_shadow_warp_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    let sz = std::mem::size_of::<crate::render::hallway_glb::HallwayDistortion>() as u64;
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("shadow-warp-layout"),
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::VERTEX,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: NonZeroU64::new(sz),
+            },
+            count: None,
+        }],
+    })
+}
+
+pub fn create_shadow_warp_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    distortion_uniform: &wgpu::Buffer,
+    label: &'static str,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some(label),
+        layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: distortion_uniform.as_entire_binding(),
         }],
     })
 }

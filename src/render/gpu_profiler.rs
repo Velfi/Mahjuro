@@ -265,7 +265,9 @@ impl GpuProfiler {
         if self.chained_fences {
             let f = self.frame_fence_count.get();
             if f as usize >= NUM_PASSES {
-                log::warn!("GPU profiler: too many passes in one submit; dropping timestamp for {slot:?}");
+                log::warn!(
+                    "GPU profiler: too many passes in one submit; dropping timestamp for {slot:?}"
+                );
                 return None;
             }
             let mut slots = self.frame_fence_slots.get();
@@ -303,7 +305,9 @@ impl GpuProfiler {
         if self.chained_fences {
             let f = self.frame_fence_count.get();
             if f as usize >= NUM_PASSES {
-                log::warn!("GPU profiler: too many passes in one submit; dropping timestamp for {slot:?}");
+                log::warn!(
+                    "GPU profiler: too many passes in one submit; dropping timestamp for {slot:?}"
+                );
                 return None;
             }
             let mut slots = self.frame_fence_slots.get();

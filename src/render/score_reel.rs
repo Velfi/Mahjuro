@@ -1,5 +1,9 @@
 //! Odometer-style floating score reel.
 //!
+//! Gameplay currently draws the score in **2D**; this module is still driven for
+//! cascade timing (`set_score`, `is_animating`) and keeps the 3D reel
+//! implementation for easy re-enable or other scenes.
+//!
 //! Displays the current score as a row of 7 digit columns (expandable if the
 //! score overflows). Each column shows a single digit glyph; when the digit
 //! changes the column spins upward through 0–9 like an odometer reel, with
@@ -20,6 +24,8 @@
 //! grows if the player's score overflows; it is reset back down at round
 //! start. The caller is responsible for ensuring `MAX_EXTRUDED_GLYPH_SLOTS`
 //! is large enough for the worst-case column count.
+
+#![allow(dead_code)]
 
 use std::time::Instant;
 
@@ -56,7 +62,7 @@ const DIGIT_COLOR: [f32; 4] = crate::render::theme::color::TALLOW;
 /// Emissive boost while a column is actively spinning.
 const EMISSIVE_SPIN: f32 = 0.9;
 /// Emissive level when idle.
-const EMISSIVE_IDLE: f32 = 0.25;
+const EMISSIVE_IDLE: f32 = 0.34;
 
 /// Pitch (radians) passed as `rotation_x` through to the extruded-glyph
 /// pipeline. The renderer applies `-π/2 + rotation_x` to the mesh, which
@@ -133,6 +139,43 @@ impl ScoreReel {
             columns: vec![ReelColumn::new(0)],
             displayed: 0,
             min_columns: 1,
+        }
+    }
+
+    /// Current digit column count (minimum 1). Matches the horizontal span
+    /// used by [`Self::placements`].
+    pub fn column_count(&self) -> usize {
+        self.columns.len().max(1)
+    }
+
+    /// Baseline uniform scale from score-panel height — matches the historical
+    /// `panel_h / 200` reel sizing; callers shrink with [`Self::scale_to_fit_panel`]
+    /// when the `  /{target}` tail would overflow the panel width.
+    pub fn default_height_scale(panel_h: f32) -> f32 {
+        panel_h / 200.0
+    }
+
+    /// Shrink the uniform [`PlacementAnchor::scale`] when digit columns plus
+    /// the `  /{target}` tail would span wider than the score panel. Without
+    /// this, wide targets (e.g. `500`) can push the trailing digits off the
+    /// right edge so only `/` and the first digit read clearly.
+    pub fn scale_to_fit_panel(
+        panel_w: f32,
+        panel_h: f32,
+        digit_columns: usize,
+        target: Option<u64>,
+    ) -> f32 {
+        let base = Self::default_height_scale(panel_h);
+        let tail_chars = target
+            .map(|t| format!("  /{t}").chars().count())
+            .unwrap_or(0);
+        let cols = digit_columns.saturating_add(tail_chars).max(1);
+        let span_px = cols as f32 * (COLUMN_WIDTH * base);
+        let cap = panel_w * 0.88;
+        if span_px > cap {
+            (base * (cap / span_px)).max(0.06)
+        } else {
+            base
         }
     }
 
@@ -242,15 +285,13 @@ impl ScoreReel {
             scale: digit_scale,
         };
         let n = self.columns.len();
-        // Static "score:" prefix rendered as dimmer glyphs to the left of
-        // the digit columns so the reel reads as "score: N / target".
-        let prefix: Vec<char> = "score:".chars().collect();
-        // Target tail ("/ N") rendered as dimmer glyphs immediately to the
-        // right of the digit columns so the reel reads as "score / target".
-        // Each tail char occupies roughly one column-width so the spacing
-        // matches the reel.
+        // Static prefix removed — the odometer reads as digits + a spaced
+        // "/ target" tail so current vs goal stays obvious without a "score:"
+        // caption.
+        let prefix: Vec<char> = Vec::new();
+        // Target tail: extra leading space separates the main number from the goal.
         let tail: Vec<char> = target
-            .map(|t| format!("/{t}").chars().collect())
+            .map(|t| format!("  /{t}").chars().collect())
             .unwrap_or_default();
         let total_cols = prefix.len() + n + tail.len();
         // Total reel+tail width in world units; center it on the anchor.
@@ -336,8 +377,7 @@ impl ScoreReel {
             }
         }
 
-        // Prefix: "score:" rendered before the digit columns, dimmed so the
-        // digits themselves remain the primary read.
+        // Prefix slots (empty today) reserved for optional future caption glyphs.
         let dim_color = [DIGIT_COLOR[0], DIGIT_COLOR[1], DIGIT_COLOR[2], 0.55];
         for (i, ch) in prefix.iter().enumerate() {
             let col_center_x = anchor_px + (-total_w * 0.5 + (i as f32 + 0.5) * col_w);
@@ -351,9 +391,8 @@ impl ScoreReel {
             ));
         }
 
-        // Tail: "/ N" target glyphs to the right of the digit columns,
-        // dimmed so the reel reads as the primary number and the target
-        // reads as a secondary reference.
+        // Tail: goal glyphs to the right of the digit columns, dimmed so the
+        // reel digits stay primary.
         for (i, ch) in tail.iter().enumerate() {
             let display_idx = prefix.len() + n + i;
             let col_center_x = anchor_px + (-total_w * 0.5 + (display_idx as f32 + 0.5) * col_w);

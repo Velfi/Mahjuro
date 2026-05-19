@@ -73,10 +73,7 @@ fn split_pass_a_chunks(ops: &[RenderOp]) -> Vec<PassAChunk<'_>> {
     let mut start = 0usize;
     let mut upload_before_next = PassAShopInspectHdrUpload::None;
     for (i, op) in ops.iter().enumerate() {
-        let split = matches!(
-            op,
-            RenderOp::ClearSceneDepth
-        );
+        let split = matches!(op, RenderOp::ClearSceneDepth);
         if !split {
             continue;
         }
@@ -708,10 +705,6 @@ impl WgpuRenderer {
                     }
                     i += 1;
                 }
-                DrawCmd::Rain => {
-                    ops.push(RenderOp::Rain);
-                    i += 1;
-                }
                 DrawCmd::GoldenDust => {
                     if effects_quality >= crate::persistence::EffectsQuality::Medium {
                         ops.push(RenderOp::GoldenDust);
@@ -987,10 +980,8 @@ impl WgpuRenderer {
             && let Some(ref font) = self.ui_font
         {
             let length = h * 0.35;
-            let label_size = crate::render::theme::typography::size(
-                crate::render::theme::typography::H24,
-                h,
-            );
+            let label_size =
+                crate::render::theme::typography::size(crate::render::theme::typography::H24, h);
             let label_w = label_size * 3.5;
             let label_h = label_size * 1.5;
             let labels: [(glam::Vec3, &str, [f32; 4]); 3] = [
@@ -1210,15 +1201,9 @@ impl WgpuRenderer {
         );
 
         if ops_flags.shop_env {
-            let shop_room_shadow = (shadows_enabled
-                && frame.shop_inspect_shadow_target.is_none())
-            .then(|| (light_view_proj_arr, &mut shadow_uniforms_changed));
-            self.write_shop_environment_uniforms(
-                frame,
-                &camera,
-                false,
-                shop_room_shadow,
-            );
+            let shop_room_shadow = (shadows_enabled && frame.shop_inspect_shadow_target.is_none())
+                .then(|| (light_view_proj_arr, &mut shadow_uniforms_changed));
+            self.write_shop_environment_uniforms(frame, &camera, false, shop_room_shadow);
             if frame.scene_lighting.embedded_gltf_punctual {
                 self.write_shop_room_punctual_occluders(&camera);
             }
@@ -1573,15 +1558,24 @@ impl WgpuRenderer {
             }
         }
 
-        // Linear HDR bloom source for `room_glb` — emissive + bright BRDF survive
-        // thresholding (bloom extract still keys off tonemapped `scene_color` elsewhere).
-        let glb_room_bloom_linear = bloom_active
-            && frame.uses_room_glb_shader()
+        // Baked / dynamic room GI needs the emissive-only pre-pass even when bloom
+        // is off (e.g. main menu disables bloom but keeps probes on Medium+).
+        let room_gi_bake_capture = self.room_gi_capture_pending.is_some();
+        let room_gi_effects_ok =
+            effects_quality >= crate::persistence::EffectsQuality::Medium || room_gi_bake_capture;
+
+        // Emissive-only pre-pass for screen-space GI (writes `room_emissive_view`).
+        // Previously this also wrote a linear-HDR bloom source, but every scene
+        // shader now writes linear HDR to `scene_color` directly — bloom_extract
+        // reads from there, and the dedicated linear-HDR target is gone.
+        let room_glb_emissive_env = frame.uses_room_glb_shader()
             && (ops_flags.shop_env
                 || ops_flags.hallway_env
                 || ops_flags.archive_env
                 || ops_flags.main_menu_env);
-        if glb_room_bloom_linear {
+        let glb_room_emissive_prefetch =
+            room_glb_emissive_env && (bloom_active || room_gi_effects_ok);
+        if glb_room_emissive_prefetch {
             if ops_flags.shop_env
                 && self.shop_environment.is_some()
                 && !self.shop_env_primitives.is_empty()
@@ -1592,27 +1586,16 @@ impl WgpuRenderer {
                         .gpu_profiler
                         .pass_writes(crate::render::gpu_profiler::PassSlot::RoomBloom);
                     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: Some("shop-linear-bloom-pass"),
-                        color_attachments: &[
-                            Some(wgpu::RenderPassColorAttachment {
-                                view: &self.shop_linear_bloom_view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                                    store: wgpu::StoreOp::Store,
-                                },
-                                depth_slice: None,
-                            }),
-                            Some(wgpu::RenderPassColorAttachment {
-                                view: &self.room_emissive_view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                                    store: wgpu::StoreOp::Store,
-                                },
-                                depth_slice: None,
-                            }),
-                        ],
+                        label: Some("shop-emissive-prefetch-pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &self.room_emissive_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                store: wgpu::StoreOp::Store,
+                            },
+                            depth_slice: None,
+                        })],
                         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                             view: &self.depth_view,
                             depth_ops: Some(wgpu::Operations {
@@ -1639,27 +1622,16 @@ impl WgpuRenderer {
                         .gpu_profiler
                         .pass_writes(crate::render::gpu_profiler::PassSlot::RoomBloom);
                     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: Some("hallway-linear-bloom-pass"),
-                        color_attachments: &[
-                            Some(wgpu::RenderPassColorAttachment {
-                                view: &self.shop_linear_bloom_view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                                    store: wgpu::StoreOp::Store,
-                                },
-                                depth_slice: None,
-                            }),
-                            Some(wgpu::RenderPassColorAttachment {
-                                view: &self.room_emissive_view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                                    store: wgpu::StoreOp::Store,
-                                },
-                                depth_slice: None,
-                            }),
-                        ],
+                        label: Some("hallway-emissive-prefetch-pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &self.room_emissive_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                store: wgpu::StoreOp::Store,
+                            },
+                            depth_slice: None,
+                        })],
                         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                             view: &self.depth_view,
                             depth_ops: Some(wgpu::Operations {
@@ -1686,27 +1658,16 @@ impl WgpuRenderer {
                         .gpu_profiler
                         .pass_writes(crate::render::gpu_profiler::PassSlot::RoomBloom);
                     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: Some("archive-linear-bloom-pass"),
-                        color_attachments: &[
-                            Some(wgpu::RenderPassColorAttachment {
-                                view: &self.shop_linear_bloom_view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                                    store: wgpu::StoreOp::Store,
-                                },
-                                depth_slice: None,
-                            }),
-                            Some(wgpu::RenderPassColorAttachment {
-                                view: &self.room_emissive_view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                                    store: wgpu::StoreOp::Store,
-                                },
-                                depth_slice: None,
-                            }),
-                        ],
+                        label: Some("archive-emissive-prefetch-pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &self.room_emissive_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                store: wgpu::StoreOp::Store,
+                            },
+                            depth_slice: None,
+                        })],
                         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                             view: &self.depth_view,
                             depth_ops: Some(wgpu::Operations {
@@ -1733,27 +1694,16 @@ impl WgpuRenderer {
                         .gpu_profiler
                         .pass_writes(crate::render::gpu_profiler::PassSlot::RoomBloom);
                     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: Some("main-menu-linear-bloom-pass"),
-                        color_attachments: &[
-                            Some(wgpu::RenderPassColorAttachment {
-                                view: &self.shop_linear_bloom_view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                                    store: wgpu::StoreOp::Store,
-                                },
-                                depth_slice: None,
-                            }),
-                            Some(wgpu::RenderPassColorAttachment {
-                                view: &self.room_emissive_view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                                    store: wgpu::StoreOp::Store,
-                                },
-                                depth_slice: None,
-                            }),
-                        ],
+                        label: Some("main-menu-emissive-prefetch-pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &self.room_emissive_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                store: wgpu::StoreOp::Store,
+                            },
+                            depth_slice: None,
+                        })],
                         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                             view: &self.depth_view,
                             depth_ops: Some(wgpu::Operations {
@@ -1776,12 +1726,9 @@ impl WgpuRenderer {
         // a real room AABB to march through. Resolve once here so the
         // composite block below shares the same gate, dropping the
         // clear-only pass + redundant composite when there's no room
-        // (loading frames, scenes that pull in `glb_room_bloom_linear`
+        // (loading frames, scenes that pull in `glb_room_emissive_prefetch`
         // before the GLB has parsed, etc.).
-        let room_gi_bake_capture = self.room_gi_capture_pending.is_some();
-        let room_gi_effects_ok = effects_quality >= crate::persistence::EffectsQuality::Medium
-            || room_gi_bake_capture;
-        let room_gi_aabb: Option<(glam::Vec3, glam::Vec3)> = if glb_room_bloom_linear
+        let room_gi_aabb: Option<(glam::Vec3, glam::Vec3)> = if glb_room_emissive_prefetch
             && !is_prepass
             && room_gi_effects_ok
         {
@@ -1856,8 +1803,8 @@ impl WgpuRenderer {
 
         // Quality-dependent GI tuning: Medium cuts dir samples and march steps to ~1/3 of
         // High and doubles the amortization interval, for roughly 6× cheaper compute.
-        let gi_is_high = effects_quality >= crate::persistence::EffectsQuality::High
-            || room_gi_bake_capture;
+        let gi_is_high =
+            effects_quality >= crate::persistence::EffectsQuality::High || room_gi_bake_capture;
         let gi_dir_samples = if gi_is_high {
             crate::render::room_glb::ROOM_EMISSIVE_PROBE_DIR_SAMPLES
         } else {
@@ -1898,10 +1845,7 @@ impl WgpuRenderer {
                 false
             }
         } else {
-            if gi_runs_this_frame
-                && frame.room_gi_dynamic
-                && self.probe_gi_gpu_room.is_some()
-            {
+            if gi_runs_this_frame && frame.room_gi_dynamic && self.probe_gi_gpu_room.is_some() {
                 gi_clear_gpu_probes = true;
             }
             false
@@ -1910,8 +1854,7 @@ impl WgpuRenderer {
             self.probe_gi_gpu_room = None;
         }
         if let Some((room, bytes)) = gi_baked_upload {
-            self.queue
-                .write_buffer(&self.probe_sh_buffer, 0, &bytes);
+            self.queue.write_buffer(&self.probe_sh_buffer, 0, &bytes);
             self.probe_gi_gpu_room = Some(room);
         }
         let mut gi_update_probes = if use_baked_probes {
@@ -1976,9 +1919,9 @@ impl WgpuRenderer {
 
             if probe_count > 0 {
                 if gi_update_probes {
-                    let gi_compute_ts = self.gpu_profiler.compute_pass_writes(
-                        crate::render::gpu_profiler::PassSlot::GiCompute,
-                    );
+                    let gi_compute_ts = self
+                        .gpu_profiler
+                        .compute_pass_writes(crate::render::gpu_profiler::PassSlot::GiCompute);
                     let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                         label: Some("emissive-probe-update-pass"),
                         timestamp_writes: gi_compute_ts,
@@ -1988,19 +1931,19 @@ impl WgpuRenderer {
                     let wg = probe_count.div_ceil(64);
                     cpass.dispatch_workgroups(wg, 1, 1);
                     if let Some(room) = self.room_gi_capture_pending
-                        && gi_room == Some(room) {
-                            let (mn, mx) = room_gi_aabb.expect("gi frame");
-                            self.room_gi_capture_meta = Some(
-                                crate::render::room_gi_bake::probe_sh_meta(
-                                    room,
-                                    mn,
-                                    mx,
-                                    camera.view_proj_arr,
-                                    gw as u32,
-                                    gh as u32,
-                                ),
-                            );
-                        }
+                        && gi_room == Some(room)
+                    {
+                        let (mn, mx) = room_gi_aabb.expect("gi frame");
+                        self.room_gi_capture_meta =
+                            Some(crate::render::room_gi_bake::probe_sh_meta(
+                                room,
+                                mn,
+                                mx,
+                                camera.view_proj_arr,
+                                gw as u32,
+                                gh as u32,
+                            ));
+                    }
                 }
                 {
                     let gi_apply_ts = self
@@ -2109,8 +2052,16 @@ impl WgpuRenderer {
 
         let bloom_w = (self.size.width.max(1) / 2).max(1);
         let bloom_h = (self.size.height.max(1) / 2).max(1);
+        // `scene_color` is linear HDR — see `tonemap_composite.wgsl`.
+        //
+        // Bloom extract threshold must stay **high (~1.0 scene-linear luminance)**:
+        // the old two-texture path used this level on `scene_color` while routing
+        // room emissive through a separate low-threshold buffer. A low threshold
+        // here (e.g. 0.04) pulls in the procedural starfield and every mid-bright
+        // pixel, which half-res blur turns into large glowing discs.
         let bloom_threshold = if bloom_active { 1.05 } else { 9999.0 };
         let bloom_strength = if bloom_active { 0.92 } else { 0.0 };
+        let bloom_extract_scale = if bloom_active { 1.15 } else { 0.0 };
         let extract_params = BloomParams {
             data0: [
                 bloom_threshold,
@@ -2118,12 +2069,7 @@ impl WgpuRenderer {
                 1.0 / bloom_w as f32,
                 1.0 / bloom_h as f32,
             ],
-            data1: [
-                0.0,
-                0.0,
-                if bloom_active { 0.02 } else { 9999.0 },
-                if bloom_active { 1.15 } else { 0.0 },
-            ],
+            data1: [0.0, 0.0, 0.0, bloom_extract_scale],
         };
         let blur_h_params = BloomParams {
             data0: [
@@ -2181,9 +2127,9 @@ impl WgpuRenderer {
 
         if bloom_active {
             {
-                let bloom_extract_ts = self.gpu_profiler.pass_writes(
-                    crate::render::gpu_profiler::PassSlot::BloomExtract,
-                );
+                let bloom_extract_ts = self
+                    .gpu_profiler
+                    .pass_writes(crate::render::gpu_profiler::PassSlot::BloomExtract);
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("bloom-extract-pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -2205,9 +2151,9 @@ impl WgpuRenderer {
                 pass.draw(0..3, 0..1);
             }
             {
-                let bloom_blur_h_ts = self.gpu_profiler.pass_writes(
-                    crate::render::gpu_profiler::PassSlot::BloomBlurH,
-                );
+                let bloom_blur_h_ts = self
+                    .gpu_profiler
+                    .pass_writes(crate::render::gpu_profiler::PassSlot::BloomBlurH);
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("bloom-blur-h-pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -2229,9 +2175,9 @@ impl WgpuRenderer {
                 pass.draw(0..3, 0..1);
             }
             {
-                let bloom_blur_v_ts = self.gpu_profiler.pass_writes(
-                    crate::render::gpu_profiler::PassSlot::BloomBlurV,
-                );
+                let bloom_blur_v_ts = self
+                    .gpu_profiler
+                    .pass_writes(crate::render::gpu_profiler::PassSlot::BloomBlurV);
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("bloom-blur-v-pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -2266,9 +2212,9 @@ impl WgpuRenderer {
         // copy.
         let skip_scene_composite = !bloom_active && fisheye_strength == 0.0 && !gi_runs_this_frame;
         if !skip_scene_composite {
-            let scene_composite_ts = self.gpu_profiler.pass_writes(
-                crate::render::gpu_profiler::PassSlot::SceneComposite,
-            );
+            let scene_composite_ts = self
+                .gpu_profiler
+                .pass_writes(crate::render::gpu_profiler::PassSlot::SceneComposite);
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene-composite-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -2291,9 +2237,9 @@ impl WgpuRenderer {
         }
 
         if gi_runs_this_frame {
-            let gi_composite_ts = self.gpu_profiler.pass_writes(
-                crate::render::gpu_profiler::PassSlot::GiComposite,
-            );
+            let gi_composite_ts = self
+                .gpu_profiler
+                .pass_writes(crate::render::gpu_profiler::PassSlot::GiComposite);
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("emissive-gi-composite-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -2385,9 +2331,7 @@ impl WgpuRenderer {
         if ops.iter().any(|o| {
             matches!(
                 o,
-                RenderOp::TextDraw(_)
-                    | RenderOp::ImageQuad(_)
-                    | RenderOp::OverlayQuadBatch { .. }
+                RenderOp::TextDraw(_) | RenderOp::ImageQuad(_) | RenderOp::OverlayQuadBatch { .. }
             )
         }) {
             let overlay_ts = self
@@ -2447,14 +2391,14 @@ impl WgpuRenderer {
         };
         if let Some(ref path) = screenshot_path
             && matches!(self.target, RenderTarget::Surface(_))
-                && !self.config.usage.contains(wgpu::TextureUsages::COPY_SRC)
-            {
-                log::warn!(
-                    "screenshot skipped ({}): swapchain has no COPY_SRC (see MAHJURO_VULKAN_WIN_SURFACE_COPY on Windows Vulkan)",
-                    path.display()
-                );
-                screenshot_path = None;
-            }
+            && !self.config.usage.contains(wgpu::TextureUsages::COPY_SRC)
+        {
+            log::warn!(
+                "screenshot skipped ({}): swapchain has no COPY_SRC (see MAHJURO_VULKAN_WIN_SURFACE_COPY on Windows Vulkan)",
+                path.display()
+            );
+            screenshot_path = None;
+        }
         let screenshot_staging = match (&screenshot_path, &frame_texture_opt) {
             (Some(path), Some(ft)) => {
                 log::debug!("screenshot: encoding capture for {}", path.display());

@@ -1,4 +1,16 @@
-use crate::{core::{boss, hand::{DetectedMeld, validate_selection_with_rules}, relic::RelicId, tile::{Suit, Tile}}, game::{event_bus::{EventBus, GameEvent}, run::{RunState, try_disgust_substitution, try_joker_substitution, try_wind_substitution}}};
+use crate::{
+    core::{
+        boss,
+        hand::{DetectedMeld, validate_selection_with_rules},
+        relic::RelicId,
+        scoring::EffectiveRelics,
+        tile::{Suit, Tile},
+    },
+    game::{
+        event_bus::{EventBus, GameEvent},
+        run::{RunState, try_disgust_substitution, try_joker_substitution, try_wind_substitution},
+    },
+};
 
 use super::relic_removal::TransformationPrimaryRelic;
 
@@ -106,12 +118,14 @@ impl RunState {
         if selected_indices.is_empty() || self.discards_remaining == 0 {
             return 0;
         }
-        let honor_gold = if self.relics.has(RelicId::NoHonorButWealth) {
-            selected_indices
+        let eff = EffectiveRelics::from_roster(&self.relics);
+        let honor_gold = if eff.has(&self.relics, RelicId::NoHonorButWealth) {
+            let base = selected_indices
                 .iter()
                 .filter_map(|&i| self.hand.get(i))
                 .filter(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
-                .count() as i32
+                .count() as i32;
+            base.saturating_mul(eff.count(&self.relics, RelicId::NoHonorButWealth) as i32)
         } else {
             0
         };
@@ -130,7 +144,6 @@ impl RunState {
             bus.push(GameEvent::TileDiscarded);
         }
         self.tiles_discarded = self.tiles_discarded.saturating_add(count as u32);
-
 
         if self.relics.has(RelicId::SilkThread) {
             self.relic_activations.push(RelicId::SilkThread);

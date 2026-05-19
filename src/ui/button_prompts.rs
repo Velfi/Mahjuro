@@ -144,7 +144,6 @@ impl ButtonPrompt {
             }
         }
     }
-
 }
 
 #[cfg(test)]
@@ -229,9 +228,7 @@ mod tests {
     ) -> String {
         let core = match text_style {
             ShopLegendTextStyle::InlineGlyphs => shop_core_inline(surface, style, swap_ab),
-            ShopLegendTextStyle::VerbsOnly => {
-                "Exit  ·  Select  ·  Sell  ·  Inspect".to_string()
-            }
+            ShopLegendTextStyle::VerbsOnly => "Exit  ·  Select  ·  Sell  ·  Inspect".to_string(),
         };
         if inspect_active {
             let inspect_line = ButtonPrompt::shop_inspect_mode_hint(surface, style);

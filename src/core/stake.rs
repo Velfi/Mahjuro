@@ -39,7 +39,6 @@ pub enum Stake {
     Winter,
 }
 
-
 #[derive(Deserialize)]
 struct StakePresentationRaw {
     id: Stake,

@@ -59,7 +59,9 @@ impl OnboardingState {
 
         match self.step {
             0 if !has_selection => "Select two matching tiles.",
-            0 | 1 if has_selection && !has_structure => "Press Play to bank your pair into the structure.",
+            0 | 1 if has_selection && !has_structure => {
+                "Press Play to bank your pair into the structure."
+            }
             2 if has_structure => "Press Cash In to score your structure.",
             3 if !self.discard_river_tooltip_shown => {
                 "Swap a tile you don't need — select it, then Discard."
@@ -114,11 +116,7 @@ pub fn lessons_affinity_indices(hand: &[Tile], selected: &[bool]) -> Vec<usize> 
 }
 
 /// Hint text after failing the Lessons blind.
-pub fn lessons_failure_feedback(
-    round_score: u64,
-    target: u32,
-    plays_remaining: u32,
-) -> String {
+pub fn lessons_failure_feedback(round_score: u64, target: u32, plays_remaining: u32) -> String {
     if round_score == 0 {
         return "You scored 0 — select matching tiles, press Play to bank them, then Cash In."
             .to_string();
