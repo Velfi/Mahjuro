@@ -444,7 +444,7 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
                 .get_default_config(&adapter, size.width.max(1), size.height.max(1))
                 .ok_or_else(|| anyhow::anyhow!("no default surface config"))?;
             config.format = format;
-            config.present_mode = wgpu::PresentMode::Fifo;
+            config.present_mode = select_present_mode(&caps);
             config.desired_maximum_frame_latency = 2;
 
             if adapter.get_info().backend == wgpu::Backend::Vulkan {
@@ -537,6 +537,76 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
         ssr_prev_depth_texture,
         ssr_prev_depth_view,
     })
+}
+
+/// Whether the process is running under Steam's tenfoot / gamescope session.
+fn running_under_gamescope() -> bool {
+    std::env::var_os("GAMESCOPE_WAYLAND_DISPLAY").is_some()
+        || std::env::var_os("ENABLE_GAMESCOPE_WSI").is_some()
+        || std::env::var_os("SteamTenfoot").is_some()
+        || std::env::var_os("SteamGamepadUI").is_some()
+}
+
+/// Pick a swapchain present mode. Windows stays on FIFO (DXGI pacing).
+///
+/// On Steam Deck game mode, FIFO + gamescope's nested compositor has been
+/// observed to pin the main thread at ~100 ms/frame (~10 FPS) while the GPU
+/// sits at idle clocks (~242 MHz). `MESA_VK_WSI_PRESENT_MODE=mailbox` does not
+/// help when wgpu still requests `PresentMode::Fifo` in
+/// `SurfaceConfiguration`, so gamescope sessions prefer Mailbox / Immediate.
+fn select_present_mode(caps: &wgpu::SurfaceCapabilities) -> wgpu::PresentMode {
+    if let Ok(raw) = std::env::var("MAHJURO_PRESENT_MODE") {
+        if let Some(mode) = match raw.to_ascii_lowercase().as_str() {
+            "fifo" => Some(wgpu::PresentMode::Fifo),
+            "fifo_relaxed" | "fifo-relaxed" => Some(wgpu::PresentMode::FifoRelaxed),
+            "mailbox" => Some(wgpu::PresentMode::Mailbox),
+            "immediate" => Some(wgpu::PresentMode::Immediate),
+            "auto" | "auto_vsync" | "auto-vsync" => Some(wgpu::PresentMode::AutoVsync),
+            "auto_no_vsync" | "auto-no-vsync" => Some(wgpu::PresentMode::AutoNoVsync),
+            other => {
+                log::warn!(
+                    "MAHJURO_PRESENT_MODE={other:?} unrecognized; using default selection"
+                );
+                None
+            }
+        } {
+            if caps.present_modes.contains(&mode) {
+                log::info!("MAHJURO_PRESENT_MODE override → {mode:?}");
+                return mode;
+            }
+            log::warn!(
+                "MAHJURO_PRESENT_MODE={mode:?} not advertised by surface; using default selection"
+            );
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let _ = caps;
+        return wgpu::PresentMode::Fifo;
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        if running_under_gamescope() {
+            const PREFERENCE: &[wgpu::PresentMode] = &[
+                wgpu::PresentMode::Mailbox,
+                wgpu::PresentMode::Immediate,
+                wgpu::PresentMode::FifoRelaxed,
+            ];
+            for &mode in PREFERENCE {
+                if caps.present_modes.contains(&mode) {
+                    log::info!("gamescope session: using present mode {mode:?}");
+                    return mode;
+                }
+            }
+            log::warn!(
+                "gamescope session: Mailbox/Immediate unavailable; falling back to Fifo (caps: {:?})",
+                caps.present_modes
+            );
+        }
+        wgpu::PresentMode::Fifo
+    }
 }
 
 /// One-shot info-level summary of the active swapchain, logged once at startup.

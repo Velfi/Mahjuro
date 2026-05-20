@@ -229,7 +229,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     }
 
     if has(RelicId::GoldenEngine) {
-        let bonus = (ctx.economy.gold.max(0) as f64 / 5.0).floor();
+        let bonus = crate::core::relic::golden_engine_mult_bonus(ctx.economy.gold) as f64;
         if bonus > 0.0 {
             push_mult(steps, *chips, mult, "Golden Engine", bonus);
         }

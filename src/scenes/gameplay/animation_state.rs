@@ -665,6 +665,7 @@ pub(super) fn build_ambient_table_objects(
                     glow: false,
                     glow_color: None,
                     pick_id: None,
+                    arrange_group: None,
                 });
             }
             frame.showcase_tile_batch(tile_placements);
@@ -733,6 +734,7 @@ pub(super) fn build_ambient_table_objects(
                 glow: false,
                 glow_color: None,
                 pick_id: None,
+                arrange_group: None,
             });
         }
         frame.showcase_tile_batch(tile_placements);
@@ -745,7 +747,7 @@ pub(super) fn build_ambient_table_objects(
         |n| layout.mm(n),
         gameplay.gold,
         gold_anchor,
-        "gameplay.score_panel.coin_pile",
+        Some("gameplay.score_panel.coin_pile"),
         crate::render::gold_display::GAMEPLAY_GOLD_PILE_SEED,
     );
     if !coins.is_empty() {

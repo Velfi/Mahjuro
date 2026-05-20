@@ -91,56 +91,10 @@ impl WgpuRenderer {
                 }
             }
 
-            // ── HandStrip arrange-mode pre-pass ────────────────────────────
-            // When a "HandStrip" arrange override is active, compute the
-            // strip's world-space pivot (centroid of all hand tiles — those
-            // with a pick_id) and build a delta-rotation matrix so each
-            // tile's center is rotated around that pivot before the
-            // translation offset is added.
-            let hand_strip_arrange: Option<(glam::Vec3, Mat4, glam::Vec3)> = {
-                if let Some(ref ov) = self.debug_arrange_override {
-                    if ov.name == "HandStrip" {
-                        // Collect world centers of hand tiles (pick_id = Some).
-                        let hand_centers: Vec<glam::Vec3> = showcase_tile_batches
-                            .iter()
-                            .flat_map(|b| b.iter())
-                            .filter(|p| p.pick_id.is_some())
-                            .map(|p| {
-                                pixel_to_world(
-                                    w,
-                                    h,
-                                    p.center_pos[0],
-                                    p.center_pos[1],
-                                    p.center_pos[2],
-                                )
-                            })
-                            .collect();
-                        if !hand_centers.is_empty() {
-                            let count = hand_centers.len() as f32;
-                            let pivot =
-                                hand_centers.iter().fold(glam::Vec3::ZERO, |a, &c| a + c) / count;
-                            // Delta rotation applied around the pivot in world space.
-                            let r_delta = Mat4::from_rotation_z(ov.delta_rz_deg.to_radians())
-                                * Mat4::from_rotation_y(ov.delta_ry_deg.to_radians())
-                                * Mat4::from_rotation_x(ov.delta_rx_deg.to_radians());
-                            // Translation offset: pixel_x → +world_x, pixel_y → -world_y.
-                            let translation =
-                                glam::Vec3::new(ov.delta_px, -ov.delta_py, ov.delta_lift);
-                            Some((pivot, r_delta, translation))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            };
-
-            // Track hand-tile world centers for the HandStrip debug pickable
+            // Track hand-tile world centers for the hand-strip debug pickable
             // (registered after the loop).
-            let mut hand_strip_centers: Vec<glam::Vec3> = Vec::new();
+            let hand_strip_centers: Vec<glam::Vec3> = Vec::new();
+            let pack_reveal_centers: Vec<glam::Vec3> = Vec::new();
 
             let mut slot_cursor = 0usize;
             for batch in showcase_tile_batches.iter() {
@@ -176,7 +130,7 @@ impl WgpuRenderer {
                     // Shop uses a perspective camera; layout `(px, py, lift)` must match the same
                     // ray → `plane_z` hit as `Object3d` anchors (`world_on_camera_ray_plane_z`),
                     // not flat `pixel_to_world`, or celebration tiles miss the frustum.
-                    let mut center = match (self.active_scene_key, frame.camera_override.as_ref()) {
+                    let center = match (self.active_scene_key, frame.camera_override.as_ref()) {
                         (Some("shop") | Some("tile_pack_celebration"), Some(cam)) => {
                             crate::render::world_space::world_on_camera_ray_plane_z(
                                 w,
@@ -214,23 +168,8 @@ impl WgpuRenderer {
                         tile_short_px / LOCAL_Z_EXTENT,
                     ) * p.scale;
 
-                    let mut base_rotation =
+                    let base_rotation =
                         rot_euler_xyz_rad(p.rotation[0], p.rotation[1], p.rotation[2]);
-
-                    // Apply HandStrip arrange override: rotate each hand tile's
-                    // center around the strip pivot, then add the translation.
-                    if let (true, Some((pivot, r_delta, translation))) =
-                        (p.pick_id.is_some(), &hand_strip_arrange)
-                    {
-                        let offset = center - *pivot;
-                        let rotated_offset = r_delta.transform_vector3(offset);
-                        center = *pivot + rotated_offset + *translation;
-                        // Also rotate the tile's own orientation so the face
-                        // tracks the strip rotation (e.g. ry spins tiles in
-                        // place as well as revolving their centers).
-                        base_rotation = *r_delta * base_rotation;
-                        hand_strip_centers.push(center);
-                    }
 
                     let oriented = base_rotation * tile_basis;
                     let model = translate_rot_scale(center, oriented, scale);
@@ -418,6 +357,76 @@ impl WgpuRenderer {
                         0.0,
                     ));
                 }
+            }
+
+            let pack_reveal_pickable_centers: Vec<glam::Vec3> = if !pack_reveal_centers.is_empty() {
+                pack_reveal_centers.clone()
+            } else if showcase_tile_batches.iter().flat_map(|b| b.iter()).any(|p| {
+                p.arrange_group == Some("shop.celebrations.pack_reveal")
+            }) {
+                showcase_tile_batches
+                    .iter()
+                    .flat_map(|b| b.iter())
+                    .filter(|p| p.arrange_group == Some("shop.celebrations.pack_reveal"))
+                    .map(|p| {
+                        match (self.active_scene_key, frame.camera_override.as_ref()) {
+                            (Some("shop") | Some("tile_pack_celebration"), Some(cam))
+                            | (Some("showcase"), Some(cam))
+                                if frame
+                                    .showcase_render_hints
+                                    .showcase_tiles_use_camera_ray_plane_z =>
+                            {
+                                crate::render::world_space::world_on_camera_ray_plane_z(
+                                    w,
+                                    h,
+                                    cam,
+                                    p.center_pos[0],
+                                    p.center_pos[1],
+                                    p.center_pos[2],
+                                )
+                            }
+                            _ => pixel_to_world(
+                                w,
+                                h,
+                                p.center_pos[0],
+                                p.center_pos[1],
+                                p.center_pos[2],
+                            ),
+                        }
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            if !pack_reveal_pickable_centers.is_empty() {
+                let count = pack_reveal_pickable_centers.len() as f32;
+                let centroid = pack_reveal_pickable_centers
+                    .iter()
+                    .fold(glam::Vec3::ZERO, |a, &c| a + c)
+                    / count;
+                let tile_half = showcase_tile_batches
+                    .iter()
+                    .flat_map(|b| b.iter())
+                    .find(|p| p.arrange_group == Some("shop.celebrations.pack_reveal"))
+                    .map(|p| p.size_px * 0.5)
+                    .unwrap_or(40.0);
+                let mut hx = tile_half;
+                let mut hy = tile_half;
+                let mut hz = tile_half;
+                for c in &pack_reveal_pickable_centers {
+                    let d = (*c - centroid).abs();
+                    hx = hx.max(d.x + tile_half);
+                    hy = hy.max(d.y + tile_half);
+                    hz = hz.max(d.z + tile_half);
+                }
+                let row_model =
+                    translate_rot_scale(centroid, Mat4::IDENTITY, glam::Vec3::new(hx, hy, hz));
+                self.last_debug_pickables.push((
+                    "shop.celebrations.pack_reveal".to_string(),
+                    row_model,
+                    glam::Vec3::splat(0.5),
+                    0.0,
+                ));
             }
         }
 

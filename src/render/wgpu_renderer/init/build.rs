@@ -4140,8 +4140,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         last_mirror_model: None,
         last_debug_pickables: Vec::new(),
         active_scene_key: None,
-        debug_arrange_override: None,
-        committed_arrange_rotations: rustc_hash::FxHashMap::default(),
+        placement_rotations: rustc_hash::FxHashMap::default(),
         last_frame: Instant::now(),
         frame_dt: 0.0,
         obj3d_hover_state: rustc_hash::FxHashMap::default(),
@@ -4267,5 +4266,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         shadow_pipeline_room_env,
         gpu_profiler,
         pending_screenshot: std::cell::Cell::new(None),
+        acquire_telemetry: super::super::runtime::AcquireTelemetry::new(),
     })
 }

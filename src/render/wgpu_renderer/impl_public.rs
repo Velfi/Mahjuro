@@ -129,12 +129,6 @@ impl WgpuRenderer {
         &self.proj
     }
 
-    /// Set (or clear) the arrange-mode model-matrix override. Called each frame
-    /// from `App` when arrange mode has a selected object. Pass `None` to clear.
-    pub fn set_arrange_override(&mut self, ov: Option<DebugArrangeOverride>) {
-        self.debug_arrange_override = ov;
-    }
-
     /// Scale factor for embedded glTF room geometry vs window height. Must match shop/hallway/archive marker math.
     pub fn set_room_gltf_height_scale(&mut self, v: f32) {
         self.room_gltf_height_scale = v;
@@ -159,14 +153,12 @@ impl WgpuRenderer {
         self.room_gltf_height_scale
     }
 
-    /// Replace the committed-rotation map (used to apply each Placement's
-    /// `rx/ry/rz_deg` to its matching arrange-tagged draw). Called each frame
-    /// from `App` with the active scene's entries.
-    pub fn set_committed_arrange_rotations(
+    /// Replace the per-frame placement rotation map.
+    pub fn set_placement_rotations(
         &mut self,
         rotations: rustc_hash::FxHashMap<String, [f32; 3]>,
     ) {
-        self.committed_arrange_rotations = rotations;
+        self.placement_rotations = rotations;
     }
     pub fn clear_smoke(&mut self) {
         self.prev_tile_world.clear();

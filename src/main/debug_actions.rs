@@ -3,10 +3,8 @@ use super::*;
 use crate::core::tile_pack::TilePackKind;
 use crate::debug_overlays::{HallwayDistortionDebugOverlay, SceneLookDebugOverlay};
 use crate::game::engine::GameEngine;
-use crate::scenes::reload_scene_layout_from_disk;
 use crate::scenes::shop::PackCelebration;
 use crate::scenes::{ShowcasePresenter, ShowcaseScene, TilePackPresenter};
-use crate::ui::scene_layout::clear_saved_layout_files;
 use rand::RngExt;
 
 impl App {
@@ -234,11 +232,9 @@ impl App {
                     let kind = kinds[rand::rng().random_range(0..kinds.len())];
                     let tiles = GameEngine::debug_add_pack(&mut self.run, kind);
                     let celeb = PackCelebration::new(tiles, kind.name(), kind);
-                    let inventory = s.tile_pack_celeb_inventory_counts(&self.run);
+                    let _ = s;
                     self.overlay_stack.push(Scene::Showcase(ShowcaseScene::new(
-                        ShowcasePresenter::TilePack(Box::new(TilePackPresenter::new(
-                            celeb, inventory,
-                        ))),
+                        ShowcasePresenter::TilePack(Box::new(TilePackPresenter::new(celeb))),
                     )));
                     log::debug!("Opened tile pack celebration overlay");
                 }
@@ -339,29 +335,6 @@ impl App {
                 self.transition_alpha = 1.0;
                 log::debug!("Showing defeat screen");
             }
-            DebugAction::ToggleArrangeMode => {
-                if self.debug.arrange_mode.is_some() {
-                    self.debug.arrange_mode = None;
-                    log::debug!("Arrange mode DEACTIVATED");
-                } else {
-                    self.debug.arrange_mode = Some(None);
-                    log::debug!(
-                        "Arrange mode ARMED — click an object OR press Tab to browse the hierarchy"
-                    );
-                }
-            }
-            DebugAction::ClearSavedSceneLayouts => match clear_saved_layout_files() {
-                Ok(n) => {
-                    reload_scene_layout_from_disk(&mut self.scene);
-                    for overlay in &mut self.overlay_stack {
-                        reload_scene_layout_from_disk(overlay);
-                    }
-                    log::info!(
-                        "[Layout] Removed {n} saved layout file(s); reloaded defaults in active scenes"
-                    );
-                }
-                Err(e) => log::error!("[Layout] Failed to clear saved layouts: {e:#}"),
-            },
         }
     }
 }

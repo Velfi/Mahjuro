@@ -72,7 +72,6 @@ mod cases {
             best_structure_name: String::new(),
             plays_remaining: mode.starting_plays,
             plays_max: mode.starting_plays,
-            quickdraw_uses_remaining: 0,
             relics: RelicState::default(),
             round_rules: vec![],
             round_score: 0,
@@ -726,6 +725,26 @@ mod cases {
     }
 
     // ── commit_selection_to_structure ───────────────────────────
+
+    #[test]
+    fn quick_draw_draws_extra_tile_after_play() {
+        let mut run = test_run();
+        run.relics.active.push(RelicId::QuickDraw);
+        // Same deterministic opening hand as `commit_selection_valid_triplet`.
+        run.toggle_select(0);
+        run.toggle_select(1);
+        run.toggle_select(2);
+        let mut bus = bus();
+
+        let committed = run.commit_selection_to_structure(&mut bus);
+        assert!(committed > 0, "triplet should commit");
+        assert!(run.relic_activations.contains(&RelicId::QuickDraw));
+        assert_eq!(
+            run.hand.len(),
+            boss::effective_hand_size(&run) + 1,
+            "Quick Draw refills to hand size + 1"
+        );
+    }
 
     #[test]
     fn commit_selection_valid_triplet() {

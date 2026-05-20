@@ -1554,7 +1554,7 @@ pub(super) fn build_action_row_and_journal(
         },
         hover_target: 0.0,
         anim_id: 0,
-        arrange_name: Some("shop.props.journal"),
+        arrange_name: Some("gameplay.action_bar.tablet_journal"),
     });
 
     if let Some(rect) = ctx
@@ -1766,6 +1766,7 @@ pub(super) fn build_yaku_panel_and_tablets(
                     glow: false,
                     glow_color: None,
                     pick_id: None,
+                    arrange_group: None,
                 });
                 x_cursor += tile_size + intra_gap;
             }

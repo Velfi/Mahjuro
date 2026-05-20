@@ -16,9 +16,6 @@ pub use shop_inspect::ShopInspectPresenter;
 pub use tile_pack::TilePackPresenter;
 pub use zodiac::ZodiacPresenter;
 
-use crate::render::draw_cmd::UiFrame;
-use crate::ui::scene_layout::load_shop_positions;
-
 use super::{DrawCtx, SceneBehavior, SceneTransition, UpdateCtx};
 
 /// Which flow is running on the showcase overlay.
@@ -45,19 +42,13 @@ impl ShowcasePresenter {
         }
     }
 
-    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
+    fn draw_frame(&self, ctx: DrawCtx<'_>) -> crate::render::draw_cmd::UiFrame {
         match self {
             Self::TilePack(p) => p.draw_frame(ctx),
             Self::Zodiac(p) => p.draw_frame(ctx),
             Self::MetaLevelUp(p) => p.draw_frame(ctx),
             Self::ShopInspect(p) => p.draw_frame(ctx),
             Self::CollectionInspect(p) => p.draw_frame(ctx),
-        }
-    }
-
-    fn reload_shop_positions_if_tile_pack(&mut self) {
-        if let Self::TilePack(p) = self {
-            p.positions = load_shop_positions();
         }
     }
 }
@@ -75,10 +66,6 @@ impl ShowcaseScene {
     pub fn wants_orbit_input(&self) -> bool {
         self.presenter.wants_orbit_input()
     }
-
-    pub fn reload_shop_positions_from_disk(&mut self) {
-        self.presenter.reload_shop_positions_if_tile_pack();
-    }
 }
 
 impl SceneBehavior for ShowcaseScene {
@@ -86,7 +73,7 @@ impl SceneBehavior for ShowcaseScene {
         self.presenter.update(ctx)
     }
 
-    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
+    fn draw_frame(&self, ctx: DrawCtx<'_>) -> crate::render::draw_cmd::UiFrame {
         self.presenter.draw_frame(ctx)
     }
 

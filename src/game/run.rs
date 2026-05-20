@@ -582,11 +582,6 @@ pub struct RunState {
     pub available_relics: Vec<RelicId>,
     /// Whether the player scored on their last play (for ChainReaction relic).
     pub scored_last_turn: bool,
-    /// Remaining QuickDraw extra-tile draws this round. Set to 3 at round
-    /// start; each play that draws decrements it. Once at zero, QuickDraw is
-    /// inert until the next round.
-    #[serde(default)]
-    pub quickdraw_uses_remaining: u8,
     /// Whether JokerTile was used this round.
     pub joker_used: bool,
     /// Whether the player has scored a FullHand yaku this round (e.g. Eight
@@ -1098,7 +1093,6 @@ impl RunState {
             available_rules: mode.starting_rules.clone(),
             available_relics: default_available_relics(),
             scored_last_turn: false,
-            quickdraw_uses_remaining: 0,
             joker_used: false,
             full_hand_played_this_round: false,
             yaku_levels: crate::core::zodiac::YakuLevels::default(),

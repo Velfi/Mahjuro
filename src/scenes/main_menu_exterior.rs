@@ -190,7 +190,7 @@ impl MainMenuExteriorScene {
             age_secs: 0.0,
             bug_phases: lamp_moths::initial_bug_phases(),
             rain_field: RainField::new(),
-            positions: crate::ui::scene_layout::load_main_menu_exterior_positions(),
+            positions: crate::ui::scene_layout::MainMenuExteriorPositions::default(),
         }
     }
 

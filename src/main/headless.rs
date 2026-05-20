@@ -412,11 +412,10 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
                     .unwrap_or(crate::core::tile_pack::TilePackKind::Honors);
                 setup_shop_state(&mut run);
                 let progress = screenshot_profile_for_shop_stock(s.fresh_progress);
-                let shop = ShopScene::new(&mut run, &progress);
-                let counts = shop.tile_pack_celeb_inventory_counts(&run);
+                let _shop = ShopScene::new(&mut run, &progress);
                 (
                     Scene::Showcase(ShowcaseScene::new(ShowcasePresenter::TilePack(Box::new(
-                        TilePackPresenter::new_headless_with_shop_counts(&run, pack, counts),
+                        TilePackPresenter::new_headless_screenshot(&run, pack),
                     )))),
                     true,
                 )
@@ -446,11 +445,10 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
                 .unwrap_or(crate::core::tile_pack::TilePackKind::Honors);
             setup_shop_state(&mut run);
             let progress = screenshot_profile_for_shop_stock(s.fresh_progress);
-            let shop = ShopScene::new(&mut run, &progress);
-            let counts = shop.tile_pack_celeb_inventory_counts(&run);
+            let _shop = ShopScene::new(&mut run, &progress);
             (
                 Scene::Showcase(ShowcaseScene::new(ShowcasePresenter::TilePack(Box::new(
-                    TilePackPresenter::new_headless_with_shop_counts(&run, pack, counts),
+                    TilePackPresenter::new_headless_screenshot(&run, pack),
                 )))),
                 true,
             )
@@ -1089,8 +1087,9 @@ impl HeadlessApp {
             Some(Scene::Showcase(s)) if s.wants_orbit_input() => &self.scene,
             _ => scene_for_renderer,
         };
-        self.renderer
-            .set_committed_arrange_rotations(collect_committed_rotations(rotations_scene));
+        self.renderer.set_placement_rotations(
+            crate::scenes::collect_placement_rotations(rotations_scene, self.overlay_stack.last()),
+        );
         self.renderer
             .set_room_gltf_height_scale(look.room_gltf_height_scale);
         let sl = self.shop_env_lighting;

@@ -146,7 +146,7 @@ impl TutorialCampaignScene {
             page: 0,
             tree: TreeState::new(),
             try_it_phase: 0,
-            positions: crate::ui::scene_layout::load_tutorial_positions(),
+            positions: crate::ui::scene_layout::TutorialPositions::default(),
         }
     }
 
@@ -331,6 +331,7 @@ impl TutorialCampaignScene {
                         glow: false,
                         glow_color: None,
                         pick_id: None,
+                        arrange_group: None,
                     });
                     next_id += 1;
                     x += step;

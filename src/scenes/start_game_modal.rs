@@ -72,7 +72,7 @@ impl TileSelectScene {
     pub fn new() -> Self {
         Self {
             tree: TreeState::new(),
-            positions: crate::ui::scene_layout::load_tile_select_positions(),
+            positions: crate::ui::scene_layout::TileSelectPositions::default(),
             material: TileMaterial::default(),
             stake: Stake::default(),
             tutorial_mode: false,
@@ -83,7 +83,7 @@ impl TileSelectScene {
     pub fn new_tutorial() -> Self {
         Self {
             tree: TreeState::new(),
-            positions: crate::ui::scene_layout::load_tile_select_positions(),
+            positions: crate::ui::scene_layout::TileSelectPositions::default(),
             material: TileMaterial::Bamboo,
             stake: Stake::Spring,
             tutorial_mode: true,
@@ -626,6 +626,7 @@ impl SceneBehavior for TileSelectScene {
                         glow: false,
                         glow_color: None,
                         pick_id: None,
+                        arrange_group: None,
                     }
                 })
                 .collect()

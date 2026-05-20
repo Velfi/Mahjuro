@@ -59,7 +59,7 @@ use crate::ui::inspect_plaque::{
 use crate::ui::kenney_prompt_paths::shop_keyboard_prompt_icons;
 
 use super::layout::{
-    ShopInventoryCounts, ShopLayout, consumable_color, is_tile_pack_pick, live_shop_hit,
+    consumable_color, is_tile_pack_pick, live_shop_hit,
     rarity_color, relic_half_extents, tile_pack_index_from_pick,
 };
 use super::shared::shop_focus_inspectable;
@@ -483,24 +483,53 @@ fn marker_screen_rect(
 }
 
 /// [`Object3d::pos`] for the gameplay-style coin pile: [`crate::render::room_glb::PLAYER_GOLD_DISH_MARKER`]
-/// (or legacy `PlayerGoldDish`) when the room loads, otherwise [`ShopLayout::coin_dish_center_px`]
-/// with a perspective-correct lift.
+/// (or legacy `PlayerGoldDish`) when the room loads, otherwise a fixed screen fallback.
 fn player_gold_dish_object3d_anchor(
     w: f32,
     h: f32,
     cam: &CameraParams,
     env_h: f32,
-    layout: &ShopLayout,
+    ppmm: f32,
 ) -> [f32; 3] {
     let scale = room_env_world_scale(h, env_h);
     if let Some(tw) = with_shop_glb_cpu(|opt| opt.and_then(player_gold_dish_marker_translation)) {
         let world = tw * scale;
         return surface_anchor_from_world_xyz(w, h, world);
     }
-    let cx = layout.coin_dish_center_px.0;
-    let cy = layout.coin_dish_center_px.1;
-    let lift = layout.mm(10.0);
-    object3d_pos_for_screen_at_world_z(w, h, cam, cx, cy, lift)
+    let cx = w * 0.742_847_26;
+    let cy = h * 0.84;
+    object3d_pos_for_screen_at_world_z(w, h, cam, cx, cy, ppmm * 10.0)
+}
+
+fn journal_object3d_anchor(w: f32, h: f32, cam: &CameraParams, env_h: f32) -> [f32; 3] {
+    let r = journal_btn_rect(w, h, cam, env_h);
+    let cx = r[0] + r[2] * 0.5;
+    let cy = r[1] + r[3] * 0.5;
+    object3d_pos_for_screen_at_world_z(w, h, cam, cx, cy, 0.0)
+}
+
+fn owned_relic_hover_center(
+    shop: &ShopScene,
+    shop_rm: &ShopReadModel,
+    oi: usize,
+    w: f32,
+    h: f32,
+    cam: &CameraParams,
+    env_h: f32,
+) -> (f32, f32, f32) {
+    let n_for_sale = shop.items.len();
+    let inv = inventory_slots(shop, shop_rm);
+    for (slot_i, foc) in inv.iter().enumerate() {
+        if matches!(foc, Some(ShopFocus::Relic(idx)) if *idx == n_for_sale + oi) {
+            let r = inv_slot_rect(w, h, cam, shop, shop_rm, slot_i, env_h);
+            return (
+                r[0] + r[2] * 0.5,
+                r[1] + r[3] * 0.5,
+                inv_slot_wz(h),
+            );
+        }
+    }
+    (w * 0.5, h * 0.5, h * 0.2)
 }
 
 impl SceneBehavior for ShopScene {
@@ -598,18 +627,12 @@ pub(crate) fn render_shop_frame(
     frame.camera_override = Some(final_cam);
     let cam = final_cam;
 
-    let layout = ShopLayout::build(
-        ctx.layout,
-        &shop.positions,
-        ShopInventoryCounts {
-            n_for_sale: shop.items.len(),
-            n_for_sale_talismans: shop.talisman_items.len(),
-            n_owned_relics: shop_rm.owned_relics.len(),
-        },
-    );
-    let gold_dish_anchor = player_gold_dish_object3d_anchor(w, h, &cam, env_h, &layout);
+    let ppmm = ctx.layout.mm(1.0);
+    let gold_dish_anchor = player_gold_dish_object3d_anchor(w, h, &cam, env_h, ppmm);
+    let journal_anchor = journal_object3d_anchor(w, h, &cam, env_h);
 
-    let lp = layout.lamp_center_px;
+    // Legacy synthesized lamp when `shop.glb` has no embedded punctual lights.
+    let lp = (w * 0.5, h * 0.28, ppmm * 180.575_9);
     let tf = shop.age_secs;
     let flick_fast = (tf * 37.3).sin() * 0.022 + (tf * 61.7).sin() * 0.014;
     let flick_slow = (tf * 4.1).sin() * 0.034;
@@ -618,10 +641,6 @@ pub(crate) fn render_shop_frame(
         (d - 0.55).max(0.0) * 0.22
     };
     let lamp_flicker = (1.0 + flick_fast + flick_slow - brownout).clamp(0.68, 1.08);
-
-    let journal_cx = shop.positions.book.nx * w;
-    let journal_cy = shop.positions.book.ny * h;
-    let journal_cz = ctx.layout.mm(shop.positions.book.lift_mm);
 
     let hover = shop
         .focus
@@ -680,16 +699,12 @@ pub(crate) fn render_shop_frame(
             (1.0_f32, 1.0_f32)
         };
         if let Some(hit) = hover {
-            let n_for_sale_relics = shop.items.len().min(layout.niche_count);
-            let n_owned_relics = shop_rm.owned_relics.len();
             match hit {
                 ShopHit::Relic(i) => {
                     let (px, py, wy) = if let Some((cx, cy)) =
                         screen_xy_for_hit(hit, shop, &shop_rm, w, h, &cam)
                     {
                         (cx, cy, light_lift_at_screen_y(cy, h))
-                    } else if i < n_for_sale_relics {
-                        layout.niche_centers_px[i]
                     } else if let Some(si) = sale_slot_for_focus(shop, ShopFocus::Relic(i)) {
                         let r = shop_shelf_slot_rect(w, h, &cam, si, env_h);
                         (
@@ -697,13 +712,18 @@ pub(crate) fn render_shop_frame(
                             r[1] + r[3] * 0.5,
                             shop_shelf_slot_wz(h, si),
                         )
+                    } else if i >= shop.items.len() {
+                        owned_relic_hover_center(
+                            shop,
+                            &shop_rm,
+                            i - shop.items.len(),
+                            w,
+                            h,
+                            &cam,
+                            env_h,
+                        )
                     } else {
-                        let oi = i - shop.items.len();
-                        if oi < n_owned_relics {
-                            layout.owned_relic_pos(oi)
-                        } else {
-                            (w * 0.5, h * 0.5, h * 0.2)
-                        }
+                        (w * 0.5, h * 0.5, h * 0.2)
                     };
                     point_lights.push(PointLight {
                         pos: [px, py - 30.0, wy + 60.0],
@@ -724,18 +744,18 @@ pub(crate) fn render_shop_frame(
                     }
                 }
                 ShopHit::Dish(id) => {
-                    let center = if id == super::PICK_RELIC_DISH {
-                        layout.relic_dish_center_px
-                    } else if id == super::PICK_JOURNAL_BOOK {
-                        (journal_cx, journal_cy, journal_cz)
-                    } else if id == super::PICK_COIN_DISH {
+                    let center = if id == super::PICK_JOURNAL_BOOK {
+                        (
+                            journal_anchor[0],
+                            journal_anchor[1],
+                            journal_anchor[2],
+                        )
+                    } else {
                         (
                             gold_dish_anchor[0],
                             gold_dish_anchor[1],
                             gold_dish_anchor[2],
                         )
-                    } else {
-                        layout.coin_dish_center_px
                     };
                     point_lights.push(PointLight {
                         pos: [center.0, center.1 - 20.0, center.2.max(80.0)],
@@ -754,17 +774,21 @@ pub(crate) fn render_shop_frame(
                             intensity: 3.20 * hover_i_mul,
                         });
                     } else if let Some(idx) = super::layout::tile_pack_index_from_pick(id) {
-                        let center = layout
-                            .pack_centers_px
-                            .get(idx)
-                            .copied()
-                            .unwrap_or(layout.pack_centers_px[0]);
-                        point_lights.push(PointLight {
-                            pos: [center.0, center.1 - 30.0, center.2 + 60.0],
-                            radius: h * 0.62 * hover_r_mul,
-                            color: color::rgb(color::TALLOW),
-                            intensity: 3.20 * hover_i_mul,
-                        });
+                        let pid = super::PICK_TILE_PACK_BASE + idx as u32;
+                        if let Some(si) = sale_slot_for_focus(shop, ShopFocus::Pack(pid)) {
+                            let r = shop_shelf_slot_rect(w, h, &cam, si, env_h);
+                            let center = (
+                                r[0] + r[2] * 0.5,
+                                r[1] + r[3] * 0.5,
+                                shop_shelf_slot_wz(h, si),
+                            );
+                            point_lights.push(PointLight {
+                                pos: [center.0, center.1 - 30.0, center.2 + 60.0],
+                                radius: h * 0.62 * hover_r_mul,
+                                color: color::rgb(color::TALLOW),
+                                intensity: 3.20 * hover_i_mul,
+                            });
+                        }
                     }
                 }
                 ShopHit::EnvSpawnSlot(_)
@@ -814,13 +838,13 @@ pub(crate) fn render_shop_frame(
     let gold_pile_anchor = [
         gold_dish_anchor[0],
         gold_dish_anchor[1],
-        gold_dish_anchor[2] + layout.mm(3.0),
+        gold_dish_anchor[2] + ppmm * 3.0,
     ];
     let gold_pile = crate::render::gold_display::build_settled_gold_coin_pile(
-        |n| layout.mm(n),
+        |n| ppmm * n,
         shop_rm.display_gold as i32,
         gold_pile_anchor,
-        "shop.shelf.coin_dish",
+        None,
         crate::render::gold_display::SHOP_GOLD_PILE_SEED,
     );
 
@@ -940,9 +964,9 @@ pub(crate) fn render_shop_frame(
         frame.texts(tip_texts);
     }
 
-    // Journal book mesh + prepass: enables arrange-mode picking for `shop.props.journal`
-    // and live page texture.
+    // Journal book mesh + prepass (anchor from `journal_btn` in shop.glb when present).
     let cam_euler = camera_facing_euler_xyz_rad(cam.eye, cam.target);
+    let [journal_px, journal_py, journal_pz] = journal_anchor;
     if let Some(t) = shop.journal_transition {
         let zp = t.zoom_progress();
         if zp > 0.001 {
@@ -963,13 +987,13 @@ pub(crate) fn render_shop_frame(
             let cx = w * 0.5;
             let cy = h * 0.5;
             let pos = [
-                journal_cx + (cx - journal_cx) * smoothed,
-                journal_cy + (cy - journal_cy) * smoothed,
-                journal_cz,
+                journal_px + (cx - journal_px) * smoothed,
+                journal_py + (cy - journal_py) * smoothed,
+                journal_pz,
             ];
             (zoom, pos)
         }
-        None => (1.0, [journal_cx, journal_cy, journal_cz]),
+        None => (1.0, journal_anchor),
     };
     let (face_w, face_h) = journal_transition::book_cover_face_extents_xy(w, journal_zoom);
     frame.object3d(Object3d {
@@ -988,7 +1012,7 @@ pub(crate) fn render_shop_frame(
         },
         hover_target: 0.0,
         anim_id: 0,
-        arrange_name: Some("shop.props.journal"),
+        arrange_name: None,
     });
 
     if shop.journal_open_amount > 0.001 {
@@ -1376,7 +1400,7 @@ fn hover_tooltip_content(
             let desc = relic_description_live(
                 rid,
                 &shop.relic_counters,
-                shop.total_score_earned,
+                shop.gold,
                 Some((&shop.relic_state, oi)),
                 None,
             );
@@ -1500,11 +1524,16 @@ fn hover_tooltip_content(
                     "FREE".to_string(),
                     color::GOLD,
                 )
+            } else if i_got_a_guy_charges > 0 {
+                (
+                    "Restock".to_string(),
+                    "Refresh the shop at no gold cost.".to_string(),
+                    format!("FREE ({} left)", i_got_a_guy_charges),
+                    color::GOLD,
+                )
             } else {
                 let cta = if shop.gold >= scene.reroll_cost as i32 {
                     format!("{}g", scene.reroll_cost)
-                } else if i_got_a_guy_charges > 0 {
-                    format!("FREE ({} left)", i_got_a_guy_charges)
                 } else {
                     format!("${} (have {}g)", scene.reroll_cost, shop.display_gold)
                 };
@@ -2015,7 +2044,7 @@ fn push_stock_meshes(
                             },
                             hover_target: 0.0,
                             anim_id: 0,
-                            arrange_name: Some("shop.for_sale.relics"),
+                            arrange_name: None,
                         },
                         &mut dim,
                         &mut subject,
@@ -2070,7 +2099,7 @@ fn push_stock_meshes(
                         },
                         hover_target: 0.0,
                         anim_id: 0,
-                        arrange_name: Some("shop.for_sale.packs"),
+                        arrange_name: None,
                     },
                     &mut dim,
                     &mut subject,
@@ -2127,7 +2156,7 @@ fn push_stock_meshes(
                         kind: z_k,
                         hover_target: 0.0,
                         anim_id: 0,
-                        arrange_name: Some("shop.for_sale.ribbons"),
+                        arrange_name: None,
                     }),
                     &mut dim,
                     &mut subject,
@@ -2179,7 +2208,7 @@ fn push_stock_meshes(
                             kind: Object3dKind::Talisman { kind: tk },
                             hover_target: 0.0,
                             anim_id: 0,
-                            arrange_name: Some("shop.for_sale.talismans"),
+                            arrange_name: None,
                         },
                         &mut dim,
                         &mut subject,
@@ -2259,7 +2288,7 @@ fn push_stock_meshes(
                         },
                         hover_target: 0.0,
                         anim_id: 0,
-                        arrange_name: Some("shop.shelf.relic_dish"),
+                        arrange_name: None,
                     },
                     &mut dim,
                     &mut subject,
@@ -2315,7 +2344,7 @@ fn push_stock_meshes(
                             kind: Some(z),
                             hover_target: 0.0,
                             anim_id: 0,
-                            arrange_name: Some("shop.shelf.ribbon_tray"),
+                            arrange_name: None,
                         }),
                         &mut dim,
                         &mut subject,
@@ -2369,7 +2398,7 @@ fn push_stock_meshes(
                             kind: Object3dKind::Talisman { kind: tk },
                             hover_target: 0.0,
                             anim_id: 0,
-                            arrange_name: Some("shop.shelf.owned_talismans"),
+                            arrange_name: None,
                         },
                         &mut dim,
                         &mut subject,

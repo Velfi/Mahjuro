@@ -129,7 +129,7 @@ impl WgpuRenderer {
         } else {
             format!("primitive.{:?}[{}]", shape, slot_i)
         };
-        let model = self.apply_arrange_override(&arrange_name, model);
+        let model = self.apply_placement_rotation(&arrange_name, model);
         if let Some(pid) = pick_id {
             self.last_primitive_pick_models.insert(*pid, model);
         }

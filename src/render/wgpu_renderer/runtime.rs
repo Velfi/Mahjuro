@@ -1,6 +1,5 @@
 use super::*;
 
-mod arrange_overlay;
 mod camera;
 use camera::CameraFrame;
 mod debug_axes;
@@ -18,6 +17,8 @@ mod op_list;
 mod passes_shadow;
 pub use op_list::DrawKind;
 use op_list::{RenderOp, TextDraw};
+mod acquire_telemetry;
+pub(super) use acquire_telemetry::{AcquireOutcome, AcquireTelemetry};
 mod frame;
 use frame::RenderFrame;
 mod render;

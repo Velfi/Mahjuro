@@ -4,7 +4,6 @@ use glam::{Mat4, Vec3};
 
 use crate::core::tile_pack::PACK_TILE_ID_BASE;
 use crate::core::tile_pack::TilePackKind;
-use crate::game::engine::GameEngine;
 use crate::persistence::TilePreset;
 use crate::render::draw_cmd::{
     CameraParams, DrawCmd, Object3d, Object3dKind, ShowcaseRenderHints, ShowcaseTilePlacement,
@@ -13,16 +12,17 @@ use crate::render::draw_cmd::{
 use crate::render::showcase_tile_layout::{
     PackRevealRowLayoutParams, compute_pack_reveal_row_layout,
 };
-use crate::render::table_transform::mat4_to_euler_xyz_rad;
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{PointLight, SpotLight};
 use crate::render::world_space::world_on_camera_ray_plane_z;
 use crate::scenes::celebration_overlay;
 use crate::scenes::shop::{
-    CelebPhase, PackCelebration, ShopInventoryCounts, ShopLayout, shop_celebration_camera,
+    CelebPhase, PackCelebration, shop_celebration_camera,
 };
 use crate::ui::input::UiAction;
-use crate::ui::scene_layout::{ShopPositions, load_shop_positions};
+use crate::ui::layout::LayoutResult;
+use crate::ui::placement::PlacementAnchor;
+use crate::ui::scene_layout::ShopPositions;
 
 use super::super::{BackgroundId, ButtonDef, DrawCtx, OverlayRequest, SceneTransition, UpdateCtx};
 
@@ -36,46 +36,26 @@ const PACK_CELEB_SCREEN_Y_PER_BOX_H: f32 = 0.10;
 pub struct TilePackPresenter {
     pub celebration: PackCelebration,
     pub positions: ShopPositions,
-    inventory: ShopInventoryCounts,
 }
 
 impl TilePackPresenter {
-    pub fn new(celebration: PackCelebration, inventory: ShopInventoryCounts) -> Self {
+    pub fn new(celebration: PackCelebration) -> Self {
         Self {
             celebration,
-            positions: load_shop_positions(),
-            inventory,
+            positions: ShopPositions::default(),
         }
     }
 
-    #[allow(dead_code)] // parity with legacy headless helper; CLI uses `new_headless_with_shop_counts`
     pub fn new_headless_screenshot(
-        run: &crate::game::run::RunState,
-        pack_kind: TilePackKind,
-    ) -> Self {
-        let tiles = pack_kind.generate_tiles(PACK_TILE_ID_BASE);
-        let shop_rm = GameEngine::read_shop(run);
-        let inventory = ShopInventoryCounts {
-            n_for_sale: 0,
-            n_for_sale_talismans: 0,
-            n_owned_relics: shop_rm.owned_relics.len(),
-        };
-        Self::new(
-            PackCelebration::screenshot_pack_closeup_headless(tiles, pack_kind.name(), pack_kind),
-            inventory,
-        )
-    }
-
-    pub fn new_headless_with_shop_counts(
         _run: &crate::game::run::RunState,
         pack_kind: TilePackKind,
-        counts: ShopInventoryCounts,
     ) -> Self {
         let tiles = pack_kind.generate_tiles(PACK_TILE_ID_BASE);
-        Self::new(
-            PackCelebration::screenshot_pack_closeup_headless(tiles, pack_kind.name(), pack_kind),
-            counts,
-        )
+        Self::new(PackCelebration::screenshot_pack_closeup_headless(
+            tiles,
+            pack_kind.name(),
+            pack_kind,
+        ))
     }
 
     pub fn render_hints() -> ShowcaseRenderHints {
@@ -91,7 +71,7 @@ impl TilePackPresenter {
     fn push_celebration_draw(
         &self,
         frame: &mut UiFrame,
-        layout: &ShopLayout,
+        screen: &LayoutResult,
         w: f32,
         h: f32,
         cam: &CameraParams,
@@ -108,9 +88,8 @@ impl TilePackPresenter {
         ));
 
         let box_h = h * PACK_CELEB_BOX_H_FRAC;
-        let pack_py_base =
-            h * self.positions.celeb_pack_closeup.ny + h * PACK_CELEB_SCREEN_Y_DOWN_FRAC + box_h * PACK_CELEB_SCREEN_Y_PER_BOX_H;
-        let pack_lift_z = layout.mm(self.positions.celeb_pack_closeup.lift_mm) + box_h * 0.5;
+        let pack_closeup = pack_closeup_anchor(screen, &self.positions, box_h, Mat4::IDENTITY);
+        let pack_py_base = pack_closeup.pos[1];
 
         match celeb.phase {
             CelebPhase::Closeup => {
@@ -121,17 +100,13 @@ impl TilePackPresenter {
                 let bob_y = (t * 0.5).sin() * h * 0.006;
                 let bob_rx = (t * 0.6).sin() * 2.5;
                 let bob_ry = (t * 0.8).cos() * 3.0;
+                let bob_rot = Mat4::from_rotation_y(bob_ry.to_radians())
+                    * Mat4::from_rotation_x(bob_rx.to_radians());
+                let anchor = pack_closeup_anchor(screen, &self.positions, box_h, bob_rot);
                 frame.object3d_batch(vec![Object3d {
-                    pos: [
-                        w * 0.5 + bob_x,
-                        pack_py_base + bob_y,
-                        pack_lift_z,
-                    ],
+                    pos: [anchor.pos[0] + bob_x, anchor.pos[1] + bob_y, anchor.pos[2]],
                     extents: [box_w, box_d, box_h],
-                    rotation: mat4_to_euler_xyz_rad(
-                        Mat4::from_rotation_y(bob_ry.to_radians())
-                            * Mat4::from_rotation_x(bob_rx.to_radians()),
-                    ),
+                    rotation: anchor.object3d_rotation(),
                     color: celeb.pack_kind.foil_tint(),
                     kind: Object3dKind::Pack {
                         kind: celeb.pack_kind,
@@ -139,7 +114,7 @@ impl TilePackPresenter {
                     },
                     hover_target: 0.0,
                     anim_id: 0,
-                    arrange_name: Some("shop.celebrations.pack_closeup"),
+                    arrange_name: Some(anchor.arrange_name),
                 }]);
 
                 frame.text(celebration_overlay::label_confirm_to_open(h, w, t));
@@ -153,15 +128,9 @@ impl TilePackPresenter {
                 // We'll let it rest at the base closeup position without the bobbing
                 // so it looks like it settled down to open.
                 frame.object3d_batch(vec![Object3d {
-                    pos: [
-                        w * 0.5,
-                        pack_py_base,
-                        pack_lift_z,
-                    ],
+                    pos: pack_closeup.pos,
                     extents: [box_w, box_d, box_h],
-                    rotation: mat4_to_euler_xyz_rad(
-                        Mat4::from_rotation_y(0.0) * Mat4::from_rotation_x(0.0),
-                    ),
+                    rotation: pack_closeup.object3d_rotation(),
                     color: celeb.pack_kind.foil_tint(),
                     kind: Object3dKind::Pack {
                         kind: celeb.pack_kind,
@@ -169,11 +138,18 @@ impl TilePackPresenter {
                     },
                     hover_target: 0.0,
                     anim_id: 0,
-                    arrange_name: Some("shop.celebrations.pack_reveal_bg"),
+                    arrange_name: Some(pack_closeup.arrange_name),
                 }]);
 
-                let row_py = h * self.positions.celeb_pack_reveal.ny;
-                let row_lift = layout.mm(self.positions.celeb_pack_reveal.lift_mm);
+                let reveal_anchor = PlacementAnchor::new(
+                    [0.0, 0.0, 0.0],
+                    Mat4::IDENTITY,
+                    &self.positions.celeb_pack_reveal,
+                    "shop.celebrations.pack_reveal",
+                    screen,
+                );
+                let row_py = reveal_anchor.pos[1];
+                let row_lift = reveal_anchor.pos[2];
                 let rotation = pack_reveal_euler_rad(&self.positions);
                 let row = compute_pack_reveal_row_layout(&PackRevealRowLayoutParams {
                     win_w: w,
@@ -186,7 +162,7 @@ impl TilePackPresenter {
                     ny: self.positions.celeb_pack_reveal.ny,
                     rotation_xyz_rad: rotation,
                 });
-                let src_px = w * 0.5;
+                let src_px = pack_closeup.pos[0];
                 let src_py = pack_py_base;
                 // Spawn tiles from the upper half of the enlarged pack so the arc reads as “out of the box”.
                 let src_lift = row_lift + h * 0.15 + box_h * 0.42;
@@ -215,6 +191,7 @@ impl TilePackPresenter {
                         glow: false,
                         glow_color: None,
                         pick_id: None,
+                        arrange_group: Some("shop.celebrations.pack_reveal"),
                     });
                 }
 
@@ -288,7 +265,6 @@ impl TilePackPresenter {
 
         let mut frame = UiFrame::new();
         frame.background(BackgroundId::Black);
-        let layout = ShopLayout::build(ctx.layout, &self.positions, self.inventory);
         let cam = shop_celebration_camera(w, h, env_h);
         frame.camera_override = Some(cam);
         frame.scene_lighting.embedded_gltf_punctual = false;
@@ -297,21 +273,17 @@ impl TilePackPresenter {
             .scene_lighting
             .set_smooth_points(pack_celebration_isolation_lights(
                 self.celebration.phase,
-                w,
-                h,
-                &layout,
+                ctx.layout,
                 &self.positions,
             ));
         frame.scene_lighting.spot_lights = pack_celebration_subject_spotlight(
             &self.celebration,
-            w,
-            h,
+            ctx.layout,
             &cam,
-            &layout,
             &self.positions,
             ctx.tile_preset,
         );
-        self.push_celebration_draw(&mut frame, &layout, w, h, &cam, ctx.tile_preset);
+        self.push_celebration_draw(&mut frame, ctx.layout, w, h, &cam, ctx.tile_preset);
         frame.window_title = "Mahjuro".to_string();
         frame.showcase_render_hints = Self::render_hints();
 
@@ -326,6 +298,23 @@ impl TilePackPresenter {
     }
 }
 
+fn pack_closeup_anchor(
+    screen: &LayoutResult,
+    positions: &ShopPositions,
+    box_h: f32,
+    base_rotation: Mat4,
+) -> PlacementAnchor {
+    let h = screen.window_h;
+    let py_bias = h * PACK_CELEB_SCREEN_Y_DOWN_FRAC + box_h * PACK_CELEB_SCREEN_Y_PER_BOX_H;
+    PlacementAnchor::new(
+        [screen.window_w * 0.5, py_bias, box_h * 0.5],
+        base_rotation,
+        &positions.celeb_pack_closeup,
+        "shop.celebrations.pack_closeup",
+        screen,
+    )
+}
+
 fn pack_reveal_euler_rad(positions: &ShopPositions) -> [f32; 3] {
     [
         positions.celeb_pack_reveal.rx_deg.to_radians() + 32.0_f32.to_radians(),
@@ -336,24 +325,23 @@ fn pack_reveal_euler_rad(positions: &ShopPositions) -> [f32; 3] {
 
 fn pack_celebration_subject_spotlight(
     celeb: &PackCelebration,
-    w: f32,
-    h: f32,
+    screen: &LayoutResult,
     cam: &CameraParams,
-    layout: &ShopLayout,
     positions: &ShopPositions,
     tile_preset: TilePreset,
 ) -> Vec<SpotLight> {
+    let w = screen.window_w;
+    let h = screen.window_h;
     let cos_outer = (34.0_f32).to_radians().cos();
     let cos_inner = (20.0_f32).to_radians().cos();
     let warm = [1.0_f32, 0.93, 0.78];
     match celeb.phase {
         CelebPhase::Closeup => {
             let box_h = h * PACK_CELEB_BOX_H_FRAC;
-            let cx = w * 0.5;
-            let cy = h * positions.celeb_pack_closeup.ny
-                + h * PACK_CELEB_SCREEN_Y_DOWN_FRAC
-                + box_h * PACK_CELEB_SCREEN_Y_PER_BOX_H;
-            let lift = layout.mm(positions.celeb_pack_closeup.lift_mm) + box_h * 0.5;
+            let anchor = pack_closeup_anchor(screen, positions, box_h, Mat4::IDENTITY);
+            let cx = anchor.pos[0];
+            let cy = anchor.pos[1];
+            let lift = anchor.pos[2];
             let light_lift = lift + h * 0.52 + box_h * 0.38;
             let pos = [cx, cy - h * 0.14 - box_h * 0.06, light_lift];
             let tw = world_on_camera_ray_plane_z(w, h, cam, cx, cy, lift);
@@ -379,7 +367,14 @@ fn pack_celebration_subject_spotlight(
             if n == 0 {
                 return Vec::new();
             }
-            let row_lift = layout.mm(positions.celeb_pack_reveal.lift_mm);
+            let reveal_anchor = PlacementAnchor::new(
+                [0.0, 0.0, 0.0],
+                Mat4::IDENTITY,
+                &positions.celeb_pack_reveal,
+                "shop.celebrations.pack_reveal",
+                screen,
+            );
+            let row_lift = reveal_anchor.pos[2];
             let rotation = pack_reveal_euler_rad(positions);
             let row = compute_pack_reveal_row_layout(&PackRevealRowLayoutParams {
                 win_w: w,
@@ -394,7 +389,7 @@ fn pack_celebration_subject_spotlight(
             });
             let total_w = n as f32 * row.silhouette_w + (n.saturating_sub(1)) as f32 * row.gap_px;
             let cx = row.row_x0 + total_w * 0.5;
-            let row_py = h * positions.celeb_pack_reveal.ny;
+            let row_py = reveal_anchor.pos[1];
             let cy = row_py;
             let lift = row_lift + row.tile_size * 0.15;
             let light_lift = lift + h * 0.55;
@@ -422,25 +417,27 @@ fn pack_celebration_subject_spotlight(
 
 fn pack_celebration_isolation_lights(
     phase: CelebPhase,
-    w: f32,
-    h: f32,
-    layout: &ShopLayout,
+    screen: &LayoutResult,
     positions: &ShopPositions,
 ) -> Vec<PointLight> {
+    let w = screen.window_w;
+    let h = screen.window_h;
     let box_h = h * PACK_CELEB_BOX_H_FRAC;
     let (cx, row_py, lift) = match phase {
-        CelebPhase::Closeup => (
-            w * 0.5,
-            h * positions.celeb_pack_closeup.ny
-                + h * PACK_CELEB_SCREEN_Y_DOWN_FRAC
-                + box_h * PACK_CELEB_SCREEN_Y_PER_BOX_H,
-            layout.mm(positions.celeb_pack_closeup.lift_mm) + box_h * 0.5,
-        ),
-        CelebPhase::Reveal => (
-            w * 0.5 + w * positions.celeb_pack_reveal.nx,
-            h * positions.celeb_pack_reveal.ny,
-            layout.mm(positions.celeb_pack_reveal.lift_mm),
-        ),
+        CelebPhase::Closeup => {
+            let a = pack_closeup_anchor(screen, positions, box_h, Mat4::IDENTITY);
+            (a.pos[0], a.pos[1], a.pos[2])
+        }
+        CelebPhase::Reveal => {
+            let a = PlacementAnchor::new(
+                [0.0, 0.0, 0.0],
+                Mat4::IDENTITY,
+                &positions.celeb_pack_reveal,
+                "shop.celebrations.pack_reveal",
+                screen,
+            );
+            (a.pos[0], a.pos[1], a.pos[2])
+        }
     };
     let (i_mul, r_mul) = match phase {
         CelebPhase::Closeup => (2.4, 1.35),

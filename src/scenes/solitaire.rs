@@ -402,6 +402,7 @@ impl SceneBehavior for SolitaireScene {
                 glow: false,
                 glow_color: None,
                 pick_id: None,
+                arrange_group: None,
             });
 
             // Hit-test button for free tiles.

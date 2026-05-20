@@ -1,11 +1,6 @@
-use serde::{Deserialize, Serialize};
+use crate::ui::placement::Placement;
 
-use crate::ui::placement::{ArrangeTarget, Node, Placement};
-
-use super::fs::{load_positions, sanitize_placements, save_positions};
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(Clone, Debug)]
 pub struct TileSelectPositions {
     /// Top-left of the title / material copy column (normalized window fractions).
     pub left_panel: Placement,
@@ -38,49 +33,6 @@ impl Default for TileSelectPositions {
     }
 }
 
-pub const TILE_SELECT_HIERARCHY: &[Node] = &[Node::Group {
-    name: "tile_select",
-    label: "Choose tiles",
-    children: &[
-        Node::Group {
-            name: "tile_select.panel",
-            label: "Left panel",
-            children: &[
-                Node::Leaf {
-                    name: "tile_select.panel.content",
-                    label: "Title + material copy",
-                },
-                Node::Leaf {
-                    name: "tile_select.panel.bottom_hint",
-                    label: "Bottom hint",
-                },
-            ],
-        },
-        Node::Leaf {
-            name: "tile_select.button_menu",
-            label: "Menu buttons",
-        },
-        Node::Group {
-            name: "tile_select.preview",
-            label: "Tile preview",
-            children: &[
-                Node::Leaf {
-                    name: "tile_select.preview.corner_tl",
-                    label: "Preview — top-left",
-                },
-                Node::Leaf {
-                    name: "tile_select.preview.corner_br",
-                    label: "Preview — bottom-right",
-                },
-            ],
-        },
-        Node::Leaf {
-            name: "tile_select.key_light",
-            label: "Key light aim",
-        },
-    ],
-}];
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TileSelectField {
     LeftPanel,
@@ -103,7 +55,6 @@ pub fn lookup_tile_select_field(name: &str) -> Option<TileSelectField> {
     })
 }
 
-#[cfg(test)]
 pub fn tile_select_field_path(field: TileSelectField) -> &'static str {
     match field {
         TileSelectField::LeftPanel => "tile_select.panel.content",
@@ -150,35 +101,3 @@ impl TileSelectPositions {
     }
 }
 
-impl ArrangeTarget for TileSelectPositions {
-    fn placement_mut(&mut self, name: &str) -> Option<&mut Placement> {
-        lookup_tile_select_field(name).map(|f| self.field_mut(f))
-    }
-
-    fn placement(&self, name: &str) -> Option<&Placement> {
-        lookup_tile_select_field(name).map(|f| self.field_ref(f))
-    }
-
-    fn hierarchy(&self) -> &'static [Node] {
-        TILE_SELECT_HIERARCHY
-    }
-}
-
-pub fn load_tile_select_positions() -> TileSelectPositions {
-    let mut loaded = load_positions("tile_select.json");
-    sanitize_tile_select_positions(&mut loaded);
-    loaded
-}
-
-pub fn sanitize_tile_select_positions(p: &mut TileSelectPositions) {
-    sanitize_placements(
-        "tile_select",
-        p,
-        TileSelectField::ALL,
-        |positions, field| positions.field_mut(field),
-    );
-}
-
-pub fn save_tile_select_positions(pos: &TileSelectPositions) -> anyhow::Result<()> {
-    save_positions("tile_select.json", "tile_select", pos)
-}

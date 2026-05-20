@@ -39,7 +39,7 @@ impl WgpuRenderer {
         let eff_l = obj.extents[1];
         let depth = obj.extents[2];
         let ribbon_arr_name = obj.arrange_name.unwrap_or("shop.for_sale.ribbons");
-        let base_transform = self.apply_arrange_override(
+        let base_transform = self.apply_placement_rotation(
             ribbon_arr_name,
             translate_rot_scale(center, obj.rotation_matrix(), glam::Vec3::splat(1.0)),
         );
@@ -105,14 +105,28 @@ impl WgpuRenderer {
             });
             self.ribbon_slot_zodiac[slot_i] = zodiac_id;
         }
-        self.ribbon_instances[slot_i].write_uniform(
+        // Showcase celebrations (zodiac level-up, etc.) draw on a black void:
+        // the ribbon must stay fully lit like archive description decals, not
+        // catch rectangular self-shadow from the key-light map.
+        let params_w = if self.active_scene_key == Some("showcase") {
+            crate::render::lit_mesh::LIT_MESH_PARAMS_W_SKIP_DIRECTIONAL_SHADOW
+        } else {
+            0.0
+        };
+        self.ribbon_instances[slot_i].write_uniform_raw_w(
             &self.queue,
             view_proj_arr,
             full_ribbon_model,
             silk_mat,
+            params_w,
         );
         self.register_placement_shadow_slot(DrawKind::Ribbon, slot_i);
-        if self.placement_shadow_writes(frame) {
+        if self.placement_shadow_writes(frame)
+            && crate::render::lit_mesh::lit_mesh_casts_directional_shadow(
+                silk_mat.kind,
+                params_w,
+            )
+        {
             self.write_lit_mesh_shadow(
                 shadow,
                 &self.ribbon_instances[slot_i],

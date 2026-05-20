@@ -1,11 +1,6 @@
-use serde::{Deserialize, Serialize};
+use crate::ui::placement::Placement;
 
-use crate::ui::placement::{ArrangeTarget, Node, Placement};
-
-use super::fs::{load_positions, sanitize_placements, save_positions};
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(Clone, Debug)]
 pub struct GameplayPositions {
     pub relic_col: Placement,
     pub relic_col_top_ny: f32,
@@ -145,101 +140,6 @@ impl Default for GameplayPositions {
     }
 }
 
-pub const GAMEPLAY_HIERARCHY: &[Node] = &[Node::Group {
-    name: "gameplay",
-    label: "Gameplay",
-    children: &[
-        Node::Group {
-            name: "gameplay.hand",
-            label: "Hand area",
-            children: &[
-                Node::Leaf {
-                    name: "gameplay.hand.strip",
-                    label: "Hand strip",
-                },
-                Node::Leaf {
-                    name: "gameplay.hand.yaku_tablet",
-                    label: "Yaku tablet row",
-                },
-            ],
-        },
-        Node::Group {
-            name: "gameplay.score_panel",
-            label: "Score panel",
-            children: &[
-                Node::Leaf {
-                    name: "gameplay.score_panel.plaque",
-                    label: "Blind plaque",
-                },
-                Node::Leaf {
-                    name: "gameplay.score_panel.ofuda",
-                    label: "Boss-rule ofuda",
-                },
-                Node::Leaf {
-                    name: "gameplay.score_panel.coin_pile",
-                    label: "Coin pile",
-                },
-            ],
-        },
-        Node::Group {
-            name: "gameplay.action_bar",
-            label: "Action bar",
-            children: &[
-                Node::Leaf {
-                    name: "gameplay.action_bar.bowl",
-                    label: "Discard bowl",
-                },
-                Node::Leaf {
-                    name: "gameplay.action_bar.mirror",
-                    label: "Bronze mirror",
-                },
-                Node::Leaf {
-                    name: "gameplay.action_bar.tablet_cash_in",
-                    label: "Tablet — Cash in",
-                },
-                Node::Leaf {
-                    name: "gameplay.action_bar.tablet_journal",
-                    label: "Tablet — Journal",
-                },
-            ],
-        },
-        Node::Group {
-            name: "gameplay.counter",
-            label: "Counter fans",
-            children: &[
-                Node::Leaf {
-                    name: "gameplay.counter.draws_fan",
-                    label: "Draws fan",
-                },
-                Node::Leaf {
-                    name: "gameplay.counter.discards_fan",
-                    label: "Discards fan",
-                },
-            ],
-        },
-        Node::Leaf {
-            name: "gameplay.relic_col",
-            label: "Relic tray (horizontal)",
-        },
-        Node::Leaf {
-            name: "gameplay.dora",
-            label: "Dora",
-        },
-        Node::Leaf {
-            name: "gameplay.round_wind",
-            label: "Round wind",
-        },
-        Node::Leaf {
-            name: "gameplay.talisman_dish",
-            label: "Talisman dish",
-        },
-        Node::Leaf {
-            name: "gameplay.consumable_dish.talisman",
-            label: "Talisman pendant",
-        },
-    ],
-}];
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GameplayField {
     RelicCol,
@@ -282,7 +182,6 @@ pub fn lookup_gameplay_field(name: &str) -> Option<GameplayField> {
     })
 }
 
-#[cfg(test)]
 pub fn gameplay_field_path(field: GameplayField) -> &'static str {
     match field {
         GameplayField::RelicCol => "gameplay.relic_col",
@@ -369,32 +268,3 @@ impl GameplayPositions {
     }
 }
 
-impl ArrangeTarget for GameplayPositions {
-    fn placement_mut(&mut self, name: &str) -> Option<&mut Placement> {
-        lookup_gameplay_field(name).map(|f| self.field_mut(f))
-    }
-
-    fn placement(&self, name: &str) -> Option<&Placement> {
-        lookup_gameplay_field(name).map(|f| self.field_ref(f))
-    }
-
-    fn hierarchy(&self) -> &'static [Node] {
-        GAMEPLAY_HIERARCHY
-    }
-}
-
-pub fn load_gameplay_positions() -> GameplayPositions {
-    let mut loaded = load_positions("gameplay.json");
-    sanitize_gameplay_positions(&mut loaded);
-    loaded
-}
-
-pub fn sanitize_gameplay_positions(p: &mut GameplayPositions) {
-    sanitize_placements("gameplay", p, GameplayField::ALL, |positions, field| {
-        positions.field_mut(field)
-    });
-}
-
-pub fn save_gameplay_positions(pos: &GameplayPositions) -> anyhow::Result<()> {
-    save_positions("gameplay.json", "gameplay", pos)
-}

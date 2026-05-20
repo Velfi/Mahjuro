@@ -43,7 +43,7 @@ pub fn build_settled_gold_coin_pile(
     mm: impl Fn(f32) -> f32,
     gold: i32,
     anchor: [f32; 3],
-    arrange_name: &'static str,
+    arrange_name: Option<&'static str>,
     rng_seed: u64,
 ) -> Vec<Object3d> {
     if gold <= 0 {
@@ -100,7 +100,7 @@ pub fn build_settled_gold_coin_pile(
             },
             hover_target: 0.0,
             anim_id: 0,
-            arrange_name: Some(arrange_name),
+            arrange_name,
         });
     }
     coins

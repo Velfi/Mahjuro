@@ -817,8 +817,16 @@ fn fs_main(
     // base material rather than multiplied with it. For talismans, .w carries
     // the per-kind heightmap index used by the relief sampling (no per-kind
     // shader branching keys off it any more — each MaterialKind has its own
-    // dedicated branch).
-    let has_decal = mesh.material_params.w > 0.5 && !is_talisman && !is_foil && !is_enamel && !is_felt && !is_wick;
+    // dedicated branch). `w ≈ 3` is reserved for portrait silk that skips
+    // directional shadows (showcase zodiac ribbon).
+    let skip_directional_shadow = abs(mesh.material_params.w - 3.0) < 0.01;
+    let has_decal = mesh.material_params.w > 0.5
+        && !skip_directional_shadow
+        && !is_talisman
+        && !is_foil
+        && !is_enamel
+        && !is_felt
+        && !is_wick;
     var albedo = mesh.base_color.rgb * tex_rgb;
     if (has_decal) {
         // Start from the flat base colour, ignore the texture multiply —
@@ -2421,7 +2429,13 @@ fn fs_main(
     if (shop_vitrine_shadow && is_talisman) {
         lit_vitrine = lit_vitrine * 0.45;
     }
-    var shadow_vis = sample_shadow_visibility(in.world_pos);
+    // Readable portrait silk (showcase zodiac ribbon): same rule as archive
+    // description decals — do not stain copy with the key-light shadow map.
+    var shadow_vis = select(
+        sample_shadow_visibility(in.world_pos),
+        1.0,
+        skip_directional_shadow,
+    );
     if (shop_vitrine_shadow && is_enamel) {
         shadow_vis = max(shadow_vis, 0.58);
     }

@@ -720,16 +720,9 @@ pub struct WgpuRenderer {
     /// disambiguate shared mesh pipelines (e.g. `Object3dKind::Ofuda` is used
     /// by both shop and gameplay). Used by [`Self::scene_path`] helpers.
     active_scene_key: Option<&'static str>,
-    /// When arrange mode is active, this override is applied to the matching
-    /// object's model matrix each frame before GPU upload. Set from `App`
-    /// via [`Self::set_arrange_override`].
-    debug_arrange_override: Option<DebugArrangeOverride>,
-    /// Committed rotations keyed by arrange_name. Populated each frame by
-    /// `App` from the active scene's Placements so that every arrange-tagged
-    /// draw picks up `rx_deg/ry_deg/rz_deg` without each construction site
-    /// having to wire them through. Degrees, applied in Z→Y→X order, world
-    /// space (left-multiplied onto the model's rotation+scale block).
-    committed_arrange_rotations: FxHashMap<String, [f32; 3]>,
+    /// Placement rotation degrees keyed by canonical placement name. Populated
+    /// each frame from the active scene's `*Positions` structs.
+    placement_rotations: FxHashMap<String, [f32; 3]>,
 
     // ── Shadow mapping ─────────────────────────────────────────────────
     /// Fixed-size depth texture written by the shadow pre-pass and sampled
@@ -761,6 +754,11 @@ pub struct WgpuRenderer {
     /// this path. Cleared after the capture. Set via
     /// [`WgpuRenderer::queue_screenshot`].
     pending_screenshot: std::cell::Cell<Option<std::path::PathBuf>>,
+    /// Per-frame swapchain acquire telemetry. Records how long each frame
+    /// spends inside `get_current_texture` plus the outcome distribution
+    /// (Outdated, Timeout, etc.) and self-emits a one-shot info summary
+    /// after warmup. See [`runtime::AcquireTelemetry`].
+    acquire_telemetry: runtime::AcquireTelemetry,
 }
 
 mod impl_arrange;
@@ -781,7 +779,7 @@ pub use constants::{
 pub use internal_slots::{RelicIcon, TextAlign, TextLabel};
 pub use layout_instances::build_instances_from_layout;
 pub use picking_types::{GameplayPick, MainMenuPick, ShopHit};
-pub use projection::{DebugArrangeOverride, ProjectionCache};
+pub use projection::ProjectionCache;
 pub use targets::TargetInit;
 pub use ui_instances::{GpuInstance, GradientQuadInstance, RenderSettings};
 

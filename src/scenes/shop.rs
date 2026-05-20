@@ -15,7 +15,6 @@ pub(crate) use self::view::render_shop_frame;
 use crate::render::draw_cmd::CameraParams;
 use crate::scenes::object3d_inspect::InspectDolly;
 
-pub(crate) use self::layout::{ShopInventoryCounts, ShopLayout};
 pub(crate) use self::shared::{CelebPhase, PackCelebration};
 
 /// Perspective camera for tile-pack celebration overlay (not item-inspect orbit).
@@ -37,7 +36,7 @@ use self::layout::*;
 use self::shared::*;
 
 pub(super) use self::pick_ids::{
-    N_TILE_PACKS, PICK_COIN_DISH, PICK_JOURNAL_BOOK, PICK_LEAVE_PROP, PICK_RELIC_DISH,
+    N_TILE_PACKS, PICK_COIN_DISH, PICK_JOURNAL_BOOK, PICK_LEAVE_PROP,
     PICK_REROLL_PROP, PICK_TILE_PACK_BASE,
 };
 
@@ -139,9 +138,6 @@ pub struct ShopScene {
     /// drained from the run state (e.g. Bonfire on relic sell). Drives glow +
     /// wiggle on owned relics in the shop.
     relic_glow_starts: rustc_hash::FxHashMap<RelicId, Instant>,
-    /// Normalized screen-relative positions for the shop scene.
-    /// Loaded from JSON on construction; falls back to compiled defaults.
-    pub positions: crate::ui::scene_layout::ShopPositions,
     /// Last `DrawCtx::room_gltf_height_scale` from `draw_frame` (updated each draw). Used when building focus rects from `update()` so marker math matches the GPU pass (possibly one frame behind).
     drawn_room_gltf_height_scale: std::cell::Cell<f32>,
     /// Eased blend between storeroom base camera and orbit inspect ([`crate::scenes::object3d_inspect::tick_inspect_dolly`]).
@@ -199,19 +195,6 @@ impl ShopScene {
             (now.saturating_duration_since(started).as_secs_f32() / SHOP_SELL_HOLD_SECONDS)
                 .clamp(0.0, 1.0)
         })
-    }
-
-    /// Inventory counts for [`ShopLayout::build`], e.g. tile-pack celebration overlay.
-    pub(crate) fn tile_pack_celeb_inventory_counts(
-        &self,
-        run: &crate::game::run::RunState,
-    ) -> ShopInventoryCounts {
-        let shop_rm = GameEngine::read_shop(run);
-        ShopInventoryCounts {
-            n_for_sale: self.items.len(),
-            n_for_sale_talismans: self.talisman_items.len(),
-            n_owned_relics: shop_rm.owned_relics.len(),
-        }
     }
 
     /// Set focus from a stable slug — used by the screenshot CLI's

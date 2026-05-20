@@ -1,11 +1,6 @@
-use serde::{Deserialize, Serialize};
+use crate::ui::placement::Placement;
 
-use crate::ui::placement::{ArrangeTarget, Node, Placement};
-
-use super::fs::{load_positions, sanitize_placements, save_positions};
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(Clone, Debug)]
 pub struct TutorialPositions {
     pub shop_relic: Placement,
     pub shop_ribbon: Placement,
@@ -27,49 +22,6 @@ impl Default for TutorialPositions {
         }
     }
 }
-
-pub const TUTORIAL_HIERARCHY: &[Node] = &[Node::Group {
-    name: "tutorial",
-    label: "Tutorial",
-    children: &[
-        Node::Group {
-            name: "tutorial.shop",
-            label: "Shop preview",
-            children: &[
-                Node::Leaf {
-                    name: "tutorial.shop.relic",
-                    label: "Preview relic",
-                },
-                Node::Leaf {
-                    name: "tutorial.shop.ribbon",
-                    label: "Preview ribbon",
-                },
-                Node::Leaf {
-                    name: "tutorial.shop.talisman",
-                    label: "Preview talisman",
-                },
-                Node::Leaf {
-                    name: "tutorial.shop.pack",
-                    label: "Preview pack",
-                },
-            ],
-        },
-        Node::Group {
-            name: "tutorial.try_it",
-            label: "Try-it demo",
-            children: &[
-                Node::Leaf {
-                    name: "tutorial.try_it.mirror",
-                    label: "Play mirror",
-                },
-                Node::Leaf {
-                    name: "tutorial.try_it.trigger",
-                    label: "Trigger tablet",
-                },
-            ],
-        },
-    ],
-}];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TutorialField {
@@ -93,7 +45,6 @@ pub fn lookup_tutorial_field(name: &str) -> Option<TutorialField> {
     })
 }
 
-#[cfg(test)]
 pub fn tutorial_field_path(field: TutorialField) -> &'static str {
     match field {
         TutorialField::ShopRelic => "tutorial.shop.relic",
@@ -140,32 +91,3 @@ impl TutorialPositions {
     }
 }
 
-impl ArrangeTarget for TutorialPositions {
-    fn placement_mut(&mut self, name: &str) -> Option<&mut Placement> {
-        lookup_tutorial_field(name).map(|f| self.field_mut(f))
-    }
-
-    fn placement(&self, name: &str) -> Option<&Placement> {
-        lookup_tutorial_field(name).map(|f| self.field_ref(f))
-    }
-
-    fn hierarchy(&self) -> &'static [Node] {
-        TUTORIAL_HIERARCHY
-    }
-}
-
-pub fn load_tutorial_positions() -> TutorialPositions {
-    let mut loaded = load_positions("tutorial.json");
-    sanitize_tutorial_positions(&mut loaded);
-    loaded
-}
-
-pub fn sanitize_tutorial_positions(p: &mut TutorialPositions) {
-    sanitize_placements("tutorial", p, TutorialField::ALL, |positions, field| {
-        positions.field_mut(field)
-    });
-}
-
-pub fn save_tutorial_positions(pos: &TutorialPositions) -> anyhow::Result<()> {
-    save_positions("tutorial.json", "tutorial", pos)
-}

@@ -29,26 +29,3 @@ pub struct ProjectionCache {
     pub dora_plinth_rect: Option<[f32; 4]>,
     pub round_wind_plinth_rect: Option<[f32; 4]>,
 }
-
-/// Active arrange-mode override for the renderer. When set, the matching
-/// object's model matrix is rebuilt each frame using these values instead of
-/// the placement data from the scene's draw commands.
-#[derive(Clone, Debug)]
-pub struct DebugArrangeOverride {
-    /// Name as registered in `last_debug_pickables` (e.g. `"BlindPlaque"`).
-    pub name: String,
-    /// Pixel nudge along X. Because world_x = pixel_x − w/2, this maps 1:1
-    /// to world X regardless of window size.
-    pub delta_px: f32,
-    /// Pixel nudge along Y (positive = toward player). world_y = h/2 − pixel_y,
-    /// so delta_py maps to −world_y, also 1:1 regardless of window size.
-    pub delta_py: f32,
-    /// World-Z nudge (lift above the felt). Window-size-independent.
-    pub delta_lift: f32,
-    /// Rotation delta around Z, degrees (additive on top of original).
-    pub delta_rz_deg: f32,
-    /// Rotation delta around X, degrees (additive on top of original).
-    pub delta_rx_deg: f32,
-    /// Rotation delta around Y, degrees (additive on top of original).
-    pub delta_ry_deg: f32,
-}

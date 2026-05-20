@@ -135,6 +135,22 @@ pub fn material_casts_shadow(kind: MaterialKind) -> bool {
     !matches!(kind, MaterialKind::Emissive)
 }
 
+/// `material_params.w` sentinel: portrait silk / readable decals must not catch
+/// the shared key-light shadow map (same class of bug as archive description
+/// signs in `room_glb.wgsl`). Showcase zodiac ribbons set this in
+/// `object3d_ribbon.rs`.
+pub const LIT_MESH_PARAMS_W_SKIP_DIRECTIONAL_SHADOW: f32 = 3.0;
+
+#[inline]
+pub fn lit_mesh_skips_directional_shadow_receive(params_w: f32) -> bool {
+    (params_w - LIT_MESH_PARAMS_W_SKIP_DIRECTIONAL_SHADOW).abs() < 0.01
+}
+
+#[inline]
+pub fn lit_mesh_casts_directional_shadow(kind: MaterialKind, params_w: f32) -> bool {
+    material_casts_shadow(kind) && !lit_mesh_skips_directional_shadow_receive(params_w)
+}
+
 /// Compact per-mesh material parameters.
 #[derive(Clone, Copy, Debug)]
 pub struct MaterialParams {
