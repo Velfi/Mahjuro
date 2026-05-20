@@ -7,6 +7,11 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.5.0-15 — 2026-05-20
+
+### Fixed
+- Quick Draw now draws an extra tile after every play for the rest of the blind, as described on the relic.
+
 ## 0.5.0-14 — 2026-05-20
 
 ### Fixed
