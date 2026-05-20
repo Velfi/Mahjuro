@@ -16,12 +16,12 @@ const _: () = assert!(BUG_COUNT <= crate::render::wgpu_renderer::MAX_BUG_SLOTS);
 /// Per-bug: (orbit_radius_frac, orbit_z_offset_frac, orbit_speed_rad/s, body_size_frac).
 /// Radius and Z offsets are relative to `lamp_h`.
 pub const BUG_PARAMS: [(f32, f32, f32, f32); BUG_COUNT] = [
-    (0.55, -0.10, 3.60, 0.68),
-    (0.80, -0.25, 2.25, 0.75),
-    (0.45, -0.05, 5.10, 0.58),
-    (0.90, -0.35, 1.65, 0.82),
-    (0.60, -0.20, 4.20, 0.65),
-    (0.70, -0.15, 2.85, 0.72),
+    (0.38, -0.10, 3.60, 0.68),
+    (0.55, -0.25, 2.25, 0.75),
+    (0.30, -0.05, 5.10, 0.58),
+    (0.62, -0.35, 1.65, 0.82),
+    (0.42, -0.20, 4.20, 0.65),
+    (0.48, -0.15, 2.85, 0.72),
 ];
 
 pub fn initial_bug_phases() -> [f32; BUG_COUNT] {
@@ -69,11 +69,11 @@ pub fn push_moths_around_lamp(
 
         let bob = (t * bob_freq + fi * 1.3).sin() * lamp_h * 0.15;
         let r_nom = lamp_w * r_frac;
-        let r_drift = (t * drift_freq + fi * 2.1).sin() * r_nom * 0.20;
+        let r_drift = (t * drift_freq + fi * 2.1).sin() * r_nom * 0.14;
         let bug_wz = bulb_wz + lamp_h * z_frac + bob;
 
         let wing_half_span = 1.13 * size_frac * bug_body_len;
-        let orbit_r = (r_nom + r_drift).max(lamp_w * 0.72 + bug_body_len * 0.6 + wing_half_span);
+        let orbit_r = (r_nom + r_drift).max(lamp_w * 0.50 + bug_body_len * 0.6 + wing_half_span);
 
         let bug_wx = bulb_wx + orbit_r * phase.cos();
         let bug_wy = bulb_wy;
