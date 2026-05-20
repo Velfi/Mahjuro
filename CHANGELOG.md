@@ -7,6 +7,11 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.5.0-14 — 2026-05-20
+
+### Fixed
+- Steam Deck game mode no longer caps the game to ~10 FPS. Two Linux Vulkan swapchain paths were serializing every frame to gamescope's nested compositor: a Windows-only frame-latency clamp that was leaking into Linux builds, and wgpu's post-acquire fence wait (originally added for Windows DXGI pacing) that also blocked on Linux. Both are now Windows-only.
+
 ## 0.5.0-13 — 2026-05-19
 
 - maintenance, development, and bugfixes.
