@@ -195,12 +195,14 @@ impl SceneBehavior for YakuJournalScene {
         let cell_w = (w - side_margin * 2.0) / 5.0;
 
         let name_font = typography::size(typography::H28, h);
-        let stat_font = typography::size(typography::H36, h);
-        // Slightly larger than the name's stat line so "Lv N" scans on the felt.
+        // Slightly larger than the name so "Lv N" scans on the felt (H28 > H36 in px).
         let grid_lvl_font = typography::size(typography::H28, h);
         let name_h = name_font * 1.1;
-        let stat_h = stat_font * 1.1;
-        let caption_block_h = name_h + stat_h;
+        // Rect height must cover the pinned `grid_lvl_font` line box — the rasterizer
+        // vertically centers that box in the label rect and clips ascenders/descenders
+        // when rect.h < line_h (same fix as plaque stat cards below).
+        let lvl_h = grid_lvl_font * 1.12;
+        let caption_block_h = name_h + lvl_h;
 
         // Tile sizing. `size_px` on `ShowcaseTilePlacement` is the tile's
         // *short* edge; the long edge (up to ~1.5× for Chinese preset) is
@@ -372,7 +374,7 @@ impl SceneBehavior for YakuJournalScene {
                     _ => (format!("Lv {lvl}"), color::lighten(color::CHAMPAGNE, 0.06)),
                 };
                 frame.text(TextLabel {
-                    rect: [cell_cx - cell_w * 0.5, caption_y + name_h, cell_w, stat_h],
+                    rect: [cell_cx - cell_w * 0.5, caption_y + name_h, cell_w, lvl_h],
                     text: level_text,
                     color: level_color,
                     align: TextAlign::Center,

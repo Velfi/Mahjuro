@@ -65,7 +65,7 @@ impl RainField {
                 self.spawn_next_threshold = 0.35 + rng.random::<f32>() * 1.3;
                 let fall_mul = 0.88 + rng.random::<f32>() * 0.24;
                 self.particles.spawn_world_drop(
-                    volume.random_pos(),
+                    volume.random_pos_near_camera(cam, tuning.field.spawn_near_bias),
                     tuning.field.drop_color,
                     fall_mul,
                 );
@@ -92,6 +92,7 @@ impl RainField {
             tuning.field.splash_lifetime,
             tuning.field.drop_color,
             volume,
+            tuning.field.spawn_near_bias,
         );
         self.particles.update(dt);
     }

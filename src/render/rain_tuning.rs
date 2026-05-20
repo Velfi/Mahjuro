@@ -25,6 +25,9 @@ pub struct RainFieldTuning {
     /// Spawn ceiling: room top + this × room Z extent.
     #[serde(default = "default_field_volume_top_mul")]
     pub volume_top_mul: f32,
+    /// View-depth spawn falloff toward the camera (0 = uniform, ~2.2 = shipped default).
+    #[serde(default = "default_field_spawn_near_bias")]
+    pub spawn_near_bias: f32,
 }
 
 fn default_field_density() -> f32 {
@@ -37,6 +40,10 @@ fn default_field_volume_pad_xy() -> f32 {
 
 fn default_field_volume_top_mul() -> f32 {
     0.65
+}
+
+fn default_field_spawn_near_bias() -> f32 {
+    2.2
 }
 
 /// World rain tuning — [`Self::field`] plus global [`Self::speed_mul`].
@@ -70,6 +77,7 @@ impl RainTuning {
                 drop_color: [0.75, 0.82, 0.95, 0.62],
                 volume_pad_xy: default_field_volume_pad_xy(),
                 volume_top_mul: default_field_volume_top_mul(),
+                spawn_near_bias: default_field_spawn_near_bias(),
             },
         }
     }
@@ -124,6 +132,7 @@ impl RainTuning {
             12 => self.field.drop_color[3],
             13 => self.field.volume_pad_xy,
             14 => self.field.volume_top_mul,
+            15 => self.field.spawn_near_bias,
             _ => 0.0,
         }
     }
@@ -163,6 +172,7 @@ impl RainTuning {
             12 => self.field.drop_color[3] = v,
             13 => self.field.volume_pad_xy = v,
             14 => self.field.volume_top_mul = v,
+            15 => self.field.spawn_near_bias = v,
             _ => {}
         }
     }
@@ -182,6 +192,7 @@ impl RainTuning {
                 "        splash_lifetime: {:.4},\n",
                 "        drop_color: [{:.4}, {:.4}, {:.4}, {:.4}],\n",
                 "        volume_pad_xy: {:.4}, volume_top_mul: {:.4},\n",
+                "        spawn_near_bias: {:.4},\n",
                 "    }},\n",
                 "}};\n",
             ),
@@ -201,6 +212,7 @@ impl RainTuning {
             self.field.drop_color[3],
             self.field.volume_pad_xy,
             self.field.volume_top_mul,
+            self.field.spawn_near_bias,
         )
     }
 }
@@ -297,7 +309,7 @@ pub fn rain_hue_wheel_preview_linear(hue: f32) -> [f32; 3] {
 
 pub const RAIN_DEBUG_ROW_META: &[(&str, f32, f32, f32)] = &[
     ("Speed × (fall, wind, spawn)", 0.0, 30.0, 0.1),
-    ("Density (× spawn rate & pool)", 0.0, 3.0, 0.05),
+    ("Density (× spawn rate & pool)", 0.0, 25.0, 0.25),
     ("Spawn rate (drops/s)", 0.0, 800.0, 5.0),
     ("Pool size", 0.0, 600.0, 10.0),
     ("Fall speed (world Z u/s)", 0.0, 8000.0, 20.0),
@@ -311,6 +323,7 @@ pub const RAIN_DEBUG_ROW_META: &[(&str, f32, f32, f32)] = &[
     ("Drop alpha", 0.0, 1.0, 0.01),
     ("Volume pad XY (fraction)", 0.0, 2.0, 0.02),
     ("Volume top (× room Z)", 0.1, 2.0, 0.02),
+    ("Spawn near-camera bias", 0.0, 6.0, 0.05),
 ];
 
 /// Slider rows in the rain debug overlay (Save / Reset / Close follow).

@@ -42,6 +42,21 @@ pub struct RainSpawnVolume {
     pub max: Vec3,
 }
 
+/// Minimum spawn/respawn weight at the far end of the volume (faint background rain).
+const RAIN_SPAWN_FAR_FLOOR: f32 = 0.12;
+const RAIN_SPAWN_BIAS_MAX_TRIES: u32 = 16;
+
+fn rain_view_forward(cam: &CameraParams) -> Vec3 {
+    let eye = Vec3::from_array(cam.eye);
+    let target = Vec3::from_array(cam.target);
+    (target - eye).normalize()
+}
+
+fn rain_view_depth(cam: &CameraParams, pos: Vec3) -> f32 {
+    let eye = Vec3::from_array(cam.eye);
+    (pos - eye).dot(rain_view_forward(cam))
+}
+
 impl RainSpawnVolume {
     /// Random XY inside the column; Z spread across the **upper** portion of the volume.
     ///
@@ -58,6 +73,59 @@ impl RainSpawnVolume {
         let t = rng.random::<f32>().sqrt();
         let z = self.max.z - t * z_span * 0.55;
         Vec3::new(x, y, z)
+    }
+
+    /// [`Self::random_pos`] biased toward the camera along view depth (denser near, sparse far).
+    /// `near_bias` ≤ 0 skips bias (uniform spawn).
+    pub fn random_pos_near_camera(self, cam: &CameraParams, near_bias: f32) -> Vec3 {
+        if near_bias <= 0.0 {
+            return self.random_pos();
+        }
+        let (d_min, d_max) = self.view_depth_range(cam);
+        let mut rng = rand::rng();
+        for _ in 0..RAIN_SPAWN_BIAS_MAX_TRIES {
+            let pos = self.random_pos();
+            if rng.random::<f32>()
+                <= Self::spawn_acceptance(cam, pos, d_min, d_max, near_bias)
+            {
+                return pos;
+            }
+        }
+        self.random_pos()
+    }
+
+    fn view_depth_range(self, cam: &CameraParams) -> (f32, f32) {
+        let mut d_min = f32::INFINITY;
+        let mut d_max = f32::NEG_INFINITY;
+        for xi in [self.min.x, self.max.x] {
+            for yi in [self.min.y, self.max.y] {
+                for zi in [self.min.z, self.max.z] {
+                    let d = rain_view_depth(cam, Vec3::new(xi, yi, zi));
+                    d_min = d_min.min(d);
+                    d_max = d_max.max(d);
+                }
+            }
+        }
+        if d_min.is_finite() && d_max.is_finite() {
+            (d_min, d_max)
+        } else {
+            (0.0, 1.0)
+        }
+    }
+
+    fn spawn_acceptance(
+        cam: &CameraParams,
+        pos: Vec3,
+        d_min: f32,
+        d_max: f32,
+        near_bias: f32,
+    ) -> f32 {
+        let depth = rain_view_depth(cam, pos);
+        let span = (d_max - d_min).max(1.0);
+        let t = ((depth - d_min) / span).clamp(0.0, 1.0);
+        let near = 1.0 - t;
+        (RAIN_SPAWN_FAR_FLOOR + (1.0 - RAIN_SPAWN_FAR_FLOOR) * near.powf(near_bias.max(0.0)))
+            .clamp(0.0, 1.0)
     }
 }
 
@@ -205,6 +273,7 @@ impl ParticleSystem {
         splash_lifetime: f32,
         splash_color: [f32; 4],
         volume: RainSpawnVolume,
+        spawn_near_bias: f32,
     ) {
         self.splashes_this_frame = 0;
         let mut rng = rand::rng();
@@ -232,14 +301,14 @@ impl ParticleSystem {
             {
                 hits.push((i, hit_world));
             } else if drop.pos.z < volume.min.z {
-                drop.pos = volume.random_pos();
+                drop.pos = volume.random_pos_near_camera(cam, spawn_near_bias);
                 drop.fall_speed_mul = 0.88 + rng.random::<f32>() * 0.24;
             }
         }
         for (i, hit_world) in hits {
             let (sx, sy) = cam.project_world_to_screen(window_w, window_h, hit_world);
             self.emit_splash_at(sx, sy, splash_count, splash_color, splash_lifetime);
-            self.world_drops[i].pos = volume.random_pos();
+            self.world_drops[i].pos = volume.random_pos_near_camera(cam, spawn_near_bias);
             self.world_drops[i].fall_speed_mul = 0.88 + rng.random::<f32>() * 0.24;
         }
     }
