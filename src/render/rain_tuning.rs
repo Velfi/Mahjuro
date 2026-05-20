@@ -63,21 +63,21 @@ impl Default for RainTuning {
 impl RainTuning {
     pub fn shipping_default() -> Self {
         Self {
-            speed_mul: 1.0,
+            speed_mul: 3.1504,
             field: RainFieldTuning {
-                density: 1.0,
+                density: 0.7963,
                 spawn_rate: 280.0,
-                pool_size: 520.0,
-                fall_speed: 3300.0,
-                wind_x: 18.0,
-                wind_y: -10.0,
-                streak_len_px: 20.0,
-                splash_count: 8.0,
-                splash_lifetime: 0.18,
+                pool_size: 226.6241,
+                fall_speed: 8000.0,
+                wind_x: 423.8180,
+                wind_y: 800.0,
+                streak_len_px: 48.0,
+                splash_count: 15.9531,
+                splash_lifetime: 0.3331,
                 drop_color: [0.75, 0.82, 0.95, 0.62],
-                volume_pad_xy: default_field_volume_pad_xy(),
-                volume_top_mul: default_field_volume_top_mul(),
-                spawn_near_bias: default_field_spawn_near_bias(),
+                volume_pad_xy: 0.5045,
+                volume_top_mul: 0.65,
+                spawn_near_bias: 2.9529,
             },
         }
     }
