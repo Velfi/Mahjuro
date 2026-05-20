@@ -174,6 +174,16 @@ pub enum RelicId {
     NestEgg,
     /// +2 gold per unused discard at round end.
     Patience,
+    /// +1 discard per round (discard cap).
+    Kindness,
+    /// +0.5 permanent mult per unused play when the blind is cleared (stacks).
+    Temperance,
+    /// +2 mult if no scored tile has an enhancement.
+    Chastity,
+    /// Round start: if gold < $10, +$5 (once per round).
+    Charity,
+    /// +1 play per round (play cap).
+    Diligence,
     // Conditional ×mult
     /// ×2 mult if scored hand is all pairs.
     WayOfPairs,
@@ -364,6 +374,11 @@ impl RelicId {
             RelicId::JadeAbacus => "jade_abacus.png",
             RelicId::NestEgg => "nest_egg.png",
             RelicId::Patience => "patience.png",
+            RelicId::Kindness => "kindness.png",
+            RelicId::Temperance => "temperance.png",
+            RelicId::Chastity => "chastity.png",
+            RelicId::Charity => "charity.png",
+            RelicId::Diligence => "diligence.png",
             RelicId::WayOfPairs => "way_of_pairs.png",
             RelicId::WayOfTriplets => "way_of_triplets.png",
             RelicId::WayOfSequences => "way_of_sequences.png",
@@ -735,6 +750,13 @@ pub fn relic_description_live(
             format!(
                 "{base} [streak: {streak}, +{:.1} mult]",
                 0.5 * streak as f64
+            )
+        }
+        RelicId::Temperance => {
+            let stacks = counters.get(&RelicId::Temperance).copied().unwrap_or(0);
+            format!(
+                "{base} [+{:.1} permanent mult]",
+                stacks as f64 / 10.0
             )
         }
         RelicId::Obsession => {
@@ -1182,6 +1204,10 @@ fn relic_scoring_copy_dup_is_incompatible(target: RelicId) -> bool {
             | RelicId::JadeAbacus
             | RelicId::NestEgg
             | RelicId::Patience
+            | RelicId::Kindness
+            | RelicId::Diligence
+            | RelicId::Temperance
+            | RelicId::Charity
             | RelicId::Sweepstakes
             | RelicId::BeggarsCup
             | RelicId::Cosmopolitan
@@ -1418,6 +1444,11 @@ mod tests {
                     | RelicId::JadeAbacus
                     | RelicId::NestEgg
                     | RelicId::Patience
+                    | RelicId::Kindness
+                    | RelicId::Temperance
+                    | RelicId::Chastity
+                    | RelicId::Charity
+                    | RelicId::Diligence
                     | RelicId::WayOfPairs
                     | RelicId::WayOfTriplets
                     | RelicId::WayOfSequences
@@ -1515,6 +1546,11 @@ mod tests {
                 RelicId::JadeAbacus,
                 RelicId::NestEgg,
                 RelicId::Patience,
+                RelicId::Kindness,
+                RelicId::Temperance,
+                RelicId::Chastity,
+                RelicId::Charity,
+                RelicId::Diligence,
                 RelicId::WayOfPairs,
                 RelicId::WayOfTriplets,
                 RelicId::WayOfSequences,

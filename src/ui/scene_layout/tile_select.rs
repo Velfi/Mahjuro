@@ -43,18 +43,6 @@ pub enum TileSelectField {
     KeyLight,
 }
 
-pub fn lookup_tile_select_field(name: &str) -> Option<TileSelectField> {
-    Some(match name {
-        "tile_select.panel.content" => TileSelectField::LeftPanel,
-        "tile_select.panel.bottom_hint" => TileSelectField::BottomHint,
-        "tile_select.button_menu" => TileSelectField::ButtonMenu,
-        "tile_select.preview.corner_tl" => TileSelectField::PreviewCornerTl,
-        "tile_select.preview.corner_br" => TileSelectField::PreviewCornerBr,
-        "tile_select.key_light" => TileSelectField::KeyLight,
-        _ => return None,
-    })
-}
-
 pub fn tile_select_field_path(field: TileSelectField) -> &'static str {
     match field {
         TileSelectField::LeftPanel => "tile_select.panel.content",
@@ -78,17 +66,6 @@ impl TileSelectField {
 }
 
 impl TileSelectPositions {
-    pub fn field_mut(&mut self, field: TileSelectField) -> &mut Placement {
-        match field {
-            TileSelectField::LeftPanel => &mut self.left_panel,
-            TileSelectField::BottomHint => &mut self.bottom_hint,
-            TileSelectField::ButtonMenu => &mut self.button_menu,
-            TileSelectField::PreviewCornerTl => &mut self.preview_corner_tl,
-            TileSelectField::PreviewCornerBr => &mut self.preview_corner_br,
-            TileSelectField::KeyLight => &mut self.key_light,
-        }
-    }
-
     pub fn field_ref(&self, field: TileSelectField) -> &Placement {
         match field {
             TileSelectField::LeftPanel => &self.left_panel,

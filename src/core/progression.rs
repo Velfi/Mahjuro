@@ -623,7 +623,16 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
         },
         // ── L8: Mid scaling specialists + Sanshoku/Honroutou ─────────────
         8 => LevelUnlocks {
-            relics: vec![RelicId::Humility, RelicId::Bonfire, RelicId::StarTile],
+            relics: vec![
+                RelicId::Humility,
+                RelicId::Kindness,
+                RelicId::Temperance,
+                RelicId::Chastity,
+                RelicId::Charity,
+                RelicId::Diligence,
+                RelicId::Bonfire,
+                RelicId::StarTile,
+            ],
             rules: vec![],
             yaku: vec![YakuKind::SanshokuDoujun, YakuKind::Honroutou],
             dora: false,

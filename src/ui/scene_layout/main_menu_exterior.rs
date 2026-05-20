@@ -43,20 +43,6 @@ pub enum MainMenuExteriorField {
     SignBody,
 }
 
-pub fn lookup_main_menu_exterior_field(name: &str) -> Option<MainMenuExteriorField> {
-    Some(match name {
-        "main_menu_exterior.door_hit" => MainMenuExteriorField::DoorHit,
-        "main_menu_exterior.sign_hit" => MainMenuExteriorField::SignHit,
-        "main_menu_exterior.bike_hit" => MainMenuExteriorField::BikeHit,
-        "main_menu_exterior.play_label" => MainMenuExteriorField::PlayLabel,
-        "main_menu_exterior.options_label" => MainMenuExteriorField::OptionsLabel,
-        "main_menu_exterior.quit_label" => MainMenuExteriorField::QuitLabel,
-        "main_menu_exterior.sign_title" => MainMenuExteriorField::SignTitle,
-        "main_menu_exterior.sign_body" => MainMenuExteriorField::SignBody,
-        _ => return None,
-    })
-}
-
 pub fn main_menu_exterior_field_path(field: MainMenuExteriorField) -> &'static str {
     match field {
         MainMenuExteriorField::DoorHit => "main_menu_exterior.door_hit",
@@ -84,19 +70,6 @@ impl MainMenuExteriorField {
 }
 
 impl MainMenuExteriorPositions {
-    pub fn field_mut(&mut self, field: MainMenuExteriorField) -> &mut Placement {
-        match field {
-            MainMenuExteriorField::DoorHit => &mut self.door_hit,
-            MainMenuExteriorField::SignHit => &mut self.sign_hit,
-            MainMenuExteriorField::BikeHit => &mut self.bike_hit,
-            MainMenuExteriorField::PlayLabel => &mut self.play_label,
-            MainMenuExteriorField::OptionsLabel => &mut self.options_label,
-            MainMenuExteriorField::QuitLabel => &mut self.quit_label,
-            MainMenuExteriorField::SignTitle => &mut self.sign_title,
-            MainMenuExteriorField::SignBody => &mut self.sign_body,
-        }
-    }
-
     pub fn field_ref(&self, field: MainMenuExteriorField) -> &Placement {
         match field {
             MainMenuExteriorField::DoorHit => &self.door_hit,

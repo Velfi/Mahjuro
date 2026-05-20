@@ -160,28 +160,6 @@ pub enum GameplayField {
     ConsumableDishTalisman,
 }
 
-pub fn lookup_gameplay_field(name: &str) -> Option<GameplayField> {
-    Some(match name {
-        "gameplay.relic_col" => GameplayField::RelicCol,
-        "gameplay.score_panel.plaque" => GameplayField::Plaque,
-        "gameplay.counter.draws_fan" => GameplayField::CounterDrawsFan,
-        "gameplay.counter.discards_fan" => GameplayField::CounterDiscardsFan,
-        "gameplay.score_panel.ofuda" => GameplayField::Ofuda,
-        "gameplay.score_panel.coin_pile" => GameplayField::CoinPile,
-        "gameplay.dora" => GameplayField::Dora,
-        "gameplay.round_wind" => GameplayField::RoundWind,
-        "gameplay.action_bar.bowl" => GameplayField::Bowl,
-        "gameplay.action_bar.mirror" => GameplayField::Mirror,
-        "gameplay.action_bar.tablet_cash_in" => GameplayField::TabletCashIn,
-        "gameplay.action_bar.tablet_journal" => GameplayField::TabletJournal,
-        "gameplay.hand.strip" => GameplayField::HandStrip,
-        "gameplay.hand.yaku_tablet" => GameplayField::YakuTablet,
-        "gameplay.talisman_dish" => GameplayField::TalismanDish,
-        "gameplay.consumable_dish.talisman" => GameplayField::ConsumableDishTalisman,
-        _ => return None,
-    })
-}
-
 pub fn gameplay_field_path(field: GameplayField) -> &'static str {
     match field {
         GameplayField::RelicCol => "gameplay.relic_col",
@@ -225,27 +203,6 @@ impl GameplayField {
 }
 
 impl GameplayPositions {
-    pub fn field_mut(&mut self, field: GameplayField) -> &mut Placement {
-        match field {
-            GameplayField::RelicCol => &mut self.relic_col,
-            GameplayField::Plaque => &mut self.plaque,
-            GameplayField::CounterDrawsFan => &mut self.counter_draws_fan,
-            GameplayField::CounterDiscardsFan => &mut self.counter_discards_fan,
-            GameplayField::Ofuda => &mut self.ofuda,
-            GameplayField::CoinPile => &mut self.coin_pile,
-            GameplayField::Dora => &mut self.dora,
-            GameplayField::RoundWind => &mut self.round_wind,
-            GameplayField::Bowl => &mut self.bowl,
-            GameplayField::Mirror => &mut self.mirror,
-            GameplayField::HandStrip => &mut self.hand_strip,
-            GameplayField::YakuTablet => &mut self.yaku_tablet,
-            GameplayField::TabletCashIn => &mut self.tablet_cash_in,
-            GameplayField::TabletJournal => &mut self.tablet_journal,
-            GameplayField::TalismanDish => &mut self.talisman_dish,
-            GameplayField::ConsumableDishTalisman => &mut self.consumable_dish_talisman,
-        }
-    }
-
     pub fn field_ref(&self, field: GameplayField) -> &Placement {
         match field {
             GameplayField::RelicCol => &self.relic_col,

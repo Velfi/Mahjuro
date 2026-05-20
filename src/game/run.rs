@@ -728,6 +728,7 @@ pub struct RunState {
     /// Per-relic mutable counters. Key is RelicId, value meaning depends
     /// on the relic:
     ///   Humility     → consecutive plays without honor tiles
+    ///   Temperance   → permanent mult stack ×10 (+0.5 mult per unused play on blind clear)
     ///   Obsession    → rounds without most-used yaku
     ///   Bonfire      → relics sold this run
     ///   MeltingIce   → remaining chip bonus (starts 80, -8 per play)
@@ -837,11 +838,22 @@ impl RunState {
         if relics.has(crate::core::relic::RelicId::TinyHands) {
             d = d.saturating_add(2);
         }
+        if relics.has(crate::core::relic::RelicId::Kindness) {
+            d = d.saturating_add(1);
+        }
         d
     }
 
+    fn play_cap_for(mode: &GameMode, relics: &RelicState) -> u32 {
+        let mut p = mode.starting_plays;
+        if relics.has(crate::core::relic::RelicId::Diligence) {
+            p = p.saturating_add(1);
+        }
+        p
+    }
+
     fn round_play_cap(&self) -> u32 {
-        self.mode.starting_plays
+        Self::play_cap_for(&self.mode, &self.relics)
     }
 
     fn round_discard_cap(&self) -> u32 {
@@ -1064,6 +1076,7 @@ impl RunState {
             boss::pick_for_ante_with_floor(&mut boss_pool_remaining, 1, boss_floor, &mut rng);
 
         let starting_discards = Self::discard_cap_for(&mode, &relics);
+        let starting_plays = Self::play_cap_for(&mode, &relics);
         let mut state = Self {
             wall,
             hand,
@@ -1081,8 +1094,8 @@ impl RunState {
             round_rules: mode.starting_rules.clone(),
             run_number: 1,
             ante: 1,
-            plays_remaining: mode.starting_plays,
-            plays_max: mode.starting_plays,
+            plays_remaining: starting_plays,
+            plays_max: starting_plays,
             discards_remaining: starting_discards,
             discards_max: starting_discards,
             gold: mode.starting_gold as i32,

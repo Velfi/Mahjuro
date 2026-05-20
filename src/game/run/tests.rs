@@ -645,6 +645,24 @@ mod cases {
     }
 
     #[test]
+    fn kindness_adds_one_discard_cap() {
+        let mut run = test_run();
+        run.relics.active.push(RelicId::Kindness);
+        run.reset_round_resources();
+        assert_eq!(run.discards_remaining, STARTING_DISCARDS + 1);
+        assert_eq!(run.discards_max, STARTING_DISCARDS + 1);
+    }
+
+    #[test]
+    fn diligence_adds_one_play_cap() {
+        let mut run = test_run();
+        run.relics.active.push(RelicId::Diligence);
+        run.reset_round_resources();
+        assert_eq!(run.plays_remaining, STARTING_PLAYS + 1);
+        assert_eq!(run.plays_max, STARTING_PLAYS + 1);
+    }
+
+    #[test]
     fn big_hands_and_tiny_hands_cancel_hand_delta() {
         let mut run = test_run();
         run.relics.active.push(RelicId::BigHands);

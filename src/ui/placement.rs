@@ -37,15 +37,6 @@ impl Placement {
         }
     }
 
-    pub fn is_finite(&self) -> bool {
-        self.nx.is_finite()
-            && self.ny.is_finite()
-            && self.lift_mm.is_finite()
-            && self.rx_deg.is_finite()
-            && self.ry_deg.is_finite()
-            && self.rz_deg.is_finite()
-    }
-
     #[allow(dead_code)]
     #[inline]
     pub fn rotation_xyz_rad(&self) -> [f32; 3] {
@@ -117,13 +108,5 @@ mod tests {
         assert!(approx(r[0], std::f32::consts::FRAC_PI_2));
         assert!(approx(r[1], -std::f32::consts::FRAC_PI_4));
         assert!(approx(r[2], 0.0));
-    }
-
-    #[test]
-    fn placement_is_finite_rejects_nan() {
-        let mut p = Placement::at(0.5, 0.5, 10.0);
-        assert!(p.is_finite());
-        p.nx = f32::NAN;
-        assert!(!p.is_finite());
     }
 }
