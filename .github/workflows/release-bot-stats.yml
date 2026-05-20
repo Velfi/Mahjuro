@@ -1,9 +1,8 @@
 # After each published GitHub Release, run a 20k bot simulation on the
 # release tag and open a PR that updates docs/bot_stats_20k.html.
 #
-# Uses the Linux update tarball from that release (same artifact as release.yml)
-# instead of compiling — requires the tag to have a published release with
-# `mahjuro-<tag>-linux-x86_64.tar.gz` (workflow_dispatch on a bare tag will fail).
+# Builds a Linux release binary on ubuntu-latest (no Linux GitHub release
+# artifact — releases are Windows and macOS only).
 
 name: Release bot stats (20k)
 
@@ -13,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag with Linux tarball asset (e.g. v0.5.0)"
+        description: "Release tag to simulate (e.g. v0.5.0)"
         required: true
         type: string
 
@@ -48,8 +47,13 @@ jobs:
           ref: ${{ steps.tag.outputs.tag }}
           lfs: false
 
-      # Match release-linux.yml link-time deps so the published binary’s shared
-      # libraries resolve (no compile on this job).
+      - uses: ./.github/actions/hydrate-lfs-bundle
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
@@ -68,27 +72,31 @@ jobs:
             libgtk-3-dev \
             libxdo-dev
 
-      - name: Download Linux release bundle
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
+      - name: Linux — swap and compile job limit
         run: |
-          set -euo pipefail
-          TAG="${{ steps.tag.outputs.tag }}"
-          ARCHIVE="mahjuro-${TAG}-linux-x86_64.tar.gz"
-          gh release download "$TAG" \
-            --repo "${{ github.repository }}" \
-            --pattern "$ARCHIVE" \
-            --clobber
-          mkdir -p mahjuro-bundle
-          tar -xzf "$ARCHIVE" -C mahjuro-bundle
+          SWAPFILE=/home/runner/cargo_extra.swap
+          sudo fallocate -l 8G "$SWAPFILE" || sudo dd if=/dev/zero of="$SWAPFILE" bs=1M count=8192 status=none
+          sudo chmod 600 "$SWAPFILE"
+          sudo mkswap "$SWAPFILE"
+          sudo swapon "$SWAPFILE"
+          echo "CARGO_BUILD_JOBS=2" >> "$GITHUB_ENV"
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          prefix-key: bot-stats-20k
+          key: x86_64-unknown-linux-gnu
+
+      - name: Build release binary
+        run: cargo build --release --locked --target x86_64-unknown-linux-gnu
 
       - name: Run 20k bot simulation
         shell: bash
         run: |
           set -euo pipefail
           OUT="${{ github.workspace }}/docs/bot_stats_20k.html"
-          ( cd mahjuro-bundle && ./mahjuro bot 20000 -o "$OUT" )
+          BIN="target/x86_64-unknown-linux-gnu/release/mahjuro"
+          ( cd "$(dirname "$BIN")" && ./"$(basename "$BIN")" bot 20000 -o "$OUT" )
 
       - name: Open PR with bot stats HTML
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
@@ -100,5 +108,5 @@ jobs:
           body: |
             Automated 20,000-run bot report for tag **${{ steps.tag.outputs.tag }}** (same commit as that release).
 
-            Generated with the published Linux bundle `mahjuro-${{ steps.tag.outputs.tag }}-linux-x86_64.tar.gz` (`./mahjuro bot 20000`).
+            Built from source on Linux (`cargo build --release` at that tag, then `./mahjuro bot 20000`).
           add-paths: docs/bot_stats_20k.html

@@ -1,6 +1,6 @@
 # Steam build uploads
 
-Mahjuro publishes Windows / macOS / Linux builds to Steam (AppID `4636490`)
+Mahjuro publishes Windows and macOS builds to Steam (AppID `4636490`)
 using `steamcmd` and the VDF scripts in [packaging/steam/](../packaging/steam/).
 The driver is [scripts/steam-upload.sh](../scripts/steam-upload.sh).
 
@@ -29,7 +29,7 @@ and confirm three depots exist. The defaults the script assumes:
 | -------- | --------- | ----------------------- |
 | Windows  | `4636491` | `STEAM_DEPOT_WINDOWS`   |
 | macOS    | `4636492` | `STEAM_DEPOT_MACOS`     |
-| Linux    | `4636493` | `STEAM_DEPOT_LINUX`     |
+| Linux    | `4636493` | `STEAM_DEPOT_LINUX`     | *(not uploaded by `steam-upload.sh`; depot exists for a future Linux Steam build)* |
 
 If Valve assigned different IDs, export the matching `STEAM_DEPOT_*` env var.
 
@@ -73,8 +73,8 @@ export STEAM_BUILD_USER=mahjuro_ci
 scripts/steam-upload.sh --branch internal 0.4.2
 ```
 
-This downloads `mahjuro-v0.4.2-{windows,macos,linux}-*` from the GitHub
-release, stages them under `build-staging/content/<platform>/`, renders the
+This downloads `mahjuro-v0.4.2-{windows,macos}-*` from the GitHub release,
+stages them under `build-staging/content/<platform>/`, renders the
 VDFs, and runs `steamcmd +run_app_build`. The `--branch internal` flag sets
 the build live on the `internal` beta branch — leave it off to upload without
 promoting (then promote manually in the partner UI).
@@ -145,8 +145,8 @@ it reuses the copy `steamworks-sys` extracted under
 vendors the SDK headers and redistributables under `lib/steam/`).
 
 On Linux the binary is linked with `-Wl,-rpath,$ORIGIN` so the loader
-finds `libsteam_api.so` in the same directory as the executable (Steam
-Linux depot, GitHub `linux-x86_64` tarball, and AppImage `usr/bin/`).
+finds `libsteam_api.so` in the same directory as the executable (e.g. a
+future Steam Linux depot layout).
 
 The macOS packaging script ([scripts/package-macos.sh](../scripts/package-macos.sh))
 also copies the dylib into `Mahjuro.app/Contents/MacOS/` next to the
