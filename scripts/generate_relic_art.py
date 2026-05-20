@@ -867,15 +867,20 @@ RELICS = [
     (
         "humility",
         "Humility",
-        "A hooded pilgrim in plain travel robes walking forward along a "
-        "narrow road, staff in hand, head bowed. Behind them in the dusk "
-        "an ornate golden crown set with a crimson dragon glyph lies "
-        "abandoned in the dirt, half-forgotten. Ahead of the pilgrim the "
-        "path is lit by a row of small humble lanterns receding into the "
-        "distance, each one burning a little brighter than the last, "
-        "drawing the eye toward the horizon. Painterly illustration with "
-        "soft brushwork and warm amber lighting against a deep twilight sky.",
-        "Painterly illustration, hooded pilgrim in muted travel robes, abandoned golden crown with crimson glyph in shadow behind, row of lanterns ahead with intensifying warm amber glow, deep twilight sky, soft brushwork.",
+        "A Northern Renaissance allegory pin after Hans Sebald Beham's Humilitas "
+        "engraving tradition: a hooded pilgrim in three-quarter view turned "
+        "**away** from honor tiles — winds and dragons pushed face-down behind "
+        "the figure, not worn. An ornate crown with a crimson dragon glyph lies "
+        "trampled in mud behind. The path ahead shows numbered bamboo, character, "
+        "and dot tiles only — no honors on the road. Compact vertical "
+        "cameo silhouette like the original print (~10×7 cm proportions), with fine "
+        "cross-hatched shading suggested in recessed enamel wells rather than flat "
+        "cartoon fills. Black enamel background. "
+        "At the feet, one honor tile deliberately left unplayed, face-down. "
+        "Moralizing, sculptural, legible at pin scale.",
+        "Warm aged ivory robes, deep umber cross-hatch enamel, muted slate honor "
+        "tile backs, trampled gold crown recesses, plain ivory numbered tiles on "
+        "the path, cool iron rim highlights.",
     ),
     (
         "obsession",
@@ -1009,12 +1014,85 @@ RELICS = [
         "hover as one lowers a laurel victory wreath toward her head. Compact vertical "
         "cameo silhouette like the original print (~10×7 cm proportions), with fine "
         "cross-hatched shading suggested in recessed enamel wells rather than flat "
-        "cartoon fills. At her feet, a short neat stack of unused face-down mahjong "
+        "cartoon fills. Black enamel background. At her feet, a short neat stack of unused face-down mahjong "
         "tiles nods to waiting out the round. Moralizing, sculptural, legible at "
         "pin scale — engraved draftsmanship translated into raised metal lines.",
         "Warm aged ivory flesh and lamb wool, deep umber cross-hatch enamel, muted "
         "slate-blue demon, pale laurel-green wreath, soft cream wing feathers, cool "
         "iron rim highlights on the figures.",
+    ),
+    (
+        "kindness",
+        "Kindness",
+        "A Northern Renaissance allegory pin after Hans Sebald Beham's Misericordia "
+        "tradition: a calm figure with open palm offering a mahjong tile toward an "
+        "empty seat or unseen companion — gentle sheltering posture, Compact vertical "
+        "cameo silhouette like the original print (~10×7 cm proportions), with fine "
+        "cross-hatched shading suggested in recessed enamel wells rather than flat "
+        "cartoon fills. Black enamel background. At the feet, **five** face-down wall "
+        "tiles in a tidy discard row: four base tiles plus one extra clearly separated "
+        "or highlighted — the spare discard granted by the relic. Moralizing, "
+        "sculptural, legible at pin scale.",
+        "Warm aged ivory flesh, deep umber cross-hatch, muted teal spare tile "
+        "highlight, ivory tile faces, cool iron rim highlights.",
+    ),
+    (
+        "temperance",
+        "Temperance",
+        "A Northern Renaissance allegory pin after Hans Sebald Beham's Temperantia "
+        "tradition: a winged figure bridling a small imp or restraining a cup with "
+        "one hand stayed against rash haste — measured composure, compact vertical "
+        "cameo silhouette like the original print (~10×7 cm proportions), with fine "
+        "cross-hatched shading suggested in recessed enamel wells rather than flat "
+        "cartoon fills. Black enamel background. At the feet, unused play tally: stone "
+        "counters or face-down tiles still on a tray, not spent, beside a scroll or "
+        "laurel ring with etched hash marks suggesting growth across blinds. Mirror "
+        "Patience's saved-resource layout but for plays, not discards.",
+        "Warm aged ivory flesh, deep umber cross-hatch, muted slate-blue imp, pale "
+        "laurel-green growth marks, cool iron rim highlights.",
+    ),
+    (
+        "chastity",
+        "Chastity",
+        "A Northern Renaissance allegory pin after Hans Sebald Beham's Castitas "
+        "tradition: a veiled woman holding an upright lily — purity without "
+        "ornament. Compact vertical cameo silhouette like the original print (~10×7 cm proportions), with fine "
+        "cross-hatched shading suggested in recessed enamel wells rather than flat "
+        "cartoon fills. Black enamel background. Scored props "
+        "are plain ivory mahjong tiles only: **no** pearl, gold leaf, talisman seal, "
+        "or polychrome enhancement in any well. At the feet, a pair of unadorned "
+        "simple tiles and one rejected gilded tile lying aside, unused. Matte fills "
+        "only on tiles.",
+        "Warm aged ivory flesh and veil, deep umber cross-hatch, pale lily-green, "
+        "plain ivory tile wells, dull rejected gold tile aside, cool iron rim.",
+    ),
+    (
+        "charity",
+        "Charity",
+        "A Northern Renaissance allegory pin after Hans Sebald Beham's Caritas "
+        "tradition: a figure pouring coins from a **nearly empty purse** into a "
+        "beggar's bowl at dawn — thin sunrise rim along the cameo edge. Only a few "
+        "coins remain in the purse; a stream of **five** new coins falls into the "
+        "bowl. Compact vertical cameo silhouette like the original print (~10×7 cm proportions), with fine "
+        "cross-hatched shading suggested in recessed enamel wells rather than flat "
+        "cartoon fills. Black enamel background. At the feet, an "
+        "empty coin stack beside a small fresh pile of five — broke before the gift.",
+        "Warm aged ivory flesh, deep umber cross-hatch, thin gold glints on the new "
+        "five coins only, muted rose dawn rim, cool iron highlights.",
+    ),
+    (
+        "diligence",
+        "Diligence",
+        "A Northern Renaissance allegory pin after Hans Sebald Beham's Industria "
+        "tradition: a steady worker at a loom or beehive — traditional diligence "
+        "attributes, compact vertical cameo silhouette like the original print (~10×7 cm proportions), with fine "
+        "cross-hatched shading suggested in recessed enamel wells rather than flat "
+        "cartoon fills. Black enamel background. At the feet, "
+        "**six** tick marks on a work ledger or six ready tiles in a play line — base "
+        "five plays plus one extra — or a hand reaching to place a sixth tile while "
+        "five already sit committed. The bonus play waiting to be used.",
+        "Warm aged ivory flesh, deep umber cross-hatch, muted honey-amber beehive or "
+        "walnut loom wood, ivory tile faces, cool iron rim highlights.",
     ),
     (
         "way_of_pairs",

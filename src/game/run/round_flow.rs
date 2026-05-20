@@ -104,6 +104,12 @@ impl RunState {
             core.finalize_hand_after_draw();
         });
 
+        // Round-start gold (Charity, Sweepstakes): one `apply_gold_reward` so `bus` is not moved twice.
+        let mut round_start_gold = 0i32;
+        if self.relics.has(RelicId::Charity) && self.gold < 10 {
+            round_start_gold += 5;
+            self.relic_activations.push(RelicId::Charity);
+        }
         // Sweepstakes: 25% +$2, 25% +$4, 50% nothing. Rolled each round start.
         // Fortune's Favor doubles the weight of each payout vs. nothing → ⅓ / ⅓ / ⅓.
         if self.relics.has(crate::core::relic::RelicId::Sweepstakes) {
@@ -125,10 +131,13 @@ impl RunState {
                 }
             };
             if payout > 0 {
-                self.apply_gold_reward(payout, bus);
+                round_start_gold += payout;
                 self.relic_activations
                     .push(crate::core::relic::RelicId::Sweepstakes);
             }
+        }
+        if round_start_gold > 0 {
+            self.apply_gold_reward(round_start_gold, bus);
         }
     }
 

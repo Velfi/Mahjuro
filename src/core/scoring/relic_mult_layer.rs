@@ -332,6 +332,25 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
         }
     }
 
+    if has(RelicId::Temperance) {
+        let stacks = ctx
+            .relic
+            .counters
+            .get(&RelicId::Temperance)
+            .copied()
+            .unwrap_or(0);
+        if stacks > 0 {
+            push_mult(steps, *chips, mult, "Temperance", stacks as f64 / 10.0);
+        }
+    }
+
+    if has(RelicId::Chastity) && !tiles.is_empty() {
+        let all_unenhanced = tiles.iter().all(|t| t.enhancement.is_none());
+        if all_unenhanced {
+            push_mult(steps, *chips, mult, "Chastity", 2.0);
+        }
+    }
+
     if has(RelicId::Kintsugi) {
         let broken = ctx
             .relic

@@ -33,18 +33,6 @@ pub enum TutorialField {
     TryItTrigger,
 }
 
-pub fn lookup_tutorial_field(name: &str) -> Option<TutorialField> {
-    Some(match name {
-        "tutorial.shop.relic" => TutorialField::ShopRelic,
-        "tutorial.shop.ribbon" => TutorialField::ShopRibbon,
-        "tutorial.shop.talisman" => TutorialField::ShopTalisman,
-        "tutorial.shop.pack" => TutorialField::ShopPack,
-        "tutorial.try_it.mirror" => TutorialField::TryItMirror,
-        "tutorial.try_it.trigger" => TutorialField::TryItTrigger,
-        _ => return None,
-    })
-}
-
 pub fn tutorial_field_path(field: TutorialField) -> &'static str {
     match field {
         TutorialField::ShopRelic => "tutorial.shop.relic",
@@ -68,17 +56,6 @@ impl TutorialField {
 }
 
 impl TutorialPositions {
-    pub fn field_mut(&mut self, field: TutorialField) -> &mut Placement {
-        match field {
-            TutorialField::ShopRelic => &mut self.shop_relic,
-            TutorialField::ShopRibbon => &mut self.shop_ribbon,
-            TutorialField::ShopTalisman => &mut self.shop_talisman,
-            TutorialField::ShopPack => &mut self.shop_pack,
-            TutorialField::TryItMirror => &mut self.try_it_mirror,
-            TutorialField::TryItTrigger => &mut self.try_it_trigger,
-        }
-    }
-
     pub fn field_ref(&self, field: TutorialField) -> &Placement {
         match field {
             TutorialField::ShopRelic => &self.shop_relic,

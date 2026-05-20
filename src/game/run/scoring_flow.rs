@@ -599,6 +599,14 @@ impl RunState {
             } else {
                 0
             };
+            if self.relics.has(RelicId::Temperance) && self.plays_remaining > 0 {
+                let stacks = self.plays_remaining as i32 * 5;
+                *self
+                    .relic_counters
+                    .entry(RelicId::Temperance)
+                    .or_insert(0) += stacks;
+                self.relic_activations.push(RelicId::Temperance);
+            }
             let gold_earned = base_reward
                 .saturating_add(unused_play_bonus)
                 .saturating_add(interest)

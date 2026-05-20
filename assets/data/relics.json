@@ -1291,6 +1291,71 @@
     ]
   },
   {
+    "id": "kindness",
+    "name": "Kindness",
+    "description": "+1 discard per round",
+    "rarity": "common",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Kindness wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "temperance",
+    "name": "Temperance",
+    "description": "+0.5 permanent mult per unused play when you clear the blind",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Temperance wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "chastity",
+    "name": "Chastity",
+    "description": "+2 mult if no scored tile has an enhancement",
+    "rarity": "common",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Chastity wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "charity",
+    "name": "Charity",
+    "description": "Round start: if gold < $10, +$5",
+    "rarity": "uncommon",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Charity wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
+    "id": "diligence",
+    "name": "Diligence",
+    "description": "+1 play per round",
+    "rarity": "common",
+    "flavor_spans": [
+      {
+        "text": "A quiet rumor follows Diligence wherever it rests.",
+        "bold": false,
+        "italic": true
+      }
+    ]
+  },
+  {
     "id": "way_of_pairs",
     "name": "Way of Pairs",
     "description": "All pairs scored: ×2 mult",

@@ -39,19 +39,6 @@ pub enum CollectionField {
     CubbyZodiac,
 }
 
-pub fn lookup_collection_field(name: &str) -> Option<CollectionField> {
-    Some(match name {
-        "collection.cabinet" => CollectionField::Cabinet,
-        "collection.pedestal" => CollectionField::Pedestal,
-        "collection.featured_artifact" => CollectionField::FeaturedArtifact,
-        "collection.description_plaque" => CollectionField::DescriptionPlaque,
-        "collection.focus_card" => CollectionField::FocusCard,
-        "collection.stats_plaque" => CollectionField::StatsPlaque,
-        "collection.cubby_zodiac" => CollectionField::CubbyZodiac,
-        _ => return None,
-    })
-}
-
 pub fn collection_field_path(field: CollectionField) -> &'static str {
     match field {
         CollectionField::Cabinet => "collection.cabinet",
@@ -77,18 +64,6 @@ impl CollectionField {
 }
 
 impl CollectionPositions {
-    pub fn field_mut(&mut self, field: CollectionField) -> &mut Placement {
-        match field {
-            CollectionField::Cabinet => &mut self.cabinet,
-            CollectionField::Pedestal => &mut self.pedestal,
-            CollectionField::FeaturedArtifact => &mut self.featured_artifact,
-            CollectionField::DescriptionPlaque => &mut self.description_plaque,
-            CollectionField::FocusCard => &mut self.focus_card,
-            CollectionField::StatsPlaque => &mut self.stats_plaque,
-            CollectionField::CubbyZodiac => &mut self.cubby_zodiac,
-        }
-    }
-
     pub fn field_ref(&self, field: CollectionField) -> &Placement {
         match field {
             CollectionField::Cabinet => &self.cabinet,
