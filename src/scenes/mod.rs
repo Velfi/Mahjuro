@@ -489,20 +489,29 @@ pub(crate) fn scene_collection_archive() -> Scene {
     Scene::Collection(CollectionScene::new())
 }
 
-/// Refresh cached layout structs after deleting override JSON on disk.
-pub fn reload_scene_layout_from_disk(scene: &mut Scene) {
-    use crate::ui::scene_layout::{
-        load_collection_positions, load_gameplay_positions, load_main_menu_exterior_positions,
-        load_shop_positions, load_tile_select_positions, load_tutorial_positions,
-    };
-    match scene {
-        Scene::MainMenuExterior(s) => s.positions = load_main_menu_exterior_positions(),
-        Scene::Shop(s) => s.positions = load_shop_positions(),
-        Scene::Gameplay(s) => s.positions = load_gameplay_positions(),
-        Scene::Collection(s) => s.positions = load_collection_positions(),
-        Scene::TutorialCampaign(s) => s.positions = load_tutorial_positions(),
-        Scene::Showcase(s) => s.reload_shop_positions_from_disk(),
-        Scene::TileSelect(s) => s.positions = load_tile_select_positions(),
-        _ => {}
+/// Placement rotation degrees for the scene driving Object3d draws this frame.
+pub fn collect_placement_rotations(
+    base: &Scene,
+    overlay: Option<&Scene>,
+) -> rustc_hash::FxHashMap<String, [f32; 3]> {
+    if let Some(Scene::Showcase(s)) = overlay {
+        match &s.presenter {
+            ShowcasePresenter::TilePack(t) => return t.positions.committed_rotations(),
+            ShowcasePresenter::Zodiac(t) => return t.positions.committed_rotations(),
+            _ => {}
+        }
+    }
+    match base {
+        Scene::Gameplay(s) => s.positions.committed_rotations(),
+        Scene::Collection(s) => s.positions.committed_rotations(),
+        Scene::MainMenuExterior(s) => s.positions.committed_rotations(),
+        Scene::TutorialCampaign(s) => s.positions.committed_rotations(),
+        Scene::Showcase(s) => match &s.presenter {
+            ShowcasePresenter::TilePack(t) => t.positions.committed_rotations(),
+            ShowcasePresenter::Zodiac(t) => t.positions.committed_rotations(),
+            _ => rustc_hash::FxHashMap::default(),
+        },
+        Scene::TileSelect(s) => s.positions.committed_rotations(),
+        _ => rustc_hash::FxHashMap::default(),
     }
 }

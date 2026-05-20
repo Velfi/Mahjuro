@@ -665,81 +665,6 @@ impl App {
             });
         }
 
-        // Arrange-mode label in the lower-left — shows what's currently
-        // selected (or "select an object" prompt when the mode is armed but
-        // nothing is picked yet). Mirrors the FPS HUD sizing in the
-        // upper-right.
-        if let Some(ref inner) = self.debug.arrange_mode
-            && !showcase_orbit_top
-        {
-            let size = self.last_drawable_px;
-            let w = size.width as f32;
-            let h = size.height as f32;
-            let label_h = (h * 0.09).max(60.0);
-            let label_w = (label_h * 16.0).min(w * 0.95);
-            let margin = label_h * 0.3;
-            let y = h - label_h - margin;
-            let (text, color) = match inner {
-                Some(state) => {
-                    // Show resolved coords (current on-disk + staged delta) so
-                    // the HUD matches what Enter will commit. Falls back to a
-                    // delta-only string for groups (no single leaf to sample).
-                    let sampled = sample_arrange_placement(&state.object_name, &self.scene);
-                    let text = if let Some(p) = sampled {
-                        let dnx = state.delta_px / w;
-                        let dny = state.delta_py / h;
-                        let d_lift_mm = state.delta_lift * crate::ui::scene_layout::HFRAC_TO_MM
-                            / crate::ui::scene_layout::CANONICAL_WINDOW_W;
-                        format!(
-                            "Arrange: {}  nx={:.4} ny={:.4} lift={:.2}mm  rx={:+.1}° ry={:+.1}° rz={:+.1}°  [step {:.0}px/{:.0}°]",
-                            state.object_name,
-                            p.nx + dnx,
-                            p.ny + dny,
-                            p.lift_mm + d_lift_mm,
-                            p.rx_deg + state.delta_rx_deg,
-                            p.ry_deg + state.delta_ry_deg,
-                            p.rz_deg + state.delta_rz_deg,
-                            state.trans_step_px,
-                            state.rot_step_deg,
-                        )
-                    } else {
-                        format!(
-                            "Arrange: {} (group)  Δpx={:+.1} Δpy={:+.1} Δz={:+.1}  Δrx={:+.1}° Δry={:+.1}° Δrz={:+.1}°  [step {:.0}px/{:.0}°]",
-                            state.object_name,
-                            state.delta_px,
-                            state.delta_py,
-                            state.delta_lift,
-                            state.delta_rx_deg,
-                            state.delta_ry_deg,
-                            state.delta_rz_deg,
-                            state.trans_step_px,
-                            state.rot_step_deg,
-                        )
-                    };
-                    (text, [0.95, 0.85, 0.35, 1.0])
-                }
-                None => (
-                    "Arrange: click an object or press Tab".to_string(),
-                    [0.8, 0.8, 0.8, 1.0],
-                ),
-            };
-            frame.quad(GpuInstance {
-                rect: [margin, y, label_w, label_h],
-                color: [0.0, 0.0, 0.0, 0.6],
-                user: 0,
-            });
-            frame.text(TextLabel {
-                rect: [margin + label_h * 0.2, y, label_w, label_h],
-                text,
-                color,
-                font_px: Some(crate::render::theme::typography::size(
-                    crate::render::theme::typography::H24,
-                    h,
-                )),
-                ..Default::default()
-            });
-        }
-
         // Debug: drop draw cmds for hidden HUD elements so we can inspect the
         // procedural 3D scene underneath. The blind plaque / score counter and
         // candles are gated at the *call site* in `scene_behavior.rs` (via
@@ -777,7 +702,7 @@ impl App {
         });
         // Tell the renderer which scene is active so shared mesh pipelines
         // (Object3dKind::Ofuda, coin/gold piles, etc.) can emit correctly-
-        // prefixed canonical pickable names for arrange mode.
+        // prefixed canonical pickable names.
         // Inlined (rather than calling `active_scene_key_for_renderer`)
         // because `renderer` already holds a mutable borrow of
         // `self.renderer`; an `&self` helper here would clash.
@@ -796,14 +721,17 @@ impl App {
 
         renderer.set_tonemap_tuning(&scene_look.tonemap);
 
-        // Push the committed rotation map so every arrange-tagged draw picks
-        // up its Placement's rx/ry/rz_deg without each scene site having to
-        // wire it into its own rotation matrix.
-        let rotations_scene = match self.overlay_stack.last() {
+        let rotations_base = match self.overlay_stack.last() {
             Some(Scene::Showcase(s)) if s.wants_orbit_input() => &self.scene,
             _ => scene_for_renderer,
         };
-        renderer.set_committed_arrange_rotations(collect_committed_rotations(rotations_scene));
+        let rotations_overlay = self.overlay_stack.last().filter(|ov| {
+            !matches!(ov, Scene::Showcase(s) if s.wants_orbit_input())
+        });
+        renderer.set_placement_rotations(crate::scenes::collect_placement_rotations(
+            rotations_base,
+            rotations_overlay,
+        ));
 
         renderer.set_room_gltf_height_scale(scene_look.room_gltf_height_scale);
         let sl = shop_env_for_frame;
@@ -813,22 +741,6 @@ impl App {
             sl.lit_mesh_gltf_punctual_scale,
             sl.gltf_emissive_scale,
         );
-
-        // Push arrange-mode override so the renderer draws the selected object
-        // at the edited position/rotation this frame.
-        renderer.set_arrange_override(if let Some(Some(ref state)) = self.debug.arrange_mode {
-            Some(DebugArrangeOverride {
-                name: state.object_name.clone(),
-                delta_px: state.delta_px,
-                delta_py: state.delta_py,
-                delta_lift: state.delta_lift,
-                delta_rz_deg: state.delta_rz_deg,
-                delta_rx_deg: state.delta_rx_deg,
-                delta_ry_deg: state.delta_ry_deg,
-            })
-        } else {
-            None
-        });
 
         let active_tileset_name = self.gfx.tileset_name.clone();
         let render_settings = self.effect_layers.wgpu_render_settings(

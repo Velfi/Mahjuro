@@ -14,7 +14,7 @@ use crate::render::world_space::pixel_to_world;
 use crate::scenes::celebration_overlay;
 use crate::ui::input::UiAction;
 use crate::ui::placement::PlacementAnchor;
-use crate::ui::scene_layout::load_shop_positions;
+use crate::ui::scene_layout::ShopPositions;
 
 use crate::scenes::{BackgroundId, ButtonDef, DrawCtx, OverlayRequest, SceneTransition, UpdateCtx};
 
@@ -25,6 +25,7 @@ pub struct ZodiacPresenter {
     started_at: Instant,
     intro_gate: celebration_overlay::CelebrationShowcaseIntroGate,
     dismissed: bool,
+    pub positions: ShopPositions,
 }
 
 impl ZodiacPresenter {
@@ -38,6 +39,7 @@ impl ZodiacPresenter {
                 celebration_overlay::ShootingStarCelebrationIntro::new_zodiac(),
             ),
             dismissed: false,
+            positions: ShopPositions::default(),
         }
     }
 
@@ -101,11 +103,10 @@ impl ZodiacPresenter {
                 * glam::Mat4::from_rotation_y(ry)
                 * glam::Mat4::from_rotation_x(rx),
         );
-        let positions = load_shop_positions();
         let anchor = PlacementAnchor::new(
             [0.0, 0.0, 0.0],
             base_rotation,
-            &positions.celeb_zodiac,
+            &self.positions.celeb_zodiac,
             "shop.celebrations.zodiac",
             ctx.layout,
         );

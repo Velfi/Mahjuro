@@ -272,7 +272,6 @@ impl ShopScene {
             journal_transition_locked_at: None,
             journal_was_open: false,
             relic_glow_starts: rustc_hash::FxHashMap::default(),
-            positions: crate::ui::scene_layout::load_shop_positions(),
             drawn_room_gltf_height_scale: std::cell::Cell::new(
                 crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
             ),
@@ -393,15 +392,10 @@ impl ShopScene {
         match result {
             ShopActionResult::None => {}
             ShopActionResult::PackCelebration(celeb) => {
-                let shop_rm = GameEngine::read_shop(run);
-                let inventory = ShopInventoryCounts {
-                    n_for_sale: self.items.len(),
-                    n_for_sale_talismans: self.talisman_items.len(),
-                    n_owned_relics: shop_rm.owned_relics.len(),
-                };
+                let _ = run;
                 *overlay_request = Some(OverlayRequest::Push(Box::new(Scene::Showcase(
                     ShowcaseScene::new(ShowcasePresenter::TilePack(Box::new(
-                        TilePackPresenter::new(celeb, inventory),
+                        TilePackPresenter::new(celeb),
                     ))),
                 ))));
             }
@@ -435,7 +429,16 @@ impl ShopScene {
             return;
         }
         self.west_sell_hold_started = None;
-        self.reroll_cost += REROLL_COST_INCREMENT;
+        match outcome.data {
+            ShopCommandData::Rerolled {
+                skip_cost_escalation: true,
+                ..
+            } => {
+                // Free reroll (skip tag or I Got A Guy): next restock starts at stake base.
+                self.reroll_cost = run.mode.stake.reroll_base_cost();
+            }
+            _ => self.reroll_cost += REROLL_COST_INCREMENT,
+        }
         let shop = GameEngine::read_shop(run);
         let (items, zodiac_items, talisman_items, pack_items) = generate_shop_stock(
             &shop.relic_state,

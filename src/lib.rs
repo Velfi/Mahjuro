@@ -17,8 +17,6 @@ mod effect_layers;
 pub mod game;
 #[cfg(target_os = "macos")]
 mod macos_fullscreen_shortcut;
-#[path = "main/arrange.rs"]
-mod main_arrange;
 #[path = "main/cli.rs"]
 mod main_cli;
 #[path = "main/commands.rs"]
@@ -67,7 +65,7 @@ use game::run::RunState;
 use game::scene_look_tuning::SceneLookTuningSet;
 use render::animation::AnimationController;
 use render::draw_cmd::{CameraParams, UiFrame, apply_modal_relic_staging};
-use render::wgpu_renderer::{DebugArrangeOverride, GpuInstance, TextLabel, WgpuRenderer};
+use render::wgpu_renderer::{GpuInstance, TextLabel, WgpuRenderer};
 use scenes::game_over::GameOverScene;
 use scenes::gameplay::GameplayScene;
 use scenes::material_viewer::MaterialViewerScene;
@@ -83,18 +81,13 @@ use ui::modal::{Modal, ModalQueue, ModalTheme, UnlockPage};
 use crate::physical_size::PhysicalSize;
 use sdl3::keyboard::{Mod, Scancode};
 
-use main_arrange::{
-    ArrangeInput, apply_arrange_to_layout, arrange_hierarchy_first_child, arrange_hierarchy_flat,
-    arrange_hierarchy_index_of, arrange_hierarchy_parent, arrange_hierarchy_sibling_offset,
-    collect_committed_rotations, reset_arrange_to_default, sample_arrange_placement,
-};
 use main_cli::Cli;
-use main_debug_state::{ArrangeModeState, DebugState};
+use main_debug_state::DebugState;
 use main_render_settings::RenderSettings;
 
 // Debug overlays (visibility toggles, cascade tuning, SFX test, camera
 // params) live in `debug_overlays.rs`.  See `mod debug_overlays` above.
-// `DebugState`, `ArrangeModeState`, and `RenderSettings` live in
+// `DebugState` and `RenderSettings` live in
 // `main/debug_state.rs` and `main/render_settings.rs`.
 
 use scene_transition::{DEFAULT_QUICK_SPEC, PendingSceneDestination, TransitionKind};

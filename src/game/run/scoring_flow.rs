@@ -146,14 +146,12 @@ impl RunState {
         });
 
         let effective = boss::effective_hand_size(self);
-        let draw_target =
-            if copy_eff.has(&self.relics, RelicId::QuickDraw) && self.quickdraw_uses_remaining > 0 {
-                self.quickdraw_uses_remaining -= 1;
-                self.relic_activations.push(RelicId::QuickDraw);
-                effective + 1
-            } else {
-                effective
-            };
+        let draw_target = if copy_eff.has(&self.relics, RelicId::QuickDraw) {
+            self.relic_activations.push(RelicId::QuickDraw);
+            effective + 1
+        } else {
+            effective
+        };
         let mut drawn: Vec<Tile> = Vec::new();
         while self.hand.len() + drawn.len() < draw_target {
             let Some(t) = self.wall.draw() else { break };

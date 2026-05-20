@@ -171,7 +171,7 @@ impl WgpuRenderer {
                             // All slots share one placement (gameplay.hand.yaku_tablet).
                             let _ = slot_i;
                             let yaku_name = "gameplay.hand.yaku_tablet";
-                            let model = self.apply_arrange_override(yaku_name, model);
+                            let model = self.apply_placement_rotation(yaku_name, model);
                             let label_hash = tablet_label_hash(label, 256, 96);
                             let inst = &mut self.yaku_tablet_instances[slot_i];
                             if inst.decal_texture.is_none() || inst.decal_label_hash != label_hash {
@@ -237,7 +237,7 @@ impl WgpuRenderer {
                                     _ => "gameplay.action_bar.tablet".to_string(),
                                 }
                             };
-                            let model = self.apply_arrange_override(&wood_name, model);
+                            let model = self.apply_placement_rotation(&wood_name, model);
                             let label_hash = tablet_label_hash(label, 512, 192);
                             let has_decal = !label.is_empty();
                             let inst = &mut self.wood_tablet_instances[slot_i];
@@ -323,7 +323,7 @@ impl WgpuRenderer {
                                 .arrange_name
                                 .map(|n| n.to_string())
                                 .unwrap_or_else(|| "shop.props.book".to_string());
-                            let base_model = self.apply_arrange_override(&book_name, model);
+                            let base_model = self.apply_placement_rotation(&book_name, model);
 
                             // ── Body instance (back cover, page block,
                             // page-content surface, spine, ribbons). The
@@ -504,7 +504,7 @@ impl WgpuRenderer {
                                     _ => format!("relic[{slot_i}]"),
                                 }
                             };
-                            let model = self.apply_arrange_override(&relic_arr_name, model);
+                            let model = self.apply_placement_rotation(&relic_arr_name, model);
                             // obj.rotation already encodes pitch/roll; extents are full.
                             let g = if *silhouette {
                                 0.0
@@ -670,7 +670,7 @@ impl WgpuRenderer {
                             obj3d_pack_slot += 1;
                             let _ = slot_i;
                             let pack_arr_name = obj.arrange_name.unwrap_or("shop.for_sale.packs");
-                            let model = self.apply_arrange_override(pack_arr_name, model);
+                            let model = self.apply_placement_rotation(pack_arr_name, model);
                             // Hover glow: hover_target ramps 0..1 as the
                             // player focuses/cursor-hovers the pack. Lift
                             // the foil tint toward a warm bloom and push
@@ -816,7 +816,7 @@ impl WgpuRenderer {
                             // the shop's Rx/Ry/Rz arrange rotation).
                             let talisman_name =
                                 obj.arrange_name.unwrap_or("shop.for_sale.talismans");
-                            let talisman_center_arr = self.apply_arrange_override(
+                            let talisman_center_arr = self.apply_placement_rotation(
                                 talisman_name,
                                 translate_rot_scale(
                                     center,
@@ -900,7 +900,7 @@ impl WgpuRenderer {
                             );
                             let plinth_rot =
                                 mesh_y_thickness_along_local_y_to_z_up() * obj.rotation_matrix();
-                            let plinth_model = self.apply_arrange_override(
+                            let plinth_model = self.apply_placement_rotation(
                                 plinth_name,
                                 translate_rot_scale(
                                     plinth_center,
@@ -1122,7 +1122,7 @@ impl WgpuRenderer {
                                 glam::Vec3::from(obj.extents),
                             );
                             let hover_model = self
-                                .apply_arrange_override("gameplay.action_bar.mirror", hover_model);
+                                .apply_placement_rotation("gameplay.action_bar.mirror", hover_model);
                             self.mirror_instances[slot_i].write_uniform(
                                 &self.queue,
                                 view_proj_arr,
@@ -1192,7 +1192,7 @@ impl WgpuRenderer {
                                 glam::Vec3::splat(*g_scale),
                             );
                             let glyph_model =
-                                self.apply_arrange_override("gameplay.score_popup", glyph_model);
+                                self.apply_placement_rotation("gameplay.score_popup", glyph_model);
                             let material = match g_mat {
                                 crate::render::draw_cmd::GlyphMaterial::Metal => MaterialParams {
                                     kind: MaterialKind::Metal,
@@ -1260,7 +1260,7 @@ impl WgpuRenderer {
                                     obj.extents[2] * pulse_scale,
                                 ),
                             );
-                            let model = self.apply_arrange_override(cascade_token_name, model);
+                            let model = self.apply_placement_rotation(cascade_token_name, model);
                             let base = ck.color();
                             let material = MaterialParams {
                                 kind: MaterialKind::Plain,
@@ -1309,7 +1309,7 @@ impl WgpuRenderer {
                             );
                             let candle_name = self.scene_path("candle");
                             let candle_model =
-                                self.apply_arrange_override(&candle_name, candle_model);
+                                self.apply_placement_rotation(&candle_name, candle_model);
                             self.candle_instances[slot_i][0].write_uniform(
                                 &self.queue,
                                 view_proj_arr,
@@ -1411,7 +1411,7 @@ impl WgpuRenderer {
                                 let angle = slot_angle(k);
                                 let rot = fan_yaw * Mat4::from_rotation_y(angle) * base_orient;
                                 let model = translate_rot_scale(pivot, rot, base_scale);
-                                let model = self.apply_arrange_override(arrange_name, model);
+                                let model = self.apply_placement_rotation(arrange_name, model);
                                 if stick_i == 0 {
                                     self.last_debug_pickables.push((
                                         arrange_name.to_string(),
@@ -1507,7 +1507,7 @@ impl WgpuRenderer {
                                 glam::Vec3::from(obj.extents),
                             );
                             let hover_model = self
-                                .apply_arrange_override("gameplay.action_bar.bowl", hover_model);
+                                .apply_placement_rotation("gameplay.action_bar.bowl", hover_model);
                             self.bowl_instances[slot_i].write_uniform(
                                 &self.queue,
                                 view_proj_arr,
@@ -1589,7 +1589,7 @@ impl WgpuRenderer {
                     Mat4::IDENTITY,
                     glam::Vec3::new(tile_w, tile_h, tile_d),
                 );
-                let model = self.apply_arrange_override("WallTile", model);
+                let model = self.apply_placement_rotation("gameplay.wall_tile", model);
                 let material = MaterialParams {
                     kind: MaterialKind::Plain,
                     base_color: [0.86, 0.81, 0.69, 1.0],
@@ -1608,8 +1608,6 @@ impl WgpuRenderer {
                     model,
                     material.kind,
                 );
-                // Wall tiles aren't arrangeable — keep the legacy name so
-                // the hit-test debug overlay still identifies them.
                 self.last_debug_pickables.push((
                     "gameplay.wall_tile".to_string(),
                     model,

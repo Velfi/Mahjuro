@@ -804,6 +804,7 @@ impl SceneBehavior for GameplayScene {
                     glow: is_selected || is_hinted,
                     glow_color: None,
                     pick_id: Some(i),
+                    arrange_group: None,
                 });
             }
             if !hand_placements.is_empty() {
@@ -1150,8 +1151,7 @@ impl SceneBehavior for GameplayScene {
                 if rect[2] <= 1.0 || rect[3] <= 1.0 {
                     return;
                 }
-                let cap = body_px.min(rect[3] * 0.24).min(rect[2] * 0.14);
-                let fs = typography::tier_at_most(cap, layout.window_h);
+                let fs = typography::size(typography::H28, layout.window_h);
                 out.push(TextLabel {
                     rect,
                     text: copy.into(),
@@ -1163,10 +1163,10 @@ impl SceneBehavior for GameplayScene {
                 });
             };
             if let Some(rect) = ctx.proj.bowl_rect {
-                push_centered(&mut hud_text, rect, "Discard tiles");
+                push_centered(&mut hud_text, rect, "Discard");
             }
             if let Some(rect) = ctx.proj.mirror_rect {
-                push_centered(&mut hud_text, rect, "Score hand");
+                push_centered(&mut hud_text, rect, "Play");
             }
             {
                 use crate::core::relic::RelicId;
@@ -1376,7 +1376,7 @@ impl SceneBehavior for GameplayScene {
                             let desc = relic_description_live(
                                 rid,
                                 &run.relic_counters,
-                                run.total_score_earned,
+                                run.gold,
                                 Some((&run.relics, i)),
                                 Some(run.ghost_hand_preview_chips()),
                             );
@@ -1634,25 +1634,6 @@ impl SceneBehavior for GameplayScene {
         frame.buttons = buttons;
         frame.window_title = window_title;
         frame.debug_axes = self.debug_show_axes;
-
-        // Arrange-mode hint: the relic tray's horizontal position is clamped
-        // between `relic_col_top_ny` and `relic_col_bottom_ny` (historical
-        // field names — both are x-fractions). If the user's `nx` lands
-        // outside the band the tray pins to the wall and nudges appear to
-        // be ignored. Expose the band so the renderer can draw it while
-        // this placement is selected.
-        {
-            let gp = &self.positions;
-            frame
-                .arrange_clamps
-                .push(crate::render::draw_cmd::ArrangeClamp {
-                    name: "gameplay.relic_col".to_string(),
-                    axis: crate::render::draw_cmd::ClampAxis::Horizontal,
-                    lo_frac: gp.relic_col_top_ny,
-                    hi_frac: gp.relic_col_bottom_ny,
-                    center_frac: gp.relic_col.nx,
-                });
-        }
 
         // Stash the focus rect graph for the next frame's `update()` to
         // hit-test the cursor and run spatial navigation against.

@@ -1129,23 +1129,6 @@ impl WgpuRenderer {
             ));
         }
 
-        // ── Arrange-mode bounding box overlay ──────────────────────────────
-        // Borrow-split: `push_arrange_bbox_overlay` reads only
-        // `device` / `debug_arrange_override` / `last_debug_pickables`
-        // off `self`, so we hand it its dependencies directly to keep
-        // `frame_buffer_pool` mutably borrowable alongside.
-        Self::push_arrange_bbox_overlay(
-            &self.device,
-            self.debug_arrange_override.as_ref(),
-            &self.last_debug_pickables,
-            frame,
-            &camera,
-            &mut self.frame_buffer_pool,
-            &self.queue,
-            &mut quad_buffers,
-            &mut ops,
-        );
-
         // Relic activation halo buffer — built from `relic_glows` populated
         // during the relic projection loop above. Drawn through the same
         // additive `tile_glow_pipeline` as the selected-tile halos, right

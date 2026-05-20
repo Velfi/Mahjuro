@@ -107,46 +107,6 @@ impl CameraParams {
         (near, far)
     }
 
-    /// Returns the visible world-X range `(min_x, max_x)` at a given world
-    /// position `(world_y, world_z)` by unprojecting the left and right NDC
-    /// edges through the same view-projection matrix the renderer uses.
-    ///
-    /// Useful for layout code that needs to keep 3D objects within the camera
-    /// frustum.  Pass the shelf's world Y and Z so the frustum width is
-    /// evaluated at the correct depth.
-    ///
-    /// Uses the same near/far planes as the renderer ([`Self::clip_planes`]) and the same
-    /// right-handed convention.
-    pub fn frustum_x_range_at(&self, w: f32, h: f32, world_y: f32, world_z: f32) -> (f32, f32) {
-        use glam::{Mat4, Vec3, Vec4};
-
-        let aspect = w / h;
-        let fov_y = self.fovy_deg.to_radians();
-        let eye = Vec3::from_array(self.eye);
-        let target = Vec3::from_array(self.target);
-        let up = Vec3::from_array(self.up);
-        let (near, far) = self.clip_planes(h);
-
-        let view = Mat4::look_at_rh(eye, target, up);
-        let proj = Mat4::perspective_rh(fov_y, aspect, near, far);
-        let view_proj = proj * view;
-        let inv_vp = view_proj.inverse();
-
-        // Project the shelf centre (0, world_y, world_z) → NDC to obtain the
-        // correct clip depth for this horizontal plane.
-        let centre_clip = view_proj * Vec4::new(0.0, world_y, world_z, 1.0);
-        let ndc_z = centre_clip.z / centre_clip.w.max(1e-6);
-
-        // Unproject the left (ndc_x = -1) and right (ndc_x = +1) edges at
-        // that depth.  ndc_y = 0 (vertical midline) is fine — we only need X.
-        let unproj = |ndc_x: f32| {
-            let h4 = inv_vp * Vec4::new(ndc_x, 0.0, ndc_z, 1.0);
-            h4.x / h4.w.max(1e-6)
-        };
-
-        (unproj(-1.0), unproj(1.0))
-    }
-
     /// Default "person at the table" camera when [`UiFrame::camera_override`] is
     /// `None` — must match `WgpuRenderer`'s resolve path.
     pub fn default_table_camera(window_h: f32) -> Self {
@@ -324,6 +284,9 @@ pub struct ShowcaseTilePlacement {
     /// Logical slot index for ray-cast tile picking and `proj.hand_rects` tracking.
     /// `None` = not pickable (pack-open showcase tiles, etc.).
     pub pick_id: Option<usize>,
+    /// When set, every tile in the batch shares one arrange pickable and staged
+    /// move/rotate preview (pack reveal row, etc.). `None` = no group arrange.
+    pub arrange_group: Option<&'static str>,
 }
 
 /// One flat tile-face decal drawn as a screen-space image quad.
@@ -642,8 +605,8 @@ pub struct Object3d {
     /// tablets).  `0` means "no persistent state" — `hover_target` is used
     /// directly without easing.
     pub anim_id: u64,
-    /// Canonical arrange-mode path (e.g. `"shop.counter"`, `"gameplay.hand.strip"`).
-    /// When set, the renderer uses this for `apply_arrange_override` and
+    /// Canonical arrange-mode path (e.g. `"shop.celebrations.pack_closeup"`, `"gameplay.hand.strip"`).
+    /// When set, the renderer uses this for `apply_placement_rotation` and
     /// `last_debug_pickables`. `None` = not arrangeable via the debug picker.
     pub arrange_name: Option<&'static str>,
 }
@@ -753,27 +716,6 @@ pub enum DrawCmd {
     Object3dBatch(Vec<Object3d>),
 }
 
-/// Axis along which an [`ArrangeClamp`] constrains a placement.
-#[derive(Copy, Clone, Debug)]
-
-pub enum ClampAxis {
-    Horizontal,
-}
-
-/// Scene-provided hint describing the clamp band that constrains a pickable's
-/// effective position. When the named pickable is the current arrange-mode
-/// selection, the renderer draws the band so the user can see why nudges may
-/// stop having an effect. `center_frac` is the *unclamped* placement value; if
-/// it's outside `[lo_frac, hi_frac]` the renderer flags the pinning wall.
-#[derive(Clone, Debug)]
-pub struct ArrangeClamp {
-    pub name: String,
-    pub axis: ClampAxis,
-    pub lo_frac: f32,
-    pub hi_frac: f32,
-    pub center_frac: f32,
-}
-
 /// Everything a frame's draw needs: an ordered command list plus per-frame
 /// state used by hand-tile markers, hit testing, and the main loop.
 pub struct UiFrame {
@@ -812,9 +754,6 @@ pub struct UiFrame {
     /// Scene-transition progress (0.0 = inactive, >0.0 = animating).
     /// Uploaded to the GPU `Globals` uniform for the cascade shader.
     pub transition_progress: f32,
-    /// Arrange-mode clamp hints. Drawn as a faint band when the named
-    /// pickable is the current selection — see [`ArrangeClamp`].
-    pub arrange_clamps: Vec<ArrangeClamp>,
     /// Barrel / fisheye lens distortion applied in the final composite.
     /// 0.0 = off (no distortion). Positive = outward barrel (center
     /// magnified, edges compressed). Typical range 0.0..=0.6. Scenes
@@ -869,7 +808,6 @@ impl UiFrame {
             buttons: Vec::new(),
             window_title: String::new(),
             transition_progress: 0.0,
-            arrange_clamps: Vec::new(),
             fisheye_strength: 0.0,
             journal_prepass_frame: None,
             shop_inspect_lit_mesh_hdr: false,

@@ -490,7 +490,7 @@ impl GameplayScene {
             journal_open_amount: 0.0,
             journal_open_target: 0.0,
             journal_was_open: false,
-            positions: crate::ui::scene_layout::load_gameplay_positions(),
+            positions: crate::ui::scene_layout::GameplayPositions::default(),
             discard_undo: None,
         }
     }

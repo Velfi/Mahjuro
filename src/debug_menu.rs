@@ -96,14 +96,6 @@ pub enum DebugAction {
     ShowVictoryScreen,
     /// Jump directly to the defeat scene for presentation/debugging.
     ShowDefeatScreen,
-    /// Enter (or exit) arrange mode: click an object, then WASD (+ Q/E lift)
-    /// to nudge; Shift+WASDQE to rotate. Tab walks the hierarchy in pre-order;
-    /// `[` / `]` parent / first child, PageUp/PageDown siblings. Enter confirms
-    /// and copies deltas to the clipboard while saving layout JSON.
-    ToggleArrangeMode,
-    /// Delete all `*.json` under the user `layouts/` folder and reload
-    /// defaults into scenes that cache layout data.
-    ClearSavedSceneLayouts,
     /// Push the material viewer pushdown scene onto the overlay stack.
     /// Shows one preview orb per `MaterialKind` for visual inspection.
     OpenMaterialViewer,
@@ -231,17 +223,6 @@ impl DebugMenuBar {
         let hit_test_item = MenuItem::new("Object Hit Test", true, None);
         mappings.push((hit_test_item.id().clone(), DebugAction::ArmObjectHitTest));
         let _ = tools_sub.append(&hit_test_item);
-
-        let arrange_item = MenuItem::new("Arrange Mode", true, None);
-        mappings.push((arrange_item.id().clone(), DebugAction::ToggleArrangeMode));
-        let _ = tools_sub.append(&arrange_item);
-
-        let clear_layouts_item = MenuItem::new("Clear Saved Scene Layouts", true, None);
-        mappings.push((
-            clear_layouts_item.id().clone(),
-            DebugAction::ClearSavedSceneLayouts,
-        ));
-        let _ = tools_sub.append(&clear_layouts_item);
 
         let _ = debug_menu.append(&tools_sub);
 

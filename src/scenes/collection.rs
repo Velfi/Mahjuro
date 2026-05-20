@@ -261,7 +261,7 @@ impl CollectionScene {
     fn with_active_tab(active_tab: Tab) -> Self {
         Self {
             tree: TreeState::new(),
-            positions: crate::ui::scene_layout::load_collection_positions(),
+            positions: crate::ui::scene_layout::CollectionPositions::default(),
             active_tab,
             selected_artifact: None,
             focused_row: Some(0),
@@ -1003,11 +1003,17 @@ impl CollectionScene {
             // cells show this panel rather than the clear colour.
             let backing_w = (window_cols as f32 * 2.5) * cell_pitch;
             let backing_h = (window_rows as f32 * 2.5) * cell_pitch;
+            let cabinet_anchor = crate::ui::placement::PlacementAnchor::new(
+                [focus_px_x, cab_px_y - cell * 0.5, focus_world_z],
+                glam::Mat4::from_rotation_x(90.0_f32.to_radians()),
+                &self.positions.cabinet,
+                "collection.cabinet",
+                ctx.layout,
+            );
             plaques.push(Object3d {
-                // pixel_y = cab_px_y - cell*0.5 → world Y = +0.5*cell (behind plane).
-                pos: [focus_px_x, cab_px_y - cell * 0.5, focus_world_z],
+                pos: cabinet_anchor.pos,
                 extents: [backing_w, backing_h, cell * 0.1],
-                rotation: euler_xyz_rad_from_deg(90.0, 0.0, 0.0),
+                rotation: cabinet_anchor.object3d_rotation(),
                 color: color::WALNUT_DEEP,
                 kind: Object3dKind::Primitive {
                     shape: crate::render::primitive::MeshId::BeveledSlab,
@@ -1018,7 +1024,7 @@ impl CollectionScene {
                 },
                 hover_target: 0.0,
                 anim_id: 0,
-                arrange_name: Some("collection.grid_backing"),
+                arrange_name: Some(cabinet_anchor.arrange_name),
             });
 
             // Cell frames + nameplates. For each (col, row) in the window we push
@@ -1463,10 +1469,17 @@ impl CollectionScene {
                     [card_px_proc, hud_py, stats_wz]
                 };
                 use crate::render::primitive::{DecalLayout, DecalSpec, MaterialSpec, MeshId};
+                let stats_anchor = crate::ui::placement::PlacementAnchor::new(
+                    stats_base,
+                    glam::Mat4::from_rotation_x(90.0_f32.to_radians()),
+                    &self.positions.stats_plaque,
+                    "collection.stats_plaque",
+                    ctx.layout,
+                );
                 hud_plaques.push(Object3d {
-                    pos: stats_base,
+                    pos: stats_anchor.pos,
                     extents: [card_w, stats_h, stats_h * 0.06],
-                    rotation: euler_xyz_rad_from_deg(90.0, 0.0, 0.0),
+                    rotation: stats_anchor.object3d_rotation(),
                     color: color::WALNUT_BRIGHT,
                     kind: Object3dKind::Primitive {
                         shape: MeshId::BeveledSlab,
@@ -1482,7 +1495,7 @@ impl CollectionScene {
                     },
                     hover_target: 1.0,
                     anim_id: 0xC0DF,
-                    arrange_name: Some("collection.stats_plaque"),
+                    arrange_name: Some(stats_anchor.arrange_name),
                 });
             }
 
@@ -2614,7 +2627,7 @@ fn description_for(
         ArtifactKind::Relic(id) => crate::core::relic::relic_description_live(
             *id,
             &run.relic_counters,
-            run.total_score_earned,
+            run.gold,
             None,
             Some(run.ghost_hand_preview_chips()),
         ),

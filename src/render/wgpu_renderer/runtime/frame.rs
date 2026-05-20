@@ -77,16 +77,28 @@ impl WgpuRenderer {
                 // that often reads as a persistent black window after launch unfocused /
                 // occlusion, or right after `configure` — poll + extra acquire attempts usually
                 // land a drawable the same tick.
+                let telemetry = &self.acquire_telemetry;
                 let try_once = |s: &wgpu::Surface| match s.get_current_texture() {
-                    wgpu::CurrentSurfaceTexture::Success(t)
-                    | wgpu::CurrentSurfaceTexture::Suboptimal(t) => Some(t),
+                    wgpu::CurrentSurfaceTexture::Success(t) => {
+                        telemetry.record_attempt(super::AcquireOutcome::Success);
+                        Some(t)
+                    }
+                    wgpu::CurrentSurfaceTexture::Suboptimal(t) => {
+                        telemetry.record_attempt(super::AcquireOutcome::Suboptimal);
+                        Some(t)
+                    }
                     wgpu::CurrentSurfaceTexture::Timeout
-                    | wgpu::CurrentSurfaceTexture::Occluded => None,
+                    | wgpu::CurrentSurfaceTexture::Occluded => {
+                        telemetry.record_attempt(super::AcquireOutcome::TimeoutOrOccluded);
+                        None
+                    }
                     wgpu::CurrentSurfaceTexture::Outdated => {
+                        telemetry.record_attempt(super::AcquireOutcome::Outdated);
                         s.configure(&self.device, &self.config);
                         None
                     }
                     wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Validation => {
+                        telemetry.record_attempt(super::AcquireOutcome::Lost);
                         log::warn!(
                             "swapchain surface lost or invalid — reconfiguring (next frame should recover)"
                         );
@@ -95,19 +107,29 @@ impl WgpuRenderer {
                     }
                 };
 
-                if let Some(t) = try_once(surface) {
-                    return Ok(RenderFrame::Draw(Some(t)));
-                }
-                let _ = self.device.poll(wgpu::PollType::Poll);
-                if let Some(t) = try_once(surface) {
-                    return Ok(RenderFrame::Draw(Some(t)));
-                }
-                std::thread::yield_now();
-                let _ = self.device.poll(wgpu::PollType::Poll);
-                if let Some(t) = try_once(surface) {
-                    return Ok(RenderFrame::Draw(Some(t)));
-                }
-                Ok(RenderFrame::Skip)
+                let start = Instant::now();
+                let outcome = {
+                    if let Some(t) = try_once(surface) {
+                        Ok(RenderFrame::Draw(Some(t)))
+                    } else {
+                        let _ = self.device.poll(wgpu::PollType::Poll);
+                        if let Some(t) = try_once(surface) {
+                            Ok(RenderFrame::Draw(Some(t)))
+                        } else {
+                            std::thread::yield_now();
+                            let _ = self.device.poll(wgpu::PollType::Poll);
+                            if let Some(t) = try_once(surface) {
+                                Ok(RenderFrame::Draw(Some(t)))
+                            } else {
+                                Ok(RenderFrame::Skip)
+                            }
+                        }
+                    }
+                };
+                let elapsed_ms = start.elapsed().as_secs_f32() * 1000.0;
+                let frame_drawn = matches!(&outcome, Ok(RenderFrame::Draw(Some(_))));
+                telemetry.record_frame(elapsed_ms, frame_drawn);
+                outcome
             }
             RenderTarget::Offscreen { .. } => Ok(RenderFrame::Draw(None)),
         }

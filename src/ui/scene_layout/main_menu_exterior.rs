@@ -1,11 +1,6 @@
-use serde::{Deserialize, Serialize};
+use crate::ui::placement::Placement;
 
-use crate::ui::placement::{ArrangeTarget, Node, Placement};
-
-use super::fs::{load_positions, sanitize_placements, save_positions};
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(Clone, Debug)]
 pub struct MainMenuExteriorPositions {
     pub door_hit: Placement,
     pub sign_hit: Placement,
@@ -25,7 +20,7 @@ impl Default for MainMenuExteriorPositions {
             // Options: wall beside the doorway (lantern / plaster), not the blank board above.
             sign_hit: Placement::at(0.375, 0.435, 170.0),
             bike_hit: Placement::at(0.775, 0.605, 140.0),
-            // Label anchors — tuned to the current exterior plate (see shipped `main_menu_exterior.json`).
+            // Label anchors — tuned to the current exterior plate.
             play_label: Placement::at(0.613206, 0.4833688, 0.0),
             options_label: Placement::at(0.7578125, 0.4855285, 0.0),
             quit_label: Placement::at(0.83287036, 0.8056426, 0.0),
@@ -35,45 +30,6 @@ impl Default for MainMenuExteriorPositions {
         }
     }
 }
-
-pub const MAIN_MENU_EXTERIOR_HIERARCHY: &[Node] = &[Node::Group {
-    name: "main_menu_exterior",
-    label: "Main menu (exterior)",
-    children: &[
-        Node::Leaf {
-            name: "main_menu_exterior.door_hit",
-            label: "Play — doorway hit",
-        },
-        Node::Leaf {
-            name: "main_menu_exterior.sign_hit",
-            label: "Options — wall beside doorway",
-        },
-        Node::Leaf {
-            name: "main_menu_exterior.bike_hit",
-            label: "Quit — bicycle hit",
-        },
-        Node::Leaf {
-            name: "main_menu_exterior.play_label",
-            label: "PLAY label (doorway)",
-        },
-        Node::Leaf {
-            name: "main_menu_exterior.options_label",
-            label: "OPTIONS label (beside doorway)",
-        },
-        Node::Leaf {
-            name: "main_menu_exterior.quit_label",
-            label: "QUIT label (over bicycle)",
-        },
-        Node::Leaf {
-            name: "main_menu_exterior.sign_title",
-            label: "Reserved — blank board title band",
-        },
-        Node::Leaf {
-            name: "main_menu_exterior.sign_body",
-            label: "Reserved — blank board body band",
-        },
-    ],
-}];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MainMenuExteriorField {
@@ -101,7 +57,6 @@ pub fn lookup_main_menu_exterior_field(name: &str) -> Option<MainMenuExteriorFie
     })
 }
 
-#[cfg(test)]
 pub fn main_menu_exterior_field_path(field: MainMenuExteriorField) -> &'static str {
     match field {
         MainMenuExteriorField::DoorHit => "main_menu_exterior.door_hit",
@@ -156,35 +111,3 @@ impl MainMenuExteriorPositions {
     }
 }
 
-impl ArrangeTarget for MainMenuExteriorPositions {
-    fn placement_mut(&mut self, name: &str) -> Option<&mut Placement> {
-        lookup_main_menu_exterior_field(name).map(|f| self.field_mut(f))
-    }
-
-    fn placement(&self, name: &str) -> Option<&Placement> {
-        lookup_main_menu_exterior_field(name).map(|f| self.field_ref(f))
-    }
-
-    fn hierarchy(&self) -> &'static [Node] {
-        MAIN_MENU_EXTERIOR_HIERARCHY
-    }
-}
-
-pub fn load_main_menu_exterior_positions() -> MainMenuExteriorPositions {
-    let mut loaded = load_positions("main_menu_exterior.json");
-    sanitize_main_menu_exterior_positions(&mut loaded);
-    loaded
-}
-
-pub fn sanitize_main_menu_exterior_positions(p: &mut MainMenuExteriorPositions) {
-    sanitize_placements(
-        "main_menu_exterior",
-        p,
-        MainMenuExteriorField::ALL,
-        |positions, field| positions.field_mut(field),
-    );
-}
-
-pub fn save_main_menu_exterior_positions(pos: &MainMenuExteriorPositions) -> anyhow::Result<()> {
-    save_positions("main_menu_exterior.json", "main_menu_exterior", pos)
-}

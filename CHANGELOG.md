@@ -73,7 +73,7 @@ commit history.
 ### Added
 - New relic **Chrysalis**: once you've already reached the blind's target score, further scores that round no longer add to your round or run totals—instead that value is absorbed. Gather enough absorbed score and it hatches into **Monarch Butterfly**, which adds bonus chips each hand based on tiers that grow from total absorbed excess (with diminishing tier gains as excess climbs).
 - New rare relic **Euler's Number** adds a flat mult bonus equal to the constant *e* (about 2.718) every time you score a hand.
-- New relic **I Got A Guy**: three times per run you can restock the shop without paying gold (normal restock price increases still apply after each restock).
+- New relic **I Got A Guy**: three times per run you can restock the shop without paying gold.
 
 ### Changed
 - Ghost Hand now adds chips equal to the **point value** of hand tiles that are not part of what you scored (your full remaining hand when you cash in the structure bank). The relic shows a live chip preview on the tray and in tooltips.

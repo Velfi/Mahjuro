@@ -68,7 +68,7 @@ pub enum RelicId {
     HighTide,
     /// Relics cost 25% less in the shop, rounded down (minimum $1).
     MerchantsEye,
-    /// Three shop restocks this run cost no gold (escalating restock prices still apply).
+    /// Three shop restocks this run cost no gold.
     IGotAGuy,
     /// Terminal tiles (rank 1 or 9) in scored sets: +12 chips each.
     EdgeRunner,
@@ -641,7 +641,7 @@ pub fn relic_sell_price_live(
 pub fn relic_description_live(
     id: RelicId,
     counters: &std::collections::BTreeMap<RelicId, i32>,
-    _total_score: u64,
+    gold: i32,
     inventory_focus: Option<(&RelicState, usize)>,
     ghost_hand_chips_preview: Option<i32>,
 ) -> String {
@@ -784,6 +784,11 @@ pub fn relic_description_live(
                 "{base} [{blinds} blind{}, +{blinds} mult]",
                 if blinds == 1 { "" } else { "s" }
             )
+        }
+        RelicId::GoldenEngine => {
+            let held = gold.max(0);
+            let bonus = golden_engine_mult_bonus(gold);
+            format!("{base} [{held}g held, +{bonus} mult]")
         }
         RelicId::BeggarsCup => {
             let bosses = counters
@@ -1243,6 +1248,12 @@ pub const SNOWBALL_CHIPS_PER_CLEAR: i32 = 15;
 /// The relic is removed when run gold hits zero or below (handled in the run gold-change hook).
 pub const TURTLE_SHELL_CHIPS: i32 = 200;
 
+/// Mult bonus from Golden Engine (+1 per 5 gold held at score time).
+#[inline]
+pub fn golden_engine_mult_bonus(gold: i32) -> i32 {
+    (gold.max(0) as f64 / 5.0).floor() as i32
+}
+
 /// Chips from Snowball for one scored hand (`stacks` = blind clears while owned, capped).
 #[inline]
 pub fn snowball_score_chips(stacks: i32) -> i32 {
@@ -1271,8 +1282,18 @@ pub struct ScoreContext<'a> {
 mod tests {
     use super::{
         RelicId, RelicState, SNOWBALL_CHIPS_PER_CLEAR, SNOWBALL_STACK_CAP,
-        apply_merchants_eye_discount, relic_buy_price, relic_shop_price, snowball_score_chips,
+        apply_merchants_eye_discount, golden_engine_mult_bonus, relic_buy_price, relic_shop_price,
+        snowball_score_chips,
     };
+
+    #[test]
+    fn golden_engine_mult_scales_per_five_gold() {
+        assert_eq!(golden_engine_mult_bonus(0), 0);
+        assert_eq!(golden_engine_mult_bonus(4), 0);
+        assert_eq!(golden_engine_mult_bonus(5), 1);
+        assert_eq!(golden_engine_mult_bonus(24), 4);
+        assert_eq!(golden_engine_mult_bonus(-3), 0);
+    }
 
     #[test]
     fn snowball_chips_flat_per_clear_and_caps_stacks() {

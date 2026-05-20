@@ -1,17 +1,14 @@
-use serde::{Deserialize, Serialize};
+use crate::ui::placement::Placement;
 
-use crate::ui::placement::{ArrangeTarget, Node, Placement};
-
-use super::fs::{load_positions, sanitize_placements, save_positions};
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(Clone, Debug)]
 pub struct CollectionPositions {
     pub cabinet: Placement,
     pub pedestal: Placement,
     pub featured_artifact: Placement,
     pub description_plaque: Placement,
     pub focus_card: Placement,
+    /// Stats annex plaque under the focus description card (procedural archive HUD).
+    pub stats_plaque: Placement,
     /// Per-cubby offset applied to every Zodiac ribbon in the Archive grid
     /// (shared arrange target so the whole row tunes together).
     pub cubby_zodiac: Placement,
@@ -25,41 +22,11 @@ impl Default for CollectionPositions {
             featured_artifact: Placement::at(0.0, 0.0, 0.0),
             description_plaque: Placement::at(0.0, 0.0, 0.0),
             focus_card: Placement::at(0.0, 0.0, 0.0),
+            stats_plaque: Placement::at(0.0, 0.0, 0.0),
             cubby_zodiac: Placement::at(0.0, 0.0, 0.0),
         }
     }
 }
-
-pub const COLLECTION_HIERARCHY: &[Node] = &[Node::Group {
-    name: "collection",
-    label: "Archive",
-    children: &[
-        Node::Leaf {
-            name: "collection.cabinet",
-            label: "Grid backdrop",
-        },
-        Node::Leaf {
-            name: "collection.pedestal",
-            label: "Orbit inspect anchor",
-        },
-        Node::Leaf {
-            name: "collection.featured_artifact",
-            label: "Featured artifact",
-        },
-        Node::Leaf {
-            name: "collection.description_plaque",
-            label: "Description plaque",
-        },
-        Node::Leaf {
-            name: "collection.focus_card",
-            label: "Focus description card",
-        },
-        Node::Leaf {
-            name: "collection.cubby_zodiac",
-            label: "Cubby zodiac ribbons",
-        },
-    ],
-}];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CollectionField {
@@ -68,6 +35,7 @@ pub enum CollectionField {
     FeaturedArtifact,
     DescriptionPlaque,
     FocusCard,
+    StatsPlaque,
     CubbyZodiac,
 }
 
@@ -78,12 +46,12 @@ pub fn lookup_collection_field(name: &str) -> Option<CollectionField> {
         "collection.featured_artifact" => CollectionField::FeaturedArtifact,
         "collection.description_plaque" => CollectionField::DescriptionPlaque,
         "collection.focus_card" => CollectionField::FocusCard,
+        "collection.stats_plaque" => CollectionField::StatsPlaque,
         "collection.cubby_zodiac" => CollectionField::CubbyZodiac,
         _ => return None,
     })
 }
 
-#[cfg(test)]
 pub fn collection_field_path(field: CollectionField) -> &'static str {
     match field {
         CollectionField::Cabinet => "collection.cabinet",
@@ -91,6 +59,7 @@ pub fn collection_field_path(field: CollectionField) -> &'static str {
         CollectionField::FeaturedArtifact => "collection.featured_artifact",
         CollectionField::DescriptionPlaque => "collection.description_plaque",
         CollectionField::FocusCard => "collection.focus_card",
+        CollectionField::StatsPlaque => "collection.stats_plaque",
         CollectionField::CubbyZodiac => "collection.cubby_zodiac",
     }
 }
@@ -102,6 +71,7 @@ impl CollectionField {
         CollectionField::FeaturedArtifact,
         CollectionField::DescriptionPlaque,
         CollectionField::FocusCard,
+        CollectionField::StatsPlaque,
         CollectionField::CubbyZodiac,
     ];
 }
@@ -114,6 +84,7 @@ impl CollectionPositions {
             CollectionField::FeaturedArtifact => &mut self.featured_artifact,
             CollectionField::DescriptionPlaque => &mut self.description_plaque,
             CollectionField::FocusCard => &mut self.focus_card,
+            CollectionField::StatsPlaque => &mut self.stats_plaque,
             CollectionField::CubbyZodiac => &mut self.cubby_zodiac,
         }
     }
@@ -125,37 +96,9 @@ impl CollectionPositions {
             CollectionField::FeaturedArtifact => &self.featured_artifact,
             CollectionField::DescriptionPlaque => &self.description_plaque,
             CollectionField::FocusCard => &self.focus_card,
+            CollectionField::StatsPlaque => &self.stats_plaque,
             CollectionField::CubbyZodiac => &self.cubby_zodiac,
         }
     }
 }
 
-impl ArrangeTarget for CollectionPositions {
-    fn placement_mut(&mut self, name: &str) -> Option<&mut Placement> {
-        lookup_collection_field(name).map(|f| self.field_mut(f))
-    }
-
-    fn placement(&self, name: &str) -> Option<&Placement> {
-        lookup_collection_field(name).map(|f| self.field_ref(f))
-    }
-
-    fn hierarchy(&self) -> &'static [Node] {
-        COLLECTION_HIERARCHY
-    }
-}
-
-pub fn load_collection_positions() -> CollectionPositions {
-    let mut loaded = load_positions("collection.json");
-    sanitize_collection_positions(&mut loaded);
-    loaded
-}
-
-pub fn sanitize_collection_positions(p: &mut CollectionPositions) {
-    sanitize_placements("collection", p, CollectionField::ALL, |positions, field| {
-        positions.field_mut(field)
-    });
-}
-
-pub fn save_collection_positions(pos: &CollectionPositions) -> anyhow::Result<()> {
-    save_positions("collection.json", "collection", pos)
-}

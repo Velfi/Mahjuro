@@ -431,6 +431,7 @@ impl SceneBehavior for YakuJournalScene {
                                 glow: tile_glow,
                                 glow_color: tile_glow_color,
                                 pick_id: None,
+                                arrange_group: None,
                             });
                         }
                     }
@@ -980,6 +981,7 @@ fn draw_plaque(
                     glow: hand_glow,
                     glow_color: hand_glow_color,
                     pick_id: None,
+                    arrange_group: None,
                 });
                 cursor_x += hand_tile;
             }

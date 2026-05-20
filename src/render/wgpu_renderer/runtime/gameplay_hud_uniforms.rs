@@ -93,7 +93,7 @@ impl WgpuRenderer {
                     ),
                     glam::Vec3::new(t.extents[0], t.extents[1], t.extents[2]),
                 );
-                let model = self.apply_arrange_override("gameplay.hand.yaku_tablet", model);
+                let model = self.apply_placement_rotation("gameplay.hand.yaku_tablet", model);
                 // Active tablets warm up to a champagne tint; dim ones stay
                 // bone. The decal pass (phase 2) will paint the engraved name
                 // on top via a per-instance albedo texture.

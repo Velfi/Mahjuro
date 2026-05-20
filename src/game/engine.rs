@@ -224,7 +224,10 @@ pub enum ShopCommandData {
         pack_name: &'static str,
         pack_kind: TilePackKind,
     },
-    Rerolled,
+    Rerolled {
+        /// True for a skip-tag free reroll (`cost == 0`) or when [RelicId::IGotAGuy] waived gold.
+        skip_cost_escalation: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1125,6 +1128,8 @@ impl<'a> GameEngine<'a> {
             }
             ShopCommand::RerollShop { cost } => {
                 let mut gold_cost = cost;
+                // Skip-tag free reroll (`cost == 0`) and I Got A Guy waivers keep the listed price.
+                let mut skip_cost_escalation = cost == 0;
                 if gold_cost > 0
                     && self.run.relics.has(RelicId::IGotAGuy)
                     && self
@@ -1139,6 +1144,7 @@ impl<'a> GameEngine<'a> {
                         *n -= 1;
                     }
                     gold_cost = 0;
+                    skip_cost_escalation = true;
                 }
                 if self.run.gold < gold_cost as i32 {
                     return ShopCommandOutcome::rejected(
@@ -1149,7 +1155,9 @@ impl<'a> GameEngine<'a> {
                 }
                 self.run
                     .apply_gold_delta(-(gold_cost as i32), Some(&mut self.bus));
-                ShopCommandData::Rerolled
+                ShopCommandData::Rerolled {
+                    skip_cost_escalation,
+                }
             }
         };
 
@@ -1695,6 +1703,30 @@ mod tests {
                 .copied(),
             Some(1)
         );
+        assert_eq!(
+            outcome.data,
+            ShopCommandData::Rerolled {
+                skip_cost_escalation: true,
+            }
+        );
+    }
+
+    #[test]
+    fn reroll_shop_paid_does_not_skip_cost_escalation() {
+        let mut run = deterministic_run();
+        run.gold = 100;
+        let mut bus = EventBus::default();
+
+        let outcome =
+            GameEngine::new(&mut run, &mut bus).dispatch_shop(ShopCommand::RerollShop { cost: 5 });
+
+        assert_eq!(outcome.rejection, None);
+        assert_eq!(
+            outcome.data,
+            ShopCommandData::Rerolled {
+                skip_cost_escalation: false,
+            }
+        );
     }
 
     #[test]
@@ -1739,6 +1771,12 @@ mod tests {
                 .get(&crate::core::relic::RelicId::IGotAGuy)
                 .copied(),
             Some(3)
+        );
+        assert_eq!(
+            outcome.data,
+            ShopCommandData::Rerolled {
+                skip_cost_escalation: true,
+            }
         );
     }
 }
