@@ -13,6 +13,5 @@
 	{
 		"__DEPOT_WINDOWS__" "depot_build_windows.vdf"
 		"__DEPOT_MACOS__"   "depot_build_macos.vdf"
-		"__DEPOT_LINUX__"   "depot_build_linux.vdf"
 	}
 }

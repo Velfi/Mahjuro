@@ -14,8 +14,7 @@
 //!
 //! Linux does not search the executable directory for shared libraries by
 //! default. We pass `-Wl,-rpath,$ORIGIN` so `libsteam_api.so` can live next to
-//! `mahjuro` (same layout as Steam depots and GitHub release tarballs — see
-//! release workflow AppImage / linux tarball steps). SDL is linked statically
+//! `mahjuro` (same layout as Steam depots and Windows release zips). SDL is linked statically
 //! (`sdl3` feature `build-from-source-static`).
 //!
 //! On macOS we pass `-Wl,-rpath,@loader_path` so `libsteam_api.dylib` next to

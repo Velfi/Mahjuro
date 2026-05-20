@@ -32,7 +32,6 @@
 #   STEAM_APP_ID         Override Mahjuro's AppID. Default: 4636490
 #   STEAM_DEPOT_WINDOWS  Default: 4636491
 #   STEAM_DEPOT_MACOS    Default: 4636492
-#   STEAM_DEPOT_LINUX    Default: 4636493
 #   STEAM_BETA_BRANCH    Used with --beta when you want a default other than
 #                        the branch literally named "beta" (e.g. "publicbeta").
 
@@ -90,7 +89,6 @@ STEAM_SDK_ROOT="${STEAM_SDK_ROOT:-${REPO_ROOT}/steam_sdk}"
 STEAM_APP_ID="${STEAM_APP_ID:-4636490}"
 STEAM_DEPOT_WINDOWS="${STEAM_DEPOT_WINDOWS:-4636491}"
 STEAM_DEPOT_MACOS="${STEAM_DEPOT_MACOS:-4636492}"
-STEAM_DEPOT_LINUX="${STEAM_DEPOT_LINUX:-4636493}"
 
 if [[ ! -d "$STEAM_SDK_ROOT" ]]; then
     echo "error: STEAM_SDK_ROOT does not exist: $STEAM_SDK_ROOT" >&2
@@ -143,7 +141,7 @@ SCRIPTS="$STAGING/scripts"
 DOWNLOADS="$STAGING/dl"
 
 rm -rf "$STAGING"
-mkdir -p "$CONTENT/windows" "$CONTENT/macos" "$CONTENT/linux" \
+mkdir -p "$CONTENT/windows" "$CONTENT/macos" \
          "$OUTPUT" "$SCRIPTS" "$DOWNLOADS"
 
 # ─────────────────────────── Stage content ───────────────────────────
@@ -160,29 +158,10 @@ stage_local () {
             fi
             cp -R "$app" "$CONTENT/macos/"
             echo "staged: macos/Mahjuro.app (from $app)"
-            echo "warning: --local stages only the host platform; windows/ and linux/ are empty." >&2
-            ;;
-        Linux)
-            local bin="$REPO_ROOT/target/release/mahjuro"
-            if [[ ! -x "$bin" ]]; then
-                echo "error: --local on Linux expects target/release/mahjuro." >&2
-                echo "       Run 'cargo build --release' first." >&2
-                exit 1
-            fi
-            cp "$bin" "$CONTENT/linux/mahjuro"
-            chmod +x "$CONTENT/linux/mahjuro"
-            local so="$REPO_ROOT/target/release/libsteam_api.so"
-            if [[ ! -f "$so" ]]; then
-                echo "error: $so not found." >&2
-                echo "       Run a release build so build.rs copies the Steam redistributable next to the binary." >&2
-                exit 1
-            fi
-            cp "$so" "$CONTENT/linux/libsteam_api.so"
-            echo "staged: linux/mahjuro (from $bin)"
-            echo "warning: --local stages only the host platform; windows/ and macos/ are empty." >&2
+            echo "warning: --local stages only the host platform; windows/ is empty." >&2
             ;;
         *)
-            echo "error: --local is only supported on macOS or Linux hosts." >&2
+            echo "error: --local is only supported on macOS hosts." >&2
             exit 1
             ;;
     esac
@@ -197,19 +176,12 @@ stage_release () {
     echo "Downloading $TAG release artifacts..."
     gh release download "$TAG" \
         --pattern "mahjuro-${TAG}-windows-x86_64.zip" \
-        --pattern "mahjuro-${TAG}-linux-x86_64.tar.gz" \
         --pattern "mahjuro-${TAG}-macos-universal.dmg" \
         --dir "$DOWNLOADS"
 
     # Windows: zip contains mahjuro.exe, pack_manifest.json + mahjuro-pack-*.zip beside the exe.
     unzip -q "$DOWNLOADS/mahjuro-${TAG}-windows-x86_64.zip" -d "$CONTENT/windows/"
     echo "staged: windows/mahjuro.exe"
-
-    # Linux: tar.gz contains mahjuro + libsteam_api.so (SDL is static).
-    tar -xzf "$DOWNLOADS/mahjuro-${TAG}-linux-x86_64.tar.gz" -C "$CONTENT/linux/"
-    chmod +x "$CONTENT/linux/mahjuro"
-    echo "staged: linux/mahjuro"
-    echo "staged: linux/libsteam_api.so (from release tarball)"
 
     # macOS: mount the DMG and copy the .app out of it (signed + notarized + stapled).
     if [[ "$(uname)" != "Darwin" ]]; then
@@ -252,14 +224,12 @@ render () {
         -e "s|__BUILD_OUTPUT__|${OUTPUT}|g" \
         -e "s|__DEPOT_WINDOWS__|${STEAM_DEPOT_WINDOWS}|g" \
         -e "s|__DEPOT_MACOS__|${STEAM_DEPOT_MACOS}|g" \
-        -e "s|__DEPOT_LINUX__|${STEAM_DEPOT_LINUX}|g" \
         "$src" > "$dst"
 }
 
 render "packaging/steam/app_build.vdf.template"           "$SCRIPTS/app_build.vdf"
 render "packaging/steam/depot_build_windows.vdf.template" "$SCRIPTS/depot_build_windows.vdf"
 render "packaging/steam/depot_build_macos.vdf.template"   "$SCRIPTS/depot_build_macos.vdf"
-render "packaging/steam/depot_build_linux.vdf.template"   "$SCRIPTS/depot_build_linux.vdf"
 
 echo
 echo "Rendered VDFs in $SCRIPTS:"

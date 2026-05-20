@@ -30,13 +30,6 @@ jobs:
       release_tag: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
     secrets: inherit
 
-  release-linux:
-    needs: lfs-assets
-    uses: ./.github/workflows/release-linux.yml
-    with:
-      release_tag: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
-    secrets: inherit
-
   release-windows:
     needs: lfs-assets
     uses: ./.github/workflows/release-windows.yml
@@ -45,7 +38,7 @@ jobs:
     secrets: inherit
 
   create-release:
-    needs: [release-macos, release-linux, release-windows]
+    needs: [release-macos, release-windows]
     runs-on: ubuntu-latest
 
     env:
