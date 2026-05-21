@@ -41,6 +41,8 @@ for those four room files before they go into `mahjuro-pack-gameplay.zip`. Witho
 
 Authoring tip: export room textures at ≤1024 in Blender so decode + pack size stay small even without `gltf-transform`.
 
+Loose `baseColor_*` / `normal_*` files sometimes land in `assets/3d/` after `gltf-transform`; move them to `assets/3d/_gltf_sidecars/` (gitignored, excluded from packs). The game only reads embedded textures inside the `.glb` files.
+
 ## Boot loading (runtime)
 
 At startup, **`shared`** and **`gameplay`** mount **eagerly**. **`scenes/main_menu/`** and **`music/`** use **lazy** zips (menu art on first draw of the façade; BGM when a track first starts). The splash screen does not wait on those decodes — the hub may briefly show a solid fallback until the façade texture uploads.
