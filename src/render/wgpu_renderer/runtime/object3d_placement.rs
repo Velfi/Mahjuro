@@ -1620,6 +1620,7 @@ impl WgpuRenderer {
                                     BOWL_LOCAL_HALF,
                                     BOWL_LOCAL_CENTER_Y,
                                 ));
+                                self.proj.bowl_model = Some(hover_model);
                                 self.last_bowl_model = Some(hover_model);
                             }
                             self.last_debug_pickables.push((

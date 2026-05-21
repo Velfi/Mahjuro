@@ -14,6 +14,7 @@ mod animation_state;
 mod candle;
 mod cascade_controller;
 mod cascade_hud;
+mod discard_animation;
 mod focus;
 mod hand_layout;
 mod input_handler;
@@ -26,7 +27,7 @@ use std::time::Instant;
 
 use crate::core::hand::suggest_completions;
 use crate::core::scoring::StepKind;
-use crate::game::cascade::ScoringCascade;
+use crate::game::cascade::{CascadeTuning, ScoringCascade};
 use crate::game::engine::{CommandData, GameCommand, GameEngine};
 use crate::game::run::DiscardUndoSnapshot;
 use crate::render::animation::ENTITY_SCORE_PANEL;
@@ -147,12 +148,19 @@ pub struct GameplayScene {
     /// against the inputs that affect its output. `draw_frame` takes `&self`
     /// so we use a `RefCell` to update the cache from the read path.
     suggest_hint_cache: std::cell::RefCell<SuggestHintCache>,
-    /// Tile indices that should depart this frame (set during update, consumed during draw).
-    pending_departures: Vec<usize>,
     /// When set, the hand has been discarded-from but not yet refilled. The
-    /// auto-draw fires once `Instant::now()` reaches this deadline, giving the
-    /// discard departure animation time to play out.
+    /// auto-draw fires once the discard animation completes; timing uses
+    /// [`discard_animation::DiscardAnimationBatch::total_duration`] with a
+    /// ceiling from [`CascadeTuning::discard_refill_cap_ms`].
     pending_refill: Option<Instant>,
+    /// In-flight tiles animating from hand into the discard river.
+    active_discard_anim: Option<discard_animation::DiscardAnimationBatch>,
+    /// Tiles resting in the river until the next discard replaces them.
+    river_settled_tiles: Vec<discard_animation::RiverSettledTile>,
+    /// Previous river pile sinking away before despawn.
+    river_sink_batch: Option<discard_animation::RiverSinkBatch>,
+    /// Copy of cascade tuning for draw (updated each frame from [`UpdateCtx`]).
+    cached_cascade_tuning: CascadeTuning,
     /// Latest cursor position (window coords), captured each update for hover picking.
     cursor_pos: (f32, f32),
     /// Score panel (2) + hand strip — upper pair (2) + lower pair (2) + footlight (1).
@@ -268,8 +276,9 @@ pub struct GameplayScene {
     /// Normalized screen-relative positions for the gameplay scene.
     /// Loaded from JSON on construction; falls back to compiled defaults.
     pub positions: crate::ui::scene_layout::GameplayPositions,
-    /// When set, the player can undo the last discard (accessibility option)
-    /// until any other gameplay action invalidates it.
+    /// Snapshot of run state before the last discard; kept even when the
+    /// accessibility undo option is off so turning it on can still undo that discard.
+    /// Cleared by any other gameplay action.
     pub(super) discard_undo: Option<DiscardUndoSnapshot>,
     /// Hand slot indices to wiggle + pulse red after a rejected meld commit.
     invalid_meld_flash_slots: Vec<usize>,
@@ -383,6 +392,7 @@ impl GameplayScene {
             || self.flying_coins.is_active()
             || self.score_reel.is_animating(Instant::now())
             || self.pending_refill.is_some()
+            || discard_animation::discard_animation_active(self)
             || !self.relic_glow_starts.is_empty()
             || self.post_deal_gust_active()
             || self.debug_wind_active()
@@ -497,8 +507,11 @@ impl GameplayScene {
             focus: None,
             last_focus_rects: std::cell::RefCell::new(Vec::new()),
             suggest_hint_cache: std::cell::RefCell::new(SuggestHintCache::default()),
-            pending_departures: Vec::new(),
             pending_refill: None,
+            active_discard_anim: None,
+            river_settled_tiles: Vec::new(),
+            river_sink_batch: None,
+            cached_cascade_tuning: CascadeTuning::default(),
             cursor_pos: (0.0, 0.0),
             candles: [
                 CandleState::new(0.0),

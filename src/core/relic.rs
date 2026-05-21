@@ -47,7 +47,7 @@ pub enum RelicId {
     /// Kongs grant +120 chips and +2 mult each when scored.
     KongsBlessing,
     // ── Flower-synergy relics ──────────────────────────────────────────
-    /// Each flower's triggered effect fires a second time.
+    /// Each scored flower tile: +25 chips (stacks with Mirror Tile).
     GardenKeeper,
     /// Scoring 2+ flowers in one hand grants +6 mult.
     Ikebana,

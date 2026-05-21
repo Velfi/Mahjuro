@@ -57,16 +57,6 @@ impl WgpuRenderer {
             || tuning.vhs_vignette > 0.0;
     }
 
-    /// True when the showcase decal atlas for the active tileset is built and
-    /// resident on the GPU. The atlas is the single biggest CPU cost in the
-    /// renderer (≈3 s of `image::resize` + PNG decode for 336 face decals on
-    /// first use); the splash scene gates its dismissal on this so the bake
-    /// happens behind the splash plate rather than freezing the first
-    /// gameplay frame.
-    pub fn showcase_decal_atlas_baked(&self) -> bool {
-        self.showcase_decal_atlas.is_some()
-    }
-
     /// True when every player-visible tileset has a baked showcase atlas
     /// either active or parked in the renderer cache.
     pub fn showcase_decal_atlases_baked_for_all_player_tilesets(&self) -> bool {
@@ -79,35 +69,13 @@ impl WgpuRenderer {
             .all(|name| self.has_showcase_decal_atlas_for_tileset(name))
     }
 
-    /// Pre-bake the showcase decal atlas for `tileset_name`, blocking until
-    /// the GPU upload is queued. Idempotent for an already-baked tileset.
-    /// Called from the splash scene's tick so the cost is amortised behind
-    /// the splash plate; subsequent renders skip the lazy bake in
-    /// `runtime/showcase_tiles.rs`.
-    ///
-    /// Also seeds `tile_set` so `apply_render_settings` doesn't immediately
-    /// invalidate the atlas on the first real `render()` call (its
-    /// "tileset changed" check compares against this field).
-    pub fn prebake_showcase_decal_atlas(&mut self, tileset_name: &str) {
-        if self.showcase_decal_atlas.is_some()
-            && self.showcase_decal_atlas_tileset.as_deref() == Some(tileset_name)
-        {
-            return;
-        }
-        // Seed tile_set so the next apply_render_settings does not see a
-        // mismatch and clear the atlas we are about to build.
-        if self.tile_set.as_deref() != Some(tileset_name) {
-            self.tile_set = Some(tileset_name.to_owned());
-        }
-        self.ensure_showcase_decal_atlas(tileset_name);
-    }
-
     /// Pre-bake showcase atlases for every player tileset, keeping them in the
     /// in-memory atlas cache for hitch-free tileset cycling.
     pub fn prebake_showcase_decal_atlases_for_all_player_tilesets(
         &mut self,
         active_tileset_name: &str,
     ) {
+        let _bake = crate::startup_profile::scope("splash.showcase_decal_atlases");
         let mut tilesets = crate::asset_path::list_player_tilesets();
         if !tilesets.iter().any(|n| n == active_tileset_name) {
             tilesets.push(active_tileset_name.to_string());
@@ -155,11 +123,9 @@ impl WgpuRenderer {
         // Keep animating while any tile is sliding into position.
         let slide_active = self.tile_anim_y.iter().any(|&y| y.abs() > 0.5)
             || self.tile_anim_x.iter().any(|&x| x.abs() > 0.01);
-        let departing_active = !self.departing_tiles.is_empty();
         spin_active
             || lerp_active
             || slide_active
-            || departing_active
             || !self.hand_tiles.is_empty()
     }
 

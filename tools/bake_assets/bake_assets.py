@@ -25,6 +25,13 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RULES_PATH = Path(__file__).resolve().parent / "pack_rules.json"
 
+# Room environment GLBs: runtime caps textures to 1024px and builds mips on load.
+# Resize at bake when `gltf-transform` is on PATH (npm i -g @gltf-transform/cli).
+ROOM_ENV_GLB_NAMES = frozenset(
+    {"shop.glb", "hallway.glb", "archive.glb", "main_menu.glb"}
+)
+ROOM_ENV_TEXTURE_MAX = 1024
+
 
 @dataclass
 class PackRule:
@@ -128,9 +135,49 @@ def zip_write_params(rel: str) -> tuple[int, int | None]:
     return zipfile.ZIP_DEFLATED, 6
 
 
+def maybe_resize_room_env_glb(src: Path, tmp_out: Path) -> bool:
+    """Resize embedded textures in room GLBs. Returns True if handled."""
+    if src.name.lower() not in ROOM_ENV_GLB_NAMES:
+        return False
+    transform = shutil.which("gltf-transform")
+    if transform is None:
+        size_mb = src.stat().st_size / (1024 * 1024)
+        if size_mb > 32:
+            print(
+                f"bake_assets: warning: {src.name} is {size_mb:.0f} MB — "
+                f"install @gltf-transform/cli and re-bake to resize textures to "
+                f"{ROOM_ENV_TEXTURE_MAX}px (faster startup)",
+                file=sys.stderr,
+            )
+        return False
+    r = subprocess.run(
+        [
+            transform,
+            "resize",
+            str(src),
+            str(tmp_out),
+            "--width",
+            str(ROOM_ENV_TEXTURE_MAX),
+            "--height",
+            str(ROOM_ENV_TEXTURE_MAX),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode == 0 and tmp_out.is_file():
+        return True
+    print(
+        f"bake_assets: gltf-transform resize failed for {src.name}: {r.stderr or r.stdout}",
+        file=sys.stderr,
+    )
+    return False
+
+
 def process_file(src: Path, rel: str, tmp_out: Path, lossy: bool) -> None:
     """Write processed bytes to tmp_out (single file)."""
     suf = src.suffix.lower()
+    if suf == ".glb" and maybe_resize_room_env_glb(src, tmp_out):
+        return
     if suf == ".json":
         data = json.loads(src.read_text(encoding="utf-8"))
         tmp_out.write_bytes(json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))

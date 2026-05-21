@@ -7,7 +7,6 @@ use crate::render::moths_to_a_light::{
 };
 
 pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<WgpuRenderer> {
-    let t_total = Instant::now();
     // Instance, adapter, device, surface/offscreen target, depth — see
     // `init_phases::early_gpu_and_depth`.
     let super::super::init_phases::EarlyGpuState {
@@ -25,12 +24,15 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         depth_view,
         ssr_prev_depth_texture,
         ssr_prev_depth_view,
-    } = super::super::init_phases::early_gpu_and_depth(target_init)?;
+    } = {
+        let _early = crate::startup_profile::scope("wgpu.early_gpu");
+        super::super::init_phases::early_gpu_and_depth(target_init)?
+    };
 
     // Linear HDR intermediate — main scene + bloom; tonemap maps to the swapchain format.
     let scene_hdr_format = SCENE_HDR_FORMAT;
 
-    let t0 = Instant::now();
+    let t_shaders = Instant::now();
     let super::super::init_phases::RendererShaderPack {
         quad: shader,
         tile: tile_shader,
@@ -2309,10 +2311,9 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             },
         ],
     });
+    crate::startup_profile::record("wgpu.shaders_and_pipelines", t_shaders.elapsed());
 
-    log::debug!("shaders + pipelines compiled in {:?}", t0.elapsed());
-
-    let t0 = Instant::now();
+    let t_fonts = Instant::now();
     let ui_font = load_ui_font();
     if ui_font.is_some() {
         log::debug!("UI font loaded.");
@@ -2326,8 +2327,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     } else {
         log::warn!("No Noto Emoji font found; tile symbols may be blank.");
     }
-
-    log::debug!("fonts loaded in {:?}", t0.elapsed());
+    crate::startup_profile::record("wgpu.fonts", t_fonts.elapsed());
 
     let quad_v: [[f32; 2]; 4] = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]];
     let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -2348,10 +2348,16 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     let (_tile_glb_default_emissive_tex, tile_glb_default_emissive_view) =
         default_emissive_map(&device, &queue);
 
-    let t0 = Instant::now();
-    let mut tile_outline_merge_vertices: Vec<Vertex3dTex> = Vec::new();
-    let mut tile_outline_merge_indices: Vec<u32> = Vec::new();
-    let tile_primitives: Vec<TilePrimitiveGpu> = match loaded_glb {
+    let (
+        tile_primitives,
+        tile_outline_vertex_buffer,
+        tile_outline_index_buffer,
+        tile_outline_index_count,
+    ) = {
+        let _tile = crate::startup_profile::scope("wgpu.tile_mesh");
+        let mut tile_outline_merge_vertices: Vec<Vertex3dTex> = Vec::new();
+        let mut tile_outline_merge_indices: Vec<u32> = Vec::new();
+        let tile_primitives: Vec<TilePrimitiveGpu> = match loaded_glb {
         Ok(mut mesh) => {
             normalize_mesh(&mut mesh);
             log::info!("Loaded 3D tile: {} primitive(s)", mesh.primitives.len());
@@ -2509,10 +2515,16 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             });
             (vb, ib, tile_outline_merge_indices.len() as u32)
         };
+        (
+            tile_primitives,
+            tile_outline_vertex_buffer,
+            tile_outline_index_buffer,
+            tile_outline_index_count,
+        )
+    };
 
-    log::info!("tile mesh loaded in {:?}", t0.elapsed());
-
-    let (shop_env_primitives, shop_environment) =
+    let (shop_env_primitives, shop_environment) = {
+        let _shop = crate::startup_profile::scope("wgpu.room.shop");
         crate::render::room_glb::with_shop_glb_cpu(|cpu_opt| {
             let mut prims = Vec::new();
             let mut gpu_wrap = None;
@@ -2520,6 +2532,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 return (prims, gpu_wrap);
             };
             if !cpu.environment_primitives.is_empty() {
+                let mut room_tex_cache = RoomEnvTextureCache::new();
+                let (_white_tex, white_albedo_view) = white_albedo(&device, &queue);
                 for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
                     let prim = &env_prim.mesh;
                     let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -2533,69 +2547,48 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                         usage: wgpu::BufferUsages::INDEX,
                     });
                     let mips = crate::render::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
-                    let (_albedo_texture, albedo_view) = match &prim.albedo_rgba {
-                        Some((rgba, aw, ah)) => {
-                            upload_rgba_texture_with_mips(&TextureUploadParams {
-                                device: &device,
-                                queue: &queue,
-                                label: format!("shop-env-albedo-{i}"),
-                                rgba: rgba,
-                                width: *aw,
-                                height: *ah,
-                                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                                mips,
-                            })
-                        }
-                        None => white_albedo(&device, &queue),
-                    };
-                    let normal_view = match &prim.normal_rgba {
-                        Some((rgba, nw, nh)) => {
-                            upload_rgba_texture_with_mips(&TextureUploadParams {
-                                device: &device,
-                                queue: &queue,
-                                label: format!("shop-env-normal-{i}"),
-                                rgba: rgba,
-                                width: *nw,
-                                height: *nh,
-                                format: wgpu::TextureFormat::Rgba8Unorm,
-                                mips,
-                            })
-                            .1
-                        }
-                        None => tile_default_normal_view.clone(),
-                    };
-                    let metallic_roughness_view = match &prim.metallic_roughness_rgba {
-                        Some((rgba, w, h)) => {
-                            upload_rgba_texture_with_mips(&TextureUploadParams {
-                                device: &device,
-                                queue: &queue,
-                                label: format!("shop-env-mr-{i}"),
-                                rgba: rgba,
-                                width: *w,
-                                height: *h,
-                                format: wgpu::TextureFormat::Rgba8Unorm,
-                                mips,
-                            })
-                            .1
-                        }
-                        None => tile_glb_default_mr_view.clone(),
-                    };
-                    let emissive_view = match &prim.emissive_rgba {
-                        Some((rgba, w, h)) => {
-                            upload_rgba_texture_with_mips(&TextureUploadParams {
-                                device: &device,
-                                queue: &queue,
-                                label: format!("shop-env-emissive-{i}"),
-                                rgba: rgba,
-                                width: *w,
-                                height: *h,
-                                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                                mips,
-                            })
-                            .1
-                        }
-                        None => tile_glb_default_emissive_view.clone(),
-                    };
+                    let albedo_view = room_tex_cache.upload_slot(
+                        &device,
+                        &queue,
+                        format!("shop-env-albedo-{i}"),
+                        prim.albedo_rgba.as_ref(),
+                        prim.albedo_mip_chain.as_deref().map(|c| c.as_slice()),
+                        wgpu::TextureFormat::Rgba8UnormSrgb,
+                        mips,
+                        &white_albedo_view,
+                    );
+                    let normal_view = room_tex_cache.upload_slot(
+                        &device,
+                        &queue,
+                        format!("shop-env-normal-{i}"),
+                        prim.normal_rgba.as_ref(),
+                        prim.normal_mip_chain.as_deref().map(|c| c.as_slice()),
+                        wgpu::TextureFormat::Rgba8Unorm,
+                        mips,
+                        &tile_default_normal_view,
+                    );
+                    let metallic_roughness_view = room_tex_cache.upload_slot(
+                        &device,
+                        &queue,
+                        format!("shop-env-mr-{i}"),
+                        prim.metallic_roughness_rgba.as_ref(),
+                        prim.metallic_roughness_mip_chain
+                            .as_deref()
+                            .map(|c| c.as_slice()),
+                        wgpu::TextureFormat::Rgba8Unorm,
+                        mips,
+                        &tile_glb_default_mr_view,
+                    );
+                    let emissive_view = room_tex_cache.upload_slot(
+                        &device,
+                        &queue,
+                        format!("shop-env-emissive-{i}"),
+                        prim.emissive_rgba.as_ref(),
+                        prim.emissive_mip_chain.as_deref().map(|c| c.as_slice()),
+                        wgpu::TextureFormat::Rgba8UnormSrgb,
+                        mips,
+                        &tile_glb_default_emissive_view,
+                    );
                     let pbr_uniform_buffer =
                         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some(&format!("shop-pbr-{i}")),
@@ -2745,11 +2738,13 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 log::info!("shop.glb GPU: {} primitive draw(s)", prims.len());
             }
             (prims, gpu_wrap)
-        });
+        })
+    };
 
     crate::render::room_glb::release_shop_environment_cpu_sources_after_gpu_upload();
 
-    let (hallway_env_primitives, hallway_environment) =
+    let (hallway_env_primitives, hallway_environment) = {
+        let _hallway = crate::startup_profile::scope("wgpu.room.hallway");
         crate::render::hallway_glb::with_hallway_glb_cpu(|cpu_opt| {
             let mut prims = Vec::new();
             let mut gpu_wrap = None;
@@ -2757,6 +2752,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 return (prims, gpu_wrap);
             };
             if !cpu.environment_primitives.is_empty() {
+                let mut room_tex_cache = RoomEnvTextureCache::new();
+                let (_white_tex, white_albedo_view) = white_albedo(&device, &queue);
                 for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
                     let prim = &env_prim.mesh;
                     let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -2770,69 +2767,48 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                         usage: wgpu::BufferUsages::INDEX,
                     });
                     let mips = crate::render::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
-                    let (_albedo_texture, albedo_view) = match &prim.albedo_rgba {
-                        Some((rgba, aw, ah)) => {
-                            upload_rgba_texture_with_mips(&TextureUploadParams {
-                                device: &device,
-                                queue: &queue,
-                                label: format!("hallway-env-albedo-{i}"),
-                                rgba: rgba,
-                                width: *aw,
-                                height: *ah,
-                                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                                mips,
-                            })
-                        }
-                        None => white_albedo(&device, &queue),
-                    };
-                    let normal_view = match &prim.normal_rgba {
-                        Some((rgba, nw, nh)) => {
-                            upload_rgba_texture_with_mips(&TextureUploadParams {
-                                device: &device,
-                                queue: &queue,
-                                label: format!("hallway-env-normal-{i}"),
-                                rgba: rgba,
-                                width: *nw,
-                                height: *nh,
-                                format: wgpu::TextureFormat::Rgba8Unorm,
-                                mips,
-                            })
-                            .1
-                        }
-                        None => tile_default_normal_view.clone(),
-                    };
-                    let metallic_roughness_view = match &prim.metallic_roughness_rgba {
-                        Some((rgba, w, h)) => {
-                            upload_rgba_texture_with_mips(&TextureUploadParams {
-                                device: &device,
-                                queue: &queue,
-                                label: format!("hallway-env-mr-{i}"),
-                                rgba: rgba,
-                                width: *w,
-                                height: *h,
-                                format: wgpu::TextureFormat::Rgba8Unorm,
-                                mips,
-                            })
-                            .1
-                        }
-                        None => tile_glb_default_mr_view.clone(),
-                    };
-                    let emissive_view = match &prim.emissive_rgba {
-                        Some((rgba, w, h)) => {
-                            upload_rgba_texture_with_mips(&TextureUploadParams {
-                                device: &device,
-                                queue: &queue,
-                                label: format!("hallway-env-emissive-{i}"),
-                                rgba: rgba,
-                                width: *w,
-                                height: *h,
-                                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                                mips,
-                            })
-                            .1
-                        }
-                        None => tile_glb_default_emissive_view.clone(),
-                    };
+                    let albedo_view = room_tex_cache.upload_slot(
+                        &device,
+                        &queue,
+                        format!("hallway-env-albedo-{i}"),
+                        prim.albedo_rgba.as_ref(),
+                        prim.albedo_mip_chain.as_deref().map(|c| c.as_slice()),
+                        wgpu::TextureFormat::Rgba8UnormSrgb,
+                        mips,
+                        &white_albedo_view,
+                    );
+                    let normal_view = room_tex_cache.upload_slot(
+                        &device,
+                        &queue,
+                        format!("hallway-env-normal-{i}"),
+                        prim.normal_rgba.as_ref(),
+                        prim.normal_mip_chain.as_deref().map(|c| c.as_slice()),
+                        wgpu::TextureFormat::Rgba8Unorm,
+                        mips,
+                        &tile_default_normal_view,
+                    );
+                    let metallic_roughness_view = room_tex_cache.upload_slot(
+                        &device,
+                        &queue,
+                        format!("hallway-env-mr-{i}"),
+                        prim.metallic_roughness_rgba.as_ref(),
+                        prim.metallic_roughness_mip_chain
+                            .as_deref()
+                            .map(|c| c.as_slice()),
+                        wgpu::TextureFormat::Rgba8Unorm,
+                        mips,
+                        &tile_glb_default_mr_view,
+                    );
+                    let emissive_view = room_tex_cache.upload_slot(
+                        &device,
+                        &queue,
+                        format!("hallway-env-emissive-{i}"),
+                        prim.emissive_rgba.as_ref(),
+                        prim.emissive_mip_chain.as_deref().map(|c| c.as_slice()),
+                        wgpu::TextureFormat::Rgba8UnormSrgb,
+                        mips,
+                        &tile_glb_default_emissive_view,
+                    );
                     let pbr_uniform_buffer =
                         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some(&format!("hallway-pbr-{i}")),
@@ -2963,7 +2939,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 log::info!("hallway.glb GPU: {} primitive draw(s)", prims.len());
             }
             (prims, gpu_wrap)
-        });
+        })
+    };
 
     crate::render::hallway_glb::release_hallway_environment_cpu_sources_after_gpu_upload();
 
@@ -2972,7 +2949,9 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         archive_environment,
         archive_sign_left_prim_idx,
         archive_sign_right_prim_idx,
-    ) = crate::render::archive_glb::with_archive_glb_cpu(|cpu_opt| {
+    ) = {
+        let _archive = crate::startup_profile::scope("wgpu.room.archive");
+        crate::render::archive_glb::with_archive_glb_cpu(|cpu_opt| {
         let mut prims = Vec::new();
         let mut gpu_wrap = None;
         let mut sign_l = None;
@@ -2981,6 +2960,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             return (prims, gpu_wrap, sign_l, sign_r);
         };
         if !cpu.environment_primitives.is_empty() {
+            let mut room_tex_cache = RoomEnvTextureCache::new();
+            let (_white_tex, white_albedo_view) = white_albedo(&device, &queue);
             for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
                 if let Some(ref name) = env_prim.gltf_node_name {
                     if name == crate::render::archive_glb::SIGN_DESCRIPTION_LEFT {
@@ -3001,67 +2982,48 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     usage: wgpu::BufferUsages::INDEX,
                 });
                 let mips = crate::render::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
-                let (_albedo_texture, albedo_view) = match &prim.albedo_rgba {
-                    Some((rgba, aw, ah)) => upload_rgba_texture_with_mips(&TextureUploadParams {
-                        device: &device,
-                        queue: &queue,
-                        label: format!("archive-env-albedo-{i}"),
-                        rgba: rgba,
-                        width: *aw,
-                        height: *ah,
-                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                        mips,
-                    }),
-                    None => white_albedo(&device, &queue),
-                };
-                let normal_view = match &prim.normal_rgba {
-                    Some((rgba, nw, nh)) => {
-                        upload_rgba_texture_with_mips(&TextureUploadParams {
-                            device: &device,
-                            queue: &queue,
-                            label: format!("archive-env-normal-{i}"),
-                            rgba: rgba,
-                            width: *nw,
-                            height: *nh,
-                            format: wgpu::TextureFormat::Rgba8Unorm,
-                            mips,
-                        })
-                        .1
-                    }
-                    None => tile_default_normal_view.clone(),
-                };
-                let metallic_roughness_view = match &prim.metallic_roughness_rgba {
-                    Some((rgba, w, h)) => {
-                        upload_rgba_texture_with_mips(&TextureUploadParams {
-                            device: &device,
-                            queue: &queue,
-                            label: format!("archive-env-mr-{i}"),
-                            rgba: rgba,
-                            width: *w,
-                            height: *h,
-                            format: wgpu::TextureFormat::Rgba8Unorm,
-                            mips,
-                        })
-                        .1
-                    }
-                    None => tile_glb_default_mr_view.clone(),
-                };
-                let emissive_view = match &prim.emissive_rgba {
-                    Some((rgba, w, h)) => {
-                        upload_rgba_texture_with_mips(&TextureUploadParams {
-                            device: &device,
-                            queue: &queue,
-                            label: format!("archive-env-emissive-{i}"),
-                            rgba: rgba,
-                            width: *w,
-                            height: *h,
-                            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                            mips,
-                        })
-                        .1
-                    }
-                    None => tile_glb_default_emissive_view.clone(),
-                };
+                let albedo_view = room_tex_cache.upload_slot(
+                    &device,
+                    &queue,
+                    format!("archive-env-albedo-{i}"),
+                    prim.albedo_rgba.as_ref(),
+                    prim.albedo_mip_chain.as_deref().map(|c| c.as_slice()),
+                    wgpu::TextureFormat::Rgba8UnormSrgb,
+                    mips,
+                    &white_albedo_view,
+                );
+                let normal_view = room_tex_cache.upload_slot(
+                    &device,
+                    &queue,
+                    format!("archive-env-normal-{i}"),
+                    prim.normal_rgba.as_ref(),
+                    prim.normal_mip_chain.as_deref().map(|c| c.as_slice()),
+                    wgpu::TextureFormat::Rgba8Unorm,
+                    mips,
+                    &tile_default_normal_view,
+                );
+                let metallic_roughness_view = room_tex_cache.upload_slot(
+                    &device,
+                    &queue,
+                    format!("archive-env-mr-{i}"),
+                    prim.metallic_roughness_rgba.as_ref(),
+                    prim.metallic_roughness_mip_chain
+                        .as_deref()
+                        .map(|c| c.as_slice()),
+                    wgpu::TextureFormat::Rgba8Unorm,
+                    mips,
+                    &tile_glb_default_mr_view,
+                );
+                let emissive_view = room_tex_cache.upload_slot(
+                    &device,
+                    &queue,
+                    format!("archive-env-emissive-{i}"),
+                    prim.emissive_rgba.as_ref(),
+                    prim.emissive_mip_chain.as_deref().map(|c| c.as_slice()),
+                    wgpu::TextureFormat::Rgba8UnormSrgb,
+                    mips,
+                    &tile_glb_default_emissive_view,
+                );
                 let pbr_uniform_buffer =
                     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some(&format!("archive-pbr-{i}")),
@@ -3226,11 +3188,13 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             log::info!("archive.glb GPU: {} primitive draw(s)", prims.len());
         }
         (prims, gpu_wrap, sign_l, sign_r)
-    });
+        })
+    };
 
     crate::render::archive_glb::release_archive_environment_cpu_sources_after_gpu_upload();
 
-    let (main_menu_env_primitives, main_menu_environment) =
+    let (main_menu_env_primitives, main_menu_environment) = {
+        let _menu = crate::startup_profile::scope("wgpu.room.main_menu");
         crate::render::main_menu_glb::with_main_menu_glb_cpu(|cpu_opt| {
             let mut prims = Vec::new();
             let mut gpu_wrap = None;
@@ -3238,6 +3202,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 return (prims, gpu_wrap);
             };
             if !cpu.environment_primitives.is_empty() {
+                let mut room_tex_cache = RoomEnvTextureCache::new();
+                let (_white_tex, white_albedo_view) = white_albedo(&device, &queue);
                 for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
                     let prim = &env_prim.mesh;
                     let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -3251,69 +3217,48 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                         usage: wgpu::BufferUsages::INDEX,
                     });
                     let mips = crate::render::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
-                    let (_albedo_texture, albedo_view) = match &prim.albedo_rgba {
-                        Some((rgba, aw, ah)) => {
-                            upload_rgba_texture_with_mips(&TextureUploadParams {
-                                device: &device,
-                                queue: &queue,
-                                label: format!("main_menu-env-albedo-{i}"),
-                                rgba: rgba,
-                                width: *aw,
-                                height: *ah,
-                                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                                mips,
-                            })
-                        }
-                        None => white_albedo(&device, &queue),
-                    };
-                    let normal_view = match &prim.normal_rgba {
-                        Some((rgba, nw, nh)) => {
-                            upload_rgba_texture_with_mips(&TextureUploadParams {
-                                device: &device,
-                                queue: &queue,
-                                label: format!("main_menu-env-normal-{i}"),
-                                rgba: rgba,
-                                width: *nw,
-                                height: *nh,
-                                format: wgpu::TextureFormat::Rgba8Unorm,
-                                mips,
-                            })
-                            .1
-                        }
-                        None => tile_default_normal_view.clone(),
-                    };
-                    let metallic_roughness_view = match &prim.metallic_roughness_rgba {
-                        Some((rgba, w, h)) => {
-                            upload_rgba_texture_with_mips(&TextureUploadParams {
-                                device: &device,
-                                queue: &queue,
-                                label: format!("main_menu-env-mr-{i}"),
-                                rgba: rgba,
-                                width: *w,
-                                height: *h,
-                                format: wgpu::TextureFormat::Rgba8Unorm,
-                                mips,
-                            })
-                            .1
-                        }
-                        None => tile_glb_default_mr_view.clone(),
-                    };
-                    let emissive_view = match &prim.emissive_rgba {
-                        Some((rgba, w, h)) => {
-                            upload_rgba_texture_with_mips(&TextureUploadParams {
-                                device: &device,
-                                queue: &queue,
-                                label: format!("main_menu-env-emissive-{i}"),
-                                rgba: rgba,
-                                width: *w,
-                                height: *h,
-                                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                                mips,
-                            })
-                            .1
-                        }
-                        None => tile_glb_default_emissive_view.clone(),
-                    };
+                    let albedo_view = room_tex_cache.upload_slot(
+                        &device,
+                        &queue,
+                        format!("main_menu-env-albedo-{i}"),
+                        prim.albedo_rgba.as_ref(),
+                        prim.albedo_mip_chain.as_deref().map(|c| c.as_slice()),
+                        wgpu::TextureFormat::Rgba8UnormSrgb,
+                        mips,
+                        &white_albedo_view,
+                    );
+                    let normal_view = room_tex_cache.upload_slot(
+                        &device,
+                        &queue,
+                        format!("main_menu-env-normal-{i}"),
+                        prim.normal_rgba.as_ref(),
+                        prim.normal_mip_chain.as_deref().map(|c| c.as_slice()),
+                        wgpu::TextureFormat::Rgba8Unorm,
+                        mips,
+                        &tile_default_normal_view,
+                    );
+                    let metallic_roughness_view = room_tex_cache.upload_slot(
+                        &device,
+                        &queue,
+                        format!("main_menu-env-mr-{i}"),
+                        prim.metallic_roughness_rgba.as_ref(),
+                        prim.metallic_roughness_mip_chain
+                            .as_deref()
+                            .map(|c| c.as_slice()),
+                        wgpu::TextureFormat::Rgba8Unorm,
+                        mips,
+                        &tile_glb_default_mr_view,
+                    );
+                    let emissive_view = room_tex_cache.upload_slot(
+                        &device,
+                        &queue,
+                        format!("main_menu-env-emissive-{i}"),
+                        prim.emissive_rgba.as_ref(),
+                        prim.emissive_mip_chain.as_deref().map(|c| c.as_slice()),
+                        wgpu::TextureFormat::Rgba8UnormSrgb,
+                        mips,
+                        &tile_glb_default_emissive_view,
+                    );
                     let pbr_uniform_buffer =
                         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some(&format!("main_menu-pbr-{i}")),
@@ -3444,7 +3389,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 log::info!("main_menu.glb GPU: {} primitive draw(s)", prims.len());
             }
             (prims, gpu_wrap)
-        });
+        })
+    };
 
     crate::render::main_menu_glb::release_main_menu_environment_cpu_sources_after_gpu_upload();
 
@@ -3457,7 +3403,10 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     let relic_rx = Some(spawn_relic_loader());
     let (_lit_mesh_relief_default_tex, lit_mesh_relief_default_view) =
         flat_relief_height(&device, &queue);
-    let pack_textures_map = load_pack_textures(&device, &queue, &lit_mesh_relief_default_view);
+    let pack_textures_map = {
+        let _pack = crate::startup_profile::scope("wgpu.pack_textures");
+        load_pack_textures(&device, &queue, &lit_mesh_relief_default_view)
+    };
     let (background_load_start, background_rx) =
         if super::resources::ASYNC_LOADED_BACKGROUNDS.is_empty() {
             (None, None)
@@ -3466,6 +3415,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         };
 
     // ---- Lit-mesh procedural geometry (candles + table) ----
+    let t_lit_meshes = Instant::now();
     let candle_wax_mesh = LitMeshGpu::new(&device, &build_candle_wax_mesh(), "candle-wax");
     let candle_wick_mesh = LitMeshGpu::new(&device, &build_candle_wick_mesh(), "candle-wick");
     let table_mesh = LitMeshGpu::new(&device, &build_table_mesh(), "table");
@@ -3924,6 +3874,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     let cascade_token_instances = make_pool(MAX_CASCADE_TOKEN_SLOTS);
     let extruded_glyph_instances = make_pool(MAX_EXTRUDED_GLYPH_SLOTS);
     let debug_axes_instances = make_pool(3);
+    crate::startup_profile::record("wgpu.lit_meshes_and_pools", t_lit_meshes.elapsed());
 
     // Build the GPU profiler up-front while we still have a borrow of
     // device/queue (the struct literal below moves them).
@@ -3933,8 +3884,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         timestamp_supported,
         gpu_profiler_backend,
     );
-
-    log::info!("WgpuRenderer::new() total: {:?}", t_total.elapsed());
 
     queue.write_buffer(
         &tonemap_params_buffer,
@@ -4078,7 +4027,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         tile_anim_y: Vec::new(),
         tile_anim_x: Vec::new(),
         tile_uids: Vec::new(),
-        departing_tiles: Vec::new(),
         proj: ProjectionCache::default(),
         last_pick_models: Vec::new(),
         last_pick_camera: None,

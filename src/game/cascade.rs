@@ -23,9 +23,28 @@ pub struct CascadeTuning {
     pub total_hold_ms: u64,
     /// Duration for the score counter tick-up animation (ms).
     pub tick_duration_ms: u64,
-    /// Lifetime of the discard departure animation (ms). Higher = slower float-away.
-    #[serde(default = "default_depart_ms")]
-    pub depart_lifetime_ms: u64,
+    /// Fallback ceiling for post-discard refill (ms). Refill waits for the 3D
+    /// discard animation to finish, but never longer than this value.
+    #[serde(
+        alias = "depart_lifetime_ms",
+        default = "default_discard_refill_cap_ms"
+    )]
+    pub discard_refill_cap_ms: u64,
+    /// Per-tile lift phase before the arc into the river (ms).
+    #[serde(default = "default_discard_lift_ms")]
+    pub discard_lift_ms: u64,
+    /// Curved flight from hand to river (ms).
+    #[serde(default = "default_discard_flight_ms")]
+    pub discard_flight_ms: u64,
+    /// Small settle on the water surface (ms).
+    #[serde(default = "default_discard_landing_ms")]
+    pub discard_landing_ms: u64,
+    /// Upper bound on randomized per-tile launch spread (ms); clamped to 8–200.
+    #[serde(default = "default_discard_stagger_ms")]
+    pub discard_stagger_ms: u64,
+    /// How long the previous river pile sinks before despawn (ms).
+    #[serde(default = "default_discard_river_sink_ms")]
+    pub discard_river_sink_ms: u64,
     /// Duration for drawn tiles to settle into position (ms). Higher = slower slide-in.
     #[serde(default = "default_draw_ms")]
     pub draw_settle_ms: u64,
@@ -44,8 +63,23 @@ pub struct CascadeTuning {
     pub wind_duration_ms: u64,
 }
 
-fn default_depart_ms() -> u64 {
+fn default_discard_refill_cap_ms() -> u64 {
     700
+}
+fn default_discard_lift_ms() -> u64 {
+    140
+}
+fn default_discard_flight_ms() -> u64 {
+    380
+}
+fn default_discard_landing_ms() -> u64 {
+    160
+}
+fn default_discard_stagger_ms() -> u64 {
+    200
+}
+fn default_discard_river_sink_ms() -> u64 {
+    450
 }
 fn default_draw_ms() -> u64 {
     500
@@ -67,7 +101,12 @@ impl Default for CascadeTuning {
             step_hold_ms: 240,
             total_hold_ms: 520,
             tick_duration_ms: 170,
-            depart_lifetime_ms: 700,
+            discard_refill_cap_ms: 700,
+            discard_lift_ms: 140,
+            discard_flight_ms: 380,
+            discard_landing_ms: 160,
+            discard_stagger_ms: 200,
+            discard_river_sink_ms: 450,
             draw_settle_ms: 500,
             sort_settle_ms: 400,
             wind_delay_ms: 3000,

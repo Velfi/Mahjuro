@@ -234,7 +234,7 @@ impl DebugVisibilityOverlay {
 
 // ── Cascade tuning overlay ──────────────────────────────────────────────
 
-pub const TUNING_ROW_COUNT: usize = 10; // 9 sliders + Export button
+pub const TUNING_ROW_COUNT: usize = 15; // 14 sliders + Export button
 const TUNING_SLIDER_ROWS: usize = TUNING_ROW_COUNT - 1;
 const TUNING_MIN_MS: u64 = 50;
 const TUNING_MAX_MS: u64 = 5000;
@@ -294,11 +294,16 @@ impl TuningOverlay {
             1 => &mut self.tuning.step_hold_ms,
             2 => &mut self.tuning.total_hold_ms,
             3 => &mut self.tuning.tick_duration_ms,
-            4 => &mut self.tuning.depart_lifetime_ms,
-            5 => &mut self.tuning.draw_settle_ms,
-            6 => &mut self.tuning.sort_settle_ms,
-            7 => &mut self.tuning.wind_delay_ms,
-            8 => &mut self.tuning.wind_duration_ms,
+            4 => &mut self.tuning.discard_refill_cap_ms,
+            5 => &mut self.tuning.discard_lift_ms,
+            6 => &mut self.tuning.discard_flight_ms,
+            7 => &mut self.tuning.discard_landing_ms,
+            8 => &mut self.tuning.discard_stagger_ms,
+            9 => &mut self.tuning.discard_river_sink_ms,
+            10 => &mut self.tuning.draw_settle_ms,
+            11 => &mut self.tuning.sort_settle_ms,
+            12 => &mut self.tuning.wind_delay_ms,
+            13 => &mut self.tuning.wind_duration_ms,
             _ => return,
         };
         *field = (*field as i64 + delta).clamp(TUNING_MIN_MS as i64, TUNING_MAX_MS as i64) as u64;
@@ -476,9 +481,34 @@ impl TuningOverlay {
                 self.tuning.tick_duration_ms,
             ),
             (
-                "Discard Speed",
-                "How long discarded tiles float away",
-                self.tuning.depart_lifetime_ms,
+                "Discard Refill Cap",
+                "Max wait before auto-draw after discard (fallback ceiling)",
+                self.tuning.discard_refill_cap_ms,
+            ),
+            (
+                "Discard Lift",
+                "Per-tile rise above the hand before the arc",
+                self.tuning.discard_lift_ms,
+            ),
+            (
+                "Discard Flight",
+                "Curved arc from hand into the river",
+                self.tuning.discard_flight_ms,
+            ),
+            (
+                "Discard Landing",
+                "Small settle on the river surface",
+                self.tuning.discard_landing_ms,
+            ),
+            (
+                "Discard Stagger",
+                "Random spread for when each tile starts (capped 8–200ms)",
+                self.tuning.discard_stagger_ms,
+            ),
+            (
+                "River Sink",
+                "Previous river pile sinks before despawn",
+                self.tuning.discard_river_sink_ms,
             ),
             (
                 "Draw Speed",

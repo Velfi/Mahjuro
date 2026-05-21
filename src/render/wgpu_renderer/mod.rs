@@ -299,8 +299,6 @@ pub struct WgpuRenderer {
     tile_anim_x: Vec<f32>,
     /// Per-tile unique id — used to detect when a tile slot changes identity.
     tile_uids: Vec<u32>,
-    /// Tiles currently animating away (discard/score). Each entry: (HandTileGpu data, slot rect, velocity, elapsed time).
-    departing_tiles: Vec<DepartingTile>,
     /// All per-frame projected screen-space rects for 3D elements.
     pub proj: ProjectionCache,
     /// Per-hand-tile world-space model matrices captured at the end of the
@@ -813,6 +811,6 @@ pub(super) use constants::{
 pub(crate) use projection::PickCamera;
 
 pub(crate) use internal_slots::{
-    CachedTextLabel, DepartingTile, HandTileGpu, ShopEnvironmentGpu, ShowcaseTileGpu,
+    CachedTextLabel, HandTileGpu, ShopEnvironmentGpu, ShowcaseTileGpu,
     TextLabelShapeKey, TileFaceOverlayGpu,
 };

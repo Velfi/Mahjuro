@@ -25,6 +25,7 @@ impl WgpuRenderer {
         self.proj.wood_tablet_rects.clear();
         self.proj.plaque_rects.clear();
         self.proj.bowl_rect = None;
+        self.proj.bowl_model = None;
         self.proj.mirror_rect = None;
         self.proj.plinth_rect = None;
         self.proj.boss_plinth_rect = None;

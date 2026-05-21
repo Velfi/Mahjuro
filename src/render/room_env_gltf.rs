@@ -4,13 +4,17 @@
 //! [`crate::render::room_glb`] and [`crate::render::hallway_glb`] load different assets but share
 //! this pipeline and GPU path (`room_glb.wgsl`).
 
+use std::sync::Arc;
+
 use rustc_hash::FxHashMap;
 
 use anyhow::Context;
 use glam::{Mat4, Vec2, Vec3, Vec4};
 
 use crate::render::draw_cmd::CameraParams;
-use crate::render::gltf_helpers::{apply_texture_transform, sampler_cpu_from_material};
+use crate::render::gltf_helpers::{
+    apply_texture_transform, cpu_mip_chain_rgba8, sampler_cpu_from_material,
+};
 use crate::render::tile_glb::{
     GltfAlphaMode, LoadedPrimitive, Vertex3dTex, compute_vertex_tangents,
     gltf_image_to_rgba8_capped, multiply_rgba8_by_factor, solid_albedo_rgba8,
@@ -22,6 +26,42 @@ pub const ROOM_ENV_TEXTURE_MAX_DIMENSION: u32 = 1024;
 #[inline]
 fn room_env_gltf_image_to_rgba8(img: &gltf::image::Data) -> Option<(Vec<u8>, u32, u32)> {
     gltf_image_to_rgba8_capped(img, ROOM_ENV_TEXTURE_MAX_DIMENSION)
+}
+
+/// One glTF image decoded to ≤[`ROOM_ENV_TEXTURE_MAX_DIMENSION`] RGBA8 with a precomputed mip chain.
+pub struct CappedGltfImage {
+    pub base: (Vec<u8>, u32, u32),
+    /// Level 0 = [`Self::base`]; includes all mips down to 1×1.
+    pub mip_chain: Arc<Vec<(Vec<u8>, u32, u32)>>,
+}
+
+/// Decode every embedded image once (cap + mips). Room env walks index into this table.
+pub fn cap_room_gltf_images(images: &[gltf::image::Data]) -> Vec<Option<CappedGltfImage>> {
+    images
+        .iter()
+        .map(|img| {
+            room_env_gltf_image_to_rgba8(img).map(|(rgba, w, h)| {
+                let mip_chain = Arc::new(cpu_mip_chain_rgba8(rgba.clone(), w, h));
+                CappedGltfImage {
+                    base: (rgba, w, h),
+                    mip_chain,
+                }
+            })
+        })
+        .collect()
+}
+
+#[inline]
+fn capped_image_base(img: &CappedGltfImage) -> (Vec<u8>, u32, u32) {
+    (img.base.0.clone(), img.base.1, img.base.2)
+}
+
+#[inline]
+fn capped_image_at<'a>(
+    capped: &'a [Option<CappedGltfImage>],
+    index: usize,
+) -> Option<&'a CappedGltfImage> {
+    capped.get(index).and_then(|o| o.as_ref())
 }
 
 /// `COLOR_0.a` tag: archive sign description samples [`decal_tex`](../../shaders/room_glb.wgsl) at `uv`.
@@ -538,7 +578,7 @@ pub fn decode_env_primitive(
     primitive: gltf::Primitive<'_>,
     node_world: Mat4,
     buffers: &[Vec<u8>],
-    images: &[gltf::image::Data],
+    capped_images: &[Option<CappedGltfImage>],
     log_asset_label: &str,
     gltf_node_name: &str,
 ) -> anyhow::Result<RoomEnvPrimitiveCpu> {
@@ -738,10 +778,12 @@ pub fn decode_env_primitive(
     }
     let factor = pbr.base_color_factor();
 
-    let mut albedo_rgba = pbr.base_color_texture().and_then(|tex_info| {
+    let albedo_src = pbr.base_color_texture().and_then(|tex_info| {
         let img_index = tex_info.texture().source().index();
-        images.get(img_index).and_then(room_env_gltf_image_to_rgba8)
+        capped_image_at(capped_images, img_index)
     });
+    let mut albedo_rgba = albedo_src.map(capped_image_base);
+    let albedo_mip_chain = albedo_src.map(|c| Arc::clone(&c.mip_chain));
 
     if albedo_rgba.is_none() && pbr.base_color_texture().is_some() {
         log::warn!(
@@ -767,16 +809,20 @@ pub fn decode_env_primitive(
         }
     }
 
-    let normal_rgba = material.normal_texture().and_then(|nt| {
-        let scale = nt.scale();
+    let normal_src = material.normal_texture().and_then(|nt| {
         let img_index = nt.texture().source().index();
-        images
-            .get(img_index)
-            .and_then(room_env_gltf_image_to_rgba8)
-            .map(|mut tex| {
-                apply_normal_scale_rgba8(&mut tex.0, scale);
-                tex
-            })
+        capped_image_at(capped_images, img_index)
+    });
+    let normal_rgba = normal_src.map(|img| {
+        let mut tex = capped_image_base(img);
+        if let Some(nt) = material.normal_texture() {
+            apply_normal_scale_rgba8(&mut tex.0, nt.scale());
+        }
+        tex
+    });
+    let normal_mip_chain = normal_src.and_then(|c| {
+        let scale = material.normal_texture().map(|nt| nt.scale()).unwrap_or(1.0);
+        (scale == 1.0).then(|| Arc::clone(&c.mip_chain))
     });
 
     if normal_rgba.is_none() && material.normal_texture().is_some() {
@@ -786,15 +832,19 @@ pub fn decode_env_primitive(
         );
     }
 
-    let metallic_roughness_rgba = pbr.metallic_roughness_texture().and_then(|tex_info| {
+    let mr_src = pbr.metallic_roughness_texture().and_then(|tex_info| {
         let img_index = tex_info.texture().source().index();
-        images.get(img_index).and_then(room_env_gltf_image_to_rgba8)
+        capped_image_at(capped_images, img_index)
     });
+    let metallic_roughness_rgba = mr_src.map(capped_image_base);
+    let metallic_roughness_mip_chain = mr_src.map(|c| Arc::clone(&c.mip_chain));
 
-    let emissive_rgba = material.emissive_texture().and_then(|tex_info| {
+    let emissive_src = material.emissive_texture().and_then(|tex_info| {
         let img_index = tex_info.texture().source().index();
-        images.get(img_index).and_then(room_env_gltf_image_to_rgba8)
+        capped_image_at(capped_images, img_index)
     });
+    let emissive_rgba = emissive_src.map(capped_image_base);
+    let emissive_mip_chain = emissive_src.map(|c| Arc::clone(&c.mip_chain));
 
     let alpha_mode = GltfAlphaMode::from(material.alpha_mode());
     let alpha_cutoff = material.alpha_cutoff().unwrap_or(0.5);
@@ -819,9 +869,13 @@ pub fn decode_env_primitive(
             vertices,
             indices,
             albedo_rgba,
+            albedo_mip_chain,
             normal_rgba,
+            normal_mip_chain,
             metallic_roughness_rgba,
+            metallic_roughness_mip_chain,
             emissive_rgba,
+            emissive_mip_chain,
             metallic_factor,
             roughness_factor,
             emissive_factor,
@@ -945,7 +999,7 @@ pub struct RoomEnvWalkState<'a> {
     pub embedded_point_lights: &'a mut Vec<RoomGltfEmbeddedPointLight>,
     pub embedded_spot_lights: &'a mut Vec<RoomGltfEmbeddedSpotLight>,
     pub buffers: &'a [Vec<u8>],
-    pub images: &'a [gltf::image::Data],
+    pub capped_images: &'a [Option<CappedGltfImage>],
 }
 
 pub fn walk_room_env_node(
@@ -1023,7 +1077,7 @@ pub fn walk_room_env_node(
                             prim,
                             world,
                             state.buffers,
-                            state.images,
+                            state.capped_images,
                             label,
                             name,
                         )?;
@@ -1043,7 +1097,7 @@ pub fn walk_room_env_node(
                             prim,
                             world,
                             state.buffers,
-                            state.images,
+                            state.capped_images,
                             label,
                             name,
                         )?;

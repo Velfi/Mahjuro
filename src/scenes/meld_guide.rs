@@ -21,13 +21,14 @@ use super::{BackgroundId, ButtonDef, DrawCtx, SceneBehavior, SceneTransition, Up
 
 // ── Page indices ──────────────────────────────────────────────────────────
 //
-// Intro material is condensed onto two pages so navigation stays short; each
-// page shows multiple labelled tile groups (pair + sequences + triplets + kong,
-// then categories + flowers).
+// Intro material is split into three short pages so each topic gets room to
+// breathe: basic melds, tile categories, then a flower-focused page that
+// walks through every legal way to use a flower wildcard.
 
 const PAGE_BASIC_MELDS: usize = 0;
-const PAGE_TILES_AND_FLOWERS: usize = 1;
-const YAKU_PAGE_START: usize = 2;
+const PAGE_TILES: usize = 1;
+const PAGE_FLOWERS: usize = 2;
+const YAKU_PAGE_START: usize = 3;
 
 fn total_pages(progress: &PlayerProgress) -> usize {
     YAKU_PAGE_START + progress.available_yaku().len()
@@ -197,6 +198,22 @@ impl SceneBehavior for MeldGuideScene {
             });
         }
 
+        // ── In-universe margin scrawl ─────────────────────────────
+        if let Some(scrawl) = page_graffiti(self.page) {
+            let scrawl_font = typography::size(typography::H42, h);
+            let scrawl_h = scrawl_font * 2.6;
+            let scrawl_y = h * 0.755;
+            frame.text(TextLabel {
+                rect: [w * 0.12, scrawl_y, w * 0.76, scrawl_h],
+                text: scrawl.into(),
+                color: color::STONE,
+                align: TextAlign::Center,
+                font_px: Some(scrawl_font),
+                italic: true,
+                ..Default::default()
+            });
+        }
+
         // ── Scoring info (yaku pages) ─────────────────────────────
         if self.page >= YAKU_PAGE_START {
             let yaku_idx = self.page - YAKU_PAGE_START;
@@ -350,6 +367,17 @@ fn t(suit: Suit, rank: u8, id: u32) -> Tile {
     Tile::new(suit, rank, id)
 }
 
+/// Optional in-universe margin scrawl for a page. Rendered below the tile
+/// area in faded italic to feel like a player's aside left on the guide.
+fn page_graffiti(page: usize) -> Option<&'static str> {
+    match page {
+        PAGE_FLOWERS => Some(
+            "scribbled in the margin: \"a flower may close a triplet, mend a sequence \u{2014} yet never weds a stranger as a pair. why?\"  \u{2014} Nicole",
+        ),
+        _ => None,
+    }
+}
+
 /// Returns `(title, description, groups)` for the given page index.
 fn page_content(
     page: usize,
@@ -395,9 +423,9 @@ fn page_content(
                 },
             ],
         ),
-        PAGE_TILES_AND_FLOWERS => (
-            "Tiles & flowers",
-            "Number suits use ranks 1\u{2013}9; 1 and 9 are terminals; winds and dragons are honors. Flowers are wildcards: they can form their own melds (any two as a pair, any three as a triplet) or stand in for one missing tile in a sequence or triplet.",
+        PAGE_TILES => (
+            "Tile categories",
+            "Number suits (characters, bamboos, dots) use ranks 1\u{2013}9. Ranks 1 and 9 are terminals. Winds and dragons are honors \u{2014} they form triplets and pairs but never sequences.",
             vec![
                 TileGroup {
                     label: "Number suits",
@@ -422,22 +450,49 @@ fn page_content(
                     ],
                     accent: [0.70, 0.55, 0.85, 0.9],
                 },
-                TileGroup {
-                    label: "Flower pair",
-                    tiles: vec![t(Suit::Flower, 1, 8), t(Suit::Flower, 2, 9)],
-                    accent: [0.85, 0.55, 0.70, 0.9],
-                },
-                TileGroup {
-                    label: "Flower wildcard",
-                    tiles: vec![
-                        t(Suit::Characters, 4, 10),
-                        t(Suit::Flower, 3, 11),
-                        t(Suit::Characters, 6, 12),
-                    ],
-                    accent: [0.85, 0.55, 0.70, 0.9],
-                },
             ],
         ),
+        PAGE_FLOWERS => {
+            let flower_accent: [f32; 4] = [0.85, 0.55, 0.70, 0.9];
+            (
+                "Flowers",
+                "Flowers are wildcards. One flower can stand in for the missing tile of a triplet or sequence (max one per meld). Two flowers form a pair and three form a triplet, regardless of rank. A flower cannot pair with a regular tile.",
+                vec![
+                    TileGroup {
+                        label: "Fills a triplet",
+                        tiles: vec![
+                            t(Suit::Dots, 7, 0),
+                            t(Suit::Dots, 7, 1),
+                            t(Suit::Flower, 2, 2),
+                        ],
+                        accent: flower_accent,
+                    },
+                    TileGroup {
+                        label: "Fills a sequence",
+                        tiles: vec![
+                            t(Suit::Characters, 4, 3),
+                            t(Suit::Flower, 3, 4),
+                            t(Suit::Characters, 6, 5),
+                        ],
+                        accent: flower_accent,
+                    },
+                    TileGroup {
+                        label: "Two flowers \u{2192} pair",
+                        tiles: vec![t(Suit::Flower, 1, 6), t(Suit::Flower, 2, 7)],
+                        accent: flower_accent,
+                    },
+                    TileGroup {
+                        label: "Three flowers \u{2192} triplet",
+                        tiles: vec![
+                            t(Suit::Flower, 1, 8),
+                            t(Suit::Flower, 3, 9),
+                            t(Suit::Flower, 4, 10),
+                        ],
+                        accent: flower_accent,
+                    },
+                ],
+            )
+        }
         _ => {
             // Yaku pages (Kokushi Musō page is omitted until first cash-in).
             let yaku_idx = page - YAKU_PAGE_START;

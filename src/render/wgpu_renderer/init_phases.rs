@@ -1,8 +1,6 @@
 //! Large chunks of `WgpuRenderer::new` split into `#[inline(never)]` helpers so
 //! LLVM does not optimize one multi-thousand-line function as a single unit.
 
-use std::time::Instant;
-
 use super::embedded_wgsl;
 use super::{
     RenderTarget, TargetInit, clamp_render_physical_size, create_depth, create_depth_copy,
@@ -282,7 +280,7 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
     let size = clamp_render_physical_size(size);
 
     let power_preference = wgpu::PowerPreference::from_env().unwrap_or_default();
-    let t_adapter = Instant::now();
+    let _adapter_scope = crate::startup_profile::scope("wgpu.adapter");
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference,
         compatible_surface: surface_opt.as_ref(),
@@ -291,10 +289,9 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
     .map_err(|e| anyhow::anyhow!("adapter: {e:?}"))?;
     let ai = adapter.get_info();
     log::debug!(
-        "wgpu: adapter OK — '{}' ({:?}, power_pref={power_preference:?}) in {:?}",
+        "wgpu: adapter OK — '{}' ({:?}, power_pref={power_preference:?})",
         ai.name,
         ai.backend,
-        t_adapter.elapsed()
     );
 
     if surface_opt.is_none() {
@@ -425,7 +422,7 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
     }
 
     log::debug!("wgpu: requesting logical device…");
-    let t_device = Instant::now();
+    let _device_scope = crate::startup_profile::scope("wgpu.device");
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some("mahjuro-device"),
         required_features,
@@ -435,7 +432,7 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
         trace: wgpu::Trace::default(),
     }))
     .map_err(|e| anyhow::anyhow!("device: {e:?}"))?;
-    log::debug!("wgpu: device + queue OK in {:?}", t_device.elapsed());
+    log::debug!("wgpu: device + queue OK");
 
     let (target, config) = match surface_opt {
         Some(surface) => {

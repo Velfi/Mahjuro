@@ -214,11 +214,6 @@ impl WgpuRenderer {
             }
         }
 
-        for tile in self.departing_tiles.iter_mut() {
-            tile.elapsed += dt;
-        }
-        self.departing_tiles.retain(|t| t.elapsed < t.lifetime);
-
         dt
     }
 

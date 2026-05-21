@@ -34,11 +34,13 @@ impl SceneBehavior for GameplayScene {
         let now = Instant::now();
         let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
+        self.cached_cascade_tuning = ctx.cascade_tuning.clone();
         let focus_kind_before = focus_kind(self.focus);
         {
             let _g = crate::render::cpu_profiler::scope("update.tick_basic_animations");
             animation_state::tick_basic_animations(self, &mut ctx, now, dt);
         }
+        discard_animation::tick_discard_animation(self, now, &ctx.cascade_tuning);
         // Cursor position is captured every frame for cursor-mode hit-test
         // and tooltip placement. The legacy `cursor_moved` guard that used
         // to drop stale controller focus on mouse motion is gone — Phase A
@@ -213,10 +215,12 @@ impl SceneBehavior for GameplayScene {
             self.prev_displayed_score = self.displayed_score;
         }
 
-        // If a discard is waiting for its departure animation to play out,
-        // hold input until the deadline passes, then auto-draw replacements.
+        // If a discard is waiting for the river animation to finish,
+        // hold input until the animation completes and the fallback deadline
+        // passes, then auto-draw replacements.
         if let Some(deadline) = self.pending_refill {
-            if now >= deadline {
+            let anim_done = !discard_animation::discard_animation_active(self);
+            if anim_done && now >= deadline {
                 let outcome = {
                     let mut engine = GameEngine::new(ctx.run, ctx.bus);
                     engine.dispatch(GameCommand::RefillHand)
@@ -1046,8 +1050,48 @@ impl SceneBehavior for GameplayScene {
         if !wood_tablet_placements.is_empty() {
             frame.object3d_batch(wood_tablet_placements);
         }
+        let bowl_model = ctx.proj.bowl_model.or_else(|| {
+            discard_bowl_placement.as_ref().map(|bowl| {
+                discard_animation::bowl_model_matrix(layout.window_w, layout.window_h, bowl)
+            })
+        });
         if let Some(bowl) = discard_bowl_placement {
             frame.object3d(bowl);
+        }
+        // Discard river tiles (sinking pile, settled, in-flight) — after the
+        // river mesh so tiles read as resting on / flying into the water.
+        {
+            let mut discard_placements = discard_animation::sinking_placements(
+                self,
+                now,
+                &self.cached_cascade_tuning,
+                bowl_model,
+                layout,
+                layout.window_w,
+                layout.window_h,
+                run,
+            );
+            discard_placements.extend(discard_animation::settled_placements(
+                self,
+                bowl_model,
+                layout,
+                layout.window_w,
+                layout.window_h,
+                run,
+            ));
+            discard_placements.extend(discard_animation::in_flight_placements(
+                self,
+                now,
+                &self.cached_cascade_tuning,
+                bowl_model,
+                layout,
+                layout.window_w,
+                layout.window_h,
+                run,
+            ));
+            if !discard_placements.is_empty() {
+                frame.showcase_tile_batch(discard_placements);
+            }
         }
         if let Some(mirror) = bronze_mirror_placement {
             frame.object3d(mirror);

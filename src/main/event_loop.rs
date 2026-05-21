@@ -32,12 +32,18 @@ impl App {
         // an HDR swapchain at init then an immediate SDR reconfigure on frame
         // 1 — a redundant Metal surface transition linked to intermittent black
         // startup frames on macOS.
-        let renderer = WgpuRenderer::new(render::wgpu_renderer::TargetInit::Windowed {
-            window: shell.window.clone(),
-            hdr_enabled: self.effect_layers.hdr_enabled(&self.gfx),
-        })?;
+        let renderer = {
+            let _wgpu = crate::startup_profile::scope("wgpu.renderer_new");
+            WgpuRenderer::new(render::wgpu_renderer::TargetInit::Windowed {
+                window: shell.window.clone(),
+                hdr_enabled: self.effect_layers.hdr_enabled(&self.gfx),
+            })?
+        };
         self.renderer = Some(renderer);
-        self.input = Some(InputState::new()?);
+        self.input = {
+            let _input = crate::startup_profile::scope("input.new");
+            Some(InputState::new()?)
+        };
         let (w0, h0) = shell.drawable_size();
         self.last_drawable_px = PhysicalSize::new(w0.max(1), h0.max(1));
         #[cfg(debug_menu_enabled)]
@@ -45,6 +51,14 @@ impl App {
             self.debug.menu = Some(DebugMenuBar::new(&shell.window));
         }
         shell.window.show();
+        crate::startup_profile::report_sync_boot();
+        if self
+            .renderer
+            .as_ref()
+            .is_some_and(|r| !r.is_loading())
+        {
+            crate::startup_profile::note_async_boot_complete();
+        }
         log::debug!("SDL shell: window + wgpu + input ready");
 
         'running: loop {
