@@ -13,7 +13,8 @@ pub struct ShopPositions {
 impl Default for ShopPositions {
     fn default() -> Self {
         Self {
-            celeb_pack_reveal: Placement::at(-3.352_761_3e-8, 0.55, 36.887_23),
+            // `ny` is added to `h * 0.5` for reveal-row layout (see `compute_pack_reveal_row_layout`).
+            celeb_pack_reveal: Placement::at(0.0, 0.14, 0.0),
             celeb_zodiac: Placement {
                 nx: 0.0,
                 ny: -0.12,
