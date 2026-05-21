@@ -24,6 +24,8 @@ pub struct ProjectionCache {
     pub yaku_tablet_rects: Vec<[f32; 4]>,
     pub wood_tablet_rects: Vec<[f32; 4]>,
     pub bowl_rect: Option<[f32; 4]>,
+    /// World model matrix for the discard river from the previous frame.
+    pub bowl_model: Option<Mat4>,
     pub mirror_rect: Option<[f32; 4]>,
     pub aux_dish_rects: Vec<(Option<u32>, [f32; 4])>,
     pub plinth_rect: Option<[f32; 4]>,

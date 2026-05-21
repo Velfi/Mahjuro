@@ -217,6 +217,14 @@ pub(super) struct TextureUploadParams<'a> {
 pub(super) fn upload_rgba_texture_with_mips(
     p: &TextureUploadParams<'_>,
 ) -> (wgpu::Texture, wgpu::TextureView) {
+    upload_rgba_texture_with_mip_chain(p, None)
+}
+
+/// Like [`upload_rgba_texture_with_mips`], but reuses a precomputed chain from room GLB decode.
+pub(super) fn upload_rgba_texture_with_mip_chain(
+    p: &TextureUploadParams<'_>,
+    precomputed: Option<&[(Vec<u8>, u32, u32)]>,
+) -> (wgpu::Texture, wgpu::TextureView) {
     use crate::render::gltf_helpers::{cpu_mip_chain_rgba8, mip_level_count};
     let mip_levels = if p.mips && p.width.max(p.height) > 1 {
         mip_level_count(p.width, p.height)
@@ -258,7 +266,10 @@ pub(super) fn upload_rgba_texture_with_mips(
             },
         );
     } else {
-        let chain = cpu_mip_chain_rgba8(p.rgba.to_vec(), p.width, p.height);
+        let chain: Vec<(Vec<u8>, u32, u32)> = match precomputed {
+            Some(levels) => levels.to_vec(),
+            None => cpu_mip_chain_rgba8(p.rgba.to_vec(), p.width, p.height),
+        };
         for (level, (data, mw, mh)) in chain.into_iter().enumerate() {
             let level = level as u32;
             p.queue.write_texture(
@@ -284,6 +295,113 @@ pub(super) fn upload_rgba_texture_with_mips(
     }
     let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
     (tex, view)
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+struct RoomEnvTextureCacheKey {
+    content_hash: u64,
+    width: u32,
+    height: u32,
+    format_tag: u8,
+    mips: bool,
+}
+
+fn room_env_texture_cache_key(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    format: wgpu::TextureFormat,
+    mips: bool,
+) -> RoomEnvTextureCacheKey {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = rustc_hash::FxHasher::default();
+    width.hash(&mut hasher);
+    height.hash(&mut hasher);
+    let step = (rgba.len() / 8192).max(4);
+    for (i, b) in rgba.iter().enumerate().step_by(step) {
+        i.hash(&mut hasher);
+        b.hash(&mut hasher);
+    }
+    let format_tag = match format {
+        wgpu::TextureFormat::Rgba8UnormSrgb => 0,
+        wgpu::TextureFormat::Rgba8Unorm => 1,
+        _ => 2,
+    };
+    RoomEnvTextureCacheKey {
+        content_hash: hasher.finish(),
+        width,
+        height,
+        format_tag,
+        mips,
+    }
+}
+
+/// Dedupes identical room-env texture uploads during renderer init (shared glTF images).
+pub(super) struct RoomEnvTextureCache {
+    views: rustc_hash::FxHashMap<RoomEnvTextureCacheKey, wgpu::TextureView>,
+    textures: Vec<wgpu::Texture>,
+}
+
+impl RoomEnvTextureCache {
+    pub fn new() -> Self {
+        Self {
+            views: rustc_hash::FxHashMap::default(),
+            textures: Vec::new(),
+        }
+    }
+
+    pub fn upload(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        label: String,
+        rgba: &[u8],
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+        mips: bool,
+        mip_chain: Option<&[(Vec<u8>, u32, u32)]>,
+    ) -> wgpu::TextureView {
+        let key = room_env_texture_cache_key(rgba, width, height, format, mips);
+        if let Some(view) = self.views.get(&key) {
+            return view.clone();
+        }
+        let (tex, view) = upload_rgba_texture_with_mip_chain(
+            &TextureUploadParams {
+                device,
+                queue,
+                label,
+                rgba,
+                width,
+                height,
+                format,
+                mips,
+            },
+            mip_chain,
+        );
+        self.textures.push(tex);
+        self.views.insert(key, view.clone());
+        view
+    }
+
+    pub fn upload_slot(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        label: String,
+        rgba: Option<&(Vec<u8>, u32, u32)>,
+        mip_chain: Option<&[(Vec<u8>, u32, u32)]>,
+        format: wgpu::TextureFormat,
+        mips: bool,
+        fallback: &wgpu::TextureView,
+    ) -> wgpu::TextureView {
+        match rgba {
+            Some((rgba, w, h)) => self.upload(
+                device, queue, label, rgba, *w, *h, format, mips, mip_chain,
+            ),
+            None => fallback.clone(),
+        }
+    }
 }
 
 /// Load a loose PNG from the asset pack for room-env `decal_tex` binds (e.g. shop candle SSS bake).

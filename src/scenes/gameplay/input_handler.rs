@@ -599,9 +599,6 @@ pub(super) fn process_focus_and_actions(
         }
     }
 
-    // Clear any previous frame's departures.
-    scene.pending_departures.clear();
-
     // Debug: `B` blows a strong gust of wind at the candle row so the
     // flame's wind reaction is observable on demand. Stamps a timer the
     // draw step reads to emit the actual `WindGust` impulses.
@@ -800,32 +797,29 @@ pub(super) fn process_focus_and_actions(
                     continue;
                 }
                 let gameplay = GameEngine::read(ctx.run);
-                let settings_on = crate::persistence::load_settings().discard_undo_enabled;
-                if !settings_on {
-                    scene.discard_undo = None;
-                }
-                let snap_before = if settings_on
-                    && gameplay.selected_count > 0
-                    && gameplay.discards_remaining > 0
-                {
+                let snap_before = if gameplay.selected_count > 0 && gameplay.discards_remaining > 0 {
                     Some(DiscardUndoSnapshot::capture(ctx.run))
                 } else {
                     None
                 };
-                // Capture selected indices BEFORE discard so we can animate them departing.
+                let mut pre_discard_tiles: Vec<crate::core::tile::Tile> = Vec::new();
+                let mut pre_discard_indices: Vec<usize> = Vec::new();
+                let mut pre_discard_hand_slots: Vec<(f32, f32, f32, f32)> = Vec::new();
                 if gameplay.selected_count > 0 && gameplay.discards_remaining > 0 {
-                    let selected_indices: Vec<usize> = ctx
-                        .run
-                        .selected_slice()
-                        .iter()
-                        .enumerate()
-                        .filter(|&(_, &s)| s)
-                        .map(|(i, _)| i)
-                        .collect();
-                    scene.pending_departures = selected_indices;
+                    let interaction = GameEngine::read_interaction(ctx.run);
+                    pre_discard_hand_slots = super::hand_layout::hand_slots_for_count(
+                        ctx.layout,
+                        interaction.hand_len,
+                    );
+                    for (i, &sel) in ctx.run.selected_slice().iter().enumerate() {
+                        if sel {
+                            pre_discard_indices.push(i);
+                            pre_discard_tiles.push(interaction.hand[i]);
+                        }
+                    }
                 }
                 // Remove the tiles immediately, but defer the auto-draw
-                // until the departure animation has had time to play.
+                // until the discard river animation has finished.
                 let outcome = {
                     let mut engine = GameEngine::new(ctx.run, ctx.bus);
                     engine.dispatch(GameCommand::DiscardSelectionNoRefill)
@@ -838,10 +832,25 @@ pub(super) fn process_focus_and_actions(
                     if let Some(s) = snap_before {
                         scene.discard_undo = Some(s);
                     }
+                    super::discard_animation::begin_discard_batch(
+                        scene,
+                        ctx.layout,
+                        &pre_discard_hand_slots,
+                        gameplay.has_structure,
+                        &pre_discard_indices,
+                        &pre_discard_tiles,
+                        now,
+                    );
                     ctx.anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
-                    let depart_lifetime =
-                        std::time::Duration::from_millis(ctx.cascade_tuning.depart_lifetime_ms);
-                    scene.pending_refill = Some(now + depart_lifetime);
+                    let fallback = std::time::Duration::from_millis(
+                        ctx.cascade_tuning.discard_refill_cap_ms,
+                    );
+                    let anim_dur = scene
+                        .active_discard_anim
+                        .as_ref()
+                        .map(|b| b.total_duration(&ctx.cascade_tuning))
+                        .unwrap_or(fallback);
+                    scene.pending_refill = Some(now + anim_dur.max(fallback));
                 }
             }
             UiAction::UndoDiscard => {
@@ -849,6 +858,9 @@ pub(super) fn process_focus_and_actions(
                     && scene.pending_refill.is_none()
                     && let Some(snap) = scene.discard_undo.take()
                 {
+                    scene.active_discard_anim = None;
+                    scene.river_settled_tiles.clear();
+                    scene.river_sink_batch = None;
                     ctx.run.apply_discard_undo(snap, Some(ctx.bus));
                     ctx.bus.push(crate::game::event_bus::GameEvent::UiSound(
                         crate::audio::SfxId::TilePlace,

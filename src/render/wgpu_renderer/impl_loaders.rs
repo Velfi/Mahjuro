@@ -91,17 +91,17 @@ impl WgpuRenderer {
             }
         }
         if finished {
-            let elapsed = self
-                .relic_load_start
-                .take()
-                .map(|t| t.elapsed())
-                .unwrap_or_default();
+            if let Some(start) = self.relic_load_start.take() {
+                crate::startup_profile::record("async.relic_gpu_uploads", start.elapsed());
+            }
             log::debug!(
-                "all {} relic textures uploaded to GPU in {:?} (spawn → last upload)",
+                "all {} relic textures uploaded to GPU (spawn → last upload)",
                 self.relic_textures.len(),
-                elapsed,
             );
             self.relic_rx = None; // drop the channel
+            if !self.is_loading() {
+                crate::startup_profile::note_async_boot_complete();
+            }
         }
     }
 
@@ -151,17 +151,17 @@ impl WgpuRenderer {
             for &id in super::resources::ASYNC_LOADED_BACKGROUNDS {
                 self.insert_background_solid_fallback_if_missing(id);
             }
-            let elapsed = self
-                .background_load_start
-                .take()
-                .map(|t| t.elapsed())
-                .unwrap_or_default();
+            if let Some(start) = self.background_load_start.take() {
+                crate::startup_profile::record("async.background_gpu_uploads", start.elapsed());
+            }
             log::debug!(
-                "all {} background textures uploaded to GPU in {:?} (spawn → last upload)",
+                "all {} background textures uploaded to GPU (spawn → last upload)",
                 self.background_textures.len(),
-                elapsed,
             );
             self.background_rx = None;
+            if !self.is_loading() {
+                crate::startup_profile::note_async_boot_complete();
+            }
         }
     }
 

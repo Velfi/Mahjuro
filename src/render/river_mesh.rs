@@ -71,6 +71,18 @@ pub const RIVER_LOCAL_HALF: [f32; 3] = [
 ];
 pub const RIVER_LOCAL_CENTER_Y: f32 = (BANK_MAX_Y + FLOOR_Y) * 0.5;
 
+/// Flow-axis range for discard tiles — inset from spring pool and outlet.
+pub const RIVER_TILE_FLOW_T_MIN: f32 = 0.14;
+pub const RIVER_TILE_FLOW_T_MAX: f32 = 0.86;
+
+/// A point on the water surface in river mesh local space.
+/// `t_flow` runs 0 at the -X source end to 1 at the +X outlet.
+pub fn river_surface_local(t_flow: f32) -> glam::Vec3 {
+    let t = t_flow.clamp(0.0, 1.0);
+    let x = -CHAN_X + t * 2.0 * CHAN_X;
+    glam::Vec3::new(x, WATER_Y, centerline_z(t))
+}
+
 /// Centerline Z offset as a function of the flow-axis parameter t in [0, 1].
 /// A smooth low-frequency sinusoid plus a tiny secondary term so the
 /// meander is not perfectly symmetric.

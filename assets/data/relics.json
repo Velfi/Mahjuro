@@ -372,7 +372,7 @@
   {
     "id": "garden_keeper",
     "name": "Garden Keeper",
-    "description": "Flower effects fire twice",
+    "description": "Scored flower tiles: +25 chips each",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -403,7 +403,7 @@
   {
     "id": "hanami",
     "name": "Hanami",
-    "description": "+$3 gold each time flowers score",
+    "description": "+$3 gold per scored flower tile",
     "rarity": "common",
     "flavor_spans": [
       {

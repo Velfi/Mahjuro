@@ -624,6 +624,7 @@ pub fn load_room_glb_from_bytes(
         .context(scene_err_ctx)?;
 
     let buffers: Vec<Vec<u8>> = buffers_vec.into_iter().map(|b| b.0).collect();
+    let capped_images = renv::cap_room_gltf_images(&images);
 
     let mut markers = FxHashMap::default();
     let mut environment_primitives = Vec::new();
@@ -646,7 +647,7 @@ pub fn load_room_glb_from_bytes(
         embedded_point_lights: &mut embedded_point_lights,
         embedded_spot_lights: &mut embedded_spot_lights,
         buffers: &buffers,
-        images: &images,
+        capped_images: &capped_images,
     };
     for node in scene.nodes() {
         walk_room_env_node(node, Mat4::IDENTITY, hooks, &mut walk_state)?;

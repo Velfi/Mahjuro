@@ -14,6 +14,8 @@
 //! **+Y**; [`normalize_mesh`] rotates that case once (+90° about +X) so
 //! [`crate::render::table_transform::tile_mesh_local_to_world`] always sees thickness on local +Y.
 
+use std::sync::Arc;
+
 use anyhow::Context;
 use glam::{Mat4, Vec2, Vec3};
 use gltf::image::Format;
@@ -60,12 +62,17 @@ pub struct LoadedPrimitive {
     pub indices: Vec<u32>,
     /// Decoded RGBA8, row-major.
     pub albedo_rgba: Option<(Vec<u8>, u32, u32)>,
+    /// Precomputed mips for [`Self::albedo_rgba`] when sourced from a shared glTF image.
+    pub albedo_mip_chain: Option<Arc<Vec<(Vec<u8>, u32, u32)>>>,
     /// Optional tangent-space normal map (linear RGBA8, +X +Y +Z in tangent frame).
     pub normal_rgba: Option<(Vec<u8>, u32, u32)>,
+    pub normal_mip_chain: Option<Arc<Vec<(Vec<u8>, u32, u32)>>>,
     /// Metallic (B) + roughness (G) in linear RGBA8.
     pub metallic_roughness_rgba: Option<(Vec<u8>, u32, u32)>,
+    pub metallic_roughness_mip_chain: Option<Arc<Vec<(Vec<u8>, u32, u32)>>>,
     /// sRGB emissive texture (matches base-color encoding for candle-lit output).
     pub emissive_rgba: Option<(Vec<u8>, u32, u32)>,
+    pub emissive_mip_chain: Option<Arc<Vec<(Vec<u8>, u32, u32)>>>,
     pub metallic_factor: f32,
     pub roughness_factor: f32,
     pub emissive_factor: [f32; 3],
@@ -80,9 +87,13 @@ pub(crate) fn release_loaded_primitive_gpu_source_buffers(prim: &mut LoadedPrimi
     prim.vertices = Vec::new();
     prim.indices = Vec::new();
     prim.albedo_rgba = None;
+    prim.albedo_mip_chain = None;
     prim.normal_rgba = None;
+    prim.normal_mip_chain = None;
     prim.metallic_roughness_rgba = None;
+    prim.metallic_roughness_mip_chain = None;
     prim.emissive_rgba = None;
+    prim.emissive_mip_chain = None;
 }
 
 /// All decoded primitives from the default scene (order: depth-first scene traversal).
@@ -623,9 +634,13 @@ fn decode_tile_primitive(
         vertices,
         indices,
         albedo_rgba,
+        albedo_mip_chain: None,
         normal_rgba: None,
+        normal_mip_chain: None,
         metallic_roughness_rgba,
+        metallic_roughness_mip_chain: None,
         emissive_rgba,
+        emissive_mip_chain: None,
         metallic_factor: pbr.metallic_factor(),
         roughness_factor: pbr.roughness_factor(),
         emissive_factor: crate::render::gltf_helpers::effective_gltf_emissive_rgb(&material),

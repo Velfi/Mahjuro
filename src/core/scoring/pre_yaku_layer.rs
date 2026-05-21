@@ -396,9 +396,25 @@ pub(crate) fn apply_pre_yaku_scoring(
     }
 
     {
-        let meld_count = sets.len() as i32;
-        let garden_keeper_passes = eff.count(ctx.relic.roster, RelicId::GardenKeeper);
-        let hanami = eff.has(ctx.relic.roster, RelicId::Hanami);
+        let garden_keeper = eff.count(ctx.relic.roster, RelicId::GardenKeeper);
+        if garden_keeper > 0 {
+            const CHIPS_PER_FLOWER: i32 = 25;
+            let delta = CHIPS_PER_FLOWER * garden_keeper as i32;
+            for s in sets {
+                for &tid in &s.tile_ids {
+                    let Some(t) = tile_by_id(tiles, tid) else {
+                        continue;
+                    };
+                    if t.suit != Suit::Flower || tile_is_debuffed(t, ctx.tiles.debuffs) {
+                        continue;
+                    }
+                    push_chips(steps, chips, *mult, "Garden Keeper", delta);
+                }
+            }
+        }
+    }
+
+    if eff.has(ctx.relic.roster, RelicId::Hanami) {
         for s in sets {
             for &tid in &s.tile_ids {
                 let Some(t) = tile_by_id(tiles, tid) else {
@@ -407,33 +423,7 @@ pub(crate) fn apply_pre_yaku_scoring(
                 if t.suit != Suit::Flower || tile_is_debuffed(t, ctx.tiles.debuffs) {
                     continue;
                 }
-                let mut score_flower = |suffix: &str| match t.rank {
-                    1 => push_chips(steps, chips, *mult, format!("Plum Blossom{suffix}"), 40),
-                    2 => push_mult(steps, *chips, mult, format!("Orchid{suffix}"), 1.5),
-                    3 => push_chips(
-                        steps,
-                        chips,
-                        *mult,
-                        format!("Chrysanthemum{suffix}"),
-                        15 * meld_count,
-                    ),
-                    4 => push_gold(
-                        steps,
-                        flower_gold,
-                        *chips,
-                        *mult,
-                        format!("Bamboo{suffix}"),
-                        4,
-                    ),
-                    _ => {}
-                };
-                score_flower("");
-                for _ in 0..garden_keeper_passes {
-                    score_flower(" (Garden Keeper)");
-                }
-                if hanami {
-                    push_gold(steps, flower_gold, *chips, *mult, "Hanami", 3);
-                }
+                push_gold(steps, flower_gold, *chips, *mult, "Hanami", 3);
             }
         }
     }

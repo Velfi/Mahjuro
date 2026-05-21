@@ -401,7 +401,8 @@ pub struct AppSettings {
     pub auto_cash_in_on_full_structure: bool,
     #[serde(default)]
     pub hints_enabled: bool,
-    /// After a discard, offer a one-step undo until any other action.
+    /// Show the post-discard Undo control and allow undoing the last discard.
+    /// The snapshot is always recorded; this only gates UI and the undo action.
     #[serde(default)]
     pub discard_undo_enabled: bool,
     /// Per profile slot: `run_history.len()` last time the player opened Archive.

@@ -220,8 +220,7 @@ impl WgpuRenderer {
         // and `queue.write_buffer` per allocation.
         self.frame_buffer_pool.begin_frame();
 
-        // Lerp per-tile slide animations toward 0 (ease-out) and advance
-        // short-lived departing-tile clocks.
+        // Lerp per-tile slide animations toward 0 (ease-out).
         let dt = self.advance_frame_timers(draw_settle_speed, sort_settle_speed);
 
         self.upload_frame_uniforms(frame, effects_quality, gamma);
@@ -230,9 +229,6 @@ impl WgpuRenderer {
         // labels (just the focused arrow — the symbol+emoji live in the 3D
         // tile decal now).  Per-tile model matrices for the 3D mesh draw are
         // also written here.
-        let mut tile_quads: Vec<GpuInstance> = Vec::new();
-        let mut tile_labels: Vec<TextLabel> = Vec::new();
-        let mut emoji_labels: Vec<TextLabel> = Vec::new();
         let mut tile_3d_rects: Vec<(usize, [f32; 4])> = Vec::new();
         // Per-tile world-space model matrices, snapshotted for next frame's
         // cursor pick (`pick_hand_tile`).
@@ -280,94 +276,6 @@ impl WgpuRenderer {
         let tile_basis = tile_mesh_local_to_world();
         // Hand tiles render via ShowcaseTileBatch (further below); tile hints
         // come through as real green PointLights from gameplay scene.
-
-        // Render departing tiles (two-phase: arc into river, then drift).
-        for dep in &self.departing_tiles {
-            let t = dep.elapsed.max(0.0);
-            let w = dep.start_rect[2];
-            let h = dep.start_rect[3];
-            let start_cx = dep.start_rect[0] + w * 0.5;
-            let start_cy = dep.start_rect[1] + h * 0.5;
-
-            // Phase split: Arcing → Drifting at t = arc_dur.
-            let (cx, cy, alpha, scale) = if t < dep.arc_dur {
-                // Phase 1 — quadratic Bezier from the hand slot, over an
-                // apex above the midpoint, into the river center. The
-                // apex sits 110px above the higher of the two endpoints
-                // so the tile reads as being *thrown* upward before
-                // arcing down into the water rather than sliding in a
-                // straight line.
-                let u = (t / dep.arc_dur).clamp(0.0, 1.0);
-                let mid_x = (start_cx + dep.river_target.0) * 0.5;
-                let mid_y = start_cy.min(dep.river_target.1) - 110.0;
-                let one_u = 1.0 - u;
-                let bx =
-                    one_u * one_u * start_cx + 2.0 * one_u * u * mid_x + u * u * dep.river_target.0;
-                let by =
-                    one_u * one_u * start_cy + 2.0 * one_u * u * mid_y + u * u * dep.river_target.1;
-                // Slight shrink during the arc — the tile reads as
-                // moving away from the camera as it falls into the
-                // recessed water surface.
-                let s = 1.0 - 0.18 * u;
-                (bx, by, 1.0, s)
-            } else {
-                // Phase 2 — drift downstream and fade. Position
-                // continues from the splash point along `drift_dir` at
-                // `drift_speed`. Alpha eases from 1 → 0 over the drift
-                // duration; scale shrinks further so the tile reads as
-                // sinking into the water.
-                let dt2 = t - dep.arc_dur;
-                let u2 = (dt2 / dep.drift_dur).clamp(0.0, 1.0);
-                let dx = dep.drift_dir.0 * dep.drift_speed * dt2;
-                let dy = dep.drift_dir.1 * dep.drift_speed * dt2;
-                let bx = dep.river_target.0 + dx;
-                let by = dep.river_target.1 + dy;
-                let a = 1.0 - u2;
-                let s = 0.82 - 0.40 * u2;
-                (bx, by, a, s)
-            };
-
-            let sw = w * scale;
-            let sh = h * scale;
-            let sx = cx - sw * 0.5;
-            let sy = cy - sh * 0.5;
-
-            // Tile background.
-            tile_quads.push(GpuInstance {
-                rect: [sx, sy, sw, sh],
-                color: [0.0, 0.0, 0.0, alpha],
-                user: 0,
-            });
-
-            // Main label.
-            let inset_x = sw * 0.10;
-            let top_h = sh * 0.50;
-            tile_labels.push(TextLabel {
-                rect: [sx + inset_x, sy + sh * 0.05, sw - inset_x * 2.0, top_h],
-                text: dep.symbol.clone(),
-                color: [
-                    dep.suit_color[0],
-                    dep.suit_color[1],
-                    dep.suit_color[2],
-                    alpha,
-                ],
-                ..Default::default()
-            });
-
-            // Suit emoji.
-            let bot_h = sh * 0.40;
-            emoji_labels.push(TextLabel {
-                rect: [sx + inset_x, sy + sh * 0.55, sw - inset_x * 2.0, bot_h],
-                text: dep.suit_emoji.clone(),
-                color: [
-                    dep.suit_color[0],
-                    dep.suit_color[1],
-                    dep.suit_color[2],
-                    alpha,
-                ],
-                ..Default::default()
-            });
-        }
 
         // Tile glow instance buffer (additive halo behind selected tiles).
         let tile_glow_buffer = if tile_glows.is_empty() {
@@ -604,40 +512,6 @@ impl WgpuRenderer {
                 !inner.is_empty()
             });
         }
-        let mut hand_face_draws: Vec<TextDraw> = Vec::new();
-        if let Some(ref font) = self.ui_font {
-            for lbl in &tile_labels {
-                hand_face_draws.push(make_text_draw(
-                    &self.device,
-                    &self.queue,
-                    &self.text_bind_group_layout,
-                    &self.tile_sampler,
-                    &mut self.text_label_cache,
-                    cache_frame_id,
-                    lbl,
-                    font,
-                    self.ui_font_italic.as_ref(),
-                    None,
-                ));
-            }
-        }
-        if let Some(ref font) = self.emoji_font {
-            for lbl in &emoji_labels {
-                hand_face_draws.push(make_text_draw(
-                    &self.device,
-                    &self.queue,
-                    &self.text_bind_group_layout,
-                    &self.tile_sampler,
-                    &mut self.text_label_cache,
-                    cache_frame_id,
-                    lbl,
-                    font,
-                    None,
-                    None,
-                ));
-            }
-        }
-
         // ── Walk frame.cmds; build per-cmd GPU resources + a parallel ─────
         // ── ordered op list, batching contiguous Quad runs into a single ──
         // ── instanced draw. ────────────────────────────────────────────────

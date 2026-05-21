@@ -100,7 +100,7 @@ impl RunState {
 
     /// Remove all selected tiles and decrement the discard counter, but do NOT
     /// auto-draw replacements. The caller is responsible for invoking
-    /// `refill_hand` once the discard departure animation has had time to play.
+    /// `refill_hand` once the discard river animation has finished.
     /// Returns the number of tiles removed, or 0 if nothing was selected or no
     /// discards remain.
     pub fn discard_selected_no_refill(&mut self, bus: &mut EventBus) -> usize {

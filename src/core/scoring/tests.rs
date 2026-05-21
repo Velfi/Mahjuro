@@ -528,12 +528,12 @@ fn mirror_tile_doubles_dora_crown_bonus() {
     assert_eq!(dora_chips_delta(&breakdown), 360);
 }
 
-fn flower_chips_delta(breakdown: &ScoreBreakdown) -> i32 {
+fn garden_keeper_chips_delta(breakdown: &ScoreBreakdown) -> i32 {
     let mut total = 0;
     let mut prev = breakdown.base_chips;
     for s in &breakdown.steps {
         let delta = s.running_chips - prev;
-        if s.source.contains("Plum") || s.source.contains("Chrysanthemum") {
+        if s.source == "Garden Keeper" {
             total += delta;
         }
         prev = s.running_chips;
@@ -542,13 +542,12 @@ fn flower_chips_delta(breakdown: &ScoreBreakdown) -> i32 {
 }
 
 #[test]
-fn mirror_tile_doubles_garden_keeper_extra_pass() {
+fn garden_keeper_adds_chips_per_scored_flower() {
     use crate::core::hand::{DetectedMeld, MeldKind};
-    // One pair to satisfy minimum scoring + a flower tile.
     let hand = vec![
         Tile::new(Suit::Bamboos, 5, 0),
         Tile::new(Suit::Bamboos, 5, 1),
-        Tile::new(Suit::Flower, 1, 2), // Plum Blossom: 40 chips
+        Tile::new(Suit::Flower, 1, 2),
     ];
     let sets = vec![
         DetectedMeld {
@@ -558,13 +557,38 @@ fn mirror_tile_doubles_garden_keeper_extra_pass() {
         DetectedMeld {
             kind: MeldKind::Pair,
             tile_ids: vec![2],
-        }, // single flower as pseudo-set
+        },
     ];
-    // Base GardenKeeper: triggers = 2 -> 80 chips of plum.
-    // After refactor with Mirror: base pass 40 + GardenKeeper second pass 40 + Mirror duplicates GardenKeeper's second pass 40 = 120.
+    let no_relics = RelicState::default();
+    let ctx = ctx_with(&no_relics, false);
+    let base = score_sets(&hand, &sets, &ctx, &[]);
+    let r = relics(vec![RelicId::GardenKeeper]);
+    let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
+    assert_eq!(garden_keeper_chips_delta(&breakdown), 25);
+    assert_eq!(breakdown.final_chips, base.final_chips + 25);
+}
+
+#[test]
+fn mirror_tile_doubles_garden_keeper_flower_chips() {
+    use crate::core::hand::{DetectedMeld, MeldKind};
+    let hand = vec![
+        Tile::new(Suit::Bamboos, 5, 0),
+        Tile::new(Suit::Bamboos, 5, 1),
+        Tile::new(Suit::Flower, 1, 2),
+    ];
+    let sets = vec![
+        DetectedMeld {
+            kind: MeldKind::Pair,
+            tile_ids: vec![0, 1],
+        },
+        DetectedMeld {
+            kind: MeldKind::Pair,
+            tile_ids: vec![2],
+        },
+    ];
     let r = relics(vec![RelicId::MirrorTile, RelicId::GardenKeeper]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(flower_chips_delta(&breakdown), 120);
+    assert_eq!(garden_keeper_chips_delta(&breakdown), 50);
 }
 
 #[test]

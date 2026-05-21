@@ -46,6 +46,7 @@ mod render;
 mod scene_transition;
 mod scenes;
 mod sdl_shell;
+mod startup_profile;
 mod steam;
 mod ui;
 
@@ -272,7 +273,6 @@ impl App {
     }
 
     fn new(steam: steam::SteamClient) -> Self {
-        let t0 = Instant::now();
         let settings = persistence::load_settings();
         let active_profile = settings.active_profile;
         let progress = persistence::load_profile(active_profile);
@@ -298,7 +298,7 @@ impl App {
         if !settings.sfx_enabled {
             audio.set_enabled(false);
         }
-        log::debug!("App::new() settings + profile loaded in {:?}", t0.elapsed());
+        let scene_look = SceneLookTuningSet::load();
         Self {
             last_drawable_px: PhysicalSize::new(1920, 1080),
             renderer: None,
@@ -350,7 +350,7 @@ impl App {
             effect_layers: crate::effect_layers::EffectLayers::BASELINE,
             debug: DebugState::new(),
             cascade_tuning: CascadeTuning::default(),
-            scene_look: SceneLookTuningSet::load(),
+            scene_look,
             modifiers: Mod::NOMOD,
             steam,
             archive_last_seen_run_len: settings.archive_last_seen_run_len,
@@ -564,8 +564,11 @@ pub fn run() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    asset_path::init();
-    asset_path::log_all_assets();
+    {
+        let _assets = crate::startup_profile::scope("assets.init");
+        asset_path::init();
+        asset_path::log_all_assets();
+    }
 
     let no_steam = cli.no_steam;
     let result =
@@ -577,24 +580,33 @@ pub fn run() -> anyhow::Result<()> {
             // (Steam not running, no license, etc.) are logged and we fall
             // back to `Disabled` — the game then runs normally without
             // achievements/overlay.
-            let steam = if no_steam {
-                log::debug!("--no-steam: skipping Steamworks init");
-                steam::SteamClient::disabled()
-            } else if !steam::steamworks_dll_ready() {
-                log::warn!(
-                    "steam_api64.dll was not found next to this executable (or failed to load); \
-                     Steam achievements and overlay are disabled this session",
-                );
-                steam::SteamClient::disabled()
-            } else {
-                steam::SteamClient::init()
+            let steam = {
+                let _steam_scope = crate::startup_profile::scope("steam.init");
+                if no_steam {
+                    log::debug!("--no-steam: skipping Steamworks init");
+                    steam::SteamClient::disabled()
+                } else if !steam::steamworks_dll_ready() {
+                    log::warn!(
+                        "steam_api64.dll was not found next to this executable (or failed to load); \
+                         Steam achievements and overlay are disabled this session",
+                    );
+                    steam::SteamClient::disabled()
+                } else {
+                    steam::SteamClient::init()
+                }
             };
 
             let settings = persistence::load_settings();
             let tenfoot = std::env::var_os("SteamTenfoot").is_some();
             let launch_borderless = !tenfoot && settings.borderless_fullscreen;
-            let mut shell = sdl_shell::SdlShell::new("Mahjuro", 1920, 1080, launch_borderless)?;
-            let app = App::new(steam);
+            let mut shell = {
+                let _sdl = crate::startup_profile::scope("sdl.window");
+                sdl_shell::SdlShell::new("Mahjuro", 1920, 1080, launch_borderless)?
+            };
+            let app = {
+                let _app = crate::startup_profile::scope("app.new");
+                App::new(steam)
+            };
             app.run_sdl_main(&mut shell)?;
             Ok(())
         }));
