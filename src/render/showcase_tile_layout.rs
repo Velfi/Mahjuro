@@ -5,13 +5,16 @@ use glam::Vec3;
 
 use crate::persistence::TilePreset;
 use crate::render::draw_cmd::CameraParams;
-use crate::render::table_transform::{rot_euler_xyz_rad, tile_mesh_local_to_world};
+use crate::render::table_transform::{
+    rot_euler_xyz_rad, tile_mesh_local_to_world, translate_rot_scale,
+};
+use crate::render::wgpu_renderer::{LOCAL_X_EXTENT, LOCAL_Y_EXTENT, LOCAL_Z_EXTENT};
 use crate::render::world_space::world_on_camera_ray_plane_z;
 
 /// Max fraction of window width occupied by the pack-reveal row (projected silhouettes + gaps).
-const PACK_REVEAL_ROW_MAX_W_FRAC: f32 = 0.48;
+const PACK_REVEAL_ROW_MAX_W_FRAC: f32 = 0.72;
 /// Upper cap on [`crate::render::draw_cmd::ShowcaseTilePlacement::size_px`] vs window height.
-const PACK_REVEAL_TILE_SIZE_MAX_H_FRAC: f32 = 0.048;
+const PACK_REVEAL_TILE_SIZE_MAX_H_FRAC: f32 = 0.20;
 /// Clearance between adjacent tiles as a fraction of each tile's projected silhouette width.
 const PACK_REVEAL_SILHOUETTE_GAP_FRAC: f32 = 0.14;
 
@@ -69,10 +72,11 @@ pub fn showcase_tile_projected_width_px(p: &ShowcaseTileProjectParams<'_>) -> f3
     let tile_short_px = p.size_px * 0.85 * p.placement_scale;
     let tile_long_px = tile_short_px * p.preset.face_long_ratio();
     let tile_thickness_px = tile_short_px * p.preset.thickness_ratio();
-
-    let lx = tile_long_px * 0.5;
-    let ly = tile_thickness_px * 0.5;
-    let lz = tile_short_px * 0.5;
+    let scale = Vec3::new(
+        tile_long_px / LOCAL_X_EXTENT,
+        tile_thickness_px / LOCAL_Y_EXTENT,
+        tile_short_px / LOCAL_Z_EXTENT,
+    );
 
     let base_rotation = rot_euler_xyz_rad(
         p.rotation_xyz_rad[0],
@@ -80,22 +84,21 @@ pub fn showcase_tile_projected_width_px(p: &ShowcaseTileProjectParams<'_>) -> f3
         p.rotation_xyz_rad[2],
     );
     let oriented = base_rotation * tile_mesh_local_to_world();
-
-    let corners = [
-        Vec3::new(-lx, -ly, -lz),
-        Vec3::new(lx, -ly, -lz),
-        Vec3::new(-lx, ly, -lz),
-        Vec3::new(lx, ly, -lz),
-        Vec3::new(-lx, -ly, lz),
-        Vec3::new(lx, -ly, lz),
-        Vec3::new(-lx, ly, lz),
-        Vec3::new(lx, ly, lz),
-    ];
+    let model = translate_rot_scale(center, oriented, scale);
 
     let mut min_x = f32::INFINITY;
     let mut max_x = f32::NEG_INFINITY;
-    for c in corners {
-        let world_c = center + oriented.transform_point3(c);
+    for &corner in &[
+        Vec3::new(-0.5, -0.5, -0.5),
+        Vec3::new(0.5, -0.5, -0.5),
+        Vec3::new(-0.5, 0.5, -0.5),
+        Vec3::new(0.5, 0.5, -0.5),
+        Vec3::new(-0.5, -0.5, 0.5),
+        Vec3::new(0.5, -0.5, 0.5),
+        Vec3::new(-0.5, 0.5, 0.5),
+        Vec3::new(0.5, 0.5, 0.5),
+    ] {
+        let world_c = model.transform_point3(corner);
         let (sx, _) = p.cam.project_world_to_screen(p.win_w, p.win_h, world_c);
         min_x = min_x.min(sx);
         max_x = max_x.max(sx);
@@ -160,5 +163,45 @@ pub fn compute_pack_reveal_row_layout(p: &PackRevealRowLayoutParams<'_>) -> Pack
         gap_px,
         row_x0,
         step_px,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::persistence::TilePreset;
+    use crate::scenes::shop::shop_celebration_camera;
+
+    #[test]
+    fn pack_reveal_row_tiles_are_readable_on_celebration_camera() {
+        let w = 1920.0_f32;
+        let h = 1080.0_f32;
+        let cam = shop_celebration_camera(w, h, crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE);
+        let rotation = [
+            32.0_f32.to_radians(),
+            0.0,
+            std::f32::consts::PI,
+        ];
+        let row = compute_pack_reveal_row_layout(&PackRevealRowLayoutParams {
+            win_w: w,
+            win_h: h,
+            cam: &cam,
+            preset: TilePreset::Chinese,
+            n: 4,
+            row_lift: 0.0,
+            nx: 0.0,
+            ny: 0.14,
+            rotation_xyz_rad: rotation,
+        });
+        assert!(
+            row.tile_size >= h * 0.10,
+            "tile_size {} should be a readable fraction of window height",
+            row.tile_size
+        );
+        assert!(
+            row.silhouette_w >= h * 0.12,
+            "projected silhouette_w {} too narrow for pack reveal",
+            row.silhouette_w
+        );
     }
 }

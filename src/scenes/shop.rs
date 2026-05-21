@@ -19,9 +19,28 @@ use crate::scenes::object3d_inspect::InspectDolly;
 pub(crate) use self::pack_celebration_v2::PackCelebrationV2;
 pub(crate) use self::shared::{CelebPhase, PackCelebration};
 
-/// Perspective camera for tile-pack celebration overlay (not item-inspect orbit).
-pub(crate) fn shop_celebration_camera(w: f32, h: f32, env_h: f32) -> CameraParams {
-    view::shop_camera_base(w, h, env_h)
+/// Perspective camera for tile-pack celebration overlays (not item-inspect orbit).
+///
+/// Authored hero framing on **−Y** (foil faces the camera), not [`view::shop_camera_base`].
+/// Pitch is shallower than the old table-style fallback (~58° FOV, target at origin) so the
+/// pack reads as a frontal product shot instead of a birds-eye on the lid.
+pub(crate) fn shop_celebration_camera(w: f32, h: f32, _env_h: f32) -> CameraParams {
+    let cs = (h / 1080_f32).max(1e-6);
+    // ref_h: 1080 — eye / target in world units before `cs` scale.
+    const EYE_Y: f32 = -1780.0;
+    const EYE_Z: f32 = 620.0;
+    const TARGET_Y: f32 = 90.0;
+    const TARGET_Z: f32 = 150.0;
+    /// Wider than the storeroom table camera (58°) — less telephoto stretch on the tall pack.
+    const FOVY_DEG: f32 = 46.0;
+    CameraParams {
+        eye: [0.0, EYE_Y * cs, EYE_Z * cs],
+        target: [0.0, TARGET_Y * cs, TARGET_Z * cs],
+        up: [0.0, 0.0, 1.0],
+        fovy_deg: FOVY_DEG,
+        clip_near: None,
+        clip_far: None,
+    }
 }
 
 pub(crate) fn sync_item_inspect_orbit_target(

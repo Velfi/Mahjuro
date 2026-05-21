@@ -26,10 +26,8 @@ use super::super::{BackgroundId, ButtonDef, DrawCtx, OverlayRequest, SceneTransi
 
 /// Pack mesh height vs window height (must match shop shelf “hero” scale).
 pub(crate) const PACK_CELEB_BOX_H_FRAC: f32 = 0.56;
-/// Nudge pack **down** in layout pixels so a tall box clears the title band and stays centered.
-const PACK_CELEB_SCREEN_Y_DOWN_FRAC: f32 = 0.055;
-/// Extra downward shift scaled with box height (keeps framing when [`PACK_CELEB_BOX_H_FRAC`] changes).
-const PACK_CELEB_SCREEN_Y_PER_BOX_H: f32 = 0.10;
+/// Pack anchor Y as a fraction of window height (title band ~0.18h).
+const PACK_CELEB_ANCHOR_Y_FRAC: f32 = 0.52;
 
 pub struct TilePackPresenter {
     pub celebration: PackCelebration,
@@ -311,6 +309,9 @@ impl TilePackPresenter {
 }
 
 /// Screen-pixel pack height → world `Object3d::extents` for the perspective celebration camera.
+///
+/// Ray deltas on the felt plane (`z = plane_z`) explode when the celebration camera is
+/// shallow; scale from eye distance and vertical FOV instead (same screen fraction at `center`).
 pub(crate) fn pack_closeup_world_extents(
     win_w: f32,
     win_h: f32,
@@ -320,33 +321,40 @@ pub(crate) fn pack_closeup_world_extents(
     plane_z: f32,
     screen_h_px: f32,
 ) -> [f32; 3] {
-    let half_h = screen_h_px * 0.5;
-    let half_w = half_h * crate::core::tile_pack::PACK_ASPECT_W_OVER_H;
-    let sample = |x: f32, y: f32| {
-        crate::render::world_space::world_on_camera_ray_plane_z(win_w, win_h, cam, x, y, plane_z)
-    };
-    let center = sample(px, py);
-    let world_h = (sample(px, py - half_h) - center).length().max(1.0);
-    let world_w = (sample(px + half_w, py) - center).length().max(1.0);
-    [world_w, world_h * 0.10, world_h]
+    use glam::Vec3;
+
+    let center = crate::render::world_space::world_on_camera_ray_plane_z(
+        win_w, win_h, cam, px, py, plane_z,
+    );
+    let eye = Vec3::from_array(cam.eye);
+    let dist = (eye - center).length().max(1.0);
+    let h = win_h.max(1e-6);
+    let w = win_w.max(1e-6);
+    let fov_y = cam.fovy_deg.to_radians();
+    let visible_h = 2.0 * dist * (fov_y * 0.5).tan();
+    let visible_w = visible_h * (w / h);
+    let world_h = (screen_h_px / h) * visible_h;
+    let screen_w_px = screen_h_px * crate::core::tile_pack::PACK_ASPECT_W_OVER_H;
+    let world_w = (screen_w_px / w) * visible_w;
+    [
+        world_w.max(1.0),
+        world_h * 0.10,
+        world_h.max(1.0),
+    ]
 }
 
 pub(crate) fn pack_closeup_anchor(
     screen: &LayoutResult,
     _positions: &ShopPositions,
-    box_h: f32,
+    _box_h: f32,
     base_rotation: Mat4,
 ) -> PlacementAnchor {
     let h = screen.window_h;
     let w = screen.window_w;
-    let py_bias = h * PACK_CELEB_SCREEN_Y_DOWN_FRAC + box_h * PACK_CELEB_SCREEN_Y_PER_BOX_H;
-    // Pack foil is authored on the −Y face; the shop celebration camera sits on
-    // −Y looking toward +Y, so no extra flip is needed (π around X shows the back).
-    // Keep lift at 0 in the anchor (same as zodiac ribbon): `pos[2]` is world Z via
-    // `pixel_to_world`, not a ray-plane depth; large box-height lifts push the mesh
-    // out of the celebration frustum.
+    // Pack foil is on the −Y face; [`shop_celebration_camera`] sits on −Y looking toward +Y.
+    // Keep lift at 0: `pos[2]` is the ray-plane depth, not a Z lift in world space.
     PlacementAnchor::new(
-        [w * 0.5, h * 0.5 + py_bias, 0.0],
+        [w * 0.5, h * PACK_CELEB_ANCHOR_Y_FRAC, 0.0],
         base_rotation,
         &crate::ui::placement::Placement::default(),
         screen,
@@ -597,7 +605,10 @@ mod tests {
             anchor.pos[1],
             anchor.pos[2],
         );
-        let model = translate_rot_scale(center, Mat4::IDENTITY, Vec3::from(extents));
+        let rot = anchor.object3d_rotation();
+        let oriented =
+            crate::render::table_transform::rot_euler_xyz_rad(rot[0], rot[1], rot[2]);
+        let model = translate_rot_scale(center, oriented, Vec3::from(extents));
 
         let mut ndc_min = Vec3::splat(f32::INFINITY);
         let mut ndc_max = Vec3::splat(f32::NEG_INFINITY);
