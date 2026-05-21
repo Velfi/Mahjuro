@@ -7,6 +7,16 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.5.0-17 — 2026-05-21
+
+### Added
+- Discarded tiles now lift from your hand, arc into the discard river, and rest face-up along the water until your next discard, when the previous pile sinks away before the new tiles land.
+
+### Changed
+- The Meld Guide now has a dedicated Flowers page that walks through every legal way a flower can be used: filling a triplet, mending a sequence, pairing with another flower, or forming an all-flower triplet.
+- Flowers no longer grant different chips, mult, or gold by face (Plum, Orchid, and the rest). **Garden Keeper** now adds **+25 chips** for each flower tile in a scored hand instead of doubling Hanami payouts.
+- You can now invert your current hand selection instantly with `Z` on keyboard or left-stick click (L3) on controller.
+
 ## 0.5.0-16 — 2026-05-20
 
 - maintenance, development, and bugfixes.
