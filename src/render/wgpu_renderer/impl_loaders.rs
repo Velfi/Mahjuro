@@ -30,6 +30,7 @@ impl WgpuRenderer {
                     } else {
                         format!("{} (alpha fallback)", img.id.render_texture_path())
                     };
+                    let t_mesh = std::time::Instant::now();
                     if let Some(cpu) = build_relic_mesh_from_rgba(
                         mesh_source.0,
                         mesh_source.1,
@@ -64,6 +65,8 @@ impl WgpuRenderer {
                             ),
                         );
                     }
+                    self.relic_profile_mesh_cpu += t_mesh.elapsed();
+                    let t_upload = std::time::Instant::now();
                     let (_tex, view) = upload_rgba_texture(
                         &self.device,
                         &self.queue,
@@ -80,6 +83,7 @@ impl WgpuRenderer {
                         img.relief_width,
                         img.relief_height,
                     );
+                    self.relic_profile_upload_cpu += t_upload.elapsed();
                     self.relic_textures
                         .insert(img.id, RelicTextureGpu { view, relief_view });
                 }
@@ -91,8 +95,13 @@ impl WgpuRenderer {
             }
         }
         if finished {
+            crate::startup_profile::record("relic.mesh_build_main", self.relic_profile_mesh_cpu);
+            crate::startup_profile::record(
+                "relic.texture_upload_main",
+                self.relic_profile_upload_cpu,
+            );
             if let Some(start) = self.relic_load_start.take() {
-                crate::startup_profile::record("async.relic_gpu_uploads", start.elapsed());
+                crate::startup_profile::record("async.relic_load_wall", start.elapsed());
             }
             log::debug!(
                 "all {} relic textures uploaded to GPU (spawn → last upload)",

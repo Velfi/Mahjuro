@@ -227,9 +227,11 @@ pub(crate) fn spawn_relic_loader() -> mpsc::Receiver<DecodedRelicImage> {
                     break;
                 }
             }
+            let thread_total = t_thread.elapsed();
+            crate::startup_profile::record("relic.decode_thread", thread_total);
+            crate::startup_profile::record("relic.decode_cpu", decode_time);
             log::debug!(
-                "relic-loader thread finished: decoded {decoded} images in {decode_time:?} (thread total {:?})",
-                t_thread.elapsed(),
+                "relic-loader thread finished: decoded {decoded} images in {decode_time:?} (thread total {thread_total:?})",
             );
         })
         .expect("failed to spawn relic-loader thread");

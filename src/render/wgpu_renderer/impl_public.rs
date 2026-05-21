@@ -82,6 +82,9 @@ impl WgpuRenderer {
         }
         for tileset in &tilesets {
             self.ensure_showcase_decal_atlas(tileset);
+            // Decal pre-bake can take several seconds; keep draining relic /
+            // backdrop uploads so `relic_rx` does not stall behind this loop.
+            self.poll_pending_texture_uploads();
         }
         // Restore active set so the first post-splash frame does not need to
         // promote from cache before draw.

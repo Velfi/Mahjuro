@@ -331,6 +331,10 @@ pub struct WgpuRenderer {
     relic_rx: Option<mpsc::Receiver<DecodedRelicImage>>,
     /// Wall-clock start of the relic load pipeline (spawn → last GPU upload).
     relic_load_start: Option<Instant>,
+    /// Cumulative main-thread mesh extraction + GPU mesh buffer creation during relic boot.
+    relic_profile_mesh_cpu: std::time::Duration,
+    /// Cumulative main-thread albedo + relief texture uploads during relic boot.
+    relic_profile_upload_cpu: std::time::Duration,
     /// Cached tile-pack box art textures, keyed by `TilePackKind`.
     pack_textures: FxHashMap<TilePackKind, RelicTextureGpu>,
     /// Cached background textures, populated asynchronously.

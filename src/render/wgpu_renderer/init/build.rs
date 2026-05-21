@@ -4097,6 +4097,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         relic_textures: rustc_hash::FxHashMap::default(),
         relic_rx,
         relic_load_start,
+        relic_profile_mesh_cpu: std::time::Duration::ZERO,
+        relic_profile_upload_cpu: std::time::Duration::ZERO,
         pack_textures: pack_textures_map,
         background_textures: rustc_hash::FxHashMap::default(),
         background_rx,

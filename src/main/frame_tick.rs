@@ -1104,10 +1104,13 @@ impl App {
         // Splash dismissal in `loading_done` (above) waits for this to finish.
         if matches!(self.scene, Scene::Splash(_)) {
             let tileset = self.gfx.tileset_name.clone();
-            if let Some(renderer) = self.renderer.as_mut()
-                && !renderer.showcase_decal_atlases_baked_for_all_player_tilesets()
-            {
-                renderer.prebake_showcase_decal_atlases_for_all_player_tilesets(&tileset);
+            if let Some(renderer) = self.renderer.as_mut() {
+                // Upload any relics decoded before the (long) decal atlas pass.
+                renderer.poll_pending_texture_uploads();
+                if !renderer.showcase_decal_atlases_baked_for_all_player_tilesets() {
+                    renderer.prebake_showcase_decal_atlases_for_all_player_tilesets(&tileset);
+                }
+                renderer.poll_pending_texture_uploads();
             }
         }
 
