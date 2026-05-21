@@ -440,6 +440,13 @@ pub enum Object3dKind {
     Talisman {
         kind: crate::core::talisman::TalismanKind,
     },
+    /// Boss encounter icon — extruded silhouette mesh from `textures/boss_icons/`
+    /// (same mesh builder as [`Relic`], archive cubbies + pedestal close-up).
+    BossIcon {
+        kind: crate::core::boss::BossKind,
+        glow: f32,
+        pick_id: Option<u32>,
+    },
     // (Coin is now modeled as `Primitive { shape: Cylinder,
     // material: MaterialSpec::metal(), shadow_caster: true }`. The
     // renderer registers the engraved-coin heightmap as a per-shape

@@ -129,8 +129,7 @@ impl WgpuRenderer {
             }
             RenderOp::MoonlitWater => {
                 pass.set_pipeline(&self.moonlit_water_pipeline);
-                pass.set_bind_group(0, &self.globals_bind_group, &[]);
-                pass.set_bind_group(1, &self.moon_albedo_bind_group, &[]);
+                pass.set_bind_group(0, &self.moonlit_water_bind_group, &[]);
                 pass.draw(0..3, 0..1);
             }
             RenderOp::SunlitWater => {
@@ -188,6 +187,23 @@ impl WgpuRenderer {
                             None => &self.relic_box_mesh,
                         };
                         if let Some(inst) = self.relic_instances.get(slot_i) {
+                            pass.set_bind_group(0, &inst.bind_group, &[]);
+                            pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                            pass.set_index_buffer(
+                                mesh.index_buffer.slice(..),
+                                wgpu::IndexFormat::Uint32,
+                            );
+                            pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+                        }
+                        continue;
+                    }
+                    if matches!(kind, DrawKind::BossIcon) {
+                        let mesh = match self.boss_icon_slot_texture.get(slot_i).copied().flatten()
+                        {
+                            Some(bk) => self.boss_icon_mesh_for(bk),
+                            None => &self.relic_box_mesh,
+                        };
+                        if let Some(inst) = self.boss_icon_instances.get(slot_i) {
                             pass.set_bind_group(0, &inst.bind_group, &[]);
                             pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                             pass.set_index_buffer(
@@ -323,7 +339,8 @@ impl WgpuRenderer {
                         DrawKind::Relic
                         | DrawKind::ExtrudedGlyph
                         | DrawKind::CandleWax
-                        | DrawKind::CandleWick => unreachable!(),
+                        | DrawKind::CandleWick
+                        | DrawKind::BossIcon => unreachable!(),
                     };
                     let Some(inst) = inst_opt else { continue };
                     pass.set_bind_group(0, &inst.bind_group, &[]);

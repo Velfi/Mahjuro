@@ -28,6 +28,23 @@ pub(crate) struct DecodedBackgroundImage {
     pub height: u32,
 }
 
+/// Lit-mesh shading for boss-icon medallions (true albedo; light specular).
+pub(super) fn boss_icon_material_params(base_color: [f32; 4], glow: f32) -> MaterialParams {
+    let g = glow.clamp(0.0, 1.0);
+    let target = [1.55, 1.32, 0.78, base_color[3]];
+    MaterialParams {
+        kind: MaterialKind::Plain,
+        base_color: [
+            base_color[0] + (target[0] - base_color[0]) * g,
+            base_color[1] + (target[1] - base_color[1]) * g,
+            base_color[2] + (target[2] - base_color[2]) * g,
+            base_color[3],
+        ],
+        specular_strength: 0.42 + 0.22 * g,
+        specular_power: 56.0,
+    }
+}
+
 pub(super) fn relic_material_params(
     relic_id: RelicId,
     base_color: [f32; 4],

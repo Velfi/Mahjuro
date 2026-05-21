@@ -22,8 +22,10 @@ struct Globals {
 @group(0) @binding(0) var<uniform> globals: Globals;
 
 // LRO WAC equirectangular albedo map (real lunar surface data).
-@group(1) @binding(0) var moon_albedo_tex: texture_2d<f32>;
-@group(1) @binding(1) var moon_albedo_smp: sampler;
+// Group 0 with the globals uniform — DX12/FXC cannot compile a fragment-only
+// second bind group as an SM 5.1+ resource array.
+@group(0) @binding(1) var moon_albedo_tex: texture_2d<f32>;
+@group(0) @binding(2) var moon_albedo_smp: sampler;
 
 struct VsOut {
     @builtin(position) clip_pos: vec4<f32>,

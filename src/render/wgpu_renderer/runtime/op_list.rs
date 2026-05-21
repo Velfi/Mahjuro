@@ -85,6 +85,7 @@ pub enum DrawKind {
     Book,
     BookCover,
     Relic,
+    BossIcon,
     Pack,
     Ribbon,
     Talisman,

@@ -204,7 +204,14 @@ impl WgpuRenderer {
         );
         let light_view_proj = shadow_proj * shadow_view;
         let light_view_proj_arr = light_view_proj.to_cols_array();
-        let shadow_enabled_flag = if shadows_enabled { 1.0_f32 } else { 0.0 };
+        // Tile-pack / zodiac showcase overlays: perspective shop camera on a
+        // black void — the gameplay-table shadow frustum does not cover them,
+        // so PCF reads as fully occluded and meshes vanish.
+        let pack_celeb_black_void = self.active_scene_key == Some("showcase")
+            && frame.showcase_render_hints.tile_pack_celebration_tonemap
+            && !frame_draws_room_environment(frame);
+        let shadow_enabled_flag =
+            if shadows_enabled && !pack_celeb_black_void { 1.0_f32 } else { 0.0 };
         self.queue.write_buffer(
             &self.shadow_globals_buffer,
             0,

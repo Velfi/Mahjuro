@@ -343,12 +343,22 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     });
 
     // ---- Moon albedo texture (LRO WAC real heightmap) ----
-    let moon_albedo_tex_layout =
+    let moonlit_water_bind_layout =
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("moon-albedo-layout"),
+            label: Some("moonlit-water-bind-layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         multisampled: false,
@@ -358,7 +368,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 1,
+                    binding: 2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
@@ -367,21 +377,25 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         });
     let moonlit_water_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("moonlit-water-pl"),
-        bind_group_layouts: &[Some(&globals_layout), Some(&moon_albedo_tex_layout)],
+        bind_group_layouts: &[Some(&moonlit_water_bind_layout)],
         immediate_size: 0,
     });
     let (_moon_albedo_texture, moon_albedo_view) =
         load_metal_heightmap(&device, &queue, "textures/moon_albedo.png", "moon-albedo");
-    let moon_albedo_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("moon-albedo-bg"),
-        layout: &moon_albedo_tex_layout,
+    let moonlit_water_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("moonlit-water-bg"),
+        layout: &moonlit_water_bind_layout,
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: wgpu::BindingResource::TextureView(&moon_albedo_view),
+                resource: globals_buffer.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
+                resource: wgpu::BindingResource::TextureView(&moon_albedo_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
                 resource: wgpu::BindingResource::Sampler(&tile_sampler),
             },
         ],
@@ -904,7 +918,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     let ember_drift_pipeline = vignette_pipeline("ember-drift-pipeline", &ember_drift_shader);
     let golden_dust_pipeline = vignette_pipeline("golden-dust-pipeline", &golden_dust_shader);
     // moonlit_water gets its own pipeline so it can bind the moon albedo
-    // texture at group 1 in addition to the globals at group 0.
+    // texture alongside globals in a dedicated bind group layout.
     let moonlit_water_pipeline = {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("moonlit-water-pipeline"),
@@ -3656,6 +3670,18 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             &tile_sampler,
         ));
     }
+    let mut boss_icon_instances: Vec<LitMeshInstance> =
+        Vec::with_capacity(MAX_BOSS_ICON_SLOTS);
+    for _ in 0..MAX_BOSS_ICON_SLOTS {
+        boss_icon_instances.push(LitMeshInstance::new(
+            &device,
+            &lit_mesh_material_layout,
+            &shadow_caster_layout,
+            &lit_mesh_white_view,
+            &lit_mesh_relief_default_view,
+            &tile_sampler,
+        ));
+    }
     let mut pack_instances: Vec<LitMeshInstance> = Vec::with_capacity(4);
     for _ in 0..4 {
         pack_instances.push(LitMeshInstance::new(
@@ -3931,7 +3957,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         ember_drift_pipeline,
         golden_dust_pipeline,
         moonlit_water_pipeline,
-        moon_albedo_bind_group,
+        moonlit_water_bind_group,
         sunlit_water_pipeline,
         shooting_star_cascade_pipeline,
         cascade_composite_pipeline,
@@ -4033,6 +4059,10 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         last_relic_models: Vec::new(),
         last_pickable_relic_models: Vec::new(),
         relic_slot_texture: vec![None; MAX_RELIC_SLOTS],
+        boss_icon_instances,
+        boss_icon_meshes: rustc_hash::FxHashMap::default(),
+        boss_icon_textures: rustc_hash::FxHashMap::default(),
+        boss_icon_slot_texture: vec![None; MAX_BOSS_ICON_SLOTS],
         pack_instances,
         pack_slot_texture: vec![None; 4],
         ribbon_mesh,

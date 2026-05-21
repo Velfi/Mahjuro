@@ -57,6 +57,8 @@ pub const MAIN_MENU_PICK_QUIT: u32 = 242;
 /// match the size of the `relic_instances` slot pool below; the renderer
 /// silently truncates batches longer than this.
 pub const MAX_RELIC_SLOTS: usize = 128;
+/// Archive boss-tab cubbies + pedestal (one frame, all slots visible).
+pub const MAX_BOSS_ICON_SLOTS: usize = 32;
 /// Maximum number of zodiac/talisman ribbon *draw slots* per frame (across all
 /// `ZodiacBatch` cmds). Each textured ribbon uses up to 3 slots (top/mid/bot
 /// caps), so 16 logical ribbons × 3 = 48. Truncated silently.
