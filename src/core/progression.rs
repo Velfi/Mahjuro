@@ -419,7 +419,7 @@ impl PlayerProgress {
     /// the hand qualifies — the scorer always applies Kokushi when detected,
     /// even if this list omits it.
     pub fn available_yaku(&self) -> Vec<YakuKind> {
-        YakuKind::all()
+        let mut list: Vec<YakuKind> = YakuKind::all()
             .iter()
             .copied()
             .filter(|&y| {
@@ -428,7 +428,9 @@ impl PlayerProgress {
                 }
                 true
             })
-            .collect()
+            .collect();
+        list.sort_by(YakuKind::cmp_by_base_score);
+        list
     }
 
     /// Whether the Plastic tile material is unlocked (requires first victory).
@@ -723,6 +725,21 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn available_yaku_sorted_by_base_score_lowest_first() {
+        let p = PlayerProgress::new();
+        let ay = p.available_yaku();
+        for w in ay.windows(2) {
+            assert!(
+                YakuKind::cmp_by_base_score(&w[0], &w[1]).is_le(),
+                "expected ascending base score: {:?} before {:?}",
+                w[0],
+                w[1]
+            );
+        }
+        assert_eq!(ay.first(), Some(&YakuKind::ChickenHand));
+    }
 
     #[test]
     fn kokushi_omitted_from_available_yaku_until_first_cash_in() {

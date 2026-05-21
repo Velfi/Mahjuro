@@ -406,7 +406,7 @@ pub enum Object3dKind {
     /// the dora indicator tile(s). The mesh has no roof; the indicator
     /// tile face(s) are pushed separately as `ShowcaseTilePlacement`s
     /// resting on the platform on top.
-    DoraPlinth { glow: f32 },
+    Plinth { glow: f32 },
     /// Relic medallion — shop for-sale, owned dish row, gameplay HUD
     /// tray, collection cards, tutorial panels, and unlock modals all use
     /// this single kind; callers pick the rotation so the face points at
@@ -1045,7 +1045,7 @@ pub fn apply_modal_relic_staging(
         radius: w.max(h) * 2.2,
         cos_outer,
         cos_inner,
-        color: color::rgb(color::TALLOW),
+        color: color::rgb(color::PARCHMENT),
         intensity: 6.0,
     }];
     frame.object3d_batch(modal_relic_objects);

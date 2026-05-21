@@ -236,11 +236,11 @@ impl WgpuRenderer {
                 };
                 self.draw_lit_mesh_shadow(pass, &self.orb_mesh, inst);
             }
-            DrawKind::DoraPlinth => {
-                let Some(inst) = self.dora_plinth_instances.get(slot_i) else {
+            DrawKind::Plinth => {
+                let Some(inst) = self.plinth_instances.get(slot_i) else {
                     return;
                 };
-                self.draw_lit_mesh_shadow(pass, &self.dora_plinth_mesh, inst);
+                self.draw_lit_mesh_shadow(pass, &self.plinth_mesh, inst);
             }
             DrawKind::Bowl => {
                 let Some(inst) = self.bowl_instances.get(slot_i) else {

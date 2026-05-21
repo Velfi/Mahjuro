@@ -26,6 +26,10 @@ pub struct ProjectionCache {
     pub bowl_rect: Option<[f32; 4]>,
     pub mirror_rect: Option<[f32; 4]>,
     pub aux_dish_rects: Vec<(Option<u32>, [f32; 4])>,
-    pub dora_plinth_rect: Option<[f32; 4]>,
+    pub plinth_rect: Option<[f32; 4]>,
+    pub boss_plinth_rect: Option<[f32; 4]>,
+    pub boss_plinth_platform_px: Option<[f32; 2]>,
     pub round_wind_plinth_rect: Option<[f32; 4]>,
+    pub dora_tile_rect: Option<[f32; 4]>,
+    pub round_wind_tile_rect: Option<[f32; 4]>,
 }

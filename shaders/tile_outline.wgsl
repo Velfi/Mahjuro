@@ -36,6 +36,7 @@ struct VsOut {
     @location(1) world_pos: vec3<f32>,
     @location(2) local_n: vec3<f32>,
     @location(3) sel_y: f32,
+    @location(4) local_pos: vec3<f32>,
 };
 
 @vertex
@@ -60,6 +61,7 @@ fn vs_main(
     o.world_pos = world.xyz;
     o.local_n = n;
     o.sel_y = inst_base_color_factor.y;
+    o.local_pos = pos;
     return o;
 }
 
@@ -68,14 +70,27 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     // base_color_factor.y encodes hover/select state:
     //   >= 0.75 → selected (warm gold rim)
     //   ~0.5    → hovered (saturated blue rim)
+    //   >= 1.25 → alternating hover/selected perimeter colors
     let sel = in.sel_y;
-    let is_selected = sel >= 0.75;
+    let is_combo = sel >= 1.25;
+    let is_selected = sel >= 0.75 && !is_combo;
     let is_hovered = sel > 0.25 && sel < 0.75;
+    let selected_color = vec3<f32>(1.00, 0.38, 0.02);
+    let hovered_color = vec3<f32>(0.05, 0.40, 1.00);
     var base_color = vec3<f32>(0.72, 0.88, 1.00);
     if (is_selected) {
-        base_color = vec3<f32>(1.00, 0.38, 0.02);
+        base_color = selected_color;
     } else if (is_hovered) {
-        base_color = vec3<f32>(0.05, 0.40, 1.00);
+        base_color = hovered_color;
+    } else if (is_combo) {
+        // Alternate two colors around the perimeter using local X/Z so top and
+        // bottom edges are included (Y is tile thickness in local space).
+        let ang = atan2(in.local_pos.z, in.local_pos.x);
+        let u = fract((ang + 3.14159265) / (2.0 * 3.14159265));
+        // Larger segments for readability at gameplay distance.
+        let segment = floor(u * 16.0);
+        let stripe = select(0.0, 1.0, fract(segment * 0.5) >= 0.5);
+        base_color = mix(hovered_color, selected_color, stripe);
     }
 
     // Local-space directional ambient + diffuse so the rim has shape even
@@ -88,6 +103,8 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         base_shade = 0.72 + 0.33 * ndl;
     } else if (is_hovered) {
         base_shade = 0.58 + 0.48 * ndl;
+    } else if (is_combo) {
+        base_shade = 0.70 + 0.40 * ndl;
     }
 
     // Point-light pass: same falloff/Lambert model the tile shader uses,
@@ -116,6 +133,8 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
             metal = 0.35 + 2.05 * pow(nl, 1.65);
         } else if (is_hovered) {
             metal = 0.32 + 1.85 * pow(nl, 1.72);
+        } else if (is_combo) {
+            metal = 0.34 + 1.95 * pow(nl, 1.68);
         }
         contrib = contrib + lc * intensity * atten * metal;
     }
@@ -124,6 +143,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     // Emissive + chroma punch so ACES/HDR does not wash rims to grey/white.
     lit = lit + select(vec3<f32>(0.0), base_color * 0.16, is_hovered);
     lit = lit + select(vec3<f32>(0.0), base_color * 0.26, is_selected);
+    lit = lit + select(vec3<f32>(0.0), base_color * 0.23, is_combo);
     if (is_selected) {
         let luma = dot(lit, vec3<f32>(0.2126, 0.7152, 0.0722));
         let sat = 1.75;
@@ -134,12 +154,19 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let sat = 1.58;
         lit = vec3<f32>(luma) + (lit - vec3<f32>(luma)) * sat;
         lit = max(lit, vec3<f32>(0.0));
+    } else if (is_combo) {
+        let luma = dot(lit, vec3<f32>(0.2126, 0.7152, 0.0722));
+        let sat = 1.66;
+        lit = vec3<f32>(luma) + (lit - vec3<f32>(luma)) * sat;
+        lit = max(lit, vec3<f32>(0.0));
     }
     var gain = 1.0;
     if (is_selected) {
         gain = 1.38;
     } else if (is_hovered) {
         gain = 1.20;
+    } else if (is_combo) {
+        gain = 1.32;
     }
     lit = lit * gain;
     let inv_g = 1.0 / max(lights.extras.x, 0.01);

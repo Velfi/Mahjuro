@@ -97,10 +97,10 @@ impl App {
                         did_loader_work = true;
                     }
                     let splash_atlas_pending = matches!(self.scene, Scene::Splash(_))
-                        && !renderer.showcase_decal_atlas_baked();
+                        && !renderer.showcase_decal_atlases_baked_for_all_player_tilesets();
                     if splash_atlas_pending {
                         let tileset = self.gfx.tileset_name.clone();
-                        renderer.prebake_showcase_decal_atlas(&tileset);
+                        renderer.prebake_showcase_decal_atlases_for_all_player_tilesets(&tileset);
                         did_loader_work = true;
                     }
                 }
@@ -413,7 +413,8 @@ impl App {
                 }
             }
             input.update_pointer_hover(input.last_cursor, &slots);
-            // Showcase inspect (shop / collection): orbit with LMB drag — same stick channel as gamepad / WASD / arrows.
+            // Showcase inspect (shop / collection): orbit with LMB drag
+            // (same channel as right stick / arrow-key orbit input).
             let showcase_orbit = self
                 .overlay_stack
                 .last()
@@ -502,8 +503,23 @@ impl App {
 
         let mut v = Vec::new();
         let shift = mod_shift(self.modifiers);
+        let orbit_overlay_active = self
+            .overlay_stack
+            .last()
+            .is_some_and(|top| matches!(top, Scene::Showcase(s) if s.wants_orbit_input()));
+        // While orbit inspect is active, arrow keys are reserved for orbit
+        // rotation (sampled in `gamepad_frame_tick`) rather than focus actions.
+        let scancode_for_actions = if orbit_overlay_active
+            && matches!(
+                scancode,
+                Some(Scancode::Left | Scancode::Right | Scancode::Up | Scancode::Down)
+            ) {
+            None
+        } else {
+            scancode
+        };
         let mode_changed = if let Some(input) = self.input.as_mut() {
-            input.on_key(scancode, shift, &mut v)
+            input.on_key(scancode_for_actions, shift, &mut v)
         } else {
             false
         };

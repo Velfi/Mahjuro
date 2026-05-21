@@ -754,10 +754,7 @@ pub fn relic_description_live(
         }
         RelicId::Temperance => {
             let stacks = counters.get(&RelicId::Temperance).copied().unwrap_or(0);
-            format!(
-                "{base} [+{:.1} permanent mult]",
-                stacks as f64 / 10.0
-            )
+            format!("{base} [+{:.1} permanent mult]", stacks as f64 / 10.0)
         }
         RelicId::Obsession => {
             let rounds = counters.get(&RelicId::Obsession).copied().unwrap_or(0);
@@ -1158,7 +1155,9 @@ pub fn format_shadow_hand_inventory_help(relics: &RelicState, shadow_slot: usize
     match active.first().copied() {
         None => parts.push("Nothing to copy.".to_string()),
         Some(RelicId::ShadowHand) => {
-            parts.push("Move Shadow Hand right so a different relic is in the first slot.".to_string());
+            parts.push(
+                "Move Shadow Hand right so a different relic is in the first slot.".to_string(),
+            );
         }
         Some(tid) => {
             let name = relic_display_name(tid);

@@ -246,7 +246,7 @@ impl SceneBehavior for MeldGuideScene {
         let prev_color = if prev_enabled {
             color::WALNUT_INK
         } else {
-            color::alpha(color::FELT_DEEP, 0.5)
+            color::alpha(color::WALNUT_INK, 0.5)
         };
         frame.quad(GpuInstance {
             rect: [prev_x, btn_y, btn_w, btn_h],
@@ -296,7 +296,7 @@ impl SceneBehavior for MeldGuideScene {
         let next_color = if next_enabled {
             color::WALNUT_INK
         } else {
-            color::alpha(color::FELT_DEEP, 0.5)
+            color::alpha(color::WALNUT_INK, 0.5)
         };
         frame.quad(GpuInstance {
             rect: [next_x, btn_y, btn_w, btn_h],

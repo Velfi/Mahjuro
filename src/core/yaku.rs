@@ -146,6 +146,14 @@ impl YakuKind {
         yaku_def(self).name
     }
 
+    /// Sort key for reference UIs (journal, meld guide): lowest base payout first.
+    pub fn cmp_by_base_score(a: &Self, b: &Self) -> std::cmp::Ordering {
+        a.mult_bonus()
+            .partial_cmp(&b.mult_bonus())
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.chip_bonus().cmp(&b.chip_bonus()))
+    }
+
     /// All 14 yaku, in display order.
     pub fn all() -> &'static [YakuKind] {
         &[
@@ -1036,6 +1044,68 @@ mod tests {
             detect_yaku_with_wind(&tiles, &sets, Some(1), Some(2), None)
                 .contains(&YakuKind::Yakuhai)
         );
+    }
+
+    /// Full hand built from compact labels **EEF1** and **NNF1**: each is two winds
+    /// plus a flower wildcard completing a triplet (`E`+`E`+`F1`, `N`+`N`+`F1`).
+    /// Filler melds are one bamboo suit so the hand also scores Honitsu + Full Hand.
+    fn eef1_nnf1_flower_wind_hand() -> (Vec<Tile>, Vec<DetectedMeld>) {
+        use crate::core::hand::validate_selection;
+
+        let tiles = vec![
+            // EEF1 — East triplet
+            t(Suit::Wind, 1, 0),
+            t(Suit::Wind, 1, 1),
+            t(Suit::Flower, 1, 100),
+            // NNF1 — North triplet (second F1 tile, distinct id)
+            t(Suit::Wind, 4, 2),
+            t(Suit::Wind, 4, 3),
+            t(Suit::Flower, 1, 101),
+            // Honitsu filler: one number suit (bamboo)
+            t(Suit::Bamboos, 2, 4),
+            t(Suit::Bamboos, 3, 5),
+            t(Suit::Bamboos, 4, 6),
+            t(Suit::Bamboos, 5, 7),
+            t(Suit::Bamboos, 5, 8),
+            t(Suit::Bamboos, 5, 9),
+            t(Suit::Bamboos, 8, 10),
+            t(Suit::Bamboos, 8, 11),
+        ];
+        let sets = validate_selection(&tiles).expect("EEF1+NNF1 hand should decompose");
+        assert_eq!(sets.len(), 5, "expected 4 melds + pair: {:?}", sets);
+        assert!(is_full_hand(&tiles, &sets));
+        let wind_flower_triplets = sets
+            .iter()
+            .filter(|s| {
+                s.kind == MeldKind::Triplet && s.tile_ids.iter().any(|id| id == &100 || id == &101)
+            })
+            .count();
+        assert_eq!(
+            wind_flower_triplets, 2,
+            "EEF1 and NNF1 should each form a triplet"
+        );
+        (tiles, sets)
+    }
+
+    #[test]
+    fn classify_yaku_for_eef1_nnf1_flower_wind_hand() {
+        let (tiles, sets) = eef1_nnf1_flower_wind_hand();
+
+        let no_wind = detect_yaku_with_wind(&tiles, &sets, None, None, None);
+        assert!(no_wind.contains(&YakuKind::Honitsu));
+        assert!(no_wind.contains(&YakuKind::FullHand));
+        assert!(!no_wind.contains(&YakuKind::Yakuhai));
+        assert!(!no_wind.contains(&YakuKind::Toitoi));
+
+        // Round wind East — flower-assisted East triplet (EEF1) is Yakuhai.
+        let east_round = detect_yaku_with_wind(&tiles, &sets, Some(1), None, None);
+        assert!(east_round.contains(&YakuKind::Yakuhai));
+        assert!(east_round.contains(&YakuKind::Honitsu));
+
+        // Round wind North — flower-assisted North triplet (NNF1) is Yakuhai.
+        let north_round = detect_yaku_with_wind(&tiles, &sets, Some(4), None, None);
+        assert!(north_round.contains(&YakuKind::Yakuhai));
+        assert!(north_round.contains(&YakuKind::Honitsu));
     }
 
     #[test]

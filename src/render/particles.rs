@@ -85,9 +85,7 @@ impl RainSpawnVolume {
         let mut rng = rand::rng();
         for _ in 0..RAIN_SPAWN_BIAS_MAX_TRIES {
             let pos = self.random_pos();
-            if rng.random::<f32>()
-                <= Self::spawn_acceptance(cam, pos, d_min, d_max, near_bias)
-            {
+            if rng.random::<f32>() <= Self::spawn_acceptance(cam, pos, d_min, d_max, near_bias) {
                 return pos;
             }
         }

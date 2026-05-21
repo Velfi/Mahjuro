@@ -13,15 +13,16 @@
 //!
 //! Dark walnut panel tones with sparing brass accents. Brass is precious —
 //! reserve it for headers, score numerals, selected-tile rims, currency, and
-//! relic borders. Body text is `PARCHMENT`, never pure white. Highlights pull
-//! toward `TALLOW` (candle bloom), not toward white. Think
+//! relic borders. Body text is `PARCHMENT` (pure white) for maximum readability
+//! on deep brown surfaces. Highlights pull toward white rather than cool grays.
+//! Think
 //! "lacquered rosewood box with brass fittings under candlelight," not
 //! flat UI gray.
 //!
 //! ## Material vs. semantic colors
 //!
-//! Material tokens (`WALNUT_*`, `FELT_*`, `TWILIGHT_*`, `LACQUER`, `CINNABAR`,
-//! `TALLOW`) describe surfaces in the House. Semantic tokens (`JADE`, `RUBY`,
+//! Material tokens (`WALNUT_*`) describe surfaces in the House. Semantic
+//! tokens (`JADE`, `RUBY`,
 //! `AMBER`) describe UI signals (success / danger / warning). Don't cross them:
 //! `JADE` is "this succeeded," not "this is a tabletop." `RUBY` is "this is
 //! dangerous," not "this is celebratory." Materials are wood and felt and ink;
@@ -36,16 +37,16 @@
 /// Named color tokens. Pull from here in scenes via `theme::color::GOLD` etc.
 pub mod color {
     // ── Walnut ladder: dark → light, backgrounds, panels, modals, tooltips ─
-    /// `#0A0806` — deepest base, near-black brown.
-    pub const WALNUT_INK: [f32; 4] = [0.040, 0.031, 0.024, 1.0];
-    /// `#120E0B` — primary modal/panel background and tooltip fill.
-    pub const WALNUT_DEEP: [f32; 4] = [0.071, 0.055, 0.043, 1.0];
-    /// `#1C1611` — raised panel background (one step lighter than WALNUT_DEEP).
-    pub const WALNUT_RAISED: [f32; 4] = [0.110, 0.086, 0.067, 1.0];
-    /// `#2A211A` — hovered/selected panel background, button rest state.
-    pub const WALNUT_SOFT: [f32; 4] = [0.165, 0.129, 0.102, 1.0];
-    /// `#362A21` — strongest panel tone, primary button rest / highlights.
-    pub const WALNUT_BRIGHT: [f32; 4] = [0.212, 0.165, 0.129, 1.0];
+    /// `#050302` — deepest base, near-black brown.
+    pub const WALNUT_INK: [f32; 4] = [0.020, 0.012, 0.008, 1.0];
+    /// `#0B0604` — primary modal/panel background and tooltip fill.
+    pub const WALNUT_DEEP: [f32; 4] = [0.043, 0.024, 0.016, 1.0];
+    /// `#140D08` — raised panel background (one step lighter than WALNUT_DEEP).
+    pub const WALNUT_RAISED: [f32; 4] = [0.078, 0.051, 0.031, 1.0];
+    /// `#1E140D` — hovered/selected panel background, button rest state.
+    pub const WALNUT_SOFT: [f32; 4] = [0.118, 0.078, 0.051, 1.0];
+    /// `#2A1C12` — strongest panel tone, primary button rest / highlights.
+    pub const WALNUT_BRIGHT: [f32; 4] = [0.165, 0.110, 0.071, 1.0];
 
     // ── Golds: use sparingly, hierarchy of warmth ─────────────────────────
     /// `#F5C674` — palest gold, hero score numerals & selected-tile rims.
@@ -58,66 +59,27 @@ pub mod color {
     pub const ANTIQUE: [f32; 4] = [0.541, 0.369, 0.078, 1.0];
 
     // ── Neutrals: text + dividers (warm stone — reads on walnut panels) ──
-    /// `#F4F1E8` — body text. Warm off-white. NEVER use pure white.
-    pub const PARCHMENT: [f32; 4] = [0.957, 0.945, 0.910, 1.0];
+    /// `#FFFFFF` — body text. High-contrast white on dark walnut.
+    pub const PARCHMENT: [f32; 4] = [1.000, 1.000, 1.000, 1.0];
     /// `#B8AEA2` — secondary text, captions, inactive labels.
     pub const STONE: [f32; 4] = [0.722, 0.682, 0.635, 1.0];
     /// `#635C52` — tertiary text, disabled state, dividers.
     pub const UMBER: [f32; 4] = [0.388, 0.361, 0.322, 1.0];
 
     // ── Semantic colors (desaturated to sit on warm wood panels) ──────────
-    /// `#5FD4A8` — success / target met / positive. **Semantic**, not the
-    /// tabletop color (use `FELT_LIT` / `FELT_DEEP` for that).
+    /// `#5FD4A8` — success / target met / positive. **Semantic**, not a
+    /// general surface color.
     pub const JADE: [f32; 4] = [0.373, 0.831, 0.659, 1.0];
-    /// `#E85A6B` — danger / exit / negative. **Semantic**, not ceremonial
-    /// red (use `CINNABAR` for that).
+    /// `#E85A6B` — danger / exit / negative. **Semantic** signal red.
     pub const RUBY: [f32; 4] = [0.910, 0.353, 0.420, 1.0];
     /// `#F0A848` — warning / attention.
     pub const AMBER: [f32; 4] = [0.941, 0.659, 0.282, 1.0];
 
-    // ── Felt: cabinet linings, scoring panels, mahjong tabletop. *Material*
-    //    color — green felt as a surface, not a "success" signal. Use `JADE`
-    //    when you mean "this succeeded."
-    /// `#1A2A20` — in-shadow felt, e.g. cubby corners.
-    pub const FELT_DEEP: [f32; 4] = [0.102, 0.165, 0.129, 1.0];
-    /// `#2D4A38` — lit tabletop, archive cubby lining.
-    pub const FELT_LIT: [f32; 4] = [0.290, 0.420, 0.322, 1.0];
-    /// `#3C7837` — leaf green for the **Play** HUD verb in glossary copy.
-    /// Distinct from felt tabletop (`FELT_*`) and success signal (`JADE`).
-    pub const LEAF_GREEN: [f32; 4] = [0.235, 0.471, 0.216, 1.0];
-
-    // ── Twilight: the cool counterpoint. The world *outside* the House.
-    //    Sky behind the main menu, shop wall plaster, info-modal backings,
-    //    journal page tints — anything that reads as "looking out from
-    //    inside." Reach for these before any saturated UI blue.
-    /// `#0E1422` — distant night through a window.
-    pub const TWILIGHT_INK: [f32; 4] = [0.055, 0.078, 0.133, 1.0];
-    /// `#1E2A40` — shop walls, info modal background.
-    pub const TWILIGHT: [f32; 4] = [0.118, 0.165, 0.251, 1.0];
-    /// `#5A6E94` — distant lit window, hint text on cool surfaces.
-    pub const TWILIGHT_GLOW: [f32; 4] = [0.353, 0.431, 0.580, 1.0];
-
-    // ── Lacquer & Cinnabar: deep contrast and ceremony.
-    /// `#0A0608` — true black-with-warmth. Counter tops, deepest shadow,
-    /// frames around precious things. Distinct from `WALNUT_INK`: lacquer is
-    /// *flat* black, walnut ink is *wood-grain* black.
-    pub const LACQUER: [f32; 4] = [0.039, 0.024, 0.031, 1.0];
-    /// `#B83228` — ceremonial red. Character-suit ink, dragon "Chun",
-    /// celebration sigils, temple stamps. **Distinct from `RUBY`** —
-    /// `RUBY` means "danger," `CINNABAR` means "ritual."
-    pub const CINNABAR: [f32; 4] = [0.722, 0.196, 0.157, 1.0];
-
-    // ── Tallow: candle bloom. The color of the light itself.
-    /// `#FFE8B8` — particle cores, lantern halo, score-pop center,
-    /// "this just happened" highlights. Highlights pull toward `TALLOW`,
-    /// not toward white — light in this game is *made of fire*.
-    pub const TALLOW: [f32; 4] = [1.000, 0.910, 0.722, 1.0];
-
-    // ── Lapis: the cool number-signal counterpart to RUBY/CINNABAR.
+    // ── Lapis: the cool number-signal counterpart to RUBY.
     /// `#8CC7FF` — sky-blue tint for "Chips" score tokens, info chips,
     /// and any other UI signal that wants to read as the *cool* half of
     /// a warm/cool score pair. Paired with `RUBY` (Mult) at every score
-    /// readout, and with `RELIC_GOLD` (Gold) / `TALLOW` (Final) when all
+    /// readout, and with `RELIC_GOLD` (Gold) / `PARCHMENT` (Final) when all
     /// four cascade kinds appear together. Distinct from the moody
     /// `TWILIGHT_*` family, which is *atmospheric* night-sky color, not a
     /// number-signal accent.
@@ -126,7 +88,7 @@ pub mod color {
     // ── Porcelain: aged ceramic surfaces — temple-merchant pottery, the
     //    coin/consumable dishes on the gameplay table, the worn cream of
     //    a well-loved bowl. Distinct from `PARCHMENT` (paper) and
-    //    `TALLOW` (light): porcelain is *fired clay with a tea-stain*,
+    //    `PARCHMENT` (text): porcelain is *fired clay with a tea-stain*,
     //    softer than parchment and noticeably less warm than tallow.
     /// `#E0D6C7` — aged porcelain cream. Used for the relic dish, the
     /// consumable dish, and the "well-loved ceramic" base color.

@@ -71,8 +71,9 @@ pub const MAX_BUG_SLOTS: usize = 8;
 /// material viewer debug scene uses these; 32 covers every `MaterialKind`
 /// with room to grow.
 pub const MAX_ORB_SLOTS: usize = 32;
-/// Maximum number of dora-plinth instances per frame (gameplay: dora + round wind).
-pub const MAX_DORA_PLINTH_SLOTS: usize = 2;
+/// Maximum number of dora-plinth instances per frame
+/// (gameplay: dora + boss + round wind).
+pub const MAX_PLINTH_SLOTS: usize = 3;
 /// Maximum number of yaku tablets per frame (5 visible + headroom).
 pub const MAX_YAKU_TABLET_SLOTS: usize = 12;
 /// Maximum number of wood action tablets per frame (cash-in).

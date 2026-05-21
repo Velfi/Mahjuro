@@ -24,7 +24,7 @@
 //! | `Trigger`, `trigger` | `BRASS` | Cash-in HUD verb |
 //!
 //! 3D cascade labels and streaming score popups reuse `LAPIS` / `RUBY` /
-//! `RELIC_GOLD` / `TALLOW` for chips, mult, gold, and final totals — see
+//! `RELIC_GOLD` / `PARCHMENT` for chips, mult, gold, and final totals — see
 //! [`crate::render::score_popups`] and [`crate::scenes::gameplay::cascade_hud`].
 //!
 //! For paragraphs that use **safe inline markup** (`**`, `{{effect:…}}`, …)

@@ -95,6 +95,23 @@ impl WgpuRenderer {
             // (registered after the loop).
             let hand_strip_centers: Vec<glam::Vec3> = Vec::new();
             let pack_reveal_centers: Vec<glam::Vec3> = Vec::new();
+            let mut dora_tile_bounds: Option<[f32; 4]> = None; // [min_x, min_y, max_x, max_y]
+            let mut round_wind_tile_bounds: Option<[f32; 4]> = None; // [min_x, min_y, max_x, max_y]
+            let grow_bounds = |bounds: &mut Option<[f32; 4]>, rect: [f32; 4]| {
+                let x0 = rect[0];
+                let y0 = rect[1];
+                let x1 = rect[0] + rect[2];
+                let y1 = rect[1] + rect[3];
+                match bounds.as_mut() {
+                    Some(b) => {
+                        b[0] = b[0].min(x0);
+                        b[1] = b[1].min(y0);
+                        b[2] = b[2].max(x1);
+                        b[3] = b[3].max(y1);
+                    }
+                    None => *bounds = Some([x0, y0, x1, y1]),
+                }
+            };
 
             let mut slot_cursor = 0usize;
             for batch in showcase_tile_batches.iter() {
@@ -173,42 +190,52 @@ impl WgpuRenderer {
 
                     let oriented = base_rotation * tile_basis;
                     let model = translate_rot_scale(center, oriented, scale);
+                    // Project the tile's 8 corners to get a tight-ish screen AABB.
+                    let lx = tile_long_px * 0.5;
+                    let ly = tile_thickness_px * 0.5;
+                    let lz = tile_short_px * 0.5;
+                    let sc_corners = [
+                        glam::Vec3::new(-lx, -ly, -lz),
+                        glam::Vec3::new(lx, -ly, -lz),
+                        glam::Vec3::new(-lx, ly, -lz),
+                        glam::Vec3::new(lx, ly, -lz),
+                        glam::Vec3::new(-lx, -ly, lz),
+                        glam::Vec3::new(lx, -ly, lz),
+                        glam::Vec3::new(-lx, ly, lz),
+                        glam::Vec3::new(lx, ly, lz),
+                    ];
+                    let mut sc_min_x = f32::INFINITY;
+                    let mut sc_min_y = f32::INFINITY;
+                    let mut sc_max_x = f32::NEG_INFINITY;
+                    let mut sc_max_y = f32::NEG_INFINITY;
+                    for c in sc_corners {
+                        let world_c = center + oriented.transform_point3(c);
+                        let (px, py) = project_to_screen(world_c);
+                        sc_min_x = sc_min_x.min(px);
+                        sc_min_y = sc_min_y.min(py);
+                        sc_max_x = sc_max_x.max(px);
+                        sc_max_y = sc_max_y.max(py);
+                    }
+                    let overlay_w = (sc_max_x - sc_min_x).max(16.0);
+                    let overlay_h = (sc_max_y - sc_min_y).max(16.0);
+                    let overlay_x = sc_min_x;
+                    let overlay_y = sc_min_y;
+
+                    match p.arrange_group {
+                        Some("gameplay.dora_tiles") => grow_bounds(
+                            &mut dora_tile_bounds,
+                            [overlay_x, overlay_y, overlay_w, overlay_h],
+                        ),
+                        Some("gameplay.round_wind_tiles") => grow_bounds(
+                            &mut round_wind_tile_bounds,
+                            [overlay_x, overlay_y, overlay_w, overlay_h],
+                        ),
+                        _ => {}
+                    }
 
                     if let Some(pick_id) = p.pick_id {
                         let uid = p.tile.id;
                         self.prev_tile_world.insert(uid, center);
-
-                        // Project the tile's 8 corners for the screen AABB,
-                        // used for pick tracking and glow rect sizing.
-                        let lx = tile_long_px * 0.5;
-                        let ly = tile_thickness_px * 0.5;
-                        let lz = tile_short_px * 0.5;
-                        let sc_corners = [
-                            glam::Vec3::new(-lx, -ly, -lz),
-                            glam::Vec3::new(lx, -ly, -lz),
-                            glam::Vec3::new(-lx, ly, -lz),
-                            glam::Vec3::new(lx, ly, -lz),
-                            glam::Vec3::new(-lx, -ly, lz),
-                            glam::Vec3::new(lx, -ly, lz),
-                            glam::Vec3::new(-lx, ly, lz),
-                            glam::Vec3::new(lx, ly, lz),
-                        ];
-                        let mut sc_min_x = f32::INFINITY;
-                        let mut sc_min_y = f32::INFINITY;
-                        let mut sc_max_x = f32::NEG_INFINITY;
-                        let mut sc_max_y = f32::NEG_INFINITY;
-                        for c in sc_corners {
-                            let world_c = center + oriented.transform_point3(c);
-                            let (px, py) = project_to_screen(world_c);
-                            sc_min_x = sc_min_x.min(px);
-                            sc_min_y = sc_min_y.min(py);
-                            sc_max_x = sc_max_x.max(px);
-                            sc_max_y = sc_max_y.max(py);
-                        }
-                        let overlay_w = (sc_max_x - sc_min_x).max(16.0);
-                        let overlay_h = (sc_max_y - sc_min_y).max(16.0);
-                        let overlay_x = sc_min_x;
-                        let overlay_y = sc_min_y;
 
                         tile_3d_rects.push((pick_id, [overlay_x, overlay_y, overlay_w, overlay_h]));
                         tile_pick_models.push((pick_id, model));
@@ -261,10 +288,15 @@ impl WgpuRenderer {
                         const OUTLINE_GROW: f32 = 1.07;
                         let outline_scale = scale * OUTLINE_GROW;
                         let outline_model = translate_rot_scale(center, oriented, outline_scale);
+                        let mut outline_bcf = sc_bcf;
+                        // 1.5 = combined hover+selected perimeter alternation mode.
+                        if p.hovered && p.selected {
+                            outline_bcf[1] = 1.5;
+                        }
                         self.tile_outline_instances_staging.push(
                             super::super::TileOutlineInstance {
                                 model: outline_model.to_cols_array(),
-                                base_color_factor: sc_bcf,
+                                base_color_factor: outline_bcf,
                             },
                         );
                     }
@@ -292,6 +324,11 @@ impl WgpuRenderer {
                 self.tile_outline_batch_ranges
                     .push((outline_batch_start, outline_n));
             }
+
+            self.proj.dora_tile_rect = dora_tile_bounds
+                .map(|b| [b[0], b[1], (b[2] - b[0]).max(1.0), (b[3] - b[1]).max(1.0)]);
+            self.proj.round_wind_tile_rect = round_wind_tile_bounds
+                .map(|b| [b[0], b[1], (b[2] - b[0]).max(1.0), (b[3] - b[1]).max(1.0)]);
 
             if !self.tile_outline_instances_staging.is_empty() {
                 self.queue.write_buffer(
@@ -361,15 +398,17 @@ impl WgpuRenderer {
 
             let pack_reveal_pickable_centers: Vec<glam::Vec3> = if !pack_reveal_centers.is_empty() {
                 pack_reveal_centers.clone()
-            } else if showcase_tile_batches.iter().flat_map(|b| b.iter()).any(|p| {
-                p.arrange_group == Some("shop.celebrations.pack_reveal")
-            }) {
+            } else if showcase_tile_batches
+                .iter()
+                .flat_map(|b| b.iter())
+                .any(|p| p.arrange_group == Some("shop.celebrations.pack_reveal"))
+            {
                 showcase_tile_batches
                     .iter()
                     .flat_map(|b| b.iter())
                     .filter(|p| p.arrange_group == Some("shop.celebrations.pack_reveal"))
-                    .map(|p| {
-                        match (self.active_scene_key, frame.camera_override.as_ref()) {
+                    .map(
+                        |p| match (self.active_scene_key, frame.camera_override.as_ref()) {
                             (Some("shop") | Some("tile_pack_celebration"), Some(cam))
                             | (Some("showcase"), Some(cam))
                                 if frame
@@ -392,8 +431,8 @@ impl WgpuRenderer {
                                 p.center_pos[1],
                                 p.center_pos[2],
                             ),
-                        }
-                    })
+                        },
+                    )
                     .collect()
             } else {
                 Vec::new()

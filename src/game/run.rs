@@ -721,10 +721,11 @@ pub struct RunState {
     /// underlying scene (shop) to spawn a score popup + particle burst.
     #[serde(skip)]
     pub finished_zodiac_celebration: Option<(&'static str, u32)>,
-    /// Set when the tile-pack celebration overlay pops; [`ShopScene`] consumes
-    /// it once to refocus the shelf (same as the old in-shop celebration path).
+    /// Set when a shop celebration overlay (tile pack or zodiac level-up) pops;
+    /// [`ShopScene`] consumes it once to refocus the shelf so the player isn't
+    /// stuck with focus pointing at the now-removed item.
     #[serde(skip)]
-    pub pending_shop_focus_snap_after_pack_celebration: bool,
+    pub pending_shop_focus_snap_after_celebration: bool,
     /// Per-relic mutable counters. Key is RelicId, value meaning depends
     /// on the relic:
     ///   Humility     → consecutive plays without honor tiles
@@ -1155,7 +1156,7 @@ impl RunState {
             tag_bonus_hand_size: 0,
             pending_zodiac_celebrations: Vec::new(),
             finished_zodiac_celebration: None,
-            pending_shop_focus_snap_after_pack_celebration: false,
+            pending_shop_focus_snap_after_celebration: false,
             relic_counters: std::collections::BTreeMap::new(),
             onboarding: None,
             relic_activations: Vec::new(),

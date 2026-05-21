@@ -11,7 +11,10 @@ mod validation;
 #[cfg(test)]
 pub use decomposition::find_pairs_and_triplets;
 pub use decomposition::{detect_all_sets, enumerate_decompositions};
-pub use validation::{suggest_completions, validate_selection, validate_selection_with_rules};
+pub use validation::{
+    non_contributing_tile_ids, suggest_completions, validate_selection,
+    validate_selection_with_rules,
+};
 
 /// Player-facing meld variant. `Single` is a decomposition artefact (only
 /// produced by the Kokushi Musō layout: twelve singles + one pair) and is

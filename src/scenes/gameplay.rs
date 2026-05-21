@@ -271,6 +271,10 @@ pub struct GameplayScene {
     /// When set, the player can undo the last discard (accessibility option)
     /// until any other gameplay action invalidates it.
     pub(super) discard_undo: Option<DiscardUndoSnapshot>,
+    /// Hand slot indices to wiggle + pulse red after a rejected meld commit.
+    invalid_meld_flash_slots: Vec<usize>,
+    /// Wall time when [`invalid_meld_flash_slots`] was last set.
+    invalid_meld_flash_at: Option<Instant>,
 }
 
 /// How long the debug `B` gust stays active after a press.
@@ -292,6 +296,8 @@ const CANDLE_FLARE_DECAY: f32 = 2.5;
 const FINAL_TILES_FOV_POP_SECS: f32 = 0.22;
 /// Peak FoV reduction in degrees during the completion pop.
 const FINAL_TILES_FOV_POP_DEGREES: f32 = 3.6;
+/// How long rejected meld tiles keep their red glow pulse.
+const INVALID_MELD_FLASH_SECS: f32 = 0.55;
 
 /// Click-id base for the Zodiac inventory bar. `ZODIAC_USE_BASE + slot_idx`
 /// is the click id for using the Zodiac in slot `slot_idx`.
@@ -410,6 +416,51 @@ impl GameplayScene {
         Instant::now().saturating_duration_since(t).as_secs_f32() < FINAL_TILES_FOV_POP_SECS
     }
 
+    pub(super) fn trigger_invalid_meld_flash(
+        &mut self,
+        run: &crate::game::run::RunState,
+        hand: &[crate::core::tile::Tile],
+        selected: &[bool],
+    ) {
+        let selected_tiles: Vec<_> = hand
+            .iter()
+            .zip(selected.iter())
+            .filter(|&(_, &sel)| sel)
+            .map(|(t, _)| *t)
+            .collect();
+        if selected_tiles.is_empty() {
+            return;
+        }
+        let rules = run.validation_rules_for_structure_commits();
+        let bad_ids: rustc_hash::FxHashSet<u32> =
+            crate::core::hand::non_contributing_tile_ids(&selected_tiles, &rules)
+                .into_iter()
+                .collect();
+        self.invalid_meld_flash_slots = hand
+            .iter()
+            .enumerate()
+            .filter(|(i, t)| selected.get(*i).copied().unwrap_or(false) && bad_ids.contains(&t.id))
+            .map(|(i, _)| i)
+            .collect();
+        if !self.invalid_meld_flash_slots.is_empty() {
+            self.invalid_meld_flash_at = Some(Instant::now());
+        }
+    }
+
+    /// `(strength 0..1, elapsed seconds)` for the active invalid-meld feedback.
+    fn invalid_meld_flash_phase(&self, now: Instant) -> (f32, f32) {
+        let Some(t0) = self.invalid_meld_flash_at else {
+            return (0.0, 0.0);
+        };
+        let elapsed = now.saturating_duration_since(t0).as_secs_f32();
+        if elapsed >= INVALID_MELD_FLASH_SECS {
+            return (0.0, elapsed);
+        }
+        let fade = 1.0 - (elapsed / INVALID_MELD_FLASH_SECS);
+        let pulse = 0.65 + 0.35 * (elapsed * 16.0).sin();
+        (fade * pulse, elapsed)
+    }
+
     fn final_tiles_fov_pop_offset_deg(&self, now: Instant) -> f32 {
         let Some(t) = self.final_tiles_fov_pop_at else {
             return 0.0;
@@ -492,6 +543,8 @@ impl GameplayScene {
             journal_was_open: false,
             positions: crate::ui::scene_layout::GameplayPositions::default(),
             discard_undo: None,
+            invalid_meld_flash_slots: Vec::new(),
+            invalid_meld_flash_at: None,
         }
     }
 

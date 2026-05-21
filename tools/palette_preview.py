@@ -213,10 +213,10 @@ WALNUT_NAMES = ["WALNUT_INK", "WALNUT_DEEP", "WALNUT_RAISED", "WALNUT_SOFT", "WA
 BRASS_NAMES = ["CHAMPAGNE", "GOLD", "BRASS", "ANTIQUE"]
 NEUTRAL_NAMES = ["PARCHMENT", "STONE", "UMBER"]
 SEMANTIC_NAMES = ["JADE", "RUBY", "AMBER"]
-FELT_NAMES = ["FELT_DEEP", "FELT", "FELT_LIT"]
-TWILIGHT_NAMES = ["TWILIGHT_INK", "TWILIGHT", "TWILIGHT_GLOW"]
-LACQUER_NAMES = ["LACQUER", "CINNABAR"]
-TALLOW_NAMES = ["TALLOW"]
+FELT_NAMES = ["WALNUT_DEEP", "WALNUT_RAISED", "WALNUT_SOFT"]
+TWILIGHT_NAMES = ["WALNUT_INK", "WALNUT_DEEP", "WALNUT_BRIGHT"]
+LACQUER_NAMES = ["WALNUT_INK", "RUBY"]
+TALLOW_NAMES = ["PARCHMENT"]
 RARITY_NAMES = ["STONE", "JADE", "WALNUT_BRIGHT", "CHAMPAGNE"]
 RARITY_LABELS = ["common", "uncommon", "rare", "legendary"]
 
@@ -248,22 +248,22 @@ def assemble_sections(consts: dict[str, Swatch]) -> list[Section]:
         ),
         Section(
             "Felt — cabinet linings & tabletops",
-            "material color; reach for FELT before JADE on a panel",
+            "simplified to walnut surface tones",
             grab(FELT_NAMES),
         ),
         Section(
             "Twilight — the world outside",
-            "the cool counterpoint; reach here before any saturated UI blue",
+            "simplified to walnut ladder values",
             grab(TWILIGHT_NAMES),
         ),
         Section(
             "Lacquer — black & ceremonial red",
-            "deep contrast and ritual — distinct from WALNUT_INK and RUBY",
+            "mapped to walnut ink and ruby in the simplified theme",
             grab(LACQUER_NAMES),
         ),
         Section(
-            "Tallow — candle bloom highlight",
-            "highlights pull toward TALLOW, not toward white",
+            "Highlight white",
+            "final highlight token in the simplified theme",
             grab(TALLOW_NAMES),
         ),
         Section(

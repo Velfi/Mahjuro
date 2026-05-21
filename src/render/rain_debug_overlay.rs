@@ -254,9 +254,9 @@ impl RainDebugOverlay {
                 layout.row_h,
             ],
             color: if is_focused {
-                color::alpha(color::FELT_LIT, 0.95)
+                color::alpha(color::WALNUT_SOFT, 0.95)
             } else {
-                color::alpha(color::FELT_DEEP, 0.85)
+                color::alpha(color::WALNUT_DEEP, 0.85)
             },
             user: 0,
         });
@@ -454,12 +454,12 @@ impl RainDebugOverlay {
                 layout.panel_w + border * 2.0,
                 panel_h + border * 2.0,
             ],
-            color: color::alpha(color::FELT_LIT, 0.85),
+            color: color::alpha(color::WALNUT_SOFT, 0.85),
             user: 0,
         });
         instances.push(GpuInstance {
             rect: [layout.panel_x, layout.panel_y, layout.panel_w, panel_h],
-            color: color::alpha(color::TWILIGHT_INK, 0.97),
+            color: color::alpha(color::WALNUT_INK, 0.97),
             user: 0,
         });
 
@@ -481,9 +481,9 @@ impl RainDebugOverlay {
             let v = self.row_value(i);
 
             let bg = if is_focused {
-                color::alpha(color::FELT_LIT, 0.95)
+                color::alpha(color::WALNUT_SOFT, 0.95)
             } else {
-                color::alpha(color::TWILIGHT, 0.80)
+                color::alpha(color::WALNUT_DEEP, 0.80)
             };
             let (rx, ry, rw, rh) = layout.row_rect(i);
             instances.push(GpuInstance {
@@ -533,7 +533,7 @@ impl RainDebugOverlay {
             } else {
                 instances.push(GpuInstance {
                     rect: [track_x, track_y, tw, th],
-                    color: color::TWILIGHT_INK,
+                    color: color::WALNUT_INK,
                     user: 0,
                 });
                 let fill_color = rain_color_swatch_rgb(&self.tuning, i)
@@ -583,9 +583,9 @@ impl RainDebugOverlay {
             instances.push(GpuInstance {
                 rect: [vx, vy + vh * 0.15, vw, vh * 0.7],
                 color: if self.editing && i == self.cursor {
-                    color::alpha(color::TWILIGHT_INK, 0.95)
+                    color::alpha(color::WALNUT_INK, 0.95)
                 } else {
-                    color::alpha(color::TWILIGHT_INK, 0.75)
+                    color::alpha(color::WALNUT_INK, 0.75)
                 },
                 user: 0,
             });

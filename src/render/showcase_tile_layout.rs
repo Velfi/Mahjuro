@@ -110,7 +110,7 @@ pub fn compute_pack_reveal_row_layout(p: &PackRevealRowLayoutParams<'_>) -> Pack
     let w = p.win_w.max(1.0);
     let n_tiles = p.n.max(1) as f32;
 
-    let cy = h * p.ny;
+    let cy = h * 0.5 + h * p.ny;
     let cx_ref = w * 0.5 + w * p.nx;
     let center_ref = [cx_ref, cy, p.row_lift];
 

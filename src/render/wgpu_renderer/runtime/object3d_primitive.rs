@@ -272,7 +272,11 @@ impl WgpuRenderer {
                     rails_kind,
                 );
             }
-            WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::Primitive(MeshId::CabinetRails), rails_slot);
+            WgpuRenderer::push_object3d_draw(
+                object3d_draw_list,
+                DrawKind::Primitive(MeshId::CabinetRails),
+                rails_slot,
+            );
         }
     }
 }

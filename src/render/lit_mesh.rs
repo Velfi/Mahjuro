@@ -190,7 +190,7 @@ impl MaterialParams {
             kind: MaterialKind::FeltGreen,
             // Fallback tint if the procedural sampler is bypassed; the shader
             // recolours from its own palette on the felt branch.
-            base_color: color::FELT_DEEP,
+            base_color: color::WALNUT_DEEP,
             // Felt has no pinpoint highlight — broad soft sheen only.
             specular_strength: 0.04,
             specular_power: 8.0,

@@ -600,7 +600,7 @@ pub(super) fn build_ambient_table_objects(
                     * glam::Mat4::from_rotation_z(dora_p.rz_deg.to_radians()),
             ),
             color: [1.0, 1.0, 1.0, 1.0],
-            kind: crate::render::draw_cmd::Object3dKind::DoraPlinth { glow: 0.0 },
+            kind: crate::render::draw_cmd::Object3dKind::Plinth { glow: 0.0 },
             hover_target: 0.0,
             anim_id: 0,
             // Must match `GAMEPLAY_HIERARCHY` / `gameplay.json` key `gameplay.dora`
@@ -665,11 +665,38 @@ pub(super) fn build_ambient_table_objects(
                     glow: false,
                     glow_color: None,
                     pick_id: None,
-                    arrange_group: None,
+                    arrange_group: Some("gameplay.dora_tiles"),
                 });
             }
             frame.showcase_tile_batch(tile_placements);
         }
+    }
+
+    // Boss plinth — same brass pedestal mesh, to the right of dora. During
+    // boss rounds it displays the boss icon as a flat image quad in
+    // `scene_behavior`; this object only provides the physical stand.
+    if !gameplay.boss_ofuda_title.is_empty() {
+        let boss_p = &scene.positions.boss_plinth;
+        let plinth_w = layout.mm(48.0);
+        let plinth_h = layout.mm(20.0);
+        let plinth_d = layout.mm(34.0);
+        let plinth_cx = boss_p.nx * layout.window_w;
+        let plinth_cy = boss_p.ny * layout.window_h;
+        let plinth_lift = layout.mm(boss_p.lift_mm);
+        frame.object3d(Object3d {
+            pos: [plinth_cx, plinth_cy, plinth_lift],
+            extents: [plinth_w, plinth_h, plinth_d],
+            rotation: crate::render::table_transform::mat4_to_euler_xyz_rad(
+                glam::Mat4::from_rotation_y(boss_p.ry_deg.to_radians())
+                    * glam::Mat4::from_rotation_x(boss_p.rx_deg.to_radians())
+                    * glam::Mat4::from_rotation_z(boss_p.rz_deg.to_radians()),
+            ),
+            color: [1.0, 1.0, 1.0, 1.0],
+            kind: Object3dKind::Plinth { glow: 0.0 },
+            hover_target: 0.0,
+            anim_id: 0,
+            arrange_name: Some("gameplay.boss_plinth"),
+        });
     }
 
     // Round wind plinth — same brass pedestal mesh as dora, parked beside
@@ -695,7 +722,7 @@ pub(super) fn build_ambient_table_objects(
                     * glam::Mat4::from_rotation_z(rw_p.rz_deg.to_radians()),
             ),
             color: [1.0, 1.0, 1.0, 1.0],
-            kind: Object3dKind::DoraPlinth { glow: 0.0 },
+            kind: Object3dKind::Plinth { glow: 0.0 },
             hover_target: 0.0,
             anim_id: 0,
             arrange_name: Some("gameplay.round_wind"),
@@ -734,7 +761,7 @@ pub(super) fn build_ambient_table_objects(
                 glow: false,
                 glow_color: None,
                 pick_id: None,
-                arrange_group: None,
+                arrange_group: Some("gameplay.round_wind_tiles"),
             });
         }
         frame.showcase_tile_batch(tile_placements);

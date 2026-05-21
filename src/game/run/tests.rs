@@ -103,7 +103,7 @@ mod cases {
             tag_bonus_hand_size: 0,
             pending_zodiac_celebrations: Vec::new(),
             finished_zodiac_celebration: None,
-            pending_shop_focus_snap_after_pack_celebration: false,
+            pending_shop_focus_snap_after_celebration: false,
             relic_counters: BTreeMap::new(),
             onboarding: None,
             relic_activations: Vec::new(),

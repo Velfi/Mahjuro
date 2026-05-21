@@ -292,10 +292,7 @@ impl WgpuRenderer {
                             self.bug_wing_blur_r_instances.get(slot_i),
                         ),
                         DrawKind::Orb => (&self.orb_mesh, self.orb_instances.get(slot_i)),
-                        DrawKind::DoraPlinth => (
-                            &self.dora_plinth_mesh,
-                            self.dora_plinth_instances.get(slot_i),
-                        ),
+                        DrawKind::Plinth => (&self.plinth_mesh, self.plinth_instances.get(slot_i)),
                         DrawKind::Bowl => (&self.bowl_mesh, self.bowl_instances.get(slot_i)),
                         DrawKind::Mirror => (&self.mirror_mesh, self.mirror_instances.get(slot_i)),
                         DrawKind::TallyStickBase => (

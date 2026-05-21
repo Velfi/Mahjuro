@@ -115,9 +115,7 @@ impl AcquireTelemetry {
         let total_frames = self.frames_success.get() + self.frames_skipped.get();
         if total_frames == WARMUP_FRAMES {
             self.log_initial_summary();
-        } else if total_frames > WARMUP_FRAMES
-            && next > HIGH_EMA_MS
-            && !self.high_ema_warned.get()
+        } else if total_frames > WARMUP_FRAMES && next > HIGH_EMA_MS && !self.high_ema_warned.get()
         {
             self.log_high_ema_warning();
         }

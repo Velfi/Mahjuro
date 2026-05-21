@@ -26,6 +26,7 @@ mod tile_pipeline;
 mod ui_instances;
 mod uniforms;
 
+use std::collections::VecDeque;
 use std::sync::mpsc;
 use std::time::Instant;
 
@@ -50,7 +51,6 @@ use crate::render::decal::{
     LabelAlign, load_noto_emoji_font, load_ui_font, rasterize_label_styled_with_fallback,
     rasterize_tile_face_decal,
 };
-use crate::render::dora_plinth_mesh::build_dora_plinth_mesh;
 use crate::render::draw_cmd::{
     CascadeTokenKind, DrawCmd, ShowcaseTilePlacement, TallyFanKind, TileFaceQuad, UiFrame,
     WallStackPlacement, YakuTabletPlacement,
@@ -69,6 +69,7 @@ use crate::render::mirror_mesh::{MIRROR_LOCAL_CENTER_Y, MIRROR_LOCAL_HALF, build
 use crate::render::ofuda_mesh::build_ofuda_mesh;
 use crate::render::orb_mesh::build_orb_mesh;
 use crate::render::plaque_mesh::build_plaque_mesh;
+use crate::render::plinth_mesh::build_plinth_mesh;
 use crate::render::primitive::MeshId;
 use crate::render::relic_dish::{
     build_dish_mesh, build_pack_mesh, build_porcelain_dish_mesh, build_relic_mesh,
@@ -360,6 +361,12 @@ pub struct WgpuRenderer {
     showcase_decal_atlas: Option<crate::render::showcase_decal_atlas::ShowcaseDecalAtlasGpu>,
     /// Tileset name the atlas was baked for; rebuilt when Options tileset changes.
     showcase_decal_atlas_tileset: Option<String>,
+    /// In-memory cache of inactive showcase atlases keyed by tileset name.
+    /// Splash preloading fills this so tileset cycling avoids rebuild hitches.
+    showcase_decal_atlas_cache: VecDeque<(
+        String,
+        crate::render::showcase_decal_atlas::ShowcaseDecalAtlasGpu,
+    )>,
 
     // ── Procedural lit meshes (candles + wood table) ────────────────────
     /// Bind-group layout shared by every lit-mesh instance.
@@ -565,7 +572,7 @@ pub struct WgpuRenderer {
     talisman_mesh: LitMeshGpu,
     /// Procedural ornate brass plinth used by the gameplay scene to hold
     /// the dora indicator tile(s).
-    dora_plinth_mesh: LitMeshGpu,
+    plinth_mesh: LitMeshGpu,
     /// Per-ribbon draw-slot instances (shop scene). One slot per ribbon —
     /// the whole ribbon is a single textured mesh now. Truncated at
     /// `MAX_RIBBON_SLOTS`.
@@ -617,10 +624,10 @@ pub struct WgpuRenderer {
     /// render flat, previewing the shading model rather than any per-asset
     /// heightmap.
     orb_instances: Vec<LitMeshInstance>,
-    /// Per-dora-plinth instances (gameplay scene). Truncated at
-    /// `MAX_DORA_PLINTH_SLOTS`. The gameplay scene only ever pushes one
-    /// plinth per frame, but the slot pool tolerates more without allocation.
-    dora_plinth_instances: Vec<LitMeshInstance>,
+    /// Per-plinth instances (gameplay scene). Truncated at
+    /// `MAX_PLINTH_SLOTS`. Gameplay can push up to three plinths
+    /// per frame (dora, boss, round wind).
+    plinth_instances: Vec<LitMeshInstance>,
     /// Per-ribbon world-space model matrices for `pick_shop_object`.
     pub(super) last_ribbon_models: Vec<Mat4>,
     /// Per-batch ribbon slot counts: `last_ribbon_batch_slot_counts[batch_idx]`
@@ -770,8 +777,8 @@ mod impl_screenshot;
 
 pub use constants::{
     MAIN_MENU_PICK_OPTIONS, MAIN_MENU_PICK_PLAY, MAIN_MENU_PICK_QUIT, MAX_BOOK_SLOTS,
-    MAX_BOWL_SLOTS, MAX_BUG_SLOTS, MAX_CASCADE_TOKEN_SLOTS, MAX_DORA_PLINTH_SLOTS,
-    MAX_EXTRUDED_GLYPH_SLOTS, MAX_MIRROR_SLOTS, MAX_ORB_SLOTS, MAX_POINT_LIGHTS, MAX_RELIC_SLOTS,
+    MAX_BOWL_SLOTS, MAX_BUG_SLOTS, MAX_CASCADE_TOKEN_SLOTS, MAX_EXTRUDED_GLYPH_SLOTS,
+    MAX_MIRROR_SLOTS, MAX_ORB_SLOTS, MAX_PLINTH_SLOTS, MAX_POINT_LIGHTS, MAX_RELIC_SLOTS,
     MAX_RIBBON_SLOTS, MAX_SPOT_LIGHTS, MAX_TALISMAN_SLOTS, MAX_TALLY_FAN_SLOTS,
     MAX_TALLY_STICK_SLOTS, MAX_TILE_OCCLUDERS, MAX_WALL_TILE_SLOTS, MAX_WOOD_TABLET_SLOTS,
     MAX_YAKU_TABLET_SLOTS,

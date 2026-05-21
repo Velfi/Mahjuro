@@ -3,8 +3,8 @@
 //! Replaces the old parchment overlay with its own scene: the player steps
 //! *onto* the table rather than into a book. Each yaku is rendered as a
 //! signature-tile icon in a grid on the lacquered wood surface; the focused
-//! yaku's full canonical 14-tile hand sits above the grid on a bottom-anchored
-//! plaque whose margins tighten on short screens (e.g. Steam Deck),
+//! yaku's full canonical 14-tile hand sits in a top-anchored plaque, with the
+//! scrollable table beneath it. Margins tighten on short screens (e.g. Steam Deck),
 //! drawn from the same `yaku_page()` data the meld guide teaches with (so
 //! the plaque hand is guaranteed to score as its named yaku — see the
 //! scoring test in meld_guide).
@@ -12,21 +12,20 @@
 //! Kokushi Musō does not appear in the grid until the first time it is cashed in
 //! (same gate as `PlayerProgress::available_yaku`).
 
-use crate::core::tile::{Suit, Tile};
+use crate::core::tile::Tile;
 use crate::core::yaku::YakuKind;
 use crate::game::engine::GameEngine;
 use crate::render::draw_cmd::{CameraParams, ShowcaseTilePlacement, UiFrame};
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::ui::input::UiAction;
+use std::time::Instant;
 
 use super::{
     BackgroundId, ButtonDef, DrawCtx, OverlayRequest, SceneBehavior, SceneTransition, UpdateCtx,
 };
 
-/// Click id for the footer "Esc  return" hint, which doubles as a back
-/// button so a mouse-only player can leave the journal without keyboard.
-const CLICK_BACK: u32 = 0xE010;
+const CLICK_ROW_BASE: u32 = 0xE100;
 
 /// Couch / TV legibility: ramps up font floors and tile mins from ~720p
 /// short edge toward large displays (capped so UI doesn't balloon on 4K).
@@ -42,95 +41,170 @@ fn journal_compact_factor(short_edge_px: f32) -> f32 {
     ((960.0 - short_edge_px) / 320.0).clamp(0.0, 1.0)
 }
 
-/// Row widths for the journal grid (3 rows). Kokushi Musō is hidden until
-/// discovery, so the count is usually 13; after the first Kokushi cash-in it is 14.
-fn yaku_journal_row_counts(n: usize) -> Vec<usize> {
-    match n {
-        13 => vec![5, 4, 4],
-        14 => vec![5, 5, 4],
-        _ => {
-            let base = n / 3;
-            let rem = n % 3;
-            vec![
-                base + usize::from(rem > 0),
-                base + usize::from(rem > 1),
-                base,
-            ]
-        }
-    }
+#[derive(Clone, Copy)]
+struct JournalTableLayout {
+    table_x: f32,
+    table_y: f32,
+    table_w: f32,
+    table_h: f32,
+    header_h: f32,
+    row_h: f32,
+    visible_rows: usize,
+}
+
+fn yaku_table_layout(
+    window_w: f32,
+    window_h: f32,
+    jr: f32,
+    jc: f32,
+) -> (JournalTableLayout, f32, f32) {
+    let top_safe = window_h * (0.048 - 0.015 * jc);
+    let gap_below_plaque = window_h * (0.018 - 0.011 * jc);
+    let plaque_h = window_h * (0.365 - 0.028 * jc);
+    let bottom_safe = window_h * (0.012 - 0.006 * jc);
+    let plaque_top = top_safe;
+
+    let table_x = window_w * (0.055 - 0.023 * jc);
+    let table_w = window_w * (0.89 + 0.046 * jc);
+    let table_top = plaque_top + plaque_h + gap_below_plaque;
+    let table_h = (window_h - bottom_safe - table_top).max(120.0 * jr);
+    let header_h = (44.0 * jr).clamp(32.0, 64.0);
+    let row_h = (54.0 * jr).clamp(40.0, 82.0);
+    let visible_rows = ((table_h - header_h) / row_h).floor().max(1.0) as usize;
+    (
+        JournalTableLayout {
+            table_x,
+            table_y: table_top,
+            table_w,
+            table_h,
+            header_h,
+            row_h,
+            visible_rows,
+        },
+        plaque_top,
+        plaque_h,
+    )
 }
 
 pub struct YakuJournalScene {
     /// Index into the visible yaku row order (`PlayerProgress::available_yaku`).
     selected: usize,
+    scroll_rows: f32,
+    target_scroll_rows: f32,
+    scroll_last_tick: Instant,
 }
 
 impl YakuJournalScene {
     pub fn new() -> Self {
-        Self { selected: 0 }
-    }
-
-    fn index_to_grid(i: usize, rows: &[usize]) -> (usize, usize) {
-        let mut remaining = i;
-        for (row, &n) in rows.iter().enumerate() {
-            if remaining < n {
-                return (row, remaining);
-            }
-            remaining -= n;
+        Self {
+            selected: 0,
+            scroll_rows: 0.0,
+            target_scroll_rows: 0.0,
+            scroll_last_tick: Instant::now(),
         }
-        let row = rows.len().saturating_sub(1);
-        (row, rows[row].saturating_sub(1))
     }
 
-    fn grid_to_index(row: usize, col: usize, rows: &[usize]) -> usize {
-        let row = row.min(rows.len().saturating_sub(1));
-        let col = col.min(rows[row].saturating_sub(1));
-        rows.iter().take(row).sum::<usize>() + col
+    fn max_scroll(total_rows: usize, visible_rows: usize) -> f32 {
+        total_rows.saturating_sub(visible_rows) as f32
     }
 
-    fn move_focus(&mut self, drow: isize, dcol: isize, rows: &[usize]) {
-        if rows.is_empty() {
-            return;
+    fn clamp_scroll(&mut self, max_scroll: f32) {
+        self.target_scroll_rows = self.target_scroll_rows.clamp(0.0, max_scroll);
+        self.scroll_rows = self.scroll_rows.clamp(0.0, max_scroll);
+    }
+
+    fn ensure_selected_visible(&mut self, visible_rows: usize, max_scroll: f32) {
+        let top = self.target_scroll_rows.floor() as usize;
+        if self.selected < top {
+            self.target_scroll_rows = self.selected as f32;
+        } else if self.selected >= top + visible_rows {
+            self.target_scroll_rows = (self.selected + 1 - visible_rows) as f32;
         }
-        let (row, col) = Self::index_to_grid(self.selected, rows);
-        let new_row = ((row as isize + drow).rem_euclid(rows.len() as isize)) as usize;
-        let target_col = if drow != 0 {
-            col.min(rows[new_row].saturating_sub(1))
-        } else {
-            let width = rows[new_row] as isize;
-            ((col as isize + dcol).rem_euclid(width)) as usize
-        };
-        self.selected = Self::grid_to_index(new_row, target_col, rows);
+        self.target_scroll_rows = self.target_scroll_rows.clamp(0.0, max_scroll);
+    }
+
+    fn tick_scroll(&mut self) {
+        let now = Instant::now();
+        let dt = now
+            .saturating_duration_since(self.scroll_last_tick)
+            .as_secs_f32();
+        self.scroll_last_tick = now;
+        let t = (dt * 12.0).clamp(0.0, 1.0);
+        self.scroll_rows += (self.target_scroll_rows - self.scroll_rows) * t;
     }
 }
 
 impl SceneBehavior for YakuJournalScene {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
         let yaku_list = ctx.progress.available_yaku();
-        let rows = yaku_journal_row_counts(yaku_list.len());
-        if !yaku_list.is_empty() && self.selected >= yaku_list.len() {
-            self.selected = yaku_list.len() - 1;
+        let total_rows = yaku_list.len();
+        if total_rows > 0 && self.selected >= total_rows {
+            self.selected = total_rows - 1;
+        }
+        if total_rows == 0 {
+            self.selected = 0;
+            self.scroll_rows = 0.0;
+            self.target_scroll_rows = 0.0;
+        }
+
+        let w = ctx.layout.window_w;
+        let h = ctx.layout.window_h;
+        let jr = journal_read_boost(w, h);
+        let jc = journal_compact_factor(w.min(h));
+        let (table, _, _) = yaku_table_layout(w, h, jr, jc);
+        let max_scroll = Self::max_scroll(total_rows, table.visible_rows);
+        self.clamp_scroll(max_scroll);
+
+        if ctx.scroll_lines.abs() > 0.001 {
+            self.target_scroll_rows =
+                (self.target_scroll_rows + ctx.scroll_lines).clamp(0.0, max_scroll);
         }
 
         for &cid in ctx.button_clicks {
-            if cid == CLICK_BACK {
-                *ctx.overlay_request = Some(OverlayRequest::Pop);
-                return None;
+            if cid >= CLICK_ROW_BASE && cid < CLICK_ROW_BASE + total_rows as u32 {
+                self.selected = (cid - CLICK_ROW_BASE) as usize;
+                self.ensure_selected_visible(table.visible_rows, max_scroll);
+                continue;
             }
         }
+
         for a in ctx.actions {
             match a {
                 UiAction::Cancel | UiAction::Pause | UiAction::Help => {
                     *ctx.overlay_request = Some(OverlayRequest::Pop);
                     return None;
                 }
-                UiAction::FocusPrev => self.move_focus(0, -1, &rows),
-                UiAction::FocusNext => self.move_focus(0, 1, &rows),
-                UiAction::FocusUp => self.move_focus(-1, 0, &rows),
-                UiAction::FocusDown => self.move_focus(1, 0, &rows),
+                UiAction::FocusUp | UiAction::FocusPrev => {
+                    if total_rows > 0 {
+                        self.selected = self.selected.saturating_sub(1);
+                        self.ensure_selected_visible(table.visible_rows, max_scroll);
+                    }
+                }
+                UiAction::FocusDown | UiAction::FocusNext => {
+                    if total_rows > 0 {
+                        self.selected = (self.selected + 1).min(total_rows.saturating_sub(1));
+                        self.ensure_selected_visible(table.visible_rows, max_scroll);
+                    }
+                }
+                UiAction::PagePrev => {
+                    if total_rows > 0 {
+                        let page = table.visible_rows.max(1);
+                        self.selected = self.selected.saturating_sub(page);
+                        self.ensure_selected_visible(table.visible_rows, max_scroll);
+                    }
+                }
+                UiAction::PageNext => {
+                    if total_rows > 0 {
+                        let page = table.visible_rows.max(1);
+                        self.selected = (self.selected + page).min(total_rows.saturating_sub(1));
+                        self.ensure_selected_visible(table.visible_rows, max_scroll);
+                    }
+                }
                 _ => {}
             }
         }
+        self.tick_scroll();
+        self.clamp_scroll(max_scroll);
         None
     }
 
@@ -143,11 +217,17 @@ impl SceneBehavior for YakuJournalScene {
         let run = ctx.run;
         let progress = ctx.progress;
         let yaku = progress.available_yaku();
-        let rows = yaku_journal_row_counts(yaku.len());
+        let (table, plaque_top, plaque_h) = yaku_table_layout(w, h, jr, jc);
+        let total_rows = yaku.len();
 
         let mut frame = UiFrame::new();
         frame.background(BackgroundId::Black);
-        frame.table();
+        // Keep journal UI on a controlled walnut backdrop (no felt table tint bleed-through).
+        frame.quad(GpuInstance {
+            rect: [0.0, 0.0, w, h],
+            color: color::WALNUT_INK,
+            user: 0,
+        });
 
         // Camera — directly top-down so pixel-space layout and the
         // projected tile positions stay 1:1 with each other, letting
@@ -173,272 +253,256 @@ impl SceneBehavior for YakuJournalScene {
             intensity: 1.2,
         });
 
-        // No English "Yaku Journal" title — the player just pressed the
-        // journal button, they know where they are, and the space is
-        // better used letting the grid breathe.
-
-        // ── Grid metrics ─────────────────────────────────────────
-        // Bottom-anchored plaque + tighter gaps on handheld so the grid keeps
-        // vertical room for bigger tiles (Steam Deck 800px short edge).
-        let grid_top = h * (0.045 - 0.019 * jc);
-        let gap_above_plaque = h * (0.018 - 0.011 * jc);
-        let plaque_h = h * (0.365 - 0.028 * jc);
-        let bottom_safe = h * (0.012 - 0.006 * jc);
-        let plaque_top = h - bottom_safe - plaque_h;
-        let grid_bot = plaque_top - gap_above_plaque;
-        let grid_h = grid_bot - grid_top;
-        let row_h = grid_h / rows.len().max(1) as f32;
-
-        let side_margin = w * (0.052 - 0.020 * jc);
-        // Cells are sized by the widest row so every row's cells match
-        // width regardless of count — row 1 (5 wide) defines the cell.
-        let cell_w = (w - side_margin * 2.0) / 5.0;
-
-        let name_font = typography::size(typography::H28, h);
-        // Slightly larger than the name so "Lv N" scans on the felt (H28 > H36 in px).
-        let grid_lvl_font = typography::size(typography::H28, h);
-        let name_h = name_font * 1.1;
-        // Rect height must cover the pinned `grid_lvl_font` line box — the rasterizer
-        // vertically centers that box in the label rect and clips ascenders/descenders
-        // when rect.h < line_h (same fix as plaque stat cards below).
-        let lvl_h = grid_lvl_font * 1.12;
-        let caption_block_h = name_h + lvl_h;
-
-        // Tile sizing. `size_px` on `ShowcaseTilePlacement` is the tile's
-        // *short* edge; the long edge (up to ~1.5× for Chinese preset) is
-        // what actually consumes vertical space on a top-down view. So
-        // each row must budget `tile_size * FACE_LONG_MAX` of vertical
-        // space plus the caption block above — we use the conservative
-        // Chinese ratio to keep layout correct across all tile presets.
-        const FACE_LONG_MAX: f32 = 1.5;
-        let tiles_per_cell = 3usize;
-        let tile_gap_frac = 0.15;
-        let tile_divisor = tiles_per_cell as f32 + tile_gap_frac * (tiles_per_cell - 1) as f32;
-        let max_tile_from_cell_w = cell_w * 0.75 / tile_divisor;
-        let row_budget_v = (row_h * (0.85 + 0.055 * jc) - caption_block_h) / FACE_LONG_MAX;
-        let tile_size = max_tile_from_cell_w.min(row_budget_v).max(38.0 * jr);
-        let tile_gap = tile_size * tile_gap_frac;
-        let tile_long_h = tile_size * FACE_LONG_MAX;
-
-        // ── Grid draw ────────────────────────────────────────────
+        // ── Scrollable yaku table (sticky header) ────────────────
         let mut placements: Vec<ShowcaseTilePlacement> = Vec::new();
         let mut tile_id: u32 = 0;
         let yaku_progress = GameEngine::read_yaku_progress(run);
+        let table_bg = color::WALNUT_DEEP;
+        frame.quad(GpuInstance {
+            rect: [table.table_x, table.table_y, table.table_w, table.table_h],
+            color: table_bg,
+            user: 0,
+        });
 
-        let mut yi = 0usize;
-        for (row_i, &row_n) in rows.iter().enumerate() {
-            let row_w = cell_w * row_n as f32;
-            let row_x0 = (w - row_w) * 0.5;
-            let row_top = grid_top + row_h * row_i as f32;
-            let caption_y = row_top + row_h * (0.06 - 0.022 * jc);
-            // Tile center sits a full long-half below the caption block
-            // so the tile's projected top edge doesn't encroach on the
-            // caption above it.
-            let tile_cy = caption_y + caption_block_h + tile_long_h * 0.55;
+        let header_bg = color::alpha(color::WALNUT_RAISED, 0.96);
+        frame.quad(GpuInstance {
+            rect: [table.table_x, table.table_y, table.table_w, table.header_h],
+            color: header_bg,
+            user: 0,
+        });
 
-            for col_i in 0..row_n {
-                if yi >= yaku.len() {
-                    break;
-                }
-                let yk = yaku[yi];
-                let is_selected = yi == self.selected;
-                yi += 1;
+        let row_level_w = table.table_w * 0.06;
+        let row_name_w = table.table_w * 0.15;
+        let row_payout_w = table.table_w * 0.17;
+        let row_scored_w = table.table_w * 0.08;
+        let row_rule_w =
+            table.table_w - row_level_w - row_name_w - row_payout_w - row_scored_w;
+        let col_x = [
+            table.table_x,
+            table.table_x + row_level_w,
+            table.table_x + row_level_w + row_name_w,
+            table.table_x + row_level_w + row_name_w + row_rule_w,
+            table.table_x + row_level_w + row_name_w + row_rule_w + row_payout_w,
+        ];
+        let header_font = typography::size(typography::H42, h);
+        let body_font = typography::size(typography::H42, h);
+        let tiny_font = typography::size(typography::H42, h);
+        let col_pad = 9.0 * jr;
 
-                let state = progression_state(run, progress, yk);
-                let cell_cx = row_x0 + cell_w * (col_i as f32 + 0.5);
-                let strip_w =
-                    tiles_per_cell as f32 * tile_size + (tiles_per_cell - 1) as f32 * tile_gap;
-                let strip_x0 = cell_cx - strip_w * 0.5;
-
-                // Discovered cells get a faint parchment-glow pad behind
-                // the tile strip so unlocked yaku read as "lit lanterns"
-                // on the table, differentiated from the sealed cards
-                // around them. Selection adds a stronger champagne halo
-                // on top of that, tightened to the tile envelope so
-                // focus sits on the tiles, not a row-wide stripe.
-                let pad_pad_y = tile_long_h * 0.18;
-                let pad_pad_x = tile_size * 0.35;
-                let pad_x0 = strip_x0 - pad_pad_x;
-                let pad_y0 = tile_cy - tile_long_h * 0.5 - pad_pad_y;
-                let pad_w = strip_w + pad_pad_x * 2.0;
-                let pad_h = tile_long_h + pad_pad_y * 2.0;
-
-                if matches!(state, ProgressionState::Played | ProgressionState::Leveled) {
-                    frame.quad(GpuInstance {
-                        rect: [pad_x0, pad_y0, pad_w, pad_h],
-                        color: color::alpha(color::PARCHMENT, 0.06),
-                        user: 0,
-                    });
-                }
-                if is_selected {
-                    // Stacked halo layers — outer soft pool, inner warm
-                    // wash, then a crisp 1px brass rim. Against the dark
-                    // lacquer of sealed cards the subtler version got lost,
-                    // so we push opacity up and add a visible ring to
-                    // anchor "this is the one you're reading."
-                    let halo_pad = tile_long_h * 0.30;
-                    frame.quad(GpuInstance {
-                        rect: [
-                            pad_x0 - halo_pad,
-                            pad_y0 - halo_pad,
-                            pad_w + halo_pad * 2.0,
-                            pad_h + halo_pad * 2.0,
-                        ],
-                        color: color::alpha(color::CHAMPAGNE, 0.10),
-                        user: 0,
-                    });
-                    let mid_pad = tile_long_h * 0.14;
-                    frame.quad(GpuInstance {
-                        rect: [
-                            pad_x0 - mid_pad,
-                            pad_y0 - mid_pad,
-                            pad_w + mid_pad * 2.0,
-                            pad_h + mid_pad * 2.0,
-                        ],
-                        color: color::alpha(color::CHAMPAGNE, 0.22),
-                        user: 0,
-                    });
-                    // Crisp brass outline — 4-edge ring so focus reads
-                    // even on dark sealed cards.
-                    let ring_px = (2.6 * (h / 1080.0)).max(2.0);
-                    let rx = pad_x0 - mid_pad;
-                    let ry = pad_y0 - mid_pad;
-                    let rw = pad_w + mid_pad * 2.0;
-                    let rh = pad_h + mid_pad * 2.0;
-                    let ring_color = color::alpha(color::GOLD, 0.85);
-                    frame.quad(GpuInstance {
-                        rect: [rx, ry, rw, ring_px],
-                        color: ring_color,
-                        user: 0,
-                    });
-                    frame.quad(GpuInstance {
-                        rect: [rx, ry + rh - ring_px, rw, ring_px],
-                        color: ring_color,
-                        user: 0,
-                    });
-                    frame.quad(GpuInstance {
-                        rect: [rx, ry, ring_px, rh],
-                        color: ring_color,
-                        user: 0,
-                    });
-                    frame.quad(GpuInstance {
-                        rect: [rx + rw - ring_px, ry, ring_px, rh],
-                        color: ring_color,
-                        user: 0,
-                    });
-                }
-
-                // Name — until the first cash-in (`yaku_times_scored`), show a
-                // mystery pill instead of the real title (gameplay tablets match).
-                match state {
-                    ProgressionState::Unseen => {
-                        let shadow_scale = (h / 1080.0).max(1.0);
-                        let bamboo_face = color::darken(color::JADE, 0.76);
-                        draw_mystery_name_pill(
-                            &mut frame,
-                            MysteryNamePillStyle {
-                                pill_center_x: cell_cx,
-                                top_y: caption_y + name_h * 0.02,
-                                pill_h: name_h * 0.92,
-                                font_px: name_font * 1.05,
-                                shadow_scale,
-                                pill_bg: color::darken(bamboo_face, 0.28),
-                                text_color: color::alpha(color::CHAMPAGNE, 0.88),
-                            },
-                        );
-                    }
-                    _ => {
-                        let name_color = if is_selected {
-                            color::CHAMPAGNE
-                        } else {
-                            color::PARCHMENT
-                        };
-                        frame.text(TextLabel {
-                            rect: [cell_cx - cell_w * 0.5, caption_y, cell_w, name_h],
-                            text: yk.name().into(),
-                            color: name_color,
-                            align: TextAlign::Center,
-                            font_px: Some(name_font),
-                            ..Default::default()
-                        });
-                    }
-                }
-
-                // Level caption. Sealed cells get a thin en-dash —
-                // the wax seal already says "locked," so a redundant
-                // "sealed" word just creates visual noise on the row.
-                let lvl = yaku_progress.level_of(yk);
-                let (level_text, level_color) = match state {
-                    ProgressionState::Unseen => ("—".into(), color::alpha(color::PARCHMENT, 0.48)),
-                    ProgressionState::Leveled => (format!("Lv {lvl}"), color::GOLD),
-                    _ => (format!("Lv {lvl}"), color::lighten(color::CHAMPAGNE, 0.06)),
-                };
-                frame.text(TextLabel {
-                    rect: [cell_cx - cell_w * 0.5, caption_y + name_h, cell_w, lvl_h],
-                    text: level_text,
-                    color: level_color,
-                    align: TextAlign::Center,
-                    font_px: Some(grid_lvl_font),
-                    ..Default::default()
+        let headers = ["Lvl.", "Name", "Rule", "Payout", "Run"];
+        for (i, title) in headers.iter().enumerate() {
+            let cw = match i {
+                0 => row_level_w,
+                1 => row_name_w,
+                2 => row_rule_w,
+                3 => row_payout_w,
+                _ => row_scored_w,
+            };
+            frame.text(TextLabel {
+                rect: [
+                    col_x[i] + col_pad,
+                    table.table_y,
+                    cw - col_pad * 2.0,
+                    table.header_h,
+                ],
+                text: (*title).into(),
+                color: color::CHAMPAGNE,
+                align: TextAlign::Left,
+                font_px: Some(header_font),
+                ..Default::default()
+            });
+            if i > 0 {
+                frame.quad(GpuInstance {
+                    rect: [col_x[i], table.table_y, 1.0_f32.max(jr), table.table_h],
+                    color: color::alpha(color::CHAMPAGNE, 0.08),
+                    user: 0,
                 });
-
-                match state {
-                    ProgressionState::Unseen => {
-                        // Sealed tablet in place of the tile strip:
-                        // dark slab + wax seal. Reads unambiguously
-                        // as "locked / unknown" without the dying-
-                        // bulb effect that dimmed-tile rendering had
-                        // (the suit color still bleeds through
-                        // `brightness`, so silhouettes looked broken
-                        // rather than concealed).
-                        draw_sealed_slab(
-                            &mut frame,
-                            strip_x0,
-                            tile_cy - tile_long_h * 0.5,
-                            strip_w,
-                            tile_long_h,
-                            h,
-                            jr,
-                        );
-                    }
-                    ProgressionState::Played | ProgressionState::Leveled => {
-                        let sig = signature_tiles(yk, &mut tile_id);
-                        for (i, tile) in sig.iter().enumerate() {
-                            let cx = strip_x0 + tile_size * 0.5 + i as f32 * (tile_size + tile_gap);
-                            let (brightness, tile_glow, tile_glow_color) = match state {
-                                ProgressionState::Played => {
-                                    (if is_selected { 1.0 } else { 0.85 }, is_selected, None)
-                                }
-                                ProgressionState::Leveled => (
-                                    1.0,
-                                    true,
-                                    Some(color::alpha(
-                                        color::GOLD,
-                                        if is_selected { 0.9 } else { 0.55 },
-                                    )),
-                                ),
-                                // Unreachable — Unseen is handled above.
-                                ProgressionState::Unseen => (1.0, false, None),
-                            };
-                            placements.push(ShowcaseTilePlacement {
-                                tile: *tile,
-                                center_pos: [cx, tile_cy, 0.0],
-                                rotation: [0.0, 0.0, std::f32::consts::PI],
-                                scale: 1.0,
-                                size_px: tile_size,
-                                brightness,
-                                selected: false,
-                                hovered: false,
-                                outline: is_selected,
-                                glow: tile_glow,
-                                glow_color: tile_glow_color,
-                                pick_id: None,
-                                arrange_group: None,
-                            });
-                        }
-                    }
-                }
             }
+        }
+
+        let body_top = table.table_y + table.header_h;
+        let body_bottom = table.table_y + table.table_h - 2.0 * jr;
+        let body_clip_rect = [
+            table.table_x,
+            body_top,
+            table.table_w,
+            (body_bottom - body_top).max(0.0),
+        ];
+        let scroll = self
+            .scroll_rows
+            .clamp(0.0, Self::max_scroll(total_rows, table.visible_rows));
+        let first_row = scroll.floor() as usize;
+        let row_offset = scroll - first_row as f32;
+        let draw_rows = table.visible_rows + 2;
+        for vi in 0..draw_rows {
+            let idx = first_row + vi;
+            if idx >= total_rows {
+                break;
+            }
+            let yk = yaku[idx];
+            let row_y = body_top + (vi as f32 - row_offset) * table.row_h;
+            let row_bottom = row_y + table.row_h;
+            let clipped_row_top = row_y.max(body_top);
+            let clipped_row_bottom = row_bottom.min(body_bottom);
+            let clipped_row_h = clipped_row_bottom - clipped_row_top;
+            if clipped_row_h <= 0.0 {
+                continue;
+            }
+            let is_selected = idx == self.selected;
+            let state = progression_state(run, progress, yk);
+            let lvl = yaku_progress.level_of(yk);
+            let chips = yk.chip_bonus_at(lvl);
+            let mult = yk.mult_bonus_at(lvl);
+            let scored_this_run = yaku_progress.played_this_run(yk);
+            let (rule_text, _) = super::meld_guide::yaku_page(yk);
+
+            let base_row_color = if vi % 2 == 0 {
+                color::WALNUT_RAISED
+            } else {
+                color::alpha(color::WALNUT_RAISED, 0.86)
+            };
+            frame.quad(GpuInstance {
+                rect: [table.table_x, clipped_row_top, table.table_w, clipped_row_h],
+                color: base_row_color,
+                user: 0,
+            });
+            if is_selected {
+                frame.quad(GpuInstance {
+                    rect: [table.table_x, clipped_row_top, table.table_w, clipped_row_h],
+                    color: color::alpha(color::CHAMPAGNE, 0.14),
+                    user: 0,
+                });
+            }
+            frame.buttons.push(ButtonDef::scene(
+                (table.table_x, clipped_row_top, table.table_w, clipped_row_h),
+                CLICK_ROW_BASE + idx as u32,
+            ));
+
+            let row_text_color = if is_selected {
+                color::CHAMPAGNE
+            } else {
+                color::PARCHMENT
+            };
+            let level_text = match state {
+                ProgressionState::Unseen => "—".into(),
+                _ => format!("{lvl}"),
+            };
+            frame.text(TextLabel {
+                rect: [
+                    col_x[0] + col_pad,
+                    row_y,
+                    row_level_w - col_pad * 2.0,
+                    table.row_h,
+                ],
+                text: level_text,
+                color: if matches!(state, ProgressionState::Leveled) {
+                    color::GOLD
+                } else {
+                    row_text_color
+                },
+                align: TextAlign::Left,
+                font_px: Some(body_font),
+                clip_rect: Some(body_clip_rect),
+                ..Default::default()
+            });
+
+            let name_text: String = match state {
+                ProgressionState::Unseen => "???".into(),
+                _ => yk.name().into(),
+            };
+            frame.text(TextLabel {
+                rect: [
+                    col_x[1] + col_pad,
+                    row_y,
+                    row_name_w - col_pad * 2.0,
+                    table.row_h,
+                ],
+                text: name_text,
+                color: row_text_color,
+                align: TextAlign::Left,
+                font_px: Some(body_font),
+                clip_rect: Some(body_clip_rect),
+                ..Default::default()
+            });
+
+            let rule_row_text = match state {
+                ProgressionState::Unseen => "sealed — score once to reveal".into(),
+                _ => rule_text.into(),
+            };
+            frame.text(TextLabel {
+                rect: [
+                    col_x[2] + col_pad,
+                    row_y,
+                    row_rule_w - col_pad * 2.0,
+                    table.row_h,
+                ],
+                text: rule_row_text,
+                color: color::alpha(row_text_color, 0.90),
+                align: TextAlign::Left,
+                font_px: Some(tiny_font),
+                clip_rect: Some(body_clip_rect),
+                ..Default::default()
+            });
+
+            let payout_text = match state {
+                ProgressionState::Unseen => "—".into(),
+                _ => format!("+{} chips / +{}", chips, format_yaku_mult_bonus(mult)),
+            };
+            frame.text(TextLabel {
+                rect: [
+                    col_x[3] + col_pad,
+                    row_y,
+                    row_payout_w - col_pad * 2.0,
+                    table.row_h,
+                ],
+                text: payout_text,
+                color: row_text_color,
+                align: TextAlign::Left,
+                font_px: Some(tiny_font),
+                clip_rect: Some(body_clip_rect),
+                ..Default::default()
+            });
+            frame.text(TextLabel {
+                rect: [
+                    col_x[4] + col_pad,
+                    row_y,
+                    row_scored_w - col_pad * 2.0,
+                    table.row_h,
+                ],
+                text: format!("{scored_this_run}"),
+                color: row_text_color,
+                align: TextAlign::Left,
+                font_px: Some(body_font),
+                clip_rect: Some(body_clip_rect),
+                ..Default::default()
+            });
+        }
+
+        // Vertical scrollbar indicator.
+        let max_scroll = Self::max_scroll(total_rows, table.visible_rows);
+        if max_scroll > 0.0 {
+            let track_w = (6.0 * jr).max(4.0);
+            let track_x = table.table_x + table.table_w - track_w - 4.0 * jr;
+            let track_y = body_top + 3.0 * jr;
+            let track_h = table.table_h - table.header_h - 6.0 * jr;
+            frame.quad(GpuInstance {
+                rect: [track_x, track_y, track_w, track_h],
+                color: color::alpha(color::WALNUT_INK, 0.45),
+                user: 0,
+            });
+            let thumb_h = (track_h * (table.visible_rows as f32 / total_rows as f32))
+                .clamp(24.0 * jr, track_h);
+            let thumb_t = if max_scroll > 0.001 {
+                scroll / max_scroll
+            } else {
+                0.0
+            };
+            let thumb_y = track_y + (track_h - thumb_h) * thumb_t;
+            frame.quad(GpuInstance {
+                rect: [track_x, thumb_y, track_w, thumb_h],
+                color: color::alpha(color::CHAMPAGNE, 0.82),
+                user: 0,
+            });
         }
 
         // ── Floating plaque for the selected yaku ────────────────
@@ -451,8 +515,6 @@ impl SceneBehavior for YakuJournalScene {
             &mut placements,
             &mut tile_id,
             sel_yk,
-            yaku_progress.level_of(sel_yk),
-            yaku_progress.played_this_run(sel_yk),
             sel_state,
             plaque_top,
             plaque_h,
@@ -671,17 +733,13 @@ fn format_yaku_mult_bonus(mult: f64) -> String {
 ///
 /// Header hierarchy is **identity-first**: yaku name is the title, followed
 /// by explicit stat cards for level, chips, mult, and this-run scoring count.
-/// A thin champagne rule separates header from description. The control hint
-/// sits in a darker bamboo strip inside the plaque's rim so it reads as an
-/// affordance rather than orphaned caption text.
+/// A thin champagne rule separates header from description.
 #[allow(clippy::too_many_arguments)]
 fn draw_plaque(
     frame: &mut UiFrame,
     placements: &mut Vec<ShowcaseTilePlacement>,
     tile_id: &mut u32,
     yk: YakuKind,
-    lvl: u32,
-    scored_this_run: u32,
     state: ProgressionState,
     top_y: f32,
     plaque_h: f32,
@@ -739,19 +797,15 @@ fn draw_plaque(
         color: color::BRASS,
         user: 0,
     });
-    // Bamboo lacquer face — stops short of the bottom to leave room for the
-    // footer strip (which carries the control hint).
+    // Walnut lacquer face fills the plaque interior.
     let pad_scale = 1.0 - 0.14 * jc;
     let pad = ((14.0 * shadow_scale).max(10.0)) * pad_scale;
-    let hint_font = typography::size(typography::H42, h);
-    let footer_h = hint_font * (2.35 - 0.28 * jc);
     let face_x = plaque_x + pad;
     let face_y = plaque_y + pad;
     let face_w = plaque_w - pad * 2.0;
-    let face_h = plaque_h - pad - footer_h - bevel;
-    // Deep green-brown lacquer (mahjong-table / bamboo mat) — keep this dark so
-    // champagne type pops; lighter greens read as washed-out on HDR TVs.
-    let bamboo_face = color::darken(color::JADE, 0.76);
+    let face_h = plaque_h - pad * 2.0;
+    // Deep brown lacquer to match the global white-on-dark-walnut theme.
+    let bamboo_face = color::WALNUT_DEEP;
     frame.quad(GpuInstance {
         rect: [face_x, face_y, face_w, face_h],
         color: bamboo_face,
@@ -759,7 +813,7 @@ fn draw_plaque(
     });
     let label_champagne = color::CHAMPAGNE;
     let label_champagne_soft = color::alpha(color::CHAMPAGNE, 0.88);
-    let label_champagne_muted = color::alpha(color::CHAMPAGNE, 0.52);
+    let _label_champagne_muted = color::alpha(color::CHAMPAGNE, 0.52);
 
     // ── Header ───────────────────────────────────────────────────
     // Title first, then the current run stats as distinct cards.
@@ -767,9 +821,6 @@ fn draw_plaque(
     let header_x = face_x + header_pad;
     let header_w = face_w - header_pad * 2.0;
     let header_y = face_y + header_pad * 0.6;
-
-    let mult = yk.mult_bonus_at(lvl);
-    let chip = yk.chip_bonus_at(lvl);
 
     // Title — full name once cashed in; until then a `???` pill (matches
     // gameplay bone tablets).
@@ -801,90 +852,9 @@ fn draw_plaque(
         });
     }
 
-    // Stat cards — four equal columns so the requested values are always
-    // present and scannable instead of hidden in one long right-aligned line.
-    let card_label_font = typography::size(typography::H42, h);
-    let card_value_font = typography::size(typography::H36, h);
-    // `card_h` must leave each band tall enough for pinned `font_px`: the
-    // rasterizer vertically centers the font line box in the label rect, so
-    // if rect.h < line_h the ascenders clip (seen on Level / Chips / Mult).
-    let card_h = card_label_font * (3.05 - 0.20 * jc);
-    let card_gap = (10.0 * shadow_scale).max(6.0) * pad_scale;
-    let card_w = (header_w - card_gap * 3.0) / 4.0;
-    let card_y = header_y + title_h + header_pad * 0.32;
-    let badge_ink = color::darken(color::WALNUT_INK, 0.12);
-    let card_bg = match state {
-        ProgressionState::Leveled => color::darken(color::GOLD, 0.06),
-        ProgressionState::Unseen => color::darken(bamboo_face, 0.28),
-        ProgressionState::Played => color::darken(color::BRASS, 0.07),
-    };
-    let value_color = match state {
-        ProgressionState::Unseen => label_champagne_muted,
-        _ => badge_ink,
-    };
-    let stat_cards = [
-        (
-            "Level",
-            match state {
-                ProgressionState::Unseen => "—".to_string(),
-                _ => lvl.to_string(),
-            },
-        ),
-        (
-            "Chips",
-            match state {
-                ProgressionState::Unseen => "—".to_string(),
-                _ => format!("+{chip}"),
-            },
-        ),
-        (
-            "Mult",
-            match state {
-                ProgressionState::Unseen => "—".to_string(),
-                _ => format!("+{}", format_yaku_mult_bonus(mult)),
-            },
-        ),
-        ("This Run", format!("{scored_this_run}x scored")),
-    ];
-    for (i, (label, value)) in stat_cards.iter().enumerate() {
-        let x = header_x + i as f32 * (card_w + card_gap);
-        frame.quad(GpuInstance {
-            rect: [
-                x + 1.5 * shadow_scale,
-                card_y + 2.0 * shadow_scale,
-                card_w,
-                card_h,
-            ],
-            color: color::alpha(color::WALNUT_DEEP, 0.35),
-            user: 0,
-        });
-        frame.quad(GpuInstance {
-            rect: [x, card_y, card_w, card_h],
-            color: card_bg,
-            user: 0,
-        });
-        frame.text(TextLabel {
-            rect: [x, card_y + card_h * 0.06, card_w, card_h * 0.40],
-            text: (*label).into(),
-            color: color::alpha(badge_ink, 0.78),
-            align: TextAlign::Center,
-            font_px: Some(card_label_font),
-            ..Default::default()
-        });
-        frame.text(TextLabel {
-            rect: [x, card_y + card_h * 0.48, card_w, card_h * 0.44],
-            text: value.clone(),
-            color: value_color,
-            align: TextAlign::Center,
-            font_px: Some(card_value_font),
-            ..Default::default()
-        });
-    }
-
-    // Rule line under the header — 1-2px ANTIQUE strip, separates the
-    // title + stat cards from the description/hand below.
-    let header_bottom = (card_y + card_h).max(header_y + title_h);
-    let rule_y = header_bottom + header_pad * 0.4;
+    // Rule line under the title — 1-2px ANTIQUE strip, separating the
+    // identity header from the description/hand below.
+    let rule_y = header_y + title_h + header_pad * 0.35;
     let rule_h = (1.5 * shadow_scale).max(1.0);
     frame.quad(GpuInstance {
         rect: [header_x, rule_y, header_w, rule_h],
@@ -991,102 +961,4 @@ fn draw_plaque(
         }
     }
 
-    // ── Footer strip with control hint ───────────────────────────
-    // Darker bamboo tone below the lacquer face; champagne type matches
-    // the panel body.
-    let footer_x = plaque_x + bevel;
-    let footer_y = plaque_y + plaque_h - footer_h - bevel;
-    let footer_w = plaque_w - bevel * 2.0;
-    frame.quad(GpuInstance {
-        rect: [footer_x, footer_y, footer_w, footer_h],
-        color: color::darken(bamboo_face, 0.22),
-        user: 0,
-    });
-    frame.quad(GpuInstance {
-        rect: [footer_x, footer_y, footer_w, (1.0 * shadow_scale).max(1.0)],
-        color: color::alpha(color::CHAMPAGNE, 0.18),
-        user: 0,
-    });
-    let footer_pad = header_pad * 0.8;
-    frame.text(TextLabel {
-        rect: [
-            footer_x + footer_pad,
-            footer_y + footer_h * 0.18,
-            footer_w - footer_pad * 2.0,
-            footer_h * 0.7,
-        ],
-        text: "← → ↑ ↓  browse".into(),
-        color: label_champagne_soft,
-        align: TextAlign::Left,
-        font_px: Some(typography::size(typography::H36, h)),
-        ..Default::default()
-    });
-    frame.text(TextLabel {
-        rect: [
-            footer_x + footer_pad,
-            footer_y + footer_h * 0.18,
-            footer_w - footer_pad * 2.0,
-            footer_h * 0.7,
-        ],
-        text: "Esc  return".into(),
-        color: label_champagne_soft,
-        align: TextAlign::Right,
-        font_px: Some(typography::size(typography::H36, h)),
-        ..Default::default()
-    });
-    // Make the right-aligned "Esc  return" hint a real click target so a
-    // mouse-only player can leave the journal without the keyboard. Hit
-    // rect covers the right third of the footer where the text actually
-    // renders.
-    let back_w = (footer_w - footer_pad * 2.0) * 0.33;
-    let back_x = footer_x + footer_w - footer_pad - back_w;
-    frame.buttons.push(ButtonDef::scene(
-        (back_x, footer_y, back_w, footer_h),
-        CLICK_BACK,
-    ));
-}
-
-/// Three signature tiles that communicate the essence of a yaku at grid-icon
-/// size. These are intentionally a condensed shorthand, not a full hand —
-/// the floating plaque carries the scorer-validated 14-tile hand. The grid
-/// icon just needs to be scannable at distance so the player can navigate
-/// the collection.
-fn signature_tiles(yk: YakuKind, id: &mut u32) -> Vec<Tile> {
-    let specs: &[(Suit, u8)] = match yk {
-        YakuKind::Tanyao => &[(Suit::Characters, 4), (Suit::Bamboos, 5), (Suit::Dots, 7)],
-        YakuKind::Toitoi => &[(Suit::Dots, 5), (Suit::Dots, 5), (Suit::Dots, 5)],
-        YakuKind::Honroutou => &[(Suit::Characters, 1), (Suit::Bamboos, 9), (Suit::Dragon, 1)],
-        YakuKind::Iipeikou => &[(Suit::Bamboos, 1), (Suit::Bamboos, 2), (Suit::Bamboos, 3)],
-        YakuKind::FullHand => &[
-            (Suit::Characters, 3),
-            (Suit::Characters, 4),
-            (Suit::Characters, 5),
-        ],
-        YakuKind::Chinitsu => &[(Suit::Bamboos, 2), (Suit::Bamboos, 5), (Suit::Bamboos, 8)],
-        YakuKind::SanshokuDoujun => &[(Suit::Characters, 5), (Suit::Bamboos, 5), (Suit::Dots, 5)],
-        YakuKind::Junchan => &[(Suit::Dots, 1), (Suit::Dots, 2), (Suit::Dots, 3)],
-        YakuKind::Ittsu => &[(Suit::Bamboos, 1), (Suit::Bamboos, 5), (Suit::Bamboos, 9)],
-        YakuKind::Honitsu => &[(Suit::Bamboos, 3), (Suit::Bamboos, 7), (Suit::Wind, 1)],
-        YakuKind::Yakuhai => &[(Suit::Dragon, 1), (Suit::Dragon, 1), (Suit::Dragon, 1)],
-        YakuKind::Chiitoitsu => &[
-            (Suit::Characters, 1),
-            (Suit::Characters, 1),
-            (Suit::Bamboos, 5),
-        ],
-        YakuKind::KokushiMusou => &[(Suit::Characters, 1), (Suit::Wind, 1), (Suit::Dragon, 1)],
-        YakuKind::ChickenHand => &[
-            (Suit::Characters, 1),
-            (Suit::Characters, 2),
-            (Suit::Characters, 3),
-        ],
-    };
-
-    specs
-        .iter()
-        .map(|&(suit, rank)| {
-            let tile = Tile::new(suit, rank, *id);
-            *id += 1;
-            tile
-        })
-        .collect()
 }

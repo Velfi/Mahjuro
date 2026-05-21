@@ -89,19 +89,6 @@ pub struct ScreenshotCli {
     /// `ribbon:N`, `talisman:N`, `pack:N` (N is 0-based index).
     #[arg(long)]
     pub shop_focus: Option<String>,
-    /// Override the Yaku Journal cover-open animation amount (0.0 = closed,
-    /// 1.0 = fully open). Only honored when `--scene shop`. Useful for
-    /// capturing mid-tween states without trying to time the screenshot
-    /// precisely against the live animation.
-    #[arg(long)]
-    pub journal_open: Option<f32>,
-    /// Override the click-to-open journal transition progress (0.0 = just
-    /// clicked, 1.0 = about to push YakuJournalScene). Drives both the
-    /// cover-open phase and the zoom phase via a single `[0, 1]` time
-    /// fraction relative to `JournalTransition::TOTAL_DUR`. Only honored
-    /// when `--scene shop`.
-    #[arg(long)]
-    pub journal_transition: Option<f32>,
     /// Override `RoomEnvLightingTune::gltf_emissive_scale` for this capture
     /// (glTF room mesh emissive gain). Compare e.g. `1` vs `12` on `--scene pick_blind`.
     #[arg(long)]

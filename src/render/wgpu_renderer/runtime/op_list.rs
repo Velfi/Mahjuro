@@ -94,7 +94,7 @@ pub enum DrawKind {
     BugWingBlurL,
     BugWingBlurR,
     Orb,
-    DoraPlinth,
+    Plinth,
     Bowl,
     Mirror,
     TallyStickBase,

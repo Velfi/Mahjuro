@@ -615,8 +615,7 @@ impl SceneBehavior for PickBlindScene {
                         let n = first_line.chars().count().max(1) as f32;
                         (px_blind * 0.52 * n).min(text_w_play)
                     };
-                    let mut icon_x =
-                        text_x_play + text_w_play - title_w - boss_icon_gap - ipx;
+                    let mut icon_x = text_x_play + text_w_play - title_w - boss_icon_gap - ipx;
                     icon_x = icon_x.max(edge_margin);
                     let title_line_count = title_lines.len().max(1) as f32;
                     let name_block_h = h_blind * title_line_count;

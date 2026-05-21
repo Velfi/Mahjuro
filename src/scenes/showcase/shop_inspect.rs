@@ -5,6 +5,7 @@ use std::time::Instant;
 use crate::render::draw_cmd::{ShowcaseRenderHints, UiFrame};
 use crate::scenes::object3d_inspect::ItemInspectOrbitState;
 use crate::scenes::shop::{self, render_shop_frame};
+use crate::ui::focus_nav::FocusDir;
 use crate::ui::input::UiAction;
 
 use crate::scenes::{BackgroundId, DrawCtx, OverlayRequest, SceneTransition, UpdateCtx};
@@ -32,10 +33,10 @@ impl ShopInspectPresenter {
         }
     }
 
-    pub fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
-        if let Some(shop) = ctx.suspended_shop {
+    pub fn update(&mut self, mut ctx: UpdateCtx<'_>) -> SceneTransition {
+        if let Some(shop) = ctx.suspended_shop.as_deref_mut() {
             shop::sync_item_inspect_orbit_target(
-                shop,
+                &*shop,
                 ctx.run,
                 ctx.layout.window_w,
                 ctx.layout.window_h,
@@ -61,6 +62,27 @@ impl ShopInspectPresenter {
         self.orbit.zoom = (self.orbit.zoom + ctx.scroll_lines * WHEEL_ZOOM).clamp(ZMIN, ZMAX);
 
         for a in ctx.actions {
+            let dir = match a {
+                UiAction::FocusUp => Some(FocusDir::Up),
+                UiAction::FocusDown => Some(FocusDir::Down),
+                UiAction::FocusPrev => Some(FocusDir::Left),
+                UiAction::FocusNext => Some(FocusDir::Right),
+                _ => None,
+            };
+            if let Some(dir) = dir {
+                if let Some(shop) = ctx.suspended_shop.as_deref_mut()
+                    && shop.inspect_cycle_focus(dir, ctx.run)
+                {
+                    shop::sync_item_inspect_orbit_target(
+                        &*shop,
+                        ctx.run,
+                        ctx.layout.window_w,
+                        ctx.layout.window_h,
+                        &mut self.orbit,
+                    );
+                }
+                continue;
+            }
             if matches!(
                 a,
                 UiAction::NorthFacePress | UiAction::Cancel | UiAction::Pause

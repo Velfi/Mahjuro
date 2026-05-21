@@ -564,9 +564,7 @@ fn select_present_mode(caps: &wgpu::SurfaceCapabilities) -> wgpu::PresentMode {
             "auto" | "auto_vsync" | "auto-vsync" => Some(wgpu::PresentMode::AutoVsync),
             "auto_no_vsync" | "auto-no-vsync" => Some(wgpu::PresentMode::AutoNoVsync),
             other => {
-                log::warn!(
-                    "MAHJURO_PRESENT_MODE={other:?} unrecognized; using default selection"
-                );
+                log::warn!("MAHJURO_PRESENT_MODE={other:?} unrecognized; using default selection");
                 None
             }
         } {

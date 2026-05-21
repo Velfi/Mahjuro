@@ -63,6 +63,7 @@ Relics are **remnants of previous gamblers**—left hands, talismans, props prie
 ## Environmental principles
 
 - **One step ahead:** Light leads; darkness eats edges.
+- **Readability over patina:** UI copy sits as white text on very dark walnut so interaction reads instantly, while brass remains accent-only.
 - **Negative space:** Sound from nowhere, drafts without openings, dust falling through invisible shafts—the inner room **inferred**, not shown until the fiction allows.
 - **Layered surfaces:** Screens hint at another table; chalk tallies repeat like failed runs.
 - **Escalation:** Outer wings cluttered; **inner approach quieter and smaller**—claustrophobic certainty, not a spectacle arena.

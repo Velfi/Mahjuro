@@ -39,6 +39,7 @@ pub fn gameplay_west_north_legend_active(
                     | FocusTarget::Gold
                     | FocusTarget::YakuTablet(_)
                     | FocusTarget::Dora
+                    | FocusTarget::Boss
                     | FocusTarget::RoundWind
                     | FocusTarget::Consumable(_),
                 ) => false,
@@ -48,8 +49,8 @@ pub fn gameplay_west_north_legend_active(
     }
 }
 
-/// Matches [`crate::scenes::gameplay::scene_behavior`] copy: draw → mirror, discard → bowl.
-const GAMEPLAY_ACTION_PROMPT_LABELS: [&str; 3] = ["Discard", "Draw", "Cash in"];
+/// Matches [`crate::scenes::gameplay::scene_behavior`] copy: discard → bowl, play → mirror, cash in → trigger.
+const GAMEPLAY_ACTION_PROMPT_LABELS: [&str; 3] = ["Discard", "Play", "Cash in"];
 
 /// Extra inset inside the text rect (and pill) so glyphs aren’t flush to the backer edge.
 const LABEL_PAD_X: f32 = 4.0;
@@ -79,6 +80,7 @@ pub fn push_gameplay_action_prompts(
         show_play_legend,
         hud_text,
     } = input;
+    let _ = (show_discard_legend, show_play_legend);
     let h = ctx.layout.window_h;
     let w = ctx.layout.window_w;
 
@@ -111,7 +113,9 @@ pub fn push_gameplay_action_prompts(
 
     let rects: [(f32, f32, f32, f32); 3] = [discard_btn_rect, play_btn_rect, trigger_btn_rect];
 
-    // Indices with valid hit targets, in Discard → Draw → Cash-in order.
+    // Context-only prompt row: show actionable cash-in only. Discard / Play are
+    // baseline gameplay interactions and stay unlabeled to reduce hint noise.
+    // Indices remain Discard → Draw → Cash-in to preserve icon/label mapping.
     let mut visible: [usize; 3] = [0; 3];
     let mut n_visible = 0usize;
     for (i, rect) in rects.iter().enumerate() {
@@ -119,10 +123,10 @@ pub fn push_gameplay_action_prompts(
         if dw <= 1.0 || dh <= 1.0 {
             continue;
         }
-        if i == 0 && !show_discard_legend {
+        if i != 2 {
             continue;
         }
-        if i == 1 && !show_play_legend {
+        if i == 2 && !cash_in_enabled {
             continue;
         }
         visible[n_visible] = i;

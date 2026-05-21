@@ -196,8 +196,7 @@ pub fn build_river_mesh() -> MeshCpu {
         indices,
         default_material: MaterialParams {
             kind: MaterialKind::Water,
-            // Twilight-ink reflects the cool sky into the water surface.
-            base_color: color::TWILIGHT_INK,
+            base_color: color::WALNUT_INK,
             specular_strength: 0.85,
             specular_power: 220.0,
         },

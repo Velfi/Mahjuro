@@ -5,6 +5,7 @@ use crate::core::relic::{RelicId, all_relic_defs, relic_description_live};
 use crate::render::theme::color;
 use crate::scenes::options;
 use crate::scenes::{BackgroundId, MeldGuideScene, OverlayRequest};
+use crate::ui::boss_icons::boss_icon_source;
 use crate::ui::inspect_plaque::{
     FocusTooltipPanelParams, dora_focus_tooltip_strings, gameplay_consumable_description_full,
     hand_tile_focus_tooltip, push_focus_tooltip_panel_2d, round_wind_focus_tooltip_strings,
@@ -298,11 +299,9 @@ impl SceneBehavior for GameplayScene {
 
         let hand_slots = hand_slots_for_count(layout, interaction.hand_len);
 
-        // Boss-rule ofuda payload: derived independently from `run` so the
-        // hanging paper always reflects the active boss rule, regardless of
-        // whether a cascade is currently animating in the modifier strip.
-        let ofuda_title_text = gameplay.boss_ofuda_title.clone();
-        let ofuda_rule_text = gameplay.boss_ofuda_rule_text.clone();
+        // Boss payload for the dedicated boss plinth inspect target.
+        let boss_title_text = gameplay.boss_ofuda_title.clone();
+        let boss_rule_text = gameplay.boss_ofuda_rule_text.clone();
 
         // Modifier strip: cascade / sets (full width). Relics shown as row below score panel.
         let cascade_frame = self
@@ -529,23 +528,69 @@ impl SceneBehavior for GameplayScene {
 
         // Dora indicator screen rect. Pre-computed up here so the focus
         // rect graph entry can both use it.
-        // Prefer the renderer's projected plinth rect (one frame stale,
-        // tracks the actual on-screen quad as the camera or arrange-mode
-        // overrides shift it). Falls back to a screen-position estimate on
-        // the first frame before the projection cache has populated.
-        let dora_rect: [f32; 4] = ctx.proj.dora_plinth_rect.unwrap_or_else(|| {
+        // Prefer the renderer's projected dora tile rect (one frame stale,
+        // tracks the actual on-screen tile as camera/arrange overrides shift
+        // it). Falls back to a screen-position estimate before projection
+        // cache has populated.
+        let dora_tile_count = if self.pending_blind.is_some() {
+            0
+        } else {
+            gameplay.dora_indicator_tiles.len().min(2)
+        };
+        let dora_rect: [f32; 4] = ctx.proj.dora_tile_rect.unwrap_or_else(|| {
             let dora_x = self.positions.dora.nx * layout.window_w;
             let dora_y = self.positions.dora.ny * layout.window_h;
-            let dora_w = layout.mm(48.0);
-            let dora_h = layout.mm(34.0);
+            let spacing = layout.mm(24.0);
+            let tile_w = layout.mm(22.0);
+            let dora_w = if dora_tile_count >= 2 {
+                spacing + tile_w
+            } else {
+                tile_w
+            };
+            let dora_h = layout.mm(30.0);
             [dora_x - dora_w * 0.5, dora_y - dora_h * 0.5, dora_w, dora_h]
         });
-        let round_wind_rect: [f32; 4] = ctx.proj.round_wind_plinth_rect.unwrap_or_else(|| {
+        let round_wind_tile_count = 1 + usize::from(gameplay.bonus_round_wind_rank.is_some());
+        let round_wind_rect: [f32; 4] = ctx.proj.round_wind_tile_rect.unwrap_or_else(|| {
             let rw_x = self.positions.round_wind.nx * layout.window_w;
             let rw_y = self.positions.round_wind.ny * layout.window_h;
-            let rw_w = layout.mm(48.0);
-            let rw_h = layout.mm(34.0);
+            let spacing = layout.mm(24.0);
+            let tile_w = layout.mm(22.0);
+            let rw_w = if round_wind_tile_count >= 2 {
+                spacing + tile_w
+            } else {
+                tile_w
+            };
+            let rw_h = layout.mm(30.0);
             [rw_x - rw_w * 0.5, rw_y - rw_h * 0.5, rw_w, rw_h]
+        });
+        let boss_plinth_rect: Option<[f32; 4]> = (!boss_title_text.is_empty()).then(|| {
+            ctx.proj.boss_plinth_rect.unwrap_or_else(|| {
+                let bx = self.positions.boss_plinth.nx * layout.window_w;
+                let by = self.positions.boss_plinth.ny * layout.window_h;
+                let bw = layout.mm(48.0);
+                let bh = layout.mm(34.0);
+                [bx - bw * 0.5, by - bh * 0.5, bw, bh]
+            })
+        });
+        let boss_icon_rect: Option<[f32; 4]> = boss_plinth_rect.map(|rect| {
+            let icon_size = layout.mm(20.0).min(rect[2] * 0.70).min(rect[3] * 0.70);
+            let [anchor_x, platform_top_y] = ctx.proj.boss_plinth_platform_px.unwrap_or([
+                rect[0] + rect[2] * 0.5,
+                // Fallback before projection cache warms: estimate the
+                // plinth's top platform in the projected bounds.
+                rect[1] + rect[3] * 0.14,
+            ]);
+            [
+                anchor_x - icon_size * 0.5,
+                // Rest icon base on the plinth platform (with a tiny overlap
+                // so alpha bleed does not leave a visible gap).
+                // Texture has extra transparent footroom; bias upward so the
+                // visible glyph (not the texture bounds) reads centered.
+                platform_top_y - icon_size * 1.10,
+                icon_size,
+                icon_size,
+            ]
         });
 
         let gold_anchor = crate::render::gold_display::gameplay_gold_pile_anchor(
@@ -766,6 +811,7 @@ impl SceneBehavior for GameplayScene {
             // before dora unlocks (level 4) so the marker only appears
             let mut hand_placements: Vec<crate::render::draw_cmd::ShowcaseTilePlacement> =
                 Vec::with_capacity(hand.len());
+            let (invalid_flash, invalid_elapsed) = self.invalid_meld_flash_phase(now);
             for (i, &tile) in hand.iter().enumerate() {
                 let Some(&(sx, sy, sw, sh)) = hand_slots.get(i) else {
                     continue;
@@ -774,12 +820,25 @@ impl SceneBehavior for GameplayScene {
                 let is_selected = interaction.selected.get(i).copied().unwrap_or(false);
                 let is_focused = focus == i;
                 let is_hinted = hint_indices.contains(&i);
+                let is_invalid_flash =
+                    invalid_flash > 0.0 && self.invalid_meld_flash_slots.contains(&i);
                 // Pop-in: slide_y 0→1, offset pixels downward (large py = nearer player).
                 let slide_y_frac = self.hand_slide_y.get(i).copied().unwrap_or(1.0);
                 let pop_offset = (1.0 - slide_y_frac) * sh * 0.3;
                 let slide_x_px = self.hand_slide_x.get(i).copied().unwrap_or(0.0);
-                let cx =
-                    sx + sw * 0.5 + slide_x_px + self.positions.hand_strip.nx * layout.window_w;
+                // Side-to-side "no" shake — fast horizontal oscillation that decays out.
+                let reject_shake_x = if is_invalid_flash {
+                    let decay =
+                        1.0 - (invalid_elapsed / super::INVALID_MELD_FLASH_SECS).clamp(0.0, 1.0);
+                    13.0 * decay * (invalid_elapsed * 34.0).sin()
+                } else {
+                    0.0
+                };
+                let cx = sx
+                    + sw * 0.5
+                    + slide_x_px
+                    + reject_shake_x
+                    + self.positions.hand_strip.nx * layout.window_w;
                 let cy = sy
                     + sh * HAND_TILE_MESH_Y_FRAC
                     + pop_offset
@@ -797,12 +856,17 @@ impl SceneBehavior for GameplayScene {
                     ],
                     scale: slide_y_frac.max(0.05),
                     size_px: sw,
-                    brightness: 1.0,
-                    selected: is_selected,
-                    hovered: is_focused,
-                    outline: is_selected || is_focused,
-                    glow: is_selected || is_hinted,
-                    glow_color: None,
+                    brightness: if is_invalid_flash { 1.12 } else { 1.0 },
+                    // Suppress gold selection rim on straggler tiles so red reads clearly.
+                    selected: is_selected && !is_invalid_flash,
+                    hovered: is_focused && !is_invalid_flash,
+                    outline: (is_selected || is_focused) && !is_invalid_flash,
+                    glow: is_hinted || is_invalid_flash || (is_selected && !is_invalid_flash),
+                    glow_color: if is_invalid_flash {
+                        Some([1.00, 0.14, 0.08, 0.72 + 0.28 * invalid_flash])
+                    } else {
+                        None
+                    },
                     pick_id: Some(i),
                     arrange_group: None,
                 });
@@ -817,7 +881,7 @@ impl SceneBehavior for GameplayScene {
         if !relic_objects.is_empty() {
             frame.object3d_batch(relic_objects);
         }
-        // PERSISTENT HUD: boss ofuda (3D) → score-panel overlay quads (none
+        // PERSISTENT HUD: score-panel overlay quads (none
         // today) → modifier strip → tally fans → cascade tokens / popups /
         // cascade HUD (3D) → gold flash → undo → `frame.quads` → texts.
         //
@@ -832,66 +896,6 @@ impl SceneBehavior for GameplayScene {
         // objects inward on screen, so a naive "some pixels left of
         // score_panel.x" anchor can still drift back over the wood plaque
         // and obscure the plaque text.
-        if !ofuda_title_text.is_empty() {
-            let sp = layout.score_panel;
-            let ms_rect = layout.modifier_strip;
-            // Keep the gameplay ofuda slimmer than the shrine-screen paper:
-            // the main plaque also needs room for score line, so a
-            // full-width warning card feels crowding here. Width set so the
-            // wrapped rule body reads at table distance — too narrow and the
-            // body shrinks to unreadable per-glyph sizes.
-            let ofuda_w = ms_rect.w * 0.34;
-            let ofuda_h = ms_rect.h * 1.55;
-            let scale_c = (layout.window_w / 600.0).max(0.5);
-            let plaque_w = sp.w * 0.95;
-            let plaque_left = sp.x + (sp.w - plaque_w) * 0.5;
-            // Give the paper extra berth from the plaque itself, not just
-            // from the candle footprint. That keeps the plaque text readable
-            // even after the taller paper projects inward toward center.
-            let plaque_gap = 26.0 * scale_c;
-            let candle_clearance = 120.0 * scale_c;
-            let right_edge = (plaque_left - plaque_gap).min(sp.x - candle_clearance);
-            let min_left_margin = ofuda_w * 0.5 + 12.0;
-            let ofuda_cx = (right_edge - ofuda_w * 0.5).max(min_left_margin);
-            // Push it up the back wall: smaller pixel-y → farther into z
-            // (recessed against the wall behind the table) and a taller
-            // lift so the paper hangs above the score-plaque elevation
-            // rather than beside it. The mesh is now upright (no
-            // toward-camera tilt — see ofuda_tilt_x in the renderer), so
-            // raising it visually moves it up the back wall on screen.
-            let ofuda_cy = sp.y - sp.h * 0.68;
-            let ofuda_lift = layout.window_h * 0.45;
-            let ofuda_p = &self.positions.ofuda;
-            frame.object3d(Object3d {
-                pos: [
-                    ofuda_cx + ofuda_p.nx * layout.window_w,
-                    ofuda_cy + ofuda_p.ny * layout.window_h,
-                    ofuda_lift + layout.mm(ofuda_p.lift_mm),
-                ],
-                extents: [ofuda_w, ofuda_h, layout.mm(3.0)],
-                // Placement rotation applied centrally via
-                // `committed_arrange_rotations`.
-                rotation: cam_euler,
-                color: [1.0, 1.0, 1.0, 1.0],
-                kind: Object3dKind::Primitive {
-                    shape: crate::render::primitive::MeshId::Ofuda,
-                    material: crate::render::primitive::MaterialSpec::plain().with_decal(
-                        crate::render::primitive::DecalSpec {
-                            text: format!("{}\n{}", ofuda_title_text, ofuda_rule_text),
-                            layout: crate::render::primitive::DecalLayout::TitleRule {
-                                target_short_edge: crate::render::decal::OFUDA_DECAL_LONG_EDGE,
-                            },
-                        },
-                    ),
-                    pick_id: None,
-                    shadow_caster: false,
-                    silhouette: false,
-                },
-                hover_target: 0.0,
-                anim_id: 0,
-                arrange_name: Some("gameplay.score_panel.ofuda"),
-            });
-        }
         // Counter fans — upright bone-stick tallies standing in front of
         // the action objects. Draws fan (jade tips) stands in front of the
         // bronze mirror; discards fan (amber tips) stands in front of the
@@ -1103,6 +1107,16 @@ impl SceneBehavior for GameplayScene {
                 &mut frame,
             );
         }
+        if let (Some(boss_kind), Some(icon_rect)) = (gameplay.boss_kind, boss_icon_rect) {
+            frame.image_quads(std::iter::once(crate::render::draw_cmd::ImageQuad {
+                inst: GpuInstance {
+                    rect: icon_rect,
+                    color: color::alpha(color::CHAMPAGNE, 0.98),
+                    user: 0,
+                },
+                source: boss_icon_source(boss_kind),
+            }));
+        }
 
         // Flying coin animations (gold changes).
         {
@@ -1222,7 +1236,7 @@ impl SceneBehavior for GameplayScene {
                     discard_btn_rect,
                     play_btn_rect,
                     trigger_btn_rect,
-                    cash_in_enabled: has_structure,
+                    cash_in_enabled: gameplay.trigger_enabled,
                     show_discard_legend,
                     show_play_legend,
                     hud_text: &mut hud_text,
@@ -1351,6 +1365,9 @@ impl SceneBehavior for GameplayScene {
         // Dora indicator — display-only focus target so a controller
         // player can read what the brass plinth represents.
         focus_rect_graph.push((FocusTarget::Dora, dora_rect));
+        if let Some(rect) = boss_icon_rect {
+            focus_rect_graph.push((FocusTarget::Boss, rect));
+        }
         focus_rect_graph.push((FocusTarget::RoundWind, round_wind_rect));
 
         // Focus inspect: [`crate::ui::tooltip`] frame + wrapped text (shop uses the same helper).
@@ -1384,7 +1401,9 @@ impl SceneBehavior for GameplayScene {
                                 RelicId::MirrorTile => {
                                     "[ ] reorder · copy = relic to the right".to_string()
                                 }
-                                RelicId::ShadowHand => "Copy = leftmost relic (not Shadow Hand)".to_string(),
+                                RelicId::ShadowHand => {
+                                    "Copy = leftmost relic (not Shadow Hand)".to_string()
+                                }
                                 _ => format!("Tier · {rare}"),
                             };
                             push_focus_tooltip_panel_2d(
@@ -1502,6 +1521,67 @@ impl SceneBehavior for GameplayScene {
                             },
                         );
                     }
+                    FocusTarget::Boss => {
+                        if !boss_title_text.is_empty() {
+                            push_focus_tooltip_panel_2d(
+                                &mut inspect_tooltip_quads,
+                                &mut inspect_tooltip_texts,
+                                FocusTooltipPanelParams {
+                                    window_w: layout.window_w,
+                                    window_h: layout.window_h,
+                                    anchor_rect: Some(rect),
+                                    title: &boss_title_text,
+                                    desc: &boss_rule_text,
+                                    cta: "Boss Rule",
+                                    accent_color: color::RUBY,
+                                    hover_is_owned: false,
+                                    skip_title_block: false,
+                                    avoid_rect: None,
+                                },
+                            );
+                        }
+                    }
+                    FocusTarget::Peg(kind) => {
+                        let (title, remaining, label, accent) = match kind {
+                            PegKind::Hands => (
+                                "Plays",
+                                gameplay.plays_remaining,
+                                if gameplay.plays_remaining == 1 {
+                                    "play"
+                                } else {
+                                    "plays"
+                                },
+                                color::JADE,
+                            ),
+                            PegKind::Discards => (
+                                "Discards",
+                                gameplay.discards_remaining,
+                                if gameplay.discards_remaining == 1 {
+                                    "discard"
+                                } else {
+                                    "discards"
+                                },
+                                color::AMBER,
+                            ),
+                        };
+                        let desc = format!("You have {remaining} {label} remaining.");
+                        push_focus_tooltip_panel_2d(
+                            &mut inspect_tooltip_quads,
+                            &mut inspect_tooltip_texts,
+                            FocusTooltipPanelParams {
+                                window_w: layout.window_w,
+                                window_h: layout.window_h,
+                                anchor_rect: Some(rect),
+                                title,
+                                desc: &desc,
+                                cta: "",
+                                accent_color: accent,
+                                hover_is_owned: false,
+                                skip_title_block: false,
+                                avoid_rect: None,
+                            },
+                        );
+                    }
                     FocusTarget::Gold => {
                         push_focus_tooltip_panel_2d(
                             &mut inspect_tooltip_quads,
@@ -1530,7 +1610,7 @@ impl SceneBehavior for GameplayScene {
                                 anchor_rect: Some(rect),
                                 title: "Undo discard",
                                 desc: "Confirm to restore your previous hand and wall before the last discard. Clears when you play, sort, use a consumable, or discard again.",
-                                cta: "D-pad Up: Discard · [ ] / LB RB: HUD cycle",
+                                cta: "",
                                 accent_color: color::CHAMPAGNE,
                                 hover_is_owned: false,
                                 skip_title_block: false,

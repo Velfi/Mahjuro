@@ -1,12 +1,13 @@
 //! Split-pane Chronicle ledger for the Archive tab: run log (left) + career stats (right).
 //!
-//! Cool twilight sheet over the dimmed archive room; brass rim; walnut-compatible typography.
+//! Dark walnut sheet over the dimmed archive room; brass rim; white-on-walnut typography.
 
 use crate::core::progression::{PlayerProgress, RunOutcome, RunRecord};
 use crate::core::yaku::YakuKind;
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, TextAlign, TextLabel};
 use crate::scenes::archive_career;
+use crate::ui::clip::intersect_rect;
 use crate::ui::tooltip::FRAME_BORDER_PX;
 
 /// Cap score history columns when many runs exist.
@@ -320,23 +321,18 @@ pub fn chronicle_run_log_hit_rects(
     let panes = chronicle_pane_layout(w, h, panel);
     let m = layout_constants(h);
     let list_top = panes.inner_y + m.title_h + m.gap * 0.75;
+    let clip_rect = [panes.left_x, panes.inner_y, panes.left_w, panes.inner_h];
     (0..entry_count)
-        .map(|i| {
+        .filter_map(|i| {
             let y = list_top + i as f32 * panes.run_row_h - scroll;
-            [panes.left_x, y, panes.left_w, panes.run_row_h]
+            intersect_rect([panes.left_x, y, panes.left_w, panes.run_row_h], clip_rect)
         })
-        .filter(|r| r[1] + r[3] > panes.inner_y && r[1] < panes.inner_y + panes.inner_h)
         .collect()
 }
 
 #[inline]
 fn pane_clip_y(panes: ChroniclePaneLayout) -> (f32, f32) {
     (panes.inner_y, panes.inner_y + panes.inner_h)
-}
-
-#[inline]
-fn rect_in_clip(y: f32, h: f32, clip_top: f32, clip_bottom: f32) -> bool {
-    y + h > clip_top && y < clip_bottom
 }
 
 fn push_label_clipped(
@@ -346,13 +342,9 @@ fn push_label_clipped(
     clip_bottom: f32,
     mut label: TextLabel,
 ) {
-    if rect_in_clip(rect[1], rect[3], clip_top, clip_bottom) {
-        let clip_y0 = rect[1].max(clip_top);
-        let clip_y1 = (rect[1] + rect[3]).min(clip_bottom);
-        if clip_y1 <= clip_y0 {
-            return;
-        }
-        label.clip_rect = Some([rect[0], clip_y0, rect[2].max(0.0), clip_y1 - clip_y0]);
+    let clip_rect = [rect[0], clip_top, rect[2], (clip_bottom - clip_top).max(0.0)];
+    if let Some(clipped) = intersect_rect(rect, clip_rect) {
+        label.clip_rect = Some(clipped);
         out.push(label);
     }
 }
@@ -364,8 +356,9 @@ fn push_quad_clipped(
     clip_bottom: f32,
     color: [f32; 4],
 ) {
-    if rect_in_clip(rect[1], rect[3], clip_top, clip_bottom) {
-        push_quad(out, rect, color);
+    let clip_rect = [rect[0], clip_top, rect[2], (clip_bottom - clip_top).max(0.0)];
+    if let Some(clipped) = intersect_rect(rect, clip_rect) {
+        push_quad(out, clipped, color);
     }
 }
 
@@ -420,12 +413,7 @@ fn push_ledger_sheet(
     push_quad(
         out,
         [inner_x, inner_y, inner_w, inner_h],
-        [
-            color::TWILIGHT[0],
-            color::TWILIGHT[1],
-            color::TWILIGHT[2],
-            0.94,
-        ],
+        color::alpha(color::WALNUT_DEEP, 0.95),
     );
 }
 
@@ -438,7 +426,7 @@ fn push_ruled_lines(
     scroll: f32,
     spacing: f32,
 ) {
-    let line_c = color::alpha(color::UMBER, 0.32);
+    let line_c = color::alpha(color::BRASS, 0.18);
     let mut y = y0 - scroll % spacing;
     while y < y0 + h {
         if y + 1.0 > y0 {
@@ -522,7 +510,12 @@ fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
 
     for list_i in 0..entry_count {
         let row_y = list_top + list_i as f32 * panes.run_row_h - scroll;
-        if !rect_in_clip(row_y, panes.run_row_h, clip_top, clip_bottom) {
+        if intersect_rect(
+            [panes.left_x, row_y, panes.left_w, panes.run_row_h],
+            [panes.left_x, clip_top, panes.left_w, (clip_bottom - clip_top).max(0.0)],
+        )
+        .is_none()
+        {
             continue;
         }
         let selected = focused == Some(list_i);
@@ -532,7 +525,7 @@ fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
                 [panes.left_x, row_y, panes.left_w, panes.run_row_h],
                 clip_top,
                 clip_bottom,
-                color::alpha(color::WALNUT_SOFT, 0.88),
+                color::alpha(color::WALNUT_RAISED, 0.92),
             );
             push_quad_clipped(
                 out_quads,
@@ -1005,7 +998,7 @@ fn push_career_pane(h: f32, draw: ChroniclePaneDraw<'_>) {
                 [x, y0, col_w, 1.25],
                 clip_top,
                 clip_bottom,
-                color::alpha(color::TALLOW, 0.45),
+                color::alpha(color::PARCHMENT, 0.45),
             );
         }
         push_quad_clipped(
@@ -1206,7 +1199,7 @@ fn push_career_pane(h: f32, draw: ChroniclePaneDraw<'_>) {
                 ],
                 clip_top,
                 clip_bottom,
-                color::alpha(color::FELT_LIT, 0.75),
+                color::alpha(color::WALNUT_SOFT, 0.75),
             );
             let count_rect = [
                 bar_x0 + bw + 6.0,
@@ -1272,7 +1265,7 @@ pub fn push_chronicle_dashboard(
             panes.gutter,
             panes.inner_h,
         ],
-        color::alpha(color::UMBER, 0.35),
+        color::alpha(color::BRASS, 0.16),
     );
 
     push_run_log(
@@ -1318,16 +1311,11 @@ pub fn push_chronicle_dashboard(
     }
 }
 
-/// Heavier twilight vignette over the archive room.
+/// Heavier dark-walnut vignette over the archive room.
 pub fn chronicle_dim_gradient(panel: [f32; 4]) -> GradientQuadInstance {
     GradientQuadInstance {
         rect: panel,
-        color: [
-            color::TWILIGHT_INK[0],
-            color::TWILIGHT_INK[1],
-            color::TWILIGHT_INK[2],
-            0.88,
-        ],
+        color: color::alpha(color::WALNUT_INK, 0.90),
         feather: [0.12, 0.0, 0.0, 0.0],
     }
 }

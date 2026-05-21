@@ -263,6 +263,7 @@ impl ShopCommandOutcome {
 pub struct GameplayReadModel {
     pub blind: BlindKind,
     pub blind_label: String,
+    pub boss_kind: Option<BossKind>,
     pub boss_ofuda_title: String,
     pub boss_ofuda_rule_text: String,
     pub run_number: u32,
@@ -685,6 +686,7 @@ impl<'a> GameEngine<'a> {
         GameplayReadModel {
             blind: run.blind,
             blind_label,
+            boss_kind: run.boss.upcoming,
             boss_ofuda_title,
             boss_ofuda_rule_text,
             run_number: run.run_number,

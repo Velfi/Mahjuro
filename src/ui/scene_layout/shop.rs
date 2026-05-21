@@ -18,8 +18,8 @@ impl Default for ShopPositions {
             celeb_pack_reveal: Placement::at(-3.352_761_3e-8, 0.55, 36.887_23),
             celeb_zodiac: Placement {
                 nx: 0.0,
-                ny: 0.0,
-                lift_mm: -523.66,
+                ny: -0.12,
+                lift_mm: 0.0,
                 rx_deg: -12.0,
                 ry_deg: 0.0,
                 rz_deg: 0.0,

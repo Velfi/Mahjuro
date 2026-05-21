@@ -122,10 +122,7 @@ impl WgpuRenderer {
         );
         self.register_placement_shadow_slot(DrawKind::Ribbon, slot_i);
         if self.placement_shadow_writes(frame)
-            && crate::render::lit_mesh::lit_mesh_casts_directional_shadow(
-                silk_mat.kind,
-                params_w,
-            )
+            && crate::render::lit_mesh::lit_mesh_casts_directional_shadow(silk_mat.kind, params_w)
         {
             self.write_lit_mesh_shadow(
                 shadow,

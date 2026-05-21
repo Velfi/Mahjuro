@@ -141,7 +141,7 @@ impl TilePackKind {
     /// halo on the shop counter — the two MUST agree, which is why the
     /// canonical value lives in [`crate::render::pack_palette`].
     ///
-    /// Each pack nudges off canonical `CINNABAR` so the seals read as a
+    /// Each pack nudges off canonical `RUBY` so the seals read as a
     /// *family* of ceremonial reds rather than six unrelated splotches.
     pub fn seal_color(self) -> [f32; 4] {
         crate::render::pack_palette::for_kind(self).seal

@@ -265,12 +265,6 @@ impl ShopScene {
             last_frame: Instant::now(),
             age_secs: 0.0,
             leave_bell_hover_anim: 0.0,
-            journal_open_amount: 0.0,
-            journal_open_target: 0.0,
-            journal_open_lock: None,
-            journal_transition: None,
-            journal_transition_locked_at: None,
-            journal_was_open: false,
             relic_glow_starts: rustc_hash::FxHashMap::default(),
             drawn_room_gltf_height_scale: std::cell::Cell::new(
                 crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE,

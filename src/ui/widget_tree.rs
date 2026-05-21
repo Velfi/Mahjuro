@@ -43,6 +43,7 @@
 use crate::render::theme::{ButtonState, ButtonVariant, metrics};
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
 use crate::scenes::ButtonDef;
+use crate::ui::clip::intersect_rect;
 use crate::ui::focus_nav::push_focus_ring;
 use crate::ui::input::UiAction;
 use crate::ui::smooth_scroll::SmoothScroll;
@@ -154,6 +155,8 @@ pub struct TreeState {
     content_height: f32,
     /// Anchor height from the last layout.
     anchor_height: f32,
+    /// Scroll viewport clip rect in screen pixels.
+    scroll_clip_rect: Option<[f32; 4]>,
 }
 
 #[derive(Clone, Copy)]
@@ -180,6 +183,7 @@ impl TreeState {
             scroll_offset_px: 0.0,
             content_height: 0.0,
             anchor_height: 0.0,
+            scroll_clip_rect: None,
         }
     }
 
@@ -343,6 +347,7 @@ pub struct TreeInput<'a> {
 struct LayoutInfo {
     content_height: f32,
     anchor_height: f32,
+    anchor_rect: [f32; 4],
 }
 
 fn layout_tree<A: Copy>(tree: &Tree<A>, window: (f32, f32), out: &mut Vec<LaidOut>) -> LayoutInfo {
@@ -366,6 +371,7 @@ fn layout_tree<A: Copy>(tree: &Tree<A>, window: (f32, f32), out: &mut Vec<LaidOu
     LayoutInfo {
         content_height,
         anchor_height: anchor[3],
+        anchor_rect: anchor,
     }
 }
 
@@ -506,6 +512,7 @@ impl TreeState {
         // ── Autoscroll: apply pixel offset when content overflows ────
         let overflow = (self.content_height - self.anchor_height).max(0.0);
         if overflow > 0.0 {
+            self.scroll_clip_rect = Some(info.anchor_rect);
             // Feed mouse-wheel input into smooth scroll.
             // SmoothScroll works in "entry units" — we use pixels directly
             // by treating 1 unit = 1 pixel of scroll.
@@ -529,6 +536,7 @@ impl TreeState {
                 l.rect[1] -= self.scroll_offset_px;
             }
         } else {
+            self.scroll_clip_rect = None;
             self.scroll_offset_px = 0.0;
             self.scroll.jump(0.0);
         }
@@ -712,6 +720,7 @@ impl TreeState {
             layout: &layout_scratch,
             idx: &mut idx,
             window: self.last_window,
+            clip_rect: self.scroll_clip_rect,
         };
         draw_node(&tree.root, frame, &mut ctx);
     }
@@ -722,6 +731,7 @@ struct DrawNodeCtx<'a, 'b> {
     layout: &'a [LaidOut],
     idx: &'b mut usize,
     window: (f32, f32),
+    clip_rect: Option<[f32; 4]>,
 }
 
 fn draw_node<A: Copy>(node: &Node<A>, frame: &mut TreeFrame<'_>, ctx: &mut DrawNodeCtx<'_, '_>) {
@@ -739,7 +749,7 @@ fn draw_node<A: Copy>(node: &Node<A>, frame: &mut TreeFrame<'_>, ctx: &mut DrawN
                 .unwrap_or([0.0, 0.0, 0.0, 0.0]);
             *ctx.idx += 1;
             let is_focused = ctx.focused == Some(item.id);
-            draw_item(item, rect, is_focused, frame, ctx.window);
+            draw_item(item, rect, is_focused, ctx.clip_rect, frame, ctx.window);
         }
     }
 }
@@ -761,9 +771,18 @@ fn draw_item<A: Copy>(
     item: &Item<A>,
     rect: [f32; 4],
     focused: bool,
+    clip_rect: Option<[f32; 4]>,
     frame: &mut TreeFrame<'_>,
     window: (f32, f32),
 ) {
+    let draw_rect = if let Some(clip) = clip_rect {
+        let Some(clipped) = intersect_rect(rect, clip) else {
+            return;
+        };
+        clipped
+    } else {
+        rect
+    };
     let state = if !item.enabled {
         ButtonState::Disabled
     } else if focused {
@@ -774,23 +793,19 @@ fn draw_item<A: Copy>(
 
     if focused {
         let scale = metrics::scene_scale(window.0, window.1);
-        push_focus_ring(rect, scale, window.0, window.1, frame.instances);
+        push_focus_ring(draw_rect, scale, window.0, window.1, frame.instances);
     }
 
-    widget::push_button(
-        frame.instances,
-        frame.labels,
-        frame.buttons,
-        widget::ButtonSpec {
-            rect,
-            label: &item.label,
-            variant: item.variant,
-            state,
-            action: UiAction::Confirm,
-        },
-    );
-    frame.buttons.pop();
-    push_scene_button_for_item(frame, rect, item.id, &item.tooltip);
+    let colors = crate::render::theme::button_colors(item.variant, state);
+    widget::push_panel_colored(frame.instances, draw_rect, colors.bg, colors.border);
+    frame.labels.push(TextLabel {
+        rect,
+        text: item.label.clone(),
+        color: colors.text,
+        clip_rect,
+        ..Default::default()
+    });
+    push_scene_button_for_item(frame, draw_rect, item.id, &item.tooltip);
 }
 
 #[cfg(test)]
