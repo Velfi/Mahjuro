@@ -59,6 +59,7 @@ impl WgpuRenderer {
             let mut obj3d_wood_slot: usize = 0;
             let mut obj3d_book_slot: usize = 0;
             let mut obj3d_relic_slot: usize = 0;
+            let mut obj3d_boss_icon_slot: usize = 0;
             let mut obj3d_pack_slot: usize = 0;
             let mut obj3d_talisman_slot: usize = 0;
             let mut obj3d_ribbon_slot: usize = 0;
@@ -119,6 +120,7 @@ impl WgpuRenderer {
                         obj.kind,
                         Object3dKind::Candle { .. }
                             | Object3dKind::ZodiacRibbon { .. }
+                            | Object3dKind::Pack { .. }
                             | Object3dKind::Talisman { .. }
                             | Object3dKind::Primitive { .. }
                             | Object3dKind::WoodTablet { .. }
@@ -682,6 +684,119 @@ impl WgpuRenderer {
                                 slot_i,
                             );
                         }
+                        Object3dKind::BossIcon {
+                            kind,
+                            glow,
+                            pick_id,
+                        } => {
+                            if obj3d_boss_icon_slot >= MAX_BOSS_ICON_SLOTS {
+                                continue;
+                            }
+                            self.ensure_boss_icon_gpu(*kind);
+                            let slot_i = obj3d_boss_icon_slot;
+                            obj3d_boss_icon_slot += 1;
+                            let boss_arr_name = obj
+                                .arrange_name
+                                .unwrap_or("collection.boss_icon");
+                            let model = self.apply_placement_rotation(boss_arr_name, model);
+                            let g = glow.clamp(0.0, 1.0);
+                            let base_color = if g > 0.0 {
+                                let target = [1.55, 1.32, 0.78, obj.color[3]];
+                                [
+                                    obj.color[0] + (target[0] - obj.color[0]) * g,
+                                    obj.color[1] + (target[1] - obj.color[1]) * g,
+                                    obj.color[2] + (target[2] - obj.color[2]) * g,
+                                    obj.color[3],
+                                ]
+                            } else {
+                                obj.color
+                            };
+                            let material = boss_icon_material_params(base_color, g);
+                            self.boss_icon_instances[slot_i].write_uniform_with_decal(
+                                &self.queue,
+                                view_proj_arr,
+                                model,
+                                material,
+                                false,
+                            );
+                            self.register_placement_shadow_slot(DrawKind::BossIcon, slot_i);
+                            if self.placement_shadow_writes(frame) {
+                                self.write_lit_mesh_shadow(
+                                    &mut shadow,
+                                    &self.boss_icon_instances[slot_i],
+                                    model,
+                                    material.kind,
+                                );
+                            }
+                            let want_tex = self.boss_icon_textures.contains_key(kind).then_some(*kind);
+                            if self.boss_icon_slot_texture[slot_i] != want_tex {
+                                let view = match want_tex {
+                                    Some(bk) => &self.boss_icon_textures[&bk].view,
+                                    None => &self.lit_mesh_white_view,
+                                };
+                                let relief_view = match want_tex {
+                                    Some(bk) => &self.boss_icon_textures[&bk].relief_view,
+                                    None => &self.lit_mesh_relief_default_view,
+                                };
+                                let inst = &mut self.boss_icon_instances[slot_i];
+                                inst.bind_group =
+                                    self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                        label: Some("boss-icon-bg"),
+                                        layout: &self.lit_mesh_material_layout,
+                                        entries: &[
+                                            wgpu::BindGroupEntry {
+                                                binding: 0,
+                                                resource: inst.uniform_buffer.as_entire_binding(),
+                                            },
+                                            wgpu::BindGroupEntry {
+                                                binding: 1,
+                                                resource: wgpu::BindingResource::TextureView(view),
+                                            },
+                                            wgpu::BindGroupEntry {
+                                                binding: 2,
+                                                resource: wgpu::BindingResource::Sampler(
+                                                    &self.tile_sampler,
+                                                ),
+                                            },
+                                            wgpu::BindGroupEntry {
+                                                binding: 3,
+                                                resource: wgpu::BindingResource::TextureView(
+                                                    relief_view,
+                                                ),
+                                            },
+                                        ],
+                                    });
+                                self.boss_icon_slot_texture[slot_i] = want_tex;
+                            }
+                            if g > 0.0 {
+                                let projected_rect = project_unit_cube_rect(model);
+                                let [rx, ry, rw, rh] = projected_rect;
+                                let pad_x = rw * 0.85;
+                                let pad_y = rh * 0.95;
+                                relic_glows.push(GpuInstance {
+                                    rect: [
+                                        rx - pad_x,
+                                        ry - pad_y,
+                                        rw + pad_x * 2.0,
+                                        rh + pad_y * 2.0,
+                                    ],
+                                    color: [1.0, 0.88, 0.62, 0.85 * g],
+                                    user: 0,
+                                });
+                            }
+                            let _ = pick_id;
+                            self.last_debug_pickables.push((
+                                boss_arr_name.to_string(),
+                                model,
+                                glam::Vec3::splat(0.5),
+                                0.0,
+                            ));
+                            WgpuRenderer::push_object3d_draw(
+                                object3d_draw_list,
+                                DrawKind::BossIcon,
+                                slot_i,
+                            );
+                        }
                         Object3dKind::Pack { kind, pick_id } => {
                             if obj3d_pack_slot >= self.pack_instances.len() {
                                 continue;
@@ -715,6 +830,11 @@ impl WgpuRenderer {
                                 specular_strength: 0.70,
                                 specular_power: 48.0,
                             };
+                            // Foil packs must keep `material_params.w == 0` so the
+                            // shader composites the cover decal and streak/holo
+                            // bands (`w > 0.5` is the talisman-foil path).
+                            // Showcase pack celebrations already disable the
+                            // directional shadow map in `shadow_setup.rs`.
                             self.pack_instances[slot_i].write_uniform_with_decal(
                                 &self.queue,
                                 view_proj_arr,
@@ -723,7 +843,12 @@ impl WgpuRenderer {
                                 false,
                             );
                             self.register_placement_shadow_slot(DrawKind::Pack, slot_i);
-                            if self.placement_shadow_writes(frame) {
+                            if self.placement_shadow_writes(frame)
+                                && crate::render::lit_mesh::lit_mesh_casts_directional_shadow(
+                                    material.kind,
+                                    0.0,
+                                )
+                            {
                                 self.write_lit_mesh_shadow(
                                     &mut shadow,
                                     &self.pack_instances[slot_i],

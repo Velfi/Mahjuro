@@ -6,7 +6,7 @@
 use std::time::Instant;
 
 use crate::audio::SfxId;
-use crate::core::boss::{all_bosses, final_bosses};
+use crate::core::boss::{BossKind, all_bosses, final_bosses};
 use crate::core::progression::is_transformation_successor_relic;
 use crate::core::relic::{RelicId, all_relic_defs};
 use crate::core::talisman::TalismanKind;
@@ -15,7 +15,8 @@ use crate::core::zodiac::ZodiacKind;
 use crate::game::event_bus::GameEvent;
 use crate::render::archive_glb;
 use crate::render::draw_cmd::{
-    CameraParams, Object3d, Object3dKind, ScenePunctualLight, UiFrame, camera_facing_euler_xyz_rad,
+    CameraParams, Object3d, Object3dKind, ScenePunctualLight, UiFrame,
+    camera_facing_euler_xyz_rad,
 };
 use crate::render::ribbon_mesh::{ZodiacRibbonSpec, zodiac_ribbon_object3d};
 use crate::render::room_glb;
@@ -89,6 +90,11 @@ enum Tab {
     Chronicle,
 }
 
+/// Archive grid / featured talisman `Object3d::extents` vs `plate_w` / `closeup_size`.
+/// Mesh local AABB is 1.0 × 1.4 × 0.18; keep cubby margin so pendants do not
+/// overlap neighbors when focused.
+const ARCHIVE_TALISMAN_EXTENTS: [f32; 3] = [1.12, 1.55, 0.29];
+
 const TABS: [Tab; 5] = [
     Tab::Relics,
     Tab::Yaku,
@@ -127,9 +133,8 @@ enum ArtifactKind {
     Relic(RelicId),
     Talisman(TalismanKind),
     Zodiac(ZodiacKind),
-    /// Yaku, rules, and bosses don't have per-item 3D models — they
-    /// render as engraved plaques on the table.
-    PlaqueOnly,
+    /// Boss encounter — flat icon from the boss atlas (no 3D mesh).
+    Boss(BossKind),
     /// Index into [`crate::core::progression::PlayerProgress::run_history`].
     ChronicleRun(usize),
     /// Aggregate career view (run-log row 0).
@@ -259,6 +264,13 @@ impl CollectionScene {
     /// Headless screenshot: open the Chronicle tab with a clean scroll/camera state.
     pub fn prepare_chronicle_for_screenshot(&mut self) {
         *self = Self::with_active_tab(Tab::Chronicle);
+    }
+
+    /// Headless screenshot: open the Bosses tab on page 0 with the first entry focused.
+    pub fn prepare_bosses_for_screenshot(&mut self) {
+        *self = Self::with_active_tab(Tab::Bosses);
+        self.focused_row = Some(0);
+        self.archive_page = 0;
     }
 
     pub fn is_chronicle_tab(&self) -> bool {
@@ -1206,7 +1218,9 @@ impl CollectionScene {
             // reads the same visually (relic silhouette/medallion vs.
             // tinted plaque). No `glow` on the relic here — the grid
             // cell already carries the pulsing selection halo.
-            let closeup_size = h * 0.28;
+            // Archive room: size to the cabinet cell so the prop sits on the authored
+            // plinth; procedural fallback keeps the larger HUD close-up.
+            let closeup_size = if use_archive { cell * 0.95 } else { h * 0.28 };
             let closeup_px = cab_px_x + closeup_wx;
             // Anchor the close-up to the `ARCHIVE_SPAWN_FOCUSED_ITEM` marker whenever
             // the archive room is loaded. Orbit inspect uses the same marker for
@@ -1231,11 +1245,22 @@ impl CollectionScene {
             } else {
                 (closeup_px, hud_py, hud_wz)
             };
+            let (closeup_placement, closeup_arrange) = if use_archive {
+                (
+                    &self.positions.pedestal,
+                    "collection.pedestal",
+                )
+            } else {
+                (
+                    &self.positions.featured_artifact,
+                    "collection.featured_artifact",
+                )
+            };
             let closeup_anchor = crate::ui::placement::PlacementAnchor::new(
                 [closeup_ax, closeup_ay, closeup_az],
                 rot_fixed_axes_deg(90.0, 0.0, 0.0),
-                &self.positions.featured_artifact,
-                "collection.featured_artifact",
+                closeup_placement,
+                closeup_arrange,
                 ctx.layout,
             );
             let closeup_bright = {
@@ -1286,7 +1311,11 @@ impl CollectionScene {
                     // material sheen readable on the featured tablet too.
                     hud_plaques.push(with_inspect_spin(Object3d {
                         pos: closeup_anchor.pos,
-                        extents: [closeup_size * 1.40, closeup_size * 2.0, closeup_size * 0.36],
+                        extents: [
+                            closeup_size * ARCHIVE_TALISMAN_EXTENTS[0],
+                            closeup_size * ARCHIVE_TALISMAN_EXTENTS[1],
+                            closeup_size * ARCHIVE_TALISMAN_EXTENTS[2],
+                        ],
                         rotation: euler_xyz_rad_from_deg(-90.0, 14.0, 0.0),
                         color: closeup_bright,
                         kind: Object3dKind::Talisman { kind: *tk },
@@ -1309,49 +1338,16 @@ impl CollectionScene {
                         },
                     )));
                 }
-                ArtifactKind::PlaqueOnly => {
-                    let label = if boss.unlocked {
-                        boss.name.clone()
-                    } else {
-                        String::from("???")
-                    };
-                    let color = if boss.unlocked {
-                        // Match gameplay hanging plaque: neutral tint so lacquer +
-                        // gilded decal read correctly (tier halo was washing the wood).
-                        [1.0, 1.0, 1.0, 1.0]
-                    } else {
-                        [
-                            boss.accent[0] * 0.22 + 0.02,
-                            boss.accent[1] * 0.22 + 0.02,
-                            boss.accent[2] * 0.22 + 0.02,
-                            1.0,
-                        ]
-                    };
-                    use crate::render::primitive::{DecalLayout, DecalSpec, MaterialSpec, MeshId};
-                    let closeup_silhouette = !boss.unlocked;
-                    let closeup_material = if closeup_silhouette {
-                        // Silhouette overrides decal anyway, but keep
-                        // the spec tidy.
-                        MaterialSpec::lacquered_wood_flat()
-                    } else {
-                        MaterialSpec::lacquered_wood_flat().with_decal(DecalSpec {
-                            text: label,
-                            layout: DecalLayout::Fit {
-                                target_short_edge: crate::render::decal::PLAQUE_DECAL_HEIGHT,
-                            },
-                        })
-                    };
+                ArtifactKind::Boss(kind) => {
                     hud_plaques.push(with_inspect_spin(Object3d {
                         pos: closeup_anchor.pos,
-                        extents: [closeup_size, closeup_size, closeup_size * 0.1],
+                        extents: [closeup_size, closeup_size * 0.04, closeup_size],
                         rotation: closeup_anchor.object3d_rotation(),
-                        color,
-                        kind: Object3dKind::Primitive {
-                            shape: MeshId::BeveledSlab,
-                            material: closeup_material,
+                        color: [1.0, 1.0, 1.0, 1.0],
+                        kind: Object3dKind::BossIcon {
+                            kind: *kind,
+                            glow: 0.0,
                             pick_id: None,
-                            shadow_caster: false,
-                            silhouette: closeup_silhouette,
                         },
                         hover_target: 1.0,
                         anim_id: 0xC105E0,
@@ -2664,7 +2660,7 @@ fn tab_artifacts(tab: Tab, progress: &crate::core::progression::PlayerProgress) 
             .map(|def| Artifact {
                 name: def.name.to_string(),
                 unlocked: true,
-                kind: ArtifactKind::PlaqueOnly,
+                kind: ArtifactKind::Boss(def.kind),
                 accent: def.tier.halo_color(),
             })
             .collect(),
@@ -2742,13 +2738,7 @@ fn description_for(
             "Levelled by the {} zodiac ribbon (+0.5 mult, +20 chips per level).",
             kind.name()
         ),
-        ArtifactKind::PlaqueOnly => {
-            // Bosses route here (yaku now render as ribbons). Bosses
-            // carry their own description text.
-            boss_by_name(&art.name)
-                .map(str::to_string)
-                .unwrap_or_default()
-        }
+        ArtifactKind::Boss(kind) => kind.def().description.to_string(),
         ArtifactKind::ChronicleSummary => {
             let n = archive_career::chronicle_indices_recent_first(progress).len();
             format!(
@@ -2762,14 +2752,6 @@ fn description_for(
             .map(archive_career::chronicle_run_description)
             .unwrap_or_else(|| "Missing run record.".to_string()),
     }
-}
-
-fn boss_by_name(name: &str) -> Option<&'static str> {
-    all_bosses()
-        .iter()
-        .chain(final_bosses().iter())
-        .find(|def| def.name == name)
-        .map(|def| def.description)
 }
 
 /// Profile-wide counters for the focused artifact, formatted for the
@@ -2798,20 +2780,12 @@ fn stats_for(art: &Artifact, progress: &crate::core::progression::PlayerProgress
                 lines.push(format!("Used: {}", n));
             }
         }
-        ArtifactKind::PlaqueOnly => {
-            // Bosses route here. Look up the kind by name since the
-            // Artifact doesn't carry it for plaque-only entries.
-            if let Some(def) = all_bosses()
-                .iter()
-                .chain(final_bosses().iter())
-                .find(|d| d.name == art.name)
-            {
-                if let Some(n) = progress.boss_times_encountered.get(&def.kind).copied() {
-                    lines.push(format!("Encountered: {}", n));
-                }
-                if let Some(n) = progress.boss_times_defeated.get(&def.kind).copied() {
-                    lines.push(format!("Defeated: {}", n));
-                }
+        ArtifactKind::Boss(kind) => {
+            if let Some(n) = progress.boss_times_encountered.get(kind).copied() {
+                lines.push(format!("Encountered: {}", n));
+            }
+            if let Some(n) = progress.boss_times_defeated.get(kind).copied() {
+                lines.push(format!("Defeated: {}", n));
             }
         }
         ArtifactKind::ChronicleSummary => {}
@@ -3002,7 +2976,11 @@ fn collection_push_grid_cell_object3d(p: CollectionGridCellObject3d<'_>) {
         ArtifactKind::Talisman(tk) => {
             plaques.push(Object3d {
                 pos: [cx, nameplate_py, cz],
-                extents: [plate_w * 1.40, plate_w * 2.0, plate_w * 0.36],
+                extents: [
+                    plate_w * ARCHIVE_TALISMAN_EXTENTS[0],
+                    plate_w * ARCHIVE_TALISMAN_EXTENTS[1],
+                    plate_w * ARCHIVE_TALISMAN_EXTENTS[2],
+                ],
                 rotation: euler_xyz_rad_from_deg(-90.0, 14.0, 0.0),
                 color: bright,
                 kind: Object3dKind::Talisman { kind: *tk },
@@ -3030,26 +3008,18 @@ fn collection_push_grid_cell_object3d(p: CollectionGridCellObject3d<'_>) {
                 arrange_name: Some(zodiac_anchor.arrange_name),
             }));
         }
-        ArtifactKind::PlaqueOnly => {
-            use crate::render::primitive::{DecalLayout, DecalSpec, MaterialSpec, MeshId};
-            let lum = fade.max(if is_focus { 1.0 } else { 0.55 }).min(1.0);
-            let wood_tint = [lum, lum, lum, 1.0];
+        ArtifactKind::Boss(kind) => {
+            let f = fade.max(if is_focus { 1.0 } else { 0.55 });
+            let lum = f.min(1.0);
             plaques.push(Object3d {
                 pos: [cx, nameplate_py, cz],
-                extents: [plate_w, plate_h, plate_thick],
-                rotation: euler_xyz_rad_from_deg(90.0, 0.0, 0.0),
-                color: wood_tint,
-                kind: Object3dKind::Primitive {
-                    shape: MeshId::BeveledSlab,
-                    material: MaterialSpec::lacquered_wood_flat().with_decal(DecalSpec {
-                        text: boss.name.clone(),
-                        layout: DecalLayout::Fit {
-                            target_short_edge: crate::render::decal::PLAQUE_DECAL_HEIGHT,
-                        },
-                    }),
-                    pick_id: None,
-                    shadow_caster: false,
-                    silhouette: false,
+                extents: [plate_w, plate_w * 0.04, plate_w],
+                rotation: euler_xyz_rad_from_deg(180.0, 0.0, 0.0),
+                color: [lum, lum, lum, 1.0],
+                kind: Object3dKind::BossIcon {
+                    kind: *kind,
+                    glow: if is_focus { 0.5 } else { 0.0 },
+                    pick_id: Some(boss_i as u32),
                 },
                 hover_target: if is_focus { 1.0 } else { 0.0 },
                 anim_id: boss_i as u64,

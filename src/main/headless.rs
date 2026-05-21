@@ -299,6 +299,12 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
             unlock_collection = true;
             (Scene::Collection(scenes::CollectionScene::new()), false)
         }
+        "archive_bosses" | "collection_bosses" => {
+            unlock_collection = true;
+            let mut coll = scenes::CollectionScene::new();
+            coll.prepare_bosses_for_screenshot();
+            (Scene::Collection(coll), false)
+        }
         "chronicle" | "archive_chronicle" => {
             unlock_collection = true;
             let mut coll = scenes::CollectionScene::new();
@@ -443,7 +449,7 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
         }
         other => {
             anyhow::bail!(
-                "unsupported --scene '{other}' (supported: collection, archive, chronicle, \
+                "unsupported --scene '{other}' (supported: collection, archive, archive_bosses, chronicle, \
                 yaku_journal, gameplay, gameplay_hero, pick_blind, shop, \
                 main_menu_exterior, tile_select, transition_playground, \
                 material_viewer, relic_unlock, game_over_level_up, meta_level_up, \

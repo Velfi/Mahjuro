@@ -131,8 +131,8 @@ pub struct WgpuRenderer {
     ember_drift_pipeline: wgpu::RenderPipeline,
     golden_dust_pipeline: wgpu::RenderPipeline,
     moonlit_water_pipeline: wgpu::RenderPipeline,
-    // Owns the GPU resource that `moon_albedo_bind_group` samples from.
-    moon_albedo_bind_group: wgpu::BindGroup,
+    // Owns the GPU resource that `moonlit_water_bind_group` samples from.
+    moonlit_water_bind_group: wgpu::BindGroup,
     sunlit_water_pipeline: wgpu::RenderPipeline,
     /// Expensive shooting-star cascade transition renders into a half-res
     /// offscreen target to keep costs bounded at large resolutions; these
@@ -566,6 +566,11 @@ pub struct WgpuRenderer {
     /// bind group already points at the texture for `id`; `None` means the
     /// flat-white fallback. Avoids rebuilding bind groups every frame.
     relic_slot_texture: Vec<Option<RelicId>>,
+    /// Per-slot boss-icon meshes/textures (archive catalog).
+    boss_icon_instances: Vec<LitMeshInstance>,
+    boss_icon_meshes: rustc_hash::FxHashMap<crate::core::boss::BossKind, LitMeshGpu>,
+    boss_icon_textures: rustc_hash::FxHashMap<crate::core::boss::BossKind, RelicTextureGpu>,
+    boss_icon_slot_texture: Vec<Option<crate::core::boss::BossKind>>,
     /// Pre-allocated per-pack instances (lit-mesh foil; uses `pack_mesh` geometry).
     pack_instances: Vec<LitMeshInstance>,
     pack_slot_texture: Vec<Option<TilePackKind>>,
@@ -780,7 +785,8 @@ mod impl_screenshot;
 pub use constants::{
     MAIN_MENU_PICK_OPTIONS, MAIN_MENU_PICK_PLAY, MAIN_MENU_PICK_QUIT, MAX_BOOK_SLOTS,
     MAX_BOWL_SLOTS, MAX_BUG_SLOTS, MAX_CASCADE_TOKEN_SLOTS, MAX_EXTRUDED_GLYPH_SLOTS,
-    MAX_MIRROR_SLOTS, MAX_ORB_SLOTS, MAX_PLINTH_SLOTS, MAX_POINT_LIGHTS, MAX_RELIC_SLOTS,
+    MAX_BOSS_ICON_SLOTS, MAX_MIRROR_SLOTS, MAX_ORB_SLOTS, MAX_PLINTH_SLOTS, MAX_POINT_LIGHTS,
+    MAX_RELIC_SLOTS,
     MAX_RIBBON_SLOTS, MAX_SPOT_LIGHTS, MAX_TALISMAN_SLOTS, MAX_TALLY_FAN_SLOTS,
     MAX_TALLY_STICK_SLOTS, MAX_TILE_OCCLUDERS, MAX_WALL_TILE_SLOTS, MAX_WOOD_TABLET_SLOTS,
     MAX_YAKU_TABLET_SLOTS,

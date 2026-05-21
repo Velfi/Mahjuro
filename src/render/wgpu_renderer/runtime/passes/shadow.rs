@@ -182,6 +182,16 @@ impl WgpuRenderer {
                 };
                 self.draw_lit_mesh_shadow(pass, mesh, inst);
             }
+            DrawKind::BossIcon => {
+                let mesh = match self.boss_icon_slot_texture.get(slot_i).copied().flatten() {
+                    Some(bk) => self.boss_icon_mesh_for(bk),
+                    None => &self.relic_box_mesh,
+                };
+                let Some(inst) = self.boss_icon_instances.get(slot_i) else {
+                    return;
+                };
+                self.draw_lit_mesh_shadow(pass, mesh, inst);
+            }
             DrawKind::Pack => {
                 let Some(inst) = self.pack_instances.get(slot_i) else {
                     return;

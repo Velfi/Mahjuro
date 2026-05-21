@@ -14,7 +14,7 @@ use crate::render::showcase_tile_layout::{
 };
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{PointLight, SpotLight};
-use crate::render::world_space::world_on_camera_ray_plane_z;
+use crate::render::world_space::pixel_to_world;
 use crate::scenes::celebration_overlay;
 use crate::scenes::shop::{CelebPhase, PackCelebration, shop_celebration_camera};
 use crate::ui::input::UiAction;
@@ -58,6 +58,9 @@ impl TilePackPresenter {
 
     pub fn render_hints() -> ShowcaseRenderHints {
         ShowcaseRenderHints {
+            // Perspective shop camera: map screen `(px, py)` through the ray → `plane_z`
+            // (`anchor.pos[2]`, usually 0). `pixel_to_world` is not the inverse of this
+            // projection and pushes celebration meshes out of the frustum.
             object3d_use_camera_ray_plane_z: true,
             showcase_tiles_use_camera_ray_plane_z: true,
             tile_pack_celebration_tonemap: true,
@@ -91,8 +94,6 @@ impl TilePackPresenter {
 
         match celeb.phase {
             CelebPhase::Closeup => {
-                let box_w = box_h * crate::core::tile_pack::PACK_ASPECT_W_OVER_H;
-                let box_d = box_h * 0.10;
                 let t = celeb.started_at.elapsed().as_secs_f32();
                 let bob_x = (t * 0.7).sin() * h * 0.008;
                 let bob_y = (t * 0.5).sin() * h * 0.006;
@@ -101,9 +102,18 @@ impl TilePackPresenter {
                 let bob_rot = Mat4::from_rotation_y(bob_ry.to_radians())
                     * Mat4::from_rotation_x(bob_rx.to_radians());
                 let anchor = pack_closeup_anchor(screen, &self.positions, box_h, bob_rot);
+                let extents = pack_closeup_world_extents(
+                    w,
+                    h,
+                    cam,
+                    anchor.pos[0] + bob_x,
+                    anchor.pos[1] + bob_y,
+                    anchor.pos[2],
+                    box_h,
+                );
                 frame.object3d_batch(vec![Object3d {
                     pos: [anchor.pos[0] + bob_x, anchor.pos[1] + bob_y, anchor.pos[2]],
-                    extents: [box_w, box_d, box_h],
+                    extents,
                     rotation: anchor.object3d_rotation(),
                     color: celeb.pack_kind.foil_tint(),
                     kind: Object3dKind::Pack {
@@ -118,8 +128,15 @@ impl TilePackPresenter {
                 frame.text(celebration_overlay::label_confirm_to_open(h, w, t));
             }
             CelebPhase::Reveal => {
-                let box_w = box_h * crate::core::tile_pack::PACK_ASPECT_W_OVER_H;
-                let box_d = box_h * 0.10;
+                let pack_extents = pack_closeup_world_extents(
+                    w,
+                    h,
+                    cam,
+                    pack_closeup.pos[0],
+                    pack_closeup.pos[1],
+                    pack_closeup.pos[2],
+                    box_h,
+                );
 
                 // Keep the pack box visible while tiles fly out of it.
                 // In Reveal, `started_at` is reset, so we use a smooth settle or just let it rest.
@@ -127,7 +144,7 @@ impl TilePackPresenter {
                 // so it looks like it settled down to open.
                 frame.object3d_batch(vec![Object3d {
                     pos: pack_closeup.pos,
-                    extents: [box_w, box_d, box_h],
+                    extents: pack_extents,
                     rotation: pack_closeup.object3d_rotation(),
                     color: celeb.pack_kind.foil_tint(),
                     kind: Object3dKind::Pack {
@@ -296,22 +313,45 @@ impl TilePackPresenter {
     }
 }
 
+/// Screen-pixel pack height → world `Object3d::extents` for the perspective celebration camera.
+fn pack_closeup_world_extents(
+    win_w: f32,
+    win_h: f32,
+    cam: &CameraParams,
+    px: f32,
+    py: f32,
+    plane_z: f32,
+    screen_h_px: f32,
+) -> [f32; 3] {
+    let half_h = screen_h_px * 0.5;
+    let half_w = half_h * crate::core::tile_pack::PACK_ASPECT_W_OVER_H;
+    let sample = |x: f32, y: f32| {
+        crate::render::world_space::world_on_camera_ray_plane_z(win_w, win_h, cam, x, y, plane_z)
+    };
+    let center = sample(px, py);
+    let world_h = (sample(px, py - half_h) - center).length().max(1.0);
+    let world_w = (sample(px + half_w, py) - center).length().max(1.0);
+    [world_w, world_h * 0.10, world_h]
+}
+
 fn pack_closeup_anchor(
     screen: &LayoutResult,
-    positions: &ShopPositions,
+    _positions: &ShopPositions,
     box_h: f32,
     base_rotation: Mat4,
 ) -> PlacementAnchor {
     let h = screen.window_h;
+    let w = screen.window_w;
     let py_bias = h * PACK_CELEB_SCREEN_Y_DOWN_FRAC + box_h * PACK_CELEB_SCREEN_Y_PER_BOX_H;
+    // Pack foil is authored on the −Y face; the shop celebration camera sits on
+    // −Y looking toward +Y, so no extra flip is needed (π around X shows the back).
+    // Keep lift at 0 in the anchor (same as zodiac ribbon): `pos[2]` is world Z via
+    // `pixel_to_world`, not a ray-plane depth; large box-height lifts push the mesh
+    // out of the celebration frustum.
     PlacementAnchor::new(
-        [
-            screen.window_w * 0.5,
-            screen.window_h * 0.5 + py_bias,
-            box_h * 0.5,
-        ],
+        [w * 0.5, h * 0.5 + py_bias, 0.0],
         base_rotation,
-        &positions.celeb_pack_closeup,
+        &crate::ui::placement::Placement::default(),
         "shop.celebrations.pack_closeup",
         screen,
     )
@@ -346,14 +386,15 @@ fn pack_celebration_subject_spotlight(
             let lift = anchor.pos[2];
             let light_lift = lift + h * 0.52 + box_h * 0.38;
             let pos = [cx, cy - h * 0.14 - box_h * 0.06, light_lift];
-            let tw = world_on_camera_ray_plane_z(w, h, cam, cx, cy, lift);
-            let lw = world_on_camera_ray_plane_z(w, h, cam, pos[0], pos[1], pos[2]);
+            let tw = pixel_to_world(w, h, cx, cy, lift);
+            let lw = pixel_to_world(w, h, pos[0], pos[1], pos[2]);
             let dir = (tw - lw).normalize_or_zero();
             let dir = if dir.length_squared() < 1e-4 {
                 Vec3::new(0.0, 0.5, -1.0).normalize()
             } else {
                 dir
             };
+            let _ = cam;
             vec![SpotLight {
                 pos,
                 dir: dir.to_array(),
@@ -396,14 +437,15 @@ fn pack_celebration_subject_spotlight(
             let lift = row_lift + row.tile_size * 0.15;
             let light_lift = lift + h * 0.55;
             let pos = [cx, cy - h * 0.12, light_lift];
-            let tw = world_on_camera_ray_plane_z(w, h, cam, cx, cy, lift);
-            let lw = world_on_camera_ray_plane_z(w, h, cam, pos[0], pos[1], pos[2]);
+            let tw = pixel_to_world(w, h, cx, cy, lift);
+            let lw = pixel_to_world(w, h, pos[0], pos[1], pos[2]);
             let dir = (tw - lw).normalize_or_zero();
             let dir = if dir.length_squared() < 1e-4 {
                 Vec3::new(0.0, 0.45, -1.0).normalize()
             } else {
                 dir
             };
+            let _ = cam;
             vec![SpotLight {
                 pos,
                 dir: dir.to_array(),
@@ -482,4 +524,97 @@ fn pack_celebration_isolation_lights(
             intensity: 1.25 * i_mul,
         },
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::render::world_space::pixel_to_world;
+    use crate::ui::layout::UiLayout;
+
+    #[test]
+    fn pack_closeup_projects_into_viewport() {
+        use crate::render::table_transform::translate_rot_scale;
+        use glam::{Mat4, Vec3};
+
+        let w = 1920.0_f32;
+        let h = 1080.0_f32;
+        let env_h = crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE;
+        let cam = shop_celebration_camera(w, h, env_h);
+        let aspect = w / h;
+        let eye = Vec3::from_array(cam.eye);
+        let target = Vec3::from_array(cam.target);
+        let up = Vec3::from_array(cam.up);
+        let view = Mat4::look_at_rh(eye, target, up);
+        let (near, far) = cam.clip_planes(h);
+        let proj = Mat4::perspective_rh(cam.fovy_deg.to_radians(), aspect, near, far);
+        let view_proj = proj * view;
+
+        let mut layout_engine = UiLayout::new();
+        let layout = layout_engine.solve(w, h);
+        let box_h = h * PACK_CELEB_BOX_H_FRAC;
+        let box_w = box_h * crate::core::tile_pack::PACK_ASPECT_W_OVER_H;
+        let box_d = box_h * 0.10;
+        let anchor = pack_closeup_anchor(&layout, &ShopPositions::default(), box_h, Mat4::IDENTITY);
+        let extents = pack_closeup_world_extents(
+            w,
+            h,
+            &cam,
+            anchor.pos[0],
+            anchor.pos[1],
+            anchor.pos[2],
+            box_h,
+        );
+        let center = crate::render::world_space::world_on_camera_ray_plane_z(
+            w,
+            h,
+            &cam,
+            anchor.pos[0],
+            anchor.pos[1],
+            anchor.pos[2],
+        );
+        let model = translate_rot_scale(center, Mat4::IDENTITY, Vec3::from(extents));
+
+        let mut ndc_min = Vec3::splat(f32::INFINITY);
+        let mut ndc_max = Vec3::splat(f32::NEG_INFINITY);
+        for &corner in &[
+            Vec3::new(-0.5, -0.5, -0.5),
+            Vec3::new(0.5, -0.5, -0.5),
+            Vec3::new(-0.5, 0.5, -0.5),
+            Vec3::new(0.5, 0.5, -0.5),
+            Vec3::new(-0.5, -0.5, 0.5),
+            Vec3::new(0.5, -0.5, 0.5),
+            Vec3::new(-0.5, 0.5, 0.5),
+            Vec3::new(0.5, 0.5, 0.5),
+        ] {
+            let world = model.transform_point3(corner);
+            let clip = view_proj * world.extend(1.0);
+            let ndc = clip.truncate() / clip.w;
+            ndc_min = ndc_min.min(ndc);
+            ndc_max = ndc_max.max(ndc);
+        }
+        assert!(
+            ndc_min.x > -1.05 && ndc_max.x < 1.05 && ndc_min.y > -1.05 && ndc_max.y < 1.05,
+            "pack NDC bounds {ndc_min:?}..{ndc_max:?} should intersect the viewport"
+        );
+        assert!(
+            ndc_max.z > -1.0 && ndc_min.z < 1.0,
+            "pack depth {ndc_min:?}..{ndc_max:?} should pass the clip volume"
+        );
+    }
+
+    #[test]
+    fn pack_closeup_pixel_anchor_stays_near_scene_origin() {
+        let w = 1920.0_f32;
+        let h = 1080.0_f32;
+        let mut layout_engine = UiLayout::new();
+        let layout = layout_engine.solve(w, h);
+        let box_h = h * PACK_CELEB_BOX_H_FRAC;
+        let anchor = pack_closeup_anchor(&layout, &ShopPositions::default(), box_h, Mat4::IDENTITY);
+        let center = pixel_to_world(w, h, anchor.pos[0], anchor.pos[1], anchor.pos[2]);
+        assert!(
+            center.y > -h && center.y < h && center.z >= 0.0 && center.z < h,
+            "pack center {center:?} should sit in front of the shop camera"
+        );
+    }
 }

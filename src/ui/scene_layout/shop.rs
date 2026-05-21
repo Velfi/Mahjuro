@@ -14,8 +14,8 @@ pub struct ShopPositions {
 impl Default for ShopPositions {
     fn default() -> Self {
         Self {
-            celeb_pack_closeup: Placement::at(0.358_506_95, -1.991_540_2, -557.059_51),
-            celeb_pack_reveal: Placement::at(-3.352_761_3e-8, 0.55, 36.887_23),
+            celeb_pack_closeup: Placement::default(),
+            celeb_pack_reveal: Placement::default(),
             celeb_zodiac: Placement {
                 nx: 0.0,
                 ny: -0.12,
