@@ -725,9 +725,10 @@ impl App {
             Some(Scene::Showcase(s)) if s.wants_orbit_input() => &self.scene,
             _ => scene_for_renderer,
         };
-        let rotations_overlay = self.overlay_stack.last().filter(|ov| {
-            !matches!(ov, Scene::Showcase(s) if s.wants_orbit_input())
-        });
+        let rotations_overlay = self
+            .overlay_stack
+            .last()
+            .filter(|ov| !matches!(ov, Scene::Showcase(s) if s.wants_orbit_input()));
         renderer.set_placement_rotations(crate::scenes::collect_placement_rotations(
             rotations_base,
             rotations_overlay,

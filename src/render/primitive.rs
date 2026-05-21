@@ -72,6 +72,7 @@ pub enum DecalLayout {
     /// aspect ratio.
     Fit { target_short_edge: u32 },
     /// Two-line title over body copy.
+    #[allow(dead_code)]
     TitleRule { target_short_edge: u32 },
 }
 
@@ -108,6 +109,7 @@ impl MaterialSpec {
     }
 
     /// Plain diffuse+specular dielectric.
+    #[allow(dead_code)]
     pub fn plain() -> Self {
         Self {
             kind: MaterialKind::Plain,

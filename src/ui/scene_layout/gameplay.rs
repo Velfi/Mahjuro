@@ -12,6 +12,7 @@ pub struct GameplayPositions {
     pub ofuda: Placement,
     pub coin_pile: Placement,
     pub dora: Placement,
+    pub boss_plinth: Placement,
     pub round_wind: Placement,
     pub talisman_dish: Placement,
     pub consumable_dish_talisman: Placement,
@@ -33,7 +34,7 @@ pub struct GameplayPositions {
 impl Default for GameplayPositions {
     fn default() -> Self {
         Self {
-            relic_col: Placement::at(-0.950_520_9, 0.191_863_13, 2.144_608),
+            relic_col: Placement::at(-0.950_520_9, 0.071_863_13, 2.144_608),
             relic_col_top_ny: 0.22,
             relic_col_bottom_ny: 0.78,
             relic_cell_height_mm: 42.0,
@@ -78,6 +79,14 @@ impl Default for GameplayPositions {
                 ry_deg: 180.0,
                 rz_deg: 180.0,
             },
+            boss_plinth: Placement {
+                nx: 0.885_231_4,
+                ny: -0.540_456_24,
+                lift_mm: 2.144_608_5,
+                rx_deg: 0.0,
+                ry_deg: 180.0,
+                rz_deg: 180.0,
+            },
             round_wind: Placement {
                 nx: 0.645_231_4,
                 ny: -0.540_456_24,
@@ -86,7 +95,7 @@ impl Default for GameplayPositions {
                 ry_deg: 180.0,
                 rz_deg: 180.0,
             },
-            talisman_dish: Placement::at(-0.137_442_13, -0.336_977_2, -3.365_842_3),
+            talisman_dish: Placement::at(-0.492_442_13, -0.626_977_2, -3.365_842_3),
             consumable_dish_talisman: Placement {
                 nx: -0.008_575_439,
                 ny: 0.049_166_66,
@@ -149,6 +158,7 @@ pub enum GameplayField {
     Ofuda,
     CoinPile,
     Dora,
+    BossPlinth,
     RoundWind,
     Bowl,
     Mirror,
@@ -169,6 +179,7 @@ pub fn gameplay_field_path(field: GameplayField) -> &'static str {
         GameplayField::Ofuda => "gameplay.score_panel.ofuda",
         GameplayField::CoinPile => "gameplay.score_panel.coin_pile",
         GameplayField::Dora => "gameplay.dora",
+        GameplayField::BossPlinth => "gameplay.boss_plinth",
         GameplayField::RoundWind => "gameplay.round_wind",
         GameplayField::Bowl => "gameplay.action_bar.bowl",
         GameplayField::Mirror => "gameplay.action_bar.mirror",
@@ -190,6 +201,7 @@ impl GameplayField {
         GameplayField::Ofuda,
         GameplayField::CoinPile,
         GameplayField::Dora,
+        GameplayField::BossPlinth,
         GameplayField::RoundWind,
         GameplayField::Bowl,
         GameplayField::Mirror,
@@ -212,6 +224,7 @@ impl GameplayPositions {
             GameplayField::Ofuda => &self.ofuda,
             GameplayField::CoinPile => &self.coin_pile,
             GameplayField::Dora => &self.dora,
+            GameplayField::BossPlinth => &self.boss_plinth,
             GameplayField::RoundWind => &self.round_wind,
             GameplayField::Bowl => &self.bowl,
             GameplayField::Mirror => &self.mirror,
@@ -224,4 +237,3 @@ impl GameplayPositions {
         }
     }
 }
-

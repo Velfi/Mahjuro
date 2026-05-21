@@ -345,7 +345,7 @@ pub const SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX: &str = "light_candle";
 /// Linear RGB multiplier for punctual lights on nodes matching [`SHOP_GLTF_CANDLE_LIGHT_NODE_PREFIX`].
 /// Warm shift for candle reads; other lights keep glTF linear RGB.
 pub const SHOP_GLTF_CANDLE_LIGHT_COLOR_MUL: [f32; 3] =
-    crate::render::theme::color::rgb(crate::render::theme::color::TALLOW);
+    crate::render::theme::color::rgb(crate::render::theme::color::PARCHMENT);
 
 /// glTF **node** name prefix for punctual lights that should read as lanterns
 /// (`light_lantern`, `light_lantern.001`, `light_lantern_06`, …).

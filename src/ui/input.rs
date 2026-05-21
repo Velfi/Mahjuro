@@ -103,6 +103,8 @@ pub enum UiAction {
     TriggerStructure,
     /// Commit: discard all selected tiles and auto-draw back to full hand.
     CommitDiscard,
+    /// Flip every hand-tile selection bit (selected ↔ unselected).
+    InvertSelection,
     /// Restore hand and wall immediately before the last discard (accessibility).
     UndoDiscard,
     /// Move focus onto the gameplay Play mirror (no commit). Emitted by the
@@ -152,7 +154,7 @@ pub struct GamepadPollCtx {
     pub shop_face_buttons: bool,
     /// Collection scene: route gamepad North (and **E**) to inspect, same as shop North.
     pub collection_uses_north_for_inspect: bool,
-    /// Showcase **orbit** overlay ([`crate::scenes::Scene::Showcase`] inspect presenters) — right stick, WASD / arrows, LMB drag, triggers + wheel for orbit/zoom.
+    /// Showcase **orbit** overlay ([`crate::scenes::Scene::Showcase`] inspect presenters) — right stick + arrows for orbit, left stick + WASD for focus cycling, LMB drag + triggers/wheel for orbit zoom.
     pub item_inspect_overlay: bool,
 }
 
@@ -266,6 +268,8 @@ pub struct InputState {
     item_inspect_mouse_orbit_px: (f32, f32),
     /// Trigger analog zoom for item inspect: `RightTrigger2 − LeftTrigger2`, plus bumpers (see [`Self::sample_item_inspect_analog`]).
     pub item_inspect_zoom_triggers: f32,
+    /// Right stick vertical axis used for list/pane scroll scenes (`-1..1`).
+    pub right_stick_scroll_axis: f32,
     /// Controller family for on-screen button prompts (from USB vendor / name).
     pub gamepad_style: GamepadStyle,
     /// Last style we ran `apply_controller_layout_defaults_for_active_style`
@@ -301,6 +305,7 @@ impl InputState {
             item_inspect_orbit_stick: (0.0, 0.0),
             item_inspect_mouse_orbit_px: (0.0, 0.0),
             item_inspect_zoom_triggers: 0.0,
+            right_stick_scroll_axis: 0.0,
             gamepad_style: GamepadStyle::default(),
             last_seen_layout_style: None,
             scoring_rumble_schedule: Vec::new(),
@@ -650,6 +655,7 @@ impl InputState {
                 }
                 GpButton::Start => actions.push(UiAction::Pause),
                 GpButton::Back => actions.push(UiAction::Help),
+                GpButton::LeftStick => actions.push(UiAction::InvertSelection),
                 GpButton::LeftShoulder => {
                     actions.push(UiAction::NavigateHudPrev);
                     actions.push(UiAction::TabPrev);
@@ -778,6 +784,7 @@ impl InputState {
     ) -> bool {
         self.item_inspect_orbit_stick = (0.0, 0.0);
         self.item_inspect_zoom_triggers = 0.0;
+        self.right_stick_scroll_axis = 0.0;
 
         let before = actions.len();
         shell.prepare_gamepad_frame();
@@ -803,21 +810,20 @@ impl InputState {
             self.item_inspect_orbit_stick.1 =
                 (self.item_inspect_orbit_stick.1 + sy).clamp(-1.0, 1.0);
 
-            // Keyboard / arrows: same axes as the right stick (WASD + arrows).
-            // Shift+W/↑ / Shift+S/↓ feed zoom (same sign as RT−LT in [`Self::sample_item_inspect_analog`]),
-            // not pitch orbit.
+            // Keyboard orbit controls while inspect overlay is active:
+            // arrows map to orbit; W/S (with Shift) drive zoom.
             let ks = shell.pump.keyboard_state();
             let shift = ks.is_scancode_pressed(Scancode::LShift)
                 || ks.is_scancode_pressed(Scancode::RShift);
-            let up_orbit =
-                ks.is_scancode_pressed(Scancode::Up) || ks.is_scancode_pressed(Scancode::W);
-            let down_orbit =
-                ks.is_scancode_pressed(Scancode::Down) || ks.is_scancode_pressed(Scancode::S);
+            let up_orbit = ks.is_scancode_pressed(Scancode::Up);
+            let down_orbit = ks.is_scancode_pressed(Scancode::Down);
+            let up_zoom = ks.is_scancode_pressed(Scancode::W) || up_orbit;
+            let down_zoom = ks.is_scancode_pressed(Scancode::S) || down_orbit;
             if shift {
-                if up_orbit {
+                if up_zoom {
                     self.item_inspect_zoom_triggers += 1.0;
                 }
-                if down_orbit {
+                if down_zoom {
                     self.item_inspect_zoom_triggers -= 1.0;
                 }
             }
@@ -825,10 +831,10 @@ impl InputState {
 
             let mut kx = 0.0f32;
             let mut ky = 0.0f32;
-            if ks.is_scancode_pressed(Scancode::Right) || ks.is_scancode_pressed(Scancode::D) {
+            if ks.is_scancode_pressed(Scancode::Right) {
                 kx += 1.0;
             }
-            if ks.is_scancode_pressed(Scancode::Left) || ks.is_scancode_pressed(Scancode::A) {
+            if ks.is_scancode_pressed(Scancode::Left) {
                 kx -= 1.0;
             }
             if up_orbit && !shift {
@@ -847,6 +853,7 @@ impl InputState {
             self.item_inspect_orbit_stick.1 =
                 (self.item_inspect_orbit_stick.1 + ky).clamp(-1.0, 1.0);
         }
+        self.right_stick_scroll_axis = Self::sample_right_stick_scroll_axis(shell);
         Self::emit_held_navigation_repeats(
             shell,
             &mut self.dpad_repeat,
@@ -947,6 +954,24 @@ impl InputState {
             *out_zoom = z;
             break;
         }
+    }
+
+    fn sample_right_stick_scroll_axis(shell: &SdlShell) -> f32 {
+        const STICK_DZ: f32 = 0.22;
+        let Ok(ids) = shell.gamepad.gamepads() else {
+            return 0.0;
+        };
+        for id in ids {
+            let Some(gp) = shell.pads.get(&id) else {
+                continue;
+            };
+            if !gp.connected() {
+                continue;
+            }
+            let y = axis_norm(gp.axis(GpAxis::RightY));
+            return if y.abs() < STICK_DZ { 0.0 } else { y };
+        }
+        0.0
     }
 
     fn emit_held_navigation_repeats(
@@ -1156,6 +1181,7 @@ impl InputState {
             Scancode::Escape => actions.push(UiAction::Pause),
             Scancode::Backspace => actions.push(UiAction::Cancel),
             Scancode::Delete | Scancode::X => actions.push(UiAction::Delete),
+            Scancode::Z => actions.push(UiAction::InvertSelection),
             Scancode::T => actions.push(UiAction::TriggerStructure),
             Scancode::Return | Scancode::KpEnter => actions.push(UiAction::Confirm),
             // Tab is dual-purpose: scenes that opt in to TabNext/TabPrev
@@ -1267,6 +1293,7 @@ pub fn apply_ui_actions(
             UiAction::SortBySuit
             | UiAction::SortByRank
             | UiAction::TriggerStructure
+            | UiAction::InvertSelection
             | UiAction::UndoDiscard
             | UiAction::Pause
             | UiAction::Help

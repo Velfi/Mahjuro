@@ -6,10 +6,47 @@ pub(super) enum RenderFrame {
 }
 
 impl WgpuRenderer {
+    fn push_active_showcase_decal_atlas_to_cache(&mut self) {
+        let (Some(tileset), Some(atlas)) = (
+            self.showcase_decal_atlas_tileset.take(),
+            self.showcase_decal_atlas.take(),
+        ) else {
+            return;
+        };
+        if let Some(pos) = self
+            .showcase_decal_atlas_cache
+            .iter()
+            .position(|(name, _)| name == &tileset)
+        {
+            let _ = self.showcase_decal_atlas_cache.remove(pos);
+        }
+        self.showcase_decal_atlas_cache.push_front((tileset, atlas));
+    }
+
+    fn activate_cached_showcase_decal_atlas(&mut self, tileset_name: &str) -> bool {
+        let Some(pos) = self
+            .showcase_decal_atlas_cache
+            .iter()
+            .position(|(name, _)| name == tileset_name)
+        else {
+            return false;
+        };
+        let Some((name, atlas)) = self.showcase_decal_atlas_cache.remove(pos) else {
+            return false;
+        };
+        self.showcase_decal_atlas = Some(atlas);
+        self.showcase_decal_atlas_tileset = Some(name);
+        true
+    }
+
     pub(crate) fn ensure_showcase_decal_atlas(&mut self, tileset_name: &str) {
         if self.showcase_decal_atlas_tileset.as_deref() == Some(tileset_name)
             && self.showcase_decal_atlas.is_some()
         {
+            return;
+        }
+        self.push_active_showcase_decal_atlas_to_cache();
+        if self.activate_cached_showcase_decal_atlas(tileset_name) {
             return;
         }
         let atlas = crate::render::showcase_decal_atlas::build_showcase_decal_atlas_texture(
@@ -61,12 +98,12 @@ impl WgpuRenderer {
         // the active name and blow the per-tile decal caches so the next frame
         // re-rasterizes against the new set's PNGs.
         if self.tile_set.as_deref() != Some(tileset_name) {
+            self.push_active_showcase_decal_atlas_to_cache();
             self.tile_set = Some(tileset_name.to_owned());
             self.tile_face_overlays.clear();
             self.hand_tiles.clear();
             self.showcase_tiles.clear();
-            self.showcase_decal_atlas = None;
-            self.showcase_decal_atlas_tileset = None;
+            let _ = self.activate_cached_showcase_decal_atlas(tileset_name);
         }
     }
 
@@ -218,11 +255,16 @@ impl WgpuRenderer {
             .iter()
             .any(|c| matches!(c, crate::render::draw_cmd::DrawCmd::ShowcaseTileBatch(_)));
         let h = &frame.showcase_render_hints;
-        let lit_mesh_inv_scale = if frame.scene_lighting.embedded_gltf_punctual {
-            self.shop_lit_mesh_gltf_punctual_scale
-        } else {
-            1.0
-        };
+        // Keep shop inspect in the same lit-mesh GLTF intensity band as the
+        // storeroom baseline so inspect entry does not pop brightness.
+        let shop_inspect_context =
+            self.active_scene_key == Some("showcase") && h.shop_tonemap_and_lit_mesh_context;
+        let lit_mesh_inv_scale =
+            if frame.scene_lighting.embedded_gltf_punctual || shop_inspect_context {
+                self.shop_lit_mesh_gltf_punctual_scale
+            } else {
+                1.0
+            };
         let punctual_bake = PunctualLightBakeParams {
             src: &frame.scene_lighting.punctual,
             candle_count: frame.candle_light_count,

@@ -28,11 +28,11 @@ THEME_PALETTE: tuple[tuple[int, int, int], ...] = (
     (95, 212, 168),  # JADE
     (232, 90, 107),  # RUBY
     (240, 168, 72),  # AMBER
-    (26, 42, 33),  # FELT_DEEP
-    (74, 107, 82),  # FELT_LIT
-    (14, 20, 34),  # TWILIGHT_INK
-    (30, 42, 64),  # TWILIGHT
-    (90, 110, 148),  # TWILIGHT_GLOW
+    (26, 42, 33),  # WALNUT_DEEP (legacy slot)
+    (74, 107, 82),  # WALNUT_SOFT (legacy slot)
+    (14, 20, 34),  # WALNUT_INK (legacy slot)
+    (30, 42, 64),  # WALNUT_DEEP (legacy slot)
+    (90, 110, 148),  # WALNUT_BRIGHT (legacy slot)
 )
 
 PSX_PALETTE = THEME_PALETTE  # back-compat alias

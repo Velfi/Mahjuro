@@ -67,8 +67,8 @@ impl ModalTheme {
     fn bg_color(&self) -> [f32; 4] {
         use crate::render::theme::color;
         match self {
-            // Success = a win at the table → felt-toned background.
-            ModalTheme::Success => color::alpha(color::FELT_DEEP, 0.95),
+            // Success = a win at the table → deep walnut background.
+            ModalTheme::Success => color::alpha(color::WALNUT_DEEP, 0.95),
             ModalTheme::Info => color::alpha(color::WALNUT_DEEP, 0.95),
         }
     }
@@ -92,8 +92,8 @@ impl ModalTheme {
     fn body_color(&self) -> [f32; 4] {
         use crate::render::theme::color;
         match self {
-            // Warm candle-bloom body text on lit felt — celebratory.
-            ModalTheme::Success => color::TALLOW,
+            // Bright celebratory text on dark walnut.
+            ModalTheme::Success => color::PARCHMENT,
             ModalTheme::Info => color::PARCHMENT,
         }
     }
@@ -176,7 +176,7 @@ impl Fireworks {
         use crate::render::theme::color;
         // Warm palette: champagne / amber / soft gold. Subtle hue
         // variance so the swarm doesn't read as a flat monochrome dust.
-        // Anchored on the CHAMPAGNE and TALLOW tokens; the other two
+        // Anchored on the CHAMPAGNE and PARCHMENT tokens; the other two
         // entries are deliberate brighter/darker variants that round out
         // the swarm.
         let palette: [[f32; 3]; 4] = [
@@ -187,7 +187,7 @@ impl Fireworks {
                 color::CHAMPAGNE[2],
             ],
             [1.00, 0.72, 0.38], // amber shoulder, warmer than the AMBER token
-            [color::TALLOW[0], color::TALLOW[1], color::TALLOW[2]],
+            [color::PARCHMENT[0], color::PARCHMENT[1], color::PARCHMENT[2]],
         ];
         let color = palette[rng.random_range(0..palette.len())];
         let x = self.spawn_center_x + (rng.random::<f32>() - 0.5) * self.spawn_spread;

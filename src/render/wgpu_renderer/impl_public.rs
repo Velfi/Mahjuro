@@ -1,6 +1,15 @@
 use super::*;
 
 impl WgpuRenderer {
+    fn has_showcase_decal_atlas_for_tileset(&self, tileset_name: &str) -> bool {
+        (self.showcase_decal_atlas_tileset.as_deref() == Some(tileset_name)
+            && self.showcase_decal_atlas.is_some())
+            || self
+                .showcase_decal_atlas_cache
+                .iter()
+                .any(|(name, _)| name == tileset_name)
+    }
+
     pub fn queue_screenshot(&self, path: std::path::PathBuf) {
         self.pending_screenshot.set(Some(path));
     }
@@ -58,6 +67,18 @@ impl WgpuRenderer {
         self.showcase_decal_atlas.is_some()
     }
 
+    /// True when every player-visible tileset has a baked showcase atlas
+    /// either active or parked in the renderer cache.
+    pub fn showcase_decal_atlases_baked_for_all_player_tilesets(&self) -> bool {
+        let tilesets = crate::asset_path::list_player_tilesets();
+        if tilesets.is_empty() {
+            return self.showcase_decal_atlas.is_some();
+        }
+        tilesets
+            .iter()
+            .all(|name| self.has_showcase_decal_atlas_for_tileset(name))
+    }
+
     /// Pre-bake the showcase decal atlas for `tileset_name`, blocking until
     /// the GPU upload is queued. Idempotent for an already-baked tileset.
     /// Called from the splash scene's tick so the cost is amortised behind
@@ -79,6 +100,27 @@ impl WgpuRenderer {
             self.tile_set = Some(tileset_name.to_owned());
         }
         self.ensure_showcase_decal_atlas(tileset_name);
+    }
+
+    /// Pre-bake showcase atlases for every player tileset, keeping them in the
+    /// in-memory atlas cache for hitch-free tileset cycling.
+    pub fn prebake_showcase_decal_atlases_for_all_player_tilesets(
+        &mut self,
+        active_tileset_name: &str,
+    ) {
+        let mut tilesets = crate::asset_path::list_player_tilesets();
+        if !tilesets.iter().any(|n| n == active_tileset_name) {
+            tilesets.push(active_tileset_name.to_string());
+        }
+        for tileset in &tilesets {
+            self.ensure_showcase_decal_atlas(tileset);
+        }
+        // Restore active set so the first post-splash frame does not need to
+        // promote from cache before draw.
+        self.ensure_showcase_decal_atlas(active_tileset_name);
+        if self.tile_set.as_deref() != Some(active_tileset_name) {
+            self.tile_set = Some(active_tileset_name.to_owned());
+        }
     }
 
     /// Returns `true` while boot-time async decode threads (relic images and/or
@@ -154,10 +196,7 @@ impl WgpuRenderer {
     }
 
     /// Replace the per-frame placement rotation map.
-    pub fn set_placement_rotations(
-        &mut self,
-        rotations: rustc_hash::FxHashMap<String, [f32; 3]>,
-    ) {
+    pub fn set_placement_rotations(&mut self, rotations: rustc_hash::FxHashMap<String, [f32; 3]>) {
         self.placement_rotations = rotations;
     }
     pub fn clear_smoke(&mut self) {

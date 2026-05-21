@@ -657,18 +657,17 @@ impl App {
             .map(|i| i.last_cursor)
             .unwrap_or((0.0, 0.0));
         let loading_done = match &self.scene {
-            // Splash may dismiss as soon as the window has a renderer AND the
-            // showcase decal atlas has been pre-baked. Relic and menu-backdrop
-            // decode continue in parallel (solid fallback until the façade
-            // texture lands). The atlas bake is the largest one-shot CPU
-            // cost in the renderer (~3 s of image resize + PNG decode); the
-            // bake itself is kicked at the bottom of this frame_tick when
-            // the splash is the active scene, so the splash plate is shown
-            // for at least one full frame before the freeze.
+            // Splash may dismiss as soon as the window has a renderer AND all
+            // player tilesets have their showcase decal atlases pre-baked.
+            // Relic and menu-backdrop decode continue in parallel (solid
+            // fallback until the façade texture lands). The atlas bake is the
+            // largest one-shot CPU cost in the renderer; the bake itself is
+            // kicked at the bottom of this frame_tick when splash is active,
+            // so the splash plate is shown for at least one full frame first.
             Scene::Splash(_) => self
                 .renderer
                 .as_ref()
-                .is_some_and(|r| r.showcase_decal_atlas_baked()),
+                .is_some_and(|r| r.showcase_decal_atlases_baked_for_all_player_tilesets()),
             _ => self.renderer.as_ref().is_none_or(|r| !r.is_loading()),
         };
         // Compute every scene pick once per frame. The same four results
@@ -690,7 +689,26 @@ impl App {
         let picked_gameplay_object = self.frame_picks.gameplay;
         let picked_collection_object = self.frame_picks.collection;
         let picked_hand_tile_for_update = self.frame_picks.hand;
-        let scroll_lines = std::mem::take(&mut self.scroll_delta);
+        let mut scroll_lines = std::mem::take(&mut self.scroll_delta);
+        // Right stick vertical scroll is opt-in by scene: Yaku Journal and
+        // Chronicle dashboard/listing. Other scenes keep right stick free.
+        let right_stick_scroll_enabled = {
+            let active_scene = self.overlay_stack.last().unwrap_or(&self.scene);
+            match active_scene {
+                Scene::YakuJournal(_) => true,
+                Scene::Collection(scene) => scene.is_chronicle_tab(),
+                _ => false,
+            }
+        };
+        if right_stick_scroll_enabled {
+            const STICK_SCROLL_LINES_PER_SEC: f32 = 24.0;
+            let axis = self
+                .input
+                .as_ref()
+                .map(|i| i.right_stick_scroll_axis)
+                .unwrap_or(0.0);
+            scroll_lines += axis * self.last_frame_dt * STICK_SCROLL_LINES_PER_SEC;
+        }
         let mut overlay_request: Option<scenes::OverlayRequest> = None;
         let mut rumble_lab_ops: Vec<crate::ui::input::RumbleLabOp> = Vec::new();
         let mut bump_archive_chronicle_seen: Option<u32> = None;
@@ -747,6 +765,7 @@ impl App {
                     .unwrap_or(0.0),
                 rumble_lab_ops: &mut rumble_lab_ops,
                 suspended_shop: None,
+                suspended_collection: None,
                 room_gltf_height_scale: room_gltf_height_for_update,
                 bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
                 rain_tuning: self
@@ -763,18 +782,22 @@ impl App {
                         if matches!(s.presenter, scenes::ShowcasePresenter::ShopInspect(_))
                 )
             });
-            if showcase_shop_inspect {
-                if let Scene::Shop(shop) = &mut self.scene {
+            let showcase_collection_inspect = self.overlay_stack.last().is_some_and(|top| {
+                matches!(
+                    top,
+                    Scene::Showcase(s)
+                        if matches!(s.presenter, scenes::ShowcasePresenter::CollectionInspect(_))
+                )
+            });
+            let (suspended_shop, suspended_collection) = match &mut self.scene {
+                Scene::Shop(shop) if showcase_shop_inspect => {
                     shop.tick_suspended_animation_clock();
+                    (Some(shop), None)
                 }
-            }
-            let suspended_shop = if showcase_shop_inspect {
-                match &self.scene {
-                    Scene::Shop(shop) => Some(shop),
-                    _ => None,
+                Scene::Collection(collection) if showcase_collection_inspect => {
+                    (None, Some(collection))
                 }
-            } else {
-                None
+                _ => (None, None),
             };
             self.overlay_stack
                 .last_mut()
@@ -827,6 +850,7 @@ impl App {
                         .unwrap_or(0.0),
                     rumble_lab_ops: &mut rumble_lab_ops,
                     suspended_shop,
+                    suspended_collection,
                     room_gltf_height_scale: room_gltf_height_for_update,
                     bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
                     rain_tuning: self
@@ -1073,18 +1097,17 @@ impl App {
         // synchronously inside `enqueue` so subsequent loads see fresh data.
         self.flush_dirty_profile();
 
-        // After the splash plate has been presented, run the showcase decal
-        // atlas pre-bake. The bake is a synchronous ~3 s of image-resize +
-        // PNG decode; doing it here means the splash is on screen during the
-        // freeze instead of the first gameplay frame stalling for 3 s. Splash
-        // dismissal in `loading_done` (above) waits on
-        // `renderer.showcase_decal_atlas_baked()`.
+        // After the splash plate has been presented, pre-bake showcase decal
+        // atlases for every player tileset. This is synchronous and can take
+        // several seconds total, but doing it here keeps the cost behind the
+        // splash instead of hitching when the player cycles tilesets later.
+        // Splash dismissal in `loading_done` (above) waits for this to finish.
         if matches!(self.scene, Scene::Splash(_)) {
             let tileset = self.gfx.tileset_name.clone();
             if let Some(renderer) = self.renderer.as_mut()
-                && !renderer.showcase_decal_atlas_baked()
+                && !renderer.showcase_decal_atlases_baked_for_all_player_tilesets()
             {
-                renderer.prebake_showcase_decal_atlas(&tileset);
+                renderer.prebake_showcase_decal_atlases_for_all_player_tilesets(&tileset);
             }
         }
 

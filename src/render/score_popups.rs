@@ -46,7 +46,7 @@ const MULT_COLOR: [f32; 4] = crate::render::theme::color::RUBY;
 /// Warm gold base tint for Gold popups.
 const GOLD_COLOR: [f32; 4] = crate::render::theme::color::RELIC_GOLD;
 /// Cream tint for the Final landing number.
-const FINAL_COLOR: [f32; 4] = crate::render::theme::color::TALLOW;
+const FINAL_COLOR: [f32; 4] = crate::render::theme::color::PARCHMENT;
 
 #[derive(Clone, Debug)]
 struct ScorePopup {

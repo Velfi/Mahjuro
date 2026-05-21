@@ -452,7 +452,8 @@ impl SceneBehavior for MainMenuExteriorScene {
         let env_scale = main_menu_glb::main_menu_env_height_scale(ctx.room_gltf_height_scale);
         if main_menu_glb::main_menu_room_draw_ready() {
             push_main_menu_room_frame(&mut frame, w, h, env_scale, &ctx.shop_env_lighting);
-            if let Some(door_light) = main_menu_glb::main_menu_door_light_object3d_anchor(w, h, env_scale)
+            if let Some(door_light) =
+                main_menu_glb::main_menu_door_light_object3d_anchor(w, h, env_scale)
             {
                 lamp_moths::push_moths_around_lamp(
                     &mut frame,

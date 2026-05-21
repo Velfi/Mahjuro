@@ -1,7 +1,8 @@
 //! Stable `ShopHit::Dish(u32)` ids for the shop scene.
 //!
-//! Order: coin ([`PICK_COIN_DISH`]), journal ([`PICK_JOURNAL_BOOK`]), then [`N_TILE_PACKS`] consecutive pack ids
-//! starting at [`PICK_TILE_PACK_BASE`], then leave prop and reroll prop. GLB button nodes
+//! Order: coin ([`PICK_COIN_DISH`]), journal ([`PICK_JOURNAL_BOOK`]), then
+//! [`N_TILE_PACKS`] consecutive pack ids starting at [`PICK_TILE_PACK_BASE`],
+//! then leave prop and reroll prop. GLB button nodes
 //! (`exit_btn`, `restock_btn`) map to [`PICK_LEAVE_PROP`] / [`PICK_REROLL_PROP`] in
 //! [`crate::render::picking`].
 

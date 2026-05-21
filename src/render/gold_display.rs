@@ -145,7 +145,7 @@ pub fn push_gold_amount_label(
     let gold_label_rect: [f32; 4] = [bx - 4.0, by - 3.0, bw + 8.0, bh + 7.0];
     frame.quad(GpuInstance {
         rect: [bx - 4.0, by - 3.0, bw + 8.0, bh + 7.0],
-        color: color::alpha(color::LACQUER, 0.48),
+        color: color::alpha(color::WALNUT_INK, 0.48),
         user: 0,
     });
     frame.quad(GpuInstance {

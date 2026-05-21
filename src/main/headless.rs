@@ -259,12 +259,6 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
     if s.shop_focus.is_some() && !shop_like {
         anyhow::bail!("--shop-focus is only valid with --scene shop");
     }
-    if s.journal_open.is_some() && !shop_like {
-        anyhow::bail!("--journal-open is only valid with --scene shop");
-    }
-    if s.journal_transition.is_some() && !shop_like {
-        anyhow::bail!("--journal-transition is only valid with --scene shop");
-    }
     let showcase_like = matches!(s.scene.as_str(), "showcase");
     let celebration_like =
         matches!(s.scene.as_str(), "zodiac_celebration") || (showcase_like && s.pack.is_none());
@@ -332,12 +326,6 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
             if let Some(focus_slug) = s.shop_focus.as_deref() {
                 shop.set_focus_for_screenshot(focus_slug)
                     .map_err(anyhow::Error::msg)?;
-            }
-            if let Some(amt) = s.journal_open {
-                shop.set_journal_open_for_screenshot(amt);
-            }
-            if let Some(prog) = s.journal_transition {
-                shop.set_journal_transition_for_screenshot(prog);
             }
             (Scene::Shop(shop), true)
         }
@@ -911,6 +899,7 @@ impl HeadlessApp {
                 item_inspect_zoom_triggers: 0.0,
                 rumble_lab_ops: &mut rumble_lab_ops,
                 suspended_shop: None,
+                suspended_collection: None,
                 room_gltf_height_scale: crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
                 bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
                 rain_tuning: self.renderer.rain_tuning,
@@ -923,18 +912,22 @@ impl HeadlessApp {
                         if matches!(s.presenter, scenes::ShowcasePresenter::ShopInspect(_))
                 )
             });
-            if showcase_shop_inspect {
-                if let Scene::Shop(shop) = &mut self.scene {
+            let showcase_collection_inspect = self.overlay_stack.last().is_some_and(|top| {
+                matches!(
+                    top,
+                    Scene::Showcase(s)
+                        if matches!(s.presenter, scenes::ShowcasePresenter::CollectionInspect(_))
+                )
+            });
+            let (suspended_shop, suspended_collection) = match &mut self.scene {
+                Scene::Shop(shop) if showcase_shop_inspect => {
                     shop.tick_suspended_animation_clock();
+                    (Some(shop), None)
                 }
-            }
-            let suspended_shop = if showcase_shop_inspect {
-                match &self.scene {
-                    Scene::Shop(shop) => Some(shop),
-                    _ => None,
+                Scene::Collection(collection) if showcase_collection_inspect => {
+                    (None, Some(collection))
                 }
-            } else {
-                None
+                _ => (None, None),
             };
             self.overlay_stack
                 .last_mut()
@@ -974,6 +967,7 @@ impl HeadlessApp {
                     item_inspect_zoom_triggers: 0.0,
                     rumble_lab_ops: &mut rumble_lab_ops,
                     suspended_shop,
+                    suspended_collection,
                     room_gltf_height_scale: crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
                     bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
                     rain_tuning: self.renderer.rain_tuning,
@@ -1087,9 +1081,11 @@ impl HeadlessApp {
             Some(Scene::Showcase(s)) if s.wants_orbit_input() => &self.scene,
             _ => scene_for_renderer,
         };
-        self.renderer.set_placement_rotations(
-            crate::scenes::collect_placement_rotations(rotations_scene, self.overlay_stack.last()),
-        );
+        self.renderer
+            .set_placement_rotations(crate::scenes::collect_placement_rotations(
+                rotations_scene,
+                self.overlay_stack.last(),
+            ));
         self.renderer
             .set_room_gltf_height_scale(look.room_gltf_height_scale);
         let sl = self.shop_env_lighting;

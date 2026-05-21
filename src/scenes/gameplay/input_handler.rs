@@ -150,6 +150,7 @@ pub(super) fn process_focus_and_actions(
             | FocusTarget::Gold
             | FocusTarget::YakuTablet(_)
             | FocusTarget::Dora
+            | FocusTarget::Boss
             | FocusTarget::RoundWind => true,
             FocusTarget::DiscardUndo => {
                 crate::persistence::load_settings().discard_undo_enabled
@@ -353,6 +354,24 @@ pub(super) fn process_focus_and_actions(
                 }
                 continue;
             }
+            UiAction::InvertSelection => {
+                scene.marquee = None;
+                let selected = ctx.run.selected_mut();
+                let mut added = 0u32;
+                let mut removed = 0u32;
+                for s in selected.iter_mut() {
+                    if *s {
+                        removed += 1;
+                    } else {
+                        added += 1;
+                    }
+                    *s = !*s;
+                }
+                if added > 0 || removed > 0 {
+                    play_select_sfx(ctx.bus, added, removed);
+                }
+                continue;
+            }
             // Confirm: route by focused target.
             //   HandTile → toggle selection
             //   Button   → enqueue the corresponding gameplay action
@@ -460,6 +479,7 @@ pub(super) fn process_focus_and_actions(
                     | Some(FocusTarget::Gold)
                     | Some(FocusTarget::YakuTablet(_))
                     | Some(FocusTarget::Dora)
+                    | Some(FocusTarget::Boss)
                     | Some(FocusTarget::RoundWind) => {}
                     None => {}
                 }
@@ -609,7 +629,6 @@ pub(super) fn process_focus_and_actions(
         match a {
             UiAction::ScoreHand => {
                 let gameplay = GameEngine::read(ctx.run);
-                let had_selection = gameplay.selected_count > 0;
                 let bank_before = GameEngine::structure_banked_meld_chips(ctx.run);
                 let round_before = gameplay.round_score;
                 let score_before = gameplay.round_score;
@@ -669,37 +688,50 @@ pub(super) fn process_focus_and_actions(
                         .unwrap_or(0),
                 );
 
-                if step == 0 && had_selection {
+                if matches!(
+                    outcome.rejection,
+                    Some(crate::game::engine::CommandRejection::InvalidSelection)
+                ) {
+                    scene.trigger_invalid_meld_flash(
+                        ctx.run,
+                        &interaction.hand,
+                        &interaction.selected,
+                    );
                     ctx.anim
                         .shake(crate::render::animation::ENTITY_HAND_STRIP, 8.0, 200);
-                } else if gained > 0 {
-                    ctx.anim.pulse(ENTITY_SCORE_PANEL);
-                    scene.begin_scoring_cascade(ctx, score_before, gained, cascade_showcase);
-                } else if step > 0 {
-                    ctx.anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
-                    let bank_after = GameEngine::structure_banked_meld_chips(ctx.run);
-                    let d = bank_after.saturating_sub(bank_before);
-                    if d > 0 {
-                        let structure_is_complete = GameEngine::read(ctx.run).structure_complete;
-                        let sp = ctx.layout.score_panel;
-                        let px = sp.x + sp.w * 0.5;
-                        let py = sp.y + sp.h * 0.5 + 40.0;
-                        let is_final_tiles = !structure_was_complete && structure_is_complete;
-                        if is_final_tiles {
-                            scene.final_tiles_fov_pop_at = Some(Instant::now());
-                        }
-                        scene.score_popups.spawn(
+                } else {
+                    scene.invalid_meld_flash_at = None;
+                    scene.invalid_meld_flash_slots.clear();
+                    if gained > 0 {
+                        ctx.anim.pulse(ENTITY_SCORE_PANEL);
+                        scene.begin_scoring_cascade(ctx, score_before, gained, cascade_showcase);
+                    } else if step > 0 {
+                        ctx.anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
+                        let bank_after = GameEngine::structure_banked_meld_chips(ctx.run);
+                        let d = bank_after.saturating_sub(bank_before);
+                        if d > 0 {
+                            let structure_is_complete =
+                                GameEngine::read(ctx.run).structure_complete;
+                            let sp = ctx.layout.score_panel;
+                            let px = sp.x + sp.w * 0.5;
+                            let py = sp.y + sp.h * 0.5 + 40.0;
+                            let is_final_tiles = !structure_was_complete && structure_is_complete;
                             if is_final_tiles {
-                                "The final tiles!".to_string()
-                            } else {
-                                "Structure grows".to_string()
-                            },
-                            (px, py),
-                            (px, py),
-                            None,
-                            StepKind::Chips,
-                            d as f32,
-                        );
+                                scene.final_tiles_fov_pop_at = Some(Instant::now());
+                            }
+                            scene.score_popups.spawn(
+                                if is_final_tiles {
+                                    "The final tiles!".to_string()
+                                } else {
+                                    "Structure grows".to_string()
+                                },
+                                (px, py),
+                                (px, py),
+                                None,
+                                StepKind::Chips,
+                                d as f32,
+                            );
+                        }
                     }
                 }
             }

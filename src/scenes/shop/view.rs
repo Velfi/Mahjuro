@@ -1,7 +1,6 @@
 //! Shop view (`THEME.md` storeroom): `shop.glb` room, screen-space hit slots, and shelf props.
 //! Stock and input dispatch live on [`super::ShopScene`].
 
-use std::borrow::Cow;
 use std::time::Instant;
 
 use glam::{Vec2, Vec3};
@@ -17,7 +16,6 @@ use crate::game::run::RunState;
 use crate::render::decal::{load_ui_font, measure_label_advances};
 use crate::render::draw_cmd::{
     CameraParams, ImageQuad, Object3d, Object3dKind, ScenePunctualLight, UiFrame,
-    camera_facing_euler_xyz_rad,
 };
 use crate::render::flame_volume::FlameEmitter;
 use crate::render::ribbon_mesh::{
@@ -40,16 +38,13 @@ use crate::render::world_space::{
     object3d_pos_for_screen_at_world_z, object3d_pos_triple_for_world_center,
     surface_anchor_from_world_xyz,
 };
-use crate::scenes::journal_transition;
 use crate::scenes::object3d_inspect::{
     InspectRig, ItemInspectOrbitState, inspect_orbit_camera, inspect_point_lights,
     inspect_subject_spotlight, lerp_camera, prepend_inspect_orbit_subject_rotation,
     tick_inspect_dolly,
 };
 use crate::scenes::options::OptionsScene;
-use crate::scenes::{
-    ButtonDef, DrawCtx, SceneBehavior, SceneTransition, UpdateCtx, YakuJournalScene,
-};
+use crate::scenes::{ButtonDef, DrawCtx, SceneBehavior, SceneTransition, UpdateCtx};
 use crate::ui::button_prompts::{ButtonPrompt, PromptInputSurface, SHOP_LEGEND_VERB_LABELS};
 use crate::ui::focus_nav::{clamp_rect_to_viewport, push_focus_ring, rect_center};
 use crate::ui::input::InputMode;
@@ -59,8 +54,8 @@ use crate::ui::inspect_plaque::{
 use crate::ui::kenney_prompt_paths::shop_keyboard_prompt_icons;
 
 use super::layout::{
-    consumable_color, is_tile_pack_pick, live_shop_hit,
-    rarity_color, relic_half_extents, tile_pack_index_from_pick,
+    consumable_color, is_tile_pack_pick, live_shop_hit, rarity_color, relic_half_extents,
+    tile_pack_index_from_pick,
 };
 use super::shared::shop_focus_inspectable;
 use super::{
@@ -104,19 +99,19 @@ fn default_fill_point_lights(w: f32, h: f32) -> Vec<PointLight> {
         PointLight {
             pos: [w * 0.52, h * 0.34, h * 0.26],
             radius: h * 2.5,
-            color: color::rgb(color::TALLOW),
+            color: color::rgb(color::PARCHMENT),
             intensity: 3.6,
         },
         PointLight {
             pos: [w * 0.52, h * 0.46, h * 0.21],
             radius: h * 2.3,
-            color: color::rgb(color::TALLOW),
+            color: color::rgb(color::PARCHMENT),
             intensity: 3.0,
         },
         PointLight {
             pos: [w * 0.52, h * 0.78, h * 0.13],
             radius: h * 2.0,
-            color: color::rgb(color::TALLOW),
+            color: color::rgb(color::PARCHMENT),
             intensity: 2.7,
         },
     ]
@@ -501,13 +496,6 @@ fn player_gold_dish_object3d_anchor(
     object3d_pos_for_screen_at_world_z(w, h, cam, cx, cy, ppmm * 10.0)
 }
 
-fn journal_object3d_anchor(w: f32, h: f32, cam: &CameraParams, env_h: f32) -> [f32; 3] {
-    let r = journal_btn_rect(w, h, cam, env_h);
-    let cx = r[0] + r[2] * 0.5;
-    let cy = r[1] + r[3] * 0.5;
-    object3d_pos_for_screen_at_world_z(w, h, cam, cx, cy, 0.0)
-}
-
 fn owned_relic_hover_center(
     shop: &ShopScene,
     shop_rm: &ShopReadModel,
@@ -522,11 +510,7 @@ fn owned_relic_hover_center(
     for (slot_i, foc) in inv.iter().enumerate() {
         if matches!(foc, Some(ShopFocus::Relic(idx)) if *idx == n_for_sale + oi) {
             let r = inv_slot_rect(w, h, cam, shop, shop_rm, slot_i, env_h);
-            return (
-                r[0] + r[2] * 0.5,
-                r[1] + r[3] * 0.5,
-                inv_slot_wz(h),
-            );
+            return (r[0] + r[2] * 0.5, r[1] + r[3] * 0.5, inv_slot_wz(h));
         }
     }
     (w * 0.5, h * 0.5, h * 0.2)
@@ -589,7 +573,7 @@ pub(crate) fn render_shop_frame(
     let mut frame = UiFrame::new();
     frame.quad(GpuInstance {
         rect: [0.0, 0.0, w, h],
-        color: color::LACQUER,
+        color: color::WALNUT_INK,
         user: 0,
     });
     if with_shop_glb_cpu(|opt| opt.is_some()) {
@@ -629,7 +613,6 @@ pub(crate) fn render_shop_frame(
 
     let ppmm = ctx.layout.mm(1.0);
     let gold_dish_anchor = player_gold_dish_object3d_anchor(w, h, &cam, env_h, ppmm);
-    let journal_anchor = journal_object3d_anchor(w, h, &cam, env_h);
 
     // Legacy synthesized lamp when `shop.glb` has no embedded punctual lights.
     let lp = (w * 0.5, h * 0.28, ppmm * 180.575_9);
@@ -728,7 +711,7 @@ pub(crate) fn render_shop_frame(
                     point_lights.push(PointLight {
                         pos: [px, py - 30.0, wy + 60.0],
                         radius: h * 0.65 * hover_r_mul,
-                        color: color::rgb(color::TALLOW),
+                        color: color::rgb(color::PARCHMENT),
                         intensity: 3.20 * hover_i_mul,
                     });
                 }
@@ -738,29 +721,21 @@ pub(crate) fn render_shop_frame(
                         point_lights.push(PointLight {
                             pos: [cx, cy + 35.0, wy + 50.0],
                             radius: h * 0.72 * hover_r_mul,
-                            color: color::rgb(color::TALLOW),
+                            color: color::rgb(color::PARCHMENT),
                             intensity: 3.00 * hover_i_mul,
                         });
                     }
                 }
-                ShopHit::Dish(id) => {
-                    let center = if id == super::PICK_JOURNAL_BOOK {
-                        (
-                            journal_anchor[0],
-                            journal_anchor[1],
-                            journal_anchor[2],
-                        )
-                    } else {
-                        (
-                            gold_dish_anchor[0],
-                            gold_dish_anchor[1],
-                            gold_dish_anchor[2],
-                        )
-                    };
+                ShopHit::Dish(_) => {
+                    let center = (
+                        gold_dish_anchor[0],
+                        gold_dish_anchor[1],
+                        gold_dish_anchor[2],
+                    );
                     point_lights.push(PointLight {
                         pos: [center.0, center.1 - 20.0, center.2.max(80.0)],
                         radius: h * 0.55 * hover_r_mul,
-                        color: color::rgb(color::TALLOW),
+                        color: color::rgb(color::PARCHMENT),
                         intensity: 2.50 * hover_i_mul,
                     });
                 }
@@ -770,7 +745,7 @@ pub(crate) fn render_shop_frame(
                         point_lights.push(PointLight {
                             pos: [cx, cy - 28.0, wy + 55.0],
                             radius: h * 0.62 * hover_r_mul,
-                            color: color::rgb(color::TALLOW),
+                            color: color::rgb(color::PARCHMENT),
                             intensity: 3.20 * hover_i_mul,
                         });
                     } else if let Some(idx) = super::layout::tile_pack_index_from_pick(id) {
@@ -785,7 +760,7 @@ pub(crate) fn render_shop_frame(
                             point_lights.push(PointLight {
                                 pos: [center.0, center.1 - 30.0, center.2 + 60.0],
                                 radius: h * 0.62 * hover_r_mul,
-                                color: color::rgb(color::TALLOW),
+                                color: color::rgb(color::PARCHMENT),
                                 intensity: 3.20 * hover_i_mul,
                             });
                         }
@@ -873,20 +848,27 @@ pub(crate) fn render_shop_frame(
         }));
     }
 
-    let gold_label_center = with_shop_glb_cpu(|opt| {
-        let cpu = opt?;
-        let tw = player_gold_dish_marker_translation(cpu)? * room_env_world_scale(h, env_h);
-        let (cx, cy) = cam.project_world_to_screen(w, h, tw);
-        Some((cx, cy))
-    })
-    .unwrap_or((gold_dish_anchor[0], gold_dish_anchor[1]));
-    let gold_label_rect = crate::render::gold_display::push_gold_amount_label(
-        &mut frame,
-        w,
-        h,
-        shop_rm.display_gold as i32,
-        gold_label_center,
-    );
+    // Gold plaque + label sit on the post-tonemap overlay layer (text label
+    // routes through `frame.texts`), so they'd punch through the pause /
+    // options dim — skip them while the pause menu is up.
+    let gold_label_rect = if shop.pause_menu.paused {
+        [0.0, 0.0, 0.0, 0.0]
+    } else {
+        let gold_label_center = with_shop_glb_cpu(|opt| {
+            let cpu = opt?;
+            let tw = player_gold_dish_marker_translation(cpu)? * room_env_world_scale(h, env_h);
+            let (cx, cy) = cam.project_world_to_screen(w, h, tw);
+            Some((cx, cy))
+        })
+        .unwrap_or((gold_dish_anchor[0], gold_dish_anchor[1]));
+        crate::render::gold_display::push_gold_amount_label(
+            &mut frame,
+            w,
+            h,
+            shop_rm.display_gold as i32,
+            gold_label_center,
+        )
+    };
 
     // Shelf focus ring uses shelf-slot screen rects.
     if !shop.pause_menu.paused && inspect.is_none() {
@@ -917,8 +899,8 @@ pub(crate) fn render_shop_frame(
         }
     }
 
-    if inspect.is_none()
-        && shop.journal_transition.is_none()
+    if !shop.pause_menu.paused
+        && inspect.is_none()
         && let Some(hit) = hover
         && let Some((ref title, ref desc, ref cta, col)) =
             hover_tooltip_content(shop, &shop_rm, &ctx.run.mode, hit)
@@ -964,91 +946,6 @@ pub(crate) fn render_shop_frame(
         frame.texts(tip_texts);
     }
 
-    // Journal book mesh + prepass (anchor from `journal_btn` in shop.glb when present).
-    let cam_euler = camera_facing_euler_xyz_rad(cam.eye, cam.target);
-    let [journal_px, journal_py, journal_pz] = journal_anchor;
-    if let Some(t) = shop.journal_transition {
-        let zp = t.zoom_progress();
-        if zp > 0.001 {
-            let smoothed = zp * zp * (3.0 - 2.0 * zp);
-            let a = smoothed * 0.72;
-            frame.quad(GpuInstance {
-                rect: [0.0, 0.0, w, h],
-                color: [0.03, 0.04, 0.06, a],
-                user: 0,
-            });
-        }
-    }
-    let (journal_zoom, journal_pos) = match shop.journal_transition {
-        Some(t) => {
-            let z = t.zoom_progress();
-            let smoothed = z * z * (3.0 - 2.0 * z);
-            let zoom = 1.0 + smoothed * 7.0;
-            let cx = w * 0.5;
-            let cy = h * 0.5;
-            let pos = [
-                journal_px + (cx - journal_px) * smoothed,
-                journal_py + (cy - journal_py) * smoothed,
-                journal_pz,
-            ];
-            (zoom, pos)
-        }
-        None => (1.0, journal_anchor),
-    };
-    let (face_w, face_h) = journal_transition::book_cover_face_extents_xy(w, journal_zoom);
-    frame.object3d(Object3d {
-        pos: journal_pos,
-        extents: [
-            face_w,
-            ctx.layout.mm(journal_transition::BOOK_SPINE_THICKNESS_MM) * journal_zoom,
-            face_h,
-        ],
-        rotation: cam_euler,
-        color: [1.0, 1.0, 1.0, 1.0],
-        kind: Object3dKind::Book {
-            spine_label: Cow::Borrowed("Journal"),
-            pick_id: Some(super::PICK_JOURNAL_BOOK),
-            open_amount: shop.journal_open_amount,
-        },
-        hover_target: 0.0,
-        anim_id: 0,
-        arrange_name: None,
-    });
-
-    if shop.journal_open_amount > 0.001 {
-        let scratch = YakuJournalScene::new();
-        let inner_ctx = DrawCtx::new(
-            ctx.layout,
-            ctx.anim,
-            ctx.run,
-            ctx.progress,
-            ctx.active_profile,
-            ctx.game_in_progress,
-            ctx.proj,
-            ctx.picked_gameplay_object,
-            ctx.picked_shop_object,
-            ctx.debug_visibility,
-            ctx.modal_active,
-            ctx.room_gltf_height_scale,
-            ctx.shop_env_lighting,
-            ctx.effect_layers,
-            ctx.cursor_pos,
-            ctx.input_mode,
-            ctx.gamepad_swap_ab,
-            ctx.gamepad_swap_xy,
-            ctx.gamepad_style,
-            ctx.glyphs,
-            None,
-            None,
-            ctx.tile_preset,
-            ctx.archive_has_new_chronicle,
-            ctx.hallway_distortion_debug,
-            ctx.rain_tuning,
-        );
-        let prepass = SceneBehavior::draw_frame(&scratch, inner_ctx);
-        frame.journal_prepass_frame = Some(Box::new(prepass));
-    }
-
     shop.push_shop_particle_quads(&mut frame);
     shop.push_shop_score_popup_labels(&mut frame, w, h);
 
@@ -1073,7 +970,10 @@ pub(crate) fn render_shop_frame(
         pause_buttons.push(ButtonDef::scene((0.0, 0.0, w, h), u32::MAX));
         frame.buttons = pause_buttons;
     } else if inspect.is_none() {
-        for i in 0..SHOP_SPAWN_SLOT_COUNT {
+        for (i, sf) in for_sale_slots(shop).into_iter().enumerate() {
+            if sf.is_none() {
+                continue;
+            }
             let r = shop_shelf_slot_rect(w, h, &cam, i, env_h);
             frame.buttons.push(ButtonDef::scene(
                 (r[0], r[1], r[2], r[3]),
@@ -1081,9 +981,6 @@ pub(crate) fn render_shop_frame(
             ));
         }
         let jr = journal_btn_rect(w, h, &cam, env_h);
-        // No `hover_label` here — [`push_focus_tooltip_panel_2d`] already shows name /
-        // description / action for these hits; main/draw would duplicate it as a second
-        // brass tooltip when the cursor hovers the same rect.
         frame.buttons.push(ButtonDef::scene(
             (jr[0], jr[1], jr[2], jr[3]),
             SHOP_CLICK_JOURNAL,
@@ -1339,6 +1236,19 @@ pub(crate) fn render_shop_frame(
 }
 
 /// Name, description, price line, and accent colour for hover tooltip.
+#[inline]
+fn purchasable_tooltip_cta(price: u32, sold: bool, can_afford: bool, display_gold: u32) -> String {
+    if sold {
+        "SOLD".to_string()
+    } else if price == 0 {
+        "FREE".to_string()
+    } else if can_afford {
+        format!("Buy {}g", price)
+    } else {
+        format!("${} (have {}g)", price, display_gold)
+    }
+}
+
 fn hover_tooltip_content(
     scene: &ShopScene,
     shop: &ShopReadModel,
@@ -1558,20 +1468,19 @@ fn hover_tooltip_content(
                         &shop.relic_state,
                     ));
                 let can_afford = shop.gold >= price as i32 && !pack.sold;
-                let cta = if pack.sold {
-                    "SOLD".to_string()
-                } else if price == 0 {
-                    "FREE".to_string()
+                let cta = purchasable_tooltip_cta(price, pack.sold, can_afford, shop.display_gold);
+                let col = if pack.sold {
+                    color::UMBER
                 } else if can_afford {
-                    format!("Buy {}g", price)
+                    color::GOLD
                 } else {
-                    format!("${} (have {}g)", price, shop.display_gold)
+                    color::RUBY
                 };
                 (
                     pack.kind.name().to_string(),
                     pack.kind.description().to_string(),
                     cta,
-                    color::CHAMPAGNE,
+                    col,
                 )
             })
         }
@@ -1590,21 +1499,13 @@ fn hover_tooltip_content(
                         &shop.relic_state,
                     ));
                 let can_afford = shop.gold >= price as i32 && !pack.sold;
-                let cta = if pack.sold {
-                    "SOLD".to_string()
-                } else if price == 0 {
-                    "FREE".to_string()
-                } else if can_afford {
-                    format!("Buy {}g", price)
-                } else {
-                    format!("${} (have {}g)", price, shop.display_gold)
-                };
+                let cta = purchasable_tooltip_cta(price, pack.sold, can_afford, shop.display_gold);
                 let col = if pack.sold {
                     color::UMBER
                 } else if can_afford {
-                    color::CHAMPAGNE
+                    color::GOLD
                 } else {
-                    color::UMBER
+                    color::RUBY
                 };
                 (
                     pack.kind.name().to_string(),
@@ -1630,6 +1531,7 @@ struct CursorHoverCtx<'a> {
     cy: f32,
     w: f32,
     h: f32,
+    scene: &'a ShopScene,
     cam: &'a CameraParams,
     env_h: f32,
 }
@@ -1640,10 +1542,15 @@ fn cursor_hover_rect(ctx: CursorHoverCtx<'_>) -> Option<[f32; 4]> {
         cy,
         w,
         h,
+        scene,
         cam,
         env_h,
     } = ctx;
+    let sale_slots = for_sale_slots(scene);
     for i in 0..SHOP_SPAWN_SLOT_COUNT {
+        if sale_slots[i].is_none() {
+            continue;
+        }
         let r = shop_shelf_slot_rect(w, h, cam, i, env_h);
         if pt_in_rect(cx, cy, r) {
             return Some(r);
@@ -1674,6 +1581,7 @@ fn ring_target_rect(
             cy,
             w,
             h,
+            scene,
             cam,
             env_h,
         })
@@ -2422,8 +2330,16 @@ fn rect_center_n(window_w: f32, window_h: f32, nx: f32, ny: f32, rw: f32, rh: f3
 fn shop_shelf_slot_rect(w: f32, h: f32, cam: &CameraParams, index: usize, env_h: f32) -> [f32; 4] {
     let rw = w * 0.065;
     let rh = h * 0.125;
-    if let Some(r) = marker_screen_rect(w, h, cam, &spawn_relic_marker_name(index), rw, rh, env_h) {
-        return r;
+    // For-sale focus/click rects should hug stock (tile/relic/ribbon/talisman),
+    // not the pedestal mesh under it. Use marker translation + fixed extents
+    // here instead of marker mesh bounds, which can include the full plinth.
+    if let Some((cx, cy)) = with_shop_glb_cpu(|opt| {
+        let cpu = opt?;
+        let tw = marker_translation(cpu, &spawn_relic_marker_name(index))?
+            * room_env_world_scale(h, env_h);
+        Some(cam.project_world_to_screen(w, h, tw))
+    }) {
+        return [cx - rw * 0.5, cy - rh * 0.5, rw, rh];
     }
     let nx_span_start = 0.14_f32;
     let nx_span_end = 0.86_f32;

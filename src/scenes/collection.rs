@@ -19,7 +19,9 @@ use crate::render::draw_cmd::{
 };
 use crate::render::ribbon_mesh::{ZodiacRibbonSpec, zodiac_ribbon_object3d};
 use crate::render::room_glb;
-use crate::render::table_transform::{euler_xyz_rad_from_deg, mat4_to_euler_xyz_rad, rot_fixed_axes_deg};
+use crate::render::table_transform::{
+    euler_xyz_rad_from_deg, mat4_to_euler_xyz_rad, rot_fixed_axes_deg,
+};
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{
     GpuInstance, GradientQuadInstance, PointLight, TextAlign, TextLabel,
@@ -27,6 +29,7 @@ use crate::render::wgpu_renderer::{
 use crate::render::world_space::{
     object3d_pos_for_screen_at_world_z, surface_anchor_from_world_xyz, world_on_camera_ray_plane_z,
 };
+use crate::ui::button_prompts::{ButtonPrompt, PromptInputSurface};
 use crate::ui::focus_nav::{FocusDir, pick_neighbor, push_focus_ring};
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
@@ -256,6 +259,10 @@ impl CollectionScene {
     /// Headless screenshot: open the Chronicle tab with a clean scroll/camera state.
     pub fn prepare_chronicle_for_screenshot(&mut self) {
         *self = Self::with_active_tab(Tab::Chronicle);
+    }
+
+    pub fn is_chronicle_tab(&self) -> bool {
+        matches!(self.active_tab, Tab::Chronicle)
     }
 
     fn with_active_tab(active_tab: Tab) -> Self {
@@ -673,6 +680,33 @@ impl CollectionScene {
             layout,
             crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
         )
+    }
+
+    /// Move archive inspect focus while [`CollectionInspectPresenter`] is active.
+    /// Returns true when the focused artifact changed.
+    pub(crate) fn inspect_cycle_focus(
+        &mut self,
+        dir: FocusDir,
+        w: f32,
+        h: f32,
+        progress: &crate::core::progression::PlayerProgress,
+        env_h: f32,
+        bus: &mut crate::game::event_bus::EventBus,
+    ) -> bool {
+        if !archive_glb::archive_room_draw_ready() {
+            return false;
+        }
+        let all_count = tab_artifacts(self.active_tab, progress).len();
+        if all_count == 0 {
+            return false;
+        }
+        let items = self.flat_items(w, h, progress, env_h);
+        if archive_directional_step(self, bus, &items, dir, all_count) {
+            self.selected_artifact = self.focused_row;
+            self.focused_chrome = None;
+            return true;
+        }
+        false
     }
 
     /// Build the 3D frame for the active Archive tab: grid on a plane, camera
@@ -1688,9 +1722,17 @@ impl CollectionScene {
             user: 0,
         });
 
-        let chrome_label_px = typography::size(typography::H24, h);
+        // Inset copy inside the 3D wood-tablet bevel (~10% per edge in
+        // `wood_tablet_mesh`) and cap size to the inner band so pinned H24
+        // does not clip ascenders/descenders against the label rect.
+        const CHROME_LABEL_INSET_FRAC: f32 = 0.10;
+        let label_inset = back_h * CHROME_LABEL_INSET_FRAC;
+        let chrome_label_rect = |r: [f32; 4]| -> [f32; 4] {
+            [r[0], r[1] + label_inset, r[2], r[3] - label_inset * 2.0]
+        };
+        let chrome_label_px = typography::tier_at_most((back_h - label_inset * 2.0) * 0.55, h);
         text_labels.push(TextLabel {
-            rect: back_rect,
+            rect: chrome_label_rect(back_rect),
             text: "Back".into(),
             color: color::PARCHMENT,
             font_px: Some(chrome_label_px),
@@ -1698,7 +1740,7 @@ impl CollectionScene {
             ..Default::default()
         });
         text_labels.push(TextLabel {
-            rect: switch_rect,
+            rect: chrome_label_rect(switch_rect),
             text: "Switch save".into(),
             color: color::PARCHMENT,
             font_px: Some(chrome_label_px),
@@ -1749,10 +1791,10 @@ impl CollectionScene {
                 user: 0,
             });
             text_labels.push(TextLabel {
-                rect,
+                rect: chrome_label_rect(rect),
                 text: sym.into(),
                 color: color::PARCHMENT,
-                font_px: Some(typography::size(typography::H28, h)),
+                font_px: Some(chrome_label_px),
                 ..Default::default()
             });
             if focused {
@@ -1776,29 +1818,76 @@ impl CollectionScene {
         // never drives hints to microtext.
         let hint_font_px = typography::size(typography::H36, h);
         let hint_line_h = (hint_font_px / 0.55).ceil() + 4.0;
-        let hint_text: String = if inspect.is_some() {
-            "Right stick or WASD / arrows: orbit item\nTriggers / scroll or Shift+W/↑ / Shift+S/↓: zoom   ·   E / North: close   ·   Esc: menu"
-                .to_string()
+        let hint_text: String = if matches!(ctx.input_mode, InputMode::Controller) {
+            let confirm = ButtonPrompt::controller_action_label(
+                ctx.gamepad_style,
+                UiAction::Confirm,
+                ctx.gamepad_swap_ab,
+                ctx.gamepad_swap_xy,
+            )
+            .unwrap_or("A");
+            let cancel = ButtonPrompt::controller_action_label(
+                ctx.gamepad_style,
+                UiAction::Cancel,
+                ctx.gamepad_swap_ab,
+                ctx.gamepad_swap_xy,
+            )
+            .unwrap_or("B");
+            let north = ButtonPrompt::controller_action_label(
+                ctx.gamepad_style,
+                UiAction::NorthFacePress,
+                ctx.gamepad_swap_ab,
+                ctx.gamepad_swap_xy,
+            )
+            .unwrap_or("Y");
+            if inspect.is_some() {
+                format!(
+                    "{}   ·   {north}: close   ·   {cancel}: menu",
+                    ButtonPrompt::shop_inspect_mode_hint(
+                        PromptInputSurface::Controller,
+                        ctx.gamepad_style
+                    )
+                )
+            } else if matches!(self.active_tab, Tab::Chronicle) && all_count_hint == 0 {
+                "Finish a non-tutorial run to add folios here.".to_string()
+            } else if matches!(self.active_tab, Tab::Chronicle) && all_count_hint > 0 {
+                format!("{north}: inspect run")
+            } else if archive_path {
+                if archive_multi_page {
+                    format!(
+                        "{confirm} / {north}: inspect   ·   Footer arrows or page-edge ← / →: page"
+                    )
+                } else {
+                    format!("{confirm} / {north}: inspect")
+                }
+            } else if tab_scrollable {
+                format!("{confirm} / {north}: inspect")
+            } else {
+                format!("{confirm} / {north}: inspect")
+            }
+        } else if inspect.is_some() {
+            format!(
+                "{}   ·   E: close   ·   Esc: menu",
+                ButtonPrompt::shop_inspect_mode_hint(
+                    PromptInputSurface::MouseOrKeyboard,
+                    ctx.gamepad_style
+                )
+            )
         } else if matches!(self.active_tab, Tab::Chronicle) && all_count_hint == 0 {
-            "Finish a non-tutorial run to add folios here.\nTab / Shift+Tab: tabs   ·   Esc: back"
-                .to_string()
+            "Finish a non-tutorial run to add folios here.".to_string()
         } else if matches!(self.active_tab, Tab::Chronicle) && all_count_hint > 0 {
-            "Tab / Shift+Tab: section   ·   ↑↓: run log   ·   PgUp / PgDn: detail pane   ·   E / North: inspect run   ·   Esc: back"
-                .to_string()
+            "Enter / E: inspect run".to_string()
         } else if archive_path {
             if archive_multi_page {
-                "Tab / Shift+Tab: section   ·   \u{2190}\u{2192}\u{2191}\u{2193}: focus   ·   Enter / E / North: inspect   ·   Esc: back\nPgUp / PgDn or mouse wheel: page   ·   Footer arrows or page-edge \u{2190} / \u{2192}: page"
+                "Enter / E: inspect   ·   Footer arrows or page-edge \u{2190} / \u{2192}: page"
                     .to_string()
             } else {
-                "Tab / Shift+Tab: section   ·   \u{2190}\u{2192}\u{2191}\u{2193}: focus   ·   Enter / E / North: inspect   ·   Esc: back"
-                    .to_string()
+                "Enter / E: inspect".to_string()
             }
         } else if tab_scrollable {
-            "Tab / Shift+Tab: cycle tab   ·   \u{2190}\u{2192}\u{2191}\u{2193}: focus   ·   Enter: select   ·   E/North: inspect   ·   Esc: back\nScroll: mouse wheel or PgUp / PgDn"
-                .to_string()
+            "Enter / E: inspect".to_string()
         } else {
-            "Tab / Shift+Tab: cycle tab   ·   \u{2190}\u{2192}\u{2191}\u{2193}: focus\nEnter: select   ·   E/North: inspect   ·   Esc: back"
-                .to_string()
+            "Enter / E: inspect".to_string()
         };
         let hint_lines = hint_text.lines().count().max(1) as f32;
         let hint_h = hint_line_h * hint_lines + 10.0;
@@ -1875,6 +1964,23 @@ impl CollectionScene {
 
         // Grid layout, focus close-up, and description plaque.
         self.build_archive_grid_frame(frame, quads, &mut text_labels, &all_artifacts, ctx, inspect)
+    }
+}
+
+pub(crate) fn sync_item_inspect_orbit_target(
+    scene: &CollectionScene,
+    w: f32,
+    h: f32,
+    layout: &crate::ui::layout::LayoutResult,
+    progress: &crate::core::progression::PlayerProgress,
+    room_gltf_height_scale: f32,
+    orbit: &mut ItemInspectOrbitState,
+) {
+    let all_artifacts = tab_artifacts(scene.active_tab, progress);
+    if let Some(target_world) =
+        scene.collection_inspect_target_world(w, h, &all_artifacts, layout, room_gltf_height_scale)
+    {
+        orbit.target_world = target_world;
     }
 }
 

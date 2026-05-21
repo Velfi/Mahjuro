@@ -3488,7 +3488,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     let pack_mesh = LitMeshGpu::new(&device, &build_pack_mesh(), "pack-mesh");
     let ribbon_mesh = LitMeshGpu::new(&device, &build_ribbon_mesh(), "ribbon");
     let talisman_mesh = LitMeshGpu::new(&device, &build_talisman_mesh(), "talisman");
-    let dora_plinth_mesh = LitMeshGpu::new(&device, &build_dora_plinth_mesh(), "dora-plinth");
+    let plinth_mesh = LitMeshGpu::new(&device, &build_plinth_mesh(), "plinth");
     let bug_body_mesh = LitMeshGpu::new(&device, &build_bug_body_mesh(), "bug-body");
     let bug_wing_mesh = LitMeshGpu::new(&device, &build_bug_wing_mesh(), "bug-wing");
     let bug_wing_blur_mesh = LitMeshGpu::new(&device, &build_bug_wing_blur_mesh(), "bug-wing-blur");
@@ -3860,9 +3860,9 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             &tile_sampler,
         ));
     }
-    let mut dora_plinth_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_DORA_PLINTH_SLOTS);
-    for _ in 0..MAX_DORA_PLINTH_SLOTS {
-        dora_plinth_instances.push(LitMeshInstance::new(
+    let mut plinth_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_PLINTH_SLOTS);
+    for _ in 0..MAX_PLINTH_SLOTS {
+        plinth_instances.push(LitMeshInstance::new(
             &device,
             &lit_mesh_material_layout,
             &shadow_caster_layout,
@@ -4089,7 +4089,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         pack_slot_texture: vec![None; 4],
         ribbon_mesh,
         talisman_mesh,
-        dora_plinth_mesh,
+        plinth_mesh,
         ribbon_instances,
         ribbon_slot_zodiac,
         ribbon_zodiac_tex,
@@ -4104,7 +4104,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         bug_wing_blur_r_instances,
         orb_mesh,
         orb_instances,
-        dora_plinth_instances,
+        plinth_instances,
         last_ribbon_models: Vec::new(),
         last_ribbon_batch_slot_counts: Vec::new(),
         last_talisman_models: Vec::new(),
@@ -4161,6 +4161,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         shadow_placement_anim_id: 0,
         showcase_decal_atlas: None,
         showcase_decal_atlas_tileset: None,
+        showcase_decal_atlas_cache: std::collections::VecDeque::new(),
         lit_mesh_material_layout,
         lit_mesh_spot_ssr_layout,
         lit_mesh_ssr_buffer,

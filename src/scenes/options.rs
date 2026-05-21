@@ -2,14 +2,13 @@
 //!
 //! Layout: a table-of-contents (TOC) column on the left links to
 //! sections (Audio, Visual, Rendering, Accessibility, Controls, Data) in a
-//! scrollable content pane on the right.  Entry-based scroll stepping (same
-//! pattern as the glossary) keeps every visible row fully on-screen — the
-//! renderer has no scissor support.
+//! scrollable content pane on the right.
 
 use crate::audio::SfxId;
 use crate::game::event_bus::GameEvent;
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
+use crate::ui::clip::intersect_rect;
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::smooth_scroll::SmoothScroll;
 
@@ -988,6 +987,12 @@ impl OptionsScene {
         let slider_w = layout.content_w * slider_frac;
         let pct_x = slider_x + slider_w + layout.content_w * 0.02;
         let pct_w = layout.content_w * 0.13;
+        let content_clip_rect = [
+            layout.content_x,
+            layout.content_start_y,
+            layout.content_w,
+            layout.visible_slots as f32 * (layout.slot_h + layout.slot_gap),
+        ];
 
         let render_slots = layout.visible_slots + 1;
         for (vi, ci) in (scroll..CONTENT.len()).enumerate() {
@@ -997,27 +1002,37 @@ impl OptionsScene {
             let slot_y = layout.content_start_y
                 + vi as f32 * (layout.slot_h + layout.slot_gap)
                 + frac_offset;
+            let slot_rect = [layout.content_x, slot_y, layout.content_w, layout.slot_h];
+            let Some(clipped_slot_rect) = intersect_rect(slot_rect, content_clip_rect) else {
+                continue;
+            };
             match CONTENT[ci] {
                 ContentSlot::Header(section) => {
                     // Gold section heading with a subtle underline.
                     text_labels.push(TextLabel {
-                        rect: [layout.content_x, slot_y, layout.content_w, layout.slot_h],
+                        rect: slot_rect,
                         text: section.label().into(),
                         color: color::GOLD,
                         align: TextAlign::Left,
+                        clip_rect: Some(content_clip_rect),
                         ..Default::default()
                     });
                     let line_y = slot_y + layout.slot_h - 2.0 * layout.scale;
-                    instances.push(GpuInstance {
-                        rect: [
+                    if let Some(line_rect) = intersect_rect(
+                        [
                             layout.content_x,
                             line_y,
                             layout.content_w,
                             (2.0 * layout.scale).max(1.0),
                         ],
-                        color: color::WALNUT_SOFT,
-                        user: 0,
-                    });
+                        content_clip_rect,
+                    ) {
+                        instances.push(GpuInstance {
+                            rect: line_rect,
+                            color: color::WALNUT_SOFT,
+                            user: 0,
+                        });
+                    }
                 }
                 ContentSlot::Row(row) => {
                     let is_focused = !self.back_focused && row == self.focused;
@@ -1025,14 +1040,20 @@ impl OptionsScene {
                         instances,
                         text_labels,
                         row,
-                        [layout.content_x, slot_y, layout.content_w, layout.slot_h],
+                        slot_rect,
+                        content_clip_rect,
                         is_focused,
                         track_h,
                         pct_x,
                         pct_w,
                     );
                     buttons.push(ButtonDef::scene(
-                        (layout.content_x, slot_y, layout.content_w, layout.slot_h),
+                        (
+                            clipped_slot_rect[0],
+                            clipped_slot_rect[1],
+                            clipped_slot_rect[2],
+                            clipped_slot_rect[3],
+                        ),
                         row.click_id(),
                     ));
                 }
@@ -1120,6 +1141,7 @@ impl OptionsScene {
         text_labels: &mut Vec<TextLabel>,
         row: Row,
         rect: [f32; 4],
+        content_clip_rect: [f32; 4],
         is_focused: bool,
         track_h: f32,
         pct_x: f32,
@@ -1127,6 +1149,15 @@ impl OptionsScene {
     ) {
         let [row_x, row_y, row_w, row_h] = rect;
         let scale = (row_h / 40.0).max(0.5);
+        let mut push_quad_in_clip = |quad_rect: [f32; 4], quad_color: [f32; 4]| {
+            if let Some(clipped) = intersect_rect(quad_rect, content_clip_rect) {
+                instances.push(GpuInstance {
+                    rect: clipped,
+                    color: quad_color,
+                    user: 0,
+                });
+            }
+        };
 
         match row {
             Row::Master | Row::Music | Row::Sfx | Row::Gamma => {
@@ -1144,13 +1175,9 @@ impl OptionsScene {
                 let bg_color = if is_focused {
                     [0.20, 0.32, 0.50, 0.90]
                 } else {
-                    color::alpha(color::TWILIGHT, 0.75)
+                    color::alpha(color::WALNUT_INK, 0.75)
                 };
-                instances.push(GpuInstance {
-                    rect: [row_x, row_y, row_w, row_h],
-                    color: bg_color,
-                    user: 0,
-                });
+                push_quad_in_clip([row_x, row_y, row_w, row_h], bg_color);
 
                 let text_color = if is_focused {
                     [1.0, 1.0, 1.0, 1.0]
@@ -1162,28 +1189,21 @@ impl OptionsScene {
                     rect: [row_x + 8.0 * scale, row_y, label_w - 8.0 * scale, row_h],
                     text: label.into(),
                     color: text_color,
+                    clip_rect: Some(content_clip_rect),
                     ..Default::default()
                 });
 
                 let slider_x = row_x + label_w;
                 let slider_w = row_w * 0.50;
                 let track_y = row_y + (row_h - track_h) * 0.5;
-                instances.push(GpuInstance {
-                    rect: [slider_x, track_y, slider_w, track_h],
-                    color: color::WALNUT_INK,
-                    user: 0,
-                });
+                push_quad_in_clip([slider_x, track_y, slider_w, track_h], color::WALNUT_INK);
                 let fill_w = slider_w * fill_ratio;
                 let fill_color = if is_focused {
                     color::GOLD
                 } else {
                     color::BRASS
                 };
-                instances.push(GpuInstance {
-                    rect: [slider_x, track_y, fill_w, track_h],
-                    color: fill_color,
-                    user: 0,
-                });
+                push_quad_in_clip([slider_x, track_y, fill_w, track_h], fill_color);
                 let knob_size = track_h * 2.5;
                 let knob_x = slider_x + fill_w - knob_size * 0.5;
                 let knob_y = track_y + (track_h - knob_size) * 0.5;
@@ -1192,11 +1212,7 @@ impl OptionsScene {
                 } else {
                     color::PARCHMENT
                 };
-                instances.push(GpuInstance {
-                    rect: [knob_x, knob_y, knob_size, knob_size],
-                    color: knob_color,
-                    user: 0,
-                });
+                push_quad_in_clip([knob_x, knob_y, knob_size, knob_size], knob_color);
                 let readout = match row {
                     Row::Gamma => format!("{:.2}", value),
                     _ => format!("{}%", (value * 100.0).round() as u32),
@@ -1205,6 +1221,7 @@ impl OptionsScene {
                     rect: [pct_x, row_y, pct_w, row_h],
                     text: readout,
                     color: text_color,
+                    clip_rect: Some(content_clip_rect),
                     ..Default::default()
                 });
             }
@@ -1215,11 +1232,7 @@ impl OptionsScene {
                 } else {
                     color::WALNUT_RAISED
                 };
-                instances.push(GpuInstance {
-                    rect: [row_x, row_y, row_w, row_h],
-                    color: bg_color,
-                    user: 0,
-                });
+                push_quad_in_clip([row_x, row_y, row_w, row_h], bg_color);
                 let text_color = if is_focused {
                     color::CHAMPAGNE
                 } else {
@@ -1297,6 +1310,7 @@ impl OptionsScene {
                     rect: [row_x, row_y, row_w, row_h],
                     text,
                     color: text_color,
+                    clip_rect: Some(content_clip_rect),
                     ..Default::default()
                 });
             }

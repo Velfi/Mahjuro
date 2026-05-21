@@ -1167,6 +1167,7 @@ pub const PLAQUE_DECAL_HEIGHT: u32 = 320;
 /// other dimension is computed at draw time from the paper face's world-space
 /// aspect ratio so the bilinear sampler doesn't stretch glyphs — see the
 /// call site in `wgpu_renderer.rs`.
+#[allow(dead_code)]
 pub const OFUDA_DECAL_LONG_EDGE: u32 = 1024;
 
 /// Paint a boss-rule ofuda paper face: large title (boss name) at the top,

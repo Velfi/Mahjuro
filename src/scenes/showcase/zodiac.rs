@@ -70,6 +70,7 @@ impl ZodiacPresenter {
         if self.dismissed {
             ctx.bus.push(GameEvent::ZodiacLevelUp);
             GameEngine::set_finished_zodiac_celebration(ctx.run, self.yaku_name, self.new_level);
+            ctx.run.pending_shop_focus_snap_after_celebration = true;
             *ctx.overlay_request = Some(OverlayRequest::Pop);
         }
         None
@@ -88,7 +89,7 @@ impl ZodiacPresenter {
             .push_depth_reset_for_celebration_mesh(&mut frame);
 
         let t = self.elapsed();
-        let ribbon_l = h * 0.55;
+        let ribbon_l = h * 0.40;
 
         let sway_yaw = (t * 1.8).sin() * 12.0;
         let sway_roll = (t * 2.5 + 0.7).sin() * 6.0;
@@ -104,7 +105,7 @@ impl ZodiacPresenter {
                 * glam::Mat4::from_rotation_x(rx),
         );
         let anchor = PlacementAnchor::new(
-            [0.0, 0.0, 0.0],
+            [w * 0.5, h * 0.5, 0.0],
             base_rotation,
             &self.positions.celeb_zodiac,
             "shop.celebrations.zodiac",
@@ -153,7 +154,7 @@ impl ZodiacPresenter {
             radius: w.max(h) * 2.2,
             cos_outer,
             cos_inner,
-            color: color::rgb(color::TALLOW),
+            color: color::rgb(color::PARCHMENT),
             intensity: 6.0,
         }];
 

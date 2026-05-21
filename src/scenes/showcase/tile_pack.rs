@@ -16,9 +16,7 @@ use crate::render::theme::color;
 use crate::render::wgpu_renderer::{PointLight, SpotLight};
 use crate::render::world_space::world_on_camera_ray_plane_z;
 use crate::scenes::celebration_overlay;
-use crate::scenes::shop::{
-    CelebPhase, PackCelebration, shop_celebration_camera,
-};
+use crate::scenes::shop::{CelebPhase, PackCelebration, shop_celebration_camera};
 use crate::ui::input::UiAction;
 use crate::ui::layout::LayoutResult;
 use crate::ui::placement::PlacementAnchor;
@@ -142,7 +140,7 @@ impl TilePackPresenter {
                 }]);
 
                 let reveal_anchor = PlacementAnchor::new(
-                    [0.0, 0.0, 0.0],
+                    [w * 0.5, h * 0.5, 0.0],
                     Mat4::IDENTITY,
                     &self.positions.celeb_pack_reveal,
                     "shop.celebrations.pack_reveal",
@@ -245,7 +243,7 @@ impl TilePackPresenter {
                 }
                 let dominated = self.celebration.fully_settled() || self.celebration.dismissed;
                 if dominated && has_input {
-                    ctx.run.pending_shop_focus_snap_after_pack_celebration = true;
+                    ctx.run.pending_shop_focus_snap_after_celebration = true;
                     *ctx.overlay_request = Some(OverlayRequest::Pop);
                 }
             }
@@ -307,7 +305,11 @@ fn pack_closeup_anchor(
     let h = screen.window_h;
     let py_bias = h * PACK_CELEB_SCREEN_Y_DOWN_FRAC + box_h * PACK_CELEB_SCREEN_Y_PER_BOX_H;
     PlacementAnchor::new(
-        [screen.window_w * 0.5, py_bias, box_h * 0.5],
+        [
+            screen.window_w * 0.5,
+            screen.window_h * 0.5 + py_bias,
+            box_h * 0.5,
+        ],
         base_rotation,
         &positions.celeb_pack_closeup,
         "shop.celebrations.pack_closeup",
@@ -368,7 +370,7 @@ fn pack_celebration_subject_spotlight(
                 return Vec::new();
             }
             let reveal_anchor = PlacementAnchor::new(
-                [0.0, 0.0, 0.0],
+                [w * 0.5, h * 0.5, 0.0],
                 Mat4::IDENTITY,
                 &positions.celeb_pack_reveal,
                 "shop.celebrations.pack_reveal",
@@ -430,7 +432,7 @@ fn pack_celebration_isolation_lights(
         }
         CelebPhase::Reveal => {
             let a = PlacementAnchor::new(
-                [0.0, 0.0, 0.0],
+                [w * 0.5, h * 0.5, 0.0],
                 Mat4::IDENTITY,
                 &positions.celeb_pack_reveal,
                 "shop.celebrations.pack_reveal",
@@ -456,7 +458,7 @@ fn pack_celebration_isolation_lights(
                 lift + h * 0.48 + close_z_k,
             ],
             radius: h * 3.2 * r_mul + box_h * 0.5 * r_mul,
-            color: color::rgb(color::TALLOW),
+            color: color::rgb(color::PARCHMENT),
             intensity: 1.55 * i_mul,
         },
         PointLight {

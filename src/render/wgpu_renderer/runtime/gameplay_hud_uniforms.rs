@@ -26,8 +26,12 @@ impl WgpuRenderer {
         self.proj.plaque_rects.clear();
         self.proj.bowl_rect = None;
         self.proj.mirror_rect = None;
-        self.proj.dora_plinth_rect = None;
+        self.proj.plinth_rect = None;
+        self.proj.boss_plinth_rect = None;
+        self.proj.boss_plinth_platform_px = None;
         self.proj.round_wind_plinth_rect = None;
+        self.proj.dora_tile_rect = None;
+        self.proj.round_wind_tile_rect = None;
         self.proj.peg_rects = [None, None];
         self.proj.aux_dish_rects.clear();
         self.last_aux_dish_aabbs.clear();
@@ -101,7 +105,7 @@ impl WgpuRenderer {
                 // cast when this yaku is the selected target so it still
                 // reads as "active" against the row.
                 let base = if t.active {
-                    crate::render::theme::color::TALLOW
+                    crate::render::theme::color::PARCHMENT
                 } else {
                     crate::render::theme::color::PARCHMENT
                 };

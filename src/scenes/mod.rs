@@ -198,8 +198,10 @@ pub struct UpdateCtx<'a> {
     pub item_inspect_zoom_triggers: f32,
     /// Queued by the rumble lab scene; drained into input state after `update()`.
     pub rumble_lab_ops: &'a mut Vec<RumbleLabOp>,
-    /// [`ShopScene`] under shop showcase **inspect** presenter: orbit sync to mesh anchors.
-    pub suspended_shop: Option<&'a ShopScene>,
+    /// [`ShopScene`] under shop showcase **inspect** presenter: orbit sync + focus cycling.
+    pub suspended_shop: Option<&'a mut ShopScene>,
+    /// [`CollectionScene`] under archive showcase **inspect** presenter: focused artifact cycling.
+    pub suspended_collection: Option<&'a mut CollectionScene>,
     /// Same as [`DrawCtx::room_gltf_height_scale`] — vertical scale for embedded glTF rooms vs window height.
     pub room_gltf_height_scale: f32,
     /// Archive scene sets this to `Some(progress.run_history.len())` when the count changes so

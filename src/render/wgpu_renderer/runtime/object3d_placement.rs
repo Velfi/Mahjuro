@@ -62,7 +62,7 @@ impl WgpuRenderer {
             let mut obj3d_pack_slot: usize = 0;
             let mut obj3d_talisman_slot: usize = 0;
             let mut obj3d_ribbon_slot: usize = 0;
-            let mut obj3d_dora_plinth_slot: usize = 0;
+            let mut obj3d_plinth_slot: usize = 0;
             let mut obj3d_orb_slot: usize = 0;
             let mut obj3d_bowl_slot: usize = 0;
             let mut obj3d_mirror_slot: usize = 0;
@@ -216,7 +216,11 @@ impl WgpuRenderer {
                                 glam::Vec3::splat(0.5),
                                 0.0,
                             ));
-                            WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::YakuTablet, slot_i);
+                            WgpuRenderer::push_object3d_draw(
+                                object3d_draw_list,
+                                DrawKind::YakuTablet,
+                                slot_i,
+                            );
                         }
                         Object3dKind::WoodTablet { label, pick_id } => {
                             let slot_i = obj3d_wood_slot;
@@ -307,7 +311,11 @@ impl WgpuRenderer {
                                     .push((Some(*pid), project_unit_cube_rect(model)));
                                 self.last_primitive_pick_models.insert(*pid, model);
                             }
-                            WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::WoodTablet, slot_i);
+                            WgpuRenderer::push_object3d_draw(
+                                object3d_draw_list,
+                                DrawKind::WoodTablet,
+                                slot_i,
+                            );
                         }
                         Object3dKind::Book {
                             spine_label,
@@ -398,7 +406,11 @@ impl WgpuRenderer {
                                     .push((Some(*pid), project_unit_cube_rect(base_model)));
                                 self.last_primitive_pick_models.insert(*pid, base_model);
                             }
-                            WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::Book, slot_i);
+                            WgpuRenderer::push_object3d_draw(
+                                object3d_draw_list,
+                                DrawKind::Book,
+                                slot_i,
+                            );
 
                             // ── Cover instance: rotate the front cover
                             // around the local spine axis (X = -0.5).
@@ -473,7 +485,11 @@ impl WgpuRenderer {
                                     self.book_cover_mesh.default_material.kind,
                                 );
                             }
-                            WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::BookCover, slot_i);
+                            WgpuRenderer::push_object3d_draw(
+                                object3d_draw_list,
+                                DrawKind::BookCover,
+                                slot_i,
+                            );
                         }
                         Object3dKind::Relic {
                             relic_id,
@@ -660,7 +676,11 @@ impl WgpuRenderer {
                                     user: 0,
                                 });
                             }
-                            WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::Relic, slot_i);
+                            WgpuRenderer::push_object3d_draw(
+                                object3d_draw_list,
+                                DrawKind::Relic,
+                                slot_i,
+                            );
                         }
                         Object3dKind::Pack { kind, pick_id } => {
                             if obj3d_pack_slot >= self.pack_instances.len() {
@@ -797,7 +817,11 @@ impl WgpuRenderer {
                                     user: 0,
                                 });
                             }
-                            WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::Pack, slot_i);
+                            WgpuRenderer::push_object3d_draw(
+                                object3d_draw_list,
+                                DrawKind::Pack,
+                                slot_i,
+                            );
                         }
                         Object3dKind::Talisman { kind } => {
                             if obj3d_talisman_slot >= MAX_TALISMAN_SLOTS {
@@ -867,7 +891,11 @@ impl WgpuRenderer {
                                 glam::Vec3::splat(0.5),
                                 0.0,
                             ));
-                            WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::Talisman, slot_i);
+                            WgpuRenderer::push_object3d_draw(
+                                object3d_draw_list,
+                                DrawKind::Talisman,
+                                slot_i,
+                            );
                         }
                         Object3dKind::ZodiacRibbon { kind } => {
                             self.place_object3d_ribbon(
@@ -881,12 +909,12 @@ impl WgpuRenderer {
                                 &mut shadow,
                             );
                         }
-                        Object3dKind::DoraPlinth { glow } => {
-                            if obj3d_dora_plinth_slot >= MAX_DORA_PLINTH_SLOTS {
+                        Object3dKind::Plinth { glow } => {
+                            if obj3d_plinth_slot >= MAX_PLINTH_SLOTS {
                                 continue;
                             }
-                            let slot_i = obj3d_dora_plinth_slot;
-                            obj3d_dora_plinth_slot += 1;
+                            let slot_i = obj3d_plinth_slot;
+                            obj3d_plinth_slot += 1;
                             let plinth_name = obj.arrange_name.unwrap_or("gameplay.dora");
                             // Mesh is built Y-up centered; lift the world position
                             // by half-height so `obj.pos` describes the plinth's
@@ -926,18 +954,18 @@ impl WgpuRenderer {
                                 specular_strength: 0.85,
                                 specular_power: 64.0,
                             };
-                            self.dora_plinth_instances[slot_i].write_uniform_with_decal(
+                            self.plinth_instances[slot_i].write_uniform_with_decal(
                                 &self.queue,
                                 view_proj_arr,
                                 plinth_model,
                                 material,
                                 false,
                             );
-                            self.register_placement_shadow_slot(DrawKind::DoraPlinth, slot_i);
+                            self.register_placement_shadow_slot(DrawKind::Plinth, slot_i);
                             if self.placement_shadow_writes(frame) {
                                 self.write_lit_mesh_shadow(
                                     &mut shadow,
-                                    &self.dora_plinth_instances[slot_i],
+                                    &self.plinth_instances[slot_i],
                                     plinth_model,
                                     material.kind,
                                 );
@@ -969,10 +997,18 @@ impl WgpuRenderer {
                                 }
                             }
                             let rect = [mn_x, mn_y, mx_x - mn_x, mx_y - mn_y];
+                            // Local +Y is plinth height; +0.36 is the top platform
+                            // where tiles/icons rest (vs. the decorative crown).
+                            let platform_world =
+                                plinth_model.transform_point3(glam::Vec3::new(0.0, 0.36, 0.0));
+                            let (platform_px, platform_py) = project_to_screen(platform_world);
                             if plinth_name.contains("round_wind") {
                                 self.proj.round_wind_plinth_rect = Some(rect);
+                            } else if plinth_name.contains("boss_plinth") {
+                                self.proj.boss_plinth_rect = Some(rect);
+                                self.proj.boss_plinth_platform_px = Some([platform_px, platform_py]);
                             } else {
-                                self.proj.dora_plinth_rect = Some(rect);
+                                self.proj.plinth_rect = Some(rect);
                             }
                             self.last_debug_pickables.push((
                                 plinth_name.to_string(),
@@ -980,7 +1016,11 @@ impl WgpuRenderer {
                                 glam::Vec3::new(hx, hy, hz),
                                 0.0,
                             ));
-                            WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::DoraPlinth, slot_i);
+                            WgpuRenderer::push_object3d_draw(
+                                object3d_draw_list,
+                                DrawKind::Plinth,
+                                slot_i,
+                            );
                         }
                         Object3dKind::Bug {
                             slot,
@@ -1013,7 +1053,11 @@ impl WgpuRenderer {
                                     self.bug_body_mesh.default_material.kind,
                                 );
                             }
-                            WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::BugBody, slot);
+                            WgpuRenderer::push_object3d_draw(
+                                object3d_draw_list,
+                                DrawKind::BugBody,
+                                slot,
+                            );
                             let flap_l = glam::Mat4::from_rotation_x(*flap_rad);
                             let flap_r = glam::Mat4::from_rotation_x(-*flap_rad)
                                 * glam::Mat4::from_scale(glam::Vec3::new(1.0, -1.0, 1.0));
@@ -1032,7 +1076,11 @@ impl WgpuRenderer {
                                 wing_mat,
                                 live_tint,
                             );
-                            WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::BugWingL, slot);
+                            WgpuRenderer::push_object3d_draw(
+                                object3d_draw_list,
+                                DrawKind::BugWingL,
+                                slot,
+                            );
                             self.bug_wing_r_instances[slot].write_uniform_tinted(
                                 &self.queue,
                                 view_proj_arr,
@@ -1040,7 +1088,11 @@ impl WgpuRenderer {
                                 wing_mat,
                                 live_tint,
                             );
-                            WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::BugWingR, slot);
+                            WgpuRenderer::push_object3d_draw(
+                                object3d_draw_list,
+                                DrawKind::BugWingR,
+                                slot,
+                            );
                             let blur_a = blur_alpha.clamp(0.0, 1.0);
                             let blur_mat = self.bug_wing_blur_mesh.default_material;
                             let blur_tint = [
@@ -1056,7 +1108,11 @@ impl WgpuRenderer {
                                 blur_mat,
                                 blur_tint,
                             );
-                            WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::BugWingBlurL, slot);
+                            WgpuRenderer::push_object3d_draw(
+                                object3d_draw_list,
+                                DrawKind::BugWingBlurL,
+                                slot,
+                            );
                             self.bug_wing_blur_r_instances[slot].write_uniform_tinted(
                                 &self.queue,
                                 view_proj_arr,
@@ -1064,7 +1120,11 @@ impl WgpuRenderer {
                                 blur_mat,
                                 blur_tint,
                             );
-                            WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::BugWingBlurR, slot);
+                            WgpuRenderer::push_object3d_draw(
+                                object3d_draw_list,
+                                DrawKind::BugWingBlurR,
+                                slot,
+                            );
                         }
                         Object3dKind::MaterialOrb { material } => {
                             if obj3d_orb_slot >= MAX_ORB_SLOTS {
@@ -1087,7 +1147,11 @@ impl WgpuRenderer {
                                     material.kind,
                                 );
                             }
-                            WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::Orb, slot_i);
+                            WgpuRenderer::push_object3d_draw(
+                                object3d_draw_list,
+                                DrawKind::Orb,
+                                slot_i,
+                            );
                         }
                         Object3dKind::Mirror {
                             rotation_x_deg,
@@ -1121,8 +1185,10 @@ impl WgpuRenderer {
                                 ),
                                 glam::Vec3::from(obj.extents),
                             );
-                            let hover_model = self
-                                .apply_placement_rotation("gameplay.action_bar.mirror", hover_model);
+                            let hover_model = self.apply_placement_rotation(
+                                "gameplay.action_bar.mirror",
+                                hover_model,
+                            );
                             self.mirror_instances[slot_i].write_uniform(
                                 &self.queue,
                                 view_proj_arr,
@@ -1153,7 +1219,11 @@ impl WgpuRenderer {
                                 ),
                                 MIRROR_LOCAL_CENTER_Y,
                             ));
-                            WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::Mirror, slot_i);
+                            WgpuRenderer::push_object3d_draw(
+                                object3d_draw_list,
+                                DrawKind::Mirror,
+                                slot_i,
+                            );
                         }
                         Object3dKind::ExtrudedGlyph {
                             scale: g_scale,
@@ -1236,7 +1306,11 @@ impl WgpuRenderer {
                                 glam::Vec3::splat(0.5),
                                 0.0,
                             ));
-                            WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::ExtrudedGlyph, slot_i);
+                            WgpuRenderer::push_object3d_draw(
+                                object3d_draw_list,
+                                DrawKind::ExtrudedGlyph,
+                                slot_i,
+                            );
                         }
                         Object3dKind::CascadeToken { kind: ck, pulse } => {
                             if obj3d_cascade_token_slot >= MAX_CASCADE_TOKEN_SLOTS {
@@ -1289,7 +1363,11 @@ impl WgpuRenderer {
                                 glam::Vec3::splat(0.5),
                                 0.0,
                             ));
-                            WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::CascadeToken, slot_i);
+                            WgpuRenderer::push_object3d_draw(
+                                object3d_draw_list,
+                                DrawKind::CascadeToken,
+                                slot_i,
+                            );
                         }
                         Object3dKind::Candle {
                             scale,
@@ -1349,8 +1427,16 @@ impl WgpuRenderer {
                                 glam::Vec3::new(0.36, 0.305, 0.36),
                                 0.305,
                             ));
-                            WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::CandleWax, slot_i);
-                            WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::CandleWick, slot_i);
+                            WgpuRenderer::push_object3d_draw(
+                                object3d_draw_list,
+                                DrawKind::CandleWax,
+                                slot_i,
+                            );
+                            WgpuRenderer::push_object3d_draw(
+                                object3d_draw_list,
+                                DrawKind::CandleWick,
+                                slot_i,
+                            );
                         }
                         Object3dKind::TallyFan {
                             stick_len,
@@ -1452,8 +1538,16 @@ impl WgpuRenderer {
                                         tip_material.kind,
                                     );
                                 }
-                                WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::TallyStickBase, obj3d_tally_stick_cursor);
-                                WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::TallyStickTip, obj3d_tally_stick_cursor + 1);
+                                WgpuRenderer::push_object3d_draw(
+                                    object3d_draw_list,
+                                    DrawKind::TallyStickBase,
+                                    obj3d_tally_stick_cursor,
+                                );
+                                WgpuRenderer::push_object3d_draw(
+                                    object3d_draw_list,
+                                    DrawKind::TallyStickTip,
+                                    obj3d_tally_stick_cursor + 1,
+                                );
                                 obj3d_tally_stick_cursor += 2;
                             }
                             let fan_width =
@@ -1538,7 +1632,11 @@ impl WgpuRenderer {
                                 ),
                                 BOWL_LOCAL_CENTER_Y,
                             ));
-                            WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::Bowl, slot_i);
+                            WgpuRenderer::push_object3d_draw(
+                                object3d_draw_list,
+                                DrawKind::Bowl,
+                                slot_i,
+                            );
                         }
                     }
                 }

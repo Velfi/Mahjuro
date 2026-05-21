@@ -8,7 +8,6 @@ use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, TextAlign, TextLabel};
 use crate::ui::colored_keywords;
 use crate::ui::tooltip::{self, push_tooltip_frame_quads};
-use crate::ui::widget;
 
 /// Rough line count for relic flavor layout (matches bottom-aligned raster band).
 fn estimated_flavor_line_count(
@@ -80,8 +79,6 @@ pub fn push_focus_tooltip_panel_2d(
     enum Tier {
         Heading,
         Body,
-        /// Keyword-tinted description (matches [`colored_keywords`]).
-        Desc,
     }
 
     let mut blocks: Vec<(&str, [f32; 4], Tier)> = Vec::new();
@@ -92,35 +89,26 @@ pub fn push_focus_tooltip_panel_2d(
         }
     }
     if !desc_trim.is_empty() {
-        blocks.push((desc_trim.as_str(), color::PARCHMENT, Tier::Desc));
+        blocks.push((desc_trim.as_str(), color::PARCHMENT, Tier::Body));
     }
 
     if blocks.is_empty() {
         return;
     }
 
-    let block_height = |text: &str, tier: Tier| -> f32 {
+    let block_height = |text: &str, col: [f32; 4], tier: Tier| -> f32 {
         let line_h = match tier {
             Tier::Heading => heading_px,
-            Tier::Body | Tier::Desc => body_px,
+            Tier::Body => body_px,
         };
         let line_step = line_h * 1.4;
-        let n = match tier {
-            Tier::Desc => colored_keywords::wrap_colored_text_multiline(
-                text,
-                inner_w,
-                line_h,
-                color::PARCHMENT,
-            )
-            .len(),
-            _ => widget::wrap_text(text, inner_w, line_h).len(),
-        };
+        let n = colored_keywords::colored_wrapped_line_count(text, inner_w, line_h, col);
         n as f32 * line_step
     };
 
     let mut total_h = pad * 2.0 + border * 2.0;
-    for (i, (text, _, tier)) in blocks.iter().enumerate() {
-        total_h += block_height(text, *tier);
+    for (i, (text, col, tier)) in blocks.iter().enumerate() {
+        total_h += block_height(text, *col, *tier);
         if i + 1 < blocks.len() {
             total_h += section_gap;
         }
@@ -163,46 +151,26 @@ pub fn push_focus_tooltip_panel_2d(
 
     let text_left = left + pad + border;
     let mut y = top + pad + border;
-    let text_w = inner_w;
 
     for (i, (text, col, tier)) in blocks.iter().enumerate() {
         let line_h = match tier {
             Tier::Heading => heading_px,
-            Tier::Body | Tier::Desc => body_px,
+            Tier::Body => body_px,
         };
-        let h_block = block_height(text, *tier);
-        let font_px = typography::tier_at_most(line_h, window_h);
-        match tier {
-            Tier::Desc => {
-                let lines =
-                    colored_keywords::wrap_colored_text_multiline(text, inner_w, line_h, *col);
-                colored_keywords::push_colored_rows_left(
-                    texts,
-                    colored_keywords::ColoredRowsLayout {
-                        text_left,
-                        top_y: y,
-                        inner_w,
-                        line_h,
-                        fallback_plain: text,
-                        fallback_color: *col,
-                    },
-                    &lines,
-                );
-            }
-            _ => {
-                let lines = widget::wrap_text(text, inner_w, line_h);
-                let joined = lines.join("\n");
-                texts.push(TextLabel {
-                    rect: [text_left, y, text_w, h_block],
-                    text: joined,
-                    color: *col,
-                    font_px: Some(font_px),
-                    align: TextAlign::Left,
-                    no_glossary: true,
-                    ..Default::default()
-                });
-            }
-        }
+        let h_block = block_height(text, *col, *tier);
+        let lines = colored_keywords::wrap_colored_text_multiline(text, inner_w, line_h, *col);
+        colored_keywords::push_colored_rows_left(
+            texts,
+            colored_keywords::ColoredRowsLayout {
+                text_left,
+                top_y: y,
+                inner_w,
+                line_h,
+                fallback_plain: text,
+                fallback_color: *col,
+            },
+            &lines,
+        );
         y += h_block;
         if i + 1 < blocks.len() {
             y += section_gap;
@@ -249,7 +217,7 @@ pub fn push_floating_relic_flavor_labels(
     let shadow_top = shadow_bottom - shadow_h;
     gradient_quads.push(GradientQuadInstance {
         rect: [left - pad_x, shadow_top, band_w + 2.0 * pad_x, shadow_h],
-        color: color::alpha(color::LACQUER, 0.82),
+        color: color::alpha(color::WALNUT_INK, 0.82),
         feather: [0.48, 0.12, 0.0, 0.0],
     });
 

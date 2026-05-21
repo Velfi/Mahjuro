@@ -17,14 +17,10 @@ fn insert_rotation(out: &mut FxHashMap<String, [f32; 3]>, name: &str, p: &Placem
 
 impl GameplayPositions {
     pub fn committed_rotations(&self) -> FxHashMap<String, [f32; 3]> {
-        use super::gameplay::{gameplay_field_path, GameplayField};
+        use super::gameplay::{GameplayField, gameplay_field_path};
         let mut out = FxHashMap::default();
         for &field in GameplayField::ALL {
-            insert_rotation(
-                &mut out,
-                gameplay_field_path(field),
-                self.field_ref(field),
-            );
+            insert_rotation(&mut out, gameplay_field_path(field), self.field_ref(field));
         }
         out
     }
@@ -32,7 +28,7 @@ impl GameplayPositions {
 
 impl CollectionPositions {
     pub fn committed_rotations(&self) -> FxHashMap<String, [f32; 3]> {
-        use super::collection::{collection_field_path, CollectionField};
+        use super::collection::{CollectionField, collection_field_path};
         let mut out = FxHashMap::default();
         for &field in CollectionField::ALL {
             insert_rotation(
@@ -47,7 +43,7 @@ impl CollectionPositions {
 
 impl ShopPositions {
     pub fn committed_rotations(&self) -> FxHashMap<String, [f32; 3]> {
-        use super::shop::{shop_field_path, ShopField};
+        use super::shop::{ShopField, shop_field_path};
         let mut out = FxHashMap::default();
         for &field in ShopField::ALL {
             insert_rotation(&mut out, shop_field_path(field), self.field_ref(field));
@@ -58,7 +54,7 @@ impl ShopPositions {
 
 impl MainMenuExteriorPositions {
     pub fn committed_rotations(&self) -> FxHashMap<String, [f32; 3]> {
-        use super::main_menu_exterior::{main_menu_exterior_field_path, MainMenuExteriorField};
+        use super::main_menu_exterior::{MainMenuExteriorField, main_menu_exterior_field_path};
         let mut out = FxHashMap::default();
         for &field in MainMenuExteriorField::ALL {
             insert_rotation(
@@ -73,7 +69,7 @@ impl MainMenuExteriorPositions {
 
 impl TileSelectPositions {
     pub fn committed_rotations(&self) -> FxHashMap<String, [f32; 3]> {
-        use super::tile_select::{tile_select_field_path, TileSelectField};
+        use super::tile_select::{TileSelectField, tile_select_field_path};
         let mut out = FxHashMap::default();
         for &field in TileSelectField::ALL {
             insert_rotation(
@@ -88,14 +84,10 @@ impl TileSelectPositions {
 
 impl TutorialPositions {
     pub fn committed_rotations(&self) -> FxHashMap<String, [f32; 3]> {
-        use super::tutorial::{tutorial_field_path, TutorialField};
+        use super::tutorial::{TutorialField, tutorial_field_path};
         let mut out = FxHashMap::default();
         for &field in TutorialField::ALL {
-            insert_rotation(
-                &mut out,
-                tutorial_field_path(field),
-                self.field_ref(field),
-            );
+            insert_rotation(&mut out, tutorial_field_path(field), self.field_ref(field));
         }
         out
     }

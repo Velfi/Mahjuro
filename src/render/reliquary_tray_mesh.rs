@@ -249,14 +249,14 @@ pub fn build_reliquary_tray_mesh() -> MeshCpu {
     MeshCpu {
         vertices,
         indices,
-        // Deep obsidian-lacquer body — `TWILIGHT_INK` reads as the cool
+        // Deep obsidian-lacquer body — `WALNUT_INK` reads as the cool
         // counterpoint to the surrounding warm walnut. Phase 2 will add a
         // brass rim overlay and emissive pulse driven by the structure
         // bank's depth multiplier.
         default_material: MaterialParams {
             kind: MaterialKind::LacqueredWood,
-            base_color: color::TWILIGHT_INK,
-            specular_strength: 0.55,
+            base_color: color::WALNUT_INK,
+            specular_strength: 0.55,    
             specular_power: 96.0,
         },
     }

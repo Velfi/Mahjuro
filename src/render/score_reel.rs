@@ -57,7 +57,7 @@ const CASCADE_DELAY: f32 = 0.04;
 const OVERSHOOT: f32 = 0.18;
 
 /// Colour of all digit glyphs (warm gold matching the existing score style).
-const DIGIT_COLOR: [f32; 4] = crate::render::theme::color::TALLOW;
+const DIGIT_COLOR: [f32; 4] = crate::render::theme::color::PARCHMENT;
 
 /// Emissive boost while a column is actively spinning.
 const EMISSIVE_SPIN: f32 = 0.9;

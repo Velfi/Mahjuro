@@ -2,6 +2,8 @@
 //!
 //! Decomposition logic lives in [`super::decomposition`].
 
+use rustc_hash::FxHashSet;
+
 use crate::core::rules::RuleModifier;
 use crate::core::tile::Tile;
 
@@ -109,6 +111,56 @@ pub fn validate_selection_with_rules(
 /// 4 form two pairs. Flowers cannot pair with regular tiles.
 pub fn validate_selection(tiles: &[Tile]) -> Option<Vec<DetectedMeld>> {
     validate_selection_with_rules(tiles, &[])
+}
+
+/// Tile ids in `tiles` that are not part of any meld in a valid play.
+///
+/// When the selection decomposes cleanly, returns ids left over (unused flowers, etc.).
+/// When it does not, greedily packs non-overlapping melds from [`decomposition::detect_all_sets`]
+/// and marks anything uncovered. If every tile is covered but validation still fails (e.g. boss
+/// tile-count rules), all tile ids are returned so the hand still gets feedback.
+pub fn non_contributing_tile_ids(tiles: &[Tile], rules: &[RuleModifier]) -> Vec<u32> {
+    if tiles.is_empty() {
+        return Vec::new();
+    }
+    if let Some(sets) = validate_selection_with_rules(tiles, rules) {
+        let used: FxHashSet<u32> = sets
+            .iter()
+            .flat_map(|s| s.tile_ids.iter().copied())
+            .collect();
+        return tiles
+            .iter()
+            .filter(|t| !used.contains(&t.id))
+            .map(|t| t.id)
+            .collect();
+    }
+
+    let mut melds = decomposition::detect_all_sets(tiles);
+    melds.sort_by(|a, b| {
+        b.tile_ids
+            .len()
+            .cmp(&a.tile_ids.len())
+            .then_with(|| a.kind.cmp(&b.kind))
+    });
+    let mut used = FxHashSet::default();
+    let mut contributing = FxHashSet::default();
+    for meld in melds {
+        if meld.tile_ids.iter().all(|id| !used.contains(id)) {
+            for &id in &meld.tile_ids {
+                used.insert(id);
+                contributing.insert(id);
+            }
+        }
+    }
+    let mut out: Vec<u32> = tiles
+        .iter()
+        .filter(|t| !contributing.contains(&t.id))
+        .map(|t| t.id)
+        .collect();
+    if out.is_empty() {
+        out = tiles.iter().map(|t| t.id).collect();
+    }
+    out
 }
 
 /// For each unselected tile in the hand, check if adding it to the current selection

@@ -468,7 +468,7 @@ impl SceneBehavior for SolitaireScene {
                 color: [0.85, 0.75, 0.20, 0.90], user: 0});
             frame.quad(GpuInstance {
                 rect: [bx, by, banner_w, banner_h],
-                color: color::alpha(color::TWILIGHT_INK, 0.97), user: 0});
+                color: color::alpha(color::WALNUT_INK, 0.97), user: 0});
             let (title, subtitle) = match state {
                 Finished::Won => ("You Win!", "All tiles cleared."),
                 Finished::Stuck => ("No Moves", "No matching free pairs remain."),
@@ -477,7 +477,7 @@ impl SceneBehavior for SolitaireScene {
             frame.text(TextLabel {
                 rect: [bx, by + banner_h * 0.18, banner_w, title_font],
                 text: title.into(),
-                color: color::TALLOW,
+                color: color::PARCHMENT,
                 ..Default::default()
             });
             let sub_font = (14.0 * scale).max(10.0);

@@ -36,8 +36,8 @@ use self::layout::*;
 use self::shared::*;
 
 pub(super) use self::pick_ids::{
-    N_TILE_PACKS, PICK_COIN_DISH, PICK_JOURNAL_BOOK, PICK_LEAVE_PROP,
-    PICK_REROLL_PROP, PICK_TILE_PACK_BASE,
+    N_TILE_PACKS, PICK_COIN_DISH, PICK_JOURNAL_BOOK, PICK_LEAVE_PROP, PICK_REROLL_PROP,
+    PICK_TILE_PACK_BASE,
 };
 
 use rand::RngExt;
@@ -60,7 +60,6 @@ use crate::render::wgpu_renderer::{GpuInstance, ShopHit, TextAlign, TextLabel};
 use crate::ui::focus_nav::{FocusDir, focus_target_at_cursor, pick_neighbor};
 use crate::ui::input::{InputMode, UiAction};
 
-use super::journal_transition::{JournalDirection, JournalTransition};
 use super::pause_menu::PauseMenu;
 use super::pick_blind::PickBlindScene;
 pub(crate) use super::{Scene, SceneTransition, UpdateCtx};
@@ -102,38 +101,6 @@ pub struct ShopScene {
     /// Eased 0..1 while the leave bell is hovered or focus-selected — drives a
     /// subtle wobble on the bell mesh in `draw_frame`.
     leave_bell_hover_anim: f32,
-    /// Cover-open animation amount for the Yaku Journal book on the
-    /// counter, 0.0 (closed) to 1.0 (fully open). Tweens toward
-    /// `journal_open_target` each frame in `update()`. Threaded into
-    /// `Object3dKind::Book::open_amount` in `draw_frame()`.
-    journal_open_amount: f32,
-    /// Target value for `journal_open_amount` when idle (usually 0 —
-    /// cover does not open on hover; click drives [`JournalTransition`]).
-    journal_open_target: f32,
-    /// When `Some`, `update()` skips the tween entirely and pins both
-    /// `journal_open_amount` and `journal_open_target` to the locked
-    /// value. Used by the screenshot CLI's `--journal-open` flag to
-    /// capture deterministic mid-tween states.
-    journal_open_lock: Option<f32>,
-    /// Active journal-opening transition. When `Some`, the player has
-    /// clicked the journal and we're playing the cover-open + zoom
-    /// animation before pushing `YakuJournalScene`. The contained
-    /// `JournalTransition` carries the start time and progress.
-    journal_transition: Option<JournalTransition>,
-    /// When `Some`, the transition is frozen at this `[0, 1]` progress
-    /// fraction — `update_impl` re-anchors `journal_transition.start`
-    /// each tick so `elapsed()` reports the corresponding time, and
-    /// skips the scene push when `done()` would otherwise fire. Used
-    /// by the `--journal-transition` screenshot flag to capture
-    /// deterministic mid-zoom states.
-    journal_transition_locked_at: Option<f32>,
-    /// Set to `true` when the forward transition completes and we
-    /// push `YakuJournalScene`. Stays `true` while the journal is on
-    /// top of the scene stack (during which `update_impl` doesn't
-    /// run). On the first `update_impl` after the journal pops, we
-    /// notice this flag and start the reverse animation, then clear
-    /// it.
-    journal_was_open: bool,
     /// Per-relic glow start times. Populated when `relic_activations` is
     /// drained from the run state (e.g. Bonfire on relic sell). Drives glow +
     /// wiggle on owned relics in the shop.
@@ -233,35 +200,6 @@ impl ShopScene {
         };
         self.focus = Some(focus);
         Ok(())
-    }
-
-    /// Pin the journal cover-open amount and bypass the focus-driven
-    /// tween. Used by the screenshot CLI's `--journal-open` flag to
-    /// capture deterministic mid-tween states.
-    pub fn set_journal_open_for_screenshot(&mut self, amount: f32) {
-        let a = amount.clamp(0.0, 1.0);
-        self.journal_open_amount = a;
-        self.journal_open_target = a;
-        self.journal_open_lock = Some(a);
-    }
-
-    /// Pin the click-to-open journal transition at a fixed `[0, 1]`
-    /// progress fraction (where 1.0 corresponds to
-    /// `JournalTransition::TOTAL_DUR`). Used by the screenshot CLI's
-    /// `--journal-transition` flag to capture deterministic mid-zoom
-    /// states. Implemented by synthesising a `JournalTransition` whose
-    /// `start` is offset into the past so `elapsed()` returns the
-    /// requested time.
-    pub fn set_journal_transition_for_screenshot(&mut self, progress: f32) {
-        let p = progress.clamp(0.0, 0.999); // never exactly done — would push the scene
-        self.journal_transition_locked_at = Some(p);
-        // Build a transition whose initial elapsed matches the locked
-        // progress; update_impl re-anchors `start` each tick so
-        // wall-clock can't drift it.
-        self.journal_transition = Some(JournalTransition {
-            start: std::time::Instant::now(),
-            dir: JournalDirection::Opening,
-        });
     }
 
     /// Headless screenshot: initial orbit for [`crate::scenes::ItemInspectScene`]

@@ -187,7 +187,7 @@ pub(super) fn build_cascade_hud_placements(
     // cream for the Metal total / ×.
     const CHIPS_COLOR: [f32; 4] = crate::render::theme::color::LAPIS;
     const MULT_COLOR: [f32; 4] = crate::render::theme::color::RUBY;
-    const FINAL_COLOR: [f32; 4] = crate::render::theme::color::TALLOW;
+    const FINAL_COLOR: [f32; 4] = crate::render::theme::color::PARCHMENT;
 
     // Lateral spacing for the three labels (chips × mult). Sized off the
     // plaque so the trio lives comfortably beneath it without spilling.

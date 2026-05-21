@@ -23,7 +23,7 @@
 //! The palette is *not* in `theme.rs` because the wrapper / seal / bg
 //! values are deliberate per-pack signatures, not generic theme tokens.
 //! Where a per-pack value happens to be a theme token (e.g. Honors seal
-//! is `CINNABAR`), the constant references that token directly so the
+//! is `RUBY`), the constant references that token directly so the
 //! relationship survives a re-skin.
 
 use crate::core::tile_pack::TilePackKind;
@@ -61,7 +61,7 @@ pub const HONORS: PackPalette = PackPalette {
     slug: "honors",
     display_name: "Honors Pack",
     foil: [0.92, 0.78, 0.38, 1.0],
-    seal: color::CINNABAR,
+    seal: color::RUBY,
     bg: [0.055, 0.094, 0.220, 1.0], // #0E1838
     bg_name: "deep navy",
     insignia: "H",

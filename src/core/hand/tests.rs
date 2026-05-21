@@ -490,6 +490,45 @@ fn tricky_kokushi_musou_decomposed() {
     assert!(!yaku.contains(&crate::core::yaku::YakuKind::Honroutou));
 }
 
+#[test]
+fn non_contributing_empty_on_valid_pair() {
+    let tiles = vec![t(Suit::Bamboos, 3, 0), t(Suit::Bamboos, 3, 1)];
+    assert!(non_contributing_tile_ids(&tiles, &[]).is_empty());
+}
+
+#[test]
+fn non_contributing_flags_orphan_on_invalid_mixed() {
+    // Pair of 3s + stray 7 — no full decomposition.
+    let tiles = vec![
+        t(Suit::Bamboos, 3, 0),
+        t(Suit::Bamboos, 3, 1),
+        t(Suit::Bamboos, 7, 2),
+    ];
+    assert_eq!(non_contributing_tile_ids(&tiles, &[]), vec![2]);
+}
+
+#[test]
+fn non_contributing_flags_stray_fifth_on_pair_plus_two() {
+    // Two 2s + 5 — pair uses both 2s; 5 cannot join the meld.
+    let tiles = vec![
+        t(Suit::Bamboos, 2, 10),
+        t(Suit::Bamboos, 2, 11),
+        t(Suit::Bamboos, 5, 12),
+    ];
+    assert_eq!(non_contributing_tile_ids(&tiles, &[]), vec![12]);
+}
+
+#[test]
+fn non_contributing_all_when_nothing_forms() {
+    let tiles = vec![
+        t(Suit::Bamboos, 2, 0),
+        t(Suit::Bamboos, 5, 1),
+        t(Suit::Bamboos, 8, 2),
+    ];
+    let ids: Vec<u32> = tiles.iter().map(|t| t.id).collect();
+    assert_eq!(non_contributing_tile_ids(&tiles, &[]), ids);
+}
+
 /// 1-1-1-2-3: triplet(1) leaves orphans, but pair(1,1) + sequence(1,2,3) works.
 #[test]
 fn tricky_shared_rank_ambiguity_11123() {

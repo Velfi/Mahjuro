@@ -40,7 +40,7 @@ pub fn push_wall_remaining_hud(
             block_w + 8.0,
             block_h + 7.0,
         ],
-        color: color::alpha(color::LACQUER, 0.42),
+        color: color::alpha(color::WALNUT_INK, 0.42),
         user: 0,
     });
     frame.quad(GpuInstance {

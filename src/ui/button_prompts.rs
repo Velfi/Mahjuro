@@ -3,6 +3,8 @@
 //! `East` / `West` / `North`; this module turns those into what the player
 //! expects to see on their controller.
 
+use crate::ui::input::UiAction;
+
 /// Best-effort controller family for prompt text. Derived from USB vendor ID
 /// (when present) and lowercase name heuristics.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
@@ -101,6 +103,15 @@ impl GamepadStyle {
             | Self::Generic => "LT/RT",
         }
     }
+
+    /// Shoulder button names (tab cycling, HUD stepping, etc.).
+    pub fn shoulder_pair_label(self) -> &'static str {
+        match self {
+            Self::PlayStation | Self::SteamDeck => "L1/R1",
+            Self::Nintendo | Self::NintendoSwitch2 => "L/R",
+            Self::Xbox | Self::SteamController | Self::Generic => "LB/RB",
+        }
+    }
 }
 
 /// Whether on-screen prompts should use controller glyphs or keyboard text.
@@ -129,9 +140,54 @@ pub enum ShopLegendTextStyle {
 pub struct ButtonPrompt;
 
 impl ButtonPrompt {
+    fn action_face(action: UiAction, swap_ab: bool, swap_xy: bool) -> Option<FaceButton> {
+        Some(match action {
+            UiAction::Confirm => {
+                if swap_ab {
+                    FaceButton::East
+                } else {
+                    FaceButton::South
+                }
+            }
+            UiAction::Cancel => {
+                if swap_ab {
+                    FaceButton::South
+                } else {
+                    FaceButton::East
+                }
+            }
+            UiAction::WestFacePress => {
+                if swap_xy {
+                    FaceButton::North
+                } else {
+                    FaceButton::West
+                }
+            }
+            UiAction::NorthFacePress => {
+                if swap_xy {
+                    FaceButton::West
+                } else {
+                    FaceButton::North
+                }
+            }
+            _ => return None,
+        })
+    }
+
+    /// Human-readable face-button label for the action under the active swap options.
+    pub fn controller_action_label(
+        style: GamepadStyle,
+        action: UiAction,
+        swap_ab: bool,
+        swap_xy: bool,
+    ) -> Option<&'static str> {
+        let face = Self::action_face(action, swap_ab, swap_xy)?;
+        Some(face.label(style))
+    }
+
     fn inspect_camera_extras(style: GamepadStyle) -> String {
         let t = style.analog_trigger_pair_label();
-        format!("Right stick: orbit item  ·  {t} zoom")
+        format!("Right stick: orbit item  ·  Left stick: cycle items  ·  {t} zoom")
     }
 
     /// Second shop HUD line while **item inspect** is active (gamepad vs mouse).
@@ -139,9 +195,44 @@ impl ButtonPrompt {
         match surface {
             PromptInputSurface::Controller => Self::inspect_camera_extras(style),
             PromptInputSurface::MouseOrKeyboard => {
-                "WASD / arrows or drag: orbit item · Shift+W/↑ zoom in · Shift+S/↓ zoom out · Mouse wheel: zoom (inspect)"
+                "Arrows or drag: orbit item · WASD: cycle items · Shift+W/↑ zoom in · Shift+S/↓ zoom out · Mouse wheel: zoom (inspect)"
                     .to_string()
             }
+        }
+    }
+}
+
+/// Physical face positions in the SDL semantic layout (south = bottom, etc.),
+/// not vendor paint labels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum FaceButton {
+    South,
+    East,
+    West,
+    North,
+}
+
+impl FaceButton {
+    fn label(self, style: GamepadStyle) -> &'static str {
+        use FaceButton::{East, North, South, West};
+        use GamepadStyle::{
+            Generic, Nintendo, NintendoSwitch2, PlayStation, SteamController, SteamDeck, Xbox,
+        };
+        match (style, self) {
+            (Xbox | Generic | SteamDeck | SteamController, South) => "A",
+            (Xbox | Generic | SteamDeck | SteamController, East) => "B",
+            (Xbox | Generic | SteamDeck | SteamController, West) => "X",
+            (Xbox | Generic | SteamDeck | SteamController, North) => "Y",
+
+            (PlayStation, South) => "Cross",
+            (PlayStation, East) => "Circle",
+            (PlayStation, West) => "Square",
+            (PlayStation, North) => "Triangle",
+
+            (Nintendo | NintendoSwitch2, South) => "B",
+            (Nintendo | NintendoSwitch2, East) => "A",
+            (Nintendo | NintendoSwitch2, West) => "Y",
+            (Nintendo | NintendoSwitch2, North) => "X",
         }
     }
 }
@@ -149,48 +240,14 @@ impl ButtonPrompt {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::input::UiAction;
 
-    /// Physical face positions in the SDL **semantic** layout (south =
-    /// bottom, etc.), not vendor paint.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-    enum FaceButton {
-        South,
-        East,
-        West,
-        North,
-    }
-
-    impl FaceButton {
-        fn label(self, style: GamepadStyle) -> &'static str {
-            use FaceButton::{East, North, South, West};
-            use GamepadStyle::{
-                Generic, Nintendo, NintendoSwitch2, PlayStation, SteamController, SteamDeck, Xbox,
-            };
-            match (style, self) {
-                (Xbox | Generic | SteamDeck | SteamController, South) => "A",
-                (Xbox | Generic | SteamDeck | SteamController, East) => "B",
-                (Xbox | Generic | SteamDeck | SteamController, West) => "X",
-                (Xbox | Generic | SteamDeck | SteamController, North) => "Y",
-
-                (PlayStation, South) => "Cross",
-                (PlayStation, East) => "Circle",
-                (PlayStation, West) => "Square",
-                (PlayStation, North) => "Triangle",
-
-                (Nintendo | NintendoSwitch2, South) => "B",
-                (Nintendo | NintendoSwitch2, East) => "A",
-                (Nintendo | NintendoSwitch2, West) => "Y",
-                (Nintendo | NintendoSwitch2, North) => "X",
-            }
-        }
-
-        fn glyph(self, style: GamepadStyle) -> &'static str {
-            self.label(style)
-        }
+    fn glyph(face: FaceButton, style: GamepadStyle) -> &'static str {
+        face.label(style)
     }
 
     fn face(style: GamepadStyle, face: FaceButton) -> String {
-        format!("({})", face.glyph(style))
+        format!("({})", glyph(face, style))
     }
 
     fn face_then(style: GamepadStyle, button: FaceButton, rest: &str) -> String {
@@ -285,17 +342,48 @@ mod tests {
 
     #[test]
     fn glyph_xbox_west_is_x() {
-        assert_eq!(FaceButton::West.glyph(GamepadStyle::Xbox), "X");
+        assert_eq!(glyph(FaceButton::West, GamepadStyle::Xbox), "X");
     }
 
     #[test]
     fn glyph_playstation_west_is_square() {
-        assert_eq!(FaceButton::West.glyph(GamepadStyle::PlayStation), "Square");
+        assert_eq!(glyph(FaceButton::West, GamepadStyle::PlayStation), "Square");
     }
 
     #[test]
     fn glyph_nintendo_south_is_b() {
-        assert_eq!(FaceButton::South.glyph(GamepadStyle::Nintendo), "B");
+        assert_eq!(glyph(FaceButton::South, GamepadStyle::Nintendo), "B");
+    }
+
+    #[test]
+    fn controller_action_label_respects_swap_settings() {
+        assert_eq!(
+            ButtonPrompt::controller_action_label(
+                GamepadStyle::Xbox,
+                UiAction::Confirm,
+                false,
+                false
+            ),
+            Some("A")
+        );
+        assert_eq!(
+            ButtonPrompt::controller_action_label(
+                GamepadStyle::Xbox,
+                UiAction::Confirm,
+                true,
+                false
+            ),
+            Some("B")
+        );
+        assert_eq!(
+            ButtonPrompt::controller_action_label(
+                GamepadStyle::PlayStation,
+                UiAction::NorthFacePress,
+                false,
+                false
+            ),
+            Some("Triangle")
+        );
     }
 
     #[test]
