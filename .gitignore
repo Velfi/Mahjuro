@@ -11,3 +11,10 @@
 /build-staging
 .env
 *.blend1
+# gltf-transform may extract loose maps next to GLBs; keep under _gltf_sidecars/ only
+/assets/3d/_gltf_sidecars/*
+!/assets/3d/_gltf_sidecars/README.md
+/assets/3d/*.jpg
+/assets/3d/*.jpeg
+/assets/3d/*.png
+/assets/3d/*.bin

@@ -124,6 +124,17 @@ def should_skip(rel: str) -> bool:
         return True
     if base.endswith(".blend") or base.endswith(".blend1"):
         return True
+    # Authoring tree + gltf-transform scratch (not loaded by the game).
+    if rel.startswith("3d/source/") or rel.startswith("3d/_gltf_sidecars/"):
+        return True
+    # Loose maps next to GLBs (orphans) — never ship in packs.
+    if rel.startswith("3d/") and Path(rel).suffix.lower() in {
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".bin",
+    }:
+        return True
     return False
 
 
@@ -150,12 +161,14 @@ def maybe_resize_room_env_glb(src: Path, tmp_out: Path) -> bool:
                 file=sys.stderr,
             )
         return False
+    # gltf-transform writes JSON when the output path lacks a .glb/.gltf suffix.
+    out_glb = tmp_out if tmp_out.suffix.lower() == ".glb" else tmp_out.with_suffix(".glb")
     r = subprocess.run(
         [
             transform,
             "resize",
             str(src),
-            str(tmp_out),
+            str(out_glb),
             "--width",
             str(ROOM_ENV_TEXTURE_MAX),
             "--height",
@@ -164,7 +177,10 @@ def maybe_resize_room_env_glb(src: Path, tmp_out: Path) -> bool:
         capture_output=True,
         text=True,
     )
-    if r.returncode == 0 and tmp_out.is_file():
+    if r.returncode == 0 and out_glb.is_file() and out_glb.stat().st_size > 1024:
+        if out_glb != tmp_out:
+            shutil.copy2(out_glb, tmp_out)
+            out_glb.unlink(missing_ok=True)
         return True
     print(
         f"bake_assets: gltf-transform resize failed for {src.name}: {r.stderr or r.stdout}",
