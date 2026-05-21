@@ -177,7 +177,6 @@ pub struct MainMenuExteriorScene {
     age_secs: f32,
     bug_phases: [f32; BUG_COUNT],
     rain_field: RainField,
-    pub positions: crate::ui::scene_layout::MainMenuExteriorPositions,
 }
 
 impl MainMenuExteriorScene {
@@ -190,7 +189,6 @@ impl MainMenuExteriorScene {
             age_secs: 0.0,
             bug_phases: lamp_moths::initial_bug_phases(),
             rain_field: RainField::new(),
-            positions: crate::ui::scene_layout::MainMenuExteriorPositions::default(),
         }
     }
 

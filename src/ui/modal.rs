@@ -187,7 +187,11 @@ impl Fireworks {
                 color::CHAMPAGNE[2],
             ],
             [1.00, 0.72, 0.38], // amber shoulder, warmer than the AMBER token
-            [color::PARCHMENT[0], color::PARCHMENT[1], color::PARCHMENT[2]],
+            [
+                color::PARCHMENT[0],
+                color::PARCHMENT[1],
+                color::PARCHMENT[2],
+            ],
         ];
         let color = palette[rng.random_range(0..palette.len())];
         let x = self.spawn_center_x + (rng.random::<f32>() - 0.5) * self.spawn_spread;
@@ -815,7 +819,6 @@ fn draw_modal_paginated_unlock(
             },
             hover_target: 0.0,
             anim_id: 0,
-            arrange_name: None,
         });
     }
 

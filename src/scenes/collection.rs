@@ -15,8 +15,7 @@ use crate::core::zodiac::ZodiacKind;
 use crate::game::event_bus::GameEvent;
 use crate::render::archive_glb;
 use crate::render::draw_cmd::{
-    CameraParams, Object3d, Object3dKind, ScenePunctualLight, UiFrame,
-    camera_facing_euler_xyz_rad,
+    CameraParams, Object3d, Object3dKind, ScenePunctualLight, UiFrame, camera_facing_euler_xyz_rad,
 };
 use crate::render::ribbon_mesh::{ZodiacRibbonSpec, zodiac_ribbon_object3d};
 use crate::render::room_glb;
@@ -645,7 +644,6 @@ impl CollectionScene {
             [closeup_px, hud_py, hud_wz],
             rot_fixed_axes_deg(90.0, 0.0, 0.0),
             &self.positions.featured_artifact,
-            "collection.featured_artifact",
             layout,
         );
         let v = pixel_to_world_xy(
@@ -1053,7 +1051,6 @@ impl CollectionScene {
                 [focus_px_x, cab_px_y - cell * 0.5, focus_world_z],
                 glam::Mat4::from_rotation_x(90.0_f32.to_radians()),
                 &self.positions.cabinet,
-                "collection.cabinet",
                 ctx.layout,
             );
             plaques.push(Object3d {
@@ -1070,7 +1067,6 @@ impl CollectionScene {
                 },
                 hover_target: 0.0,
                 anim_id: 0,
-                arrange_name: Some(cabinet_anchor.arrange_name),
             });
 
             // Cell frames + nameplates. For each (col, row) in the window we push
@@ -1245,22 +1241,15 @@ impl CollectionScene {
             } else {
                 (closeup_px, hud_py, hud_wz)
             };
-            let (closeup_placement, closeup_arrange) = if use_archive {
-                (
-                    &self.positions.pedestal,
-                    "collection.pedestal",
-                )
+            let closeup_placement = if use_archive {
+                &self.positions.pedestal
             } else {
-                (
-                    &self.positions.featured_artifact,
-                    "collection.featured_artifact",
-                )
+                &self.positions.featured_artifact
             };
             let closeup_anchor = crate::ui::placement::PlacementAnchor::new(
                 [closeup_ax, closeup_ay, closeup_az],
                 rot_fixed_axes_deg(90.0, 0.0, 0.0),
                 closeup_placement,
-                closeup_arrange,
                 ctx.layout,
             );
             let closeup_bright = {
@@ -1302,7 +1291,6 @@ impl CollectionScene {
                         },
                         hover_target: 1.0,
                         anim_id: 0xC105E0,
-                        arrange_name: Some(closeup_anchor.arrange_name),
                     }));
                 }
                 ArtifactKind::Talisman(tk) => {
@@ -1321,7 +1309,6 @@ impl CollectionScene {
                         kind: Object3dKind::Talisman { kind: *tk },
                         hover_target: 1.0,
                         anim_id: 0xC105E0,
-                        arrange_name: Some(closeup_anchor.arrange_name),
                     }));
                 }
                 ArtifactKind::Zodiac(zk) => {
@@ -1334,15 +1321,26 @@ impl CollectionScene {
                             kind: Some(*zk),
                             hover_target: 1.0,
                             anim_id: 0xC105E0,
-                            arrange_name: Some(closeup_anchor.arrange_name),
+                            placement_rot_deg: [0.0, 0.0, 0.0],
                         },
                     )));
                 }
                 ArtifactKind::Boss(kind) => {
+                    // BossIcon mesh caps face local +Y (same as Relic). Pedestal
+                    // placement uses Rx(90°) for vertical plaques — don't reuse that
+                    // rotation or the icon lies edge-on. Billboard toward the active camera.
+                    let closeup_rotation = collection_chrome_tablet_rotation(
+                        w,
+                        h,
+                        &final_cam,
+                        closeup_anchor.pos[0],
+                        closeup_anchor.pos[1],
+                        closeup_anchor.pos[2],
+                    );
                     hud_plaques.push(with_inspect_spin(Object3d {
                         pos: closeup_anchor.pos,
                         extents: [closeup_size, closeup_size * 0.04, closeup_size],
-                        rotation: closeup_anchor.object3d_rotation(),
+                        rotation: closeup_rotation,
                         color: [1.0, 1.0, 1.0, 1.0],
                         kind: Object3dKind::BossIcon {
                             kind: *kind,
@@ -1351,7 +1349,6 @@ impl CollectionScene {
                         },
                         hover_target: 1.0,
                         anim_id: 0xC105E0,
-                        arrange_name: Some(closeup_anchor.arrange_name),
                     }));
                 }
                 ArtifactKind::ChronicleSummary => {}
@@ -1379,7 +1376,6 @@ impl CollectionScene {
                         },
                         hover_target: 1.0,
                         anim_id: 0xC105E0,
-                        arrange_name: Some(closeup_anchor.arrange_name),
                     }));
                 }
             }
@@ -1449,7 +1445,6 @@ impl CollectionScene {
                     card_base,
                     rot_fixed_axes_deg(90.0, 0.0, 0.0),
                     &self.positions.focus_card,
-                    "collection.focus_card",
                     ctx.layout,
                 );
                 use crate::render::primitive::{DecalLayout, DecalSpec, MaterialSpec, MeshId};
@@ -1472,7 +1467,6 @@ impl CollectionScene {
                     },
                     hover_target: 1.0,
                     anim_id: 0xC0DE,
-                    arrange_name: Some(anchor.arrange_name),
                 });
             }
 
@@ -1503,7 +1497,6 @@ impl CollectionScene {
                     stats_base,
                     glam::Mat4::from_rotation_x(90.0_f32.to_radians()),
                     &self.positions.stats_plaque,
-                    "collection.stats_plaque",
                     ctx.layout,
                 );
                 hud_plaques.push(Object3d {
@@ -1525,7 +1518,6 @@ impl CollectionScene {
                     },
                     hover_target: 1.0,
                     anim_id: 0xC0DF,
-                    arrange_name: Some(stats_anchor.arrange_name),
                 });
             }
 
@@ -1637,7 +1629,6 @@ impl CollectionScene {
                     &final_cam,
                     chrome_plane_z,
                     ring_focus == Some(CollectionAction::Back),
-                    "collection.chrome.back",
                 ),
                 collection_chrome_wood_tablet(
                     w,
@@ -1646,7 +1637,6 @@ impl CollectionScene {
                     &final_cam,
                     chrome_plane_z,
                     ring_focus == Some(CollectionAction::SwitchSave),
-                    "collection.chrome.switch_save",
                 ),
             ]);
         }
@@ -2856,7 +2846,6 @@ fn collection_chrome_wood_tablet(
     cam: &CameraParams,
     plane_z: f32,
     focused: bool,
-    arrange_name: &'static str,
 ) -> Object3d {
     let cx = rect[0] + rect[2] * 0.5;
     let cy = rect[1] + rect[3] * 0.5;
@@ -2874,7 +2863,6 @@ fn collection_chrome_wood_tablet(
         },
         hover_target: if focused { 1.0 } else { 0.0 },
         anim_id: 0,
-        arrange_name: Some(arrange_name),
     }
 }
 
@@ -2970,7 +2958,6 @@ fn collection_push_grid_cell_object3d(p: CollectionGridCellObject3d<'_>) {
                 },
                 hover_target: if is_focus { 1.0 } else { 0.0 },
                 anim_id: boss_i as u64,
-                arrange_name: None,
             });
         }
         ArtifactKind::Talisman(tk) => {
@@ -2986,7 +2973,6 @@ fn collection_push_grid_cell_object3d(p: CollectionGridCellObject3d<'_>) {
                 kind: Object3dKind::Talisman { kind: *tk },
                 hover_target: if is_focus { 1.0 } else { 0.0 },
                 anim_id: boss_i as u64,
-                arrange_name: None,
             });
         }
         ArtifactKind::Zodiac(zk) => {
@@ -2994,7 +2980,6 @@ fn collection_push_grid_cell_object3d(p: CollectionGridCellObject3d<'_>) {
                 [cx, nameplate_py, cz],
                 rot_fixed_axes_deg(90.0, 0.0, 0.0),
                 cubby_zodiac,
-                "collection.cubby_zodiac",
                 layout,
             );
             plaques.push(zodiac_ribbon_object3d(ZodiacRibbonSpec {
@@ -3005,7 +2990,7 @@ fn collection_push_grid_cell_object3d(p: CollectionGridCellObject3d<'_>) {
                 kind: Some(*zk),
                 hover_target: if is_focus { 1.0 } else { 0.0 },
                 anim_id: boss_i as u64,
-                arrange_name: Some(zodiac_anchor.arrange_name),
+                placement_rot_deg: [0.0, 0.0, 0.0],
             }));
         }
         ArtifactKind::Boss(kind) => {
@@ -3023,7 +3008,6 @@ fn collection_push_grid_cell_object3d(p: CollectionGridCellObject3d<'_>) {
                 },
                 hover_target: if is_focus { 1.0 } else { 0.0 },
                 anim_id: boss_i as u64,
-                arrange_name: None,
             });
         }
         ArtifactKind::ChronicleSummary => {}
@@ -3048,7 +3032,6 @@ fn collection_push_grid_cell_object3d(p: CollectionGridCellObject3d<'_>) {
                 },
                 hover_target: if is_focus { 1.0 } else { 0.0 },
                 anim_id: boss_i as u64,
-                arrange_name: None,
             });
         }
     }

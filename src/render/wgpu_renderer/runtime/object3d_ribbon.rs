@@ -38,23 +38,14 @@ impl WgpuRenderer {
         let eff_w = obj.extents[0];
         let eff_l = obj.extents[1];
         let depth = obj.extents[2];
-        let ribbon_arr_name = obj.arrange_name.unwrap_or("shop.for_sale.ribbons");
-        let base_transform = self.apply_placement_rotation(
-            ribbon_arr_name,
-            translate_rot_scale(center, obj.rotation_matrix(), glam::Vec3::splat(1.0)),
-        );
+        let base_transform =
+            translate_rot_scale(center, obj.rotation_matrix(), glam::Vec3::splat(1.0));
         let full_ribbon_model =
             ribbon_submesh(base_transform, 0.0, glam::Vec3::new(eff_w, eff_l, depth));
         self.last_ribbon_models.push(full_ribbon_model);
         self.proj
             .ribbon_rects
             .push(project_ribbon_rect(full_ribbon_model));
-        self.last_debug_pickables.push((
-            ribbon_arr_name.to_string(),
-            full_ribbon_model,
-            RIBBON_HALF,
-            RIBBON_CENTER_Y,
-        ));
         if *ribbon_slot >= MAX_RIBBON_SLOTS {
             return;
         }

@@ -626,7 +626,7 @@ impl SceneBehavior for TileSelectScene {
                         glow: false,
                         glow_color: None,
                         pick_id: None,
-                        arrange_group: None,
+                        overlay_rect_group: None,
                     }
                 })
                 .collect()

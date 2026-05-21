@@ -58,7 +58,8 @@ pub struct ZodiacRibbonSpec {
     pub kind: Option<crate::core::zodiac::ZodiacKind>,
     pub hover_target: f32,
     pub anim_id: u64,
-    pub arrange_name: Option<&'static str>,
+    /// Extra placement rotation (degrees) composed onto `rotation` at build time.
+    pub placement_rot_deg: [f32; 3],
 }
 
 /// Build the standard zodiac-ribbon [`Object3d`] from `spec`. Width and
@@ -72,12 +73,18 @@ pub fn zodiac_ribbon_object3d(spec: ZodiacRibbonSpec) -> Object3d {
     Object3d {
         pos: spec.pos,
         extents: [width, length, depth],
-        rotation: spec.rotation,
+        rotation: crate::render::table_transform::compose_rotation_euler(
+            crate::render::table_transform::rot_euler_xyz_rad(
+                spec.rotation[0],
+                spec.rotation[1],
+                spec.rotation[2],
+            ),
+            spec.placement_rot_deg,
+        ),
         color: spec.color,
         kind: Object3dKind::ZodiacRibbon { kind: spec.kind },
         hover_target: spec.hover_target,
         anim_id: spec.anim_id,
-        arrange_name: spec.arrange_name,
     }
 }
 

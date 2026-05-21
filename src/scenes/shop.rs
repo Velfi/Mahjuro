@@ -5,6 +5,7 @@
 mod actions;
 mod draw;
 mod layout;
+pub(crate) mod pack_celebration_v2;
 pub(crate) mod pick_ids;
 mod shared;
 mod update;
@@ -15,6 +16,7 @@ pub(crate) use self::view::render_shop_frame;
 use crate::render::draw_cmd::CameraParams;
 use crate::scenes::object3d_inspect::InspectDolly;
 
+pub(crate) use self::pack_celebration_v2::PackCelebrationV2;
 pub(crate) use self::shared::{CelebPhase, PackCelebration};
 
 /// Perspective camera for tile-pack celebration overlay (not item-inspect orbit).

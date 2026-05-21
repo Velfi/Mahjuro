@@ -52,11 +52,7 @@ impl App {
         }
         shell.window.show();
         crate::startup_profile::report_sync_boot();
-        if self
-            .renderer
-            .as_ref()
-            .is_some_and(|r| !r.is_loading())
-        {
+        if self.renderer.as_ref().is_some_and(|r| !r.is_loading()) {
             crate::startup_profile::note_async_boot_complete();
         }
         log::debug!("SDL shell: window + wgpu + input ready");
@@ -281,34 +277,6 @@ impl App {
             self.mouse_clicked = true;
             if let Some(input) = self.input.as_mut() {
                 input.mode = InputMode::Cursor;
-            }
-
-            // Debug "Object Hit Test" one-shot picker. If armed,
-            // consume this click: hit-test the cursor against
-            // every known scene object and log the match. Skip
-            // all the normal click dispatch (buttons, tiles,
-            // drag) so the click can't accidentally fire a
-            // gameplay action while we're just probing.
-            if self.debug.object_hit_test_armed {
-                self.debug.object_hit_test_armed = false;
-                let name = self
-                    .renderer
-                    .as_ref()
-                    .and_then(|r| r.pick_debug_object(cursor.0, cursor.1));
-                match name {
-                    Some(n) => log::debug!(
-                        "Object hit test: {} at ({:.0}, {:.0})",
-                        n,
-                        cursor.0,
-                        cursor.1
-                    ),
-                    None => log::debug!(
-                        "Object hit test: (no object) at ({:.0}, {:.0})",
-                        cursor.0,
-                        cursor.1
-                    ),
-                }
-                return;
             }
 
             // Check if click hit any button.

@@ -31,7 +31,7 @@
 //! [`DrawCmd`](crate::render::draw_cmd) packs `(px, py, lift)` into [`WorldSurfaceAnchor`](crate::render::draw_cmd::WorldSurfaceAnchor);
 //! the third value is **+Z** lift above the felt.
 //!
-//! **Saved props + arrange mode** use [`crate::ui::placement::Placement`] — see
+//! **Saved props** use [`crate::ui::placement::Placement`] — see
 //! `docs/agents/scene-placement.md`. This module’s [`PlacementAnchor`] is only
 //! for lightweight HUD-style anchors (reel, glyphs), not `ui::placement::PlacementAnchor`.
 
@@ -137,7 +137,7 @@ pub fn object3d_pos_for_screen_at_world_z(
 /// Top edge **`py`** (top-down layout pixels, `py` increases downward) for a rectangle
 /// with height `rect_h_px` and an empty band `margin_bottom_px` below it to the window bottom.
 ///
-/// Not every caller needs this helper (some scenes pin both corners via arrange mode).
+/// Not every caller needs this helper (some scenes pin both corners via layout anchors).
 #[allow(dead_code)]
 #[inline]
 pub fn layout_py_top_from_bottom_margin(

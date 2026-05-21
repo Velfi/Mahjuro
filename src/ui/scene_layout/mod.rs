@@ -10,15 +10,12 @@
 
 mod collection;
 mod gameplay;
-mod main_menu_exterior;
-mod rotations;
 mod shop;
 mod tile_select;
 mod tutorial;
 
 pub use collection::CollectionPositions;
 pub use gameplay::GameplayPositions;
-pub use main_menu_exterior::MainMenuExteriorPositions;
 pub use shop::ShopPositions;
 pub use tile_select::TileSelectPositions;
 pub use tutorial::TutorialPositions;

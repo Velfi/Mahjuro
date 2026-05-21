@@ -210,8 +210,11 @@ impl WgpuRenderer {
         let pack_celeb_black_void = self.active_scene_key == Some("showcase")
             && frame.showcase_render_hints.tile_pack_celebration_tonemap
             && !frame_draws_room_environment(frame);
-        let shadow_enabled_flag =
-            if shadows_enabled && !pack_celeb_black_void { 1.0_f32 } else { 0.0 };
+        let shadow_enabled_flag = if shadows_enabled && !pack_celeb_black_void {
+            1.0_f32
+        } else {
+            0.0
+        };
         self.queue.write_buffer(
             &self.shadow_globals_buffer,
             0,

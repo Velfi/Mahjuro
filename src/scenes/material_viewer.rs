@@ -138,7 +138,6 @@ impl SceneBehavior for MaterialViewerScene {
                 },
                 hover_target: 0.0,
                 anim_id: 0,
-                arrange_name: None,
             });
 
             // Caption under the orb.

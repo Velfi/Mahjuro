@@ -127,7 +127,6 @@ pub fn push_moths_around_lamp(
             },
             hover_target: 0.0,
             anim_id: 0,
-            arrange_name: None,
         });
     }
     frame.object3d_batch(bugs);

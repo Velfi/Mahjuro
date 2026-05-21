@@ -797,7 +797,8 @@ pub(super) fn process_focus_and_actions(
                     continue;
                 }
                 let gameplay = GameEngine::read(ctx.run);
-                let snap_before = if gameplay.selected_count > 0 && gameplay.discards_remaining > 0 {
+                let snap_before = if gameplay.selected_count > 0 && gameplay.discards_remaining > 0
+                {
                     Some(DiscardUndoSnapshot::capture(ctx.run))
                 } else {
                     None
@@ -807,10 +808,8 @@ pub(super) fn process_focus_and_actions(
                 let mut pre_discard_hand_slots: Vec<(f32, f32, f32, f32)> = Vec::new();
                 if gameplay.selected_count > 0 && gameplay.discards_remaining > 0 {
                     let interaction = GameEngine::read_interaction(ctx.run);
-                    pre_discard_hand_slots = super::hand_layout::hand_slots_for_count(
-                        ctx.layout,
-                        interaction.hand_len,
-                    );
+                    pre_discard_hand_slots =
+                        super::hand_layout::hand_slots_for_count(ctx.layout, interaction.hand_len);
                     for (i, &sel) in ctx.run.selected_slice().iter().enumerate() {
                         if sel {
                             pre_discard_indices.push(i);
@@ -842,9 +841,8 @@ pub(super) fn process_focus_and_actions(
                         now,
                     );
                     ctx.anim.pulse(crate::render::animation::ENTITY_HAND_STRIP);
-                    let fallback = std::time::Duration::from_millis(
-                        ctx.cascade_tuning.discard_refill_cap_ms,
-                    );
+                    let fallback =
+                        std::time::Duration::from_millis(ctx.cascade_tuning.discard_refill_cap_ms);
                     let anim_dur = scene
                         .active_discard_anim
                         .as_ref()
@@ -1018,7 +1016,6 @@ pub(super) fn build_relic_tray(
                 },
                 hover_target: 0.0,
                 anim_id: 0,
-                arrange_name: None,
             });
         }
     }
@@ -1258,7 +1255,7 @@ pub(super) fn build_consumable_dish(
                                     kind: Some(z),
                                     hover_target: 0.0,
                                     anim_id: 0,
-                                    arrange_name: None,
+                                    placement_rot_deg: [0.0, 0.0, 0.0],
                                 },
                             ),
                         );
@@ -1273,7 +1270,6 @@ pub(super) fn build_consumable_dish(
                             ],
                             crate::render::table_transform::rot_fixed_axes_deg(0.0, 0.0, 90.0),
                             &scene.positions.consumable_dish_talisman,
-                            "gameplay.consumable_dish.talisman",
                             layout,
                         );
                         let tscale = slot_h * 1.56;
@@ -1285,7 +1281,6 @@ pub(super) fn build_consumable_dish(
                             kind: Object3dKind::Talisman { kind: tk },
                             hover_target: 0.0,
                             anim_id: 0,
-                            arrange_name: Some(anchor.arrange_name),
                         });
                     }
                 }
@@ -1338,7 +1333,7 @@ pub(super) fn build_action_row_and_journal(
 ) -> ActionRowOutputs {
     use super::focus::ALL_BUTTONS;
     use crate::render::draw_cmd::{Object3d, Object3dKind};
-    use crate::render::table_transform::{mat4_to_euler_xyz_rad, rot_euler_xyz_rad};
+    use crate::render::table_transform::rot_euler_xyz_rad;
     use crate::render::world_space::LayoutAnchorPx;
     // Phase 4: action row is now physical objects.
     //   - Discard / Play → bowl + mirror (row below hand, above journal;
@@ -1465,7 +1460,6 @@ pub(super) fn build_action_row_and_journal(
                     kind: Object3dKind::Bowl,
                     hover_target: target,
                     anim_id: 1,
-                    arrange_name: None,
                 });
                 // Gold "Discard tiles" label superimposed on the river
                 // when it's the active selection (cursor hover or
@@ -1502,7 +1496,6 @@ pub(super) fn build_action_row_and_journal(
                     },
                     hover_target: target,
                     anim_id: 2,
-                    arrange_name: None,
                 });
                 // Gold "Play hand" label superimposed on the mirror
                 // when it's the active selection. Same projected-mesh
@@ -1530,9 +1523,10 @@ pub(super) fn build_action_row_and_journal(
                         anchor[2] + layout.mm(tp.lift_mm),
                     ],
                     extents: [bw, tablet_thickness, bh],
-                    // Placement rotation applied centrally via
-                    // `committed_arrange_rotations`.
-                    rotation: mat4_to_euler_xyz_rad(wiggle * cam_m),
+                    rotation: crate::render::table_transform::compose_rotation_euler(
+                        wiggle * cam_m,
+                        tp.rotation_deg(),
+                    ),
                     color: [1.0, 1.0, 1.0, 1.0],
                     kind: Object3dKind::WoodTablet {
                         label: std::borrow::Cow::Borrowed("Cash in"),
@@ -1540,7 +1534,6 @@ pub(super) fn build_action_row_and_journal(
                     },
                     hover_target: 0.0,
                     anim_id: 0,
-                    arrange_name: None,
                 });
             }
             _ => {}
@@ -1589,7 +1582,10 @@ pub(super) fn build_action_row_and_journal(
             layout.mm(BOOK_SPINE_THICKNESS_MM) * journal_zoom,
             face_h,
         ],
-        rotation: cam_euler,
+        rotation: crate::render::table_transform::compose_rotation_euler(
+            rot_euler_xyz_rad(cam_euler[0], cam_euler[1], cam_euler[2]),
+            tp.rotation_deg(),
+        ),
         color: [1.0, 1.0, 1.0, 1.0],
         kind: Object3dKind::Book {
             spine_label: std::borrow::Cow::Borrowed("Journal"),
@@ -1598,7 +1594,6 @@ pub(super) fn build_action_row_and_journal(
         },
         hover_target: 0.0,
         anim_id: 0,
-        arrange_name: Some("gameplay.action_bar.tablet_journal"),
     });
 
     if let Some(rect) = ctx
@@ -1810,7 +1805,7 @@ pub(super) fn build_yaku_panel_and_tablets(
                     glow: false,
                     glow_color: None,
                     pick_id: None,
-                    arrange_group: None,
+                    overlay_rect_group: None,
                 });
                 x_cursor += tile_size + intra_gap;
             }
@@ -1954,7 +1949,6 @@ pub(super) fn build_yaku_panel_and_tablets(
                 },
                 hover_target: 0.0,
                 anim_id: 0,
-                arrange_name: None,
             });
         } else {
             for (i, p) in visible_previews.iter().enumerate() {
@@ -2000,7 +1994,6 @@ pub(super) fn build_yaku_panel_and_tablets(
                     },
                     hover_target: 0.0,
                     anim_id: 0,
-                    arrange_name: None,
                 });
             }
         }

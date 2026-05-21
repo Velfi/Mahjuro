@@ -1083,15 +1083,6 @@ impl HeadlessApp {
         self.renderer.set_active_scene(active_scene_key);
         let look = self.scene_look.resolve(active_scene_key);
         self.renderer.set_tonemap_tuning(&look.tonemap);
-        let rotations_scene = match self.overlay_stack.last() {
-            Some(Scene::Showcase(s)) if s.wants_orbit_input() => &self.scene,
-            _ => scene_for_renderer,
-        };
-        self.renderer
-            .set_placement_rotations(crate::scenes::collect_placement_rotations(
-                rotations_scene,
-                self.overlay_stack.last(),
-            ));
         self.renderer
             .set_room_gltf_height_scale(look.room_gltf_height_scale);
         let sl = self.shop_env_lighting;

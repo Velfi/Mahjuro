@@ -108,28 +108,6 @@ impl WgpuRenderer {
             obj.rotation_matrix() * orient,
             glam::Vec3::from(obj.extents),
         );
-        // Arrange-name compat shim: for BeveledSlab
-        // without an explicit arrange_name,
-        // synthesise the legacy plaque name so
-        // saved arrange_overrides.json still works.
-        let arrange_name: String = if let Some(name) = obj.arrange_name {
-            name.to_string()
-        } else if *shape == MeshId::BeveledSlab {
-            let shop_like = self.active_scene_key == Some("shop")
-                || (self.active_scene_key == Some("showcase")
-                    && frame
-                        .showcase_render_hints
-                        .shop_tonemap_and_lit_mesh_context);
-            match (self.active_scene_key, slot_i) {
-                (Some("gameplay"), 0) => "gameplay.score_panel.plaque".to_string(),
-                (Some("gameplay"), 1) => "gameplay.score_panel.scoring_placard".to_string(),
-                (_, i) if shop_like => format!("shop.plaque[{i}]"),
-                (_, i) => format!("plaque[{i}]"),
-            }
-        } else {
-            format!("primitive.{:?}[{}]", shape, slot_i)
-        };
-        let model = self.apply_placement_rotation(&arrange_name, model);
         if let Some(pid) = pick_id {
             self.last_primitive_pick_models.insert(*pid, model);
         }
@@ -154,8 +132,6 @@ impl WgpuRenderer {
                 params.kind,
             );
         }
-        self.last_debug_pickables
-            .push((arrange_name, model, glam::Vec3::splat(0.5), 0.0));
         // Screen-space rect for focus/hover hit
         // testing. BeveledSlab projects only the
         // +Z face (back is never seen); other

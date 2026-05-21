@@ -721,19 +721,6 @@ impl App {
 
         renderer.set_tonemap_tuning(&scene_look.tonemap);
 
-        let rotations_base = match self.overlay_stack.last() {
-            Some(Scene::Showcase(s)) if s.wants_orbit_input() => &self.scene,
-            _ => scene_for_renderer,
-        };
-        let rotations_overlay = self
-            .overlay_stack
-            .last()
-            .filter(|ov| !matches!(ov, Scene::Showcase(s) if s.wants_orbit_input()));
-        renderer.set_placement_rotations(crate::scenes::collect_placement_rotations(
-            rotations_base,
-            rotations_overlay,
-        ));
-
         renderer.set_room_gltf_height_scale(scene_look.room_gltf_height_scale);
         let sl = shop_env_for_frame;
         renderer.set_shop_env_render_tune(

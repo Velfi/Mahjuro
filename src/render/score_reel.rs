@@ -502,6 +502,5 @@ fn make_placement(
         },
         hover_target: 0.0,
         anim_id: 0,
-        arrange_name: None,
     }
 }

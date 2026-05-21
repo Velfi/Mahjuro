@@ -282,6 +282,7 @@ impl WgpuRenderer {
             (Some("tile_pack_celebration"), Some(cam)) => shop_camera_punctual(cam),
             (Some("showcase"), Some(cam))
                 if h.object3d_use_camera_ray_plane_z
+                    || h.tile_pack_celebration_tonemap
                     || (h.showcase_tiles_use_camera_ray_plane_z && has_showcase_tiles) =>
             {
                 shop_camera_punctual(cam)
@@ -303,7 +304,10 @@ impl WgpuRenderer {
         // Upload spotlights (tile + `lit_mesh` group 3).
         let spot_cam = match self.active_scene_key {
             Some("tile_pack_celebration") => frame.camera_override.as_ref(),
-            Some("showcase") if frame.showcase_render_hints.object3d_use_camera_ray_plane_z => {
+            Some("showcase")
+                if frame.showcase_render_hints.object3d_use_camera_ray_plane_z
+                    || frame.showcase_render_hints.tile_pack_celebration_tonemap =>
+            {
                 frame.camera_override.as_ref()
             }
             _ => None,

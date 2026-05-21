@@ -10,7 +10,7 @@ pipeline (`_icon_atlas_postprocess.py`), then packs a 5×5 row-major atlas.
 **Writes (under `assets/textures/boss_icons/` by default)**
 
   • `source/boss_{slug}.png` — raw API output (RGBA)
-  • `processed/boss_{slug}.png` — cleaned icon, square `CELL_SIZE`
+  • `processed/boss_{slug}.png` — cleaned icon, square `CELL_SIZE` (512×512)
   • `atlas.png` / `atlas.toml` — grid aligned with `BossKind::ALL`
 
 Slug order MUST match `BossKind::ALL` in `src/core/boss.rs` and ids in
@@ -63,9 +63,9 @@ BOSS_RS_PATH = REPO_ROOT / "src" / "core" / "boss.rs"
 OUTPUT_DIR = REPO_ROOT / "assets" / "textures" / "boss_icons"
 
 COLUMNS = 5
-CELL_SIZE = 128
+CELL_SIZE = 512
 CONTENT_FILL = 0.82
-WORK_PX = CELL_SIZE * 4
+WORK_PX = CELL_SIZE
 
 # Per-tier rim accent (mirrors boss card tier read in-game).
 BOSS_TIER_ACCENTS: dict[str, str] = {

@@ -98,7 +98,7 @@ impl WgpuRenderer {
                     ),
                     glam::Vec3::new(t.extents[0], t.extents[1], t.extents[2]),
                 );
-                let model = self.apply_placement_rotation("gameplay.hand.yaku_tablet", model);
+                // model: placement rotation baked at scene build
                 // Active tablets warm up to a champagne tint; dim ones stay
                 // bone. The decal pass (phase 2) will paint the engraved name
                 // on top via a per-instance albedo texture.
@@ -150,12 +150,6 @@ impl WgpuRenderer {
                     .yaku_tablet_rects
                     .push(project_unit_cube_rect(model));
                 self.last_yaku_tablet_models.push(model);
-                self.last_debug_pickables.push((
-                    "gameplay.hand.yaku_tablet".to_string(),
-                    model,
-                    glam::Vec3::splat(0.5),
-                    0.0,
-                ));
             }
         }
     }

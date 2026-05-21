@@ -210,13 +210,14 @@ impl WgpuRenderer {
         if tile_pack_celebration {
             let ambient = (self.shop_env_ambient_scale * 0.45)
                 .max(crate::render::room_glb::TILE_PACK_CELEBRATION_LIT_MESH_AMBIENT_MIN);
-            return [
+            let hdr = [
                 1.0,
                 self.shop_env_linear_exposure
                     * crate::render::room_glb::TILE_PACK_CELEBRATION_HDR_LINEAR_EXPOSURE,
                 ambient,
                 0.0,
             ];
+            return hdr;
         }
         // Shop applies a heavy linear HDR divisor so bright `shop.glb` fills land in
         // range. Showcase tiles alone (e.g. headless pack-celebration isolation)

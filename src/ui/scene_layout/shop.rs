@@ -6,7 +6,6 @@ use crate::ui::placement::Placement;
 /// `shop.glb` marker transforms (`room_glb.rs` / `shop/view.rs`), not this struct.
 #[derive(Clone, Debug)]
 pub struct ShopPositions {
-    pub celeb_pack_closeup: Placement,
     pub celeb_pack_reveal: Placement,
     pub celeb_zodiac: Placement,
 }
@@ -14,8 +13,7 @@ pub struct ShopPositions {
 impl Default for ShopPositions {
     fn default() -> Self {
         Self {
-            celeb_pack_closeup: Placement::default(),
-            celeb_pack_reveal: Placement::default(),
+            celeb_pack_reveal: Placement::at(-3.352_761_3e-8, 0.55, 36.887_23),
             celeb_zodiac: Placement {
                 nx: 0.0,
                 ny: -0.12,
@@ -24,39 +22,6 @@ impl Default for ShopPositions {
                 ry_deg: 0.0,
                 rz_deg: 0.0,
             },
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ShopField {
-    CelebPackCloseup,
-    CelebPackReveal,
-    CelebZodiac,
-}
-
-pub fn shop_field_path(field: ShopField) -> &'static str {
-    match field {
-        ShopField::CelebPackCloseup => "shop.celebrations.pack_closeup",
-        ShopField::CelebPackReveal => "shop.celebrations.pack_reveal",
-        ShopField::CelebZodiac => "shop.celebrations.zodiac",
-    }
-}
-
-impl ShopField {
-    pub const ALL: &'static [ShopField] = &[
-        ShopField::CelebPackCloseup,
-        ShopField::CelebPackReveal,
-        ShopField::CelebZodiac,
-    ];
-}
-
-impl ShopPositions {
-    pub fn field_ref(&self, field: ShopField) -> &Placement {
-        match field {
-            ShopField::CelebPackCloseup => &self.celeb_pack_closeup,
-            ShopField::CelebPackReveal => &self.celeb_pack_reveal,
-            ShopField::CelebZodiac => &self.celeb_zodiac,
         }
     }
 }

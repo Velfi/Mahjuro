@@ -9,14 +9,14 @@ use crate::game::cascade::CascadeTuning;
 use crate::persistence::TilePreset;
 use crate::render::draw_cmd::{Object3d, Object3dKind, ShowcaseTilePlacement};
 use crate::render::river_mesh::{
-    river_surface_local, RIVER_TILE_FLOW_T_MAX, RIVER_TILE_FLOW_T_MIN,
+    RIVER_TILE_FLOW_T_MAX, RIVER_TILE_FLOW_T_MIN, river_surface_local,
 };
 use crate::render::table_transform::{mat4_to_euler_xyz_rad, translate_rot_scale};
-use crate::render::world_space::{pixel_to_world, surface_anchor_from_world_xyz, LayoutAnchorPx};
+use crate::render::world_space::{LayoutAnchorPx, pixel_to_world, surface_anchor_from_world_xyz};
+use crate::scenes::gameplay::GameplayScene;
 use crate::scenes::gameplay::action_bar_layout::{
     action_hud_world_z_py_nudge, compute_gameplay_hud_layout,
 };
-use crate::scenes::gameplay::GameplayScene;
 use glam::Vec3;
 use rand::RngExt;
 
@@ -218,7 +218,6 @@ pub fn build_discard_river_object3d(
         kind: Object3dKind::Bowl,
         hover_target: 0.0,
         anim_id: 1,
-        arrange_name: None,
     }
 }
 
@@ -836,7 +835,7 @@ pub fn sinking_placements(
                 glow: false,
                 glow_color: None,
                 pick_id: None,
-                arrange_group: None,
+                overlay_rect_group: None,
             })
         })
         .collect()
@@ -854,10 +853,20 @@ fn river_pose(
     fallback_rotation: [f32; 3],
 ) -> ([f32; 3], [f32; 3], f32) {
     let Some(model) = bowl_model else {
-        return (fallback_center, fallback_rotation, size_px * RIVER_TILE_SIZE_FRAC);
+        return (
+            fallback_center,
+            fallback_rotation,
+            size_px * RIVER_TILE_SIZE_FRAC,
+        );
     };
     let slot = resolve_river_slot(
-        model, flow_t, size_px, stream_lane, window_w, window_h, layout,
+        model,
+        flow_t,
+        size_px,
+        stream_lane,
+        window_w,
+        window_h,
+        layout,
     );
     (slot.center, slot.rotation, slot.size_px)
 }
@@ -929,7 +938,7 @@ pub fn in_flight_placements(
             glow: false,
             glow_color: None,
             pick_id: None,
-            arrange_group: None,
+            overlay_rect_group: None,
         });
     }
     out
@@ -992,7 +1001,6 @@ mod tests {
             kind: Object3dKind::Bowl,
             hover_target: 0.0,
             anim_id: 1,
-            arrange_name: None,
         };
         let tile_size_px = 80.0;
         let model = bowl_model_matrix(800.0, 600.0, &bowl);
@@ -1062,7 +1070,6 @@ mod tests {
             kind: Object3dKind::Bowl,
             hover_target: 0.0,
             anim_id: 1,
-            arrange_name: None,
         };
         let slots = river_slots_for_discard(800.0, 600.0, &bowl, 4, 80.0, &layout);
         assert_eq!(slots.len(), 4);
@@ -1236,7 +1243,7 @@ pub fn settled_placements(
                 glow: false,
                 glow_color: None,
                 pick_id: None,
-                arrange_group: None,
+                overlay_rect_group: None,
             },
         )
         .collect()

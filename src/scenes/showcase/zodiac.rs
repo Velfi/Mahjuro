@@ -108,7 +108,6 @@ impl ZodiacPresenter {
             [w * 0.5, h * 0.5, 0.0],
             base_rotation,
             &self.positions.celeb_zodiac,
-            "shop.celebrations.zodiac",
             ctx.layout,
         );
         let cx = anchor.pos[0];
@@ -166,7 +165,7 @@ impl ZodiacPresenter {
             kind: Some(self.kind),
             hover_target: 0.0,
             anim_id: 0,
-            arrange_name: Some(anchor.arrange_name),
+            placement_rot_deg: [0.0, 0.0, 0.0],
         })]);
 
         frame.text(celebration_overlay::label_zodiac_level_title(

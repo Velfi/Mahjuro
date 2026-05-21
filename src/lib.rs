@@ -571,8 +571,8 @@ pub fn run() -> anyhow::Result<()> {
     }
 
     let no_steam = cli.no_steam;
-    let result =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> anyhow::Result<()> {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        || -> anyhow::Result<()> {
             // Steam init runs before the window so the SDK can hook the
             // rendering surface as it's created. `--no-steam` short-circuits
             // this for dev runs where you don't want the overlay attaching
@@ -609,7 +609,8 @@ pub fn run() -> anyhow::Result<()> {
             };
             app.run_sdl_main(&mut shell)?;
             Ok(())
-        }));
+        },
+    ));
 
     match result {
         Ok(Ok(())) => Ok(()),

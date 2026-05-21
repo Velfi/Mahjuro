@@ -6,7 +6,7 @@ has valid RGBA art before hand-painted icons land. For Gemini-generated art
 instead, use ``scripts/generate_boss_icons.py`` (writes ``source/boss_{slug}.png``,
 post-processes, and repacks the atlas).
 
-Replace cells by dropping 128×128 PNGs into
+Replace cells by dropping 512×512 PNGs into
 ``assets/textures/boss_icons/source/{slug}.png`` and re-run with Pillow to
 composite those over the placeholders.
 

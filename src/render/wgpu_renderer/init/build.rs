@@ -2372,163 +2372,164 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         let mut tile_outline_merge_vertices: Vec<Vertex3dTex> = Vec::new();
         let mut tile_outline_merge_indices: Vec<u32> = Vec::new();
         let tile_primitives: Vec<TilePrimitiveGpu> = match loaded_glb {
-        Ok(mut mesh) => {
-            normalize_mesh(&mut mesh);
-            log::info!("Loaded 3D tile: {} primitive(s)", mesh.primitives.len());
-            for prim in mesh.primitives.iter() {
-                let base = tile_outline_merge_vertices.len() as u32;
-                tile_outline_merge_vertices.extend_from_slice(&prim.vertices);
-                tile_outline_merge_indices.extend(prim.indices.iter().map(|&ix| ix + base));
-            }
-            let mut out = Vec::with_capacity(mesh.primitives.len());
-            for (i, prim) in mesh.primitives.iter().enumerate() {
-                let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("tile-verts"),
-                    contents: bytemuck::cast_slice(&prim.vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-                let ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("tile-idx"),
-                    contents: bytemuck::cast_slice(&prim.indices),
-                    usage: wgpu::BufferUsages::INDEX,
-                });
-                let mips = crate::render::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
-                let (_albedo_texture, albedo_view) = match &prim.albedo_rgba {
-                    Some((rgba, w, h)) => upload_rgba_texture_with_mips(&TextureUploadParams {
-                        device: &device,
-                        queue: &queue,
-                        label: "tile-prim-albedo".to_string(),
-                        rgba: rgba,
-                        width: *w,
-                        height: *h,
-                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                        mips,
-                    }),
-                    None => white_albedo(&device, &queue),
-                };
-                let normal_view = match &prim.normal_rgba {
-                    Some((rgba, w, h)) => {
-                        upload_rgba_texture_with_mips(&TextureUploadParams {
+            Ok(mut mesh) => {
+                normalize_mesh(&mut mesh);
+                log::info!("Loaded 3D tile: {} primitive(s)", mesh.primitives.len());
+                for prim in mesh.primitives.iter() {
+                    let base = tile_outline_merge_vertices.len() as u32;
+                    tile_outline_merge_vertices.extend_from_slice(&prim.vertices);
+                    tile_outline_merge_indices.extend(prim.indices.iter().map(|&ix| ix + base));
+                }
+                let mut out = Vec::with_capacity(mesh.primitives.len());
+                for (i, prim) in mesh.primitives.iter().enumerate() {
+                    let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("tile-verts"),
+                        contents: bytemuck::cast_slice(&prim.vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+                    let ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("tile-idx"),
+                        contents: bytemuck::cast_slice(&prim.indices),
+                        usage: wgpu::BufferUsages::INDEX,
+                    });
+                    let mips = crate::render::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
+                    let (_albedo_texture, albedo_view) = match &prim.albedo_rgba {
+                        Some((rgba, w, h)) => upload_rgba_texture_with_mips(&TextureUploadParams {
                             device: &device,
                             queue: &queue,
-                            label: format!("tile-prim-normal-{i}"),
-                            rgba: rgba,
-                            width: *w,
-                            height: *h,
-                            format: wgpu::TextureFormat::Rgba8Unorm,
-                            mips,
-                        })
-                        .1
-                    }
-                    None => tile_default_normal_view.clone(),
-                };
-                let metallic_roughness_view = match &prim.metallic_roughness_rgba {
-                    Some((rgba, w, h)) => {
-                        upload_rgba_texture_with_mips(&TextureUploadParams {
-                            device: &device,
-                            queue: &queue,
-                            label: format!("tile-prim-mr-{i}"),
-                            rgba: rgba,
-                            width: *w,
-                            height: *h,
-                            format: wgpu::TextureFormat::Rgba8Unorm,
-                            mips,
-                        })
-                        .1
-                    }
-                    None => tile_glb_default_mr_view.clone(),
-                };
-                let emissive_view = match &prim.emissive_rgba {
-                    Some((rgba, w, h)) => {
-                        upload_rgba_texture_with_mips(&TextureUploadParams {
-                            device: &device,
-                            queue: &queue,
-                            label: format!("tile-prim-emissive-{i}"),
+                            label: "tile-prim-albedo".to_string(),
                             rgba: rgba,
                             width: *w,
                             height: *h,
                             format: wgpu::TextureFormat::Rgba8UnormSrgb,
                             mips,
-                        })
-                        .1
-                    }
-                    None => tile_glb_default_emissive_view.clone(),
-                };
-                let pbr_uniform_buffer =
-                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("tile-pbr-{i}")),
-                        contents: bytemuck::bytes_of(&GltfPbrUniform::from_loaded(
-                            prim.metallic_factor,
-                            prim.roughness_factor,
-                            prim.emissive_factor,
-                            prim.alpha_mode,
-                            prim.alpha_cutoff,
-                        )),
-                        usage: wgpu::BufferUsages::UNIFORM,
+                        }),
+                        None => white_albedo(&device, &queue),
+                    };
+                    let normal_view = match &prim.normal_rgba {
+                        Some((rgba, w, h)) => {
+                            upload_rgba_texture_with_mips(&TextureUploadParams {
+                                device: &device,
+                                queue: &queue,
+                                label: format!("tile-prim-normal-{i}"),
+                                rgba: rgba,
+                                width: *w,
+                                height: *h,
+                                format: wgpu::TextureFormat::Rgba8Unorm,
+                                mips,
+                            })
+                            .1
+                        }
+                        None => tile_default_normal_view.clone(),
+                    };
+                    let metallic_roughness_view = match &prim.metallic_roughness_rgba {
+                        Some((rgba, w, h)) => {
+                            upload_rgba_texture_with_mips(&TextureUploadParams {
+                                device: &device,
+                                queue: &queue,
+                                label: format!("tile-prim-mr-{i}"),
+                                rgba: rgba,
+                                width: *w,
+                                height: *h,
+                                format: wgpu::TextureFormat::Rgba8Unorm,
+                                mips,
+                            })
+                            .1
+                        }
+                        None => tile_glb_default_mr_view.clone(),
+                    };
+                    let emissive_view = match &prim.emissive_rgba {
+                        Some((rgba, w, h)) => {
+                            upload_rgba_texture_with_mips(&TextureUploadParams {
+                                device: &device,
+                                queue: &queue,
+                                label: format!("tile-prim-emissive-{i}"),
+                                rgba: rgba,
+                                width: *w,
+                                height: *h,
+                                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                                mips,
+                            })
+                            .1
+                        }
+                        None => tile_glb_default_emissive_view.clone(),
+                    };
+                    let pbr_uniform_buffer =
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some(&format!("tile-pbr-{i}")),
+                            contents: bytemuck::bytes_of(&GltfPbrUniform::from_loaded(
+                                prim.metallic_factor,
+                                prim.roughness_factor,
+                                prim.emissive_factor,
+                                prim.alpha_mode,
+                                prim.alpha_cutoff,
+                            )),
+                            usage: wgpu::BufferUsages::UNIFORM,
+                        });
+                    let sampler =
+                        device.create_sampler(&build_sampler_descriptor(prim.sampler, None));
+                    log::info!(
+                        "  prim {}: {} verts, {} idx, has_tex={}",
+                        i,
+                        prim.vertices.len(),
+                        prim.indices.len(),
+                        prim.albedo_rgba.is_some(),
+                    );
+                    out.push(TilePrimitiveGpu {
+                        vertex_buffer: vb,
+                        index_buffer: ib,
+                        index_count: prim.indices.len() as u32,
+                        albedo_view,
+                        normal_view,
+                        metallic_roughness_view,
+                        emissive_view,
+                        pbr_uniform_buffer,
+                        sampler,
+                        pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
                     });
-                let sampler = device.create_sampler(&build_sampler_descriptor(prim.sampler, None));
-                log::info!(
-                    "  prim {}: {} verts, {} idx, has_tex={}",
-                    i,
-                    prim.vertices.len(),
-                    prim.indices.len(),
-                    prim.albedo_rgba.is_some(),
-                );
-                out.push(TilePrimitiveGpu {
-                    vertex_buffer: vb,
-                    index_buffer: ib,
-                    index_count: prim.indices.len() as u32,
-                    albedo_view,
-                    normal_view,
-                    metallic_roughness_view,
-                    emissive_view,
-                    pbr_uniform_buffer,
-                    sampler,
-                    pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
-                });
+                }
+                out
             }
-            out
-        }
-        Err(e) => {
-            log::warn!("Could not load tile mesh GLB (3D hand tiles disabled): {e:#}");
-            Vec::new()
-        }
-    };
-
-    let dummy_outline_vertex = Vertex3dTex {
-        position: [0.0, 0.0, 0.0],
-        normal: [0.0, 1.0, 0.0],
-        uv: [0.0, 0.0],
-        tangent: Vertex3dTex::DEFAULT_TANGENT,
-        uv_emr: [0.0, 0.0],
-        color: [1.0, 1.0, 1.0, 1.0],
-    };
-    let (tile_outline_vertex_buffer, tile_outline_index_buffer, tile_outline_index_count) =
-        if tile_outline_merge_indices.is_empty() {
-            let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("tile-outline-verts-dummy"),
-                contents: bytemuck::cast_slice(&[dummy_outline_vertex; 3]),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-            let ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("tile-outline-idx-dummy"),
-                contents: bytemuck::cast_slice(&[0u32, 1, 2]),
-                usage: wgpu::BufferUsages::INDEX,
-            });
-            (vb, ib, 0u32)
-        } else {
-            let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("tile-outline-verts-merged"),
-                contents: bytemuck::cast_slice(&tile_outline_merge_vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-            let ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("tile-outline-idx-merged"),
-                contents: bytemuck::cast_slice(&tile_outline_merge_indices),
-                usage: wgpu::BufferUsages::INDEX,
-            });
-            (vb, ib, tile_outline_merge_indices.len() as u32)
+            Err(e) => {
+                log::warn!("Could not load tile mesh GLB (3D hand tiles disabled): {e:#}");
+                Vec::new()
+            }
         };
+
+        let dummy_outline_vertex = Vertex3dTex {
+            position: [0.0, 0.0, 0.0],
+            normal: [0.0, 1.0, 0.0],
+            uv: [0.0, 0.0],
+            tangent: Vertex3dTex::DEFAULT_TANGENT,
+            uv_emr: [0.0, 0.0],
+            color: [1.0, 1.0, 1.0, 1.0],
+        };
+        let (tile_outline_vertex_buffer, tile_outline_index_buffer, tile_outline_index_count) =
+            if tile_outline_merge_indices.is_empty() {
+                let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("tile-outline-verts-dummy"),
+                    contents: bytemuck::cast_slice(&[dummy_outline_vertex; 3]),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                let ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("tile-outline-idx-dummy"),
+                    contents: bytemuck::cast_slice(&[0u32, 1, 2]),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
+                (vb, ib, 0u32)
+            } else {
+                let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("tile-outline-verts-merged"),
+                    contents: bytemuck::cast_slice(&tile_outline_merge_vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                let ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("tile-outline-idx-merged"),
+                    contents: bytemuck::cast_slice(&tile_outline_merge_indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
+                (vb, ib, tile_outline_merge_indices.len() as u32)
+            };
         (
             tile_primitives,
             tile_outline_vertex_buffer,
@@ -2966,242 +2967,249 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     ) = {
         let _archive = crate::startup_profile::scope("wgpu.room.archive");
         crate::render::archive_glb::with_archive_glb_cpu(|cpu_opt| {
-        let mut prims = Vec::new();
-        let mut gpu_wrap = None;
-        let mut sign_l = None;
-        let mut sign_r = None;
-        let Some(cpu) = cpu_opt else {
-            return (prims, gpu_wrap, sign_l, sign_r);
-        };
-        if !cpu.environment_primitives.is_empty() {
-            let mut room_tex_cache = RoomEnvTextureCache::new();
-            let (_white_tex, white_albedo_view) = white_albedo(&device, &queue);
-            for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
-                if let Some(ref name) = env_prim.gltf_node_name {
-                    if name == crate::render::archive_glb::SIGN_DESCRIPTION_LEFT {
-                        sign_l = Some(i);
-                    } else if name == crate::render::archive_glb::SIGN_DESCRIPTION_RIGHT {
-                        sign_r = Some(i);
+            let mut prims = Vec::new();
+            let mut gpu_wrap = None;
+            let mut sign_l = None;
+            let mut sign_r = None;
+            let Some(cpu) = cpu_opt else {
+                return (prims, gpu_wrap, sign_l, sign_r);
+            };
+            if !cpu.environment_primitives.is_empty() {
+                let mut room_tex_cache = RoomEnvTextureCache::new();
+                let (_white_tex, white_albedo_view) = white_albedo(&device, &queue);
+                for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
+                    if let Some(ref name) = env_prim.gltf_node_name {
+                        if name == crate::render::archive_glb::SIGN_DESCRIPTION_LEFT {
+                            sign_l = Some(i);
+                        } else if name == crate::render::archive_glb::SIGN_DESCRIPTION_RIGHT {
+                            sign_r = Some(i);
+                        }
                     }
-                }
-                let prim = &env_prim.mesh;
-                let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some(&format!("archive-env-verts-{i}")),
-                    contents: bytemuck::cast_slice(&prim.vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-                let ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some(&format!("archive-env-idx-{i}")),
-                    contents: bytemuck::cast_slice(&prim.indices),
-                    usage: wgpu::BufferUsages::INDEX,
-                });
-                let mips = crate::render::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
-                let albedo_view = room_tex_cache.upload_slot(
-                    &device,
-                    &queue,
-                    format!("archive-env-albedo-{i}"),
-                    prim.albedo_rgba.as_ref(),
-                    prim.albedo_mip_chain.as_deref().map(|c| c.as_slice()),
-                    wgpu::TextureFormat::Rgba8UnormSrgb,
-                    mips,
-                    &white_albedo_view,
-                );
-                let normal_view = room_tex_cache.upload_slot(
-                    &device,
-                    &queue,
-                    format!("archive-env-normal-{i}"),
-                    prim.normal_rgba.as_ref(),
-                    prim.normal_mip_chain.as_deref().map(|c| c.as_slice()),
-                    wgpu::TextureFormat::Rgba8Unorm,
-                    mips,
-                    &tile_default_normal_view,
-                );
-                let metallic_roughness_view = room_tex_cache.upload_slot(
-                    &device,
-                    &queue,
-                    format!("archive-env-mr-{i}"),
-                    prim.metallic_roughness_rgba.as_ref(),
-                    prim.metallic_roughness_mip_chain
-                        .as_deref()
-                        .map(|c| c.as_slice()),
-                    wgpu::TextureFormat::Rgba8Unorm,
-                    mips,
-                    &tile_glb_default_mr_view,
-                );
-                let emissive_view = room_tex_cache.upload_slot(
-                    &device,
-                    &queue,
-                    format!("archive-env-emissive-{i}"),
-                    prim.emissive_rgba.as_ref(),
-                    prim.emissive_mip_chain.as_deref().map(|c| c.as_slice()),
-                    wgpu::TextureFormat::Rgba8UnormSrgb,
-                    mips,
-                    &tile_glb_default_emissive_view,
-                );
-                let pbr_uniform_buffer =
-                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("archive-pbr-{i}")),
-                        contents: bytemuck::bytes_of(&GltfPbrUniform::from_loaded(
-                            prim.metallic_factor,
-                            prim.roughness_factor,
-                            prim.emissive_factor,
-                            prim.alpha_mode,
-                            prim.alpha_cutoff,
-                        )),
-                        usage: wgpu::BufferUsages::UNIFORM,
+                    let prim = &env_prim.mesh;
+                    let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("archive-env-verts-{i}")),
+                        contents: bytemuck::cast_slice(&prim.vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
                     });
-                let sampler = device.create_sampler(&build_sampler_descriptor(prim.sampler, None));
-                prims.push(TilePrimitiveGpu {
-                    vertex_buffer: vb,
-                    index_buffer: ib,
-                    index_count: prim.indices.len() as u32,
-                    albedo_view,
-                    normal_view,
-                    metallic_roughness_view,
-                    emissive_view,
-                    pbr_uniform_buffer,
-                    sampler,
-                    pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
+                    let ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("archive-env-idx-{i}")),
+                        contents: bytemuck::cast_slice(&prim.indices),
+                        usage: wgpu::BufferUsages::INDEX,
+                    });
+                    let mips = crate::render::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
+                    let albedo_view = room_tex_cache.upload_slot(
+                        &device,
+                        &queue,
+                        format!("archive-env-albedo-{i}"),
+                        prim.albedo_rgba.as_ref(),
+                        prim.albedo_mip_chain.as_deref().map(|c| c.as_slice()),
+                        wgpu::TextureFormat::Rgba8UnormSrgb,
+                        mips,
+                        &white_albedo_view,
+                    );
+                    let normal_view = room_tex_cache.upload_slot(
+                        &device,
+                        &queue,
+                        format!("archive-env-normal-{i}"),
+                        prim.normal_rgba.as_ref(),
+                        prim.normal_mip_chain.as_deref().map(|c| c.as_slice()),
+                        wgpu::TextureFormat::Rgba8Unorm,
+                        mips,
+                        &tile_default_normal_view,
+                    );
+                    let metallic_roughness_view = room_tex_cache.upload_slot(
+                        &device,
+                        &queue,
+                        format!("archive-env-mr-{i}"),
+                        prim.metallic_roughness_rgba.as_ref(),
+                        prim.metallic_roughness_mip_chain
+                            .as_deref()
+                            .map(|c| c.as_slice()),
+                        wgpu::TextureFormat::Rgba8Unorm,
+                        mips,
+                        &tile_glb_default_mr_view,
+                    );
+                    let emissive_view = room_tex_cache.upload_slot(
+                        &device,
+                        &queue,
+                        format!("archive-env-emissive-{i}"),
+                        prim.emissive_rgba.as_ref(),
+                        prim.emissive_mip_chain.as_deref().map(|c| c.as_slice()),
+                        wgpu::TextureFormat::Rgba8UnormSrgb,
+                        mips,
+                        &tile_glb_default_emissive_view,
+                    );
+                    let pbr_uniform_buffer =
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some(&format!("archive-pbr-{i}")),
+                            contents: bytemuck::bytes_of(&GltfPbrUniform::from_loaded(
+                                prim.metallic_factor,
+                                prim.roughness_factor,
+                                prim.emissive_factor,
+                                prim.alpha_mode,
+                                prim.alpha_cutoff,
+                            )),
+                            usage: wgpu::BufferUsages::UNIFORM,
+                        });
+                    let sampler =
+                        device.create_sampler(&build_sampler_descriptor(prim.sampler, None));
+                    prims.push(TilePrimitiveGpu {
+                        vertex_buffer: vb,
+                        index_buffer: ib,
+                        index_count: prim.indices.len() as u32,
+                        albedo_view,
+                        normal_view,
+                        metallic_roughness_view,
+                        emissive_view,
+                        pbr_uniform_buffer,
+                        sampler,
+                        pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
+                    });
+                }
+                let (sign_decal_w, sign_decal_h) = crate::render::decal::decal_dimensions(
+                    &crate::render::primitive::DecalLayout::Fit {
+                        target_short_edge: crate::render::decal::PLAQUE_DECAL_HEIGHT,
+                    },
+                    crate::render::archive_glb::archive_sign_description_decal_extents_for(cpu),
+                );
+                let sign_decal_clear = vec![0u8; (sign_decal_w * sign_decal_h * 4) as usize];
+                let archive_sign_decal_tex = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("archive-sign-decal"),
+                    size: wgpu::Extent3d {
+                        width: sign_decal_w,
+                        height: sign_decal_h,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
                 });
-            }
-            let (sign_decal_w, sign_decal_h) = crate::render::decal::decal_dimensions(
-                &crate::render::primitive::DecalLayout::Fit {
-                    target_short_edge: crate::render::decal::PLAQUE_DECAL_HEIGHT,
-                },
-                crate::render::archive_glb::archive_sign_description_decal_extents_for(cpu),
-            );
-            let sign_decal_clear = vec![0u8; (sign_decal_w * sign_decal_h * 4) as usize];
-            let archive_sign_decal_tex = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("archive-sign-decal"),
-                size: wgpu::Extent3d {
-                    width: sign_decal_w,
-                    height: sign_decal_h,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
-            queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &archive_sign_decal_tex,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                &sign_decal_clear,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(4 * sign_decal_w),
-                    rows_per_image: Some(sign_decal_h),
-                },
-                wgpu::Extent3d {
-                    width: sign_decal_w,
-                    height: sign_decal_h,
-                    depth_or_array_layers: 1,
-                },
-            );
-            let archive_decal_view =
-                archive_sign_decal_tex.create_view(&wgpu::TextureViewDescriptor::default());
-            let identity = Mat4::IDENTITY;
-            let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("archive-env-uniform"),
-                contents: bytemuck::bytes_of(&CameraUniform {
-                    view_proj: identity.to_cols_array(),
-                    model: identity.to_cols_array(),
-                    base_color_factor: [
-                        1.0,
-                        0.0,
-                        0.0,
-                        crate::render::tile_body::TEXTURED_BASE_MAP_BODY_KIND,
-                    ],
-                    cam_pos: [0.0; 3],
-                    tile_seed: 0.0,
-                    decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
-                    hdr_tonemap: [0.0; 4],
-                }),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
-            let distortion_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("archive-env-distortion"),
-                contents: bytemuck::bytes_of(
-                    &crate::render::hallway_glb::HallwayDistortion::default(),
-                ),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
-            let bind_groups: Vec<wgpu::BindGroup> = prims
-                .iter()
-                .map(|p| {
-                    device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("archive-env-bg"),
-                        layout: &tile_material_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: uniform_buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::TextureView(&p.albedo_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: wgpu::BindingResource::Sampler(&p.sampler),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 3,
-                                resource: wgpu::BindingResource::TextureView(&archive_decal_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 4,
-                                resource: wgpu::BindingResource::TextureView(&p.normal_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 5,
-                                resource: p.pbr_uniform_buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 6,
-                                resource: wgpu::BindingResource::TextureView(
-                                    &p.metallic_roughness_view,
-                                ),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 7,
-                                resource: wgpu::BindingResource::TextureView(&p.emissive_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 8,
-                                resource: distortion_buffer.as_entire_binding(),
-                            },
+                queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &archive_sign_decal_tex,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    &sign_decal_clear,
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(4 * sign_decal_w),
+                        rows_per_image: Some(sign_decal_h),
+                    },
+                    wgpu::Extent3d {
+                        width: sign_decal_w,
+                        height: sign_decal_h,
+                        depth_or_array_layers: 1,
+                    },
+                );
+                let archive_decal_view =
+                    archive_sign_decal_tex.create_view(&wgpu::TextureViewDescriptor::default());
+                let identity = Mat4::IDENTITY;
+                let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("archive-env-uniform"),
+                    contents: bytemuck::bytes_of(&CameraUniform {
+                        view_proj: identity.to_cols_array(),
+                        model: identity.to_cols_array(),
+                        base_color_factor: [
+                            1.0,
+                            0.0,
+                            0.0,
+                            crate::render::tile_body::TEXTURED_BASE_MAP_BODY_KIND,
                         ],
+                        cam_pos: [0.0; 3],
+                        tile_seed: 0.0,
+                        decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
+                        hdr_tonemap: [0.0; 4],
+                    }),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+                let distortion_buffer =
+                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("archive-env-distortion"),
+                        contents: bytemuck::bytes_of(
+                            &crate::render::hallway_glb::HallwayDistortion::default(),
+                        ),
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    });
+                let bind_groups: Vec<wgpu::BindGroup> = prims
+                    .iter()
+                    .map(|p| {
+                        device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("archive-env-bg"),
+                            layout: &tile_material_layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: uniform_buffer.as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: wgpu::BindingResource::TextureView(&p.albedo_view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 2,
+                                    resource: wgpu::BindingResource::Sampler(&p.sampler),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 3,
+                                    resource: wgpu::BindingResource::TextureView(
+                                        &archive_decal_view,
+                                    ),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 4,
+                                    resource: wgpu::BindingResource::TextureView(&p.normal_view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 5,
+                                    resource: p.pbr_uniform_buffer.as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 6,
+                                    resource: wgpu::BindingResource::TextureView(
+                                        &p.metallic_roughness_view,
+                                    ),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 7,
+                                    resource: wgpu::BindingResource::TextureView(&p.emissive_view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 8,
+                                    resource: distortion_buffer.as_entire_binding(),
+                                },
+                            ],
+                        })
                     })
-                })
-                .collect();
-            let (shadow_uniform_buffer, shadow_bind_group) =
-                create_room_env_shadow_gpu(&device, &shadow_caster_layout, "archive-env-shadow");
-            let shadow_warp_bind_group = create_shadow_warp_bind_group(
-                &device,
-                &shadow_warp_layout,
-                &distortion_buffer,
-                "archive-env-shadow-warp",
-            );
-            gpu_wrap = Some(ShopEnvironmentGpu {
-                uniform_buffer,
-                distortion_buffer,
-                shadow_uniform_buffer,
-                shadow_bind_group,
-                shadow_warp_bind_group,
-                bind_groups,
-                archive_sign_decal_texture: Some(archive_sign_decal_tex),
-                shop_candle_sss_texture: None,
-            });
-            log::info!("archive.glb GPU: {} primitive draw(s)", prims.len());
-        }
-        (prims, gpu_wrap, sign_l, sign_r)
+                    .collect();
+                let (shadow_uniform_buffer, shadow_bind_group) = create_room_env_shadow_gpu(
+                    &device,
+                    &shadow_caster_layout,
+                    "archive-env-shadow",
+                );
+                let shadow_warp_bind_group = create_shadow_warp_bind_group(
+                    &device,
+                    &shadow_warp_layout,
+                    &distortion_buffer,
+                    "archive-env-shadow-warp",
+                );
+                gpu_wrap = Some(ShopEnvironmentGpu {
+                    uniform_buffer,
+                    distortion_buffer,
+                    shadow_uniform_buffer,
+                    shadow_bind_group,
+                    shadow_warp_bind_group,
+                    bind_groups,
+                    archive_sign_decal_texture: Some(archive_sign_decal_tex),
+                    shop_candle_sss_texture: None,
+                });
+                log::info!("archive.glb GPU: {} primitive draw(s)", prims.len());
+            }
+            (prims, gpu_wrap, sign_l, sign_r)
         })
     };
 
@@ -3670,8 +3678,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             &tile_sampler,
         ));
     }
-    let mut boss_icon_instances: Vec<LitMeshInstance> =
-        Vec::with_capacity(MAX_BOSS_ICON_SLOTS);
+    let mut boss_icon_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_BOSS_ICON_SLOTS);
     for _ in 0..MAX_BOSS_ICON_SLOTS {
         boss_icon_instances.push(LitMeshInstance::new(
             &device,
@@ -4116,9 +4123,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         last_wood_tablet_models: Vec::new(),
         last_bowl_model: None,
         last_mirror_model: None,
-        last_debug_pickables: Vec::new(),
         active_scene_key: None,
-        placement_rotations: rustc_hash::FxHashMap::default(),
         last_frame: Instant::now(),
         frame_dt: 0.0,
         obj3d_hover_state: rustc_hash::FxHashMap::default(),

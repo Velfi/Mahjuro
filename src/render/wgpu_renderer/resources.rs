@@ -413,9 +413,9 @@ impl RoomEnvTextureCache {
         fallback: &wgpu::TextureView,
     ) -> wgpu::TextureView {
         match rgba {
-            Some((rgba, w, h)) => self.upload(
-                device, queue, label, rgba, *w, *h, format, mips, mip_chain,
-            ),
+            Some((rgba, w, h)) => {
+                self.upload(device, queue, label, rgba, *w, *h, format, mips, mip_chain)
+            }
             None => fallback.clone(),
         }
     }

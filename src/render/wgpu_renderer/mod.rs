@@ -52,8 +52,7 @@ use crate::render::decal::{
     rasterize_tile_face_decal,
 };
 use crate::render::draw_cmd::{
-    CascadeTokenKind, DrawCmd, ShowcaseTilePlacement, TallyFanKind, TileFaceQuad, UiFrame,
-    WallStackPlacement, YakuTabletPlacement,
+    DrawCmd, ShowcaseTilePlacement, TileFaceQuad, UiFrame, WallStackPlacement, YakuTabletPlacement,
 };
 use crate::render::gpu_types::{DecodedRelicImage, RelicTextureGpu};
 use crate::render::lit_mesh::Aabb;
@@ -65,7 +64,7 @@ use crate::render::lit_mesh::{
     create_room_env_shadow_gpu, create_shadow_caster_layout, create_shadow_sample_layout,
     create_shadow_warp_bind_group, create_shadow_warp_layout,
 };
-use crate::render::mirror_mesh::{MIRROR_LOCAL_CENTER_Y, MIRROR_LOCAL_HALF, build_mirror_mesh};
+use crate::render::mirror_mesh::build_mirror_mesh;
 use crate::render::ofuda_mesh::build_ofuda_mesh;
 use crate::render::orb_mesh::build_orb_mesh;
 use crate::render::plaque_mesh::build_plaque_mesh;
@@ -77,18 +76,14 @@ use crate::render::relic_dish::{
 };
 use crate::render::relic_pipeline::spawn_relic_loader;
 use crate::render::ribbon_mesh::build_ribbon_mesh;
-use crate::render::river_mesh::{
-    RIVER_LOCAL_CENTER_Y as BOWL_LOCAL_CENTER_Y, RIVER_LOCAL_HALF as BOWL_LOCAL_HALF,
-    build_river_mesh,
-};
+use crate::render::river_mesh::build_river_mesh;
 use crate::render::shop_bell_mesh::build_shop_bell_mesh;
 use crate::render::table_mesh::build_table_mesh;
 use crate::render::table_transform::{
-    mesh_y_thickness_along_local_y_to_z_up, ribbon_submesh, rot_euler_xyz_rad,
-    rot_fixed_axes_deg_matrix, score_popup_glyph_rot_rad, table_mesh_lay_flat,
+    ribbon_submesh, rot_fixed_axes_deg_matrix, table_mesh_lay_flat,
     tile_mesh_local_to_world, translate_rot_scale,
 };
-use crate::render::talisman_mesh::{TALISMAN_LOCAL_HALF, build_talisman_mesh, talisman_material};
+use crate::render::talisman_mesh::{TALISMAN_LOCAL_HALF, build_talisman_mesh};
 use crate::render::tally_stick_mesh::{build_tally_stick_base_mesh, build_tally_stick_tip_mesh};
 use crate::render::tile_glb::{Vertex3dTex, load_glb_tile_from_bytes, normalize_mesh};
 use crate::render::wood_tablet_mesh::build_wood_tablet_mesh;
@@ -721,22 +716,11 @@ pub struct WgpuRenderer {
     pub(super) last_bowl_model: Option<Mat4>,
     /// Bronze mirror world-space model matrix for `pick_gameplay_object`.
     pub(super) last_mirror_model: Option<Mat4>,
-    /// Per-frame catch-all of "what's this thing under the cursor" entries
-    /// used by the debug "Object Hit Test" menu action. Each entry is a
-    /// `(name, model, half_extents, center_offset_y)` tuple — the same
-    /// local-space slab-test format the existing `pick_*_object` methods
-    /// use, just with a human-readable name attached. Populated as the
-    /// renderer walks the frame's draw cmds; consumed by
-    /// `pick_debug_object`.
-    pub(super) last_debug_pickables: Vec<(String, Mat4, glam::Vec3, f32)>,
     /// Canonical scene-path prefix for the currently active scene — e.g.
     /// `"shop"` or `"gameplay"`. Set per-frame by `App` so the renderer can
     /// disambiguate shared mesh pipelines (e.g. `Object3dKind::Ofuda` is used
-    /// by both shop and gameplay). Used by [`Self::scene_path`] helpers.
+    /// by both shop and gameplay).
     active_scene_key: Option<&'static str>,
-    /// Placement rotation degrees keyed by canonical placement name. Populated
-    /// each frame from the active scene's `*Positions` structs.
-    placement_rotations: FxHashMap<String, [f32; 3]>,
 
     // ── Shadow mapping ─────────────────────────────────────────────────
     /// Fixed-size depth texture written by the shadow pre-pass and sampled
@@ -775,7 +759,6 @@ pub struct WgpuRenderer {
     acquire_telemetry: runtime::AcquireTelemetry,
 }
 
-mod impl_arrange;
 mod impl_loaders;
 mod impl_pipelines;
 mod impl_public;
@@ -784,10 +767,9 @@ mod impl_screenshot;
 
 pub use constants::{
     MAIN_MENU_PICK_OPTIONS, MAIN_MENU_PICK_PLAY, MAIN_MENU_PICK_QUIT, MAX_BOOK_SLOTS,
-    MAX_BOWL_SLOTS, MAX_BUG_SLOTS, MAX_CASCADE_TOKEN_SLOTS, MAX_EXTRUDED_GLYPH_SLOTS,
-    MAX_BOSS_ICON_SLOTS, MAX_MIRROR_SLOTS, MAX_ORB_SLOTS, MAX_PLINTH_SLOTS, MAX_POINT_LIGHTS,
-    MAX_RELIC_SLOTS,
-    MAX_RIBBON_SLOTS, MAX_SPOT_LIGHTS, MAX_TALISMAN_SLOTS, MAX_TALLY_FAN_SLOTS,
+    MAX_BOSS_ICON_SLOTS, MAX_BOWL_SLOTS, MAX_BUG_SLOTS, MAX_CASCADE_TOKEN_SLOTS,
+    MAX_EXTRUDED_GLYPH_SLOTS, MAX_MIRROR_SLOTS, MAX_ORB_SLOTS, MAX_PLINTH_SLOTS, MAX_POINT_LIGHTS,
+    MAX_RELIC_SLOTS, MAX_RIBBON_SLOTS, MAX_SPOT_LIGHTS, MAX_TALISMAN_SLOTS, MAX_TALLY_FAN_SLOTS,
     MAX_TALLY_STICK_SLOTS, MAX_TILE_OCCLUDERS, MAX_WALL_TILE_SLOTS, MAX_WOOD_TABLET_SLOTS,
     MAX_YAKU_TABLET_SLOTS,
 };
@@ -821,6 +803,6 @@ pub(super) use constants::{
 pub(crate) use projection::PickCamera;
 
 pub(crate) use internal_slots::{
-    CachedTextLabel, HandTileGpu, ShopEnvironmentGpu, ShowcaseTileGpu,
-    TextLabelShapeKey, TileFaceOverlayGpu,
+    CachedTextLabel, HandTileGpu, ShopEnvironmentGpu, ShowcaseTileGpu, TextLabelShapeKey,
+    TileFaceOverlayGpu,
 };

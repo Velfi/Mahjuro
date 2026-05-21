@@ -275,8 +275,7 @@ impl SceneBehavior for YakuJournalScene {
         let row_name_w = table.table_w * 0.15;
         let row_payout_w = table.table_w * 0.17;
         let row_scored_w = table.table_w * 0.08;
-        let row_rule_w =
-            table.table_w - row_level_w - row_name_w - row_payout_w - row_scored_w;
+        let row_rule_w = table.table_w - row_level_w - row_name_w - row_payout_w - row_scored_w;
         let col_x = [
             table.table_x,
             table.table_x + row_level_w,
@@ -953,12 +952,11 @@ fn draw_plaque(
                     glow: hand_glow,
                     glow_color: hand_glow_color,
                     pick_id: None,
-                    arrange_group: None,
+                    overlay_rect_group: None,
                 });
                 cursor_x += hand_tile;
             }
             cursor_x += hand_gap;
         }
     }
-
 }

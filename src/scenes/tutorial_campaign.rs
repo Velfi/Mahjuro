@@ -331,7 +331,7 @@ impl TutorialCampaignScene {
                         glow: false,
                         glow_color: None,
                         pick_id: None,
-                        arrange_group: None,
+                        overlay_rect_group: None,
                     });
                     next_id += 1;
                     x += step;
@@ -603,7 +603,6 @@ impl SceneBehavior for TutorialCampaignScene {
                 },
                 hover_target: if play_focused { 1.0 } else { 0.0 },
                 anim_id: 2,
-                arrange_name: Some("tutorial.try_it.mirror"),
             });
             let tp = &self.positions.try_it_trigger;
             let trigger_pos = LayoutAnchorPx {
@@ -631,7 +630,6 @@ impl SceneBehavior for TutorialCampaignScene {
                 },
                 hover_target: 0.0,
                 anim_id: 0,
-                arrange_name: Some("tutorial.try_it.trigger"),
             });
             texts.push(TextLabel {
                 rect: [
