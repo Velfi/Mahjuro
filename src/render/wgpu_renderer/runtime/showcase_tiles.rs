@@ -1,3 +1,5 @@
+use crate::render::table_transform::{rot_euler_xyz_rad, translate_rot_scale};
+
 use super::*;
 
 impl WgpuRenderer {
@@ -93,8 +95,6 @@ impl WgpuRenderer {
 
             // Track hand-tile world centers for the hand-strip debug pickable
             // (registered after the loop).
-            let hand_strip_centers: Vec<glam::Vec3> = Vec::new();
-            let pack_reveal_centers: Vec<glam::Vec3> = Vec::new();
             let mut dora_tile_bounds: Option<[f32; 4]> = None; // [min_x, min_y, max_x, max_y]
             let mut round_wind_tile_bounds: Option<[f32; 4]> = None; // [min_x, min_y, max_x, max_y]
             let grow_bounds = |bounds: &mut Option<[f32; 4]>, rect: [f32; 4]| {
@@ -147,6 +147,8 @@ impl WgpuRenderer {
                     // Shop uses a perspective camera; layout `(px, py, lift)` must match the same
                     // ray → `plane_z` hit as `Object3d` anchors (`world_on_camera_ray_plane_z`),
                     // not flat `pixel_to_world`, or celebration tiles miss the frustum.
+                    let hints = frame.showcase_render_hints;
+                    let pack_celeb = hints.tile_pack_celebration_tonemap;
                     let center = match (self.active_scene_key, frame.camera_override.as_ref()) {
                         (Some("shop") | Some("tile_pack_celebration"), Some(cam)) => {
                             crate::render::world_space::world_on_camera_ray_plane_z(
@@ -159,10 +161,18 @@ impl WgpuRenderer {
                             )
                         }
                         (Some("showcase"), Some(cam))
-                            if frame
-                                .showcase_render_hints
-                                .showcase_tiles_use_camera_ray_plane_z =>
+                            if hints.showcase_tiles_use_camera_ray_plane_z || pack_celeb =>
                         {
+                            crate::render::world_space::world_on_camera_ray_plane_z(
+                                w,
+                                h,
+                                cam,
+                                p.center_pos[0],
+                                p.center_pos[1],
+                                p.center_pos[2],
+                            )
+                        }
+                        (_, Some(cam)) if pack_celeb => {
                             crate::render::world_space::world_on_camera_ray_plane_z(
                                 w,
                                 h,
@@ -221,16 +231,17 @@ impl WgpuRenderer {
                     let overlay_x = sc_min_x;
                     let overlay_y = sc_min_y;
 
-                    match p.arrange_group {
-                        Some("gameplay.dora_tiles") => grow_bounds(
+                    use crate::render::draw_cmd::TileOverlayRectGroup;
+                    match p.overlay_rect_group {
+                        Some(TileOverlayRectGroup::DoraTiles) => grow_bounds(
                             &mut dora_tile_bounds,
                             [overlay_x, overlay_y, overlay_w, overlay_h],
                         ),
-                        Some("gameplay.round_wind_tiles") => grow_bounds(
+                        Some(TileOverlayRectGroup::RoundWindTiles) => grow_bounds(
                             &mut round_wind_tile_bounds,
                             [overlay_x, overlay_y, overlay_w, overlay_h],
                         ),
-                        _ => {}
+                        None => {}
                     }
 
                     if let Some(pick_id) = p.pick_id {
@@ -336,136 +347,6 @@ impl WgpuRenderer {
                     0,
                     bytemuck::cast_slice(&self.tile_outline_instances_staging),
                 );
-            }
-
-            // Register the hand strip as a single debug-pickable so arrange
-            // mode can select it by clicking any tile. The pickable is an AABB
-            // that encloses all hand-tile centers (or their arrange-moved
-            // positions when an override is already active).
-            if !hand_strip_centers.is_empty() || {
-                // Fallback: compute from batch placements when the override is
-                // not yet active (first click selection).
-
-                showcase_tile_batches
-                    .iter()
-                    .flat_map(|b| b.iter())
-                    .any(|p| p.pick_id.is_some())
-            } {
-                // Use the centers we collected (post-override) if available,
-                // otherwise derive directly from placements.
-                let centers: Vec<glam::Vec3> = if !hand_strip_centers.is_empty() {
-                    hand_strip_centers.clone()
-                } else {
-                    showcase_tile_batches
-                        .iter()
-                        .flat_map(|b| b.iter())
-                        .filter(|p| p.pick_id.is_some())
-                        .map(|p| {
-                            pixel_to_world(w, h, p.center_pos[0], p.center_pos[1], p.center_pos[2])
-                        })
-                        .collect()
-                };
-                if !centers.is_empty() {
-                    let count = centers.len() as f32;
-                    let centroid = centers.iter().fold(glam::Vec3::ZERO, |a, &c| a + c) / count;
-                    // Build half-extents that encompass all tile centers plus
-                    // one tile-width of padding so clicking the end tiles works.
-                    let tile_half = showcase_tile_batches
-                        .iter()
-                        .flat_map(|b| b.iter())
-                        .find(|p| p.pick_id.is_some())
-                        .map(|p| p.size_px * 0.5)
-                        .unwrap_or(40.0);
-                    let mut hx = tile_half;
-                    let mut hy = tile_half;
-                    let mut hz = tile_half;
-                    for c in &centers {
-                        let d = (*c - centroid).abs();
-                        hx = hx.max(d.x + tile_half);
-                        hy = hy.max(d.y + tile_half);
-                        hz = hz.max(d.z + tile_half);
-                    }
-                    let strip_model =
-                        translate_rot_scale(centroid, Mat4::IDENTITY, glam::Vec3::new(hx, hy, hz));
-                    self.last_debug_pickables.push((
-                        "gameplay.hand.strip".to_string(),
-                        strip_model,
-                        glam::Vec3::splat(0.5),
-                        0.0,
-                    ));
-                }
-            }
-
-            let pack_reveal_pickable_centers: Vec<glam::Vec3> = if !pack_reveal_centers.is_empty() {
-                pack_reveal_centers.clone()
-            } else if showcase_tile_batches
-                .iter()
-                .flat_map(|b| b.iter())
-                .any(|p| p.arrange_group == Some("shop.celebrations.pack_reveal"))
-            {
-                showcase_tile_batches
-                    .iter()
-                    .flat_map(|b| b.iter())
-                    .filter(|p| p.arrange_group == Some("shop.celebrations.pack_reveal"))
-                    .map(
-                        |p| match (self.active_scene_key, frame.camera_override.as_ref()) {
-                            (Some("shop") | Some("tile_pack_celebration"), Some(cam))
-                            | (Some("showcase"), Some(cam))
-                                if frame
-                                    .showcase_render_hints
-                                    .showcase_tiles_use_camera_ray_plane_z =>
-                            {
-                                crate::render::world_space::world_on_camera_ray_plane_z(
-                                    w,
-                                    h,
-                                    cam,
-                                    p.center_pos[0],
-                                    p.center_pos[1],
-                                    p.center_pos[2],
-                                )
-                            }
-                            _ => pixel_to_world(
-                                w,
-                                h,
-                                p.center_pos[0],
-                                p.center_pos[1],
-                                p.center_pos[2],
-                            ),
-                        },
-                    )
-                    .collect()
-            } else {
-                Vec::new()
-            };
-            if !pack_reveal_pickable_centers.is_empty() {
-                let count = pack_reveal_pickable_centers.len() as f32;
-                let centroid = pack_reveal_pickable_centers
-                    .iter()
-                    .fold(glam::Vec3::ZERO, |a, &c| a + c)
-                    / count;
-                let tile_half = showcase_tile_batches
-                    .iter()
-                    .flat_map(|b| b.iter())
-                    .find(|p| p.arrange_group == Some("shop.celebrations.pack_reveal"))
-                    .map(|p| p.size_px * 0.5)
-                    .unwrap_or(40.0);
-                let mut hx = tile_half;
-                let mut hy = tile_half;
-                let mut hz = tile_half;
-                for c in &pack_reveal_pickable_centers {
-                    let d = (*c - centroid).abs();
-                    hx = hx.max(d.x + tile_half);
-                    hy = hy.max(d.y + tile_half);
-                    hz = hz.max(d.z + tile_half);
-                }
-                let row_model =
-                    translate_rot_scale(centroid, Mat4::IDENTITY, glam::Vec3::new(hx, hy, hz));
-                self.last_debug_pickables.push((
-                    "shop.celebrations.pack_reveal".to_string(),
-                    row_model,
-                    glam::Vec3::splat(0.5),
-                    0.0,
-                ));
             }
         }
 

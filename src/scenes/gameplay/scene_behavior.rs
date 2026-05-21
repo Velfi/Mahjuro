@@ -363,7 +363,6 @@ impl SceneBehavior for GameplayScene {
                     },
                     hover_target: 0.0,
                     anim_id: 0,
-                    arrange_name: None,
                 });
             }
 
@@ -872,7 +871,7 @@ impl SceneBehavior for GameplayScene {
                         None
                     },
                     pick_id: Some(i),
-                    arrange_group: None,
+                    overlay_rect_group: None,
                 });
             }
             if !hand_placements.is_empty() {
@@ -935,11 +934,11 @@ impl SceneBehavior for GameplayScene {
                         spread_deg,
                         tip_color: crate::render::theme::color::JADE,
                         rotation_y_deg: fan.ry_deg,
+                        placement_rot_deg: fan.rotation_deg(),
                         kind: crate::render::draw_cmd::TallyFanKind::Draws,
                     },
                     hover_target: 0.0,
                     anim_id: 0,
-                    arrange_name: None,
                 });
             }
             if let Some(bowl) = discard_bowl_placement.as_ref() {
@@ -961,11 +960,11 @@ impl SceneBehavior for GameplayScene {
                         spread_deg,
                         tip_color: crate::render::theme::color::AMBER,
                         rotation_y_deg: fan.ry_deg,
+                        placement_rot_deg: fan.rotation_deg(),
                         kind: crate::render::draw_cmd::TallyFanKind::Discards,
                     },
                     hover_target: 0.0,
                     anim_id: 0,
-                    arrange_name: None,
                 });
             }
         }
@@ -1131,7 +1130,6 @@ impl SceneBehavior for GameplayScene {
                 },
                 hover_target: 0.0,
                 anim_id: 0,
-                arrange_name: Some("gameplay.talisman_dish"),
             });
             if !ribbon_dish_placements.is_empty() {
                 frame.object3d_batch(ribbon_dish_placements);

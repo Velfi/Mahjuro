@@ -115,6 +115,33 @@ pub fn score_popup_glyph_rot_rad(rotation_z: f32, rotation_x: f32) -> Mat4 {
     Mat4::from_rotation_z(rotation_z) * Mat4::from_rotation_x(rotation_x)
 }
 
+/// Apply **`Rz * Ry * Rx`** placement degrees to an existing model matrix (translation preserved).
+#[inline]
+pub fn apply_rotation_deg_to_model(model: Mat4, rot_deg: [f32; 3]) -> Mat4 {
+    if rot_deg[0] == 0.0 && rot_deg[1] == 0.0 && rot_deg[2] == 0.0 {
+        return model;
+    }
+    let r = Mat4::from_rotation_z(rot_deg[2].to_radians())
+        * Mat4::from_rotation_y(rot_deg[1].to_radians())
+        * Mat4::from_rotation_x(rot_deg[0].to_radians());
+    let t = model.w_axis.truncate();
+    let nx = r.transform_vector3(model.x_axis.truncate());
+    let ny = r.transform_vector3(model.y_axis.truncate());
+    let nz = r.transform_vector3(model.z_axis.truncate());
+    Mat4::from_cols(
+        nx.extend(0.0),
+        ny.extend(0.0),
+        nz.extend(0.0),
+        t.extend(1.0),
+    )
+}
+
+/// Compose a base orientation matrix with placement rotation degrees (`R_place * R_base`).
+#[inline]
+pub fn compose_rotation_euler(base: Mat4, rot_deg: [f32; 3]) -> [f32; 3] {
+    mat4_to_euler_xyz_rad(apply_rotation_deg_to_model(base, rot_deg))
+}
+
 /// `Translation * rotation * scale` — standard lit-mesh instance pose on the table.
 /// Use [`Mat4::IDENTITY`] for rotation when the mesh has no orientation (axis-aligned boxes).
 /// For ribbon anchor poses with no per-axis scale yet, pass **`Vec3::splat(1.0)`**

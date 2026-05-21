@@ -32,8 +32,6 @@ pub struct DebugState {
     /// Pick-blind hallway vertex warp tuning (left panel).
     pub hallway_distortion_debug_overlay: Option<HallwayDistortionDebugOverlay>,
     pub rain_debug_overlay: Option<RainDebugOverlay>,
-    /// One-shot debug picker armed by the "Object Hit Test" debug menu item.
-    pub object_hit_test_armed: bool,
     /// Effective 3D camera after the scene's `draw_frame` (override or table
     /// default), updated each paint — used to seed camera debug overlay.
     pub last_effective_camera: CameraParams,
@@ -57,7 +55,6 @@ impl DebugState {
             scene_look_debug_overlay: None,
             hallway_distortion_debug_overlay: None,
             rain_debug_overlay: None,
-            object_hit_test_armed: false,
             last_effective_camera: CameraParams::default_table_camera(800.0),
         }
     }

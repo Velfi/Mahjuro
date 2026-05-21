@@ -821,7 +821,10 @@ pub fn decode_env_primitive(
         tex
     });
     let normal_mip_chain = normal_src.and_then(|c| {
-        let scale = material.normal_texture().map(|nt| nt.scale()).unwrap_or(1.0);
+        let scale = material
+            .normal_texture()
+            .map(|nt| nt.scale())
+            .unwrap_or(1.0);
         (scale == 1.0).then(|| Arc::clone(&c.mip_chain))
     });
 

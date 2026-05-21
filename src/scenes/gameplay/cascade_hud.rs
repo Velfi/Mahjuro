@@ -101,7 +101,6 @@ pub(super) fn push_structure_preview_pile(
             kind: Object3dKind::CascadeToken { kind, pulse },
             hover_target: 0.0,
             anim_id: 0,
-            arrange_name: None,
         });
     }
 }
@@ -333,7 +332,6 @@ fn make_extruded_glyph(
         },
         hover_target: 0.0,
         anim_id: 0,
-        arrange_name: None,
     }
 }
 

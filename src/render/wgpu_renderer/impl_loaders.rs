@@ -14,22 +14,21 @@ impl WgpuRenderer {
     }
 
     /// Lazy-upload one boss atlas cell into [`Self::boss_icon_meshes`] /
-    /// [`Self::boss_icon_textures`] (silhouette mesh via [`build_relic_mesh_from_rgba`]).
+    /// [`Self::boss_icon_textures`] (silhouette mesh via [`build_boss_icon_mesh_from_rgba`]).
     pub(crate) fn ensure_boss_icon_gpu(&mut self, kind: crate::core::boss::BossKind) {
-        use crate::render::relic_dish::build_relic_mesh_from_rgba;
-        use crate::render::skip_tag_atlas::extract_sprite_rgba;
-        use crate::ui::boss_icons::BOSS_ICON_ATLAS_PNG;
+        use crate::render::relic_dish::build_boss_icon_mesh_from_rgba;
+        use crate::ui::boss_icons::boss_icon_rgba;
 
         if self.boss_icon_meshes.contains_key(&kind) && self.boss_icon_textures.contains_key(&kind)
         {
             return;
         }
-        let Some((rgba, w, h)) = extract_sprite_rgba(BOSS_ICON_ATLAS_PNG, kind.atlas_slug()) else {
+        let Some((rgba, w, h)) = boss_icon_rgba(kind) else {
             return;
         };
         let label = kind.atlas_slug();
         if !self.boss_icon_meshes.contains_key(&kind)
-            && let Some(cpu) = build_relic_mesh_from_rgba(&rgba, w, h, label)
+            && let Some(cpu) = build_boss_icon_mesh_from_rgba(&rgba, w, h, label)
         {
             self.boss_icon_meshes.insert(
                 kind,
@@ -53,10 +52,8 @@ impl WgpuRenderer {
                 1,
                 1,
             );
-            self.boss_icon_textures.insert(
-                kind,
-                RelicTextureGpu { view, relief_view },
-            );
+            self.boss_icon_textures
+                .insert(kind, RelicTextureGpu { view, relief_view });
         }
     }
 

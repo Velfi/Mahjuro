@@ -150,6 +150,16 @@ pub fn label_confirm_to_open(h: f32, w: f32, t_secs: f32) -> TextLabel {
     )
 }
 
+/// TPOS2 anticipation prompt.
+pub fn label_confirm_to_unseal(h: f32, w: f32, t_secs: f32, overall_alpha: f32) -> TextLabel {
+    bottom_prompt_label(
+        h,
+        w,
+        "Click or press confirm to unseal",
+        overall_alpha * prompt_pulse_alpha(t_secs),
+    )
+}
+
 /// Tile-pack celebration header (champagne, upper band).
 pub fn label_pack_title(h: f32, w: f32, title: String) -> TextLabel {
     let title_font = typography::size(typography::H24, h);
@@ -226,6 +236,12 @@ impl ShootingStarCelebrationIntro {
     /// [`EffectLayers::transition_fullscreen_fx`] is off.
     #[inline]
     pub fn new_meta_level_up() -> Self {
+        Self::new_zodiac()
+    }
+
+    /// TPOS2 tile-pack opening: always run the cascade when the overlay appears.
+    #[inline]
+    pub fn new_pack_opening() -> Self {
         Self::new_zodiac()
     }
 

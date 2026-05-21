@@ -502,7 +502,6 @@ impl PackCelebration {
     }
 
     /// Headless preset: reveal phase with every tile landed and prompt visible (tile row, no pack mesh).
-    #[allow(dead_code)] // kept for optional reveal-phase captures / future CLI
     pub(crate) fn screenshot_reveal_settled(
         tiles: Vec<crate::core::tile::Tile>,
         pack_name: &'static str,
@@ -513,18 +512,6 @@ impl PackCelebration {
         let dur = s.total_duration();
         s.started_at = Instant::now() - std::time::Duration::from_secs_f32(dur + 0.5);
         s.revealed_count = s.tiles.len();
-        s
-    }
-
-    /// Headless screenshot: pack closeup (3D box visible). Holds Closeup across headless ticks.
-    pub(crate) fn screenshot_pack_closeup_headless(
-        tiles: Vec<crate::core::tile::Tile>,
-        pack_name: &'static str,
-        pack_kind: crate::core::tile_pack::TilePackKind,
-    ) -> Self {
-        let mut s = Self::new(tiles, pack_name, pack_kind);
-        s.headless_hold_pack_closeup = true;
-        s.started_at = Instant::now() - std::time::Duration::from_secs_f32(10.0);
         s
     }
 }

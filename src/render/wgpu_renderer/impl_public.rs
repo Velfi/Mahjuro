@@ -126,10 +126,7 @@ impl WgpuRenderer {
         // Keep animating while any tile is sliding into position.
         let slide_active = self.tile_anim_y.iter().any(|&y| y.abs() > 0.5)
             || self.tile_anim_x.iter().any(|&x| x.abs() > 0.01);
-        spin_active
-            || lerp_active
-            || slide_active
-            || !self.hand_tiles.is_empty()
+        spin_active || lerp_active || slide_active || !self.hand_tiles.is_empty()
     }
 
     /// Per-hand-tile screen-space rects after the perspective projection,
@@ -164,10 +161,6 @@ impl WgpuRenderer {
         self.room_gltf_height_scale
     }
 
-    /// Replace the per-frame placement rotation map.
-    pub fn set_placement_rotations(&mut self, rotations: rustc_hash::FxHashMap<String, [f32; 3]>) {
-        self.placement_rotations = rotations;
-    }
     pub fn clear_smoke(&mut self) {
         self.prev_tile_world.clear();
     }

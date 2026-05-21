@@ -9,7 +9,6 @@ pub struct GameplayPositions {
     pub plaque: Placement,
     pub counter_draws_fan: Placement,
     pub counter_discards_fan: Placement,
-    pub ofuda: Placement,
     pub coin_pile: Placement,
     pub dora: Placement,
     pub boss_plinth: Placement,
@@ -61,14 +60,6 @@ impl Default for GameplayPositions {
                 rx_deg: 0.0,
                 ry_deg: 0.0,
                 rz_deg: 45.0,
-            },
-            ofuda: Placement {
-                nx: 0.002_893_518_4,
-                ny: 0.0,
-                lift_mm: -35.981_754,
-                rx_deg: -69.0,
-                ry_deg: 0.0,
-                rz_deg: 0.0,
             },
             coin_pile: Placement::at(1.179_050_6, 0.13, 2.144_608),
             dora: Placement {
@@ -145,95 +136,6 @@ impl Default for GameplayPositions {
             camera_target_y_mul: 1.0,
             camera_target_z_mul: 1.0,
             camera_fovy_deg: 55.0,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum GameplayField {
-    RelicCol,
-    Plaque,
-    CounterDrawsFan,
-    CounterDiscardsFan,
-    Ofuda,
-    CoinPile,
-    Dora,
-    BossPlinth,
-    RoundWind,
-    Bowl,
-    Mirror,
-    HandStrip,
-    YakuTablet,
-    TabletCashIn,
-    TabletJournal,
-    TalismanDish,
-    ConsumableDishTalisman,
-}
-
-pub fn gameplay_field_path(field: GameplayField) -> &'static str {
-    match field {
-        GameplayField::RelicCol => "gameplay.relic_col",
-        GameplayField::Plaque => "gameplay.score_panel.plaque",
-        GameplayField::CounterDrawsFan => "gameplay.counter.draws_fan",
-        GameplayField::CounterDiscardsFan => "gameplay.counter.discards_fan",
-        GameplayField::Ofuda => "gameplay.score_panel.ofuda",
-        GameplayField::CoinPile => "gameplay.score_panel.coin_pile",
-        GameplayField::Dora => "gameplay.dora",
-        GameplayField::BossPlinth => "gameplay.boss_plinth",
-        GameplayField::RoundWind => "gameplay.round_wind",
-        GameplayField::Bowl => "gameplay.action_bar.bowl",
-        GameplayField::Mirror => "gameplay.action_bar.mirror",
-        GameplayField::TabletCashIn => "gameplay.action_bar.tablet_cash_in",
-        GameplayField::TabletJournal => "gameplay.action_bar.tablet_journal",
-        GameplayField::HandStrip => "gameplay.hand.strip",
-        GameplayField::YakuTablet => "gameplay.hand.yaku_tablet",
-        GameplayField::TalismanDish => "gameplay.talisman_dish",
-        GameplayField::ConsumableDishTalisman => "gameplay.consumable_dish.talisman",
-    }
-}
-
-impl GameplayField {
-    pub const ALL: &'static [GameplayField] = &[
-        GameplayField::RelicCol,
-        GameplayField::Plaque,
-        GameplayField::CounterDrawsFan,
-        GameplayField::CounterDiscardsFan,
-        GameplayField::Ofuda,
-        GameplayField::CoinPile,
-        GameplayField::Dora,
-        GameplayField::BossPlinth,
-        GameplayField::RoundWind,
-        GameplayField::Bowl,
-        GameplayField::Mirror,
-        GameplayField::HandStrip,
-        GameplayField::YakuTablet,
-        GameplayField::TabletCashIn,
-        GameplayField::TabletJournal,
-        GameplayField::TalismanDish,
-        GameplayField::ConsumableDishTalisman,
-    ];
-}
-
-impl GameplayPositions {
-    pub fn field_ref(&self, field: GameplayField) -> &Placement {
-        match field {
-            GameplayField::RelicCol => &self.relic_col,
-            GameplayField::Plaque => &self.plaque,
-            GameplayField::CounterDrawsFan => &self.counter_draws_fan,
-            GameplayField::CounterDiscardsFan => &self.counter_discards_fan,
-            GameplayField::Ofuda => &self.ofuda,
-            GameplayField::CoinPile => &self.coin_pile,
-            GameplayField::Dora => &self.dora,
-            GameplayField::BossPlinth => &self.boss_plinth,
-            GameplayField::RoundWind => &self.round_wind,
-            GameplayField::Bowl => &self.bowl,
-            GameplayField::Mirror => &self.mirror,
-            GameplayField::HandStrip => &self.hand_strip,
-            GameplayField::YakuTablet => &self.yaku_tablet,
-            GameplayField::TabletCashIn => &self.tablet_cash_in,
-            GameplayField::TabletJournal => &self.tablet_journal,
-            GameplayField::TalismanDish => &self.talisman_dish,
-            GameplayField::ConsumableDishTalisman => &self.consumable_dish_talisman,
         }
     }
 }

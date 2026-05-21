@@ -189,6 +189,14 @@ pub struct YakuTabletPlacement {
 
 /// Which counter fan an `Object3dKind::TallyFan` represents. Drives per-fan
 /// focus rect slot and tooltip wiring on the gameplay scene side.
+/// Which gameplay plinth HUD rect slot to publish.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlinthRole {
+    Dora,
+    Boss,
+    RoundWind,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TallyFanKind {
     /// Plays-remaining fan, anchored in front of the mirror.
@@ -284,9 +292,15 @@ pub struct ShowcaseTilePlacement {
     /// Logical slot index for ray-cast tile picking and `proj.hand_rects` tracking.
     /// `None` = not pickable (pack-open showcase tiles, etc.).
     pub pick_id: Option<usize>,
-    /// When set, every tile in the batch shares one arrange pickable and staged
-    /// move/rotate preview (pack reveal row, etc.). `None` = no group arrange.
-    pub arrange_group: Option<&'static str>,
+    /// When set, this tile contributes to a merged screen overlay rect (dora / round wind).
+    pub overlay_rect_group: Option<TileOverlayRectGroup>,
+}
+
+/// Merged HUD overlay rect sources for groups of showcase tiles.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TileOverlayRectGroup {
+    DoraTiles,
+    RoundWindTiles,
 }
 
 /// One flat tile-face decal drawn as a screen-space image quad.
@@ -406,7 +420,7 @@ pub enum Object3dKind {
     /// the dora indicator tile(s). The mesh has no roof; the indicator
     /// tile face(s) are pushed separately as `ShowcaseTilePlacement`s
     /// resting on the platform on top.
-    Plinth { glow: f32 },
+    Plinth { glow: f32, role: PlinthRole },
     /// Relic medallion — shop for-sale, owned dish row, gameplay HUD
     /// tray, collection cards, tutorial panels, and unlock modals all use
     /// this single kind; callers pick the rotation so the face points at
@@ -528,7 +542,9 @@ pub enum Object3dKind {
         tip_color: [f32; 4],
         /// Yaw of the fan plane about world up (degrees).
         rotation_y_deg: f32,
-        /// Which counter this fan represents (drives arrange-name + peg_rects slot).
+        /// Pitch / roll from scene layout (degrees, `Rz * Ry * Rx`).
+        placement_rot_deg: [f32; 3],
+        /// Which counter this fan represents (peg_rects slot).
         kind: TallyFanKind,
     },
     /// One hovering insect near a light source (main-menu door light). The scene emits
@@ -612,10 +628,6 @@ pub struct Object3d {
     /// tablets).  `0` means "no persistent state" — `hover_target` is used
     /// directly without easing.
     pub anim_id: u64,
-    /// Canonical arrange-mode path (e.g. `"shop.celebrations.pack_closeup"`, `"gameplay.hand.strip"`).
-    /// When set, the renderer uses this for `apply_placement_rotation` and
-    /// `last_debug_pickables`. `None` = not arrangeable via the debug picker.
-    pub arrange_name: Option<&'static str>,
 }
 
 impl Object3d {

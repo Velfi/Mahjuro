@@ -372,7 +372,6 @@ pub(super) fn build_candles_and_spotlights(
                 },
                 hover_target: 0.0,
                 anim_id: 0,
-                arrange_name: None,
             });
             let phase01 = (candle.phase / std::f32::consts::TAU).fract().abs();
             let flare_mul = 1.0 + scene.candle_flare;
@@ -600,12 +599,12 @@ pub(super) fn build_ambient_table_objects(
                     * glam::Mat4::from_rotation_z(dora_p.rz_deg.to_radians()),
             ),
             color: [1.0, 1.0, 1.0, 1.0],
-            kind: crate::render::draw_cmd::Object3dKind::Plinth { glow: 0.0 },
+            kind: crate::render::draw_cmd::Object3dKind::Plinth {
+                glow: 0.0,
+                role: crate::render::draw_cmd::PlinthRole::Dora,
+            },
             hover_target: 0.0,
             anim_id: 0,
-            // Must match `GAMEPLAY_HIERARCHY` / `gameplay.json` key `gameplay.dora`
-            // so arrange pick, committed rotations, and Tab navigation agree.
-            arrange_name: Some("gameplay.dora"),
         });
 
         // Indicator tile face(s) sitting on the platform. The mesh
@@ -665,7 +664,9 @@ pub(super) fn build_ambient_table_objects(
                     glow: false,
                     glow_color: None,
                     pick_id: None,
-                    arrange_group: Some("gameplay.dora_tiles"),
+                    overlay_rect_group: Some(
+                        crate::render::draw_cmd::TileOverlayRectGroup::DoraTiles,
+                    ),
                 });
             }
             frame.showcase_tile_batch(tile_placements);
@@ -692,10 +693,12 @@ pub(super) fn build_ambient_table_objects(
                     * glam::Mat4::from_rotation_z(boss_p.rz_deg.to_radians()),
             ),
             color: [1.0, 1.0, 1.0, 1.0],
-            kind: Object3dKind::Plinth { glow: 0.0 },
+            kind: Object3dKind::Plinth {
+                glow: 0.0,
+                role: crate::render::draw_cmd::PlinthRole::Boss,
+            },
             hover_target: 0.0,
             anim_id: 0,
-            arrange_name: Some("gameplay.boss_plinth"),
         });
     }
 
@@ -722,10 +725,12 @@ pub(super) fn build_ambient_table_objects(
                     * glam::Mat4::from_rotation_z(rw_p.rz_deg.to_radians()),
             ),
             color: [1.0, 1.0, 1.0, 1.0],
-            kind: Object3dKind::Plinth { glow: 0.0 },
+            kind: Object3dKind::Plinth {
+                glow: 0.0,
+                role: crate::render::draw_cmd::PlinthRole::RoundWind,
+            },
             hover_target: 0.0,
             anim_id: 0,
-            arrange_name: Some("gameplay.round_wind"),
         });
 
         let mut winds = vec![Tile::new(Suit::Wind, gameplay.round_wind_rank, 0)];
@@ -761,7 +766,9 @@ pub(super) fn build_ambient_table_objects(
                 glow: false,
                 glow_color: None,
                 pick_id: None,
-                arrange_group: Some("gameplay.round_wind_tiles"),
+                overlay_rect_group: Some(
+                    crate::render::draw_cmd::TileOverlayRectGroup::RoundWindTiles,
+                ),
             });
         }
         frame.showcase_tile_batch(tile_placements);
@@ -774,7 +781,6 @@ pub(super) fn build_ambient_table_objects(
         |n| layout.mm(n),
         gameplay.gold,
         gold_anchor,
-        Some("gameplay.score_panel.coin_pile"),
         crate::render::gold_display::GAMEPLAY_GOLD_PILE_SEED,
     );
     if !coins.is_empty() {

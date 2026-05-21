@@ -25,7 +25,7 @@ use crate::ui::scene_layout::ShopPositions;
 use super::super::{BackgroundId, ButtonDef, DrawCtx, OverlayRequest, SceneTransition, UpdateCtx};
 
 /// Pack mesh height vs window height (must match shop shelf “hero” scale).
-const PACK_CELEB_BOX_H_FRAC: f32 = 0.56;
+pub(crate) const PACK_CELEB_BOX_H_FRAC: f32 = 0.56;
 /// Nudge pack **down** in layout pixels so a tall box clears the title band and stays centered.
 const PACK_CELEB_SCREEN_Y_DOWN_FRAC: f32 = 0.055;
 /// Extra downward shift scaled with box height (keeps framing when [`PACK_CELEB_BOX_H_FRAC`] changes).
@@ -49,7 +49,7 @@ impl TilePackPresenter {
         pack_kind: TilePackKind,
     ) -> Self {
         let tiles = pack_kind.generate_tiles(PACK_TILE_ID_BASE);
-        Self::new(PackCelebration::screenshot_pack_closeup_headless(
+        Self::new(PackCelebration::screenshot_reveal_settled(
             tiles,
             pack_kind.name(),
             pack_kind,
@@ -122,7 +122,6 @@ impl TilePackPresenter {
                     },
                     hover_target: 0.0,
                     anim_id: 0,
-                    arrange_name: Some(anchor.arrange_name),
                 }]);
 
                 frame.text(celebration_overlay::label_confirm_to_open(h, w, t));
@@ -153,14 +152,12 @@ impl TilePackPresenter {
                     },
                     hover_target: 0.0,
                     anim_id: 0,
-                    arrange_name: Some(pack_closeup.arrange_name),
                 }]);
 
                 let reveal_anchor = PlacementAnchor::new(
                     [w * 0.5, h * 0.5, 0.0],
                     Mat4::IDENTITY,
                     &self.positions.celeb_pack_reveal,
-                    "shop.celebrations.pack_reveal",
                     screen,
                 );
                 let row_py = reveal_anchor.pos[1];
@@ -206,7 +203,7 @@ impl TilePackPresenter {
                         glow: false,
                         glow_color: None,
                         pick_id: None,
-                        arrange_group: Some("shop.celebrations.pack_reveal"),
+                        overlay_rect_group: None,
                     });
                 }
 
@@ -314,7 +311,7 @@ impl TilePackPresenter {
 }
 
 /// Screen-pixel pack height → world `Object3d::extents` for the perspective celebration camera.
-fn pack_closeup_world_extents(
+pub(crate) fn pack_closeup_world_extents(
     win_w: f32,
     win_h: f32,
     cam: &CameraParams,
@@ -334,7 +331,7 @@ fn pack_closeup_world_extents(
     [world_w, world_h * 0.10, world_h]
 }
 
-fn pack_closeup_anchor(
+pub(crate) fn pack_closeup_anchor(
     screen: &LayoutResult,
     _positions: &ShopPositions,
     box_h: f32,
@@ -352,17 +349,46 @@ fn pack_closeup_anchor(
         [w * 0.5, h * 0.5 + py_bias, 0.0],
         base_rotation,
         &crate::ui::placement::Placement::default(),
-        "shop.celebrations.pack_closeup",
         screen,
     )
 }
 
-fn pack_reveal_euler_rad(positions: &ShopPositions) -> [f32; 3] {
+pub(crate) fn pack_reveal_euler_rad(positions: &ShopPositions) -> [f32; 3] {
     [
         positions.celeb_pack_reveal.rx_deg.to_radians() + 32.0_f32.to_radians(),
         positions.celeb_pack_reveal.ry_deg.to_radians(),
         positions.celeb_pack_reveal.rz_deg.to_radians() + std::f32::consts::PI,
     ]
+}
+
+/// Push one pack mesh for celebration closeup (TPOS1 / TPOS2).
+pub(crate) fn push_pack_object3d(
+    frame: &mut UiFrame,
+    win_w: f32,
+    win_h: f32,
+    cam: &CameraParams,
+    anchor: &PlacementAnchor,
+    screen_h_px: f32,
+    pack_kind: TilePackKind,
+    color: [f32; 4],
+    bob_xy: Option<(f32, f32)>,
+) {
+    let (bx, by) = bob_xy.unwrap_or((0.0, 0.0));
+    let pos = [anchor.pos[0] + bx, anchor.pos[1] + by, anchor.pos[2]];
+    let extents =
+        pack_closeup_world_extents(win_w, win_h, cam, pos[0], pos[1], pos[2], screen_h_px);
+    frame.object3d_batch(vec![Object3d {
+        pos,
+        extents,
+        rotation: anchor.object3d_rotation(),
+        color,
+        kind: Object3dKind::Pack {
+            kind: pack_kind,
+            pick_id: None,
+        },
+        hover_target: 0.0,
+        anim_id: 0,
+    }]);
 }
 
 fn pack_celebration_subject_spotlight(
@@ -414,7 +440,6 @@ fn pack_celebration_subject_spotlight(
                 [w * 0.5, h * 0.5, 0.0],
                 Mat4::IDENTITY,
                 &positions.celeb_pack_reveal,
-                "shop.celebrations.pack_reveal",
                 screen,
             );
             let row_lift = reveal_anchor.pos[2];
@@ -477,7 +502,6 @@ fn pack_celebration_isolation_lights(
                 [w * 0.5, h * 0.5, 0.0],
                 Mat4::IDENTITY,
                 &positions.celeb_pack_reveal,
-                "shop.celebrations.pack_reveal",
                 screen,
             );
             (a.pos[0], a.pos[1], a.pos[2])

@@ -1,13 +1,11 @@
 //! Unified scene-placement primitives.
-//!
-//! See [`docs/agents/scene-placement.md`](../../../docs/agents/scene-placement.md).
 
 /// A manually-placeable object's position and rotation.
 ///
 /// `nx` / `ny` are normalized window fractions (0–1, may go outside for
 /// off-screen placements). `lift_mm` is physical millimeters above the felt.
-/// Rotation degrees are applied in the renderer as **`Rz * Ry * Rx`** on the
-/// mesh model basis (see `apply_placement_rotation` in `wgpu_renderer.rs`).
+/// Rotation degrees are composed as **`Rz * Ry * Rx`** on the mesh model basis
+/// (see [`crate::render::table_transform::compose_rotation_euler`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Placement {
     /// 0 = left edge, 1 = right edge.
@@ -37,6 +35,11 @@ impl Placement {
         }
     }
 
+    #[inline]
+    pub fn rotation_deg(&self) -> [f32; 3] {
+        [self.rx_deg, self.ry_deg, self.rz_deg]
+    }
+
     #[allow(dead_code)]
     #[inline]
     pub fn rotation_xyz_rad(&self) -> [f32; 3] {
@@ -50,28 +53,20 @@ impl Placement {
 
 /// Anchor derived from a [`Placement`] for constructing an `Object3d`.
 ///
-/// Folds `nx`/`ny`/`lift_mm` into the draw-site anchor and leaves mesh rotation
-/// at `base_rotation`. The renderer applies `rx_deg`/`ry_deg`/`rz_deg` via
-/// `placement_rotations` when `arrange_name` is set — do not bake those degrees
-/// into `Object3d.rotation` at the construction site.
+/// Folds `nx`/`ny`/`lift_mm` into the draw-site anchor and composes mesh rotation
+/// from `base_rotation` plus placement degrees.
 #[derive(Clone, Copy, Debug)]
 pub struct PlacementAnchor {
     pub pos: [f32; 3],
-    pub rotation: glam::Mat4,
-    pub arrange_name: &'static str,
+    pub placement: Placement,
+    base_rotation: glam::Mat4,
 }
 
 impl PlacementAnchor {
-    #[inline]
-    pub fn object3d_rotation(&self) -> [f32; 3] {
-        crate::render::table_transform::mat4_to_euler_xyz_rad(self.rotation)
-    }
-
     pub fn new(
         base_pos: [f32; 3],
         base_rotation: glam::Mat4,
         placement: &Placement,
-        arrange_name: &'static str,
         layout: &crate::ui::layout::LayoutResult,
     ) -> Self {
         Self {
@@ -80,9 +75,17 @@ impl PlacementAnchor {
                 base_pos[1] + placement.ny * layout.window_h,
                 base_pos[2] + layout.mm(placement.lift_mm),
             ],
-            rotation: base_rotation,
-            arrange_name,
+            placement: *placement,
+            base_rotation,
         }
+    }
+
+    #[inline]
+    pub fn object3d_rotation(&self) -> [f32; 3] {
+        crate::render::table_transform::compose_rotation_euler(
+            self.base_rotation,
+            self.placement.rotation_deg(),
+        )
     }
 }
 

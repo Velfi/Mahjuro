@@ -78,14 +78,12 @@ pub enum DebugAction {
     /// over the next 100 rendered frames and log the result. Always
     /// available; safe to run while the GPU profile is *not* active.
     ProfileCpu,
-    /// Arm a one-shot picker: the next mouse click in the game world is
-    /// hit-tested against every known scene object and the matched object's
-    /// name is logged. Activating this while already armed disarms it.
-    ArmObjectHitTest,
     /// Reroll the shop stock for free (no gold cost, no cost increment).
     RerollShop,
     /// Force-open a random tile pack celebration (free, ignores shop stock).
     OpenPack,
+    /// Force-open TPOS2 (tile pack opening sequence #2) on a random pack.
+    OpenPackV2,
     /// Spawn a burst of demo score popups streaming toward the reel —
     /// visually exercises the chips/mult/gold polychrome streaming effect
     /// without needing to play a hand. Only meaningful in the gameplay scene.
@@ -220,10 +218,6 @@ impl DebugMenuBar {
         mappings.push((profile_gpu_item.id().clone(), DebugAction::ProfileGpu));
         let _ = tools_sub.append(&profile_gpu_item);
 
-        let hit_test_item = MenuItem::new("Object Hit Test", true, None);
-        mappings.push((hit_test_item.id().clone(), DebugAction::ArmObjectHitTest));
-        let _ = tools_sub.append(&hit_test_item);
-
         let _ = debug_menu.append(&tools_sub);
 
         // ── Scene Jumps submenu ──────────────────────────────────────────────
@@ -273,6 +267,10 @@ impl DebugMenuBar {
         let open_pack_item = MenuItem::new("Open Tile Pack", true, None);
         mappings.push((open_pack_item.id().clone(), DebugAction::OpenPack));
         let _ = cheats_sub.append(&open_pack_item);
+
+        let open_pack_v2_item = MenuItem::new("Open Tile Pack (TPOS2)", true, None);
+        mappings.push((open_pack_v2_item.id().clone(), DebugAction::OpenPackV2));
+        let _ = cheats_sub.append(&open_pack_v2_item);
 
         let demo_cascade_item = MenuItem::new("Demo Score Cascade", true, None);
         mappings.push((demo_cascade_item.id().clone(), DebugAction::DemoCascade));

@@ -256,7 +256,7 @@ pub fn build_reliquary_tray_mesh() -> MeshCpu {
         default_material: MaterialParams {
             kind: MaterialKind::LacqueredWood,
             base_color: color::WALNUT_INK,
-            specular_strength: 0.55,    
+            specular_strength: 0.55,
             specular_power: 96.0,
         },
     }

@@ -40,7 +40,7 @@ pub use rumble_lab::RumbleLabScene;
 pub use shop::ShopScene;
 pub use showcase::{
     CollectionInspectPresenter, MetaLevelUpPresenter, ShopInspectPresenter, ShowcasePresenter,
-    ShowcaseScene, TilePackPresenter, ZodiacPresenter,
+    ShowcaseScene, TilePackPresenter, Tpos2Presenter, ZodiacPresenter,
 };
 pub use splash::SplashScene;
 pub use start_game_modal::TileSelectScene;
@@ -489,31 +489,4 @@ pub(crate) fn scene_options_menu() -> Scene {
 /// Return from profile picker to the Archive (collection) without a `profile_select` ↔ `collection` cycle.
 pub(crate) fn scene_collection_archive() -> Scene {
     Scene::Collection(CollectionScene::new())
-}
-
-/// Placement rotation degrees for the scene driving Object3d draws this frame.
-pub fn collect_placement_rotations(
-    base: &Scene,
-    overlay: Option<&Scene>,
-) -> rustc_hash::FxHashMap<String, [f32; 3]> {
-    if let Some(Scene::Showcase(s)) = overlay {
-        match &s.presenter {
-            ShowcasePresenter::TilePack(t) => return t.positions.committed_rotations(),
-            ShowcasePresenter::Zodiac(t) => return t.positions.committed_rotations(),
-            _ => {}
-        }
-    }
-    match base {
-        Scene::Gameplay(s) => s.positions.committed_rotations(),
-        Scene::Collection(s) => s.positions.committed_rotations(),
-        Scene::MainMenuExterior(s) => s.positions.committed_rotations(),
-        Scene::TutorialCampaign(s) => s.positions.committed_rotations(),
-        Scene::Showcase(s) => match &s.presenter {
-            ShowcasePresenter::TilePack(t) => t.positions.committed_rotations(),
-            ShowcasePresenter::Zodiac(t) => t.positions.committed_rotations(),
-            _ => rustc_hash::FxHashMap::default(),
-        },
-        Scene::TileSelect(s) => s.positions.committed_rotations(),
-        _ => rustc_hash::FxHashMap::default(),
-    }
 }

@@ -3,8 +3,8 @@ use super::*;
 use crate::core::tile_pack::TilePackKind;
 use crate::debug_overlays::{HallwayDistortionDebugOverlay, SceneLookDebugOverlay};
 use crate::game::engine::GameEngine;
-use crate::scenes::shop::PackCelebration;
-use crate::scenes::{ShowcasePresenter, ShowcaseScene, TilePackPresenter};
+use crate::scenes::shop::{PackCelebration, PackCelebrationV2};
+use crate::scenes::{ShowcasePresenter, ShowcaseScene, TilePackPresenter, Tpos2Presenter};
 use rand::RngExt;
 
 impl App {
@@ -209,16 +209,6 @@ impl App {
                 self.mouse_actions.push(UiAction::DebugToggleAxes);
                 log::debug!("World-axes overlay toggled");
             }
-            DebugAction::ArmObjectHitTest => {
-                self.debug.object_hit_test_armed = !self.debug.object_hit_test_armed;
-                if self.debug.object_hit_test_armed {
-                    log::debug!(
-                        "Object hit test ARMED — click anywhere in the world to identify the object under the cursor"
-                    );
-                } else {
-                    log::debug!("Object hit test disarmed");
-                }
-            }
             DebugAction::RerollShop => match &mut self.scene {
                 Scene::Shop(s) => {
                     s.debug_reroll(&self.run);
@@ -239,6 +229,20 @@ impl App {
                     log::debug!("Opened tile pack celebration overlay");
                 }
                 _ => log::warn!("Open Pack ignored — not in shop scene"),
+            },
+            DebugAction::OpenPackV2 => match &mut self.scene {
+                Scene::Shop(s) => {
+                    let kinds = TilePackKind::all();
+                    let kind = kinds[rand::rng().random_range(0..kinds.len())];
+                    let tiles = GameEngine::debug_add_pack(&mut self.run, kind);
+                    let celeb = PackCelebrationV2::new(tiles, kind.name(), kind);
+                    let _ = s;
+                    self.overlay_stack.push(Scene::Showcase(ShowcaseScene::new(
+                        ShowcasePresenter::TilePackV2(Box::new(Tpos2Presenter::new(celeb))),
+                    )));
+                    log::debug!("Opened TPOS2 tile pack celebration overlay");
+                }
+                _ => log::warn!("Open Pack (TPOS2) ignored — not in shop scene"),
             },
             DebugAction::DemoCascade => {
                 if let Scene::Gameplay(gp) = &mut self.scene {

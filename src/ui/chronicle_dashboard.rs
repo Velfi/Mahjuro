@@ -342,7 +342,12 @@ fn push_label_clipped(
     clip_bottom: f32,
     mut label: TextLabel,
 ) {
-    let clip_rect = [rect[0], clip_top, rect[2], (clip_bottom - clip_top).max(0.0)];
+    let clip_rect = [
+        rect[0],
+        clip_top,
+        rect[2],
+        (clip_bottom - clip_top).max(0.0),
+    ];
     if let Some(clipped) = intersect_rect(rect, clip_rect) {
         label.clip_rect = Some(clipped);
         out.push(label);
@@ -356,7 +361,12 @@ fn push_quad_clipped(
     clip_bottom: f32,
     color: [f32; 4],
 ) {
-    let clip_rect = [rect[0], clip_top, rect[2], (clip_bottom - clip_top).max(0.0)];
+    let clip_rect = [
+        rect[0],
+        clip_top,
+        rect[2],
+        (clip_bottom - clip_top).max(0.0),
+    ];
     if let Some(clipped) = intersect_rect(rect, clip_rect) {
         push_quad(out, clipped, color);
     }
@@ -512,7 +522,12 @@ fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
         let row_y = list_top + list_i as f32 * panes.run_row_h - scroll;
         if intersect_rect(
             [panes.left_x, row_y, panes.left_w, panes.run_row_h],
-            [panes.left_x, clip_top, panes.left_w, (clip_bottom - clip_top).max(0.0)],
+            [
+                panes.left_x,
+                clip_top,
+                panes.left_w,
+                (clip_bottom - clip_top).max(0.0),
+            ],
         )
         .is_none()
         {

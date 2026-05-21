@@ -1197,11 +1197,12 @@ fn scale_relic_mesh_vertex_positions(vertices: &mut [Vertex3dTex], scale: f32) {
     }
 }
 
+/// Alpha cutoff for boss-icon extrusion (processed atlas cells use real transparency).
+const BOSS_ICON_ALPHA_SOLID_THRESH: u8 = 24;
+
 /// Build a relic mesh whose cap silhouette is extracted from the supplied
-/// RGBA. Normally we use the **alpha** channel (threshold 24). Many offline
-/// `*_mask.png` files keep **alpha fully opaque** and encode the silhouette only
-/// in RGB (white on black); when alpha has almost no variation near 255, we
-/// treat pixels as solid using **rec.709 luminance** ≥ 0.45 instead.
+/// RGBA. Relic masks use **rec.709 luminance** ≥ 0.45 (many `*_mask.png` files
+/// keep alpha fully opaque and encode the silhouette only in RGB).
 ///
 /// Pipeline:
 /// 1. Threshold the mask into a solid/empty bitmap.
@@ -1223,13 +1224,42 @@ pub fn build_relic_mesh_from_rgba(
     if width == 0 || height == 0 || rgba.len() < (width as usize * height as usize * 4) {
         return None;
     }
-
     let w = width as usize;
     let h = height as usize;
-    let px = w * h;
+    let solid = silhouette_solid_luma(rgba, w, h);
+    build_extruded_pin_mesh_from_solid(&solid, width, height, source_label)
+}
 
-    // Silhouette is always encoded in luma; the alpha channel is ignored.
-    let mut solid = vec![false; px];
+/// Boss archive / HUD 3D icon mesh — silhouette from **alpha** only so black-painted
+/// art still extrudes correctly (luma would treat black pixels as empty).
+pub fn build_boss_icon_mesh_from_rgba(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    source_label: &str,
+) -> Option<MeshCpu> {
+    if width == 0 || height == 0 || rgba.len() < (width as usize * height as usize * 4) {
+        return None;
+    }
+    let w = width as usize;
+    let h = height as usize;
+    let solid = silhouette_solid_alpha(rgba, w, h, BOSS_ICON_ALPHA_SOLID_THRESH);
+    build_extruded_pin_mesh_from_solid(&solid, width, height, source_label)
+}
+
+fn silhouette_solid_alpha(rgba: &[u8], w: usize, h: usize, alpha_thresh: u8) -> Vec<bool> {
+    let mut solid = vec![false; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            let idx = (y * w + x) * 4;
+            solid[y * w + x] = rgba[idx + 3] >= alpha_thresh;
+        }
+    }
+    solid
+}
+
+fn silhouette_solid_luma(rgba: &[u8], w: usize, h: usize) -> Vec<bool> {
+    let mut solid = vec![false; w * h];
     for y in 0..h {
         for x in 0..w {
             let idx = (y * w + x) * 4;
@@ -1239,6 +1269,17 @@ pub fn build_relic_mesh_from_rgba(
             solid[y * w + x] = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0 >= 0.45;
         }
     }
+    solid
+}
+
+fn build_extruded_pin_mesh_from_solid(
+    solid: &[bool],
+    width: u32,
+    height: u32,
+    source_label: &str,
+) -> Option<MeshCpu> {
+    let w = width as usize;
+    let h = height as usize;
 
     // Trace the silhouette as closed polygons in pixel-space. Marching squares
     // walks the 2×2 pixel grid and emits every boundary between solid and empty
@@ -1867,6 +1908,27 @@ mod silhouette_tests {
                 None => eprintln!("{name}: NONE"),
             }
         }
+    }
+
+    #[test]
+    fn boss_icon_mesh_extrudes_from_alpha_not_luma() {
+        let mut rgba = vec![0u8; 16 * 16 * 4];
+        for y in 3..13 {
+            for x in 3..13 {
+                let i = (y * 16 + x) * 4;
+                rgba[i] = 0;
+                rgba[i + 1] = 0;
+                rgba[i + 2] = 0;
+                rgba[i + 3] = 255;
+            }
+        }
+        let mesh = build_boss_icon_mesh_from_rgba(&rgba, 16, 16, "test:black_rgb_alpha")
+            .expect("boss icon mesh should follow alpha");
+        assert!(mesh.indices.len() >= 6 * 3);
+        assert!(
+            build_relic_mesh_from_rgba(&rgba, 16, 16, "test:black_rgb_alpha").is_none(),
+            "luma-based relic path must not treat black RGB as solid"
+        );
     }
 
     #[test]

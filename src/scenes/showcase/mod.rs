@@ -8,12 +8,14 @@ mod collection_inspect;
 mod meta_level_up;
 mod shop_inspect;
 mod tile_pack;
+mod tile_pack_v2;
 mod zodiac;
 
 pub use collection_inspect::CollectionInspectPresenter;
 pub use meta_level_up::MetaLevelUpPresenter;
 pub use shop_inspect::ShopInspectPresenter;
 pub use tile_pack::TilePackPresenter;
+pub use tile_pack_v2::Tpos2Presenter;
 pub use zodiac::ZodiacPresenter;
 
 use super::{DrawCtx, SceneBehavior, SceneTransition, UpdateCtx};
@@ -21,6 +23,8 @@ use super::{DrawCtx, SceneBehavior, SceneTransition, UpdateCtx};
 /// Which flow is running on the showcase overlay.
 pub enum ShowcasePresenter {
     TilePack(Box<TilePackPresenter>),
+    /// Tile pack opening sequence #2 (TPOS2).
+    TilePackV2(Box<Tpos2Presenter>),
     Zodiac(ZodiacPresenter),
     MetaLevelUp(MetaLevelUpPresenter),
     ShopInspect(ShopInspectPresenter),
@@ -35,6 +39,7 @@ impl ShowcasePresenter {
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
         match self {
             Self::TilePack(p) => p.update(ctx),
+            Self::TilePackV2(p) => p.update(ctx),
             Self::Zodiac(p) => p.update(ctx),
             Self::MetaLevelUp(p) => p.update(ctx),
             Self::ShopInspect(p) => p.update(ctx),
@@ -45,6 +50,7 @@ impl ShowcasePresenter {
     fn draw_frame(&self, ctx: DrawCtx<'_>) -> crate::render::draw_cmd::UiFrame {
         match self {
             Self::TilePack(p) => p.draw_frame(ctx),
+            Self::TilePackV2(p) => p.draw_frame(ctx),
             Self::Zodiac(p) => p.draw_frame(ctx),
             Self::MetaLevelUp(p) => p.draw_frame(ctx),
             Self::ShopInspect(p) => p.draw_frame(ctx),

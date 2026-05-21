@@ -314,7 +314,7 @@ impl WgpuRenderer {
                               emoji_fallback: Option<&fontdue::Font>|
          -> TextDraw {
             // Clamp before casting: `f32 as u32` saturates negatives/NaN to u32::MAX,
-            // which blows past wgpu's 16384 texture limit and panics. Seen in arrange mode
+            // which blows past wgpu's 16384 texture limit and panics when too many unique textures load at once
             // when layout math produces a negative rect width.
             let tw_raw = (lbl.rect[2].clamp(1.0, 16384.0) as u32).max(1);
             let th_raw = (lbl.rect[3].clamp(1.0, 16384.0) as u32).max(1);
@@ -935,8 +935,6 @@ impl WgpuRenderer {
         }
         // Reset the debug pickable catch-all for this frame; each draw
         // loop below appends entries it wants to expose to
-        // `pick_debug_object`.
-        self.last_debug_pickables.clear();
 
         // Candles migrated to Object3dKind::Candle.
 

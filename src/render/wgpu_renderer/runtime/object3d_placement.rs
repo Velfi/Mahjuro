@@ -1,4 +1,26 @@
-use super::*;
+use glam::Mat4;
+
+use crate::render::{
+    draw_cmd::{TallyFanKind, WallStackPlacement},
+    lit_mesh::{LitMeshGpu, MaterialKind, MaterialParams},
+    mirror_mesh::{MIRROR_LOCAL_CENTER_Y, MIRROR_LOCAL_HALF},
+    river_mesh::{RIVER_LOCAL_CENTER_Y, RIVER_LOCAL_HALF},
+    table_transform::{
+        mesh_y_thickness_along_local_y_to_z_up, rot_fixed_axes_deg_matrix,
+        score_popup_glyph_rot_rad, translate_rot_scale,
+    },
+    talisman_mesh::{TALISMAN_LOCAL_HALF, talisman_material},
+    wgpu_renderer::{
+        GpuInstance, MAX_BOOK_SLOTS, MAX_BOSS_ICON_SLOTS, MAX_BOWL_SLOTS, MAX_CASCADE_TOKEN_SLOTS,
+        MAX_EXTRUDED_GLYPH_SLOTS, MAX_MIRROR_SLOTS, MAX_ORB_SLOTS, MAX_PLINTH_SLOTS,
+        MAX_RELIC_SLOTS, MAX_TALISMAN_SLOTS, MAX_TALLY_FAN_SLOTS, MAX_TALLY_STICK_SLOTS,
+        MAX_WALL_TILE_SLOTS, MAX_WOOD_TABLET_SLOTS, MAX_YAKU_TABLET_SLOTS, WgpuRenderer,
+        boss_icon_material_params, relic_material_params,
+        runtime::{CameraFrame, DrawKind, RenderOp},
+        tablet_label_hash,
+    },
+    world_space::pixel_to_world,
+};
 
 impl WgpuRenderer {
     #[inline]
@@ -172,8 +194,6 @@ impl WgpuRenderer {
                             };
                             // All slots share one placement (gameplay.hand.yaku_tablet).
                             let _ = slot_i;
-                            let yaku_name = "gameplay.hand.yaku_tablet";
-                            let model = self.apply_placement_rotation(yaku_name, model);
                             let label_hash = tablet_label_hash(label, 256, 96);
                             let inst = &mut self.yaku_tablet_instances[slot_i];
                             if inst.decal_texture.is_none() || inst.decal_label_hash != label_hash {
@@ -212,12 +232,6 @@ impl WgpuRenderer {
                                     material.kind,
                                 );
                             }
-                            self.last_debug_pickables.push((
-                                yaku_name.to_string(),
-                                model,
-                                glam::Vec3::splat(0.5),
-                                0.0,
-                            ));
                             WgpuRenderer::push_object3d_draw(
                                 object3d_draw_list,
                                 DrawKind::YakuTablet,
@@ -230,20 +244,6 @@ impl WgpuRenderer {
                             if slot_i >= MAX_WOOD_TABLET_SLOTS {
                                 continue;
                             }
-                            // Explicit `arrange_name` wins; otherwise
-                            // fall back to the legacy gameplay-slot
-                            // convention so saved arrange overrides for
-                            // the action bar keep loading.
-                            let wood_name = if let Some(name) = obj.arrange_name {
-                                name.to_string()
-                            } else {
-                                match slot_i {
-                                    0 => "gameplay.action_bar.tablet_cash_in".to_string(),
-                                    1 => "gameplay.action_bar.tablet_journal".to_string(),
-                                    _ => "gameplay.action_bar.tablet".to_string(),
-                                }
-                            };
-                            let model = self.apply_placement_rotation(&wood_name, model);
                             let label_hash = tablet_label_hash(label, 512, 192);
                             let has_decal = !label.is_empty();
                             let inst = &mut self.wood_tablet_instances[slot_i];
@@ -297,12 +297,6 @@ impl WgpuRenderer {
                                 .wood_tablet_rects
                                 .push(project_unit_cube_rect(model));
                             self.last_wood_tablet_models.push(model);
-                            self.last_debug_pickables.push((
-                                wood_name,
-                                model,
-                                glam::Vec3::splat(0.5),
-                                0.0,
-                            ));
                             // When a scene routes this tablet's click
                             // via `ShopHit::Dish(pid)` (shop journal
                             // button), publish the rect + model into
@@ -329,12 +323,6 @@ impl WgpuRenderer {
                             if slot_i >= MAX_BOOK_SLOTS {
                                 continue;
                             }
-                            let book_name = obj
-                                .arrange_name
-                                .map(|n| n.to_string())
-                                .unwrap_or_else(|| "shop.props.book".to_string());
-                            let base_model = self.apply_placement_rotation(&book_name, model);
-
                             // ── Body instance (back cover, page block,
                             // page-content surface, spine, ribbons). The
                             // page-content surface samples the journal
@@ -383,7 +371,7 @@ impl WgpuRenderer {
                             body_inst.write_uniform_with_decal(
                                 &self.queue,
                                 view_proj_arr,
-                                base_model,
+                                model,
                                 body_material,
                                 false,
                             );
@@ -392,21 +380,15 @@ impl WgpuRenderer {
                                 self.write_lit_mesh_shadow(
                                     &mut shadow,
                                     &self.book_instances[slot_i],
-                                    base_model,
+                                    model,
                                     body_material.kind,
                                 );
                             }
-                            self.last_debug_pickables.push((
-                                book_name.clone(),
-                                base_model,
-                                glam::Vec3::splat(0.5),
-                                0.0,
-                            ));
                             if let Some(pid) = pick_id {
                                 self.proj
                                     .aux_dish_rects
-                                    .push((Some(*pid), project_unit_cube_rect(base_model)));
-                                self.last_primitive_pick_models.insert(*pid, base_model);
+                                    .push((Some(*pid), project_unit_cube_rect(model)));
+                                self.last_primitive_pick_models.insert(*pid, model);
                             }
                             WgpuRenderer::push_object3d_draw(
                                 object3d_draw_list,
@@ -470,7 +452,7 @@ impl WgpuRenderer {
                                     -cover_y_mid,
                                     0.0,
                                 ));
-                            let cover_model = base_model * hinge;
+                            let cover_model = model * hinge;
                             cover_inst.write_uniform_with_decal(
                                 &self.queue,
                                 view_proj_arr,
@@ -505,24 +487,6 @@ impl WgpuRenderer {
                             }
                             let slot_i = obj3d_relic_slot;
                             obj3d_relic_slot += 1;
-                            // Object3dKind::Relic: shop for-sale column vs gameplay tray
-                            // (horizontal row; arrange anchor `gameplay.relic_col`).
-                            // Callers may set `arrange_name` (e.g. shop inventory → `shop.shelf.relic_dish`).
-                            let relic_arr_name = if let Some(name) = obj.arrange_name {
-                                name.to_string()
-                            } else {
-                                let shop_like = self.active_scene_key == Some("shop")
-                                    || (self.active_scene_key == Some("showcase")
-                                        && frame
-                                            .showcase_render_hints
-                                            .shop_tonemap_and_lit_mesh_context);
-                                match self.active_scene_key {
-                                    _ if shop_like => "shop.for_sale.relics".to_string(),
-                                    Some("gameplay") => "gameplay.relic_col".to_string(),
-                                    _ => format!("relic[{slot_i}]"),
-                                }
-                            };
-                            let model = self.apply_placement_rotation(&relic_arr_name, model);
                             // obj.rotation already encodes pitch/roll; extents are full.
                             let g = if *silhouette {
                                 0.0
@@ -643,12 +607,6 @@ impl WgpuRenderer {
                             }
                             let projected_rect = project_unit_cube_rect(model);
                             self.proj.relic_rects.push(projected_rect);
-                            self.last_debug_pickables.push((
-                                relic_arr_name,
-                                model,
-                                glam::Vec3::splat(0.5),
-                                0.0,
-                            ));
                             if g > 0.0 {
                                 // Activation halo: champagne bloom inflated past
                                 // the projected rect so the additive falloff
@@ -695,10 +653,6 @@ impl WgpuRenderer {
                             self.ensure_boss_icon_gpu(*kind);
                             let slot_i = obj3d_boss_icon_slot;
                             obj3d_boss_icon_slot += 1;
-                            let boss_arr_name = obj
-                                .arrange_name
-                                .unwrap_or("collection.boss_icon");
-                            let model = self.apply_placement_rotation(boss_arr_name, model);
                             let g = glow.clamp(0.0, 1.0);
                             let base_color = if g > 0.0 {
                                 let target = [1.55, 1.32, 0.78, obj.color[3]];
@@ -728,7 +682,8 @@ impl WgpuRenderer {
                                     material.kind,
                                 );
                             }
-                            let want_tex = self.boss_icon_textures.contains_key(kind).then_some(*kind);
+                            let want_tex =
+                                self.boss_icon_textures.contains_key(kind).then_some(*kind);
                             if self.boss_icon_slot_texture[slot_i] != want_tex {
                                 let view = match want_tex {
                                     Some(bk) => &self.boss_icon_textures[&bk].view,
@@ -785,12 +740,6 @@ impl WgpuRenderer {
                                 });
                             }
                             let _ = pick_id;
-                            self.last_debug_pickables.push((
-                                boss_arr_name.to_string(),
-                                model,
-                                glam::Vec3::splat(0.5),
-                                0.0,
-                            ));
                             WgpuRenderer::push_object3d_draw(
                                 object3d_draw_list,
                                 DrawKind::BossIcon,
@@ -804,8 +753,6 @@ impl WgpuRenderer {
                             let slot_i = obj3d_pack_slot;
                             obj3d_pack_slot += 1;
                             let _ = slot_i;
-                            let pack_arr_name = obj.arrange_name.unwrap_or("shop.for_sale.packs");
-                            let model = self.apply_placement_rotation(pack_arr_name, model);
                             // Hover glow: hover_target ramps 0..1 as the
                             // player focuses/cursor-hovers the pack. Lift
                             // the foil tint toward a warm bloom and push
@@ -905,12 +852,6 @@ impl WgpuRenderer {
                             // controller selection via aux_dish_rects (appended below).
                             let projected_rect = project_unit_cube_rect(model);
                             self.proj.pack_rects.push((projected_rect, *pick_id));
-                            self.last_debug_pickables.push((
-                                pack_arr_name.to_string(),
-                                model,
-                                glam::Vec3::splat(0.5),
-                                0.0,
-                            ));
                             if hover_g > 0.0 {
                                 // Hover halo: an additive bloom inflated
                                 // past the projected rect so the falloff
@@ -959,22 +900,11 @@ impl WgpuRenderer {
                             let sy = obj.extents[1] / (TALISMAN_LOCAL_HALF[1] * 2.0);
                             let sz = obj.extents[2] / (TALISMAN_LOCAL_HALF[2] * 2.0);
                             let _ = slot_i;
-                            // Default to the for-sale stall arrange group, but
-                            // let the caller opt into a different group (e.g.
-                            // owned-inventory talismans, which shouldn't share
-                            // the shop's Rx/Ry/Rz arrange rotation).
-                            let talisman_name =
-                                obj.arrange_name.unwrap_or("shop.for_sale.talismans");
-                            let talisman_center_arr = self.apply_placement_rotation(
-                                talisman_name,
-                                translate_rot_scale(
-                                    center,
-                                    obj.rotation_matrix(),
-                                    glam::Vec3::new(sx, sy, sz),
-                                ),
+                            let talisman_model = translate_rot_scale(
+                                center,
+                                obj.rotation_matrix(),
+                                glam::Vec3::new(sx, sy, sz),
                             );
-                            // Re-decompose center after possible override; simpler: re-derive center from matrix.
-                            let talisman_model = talisman_center_arr;
                             let material = talisman_material(*kind, obj.color);
                             let kind_idx = crate::core::talisman::TalismanKind::all()
                                 .iter()
@@ -1010,12 +940,6 @@ impl WgpuRenderer {
                             self.proj
                                 .talisman_rects
                                 .push(project_unit_cube_rect(talisman_model));
-                            self.last_debug_pickables.push((
-                                talisman_name.to_string(),
-                                talisman_model,
-                                glam::Vec3::splat(0.5),
-                                0.0,
-                            ));
                             WgpuRenderer::push_object3d_draw(
                                 object3d_draw_list,
                                 DrawKind::Talisman,
@@ -1034,13 +958,12 @@ impl WgpuRenderer {
                                 &mut shadow,
                             );
                         }
-                        Object3dKind::Plinth { glow } => {
+                        Object3dKind::Plinth { glow, role } => {
                             if obj3d_plinth_slot >= MAX_PLINTH_SLOTS {
                                 continue;
                             }
                             let slot_i = obj3d_plinth_slot;
                             obj3d_plinth_slot += 1;
-                            let plinth_name = obj.arrange_name.unwrap_or("gameplay.dora");
                             // Mesh is built Y-up centered; lift the world position
                             // by half-height so `obj.pos` describes the plinth's
                             // base sitting on the table felt.
@@ -1053,13 +976,10 @@ impl WgpuRenderer {
                             );
                             let plinth_rot =
                                 mesh_y_thickness_along_local_y_to_z_up() * obj.rotation_matrix();
-                            let plinth_model = self.apply_placement_rotation(
-                                plinth_name,
-                                translate_rot_scale(
-                                    plinth_center,
-                                    plinth_rot,
-                                    glam::Vec3::from(obj.extents),
-                                ),
+                            let plinth_model = translate_rot_scale(
+                                plinth_center,
+                                plinth_rot,
+                                glam::Vec3::from(obj.extents),
                             );
                             let g = glow.clamp(0.0, 1.0);
                             let base_color = if g > 0.0 {
@@ -1127,20 +1047,20 @@ impl WgpuRenderer {
                             let platform_world =
                                 plinth_model.transform_point3(glam::Vec3::new(0.0, 0.36, 0.0));
                             let (platform_px, platform_py) = project_to_screen(platform_world);
-                            if plinth_name.contains("round_wind") {
-                                self.proj.round_wind_plinth_rect = Some(rect);
-                            } else if plinth_name.contains("boss_plinth") {
-                                self.proj.boss_plinth_rect = Some(rect);
-                                self.proj.boss_plinth_platform_px = Some([platform_px, platform_py]);
-                            } else {
-                                self.proj.plinth_rect = Some(rect);
+                            use crate::render::draw_cmd::PlinthRole;
+                            match role {
+                                PlinthRole::RoundWind => {
+                                    self.proj.round_wind_plinth_rect = Some(rect);
+                                }
+                                PlinthRole::Boss => {
+                                    self.proj.boss_plinth_rect = Some(rect);
+                                    self.proj.boss_plinth_platform_px =
+                                        Some([platform_px, platform_py]);
+                                }
+                                PlinthRole::Dora => {
+                                    self.proj.plinth_rect = Some(rect);
+                                }
                             }
-                            self.last_debug_pickables.push((
-                                plinth_name.to_string(),
-                                plinth_model,
-                                glam::Vec3::new(hx, hy, hz),
-                                0.0,
-                            ));
                             WgpuRenderer::push_object3d_draw(
                                 object3d_draw_list,
                                 DrawKind::Plinth,
@@ -1310,10 +1230,6 @@ impl WgpuRenderer {
                                 ),
                                 glam::Vec3::from(obj.extents),
                             );
-                            let hover_model = self.apply_placement_rotation(
-                                "gameplay.action_bar.mirror",
-                                hover_model,
-                            );
                             self.mirror_instances[slot_i].write_uniform(
                                 &self.queue,
                                 view_proj_arr,
@@ -1334,16 +1250,6 @@ impl WgpuRenderer {
                                 ));
                                 self.last_mirror_model = Some(hover_model);
                             }
-                            self.last_debug_pickables.push((
-                                "gameplay.action_bar.mirror".to_string(),
-                                hover_model,
-                                glam::Vec3::new(
-                                    MIRROR_LOCAL_HALF[0],
-                                    MIRROR_LOCAL_HALF[1],
-                                    MIRROR_LOCAL_HALF[2],
-                                ),
-                                MIRROR_LOCAL_CENTER_Y,
-                            ));
                             WgpuRenderer::push_object3d_draw(
                                 object3d_draw_list,
                                 DrawKind::Mirror,
@@ -1386,8 +1292,6 @@ impl WgpuRenderer {
                                 ),
                                 glam::Vec3::splat(*g_scale),
                             );
-                            let glyph_model =
-                                self.apply_placement_rotation("gameplay.score_popup", glyph_model);
                             let material = match g_mat {
                                 crate::render::draw_cmd::GlyphMaterial::Metal => MaterialParams {
                                     kind: MaterialKind::Metal,
@@ -1425,12 +1329,6 @@ impl WgpuRenderer {
                                     material.kind,
                                 );
                             }
-                            self.last_debug_pickables.push((
-                                "gameplay.score_popup".to_string(),
-                                glyph_model,
-                                glam::Vec3::splat(0.5),
-                                0.0,
-                            ));
                             WgpuRenderer::push_object3d_draw(
                                 object3d_draw_list,
                                 DrawKind::ExtrudedGlyph,
@@ -1446,10 +1344,6 @@ impl WgpuRenderer {
                             let pulse_f = pulse.clamp(0.0, 1.0);
                             let pulse_scale = 1.0 + 0.18 * pulse_f;
                             let center = pixel_to_world(w, h, obj.pos[0], obj.pos[1], obj.pos[2]);
-                            let cascade_token_name = match ck {
-                                CascadeTokenKind::Chips => "gameplay.cascade_token.chips",
-                                CascadeTokenKind::Mult => "gameplay.cascade_token.mult",
-                            };
                             let model = translate_rot_scale(
                                 center,
                                 Mat4::IDENTITY,
@@ -1459,7 +1353,6 @@ impl WgpuRenderer {
                                     obj.extents[2] * pulse_scale,
                                 ),
                             );
-                            let model = self.apply_placement_rotation(cascade_token_name, model);
                             let base = ck.color();
                             let material = MaterialParams {
                                 kind: MaterialKind::Plain,
@@ -1482,12 +1375,6 @@ impl WgpuRenderer {
                                     material.kind,
                                 );
                             }
-                            self.last_debug_pickables.push((
-                                cascade_token_name.to_string(),
-                                model,
-                                glam::Vec3::splat(0.5),
-                                0.0,
-                            ));
                             WgpuRenderer::push_object3d_draw(
                                 object3d_draw_list,
                                 DrawKind::CascadeToken,
@@ -1510,9 +1397,6 @@ impl WgpuRenderer {
                                 mesh_y_thickness_along_local_y_to_z_up(),
                                 glam::Vec3::new(s, s * *height_scale, s),
                             );
-                            let candle_name = self.scene_path("candle");
-                            let candle_model =
-                                self.apply_placement_rotation(&candle_name, candle_model);
                             self.candle_instances[slot_i][0].write_uniform(
                                 &self.queue,
                                 view_proj_arr,
@@ -1546,12 +1430,6 @@ impl WgpuRenderer {
                                     );
                                 }
                             }
-                            self.last_debug_pickables.push((
-                                candle_name,
-                                candle_model,
-                                glam::Vec3::new(0.36, 0.305, 0.36),
-                                0.305,
-                            ));
                             WgpuRenderer::push_object3d_draw(
                                 object3d_draw_list,
                                 DrawKind::CandleWax,
@@ -1572,6 +1450,7 @@ impl WgpuRenderer {
                             spread_deg,
                             tip_color,
                             rotation_y_deg,
+                            placement_rot_deg,
                             kind: fan_kind,
                         } => {
                             let fan_i = obj3d_tally_fan_idx;
@@ -1602,10 +1481,6 @@ impl WgpuRenderer {
                                 specular_strength: 0.40,
                                 specular_power: 42.0,
                             };
-                            let arrange_name = match fan_kind {
-                                TallyFanKind::Draws => "gameplay.counter.draws_fan",
-                                TallyFanKind::Discards => "gameplay.counter.discards_fan",
-                            };
                             let missing = (max_c as usize).saturating_sub(count_usize);
                             let mut visible_slots: Vec<u32> = (0..max_c).collect();
                             for trim in 0..missing {
@@ -1615,22 +1490,17 @@ impl WgpuRenderer {
                                     visible_slots.remove(0);
                                 }
                             }
-                            for (stick_i, &k) in visible_slots.iter().enumerate() {
+                            for (_stick_i, &k) in visible_slots.iter().enumerate() {
                                 if obj3d_tally_stick_cursor + 1 >= MAX_TALLY_STICK_SLOTS * 2 {
                                     break;
                                 }
                                 let angle = slot_angle(k);
                                 let rot = fan_yaw * Mat4::from_rotation_y(angle) * base_orient;
-                                let model = translate_rot_scale(pivot, rot, base_scale);
-                                let model = self.apply_placement_rotation(arrange_name, model);
-                                if stick_i == 0 {
-                                    self.last_debug_pickables.push((
-                                        arrange_name.to_string(),
-                                        model,
-                                        glam::Vec3::new(0.5, 0.5, 0.5),
-                                        0.0,
-                                    ));
-                                }
+                                let model =
+                                    crate::render::table_transform::apply_rotation_deg_to_model(
+                                        translate_rot_scale(pivot, rot, base_scale),
+                                        *placement_rot_deg,
+                                    );
                                 self.tally_stick_instances[obj3d_tally_stick_cursor].write_uniform(
                                     &self.queue,
                                     view_proj_arr,
@@ -1725,8 +1595,6 @@ impl WgpuRenderer {
                                 glam::Mat4::from_rotation_x(tilt) * obj.rotation_matrix(),
                                 glam::Vec3::from(obj.extents),
                             );
-                            let hover_model = self
-                                .apply_placement_rotation("gameplay.action_bar.bowl", hover_model);
                             self.bowl_instances[slot_i].write_uniform(
                                 &self.queue,
                                 view_proj_arr,
@@ -1742,22 +1610,12 @@ impl WgpuRenderer {
                             if slot_i == 0 {
                                 self.proj.bowl_rect = Some(project_aabb_rect(
                                     hover_model,
-                                    BOWL_LOCAL_HALF,
-                                    BOWL_LOCAL_CENTER_Y,
+                                    RIVER_LOCAL_HALF,
+                                    RIVER_LOCAL_CENTER_Y,
                                 ));
                                 self.proj.bowl_model = Some(hover_model);
                                 self.last_bowl_model = Some(hover_model);
                             }
-                            self.last_debug_pickables.push((
-                                "gameplay.action_bar.bowl".to_string(),
-                                hover_model,
-                                glam::Vec3::new(
-                                    BOWL_LOCAL_HALF[0],
-                                    BOWL_LOCAL_HALF[1],
-                                    BOWL_LOCAL_HALF[2],
-                                ),
-                                BOWL_LOCAL_CENTER_Y,
-                            ));
                             WgpuRenderer::push_object3d_draw(
                                 object3d_draw_list,
                                 DrawKind::Bowl,
@@ -1813,7 +1671,6 @@ impl WgpuRenderer {
                     Mat4::IDENTITY,
                     glam::Vec3::new(tile_w, tile_h, tile_d),
                 );
-                let model = self.apply_placement_rotation("gameplay.wall_tile", model);
                 let material = MaterialParams {
                     kind: MaterialKind::Plain,
                     base_color: [0.86, 0.81, 0.69, 1.0],
@@ -1832,12 +1689,6 @@ impl WgpuRenderer {
                     model,
                     material.kind,
                 );
-                self.last_debug_pickables.push((
-                    "gameplay.wall_tile".to_string(),
-                    model,
-                    glam::Vec3::splat(0.5),
-                    0.0,
-                ));
                 wall_tile_slot_cursor += 1;
             }
         }
