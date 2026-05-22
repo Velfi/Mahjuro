@@ -190,7 +190,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             .filter_map(|id| tile_by_id(tiles, *id))
             .filter(|t| !tile_is_debuffed(t, ctx.tiles.debuffs))
             .filter(|t| {
-                matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Dots) && t.rank == 7
+                matches!(t.suit, Suit::Souzu | Suit::Manzu | Suit::Pinzu) && t.rank == 7
             })
             .count();
         if count7 > 0 {
@@ -220,7 +220,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             .filter_map(|id| tile_by_id(tiles, *id))
             .all(|t| {
                 matches!(t.suit, Suit::Wind | Suit::Dragon)
-                    || (matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Dots)
+                    || (matches!(t.suit, Suit::Souzu | Suit::Manzu | Suit::Pinzu)
                         && (t.rank == 1 || t.rank == 9))
             });
         if all_terminal_or_honor {
@@ -459,9 +459,9 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
                     continue;
                 }
                 let idx = match t.suit {
-                    Suit::Characters => 0,
-                    Suit::Bamboos => 1,
-                    Suit::Dots => 2,
+                    Suit::Manzu => 0,
+                    Suit::Souzu => 1,
+                    Suit::Pinzu => 2,
                     Suit::Wind => 3,
                     Suit::Dragon => 4,
                     Suit::Flower => 5,
@@ -509,7 +509,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             .flat_map(|s| &s.tile_ids)
             .filter_map(|id| tile_by_id(tiles, *id))
             .map(|t| t.suit)
-            .filter(|s| matches!(s, Suit::Bamboos | Suit::Characters | Suit::Dots))
+            .filter(|s| matches!(s, Suit::Souzu | Suit::Manzu | Suit::Pinzu))
             .collect();
         if !numbered_suits.is_empty() {
             let first = numbered_suits[0];
@@ -518,7 +518,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
                     .iter()
                     .flat_map(|s| &s.tile_ids)
                     .filter_map(|id| tile_by_id(tiles, *id))
-                    .all(|t| matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Dots));
+                    .all(|t| matches!(t.suit, Suit::Souzu | Suit::Manzu | Suit::Pinzu));
             if all_same {
                 let delta = *mult * 1.5;
                 push_mult(steps, *chips, mult, "Way of Purity", delta);

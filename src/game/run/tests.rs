@@ -70,6 +70,8 @@ mod cases {
             times_restocked: 0,
             best_structure_score: 0,
             best_structure_name: String::new(),
+            best_hand_tiles: Vec::new(),
+            score_after_ante: Vec::new(),
             plays_remaining: mode.starting_plays,
             plays_max: mode.starting_plays,
             relics: RelicState::default(),
@@ -112,6 +114,7 @@ mod cases {
             memorial_snapshot: None,
             memorial_round: crate::core::memorial_talisman::MemorialRoundState::default(),
             defeat_memorial_kind: None,
+            chronicle: crate::core::run_chronicle::RunChronicle::default(),
         }
     }
 
@@ -121,17 +124,17 @@ mod cases {
 
     fn winning_structure() -> (Vec<Tile>, Vec<DetectedMeld>) {
         let tiles = vec![
-            Tile::new(Suit::Characters, 1, 1),
-            Tile::new(Suit::Characters, 1, 2),
-            Tile::new(Suit::Characters, 2, 3),
-            Tile::new(Suit::Characters, 3, 4),
-            Tile::new(Suit::Characters, 4, 5),
-            Tile::new(Suit::Dots, 2, 6),
-            Tile::new(Suit::Dots, 3, 7),
-            Tile::new(Suit::Dots, 4, 8),
-            Tile::new(Suit::Bamboos, 5, 9),
-            Tile::new(Suit::Bamboos, 6, 10),
-            Tile::new(Suit::Bamboos, 7, 11),
+            Tile::new(Suit::Manzu, 1, 1),
+            Tile::new(Suit::Manzu, 1, 2),
+            Tile::new(Suit::Manzu, 2, 3),
+            Tile::new(Suit::Manzu, 3, 4),
+            Tile::new(Suit::Manzu, 4, 5),
+            Tile::new(Suit::Pinzu, 2, 6),
+            Tile::new(Suit::Pinzu, 3, 7),
+            Tile::new(Suit::Pinzu, 4, 8),
+            Tile::new(Suit::Souzu, 5, 9),
+            Tile::new(Suit::Souzu, 6, 10),
+            Tile::new(Suit::Souzu, 7, 11),
             Tile::new(Suit::Wind, 1, 12),
             Tile::new(Suit::Wind, 1, 13),
             Tile::new(Suit::Wind, 1, 14),
@@ -512,18 +515,18 @@ mod cases {
         let mut bus = bus();
         run.relics.active.push(RelicId::SecondWind);
         run.hand = vec![
-            Tile::new(Suit::Characters, 1, 1),
-            Tile::new(Suit::Characters, 3, 2),
-            Tile::new(Suit::Characters, 5, 3),
-            Tile::new(Suit::Characters, 7, 4),
-            Tile::new(Suit::Characters, 9, 5),
-            Tile::new(Suit::Bamboos, 2, 6),
-            Tile::new(Suit::Bamboos, 4, 7),
-            Tile::new(Suit::Bamboos, 6, 8),
-            Tile::new(Suit::Bamboos, 8, 9),
-            Tile::new(Suit::Dots, 1, 10),
-            Tile::new(Suit::Dots, 3, 11),
-            Tile::new(Suit::Dots, 5, 12),
+            Tile::new(Suit::Manzu, 1, 1),
+            Tile::new(Suit::Manzu, 3, 2),
+            Tile::new(Suit::Manzu, 5, 3),
+            Tile::new(Suit::Manzu, 7, 4),
+            Tile::new(Suit::Manzu, 9, 5),
+            Tile::new(Suit::Souzu, 2, 6),
+            Tile::new(Suit::Souzu, 4, 7),
+            Tile::new(Suit::Souzu, 6, 8),
+            Tile::new(Suit::Souzu, 8, 9),
+            Tile::new(Suit::Pinzu, 1, 10),
+            Tile::new(Suit::Pinzu, 3, 11),
+            Tile::new(Suit::Pinzu, 5, 12),
             Tile::new(Suit::Wind, 1, 13),
             Tile::new(Suit::Dragon, 1, 14),
         ];
@@ -731,6 +734,25 @@ mod cases {
     }
 
     #[test]
+    fn advance_round_after_boss_records_score_after_ante() {
+        let mut run = test_run();
+        let mut bus = bus();
+        run.ante = 3;
+        run.total_score_earned = 12_500;
+        run.blind = BlindKind::Boss;
+        run.upcoming_blind = BlindKind::Boss;
+
+        run.advance_round(&mut bus);
+
+        assert_eq!(run.ante, 4);
+        assert_eq!(
+            run.score_after_ante.last(),
+            Some(&(3, 12_500)),
+            "snapshot taken before ante increment"
+        );
+    }
+
+    #[test]
     fn advance_round_after_boss_clears_unconsumed_next_blind_skip_bonuses() {
         let mut run = test_run();
         let mut bus = bus();
@@ -809,9 +831,9 @@ mod cases {
     #[test]
     fn dragon_allows_non_honor_structure_but_debuffs_its_score() {
         let tiles = vec![
-            Tile::new(Suit::Characters, 1, 1),
-            Tile::new(Suit::Characters, 1, 2),
-            Tile::new(Suit::Characters, 1, 3),
+            Tile::new(Suit::Manzu, 1, 1),
+            Tile::new(Suit::Manzu, 1, 2),
+            Tile::new(Suit::Manzu, 1, 3),
         ];
         let sets = vec![DetectedMeld {
             kind: MeldKind::Triplet,
@@ -932,18 +954,18 @@ mod cases {
         let mut run = test_run();
         let mut bus = bus();
         run.hand = vec![
-            Tile::new(Suit::Characters, 1, 1),
-            Tile::new(Suit::Characters, 3, 2),
-            Tile::new(Suit::Characters, 5, 3),
-            Tile::new(Suit::Characters, 7, 4),
-            Tile::new(Suit::Characters, 9, 5),
-            Tile::new(Suit::Bamboos, 2, 6),
-            Tile::new(Suit::Bamboos, 4, 7),
-            Tile::new(Suit::Bamboos, 6, 8),
-            Tile::new(Suit::Bamboos, 8, 9),
-            Tile::new(Suit::Dots, 1, 10),
-            Tile::new(Suit::Dots, 3, 11),
-            Tile::new(Suit::Dots, 5, 12),
+            Tile::new(Suit::Manzu, 1, 1),
+            Tile::new(Suit::Manzu, 3, 2),
+            Tile::new(Suit::Manzu, 5, 3),
+            Tile::new(Suit::Manzu, 7, 4),
+            Tile::new(Suit::Manzu, 9, 5),
+            Tile::new(Suit::Souzu, 2, 6),
+            Tile::new(Suit::Souzu, 4, 7),
+            Tile::new(Suit::Souzu, 6, 8),
+            Tile::new(Suit::Souzu, 8, 9),
+            Tile::new(Suit::Pinzu, 1, 10),
+            Tile::new(Suit::Pinzu, 3, 11),
+            Tile::new(Suit::Pinzu, 5, 12),
             Tile::new(Suit::Wind, 1, 13),
             Tile::new(Suit::Dragon, 1, 14),
         ];
@@ -968,18 +990,18 @@ mod cases {
         let mut run = test_run();
         let mut bus = bus();
         run.hand = vec![
-            Tile::new(Suit::Characters, 1, 1),
-            Tile::new(Suit::Characters, 3, 2),
-            Tile::new(Suit::Characters, 5, 3),
-            Tile::new(Suit::Characters, 7, 4),
-            Tile::new(Suit::Characters, 9, 5),
-            Tile::new(Suit::Bamboos, 2, 6),
-            Tile::new(Suit::Bamboos, 4, 7),
-            Tile::new(Suit::Bamboos, 6, 8),
-            Tile::new(Suit::Bamboos, 8, 9),
-            Tile::new(Suit::Dots, 1, 10),
-            Tile::new(Suit::Dots, 3, 11),
-            Tile::new(Suit::Dots, 5, 12),
+            Tile::new(Suit::Manzu, 1, 1),
+            Tile::new(Suit::Manzu, 3, 2),
+            Tile::new(Suit::Manzu, 5, 3),
+            Tile::new(Suit::Manzu, 7, 4),
+            Tile::new(Suit::Manzu, 9, 5),
+            Tile::new(Suit::Souzu, 2, 6),
+            Tile::new(Suit::Souzu, 4, 7),
+            Tile::new(Suit::Souzu, 6, 8),
+            Tile::new(Suit::Souzu, 8, 9),
+            Tile::new(Suit::Pinzu, 1, 10),
+            Tile::new(Suit::Pinzu, 3, 11),
+            Tile::new(Suit::Pinzu, 5, 12),
             Tile::new(Suit::Wind, 1, 13),
             Tile::new(Suit::Dragon, 1, 14),
         ];
@@ -1142,9 +1164,9 @@ mod joker_tile_tests {
     fn joker_completes_sequence() {
         // 1m 2m 5s — joker should turn 5s into 3m
         let tiles = vec![
-            tile(Suit::Characters, 1, 0),
-            tile(Suit::Characters, 2, 1),
-            tile(Suit::Bamboos, 5, 2),
+            tile(Suit::Manzu, 1, 0),
+            tile(Suit::Manzu, 2, 1),
+            tile(Suit::Souzu, 5, 2),
         ];
         let result = try_joker_substitution(&tiles, &[]);
         assert!(result.is_some(), "joker should complete the sequence");
@@ -1152,7 +1174,7 @@ mod joker_tile_tests {
         assert_eq!(sets.len(), 1);
         assert_eq!(sets[0].kind, MeldKind::Sequence);
         // The modified tile should now be 3m
-        assert_eq!(modified[2].suit, Suit::Characters);
+        assert_eq!(modified[2].suit, Suit::Manzu);
         assert_eq!(modified[2].rank, 3);
     }
 
@@ -1160,9 +1182,9 @@ mod joker_tile_tests {
     fn joker_completes_triplet() {
         // 7p 7p 1s — joker should turn 1s into 7p
         let tiles = vec![
-            tile(Suit::Dots, 7, 0),
-            tile(Suit::Dots, 7, 1),
-            tile(Suit::Bamboos, 1, 2),
+            tile(Suit::Pinzu, 7, 0),
+            tile(Suit::Pinzu, 7, 1),
+            tile(Suit::Souzu, 1, 2),
         ];
         let result = try_joker_substitution(&tiles, &[]);
         assert!(result.is_some());
@@ -1173,7 +1195,7 @@ mod joker_tile_tests {
     #[test]
     fn joker_makes_pair_from_two_tiles() {
         // 1m 5s — joker turns 5s into 1m for a pair
-        let tiles = vec![tile(Suit::Characters, 1, 0), tile(Suit::Bamboos, 5, 1)];
+        let tiles = vec![tile(Suit::Manzu, 1, 0), tile(Suit::Souzu, 5, 1)];
         let result = try_joker_substitution(&tiles, &[]);
         assert!(result.is_some());
         let (sets, _) = result.unwrap();
@@ -1184,9 +1206,9 @@ mod joker_tile_tests {
     fn joker_only_substitutes_one_tile() {
         // 1m 5s 9p — all different, need 2 subs to make a meld, joker can only do 1
         let tiles = vec![
-            tile(Suit::Characters, 1, 0),
-            tile(Suit::Bamboos, 5, 1),
-            tile(Suit::Dots, 9, 2),
+            tile(Suit::Manzu, 1, 0),
+            tile(Suit::Souzu, 5, 1),
+            tile(Suit::Pinzu, 9, 2),
         ];
         assert!(try_joker_substitution(&tiles, &[]).is_none());
     }
@@ -1195,9 +1217,9 @@ mod joker_tile_tests {
     fn joker_respects_no_sequences_rule() {
         // 1m 2m 5s — would be a sequence with joker, but NoSequences blocks it
         let tiles = vec![
-            tile(Suit::Characters, 1, 0),
-            tile(Suit::Characters, 2, 1),
-            tile(Suit::Bamboos, 5, 2),
+            tile(Suit::Manzu, 1, 0),
+            tile(Suit::Manzu, 2, 1),
+            tile(Suit::Souzu, 5, 2),
         ];
         let result = try_joker_substitution(&tiles, &[RuleModifier::NoSequences]);
         // Could still work if joker turns 5s into 1m or 2m for a triplet — but
@@ -1228,17 +1250,17 @@ mod wild_wind_tests {
         // Hand: 2m W 4m | 7m 8m 9m | 4s 5s 6s | 7p 8p W
         // With Wild Winds, W->3m and W->9p (or 6p) should yield 4 sequences.
         let tiles = vec![
-            tile(Suit::Characters, 2, 1),
+            tile(Suit::Manzu, 2, 1),
             tile(Suit::Wind, 3, 2), // West, should become 3m
-            tile(Suit::Characters, 4, 3),
-            tile(Suit::Characters, 7, 4),
-            tile(Suit::Characters, 8, 5),
-            tile(Suit::Characters, 9, 6),
-            tile(Suit::Bamboos, 4, 7),
-            tile(Suit::Bamboos, 5, 8),
-            tile(Suit::Bamboos, 6, 9),
-            tile(Suit::Dots, 7, 10),
-            tile(Suit::Dots, 8, 11),
+            tile(Suit::Manzu, 4, 3),
+            tile(Suit::Manzu, 7, 4),
+            tile(Suit::Manzu, 8, 5),
+            tile(Suit::Manzu, 9, 6),
+            tile(Suit::Souzu, 4, 7),
+            tile(Suit::Souzu, 5, 8),
+            tile(Suit::Souzu, 6, 9),
+            tile(Suit::Pinzu, 7, 10),
+            tile(Suit::Pinzu, 8, 11),
             tile(Suit::Wind, 3, 12), // West, should become 9p (or 6p)
         ];
         let result = try_wind_substitution(&tiles, &[]);
@@ -1255,8 +1277,8 @@ mod wild_wind_tests {
     fn single_wind_substitutes_into_sequence() {
         // 1m 2m W -> W becomes 3m
         let tiles = vec![
-            tile(Suit::Characters, 1, 1),
-            tile(Suit::Characters, 2, 2),
+            tile(Suit::Manzu, 1, 1),
+            tile(Suit::Manzu, 2, 2),
             tile(Suit::Wind, 1, 3), // East
         ];
         let result = try_wind_substitution(&tiles, &[]);
@@ -1270,8 +1292,8 @@ mod wild_wind_tests {
     fn wind_substitutes_into_triplet() {
         // 5s 5s W -> W becomes 5s for a triplet
         let tiles = vec![
-            tile(Suit::Bamboos, 5, 1),
-            tile(Suit::Bamboos, 5, 2),
+            tile(Suit::Souzu, 5, 1),
+            tile(Suit::Souzu, 5, 2),
             tile(Suit::Wind, 2, 3),
         ];
         let result = try_wind_substitution(&tiles, &[]);
@@ -1284,9 +1306,9 @@ mod wild_wind_tests {
     #[test]
     fn no_winds_returns_none() {
         let tiles = vec![
-            tile(Suit::Characters, 1, 1),
-            tile(Suit::Characters, 2, 2),
-            tile(Suit::Characters, 3, 3),
+            tile(Suit::Manzu, 1, 1),
+            tile(Suit::Manzu, 2, 2),
+            tile(Suit::Manzu, 3, 3),
         ];
         assert!(try_wind_substitution(&tiles, &[]).is_none());
     }
@@ -1300,18 +1322,18 @@ mod wild_wind_tests {
 
     #[test]
     fn candidates_include_nearby_ranks() {
-        let tiles = vec![tile(Suit::Characters, 5, 1), tile(Suit::Wind, 3, 2)];
+        let tiles = vec![tile(Suit::Manzu, 5, 1), tile(Suit::Wind, 3, 2)];
         let candidates = wind_candidate_faces(&tiles);
         // Should include 3m-7m (5 ± 2) and 5m itself
         for r in 3..=7 {
             assert!(
-                candidates.contains(&(Suit::Characters, r)),
+                candidates.contains(&(Suit::Manzu, r)),
                 "candidates should include {}m",
                 r
             );
         }
         // Should NOT include 1m (too far)
-        assert!(!candidates.contains(&(Suit::Characters, 1)));
+        assert!(!candidates.contains(&(Suit::Manzu, 1)));
     }
 
     mod proptests {
@@ -1320,7 +1342,7 @@ mod wild_wind_tests {
         use super::*;
         use proptest::prelude::*;
 
-        const NUMBER_SUITS: [Suit; 3] = [Suit::Characters, Suit::Bamboos, Suit::Dots];
+        const NUMBER_SUITS: [Suit; 3] = [Suit::Manzu, Suit::Souzu, Suit::Pinzu];
 
         fn arb_number_tile(id: u32) -> BoxedStrategy<Tile> {
             (0..3usize, 1..=9u8)
@@ -1612,11 +1634,11 @@ mod disgust_tests {
 
     #[test]
     fn nonsense_selection_still_invalid() {
-        // EW + a stray bamboo cannot decompose even after relabel.
+        // EW + a stray souzu cannot decompose even after relabel.
         let tiles = vec![
             tile(Suit::Wind, 1, 0),
             tile(Suit::Wind, 3, 1),
-            tile(Suit::Bamboos, 5, 2),
+            tile(Suit::Souzu, 5, 2),
         ];
         assert!(try_disgust_substitution(&tiles, &[], false).is_none());
     }

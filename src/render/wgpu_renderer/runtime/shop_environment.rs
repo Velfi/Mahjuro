@@ -522,7 +522,9 @@ impl WgpuRenderer {
     /// Shadow pre-pass / offline bake: never cast from either sign — they are flat
     /// decal boards and project hard silhouettes onto the featured pedestal.
     #[inline]
-    pub(super) fn archive_env_skip_description_sign_shadow(&self, pi: usize) -> bool {
-        self.archive_env_is_description_sign_prim(pi)
+    pub(super) fn archive_env_skip_room_shadow_caster(&self, pi: usize) -> bool {
+        self.archive_env_shadow_caster_mask
+            .get(pi)
+            .is_some_and(|casts| !*casts)
     }
 }

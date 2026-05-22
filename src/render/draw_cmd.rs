@@ -334,6 +334,8 @@ pub enum ImageQuadSource {
     },
     /// Full embedded PNG under `assets/` (via [`crate::asset_path::get`]).
     Asset { path: &'static str },
+    /// Relic icon: albedo + mask cut via [`crate::render::relic_pipeline`].
+    Relic(crate::core::relic::RelicId),
     /// Absolute filesystem path to an SVG or PNG (rasterized at draw time).
     #[allow(dead_code)] // No current producer; renderer path kept for tooling / experiments.
     Filesystem(std::path::PathBuf),
@@ -345,6 +347,7 @@ impl ImageQuadSource {
             Self::AtlasSprite { sheet, name } => format!("atlas:{sheet}:{name}"),
             Self::PackedAtlas { sheet, name } => format!("packed-atlas:{sheet}:{name}"),
             Self::Asset { path } => format!("asset:{path}"),
+            Self::Relic(id) => format!("relic:{id:?}"),
             Self::Filesystem(path) => format!("file:{}", path.display()),
         }
     }

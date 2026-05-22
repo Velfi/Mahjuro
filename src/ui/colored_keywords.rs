@@ -9,9 +9,9 @@
 //!
 //! | Needle(s) | Theme | Meaning |
 //! | --- | --- | --- |
-//! | `Characters`, `characters` | Character suit red | Numbered suit |
-//! | `Bamboos`, `Bamboo`, `bamboo` | Bamboo green | Numbered suit |
-//! | `Dots`, `dots` | Dots suit blue | Numbered suit |
+//! | `Manzu`, `manzu`, `characters` | Manzu suit red | Numbered suit |
+//! | `Souzu`, `souzu`, `bamboos`, `bamboo` | Souzu green | Numbered suit |
+//! | `Pinzu`, `pinzu`, `dots` | Pinzu suit blue | Numbered suit |
 //! | `Winds`, `winds` | Wind gold | Honor suit family |
 //! | `Dragons`, `dragons` | Red dragon (Chun) | Honor suit family |
 //! | `Flowers`, `flowers` | Flower pink | Bonus tiles |

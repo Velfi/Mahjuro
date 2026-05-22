@@ -367,9 +367,9 @@ impl DebugMenuBar {
         // Grouped into sub-submenus per suit to keep the list browsable.
         let dora_sub = Submenu::new("Set Dora", true);
         for (suit_label, suit, max_rank) in [
-            ("Characters (m)", Suit::Characters, 9u8),
-            ("Bamboos (s)", Suit::Bamboos, 9u8),
-            ("Dots (p)", Suit::Dots, 9u8),
+            ("Manzu (m)", Suit::Manzu, 9u8),
+            ("Souzu (s)", Suit::Souzu, 9u8),
+            ("Pinzu (p)", Suit::Pinzu, 9u8),
             ("Winds", Suit::Wind, 4u8),
             ("Dragons", Suit::Dragon, 3u8),
         ] {

@@ -226,7 +226,6 @@ impl App {
                     {
                         log::info!("Level up! Now level {}", result.new_level);
                         self.pending_post_game_over_level_up = Some(modal);
-                        self.audio.play_sfx(audio::SfxId::LevelUp);
                     }
 
                     Scene::GameOver(GameOverScene::victory(&self.run))
@@ -301,7 +300,6 @@ impl App {
                 {
                     log::info!("Level up! Now level {}", result.new_level);
                     self.pending_post_game_over_level_up = Some(modal);
-                    self.audio.play_sfx(audio::SfxId::LevelUp);
                 }
 
                 self.audio.play_sfx(audio::SfxId::GameOver);

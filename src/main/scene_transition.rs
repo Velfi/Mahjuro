@@ -162,7 +162,6 @@ pub(crate) fn should_clear_smoke_on_transition(from: SceneTag, to: SceneTag) -> 
 pub(crate) struct PostSceneTransitionCtx<'a> {
     pub from: SceneTag,
     pub to: SceneTag,
-    pub pushed_meta_level_up: bool,
     /// Current blind is a boss when transitioning into gameplay (round-start BGM).
     pub gameplay_boss_blind: bool,
     pub anim: &'a mut AnimationController,
@@ -204,7 +203,7 @@ pub(crate) fn apply_post_scene_transition_effects(ctx: PostSceneTransitionCtx<'_
     {
         r.clear_smoke();
     }
-    if ctx.to == SceneTag::MainMenuExterior && !ctx.pushed_meta_level_up {
+    if ctx.to == SceneTag::MainMenuExterior {
         ctx.audio.play_sfx(crate::audio::SfxId::MainMenuEnter);
     }
     if ctx.to == SceneTag::MainMenuExterior {

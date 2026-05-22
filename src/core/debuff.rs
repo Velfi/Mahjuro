@@ -25,15 +25,15 @@ impl TileDebuffClass {
         match self {
             TileDebuffClass::Honors => matches!(tile.suit, Suit::Wind | Suit::Dragon),
             TileDebuffClass::Terminals => {
-                matches!(tile.suit, Suit::Characters | Suit::Bamboos | Suit::Dots)
+                matches!(tile.suit, Suit::Manzu | Suit::Souzu | Suit::Pinzu)
                     && matches!(tile.rank, 1 | 9)
             }
             TileDebuffClass::Simples => {
-                matches!(tile.suit, Suit::Characters | Suit::Bamboos | Suit::Dots)
+                matches!(tile.suit, Suit::Manzu | Suit::Souzu | Suit::Pinzu)
                     && matches!(tile.rank, 2..=8)
             }
             TileDebuffClass::MiddleTiles => {
-                matches!(tile.suit, Suit::Characters | Suit::Bamboos | Suit::Dots) && tile.rank == 5
+                matches!(tile.suit, Suit::Manzu | Suit::Souzu | Suit::Pinzu) && tile.rank == 5
             }
         }
     }
@@ -49,9 +49,9 @@ pub enum TileDebuff {
 impl TileDebuff {
     pub fn label(self) -> &'static str {
         match self {
-            TileDebuff::Suit(Suit::Characters) => "Characters",
-            TileDebuff::Suit(Suit::Bamboos) => "Bamboos",
-            TileDebuff::Suit(Suit::Dots) => "Dots",
+            TileDebuff::Suit(Suit::Manzu) => "Manzu",
+            TileDebuff::Suit(Suit::Souzu) => "Souzu",
+            TileDebuff::Suit(Suit::Pinzu) => "Pinzu",
             TileDebuff::Suit(Suit::Wind) => "Winds",
             TileDebuff::Suit(Suit::Dragon) => "Dragons",
             TileDebuff::Suit(Suit::Flower) => "Flowers",

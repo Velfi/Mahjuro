@@ -138,15 +138,17 @@ impl RunState {
 
         if honor_gold > 0 {
             self.apply_gold_reward(honor_gold, Some(bus));
-            self.relic_activations.push(RelicId::NoHonorButWealth);
+            self.push_relic_activation(RelicId::NoHonorButWealth);
         }
-        for _ in &selected_indices {
+        for tile in &removed {
+            self.chronicle.note_discarded_tile(tile);
             bus.push(GameEvent::TileDiscarded);
         }
+        self.chronicle.note_turn();
         self.tiles_discarded = self.tiles_discarded.saturating_add(count as u32);
 
         if self.relics.has(RelicId::SilkThread) {
-            self.relic_activations.push(RelicId::SilkThread);
+            self.push_relic_activation(RelicId::SilkThread);
             let v = self.relic_counters.entry(RelicId::SilkThread).or_insert(40);
             *v = (*v - 3).max(0);
             if *v == 0 {
@@ -159,7 +161,7 @@ impl RunState {
         if self.relics.has(RelicId::SilkMoth) {
             self.apply_gold_reward(1, Some(bus));
             *self.relic_counters.entry(RelicId::SilkMoth).or_insert(0) += 1;
-            self.relic_activations.push(RelicId::SilkMoth);
+            self.push_relic_activation(RelicId::SilkMoth);
         }
 
         self.onboarding_notify_discard();
@@ -179,12 +181,14 @@ impl RunState {
             let Some(t) = self.wall.draw() else { break };
             if lotus && t.suit == Suit::Flower {
                 *self.relic_counters.entry(RelicId::LotusBloom).or_insert(0) += 1;
-                self.relic_activations.push(RelicId::LotusBloom);
+                self.push_relic_activation(RelicId::LotusBloom);
             }
             bus.push(GameEvent::TileDrawn);
             drawn.push(t);
         }
 
+        self.chronicle
+            .note_tiles_drawn(drawn.len().min(u32::MAX as usize) as u32);
         GameplayCoreState::with_run_mut(self, |core| {
             core.push_drawn_tiles(&drawn);
         });

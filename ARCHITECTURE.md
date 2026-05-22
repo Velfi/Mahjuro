@@ -30,7 +30,7 @@ Mahjuro should be structured in **four main layers**:
 * `Tile` struct:
 
 ```rust
-enum Suit { Characters, Bamboos, Dots, Winds, Dragons, Flowers, Seasons }
+enum Suit { Manzu, Souzu, Pinzu, Winds, Dragons, Flowers, Seasons }
 struct Tile {
     suit: Suit,
     value: u8,

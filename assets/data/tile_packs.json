@@ -23,21 +23,21 @@
   {
     "id": "bamboo_grove",
     "name": "Bamboo Grove",
-    "description": "+8 bamboo tiles to the wall",
+    "description": "+8 souzu tiles to the wall",
     "shop_price": 7,
     "texture_file": "pack_bamboo_grove.png"
   },
   {
     "id": "coin_cache",
     "name": "Coin Cache",
-    "description": "+8 dots tiles to the wall",
+    "description": "+8 pinzu tiles to the wall",
     "shop_price": 7,
     "texture_file": "pack_coin_cache.png"
   },
   {
     "id": "scroll_library",
     "name": "Scroll Library",
-    "description": "+8 characters tiles to the wall",
+    "description": "+8 manzu tiles to the wall",
     "shop_price": 7,
     "texture_file": "pack_scroll_library.png"
   }

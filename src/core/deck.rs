@@ -16,7 +16,7 @@ pub fn build_wall() -> Vec<Tile> {
     let mut id = 0u32;
     let mut tiles = Vec::with_capacity(140);
 
-    for suit in [Suit::Characters, Suit::Bamboos, Suit::Dots] {
+    for suit in [Suit::Manzu, Suit::Souzu, Suit::Pinzu] {
         for rank in 1..=9 {
             for _ in 0..4 {
                 tiles.push(Tile::new(suit, rank, id));
@@ -56,7 +56,7 @@ pub fn build_overflow_extras() -> Vec<Tile> {
     // 34 tile faces × 2 extra copies = 68 tiles (no extra flowers).
     let mut tiles = Vec::with_capacity(68);
 
-    for suit in [Suit::Characters, Suit::Bamboos, Suit::Dots] {
+    for suit in [Suit::Manzu, Suit::Souzu, Suit::Pinzu] {
         for rank in 1..=9 {
             for _ in 0..2 {
                 tiles.push(Tile::new(suit, rank, id));
@@ -102,7 +102,7 @@ pub struct Wall {
 /// work).
 fn dora_from_wall_pick(t: Tile) -> Tile {
     let next_rank = match t.suit {
-        Suit::Characters | Suit::Bamboos | Suit::Dots => {
+        Suit::Manzu | Suit::Souzu | Suit::Pinzu => {
             if t.rank >= 9 {
                 1
             } else {

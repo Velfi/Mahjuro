@@ -505,7 +505,7 @@ fn is_iipeikou(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
 
 /// Sanshoku Doujun: same numerical run in all three number suits. The hand
 /// must contain three sequences whose `(low_rank)` matches across
-/// Characters / Bamboos / Dots.
+/// Manzu / Souzu / Pinzu.
 fn is_sanshoku_doujun(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
     let mut by_low: FxHashMap<u8, Vec<Suit>> = FxHashMap::default();
     for s in sets.iter().filter(|s| s.kind == MeldKind::Sequence) {
@@ -522,9 +522,9 @@ fn is_sanshoku_doujun(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
         by_low.entry(ranks[0]).or_default().push(tile_refs[0].suit);
     }
     by_low.values().any(|suits| {
-        suits.contains(&Suit::Characters)
-            && suits.contains(&Suit::Bamboos)
-            && suits.contains(&Suit::Dots)
+        suits.contains(&Suit::Manzu)
+            && suits.contains(&Suit::Souzu)
+            && suits.contains(&Suit::Pinzu)
     })
 }
 
@@ -543,7 +543,7 @@ fn is_ittsu(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
         }
         if !matches!(
             tile_refs[0].suit,
-            Suit::Characters | Suit::Bamboos | Suit::Dots
+            Suit::Manzu | Suit::Souzu | Suit::Pinzu
         ) {
             continue;
         }
@@ -568,7 +568,7 @@ fn is_chinitsu(tiles: &[Tile]) -> bool {
         return false;
     }
     let suit = regular[0].suit;
-    if !matches!(suit, Suit::Characters | Suit::Bamboos | Suit::Dots) {
+    if !matches!(suit, Suit::Manzu | Suit::Souzu | Suit::Pinzu) {
         return false;
     }
     regular.iter().all(|t| t.suit == suit)
@@ -684,12 +684,12 @@ mod tests {
     #[test]
     fn detect_all_triplets() {
         let tiles = vec![
-            t(Suit::Bamboos, 1, 0),
-            t(Suit::Bamboos, 1, 1),
-            t(Suit::Bamboos, 1, 2),
-            t(Suit::Dots, 5, 3),
-            t(Suit::Dots, 5, 4),
-            t(Suit::Dots, 5, 5),
+            t(Suit::Souzu, 1, 0),
+            t(Suit::Souzu, 1, 1),
+            t(Suit::Souzu, 1, 2),
+            t(Suit::Pinzu, 5, 3),
+            t(Suit::Pinzu, 5, 4),
+            t(Suit::Pinzu, 5, 5),
             t(Suit::Wind, 1, 6),
             t(Suit::Wind, 1, 7),
         ];
@@ -715,11 +715,11 @@ mod tests {
     #[test]
     fn detect_all_simples() {
         let tiles = vec![
-            t(Suit::Bamboos, 2, 0),
-            t(Suit::Bamboos, 3, 1),
-            t(Suit::Bamboos, 4, 2),
-            t(Suit::Dots, 5, 3),
-            t(Suit::Dots, 5, 4),
+            t(Suit::Souzu, 2, 0),
+            t(Suit::Souzu, 3, 1),
+            t(Suit::Souzu, 4, 2),
+            t(Suit::Pinzu, 5, 3),
+            t(Suit::Pinzu, 5, 4),
         ];
         let sets = vec![
             DetectedMeld {
@@ -738,11 +738,11 @@ mod tests {
     #[test]
     fn all_simples_rejects_terminals() {
         let tiles = vec![
-            t(Suit::Bamboos, 1, 0), // rank 1 = terminal
-            t(Suit::Bamboos, 2, 1),
-            t(Suit::Bamboos, 3, 2),
-            t(Suit::Dots, 5, 3),
-            t(Suit::Dots, 5, 4),
+            t(Suit::Souzu, 1, 0), // rank 1 = terminal
+            t(Suit::Souzu, 2, 1),
+            t(Suit::Souzu, 3, 2),
+            t(Suit::Pinzu, 5, 3),
+            t(Suit::Pinzu, 5, 4),
         ];
         let sets = vec![
             DetectedMeld {
@@ -761,18 +761,18 @@ mod tests {
     #[test]
     fn detect_full_hand() {
         let tiles = vec![
-            t(Suit::Bamboos, 1, 0),
-            t(Suit::Bamboos, 1, 1),
-            t(Suit::Bamboos, 1, 2),
-            t(Suit::Characters, 4, 3),
-            t(Suit::Characters, 5, 4),
-            t(Suit::Characters, 6, 5),
-            t(Suit::Dots, 9, 6),
-            t(Suit::Dots, 9, 7),
-            t(Suit::Dots, 9, 8),
-            t(Suit::Bamboos, 5, 9),
-            t(Suit::Bamboos, 6, 10),
-            t(Suit::Bamboos, 7, 11),
+            t(Suit::Souzu, 1, 0),
+            t(Suit::Souzu, 1, 1),
+            t(Suit::Souzu, 1, 2),
+            t(Suit::Manzu, 4, 3),
+            t(Suit::Manzu, 5, 4),
+            t(Suit::Manzu, 6, 5),
+            t(Suit::Pinzu, 9, 6),
+            t(Suit::Pinzu, 9, 7),
+            t(Suit::Pinzu, 9, 8),
+            t(Suit::Souzu, 5, 9),
+            t(Suit::Souzu, 6, 10),
+            t(Suit::Souzu, 7, 11),
             t(Suit::Wind, 1, 12),
             t(Suit::Wind, 1, 13),
         ];
@@ -804,7 +804,7 @@ mod tests {
 
     #[test]
     fn no_yaku_on_simple_pair() {
-        let tiles = vec![t(Suit::Bamboos, 3, 0), t(Suit::Bamboos, 3, 1)];
+        let tiles = vec![t(Suit::Souzu, 3, 0), t(Suit::Souzu, 3, 1)];
         let sets = vec![DetectedMeld {
             kind: MeldKind::Pair,
             tile_ids: vec![0, 1],
@@ -821,14 +821,14 @@ mod tests {
     fn detect_chiitoitsu_seven_pairs() {
         // 7 distinct pairs.
         let tiles = vec![
-            t(Suit::Bamboos, 1, 0),
-            t(Suit::Bamboos, 1, 1),
-            t(Suit::Bamboos, 3, 2),
-            t(Suit::Bamboos, 3, 3),
-            t(Suit::Characters, 5, 4),
-            t(Suit::Characters, 5, 5),
-            t(Suit::Dots, 7, 6),
-            t(Suit::Dots, 7, 7),
+            t(Suit::Souzu, 1, 0),
+            t(Suit::Souzu, 1, 1),
+            t(Suit::Souzu, 3, 2),
+            t(Suit::Souzu, 3, 3),
+            t(Suit::Manzu, 5, 4),
+            t(Suit::Manzu, 5, 5),
+            t(Suit::Pinzu, 7, 6),
+            t(Suit::Pinzu, 7, 7),
             t(Suit::Wind, 1, 8),
             t(Suit::Wind, 1, 9),
             t(Suit::Wind, 3, 10),
@@ -849,11 +849,11 @@ mod tests {
     #[test]
     fn detect_chinitsu_single_suit_no_honors() {
         let tiles = vec![
-            t(Suit::Bamboos, 1, 0),
-            t(Suit::Bamboos, 2, 1),
-            t(Suit::Bamboos, 3, 2),
-            t(Suit::Bamboos, 4, 3),
-            t(Suit::Bamboos, 4, 4),
+            t(Suit::Souzu, 1, 0),
+            t(Suit::Souzu, 2, 1),
+            t(Suit::Souzu, 3, 2),
+            t(Suit::Souzu, 4, 3),
+            t(Suit::Souzu, 4, 4),
         ];
         let sets = vec![
             DetectedMeld {
@@ -873,9 +873,9 @@ mod tests {
     #[test]
     fn detect_honitsu_one_suit_with_honors() {
         let tiles = vec![
-            t(Suit::Bamboos, 1, 0),
-            t(Suit::Bamboos, 2, 1),
-            t(Suit::Bamboos, 3, 2),
+            t(Suit::Souzu, 1, 0),
+            t(Suit::Souzu, 2, 1),
+            t(Suit::Souzu, 3, 2),
             t(Suit::Wind, 1, 3),
             t(Suit::Wind, 1, 4),
         ];
@@ -898,12 +898,12 @@ mod tests {
     fn detect_honitsu_two_sequences_dragon_pair() {
         // D123 + D456 + White White — one number suit with a dragon pair.
         let tiles = vec![
-            t(Suit::Dots, 1, 0),
-            t(Suit::Dots, 2, 1),
-            t(Suit::Dots, 3, 2),
-            t(Suit::Dots, 4, 3),
-            t(Suit::Dots, 5, 4),
-            t(Suit::Dots, 6, 5),
+            t(Suit::Pinzu, 1, 0),
+            t(Suit::Pinzu, 2, 1),
+            t(Suit::Pinzu, 3, 2),
+            t(Suit::Pinzu, 4, 3),
+            t(Suit::Pinzu, 5, 4),
+            t(Suit::Pinzu, 6, 5),
             t(Suit::Dragon, 3, 6), // White dragon
             t(Suit::Dragon, 3, 7),
         ];
@@ -928,18 +928,18 @@ mod tests {
     #[test]
     fn detect_iipeikou_two_identical_sequences() {
         let tiles = vec![
-            t(Suit::Characters, 2, 0),
-            t(Suit::Characters, 3, 1),
-            t(Suit::Characters, 4, 2),
-            t(Suit::Characters, 2, 3),
-            t(Suit::Characters, 3, 4),
-            t(Suit::Characters, 4, 5),
-            t(Suit::Dots, 5, 6),
-            t(Suit::Dots, 5, 7),
-            t(Suit::Dots, 5, 8),
-            t(Suit::Bamboos, 7, 9),
-            t(Suit::Bamboos, 8, 10),
-            t(Suit::Bamboos, 9, 11),
+            t(Suit::Manzu, 2, 0),
+            t(Suit::Manzu, 3, 1),
+            t(Suit::Manzu, 4, 2),
+            t(Suit::Manzu, 2, 3),
+            t(Suit::Manzu, 3, 4),
+            t(Suit::Manzu, 4, 5),
+            t(Suit::Pinzu, 5, 6),
+            t(Suit::Pinzu, 5, 7),
+            t(Suit::Pinzu, 5, 8),
+            t(Suit::Souzu, 7, 9),
+            t(Suit::Souzu, 8, 10),
+            t(Suit::Souzu, 9, 11),
             t(Suit::Wind, 1, 12),
             t(Suit::Wind, 1, 13),
         ];
@@ -973,15 +973,15 @@ mod tests {
     #[test]
     fn detect_sanshoku_doujun() {
         let tiles = vec![
-            t(Suit::Characters, 4, 0),
-            t(Suit::Characters, 5, 1),
-            t(Suit::Characters, 6, 2),
-            t(Suit::Bamboos, 4, 3),
-            t(Suit::Bamboos, 5, 4),
-            t(Suit::Bamboos, 6, 5),
-            t(Suit::Dots, 4, 6),
-            t(Suit::Dots, 5, 7),
-            t(Suit::Dots, 6, 8),
+            t(Suit::Manzu, 4, 0),
+            t(Suit::Manzu, 5, 1),
+            t(Suit::Manzu, 6, 2),
+            t(Suit::Souzu, 4, 3),
+            t(Suit::Souzu, 5, 4),
+            t(Suit::Souzu, 6, 5),
+            t(Suit::Pinzu, 4, 6),
+            t(Suit::Pinzu, 5, 7),
+            t(Suit::Pinzu, 6, 8),
         ];
         let sets = vec![
             DetectedMeld {
@@ -1004,15 +1004,15 @@ mod tests {
     #[test]
     fn detect_ittsu_full_straight_one_suit() {
         let tiles = vec![
-            t(Suit::Dots, 1, 0),
-            t(Suit::Dots, 2, 1),
-            t(Suit::Dots, 3, 2),
-            t(Suit::Dots, 4, 3),
-            t(Suit::Dots, 5, 4),
-            t(Suit::Dots, 6, 5),
-            t(Suit::Dots, 7, 6),
-            t(Suit::Dots, 8, 7),
-            t(Suit::Dots, 9, 8),
+            t(Suit::Pinzu, 1, 0),
+            t(Suit::Pinzu, 2, 1),
+            t(Suit::Pinzu, 3, 2),
+            t(Suit::Pinzu, 4, 3),
+            t(Suit::Pinzu, 5, 4),
+            t(Suit::Pinzu, 6, 5),
+            t(Suit::Pinzu, 7, 6),
+            t(Suit::Pinzu, 8, 7),
+            t(Suit::Pinzu, 9, 8),
         ];
         let sets = vec![
             DetectedMeld {
@@ -1035,9 +1035,9 @@ mod tests {
     #[test]
     fn detect_honroutou_terminals_and_honors() {
         let tiles = vec![
-            t(Suit::Bamboos, 1, 0),
-            t(Suit::Bamboos, 1, 1),
-            t(Suit::Bamboos, 1, 2),
+            t(Suit::Souzu, 1, 0),
+            t(Suit::Souzu, 1, 1),
+            t(Suit::Souzu, 1, 2),
             t(Suit::Wind, 1, 3),
             t(Suit::Wind, 1, 4),
         ];
@@ -1061,14 +1061,14 @@ mod tests {
         // through the chiitoitsu fallback.
         use crate::core::hand::validate_selection;
         let tiles = vec![
-            t(Suit::Bamboos, 1, 0),
-            t(Suit::Bamboos, 1, 1),
-            t(Suit::Bamboos, 3, 2),
-            t(Suit::Bamboos, 3, 3),
-            t(Suit::Characters, 5, 4),
-            t(Suit::Characters, 5, 5),
-            t(Suit::Dots, 7, 6),
-            t(Suit::Dots, 7, 7),
+            t(Suit::Souzu, 1, 0),
+            t(Suit::Souzu, 1, 1),
+            t(Suit::Souzu, 3, 2),
+            t(Suit::Souzu, 3, 3),
+            t(Suit::Manzu, 5, 4),
+            t(Suit::Manzu, 5, 5),
+            t(Suit::Pinzu, 7, 6),
+            t(Suit::Pinzu, 7, 7),
             t(Suit::Wind, 1, 8),
             t(Suit::Wind, 1, 9),
             t(Suit::Wind, 3, 10),
@@ -1123,7 +1123,7 @@ mod tests {
 
     /// Full hand built from compact labels **EEF1** and **NNF1**: each is two winds
     /// plus a flower wildcard completing a triplet (`E`+`E`+`F1`, `N`+`N`+`F1`).
-    /// Filler melds are one bamboo suit so the hand also scores Honitsu + Full Hand.
+    /// Filler melds are one souzu suit so the hand also scores Honitsu + Full Hand.
     fn eef1_nnf1_flower_wind_hand() -> (Vec<Tile>, Vec<DetectedMeld>) {
         use crate::core::hand::validate_selection;
 
@@ -1136,15 +1136,15 @@ mod tests {
             t(Suit::Wind, 4, 2),
             t(Suit::Wind, 4, 3),
             t(Suit::Flower, 1, 101),
-            // Honitsu filler: one number suit (bamboo)
-            t(Suit::Bamboos, 2, 4),
-            t(Suit::Bamboos, 3, 5),
-            t(Suit::Bamboos, 4, 6),
-            t(Suit::Bamboos, 5, 7),
-            t(Suit::Bamboos, 5, 8),
-            t(Suit::Bamboos, 5, 9),
-            t(Suit::Bamboos, 8, 10),
-            t(Suit::Bamboos, 8, 11),
+            // Honitsu filler: one number suit (souzu)
+            t(Suit::Souzu, 2, 4),
+            t(Suit::Souzu, 3, 5),
+            t(Suit::Souzu, 4, 6),
+            t(Suit::Souzu, 5, 7),
+            t(Suit::Souzu, 5, 8),
+            t(Suit::Souzu, 5, 9),
+            t(Suit::Souzu, 8, 10),
+            t(Suit::Souzu, 8, 11),
         ];
         let sets = validate_selection(&tiles).expect("EEF1+NNF1 hand should decompose");
         assert_eq!(sets.len(), 5, "expected 4 melds + pair: {:?}", sets);
@@ -1212,20 +1212,20 @@ mod tests {
     #[test]
     fn junchan_allows_honors_and_stacks_with_honroutou() {
         let tiles = vec![
-            t(Suit::Characters, 1, 0),
-            t(Suit::Characters, 1, 1),
-            t(Suit::Characters, 1, 2),
-            t(Suit::Characters, 9, 3),
-            t(Suit::Characters, 9, 4),
-            t(Suit::Characters, 9, 5),
-            t(Suit::Dots, 1, 6),
-            t(Suit::Dots, 1, 7),
-            t(Suit::Dots, 1, 8),
+            t(Suit::Manzu, 1, 0),
+            t(Suit::Manzu, 1, 1),
+            t(Suit::Manzu, 1, 2),
+            t(Suit::Manzu, 9, 3),
+            t(Suit::Manzu, 9, 4),
+            t(Suit::Manzu, 9, 5),
+            t(Suit::Pinzu, 1, 6),
+            t(Suit::Pinzu, 1, 7),
+            t(Suit::Pinzu, 1, 8),
             t(Suit::Dragon, 2, 9),
             t(Suit::Dragon, 2, 10),
             t(Suit::Dragon, 2, 11),
-            t(Suit::Bamboos, 9, 12),
-            t(Suit::Bamboos, 9, 13),
+            t(Suit::Souzu, 9, 12),
+            t(Suit::Souzu, 9, 13),
         ];
         let sets = vec![
             DetectedMeld {
@@ -1286,12 +1286,12 @@ mod tests {
     #[test]
     fn iipeikou_requires_complete_winning_hand() {
         let tiles = vec![
-            t(Suit::Characters, 2, 0),
-            t(Suit::Characters, 3, 1),
-            t(Suit::Characters, 4, 2),
-            t(Suit::Characters, 2, 3),
-            t(Suit::Characters, 3, 4),
-            t(Suit::Characters, 4, 5),
+            t(Suit::Manzu, 2, 0),
+            t(Suit::Manzu, 3, 1),
+            t(Suit::Manzu, 4, 2),
+            t(Suit::Manzu, 2, 3),
+            t(Suit::Manzu, 3, 4),
+            t(Suit::Manzu, 4, 5),
         ];
         let sets = vec![
             DetectedMeld {
@@ -1310,11 +1310,11 @@ mod tests {
     #[test]
     fn chinitsu_excludes_honitsu() {
         let tiles = vec![
-            t(Suit::Bamboos, 1, 0),
-            t(Suit::Bamboos, 2, 1),
-            t(Suit::Bamboos, 3, 2),
-            t(Suit::Bamboos, 4, 3),
-            t(Suit::Bamboos, 4, 4),
+            t(Suit::Souzu, 1, 0),
+            t(Suit::Souzu, 2, 1),
+            t(Suit::Souzu, 3, 2),
+            t(Suit::Souzu, 4, 3),
+            t(Suit::Souzu, 4, 4),
         ];
         let sets = vec![
             DetectedMeld {

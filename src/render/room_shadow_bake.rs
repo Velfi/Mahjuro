@@ -127,6 +127,14 @@ impl RoomShadowBake {
     }
 }
 
+/// Neighbor depth must exceed the center by at least this much (light clip Z) to count as
+/// contact occlusion — suppresses shelf-wide darkening on nearly coplanar baked texels.
+const CONTACT_AO_DEPTH_EPS: f32 = 0.003;
+/// Strength of depth-discontinuity darkening (lower than the first bake pass — large room
+/// shells were washing out under the old `×18` / `0.82` cap).
+const CONTACT_AO_STRENGTH: f32 = 10.0;
+const CONTACT_AO_MAX_DARKEN: f32 = 0.58;
+
 /// Build a simple contact-AO field from a baked depth map (light-space depth texels).
 pub fn bake_contact_ao_from_depth(width: u32, height: u32, depth_bytes: &[u8]) -> Vec<u8> {
     let w = width as usize;
@@ -154,12 +162,19 @@ pub fn bake_contact_ao_from_depth(width: u32, height: u32, depth_bytes: &[u8]) -
                     let nx = ((x as i32 + dx).clamp(0, w as i32 - 1)) as usize;
                     let ny = ((y as i32 + dy).clamp(0, h as i32 - 1)) as usize;
                     let nd = depth[ny * w + nx];
-                    let delta = (nd - d).max(0.0) * 18.0;
-                    occ += delta;
+                    let delta = (nd - d).max(0.0);
+                    if delta < CONTACT_AO_DEPTH_EPS {
+                        continue;
+                    }
+                    occ += delta * CONTACT_AO_STRENGTH;
                     n += 1.0;
                 }
             }
-            let darken = (occ / n.max(1.0)).clamp(0.0, 0.82);
+            let darken = if n > 0.0 {
+                (occ / n).clamp(0.0, CONTACT_AO_MAX_DARKEN)
+            } else {
+                0.0
+            };
             ao[i] = ((1.0 - darken) * 255.0).round() as u8;
         }
     }

@@ -109,7 +109,7 @@ impl RunState {
         let mut round_start_gold = 0i32;
         if self.relics.has(RelicId::Charity) && self.gold < 10 {
             round_start_gold += 5;
-            self.relic_activations.push(RelicId::Charity);
+            self.push_relic_activation(RelicId::Charity);
         }
         // Sweepstakes: 25% +$2, 25% +$4, 50% nothing. Rolled each round start.
         // Fortune's Favor doubles the weight of each payout vs. nothing → ⅓ / ⅓ / ⅓.
@@ -152,7 +152,7 @@ impl RunState {
         // Nest Egg: increment rounds held (affects sell value).
         if self.relics.has(RelicId::NestEgg) {
             *self.relic_counters.entry(RelicId::NestEgg).or_insert(0) += 1;
-            self.relic_activations.push(RelicId::NestEgg);
+            self.push_relic_activation(RelicId::NestEgg);
         }
         // Obsession: check if the player's most-used yaku was NOT scored
         // this round. If so, increment the counter.
@@ -165,7 +165,7 @@ impl RunState {
             if let Some(top) = top_yaku {
                 if !self.played_yaku_this_round.contains(&top) {
                     *self.relic_counters.entry(RelicId::Obsession).or_insert(0) += 1;
-                    self.relic_activations.push(RelicId::Obsession);
+                    self.push_relic_activation(RelicId::Obsession);
                 } else {
                     // Reset on use — rewards variety, not just avoidance.
                     self.relic_counters.insert(RelicId::Obsession, 0);
@@ -176,6 +176,8 @@ impl RunState {
         // Defeating the Boss completes an ante (`ante` increments below).
         let was_boss = self.blind == BlindKind::Boss;
         if was_boss {
+            self.score_after_ante
+                .push((self.ante, self.total_score_earned));
             self.ante += 1;
             if self.relics.has(RelicId::BeggarsCup) {
                 *self.relic_counters.entry(RelicId::BeggarsCup).or_insert(0) += 1;
@@ -249,7 +251,7 @@ impl RunState {
         self.roll_lantern_maybe_shatter(bus);
         if self.relics.has(RelicId::NestEgg) {
             *self.relic_counters.entry(RelicId::NestEgg).or_insert(0) += 1;
-            self.relic_activations.push(RelicId::NestEgg);
+            self.push_relic_activation(RelicId::NestEgg);
         }
         if self.relics.has(RelicId::Obsession) {
             let top_yaku = self
@@ -260,7 +262,7 @@ impl RunState {
             if let Some(top) = top_yaku {
                 if !self.played_yaku_this_round.contains(&top) {
                     *self.relic_counters.entry(RelicId::Obsession).or_insert(0) += 1;
-                    self.relic_activations.push(RelicId::Obsession);
+                    self.push_relic_activation(RelicId::Obsession);
                 } else {
                     self.relic_counters.insert(RelicId::Obsession, 0);
                 }
@@ -293,6 +295,11 @@ impl RunState {
     pub fn skip_to_next_blind(&mut self) {
         self.defeat_journal.blinds_skipped =
             self.defeat_journal.blinds_skipped.saturating_add(1);
+        self.chronicle.record_blind_skipped(
+            self.ante,
+            self.upcoming_blind,
+            "Skip reward".into(),
+        );
         self.upcoming_blind = self.upcoming_blind.next();
         self.run_number += 1;
         // `target_score` is recomputed by `apply_blind` when the next blind is picked.

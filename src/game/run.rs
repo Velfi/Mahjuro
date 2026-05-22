@@ -649,6 +649,12 @@ pub struct RunState {
     /// Display label for the highest-scoring structure.
     #[serde(default)]
     pub best_structure_name: String,
+    /// Tiles from the highest-scoring structure cash-in (for chronicle display).
+    #[serde(default)]
+    pub best_hand_tiles: Vec<Tile>,
+    /// Cumulative run score snapshot after each boss-cleared ante.
+    #[serde(default)]
+    pub score_after_ante: Vec<(u32, u64)>,
     /// Per-run tile enhancement map, keyed by tile id. Talismans stamp every
     /// hand tile's id into this map; whenever tiles are drawn (initial deal,
     /// post-play refill, mid-round draws, new-round redeals), we re-apply the
@@ -743,6 +749,10 @@ pub struct RunState {
     /// draw, consumable interaction, etc.).
     #[serde(skip)]
     pub relic_activations: Vec<RelicId>,
+
+    /// Per-run analytics for the Archive Chronicle ledger.
+    #[serde(default)]
+    pub chronicle: crate::core::run_chronicle::RunChronicle,
 
     /// Habits tracked for memorial remnant selection at defeat.
     #[serde(default)]
@@ -909,8 +919,7 @@ impl RunState {
                 .relic_counters
                 .entry(crate::core::relic::RelicId::Kintsugi)
                 .or_insert(0) += 1;
-            self.relic_activations
-                .push(crate::core::relic::RelicId::Kintsugi);
+            self.push_relic_activation(crate::core::relic::RelicId::Kintsugi);
         }
     }
 
@@ -960,8 +969,16 @@ impl RunState {
         self.gold = self.gold.saturating_add(delta);
         let applied = self.gold - old;
         if applied != 0 {
+            self.chronicle.note_gold_earned(applied);
             self.notify_run_gold_changed(applied, bus);
         }
+    }
+
+    /// Record a relic activation for animation and Chronicle totals.
+    #[inline]
+    pub(crate) fn push_relic_activation(&mut self, id: crate::core::relic::RelicId) {
+        self.relic_activations.push(id);
+        self.chronicle.note_relic_trigger();
     }
 
     /// Set run gold to an absolute value (debug / tooling). Emits the net delta.
@@ -998,7 +1015,7 @@ impl RunState {
             return;
         }
         let _ = self.destroy_relic_removed_from_run(RelicId::TurtleShell);
-        self.relic_activations.push(RelicId::TurtleShell);
+        self.push_relic_activation(RelicId::TurtleShell);
         if let Some(bus) = bus {
             bus.push(GameEvent::RelicActivated(RelicId::TurtleShell));
         }
@@ -1146,6 +1163,8 @@ impl RunState {
             times_restocked: 0,
             best_structure_score: 0,
             best_structure_name: String::new(),
+            best_hand_tiles: Vec::new(),
+            score_after_ante: Vec::new(),
             tile_enhancements: BTreeMap::new(),
             global_buff_enhancement: None,
             removed_tile_ids: rustc_hash::FxHashSet::default(),
@@ -1164,6 +1183,14 @@ impl RunState {
             relic_counters: std::collections::BTreeMap::new(),
             onboarding: None,
             relic_activations: Vec::new(),
+            chronicle: {
+                let seed = rand::random::<u64>();
+                let started_unix = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                crate::core::run_chronicle::RunChronicle::new_run(seed, started_unix)
+            },
             defeat_journal: crate::core::memorial_talisman::RunDefeatJournal::default(),
             memorial_granted: false,
             memorial_snapshot: None,
@@ -1289,7 +1316,8 @@ impl RunState {
                 self.hand.push(matching);
                 self.selected.push(false);
                 bus.push(GameEvent::TileDrawn);
-                self.relic_activations.push(RelicId::SetMagnet);
+                self.push_relic_activation(RelicId::SetMagnet);
+                self.chronicle.note_tiles_drawn(1);
             }
         }
     }
@@ -1297,9 +1325,9 @@ impl RunState {
 
 /// All tile faces for substitution attempts.
 const ALL_FACES: [(Suit, u8); 34] = {
-    let mut faces = [(Suit::Characters, 0u8); 34];
+    let mut faces = [(Suit::Manzu, 0u8); 34];
     let mut i = 0;
-    let suits = [Suit::Characters, Suit::Bamboos, Suit::Dots];
+    let suits = [Suit::Manzu, Suit::Souzu, Suit::Pinzu];
     let mut si = 0;
     while si < 3 {
         let mut r = 1u8;
@@ -1348,7 +1376,7 @@ fn try_joker_substitution(
 fn wind_candidate_faces(tiles: &[Tile]) -> Vec<(Suit, u8)> {
     use std::collections::BTreeSet;
     let mut candidates = BTreeSet::new();
-    let number_suits = [Suit::Characters, Suit::Bamboos, Suit::Dots];
+    let number_suits = [Suit::Manzu, Suit::Souzu, Suit::Pinzu];
     for t in tiles {
         // Exact face: could pair/triplet with existing tiles.
         candidates.insert((t.suit, t.rank));

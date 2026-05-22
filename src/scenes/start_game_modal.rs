@@ -285,7 +285,7 @@ impl TileSelectScene {
 fn preview_tiles() -> Vec<Tile> {
     let mut tiles = Vec::with_capacity(38);
     let mut id = 50_000u32;
-    for suit in [Suit::Characters, Suit::Bamboos, Suit::Dots] {
+    for suit in [Suit::Manzu, Suit::Souzu, Suit::Pinzu] {
         for rank in 1..=9 {
             tiles.push(Tile::new(suit, rank, id));
             id += 1;
@@ -308,9 +308,9 @@ fn preview_tiles() -> Vec<Tile> {
 
 /// Row definitions: (start_index, count) for each row.
 const GRID_ROWS: [(usize, usize); 5] = [
-    (0, 9),  // Characters 1–9
-    (9, 9),  // Bamboos 1–9
-    (18, 9), // Dots 1–9
+    (0, 9),  // Manzu 1–9
+    (9, 9),  // Souzu 1–9
+    (18, 9), // Pinzu 1–9
     (27, 7), // Winds 1–4 + Dragons 1–3
     (34, 4), // Flowers 1–4
 ];

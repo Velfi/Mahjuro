@@ -45,7 +45,14 @@ impl WgpuRenderer {
         // Imported room GLB — opaque primitives only (blend/glass skipped).
         let active_room_env = super::shadow_setup::active_room_env(frame);
         let bake_capture = self.room_shadow_capture_pending.is_some();
-        let skip_room_dynamic = self.active_room_baked_shadow.is_some() && !bake_capture;
+        let baked_loaded = active_room_env.and_then(|env| {
+            super::shadow_setup::room_baked_shadow_loaded(&self.room_baked_shadow_gpu, env)
+        });
+        let skip_room_dynamic = super::shadow_setup::skip_room_env_live_shadow_pass(
+            active_room_env,
+            baked_loaded,
+            bake_capture,
+        );
         if !skip_room_dynamic {
             match active_room_env {
                 Some(ActiveRoomEnv::Shop) if !shop_inspect_shadow_only => {
@@ -75,7 +82,7 @@ impl WgpuRenderer {
                             &mut shadow_pass,
                             &self.archive_env_primitives,
                             gpu,
-                            |pi| self.archive_env_skip_description_sign_shadow(pi),
+                            |pi| self.archive_env_skip_room_shadow_caster(pi),
                         );
                     }
                 }

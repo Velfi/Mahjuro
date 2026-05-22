@@ -54,12 +54,12 @@ pub enum RelicId {
     /// Each flower scored grants +3 gold immediately.
     Hanami,
     // ── Suit, rank, economy ───────────────────────────────────────────
-    /// Bamboo-suit tiles in scored sets: +8 chips each.
+    /// Souzu-suit tiles in scored sets: +8 chips each.
     JadeSerpent,
-    /// Characters-suit tiles in scored sets: +8 chips each.
+    /// Manzu-suit tiles in scored sets: +8 chips each.
     #[serde(alias = "red_serpent")]
     RubySerpent,
-    /// Dots tiles in scored sets: +8 chips each.
+    /// Pinzu tiles in scored sets: +8 chips each.
     #[serde(alias = "blue_serpent")]
     LapisSerpent,
     /// Tiles ranked 1–3 in scored sets: +6 chips each.
@@ -512,21 +512,21 @@ impl RelicId {
     /// for relic visual development and future mesh/height derivation.
     pub fn source_object_path(self) -> String {
         let stem = self.asset_filename().trim_end_matches(".png");
-        format!("textures/relics/source/{}_object.png", stem)
+        format!("textures/relics/{}_object.png", stem)
     }
 
     /// Optional binary or transparent silhouette image used to derive the
     /// runtime relic mesh more deterministically than the shaded object render.
     pub fn source_mask_path(self) -> String {
         let stem = self.asset_filename().trim_end_matches(".png");
-        format!("textures/relics/source/{}_mask.png", stem)
+        format!("textures/relics/{}_mask.png", stem)
     }
 
     /// Optional offline-generated grayscale relief source for future embossed
     /// or carved detailing on the 3D relic mesh.
     pub fn source_heightmap_path(self) -> String {
         let stem = self.asset_filename().trim_end_matches(".png");
-        format!("textures/relics/source/{}_height.png", stem)
+        format!("textures/relics/{}_height.png", stem)
     }
 
     /// Optional offline-generated grayscale specular mask for soft-enamel pins.
@@ -534,7 +534,7 @@ impl RelicId {
     /// when this file is missing.
     pub fn source_specular_path(self) -> String {
         let stem = self.asset_filename().trim_end_matches(".png");
-        format!("textures/relics/source/{}_specular.png", stem)
+        format!("textures/relics/{}_specular.png", stem)
     }
 
     /// Derived runtime silhouette used when the offline workflow emits a

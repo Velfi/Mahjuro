@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generate only `source/<slug>_height.png` (grayscale relief guides).
+Generate only `<slug>_height.png` under `assets/textures/relics/` (grayscale relief guides).
 
 Thin wrapper around `scripts/generate_relic_art.py --artifact height`. Those
 files are the **linear height / relief** inputs for the 3D renderer (see

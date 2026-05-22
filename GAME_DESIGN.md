@@ -30,7 +30,7 @@ Mahjuro is a mahjong-inspired roguelite that makes mahjong approachable for west
 
 ### **A. Tile Types**
 
-* **Number Tiles:** 1–9 in 3 suits — Characters, Bamboos, Dots
+* **Number Tiles:** 1–9 in 3 suits — Manzu, Souzu, Pinzu
 * **Honor Tiles:** Winds (East, South, West, North), Dragons (Red, Green, White)
 * **Flowers:** Act as wildcards — one flower can substitute for a missing tile in a meld (max one substitution per meld); flowers themselves contribute no base chips
 * **Seasons:** Solitaire-only bonus tiles

@@ -491,12 +491,12 @@ fn push_shuffling_fan(frame: &mut UiFrame, progress: f32, window: (f32, f32)) {
 
 fn tile_sequence() -> [Tile; 12] {
     [
-        Tile::new(Suit::Characters, 1, 0),
-        Tile::new(Suit::Characters, 9, 1),
-        Tile::new(Suit::Bamboos, 2, 2),
-        Tile::new(Suit::Bamboos, 8, 3),
-        Tile::new(Suit::Dots, 3, 4),
-        Tile::new(Suit::Dots, 7, 5),
+        Tile::new(Suit::Manzu, 1, 0),
+        Tile::new(Suit::Manzu, 9, 1),
+        Tile::new(Suit::Souzu, 2, 2),
+        Tile::new(Suit::Souzu, 8, 3),
+        Tile::new(Suit::Pinzu, 3, 4),
+        Tile::new(Suit::Pinzu, 7, 5),
         Tile::new(Suit::Wind, 1, 6),
         Tile::new(Suit::Wind, 4, 7),
         Tile::new(Suit::Dragon, 1, 8),

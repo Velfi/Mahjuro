@@ -4,6 +4,7 @@ use crate::render::draw_cmd::{DrawCmd, UiFrame};
 use crate::render::lit_mesh::{
     LitMeshInstance, MaterialKind, ShadowCasterUniform, material_casts_shadow,
 };
+use crate::render::room_gi_bake::RoomGiRoom;
 
 /// Which imported room mesh is active this frame (at most one is drawn).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,9 +29,75 @@ pub fn active_room_env(frame: &UiFrame) -> Option<ActiveRoomEnv> {
     None
 }
 
+impl ActiveRoomEnv {
+    #[inline]
+    pub fn to_room_gi(self) -> Option<RoomGiRoom> {
+        match self {
+            Self::Shop => Some(RoomGiRoom::Shop),
+            Self::Hallway => Some(RoomGiRoom::Hallway),
+            Self::Archive => Some(RoomGiRoom::Archive),
+            Self::MainMenu => Some(RoomGiRoom::MainMenu),
+        }
+    }
+}
+
 pub(super) const SHADOW_MAP_SIZE: f32 = 1024.0;
 
-/// Whether this catalog prop should cast into the dynamic shadow map.
+/// The active imported room has a loaded offline shadow field (`.msh`) on disk.
+#[inline]
+pub(super) fn room_has_baked_shadow_asset(
+    env: ActiveRoomEnv,
+    baked_room: Option<RoomGiRoom>,
+) -> bool {
+    env.to_room_gi()
+        .zip(baked_room)
+        .is_some_and(|(frame_room, loaded)| frame_room == loaded)
+}
+
+/// Loaded offline shadow field for the active room env, if any.
+#[inline]
+pub(super) fn room_baked_shadow_loaded(
+    slots: &[Option<crate::render::wgpu_renderer::impl_room_shadow::RoomBakedShadowGpu>; 4],
+    env: ActiveRoomEnv,
+) -> Option<RoomGiRoom> {
+    let room = env.to_room_gi()?;
+    let idx = match room {
+        RoomGiRoom::Shop => 0,
+        RoomGiRoom::Hallway => 1,
+        RoomGiRoom::Archive => 2,
+        RoomGiRoom::MainMenu => 3,
+    };
+    slots[idx].as_ref()?;
+    Some(room)
+}
+
+/// Whether this room samples its offline `.msh` instead of the live room shadow pass.
+#[inline]
+pub(crate) fn room_env_uses_offline_baked_shadow(
+    active_room: Option<ActiveRoomEnv>,
+    baked_room: Option<RoomGiRoom>,
+) -> bool {
+    let Some(env) = active_room else {
+        return false;
+    };
+    room_has_baked_shadow_asset(env, baked_room)
+}
+
+/// Room GLB must not be redrawn into the live 1024² map when offline baked sampling is active.
+/// Offline capture (`room_shadow_capture_pending`) always redraws the shell once.
+#[inline]
+pub(super) fn skip_room_env_live_shadow_pass(
+    active_room: Option<ActiveRoomEnv>,
+    baked_room: Option<RoomGiRoom>,
+    capturing_offline_bake: bool,
+) -> bool {
+    if capturing_offline_bake {
+        return false;
+    }
+    room_env_uses_offline_baked_shadow(active_room, baked_room)
+}
+
+/// Whether this catalog prop should cast into the live shadow map.
 #[inline]
 pub(super) fn object3d_casts_dynamic_shadow(
     active_room: Option<ActiveRoomEnv>,
@@ -40,12 +107,8 @@ pub(super) fn object3d_casts_dynamic_shadow(
         None | Some(ActiveRoomEnv::Shop) | Some(ActiveRoomEnv::Hallway) | Some(ActiveRoomEnv::MainMenu) => {
             true
         }
-        Some(ActiveRoomEnv::Archive) => {
-            // Grid close-up sits on the pedestal; casting the featured prop into the
-            // live map projects a hard silhouette onto `main_fixture` wood. Inspect orbit
-            // uses `SHOP_INSPECT_SUBJECT_ANIM_ID` for a tight subject-only shadow.
-            anim_id == SHOP_INSPECT_SUBJECT_ANIM_ID
-        }
+        // Baked archive contact is static; the live map is for inspect orbit only.
+        Some(ActiveRoomEnv::Archive) => anim_id == SHOP_INSPECT_SUBJECT_ANIM_ID,
     }
 }
 
@@ -193,8 +256,16 @@ impl WgpuRenderer {
                 self.room_gltf_height_scale
             };
             let extent = camera.h * env_height_scale;
-            let half = extent * 0.62;
-            let depth = extent * 1.45;
+            let archive_offline_bake = self.room_shadow_capture_pending
+                == Some(crate::render::room_gi_bake::RoomGiRoom::Archive);
+            // Archive `.msh` only bakes cubby casters — tighter XY keeps texels on the grid.
+            let (half_mul, depth_mul) = if archive_offline_bake {
+                (0.44, 1.15)
+            } else {
+                (0.62, 1.45)
+            };
+            let half = extent * half_mul;
+            let depth = extent * depth_mul;
             // PCF bias is in light clip Z (≈ texels), not world depth — scaling with the
             // room ortho span was ~20× too large and washed out GLB self-shadow.
             let bias = TABLE_SHADOW_DEPTH_BIAS;

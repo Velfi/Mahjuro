@@ -8,7 +8,7 @@ use crate::core::tile::{Suit, Tile};
 pub(crate) fn tea_harmony_chips(tiles: &[Tile]) -> Option<i32> {
     let suits: FxHashSet<Suit> = tiles
         .iter()
-        .filter(|t| matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Dots))
+        .filter(|t| matches!(t.suit, Suit::Souzu | Suit::Manzu | Suit::Pinzu))
         .map(|t| t.suit)
         .collect();
     (suits.len() >= 2).then_some(40)
@@ -25,7 +25,7 @@ pub(crate) fn tea_respect_chips(tiles: &[Tile]) -> Option<i32> {
 pub(crate) fn tea_purity_mult(tiles: &[Tile]) -> Option<f64> {
     let numbered_suits: Vec<Suit> = tiles
         .iter()
-        .filter(|t| matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Dots))
+        .filter(|t| matches!(t.suit, Suit::Souzu | Suit::Manzu | Suit::Pinzu))
         .map(|t| t.suit)
         .collect();
     if !numbered_suits.is_empty() && numbered_suits.iter().all(|&s| s == numbered_suits[0]) {

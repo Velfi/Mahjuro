@@ -73,9 +73,9 @@ Live in [`src/core/tile.rs`](src/core/tile.rs). Spread across the wheel for inst
 
 | Suit | RGBA | Hex | Feel |
 |---|---|---|---|
-| Characters | `[0.85, 0.25, 0.20, 1.0]` | `#D94033` | Cinnabar — ink-stamped on ivory. |
-| Bamboos | `[0.20, 0.65, 0.30, 1.0]` | `#33A64D` | Felt-adjacent green. |
-| Dots | `[0.20, 0.40, 0.80, 1.0]` | `#3366CC` | Sapphire. |
+| Manzu | `[0.85, 0.25, 0.20, 1.0]` | `#D94033` | Cinnabar — ink-stamped on ivory. |
+| Souzu | `[0.20, 0.65, 0.30, 1.0]` | `#33A64D` | Felt-adjacent green. |
+| Pinzu | `[0.20, 0.40, 0.80, 1.0]` | `#3366CC` | Sapphire. |
 | Wind | `[0.70, 0.60, 0.20, 1.0]` | `#B39933` | Faded gold leaf. |
 | Dragon (Chun, rank 1) | `[0.85, 0.20, 0.18, 1.0]` | `#D9332E` | Red dragon — `中`. |
 | Dragon (Hatsu, rank 2) | `[0.20, 0.65, 0.30, 1.0]` | `#33A64D` | Green dragon — `發`. |
@@ -106,7 +106,7 @@ The effects layer is where the palette gets to misbehave. The base is restrained
 
 ### Fireworks (scoring cascade)
 
-Color comes from the **scoring tile** that triggered the burst — a Characters score throws cinnabar shards, a Bamboo score throws felt-green ones. Use the suit color directly; do not desaturate. The shard core blooms toward `PARCHMENT` for a moment before falling back to the suit hue.
+Color comes from the **scoring tile** that triggered the burst — a Manzu score throws cinnabar shards, a Souzu score throws felt-green ones. Use the suit color directly; do not desaturate. The shard core blooms toward `PARCHMENT` for a moment before falling back to the suit hue.
 
 ### Score particles
 

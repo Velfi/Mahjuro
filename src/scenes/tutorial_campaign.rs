@@ -74,26 +74,26 @@ struct TutorialPage {
 /// Three numbered suits (2–9 tiles each in the full wall).
 const PART1_SUITS_GROUPS: &[TileGroup] = &[
     TileGroup {
-        label: "Bamboos",
+        label: "Souzu",
         accent: color::WALNUT_BRIGHT,
-        tiles: &[(Suit::Bamboos, 2), (Suit::Bamboos, 5), (Suit::Bamboos, 8)],
+        tiles: &[(Suit::Souzu, 2), (Suit::Souzu, 5), (Suit::Souzu, 8)],
         rows: &[],
         debuffed_visual: false,
     },
     TileGroup {
-        label: "Dots",
+        label: "Pinzu",
         accent: color::CHAMPAGNE,
-        tiles: &[(Suit::Dots, 3), (Suit::Dots, 5), (Suit::Dots, 7)],
+        tiles: &[(Suit::Pinzu, 3), (Suit::Pinzu, 5), (Suit::Pinzu, 7)],
         rows: &[],
         debuffed_visual: false,
     },
     TileGroup {
-        label: "Characters",
+        label: "Manzu",
         accent: color::STONE,
         tiles: &[
-            (Suit::Characters, 1),
-            (Suit::Characters, 5),
-            (Suit::Characters, 9),
+            (Suit::Manzu, 1),
+            (Suit::Manzu, 5),
+            (Suit::Manzu, 9),
         ],
         rows: &[],
         debuffed_visual: false,
@@ -106,7 +106,7 @@ const TUTORIAL_PAGE_SCORING: usize = 1;
 const SCORING_DEMO_GROUPS: &[TileGroup] = &[TileGroup {
     label: "Pair",
     accent: color::CHAMPAGNE,
-    tiles: &[(Suit::Dots, 5), (Suit::Dots, 5)],
+    tiles: &[(Suit::Pinzu, 5), (Suit::Pinzu, 5)],
     rows: &[],
     debuffed_visual: false,
 }];
@@ -114,11 +114,11 @@ const SCORING_DEMO_GROUPS: &[TileGroup] = &[TileGroup {
 const PAGES: &[TutorialPage] = &[
     TutorialPage {
         title: "Part 1 — Tiles",
-        subtitle: "Mahjuro uses three numbered suits: Bamboos, Dots, and Characters. Each suit has ranks 1 through 9. Most melds stay inside one suit.",
+        subtitle: "Mahjuro uses three numbered suits: Souzu, Pinzu, and Manzu. Each suit has ranks 1 through 9. Most melds stay inside one suit.",
         glossary: &[
-            "Bamboos = green bamboo sticks",
-            "Dots = circles",
-            "Characters = red kanji",
+            "Souzu = green bamboo sticks",
+            "Pinzu = circles",
+            "Manzu = red kanji",
             "Matching = same suit and rank",
         ],
         callout: Some("You'll learn the rest by playing — starting with pairs."),

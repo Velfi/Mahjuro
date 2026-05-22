@@ -111,9 +111,9 @@ mod tests {
     #[test]
     fn require_honor_blocks_trigger_when_any_set_lacks_honor() {
         let tiles = vec![
-            tile(Suit::Bamboos, 5, 0),
-            tile(Suit::Bamboos, 5, 1),
-            tile(Suit::Bamboos, 5, 2),
+            tile(Suit::Souzu, 5, 0),
+            tile(Suit::Souzu, 5, 1),
+            tile(Suit::Souzu, 5, 2),
         ];
         let sets = vec![DetectedMeld {
             kind: MeldKind::Triplet,
@@ -153,9 +153,9 @@ mod tests {
     #[test]
     fn require_honor_allows_trigger_when_only_one_set_has_honor() {
         let tiles = vec![
-            tile(Suit::Bamboos, 1, 0),
-            tile(Suit::Bamboos, 2, 1),
-            tile(Suit::Bamboos, 3, 2),
+            tile(Suit::Souzu, 1, 0),
+            tile(Suit::Souzu, 2, 1),
+            tile(Suit::Souzu, 3, 2),
             tile(Suit::Dragon, 1, 3),
             tile(Suit::Dragon, 1, 4),
             tile(Suit::Dragon, 1, 5),

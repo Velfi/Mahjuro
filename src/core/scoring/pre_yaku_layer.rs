@@ -107,29 +107,29 @@ pub(crate) fn apply_pre_yaku_scoring(
                 if tile_is_debuffed(t, ctx.tiles.debuffs) {
                     continue;
                 }
-                if has_jade_serpent && t.suit == Suit::Bamboos {
+                if has_jade_serpent && t.suit == Suit::Souzu {
                     push_chips(steps, chips, *mult, "Jade Serpent", 8);
                 }
-                if has_ruby_serpent && t.suit == Suit::Characters {
+                if has_ruby_serpent && t.suit == Suit::Manzu {
                     push_chips(steps, chips, *mult, "Ruby Serpent", 8);
                 }
-                if has_lapis_serpent && t.suit == Suit::Dots {
+                if has_lapis_serpent && t.suit == Suit::Pinzu {
                     push_chips(steps, chips, *mult, "Lapis Serpent", 8);
                 }
                 if has_edge_runner
-                    && matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Dots)
+                    && matches!(t.suit, Suit::Souzu | Suit::Manzu | Suit::Pinzu)
                     && (t.rank == 1 || t.rank == 9)
                 {
                     push_chips(steps, chips, *mult, "Edge Runner", 12);
                 }
                 if has_low_tide
-                    && matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Dots)
+                    && matches!(t.suit, Suit::Souzu | Suit::Manzu | Suit::Pinzu)
                     && t.rank <= 3
                 {
                     push_chips(steps, chips, *mult, "Low Tide", 6);
                 }
                 if has_high_tide
-                    && matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Dots)
+                    && matches!(t.suit, Suit::Souzu | Suit::Manzu | Suit::Pinzu)
                     && t.rank >= 7
                 {
                     push_chips(steps, chips, *mult, "High Tide", 6);
@@ -198,7 +198,7 @@ pub(crate) fn apply_pre_yaku_scoring(
         for s in sets {
             for &tid in &s.tile_ids {
                 if let Some(t) = tile_by_id(tiles, tid)
-                    && matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Dots)
+                    && matches!(t.suit, Suit::Souzu | Suit::Manzu | Suit::Pinzu)
                     && t.rank <= 4
                 {
                     retrigger += effective_point_value(t, ctx);
@@ -215,7 +215,7 @@ pub(crate) fn apply_pre_yaku_scoring(
         for s in sets {
             for &tid in &s.tile_ids {
                 if let Some(t) = tile_by_id(tiles, tid)
-                    && matches!(t.suit, Suit::Bamboos | Suit::Characters | Suit::Dots)
+                    && matches!(t.suit, Suit::Souzu | Suit::Manzu | Suit::Pinzu)
                     && t.rank >= 6
                 {
                     retrigger += effective_point_value(t, ctx);

@@ -1873,7 +1873,7 @@ mod silhouette_tests {
     #[ignore = "hits real asset files; run explicitly"]
     fn real_relic_masks_build_reasonable_meshes() {
         use std::path::Path;
-        let asset_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/textures/relics/source");
+        let asset_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/textures/relics");
         for name in &[
             "joker_tile",
             "beggars_cup",

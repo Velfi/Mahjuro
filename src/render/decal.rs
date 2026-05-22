@@ -47,7 +47,7 @@ fn finish_tile_decal_rgba(mut rgba: Vec<u8>, width: u32, height: u32, flip_h: bo
 /// Mahjong Unicode glyph is unavailable — no `m`/`s`/`p`, wind initials, or kanji.
 pub fn tile_face_display_label(tile: &Tile) -> String {
     match tile.suit {
-        Suit::Characters | Suit::Bamboos | Suit::Dots => format!("{}", tile.rank),
+        Suit::Manzu | Suit::Souzu | Suit::Pinzu => format!("{}", tile.rank),
         Suit::Wind => match tile.rank {
             1 => "East".into(),
             2 => "South".into(),
@@ -68,9 +68,9 @@ pub fn tile_face_display_label(tile: &Tile) -> String {
 /// Emoji indicator for each suit, rendered below the main label.
 pub fn tile_suit_emoji(tile: &Tile) -> &'static str {
     match tile.suit {
-        Suit::Characters => "\u{1F3B4}", // 🎴 flower card
-        Suit::Bamboos => "\u{1F38B}",    // 🎋 tanabata tree / bamboo
-        Suit::Dots => "\u{1F534}",       // 🔴 red circle / disc
+        Suit::Manzu => "\u{1F3B4}", // 🎴 flower card
+        Suit::Souzu => "\u{1F38B}",    // 🎋 tanabata tree / bamboo
+        Suit::Pinzu => "\u{1F534}",       // 🔴 red circle / disc
         Suit::Wind => "\u{1F32C}",       // 🌬 wind face
         Suit::Dragon => "\u{1F409}",     // 🐉 dragon
         Suit::Flower => "\u{1F33A}",     // 🌺 hibiscus
@@ -81,14 +81,14 @@ pub fn tile_suit_emoji(tile: &Tile) -> &'static str {
 /// Return the asset filename stem for a tile inside a tileset directory.
 ///
 /// Maps `(Suit, rank)` to the naming convention used in `assets/textures/tile_sets/`:
-///   Bamboos 1–9 → B1..B9, Characters → C1..C9, Dots → D1..D9,
+///   Souzu 1–9 → B1..B9, Manzu → C1..C9, Pinzu → D1..D9,
 ///   Winds → EWind/SWind/WWind/NWind, Dragons → DRed/DGreen/DWhite,
 ///   Flowers → Flower1..Flower4, Seasons → Season1..Season4.
 fn tile_set_filename(tile: &Tile) -> Option<String> {
     match tile.suit {
-        Suit::Bamboos => Some(format!("B{}", tile.rank)),
-        Suit::Characters => Some(format!("C{}", tile.rank)),
-        Suit::Dots => Some(format!("D{}", tile.rank)),
+        Suit::Souzu => Some(format!("B{}", tile.rank)),
+        Suit::Manzu => Some(format!("C{}", tile.rank)),
+        Suit::Pinzu => Some(format!("D{}", tile.rank)),
         Suit::Wind => {
             let prefix = match tile.rank {
                 1 => "E",

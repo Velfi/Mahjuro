@@ -1058,8 +1058,14 @@ impl WgpuRenderer {
         );
 
         self.upload_active_room_baked_shadow_globals(frame);
-        let room_uses_baked_shadow = self.active_room_baked_shadow.is_some()
-            && self.room_shadow_capture_pending.is_none();
+        let active_env = super::shadow_setup::active_room_env(frame);
+        let baked_loaded = active_env.and_then(|env| {
+            super::shadow_setup::room_baked_shadow_loaded(&self.room_baked_shadow_gpu, env)
+        });
+        let room_uses_baked_shadow = super::shadow_setup::room_env_uses_offline_baked_shadow(
+            active_env,
+            baked_loaded,
+        ) && self.room_shadow_capture_pending.is_none();
         if ops_flags.shop_env {
             let shop_room_shadow = (shadows_enabled
                 && frame.shop_inspect_shadow_target.is_none()

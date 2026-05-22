@@ -4,17 +4,17 @@ Run the full Gemini → derived runtime textures pipeline for one or more relics
 
 Steps:
 
-  1. `generate_relic_art.py` — writes `assets/textures/relics/source/<slug>_object.png`
+  1. `generate_relic_art.py` — writes `assets/textures/relics/<slug>_object.png`
      and `<slug>_height.png` (defaults: height from text, object from height via edit).
 
   2. `derive_relic_runtime_textures.py` — writes `assets/textures/relics/<slug>.png`
-     (preferred albedo) and, with `--emit-masks`, `source/<slug>_mask.png` for extrusion.
+     (preferred albedo) and, with `--emit-masks`, `<slug>_mask.png` for extrusion.
 
   3. Rebuild or re-bake packs — see `tools/bake_assets/README.md`.
 
 Runtime loading is implemented in `src/render/relic_pipeline.rs`: albedo
-(`relics/<slug>.png` then `source/<slug>_object.png`), optional masks, linear
-`source/<slug>_height.png` for 3D relief.
+(`relics/<slug>.png` then `<slug>_object.png`), optional masks, linear
+`<slug>_height.png` for 3D relief.
 
 Usage:
     export GEMINI_API_KEY=...

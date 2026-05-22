@@ -64,7 +64,7 @@ impl RunState {
 
         if scoring_tiles != selected_tiles && self.relics.has(RelicId::JokerTile) {
             self.joker_used = true;
-            self.relic_activations.push(RelicId::JokerTile);
+            self.push_relic_activation(RelicId::JokerTile);
         }
         self.tiles_played = self.tiles_played.saturating_add(scoring_tiles.len() as u32);
 
@@ -123,7 +123,7 @@ impl RunState {
                 .count() as i32;
             if flower_count > 0 {
                 *self.relic_counters.entry(RelicId::LotusBloom).or_insert(0) += flower_count;
-                self.relic_activations.push(RelicId::LotusBloom);
+                self.push_relic_activation(RelicId::LotusBloom);
             }
         }
         let copy_eff = EffectiveRelics::from_roster(&self.relics);
@@ -135,7 +135,7 @@ impl RunState {
                     .relic_counters
                     .entry(RelicId::KongCollector)
                     .or_insert(0) += kong_count.saturating_mul(times as i32);
-                self.relic_activations.push(RelicId::KongCollector);
+                self.push_relic_activation(RelicId::KongCollector);
             }
         }
 
@@ -147,7 +147,7 @@ impl RunState {
 
         let effective = boss::effective_hand_size(self);
         let draw_target = if copy_eff.has(&self.relics, RelicId::QuickDraw) {
-            self.relic_activations.push(RelicId::QuickDraw);
+            self.push_relic_activation(RelicId::QuickDraw);
             effective + 1
         } else {
             effective
@@ -158,6 +158,8 @@ impl RunState {
             bus.push(GameEvent::TileDrawn);
             drawn.push(t);
         }
+        self.chronicle
+            .note_tiles_drawn(drawn.len().min(u32::MAX as usize) as u32);
         let restocked = !drawn.is_empty();
         crate::game::engine_state::GameplayCoreState::with_run_mut(self, |core| {
             core.push_drawn_tiles(&drawn);
@@ -266,6 +268,7 @@ impl RunState {
         if applied > self.best_structure_score {
             self.best_structure_score = applied;
             self.best_structure_name = structure_label_from_yaku(&breakdown.detected_yaku);
+            self.best_hand_tiles = scoring_tiles.iter().map(|t| t.display_copy()).collect();
         }
 
         if absorb_excess && breakdown_total > 0 {
@@ -277,15 +280,13 @@ impl RunState {
             let add = (breakdown_total.min(room.max(0) as u64)) as i32;
             *cur = cur.saturating_add(add);
             if self.relics.has(crate::core::relic::RelicId::Chrysalis) {
-                self.relic_activations
-                    .push(crate::core::relic::RelicId::Chrysalis);
+                self.push_relic_activation(crate::core::relic::RelicId::Chrysalis);
             }
             if self
                 .relics
                 .has(crate::core::relic::RelicId::MonarchButterfly)
             {
-                self.relic_activations
-                    .push(crate::core::relic::RelicId::MonarchButterfly);
+                self.push_relic_activation(crate::core::relic::RelicId::MonarchButterfly);
             }
 
             let excess = self
@@ -311,13 +312,13 @@ impl RunState {
                 .relic_counters
                 .entry(RelicId::TilePolisher)
                 .or_insert(0) += 3 * tile_count;
-            self.relic_activations.push(RelicId::TilePolisher);
+            self.push_relic_activation(RelicId::TilePolisher);
         }
         if self.relics.has(RelicId::RiverRunner) {
             let seq_count = sets.iter().filter(|s| s.kind == MeldKind::Sequence).count() as i32;
             if seq_count > 0 {
                 *self.relic_counters.entry(RelicId::RiverRunner).or_insert(0) += 20 * seq_count;
-                self.relic_activations.push(RelicId::RiverRunner);
+                self.push_relic_activation(RelicId::RiverRunner);
             }
         }
         if self.relics.has(RelicId::Taotie) {
@@ -343,7 +344,7 @@ impl RunState {
             if devoured > 0 {
                 *self.relic_counters.entry(RelicId::Taotie).or_insert(0) +=
                     CHIPS_PER_DEVOURED * devoured;
-                self.relic_activations.push(RelicId::Taotie);
+                self.push_relic_activation(RelicId::Taotie);
                 bus.push(GameEvent::TilesDestroyed);
             }
         }
@@ -361,7 +362,7 @@ impl RunState {
                 && let Some(&y) = breakdown.detected_yaku.choose(&mut rng)
             {
                 let _new_level = self.yaku_levels.level_up(y);
-                self.relic_activations.push(RelicId::StarTile);
+                self.push_relic_activation(RelicId::StarTile);
             }
         }
         if breakdown.flower_gold > 0 {
@@ -377,7 +378,7 @@ impl RunState {
             let kong_count = sets.iter().filter(|s| s.kind == MeldKind::Kong).count() as u32;
             if kong_count > 0 {
                 self.plays_remaining = self.plays_remaining.saturating_add(kong_count);
-                self.relic_activations.push(RelicId::KanDrum);
+                self.push_relic_activation(RelicId::KanDrum);
             }
         }
         for &y in &breakdown.detected_yaku {
@@ -395,6 +396,9 @@ impl RunState {
                 crate::steam::Achievement::ThirteenOrphans,
             ));
         }
+        self.chronicle
+            .absorb_scoring(&breakdown, &scoring_tiles, &self.yaku_levels);
+        self.chronicle.note_turn();
         self.last_breakdown = Some(breakdown);
         self.scored_last_turn = breakdown_total > 0;
 
@@ -417,13 +421,13 @@ impl RunState {
                     self.consumables
                         .items
                         .push(crate::core::consumable::Consumable::Zodiac(z));
-                    self.relic_activations.push(RelicId::EightTreasures);
+                    self.push_relic_activation(RelicId::EightTreasures);
                 }
             }
         }
 
         if breakdown_total > 0 && self.relics.has(RelicId::TeaCeremony) {
-            self.relic_activations.push(RelicId::TeaCeremony);
+            self.push_relic_activation(RelicId::TeaCeremony);
             let phase = self
                 .relic_counters
                 .get(&RelicId::TeaCeremony)
@@ -459,7 +463,7 @@ impl RunState {
                 .iter()
                 .any(|t| matches!(t.suit, Suit::Wind | Suit::Dragon));
         if dragon_without_honors {
-            for suit in [Suit::Characters, Suit::Bamboos, Suit::Dots, Suit::Flower] {
+            for suit in [Suit::Manzu, Suit::Souzu, Suit::Pinzu, Suit::Flower] {
                 if scoring_tiles.iter().any(|t| t.suit == suit) {
                     debuffs.push(TileDebuff::Suit(suit));
                 }
@@ -545,13 +549,13 @@ impl RunState {
             let interest = (self.gold.max(0) as u32 / 5).min(3);
             let green_luck_bonus =
                 if self.relics.has(RelicId::GreenLuck) && !self.honors_scored_this_round {
-                    self.relic_activations.push(RelicId::GreenLuck);
+                    self.push_relic_activation(RelicId::GreenLuck);
                     4
                 } else {
                     0
                 };
             let gold_idol_bonus = if self.relics.has(RelicId::GoldIdol) {
-                self.relic_activations.push(RelicId::GoldIdol);
+                self.push_relic_activation(RelicId::GoldIdol);
                 3u32
             } else {
                 0
@@ -559,7 +563,7 @@ impl RunState {
             let jade_abacus_bonus = if self.relics.has(RelicId::JadeAbacus) {
                 let bonus = (self.gold.max(0) as u32 / 4).min(4);
                 if bonus > 0 {
-                    self.relic_activations.push(RelicId::JadeAbacus);
+                    self.push_relic_activation(RelicId::JadeAbacus);
                 }
                 bonus
             } else {
@@ -568,7 +572,7 @@ impl RunState {
             let patience_bonus = if self.relics.has(RelicId::Patience) {
                 let bonus = 2 * self.discards_remaining;
                 if bonus > 0 {
-                    self.relic_activations.push(RelicId::Patience);
+                    self.push_relic_activation(RelicId::Patience);
                 }
                 bonus
             } else {
@@ -583,7 +587,7 @@ impl RunState {
                     .max(0) as u32;
                 let bonus = 5u32.saturating_mul(kongs);
                 if bonus > 0 {
-                    self.relic_activations.push(RelicId::KongCollector);
+                    self.push_relic_activation(RelicId::KongCollector);
                 }
                 bonus
             } else {
@@ -597,7 +601,7 @@ impl RunState {
                     .unwrap_or(0)
                     .max(0) as u32;
                 let bonus = 1u32.saturating_add(bosses);
-                self.relic_activations.push(RelicId::BeggarsCup);
+                self.push_relic_activation(RelicId::BeggarsCup);
                 bonus
             } else {
                 0
@@ -605,7 +609,7 @@ impl RunState {
             let cosmopolitan_bonus = if self.relics.has(RelicId::Cosmopolitan) {
                 let unique_yaku = self.played_yaku_this_round.len() as u32;
                 if unique_yaku > 0 {
-                    self.relic_activations.push(RelicId::Cosmopolitan);
+                    self.push_relic_activation(RelicId::Cosmopolitan);
                 }
                 unique_yaku
             } else {
@@ -614,7 +618,7 @@ impl RunState {
             if self.relics.has(RelicId::Temperance) && self.plays_remaining > 0 {
                 let stacks = self.plays_remaining as i32 * 5;
                 *self.relic_counters.entry(RelicId::Temperance).or_insert(0) += stacks;
-                self.relic_activations.push(RelicId::Temperance);
+                self.push_relic_activation(RelicId::Temperance);
             }
             let memorial_clear = self.memorial_round.clear_gold_bonus;
             self.memorial_round.clear_gold_bonus = 0;
@@ -629,6 +633,22 @@ impl RunState {
                 .saturating_add(beggars_cup_bonus)
                 .saturating_add(cosmopolitan_bonus)
                 .saturating_add(memorial_clear);
+            let reward_note = if gold_earned > 0 {
+                format!("+{gold_earned} Gold")
+            } else {
+                String::new()
+            };
+            let boss_name = if self.blind == BlindKind::Boss {
+                self.boss.upcoming.map(|b| b.name())
+            } else {
+                None
+            };
+            self.chronicle.record_blind_cleared(
+                self.ante,
+                self.blind,
+                boss_name,
+                reward_note,
+            );
             bus.push(GameEvent::RoundComplete {
                 reached_target: true,
                 payout: crate::game::event_bus::RoundPayout {

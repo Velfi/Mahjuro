@@ -186,7 +186,7 @@ pub fn talisman_material(
         T::Pearl | T::Honors | T::Wildflower => (0.78, 56.0),
         T::Gilded => (0.88, 48.0),
         T::Polychrome => (0.82, 40.0),
-        T::Bamboo | T::Dots | T::Characters | T::Conformity => (0.80, 48.0),
+        T::Souzu | T::Pinzu | T::Manzu | T::Conformity => (0.80, 48.0),
     };
     MaterialParams {
         kind: MaterialKind::Chitin,

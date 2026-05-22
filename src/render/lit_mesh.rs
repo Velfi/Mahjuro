@@ -716,7 +716,8 @@ pub fn create_shadow_warp_bind_group(
 pub struct ShadowGlobals {
     /// Live 1024² shadow map (moving catalog props); updated every frame.
     pub light_view_proj: [f32; 16],
-    /// x = enabled (0/1), y = depth bias, z = texel size, w = room baked mode (0 dynamic, 1 baked).
+    /// x = enabled (0/1), y = depth bias, z = texel size,
+    /// w = room shadow mode (`room_glb.wgsl` only): 0 = live, 1 = baked×live, 2 = baked contact only (archive).
     pub params: [f32; 4],
     /// Offline `*.msh` room shadow; only read when `params.w > 0.5` (`room_glb.wgsl`).
     pub room_baked_light_view_proj: [f32; 16],

@@ -74,12 +74,15 @@ pub enum TalismanKind {
     Pearl,
     Gilded,
     Polychrome,
-    /// Every numbered tile in hand becomes bamboo; honors unchanged.
-    Bamboo,
-    /// Every numbered tile in hand becomes dots; honors unchanged.
-    Dots,
-    /// Every numbered tile in hand becomes characters; honors unchanged.
-    Characters,
+    /// Every numbered tile in hand becomes souzu; honors unchanged.
+    #[serde(alias = "bamboo")]
+    Souzu,
+    /// Every numbered tile in hand becomes pinzu; honors unchanged.
+    #[serde(alias = "dots")]
+    Pinzu,
+    /// Every numbered tile in hand becomes manzu; honors unchanged.
+    #[serde(alias = "characters")]
+    Manzu,
     /// Every numbered tile in hand becomes a random honor; honors unchanged.
     Honors,
     /// Every tile in hand becomes a flower tile.
@@ -94,9 +97,9 @@ impl TalismanKind {
             TalismanKind::Pearl,
             TalismanKind::Gilded,
             TalismanKind::Polychrome,
-            TalismanKind::Bamboo,
-            TalismanKind::Dots,
-            TalismanKind::Characters,
+            TalismanKind::Souzu,
+            TalismanKind::Pinzu,
+            TalismanKind::Manzu,
             TalismanKind::Honors,
             TalismanKind::Wildflower,
             TalismanKind::Conformity,
@@ -119,9 +122,9 @@ impl TalismanKind {
             TalismanKind::Pearl => Some(TileEnhancement::Pearl),
             TalismanKind::Gilded => Some(TileEnhancement::Gilded),
             TalismanKind::Polychrome => Some(TileEnhancement::Polychrome),
-            TalismanKind::Bamboo
-            | TalismanKind::Dots
-            | TalismanKind::Characters
+            TalismanKind::Souzu
+            | TalismanKind::Pinzu
+            | TalismanKind::Manzu
             | TalismanKind::Honors
             | TalismanKind::Wildflower
             | TalismanKind::Conformity => None,
@@ -145,9 +148,9 @@ impl TalismanKind {
             Self::Pearl => "pearl",
             Self::Gilded => "gilded",
             Self::Polychrome => "polychrome",
-            Self::Bamboo => "bamboo",
-            Self::Dots => "dots",
-            Self::Characters => "characters",
+            Self::Souzu => "souzu",
+            Self::Pinzu => "pinzu",
+            Self::Manzu => "manzu",
             Self::Honors => "honors",
             Self::Wildflower => "wildflower",
             Self::Conformity => "conformity",
@@ -160,9 +163,9 @@ impl TalismanKind {
             Self::Pearl => "textures/talismans/talisman_pearl.png",
             Self::Gilded => "textures/talismans/talisman_gilded.png",
             Self::Polychrome => "textures/talismans/talisman_polychrome.png",
-            Self::Bamboo => "textures/talismans/talisman_bamboo.png",
-            Self::Dots => "textures/talismans/talisman_dots.png",
-            Self::Characters => "textures/talismans/talisman_characters.png",
+            Self::Souzu => "textures/talismans/talisman_souzu.png",
+            Self::Pinzu => "textures/talismans/talisman_pinzu.png",
+            Self::Manzu => "textures/talismans/talisman_manzu.png",
             Self::Honors => "textures/talismans/talisman_honors.png",
             Self::Wildflower => "textures/talismans/talisman_wildflower.png",
             Self::Conformity => "textures/talismans/talisman_conformity.png",
@@ -175,9 +178,9 @@ impl TalismanKind {
             Self::Pearl => "textures/talismans/talisman_pearl_mask.png",
             Self::Gilded => "textures/talismans/talisman_gilded_mask.png",
             Self::Polychrome => "textures/talismans/talisman_polychrome_mask.png",
-            Self::Bamboo => "textures/talismans/talisman_bamboo_mask.png",
-            Self::Dots => "textures/talismans/talisman_dots_mask.png",
-            Self::Characters => "textures/talismans/talisman_characters_mask.png",
+            Self::Souzu => "textures/talismans/talisman_souzu_mask.png",
+            Self::Pinzu => "textures/talismans/talisman_pinzu_mask.png",
+            Self::Manzu => "textures/talismans/talisman_manzu_mask.png",
             Self::Honors => "textures/talismans/talisman_honors_mask.png",
             Self::Wildflower => "textures/talismans/talisman_wildflower_mask.png",
             Self::Conformity => "textures/talismans/talisman_conformity_mask.png",
@@ -193,11 +196,11 @@ impl TalismanKind {
                 "textures/talismans/talisman_polychrome.png",
                 "talisman-polychrome-hm",
             ),
-            ("textures/talismans/talisman_bamboo.png", "talisman-bamboo-hm"),
-            ("textures/talismans/talisman_dots.png", "talisman-dots-hm"),
+            ("textures/talismans/talisman_souzu.png", "talisman-souzu-hm"),
+            ("textures/talismans/talisman_pinzu.png", "talisman-pinzu-hm"),
             (
-                "textures/talismans/talisman_characters.png",
-                "talisman-characters-hm",
+                "textures/talismans/talisman_manzu.png",
+                "talisman-manzu-hm",
             ),
             ("textures/talismans/talisman_honors.png", "talisman-honors-hm"),
             (
@@ -226,13 +229,13 @@ impl TalismanKind {
                 "talisman-polychrome-mask",
             ),
             (
-                "textures/talismans/talisman_bamboo_mask.png",
-                "talisman-bamboo-mask",
+                "textures/talismans/talisman_souzu_mask.png",
+                "talisman-souzu-mask",
             ),
-            ("textures/talismans/talisman_dots_mask.png", "talisman-dots-mask"),
+            ("textures/talismans/talisman_pinzu_mask.png", "talisman-pinzu-mask"),
             (
-                "textures/talismans/talisman_characters_mask.png",
-                "talisman-characters-mask",
+                "textures/talismans/talisman_manzu_mask.png",
+                "talisman-manzu-mask",
             ),
             (
                 "textures/talismans/talisman_honors_mask.png",
@@ -272,8 +275,8 @@ mod tests {
     #[test]
     fn apply_stamps_every_tile() {
         let mut hand = vec![
-            Tile::new(Suit::Bamboos, 3, 0),
-            Tile::new(Suit::Dots, 7, 1),
+            Tile::new(Suit::Souzu, 3, 0),
+            Tile::new(Suit::Pinzu, 7, 1),
             Tile::new(Suit::Dragon, 1, 2),
         ];
         apply_to_hand(&mut hand, TalismanKind::Pearl);
@@ -286,7 +289,7 @@ mod tests {
     fn apply_replaces_existing_enhancement() {
         // Each tile can carry only one talisman mark at a time — applying a
         // new talisman overwrites whatever was on the tile before.
-        let mut hand = vec![Tile::new(Suit::Bamboos, 5, 0)];
+        let mut hand = vec![Tile::new(Suit::Souzu, 5, 0)];
         apply_to_hand(&mut hand, TalismanKind::Gilded);
         apply_to_hand(&mut hand, TalismanKind::Pearl);
         assert_eq!(hand[0].enhancement, Some(TileEnhancement::Pearl));
@@ -303,8 +306,8 @@ mod tests {
     }
 
     #[test]
-    fn bamboo_has_no_enhancement() {
-        assert_eq!(TalismanKind::Bamboo.enhancement(), None);
+    fn souzu_has_no_enhancement() {
+        assert_eq!(TalismanKind::Souzu.enhancement(), None);
     }
 
     /// Every `TalismanKind` variant must appear exactly once in `talismans.json`.
@@ -333,9 +336,9 @@ mod tests {
             TalismanKind::Pearl,
             TalismanKind::Gilded,
             TalismanKind::Polychrome,
-            TalismanKind::Bamboo,
-            TalismanKind::Dots,
-            TalismanKind::Characters,
+            TalismanKind::Souzu,
+            TalismanKind::Pinzu,
+            TalismanKind::Manzu,
             TalismanKind::Honors,
             TalismanKind::Wildflower,
             TalismanKind::Conformity,

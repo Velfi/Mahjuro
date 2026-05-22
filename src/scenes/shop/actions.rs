@@ -204,6 +204,9 @@ impl ShopScene {
         mode: ShopMode,
         progress: &crate::core::progression::PlayerProgress,
     ) -> Self {
+        if mode != ShopMode::Tutorial {
+            run.chronicle.note_shop_visit();
+        }
         let qilin_ribbon_unlocked = progress.qilin_ribbon_unlocked();
         let shop = GameEngine::read_shop(run);
         let extra_relics = GameEngine::shop_extra_relic_stock(run);
@@ -422,6 +425,7 @@ impl ShopScene {
         if outcome.rejection.is_some() {
             return;
         }
+        run.chronicle.note_reroll();
         self.west_sell_hold_started = None;
         match outcome.data {
             ShopCommandData::Rerolled {

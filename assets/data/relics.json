@@ -426,7 +426,7 @@
   {
     "id": "jade_serpent",
     "name": "Jade Serpent",
-    "description": "Bamboo tiles in scored sets: +8 chips each",
+    "description": "Souzu tiles in scored sets: +8 chips each",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -449,7 +449,7 @@
   {
     "id": "ruby_serpent",
     "name": "Ruby Serpent",
-    "description": "Characters tiles in scored sets: +8 chips each",
+    "description": "Manzu tiles in scored sets: +8 chips each",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -462,7 +462,7 @@
   {
     "id": "lapis_serpent",
     "name": "Lapis Serpent",
-    "description": "Dots tiles in scored sets: +8 chips each",
+    "description": "Pinzu tiles in scored sets: +8 chips each",
     "rarity": "common",
     "flavor_spans": [
       {

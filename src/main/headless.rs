@@ -111,12 +111,12 @@ fn setup_hero_state(run: &mut RunState) {
         Tile::new(Suit::Dragon, 3, 103), // White Dragon
         Tile::new(Suit::Dragon, 3, 104),
         Tile::new(Suit::Dragon, 3, 105),
-        Tile::new(Suit::Bamboos, 5, 106),
-        Tile::new(Suit::Bamboos, 6, 107),
-        Tile::new(Suit::Bamboos, 7, 108),
-        Tile::new(Suit::Dots, 1, 109),
-        Tile::new(Suit::Dots, 2, 110),
-        Tile::new(Suit::Dots, 3, 111),
+        Tile::new(Suit::Souzu, 5, 106),
+        Tile::new(Suit::Souzu, 6, 107),
+        Tile::new(Suit::Souzu, 7, 108),
+        Tile::new(Suit::Pinzu, 1, 109),
+        Tile::new(Suit::Pinzu, 2, 110),
+        Tile::new(Suit::Pinzu, 3, 111),
         Tile::new(Suit::Wind, 1, 112), // East
         Tile::new(Suit::Wind, 1, 113),
     ];
@@ -247,17 +247,17 @@ fn setup_gameplay_screenshot_state(run: &mut RunState) {
 
     run.set_auto_cash_in_on_full_structure(false);
     *run.structure_tiles_mut() = vec![
-        Tile::new(Suit::Characters, 1, 1),
-        Tile::new(Suit::Characters, 1, 2),
-        Tile::new(Suit::Characters, 2, 3),
-        Tile::new(Suit::Characters, 3, 4),
-        Tile::new(Suit::Characters, 4, 5),
-        Tile::new(Suit::Dots, 2, 6),
-        Tile::new(Suit::Dots, 3, 7),
-        Tile::new(Suit::Dots, 4, 8),
-        Tile::new(Suit::Bamboos, 5, 9),
-        Tile::new(Suit::Bamboos, 6, 10),
-        Tile::new(Suit::Bamboos, 7, 11),
+        Tile::new(Suit::Manzu, 1, 1),
+        Tile::new(Suit::Manzu, 1, 2),
+        Tile::new(Suit::Manzu, 2, 3),
+        Tile::new(Suit::Manzu, 3, 4),
+        Tile::new(Suit::Manzu, 4, 5),
+        Tile::new(Suit::Pinzu, 2, 6),
+        Tile::new(Suit::Pinzu, 3, 7),
+        Tile::new(Suit::Pinzu, 4, 8),
+        Tile::new(Suit::Souzu, 5, 9),
+        Tile::new(Suit::Souzu, 6, 10),
+        Tile::new(Suit::Souzu, 7, 11),
         Tile::new(Suit::Wind, 1, 12),
         Tile::new(Suit::Wind, 1, 13),
         Tile::new(Suit::Wind, 1, 14),
@@ -904,8 +904,14 @@ impl HeadlessApp {
                 ),
                 (RunOutcome::Victory, 7400, 1100, "SanshokuDoujun"),
             ];
+            let sample_tiles = crate::scenes::archive_career::sample_signature_hand_tiles();
             let base_ts = 1_700_000_000u64;
             for (i, (outcome, total, best_struct, struct_name)) in samples.into_iter().enumerate() {
+                let hand_tiles = if struct_name == "Toitoi" && !sample_tiles.is_empty() {
+                    sample_tiles.clone()
+                } else {
+                    Vec::new()
+                };
                 self.progress.run_history.push(RunRecord {
                     timestamp_unix: base_ts + i as u64 * 86_400,
                     run_number: (i + 1) as u32,
@@ -941,9 +947,42 @@ impl HeadlessApp {
                     stake: Stake::Spring,
                     tutorial_run: false,
                     memorial_kind: None,
+                    best_hand_tiles: hand_tiles,
+                    score_after_ante: vec![(4 + (i as u32 % 4), total)],
+                    chronicle: crate::core::run_chronicle::RunChronicle::default(),
+                    duration_secs: 600 + i as u32 * 120,
                 });
             }
             self.progress.high_scores = vec![15600, 11200, 9100];
+            if !sample_tiles.is_empty() {
+                if let Some(idx) = self
+                    .progress
+                    .run_history
+                    .iter()
+                    .enumerate()
+                    .max_by_key(|(_, r)| r.best_structure_score)
+                    .map(|(i, _)| i)
+                {
+                    self.progress.run_history[idx].best_hand_tiles = sample_tiles;
+                }
+            }
+        }
+        let sample_tiles = crate::scenes::archive_career::sample_signature_hand_tiles();
+        if !sample_tiles.is_empty() {
+            if let Some(idx) = self
+                .progress
+                .run_history
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| !r.tutorial_run)
+                .max_by_key(|(_, r)| r.best_structure_score)
+                .map(|(i, _)| i)
+            {
+                let rec = &mut self.progress.run_history[idx];
+                if rec.best_hand_tiles.is_empty() {
+                    rec.best_hand_tiles = sample_tiles;
+                }
+            }
         }
     }
 
@@ -1311,8 +1350,9 @@ fn scene_for_room_gi_bake(
             (Scene::PickBlind(scenes::PickBlindScene::new()), run, true)
         }
         crate::render::room_gi_bake::RoomGiRoom::Archive => {
-            let mut coll = scenes::CollectionScene::new();
-            coll.prepare_chronicle_for_screenshot();
+            // Match the default Relics tab camera used by `screenshot --scene archive`
+            // (Chronicle uses a different rig — baking there misprojects contact shadows).
+            let coll = scenes::CollectionScene::new();
             (Scene::Collection(coll), run, false)
         }
         crate::render::room_gi_bake::RoomGiRoom::MainMenu => (
