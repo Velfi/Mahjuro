@@ -18,7 +18,7 @@ use crate::audio::SfxId;
 use crate::effect_layers::EffectLayers;
 use crate::game::event_bus::{EventBus, GameEvent};
 use crate::render::draw_cmd::UiFrame;
-use crate::render::theme::{color, typography};
+use crate::render::theme::typography;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 
 /// Semi-transparent black dimmer (shop pack + zodiac overlay).
@@ -26,12 +26,10 @@ pub const DIMMER_RGBA: [f32; 4] = [0.0, 0.0, 0.0, 0.72];
 
 /// Sequences celebration fullscreen layers in a safe order.
 ///
-/// 1. [`Self::push_dimmer`] — darkens the scene (or replaces clear for overlay scenes).
+/// 1. [`Self::push_dimmer_scaled`] — darkens the scene (or replaces clear for overlay scenes).
 /// 2. [`AfterCelebrationDimmer::push_starfield_if`] — optional mid-layer (zodiac).
 /// 3. [`AfterCelebrationDimmer::push_depth_reset_for_celebration_mesh`] — required
 ///    before any celebration `Object3d` / showcase tiles.
-///
-/// Shop tile-pack skips the mid-layer; use [`Self::push_dimmer_then_depth_reset`].
 #[derive(Clone, Copy, Debug)]
 pub struct CelebrationOverlayScratch {
     w: f32,
@@ -59,13 +57,6 @@ impl CelebrationOverlayScratch {
         push_dimmer_quad_scaled(frame, self.w, self.h, dimmer_alpha_mul);
         AfterCelebrationDimmer
     }
-
-    /// Dimmer → depth reset with no mid-layer (shop tile-pack over the live shop).
-    #[inline]
-    pub fn push_dimmer_then_depth_reset(self, frame: &mut UiFrame) {
-        push_dimmer_quad(frame, self.w, self.h);
-        apply_depth_reset_for_celebration_mesh(frame);
-    }
 }
 
 impl AfterCelebrationDimmer {
@@ -83,15 +74,6 @@ impl AfterCelebrationDimmer {
     pub fn push_depth_reset_for_celebration_mesh(self, frame: &mut UiFrame) {
         apply_depth_reset_for_celebration_mesh(frame);
     }
-}
-
-#[inline]
-fn push_dimmer_quad(frame: &mut UiFrame, w: f32, h: f32) {
-    frame.quad(GpuInstance {
-        rect: [0.0, 0.0, w, h],
-        color: DIMMER_RGBA,
-        user: 0,
-    });
 }
 
 #[inline]
@@ -141,15 +123,6 @@ pub fn label_confirm_to_continue(h: f32, w: f32, t_secs: f32, overall_alpha: f32
     )
 }
 
-pub fn label_confirm_to_open(h: f32, w: f32, t_secs: f32) -> TextLabel {
-    bottom_prompt_label(
-        h,
-        w,
-        "Click or press confirm to open",
-        prompt_pulse_alpha(t_secs),
-    )
-}
-
 /// TPOS2 anticipation prompt.
 pub fn label_confirm_to_unseal(h: f32, w: f32, t_secs: f32, overall_alpha: f32) -> TextLabel {
     bottom_prompt_label(
@@ -158,20 +131,6 @@ pub fn label_confirm_to_unseal(h: f32, w: f32, t_secs: f32, overall_alpha: f32) 
         "Click or press confirm to unseal",
         overall_alpha * prompt_pulse_alpha(t_secs),
     )
-}
-
-/// Tile-pack celebration header (champagne, upper band).
-pub fn label_pack_title(h: f32, w: f32, title: String) -> TextLabel {
-    let title_font = typography::size(typography::H24, h);
-    let title_y = h * 0.18;
-    TextLabel {
-        text: title,
-        rect: [0.0, title_y, w, title_font * 1.5],
-        font_px: Some(title_font),
-        color: color::CHAMPAGNE,
-        align: TextAlign::Center,
-        ..Default::default()
-    }
 }
 
 /// Zodiac level-up header (warm gold, fades with `alpha`).

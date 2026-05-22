@@ -63,8 +63,8 @@ pub const MAX_BOSS_ICON_SLOTS: usize = 32;
 /// `ZodiacBatch` cmds). Each textured ribbon uses up to 3 slots (top/mid/bot
 /// caps), so 16 logical ribbons × 3 = 48. Truncated silently.
 pub const MAX_RIBBON_SLOTS: usize = 48;
-/// Maximum number of talisman tablets rendered per frame.
-pub const MAX_TALISMAN_SLOTS: usize = 8;
+/// Maximum number of talisman tablets rendered per frame (archive: 21 cubbies + pedestal).
+pub const MAX_TALISMAN_SLOTS: usize = 24;
 /// Maximum number of 3D moths (main-menu door light) rendered per frame.
 /// Each live bug consumes one slot for body + two for live wings + two for
 /// blur-fan surrogates (L/R). The blur-fan slot pools share this same size.

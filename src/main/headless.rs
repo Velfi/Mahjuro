@@ -305,6 +305,12 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
             coll.prepare_bosses_for_screenshot();
             (Scene::Collection(coll), false)
         }
+        "archive_talismans" | "collection_talismans" => {
+            unlock_collection = true;
+            let mut coll = scenes::CollectionScene::new();
+            coll.prepare_talismans_for_screenshot();
+            (Scene::Collection(coll), false)
+        }
         "chronicle" | "archive_chronicle" => {
             unlock_collection = true;
             let mut coll = scenes::CollectionScene::new();
@@ -1212,6 +1218,50 @@ fn scene_for_room_gi_bake(
             false,
         ),
     })
+}
+
+pub fn run_bake_room_shadows_command(b: main_cli::BakeRoomShadowsCli) -> anyhow::Result<()> {
+    asset_path::init();
+    asset_path::log_all_assets();
+    let room = parse_bake_room_slug(&b.room)?;
+    let (scene, run, game_in_progress) = scene_for_room_gi_bake(room)?;
+    let mut app = HeadlessApp::with_run(scene, run, b.width, b.height, game_in_progress, false)?;
+    app.renderer.request_room_shadow_capture(room);
+    for _ in 0..b.warmup_frames {
+        app.tick();
+    }
+    let mut extra = 0u32;
+    while app.renderer.is_loading() && extra < 600 {
+        app.tick();
+        std::thread::sleep(std::time::Duration::from_millis(16));
+        extra += 1;
+    }
+    app.tick();
+    let bake = app
+        .renderer
+        .take_room_shadow_capture()
+        .ok_or_else(|| anyhow::anyhow!("room shadow bake: GPU readback missing"))?;
+    let out_name = match room {
+        crate::render::room_gi_bake::RoomGiRoom::Shop => "shop.msh",
+        crate::render::room_gi_bake::RoomGiRoom::Hallway => "hallway.msh",
+        crate::render::room_gi_bake::RoomGiRoom::Archive => "archive.msh",
+        crate::render::room_gi_bake::RoomGiRoom::MainMenu => "main_menu.msh",
+    };
+    let out_path = b.output_dir.join(out_name);
+    if let Some(parent) = out_path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&out_path, bake.encode())?;
+    log::info!(
+        "room shadow bake {:?} → {} ({}×{})",
+        room,
+        out_path.display(),
+        bake.width,
+        bake.height
+    );
+    Ok(())
 }
 
 pub fn run_bake_room_gi_command(b: main_cli::BakeRoomGiCli) -> anyhow::Result<()> {

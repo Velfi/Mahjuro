@@ -44,64 +44,63 @@ impl WgpuRenderer {
 
         // Imported room GLB — opaque primitives only (blend/glass skipped).
         let active_room_env = super::shadow_setup::active_room_env(frame);
-        match active_room_env {
-            Some(ActiveRoomEnv::Shop) if !shop_inspect_shadow_only => {
-                if let Some(ref gpu) = self.shop_environment {
-                    self.draw_gltf_room_env_shadow(
-                        &mut shadow_pass,
-                        &self.shop_env_primitives,
-                        gpu,
-                        |_| false,
-                    );
+        let bake_capture = self.room_shadow_capture_pending.is_some();
+        let skip_room_dynamic = self.active_room_baked_shadow.is_some() && !bake_capture;
+        if !skip_room_dynamic {
+            match active_room_env {
+                Some(ActiveRoomEnv::Shop) if !shop_inspect_shadow_only => {
+                    if let Some(ref gpu) = self.shop_environment {
+                        self.draw_gltf_room_env_shadow(
+                            &mut shadow_pass,
+                            &self.shop_env_primitives,
+                            gpu,
+                            |_| false,
+                        );
+                    }
                 }
-            }
-            Some(ActiveRoomEnv::Shop) => {}
-            Some(ActiveRoomEnv::Hallway) => {
-                if let Some(ref gpu) = self.hallway_environment {
-                    self.draw_gltf_room_env_shadow(
-                        &mut shadow_pass,
-                        &self.hallway_env_primitives,
-                        gpu,
-                        |_| false,
-                    );
+                Some(ActiveRoomEnv::Shop) => {}
+                Some(ActiveRoomEnv::Hallway) => {
+                    if let Some(ref gpu) = self.hallway_environment {
+                        self.draw_gltf_room_env_shadow(
+                            &mut shadow_pass,
+                            &self.hallway_env_primitives,
+                            gpu,
+                            |_| false,
+                        );
+                    }
                 }
-            }
-            Some(ActiveRoomEnv::Archive) => {
-                if let Some(ref gpu) = self.archive_environment {
-                    self.draw_gltf_room_env_shadow(
-                        &mut shadow_pass,
-                        &self.archive_env_primitives,
-                        gpu,
-                        |pi| self.archive_env_skip_description_prim(pi, frame),
-                    );
+                Some(ActiveRoomEnv::Archive) => {
+                    if let Some(ref gpu) = self.archive_environment {
+                        self.draw_gltf_room_env_shadow(
+                            &mut shadow_pass,
+                            &self.archive_env_primitives,
+                            gpu,
+                            |pi| self.archive_env_skip_description_prim(pi, frame),
+                        );
+                    }
                 }
-            }
-            Some(ActiveRoomEnv::MainMenu) => {
-                if let Some(ref gpu) = self.main_menu_environment {
-                    self.draw_gltf_room_env_shadow(
-                        &mut shadow_pass,
-                        &self.main_menu_env_primitives,
-                        gpu,
-                        |_| false,
-                    );
+                Some(ActiveRoomEnv::MainMenu) => {
+                    if let Some(ref gpu) = self.main_menu_environment {
+                        self.draw_gltf_room_env_shadow(
+                            &mut shadow_pass,
+                            &self.main_menu_env_primitives,
+                            gpu,
+                            |_| false,
+                        );
+                    }
                 }
+                None => {}
             }
-            None => {}
         }
 
-        // Archive catalog props are mounted inside authored cubbies and in front of
-        // readable sign boards. Let the room cast shadows, but don't project the
-        // whole relic grid back onto the description sign.
-        if !matches!(active_room_env, Some(ActiveRoomEnv::Archive)) {
-            shadow_pass.set_pipeline(&self.shadow_pipeline);
-            for &(kind, slot_i) in object3d_draw_list {
-                if shop_inspect_shadow_only
-                    && self.shop_inspect_subject_shadow_slot != Some((kind, slot_i))
-                {
-                    continue;
-                }
-                self.draw_object3d_shadow_entry(&mut shadow_pass, frame, kind, slot_i);
+        shadow_pass.set_pipeline(&self.shadow_pipeline);
+        for &(kind, slot_i) in object3d_draw_list {
+            if shop_inspect_shadow_only
+                && self.shop_inspect_subject_shadow_slot != Some((kind, slot_i))
+            {
+                continue;
             }
+            self.draw_object3d_shadow_entry(&mut shadow_pass, frame, kind, slot_i);
         }
 
         // Hand tiles — one draw per (tile, primitive). Same multi-prim

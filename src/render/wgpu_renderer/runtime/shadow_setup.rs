@@ -4,10 +4,11 @@ use crate::render::draw_cmd::{DrawCmd, UiFrame};
 use crate::render::lit_mesh::{
     LitMeshInstance, MaterialKind, ShadowCasterUniform, material_casts_shadow,
 };
+use crate::render::draw_cmd::ARCHIVE_FEATURED_ANIM_ID;
 
 /// Which imported room mesh is active this frame (at most one is drawn).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ActiveRoomEnv {
+pub(crate) enum ActiveRoomEnv {
     Shop,
     Hallway,
     Archive,
@@ -15,7 +16,7 @@ pub(super) enum ActiveRoomEnv {
 }
 
 #[inline]
-pub(super) fn active_room_env(frame: &UiFrame) -> Option<ActiveRoomEnv> {
+pub fn active_room_env(frame: &UiFrame) -> Option<ActiveRoomEnv> {
     for cmd in &frame.cmds {
         match cmd {
             DrawCmd::ShopEnvironment => return Some(ActiveRoomEnv::Shop),
@@ -28,7 +29,23 @@ pub(super) fn active_room_env(frame: &UiFrame) -> Option<ActiveRoomEnv> {
     None
 }
 
-pub(super) const SHADOW_MAP_SIZE: f32 = 2048.0;
+pub(super) const SHADOW_MAP_SIZE: f32 = 1024.0;
+
+/// Whether this catalog prop should cast into the dynamic shadow map.
+#[inline]
+pub(super) fn object3d_casts_dynamic_shadow(
+    active_room: Option<ActiveRoomEnv>,
+    anim_id: u64,
+) -> bool {
+    match active_room {
+        None | Some(ActiveRoomEnv::Shop) | Some(ActiveRoomEnv::Hallway) | Some(ActiveRoomEnv::MainMenu) => {
+            true
+        }
+        Some(ActiveRoomEnv::Archive) => {
+            anim_id == ARCHIVE_FEATURED_ANIM_ID || anim_id == SHOP_INSPECT_SUBJECT_ANIM_ID
+        }
+    }
+}
 
 /// Per-frame shadow uniform target passed into [`WgpuRenderer::run_object3d_placement`].
 pub(super) struct Object3dShadowCtx<'a> {
@@ -68,6 +85,7 @@ impl WgpuRenderer {
         material: MaterialKind,
     ) {
         if let Some(shadow) = shadow.as_deref_mut()
+            && object3d_casts_dynamic_shadow(self.placement_shadow_room, self.shadow_placement_anim_id)
             && material_casts_shadow(material)
         {
             *shadow.changed |=

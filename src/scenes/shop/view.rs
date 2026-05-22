@@ -609,6 +609,15 @@ pub(crate) fn render_shop_frame(
         _ => base,
     };
     frame.camera_override = Some(final_cam);
+    if inspect.is_some() {
+        if let Some(f) = shop.focus.filter(|f| shop_focus_inspectable(*f)) {
+            if let Some(tw) =
+                shop_inspect_target_world(shop, w, h, env_h, &shop_rm, f)
+            {
+                frame.shop_inspect_shadow_target = Some(tw);
+            }
+        }
+    }
     let cam = final_cam;
 
     let ppmm = ctx.layout.mm(1.0);

@@ -20,6 +20,7 @@ impl WgpuRenderer {
         kind: &Option<crate::core::zodiac::ZodiacKind>,
         ribbon_slot: &mut usize,
         object3d_draw_list: &mut Vec<(DrawKind, usize)>,
+        object3d_shadow_draw_list: &mut Vec<(DrawKind, usize)>,
         shadow: &mut Option<&mut super::shadow_setup::Object3dShadowCtx<'_>>,
     ) {
         let view_proj_arr = camera.view_proj_arr;
@@ -122,6 +123,6 @@ impl WgpuRenderer {
                 silk_mat.kind,
             );
         }
-        WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::Ribbon, slot_i);
+        self.push_object3d_draw(object3d_draw_list, object3d_shadow_draw_list, DrawKind::Ribbon, slot_i);
     }
 }

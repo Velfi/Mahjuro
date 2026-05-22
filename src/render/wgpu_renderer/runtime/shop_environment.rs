@@ -28,7 +28,7 @@ impl WgpuRenderer {
             return;
         }
         pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
-        pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
+        pass.set_bind_group(2, self.room_shadow_sample_bind_group(), &[]);
         pass.set_bind_group(3, &self.spot_lights_bind_group, &[]);
         for blend_phase in [false, true] {
             let mut last_pi: Option<usize> = None;

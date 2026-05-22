@@ -385,13 +385,7 @@ impl TilePackPresenter {
 
         if ctx.headless {
             self.intro_gate.intro.jump_to_done();
-            if self.celebration.headless_hold_pack_closeup
-                && self.celebration.phase == PackCelebPhase::Arrival
-            {
-                self.celebration.phase = PackCelebPhase::Anticipation;
-                self.celebration.started_at = Instant::now();
-            } else if !self.celebration.headless_hold_pack_closeup
-                && self.celebration.phase == PackCelebPhase::Arrival
+            if self.celebration.phase == PackCelebPhase::Arrival
                 && self.intro_gate.intro.is_done_for(&ctx.effect_layers)
             {
                 self.celebration.phase = PackCelebPhase::Anticipation;

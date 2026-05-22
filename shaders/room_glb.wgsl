@@ -126,28 +126,72 @@ struct ShadowGlobals {
 @group(2) @binding(0) var<uniform> shadow_globals: ShadowGlobals;
 @group(2) @binding(1) var shadow_map: texture_depth_2d;
 @group(2) @binding(2) var shadow_samp: sampler_comparison;
+@group(2) @binding(3) var baked_shadow_map: texture_2d<f32>;
+@group(2) @binding(4) var baked_shadow_ao: texture_2d<f32>;
+@group(2) @binding(5) var baked_shadow_ao_samp: sampler;
 
-fn sample_shadow_visibility(world_pos: vec3<f32>) -> f32 {
-    if (shadow_globals.params.x < 0.5) {
-        return 1.0;
-    }
+fn sample_shadow_pcf(depth_tex: texture_depth_2d, world_pos: vec3<f32>, bias: f32, texel: f32) -> f32 {
     let lp = shadow_globals.light_view_proj * vec4<f32>(world_pos, 1.0);
     let proj = lp.xyz / lp.w;
     let uv = vec2<f32>(proj.x * 0.5 + 0.5, proj.y * -0.5 + 0.5);
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || proj.z < 0.0 || proj.z > 1.0) {
         return 1.0;
     }
-    let bias = shadow_globals.params.y;
     let depth_ref = proj.z - bias;
-    let texel = shadow_globals.params.z;
     var sum = 0.0;
     for (var dy = -1; dy <= 1; dy = dy + 1) {
         for (var dx = -1; dx <= 1; dx = dx + 1) {
             let off = vec2<f32>(f32(dx), f32(dy)) * texel;
-            sum = sum + textureSampleCompare(shadow_map, shadow_samp, uv + off, depth_ref);
+            sum = sum + textureSampleCompare(depth_tex, shadow_samp, uv + off, depth_ref);
         }
     }
     return sum / 9.0;
+}
+
+fn sample_shadow_pcf_baked(world_pos: vec3<f32>, bias: f32, texel: f32) -> f32 {
+    let lp = shadow_globals.light_view_proj * vec4<f32>(world_pos, 1.0);
+    let proj = lp.xyz / lp.w;
+    let uv = vec2<f32>(proj.x * 0.5 + 0.5, proj.y * -0.5 + 0.5);
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || proj.z < 0.0 || proj.z > 1.0) {
+        return 1.0;
+    }
+    let depth_ref = proj.z - bias;
+    let dims = textureDimensions(baked_shadow_map, 0);
+    let center = vec2<i32>(uv * vec2<f32>(f32(dims.x), f32(dims.y)));
+    let texel_px = vec2<i32>(1);
+    var sum = 0.0;
+    for (var dy = -1; dy <= 1; dy = dy + 1) {
+        for (var dx = -1; dx <= 1; dx = dx + 1) {
+            let px = center + vec2<i32>(dx, dy) * texel_px;
+            let stored = textureLoad(baked_shadow_map, px, 0).r;
+            sum = sum + select(0.0, 1.0, depth_ref <= stored);
+        }
+    }
+    return sum / 9.0;
+}
+
+fn sample_shadow_visibility(world_pos: vec3<f32>) -> f32 {
+    if (shadow_globals.params.x < 0.5) {
+        return 1.0;
+    }
+    let bias = shadow_globals.params.y;
+    let texel = shadow_globals.params.z;
+    let baked = shadow_globals.params.w > 0.5;
+    var vis = select(
+        sample_shadow_pcf(shadow_map, world_pos, bias, texel),
+        sample_shadow_pcf_baked(world_pos, bias, texel),
+        baked,
+    );
+    if (baked) {
+        let lp = shadow_globals.light_view_proj * vec4<f32>(world_pos, 1.0);
+        let proj = lp.xyz / lp.w;
+        let uv = vec2<f32>(proj.x * 0.5 + 0.5, proj.y * -0.5 + 0.5);
+        if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) {
+            let ao = textureSample(baked_shadow_ao, baked_shadow_ao_samp, uv).r;
+            vis = vis * ao;
+        }
+    }
+    return vis;
 }
 
 fn fresnel_schlick(cos_theta: f32, F0: vec3<f32>) -> vec3<f32> {
