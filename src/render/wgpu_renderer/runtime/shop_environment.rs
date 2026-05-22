@@ -182,6 +182,9 @@ impl WgpuRenderer {
                 e *= crate::render::main_menu_glb::MAIN_MENU_ENV_LINEAR_EXPOSURE_MUL;
                 a = a.max(crate::render::main_menu_glb::MAIN_MENU_ENV_AMBIENT_SCALE_MIN);
             }
+            if !hallway_env && !archive_env && !main_menu_env {
+                a = a.max(crate::render::room_glb::SHOP_ENV_DIELECTRIC_AMBIENT_MIN);
+            }
             (e, a)
         } else if frame.shop_inspect_lit_mesh_hdr {
             (

@@ -40,7 +40,7 @@ pub use rumble_lab::RumbleLabScene;
 pub use shop::ShopScene;
 pub use showcase::{
     CollectionInspectPresenter, MetaLevelUpPresenter, ShopInspectPresenter, ShowcasePresenter,
-    ShowcaseScene, TilePackPresenter, Tpos2Presenter, ZodiacPresenter,
+    ShowcaseScene, TilePackPresenter, ZodiacPresenter,
 };
 pub use splash::SplashScene;
 pub use start_game_modal::TileSelectScene;

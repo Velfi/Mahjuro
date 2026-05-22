@@ -62,7 +62,7 @@ Additional talismans **transform** selected tiles (suit shifts, honors, flowers,
 Many **yaku** are implemented (exact list and bonuses live in `assets/data/yaku.json`). They add chips and/or mult on top of meld scoring. Patterns include:
 
 * **Structure / value:** FullHand (4 melds + pair), Yakuhai (dragon or round-wind triplet), Chicken Hand (valid hand with no other yaku)
-* **Suit / composition:** Tanyao (2–8 only), Toitoi (all triplets/kongs), Iipeikou (doubled sequence), Sanshoku Doujun (same sequence in three suits), Ittsu (1–9 straight one suit), Honitsu (one number suit + honors), Chinitsu (one number suit), Junchan (every meld touches a terminal), Honroutou (terminals and honors only), Chiitoitsu (seven pairs)
+* **Suit / composition:** Tanyao (2–8 only), Toitoi (all triplets/kongs), Iipeikou (doubled sequence on a full hand), Sanshoku Doujun (same sequence in three suits), Ittsu (1–9 straight one suit), Honitsu (one number suit + honors), Chinitsu (one number suit), Junchan (all 1/9/honors, every meld has a terminal or honor), Honroutou (terminals and honors only), Chiitoitsu (seven pairs)
 
 After meta progression is applied to a run, the **full yaku list** is eligible for scoring (level-up tables still *mention* patterns alongside relic/rule/dora unlocks for pacing copy).
 

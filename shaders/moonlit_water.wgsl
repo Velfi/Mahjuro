@@ -22,10 +22,9 @@ struct Globals {
 @group(0) @binding(0) var<uniform> globals: Globals;
 
 // LRO WAC equirectangular albedo map (real lunar surface data).
-// Group 0 with the globals uniform — DX12/FXC cannot compile a fragment-only
-// second bind group as an SM 5.1+ resource array.
+// textureLoad only — DX12/FXC treats a separate sampler binding as an SM 5.1+
+// resource array and fails pipeline creation.
 @group(0) @binding(1) var moon_albedo_tex: texture_2d<f32>;
-@group(0) @binding(2) var moon_albedo_smp: sampler;
 
 struct VsOut {
     @builtin(position) clip_pos: vec4<f32>,
@@ -132,7 +131,16 @@ fn sample_moon_albedo(disc_uv: vec2<f32>) -> f32 {
     let u = lon / (2.0 * 3.14159265) + 0.5;
     let v = lat / 3.14159265 + 0.5;
 
-    let col = textureSample(moon_albedo_tex, moon_albedo_smp, vec2<f32>(u, v));
+    let dims = textureDimensions(moon_albedo_tex);
+    let max_coord = vec2<i32>(dims) - vec2<i32>(1, 1);
+    let px = vec2<f32>(u, v) * vec2<f32>(dims) - 0.5;
+    let base = clamp(vec2<i32>(floor(px)), vec2<i32>(0, 0), max_coord);
+    let f = fract(px);
+    let c00 = textureLoad(moon_albedo_tex, base, 0);
+    let c10 = textureLoad(moon_albedo_tex, min(base + vec2<i32>(1, 0), max_coord), 0);
+    let c01 = textureLoad(moon_albedo_tex, min(base + vec2<i32>(0, 1), max_coord), 0);
+    let c11 = textureLoad(moon_albedo_tex, min(base + vec2<i32>(1, 1), max_coord), 0);
+    let col = mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
     // Texture is RGB; luminance gives the albedo scalar.
     return dot(col.rgb, vec3<f32>(0.299, 0.587, 0.114));
 }

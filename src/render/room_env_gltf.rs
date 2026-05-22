@@ -76,6 +76,18 @@ pub const SHOP_CANDLE_WAX_MATERIAL_NAME: &str = "Wax SSS translucent shader";
 /// Baked subsurface pass (linear RGB) sampled with `TEXCOORD_1` — rebake after moving candles.
 pub const SHOP_CANDLE_SSS_BAKE_TEXTURE: &str = "textures/shop/candle_sss.png";
 
+/// Shop [`shop.glb`](../../../assets/3d/shop.glb) glazed ceramic on relic/talisman trays.
+pub const SHOP_PORCELAIN_MATERIAL_NAME: &str = "Porcelain";
+
+/// Authored `Porcelain002` MR map packs ~0.1 roughness in G and B≈1 (not glTF ORM).
+/// Drop the texture and drive roughness from factor only (default tex G=1).
+pub const SHOP_PORCELAIN_ROUGHNESS_FACTOR: f32 = 0.40;
+
+#[inline]
+pub fn is_shop_porcelain_material(material_name: Option<&str>) -> bool {
+    material_name == Some(SHOP_PORCELAIN_MATERIAL_NAME)
+}
+
 /// Shop [`shop.glb`](../../../assets/3d/shop.glb) candle votive mesh (wax body).
 #[inline]
 pub fn is_shop_candle_wax_mesh(gltf_node_name: &str, material_name: Option<&str>) -> bool {
@@ -586,6 +598,7 @@ pub fn decode_env_primitive(
     let material = primitive.material();
     let material_name = material.name();
     let is_candle_wax = is_shop_candle_wax_mesh(gltf_node_name, material_name);
+    let is_porcelain = is_shop_porcelain_material(material_name);
     let sampler_cpu = sampler_cpu_from_material(&material);
 
     let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
@@ -839,8 +852,12 @@ pub fn decode_env_primitive(
         let img_index = tex_info.texture().source().index();
         capped_image_at(capped_images, img_index)
     });
-    let metallic_roughness_rgba = mr_src.map(capped_image_base);
-    let metallic_roughness_mip_chain = mr_src.map(|c| Arc::clone(&c.mip_chain));
+    let mut metallic_roughness_rgba = mr_src.map(capped_image_base);
+    let mut metallic_roughness_mip_chain = mr_src.map(|c| Arc::clone(&c.mip_chain));
+    if is_porcelain {
+        metallic_roughness_rgba = None;
+        metallic_roughness_mip_chain = None;
+    }
 
     let emissive_src = material.emissive_texture().and_then(|tex_info| {
         let img_index = tex_info.texture().source().index();
@@ -853,6 +870,8 @@ pub fn decode_env_primitive(
     let alpha_cutoff = material.alpha_cutoff().unwrap_or(0.5);
     let (metallic_factor, roughness_factor) = if is_candle_wax {
         (0.0, 0.88)
+    } else if is_porcelain {
+        (0.0, SHOP_PORCELAIN_ROUGHNESS_FACTOR)
     } else {
         (pbr.metallic_factor(), pbr.roughness_factor())
     };

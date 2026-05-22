@@ -604,7 +604,7 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
             ]),
         ),
         YakuKind::Iipeikou => (
-            "Two identical sequences in the same suit.",
+            "Two identical sequences in the same suit on a full 14-tile hand.",
             meld_groups(&[
                 (
                     "Sequence",
@@ -628,10 +628,17 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
                     trip_color,
                 ),
                 (
+                    "Triplet",
+                    MeldKind::Triplet,
+                    Suit::Characters,
+                    &[5, 5, 5],
+                    trip_color,
+                ),
+                (
                     "Pair",
                     MeldKind::Pair,
-                    Suit::Characters,
-                    &[9, 9],
+                    Suit::Wind,
+                    &[1, 1],
                     pair_color,
                 ),
             ]),
@@ -725,21 +732,21 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
             ]),
         ),
         YakuKind::Junchan => (
-            "Every meld contains a terminal (rank 1 or 9). Pair is also terminal.",
+            "All tiles are 1, 9, or honors; every meld contains a terminal or honor.",
             meld_groups(&[
                 (
-                    "Sequence",
-                    MeldKind::Sequence,
+                    "Triplet",
+                    MeldKind::Triplet,
                     Suit::Characters,
-                    &[1, 2, 3],
-                    seq_color,
+                    &[1, 1, 1],
+                    trip_color,
                 ),
                 (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Bamboos,
-                    &[7, 8, 9],
-                    seq_color,
+                    "Triplet",
+                    MeldKind::Triplet,
+                    Suit::Characters,
+                    &[9, 9, 9],
+                    trip_color,
                 ),
                 (
                     "Triplet",
@@ -749,9 +756,16 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
                     trip_color,
                 ),
                 (
+                    "Triplet",
+                    MeldKind::Triplet,
+                    Suit::Dragon,
+                    &[2, 2, 2],
+                    trip_color,
+                ),
+                (
                     "Pair",
                     MeldKind::Pair,
-                    Suit::Characters,
+                    Suit::Bamboos,
                     &[9, 9],
                     pair_color,
                 ),
@@ -1044,12 +1058,12 @@ pub(crate) fn yaku_shape_text(yk: YakuKind) -> &'static str {
         YakuKind::Toitoi => "All triplets/kongs, no sequences",
         YakuKind::FullHand => "Complete 14-tile hand: 4+4+4+4+2 (4 melds + 1 pair)",
         YakuKind::Yakuhai => "Triplet of any dragon or round wind",
-        YakuKind::Iipeikou => "Two identical sequences in one suit",
+        YakuKind::Iipeikou => "Two identical sequences on a full hand",
+        YakuKind::Junchan => "All 1/9/honors; each meld has a terminal or honor",
         YakuKind::SanshokuDoujun => "Same sequence in all 3 suits",
         YakuKind::Ittsu => "1\u{2013}9 straight in one suit",
         YakuKind::Honitsu => "One number suit + honors only",
         YakuKind::Chinitsu => "All one number suit, no honors",
-        YakuKind::Junchan => "Every meld has a 1 or 9",
         YakuKind::Honroutou => "Only 1s, 9s, and honors",
         YakuKind::Chiitoitsu => "Seven distinct pairs",
         YakuKind::KokushiMusou => {

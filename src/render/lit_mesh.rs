@@ -64,11 +64,11 @@ pub enum MaterialKind {
     /// otherwise the fragment is treated as dark stone. Reads `extras.y`
     /// from the point-light buffer for an animated time uniform.
     Water = 6,
-    /// Metallic foil wrapping — semi-conductor with thin-film iridescence.
-    /// The bound texture is sampled as full-colour albedo (pack box art),
-    /// overlaid with a view-dependent rainbow sheen that shifts as the
-    /// light sweeps across the surface. Specular is high and tinted by
-    /// the albedo so the foil reads as a reflective metallic wrapper.
+    /// Booster-pack shrink wrap — clear dielectric gloss over box art.
+    /// The bound texture is the cover decal on the front face; edges read
+    /// as a lightly tinted plastic sleeve (no metallic streaks or holo).
+    PackWrap = 7,
+    /// Metallic foil — thin-film iridescence (material viewer / legacy).
     Foil = 8,
     /// Faux glass / glazed crystal. Still rendered in the opaque pass, but
     /// shaded with a strong Fresnel rim and cool internal glow so small props
@@ -126,6 +126,10 @@ pub enum MaterialKind {
     /// Unlit emission added on top of the usual lit path. `specular_strength`
     /// scales `base_color.rgb` in the shader (`lit_mesh.wgsl` emissive term).
     Emissive = 20,
+    /// Talisman tablets — holographic trading-card foil (rainbow bands, metallic
+    /// mirror, view-swept sheen). `base_color` tints the foil; `material_params.w`
+    /// is the talisman kind index. Uses the talisman heightmap for carved relief.
+    Chitin = 21,
 }
 
 /// Whether instances using this material should participate in the

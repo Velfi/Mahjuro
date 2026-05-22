@@ -129,8 +129,7 @@ impl TalismanKind {
     }
 
     /// Tint color for this talisman's tablet. Drives the `base_color`
-    /// passed to `talisman_material`, so the jade/pearl/gilded/etc.
-    /// materials each read with their intended hue.
+    /// passed to `talisman_material`, biasing the chitin thin-film palette.
     pub fn accent_color(self) -> [f32; 4] {
         talisman_presentation(self).accent
     }

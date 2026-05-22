@@ -274,6 +274,10 @@ fn material_entries() -> Vec<MaterialEntry> {
             material: mk(Porcelain, [0.55, 0.52, 0.46], 0.7, 128.0),
         },
         MaterialEntry {
+            label: "Chitin",
+            material: mk(Chitin, [0.82, 0.55, 0.95], 0.90, 56.0),
+        },
+        MaterialEntry {
             label: "Emissive",
             material: MaterialParams::emissive_lamp([1.0, 0.85, 0.55], 0.65),
         },

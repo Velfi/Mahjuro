@@ -247,7 +247,8 @@ impl WgpuRenderer {
             (
                 self.shop_env_linear_exposure
                     * crate::render::room_glb::ROOM_GLB_LINEAR_EXPOSURE_BASE,
-                self.shop_env_ambient_scale,
+                self.shop_env_ambient_scale
+                    .max(crate::render::room_glb::SHOP_ENV_DIELECTRIC_AMBIENT_MIN),
             )
         } else {
             (

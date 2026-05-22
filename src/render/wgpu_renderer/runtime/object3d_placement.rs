@@ -772,14 +772,13 @@ impl WgpuRenderer {
                                 obj.color
                             };
                             let material = MaterialParams {
-                                kind: MaterialKind::Foil,
+                                kind: MaterialKind::PackWrap,
                                 base_color,
-                                specular_strength: 0.70,
-                                specular_power: 48.0,
+                                specular_strength: 0.55,
+                                specular_power: 72.0,
                             };
-                            // Foil packs must keep `material_params.w == 0` so the
-                            // shader composites the cover decal and streak/holo
-                            // bands (`w > 0.5` is the talisman-foil path).
+                            // Pack shrink-wrap keeps `material_params.w == 0` for
+                            // front-face decal composite. Talisman tablets pass kind index in `.w`.
                             // Showcase pack celebrations already disable the
                             // directional shadow map in `shadow_setup.rs`.
                             self.pack_instances[slot_i].write_uniform_with_decal(

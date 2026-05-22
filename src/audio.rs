@@ -1,8 +1,8 @@
 //! Audio system: sound effects and background music.
 //!
 //! Uses rodio for playback. Gracefully degrades if audio device is unavailable.
-//! SFX (OGG/Vorbis) and music (MP3) are decoded to PCM once at load time so
-//! the device thread never runs decoders during playback.
+//! SFX and music (OGG/Vorbis) are decoded to PCM once at load time so the
+//! device thread never runs decoders during playback.
 
 use rustc_hash::FxHashMap;
 use std::io::Cursor;
@@ -104,14 +104,24 @@ fn decode_rodio(label: &str, bytes: &[u8]) -> Option<Arc<PcmClip>> {
 
 /// Background music + win/loss jingles (under `assets/audio/music/`).
 ///
-/// Looping tracks (`MainMenu`, `Gameplay`, `Shop`) play via [`AudioManager::set_music_track`].
-/// One-shot jingles (`BlindWin`, `BlindLoss`, `BossWin`, `BossLoss`) play via
-/// [`AudioManager::play_music_jingle`]; the previous loop resumes once the jingle
-/// finishes.
+/// Looping tracks (`MainMenu`, `Gameplay`, `GameplayIntense`, `Shop`) play via
+/// [`AudioManager::set_music_track`] / [`AudioManager::set_gameplay_music`].
+/// One-shot intros (`GameplayIntro`, `GameplayIntenseIntro`) play once on the
+/// music bus via [`AudioManager::play_music_intro_then_loop`], then hand off to
+/// their paired loop. Win/loss jingles (`BlindWin`, `BlindLoss`, `BossWin`,
+/// `BossLoss`) play once via [`AudioManager::play_music_jingle`] on the **SFX**
+/// volume bus (options SFX slider), then resume the last requested loop.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MusicId {
     MainMenu,
+    /// Regular blind loop (after [`MusicId::GameplayIntro`]).
     Gameplay,
+    /// Boss blind loop (after [`MusicId::GameplayIntenseIntro`]).
+    GameplayIntense,
+    /// One-shot lead-in before [`MusicId::Gameplay`].
+    GameplayIntro,
+    /// One-shot lead-in before [`MusicId::GameplayIntense`].
+    GameplayIntenseIntro,
     Shop,
     /// Stinger when the player clears a Small/Big blind.
     BlindWin,
@@ -126,23 +136,45 @@ pub enum MusicId {
 impl MusicId {
     fn asset_path(self) -> &'static str {
         match self {
-            MusicId::MainMenu => "audio/music/main_menu.mp3",
-            MusicId::Gameplay => "audio/music/gameplay.mp3",
-            MusicId::Shop => "audio/music/shop.mp3",
-            MusicId::BlindWin => "audio/music/blind_win.mp3",
-            MusicId::BlindLoss => "audio/music/blind_loss.mp3",
-            MusicId::BossWin => "audio/music/boss_win.mp3",
-            MusicId::BossLoss => "audio/music/boss_loss.mp3",
+            MusicId::MainMenu => "audio/music/main_menu.ogg",
+            MusicId::Gameplay => "audio/music/gameplay.ogg",
+            MusicId::GameplayIntense => "audio/music/gameplay_intense.ogg",
+            MusicId::GameplayIntro => "audio/music/gameplay_intro.ogg",
+            MusicId::GameplayIntenseIntro => "audio/music/gameplay_intense_intro.ogg",
+            MusicId::Shop => "audio/music/shop.ogg",
+            MusicId::BlindWin => "audio/music/blind_win.ogg",
+            MusicId::BlindLoss => "audio/music/blind_loss.ogg",
+            MusicId::BossWin => "audio/music/boss_win.ogg",
+            MusicId::BossLoss => "audio/music/boss_loss.ogg",
         }
     }
 
-    /// True when the track is a one-shot stinger (no looping); used by
+    /// Loop that follows a one-shot intro stinger.
+    fn loop_after_intro(self) -> Option<MusicId> {
+        match self {
+            MusicId::GameplayIntro => Some(MusicId::Gameplay),
+            MusicId::GameplayIntenseIntro => Some(MusicId::GameplayIntense),
+            _ => None,
+        }
+    }
+
+    /// True when the track is a one-shot (no looping); used by
     /// [`AudioManager::play_music_jingle`] vs [`AudioManager::set_music_track`].
+    fn is_one_shot(self) -> bool {
+        self.is_jingle() || self.loop_after_intro().is_some()
+    }
+
+    /// True when the track is a win/loss stinger (no intro hand-off).
     fn is_jingle(self) -> bool {
         matches!(
             self,
             MusicId::BlindWin | MusicId::BlindLoss | MusicId::BossWin | MusicId::BossLoss
         )
+    }
+
+    /// True when the track loops via [`AudioManager::set_music_track`].
+    fn is_loop(self) -> bool {
+        !self.is_one_shot()
     }
 }
 
@@ -448,9 +480,9 @@ impl SfxId {
             SfxId::RoundWin => "roundwin.ogg",
             SfxId::GameOver => "gameover.ogg",
             SfxId::PackBuy => "kenney_interface-sounds/Audio/confirmation_003.ogg",
-            SfxId::PackOpen => "kenney_interface-sounds/Audio/open_003.ogg",
+            SfxId::PackOpen => "pack_open.ogg",
             SfxId::PackTileReveal => "kenney_interface-sounds/Audio/pluck_001.ogg",
-            SfxId::ZodiacReveal => "kenney_interface-sounds/Audio/glass_006.ogg",
+            SfxId::ZodiacReveal => "zodiac_reveal.ogg",
             SfxId::ZodiacLevelUp => "zodiac_jingle.ogg",
             SfxId::CandleFlareWhoosh => "candle_flareup.ogg",
             SfxId::CandleFlareImpact => "candle_impact.ogg",
@@ -577,11 +609,13 @@ pub struct AudioManager {
     last_music: Option<MusicId>,
     /// Track currently driving `music_sink` (when playing).
     music_active_id: Option<MusicId>,
-    /// True while a one-shot jingle owns `music_sink`. `set_music_track` /
-    /// `stop_background_music` defer their effect until the jingle empties
-    /// (handled in [`AudioManager::tick`]) so the jingle isn't cut off by
-    /// the post-blind scene transition.
+    /// True while a one-shot sting owns `music_sink`. `set_music_track` /
+    /// `stop_background_music` defer their effect until it empties (handled in
+    /// [`AudioManager::tick`]) so the sting isn't cut off by scene transitions.
     jingle_active: bool,
+    /// When [`Self::jingle_active`], win/loss jingles use [`Self::sfx_volume`];
+    /// round-start intros use [`Self::music_volume`].
+    music_one_shot_sfx_bus: bool,
     /// Background track to start once the active jingle finishes. `None`
     /// means "stop music when the jingle ends".
     pending_post_jingle_music: Option<MusicId>,
@@ -654,6 +688,7 @@ impl AudioManager {
             last_music: None,
             music_active_id: None,
             jingle_active: false,
+            music_one_shot_sfx_bus: false,
             pending_post_jingle_music: None,
             ambient_data: FxHashMap::default(),
             ambient_sink: None,
@@ -694,6 +729,7 @@ impl AudioManager {
             let finished = self.music_sink.as_ref().map(|s| s.empty()).unwrap_or(true);
             if finished {
                 self.jingle_active = false;
+                self.music_one_shot_sfx_bus = false;
                 if let Some(sink) = self.music_sink.take() {
                     sink.stop();
                 }
@@ -768,10 +804,12 @@ impl AudioManager {
         self.refresh_ambient_sink_volume();
     }
 
-    /// Set the sound effects volume (0.0 to 1.0).
+    /// Set the sound effects volume (0.0 to 1.0). Also updates win/loss
+    /// jingles when one is playing on `music_sink`.
     pub fn set_sfx_volume(&mut self, vol: f32) {
         self.sfx_volume = vol.clamp(0.0, 1.0);
         self.refresh_ambient_sink_volume();
+        self.refresh_music_sink_volume();
     }
 
     /// Set the music volume (0.0 to 1.0).
@@ -793,13 +831,27 @@ impl AudioManager {
         } else {
             self.stop_ambient_sink();
         }
+        self.refresh_music_sink_volume();
+    }
+
+    /// Volume for whatever is on `music_sink`: looping BGM + intros use the
+    /// music slider; win/loss jingles use the SFX slider.
+    fn music_sink_effective_volume(&self) -> f32 {
+        if self.jingle_active && self.music_one_shot_sfx_bus {
+            if !self.sfx_enabled {
+                return 0.0;
+            }
+            self.master_volume * self.sfx_volume
+        } else {
+            self.master_volume * self.music_volume
+        }
     }
 
     fn refresh_music_sink_volume(&mut self) {
         let Some(sink) = self.music_sink.as_ref() else {
             return;
         };
-        sink.set_volume(self.master_volume * self.music_volume);
+        sink.set_volume(self.music_sink_effective_volume());
     }
 
     /// Stop background music and clear the remembered track (e.g. splash / loading).
@@ -824,7 +876,7 @@ impl AudioManager {
     /// when the jingle finishes — keeps the celebration / defeat stinger
     /// audible across the post-blind scene transition.
     pub fn set_music_track(&mut self, id: MusicId) {
-        debug_assert!(!id.is_jingle(), "use play_music_jingle for one-shot tracks");
+        debug_assert!(id.is_loop(), "use play_music_jingle for one-shot tracks");
         if self.jingle_active {
             self.pending_post_jingle_music = Some(id);
             self.last_music = Some(id);
@@ -834,13 +886,65 @@ impl AudioManager {
         self.start_music_track(id);
     }
 
+    /// Start blind BGM: intro once, then the regular or boss loop.
+    pub fn set_gameplay_music(&mut self, boss_blind: bool) {
+        if boss_blind {
+            self.play_music_intro_then_loop(
+                MusicId::GameplayIntenseIntro,
+                MusicId::GameplayIntense,
+            );
+        } else {
+            self.play_music_intro_then_loop(MusicId::GameplayIntro, MusicId::Gameplay);
+        }
+    }
+
+    /// Play `intro` once, then loop `loop_id` (round-start sting).
+    pub fn play_music_intro_then_loop(&mut self, intro: MusicId, loop_id: MusicId) {
+        debug_assert_eq!(intro.loop_after_intro(), Some(loop_id));
+        self.last_music = Some(loop_id);
+        if self.jingle_active {
+            self.pending_post_jingle_music = Some(loop_id);
+            return;
+        }
+        self.ensure_music_loaded(intro);
+        let Some(clip) = self.music_data.get(&intro).cloned() else {
+            log::debug!("play_music_intro_then_loop({intro:?}): no data — starting {loop_id:?}");
+            self.start_music_track(loop_id);
+            return;
+        };
+        let Some(handle) = &self.handle else {
+            return;
+        };
+        if let Some(sink) = self.music_sink.take() {
+            sink.stop();
+        }
+        let Ok(sink) = Sink::try_new(handle) else {
+            log::warn!("play_music_intro_then_loop({intro:?}): sink creation failed");
+            return;
+        };
+        self.music_one_shot_sfx_bus = false;
+        sink.set_volume(self.music_sink_effective_volume());
+        let source = SharedPcmSource::new(clip);
+        sink.append(source);
+        self.music_sink = Some(sink);
+        self.music_active_id = None;
+        self.jingle_active = true;
+        self.pending_post_jingle_music = Some(loop_id);
+        log::debug!(
+            "play_music_intro_then_loop({intro:?}): loop_after={loop_id:?}"
+        );
+    }
+
     /// Play `id` once on the music sink (no looping). Replaces whatever
-    /// loop or jingle is currently on the sink. Once the clip finishes, the
-    /// last requested loop ([`Self::set_music_track`]) resumes from the start
-    /// — this is what makes the win/loss jingles feel like a stinger that
-    /// hands off to the next scene's BGM.
+    /// loop or sting is currently on the sink. Once the clip finishes, the
+    /// deferred loop ([`Self::set_music_track`] / intro hand-off) resumes from
+    /// the start — win/loss jingles use the last loop; round-start intros use
+    /// their paired loop. Win/loss jingles obey the SFX volume slider.
     pub fn play_music_jingle(&mut self, id: MusicId) {
-        debug_assert!(id.is_jingle(), "use set_music_track for looping tracks");
+        debug_assert!(id.is_one_shot(), "use set_music_track for looping tracks");
+        if id.is_jingle() && !self.sfx_enabled {
+            return;
+        }
         self.ensure_music_loaded(id);
         let Some(clip) = self.music_data.get(&id).cloned() else {
             log::debug!("play_music_jingle({id:?}): no data");
@@ -856,11 +960,12 @@ impl AudioManager {
             log::warn!("play_music_jingle({id:?}): sink creation failed");
             return;
         };
-        sink.set_volume(self.master_volume * self.music_volume);
-        // Carry forward whatever loop should resume after the jingle: prefer
-        // any already-pending choice (a transition that fired during a
-        // prior jingle), otherwise the last loop we played.
-        let resume_to = self.pending_post_jingle_music.or(self.last_music);
+        self.music_one_shot_sfx_bus = id.is_jingle();
+        sink.set_volume(self.music_sink_effective_volume());
+        let resume_to = id
+            .loop_after_intro()
+            .or(self.pending_post_jingle_music)
+            .or(self.last_music);
         let source = SharedPcmSource::new(clip);
         sink.append(source);
         self.music_sink = Some(sink);
@@ -909,7 +1014,8 @@ impl AudioManager {
             log::warn!("start_music_track({id:?}): sink creation failed");
             return;
         };
-        sink.set_volume(self.master_volume * self.music_volume);
+        self.music_one_shot_sfx_bus = false;
+        sink.set_volume(self.music_sink_effective_volume());
         let source = LoopingPcmSource::new(clip);
         sink.append(source);
         self.music_sink = Some(sink);

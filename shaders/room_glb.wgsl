@@ -171,6 +171,26 @@ fn geometry_smith(NdotV: f32, NdotL: f32, roughness: f32) -> f32 {
     return geometry_schlick_ggx(NdotV, roughness) * geometry_schlick_ggx(NdotL, roughness);
 }
 
+/// Diffuse weight with a small floor so punctual-only scenes do not black out at grazing
+/// view (Schlick `kD → 0`) — approximates Blender World + EEVEE ambient/indirect on dielectrics.
+fn dielectric_kD(kS: vec3<f32>, metallic: f32) -> vec3<f32> {
+    let dielectric = 1.0 - metallic;
+    let kd = (vec3<f32>(1.0) - kS) * dielectric;
+    return max(kd, vec3<f32>(0.04 * dielectric));
+}
+
+/// Warm sky / darker ground hemispheric fill (Z-up). `ambient_scale` is runtime-tuned
+/// (`SHOP_ENV_DIELECTRIC_AMBIENT_MIN` floor on shop) to stand in for glTF's missing World node.
+fn room_world_hemisphere_ambient(n_world: vec3<f32>, albedo: vec3<f32>, metallic: f32, ambient_scale: f32) -> vec3<f32> {
+    let dielectric = 1.0 - metallic;
+    let world_up = vec3<f32>(0.0, 0.0, 1.0);
+    let hemi_mix = clamp(dot(n_world, world_up) * 0.5 + 0.5, 0.0, 1.0);
+    let sky = vec3<f32>(0.58, 0.55, 0.50);
+    let ground = vec3<f32>(0.26, 0.22, 0.18);
+    let hemi_col = mix(ground, sky, hemi_mix);
+    return ambient_scale * albedo * dielectric * hemi_col * 0.09;
+}
+
 struct VsOut {
     @builtin(position) clip_pos: vec4<f32>,
     @location(0) wn: vec3<f32>,
@@ -333,7 +353,7 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
 
         let F = fresnel_schlick(VdotH, F0);
         let kS = F;
-        let kD = (vec3<f32>(1.0) - kS) * (1.0 - metallic);
+        let kD = dielectric_kD(kS, metallic);
 
         let has_room_occluders = select(0.0, 1.0, room_occluders.count.x > 0u);
         let punc_vis = mix(1.0, mix(0.14, 1.0, room_punctual_occlusion(light_pos, in.world_pos, in.clip_pos.xy)), has_room_occluders);
@@ -377,7 +397,7 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
 
         let F = fresnel_schlick(VdotH, F0);
         let kS = F;
-        let kD = (vec3<f32>(1.0) - kS) * (1.0 - metallic);
+        let kD = dielectric_kD(kS, metallic);
 
         let has_room_occluders = select(0.0, 1.0, room_occluders.count.x > 0u);
         let punc_vis = mix(1.0, mix(0.14, 1.0, room_punctual_occlusion(s.pos.xyz, in.world_pos, in.clip_pos.xy)), has_room_occluders);
@@ -392,7 +412,7 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     }
 
     let ambient_scale = cam.decal_atlas_uv.x;
-    let amb_dielectric = ambient_scale * albedo * (1.0 - metallic) * vec3<f32>(0.08);
+    let amb_dielectric = room_world_hemisphere_ambient(n_world, albedo, metallic, ambient_scale);
     let metal_amb_tint = mix(
         vec3<f32>(0.58, 0.50, 0.40),
         albedo,
@@ -401,7 +421,8 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     let amb_metal = ambient_scale * metallic * metal_amb_tint * vec3<f32>(0.14);
     let ambient = amb_dielectric + amb_metal;
 
-    // `SHOP_ENV_AMBIENT_SCALE` defaults to 0 for this scene — dielectric ambient is off.
+    // Shop authoring may set ambient scale to 0; runtime still floors dielectric fill via
+    // `SHOP_ENV_DIELECTRIC_AMBIENT_MIN` so punctual-only interiors do not black out.
     // Without IBL, dark-metallic facets still need a tiny direction-dependent fill so
     // flat faces toward the camera read as metal, not void.
     let dark_metal_face = metallic > 0.5 && albedo_lum < 0.08;

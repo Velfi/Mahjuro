@@ -101,7 +101,7 @@ impl Default for GameplayPositions {
                 lift_mm: -32.109_547,
                 rx_deg: 0.0,
                 ry_deg: 0.0,
-                rz_deg: -315.0,
+                rz_deg: 45.0,
             },
             mirror: Placement {
                 nx: -0.006_076_388_5,

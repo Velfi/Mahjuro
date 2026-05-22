@@ -37,8 +37,8 @@ pub struct PackPalette {
     pub slug: &'static str,
     /// Display name; matches `TilePackKind::name()`.
     pub display_name: &'static str,
-    /// Foil wrapper tint — the metallic surface tint multiplied by the
-    /// cover decal. See `TilePackKind::foil_tint`.
+    /// Shrink-wrap sleeve tint — multiplied on pack edges; cover art uses
+    /// the decal. See `TilePackKind::foil_tint`.
     pub foil: [f32; 4],
     /// Wax-seal red baked onto the cover PNG and reused at runtime for
     /// the hover-glow halo. See `TilePackKind::seal_color`.

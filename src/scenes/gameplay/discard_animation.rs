@@ -202,18 +202,16 @@ pub fn build_discard_river_object3d(
     };
     let t = anchor.to_draw_cmd_triple();
     let bowl = &positions.bowl;
+    let bowl_anchor = crate::ui::placement::PlacementAnchor::new(
+        [t[0], t[1], t[2]],
+        crate::render::table_transform::rot_fixed_axes_deg(90.0, 0.0, 0.0),
+        bowl,
+        layout,
+    );
     Object3d {
-        pos: [
-            t[0] + bowl.nx * layout.window_w,
-            t[1] + bowl.ny * layout.window_h,
-            t[2] + layout.mm(bowl.lift_mm),
-        ],
+        pos: bowl_anchor.pos,
         extents: [river_len, diam, river_width],
-        rotation: [
-            std::f32::consts::FRAC_PI_2 + bowl.rx_deg.to_radians(),
-            bowl.ry_deg.to_radians(),
-            bowl.rz_deg.to_radians(),
-        ],
+        rotation: bowl_anchor.object3d_rotation(),
         color: [1.0, 1.0, 1.0, 1.0],
         kind: Object3dKind::Bowl,
         hover_target: 0.0,

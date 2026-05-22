@@ -151,10 +151,10 @@ pub fn build_talisman_mesh() -> MeshCpu {
         vertices,
         indices,
         default_material: MaterialParams {
-            kind: MaterialKind::Pearl,
+            kind: MaterialKind::Chitin,
             base_color: color::PARCHMENT,
-            specular_strength: 0.60,
-            specular_power: 64.0,
+            specular_strength: 0.78,
+            specular_power: 56.0,
         },
     }
 }
@@ -163,25 +163,21 @@ pub fn build_talisman_mesh() -> MeshCpu {
 /// vertex layout above.
 pub const TALISMAN_LOCAL_HALF: [f32; 3] = [HALF_W, HALF_H, HALF_T];
 
-/// Per-talisman material parameters. Each variant gets its own `MaterialKind`
-/// so the shader can pick the right sheen/Fresnel/SSS treatment. The caller
-/// supplies the per-instance tint via `base_color`.
+/// Per-talisman material parameters. All tablets use [`MaterialKind::Chitin`] (holographic
+/// foil wrapper). Per-kind spec tuning and `material_params.w` (kind index) bias the rainbow.
 pub fn talisman_material(
     kind: crate::core::talisman::TalismanKind,
     base_color: [f32; 4],
 ) -> MaterialParams {
     use crate::core::talisman::TalismanKind as T;
-    let (mat_kind, spec_strength, spec_power) = match kind {
-        T::Pearl => (MaterialKind::Pearl, 0.60, 64.0),
-        T::Gilded => (MaterialKind::Foil, 0.70, 48.0),
-        T::Polychrome => (MaterialKind::Polychrome, 0.70, 32.0),
-        T::Bamboo | T::Dots | T::Characters | T::Conformity => {
-            (MaterialKind::Moonstone, 0.80, 80.0)
-        }
-        T::Honors | T::Wildflower => (MaterialKind::Pearl, 0.60, 64.0),
+    let (spec_strength, spec_power) = match kind {
+        T::Pearl | T::Honors | T::Wildflower => (0.78, 56.0),
+        T::Gilded => (0.88, 48.0),
+        T::Polychrome => (0.82, 40.0),
+        T::Bamboo | T::Dots | T::Characters | T::Conformity => (0.80, 48.0),
     };
     MaterialParams {
-        kind: mat_kind,
+        kind: MaterialKind::Chitin,
         base_color,
         specular_strength: spec_strength,
         specular_power: spec_power,

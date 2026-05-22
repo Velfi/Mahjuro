@@ -9,8 +9,9 @@ use std::sync::OnceLock;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
-use crate::core::hand::{DetectedMeld, MeldKind, validate_selection};
+use crate::core::hand::{DetectedMeld, MeldKind, enumerate_decompositions, validate_selection};
 use crate::core::json_asset::load_json_asset;
+use crate::core::rules::RuleModifier;
 use crate::core::tile::{Suit, Tile};
 
 #[derive(Deserialize)]
@@ -77,7 +78,8 @@ pub enum YakuKind {
     Honitsu,
     /// Single number suit, no honors. Tied to the Rat zodiac.
     Chinitsu,
-    /// Every meld contains a terminal (rank 1 or 9). Tied to the Goat zodiac.
+    /// All tiles are terminals (1/9) or honors; every meld contains a terminal
+    /// or honor. Tied to the Goat zodiac (stacks with Honroutou when both apply).
     Junchan,
     /// Every tile is either a terminal (1 or 9) or an honor. Tied to the
     /// Tiger zodiac.
@@ -154,7 +156,7 @@ impl YakuKind {
             .then_with(|| a.chip_bonus().cmp(&b.chip_bonus()))
     }
 
-    /// All 14 yaku, in display order.
+    /// All yaku, in display order.
     pub fn all() -> &'static [YakuKind] {
         &[
             YakuKind::Tanyao,
@@ -202,10 +204,13 @@ pub fn yaku_preview(
     let (sets_opt, effective_tiles, original) = match wildcard_result {
         Some((sets, resolved)) => (Some(sets.to_vec()), resolved, Some(tiles)),
         None => {
-            // No wildcard context — fall back to plain validation.
-            let v = validate_selection(tiles);
-            // We need to return a reference to `tiles` in both arms, so
-            // store the owned vec alongside the slice we actually iterate.
+            let v = if tiles.len() >= 14 {
+                detect_yaku_best_decomposition(tiles, &[], round_wind, bonus_round_wind, None)
+                    .map(|(sets, _)| sets)
+                    .or_else(|| validate_selection(tiles))
+            } else {
+                validate_selection(tiles)
+            };
             return yaku_preview_inner(tiles, &v, available, round_wind, bonus_round_wind, None);
         }
     };
@@ -277,7 +282,7 @@ pub fn detect_yaku_with_wind(
     if is_full_hand(tiles, sets) {
         found.push(YakuKind::FullHand);
     }
-    if is_yakuhai(tiles, sets, round_wind, bonus_round_wind) {
+    for _ in 0..count_yakuhai(tiles, sets, round_wind, bonus_round_wind) {
         found.push(YakuKind::Yakuhai);
     }
     if is_chiitoitsu(sets) {
@@ -286,7 +291,7 @@ pub fn detect_yaku_with_wind(
     if is_kokushi_musou(sets, tiles) {
         found.push(YakuKind::KokushiMusou);
     }
-    if is_iipeikou(sets, tiles) {
+    if is_iipeikou(tiles, sets) {
         found.push(YakuKind::Iipeikou);
     }
     if is_sanshoku_doujun(sets, tiles) {
@@ -297,11 +302,10 @@ pub fn detect_yaku_with_wind(
     }
     if is_chinitsu(composition) {
         found.push(YakuKind::Chinitsu);
-    }
-    if is_honitsu(composition) {
+    } else if is_honitsu(composition) {
         found.push(YakuKind::Honitsu);
     }
-    if is_junchan(sets, composition) {
+    if is_junchan(sets, composition) && !is_kokushi_musou(sets, tiles) {
         found.push(YakuKind::Junchan);
     }
     if is_honroutou(composition) && !is_kokushi_musou(sets, tiles) {
@@ -309,6 +313,54 @@ pub fn detect_yaku_with_wind(
     }
 
     found
+}
+
+/// Pick the decomposition that yields the strongest yaku bundle (chip + mult
+/// weight). Used for 14-tile previews; full-hand cash-in already picks the
+/// highest-scoring decomposition in the run scoring path.
+pub fn detect_yaku_best_decomposition(
+    tiles: &[Tile],
+    rules: &[RuleModifier],
+    round_wind: Option<u8>,
+    bonus_round_wind: Option<u8>,
+    original_tiles: Option<&[Tile]>,
+) -> Option<(Vec<DetectedMeld>, Vec<YakuKind>)> {
+    let alternatives = enumerate_decompositions(tiles, rules);
+    if alternatives.is_empty() {
+        return None;
+    }
+    let mut best_sets = alternatives[0].clone();
+    let mut best_yaku = detect_yaku_with_wind(
+        tiles,
+        &best_sets,
+        round_wind,
+        bonus_round_wind,
+        original_tiles,
+    );
+    let mut best_weight = yaku_bundle_weight(&best_yaku);
+    for sets in alternatives.into_iter().skip(1) {
+        let yaku = detect_yaku_with_wind(
+            tiles,
+            &sets,
+            round_wind,
+            bonus_round_wind,
+            original_tiles,
+        );
+        let weight = yaku_bundle_weight(&yaku);
+        if weight > best_weight {
+            best_weight = weight;
+            best_sets = sets;
+            best_yaku = yaku;
+        }
+    }
+    Some((best_sets, best_yaku))
+}
+
+fn yaku_bundle_weight(yaku: &[YakuKind]) -> i64 {
+    yaku
+        .iter()
+        .map(|y| y.chip_bonus() as i64 + (y.mult_bonus() * 100.0).round() as i64)
+        .sum()
 }
 
 /// True if `tiles`/`sets` form a complete standard win (4 melds + pair or chiitoitsu).
@@ -362,18 +414,17 @@ fn is_toitoi(sets: &[DetectedMeld]) -> bool {
     triplet_like >= 2 && sequences == 0
 }
 
-/// Yakuhai: a triplet (or kong) of any dragon, or of the round wind. The
-/// round wind is the ante's wind (East/South/West/North) — passed in via
-/// `round_wind` (1..=4) or `None` if the caller doesn't track it.
-fn is_yakuhai(
+/// Yakuhai: each triplet/kong of a dragon or matching round/bonus round wind
+/// counts once (riichi awards one han per qualifying pon).
+fn count_yakuhai(
     tiles: &[Tile],
     sets: &[DetectedMeld],
     round_wind: Option<u8>,
     bonus_round_wind: Option<u8>,
-) -> bool {
+) -> u32 {
     sets.iter()
         .filter(|s| matches!(s.kind, MeldKind::Triplet | MeldKind::Kong))
-        .any(|s| {
+        .filter(|s| {
             s.tile_ids
                 .first()
                 .and_then(|id| tiles.iter().find(|t| t.id == *id))
@@ -386,6 +437,7 @@ fn is_yakuhai(
                     _ => false,
                 })
         })
+        .count() as u32
 }
 
 /// Tanyao (formerly `AllSimples`): every non-flower tile is a numbered suit
@@ -427,10 +479,12 @@ fn is_chiitoitsu(sets: &[DetectedMeld]) -> bool {
     true
 }
 
-/// Iipeikou: two identical sequences in the same suit (e.g. 1-2-3m + 1-2-3m).
-/// We compare normalized (suit, low_rank) tuples for each sequence and look
-/// for duplicates.
-fn is_iipeikou(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
+/// Iipeikou: two identical sequences in the same suit on a complete winning hand
+/// (no open melds in Mahjuro — full-hand cash-in only).
+fn is_iipeikou(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
+    if !is_complete_winning_hand(tiles, sets) {
+        return false;
+    }
     let mut seq_keys: Vec<(Suit, u8)> = sets
         .iter()
         .filter(|s| s.kind == MeldKind::Sequence)
@@ -546,26 +600,26 @@ fn is_honitsu(tiles: &[Tile]) -> bool {
     has_honor && number_suit.is_some()
 }
 
-/// Junchan: every meld contains at least one terminal (1 or 9) and the pair
-/// is also a terminal pair. Honors disqualify (that's Honroutou's territory).
-/// Requires ≥ 5 non-flower tiles and ≥ 2 sets. Flowers are neutral.
-fn is_junchan(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
-    let regular: Vec<&Tile> = tiles.iter().filter(|t| !t.is_flower()).collect();
-    if regular.len() < 5 || sets.len() < 2 {
-        return false;
-    }
-    if regular
-        .iter()
-        .any(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
-    {
-        return false;
-    }
-    sets.iter().all(|s| {
-        s.tile_ids
+/// Terminal or honor present in a meld (yaochu for chanta/junchan meld checks).
+fn meld_has_yaochu(s: &DetectedMeld, tiles: &[Tile]) -> bool {
+    s.tile_ids.iter().any(|id| {
+        tiles
             .iter()
-            .filter_map(|id| tiles.iter().find(|t| t.id == *id))
-            .any(|t| t.is_number_tile() && (t.rank == 1 || t.rank == 9))
+            .find(|t| t.id == *id)
+            .is_some_and(|t| {
+                matches!(t.suit, Suit::Wind | Suit::Dragon)
+                    || (t.is_number_tile() && (t.rank == 1 || t.rank == 9))
+            })
     })
+}
+
+/// Junchan (純全帯幺九): every tile is 1/9 or honor, and every meld contains a
+/// terminal or honor. Stacks with Honroutou on the same hand in real riichi.
+fn is_junchan(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
+    if sets.len() < 2 || !is_honroutou(tiles) {
+        return false;
+    }
+    sets.iter().all(|s| meld_has_yaochu(s, tiles))
 }
 
 /// Honroutou: every non-flower tile is a terminal (1/9) or an honor (no 2-8
@@ -880,6 +934,14 @@ mod tests {
             t(Suit::Characters, 2, 3),
             t(Suit::Characters, 3, 4),
             t(Suit::Characters, 4, 5),
+            t(Suit::Dots, 5, 6),
+            t(Suit::Dots, 5, 7),
+            t(Suit::Dots, 5, 8),
+            t(Suit::Bamboos, 7, 9),
+            t(Suit::Bamboos, 8, 10),
+            t(Suit::Bamboos, 9, 11),
+            t(Suit::Wind, 1, 12),
+            t(Suit::Wind, 1, 13),
         ];
         let sets = vec![
             DetectedMeld {
@@ -890,9 +952,22 @@ mod tests {
                 kind: MeldKind::Sequence,
                 tile_ids: vec![3, 4, 5],
             },
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: vec![6, 7, 8],
+            },
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![9, 10, 11],
+            },
+            DetectedMeld {
+                kind: MeldKind::Pair,
+                tile_ids: vec![12, 13],
+            },
         ];
         let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
         assert!(yaku.contains(&YakuKind::Iipeikou));
+        assert!(yaku.contains(&YakuKind::FullHand));
     }
 
     #[test]
@@ -1132,6 +1207,128 @@ mod tests {
         assert!(
             !detect_yaku_with_wind(&tiles, &sets, Some(2), None, None).contains(&YakuKind::Yakuhai)
         );
+    }
+
+    #[test]
+    fn junchan_allows_honors_and_stacks_with_honroutou() {
+        let tiles = vec![
+            t(Suit::Characters, 1, 0),
+            t(Suit::Characters, 1, 1),
+            t(Suit::Characters, 1, 2),
+            t(Suit::Characters, 9, 3),
+            t(Suit::Characters, 9, 4),
+            t(Suit::Characters, 9, 5),
+            t(Suit::Dots, 1, 6),
+            t(Suit::Dots, 1, 7),
+            t(Suit::Dots, 1, 8),
+            t(Suit::Dragon, 2, 9),
+            t(Suit::Dragon, 2, 10),
+            t(Suit::Dragon, 2, 11),
+            t(Suit::Bamboos, 9, 12),
+            t(Suit::Bamboos, 9, 13),
+        ];
+        let sets = vec![
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: vec![3, 4, 5],
+            },
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: vec![6, 7, 8],
+            },
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: vec![9, 10, 11],
+            },
+            DetectedMeld {
+                kind: MeldKind::Pair,
+                tile_ids: vec![12, 13],
+            },
+        ];
+        assert!(is_full_hand(&tiles, &sets));
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
+        assert!(yaku.contains(&YakuKind::Junchan));
+        assert!(yaku.contains(&YakuKind::Honroutou));
+        assert!(yaku.contains(&YakuKind::FullHand));
+    }
+
+    #[test]
+    fn count_yakuhai_stacks_per_qualifying_triplet() {
+        let tiles = vec![
+            t(Suit::Dragon, 1, 0),
+            t(Suit::Dragon, 1, 1),
+            t(Suit::Dragon, 1, 2),
+            t(Suit::Dragon, 3, 3),
+            t(Suit::Dragon, 3, 4),
+            t(Suit::Dragon, 3, 5),
+        ];
+        let sets = vec![
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: vec![3, 4, 5],
+            },
+        ];
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
+        assert_eq!(
+            yaku.iter().filter(|y| **y == YakuKind::Yakuhai).count(),
+            2
+        );
+    }
+
+    #[test]
+    fn iipeikou_requires_complete_winning_hand() {
+        let tiles = vec![
+            t(Suit::Characters, 2, 0),
+            t(Suit::Characters, 3, 1),
+            t(Suit::Characters, 4, 2),
+            t(Suit::Characters, 2, 3),
+            t(Suit::Characters, 3, 4),
+            t(Suit::Characters, 4, 5),
+        ];
+        let sets = vec![
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![3, 4, 5],
+            },
+        ];
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
+        assert!(!yaku.contains(&YakuKind::Iipeikou));
+    }
+
+    #[test]
+    fn chinitsu_excludes_honitsu() {
+        let tiles = vec![
+            t(Suit::Bamboos, 1, 0),
+            t(Suit::Bamboos, 2, 1),
+            t(Suit::Bamboos, 3, 2),
+            t(Suit::Bamboos, 4, 3),
+            t(Suit::Bamboos, 4, 4),
+        ];
+        let sets = vec![
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedMeld {
+                kind: MeldKind::Pair,
+                tile_ids: vec![3, 4],
+            },
+        ];
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
+        assert!(yaku.contains(&YakuKind::Chinitsu));
+        assert!(!yaku.contains(&YakuKind::Honitsu));
     }
 
     #[test]
