@@ -234,6 +234,7 @@ impl WgpuRenderer {
                         | DrawCmd::HallwayEnvironment
                         | DrawCmd::ArchiveEnvironment
                         | DrawCmd::MainMenuEnvironment
+                        | DrawCmd::GameplayEnvironment
                 )
             });
         if shop_showcase_without_env {
@@ -278,6 +279,10 @@ impl WgpuRenderer {
             if k == Some("collection") || (k == Some("showcase") && h.collection_tonemap_context) {
                 e *= crate::render::archive_glb::ARCHIVE_ENV_LINEAR_EXPOSURE_MUL;
                 a = a.max(crate::render::archive_glb::ARCHIVE_ENV_AMBIENT_SCALE_MIN);
+            }
+            if k == Some("gameplay") || k == Some("tutorial") {
+                e *= crate::render::gameplay_glb::GAMEPLAY_ENV_LINEAR_EXPOSURE_MUL;
+                a = a.max(crate::render::gameplay_glb::GAMEPLAY_ENV_AMBIENT_SCALE_MIN);
             }
             linear_hdr = e;
             ambient = a;

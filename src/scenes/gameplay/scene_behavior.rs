@@ -326,7 +326,46 @@ impl SceneBehavior for GameplayScene {
             gameplay.discards_max,
         );
 
-        let hand_slots = hand_slots_for_count(layout, interaction.hand_len);
+        let env_h = ctx.room_gltf_height_scale;
+        let use_glb_room = crate::render::gameplay_glb::gameplay_room_draw_ready();
+        let mut scene_camera = {
+            let h = layout.window_h;
+            let cs = h / 2104.0_f32;
+            let gp = &self.positions;
+            crate::render::gameplay_glb::gameplay_camera_from_glb_if_present(h, env_h)
+                .unwrap_or_else(|| crate::render::draw_cmd::CameraParams {
+                    eye: [
+                        0.0,
+                        -2104.0 * cs * gp.camera_eye_y_mul,
+                        1157.2 * cs * gp.camera_eye_z_mul,
+                    ],
+                    target: [
+                        0.0,
+                        -39.6 * cs * gp.camera_target_y_mul,
+                        105.2 * cs * gp.camera_target_z_mul,
+                    ],
+                    up: [0.0, 0.0, 1.0],
+                    fovy_deg: gp.camera_fovy_deg,
+                    clip_near: None,
+                    clip_far: None,
+                })
+        };
+        let glb_anchors = use_glb_room
+            .then(|| {
+                super::glb_anchors::resolve_gameplay_glb_anchors(
+                    layout,
+                    interaction.hand_len,
+                    layout.window_w,
+                    layout.window_h,
+                    &scene_camera,
+                    env_h,
+                )
+            })
+            .flatten();
+        let hand_slots = glb_anchors
+            .as_ref()
+            .map(|g| g.hand_slots.clone())
+            .unwrap_or_else(|| hand_slots_for_count(layout, interaction.hand_len));
 
         // Boss payload for the dedicated boss plinth inspect target.
         let boss_title_text = gameplay.boss_ofuda_title.clone();
@@ -426,14 +465,20 @@ impl SceneBehavior for GameplayScene {
             scale,
             container_w,
             container_x,
-            journal_btn_rect,
-            journal_btn_cx,
-            discard_btn_rect,
-            play_btn_rect,
+            mut journal_btn_rect,
+            mut journal_btn_cx,
+            mut discard_btn_rect,
+            mut play_btn_rect,
             trigger_btn_rect,
             action_hud_table_lift,
             ..
         } = ab;
+        if let Some(g) = &glb_anchors {
+            discard_btn_rect = g.discard_btn_rect;
+            play_btn_rect = g.play_btn_rect;
+            journal_btn_rect = g.journal_btn_rect;
+            journal_btn_cx = g.journal_btn_cx;
+        }
         let action_world_z_py = action_hud_world_z_py_nudge(layout_scale);
 
         // ── Frame accumulators ───────────────────────────────────────────
@@ -555,6 +600,7 @@ impl SceneBehavior for GameplayScene {
                 discard_enabled,
                 now,
                 &mut focus_rect_graph,
+                !use_glb_room,
             )
         };
         let _ = &mut wood_tablet_placements;
@@ -626,10 +672,15 @@ impl SceneBehavior for GameplayScene {
             ]
         });
 
-        let gold_anchor = crate::render::gold_display::gameplay_gold_pile_anchor(
-            layout,
-            &self.positions.coin_pile,
-        );
+        let gold_anchor = glb_anchors
+            .as_ref()
+            .map(|g| g.gold_anchor)
+            .unwrap_or_else(|| {
+                crate::render::gold_display::gameplay_gold_pile_anchor(
+                    layout,
+                    &self.positions.coin_pile,
+                )
+            });
         // Cash-in / play labels are engraved on the wood tablets (per-instance decals).
         // Discard river + play mirror use centered text in their projected rects in the
         // persistent HUD pass (see score readout + `hud_text` before `frame.texts`).
@@ -764,6 +815,7 @@ impl SceneBehavior for GameplayScene {
                 bronze_mirror_placement.as_ref(),
                 ctx.debug_visibility.hide_candles,
                 ctx.progress.dora_enabled(),
+                !use_glb_room,
             )
         };
 
@@ -774,7 +826,12 @@ impl SceneBehavior for GameplayScene {
 
         let relic_objects = {
             let _g = crate::render::cpu_profiler::scope("draw_frame.build_relic_tray");
-            input_handler::build_relic_tray(self, layout, run)
+            input_handler::build_relic_tray(
+                self,
+                layout,
+                run,
+                glb_anchors.as_ref().map(|g| g.relic_anchors.as_slice()),
+            )
         };
 
         // ── Frame assembly ──────────────────────────────────────────────
@@ -783,32 +840,49 @@ impl SceneBehavior for GameplayScene {
         let _ = relic_icons; // gameplay no longer renders 2D relic icons.
         let mut frame = UiFrame::new();
         let fov_pop_offset = self.final_tiles_fov_pop_offset_deg(now);
-        {
-            // Build camera from positions (multipliers on the cs-scaled defaults).
-            let h = layout.window_h;
-            let cs = h / 2104.0_f32;
-            let gp = &self.positions;
-            let mut camera = crate::render::draw_cmd::CameraParams {
-                eye: [
-                    0.0,
-                    -2104.0 * cs * gp.camera_eye_y_mul,
-                    1157.2 * cs * gp.camera_eye_z_mul,
-                ],
-                target: [
-                    0.0,
-                    -39.6 * cs * gp.camera_target_y_mul,
-                    105.2 * cs * gp.camera_target_z_mul,
-                ],
-                up: [0.0, 0.0, 1.0],
-                fovy_deg: gp.camera_fovy_deg,
-                clip_near: None,
-                clip_far: None,
-            };
-            camera.fovy_deg = (camera.fovy_deg - fov_pop_offset).max(35.0);
-            frame.camera_override = Some(camera);
-        }
+        scene_camera.fovy_deg = (scene_camera.fovy_deg - fov_pop_offset).max(35.0);
+        frame.camera_override = Some(scene_camera);
         frame.background(BackgroundId::Black);
-        frame.table();
+        if use_glb_room {
+            frame.gameplay_environment();
+            let room_glb_lights = crate::render::gameplay_glb::gameplay_glb_has_embedded_lights();
+            frame.scene_lighting.embedded_gltf_punctual = room_glb_lights;
+            frame.scene_lighting.room_glb_brdf = room_glb_lights;
+            if room_glb_lights {
+                let lamp_flicker = self.light_ramp * self.candle_wind_dim;
+                frame.scene_lighting.punctual = crate::render::gameplay_glb::gameplay_embedded_point_lights_runtime(
+                    layout.window_w,
+                    layout.window_h,
+                    env_h,
+                    &ctx.shop_env_lighting,
+                    self.candle_time,
+                    lamp_flicker,
+                )
+                .into_iter()
+                .map(crate::render::draw_cmd::ScenePunctualLight::Smooth)
+                .collect();
+                frame.scene_lighting.spot_lights =
+                    crate::render::gameplay_glb::gameplay_embedded_spot_lights_runtime(
+                        layout.window_w,
+                        layout.window_h,
+                        env_h,
+                        &ctx.shop_env_lighting,
+                    );
+                let glb_flames = crate::render::gameplay_glb::gameplay_gltf_candle_flame_emitters(
+                    layout.window_h,
+                    env_h,
+                    lamp_flicker,
+                );
+                frame.candle_light_count = glb_flames.len() as u32;
+                frame.flame_height_world =
+                    crate::render::flame_volume::shop_gltf_flame_height_world(
+                        crate::render::room_glb::room_env_world_scale(layout.window_h, env_h),
+                    );
+                frame.procedural_flame_emitters = glb_flames;
+            }
+        } else {
+            frame.table();
+        }
 
         let gold_label_rect = crate::render::gold_display::push_gold_amount_label(
             &mut frame,
@@ -942,11 +1016,15 @@ impl SceneBehavior for GameplayScene {
             // sticks stand on the table surface in front of (not inside)
             // the mirror/river.
             let fan_forward_px = layout.mm(30.0);
-            if let Some(mirror) = bronze_mirror_placement.as_ref() {
+            let play_tally_pos = bronze_mirror_placement
+                .as_ref()
+                .map(|m| m.pos)
+                .or_else(|| glb_anchors.as_ref().map(|g| g.play_tally_anchor));
+            if let Some([fx, fy, flift]) = play_tally_pos {
                 let fan = &self.positions.counter_draws_fan;
-                let fx = mirror.pos[0] + fan.nx * layout.window_w;
-                let fy = mirror.pos[1] + fan_forward_px + fan.ny * layout.window_h;
-                let flift = mirror.pos[2] + layout.mm(fan.lift_mm);
+                let fx = fx + fan.nx * layout.window_w;
+                let fy = fy + fan_forward_px + fan.ny * layout.window_h;
+                let flift = flift + layout.mm(fan.lift_mm);
                 frame.object3d(Object3d {
                     pos: [fx, fy, flift],
                     extents: [1.0, 1.0, 1.0],
@@ -968,11 +1046,15 @@ impl SceneBehavior for GameplayScene {
                     anim_id: 0,
                 });
             }
-            if let Some(bowl) = discard_bowl_placement.as_ref() {
+            let discard_tally_pos = discard_bowl_placement
+                .as_ref()
+                .map(|b| b.pos)
+                .or_else(|| glb_anchors.as_ref().map(|g| g.discard_tally_anchor));
+            if let Some([fx, fy, flift]) = discard_tally_pos {
                 let fan = &self.positions.counter_discards_fan;
-                let fx = bowl.pos[0] + fan.nx * layout.window_w;
-                let fy = bowl.pos[1] + fan_forward_px + fan.ny * layout.window_h;
-                let flift = bowl.pos[2] + layout.mm(fan.lift_mm);
+                let fx = fx + fan.nx * layout.window_w;
+                let fy = fy + fan_forward_px + fan.ny * layout.window_h;
+                let flift = flift + layout.mm(fan.lift_mm);
                 frame.object3d(Object3d {
                     pos: [fx, fy, flift],
                     extents: [1.0, 1.0, 1.0],
@@ -1176,6 +1258,8 @@ impl SceneBehavior for GameplayScene {
                 ctx.progress.dora_enabled(),
                 boss_plinth_glow * 0.65,
                 &mut frame,
+                use_glb_room,
+                glb_anchors.as_ref().map(|g| g.tile_plinth_anchors.as_slice()),
             );
         }
         if let (Some(boss_kind), Some(icon_rect)) = (gameplay.boss_kind, boss_icon_rect) {
@@ -1238,7 +1322,21 @@ impl SceneBehavior for GameplayScene {
             frame.object3d(book);
         }
 
-        frame.procedural_flame_emitters = flame_emitters;
+        if use_glb_room {
+            frame.scene_lighting.punctual.extend(
+                point_lights
+                    .into_iter()
+                    .map(crate::render::draw_cmd::ScenePunctualLight::Smooth),
+            );
+            frame.scene_lighting.spot_lights.extend(spot_lights);
+        } else {
+            frame.procedural_flame_emitters = flame_emitters;
+            frame.candle_light_count = candle_placements.len() as u32;
+            frame.flame_height_world =
+                crate::render::flame_volume::flame_height_world(&layout);
+            frame.scene_lighting.set_smooth_points(point_lights);
+            frame.scene_lighting.spot_lights = spot_lights;
+        }
         if !frame.procedural_flame_emitters.is_empty() {
             // One `DrawCmd::Flame` triggers the volume batch (same path as shop).
             frame.flames(std::iter::once(crate::render::wgpu_renderer::GpuInstance {

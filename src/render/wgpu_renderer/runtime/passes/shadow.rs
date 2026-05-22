@@ -96,6 +96,16 @@ impl WgpuRenderer {
                         );
                     }
                 }
+                Some(ActiveRoomEnv::Gameplay) => {
+                    if let Some(ref gpu) = self.gameplay_environment {
+                        self.draw_gltf_room_env_shadow(
+                            &mut shadow_pass,
+                            &self.gameplay_env_primitives,
+                            gpu,
+                            |_| false,
+                        );
+                    }
+                }
                 None => {}
             }
         }

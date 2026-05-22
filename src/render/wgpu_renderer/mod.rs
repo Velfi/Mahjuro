@@ -214,6 +214,8 @@ pub struct WgpuRenderer {
     /// [`main_menu.glb`](../../assets/3d/main_menu.glb) hub waterfront.
     main_menu_env_primitives: Vec<TilePrimitiveGpu>,
     main_menu_environment: Option<ShopEnvironmentGpu>,
+    gameplay_env_primitives: Vec<TilePrimitiveGpu>,
+    gameplay_environment: Option<ShopEnvironmentGpu>,
     /// GPU primitive index of `sign_description_left` in `archive_env_primitives` (for culling).
     archive_sign_left_prim_idx: Option<usize>,
     archive_sign_right_prim_idx: Option<usize>,

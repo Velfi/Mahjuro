@@ -62,6 +62,8 @@ pub(super) enum RenderOp {
     ArchiveEnvironment,
     /// Main-menu waterfront (`main_menu.glb`).
     MainMenuEnvironment,
+    /// Gameplay table room (`gameplay.glb`).
+    GameplayEnvironment,
     /// Marker: start a new Pass A subpass with depth cleared (HDR color unchanged).
     /// Emitted from [`crate::render::draw_cmd::DrawCmd::ClearSceneDepth`]. Never dispatched
     /// through [`super::process_op::WgpuRenderer::process_op`].

@@ -16,6 +16,7 @@ mod cascade_controller;
 mod cascade_hud;
 mod discard_animation;
 mod focus;
+mod glb_anchors;
 mod hand_layout;
 mod input_handler;
 mod onboarding_hints;

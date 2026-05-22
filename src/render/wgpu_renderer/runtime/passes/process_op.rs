@@ -397,6 +397,11 @@ impl WgpuRenderer {
                     self.draw_main_menu_environment_meshes(pass, frame, false);
                 }
             }
+            RenderOp::GameplayEnvironment => {
+                if self.gameplay_environment.is_some() {
+                    self.draw_gameplay_environment_meshes(pass, frame, false);
+                }
+            }
             RenderOp::ShowcaseTileBatch(batch_idx) => {
                 if !self.tile_primitives.is_empty() {
                     let batch = showcase_tile_batches[*batch_idx];

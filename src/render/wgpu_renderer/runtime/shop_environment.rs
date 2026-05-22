@@ -8,6 +8,7 @@ struct GltfRoomEnvUniformParams<'a> {
     hallway_env: bool,
     archive_env: bool,
     main_menu_env: bool,
+    gameplay_env: bool,
     bloom_linear_hdr_output: bool,
     model: Mat4,
     gpu: &'a ShopEnvironmentGpu,
@@ -88,6 +89,26 @@ impl WgpuRenderer {
         );
     }
 
+    /// Draw [`gameplay.glb`] table room.
+    pub(super) fn draw_gameplay_environment_meshes(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        frame: &crate::render::draw_cmd::UiFrame,
+        room_hdr_mrt_emissive: bool,
+    ) {
+        let Some(ref gpu) = self.gameplay_environment else {
+            return;
+        };
+        self.draw_gltf_room_env_meshes(
+            pass,
+            frame,
+            &self.gameplay_env_primitives,
+            gpu,
+            room_hdr_mrt_emissive,
+            |_| false,
+        );
+    }
+
     /// Draw [`hallway.glb`] (pick-blind room).
     pub(super) fn draw_hallway_environment_meshes(
         &self,
@@ -136,6 +157,7 @@ impl WgpuRenderer {
             hallway_env,
             archive_env,
             main_menu_env,
+            gameplay_env,
             bloom_linear_hdr_output,
             model,
             gpu,
@@ -182,7 +204,11 @@ impl WgpuRenderer {
                 e *= crate::render::main_menu_glb::MAIN_MENU_ENV_LINEAR_EXPOSURE_MUL;
                 a = a.max(crate::render::main_menu_glb::MAIN_MENU_ENV_AMBIENT_SCALE_MIN);
             }
-            if !hallway_env && !archive_env && !main_menu_env {
+            if gameplay_env {
+                e *= crate::render::gameplay_glb::GAMEPLAY_ENV_LINEAR_EXPOSURE_MUL;
+                a = a.max(crate::render::gameplay_glb::GAMEPLAY_ENV_AMBIENT_SCALE_MIN);
+            }
+            if !hallway_env && !archive_env && !main_menu_env && !gameplay_env {
                 a = a.max(crate::render::room_glb::SHOP_ENV_DIELECTRIC_AMBIENT_MIN);
             }
             (e, a)
@@ -270,6 +296,44 @@ impl WgpuRenderer {
             hallway_env: false,
             archive_env: false,
             main_menu_env: false,
+            gameplay_env: false,
+            bloom_linear_hdr_output,
+            model,
+            gpu,
+            shadow_upload,
+        });
+    }
+
+    pub(super) fn write_gameplay_environment_uniforms(
+        &self,
+        frame: &crate::render::draw_cmd::UiFrame,
+        camera: &CameraFrame,
+        bloom_linear_hdr_output: bool,
+        shadow_upload: Option<([f32; 16], &mut bool)>,
+    ) {
+        let Some(ref gpu) = self.gameplay_environment else {
+            return;
+        };
+        let s =
+            crate::render::room_glb::room_env_world_scale(camera.h, self.room_gltf_height_scale);
+        let model = crate::render::gameplay_glb::with_gameplay_glb_cpu(|opt| {
+            opt.map(|cpu| {
+                crate::render::room_glb::room_env_model_matrix_from_cpu(
+                    camera.h,
+                    self.room_gltf_height_scale,
+                    cpu,
+                )
+            })
+        })
+        .unwrap_or_else(|| Mat4::from_scale(glam::Vec3::splat(s)));
+        self.write_gltf_room_env_uniforms(GltfRoomEnvUniformParams {
+            frame,
+            camera,
+            embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
+            hallway_env: false,
+            archive_env: false,
+            main_menu_env: false,
+            gameplay_env: true,
             bloom_linear_hdr_output,
             model,
             gpu,
@@ -306,6 +370,7 @@ impl WgpuRenderer {
             hallway_env: true,
             archive_env: false,
             main_menu_env: false,
+            gameplay_env: false,
             bloom_linear_hdr_output,
             model,
             gpu,
@@ -409,6 +474,7 @@ impl WgpuRenderer {
             hallway_env: false,
             archive_env: true,
             main_menu_env: false,
+            gameplay_env: false,
             bloom_linear_hdr_output,
             model,
             gpu,
@@ -462,6 +528,7 @@ impl WgpuRenderer {
             hallway_env: false,
             archive_env: false,
             main_menu_env: true,
+            gameplay_env: false,
             bloom_linear_hdr_output,
             model,
             gpu,

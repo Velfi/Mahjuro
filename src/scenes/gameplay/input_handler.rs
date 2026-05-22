@@ -908,6 +908,7 @@ pub(super) fn build_relic_tray(
     scene: &GameplayScene,
     layout: &crate::ui::layout::LayoutResult,
     run: &crate::game::run::RunState,
+    glb_relic_anchors: Option<&[[f32; 3]]>,
 ) -> Vec<Object3d> {
     // ── Relic tray (horizontal row across the top of the screen) ────
     // Each active relic renders as a face-on enamel medallion using the
@@ -1002,9 +1003,11 @@ pub(super) fn build_relic_tray(
                 (0.0, 0.0)
             };
 
-            let px = start_x + i as f32 * stride;
+            let pos = glb_relic_anchors
+                .and_then(|anchors| anchors.get(i).copied())
+                .unwrap_or([start_x + i as f32 * stride, tray_cy, face * 0.45]);
             relic_objects.push(Object3d {
-                pos: [px, tray_cy, face * 0.45],
+                pos,
                 extents: [face, thick, face],
                 rotation: euler_xyz_rad_from_deg(face_pitch_deg, wiggle_deg, 0.0),
                 color,
@@ -1356,6 +1359,7 @@ pub(super) fn build_action_row_and_journal(
     discard_enabled: bool,
     now: Instant,
     focus_rect_graph: &mut Vec<(FocusTarget, [f32; 4])>,
+    spawn_procedural_action_props: bool,
 ) -> ActionRowOutputs {
     use super::focus::ALL_BUTTONS;
     use crate::render::draw_cmd::{Object3d, Object3dKind};
@@ -1445,7 +1449,7 @@ pub(super) fn build_action_row_and_journal(
             lift_z: action_hud_table_lift,
         };
         match i {
-            0 => {
+            0 if spawn_procedural_action_props => {
                 // Discard bowl — right side of the discard/play row under the rack.
                 // The synthesized
                 // `discard_btn_rect` above is already a square sized to
@@ -1494,7 +1498,7 @@ pub(super) fn build_action_row_and_journal(
                 // on the very first frame after a scene transition
                 // the label briefly doesn't appear.
             }
-            1 => {
+            1 if spawn_procedural_action_props => {
                 // Bronze mirror — left side of that same row (paired with the bowl).
                 // Same square `play_btn_rect` convention as the bowl,
                 // and the same binary-target → renderer-eased envelope
@@ -1528,7 +1532,7 @@ pub(super) fn build_action_row_and_journal(
                 // anchoring as the river label above (no layout-rect
                 // fallback).
             }
-            2 => {
+            2 if spawn_procedural_action_props => {
                 let tablet_thickness = (bh * 0.35).max(8.0);
                 let structure_full = gameplay.structure_complete;
                 let wiggle_deg =
@@ -1601,7 +1605,8 @@ pub(super) fn build_action_row_and_journal(
     };
 
     let (face_w, face_h) = book_cover_face_extents_xy(w, journal_zoom);
-    let journal_book = Some(Object3d {
+    let journal_book = if spawn_procedural_action_props {
+        Some(Object3d {
         pos: journal_pos,
         extents: [
             face_w,
@@ -1620,7 +1625,10 @@ pub(super) fn build_action_row_and_journal(
         },
         hover_target: 0.0,
         anim_id: 0,
-    });
+    })
+    } else {
+        None
+    };
 
     if let Some(rect) = ctx
         .proj
