@@ -122,6 +122,7 @@ struct SpotLights {
 struct ShadowGlobals {
     light_view_proj: mat4x4<f32>,
     params: vec4<f32>,
+    room_baked_light_view_proj: mat4x4<f32>,
 };
 @group(2) @binding(0) var<uniform> shadow_globals: ShadowGlobals;
 @group(2) @binding(1) var shadow_map: texture_depth_2d;
@@ -130,8 +131,14 @@ struct ShadowGlobals {
 @group(2) @binding(4) var baked_shadow_ao: texture_2d<f32>;
 @group(2) @binding(5) var baked_shadow_ao_samp: sampler;
 
-fn sample_shadow_pcf(depth_tex: texture_depth_2d, world_pos: vec3<f32>, bias: f32, texel: f32) -> f32 {
-    let lp = shadow_globals.light_view_proj * vec4<f32>(world_pos, 1.0);
+fn sample_shadow_pcf(
+    lvp: mat4x4<f32>,
+    depth_tex: texture_depth_2d,
+    world_pos: vec3<f32>,
+    bias: f32,
+    texel: f32,
+) -> f32 {
+    let lp = lvp * vec4<f32>(world_pos, 1.0);
     let proj = lp.xyz / lp.w;
     let uv = vec2<f32>(proj.x * 0.5 + 0.5, proj.y * -0.5 + 0.5);
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || proj.z < 0.0 || proj.z > 1.0) {
@@ -148,8 +155,8 @@ fn sample_shadow_pcf(depth_tex: texture_depth_2d, world_pos: vec3<f32>, bias: f3
     return sum / 9.0;
 }
 
-fn sample_shadow_pcf_baked(world_pos: vec3<f32>, bias: f32, texel: f32) -> f32 {
-    let lp = shadow_globals.light_view_proj * vec4<f32>(world_pos, 1.0);
+fn sample_shadow_pcf_baked(lvp: mat4x4<f32>, world_pos: vec3<f32>, bias: f32, texel: f32) -> f32 {
+    let lp = lvp * vec4<f32>(world_pos, 1.0);
     let proj = lp.xyz / lp.w;
     let uv = vec2<f32>(proj.x * 0.5 + 0.5, proj.y * -0.5 + 0.5);
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || proj.z < 0.0 || proj.z > 1.0) {
@@ -176,20 +183,29 @@ fn sample_shadow_visibility(world_pos: vec3<f32>) -> f32 {
     }
     let bias = shadow_globals.params.y;
     let texel = shadow_globals.params.z;
-    let baked = shadow_globals.params.w > 0.5;
-    var vis = select(
-        sample_shadow_pcf(shadow_map, world_pos, bias, texel),
-        sample_shadow_pcf_baked(world_pos, bias, texel),
-        baked,
+    let dynamic_vis = sample_shadow_pcf(
+        shadow_globals.light_view_proj,
+        shadow_map,
+        world_pos,
+        bias,
+        texel,
     );
-    if (baked) {
-        let lp = shadow_globals.light_view_proj * vec4<f32>(world_pos, 1.0);
-        let proj = lp.xyz / lp.w;
-        let uv = vec2<f32>(proj.x * 0.5 + 0.5, proj.y * -0.5 + 0.5);
-        if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) {
-            let ao = textureSample(baked_shadow_ao, baked_shadow_ao_samp, uv).r;
-            vis = vis * ao;
-        }
+    if (shadow_globals.params.w < 0.5) {
+        return dynamic_vis;
+    }
+    let baked_vis = sample_shadow_pcf_baked(
+        shadow_globals.room_baked_light_view_proj,
+        world_pos,
+        bias,
+        texel,
+    );
+    var vis = dynamic_vis * baked_vis;
+    let lp = shadow_globals.room_baked_light_view_proj * vec4<f32>(world_pos, 1.0);
+    let proj = lp.xyz / lp.w;
+    let uv = vec2<f32>(proj.x * 0.5 + 0.5, proj.y * -0.5 + 0.5);
+    if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) {
+        let ao = textureSample(baked_shadow_ao, baked_shadow_ao_samp, uv).r;
+        vis = vis * ao;
     }
     return vis;
 }

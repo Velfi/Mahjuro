@@ -497,19 +497,32 @@ impl WgpuRenderer {
     }
 
     #[inline]
+    fn archive_env_is_description_sign_prim(&self, pi: usize) -> bool {
+        self.archive_sign_left_prim_idx == Some(pi)
+            || self.archive_sign_right_prim_idx == Some(pi)
+    }
+
+    /// Lit pass: draw only the active description board (opposite the focus ref).
+    #[inline]
     pub(super) fn archive_env_skip_description_prim(
         &self,
         pi: usize,
         frame: &crate::render::draw_cmd::UiFrame,
     ) -> bool {
-        match (
-            self.archive_sign_left_prim_idx,
-            self.archive_sign_right_prim_idx,
-            frame.archive_description_sign_use_left,
-        ) {
-            (Some(_li), Some(ri), Some(true)) => pi == ri,
-            (Some(li), Some(_ri), Some(false)) => pi == li,
+        if !self.archive_env_is_description_sign_prim(pi) {
+            return false;
+        }
+        match frame.archive_description_sign_use_left {
+            Some(true) => self.archive_sign_right_prim_idx == Some(pi),
+            Some(false) => self.archive_sign_left_prim_idx == Some(pi),
             _ => false,
         }
+    }
+
+    /// Shadow pre-pass / offline bake: never cast from either sign — they are flat
+    /// decal boards and project hard silhouettes onto the featured pedestal.
+    #[inline]
+    pub(super) fn archive_env_skip_description_sign_shadow(&self, pi: usize) -> bool {
+        self.archive_env_is_description_sign_prim(pi)
     }
 }

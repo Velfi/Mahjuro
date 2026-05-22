@@ -14,6 +14,7 @@ pub mod scoring;
 pub mod stake;
 pub mod structure;
 pub mod tag;
+pub mod memorial_talisman;
 pub mod talisman;
 pub mod tile;
 pub mod tile_pack;

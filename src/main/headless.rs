@@ -147,6 +147,89 @@ fn setup_shop_state(run: &mut RunState) {
     run.tag_rich_stock = true;
 }
 
+/// Build a defeat [`Scene::GameOver`] from bot play, saved run history, or the
+/// baked-in hero fixture.
+fn game_over_defeat_scene(
+    s: &main_cli::ScreenshotCli,
+    run: &mut RunState,
+    progress: &mut crate::core::progression::PlayerProgress,
+) -> anyhow::Result<Scene> {
+    use crate::core::memorial_talisman::{select_memorial, snapshot_from_run};
+    use crate::game::event_bus::GameOverReason;
+    use crate::scenes::GameOverScene;
+
+    if s.bot_play && s.from_run_history.is_some() {
+        anyhow::bail!("use only one of --bot-play or --from-run-history");
+    }
+    if s.seed_bot_runs.is_some() && s.from_run_history.is_none() {
+        anyhow::bail!("--seed-bot-runs requires --from-run-history <index>");
+    }
+
+    if let Some(n) = s.seed_bot_runs {
+        crate::bot::seed_progress_from_bot_runs(progress, n);
+    }
+
+    let reason = if let Some(idx) = s.from_run_history {
+        let rec = progress.run_history.get(idx).ok_or_else(|| {
+            anyhow::anyhow!(
+                "profile run_history[{idx}] missing (have {} runs; seed with --seed-bot-runs N)",
+                progress.run_history.len()
+            )
+        })?;
+        let reason = rec.defeat_reason().ok_or_else(|| {
+            anyhow::anyhow!("profile run_history[{idx}] is not a defeat (use a defeat index)")
+        })?;
+        rec.hydrate_game_over_run(run);
+        reason
+    } else if s.bot_play {
+        let (terminal, stats) = crate::bot::play_bot_run(
+            crate::bot::BotConfig::default(),
+            crate::bot::BotRunOptions {
+                log: false,
+                ..crate::bot::BotRunOptions::default()
+            },
+            Some(progress.runs_completed.saturating_add(1).max(1)),
+        );
+        if stats.victory {
+            anyhow::bail!(
+                "--bot-play produced a victory; retry or pick a defeat with --from-run-history"
+            );
+        }
+        let reason = stats.death_reason.unwrap_or(GameOverReason::OutOfPlays);
+        let snap = snapshot_from_run(&terminal.defeat_journal, reason, &terminal);
+        *run = terminal;
+        run.defeat_memorial_kind = Some(select_memorial(&snap));
+        reason
+    } else {
+        setup_defeat_game_over_screenshot_state(run);
+        GameOverReason::OutOfPlays
+    };
+
+    Ok(Scene::GameOver(GameOverScene::new(run, reason)))
+}
+
+/// Rich defeat run for `screenshot --scene game_over_defeat`: boss blind,
+/// memorial talisman (Boss's Mark), and stats matching the debug defeat screen.
+fn setup_defeat_game_over_screenshot_state(run: &mut RunState) {
+    use crate::core::boss::BossKind;
+    use crate::core::rules::BlindKind;
+    use crate::core::yaku::YakuKind;
+
+    run.ante = 6;
+    run.run_number = 18;
+    run.blind = BlindKind::Boss;
+    run.boss.upcoming = Some(BossKind::Rot);
+    run.round_score = 5674;
+    run.target_score = 10486;
+    run.gold = 12;
+    run.tiles_played = 170;
+    run.tiles_discarded = 97;
+    run.times_restocked = 44;
+    run.best_structure_score = 6577;
+    run.best_structure_name = ".tsu".into();
+    run.yaku_times_played.insert(YakuKind::FullHand, 6);
+}
+
 /// Rich gameplay frame for `screenshot --scene gameplay`: hero-style rack,
 /// a complete committed structure in the bank (same geometry as
 /// `RunState` tests `winning_structure`), five relics, and consumable slots
@@ -285,7 +368,22 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
             "--pack is only valid with --scene tile_pack_celebration or --scene showcase"
         );
     }
+    let defeat_like = matches!(s.scene.as_str(), "game_over_defeat" | "defeat");
+    if (s.bot_play || s.from_run_history.is_some() || s.seed_bot_runs.is_some())
+        && !defeat_like
+    {
+        anyhow::bail!(
+            "--bot-play, --from-run-history, and --seed-bot-runs are only valid with --scene game_over_defeat"
+        );
+    }
     let boss_override = s.boss.as_deref().map(parse_boss_slug).transpose()?;
+    let settings = persistence::load_settings();
+    let profile_index = s.profile.unwrap_or(settings.active_profile);
+    let mut screenshot_progress = if s.fresh_progress {
+        crate::core::progression::PlayerProgress::new()
+    } else {
+        persistence::load_profile(profile_index)
+    };
     let mut run = RunState::new_demo();
     if let Some(kind) = boss_override {
         force_boss_blind(&mut run, kind);
@@ -453,12 +551,16 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
                 true,
             )
         }
+        "game_over_defeat" | "defeat" => {
+            let scene = game_over_defeat_scene(&s, &mut run, &mut screenshot_progress)?;
+            (scene, true)
+        }
         other => {
             anyhow::bail!(
                 "unsupported --scene '{other}' (supported: collection, archive, archive_bosses, chronicle, \
                 yaku_journal, gameplay, gameplay_hero, pick_blind, shop, \
                 main_menu_exterior, tile_select, transition_playground, \
-                material_viewer, relic_unlock, game_over_level_up, meta_level_up, \
+                material_viewer, relic_unlock, game_over_level_up, game_over_defeat, meta_level_up, \
                 showcase, \
                 zodiac_celebration, tile_pack_celebration)"
             )
@@ -471,6 +573,8 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
         s.height.max(1),
         game_in_progress,
         s.fresh_progress,
+        profile_index,
+        screenshot_progress,
     )?;
     if s.item_inspect {
         let w = s.width.max(1) as f32;
@@ -591,14 +695,11 @@ impl HeadlessApp {
         height: u32,
         game_in_progress: bool,
         fresh_progress: bool,
+        active_profile: usize,
+        progress: crate::core::progression::PlayerProgress,
     ) -> anyhow::Result<Self> {
+        let _ = fresh_progress;
         let settings = persistence::load_settings();
-        let active_profile = settings.active_profile;
-        let progress = if fresh_progress {
-            crate::core::progression::PlayerProgress::new()
-        } else {
-            persistence::load_profile(active_profile)
-        };
         let renderer = WgpuRenderer::new(render::wgpu_renderer::TargetInit::Headless {
             width,
             height,
@@ -839,6 +940,7 @@ impl HeadlessApp {
                     tile_material: TileMaterial::Bamboo,
                     stake: Stake::Spring,
                     tutorial_run: false,
+                    memorial_kind: None,
                 });
             }
             self.progress.high_scores = vec![15600, 11200, 9100];
@@ -1015,7 +1117,7 @@ impl HeadlessApp {
             &layout,
             &self.anim,
             &self.run,
-            &self.progress,
+            &mut self.progress,
             self.active_profile,
             self.game_in_progress,
             self.renderer.projections(),
@@ -1080,6 +1182,7 @@ impl HeadlessApp {
             Scene::Showcase(_) => Some("showcase"),
             Scene::Shop(_) => Some("shop"),
             Scene::Gameplay(_) => Some("gameplay"),
+            Scene::GameOver(s) if !s.won => Some("gameplay"),
             Scene::Collection(_) => Some("collection"),
             Scene::PickBlind(_) => Some("pick_blind"),
             Scene::MainMenuExterior(_) => Some("main_menu_exterior"),
@@ -1225,7 +1328,19 @@ pub fn run_bake_room_shadows_command(b: main_cli::BakeRoomShadowsCli) -> anyhow:
     asset_path::log_all_assets();
     let room = parse_bake_room_slug(&b.room)?;
     let (scene, run, game_in_progress) = scene_for_room_gi_bake(room)?;
-    let mut app = HeadlessApp::with_run(scene, run, b.width, b.height, game_in_progress, false)?;
+    let settings = persistence::load_settings();
+    let profile_index = settings.active_profile;
+    let progress = persistence::load_profile(profile_index);
+    let mut app = HeadlessApp::with_run(
+        scene,
+        run,
+        b.width,
+        b.height,
+        game_in_progress,
+        false,
+        profile_index,
+        progress,
+    )?;
     app.renderer.request_room_shadow_capture(room);
     for _ in 0..b.warmup_frames {
         app.tick();
@@ -1269,7 +1384,19 @@ pub fn run_bake_room_gi_command(b: main_cli::BakeRoomGiCli) -> anyhow::Result<()
     asset_path::log_all_assets();
     let room = parse_bake_room_slug(&b.room)?;
     let (scene, run, game_in_progress) = scene_for_room_gi_bake(room)?;
-    let app = HeadlessApp::with_run(scene, run, b.width, b.height, game_in_progress, false)?;
+    let settings = persistence::load_settings();
+    let profile_index = settings.active_profile;
+    let progress = persistence::load_profile(profile_index);
+    let app = HeadlessApp::with_run(
+        scene,
+        run,
+        b.width,
+        b.height,
+        game_in_progress,
+        false,
+        profile_index,
+        progress,
+    )?;
     let bake = app.run_room_gi_bake(room, b.warmup_frames)?;
     let out_name = match room {
         crate::render::room_gi_bake::RoomGiRoom::Shop => "shop.mgi",

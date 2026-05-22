@@ -340,6 +340,28 @@ fn single_flower_invalid() {
     assert!(validate_selection(&tiles).is_none());
 }
 
+// ── NoFlowerWildcards (The Rot) ────────────────────────────────
+
+#[test]
+fn no_flower_wildcards_blocks_substitution() {
+    let rules = [RuleModifier::NoFlowerWildcards];
+    let tiles = vec![
+        t(Suit::Bamboos, 5, 0),
+        t(Suit::Bamboos, 5, 1),
+        t(Suit::Flower, 1, 100),
+    ];
+    assert!(validate_selection_with_rules(&tiles, &rules).is_none());
+}
+
+#[test]
+fn no_flower_wildcards_allows_flower_pair() {
+    let rules = [RuleModifier::NoFlowerWildcards];
+    let tiles = vec![t(Suit::Flower, 1, 100), t(Suit::Flower, 2, 101)];
+    let sets = validate_selection_with_rules(&tiles, &rules).unwrap();
+    assert_eq!(sets.len(), 1);
+    assert_eq!(sets[0].kind, MeldKind::Pair);
+}
+
 // ── validate_selection_with_rules ──────────────────────────────
 
 #[test]

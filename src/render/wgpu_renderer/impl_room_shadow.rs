@@ -8,9 +8,12 @@ use crate::render::wgpu_renderer::runtime::shadow_setup::ActiveRoomEnv;
 
 pub(crate) struct RoomBakedShadowGpu {
     pub sample_bind_group: wgpu::BindGroup,
+    pub globals_buffer: wgpu::Buffer,
+    pub baked_light_view_proj: [f32; 16],
+    pub depth_bias: f32,
+    pub texel: f32,
     _depth_texture: wgpu::Texture,
     _ao_texture: wgpu::Texture,
-    _globals_buffer: wgpu::Buffer,
 }
 
 impl WgpuRenderer {
@@ -142,11 +145,13 @@ impl WgpuRenderer {
             },
         );
 
+        let texel = 1.0 / w.max(h) as f32;
         let globals_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("room-baked-shadow-globals"),
             contents: bytemuck::bytes_of(&ShadowGlobals {
-                light_view_proj: bake.light_view_proj,
-                params: [1.0, bake.depth_bias, 1.0 / w.max(h) as f32, 1.0],
+                light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
+                params: [1.0, bake.depth_bias, texel, 1.0],
+                room_baked_light_view_proj: bake.light_view_proj,
             }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
@@ -163,10 +168,38 @@ impl WgpuRenderer {
         );
         Ok(RoomBakedShadowGpu {
             sample_bind_group,
+            globals_buffer,
+            baked_light_view_proj: bake.light_view_proj,
+            depth_bias: bake.depth_bias,
+            texel,
             _depth_texture: depth_texture,
             _ao_texture: ao_texture,
-            _globals_buffer: globals_buffer,
         })
+    }
+
+    /// Keep baked room shadow sampling in sync with the live prop shadow pass.
+    pub(super) fn write_active_room_baked_shadow_globals(
+        &self,
+        queue: &wgpu::Queue,
+        light_view_proj: [f32; 16],
+        shadows_enabled: bool,
+    ) {
+        let Some(room) = self.active_room_baked_shadow else {
+            return;
+        };
+        let Some(gpu) = self.room_baked_shadow_gpu[room_index(room)].as_ref() else {
+            return;
+        };
+        let enabled = if shadows_enabled { 1.0 } else { 0.0 };
+        queue.write_buffer(
+            &gpu.globals_buffer,
+            0,
+            bytemuck::bytes_of(&ShadowGlobals {
+                light_view_proj,
+                params: [enabled, gpu.depth_bias, gpu.texel, 1.0],
+                room_baked_light_view_proj: gpu.baked_light_view_proj,
+            }),
+        );
     }
 
     pub(super) fn upload_active_room_baked_shadow_globals(&mut self, frame: &UiFrame) {

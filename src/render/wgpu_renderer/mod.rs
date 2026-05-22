@@ -514,6 +514,12 @@ pub struct WgpuRenderer {
     /// The talisman shader branch samples these as a
     /// grayscale heightfield to perturb the surface normal.
     talisman_height_views: Vec<wgpu::TextureView>,
+    /// Per-kind octagon masks for shop talisman tablets — [`TalismanKind::all()`] order.
+    talisman_mask_views: Vec<wgpu::TextureView>,
+    /// Per-kind heightmaps for memorial (remnant) tablets — [`MemorialTalismanKind::all()`] order.
+    memorial_talisman_height_views: Vec<wgpu::TextureView>,
+    /// Per-kind octagon masks for memorial tablets — [`MemorialTalismanKind::all()`] order.
+    memorial_talisman_mask_views: Vec<wgpu::TextureView>,
     /// Which heightmap is currently bound per talisman slot. Used to skip
     /// rebinding when the kind hasn't changed since last frame. Indexed
     /// parallel with `talisman_instances`; `None` means the white fallback
@@ -780,7 +786,8 @@ pub use constants::{
     MAIN_MENU_PICK_OPTIONS, MAIN_MENU_PICK_PLAY, MAIN_MENU_PICK_QUIT, MAX_BOOK_SLOTS,
     MAX_BOSS_ICON_SLOTS, MAX_BOWL_SLOTS, MAX_BUG_SLOTS, MAX_CASCADE_TOKEN_SLOTS,
     MAX_EXTRUDED_GLYPH_SLOTS, MAX_MIRROR_SLOTS, MAX_ORB_SLOTS, MAX_PLINTH_SLOTS, MAX_POINT_LIGHTS,
-    MAX_RELIC_SLOTS, MAX_RIBBON_SLOTS, MAX_SPOT_LIGHTS, MAX_TALISMAN_SLOTS, MAX_TALLY_FAN_SLOTS,
+    MAX_RELIC_SLOTS, MAX_RIBBON_SLOTS, MAX_SPOT_LIGHTS, MAX_TALISMAN_SLOTS,
+    MEMORIAL_TALISMAN_TEXTURE_BASE, MAX_TALLY_FAN_SLOTS,
     MAX_TALLY_STICK_SLOTS, MAX_TILE_OCCLUDERS, MAX_WALL_TILE_SLOTS, MAX_WOOD_TABLET_SLOTS,
     MAX_YAKU_TABLET_SLOTS,
 };

@@ -90,9 +90,8 @@ enum Tab {
 }
 
 /// Archive grid / featured talisman `Object3d::extents` vs `plate_w` / `closeup_size`.
-/// Mesh local AABB is 1.0 × 1.4 × 0.18; keep cubby margin so pendants do not
-/// overlap neighbors when focused.
-const ARCHIVE_TALISMAN_EXTENTS: [f32; 3] = [1.12, 1.55, 0.29];
+/// Mesh local AABB is a regular octagon (diameter 1.0 × thickness 0.18).
+const ARCHIVE_TALISMAN_EXTENTS: [f32; 3] = [1.0, 1.0, 0.36];
 
 const TABS: [Tab; 5] = [
     Tab::Relics,

@@ -18,6 +18,7 @@ pub fn stamp_input_paths(repo: &Path) -> Vec<PathBuf> {
         "assets/3d/archive.glb",
         "assets/3d/main_menu.glb",
         "src/render/room_shadow_bake.rs",
+        "src/render/wgpu_renderer/runtime/shop_environment.rs",
         "src/render/wgpu_renderer/runtime/shadow_setup.rs",
         "shaders/shadow.wgsl",
         "shaders/room_glb.wgsl",
@@ -37,6 +38,7 @@ pub fn emit_rerun_if_changed() {
         "assets/3d/archive.glb",
         "assets/3d/main_menu.glb",
         "src/render/room_shadow_bake.rs",
+        "src/render/wgpu_renderer/runtime/shop_environment.rs",
         "shaders/shadow.wgsl",
         "shaders/room_glb.wgsl",
     ] {

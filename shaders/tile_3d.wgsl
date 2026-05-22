@@ -86,6 +86,7 @@ struct ShadowGlobals {
     light_view_proj: mat4x4<f32>,
     // x = enabled (0/1), y = depth bias, z = texel size, w = unused
     params: vec4<f32>,
+    room_baked_light_view_proj: mat4x4<f32>,
 };
 @group(2) @binding(0) var<uniform> shadow_globals: ShadowGlobals;
 @group(2) @binding(1) var shadow_map: texture_depth_2d;

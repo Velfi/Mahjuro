@@ -134,6 +134,21 @@ pub struct ScreenshotCli {
     /// or `collection` (not full-screen showcase pack scenes).
     #[arg(long, action = ArgAction::SetTrue)]
     pub item_inspect: bool,
+    /// `game_over_defeat` only: play one headless bot run and use its terminal
+    /// `RunState` (stats, boss, memorial selection from the live journal).
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub bot_play: bool,
+    /// `game_over_defeat` only: hydrate the defeat screen from
+    /// `PlayerProgress::run_history` on the loaded profile (see `--profile`).
+    #[arg(long, visible_alias = "run-history-index")]
+    pub from_run_history: Option<usize>,
+    /// Profile slot for `--from-run-history` (default: active profile from settings).
+    #[arg(long)]
+    pub profile: Option<usize>,
+    /// `game_over_defeat` only: append N bot runs to the in-memory profile before
+    /// `--from-run-history` (does not write disk; use with `--from-run-history`).
+    #[arg(long)]
+    pub seed_bot_runs: Option<usize>,
 }
 
 #[derive(Debug, Args)]

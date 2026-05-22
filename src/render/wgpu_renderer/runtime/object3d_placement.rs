@@ -9,11 +9,12 @@ use crate::render::{
         mesh_y_thickness_along_local_y_to_z_up, rot_fixed_axes_deg_matrix,
         score_popup_glyph_rot_rad, translate_rot_scale,
     },
-    talisman_mesh::{TALISMAN_LOCAL_HALF, talisman_material},
+    talisman_mesh::{TALISMAN_LOCAL_HALF, memorial_talisman_material, talisman_material},
     wgpu_renderer::{
         GpuInstance, MAX_BOOK_SLOTS, MAX_BOSS_ICON_SLOTS, MAX_BOWL_SLOTS, MAX_CASCADE_TOKEN_SLOTS,
         MAX_EXTRUDED_GLYPH_SLOTS, MAX_MIRROR_SLOTS, MAX_ORB_SLOTS, MAX_PLINTH_SLOTS,
-        MAX_RELIC_SLOTS, MAX_TALISMAN_SLOTS, MAX_TALLY_FAN_SLOTS, MAX_TALLY_STICK_SLOTS,
+        MAX_RELIC_SLOTS, MAX_TALISMAN_SLOTS, MEMORIAL_TALISMAN_TEXTURE_BASE,
+        MAX_TALLY_FAN_SLOTS, MAX_TALLY_STICK_SLOTS,
         MAX_WALL_TILE_SLOTS, MAX_WOOD_TABLET_SLOTS, MAX_YAKU_TABLET_SLOTS, WgpuRenderer,
         boss_icon_material_params, relic_material_params,
         runtime::{CameraFrame, DrawKind, RenderOp},
@@ -156,6 +157,7 @@ impl WgpuRenderer {
                             | Object3dKind::ZodiacRibbon { .. }
                             | Object3dKind::Pack { .. }
                             | Object3dKind::Talisman { .. }
+                            | Object3dKind::MemorialTalisman { .. }
                             | Object3dKind::Primitive { .. }
                             | Object3dKind::WoodTablet { .. }
                     );
@@ -908,7 +910,7 @@ impl WgpuRenderer {
                                 slot_i,
                             );
                         }
-                        Object3dKind::Talisman { kind } => {
+                        Object3dKind::Talisman { .. } | Object3dKind::MemorialTalisman { .. } => {
                             if obj3d_talisman_slot >= MAX_TALISMAN_SLOTS {
                                 continue;
                             }
@@ -924,17 +926,54 @@ impl WgpuRenderer {
                                 obj.rotation_matrix(),
                                 glam::Vec3::new(sx, sy, sz),
                             );
-                            let material = talisman_material(*kind, obj.color);
-                            let kind_idx = crate::core::talisman::TalismanKind::all()
-                                .iter()
-                                .position(|&k| k == *kind)
-                                .unwrap_or(0) as u8;
+                            let (material, kind_idx, height_view, mask_view) = match &obj.kind {
+                                Object3dKind::Talisman { kind } => {
+                                    let idx = crate::core::talisman::TalismanKind::all()
+                                        .iter()
+                                        .position(|&k| k == *kind)
+                                        .unwrap_or(0) as u8;
+                                    let height = self
+                                        .talisman_height_views
+                                        .get(idx as usize)
+                                        .unwrap_or(&self.lit_mesh_white_view);
+                                    let mask = self
+                                        .talisman_mask_views
+                                        .get(idx as usize)
+                                        .unwrap_or(&self.lit_mesh_relief_default_view);
+                                    (talisman_material(*kind, obj.color), idx, height, mask)
+                                }
+                                Object3dKind::MemorialTalisman { kind } => {
+                                    let idx = crate::core::memorial_talisman::MemorialTalismanKind::all()
+                                        .iter()
+                                        .position(|&k| k == *kind)
+                                        .unwrap_or(0);
+                                    let cache_key =
+                                        MEMORIAL_TALISMAN_TEXTURE_BASE.saturating_add(idx as u8);
+                                    let height = self
+                                        .memorial_talisman_height_views
+                                        .get(idx)
+                                        .or_else(|| self.talisman_height_views.first())
+                                        .unwrap_or(&self.lit_mesh_white_view);
+                                    let mask = self
+                                        .memorial_talisman_mask_views
+                                        .get(idx)
+                                        .or_else(|| self.talisman_mask_views.first())
+                                        .unwrap_or(&self.lit_mesh_relief_default_view);
+                                    (
+                                        memorial_talisman_material(*kind, obj.color),
+                                        cache_key,
+                                        height,
+                                        mask,
+                                    )
+                                }
+                                _ => unreachable!(),
+                            };
                             if self.talisman_slot_kind[slot_i] != Some(kind_idx) {
                                 self.talisman_instances[slot_i].rebind_texture(
                                     &self.device,
                                     &self.lit_mesh_material_layout,
-                                    &self.talisman_height_views[kind_idx as usize],
-                                    &self.lit_mesh_relief_default_view,
+                                    height_view,
+                                    mask_view,
                                     &self.tile_sampler,
                                 );
                                 self.talisman_slot_kind[slot_i] = Some(kind_idx);

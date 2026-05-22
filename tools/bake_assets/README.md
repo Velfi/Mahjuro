@@ -2,7 +2,7 @@
 
 Shipped builds load game data from ZIP packs next to the executable (or under `Contents/Resources/` in a `.app`), driven by `pack_manifest.json`.
 
-**Local `cargo build` / `cargo test`:** `build.rs` runs this bake into `target/<profile>/` (or `target/<triple>/<profile>/` when using `--target`), so the game and tests load packs without copying the repo `assets/` tree. Set **`MAHJURO_SKIP_ASSET_BAKE=1`** to skip that step (you must place `pack_manifest.json` + zips next to the binary, set **`MAHJURO_ASSETS_PACK_DIR`**, or point **`MAHJURO_ASSETS`** at a loose tree). Debug profile uses **`--no-lossy`** for faster iteration; release uses the default lossy profile when optimizers are on `PATH`.
+**Local `cargo build` / `cargo test`:** `build.rs` runs this bake into `target/<profile>/` (or `target/<triple>/<profile>/` when using `--target`), so the game and tests load packs without copying the repo `assets/` tree. The bake is skipped when an FNV digest of pack-eligible files (same exclusions as `bake_assets.py`, so `.DS_Store` and authoring trees do not count) matches `target/<profile>/.pack_inputs_stamp` and the zip outputs exist. Set **`MAHJURO_SKIP_ASSET_BAKE=1`** to skip that step entirely (you must place `pack_manifest.json` + zips next to the binary, set **`MAHJURO_ASSETS_PACK_DIR`**, or point **`MAHJURO_ASSETS`** at a loose tree). Debug profile uses **`--no-lossy`** for faster iteration; release uses the default lossy profile when optimizers are on `PATH`.
 
 ## Bake
 

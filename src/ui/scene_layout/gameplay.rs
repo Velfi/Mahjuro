@@ -91,8 +91,8 @@ impl Default for GameplayPositions {
                 nx: -0.008_575_439,
                 ny: 0.049_166_66,
                 lift_mm: 1.489_310_9,
-                rx_deg: 68.0,
-                ry_deg: -90.0,
+                rx_deg: 0.0,
+                ry_deg: 0.0,
                 rz_deg: 0.0,
             },
             bowl: Placement {

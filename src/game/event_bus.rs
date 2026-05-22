@@ -96,6 +96,8 @@ pub enum GameEvent {
     /// Player consumed a talisman from the dish — App layer bumps
     /// `PlayerProgress::talisman_times_used` and saves.
     TalismanUsed(crate::core::talisman::TalismanKind),
+    /// Memorial remnant used from the dish (in-round effect).
+    MemorialTalismanUsed(crate::core::memorial_talisman::MemorialTalismanKind),
     /// Structure cash-in awarded this yaku. App layer bumps
     /// `PlayerProgress::yaku_times_scored` and saves.
     YakuScored(crate::core::yaku::YakuKind),

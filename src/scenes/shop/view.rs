@@ -2116,7 +2116,7 @@ fn push_stock_meshes(
                         *foc,
                         Object3d {
                             pos: tal_pos,
-                            extents: [tw * 1.15, tw * 1.72, tw * 0.32],
+                            extents: crate::render::talisman_mesh::talisman_object_extents(tw * 1.15),
                             rotation: euler_xyz_rad_from_deg(-90.0, 0.0, 0.0),
                             color: col,
                             kind: Object3dKind::Talisman { kind: tk },
@@ -2301,7 +2301,7 @@ fn push_stock_meshes(
                         *foc,
                         Object3d {
                             pos,
-                            extents: [tw * 1.15, tw * 1.72, tw * 0.30],
+                            extents: crate::render::talisman_mesh::talisman_object_extents(tw * 1.15),
                             rotation: euler_rad_add(
                                 base_rot,
                                 sell_hold_wobble_euler_rad(scene, *foc),

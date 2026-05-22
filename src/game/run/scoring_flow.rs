@@ -240,7 +240,19 @@ impl RunState {
             &self.round_rules,
             &original_for_wildcard,
         );
-        let breakdown_total = breakdown.total;
+        let mut breakdown_total = breakdown.total;
+        if self.memorial_round.next_cashin_bonus_chips > 0 {
+            let yaku_ok = self
+                .memorial_round
+                .next_cashin_yaku
+                .map(|required| breakdown.detected_yaku.contains(&required))
+                .unwrap_or(true);
+            if yaku_ok {
+                breakdown_total = breakdown_total.saturating_add(self.memorial_round.next_cashin_bonus_chips);
+            }
+            self.memorial_round.next_cashin_bonus_chips = 0;
+            self.memorial_round.next_cashin_yaku = None;
+        }
         let pre_round = self.round_score;
         let absorb_excess = (self.relics.has(crate::core::relic::RelicId::Chrysalis)
             || self
@@ -604,6 +616,8 @@ impl RunState {
                 *self.relic_counters.entry(RelicId::Temperance).or_insert(0) += stacks;
                 self.relic_activations.push(RelicId::Temperance);
             }
+            let memorial_clear = self.memorial_round.clear_gold_bonus;
+            self.memorial_round.clear_gold_bonus = 0;
             let gold_earned = base_reward
                 .saturating_add(unused_play_bonus)
                 .saturating_add(interest)
@@ -613,7 +627,8 @@ impl RunState {
                 .saturating_add(patience_bonus)
                 .saturating_add(kong_collector_bonus)
                 .saturating_add(beggars_cup_bonus)
-                .saturating_add(cosmopolitan_bonus);
+                .saturating_add(cosmopolitan_bonus)
+                .saturating_add(memorial_clear);
             bus.push(GameEvent::RoundComplete {
                 reached_target: true,
                 payout: crate::game::event_bus::RoundPayout {

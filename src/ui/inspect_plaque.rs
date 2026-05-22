@@ -270,6 +270,7 @@ pub fn gameplay_consumable_description_full(c: Consumable) -> String {
             z.name()
         ),
         Consumable::Talisman(t) => t.description().to_string(),
+        Consumable::Memorial(m) => m.description().to_string(),
     }
 }
 

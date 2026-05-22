@@ -4,7 +4,6 @@ use crate::render::draw_cmd::{DrawCmd, UiFrame};
 use crate::render::lit_mesh::{
     LitMeshInstance, MaterialKind, ShadowCasterUniform, material_casts_shadow,
 };
-use crate::render::draw_cmd::ARCHIVE_FEATURED_ANIM_ID;
 
 /// Which imported room mesh is active this frame (at most one is drawn).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,7 +41,10 @@ pub(super) fn object3d_casts_dynamic_shadow(
             true
         }
         Some(ActiveRoomEnv::Archive) => {
-            anim_id == ARCHIVE_FEATURED_ANIM_ID || anim_id == SHOP_INSPECT_SUBJECT_ANIM_ID
+            // Grid close-up sits on the pedestal; casting the featured prop into the
+            // live map projects a hard silhouette onto `main_fixture` wood. Inspect orbit
+            // uses `SHOP_INSPECT_SUBJECT_ANIM_ID` for a tight subject-only shadow.
+            anim_id == SHOP_INSPECT_SUBJECT_ANIM_ID
         }
     }
 }
@@ -239,6 +241,7 @@ impl WgpuRenderer {
             bytemuck::bytes_of(&ShadowGlobals {
                 light_view_proj: light_view_proj_arr,
                 params: [shadow_enabled_flag, depth_bias, 1.0 / SHADOW_MAP_SIZE, 0.0],
+                room_baked_light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
             }),
         );
         ShadowFrame {

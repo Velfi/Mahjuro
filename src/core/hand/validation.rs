@@ -42,7 +42,9 @@ pub fn validate_selection_with_rules(
     // Try each way of splitting flowers into their own melds vs wildcards.
     // Flowers can form pairs (any 2) or triplets (any 3) with each other
     // regardless of rank, in any combination.
-    for (flower_melds, mut wildcards) in decomposition::flower_meld_partitions(&flower_ids) {
+    for (flower_melds, mut wildcards) in
+        decomposition::flower_meld_partitions_for_rules(&flower_ids, rules)
+    {
         if regular.is_empty() {
             // Flower-only hand: valid only when all flowers are consumed as melds.
             if wildcards.is_empty() && !flower_melds.is_empty() {

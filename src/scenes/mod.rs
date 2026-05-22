@@ -5,6 +5,7 @@ pub mod archive_career;
 pub mod celebration_overlay;
 pub mod collection;
 pub mod game_over;
+mod game_over_tableau;
 pub mod gameplay;
 pub mod journal_transition;
 pub mod lamp_moths;

@@ -240,6 +240,9 @@ impl App {
                     *self.progress.talisman_times_used.entry(tk).or_insert(0) += 1;
                     self.mark_profile_dirty();
                 }
+                GameEvent::MemorialTalismanUsed(_) => {
+                    self.audio.play_sfx(audio::SfxId::TalismanUsed);
+                }
                 GameEvent::YakuScored(yk) => {
                     *self.progress.yaku_times_scored.entry(yk).or_insert(0) += 1;
                     self.mark_profile_dirty();
@@ -903,6 +906,10 @@ impl App {
             self.sync_shop_sell_hold_rumble(shell, hold, controller, enabled, progress);
         }
         if let Some(next_scene) = update_result {
+            if matches!(&next_scene, Scene::Shop(_)) {
+                self.run.grant_pending_memorial(&mut self.progress);
+                self.mark_profile_dirty();
+            }
             let spec =
                 transition_spec_for_edge(SceneTag::from(&self.scene), SceneTag::from(&next_scene));
             self.transition_kind = spec.kind;

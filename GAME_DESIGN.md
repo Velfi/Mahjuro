@@ -106,7 +106,9 @@ Other boss effects use **tile debuffs**, relic taxes, gold-per-play hooks, etc.�
 
 ### **H. Consumables & Slots**
 
-Talismans and zodiacs share one **consumable inventory** (default **2 slots**). **Brocade Pouch** adds **+1 slot** and changes how buff talismans apply to drawn tiles. Items are bought in the shop and used manually from the gameplay dish.
+Talismans and zodiacs share one **consumable inventory** (default **2 slots**). **Brocade Pouch** adds **+1 slot** and changes how buff talismans apply to drawn tiles. Shop talismans are bought in the storeroom and used manually from the gameplay dish.
+
+**Memorial talismans (remnants)** — After a defeat, the House selects one **remnant** from your last run’s habits (blinds skipped, how you lost, discards, boss death, etc.). The next run grants exactly **one** memorial into a consumable slot (never sold in the shop). Using it applies an **in-round** benefit for the current blind only (extra plays/discards, hand stamp, gold on clear, next cash-in bonus, etc.).
 
 ---
 

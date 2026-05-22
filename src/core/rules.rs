@@ -32,6 +32,9 @@ pub enum RuleModifier {
     /// Structure cash-in is disabled until all discards for the round are spent.
     /// (The House final boss.)
     CashInRequiresNoDiscards,
+    /// Flowers cannot substitute in triplets or sequences — only flower-only
+    /// pairs and triplets count. (The Rot boss.)
+    NoFlowerWildcards,
 }
 
 impl RuleModifier {
@@ -49,6 +52,7 @@ impl RuleModifier {
             RuleModifier::RequireHonor => "Honor Required",
             RuleModifier::CensorRepeats => "Repeats Censored",
             RuleModifier::CashInRequiresNoDiscards => "No Cash-In With Discards",
+            RuleModifier::NoFlowerWildcards => "Withered Flowers",
         }
     }
 
@@ -66,6 +70,9 @@ impl RuleModifier {
             RuleModifier::RequireHonor => "Structure must contain an honor tile",
             RuleModifier::CensorRepeats => "Repeated yaku score at half",
             RuleModifier::CashInRequiresNoDiscards => "Cannot cash in until all discards are used",
+            RuleModifier::NoFlowerWildcards => {
+                "Flowers cannot substitute in melds (flower pairs/triplets only)"
+            }
         }
     }
 }

@@ -118,9 +118,10 @@ BOSS_VISUALS: dict[str, str] = {
         "dot pip embossed on the visible face — dots suit under pressure. "
         "Warm copper planes."
     ),
-    "bloom": (
+    "rot": (
         "A lotus bud half rotted: outer petals faceted jade, inner folds "
-        "slumped to umber rot with one fallen petal tile — flowers debuffed."
+        "slumped to umber rot with one fallen petal tile — flowers withered, "
+        "no longer wild."
     ),
     "hermit": (
         "Two parallel ivory mahjong tiles standing close together with a red "

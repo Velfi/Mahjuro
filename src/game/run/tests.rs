@@ -107,6 +107,11 @@ mod cases {
             relic_counters: BTreeMap::new(),
             onboarding: None,
             relic_activations: Vec::new(),
+            defeat_journal: crate::core::memorial_talisman::RunDefeatJournal::default(),
+            memorial_granted: false,
+            memorial_snapshot: None,
+            memorial_round: crate::core::memorial_talisman::MemorialRoundState::default(),
+            defeat_memorial_kind: None,
         }
     }
 
