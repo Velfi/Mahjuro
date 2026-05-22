@@ -542,6 +542,7 @@ impl WgpuRenderer {
         let mut showcase_tile_batches: Vec<&[ShowcaseTilePlacement]> = Vec::new();
         let mut object3d_cmds: Vec<&[crate::render::draw_cmd::Object3d]> = Vec::new();
         let mut object3d_draw_list: Vec<(DrawKind, usize)> = Vec::new();
+        let mut object3d_shadow_draw_list: Vec<(DrawKind, usize)> = Vec::new();
         let mut ops: Vec<RenderOp> = Vec::new();
         let mut bg_inst_buffers: Vec<crate::render::wgpu_renderer::frame_pool::PoolSlice> =
             Vec::new();
@@ -986,6 +987,7 @@ impl WgpuRenderer {
             &object3d_cmds,
             &wall_stack_cmds,
             &mut object3d_draw_list,
+            &mut object3d_shadow_draw_list,
             &mut ops,
             &mut relic_glows,
             &mut relic_debuff_markers,
@@ -1055,8 +1057,12 @@ impl WgpuRenderer {
             &mut shadow_uniforms_changed,
         );
 
+        let room_uses_baked_shadow = self.active_room_baked_shadow.is_some()
+            && self.room_shadow_capture_pending.is_none();
         if ops_flags.shop_env {
-            let shop_room_shadow = (shadows_enabled && frame.shop_inspect_shadow_target.is_none())
+            let shop_room_shadow = (shadows_enabled
+                && frame.shop_inspect_shadow_target.is_none()
+                && !room_uses_baked_shadow)
                 .then(|| (light_view_proj_arr, &mut shadow_uniforms_changed));
             self.write_shop_environment_uniforms(frame, &camera, false, shop_room_shadow);
             if frame.scene_lighting.embedded_gltf_punctual {
@@ -1068,7 +1074,8 @@ impl WgpuRenderer {
                 frame,
                 &camera,
                 false,
-                shadows_enabled.then(|| (light_view_proj_arr, &mut shadow_uniforms_changed)),
+                (shadows_enabled && !room_uses_baked_shadow)
+                    .then(|| (light_view_proj_arr, &mut shadow_uniforms_changed)),
             );
         }
         if self.archive_environment.is_some() {
@@ -1079,7 +1086,8 @@ impl WgpuRenderer {
                 frame,
                 &camera,
                 false,
-                shadows_enabled.then(|| (light_view_proj_arr, &mut shadow_uniforms_changed)),
+                (shadows_enabled && !room_uses_baked_shadow)
+                    .then(|| (light_view_proj_arr, &mut shadow_uniforms_changed)),
             );
         }
         if ops_flags.main_menu_env {
@@ -1087,9 +1095,11 @@ impl WgpuRenderer {
                 frame,
                 &camera,
                 false,
-                shadows_enabled.then(|| (light_view_proj_arr, &mut shadow_uniforms_changed)),
+                (shadows_enabled && !room_uses_baked_shadow)
+                    .then(|| (light_view_proj_arr, &mut shadow_uniforms_changed)),
             );
         }
+        self.upload_active_room_baked_shadow_globals(frame);
 
         let mut encoder = self
             .device
@@ -1102,10 +1112,24 @@ impl WgpuRenderer {
             frame,
             shadows_enabled,
             shadow_uniforms_changed,
-            &object3d_draw_list,
+            &object3d_shadow_draw_list,
             &showcase_tile_batches,
             &tile_3d_rects,
         );
+
+        let room_shadow_capture_staging =
+            self.room_shadow_capture_pending.map(|room| {
+                use crate::render::wgpu_renderer::runtime::shadow_setup::SHADOW_MAP_SIZE;
+                const BIAS: f32 = 0.005;
+                self.encode_room_shadow_capture_copy(
+                    &mut encoder,
+                    room,
+                    SHADOW_MAP_SIZE as u32,
+                    SHADOW_MAP_SIZE as u32,
+                    light_view_proj_arr,
+                    BIAS,
+                )
+            });
 
         // Pass A renders into `scene_color_view`
         // (`Rgba16Float`). Do not key this on `is_prepass`: the journal
@@ -2281,6 +2305,15 @@ impl WgpuRenderer {
                     self.room_gi_capture_pending = None;
                 }
                 Err(e) => log::error!("room GI capture readback failed: {e:?}"),
+            }
+        }
+        if let Some(staging) = room_shadow_capture_staging {
+            match self.finalize_room_shadow_capture(staging) {
+                Ok(bake) => {
+                    self.room_shadow_captured = Some(bake);
+                    self.room_shadow_capture_pending = None;
+                }
+                Err(e) => log::error!("room shadow capture readback failed: {e:?}"),
             }
         }
 

@@ -31,6 +31,8 @@
 
 #[path = "build/room_gi_bake.rs"]
 mod room_gi_bake;
+#[path = "build/room_shadow_bake.rs"]
+mod room_shadow_bake;
 
 use std::env;
 use std::fs;
@@ -66,12 +68,14 @@ fn main() {
     println!("cargo:rerun-if-changed=assets");
 
     room_gi_bake::emit_rerun_if_changed();
+    room_shadow_bake::emit_rerun_if_changed();
 
     if let Some(out_dir) = env::var_os("OUT_DIR").map(PathBuf::from)
         && let Some(profile_dir) = profile_dir(&out_dir)
     {
         if let Some(repo) = env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from) {
             room_gi_bake::maybe_bake_room_gi(&repo, &profile_dir);
+            room_shadow_bake::maybe_bake_room_shadows(&repo, &profile_dir);
         }
         bake_asset_packs(&profile_dir);
     }

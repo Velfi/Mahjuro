@@ -23,7 +23,7 @@ pub(crate) use self::pack_celebration::PackCelebration;
 /// Authored hero framing on **−Y** (foil faces the camera), not [`view::shop_camera_base`].
 /// Pitch is shallower than the old table-style fallback (~58° FOV, target at origin) so the
 /// pack reads as a frontal product shot instead of a birds-eye on the lid.
-pub(crate) fn shop_celebration_camera(w: f32, h: f32, _env_h: f32) -> CameraParams {
+pub(crate) fn shop_celebration_camera(_w: f32, h: f32, _env_h: f32) -> CameraParams {
     let cs = (h / 1080_f32).max(1e-6);
     // ref_h: 1080 — eye / target in world units before `cs` scale.
     const EYE_Y: f32 = -1780.0;

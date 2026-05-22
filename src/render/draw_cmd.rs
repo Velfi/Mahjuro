@@ -589,6 +589,8 @@ pub enum Object3dKind {
 
 /// `Object3d::anim_id` on the inspected stock mesh — sole shadow caster during storeroom inspect.
 pub const SHOP_INSPECT_SUBJECT_ANIM_ID: u64 = 0x5348_4F50_5F49; // "SHOPI"
+/// Archive pedestal / HUD featured close-up (casts dynamic shadow; grid cubbies do not).
+pub const ARCHIVE_FEATURED_ANIM_ID: u64 = 0xC105_E0;
 
 /// A single lit mesh placed in the world.
 ///

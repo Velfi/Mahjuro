@@ -395,8 +395,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     // ---- Shadow map resources (depth texture + sampler + layouts) ----
     // Built up here so the shared sampling layout can be plumbed into
     // both `tile_layout` and `lit_mesh_pl` below as group 2.
-    const SHADOW_MAP_SIZE: u32 = 2048;
-    let _shadow_map_texture = device.create_texture(&wgpu::TextureDescriptor {
+    const SHADOW_MAP_SIZE: u32 = 1024;
+    let shadow_map_texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("shadow-map"),
         size: wgpu::Extent3d {
             width: SHADOW_MAP_SIZE,
@@ -407,10 +407,12 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Depth32Float,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
-    let shadow_map_view = _shadow_map_texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let shadow_map_view = shadow_map_texture.create_view(&wgpu::TextureViewDescriptor::default());
     let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("shadow-sampler"),
         address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -444,24 +446,105 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         }),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
-    let shadow_sample_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("shadow-sample-bg"),
-        layout: &shadow_sample_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: shadow_globals_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::TextureView(&shadow_map_view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: wgpu::BindingResource::Sampler(&shadow_sampler),
-            },
-        ],
+    let shadow_ao_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("shadow-ao-sampler"),
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        ..Default::default()
     });
+    let shadow_ao_white_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("shadow-ao-white"),
+        size: wgpu::Extent3d {
+            width: 4,
+            height: 4,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::R8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let shadow_ao_white_view = shadow_ao_white_texture.create_view(&Default::default());
+    let shadow_baked_depth_white_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("shadow-baked-depth-white"),
+        size: wgpu::Extent3d {
+            width: 4,
+            height: 4,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::R32Float,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let shadow_baked_depth_white_view =
+        shadow_baked_depth_white_texture.create_view(&Default::default());
+    const BAKED_DEPTH_FAR: [u8; 4] = 0x3F80_0000u32.to_le_bytes();
+    let baked_depth_white_pixels: [u8; 64] =
+        std::array::from_fn(|i| BAKED_DEPTH_FAR[i % 4]);
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &shadow_baked_depth_white_texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &baked_depth_white_pixels,
+        wgpu::TexelCopyBufferLayout {
+            bytes_per_row: Some(16),
+            rows_per_image: Some(4),
+            ..Default::default()
+        },
+        wgpu::Extent3d {
+            width: 4,
+            height: 4,
+            depth_or_array_layers: 1,
+        },
+    );
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &shadow_ao_white_texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &[255u8; 16],
+        wgpu::TexelCopyBufferLayout {
+            bytes_per_row: Some(4),
+            rows_per_image: Some(4),
+            ..Default::default()
+        },
+        wgpu::Extent3d {
+            width: 4,
+            height: 4,
+            depth_or_array_layers: 1,
+        },
+    );
+    let shadow_sample_bind_group = crate::render::lit_mesh::create_shadow_sample_bind_group(
+        &device,
+        &shadow_sample_layout,
+        "shadow-sample-bg",
+        &shadow_globals_buffer,
+        &shadow_map_view,
+        &shadow_sampler,
+        &shadow_baked_depth_white_view,
+        &shadow_ao_white_view,
+        &shadow_ao_sampler,
+    );
+    let room_baked_shadow_gpu = WgpuRenderer::load_room_baked_shadows(
+        &device,
+        &queue,
+        &shadow_sample_layout,
+        &shadow_map_view,
+        &shadow_sampler,
+        &shadow_ao_sampler,
+    );
 
     let tile_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("tile-pl"),
@@ -4135,6 +4218,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         cached_shadow_light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
         shop_inspect_subject_shadow_slot: None,
         shadow_placement_anim_id: 0,
+        placement_shadow_room: None,
+        placement_shadow_casts: true,
         showcase_decal_atlas: None,
         showcase_decal_atlas_tileset: None,
         showcase_decal_atlas_cache: std::collections::VecDeque::new(),
@@ -4167,6 +4252,10 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         room_gi_capture_pending: None,
         room_gi_capture_meta: None,
         room_gi_captured: None,
+        room_baked_shadow_gpu,
+        active_room_baked_shadow: None,
+        room_shadow_capture_pending: None,
+        room_shadow_captured: None,
         emissive_gi_composite_pipeline,
         emissive_gi_composite_bind_group_layout,
         emissive_gi_composite_bind_group,
@@ -4234,6 +4323,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         // frame once the user's persisted choice has been threaded in.
         table_material: MaterialParams::lacquered_wood(),
         relic_instances,
+        shadow_map_texture,
         shadow_map_view,
         shadow_caster_layout,
         shadow_warp_disabled_bind_group,

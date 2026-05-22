@@ -18,6 +18,7 @@ impl WgpuRenderer {
         silhouette: &bool,
         obj3d_primitive_slot: &mut rustc_hash::FxHashMap<crate::render::primitive::MeshId, usize>,
         object3d_draw_list: &mut Vec<(DrawKind, usize)>,
+        object3d_shadow_draw_list: &mut Vec<(DrawKind, usize)>,
         shadow: &mut Option<&mut super::shadow_setup::Object3dShadowCtx<'_>>,
     ) {
         let view_proj_arr = camera.view_proj_arr;
@@ -200,7 +201,7 @@ impl WgpuRenderer {
             );
             self.last_aux_dish_aabbs.push((center, half));
         }
-        WgpuRenderer::push_object3d_draw(object3d_draw_list, DrawKind::Primitive(*shape), slot_i);
+        self.push_object3d_draw(object3d_draw_list, object3d_shadow_draw_list, DrawKind::Primitive(*shape), slot_i);
         // CabinetColumn emits a linked CabinetRails
         // instance sharing the same world-space
         // model matrix (post arrange override).
@@ -248,8 +249,9 @@ impl WgpuRenderer {
                     rails_kind,
                 );
             }
-            WgpuRenderer::push_object3d_draw(
+            self.push_object3d_draw(
                 object3d_draw_list,
+                object3d_shadow_draw_list,
                 DrawKind::Primitive(MeshId::CabinetRails),
                 rails_slot,
             );

@@ -354,6 +354,10 @@ pub struct WgpuRenderer {
     shop_inspect_subject_shadow_slot: Option<(runtime::DrawKind, usize)>,
     /// Current `Object3d::anim_id` while [`runtime::object3d_placement::WgpuRenderer::run_object3d_placement`] walks a batch.
     shadow_placement_anim_id: u64,
+    /// Active imported room for per-frame Object3d shadow cast policy.
+    placement_shadow_room: Option<crate::render::wgpu_renderer::runtime::shadow_setup::ActiveRoomEnv>,
+    /// Whether the current Object3d placement iteration casts into the dynamic shadow map.
+    placement_shadow_casts: bool,
     /// Pre-rasterized showcase tile decals + UV lookup (`showcase_decal_atlas.rs`).
     showcase_decal_atlas: Option<crate::render::showcase_decal_atlas::ShowcaseDecalAtlasGpu>,
     /// Tileset name the atlas was baked for; rebuilt when Options tileset changes.
@@ -412,6 +416,11 @@ pub struct WgpuRenderer {
     room_gi_capture_pending: Option<crate::render::room_gi_bake::RoomGiRoom>,
     room_gi_capture_meta: Option<crate::render::room_gi_bake::RoomGiBake>,
     room_gi_captured: Option<crate::render::room_gi_bake::RoomGiBake>,
+    /// Offline baked room shadow maps (one per static room).
+    room_baked_shadow_gpu: [Option<impl_room_shadow::RoomBakedShadowGpu>; 4],
+    active_room_baked_shadow: Option<crate::render::room_gi_bake::RoomGiRoom>,
+    room_shadow_capture_pending: Option<crate::render::room_gi_bake::RoomGiRoom>,
+    room_shadow_captured: Option<crate::render::room_shadow_bake::RoomShadowBake>,
     emissive_gi_composite_pipeline: wgpu::RenderPipeline,
     emissive_gi_composite_bind_group_layout: wgpu::BindGroupLayout,
     emissive_gi_composite_bind_group: wgpu::BindGroup,
@@ -725,6 +734,7 @@ pub struct WgpuRenderer {
     // ── Shadow mapping ─────────────────────────────────────────────────
     /// Fixed-size depth texture written by the shadow pre-pass and sampled
     /// by every 3D shader through `shadow_sample_bind_group`.
+    shadow_map_texture: wgpu::Texture,
     shadow_map_view: wgpu::TextureView,
     /// Bind-group layout for per-caster uniforms (group 0 of the shadow
     /// pipeline). Each `LitMeshInstance` and `HandTileGpu` owns one bind
@@ -763,6 +773,7 @@ mod impl_loaders;
 mod impl_pipelines;
 mod impl_public;
 mod impl_room_gi;
+mod impl_room_shadow;
 mod impl_screenshot;
 
 pub use constants::{

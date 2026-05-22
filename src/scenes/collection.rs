@@ -272,6 +272,13 @@ impl CollectionScene {
         self.archive_page = 0;
     }
 
+    /// Headless screenshot: open the Talismans tab (featured pedestal + cubbies).
+    pub fn prepare_talismans_for_screenshot(&mut self) {
+        *self = Self::with_active_tab(Tab::Talismans);
+        self.focused_row = None;
+        self.archive_page = 0;
+    }
+
     pub fn is_chronicle_tab(&self) -> bool {
         matches!(self.active_tab, Tab::Chronicle)
     }
@@ -1188,6 +1195,11 @@ impl CollectionScene {
                     o
                 }
             };
+            let closeup_anim = if inspect.is_some() {
+                crate::render::draw_cmd::SHOP_INSPECT_SUBJECT_ANIM_ID
+            } else {
+                crate::render::draw_cmd::ARCHIVE_FEATURED_ANIM_ID
+            };
             // World-space offsets from the camera target. View direction
             // is +Y (eye at world_y = -h*1.1, target at world_y = 0), so
             // X and Z offsets slide the object across the view plane.
@@ -1290,7 +1302,7 @@ impl CollectionScene {
                             pick_id: None,
                         },
                         hover_target: 1.0,
-                        anim_id: 0xC105E0,
+                        anim_id: closeup_anim,
                     }));
                 }
                 ArtifactKind::Talisman(tk) => {
@@ -1308,7 +1320,7 @@ impl CollectionScene {
                         color: closeup_bright,
                         kind: Object3dKind::Talisman { kind: *tk },
                         hover_target: 1.0,
-                        anim_id: 0xC105E0,
+                        anim_id: closeup_anim,
                     }));
                 }
                 ArtifactKind::Zodiac(zk) => {
@@ -1320,7 +1332,7 @@ impl CollectionScene {
                             color: [1.0, 1.0, 1.0, 1.0],
                             kind: Some(*zk),
                             hover_target: 1.0,
-                            anim_id: 0xC105E0,
+                            anim_id: closeup_anim,
                             placement_rot_deg: [0.0, 0.0, 0.0],
                         },
                     )));
@@ -1348,7 +1360,7 @@ impl CollectionScene {
                             pick_id: None,
                         },
                         hover_target: 1.0,
-                        anim_id: 0xC105E0,
+                        anim_id: closeup_anim,
                     }));
                 }
                 ArtifactKind::ChronicleSummary => {}
@@ -1375,7 +1387,7 @@ impl CollectionScene {
                             silhouette: false,
                         },
                         hover_target: 1.0,
-                        anim_id: 0xC105E0,
+                        anim_id: closeup_anim,
                     }));
                 }
             }
@@ -1649,6 +1661,17 @@ impl CollectionScene {
         }
 
         frame.window_title = format!("Mahjuro — Archive ({})", self.active_tab.label());
+        if inspect.is_some() {
+            if let Some(tw) = self.collection_inspect_target_world(
+                w,
+                h,
+                bosses,
+                ctx.layout,
+                env_scale,
+            ) {
+                frame.shop_inspect_shadow_target = Some(tw);
+            }
+        }
         frame
     }
 

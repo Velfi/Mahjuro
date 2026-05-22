@@ -27,7 +27,6 @@ pub struct PackCelebration {
     pub started_at: Instant,
     pub dismissed: bool,
     pub revealed_count: usize,
-    pub headless_hold_pack_closeup: bool,
 }
 
 impl PackCelebration {
@@ -48,7 +47,6 @@ impl PackCelebration {
             started_at: Instant::now(),
             dismissed: false,
             revealed_count: 0,
-            headless_hold_pack_closeup: false,
         }
     }
 
@@ -88,18 +86,6 @@ impl PackCelebration {
         let dur = s.total_duration();
         s.started_at = Instant::now() - std::time::Duration::from_secs_f32(dur + 0.5);
         s.revealed_count = s.tiles.len();
-        s
-    }
-
-    pub fn screenshot_pack_closeup_headless(
-        tiles: Vec<Tile>,
-        pack_name: &'static str,
-        pack_kind: TilePackKind,
-    ) -> Self {
-        let mut s = Self::new(tiles, pack_name, pack_kind);
-        s.phase = PackCelebPhase::Anticipation;
-        s.headless_hold_pack_closeup = true;
-        s.started_at = Instant::now() - std::time::Duration::from_secs_f32(10.0);
         s
     }
 }

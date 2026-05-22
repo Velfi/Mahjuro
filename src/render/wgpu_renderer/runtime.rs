@@ -22,7 +22,7 @@ pub(super) use acquire_telemetry::{AcquireOutcome, AcquireTelemetry};
 mod frame;
 use frame::RenderFrame;
 mod render;
-mod shadow_setup;
+pub(crate) mod shadow_setup;
 mod shop_environment;
 mod showcase_tiles;
 mod surface;

@@ -37,6 +37,8 @@ pub enum Command {
     /// Writes `assets/data/room_gi/<room>.mgi` for packaging into the gameplay asset pack.
     /// Prefer **`cargo build --release`** — same cold-start cost as `screenshot`.
     BakeRoomGi(BakeRoomGiCli),
+    /// Bake offline directional shadow + contact AO for a static room GLB.
+    BakeRoomShadows(BakeRoomShadowsCli),
     /// Internal: Win32 Vulkan WSI smoke test (parent uses this to fall back to DX12 on fault).
     #[command(hide = true, name = "vulkan-wsi-probe")]
     VulkanWsiProbe,
@@ -48,6 +50,21 @@ pub struct BakeRoomGiCli {
     /// Room to bake: `shop`, `hallway`, `archive`, or `main_menu`.
     pub room: String,
     #[arg(long, default_value = "assets/data/room_gi")]
+    pub output_dir: PathBuf,
+    #[arg(long, default_value_t = 1920)]
+    pub width: u32,
+    #[arg(long, default_value_t = 1080)]
+    pub height: u32,
+    #[arg(long, default_value_t = 24)]
+    pub warmup_frames: u32,
+}
+
+/// Offline room shadow bake (2048² depth + contact AO) at the resting room camera.
+#[derive(Debug, Args)]
+pub struct BakeRoomShadowsCli {
+    /// Room to bake: `shop`, `hallway`, `archive`, or `main_menu`.
+    pub room: String,
+    #[arg(long, default_value = "assets/data/room_shadow")]
     pub output_dir: PathBuf,
     #[arg(long, default_value_t = 1920)]
     pub width: u32,
