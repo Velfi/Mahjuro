@@ -443,6 +443,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         contents: bytemuck::bytes_of(&ShadowGlobals {
             light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
             params: [0.0, 0.0015, 1.0 / SHADOW_MAP_SIZE as f32, 0.0],
+            room_baked_light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
         }),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
@@ -3211,7 +3212,15 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     });
                 let bind_groups: Vec<wgpu::BindGroup> = prims
                     .iter()
-                    .map(|p| {
+                    .enumerate()
+                    .map(|(pi, p)| {
+                        // Only description boards sample the CPU decal atlas; other room
+                        // meshes bind a 1×1 white stub so a shared atlas cannot leak.
+                        let decal_view = if sign_l == Some(pi) || sign_r == Some(pi) {
+                            &archive_decal_view
+                        } else {
+                            &white_albedo_view
+                        };
                         device.create_bind_group(&wgpu::BindGroupDescriptor {
                             label: Some("archive-env-bg"),
                             layout: &tile_material_layout,
@@ -3230,9 +3239,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                                 },
                                 wgpu::BindGroupEntry {
                                     binding: 3,
-                                    resource: wgpu::BindingResource::TextureView(
-                                        &archive_decal_view,
-                                    ),
+                                    resource: wgpu::BindingResource::TextureView(decal_view),
                                 },
                                 wgpu::BindGroupEntry {
                                     binding: 4,
@@ -3868,42 +3875,31 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     // texture. Falls back to a flat mid-gray 1×1 if the asset is missing.
     // Order matches `TalismanKind::all()` — reuse art where dedicated assets
     // are not yet present.
-    let talisman_height_paths = [
-        ("textures/talismans/talisman_pearl.png", "talisman-pearl-hm"),
-        (
-            "textures/talismans/talisman_gilded.png",
-            "talisman-gilded-hm",
-        ),
-        (
-            "textures/talismans/talisman_polychrome.png",
-            "talisman-polychrome-hm",
-        ),
-        (
-            "textures/talismans/talisman_bamboo.png",
-            "talisman-bamboo-hm",
-        ),
-        ("textures/talismans/talisman_dots.png", "talisman-dots-hm"),
-        (
-            "textures/talismans/talisman_characters.png",
-            "talisman-characters-hm",
-        ),
-        (
-            "textures/talismans/talisman_honors.png",
-            "talisman-honors-hm",
-        ),
-        (
-            "textures/talismans/talisman_wildflower.png",
-            "talisman-wildflower-hm",
-        ),
-        (
-            "textures/talismans/talisman_conformity.png",
-            "talisman-conformity-hm",
-        ),
-    ];
+    let talisman_height_paths = crate::core::talisman::TalismanKind::heightmap_paths();
     let mut talisman_height_views: Vec<wgpu::TextureView> = Vec::new();
-    for &(path, label) in &talisman_height_paths {
+    for &(path, label) in talisman_height_paths {
         let (_tex, view) = load_metal_heightmap(&device, &queue, path, label);
         talisman_height_views.push(view);
+    }
+    let talisman_mask_paths = crate::core::talisman::TalismanKind::mask_paths();
+    let mut talisman_mask_views: Vec<wgpu::TextureView> = Vec::new();
+    for &(path, label) in talisman_mask_paths {
+        let (_tex, view) = load_metal_heightmap(&device, &queue, path, label);
+        talisman_mask_views.push(view);
+    }
+    let memorial_talisman_height_paths =
+        crate::core::memorial_talisman::MemorialTalismanKind::heightmap_paths();
+    let mut memorial_talisman_height_views: Vec<wgpu::TextureView> = Vec::new();
+    for &(path, label) in memorial_talisman_height_paths {
+        let (_tex, view) = load_metal_heightmap(&device, &queue, path, label);
+        memorial_talisman_height_views.push(view);
+    }
+    let memorial_talisman_mask_paths =
+        crate::core::memorial_talisman::MemorialTalismanKind::mask_paths();
+    let mut memorial_talisman_mask_views: Vec<wgpu::TextureView> = Vec::new();
+    for &(path, label) in memorial_talisman_mask_paths {
+        let (_tex, view) = load_metal_heightmap(&device, &queue, path, label);
+        memorial_talisman_mask_views.push(view);
     }
     let talisman_slot_kind: Vec<Option<u8>> = vec![None; MAX_TALISMAN_SLOTS];
     let mut talisman_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_TALISMAN_SLOTS);
@@ -4307,6 +4303,9 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         lit_mesh_white_view,
         lit_mesh_relief_default_view,
         talisman_height_views,
+        talisman_mask_views,
+        memorial_talisman_height_views,
+        memorial_talisman_mask_views,
         talisman_slot_kind,
         candle_wax_mesh,
         candle_wick_mesh,

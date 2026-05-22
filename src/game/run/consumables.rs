@@ -1,4 +1,5 @@
 use super::*;
+use crate::game::engine_state::GameplayCoreState;
 
 impl RunState {
     /// Use a consumable from the shared inventory at `index`. Zodiacs level
@@ -15,21 +16,18 @@ impl RunState {
         let item = self.consumables.take(index)?;
         match item {
             Consumable::Zodiac(z) => {
+                self.defeat_journal.zodiac_uses =
+                    self.defeat_journal.zodiac_uses.saturating_add(1);
                 let yaku = z.yaku();
                 let new_level = self.yaku_levels.level_up(yaku);
                 Some(ConsumableUseResult::Zodiac { yaku, new_level })
             }
             Consumable::Talisman(t) => {
+                self.defeat_journal.record_talisman_use(t);
                 if let Some(enh) = t.enhancement() {
-                    // Record the enhancement against each current hand tile's id
-                    // so it persists when those tiles get redrawn next round.
                     for tile in &self.hand {
                         self.tile_enhancements.insert(tile.id, enh);
                     }
-                    // Brocade Pouch: also mark the run's global buff so every
-                    // tile drawn from now on (not just the 14 in hand) carries
-                    // this enhancement. Latest buff talisman wins, matching
-                    // the "most-recent wins" rule for per-tile stamps.
                     if self.relics.has(RelicId::BrocadePouch) {
                         self.global_buff_enhancement = Some(enh);
                     }
@@ -39,6 +37,93 @@ impl RunState {
                 }
                 bus.push(GameEvent::TalismanUsed(t));
                 Some(ConsumableUseResult::Talisman { kind: t })
+            }
+            Consumable::Memorial(kind) => {
+                self.apply_memorial_talisman(kind, bus);
+                bus.push(GameEvent::MemorialTalismanUsed(kind));
+                Some(ConsumableUseResult::Memorial { kind })
+            }
+        }
+    }
+
+    fn apply_memorial_talisman(
+        &mut self,
+        kind: crate::core::memorial_talisman::MemorialTalismanKind,
+        bus: &mut EventBus,
+    ) {
+        use crate::core::memorial_talisman::{
+            MemorialTalismanKind, buff_saint_enhancement, transformer_target_suit,
+        };
+
+        let snapshot = self.memorial_snapshot.as_ref();
+        let journal_discards = snapshot.map(|s| s.tiles_discarded).unwrap_or(0);
+
+        match kind {
+            MemorialTalismanKind::Exhausted => {
+                self.plays_remaining = self.plays_remaining.saturating_add(2);
+                self.sync_round_resource_caps();
+            }
+            MemorialTalismanKind::FrozenHand => {
+                self.discards_remaining = self.discards_remaining.saturating_add(1);
+                self.sync_round_resource_caps();
+                self.hand.clear();
+                self.selected.clear();
+                self.refill_hand(bus);
+            }
+            MemorialTalismanKind::Skipper => {
+                let bonus = 4u32.saturating_add(snapshot.map(|s| s.journal.blinds_skipped).unwrap_or(0));
+                self.memorial_round.clear_gold_bonus = bonus.min(12);
+            }
+            MemorialTalismanKind::Hoarder => {
+                self.apply_gold_reward(6, Some(bus));
+            }
+            MemorialTalismanKind::FullDish => {
+                self.discards_remaining = self.discards_remaining.saturating_add(1);
+                self.sync_round_resource_caps();
+            }
+            MemorialTalismanKind::Discarded => {
+                let extra = (journal_discards / 10).clamp(1, 3);
+                self.discards_remaining = self.discards_remaining.saturating_add(extra);
+                self.sync_round_resource_caps();
+            }
+            MemorialTalismanKind::BossMark => {
+                self.plays_remaining = self.plays_remaining.saturating_add(1);
+                self.sync_round_resource_caps();
+            }
+            MemorialTalismanKind::BuffSaint => {
+                let enh = snapshot
+                    .map(buff_saint_enhancement)
+                    .unwrap_or(crate::core::tile::TileEnhancement::Pearl);
+                for tile in &mut self.hand {
+                    self.tile_enhancements.insert(tile.id, enh);
+                    tile.enhancement = Some(enh);
+                }
+            }
+            MemorialTalismanKind::Transformer => {
+                let suit = snapshot
+                    .map(transformer_target_suit)
+                    .unwrap_or(crate::core::tile::Suit::Bamboos);
+                for tile in &mut self.hand {
+                    if tile.is_number_tile() {
+                        tile.suit = suit;
+                    }
+                }
+                self.clear_hand_selection_flags();
+                GameplayCoreState::with_run_mut(self, |core| core.finalize_hand_after_draw());
+            }
+            MemorialTalismanKind::TagBearer => {
+                self.plays_remaining = self.plays_remaining.saturating_add(1);
+                self.discards_remaining = self.discards_remaining.saturating_add(1);
+                self.sync_round_resource_caps();
+            }
+            MemorialTalismanKind::MeldMason => {
+                self.memorial_round.next_cashin_bonus_chips = 80;
+                self.memorial_round.next_cashin_yaku =
+                    snapshot.and_then(|s| s.dominant_yaku);
+            }
+            MemorialTalismanKind::DeepWalker => {
+                self.memorial_round.next_cashin_bonus_chips = 60;
+                self.memorial_round.next_cashin_yaku = None;
             }
         }
     }
@@ -133,8 +218,6 @@ impl RunState {
 
     /// Recompute consumable inventory capacity from
     /// currently-owned relics. Idempotent — call after any relic add/remove.
-    /// The inventory is shared between Zodiacs and Talismans; the base
-    /// capacity comes from `GameMode::consumable_capacity` (default 2).
     pub fn recompute_capacities(&mut self) {
         let mut consumable_cap = self.mode.consumable_capacity;
         if self.relics.has(RelicId::BrocadePouch) {

@@ -354,6 +354,7 @@ impl ConsumableShopItem {
         let base = match self.consumable {
             Consumable::Zodiac(_) => ZodiacKind::shop_price(),
             Consumable::Talisman(t) => t.shop_price(),
+            Consumable::Memorial(_) => 0,
         };
         mode.scale_shop_price(super::apply_merchants_eye_discount(base, relics))
     }
@@ -371,6 +372,7 @@ impl ConsumableShopItem {
                 )
             }
             Consumable::Talisman(t) => t.description().to_string(),
+            Consumable::Memorial(m) => m.description().to_string(),
         }
     }
 }

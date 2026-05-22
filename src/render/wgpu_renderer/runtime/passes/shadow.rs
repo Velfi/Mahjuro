@@ -75,7 +75,7 @@ impl WgpuRenderer {
                             &mut shadow_pass,
                             &self.archive_env_primitives,
                             gpu,
-                            |pi| self.archive_env_skip_description_prim(pi, frame),
+                            |pi| self.archive_env_skip_description_sign_shadow(pi),
                         );
                     }
                 }

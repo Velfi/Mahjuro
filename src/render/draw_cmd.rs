@@ -454,6 +454,10 @@ pub enum Object3dKind {
     Talisman {
         kind: crate::core::talisman::TalismanKind,
     },
+    /// Memorial remnant tablet (defeat / dish).
+    MemorialTalisman {
+        kind: crate::core::memorial_talisman::MemorialTalismanKind,
+    },
     /// Boss encounter icon — extruded silhouette mesh from `textures/boss_icons/`
     /// (same mesh builder as [`Relic`], archive cubbies + pedestal close-up).
     BossIcon {

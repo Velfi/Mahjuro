@@ -1161,7 +1161,8 @@ pub(super) fn build_consumable_dish(
             };
             let (fx, fy, fw, fh) = {
                 match slot_item {
-                    crate::core::consumable::Consumable::Talisman(_) => {
+                    crate::core::consumable::Consumable::Talisman(_)
+                    | crate::core::consumable::Consumable::Memorial(_) => {
                         let proj_rect = ctx
                             .proj
                             .talisman_rects
@@ -1224,6 +1225,7 @@ pub(super) fn build_consumable_dish(
                 let pendant_color = match item {
                     crate::core::consumable::Consumable::Zodiac(_) => [0.45, 0.78, 0.55, 1.0],
                     crate::core::consumable::Consumable::Talisman(tk) => tk.accent_color(),
+                    crate::core::consumable::Consumable::Memorial(mk) => mk.accent_color(),
                 };
                 // Rest the pendant on the dish's rim. The dish is
                 // centered at `mm(td.lift_mm)` with full rim extent
@@ -1275,10 +1277,33 @@ pub(super) fn build_consumable_dish(
                         let tscale = slot_h * 1.56;
                         talisman_dish_placements.push(Object3d {
                             pos: anchor.pos,
-                            extents: [tscale, tscale * 1.28, tscale * 0.22],
+                            extents: crate::render::talisman_mesh::talisman_object_extents(tscale),
                             rotation: anchor.object3d_rotation(),
                             color: pendant_color,
                             kind: Object3dKind::Talisman { kind: tk },
+                            hover_target: 0.0,
+                            anim_id: 0,
+                        });
+                    }
+                    crate::core::consumable::Consumable::Memorial(mk) => {
+                        let talisman_half_height = slot_w * 0.55;
+                        let anchor = crate::ui::placement::PlacementAnchor::new(
+                            [
+                                zx + slot_w * 0.5,
+                                zy + slot_h * 0.5,
+                                pendant_y + talisman_half_height,
+                            ],
+                            crate::render::table_transform::rot_fixed_axes_deg(0.0, 0.0, 90.0),
+                            &scene.positions.consumable_dish_talisman,
+                            layout,
+                        );
+                        let tscale = slot_h * 1.56;
+                        talisman_dish_placements.push(Object3d {
+                            pos: anchor.pos,
+                            extents: crate::render::talisman_mesh::talisman_object_extents(tscale),
+                            rotation: anchor.object3d_rotation(),
+                            color: pendant_color,
+                            kind: Object3dKind::MemorialTalisman { kind: mk },
                             hover_target: 0.0,
                             anim_id: 0,
                         });

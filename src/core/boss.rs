@@ -44,7 +44,8 @@ pub enum BossKind {
     Gate,
     Grove,
     Coin,
-    Bloom,
+    #[serde(alias = "bloom")]
+    Rot,
     // ── Medium (min_ante 3) ──────────────────────────────────────────────
     Hermit,
     Forest,
@@ -163,7 +164,7 @@ impl BossKind {
         BossKind::Gate,
         BossKind::Grove,
         BossKind::Coin,
-        BossKind::Bloom,
+        BossKind::Rot,
         BossKind::Hermit,
         BossKind::Forest,
         BossKind::Bureaucrat,
@@ -208,7 +209,7 @@ impl BossKind {
             BossKind::Gate => "gate",
             BossKind::Grove => "grove",
             BossKind::Coin => "coin",
-            BossKind::Bloom => "bloom",
+            BossKind::Rot => "rot",
             BossKind::Hermit => "hermit",
             BossKind::Forest => "forest",
             BossKind::Bureaucrat => "bureaucrat",
@@ -638,7 +639,7 @@ fn boss_behavior(kind: BossKind) -> BossBehavior {
         B::Gate => b.tile_debuffs = &[TileDebuff::Suit(Suit::Characters)],
         B::Grove => b.tile_debuffs = &[TileDebuff::Suit(Suit::Bamboos)],
         B::Coin => b.tile_debuffs = &[TileDebuff::Suit(Suit::Dots)],
-        B::Bloom => b.tile_debuffs = &[TileDebuff::Suit(Suit::Flower)],
+        B::Rot => b.rule_pushes = &[RuleModifier::NoFlowerWildcards],
         B::Hermit => b.rule_pushes = &[RuleModifier::PairsScoreZero],
         B::Forest => b.rule_pushes = &[RuleModifier::SequencesHalved],
         B::Bureaucrat => b.rule_pushes = &[RuleModifier::MustPlayFive],
@@ -769,13 +770,21 @@ mod tests {
     }
 
     #[test]
+    fn the_rot_pushes_no_flower_wildcards_rule() {
+        let beh = boss_behavior(BossKind::Rot);
+        assert_eq!(
+            beh.rule_pushes,
+            &[RuleModifier::NoFlowerWildcards]
+        );
+        assert!(beh.tile_debuffs.is_empty());
+    }
+
     fn static_debuff_bosses_are_in_regular_pool() {
         let pool = regular_pool();
         for boss in [
             BossKind::Gate,
             BossKind::Grove,
             BossKind::Coin,
-            BossKind::Bloom,
             BossKind::Ash,
             BossKind::Furnace,
             BossKind::Relic,
@@ -783,6 +792,11 @@ mod tests {
         ] {
             assert!(pool.contains(&boss), "{boss:?} should be rollable");
         }
+    }
+
+    #[test]
+    fn the_rot_is_in_regular_pool() {
+        assert!(regular_pool().contains(&BossKind::Rot));
     }
 
     #[test]
@@ -840,7 +854,7 @@ mod tests {
                 | BossKind::Gate
                 | BossKind::Grove
                 | BossKind::Coin
-                | BossKind::Bloom
+                | BossKind::Rot
                 | BossKind::Hermit
                 | BossKind::Forest
                 | BossKind::Bureaucrat

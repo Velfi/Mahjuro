@@ -65,6 +65,9 @@ pub const MAX_BOSS_ICON_SLOTS: usize = 32;
 pub const MAX_RIBBON_SLOTS: usize = 48;
 /// Maximum number of talisman tablets rendered per frame (archive: 21 cubbies + pedestal).
 pub const MAX_TALISMAN_SLOTS: usize = 24;
+
+/// `talisman_slot_kind` values `>=` this bind memorial height + mask views.
+pub const MEMORIAL_TALISMAN_TEXTURE_BASE: u8 = 128;
 /// Maximum number of 3D moths (main-menu door light) rendered per frame.
 /// Each live bug consumes one slot for body + two for live wings + two for
 /// blur-fan surrogates (L/R). The blur-fan slot pools share this same size.

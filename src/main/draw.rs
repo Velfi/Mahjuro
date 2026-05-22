@@ -32,6 +32,7 @@ impl App {
             Scene::PickBlind(_) => Some("pick_blind"),
             Scene::MainMenuExterior(_) => Some("main_menu_exterior"),
             Scene::TutorialCampaign(_) => Some("tutorial"),
+            Scene::GameOver(s) if !s.won => Some("gameplay"),
             _ => None,
         }
     }
@@ -274,6 +275,15 @@ impl App {
                 self.progress.runs_completed += 1;
                 self.progress.record_score(self.run.round_score);
                 let level_up = self.progress.check_level_up();
+                let snap = crate::core::memorial_talisman::snapshot_from_run(
+                    &self.run.defeat_journal,
+                    reason,
+                    &self.run,
+                );
+                let memorial = crate::core::memorial_talisman::select_memorial(&snap);
+                self.run.defeat_memorial_kind = Some(memorial);
+                self.progress.pending_memorial = Some(memorial);
+                self.progress.pending_memorial_journal = Some(snap);
                 self.progress
                     .run_history
                     .push(crate::core::progression::RunRecord::from_run(
@@ -382,7 +392,7 @@ impl App {
             &layout,
             &self.anim,
             &self.run,
-            &self.progress,
+            &mut self.progress,
             self.active_profile,
             self.run.is_in_progress(),
             renderer.projections(),
@@ -715,6 +725,7 @@ impl App {
             Scene::PickBlind(_) => Some("pick_blind"),
             Scene::MainMenuExterior(_) => Some("main_menu_exterior"),
             Scene::TutorialCampaign(_) => Some("tutorial"),
+            Scene::GameOver(s) if !s.won => Some("gameplay"),
             _ => None,
         };
         renderer.set_active_scene(active_scene_key);

@@ -16,6 +16,7 @@ impl RunState {
     pub fn apply_blind(&mut self, blind: BlindKind, bus: Option<&mut EventBus>) {
         self.blind = blind;
         self.round_score = 0;
+        self.memorial_round.clear();
         self.reset_round_resources();
         self.tile_debuffs.clear();
         self.relics.clear_debuffs();
@@ -290,6 +291,8 @@ impl RunState {
     /// playing or visiting the shop. Resets per-round state. Skipping is
     /// not allowed for the Boss blind — callers should check first.
     pub fn skip_to_next_blind(&mut self) {
+        self.defeat_journal.blinds_skipped =
+            self.defeat_journal.blinds_skipped.saturating_add(1);
         self.upcoming_blind = self.upcoming_blind.next();
         self.run_number += 1;
         // `target_score` is recomputed by `apply_blind` when the next blind is picked.
@@ -304,6 +307,7 @@ impl RunState {
         self.boss.gold_cost_per_play = 0;
         self.played_yaku_this_round.clear();
         self.honors_scored_this_round = false;
+        self.memorial_round.clear();
         self.blind = self.upcoming_blind;
         GameplayCoreState::with_run_mut(self, |core| {
             core.clear_hand_structure_bank();

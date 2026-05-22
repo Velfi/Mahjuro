@@ -119,12 +119,12 @@ pub fn chronicle_run_description(rec: &RunRecord) -> String {
 pub fn chronicle_run_stats(rec: &RunRecord) -> String {
     let mut lines = vec![
         format!("Tiles played: {}", rec.tiles_played),
-        format!("Discarded: {}", rec.tiles_discarded),
-        format!("Restocks: {}", rec.times_restocked),
+        format!("Tiles discarded: {}", rec.tiles_discarded),
+        format!("Tiles drawn: {}", rec.times_restocked),
         format!("Gold: {}", rec.final_gold),
-        format!("Plays left: {} / {}", rec.plays_remaining, rec.plays_max),
+        format!("Plays remaining: {} / {}", rec.plays_remaining, rec.plays_max),
         format!(
-            "Discards left: {} / {}",
+            "Discards remaining: {} / {}",
             rec.discards_remaining, rec.discards_max
         ),
     ];

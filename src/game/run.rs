@@ -65,6 +65,9 @@ pub enum ConsumableUseResult {
     Talisman {
         kind: crate::core::talisman::TalismanKind,
     },
+    Memorial {
+        kind: crate::core::memorial_talisman::MemorialTalismanKind,
+    },
 }
 
 /// Defeating the Boss of this ante completes the run (Balatro-style).
@@ -173,52 +176,51 @@ fn enumerate_candidate_play_masks(hand: &[Tile], rules: &[RuleModifier]) -> Vec<
     regular.sort_by_key(|it| it.tile);
     flowers.sort_by_key(|it| it.tile);
 
-    let allow_wrap = rules.contains(&RuleModifier::SequenceWrap);
-    let no_sequences = rules.contains(&RuleModifier::NoSequences);
-    let require_honor = rules.contains(&RuleModifier::RequireHonor);
-    let must_play_five = rules.contains(&RuleModifier::MustPlayFive);
+    let subset_rules = PlayMaskRules {
+        allow_wrap: rules.contains(&RuleModifier::SequenceWrap),
+        no_sequences: rules.contains(&RuleModifier::NoSequences),
+        require_honor: rules.contains(&RuleModifier::RequireHonor),
+        must_play_five: rules.contains(&RuleModifier::MustPlayFive),
+        no_flower_wildcards: rules.contains(&RuleModifier::NoFlowerWildcards),
+    };
 
     let mut masks: rustc_hash::FxHashSet<u32> = rustc_hash::FxHashSet::default();
-    enumerate_regular_subsets(
-        &regular,
-        &flowers,
-        0,
-        allow_wrap,
-        no_sequences,
-        require_honor,
-        must_play_five,
-        0,
-        &mut masks,
-    );
+    enumerate_regular_subsets(&regular, &flowers, 0, subset_rules, 0, &mut masks);
     let mut out: Vec<u32> = masks.into_iter().collect();
     out.sort_unstable();
     out
 }
 
-#[allow(clippy::too_many_arguments)]
-fn enumerate_regular_subsets(
-    remaining: &[IndexedTile],
-    flowers: &[IndexedTile],
-    current_mask: u32,
+#[derive(Clone, Copy)]
+struct PlayMaskRules {
     allow_wrap: bool,
     no_sequences: bool,
     require_honor: bool,
     must_play_five: bool,
+    no_flower_wildcards: bool,
+}
+
+fn enumerate_regular_subsets(
+    remaining: &[IndexedTile],
+    flowers: &[IndexedTile],
+    current_mask: u32,
+    rules: PlayMaskRules,
     current_tile_count: usize,
     out: &mut rustc_hash::FxHashSet<u32>,
 ) {
+    let PlayMaskRules {
+        allow_wrap,
+        no_sequences,
+        require_honor,
+        must_play_five,
+        no_flower_wildcards,
+    } = rules;
     if current_tile_count > 14 || (must_play_five && current_tile_count > 5) {
         return;
     }
 
     if remaining.is_empty() {
-        emit_leaf_masks(
-            flowers,
-            current_mask,
-            current_tile_count,
-            must_play_five,
-            out,
-        );
+        emit_leaf_masks(flowers, current_mask, current_tile_count, rules, out);
         return;
     }
 
@@ -227,10 +229,7 @@ fn enumerate_regular_subsets(
         &remaining[1..],
         flowers,
         current_mask,
-        allow_wrap,
-        no_sequences,
-        require_honor,
-        must_play_five,
+        rules,
         current_tile_count,
         out,
     );
@@ -243,10 +242,7 @@ fn enumerate_regular_subsets(
             &remaining[2..],
             flowers,
             current_mask | (1 << first.hand_index) | (1 << remaining[1].hand_index),
-            allow_wrap,
-            no_sequences,
-            require_honor,
-            must_play_five,
+            rules,
             current_tile_count + 2,
             out,
         );
@@ -264,10 +260,7 @@ fn enumerate_regular_subsets(
                 | (1 << first.hand_index)
                 | (1 << remaining[1].hand_index)
                 | (1 << remaining[2].hand_index),
-            allow_wrap,
-            no_sequences,
-            require_honor,
-            must_play_five,
+            rules,
             current_tile_count + 3,
             out,
         );
@@ -293,16 +286,14 @@ fn enumerate_regular_subsets(
                 | (1 << remaining[1].hand_index)
                 | (1 << remaining[2].hand_index)
                 | (1 << remaining[3].hand_index),
-            allow_wrap,
-            no_sequences,
-            require_honor,
-            must_play_five,
+            rules,
             current_tile_count + 4,
             out,
         );
     }
 
-    if !flowers.is_empty()
+    let can_use_flower_wildcard = !flowers.is_empty() && !no_flower_wildcards;
+    if can_use_flower_wildcard
         && remaining.len() >= 2
         && same_face(first.tile, remaining[1].tile)
         && (!require_honor || tiles_have_honor(&[first.tile, remaining[1].tile]))
@@ -315,10 +306,7 @@ fn enumerate_regular_subsets(
                     | (1 << first.hand_index)
                     | (1 << remaining[1].hand_index)
                     | (1 << flower.hand_index),
-                allow_wrap,
-                no_sequences,
-                require_honor,
-                must_play_five,
+                rules,
                 current_tile_count + 3,
                 out,
             );
@@ -326,7 +314,7 @@ fn enumerate_regular_subsets(
     }
 
     if !no_sequences && first.tile.is_number_tile() && !require_honor {
-        for seq in sequence_candidates(remaining, allow_wrap, !flowers.is_empty(), first) {
+        for seq in sequence_candidates(remaining, allow_wrap, can_use_flower_wildcard, first) {
             let mut next_mask = current_mask | (1 << first.hand_index);
             let mut remove = vec![0usize];
             for idx in seq.regular_indices {
@@ -340,10 +328,7 @@ fn enumerate_regular_subsets(
                         &rest,
                         &remove_flower(flowers, flower_idx),
                         next_mask | (1 << flower.hand_index),
-                        allow_wrap,
-                        no_sequences,
-                        require_honor,
-                        must_play_five,
+                        rules,
                         current_tile_count + 3,
                         out,
                     );
@@ -353,10 +338,7 @@ fn enumerate_regular_subsets(
                     &rest,
                     flowers,
                     next_mask,
-                    allow_wrap,
-                    no_sequences,
-                    require_honor,
-                    must_play_five,
+                    rules,
                     current_tile_count + 3,
                     out,
                 );
@@ -369,10 +351,16 @@ fn emit_leaf_masks(
     flowers: &[IndexedTile],
     current_mask: u32,
     current_tile_count: usize,
-    must_play_five: bool,
+    rules: PlayMaskRules,
     out: &mut rustc_hash::FxHashSet<u32>,
 ) {
-    for extra_mask in flower_meld_partition_masks(flowers) {
+    let must_play_five = rules.must_play_five;
+    let round_rules = if rules.no_flower_wildcards {
+        &[RuleModifier::NoFlowerWildcards][..]
+    } else {
+        &[][..]
+    };
+    for extra_mask in flower_meld_partition_masks(flowers, round_rules) {
         let total_mask = current_mask | extra_mask;
         let total_count = total_mask.count_ones() as usize;
         if total_count == 0 {
@@ -388,9 +376,9 @@ fn emit_leaf_masks(
     }
 }
 
-fn flower_meld_partition_masks(flowers: &[IndexedTile]) -> Vec<u32> {
+fn flower_meld_partition_masks(flowers: &[IndexedTile], rules: &[RuleModifier]) -> Vec<u32> {
     let indexed: Vec<(usize, u32)> = flowers.iter().map(|f| (f.hand_index, f.tile.id)).collect();
-    crate::core::hand::decomposition::flower_meld_partition_masks(&indexed)
+    crate::core::hand::decomposition::flower_meld_partition_masks(&indexed, rules)
 }
 
 fn remove_flower(flowers: &[IndexedTile], remove_idx: usize) -> Vec<IndexedTile> {
@@ -755,6 +743,22 @@ pub struct RunState {
     /// draw, consumable interaction, etc.).
     #[serde(skip)]
     pub relic_activations: Vec<RelicId>,
+
+    /// Habits tracked for memorial remnant selection at defeat.
+    #[serde(default)]
+    pub defeat_journal: crate::core::memorial_talisman::RunDefeatJournal,
+    /// True once the run-start memorial grant has been applied.
+    #[serde(default)]
+    pub memorial_granted: bool,
+    /// Journal snapshot from the previous defeat (use-time scaling / flavor).
+    #[serde(default)]
+    pub memorial_snapshot: Option<crate::core::memorial_talisman::MemorialJournalSnapshot>,
+    /// In-round bonuses from memorial use; cleared each blind.
+    #[serde(skip)]
+    pub memorial_round: crate::core::memorial_talisman::MemorialRoundState,
+    /// Remnant chosen at defeat (for run history / debug).
+    #[serde(skip)]
+    pub defeat_memorial_kind: Option<crate::core::memorial_talisman::MemorialTalismanKind>,
 }
 
 impl RunState {
@@ -1160,6 +1164,11 @@ impl RunState {
             relic_counters: std::collections::BTreeMap::new(),
             onboarding: None,
             relic_activations: Vec::new(),
+            defeat_journal: crate::core::memorial_talisman::RunDefeatJournal::default(),
+            memorial_granted: false,
+            memorial_snapshot: None,
+            memorial_round: crate::core::memorial_talisman::MemorialRoundState::default(),
+            defeat_memorial_kind: None,
         };
         // Roll skip-reward tags for ante 1.
         state.roll_ante_tags();
@@ -1184,6 +1193,22 @@ impl RunState {
         self.available_yaku = progress.available_yaku();
         self.available_rules = progress.available_rules();
         self.available_relics = progress.available_relics();
+    }
+
+    /// Grant the memorial remnant carried over from the last defeat (once per run).
+    pub fn grant_pending_memorial(&mut self, progress: &mut crate::core::progression::PlayerProgress) {
+        if self.memorial_granted {
+            return;
+        }
+        let Some(kind) = progress.pending_memorial.take() else {
+            return;
+        };
+        self.memorial_snapshot = progress.pending_memorial_journal.take();
+        let _ = self
+            .consumables
+            .try_push(crate::core::consumable::Consumable::Memorial(kind));
+        self.memorial_granted = true;
+        progress.memorials_discovered.insert(kind);
     }
 
     /// Build the `ResolvedBossEffect` for the current `upcoming_boss`. For

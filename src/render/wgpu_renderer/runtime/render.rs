@@ -1057,6 +1057,7 @@ impl WgpuRenderer {
             &mut shadow_uniforms_changed,
         );
 
+        self.upload_active_room_baked_shadow_globals(frame);
         let room_uses_baked_shadow = self.active_room_baked_shadow.is_some()
             && self.room_shadow_capture_pending.is_none();
         if ops_flags.shop_env {
@@ -1099,7 +1100,11 @@ impl WgpuRenderer {
                     .then(|| (light_view_proj_arr, &mut shadow_uniforms_changed)),
             );
         }
-        self.upload_active_room_baked_shadow_globals(frame);
+        self.write_active_room_baked_shadow_globals(
+            &self.queue,
+            light_view_proj_arr,
+            shadows_enabled,
+        );
 
         let mut encoder = self
             .device

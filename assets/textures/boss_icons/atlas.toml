@@ -5,7 +5,7 @@ columns = 5
 
 layout = [
     "drought","whisper","tribute","gate","grove",
-    "coin","bloom","hermit","forest","bureaucrat",
+    "coin","rot","hermit","forest","bureaucrat",
     "drunkard","ash","furnace","relic","blight",
     "hex","famine","tempest","censor","mirror",
     "counterweight","tax_collector","dragon","house","",

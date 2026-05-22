@@ -138,6 +138,116 @@ impl TalismanKind {
     pub fn shop_price(self) -> u32 {
         talisman_presentation(self).shop_price
     }
+
+    /// JSON / asset stem (`pearl`, `gilded`, …).
+    pub fn asset_slug(self) -> &'static str {
+        match self {
+            Self::Pearl => "pearl",
+            Self::Gilded => "gilded",
+            Self::Polychrome => "polychrome",
+            Self::Bamboo => "bamboo",
+            Self::Dots => "dots",
+            Self::Characters => "characters",
+            Self::Honors => "honors",
+            Self::Wildflower => "wildflower",
+            Self::Conformity => "conformity",
+        }
+    }
+
+    /// Grayscale relief heightmap for the octagonal tablet mesh (`lit_mesh` chitin).
+    pub fn heightmap_asset_path(self) -> &'static str {
+        match self {
+            Self::Pearl => "textures/talismans/talisman_pearl.png",
+            Self::Gilded => "textures/talismans/talisman_gilded.png",
+            Self::Polychrome => "textures/talismans/talisman_polychrome.png",
+            Self::Bamboo => "textures/talismans/talisman_bamboo.png",
+            Self::Dots => "textures/talismans/talisman_dots.png",
+            Self::Characters => "textures/talismans/talisman_characters.png",
+            Self::Honors => "textures/talismans/talisman_honors.png",
+            Self::Wildflower => "textures/talismans/talisman_wildflower.png",
+            Self::Conformity => "textures/talismans/talisman_conformity.png",
+        }
+    }
+
+    /// Octagon silhouette mask (white = tablet, black = void) for chitin discard.
+    pub fn mask_asset_path(self) -> &'static str {
+        match self {
+            Self::Pearl => "textures/talismans/talisman_pearl_mask.png",
+            Self::Gilded => "textures/talismans/talisman_gilded_mask.png",
+            Self::Polychrome => "textures/talismans/talisman_polychrome_mask.png",
+            Self::Bamboo => "textures/talismans/talisman_bamboo_mask.png",
+            Self::Dots => "textures/talismans/talisman_dots_mask.png",
+            Self::Characters => "textures/talismans/talisman_characters_mask.png",
+            Self::Honors => "textures/talismans/talisman_honors_mask.png",
+            Self::Wildflower => "textures/talismans/talisman_wildflower_mask.png",
+            Self::Conformity => "textures/talismans/talisman_conformity_mask.png",
+        }
+    }
+
+    /// `(path, gpu label)` pairs in [`Self::all()`] order — see `build.rs` loader.
+    pub fn heightmap_paths() -> &'static [(&'static str, &'static str)] {
+        &[
+            ("textures/talismans/talisman_pearl.png", "talisman-pearl-hm"),
+            ("textures/talismans/talisman_gilded.png", "talisman-gilded-hm"),
+            (
+                "textures/talismans/talisman_polychrome.png",
+                "talisman-polychrome-hm",
+            ),
+            ("textures/talismans/talisman_bamboo.png", "talisman-bamboo-hm"),
+            ("textures/talismans/talisman_dots.png", "talisman-dots-hm"),
+            (
+                "textures/talismans/talisman_characters.png",
+                "talisman-characters-hm",
+            ),
+            ("textures/talismans/talisman_honors.png", "talisman-honors-hm"),
+            (
+                "textures/talismans/talisman_wildflower.png",
+                "talisman-wildflower-hm",
+            ),
+            (
+                "textures/talismans/talisman_conformity.png",
+                "talisman-conformity-hm",
+            ),
+        ]
+    }
+
+    pub fn mask_paths() -> &'static [(&'static str, &'static str)] {
+        &[
+            (
+                "textures/talismans/talisman_pearl_mask.png",
+                "talisman-pearl-mask",
+            ),
+            (
+                "textures/talismans/talisman_gilded_mask.png",
+                "talisman-gilded-mask",
+            ),
+            (
+                "textures/talismans/talisman_polychrome_mask.png",
+                "talisman-polychrome-mask",
+            ),
+            (
+                "textures/talismans/talisman_bamboo_mask.png",
+                "talisman-bamboo-mask",
+            ),
+            ("textures/talismans/talisman_dots_mask.png", "talisman-dots-mask"),
+            (
+                "textures/talismans/talisman_characters_mask.png",
+                "talisman-characters-mask",
+            ),
+            (
+                "textures/talismans/talisman_honors_mask.png",
+                "talisman-honors-mask",
+            ),
+            (
+                "textures/talismans/talisman_wildflower_mask.png",
+                "talisman-wildflower-mask",
+            ),
+            (
+                "textures/talismans/talisman_conformity_mask.png",
+                "talisman-conformity-mask",
+            ),
+        ]
+    }
 }
 
 /// Apply a talisman to every tile in the given hand. A tile can only carry
@@ -198,6 +308,25 @@ mod tests {
     }
 
     /// Every `TalismanKind` variant must appear exactly once in `talismans.json`.
+    #[test]
+    fn heightmap_and_mask_paths_match_all_kinds() {
+        let all = TalismanKind::all();
+        assert_eq!(TalismanKind::heightmap_paths().len(), all.len());
+        assert_eq!(TalismanKind::mask_paths().len(), all.len());
+        for (i, &k) in all.iter().enumerate() {
+            let (hm, _) = TalismanKind::heightmap_paths()[i];
+            let (mask, _) = TalismanKind::mask_paths()[i];
+            assert!(
+                hm.ends_with(&format!("talisman_{}.png", k.asset_slug())),
+                "height path order mismatch for {k:?}"
+            );
+            assert!(
+                mask.ends_with(&format!("talisman_{}_mask.png", k.asset_slug())),
+                "mask path order mismatch for {k:?}"
+            );
+        }
+    }
+
     #[test]
     fn every_talisman_variant_has_one_data_entry() {
         const ALL: &[TalismanKind] = &[

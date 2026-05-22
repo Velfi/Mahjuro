@@ -1,0 +1,74 @@
+[
+  {
+    "id": "exhausted",
+    "name": "The Exhausted",
+    "description": "Use: +2 plays this blind.",
+    "accent": [0.55, 0.52, 0.58, 1.0]
+  },
+  {
+    "id": "frozen_hand",
+    "name": "The Frozen Hand",
+    "description": "Use: +1 discard this blind and redraw your hand.",
+    "accent": [0.42, 0.58, 0.72, 1.0]
+  },
+  {
+    "id": "skipper",
+    "name": "The Skipper",
+    "description": "Use: +$4 when you clear this blind.",
+    "accent": [0.72, 0.68, 0.42, 1.0]
+  },
+  {
+    "id": "hoarder",
+    "name": "The Hoarder",
+    "description": "Use: gain $6 immediately.",
+    "accent": [0.92, 0.78, 0.28, 1.0]
+  },
+  {
+    "id": "full_dish",
+    "name": "The Full Dish",
+    "description": "Use: +1 discard this blind.",
+    "accent": [0.68, 0.62, 0.78, 1.0]
+  },
+  {
+    "id": "discarded",
+    "name": "The Discarded",
+    "description": "Use: +2 discards this blind.",
+    "accent": [0.48, 0.42, 0.50, 1.0]
+  },
+  {
+    "id": "boss_mark",
+    "name": "The Boss's Mark",
+    "description": "Use: +1 play this blind.",
+    "accent": [0.78, 0.22, 0.28, 1.0]
+  },
+  {
+    "id": "buff_saint",
+    "name": "The Buff Saint",
+    "description": "Use: stamp every hand tile with your last run's favored enhancement.",
+    "accent": [0.94, 0.95, 0.98, 1.0]
+  },
+  {
+    "id": "transformer",
+    "name": "The Transformer",
+    "description": "Use: transform numbered tiles in hand to your last run's favored suit.",
+    "accent": [0.62, 0.60, 0.68, 1.0]
+  },
+  {
+    "id": "tag_bearer",
+    "name": "The Tag Bearer",
+    "description": "Use: +1 discard and +1 play this blind.",
+    "accent": [0.58, 0.72, 0.55, 1.0]
+  },
+  {
+    "id": "meld_mason",
+    "name": "The Meld Mason",
+    "description": "Use: next structure cash-in with your favored yaku gains +80 chips.",
+    "accent": [0.82, 0.55, 0.38, 1.0]
+  },
+  {
+    "id": "deep_walker",
+    "name": "The Deep Walker",
+    "description": "Use: next structure cash-in gains +60 chips.",
+    "accent": [0.38, 0.42, 0.52, 1.0]
+  }
+]

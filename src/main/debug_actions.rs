@@ -318,9 +318,17 @@ impl App {
             }
             DebugAction::ShowDefeatScreen => {
                 while self.modals.dismiss() {}
+                let reason = crate::game::event_bus::GameOverReason::OutOfPlays;
+                let snap = crate::core::memorial_talisman::snapshot_from_run(
+                    &self.run.defeat_journal,
+                    reason,
+                    &self.run,
+                );
+                self.run.defeat_memorial_kind =
+                    Some(crate::core::memorial_talisman::select_memorial(&snap));
                 self.pending_scene = Some(Scene::GameOver(GameOverScene::new(
                     &self.run,
-                    crate::game::event_bus::GameOverReason::OutOfPlays,
+                    reason,
                 )));
                 self.transition_alpha = 1.0;
                 log::debug!("Showing defeat screen");

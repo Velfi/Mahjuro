@@ -557,6 +557,7 @@ fn enumerate_candidate_play_masks(hand: &[Tile], rules: &[RuleModifier]) -> Vec<
         no_sequences: rules.contains(&RuleModifier::NoSequences),
         require_honor: rules.contains(&RuleModifier::RequireHonor),
         must_play_five: rules.contains(&RuleModifier::MustPlayFive),
+        no_flower_wildcards: rules.contains(&RuleModifier::NoFlowerWildcards),
     };
 
     let mut masks: rustc_hash::FxHashSet<u32> = rustc_hash::FxHashSet::default();
@@ -630,6 +631,7 @@ struct SubsetRules {
     no_sequences: bool,
     require_honor: bool,
     must_play_five: bool,
+    no_flower_wildcards: bool,
 }
 
 fn enumerate_regular_subsets(
@@ -645,19 +647,14 @@ fn enumerate_regular_subsets(
         no_sequences,
         require_honor,
         must_play_five,
+        no_flower_wildcards,
     } = rules;
     if current_tile_count > 14 || (must_play_five && current_tile_count > 5) {
         return;
     }
 
     if remaining.is_empty() {
-        emit_leaf_masks(
-            flowers,
-            current_mask,
-            current_tile_count,
-            must_play_five,
-            out,
-        );
+        emit_leaf_masks(flowers, current_mask, current_tile_count, rules, out);
         return;
     }
 
@@ -731,7 +728,8 @@ fn enumerate_regular_subsets(
         );
     }
 
-    if !flowers.is_empty()
+    let can_use_flower_wildcard = !flowers.is_empty() && !no_flower_wildcards;
+    if can_use_flower_wildcard
         && remaining.len() >= 2
         && same_face(first.tile, remaining[1].tile)
         && (!require_honor || tiles_have_honor(&[first.tile, remaining[1].tile]))
@@ -752,7 +750,7 @@ fn enumerate_regular_subsets(
     }
 
     if !no_sequences && first.tile.is_number_tile() && !require_honor {
-        for seq in sequence_candidates(remaining, allow_wrap, !flowers.is_empty(), first) {
+        for seq in sequence_candidates(remaining, allow_wrap, can_use_flower_wildcard, first) {
             let mut next_mask = current_mask | (1 << first.hand_index);
             let mut remove = vec![0usize];
             for idx in seq.regular_indices {
@@ -789,10 +787,16 @@ fn emit_leaf_masks(
     flowers: &[IndexedTile],
     current_mask: u32,
     current_tile_count: usize,
-    must_play_five: bool,
+    rules: SubsetRules,
     out: &mut rustc_hash::FxHashSet<u32>,
 ) {
-    for extra_mask in flower_meld_partition_masks(flowers) {
+    let must_play_five = rules.must_play_five;
+    let round_rules = if rules.no_flower_wildcards {
+        &[RuleModifier::NoFlowerWildcards][..]
+    } else {
+        &[][..]
+    };
+    for extra_mask in flower_meld_partition_masks(flowers, round_rules) {
         let total_mask = current_mask | extra_mask;
         let total_count = total_mask.count_ones() as usize;
         if total_count == 0 {
@@ -808,9 +812,9 @@ fn emit_leaf_masks(
     }
 }
 
-fn flower_meld_partition_masks(flowers: &[IndexedTile]) -> Vec<u32> {
+fn flower_meld_partition_masks(flowers: &[IndexedTile], rules: &[RuleModifier]) -> Vec<u32> {
     let indexed: Vec<(usize, u32)> = flowers.iter().map(|f| (f.hand_index, f.tile.id)).collect();
-    crate::core::hand::decomposition::flower_meld_partition_masks(&indexed)
+    crate::core::hand::decomposition::flower_meld_partition_masks(&indexed, rules)
 }
 
 fn remove_flower(flowers: &[IndexedTile], remove_idx: usize) -> Vec<IndexedTile> {
@@ -2237,7 +2241,7 @@ fn use_bot_consumables(run: &mut RunState, stats: &mut RunStats, log: bool) -> b
     {
         let zodiac = match run.consumables.items[idx] {
             Consumable::Zodiac(z) => z,
-            Consumable::Talisman(_) => unreachable!(),
+            Consumable::Talisman(_) | Consumable::Memorial(_) => unreachable!(),
         };
         let _ = run.use_consumable(idx, &mut crate::game::event_bus::EventBus::default());
         *stats.zodiacs_used.entry(zodiac.name()).or_insert(0) += 1;

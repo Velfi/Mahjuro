@@ -111,5 +111,6 @@ pub(super) fn consumable_color(c: Consumable) -> [f32; 4] {
             palette[(z as usize) % palette.len()]
         }
         Consumable::Talisman(t) => t.accent_color(),
+        Consumable::Memorial(m) => m.accent_color(),
     }
 }

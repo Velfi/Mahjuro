@@ -142,6 +142,7 @@ struct ShadowGlobals {
     light_view_proj: mat4x4<f32>,
     // x = enabled (0/1), y = depth bias, z = texel size, w = unused
     params: vec4<f32>,
+    room_baked_light_view_proj: mat4x4<f32>,
 };
 @group(2) @binding(0) var<uniform> shadow_globals: ShadowGlobals;
 @group(2) @binding(1) var shadow_map: texture_depth_2d;
@@ -860,6 +861,14 @@ fn fs_main(
     // Chitin: flat ±Z faces get heightmap warp; thin rim quads use stable shading.
     let chitin_flat_face = is_chitin && abs(abs(in.local_pos.z) - 0.09) < 0.02;
     let chitin_rim_face = is_chitin && !chitin_flat_face;
+
+    // Talisman tablets: `relief_tex` carries the octagon mask (white = tablet).
+    if (is_chitin) {
+        let tablet_mask = textureSampleLevel(relief_tex, albedo_samp, in.uv, 0.0).r;
+        if (tablet_mask < (8.0 / 255.0)) {
+            discard;
+        }
+    }
 
     // Sample the albedo texture unconditionally — material kind is uniform
     // across the draw, but hoisting the sample keeps naga's uniform-control-

@@ -198,6 +198,11 @@ impl SceneBehavior for GameplayScene {
                             log::info!("Used {}", kind.name());
                         }
                     }
+                    CommandData::UseConsumable {
+                        result: crate::game::run::ConsumableUseResult::Memorial { kind },
+                    } => {
+                        log::info!("Used memorial {}", kind.name());
+                    }
                     _ => {}
                 }
                 if outcome.rejection.is_none()
@@ -1471,6 +1476,7 @@ impl SceneBehavior for GameplayScene {
                             let kind = match c {
                                 Consumable::Zodiac(_) => "Ribbon",
                                 Consumable::Talisman(_) => "Talisman",
+                                Consumable::Memorial(_) => "Remnant",
                             };
                             let title = format!("{} · {}", kind, c.name());
                             let desc = gameplay_consumable_description_full(c);

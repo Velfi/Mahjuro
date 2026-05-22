@@ -535,6 +535,7 @@ impl<'a> GameEngine<'a> {
             match consumable {
                 Consumable::Zodiac(_) => owned_zodiacs.push(owned),
                 Consumable::Talisman(_) => owned_talismans.push(owned),
+                Consumable::Memorial(_) => {}
             }
         }
         ShopReadModel {
@@ -928,6 +929,8 @@ impl<'a> GameEngine<'a> {
                 self.run
                     .apply_gold_delta(-(price as i32), Some(&mut self.bus));
                 self.run.relics.active.push(relic);
+                self.run.defeat_journal.shop_relic_buys =
+                    self.run.defeat_journal.shop_relic_buys.saturating_add(1);
                 self.bus
                     .push(GameEvent::UiSound(crate::audio::SfxId::Purchase));
                 self.bus.push(GameEvent::PlayRelicStinger(relic));
@@ -1058,6 +1061,11 @@ impl<'a> GameEngine<'a> {
                 self.run
                     .apply_gold_delta(-(price as i32), Some(&mut self.bus));
                 self.run.consumables.items.push(Consumable::Talisman(kind));
+                self.run.defeat_journal.shop_talisman_buys = self
+                    .run
+                    .defeat_journal
+                    .shop_talisman_buys
+                    .saturating_add(1);
                 self.bus
                     .push(GameEvent::UiSound(crate::audio::SfxId::Purchase));
                 self.bus.push(GameEvent::TalismanPurchased(kind));
@@ -1098,7 +1106,9 @@ impl<'a> GameEngine<'a> {
                             new_level,
                         }
                     }
-                    ConsumableUseResult::Talisman { .. } => ShopCommandData::None,
+                    ConsumableUseResult::Talisman { .. } | ConsumableUseResult::Memorial { .. } => {
+                        ShopCommandData::None
+                    }
                 }
             }
             ShopCommand::BuyPack { kind, price } => {
@@ -1121,6 +1131,8 @@ impl<'a> GameEngine<'a> {
                     }
                 }
                 self.run.tile_packs.push(kind);
+                self.run.defeat_journal.shop_pack_buys =
+                    self.run.defeat_journal.shop_pack_buys.saturating_add(1);
                 self.bus.push(GameEvent::PackBought);
                 ShopCommandData::PackBought {
                     tiles,
@@ -1351,9 +1363,13 @@ pub(crate) fn consumable_sell_price_for_mode(
     mode: &crate::game::game_mode::GameMode,
     relics: &RelicState,
 ) -> u32 {
+    if matches!(c, Consumable::Memorial(_)) {
+        return 0;
+    }
     let base = match c {
         Consumable::Zodiac(_) => crate::core::zodiac::ZodiacKind::shop_price(),
         Consumable::Talisman(t) => t.shop_price(),
+        Consumable::Memorial(_) => unreachable!(),
     };
     let paid = mode.scale_shop_price(apply_merchants_eye_discount(base, relics));
     (paid / 2).max(1)

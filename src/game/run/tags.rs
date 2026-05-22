@@ -28,6 +28,8 @@ impl RunState {
     ) -> &'static str {
         use crate::core::tag::TagKind;
 
+        self.defeat_journal.tags_taken = self.defeat_journal.tags_taken.saturating_add(1);
+
         match tag {
             TagKind::GoldIngot => {
                 self.apply_gold_reward(8, bus);

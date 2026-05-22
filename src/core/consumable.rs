@@ -4,15 +4,17 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::core::memorial_talisman::MemorialTalismanKind;
 use crate::core::talisman::TalismanKind;
 use crate::core::zodiac::ZodiacKind;
 
-/// One slot in the shared inventory — either a Zodiac or a Talisman.
+/// One slot in the shared inventory — zodiac, shop talisman, or memorial remnant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "value")]
 pub enum Consumable {
     Zodiac(ZodiacKind),
     Talisman(TalismanKind),
+    Memorial(MemorialTalismanKind),
 }
 
 impl Consumable {
@@ -20,7 +22,12 @@ impl Consumable {
         match self {
             Consumable::Zodiac(z) => z.name().to_string(),
             Consumable::Talisman(t) => t.name().to_string(),
+            Consumable::Memorial(m) => m.name().to_string(),
         }
+    }
+
+    pub fn is_memorial(self) -> bool {
+        matches!(self, Consumable::Memorial(_))
     }
 }
 

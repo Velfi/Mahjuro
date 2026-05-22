@@ -3,6 +3,7 @@
 use std::time::Instant;
 
 use crate::audio::SfxId;
+use crate::core::memorial_talisman::{MemorialTalismanKind, select_memorial, snapshot_from_run};
 use crate::game::engine::GameEngine;
 use crate::game::event_bus::{GameEvent, GameOverReason};
 use crate::game::run::RunState;
@@ -67,6 +68,9 @@ pub struct GameOverScene {
     pub target_score: u32,
     pub won: bool,
     pub loss_reason: Option<GameOverReason>,
+    /// Remnant the player is becoming (defeat only).
+    pub memorial_kind: Option<MemorialTalismanKind>,
+    memorial_subtitle: Option<String>,
     summary: RunSummary,
     tree: TreeState,
     opened_at: Instant,
@@ -80,11 +84,22 @@ const OUTCOME_SFX_DELAY_SECS: f32 = 1.0;
 impl GameOverScene {
     pub fn new(run: &RunState, reason: GameOverReason) -> Self {
         let gameplay = GameEngine::read(run);
+        let snap = snapshot_from_run(&run.defeat_journal, reason, run);
+        let memorial = run.defeat_memorial_kind.or_else(|| Some(select_memorial(&snap)));
+        let memorial_subtitle = memorial.map(|k| {
+            format!(
+                "{} — {}",
+                k.name(),
+                k.defeat_subtitle(&snap)
+            )
+        });
         Self {
             final_score: gameplay.round_score,
             target_score: gameplay.target_score,
             won: false,
             loss_reason: Some(reason),
+            memorial_kind: memorial,
+            memorial_subtitle,
             summary: RunSummary::from_run(run),
             tree: TreeState::new(),
             opened_at: Instant::now(),
@@ -103,6 +118,8 @@ impl GameOverScene {
             target_score: gameplay.target_score,
             won: true,
             loss_reason: None,
+            memorial_kind: None,
+            memorial_subtitle: None,
             summary: RunSummary::from_run(run),
             tree: TreeState::new(),
             opened_at: Instant::now(),
@@ -211,6 +228,8 @@ impl SceneBehavior for GameOverScene {
         };
         let subtitle = if self.won {
             "Final ante cleared".to_string()
+        } else if let Some(ref line) = self.memorial_subtitle {
+            line.clone()
         } else {
             format!("{} / {}", self.final_score, self.target_score)
         };
@@ -289,12 +308,14 @@ impl SceneBehavior for GameOverScene {
             color: color::WALNUT_INK,
             user: 0,
         });
-        if ctx.effect_layers.fullscreen_water_backdrop {
-            if self.won {
+        if self.won {
+            if ctx.effect_layers.fullscreen_water_backdrop {
                 frame.moonlit_water();
-            } else {
-                frame.sunlit_water();
             }
+        } else if let Some(kind) = self.memorial_kind {
+            super::game_over_tableau::push_defeat_memorial_tableau(&mut frame, &ctx.layout, kind);
+        } else if ctx.effect_layers.fullscreen_water_backdrop {
+            frame.sunlit_water();
         }
 
         // Panel body — slightly deeper than before so it reads as a card.

@@ -1,19 +1,9 @@
 //! Procedural mesh for a hanging talisman (jade tablet) used by the shop.
 //!
-//! The mesh is a flat octagonal prism: an 8-sided "coin" oriented so its
-//! flat faces point along ±Z and its long axis along Y. Local extents fit
-//! inside the unit cube [-0.5, 0.5]^3 so a per-instance scale matrix can
-//! turn it into varied tablet sizes. Each face has its own normal so the
-//! lit-mesh shader reads it as flat-shaded jade.
-//!
-//! Layout:
-//! - Front face (+Z normal) — octagon, slightly inset corners
-//! - Back face  (-Z normal) — same octagon, opposite winding
-//! - 8 rim quads connecting front and back, each with its own outward normal
-//!
-//! Width × height × thickness ≈ 1.0 × 1.4 × 0.18 in local units (the prism is
-//! taller than wide, like a real hanging jade tablet). The scene scales it
-//! up to whatever world-space size the talisman should display at.
+//! The mesh is a flat **regular octagonal** prism: eight equal sides with a
+//! **flat edge toward −Y** (resting on the felt like a stop sign on its edge).
+//! Flat faces point along ±Z; thickness along Z. Local space fits in the unit
+//! cube so per-instance scale matrices can size each tablet.
 
 use std::f32::consts::TAU;
 
@@ -22,27 +12,32 @@ use crate::render::theme::color;
 use crate::render::tile_glb::Vertex3dTex;
 
 const SIDES: usize = 8;
-const HALF_W: f32 = 0.50;
-const HALF_H: f32 = 0.70;
+/// Circumradius of the octagon in local XY.
+const RADIUS: f32 = 0.50;
 const HALF_T: f32 = 0.09;
 
-/// Build the talisman mesh (octagonal flat tablet, hangs portrait-orientation).
+/// Rotate the octagon so a horizontal edge sits on −Y (not a vertex).
+/// `π/8` rad (`TAU/16`) puts edge midpoints at ±Y/±X; `0` puts vertices on cardinals.
+const OCTAGON_ANGLE_OFFSET: f32 = TAU / 16.0;
+
+/// Face-plate UV: +local Y is the top of the heightmap (`v → 0`).
+#[inline]
+fn talisman_face_uv(x: f32, y: f32) -> [f32; 2] {
+    [x / RADIUS * 0.5 + 0.5, 0.5 - y / RADIUS * 0.5]
+}
+
+fn octagon_rim() -> [(f32, f32); SIDES] {
+    std::array::from_fn(|i| {
+        let theta = (i as f32) * TAU / SIDES as f32 + OCTAGON_ANGLE_OFFSET;
+        (theta.cos() * RADIUS, theta.sin() * RADIUS)
+    })
+}
+
+/// Build the talisman mesh (octagonal flat tablet, flat edge down).
 pub fn build_talisman_mesh() -> MeshCpu {
     let mut vertices: Vec<Vertex3dTex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
-
-    // Compute the 8 rim corner positions in local XY space. Octagonal, with
-    // slightly stretched Y so the tablet reads as taller than wide.
-    let rim: Vec<(f32, f32)> = (0..SIDES)
-        .map(|i| {
-            // Start at the top center and go clockwise.
-            let theta = (i as f32) * TAU / SIDES as f32 - TAU * 0.25;
-            let cx = theta.cos();
-            let cy = theta.sin();
-            // Stretch Y to make the tablet taller than wide.
-            (cx * HALF_W, -cy * HALF_H)
-        })
-        .collect();
+    let rim = octagon_rim();
 
     // ── Front face (+Z normal): triangle fan from center vertex.
     let front_z = HALF_T;
@@ -57,11 +52,11 @@ pub fn build_talisman_mesh() -> MeshCpu {
         color: [1.0, 1.0, 1.0, 1.0],
     });
     let front_ring_start = vertices.len() as u32;
-    for &(x, y) in rim.iter() {
+    for &(x, y) in &rim {
         vertices.push(Vertex3dTex {
             position: [x, y, front_z],
             normal: front_normal,
-            uv: [x / HALF_W * 0.5 + 0.5, 0.5 + y / HALF_H * 0.5],
+            uv: talisman_face_uv(x, y),
             tangent: Vertex3dTex::DEFAULT_TANGENT,
             uv_emr: [0.0, 0.0],
             color: [1.0, 1.0, 1.0, 1.0],
@@ -86,11 +81,11 @@ pub fn build_talisman_mesh() -> MeshCpu {
         color: [1.0, 1.0, 1.0, 1.0],
     });
     let back_ring_start = vertices.len() as u32;
-    for &(x, y) in rim.iter() {
+    for &(x, y) in &rim {
         vertices.push(Vertex3dTex {
             position: [x, y, back_z],
             normal: back_normal,
-            uv: [x / HALF_W * 0.5 + 0.5, 0.5 + y / HALF_H * 0.5],
+            uv: talisman_face_uv(x, y),
             tangent: Vertex3dTex::DEFAULT_TANGENT,
             uv_emr: [0.0, 0.0],
             color: [1.0, 1.0, 1.0, 1.0],
@@ -106,7 +101,6 @@ pub fn build_talisman_mesh() -> MeshCpu {
     for i in 0..SIDES {
         let (x0, y0) = rim[i];
         let (x1, y1) = rim[(i + 1) % SIDES];
-        // Outward normal = midpoint direction in XY.
         let mx = (x0 + x1) * 0.5;
         let my = (y0 + y1) * 0.5;
         let len = (mx * mx + my * my).sqrt().max(1e-6);
@@ -159,12 +153,30 @@ pub fn build_talisman_mesh() -> MeshCpu {
     }
 }
 
-/// Local AABB half-extents for `pick_shop_object`'s slab test. Matches the
-/// vertex layout above.
-pub const TALISMAN_LOCAL_HALF: [f32; 3] = [HALF_W, HALF_H, HALF_T];
+/// Local AABB half-extents for picking / projection (regular octagon × thickness).
+pub const TALISMAN_LOCAL_HALF: [f32; 3] = [RADIUS, RADIUS, HALF_T];
+
+/// World-space `Object3d::extents` matching [`TALISMAN_LOCAL_HALF`].
+pub fn talisman_object_extents(xy_extent: f32) -> [f32; 3] {
+    let thickness = xy_extent * (HALF_T * 2.0) / (RADIUS * 2.0);
+    [xy_extent, xy_extent, thickness]
+}
 
 /// Per-talisman material parameters. All tablets use [`MaterialKind::Chitin`] (holographic
 /// foil wrapper). Per-kind spec tuning and `material_params.w` (kind index) bias the rainbow.
+pub fn memorial_talisman_material(
+    kind: crate::core::memorial_talisman::MemorialTalismanKind,
+    base_color: [f32; 4],
+) -> MaterialParams {
+    let _ = kind;
+    MaterialParams {
+        kind: MaterialKind::Chitin,
+        base_color,
+        specular_strength: 0.78,
+        specular_power: 56.0,
+    }
+}
+
 pub fn talisman_material(
     kind: crate::core::talisman::TalismanKind,
     base_color: [f32; 4],

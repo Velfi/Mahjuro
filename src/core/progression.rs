@@ -77,6 +77,17 @@ pub struct PlayerProgress {
     /// Taotie, Geese, Rakuware, Stone Lantern, Monarch Butterfly). Shops, runs, and Collection consult this.
     #[serde(default)]
     pub discovered_transformation_successors: HashSet<RelicId>,
+    /// Memorial remnant to grant at the next run start (from last defeat).
+    #[serde(default)]
+    pub pending_memorial: Option<crate::core::memorial_talisman::MemorialTalismanKind>,
+    /// Journal snapshot paired with [`Self::pending_memorial`].
+    #[serde(default)]
+    pub pending_memorial_journal:
+        Option<crate::core::memorial_talisman::MemorialJournalSnapshot>,
+    /// Memorial remnants the player has carried at least once.
+    #[serde(default)]
+    pub memorials_discovered:
+        HashSet<crate::core::memorial_talisman::MemorialTalismanKind>,
     /// Per-material ladder of cleared stakes. `Spring` is implicitly unlocked
     /// for every material (never written to this map); higher stakes require
     /// a full victory on the previous tier *with that material*. So beating
@@ -172,6 +183,9 @@ pub struct RunRecord {
     /// them out.
     #[serde(default)]
     pub tutorial_run: bool,
+    /// Remnant selected when this run ended in defeat.
+    #[serde(default)]
+    pub memorial_kind: Option<crate::core::memorial_talisman::MemorialTalismanKind>,
 }
 
 impl PlayerProgress {
@@ -210,6 +224,9 @@ impl PlayerProgress {
             run_history: Vec::new(),
             unlocked_stakes: BTreeMap::new(),
             discovered_transformation_successors: HashSet::default(),
+            pending_memorial: None,
+            pending_memorial_journal: None,
+            memorials_discovered: HashSet::default(),
         }
     }
 
@@ -446,6 +463,43 @@ impl PlayerProgress {
 }
 
 impl RunRecord {
+    /// Loss reason when this record is a defeat.
+    pub fn defeat_reason(&self) -> Option<crate::game::event_bus::GameOverReason> {
+        match self.outcome {
+            RunOutcome::Victory => None,
+            RunOutcome::Defeat { reason } => Some(reason),
+        }
+    }
+
+    /// Restore terminal run fields so [`crate::scenes::GameOverScene`] and the
+    /// defeat tableau read the same stats as when the record was written.
+    pub fn hydrate_game_over_run(&self, run: &mut crate::game::run::RunState) {
+        use crate::core::rules::BlindKind;
+
+        run.run_number = self.run_number;
+        run.ante = self.final_ante;
+        run.blind = self.final_blind;
+        run.round_score = self.round_score;
+        run.target_score = self.target_score;
+        run.total_score_earned = self.total_score_earned;
+        run.gold = self.final_gold;
+        run.plays_remaining = self.plays_remaining;
+        run.discards_remaining = self.discards_remaining;
+        run.plays_max = self.plays_max;
+        run.discards_max = self.discards_max;
+        run.tiles_played = self.tiles_played;
+        run.tiles_discarded = self.tiles_discarded;
+        run.times_restocked = self.times_restocked;
+        run.best_structure_score = self.best_structure_score;
+        run.best_structure_name = self.best_structure_name.clone();
+        run.yaku_times_played = self.yaku_times_played.clone();
+        run.defeat_memorial_kind = self.memorial_kind;
+        run.boss.upcoming = self.final_boss;
+        if self.final_blind == BlindKind::Boss && self.final_boss.is_some() {
+            run.resolve_upcoming_boss();
+        }
+    }
+
     /// Capture a run's terminal state into a `RunRecord`. Called from
     /// the App layer when either the victory screen or the defeat screen
     /// is about to open — whichever branch fires first wins.
@@ -485,6 +539,7 @@ impl RunRecord {
             tile_material: run.mode.tile_material,
             stake: run.mode.stake,
             tutorial_run: false,
+            memorial_kind: run.defeat_memorial_kind,
         }
     }
 }
@@ -961,6 +1016,7 @@ mod tests {
             tile_material: TileMaterial::Bamboo,
             stake: Stake::Summer,
             tutorial_run: false,
+            memorial_kind: None,
         });
         assert!(p.unlocked_stakes.is_empty());
         p.backfill_stakes_from_history();

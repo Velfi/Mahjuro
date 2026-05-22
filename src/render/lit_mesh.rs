@@ -714,9 +714,12 @@ pub fn create_shadow_warp_bind_group(
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ShadowGlobals {
+    /// Live 1024² shadow map (moving catalog props); updated every frame.
     pub light_view_proj: [f32; 16],
     /// x = enabled (0/1), y = depth bias, z = texel size, w = room baked mode (0 dynamic, 1 baked).
     pub params: [f32; 4],
+    /// Offline `*.msh` room shadow; only read when `params.w > 0.5` (`room_glb.wgsl`).
+    pub room_baked_light_view_proj: [f32; 16],
 }
 
 /// Bind-group layout for the shadow-sampling group (group 2) shared by
