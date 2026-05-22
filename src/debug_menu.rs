@@ -82,8 +82,6 @@ pub enum DebugAction {
     RerollShop,
     /// Force-open a random tile pack celebration (free, ignores shop stock).
     OpenPack,
-    /// Force-open TPOS2 (tile pack opening sequence #2) on a random pack.
-    OpenPackV2,
     /// Spawn a burst of demo score popups streaming toward the reel —
     /// visually exercises the chips/mult/gold polychrome streaming effect
     /// without needing to play a hand. Only meaningful in the gameplay scene.
@@ -267,10 +265,6 @@ impl DebugMenuBar {
         let open_pack_item = MenuItem::new("Open Tile Pack", true, None);
         mappings.push((open_pack_item.id().clone(), DebugAction::OpenPack));
         let _ = cheats_sub.append(&open_pack_item);
-
-        let open_pack_v2_item = MenuItem::new("Open Tile Pack (TPOS2)", true, None);
-        mappings.push((open_pack_v2_item.id().clone(), DebugAction::OpenPackV2));
-        let _ = cheats_sub.append(&open_pack_v2_item);
 
         let demo_cascade_item = MenuItem::new("Demo Score Cascade", true, None);
         mappings.push((demo_cascade_item.id().clone(), DebugAction::DemoCascade));

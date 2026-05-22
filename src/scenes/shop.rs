@@ -5,7 +5,7 @@
 mod actions;
 mod draw;
 mod layout;
-pub(crate) mod pack_celebration_v2;
+pub(crate) mod pack_celebration;
 pub(crate) mod pick_ids;
 mod shared;
 mod update;
@@ -16,8 +16,7 @@ pub(crate) use self::view::render_shop_frame;
 use crate::render::draw_cmd::CameraParams;
 use crate::scenes::object3d_inspect::InspectDolly;
 
-pub(crate) use self::pack_celebration_v2::PackCelebrationV2;
-pub(crate) use self::shared::{CelebPhase, PackCelebration};
+pub(crate) use self::pack_celebration::PackCelebration;
 
 /// Perspective camera for tile-pack celebration overlays (not item-inspect orbit).
 ///
@@ -71,7 +70,6 @@ use crate::core::relic::{
     Rarity, RelicId, RelicState, all_relic_defs, apply_merchants_eye_discount, relic_shop_price,
 };
 use crate::core::talisman::TalismanKind;
-use crate::core::tile::Tile;
 use crate::core::zodiac::ZodiacKind;
 use crate::game::engine::{GameEngine, ShopCommand, ShopCommandData, ShopReadModel};
 use crate::render::particles::ParticleSystem;

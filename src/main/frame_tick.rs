@@ -1062,10 +1062,13 @@ impl App {
                     if let Some(scene) = Self::saved_resume_scene_for(&self.scene) {
                         self.resume_scene = scene;
                     }
+                    let gameplay_boss_blind = to_tag == SceneTag::Gameplay
+                        && self.run.blind == crate::core::rules::BlindKind::Boss;
                     apply_post_scene_transition_effects(PostSceneTransitionCtx {
                         from: from_tag,
                         to: to_tag,
                         pushed_meta_level_up,
+                        gameplay_boss_blind,
                         anim: &mut self.anim,
                         renderer: self.renderer.as_mut(),
                         input: self.input.as_mut(),

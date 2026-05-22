@@ -16,6 +16,7 @@
 //   13.0 = pearl      — pearlescent nacre, base_color tints the sheen
 //   14.0 = gold nugget — pitted metallic gold (procedural noise normals)
 //   15.0 = polychrome  — holographic thin-film rainbow
+//   21.0 = chitin      — holographic foil (talisman tablets)
 //   20.0 = emissive    — additive self-illumination (strength in specular_strength)
 //
 // All material variants share the candle/spot point-light loop from the tile
@@ -372,6 +373,56 @@ fn noise3(p: vec3<f32>) -> f32 {
     let nx01 = mix(n001, n101, u.x);
     let nx11 = mix(n011, n111, u.x);
     return mix(mix(nx00, nx10, u.y), mix(nx01, nx11, u.y), u.z);
+}
+
+// Themed cartoon holo: interference rainbow anchored to the talisman accent colour.
+fn themed_holo(theta: f32, accent: vec3<f32>) -> vec3<f32> {
+    let phase = theta * 1.12;
+    let holo = vec3<f32>(
+        0.5 + 0.5 * cos(phase),
+        0.5 + 0.5 * cos(phase + 2.094395102),
+        0.5 + 0.5 * cos(phase + 4.188790205),
+    );
+    var vivid = (holo - vec3<f32>(0.5)) * 1.35 + vec3<f32>(0.5);
+    vivid = vivid * 1.05 + vec3<f32>(0.05, 0.04, 0.06);
+    let theme_a = accent + vec3<f32>(0.10, 0.08, 0.08);
+    let theme_b = vec3<f32>(
+        accent.g * 0.55 + accent.r * 0.35 + 0.12,
+        accent.b * 0.50 + accent.g * 0.30 + 0.10,
+        accent.r * 0.45 + accent.b * 0.40 + 0.12,
+    );
+    let themed = mix(theme_a, theme_b, 0.5 + 0.5 * cos(phase * 0.65));
+    return clamp(mix(themed, vivid, 0.42), vec3<f32>(0.0), vec3<f32>(1.35));
+}
+
+// Holo phase driven by perturbed surface normal (heightmap carving) + view/light.
+// `on_rim` uses a smoother phase so thin side faces don't sparkle when orbiting.
+fn talisman_holo_phase(
+    n: vec3<f32>,
+    view_dir: vec3<f32>,
+    half_vec: vec3<f32>,
+    light_dir: vec3<f32>,
+    kind_idx: f32,
+    on_rim: bool,
+) -> f32 {
+    let ndv = max(dot(n, view_dir), 0.0);
+    let nh = max(dot(n, half_vec), 0.0);
+    let carve = dot(n, vec3<f32>(5.8, 4.2, 6.8)) * select(8.5, 3.0, on_rim)
+        + select((n.x * n.y + n.z * n.z - 0.25) * 14.0, 0.0, on_rim);
+    let view_sweep = ndv * select(7.5, 4.0, on_rim)
+        + select(dot(view_dir, n) * 5.0, 0.0, on_rim);
+    let film = dot(n, half_vec) * select(9.0, 3.5, on_rim)
+        + nh * select(4.0, 1.2, on_rim);
+    let light = dot(n, light_dir) * select(4.5, 1.8, on_rim);
+    return carve + view_sweep + film + light + kind_idx * 0.35;
+}
+
+fn talisman_holo_phase_view(n: vec3<f32>, view_dir: vec3<f32>, kind_idx: f32, on_rim: bool) -> f32 {
+    let ndv = max(dot(n, view_dir), 0.0);
+    let carve = dot(n, vec3<f32>(5.8, 4.2, 6.8)) * select(8.5, 3.0, on_rim)
+        + select((n.x * n.y + n.z * n.z - 0.25) * 14.0, 0.0, on_rim);
+    let view_sweep = ndv * select(8.0, 4.5, on_rim);
+    return carve + view_sweep + kind_idx * 0.45;
 }
 
 // 4-octave fractal value noise.
@@ -770,15 +821,16 @@ fn fs_main(
     // Keep these in sync with MaterialKind in lit_mesh.rs.
     //   0 = Plain, 1 = Wax, 2 = Wick, 3 = LacqueredWood,
     //   4 = LacqueredWoodFlat, 5 = Metal, 6 = Water,
-    //   8 = Foil, 9 = Glass, 10 = Enamel,
+    //   7 = PackWrap, 8 = Foil, 9 = Glass, 10 = Enamel,
     //   11 = Jade, 12 = Moonstone, 13 = Pearl, 14 = GoldNugget,
     //   15 = Polychrome, 16 = Porcelain, 17 = Brass, 18 = Leather,
-    //   19 = FeltGreen, 20 = Emissive
+    //   19 = FeltGreen, 20 = Emissive, 21 = Chitin
     let is_wax       = (kind > 0.5 && kind < 1.5);
     let is_wick      = (kind > 1.5 && kind < 2.5);
     let is_wood      = (kind > 2.5 && kind < 4.5);
     let is_metal     = (kind > 4.5 && kind < 5.5);
     let is_water_mat = (kind > 5.5 && kind < 6.5);
+    let is_pack_wrap = (kind > 6.5 && kind < 7.5);
     let is_foil      = (kind > 7.5 && kind < 8.5);
     let is_glass     = (kind > 8.5 && kind < 9.5);
     let is_enamel    = (kind > 9.5 && kind < 10.5);
@@ -792,6 +844,7 @@ fn fs_main(
     let is_leather   = (kind > 17.5 && kind < 18.5);
     let is_felt      = (kind > 18.5 && kind < 19.5);
     let is_emissive  = (kind > 19.5 && kind < 20.5);
+    let is_chitin    = (kind > 20.5 && kind < 21.5);
     let felt_lod = clamp(ssr_globals.felt.x, 0.0, 2.0);
     let phys_hdr = clamp(ssr_globals.felt.y, 0.0, 1.0);
     // Shop storeroom-only albedo / spec / ambient tweaks (see `shop_punctual.y` upload).
@@ -802,9 +855,11 @@ fn fs_main(
     // heightmap perturbation since brass fittings are smooth, not
     // engraved.
     let is_conductor = (is_metal || is_brass);
-    // Any of the five carved-tablet materials: shares the heightmap
-    // normal-perturbation pipeline and the rim/SSS treatment.
-    let is_talisman  = (is_jade || is_moonstone || is_pearl || is_goldnug || is_poly);
+    // Talisman tablets: beetle chitin + legacy gem kinds (material viewer).
+    let is_talisman  = (is_chitin || is_jade || is_moonstone || is_pearl || is_goldnug || is_poly);
+    // Chitin: flat ±Z faces get heightmap warp; thin rim quads use stable shading.
+    let chitin_flat_face = is_chitin && abs(abs(in.local_pos.z) - 0.09) < 0.02;
+    let chitin_rim_face = is_chitin && !chitin_flat_face;
 
     // Sample the albedo texture unconditionally — material kind is uniform
     // across the draw, but hoisting the sample keeps naga's uniform-control-
@@ -824,6 +879,7 @@ fn fs_main(
         && !skip_directional_shadow
         && !is_talisman
         && !is_foil
+        && !is_pack_wrap
         && !is_enamel
         && !is_felt
         && !is_wick;
@@ -912,27 +968,23 @@ fn fs_main(
             albedo = mesh.base_color.rgb * tone * pore + vec3<f32>(0.05, 0.025, 0.0) * high;
         }
     }
+    if (is_pack_wrap) {
+        // Shrink-wrapped booster: cover art on the front (-Y) face; sides
+        // and back read as a lightly tinted clear sleeve.
+        let front_face = smoothstep(-0.42, -0.48, in.local_pos.y);
+        let decal_mask = tex_sample.a * front_face;
+        let sleeve = mesh.base_color.rgb * 0.94;
+        albedo = mix(sleeve, tex_rgb, decal_mask * 0.96);
+        albedo = mix(sleeve, albedo, front_face);
+    }
+    if (is_chitin) {
+        // Theme body only here; normal-warped holo is applied after heightmap perturb.
+        albedo = mesh.base_color.rgb * 0.62 + vec3<f32>(0.10, 0.10, 0.12);
+    }
     if (is_foil) {
-        // Foil: base_color.rgb is the metallic wrapper tint; the texture is
-        // a decal whose alpha masks where the art sits on the front of the
-        // pack. Front face is local -Y (see build_pack_mesh). Back + edges
-        // stay pure foil so the pack reads as a wrapped card from every
-        // angle. Metallic foil sheen is layered on top in the per-light
-        // loop regardless — decal art still catches the iridescence.
-        // `material_params.w > 0.5` signals a talisman-shaped foil draw
-        // (different mesh axis, heightmap bound instead of decal) — skip
-        // the decal composite so the tablet reads as pure gold foil.
-        if (mesh.material_params.w > 0.5) {
-            albedo = mesh.base_color.rgb;
-        } else {
-            // Keep ~18% of the foil tint bleeding through even fully-opaque
-            // art so the metallic sheen in the lighting pass has a tinted
-            // base to modulate. Pure-white decal pixels otherwise wash out
-            // the wrapper and kill the "foil card pack" read.
-            let front_face = smoothstep(-0.42, -0.48, in.local_pos.y);
-            let decal_mask = tex_sample.a * front_face * 0.82;
-            albedo = mix(mesh.base_color.rgb, tex_rgb, decal_mask);
-        }
+        let front_face = smoothstep(-0.42, -0.48, in.local_pos.y);
+        let decal_mask = tex_sample.a * front_face * 0.82;
+        albedo = mix(mesh.base_color.rgb, tex_rgb, decal_mask);
     }
     if (is_glass) {
         // The bound texture remains visible, but we brighten and cool it so
@@ -1529,8 +1581,7 @@ fn fs_main(
     // the tablet's orientation (upright on the wall or laid flat in the
     // tray). Only the flat front/back faces are perturbed — detected via
     // local_pos.z proximity to the half-thickness (±0.09).
-    let is_foil_talisman = is_foil && mesh.material_params.w > 0.5;
-    if (is_talisman || is_foil_talisman) {
+    if (is_talisman) {
         let face_flat = abs(abs(in.local_pos.z) - 0.09);
         if (face_flat < 0.02) {
             let dim = vec2<f32>(textureDimensions(albedo_tex, 0));
@@ -1539,8 +1590,8 @@ fn fs_main(
             let h_r = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>( texel.x, 0.0), 0.0).r;
             let h_d = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>(0.0, -texel.y), 0.0).r;
             let h_u = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>(0.0,  texel.y), 0.0).r;
-            // Bump strength tuned for shallow carved relief on jade.
-            let bump = 10.0;
+            // Bump strength — chitin holo warps with relief; slightly stronger carve read.
+            let bump = select(10.0, 14.0, is_chitin);
             var dhdu = (h_r - h_l) * bump;
             var dhdv = (h_u - h_d) * bump;
             // Gold: subtle surface variation layered on top of the carved
@@ -1557,17 +1608,24 @@ fn fs_main(
                 dhdu = dhdu + (h_x2 - h_c2) * pit_bump;
                 dhdv = dhdv + (h_y2 - h_c2) * pit_bump;
             }
-            // Screen-space derivative tangent basis: works for any
-            // orientation without needing explicit tangent attributes.
-            // Per-component dpdx avoids naga emitting an unused df_dy(vec3).
-            let tangent = normalize(vec3<f32>(
-                dpdx(in.world_pos.x),
-                dpdx(in.world_pos.y),
-                dpdx(in.world_pos.z),
-            ));
-            let bitangent = normalize(cross(n, tangent));
-            let perturbed = normalize(n + tangent * dhdu + bitangent * dhdv);
-            n = perturbed;
+            if (is_chitin) {
+                // Model-space tangent frame on ±Z faces — avoids dpdx flicker when
+                // the tablet rotates (screen-space tangents spin on flat surfaces).
+                let z_face = select(-1.0, 1.0, in.local_pos.z > 0.0);
+                let n_local = normalize(vec3(-dhdu, -dhdv, z_face));
+                n = normalize((mesh.model * vec4<f32>(n_local, 0.0)).xyz);
+            } else {
+                // Screen-space derivative tangent basis: works for any
+                // orientation without needing explicit tangent attributes.
+                let tangent = normalize(vec3<f32>(
+                    dpdx(in.world_pos.x),
+                    dpdx(in.world_pos.y),
+                    dpdx(in.world_pos.z),
+                ));
+                let bitangent = normalize(cross(n, tangent));
+                let perturbed = normalize(n + tangent * dhdu + bitangent * dhdv);
+                n = perturbed;
+            }
         }
     }
     var rgb = vec3<f32>(0.0);
@@ -1635,6 +1693,10 @@ fn fs_main(
         wrap = 0.45;
         sss_strength = 0.30;
         sss_tint = vec3<f32>(0.75, 0.55, 0.95);
+    } else if (is_chitin) {
+        wrap = 0.42;
+        sss_strength = 0.28;
+        sss_tint = mix(vec3<f32>(0.88, 0.86, 0.92), mesh.base_color.rgb, 0.45);
     } else if (is_porcelain) {
         // Porcelain: soft warm wrap so the glazed ceramic reads as
         // lit-through rather than flat painted. Tint biases slightly
@@ -1702,6 +1764,9 @@ fn fs_main(
     } else if (is_poly) {
         back_scale = 0.9;
         back_tint = vec3<f32>(0.70, 0.50, 0.90);
+    } else if (is_chitin) {
+        back_scale = 0.45;
+        back_tint = mesh.base_color.rgb + vec3<f32>(0.18, 0.18, 0.20);
     }
 
     // Thickness proxy from local geometry. For wax: high near the top
@@ -1839,6 +1904,19 @@ fn fs_main(
                 let fresnel = 0.10 + 0.90 * pow(1.0 - vdh, 5.0);
                 let glass_tint = mix(vec3<f32>(0.92, 0.97, 1.0), mesh.base_color.rgb, 0.35);
                 spec_acc = spec_acc + lc * intensity * atten * s * cand_vis * fresnel * glass_tint * 1.35;
+            } else if (is_pack_wrap) {
+                // Clear plastic gloss: dielectric Fresnel, tight highlight +
+                // broad wet wrap — no streaks or rainbow bands.
+                let vdh = max(dot(view_dir, h), 0.0);
+                let ndv = max(dot(n, view_dir), 0.0);
+                let fresnel = 0.04 + 0.96 * pow(1.0 - vdh, 5.0);
+                let wrap_tint = mix(vec3<f32>(0.98, 0.99, 1.02), mesh.base_color.rgb, 0.12);
+                let pinpoint = pow(nh, max(spec_power * 0.85, 32.0)) * 1.85;
+                let wide = pow(nh, max(spec_power * 0.22, 6.0)) * 0.42;
+                let rim = 0.32 * pow(1.0 - ndv, 2.4);
+                spec_acc = spec_acc + lc * intensity * atten * cand_vis * fresnel * wrap_tint * pinpoint;
+                spec_acc = spec_acc + lc * intensity * atten * cand_vis * wide * wrap_tint;
+                spec_acc = spec_acc + lc * intensity * atten * cand_vis * rim * wrap_tint * 0.55;
             } else if (is_porcelain) {
                 // Porcelain glaze (chiclet/pillow look): a tight pinpoint
                 // highlight sits inside a broader wet-glaze lobe, then a
@@ -1948,6 +2026,8 @@ fn fs_main(
                 let retro = pow(1.0 - ndv, 4.0) * 0.55;
                 spec_acc = spec_acc + lc * intensity * atten * cand_vis
                          * retro * sheen_tint * 0.6;
+            } else if (is_chitin) {
+                // Mirror + holo bands are in the talisman block below.
             } else {
                 spec_acc = spec_acc + lc * intensity * atten * s * cand_vis;
             }
@@ -1980,7 +2060,42 @@ fn fs_main(
             // light from a wide arc, not just the mirror direction.
             let broad = max(dot(n, l_dir), 0.0);
 
-            if (is_jade) {
+            if (is_chitin) {
+                let accent = mesh.base_color.rgb;
+                let kind_idx = mesh.material_params.w;
+                let holo_phase = talisman_holo_phase(
+                    n, view_dir, h, l_dir, kind_idx, chitin_rim_face,
+                );
+                let holo_col = themed_holo(holo_phase, accent);
+                let streak_wave = 0.5 + 0.5 * cos(in.uv.y * 38.0 + kind_idx * 0.4);
+                let streak = mix(select(0.92, 1.20, chitin_rim_face), 1.45, streak_wave);
+                let f0 = mix(accent, holo_col, select(0.68, 0.52, chitin_rim_face));
+                let f_foil = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - vdh, select(4.0, 5.0, chitin_rim_face));
+                let mirror_pow = select(72.0, 22.0, chitin_rim_face);
+                let mirror_lobe = pow(nh, mirror_pow) * select(2.0, 1.0, chitin_rim_face) * streak;
+                spec_acc = spec_acc + lc * intensity * atten * cand_vis * mirror_lobe * f_foil;
+                let broad_lobe = pow(nh, select(10.0, 6.0, chitin_rim_face)) * select(0.72, 0.38, chitin_rim_face) * streak;
+                spec_acc = spec_acc + lc * intensity * atten * cand_vis * broad_lobe * holo_col;
+
+                let band_phase = holo_phase + nh * select(2.5, 0.8, chitin_rim_face);
+                let band_tint = themed_holo(band_phase, accent);
+                let band_gain = (select(0.28, 0.18, chitin_rim_face)
+                    + select(0.58, 0.30, chitin_rim_face) * pow(1.0 - ndv, select(1.6, 2.4, chitin_rim_face)))
+                    * streak;
+                let band_lobe = pow(nh, select(12.0, 6.0, chitin_rim_face)) * select(1.05, 0.50, chitin_rim_face);
+                sheen_acc = sheen_acc + lc * intensity * atten * cand_vis
+                    * band_lobe * band_gain * band_tint;
+
+                let fresnel = select(0.14 + 0.52 * pow(1.0 - ndv, 1.8), 0.10 + 0.30 * pow(1.0 - ndv, 2.6), chitin_rim_face);
+                let lobe = pow(nh, select(8.0, 5.0, chitin_rim_face)) * select(0.82, 0.32, chitin_rim_face)
+                    + broad * select(0.24, 0.10, chitin_rim_face);
+                sheen_acc = sheen_acc + lc * intensity * atten * cand_vis
+                    * lobe * fresnel * themed_holo(holo_phase + 1.8, accent);
+                if (!chitin_rim_face) {
+                    sheen_acc = sheen_acc + lc * intensity * atten * cand_vis
+                        * broad * 0.18 * themed_holo(holo_phase - 0.9, accent);
+                }
+            } else if (is_jade) {
                 // Jade: waxy vitreous luster — a broad green-tinted sheen
                 // that strengthens at grazing angles.
                 let fresnel = 0.08 + 0.30 * pow(1.0 - ndv, 2.5);
@@ -2224,6 +2339,9 @@ fn fs_main(
         // otherwise the rails go near-black in overhead museum light.
         diffuse_scale = 0.22;
     }
+    if (is_pack_wrap) {
+        diffuse_scale = 0.78;
+    }
     if (is_foil) {
         // Semi-metallic foil: more diffuse than a pure conductor (the
         // printed art needs to read) but less than a dielectric. The
@@ -2248,6 +2366,9 @@ fn fs_main(
         // body warm and luminous rather than dark.
         diffuse_scale = 0.18;
     }
+    if (is_chitin) {
+        diffuse_scale = 0.44;
+    }
     // Gold-painted fragments inside carved decals are conductors: almost
     // all energy goes into the tinted Fresnel spec lobe, very little
     // diffuse. Lerp the diffuse scale down so gold reads as metallic.
@@ -2258,7 +2379,7 @@ fn fs_main(
     if (shop_vitrine_d && is_foil) {
         diffuse_scale = diffuse_scale * 0.58;
     }
-    if (shop_vitrine_d && is_talisman) {
+    if (shop_vitrine_d && is_talisman && !is_chitin) {
         diffuse_scale = diffuse_scale * 0.62;
     }
     if (is_wood) {
@@ -2285,6 +2406,9 @@ fn fs_main(
     if (shop_vitrine && is_foil) {
         spec_acc = spec_acc * 0.22;
         sheen_acc = sheen_acc * 0.22;
+    } else if (shop_vitrine && is_chitin) {
+        spec_acc = spec_acc * 0.68;
+        sheen_acc = sheen_acc * 0.80;
     } else if (shop_vitrine && is_talisman) {
         spec_acc = spec_acc * 0.26;
         sheen_acc = sheen_acc * 0.26;
@@ -2295,7 +2419,23 @@ fn fs_main(
     // highlight that depends on perfect light alignment.
     if (is_talisman) {
         let edge = 1.0 - ndv_view;
-        if (is_jade) {
+        if (is_chitin) {
+            let accent = mesh.base_color.rgb;
+            let kind_idx = mesh.material_params.w;
+            let phase = talisman_holo_phase_view(n, view_dir, kind_idx, chitin_rim_face);
+            let holo = themed_holo(phase, accent);
+            let rim = pow(edge, select(1.4, 2.2, chitin_rim_face)) * select(0.34, 0.20, chitin_rim_face);
+            albedo = mix(albedo, holo * 0.82, rim);
+            let face_mix = select(
+                0.30 * (1.0 - pow(ndv_view, 1.0)),
+                0.12 * (1.0 - pow(ndv_view, 1.4)),
+                chitin_rim_face,
+            );
+            albedo = mix(albedo, themed_holo(phase + 2.1, accent) * 0.85, face_mix);
+            if (!chitin_rim_face) {
+                albedo = mix(albedo, accent * 0.45 + holo * 0.55, 0.18);
+            }
+        } else if (is_jade) {
             // Jade: edges brighten toward a cooler, lighter green.
             let rim = pow(edge, 2.0) * 0.25;
             albedo = mix(albedo, vec3<f32>(0.6, 1.0, 0.75), rim);
@@ -2344,7 +2484,7 @@ fn fs_main(
             );
             albedo = mix(albedo, holo, rim);
         }
-        if (shop_vitrine) {
+        if (shop_vitrine && !is_chitin) {
             albedo = albedo * 0.86;
         }
     }
@@ -2356,11 +2496,13 @@ fn fs_main(
         albedo = mix(albedo, albedo * 1.10 + vec3<f32>(0.04, 0.04, 0.05), glaze);
     }
 
-    // Foil Fresnel edge tint: strong rainbow color-shift at grazing
-    // angles so the wrapper catches iridescence even when no direct
-    // light hits the mirror lobe. Combined with the lifted-tint albedo
-    // and the per-light swept band, this is what reads as "glossy
-    // holographic plastic" rather than a flat card.
+    if (is_pack_wrap) {
+        let edge = 1.0 - ndv_view;
+        let rim = pow(edge, 2.1) * 0.26;
+        let clear = mix(vec3<f32>(0.94, 0.97, 1.0), mesh.base_color.rgb, 0.18);
+        albedo = mix(albedo, clear, rim);
+    }
+    // Foil Fresnel edge tint (talisman / legacy decal path only).
     if (is_foil && mesh.material_params.w <= 0.5) {
         let edge = 1.0 - ndv_view;
         // Tint boost that runs from 0 dead-on to ~0.55 at silhouette.

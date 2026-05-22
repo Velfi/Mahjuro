@@ -1443,19 +1443,19 @@ pub(super) fn build_action_row_and_journal(
                 // the hover lift envelope matches the old bowl.
                 let river_len = diam * 1.9;
                 let river_width = diam * 1.1;
-                let pos = {
-                    let t = action_anchor.to_draw_cmd_triple();
-                    let bowl = &scene.positions.bowl;
-                    [
-                        t[0] + bowl.nx * layout.window_w,
-                        t[1] + bowl.ny * layout.window_h,
-                        t[2] + layout.mm(bowl.lift_mm),
-                    ]
-                };
+                let bowl_anchor = crate::ui::placement::PlacementAnchor::new(
+                    {
+                        let t = action_anchor.to_draw_cmd_triple();
+                        [t[0], t[1], t[2]]
+                    },
+                    crate::render::table_transform::rot_fixed_axes_deg(90.0, 0.0, 0.0),
+                    &scene.positions.bowl,
+                    layout,
+                );
                 discard_bowl_placement = Some(Object3d {
-                    pos,
+                    pos: bowl_anchor.pos,
                     extents: [river_len, diam, river_width],
-                    rotation: [std::f32::consts::FRAC_PI_2, 0.0, 0.0],
+                    rotation: bowl_anchor.object3d_rotation(),
                     color: [1.0, 1.0, 1.0, 1.0],
                     kind: Object3dKind::Bowl,
                     hover_target: target,

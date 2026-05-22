@@ -40,8 +40,14 @@
 //! [`KHR_lights_punctual`](https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_lights_punctual/README.md).
 //!
 //! **Validation:** Compare punctual brightness and cones in a reference viewer (e.g.
-//! [Don McCurdy’s glTF Viewer](https://gltf-viewer.donmccurdy.com/)) against this build; differences
-//! vs the Blender viewport are usually exposure or scene scale, not JSON alone.
+//! [Don McCurdy’s glTF Viewer](https://gltf-viewer.donmccurdy.com/)) against this build.
+//!
+//! **Blender parity:** The viewport almost always adds **World** lighting (sky/ground) and often
+//! EEVEE indirect; glTF export does not include World. Runtime approximates that with hemispheric
+//! ambient in `room_glb.wgsl` ([`SHOP_ENV_DIELECTRIC_AMBIENT_MIN`]) plus emissive-probe GI from
+//! candles/lanterns. In Blender before export: glTF *Data → Lighting* units match Khronos, disable
+//! viewport-only overlays, and compare in Don McCurdy’s viewer at exposure **−9** (same as
+//! [`ROOM_GLB_LINEAR_EXPOSURE_BASE`]). Warm candle/lantern tints are intentional game grading.
 //!
 //! ## Scale & framing
 //! Environment vertices are **centered** using the axis-aligned bounds of all shop mesh geometry:
@@ -183,8 +189,9 @@ pub fn release_shop_environment_cpu_sources_after_gpu_upload() {
 pub const SHOP_ENV_HEIGHT_SCALE: f32 = 1.0;
 
 /// Multiplies glTF punctual **intensity** before upload (document-space inverse-square; see
-/// `decal_atlas_uv.y` / `SsrGlobals.shop_punctual.x` (inverse doc scale for attenuation).
-pub const SHOP_GLTF_LIGHT_INTENSITY_SCALE: f32 = 0.6;
+/// `decal_atlas_uv.y` / `SsrGlobals.shop_punctual.x`). `1.0` matches authored glTF / Blender
+/// export; lower only if punctuals clip after ACES (debug **glTF light intensity** slider).
+pub const SHOP_GLTF_LIGHT_INTENSITY_SCALE: f32 = 1.0;
 
 /// Shared linear HDR gain for embedded GLB rooms (shop, hallway, archive, main menu): `2^-9` ≈
 /// Don McCurdy glTF viewer exposure **−9** (EV on linear HDR). Multiplied with
@@ -319,8 +326,14 @@ pub const SHOP_INSPECT_ENV_VS_LIT_AMBIENT: f32 = 0.45;
 /// The storeroom BRDF stacks different radiance than `lit_mesh`; without this boost the room reads black.
 pub const SHOP_INSPECT_STOREROOM_GLB_TILE_SEED_MUL: f32 = 12.0;
 
-/// Hemispheric fill in `room_glb.wgsl` (`decal_atlas_uv.x`).
+/// Hemispheric fill in `room_glb.wgsl` (`decal_atlas_uv.x`). Authoring default is 0
+/// (punctual-forward interior); [`SHOP_ENV_DIELECTRIC_AMBIENT_MIN`] is still applied so
+/// low-roughness dielectrics (porcelain trays) do not go black on faces away from lights.
 pub const SHOP_ENV_AMBIENT_SCALE: f32 = 0.0;
+
+/// Minimum `decal_atlas_uv.x` for shop storeroom `room_glb.wgsl` draws — scales the
+/// hemispheric sky/ground fill that stands in for Blender's World node (see `room_world_hemisphere_ambient`).
+pub const SHOP_ENV_DIELECTRIC_AMBIENT_MIN: f32 = 0.24;
 
 /// Lower bound for `hdr_tonemap.z` on candle-key **table** scenes (`gameplay`, `tutorial`,
 /// `pick_blind`, `collection`). Shop keeps authored ambient only. Tiles and `lit_mesh` add

@@ -39,11 +39,16 @@ These cues are considered final. They define the identity that everything else m
 
 | Role | Sample | Used for |
 |---|---|---|
-| BGM — Main Menu / Collection | `audio/music/main_menu.mp3` | `MusicId::MainMenu` |
-| BGM — Gameplay | `audio/music/gameplay.mp3` | `MusicId::Gameplay` |
-| BGM — Shop / Pick Blind | `audio/music/shop.mp3` | `MusicId::Shop` |
-| Blind / boss win stinger | `audio/music/blind_win.mp3`, `boss_win.mp3` | `MusicId::BlindWin`, `BossWin` |
-| Blind / boss loss stinger | `audio/music/blind_loss.mp3`, `boss_loss.mp3` | `MusicId::BlindLoss`, `BossLoss` |
+| BGM — Main Menu / Collection | `audio/music/main_menu.ogg` | `MusicId::MainMenu` |
+| BGM — Gameplay (regular) | `audio/music/gameplay_intro.ogg` → `gameplay.ogg` | `MusicId::GameplayIntro` → `Gameplay` |
+| BGM — Gameplay (boss) | `audio/music/gameplay_intense_intro.ogg` → `gameplay_intense.ogg` | `MusicId::GameplayIntenseIntro` → `GameplayIntense` |
+| BGM — Shop / Pick Blind / Hallway | `audio/music/shop.ogg` | `MusicId::Shop` |
+| Blind / boss win stinger | `audio/music/blind_win.ogg`, `boss_win.ogg` | `MusicId::BlindWin`, `BossWin` |
+| Blind / boss loss stinger | `audio/music/blind_loss.ogg`, `boss_loss.ogg` | `MusicId::BlindLoss`, `BossLoss` |
+| Pack open | `audio/pack_open.ogg` | `SfxId::PackOpen` |
+| Zodiac acquire | `audio/zodiac_reveal.ogg` | `SfxId::ZodiacReveal` |
+| Talisman trigger | `audio/talisman_used.ogg` | `SfxId::TalismanUsed` |
+| Cash in | `audio/cash_in.ogg` | `SfxId::CashIn` |
 | Tile discard sweep | `audio/freesound_community-tile-shuffle-99834.ogg` | `SfxId::TileDiscard` |
 | Tile click (mouse pick) | `audio/kenney_interface-sounds/Audio/drop_003.ogg` | `SfxId::TileClick` |
 | Per-relic activation stingers | `audio/relics/<slug>.ogg` (82 today) | `play_relic_trigger(rid)` |
@@ -82,14 +87,13 @@ This is the only sustained musical sequence in the moment-to-moment loop. It is 
 - **`CashIn`** — see §2.2.
 - **`Sell`** — today: `confirmation_002.ogg`. Replace with **a single coin drop *into* a wooden box** (i.e. coin sample + soft wooden enclosure tail) so it is audibly distinguishable from `CoinDrop`. Sell is the player *receiving* gold; the timbre should reward.
 - **`PackBuy`** — wallet → counter. Today: `confirmation_003.ogg`. Replace with a **paper-wrapped slap on the counter** — one short hand-flesh-on-wood thump with a paper-rustle layer.
-- **`PackOpen`** — paper tear. Today: `open_003.ogg`. Replace with a **two-stage tear**: ~80 ms quick rip + a 200 ms papery unfold tail. Single source recording, not synthesized.
+- **`PackOpen`** — paper tear. Shipped: `pack_open.ogg`.
 - **`PackTileReveal`** — per tile in the pack. Today: `pluck_001.ogg`. Replace with a **dry, soft tile flip** — a smaller cousin of `TilePlace`, half its body, more click than thump. This is recurring (up to 5 in a row) and must not fatigue.
-- **`ZodiacReveal`** — close-up reveal of a zodiac ribbon. Today: `glass_006.ogg`. Replace with a **silk unfurl** + a soft chime tail keyed to the cascade's tonality.
+- **`ZodiacReveal`** — close-up reveal of a zodiac ribbon. Shipped: `zodiac_reveal.ogg`.
 - **`ZodiacLevelUp`** — yaku permanently leveled. Today: `zodiac_jingle.ogg`. Keep — it is one of the few places the game gets to play a true jingle, and the current cue earns it.
 - **`StarShimmer`** — celebration scene transition. Today: `glass_005.ogg`. Acceptable; revisit only if it clashes with the cascade hand-off.
-- **`TalismanPurchased` / `TalismanUsed`** *(no asset yet)*. Both share the talisman-as-paper-charm framing (the visual is an `ofuda`). Design:
-  - `TalismanPurchased` — a single short brush-stroke on paper + a soft thump as the talisman lands on the dish. Sibling to `PackBuy` but lighter and drier.
-  - `TalismanUsed` — a quick paper crumple/burn whoosh — the charm is being expended. ~180 ms total. Must read as expiration, not as a new item appearing.
+- **`TalismanPurchased`** *(no asset yet)* — brush-stroke on paper + soft landing thump.
+- **`TalismanUsed`** — shipped: `talisman_used.ogg`.
 
 ### 2.5 Round / blind / run lifecycle
 
@@ -201,7 +205,7 @@ Loader is `decode_rodio` in [src/audio.rs](../src/audio.rs); anything outside th
 - `assets/audio/<role>.ogg` for flat one-off cues (`Snap.ogg`, `cash_in.ogg`, `levelup.ogg`).
 - `assets/audio/yaku_<kind>.ogg` for yaku stingers; `<kind>` is the `YakuKind` variant in `snake_case` (`yaku_kokushi_musou.ogg` is the missing one).
 - `assets/audio/relics/<slug>.ogg` for per-relic stingers; `<slug>` matches `RelicId::asset_filename()` minus `.png`.
-- `assets/audio/music/<track>.mp3` for music loops and stingers.
+- `assets/audio/music/<track>.ogg` for music loops, intros, and stingers.
 - `assets/audio/<role>_<variant>.ogg` for future randomized variants (e.g. `Snap_a.ogg`, `Snap_b.ogg`). Variant selection is **not yet implemented**; adding it is the loader change described in §2.2.
 
 `PascalCase` vs `snake_case` is inconsistent in the current tree (`Snap.ogg`, `MixingBell.ogg` are imports). New files use `snake_case`. The loader literally references whatever string `SfxId::filename()` returns, so renaming an existing file also requires editing `src/audio.rs`.

@@ -1,22 +1,30 @@
-//! Tile-pack purchase flow on the showcase overlay.
+//! Tile-pack opening celebration on the showcase overlay.
+
+use std::f32::consts::PI;
+use std::time::{Duration, Instant};
 
 use glam::{Mat4, Vec3};
 
-use crate::core::tile_pack::PACK_TILE_ID_BASE;
-use crate::core::tile_pack::TilePackKind;
+use crate::core::tile_pack::{PACK_TILE_ID_BASE, TilePackKind};
 use crate::persistence::TilePreset;
 use crate::render::draw_cmd::{
     CameraParams, DrawCmd, Object3d, Object3dKind, ShowcaseRenderHints, ShowcaseTilePlacement,
     UiFrame,
 };
+use crate::render::pack_palette;
 use crate::render::showcase_tile_layout::{
     PackRevealRowLayoutParams, compute_pack_reveal_row_layout,
 };
 use crate::render::theme::color;
-use crate::render::wgpu_renderer::{PointLight, SpotLight};
+use crate::render::wgpu_renderer::{
+    GpuInstance, GradientQuadInstance, PointLight, SpotLight, TextAlign, TextLabel,
+};
 use crate::render::world_space::pixel_to_world;
-use crate::scenes::celebration_overlay;
-use crate::scenes::shop::{CelebPhase, PackCelebration, shop_celebration_camera};
+use crate::scenes::celebration_overlay::{
+    self, CelebrationOverlayScratch, CelebrationShowcaseIntroGate, ShootingStarCelebrationIntro,
+};
+use crate::scenes::shop::pack_celebration::{PackCelebration, PackCelebPhase};
+use crate::scenes::shop::shop_celebration_camera;
 use crate::ui::input::UiAction;
 use crate::ui::layout::LayoutResult;
 use crate::ui::placement::PlacementAnchor;
@@ -24,14 +32,21 @@ use crate::ui::scene_layout::ShopPositions;
 
 use super::super::{BackgroundId, ButtonDef, DrawCtx, OverlayRequest, SceneTransition, UpdateCtx};
 
-/// Pack mesh height vs window height (must match shop shelf “hero” scale).
-pub(crate) const PACK_CELEB_BOX_H_FRAC: f32 = 0.56;
-/// Pack anchor Y as a fraction of window height (title band ~0.18h).
-const PACK_CELEB_ANCHOR_Y_FRAC: f32 = 0.52;
+const UNSEAL_DOLLY_PULL: f32 = 0.04;
+/// Pack-tint fullscreen flash during the shooting-star wipe (fraction of wipe progress).
+const ARRIVAL_BG_FLASH_START: f32 = 0.30;
+const ARRIVAL_BG_FLASH_END: f32 = 0.46;
+
+/// Pack mesh height vs window height (celebration hero framing).
+pub(crate) const PACK_CELEB_BOX_H_FRAC: f32 = 0.62;
+/// Center Y for the hero pack — clears the title band at ~0.18h without sitting too low.
+const PACK_CELEB_ANCHOR_Y_FRAC: f32 = 0.57;
 
 pub struct TilePackPresenter {
     pub celebration: PackCelebration,
     pub positions: ShopPositions,
+    intro_gate: CelebrationShowcaseIntroGate,
+    arrival_done_at: Option<Instant>,
 }
 
 impl TilePackPresenter {
@@ -39,6 +54,10 @@ impl TilePackPresenter {
         Self {
             celebration,
             positions: ShopPositions::default(),
+            intro_gate: CelebrationShowcaseIntroGate::new(
+                ShootingStarCelebrationIntro::new_pack_opening(),
+            ),
+            arrival_done_at: None,
         }
     }
 
@@ -56,15 +75,28 @@ impl TilePackPresenter {
 
     pub fn render_hints() -> ShowcaseRenderHints {
         ShowcaseRenderHints {
-            // Perspective shop camera: map screen `(px, py)` through the ray → `plane_z`
-            // (`anchor.pos[2]`, usually 0). `pixel_to_world` is not the inverse of this
-            // projection and pushes celebration meshes out of the frustum.
             object3d_use_camera_ray_plane_z: true,
             showcase_tiles_use_camera_ray_plane_z: true,
             tile_pack_celebration_tonemap: true,
             shop_tonemap_and_lit_mesh_context: false,
             collection_tonemap_context: false,
         }
+    }
+
+    fn intro_content_alpha(&self, ctx: &DrawCtx<'_>) -> f32 {
+        self.intro_gate.intro.content_alpha_for(&ctx.effect_layers)
+    }
+
+    fn camera_with_dolly(&self, w: f32, h: f32, env_h: f32, pull: f32) -> CameraParams {
+        let mut cam = shop_celebration_camera(w, h, env_h);
+        if pull <= 0.0 {
+            return cam;
+        }
+        let eye = Vec3::from_array(cam.eye);
+        let target = Vec3::from_array(cam.target);
+        let delta = (eye - target) * pull;
+        cam.eye = (eye + delta).to_array();
+        cam
     }
 
     fn push_celebration_draw(
@@ -75,24 +107,80 @@ impl TilePackPresenter {
         h: f32,
         cam: &CameraParams,
         tile_preset: TilePreset,
+        dimmer_alpha: f32,
+        content_alpha: f32,
+        ctx: &DrawCtx<'_>,
     ) {
         let celeb = &self.celebration;
+        let palette = pack_palette::for_kind(celeb.pack_kind);
         let n = celeb.tiles.len();
-        celebration_overlay::CelebrationOverlayScratch::new(w, h)
-            .push_dimmer_then_depth_reset(frame);
-        frame.text(celebration_overlay::label_pack_title(
-            h,
-            w,
-            celeb.pack_name.to_string(),
-        ));
+
+        let after_dimmer =
+            CelebrationOverlayScratch::new(w, h).push_dimmer_scaled(frame, dimmer_alpha);
+        after_dimmer
+            .push_starfield_if(frame, ctx.effect_layers.starfield)
+            .push_depth_reset_for_celebration_mesh(frame);
+
+        if matches!(
+            celeb.phase,
+            PackCelebPhase::Anticipation | PackCelebPhase::Unseal | PackCelebPhase::Deal
+        ) {
+            let mut vignette = Vec::new();
+            push_edge_vignette(&mut vignette, w, h, content_alpha * 0.85);
+            frame.gradient_quads(vignette);
+        }
+
+        if matches!(celeb.phase, PackCelebPhase::Arrival) {
+            let wipe_t = self.intro_gate.intro.transition_progress();
+            if wipe_t > ARRIVAL_BG_FLASH_START {
+                let bg_a = content_alpha
+                    * smoothstep(ARRIVAL_BG_FLASH_START, ARRIVAL_BG_FLASH_END, wipe_t)
+                    * 0.55;
+                let mut bg = palette.bg;
+                bg[3] *= bg_a;
+                frame.quad(GpuInstance {
+                    rect: [0.0, 0.0, w, h],
+                    color: bg,
+                    user: 0,
+                });
+            }
+        }
+
+        let title_alpha = match celeb.phase {
+            PackCelebPhase::Arrival => {
+                content_alpha * smoothstep(0.5, 0.85, self.intro_gate.intro.transition_progress())
+            }
+            _ => content_alpha,
+        };
+        let push_pack_title = |frame: &mut UiFrame| {
+            if title_alpha <= 0.01 {
+                return;
+            }
+            let title_font =
+                crate::render::theme::typography::size(crate::render::theme::typography::H24, h);
+            frame.text(TextLabel {
+                text: celeb.pack_name.to_string(),
+                rect: [0.0, h * 0.18, w, title_font * 1.5],
+                font_px: Some(title_font),
+                color: [
+                    color::CHAMPAGNE[0],
+                    color::CHAMPAGNE[1],
+                    color::CHAMPAGNE[2],
+                    title_alpha,
+                ],
+                align: TextAlign::Center,
+                ..Default::default()
+            });
+        };
 
         let box_h = h * PACK_CELEB_BOX_H_FRAC;
-        let pack_closeup = pack_closeup_anchor(screen, &self.positions, box_h, Mat4::IDENTITY);
-        let pack_py_base = pack_closeup.pos[1];
 
         match celeb.phase {
-            CelebPhase::Closeup => {
-                let t = celeb.started_at.elapsed().as_secs_f32();
+            PackCelebPhase::Arrival => {
+                push_pack_title(frame);
+            }
+            PackCelebPhase::Anticipation => {
+                let t = celeb.elapsed();
                 let bob_x = (t * 0.7).sin() * h * 0.008;
                 let bob_y = (t * 0.5).sin() * h * 0.006;
                 let bob_rx = (t * 0.6).sin() * 2.5;
@@ -100,57 +188,99 @@ impl TilePackPresenter {
                 let bob_rot = Mat4::from_rotation_y(bob_ry.to_radians())
                     * Mat4::from_rotation_x(bob_rx.to_radians());
                 let anchor = pack_closeup_anchor(screen, &self.positions, box_h, bob_rot);
-                let extents = pack_closeup_world_extents(
+                let cx = anchor.pos[0] + bob_x;
+                let cy = anchor.pos[1] + bob_y;
+
+                let mut gradients = Vec::new();
+                let mut squircles = Vec::new();
+                push_pack_brand_wash(&mut gradients, w, h, palette.bg, content_alpha * 0.14);
+                let seal_pulse = 0.5 + 0.5 * (t * 2.0).sin();
+                push_pack_aura(
+                    &mut gradients,
+                    &mut squircles,
+                    cx,
+                    cy,
+                    box_h,
+                    palette,
+                    content_alpha,
+                    seal_pulse,
+                );
+                flush_backdrop_quads(frame, gradients, squircles);
+
+                let foil = celeb.pack_kind.foil_tint();
+                push_pack_object3d(
+                    frame,
                     w,
                     h,
                     cam,
-                    anchor.pos[0] + bob_x,
-                    anchor.pos[1] + bob_y,
-                    anchor.pos[2],
+                    &anchor,
                     box_h,
+                    celeb.pack_kind,
+                    foil,
+                    Some((bob_x, bob_y)),
                 );
-                frame.object3d_batch(vec![Object3d {
-                    pos: [anchor.pos[0] + bob_x, anchor.pos[1] + bob_y, anchor.pos[2]],
-                    extents,
-                    rotation: anchor.object3d_rotation(),
-                    color: celeb.pack_kind.foil_tint(),
-                    kind: Object3dKind::Pack {
-                        kind: celeb.pack_kind,
-                        pick_id: None,
-                    },
-                    hover_target: 0.0,
-                    anim_id: 0,
-                }]);
+                push_pack_title(frame);
 
-                frame.text(celebration_overlay::label_confirm_to_open(h, w, t));
+                frame.text(celebration_overlay::label_confirm_to_unseal(
+                    h,
+                    w,
+                    t,
+                    content_alpha,
+                ));
             }
-            CelebPhase::Reveal => {
-                let pack_extents = pack_closeup_world_extents(
-                    w,
-                    h,
-                    cam,
-                    pack_closeup.pos[0],
-                    pack_closeup.pos[1],
-                    pack_closeup.pos[2],
-                    box_h,
-                );
+            PackCelebPhase::Unseal => {
+                let u = celeb.unseal_t();
+                let snap = ease_out_cubic((u / 0.2).min(1.0));
+                let screen_h = box_h * (1.0 + 0.06 * snap);
+                let tilt_x = 8.0_f32.to_radians() * smoothstep(0.15, 0.35, u);
+                let bob_rot = Mat4::from_rotation_x(tilt_x);
+                let anchor = pack_closeup_anchor(screen, &self.positions, box_h, bob_rot);
 
-                // Keep the pack box visible while tiles fly out of it.
-                // In Reveal, `started_at` is reset, so we use a smooth settle or just let it rest.
-                // We'll let it rest at the base closeup position without the bobbing
-                // so it looks like it settled down to open.
-                frame.object3d_batch(vec![Object3d {
-                    pos: pack_closeup.pos,
-                    extents: pack_extents,
-                    rotation: pack_closeup.object3d_rotation(),
-                    color: celeb.pack_kind.foil_tint(),
-                    kind: Object3dKind::Pack {
-                        kind: celeb.pack_kind,
-                        pick_id: None,
-                    },
-                    hover_target: 0.0,
-                    anim_id: 0,
-                }]);
+                let flash = smoothstep(0.25, 0.4, u) * (1.0 - smoothstep(0.45, 0.55, u));
+                let mut foil = celeb.pack_kind.foil_tint();
+                if flash > 0.0 {
+                    foil = [
+                        foil[0] + (1.4 - foil[0]) * flash,
+                        foil[1] + (1.4 - foil[1]) * flash,
+                        foil[2] + (1.4 - foil[2]) * flash,
+                        foil[3],
+                    ];
+                }
+                let pack_alpha = content_alpha * (1.0 - smoothstep(0.4, 0.55, u));
+                let ghost_scale = 1.0 - 0.15 * smoothstep(0.4, 0.55, u);
+                if pack_alpha > 0.02 {
+                    push_pack_object3d(
+                        frame,
+                        w,
+                        h,
+                        cam,
+                        &anchor,
+                        screen_h * ghost_scale,
+                        celeb.pack_kind,
+                        foil,
+                        None,
+                    );
+                }
+                push_pack_title(frame);
+
+                let mut gradients = Vec::new();
+                push_unseal_burst(
+                    &mut gradients,
+                    anchor.pos[0],
+                    anchor.pos[1],
+                    h.min(w),
+                    palette,
+                    content_alpha,
+                    u,
+                );
+                flush_backdrop_quads(frame, gradients, Vec::new());
+            }
+            PackCelebPhase::Deal => {
+                push_pack_title(frame);
+
+                let pack_closeup =
+                    pack_closeup_anchor(screen, &self.positions, box_h, Mat4::IDENTITY);
+                let pack_py_base = pack_closeup.pos[1];
 
                 let reveal_anchor = PlacementAnchor::new(
                     [w * 0.5, h * 0.5, 0.0],
@@ -172,34 +302,65 @@ impl TilePackPresenter {
                     ny: self.positions.celeb_pack_reveal.ny,
                     rotation_xyz_rad: rotation,
                 });
+
                 let src_px = pack_closeup.pos[0];
                 let src_py = pack_py_base;
-                // Spawn tiles from the upper half of the enlarged pack so the arc reads as “out of the box”.
                 let src_lift = row_lift + h * 0.15 + box_h * 0.42;
+
+                let fan_half = PackCelebration::FAN_HALF_DEG.to_radians();
+                let deal_elapsed = celeb.elapsed();
+                let last_land_t = if n > 0 {
+                    (n - 1) as f32 * PackCelebration::DEAL_STAGGER
+                        + PackCelebration::DEAL_TILE_FLY_SECS
+                } else {
+                    0.0
+                };
+                let last_glow = deal_elapsed >= last_land_t
+                    && deal_elapsed < last_land_t + PackCelebration::LAST_TILE_GLOW_SECS;
+
+                let total_w = n as f32 * row.silhouette_w + (n.saturating_sub(1)) as f32 * row.gap_px;
+                let row_cx = row.row_x0 + total_w * 0.5;
+                let deal_t = (deal_elapsed / celeb.total_duration().max(0.01)).clamp(0.0, 1.0);
+                let wash_cx = src_px + (row_cx - src_px) * deal_t;
+                let mut gradients = Vec::new();
+                push_deal_row_wash(
+                    &mut gradients,
+                    wash_cx,
+                    row_py,
+                    row.tile_size,
+                    total_w,
+                    palette.foil,
+                    content_alpha,
+                );
+                flush_backdrop_quads(frame, gradients, Vec::new());
 
                 let mut placements = Vec::with_capacity(n);
                 for i in 0..n {
-                    let t = celeb.tile_progress(i);
-                    let ease = 1.0 - (1.0_f32 - t).powi(3);
-
+                    let p = celeb.tile_progress(i);
                     let dest_px = row.row_x0 + row.silhouette_w * 0.5 + i as f32 * row.step_px;
-                    let px = src_px + (dest_px - src_px) * ease;
-                    let py = src_py + (row_py - src_py) * ease;
-                    let lift = src_lift + (row_lift - src_lift) * ease;
-                    let scale = 0.3 + 0.7 * ease;
+                    let (px, py, lift, scale, spin_z) = deal_tile_transform(
+                        p, w, h, n, i, fan_half, src_px, src_py, src_lift, dest_px, row_py,
+                        row_lift,
+                    );
+
+                    let in_flight = p > 0.05 && p < 0.95;
+                    let landed_last = i == n.saturating_sub(1) && p >= 1.0 && last_glow;
+                    let glow = in_flight || landed_last;
+                    let mut tile_rot = rotation;
+                    tile_rot[2] += spin_z;
 
                     placements.push(ShowcaseTilePlacement {
                         tile: celeb.tiles[i],
                         center_pos: [px, py, lift],
-                        rotation,
+                        rotation: tile_rot,
                         scale,
                         size_px: row.tile_size,
                         brightness: 1.0,
                         selected: false,
                         hovered: false,
                         outline: false,
-                        glow: false,
-                        glow_color: None,
+                        glow,
+                        glow_color: if glow { Some(palette.seal) } else { None },
                         pick_id: None,
                         overlay_rect_group: None,
                     });
@@ -208,22 +369,49 @@ impl TilePackPresenter {
                 frame.cmds.push(DrawCmd::ShowcaseTileBatch(placements));
 
                 if celeb.fully_settled() {
-                    let elapsed = celeb.elapsed();
                     frame.text(celebration_overlay::label_confirm_to_continue(
-                        h, w, elapsed, 1.0,
+                        h,
+                        w,
+                        celeb.elapsed(),
+                        content_alpha,
                     ));
                 }
             }
         }
     }
 
-    pub fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
-        if ctx.headless
-            && !self.celebration.headless_hold_pack_closeup
-            && matches!(self.celebration.phase, CelebPhase::Closeup)
+    pub fn update(&mut self, mut ctx: UpdateCtx<'_>) -> SceneTransition {
+        self.intro_gate.tick(&mut ctx);
+
+        if ctx.headless {
+            self.intro_gate.intro.jump_to_done();
+            if self.celebration.headless_hold_pack_closeup
+                && self.celebration.phase == PackCelebPhase::Arrival
+            {
+                self.celebration.phase = PackCelebPhase::Anticipation;
+                self.celebration.started_at = Instant::now();
+            } else if !self.celebration.headless_hold_pack_closeup
+                && self.celebration.phase == PackCelebPhase::Arrival
+                && self.intro_gate.intro.is_done_for(&ctx.effect_layers)
+            {
+                self.celebration.phase = PackCelebPhase::Anticipation;
+                self.celebration.started_at = Instant::now();
+            }
+        }
+
+        if self.celebration.phase == PackCelebPhase::Arrival
+            && self.intro_gate.intro.is_done_for(&ctx.effect_layers)
         {
-            self.celebration.phase = CelebPhase::Reveal;
-            self.celebration.started_at = std::time::Instant::now();
+            if self.arrival_done_at.is_none() {
+                self.arrival_done_at = Some(Instant::now());
+            } else if self.arrival_done_at.is_some()
+                && Instant::now().saturating_duration_since(self.arrival_done_at.unwrap())
+                    >= Duration::from_secs_f32(CelebrationShowcaseIntroGate::GRACE_AFTER_DONE_SECS)
+            {
+                self.celebration.phase = PackCelebPhase::Anticipation;
+                self.celebration.started_at = Instant::now();
+                self.arrival_done_at = None;
+            }
         }
 
         let has_input = ctx.actions.iter().any(|a| {
@@ -234,14 +422,21 @@ impl TilePackPresenter {
         }) || !ctx.button_clicks.is_empty();
 
         match self.celebration.phase {
-            CelebPhase::Closeup => {
+            PackCelebPhase::Arrival => {}
+            PackCelebPhase::Anticipation => {
                 if has_input {
-                    self.celebration.phase = CelebPhase::Reveal;
-                    self.celebration.started_at = std::time::Instant::now();
+                    self.celebration.phase = PackCelebPhase::Unseal;
+                    self.celebration.started_at = Instant::now();
                     ctx.bus.push(crate::game::event_bus::GameEvent::PackOpened);
                 }
             }
-            CelebPhase::Reveal => {
+            PackCelebPhase::Unseal => {
+                if self.celebration.elapsed() >= PackCelebration::UNSEAL_SECS {
+                    self.celebration.phase = PackCelebPhase::Deal;
+                    self.celebration.started_at = Instant::now();
+                }
+            }
+            PackCelebPhase::Deal => {
                 let n = self.celebration.tiles.len();
                 while self.celebration.revealed_count < n
                     && self
@@ -253,8 +448,8 @@ impl TilePackPresenter {
                         .push(crate::game::event_bus::GameEvent::PackTileRevealed);
                     self.celebration.revealed_count += 1;
                 }
-                let dominated = self.celebration.fully_settled() || self.celebration.dismissed;
-                if dominated && has_input {
+                let done = self.celebration.fully_settled() || self.celebration.dismissed;
+                if done && has_input {
                     ctx.run.pending_shop_focus_snap_after_celebration = true;
                     *ctx.overlay_request = Some(OverlayRequest::Pop);
                 }
@@ -268,38 +463,59 @@ impl TilePackPresenter {
         let h = ctx.layout.window_h;
         let env_h = ctx.room_gltf_height_scale;
 
-        debug_assert!(
-            !self.celebration.tiles.is_empty(),
-            "pack celebration needs tiles"
-        );
+        debug_assert!(!self.celebration.tiles.is_empty());
+
+        let content_alpha = self.intro_content_alpha(&ctx);
+        let dimmer_alpha = pack_celebration_dimmer_alpha(content_alpha, &self.celebration);
+        let dolly = match self.celebration.phase {
+            PackCelebPhase::Unseal => UNSEAL_DOLLY_PULL * ease_out_cubic(self.celebration.unseal_t()),
+            PackCelebPhase::Deal => UNSEAL_DOLLY_PULL,
+            _ => 0.0,
+        };
+        let cam = self.camera_with_dolly(w, h, env_h, dolly);
 
         let mut frame = UiFrame::new();
         frame.background(BackgroundId::Black);
-        let cam = shop_celebration_camera(w, h, env_h);
         frame.camera_override = Some(cam);
         frame.scene_lighting.embedded_gltf_punctual = false;
         frame.scene_lighting.room_glb_brdf = false;
-        frame
-            .scene_lighting
-            .set_smooth_points(pack_celebration_isolation_lights(
-                self.celebration.phase,
-                ctx.layout,
-                &self.positions,
-            ));
-        frame.scene_lighting.spot_lights = pack_celebration_subject_spotlight(
+        frame.scene_lighting.set_smooth_points(pack_celebration_point_lights(
+            &self.celebration,
+            ctx.layout,
+            &self.positions,
+        ));
+        frame.scene_lighting.spot_lights = pack_celebration_spot_lights(
             &self.celebration,
             ctx.layout,
             &cam,
             &self.positions,
             ctx.tile_preset,
         );
-        self.push_celebration_draw(&mut frame, ctx.layout, w, h, &cam, ctx.tile_preset);
+
+        self.push_celebration_draw(
+            &mut frame,
+            ctx.layout,
+            w,
+            h,
+            &cam,
+            ctx.tile_preset,
+            dimmer_alpha,
+            content_alpha,
+            &ctx,
+        );
+
+        self.intro_gate
+            .intro
+            .push_shooting_star_cascade_if_active(&mut frame, &ctx.effect_layers);
+
         frame.window_title = "Mahjuro".to_string();
         frame.showcase_render_hints = Self::render_hints();
 
         let allow_click = match self.celebration.phase {
-            CelebPhase::Closeup => true,
-            CelebPhase::Reveal => self.celebration.fully_settled() || self.celebration.dismissed,
+            PackCelebPhase::Arrival => false,
+            PackCelebPhase::Anticipation => self.intro_gate.intro.is_done_for(&ctx.effect_layers),
+            PackCelebPhase::Unseal => false,
+            PackCelebPhase::Deal => self.celebration.fully_settled() || self.celebration.dismissed,
         };
         if allow_click {
             frame.buttons = vec![ButtonDef::scene((0.0, 0.0, w, h), u32::MAX)];
@@ -308,10 +524,393 @@ impl TilePackPresenter {
     }
 }
 
+fn deal_tile_transform(
+    p: f32,
+    w: f32,
+    h: f32,
+    n: usize,
+    i: usize,
+    fan_half: f32,
+    src_px: f32,
+    src_py: f32,
+    src_lift: f32,
+    dest_px: f32,
+    dest_py: f32,
+    dest_lift: f32,
+) -> (f32, f32, f32, f32, f32) {
+    let fan_t = if n <= 1 {
+        0.0
+    } else {
+        i as f32 / (n - 1) as f32
+    };
+    let fan_angle = fan_half * (fan_t * 2.0 - 1.0);
+    let lateral = w * 0.14 * fan_angle.sin();
+
+    let m_px = src_px + (dest_px - src_px) * 0.5 + lateral;
+    let m_py = src_py + (dest_py - src_py) * 0.5;
+    let m_lift = src_lift + (dest_lift - src_lift) * 0.5 + h * 0.22;
+
+    let ctrl_px = m_px + lateral * 0.35;
+    let ctrl_py = m_py - h * 0.08;
+    let ctrl_lift = m_lift + h * 0.10;
+
+    let split = PackCelebration::ARC_SPLIT;
+
+    if p <= split {
+        let u = (p / split).clamp(0.0, 1.0);
+        let ease = 1.0 - (1.0 - u).powi(3);
+        let (px, py, lift) = quad_bezier(
+            [src_px, src_py, src_lift],
+            [ctrl_px, ctrl_py, ctrl_lift],
+            [m_px, m_py, m_lift],
+            ease,
+        );
+        let scale = 0.25 + 0.60 * ease;
+        let spin = (1.0 - ease) * PI * 0.25;
+        (px, py, lift, scale, spin)
+    } else {
+        let u = ((p - split) / (1.0 - split)).clamp(0.0, 1.0);
+        let ease = smoothstep(0.0, 1.0, u);
+        let overshoot = 1.0 + 0.04 * (ease * PI).sin();
+        let px = m_px + (dest_px - m_px) * ease * overshoot;
+        let py = m_py + (dest_py - m_py) * ease;
+        let lift = m_lift + (dest_lift - m_lift) * ease;
+        let scale = 0.85 + 0.15 * ease;
+        let spin = (1.0 - ease) * PI * 0.08;
+        (px, py, lift, scale, spin)
+    }
+}
+
+fn quad_bezier(a: [f32; 3], b: [f32; 3], c: [f32; 3], t: f32) -> (f32, f32, f32) {
+    let u = 1.0 - t;
+    let px = u * u * a[0] + 2.0 * u * t * b[0] + t * t * c[0];
+    let py = u * u * a[1] + 2.0 * u * t * b[1] + t * t * c[1];
+    let lift = u * u * a[2] + 2.0 * u * t * b[2] + t * t * c[2];
+    (px, py, lift)
+}
+
+fn pack_celebration_spot_lights(
+    celeb: &PackCelebration,
+    screen: &LayoutResult,
+    cam: &CameraParams,
+    positions: &ShopPositions,
+    tile_preset: TilePreset,
+) -> Vec<SpotLight> {
+    let w = screen.window_w;
+    let h = screen.window_h;
+    let (cos_outer, cos_inner, intensity) = match celeb.phase {
+        PackCelebPhase::Anticipation | PackCelebPhase::Unseal => (
+            (34.0_f32).to_radians().cos(),
+            (20.0_f32).to_radians().cos(),
+            7.0,
+        ),
+        PackCelebPhase::Deal => (
+            (34.0_f32).to_radians().cos(),
+            (20.0_f32).to_radians().cos(),
+            10.0,
+        ),
+        PackCelebPhase::Arrival => return Vec::new(),
+    };
+    let warm = [1.0_f32, 0.93, 0.78];
+    let box_h = h * PACK_CELEB_BOX_H_FRAC;
+
+    let (cx, cy, lift) = match celeb.phase {
+        PackCelebPhase::Anticipation | PackCelebPhase::Unseal => {
+            let a = pack_closeup_anchor(screen, positions, box_h, Mat4::IDENTITY);
+            (a.pos[0], a.pos[1], a.pos[2])
+        }
+        PackCelebPhase::Deal => {
+            let pack_a = pack_closeup_anchor(screen, positions, box_h, Mat4::IDENTITY);
+            let reveal_anchor = PlacementAnchor::new(
+                [w * 0.5, h * 0.5, 0.0],
+                Mat4::IDENTITY,
+                &positions.celeb_pack_reveal,
+                screen,
+            );
+            let n = celeb.tiles.len();
+            if n == 0 {
+                return Vec::new();
+            }
+            let row_lift = reveal_anchor.pos[2];
+            let rotation = pack_reveal_euler_rad(positions);
+            let row = compute_pack_reveal_row_layout(&PackRevealRowLayoutParams {
+                win_w: w,
+                win_h: h,
+                cam,
+                preset: tile_preset,
+                n,
+                row_lift,
+                nx: positions.celeb_pack_reveal.nx,
+                ny: positions.celeb_pack_reveal.ny,
+                rotation_xyz_rad: rotation,
+            });
+            let total_w = n as f32 * row.silhouette_w + (n.saturating_sub(1)) as f32 * row.gap_px;
+            let row_cx = row.row_x0 + total_w * 0.5;
+            let deal_t = (celeb.elapsed() / celeb.total_duration().max(0.01)).clamp(0.0, 1.0);
+            let cx = pack_a.pos[0] + (row_cx - pack_a.pos[0]) * deal_t;
+            (cx, reveal_anchor.pos[1], row_lift)
+        }
+        PackCelebPhase::Arrival => return Vec::new(),
+    };
+
+    let light_lift = lift + h * 0.52 + box_h * 0.38;
+    let pos = [cx, cy - h * 0.14 - box_h * 0.06, light_lift];
+    let tw = pixel_to_world(w, h, cx, cy, lift);
+    let lw = pixel_to_world(w, h, pos[0], pos[1], pos[2]);
+    let dir = (tw - lw).normalize_or_zero();
+    let dir = if dir.length_squared() < 1e-4 {
+        Vec3::new(0.0, 0.5, -1.0).normalize()
+    } else {
+        dir
+    };
+    let _ = cam;
+    vec![SpotLight {
+        pos,
+        dir: dir.to_array(),
+        radius: h * 2.4 + box_h,
+        cos_outer,
+        cos_inner,
+        color: warm,
+        intensity,
+    }]
+}
+
+fn pack_celebration_point_lights(
+    celeb: &PackCelebration,
+    screen: &LayoutResult,
+    positions: &ShopPositions,
+) -> Vec<PointLight> {
+    let w = screen.window_w;
+    let h = screen.window_h;
+    let box_h = h * PACK_CELEB_BOX_H_FRAC;
+    let (cx, row_py, lift) = match celeb.phase {
+        PackCelebPhase::Anticipation | PackCelebPhase::Unseal => {
+            let a = pack_closeup_anchor(screen, positions, box_h, Mat4::IDENTITY);
+            (a.pos[0], a.pos[1], a.pos[2])
+        }
+        PackCelebPhase::Deal | PackCelebPhase::Arrival => {
+            let a = PlacementAnchor::new(
+                [w * 0.5, h * 0.5, 0.0],
+                Mat4::IDENTITY,
+                &positions.celeb_pack_reveal,
+                screen,
+            );
+            (a.pos[0], a.pos[1], a.pos[2])
+        }
+    };
+    let (i_mul, r_mul, close_z) = match celeb.phase {
+        PackCelebPhase::Anticipation | PackCelebPhase::Unseal => (2.6, 1.4, box_h * 0.22),
+        PackCelebPhase::Deal => (1.9, 1.15, 0.0),
+        PackCelebPhase::Arrival => (1.2, 1.0, 0.0),
+    };
+    let foil = pack_palette::for_kind(celeb.pack_kind).foil;
+    vec![
+        PointLight {
+            pos: [
+                cx + w * 0.14,
+                row_py - h * 0.22 - box_h * 0.04,
+                lift + h * 0.48 + close_z,
+            ],
+            radius: h * 3.2 * r_mul + box_h * 0.5 * r_mul,
+            color: color::rgb(color::PARCHMENT),
+            intensity: 1.55 * i_mul,
+        },
+        PointLight {
+            pos: [
+                cx,
+                row_py + h * 0.12 + box_h * 0.05,
+                lift + h * 0.28 + close_z * 0.6,
+            ],
+            radius: h * 2.5 * r_mul,
+            color: [
+                foil[0] * 0.5 + 0.25,
+                foil[1] * 0.5 + 0.35,
+                foil[2] * 0.5 + 0.55,
+            ],
+            intensity: 1.2 * i_mul,
+        },
+        PointLight {
+            pos: [
+                cx - w * 0.16,
+                row_py + h * 0.06 + box_h * 0.03,
+                lift + h * 0.32 + close_z * 0.7,
+            ],
+            radius: h * 2.8 * r_mul + box_h * 0.45 * r_mul,
+            color: [0.70, 0.82, 1.0],
+            intensity: 1.15 * i_mul,
+        },
+    ]
+}
+
+/// Brief backdrop deepen during the unseal punch.
+fn pack_celebration_dimmer_alpha(content_alpha: f32, celeb: &PackCelebration) -> f32 {
+    if celeb.phase != PackCelebPhase::Unseal {
+        return content_alpha;
+    }
+    let u = celeb.unseal_t();
+    let bump = smoothstep(0.0, 0.12, u) * (1.0 - smoothstep(0.2, 0.35, u));
+    (content_alpha * (1.0 + 0.15 * bump)).min(0.85)
+}
+
+fn flush_backdrop_quads(
+    frame: &mut UiFrame,
+    gradients: Vec<GradientQuadInstance>,
+    squircles: Vec<GpuInstance>,
+) {
+    if !gradients.is_empty() {
+        frame.gradient_quads(gradients);
+    }
+    if !squircles.is_empty() {
+        frame.squircle_quads(squircles);
+    }
+}
+
+fn push_radial_gradient(
+    out: &mut Vec<GradientQuadInstance>,
+    cx: f32,
+    cy: f32,
+    size: f32,
+    color: [f32; 4],
+    feather_edge: f32,
+) {
+    if color[3] <= 0.001 {
+        return;
+    }
+    out.push(GradientQuadInstance {
+        rect: [cx - size * 0.5, cy - size * 0.5, size, size],
+        color,
+        feather: [feather_edge.clamp(0.05, 0.99), 1.0, 0.0, 0.0],
+    });
+}
+
+/// Darkens the four screen edges so the hero reads against the dimmer.
+fn push_edge_vignette(out: &mut Vec<GradientQuadInstance>, w: f32, h: f32, alpha: f32) {
+    if alpha <= 0.001 {
+        return;
+    }
+    let edge = 0.38_f32;
+    let band = (w.min(h) * edge).max(48.0);
+    let c = [0.02, 0.025, 0.05, 0.42 * alpha];
+    let feather = [0.92, 0.0, 0.0, 0.0];
+    out.push(GradientQuadInstance {
+        rect: [0.0, 0.0, w, band],
+        color: c,
+        feather,
+    });
+    out.push(GradientQuadInstance {
+        rect: [0.0, h - band, w, band],
+        color: c,
+        feather,
+    });
+    out.push(GradientQuadInstance {
+        rect: [0.0, 0.0, band, h],
+        color: c,
+        feather,
+    });
+    out.push(GradientQuadInstance {
+        rect: [w - band, 0.0, band, h],
+        color: c,
+        feather,
+    });
+}
+
+fn push_pack_brand_wash(
+    out: &mut Vec<GradientQuadInstance>,
+    w: f32,
+    h: f32,
+    mut bg: [f32; 4],
+    alpha: f32,
+) {
+    if alpha <= 0.001 {
+        return;
+    }
+    bg[3] *= alpha;
+    out.push(GradientQuadInstance {
+        rect: [0.0, 0.0, w, h],
+        color: bg,
+        feather: [0.88, 1.0, 0.0, 0.0],
+    });
+}
+
+fn push_pack_aura(
+    gradients: &mut Vec<GradientQuadInstance>,
+    squircles: &mut Vec<GpuInstance>,
+    cx: f32,
+    cy: f32,
+    box_h: f32,
+    palette: pack_palette::PackPalette,
+    content_alpha: f32,
+    seal_pulse: f32,
+) {
+    let wide = box_h * 1.85;
+    let tight = box_h * 1.05;
+    let seal_a = content_alpha * (0.10 + 0.07 * seal_pulse);
+    let mut seal = palette.seal;
+    seal[3] = seal_a;
+    push_radial_gradient(gradients, cx, cy, wide, seal, 0.78);
+
+    let mut foil = palette.foil;
+    foil[3] = content_alpha * 0.11;
+    push_radial_gradient(gradients, cx, cy - box_h * 0.04, tight, foil, 0.62);
+
+    let plate = box_h * 0.72;
+    let mut plate_c = palette.seal;
+    plate_c[3] = content_alpha * (0.09 + 0.04 * seal_pulse);
+    squircles.push(GpuInstance {
+        rect: [cx - plate * 0.5, cy - plate * 0.52, plate, plate * 1.04],
+        color: plate_c,
+        user: 0,
+    });
+}
+
+fn push_unseal_burst(
+    out: &mut Vec<GradientQuadInstance>,
+    cx: f32,
+    cy: f32,
+    min_axis: f32,
+    palette: pack_palette::PackPalette,
+    content_alpha: f32,
+    u: f32,
+) {
+    let envelope = smoothstep(0.05, 0.2, u) * (1.0 - smoothstep(0.35, 0.5, u));
+    let burst_a = content_alpha * envelope * 0.32;
+    if burst_a <= 0.001 {
+        return;
+    }
+    let r = min_axis * 0.45 * smoothstep(0.0, 0.35, u);
+    let mut seal = palette.seal;
+    seal[3] = burst_a;
+    push_radial_gradient(out, cx, cy, r * 2.0, seal, 0.55);
+
+    let mut foil = palette.foil;
+    foil[0] = (foil[0] + 0.35).min(1.35);
+    foil[1] = (foil[1] + 0.35).min(1.35);
+    foil[2] = (foil[2] + 0.35).min(1.35);
+    foil[3] = burst_a * 0.55;
+    push_radial_gradient(out, cx, cy, r * 1.35, foil, 0.42);
+}
+
+fn push_deal_row_wash(
+    out: &mut Vec<GradientQuadInstance>,
+    row_cx: f32,
+    row_py: f32,
+    tile_size: f32,
+    row_span_px: f32,
+    foil: [f32; 4],
+    content_alpha: f32,
+) {
+    let a = content_alpha * 0.14;
+    if a <= 0.001 {
+        return;
+    }
+    let wash_w = (row_span_px + tile_size * 2.4).max(tile_size * 4.0);
+    let wash_h = tile_size * 2.8;
+    let mut warm = foil;
+    warm[3] = a;
+    push_radial_gradient(out, row_cx, row_py, wash_w.max(wash_h), warm, 0.72);
+}
+
 /// Screen-pixel pack height → world `Object3d::extents` for the perspective celebration camera.
-///
-/// Ray deltas on the felt plane (`z = plane_z`) explode when the celebration camera is
-/// shallow; scale from eye distance and vertical FOV instead (same screen fraction at `center`).
 pub(crate) fn pack_closeup_world_extents(
     win_w: f32,
     win_h: f32,
@@ -351,8 +950,6 @@ pub(crate) fn pack_closeup_anchor(
 ) -> PlacementAnchor {
     let h = screen.window_h;
     let w = screen.window_w;
-    // Pack foil is on the −Y face; [`shop_celebration_camera`] sits on −Y looking toward +Y.
-    // Keep lift at 0: `pos[2]` is the ray-plane depth, not a Z lift in world space.
     PlacementAnchor::new(
         [w * 0.5, h * PACK_CELEB_ANCHOR_Y_FRAC, 0.0],
         base_rotation,
@@ -369,7 +966,6 @@ pub(crate) fn pack_reveal_euler_rad(positions: &ShopPositions) -> [f32; 3] {
     ]
 }
 
-/// Push one pack mesh for celebration closeup (TPOS1 / TPOS2).
 pub(crate) fn push_pack_object3d(
     frame: &mut UiFrame,
     win_w: f32,
@@ -399,165 +995,6 @@ pub(crate) fn push_pack_object3d(
     }]);
 }
 
-fn pack_celebration_subject_spotlight(
-    celeb: &PackCelebration,
-    screen: &LayoutResult,
-    cam: &CameraParams,
-    positions: &ShopPositions,
-    tile_preset: TilePreset,
-) -> Vec<SpotLight> {
-    let w = screen.window_w;
-    let h = screen.window_h;
-    let cos_outer = (34.0_f32).to_radians().cos();
-    let cos_inner = (20.0_f32).to_radians().cos();
-    let warm = [1.0_f32, 0.93, 0.78];
-    match celeb.phase {
-        CelebPhase::Closeup => {
-            let box_h = h * PACK_CELEB_BOX_H_FRAC;
-            let anchor = pack_closeup_anchor(screen, positions, box_h, Mat4::IDENTITY);
-            let cx = anchor.pos[0];
-            let cy = anchor.pos[1];
-            let lift = anchor.pos[2];
-            let light_lift = lift + h * 0.52 + box_h * 0.38;
-            let pos = [cx, cy - h * 0.14 - box_h * 0.06, light_lift];
-            let tw = pixel_to_world(w, h, cx, cy, lift);
-            let lw = pixel_to_world(w, h, pos[0], pos[1], pos[2]);
-            let dir = (tw - lw).normalize_or_zero();
-            let dir = if dir.length_squared() < 1e-4 {
-                Vec3::new(0.0, 0.5, -1.0).normalize()
-            } else {
-                dir
-            };
-            let _ = cam;
-            vec![SpotLight {
-                pos,
-                dir: dir.to_array(),
-                radius: h * 2.2 + box_h * 0.85,
-                cos_outer,
-                cos_inner,
-                color: warm,
-                intensity: 7.0,
-            }]
-        }
-        CelebPhase::Reveal => {
-            let n = celeb.tiles.len();
-            if n == 0 {
-                return Vec::new();
-            }
-            let reveal_anchor = PlacementAnchor::new(
-                [w * 0.5, h * 0.5, 0.0],
-                Mat4::IDENTITY,
-                &positions.celeb_pack_reveal,
-                screen,
-            );
-            let row_lift = reveal_anchor.pos[2];
-            let rotation = pack_reveal_euler_rad(positions);
-            let row = compute_pack_reveal_row_layout(&PackRevealRowLayoutParams {
-                win_w: w,
-                win_h: h,
-                cam,
-                preset: tile_preset,
-                n,
-                row_lift,
-                nx: positions.celeb_pack_reveal.nx,
-                ny: positions.celeb_pack_reveal.ny,
-                rotation_xyz_rad: rotation,
-            });
-            let total_w = n as f32 * row.silhouette_w + (n.saturating_sub(1)) as f32 * row.gap_px;
-            let cx = row.row_x0 + total_w * 0.5;
-            let row_py = reveal_anchor.pos[1];
-            let cy = row_py;
-            let lift = row_lift + row.tile_size * 0.15;
-            let light_lift = lift + h * 0.55;
-            let pos = [cx, cy - h * 0.12, light_lift];
-            let tw = pixel_to_world(w, h, cx, cy, lift);
-            let lw = pixel_to_world(w, h, pos[0], pos[1], pos[2]);
-            let dir = (tw - lw).normalize_or_zero();
-            let dir = if dir.length_squared() < 1e-4 {
-                Vec3::new(0.0, 0.45, -1.0).normalize()
-            } else {
-                dir
-            };
-            let _ = cam;
-            vec![SpotLight {
-                pos,
-                dir: dir.to_array(),
-                radius: h * 3.1,
-                cos_outer,
-                cos_inner,
-                color: warm,
-                intensity: 10.0,
-            }]
-        }
-    }
-}
-
-fn pack_celebration_isolation_lights(
-    phase: CelebPhase,
-    screen: &LayoutResult,
-    positions: &ShopPositions,
-) -> Vec<PointLight> {
-    let w = screen.window_w;
-    let h = screen.window_h;
-    let box_h = h * PACK_CELEB_BOX_H_FRAC;
-    let (cx, row_py, lift) = match phase {
-        CelebPhase::Closeup => {
-            let a = pack_closeup_anchor(screen, positions, box_h, Mat4::IDENTITY);
-            (a.pos[0], a.pos[1], a.pos[2])
-        }
-        CelebPhase::Reveal => {
-            let a = PlacementAnchor::new(
-                [w * 0.5, h * 0.5, 0.0],
-                Mat4::IDENTITY,
-                &positions.celeb_pack_reveal,
-                screen,
-            );
-            (a.pos[0], a.pos[1], a.pos[2])
-        }
-    };
-    let (i_mul, r_mul) = match phase {
-        CelebPhase::Closeup => (2.4, 1.35),
-        // Wider radius + higher intensity so an 8-tile row still reads on the sides.
-        CelebPhase::Reveal => (1.65, 1.12),
-    };
-    let close_z_k = match phase {
-        CelebPhase::Closeup => box_h * 0.22,
-        CelebPhase::Reveal => 0.0,
-    };
-    vec![
-        PointLight {
-            pos: [
-                cx + w * 0.14,
-                row_py - h * 0.22 - box_h * 0.04,
-                lift + h * 0.48 + close_z_k,
-            ],
-            radius: h * 3.2 * r_mul + box_h * 0.5 * r_mul,
-            color: color::rgb(color::PARCHMENT),
-            intensity: 1.55 * i_mul,
-        },
-        PointLight {
-            pos: [
-                cx - w * 0.16,
-                row_py + h * 0.06 + box_h * 0.03,
-                lift + h * 0.32 + close_z_k * 0.7,
-            ],
-            radius: h * 2.8 * r_mul + box_h * 0.45 * r_mul,
-            color: [0.70, 0.82, 1.0],
-            intensity: 1.05 * i_mul,
-        },
-        PointLight {
-            pos: [
-                cx,
-                row_py - h * 0.38 - box_h * 0.08,
-                lift + h * 0.62 + close_z_k * 1.1,
-            ],
-            radius: h * 2.6 * r_mul + box_h * 0.4 * r_mul,
-            color: color::rgb(color::PARCHMENT),
-            intensity: 1.25 * i_mul,
-        },
-    ]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -585,8 +1022,6 @@ mod tests {
         let mut layout_engine = UiLayout::new();
         let layout = layout_engine.solve(w, h);
         let box_h = h * PACK_CELEB_BOX_H_FRAC;
-        let box_w = box_h * crate::core::tile_pack::PACK_ASPECT_W_OVER_H;
-        let box_d = box_h * 0.10;
         let anchor = pack_closeup_anchor(&layout, &ShopPositions::default(), box_h, Mat4::IDENTITY);
         let extents = pack_closeup_world_extents(
             w,
@@ -598,12 +1033,7 @@ mod tests {
             box_h,
         );
         let center = crate::render::world_space::world_on_camera_ray_plane_z(
-            w,
-            h,
-            &cam,
-            anchor.pos[0],
-            anchor.pos[1],
-            anchor.pos[2],
+            w, h, &cam, anchor.pos[0], anchor.pos[1], anchor.pos[2],
         );
         let rot = anchor.object3d_rotation();
         let oriented =
@@ -652,4 +1082,15 @@ mod tests {
             "pack center {center:?} should sit in front of the shop camera"
         );
     }
+}
+
+#[inline]
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    let t = ((x - edge0) / (edge1 - edge0).max(1e-6)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+#[inline]
+fn ease_out_cubic(x: f32) -> f32 {
+    1.0 - (1.0 - x).powi(3)
 }

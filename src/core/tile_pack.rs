@@ -121,8 +121,8 @@ impl TilePackKind {
         tile_pack_presentation(self).description
     }
 
-    /// Foil wrapper tint — the metallic surface tint multiplied by the
-    /// cover decal's transparent regions. Sourced from the canonical
+    /// Plastic sleeve tint on pack edges — multiplied under the cover
+    /// decal's transparent regions. Sourced from the canonical
     /// per-pack table in [`crate::render::pack_palette`].
     pub fn foil_tint(self) -> [f32; 4] {
         crate::render::pack_palette::for_kind(self).foil

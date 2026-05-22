@@ -163,6 +163,8 @@ pub(crate) struct PostSceneTransitionCtx<'a> {
     pub from: SceneTag,
     pub to: SceneTag,
     pub pushed_meta_level_up: bool,
+    /// Current blind is a boss when transitioning into gameplay (round-start BGM).
+    pub gameplay_boss_blind: bool,
     pub anim: &'a mut AnimationController,
     pub renderer: Option<&'a mut WgpuRenderer>,
     pub input: Option<&'a mut InputState>,
@@ -170,13 +172,17 @@ pub(crate) struct PostSceneTransitionCtx<'a> {
 }
 
 /// Side effects after the scene pointer(s) have been updated (smoke, SFX, focus reset, entry tweens).
-pub(crate) fn sync_music_for_scene(audio: &mut crate::audio::AudioManager, tag: SceneTag) {
+pub(crate) fn sync_music_for_scene(
+    audio: &mut crate::audio::AudioManager,
+    tag: SceneTag,
+    gameplay_boss_blind: bool,
+) {
     use crate::audio::MusicId;
     match tag {
         SceneTag::MainMenuExterior | SceneTag::Collection => {
             audio.set_music_track(MusicId::MainMenu)
         }
-        SceneTag::Gameplay => audio.set_music_track(MusicId::Gameplay),
+        SceneTag::Gameplay => audio.set_gameplay_music(gameplay_boss_blind),
         SceneTag::Shop | SceneTag::PickBlind => audio.set_music_track(MusicId::Shop),
         _ => audio.stop_background_music(),
     }
@@ -204,7 +210,7 @@ pub(crate) fn apply_post_scene_transition_effects(ctx: PostSceneTransitionCtx<'_
     if ctx.to == SceneTag::MainMenuExterior {
         crate::asset_path::prefetch_lazy_packs_after_menu_once();
     }
-    sync_music_for_scene(ctx.audio, ctx.to);
+    sync_music_for_scene(ctx.audio, ctx.to, ctx.gameplay_boss_blind);
     sync_ambient_for_scene(ctx.audio, ctx.to);
     if let Some(input) = ctx.input {
         input.focus_slot = 0;
