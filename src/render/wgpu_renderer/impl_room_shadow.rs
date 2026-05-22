@@ -336,4 +336,14 @@ impl ActiveRoomEnv {
     pub fn from_frame(frame: &UiFrame) -> Option<Self> {
         crate::render::wgpu_renderer::runtime::shadow_setup::active_room_env(frame)
     }
+
+    pub fn to_room_gi(self) -> Option<RoomGiRoom> {
+        match self {
+            Self::Shop => Some(RoomGiRoom::Shop),
+            Self::Hallway => Some(RoomGiRoom::Hallway),
+            Self::Archive => Some(RoomGiRoom::Archive),
+            Self::MainMenu => Some(RoomGiRoom::MainMenu),
+            Self::Gameplay => None,
+        }
+    }
 }

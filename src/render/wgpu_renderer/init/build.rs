@@ -3532,6 +3532,231 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
 
     crate::render::main_menu_glb::release_main_menu_environment_cpu_sources_after_gpu_upload();
 
+    let (gameplay_env_primitives, gameplay_environment) = {
+        let _gameplay = crate::startup_profile::scope("wgpu.room.gameplay");
+        crate::render::gameplay_glb::with_gameplay_glb_cpu(|cpu_opt| {
+            let mut prims = Vec::new();
+            let mut gpu_wrap = None;
+            let Some(cpu) = cpu_opt else {
+                return (prims, gpu_wrap);
+            };
+            if !cpu.environment_primitives.is_empty() {
+                let mut room_tex_cache = RoomEnvTextureCache::new();
+                let (_white_tex, white_albedo_view) = white_albedo(&device, &queue);
+                for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
+                    let prim = &env_prim.mesh;
+                    let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("gameplay-env-verts-{i}")),
+                        contents: bytemuck::cast_slice(&prim.vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+                    let ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("gameplay-env-idx-{i}")),
+                        contents: bytemuck::cast_slice(&prim.indices),
+                        usage: wgpu::BufferUsages::INDEX,
+                    });
+                    let mips = crate::render::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
+                    let albedo_view = room_tex_cache.upload_slot(
+                        &device,
+                        &queue,
+                        format!("gameplay-env-albedo-{i}"),
+                        prim.albedo_rgba.as_ref(),
+                        prim.albedo_mip_chain.as_deref().map(|c| c.as_slice()),
+                        wgpu::TextureFormat::Rgba8UnormSrgb,
+                        mips,
+                        &white_albedo_view,
+                    );
+                    let normal_view = room_tex_cache.upload_slot(
+                        &device,
+                        &queue,
+                        format!("gameplay-env-normal-{i}"),
+                        prim.normal_rgba.as_ref(),
+                        prim.normal_mip_chain.as_deref().map(|c| c.as_slice()),
+                        wgpu::TextureFormat::Rgba8Unorm,
+                        mips,
+                        &tile_default_normal_view,
+                    );
+                    let metallic_roughness_view = room_tex_cache.upload_slot(
+                        &device,
+                        &queue,
+                        format!("gameplay-env-mr-{i}"),
+                        prim.metallic_roughness_rgba.as_ref(),
+                        prim.metallic_roughness_mip_chain
+                            .as_deref()
+                            .map(|c| c.as_slice()),
+                        wgpu::TextureFormat::Rgba8Unorm,
+                        mips,
+                        &tile_glb_default_mr_view,
+                    );
+                    let emissive_view = room_tex_cache.upload_slot(
+                        &device,
+                        &queue,
+                        format!("gameplay-env-emissive-{i}"),
+                        prim.emissive_rgba.as_ref(),
+                        prim.emissive_mip_chain.as_deref().map(|c| c.as_slice()),
+                        wgpu::TextureFormat::Rgba8UnormSrgb,
+                        mips,
+                        &tile_glb_default_emissive_view,
+                    );
+                    let pbr_uniform_buffer =
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some(&format!("gameplay-pbr-{i}")),
+                            contents: bytemuck::bytes_of(&GltfPbrUniform::from_loaded(
+                                prim.metallic_factor,
+                                prim.roughness_factor,
+                                prim.emissive_factor,
+                                prim.alpha_mode,
+                                prim.alpha_cutoff,
+                            )),
+                            usage: wgpu::BufferUsages::UNIFORM,
+                        });
+                    let sampler =
+                        device.create_sampler(&build_sampler_descriptor(prim.sampler, None));
+                    prims.push(TilePrimitiveGpu {
+                        vertex_buffer: vb,
+                        index_buffer: ib,
+                        index_count: prim.indices.len() as u32,
+                        albedo_view,
+                        normal_view,
+                        metallic_roughness_view,
+                        emissive_view,
+                        pbr_uniform_buffer,
+                        sampler,
+                        pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
+                    });
+                }
+                let (_white_tex, gameplay_decal_view) = white_albedo(&device, &queue);
+                let gameplay_candle_sss_tex = load_room_env_png_texture(
+                    &device,
+                    &queue,
+                    crate::render::room_env_gltf::SHOP_CANDLE_SSS_BAKE_TEXTURE,
+                    "gameplay-candle-sss-bake",
+                    wgpu::TextureFormat::Rgba8Unorm,
+                );
+                let gameplay_candle_sss_view = gameplay_candle_sss_tex
+                    .as_ref()
+                    .map(|(_, v)| v)
+                    .unwrap_or(&gameplay_decal_view);
+                let identity = Mat4::IDENTITY;
+                let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("gameplay-env-uniform"),
+                    contents: bytemuck::bytes_of(&CameraUniform {
+                        view_proj: identity.to_cols_array(),
+                        model: identity.to_cols_array(),
+                        base_color_factor: [
+                            1.0,
+                            0.0,
+                            0.0,
+                            crate::render::tile_body::TEXTURED_BASE_MAP_BODY_KIND,
+                        ],
+                        cam_pos: [0.0; 3],
+                        tile_seed: 0.0,
+                        decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
+                        hdr_tonemap: [0.0; 4],
+                    }),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+                let distortion_buffer =
+                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("gameplay-env-distortion"),
+                        contents: bytemuck::bytes_of(
+                            &crate::render::hallway_glb::HallwayDistortion::default(),
+                        ),
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    });
+                let bind_groups: Vec<wgpu::BindGroup> = prims
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| {
+                        let is_candle = cpu
+                            .environment_primitives
+                            .get(i)
+                            .and_then(|ep| ep.gltf_node_name.as_deref())
+                            .is_some_and(
+                                crate::render::room_env_gltf::is_shop_candle_wax_node_name,
+                            );
+                        let decal_view = if is_candle {
+                            gameplay_candle_sss_view
+                        } else {
+                            &gameplay_decal_view
+                        };
+                        device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("gameplay-env-bg"),
+                            layout: &tile_material_layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: uniform_buffer.as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: wgpu::BindingResource::TextureView(&p.albedo_view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 2,
+                                    resource: wgpu::BindingResource::Sampler(&p.sampler),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 3,
+                                    resource: wgpu::BindingResource::TextureView(
+                                        &decal_view,
+                                    ),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 4,
+                                    resource: wgpu::BindingResource::TextureView(&p.normal_view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 5,
+                                    resource: p.pbr_uniform_buffer.as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 6,
+                                    resource: wgpu::BindingResource::TextureView(
+                                        &p.metallic_roughness_view,
+                                    ),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 7,
+                                    resource: wgpu::BindingResource::TextureView(&p.emissive_view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 8,
+                                    resource: distortion_buffer.as_entire_binding(),
+                                },
+                            ],
+                        })
+                    })
+                    .collect();
+                let (shadow_uniform_buffer, shadow_bind_group) = create_room_env_shadow_gpu(
+                    &device,
+                    &shadow_caster_layout,
+                    "gameplay-env-shadow",
+                );
+                let shadow_warp_bind_group = create_shadow_warp_bind_group(
+                    &device,
+                    &shadow_warp_layout,
+                    &distortion_buffer,
+                    "gameplay-env-shadow-warp",
+                );
+                gpu_wrap = Some(ShopEnvironmentGpu {
+                    uniform_buffer,
+                    distortion_buffer,
+                    shadow_uniform_buffer,
+                    shadow_bind_group,
+                    shadow_warp_bind_group,
+                    bind_groups,
+                    archive_sign_decal_texture: None,
+                    shop_candle_sss_texture: gameplay_candle_sss_tex.map(|(t, _)| t),
+                });
+                log::info!("gameplay.glb GPU: {} primitive draw(s)", prims.len());
+            }
+            (prims, gpu_wrap)
+        })
+    };
+
+    crate::render::gameplay_glb::release_gameplay_environment_cpu_sources_after_gpu_upload();
+
     let shop_env_collision_meshes = crate::render::room_glb::with_shop_glb_cpu(|opt| {
         opt.map(|c| c.collision_meshes.clone()).unwrap_or_default()
     });
@@ -4124,6 +4349,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         archive_environment,
         main_menu_env_primitives,
         main_menu_environment,
+        gameplay_env_primitives,
+        gameplay_environment,
         archive_sign_left_prim_idx,
         archive_sign_right_prim_idx,
         archive_page_left_prim_indices,

@@ -13,6 +13,7 @@ pub(crate) enum ActiveRoomEnv {
     Hallway,
     Archive,
     MainMenu,
+    Gameplay,
 }
 
 #[inline]
@@ -23,6 +24,7 @@ pub fn active_room_env(frame: &UiFrame) -> Option<ActiveRoomEnv> {
             DrawCmd::HallwayEnvironment => return Some(ActiveRoomEnv::Hallway),
             DrawCmd::ArchiveEnvironment => return Some(ActiveRoomEnv::Archive),
             DrawCmd::MainMenuEnvironment => return Some(ActiveRoomEnv::MainMenu),
+            DrawCmd::GameplayEnvironment => return Some(ActiveRoomEnv::Gameplay),
             _ => {}
         }
     }
@@ -110,7 +112,11 @@ pub(super) fn object3d_casts_dynamic_shadow(
     anim_id: u64,
 ) -> bool {
     match active_room {
-        None | Some(ActiveRoomEnv::Shop) | Some(ActiveRoomEnv::Hallway) | Some(ActiveRoomEnv::MainMenu) => {
+        None
+        | Some(ActiveRoomEnv::Shop)
+        | Some(ActiveRoomEnv::Hallway)
+        | Some(ActiveRoomEnv::MainMenu)
+        | Some(ActiveRoomEnv::Gameplay) => {
             true
         }
         // Baked archive contact is static; the live map is for inspect orbit only.
@@ -197,6 +203,7 @@ fn frame_draws_room_environment(frame: &crate::render::draw_cmd::UiFrame) -> boo
                 | DrawCmd::HallwayEnvironment
                 | DrawCmd::ArchiveEnvironment
                 | DrawCmd::MainMenuEnvironment
+                | DrawCmd::GameplayEnvironment
         )
     })
 }

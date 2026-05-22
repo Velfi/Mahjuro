@@ -28,7 +28,7 @@ RULES_PATH = Path(__file__).resolve().parent / "pack_rules.json"
 # Room environment GLBs: runtime caps textures to 1024px and builds mips on load.
 # Resize at bake when `gltf-transform` is on PATH (npm i -g @gltf-transform/cli).
 ROOM_ENV_GLB_NAMES = frozenset(
-    {"shop.glb", "hallway.glb", "archive.glb", "main_menu.glb"}
+    {"shop.glb", "hallway.glb", "archive.glb", "main_menu.glb", "gameplay.glb"}
 )
 ROOM_ENV_TEXTURE_MAX = 1024
 

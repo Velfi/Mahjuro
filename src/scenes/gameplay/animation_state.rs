@@ -221,6 +221,7 @@ pub(super) fn build_candles_and_spotlights(
     _bronze_mirror_placement: Option<&Object3d>,
     debug_visibility_hide_candles: bool,
     progress_dora_enabled: bool,
+    spawn_procedural_candles: bool,
 ) -> CandleAndLightBuffers {
     // ── Candles ─────────────────────────────────────────────────────
     // Score L/R, hand strip L/R (upper row), hand strip L/R (lower row),
@@ -338,7 +339,7 @@ pub(super) fn build_candles_and_spotlights(
     // push loop. We can't filter `CandleBatch` / `Flame` post-hoc because
     // each candle also pushes a `PointLight` and the table shader would
     // keep getting lit by invisible flames.
-    let hide_candles = debug_visibility_hide_candles;
+    let hide_candles = debug_visibility_hide_candles || !spawn_procedural_candles;
     if !hide_candles {
         for (i, &(cx, cy_anchor)) in candle_centers.iter().enumerate() {
             let candle = scene.candles[i];
@@ -572,6 +573,8 @@ pub(super) fn build_ambient_table_objects(
     progress_dora_enabled: bool,
     boss_plinth_glow: f32,
     frame: &mut crate::render::draw_cmd::UiFrame,
+    skip_authored_plinth_meshes: bool,
+    tile_plinth_anchors: Option<&[[f32; 3]]>,
 ) {
     use crate::render::draw_cmd::{Object3d, Object3dKind};
     // Phase 7: ambient table objects — physical coin pile (gold) and the
@@ -588,25 +591,32 @@ pub(super) fn build_ambient_table_objects(
         let plinth_w = layout.mm(48.0);
         let plinth_h = layout.mm(20.0);
         let plinth_d = layout.mm(34.0);
-        let plinth_cx = dora_p.nx * layout.window_w;
-        let plinth_cy = dora_p.ny * layout.window_h;
-        let plinth_lift = layout.mm(dora_p.lift_mm);
-        frame.object3d(Object3d {
-            pos: [plinth_cx, plinth_cy, plinth_lift],
-            extents: [plinth_w, plinth_h, plinth_d],
-            rotation: crate::render::table_transform::mat4_to_euler_xyz_rad(
-                glam::Mat4::from_rotation_y(dora_p.ry_deg.to_radians())
-                    * glam::Mat4::from_rotation_x(dora_p.rx_deg.to_radians())
-                    * glam::Mat4::from_rotation_z(dora_p.rz_deg.to_radians()),
-            ),
-            color: [1.0, 1.0, 1.0, 1.0],
-            kind: crate::render::draw_cmd::Object3dKind::Plinth {
-                glow: 0.0,
-                role: crate::render::draw_cmd::PlinthRole::Dora,
-            },
-            hover_target: 0.0,
-            anim_id: 0,
-        });
+        let (plinth_cx, plinth_cy, plinth_lift) = tile_plinth_anchors
+            .and_then(|a| a.first().copied())
+            .map(|[x, y, z]| (x, y, z))
+            .unwrap_or((
+                dora_p.nx * layout.window_w,
+                dora_p.ny * layout.window_h,
+                layout.mm(dora_p.lift_mm),
+            ));
+        if !skip_authored_plinth_meshes {
+            frame.object3d(Object3d {
+                pos: [plinth_cx, plinth_cy, plinth_lift],
+                extents: [plinth_w, plinth_h, plinth_d],
+                rotation: crate::render::table_transform::mat4_to_euler_xyz_rad(
+                    glam::Mat4::from_rotation_y(dora_p.ry_deg.to_radians())
+                        * glam::Mat4::from_rotation_x(dora_p.rx_deg.to_radians())
+                        * glam::Mat4::from_rotation_z(dora_p.rz_deg.to_radians()),
+                ),
+                color: [1.0, 1.0, 1.0, 1.0],
+                kind: crate::render::draw_cmd::Object3dKind::Plinth {
+                    glow: 0.0,
+                    role: crate::render::draw_cmd::PlinthRole::Dora,
+                },
+                hover_target: 0.0,
+                anim_id: 0,
+            });
+        }
 
         // Indicator tile face(s) sitting on the platform. The mesh
         // platform's top is at local-y = +0.36 (lip rim), so place
@@ -677,14 +687,19 @@ pub(super) fn build_ambient_table_objects(
     // Boss plinth — same brass pedestal mesh, to the right of dora. During
     // boss rounds it displays the boss icon as a flat image quad in
     // `scene_behavior`; this object only provides the physical stand.
-    if !gameplay.boss_ofuda_title.is_empty() {
+    if !gameplay.boss_ofuda_title.is_empty() && !skip_authored_plinth_meshes {
         let boss_p = &scene.positions.boss_plinth;
         let plinth_w = layout.mm(48.0);
         let plinth_h = layout.mm(20.0);
         let plinth_d = layout.mm(34.0);
-        let plinth_cx = boss_p.nx * layout.window_w;
-        let plinth_cy = boss_p.ny * layout.window_h;
-        let plinth_lift = layout.mm(boss_p.lift_mm);
+        let (plinth_cx, plinth_cy, plinth_lift) = tile_plinth_anchors
+            .and_then(|a| a.get(2).copied())
+            .map(|[x, y, z]| (x, y, z))
+            .unwrap_or((
+                boss_p.nx * layout.window_w,
+                boss_p.ny * layout.window_h,
+                layout.mm(boss_p.lift_mm),
+            ));
         frame.object3d(Object3d {
             pos: [plinth_cx, plinth_cy, plinth_lift],
             extents: [plinth_w, plinth_h, plinth_d],

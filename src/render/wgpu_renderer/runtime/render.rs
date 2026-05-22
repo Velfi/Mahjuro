@@ -28,6 +28,7 @@ struct OpsFlags {
     hallway_env: bool,
     archive_env: bool,
     main_menu_env: bool,
+    gameplay_env: bool,
     cascade: bool,
 }
 
@@ -41,6 +42,7 @@ impl OpsFlags {
                 RenderOp::HallwayEnvironment => f.hallway_env = true,
                 RenderOp::ArchiveEnvironment => f.archive_env = true,
                 RenderOp::MainMenuEnvironment => f.main_menu_env = true,
+                RenderOp::GameplayEnvironment => f.gameplay_env = true,
                 RenderOp::ShootingStarCascade => f.cascade = true,
                 _ => {}
             }
@@ -50,6 +52,7 @@ impl OpsFlags {
                 && f.hallway_env
                 && f.archive_env
                 && f.main_menu_env
+                && f.gameplay_env
                 && f.cascade
             {
                 break;
@@ -650,6 +653,10 @@ impl WgpuRenderer {
                     ops.push(RenderOp::MainMenuEnvironment);
                     i += 1;
                 }
+                DrawCmd::GameplayEnvironment => {
+                    ops.push(RenderOp::GameplayEnvironment);
+                    i += 1;
+                }
                 DrawCmd::ClearSceneDepth => {
                     ops.push(RenderOp::ClearSceneDepth);
                     i += 1;
@@ -1133,6 +1140,15 @@ impl WgpuRenderer {
                     .then_some((light_view_proj_arr, &mut shadow_uniforms_changed)),
             );
         }
+        if ops_flags.gameplay_env {
+            self.write_gameplay_environment_uniforms(
+                frame,
+                &camera,
+                false,
+                (shadows_enabled && !room_uses_baked_shadow)
+                    .then(|| (light_view_proj_arr, &mut shadow_uniforms_changed)),
+            );
+        }
         self.write_active_room_baked_shadow_globals(
             &self.queue,
             light_view_proj_arr,
@@ -1489,7 +1505,8 @@ impl WgpuRenderer {
             && (ops_flags.shop_env
                 || ops_flags.hallway_env
                 || ops_flags.archive_env
-                || ops_flags.main_menu_env);
+                || ops_flags.main_menu_env
+                || ops_flags.gameplay_env);
         let glb_room_emissive_prefetch =
             room_glb_emissive_env && (bloom_active || room_gi_effects_ok);
         if glb_room_emissive_prefetch {
@@ -1637,6 +1654,42 @@ impl WgpuRenderer {
                 }
                 self.write_main_menu_environment_uniforms(frame, &camera, false, None);
             }
+            if ops_flags.gameplay_env
+                && self.gameplay_environment.is_some()
+                && !self.gameplay_env_primitives.is_empty()
+            {
+                self.write_gameplay_environment_uniforms(frame, &camera, true, None);
+                {
+                    let room_bloom_ts = self
+                        .gpu_profiler
+                        .pass_writes(crate::render::gpu_profiler::PassSlot::RoomBloom);
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("gameplay-emissive-prefetch-pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &self.room_emissive_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                store: wgpu::StoreOp::Store,
+                            },
+                            depth_slice: None,
+                        })],
+                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                            view: &self.depth_view,
+                            depth_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Load,
+                                store: wgpu::StoreOp::Store,
+                            }),
+                            stencil_ops: None,
+                        }),
+                        occlusion_query_set: None,
+                        timestamp_writes: room_bloom_ts,
+                        multiview_mask: None,
+                    });
+                    self.draw_gameplay_environment_meshes(&mut pass, frame, true);
+                }
+                self.write_gameplay_environment_uniforms(frame, &camera, false, None);
+            }
         }
 
         // GI compute / apply / composite are only meaningful when we have
@@ -1690,6 +1743,17 @@ impl WgpuRenderer {
                     cpu.and_then(|c| {
                         let corners = crate::render::room_glb::room_world_bounds_corners_centered(
                             camera.h, env_h, c,
+                        );
+                        crate::render::room_glb::room_probe_world_aabb(&corners, 0.035)
+                    })
+                })
+            } else if ops_flags.gameplay_env {
+                crate::render::gameplay_glb::with_gameplay_glb_cpu(|cpu| {
+                    cpu.and_then(|c| {
+                        let corners = crate::render::room_glb::room_world_bounds_corners_centered(
+                            camera.h,
+                            self.room_gltf_height_scale,
+                            c,
                         );
                         crate::render::room_glb::room_probe_world_aabb(&corners, 0.035)
                     })

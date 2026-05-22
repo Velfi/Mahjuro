@@ -13,6 +13,7 @@ pub mod coin_mesh;
 pub mod cpu_profiler;
 pub mod decal;
 pub mod draw_cmd;
+pub mod gameplay_glb;
 pub mod flame_volume;
 pub mod flying_coins;
 pub mod gltf_helpers;

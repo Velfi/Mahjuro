@@ -742,6 +742,8 @@ pub enum DrawCmd {
     ArchiveEnvironment,
     /// Imported `main_menu.glb` hub waterfront (same GPU path as [`DrawCmd::ShopEnvironment`]).
     MainMenuEnvironment,
+    /// Imported [`gameplay.glb`](../../assets/3d/gameplay.glb) table room (same GPU path as shop).
+    GameplayEnvironment,
     /// Reset the main scene depth target while keeping the HDR color buffer. Later 3D
     /// draws (same camera) composite by depth among themselves but no longer test
     /// against geometry drawn before this marker — e.g. pack celebration meshes over
@@ -921,6 +923,10 @@ impl UiFrame {
     pub fn main_menu_environment(&mut self) {
         self.cmds.push(DrawCmd::MainMenuEnvironment);
     }
+    /// Draw [`gameplay.glb`](../../assets/3d/gameplay.glb). No-op if the asset failed to load.
+    pub fn gameplay_environment(&mut self) {
+        self.cmds.push(DrawCmd::GameplayEnvironment);
+    }
     /// See [`DrawCmd::ClearSceneDepth`].
     pub fn clear_scene_depth(&mut self) {
         self.cmds.push(DrawCmd::ClearSceneDepth);
@@ -1029,6 +1035,7 @@ impl UiFrame {
                 | DrawCmd::HallwayEnvironment
                 | DrawCmd::ArchiveEnvironment
                 | DrawCmd::MainMenuEnvironment
+                | DrawCmd::GameplayEnvironment
                 | DrawCmd::ClearSceneDepth
                 | DrawCmd::Table
                 | DrawCmd::ShowcaseTileBatch(_)
