@@ -5,7 +5,7 @@ Generate relic **source** art for Mahjuro via Google's Nano Banana 2 image API.
 Relic list matches `RelicId` / `asset_filename` in `src/core/relic.rs`. Art
 direction: realistic soft-enamel lapel pins (custom die-cut silhouettes, raised metal lines, recessed fills).
 
-**Writes (under `assets/textures/relics/source/` by default)**
+**Writes (under `assets/textures/relics/` by default)**
 
   • `{slug}_object.png` — RGBA color render (transparent background). Fallback
     albedo if `derive` has not produced `relics/{slug}.png` yet; see
@@ -69,11 +69,7 @@ from _image_gen import (  # noqa: E402
 
 
 OUTPUT_DIR = (
-    Path(__file__).resolve().parent.parent
-    / "assets"
-    / "textures"
-    / "relics"
-    / "source"
+    Path(__file__).resolve().parent.parent / "assets" / "textures" / "relics"
 )
 
 # Shared style description injected into every prompt. Tuned for isolated
@@ -1896,8 +1892,8 @@ def main() -> None:
             rarity = SLUG_TO_RARITY.get(slug, "?")
             print(
                 f"  {i:2d}. {name:<22s}  [{rarity:<9s}]  "
-                f"source/{slug}_object.png, source/{slug}_height.png, "
-                f"source/{slug}_specular.png, source/{slug}_mask.png"
+                f"{slug}_object.png, {slug}_height.png, "
+                f"{slug}_specular.png, {slug}_mask.png"
             )
         print(
             "\n  Runtime albedo: relics/{slug}.png (derived separately)."

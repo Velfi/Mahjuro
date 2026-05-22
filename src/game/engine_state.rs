@@ -235,9 +235,9 @@ mod tests {
     fn core_state_round_trips_through_run() {
         let mut run = RunState::new_demo();
         *run.hand_mut() = vec![
-            Tile::new(Suit::Dots, 9, 1),
-            Tile::new(Suit::Characters, 2, 2),
-            Tile::new(Suit::Bamboos, 4, 3),
+            Tile::new(Suit::Pinzu, 9, 1),
+            Tile::new(Suit::Manzu, 2, 2),
+            Tile::new(Suit::Souzu, 4, 3),
         ];
         *run.selected_mut() = vec![true, false, true];
         run.gold = 42;
@@ -258,9 +258,9 @@ mod tests {
     fn marquee_selection_updates_owned_selected_mask() {
         let mut run = RunState::new_demo();
         *run.hand_mut() = vec![
-            Tile::new(Suit::Characters, 1, 10),
-            Tile::new(Suit::Characters, 2, 11),
-            Tile::new(Suit::Characters, 3, 12),
+            Tile::new(Suit::Manzu, 1, 10),
+            Tile::new(Suit::Manzu, 2, 11),
+            Tile::new(Suit::Manzu, 3, 12),
         ];
         *run.selected_mut() = vec![false; 3];
         let mut core = GameplayCoreState::from_run(&run);

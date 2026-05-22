@@ -224,6 +224,9 @@ pub(super) fn make_image_quad_overlay_gpu(
             let h = rgba.height();
             (rgba.into_raw(), w, h)
         }
+        crate::render::draw_cmd::ImageQuadSource::Relic(id) => {
+            crate::render::relic_pipeline::decode_relic_icon_rgba(*id)?
+        }
         crate::render::draw_cmd::ImageQuadSource::Filesystem(path) => {
             crate::render::kenney_svg::rasterize_filesystem_svg_or_png_rgba(path)?
         }

@@ -949,7 +949,7 @@ mod tests {
     use std::time::Instant;
 
     fn test_tile(id: u32) -> Tile {
-        Tile::new(Suit::Characters, 1, id)
+        Tile::new(Suit::Manzu, 1, id)
     }
 
     #[test]

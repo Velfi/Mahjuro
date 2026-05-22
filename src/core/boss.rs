@@ -372,24 +372,24 @@ fn tax_collector_apply(run: &mut RunState) {
 fn blight_reveal(run: &mut RunState) -> ResolvedBossEffect {
     let candidates = [
         (
-            TileDebuff::Suit(crate::core::tile::Suit::Characters),
+            TileDebuff::Suit(crate::core::tile::Suit::Manzu),
             run.hand()
                 .iter()
-                .filter(|t| t.suit == crate::core::tile::Suit::Characters)
+                .filter(|t| t.suit == crate::core::tile::Suit::Manzu)
                 .count(),
         ),
         (
-            TileDebuff::Suit(crate::core::tile::Suit::Bamboos),
+            TileDebuff::Suit(crate::core::tile::Suit::Souzu),
             run.hand()
                 .iter()
-                .filter(|t| t.suit == crate::core::tile::Suit::Bamboos)
+                .filter(|t| t.suit == crate::core::tile::Suit::Souzu)
                 .count(),
         ),
         (
-            TileDebuff::Suit(crate::core::tile::Suit::Dots),
+            TileDebuff::Suit(crate::core::tile::Suit::Pinzu),
             run.hand()
                 .iter()
-                .filter(|t| t.suit == crate::core::tile::Suit::Dots)
+                .filter(|t| t.suit == crate::core::tile::Suit::Pinzu)
                 .count(),
         ),
         (
@@ -430,18 +430,18 @@ fn blight_reveal(run: &mut RunState) -> ResolvedBossEffect {
 }
 
 fn counterweight_reveal(run: &mut RunState) -> ResolvedBossEffect {
-    let mut characters = 0u32;
-    let mut bamboos = 0u32;
-    let mut dots = 0u32;
+    let mut manzu = 0u32;
+    let mut souzu = 0u32;
+    let mut pinzu = 0u32;
     let mut honors = 0u32;
     let mut terminals = 0u32;
     let mut flowers = 0u32;
 
     for &relic in &run.relics.active {
         match relic {
-            RelicId::RubySerpent => characters += 3,
-            RelicId::JadeSerpent => bamboos += 3,
-            RelicId::LapisSerpent => dots += 3,
+            RelicId::RubySerpent => manzu += 3,
+            RelicId::JadeSerpent => souzu += 3,
+            RelicId::LapisSerpent => pinzu += 3,
             RelicId::HonorFury
             | RelicId::DragonRage
             | RelicId::GreenLuck
@@ -462,14 +462,14 @@ fn counterweight_reveal(run: &mut RunState) -> ResolvedBossEffect {
             (TileDebuff::Class(TileDebuffClass::Honors), 0usize),
             |best, tile| {
                 let candidate = match tile.suit {
-                    crate::core::tile::Suit::Characters => {
-                        TileDebuff::Suit(crate::core::tile::Suit::Characters)
+                    crate::core::tile::Suit::Manzu => {
+                        TileDebuff::Suit(crate::core::tile::Suit::Manzu)
                     }
-                    crate::core::tile::Suit::Bamboos => {
-                        TileDebuff::Suit(crate::core::tile::Suit::Bamboos)
+                    crate::core::tile::Suit::Souzu => {
+                        TileDebuff::Suit(crate::core::tile::Suit::Souzu)
                     }
-                    crate::core::tile::Suit::Dots => {
-                        TileDebuff::Suit(crate::core::tile::Suit::Dots)
+                    crate::core::tile::Suit::Pinzu => {
+                        TileDebuff::Suit(crate::core::tile::Suit::Pinzu)
                     }
                     crate::core::tile::Suit::Flower => {
                         TileDebuff::Suit(crate::core::tile::Suit::Flower)
@@ -491,11 +491,11 @@ fn counterweight_reveal(run: &mut RunState) -> ResolvedBossEffect {
 
     let chosen = [
         (
-            TileDebuff::Suit(crate::core::tile::Suit::Characters),
-            characters,
+            TileDebuff::Suit(crate::core::tile::Suit::Manzu),
+            manzu,
         ),
-        (TileDebuff::Suit(crate::core::tile::Suit::Bamboos), bamboos),
-        (TileDebuff::Suit(crate::core::tile::Suit::Dots), dots),
+        (TileDebuff::Suit(crate::core::tile::Suit::Souzu), souzu),
+        (TileDebuff::Suit(crate::core::tile::Suit::Pinzu), pinzu),
         (TileDebuff::Class(TileDebuffClass::Honors), honors),
         (TileDebuff::Class(TileDebuffClass::Terminals), terminals),
         (TileDebuff::Suit(crate::core::tile::Suit::Flower), flowers),
@@ -636,9 +636,9 @@ fn boss_behavior(kind: BossKind) -> BossBehavior {
             b.on_apply = Some(tribute_apply);
             b.on_play = Some(tribute_play);
         }
-        B::Gate => b.tile_debuffs = &[TileDebuff::Suit(Suit::Characters)],
-        B::Grove => b.tile_debuffs = &[TileDebuff::Suit(Suit::Bamboos)],
-        B::Coin => b.tile_debuffs = &[TileDebuff::Suit(Suit::Dots)],
+        B::Gate => b.tile_debuffs = &[TileDebuff::Suit(Suit::Manzu)],
+        B::Grove => b.tile_debuffs = &[TileDebuff::Suit(Suit::Souzu)],
+        B::Coin => b.tile_debuffs = &[TileDebuff::Suit(Suit::Pinzu)],
         B::Rot => b.rule_pushes = &[RuleModifier::NoFlowerWildcards],
         B::Hermit => b.rule_pushes = &[RuleModifier::PairsScoreZero],
         B::Forest => b.rule_pushes = &[RuleModifier::SequencesHalved],
@@ -779,21 +779,6 @@ mod tests {
         assert!(beh.tile_debuffs.is_empty());
     }
 
-    fn static_debuff_bosses_are_in_regular_pool() {
-        let pool = regular_pool();
-        for boss in [
-            BossKind::Gate,
-            BossKind::Grove,
-            BossKind::Coin,
-            BossKind::Ash,
-            BossKind::Furnace,
-            BossKind::Relic,
-            BossKind::Counterweight,
-        ] {
-            assert!(pool.contains(&boss), "{boss:?} should be rollable");
-        }
-    }
-
     #[test]
     fn the_rot_is_in_regular_pool() {
         assert!(regular_pool().contains(&BossKind::Rot));
@@ -806,8 +791,8 @@ mod tests {
             custom_tile(Suit::Flower, 1, 1),
             custom_tile(Suit::Flower, 2, 2),
             custom_tile(Suit::Flower, 3, 3),
-            custom_tile(Suit::Characters, 1, 4),
-            custom_tile(Suit::Bamboos, 2, 5),
+            custom_tile(Suit::Manzu, 1, 4),
+            custom_tile(Suit::Souzu, 2, 5),
         ];
         *run.selected_mut() = vec![false; run.hand().len()];
 
@@ -821,20 +806,20 @@ mod tests {
         let mut run = RunState::new(GameMode::standard());
         run.relics.active = vec![RelicId::JadeSerpent, RelicId::GardenKeeper];
         *run.hand_mut() = vec![
-            custom_tile(Suit::Characters, 1, 1),
-            custom_tile(Suit::Characters, 2, 2),
-            custom_tile(Suit::Bamboos, 3, 3),
-            custom_tile(Suit::Bamboos, 4, 4),
+            custom_tile(Suit::Manzu, 1, 1),
+            custom_tile(Suit::Manzu, 2, 2),
+            custom_tile(Suit::Souzu, 3, 3),
+            custom_tile(Suit::Souzu, 4, 4),
             custom_tile(Suit::Flower, 1, 5),
         ];
         *run.selected_mut() = vec![false; run.hand().len()];
 
         let effect = counterweight_reveal(&mut run);
 
-        assert_eq!(effect.tile_debuffs, vec![TileDebuff::Suit(Suit::Bamboos)]);
+        assert_eq!(effect.tile_debuffs, vec![TileDebuff::Suit(Suit::Souzu)]);
         assert_eq!(
             effect.description_override.as_deref(),
-            Some("Countered your relic loadout: Bamboos tiles are debuffed")
+            Some("Countered your relic loadout: Souzu tiles are debuffed")
         );
     }
 

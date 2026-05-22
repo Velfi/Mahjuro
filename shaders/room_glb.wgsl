@@ -183,15 +183,14 @@ fn sample_shadow_visibility(world_pos: vec3<f32>) -> f32 {
     }
     let bias = shadow_globals.params.y;
     let texel = shadow_globals.params.z;
-    let dynamic_vis = sample_shadow_pcf(
-        shadow_globals.light_view_proj,
-        shadow_map,
-        world_pos,
-        bias,
-        texel,
-    );
     if (shadow_globals.params.w < 0.5) {
-        return dynamic_vis;
+        return sample_shadow_pcf(
+            shadow_globals.light_view_proj,
+            shadow_map,
+            world_pos,
+            bias,
+            texel,
+        );
     }
     let baked_vis = sample_shadow_pcf_baked(
         shadow_globals.room_baked_light_view_proj,
@@ -199,13 +198,24 @@ fn sample_shadow_visibility(world_pos: vec3<f32>) -> f32 {
         bias,
         texel,
     );
-    var vis = dynamic_vis * baked_vis;
     let lp = shadow_globals.room_baked_light_view_proj * vec4<f32>(world_pos, 1.0);
     let proj = lp.xyz / lp.w;
     let uv = vec2<f32>(proj.x * 0.5 + 0.5, proj.y * -0.5 + 0.5);
+    var vis = baked_vis;
     if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) {
         let ao = textureSample(baked_shadow_ao, baked_shadow_ao_samp, uv).r;
         vis = vis * ao;
+    }
+    // Archive (`params.w >= 2`): caster/receiver split — room shell samples offline
+    // contact only; catalog props use `lit_mesh` + the live map (inspect subject).
+    if (shadow_globals.params.w < 1.5) {
+        vis = vis * sample_shadow_pcf(
+            shadow_globals.light_view_proj,
+            shadow_map,
+            world_pos,
+            bias,
+            texel,
+        );
     }
     return vis;
 }

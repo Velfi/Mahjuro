@@ -38,7 +38,7 @@
   }
 
   function relicObjectArtUrl(id, base) {
-    return new URL(`textures/relics/source/${id}_object.png`, base).href;
+    return new URL(`textures/relics/${id}_object.png`, base).href;
   }
 
   let loadGen = 0;

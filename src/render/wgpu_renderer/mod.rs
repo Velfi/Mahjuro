@@ -216,6 +216,8 @@ pub struct WgpuRenderer {
     /// GPU primitive index of `sign_description_left` in `archive_env_primitives` (for culling).
     archive_sign_left_prim_idx: Option<usize>,
     archive_sign_right_prim_idx: Option<usize>,
+    /// Per-primitive shadow caster flags (parallel to `archive_env_primitives`).
+    archive_env_shadow_caster_mask: Vec<bool>,
     /// Last-uploaded description decal (`archive_sign_decal_texture`); `u64::MAX` = cleared / none.
     archive_sign_decal_upload_key: u64,
     /// Multiplier for embedded glTF **room** scale (`window_h *` this): shop, hallway, archive, etc.

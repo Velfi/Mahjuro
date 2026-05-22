@@ -139,7 +139,8 @@ struct App {
     quit_requested: bool,
     close_saved: bool,
     modals: ModalQueue,
-    /// Meta profile level-up after game over — shown as [`Scene::Showcase`] (`MetaLevelUpPresenter`).
+    /// Meta profile level-up after game over — stinger + [`Scene::Showcase`]
+    /// (`MetaLevelUpPresenter`) once the main menu fade-in finishes.
     pending_post_game_over_level_up: Option<Modal>,
     gfx: RenderSettings,
     effect_layers: crate::effect_layers::EffectLayers,

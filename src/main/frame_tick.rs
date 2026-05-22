@@ -8,6 +8,31 @@ use crate::sdl_shell::SdlShell;
 use crate::ui::input::RumbleLabOp;
 
 impl App {
+    /// After game over, meta profile level-up waits until the main menu is
+    /// fully visible (fade-in complete, no blocking modals) before the stinger
+    /// and unlock showcase overlay.
+    fn try_surface_pending_post_game_over_level_up(&mut self) {
+        if self.pending_post_game_over_level_up.is_none() {
+            return;
+        }
+        if self.pending_scene.is_some()
+            || self.transition_alpha < 1.0
+            || self.modals.is_active()
+            || !self.overlay_stack.is_empty()
+            || !matches!(self.scene, Scene::MainMenuExterior(_))
+        {
+            return;
+        }
+        let Some(modal) = self.pending_post_game_over_level_up.take() else {
+            return;
+        };
+        self.audio.play_sfx(crate::audio::SfxId::LevelUp);
+        self.overlay_stack
+            .push(Scene::Showcase(scenes::ShowcaseScene::new(
+                scenes::ShowcasePresenter::MetaLevelUp(scenes::MetaLevelUpPresenter::new(modal)),
+            )));
+    }
+
     /// Whether scoring-cascade / hold-to-sell rumble should fire this frame:
     /// the player is on the controller and hasn't disabled gameplay rumble in
     /// settings. (The setting was originally named after shop hold-to-sell
@@ -1033,21 +1058,6 @@ impl App {
                 if let Some(next) = self.pending_scene.take() {
                     let from_tag = SceneTag::from(&self.scene);
                     let to_tag = SceneTag::from(&next);
-                    // If we're transitioning out of the GameOver scene,
-                    // surface deferred meta level-up on the showcase overlay.
-                    let pushed_meta_level_up = if matches!(self.scene, Scene::GameOver(_))
-                        && let Some(modal) = self.pending_post_game_over_level_up.take()
-                    {
-                        self.overlay_stack
-                            .push(Scene::Showcase(scenes::ShowcaseScene::new(
-                                scenes::ShowcasePresenter::MetaLevelUp(
-                                    scenes::MetaLevelUpPresenter::new(modal),
-                                ),
-                            )));
-                        true
-                    } else {
-                        false
-                    };
                     // Route the new scene to the target recorded
                     // when the transition started, not whatever is
                     // on top now — overlays may have been pushed
@@ -1074,7 +1084,6 @@ impl App {
                     apply_post_scene_transition_effects(PostSceneTransitionCtx {
                         from: from_tag,
                         to: to_tag,
-                        pushed_meta_level_up,
                         gameplay_boss_blind,
                         anim: &mut self.anim,
                         renderer: self.renderer.as_mut(),
@@ -1094,6 +1103,8 @@ impl App {
                 self.transition_speed = DEFAULT_QUICK_SPEC.speed;
             }
         }
+
+        self.try_surface_pending_post_game_over_level_up();
 
         // Handle quit request from scene.
         if quit_requested {

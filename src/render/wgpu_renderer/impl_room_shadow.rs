@@ -4,7 +4,9 @@ use super::*;
 use crate::render::lit_mesh::{ShadowGlobals, create_shadow_sample_bind_group};
 use crate::render::room_gi_bake::RoomGiRoom;
 use crate::render::room_shadow_bake::{self, RoomShadowBake};
-use crate::render::wgpu_renderer::runtime::shadow_setup::ActiveRoomEnv;
+use crate::render::wgpu_renderer::runtime::shadow_setup::{
+    self, ActiveRoomEnv,
+};
 
 pub(crate) struct RoomBakedShadowGpu {
     pub sample_bind_group: wgpu::BindGroup,
@@ -191,23 +193,29 @@ impl WgpuRenderer {
             return;
         };
         let enabled = if shadows_enabled { 1.0 } else { 0.0 };
+        let baked_mode = if room == RoomGiRoom::Archive { 2.0 } else { 1.0 };
         queue.write_buffer(
             &gpu.globals_buffer,
             0,
             bytemuck::bytes_of(&ShadowGlobals {
                 light_view_proj,
-                params: [enabled, gpu.depth_bias, gpu.texel, 1.0],
+                params: [enabled, gpu.depth_bias, gpu.texel, baked_mode],
                 room_baked_light_view_proj: gpu.baked_light_view_proj,
             }),
         );
     }
 
     pub(super) fn upload_active_room_baked_shadow_globals(&mut self, frame: &UiFrame) {
-        self.active_room_baked_shadow = ActiveRoomEnv::from_frame(frame).and_then(|env: ActiveRoomEnv| {
+        let active_env = ActiveRoomEnv::from_frame(frame);
+        let loaded = active_env.and_then(|env| {
             let room = env.to_room_gi()?;
             self.room_baked_shadow_gpu[room_index(room)]
                 .as_ref()
                 .map(|_| room)
+        });
+        self.active_room_baked_shadow = active_env.and_then(|env| {
+            shadow_setup::room_env_uses_offline_baked_shadow(Some(env), loaded)
+                .then_some(loaded?)
         });
     }
 
@@ -285,11 +293,17 @@ impl WgpuRenderer {
         let depth_bytes: Arc<[u8]> = Arc::from(mapped[..].to_vec());
         drop(mapped);
         staging.buffer.unmap();
-        let ao = room_shadow_bake::bake_contact_ao_from_depth(
-            staging.width,
-            staging.height,
-            &depth_bytes,
-        );
+        let ao_len = (staging.width * staging.height) as usize;
+        let ao: Arc<[u8]> = if staging.room == RoomGiRoom::Archive {
+            // Cubby-only caster bake: contact AO darkens `main_fixture` shelf-wide.
+            Arc::from(vec![255u8; ao_len])
+        } else {
+            Arc::from(room_shadow_bake::bake_contact_ao_from_depth(
+                staging.width,
+                staging.height,
+                &depth_bytes,
+            ))
+        };
         Ok(RoomShadowBake {
             room: staging.room,
             width: staging.width,
@@ -324,14 +338,5 @@ fn room_index(room: RoomGiRoom) -> usize {
 impl ActiveRoomEnv {
     pub fn from_frame(frame: &UiFrame) -> Option<Self> {
         crate::render::wgpu_renderer::runtime::shadow_setup::active_room_env(frame)
-    }
-
-    pub fn to_room_gi(self) -> Option<RoomGiRoom> {
-        match self {
-            Self::Shop => Some(RoomGiRoom::Shop),
-            Self::Hallway => Some(RoomGiRoom::Hallway),
-            Self::Archive => Some(RoomGiRoom::Archive),
-            Self::MainMenu => Some(RoomGiRoom::MainMenu),
-        }
     }
 }

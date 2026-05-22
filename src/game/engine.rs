@@ -1441,9 +1441,9 @@ mod tests {
     fn commit_selection_rejects_invalid_melds() {
         let mut run = deterministic_run();
         *run.hand_mut() = vec![
-            tile(Suit::Characters, 1, 0),
-            tile(Suit::Bamboos, 4, 1),
-            tile(Suit::Dots, 9, 2),
+            tile(Suit::Manzu, 1, 0),
+            tile(Suit::Souzu, 4, 1),
+            tile(Suit::Pinzu, 9, 2),
         ];
         *run.selected_mut() = vec![true, true, true];
         let mut bus = EventBus::default();
@@ -1523,17 +1523,17 @@ mod tests {
 
     fn winning_structure_bank() -> (Vec<Tile>, Vec<DetectedMeld>) {
         let tiles = vec![
-            tile(Suit::Characters, 1, 1),
-            tile(Suit::Characters, 1, 2),
-            tile(Suit::Characters, 2, 3),
-            tile(Suit::Characters, 3, 4),
-            tile(Suit::Characters, 4, 5),
-            tile(Suit::Dots, 2, 6),
-            tile(Suit::Dots, 3, 7),
-            tile(Suit::Dots, 4, 8),
-            tile(Suit::Bamboos, 5, 9),
-            tile(Suit::Bamboos, 6, 10),
-            tile(Suit::Bamboos, 7, 11),
+            tile(Suit::Manzu, 1, 1),
+            tile(Suit::Manzu, 1, 2),
+            tile(Suit::Manzu, 2, 3),
+            tile(Suit::Manzu, 3, 4),
+            tile(Suit::Manzu, 4, 5),
+            tile(Suit::Pinzu, 2, 6),
+            tile(Suit::Pinzu, 3, 7),
+            tile(Suit::Pinzu, 4, 8),
+            tile(Suit::Souzu, 5, 9),
+            tile(Suit::Souzu, 6, 10),
+            tile(Suit::Souzu, 7, 11),
             tile(Suit::Wind, 1, 12),
             tile(Suit::Wind, 1, 13),
             tile(Suit::Wind, 1, 14),

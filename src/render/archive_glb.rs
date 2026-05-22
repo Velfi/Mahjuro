@@ -37,6 +37,35 @@ pub const SECTION_BUTTONS_LEFT_BOUND: &str = "section_buttons_left_bound";
 pub const SECTION_BUTTONS_RIGHT_BOUND: &str = "section_buttons_right_bound";
 pub const ARCHIVE_SPAWN_FOCUSED_ITEM: &str = "archive_spawn_focused_item";
 
+/// Receiver shells excluded from the offline / live directional **caster** pass.
+///
+/// `main_fixture` and room envelope meshes fill the bake ortho frustum and self-occlude when
+/// written into the `.msh`; they still receive baked contact from [`archive_prim_casts_room_shadow`].
+const ARCHIVE_SHADOW_RECEIVER_ONLY: &[&str] = &[
+    "main_fixture",
+    "Floor",
+    "Ceiling",
+    "subtractor",
+    SECTION_BUTTONS_LEFT_BOUND,
+    SECTION_BUTTONS_RIGHT_BOUND,
+    SIGN_DESCRIPTION_LEFT,
+    SIGN_DESCRIPTION_RIGHT,
+];
+
+/// Whether this archive room primitive casts into the directional shadow map (live or bake).
+///
+/// Only the cubby lattice casts; receiver shells are listed in
+/// [`ARCHIVE_SHADOW_RECEIVER_ONLY`].
+#[inline]
+pub fn archive_prim_casts_room_shadow(node_name: Option<&str>) -> bool {
+    match node_name {
+        None => false,
+        Some(name) if ARCHIVE_SHADOW_RECEIVER_ONLY.contains(&name) => false,
+        Some(name) if name.starts_with("Cubby") => true,
+        Some(_) => false,
+    }
+}
+
 /// Fallback host extents for [`crate::render::decal::decal_dimensions`] when the archive `.glb`
 /// is missing. Live archive decal sizing reads the actual sign-face aspect via
 /// [`archive_sign_description_decal_extents`].
@@ -420,4 +449,19 @@ pub fn archive_embedded_spot_lights_runtime(
         })
         .unwrap_or_default()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn archive_shadow_caster_receiver_split() {
+        assert!(!archive_prim_casts_room_shadow(Some("main_fixture")));
+        assert!(!archive_prim_casts_room_shadow(Some(SIGN_DESCRIPTION_LEFT)));
+        assert!(archive_prim_casts_room_shadow(Some("Cubby")));
+        assert!(archive_prim_casts_room_shadow(Some("Cubby.001")));
+        assert!(!archive_prim_casts_room_shadow(Some("Wall")));
+        assert!(!archive_prim_casts_room_shadow(Some("Floor")));
+    }
 }

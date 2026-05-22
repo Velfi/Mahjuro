@@ -1481,15 +1481,15 @@ mod tests {
     fn scoring_test_run() -> RunState {
         let mut run = RunState::new_demo();
         *run.hand_mut() = vec![
-            t(Suit::Characters, 3, 1),
-            t(Suit::Characters, 3, 2),
-            t(Suit::Characters, 3, 3),
-            t(Suit::Bamboos, 6, 4),
-            t(Suit::Bamboos, 6, 5),
-            t(Suit::Bamboos, 6, 6),
-            t(Suit::Dots, 2, 7),
-            t(Suit::Dots, 3, 8),
-            t(Suit::Dots, 4, 9),
+            t(Suit::Manzu, 3, 1),
+            t(Suit::Manzu, 3, 2),
+            t(Suit::Manzu, 3, 3),
+            t(Suit::Souzu, 6, 4),
+            t(Suit::Souzu, 6, 5),
+            t(Suit::Souzu, 6, 6),
+            t(Suit::Pinzu, 2, 7),
+            t(Suit::Pinzu, 3, 8),
+            t(Suit::Pinzu, 4, 9),
         ];
         run.hand_mut().sort();
         run
@@ -1539,12 +1539,12 @@ mod tests {
     fn bot_finds_kokushi_musou_on_complete_hand() {
         let mut run = RunState::new_demo();
         *run.hand_mut() = vec![
-            t(Suit::Characters, 1, 0),
-            t(Suit::Characters, 9, 1),
-            t(Suit::Bamboos, 1, 2),
-            t(Suit::Bamboos, 9, 3),
-            t(Suit::Dots, 1, 4),
-            t(Suit::Dots, 9, 5),
+            t(Suit::Manzu, 1, 0),
+            t(Suit::Manzu, 9, 1),
+            t(Suit::Souzu, 1, 2),
+            t(Suit::Souzu, 9, 3),
+            t(Suit::Pinzu, 1, 4),
+            t(Suit::Pinzu, 9, 5),
             t(Suit::Wind, 1, 6),
             t(Suit::Wind, 2, 7),
             t(Suit::Wind, 3, 8),
@@ -1552,7 +1552,7 @@ mod tests {
             t(Suit::Dragon, 1, 10),
             t(Suit::Dragon, 2, 11),
             t(Suit::Dragon, 3, 12),
-            t(Suit::Characters, 1, 13),
+            t(Suit::Manzu, 1, 13),
         ];
         run.hand_mut().sort();
         let best = pick_best_play(&run).expect("kokushi should score");
@@ -1567,13 +1567,13 @@ mod tests {
     fn enumerated_masks_match_bruteforce_best_play_with_flowers() {
         let mut run = RunState::new_demo();
         *run.hand_mut() = vec![
-            t(Suit::Characters, 2, 1),
-            t(Suit::Characters, 3, 2),
-            t(Suit::Characters, 5, 3),
-            t(Suit::Characters, 5, 4),
-            t(Suit::Characters, 5, 5),
-            t(Suit::Bamboos, 7, 6),
-            t(Suit::Bamboos, 8, 7),
+            t(Suit::Manzu, 2, 1),
+            t(Suit::Manzu, 3, 2),
+            t(Suit::Manzu, 5, 3),
+            t(Suit::Manzu, 5, 4),
+            t(Suit::Manzu, 5, 5),
+            t(Suit::Souzu, 7, 6),
+            t(Suit::Souzu, 8, 7),
             t(Suit::Dragon, 1, 8),
             t(Suit::Dragon, 1, 9),
             t(Suit::Flower, 1, 10),
@@ -1589,12 +1589,12 @@ mod tests {
     fn candidate_masks_only_produce_valid_selections() {
         let mut run = RunState::new_demo();
         *run.hand_mut() = vec![
-            t(Suit::Characters, 1, 1),
-            t(Suit::Characters, 2, 2),
-            t(Suit::Characters, 3, 3),
-            t(Suit::Characters, 7, 4),
-            t(Suit::Characters, 7, 5),
-            t(Suit::Characters, 7, 6),
+            t(Suit::Manzu, 1, 1),
+            t(Suit::Manzu, 2, 2),
+            t(Suit::Manzu, 3, 3),
+            t(Suit::Manzu, 7, 4),
+            t(Suit::Manzu, 7, 5),
+            t(Suit::Manzu, 7, 6),
             t(Suit::Wind, 1, 7),
             t(Suit::Wind, 1, 8),
             t(Suit::Flower, 1, 9),
@@ -1646,8 +1646,8 @@ mod tests {
     fn candidate_masks_include_each_flower_identity_for_wildcard_melds() {
         let mut run = RunState::new_demo();
         *run.hand_mut() = vec![
-            t(Suit::Characters, 5, 1),
-            t(Suit::Characters, 5, 2),
+            t(Suit::Manzu, 5, 1),
+            t(Suit::Manzu, 5, 2),
             t(Suit::Flower, 1, 3),
             t(Suit::Flower, 2, 4),
         ];
@@ -1727,9 +1727,9 @@ mod tests {
     fn honors_talisman_values_hands_with_few_numbered_tiles() {
         let mut run = scoring_test_run();
         *run.hand_mut() = vec![
-            t(Suit::Characters, 3, 1),
-            t(Suit::Characters, 4, 2),
-            t(Suit::Characters, 5, 3),
+            t(Suit::Manzu, 3, 1),
+            t(Suit::Manzu, 4, 2),
+            t(Suit::Manzu, 5, 3),
             t(Suit::Wind, 1, 4),
             t(Suit::Wind, 1, 5),
             t(Suit::Dragon, 1, 6),
@@ -1917,7 +1917,7 @@ impl ShopMarginalBase {
 ///
 /// We need the random sampling because most relics' effects are
 /// hand-conditional — `TripletBoost` is worthless on a hand with no triplets,
-/// `BambooCharm` does nothing without bamboo tiles. Evaluating only the current
+/// Souzu serpent relics do nothing without souzu tiles. Evaluating only the current
 /// hand systematically under-values relics whose payoff is "applies whenever you
 /// happen to draw the right tiles." A handful of synthetic hands surface that
 /// expected value.
@@ -2000,11 +2000,11 @@ fn transform_talisman_lift_on_hand(
         // Suit-transforms rewrite selected numbered tiles to a target suit.
         // Convert all numbered tiles NOT already in the target suit and
         // measure the delta against the baseline.
-        TalismanKind::Bamboo | TalismanKind::Dots | TalismanKind::Characters => {
+        TalismanKind::Souzu | TalismanKind::Pinzu | TalismanKind::Manzu => {
             let target = match kind {
-                TalismanKind::Bamboo => Suit::Bamboos,
-                TalismanKind::Dots => Suit::Dots,
-                TalismanKind::Characters => Suit::Characters,
+                TalismanKind::Souzu => Suit::Souzu,
+                TalismanKind::Pinzu => Suit::Pinzu,
+                TalismanKind::Manzu => Suit::Manzu,
                 _ => unreachable!(),
             };
             let sel: Vec<usize> = hand

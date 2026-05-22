@@ -124,8 +124,8 @@ Distance > 0.080 from any token. These are the colors that either deserve their 
 | `src/core/talisman.rs` | 136 | `#FFD661` | 1.00, 0.84, 0.38 | `CHAMPAGNE` | 0.106 | TalismanKind::Gilded => [1.0, 0.84, 0.38, 1.0], |
 | `src/core/talisman.rs` | 137 | `#D18CF2` | 0.82, 0.55, 0.95 | `RELIC_SILVER` | 0.298 | TalismanKind::Polychrome => [0.82, 0.55, 0.95, 1.0], |
 | `src/core/talisman.rs` | 138 | `#0F8C47` | 0.06, 0.55, 0.28 | `FELT_LIT` | 0.268 | TalismanKind::Bamboo => [0.06, 0.55, 0.28, 1.0], |
-| `src/core/talisman.rs` | 139 | `#1438C7` | 0.08, 0.22, 0.78 | `TWILIGHT_GLOW` | 0.399 | TalismanKind::Dots => [0.08, 0.22, 0.78, 1.0], |
-| `src/core/talisman.rs` | 140 | `#D1142E` | 0.82, 0.08, 0.18 | `CINNABAR` | 0.154 | TalismanKind::Characters => [0.82, 0.08, 0.18, 1.0], |
+| `src/core/talisman.rs` | 139 | `#1438C7` | 0.08, 0.22, 0.78 | `TWILIGHT_GLOW` | 0.399 | TalismanKind::Pinzu => [0.08, 0.22, 0.78, 1.0], |
+| `src/core/talisman.rs` | 140 | `#D1142E` | 0.82, 0.08, 0.18 | `CINNABAR` | 0.154 | TalismanKind::Manzu => [0.82, 0.08, 0.18, 1.0], |
 | `src/core/talisman.rs` | 141 | `#C7A347` | 0.78, 0.64, 0.28 | `GOLD` | 0.141 | TalismanKind::Honors => [0.78, 0.64, 0.28, 1.0], |
 | `src/core/talisman.rs` | 142 | `#EB7A9E` | 0.92, 0.48, 0.62 | `RUBY` | 0.237 | TalismanKind::Wildflower => [0.92, 0.48, 0.62, 1.0], |
 | `src/core/talisman.rs` | 143 | `#9E99AD` | 0.62, 0.60, 0.68 | `STONE` | 0.138 | TalismanKind::Conformity => [0.62, 0.60, 0.68, 1.0], |

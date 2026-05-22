@@ -111,7 +111,7 @@ impl SceneBehavior for TutorialSummaryScene {
         let subtitle = if self.won {
             "You beat The Iconoclast and finished onboarding."
         } else {
-            "You reached the finale. Honors scored low under The Iconoclast — bamboo, dots, characters, and shop picks carried most runs."
+            "You reached the finale. Honors scored low under The Iconoclast — souzu, pinzu, manzu, and shop picks carried most runs."
         };
         let bullets = [
             "Pairs, triplets, and sequences become melds when you bank them into your structure.",

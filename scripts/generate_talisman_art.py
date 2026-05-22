@@ -99,16 +99,16 @@ SHOP_MOTIFS: dict[str, str] = {
         "each arm a raised wedge separated by groove moats, implying multicolor "
         "mult bonus."
     ),
-    "bamboo": (
-        "Motif — Bamboo: three vertical bamboo stalks with joint nodes, simplified "
+    "souzu": (
+        "Motif — Souzu: three vertical bamboo stalks with joint nodes, simplified "
         "segments, leaves as small raised chevrons at the top. Suit-transform tablet."
     ),
-    "dots": (
-        "Motif — Dots: a large concentric circle target (one bold ring, one inner "
+    "pinzu": (
+        "Motif — Pinzu: a large concentric circle target (one bold ring, one inner "
         "disk) like a simplified pin / circle suit pip, centered on the tablet."
     ),
-    "characters": (
-        "Motif — Characters: a bold wan / character suit square frame in the center "
+    "manzu": (
+        "Motif — Manzu: a bold wan / character suit square frame in the center "
         "with a raised horizontal bar and two side pillars — abstract, not a real "
         "kanji glyph."
     ),
@@ -160,7 +160,7 @@ MEMORIAL_MOTIFS: dict[str, str] = {
         "central dot, each a different simple geometric glyph."
     ),
     "transformer": (
-        "Motif — The Transformer: bamboo stalk, dot circle, and wan square in a "
+        "Motif — The Transformer: souzu stalk, pinzu circle, and manzu square in a "
         "column connected by morphing groove lines."
     ),
     "tag_bearer": (

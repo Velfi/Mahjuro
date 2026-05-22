@@ -14,6 +14,7 @@ impl RunState {
         use crate::core::consumable::Consumable;
 
         let item = self.consumables.take(index)?;
+        self.chronicle.note_consumable_used(item);
         match item {
             Consumable::Zodiac(z) => {
                 self.defeat_journal.zodiac_uses =
@@ -102,7 +103,7 @@ impl RunState {
             MemorialTalismanKind::Transformer => {
                 let suit = snapshot
                     .map(transformer_target_suit)
-                    .unwrap_or(crate::core::tile::Suit::Bamboos);
+                    .unwrap_or(crate::core::tile::Suit::Souzu);
                 for tile in &mut self.hand {
                     if tile.is_number_tile() {
                         tile.suit = suit;
@@ -139,11 +140,11 @@ impl RunState {
         }
 
         match kind {
-            TalismanKind::Bamboo | TalismanKind::Dots | TalismanKind::Characters => {
+            TalismanKind::Souzu | TalismanKind::Pinzu | TalismanKind::Manzu => {
                 let target = match kind {
-                    TalismanKind::Bamboo => Suit::Bamboos,
-                    TalismanKind::Dots => Suit::Dots,
-                    TalismanKind::Characters => Suit::Characters,
+                    TalismanKind::Souzu => Suit::Souzu,
+                    TalismanKind::Pinzu => Suit::Pinzu,
+                    TalismanKind::Manzu => Suit::Manzu,
                     _ => unreachable!(),
                 };
                 for tile in &mut self.hand {

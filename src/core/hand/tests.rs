@@ -10,9 +10,9 @@ fn t(suit: Suit, rank: u8, id: u32) -> Tile {
 #[test]
 fn triplet_detected() {
     let hand = vec![
-        t(Suit::Bamboos, 3, 0),
-        t(Suit::Bamboos, 3, 1),
-        t(Suit::Bamboos, 3, 2),
+        t(Suit::Souzu, 3, 0),
+        t(Suit::Souzu, 3, 1),
+        t(Suit::Souzu, 3, 2),
     ];
     let sets = find_pairs_and_triplets(&hand);
     assert!(sets.iter().any(|s| s.kind == MeldKind::Triplet));
@@ -21,9 +21,9 @@ fn triplet_detected() {
 #[test]
 fn sequence_detected() {
     let hand = vec![
-        t(Suit::Characters, 2, 0),
-        t(Suit::Characters, 3, 1),
-        t(Suit::Characters, 4, 2),
+        t(Suit::Manzu, 2, 0),
+        t(Suit::Manzu, 3, 1),
+        t(Suit::Manzu, 4, 2),
     ];
     let seqs = find_sequences(&hand);
     assert!(seqs.iter().any(|s| s.kind == MeldKind::Sequence));
@@ -33,7 +33,7 @@ fn sequence_detected() {
 
 #[test]
 fn validate_pair() {
-    let tiles = vec![t(Suit::Bamboos, 5, 0), t(Suit::Bamboos, 5, 1)];
+    let tiles = vec![t(Suit::Souzu, 5, 0), t(Suit::Souzu, 5, 1)];
     let sets = validate_selection(&tiles).unwrap();
     assert_eq!(sets.len(), 1);
     assert_eq!(sets[0].kind, MeldKind::Pair);
@@ -42,9 +42,9 @@ fn validate_pair() {
 #[test]
 fn validate_triplet() {
     let tiles = vec![
-        t(Suit::Dots, 7, 0),
-        t(Suit::Dots, 7, 1),
-        t(Suit::Dots, 7, 2),
+        t(Suit::Pinzu, 7, 0),
+        t(Suit::Pinzu, 7, 1),
+        t(Suit::Pinzu, 7, 2),
     ];
     let sets = validate_selection(&tiles).unwrap();
     assert_eq!(sets.len(), 1);
@@ -54,9 +54,9 @@ fn validate_triplet() {
 #[test]
 fn validate_sequence() {
     let tiles = vec![
-        t(Suit::Characters, 3, 0),
-        t(Suit::Characters, 4, 1),
-        t(Suit::Characters, 5, 2),
+        t(Suit::Manzu, 3, 0),
+        t(Suit::Manzu, 4, 1),
+        t(Suit::Manzu, 5, 2),
     ];
     let sets = validate_selection(&tiles).unwrap();
     assert_eq!(sets.len(), 1);
@@ -67,17 +67,17 @@ fn validate_sequence() {
 fn validate_rejects_leftover() {
     // 4 tiles: triplet + 1 leftover → invalid
     let tiles = vec![
-        t(Suit::Bamboos, 3, 0),
-        t(Suit::Bamboos, 3, 1),
-        t(Suit::Bamboos, 3, 2),
-        t(Suit::Dots, 9, 3),
+        t(Suit::Souzu, 3, 0),
+        t(Suit::Souzu, 3, 1),
+        t(Suit::Souzu, 3, 2),
+        t(Suit::Pinzu, 9, 3),
     ];
     assert!(validate_selection(&tiles).is_none());
 }
 
 #[test]
 fn validate_rejects_single_tile() {
-    let tiles = vec![t(Suit::Bamboos, 1, 0)];
+    let tiles = vec![t(Suit::Souzu, 1, 0)];
     assert!(validate_selection(&tiles).is_none());
 }
 
@@ -90,12 +90,12 @@ fn validate_rejects_empty() {
 fn validate_multi_set() {
     // triplet + sequence = 6 tiles
     let tiles = vec![
-        t(Suit::Bamboos, 3, 0),
-        t(Suit::Bamboos, 3, 1),
-        t(Suit::Bamboos, 3, 2),
-        t(Suit::Characters, 1, 3),
-        t(Suit::Characters, 2, 4),
-        t(Suit::Characters, 3, 5),
+        t(Suit::Souzu, 3, 0),
+        t(Suit::Souzu, 3, 1),
+        t(Suit::Souzu, 3, 2),
+        t(Suit::Manzu, 1, 3),
+        t(Suit::Manzu, 2, 4),
+        t(Suit::Manzu, 3, 5),
     ];
     let sets = validate_selection(&tiles).unwrap();
     assert_eq!(sets.len(), 2);
@@ -106,21 +106,21 @@ fn validate_full_hand() {
     // 4 sets + 1 pair = 14 tiles
     let tiles = vec![
         // triplet
-        t(Suit::Bamboos, 1, 0),
-        t(Suit::Bamboos, 1, 1),
-        t(Suit::Bamboos, 1, 2),
+        t(Suit::Souzu, 1, 0),
+        t(Suit::Souzu, 1, 1),
+        t(Suit::Souzu, 1, 2),
         // sequence
-        t(Suit::Characters, 4, 3),
-        t(Suit::Characters, 5, 4),
-        t(Suit::Characters, 6, 5),
+        t(Suit::Manzu, 4, 3),
+        t(Suit::Manzu, 5, 4),
+        t(Suit::Manzu, 6, 5),
         // triplet
-        t(Suit::Dots, 9, 6),
-        t(Suit::Dots, 9, 7),
-        t(Suit::Dots, 9, 8),
+        t(Suit::Pinzu, 9, 6),
+        t(Suit::Pinzu, 9, 7),
+        t(Suit::Pinzu, 9, 8),
         // sequence
-        t(Suit::Bamboos, 5, 9),
-        t(Suit::Bamboos, 6, 10),
-        t(Suit::Bamboos, 7, 11),
+        t(Suit::Souzu, 5, 9),
+        t(Suit::Souzu, 6, 10),
+        t(Suit::Souzu, 7, 11),
         // pair
         t(Suit::Wind, 1, 12),
         t(Suit::Wind, 1, 13),
@@ -133,10 +133,10 @@ fn validate_full_hand() {
 fn validate_kong_four_of_a_kind() {
     // 4 identical tiles must decompose as a single Kong, not Triplet+leftover.
     let tiles = vec![
-        t(Suit::Bamboos, 5, 0),
-        t(Suit::Bamboos, 5, 1),
-        t(Suit::Bamboos, 5, 2),
-        t(Suit::Bamboos, 5, 3),
+        t(Suit::Souzu, 5, 0),
+        t(Suit::Souzu, 5, 1),
+        t(Suit::Souzu, 5, 2),
+        t(Suit::Souzu, 5, 3),
     ];
     let sets = validate_selection(&tiles).unwrap();
     assert_eq!(sets.len(), 1);
@@ -147,10 +147,10 @@ fn validate_kong_four_of_a_kind() {
 #[test]
 fn find_pairs_and_triplets_emits_kong() {
     let tiles = vec![
-        t(Suit::Dots, 7, 0),
-        t(Suit::Dots, 7, 1),
-        t(Suit::Dots, 7, 2),
-        t(Suit::Dots, 7, 3),
+        t(Suit::Pinzu, 7, 0),
+        t(Suit::Pinzu, 7, 1),
+        t(Suit::Pinzu, 7, 2),
+        t(Suit::Pinzu, 7, 3),
     ];
     let sets = find_pairs_and_triplets(&tiles);
     assert!(sets.iter().any(|s| s.kind == MeldKind::Kong));
@@ -159,15 +159,15 @@ fn find_pairs_and_triplets_emits_kong() {
 
 #[test]
 fn validate_ambiguous_decomposition() {
-    // 1-1-1-2-3 bamboo: could be triplet(1,1,1) + leftover(2,3) = FAIL
+    // 1-1-1-2-3 souzu: could be triplet(1,1,1) + leftover(2,3) = FAIL
     // or pair(1,1) + sequence(1,2,3) = SUCCESS
     // Backtracking should find the valid decomposition.
     let tiles = vec![
-        t(Suit::Bamboos, 1, 0),
-        t(Suit::Bamboos, 1, 1),
-        t(Suit::Bamboos, 1, 2),
-        t(Suit::Bamboos, 2, 3),
-        t(Suit::Bamboos, 3, 4),
+        t(Suit::Souzu, 1, 0),
+        t(Suit::Souzu, 1, 1),
+        t(Suit::Souzu, 1, 2),
+        t(Suit::Souzu, 2, 3),
+        t(Suit::Souzu, 3, 4),
     ];
     let sets = validate_selection(&tiles).unwrap();
     assert_eq!(sets.len(), 2);
@@ -179,13 +179,13 @@ fn validate_ambiguous_decomposition() {
 fn suggest_completions_finds_pair_partner() {
     // Hand has one selected tile; another copy exists in hand.
     let hand = vec![
-        t(Suit::Bamboos, 3, 0),
-        t(Suit::Bamboos, 3, 1),
-        t(Suit::Dots, 5, 2),
+        t(Suit::Souzu, 3, 0),
+        t(Suit::Souzu, 3, 1),
+        t(Suit::Pinzu, 5, 2),
     ];
-    let selected = vec![0]; // selected tile id 0 (Bamboos 3)
+    let selected = vec![0]; // selected tile id 0 (Souzu 3)
     let hints = suggest_completions(&hand, &selected);
-    // Index 1 (Bamboos 3, id=1) should be suggested since adding it forms a pair.
+    // Index 1 (Souzu 3, id=1) should be suggested since adding it forms a pair.
     assert!(hints.contains(&1));
 }
 
@@ -195,8 +195,8 @@ fn suggest_completions_finds_pair_partner() {
 fn flower_completes_triplet() {
     // 2 identical tiles + 1 flower = valid triplet (flower must be consumed)
     let tiles = vec![
-        t(Suit::Bamboos, 5, 0),
-        t(Suit::Bamboos, 5, 1),
+        t(Suit::Souzu, 5, 0),
+        t(Suit::Souzu, 5, 1),
         t(Suit::Flower, 1, 100),
     ];
     let sets = validate_selection(&tiles).unwrap();
@@ -209,8 +209,8 @@ fn flower_completes_triplet() {
 fn flower_completes_sequence_high() {
     // 1m, 2m + flower = 1-2-3m sequence (flower fills rank 3)
     let tiles = vec![
-        t(Suit::Characters, 1, 0),
-        t(Suit::Characters, 2, 1),
+        t(Suit::Manzu, 1, 0),
+        t(Suit::Manzu, 2, 1),
         t(Suit::Flower, 2, 100),
     ];
     let sets = validate_selection(&tiles).unwrap();
@@ -222,8 +222,8 @@ fn flower_completes_sequence_high() {
 fn flower_completes_sequence_mid() {
     // 1m, 3m + flower = 1-2-3m sequence (flower fills rank 2)
     let tiles = vec![
-        t(Suit::Characters, 1, 0),
-        t(Suit::Characters, 3, 1),
+        t(Suit::Manzu, 1, 0),
+        t(Suit::Manzu, 3, 1),
         t(Suit::Flower, 3, 100),
     ];
     let sets = validate_selection(&tiles).unwrap();
@@ -235,8 +235,8 @@ fn flower_completes_sequence_mid() {
 fn flower_completes_sequence_low() {
     // 8m, 9m + flower = 7-8-9m sequence (flower fills rank 7)
     let tiles = vec![
-        t(Suit::Characters, 8, 0),
-        t(Suit::Characters, 9, 1),
+        t(Suit::Manzu, 8, 0),
+        t(Suit::Manzu, 9, 1),
         t(Suit::Flower, 1, 100),
     ];
     let sets = validate_selection(&tiles).unwrap();
@@ -248,7 +248,7 @@ fn flower_completes_sequence_low() {
 fn flower_cannot_pair_with_regular() {
     // 1 regular tile + 1 flower should NOT form a valid pair (flowers
     // pair only with other flowers, or act as wildcards in triplets/seqs).
-    let tiles = vec![t(Suit::Bamboos, 3, 0), t(Suit::Flower, 1, 100)];
+    let tiles = vec![t(Suit::Souzu, 3, 0), t(Suit::Flower, 1, 100)];
     assert!(validate_selection(&tiles).is_none());
 }
 
@@ -256,7 +256,7 @@ fn flower_cannot_pair_with_regular() {
 fn flower_max_one_per_meld() {
     // 1 tile + 2 flowers should NOT form a valid triplet
     let tiles = vec![
-        t(Suit::Bamboos, 5, 0),
+        t(Suit::Souzu, 5, 0),
         t(Suit::Flower, 1, 100),
         t(Suit::Flower, 2, 101),
     ];
@@ -267,11 +267,11 @@ fn flower_max_one_per_meld() {
 fn flower_in_multi_meld_hand() {
     // pair + flower-assisted triplet = valid 5-tile hand
     let tiles = vec![
-        t(Suit::Dots, 7, 0),
-        t(Suit::Dots, 7, 1),
-        t(Suit::Dots, 7, 2),
-        t(Suit::Bamboos, 3, 3),
-        t(Suit::Bamboos, 3, 4),
+        t(Suit::Pinzu, 7, 0),
+        t(Suit::Pinzu, 7, 1),
+        t(Suit::Pinzu, 7, 2),
+        t(Suit::Souzu, 3, 3),
+        t(Suit::Souzu, 3, 4),
         t(Suit::Flower, 1, 100),
     ];
     let sets = validate_selection(&tiles).unwrap();
@@ -286,8 +286,8 @@ fn unused_flower_is_invalid() {
     // (only triplets/sequences), so the selection is invalid. Players
     // shouldn't select flowers they can't use.
     let tiles = vec![
-        t(Suit::Bamboos, 3, 0),
-        t(Suit::Bamboos, 3, 1),
+        t(Suit::Souzu, 3, 0),
+        t(Suit::Souzu, 3, 1),
         t(Suit::Flower, 1, 100),
     ];
     // pair(3s×2) + unused flower → flower must be consumed → invalid
@@ -346,8 +346,8 @@ fn single_flower_invalid() {
 fn no_flower_wildcards_blocks_substitution() {
     let rules = [RuleModifier::NoFlowerWildcards];
     let tiles = vec![
-        t(Suit::Bamboos, 5, 0),
-        t(Suit::Bamboos, 5, 1),
+        t(Suit::Souzu, 5, 0),
+        t(Suit::Souzu, 5, 1),
         t(Suit::Flower, 1, 100),
     ];
     assert!(validate_selection_with_rules(&tiles, &rules).is_none());
@@ -367,9 +367,9 @@ fn no_flower_wildcards_allows_flower_pair() {
 #[test]
 fn sequence_wrap_891() {
     let tiles = vec![
-        t(Suit::Characters, 8, 0),
-        t(Suit::Characters, 9, 1),
-        t(Suit::Characters, 1, 2),
+        t(Suit::Manzu, 8, 0),
+        t(Suit::Manzu, 9, 1),
+        t(Suit::Manzu, 1, 2),
     ];
     // Without wrap: invalid
     assert!(validate_selection(&tiles).is_none());
@@ -382,9 +382,9 @@ fn sequence_wrap_891() {
 #[test]
 fn sequence_wrap_912() {
     let tiles = vec![
-        t(Suit::Bamboos, 9, 0),
-        t(Suit::Bamboos, 1, 1),
-        t(Suit::Bamboos, 2, 2),
+        t(Suit::Souzu, 9, 0),
+        t(Suit::Souzu, 1, 1),
+        t(Suit::Souzu, 2, 2),
     ];
     assert!(validate_selection(&tiles).is_none());
     let sets = validate_selection_with_rules(&tiles, &[RuleModifier::SequenceWrap]).unwrap();
@@ -395,9 +395,9 @@ fn sequence_wrap_912() {
 #[test]
 fn no_sequences_rejects_sequence() {
     let tiles = vec![
-        t(Suit::Characters, 1, 0),
-        t(Suit::Characters, 2, 1),
-        t(Suit::Characters, 3, 2),
+        t(Suit::Manzu, 1, 0),
+        t(Suit::Manzu, 2, 1),
+        t(Suit::Manzu, 3, 2),
     ];
     // Normal: valid sequence
     assert!(validate_selection(&tiles).is_some());
@@ -408,9 +408,9 @@ fn no_sequences_rejects_sequence() {
 #[test]
 fn no_sequences_allows_triplets() {
     let tiles = vec![
-        t(Suit::Bamboos, 5, 0),
-        t(Suit::Bamboos, 5, 1),
-        t(Suit::Bamboos, 5, 2),
+        t(Suit::Souzu, 5, 0),
+        t(Suit::Souzu, 5, 1),
+        t(Suit::Souzu, 5, 2),
     ];
     let sets = validate_selection_with_rules(&tiles, &[RuleModifier::NoSequences]).unwrap();
     assert_eq!(sets.len(), 1);
@@ -420,9 +420,9 @@ fn no_sequences_allows_triplets() {
 #[test]
 fn require_honor_rejects_structure_without_honor() {
     let tiles = vec![
-        t(Suit::Bamboos, 5, 0),
-        t(Suit::Bamboos, 5, 1),
-        t(Suit::Bamboos, 5, 2),
+        t(Suit::Souzu, 5, 0),
+        t(Suit::Souzu, 5, 1),
+        t(Suit::Souzu, 5, 2),
     ];
     assert!(validate_selection_with_rules(&tiles, &[RuleModifier::RequireHonor]).is_none());
 }
@@ -442,9 +442,9 @@ fn require_honor_allows_honor_only_structure() {
 #[test]
 fn require_honor_allows_mixed_structure_with_one_honor_meld() {
     let tiles = vec![
-        t(Suit::Bamboos, 1, 0),
-        t(Suit::Bamboos, 2, 1),
-        t(Suit::Bamboos, 3, 2),
+        t(Suit::Souzu, 1, 0),
+        t(Suit::Souzu, 2, 1),
+        t(Suit::Souzu, 3, 2),
         t(Suit::Dragon, 1, 3),
         t(Suit::Dragon, 1, 4),
         t(Suit::Dragon, 1, 5),
@@ -458,14 +458,14 @@ fn require_honor_allows_mixed_structure_with_one_honor_meld() {
 #[test]
 fn tricky_chiitoitsu_seven_distinct_pairs() {
     let tiles = vec![
-        t(Suit::Bamboos, 1, 0),
-        t(Suit::Bamboos, 1, 1),
-        t(Suit::Bamboos, 3, 2),
-        t(Suit::Bamboos, 3, 3),
-        t(Suit::Characters, 5, 4),
-        t(Suit::Characters, 5, 5),
-        t(Suit::Dots, 7, 6),
-        t(Suit::Dots, 7, 7),
+        t(Suit::Souzu, 1, 0),
+        t(Suit::Souzu, 1, 1),
+        t(Suit::Souzu, 3, 2),
+        t(Suit::Souzu, 3, 3),
+        t(Suit::Manzu, 5, 4),
+        t(Suit::Manzu, 5, 5),
+        t(Suit::Pinzu, 7, 6),
+        t(Suit::Pinzu, 7, 7),
         t(Suit::Wind, 1, 8),
         t(Suit::Wind, 1, 9),
         t(Suit::Wind, 3, 10),
@@ -485,12 +485,12 @@ fn tricky_chiitoitsu_seven_distinct_pairs() {
 #[test]
 fn tricky_kokushi_musou_decomposed() {
     let tiles = vec![
-        t(Suit::Characters, 1, 0),
-        t(Suit::Characters, 9, 1),
-        t(Suit::Bamboos, 1, 2),
-        t(Suit::Bamboos, 9, 3),
-        t(Suit::Dots, 1, 4),
-        t(Suit::Dots, 9, 5),
+        t(Suit::Manzu, 1, 0),
+        t(Suit::Manzu, 9, 1),
+        t(Suit::Souzu, 1, 2),
+        t(Suit::Souzu, 9, 3),
+        t(Suit::Pinzu, 1, 4),
+        t(Suit::Pinzu, 9, 5),
         t(Suit::Wind, 1, 6),
         t(Suit::Wind, 2, 7),
         t(Suit::Wind, 3, 8),
@@ -498,7 +498,7 @@ fn tricky_kokushi_musou_decomposed() {
         t(Suit::Dragon, 1, 10),
         t(Suit::Dragon, 2, 11),
         t(Suit::Dragon, 3, 12),
-        t(Suit::Characters, 1, 13), // pair on 1m
+        t(Suit::Manzu, 1, 13), // pair on 1m
     ];
     let sets = validate_selection(&tiles).expect("kokushi");
     assert_eq!(sets.len(), 13);
@@ -514,7 +514,7 @@ fn tricky_kokushi_musou_decomposed() {
 
 #[test]
 fn non_contributing_empty_on_valid_pair() {
-    let tiles = vec![t(Suit::Bamboos, 3, 0), t(Suit::Bamboos, 3, 1)];
+    let tiles = vec![t(Suit::Souzu, 3, 0), t(Suit::Souzu, 3, 1)];
     assert!(non_contributing_tile_ids(&tiles, &[]).is_empty());
 }
 
@@ -522,9 +522,9 @@ fn non_contributing_empty_on_valid_pair() {
 fn non_contributing_flags_orphan_on_invalid_mixed() {
     // Pair of 3s + stray 7 — no full decomposition.
     let tiles = vec![
-        t(Suit::Bamboos, 3, 0),
-        t(Suit::Bamboos, 3, 1),
-        t(Suit::Bamboos, 7, 2),
+        t(Suit::Souzu, 3, 0),
+        t(Suit::Souzu, 3, 1),
+        t(Suit::Souzu, 7, 2),
     ];
     assert_eq!(non_contributing_tile_ids(&tiles, &[]), vec![2]);
 }
@@ -533,9 +533,9 @@ fn non_contributing_flags_orphan_on_invalid_mixed() {
 fn non_contributing_flags_stray_fifth_on_pair_plus_two() {
     // Two 2s + 5 — pair uses both 2s; 5 cannot join the meld.
     let tiles = vec![
-        t(Suit::Bamboos, 2, 10),
-        t(Suit::Bamboos, 2, 11),
-        t(Suit::Bamboos, 5, 12),
+        t(Suit::Souzu, 2, 10),
+        t(Suit::Souzu, 2, 11),
+        t(Suit::Souzu, 5, 12),
     ];
     assert_eq!(non_contributing_tile_ids(&tiles, &[]), vec![12]);
 }
@@ -543,9 +543,9 @@ fn non_contributing_flags_stray_fifth_on_pair_plus_two() {
 #[test]
 fn non_contributing_all_when_nothing_forms() {
     let tiles = vec![
-        t(Suit::Bamboos, 2, 0),
-        t(Suit::Bamboos, 5, 1),
-        t(Suit::Bamboos, 8, 2),
+        t(Suit::Souzu, 2, 0),
+        t(Suit::Souzu, 5, 1),
+        t(Suit::Souzu, 8, 2),
     ];
     let ids: Vec<u32> = tiles.iter().map(|t| t.id).collect();
     assert_eq!(non_contributing_tile_ids(&tiles, &[]), ids);
@@ -555,11 +555,11 @@ fn non_contributing_all_when_nothing_forms() {
 #[test]
 fn tricky_shared_rank_ambiguity_11123() {
     let tiles = vec![
-        t(Suit::Bamboos, 1, 0),
-        t(Suit::Bamboos, 1, 1),
-        t(Suit::Bamboos, 1, 2),
-        t(Suit::Bamboos, 2, 3),
-        t(Suit::Bamboos, 3, 4),
+        t(Suit::Souzu, 1, 0),
+        t(Suit::Souzu, 1, 1),
+        t(Suit::Souzu, 1, 2),
+        t(Suit::Souzu, 2, 3),
+        t(Suit::Souzu, 3, 4),
     ];
     let sets = validate_selection(&tiles).expect("pair + sequence");
     assert_eq!(sets.len(), 2);

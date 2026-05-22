@@ -26,7 +26,7 @@ impl RunState {
         if !self.destroy_relic_removed_from_run(relic_id) {
             return false;
         }
-        self.relic_activations.push(relic_id);
+        self.push_relic_activation(relic_id);
         if let Some(b) = bus {
             b.push(GameEvent::RelicActivated(relic_id));
         }
@@ -75,7 +75,7 @@ impl RunState {
             self.clear_relic_run_metadata(victim_id);
             self.note_relic_destroyed();
             *self.relic_counters.entry(RelicId::HungryGhost).or_insert(0) += victim_value * 10;
-            self.relic_activations.push(RelicId::HungryGhost);
+            self.push_relic_activation(RelicId::HungryGhost);
         }
     }
 
@@ -112,7 +112,7 @@ impl RunState {
         self.relics.active[slot] = RelicId::MonarchButterfly;
         self.chrysalis_extinct = true;
         self.note_relic_destroyed();
-        self.relic_activations.push(RelicId::MonarchButterfly);
+        self.push_relic_activation(RelicId::MonarchButterfly);
         bus.push(GameEvent::TransformationSuccessorDiscovered(
             RelicId::MonarchButterfly,
         ));
@@ -129,7 +129,7 @@ impl RunState {
         self.relic_counters.remove(&RelicId::Rakuware);
         self.tea_ceremony_extinct = true;
         self.note_relic_destroyed();
-        self.relic_activations.push(RelicId::Rakuware);
+        self.push_relic_activation(RelicId::Rakuware);
         bus.push(GameEvent::TransformationSuccessorDiscovered(
             RelicId::Rakuware,
         ));

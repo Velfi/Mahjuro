@@ -3039,6 +3039,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         archive_environment,
         archive_sign_left_prim_idx,
         archive_sign_right_prim_idx,
+        archive_env_shadow_caster_mask,
     ) = {
         let _archive = crate::startup_profile::scope("wgpu.room.archive");
         crate::render::archive_glb::with_archive_glb_cpu(|cpu_opt| {
@@ -3046,8 +3047,9 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             let mut gpu_wrap = None;
             let mut sign_l = None;
             let mut sign_r = None;
+            let mut shadow_caster_mask = Vec::new();
             let Some(cpu) = cpu_opt else {
-                return (prims, gpu_wrap, sign_l, sign_r);
+                return (prims, gpu_wrap, sign_l, sign_r, shadow_caster_mask);
             };
             if !cpu.environment_primitives.is_empty() {
                 let mut room_tex_cache = RoomEnvTextureCache::new();
@@ -3128,6 +3130,9 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                         });
                     let sampler =
                         device.create_sampler(&build_sampler_descriptor(prim.sampler, None));
+                    shadow_caster_mask.push(crate::render::archive_glb::archive_prim_casts_room_shadow(
+                        env_prim.gltf_node_name.as_deref(),
+                    ));
                     prims.push(TilePrimitiveGpu {
                         vertex_buffer: vb,
                         index_buffer: ib,
@@ -3290,7 +3295,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 });
                 log::info!("archive.glb GPU: {} primitive draw(s)", prims.len());
             }
-            (prims, gpu_wrap, sign_l, sign_r)
+            (prims, gpu_wrap, sign_l, sign_r, shadow_caster_mask)
         })
     };
 
@@ -4091,6 +4096,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         main_menu_environment,
         archive_sign_left_prim_idx,
         archive_sign_right_prim_idx,
+        archive_env_shadow_caster_mask,
         archive_sign_decal_upload_key: 0,
         room_gltf_height_scale: crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
         shop_env_linear_exposure: crate::render::room_glb::SHOP_ENV_LINEAR_EXPOSURE,

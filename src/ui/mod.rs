@@ -1,5 +1,6 @@
 pub mod boss_icons;
 pub mod button_prompts;
+pub mod chart_primitives;
 pub mod chronicle_dashboard;
 pub mod clip;
 pub mod colored_keywords;

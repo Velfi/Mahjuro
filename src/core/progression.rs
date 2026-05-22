@@ -186,6 +186,18 @@ pub struct RunRecord {
     /// Remnant selected when this run ended in defeat.
     #[serde(default)]
     pub memorial_kind: Option<crate::core::memorial_talisman::MemorialTalismanKind>,
+    /// Tiles from the highest-scoring structure cash-in (display faces only).
+    #[serde(default)]
+    pub best_hand_tiles: Vec<crate::core::tile::Tile>,
+    /// Cumulative run score after each boss-cleared ante.
+    #[serde(default)]
+    pub score_after_ante: Vec<(u32, u64)>,
+    /// Extended Chronicle analytics (seed, encounters, breakdowns, milestones).
+    #[serde(default)]
+    pub chronicle: crate::core::run_chronicle::RunChronicle,
+    /// Wall-clock run length in seconds (`ended - chronicle.started_unix`).
+    #[serde(default)]
+    pub duration_secs: u32,
 }
 
 impl PlayerProgress {
@@ -492,6 +504,8 @@ impl RunRecord {
         run.times_restocked = self.times_restocked;
         run.best_structure_score = self.best_structure_score;
         run.best_structure_name = self.best_structure_name.clone();
+        run.best_hand_tiles = self.best_hand_tiles.clone();
+        run.score_after_ante = self.score_after_ante.clone();
         run.yaku_times_played = self.yaku_times_played.clone();
         run.defeat_memorial_kind = self.memorial_kind;
         run.boss.upcoming = self.final_boss;
@@ -540,8 +554,90 @@ impl RunRecord {
             stake: run.mode.stake,
             tutorial_run: false,
             memorial_kind: run.defeat_memorial_kind,
+            best_hand_tiles: run.best_hand_tiles.clone(),
+            score_after_ante: finalize_score_after_ante(run),
+            chronicle: finalize_run_chronicle(run, outcome),
+            duration_secs: run_duration_secs(run),
         }
     }
+}
+
+fn run_duration_secs(run: &crate::game::run::RunState) -> u32 {
+    let end = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let start = run.chronicle.started_unix;
+    if end > start {
+        (end - start).min(u32::MAX as u64) as u32
+    } else {
+        0
+    }
+}
+
+fn finalize_run_chronicle(
+    run: &crate::game::run::RunState,
+    outcome: RunOutcome,
+) -> crate::core::run_chronicle::RunChronicle {
+    let mut chronicle = run.chronicle.clone();
+    let victory = matches!(outcome, RunOutcome::Victory);
+    chronicle.finalize_for_outcome(
+        victory,
+        run.total_score_earned,
+        run.ante,
+        run.plays_remaining,
+    );
+
+    if let Some(bd) = run.last_breakdown.as_ref() {
+        chronicle.set_terminal_breakdown(bd, run.mode.stake);
+        if victory {
+            chronicle.signature_hand = Some(crate::core::run_chronicle::signature_from_breakdown(
+                bd,
+                &run.best_hand_tiles,
+            ));
+        }
+    }
+
+    if !victory {
+        let boss_name = if run.blind == BlindKind::Boss {
+            run.boss.upcoming.map(|b| b.name().to_string())
+        } else {
+            None
+        };
+        chronicle.record_run_end_defeat(
+            run.ante,
+            run.blind,
+            boss_name.as_deref(),
+        );
+    }
+
+    if chronicle.signature_hand.is_none() && !run.best_hand_tiles.is_empty() {
+        chronicle.signature_hand = Some(crate::core::run_chronicle::SignatureHandRecord {
+            tiles: run.best_hand_tiles.clone(),
+            yaku: run
+                .yaku_times_played
+                .keys()
+                .copied()
+                .take(6)
+                .collect(),
+            yaku_han_total: 0,
+            dora_count: 0,
+            aka_dora_count: 0,
+            ura_dora_count: 0,
+        });
+    }
+
+    chronicle
+}
+
+/// Ensure the terminal `(ante, total_score)` point is present for run-detail charts.
+fn finalize_score_after_ante(run: &crate::game::run::RunState) -> Vec<(u32, u64)> {
+    let mut v = run.score_after_ante.clone();
+    let terminal = (run.ante, run.total_score_earned);
+    if v.last().copied() != Some(terminal) {
+        v.push(terminal);
+    }
+    v
 }
 
 struct LevelUnlocks {
@@ -986,6 +1082,38 @@ mod tests {
     }
 
     #[test]
+    fn run_record_deserializes_without_chronicle_fields() {
+        let json = r#"{
+            "timestamp_unix": 1,
+            "run_number": 2,
+            "outcome": "Victory",
+            "final_ante": 4,
+            "final_blind": "Boss",
+            "round_score": 100,
+            "target_score": 50,
+            "total_score_earned": 900,
+            "final_gold": 0,
+            "plays_remaining": 1,
+            "discards_remaining": 1,
+            "plays_max": 4,
+            "discards_max": 4,
+            "tiles_played": 10,
+            "tiles_discarded": 5,
+            "times_restocked": 0,
+            "best_structure_score": 80,
+            "best_structure_name": "Pair",
+            "relics_owned": [],
+            "consumables_owned": [],
+            "tile_material": "Bamboo",
+            "stake": "Spring",
+            "tutorial_run": false
+        }"#;
+        let rec: RunRecord = serde_json::from_str(json).expect("parse old run record");
+        assert!(rec.best_hand_tiles.is_empty());
+        assert!(rec.score_after_ante.is_empty());
+    }
+
+    #[test]
     fn backfill_rebuilds_unlocks_from_history() {
         let mut p = PlayerProgress::new();
         // Synthesize a RunRecord as if an old profile had a Summer win on
@@ -1017,6 +1145,10 @@ mod tests {
             stake: Stake::Summer,
             tutorial_run: false,
             memorial_kind: None,
+            best_hand_tiles: Vec::new(),
+            score_after_ante: vec![(8, 5000)],
+            chronicle: crate::core::run_chronicle::RunChronicle::default(),
+            duration_secs: 0,
         });
         assert!(p.unlocked_stakes.is_empty());
         p.backfill_stakes_from_history();

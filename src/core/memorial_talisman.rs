@@ -446,10 +446,10 @@ pub fn buff_saint_enhancement(snapshot: &MemorialJournalSnapshot) -> TileEnhance
 /// Suit bias for Transformer remnant.
 pub fn transformer_target_suit(snapshot: &MemorialJournalSnapshot) -> Suit {
     match snapshot.journal.dominant_transform_talisman() {
-        Some(TalismanKind::Bamboo) => Suit::Bamboos,
-        Some(TalismanKind::Dots) => Suit::Dots,
-        Some(TalismanKind::Characters) => Suit::Characters,
-        _ => Suit::Bamboos,
+        Some(TalismanKind::Souzu) => Suit::Souzu,
+        Some(TalismanKind::Pinzu) => Suit::Pinzu,
+        Some(TalismanKind::Manzu) => Suit::Manzu,
+        _ => Suit::Souzu,
     }
 }
 

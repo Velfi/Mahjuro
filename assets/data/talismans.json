@@ -21,23 +21,23 @@
     "accent": [0.82, 0.55, 0.95, 1.0]
   },
   {
-    "id": "bamboo",
-    "name": "Bamboo Talisman",
-    "description": "Every numbered tile in hand becomes bamboo; honors unchanged.",
+    "id": "souzu",
+    "name": "Souzu Talisman",
+    "description": "Every numbered tile in hand becomes souzu; honors unchanged.",
     "shop_price": 8,
     "accent": [0.06, 0.55, 0.28, 1.0]
   },
   {
-    "id": "dots",
-    "name": "Dots Talisman",
-    "description": "Every numbered tile in hand becomes dots; honors unchanged.",
+    "id": "pinzu",
+    "name": "Pinzu Talisman",
+    "description": "Every numbered tile in hand becomes pinzu; honors unchanged.",
     "shop_price": 8,
     "accent": [0.08, 0.22, 0.78, 1.0]
   },
   {
-    "id": "characters",
-    "name": "Characters Talisman",
-    "description": "Every numbered tile in hand becomes characters; honors unchanged.",
+    "id": "manzu",
+    "name": "Manzu Talisman",
+    "description": "Every numbered tile in hand becomes manzu; honors unchanged.",
     "shop_price": 8,
     "accent": [0.82, 0.08, 0.18, 1.0]
   },

@@ -171,7 +171,7 @@ pub fn finale_failure_feedback(
 
     if discards_left >= 2 {
         return format!(
-            "You scored {} / {} ({}%) but had {} discards left. The Iconoclast weakens honors — favor triplets and runs in bamboo, dots, or characters, then cash in with a yaku.",
+            "You scored {} / {} ({}%) but had {} discards left. The Iconoclast weakens honors — favor triplets and runs in souzu, pinzu, or manzu, then cash in with a yaku.",
             round_score, target, score_pct, discards_left,
         );
     }
@@ -184,7 +184,7 @@ pub fn finale_failure_feedback(
     }
 
     format!(
-        "You scored {} / {} — {} short of the target. The Iconoclast debuffs winds and dragons; build melds in bamboo, dots, and characters, bank with Play, then Cash In. Chips × mult: Full Hand or Chiitoitsu is your main mult lever here.",
+        "You scored {} / {} — {} short of the target. The Iconoclast debuffs winds and dragons; build melds in souzu, pinzu, and manzu, bank with Play, then Cash In. Chips × mult: Full Hand or Chiitoitsu is your main mult lever here.",
         round_score, target, gap,
     )
 }
@@ -192,7 +192,7 @@ pub fn finale_failure_feedback(
 pub fn finale_intro_message() -> &'static str {
     "Boss shrine — The Iconoclast\n\n\
      Winds and dragons are debuffed: they still form melds, but score much less. \
-     Build in Bamboos, Dots, and Characters. Full Hand and Chiitoitsu (seven pairs) \
+     Build in Souzu, Pinzu, and Manzu. Full Hand and Chiitoitsu (seven pairs) \
      are your best yaku here. You can retry if you miss the target."
 }
 

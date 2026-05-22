@@ -191,9 +191,9 @@ impl TilePackKind {
             }
             Self::Terminals => {
                 // 6 terminal tiles — still all 1s and 9s, but the suit
-                // distribution is randomized (could be 3 bamboo-1s and no
+                // distribution is randomized (could be 3 souzu-1s and no
                 // character-1, etc.)
-                let suits = [Suit::Characters, Suit::Bamboos, Suit::Dots];
+                let suits = [Suit::Manzu, Suit::Souzu, Suit::Pinzu];
                 for &terminal_rank in &[1u8, 9] {
                     for _ in 0..3 {
                         let suit = suits[(pack_rng_next(&mut rng_state) as usize) % 3];
@@ -210,21 +210,21 @@ impl TilePackKind {
                 let mut ranks: Vec<u8> = (1..=9).collect();
                 seeded_shuffle(&mut ranks, rng_state);
                 for &rank in ranks.iter().take(8) {
-                    push(Suit::Bamboos, rank, &mut out);
+                    push(Suit::Souzu, rank, &mut out);
                 }
             }
             Self::CoinCache => {
                 let mut ranks: Vec<u8> = (1..=9).collect();
                 seeded_shuffle(&mut ranks, rng_state);
                 for &rank in ranks.iter().take(8) {
-                    push(Suit::Dots, rank, &mut out);
+                    push(Suit::Pinzu, rank, &mut out);
                 }
             }
             Self::ScrollLibrary => {
                 let mut ranks: Vec<u8> = (1..=9).collect();
                 seeded_shuffle(&mut ranks, rng_state);
                 for &rank in ranks.iter().take(8) {
-                    push(Suit::Characters, rank, &mut out);
+                    push(Suit::Manzu, rank, &mut out);
                 }
             }
         }

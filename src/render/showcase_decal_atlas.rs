@@ -16,7 +16,7 @@ const ATLAS_ROWS: u32 = 16;
 
 fn all_base_faces() -> Vec<(Suit, u8)> {
     let mut v = Vec::with_capacity(42);
-    for suit in [Suit::Characters, Suit::Bamboos, Suit::Dots] {
+    for suit in [Suit::Manzu, Suit::Souzu, Suit::Pinzu] {
         for rank in 1..=9 {
             v.push((suit, rank));
         }

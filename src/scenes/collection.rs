@@ -152,6 +152,8 @@ enum CollectionAction {
     /// active tab's artifact list globally so the selection survives
     /// scroll position changes.
     SelectArtifact(usize),
+    /// Chronicle: focus the career / run-detail column for scroll and D-pad.
+    ChronicleFocusCareer,
     /// Footer arrow paginates the archive cabinet by one page (only used when the
     /// `archive.glb` room is loaded; procedural fallback uses the arrows for tabs).
     PrevPage,
@@ -171,6 +173,7 @@ impl CollectionAction {
             // SelectArtifact IDs start at 200. The widget tree just needs
             // unique IDs per hit target — the values themselves don't matter.
             CollectionAction::SelectArtifact(i) => FocusId(200 + i as u32),
+            CollectionAction::ChronicleFocusCareer => FocusId(199),
         }
     }
 }
@@ -242,6 +245,8 @@ pub struct CollectionScene {
     chronicle_dashboard_scroll: std::cell::Cell<f32>,
     /// Vertical scroll (px) for the Chronicle run log (left).
     chronicle_run_log_scroll: std::cell::Cell<f32>,
+    /// Which Chronicle column owns directional scroll (left run log vs right career/detail).
+    chronicle_focused_pane: crate::ui::chronicle_dashboard::ChronicleScrollPane,
 }
 
 #[derive(Clone, Copy)]
@@ -262,6 +267,9 @@ impl CollectionScene {
     /// Headless screenshot: open the Chronicle tab with a clean scroll/camera state.
     pub fn prepare_chronicle_for_screenshot(&mut self) {
         *self = Self::with_active_tab(Tab::Chronicle);
+        self.focused_row = Some(0);
+        self.chronicle_run_log_scroll.set(0.0);
+        self.chronicle_dashboard_scroll.set(0.0);
     }
 
     /// Headless screenshot: open the Bosses tab on page 0 with the first entry focused.
@@ -304,6 +312,7 @@ impl CollectionScene {
             focused_chrome: None,
             chronicle_dashboard_scroll: std::cell::Cell::new(0.0),
             chronicle_run_log_scroll: std::cell::Cell::new(0.0),
+            chronicle_focused_pane: crate::ui::chronicle_dashboard::ChronicleScrollPane::RunLog,
         }
     }
 
@@ -388,6 +397,7 @@ impl CollectionScene {
         self.cam_anim.set(None);
         self.chronicle_dashboard_scroll.set(0.0);
         self.chronicle_run_log_scroll.set(0.0);
+        self.chronicle_focused_pane = crate::ui::chronicle_dashboard::ChronicleScrollPane::RunLog;
     }
 
     /// Advance `scroll_rows` toward `target_scroll_rows` with the same
@@ -459,17 +469,19 @@ impl CollectionScene {
                 [switch_x, title_y, switch_w, back_h],
                 CollectionAction::SwitchSave,
             ),
-            FlatItem::new(
+        ];
+        if collection_uses_footer_arrows(self.active_tab) {
+            items.push(FlatItem::new(
                 footer_prev_action.id(),
                 [prev_x, arrow_y, arrow_w, arrow_h],
                 footer_prev_action,
-            ),
-            FlatItem::new(
+            ));
+            items.push(FlatItem::new(
                 footer_next_action.id(),
                 [next_x, arrow_y, arrow_w, arrow_h],
                 footer_next_action,
-            ),
-        ];
+            ));
+        }
 
         // Compute the same layout draw_frame uses so hit rects line up
         // with the visuals.
@@ -557,6 +569,15 @@ impl CollectionScene {
                     CollectionAction::SelectArtifact(i).id(),
                     rect,
                     CollectionAction::SelectArtifact(i),
+                ));
+            }
+            let (_, career_rect) =
+                crate::ui::chronicle_dashboard::chronicle_pane_rects(w, h, panel);
+            if flat_rect_xywh_is_finite(career_rect) {
+                items.push(FlatItem::new(
+                    CollectionAction::ChronicleFocusCareer.id(),
+                    career_rect,
+                    CollectionAction::ChronicleFocusCareer,
                 ));
             }
         } else {
@@ -670,6 +691,9 @@ impl CollectionScene {
         layout: &crate::ui::layout::LayoutResult,
         env_h: f32,
     ) -> Option<ItemInspectOrbitState> {
+        if matches!(self.active_tab, Tab::Chronicle) {
+            return None;
+        }
         let tw = self.collection_inspect_target_world(w, h, bosses, layout, env_h)?;
         Some(ItemInspectOrbitState {
             target_world: tw,
@@ -709,6 +733,9 @@ impl CollectionScene {
         env_h: f32,
         bus: &mut crate::game::event_bus::EventBus,
     ) -> bool {
+        if matches!(self.active_tab, Tab::Chronicle) {
+            return false;
+        }
         if !archive_glb::archive_room_draw_ready() {
             return false;
         }
@@ -742,7 +769,7 @@ impl CollectionScene {
         let env_scale = collection_sanitized_room_gltf_height_scale(ctx.room_gltf_height_scale);
         let use_archive = archive_glb::archive_room_draw_ready();
         let chronicle_dashboard = matches!(self.active_tab, Tab::Chronicle) && inspect.is_none();
-        if use_archive {
+        if use_archive && !chronicle_dashboard {
             frame.archive_environment();
         }
         frame.archive_sign_description_decal_text = None;
@@ -1589,29 +1616,36 @@ impl CollectionScene {
         if chronicle_dashboard {
             let ch = archive_chrome_layout(w, h);
             let layout = compute_layout(w, h, ch.scale, self.active_tab, bosses.len().max(1));
+            let band_h = (layout.band_bottom_y - layout.band_top_y).max(1.0);
             let panel = [
                 ch.margin_x,
                 layout.band_top_y,
                 w - ch.margin_x * 2.0,
-                layout.band_bottom_y - layout.band_top_y,
+                crate::ui::chronicle_dashboard::chronicle_panel_height(w, h, band_h),
             ];
             let dim = crate::ui::chronicle_dashboard::chronicle_dim_gradient(panel);
             let mut chart_quads: Vec<GpuInstance> = Vec::new();
+            let mut chart_images: Vec<crate::render::draw_cmd::ImageQuad> = Vec::new();
             crate::ui::chronicle_dashboard::push_chronicle_dashboard(
                 w,
                 h,
                 panel,
                 crate::ui::chronicle_dashboard::ChronicleView {
                     focused_run: self.focused_row,
+                    focused_pane: self.chronicle_focused_pane,
                     run_log_scroll: self.chronicle_run_log_scroll.get(),
                     career_scroll: self.chronicle_dashboard_scroll.get(),
                 },
                 ctx.progress,
                 &mut chart_quads,
                 text_labels,
+                &mut chart_images,
             );
             frame.gradient_quads(std::iter::once(dim));
             frame.quads(chart_quads);
+            if !chart_images.is_empty() {
+                frame.image_quads(chart_images);
+            }
         } else if !gradient_backers.is_empty() {
             frame.gradient_quads(gradient_backers);
         }
@@ -1764,49 +1798,51 @@ impl CollectionScene {
             push_focus_ring(switch_rect, scale, w, h, &mut quads);
         }
 
-        // Footer Prev/Next tab arrows. Match the rects from `flat_items`
-        // so the click hit-testing and the visual button line up. The
-        // active footer action depends on whether the archive room is loaded
-        // (page) vs. the procedural grid (tab cycle), so the focus ring
-        // checks both variants.
+        // Footer Prev/Next tab arrows (omitted on Chronicle — that tab scrolls
+        // split panes instead of paging the cabinet).
         let arrow_w = ch.arrow_w;
         let arrow_h = back_h;
         let arrow_y = h - arrow_h - h * 0.02;
         let prev_x = w * 0.5 - arrow_w * 1.5;
         let next_x = w * 0.5 + arrow_w * 0.5;
-        for (x, sym, focused) in [
-            (
-                prev_x,
-                "<",
-                matches!(
-                    ring_focus,
-                    Some(CollectionAction::PrevPage) | Some(CollectionAction::PrevTab)
+        let chronicle_ledger =
+            matches!(self.active_tab, Tab::Chronicle) && inspect.is_none();
+        if collection_uses_footer_arrows(self.active_tab) {
+            for (x, sym, focused) in [
+                (
+                    prev_x,
+                    "<",
+                    matches!(
+                        ring_focus,
+                        Some(CollectionAction::PrevPage) | Some(CollectionAction::PrevTab)
+                    ),
                 ),
-            ),
-            (
-                next_x,
-                ">",
-                matches!(
-                    ring_focus,
-                    Some(CollectionAction::NextPage) | Some(CollectionAction::NextTab)
+                (
+                    next_x,
+                    ">",
+                    matches!(
+                        ring_focus,
+                        Some(CollectionAction::NextPage) | Some(CollectionAction::NextTab)
+                    ),
                 ),
-            ),
-        ] {
-            let rect = [x, arrow_y, arrow_w, arrow_h];
-            quads.push(GpuInstance {
-                rect,
-                color: chrome_btn_color(focused),
-                user: 0,
-            });
-            text_labels.push(TextLabel {
-                rect: chrome_label_rect(rect),
-                text: sym.into(),
-                color: color::PARCHMENT,
-                font_px: Some(chrome_label_px),
-                ..Default::default()
-            });
-            if focused {
-                push_focus_ring(rect, scale, w, h, &mut quads);
+            ] {
+                let rect = [x, arrow_y, arrow_w, arrow_h];
+                quads.push(GpuInstance {
+                    rect,
+                    color: chrome_btn_color(focused),
+                    user: 0,
+                });
+                text_labels.push(TextLabel {
+                    rect: chrome_label_rect(rect),
+                    text: sym.into(),
+                    color: color::PARCHMENT,
+                    font_px: Some(chrome_label_px),
+                    align: TextAlign::Center,
+                    ..Default::default()
+                });
+                if focused {
+                    push_focus_ring(rect, scale, w, h, &mut quads);
+                }
             }
         }
 
@@ -1859,7 +1895,7 @@ impl CollectionScene {
             } else if matches!(self.active_tab, Tab::Chronicle) && all_count_hint == 0 {
                 "Finish a non-tutorial run to add folios here.".to_string()
             } else if matches!(self.active_tab, Tab::Chronicle) && all_count_hint > 0 {
-                format!("{north}: inspect run")
+                "↑↓: scroll   ·   ←→: pane".to_string()
             } else if archive_path {
                 if archive_multi_page {
                     format!(
@@ -1884,7 +1920,7 @@ impl CollectionScene {
         } else if matches!(self.active_tab, Tab::Chronicle) && all_count_hint == 0 {
             "Finish a non-tutorial run to add folios here.".to_string()
         } else if matches!(self.active_tab, Tab::Chronicle) && all_count_hint > 0 {
-            "Enter / E: inspect run".to_string()
+            "Wheel or ↑↓: scroll   ·   ←→: pane".to_string()
         } else if archive_path {
             if archive_multi_page {
                 "Enter / E: inspect   ·   Footer arrows or page-edge \u{2190} / \u{2192}: page"
@@ -1900,21 +1936,25 @@ impl CollectionScene {
         let hint_lines = hint_text.lines().count().max(1) as f32;
         let hint_h = hint_line_h * hint_lines + 10.0;
         // Layout (bottom → top): footer arrows → page indicator (multi-page only)
-        // → hint copy → ladder line. Compute the indicator band first so the hint
-        // can stack above it without overlap.
-        let page_band_h = if archive_multi_page && inspect.is_none() {
+        // → hint copy → ladder line. Chronicle omits arrows/pages and pins the
+        // hint to the bottom edge.
+        let page_band_h = if archive_multi_page && inspect.is_none() && !chronicle_ledger {
             hint_line_h + 8.0
         } else {
             0.0
         };
         let page_band_y = arrow_y
             - page_band_h
-            - if archive_multi_page && inspect.is_none() {
+            - if archive_multi_page && inspect.is_none() && !chronicle_ledger {
                 (h * 0.006).max(4.0)
             } else {
                 0.0
             };
-        let hint_y = page_band_y - hint_h - (h * 0.014).max(10.0);
+        let hint_y = if chronicle_ledger {
+            h - hint_h - (h * 0.018).max(10.0)
+        } else {
+            page_band_y - hint_h - (h * 0.014).max(10.0)
+        };
         text_labels.push(TextLabel {
             rect: [margin_x * 0.5, hint_y, w - margin_x, hint_h],
             text: hint_text,
@@ -1927,7 +1967,7 @@ impl CollectionScene {
         // Page indicator — `Page X / Y · ● ○ ○ …` centred between the hint and
         // the footer arrows, only when archive multi-page. Gives the player a
         // glanceable cue that the catalog continues past the visible cabinet.
-        if archive_multi_page && inspect.is_none() {
+        if archive_multi_page && inspect.is_none() && !chronicle_ledger {
             let cur_page = self.archive_page.min(archive_page_count_now - 1);
             // Cap the dot row to keep the indicator readable on very large
             // catalogs; show numeric only when dots would crowd the line.
@@ -2061,16 +2101,18 @@ impl SceneBehavior for CollectionScene {
                 let w = ctx.layout.window_w;
                 let h = ctx.layout.window_h;
                 let panel = chronicle_panel_rect(w, h, ctx.progress);
-                let max_s = crate::ui::chronicle_dashboard::chronicle_right_pane_scroll_max(
+                chronicle_update_pane_from_cursor(self, w, h, panel, ctx.cursor_pos);
+                let pane = chronicle_resolve_scroll_pane(self, w, h, panel, ctx.cursor_pos);
+                self.chronicle_focused_pane = pane;
+                chronicle_apply_scroll_delta(
+                    self,
                     w,
                     h,
                     panel,
                     ctx.progress,
-                    self.focused_row,
+                    pane,
+                    -ctx.scroll_lines * CHRONICLE_SCROLL_STEP_PX,
                 );
-                let next = (self.chronicle_dashboard_scroll.get() - ctx.scroll_lines * 42.0)
-                    .clamp(0.0, max_s);
-                self.chronicle_dashboard_scroll.set(next);
             } else if archive_path {
                 let dir: i32 = if ctx.scroll_lines > 0.0 { 1 } else { -1 };
                 let from = archive_focus_row_col_in_page(self.focused_row);
@@ -2130,16 +2172,18 @@ impl SceneBehavior for CollectionScene {
                         let w = ctx.layout.window_w;
                         let h = ctx.layout.window_h;
                         let panel = chronicle_panel_rect(w, h, ctx.progress);
-                        let max_s = crate::ui::chronicle_dashboard::chronicle_right_pane_scroll_max(
+                        chronicle_update_pane_from_cursor(self, w, h, panel, ctx.cursor_pos);
+                        let pane = chronicle_resolve_scroll_pane(self, w, h, panel, ctx.cursor_pos);
+                        self.chronicle_focused_pane = pane;
+                        chronicle_apply_scroll_delta(
+                            self,
                             w,
                             h,
                             panel,
                             ctx.progress,
-                            self.focused_row,
+                            pane,
+                            h * 0.22,
                         );
-                        let step = h * 0.22;
-                        let next = (self.chronicle_dashboard_scroll.get() + step).min(max_s);
-                        self.chronicle_dashboard_scroll.set(next);
                         ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                     } else if archive_path {
                         let from = archive_focus_row_col_in_page(self.focused_row);
@@ -2156,18 +2200,18 @@ impl SceneBehavior for CollectionScene {
                         let w = ctx.layout.window_w;
                         let h = ctx.layout.window_h;
                         let panel = chronicle_panel_rect(w, h, ctx.progress);
-                        let max_s = crate::ui::chronicle_dashboard::chronicle_right_pane_scroll_max(
+                        chronicle_update_pane_from_cursor(self, w, h, panel, ctx.cursor_pos);
+                        let pane = chronicle_resolve_scroll_pane(self, w, h, panel, ctx.cursor_pos);
+                        self.chronicle_focused_pane = pane;
+                        chronicle_apply_scroll_delta(
+                            self,
                             w,
                             h,
                             panel,
                             ctx.progress,
-                            self.focused_row,
+                            pane,
+                            -h * 0.22,
                         );
-                        let step = h * 0.22;
-                        let next = (self.chronicle_dashboard_scroll.get() - step)
-                            .max(0.0)
-                            .min(max_s);
-                        self.chronicle_dashboard_scroll.set(next);
                         ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                     } else if archive_path {
                         let from = archive_focus_row_col_in_page(self.focused_row);
@@ -2182,6 +2226,19 @@ impl SceneBehavior for CollectionScene {
                 UiAction::FocusNext => {
                     if self.focused_chrome.is_some() {
                         collection_chrome_directional(self, ctx.bus, &items, FocusDir::Right);
+                        continue;
+                    }
+                    if matches!(self.active_tab, Tab::Chronicle) && all_count > 0 {
+                        ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+                        let pane = match self.chronicle_focused_pane {
+                            crate::ui::chronicle_dashboard::ChronicleScrollPane::RunLog => {
+                                crate::ui::chronicle_dashboard::ChronicleScrollPane::Career
+                            }
+                            crate::ui::chronicle_dashboard::ChronicleScrollPane::Career => {
+                                crate::ui::chronicle_dashboard::ChronicleScrollPane::RunLog
+                            }
+                        };
+                        chronicle_set_focused_pane(self, pane, all_count);
                         continue;
                     }
                     if all_count == 0 {
@@ -2212,6 +2269,19 @@ impl SceneBehavior for CollectionScene {
                         collection_chrome_directional(self, ctx.bus, &items, FocusDir::Left);
                         continue;
                     }
+                    if matches!(self.active_tab, Tab::Chronicle) && all_count > 0 {
+                        ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+                        let pane = match self.chronicle_focused_pane {
+                            crate::ui::chronicle_dashboard::ChronicleScrollPane::RunLog => {
+                                crate::ui::chronicle_dashboard::ChronicleScrollPane::Career
+                            }
+                            crate::ui::chronicle_dashboard::ChronicleScrollPane::Career => {
+                                crate::ui::chronicle_dashboard::ChronicleScrollPane::RunLog
+                            }
+                        };
+                        chronicle_set_focused_pane(self, pane, all_count);
+                        continue;
+                    }
                     if all_count == 0 {
                         continue;
                     }
@@ -2239,17 +2309,44 @@ impl SceneBehavior for CollectionScene {
                         continue;
                     }
                     if matches!(self.active_tab, Tab::Chronicle) && all_count > 0 {
-                        let idx = self.focused_row.unwrap_or(0);
-                        if idx > 0 {
-                            apply_artifact_focus(self, ctx.bus, idx - 1);
-                            chronicle_sync_run_log_scroll(
-                                self,
-                                ctx.layout.window_w,
-                                ctx.layout.window_h,
-                                ctx.progress,
-                            );
+                        if self.chronicle_focused_pane
+                            == crate::ui::chronicle_dashboard::ChronicleScrollPane::Career
+                        {
+                            if self.chronicle_dashboard_scroll.get() <= 0.001 {
+                                chronicle_set_focused_pane(
+                                    self,
+                                    crate::ui::chronicle_dashboard::ChronicleScrollPane::RunLog,
+                                    all_count.max(1),
+                                );
+                                ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+                            } else {
+                                let w = ctx.layout.window_w;
+                                let h = ctx.layout.window_h;
+                                let panel = chronicle_panel_rect(w, h, ctx.progress);
+                                chronicle_apply_scroll_delta(
+                                    self,
+                                    w,
+                                    h,
+                                    panel,
+                                    ctx.progress,
+                                    crate::ui::chronicle_dashboard::ChronicleScrollPane::Career,
+                                    -CHRONICLE_SCROLL_STEP_PX,
+                                );
+                                ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+                            }
                         } else {
-                            collection_enter_chrome(self, ctx.bus, &items, FocusDir::Up);
+                            let idx = self.focused_row.unwrap_or(0);
+                            if idx > 0 {
+                                apply_artifact_focus(self, ctx.bus, idx - 1);
+                                chronicle_sync_run_log_scroll(
+                                    self,
+                                    ctx.layout.window_w,
+                                    ctx.layout.window_h,
+                                    ctx.progress,
+                                );
+                            } else {
+                                collection_enter_chrome(self, ctx.bus, &items, FocusDir::Up);
+                            }
                         }
                         continue;
                     }
@@ -2293,17 +2390,40 @@ impl SceneBehavior for CollectionScene {
                         continue;
                     }
                     if matches!(self.active_tab, Tab::Chronicle) && all_count > 0 {
-                        let idx = self.focused_row.unwrap_or(0);
-                        if idx + 1 < all_count {
-                            apply_artifact_focus(self, ctx.bus, idx + 1);
-                            chronicle_sync_run_log_scroll(
+                        if self.chronicle_focused_pane
+                            == crate::ui::chronicle_dashboard::ChronicleScrollPane::Career
+                        {
+                            let w = ctx.layout.window_w;
+                            let h = ctx.layout.window_h;
+                            let panel = chronicle_panel_rect(w, h, ctx.progress);
+                            chronicle_apply_scroll_delta(
                                 self,
-                                ctx.layout.window_w,
-                                ctx.layout.window_h,
+                                w,
+                                h,
+                                panel,
                                 ctx.progress,
+                                crate::ui::chronicle_dashboard::ChronicleScrollPane::Career,
+                                CHRONICLE_SCROLL_STEP_PX,
                             );
+                            ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
                         } else {
-                            collection_enter_chrome(self, ctx.bus, &items, FocusDir::Down);
+                            let idx = self.focused_row.unwrap_or(0);
+                            if idx + 1 < all_count {
+                                apply_artifact_focus(self, ctx.bus, idx + 1);
+                                chronicle_sync_run_log_scroll(
+                                    self,
+                                    ctx.layout.window_w,
+                                    ctx.layout.window_h,
+                                    ctx.progress,
+                                );
+                            } else {
+                                chronicle_set_focused_pane(
+                                    self,
+                                    crate::ui::chronicle_dashboard::ChronicleScrollPane::Career,
+                                    all_count.max(1),
+                                );
+                                ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+                            }
                         }
                         continue;
                     }
@@ -2357,32 +2477,12 @@ impl SceneBehavior for CollectionScene {
                                 ));
                             }
                             CollectionAction::PrevPage => {
-                                if matches!(self.active_tab, Tab::Chronicle) {
-                                    chronicle_apply_footer_page_scroll(
-                                        self,
-                                        ctx.layout.window_w,
-                                        ctx.layout.window_h,
-                                        ctx.progress,
-                                        -1.0,
-                                    );
-                                } else {
-                                    let from = archive_focus_row_col_in_page(self.focused_row);
-                                    archive_page_step(self, ctx.bus, -1, from, all_count);
-                                }
+                                let from = archive_focus_row_col_in_page(self.focused_row);
+                                archive_page_step(self, ctx.bus, -1, from, all_count);
                             }
                             CollectionAction::NextPage => {
-                                if matches!(self.active_tab, Tab::Chronicle) {
-                                    chronicle_apply_footer_page_scroll(
-                                        self,
-                                        ctx.layout.window_w,
-                                        ctx.layout.window_h,
-                                        ctx.progress,
-                                        1.0,
-                                    );
-                                } else {
-                                    let from = archive_focus_row_col_in_page(self.focused_row);
-                                    archive_page_step(self, ctx.bus, 1, from, all_count);
-                                }
+                                let from = archive_focus_row_col_in_page(self.focused_row);
+                                archive_page_step(self, ctx.bus, 1, from, all_count);
                             }
                             CollectionAction::PrevTab => {
                                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
@@ -2396,10 +2496,7 @@ impl SceneBehavior for CollectionScene {
                         }
                         continue;
                     }
-                    if (archive_path && !matches!(self.active_tab, Tab::Chronicle))
-                        || (matches!(self.active_tab, Tab::Chronicle)
-                            && self.focused_row.is_some_and(|i| i > 0))
-                    {
+                    if archive_path && !matches!(self.active_tab, Tab::Chronicle) {
                         let w = ctx.layout.window_w;
                         let h = ctx.layout.window_h;
                         let bosses = tab_artifacts(self.active_tab, ctx.progress);
@@ -2434,9 +2531,7 @@ impl SceneBehavior for CollectionScene {
                     if bosses.is_empty() {
                         continue;
                     }
-                    if matches!(self.active_tab, Tab::Chronicle)
-                        && self.focused_row.is_some_and(|i| i == 0)
-                    {
+                    if matches!(self.active_tab, Tab::Chronicle) {
                         continue;
                     }
                     if let Some(orbit) = self.collection_inspect_orbit_for_focus(
@@ -2479,32 +2574,12 @@ impl SceneBehavior for CollectionScene {
                 self.cycle_tab(true);
             }
             Some(CollectionAction::PrevPage) => {
-                if matches!(self.active_tab, Tab::Chronicle) {
-                    chronicle_apply_footer_page_scroll(
-                        self,
-                        ctx.layout.window_w,
-                        ctx.layout.window_h,
-                        ctx.progress,
-                        -1.0,
-                    );
-                } else {
-                    let from = archive_focus_row_col_in_page(self.focused_row);
-                    archive_page_step(self, ctx.bus, -1, from, all_count);
-                }
+                let from = archive_focus_row_col_in_page(self.focused_row);
+                archive_page_step(self, ctx.bus, -1, from, all_count);
             }
             Some(CollectionAction::NextPage) => {
-                if matches!(self.active_tab, Tab::Chronicle) {
-                    chronicle_apply_footer_page_scroll(
-                        self,
-                        ctx.layout.window_w,
-                        ctx.layout.window_h,
-                        ctx.progress,
-                        1.0,
-                    );
-                } else {
-                    let from = archive_focus_row_col_in_page(self.focused_row);
-                    archive_page_step(self, ctx.bus, 1, from, all_count);
-                }
+                let from = archive_focus_row_col_in_page(self.focused_row);
+                archive_page_step(self, ctx.bus, 1, from, all_count);
             }
             Some(CollectionAction::SelectTab(i)) => {
                 if i < TABS.len() {
@@ -2519,7 +2594,17 @@ impl SceneBehavior for CollectionScene {
                     self.cam_anim.set(None);
                     self.chronicle_dashboard_scroll.set(0.0);
                     self.chronicle_run_log_scroll.set(0.0);
+                    self.chronicle_focused_pane =
+                        crate::ui::chronicle_dashboard::ChronicleScrollPane::RunLog;
                 }
+            }
+            Some(CollectionAction::ChronicleFocusCareer) => {
+                ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
+                chronicle_set_focused_pane(
+                    self,
+                    crate::ui::chronicle_dashboard::ChronicleScrollPane::Career,
+                    all_count.max(1),
+                );
             }
             Some(CollectionAction::SelectArtifact(idx)) => {
                 if all_count > 0 {
@@ -2569,6 +2654,7 @@ impl SceneBehavior for CollectionScene {
             let w = ctx.layout.window_w;
             let h = ctx.layout.window_h;
             let panel = chronicle_panel_rect(w, h, ctx.progress);
+            chronicle_update_pane_from_cursor(self, w, h, panel, ctx.cursor_pos);
             let entry_count = archive_career::chronicle_list_entry_count(ctx.progress);
             let right_max = crate::ui::chronicle_dashboard::chronicle_right_pane_scroll_max(
                 w,
@@ -2585,15 +2671,8 @@ impl SceneBehavior for CollectionScene {
                 panel,
                 entry_count,
             );
-            let panes = crate::ui::chronicle_dashboard::chronicle_pane_layout(w, h, panel);
-            let scroll = crate::ui::chronicle_dashboard::chronicle_clamp_run_log_scroll(
-                self.chronicle_run_log_scroll.get(),
-                self.focused_row,
-                entry_count,
-                panes,
-            );
             self.chronicle_run_log_scroll
-                .set(scroll.clamp(0.0, run_max));
+                .set(self.chronicle_run_log_scroll.get().clamp(0.0, run_max));
         }
 
         if archive_glb::archive_room_draw_ready() {
@@ -3163,8 +3242,12 @@ fn collection_sync_artifact_focus_to_idx(
 ) {
     let prev = scene.focused_row;
     scene.focused_row = Some(idx);
-    if matches!(scene.active_tab, Tab::Chronicle) && prev != Some(idx) {
-        scene.chronicle_dashboard_scroll.set(0.0);
+    if matches!(scene.active_tab, Tab::Chronicle) {
+        if prev != Some(idx) {
+            scene.chronicle_dashboard_scroll.set(0.0);
+        }
+        scene.chronicle_focused_pane =
+            crate::ui::chronicle_dashboard::ChronicleScrollPane::RunLog;
     }
     scene
         .tree
@@ -3312,12 +3395,111 @@ fn chronicle_panel_rect(
     let ch = archive_chrome_layout(w, h);
     let count = tab_artifacts(Tab::Chronicle, progress).len().max(1);
     let layout = compute_layout(w, h, ch.scale, Tab::Chronicle, count);
+    let band_h = (layout.band_bottom_y - layout.band_top_y).max(1.0);
+    let panel_h = crate::ui::chronicle_dashboard::chronicle_panel_height(w, h, band_h);
     [
         ch.margin_x,
         layout.band_top_y,
         w - ch.margin_x * 2.0,
-        (layout.band_bottom_y - layout.band_top_y).max(1.0),
+        panel_h,
     ]
+}
+
+const CHRONICLE_SCROLL_STEP_PX: f32 = 42.0;
+
+#[inline]
+fn collection_uses_footer_arrows(tab: Tab) -> bool {
+    !matches!(tab, Tab::Chronicle)
+}
+
+#[inline]
+fn chronicle_update_pane_from_cursor(
+    scene: &mut CollectionScene,
+    w: f32,
+    h: f32,
+    panel: [f32; 4],
+    cursor: (f32, f32),
+) {
+    if let Some(pane) =
+        crate::ui::chronicle_dashboard::chronicle_scroll_pane_at(w, h, panel, cursor)
+    {
+        scene.chronicle_focused_pane = pane;
+    }
+}
+
+#[inline]
+fn chronicle_resolve_scroll_pane(
+    scene: &CollectionScene,
+    w: f32,
+    h: f32,
+    panel: [f32; 4],
+    cursor: (f32, f32),
+) -> crate::ui::chronicle_dashboard::ChronicleScrollPane {
+    crate::ui::chronicle_dashboard::chronicle_scroll_pane_at(w, h, panel, cursor)
+        .unwrap_or(scene.chronicle_focused_pane)
+}
+
+#[inline]
+fn chronicle_set_focused_pane(
+    scene: &mut CollectionScene,
+    pane: crate::ui::chronicle_dashboard::ChronicleScrollPane,
+    entry_count: usize,
+) {
+    use crate::ui::chronicle_dashboard::ChronicleScrollPane;
+
+    scene.chronicle_focused_pane = pane;
+    scene.focused_chrome = None;
+    match pane {
+        ChronicleScrollPane::RunLog => {
+            let idx = scene
+                .focused_row
+                .unwrap_or(0)
+                .min(entry_count.saturating_sub(1));
+            scene
+                .tree
+                .set_focus(CollectionAction::SelectArtifact(idx).id());
+        }
+        ChronicleScrollPane::Career => {
+            scene
+                .tree
+                .set_focus(CollectionAction::ChronicleFocusCareer.id());
+        }
+    }
+}
+
+#[inline]
+fn chronicle_apply_scroll_delta(
+    scene: &mut CollectionScene,
+    w: f32,
+    h: f32,
+    panel: [f32; 4],
+    progress: &crate::core::progression::PlayerProgress,
+    pane: crate::ui::chronicle_dashboard::ChronicleScrollPane,
+    delta: f32,
+) {
+    use crate::ui::chronicle_dashboard::ChronicleScrollPane;
+
+    match pane {
+        ChronicleScrollPane::RunLog => {
+            let entry_count = archive_career::chronicle_list_entry_count(progress);
+            let max_s = crate::ui::chronicle_dashboard::chronicle_run_log_scroll_max(
+                w, h, panel, entry_count,
+            );
+            let next = (scene.chronicle_run_log_scroll.get() + delta).clamp(0.0, max_s);
+            scene.chronicle_run_log_scroll.set(next);
+        }
+        ChronicleScrollPane::Career => {
+            let max_s = crate::ui::chronicle_dashboard::chronicle_right_pane_scroll_max(
+                w,
+                h,
+                panel,
+                progress,
+                scene.focused_row,
+            );
+            let next = (scene.chronicle_dashboard_scroll.get() + delta).clamp(0.0, max_s);
+            scene.chronicle_dashboard_scroll.set(next);
+        }
+    }
 }
 
 #[inline]
@@ -3335,31 +3517,11 @@ fn chronicle_sync_run_log_scroll(
         scene.focused_row,
         entry_count,
         panes,
+        true,
     );
     let max_s =
         crate::ui::chronicle_dashboard::chronicle_run_log_scroll_max(w, h, panel, entry_count);
     scene.chronicle_run_log_scroll.set(scroll.clamp(0.0, max_s));
-}
-
-#[inline]
-fn chronicle_apply_footer_page_scroll(
-    scene: &mut CollectionScene,
-    w: f32,
-    h: f32,
-    progress: &crate::core::progression::PlayerProgress,
-    direction: f32,
-) {
-    let panel = chronicle_panel_rect(w, h, progress);
-    let max_s = crate::ui::chronicle_dashboard::chronicle_right_pane_scroll_max(
-        w,
-        h,
-        panel,
-        progress,
-        scene.focused_row,
-    );
-    let step = h * 0.22 * direction;
-    let next = (scene.chronicle_dashboard_scroll.get() + step).clamp(0.0, max_s);
-    scene.chronicle_dashboard_scroll.set(next);
 }
 
 #[inline]
@@ -3479,6 +3641,10 @@ fn collection_chrome_directional(
     match dir {
         FocusDir::Down if on_top => {
             scene.focused_chrome = None;
+            if matches!(scene.active_tab, Tab::Chronicle) {
+                scene.chronicle_focused_pane =
+                    crate::ui::chronicle_dashboard::ChronicleScrollPane::RunLog;
+            }
             if let Some(fi) = scene.focused_row {
                 scene
                     .tree
@@ -3488,6 +3654,10 @@ fn collection_chrome_directional(
         }
         FocusDir::Up if on_bottom => {
             scene.focused_chrome = None;
+            if matches!(scene.active_tab, Tab::Chronicle) {
+                scene.chronicle_focused_pane =
+                    crate::ui::chronicle_dashboard::ChronicleScrollPane::RunLog;
+            }
             if let Some(fi) = scene.focused_row {
                 scene
                     .tree
@@ -3654,7 +3824,7 @@ fn total_rows_for(count: usize) -> u32 {
     }
 }
 
-fn compute_layout(w: f32, h: f32, scale: f32, _tab: Tab, item_count: usize) -> SceneLayout {
+fn compute_layout(w: f32, h: f32, scale: f32, tab: Tab, item_count: usize) -> SceneLayout {
     let _ = scale;
     let title_y = h * 0.02;
     let title_h = ((24.0_f32 * (w.min(h) / 600.0)).max(14.0) / 0.55).ceil();
@@ -3717,7 +3887,13 @@ fn compute_layout(w: f32, h: f32, scale: f32, _tab: Tab, item_count: usize) -> S
     // sits flush with `grid_y_top_band + cell*0.5`.
     let grid_y_top = grid_y_top_band + cell_w * 0.5;
     let band_top_y = grid_y_top_band;
-    let band_bottom_y = grid_y_top_band + visible_grid_h;
+    // Chronicle uses the 2D ledger, not the cubby grid — give it the full
+    // title→bottom band (footer arrows/page chrome are omitted on that tab).
+    let band_bottom_y = if matches!(tab, Tab::Chronicle) {
+        h - h * 0.03
+    } else {
+        grid_y_top_band + visible_grid_h
+    };
 
     // Anchor only kept for the hit-test ray cast in `flat_items`. Unused for
     // 3D placement in [`CollectionScene::build_archive_grid_frame`].

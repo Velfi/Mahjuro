@@ -37,7 +37,7 @@ const GRID_ROWS: i32 = 8;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Face {
-    /// Standard tile (Characters/Bamboos/Dots/Wind/Dragon).
+    /// Standard tile (Manzu/Souzu/Pinzu/Wind/Dragon).
     Standard(Suit, u8),
     /// Bonus flower 1..=4. All flowers match each other.
     Flower(u8),
@@ -500,7 +500,7 @@ impl SceneBehavior for SolitaireScene {
 /// dragons + 4 flowers + 4 seasons.
 fn standard_faces() -> Vec<Face> {
     let mut faces = Vec::with_capacity(144);
-    for suit in [Suit::Characters, Suit::Bamboos, Suit::Dots] {
+    for suit in [Suit::Manzu, Suit::Souzu, Suit::Pinzu] {
         for rank in 1..=9u8 {
             for _ in 0..4 {
                 faces.push(Face::Standard(suit, rank));
