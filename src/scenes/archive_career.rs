@@ -72,9 +72,6 @@ pub fn chronicle_run_log_title(
     rec: &RunRecord,
 ) -> String {
     let mut pins = String::new();
-    if matches!(rec.outcome, RunOutcome::Victory) {
-        pins.push_str("★ ");
-    }
     if Some(rec.total_score_earned) == max_total_score_serious(progress) {
         pins.push_str("⌁ ");
     }
@@ -94,31 +91,6 @@ pub fn chronicle_run_log_title(
     format!("{pins}Run {display_num} — {outcome}{boss}")
 }
 
-/// Run-log row line 1: pins, number, outcome (boss on line 2 in the ledger).
-pub fn chronicle_run_log_line1(
-    progress: &PlayerProgress,
-    display_num: u32,
-    rec: &RunRecord,
-) -> String {
-    let mut pins = String::new();
-    if matches!(rec.outcome, RunOutcome::Victory) {
-        pins.push_str("★ ");
-    }
-    if Some(rec.total_score_earned) == max_total_score_serious(progress) {
-        pins.push_str("⌁ ");
-    }
-    if Some(rec.best_structure_score) == max_structure_score_serious(progress)
-        && rec.best_structure_score > 0
-    {
-        pins.push_str("◆ ");
-    }
-    let outcome = match rec.outcome {
-        RunOutcome::Victory => "Victory",
-        RunOutcome::Defeat { .. } => "Defeat",
-    };
-    format!("{pins}Run {display_num} — {outcome}")
-}
-
 /// Full boss name for run-log row line 2.
 pub fn chronicle_run_log_boss_line(rec: &RunRecord) -> Option<String> {
     rec.final_boss.map(|b| b.name().to_string())
@@ -126,7 +98,7 @@ pub fn chronicle_run_log_boss_line(rec: &RunRecord) -> Option<String> {
 
 /// Sample tiles for chronicle screenshots / empty career hero.
 pub fn sample_signature_hand_tiles() -> Vec<Tile> {
-    use crate::scenes::meld_guide::yaku_page;
+    use crate::scenes::guide::yaku_page;
     let (_desc, groups) = yaku_page(YakuKind::Toitoi);
     groups
         .iter()
@@ -139,8 +111,8 @@ pub fn sample_signature_hand_tiles() -> Vec<Tile> {
 pub fn chronicle_run_outcome_color(rec: &RunRecord) -> [f32; 4] {
     use crate::render::theme::color;
     match rec.outcome {
-        RunOutcome::Victory => color::alpha(color::JADE, 0.95),
-        RunOutcome::Defeat { .. } => color::alpha(color::RUBY, 0.92),
+        RunOutcome::Victory => color::alpha(color::chart::POSITIVE, 0.95),
+        RunOutcome::Defeat { .. } => color::alpha(color::chart::NEGATIVE, 0.92),
     }
 }
 
@@ -152,24 +124,22 @@ pub fn run_dominant_yaku(rec: &RunRecord) -> Option<YakuKind> {
         .map(|(k, _)| *k)
 }
 
-/// Accent tint for yaku pills in the chronicle ledger.
-pub fn yaku_pill_color(yk: YakuKind) -> [f32; 4] {
+/// Bone-tablet face for chronicle yaku name pills (porcelain cream, like gameplay tablets).
+pub fn yaku_pill_face() -> [f32; 4] {
     use crate::render::theme::color;
-    match yk {
-        YakuKind::Tanyao | YakuKind::FullHand => color::alpha(color::CHAMPAGNE, 0.75),
-        YakuKind::Honitsu | YakuKind::Chinitsu => color::alpha(color::WALNUT_SOFT, 0.9),
-        YakuKind::Yakuhai | YakuKind::Toitoi | YakuKind::Chiitoitsu => {
-            color::alpha(color::ANTIQUE, 0.88)
-        }
-        YakuKind::KokushiMusou => color::alpha(color::JADE, 0.85),
-        _ => color::alpha(color::STONE, 0.82),
-    }
+    color::PORCELAIN_AGED
 }
 
-/// Floor shorthand for run log (`6 · 40F` style).
-pub fn chronicle_floor_shorthand(rec: &RunRecord) -> String {
-    let floor = rec.final_ante.saturating_mul(5);
-    format!("Ante {} · {}F", rec.final_ante, floor)
+/// Label ink on yaku pills (walnut on cream, readable on the ledger).
+pub fn yaku_pill_ink() -> [f32; 4] {
+    use crate::render::theme::color;
+    color::WALNUT_INK
+}
+
+/// Bottom rim on yaku pills — subtle antique line like carved bone edge shadow.
+pub fn yaku_pill_rim() -> [f32; 4] {
+    use crate::render::theme::color;
+    color::alpha(color::ANTIQUE, 0.42)
 }
 
 /// Multi-line plaque for inspect / description.
@@ -194,46 +164,6 @@ pub fn chronicle_run_description(rec: &RunRecord) -> String {
         rec.tile_material.label(),
         rec.stake.label(),
     )
-}
-
-/// Stats block for Chronicle inspect plaque (run snapshot).
-pub fn chronicle_run_stats(rec: &RunRecord) -> String {
-    let mut lines = vec![
-        format!("Tiles played: {}", rec.tiles_played),
-        format!("Tiles discarded: {}", rec.tiles_discarded),
-        format!("Tiles drawn: {}", rec.times_restocked),
-        format!("Gold: {}", rec.final_gold),
-        format!("Plays remaining: {} / {}", rec.plays_remaining, rec.plays_max),
-        format!(
-            "Discards remaining: {} / {}",
-            rec.discards_remaining, rec.discards_max
-        ),
-    ];
-    if !rec.yaku_times_played.is_empty() {
-        let mut pairs: Vec<(YakuKind, u32)> = rec
-            .yaku_times_played
-            .iter()
-            .map(|(k, v)| (*k, *v))
-            .collect();
-        pairs.sort_by(|a, b| b.1.cmp(&a.1));
-        for (k, n) in pairs.into_iter().take(6) {
-            lines.push(format!("{}: {}", k.name(), n));
-        }
-    }
-    if !rec.relics_owned.is_empty() {
-        let names: Vec<String> = rec
-            .relics_owned
-            .iter()
-            .filter_map(|id| {
-                crate::core::relic::all_relic_defs()
-                    .iter()
-                    .find(|d| d.id == *id)
-                    .map(|d| d.name.to_string())
-            })
-            .collect();
-        lines.push(format!("Relics: {}", names.join(", ")));
-    }
-    lines.join("\n")
 }
 
 /// Optional nemesis only when the player lost to the same boss at least 3 times.
@@ -272,7 +202,199 @@ fn nemesis_line(progress: &PlayerProgress) -> Option<(BossKind, u32, u32)> {
 pub struct CareerKpi {
     pub label: &'static str,
     pub value: String,
-    pub detail: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ScoreHistoryPoint {
+    pub score: u64,
+    pub victory: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct BossRecordRow {
+    pub boss: BossKind,
+    pub wins: u32,
+    pub losses: u32,
+    pub best_score: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct AnteOutcomeCell {
+    pub ante: u32,
+    pub wins: u32,
+    pub losses: u32,
+}
+
+#[derive(Clone, Debug)]
+pub struct SignatureHandStats {
+    pub yaku_tags: Vec<YakuKind>,
+    pub times_used: u32,
+    pub avg_score: u64,
+}
+
+pub fn career_score_history_points(progress: &PlayerProgress) -> Vec<ScoreHistoryPoint> {
+    let mut runs: Vec<&RunRecord> = serious_records(progress).collect();
+    runs.sort_by_key(|r| r.timestamp_unix);
+    runs.into_iter()
+        .map(|r| ScoreHistoryPoint {
+            score: r.total_score_earned,
+            victory: matches!(r.outcome, RunOutcome::Victory),
+        })
+        .collect()
+}
+
+pub fn career_average_score(progress: &PlayerProgress) -> u64 {
+    let runs: Vec<&RunRecord> = serious_records(progress).collect();
+    if runs.is_empty() {
+        return 0;
+    }
+    runs.iter().map(|r| r.total_score_earned).sum::<u64>() / runs.len() as u64
+}
+
+pub fn career_boss_records(progress: &PlayerProgress) -> Vec<BossRecordRow> {
+    use std::collections::HashMap;
+    let mut by_boss: HashMap<BossKind, (u32, u32, u64)> = HashMap::new();
+    for r in serious_records(progress) {
+        let Some(boss) = r.final_boss else {
+            continue;
+        };
+        let e = by_boss.entry(boss).or_insert((0, 0, 0));
+        match r.outcome {
+            RunOutcome::Victory => e.0 += 1,
+            RunOutcome::Defeat { .. } => e.1 += 1,
+        }
+        if r.total_score_earned > e.2 {
+            e.2 = r.total_score_earned;
+        }
+    }
+    let mut rows: Vec<BossRecordRow> = by_boss
+        .into_iter()
+        .map(|(boss, (wins, losses, best_score))| BossRecordRow {
+            boss,
+            wins,
+            losses,
+            best_score,
+        })
+        .collect();
+    rows.sort_by(|a, b| {
+        b.losses
+            .cmp(&a.losses)
+            .then_with(|| b.wins.cmp(&a.wins))
+            .then_with(|| a.boss.name().cmp(b.boss.name()))
+    });
+    rows.truncate(6);
+    rows
+}
+
+pub fn career_ante_outcome_matrix(progress: &PlayerProgress) -> Vec<AnteOutcomeCell> {
+    use std::collections::BTreeMap;
+    let mut map: BTreeMap<u32, (u32, u32)> = BTreeMap::new();
+    for r in serious_records(progress) {
+        let e = map.entry(r.final_ante).or_insert((0, 0));
+        match r.outcome {
+            RunOutcome::Victory => e.0 += 1,
+            RunOutcome::Defeat { .. } => e.1 += 1,
+        }
+    }
+    map.into_iter()
+        .map(|(ante, (wins, losses))| AnteOutcomeCell {
+            ante,
+            wins,
+            losses,
+        })
+        .collect()
+}
+
+pub fn career_top_yaku(progress: &PlayerProgress, limit: usize) -> Vec<(YakuKind, u32)> {
+    let mut yaku: Vec<(YakuKind, u32)> = progress
+        .yaku_times_scored
+        .iter()
+        .map(|(k, v)| (*k, *v))
+        .collect();
+    yaku.sort_by(|a, b| b.1.cmp(&a.1));
+    yaku.truncate(limit);
+    yaku
+}
+
+pub fn signature_hand_yaku_tags(rec: &RunRecord) -> Vec<YakuKind> {
+    let mut tags: Vec<(YakuKind, u32)> = rec
+        .yaku_times_played
+        .iter()
+        .map(|(k, c)| (*k, *c))
+        .collect();
+    if tags.is_empty() && !rec.best_structure_name.is_empty() {
+        return Vec::new();
+    }
+    tags.sort_by(|a, b| b.1.cmp(&a.1));
+    tags.into_iter().take(4).map(|(k, _)| k).collect()
+}
+
+pub fn signature_hand_stats(progress: &PlayerProgress, rec: &RunRecord) -> SignatureHandStats {
+    let name = rec.best_structure_name.as_str();
+    let mut times_used = 0u32;
+    let mut score_sum = 0u64;
+    for r in serious_records(progress) {
+        if r.best_structure_name == name && r.best_structure_score > 0 {
+            times_used += 1;
+            score_sum += r.best_structure_score;
+        }
+    }
+    let avg_score = if times_used > 0 {
+        score_sum / times_used as u64
+    } else {
+        rec.best_structure_score
+    };
+    SignatureHandStats {
+        yaku_tags: signature_hand_yaku_tags(rec),
+        times_used,
+        avg_score,
+    }
+}
+
+pub fn chronicle_run_outcome_short(rec: &RunRecord) -> &'static str {
+    match rec.outcome {
+        RunOutcome::Victory => "Win",
+        RunOutcome::Defeat { .. } => "Loss",
+    }
+}
+
+/// Normalized 0..1 samples for a run's per-blind score sparkline.
+pub fn run_blind_sparkline(rec: &RunRecord) -> Vec<f32> {
+    let scores = run_blind_scores(rec);
+    if scores.is_empty() {
+        return Vec::new();
+    }
+    let mx = scores.iter().copied().max().unwrap_or(1).max(1) as f32;
+    scores.iter().map(|s| *s as f32 / mx).collect()
+}
+
+fn run_blind_scores(rec: &RunRecord) -> Vec<u64> {
+    if !rec.chronicle.blind_scores.is_empty() {
+        return rec.chronicle.blind_scores.clone();
+    }
+    legacy_blind_scores(rec)
+}
+
+fn legacy_blind_scores(rec: &RunRecord) -> Vec<u64> {
+    if !rec.score_after_ante.is_empty() {
+        let mut out = Vec::new();
+        let mut prev = 0u64;
+        for &(_, cum) in &rec.score_after_ante {
+            let delta = cum.saturating_sub(prev).max(1);
+            let third = delta / 3;
+            out.extend([third, third, delta.saturating_sub(third * 2)]);
+            prev = cum;
+        }
+        if matches!(rec.outcome, RunOutcome::Defeat { .. }) && rec.round_score > 0 {
+            out.push(rec.round_score);
+        }
+        return out;
+    }
+    if rec.round_score > 0 {
+        vec![rec.round_score]
+    } else {
+        Vec::new()
+    }
 }
 
 pub fn career_kpi_strip(progress: &PlayerProgress) -> Vec<CareerKpi> {
@@ -280,8 +402,7 @@ pub fn career_kpi_strip(progress: &PlayerProgress) -> Vec<CareerKpi> {
     if serious.is_empty() {
         return vec![CareerKpi {
             label: "Chronicle",
-            value: "—".into(),
-            detail: Some("Awaiting first run".into()),
+            value: "No runs yet".into(),
         }];
     }
     let n = serious.len() as u32;
@@ -304,29 +425,20 @@ pub fn career_kpi_strip(progress: &PlayerProgress) -> Vec<CareerKpi> {
     let win_pct = (wins as f32 / n as f32 * 100.0).round() as u32;
     vec![
         CareerKpi {
-            label: "Personal best",
-            value: format!("{best_run}"),
-            detail: Some(format!("Run {best_run_num}")),
-        },
-        CareerKpi {
-            label: "Total runs",
-            value: format!("{n}"),
-            detail: Some("Recorded".into()),
+            label: "Best run",
+            value: format!("{} · #{best_run_num}", format_score(best_run)),
         },
         CareerKpi {
             label: "Win rate",
-            value: format!("{win_pct}%"),
-            detail: Some(format!("{wins} wins")),
+            value: format!("{win_pct}% · {wins}/{n}"),
         },
         CareerKpi {
-            label: "Highest ante",
+            label: "Peak ante",
             value: format!("{max_ante}"),
-            detail: Some("Reached".into()),
         },
         CareerKpi {
             label: "Total score",
-            value: format!("{total_score}"),
-            detail: Some("Lifetime".into()),
+            value: format_score(total_score),
         },
     ]
 }
@@ -362,87 +474,14 @@ pub fn score_distribution_buckets(progress: &PlayerProgress) -> Vec<ScoreBucket>
         .collect()
 }
 
-#[derive(Clone, Debug)]
-pub struct FooterStat {
-    pub icon: &'static str,
-    pub value: String,
-    pub label: &'static str,
-}
-
-pub fn career_footer_stats(progress: &PlayerProgress) -> Vec<FooterStat> {
-    let serious: Vec<&RunRecord> = serious_records(progress).collect();
-    let n = serious.len();
-    if n == 0 {
-        return Vec::new();
-    }
-    let total_yaku: u32 = progress.yaku_times_scored.values().sum();
-    let bosses_defeated: u32 = progress.boss_times_defeated.values().sum();
-    let boss_catalog = all_bosses().len() + final_bosses().len();
-    let asc_wins = serious
-        .iter()
-        .filter(|r| matches!(r.outcome, RunOutcome::Victory))
-        .count();
-    let best_streak = best_win_streak(&serious);
-    let total_score: u64 = serious.iter().map(|r| r.total_score_earned).sum();
-    let avg_score = total_score / n as u64;
-    let avg_ante: f32 =
-        serious.iter().map(|r| r.final_ante as u64).sum::<u64>() as f32 / n as f32;
-    vec![
-        FooterStat {
-            icon: "✦",
-            value: format!("{total_yaku}"),
-            label: "Total yaku",
-        },
-        FooterStat {
-            icon: "☠",
-            value: format!("{bosses_defeated}/{boss_catalog}"),
-            label: "Bosses",
-        },
-        FooterStat {
-            icon: "♛",
-            value: format!("{asc_wins}"),
-            label: "Wins",
-        },
-        FooterStat {
-            icon: "⚡",
-            value: format!("{best_streak}"),
-            label: "Best streak",
-        },
-        FooterStat {
-            icon: "◎",
-            value: format!("{avg_score}"),
-            label: "Avg score",
-        },
-        FooterStat {
-            icon: "▲",
-            value: format!("{avg_ante:.1}"),
-            label: "Avg ante",
-        },
-    ]
-}
-
-fn best_win_streak(runs: &[&RunRecord]) -> u32 {
-    let mut sorted: Vec<&RunRecord> = runs.to_vec();
-    sorted.sort_by_key(|r| r.timestamp_unix);
-    let mut best = 0u32;
-    let mut cur = 0u32;
-    for r in sorted {
-        if matches!(r.outcome, RunOutcome::Victory) {
-            cur += 1;
-            best = best.max(cur);
-        } else {
-            cur = 0;
-        }
-    }
-    best
-}
-
 /// Compact career tile for the Chronicle ledger (right pane).
 #[derive(Clone, Debug)]
 pub struct CareerTile {
     pub label: &'static str,
     pub value: String,
     pub detail: Option<String>,
+    /// When set, the value line is drawn as a bone-tablet pill instead of plain text.
+    pub yaku: Option<YakuKind>,
 }
 
 /// Up to four career highlights for the 2×2 tile grid.
@@ -453,6 +492,7 @@ pub fn career_tiles(progress: &PlayerProgress) -> Vec<CareerTile> {
             label: "Chronicle",
             value: "Awaiting first run".into(),
             detail: None,
+            yaku: None,
         }];
     }
 
@@ -463,8 +503,9 @@ pub fn career_tiles(progress: &PlayerProgress) -> Vec<CareerTile> {
     if let Some((yk, n)) = progress.yaku_times_scored.iter().max_by_key(|(_, c)| *c) {
         tiles.push(CareerTile {
             label: "Favorite yaku",
-            value: yk.name().into(),
+            value: String::new(),
             detail: Some(format!("{n} scored")),
+            yaku: Some(*yk),
         });
     }
 
@@ -473,6 +514,7 @@ pub fn career_tiles(progress: &PlayerProgress) -> Vec<CareerTile> {
             label: "Nemesis",
             value: boss.name().into(),
             detail: Some(format!("{losses}L · best {wins}W")),
+            yaku: None,
         });
     } else if let Some((rid, n)) = progress
         .relic_times_activated
@@ -486,6 +528,7 @@ pub fn career_tiles(progress: &PlayerProgress) -> Vec<CareerTile> {
             label: "Most-triggered relic",
             value: def.name.into(),
             detail: Some(format!("{n}×")),
+            yaku: None,
         });
     }
 
@@ -714,7 +757,7 @@ fn lite_encounter_timeline(rec: &RunRecord) -> Vec<(u32, String, String)> {
 }
 
 fn yaku_page_tiles(yk: YakuKind) -> Vec<Tile> {
-    use crate::scenes::meld_guide::yaku_page;
+    use crate::scenes::guide::yaku_page;
     let (_desc, groups) = yaku_page(yk);
     groups
         .iter()
@@ -771,7 +814,68 @@ pub fn tile_image_source(tile: &Tile) -> Option<ImageQuadSource> {
 
 #[cfg(test)]
 mod tests {
-    use super::format_run_ended_timestamp;
+    use super::{career_boss_records, format_run_ended_timestamp};
+    use crate::core::boss::BossKind;
+    use crate::core::progression::{PlayerProgress, RunOutcome, RunRecord};
+    use crate::core::rules::BlindKind;
+    use crate::core::stake::Stake;
+    use crate::game::event_bus::GameOverReason;
+    use crate::persistence::TileMaterial;
+
+    fn defeat_against(boss: BossKind, score: u64) -> RunRecord {
+        RunRecord {
+            timestamp_unix: 0,
+            run_number: 1,
+            outcome: RunOutcome::Defeat {
+                reason: GameOverReason::OutOfPlays,
+            },
+            final_ante: 4,
+            final_blind: BlindKind::Boss,
+            final_boss: Some(boss),
+            round_score: score,
+            target_score: 500,
+            total_score_earned: score,
+            final_gold: 0,
+            plays_remaining: 0,
+            discards_remaining: 0,
+            plays_max: 4,
+            discards_max: 4,
+            tiles_played: 0,
+            tiles_discarded: 0,
+            times_restocked: 0,
+            best_structure_score: 0,
+            best_structure_name: String::new(),
+            yaku_times_played: Default::default(),
+            relics_owned: vec![],
+            consumables_owned: vec![],
+            tile_material: TileMaterial::Bamboo,
+            stake: Stake::Spring,
+            tutorial_run: false,
+            memorial_kind: None,
+            best_hand_tiles: vec![],
+            score_after_ante: vec![],
+            chronicle: crate::core::run_chronicle::RunChronicle::default(),
+            duration_secs: 0,
+        }
+    }
+
+    #[test]
+    fn career_boss_records_breaks_wl_ties_by_name() {
+        let mut progress = PlayerProgress::new();
+        for _ in 0..5 {
+            progress.run_history.push(defeat_against(BossKind::Whisper, 52_371));
+        }
+        for _ in 0..3 {
+            progress.run_history.push(defeat_against(BossKind::Gate, 34_047));
+            progress.run_history.push(defeat_against(BossKind::Drought, 8_769));
+        }
+
+        let rows = career_boss_records(&progress);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].boss, BossKind::Whisper);
+        assert_eq!(rows[1].boss, BossKind::Drought);
+        assert_eq!(rows[2].boss, BossKind::Gate);
+    }
 
     #[test]
     fn run_ended_timestamp_is_human_readable() {
@@ -803,4 +907,17 @@ pub fn format_score(n: u64) -> String {
         out.push(ch);
     }
     out.chars().rev().collect()
+}
+
+/// Compact score for the narrow run-log column (full commas below 100k).
+pub fn format_run_log_score(n: u64) -> String {
+    if n >= 10_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000_000 {
+        format!("{:.2}M", n as f64 / 1_000_000.0)
+    } else if n >= 100_000 {
+        format!("{:.0}k", n as f64 / 1_000.0)
+    } else {
+        format_score(n)
+    }
 }

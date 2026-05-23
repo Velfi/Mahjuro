@@ -805,8 +805,12 @@ pub struct UiFrame {
     /// Set by showcase overlay presenters; read by shadow / placement / tonemap paths.
     pub showcase_render_hints: ShowcaseRenderHints,
     /// Archive description quads: `Some(true)` = show left sign only; `Some(false)` = right only;
-    /// `None` = draw both (or procedural Archive). Renderer culls the hidden GLB primitive index.
+    /// `None` = draw both sign meshes. Renderer culls the hidden GLB primitive index.
     pub archive_description_sign_use_left: Option<bool>,
+    /// Archive cabinet page buttons (`btn_page_left` / `btn_page_right`). When false, the matching
+    /// GLB mesh is culled (e.g. first page hides left, last page hides right).
+    pub archive_page_left_visible: bool,
+    pub archive_page_right_visible: bool,
     /// When set, description copy is rasterized into the archive room decal atlas and composited
     /// on the `sign_description_left` / `sign_description_right` meshes in `room_glb.wgsl`.
     pub archive_sign_description_decal_text: Option<String>,
@@ -841,6 +845,8 @@ impl UiFrame {
             shop_inspect_lit_mesh_hdr: false,
             showcase_render_hints: ShowcaseRenderHints::default(),
             archive_description_sign_use_left: None,
+            archive_page_left_visible: false,
+            archive_page_right_visible: false,
             archive_sign_description_decal_text: None,
             hallway_distortion: None,
             room_gi_dynamic: false,

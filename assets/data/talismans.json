@@ -4,62 +4,62 @@
     "name": "Pearl Talisman",
     "description": "Every tile in hand: +100 chips when scored in a meld.",
     "shop_price": 12,
-    "accent": [0.94, 0.95, 0.98, 1.0]
+    "accent": [0.920, 0.930, 0.950, 1.0]
   },
   {
     "id": "gilded",
     "name": "Gilded Talisman",
     "description": "Every tile in hand: +$1 when scored in a meld.",
     "shop_price": 14,
-    "accent": [1.0, 0.84, 0.38, 1.0]
+    "accent": [0.843, 0.778, 0.575, 1.0]
   },
   {
     "id": "polychrome",
     "name": "Polychrome Talisman",
     "description": "Every tile in hand: ×1.2 mult when scored in a meld.",
     "shop_price": 12,
-    "accent": [0.82, 0.55, 0.95, 1.0]
+    "accent": [0.680, 0.580, 0.720, 1.0]
   },
   {
     "id": "souzu",
     "name": "Souzu Talisman",
     "description": "Every numbered tile in hand becomes souzu; honors unchanged.",
     "shop_price": 8,
-    "accent": [0.06, 0.55, 0.28, 1.0]
+    "accent": [0.386, 0.582, 0.429, 1.0]
   },
   {
     "id": "pinzu",
     "name": "Pinzu Talisman",
     "description": "Every numbered tile in hand becomes pinzu; honors unchanged.",
     "shop_price": 8,
-    "accent": [0.08, 0.22, 0.78, 1.0]
+    "accent": [0.306, 0.393, 0.567, 1.0]
   },
   {
     "id": "manzu",
     "name": "Manzu Talisman",
     "description": "Every numbered tile in hand becomes manzu; honors unchanged.",
     "shop_price": 8,
-    "accent": [0.82, 0.08, 0.18, 1.0]
+    "accent": [0.581, 0.320, 0.298, 1.0]
   },
   {
     "id": "honors",
     "name": "Honors Talisman",
     "description": "Every numbered tile in hand becomes a random honor; honors unchanged.",
     "shop_price": 8,
-    "accent": [0.78, 0.64, 0.28, 1.0]
+    "accent": [0.639, 0.596, 0.422, 1.0]
   },
   {
     "id": "wildflower",
     "name": "Wildflower Talisman",
     "description": "Every tile in hand becomes a flower.",
     "shop_price": 8,
-    "accent": [0.92, 0.48, 0.62, 1.0]
+    "accent": [0.704, 0.508, 0.552, 1.0]
   },
   {
     "id": "conformity",
     "name": "Conformity Talisman",
     "description": "Every tile in hand becomes a copy of a random tile in your hand.",
     "shop_price": 8,
-    "accent": [0.62, 0.60, 0.68, 1.0]
+    "accent": [0.580, 0.570, 0.620, 1.0]
   }
 ]

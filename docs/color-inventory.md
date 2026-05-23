@@ -20,7 +20,7 @@ Distance is Euclidean in linear-RGB space (channels in [0, 1]). Pure black / pur
 | `src/scenes/transition_playground.rs` | 14 |
 | `src/scenes/material_viewer.rs` | 12 |
 | `src/scenes/shop/layout.rs` | 11 |
-| `src/scenes/meld_guide.rs` | 10 |
+| `src/scenes/guide.rs` | 10 |
 | `src/core/talisman.rs` | 9 |
 | `src/scenes/gameplay/input_handler.rs` | 9 |
 | `src/render/relic_dish.rs` | 8 |
@@ -215,16 +215,16 @@ Distance > 0.080 from any token. These are the colors that either deserve their 
 | `src/scenes/material_viewer.rs` | 245 | `#E6EBFF` | 0.90, 0.92, 1.00 | `PARCHMENT` | 0.109 | material: mk(Moonstone, [0.90, 0.92, 1.00], 0.8, 96.0), |
 | `src/scenes/material_viewer.rs` | 272 | `#8C8575` | 0.55, 0.52, 0.46 | `RELIC_IRON` | 0.154 | material: mk(Porcelain, [0.55, 0.52, 0.46], 0.7, 128.0), |
 | `src/scenes/material_viewer.rs` | 276 | `#FFD98C` | 1.00, 0.85, 0.55 | `CHAMPAGNE` | 0.127 | material: MaterialParams::emissive_lamp([1.0, 0.85, 0.55], … |
-| `src/scenes/meld_guide.rs` | 366 | `#59B2D9` | 0.35, 0.70, 0.85 | `JADE` | 0.233 | accent: [0.35, 0.70, 0.85, 0.9], |
-| `src/scenes/meld_guide.rs` | 385 | `#D9A633` | 0.85, 0.65, 0.20 | `GOLD` | 0.117 | accent: [0.85, 0.65, 0.20, 0.9], |
-| `src/scenes/meld_guide.rs` | 400 | `#59B2D9` | 0.35, 0.70, 0.85 | `JADE` | 0.233 | accent: [0.35, 0.70, 0.85, 0.9], |
-| `src/scenes/meld_guide.rs` | 405 | `#D97359` | 0.85, 0.45, 0.35 | `RELIC_COPPER` | 0.114 | accent: [0.85, 0.45, 0.35, 0.9], |
-| `src/scenes/meld_guide.rs` | 414 | `#B28CD9` | 0.70, 0.55, 0.85 | `STONE` | 0.253 | accent: [0.70, 0.55, 0.85, 0.9], |
-| `src/scenes/meld_guide.rs` | 419 | `#D98CB2` | 0.85, 0.55, 0.70 | `STONE` | 0.195 | accent: [0.85, 0.55, 0.70, 0.9], |
-| `src/scenes/meld_guide.rs` | 428 | `#D98CB2` | 0.85, 0.55, 0.70 | `STONE` | 0.195 | accent: [0.85, 0.55, 0.70, 0.9], |
-| `src/scenes/meld_guide.rs` | 448 | `#59B2D9` | 0.35, 0.70, 0.85 | `JADE` | 0.233 | let seq_color: [f32; 4] = [0.35, 0.70, 0.85, 0.9]; |
-| `src/scenes/meld_guide.rs` | 451 | `#C7BD94` | 0.78, 0.74, 0.58 | `STONE` | 0.099 | let single_color: [f32; 4] = [0.78, 0.74, 0.58, 0.9]; |
-| `src/scenes/meld_guide.rs` | 452 | `#D9A633` | 0.85, 0.65, 0.20 | `GOLD` | 0.117 | let _kong_color: [f32; 4] = [0.85, 0.65, 0.20, 0.9]; |
+| `src/scenes/guide.rs` | 366 | `#59B2D9` | 0.35, 0.70, 0.85 | `JADE` | 0.233 | accent: [0.35, 0.70, 0.85, 0.9], |
+| `src/scenes/guide.rs` | 385 | `#D9A633` | 0.85, 0.65, 0.20 | `GOLD` | 0.117 | accent: [0.85, 0.65, 0.20, 0.9], |
+| `src/scenes/guide.rs` | 400 | `#59B2D9` | 0.35, 0.70, 0.85 | `JADE` | 0.233 | accent: [0.35, 0.70, 0.85, 0.9], |
+| `src/scenes/guide.rs` | 405 | `#D97359` | 0.85, 0.45, 0.35 | `RELIC_COPPER` | 0.114 | accent: [0.85, 0.45, 0.35, 0.9], |
+| `src/scenes/guide.rs` | 414 | `#B28CD9` | 0.70, 0.55, 0.85 | `STONE` | 0.253 | accent: [0.70, 0.55, 0.85, 0.9], |
+| `src/scenes/guide.rs` | 419 | `#D98CB2` | 0.85, 0.55, 0.70 | `STONE` | 0.195 | accent: [0.85, 0.55, 0.70, 0.9], |
+| `src/scenes/guide.rs` | 428 | `#D98CB2` | 0.85, 0.55, 0.70 | `STONE` | 0.195 | accent: [0.85, 0.55, 0.70, 0.9], |
+| `src/scenes/guide.rs` | 448 | `#59B2D9` | 0.35, 0.70, 0.85 | `JADE` | 0.233 | let seq_color: [f32; 4] = [0.35, 0.70, 0.85, 0.9]; |
+| `src/scenes/guide.rs` | 451 | `#C7BD94` | 0.78, 0.74, 0.58 | `STONE` | 0.099 | let single_color: [f32; 4] = [0.78, 0.74, 0.58, 0.9]; |
+| `src/scenes/guide.rs` | 452 | `#D9A633` | 0.85, 0.65, 0.20 | `GOLD` | 0.117 | let _kong_color: [f32; 4] = [0.85, 0.65, 0.20, 0.9]; |
 | `src/scenes/object3d_inspect.rs` | 227 | `#FFF0D1` | 1.00, 0.94, 0.82 | `PARCHMENT` | 0.100 | color: [1.0, 0.94, 0.82], |
 | `src/scenes/object3d_inspect.rs` | 233 | `#BFDBFF` | 0.75, 0.86, 1.00 | `RELIC_SILVER` | 0.140 | color: [0.75, 0.86, 1.0], |
 | `src/scenes/object3d_inspect.rs` | 239 | `#FFAD80` | 1.00, 0.68, 0.50 | `CHAMPAGNE` | 0.113 | color: [1.0, 0.68, 0.5], |

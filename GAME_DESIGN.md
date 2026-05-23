@@ -108,7 +108,7 @@ Other boss effects use **tile debuffs**, relic taxes, gold-per-play hooks, etc.�
 
 Talismans and zodiacs share one **consumable inventory** (default **2 slots**). **Brocade Pouch** adds **+1 slot** and changes how buff talismans apply to drawn tiles. Shop talismans are bought in the storeroom and used manually from the gameplay dish.
 
-**Memorial talismans (remnants)** — After a defeat, the House selects one **remnant** from your last run’s habits (blinds skipped, how you lost, discards, boss death, etc.). The next run grants exactly **one** memorial into a consumable slot (never sold in the shop). Using it applies an **in-round** benefit for the current blind only (extra plays/discards, hand stamp, gold on clear, next cash-in bonus, etc.).
+**Memorial talismans (remnants)** — After a defeat, the House selects one **remnant** from your last run’s habits (blinds skipped, how you lost, discards, boss death, etc.). The next run grants exactly **one** memorial into a consumable slot (not bought in the shop; sellable for **4** gold). Using it applies an **in-round** benefit for the current blind only (extra plays/discards, hand stamp, gold on clear, next cash-in bonus, etc.).
 
 ---
 
@@ -135,7 +135,7 @@ Tracked in `PlayerProgress` with a **tiered unlock ladder** driven by **runs com
 
 * **Tutorial overlay** (inside gameplay) highlights hand tiles, actions, and HUD with pulsing cues
 * **Tutorial Campaign**, **Tutorial Summary**, and **Tutorial Recap** scenes support onboarding
-* **Meld Guide**, **Tile Literacy**, **Yaku Journal**, **Collection**, **Material Viewer**, and **Solitaire** support reference play outside a standard run
+* **Guide**, **Tile Literacy**, **Yaku Journal**, **Collection**, **Material Viewer**, and **Solitaire** support reference play outside a standard run
 * **Zodiac Celebration** marks level-ups on zodiac cards
 
 ---
@@ -152,7 +152,7 @@ Tracked in `PlayerProgress` with a **tiered unlock ladder** driven by **runs com
 ## **6. Visual & UI Design**
 
 * **3D render pipeline** (wgpu) — many top-level `render/` modules (meshes, particles, fluid, flying coins, cabinet/shrine props, `wgpu_renderer` umbrella, etc.)
-* **First-class scenes** (`Scene` enum): Splash, Start Screen, **Tile Select** (material / start modal), Profile Select, Shop, Pick Blind, Gameplay, Game Over, Meld Guide, Material Viewer, Options, Collection, Solitaire, Tutorial Recap, **Tutorial Campaign**, **Tutorial Summary**, Tile Literacy, **Transition Playground** (dev), **Yaku Journal**, **Zodiac Celebration**
+* **First-class scenes** (`Scene` enum): Splash, Start Screen, **Tile Select** (material / start modal), Profile Select, Shop, Pick Blind, Gameplay, Game Over, Guide, Material Viewer, Options, Collection, Solitaire, Tutorial Recap, **Tutorial Campaign**, **Tutorial Summary**, Tile Literacy, **Transition Playground** (dev), **Yaku Journal**, **Zodiac Celebration**
 * **Pause menu** is embedded in run-adjacent scenes (gameplay, shop, pick blind)—not a separate `Scene` variant
 * **Score popups** animate each chip/mult cascade step
 * **Level-up modal** celebrates newly unlocked **relics** and **rules** (and level-ups can flag **dora** / yaku-related milestones in progression data)

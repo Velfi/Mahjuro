@@ -699,6 +699,7 @@ pub(super) fn process_focus_and_actions(
                 } else {
                     scene.invalid_meld_flash_at = None;
                     scene.invalid_meld_flash_slots.clear();
+                    scene.clear_boss_rule_feedback();
                     if gained > 0 {
                         ctx.anim.pulse(ENTITY_SCORE_PANEL);
                         scene.begin_scoring_cascade(ctx, score_before, gained, cascade_showcase);
@@ -1136,7 +1137,7 @@ pub(super) fn build_consumable_dish(
         // (ribbons, then talismans), so the nth talisman placement maps
         // to `proj.talisman_rects[n]` and the nth ribbon to
         // `proj.ribbon_rects[n]`. The renderer's projected rects already
-        // fold in the pendant's full rotation (base 90° Z + the
+        // fold in the pendant's full rotation (base Rx +90° + the
         // consumable_dish_talisman placement tilt), so using them gives
         // a focus rect that tracks the rotated silhouette instead of an
         // axis-aligned stand-in.
@@ -1263,18 +1264,19 @@ pub(super) fn build_consumable_dish(
                         );
                     }
                     crate::core::consumable::Consumable::Talisman(tk) => {
-                        let talisman_half_height = slot_w * 0.55;
+                        let tscale = slot_h * 1.56;
+                        // Upright on the dish (same Rx −90° as shop / zodiac ribbons).
+                        let talisman_half_height = tscale * 0.5;
                         let anchor = crate::ui::placement::PlacementAnchor::new(
                             [
                                 zx + slot_w * 0.5,
                                 zy + slot_h * 0.5,
                                 pendant_y + talisman_half_height,
                             ],
-                            crate::render::table_transform::rot_fixed_axes_deg(0.0, 0.0, 90.0),
+                            crate::render::table_transform::rot_fixed_axes_deg(90.0, 0.0, 0.0),
                             &scene.positions.consumable_dish_talisman,
                             layout,
                         );
-                        let tscale = slot_h * 1.56;
                         talisman_dish_placements.push(Object3d {
                             pos: anchor.pos,
                             extents: crate::render::talisman_mesh::talisman_object_extents(tscale),
@@ -1286,18 +1288,18 @@ pub(super) fn build_consumable_dish(
                         });
                     }
                     crate::core::consumable::Consumable::Memorial(mk) => {
-                        let talisman_half_height = slot_w * 0.55;
+                        let tscale = slot_h * 1.56;
+                        let talisman_half_height = tscale * 0.5;
                         let anchor = crate::ui::placement::PlacementAnchor::new(
                             [
                                 zx + slot_w * 0.5,
                                 zy + slot_h * 0.5,
                                 pendant_y + talisman_half_height,
                             ],
-                            crate::render::table_transform::rot_fixed_axes_deg(0.0, 0.0, 90.0),
+                            crate::render::table_transform::rot_fixed_axes_deg(90.0, 0.0, 0.0),
                             &scene.positions.consumable_dish_talisman,
                             layout,
                         );
-                        let tscale = slot_h * 1.56;
                         talisman_dish_placements.push(Object3d {
                             pos: anchor.pos,
                             extents: crate::render::talisman_mesh::talisman_object_extents(tscale),

@@ -1,6 +1,6 @@
 use super::*;
 use crate::core::tile_pack::TilePackKind;
-use crate::scenes::meld_guide;
+use crate::scenes::guide;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ShopAction {
@@ -368,7 +368,7 @@ impl ConsumableShopItem {
                 format!(
                     "Levels {} for the rest of the run (+0.5 mult, +20 chips per level). {}",
                     yk.name(),
-                    meld_guide::yaku_shape_text(yk),
+                    guide::yaku_shape_text(yk),
                 )
             }
             Consumable::Talisman(t) => t.description().to_string(),

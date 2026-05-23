@@ -72,6 +72,9 @@ pub(super) fn room_baked_shadow_loaded(
 }
 
 /// Whether this room samples its offline `.msh` instead of the live room shadow pass.
+///
+/// Archive is excluded: the room GLB uses punctual lights only (`COLOR_0.a = 3` on all shell
+/// meshes). Offline cubby-only bakes still mis-darken receivers when the asset grows (30+ prims).
 #[inline]
 pub(crate) fn room_env_uses_offline_baked_shadow(
     active_room: Option<ActiveRoomEnv>,
@@ -80,6 +83,9 @@ pub(crate) fn room_env_uses_offline_baked_shadow(
     let Some(env) = active_room else {
         return false;
     };
+    if env == ActiveRoomEnv::Archive {
+        return false;
+    }
     room_has_baked_shadow_asset(env, baked_room)
 }
 

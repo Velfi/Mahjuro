@@ -570,6 +570,7 @@ pub(super) fn build_ambient_table_objects(
     layout: &crate::ui::layout::LayoutResult,
     gameplay: &crate::game::engine::GameplayReadModel,
     progress_dora_enabled: bool,
+    boss_plinth_glow: f32,
     frame: &mut crate::render::draw_cmd::UiFrame,
 ) {
     use crate::render::draw_cmd::{Object3d, Object3dKind};
@@ -694,7 +695,7 @@ pub(super) fn build_ambient_table_objects(
             ),
             color: [1.0, 1.0, 1.0, 1.0],
             kind: Object3dKind::Plinth {
-                glow: 0.0,
+                glow: boss_plinth_glow.clamp(0.0, 1.0),
                 role: crate::render::draw_cmd::PlinthRole::Boss,
             },
             hover_target: 0.0,

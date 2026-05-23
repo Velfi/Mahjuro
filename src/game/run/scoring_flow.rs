@@ -648,6 +648,7 @@ impl RunState {
                 self.blind,
                 boss_name,
                 reward_note,
+                self.round_score,
             );
             bus.push(GameEvent::RoundComplete {
                 reached_target: true,

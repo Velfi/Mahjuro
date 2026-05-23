@@ -5,9 +5,9 @@
 //! signature-tile icon in a grid on the lacquered wood surface; the focused
 //! yaku's full canonical 14-tile hand sits in a top-anchored plaque, with the
 //! scrollable table beneath it. Margins tighten on short screens (e.g. Steam Deck),
-//! drawn from the same `yaku_page()` data the meld guide teaches with (so
+//! drawn from the same `yaku_page()` data the guide teaches with (so
 //! the plaque hand is guaranteed to score as its named yaku — see the
-//! scoring test in meld_guide).
+//! scoring test in guide).
 //!
 //! Kokushi Musō does not appear in the grid until the first time it is cashed in
 //! (same gate as `PlayerProgress::available_yaku`).
@@ -353,7 +353,7 @@ impl SceneBehavior for YakuJournalScene {
             let chips = yk.chip_bonus_at(lvl);
             let mult = yk.mult_bonus_at(lvl);
             let scored_this_run = yaku_progress.played_this_run(yk);
-            let (rule_text, _) = super::meld_guide::yaku_page(yk);
+            let (rule_text, _) = super::guide::yaku_page(yk);
 
             let base_row_color = if vi % 2 == 0 {
                 color::WALNUT_RAISED
@@ -726,7 +726,7 @@ fn format_yaku_mult_bonus(mult: f64) -> String {
 /// Draw the floating plaque: a bamboo-lacquer panel across the bottom of the
 /// screen showing the selected yaku's canonical 14-tile hand, scoring
 /// values, name, and description. The hand comes from
-/// `super::meld_guide::yaku_page`, validated by the scorer test in that
+/// `super::guide::yaku_page`, validated by the scorer test in that
 /// module — so whatever renders here is guaranteed to score as the named
 /// yaku.
 ///
@@ -866,7 +866,7 @@ fn draw_plaque(
     // Room for two wrapped lines; slightly shorter band on handheld → larger tile strip.
     let desc_h = desc_font * (2.35 - 0.22 * jc);
     let desc_y = rule_y + rule_h + header_pad * 0.35;
-    let (desc_text, groups) = super::meld_guide::yaku_page(yk);
+    let (desc_text, groups) = super::guide::yaku_page(yk);
     let body_text: String = match state {
         ProgressionState::Unseen => "sealed — score this yaku to reveal its shape".into(),
         _ => desc_text.into(),

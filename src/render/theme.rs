@@ -13,7 +13,7 @@
 //!
 //! Dark walnut panel tones with sparing brass accents. Brass is precious —
 //! reserve it for headers, score numerals, selected-tile rims, currency, and
-//! relic borders. Body text is `PARCHMENT` (pure white) for maximum readability
+//! relic borders. Body text is `PARCHMENT` (warm cream) for readability
 //! on deep brown surfaces. Highlights pull toward white rather than cool grays.
 //! Think
 //! "lacquered rosewood box with brass fittings under candlelight," not
@@ -37,62 +37,96 @@
 /// Named color tokens. Pull from here in scenes via `theme::color::GOLD` etc.
 pub mod color {
     // ── Walnut ladder: dark → light, backgrounds, panels, modals, tooltips ─
-    /// `#050302` — deepest base, near-black brown.
-    pub const WALNUT_INK: [f32; 4] = [0.020, 0.012, 0.008, 1.0];
-    /// `#0B0604` — primary modal/panel background and tooltip fill.
-    pub const WALNUT_DEEP: [f32; 4] = [0.043, 0.024, 0.016, 1.0];
-    /// `#140D08` — raised panel background (one step lighter than WALNUT_DEEP).
-    pub const WALNUT_RAISED: [f32; 4] = [0.078, 0.051, 0.031, 1.0];
-    /// `#1E140D` — hovered/selected panel background, button rest state.
-    pub const WALNUT_SOFT: [f32; 4] = [0.118, 0.078, 0.051, 1.0];
-    /// `#2A1C12` — strongest panel tone, primary button rest / highlights.
-    pub const WALNUT_BRIGHT: [f32; 4] = [0.165, 0.110, 0.071, 1.0];
+    /// `#040302` — deepest base, near-black brown.
+    pub const WALNUT_INK: [f32; 4] = [0.019, 0.012, 0.009, 1.0];
+    /// `#0A0604` — primary modal/panel background and tooltip fill.
+    pub const WALNUT_DEEP: [f32; 4] = [0.040, 0.024, 0.018, 1.0];
+    /// `#120D09` — raised panel background (one step lighter than WALNUT_DEEP).
+    pub const WALNUT_RAISED: [f32; 4] = [0.073, 0.052, 0.036, 1.0];
+    /// `#1C140E` — hovered/selected panel background, button rest state.
+    pub const WALNUT_SOFT: [f32; 4] = [0.111, 0.080, 0.058, 1.0];
+    /// `#271C15` — strongest panel tone, primary button rest / highlights.
+    pub const WALNUT_BRIGHT: [f32; 4] = [0.154, 0.112, 0.083, 1.0];
 
     // ── Golds: use sparingly, hierarchy of warmth ─────────────────────────
-    /// `#F5C674` — palest gold, hero score numerals & selected-tile rims.
-    pub const CHAMPAGNE: [f32; 4] = [0.961, 0.776, 0.455, 1.0];
-    /// `#E8B14A` — primary gold accent, headers, currency.
-    pub const GOLD: [f32; 4] = [0.910, 0.694, 0.290, 1.0];
-    /// `#C8901E` — darker gold for borders, inset frames.
-    pub const BRASS: [f32; 4] = [0.784, 0.565, 0.118, 1.0];
-    /// `#8A5E14` — deepest gold, almost bronze, used for shadow lines.
-    pub const ANTIQUE: [f32; 4] = [0.541, 0.369, 0.078, 1.0];
+    /// `#DAC8A9` — palest gold, hero score numerals & selected-tile rims.
+    pub const CHAMPAGNE: [f32; 4] = [0.855, 0.786, 0.666, 1.0];
+    /// `#C8B38D` — primary gold accent, headers, currency.
+    pub const GOLD: [f32; 4] = [0.785, 0.704, 0.553, 1.0];
+    /// `#A89263` — darker gold for borders, inset frames.
+    pub const BRASS: [f32; 4] = [0.663, 0.573, 0.392, 1.0];
+    /// `#73603F` — deepest gold, almost bronze, used for shadow lines.
+    pub const ANTIQUE: [f32; 4] = [0.454, 0.377, 0.248, 1.0];
 
     // ── Neutrals: text + dividers (warm stone — reads on walnut panels) ──
-    /// `#FFFFFF` — body text. High-contrast white on dark walnut.
-    pub const PARCHMENT: [f32; 4] = [1.000, 1.000, 1.000, 1.0];
-    /// `#B8AEA2` — secondary text, captions, inactive labels.
-    pub const STONE: [f32; 4] = [0.722, 0.682, 0.635, 1.0];
-    /// `#635C52` — tertiary text, disabled state, dividers.
-    pub const UMBER: [f32; 4] = [0.388, 0.361, 0.322, 1.0];
+    /// `#F5F3F0` — body text. Warm cream on dark walnut (not pure white).
+    pub const PARCHMENT: [f32; 4] = [0.960, 0.955, 0.940, 1.0];
+    /// `#B6AEA4` — secondary text, captions, inactive labels.
+    pub const STONE: [f32; 4] = [0.716, 0.683, 0.645, 1.0];
+    /// `#625C53` — tertiary text, disabled state, dividers.
+    pub const UMBER: [f32; 4] = [0.385, 0.361, 0.328, 1.0];
 
     // ── Semantic colors (desaturated to sit on warm wood panels) ──────────
-    /// `#5FD4A8` — success / target met / positive. **Semantic**, not a
+    /// `#9CC0B3` — success / target met / positive. **Semantic**, not a
     /// general surface color.
-    pub const JADE: [f32; 4] = [0.373, 0.831, 0.659, 1.0];
-    /// `#E85A6B` — danger / exit / negative. **Semantic** signal red.
-    pub const RUBY: [f32; 4] = [0.910, 0.353, 0.420, 1.0];
-    /// `#F0A848` — warning / attention.
-    pub const AMBER: [f32; 4] = [0.941, 0.659, 0.282, 1.0];
+    pub const JADE: [f32; 4] = [0.613, 0.755, 0.702, 1.0];
+    /// `#9B6F74` — danger / exit / negative. **Semantic** signal red.
+    pub const RUBY: [f32; 4] = [0.611, 0.438, 0.459, 1.0];
+    /// `#C5AD8C` — warning / attention.
+    pub const AMBER: [f32; 4] = [0.776, 0.680, 0.553, 1.0];
 
     // ── Lapis: the cool number-signal counterpart to RUBY.
-    /// `#8CC7FF` — sky-blue tint for "Chips" score tokens, info chips,
+    /// `#AEC0D2` — sky-blue tint for "Chips" score tokens, info chips,
     /// and any other UI signal that wants to read as the *cool* half of
     /// a warm/cool score pair. Paired with `RUBY` (Mult) at every score
     /// readout, and with `RELIC_GOLD` (Gold) / `PARCHMENT` (Final) when all
     /// four cascade kinds appear together. Distinct from the moody
     /// `TWILIGHT_*` family, which is *atmospheric* night-sky color, not a
     /// number-signal accent.
-    pub const LAPIS: [f32; 4] = [0.55, 0.78, 1.00, 1.0];
+    pub const LAPIS: [f32; 4] = [0.686, 0.757, 0.825, 1.0];
+
+    // ── Chart encodings: more chroma than UI semantics so bars, sparklines,
+    //    and outcome strips read at a glance on walnut panels.
+    pub mod chart {
+        /// `#62B894` — wins, positive series, average reference lines.
+        pub const POSITIVE: [f32; 4] = [0.384, 0.722, 0.580, 1.0];
+        /// `#C75C66` — losses, negative series.
+        pub const NEGATIVE: [f32; 4] = [0.780, 0.361, 0.400, 1.0];
+        /// `#D9A658` — peaks, last-bar highlight.
+        pub const HIGHLIGHT: [f32; 4] = [0.851, 0.651, 0.345, 1.0];
+        /// `#B8924A` — secondary chart accent (discovery stamp, warm fills).
+        pub const ACCENT: [f32; 4] = [0.722, 0.573, 0.290, 1.0];
+        /// `#B8A078` — neutral magnitude bars (score distribution segments).
+        pub const FILL: [f32; 4] = [0.722, 0.627, 0.471, 1.0];
+    }
+
+    // ── Glossary keyword tints (`vocabulary_colors`, styled text). Full
+    //    chroma so suit names and score jargon pop in tutorial copy; the
+    //    muted `JADE` / `RUBY` / `LAPIS` ladder above is for chrome elsewhere.
+    pub mod keyword {
+        pub const MANZU: [f32; 4] = [0.85, 0.25, 0.20, 1.0];
+        pub const SOUZU: [f32; 4] = [0.20, 0.65, 0.30, 1.0];
+        pub const PINZU: [f32; 4] = [0.20, 0.40, 0.80, 1.0];
+        pub const WIND: [f32; 4] = [0.70, 0.60, 0.20, 1.0];
+        pub const DRAGON: [f32; 4] = [0.85, 0.20, 0.18, 1.0];
+        pub const FLOWER: [f32; 4] = [0.90, 0.45, 0.55, 1.0];
+        pub const SEASON: [f32; 4] = [0.30, 0.70, 0.65, 1.0];
+        pub const HONORS: [f32; 4] = [0.961, 0.776, 0.455, 1.0];
+        pub const CHIPS: [f32; 4] = [0.55, 0.78, 1.00, 1.0];
+        pub const MULT: [f32; 4] = [0.910, 0.353, 0.420, 1.0];
+        pub const GOLD: [f32; 4] = [0.94, 0.78, 0.28, 1.0];
+        pub const PLAY: [f32; 4] = [0.373, 0.831, 0.659, 1.0];
+        pub const TRIGGER: [f32; 4] = [0.784, 0.565, 0.118, 1.0];
+    }
 
     // ── Porcelain: aged ceramic surfaces — temple-merchant pottery, the
     //    coin/consumable dishes on the gameplay table, the worn cream of
     //    a well-loved bowl. Distinct from `PARCHMENT` (paper) and
     //    `PARCHMENT` (text): porcelain is *fired clay with a tea-stain*,
     //    softer than parchment and noticeably less warm than tallow.
-    /// `#E0D6C7` — aged porcelain cream. Used for the relic dish, the
+    /// `#DED6CB` — aged porcelain cream. Used for the relic dish, the
     /// consumable dish, and the "well-loved ceramic" base color.
-    pub const PORCELAIN_AGED: [f32; 4] = [0.88, 0.84, 0.78, 1.0];
+    pub const PORCELAIN_AGED: [f32; 4] = [0.871, 0.841, 0.797, 1.0];
 
     // ── Relic metal tiers: rarity-keyed body materials for relics.
     //    Common → Iron, Uncommon → Copper, Rare → Silver, Legendary → Gold.
@@ -102,16 +136,16 @@ pub mod color {
     //    chip cannot drift apart. Distinct from the brass UI palette
     //    (`GOLD`, `BRASS`, `ANTIQUE`) which is for fixtures (headers,
     //    currency, button borders), not for material identity.
-    /// `#6B707A` — Common-tier relic body. Cool steel gray.
-    pub const RELIC_IRON: [f32; 4] = [0.42, 0.44, 0.48, 1.0];
-    /// `#C77542` — Uncommon-tier relic body. Warm copper.
-    pub const RELIC_COPPER: [f32; 4] = [0.78, 0.46, 0.26, 1.0];
-    /// `#D1D6E0` — Rare-tier relic body. Pale cool silver.
-    pub const RELIC_SILVER: [f32; 4] = [0.82, 0.84, 0.88, 1.0];
-    /// `#F0C747` — Legendary-tier relic body. Warm yellow gold; brighter
+    /// `#6B7078` — Common-tier relic body. Cool steel gray.
+    pub const RELIC_IRON: [f32; 4] = [0.423, 0.440, 0.472, 1.0];
+    /// `#A27C64` — Uncommon-tier relic body. Warm copper.
+    pub const RELIC_COPPER: [f32; 4] = [0.638, 0.488, 0.395, 1.0];
+    /// `#D2D6DE` — Rare-tier relic body. Pale cool silver.
+    pub const RELIC_SILVER: [f32; 4] = [0.824, 0.840, 0.871, 1.0];
+    /// `#D7C692` — Legendary-tier relic body. Warm yellow gold; brighter
     /// than the UI `GOLD` token because legendaries earn the *light*, not
     /// just the fixture.
-    pub const RELIC_GOLD: [f32; 4] = [0.94, 0.78, 0.28, 1.0];
+    pub const RELIC_GOLD: [f32; 4] = [0.843, 0.778, 0.575, 1.0];
 
     pub const fn alpha(c: [f32; 4], a: f32) -> [f32; 4] {
         [c[0], c[1], c[2], a]

@@ -67,9 +67,9 @@ impl OnboardingState {
                 "Swap a tile you don't need — select it, then Discard."
             }
             3 => "Try a discard to improve your hand.",
-            4 => "Build another meld, then Cash In again to reach the target.",
-            _ if !has_selection => "Select matching tiles to form a meld.",
-            _ if has_selection && !has_structure => "Press Play to bank your meld.",
+            4 => "Bank another pair, then Cash In again to reach the target.",
+            _ if !has_selection => "Select matching tiles to form a pair.",
+            _ if has_selection && !has_structure => "Press Play to bank your pair.",
             _ if has_structure => "Press Cash In when you're ready to score.",
             _ => "Reach the target score before you run out of plays.",
         }
@@ -131,7 +131,7 @@ pub fn lessons_failure_feedback(round_score: u64, target: u32, plays_remaining: 
         );
     }
     format!(
-        "You scored {} / {} — {} short. Try discarding a useless tile, then bank bigger melds before you Cash In.",
+        "You scored {} / {} — {} short. Try discarding a useless tile, then bank another pair before you Cash In.",
         round_score,
         target,
         target.saturating_sub(round_score.min(u32::MAX as u64) as u32),
@@ -164,7 +164,7 @@ pub fn finale_failure_feedback(
 
     if chicken_only {
         return format!(
-            "Your last cash-in was a Chicken Hand (no pattern bonus). This run only awards Full Hand and Chiitoitsu — build one of those shapes so mult is not stuck near zero. You were {} / {} ({}%).",
+            "Your last cash-in was a Chicken Hand (no yaku bonus). This run only awards Full Hand and Chiitoitsu — build one of those shapes so mult is not stuck near zero. You were {} / {} ({}%).",
             round_score, target, score_pct,
         );
     }
@@ -191,7 +191,7 @@ pub fn finale_failure_feedback(
 
 pub fn finale_intro_message() -> &'static str {
     "Boss shrine — The Iconoclast\n\n\
-     Winds and dragons are debuffed: they still form melds, but score much less. \
+     Yaku = hand patterns that add mult. Winds and dragons are debuffed: they still form melds, but score much less. \
      Build in Souzu, Pinzu, and Manzu. Full Hand and Chiitoitsu (seven pairs) \
      are your best yaku here. You can retry if you miss the target."
 }

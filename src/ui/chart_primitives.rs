@@ -1,4 +1,9 @@
 //! Shared clipped chart helpers for Chronicle and other immediate-mode UI.
+//!
+//! Follows [Duke Library chart dos and don'ts](https://guides.library.duke.edu/datavis/topten):
+//! bar charts use a **zero baseline** and linear height; line/sparkline series may
+//! autoscale; keep ≤6 categorical colors from [`color::chart`](crate::render::theme::color::chart);
+//! precompute comparisons (avg line, numeric labels) instead of asking viewers to do visual math.
 
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
@@ -35,6 +40,23 @@ pub fn push_quad_clipped(
     }
 }
 
+pub fn push_squircle_quad_clipped(
+    out: &mut Vec<GpuInstance>,
+    rect: [f32; 4],
+    clip: ChartClip,
+    c: [f32; 4],
+) {
+    let clip_rect = [
+        rect[0],
+        clip.top,
+        rect[2],
+        (clip.bottom - clip.top).max(0.0),
+    ];
+    if let Some(clipped) = intersect_rect(rect, clip_rect) {
+        push_quad(out, clipped, c);
+    }
+}
+
 pub fn push_label_clipped(
     out: &mut Vec<TextLabel>,
     rect: [f32; 4],
@@ -53,80 +75,148 @@ pub fn push_label_clipped(
     }
 }
 
-/// Vertical bar chart; `values` normalized against `max_value`.
-pub fn push_vbar_chart(
+/// Left gutter width for numeric Y ticks on vertical bar charts.
+#[allow(dead_code)]
+pub fn chart_y_axis_width(caption_px: f32, total_w: f32) -> f32 {
+    (caption_px * 4.8).max(44.0).min(total_w * 0.22)
+}
+
+/// Tight gutter width from the widest rendered tick label.
+pub fn chart_y_axis_width_for_max(max_value: u64, caption_px: f32) -> f32 {
+    let max_v = max_value.max(1);
+    let axis_font = caption_px * 0.86;
+    let mut widest = pill_label_width(&format_chart_axis_tick(max_v), axis_font);
+    for top_frac in [0.0_f32, 0.25, 0.5, 0.75] {
+        let value_frac = 1.0 - top_frac;
+        let tick_v = (max_v as f64 * value_frac as f64).round() as u64;
+        widest = widest.max(pill_label_width(&format_chart_axis_tick(tick_v), axis_font));
+    }
+    widest + 4.0
+}
+
+/// Compact score label for the Y-axis (fits narrow axis gutters).
+pub fn format_chart_axis_tick(n: u64) -> String {
+    if n >= 1_000_000 {
+        let m = n as f64 / 1_000_000.0;
+        if m >= 10.0 {
+            format!("{m:.0}M")
+        } else {
+            format!("{m:.1}M")
+        }
+    } else if n >= 1_000 {
+        let k = n as f64 / 1_000.0;
+        if k >= 100.0 {
+            format!("{k:.0}k")
+        } else if k >= 10.0 {
+            format!("{k:.0}k")
+        } else {
+            format!("{k:.1}k")
+        }
+    } else {
+        n.to_string()
+    }
+}
+
+/// Zero-based Y ticks and optional faint horizontal guides for a vertical bar plot.
+pub fn push_chart_y_axis(
     quads: &mut Vec<GpuInstance>,
     labels: &mut Vec<TextLabel>,
     clip: ChartClip,
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-    values: &[u64],
+    axis_x: f32,
+    axis_w: f32,
+    plot_x: f32,
+    plot_w: f32,
+    plot_y: f32,
+    plot_h: f32,
     max_value: u64,
-    bar_color: [f32; 4],
-    highlight_last: bool,
-    grid_color: [f32; 4],
     caption_px: f32,
+    grid_color: [f32; 4],
+    draw_grid: bool,
+    label_align: TextAlign,
 ) {
-    if values.is_empty() {
-        return;
-    }
     let max_v = max_value.max(1);
-    let bn = values.len().max(1);
-    let slot = w / bn as f32;
-    let col_w = (slot - 4.0).max(3.0).min(slot * 0.85);
-
-    for frac in [0.25_f32, 0.5, 0.75] {
-        push_quad_clipped(
-            quads,
-            [x, y + h * frac, w, 1.0],
-            clip,
-            grid_color,
-        );
-    }
-    for (i, pk) in values.iter().enumerate() {
-        let bx = x + i as f32 * slot + (slot - col_w) * 0.5;
-        let frac = *pk as f32 / max_v as f32;
-        let bar_h = (h * frac).max(3.0);
-        let y0 = y + h - bar_h;
-        let is_last = highlight_last && i + 1 == values.len();
-        let c = if is_last {
-            color::alpha(color::GOLD, 0.92)
-        } else {
-            bar_color
-        };
-        push_quad_clipped(quads, [bx, y0, col_w, bar_h], clip, c);
-        push_quad_clipped(
-            quads,
-            [bx, y0, col_w, 1.25],
-            clip,
-            color::alpha(color::PARCHMENT, 0.45),
-        );
-        if is_last {
-            let dot = col_w.min(8.0);
+    let axis_font = caption_px * 0.86;
+    let axis_line_h = axis_font + 2.0;
+    let tick_gap = axis_line_h + 4.0;
+    push_quad_clipped(
+        quads,
+        [plot_x - 1.0, plot_y, 1.0, plot_h],
+        clip,
+        color::alpha(color::ANTIQUE, 0.55),
+    );
+    let mut placed_bottom = plot_y;
+    for top_frac in [0.0_f32, 0.25, 0.5, 0.75] {
+        let value_frac = 1.0 - top_frac;
+        let tick_v = (max_v as f64 * value_frac as f64).round() as u64;
+        let line_y = plot_y + plot_h * top_frac;
+        if draw_grid && top_frac > 0.0 {
             push_quad_clipped(
                 quads,
-                [
-                    bx + (col_w - dot) * 0.5,
-                    y0 - dot - 3.0,
-                    dot,
-                    dot,
-                ],
+                [plot_x, line_y, plot_w, 1.0],
                 clip,
-                color::alpha(color::CHAMPAGNE, 0.95),
+                grid_color,
             );
         }
+        let label_y = (line_y - axis_line_h * 0.5).max(plot_y);
+        if label_y + axis_line_h > plot_y + plot_h + 1.0 {
+            continue;
+        }
+        if label_y < placed_bottom {
+            continue;
+        }
+        placed_bottom = label_y + axis_line_h + tick_gap;
+        push_label_clipped(
+            labels,
+            [axis_x, label_y, axis_w - 4.0, axis_line_h],
+            clip,
+            TextLabel {
+                rect: [axis_x, label_y, axis_w - 4.0, axis_line_h],
+                text: format_chart_axis_tick(tick_v),
+                color: color::alpha(color::STONE, 0.82),
+                font_px: Some(axis_font),
+                align: label_align,
+                mono: true,
+                ..Default::default()
+            },
+        );
     }
-    push_quad_clipped(quads, [x, y + h, w, 1.5], clip, color::alpha(color::ANTIQUE, 0.7));
-    let cap_h = (caption_px / 0.55).ceil();
+}
+
+/// Baseline at the bottom of a vertical bar plot (y = 0).
+pub fn push_chart_plot_baseline(
+    quads: &mut Vec<GpuInstance>,
+    clip: ChartClip,
+    plot_x: f32,
+    plot_y: f32,
+    plot_w: f32,
+    plot_h: f32,
+) {
+    push_quad_clipped(
+        quads,
+        [plot_x, plot_y + plot_h, plot_w, 1.5],
+        clip,
+        color::alpha(color::ANTIQUE, 0.7),
+    );
+}
+
+/// Chronological axis captions under a time-series bar chart.
+pub fn push_chart_time_axis_labels(
+    labels: &mut Vec<TextLabel>,
+    clip: ChartClip,
+    plot_x: f32,
+    plot_y: f32,
+    plot_w: f32,
+    plot_h: f32,
+    cap_h: f32,
+    caption_px: f32,
+) {
     push_label_clipped(
         labels,
-        [x, y + h + 4.0, w * 0.5, cap_h],
+        [plot_x, plot_y + plot_h + 4.0, plot_w * 0.5, cap_h],
         clip,
         TextLabel {
-            rect: [x, y + h + 4.0, w * 0.5, cap_h],
-            text: "earlier".into(),
+            rect: [plot_x, plot_y + plot_h + 4.0, plot_w * 0.5, cap_h],
+            text: "then".into(),
             color: color::alpha(color::STONE, 0.75),
             font_px: Some(caption_px),
             align: TextAlign::Left,
@@ -135,11 +225,11 @@ pub fn push_vbar_chart(
     );
     push_label_clipped(
         labels,
-        [x + w * 0.5, y + h + 4.0, w * 0.5, cap_h],
+        [plot_x + plot_w * 0.5, plot_y + plot_h + 4.0, plot_w * 0.5, cap_h],
         clip,
         TextLabel {
-            rect: [x + w * 0.5, y + h + 4.0, w * 0.5, cap_h],
-            text: "later".into(),
+            rect: [plot_x + plot_w * 0.5, plot_y + plot_h + 4.0, plot_w * 0.5, cap_h],
+            text: "now".into(),
             color: color::alpha(color::STONE, 0.75),
             font_px: Some(caption_px),
             align: TextAlign::Right,
@@ -148,27 +238,257 @@ pub fn push_vbar_chart(
     );
 }
 
-/// Horizontal stacked bar (left segment + right segment).
-pub fn push_stacked_bar(
+/// Heuristic width for a single-line pill or caption at `font_px`.
+#[inline]
+pub fn pill_label_width(text: &str, font_px: f32) -> f32 {
+    let chars = text.chars().count() as f32;
+    (font_px * chars * 0.48).max(font_px * 2.2)
+}
+
+/// Compact chart annotation (AVG / PEAK) with a dark backing and accent stripe.
+#[allow(dead_code)]
+pub fn push_chart_stat_badge(
     quads: &mut Vec<GpuInstance>,
+    labels: &mut Vec<TextLabel>,
+    clip: ChartClip,
+    x: f32,
+    y: f32,
+    text: &str,
+    accent: [f32; 4],
+    caption_px: f32,
+) -> [f32; 4] {
+    let font_px = caption_px.max(12.0);
+    let line_h = (font_px / 0.55).ceil() + 1.0;
+    let pad_x = 7.0;
+    let pad_y = 4.0;
+    let badge_w = pill_label_width(text, font_px) + pad_x * 2.0 + 3.0;
+    let badge_h = line_h + pad_y * 2.0;
+    let rect = [x, y, badge_w, badge_h];
+    push_quad_clipped(
+        quads,
+        rect,
+        clip,
+        color::alpha(color::WALNUT_DEEP, 0.94),
+    );
+    push_quad_clipped(
+        quads,
+        [x, y, 2.5, badge_h],
+        clip,
+        color::alpha(accent, 0.98),
+    );
+    push_quad_clipped(
+        quads,
+        [x + 0.5, y + 0.5, badge_w - 1.0, 1.0],
+        clip,
+        color::alpha(color::ANTIQUE, 0.35),
+    );
+    push_label_clipped(
+        labels,
+        [x + pad_x + 2.5, y + pad_y, badge_w - pad_x * 2.0 - 2.5, line_h],
+        clip,
+        TextLabel {
+            rect: [x + pad_x + 2.5, y + pad_y, badge_w - pad_x * 2.0 - 2.5, line_h],
+            text: text.into(),
+            color: color::CHAMPAGNE,
+            font_px: Some(font_px),
+            bold: true,
+            align: TextAlign::Left,
+            ..Default::default()
+        },
+    );
+    rect
+}
+
+/// Two-line stacked stat badge: small muted label on top, large accented value below.
+#[allow(dead_code)]
+pub fn push_chart_stat_badge_2line(
+    quads: &mut Vec<GpuInstance>,
+    labels: &mut Vec<TextLabel>,
+    clip: ChartClip,
+    x: f32,
+    y: f32,
+    label: &str,
+    value: &str,
+    accent: [f32; 4],
+    caption_px: f32,
+) -> [f32; 4] {
+    let label_px = (caption_px * 0.82).max(9.0);
+    let value_px = caption_px.max(11.0);
+    let label_line_h = (label_px / 0.55).ceil();
+    let value_line_h = (value_px / 0.55).ceil();
+    let pad_x = 7.0;
+    let pad_y = 4.0;
+    let gap = 2.0;
+    let inner_w = pill_label_width(value, value_px).max(pill_label_width(label, label_px));
+    let badge_w = inner_w + pad_x * 2.0 + 3.0;
+    let badge_h = label_line_h + gap + value_line_h + pad_y * 2.0;
+    let rect = [x, y, badge_w, badge_h];
+
+    push_quad_clipped(quads, rect, clip, color::alpha(color::WALNUT_DEEP, 0.94));
+    push_quad_clipped(quads, [x, y, 2.5, badge_h], clip, color::alpha(accent, 0.98));
+    push_quad_clipped(
+        quads,
+        [x + 0.5, y + 0.5, badge_w - 1.0, 1.0],
+        clip,
+        color::alpha(color::ANTIQUE, 0.35),
+    );
+
+    let tx = x + pad_x + 2.5;
+    let tw = badge_w - pad_x * 2.0 - 2.5;
+    push_label_clipped(
+        labels,
+        [tx, y + pad_y, tw, label_line_h],
+        clip,
+        TextLabel {
+            rect: [tx, y + pad_y, tw, label_line_h],
+            text: label.into(),
+            color: color::alpha(color::CHAMPAGNE, 0.60),
+            font_px: Some(label_px),
+            bold: false,
+            align: TextAlign::Left,
+            ..Default::default()
+        },
+    );
+    push_label_clipped(
+        labels,
+        [tx, y + pad_y + label_line_h + gap, tw, value_line_h],
+        clip,
+        TextLabel {
+            rect: [tx, y + pad_y + label_line_h + gap, tw, value_line_h],
+            text: value.into(),
+            color: color::CHAMPAGNE,
+            font_px: Some(value_px),
+            bold: true,
+            align: TextAlign::Left,
+            ..Default::default()
+        },
+    );
+    rect
+}
+
+/// Natural pill width for `label` at `caption_px` inside a `row_h` band (before `max_w` clamp).
+#[inline]
+pub fn yaku_pill_width(label: &str, caption_px: f32, row_h: f32) -> f32 {
+    let pill_h = (row_h * 0.70).clamp(caption_px * 1.05, row_h - 4.0);
+    let pad = (row_h - pill_h) * 0.5;
+    (pill_label_width(label, caption_px) + pad * 2.0).max(caption_px * 2.4)
+}
+
+/// Off-white bone-tablet pill with engraved label. Returns drawn width.
+pub fn push_yaku_pill(
+    squircle_quads: &mut Vec<GpuInstance>,
+    labels: &mut Vec<TextLabel>,
+    clip: ChartClip,
+    x: f32,
+    y: f32,
+    row_h: f32,
+    label: &str,
+    max_w: f32,
+    pill_face: [f32; 4],
+    pill_ink: [f32; 4],
+    pill_rim: [f32; 4],
+    caption_px: f32,
+) -> f32 {
+    let pill_h = (row_h * 0.70).clamp(caption_px * 1.05, row_h - 4.0);
+    let pad = (row_h - pill_h) * 0.5;
+    let pill_w = yaku_pill_width(label, caption_px, row_h)
+        .min((max_w - 2.0).max(caption_px * 2.4));
+    let pill_y = y + pad;
+    push_squircle_quad_clipped(
+        squircle_quads,
+        [x + 1.0, pill_y + 1.5, pill_w, pill_h],
+        clip,
+        color::alpha(pill_rim, 0.38),
+    );
+    push_squircle_quad_clipped(squircle_quads, [x, pill_y, pill_w, pill_h], clip, pill_face);
+    push_label_clipped(
+        labels,
+        [x, pill_y, pill_w, pill_h],
+        clip,
+        TextLabel {
+            rect: [x, pill_y, pill_w, pill_h],
+            text: label.into(),
+            color: pill_ink,
+            font_px: Some(caption_px),
+            align: TextAlign::Center,
+            ..Default::default()
+        },
+    );
+    pill_w
+}
+
+/// One labeled horizontal bar row with an off-white yaku name pill (gameplay bone tablets).
+pub fn push_yaku_hbar_row(
+    squircle_quads: &mut Vec<GpuInstance>,
+    quads: &mut Vec<GpuInstance>,
+    labels: &mut Vec<TextLabel>,
     clip: ChartClip,
     x: f32,
     y: f32,
     w: f32,
-    h: f32,
-    left_frac: f32,
-    left_color: [f32; 4],
-    right_color: [f32; 4],
-    grid_color: [f32; 4],
+    row_h: f32,
+    label: &str,
+    count: u32,
+    max_count: u32,
+    label_w: f32,
+    pill_face: [f32; 4],
+    pill_ink: [f32; 4],
+    pill_rim: [f32; 4],
+    bar_color: [f32; 4],
+    value_color: [f32; 4],
+    caption_px: f32,
+    body_px: f32,
+    suffix: Option<&str>,
 ) {
-    let lf = left_frac.clamp(0.0, 1.0);
-    push_quad_clipped(quads, [x, y + h * 0.5 - 1.0, w, 1.5], clip, grid_color);
-    push_quad_clipped(quads, [x, y, w * lf, h], clip, left_color);
+    let _pill_w = push_yaku_pill(
+        squircle_quads,
+        labels,
+        clip,
+        x,
+        y,
+        row_h,
+        label,
+        label_w,
+        pill_face,
+        pill_ink,
+        pill_rim,
+        caption_px,
+    );
+
+    let max_c = max_count.max(1);
+    let label_gap = 8.0;
+    let value_gap = 6.0;
+    let value_w = match suffix {
+        Some(_) => (body_px * 9.0).max(72.0).min(w * 0.42),
+        None => (body_px * 3.0).max(28.0).min(w * 0.22),
+    };
+    let bar_x0 = x + label_w + label_gap;
+    let bar_track_w = (w - label_w - label_gap - value_w - value_gap).max(4.0);
+    let bw = (bar_track_w * (count as f32 / max_c as f32)).clamp(4.0, bar_track_w);
     push_quad_clipped(
         quads,
-        [x + w * lf, y, w * (1.0 - lf), h],
+        [bar_x0, y + row_h * 0.18, bw, row_h * 0.64],
         clip,
-        right_color,
+        bar_color,
+    );
+    let value_text = match suffix {
+        Some(s) => format!("{count}{s}"),
+        None => format!("{count}"),
+    };
+    let value_x = x + w - value_w;
+    push_label_clipped(
+        labels,
+        [value_x, y, value_w, row_h],
+        clip,
+        TextLabel {
+            rect: [value_x, y, value_w, row_h],
+            text: value_text,
+            color: value_color,
+            font_px: Some(body_px),
+            align: TextAlign::Right,
+            mono: true,
+            ..Default::default()
+        },
     );
 }
 
@@ -236,12 +556,157 @@ pub fn push_hbar_row(
             color: value_color,
             font_px: Some(body_px),
             align: TextAlign::Right,
+            mono: true,
             ..Default::default()
         },
     );
 }
 
-/// Simple sparkline from normalized 0..1 samples.
+/// Resample to at most `max_points` via linear interpolation (keeps endpoints).
+fn resample_sparkline(samples: &[f32], max_points: usize) -> Vec<f32> {
+    let max_points = max_points.max(2);
+    if samples.len() <= max_points {
+        return samples.to_vec();
+    }
+    let last = samples.len() - 1;
+    (0..max_points)
+        .map(|i| {
+            let t = i as f32 / (max_points - 1) as f32;
+            let idx = t * last as f32;
+            let lo = idx.floor() as usize;
+            let hi = (lo + 1).min(last);
+            let frac = idx - lo as f32;
+            samples[lo] * (1.0 - frac) + samples[hi] * frac
+        })
+        .collect()
+}
+
+/// Map samples into `[pad, 1-pad]` with a minimum vertical span so flat series
+/// still read as a line, not a smear.
+fn autoscale_sparkline(samples: &[f32]) -> Vec<f32> {
+    if samples.is_empty() {
+        return Vec::new();
+    }
+    let min = samples.iter().copied().fold(f32::INFINITY, f32::min);
+    let max = samples.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let span = (max - min).max(0.18);
+    const PAD: f32 = 0.08;
+    samples
+        .iter()
+        .map(|v| {
+            let t = (*v - min) / span;
+            PAD + t.clamp(0.0, 1.0) * (1.0 - 2.0 * PAD)
+        })
+        .collect()
+}
+
+fn prepare_sparkline(samples: &[f32], plot_w: f32) -> Vec<f32> {
+    let max_pts = ((plot_w / 2.5).floor() as usize).clamp(2, 48);
+    autoscale_sparkline(&resample_sparkline(samples, max_pts))
+}
+
+fn sparkline_point_xy(
+    x: f32,
+    w: f32,
+    plot_top: f32,
+    plot_h: f32,
+    n: usize,
+    i: usize,
+    value: f32,
+) -> (f32, f32) {
+    let px = if n <= 1 {
+        x + w * 0.5
+    } else {
+        x + i as f32 * (w / (n - 1) as f32)
+    };
+    let py = plot_top + plot_h * (1.0 - value.clamp(0.0, 1.0));
+    (px, py)
+}
+
+/// Area fill under the sparkline polyline (baseline → line), sampled along each segment.
+fn push_sparkline_area_fill(
+    quads: &mut Vec<GpuInstance>,
+    clip: ChartClip,
+    floor_y: f32,
+    points: &[(f32, f32)],
+    fill: [f32; 4],
+) {
+    if points.is_empty() {
+        return;
+    }
+    if points.len() == 1 {
+        let (px, py) = points[0];
+        let bar_h = (floor_y - py).max(0.0);
+        if bar_h >= 0.5 {
+            push_quad_clipped(quads, [px - 0.5, py, 1.0, bar_h], clip, fill);
+        }
+        return;
+    }
+    const SLICE_W: f32 = 1.0;
+    for window in points.windows(2) {
+        let (x0, y0) = window[0];
+        let (x1, y1) = window[1];
+        let dx = x1 - x0;
+        let len = dx.abs();
+        if len < 0.01 {
+            continue;
+        }
+        let steps = ((len / SLICE_W).ceil() as i32).max(1);
+        let slice_w = (len / steps as f32).max(SLICE_W);
+        for s in 0..steps {
+            let t = (s as f32 + 0.5) / steps as f32;
+            let sx = x0 + dx * t;
+            let sy = y0 + (y1 - y0) * t;
+            let bar_h = (floor_y - sy).max(0.0);
+            if bar_h >= 0.5 {
+                push_quad_clipped(
+                    quads,
+                    [sx - slice_w * 0.5, sy, slice_w, bar_h],
+                    clip,
+                    fill,
+                );
+            }
+        }
+    }
+}
+
+fn push_sparkline_line_segment(
+    quads: &mut Vec<GpuInstance>,
+    clip: ChartClip,
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+    thick: f32,
+    color: [f32; 4],
+) {
+    let dx = x1 - x0;
+    let dy = y1 - y0;
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 0.01 {
+        push_quad_clipped(
+            quads,
+            [x0 - thick * 0.5, y0 - thick * 0.5, thick, thick],
+            clip,
+            color,
+        );
+        return;
+    }
+    let steps = (len / 0.75).ceil() as i32;
+    for s in 0..=steps {
+        let t = s as f32 / steps as f32;
+        let px = x0 + dx * t;
+        let py = y0 + dy * t;
+        push_quad_clipped(
+            quads,
+            [px - thick * 0.5, py - thick * 0.5, thick, thick],
+            clip,
+            color,
+        );
+    }
+}
+
+/// Sparkline from normalized 0..1 samples (values may be re-scaled for display).
 pub fn push_sparkline(
     quads: &mut Vec<GpuInstance>,
     clip: ChartClip,
@@ -253,29 +718,91 @@ pub fn push_sparkline(
     line_color: [f32; 4],
     baseline_color: [f32; 4],
 ) {
-    if samples.is_empty() {
+    if samples.is_empty() || w < 2.0 || h < 2.0 {
         return;
     }
-    push_quad_clipped(quads, [x, y + h, w, 1.0], clip, baseline_color);
-    let n = samples.len().max(1);
-    let step = w / (n.saturating_sub(1).max(1) as f32);
-    let thick = 2.0_f32;
-    for (i, &s) in samples.iter().enumerate() {
-        let sx = x + i as f32 * step;
-        let sy = y + h - s.clamp(0.0, 1.0) * h;
-        push_quad_clipped(quads, [sx, sy, thick, thick], clip, line_color);
-        if i + 1 < samples.len() {
-            let nx = x + (i + 1) as f32 * step;
-            let ns = samples[i + 1].clamp(0.0, 1.0);
-            let ny = y + h - ns * h;
-            let dx = nx - sx;
-            let dy = ny - sy;
-            let len = (dx * dx + dy * dy).sqrt().max(1.0);
-            let seg_w = len;
-            let seg_h = thick;
-            let mid_x = (sx + nx) * 0.5 - seg_w * 0.5;
-            let mid_y = (sy + ny) * 0.5 - seg_h * 0.5;
-            push_quad_clipped(quads, [mid_x, mid_y, seg_w, seg_h], clip, line_color);
-        }
+    let values = prepare_sparkline(samples, w);
+    let n = values.len();
+    let plot_top = y + 1.0;
+    let floor_y = y + h - 1.0;
+    let plot_h = (floor_y - plot_top).max(1.0);
+
+    push_quad_clipped(quads, [x, floor_y, w, 1.0], clip, baseline_color);
+
+    let thick = (h * 0.16).clamp(1.25, 2.25);
+    let mut points = Vec::with_capacity(n);
+    for (i, &v) in values.iter().enumerate() {
+        points.push(sparkline_point_xy(x, w, plot_top, plot_h, n, i, v));
+    }
+
+    // Light area fill only — sparklines may truncate Y; bar charts must not.
+    let fill = color::alpha(line_color, line_color[3] * 0.2);
+    push_sparkline_area_fill(quads, clip, floor_y, &points, fill);
+
+    for window in points.windows(2) {
+        let (x0, y0) = window[0];
+        let (x1, y1) = window[1];
+        push_sparkline_line_segment(quads, clip, x0, y0, x1, y1, thick, line_color);
+    }
+    if let Some(&(lx, ly)) = points.last() {
+        let cap = thick + 0.5;
+        push_quad_clipped(
+            quads,
+            [lx - cap * 0.5, ly - cap * 0.5, cap, cap],
+            clip,
+            color::lighten(line_color, 0.12),
+        );
+    }
+}
+
+#[cfg(test)]
+mod sparkline_tests {
+    use super::*;
+
+    #[test]
+    fn autoscale_flat_series_gets_visible_span() {
+        let out = autoscale_sparkline(&[0.5, 0.5, 0.5]);
+        assert!(out.iter().all(|v| *v >= 0.08 && *v <= 0.92));
+        assert!(out.last().unwrap() - out.first().unwrap() < 0.01);
+    }
+
+    #[test]
+    fn autoscale_trend_uses_full_height_band() {
+        let out = autoscale_sparkline(&[0.0, 0.5, 1.0]);
+        assert!(*out.first().unwrap() <= 0.1);
+        assert!(*out.last().unwrap() >= 0.9);
+    }
+
+    #[test]
+    fn resample_reduces_point_count() {
+        let src: Vec<f32> = (0..20).map(|i| i as f32).collect();
+        let out = resample_sparkline(&src, 6);
+        assert_eq!(out.len(), 6);
+        assert!((out[0] - src[0]).abs() < 0.01);
+        assert!((out[5] - src[19]).abs() < 0.5);
+    }
+
+    #[test]
+    fn sparkline_points_span_full_plot_width() {
+        let x = 10.0;
+        let w = 100.0;
+        let values = vec![0.2, 0.5, 0.8];
+        let n = values.len();
+        let (x0, _) = sparkline_point_xy(x, w, 0.0, 10.0, n, 0, values[0]);
+        let (x1, _) = sparkline_point_xy(x, w, 0.0, 10.0, n, n - 1, values[n - 1]);
+        assert!((x0 - x).abs() < 0.01);
+        assert!((x1 - (x + w)).abs() < 0.01);
+    }
+
+    #[test]
+    fn bar_height_frac_is_linear_from_zero() {
+        let max_v = 100_u64;
+        let score = 85_u64;
+        let frac = (score as f32 / max_v as f32).clamp(0.0, 1.0);
+        assert!((frac - 0.85).abs() < 0.001);
+        let tall = 95_u64;
+        let tall_frac = (tall as f32 / max_v as f32).clamp(0.0, 1.0);
+        assert!(tall_frac > frac);
+        assert!((tall_frac - frac - 0.1).abs() < 0.001);
     }
 }

@@ -356,6 +356,7 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     }
     // Archive `sign_description_*` meshes tag `COLOR_0.a = 2` in `room_env_gltf` (see `decode_env_primitive`).
     let is_archive_decal = abs(in.v_color.a - 2.0) < 0.01;
+    let is_archive_no_dir_shadow = abs(in.v_color.a - 3.0) < 0.01;
     if (is_archive_decal) {
         let dec = textureSample(decal_tex, base_sampler, in.uv);
         albedo = mix(albedo, dec.rgb, dec.a);
@@ -511,9 +512,12 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     // already outgoing radiance — do not shadow it.
     var lit_hdr = (ambient + Lo + metal_hemi) * cam.tile_seed;
     // Shared directional shadow map (props + room self-shadow in key-light space).
-    // Archive description signs (`is_archive_decal`) hold readable copy and must not catch
-    // lantern / prop silhouettes from the key-light pass — keep them fully lit.
-    let shadow_vis = select(sample_shadow_visibility(in.world_pos), 1.0, is_archive_decal);
+    // Archive signs + chrome/pedestal shells skip directional shadows (tags 2 / 3 in `room_env_gltf`).
+    let shadow_vis = select(
+        sample_shadow_visibility(in.world_pos),
+        1.0,
+        is_archive_decal || is_archive_no_dir_shadow,
+    );
     lit_hdr = lit_hdr * shadow_vis;
     var hdr = lit_hdr + emissive;
 

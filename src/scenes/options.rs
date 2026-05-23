@@ -1,7 +1,7 @@
 //! Options scene — volume sliders, visual settings, rendering, and accessibility.
 //!
 //! Layout: a table-of-contents (TOC) column on the left links to
-//! sections (Audio, Visual, Rendering, Accessibility, Controls, Data) in a
+//! sections (Audio, Graphics, Controls, Accessibility, Data) in a
 //! scrollable content pane on the right.
 
 use crate::audio::SfxId;
@@ -9,6 +9,7 @@ use crate::game::event_bus::GameEvent;
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::clip::intersect_rect;
+use crate::ui::button_prompts::{ButtonPrompt, GamepadStyle};
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::smooth_scroll::SmoothScroll;
 
@@ -30,16 +31,21 @@ const TOC_ID_BASE: u32 = 0xF200;
 /// Click-id for the fixed Back button.
 const BACK_ID: u32 = 0xF210;
 
+/// Label column width as a fraction of the content pane.
+const LABEL_FRAC: f32 = 0.42;
+/// Control column width (slider track or value chip).
+const CONTROL_FRAC: f32 = 0.48;
+/// Trailing readout column for slider percentages.
+const READOUT_FRAC: f32 = 0.10;
+
 // ── Sections ───────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Section {
     Audio,
-    Visual,
-    Display,
-    Rendering,
-    Accessibility,
+    Graphics,
     Controls,
+    Accessibility,
     Data,
 }
 
@@ -47,11 +53,9 @@ impl Section {
     fn label(self) -> &'static str {
         match self {
             Section::Audio => "Audio",
-            Section::Visual => "Visual",
-            Section::Display => "Display",
-            Section::Rendering => "Rendering",
-            Section::Accessibility => "Accessibility",
+            Section::Graphics => "Graphics",
             Section::Controls => "Controls",
+            Section::Accessibility => "Accessibility",
             Section::Data => "Data",
         }
     }
@@ -59,11 +63,9 @@ impl Section {
 
 const SECTIONS: &[Section] = &[
     Section::Audio,
-    Section::Visual,
-    Section::Display,
-    Section::Rendering,
-    Section::Accessibility,
+    Section::Graphics,
     Section::Controls,
+    Section::Accessibility,
     Section::Data,
 ];
 
@@ -125,83 +127,166 @@ const ROWS: &[Row] = &[
     Row::Shadows,
     Row::Ssr,
     Row::Hdr,
-    Row::UndoDiscard,
     Row::SwapAb,
     Row::SwapXy,
     Row::XyQuickAction,
     Row::HoldToSellRumble,
     Row::AutoCashInOnFullStructure,
+    Row::UndoDiscard,
     Row::Hints,
     Row::GlyphPrompts,
     Row::ExportPlayStats,
     Row::SaveAndProfiles,
 ];
 
-// ── Content slots (section headers interspersed with rows) ─────────────
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ContentSlot {
-    Header(Section),
-    Row(Row),
-}
-
-const CONTENT: &[ContentSlot] = &[
-    ContentSlot::Header(Section::Audio),
-    ContentSlot::Row(Row::Master),
-    ContentSlot::Row(Row::Music),
-    ContentSlot::Row(Row::Sfx),
-    ContentSlot::Row(Row::SfxToggle),
-    ContentSlot::Header(Section::Visual),
-    ContentSlot::Row(Row::Gamma),
-    ContentSlot::Row(Row::Effects),
-    ContentSlot::Row(Row::Tile),
-    ContentSlot::Row(Row::Tileset),
-    ContentSlot::Row(Row::Surface),
-    ContentSlot::Header(Section::Display),
-    ContentSlot::Row(Row::BorderlessFullscreen),
-    ContentSlot::Header(Section::Rendering),
-    ContentSlot::Row(Row::Shadows),
-    ContentSlot::Row(Row::Ssr),
-    ContentSlot::Row(Row::Hdr),
-    ContentSlot::Header(Section::Accessibility),
-    ContentSlot::Row(Row::UndoDiscard),
-    ContentSlot::Header(Section::Controls),
-    ContentSlot::Row(Row::SwapAb),
-    ContentSlot::Row(Row::SwapXy),
-    ContentSlot::Row(Row::XyQuickAction),
-    ContentSlot::Row(Row::HoldToSellRumble),
-    ContentSlot::Row(Row::AutoCashInOnFullStructure),
-    ContentSlot::Row(Row::Hints),
-    ContentSlot::Row(Row::GlyphPrompts),
-    ContentSlot::Header(Section::Data),
-    ContentSlot::Row(Row::ExportPlayStats),
-    ContentSlot::Row(Row::SaveAndProfiles),
-];
-
-fn content_index_of_row(row: Row) -> usize {
-    CONTENT
-        .iter()
-        .position(|s| matches!(s, ContentSlot::Row(r) if *r == row))
-        .unwrap()
-}
-
-fn content_index_of_section(section: Section) -> usize {
-    CONTENT
-        .iter()
-        .position(|s| matches!(s, ContentSlot::Header(sec) if *sec == section))
-        .unwrap()
-}
-
-/// Which section does the given row belong to? Walks backwards through
-/// CONTENT from the row's position to find its enclosing Header.
 fn section_of_row(row: Row) -> Section {
-    let idx = content_index_of_row(row);
-    for slot in CONTENT[..idx].iter().rev() {
-        if let ContentSlot::Header(sec) = slot {
-            return *sec;
+    match row {
+        Row::Master | Row::Music | Row::Sfx | Row::SfxToggle => Section::Audio,
+        Row::Gamma
+        | Row::Effects
+        | Row::Tile
+        | Row::Tileset
+        | Row::Surface
+        | Row::BorderlessFullscreen
+        | Row::Shadows
+        | Row::Ssr
+        | Row::Hdr => Section::Graphics,
+        Row::SwapAb
+        | Row::SwapXy
+        | Row::XyQuickAction
+        | Row::HoldToSellRumble
+        | Row::AutoCashInOnFullStructure => Section::Controls,
+        Row::UndoDiscard | Row::Hints | Row::GlyphPrompts => Section::Accessibility,
+        Row::ExportPlayStats | Row::SaveAndProfiles => Section::Data,
+    }
+}
+
+fn row_index(row: Row) -> usize {
+    ROWS.iter().position(|&r| r == row).unwrap()
+}
+
+fn section_row_index(section: Section) -> usize {
+    ROWS.iter()
+        .position(|&r| section_of_row(r) == section)
+        .unwrap()
+}
+
+/// Which section is at the top of the visible content viewport?
+fn section_at_scroll(scroll: f32) -> Section {
+    ROWS.get(scroll.floor() as usize)
+        .map(|&row| section_of_row(row))
+        .unwrap_or(Section::Audio)
+}
+
+/// Input/device context for hint copy and scroll fades in [`OptionsScene::draw_overlay`].
+pub struct OptionsDrawHint {
+    pub input_mode: InputMode,
+    pub gamepad_style: GamepadStyle,
+    pub swap_ab: bool,
+    pub swap_xy: bool,
+    /// Color the top/bottom scroll fades blend into (standalone vs pause overlay).
+    pub scroll_fade_backdrop: [f32; 4],
+}
+
+impl Default for OptionsDrawHint {
+    fn default() -> Self {
+        Self {
+            input_mode: InputMode::Cursor,
+            gamepad_style: GamepadStyle::default(),
+            swap_ab: false,
+            swap_xy: false,
+            scroll_fade_backdrop: color::WALNUT_INK,
         }
     }
-    Section::Audio
+}
+
+impl OptionsDrawHint {
+    pub fn from_draw_ctx(ctx: &DrawCtx<'_>) -> Self {
+        Self {
+            input_mode: ctx.input_mode,
+            gamepad_style: ctx.gamepad_style,
+            swap_ab: ctx.gamepad_swap_ab,
+            swap_xy: ctx.gamepad_swap_xy,
+            scroll_fade_backdrop: color::WALNUT_INK,
+        }
+    }
+
+    /// Pause-menu overlay sits on a dim walnut scrim, not a solid fill.
+    pub fn pause_overlay(ctx: &DrawCtx<'_>) -> Self {
+        Self {
+            scroll_fade_backdrop: color::alpha(color::WALNUT_INK, 0.78),
+            ..Self::from_draw_ctx(ctx)
+        }
+    }
+}
+
+struct RowColumns {
+    label_x: f32,
+    label_w: f32,
+    control_x: f32,
+    control_w: f32,
+    readout_x: f32,
+    readout_w: f32,
+}
+
+fn row_columns(content_x: f32, content_w: f32) -> RowColumns {
+    let label_w = content_w * LABEL_FRAC;
+    let control_w = content_w * CONTROL_FRAC;
+    let readout_w = content_w * READOUT_FRAC;
+    RowColumns {
+        label_x: content_x,
+        label_w,
+        control_x: content_x + label_w,
+        control_w,
+        readout_x: content_x + label_w + control_w,
+        readout_w,
+    }
+}
+
+fn on_off(enabled: bool) -> String {
+    if enabled {
+        "ON".into()
+    } else {
+        "OFF".into()
+    }
+}
+
+fn row_copy(row: Row, scene: &OptionsScene) -> (&'static str, String) {
+    match row {
+        Row::Master => ("Master", format!("{}%", (scene.master_volume * 100.0).round() as u32)),
+        Row::Music => ("Music", format!("{}%", (scene.music_volume * 100.0).round() as u32)),
+        Row::Sfx => ("SFX", format!("{}%", (scene.sfx_volume * 100.0).round() as u32)),
+        Row::SfxToggle => ("SFX enabled", on_off(scene.sfx_enabled)),
+        Row::Gamma => ("Gamma", format!("{:.2}", scene.gamma)),
+        Row::Effects => ("Effects quality", scene.effects_quality.label().into()),
+        Row::Tile => ("Tile style", scene.tile_preset.label().into()),
+        Row::Tileset => ("Tile set", scene.tileset_name.clone()),
+        Row::Surface => ("Surface", scene.surface_kind.label().into()),
+        Row::BorderlessFullscreen => (
+            "Window mode",
+            if scene.borderless_fullscreen {
+                "Borderless".into()
+            } else {
+                "Windowed".into()
+            },
+        ),
+        Row::Shadows => ("Shadows", on_off(scene.shadows_enabled)),
+        Row::Ssr => ("Reflections", on_off(scene.ssr_enabled)),
+        Row::Hdr => ("HDR", on_off(scene.hdr_enabled)),
+        Row::SwapAb => ("Swap A/B", on_off(scene.swap_ab)),
+        Row::SwapXy => ("Swap X/Y", on_off(scene.swap_xy)),
+        Row::XyQuickAction => ("Face buttons: play/discard", on_off(scene.xy_quick_action)),
+        Row::HoldToSellRumble => ("Controller rumble", on_off(scene.hold_to_sell_rumble)),
+        Row::AutoCashInOnFullStructure => (
+            "Auto cash-in",
+            on_off(scene.auto_cash_in_on_full_structure),
+        ),
+        Row::Hints => ("Hints", on_off(scene.hints_enabled)),
+        Row::GlyphPrompts => ("Button glyphs", scene.glyph_prompt.label().into()),
+        Row::UndoDiscard => ("Discard undo", on_off(scene.discard_undo_enabled)),
+        Row::ExportPlayStats => ("Export play stats", String::new()),
+        Row::SaveAndProfiles => ("Save & profiles", String::new()),
+    }
 }
 
 // ── Layout ─────────────────────────────────────────────────────────────
@@ -270,8 +355,8 @@ fn compute_layout(w: f32, h: f32) -> PanelLayout {
     let version_y = h - version_h - (4.0 * scale);
     let hint_y = version_y - hint_h - (6.0 * scale);
     let back_y = hint_y - back_h - (12.0 * scale);
-    let back_w = (180.0 * scale).min(content_w * 0.5);
-    let back_x = content_x + (content_w - back_w) * 0.5;
+    let back_w = total_w;
+    let back_x = margin;
 
     let content_end_y = back_y - (12.0 * scale);
     let slot_step = slot_h + slot_gap;
@@ -537,10 +622,9 @@ impl OptionsScene {
     }
 
     fn slider_track_xw(layout: &PanelLayout) -> (f32, f32) {
-        let label_w = layout.content_w * 0.35;
-        let slider_x = layout.content_x + label_w;
-        let slider_w = layout.content_w * 0.50;
-        (slider_x, slider_w)
+        let cols = row_columns(layout.content_x, layout.content_w);
+        let slider_w = cols.control_w - cols.readout_w;
+        (cols.control_x, slider_w.max(1.0))
     }
 
     fn cursor_on_slider_track(layout: &PanelLayout, cursor_pos: (f32, f32)) -> bool {
@@ -559,13 +643,13 @@ impl OptionsScene {
 
     /// Clamp scroll offset and update max for the given layout.
     fn sync_scroll(&self, layout: &PanelLayout) {
-        let max = CONTENT.len().saturating_sub(layout.visible_slots) as u32;
+        let max = ROWS.len().saturating_sub(layout.visible_slots) as u32;
         self.scroll.set_max(max);
     }
 
     /// Adjust scroll so `self.focused` is visible.
     fn ensure_focused_visible(&self, layout: &PanelLayout) {
-        let idx = content_index_of_row(self.focused) as f32;
+        let idx = row_index(self.focused) as f32;
         let scroll = self.scroll.target();
         let vis = layout.visible_slots as f32;
         if idx < scroll {
@@ -789,20 +873,19 @@ impl OptionsScene {
         if input_mode == InputMode::Cursor {
             let (cx, cy) = cursor_pos;
             let scroll = self.scroll.target() as usize;
-            for (vi, ci) in (scroll..CONTENT.len()).enumerate() {
-                if vi >= layout.visible_slots {
+            for (vi, &row) in ROWS.iter().enumerate().skip(scroll) {
+                if vi - scroll >= layout.visible_slots {
                     break;
                 }
-                if let ContentSlot::Row(row) = CONTENT[ci] {
-                    let ry = layout.content_start_y + vi as f32 * (layout.slot_h + layout.slot_gap);
-                    if cx >= layout.content_x
-                        && cx <= layout.content_x + layout.content_w
-                        && cy >= ry
-                        && cy <= ry + layout.slot_h
-                    {
-                        self.focused = row;
-                        self.back_focused = false;
-                    }
+                let ry = layout.content_start_y
+                    + (vi - scroll) as f32 * (layout.slot_h + layout.slot_gap);
+                if cx >= layout.content_x
+                    && cx <= layout.content_x + layout.content_w
+                    && cy >= ry
+                    && cy <= ry + layout.slot_h
+                {
+                    self.focused = row;
+                    self.back_focused = false;
                 }
             }
             if cx >= layout.back_x
@@ -819,16 +902,10 @@ impl OptionsScene {
             // TOC link?
             if cid >= TOC_ID_BASE && cid < TOC_ID_BASE + SECTIONS.len() as u32 {
                 let section = SECTIONS[(cid - TOC_ID_BASE) as usize];
-                let target = content_index_of_section(section) as f32;
+                let target = section_row_index(section) as f32;
                 self.scroll.set_target(target);
-                // Focus the first row of this section.
-                if let Some(first_row) = CONTENT[target as usize..].iter().find_map(|s| match s {
-                    ContentSlot::Row(r) => Some(*r),
-                    _ => None,
-                }) {
-                    self.focused = first_row;
-                    self.back_focused = false;
-                }
+                self.focused = ROWS[section_row_index(section)];
+                self.back_focused = false;
                 continue;
             }
             if cid == BACK_ID {
@@ -919,28 +996,85 @@ impl OptionsScene {
         false
     }
 
+    fn hint_text(&self, back_focused: bool, hint: &OptionsDrawHint) -> String {
+        if matches!(hint.input_mode, InputMode::Controller) {
+            let confirm = ButtonPrompt::controller_action_label(
+                hint.gamepad_style,
+                UiAction::Confirm,
+                hint.swap_ab,
+                hint.swap_xy,
+            )
+            .unwrap_or("A");
+            let cancel = ButtonPrompt::controller_action_label(
+                hint.gamepad_style,
+                UiAction::Cancel,
+                hint.swap_ab,
+                hint.swap_xy,
+            )
+            .unwrap_or("B");
+            if back_focused {
+                return format!("{confirm}: back   ·   {cancel}: back");
+            }
+            if self.focused.is_slider() {
+                return format!("←→: adjust   ·   ↑↓: navigate   ·   {cancel}: back");
+            }
+            if matches!(self.focused, Row::ExportPlayStats | Row::SaveAndProfiles) {
+                return format!("{confirm}: select   ·   ↑↓: navigate   ·   {cancel}: back");
+            }
+            return format!(
+                "←→: change   ·   {confirm}: toggle   ·   ↑↓: navigate   ·   {cancel}: back"
+            );
+        }
+
+        if back_focused {
+            "Enter: back · Esc: back".into()
+        } else if self.focused.is_slider() {
+            "←→ or drag: adjust · ↑↓: navigate · Esc: back".into()
+        } else if matches!(self.focused, Row::ExportPlayStats | Row::SaveAndProfiles) {
+            "Enter: select · ↑↓: navigate · Esc: back".into()
+        } else {
+            "←→: change · Enter: toggle · ↑↓: navigate · Esc: back".into()
+        }
+    }
+
     /// Build the options menu UI elements into the supplied buffers.
     pub fn draw_overlay(
         &self,
         w: f32,
         h: f32,
+        hint: OptionsDrawHint,
         instances: &mut Vec<GpuInstance>,
         text_labels: &mut Vec<TextLabel>,
         buttons: &mut Vec<ButtonDef>,
     ) {
         let layout = compute_layout(w, h);
         self.sync_scroll(&layout);
+        let smooth = self.scroll.tick();
+        let cols = row_columns(layout.content_x, layout.content_w);
 
         // ── Title ──────────────────────────────────────────────────────
+        let title_font = typography::size(typography::H16, h);
         text_labels.push(TextLabel {
             rect: [0.0, layout.title_y, w, layout.title_h],
             text: "Options".into(),
             color: color::CHAMPAGNE,
+            font_px: Some(title_font),
             ..Default::default()
+        });
+        let rule_y = layout.title_y + layout.title_h + (4.0 * layout.scale);
+        instances.push(GpuInstance {
+            rect: [
+                w * 0.25,
+                rule_y,
+                w * 0.5,
+                (1.0 * layout.scale).max(1.0),
+            ],
+            color: color::BRASS,
+            user: 0,
         });
 
         // ── TOC column ─────────────────────────────────────────────────
-        let active_sec = section_of_row(self.focused);
+        let active_sec = section_at_scroll(smooth);
         for (i, &section) in SECTIONS.iter().enumerate() {
             let y = layout.toc_start_y + i as f32 * (layout.toc_item_h + layout.toc_gap);
             let is_active = section == active_sec;
@@ -948,7 +1082,7 @@ impl OptionsScene {
             if is_active {
                 instances.push(GpuInstance {
                     rect: [layout.toc_x, y, layout.toc_w, layout.toc_item_h],
-                    color: color::WALNUT_SOFT,
+                    color: color::WALNUT_BRIGHT,
                     user: 0,
                 });
             }
@@ -956,7 +1090,7 @@ impl OptionsScene {
             let text_color = if is_active {
                 color::CHAMPAGNE
             } else {
-                color::STONE
+                color::UMBER
             };
             text_labels.push(TextLabel {
                 rect: [
@@ -977,16 +1111,9 @@ impl OptionsScene {
         }
 
         // ── Scrollable content ─────────────────────────────────────────
-        let smooth = self.scroll.tick();
         let scroll = smooth.floor() as usize;
         let frac_offset = -(smooth.fract()) * (layout.slot_h + layout.slot_gap);
         let track_h = (8.0 * layout.scale).max(4.0);
-        let label_frac = 0.35;
-        let slider_frac = 0.50;
-        let slider_x = layout.content_x + layout.content_w * label_frac;
-        let slider_w = layout.content_w * slider_frac;
-        let pct_x = slider_x + slider_w + layout.content_w * 0.02;
-        let pct_w = layout.content_w * 0.13;
         let content_clip_rect = [
             layout.content_x,
             layout.content_start_y,
@@ -995,89 +1122,85 @@ impl OptionsScene {
         ];
 
         let render_slots = layout.visible_slots + 1;
-        for (vi, ci) in (scroll..CONTENT.len()).enumerate() {
-            if vi >= render_slots {
+        for (vi, &row) in ROWS.iter().enumerate().skip(scroll) {
+            if vi - scroll >= render_slots {
                 break;
             }
             let slot_y = layout.content_start_y
-                + vi as f32 * (layout.slot_h + layout.slot_gap)
+                + (vi - scroll) as f32 * (layout.slot_h + layout.slot_gap)
                 + frac_offset;
             let slot_rect = [layout.content_x, slot_y, layout.content_w, layout.slot_h];
             let Some(clipped_slot_rect) = intersect_rect(slot_rect, content_clip_rect) else {
                 continue;
             };
-            match CONTENT[ci] {
-                ContentSlot::Header(section) => {
-                    // Gold section heading with a subtle underline.
-                    text_labels.push(TextLabel {
-                        rect: slot_rect,
-                        text: section.label().into(),
-                        color: color::GOLD,
-                        align: TextAlign::Left,
-                        clip_rect: Some(content_clip_rect),
-                        ..Default::default()
-                    });
-                    let line_y = slot_y + layout.slot_h - 2.0 * layout.scale;
-                    if let Some(line_rect) = intersect_rect(
-                        [
-                            layout.content_x,
-                            line_y,
-                            layout.content_w,
-                            (2.0 * layout.scale).max(1.0),
-                        ],
-                        content_clip_rect,
-                    ) {
-                        instances.push(GpuInstance {
-                            rect: line_rect,
-                            color: color::WALNUT_SOFT,
-                            user: 0,
-                        });
-                    }
-                }
-                ContentSlot::Row(row) => {
-                    let is_focused = !self.back_focused && row == self.focused;
-                    self.draw_row(
-                        instances,
-                        text_labels,
-                        row,
-                        slot_rect,
-                        content_clip_rect,
-                        is_focused,
-                        track_h,
-                        pct_x,
-                        pct_w,
-                    );
-                    buttons.push(ButtonDef::scene(
-                        (
-                            clipped_slot_rect[0],
-                            clipped_slot_rect[1],
-                            clipped_slot_rect[2],
-                            clipped_slot_rect[3],
-                        ),
-                        row.click_id(),
-                    ));
-                }
-            }
+            let is_focused = !self.back_focused && row == self.focused;
+            self.draw_row(
+                instances,
+                text_labels,
+                row,
+                slot_rect,
+                content_clip_rect,
+                is_focused,
+                track_h,
+                &cols,
+            );
+            buttons.push(ButtonDef::scene(
+                (
+                    clipped_slot_rect[0],
+                    clipped_slot_rect[1],
+                    clipped_slot_rect[2],
+                    clipped_slot_rect[3],
+                ),
+                row.click_id(),
+            ));
+        }
+
+        // ── Scroll edge fades ──────────────────────────────────────────
+        let max_scroll = self.scroll.max();
+        let fade_h = (16.0 * layout.scale).max(10.0);
+        let content_h = content_clip_rect[3];
+        if smooth > 0.01 {
+            instances.push(GpuInstance {
+                rect: [
+                    layout.content_x,
+                    layout.content_start_y,
+                    layout.content_w,
+                    fade_h.min(content_h * 0.35),
+                ],
+                color: color::alpha(hint.scroll_fade_backdrop, 0.72),
+                user: 0,
+            });
+        }
+        if max_scroll > 0.0 && smooth < max_scroll - 0.01 {
+            instances.push(GpuInstance {
+                rect: [
+                    layout.content_x,
+                    layout.content_start_y + content_h - fade_h.min(content_h * 0.35),
+                    layout.content_w,
+                    fade_h.min(content_h * 0.35),
+                ],
+                color: color::alpha(hint.scroll_fade_backdrop, 0.72),
+                user: 0,
+            });
         }
 
         // ── Scroll indicator ───────────────────────────────────────────
-        let max_scroll = self.scroll.max();
         if max_scroll > 0.0 {
-            let indicator_x = layout.content_x + layout.content_w + (4.0 * layout.scale);
+            let indicator_x = layout.content_x + layout.content_w + (6.0 * layout.scale);
             let indicator_y = layout.content_start_y;
-            let indicator_w = (3.0 * layout.scale).max(2.0);
+            let indicator_w = (7.0 * layout.scale).max(6.0);
             let indicator_h = layout.visible_slots as f32 * (layout.slot_h + layout.slot_gap);
             instances.push(GpuInstance {
                 rect: [indicator_x, indicator_y, indicator_w, indicator_h],
-                color: color::WALNUT_INK,
+                color: color::WALNUT_RAISED,
                 user: 0,
             });
-            let thumb_h = (indicator_h * (layout.visible_slots as f32 / CONTENT.len() as f32))
+            let thumb_h = (indicator_h * (layout.visible_slots as f32 / ROWS.len() as f32))
                 .max(12.0 * layout.scale);
             let thumb_y = indicator_y + (indicator_h - thumb_h) * (smooth / max_scroll);
             instances.push(GpuInstance {
                 rect: [indicator_x, thumb_y, indicator_w, thumb_h],
-                color: color::GOLD,
+                color: color::WALNUT_BRIGHT,
                 user: 0,
             });
         }
@@ -1112,8 +1235,8 @@ impl OptionsScene {
         // ── Hint ───────────────────────────────────────────────────────
         text_labels.push(TextLabel {
             rect: [0.0, layout.hint_y, w, layout.hint_h],
-            text: "Up/Down: navigate   Left/Right: adjust   Space: toggle/select".into(),
-            color: color::UMBER,
+            text: self.hint_text(self.back_focused, &hint),
+            color: color::STONE,
             ..Default::default()
         });
 
@@ -1144,11 +1267,12 @@ impl OptionsScene {
         content_clip_rect: [f32; 4],
         is_focused: bool,
         track_h: f32,
-        pct_x: f32,
-        pct_w: f32,
+        cols: &RowColumns,
     ) {
         let [row_x, row_y, row_w, row_h] = rect;
         let scale = (row_h / 40.0).max(0.5);
+        let accent_w = (3.0 * scale).max(2.0);
+        let pad = 8.0 * scale;
         let mut push_quad_in_clip = |quad_rect: [f32; 4], quad_color: [f32; 4]| {
             if let Some(clipped) = intersect_rect(quad_rect, content_clip_rect) {
                 instances.push(GpuInstance {
@@ -1159,42 +1283,50 @@ impl OptionsScene {
             }
         };
 
+        let label_color = if is_focused {
+            color::CHAMPAGNE
+        } else {
+            color::STONE
+        };
+        let value_color = if is_focused {
+            color::PARCHMENT
+        } else {
+            color::STONE
+        };
+
         match row {
             Row::Master | Row::Music | Row::Sfx | Row::Gamma => {
                 let value = self.slider_value(row).unwrap_or(0.0);
                 let (lo, hi, _) = Self::slider_range(row);
                 let fill_ratio = ((value - lo) / (hi - lo)).clamp(0.0, 1.0);
-                let label = match row {
-                    Row::Master => "Master Volume",
-                    Row::Music => "Music Volume",
-                    Row::Sfx => "SFX Volume",
-                    Row::Gamma => "Gamma",
-                    _ => unreachable!(),
-                };
+                let (label, readout) = row_copy(row, self);
 
                 let bg_color = if is_focused {
-                    [0.20, 0.32, 0.50, 0.90]
+                    color::WALNUT_SOFT
                 } else {
-                    color::alpha(color::WALNUT_INK, 0.75)
+                    color::WALNUT_RAISED
                 };
                 push_quad_in_clip([row_x, row_y, row_w, row_h], bg_color);
+                if is_focused {
+                    push_quad_in_clip([row_x, row_y, accent_w, row_h], color::GOLD);
+                }
 
-                let text_color = if is_focused {
-                    [1.0, 1.0, 1.0, 1.0]
-                } else {
-                    [0.6, 0.6, 0.7, 0.9]
-                };
-                let label_w = row_w * 0.35;
                 text_labels.push(TextLabel {
-                    rect: [row_x + 8.0 * scale, row_y, label_w - 8.0 * scale, row_h],
+                    rect: [
+                        cols.label_x + pad,
+                        row_y,
+                        cols.label_w - pad * 2.0,
+                        row_h,
+                    ],
                     text: label.into(),
-                    color: text_color,
+                    color: label_color,
+                    align: TextAlign::Left,
                     clip_rect: Some(content_clip_rect),
                     ..Default::default()
                 });
 
-                let slider_x = row_x + label_w;
-                let slider_w = row_w * 0.50;
+                let slider_w = cols.control_w - cols.readout_w;
+                let slider_x = cols.control_x;
                 let track_y = row_y + (row_h - track_h) * 0.5;
                 push_quad_in_clip([slider_x, track_y, slider_w, track_h], color::WALNUT_INK);
                 let fill_w = slider_w * fill_ratio;
@@ -1213,106 +1345,56 @@ impl OptionsScene {
                     color::PARCHMENT
                 };
                 push_quad_in_clip([knob_x, knob_y, knob_size, knob_size], knob_color);
-                let readout = match row {
-                    Row::Gamma => format!("{:.2}", value),
-                    _ => format!("{}%", (value * 100.0).round() as u32),
-                };
                 text_labels.push(TextLabel {
-                    rect: [pct_x, row_y, pct_w, row_h],
+                    rect: [cols.readout_x, row_y, cols.readout_w - pad, row_h],
                     text: readout,
-                    color: text_color,
+                    color: value_color,
+                    align: TextAlign::Right,
                     clip_rect: Some(content_clip_rect),
                     ..Default::default()
                 });
             }
             _ => {
-                // Toggle / cycle rows share the same visual pattern.
+                let (label, value) = row_copy(row, self);
                 let bg_color = if is_focused {
                     color::WALNUT_SOFT
                 } else {
                     color::WALNUT_RAISED
                 };
                 push_quad_in_clip([row_x, row_y, row_w, row_h], bg_color);
-                let text_color = if is_focused {
-                    color::CHAMPAGNE
-                } else {
-                    color::STONE
-                };
-                let text = match row {
-                    Row::SfxToggle => format!(
-                        "Sound Effects: {}",
-                        if self.sfx_enabled { "ON" } else { "OFF" }
-                    ),
-                    Row::Effects => {
-                        format!("Effects: {}", self.effects_quality.label())
-                    }
-                    Row::Tile => format!("Tile Style: {}", self.tile_preset.label()),
-                    Row::Tileset => format!("Tile Set: {}", self.tileset_name),
-                    Row::Surface => format!("Surface: {}", self.surface_kind.label()),
-                    Row::BorderlessFullscreen => format!(
-                        "Display: {}",
-                        if self.borderless_fullscreen {
-                            "Borderless fullscreen"
-                        } else {
-                            "Windowed"
-                        }
-                    ),
-                    Row::Shadows => format!(
-                        "Shadows: {}",
-                        if self.shadows_enabled { "ON" } else { "OFF" }
-                    ),
-                    Row::Ssr => format!(
-                        "Reflections: {}",
-                        if self.ssr_enabled { "ON" } else { "OFF" }
-                    ),
-                    Row::Hdr => format!("HDR: {}", if self.hdr_enabled { "ON" } else { "OFF" }),
-                    Row::SwapAb => format!("Swap A/B: {}", if self.swap_ab { "ON" } else { "OFF" }),
-                    Row::SwapXy => format!("Swap X/Y: {}", if self.swap_xy { "ON" } else { "OFF" }),
-                    Row::XyQuickAction => format!(
-                        "Instant play / discard (X·Y face): {}",
-                        if self.xy_quick_action { "ON" } else { "OFF" }
-                    ),
-                    Row::HoldToSellRumble => format!(
-                        "Controller rumble: {}",
-                        if self.hold_to_sell_rumble {
-                            "ON"
-                        } else {
-                            "OFF"
-                        }
-                    ),
-                    Row::AutoCashInOnFullStructure => format!(
-                        "Auto Cash-In on Full Structure: {}",
-                        if self.auto_cash_in_on_full_structure {
-                            "ON"
-                        } else {
-                            "OFF"
-                        }
-                    ),
-                    Row::Hints => {
-                        format!("Hints: {}", if self.hints_enabled { "ON" } else { "OFF" })
-                    }
-                    Row::GlyphPrompts => {
-                        format!("Button prompt icons: {}", self.glyph_prompt.label())
-                    }
-                    Row::UndoDiscard => format!(
-                        "Discard undo: {}",
-                        if self.discard_undo_enabled {
-                            "ON"
-                        } else {
-                            "OFF"
-                        }
-                    ),
-                    Row::ExportPlayStats => "Export play stats (HTML) — Space / click".into(),
-                    Row::SaveAndProfiles => "Save & profiles — switch slot or delete save".into(),
-                    _ => unreachable!(),
-                };
+                if is_focused {
+                    push_quad_in_clip([row_x, row_y, accent_w, row_h], color::GOLD);
+                }
+
                 text_labels.push(TextLabel {
-                    rect: [row_x, row_y, row_w, row_h],
-                    text,
-                    color: text_color,
+                    rect: [
+                        cols.label_x + pad,
+                        row_y,
+                        cols.label_w - pad * 2.0,
+                        row_h,
+                    ],
+                    text: label.into(),
+                    color: label_color,
+                    align: TextAlign::Left,
                     clip_rect: Some(content_clip_rect),
                     ..Default::default()
                 });
+
+                if !value.is_empty() {
+                    text_labels.push(TextLabel {
+                        rect: [
+                            cols.control_x,
+                            row_y,
+                            cols.control_w + cols.readout_w - pad,
+                            row_h,
+                        ],
+                        text: value,
+                        color: value_color,
+                        align: TextAlign::Right,
+                        clip_rect: Some(content_clip_rect),
+                        ..Default::default()
+                    });
+                }
             }
         }
     }
@@ -1374,7 +1456,14 @@ impl SceneBehavior for OptionsScene {
         let mut text_labels = Vec::new();
         let mut buttons = Vec::new();
 
-        self.draw_overlay(w, h, &mut instances, &mut text_labels, &mut buttons);
+        self.draw_overlay(
+            w,
+            h,
+            OptionsDrawHint::from_draw_ctx(&ctx),
+            &mut instances,
+            &mut text_labels,
+            &mut buttons,
+        );
 
         let mut frame = UiFrame::new();
         frame.quads(instances);

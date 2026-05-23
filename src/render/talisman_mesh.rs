@@ -8,6 +8,7 @@
 use std::f32::consts::TAU;
 
 use crate::render::lit_mesh::{MaterialKind, MaterialParams, MeshCpu};
+use crate::render::table_transform::euler_xyz_rad_from_deg;
 use crate::render::theme::color;
 use crate::render::tile_glb::Vertex3dTex;
 
@@ -20,10 +21,41 @@ const HALF_T: f32 = 0.09;
 /// `π/8` rad (`TAU/16`) puts edge midpoints at ±Y/±X; `0` puts vertices on cardinals.
 const OCTAGON_ANGLE_OFFSET: f32 = TAU / 16.0;
 
+/// Pitch (degrees) that aims carved +local Z at cameras on world −Y (table / shop / archive).
+pub const TALISMAN_FACE_CAMERA_RX_DEG: f32 = 90.0;
+
+/// Upright talisman facing the default −Y camera. `yaw_y_deg` adds a small Ry tilt (archive uses 14°).
+#[inline]
+pub fn talisman_face_camera_rotation(yaw_y_deg: f32) -> [f32; 3] {
+    euler_xyz_rad_from_deg(TALISMAN_FACE_CAMERA_RX_DEG, yaw_y_deg, 0.0)
+}
+
 /// Face-plate UV: +local Y is the top of the heightmap (`v → 0`).
+/// `v = 0.5 - y/R` maps the flat edge (−Y) to the bottom row of the texture.
 #[inline]
 fn talisman_face_uv(x: f32, y: f32) -> [f32; 2] {
     [x / RADIUS * 0.5 + 0.5, 0.5 - y / RADIUS * 0.5]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn face_uv_maps_plus_y_to_top_of_heightmap() {
+        let uv_top = talisman_face_uv(0.0, RADIUS * 0.92);
+        assert!(
+            uv_top[1] < 0.1,
+            "top of tablet should sample low v (got {})",
+            uv_top[1]
+        );
+        let uv_bottom = talisman_face_uv(0.0, -RADIUS * 0.92);
+        assert!(
+            uv_bottom[1] > 0.9,
+            "flat edge should sample high v (got {})",
+            uv_bottom[1]
+        );
+    }
 }
 
 fn octagon_rim() -> [(f32, f32); SIDES] {
@@ -97,7 +129,7 @@ pub fn build_talisman_mesh() -> MeshCpu {
         indices.extend_from_slice(&[back_center_idx, i1, i0]);
     }
 
-    // ── Rim: 8 quads, each with its own outward normal.
+    // ── Rim: eight flat side planes (one quad per edge, outward XY normal).
     for i in 0..SIDES {
         let (x0, y0) = rim[i];
         let (x1, y1) = rim[(i + 1) % SIDES];
@@ -106,6 +138,7 @@ pub fn build_talisman_mesh() -> MeshCpu {
         let len = (mx * mx + my * my).sqrt().max(1e-6);
         let n = [mx / len, my / len, 0.0];
         let base = vertices.len() as u32;
+        // UVs span the plane (u along edge, v front→back); never sampled for mask.
         vertices.push(Vertex3dTex {
             position: [x0, y0, front_z],
             normal: n,

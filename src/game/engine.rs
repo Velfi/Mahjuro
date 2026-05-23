@@ -534,8 +534,7 @@ impl<'a> GameEngine<'a> {
             };
             match consumable {
                 Consumable::Zodiac(_) => owned_zodiacs.push(owned),
-                Consumable::Talisman(_) => owned_talismans.push(owned),
-                Consumable::Memorial(_) => {}
+                Consumable::Talisman(_) | Consumable::Memorial(_) => owned_talismans.push(owned),
             }
         }
         ShopReadModel {
@@ -633,6 +632,10 @@ impl<'a> GameEngine<'a> {
 
     pub fn selection_is_valid(run: &RunState) -> bool {
         run.is_selection_valid()
+    }
+
+    pub fn selection_blocked_by_boss_rules(run: &RunState, tiles: &[Tile]) -> bool {
+        run.selection_blocked_by_boss_rules(tiles)
     }
 
     pub fn validate_with_wildcards(
@@ -1363,8 +1366,8 @@ pub(crate) fn consumable_sell_price_for_mode(
     mode: &crate::game::game_mode::GameMode,
     relics: &RelicState,
 ) -> u32 {
-    if matches!(c, Consumable::Memorial(_)) {
-        return 0;
+    if let Consumable::Memorial(_) = c {
+        return crate::core::memorial_talisman::MemorialTalismanKind::SHOP_SELL_PRICE;
     }
     let base = match c {
         Consumable::Zodiac(_) => crate::core::zodiac::ZodiacKind::shop_price(),
@@ -1796,5 +1799,33 @@ mod tests {
                 skip_cost_escalation: true,
             }
         );
+    }
+
+    #[test]
+    fn memorial_sell_price_is_flat_four_gold() {
+        let run = deterministic_run();
+        let price = consumable_sell_price_for_mode(
+            Consumable::Memorial(crate::core::memorial_talisman::MemorialTalismanKind::Exhausted),
+            &run.mode,
+            &run.relics,
+        );
+        assert_eq!(
+            price,
+            crate::core::memorial_talisman::MemorialTalismanKind::SHOP_SELL_PRICE
+        );
+    }
+
+    #[test]
+    fn read_shop_lists_owned_memorial_in_inventory() {
+        use crate::core::memorial_talisman::MemorialTalismanKind;
+
+        let mut run = deterministic_run();
+        run.consumables
+            .items
+            .push(Consumable::Memorial(MemorialTalismanKind::Exhausted));
+
+        let shop = GameEngine::read_shop(&run);
+        assert_eq!(shop.owned_talismans.len(), 1);
+        assert!(shop.owned_talismans[0].consumable.is_memorial());
     }
 }

@@ -284,6 +284,10 @@ pub struct GameplayScene {
     invalid_meld_flash_slots: Vec<usize>,
     /// Wall time when [`invalid_meld_flash_slots`] was last set.
     invalid_meld_flash_at: Option<Instant>,
+    /// Wall time when a boss-rule rejection last fired (boss icon wiggle decay).
+    invalid_boss_flash_at: Option<Instant>,
+    /// Cached each `update`: selection is invalid only because of boss rules.
+    boss_rule_feedback_live: bool,
 }
 
 /// How long the debug `B` gust stays active after a press.
@@ -307,6 +311,8 @@ const FINAL_TILES_FOV_POP_SECS: f32 = 0.22;
 const FINAL_TILES_FOV_POP_DEGREES: f32 = 3.6;
 /// How long rejected meld tiles keep their red glow pulse.
 const INVALID_MELD_FLASH_SECS: f32 = 0.55;
+/// How long the boss icon keeps its reject wiggle after a failed commit.
+const INVALID_BOSS_FLASH_SECS: f32 = 0.55;
 
 /// Click-id base for the Zodiac inventory bar. `ZODIAC_USE_BASE + slot_idx`
 /// is the click id for using the Zodiac in slot `slot_idx`.
@@ -397,6 +403,7 @@ impl GameplayScene {
             || self.post_deal_gust_active()
             || self.debug_wind_active()
             || self.final_tiles_fov_pop_active()
+            || self.boss_rule_feedback_active(Instant::now())
     }
 
     /// True while the post-deal smoke breath is either pending or actively
@@ -455,6 +462,46 @@ impl GameplayScene {
         if !self.invalid_meld_flash_slots.is_empty() {
             self.invalid_meld_flash_at = Some(Instant::now());
         }
+        if run.selection_blocked_by_boss_rules(&selected_tiles) {
+            self.invalid_boss_flash_at = Some(Instant::now());
+        }
+    }
+
+    pub(super) fn clear_boss_rule_feedback(&mut self) {
+        self.invalid_boss_flash_at = None;
+    }
+
+    /// True while the boss icon should pulse (live boss-blocked selection or reject decay).
+    fn boss_rule_feedback_active(&self, now: Instant) -> bool {
+        self.invalid_boss_flash_phase(now).0 > 0.0 || self.boss_rule_feedback_live
+    }
+
+    /// `(glow 0..1, wiggle px)` for boss-icon feedback.
+    pub(super) fn boss_rule_feedback(&self, now: Instant, live_blocked: bool) -> (f32, f32) {
+        let (reject_glow, reject_wiggle) = self.invalid_boss_flash_phase(now);
+        if reject_glow > 0.0 {
+            return (reject_glow, reject_wiggle);
+        }
+        if live_blocked {
+            let pulse = 0.55 + 0.45 * (self.candle_time * 5.2).sin();
+            let wiggle = 3.0 * (self.candle_time * 11.0).sin();
+            return (pulse, wiggle);
+        }
+        (0.0, 0.0)
+    }
+
+    fn invalid_boss_flash_phase(&self, now: Instant) -> (f32, f32) {
+        let Some(t0) = self.invalid_boss_flash_at else {
+            return (0.0, 0.0);
+        };
+        let elapsed = now.saturating_duration_since(t0).as_secs_f32();
+        if elapsed >= INVALID_BOSS_FLASH_SECS {
+            return (0.0, 0.0);
+        }
+        let fade = 1.0 - (elapsed / INVALID_BOSS_FLASH_SECS);
+        let pulse = 0.65 + 0.35 * (elapsed * 16.0).sin();
+        let wiggle = 9.0 * fade * (elapsed * 34.0).sin();
+        (fade * pulse, wiggle)
     }
 
     /// `(strength 0..1, elapsed seconds)` for the active invalid-meld feedback.
@@ -558,6 +605,8 @@ impl GameplayScene {
             discard_undo: None,
             invalid_meld_flash_slots: Vec::new(),
             invalid_meld_flash_at: None,
+            invalid_boss_flash_at: None,
+            boss_rule_feedback_live: false,
         }
     }
 

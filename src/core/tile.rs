@@ -27,13 +27,13 @@ impl Suit {
     /// keyword stays legible without a rank context.
     pub const fn keyword_color(self) -> [f32; 4] {
         match self {
-            Suit::Manzu => [0.85, 0.25, 0.20, 1.0],
-            Suit::Souzu => [0.20, 0.65, 0.30, 1.0],
-            Suit::Pinzu => [0.20, 0.40, 0.80, 1.0],
-            Suit::Wind => [0.70, 0.60, 0.20, 1.0],
-            Suit::Dragon => [0.85, 0.20, 0.18, 1.0],
-            Suit::Flower => [0.90, 0.45, 0.55, 1.0],
-            Suit::Season => [0.30, 0.70, 0.65, 1.0],
+            Suit::Manzu => [0.581, 0.320, 0.298, 1.0],
+            Suit::Souzu => [0.386, 0.582, 0.429, 1.0],
+            Suit::Pinzu => [0.306, 0.393, 0.567, 1.0],
+            Suit::Wind => [0.639, 0.596, 0.422, 1.0],
+            Suit::Dragon => [0.560, 0.277, 0.268, 1.0],
+            Suit::Flower => [0.704, 0.508, 0.552, 1.0],
+            Suit::Season => [0.476, 0.650, 0.628, 1.0],
         }
     }
 }
@@ -225,24 +225,22 @@ impl Tile {
     /// RGBA color hint for the tile's suit, for UI rendering.
     pub fn suit_color(&self) -> [f32; 4] {
         match self.suit {
-            Suit::Manzu => [0.85, 0.25, 0.20, 1.0], // red
-            Suit::Souzu => [0.20, 0.65, 0.30, 1.0],    // green
-            Suit::Pinzu => [0.20, 0.40, 0.80, 1.0],       // blue
-            Suit::Wind => [0.70, 0.60, 0.20, 1.0],       // gold
+            Suit::Manzu => Suit::Manzu.keyword_color(),
+            Suit::Souzu => Suit::Souzu.keyword_color(),
+            Suit::Pinzu => Suit::Pinzu.keyword_color(),
+            Suit::Wind => Suit::Wind.keyword_color(),
             // Dragons are coloured per rank in the traditional set:
             //   1 = Chun  (中) → red
             //   2 = Hatsu (發) → green
             //   3 = Haku  (白) → ivory/white
             Suit::Dragon => match self.rank {
-                1 => [0.85, 0.20, 0.18, 1.0], // red
-                2 => [0.20, 0.65, 0.30, 1.0], // green
-                3 => [0.90, 0.88, 0.82, 1.0], // ivory white
-                _ => [0.60, 0.20, 0.70, 1.0], // fallback (shouldn't happen)
+                1 => Suit::Dragon.keyword_color(),
+                2 => Suit::Souzu.keyword_color(),
+                3 => [0.90, 0.88, 0.82, 1.0], // ivory white (low sat already)
+                _ => [0.55, 0.42, 0.58, 1.0], // fallback (shouldn't happen)
             },
-            // Flowers — warm pink, reads as "special bonus" at a glance.
-            Suit::Flower => [0.90, 0.45, 0.55, 1.0],
-            // Seasons — cool teal, distinct from flowers.
-            Suit::Season => [0.30, 0.70, 0.65, 1.0],
+            Suit::Flower => Suit::Flower.keyword_color(),
+            Suit::Season => Suit::Season.keyword_color(),
         }
     }
 }

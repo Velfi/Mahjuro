@@ -10,7 +10,7 @@ use crate::ui::input::UiAction;
 use crate::ui::widget_tree::{self as wt, FocusId, Tree, TreeFrame, TreeInput, TreeState};
 
 use super::main_menu_exterior::MainMenuExteriorScene;
-use super::options::OptionsScene;
+use super::options::{OptionsDrawHint, OptionsScene};
 use super::shop::ShopScene;
 use super::{ButtonDef, Scene, SceneTransition, UpdateCtx};
 
@@ -18,7 +18,7 @@ use super::{ButtonDef, Scene, SceneTransition, UpdateCtx};
 enum PauseAction {
     Resume,
     Restart,
-    MeldGuide,
+    Guide,
     Options,
     MainMenu,
     Exit,
@@ -62,10 +62,10 @@ pub struct PauseMenu {
     /// pause menu — input and draw are delegated to it until the user
     /// chooses Back, at which point we drop back to the pause root.
     options_overlay: Option<OptionsScene>,
-    /// One-shot flag set when the user picks "Meld Guide" from the menu.
-    /// The owning scene drains it via `take_meld_guide_request()` after
-    /// `handle()` returns and transitions to the Meld Guide scene.
-    meld_guide_requested: bool,
+    /// One-shot flag set when the user picks "Guide" from the menu.
+    /// The owning scene drains it via `take_guide_request()` after
+    /// `handle()` returns and transitions to the Guide scene.
+    guide_requested: bool,
 }
 
 impl PauseMenu {
@@ -74,16 +74,16 @@ impl PauseMenu {
             paused: false,
             tree: TreeState::new(),
             options_overlay: None,
-            meld_guide_requested: false,
+            guide_requested: false,
         }
     }
 
-    /// Drain the meld-guide-open request flag. Returns `true` exactly once
-    /// after the user picks "Meld Guide" from the pause menu; subsequent
+    /// Drain the guide-open request flag. Returns `true` exactly once
+    /// after the user picks "Guide" from the pause menu; subsequent
     /// calls return `false` until they re-open the menu and pick it again.
-    pub fn take_meld_guide_request(&mut self) -> bool {
-        let v = self.meld_guide_requested;
-        self.meld_guide_requested = false;
+    pub fn take_guide_request(&mut self) -> bool {
+        let v = self.guide_requested;
+        self.guide_requested = false;
         v
     }
 
@@ -92,7 +92,7 @@ impl PauseMenu {
         self.paused = true;
         self.tree = TreeState::new();
         self.options_overlay = None;
-        self.meld_guide_requested = false;
+        self.guide_requested = false;
     }
 
     /// True when the embedded options overlay is currently visible. Callers
@@ -135,9 +135,9 @@ impl PauseMenu {
                 ButtonVariant::Default,
             ),
             wt::button_id(
-                PauseAction::MeldGuide.id(),
-                "Meld Guide",
-                PauseAction::MeldGuide,
+                PauseAction::Guide.id(),
+                "Guide",
+                PauseAction::Guide,
                 ButtonVariant::Default,
             ),
             wt::button_id(
@@ -324,13 +324,13 @@ impl PauseMenu {
                 bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                 self.do_restart(run, progress)
             }
-            Some(PauseAction::MeldGuide) => {
+            Some(PauseAction::Guide) => {
                 bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                 // Set the one-shot flag and close the pause menu so the
-                // owning scene can transition to the Meld Guide on the
+                // owning scene can transition to the Guide on the
                 // next frame. The scene drains the flag via
-                // `take_meld_guide_request()` after `handle()` returns.
-                self.meld_guide_requested = true;
+                // `take_guide_request()` after `handle()` returns.
+                self.guide_requested = true;
                 self.paused = false;
                 PauseUpdate::Resume
             }
@@ -368,6 +368,7 @@ impl PauseMenu {
         &self,
         viewport: crate::ui::layout::ViewportCtx,
         scale: f32,
+        hint: OptionsDrawHint,
         instances: &mut Vec<GpuInstance>,
         text_labels: &mut Vec<TextLabel>,
         buttons: &mut Vec<ButtonDef>,
@@ -387,7 +388,7 @@ impl PauseMenu {
         // If the options sub-overlay is open, draw it instead of the pause
         // menu root. The dim quad above already provides the backdrop.
         if let Some(opts) = self.options_overlay.as_ref() {
-            opts.draw_overlay(window_w, window_h, instances, text_labels, buttons);
+            opts.draw_overlay(window_w, window_h, hint, instances, text_labels, buttons);
             return;
         }
 

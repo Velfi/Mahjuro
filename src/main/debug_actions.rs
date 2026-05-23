@@ -66,6 +66,12 @@ impl App {
                         .count()
                 );
             }
+            DebugAction::RevealKokushiMusou => {
+                self.progress.cheat_reveal_kokushi_musou();
+                self.run.apply_progression(&self.progress);
+                let _ = persistence::save_profile(self.active_profile, &self.progress);
+                log::debug!("Revealed Kokushi Musō (available_yaku + journal/guide + Qilin ribbon)");
+            }
             DebugAction::SetGold(amount) => {
                 self.run.set_run_gold_direct(amount as i32, None);
                 log::debug!("Set gold to {}", amount);
@@ -248,7 +254,7 @@ impl App {
                         Scene::PickBlind(_) => "PickBlind",
                         Scene::Gameplay(_) => "Gameplay",
                         Scene::GameOver(_) => "GameOver",
-                        Scene::MeldGuide(_) => "MeldGuide",
+                        Scene::Guide(_) => "Guide",
                         Scene::MaterialViewer(_) => "MaterialViewer",
                         Scene::Options(_) => "Options",
                         Scene::Collection(_) => "Collection",

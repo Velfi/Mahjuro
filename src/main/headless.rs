@@ -48,6 +48,42 @@ fn parse_zodiac_slug(slug: &str) -> anyhow::Result<crate::core::zodiac::ZodiacKi
     anyhow::bail!("unknown --zodiac '{slug}'");
 }
 
+fn synthetic_blind_scores(
+    total: u64,
+    final_ante: u32,
+    outcome: crate::core::progression::RunOutcome,
+    failing_round: u64,
+) -> Vec<u64> {
+    use crate::core::progression::RunOutcome;
+    let cleared_antes = match outcome {
+        RunOutcome::Victory => final_ante,
+        RunOutcome::Defeat { .. } => final_ante.saturating_sub(1),
+    };
+    let mut n_blinds = cleared_antes.saturating_mul(3);
+    if matches!(outcome, RunOutcome::Defeat { .. }) {
+        n_blinds += 1;
+    }
+    n_blinds = n_blinds.max(1);
+    let mut scores = Vec::with_capacity(n_blinds as usize);
+    let mut rem = total;
+    for i in 0..n_blinds {
+        if i + 1 == n_blinds {
+            if matches!(outcome, RunOutcome::Defeat { .. }) {
+                scores.push(failing_round.max(1));
+            } else {
+                scores.push(rem.max(1));
+            }
+        } else {
+            let weight = 80 + (i as u64 * 37 % 120);
+            let share = (total * weight / (weight + (n_blinds - i) as u64 * 90)).max(1);
+            let capped = share.min(rem.saturating_sub((n_blinds - i - 1) as u64));
+            scores.push(capped);
+            rem = rem.saturating_sub(capped);
+        }
+    }
+    scores
+}
+
 /// `--pack` for `tile_pack_celebration` / `showcase --pack`: variant name or compact pack title.
 fn parse_tile_pack_slug(slug: &str) -> anyhow::Result<crate::core::tile_pack::TilePackKind> {
     use crate::core::tile_pack::TilePackKind;
@@ -439,6 +475,7 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
             }
             (Scene::Shop(shop), true)
         }
+        "options" => (Scene::Options(scenes::OptionsScene::new()), false),
         "main_menu_exterior" => (
             Scene::MainMenuExterior(scenes::MainMenuExteriorScene::new()),
             false,
@@ -558,7 +595,7 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
         other => {
             anyhow::bail!(
                 "unsupported --scene '{other}' (supported: collection, archive, archive_bosses, chronicle, \
-                yaku_journal, gameplay, gameplay_hero, pick_blind, shop, \
+                yaku_journal, gameplay, gameplay_hero, pick_blind, shop, options, \
                 main_menu_exterior, tile_select, transition_playground, \
                 material_viewer, relic_unlock, game_over_level_up, game_over_defeat, meta_level_up, \
                 showcase, \
@@ -912,11 +949,15 @@ impl HeadlessApp {
                 } else {
                     Vec::new()
                 };
+                let final_ante = 4 + (i as u32 % 4);
+                let blind_scores = synthetic_blind_scores(total, final_ante, outcome, total / 3);
+                let mut chronicle = crate::core::run_chronicle::RunChronicle::default();
+                chronicle.blind_scores = blind_scores;
                 self.progress.run_history.push(RunRecord {
                     timestamp_unix: base_ts + i as u64 * 86_400,
                     run_number: (i + 1) as u32,
                     outcome,
-                    final_ante: 4 + (i as u32 % 4),
+                    final_ante,
                     final_blind: if i % 3 == 0 {
                         BlindKind::Boss
                     } else {
@@ -948,8 +989,8 @@ impl HeadlessApp {
                     tutorial_run: false,
                     memorial_kind: None,
                     best_hand_tiles: hand_tiles,
-                    score_after_ante: vec![(4 + (i as u32 % 4), total)],
-                    chronicle: crate::core::run_chronicle::RunChronicle::default(),
+                    score_after_ante: vec![(final_ante, total)],
+                    chronicle,
                     duration_secs: 600 + i as u32 * 120,
                 });
             }
@@ -999,6 +1040,7 @@ impl HeadlessApp {
         let mut complete_onboarding = false;
         let mut overlay_request: Option<scenes::OverlayRequest> = None;
         let mut bump_archive_chronicle_seen: Option<u32> = None;
+        let mut seed_archive_seen = false;
         let mut rumble_lab_ops: Vec<crate::ui::input::RumbleLabOp> = Vec::new();
         let actions_this_tick: Vec<UiAction> = self
             .queued_actions
@@ -1055,6 +1097,8 @@ impl HeadlessApp {
                 suspended_collection: None,
                 room_gltf_height_scale: crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
                 bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
+                seed_archive_seen: &mut seed_archive_seen,
+                archive_chronicle_last_seen: 0,
                 rain_tuning: self.renderer.rain_tuning,
             })
         } else {
@@ -1123,6 +1167,8 @@ impl HeadlessApp {
                     suspended_collection,
                     room_gltf_height_scale: crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
                     bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
+                    seed_archive_seen: &mut seed_archive_seen,
+                    archive_chronicle_last_seen: 0,
                     rain_tuning: self.renderer.rain_tuning,
                 })
         };
@@ -1156,7 +1202,7 @@ impl HeadlessApp {
             &layout,
             &self.anim,
             &self.run,
-            &mut self.progress,
+            &self.progress,
             self.active_profile,
             self.game_in_progress,
             self.renderer.projections(),
@@ -1181,6 +1227,7 @@ impl HeadlessApp {
             suspended_collection,
             self.gfx.tile_preset,
             false,
+            0,
             None,
             self.renderer.rain_tuning,
         );

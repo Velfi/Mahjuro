@@ -76,6 +76,7 @@ pub fn push_wall_remaining_hud(
         rotation_quarters: 0,
         baseline_shift_px: 0.0,
         clip_rect: None,
+        mono: false,
     }]);
 }
 

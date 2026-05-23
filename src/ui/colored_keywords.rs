@@ -16,12 +16,12 @@
 //! | `Dragons`, `dragons` | Red dragon (Chun) | Honor suit family |
 //! | `Flowers`, `flowers` | Flower pink | Bonus tiles |
 //! | `Seasons`, `seasons` | Season teal | Bonus tiles (solitaire) |
-//! | `Honors`, `honors` | `CHAMPAGNE` | Winds + dragons umbrella |
-//! | `Chips`, `chips` | `LAPIS` | Score rail (cool) |
-//! | `Mult`, `mult` | `RUBY` | Score rail (warm) |
-//! | `Gold`, `gold` | `RELIC_GOLD` | Currency |
-//! | `Play`, `play` | `LEAF_GREEN` | Bank-meld HUD verb |
-//! | `Trigger`, `trigger` | `BRASS` | Cash-in HUD verb |
+//! | `Honors`, `honors` | `color::keyword::HONORS` | Winds + dragons umbrella |
+//! | `Chips`, `chips` | `color::keyword::CHIPS` | Score rail (cool) |
+//! | `Mult`, `mult` | `color::keyword::MULT` | Score rail (warm) |
+//! | `Gold`, `gold` | `color::keyword::GOLD` | Currency |
+//! | `Play`, `play` | `color::keyword::PLAY` | Bank-meld HUD verb |
+//! | `Trigger`, `trigger` | `color::keyword::TRIGGER` | Cash-in HUD verb |
 //!
 //! 3D cascade labels and streaming score popups reuse `LAPIS` / `RUBY` /
 //! `RELIC_GOLD` / `PARCHMENT` for chips, mult, gold, and final totals — see

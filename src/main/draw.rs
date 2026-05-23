@@ -95,6 +95,9 @@ impl App {
                                 ),
                             );
                             GameEngine::set_onboarding_shop_phase(&mut self.run);
+                            self.run
+                                .grant_pending_memorial(&mut self.progress);
+                            self.mark_profile_dirty();
                             self.pending_scene = Some(Scene::Shop(
                                 crate::scenes::ShopScene::new_tutorial(&mut self.run),
                             ));
@@ -130,6 +133,9 @@ impl App {
                         ModalTheme::Info,
                     );
                     self.modals.push(modal);
+                    self.run
+                        .grant_pending_memorial(&mut self.progress);
+                    self.mark_profile_dirty();
                     self.pending_scene = Some(Scene::Shop(crate::scenes::ShopScene::new(
                         &mut self.run,
                         &self.progress,
@@ -230,6 +236,9 @@ impl App {
 
                     Scene::GameOver(GameOverScene::victory(&self.run))
                 } else {
+                    self.run
+                        .grant_pending_memorial(&mut self.progress);
+                    self.mark_profile_dirty();
                     Scene::Shop(crate::scenes::ShopScene::new(&mut self.run, &self.progress))
                 });
                 self.transition_alpha = 1.0;
@@ -373,8 +382,11 @@ impl App {
         };
 
         let p = self.active_profile.min(2);
-        let archive_has_new_chronicle =
-            self.progress.run_history.len() as u32 > self.archive_last_seen_run_len[p];
+        let archive_chronicle_last_seen_run_len = self.archive_last_seen_run_len[p];
+        let archive_has_new = crate::core::archive_seen::archive_has_any_new(
+            &self.progress,
+            archive_chronicle_last_seen_run_len,
+        );
         let settings = crate::persistence::load_settings();
         let detected = self
             .input
@@ -423,7 +435,8 @@ impl App {
             suspended_shop,
             suspended_collection,
             self.gfx.tile_preset,
-            archive_has_new_chronicle,
+            archive_has_new,
+            archive_chronicle_last_seen_run_len,
             self.debug
                 .hallway_distortion_debug_overlay
                 .as_ref()

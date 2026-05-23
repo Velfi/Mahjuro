@@ -8,9 +8,9 @@ use crate::game::engine::GameEngine;
 use crate::game::event_bus::{GameEvent, GameOverReason};
 use crate::game::run::RunState;
 use crate::persistence;
-use crate::render::decal::{load_ui_font_bytes, measure_label_advances};
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
+use crate::ui::widget::wrap_text;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use crate::render::draw_cmd::UiFrame;
@@ -75,7 +75,6 @@ pub struct GameOverScene {
     tree: TreeState,
     opened_at: Instant,
     outcome_sfx_fired: bool,
-    ui_font: Option<fontdue::Font>,
 }
 
 /// Delay between the game-over screen appearing and its outcome stinger.
@@ -104,9 +103,6 @@ impl GameOverScene {
             tree: TreeState::new(),
             opened_at: Instant::now(),
             outcome_sfx_fired: false,
-            ui_font: load_ui_font_bytes().and_then(|bytes| {
-                fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()).ok()
-            }),
         }
     }
 
@@ -124,53 +120,17 @@ impl GameOverScene {
             tree: TreeState::new(),
             opened_at: Instant::now(),
             outcome_sfx_fired: false,
-            ui_font: load_ui_font_bytes().and_then(|bytes| {
-                fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()).ok()
-            }),
         }
     }
 
     fn flat_items(&self, w: f32, h: f32) -> [FlatItem<DismissAction>; 1] {
         [FlatItem::new(FocusId(0), [0.0, 0.0, w, h], DismissAction)]
     }
+}
 
-    fn marquee_offset(&self, text: &str, width: f32, font_px: f32) -> f32 {
-        let Some(font) = &self.ui_font else {
-            return 0.0;
-        };
-        let (_, _, advances) = measure_label_advances(
-            font,
-            text,
-            width.max(1.0).round() as u32,
-            font_px.max(1.0).round() as u32,
-            Some(font_px),
-        );
-        let text_w: f32 = advances.iter().sum();
-        let overflow = (text_w - width).max(0.0);
-        if overflow <= 4.0 {
-            return 0.0;
-        }
-
-        let hold_secs = 0.9;
-        let speed_px_per_sec = 36.0;
-        let travel_secs = overflow / speed_px_per_sec;
-        let cycle_secs = hold_secs * 2.0 + travel_secs * 2.0;
-        let t = self
-            .opened_at
-            .elapsed()
-            .as_secs_f32()
-            .rem_euclid(cycle_secs);
-
-        if t < hold_secs {
-            0.0
-        } else if t < hold_secs + travel_secs {
-            (t - hold_secs) * speed_px_per_sec
-        } else if t < hold_secs * 2.0 + travel_secs {
-            overflow
-        } else {
-            overflow - (t - (hold_secs * 2.0 + travel_secs)) * speed_px_per_sec
-        }
-    }
+fn wrapped_row_height(text: &str, col_w: f32, font_px: f32, line_h: f32) -> f32 {
+    let lines = wrap_text(text, col_w, font_px / 0.99);
+    line_h * lines.len().max(1) as f32
 }
 
 impl SceneBehavior for GameOverScene {
@@ -235,29 +195,72 @@ impl SceneBehavior for GameOverScene {
         };
         let loss_reason = self.loss_reason.map(GameOverReason::loss_summary);
 
-        // Layout — left-of-centre composition.  The panel is compact: just tall
-        // enough for the current set of tight rows.  All sizes derive from h
-        // so they scale.
+        let mut rows = vec![
+            (
+                "Best structure".to_string(),
+                self.summary.best_structure.clone(),
+            ),
+            (
+                "Most played".to_string(),
+                self.summary.most_played_structure.clone(),
+            ),
+            (
+                "Tiles played".to_string(),
+                self.summary.tiles_played.to_string(),
+            ),
+            (
+                "Tiles discarded".to_string(),
+                self.summary.tiles_discarded.to_string(),
+            ),
+            (
+                "Times restocked".to_string(),
+                self.summary.times_restocked.to_string(),
+            ),
+            ("Ante".to_string(), self.summary.ante.to_string()),
+            ("Round".to_string(), self.summary.round.clone()),
+        ];
+        if let Some(reason) = loss_reason {
+            rows.push(("Defeat cause".to_string(), reason.to_string()));
+        }
+
+        // Layout — left-of-centre composition.  Row heights grow when labels or
+        // values wrap; the subtitle uses the same width as the headline.
         let row_font_px = typography::size(typography::H36, h);
-        let row_h = row_font_px * 2.0; // 2× leading — dense but breathable
-        let n_rows = if self.won { 7.0 } else { 8.0 };
-        let pad_v = row_font_px * 0.8; // top/bottom padding inside panel
+        let row_line_h = row_font_px * 1.35;
+        let pad_v = row_font_px * 0.8;
         let panel_w = w * 0.25;
-        let panel_h = row_h * n_rows + pad_v * 2.0;
-        // Victory sits on the right, defeat on the left — contrasting compositions.
+        let inner_w = panel_w * 0.90;
+        let label_col_w = inner_w * 0.48;
+        let value_col_w = inner_w * 0.50;
+        let panel_h = rows
+            .iter()
+            .map(|(label, value)| {
+                wrapped_row_height(label, label_col_w, row_font_px, row_line_h)
+                    .max(wrapped_row_height(
+                        value,
+                        value_col_w,
+                        row_font_px,
+                        row_line_h,
+                    ))
+            })
+            .sum::<f32>()
+            + pad_v * 2.0;
         let panel_x = if self.won { w * 0.67 } else { w * 0.08 };
 
-        // Build upward from panel_y so nothing overlaps:
-        //   panel_y - gap - sub_h - gap - headline_h  = headline top
         let gap = row_font_px * 0.5;
         let sub_font = typography::size(typography::H32, h);
-        let sub_h = sub_font * 1.3;
+        let sub_line_h = sub_font * 1.3;
         let headline_font = typography::size(typography::H5, h);
         let headline_h = headline_font * 1.25;
         let top_pad = (h * 0.04).max(row_font_px * 0.6);
+        let content_w = if self.won {
+            panel_w
+        } else {
+            w * 0.60
+        };
+        let sub_lines = wrap_text(&subtitle, content_w, sub_font / 0.99);
+        let sub_h = sub_line_h * sub_lines.len().max(1) as f32;
 
-        // Centre the stats card, then nudge the whole stack down if the H5 headline
-        // would clip above the window (common at 1080p with eight stat rows).
         let mut panel_y = h * 0.50 - panel_h * 0.5;
         let headline_y = panel_y - gap - sub_h - gap - headline_h;
         if headline_y < top_pad {
@@ -266,16 +269,14 @@ impl SceneBehavior for GameOverScene {
 
         let panel_rect = [panel_x, panel_y, panel_w, panel_h];
         let sub_y = panel_y - gap - sub_h;
-        let subtitle_rect = [panel_x, sub_y, panel_w, sub_h];
+        let subtitle_rect = [panel_x, sub_y, content_w, sub_h];
         let headline_y = sub_y - gap - headline_h;
-        // On victory (right side) the headline extends leftward from the panel
-        // right edge; on defeat it extends rightward from the panel left edge.
         let headline_x = if self.won {
-            panel_x + panel_w - w * 0.60
+            panel_x + panel_w - content_w
         } else {
             panel_x
         };
-        let headline_rect = [headline_x, headline_y, w * 0.60, headline_h];
+        let headline_rect = [headline_x, headline_y, content_w, headline_h];
 
         // Thin rule sits right on the panel top edge.
         let rule_rect = [panel_x, panel_y - 2.0, panel_w, 2.0];
@@ -359,7 +360,7 @@ impl SceneBehavior for GameOverScene {
 
         frame.text(TextLabel {
             rect: subtitle_rect,
-            text: subtitle,
+            text: sub_lines.join("\n"),
             color: color::CHAMPAGNE,
             font_px: Some(sub_font),
             align: text_align,
@@ -378,74 +379,44 @@ impl SceneBehavior for GameOverScene {
             user: 0,
         });
 
-        let mut rows = vec![
-            (
-                "Best structure".to_string(),
-                self.summary.best_structure.clone(),
-            ),
-            (
-                "Most played".to_string(),
-                self.summary.most_played_structure.clone(),
-            ),
-            (
-                "Tiles played".to_string(),
-                self.summary.tiles_played.to_string(),
-            ),
-            (
-                "Tiles discarded".to_string(),
-                self.summary.tiles_discarded.to_string(),
-            ),
-            (
-                "Times restocked".to_string(),
-                self.summary.times_restocked.to_string(),
-            ),
-            ("Ante".to_string(), self.summary.ante.to_string()),
-            ("Round".to_string(), self.summary.round.clone()),
-        ];
-        if let Some(reason) = loss_reason {
-            rows.push(("Defeat cause".to_string(), reason.to_string()));
-        }
-
-        // Inner content area — inset by one padding unit on each side.
         let inner_x = panel_rect[0] + panel_rect[2] * 0.05;
-        let inner_w = panel_rect[2] * 0.90;
         let inner_y = panel_rect[1] + pad_v;
-        // row_h and row_font_px already computed above.
+        let mut row_y = inner_y;
 
         for (idx, (label, value)) in rows.iter().enumerate() {
-            let y = inner_y + row_h * idx as f32;
-            let text_y = y + (row_h - row_font_px) * 0.5;
-            let text_h = row_font_px * 1.2;
+            let label_lines = wrap_text(label, label_col_w, row_font_px / 0.99);
+            let value_lines = wrap_text(value, value_col_w, row_font_px / 0.99);
+            let row_h = row_line_h
+                * label_lines
+                    .len()
+                    .max(value_lines.len())
+                    .max(1) as f32;
 
-            // Alternating row tint for scannability.
             if idx % 2 == 0 {
                 frame.quad(GpuInstance {
-                    rect: [panel_rect[0] + 3.0, y, panel_rect[2] - 6.0, row_h],
+                    rect: [panel_rect[0] + 3.0, row_y, panel_rect[2] - 6.0, row_h],
                     color: color::alpha(color::WALNUT_RAISED, 0.25),
                     user: 0,
                 });
             }
 
-            // Label — left-aligned, muted.
             frame.text(TextLabel {
-                rect: [inner_x, text_y, inner_w * 0.48, text_h],
-                text: label.clone(),
+                rect: [inner_x, row_y, label_col_w, row_h],
+                text: label_lines.join("\n"),
                 color: color::STONE,
                 font_px: Some(row_font_px),
                 align: TextAlign::Left,
                 ..Default::default()
             });
-            // Value — right side of the row, brighter.
-            let value_rect = [inner_x + inner_w * 0.50, text_y, inner_w * 0.50, text_h];
             frame.text(TextLabel {
-                rect: value_rect,
-                text: value.clone(),
+                rect: [inner_x + inner_w * 0.50, row_y, value_col_w, row_h],
+                text: value_lines.join("\n"),
                 color: color::PARCHMENT,
                 font_px: Some(row_font_px),
                 align: TextAlign::Right,
-                scroll_offset: self.marquee_offset(value, value_rect[2], row_font_px),
                 ..Default::default()
             });
+            row_y += row_h;
         }
 
         frame.text(TextLabel {

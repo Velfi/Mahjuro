@@ -286,6 +286,15 @@ impl App {
                     let _ = self.progress.note_transformation_successor_discovered(rid);
                     self.mark_profile_dirty();
                 }
+                GameEvent::ArchiveItemSeen(mark) => {
+                    if self.progress.mark_archive_seen(mark) {
+                        self.mark_profile_dirty();
+                    }
+                }
+                GameEvent::ArchiveSeedSeenIfNeeded => {
+                    crate::core::archive_seen::archive_seen_migration_seed(&mut self.progress);
+                    self.mark_profile_dirty();
+                }
                 GameEvent::InfoModal { title, body } => {
                     self.modals.push(Modal::new(title, body, ModalTheme::Info));
                 }
@@ -740,6 +749,10 @@ impl App {
         let mut overlay_request: Option<scenes::OverlayRequest> = None;
         let mut rumble_lab_ops: Vec<crate::ui::input::RumbleLabOp> = Vec::new();
         let mut bump_archive_chronicle_seen: Option<u32> = None;
+        let mut seed_archive_seen = false;
+        let p = self.active_profile.min(2);
+        let settings_for_archive = persistence::load_settings();
+        let archive_chronicle_last_seen = settings_for_archive.archive_last_seen_run_len[p];
         let room_gltf_height_for_update = self.resolved_scene_look().room_gltf_height_scale;
         let updated_overlay = !self.overlay_stack.is_empty();
         self.cpu_profiler
@@ -796,6 +809,8 @@ impl App {
                 suspended_collection: None,
                 room_gltf_height_scale: room_gltf_height_for_update,
                 bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
+                seed_archive_seen: &mut seed_archive_seen,
+                archive_chronicle_last_seen,
                 rain_tuning: self
                     .renderer
                     .as_ref()
@@ -881,6 +896,8 @@ impl App {
                     suspended_collection,
                     room_gltf_height_scale: room_gltf_height_for_update,
                     bump_archive_chronicle_seen: &mut bump_archive_chronicle_seen,
+                    seed_archive_seen: &mut seed_archive_seen,
+                    archive_chronicle_last_seen,
                     rain_tuning: self
                         .renderer
                         .as_ref()
@@ -893,6 +910,10 @@ impl App {
         }
         self.cpu_profiler
             .end(crate::render::cpu_profiler::CpuStage::Update);
+        if seed_archive_seen {
+            crate::core::archive_seen::archive_seen_migration_seed(&mut self.progress);
+            self.mark_profile_dirty();
+        }
         if let Some(n) = bump_archive_chronicle_seen {
             let p = self.active_profile.min(2);
             let mut s = persistence::load_settings();
@@ -1056,6 +1077,10 @@ impl App {
             if self.transition_alpha <= 0.0 {
                 self.transition_alpha = 0.0;
                 if let Some(next) = self.pending_scene.take() {
+                    if matches!(&next, Scene::Shop(_)) {
+                        self.run.grant_pending_memorial(&mut self.progress);
+                        self.mark_profile_dirty();
+                    }
                     let from_tag = SceneTag::from(&self.scene);
                     let to_tag = SceneTag::from(&next);
                     // Route the new scene to the target recorded

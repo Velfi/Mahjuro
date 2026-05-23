@@ -98,6 +98,18 @@ pub struct PlayerProgress {
     /// unlocks for any victories already in the log.
     #[serde(default)]
     pub unlocked_stakes: BTreeMap<TileMaterial, BTreeSet<Stake>>,
+    /// Relics the player has focused in Archive since they appeared in the grid.
+    #[serde(default)]
+    pub archive_seen_relics: HashSet<RelicId>,
+    /// Yaku the player has focused in Archive since first scored.
+    #[serde(default)]
+    pub archive_seen_yaku: HashSet<YakuKind>,
+    /// Bosses the player has focused in Archive since first encountered.
+    #[serde(default)]
+    pub archive_seen_bosses: HashSet<BossKind>,
+    /// Talismans the player has focused in Archive since first purchased.
+    #[serde(default)]
+    pub archive_seen_talismans: HashSet<TalismanKind>,
 }
 
 /// Relics that never appear in meta level-up and stay out of Collection until a
@@ -239,6 +251,10 @@ impl PlayerProgress {
             pending_memorial: None,
             pending_memorial_journal: None,
             memorials_discovered: HashSet::default(),
+            archive_seen_relics: HashSet::default(),
+            archive_seen_yaku: HashSet::default(),
+            archive_seen_bosses: HashSet::default(),
+            archive_seen_talismans: HashSet::default(),
         }
     }
 
@@ -431,6 +447,17 @@ impl PlayerProgress {
         }
     }
 
+    /// Debug / cheat: treat Kokushi Musō as discovered (journal, guide, Qilin ribbon).
+    pub fn cheat_reveal_kokushi_musou(&mut self) {
+        let entry = self
+            .yaku_times_scored
+            .entry(YakuKind::KokushiMusou)
+            .or_insert(0);
+        if *entry == 0 {
+            *entry = 1;
+        }
+    }
+
     /// Rules available for this player's progression level.
     pub fn available_rules(&self) -> Vec<RuleModifier> {
         let level = self.current_level();
@@ -608,6 +635,7 @@ fn finalize_run_chronicle(
             run.ante,
             run.blind,
             boss_name.as_deref(),
+            run.round_score,
         );
     }
 

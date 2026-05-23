@@ -134,6 +134,9 @@ pub struct RunChronicle {
     pub milestones: Vec<String>,
     #[serde(default)]
     pub victory_tier: Option<VictoryTier>,
+    /// Round score when each blind ended (cleared, skipped, or failed).
+    #[serde(default)]
+    pub blind_scores: Vec<u64>,
 }
 
 impl RunChronicle {
@@ -196,7 +199,9 @@ impl RunChronicle {
         blind: BlindKind,
         boss: Option<&str>,
         reward_note: String,
+        round_score: u64,
     ) {
+        self.blind_scores.push(round_score);
         self.encounters.push(RunEncounterRecord {
             ante,
             blind_label: blind.name().to_string(),
@@ -207,6 +212,7 @@ impl RunChronicle {
     }
 
     pub fn record_blind_skipped(&mut self, ante: u32, blind: BlindKind, reward_note: String) {
+        self.blind_scores.push(0);
         self.encounters.push(RunEncounterRecord {
             ante,
             blind_label: blind.name().to_string(),
@@ -221,6 +227,7 @@ impl RunChronicle {
         ante: u32,
         blind: BlindKind,
         boss: Option<&str>,
+        round_score: u64,
     ) {
         if self
             .encounters
@@ -229,6 +236,7 @@ impl RunChronicle {
         {
             return;
         }
+        self.blind_scores.push(round_score);
         self.encounters.push(RunEncounterRecord {
             ante,
             blind_label: blind.name().to_string(),
@@ -428,6 +436,16 @@ fn compute_milestones(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blind_scores_record_on_clear_and_defeat() {
+        use crate::core::rules::BlindKind;
+        let mut c = RunChronicle::default();
+        c.record_blind_cleared(1, BlindKind::Small, None, String::new(), 420);
+        c.record_blind_cleared(1, BlindKind::Big, None, String::new(), 880);
+        c.record_run_end_defeat(1, BlindKind::Boss, Some("The Whisper"), 210);
+        assert_eq!(c.blind_scores, vec![420, 880, 210]);
+    }
 
     #[test]
     fn format_run_seed_is_grouped() {

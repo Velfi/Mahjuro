@@ -65,7 +65,7 @@ impl SceneBehavior for MaterialViewerScene {
         // ── Camera ────────────────────────────────────────────────
         // Front-facing camera sized to the window so pixel-space object
         // placements map directly to what the player sees. Matches the
-        // meld guide's approach.
+        // guide's approach.
         let cam_scale = h / 1600.0;
         frame.camera_override = Some(CameraParams {
             eye: [0.0, -200.0 * cam_scale, 2040.0 * cam_scale],

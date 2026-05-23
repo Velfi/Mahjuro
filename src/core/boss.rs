@@ -238,7 +238,7 @@ impl BossTier {
     pub fn halo_color(self) -> [f32; 4] {
         use crate::render::theme::color;
         match self {
-            BossTier::Soft => [0.55, 0.65, 0.85, 1.0], // muted indigo
+            BossTier::Soft => color::LAPIS,
             BossTier::Medium => color::GOLD,
             BossTier::Hard => color::AMBER,
             BossTier::Final => color::RUBY,

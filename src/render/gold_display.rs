@@ -172,6 +172,7 @@ pub fn push_gold_amount_label(
         rotation_quarters: 0,
         baseline_shift_px: 0.0,
         clip_rect: None,
+        mono: false,
     }]);
     gold_label_rect
 }

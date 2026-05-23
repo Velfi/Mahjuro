@@ -5,28 +5,27 @@
 //! recolored; `winds`, `WINDS`, and game jargon (`Chips`, `Mult`, …) behave as
 //! before.
 
-use crate::core::tile::Suit;
 use crate::render::theme::color;
 
 /// Longest-token-first table consumed by [`color_for_token`].
 pub const COLORED_KEYWORD_TABLE: &[(&str, [f32; 4])] = &[
-    ("characters", Suit::Manzu.keyword_color()),
-    ("bamboos", Suit::Souzu.keyword_color()),
-    ("manzu", Suit::Manzu.keyword_color()),
-    ("souzu", Suit::Souzu.keyword_color()),
-    ("pinzu", Suit::Pinzu.keyword_color()),
-    ("dragons", Suit::Dragon.keyword_color()),
-    ("flowers", Suit::Flower.keyword_color()),
-    ("seasons", Suit::Season.keyword_color()),
-    ("trigger", color::BRASS),
-    ("bamboo", Suit::Souzu.keyword_color()),
-    ("honors", color::CHAMPAGNE),
-    ("chips", color::LAPIS),
-    ("winds", Suit::Wind.keyword_color()),
-    ("mult", color::RUBY),
-    ("dots", Suit::Pinzu.keyword_color()),
-    ("gold", color::RELIC_GOLD),
-    ("play", color::JADE),
+    ("characters", color::keyword::MANZU),
+    ("bamboos", color::keyword::SOUZU),
+    ("manzu", color::keyword::MANZU),
+    ("souzu", color::keyword::SOUZU),
+    ("pinzu", color::keyword::PINZU),
+    ("dragons", color::keyword::DRAGON),
+    ("flowers", color::keyword::FLOWER),
+    ("seasons", color::keyword::SEASON),
+    ("trigger", color::keyword::TRIGGER),
+    ("bamboo", color::keyword::SOUZU),
+    ("honors", color::keyword::HONORS),
+    ("chips", color::keyword::CHIPS),
+    ("winds", color::keyword::WIND),
+    ("mult", color::keyword::MULT),
+    ("dots", color::keyword::PINZU),
+    ("gold", color::keyword::GOLD),
+    ("play", color::keyword::PLAY),
 ];
 
 /// Needles that also read as ordinary English words (often title-cased in
@@ -208,14 +207,14 @@ mod tests {
     fn play_keyword_is_leaf_green() {
         use crate::render::theme::color;
         let d = [0.5, 0.5, 0.5, 1.0];
-        assert_eq!(color_for_token("play", d), color::JADE);
-        assert_eq!(color_for_token("Play", d), color::JADE);
+        assert_eq!(color_for_token("play", d), color::keyword::PLAY);
+        assert_eq!(color_for_token("Play", d), color::keyword::PLAY);
     }
 
     #[test]
     fn trigger_keyword_stays_brass() {
         use crate::render::theme::color;
         let d = [0.5, 0.5, 0.5, 1.0];
-        assert_eq!(color_for_token("trigger", d), color::BRASS);
+        assert_eq!(color_for_token("trigger", d), color::keyword::TRIGGER);
     }
 }
