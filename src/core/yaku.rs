@@ -88,7 +88,7 @@ pub enum YakuKind {
     Chiitoitsu,
     /// Thirteen orphans: one of each terminal and honor type, plus one
     /// duplicate of an orphan face. Tied to the Qilin zodiac. Omitted from
-    /// `PlayerProgress::available_yaku` (previews, journal, meld guide) until
+    /// `PlayerProgress::available_yaku` (previews, journal, guide) until
     /// the first cash-in that scores it; detection still applies when valid.
     KokushiMusou,
     /// A structurally valid hand that triggers no other yaku. Scores base
@@ -148,7 +148,7 @@ impl YakuKind {
         yaku_def(self).name
     }
 
-    /// Sort key for reference UIs (journal, meld guide): lowest base payout first.
+    /// Sort key for reference UIs (journal, guide): lowest base payout first.
     pub fn cmp_by_base_score(a: &Self, b: &Self) -> std::cmp::Ordering {
         a.mult_bonus()
             .partial_cmp(&b.mult_bonus())

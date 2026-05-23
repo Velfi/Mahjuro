@@ -1048,6 +1048,42 @@ mod cases {
         assert!(!run.is_selection_valid(), "triplet + leftover is invalid");
     }
 
+    #[test]
+    fn selection_blocked_by_boss_rules_detects_rot_and_bureaucrat() {
+        use crate::core::boss::{BossKind, ResolvedBossEffect};
+        use crate::core::rules::{BlindKind, RuleModifier};
+        use crate::core::tile::{Suit, Tile};
+
+        let tiles = vec![
+            Tile::new(Suit::Manzu, 1, 1),
+            Tile::new(Suit::Manzu, 2, 2),
+            Tile::new(Suit::Flower, 1, 3),
+        ];
+
+        let mut run = test_run();
+        run.blind = BlindKind::Boss;
+        run.boss.effect = Some(ResolvedBossEffect::from_static(
+            &BossKind::Rot.def().effect,
+        ));
+        run.round_rules.push(RuleModifier::NoFlowerWildcards);
+        assert!(run.selection_blocked_by_boss_rules(&tiles));
+
+        let mut run = test_run();
+        run.blind = BlindKind::Boss;
+        run.boss.effect = Some(ResolvedBossEffect::from_static(
+            &BossKind::Bureaucrat.def().effect,
+        ));
+        run.round_rules.push(RuleModifier::MustPlayFive);
+        assert!(run.selection_blocked_by_boss_rules(&tiles));
+
+        let mut run = test_run();
+        run.blind = BlindKind::Boss;
+        run.boss.effect = Some(ResolvedBossEffect::from_static(
+            &BossKind::Gate.def().effect,
+        ));
+        assert!(!run.selection_blocked_by_boss_rules(&tiles));
+    }
+
     // ── discard indices are correct (reverse removal) ───────────────
 
     #[test]

@@ -3,6 +3,7 @@ use crate::{
         boss,
         hand::{DetectedMeld, validate_selection_with_rules},
         relic::RelicId,
+        rules::RuleModifier,
         scoring::EffectiveRelics,
         tile::{Suit, Tile},
     },
@@ -21,16 +22,27 @@ impl RunState {
         &self,
         tiles: &[Tile],
     ) -> Option<(Vec<DetectedMeld>, Vec<Tile>)> {
-        let validation_rules = self.validation_rules_for_structure_commits();
+        self.try_validate_with_wildcards_and_rules(
+            tiles,
+            &self.validation_rules_for_structure_commits(),
+        )
+    }
+
+    /// Like [`Self::try_validate_with_wildcards`], but against an explicit rule set.
+    pub fn try_validate_with_wildcards_and_rules(
+        &self,
+        tiles: &[Tile],
+        validation_rules: &[RuleModifier],
+    ) -> Option<(Vec<DetectedMeld>, Vec<Tile>)> {
         // Try standard validation first.
-        if let Some(sets) = validate_selection_with_rules(tiles, &validation_rules) {
+        if let Some(sets) = validate_selection_with_rules(tiles, validation_rules) {
             return Some((sets, tiles.to_vec()));
         }
 
         // JokerTile: try substituting one tile with each possible face.
         if self.relics.has(RelicId::JokerTile)
             && !self.joker_used
-            && let Some(result) = try_joker_substitution(tiles, &validation_rules)
+            && let Some(result) = try_joker_substitution(tiles, validation_rules)
         {
             return Some(result);
         }
@@ -41,19 +53,43 @@ impl RunState {
         // for any *other* wind tiles in the selection.
         if self.relics.has(RelicId::Disgust) {
             let chain_winds = self.relics.has(RelicId::WildWinds);
-            if let Some(result) = try_disgust_substitution(tiles, &validation_rules, chain_winds) {
+            if let Some(result) = try_disgust_substitution(tiles, validation_rules, chain_winds) {
                 return Some(result);
             }
         }
 
         // WildWinds: try substituting wind tiles.
         if self.relics.has(RelicId::WildWinds)
-            && let Some(result) = try_wind_substitution(tiles, &validation_rules)
+            && let Some(result) = try_wind_substitution(tiles, validation_rules)
         {
             return Some(result);
         }
 
         None
+    }
+
+    /// True when the selection is invalid under the active round rules but would
+    /// validate if this boss blind's [`RuleModifier`] pushes were removed.
+    pub fn selection_blocked_by_boss_rules(&self, tiles: &[Tile]) -> bool {
+        let boss_rules: &[RuleModifier] = self
+            .boss
+            .effect
+            .as_ref()
+            .map(|e| e.rule_pushes.as_slice())
+            .unwrap_or(&[]);
+        if boss_rules.is_empty() || tiles.is_empty() {
+            return false;
+        }
+        if self.try_validate_with_wildcards(tiles).is_some() {
+            return false;
+        }
+        let without_boss: Vec<RuleModifier> = self
+            .validation_rules_for_structure_commits()
+            .into_iter()
+            .filter(|r| !boss_rules.contains(r))
+            .collect();
+        self.try_validate_with_wildcards_and_rules(tiles, &without_boss)
+            .is_some()
     }
 
     /// Toggle whether a hand tile is marked for discard.
@@ -71,6 +107,23 @@ impl RunState {
     /// How many tiles are currently selected for discard.
     pub fn selected_count(&self) -> usize {
         self.selected.iter().filter(|&&s| s).count()
+    }
+
+    /// True when the current hand selection is invalid solely because of this
+    /// boss blind's rule modifiers (see [`Self::selection_blocked_by_boss_rules`]).
+    pub fn hand_selection_blocked_by_boss(&self) -> bool {
+        use crate::core::rules::BlindKind;
+        if self.blind != BlindKind::Boss || self.selected_count() == 0 {
+            return false;
+        }
+        let selected_tiles: Vec<Tile> = self
+            .hand
+            .iter()
+            .zip(self.selected.iter())
+            .filter(|&(_, &sel)| sel)
+            .map(|(t, _)| *t)
+            .collect();
+        !self.is_selection_valid() && self.selection_blocked_by_boss_rules(&selected_tiles)
     }
 
     /// Check if the current selection forms a valid playable hand.

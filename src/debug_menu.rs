@@ -109,6 +109,8 @@ pub enum DebugAction {
     /// Play N headless bot runs and append each terminal state to
     /// `run_history` + career counters (Chronicle debug fill).
     SeedChronicleFromBotRuns(u32),
+    /// Mark Kokushi Musō as discovered in the active profile (journal, guide, Qilin ribbon).
+    RevealKokushiMusou,
 }
 
 /// Holds the menu bar and maps MenuIds to DebugActions.
@@ -281,6 +283,13 @@ impl DebugMenuBar {
             DebugAction::UnlockAllTransformationsAndSuccessors,
         ));
         let _ = cheats_sub.append(&unlock_transforms_item);
+
+        let reveal_kokushi_item = MenuItem::new("Reveal Kokushi Musō", true, None);
+        mappings.push((
+            reveal_kokushi_item.id().clone(),
+            DebugAction::RevealKokushiMusou,
+        ));
+        let _ = cheats_sub.append(&reveal_kokushi_item);
 
         let _ = cheats_sub.append(&PredefinedMenuItem::separator());
 

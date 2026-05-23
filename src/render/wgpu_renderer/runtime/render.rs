@@ -311,6 +311,7 @@ impl WgpuRenderer {
                               lbl: &TextLabel,
                               font: &fontdue::Font,
                               font_italic: Option<&fontdue::Font>,
+                              font_mono: Option<&fontdue::Font>,
                               emoji_fallback: Option<&fontdue::Font>|
          -> TextDraw {
             // Clamp before casting: `f32 as u32` saturates negatives/NaN to u32::MAX,
@@ -336,7 +337,18 @@ impl WgpuRenderer {
                 .and_then(|s| if s.is_empty() { None } else { Some(s) });
             let inline_face_bits =
                 (lbl.bold as u8) | ((lbl.italic as u8) << 1) | ((lbl.underline as u8) << 2);
+            let face_font = if lbl.mono {
+                font_mono.unwrap_or(font)
+            } else {
+                font
+            };
+            let face_italic = if lbl.mono {
+                font_mono.unwrap_or(font_italic.unwrap_or(font))
+            } else {
+                font_italic.unwrap_or(font)
+            };
             let shape_key = TextLabelShapeKey {
+                mono: lbl.mono,
                 emoji_path: emoji_fallback.is_some(),
                 flavor_spans: flavor.is_some(),
                 inline_face_bits,
@@ -356,13 +368,20 @@ impl WgpuRenderer {
 
             let rasterize = || -> Vec<u8> {
                 if let Some(spans) = flavor {
-                    let italic = font_italic.unwrap_or(font);
                     let floor = crate::render::theme::typography::readable_floor_px(window_h);
-                    let px = lbl.font_px.unwrap_or(floor).max(floor);
+                    let px = crate::render::decal::resolve_label_font_px(
+                        face_font,
+                        emoji_fallback,
+                        &lbl.text,
+                        tw,
+                        th,
+                        lbl.font_px,
+                        floor,
+                    );
                     crate::render::decal::rasterize_label_flavor_spans(
                         &crate::render::decal::DecalFonts {
-                            regular: font,
-                            italic: Some(italic),
+                            regular: face_font,
+                            italic: Some(face_italic),
                             emoji: emoji_fallback,
                         },
                         spans,
@@ -374,9 +393,16 @@ impl WgpuRenderer {
                         },
                     )
                 } else if lbl.bold || lbl.italic || lbl.underline {
-                    let italic = font_italic.unwrap_or(font);
                     let floor = crate::render::theme::typography::readable_floor_px(window_h);
-                    let px = lbl.font_px.unwrap_or(floor).max(floor);
+                    let px = crate::render::decal::resolve_label_font_px(
+                        face_font,
+                        emoji_fallback,
+                        &lbl.text,
+                        tw,
+                        th,
+                        lbl.font_px,
+                        floor,
+                    );
                     let syn = [crate::render::decal::RasterStyleSpan {
                         text: lbl.text.as_str(),
                         bold: lbl.bold,
@@ -385,8 +411,8 @@ impl WgpuRenderer {
                     }];
                     crate::render::decal::rasterize_label_raster_spans(
                         &crate::render::decal::DecalFonts {
-                            regular: font,
-                            italic: Some(italic),
+                            regular: face_font,
+                            italic: Some(face_italic),
                             emoji: emoji_fallback,
                         },
                         &syn,
@@ -399,7 +425,7 @@ impl WgpuRenderer {
                     )
                 } else {
                     rasterize_label_styled_with_fallback(
-                        font,
+                        face_font,
                         emoji_fallback,
                         &lbl.text,
                         tw,
@@ -747,6 +773,7 @@ impl WgpuRenderer {
                             lbl,
                             font,
                             self.ui_font_italic.as_ref(),
+                            self.mono_font.as_ref(),
                             self.emoji_font.as_ref(),
                         );
                         let idx = text_draws.len();
@@ -897,6 +924,7 @@ impl WgpuRenderer {
                     &lbl,
                     font,
                     self.ui_font_italic.as_ref(),
+                    self.mono_font.as_ref(),
                     None,
                 );
                 let idx = text_draws.len();

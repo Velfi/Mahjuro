@@ -11,13 +11,13 @@ use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use super::main_menu_exterior::MainMenuExteriorScene;
-use super::meld_guide::MeldGuideScene;
+use super::guide::GuideScene;
 use super::{DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SummaryAction {
     Continue,
-    MeldGuide,
+    Guide,
 }
 
 impl SummaryAction {
@@ -49,9 +49,9 @@ impl TutorialSummaryScene {
         let start_x = (w - pair_w) * 0.5;
         vec![
             FlatItem::new(
-                SummaryAction::MeldGuide.id(),
+                SummaryAction::Guide.id(),
                 [start_x, y, btn_w, btn_h],
-                SummaryAction::MeldGuide,
+                SummaryAction::Guide,
             ),
             FlatItem::new(
                 SummaryAction::Continue.id(),
@@ -80,10 +80,10 @@ impl SceneBehavior for TutorialSummaryScene {
             ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
         }
         match action {
-            Some(SummaryAction::MeldGuide) => {
+            Some(SummaryAction::Guide) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                 *ctx.overlay_request = Some(super::OverlayRequest::Push(Box::new(
-                    Scene::MeldGuide(MeldGuideScene::new()),
+                    Scene::Guide(GuideScene::new()),
                 )));
                 None
             }
@@ -114,11 +114,11 @@ impl SceneBehavior for TutorialSummaryScene {
             "You reached the finale. Honors scored low under The Iconoclast — souzu, pinzu, manzu, and shop picks carried most runs."
         };
         let bullets = [
-            "Pairs, triplets, and sequences become melds when you bank them into your structure.",
-            "Full Hand and Chiitoitsu (seven pairs) are the two tutorial patterns to learn first.",
-            "Play banks melds; Cash In scores them (chips × mult). Yaku are the usual way to grow mult early.",
-            "Relics passively help all shrines; ribbons level yaku; talismans stamp tiles; packs reshape the wall.",
-            "Any time: open Pause → Meld Guide for pictures of every meld and yaku.",
+            "Pairs become melds when you bank them into your structure.",
+            "Full Hand and Chiitoitsu (seven pairs) are the two tutorial yaku to learn first.",
+            "Play banks melds; Cash In scores them (chips × mult).",
+            "Coming up: the shop introduces relics, ribbons, talismans, packs, and more.",
+            "Any time: open Pause → Guide for pictures of every meld and yaku.",
         ];
 
         let mut frame = UiFrame::new();
@@ -230,7 +230,7 @@ impl SceneBehavior for TutorialSummaryScene {
                 card_w - 40.0 * scale,
                 26.0 * scale,
             ],
-            text: "Meld Guide — full visual reference".to_string(),
+            text: "Guide — full visual reference".to_string(),
             color: color::STONE,
             align: TextAlign::Center,
             font_px: Some(typography::size(typography::H45, h)),
@@ -244,7 +244,7 @@ impl SceneBehavior for TutorialSummaryScene {
         let mut junk_buttons = Vec::new();
         for item in &items {
             let (label, variant) = match item.action {
-                SummaryAction::MeldGuide => ("Meld Guide", ButtonVariant::Default),
+                SummaryAction::Guide => ("Guide", ButtonVariant::Default),
                 SummaryAction::Continue => ("Continue", ButtonVariant::Primary),
             };
             crate::ui::widget::push_button(

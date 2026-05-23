@@ -70,7 +70,7 @@ fn menu_items(in_progress: bool, progress: &PlayerProgress) -> Vec<HubFocus> {
     items
 }
 
-fn label_for(item: HubFocus, in_progress: bool, archive_has_new_chronicle: bool) -> String {
+fn label_for(item: HubFocus, in_progress: bool, archive_has_new: bool) -> String {
     match item {
         HubFocus::Continue => "Continue".into(),
         HubFocus::NewGame => {
@@ -81,7 +81,7 @@ fn label_for(item: HubFocus, in_progress: bool, archive_has_new_chronicle: bool)
             }
         }
         HubFocus::Archive => {
-            if archive_has_new_chronicle {
+            if archive_has_new {
                 "Archive (new)".into()
             } else {
                 "Archive".into()
@@ -435,7 +435,7 @@ impl SceneBehavior for MainMenuExteriorScene {
         for &(item, rect) in &focus_rects {
             text_labels.push(TextLabel {
                 rect,
-                text: label_for(item, in_progress, ctx.archive_has_new_chronicle),
+                text: label_for(item, in_progress, ctx.archive_has_new),
                 font_px: Some(menu_font),
                 color: label_color,
                 align: TextAlign::Left,

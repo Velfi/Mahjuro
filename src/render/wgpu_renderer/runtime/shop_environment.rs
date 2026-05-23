@@ -124,7 +124,7 @@ impl WgpuRenderer {
             &self.archive_env_primitives,
             gpu,
             room_hdr_mrt_emissive,
-            |pi| self.archive_env_skip_description_prim(pi, frame),
+            |pi| self.archive_env_skip_archive_prim(pi, frame),
         );
     }
 
@@ -500,6 +500,32 @@ impl WgpuRenderer {
     fn archive_env_is_description_sign_prim(&self, pi: usize) -> bool {
         self.archive_sign_left_prim_idx == Some(pi)
             || self.archive_sign_right_prim_idx == Some(pi)
+    }
+
+    /// Lit pass: draw only the active description board (opposite the focus ref).
+    #[inline]
+    pub(super) fn archive_env_skip_archive_prim(
+        &self,
+        pi: usize,
+        frame: &crate::render::draw_cmd::UiFrame,
+    ) -> bool {
+        self.archive_env_skip_description_prim(pi, frame)
+            || self.archive_env_skip_page_button_prim(pi, frame)
+    }
+
+    #[inline]
+    fn archive_env_skip_page_button_prim(
+        &self,
+        pi: usize,
+        frame: &crate::render::draw_cmd::UiFrame,
+    ) -> bool {
+        if self.archive_page_left_prim_indices.contains(&pi) {
+            return !frame.archive_page_left_visible;
+        }
+        if self.archive_page_right_prim_indices.contains(&pi) {
+            return !frame.archive_page_right_visible;
+        }
+        false
     }
 
     /// Lit pass: draw only the active description board (opposite the focus ref).

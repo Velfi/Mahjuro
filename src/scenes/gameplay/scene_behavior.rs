@@ -4,7 +4,7 @@ use crate::core::consumable::Consumable;
 use crate::core::relic::{RelicId, all_relic_defs, relic_description_live};
 use crate::render::theme::color;
 use crate::scenes::options;
-use crate::scenes::{BackgroundId, MeldGuideScene, OverlayRequest};
+use crate::scenes::{BackgroundId, GuideScene, OverlayRequest};
 use crate::ui::boss_icons::boss_icon_source;
 use crate::ui::inspect_plaque::{
     FocusTooltipPanelParams, dora_focus_tooltip_strings, gameplay_consumable_description_full,
@@ -89,6 +89,7 @@ impl SceneBehavior for GameplayScene {
         }
 
         onboarding_hints::sync_onboarding_step(ctx.run);
+        self.boss_rule_feedback_live = ctx.run.hand_selection_blocked_by_boss();
 
         // Scene transition in progress — keep animations running but block
         // all input so the player can't alter game state during the fade-out.
@@ -104,19 +105,19 @@ impl SceneBehavior for GameplayScene {
             return None;
         }
 
-        // Help action opens the Meld Guide scene (replaces the old glossary overlay).
+        // Help action opens the Guide scene (replaces the old glossary overlay).
         for &cid in ctx.button_clicks {
             if cid == HELP_BADGE_ID {
-                *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::MeldGuide(
-                    MeldGuideScene::new(),
+                *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::Guide(
+                    GuideScene::new(),
                 ))));
                 return None;
             }
         }
         for a in ctx.actions {
             if matches!(a, UiAction::Help) {
-                *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::MeldGuide(
-                    MeldGuideScene::new(),
+                *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::Guide(
+                    GuideScene::new(),
                 ))));
                 return None;
             }
@@ -125,11 +126,11 @@ impl SceneBehavior for GameplayScene {
         // Pause menu handling — drives the menu while paused and intercepts
         // the open-on-Pause shortcut. Returns immediately if either applies.
         if let Some(t) = self.pause_menu.handle(&mut ctx) {
-            // The pause menu's "Meld Guide" entry sets a one-shot flag and
-            // closes itself; drain the flag to push the Meld Guide as an overlay.
-            if self.pause_menu.take_meld_guide_request() {
-                *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::MeldGuide(
-                    MeldGuideScene::new(),
+            // The pause menu's "Guide" entry sets a one-shot flag and
+            // closes itself; drain the flag to push the Guide as an overlay.
+            if self.pause_menu.take_guide_request() {
+                *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::Guide(
+                    GuideScene::new(),
                 ))));
                 return None;
             }
@@ -383,6 +384,7 @@ impl SceneBehavior for GameplayScene {
         let layout_scale = (layout.window_w.min(layout.window_h)) / 600.0;
         let selected_count = gameplay.selected_count;
         let selection_valid = GameEngine::selection_is_valid(run);
+        let boss_blocks_selection = self.boss_rule_feedback_live;
 
         // Bowl + mirror: own row below the hand tile slots, above the journal
         // (discard left, play right within the centered playfield). Click rects
@@ -704,6 +706,7 @@ impl SceneBehavior for GameplayScene {
                 window_h: layout.window_h,
             },
             scale,
+            crate::scenes::options::OptionsDrawHint::pause_overlay(&ctx),
             &mut pause_quads,
             &mut pause_text,
             &mut buttons,
@@ -1146,18 +1149,44 @@ impl SceneBehavior for GameplayScene {
 
         {
             let _g = crate::render::cpu_profiler::scope("draw_frame.build_ambient_table_objects");
+            let (boss_plinth_glow, _) = self.boss_rule_feedback(now, boss_blocks_selection);
             animation_state::build_ambient_table_objects(
                 self,
                 layout,
                 &gameplay,
                 ctx.progress.dora_enabled(),
+                boss_plinth_glow * 0.65,
                 &mut frame,
             );
         }
         if let (Some(boss_kind), Some(icon_rect)) = (gameplay.boss_kind, boss_icon_rect) {
+            let (boss_glow, boss_wiggle) = self.boss_rule_feedback(now, boss_blocks_selection);
+            if boss_glow > 0.0 {
+                let pad = icon_rect[2].max(icon_rect[3]) * 0.42;
+                hud_quads.push(GpuInstance {
+                    rect: [
+                        icon_rect[0] - pad + boss_wiggle,
+                        icon_rect[1] - pad,
+                        icon_rect[2] + pad * 2.0,
+                        icon_rect[3] + pad * 2.0,
+                    ],
+                    color: [
+                        1.0,
+                        0.48,
+                        0.10,
+                        0.18 + 0.42 * boss_glow,
+                    ],
+                    user: 0,
+                });
+            }
             frame.image_quads(std::iter::once(crate::render::draw_cmd::ImageQuad {
                 inst: GpuInstance {
-                    rect: icon_rect,
+                    rect: [
+                        icon_rect[0] + boss_wiggle,
+                        icon_rect[1],
+                        icon_rect[2],
+                        icon_rect[3],
+                    ],
                     color: color::alpha(color::CHAMPAGNE, 0.98),
                     user: 0,
                 },

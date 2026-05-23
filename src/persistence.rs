@@ -8,7 +8,7 @@ use std::sync::{Mutex, OnceLock};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
-use crate::core::progression::PlayerProgress;
+use crate::core::progression::{PlayerProgress, RunOutcome};
 use crate::game::run::RunState;
 use crate::ui::button_prompts::GamepadStyle;
 
@@ -762,6 +762,11 @@ pub struct ProfileSummary {
     pub high_score: u64,
     /// Whether a saved run is on disk for this profile.
     pub has_saved_run: bool,
+    pub victories: u32,
+    pub relics_unlocked: u32,
+    pub yaku_discovered: u32,
+    pub second_high_score: u64,
+    pub third_high_score: u64,
 }
 
 /// Path for a saved in-progress run for a profile.
@@ -901,6 +906,11 @@ pub fn profile_summary(index: usize) -> ProfileSummary {
             runs_completed: 0,
             high_score: 0,
             has_saved_run: false,
+            victories: 0,
+            relics_unlocked: 0,
+            yaku_discovered: 0,
+            second_high_score: 0,
+            third_high_score: 0,
         };
     }
     let progress = load_profile(index);
@@ -910,6 +920,19 @@ pub fn profile_summary(index: usize) -> ProfileSummary {
         runs_completed: progress.runs_completed,
         high_score: progress.high_scores.first().copied().unwrap_or(0),
         has_saved_run: has_saved_run(index),
+        victories: progress
+            .run_history
+            .iter()
+            .filter(|r| matches!(r.outcome, RunOutcome::Victory))
+            .count() as u32,
+        relics_unlocked: progress.unlocked_relics.len() as u32,
+        yaku_discovered: progress
+            .yaku_times_scored
+            .values()
+            .filter(|&&c| c > 0)
+            .count() as u32,
+        second_high_score: progress.high_scores.get(1).copied().unwrap_or(0),
+        third_high_score: progress.high_scores.get(2).copied().unwrap_or(0),
     }
 }
 

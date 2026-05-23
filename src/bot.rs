@@ -6,7 +6,8 @@
 //! (the meld enumerator never emits twelve singletons + one pair).
 //! Between turns it strategically discards isolated tiles via 1-step rollout when the
 //! best play falls below the pace needed to clear. Between blinds it values relics and
-//! consumables, visits the shop, buys the most useful affordable upgrade, and skips
+//! consumables, visits the shop, buys the most useful affordable upgrade (selling a
+//! weaker owned relic first when inventory is full), and skips
 //! Small/Big blinds when its expected score comfortably exceeds the target.
 //!
 //! Run with: `cargo run --release -- --bot 200`
@@ -25,7 +26,7 @@ use crate::core::hand::{MeldKind, detect_all_sets, validate_selection_with_rules
 use crate::core::relic::{
     RelicId, RelicState, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
     ScoreRoundBundle, ScoreTileBundle, all_relic_defs, apply_merchants_eye_discount,
-    relic_shop_price,
+    relic_sell_price_live, relic_shop_price,
 };
 use crate::core::rules::{BlindKind, RuleModifier};
 use crate::core::scoring::{format_meld_groups, score_sets_with_original};
@@ -91,6 +92,27 @@ fn acquire_relic(run: &mut RunState, id: RelicId) {
         _ => {}
     }
     run.recompute_capacities();
+}
+
+/// Headless analogue of `ShopCommand::SellRelic`.
+fn bot_sell_relic(run: &mut RunState, index: usize, bus: Option<&mut EventBus>) -> Option<u32> {
+    if index >= run.relics.active.len() {
+        return None;
+    }
+    let rid = run.relics.active[index];
+    let refund = relic_sell_price_live(rid, &run.relic_counters);
+    run.relics.active.remove(index);
+    run.clear_relic_run_metadata(rid);
+    if !run.relics.has(RelicId::IGotAGuy) {
+        run.relic_counters.remove(&RelicId::IGotAGuy);
+    }
+    run.apply_gold_reward(refund as i32, bus);
+    *run.relic_counters.entry(RelicId::Bonfire).or_insert(0) += 1;
+    if run.relics.has(RelicId::Bonfire) {
+        run.relic_activations.push(RelicId::Bonfire);
+    }
+    run.recompute_capacities();
+    Some(refund)
 }
 
 macro_rules! bot_log {
@@ -1388,11 +1410,13 @@ fn play_blind(
 mod tests {
     use super::{
         RunStats, ShopMarginalBase, best_play_in_hand, enumerate_candidate_play_masks,
-        pick_best_play, remaining_antes_including_current, scale_long_term_value_for_ante,
-        talisman_marginal_value, use_bot_consumables, zodiac_marginal_value_with_base,
+        pick_best_play, relic_marginal_value_with_base, relic_shop_offer_value_with_base,
+        remaining_antes_including_current, scale_long_term_value_for_ante, talisman_marginal_value,
+        use_bot_consumables, zodiac_marginal_value_with_base,
     };
     use crate::core::consumable::Consumable;
     use crate::core::hand::{DetectedMeld, MeldKind};
+    use crate::core::relic::RelicId;
     use crate::core::talisman::TalismanKind;
     use crate::core::tile::{Suit, Tile};
     use crate::core::zodiac::ZodiacKind;
@@ -1799,6 +1823,32 @@ mod tests {
         );
         assert!(run.consumables.items.is_empty());
     }
+
+    #[test]
+    fn relic_shop_value_evaluates_swap_when_inventory_full() {
+        let mut run = scoring_test_run();
+        run.relics.active = vec![
+            RelicId::PairPower,
+            RelicId::TripletBoost,
+            RelicId::SequenceSurge,
+            RelicId::HonorFury,
+            RelicId::DragonRage,
+        ];
+        assert!(run.relics.is_full());
+        let base = ShopMarginalBase::new(&run);
+        let mut sell_index = None;
+        let _swap_mv = relic_shop_offer_value_with_base(
+            &run,
+            RelicId::JadeSerpent,
+            &base,
+            &mut sell_index,
+        );
+        assert_eq!(
+            relic_marginal_value_with_base(&run, RelicId::JadeSerpent, &base),
+            0,
+            "straight add path should stay blocked when full"
+        );
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1964,6 +2014,70 @@ fn relic_marginal_value_with_base(
     }
     let sample_count = base.hands.len() as i64;
     scale_long_term_value_for_ante((delta_sum / sample_count) as i32, run.ante)
+}
+
+fn relic_swap_marginal_value_with_base(
+    run: &RunState,
+    candidate: RelicId,
+    replace_index: usize,
+    base: &ShopMarginalBase,
+) -> i32 {
+    if run.relics.owns(candidate) || replace_index >= run.relics.active.len() {
+        return 0;
+    }
+
+    let mut hypothetical = run.relics.clone();
+    hypothetical.active[replace_index] = candidate;
+
+    let mut delta_sum: i64 = 0;
+    for (h, hand) in base.hands.iter().enumerate() {
+        delta_sum += best_play_score_for_hand(run, hand, Some(&hypothetical), None) as i64
+            - base.baseline[h] as i64;
+    }
+    let sample_count = base.hands.len() as i64;
+    scale_long_term_value_for_ante((delta_sum / sample_count) as i32, run.ante)
+}
+
+/// Marginal shop value for a relic offer. When inventory is full, returns the best
+/// swap lift and the owned slot to sell; otherwise behaves like a straight purchase.
+fn relic_shop_offer_value_with_base(
+    run: &RunState,
+    candidate: RelicId,
+    base: &ShopMarginalBase,
+    sell_index: &mut Option<usize>,
+) -> i32 {
+    *sell_index = None;
+    if run.relics.owns(candidate) {
+        return -1;
+    }
+    if !run.relics.is_full() {
+        return relic_marginal_value_with_base(run, candidate, base);
+    }
+
+    let mut best = 0;
+    for idx in 0..run.relics.active.len() {
+        let mv = relic_swap_marginal_value_with_base(run, candidate, idx, base);
+        if mv > best {
+            best = mv;
+            *sell_index = Some(idx);
+        }
+    }
+    if best <= 0 {
+        *sell_index = None;
+    }
+    best
+}
+
+fn relic_offer_affordable(run: &RunState, price: i32, sell_index: Option<usize>) -> bool {
+    if let Some(idx) = sell_index {
+        let owned = run.relics.active[idx];
+        let refund = relic_sell_price_live(owned, &run.relic_counters) as i32;
+        run.gold + refund >= price
+    } else if run.relics.is_full() {
+        false
+    } else {
+        run.gold >= price
+    }
 }
 
 fn zodiac_marginal_value_with_base(
@@ -2415,7 +2529,7 @@ fn visit_shop(
         }
         let shop_base = ShopMarginalBase::new(run);
         // Find the best affordable offer with positive marginal value.
-        let mut best: Option<(usize, i32)> = None;
+        let mut best: Option<(usize, i32, Option<usize>)> = None;
         for (i, offer) in shop.iter().copied().enumerate() {
             let price = match offer {
                 ShopOffer::Relic(id) => {
@@ -2436,15 +2550,26 @@ fn visit_shop(
                     .mode
                     .scale_shop_price(apply_merchants_eye_discount(kind.shop_price(), &run.relics)),
             };
-            if price as i32 > run.gold {
-                continue;
-            }
+            let price_i32 = price as i32;
+            let mut sell_index = None;
             let raw_mv = match offer {
-                ShopOffer::Relic(id) => relic_marginal_value_with_base(run, id, &shop_base),
+                ShopOffer::Relic(id) => {
+                    let mv = relic_shop_offer_value_with_base(run, id, &shop_base, &mut sell_index);
+                    if !relic_offer_affordable(run, price_i32, sell_index) {
+                        continue;
+                    }
+                    mv
+                }
                 ShopOffer::Zodiac(zodiac) => {
+                    if price_i32 > run.gold {
+                        continue;
+                    }
                     zodiac_marginal_value_with_base(run, zodiac, &shop_base)
                 }
                 ShopOffer::Talisman(kind) => {
+                    if price_i32 > run.gold {
+                        continue;
+                    }
                     if run.consumables.is_full()
                         || run.consumables.items.iter().any(
                             |c| matches!(c, Consumable::Talisman(existing) if *existing == kind),
@@ -2455,7 +2580,12 @@ fn visit_shop(
                         talisman_marginal_value_with_base(run, kind, &shop_base)
                     }
                 }
-                ShopOffer::Pack(kind) => pack_marginal_value(run, kind),
+                ShopOffer::Pack(kind) => {
+                    if price_i32 > run.gold {
+                        continue;
+                    }
+                    pack_marginal_value(run, kind)
+                }
             };
             // Apply the strategy's category weight. weight = 0 zeros the
             // value out; weight > 1 biases the bot toward that category.
@@ -2469,11 +2599,15 @@ fn visit_shop(
             if mv <= 0 {
                 continue;
             }
-            if best.as_ref().map(|(_, b)| mv > *b).unwrap_or(true) {
-                best = Some((i, mv));
+            if best
+                .as_ref()
+                .map(|(_, b, _)| mv > *b)
+                .unwrap_or(true)
+            {
+                best = Some((i, mv, sell_index));
             }
         }
-        let Some((idx, marginal_value)) = best else {
+        let Some((idx, marginal_value, sell_index)) = best else {
             bot_log!(log, "    shop: no positive-value affordable purchase");
             break;
         };
@@ -2486,6 +2620,17 @@ fn visit_shop(
                     run.mode.scale_shop_price(relic_shop_price(id, &run.relics))
                 };
                 free_relic = false;
+                if let Some(sell_idx) = sell_index {
+                    let sold = run.relics.active[sell_idx];
+                    if let Some(refund) = bot_sell_relic(run, sell_idx, Some(bus)) {
+                        bot_log!(
+                            log,
+                            "    shop: sold {:?} for {} (making room)",
+                            sold,
+                            refund
+                        );
+                    }
+                }
                 run.apply_gold_delta(-(price as i32), Some(bus));
                 acquire_relic(run, id);
                 stats.relics_bought += 1;

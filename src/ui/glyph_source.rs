@@ -33,6 +33,45 @@ impl GlyphResolver {
         static_glyph_sprite(self.style, action, self.swap_ab, self.swap_xy)
             .map(|(sheet, name)| ImageQuadSource::AtlasSprite { sheet, name })
     }
+
+    /// D-pad composite glyphs for navigation hints (↑↓ / ←→).
+    pub fn dpad_glyph(&self, kind: DpadGlyph) -> Option<ImageQuadSource> {
+        static_dpad_sprite(self.style, kind)
+            .map(|(sheet, name)| ImageQuadSource::AtlasSprite { sheet, name })
+    }
+
+    /// Analog stick glyphs (left / right).
+    pub fn stick_glyph(&self, side: StickSide) -> Option<ImageQuadSource> {
+        static_stick_sprite(self.style, side)
+            .map(|(sheet, name)| ImageQuadSource::AtlasSprite { sheet, name })
+    }
+
+    /// Analog trigger glyphs (left / right).
+    pub fn trigger_glyph(&self, side: TriggerSide) -> Option<ImageQuadSource> {
+        static_trigger_sprite(self.style, side)
+            .map(|(sheet, name)| ImageQuadSource::AtlasSprite { sheet, name })
+    }
+}
+
+/// Composite d-pad artwork for footer / HUD navigation copy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DpadGlyph {
+    Vertical,
+    Horizontal,
+}
+
+/// Left / right analog stick artwork.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StickSide {
+    Left,
+    Right,
+}
+
+/// Left / right analog trigger artwork.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TriggerSide {
+    Left,
+    Right,
 }
 
 const XBOX_SHEET: &str = "textures/kenney_input-prompts/Xbox Series/xbox-series_sheet_double.png";
@@ -169,6 +208,73 @@ fn static_glyph_sprite(
     })
 }
 
+fn static_stick_sprite(style: GamepadStyle, side: StickSide) -> Option<(&'static str, &'static str)> {
+    use StickSide::{Left, Right};
+    Some(match (style, side) {
+        (GamepadStyle::PlayStation, Left) => (PLAYSTATION_SHEET, "playstation_stick_l"),
+        (GamepadStyle::PlayStation, Right) => (PLAYSTATION_SHEET, "playstation_stick_r"),
+        (GamepadStyle::Nintendo, Left) => (SWITCH_SHEET, "switch_stick_l"),
+        (GamepadStyle::Nintendo, Right) => (SWITCH_SHEET, "switch_stick_r"),
+        (GamepadStyle::NintendoSwitch2, Left) => (SWITCH2_SHEET, "switch_stick_l"),
+        (GamepadStyle::NintendoSwitch2, Right) => (SWITCH2_SHEET, "switch_stick_r"),
+        (GamepadStyle::SteamDeck, Left) => (STEAM_DECK_SHEET, "steamdeck_stick_l"),
+        (GamepadStyle::SteamDeck, Right) => (STEAM_DECK_SHEET, "steamdeck_stick_r"),
+        (GamepadStyle::SteamController, Left) => (STEAM_CONTROLLER_SHEET, "steam_stick_side_l"),
+        (GamepadStyle::SteamController, Right) => (STEAM_CONTROLLER_SHEET, "steam_stick"),
+        (GamepadStyle::Xbox | GamepadStyle::Generic, Left) => (XBOX_SHEET, "xbox_stick_l"),
+        (GamepadStyle::Xbox | GamepadStyle::Generic, Right) => (XBOX_SHEET, "xbox_stick_r"),
+    })
+}
+
+fn static_trigger_sprite(
+    style: GamepadStyle,
+    side: TriggerSide,
+) -> Option<(&'static str, &'static str)> {
+    use TriggerSide::{Left, Right};
+    Some(match (style, side) {
+        (GamepadStyle::PlayStation, Left) => (PLAYSTATION_SHEET, "playstation_trigger_l2"),
+        (GamepadStyle::PlayStation, Right) => (PLAYSTATION_SHEET, "playstation_trigger_r2"),
+        (GamepadStyle::Nintendo, Left) => (SWITCH_SHEET, "switch_button_zl"),
+        (GamepadStyle::Nintendo, Right) => (SWITCH_SHEET, "switch_button_zr"),
+        (GamepadStyle::NintendoSwitch2, Left) => (SWITCH2_SHEET, "switch_button_zl"),
+        (GamepadStyle::NintendoSwitch2, Right) => (SWITCH2_SHEET, "switch_button_zr"),
+        (GamepadStyle::SteamDeck, Left) => (STEAM_DECK_SHEET, "steamdeck_button_l2"),
+        (GamepadStyle::SteamDeck, Right) => (STEAM_DECK_SHEET, "steamdeck_button_r2"),
+        (GamepadStyle::SteamController, Left) => (STEAM_CONTROLLER_SHEET, "steam_lt"),
+        (GamepadStyle::SteamController, Right) => (STEAM_CONTROLLER_SHEET, "steam_rt"),
+        (GamepadStyle::Xbox | GamepadStyle::Generic, Left) => (XBOX_SHEET, "xbox_lt"),
+        (GamepadStyle::Xbox | GamepadStyle::Generic, Right) => (XBOX_SHEET, "xbox_rt"),
+    })
+}
+
+fn static_dpad_sprite(style: GamepadStyle, kind: DpadGlyph) -> Option<(&'static str, &'static str)> {
+    use DpadGlyph::{Horizontal, Vertical};
+    Some(match (style, kind) {
+        (GamepadStyle::PlayStation, Vertical) => {
+            (PLAYSTATION_SHEET, "playstation_dpad_vertical")
+        }
+        (GamepadStyle::PlayStation, Horizontal) => {
+            (PLAYSTATION_SHEET, "playstation_dpad_horizontal")
+        }
+        (GamepadStyle::Nintendo, Vertical) => (SWITCH_SHEET, "switch_dpad_vertical"),
+        (GamepadStyle::Nintendo, Horizontal) => (SWITCH_SHEET, "switch_dpad_horizontal"),
+        (GamepadStyle::NintendoSwitch2, Vertical) => (SWITCH2_SHEET, "switch_dpad_vertical"),
+        (GamepadStyle::NintendoSwitch2, Horizontal) => (SWITCH2_SHEET, "switch_dpad_horizontal"),
+        (GamepadStyle::SteamDeck, Vertical) => (STEAM_DECK_SHEET, "steamdeck_dpad_vertical"),
+        (GamepadStyle::SteamDeck, Horizontal) => (STEAM_DECK_SHEET, "steamdeck_dpad_horizontal"),
+        (GamepadStyle::SteamController, Vertical) => {
+            (STEAM_CONTROLLER_SHEET, "steam_dpad_vertical")
+        }
+        (GamepadStyle::SteamController, Horizontal) => {
+            (STEAM_CONTROLLER_SHEET, "steam_dpad_horizontal")
+        }
+        (GamepadStyle::Xbox | GamepadStyle::Generic, Vertical) => (XBOX_SHEET, "xbox_dpad_vertical"),
+        (GamepadStyle::Xbox | GamepadStyle::Generic, Horizontal) => {
+            (XBOX_SHEET, "xbox_dpad_horizontal")
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,6 +405,32 @@ mod tests {
                         );
                     }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn every_dpad_glyph_resolves_in_atlas() {
+        use DpadGlyph::{Horizontal, Vertical};
+        let styles = [
+            GamepadStyle::Xbox,
+            GamepadStyle::PlayStation,
+            GamepadStyle::Nintendo,
+            GamepadStyle::NintendoSwitch2,
+            GamepadStyle::SteamDeck,
+            GamepadStyle::SteamController,
+            GamepadStyle::Generic,
+        ];
+        for &style in &styles {
+            for &kind in &[Vertical, Horizontal] {
+                let Some((sheet, name)) = static_dpad_sprite(style, kind) else {
+                    continue;
+                };
+                let names = names_in(xml_for(sheet));
+                assert!(
+                    names.contains_key(name),
+                    "{style:?} / {kind:?} references '{name}' missing from {sheet}",
+                );
             }
         }
     }

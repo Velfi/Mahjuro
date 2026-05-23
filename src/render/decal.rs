@@ -1277,7 +1277,7 @@ pub fn rasterize_ofuda_decal(
         let chars_per_line = ((inner_w as f32 / approx_glyph_w).floor() as usize).max(8);
         let wrapped_rule = wrap_text(rule, chars_per_line);
         let wrapped_rule_lines: Vec<&str> = wrapped_rule.lines().collect();
-        let rule_px = fit_multiline_font_px(
+        let rule_px = fit_label_block_font_px(
             font,
             None,
             &wrapped_rule_lines,
@@ -1351,7 +1351,7 @@ fn wrap_text(text: &str, max_chars: usize) -> String {
 
 /// Pick the largest font size up to `target_px` that keeps a multi-line block
 /// within both the supplied width and height.
-fn fit_multiline_font_px(
+pub fn fit_label_block_font_px(
     font: &fontdue::Font,
     emoji_font: Option<&fontdue::Font>,
     lines: &[&str],
@@ -1405,6 +1405,46 @@ fn fit_multiline_font_px(
         }
     }
     lo
+}
+
+/// Largest font size ≤ `target_px` so a single line fits `width` × `height`.
+pub fn fit_single_line_font_px(
+    font: &fontdue::Font,
+    emoji_font: Option<&fontdue::Font>,
+    text: &str,
+    width: u32,
+    height: u32,
+    target_px: f32,
+    min_px: f32,
+) -> f32 {
+    fit_label_block_font_px(font, emoji_font, &[text], width, height, target_px, min_px)
+}
+
+/// Resolve a pinned or auto font size for UI labels before rasterization.
+pub fn resolve_label_font_px(
+    font: &fontdue::Font,
+    emoji_font: Option<&fontdue::Font>,
+    text: &str,
+    width: u32,
+    height: u32,
+    font_px: Option<f32>,
+    min_px: f32,
+) -> f32 {
+    let min_px = min_px.max(8.0);
+    let lines: Vec<&str> = text.split('\n').collect();
+    match font_px {
+        None => (height as f32 * 0.55)
+            .min(width as f32 * 1.5 / text.chars().count().max(1) as f32)
+            .max(min_px),
+        Some(target) => {
+            let target = target.max(min_px);
+            if lines.len() > 1 {
+                fit_label_block_font_px(font, emoji_font, &lines, width, height, target, min_px)
+            } else {
+                fit_single_line_font_px(font, emoji_font, text, width, height, target, min_px)
+            }
+        }
+    }
 }
 
 /// Paint a soft inner border + corner gem onto an RGBA8 decal to mark a tile
@@ -1764,6 +1804,19 @@ pub fn load_ui_font() -> Option<fontdue::Font> {
         .clone()
 }
 
+/// Xanh Mono for tabular Chronicle copy (run receipt columns, KPI values, chart ticks).
+pub fn load_mono_font() -> Option<fontdue::Font> {
+    static CACHE: std::sync::OnceLock<Option<fontdue::Font>> = std::sync::OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            let path = "fonts/Xanh_Mono/XanhMono-Regular.ttf";
+            crate::asset_path::get(path).and_then(|file| {
+                fontdue::Font::from_bytes(file.data.as_ref(), fontdue::FontSettings::default()).ok()
+            })
+        })
+        .clone()
+}
+
 /// Instrument Serif italic for UI (relic inspect flavor, etc.). Falls back to
 /// [`load_ui_font`] when the italic file is missing.
 pub fn load_ui_font_italic() -> Option<fontdue::Font> {
@@ -1887,12 +1940,7 @@ pub fn rasterize_label_styled_with_fallback(
     }
 
     // Single-line fast path retains the historical centring behaviour.
-    let font_px = match font_px_opt {
-        Some(px) => px.max(8.0),
-        None => (height as f32 * 0.55)
-            .min(width as f32 * 1.5 / text.chars().count().max(1) as f32)
-            .max(8.0),
-    };
+    let font_px = resolve_label_font_px(font, emoji_font, text, width, height, font_px_opt, 8.0);
 
     let chars: Vec<char> = text.chars().collect();
 
@@ -1985,12 +2033,24 @@ fn rasterize_block(
         align,
         underline,
     } = *params;
-    // For multi-line blocks the font size MUST be pinned — auto-shrink would
-    // produce different sizes per line which defeats the purpose. If the
-    // caller didn't pin one, derive it from height / line_count.
-    let font_px = font_px
+    // Pinned sizes shrink uniformly when the block would overflow; unpinned
+    // sizes derive from height / line_count (legacy).
+    let derived = font_px
         .unwrap_or_else(|| (height as f32 * 0.55 / lines.len() as f32).max(8.0))
         .max(8.0);
+    let font_px = if font_px.is_some() {
+        fit_label_block_font_px(
+            fonts.regular,
+            fonts.emoji,
+            lines,
+            width,
+            height,
+            derived,
+            8.0,
+        )
+    } else {
+        derived
+    };
 
     // Per-line layout: rasterise glyphs once, measure the widest, compute a
     // shared baseline step.

@@ -237,6 +237,7 @@ pub fn push_floating_relic_flavor_labels(
         rotation_quarters: 0,
         baseline_shift_px: 0.0,
         clip_rect: None,
+        mono: false,
     });
 }
 

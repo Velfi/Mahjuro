@@ -9,8 +9,8 @@
 //!    distance / FOV / [`InspectLightPreset`]).
 //! 3. **Pivot** — Build [`ItemInspectOrbitState`] with `target_world` in the same Z-up world space as
 //!    your [`Object3d`](crate::render::draw_cmd::Object3d) anchors.
-//! 4. **Apply view** — Call [`apply_inspect_view_to_frame`] (sets camera + point lights + a subject
-//!    [`SpotLight`](crate::render::wgpu_renderer::SpotLight); optionally shop storeroom lighting overrides).
+//! 4. **Apply view** — Lerp [`inspect_orbit_camera`] via [`tick_inspect_dolly`] / [`lerp_camera`], and
+//!    drive [`inspect_point_lights`] / [`inspect_subject_spotlight`] on [`UiFrame::scene_lighting`].
 //! 5. **Meshes** — Push `object3d` / `object3d_batch` for the subject; compose yaw/pitch with
 //!    [`prepend_inspect_orbit_subject_rotation`] on the hero mesh so it orbits under the fixed camera.
 //! 6. **Overlay** — Collection and shop item inspect use [`Scene::Showcase`](crate::scenes::Scene::Showcase)
@@ -27,7 +27,7 @@ use std::time::Instant;
 
 use glam::{Mat3, Mat4, Vec3};
 
-use crate::render::draw_cmd::{CameraParams, Object3d, UiFrame};
+use crate::render::draw_cmd::{CameraParams, Object3d};
 use crate::render::table_transform::{mat4_to_euler_xyz_rad, rot_euler_xyz_rad};
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{PointLight, SpotLight};
@@ -106,15 +106,6 @@ impl InspectRig {
             light_preset: InspectLightPreset::COLLECTION,
         }
     }
-}
-
-/// Environment-specific frame flags applied with inspect lighting.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum InspectFrameEnv {
-    /// Only set camera + `frame.scene_lighting` punctual (collection, isolated inspect).
-    Neutral,
-    /// Shop storeroom: disable GLB punctual and clear shop/spot light vectors (matches prior inspect).
-    ShopStoreroomInspect,
 }
 
 #[inline]
@@ -298,37 +289,6 @@ pub fn inspect_subject_spotlight(
         cos_inner,
         color: color::rgb(color::PARCHMENT),
         intensity: 15.0,
-    }
-}
-
-/// Sets inspect camera, synthetic point lights, and optional shop storeroom lighting overrides.
-pub fn apply_inspect_view_to_frame(
-    frame: &mut UiFrame,
-    window_w: f32,
-    window_h: f32,
-    orbit: &ItemInspectOrbitState,
-    rig: &InspectRig,
-    target_world: [f32; 3],
-    env: InspectFrameEnv,
-) {
-    let cam = inspect_orbit_camera(orbit, rig);
-    frame.camera_override = Some(cam);
-    frame.scene_lighting.set_smooth_points(inspect_point_lights(
-        window_w,
-        window_h,
-        &cam,
-        target_world,
-        rig.light_preset,
-    ));
-    frame.scene_lighting.spot_lights = vec![inspect_subject_spotlight(
-        window_w,
-        window_h,
-        &cam,
-        target_world,
-    )];
-
-    if env == InspectFrameEnv::ShopStoreroomInspect {
-        frame.scene_lighting.embedded_gltf_punctual = false;
     }
 }
 

@@ -48,7 +48,8 @@ use crate::render::cabinet_mesh::{build_cabinet_mesh, build_cabinet_rails_mesh};
 use crate::render::candle_mesh::{build_candle_wax_mesh, build_candle_wick_mesh};
 use crate::render::coin_mesh::build_coin_mesh;
 use crate::render::decal::{
-    LabelAlign, load_noto_emoji_font, load_ui_font, rasterize_label_styled_with_fallback,
+    LabelAlign, load_mono_font, load_noto_emoji_font, load_ui_font,
+    rasterize_label_styled_with_fallback,
     rasterize_tile_face_decal,
 };
 use crate::render::draw_cmd::{
@@ -216,6 +217,9 @@ pub struct WgpuRenderer {
     /// GPU primitive index of `sign_description_left` in `archive_env_primitives` (for culling).
     archive_sign_left_prim_idx: Option<usize>,
     archive_sign_right_prim_idx: Option<usize>,
+    /// All GPU primitive indices for `btn_page_left` / `btn_page_right` (multi-material meshes).
+    archive_page_left_prim_indices: Vec<usize>,
+    archive_page_right_prim_indices: Vec<usize>,
     /// Per-primitive shadow caster flags (parallel to `archive_env_primitives`).
     archive_env_shadow_caster_mask: Vec<bool>,
     /// Last-uploaded description decal (`archive_sign_decal_texture`); `u64::MAX` = cleared / none.
@@ -283,6 +287,7 @@ pub struct WgpuRenderer {
     ui_font: Option<fontdue::Font>,
     emoji_font: Option<fontdue::Font>,
     ui_font_italic: Option<fontdue::Font>,
+    mono_font: Option<fontdue::Font>,
     pub size: crate::physical_size::PhysicalSize,
     /// Last focused tile index — used to detect focus changes.
     last_focus: usize,

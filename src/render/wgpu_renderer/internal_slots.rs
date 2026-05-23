@@ -24,8 +24,9 @@ pub enum TextAlign {
 ///
 /// `font_px = None` falls back to the legacy auto-shrink behaviour where
 /// `rasterize_label` picks `min(rect.h * 0.55, rect.w * 1.5 / chars)`. Set
-/// `font_px = Some(px)` to pin the font size — this is what `push_text_block`
-/// uses to keep every wrapped line of a paragraph at a consistent size.
+/// `font_px = Some(px)` to pin the maximum font size — the rasterizer shrinks
+/// uniformly (down to the readable floor) when the string would overflow the
+/// rect's width or height.
 ///
 /// `text` may contain `\n` for explicit line breaks; the rasteriser
 /// stacks lines vertically and applies the chosen alignment to each line.
@@ -73,6 +74,8 @@ pub struct TextLabel {
     /// Optional clip rectangle in screen pixels `[x, y, w, h]`.
     /// When set, the renderer applies a scissor rect for this label draw.
     pub clip_rect: Option<[f32; 4]>,
+    /// Use [`crate::render::decal::load_mono_font`] (Xanh Mono) instead of Instrument Serif.
+    pub mono: bool,
 }
 
 impl Default for TextLabel {
@@ -93,6 +96,7 @@ impl Default for TextLabel {
             rotation_quarters: 0,
             baseline_shift_px: 0.0,
             clip_rect: None,
+            mono: false,
         }
     }
 }
@@ -104,6 +108,8 @@ impl Default for TextLabel {
 /// `&str` and avoid allocating a `String` to probe with.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub(crate) struct TextLabelShapeKey {
+    /// Xanh Mono tabular face instead of Instrument Serif.
+    pub mono: bool,
     /// Font kind: `false` = ui_font, `true` = emoji-fallback path.
     pub emoji_path: bool,
     /// Relic flavor span raster path (italic + faux-bold).

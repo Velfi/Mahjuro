@@ -7,7 +7,11 @@
 //!   from the pointer; catalog copy is CPU-rasterized into a shared decal atlas and composited in
 //!   `room_glb.wgsl` on those meshes (vertex `COLOR_0.a = 2` tag from `decode_env_primitive`).
 //! - `archive_spawn_item.001` … `archive_spawn_item.021` — 21 item anchors (3×7 window into the tab catalogue).
-//! - `section_buttons_left_bound` / `section_buttons_right_bound` — bounds volumes for tab plaques.
+//! - `btn_relics_tab`, `btn_zodiacs_tab`, `btn_bosses_tab`, `btn_talismans_tab`, `btn_chronicle_tab` —
+//!   section tabs (meshes draw; hit rects project mesh AABBs like shop `exit_btn`).
+//! - `btn_main_menu`, `btn_switch_save` — title-bar chrome.
+//! - `btn_page_left`, `btn_page_right` — cabinet page step (hidden at first/last page).
+//! - `section_buttons_left_bound` / `section_buttons_right_bound` — legacy bounds (collision only when present).
 //! - `archive_spawn_focused_item` — large featured / inspect anchor.
 //!
 //! **Description copy:** name/body text is **CPU-rasterized** in [`CollectionScene`](../../scenes/collection.rs)
@@ -37,33 +41,31 @@ pub const SECTION_BUTTONS_LEFT_BOUND: &str = "section_buttons_left_bound";
 pub const SECTION_BUTTONS_RIGHT_BOUND: &str = "section_buttons_right_bound";
 pub const ARCHIVE_SPAWN_FOCUSED_ITEM: &str = "archive_spawn_focused_item";
 
-/// Receiver shells excluded from the offline / live directional **caster** pass.
-///
-/// `main_fixture` and room envelope meshes fill the bake ortho frustum and self-occlude when
-/// written into the `.msh`; they still receive baked contact from [`archive_prim_casts_room_shadow`].
-const ARCHIVE_SHADOW_RECEIVER_ONLY: &[&str] = &[
-    "main_fixture",
-    "Floor",
-    "Ceiling",
-    "subtractor",
-    SECTION_BUTTONS_LEFT_BOUND,
-    SECTION_BUTTONS_RIGHT_BOUND,
-    SIGN_DESCRIPTION_LEFT,
-    SIGN_DESCRIPTION_RIGHT,
+pub const BTN_RELICS_TAB: &str = "btn_relics_tab";
+pub const BTN_ZODIACS_TAB: &str = "btn_zodiacs_tab";
+pub const BTN_BOSSES_TAB: &str = "btn_bosses_tab";
+pub const BTN_TALISMANS_TAB: &str = "btn_talismans_tab";
+pub const BTN_CHRONICLE_TAB: &str = "btn_chronicle_tab";
+pub const BTN_MAIN_MENU: &str = "btn_main_menu";
+pub const BTN_SWITCH_SAVE: &str = "btn_switch_save";
+pub const BTN_PAGE_LEFT: &str = "btn_page_left";
+pub const BTN_PAGE_RIGHT: &str = "btn_page_right";
+
+/// Tab button glTF nodes in [`crate::scenes::collection::TABS`] order (Relics → Talismans → Yaku → Bosses → Chronicle).
+pub const ARCHIVE_TAB_BUTTON_NODES: [&str; 5] = [
+    BTN_RELICS_TAB,
+    BTN_TALISMANS_TAB,
+    BTN_ZODIACS_TAB,
+    BTN_BOSSES_TAB,
+    BTN_CHRONICLE_TAB,
 ];
 
 /// Whether this archive room primitive casts into the directional shadow map (live or bake).
 ///
-/// Only the cubby lattice casts; receiver shells are listed in
-/// [`ARCHIVE_SHADOW_RECEIVER_ONLY`].
+/// Archive never casts room GLB into the directional map — contact is punctual-only.
 #[inline]
-pub fn archive_prim_casts_room_shadow(node_name: Option<&str>) -> bool {
-    match node_name {
-        None => false,
-        Some(name) if ARCHIVE_SHADOW_RECEIVER_ONLY.contains(&name) => false,
-        Some(name) if name.starts_with("Cubby") => true,
-        Some(_) => false,
-    }
+pub fn archive_prim_casts_room_shadow(_node_name: Option<&str>) -> bool {
+    false
 }
 
 /// Fallback host extents for [`crate::render::decal::decal_dimensions`] when the archive `.glb`
@@ -180,15 +182,10 @@ fn ensure_archive_glb_loaded() {
             }
         }
     } else {
-        log::debug!("archive.glb not embedded — Archive uses procedural layout");
+        log::debug!("archive.glb not embedded — Archive room unavailable");
         None
     };
     *w = ArchiveGlbCache::Ready(ready.map(Box::new));
-}
-
-/// `true` when `archive.glb` loaded and has drawable environment geometry.
-pub fn archive_room_draw_ready() -> bool {
-    with_archive_glb_cpu(|opt| opt.is_some_and(|c| !c.environment_primitives.is_empty()))
 }
 
 pub fn with_archive_glb_cpu<R>(f: impl FnOnce(Option<&RoomGlbCpu>) -> R) -> R {
@@ -217,15 +214,33 @@ fn is_archive_spawn_item_name(name: &str) -> bool {
 }
 
 #[inline]
-fn is_archive_marker_name(name: &str) -> bool {
+fn is_archive_button_node(name: &str) -> bool {
     matches!(
         name,
-        SIGN_DESCRIPTION_LEFT
-            | SIGN_DESCRIPTION_RIGHT
-            | SECTION_BUTTONS_LEFT_BOUND
-            | SECTION_BUTTONS_RIGHT_BOUND
-            | ARCHIVE_SPAWN_FOCUSED_ITEM
-    ) || is_archive_spawn_item_name(name)
+        BTN_RELICS_TAB
+            | BTN_ZODIACS_TAB
+            | BTN_BOSSES_TAB
+            | BTN_TALISMANS_TAB
+            | BTN_CHRONICLE_TAB
+            |         BTN_MAIN_MENU
+            | BTN_SWITCH_SAVE
+            | BTN_PAGE_LEFT
+            | BTN_PAGE_RIGHT
+    )
+}
+
+#[inline]
+fn is_archive_marker_name(name: &str) -> bool {
+    is_archive_button_node(name)
+        || matches!(
+            name,
+            SIGN_DESCRIPTION_LEFT
+                | SIGN_DESCRIPTION_RIGHT
+                | SECTION_BUTTONS_LEFT_BOUND
+                | SECTION_BUTTONS_RIGHT_BOUND
+                | ARCHIVE_SPAWN_FOCUSED_ITEM
+        )
+        || is_archive_spawn_item_name(name)
 }
 
 #[derive(Copy, Clone)]
@@ -237,7 +252,9 @@ impl RoomEnvWalkHooks for ArchiveRoomWalkHooks {
     }
 
     fn mesh_policy(&self, name: &str) -> RoomMeshPolicy {
-        if matches!(name, SIGN_DESCRIPTION_LEFT | SIGN_DESCRIPTION_RIGHT) {
+        if matches!(name, SIGN_DESCRIPTION_LEFT | SIGN_DESCRIPTION_RIGHT)
+            || is_archive_button_node(name)
+        {
             RoomMeshPolicy::EnvironmentDraw
         } else if matches!(
             name,
@@ -263,7 +280,7 @@ pub fn load_archive_glb_from_bytes(data: &[u8]) -> anyhow::Result<RoomGlbCpu> {
         "archive.glb has no scenes",
         &ArchiveRoomWalkHooks,
     )?;
-    // Keep collision soups for section bounds (screen-rect projection); spawn empties contribute none.
+    // Section bounds (when present) keep collision only; tab/chrome buttons draw like shop controls.
     Ok(cpu)
 }
 
@@ -327,11 +344,9 @@ pub fn archive_camera_base(w: f32, h: f32, env_h: f32) -> CameraParams {
         if let Some(cpu) = opt {
             cam = room_glb::room_camera_with_room_clip_planes(cam, h, env_h, cpu);
             // `room_camera_fit_clip_planes` sets `clip_near` near the room AABB entry along the
-            // look ray. [`CollectionScene`] pins camera-facing wood chrome (Back / Switch save)
-            // between the eye and the shell (`collection_chrome_tablet_plane_z`), so a fitted
-            // near plane vertex-clips those lit meshes (and they read as missing buttons). Keep
-            // the tuned `clip_far` for depth precision; use the default near from
-            // [`CameraParams::clip_planes`] instead (`clip_near: None` → 1 world unit at this scale).
+            // look ray, which can clip nearby title-bar `btn_*` meshes. Keep the tuned `clip_far`
+            // for depth precision; use the default near from [`CameraParams::clip_planes`]
+            // instead (`clip_near: None` → 1 world unit at this scale).
             cam.clip_near = None;
         }
         cam
@@ -455,13 +470,34 @@ pub fn archive_embedded_spot_lights_runtime(
 mod tests {
     use super::*;
 
+    /// Whether this archive mesh skips directional shadows (matches decode in [`room_env_gltf`]:
+    /// every shell primitive except description boards).
+    fn archive_env_skips_directional_room_shadow(node_name: &str) -> bool {
+        !matches!(node_name, SIGN_DESCRIPTION_LEFT | SIGN_DESCRIPTION_RIGHT)
+    }
+
+    #[test]
+    fn archive_tab_button_nodes_have_marker_bounds() {
+        with_archive_glb_cpu(|opt| {
+            let cpu = opt.expect("archive.glb should load in tests");
+            for node in ARCHIVE_TAB_BUTTON_NODES {
+                assert!(
+                    cpu.marker_mesh_bounds_doc_for(node).is_some()
+                        || cpu.markers.contains_key(node),
+                    "missing marker data for {node}"
+                );
+            }
+        });
+    }
+
     #[test]
     fn archive_shadow_caster_receiver_split() {
         assert!(!archive_prim_casts_room_shadow(Some("main_fixture")));
         assert!(!archive_prim_casts_room_shadow(Some(SIGN_DESCRIPTION_LEFT)));
-        assert!(archive_prim_casts_room_shadow(Some("Cubby")));
-        assert!(archive_prim_casts_room_shadow(Some("Cubby.001")));
-        assert!(!archive_prim_casts_room_shadow(Some("Wall")));
-        assert!(!archive_prim_casts_room_shadow(Some("Floor")));
+        assert!(!archive_prim_casts_room_shadow(Some("Cubby")));
+        assert!(archive_env_skips_directional_room_shadow("text_scene_title"));
+        assert!(archive_env_skips_directional_room_shadow(BTN_PAGE_RIGHT));
+        assert!(archive_env_skips_directional_room_shadow("main_fixture"));
+        assert!(!archive_env_skips_directional_room_shadow(SIGN_DESCRIPTION_LEFT));
     }
 }

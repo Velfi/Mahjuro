@@ -858,12 +858,12 @@ fn fs_main(
     let is_conductor = (is_metal || is_brass);
     // Talisman tablets: beetle chitin + legacy gem kinds (material viewer).
     let is_talisman  = (is_chitin || is_jade || is_moonstone || is_pearl || is_goldnug || is_poly);
-    // Chitin: flat ±Z faces get heightmap warp; thin rim quads use stable shading.
-    let chitin_flat_face = is_chitin && abs(abs(in.local_pos.z) - 0.09) < 0.02;
-    let chitin_rim_face = is_chitin && !chitin_flat_face;
+    // Chitin: classify by local normal — rim verts share |z| with caps but face outward.
+    let chitin_front_face = is_chitin && in.local_n.z > 0.9;
+    let chitin_rim_face = is_chitin && abs(in.local_n.z) <= 0.9;
 
-    // Talisman tablets: `relief_tex` carries the octagon mask (white = tablet).
-    if (is_chitin) {
+    // Octagon mask on the carved front cap only (not rim planes or back).
+    if (chitin_front_face) {
         let tablet_mask = textureSampleLevel(relief_tex, albedo_samp, in.uv, 0.0).r;
         if (tablet_mask < (8.0 / 255.0)) {
             discard;
@@ -1585,14 +1585,10 @@ fn fs_main(
     }
 
     // ── Talisman heightmap perturbation ──────────────────────────────────
-    // Same finite-difference approach as metal, but uses screen-space
-    // derivatives to build the tangent frame so it works regardless of
-    // the tablet's orientation (upright on the wall or laid flat in the
-    // tray). Only the flat front/back faces are perturbed — detected via
-    // local_pos.z proximity to the half-thickness (±0.09).
+    // Relief is authored for the front cap (+local Z normal) only.
+    let talisman_front_cap = is_talisman && in.local_n.z > 0.9;
     if (is_talisman) {
-        let face_flat = abs(abs(in.local_pos.z) - 0.09);
-        if (face_flat < 0.02) {
+        if (talisman_front_cap) {
             let dim = vec2<f32>(textureDimensions(albedo_tex, 0));
             let texel = vec2<f32>(1.0 / max(dim.x, 1.0), 1.0 / max(dim.y, 1.0));
             let h_l = textureSampleLevel(albedo_tex, albedo_samp, in.uv + vec2<f32>(-texel.x, 0.0), 0.0).r;
@@ -1618,10 +1614,10 @@ fn fs_main(
                 dhdv = dhdv + (h_y2 - h_c2) * pit_bump;
             }
             if (is_chitin) {
-                // Model-space tangent frame on ±Z faces — avoids dpdx flicker when
+                // Model-space tangent frame on the front cap — avoids dpdx flicker when
                 // the tablet rotates (screen-space tangents spin on flat surfaces).
-                let z_face = select(-1.0, 1.0, in.local_pos.z > 0.0);
-                let n_local = normalize(vec3(-dhdu, -dhdv, z_face));
+                // +dhdv: heightmap v grows toward −local Y (see `talisman_face_uv`).
+                let n_local = normalize(vec3(-dhdu, dhdv, 1.0));
                 n = normalize((mesh.model * vec4<f32>(n_local, 0.0)).xyz);
             } else {
                 // Screen-space derivative tangent basis: works for any
@@ -1795,9 +1791,8 @@ fn fs_main(
         // Silhouette edge: camera sees through a thin slice of jade.
         let edge = 1.0 - max(dot(n, view_dir), 0.0);
         let edge_thin = pow(edge, 2.5);
-        // Rim faces (local_pos.z near 0, between front/back) are
-        // geometrically thinner cross-sections of the tablet.
-        let rim_thin = 1.0 - smoothstep(0.0, 0.06, abs(in.local_pos.z));
+        // Rim planes are the thin edge cross-section of the tablet.
+        let rim_thin = select(0.0, 1.0, is_talisman && abs(in.local_n.z) <= 0.9);
         back_thinness = clamp(edge_thin * 0.8 + rim_thin * 0.4, 0.0, 1.2);
     }
 
@@ -2100,7 +2095,7 @@ fn fs_main(
                     + broad * select(0.24, 0.10, chitin_rim_face);
                 sheen_acc = sheen_acc + lc * intensity * atten * cand_vis
                     * lobe * fresnel * themed_holo(holo_phase + 1.8, accent);
-                if (!chitin_rim_face) {
+                if (chitin_front_face) {
                     sheen_acc = sheen_acc + lc * intensity * atten * cand_vis
                         * broad * 0.18 * themed_holo(holo_phase - 0.9, accent);
                 }
@@ -2441,7 +2436,7 @@ fn fs_main(
                 chitin_rim_face,
             );
             albedo = mix(albedo, themed_holo(phase + 2.1, accent) * 0.85, face_mix);
-            if (!chitin_rim_face) {
+            if (chitin_front_face) {
                 albedo = mix(albedo, accent * 0.45 + holo * 0.55, 0.18);
             }
         } else if (is_jade) {

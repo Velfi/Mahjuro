@@ -1,7 +1,7 @@
 use super::view::snap_focus_after_shop_purchase;
 use super::*;
 use crate::scenes::{
-    MeldGuideScene, OverlayRequest, Scene, ShopInspectPresenter, ShowcasePresenter, ShowcaseScene,
+    GuideScene, OverlayRequest, Scene, ShopInspectPresenter, ShowcasePresenter, ShowcaseScene,
     YakuJournalScene, options,
 };
 
@@ -244,7 +244,7 @@ impl ShopScene {
         self.relic_glow_starts
             .retain(|_, start| now.saturating_duration_since(*start) < RELIC_GLOW_LIFETIME);
 
-        // Help action opens the Meld Guide as an overlay.
+        // Help action opens the Guide as an overlay.
         let mut open_guide = false;
         for &cid in ctx.button_clicks {
             if cid == SHOP_HELP_BADGE_ID {
@@ -257,18 +257,18 @@ impl ShopScene {
             }
         }
         if open_guide {
-            *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::MeldGuide(
-                MeldGuideScene::new(),
+            *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::Guide(
+                GuideScene::new(),
             ))));
             return None;
         }
 
         // Pause menu handling.
         if let Some(t) = self.pause_menu.handle(&mut ctx) {
-            // Drain a meld guide request from the pause menu.
-            if self.pause_menu.take_meld_guide_request() {
-                *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::MeldGuide(
-                    MeldGuideScene::new(),
+            // Drain a guide request from the pause menu.
+            if self.pause_menu.take_guide_request() {
+                *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::Guide(
+                    GuideScene::new(),
                 ))));
                 return None;
             }

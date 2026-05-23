@@ -4,18 +4,178 @@ use crate::audio::SfxId;
 use crate::game::event_bus::GameEvent;
 use crate::persistence;
 use crate::render::theme::{color, typography};
-use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
-use crate::ui::input::UiAction;
+use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
+use crate::ui::controller_hints::{HintKey, HintRow, HintStyle, push_inline_hint_rows};
+use crate::ui::input::{InputMode, UiAction};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use crate::render::draw_cmd::UiFrame;
 
 use super::{
-    DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx, scene_collection_archive,
-    scene_options_menu,
+    DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx, archive_career,
+    scene_collection_archive, scene_options_menu,
 };
 
 const PROFILE_COUNT: usize = 3;
+/// Max stat lines in a populated column (scores, collection counts, saved run).
+const MAX_BODY_LINES: usize = 9;
+
+/// Shared profile-column geometry and typography — one source for hit-test and draw.
+#[derive(Clone, Copy, Debug)]
+struct ProfileCardLayout {
+    scale: f32,
+    title_h: f32,
+    title_y: f32,
+    card_w: f32,
+    card_h: f32,
+    card_gap: f32,
+    start_x: f32,
+    card_y: f32,
+    pad_x: f32,
+    pad_y: f32,
+    header_font: f32,
+    body_font: f32,
+    header_line_h: f32,
+    body_line_h: f32,
+}
+
+impl ProfileCardLayout {
+    fn card_content_h(pad_y: f32, header_line_h: f32, body_line_h: f32, body_lines: usize) -> f32 {
+        let body_gap = pad_y * 0.3;
+        let header_gap = pad_y * 0.5;
+        pad_y
+            + header_line_h
+            + header_gap
+            + body_lines as f32 * body_line_h
+            + body_lines.saturating_sub(1) as f32 * body_gap
+            + pad_y
+    }
+
+    fn compute(w: f32, h: f32) -> Self {
+        let scale = (w.min(h)) / 600.0;
+        let hint_style = HintStyle::profile_footer(h);
+        let footer_reserve = hint_style.line_h + h * 0.02;
+        let title_font = typography::size(typography::H20, h);
+        let title_h = title_font * 1.35;
+        let title_y = h * 0.06;
+        let margin_x = w * 0.04;
+        let card_gap = (20.0 * scale).max(12.0);
+        let band_w = w - margin_x * 2.0;
+        let card_w =
+            ((band_w - card_gap * (PROFILE_COUNT - 1) as f32) / PROFILE_COUNT as f32).max(80.0);
+        let pad_x = 14.0 * scale;
+        let pad_y = 12.0 * scale;
+
+        let avail_h = h - title_y - title_h - footer_reserve - h * 0.03;
+        let card_h = avail_h.max(100.0);
+        let card_y = title_y + title_h + h * 0.02;
+        let start_x = margin_x;
+
+        let mut header_font = typography::size(typography::H28, h);
+        let mut body_font = typography::size(typography::H36, h);
+        let mut header_line_h = header_font * 1.35;
+        let mut body_line_h = body_font * 1.35;
+        let mut min_content_h =
+            Self::card_content_h(pad_y, header_line_h, body_line_h, MAX_BODY_LINES);
+
+        let body_floor = typography::size(typography::H45, h);
+        while min_content_h > card_h && body_font > body_floor + 0.5 {
+            body_font = typography::tier_at_most(body_font - 1.0, h);
+            body_line_h = body_font * 1.35;
+            min_content_h =
+                Self::card_content_h(pad_y, header_line_h, body_line_h, MAX_BODY_LINES);
+        }
+
+        let header_floor = typography::size(typography::H36, h);
+        while min_content_h > card_h && header_font > header_floor + 0.5 {
+            header_font = typography::tier_at_most(header_font - 1.0, h);
+            header_line_h = header_font * 1.35;
+            min_content_h =
+                Self::card_content_h(pad_y, header_line_h, body_line_h, MAX_BODY_LINES);
+        }
+
+        Self {
+            scale,
+            title_h,
+            title_y,
+            card_w,
+            card_h,
+            card_gap,
+            start_x,
+            card_y,
+            pad_x,
+            pad_y,
+            header_font,
+            body_font,
+            header_line_h,
+            body_line_h,
+        }
+    }
+
+    fn card_rects(self) -> Vec<[f32; 4]> {
+        (0..PROFILE_COUNT)
+            .map(|i| {
+                let card_x = self.start_x + i as f32 * (self.card_w + self.card_gap);
+                [card_x, self.card_y, self.card_w, self.card_h]
+            })
+            .collect()
+    }
+}
+
+fn profile_stat_lines(summary: &persistence::ProfileSummary) -> Vec<(String, [f32; 4])> {
+    let mut lines = Vec::new();
+    lines.push((
+        format!("Level {}", summary.level),
+        color::STONE,
+    ));
+    lines.push((
+        format!(
+            "{} run{} completed",
+            summary.runs_completed,
+            if summary.runs_completed == 1 { "" } else { "s" }
+        ),
+        color::STONE,
+    ));
+    lines.push((
+        format!(
+            "{} victor{}",
+            summary.victories,
+            if summary.victories == 1 { "y" } else { "ies" }
+        ),
+        color::STONE,
+    ));
+    lines.push((
+        format!("Best: {}", archive_career::format_score(summary.high_score)),
+        color::STONE,
+    ));
+    if summary.second_high_score > 0 {
+        lines.push((
+            format!("2nd: {}", archive_career::format_score(summary.second_high_score)),
+            color::STONE,
+        ));
+    }
+    if summary.third_high_score > 0 {
+        lines.push((
+            format!("3rd: {}", archive_career::format_score(summary.third_high_score)),
+            color::STONE,
+        ));
+    }
+    lines.push((
+        format!("{} relic{} unlocked", summary.relics_unlocked, if summary.relics_unlocked == 1 { "" } else { "s" }),
+        color::STONE,
+    ));
+    lines.push((
+        format!(
+            "{} yaku discovered",
+            summary.yaku_discovered,
+        ),
+        color::STONE,
+    ));
+    if summary.has_saved_run {
+        lines.push(("Saved game in progress".into(), color::JADE));
+    }
+    lines
+}
 
 /// Where [`ProfileSelectScene`] returns after pick / cancel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,27 +241,7 @@ impl ProfileSelectScene {
     /// Single source of truth for profile card layout — used by both
     /// `update()` (hit-test) and `draw()` (rendering + button registration).
     fn card_rects(window_w: f32, window_h: f32) -> Vec<[f32; 4]> {
-        let w = window_w;
-        let h = window_h;
-        let scale = (w.min(h)) / 600.0;
-        let title_h = (48.0 * scale).max(28.0);
-        let title_y = h * 0.06;
-        let card_w = (260.0 * scale).min(w * 0.8);
-        let card_gap = (16.0 * scale).max(8.0);
-        // Cap card height so all profiles fit on screen.
-        let avail_h = h * 0.88 - title_y - title_h;
-        let card_h = (160.0 * scale)
-            .max(100.0)
-            .min((avail_h - (PROFILE_COUNT - 1) as f32 * card_gap) / PROFILE_COUNT as f32);
-        let total_h = PROFILE_COUNT as f32 * card_h + (PROFILE_COUNT - 1) as f32 * card_gap;
-        let start_y = title_y + title_h + (h - title_y - title_h - total_h) * 0.35;
-        let card_x = (w - card_w) * 0.5;
-        (0..PROFILE_COUNT)
-            .map(|i| {
-                let card_y = start_y + i as f32 * (card_h + card_gap);
-                [card_x, card_y, card_w, card_h]
-            })
-            .collect()
+        ProfileCardLayout::compute(window_w, window_h).card_rects()
     }
 
     fn flat_items(window_w: f32, window_h: f32) -> Vec<FlatItem<PickProfile>> {
@@ -156,7 +296,10 @@ impl SceneBehavior for ProfileSelectScene {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
                 return Some(self.pop_return_scene());
             }
-            if matches!(a, UiAction::Delete) {
+            let delete_pressed = matches!(a, UiAction::Delete)
+                || (matches!(a, UiAction::WestFacePress)
+                    && ctx.input_mode == InputMode::Controller);
+            if delete_pressed {
                 let idx = self.cursor();
                 if persistence::profile_exists(idx) {
                     self.confirm_delete = ConfirmDelete::Pending(idx);
@@ -176,7 +319,8 @@ impl SceneBehavior for ProfileSelectScene {
     fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
-        let scale = (w.min(h)) / 600.0;
+        let layout = ProfileCardLayout::compute(w, h);
+        let scale = layout.scale;
 
         let mut frame = UiFrame::new();
         let mut buttons = Vec::new();
@@ -190,15 +334,13 @@ impl SceneBehavior for ProfileSelectScene {
         let showing_dialog = self.confirm_delete != ConfirmDelete::None;
 
         // Title.
-        let title_h = (48.0 * scale).max(28.0);
-        let title_y = h * 0.06;
         if !showing_dialog {
             let title = match self.return_to {
                 ProfileSelectReturn::Options => "Save & profiles",
                 ProfileSelectReturn::Archive => "Switch save",
             };
             frame.text(TextLabel {
-                rect: [0.0, title_y, w, title_h],
+                rect: [0.0, layout.title_y, w, layout.title_h],
                 text: title.into(),
                 color: color::CHAMPAGNE,
                 font_px: Some(typography::size(typography::H20, h)),
@@ -208,7 +350,7 @@ impl SceneBehavior for ProfileSelectScene {
 
         // Profile cards — single source of truth via card_rects().
         let summaries = persistence::all_profile_summaries();
-        let card_rects = Self::card_rects(w, h);
+        let card_rects = layout.card_rects();
         let cursor = self.cursor();
 
         for (i, summary) in summaries.iter().enumerate() {
@@ -229,17 +371,17 @@ impl SceneBehavior for ProfileSelectScene {
                     user: 0,
                 });
 
-                // Active indicator stripe on left edge.
+                // Active indicator stripe on top edge.
                 if is_active {
-                    let stripe_w = 4.0 * scale;
+                    let stripe_h = 4.0 * scale;
                     frame.quad(GpuInstance {
-                        rect: [card_x, card_y, stripe_w, card_h],
+                        rect: [card_x, card_y, card_w, stripe_h],
                         color: color::JADE,
                         user: 0,
                     });
                 }
 
-                // Selection highlight border (top and bottom gold lines).
+                // Selection highlight border.
                 if is_focused {
                     let border = 2.0 * scale;
                     frame.quad(GpuInstance {
@@ -252,6 +394,16 @@ impl SceneBehavior for ProfileSelectScene {
                         color: color::GOLD,
                         user: 0,
                     });
+                    frame.quad(GpuInstance {
+                        rect: [card_x, card_y, border, card_h],
+                        color: color::GOLD,
+                        user: 0,
+                    });
+                    frame.quad(GpuInstance {
+                        rect: [card_x + card_w - border, card_y, border, card_h],
+                        color: color::GOLD,
+                        user: 0,
+                    });
                 }
             }
 
@@ -261,18 +413,26 @@ impl SceneBehavior for ProfileSelectScene {
                 continue;
             }
 
-            let pad_x = 16.0 * scale;
-            let pad_y = 10.0 * scale;
-            let line_h = (22.0 * scale).max(14.0);
-            let small_h = (17.0 * scale).max(11.0);
+            let pad_x = layout.pad_x;
+            let pad_y = layout.pad_y;
+            let header_font = layout.header_font;
+            let body_font = layout.body_font;
+            let header_line_h = layout.header_line_h;
+            let body_line_h = layout.body_line_h;
 
             // Profile header line.
             let header_text = if is_active {
-                format!("Profile {}  (active)", i + 1)
+                format!("Profile {}\n(active)", i + 1)
             } else {
                 format!("Profile {}", i + 1)
             };
-            let header_rect = [card_x + pad_x, card_y + pad_y, card_w - pad_x * 2.0, line_h];
+            let header_top = card_y + pad_y + if is_active { 4.0 * scale } else { 0.0 };
+            let header_rect = [
+                card_x + pad_x,
+                header_top,
+                card_w - pad_x * 2.0,
+                header_line_h * if is_active { 2.0 } else { 1.0 },
+            ];
             frame.text(TextLabel {
                 rect: header_rect,
                 text: header_text,
@@ -281,57 +441,44 @@ impl SceneBehavior for ProfileSelectScene {
                 } else {
                     color::PARCHMENT
                 },
+                font_px: Some(header_font),
+                align: TextAlign::Center,
                 ..Default::default()
             });
 
             if summary.exists {
                 let stat_x = card_x + pad_x;
                 let stat_w = card_w - pad_x * 2.0;
-                let line1_y = card_y + pad_y + line_h + pad_y * 0.5;
-                let stat_color = color::STONE;
+                let mut line_y = header_top
+                    + header_line_h * if is_active { 2.0 } else { 1.0 }
+                    + pad_y * 0.5;
 
-                frame.text(TextLabel {
-                    rect: [stat_x, line1_y, stat_w, small_h],
-                    text: format!("Level {}", summary.level),
-                    color: stat_color,
-                    ..Default::default()
-                });
-
-                let line2_y = line1_y + small_h + pad_y * 0.3;
-                frame.text(TextLabel {
-                    rect: [stat_x, line2_y, stat_w, small_h],
-                    text: format!(
-                        "{} run{} completed",
-                        summary.runs_completed,
-                        if summary.runs_completed == 1 { "" } else { "s" }
-                    ),
-                    color: stat_color,
-                    ..Default::default()
-                });
-
-                let line3_y = line2_y + small_h + pad_y * 0.3;
-                frame.text(TextLabel {
-                    rect: [stat_x, line3_y, stat_w, small_h],
-                    text: format!("Best score: {}", summary.high_score),
-                    color: stat_color,
-                    ..Default::default()
-                });
-
-                if summary.has_saved_run {
-                    let line4_y = line3_y + small_h + pad_y * 0.3;
+                for (text, stat_color) in profile_stat_lines(summary) {
                     frame.text(TextLabel {
-                        rect: [stat_x, line4_y, stat_w, small_h],
-                        text: "Saved game in progress".into(),
-                        color: color::JADE,
+                        rect: [stat_x, line_y, stat_w, body_line_h],
+                        text,
+                        color: stat_color,
+                        font_px: Some(body_font),
+                        align: TextAlign::Center,
                         ..Default::default()
                     });
+                    line_y += body_line_h + pad_y * 0.3;
                 }
             } else {
-                let empty_y = card_y + pad_y + line_h + pad_y;
+                let empty_y = header_top
+                    + header_line_h
+                    + pad_y;
                 frame.text(TextLabel {
-                    rect: [card_x + pad_x, empty_y, card_w - pad_x * 2.0, small_h],
-                    text: "Empty — start a new adventure".into(),
+                    rect: [
+                        card_x + pad_x,
+                        empty_y,
+                        card_w - pad_x * 2.0,
+                        body_line_h * 2.0,
+                    ],
+                    text: "Empty slot\nStart a new adventure".into(),
                     color: color::UMBER,
+                    font_px: Some(body_font),
+                    align: TextAlign::Center,
                     ..Default::default()
                 });
             }
@@ -374,48 +521,104 @@ impl SceneBehavior for ProfileSelectScene {
                 user: 0,
             });
 
-            let msg_h = (24.0 * scale).max(16.0);
+            let dialog_title_font = typography::size(typography::H24, h);
+            let dialog_body_font = typography::size(typography::H36, h);
+            let msg_h = dialog_title_font * 1.35;
             let msg_y = dialog_y + dialog_h * 0.25;
             frame.text(TextLabel {
                 rect: [dialog_x, msg_y, dialog_w, msg_h],
                 text: format!("Delete Profile {}?", del_idx + 1),
                 color: color::CHAMPAGNE,
+                font_px: Some(dialog_title_font),
                 ..Default::default()
             });
 
-            let hint_h = (16.0 * scale).max(11.0);
+            let sub_h = dialog_body_font * 1.35;
             let hint_y = dialog_y + dialog_h * 0.55;
             frame.text(TextLabel {
-                rect: [dialog_x, hint_y, dialog_w, hint_h],
+                rect: [dialog_x, hint_y, dialog_w, sub_h],
                 text: "All progress will be lost.".into(),
                 color: color::STONE,
+                font_px: Some(dialog_body_font),
                 ..Default::default()
             });
 
-            let btn_h = (16.0 * scale).max(11.0);
+            let hint_style = HintStyle::profile_footer(h);
+            let btn_h = hint_style.line_h;
             let btn_y = dialog_y + dialog_h * 0.78;
-            frame.text(TextLabel {
-                rect: [dialog_x, btn_y, dialog_w, btn_h],
-                text: "Enter to confirm  |  Esc to cancel".into(),
-                color: color::UMBER,
-                ..Default::default()
-            });
+            let dialog_footer = HintRow::new()
+                .bind(
+                    "confirm",
+                    vec![HintKey::for_input(
+                        ctx.input_mode,
+                        UiAction::Confirm,
+                        "keyboard_enter",
+                    )],
+                )
+                .sep()
+                .bind(
+                    "cancel",
+                    vec![HintKey::for_input(
+                        ctx.input_mode,
+                        UiAction::Cancel,
+                        "keyboard_escape",
+                    )],
+                )
+                .into_segments();
+            let dialog_rect = [dialog_x, btn_y, dialog_w, btn_h];
+            push_inline_hint_rows(
+                &mut frame,
+                &ctx,
+                &[dialog_rect],
+                &[dialog_footer],
+                hint_style,
+            );
         }
 
-        // Hint text at bottom.
-        let hint_h = (18.0 * scale).max(12.0);
-        let hint_y = h - hint_h - (12.0 * scale);
-        let hint_text = if self.confirm_delete != ConfirmDelete::None {
-            ""
-        } else {
-            "Up/Down to browse  |  Enter to select  |  X to delete  |  Esc to go back"
-        };
-        frame.text(TextLabel {
-            rect: [0.0, hint_y, w, hint_h],
-            text: hint_text.into(),
-            color: color::UMBER,
-            ..Default::default()
-        });
+        // Hint icons at bottom.
+        if self.confirm_delete == ConfirmDelete::None {
+            let hint_style = HintStyle::profile_footer(h);
+            let hint_h = hint_style.line_h;
+            let hint_y = h - hint_h - h * 0.02;
+            let bottom_footer = HintRow::new()
+                .bind("browse", vec![HintKey::dpad_horizontal()])
+                .sep()
+                .bind(
+                    "select",
+                    vec![HintKey::for_input(
+                        ctx.input_mode,
+                        UiAction::Confirm,
+                        "keyboard_enter",
+                    )],
+                )
+                .sep()
+                .bind(
+                    "delete",
+                    vec![HintKey::for_input(
+                        ctx.input_mode,
+                        UiAction::WestFacePress,
+                        "keyboard_x",
+                    )],
+                )
+                .sep()
+                .bind(
+                    "back",
+                    vec![HintKey::for_input(
+                        ctx.input_mode,
+                        UiAction::Cancel,
+                        "keyboard_escape",
+                    )],
+                )
+                .into_segments();
+            let bottom_rect = [0.0, hint_y, w, hint_h];
+            push_inline_hint_rows(
+                &mut frame,
+                &ctx,
+                &[bottom_rect],
+                &[bottom_footer],
+                hint_style,
+            );
+        }
 
         frame.buttons = buttons;
         frame.window_title = "Mahjuro — Select Profile".into();

@@ -128,7 +128,7 @@ struct App {
     /// overlays pushed mid-transition are not clobbered.
     pending_scene_destination: PendingSceneDestination,
     /// Pushdown stack for overlay scenes (e.g. zodiac/pack celebrations,
-    /// meld guide from in-game).
+    /// guide from in-game).
     /// When non-empty, the top of the stack is the active scene: only it
     /// ticks and draws. `self.scene` is the root; overlays stack above.
     overlay_stack: Vec<Scene>,

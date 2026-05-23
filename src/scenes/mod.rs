@@ -11,7 +11,7 @@ pub mod journal_transition;
 pub mod lamp_moths;
 pub mod main_menu_exterior;
 pub mod material_viewer;
-pub mod meld_guide;
+pub mod guide;
 pub mod object3d_inspect;
 pub mod options;
 pub mod pause_menu;
@@ -33,7 +33,7 @@ pub use game_over::GameOverScene;
 pub use gameplay::GameplayScene;
 pub use main_menu_exterior::MainMenuExteriorScene;
 pub use material_viewer::MaterialViewerScene;
-pub use meld_guide::MeldGuideScene;
+pub use guide::GuideScene;
 pub use options::OptionsScene;
 pub use pick_blind::PickBlindScene;
 pub use profile_select::ProfileSelectScene;
@@ -205,9 +205,13 @@ pub struct UpdateCtx<'a> {
     pub suspended_collection: Option<&'a mut CollectionScene>,
     /// Same as [`DrawCtx::room_gltf_height_scale`] — vertical scale for embedded glTF rooms vs window height.
     pub room_gltf_height_scale: f32,
-    /// Archive scene sets this to `Some(progress.run_history.len())` when the count changes so
-    /// the app can persist per-profile "seen" state for menu hints.
+    /// Archive scene sets this to `Some(progress.run_history.len())` when the player
+    /// leaves Archive after visiting Chronicle so the app can persist menu hints.
     pub bump_archive_chronicle_seen: &'a mut Option<u32>,
+    /// Set when Archive opens on a legacy profile that needs seen-set backfill.
+    pub seed_archive_seen: &'a mut bool,
+    /// Per-profile chronicle cursor from settings — stable for the Archive visit.
+    pub archive_chronicle_last_seen: u32,
     pub rain_tuning: crate::render::rain_tuning::RainTuning,
 }
 
@@ -274,8 +278,10 @@ pub struct DrawCtx<'a> {
     pub suspended_collection: Option<&'a CollectionScene>,
     /// Physical tile proportions for 3D layout (options / renderer settings).
     pub tile_preset: crate::persistence::TilePreset,
-    /// True when `run_history` has grown since the player last opened Archive (this profile).
-    pub archive_has_new_chronicle: bool,
+    /// True when Archive has unseen catalog entries or chronicle runs (this profile).
+    pub archive_has_new: bool,
+    /// Settings cursor for chronicle run-log NEW markers.
+    pub archive_chronicle_last_seen_run_len: u32,
     /// When set (Debug → Hallway hall FX…), pick-blind hallway uses
     /// [`HallwayDistortionDebugSnapshot::resolve`] (see `hallway_glb.rs`) instead of
     /// [`HallwayDistortion::from_pick_blind`] alone.
@@ -310,7 +316,8 @@ impl<'a> DrawCtx<'a> {
         suspended_shop: Option<&'a ShopScene>,
         suspended_collection: Option<&'a CollectionScene>,
         tile_preset: crate::persistence::TilePreset,
-        archive_has_new_chronicle: bool,
+        archive_has_new: bool,
+        archive_chronicle_last_seen_run_len: u32,
         hallway_distortion_debug: Option<
             crate::render::hallway_glb::HallwayDistortionDebugSnapshot,
         >,
@@ -340,7 +347,8 @@ impl<'a> DrawCtx<'a> {
             suspended_shop,
             suspended_collection,
             tile_preset,
-            archive_has_new_chronicle,
+            archive_has_new,
+            archive_chronicle_last_seen_run_len,
             hallway_distortion_debug,
             rain_tuning,
         }
@@ -471,7 +479,7 @@ pub enum Scene {
     PickBlind(PickBlindScene),
     Gameplay(Box<GameplayScene>),
     GameOver(GameOverScene),
-    MeldGuide(MeldGuideScene),
+    Guide(GuideScene),
     MaterialViewer(MaterialViewerScene),
     Options(OptionsScene),
     Collection(CollectionScene),

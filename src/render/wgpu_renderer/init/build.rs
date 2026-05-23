@@ -2410,6 +2410,12 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         log::warn!("No UI font found; panel text will be blank.");
     }
     let ui_font_italic = crate::render::decal::load_ui_font_italic();
+    let mono_font = load_mono_font();
+    if mono_font.is_some() {
+        log::debug!("Mono UI font loaded.");
+    } else {
+        log::warn!("No mono UI font found; tabular Chronicle text falls back to serif.");
+    }
     let emoji_font = load_noto_emoji_font();
     if emoji_font.is_some() {
         log::debug!("Noto Emoji font loaded.");
@@ -3039,6 +3045,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         archive_environment,
         archive_sign_left_prim_idx,
         archive_sign_right_prim_idx,
+        archive_page_left_prim_indices,
+        archive_page_right_prim_indices,
         archive_env_shadow_caster_mask,
     ) = {
         let _archive = crate::startup_profile::scope("wgpu.room.archive");
@@ -3047,9 +3055,19 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             let mut gpu_wrap = None;
             let mut sign_l = None;
             let mut sign_r = None;
+            let mut page_left = Vec::new();
+            let mut page_right = Vec::new();
             let mut shadow_caster_mask = Vec::new();
             let Some(cpu) = cpu_opt else {
-                return (prims, gpu_wrap, sign_l, sign_r, shadow_caster_mask);
+                return (
+                    prims,
+                    gpu_wrap,
+                    sign_l,
+                    sign_r,
+                    page_left,
+                    page_right,
+                    shadow_caster_mask,
+                );
             };
             if !cpu.environment_primitives.is_empty() {
                 let mut room_tex_cache = RoomEnvTextureCache::new();
@@ -3060,6 +3078,10 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                             sign_l = Some(i);
                         } else if name == crate::render::archive_glb::SIGN_DESCRIPTION_RIGHT {
                             sign_r = Some(i);
+                        } else if name == crate::render::archive_glb::BTN_PAGE_LEFT {
+                            page_left.push(i);
+                        } else if name == crate::render::archive_glb::BTN_PAGE_RIGHT {
+                            page_right.push(i);
                         }
                     }
                     let prim = &env_prim.mesh;
@@ -3295,7 +3317,15 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 });
                 log::info!("archive.glb GPU: {} primitive draw(s)", prims.len());
             }
-            (prims, gpu_wrap, sign_l, sign_r, shadow_caster_mask)
+            (
+                prims,
+                gpu_wrap,
+                sign_l,
+                sign_r,
+                page_left,
+                page_right,
+                shadow_caster_mask,
+            )
         })
     };
 
@@ -4096,6 +4126,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         main_menu_environment,
         archive_sign_left_prim_idx,
         archive_sign_right_prim_idx,
+        archive_page_left_prim_indices,
+        archive_page_right_prim_indices,
         archive_env_shadow_caster_mask,
         archive_sign_decal_upload_key: 0,
         room_gltf_height_scale: crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
@@ -4129,6 +4161,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         ui_font,
         emoji_font,
         ui_font_italic,
+        mono_font,
         size,
         last_focus: usize::MAX,
         focus_spin: None,

@@ -1,8 +1,10 @@
 //! Memorial (remnant) talismans — one per run, granted from the previous defeat.
 //!
 //! Shop talismans live in [`crate::core::talisman`]. Memorials are a parallel
-//! series: never sold, selected from [`RunDefeatJournal`] at game over, carried
-//! into the next run in a normal consumable slot. Effects are **in-round**
+//! series: not bought in the shop (granted after defeat), sellable for
+//! [`MemorialTalismanKind::SHOP_SELL_PRICE`]. Selected from [`RunDefeatJournal`]
+//! at game over and carried into the next run in a normal consumable slot.
+//! Effects are **in-round**
 //! only (current blind), applied on dish use.
 
 use std::collections::HashMap;
@@ -92,6 +94,9 @@ impl MemorialTalismanKind {
             Self::DeepWalker,
         ]
     }
+
+    /// Flat sell price when the player discards a remnant from the shop inventory.
+    pub const SHOP_SELL_PRICE: u32 = 4;
 
     pub fn name(self) -> &'static str {
         presentation(self).name
@@ -258,23 +263,20 @@ impl MemorialTalismanKind {
     }
 
     /// One-line flavor for the defeat screen from journal habits.
-    pub fn defeat_subtitle(self, journal: &MemorialJournalSnapshot) -> &'static str {
+    pub fn defeat_subtitle(self, _journal: &MemorialJournalSnapshot) -> &'static str {
         match self {
             Self::Exhausted => "You ran out of plays.",
             Self::FrozenHand => "No legal move remained.",
             Self::Skipper => "You kept walking past the blinds.",
             Self::Hoarder => "Credits stayed in your purse.",
-            Self::FullDish => "Your dish never emptied.",
-            Self::Discarded => "The river ate your tiles.",
-            Self::BossMark => "The House boss still had you.",
+            Self::FullDish => "You never used your items.",
+            Self::Discarded => "Perhaps you discarded too many tiles.",
+            Self::BossMark => "You met your end at the hands of a boss.",
             Self::BuffSaint => "You buffed every tile you could.",
             Self::Transformer => "You reshaped the hand again and again.",
             Self::TagBearer => "You took every token the House offered.",
-            Self::MeldMason => {
-                let _ = journal;
-                "One pattern owned your run."
-            }
-            Self::DeepWalker => "You walked deep into the wings.",
+            Self::MeldMason => "One pattern ruled your run.",
+            Self::DeepWalker => "Your reach exceeded your grasp.",
         }
     }
 }

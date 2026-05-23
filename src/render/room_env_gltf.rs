@@ -66,6 +66,8 @@ fn capped_image_at<'a>(
 
 /// `COLOR_0.a` tag: archive sign description samples [`decal_tex`](../../shaders/room_glb.wgsl) at `uv`.
 pub const ROOM_ENV_COLOR_A_ARCHIVE_DECAL: f32 = 2.0;
+/// `COLOR_0.a` tag: skip directional shadow receive (`room_glb.wgsl`) — chrome / pedestal shell.
+pub const ROOM_ENV_COLOR_A_ARCHIVE_NO_DIRECTIONAL_SHADOW: f32 = 3.0;
 /// `COLOR_0.a` tag: shop candle wax samples baked SSS at `uv` (glTF `TEXCOORD_1`).
 pub const ROOM_ENV_COLOR_A_CANDLE_SSS_BAKE: f32 = 4.0;
 
@@ -783,6 +785,12 @@ pub fn decode_env_primitive(
     if is_archive_sign {
         for v in &mut vertices {
             v.color[3] = ROOM_ENV_COLOR_A_ARCHIVE_DECAL;
+        }
+    } else if log_asset_label == "archive.glb" {
+        // Every archive shell mesh except description boards (tag 2 above): no directional
+        // shadows — punctual lights only. Avoids per-node lists missing new `btn_*` / `text_*`.
+        for v in &mut vertices {
+            v.color[3] = ROOM_ENV_COLOR_A_ARCHIVE_NO_DIRECTIONAL_SHADOW;
         }
     } else if is_candle_wax {
         for v in &mut vertices {

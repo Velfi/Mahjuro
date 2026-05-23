@@ -814,6 +814,7 @@ impl SceneBehavior for PickBlindScene {
                 window_h: h,
             },
             scale,
+            crate::scenes::options::OptionsDrawHint::pause_overlay(&ctx),
             &mut quads,
             &mut texts,
             &mut buttons,

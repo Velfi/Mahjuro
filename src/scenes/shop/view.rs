@@ -13,9 +13,8 @@ use crate::core::tile_pack::PACK_ASPECT_W_OVER_H;
 use crate::game::engine::{GameEngine, ShopReadModel, consumable_sell_price_for_mode};
 use crate::game::game_mode::GameMode;
 use crate::game::run::RunState;
-use crate::render::decal::{load_ui_font, measure_label_advances};
 use crate::render::draw_cmd::{
-    CameraParams, ImageQuad, Object3d, Object3dKind, ScenePunctualLight, UiFrame,
+    CameraParams, Object3d, Object3dKind, ScenePunctualLight, UiFrame,
 };
 use crate::render::flame_volume::FlameEmitter;
 use crate::render::ribbon_mesh::{
@@ -31,9 +30,9 @@ use crate::render::room_glb::{
     with_shop_glb_cpu,
 };
 use crate::render::table_transform::euler_xyz_rad_from_deg;
-use crate::render::theme::{color, metrics, typography};
+use crate::render::theme::{color, metrics};
 use crate::render::wgpu_renderer::GpuInstance;
-use crate::render::wgpu_renderer::{PointLight, ShopHit, TextAlign, TextLabel};
+use crate::render::wgpu_renderer::{PointLight, ShopHit, TextLabel};
 use crate::render::world_space::{
     object3d_pos_for_screen_at_world_z, object3d_pos_triple_for_world_center,
     surface_anchor_from_world_xyz,
@@ -45,7 +44,10 @@ use crate::scenes::object3d_inspect::{
 };
 use crate::scenes::options::OptionsScene;
 use crate::scenes::{ButtonDef, DrawCtx, SceneBehavior, SceneTransition, UpdateCtx};
-use crate::ui::button_prompts::{ButtonPrompt, PromptInputSurface, SHOP_LEGEND_VERB_LABELS};
+use crate::ui::controller_hints::{
+    ColumnHintEntry, ColumnHintLayout, ColumnHintStyle, HintKey, HintStyle,
+    inspect_camera_hint_row, push_column_hints, push_inline_hint_rows,
+};
 use crate::ui::focus_nav::{clamp_rect_to_viewport, push_focus_ring, rect_center};
 use crate::ui::input::InputMode;
 use crate::ui::inspect_plaque::{
@@ -359,10 +361,7 @@ fn shop_inspect_pivot_world(
             ShopFocus::Talisman(i) => {
                 let talisman_for_sale = scene.talisman_items.len();
                 let oi = i.saturating_sub(talisman_for_sale);
-                let owned = shop.owned_talismans.get(oi)?;
-                let Consumable::Talisman(_) = owned.consumable else {
-                    return None;
-                };
+                shop.owned_talismans.get(oi)?;
                 let tw = r[2] * 0.76;
                 let cz = wz + tw * 0.45;
                 inv_marker_surface_anchor(InvMarkerSurfaceAnchor {
@@ -969,6 +968,7 @@ pub(crate) fn render_shop_frame(
                 window_h: h,
             },
             scale,
+            crate::scenes::options::OptionsDrawHint::pause_overlay(&ctx),
             &mut pause_quads,
             &mut pause_text,
             &mut pause_buttons,
@@ -1014,156 +1014,61 @@ pub(crate) fn render_shop_frame(
 
     // Floating control hints — copy reflects [`DrawCtx::input_mode`] + swap toggles.
     if !shop.pause_menu.paused {
-        let surface = match ctx.input_mode {
-            InputMode::Controller => PromptInputSurface::Controller,
-            InputMode::Keyboard | InputMode::Cursor => PromptInputSurface::MouseOrKeyboard,
-        };
         let inspect_active = inspect.is_some();
-        let pad_bottom = h * 0.014;
         let x = w * 0.05;
         let bw = w * 0.90;
         let inner_left = x + bw * 0.02;
         let inner_right = x + bw * 0.98;
         let inner_w = (inner_right - inner_left).max(8.0);
 
-        let font_px = typography::size(typography::H42, h);
-        let legend_font_px = typography::size(typography::H20, h);
-
-        // Primary row: four equal columns, each `[icon][label]` for Exit → Select → Sell → Inspect.
-        // Icons are ~3× the old bar-relative size; each prompt gets its own backer (no full-width bar).
-        let bar_h_ref = h * 0.056;
-        let icon_cap_3x = if inspect_active {
-            bar_h_ref * 0.38 * 3.0
-        } else {
-            bar_h_ref * 0.72 * 3.0
-        };
-
-        let col_w = inner_w / 4.0;
-        let col_pad = (col_w * 0.045).clamp(2.0, 8.0);
-        let mut icon_px = icon_cap_3x.clamp(48.0, 132.0);
-        let mut gap_after_icon = icon_px * 0.18;
-        loop {
-            let slot = icon_px + gap_after_icon;
-            if slot <= col_w - col_pad * 2.0 || icon_px <= 18.0 {
-                break;
-            }
-            icon_px -= 1.0;
-            gap_after_icon = icon_px * 0.18;
-        }
-
-        let ui_font = load_ui_font();
-        let legend_line_h = ui_font
-            .as_ref()
-            .and_then(|f| f.horizontal_line_metrics(legend_font_px))
-            .map(|lm| lm.new_line_size)
-            .unwrap_or(legend_font_px * 1.2)
-            .max(legend_font_px * 0.85);
-
-        let primary_h = (icon_px * 1.06).max(legend_line_h).max(font_px * 1.35);
-        let inspect_line_h = if inspect_active {
-            typography::size(typography::H42, h) * 1.4 + h * 0.008
-        } else {
-            0.0
-        };
-        let gap_before_inspect_line = if inspect_active { h * 0.01 } else { 0.0 };
-        let block_h = primary_h + gap_before_inspect_line + inspect_line_h;
-        let primary_y0 = h - pad_bottom - block_h;
-        let iy = primary_y0 + (primary_h - icon_px) * 0.5;
-
+        let layout = ColumnHintLayout::shop_floating_band(w, h, inspect_active, 4);
         let keyboard_icons = shop_keyboard_prompt_icons();
+        let entries = [
+            ColumnHintEntry::new(
+                HintKey::Action(crate::ui::input::UiAction::Cancel),
+                keyboard_icons[0].clone(),
+                "Exit",
+            ),
+            ColumnHintEntry::new(
+                HintKey::Action(crate::ui::input::UiAction::Confirm),
+                keyboard_icons[1].clone(),
+                "Select",
+            ),
+            ColumnHintEntry::new(
+                HintKey::Action(crate::ui::input::UiAction::WestFacePress),
+                keyboard_icons[2].clone(),
+                "Sell",
+            ),
+            ColumnHintEntry::new(
+                HintKey::Action(crate::ui::input::UiAction::NorthFacePress),
+                keyboard_icons[3].clone(),
+                "Inspect",
+            ),
+        ];
 
-        let pill_bg = [0.06_f32, 0.055, 0.07, 0.82];
-        let pill_pad_x = (icon_px * 0.10).clamp(6.0, 16.0) + (h * 0.003).clamp(4.0, 8.0);
-
-        let legend_text_h_px = legend_line_h.max(8.0).round().max(1.0) as u32;
-        let pill_pad_y = (legend_line_h * 0.14).clamp(3.0, 9.0);
-        let legend_text_y = primary_y0 + (primary_h - legend_line_h) * 0.5;
-
-        let mut pill_quads: Vec<GpuInstance> = Vec::with_capacity(4);
-        let mut icon_cmds: Vec<ImageQuad> = Vec::with_capacity(4);
-        let mut legend_texts: Vec<TextLabel> =
-            Vec::with_capacity(if inspect_active { 5 } else { 4 });
-
-        for i in 0..4 {
-            let col_x = inner_left + i as f32 * col_w;
-            let ix = col_x + col_pad;
-            let text_x = ix + icon_px + gap_after_icon;
-            let max_text_w = (col_x + col_w - col_pad - text_x).max(10.0);
-            let measured_w: f32 = if let Some(ref font) = ui_font {
-                let (_, _, advances) = measure_label_advances(
-                    font,
-                    SHOP_LEGEND_VERB_LABELS[i],
-                    8192,
-                    legend_text_h_px,
-                    Some(legend_font_px),
-                );
-                advances.iter().copied().sum()
-            } else {
-                let est_ch = SHOP_LEGEND_VERB_LABELS[i].chars().count().max(1) as f32;
-                (legend_font_px * 0.52 * est_ch).max(8.0)
-            };
-            let text_w = measured_w.min(max_text_w).max(1.0);
-            let pill_left = text_x - pill_pad_x;
-            let pill_w = (text_w + pill_pad_x * 2.0).max(1.0);
-            pill_quads.push(GpuInstance {
-                rect: [
-                    pill_left,
-                    legend_text_y - pill_pad_y,
-                    pill_w,
-                    legend_line_h + pill_pad_y * 2.0,
-                ],
-                color: pill_bg,
-                user: 0,
-            });
-            let action = match i {
-                0 => crate::ui::input::UiAction::Cancel,
-                1 => crate::ui::input::UiAction::Confirm,
-                2 => crate::ui::input::UiAction::WestFacePress,
-                _ => crate::ui::input::UiAction::NorthFacePress,
-            };
-            let source = match surface {
-                PromptInputSurface::Controller => ctx.glyphs.glyph_for(action),
-                PromptInputSurface::MouseOrKeyboard => Some(keyboard_icons[i].clone()),
-            };
-            if let Some(source) = source {
-                icon_cmds.push(ImageQuad {
-                    inst: GpuInstance {
-                        rect: [ix, iy, icon_px, icon_px],
-                        color: color::alpha(color::PORCELAIN_AGED, 0.96),
-                        user: 0,
-                    },
-                    source,
-                });
-            }
-            legend_texts.push(TextLabel {
-                rect: [text_x, legend_text_y, text_w, legend_line_h],
-                text: SHOP_LEGEND_VERB_LABELS[i].to_string(),
-                color: color::alpha(color::PORCELAIN_AGED, 0.96),
-                font_px: Some(legend_font_px),
-                align: TextAlign::Left,
-                no_glossary: false,
-                scroll_offset: 0.0,
-                flavor_spans: None,
-                bold: false,
-                italic: false,
-                underline: false,
-                text_effect: crate::render::text_effect::TextEffectId::Flat,
-                rotation_quarters: 0,
-                baseline_shift_px: 0.0,
-                clip_rect: None,
-            });
-        }
-
-        frame.squircle_quads(pill_quads);
+        let mut legend_texts: Vec<TextLabel> = Vec::with_capacity(if inspect_active {
+            5
+        } else {
+            4
+        });
+        let slots = push_column_hints(
+            &mut frame,
+            &ctx,
+            layout,
+            &entries,
+            ColumnHintStyle::shop_floating(h),
+            &mut legend_texts,
+        );
 
         const HOLD_SELL_LEGEND_COL: usize = 2;
-        if let Some(started) = shop.west_sell_hold_started {
+        if let Some(started) = shop.west_sell_hold_started
+            && let Some(slot) = slots.iter().find(|s| s.column_index == HOLD_SELL_LEGEND_COL)
+        {
             let elapsed = Instant::now()
                 .saturating_duration_since(started)
                 .as_secs_f32();
             let progress = (elapsed / super::SHOP_SELL_HOLD_SECONDS).clamp(0.0, 1.0);
-            let col_x = inner_left + HOLD_SELL_LEGEND_COL as f32 * col_w;
-            let ix = col_x + col_pad;
+            let [ix, iy, icon_px, _] = slot.icon_rect;
             let cx = ix + icon_px * 0.5;
             let cy = iy + icon_px * 0.5;
             let r = icon_px * 0.58;
@@ -1180,31 +1085,22 @@ pub(crate) fn render_shop_frame(
             frame.quads(ring_quads);
         }
 
-        frame.image_quads(icon_cmds);
-
         if inspect_active {
-            legend_texts.push(TextLabel {
-                rect: [
-                    inner_left,
-                    primary_y0 + primary_h + gap_before_inspect_line,
-                    inner_w,
-                    inspect_line_h,
-                ],
-                text: ButtonPrompt::shop_inspect_mode_hint(surface, ctx.gamepad_style),
-                color: [0.82, 0.78, 0.72, 0.94],
-                font_px: Some(typography::size(typography::H42, h)),
-                align: TextAlign::Center,
-                no_glossary: false,
-                scroll_offset: 0.0,
-                flavor_spans: None,
-                bold: false,
-                italic: false,
-                underline: false,
-                text_effect: crate::render::text_effect::TextEffectId::Flat,
-                rotation_quarters: 0,
-                baseline_shift_px: 0.0,
-                clip_rect: None,
-            });
+            let inspect_style = HintStyle::shop_inspect_camera(h);
+            let gap_before_inspect_line = h * 0.01;
+            let inspect_rect = [
+                inner_left,
+                layout.row_top + layout.row_height + gap_before_inspect_line,
+                inner_w,
+                inspect_style.line_h,
+            ];
+            push_inline_hint_rows(
+                &mut frame,
+                &ctx,
+                &[inspect_rect],
+                &[inspect_camera_hint_row(ctx.input_mode)],
+                inspect_style,
+            );
         }
 
         frame.texts(legend_texts);
@@ -1232,7 +1128,7 @@ pub(crate) fn render_shop_frame(
                     w,
                     h,
                     d.flavor,
-                    pad_bottom + block_h,
+                    h - layout.row_top,
                 );
                 frame.gradient_quads(flavor_gradients);
                 frame.texts(flavor_texts);
@@ -2117,7 +2013,7 @@ fn push_stock_meshes(
                         Object3d {
                             pos: tal_pos,
                             extents: crate::render::talisman_mesh::talisman_object_extents(tw * 1.15),
-                            rotation: euler_xyz_rad_from_deg(-90.0, 0.0, 0.0),
+                            rotation: crate::render::talisman_mesh::talisman_face_camera_rotation(0.0),
                             color: col,
                             kind: Object3dKind::Talisman { kind: tk },
                             hover_target: 0.0,
@@ -2241,7 +2137,7 @@ fn push_stock_meshes(
                     if stock_bobs(*foc) {
                         apply_shop_stock_bob(&mut pos, h, slot_i as u32 + 80, scene.age_secs);
                     }
-                    let base_rot = euler_xyz_rad_from_deg(-90.0, 0.0, 0.0);
+                    let base_rot = euler_xyz_rad_from_deg(90.0, 0.0, 0.0);
                     partition_shop_inspect_stock_mesh(
                         inspect_anchor,
                         *foc,
@@ -2269,52 +2165,58 @@ fn push_stock_meshes(
                 let Some(owned) = shop.owned_talismans.get(oi) else {
                     continue;
                 };
-                if let Consumable::Talisman(tk) = owned.consumable {
-                    let tw = r[2] * 0.72;
-                    let cz = wz + tw * 0.45;
-                    let mut pos = object3d_pos_for_shop_inspect_focus(
-                        inspect_anchor,
-                        *foc,
-                        w,
-                        h,
-                        inv_marker_surface_anchor(InvMarkerSurfaceAnchor {
-                            screen: ShopScreenAnchor {
-                                w,
-                                h,
-                                cam,
-                                env_h,
-                                cx,
-                                cy,
-                                cz_fallback: cz,
-                            },
-                            scene,
-                            shop,
-                            slot_i,
-                        }),
-                    );
-                    if stock_bobs(*foc) {
-                        apply_shop_stock_bob(&mut pos, h, slot_i as u32 + 96, scene.age_secs);
-                    }
-                    let base_rot = euler_xyz_rad_from_deg(-90.0, 0.0, 0.0);
-                    partition_shop_inspect_stock_mesh(
-                        inspect_anchor,
-                        *foc,
-                        Object3d {
-                            pos,
-                            extents: crate::render::talisman_mesh::talisman_object_extents(tw * 1.15),
-                            rotation: euler_rad_add(
-                                base_rot,
-                                sell_hold_wobble_euler_rad(scene, *foc),
-                            ),
-                            color: consumable_color(owned.consumable),
-                            kind: Object3dKind::Talisman { kind: tk },
-                            hover_target: 0.0,
-                            anim_id: 0,
+                let tw = r[2] * 0.72;
+                let cz = wz + tw * 0.45;
+                let mut pos = object3d_pos_for_shop_inspect_focus(
+                    inspect_anchor,
+                    *foc,
+                    w,
+                    h,
+                    inv_marker_surface_anchor(InvMarkerSurfaceAnchor {
+                        screen: ShopScreenAnchor {
+                            w,
+                            h,
+                            cam,
+                            env_h,
+                            cx,
+                            cy,
+                            cz_fallback: cz,
                         },
-                        &mut dim,
-                        &mut subject,
-                    );
+                        scene,
+                        shop,
+                        slot_i,
+                    }),
+                );
+                if stock_bobs(*foc) {
+                    apply_shop_stock_bob(&mut pos, h, slot_i as u32 + 96, scene.age_secs);
                 }
+                let base_rot = euler_xyz_rad_from_deg(90.0, 0.0, 0.0);
+                let (kind, color) = match owned.consumable {
+                    Consumable::Talisman(tk) => (
+                        Object3dKind::Talisman { kind: tk },
+                        consumable_color(owned.consumable),
+                    ),
+                    Consumable::Memorial(mk) => (
+                        Object3dKind::MemorialTalisman { kind: mk },
+                        consumable_color(owned.consumable),
+                    ),
+                    _ => continue,
+                };
+                partition_shop_inspect_stock_mesh(
+                    inspect_anchor,
+                    *foc,
+                    Object3d {
+                        pos,
+                        extents: crate::render::talisman_mesh::talisman_object_extents(tw * 1.15),
+                        rotation: euler_rad_add(base_rot, sell_hold_wobble_euler_rad(scene, *foc)),
+                        color,
+                        kind,
+                        hover_target: 0.0,
+                        anim_id: 0,
+                    },
+                    &mut dim,
+                    &mut subject,
+                );
             }
             _ => {}
         }

@@ -16,6 +16,11 @@ const fn key(name: &'static str) -> ImageQuadSource {
     }
 }
 
+/// Single keyboard / mouse atlas sprite (see `keyboard-&-mouse_sheet_double.xml`).
+pub fn keyboard_key(name: &'static str) -> ImageQuadSource {
+    key(name)
+}
+
 /// Four keyboard icons matching the shop legend (Exit, Select, Sell, Inspect).
 pub fn shop_keyboard_prompt_icons() -> [ImageQuadSource; 4] {
     [
