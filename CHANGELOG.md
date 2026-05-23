@@ -7,6 +7,11 @@ Fragment-based changelog authoring (see `.changes/README.md`) starts with
 the next release after v0.3.2. Earlier releases are summarized below from
 commit history.
 
+## 0.5.0-19 — 2026-05-23
+
+### Fixed
+- Yaku detection now matches standard mahjong more closely: Junchan allows honors and stacks with Honroutou, each Yakuhai triplet scores separately, Chinitsu no longer overlaps Honitsu, and Iipeikou only counts on a full winning hand. Full-hand previews pick the meld split that awards the strongest yaku.
+
 ## 0.5.0-18 — 2026-05-21
 
 ### Changed
