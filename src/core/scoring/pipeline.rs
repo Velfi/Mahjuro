@@ -6,8 +6,8 @@ use crate::core::tile::Tile;
 use super::effective_relic::EffectiveRelics;
 use super::presentation::reorder_steps_chips_then_mult_then_gold;
 use super::{
-    ScoreBreakdown, ScoreStep, StepKind, combine, describe_set, fmt_mult, meld_chip_bonus,
-    tile_by_id, tile_is_debuffed,
+    ScoreBreakdown, ScoreStep, StepKind, combine, describe_set, fmt_mult, tile_by_id,
+    tile_is_debuffed,
 };
 
 pub fn score_sets_with_original(
@@ -54,7 +54,7 @@ fn score_sets_inner(
 
     let mut base_chips: i32 = 0;
     for s in sets {
-        let mut meld_contrib = meld_chip_bonus(s.kind);
+        let mut meld_contrib = 0;
         for &tid in &s.tile_ids {
             if let Some(t) = tile_by_id(tiles, tid) {
                 meld_contrib += if tile_is_debuffed(t, ctx.tiles.debuffs) {

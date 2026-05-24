@@ -4,7 +4,7 @@ use crate::core::tile_pack::TilePackKind;
 use crate::debug_overlays::{HallwayDistortionDebugOverlay, SceneLookDebugOverlay};
 use crate::game::engine::GameEngine;
 use crate::scenes::shop::PackCelebration;
-use crate::scenes::{ShowcasePresenter, ShowcaseScene, TilePackPresenter};
+use crate::scenes::{ShowcasePresenter, ShowcaseScene, TileAnchorLabScene, TilePackPresenter};
 use rand::RngExt;
 
 impl App {
@@ -256,6 +256,7 @@ impl App {
                         Scene::GameOver(_) => "GameOver",
                         Scene::Guide(_) => "Guide",
                         Scene::MaterialViewer(_) => "MaterialViewer",
+                        Scene::TileAnchorLab(_) => "TileAnchorLab",
                         Scene::Options(_) => "Options",
                         Scene::Collection(_) => "Collection",
                         Scene::TutorialCampaign(_) => "TutorialCampaign",
@@ -306,6 +307,11 @@ impl App {
                 self.overlay_stack
                     .push(Scene::RumbleLab(RumbleLabScene::new(true)));
                 log::debug!("Opened rumble lab");
+            }
+            DebugAction::OpenTileAnchorLab => {
+                self.overlay_stack
+                    .push(Scene::TileAnchorLab(TileAnchorLabScene::new(true)));
+                log::debug!("Opened tile anchor lab");
             }
             DebugAction::OpenAbout => {
                 let body = format!(

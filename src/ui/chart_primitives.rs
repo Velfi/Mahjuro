@@ -105,9 +105,7 @@ pub fn format_chart_axis_tick(n: u64) -> String {
         }
     } else if n >= 1_000 {
         let k = n as f64 / 1_000.0;
-        if k >= 100.0 {
-            format!("{k:.0}k")
-        } else if k >= 10.0 {
+        if k >= 10.0 {
             format!("{k:.0}k")
         } else {
             format!("{k:.1}k")

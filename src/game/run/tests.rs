@@ -857,17 +857,18 @@ mod cases {
         dragon.structure_sets = sets;
         let mut dragon_bus = bus();
         let dragon_earned = dragon.trigger_structure_manual(&mut dragon_bus);
+        assert_eq!(
+            dragon_earned, 0,
+            "Dragon debuffs non-honor tile chips; with no meld flat bonuses the cash-in scores zero"
+        );
+        assert_eq!(dragon.round_score, 0);
         assert!(
-            dragon_earned > 0,
-            "Dragon should still allow structure cash-in"
+            dragon.structure_sets.is_empty(),
+            "Dragon should still complete structure cash-in"
         );
         assert!(
-            dragon.round_score > 0,
-            "debuffed Dragon cash-in should still score something"
-        );
-        assert!(
-            dragon.round_score < baseline_score,
-            "Dragon should weaken non-honor cash-ins vs a non-Dragon blind"
+            baseline_score > 0,
+            "non-Dragon blind should still score tile chips from the same structure"
         );
     }
 

@@ -394,7 +394,7 @@ pub struct RiverFlowPlacement {
 fn stream_lane_for_index(i: usize, crowded: bool) -> f32 {
     if !crowded {
         0.0
-    } else if i % 2 == 0 {
+    } else if i.is_multiple_of(2) {
         -1.0
     } else {
         1.0
@@ -691,7 +691,7 @@ pub fn begin_discard_batch(
     let hand_rotation = hand_tile_rotation(&scene.positions);
     let reference_size_px = selected_indices
         .iter()
-        .map(|&slot| hand_slot_center(layout, &scene.positions, &hand_slots, slot).1)
+        .map(|&slot| hand_slot_center(layout, &scene.positions, hand_slots, slot).1)
         .fold(0.0_f32, f32::max);
     let bowl_model = bowl_model_matrix(layout.window_w, layout.window_h, &bowl);
     let flow_ts = flow_params_for_tiles(tiles.len(), bowl_model, reference_size_px);
@@ -710,7 +710,7 @@ pub fn begin_discard_batch(
     for (seq, &tile) in tiles.iter().enumerate() {
         let slot = selected_indices[seq];
         let (start_center, start_size_px) =
-            hand_slot_center(layout, &scene.positions, &hand_slots, slot);
+            hand_slot_center(layout, &scene.positions, hand_slots, slot);
         let river = river_slots[seq];
         anim_tiles.push(DiscardAnimTile {
             tile,

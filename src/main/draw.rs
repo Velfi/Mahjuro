@@ -32,6 +32,9 @@ impl App {
             Scene::PickBlind(_) => Some("pick_blind"),
             Scene::MainMenuExterior(_) => Some("main_menu_exterior"),
             Scene::TutorialCampaign(_) => Some("tutorial"),
+            Scene::Guide(_) => Some("guide"),
+            Scene::YakuJournal(_) => Some("yaku_journal"),
+            Scene::TileAnchorLab(_) => Some("tile_anchor_lab"),
             Scene::GameOver(s) if !s.won => Some("gameplay"),
             _ => None,
         }
@@ -355,7 +358,7 @@ impl App {
             || self.debug.hallway_distortion_debug_overlay.is_some();
         let preserve_overlay_stack_buttons = matches!(
             self.overlay_stack.last(),
-            Some(Scene::RumbleLab(_) | Scene::MaterialViewer(_) | Scene::TransitionPlayground(_))
+            Some(Scene::RumbleLab(_) | Scene::MaterialViewer(_) | Scene::TransitionPlayground(_) | Scene::TileAnchorLab(_))
         );
         let scene_look = self.resolved_scene_look();
         let Some(renderer) = self.renderer.as_mut() else {
@@ -402,7 +405,7 @@ impl App {
             &layout,
             &self.anim,
             &self.run,
-            &mut self.progress,
+            &self.progress,
             self.active_profile,
             self.run.is_in_progress(),
             renderer.projections(),
@@ -736,6 +739,9 @@ impl App {
             Scene::PickBlind(_) => Some("pick_blind"),
             Scene::MainMenuExterior(_) => Some("main_menu_exterior"),
             Scene::TutorialCampaign(_) => Some("tutorial"),
+            Scene::Guide(_) => Some("guide"),
+            Scene::YakuJournal(_) => Some("yaku_journal"),
+            Scene::TileAnchorLab(_) => Some("tile_anchor_lab"),
             Scene::GameOver(s) if !s.won => Some("gameplay"),
             _ => None,
         };

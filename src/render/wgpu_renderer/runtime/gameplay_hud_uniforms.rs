@@ -106,7 +106,7 @@ impl WgpuRenderer {
                 // cast when this yaku is the selected target so it still
                 // reads as "active" against the row.
                 let base = if t.active {
-                    crate::render::theme::color::PARCHMENT
+                    crate::render::theme::color::CHAMPAGNE
                 } else {
                     crate::render::theme::color::PARCHMENT
                 };

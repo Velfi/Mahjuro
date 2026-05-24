@@ -2,14 +2,14 @@
   {
     "id": "honors",
     "name": "Honors Pack",
-    "description": "+7 honor tiles to the wall (winds + dragons)",
+    "description": "+7 honors tiles to the wall",
     "shop_price": 6,
     "texture_file": "pack_honors.png"
   },
   {
     "id": "terminals",
     "name": "Terminals Pack",
-    "description": "+6 terminal tiles to the wall (1s and 9s)",
+    "description": "+6 terminal tiles to the wall",
     "shop_price": 6,
     "texture_file": "pack_terminals.png"
   },

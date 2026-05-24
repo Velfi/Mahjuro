@@ -1126,15 +1126,14 @@ pub fn format_mirror_tile_inventory_help(relics: &RelicState, mirror_slot: usize
         None => parts.push("Put a relic in the slot to the right.".to_string()),
     }
 
-    if let Some(fm) = first_mirror_slot {
-        if fm != mirror_slot {
+    if let Some(fm) = first_mirror_slot
+        && fm != mirror_slot {
             let tgt = active.get(fm + 1).copied().map(relic_display_name);
             let tgt_s = tgt.unwrap_or_else(|| "nothing".into());
             parts.push(format!(
                 "Only the leftmost mirror does anything (it copies {tgt_s})."
             ));
         }
-    }
 
     parts.join("\n")
 }

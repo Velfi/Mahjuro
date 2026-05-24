@@ -1039,7 +1039,7 @@ impl<'a> GameEngine<'a> {
                 self.bus
                     .push(GameEvent::UiSound(crate::audio::SfxId::Purchase));
                 let yaku = zodiac.yaku();
-                let new_level = self.run.yaku_levels.level_up(yaku);
+                let new_level = self.run.yaku_levels.level_up_for_zodiac(zodiac);
                 ShopCommandData::ZodiacApplied {
                     zodiac_kind: zodiac,
                     yaku_name: yaku.name(),

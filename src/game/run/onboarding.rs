@@ -1,11 +1,10 @@
 use crate::core::deck::Wall;
-use crate::core::hand::MeldKind;
 use crate::core::rules::BlindKind;
 use crate::game::engine_state::GameplayCoreState;
 use crate::game::game_mode::GameMode;
 use crate::game::onboarding::{
     LESSONS_DISCARDS, LESSONS_HAND_SIZE, LESSONS_PLAYS, LESSONS_TARGET, OnboardingPhase,
-    OnboardingState, TUTORIAL_BOSS, lessons_allowed_melds, tutorial_yaku,
+    OnboardingState, TUTORIAL_BOSS, tutorial_yaku,
 };
 use crate::game::run::RunState;
 
@@ -179,30 +178,7 @@ impl RunState {
         }
     }
 
-    /// Reject meld types outside the Lessons curriculum.
-    pub fn onboarding_validate_melds(&self, meld_kinds: &[MeldKind]) -> Result<(), &'static str> {
-        if !self.onboarding_lessons_active() {
-            return Ok(());
-        }
-        let allowed = lessons_allowed_melds();
-        for kind in meld_kinds {
-            if !allowed.contains(kind) {
-                return Err(match kind {
-                    MeldKind::Triplet | MeldKind::Kong => {
-                        "Try a pair first — select two matching tiles."
-                    }
-                    MeldKind::Sequence => {
-                        "Sequences aren't part of this lesson — use matching pairs."
-                    }
-                    MeldKind::Pair => "Pairs aren't available right now.",
-                    MeldKind::Single => "That shape isn't used in this lesson.",
-                });
-            }
-        }
-        Ok(())
-    }
-
-    /// Seed guaranteed pairs into the Lessons hand.
+    /// Seed a starter hand for the Lessons blind.
     pub fn seed_onboarding_hand(&mut self) {
         if !self.onboarding_lessons_active() {
             return;

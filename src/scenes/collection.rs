@@ -808,7 +808,6 @@ impl CollectionScene {
                             glow: 0.0,
                             silhouette,
                             debuffed: false,
-                            pick_id: None,
                         },
                         hover_target: 1.0,
                         anim_id: closeup_anim,
@@ -999,8 +998,8 @@ impl CollectionScene {
                 format!("Mahjuro — Archive ({})", self.active_tab.label())
             }
         };
-        if inspect.is_some() {
-            if let Some(tw) = self.collection_inspect_target_world(
+        if inspect.is_some()
+            && let Some(tw) = self.collection_inspect_target_world(
                 w,
                 h,
                 bosses,
@@ -1009,7 +1008,6 @@ impl CollectionScene {
             ) {
                 frame.shop_inspect_shadow_target = Some(tw);
             }
-        }
         frame
     }
 
@@ -1039,16 +1037,14 @@ impl CollectionScene {
         let ring_focus = self.chrome_focus_for_draw(ctx.input_mode);
         let page_nav = archive_page_nav(self.active_tab, ctx.progress, self.archive_page);
 
-        if let Some(back_rect) = archive_main_menu_btn_rect(w, h, &cam, env_h_draw) {
-            if ring_focus == Some(CollectionAction::Back) {
+        if let Some(back_rect) = archive_main_menu_btn_rect(w, h, &cam, env_h_draw)
+            && ring_focus == Some(CollectionAction::Back) {
                 push_focus_ring(back_rect, scale, w, h, &mut quads);
             }
-        }
-        if let Some(switch_rect) = archive_switch_save_btn_rect(w, h, &cam, env_h_draw) {
-            if ring_focus == Some(CollectionAction::SwitchSave) {
+        if let Some(switch_rect) = archive_switch_save_btn_rect(w, h, &cam, env_h_draw)
+            && ring_focus == Some(CollectionAction::SwitchSave) {
                 push_focus_ring(switch_rect, scale, w, h, &mut quads);
             }
-        }
         for (ti, rect) in archive_tab_hit_rects(w, h, env_h_draw, &cam) {
             if ring_focus == Some(CollectionAction::SelectTab(ti)) {
                 push_focus_ring(rect, scale, w, h, &mut quads);
@@ -1251,6 +1247,16 @@ pub(crate) fn sync_item_inspect_orbit_target(
 }
 
 impl SceneBehavior for CollectionScene {
+    fn face_button_bindings(
+        &self,
+        _ctx: crate::ui::input::FaceBindingCtx,
+    ) -> crate::ui::input::FaceButtonBindings {
+        crate::ui::input::FaceButtonBindings {
+            north_press: Some(crate::ui::input::UiAction::NorthFacePress),
+            ..Default::default()
+        }
+    }
+
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
         if self.chronicle_last_seen.is_none() {
             self.chronicle_last_seen = Some(ctx.archive_chronicle_last_seen);
@@ -1285,7 +1291,8 @@ impl SceneBehavior for CollectionScene {
                 scroll_lines: 0.0,
             },
         );
-        if self.tree.take_focus_changed() {
+        let focus_changed = self.tree.take_focus_changed();
+        if focus_changed {
             ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
         }
 
@@ -1294,6 +1301,9 @@ impl SceneBehavior for CollectionScene {
         //   - Cabinet: ←/↓ forward along the catalogue; →/↑ backward (wrap); wheel / PgUp/Dn flip pages
         //   - Confirm / North → orbit inspect on the focused artifact
         let all_count = tab_artifacts(self.active_tab, ctx.progress, chronicle_last_seen).len();
+        if focus_changed && self.focused_chrome.is_none() {
+            collection_sync_hover_artifact_focus(self, &items, all_count);
+        }
 
         if ctx.scroll_lines.abs() > 0.001 {
             if matches!(self.active_tab, Tab::Chronicle) {
@@ -1797,30 +1807,13 @@ impl SceneBehavior for CollectionScene {
             Some(CollectionAction::SelectArtifact(idx)) => {
                 if all_count > 0 {
                     let idx = idx.min(all_count.saturating_sub(1));
-                    // Relic cells have a per-triangle trimesh picker running
-                    // each frame; when it reports a hit, prefer that index
-                    // over the loose cell rect so clicks that land in the
-                    // empty space around a relic's silhouette don't select
-                    // the wrong artifact. For non-relic cells (talismans /
-                    // zodiacs / plaques) the trimesh picker stays silent
-                    // and the flat cell rect remains the source of truth.
-                    let resolved_raw = ctx
-                        .picked_collection_object
-                        .map(|pid| pid as usize)
-                        .unwrap_or(idx);
-                    let resolved = resolved_raw.min(all_count - 1);
                     ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
-                    self.selected_artifact = Some(resolved);
+                    self.selected_artifact = Some(idx);
                     self.focused_chrome = None;
-                    push_relic_stinger_for(ctx.bus, self.active_tab, ctx.progress, resolved);
-                    // Mouse click also moves keyboard focus so subsequent
-                    // arrow-key navigation continues from the clicked item
-                    // instead of teleporting back to position 0.
-                    // Keep the viewport synced to the clicked row so the
-                    // focus halo and the visible slot agree.
+                    push_relic_stinger_for(ctx.bus, self.active_tab, ctx.progress, idx);
                     collection_focus_artifact(
                         self,
-                        resolved,
+                        idx,
                         ctx.progress,
                         chronicle_last_seen,
                         ctx.bus,
@@ -2111,11 +2104,7 @@ fn collection_focus_artifact(
 /// ribbon that levels it up, so this is total. Inverse of
 /// `ZodiacKind::yaku`.
 fn zodiac_for_yaku(yk: YakuKind) -> ZodiacKind {
-    ZodiacKind::all()
-        .iter()
-        .copied()
-        .find(|z| z.yaku() == yk)
-        .expect("every YakuKind has a matching ZodiacKind")
+    ZodiacKind::for_yaku(yk).expect("every scoring YakuKind has a matching ZodiacKind")
 }
 
 /// Pull a human-readable description for the description plaque. Locked
@@ -2312,7 +2301,6 @@ fn collection_push_grid_cell_object3d(p: CollectionGridCellObject3d<'_>) {
                     glow: if is_focus && !silhouette { 0.6 } else { 0.0 },
                     silhouette,
                     debuffed: false,
-                    pick_id: Some(boss_i as u32),
                 },
                 hover_target: if is_focus { 1.0 } else { 0.0 },
                 anim_id: boss_i as u64,
@@ -2500,6 +2488,31 @@ fn archive_page_count(all_count: usize) -> usize {
 #[inline]
 fn archive_page_for_idx(idx: usize) -> usize {
     idx / archive_page_size().max(1)
+}
+
+/// Keep [`CollectionScene::focused_row`] in sync when the widget tree's hover
+/// target moves onto a catalog cell (same flat rects as every other tab).
+fn collection_sync_hover_artifact_focus(
+    scene: &mut CollectionScene,
+    items: &[FlatItem<CollectionAction>],
+    all_count: usize,
+) {
+    if all_count == 0 {
+        return;
+    }
+    let Some(f) = scene.tree.focused() else {
+        return;
+    };
+    let Some(it) = items.iter().find(|i| i.id == f) else {
+        return;
+    };
+    let CollectionAction::SelectArtifact(idx) = it.action else {
+        return;
+    };
+    let idx = idx.min(all_count - 1);
+    if scene.focused_row != Some(idx) {
+        collection_sync_artifact_focus_to_idx(scene, idx);
+    }
 }
 
 fn collection_sync_artifact_focus_to_idx(scene: &mut CollectionScene, idx: usize) {
@@ -3150,7 +3163,7 @@ fn archive_page_indicator_rect(
     let right = archive_page_right_btn_rect(w, h, cam, env_h)?;
     let btn_top = left[1].min(right[1]);
     let btn_h = left[3].max(right[3]);
-    let band_h = font_px * 1.4;
+    let band_h = crate::ui::colored_keywords::colored_row_line_step(font_px);
     let gap = btn_h * 0.08;
     // Full-width band keeps the pinned body tier from shrinking to fit the
     // narrow gap between the projected page-button markers.

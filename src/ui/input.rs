@@ -146,14 +146,50 @@ pub enum UiAction {
     WestFaceRelease,
 }
 
+/// Context for [`crate::scenes::SceneBehavior::face_button_bindings`].
+#[derive(Clone, Copy, Debug)]
+pub struct FaceBindingCtx {
+    /// Gameplay-only: when true, West/North emit discard/play; when false, focus bowl/mirror.
+    pub xy_quick_action: bool,
+}
+
+/// Scene-owned mapping from logical face buttons (after `swap_xy`) to [`UiAction`].
+///
+/// The input layer resolves physical West/North through `swap_xy`, then looks up the
+/// action here. Unbound slots are ignored.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FaceButtonBindings {
+    pub west_press: Option<UiAction>,
+    pub north_press: Option<UiAction>,
+    pub west_release: Option<UiAction>,
+    /// When true, LT/RT analog triggers do not emit [`UiAction::TriggerStructure`].
+    pub suppress_trigger_structure: bool,
+}
+
+impl FaceButtonBindings {
+    /// Logical West/North press for a physical face button and the player's `swap_xy` setting.
+    pub fn face_press(self, button: GpButton, swap_xy: bool) -> Option<UiAction> {
+        match (button, swap_xy) {
+            (GpButton::West, false) | (GpButton::North, true) => self.west_press,
+            (GpButton::North, false) | (GpButton::West, true) => self.north_press,
+            _ => None,
+        }
+    }
+
+    /// Logical West release (hold-to-sell completion) for a physical face button.
+    pub fn face_release(self, button: GpButton, swap_xy: bool) -> Option<UiAction> {
+        match (button, swap_xy) {
+            (GpButton::West, false) | (GpButton::North, true) => self.west_release,
+            _ => None,
+        }
+    }
+}
+
 /// Per-frame hints so [`InputState::poll_gamepads`] can emit scene-appropriate
 /// face-button actions without the input layer depending on scene types.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct GamepadPollCtx {
-    /// Shop is active with no blocking in-scene overlay — use shop face maps.
-    pub shop_face_buttons: bool,
-    /// Collection scene: route gamepad North (and **E**) to inspect, same as shop North.
-    pub collection_uses_north_for_inspect: bool,
+    pub face_bindings: FaceButtonBindings,
     /// Showcase **orbit** overlay ([`crate::scenes::Scene::Showcase`] inspect presenters) — right stick + arrows for orbit, left stick + WASD for focus cycling, LMB drag + triggers/wheel for orbit zoom.
     pub item_inspect_overlay: bool,
 }
@@ -582,49 +618,13 @@ impl InputState {
                     UiAction::Cancel
                 }),
                 GpButton::West => {
-                    // West face = discard / hold-to-sell; North = play / inspect (`swap_xy` swaps which physical button is which).
-                    if self.swap_xy {
-                        if poll_ctx.shop_face_buttons || poll_ctx.collection_uses_north_for_inspect
-                        {
-                            actions.push(UiAction::NorthFacePress);
-                        } else {
-                            actions.push(if self.xy_quick_action {
-                                UiAction::WestFacePress
-                            } else {
-                                UiAction::FocusDiscardButton
-                            });
-                        }
-                    } else if poll_ctx.shop_face_buttons {
-                        actions.push(UiAction::WestFacePress);
-                    } else {
-                        actions.push(if self.xy_quick_action {
-                            UiAction::WestFacePress
-                        } else {
-                            UiAction::FocusDiscardButton
-                        });
+                    if let Some(action) = poll_ctx.face_bindings.face_press(GpButton::West, self.swap_xy) {
+                        actions.push(action);
                     }
                 }
                 GpButton::North => {
-                    if self.swap_xy {
-                        if poll_ctx.shop_face_buttons {
-                            actions.push(UiAction::WestFacePress);
-                        } else {
-                            actions.push(if self.xy_quick_action {
-                                UiAction::NorthFacePress
-                            } else {
-                                UiAction::FocusPlayButton
-                            });
-                        }
-                    } else if poll_ctx.shop_face_buttons
-                        || poll_ctx.collection_uses_north_for_inspect
-                    {
-                        actions.push(UiAction::NorthFacePress);
-                    } else {
-                        actions.push(if self.xy_quick_action {
-                            UiAction::NorthFacePress
-                        } else {
-                            UiAction::FocusPlayButton
-                        });
+                    if let Some(action) = poll_ctx.face_bindings.face_press(GpButton::North, self.swap_xy) {
+                        actions.push(action);
                     }
                 }
                 GpButton::DPadRight => {
@@ -682,13 +682,17 @@ impl InputState {
                     }
                 }
                 GpButton::West => {
-                    if poll_ctx.shop_face_buttons && !self.swap_xy {
-                        actions.push(UiAction::WestFaceRelease);
+                    if let Some(action) =
+                        poll_ctx.face_bindings.face_release(GpButton::West, self.swap_xy)
+                    {
+                        actions.push(action);
                     }
                 }
                 GpButton::North => {
-                    if poll_ctx.shop_face_buttons && self.swap_xy {
-                        actions.push(UiAction::WestFaceRelease);
+                    if let Some(action) =
+                        poll_ctx.face_bindings.face_release(GpButton::North, self.swap_xy)
+                    {
+                        actions.push(action);
                     }
                 }
                 _ => {}
@@ -748,7 +752,9 @@ impl InputState {
                     GpAxis::TriggerLeft => {
                         let cur = trigger_norm(value);
                         let prev = shell.lt_prev.get(&id).copied().unwrap_or(0.0);
-                        if prev < TRIG_PRESS && cur >= TRIG_PRESS && !poll_ctx.shop_face_buttons {
+                        if prev < TRIG_PRESS && cur >= TRIG_PRESS
+                            && !poll_ctx.face_bindings.suppress_trigger_structure
+                        {
                             actions.push(UiAction::TriggerStructure);
                         }
                         shell.lt_prev.insert(id, cur);
@@ -756,7 +762,9 @@ impl InputState {
                     GpAxis::TriggerRight => {
                         let cur = trigger_norm(value);
                         let prev = shell.rt_prev.get(&id).copied().unwrap_or(0.0);
-                        if prev < TRIG_PRESS && cur >= TRIG_PRESS && !poll_ctx.shop_face_buttons {
+                        if prev < TRIG_PRESS && cur >= TRIG_PRESS
+                            && !poll_ctx.face_bindings.suppress_trigger_structure
+                        {
                             actions.push(UiAction::TriggerStructure);
                         }
                         shell.rt_prev.insert(id, cur);
@@ -1388,5 +1396,39 @@ mod tests {
         input.wrap_focus_slot(UiAction::FocusPrev, 16);
 
         assert_eq!(input.focus_slot, 15);
+    }
+
+    #[test]
+    fn face_bindings_west_slot_without_swap_xy() {
+        use sdl3::gamepad::Button as GpButton;
+
+        let bindings = super::FaceButtonBindings {
+            west_press: Some(UiAction::Delete),
+            north_press: Some(UiAction::NorthFacePress),
+            ..Default::default()
+        };
+        assert_eq!(
+            bindings.face_press(GpButton::West, false),
+            Some(UiAction::Delete)
+        );
+        assert_eq!(
+            bindings.face_press(GpButton::North, false),
+            Some(UiAction::NorthFacePress)
+        );
+    }
+
+    #[test]
+    fn face_bindings_swap_xy_routes_physical_north_to_west_slot() {
+        use sdl3::gamepad::Button as GpButton;
+
+        let bindings = super::FaceButtonBindings {
+            west_press: Some(UiAction::Delete),
+            ..Default::default()
+        };
+        assert_eq!(
+            bindings.face_press(GpButton::North, true),
+            Some(UiAction::Delete)
+        );
+        assert_eq!(bindings.face_press(GpButton::West, true), None);
     }
 }

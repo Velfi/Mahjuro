@@ -131,7 +131,7 @@ pub fn visible_archive_talismans(progress: &PlayerProgress) -> Vec<TalismanKind>
     TalismanKind::all()
         .iter()
         .copied()
-        .filter(|tk| progress.talisman_times_purchased.contains_key(&tk))
+        .filter(|tk| progress.talisman_times_purchased.contains_key(tk))
         .collect()
 }
 

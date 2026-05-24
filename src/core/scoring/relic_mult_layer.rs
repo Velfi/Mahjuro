@@ -1,4 +1,4 @@
-//! Relic-driven **mult** and late **chip** lines applied after yaku and structure depth
+//! Relic-driven **mult** and late **chip** lines applied after yaku
 //! ([`super::dora_yaku_layer`]). Earlier relic chip/mult effects live in [`super::pre_yaku_layer`].
 //!
 //! Keeping this in one module makes the main pipeline easier to read and gives a
@@ -128,11 +128,10 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
         if let Some(w) = ctx.round.round_wind {
             round_winds.push(w);
         }
-        if let Some(w) = ctx.round.bonus_round_wind {
-            if !round_winds.contains(&w) {
+        if let Some(w) = ctx.round.bonus_round_wind
+            && !round_winds.contains(&w) {
                 round_winds.push(w);
             }
-        }
         for s in sets {
             if !matches!(s.kind, MeldKind::Triplet | MeldKind::Kong) {
                 continue;

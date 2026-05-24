@@ -20,6 +20,7 @@ pub mod scene_layout;
 pub mod skip_tag_icons;
 pub mod smooth_scroll;
 pub mod styled_text;
+pub mod text_wrap;
 pub mod tooltip;
 pub mod widget;
 pub mod widget_tree;

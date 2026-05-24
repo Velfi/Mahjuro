@@ -552,8 +552,8 @@ fn running_under_gamescope() -> bool {
 /// help when wgpu still requests `PresentMode::Fifo` in
 /// `SurfaceConfiguration`, so gamescope sessions prefer Mailbox / Immediate.
 fn select_present_mode(caps: &wgpu::SurfaceCapabilities) -> wgpu::PresentMode {
-    if let Ok(raw) = std::env::var("MAHJURO_PRESENT_MODE") {
-        if let Some(mode) = match raw.to_ascii_lowercase().as_str() {
+    if let Ok(raw) = std::env::var("MAHJURO_PRESENT_MODE")
+        && let Some(mode) = match raw.to_ascii_lowercase().as_str() {
             "fifo" => Some(wgpu::PresentMode::Fifo),
             "fifo_relaxed" | "fifo-relaxed" => Some(wgpu::PresentMode::FifoRelaxed),
             "mailbox" => Some(wgpu::PresentMode::Mailbox),
@@ -573,7 +573,6 @@ fn select_present_mode(caps: &wgpu::SurfaceCapabilities) -> wgpu::PresentMode {
                 "MAHJURO_PRESENT_MODE={mode:?} not advertised by surface; using default selection"
             );
         }
-    }
 
     #[cfg(target_os = "windows")]
     {

@@ -2086,7 +2086,7 @@ fn zodiac_marginal_value_with_base(
     base: &ShopMarginalBase,
 ) -> i32 {
     let mut hypothetical = run.yaku_levels.clone();
-    hypothetical.level_up(zodiac.yaku());
+    hypothetical.level_up_for_zodiac(zodiac);
 
     let mut delta_sum: i64 = 0;
     for (h, hand) in base.hands.iter().enumerate() {
@@ -2273,7 +2273,7 @@ fn talisman_marginal_value_with_base(
     talisman: TalismanKind,
     base: &ShopMarginalBase,
 ) -> i32 {
-    let raw_avg = if let Some(_) = talisman.enhancement() {
+    let raw_avg = if talisman.enhancement().is_some() {
         buff_talisman_raw_avg(run, talisman, base)
     } else {
         sampled_transform_talisman_raw_avg(run, talisman, base)
@@ -2657,7 +2657,7 @@ fn visit_shop(
                     &run.relics,
                 ));
                 run.apply_gold_delta(-(price as i32), Some(bus));
-                let new_level = run.yaku_levels.level_up(zodiac.yaku());
+                let new_level = run.yaku_levels.level_up_for_zodiac(zodiac);
                 stats.gold_spent += price;
                 *stats.zodiacs_picked.entry(zodiac.name()).or_insert(0) += 1;
                 bot_log!(

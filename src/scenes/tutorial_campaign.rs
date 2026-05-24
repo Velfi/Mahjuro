@@ -6,8 +6,12 @@ use crate::audio::SfxId;
 use crate::core::tile::{Suit, Tile};
 use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;
+use crate::persistence::TilePreset;
 use crate::render::draw_cmd::{
     CameraParams, DrawCmd, Object3d, Object3dKind, ShowcaseTilePlacement, UiFrame,
+};
+use crate::render::showcase_tile_layout::{
+    ShowcaseTileLabelGaps, showcase_tile_group_label_anchor, showcase_tile_merge_projected_group,
 };
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
@@ -17,7 +21,22 @@ use crate::ui::focus_nav;
 use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
+use super::tiles_intro_copy;
 use super::{BackgroundId, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
+
+const TUTORIAL_TILE_ROTATION: [f32; 3] = [0.0, 0.0, std::f32::consts::PI];
+
+fn tutorial_camera_params(h: f32) -> CameraParams {
+    let cam_scale = h / 1600.0;
+    CameraParams {
+        eye: [0.0, -220.0 * cam_scale, 1960.0 * cam_scale],
+        target: [0.0, -40.0 * cam_scale, 0.0],
+        up: [0.0, 0.0, 1.0],
+        fovy_deg: 45.0,
+        clip_near: None,
+        clip_far: None,
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TutorialNav {
@@ -57,7 +76,6 @@ struct TileGroup {
     label: &'static str,
     accent: [f32; 4],
     tiles: &'static [(Suit, u8)],
-    rows: &'static [&'static [(Suit, u8)]],
     debuffed_visual: bool,
 }
 
@@ -77,6 +95,42 @@ struct TilesPageLabel {
     w: f32,
     text: &'static str,
     accent: [f32; 4],
+    underline_y: f32,
+}
+
+/// Shared vertical rhythm for the valid/invalid sequence comparison cards.
+/// One source of truth for layout *and* height budgeting so card backgrounds
+/// do not reserve space the content path never uses.
+struct SequenceCardSpacing {
+    pad: f32,
+    bottom_pad: f32,
+    header_row_h: f32,
+    header_to_tile_gap: f32,
+    tile_to_caption: f32,
+}
+
+impl SequenceCardSpacing {
+    fn new(scale: f32, h: f32) -> Self {
+        let header_font = typography::size(typography::H42, h);
+        Self {
+            pad: 10.0 * scale,
+            bottom_pad: (8.0 * scale).max(5.0),
+            header_row_h: header_font * 1.35,
+            // Showcase tiles project above their layout center — leave extra air under the title.
+            header_to_tile_gap: (18.0 * scale).max(12.0),
+            tile_to_caption: (4.0 * scale).max(2.0),
+        }
+    }
+
+    fn card_height(&self, tile_size: f32, caption_h: f32) -> f32 {
+        self.pad
+            + self.header_row_h
+            + self.header_to_tile_gap
+            + tile_size
+            + self.tile_to_caption
+            + caption_h
+            + self.bottom_pad
+    }
 }
 
 /// Part 1 — The Tiles (0-based index into `PAGES`).
@@ -87,35 +141,30 @@ const PART1_TILE_GROUPS: &[TileGroup] = &[
         label: "Manzu",
         accent: Suit::Manzu.keyword_color(),
         tiles: &[(Suit::Manzu, 1), (Suit::Manzu, 5), (Suit::Manzu, 9)],
-        rows: &[],
         debuffed_visual: false,
     },
     TileGroup {
         label: "Souzu",
         accent: Suit::Souzu.keyword_color(),
         tiles: &[(Suit::Souzu, 1), (Suit::Souzu, 5), (Suit::Souzu, 9)],
-        rows: &[],
         debuffed_visual: false,
     },
     TileGroup {
         label: "Pinzu",
         accent: Suit::Pinzu.keyword_color(),
         tiles: &[(Suit::Pinzu, 1), (Suit::Pinzu, 5), (Suit::Pinzu, 9)],
-        rows: &[],
         debuffed_visual: false,
     },
     TileGroup {
-        label: "3-4-5 Manzu = valid",
+        label: "3-4-5 Manzu",
         accent: [0.35, 0.70, 0.85, 0.9],
         tiles: &[(Suit::Manzu, 3), (Suit::Manzu, 4), (Suit::Manzu, 5)],
-        rows: &[],
         debuffed_visual: false,
     },
     TileGroup {
-        label: "3 Manzu / 4 Souzu / 5 Pinzu = invalid",
+        label: "Mixed suits",
         accent: color::STONE,
         tiles: &[(Suit::Manzu, 3), (Suit::Souzu, 4), (Suit::Pinzu, 5)],
-        rows: &[],
         debuffed_visual: false,
     },
     TileGroup {
@@ -127,7 +176,6 @@ const PART1_TILE_GROUPS: &[TileGroup] = &[
             (Suit::Wind, 3),
             (Suit::Wind, 4),
         ],
-        rows: &[],
         debuffed_visual: false,
     },
     TileGroup {
@@ -138,7 +186,6 @@ const PART1_TILE_GROUPS: &[TileGroup] = &[
             (Suit::Dragon, 2),
             (Suit::Dragon, 3),
         ],
-        rows: &[],
         debuffed_visual: false,
     },
 ];
@@ -150,7 +197,6 @@ const SCORING_DEMO_GROUPS: &[TileGroup] = &[TileGroup {
     label: "Pair",
     accent: color::CHAMPAGNE,
     tiles: &[(Suit::Pinzu, 5), (Suit::Pinzu, 5)],
-    rows: &[],
     debuffed_visual: false,
 }];
 
@@ -179,6 +225,17 @@ const PAGES: &[TutorialPage] = &[
         groups: SCORING_DEMO_GROUPS,
     },
 ];
+
+struct TutorialDemoLayoutPlan {
+    terminals_size: f32,
+    honor_size: f32,
+    /// Gap after the number-suit row, before the sequence comparison cards.
+    row_gap: f32,
+    /// Extra breathing room before the honor-suit row — sequence cards read as a
+    /// distinct block and should not crowd the Winds / Dragons row below.
+    sequence_to_honors_gap: f32,
+    stack_top: f32,
+}
 
 impl TutorialCampaignScene {
     pub fn new() -> Self {
@@ -256,127 +313,198 @@ impl TutorialCampaignScene {
         area_top_y: f32,
         scale: f32,
     ) -> (Vec<ShowcaseTilePlacement>, Vec<TilesPageLabel>, f32) {
-        let tile_band_bottom = h * 0.52;
-        let tile_center_y = area_top_y + (tile_band_bottom - area_top_y) * 0.35;
         let indices: Vec<usize> = (0..page.groups.len()).collect();
+        let max_tile = h * 0.075;
+        let tile_size = Self::tutorial_row_tile_size(page, &indices, w, max_tile);
+        let center_y = area_top_y + tile_size * 0.5 + h * 0.006;
         let mut next_id = 30_000u32;
-        Self::layout_tutorial_tile_row(page, &indices, w, h, tile_center_y, scale, &mut next_id)
+        Self::layout_tutorial_tile_row(
+            &tutorial_camera_params(h),
+            page,
+            &indices,
+            0.0,
+            w,
+            w,
+            h,
+            center_y,
+            scale,
+            tile_size,
+            &mut next_id,
+        )
     }
 
-    fn push_tiles_text_line(
+    fn colored_copy_block_height(text: &str, w: f32, tier: f32, h: f32) -> f32 {
+        let font = typography::size(tier, h);
+        colored_keywords::colored_line_block_height(text, w, font, color::PARCHMENT)
+    }
+
+    fn push_colored_copy_block(
         texts: &mut Vec<TextLabel>,
         rect: [f32; 4],
         text: &str,
-        font_px: f32,
-        color: [f32; 4],
-    ) -> f32 {
-        let lh = font_px * 1.22;
-        texts.push(TextLabel {
-            rect: [rect[0], rect[1], rect[2], lh],
-            text: text.into(),
-            color,
-            align: TextAlign::Center,
-            font_px: Some(font_px),
-            ..Default::default()
-        });
-        lh
-    }
-
-    /// Sectioned copy for Part 1 — mirrors the in-game Guide tiles page.
-    fn push_tutorial_tiles_page_copy(
-        texts: &mut Vec<TextLabel>,
-        panel_x: f32,
-        start_y: f32,
-        panel_w: f32,
+        tier: f32,
+        default_color: [f32; 4],
         h: f32,
     ) -> f32 {
-        let body_font = typography::size(typography::H36, h);
-        let head_font = typography::size(typography::H28, h);
-        let full_x = panel_x + 30.0;
-        let full_w = panel_w - 60.0;
-        let col_w = panel_w * 0.40;
-        let left_x = panel_x + panel_w * 0.07;
-        let right_x = panel_x + panel_w * 0.53;
-        let mut cursor = start_y;
-
-        cursor += Self::push_tiles_text_line(
+        let block_h = Self::colored_copy_block_height(text, rect[2], tier, h);
+        colored_keywords::push_colored_text_block(
             texts,
-            [full_x, cursor, full_w, 0.0],
-            "Mahjuro\u{2019}s wall contains 5 suits. Most tiles have 4 copies.",
-            body_font,
+            [rect[0], rect[1], rect[2], block_h],
+            text,
+            TextStyle {
+                tier,
+                color: default_color,
+                padding: 0.0,
+                align: TextAlign::Left,
+                ..Default::default()
+            },
+            h,
+        );
+        block_h
+    }
+
+    fn tutorial_intro_band_height(copy_w: f32, h: f32) -> f32 {
+        let intro_h =
+            Self::colored_copy_block_height(tiles_intro_copy::INTRO, copy_w, typography::H36, h);
+        intro_h + h * 0.014
+    }
+
+    /// Left copy column for Part 1 — intro, number suits, honor suits.
+    fn push_tutorial_tiles_copy_column(
+        texts: &mut Vec<TextLabel>,
+        copy_x: f32,
+        content_top: f32,
+        content_floor: f32,
+        copy_w: f32,
+        h: f32,
+    ) -> f32 {
+        let body_tier = typography::H36;
+        let head_tier = typography::H28;
+        let block_h =
+            |text: &str, tier: f32| Self::colored_copy_block_height(text, copy_w, tier, h);
+
+        let mut natural_h = block_h(tiles_intro_copy::INTRO, body_tier);
+        natural_h += block_h(tiles_intro_copy::NUMBER_SUITS_HEADING, head_tier);
+        for line in tiles_intro_copy::NUMBER_SUIT_LINES {
+            natural_h += block_h(line, body_tier);
+        }
+        natural_h += block_h(tiles_intro_copy::HONOR_SUITS_HEADING, head_tier);
+        for line in tiles_intro_copy::HONOR_LINES {
+            natural_h += block_h(line, body_tier);
+        }
+        natural_h += block_h(tiles_intro_copy::RANK_TERMS_HEADING, head_tier);
+        for line in tiles_intro_copy::RANK_TERM_LINES {
+            natural_h += block_h(line, body_tier);
+        }
+        natural_h += block_h(tiles_intro_copy::SEQUENCE_RULES_HEADING, head_tier);
+        for line in tiles_intro_copy::SEQUENCE_RULE_LINES {
+            natural_h += block_h(line, body_tier);
+        }
+
+        let section_gaps = 6;
+        let min_section_gap = h * 0.008;
+        let copy_bottom_pad = h * 0.012;
+        let available = (content_floor - content_top - copy_bottom_pad).max(natural_h);
+        let extra = (available - natural_h).max(0.0);
+        let section_gap = (extra / section_gaps as f32).max(min_section_gap);
+        let mut cursor = if natural_h + section_gap * section_gaps as f32 <= available {
+            content_top + (available - natural_h - section_gap * section_gaps as f32) * 0.5
+        } else {
+            content_top
+        };
+
+        cursor += Self::push_colored_copy_block(
+            texts,
+            [copy_x, cursor, copy_w, 0.0],
+            tiles_intro_copy::INTRO,
+            body_tier,
             color::PARCHMENT,
+            h,
         );
-        cursor += h * 0.006;
+        cursor += section_gap;
 
-        cursor += Self::push_tiles_text_line(
+        cursor += Self::push_colored_copy_block(
             texts,
-            [full_x, cursor, full_w, 0.0],
-            "Number Suits",
-            head_font,
+            [copy_x, cursor, copy_w, 0.0],
+            tiles_intro_copy::NUMBER_SUITS_HEADING,
+            head_tier,
             color::CHAMPAGNE,
+            h,
         );
 
-        let number_left: &[&str] = &[
-            "Manzu \u{2014} Characters",
-            "Red number tiles, ranked 1\u{2013}9.",
-            "Souzu \u{2014} Bamboo",
-            "Green number tiles, ranked 1\u{2013}9.",
-            "Pinzu \u{2014} Dots",
-            "Blue number tiles, ranked 1\u{2013}9.",
-        ];
-        let number_right: &[&str] = &[
-            "Only number suits can form sequences.",
-            "Sequences must stay inside one suit.",
-            "Ranks 1 and 9 are terminals.",
-        ];
-
-        let block_top = cursor;
-        let mut left_y = block_top;
-        for line in number_left {
-            left_y += Self::push_tiles_text_line(
+        for line in tiles_intro_copy::NUMBER_SUIT_LINES {
+            cursor += Self::push_colored_copy_block(
                 texts,
-                [left_x, left_y, col_w, 0.0],
+                [copy_x, cursor, copy_w, 0.0],
                 line,
-                body_font,
+                body_tier,
                 color::PARCHMENT,
+                h,
             );
         }
-        let mut right_y = block_top;
-        for line in number_right {
-            right_y += Self::push_tiles_text_line(
-                texts,
-                [right_x, right_y, col_w, 0.0],
-                line,
-                body_font,
-                color::PARCHMENT,
-            );
-        }
-        cursor = left_y.max(right_y) + h * 0.005;
+        cursor += section_gap;
 
-        cursor += Self::push_tiles_text_line(
+        cursor += Self::push_colored_copy_block(
             texts,
-            [full_x, cursor, full_w, 0.0],
-            "Honor Suits",
-            head_font,
+            [copy_x, cursor, copy_w, 0.0],
+            tiles_intro_copy::HONOR_SUITS_HEADING,
+            head_tier,
             color::CHAMPAGNE,
+            h,
         );
 
-        for line in &[
-            "Winds \u{2014} East, South, West, North",
-            "Dragons \u{2014} Red, Green, White",
-            "Honors do not form sequences.",
-            "Use honors as pairs or triplets.",
-        ] {
-            cursor += Self::push_tiles_text_line(
+        for line in tiles_intro_copy::HONOR_LINES {
+            cursor += Self::push_colored_copy_block(
                 texts,
-                [full_x, cursor, full_w, 0.0],
+                [copy_x, cursor, copy_w, 0.0],
                 line,
-                body_font,
+                body_tier,
                 color::PARCHMENT,
+                h,
+            );
+        }
+        cursor += section_gap;
+
+        cursor += Self::push_colored_copy_block(
+            texts,
+            [copy_x, cursor, copy_w, 0.0],
+            tiles_intro_copy::RANK_TERMS_HEADING,
+            head_tier,
+            color::CHAMPAGNE,
+            h,
+        );
+        for line in tiles_intro_copy::RANK_TERM_LINES {
+            cursor += Self::push_colored_copy_block(
+                texts,
+                [copy_x, cursor, copy_w, 0.0],
+                line,
+                body_tier,
+                color::PARCHMENT,
+                h,
+            );
+        }
+        cursor += section_gap;
+
+        cursor += Self::push_colored_copy_block(
+            texts,
+            [copy_x, cursor, copy_w, 0.0],
+            tiles_intro_copy::SEQUENCE_RULES_HEADING,
+            head_tier,
+            color::CHAMPAGNE,
+            h,
+        );
+        for line in tiles_intro_copy::SEQUENCE_RULE_LINES {
+            cursor += Self::push_colored_copy_block(
+                texts,
+                [copy_x, cursor, copy_w, 0.0],
+                line,
+                body_tier,
+                color::PARCHMENT,
+                h,
             );
         }
 
-        cursor + h * 0.006
+        cursor
     }
 
     fn glossary_term_metrics(
@@ -462,82 +590,441 @@ impl TutorialCampaignScene {
         items
     }
 
-    /// Three-row tile layout for Part 1 — flows downward from the copy block (matches Guide).
-    fn layout_tutorial_tiles_page(
+    fn tutorial_row_tile_size(
         page: &TutorialPage,
-        w: f32,
+        indices: &[usize],
+        column_w: f32,
+        max_tile: f32,
+    ) -> f32 {
+        let groups: Vec<&TileGroup> = indices.iter().map(|&i| &page.groups[i]).collect();
+        let total_tiles: usize = groups.iter().map(|g| g.tiles.len()).sum();
+        let num_gaps = groups.len().saturating_sub(1);
+        let gap_equiv = num_gaps as f32 * 0.6;
+        ((column_w * 0.92) / (total_tiles as f32 + gap_equiv))
+            .min(max_tile)
+            .max(22.0)
+    }
+
+    fn layout_tile_group_at(
+        group: &TileGroup,
+        start_x: f32,
+        center_y: f32,
+        tile_size: f32,
+        inter_tile_gap: f32,
+        next_id: &mut u32,
+    ) -> (Vec<ShowcaseTilePlacement>, f32, f32) {
+        let total_w =
+            group.tiles.len() as f32 * tile_size + (group.tiles.len().saturating_sub(1) as f32) * inter_tile_gap;
+        let mut placements = Vec::new();
+        let mut cursor_x = start_x;
+        for &(suit, rank) in group.tiles {
+            let px = cursor_x + tile_size * 0.5;
+            let mut tile = Tile::new(suit, rank, *next_id);
+            tile.debuffed_visual = group.debuffed_visual;
+            placements.push(ShowcaseTilePlacement {
+                tile,
+                center_pos: [px, center_y, 0.0],
+                rotation: [0.0, 0.0, std::f32::consts::PI],
+                scale: 1.0,
+                size_px: tile_size,
+                brightness: 1.08,
+                selected: false,
+                hovered: false,
+                outline: false,
+                glow: false,
+                glow_color: None,
+                pick_id: None,
+                overlay_rect_group: None,
+            });
+            *next_id += 1;
+            cursor_x += tile_size + inter_tile_gap;
+        }
+        (placements, start_x, start_x + total_w)
+    }
+
+    fn layout_sequence_comparison_cards(
+        page: &TutorialPage,
+        col_x: f32,
+        col_w: f32,
+        card_top_y: f32,
         h: f32,
-        area_top_y: f32,
         scale: f32,
-    ) -> (Vec<ShowcaseTilePlacement>, Vec<TilesPageLabel>, f32) {
-        let row_gap = h * 0.085;
-        let tile_band_bottom = h * 0.72;
-        let mut row_y = area_top_y + (tile_band_bottom - area_top_y) * 0.12;
-        let row_sets: &[&[usize]] = &[&[0, 1, 2], &[3, 4], &[5, 6]];
+        max_tile: f32,
+        stack_vertical: bool,
+        next_id: &mut u32,
+        fg_quads: &mut Vec<GpuInstance>,
+        texts: &mut Vec<TextLabel>,
+    ) -> (Vec<ShowcaseTilePlacement>, f32) {
+        let header_font = typography::size(typography::H42, h);
+        let caption_tier = typography::H36;
+        let spacing = SequenceCardSpacing::new(scale, h);
+        let (card_w, card_tile_size) =
+            Self::sequence_card_tile_metrics(col_w, h, scale, max_tile, stack_vertical);
+        let card_gap = if stack_vertical { 0.0 } else { col_w * 0.065 };
+        let valid_accent = [0.35, 0.70, 0.85, 0.9];
+        let invalid_accent = [0.65, 0.35, 0.35, 0.9];
+        const VALID_HEADER: &str = "Valid sequence";
+        const INVALID_HEADER: &str = "Invalid mix";
+
+        struct SeqCardSpec<'a> {
+            group: &'a TileGroup,
+            card_x: f32,
+            header: &'static str,
+            caption: &'static str,
+            fill: [f32; 4],
+            border: [f32; 4],
+            inter_gap: f32,
+        }
+
+        let valid_x = col_x;
+        let invalid_x = col_x + card_w + card_gap;
+        let specs = if stack_vertical {
+            vec![
+                SeqCardSpec {
+                    group: &page.groups[3],
+                    card_x: col_x + col_w * 0.04,
+                    header: VALID_HEADER,
+                    caption: "3-4-5 Manzu",
+                    fill: color::alpha(valid_accent, 0.10),
+                    border: valid_accent,
+                    inter_gap: card_tile_size * 0.06,
+                },
+                SeqCardSpec {
+                    group: &page.groups[4],
+                    card_x: col_x + col_w * 0.04,
+                    header: INVALID_HEADER,
+                    caption: "3 Manzu - 4 Souzu - 5 Pinzu",
+                    fill: color::alpha(color::STONE, 0.12),
+                    border: invalid_accent,
+                    inter_gap: card_tile_size * 0.12,
+                },
+            ]
+        } else {
+            vec![
+                SeqCardSpec {
+                    group: &page.groups[3],
+                    card_x: valid_x,
+                    header: VALID_HEADER,
+                    caption: "3-4-5 Manzu",
+                    fill: color::alpha(valid_accent, 0.10),
+                    border: valid_accent,
+                    inter_gap: card_tile_size * 0.06,
+                },
+                SeqCardSpec {
+                    group: &page.groups[4],
+                    card_x: invalid_x,
+                    header: INVALID_HEADER,
+                    caption: "3 Manzu - 4 Souzu - 5 Pinzu",
+                    fill: color::alpha(color::STONE, 0.12),
+                    border: invalid_accent,
+                    inter_gap: card_tile_size * 0.12,
+                },
+            ]
+        };
+
+        let mut placements = Vec::new();
+        let mut row_bottom = card_top_y;
+        let mut stack_y = card_top_y;
+
+        for spec in &specs {
+            let spec_caption_h =
+                Self::colored_copy_block_height(spec.caption, card_w, caption_tier, h);
+            let card_h = spacing.card_height(card_tile_size, spec_caption_h);
+            let card_y = if stack_vertical {
+                let y = stack_y;
+                stack_y = y + card_h + h * 0.018;
+                y
+            } else {
+                card_top_y
+            };
+            fg_quads.push(GpuInstance {
+                rect: [spec.card_x, card_y, card_w, card_h],
+                color: spec.fill,
+                user: 0,
+            });
+            fg_quads.push(GpuInstance {
+                rect: [
+                    spec.card_x,
+                    card_y + card_h - (2.0 * scale).max(1.0),
+                    card_w,
+                    (2.0 * scale).max(1.0),
+                ],
+                color: spec.border,
+                user: 0,
+            });
+            texts.push(TextLabel {
+                rect: [
+                    spec.card_x,
+                    card_y + spacing.pad,
+                    card_w,
+                    spacing.header_row_h,
+                ],
+                text: spec.header.into(),
+                color: spec.border,
+                align: TextAlign::Center,
+                font_px: Some(header_font),
+                ..Default::default()
+            });
+            let tile_center_y = card_y
+                + spacing.pad
+                + spacing.header_row_h
+                + spacing.header_to_tile_gap
+                + card_tile_size * 0.5;
+            let row_w = spec.group.tiles.len() as f32 * card_tile_size
+                + (spec.group.tiles.len().saturating_sub(1) as f32) * spec.inter_gap;
+            let tile_start_x = spec.card_x + (card_w - row_w) * 0.5;
+            let (group_placements, _, _) = Self::layout_tile_group_at(
+                spec.group,
+                tile_start_x,
+                tile_center_y,
+                card_tile_size,
+                spec.inter_gap,
+                next_id,
+            );
+            placements.extend(group_placements);
+            let caption_y = tile_center_y + card_tile_size * 0.5 + spacing.tile_to_caption;
+            colored_keywords::push_colored_text_block(
+                texts,
+                [spec.card_x, caption_y, card_w, spec_caption_h],
+                spec.caption,
+                TextStyle {
+                    tier: caption_tier,
+                    color: color::PARCHMENT,
+                    padding: 0.0,
+                    align: TextAlign::Center,
+                    ..Default::default()
+                },
+                h,
+            );
+            row_bottom = row_bottom.max(card_y + card_h);
+        }
+
+        if stack_vertical {
+            row_bottom += h * 0.012;
+        }
+
+        (placements, row_bottom)
+    }
+
+    fn tutorial_labeled_row_height(tile_size: f32, scale: f32, h: f32) -> f32 {
+        let underline_gap = (8.0 * scale).max(5.0);
+        let underline_h = (3.0 * scale).max(2.0);
+        let label_gap = (5.0 * scale).max(3.0);
+        let label_line_h = typography::size(typography::H42, h) * 1.22;
+        tile_size + underline_gap + underline_h + label_gap + label_line_h
+    }
+
+    fn sequence_card_tile_metrics(
+        col_w: f32,
+        h: f32,
+        scale: f32,
+        max_tile: f32,
+        stack_vertical: bool,
+    ) -> (f32, f32) {
+        let spacing = SequenceCardSpacing::new(scale, h);
+        let card_gap = if stack_vertical { 0.0 } else { col_w * 0.065 };
+        let card_w = if stack_vertical {
+            col_w * 0.92
+        } else {
+            (col_w - card_gap) * 0.5
+        };
+        let card_tile_size = ((card_w - spacing.pad * 2.0) / 3.0)
+            .min(max_tile * 1.05)
+            .max(22.0);
+        (card_w, card_tile_size)
+    }
+
+    fn sequence_cards_block_height(
+        col_w: f32,
+        h: f32,
+        scale: f32,
+        max_tile: f32,
+        stack_vertical: bool,
+    ) -> f32 {
+        let spacing = SequenceCardSpacing::new(scale, h);
+        let (card_w, card_tile_size) =
+            Self::sequence_card_tile_metrics(col_w, h, scale, max_tile, stack_vertical);
+        let caption_block_h = ["3-4-5 Manzu", "3 Manzu / 4 Souzu / 5 Pinzu"]
+            .iter()
+            .map(|caption| Self::colored_copy_block_height(caption, card_w, typography::H36, h))
+            .fold(0.0_f32, f32::max);
+        let card_h = spacing.card_height(card_tile_size, caption_block_h);
+        if stack_vertical {
+            card_h * 2.0 + h * 0.018
+        } else {
+            card_h
+        }
+    }
+
+    fn plan_tutorial_demo_layout(
+        page: &TutorialPage,
+        col_w: f32,
+        h: f32,
+        scale: f32,
+        content_top: f32,
+        content_floor: f32,
+    ) -> TutorialDemoLayoutPlan {
+        let available = (content_floor - content_top).max(h * 0.30);
+        let row_gap = (14.0 * scale).max(h * 0.016);
+        let sequence_to_honors_gap = (26.0 * scale).max(h * 0.030);
+        let stack_vertical = h < 760.0;
+        let mut max_tile = (available / 4.4).min(h * 0.054).max(20.0);
+
+        for _ in 0..28 {
+            let terminals_size = Self::tutorial_row_tile_size(page, &[0, 1, 2], col_w, max_tile);
+            let honor_size = Self::tutorial_row_tile_size(page, &[5, 6], col_w, max_tile);
+            let terminals_block_h = Self::tutorial_labeled_row_height(terminals_size, scale, h);
+            let seq_block_h =
+                Self::sequence_cards_block_height(col_w, h, scale, max_tile, stack_vertical);
+            let honor_block_h = Self::tutorial_labeled_row_height(honor_size, scale, h);
+            let blocks_total = terminals_block_h + seq_block_h + honor_block_h;
+            if blocks_total + row_gap + sequence_to_honors_gap <= available {
+                return TutorialDemoLayoutPlan {
+                    terminals_size,
+                    honor_size,
+                    row_gap,
+                    sequence_to_honors_gap,
+                    stack_top: content_top,
+                };
+            }
+            max_tile *= 0.88;
+        }
+
+        let terminals_size = Self::tutorial_row_tile_size(page, &[0, 1, 2], col_w, 20.0);
+        let honor_size = Self::tutorial_row_tile_size(page, &[5, 6], col_w, 20.0);
+        TutorialDemoLayoutPlan {
+            terminals_size,
+            honor_size,
+            row_gap,
+            sequence_to_honors_gap,
+            stack_top: content_top,
+        }
+    }
+
+    /// Part 1 — two-column layout: copy left, tile demos right.
+    fn layout_tutorial_tiles_demo_column(
+        cam: &CameraParams,
+        page: &TutorialPage,
+        window_w: f32,
+        h: f32,
+        col_x: f32,
+        col_w: f32,
+        content_top: f32,
+        content_floor: f32,
+        scale: f32,
+        fg_quads: &mut Vec<GpuInstance>,
+        texts: &mut Vec<TextLabel>,
+    ) -> (Vec<ShowcaseTilePlacement>, Vec<TilesPageLabel>, f32, f32) {
+        let stack_vertical = h < 760.0;
+        let plan = Self::plan_tutorial_demo_layout(page, col_w, h, scale, content_top, content_floor);
+        let max_tile = plan.terminals_size.max(plan.honor_size);
+
         let mut placements = Vec::new();
         let mut labels = Vec::new();
         let mut next_id = 30_000u32;
-        let mut content_bottom = row_y;
+        let mut cursor = plan.stack_top;
 
-        for indices in row_sets {
-            let (row_placements, row_labels, row_bottom) = Self::layout_tutorial_tile_row(
-                page,
-                indices,
-                w,
-                h,
-                row_y,
-                scale,
-                &mut next_id,
-            );
-            placements.extend(row_placements);
-            labels.extend(row_labels);
-            content_bottom = row_bottom;
-            row_y += row_gap;
-        }
+        let terminals_center = cursor + plan.terminals_size * 0.5;
+        let (row_placements, row_labels, terminals_bottom) = Self::layout_tutorial_tile_row(
+            cam,
+            page,
+            &[0, 1, 2],
+            col_x,
+            window_w,
+            col_w,
+            h,
+            terminals_center,
+            scale,
+            plan.terminals_size,
+            &mut next_id,
+        );
+        placements.extend(row_placements);
+        labels.extend(row_labels);
+        cursor = terminals_bottom + plan.row_gap;
 
-        (placements, labels, content_bottom)
+        let (seq_placements, seq_bottom) = Self::layout_sequence_comparison_cards(
+            page,
+            col_x,
+            col_w,
+            cursor,
+            h,
+            scale,
+            max_tile,
+            stack_vertical,
+            &mut next_id,
+            fg_quads,
+            texts,
+        );
+        placements.extend(seq_placements);
+        cursor = seq_bottom + plan.sequence_to_honors_gap;
+
+        let honor_center = cursor + plan.honor_size * 0.5;
+        let (honor_placements, honor_labels, honor_bottom) = Self::layout_tutorial_tile_row(
+            cam,
+            page,
+            &[5, 6],
+            col_x,
+            window_w,
+            col_w,
+            h,
+            honor_center,
+            scale,
+            plan.honor_size,
+            &mut next_id,
+        );
+        placements.extend(honor_placements);
+        labels.extend(honor_labels);
+
+        let content_bottom = honor_bottom.min(content_floor);
+        let tile_light_y = content_top + (content_bottom - content_top) * 0.35;
+        (placements, labels, content_bottom, tile_light_y)
     }
 
     fn layout_tutorial_tile_row(
+        cam: &CameraParams,
         page: &TutorialPage,
         indices: &[usize],
+        col_x: f32,
         window_w: f32,
+        col_w: f32,
         window_h: f32,
         center_y: f32,
         scale: f32,
+        tile_size: f32,
         next_id: &mut u32,
     ) -> (Vec<ShowcaseTilePlacement>, Vec<TilesPageLabel>, f32) {
         let groups: Vec<&TileGroup> = indices.iter().map(|&i| &page.groups[i]).collect();
         let total_tiles: usize = groups.iter().map(|g| g.tiles.len()).sum();
         let num_gaps = groups.len().saturating_sub(1);
 
-        let max_tile = window_h * 0.09;
-        let gap_equiv = num_gaps as f32 * 0.6;
-        let tile_size = ((window_w * 0.70) / (total_tiles as f32 + gap_equiv))
-            .min(max_tile)
-            .max(24.0);
         let gap = tile_size * 0.6;
 
         let total_w = total_tiles as f32 * tile_size + num_gaps as f32 * gap;
-        let start_x = (window_w - total_w) * 0.5;
-        let label_gap = (10.0 * scale).max(6.0);
+        let start_x = col_x + (col_w - total_w) * 0.5;
+        let label_gaps = ShowcaseTileLabelGaps {
+            underline_gap: (8.0 * scale).max(5.0),
+            underline_h: (3.0 * scale).max(2.0),
+            label_text_gap: (5.0 * scale).max(3.0),
+        };
         let label_line_h = typography::size(typography::H42, window_h) * 1.22;
 
         let mut placements = Vec::new();
         let mut labels = Vec::new();
         let mut cursor_x = start_x;
-        let mut row_bottom = center_y + tile_size * 0.5;
+        let mut row_bottom = center_y;
 
         for group in groups {
             let group_start_x = cursor_x;
+            let mut centers_xy = Vec::with_capacity(group.tiles.len());
             for &(suit, rank) in group.tiles {
                 let px = cursor_x + tile_size * 0.5;
+                centers_xy.push([px, center_y]);
                 let mut tile = Tile::new(suit, rank, *next_id);
                 tile.debuffed_visual = group.debuffed_visual;
                 placements.push(ShowcaseTilePlacement {
                     tile,
                     center_pos: [px, center_y, 0.0],
-                    rotation: [0.0, 0.0, std::f32::consts::PI],
+                    rotation: TUTORIAL_TILE_ROTATION,
                     scale: 1.0,
                     size_px: tile_size,
                     brightness: 1.08,
@@ -554,15 +1041,27 @@ impl TutorialCampaignScene {
             }
 
             let group_w = cursor_x - group_start_x;
-            let label_y = center_y + tile_size * 0.85 + label_gap;
+            let bounds = showcase_tile_merge_projected_group(
+                cam,
+                window_w,
+                window_h,
+                TilePreset::Chinese,
+                TUTORIAL_TILE_ROTATION,
+                1.0,
+                tile_size,
+                0.0,
+                &centers_xy,
+            );
+            let anchor = showcase_tile_group_label_anchor(bounds, label_gaps);
             labels.push(TilesPageLabel {
                 x: group_start_x,
-                y: label_y,
+                y: anchor.label_y,
                 w: group_w,
                 text: group.label,
                 accent: group.accent,
+                underline_y: anchor.underline_y,
             });
-            row_bottom = label_y + label_line_h;
+            row_bottom = anchor.label_y + label_line_h;
             cursor_x += gap;
         }
 
@@ -580,14 +1079,18 @@ impl TutorialCampaignScene {
         let underline_h = (3.0 * scale).max(2.0);
 
         for label in labels {
-            let underline_y = label.y - underline_h - 2.0 * scale;
             fg_quads.push(GpuInstance {
-                rect: [label.x, underline_y, label.w, underline_h],
+                rect: [label.x, label.underline_y, label.w, underline_h],
                 color: label.accent,
                 user: 0,
             });
             texts.push(TextLabel {
-                rect: [label.x, label.y, label.w, label_font * 1.4],
+                rect: [
+                    label.x,
+                    label.y,
+                    label.w,
+                    colored_keywords::colored_row_line_step(label_font),
+                ],
                 text: label.text.to_string(),
                 color: color::PARCHMENT,
                 align: TextAlign::Center,
@@ -697,15 +1200,9 @@ impl SceneBehavior for TutorialCampaignScene {
         if ctx.effect_layers.golden_dust {
             frame.golden_dust();
         }
-        let cam_scale = h / 1600.0;
-        frame.camera_override = Some(CameraParams {
-            eye: [0.0, -220.0 * cam_scale, 1960.0 * cam_scale],
-            target: [0.0, -40.0 * cam_scale, 0.0],
-            up: [0.0, 0.0, 1.0],
-            fovy_deg: 45.0,
-            clip_near: None,
-            clip_far: None,
-        });
+        let cam = tutorial_camera_params(h);
+        frame.camera_override = Some(cam);
+        frame.showcase_render_hints.layout_use_ray_plane_z = true;
 
         let panel_x = w * 0.06;
         let panel_y = h * 0.07;
@@ -747,6 +1244,11 @@ impl SceneBehavior for TutorialCampaignScene {
             user: 0,
         });
 
+        let title_font = if self.page == TUTORIAL_PAGE_TILES {
+            typography::size(typography::H24, h)
+        } else {
+            typography::size(typography::H36, h)
+        };
         texts.push(TextLabel {
             rect: [
                 panel_x + 24.0 * scale,
@@ -757,14 +1259,80 @@ impl SceneBehavior for TutorialCampaignScene {
             text: page.title.to_string(),
             color: color::CHAMPAGNE,
             align: TextAlign::Center,
-            font_px: Some(typography::size(typography::H36, h)),
+            font_px: Some(title_font),
             ..Default::default()
         });
 
-        let subtitle_y = panel_y + 70.0 * scale;
-        let copy_end = if self.page == TUTORIAL_PAGE_TILES {
-            Self::push_tutorial_tiles_page_copy(&mut texts, panel_x, subtitle_y, panel_w, h)
+        let nav_top = h - (46.0 * scale).max(30.0) - 22.0 * scale;
+        let content_top = panel_y + panel_h * 0.11;
+        let pad_x = panel_w * 0.04;
+        let copy_w = panel_w * 0.36;
+        let col_gutter = panel_w * 0.05;
+        let copy_x = panel_x + pad_x;
+        let tile_col_x = copy_x + copy_w + col_gutter;
+        let tile_col_w = panel_x + panel_w - pad_x - tile_col_x;
+        let intro_band_h = Self::tutorial_intro_band_height(copy_w, h);
+        let tile_area_top = content_top + intro_band_h;
+
+        let tiles_callout_h = if self.page == TUTORIAL_PAGE_TILES {
+            page.callout.map_or(0.0, |callout| {
+                let callout_w = tile_col_w;
+                let callout_font = typography::size(typography::H36, h);
+                let callout_lines_n = colored_keywords::colored_wrapped_line_count(
+                    callout,
+                    callout_w - 32.0 * scale,
+                    callout_font,
+                    color::CHAMPAGNE,
+                );
+                callout_lines_n as f32 * callout_font * 1.3 + 28.0 * scale
+            })
         } else {
+            0.0
+        };
+        let callout_band = tiles_callout_h + 28.0 * scale;
+        let content_floor = if self.page == TUTORIAL_PAGE_TILES {
+            nav_top - callout_band
+        } else {
+            nav_top - panel_h * 0.13
+        };
+
+        let (showcase_tiles, tile_light_y, content_bottom) = if self.page == TUTORIAL_PAGE_TILES {
+            Self::push_tutorial_tiles_copy_column(
+                &mut texts,
+                copy_x,
+                content_top,
+                content_floor,
+                copy_w,
+                h,
+            );
+            let gutter_x = copy_x + copy_w + col_gutter * 0.5;
+            fg_quads.push(GpuInstance {
+                rect: [
+                    gutter_x,
+                    content_top,
+                    (1.0 * scale).max(1.0),
+                    content_floor - content_top,
+                ],
+                color: color::alpha(color::BRASS, 0.35),
+                user: 0,
+            });
+            let (placements, labels, bottom, light_y) = Self::layout_tutorial_tiles_demo_column(
+                &cam,
+                page,
+                w,
+                h,
+                tile_col_x,
+                tile_col_w,
+                tile_area_top,
+                content_floor,
+                scale,
+                &mut fg_quads,
+                &mut texts,
+            );
+            Self::draw_tiles_page_group_labels(&mut texts, &mut fg_quads, &labels, scale, h);
+            (placements, light_y, bottom)
+        } else {
+            let subtitle_y = panel_y + 70.0 * scale;
             let subtitle_x = panel_x + 30.0 * scale;
             let subtitle_w = panel_w - 60.0 * scale;
             let subtitle_end = Self::scoring_page_subtitle_end_y(
@@ -787,17 +1355,7 @@ impl SceneBehavior for TutorialCampaignScene {
                 },
                 h,
             );
-            subtitle_end
-        };
-
-        let (showcase_tiles, tile_light_y, content_bottom) = if self.page == TUTORIAL_PAGE_TILES {
-            let tile_area_y = copy_end + h * 0.012;
-            let (placements, labels, bottom) =
-                Self::layout_tutorial_tiles_page(page, w, h, tile_area_y, scale);
-            Self::draw_tiles_page_group_labels(&mut texts, &mut fg_quads, &labels, scale, h);
-            (placements, tile_area_y, bottom)
-        } else {
-            let tile_area_y = copy_end + h * 0.012;
+            let tile_area_y = subtitle_end + h * 0.012;
             let (placements, labels, bottom) =
                 Self::layout_demo_page_tiles(page, w, h, tile_area_y, scale);
             Self::draw_tiles_page_group_labels(&mut texts, &mut fg_quads, &labels, scale, h);
@@ -807,11 +1365,11 @@ impl SceneBehavior for TutorialCampaignScene {
         let try_it_layout = page.try_it_demo.then(|| {
             Self::compute_try_it_layout(panel_x, panel_w, content_bottom, scale)
         });
-        let nav_top = h - (46.0 * scale).max(30.0) - 22.0 * scale;
+        let tiles_page_footer = content_floor;
         let glossary_y = if let Some(ref t) = try_it_layout {
             (t.content_floor_y + 14.0 * scale).min(nav_top - 180.0 * scale)
         } else if self.page == TUTORIAL_PAGE_TILES {
-            (content_bottom + 10.0 * scale).min(nav_top - 120.0 * scale)
+            tiles_page_footer + 20.0 * scale
         } else {
             (content_bottom + 14.0 * scale).min(nav_top - 120.0 * scale)
         };
@@ -923,6 +1481,7 @@ impl SceneBehavior for TutorialCampaignScene {
                     color: color::CHAMPAGNE,
                     padding: 0.0,
                     align: TextAlign::Left,
+                    glossary_tint: true,
                     ..Default::default()
                 },
                 h,
@@ -999,15 +1558,19 @@ impl SceneBehavior for TutorialCampaignScene {
             let callout_x = if page.try_it_demo {
                 panel_x + panel_w * 0.54
             } else if self.page == TUTORIAL_PAGE_TILES {
-                panel_x + panel_w * 0.12
+                tile_col_x
             } else {
                 panel_x + panel_w * 0.47
             };
-            let callout_y = glossary_y + 6.0 * scale;
+            let callout_y = if self.page == TUTORIAL_PAGE_TILES {
+                glossary_y
+            } else {
+                glossary_y + 6.0 * scale
+            };
             let callout_w = if page.try_it_demo {
                 panel_w * 0.36
             } else if self.page == TUTORIAL_PAGE_TILES {
-                panel_w * 0.76
+                tile_col_w
             } else {
                 panel_w * 0.45
             };
@@ -1018,8 +1581,11 @@ impl SceneBehavior for TutorialCampaignScene {
                 callout_font,
                 color::CHAMPAGNE,
             );
-            let callout_h =
-                (callout_lines_n as f32 * callout_font * 1.3 + 36.0 * scale).max(112.0 * scale);
+            let callout_h = if self.page == TUTORIAL_PAGE_TILES {
+                callout_lines_n as f32 * callout_font * 1.3 + 28.0 * scale
+            } else {
+                (callout_lines_n as f32 * callout_font * 1.3 + 36.0 * scale).max(112.0 * scale)
+            };
             fg_quads.push(GpuInstance {
                 rect: [callout_x, callout_y, callout_w, callout_h],
                 color: color::alpha(color::WALNUT_INK, 0.85),
@@ -1033,9 +1599,9 @@ impl SceneBehavior for TutorialCampaignScene {
             colored_keywords::push_colored_text_block(
                 &mut texts,
                 [
-                    callout_x + 18.0 * scale,
+                    callout_x + 24.0 * scale,
                     callout_y + 14.0 * scale,
-                    callout_w - 32.0 * scale,
+                    callout_w - 40.0 * scale,
                     callout_h - 28.0 * scale,
                 ],
                 callout,
@@ -1056,6 +1622,7 @@ impl SceneBehavior for TutorialCampaignScene {
             if matches!(item.action, TutorialNav::TryPlay | TutorialNav::TryTrigger) {
                 continue;
             }
+            let focused = self.tree.focused() == Some(item.id);
             let (label, variant, state) = match item.action {
                 TutorialNav::Next => {
                     let label = if self.page + 1 == PAGES.len() {
@@ -1063,9 +1630,25 @@ impl SceneBehavior for TutorialCampaignScene {
                     } else {
                         "Next"
                     };
-                    (label, ButtonVariant::Primary, ButtonState::Rest)
+                    (
+                        label,
+                        ButtonVariant::Primary,
+                        if focused {
+                            ButtonState::Hover
+                        } else {
+                            ButtonState::Rest
+                        },
+                    )
                 }
-                TutorialNav::Back => ("Back", ButtonVariant::Default, ButtonState::Rest),
+                TutorialNav::Back => (
+                    "Back",
+                    ButtonVariant::Default,
+                    if focused {
+                        ButtonState::Hover
+                    } else {
+                        ButtonState::Rest
+                    },
+                ),
                 TutorialNav::TryPlay | TutorialNav::TryTrigger => continue,
             };
             widget::push_button(
@@ -1080,6 +1663,9 @@ impl SceneBehavior for TutorialCampaignScene {
                     action: crate::ui::input::UiAction::Confirm,
                 },
             );
+            if focused {
+                focus_nav::push_focus_ring(item.rect, scale, w, h, &mut fg_quads);
+            }
         }
         buttons.clear();
         self.tree.register_flat_buttons(&items, &mut buttons);
@@ -1106,13 +1692,22 @@ impl SceneBehavior for TutorialCampaignScene {
         }
         // Broad, forgiving lighting for educational showcase objects.
         let light_y = h * 0.18;
-        for &(lx, ly, intensity) in &[
-            (panel_x + panel_w * 0.24, tile_light_y - 12.0 * scale, 1.95),
-            (panel_x + panel_w * 0.50, tile_light_y - 24.0 * scale, 2.15),
-            (panel_x + panel_w * 0.76, tile_light_y - 12.0 * scale, 1.95),
-            (panel_x + panel_w * 0.34, content_bottom + 8.0 * scale, 1.10),
-            (panel_x + panel_w * 0.66, content_bottom + 8.0 * scale, 1.10),
-        ] {
+        let light_rows: &[(f32, f32, f32)] = if self.page == TUTORIAL_PAGE_TILES {
+            &[
+                (tile_col_x + tile_col_w * 0.20, tile_light_y - 10.0 * scale, 1.95),
+                (tile_col_x + tile_col_w * 0.50, tile_light_y - 22.0 * scale, 2.15),
+                (tile_col_x + tile_col_w * 0.80, tile_light_y - 10.0 * scale, 1.95),
+            ]
+        } else {
+            &[
+                (panel_x + panel_w * 0.24, tile_light_y - 12.0 * scale, 1.95),
+                (panel_x + panel_w * 0.50, tile_light_y - 24.0 * scale, 2.15),
+                (panel_x + panel_w * 0.76, tile_light_y - 12.0 * scale, 1.95),
+                (panel_x + panel_w * 0.34, content_bottom + 8.0 * scale, 1.10),
+                (panel_x + panel_w * 0.66, content_bottom + 8.0 * scale, 1.10),
+            ]
+        };
+        for &(lx, ly, intensity) in light_rows {
             frame.scene_lighting.push_smooth(PointLight {
                 pos: [lx, ly, light_y],
                 radius: h * 0.95,

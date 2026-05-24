@@ -303,6 +303,7 @@ impl SceneBehavior for SolitaireScene {
             clip_near: None,
             clip_far: None,
         });
+        frame.showcase_render_hints.layout_use_ray_plane_z = true;
 
         // Bright, broad overhead lights — the tile shader has no ambient,
         // so without these the 3D tiles would be pitch black. Lights must

@@ -95,6 +95,18 @@ pub enum YakuKind {
     /// chips × 1 mult — legal, but worth very little. Tied to the Rooster
     /// zodiac.
     ChickenHand,
+    /// Every meld contains a terminal or honor; the pair may be 2–8. Tied to
+    /// the Phoenix zodiac.
+    Chanta,
+    /// Two pairs of identical sequences in one number suit on a full hand.
+    /// Tied to the Rabbit zodiac (with Iipeikou).
+    Ryanpeikou,
+    /// Same-rank triplet (or kong) in all three number suits. Tied to the
+    /// Horse zodiac (with Sanshoku Doujun).
+    SanshokuDoukou,
+    /// Full hand of four sequences and a 2–8 number-suit pair. Tied to the
+    /// Crane zodiac.
+    Pinfu,
 }
 
 impl YakuKind {
@@ -162,10 +174,14 @@ impl YakuKind {
             YakuKind::Tanyao,
             YakuKind::Toitoi,
             YakuKind::Honroutou,
+            YakuKind::Chanta,
             YakuKind::Iipeikou,
+            YakuKind::Pinfu,
             YakuKind::FullHand,
             YakuKind::Chinitsu,
             YakuKind::SanshokuDoujun,
+            YakuKind::SanshokuDoukou,
+            YakuKind::Ryanpeikou,
             YakuKind::Junchan,
             YakuKind::Ittsu,
             YakuKind::Honitsu,
@@ -294,8 +310,14 @@ pub fn detect_yaku_with_wind(
     if is_iipeikou(tiles, sets) {
         found.push(YakuKind::Iipeikou);
     }
+    if is_ryanpeikou(tiles, sets) {
+        found.push(YakuKind::Ryanpeikou);
+    }
     if is_sanshoku_doujun(sets, tiles) {
         found.push(YakuKind::SanshokuDoujun);
+    }
+    if is_sanshoku_doukou(sets, tiles) {
+        found.push(YakuKind::SanshokuDoukou);
     }
     if is_ittsu(sets, tiles) {
         found.push(YakuKind::Ittsu);
@@ -305,11 +327,17 @@ pub fn detect_yaku_with_wind(
     } else if is_honitsu(composition) {
         found.push(YakuKind::Honitsu);
     }
+    if is_chanta(sets, tiles) && !is_kokushi_musou(sets, tiles) {
+        found.push(YakuKind::Chanta);
+    }
     if is_junchan(sets, composition) && !is_kokushi_musou(sets, tiles) {
         found.push(YakuKind::Junchan);
     }
     if is_honroutou(composition) && !is_kokushi_musou(sets, tiles) {
         found.push(YakuKind::Honroutou);
+    }
+    if is_pinfu(tiles, sets) {
+        found.push(YakuKind::Pinfu);
     }
 
     found
@@ -477,6 +505,106 @@ fn is_chiitoitsu(sets: &[DetectedMeld]) -> bool {
         }
     }
     true
+}
+
+/// Chanta (半チャン): every non-pair meld contains a terminal or honor; pair may be 2–8.
+fn is_chanta(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
+    let melds: Vec<_> = sets
+        .iter()
+        .filter(|s| s.kind != MeldKind::Pair)
+        .collect();
+    if melds.len() < 2 {
+        return false;
+    }
+    melds.iter().all(|s| meld_has_yaochu(s, tiles))
+}
+
+/// Ryanpeikou: two different sequences each duplicated in one number suit.
+fn is_ryanpeikou(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
+    if !is_complete_winning_hand(tiles, sets) {
+        return false;
+    }
+    for suit in [Suit::Manzu, Suit::Souzu, Suit::Pinzu] {
+        let mut low_rank_counts: FxHashMap<u8, u32> = FxHashMap::default();
+        for s in sets.iter().filter(|s| s.kind == MeldKind::Sequence) {
+            let tile_refs: Vec<&Tile> = s
+                .tile_ids
+                .iter()
+                .filter_map(|id| tiles.iter().find(|t| t.id == *id))
+                .collect();
+            if tile_refs.len() != 3 || tile_refs[0].suit != suit {
+                continue;
+            }
+            let mut ranks: Vec<u8> = tile_refs.iter().map(|t| t.rank).collect();
+            ranks.sort();
+            *low_rank_counts.entry(ranks[0]).or_insert(0) += 1;
+        }
+        let duplicate_ranks = low_rank_counts.values().filter(|&&c| c >= 2).count();
+        if duplicate_ranks >= 2 {
+            return true;
+        }
+    }
+    false
+}
+
+/// Sanshoku Doukou: same-rank triplet or kong in Manzu, Souzu, and Pinzu.
+fn is_sanshoku_doukou(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
+    let mut by_rank: FxHashMap<u8, FxHashMap<Suit, ()>> = FxHashMap::default();
+    for s in sets
+        .iter()
+        .filter(|s| matches!(s.kind, MeldKind::Triplet | MeldKind::Kong))
+    {
+        let tile_refs: Vec<&Tile> = s
+            .tile_ids
+            .iter()
+            .filter_map(|id| tiles.iter().find(|t| t.id == *id))
+            .collect();
+        if tile_refs.is_empty() {
+            continue;
+        }
+        let suit = tile_refs[0].suit;
+        if !matches!(suit, Suit::Manzu | Suit::Souzu | Suit::Pinzu) {
+            continue;
+        }
+        let rank = tile_refs[0].rank;
+        if !tile_refs.iter().all(|t| t.suit == suit && t.rank == rank) {
+            continue;
+        }
+        by_rank.entry(rank).or_default().insert(suit, ());
+    }
+    by_rank.values().any(|suits| {
+        suits.contains_key(&Suit::Manzu)
+            && suits.contains_key(&Suit::Souzu)
+            && suits.contains_key(&Suit::Pinzu)
+    })
+}
+
+/// Pinfu: full hand; four sequences; pair is 2–8 in a number suit (no honors).
+fn is_pinfu(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
+    if !is_full_hand(tiles, sets) {
+        return false;
+    }
+    let pairs: Vec<_> = sets.iter().filter(|s| s.kind == MeldKind::Pair).collect();
+    let melds: Vec<_> = sets
+        .iter()
+        .filter(|s| matches!(s.kind, MeldKind::Sequence | MeldKind::Triplet | MeldKind::Kong))
+        .collect();
+    if pairs.len() != 1 || melds.len() != 4 {
+        return false;
+    }
+    if melds.iter().any(|s| s.kind != MeldKind::Sequence) {
+        return false;
+    }
+    let pair = pairs[0];
+    let pair_tiles: Vec<&Tile> = pair
+        .tile_ids
+        .iter()
+        .filter_map(|id| tiles.iter().find(|t| t.id == *id))
+        .collect();
+    pair_tiles.len() == 2
+        && pair_tiles
+            .iter()
+            .all(|t| t.is_number_tile() && t.rank >= 2 && t.rank <= 8)
 }
 
 /// Iipeikou: two identical sequences in the same suit on a complete winning hand
@@ -1358,6 +1486,204 @@ mod tests {
     }
 
     #[test]
+    fn detect_chanta_meld_has_terminal() {
+        let tiles = vec![
+            t(Suit::Manzu, 1, 0),
+            t(Suit::Manzu, 2, 1),
+            t(Suit::Manzu, 3, 2),
+            t(Suit::Souzu, 7, 3),
+            t(Suit::Souzu, 8, 4),
+            t(Suit::Souzu, 9, 5),
+            t(Suit::Wind, 1, 6),
+            t(Suit::Wind, 1, 7),
+        ];
+        let sets = vec![
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![3, 4, 5],
+            },
+            DetectedMeld {
+                kind: MeldKind::Pair,
+                tile_ids: vec![6, 7],
+            },
+        ];
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
+        assert!(yaku.contains(&YakuKind::Chanta));
+        assert!(!yaku.contains(&YakuKind::Junchan));
+    }
+
+    #[test]
+    fn detect_ryanpeikou_two_duplicate_sequences() {
+        let tiles = vec![
+            t(Suit::Manzu, 2, 0),
+            t(Suit::Manzu, 3, 1),
+            t(Suit::Manzu, 4, 2),
+            t(Suit::Manzu, 2, 3),
+            t(Suit::Manzu, 3, 4),
+            t(Suit::Manzu, 4, 5),
+            t(Suit::Manzu, 5, 6),
+            t(Suit::Manzu, 6, 7),
+            t(Suit::Manzu, 7, 8),
+            t(Suit::Manzu, 5, 9),
+            t(Suit::Manzu, 6, 10),
+            t(Suit::Manzu, 7, 11),
+            t(Suit::Souzu, 8, 12),
+            t(Suit::Souzu, 8, 13),
+        ];
+        let sets = vec![
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![3, 4, 5],
+            },
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![6, 7, 8],
+            },
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![9, 10, 11],
+            },
+            DetectedMeld {
+                kind: MeldKind::Pair,
+                tile_ids: vec![12, 13],
+            },
+        ];
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
+        assert!(yaku.contains(&YakuKind::Ryanpeikou));
+        assert!(yaku.contains(&YakuKind::Iipeikou));
+        assert!(yaku.contains(&YakuKind::FullHand));
+    }
+
+    #[test]
+    fn detect_sanshoku_doukou_matching_triplets() {
+        let tiles = vec![
+            t(Suit::Manzu, 4, 0),
+            t(Suit::Manzu, 4, 1),
+            t(Suit::Manzu, 4, 2),
+            t(Suit::Souzu, 4, 3),
+            t(Suit::Souzu, 4, 4),
+            t(Suit::Souzu, 4, 5),
+            t(Suit::Pinzu, 4, 6),
+            t(Suit::Pinzu, 4, 7),
+            t(Suit::Pinzu, 4, 8),
+        ];
+        let sets = vec![
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: vec![3, 4, 5],
+            },
+            DetectedMeld {
+                kind: MeldKind::Triplet,
+                tile_ids: vec![6, 7, 8],
+            },
+        ];
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
+        assert!(yaku.contains(&YakuKind::SanshokuDoukou));
+    }
+
+    #[test]
+    fn detect_pinfu_all_sequences_simple_pair() {
+        let tiles = vec![
+            t(Suit::Manzu, 2, 0),
+            t(Suit::Manzu, 3, 1),
+            t(Suit::Manzu, 4, 2),
+            t(Suit::Manzu, 5, 3),
+            t(Suit::Manzu, 6, 4),
+            t(Suit::Manzu, 7, 5),
+            t(Suit::Souzu, 3, 6),
+            t(Suit::Souzu, 4, 7),
+            t(Suit::Souzu, 5, 8),
+            t(Suit::Pinzu, 6, 9),
+            t(Suit::Pinzu, 7, 10),
+            t(Suit::Pinzu, 8, 11),
+            t(Suit::Manzu, 5, 12),
+            t(Suit::Manzu, 5, 13),
+        ];
+        let sets = vec![
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![3, 4, 5],
+            },
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![6, 7, 8],
+            },
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![9, 10, 11],
+            },
+            DetectedMeld {
+                kind: MeldKind::Pair,
+                tile_ids: vec![12, 13],
+            },
+        ];
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
+        assert!(yaku.contains(&YakuKind::Pinfu));
+        assert!(yaku.contains(&YakuKind::FullHand));
+        assert!(yaku.contains(&YakuKind::Tanyao));
+    }
+
+    #[test]
+    fn pinfu_rejects_dragon_pair() {
+        let tiles = vec![
+            t(Suit::Manzu, 2, 0),
+            t(Suit::Manzu, 3, 1),
+            t(Suit::Manzu, 4, 2),
+            t(Suit::Manzu, 5, 3),
+            t(Suit::Manzu, 6, 4),
+            t(Suit::Manzu, 7, 5),
+            t(Suit::Souzu, 3, 6),
+            t(Suit::Souzu, 4, 7),
+            t(Suit::Souzu, 5, 8),
+            t(Suit::Pinzu, 6, 9),
+            t(Suit::Pinzu, 7, 10),
+            t(Suit::Pinzu, 8, 11),
+            t(Suit::Dragon, 1, 12),
+            t(Suit::Dragon, 1, 13),
+        ];
+        let sets = vec![
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![0, 1, 2],
+            },
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![3, 4, 5],
+            },
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![6, 7, 8],
+            },
+            DetectedMeld {
+                kind: MeldKind::Sequence,
+                tile_ids: vec![9, 10, 11],
+            },
+            DetectedMeld {
+                kind: MeldKind::Pair,
+                tile_ids: vec![12, 13],
+            },
+        ];
+        let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
+        assert!(!yaku.contains(&YakuKind::Pinfu));
+    }
+
+    #[test]
     fn mult_bonus_at_levels_up() {
         // Level 1 = base; each subsequent level adds 0.5 mult and 20 chips.
         assert_eq!(YakuKind::Toitoi.mult_bonus_at(1), 3.0);
@@ -1383,7 +1709,7 @@ mod tests {
         }
         assert_eq!(
             YakuKind::all().len(),
-            14,
+            18,
             "YakuKind::all() must list every variant — update if you added one"
         );
     }

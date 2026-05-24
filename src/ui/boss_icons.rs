@@ -19,15 +19,14 @@ pub fn boss_icon_processed_asset(slug: &str) -> String {
 pub fn boss_icon_rgba(kind: BossKind) -> Option<(Vec<u8>, u32, u32)> {
     let slug = kind.atlas_slug();
     let path = boss_icon_processed_asset(slug);
-    if let Some(asset) = crate::asset_path::get(&path) {
-        if let Ok(img) = image::load_from_memory(&asset.data) {
+    if let Some(asset) = crate::asset_path::get(&path)
+        && let Ok(img) = image::load_from_memory(&asset.data) {
             let rgba = img.to_rgba8();
             let (w, h) = rgba.dimensions();
             if w > 0 && h > 0 {
                 return Some((rgba.into_raw(), w, h));
             }
         }
-    }
     crate::render::skip_tag_atlas::extract_sprite_rgba(BOSS_ICON_ATLAS_PNG, slug)
 }
 

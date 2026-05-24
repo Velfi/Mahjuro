@@ -1286,7 +1286,7 @@ fn build_extruded_pin_mesh_from_solid(
     // cells; the segments are stitched into closed loops and classified as
     // outer contours or interior holes. Each loop captures concave edges that
     // the old radial sweep would have convex-hulled over.
-    let contours = trace_silhouette_contours(&solid, w as i32, h as i32);
+    let contours = trace_silhouette_contours(solid, w as i32, h as i32);
     let contours = filter_border_noise_loops(contours, width as f32, height as f32, source_label);
     let polygons = group_contours_into_polygons(contours);
     if polygons.is_empty() {

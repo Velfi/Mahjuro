@@ -6,7 +6,7 @@ use crate::persistence;
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::controller_hints::{HintKey, HintRow, HintStyle, push_inline_hint_rows};
-use crate::ui::input::{InputMode, UiAction};
+use crate::ui::input::UiAction;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
 use crate::render::draw_cmd::UiFrame;
@@ -254,6 +254,19 @@ impl ProfileSelectScene {
 }
 
 impl SceneBehavior for ProfileSelectScene {
+    fn face_button_bindings(
+        &self,
+        _ctx: crate::ui::input::FaceBindingCtx,
+    ) -> crate::ui::input::FaceButtonBindings {
+        if self.confirm_delete != ConfirmDelete::None {
+            return crate::ui::input::FaceButtonBindings::default();
+        }
+        crate::ui::input::FaceButtonBindings {
+            west_press: Some(UiAction::Delete),
+            ..Default::default()
+        }
+    }
+
     fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
         // ── Confirmation dialog sub-state ──────────────────────────────
         if let ConfirmDelete::Pending(del_idx) = self.confirm_delete {
@@ -296,10 +309,7 @@ impl SceneBehavior for ProfileSelectScene {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
                 return Some(self.pop_return_scene());
             }
-            let delete_pressed = matches!(a, UiAction::Delete)
-                || (matches!(a, UiAction::WestFacePress)
-                    && ctx.input_mode == InputMode::Controller);
-            if delete_pressed {
+            if matches!(a, UiAction::Delete) {
                 let idx = self.cursor();
                 if persistence::profile_exists(idx) {
                     self.confirm_delete = ConfirmDelete::Pending(idx);
@@ -497,10 +507,30 @@ impl SceneBehavior for ProfileSelectScene {
                 user: 0,
             });
 
-            let dialog_w = (300.0 * scale).min(w * 0.85);
-            let dialog_h = (120.0 * scale).max(80.0);
+            let hint_style = HintStyle::profile_footer(h);
+            let dialog_pad_x = (18.0 * scale).max(14.0);
+            let dialog_pad_y = (16.0 * scale).max(12.0);
+            let section_gap = (10.0 * scale).max(8.0);
+
+            let dialog_title_font = typography::size(typography::H24, h);
+            let dialog_body_font = typography::size(typography::H36, h);
+            let title_line_h = dialog_title_font * 1.35;
+            let body_line_h = dialog_body_font * 1.35;
+            let btn_h = hint_style.line_h;
+
+            let content_h = dialog_pad_y
+                + title_line_h
+                + section_gap
+                + body_line_h
+                + section_gap
+                + btn_h
+                + dialog_pad_y;
+            let dialog_w = ((360.0 * scale).max(280.0)).min(w * 0.85);
+            let dialog_h = content_h;
             let dialog_x = (w - dialog_w) * 0.5;
             let dialog_y = (h - dialog_h) * 0.5;
+            let inner_x = dialog_x + dialog_pad_x;
+            let inner_w = (dialog_w - dialog_pad_x * 2.0).max(1.0);
 
             // Border (full rectangle).
             let b = 2.0 * scale;
@@ -521,31 +551,27 @@ impl SceneBehavior for ProfileSelectScene {
                 user: 0,
             });
 
-            let dialog_title_font = typography::size(typography::H24, h);
-            let dialog_body_font = typography::size(typography::H36, h);
-            let msg_h = dialog_title_font * 1.35;
-            let msg_y = dialog_y + dialog_h * 0.25;
+            let mut content_y = dialog_y + dialog_pad_y;
             frame.text(TextLabel {
-                rect: [dialog_x, msg_y, dialog_w, msg_h],
+                rect: [inner_x, content_y, inner_w, title_line_h],
                 text: format!("Delete Profile {}?", del_idx + 1),
                 color: color::CHAMPAGNE,
                 font_px: Some(dialog_title_font),
+                align: TextAlign::Center,
                 ..Default::default()
             });
 
-            let sub_h = dialog_body_font * 1.35;
-            let hint_y = dialog_y + dialog_h * 0.55;
+            content_y += title_line_h + section_gap;
             frame.text(TextLabel {
-                rect: [dialog_x, hint_y, dialog_w, sub_h],
+                rect: [inner_x, content_y, inner_w, body_line_h],
                 text: "All progress will be lost.".into(),
                 color: color::STONE,
                 font_px: Some(dialog_body_font),
+                align: TextAlign::Center,
                 ..Default::default()
             });
 
-            let hint_style = HintStyle::profile_footer(h);
-            let btn_h = hint_style.line_h;
-            let btn_y = dialog_y + dialog_h * 0.78;
+            content_y += body_line_h + section_gap;
             let dialog_footer = HintRow::new()
                 .bind(
                     "confirm",
@@ -565,7 +591,7 @@ impl SceneBehavior for ProfileSelectScene {
                     )],
                 )
                 .into_segments();
-            let dialog_rect = [dialog_x, btn_y, dialog_w, btn_h];
+            let dialog_rect = [inner_x, content_y, inner_w, btn_h];
             push_inline_hint_rows(
                 &mut frame,
                 &ctx,
@@ -596,7 +622,7 @@ impl SceneBehavior for ProfileSelectScene {
                     "delete",
                     vec![HintKey::for_input(
                         ctx.input_mode,
-                        UiAction::WestFacePress,
+                        UiAction::Delete,
                         "keyboard_x",
                     )],
                 )

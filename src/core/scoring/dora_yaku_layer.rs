@@ -1,9 +1,8 @@
-//! Dora chips, yaku chip/mult lines, and structure depth — the “standard” scoring
+//! Dora chips and yaku chip/mult lines — the “standard” scoring
 //! block between early relics ([`super::pre_yaku_layer`]) and post-yaku relics
 //! ([`super::relic_mult_layer`]).
 
 use crate::core::relic::RelicId;
-use crate::core::structure::structure_depth_mult_bonus;
 use crate::core::yaku::{YakuKind, detect_yaku_with_wind};
 
 use super::layer_input::{DoraYakuLayerOpts, ScoringLayerInput, ScoringLayerOut};
@@ -13,7 +12,7 @@ use super::{ScoreStep, StepKind, combine, tile_is_debuffed};
 /// Chips added per matching tile when a face is on the dora plinth.
 pub const DORA_CHIPS_PER_TILE: i32 = 100;
 
-/// Apply Dora, scored yaku, and structure depth mult. Returns the yaku list used for the breakdown.
+/// Apply Dora and scored yaku. Returns the yaku list used for the breakdown.
 pub(crate) fn apply_dora_yaku_and_structure(
     input: &ScoringLayerInput<'_>,
     out: ScoringLayerOut<'_>,
@@ -111,13 +110,6 @@ pub(crate) fn apply_dora_yaku_and_structure(
             push_chips(steps, chips, *mult, yaku.name(), chip_bonus);
         }
         push_mult(steps, *chips, mult, yaku.name(), mult_bonus);
-    }
-
-    if let Some(st) = &ctx.structure {
-        let depth = structure_depth_mult_bonus(st.meld_count);
-        if depth > 0.0 {
-            push_mult(steps, *chips, mult, "Structure depth", depth);
-        }
     }
 
     detected_yaku

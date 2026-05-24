@@ -1,9 +1,10 @@
 //! Keyword RGBA tints shared by UI helpers and the archive plaque decal raster.
 //!
-//! Suit-family needles (`winds`, `dragons`, …) skip tinting when the token
-//! looks title-cased (`Winds` in "Wild Winds") so proper names are not
-//! recolored; `winds`, `WINDS`, and game jargon (`Chips`, `Mult`, …) behave as
-//! before.
+//! Honor / bonus suit needles (`winds`, `dragons`, …) skip tinting when the
+//! token looks title-cased (`Winds` in "Wild Winds") so proper names are not
+//! recolored. Numbered suits (`Manzu`, `Souzu`, `Pinzu`) always tint — they
+//! are game jargon, not ordinary English. HUD verbs (`Chips`, `Mult`, …)
+//! behave as before.
 
 use crate::render::theme::color;
 
@@ -38,9 +39,6 @@ const SKIP_WHEN_TITLE_CASED: &[&str] = &[
     "bamboos",
     "bamboo",
     "dots",
-    "manzu",
-    "souzu",
-    "pinzu",
     "winds",
     "dragons",
     "flowers",
@@ -201,6 +199,15 @@ mod tests {
         let d = [0.5, 0.5, 0.5, 1.0];
         let c = color_for_token("Chips", d);
         assert_ne!(c, d);
+    }
+
+    #[test]
+    fn title_cased_manzu_still_keywords() {
+        use crate::render::theme::color;
+        let d = [0.5, 0.5, 0.5, 1.0];
+        assert_eq!(color_for_token("Manzu", d), color::keyword::MANZU);
+        assert_eq!(color_for_token("Souzu", d), color::keyword::SOUZU);
+        assert_eq!(color_for_token("Pinzu", d), color::keyword::PINZU);
     }
 
     #[test]

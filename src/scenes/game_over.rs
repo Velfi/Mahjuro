@@ -291,7 +291,7 @@ impl SceneBehavior for GameOverScene {
 
         // Hint sits below the panel, left-aligned.
         let hint_font = typography::size(typography::H42, h);
-        let hint_h = hint_font * 1.4;
+        let hint_h = crate::ui::colored_keywords::colored_row_line_step(hint_font);
         let hint_rect = [
             panel_x,
             panel_y + panel_h + hint_font * 0.6,
@@ -314,7 +314,7 @@ impl SceneBehavior for GameOverScene {
                 frame.moonlit_water();
             }
         } else if let Some(kind) = self.memorial_kind {
-            super::game_over_tableau::push_defeat_memorial_tableau(&mut frame, &ctx.layout, kind);
+            super::game_over_tableau::push_defeat_memorial_tableau(&mut frame, ctx.layout, kind);
         } else if ctx.effect_layers.fullscreen_water_backdrop {
             frame.sunlit_water();
         }

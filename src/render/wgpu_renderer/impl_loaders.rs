@@ -88,7 +88,7 @@ impl WgpuRenderer {
                         &mesh_source_label,
                     ) {
                         // Cache the CPU triangle list alongside the GPU mesh so
-                        // `pick_collection_object` / `pick_shop_object` can do
+                        // `pick_shop_object` can do
                         // per-triangle ray casts against the real silhouette
                         // instead of a loose AABB slab.
                         let tris: Vec<[glam::Vec3; 3]> = cpu

@@ -1,6 +1,6 @@
 //! Guided onboarding prompts during the Lessons blind.
 
-use crate::game::onboarding::{finale_intro_message, lessons_affinity_indices};
+use crate::game::onboarding::{finale_intro_message};
 use crate::game::run::RunState;
 use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::{color, metrics, typography};
@@ -21,20 +21,6 @@ pub fn sync_onboarding_step(run: &mut RunState) {
     }
 }
 
-pub fn lessons_hint_indices(run: &RunState) -> Option<Vec<usize>> {
-    if !run.onboarding_lessons_active() {
-        return None;
-    }
-    let interaction = crate::game::engine::GameEngine::read_interaction(run);
-    if interaction.selected_indices.is_empty() {
-        return None;
-    }
-    Some(lessons_affinity_indices(
-        &interaction.hand,
-        &interaction.selected,
-    ))
-}
-
 pub fn push_lessons_banner(frame: &mut UiFrame, ctx: &DrawCtx<'_>, run: &RunState) {
     let Some(ref onboarding) = run.onboarding else {
         return;
@@ -48,10 +34,13 @@ pub fn push_lessons_banner(frame: &mut UiFrame, ctx: &DrawCtx<'_>, run: &RunStat
     let scale = metrics::scene_scale(w, h);
     let prompt = onboarding.lessons_prompt(run);
 
-    let banner_w = (w * 0.72).min(720.0 * scale);
-    let banner_h = (56.0 * scale).max(44.0);
-    let banner_x = (w - banner_w) * 0.5;
-    let banner_y = h * 0.055;
+    // Full-width strip over the score panel so the 2D readout cannot paint
+    // above the tutorial copy (`overlay_quads` land in the post-tonemap pass).
+    let sp = ctx.layout.score_panel;
+    let banner_w = w;
+    let banner_x = 0.0;
+    let banner_y = 0.0;
+    let banner_h = (sp.y + sp.h + 10.0 * scale).max(56.0 * scale).max(44.0);
 
     let quads = vec![
         GpuInstance {
@@ -102,7 +91,7 @@ pub fn push_lessons_banner(frame: &mut UiFrame, ctx: &DrawCtx<'_>, run: &RunStat
         });
     }
 
-    frame.quads(quads);
+    frame.overlay_quads(quads);
     frame.texts(texts);
 }
 
@@ -157,7 +146,7 @@ pub fn push_finale_intro_banner(frame: &mut UiFrame, ctx: &DrawCtx<'_>, run: &Ru
         h,
     );
 
-    frame.quads(quads);
+    frame.overlay_quads(quads);
     frame.texts(texts);
 }
 

@@ -30,6 +30,25 @@ impl SceneBehavior for GameplayScene {
         self.pause_menu.paused || !self.cascade_queue.is_empty()
     }
 
+    fn face_button_bindings(
+        &self,
+        ctx: crate::ui::input::FaceBindingCtx,
+    ) -> crate::ui::input::FaceButtonBindings {
+        if ctx.xy_quick_action {
+            crate::ui::input::FaceButtonBindings {
+                west_press: Some(crate::ui::input::UiAction::WestFacePress),
+                north_press: Some(crate::ui::input::UiAction::NorthFacePress),
+                ..Default::default()
+            }
+        } else {
+            crate::ui::input::FaceButtonBindings {
+                west_press: Some(crate::ui::input::UiAction::FocusDiscardButton),
+                north_press: Some(crate::ui::input::UiAction::FocusPlayButton),
+                ..Default::default()
+            }
+        }
+    }
+
     fn update(&mut self, mut ctx: UpdateCtx<'_>) -> SceneTransition {
         let now = Instant::now();
         let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
@@ -40,7 +59,7 @@ impl SceneBehavior for GameplayScene {
             let _g = crate::render::cpu_profiler::scope("update.tick_basic_animations");
             animation_state::tick_basic_animations(self, &mut ctx, now, dt);
         }
-        discard_animation::tick_discard_animation(self, now, &ctx.cascade_tuning);
+        discard_animation::tick_discard_animation(self, now, ctx.cascade_tuning);
         // Cursor position is captured every frame for cursor-mode hit-test
         // and tooltip placement. The legacy `cursor_moved` guard that used
         // to drop stale controller focus on mouse motion is gone — Phase A
@@ -433,6 +452,10 @@ impl SceneBehavior for GameplayScene {
         //   3. PAUSE OVERLAY (`pause_quads` + `pause_text`) — built only
         //      when the pause menu is open; sits above focus rings.
         //
+        //   4. ONBOARDING OVERLAY (`onboarding_hints`) — post-tonemap
+        //      `overlay_quads` + text; pushed last so lessons / finale
+        //      prompts sit above the gameplay HUD.
+        //
         let mut hud_quads: Vec<GpuInstance> = Vec::new();
         let mut hud_text: Vec<TextLabel> = Vec::new();
         let mut inspect_tooltip_quads: Vec<GpuInstance> = Vec::new();
@@ -665,25 +688,21 @@ impl SceneBehavior for GameplayScene {
             && !interaction.selected_indices.is_empty()
             && self.cascade_queue.is_empty()
         {
-            if let Some(affinity) = onboarding_hints::lessons_hint_indices(ctx.run) {
-                affinity
-            } else {
-                let selection_mask: u32 = interaction
-                    .selected_indices
-                    .iter()
-                    .fold(0u32, |acc, &i| acc | (1u32 << i.min(31)));
-                let mut cache = self.suggest_hint_cache.borrow_mut();
-                if !cache.matches(&interaction.hand, selection_mask) {
-                    cache.hand_uids.clear();
-                    cache
-                        .hand_uids
-                        .extend(interaction.hand.iter().map(|t| t.id));
-                    cache.selection_mask = selection_mask;
-                    cache.hints =
-                        suggest_completions(&interaction.hand, &interaction.selected_indices);
-                }
-                cache.hints.clone()
+            let selection_mask: u32 = interaction
+                .selected_indices
+                .iter()
+                .fold(0u32, |acc, &i| acc | (1u32 << i.min(31)));
+            let mut cache = self.suggest_hint_cache.borrow_mut();
+            if !cache.matches(&interaction.hand, selection_mask) {
+                cache.hand_uids.clear();
+                cache
+                    .hand_uids
+                    .extend(interaction.hand.iter().map(|t| t.id));
+                cache.selection_mask = selection_mask;
+                cache.hints =
+                    suggest_completions(&interaction.hand, &interaction.selected_indices);
             }
+            cache.hints.clone()
         } else {
             vec![]
         };
@@ -872,7 +891,7 @@ impl SceneBehavior for GameplayScene {
                     selected: is_selected && !is_invalid_flash,
                     hovered: is_focused && !is_invalid_flash,
                     outline: (is_selected || is_focused) && !is_invalid_flash,
-                    glow: is_hinted || is_invalid_flash || (is_selected && !is_invalid_flash),
+                    glow: is_hinted || is_invalid_flash || is_selected,
                     glow_color: if is_invalid_flash {
                         Some([1.00, 0.14, 0.08, 0.72 + 0.28 * invalid_flash])
                     } else {
@@ -1738,7 +1757,7 @@ impl SceneBehavior for GameplayScene {
         frame.texts(pause_text);
 
         frame.candle_light_count = candle_placements.len() as u32;
-        frame.flame_height_world = crate::render::flame_volume::flame_height_world(&layout);
+        frame.flame_height_world = crate::render::flame_volume::flame_height_world(layout);
         frame.scene_lighting.set_smooth_points(point_lights);
         frame.scene_lighting.spot_lights = spot_lights;
         // Projected rects for the discard river + play mirror: hit-test order
@@ -1803,23 +1822,5 @@ impl SceneBehavior for GameplayScene {
         debug_assert_marker_uniqueness(&frame);
 
         insert_structure_before_hand(frame, structure_showcase, structure_pile_tokens)
-    }
-}
-
-impl SceneBehavior for Box<GameplayScene> {
-    fn pause_options_overlay(&self) -> Option<&options::OptionsScene> {
-        (**self).pause_options_overlay()
-    }
-
-    fn has_blocking_overlay(&self) -> bool {
-        (**self).has_blocking_overlay()
-    }
-
-    fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
-        (**self).update(ctx)
-    }
-
-    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
-        (**self).draw_frame(ctx)
     }
 }

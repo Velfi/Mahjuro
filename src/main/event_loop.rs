@@ -248,19 +248,12 @@ impl App {
     }
 
     fn gamepad_poll_ctx(&self) -> crate::ui::input::GamepadPollCtx {
-        let shop_face = matches!(&self.scene, Scene::Shop(_))
-            && self.overlay_stack.is_empty()
-            && !self.scene.has_blocking_overlay();
-        let collection_uses_north_for_inspect = matches!(&self.scene, Scene::Collection(_))
-            && self.overlay_stack.is_empty()
-            && !self.scene.has_blocking_overlay();
         let showcase_orbit_overlay = self
             .overlay_stack
             .last()
             .is_some_and(|top| matches!(top, Scene::Showcase(s) if s.wants_orbit_input()));
         crate::ui::input::GamepadPollCtx {
-            shop_face_buttons: shop_face,
-            collection_uses_north_for_inspect,
+            face_bindings: self.active_face_bindings(),
             item_inspect_overlay: showcase_orbit_overlay,
         }
     }

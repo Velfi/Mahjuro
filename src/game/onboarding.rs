@@ -1,9 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::core::boss::BossKind;
-use crate::core::hand::MeldKind;
 use crate::core::scoring::ScoreBreakdown;
-use crate::core::tile::Tile;
 use crate::core::yaku::YakuKind;
 use crate::game::engine::GameEngine;
 
@@ -58,18 +56,18 @@ impl OnboardingState {
         let has_structure = gameplay.has_structure;
 
         match self.step {
-            0 if !has_selection => "Select two matching tiles.",
+            0 if !has_selection => "Select tiles that form a valid meld.",
             0 | 1 if has_selection && !has_structure => {
-                "Press Play to bank your pair into the structure."
+                "Press Play to bank your meld into the structure."
             }
             2 if has_structure => "Press Cash In to score your structure.",
             3 if !self.discard_river_tooltip_shown => {
                 "Swap a tile you don't need — select it, then Discard."
             }
             3 => "Try a discard to improve your hand.",
-            4 => "Bank another pair, then Cash In again to reach the target.",
-            _ if !has_selection => "Select matching tiles to form a pair.",
-            _ if has_selection && !has_structure => "Press Play to bank your pair.",
+            4 => "Bank another meld, then Cash In again to reach the target.",
+            _ if !has_selection => "Select tiles to form a valid meld.",
+            _ if has_selection && !has_structure => "Press Play to bank your meld.",
             _ if has_structure => "Press Cash In when you're ready to score.",
             _ => "Reach the target score before you run out of plays.",
         }
@@ -87,43 +85,15 @@ pub fn tutorial_yaku() -> Vec<YakuKind> {
     vec![YakuKind::FullHand, YakuKind::Chiitoitsu]
 }
 
-/// Tile indices that could extend the current selection into a pair (Lessons blind).
-pub fn lessons_affinity_indices(hand: &[Tile], selected: &[bool]) -> Vec<usize> {
-    let sel_tiles: Vec<&Tile> = hand
-        .iter()
-        .zip(selected.iter())
-        .filter(|(_, s)| **s)
-        .map(|(t, _)| t)
-        .collect();
-
-    if sel_tiles.is_empty() {
-        return Vec::new();
-    }
-
-    let mut affinity = Vec::new();
-    for (i, tile) in hand.iter().enumerate() {
-        if selected[i] {
-            continue;
-        }
-        if sel_tiles
-            .iter()
-            .any(|s| s.suit == tile.suit && s.rank == tile.rank)
-        {
-            affinity.push(i);
-        }
-    }
-    affinity
-}
-
 /// Hint text after failing the Lessons blind.
 pub fn lessons_failure_feedback(round_score: u64, target: u32, plays_remaining: u32) -> String {
     if round_score == 0 {
-        return "You scored 0 — select matching tiles, press Play to bank them, then Cash In."
+        return "You scored 0 — select valid tiles, press Play to bank them, then Cash In."
             .to_string();
     }
     if plays_remaining > 0 {
         return format!(
-            "You scored {} / {}. You still had {} play{} left — bank another pair and Cash In again.",
+            "You scored {} / {}. You still had {} play{} left — bank another meld and Cash In again.",
             round_score,
             target,
             plays_remaining,
@@ -131,7 +101,7 @@ pub fn lessons_failure_feedback(round_score: u64, target: u32, plays_remaining: 
         );
     }
     format!(
-        "You scored {} / {} — {} short. Try discarding a useless tile, then bank another pair before you Cash In.",
+        "You scored {} / {} — {} short. Try discarding a useless tile, then bank another meld before you Cash In.",
         round_score,
         target,
         target.saturating_sub(round_score.min(u32::MAX as u64) as u32),
@@ -196,7 +166,3 @@ pub fn finale_intro_message() -> &'static str {
      are your best yaku here. You can retry if you miss the target."
 }
 
-/// Meld kinds allowed during the Lessons blind (pairs only keeps the loop simple).
-pub fn lessons_allowed_melds() -> &'static [MeldKind] {
-    &[MeldKind::Pair]
-}

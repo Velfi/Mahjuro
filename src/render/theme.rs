@@ -92,8 +92,6 @@ pub mod color {
         pub const POSITIVE: [f32; 4] = [0.384, 0.722, 0.580, 1.0];
         /// `#C75C66` — losses, negative series.
         pub const NEGATIVE: [f32; 4] = [0.780, 0.361, 0.400, 1.0];
-        /// `#D9A658` — peaks, last-bar highlight.
-        pub const HIGHLIGHT: [f32; 4] = [0.851, 0.651, 0.345, 1.0];
         /// `#B8924A` — secondary chart accent (discovery stamp, warm fills).
         pub const ACCENT: [f32; 4] = [0.722, 0.573, 0.290, 1.0];
         /// `#B8A078` — neutral magnitude bars (score distribution segments).

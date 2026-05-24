@@ -57,10 +57,10 @@ fn capped_image_base(img: &CappedGltfImage) -> (Vec<u8>, u32, u32) {
 }
 
 #[inline]
-fn capped_image_at<'a>(
-    capped: &'a [Option<CappedGltfImage>],
+fn capped_image_at(
+    capped: &[Option<CappedGltfImage>],
     index: usize,
-) -> Option<&'a CappedGltfImage> {
+) -> Option<&CappedGltfImage> {
     capped.get(index).and_then(|o| o.as_ref())
 }
 
@@ -1076,8 +1076,8 @@ pub fn walk_room_env_node(
         );
     }
 
-    if let Some(mesh) = node.mesh() {
-        if !skip_room_env_authoring_mesh_node_name(name) && !hooks.skip_env_mesh(name) {
+    if let Some(mesh) = node.mesh()
+        && !skip_room_env_authoring_mesh_node_name(name) && !hooks.skip_env_mesh(name) {
             match hooks.mesh_policy(name) {
                 RoomMeshPolicy::SkipDrawCollisionIfMarker => {
                     if hooks.is_marker(name) {
@@ -1154,7 +1154,6 @@ pub fn walk_room_env_node(
                 }
             }
         }
-    }
 
     for child in node.children() {
         walk_room_env_node(child, world, hooks, state)?;

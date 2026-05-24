@@ -358,45 +358,6 @@ pub fn chronicle_run_outcome_short(rec: &RunRecord) -> &'static str {
     }
 }
 
-/// Normalized 0..1 samples for a run's per-blind score sparkline.
-pub fn run_blind_sparkline(rec: &RunRecord) -> Vec<f32> {
-    let scores = run_blind_scores(rec);
-    if scores.is_empty() {
-        return Vec::new();
-    }
-    let mx = scores.iter().copied().max().unwrap_or(1).max(1) as f32;
-    scores.iter().map(|s| *s as f32 / mx).collect()
-}
-
-fn run_blind_scores(rec: &RunRecord) -> Vec<u64> {
-    if !rec.chronicle.blind_scores.is_empty() {
-        return rec.chronicle.blind_scores.clone();
-    }
-    legacy_blind_scores(rec)
-}
-
-fn legacy_blind_scores(rec: &RunRecord) -> Vec<u64> {
-    if !rec.score_after_ante.is_empty() {
-        let mut out = Vec::new();
-        let mut prev = 0u64;
-        for &(_, cum) in &rec.score_after_ante {
-            let delta = cum.saturating_sub(prev).max(1);
-            let third = delta / 3;
-            out.extend([third, third, delta.saturating_sub(third * 2)]);
-            prev = cum;
-        }
-        if matches!(rec.outcome, RunOutcome::Defeat { .. }) && rec.round_score > 0 {
-            out.push(rec.round_score);
-        }
-        return out;
-    }
-    if rec.round_score > 0 {
-        vec![rec.round_score]
-    } else {
-        Vec::new()
-    }
-}
-
 pub fn career_kpi_strip(progress: &PlayerProgress) -> Vec<CareerKpi> {
     let serious: Vec<&RunRecord> = serious_records(progress).collect();
     if serious.is_empty() {
@@ -604,12 +565,11 @@ pub fn run_detail_model(progress: &PlayerProgress, display_num: u32, rec: &RunRe
         .filter(|t| !t.is_empty())
         .unwrap_or_else(|| rec.best_hand_tiles.clone());
     let mut tiles_representative = false;
-    if tiles.is_empty() {
-        if let Some(yk) = run_dominant_yaku(rec) {
+    if tiles.is_empty()
+        && let Some(yk) = run_dominant_yaku(rec) {
             tiles = yaku_page_tiles(yk);
             tiles_representative = !tiles.is_empty();
         }
-    }
 
     let mut yaku_rows: Vec<(YakuKind, u32)> = if !rec.chronicle.yaku_contributions.is_empty() {
         rec.chronicle

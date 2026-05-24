@@ -330,24 +330,17 @@ impl App {
         let mut button_clicks: Vec<u32> = Vec::new();
         button_clicks.append(&mut self.mouse_button_clicks);
         let mut hide_cursor = false;
+        let showcase_orbit_overlay = self
+            .overlay_stack
+            .last()
+            .is_some_and(|top| matches!(top, Scene::Showcase(s) if s.wants_orbit_input()));
+        let gp_ctx = crate::ui::input::GamepadPollCtx {
+            face_bindings: self.active_face_bindings(),
+            item_inspect_overlay: showcase_orbit_overlay,
+        };
         if let Some(input) = self.input.as_mut() {
             input.item_inspect_orbit_stick = (0.0, 0.0);
             input.item_inspect_zoom_triggers = 0.0;
-            let shop_face = matches!(&self.scene, Scene::Shop(_))
-                && self.overlay_stack.is_empty()
-                && !self.scene.has_blocking_overlay();
-            let collection_uses_north_for_inspect = matches!(&self.scene, Scene::Collection(_))
-                && self.overlay_stack.is_empty()
-                && !self.scene.has_blocking_overlay();
-            let showcase_orbit_overlay = self
-                .overlay_stack
-                .last()
-                .is_some_and(|top| matches!(top, Scene::Showcase(s) if s.wants_orbit_input()));
-            let gp_ctx = crate::ui::input::GamepadPollCtx {
-                shop_face_buttons: shop_face,
-                collection_uses_north_for_inspect,
-                item_inspect_overlay: showcase_orbit_overlay,
-            };
             if input.gamepad_frame_tick(shell, gp_ctx, &mut actions) {
                 hide_cursor = true;
             }
@@ -717,14 +710,12 @@ impl App {
                 hand: r.pick_hand_tile(cursor_pos.0, cursor_pos.1),
                 shop: r.pick_shop_object(cursor_pos.0, cursor_pos.1),
                 gameplay: r.pick_gameplay_object(cursor_pos.0, cursor_pos.1),
-                collection: r.pick_collection_object(cursor_pos.0, cursor_pos.1),
             }
         } else {
             FramePicks::default()
         };
         let picked_shop_object = self.frame_picks.shop;
         let picked_gameplay_object = self.frame_picks.gameplay;
-        let picked_collection_object = self.frame_picks.collection;
         let picked_hand_tile_for_update = self.frame_picks.hand;
         let mut scroll_lines = std::mem::take(&mut self.scroll_delta);
         // Right stick vertical scroll is opt-in by scene: Yaku Journal and
@@ -778,7 +769,6 @@ impl App {
                 cascade_tuning: &self.cascade_tuning,
                 picked_shop_object,
                 picked_gameplay_object,
-                picked_collection_object,
                 input_mode: self
                     .input
                     .as_ref()
@@ -865,7 +855,6 @@ impl App {
                     cascade_tuning: &self.cascade_tuning,
                     picked_shop_object,
                     picked_gameplay_object,
-                    picked_collection_object,
                     input_mode: self
                         .input
                         .as_ref()

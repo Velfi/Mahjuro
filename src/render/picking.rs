@@ -368,45 +368,6 @@ impl WgpuRenderer {
         best.map(|(h, _)| h)
     }
 
-    /// Cast a ray from the camera through the cursor and return the
-    /// `pick_id` of the closest collection-scene relic the ray passes
-    /// through. Per-triangle trimesh test against the silhouette-extruded
-    /// relic mesh, so clicks that land in the empty space around a relic's
-    /// shape don't register.
-    pub fn pick_collection_object(&self, cursor_x: f32, cursor_y: f32) -> Option<u32> {
-        let cam = self.last_pick_camera.as_ref()?;
-        if self.last_pickable_relic_models.is_empty() {
-            return None;
-        }
-        let nx = (cursor_x / cam.viewport_w) * 2.0 - 1.0;
-        let ny = 1.0 - (cursor_y / cam.viewport_h) * 2.0;
-        let near_clip = glam::Vec4::new(nx, ny, 0.0, 1.0);
-        let far_clip = glam::Vec4::new(nx, ny, 1.0, 1.0);
-        let near_w = cam.inv_view_proj * near_clip;
-        let far_w = cam.inv_view_proj * far_clip;
-        if near_w.w.abs() < 1e-6 || far_w.w.abs() < 1e-6 {
-            return None;
-        }
-        let near = near_w.truncate() / near_w.w;
-        let far = far_w.truncate() / far_w.w;
-        let world_origin = near;
-        let world_dir = (far - near).normalize_or_zero();
-        if world_dir.length_squared() < 1e-6 {
-            return None;
-        }
-        let mut best: Option<(u32, f32)> = None;
-        for (pid, model, rid) in &self.last_pickable_relic_models {
-            let tris = self.relic_tris(*rid);
-            if let Some(t) = Self::trimesh_hit_t_tris(tris, *model, world_origin, world_dir) {
-                match best {
-                    Some((_, bt)) if t >= bt => {}
-                    _ => best = Some((*pid, t)),
-                }
-            }
-        }
-        best.map(|(pid, _)| pid)
-    }
-
     /// Cast a ray from the camera through the cursor and return the closest
     /// gameplay-scene object hit (yaku tablet, wood action tablet, or
     /// discard bowl). One-frame-stale snapshot pattern, mirroring
@@ -565,48 +526,5 @@ impl WgpuRenderer {
             .get(&relic_id)
             .map(|v| v.as_slice())
             .unwrap_or(&self.relic_box_tris)
-    }
-
-    /// Möller–Trumbore ray vs. triangle list, with tris supplied directly.
-    /// Used for relics where the mesh varies per-ID.
-    pub(super) fn trimesh_hit_t_tris(
-        tris: &[[glam::Vec3; 3]],
-        model: glam::Mat4,
-        world_origin: glam::Vec3,
-        world_dir: glam::Vec3,
-    ) -> Option<f32> {
-        let inv = model.inverse();
-        let lo = inv.transform_point3(world_origin);
-        let ld = inv.transform_vector3(world_dir);
-        const EPS: f32 = 1e-7;
-        let mut best: Option<f32> = None;
-        for [a, b, c] in tris {
-            let e1 = *b - *a;
-            let e2 = *c - *a;
-            let p = ld.cross(e2);
-            let det = e1.dot(p);
-            if det.abs() < EPS {
-                continue;
-            }
-            let inv_det = 1.0 / det;
-            let s = lo - *a;
-            let u = s.dot(p) * inv_det;
-            if !(0.0..=1.0).contains(&u) {
-                continue;
-            }
-            let q = s.cross(e1);
-            let v = ld.dot(q) * inv_det;
-            if v < 0.0 || u + v > 1.0 {
-                continue;
-            }
-            let t = e2.dot(q) * inv_det;
-            if t > EPS {
-                best = Some(match best {
-                    Some(bt) if bt <= t => bt,
-                    _ => t,
-                });
-            }
-        }
-        best
     }
 }

@@ -556,12 +556,12 @@ pub fn push_styled_text_block(
     let inner_h = (h - 2.0 * pad).max(1.0);
     let line_h = typography::size(style.tier, window_h);
     let font_px = line_h;
-    let line_step = line_h * 1.4;
+    let line_step = crate::ui::colored_keywords::colored_row_line_step(line_h);
     let max_lines = ((inner_h / line_step).floor() as usize).max(1);
 
     let regular = load_ui_font();
-    let italic_owned = load_ui_font_italic();
-    let italic_f = italic_owned.as_ref().or(regular.as_ref());
+    let italic = load_ui_font_italic();
+    let italic_f = italic.or(regular);
 
     let cells = runs_to_cells_with_glossary(&runs, style.color, style.glossary_tint);
     let hard_lines = split_lines_by_newline(&cells);
@@ -571,7 +571,7 @@ pub fn push_styled_text_block(
             visual_lines.push(Vec::new());
             continue;
         }
-        let mut wrapped = wrap_cells_hard(&hl, inner_w, font_px, regular.as_ref(), italic_f);
+        let mut wrapped = wrap_cells_hard(&hl, inner_w, font_px, regular, italic_f);
         visual_lines.append(&mut wrapped);
     }
     if visual_lines.is_empty() {
@@ -586,7 +586,7 @@ pub fn push_styled_text_block(
         if line_cells.is_empty() {
             continue;
         }
-        let chunks = merge_cells_for_runs(line_cells, font_px, regular.as_ref(), italic_f);
+        let chunks = merge_cells_for_runs(line_cells, font_px, regular, italic_f);
         let line_y = base_y + row as f32 * line_step;
         let total_w: f32 = chunks.iter().map(|c| c.advance_width).sum();
         let mut cx = match style.align {

@@ -121,10 +121,7 @@ pub enum PromptInputSurface {
     MouseOrKeyboard,
 }
 
-/// Core shop HUD actions in **Exit → Select → Sell → Inspect** order (matches [`crate::ui::kenney_prompt_paths::shop_keyboard_prompt_icons`]).
-pub const SHOP_LEGEND_VERB_LABELS: [&str; 4] = ["Exit", "Select", "Sell", "Inspect"];
-
-/// For [`ButtonPrompt::shop_floating_legend`] unit tests only.
+/// For shop floating-legend unit tests only.
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ShopLegendTextStyle {
@@ -170,6 +167,13 @@ impl ButtonPrompt {
                     FaceButton::North
                 }
             }
+            UiAction::Delete => {
+                if swap_xy {
+                    FaceButton::North
+                } else {
+                    FaceButton::West
+                }
+            }
             _ => return None,
         })
     }
@@ -183,22 +187,6 @@ impl ButtonPrompt {
     ) -> Option<&'static str> {
         let face = Self::action_face(action, swap_ab, swap_xy)?;
         Some(face.label(style))
-    }
-
-    fn inspect_camera_extras(style: GamepadStyle) -> String {
-        let t = style.analog_trigger_pair_label();
-        format!("Right stick: orbit item  ·  Left stick: cycle items  ·  {t} zoom")
-    }
-
-    /// Second shop HUD line while **item inspect** is active (gamepad vs mouse).
-    pub fn shop_inspect_mode_hint(surface: PromptInputSurface, style: GamepadStyle) -> String {
-        match surface {
-            PromptInputSurface::Controller => Self::inspect_camera_extras(style),
-            PromptInputSurface::MouseOrKeyboard => {
-                "Arrows or drag: orbit item · WASD: cycle items · Shift+W/↑ zoom in · Shift+S/↓ zoom out · Mouse wheel: zoom (inspect)"
-                    .to_string()
-            }
-        }
     }
 }
 
@@ -254,6 +242,21 @@ mod tests {
         format!("{} {}", face(style, button), rest)
     }
 
+    fn inspect_camera_extras(style: GamepadStyle) -> String {
+        let t = style.analog_trigger_pair_label();
+        format!("Right stick: orbit item  ·  Left stick: cycle items  ·  {t} zoom")
+    }
+
+    fn shop_inspect_mode_hint(surface: PromptInputSurface, style: GamepadStyle) -> String {
+        match surface {
+            PromptInputSurface::Controller => inspect_camera_extras(style),
+            PromptInputSurface::MouseOrKeyboard => {
+                "Arrows or drag: orbit item · WASD: cycle items · Shift+W/↑ zoom in · Shift+S/↓ zoom out · Mouse wheel: zoom (inspect)"
+                    .to_string()
+            }
+        }
+    }
+
     fn shop_core_inline(surface: PromptInputSurface, style: GamepadStyle, swap_ab: bool) -> String {
         match surface {
             PromptInputSurface::Controller => {
@@ -288,7 +291,7 @@ mod tests {
             ShopLegendTextStyle::VerbsOnly => "Exit  ·  Select  ·  Sell  ·  Inspect".to_string(),
         };
         if inspect_active {
-            let inspect_line = ButtonPrompt::shop_inspect_mode_hint(surface, style);
+            let inspect_line = shop_inspect_mode_hint(surface, style);
             format!("{core}\n{inspect_line}")
         } else {
             core

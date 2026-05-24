@@ -361,6 +361,10 @@ pub enum SfxId {
     YakuChiitoitsu,
     YakuKokushiMusou,
     YakuChickenHand,
+    YakuChanta,
+    YakuRyanpeikou,
+    YakuSanshokuDoukou,
+    YakuPinfu,
     /// Played ~1 second after the victory screen appears.
     Victory,
     /// Alternate victory stinger; `Victory` / `Victory2` are picked at random.
@@ -446,6 +450,10 @@ pub fn all_sfx_ids() -> &'static [SfxId] {
         SfxId::YakuChiitoitsu,
         SfxId::YakuKokushiMusou,
         SfxId::YakuChickenHand,
+        SfxId::YakuChanta,
+        SfxId::YakuRyanpeikou,
+        SfxId::YakuSanshokuDoukou,
+        SfxId::YakuPinfu,
         SfxId::Victory,
         SfxId::Victory2,
         SfxId::Defeat,
@@ -521,6 +529,10 @@ impl SfxId {
             SfxId::YakuChiitoitsu => "yaku/chiitoitsu.ogg",
             SfxId::YakuKokushiMusou => "yaku/kokushi_musou.ogg",
             SfxId::YakuChickenHand => "yaku/chicken_hand.ogg",
+            SfxId::YakuChanta => "yaku/chanta.ogg",
+            SfxId::YakuRyanpeikou => "yaku/ryanpeikou.ogg",
+            SfxId::YakuSanshokuDoukou => "yaku/sanshoku_doukou.ogg",
+            SfxId::YakuPinfu => "yaku/pinfu.ogg",
             SfxId::Victory => "victory.ogg",
             SfxId::Victory2 => "victory2.ogg",
             SfxId::Defeat => "defeat.ogg",
@@ -555,6 +567,10 @@ impl SfxId {
             YakuKind::Chiitoitsu => SfxId::YakuChiitoitsu,
             YakuKind::KokushiMusou => SfxId::YakuKokushiMusou,
             YakuKind::ChickenHand => SfxId::YakuChickenHand,
+            YakuKind::Chanta => SfxId::YakuChanta,
+            YakuKind::Ryanpeikou => SfxId::YakuRyanpeikou,
+            YakuKind::SanshokuDoukou => SfxId::YakuSanshokuDoukou,
+            YakuKind::Pinfu => SfxId::YakuPinfu,
         }
     }
 }

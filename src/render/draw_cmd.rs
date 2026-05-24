@@ -79,19 +79,65 @@ impl SceneLighting {
 
 /// GPU / layout hints when the renderer scene key is `showcase` (showcase overlay).
 /// The renderer uses these instead of branching on legacy per-flow scene keys.
+///
+/// GPU / tonemap hints for the showcase overlay and related flows.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ShowcaseRenderHints {
-    /// [`Object3d`] world placement uses [`crate::render::world_space::world_on_camera_ray_plane_z`]
-    /// when [`UiFrame::camera_override`] is set (tile-pack pack mesh).
-    pub object3d_use_camera_ray_plane_z: bool,
-    /// [`DrawCmd::ShowcaseTileBatch`] uses the same ray→plane mapping when `camera_override` is set.
-    pub showcase_tiles_use_camera_ray_plane_z: bool,
+    /// Screen-pixel anchors (showcase tiles + smooth lights). See [`Self::layout_uses_ray_plane`].
+    pub layout_use_ray_plane_z: bool,
     /// [`crate::render::wgpu_renderer::runtime::camera::WgpuRenderer::tile_hdr_tonemap`] pack-celebration path.
     pub tile_pack_celebration_tonemap: bool,
     /// Shop storeroom tonemap + lit_mesh inspect / glTF punctual branches.
     pub shop_tonemap_and_lit_mesh_context: bool,
     /// Archive grid HDR / tonemap branch for the showcase overlay.
     pub collection_tonemap_context: bool,
+}
+
+impl ShowcaseRenderHints {
+    /// Screen-pixel anchors: showcase tiles and smooth punctual lights.
+    ///
+    /// **Ray-plane:** guide, tutorial, shop lights/tiles, pick-blind, main menu, tile-pack, anchor lab.
+    /// **Pixel-to-world:** gameplay, yaku journal, archive collection.
+    #[inline]
+    pub fn layout_uses_ray_plane(self, active_scene_key: Option<&str>) -> bool {
+        if matches!(
+            active_scene_key,
+            Some("gameplay" | "yaku_journal" | "collection")
+        ) {
+            return false;
+        }
+        if self.layout_use_ray_plane_z {
+            return true;
+        }
+        matches!(
+            active_scene_key,
+            Some(
+                "shop"
+                    | "tutorial"
+                    | "pick_blind"
+                    | "main_menu_exterior"
+                    | "tile_pack_celebration"
+                    | "guide"
+                    | "tile_anchor_lab"
+            )
+        ) || (active_scene_key == Some("showcase") && self.tile_pack_celebration_tonemap)
+    }
+
+    /// Alias for [`Self::layout_uses_ray_plane`] — showcase tile batch placement.
+    #[inline]
+    pub fn showcase_tiles_use_ray_plane(self, active_scene_key: Option<&str>) -> bool {
+        self.layout_uses_ray_plane(active_scene_key)
+    }
+
+    /// [`Object3d::pos`] decoding — almost always [`pixel_to_world`].
+    ///
+    /// Shop / archive encode world centers via [`crate::render::world_space::object3d_pos_triple_for_world_center`];
+    /// only tile-pack celebration uses raw screen pixels + ray-plane here.
+    #[inline]
+    pub fn object3d_uses_ray_plane(self, active_scene_key: Option<&str>) -> bool {
+        matches!(active_scene_key, Some("tile_pack_celebration"))
+            || (active_scene_key == Some("showcase") && self.tile_pack_celebration_tonemap)
+    }
 }
 
 impl CameraParams {
@@ -258,8 +304,9 @@ pub struct ShowcaseTilePlacement {
     /// The tile to display (identity determines the rasterized decal).
     pub tile: Tile,
     /// `(pixel_x, pixel_y, lift)` — same coordinate space as every
-    /// other 3D placement. [`crate::render::world_space::pixel_to_world`] maps px/py to world XY;
-    /// `lift` is height above the table plane (**+Z**).
+    /// other 3D placement via [`crate::render::world_space::layout_anchor_to_world`]
+    /// (gameplay → [`crate::render::world_space::pixel_to_world`]; showcase/guide → ray → `plane_z`).
+    /// `lift` is height above the felt (**+Z**).
     pub center_pos: [f32; 3],
     /// Euler rotation `(rx, ry, rz)` in radians — same composition as
     /// [`crate::render::table_transform::rot_euler_xyz_rad`], after the
@@ -436,13 +483,6 @@ pub enum Object3dKind {
         silhouette: bool,
         /// Boss Hex (and similar): draw the same debuff X overlay as debuffed tiles.
         debuffed: bool,
-        /// Optional pick id. When `Some`, the renderer snapshots this
-        /// relic's model matrix into `last_collection_relic_pickables` so
-        /// `pick_collection_object` can return the pick id for clicks that
-        /// land inside the relic's real silhouette. Leave `None` for
-        /// relics that shouldn't be individually clickable (e.g., the
-        /// featured pedestal showpiece that's already selected).
-        pick_id: Option<u32>,
     },
     /// Tile-pack box on the shop shelf.
     Pack {
@@ -597,7 +637,7 @@ pub enum Object3dKind {
 /// `Object3d::anim_id` on the inspected stock mesh — sole shadow caster during storeroom inspect.
 pub const SHOP_INSPECT_SUBJECT_ANIM_ID: u64 = 0x5348_4F50_5F49; // "SHOPI"
 /// Archive pedestal / HUD featured close-up (casts dynamic shadow; grid cubbies do not).
-pub const ARCHIVE_FEATURED_ANIM_ID: u64 = 0xC105_E0;
+pub const ARCHIVE_FEATURED_ANIM_ID: u64 = 0x00C1_05E0;
 
 /// A single lit mesh placed in the world.
 ///

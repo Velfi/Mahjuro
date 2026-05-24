@@ -101,9 +101,7 @@ pub fn push_focus_tooltip_panel_2d(
             Tier::Heading => heading_px,
             Tier::Body => body_px,
         };
-        let line_step = line_h * 1.4;
-        let n = colored_keywords::colored_wrapped_line_count(text, inner_w, line_h, col);
-        n as f32 * line_step
+        colored_keywords::colored_multiline_text_height(text, inner_w, line_h, col)
     };
 
     let mut total_h = pad * 2.0 + border * 2.0;
@@ -197,7 +195,7 @@ pub fn push_floating_relic_flavor_labels(
     let band_w = (window_w - 2.0 * margin_x).min(1040.0);
     let left = (window_w - band_w) * 0.5;
     let body_px = typography::size(typography::H32, window_h);
-    let line_step = body_px * 1.4;
+    let line_step = colored_keywords::colored_row_line_step(body_px);
     let max_lines = 5usize;
     let band_h = (line_step * max_lines as f32 + body_px * 0.5)
         .min(window_h * 0.25)

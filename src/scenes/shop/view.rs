@@ -77,7 +77,7 @@ const SHOP_STOCK_BOB_HZ: f32 = 0.95;
 
 #[inline]
 fn shop_stock_bob_lift_z(h: f32, bob_seed: u32, age_secs: f32) -> f32 {
-    let phase = (bob_seed as f32 * 2.399_9632).fract() * std::f32::consts::TAU;
+    let phase = (bob_seed as f32 * 2.399_963_2).fract() * std::f32::consts::TAU;
     let t = age_secs * SHOP_STOCK_BOB_HZ * std::f32::consts::TAU;
     let amp = h * (SHOP_STOCK_BOB_AMP_MM / 1080.0);
     (t + phase).sin() * amp
@@ -516,6 +516,18 @@ fn owned_relic_hover_center(
 }
 
 impl SceneBehavior for ShopScene {
+    fn face_button_bindings(
+        &self,
+        _ctx: crate::ui::input::FaceBindingCtx,
+    ) -> crate::ui::input::FaceButtonBindings {
+        crate::ui::input::FaceButtonBindings {
+            west_press: Some(crate::ui::input::UiAction::WestFacePress),
+            north_press: Some(crate::ui::input::UiAction::NorthFacePress),
+            west_release: Some(crate::ui::input::UiAction::WestFaceRelease),
+            suppress_trigger_structure: true,
+        }
+    }
+
     fn update(&mut self, mut ctx: UpdateCtx<'_>) -> SceneTransition {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
@@ -548,6 +560,7 @@ impl SceneBehavior for ShopScene {
 
 impl ShopScene {
     pub(super) fn stash_focus_rects(&mut self, w: f32, h: f32, run: &RunState) {
+        let _g = crate::render::cpu_profiler::scope("update.shop_stash_focus_rects");
         let shop = GameEngine::read_shop(run);
         let env_h = self.drawn_room_gltf_height_scale.get();
         let cam = shop_camera_params(w, h, env_h);
@@ -583,41 +596,41 @@ pub(crate) fn render_shop_frame(
     // `pixel_to_world` drifts under perspective).
     let base = shop_camera_base(w, h, env_h);
     let inspect_rig = InspectRig::shop(h, env_h);
-    let (inspect_anchor, inspect_cam_now) = if let Some(ins) = inspect {
-        let ic = inspect_orbit_camera(ins, &inspect_rig);
-        let anchor = shop.focus.and_then(|f| {
-            if !shop_focus_inspectable(f) {
-                return None;
-            }
-            let tw = shop_inspect_target_world(shop, w, h, env_h, &shop_rm, f)
-                .unwrap_or(ins.target_world);
-            Some((f, tw))
-        });
-        (anchor, Some(ic))
-    } else {
-        (None, None)
-    };
-    if let Some(ic) = inspect_cam_now {
-        shop.last_inspect_cam.set(Some(ic));
-    }
-    let target_phase = if inspect.is_some() { 1.0 } else { 0.0 };
-    let eased = tick_inspect_dolly(&shop.inspect_dolly, target_phase);
-    let inspect_cam_for_lerp = inspect_cam_now.or_else(|| shop.last_inspect_cam.get());
-    let final_cam = match (inspect_cam_for_lerp, eased > 1e-4) {
-        (Some(ic), true) => lerp_camera(&base, &ic, eased, h),
-        _ => base,
-    };
-    frame.camera_override = Some(final_cam);
-    if inspect.is_some() {
-        if let Some(f) = shop.focus.filter(|f| shop_focus_inspectable(*f)) {
-            if let Some(tw) =
-                shop_inspect_target_world(shop, w, h, env_h, &shop_rm, f)
-            {
-                frame.shop_inspect_shadow_target = Some(tw);
-            }
+    let (inspect_anchor, _inspect_cam_now, cam, eased) = {
+        let _g = crate::render::cpu_profiler::scope("draw_frame.shop_camera_inspect");
+        let (inspect_anchor, inspect_cam_now) = if let Some(ins) = inspect {
+            let ic = inspect_orbit_camera(ins, &inspect_rig);
+            let anchor = shop.focus.and_then(|f| {
+                if !shop_focus_inspectable(f) {
+                    return None;
+                }
+                let tw = shop_inspect_target_world(shop, w, h, env_h, &shop_rm, f)
+                    .unwrap_or(ins.target_world);
+                Some((f, tw))
+            });
+            (anchor, Some(ic))
+        } else {
+            (None, None)
+        };
+        if let Some(ic) = inspect_cam_now {
+            shop.last_inspect_cam.set(Some(ic));
         }
-    }
-    let cam = final_cam;
+        let target_phase = if inspect.is_some() { 1.0 } else { 0.0 };
+        let eased = tick_inspect_dolly(&shop.inspect_dolly, target_phase);
+        let inspect_cam_for_lerp = inspect_cam_now.or_else(|| shop.last_inspect_cam.get());
+        let final_cam = match (inspect_cam_for_lerp, eased > 1e-4) {
+            (Some(ic), true) => lerp_camera(&base, &ic, eased, h),
+            _ => base,
+        };
+        frame.camera_override = Some(final_cam);
+        if inspect.is_some()
+            && let Some(f) = shop.focus.filter(|f| shop_focus_inspectable(*f))
+            && let Some(tw) = shop_inspect_target_world(shop, w, h, env_h, &shop_rm, f)
+        {
+            frame.shop_inspect_shadow_target = Some(tw);
+        }
+        (inspect_anchor, inspect_cam_now, final_cam, eased)
+    };
 
     let ppmm = ctx.layout.mm(1.0);
     let gold_dish_anchor = player_gold_dish_object3d_anchor(w, h, &cam, env_h, ppmm);
@@ -651,6 +664,7 @@ pub(crate) fn render_shop_frame(
 
     let room_glb_lights = shop_glb_has_embedded_lights();
     {
+        let _g = crate::render::cpu_profiler::scope("draw_frame.shop_scene_lighting");
         frame.scene_lighting.embedded_gltf_punctual = room_glb_lights;
         frame.scene_lighting.room_glb_brdf = room_glb_lights;
         let use_glb_lights = room_glb_lights;
@@ -823,14 +837,18 @@ pub(crate) fn render_shop_frame(
         gold_dish_anchor[1],
         gold_dish_anchor[2] + ppmm * 3.0,
     ];
-    let gold_pile = crate::render::gold_display::build_settled_gold_coin_pile(
-        |n| ppmm * n,
-        shop_rm.display_gold as i32,
-        gold_pile_anchor,
-        crate::render::gold_display::SHOP_GOLD_PILE_SEED,
-    );
-
-    let (stock_dim, stock_subj) = push_stock_meshes(shop, &shop_rm, w, h, &cam, inspect_anchor);
+    let gold_pile;
+    let (stock_dim, stock_subj);
+    {
+        let _g = crate::render::cpu_profiler::scope("draw_frame.shop_stock_meshes");
+        gold_pile = crate::render::gold_display::build_settled_gold_coin_pile(
+            |n| ppmm * n,
+            shop_rm.display_gold as i32,
+            gold_pile_anchor,
+            crate::render::gold_display::SHOP_GOLD_PILE_SEED,
+        );
+        (stock_dim, stock_subj) = push_stock_meshes(shop, &shop_rm, w, h, &cam, inspect_anchor);
+    }
 
     let mut stock_all = stock_dim;
     if let Some(mut s) = stock_subj {
@@ -861,6 +879,7 @@ pub(crate) fn render_shop_frame(
     let gold_label_rect = if shop.pause_menu.paused {
         [0.0, 0.0, 0.0, 0.0]
     } else {
+        let _g = crate::render::cpu_profiler::scope("draw_frame.shop_gold_label");
         let gold_label_center = with_shop_glb_cpu(|opt| {
             let cpu = opt?;
             let tw = player_gold_dish_marker_translation(cpu)? * room_env_world_scale(h, env_h);
@@ -879,6 +898,7 @@ pub(crate) fn render_shop_frame(
 
     // Shelf focus ring uses shelf-slot screen rects.
     if !shop.pause_menu.paused && inspect.is_none() {
+        let _g = crate::render::cpu_profiler::scope("draw_frame.shop_focus_ring_and_badges");
         if let Some(ring_rect) = ring_target_rect(&ctx, shop, &shop_rm, w, h, &cam)
             .and_then(|r| clamp_rect_to_viewport(r, w, h))
         {
@@ -913,6 +933,7 @@ pub(crate) fn render_shop_frame(
             hover_tooltip_content(shop, &shop_rm, &ctx.run.mode, hit)
         && !title.is_empty()
     {
+        let _g = crate::render::cpu_profiler::scope("draw_frame.shop_hover_tooltip");
         let f = ShopFocus::from_hit(hit);
         let tooltip_anchor = shop
             .last_focus_rects
@@ -953,12 +974,16 @@ pub(crate) fn render_shop_frame(
         frame.texts(tip_texts);
     }
 
-    shop.push_shop_particle_quads(&mut frame);
-    shop.push_shop_score_popup_labels(&mut frame, w, h);
+    {
+        let _g = crate::render::cpu_profiler::scope("draw_frame.shop_particles_popups");
+        shop.push_shop_particle_quads(&mut frame);
+        shop.push_shop_score_popup_labels(&mut frame, w, h);
+    }
 
     // Pointer targets in stack order: specific zones first (main loop uses first hit).
     // Pause overlay quads/texts are appended last so they composite above shelf geometry.
     if shop.pause_menu.paused {
+        let _g = crate::render::cpu_profiler::scope("draw_frame.shop_pause_menu");
         let mut pause_quads: Vec<GpuInstance> = Vec::new();
         let mut pause_text: Vec<TextLabel> = Vec::new();
         let mut pause_buttons: Vec<ButtonDef> = Vec::new();
@@ -978,6 +1003,7 @@ pub(crate) fn render_shop_frame(
         pause_buttons.push(ButtonDef::scene((0.0, 0.0, w, h), u32::MAX));
         frame.buttons = pause_buttons;
     } else if inspect.is_none() {
+        let _g = crate::render::cpu_profiler::scope("draw_frame.shop_hit_buttons");
         for (i, sf) in for_sale_slots(shop).into_iter().enumerate() {
             if sf.is_none() {
                 continue;
@@ -1014,6 +1040,7 @@ pub(crate) fn render_shop_frame(
 
     // Floating control hints — copy reflects [`DrawCtx::input_mode`] + swap toggles.
     if !shop.pause_menu.paused {
+        let _g = crate::render::cpu_profiler::scope("draw_frame.shop_floating_hints");
         let inspect_active = inspect.is_some();
         let x = w * 0.05;
         let bw = w * 0.90;
@@ -1451,8 +1478,8 @@ fn cursor_hover_rect(ctx: CursorHoverCtx<'_>) -> Option<[f32; 4]> {
         env_h,
     } = ctx;
     let sale_slots = for_sale_slots(scene);
-    for i in 0..SHOP_SPAWN_SLOT_COUNT {
-        if sale_slots[i].is_none() {
+    for (i, slot) in sale_slots.iter().enumerate().take(SHOP_SPAWN_SLOT_COUNT) {
+        if slot.is_none() {
             continue;
         }
         let r = shop_shelf_slot_rect(w, h, cam, i, env_h);
@@ -1787,6 +1814,7 @@ fn push_stock_meshes(
     cam: &CameraParams,
     inspect_anchor: Option<(ShopFocus, [f32; 3])>,
 ) -> (Vec<Object3d>, Option<Object3d>) {
+    let _g = crate::render::cpu_profiler::scope("draw_frame.shop_push_stock_meshes");
     let mut dim = Vec::new();
     let mut subject = None;
     let niche_base = w * 0.048;
@@ -1852,7 +1880,6 @@ fn push_stock_meshes(
                                 glow: relic_glow(scene, item.relic),
                                 silhouette: false,
                                 debuffed: false,
-                                pick_id: None,
                             },
                             hover_target: 0.0,
                             anim_id: 0,
@@ -2093,7 +2120,6 @@ fn push_stock_meshes(
                             glow,
                             silhouette: false,
                             debuffed: false,
-                            pick_id: None,
                         },
                         hover_target: 0.0,
                         anim_id: 0,

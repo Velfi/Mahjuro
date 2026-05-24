@@ -1,6 +1,6 @@
 //! Split-pane Chronicle ledger for the Archive tab: run log (left) + career stats (right).
 
-use crate::core::progression::{PlayerProgress, RunOutcome, RunRecord};
+use crate::core::progression::{PlayerProgress, RunRecord};
 use crate::core::yaku::YakuKind;
 use crate::render::draw_cmd::{ImageQuad, ImageQuadSource};
 use crate::render::theme::{color, typography};
@@ -337,28 +337,15 @@ struct ChroniclePaneDraw<'a> {
     emit: ChronicleEmit<'a>,
 }
 
-fn run_log_legend_band_height(window_h: f32) -> f32 {
-    let micro_px = typography::size(rhythm::MICRO, window_h);
-    let line = rhythm::line_h(micro_px);
-    let pad = rhythm::card_inset(window_h) * 0.65;
-    pad * 2.0 + line * 2.4 + 6.0
-}
-
-fn run_log_list_clip(panes: ChroniclePaneLayout, legend_h: f32) -> ChartClip {
+fn run_log_list_clip(panes: ChroniclePaneLayout) -> ChartClip {
     ChartClip {
         top: panes.content_y(),
-        bottom: (panes.content_y() + panes.content_h() - legend_h).max(panes.content_y() + 1.0),
+        bottom: panes.content_y() + panes.content_h(),
     }
 }
 
-fn run_log_list_viewport_h(
-    layout: ChroniclePaneLayout,
-    title_h: f32,
-    gap: f32,
-    window_h: f32,
-) -> f32 {
-    let legend_h = run_log_legend_band_height(window_h);
-    (layout.content_h() - title_h - gap * 0.25 - legend_h).max(1.0)
+fn run_log_list_viewport_h(layout: ChroniclePaneLayout, title_h: f32, gap: f32) -> f32 {
+    (layout.content_h() - title_h - gap * 0.25).max(1.0)
 }
 
 /// Compact run receipt columns.
@@ -375,8 +362,6 @@ struct RunLogReceiptLayout {
     hand_w: f32,
     score_x: f32,
     score_w: f32,
-    bar_x: f32,
-    bar_w: f32,
 }
 
 fn run_log_hand_column_w(caption_px: f32, run_row_h: f32) -> f32 {
@@ -398,21 +383,19 @@ fn run_log_receipt_layout(
     let inner_x = base_x + row_inset;
     let inner_w = (pane_w - row_inset * 2.0).max(80.0);
 
-    let bar_w = 28.0;
-    let bar_x = inner_x + inner_w - bar_w;
     let score_w = (inner_w * 0.24).clamp(88.0, 120.0);
-    let score_x = bar_x - score_w - 4.0;
+    let score_x = inner_x + inner_w - score_w;
     let hand_w = run_log_hand_column_w(row_font_px, run_row_h)
         .min(inner_w * 0.30)
         .max(row_font_px * 4.5);
     let hand_x = score_x - hand_w - 5.0;
-    let ante_w = 20.0;
-    let ante_x = hand_x - ante_w - 4.0;
+    let ante_w = (row_font_px * 1.45).clamp(32.0, 44.0);
+    let ante_x = hand_x - ante_w - 5.0;
 
-    let num_w = 24.0;
+    let num_w = (row_font_px * 1.6).clamp(28.0, 40.0);
     let num_x = inner_x;
-    let result_w = 34.0;
-    let result_x = num_x + num_w + 3.0;
+    let result_w = (row_font_px * 2.7).clamp(48.0, 64.0);
+    let result_x = num_x + num_w + 4.0;
     let boss_x = result_x + result_w + 5.0;
     let boss_w = (ante_x - boss_x - 4.0).max(40.0);
 
@@ -429,8 +412,6 @@ fn run_log_receipt_layout(
         hand_w,
         score_x,
         score_w,
-        bar_x,
-        bar_w,
     }
 }
 
@@ -466,16 +447,14 @@ fn run_log_column_y_bias(
     scroll: f32,
 ) -> f32 {
     let list_gap = gap * 0.25;
-    let window_h = panes.inner_h + panes.margin * 2.0;
-    let legend_h = run_log_legend_band_height(window_h);
     if entry_count == 0 {
-        let view_h = run_log_list_viewport_h(panes, title_h, gap, window_h);
-        let col_used = title_h + list_gap + view_h + legend_h;
+        let view_h = run_log_list_viewport_h(panes, title_h, gap);
+        let col_used = title_h + list_gap + view_h;
         return (panes.content_h() - col_used).max(0.0) * 0.5;
     }
     let list_layout = run_log_list_layout(panes, title_h, gap, cap_h, row_pad, 0.0);
     let list_top = list_layout.list_top;
-    let view_h = run_log_list_viewport_h(panes, title_h, gap, window_h);
+    let view_h = run_log_list_viewport_h(panes, title_h, gap);
     let view_bottom = list_top + view_h;
     let mut block_bottom = list_top;
     for list_i in 0..entry_count {
@@ -488,7 +467,7 @@ fn run_log_column_y_bias(
         }
         block_bottom = block_bottom.max(y + rh);
     }
-    let col_used = title_h + list_gap + (block_bottom - list_top) + legend_h;
+    let col_used = title_h + list_gap + (block_bottom - list_top);
     (panes.content_h() - col_used).max(0.0) * 0.5
 }
 
@@ -710,10 +689,9 @@ pub fn chronicle_run_log_scroll_max(w: f32, h: f32, panel: [f32; 4], entry_count
     let m = layout_constants(h);
     let cap_h = rhythm::line_h(typography::size(rhythm::CAPTION, h));
     let row_pad = (h * rhythm::ROW_PAD).max(6.0);
-    let window_h = panes.inner_h + panes.margin * 2.0;
     let list_layout = run_log_list_layout(panes, m.title_h, m.gap, cap_h, row_pad, 0.0);
     let list_h = run_log_list_content_height(entry_count, &list_layout, panes.run_row_h);
-    let view_h = run_log_list_viewport_h(panes, m.title_h, m.gap, window_h);
+    let view_h = run_log_list_viewport_h(panes, m.title_h, m.gap);
     (list_h - view_h).max(0.0)
 }
 
@@ -782,7 +760,7 @@ pub fn chronicle_clamp_run_log_scroll(
     let cap_h = rhythm::line_h(typography::size(rhythm::CAPTION, pane_h));
     let row_pad = (pane_h * rhythm::ROW_PAD).max(6.0);
     let list_layout = run_log_list_layout(layout, title_h, gap, cap_h, row_pad, 0.0);
-    let view_h = run_log_list_viewport_h(layout, title_h, gap, pane_h);
+    let view_h = run_log_list_viewport_h(layout, title_h, gap);
     let max_s = (run_log_list_content_height(entry_count, &list_layout, layout.run_row_h) - view_h)
         .max(0.0);
     let mut scroll = scroll.clamp(0.0, max_s);
@@ -831,13 +809,11 @@ pub fn chronicle_run_log_hit_rects(
     let row_pad = (h * rhythm::ROW_PAD).max(6.0);
     let y_bias = run_log_column_y_bias(panes, m.title_h, m.gap, cap_h, row_pad, entry_count, scroll);
     let list_layout = run_log_list_layout(panes, m.title_h, m.gap, cap_h, row_pad, y_bias);
-    let legend_h = run_log_legend_band_height(h);
-    let list_bottom = panes.content_y() + panes.content_h() - legend_h;
     let clip_rect = [
         panes.left_content_x(),
         panes.content_y(),
         panes.left_content_w(),
-        list_bottom - panes.content_y(),
+        panes.content_h(),
     ];
     (0..entry_count)
         .filter_map(|i| {
@@ -994,143 +970,6 @@ fn push_relic_row(
     }
 }
 
-fn push_run_log_legend(
-    emit: &mut ChronicleEmit<'_>,
-    panes: ChroniclePaneLayout,
-    pane_clip: ChartClip,
-    window_h: f32,
-    micro_px: f32,
-    caption_px: f32,
-) {
-    let legend_h = run_log_legend_band_height(window_h);
-    let lx = panes.left_content_x();
-    let lw = panes.left_content_w();
-    let ly = panes.content_y() + panes.content_h() - legend_h;
-    let inset = rhythm::card_inset(window_h) * 0.55;
-    let line_h = rhythm::line_h(micro_px);
-    let row_h = line_h + 3.0;
-    let text_color = color::alpha(color::STONE, 0.9);
-
-    push_quad_clipped(
-        emit.quads,
-        [lx, ly, lw, 1.0],
-        pane_clip,
-        color::alpha(color::BRASS, 0.24),
-    );
-    push_quad_clipped(
-        emit.quads,
-        [lx, ly, lw, legend_h],
-        pane_clip,
-        color::alpha(color::WALNUT_INK, 0.44),
-    );
-    chronicle_charts::push_corner_brackets(emit.quads, pane_clip, lx, ly, lw, legend_h);
-
-    let title_y = ly + inset * 0.55;
-    push_label_clipped(
-        emit.labels,
-        [lx + inset, title_y, lw - inset * 2.0, line_h],
-        pane_clip,
-        TextLabel {
-            rect: [lx + inset, title_y, lw - inset * 2.0, line_h],
-            text: "Legend".into(),
-            color: color::alpha(color::GOLD, 0.88),
-            font_px: Some(caption_px * 0.88),
-            align: TextAlign::Left,
-            ..Default::default()
-        },
-    );
-
-    let grid_top = title_y + line_h + 5.0;
-    let col_w = (lw - inset * 2.0) / 3.0;
-    let glyph_w = 18.0;
-    let text_x_off = glyph_w + 6.0;
-    let pill_text_x_off = glyph_w + 34.0;
-    let text_w = (col_w - text_x_off - 4.0).max(36.0);
-    let pill_text_w = (col_w - pill_text_x_off - 4.0).max(36.0);
-
-    let legend_col = |col: u32| {
-        let cx = lx + inset + col as f32 * col_w;
-        let cy = grid_top;
-        (cx, cy)
-    };
-
-    let (cx, cy) = legend_col(0);
-    let stamp = (micro_px * 1.05).max(10.0);
-    chronicle_charts::push_discovery_stamp(
-        emit.quads,
-        emit.labels,
-        pane_clip,
-        cx,
-        cy + (row_h - stamp) * 0.5,
-        stamp,
-        micro_px * 0.95,
-    );
-    push_label_clipped(
-        emit.labels,
-        [cx + text_x_off, cy, text_w, row_h],
-        pane_clip,
-        TextLabel {
-            rect: [cx + text_x_off, cy, text_w, row_h],
-            text: "New run".into(),
-            color: text_color,
-            font_px: Some(micro_px),
-            align: TextAlign::Left,
-            ..Default::default()
-        },
-    );
-
-    let (cx, cy) = legend_col(1);
-    push_chronicle_yaku_pill(
-        emit,
-        pane_clip,
-        cx,
-        cy + 1.0,
-        row_h - 2.0,
-        "Hand",
-        glyph_w + 28.0,
-        micro_px * 0.95,
-    );
-    push_label_clipped(
-        emit.labels,
-        [cx + pill_text_x_off, cy, pill_text_w, row_h],
-        pane_clip,
-        TextLabel {
-            rect: [cx + pill_text_x_off, cy, pill_text_w, row_h],
-            text: "Dominant yaku".into(),
-            color: text_color,
-            font_px: Some(micro_px),
-            align: TextAlign::Left,
-            ..Default::default()
-        },
-    );
-
-    let (cx, cy) = legend_col(2);
-    push_sparkline(
-        emit.quads,
-        pane_clip,
-        cx,
-        cy + row_h * 0.22,
-        glyph_w + 12.0,
-        row_h * 0.56,
-        &[0.25, 0.45, 0.7, 0.55, 0.9],
-        color::alpha(color::chart::POSITIVE, 0.82),
-        color::alpha(color::WALNUT_INK, 0.5),
-    );
-    push_label_clipped(
-        emit.labels,
-        [cx + text_x_off, cy, text_w, row_h],
-        pane_clip,
-        TextLabel {
-            rect: [cx + text_x_off, cy, text_w, row_h],
-            text: "Blind scores".into(),
-            color: text_color,
-            font_px: Some(micro_px),
-            align: TextAlign::Left,
-            ..Default::default()
-        },
-    );
-}
-
 fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
     let ChroniclePaneDraw {
         progress,
@@ -1153,12 +992,8 @@ fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
     let entry_count = archive_career::chronicle_list_entry_count(progress);
     let row_font_px = body;
     let cap_h = rhythm::line_h(caption_px);
-    let window_h = panes.inner_h + panes.margin * 2.0;
-    let legend_h = run_log_legend_band_height(window_h);
-    let full_clip = pane_clip(panes);
-    let list_clip = run_log_list_clip(panes, legend_h);
+    let list_clip = run_log_list_clip(panes);
     let clip = list_clip;
-    let micro_px = typography::size(rhythm::MICRO, window_h);
 
     let row_pad = (panes.inner_h + panes.margin * 2.0) * rhythm::ROW_PAD;
     let row_pad = row_pad.max(6.0);
@@ -1268,7 +1103,6 @@ fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
                 ..Default::default()
             },
         );
-        push_run_log_legend(&mut emit, panes, full_clip, window_h, micro_px, caption_px);
         return;
     }
 
@@ -1351,12 +1185,10 @@ fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
             continue;
         };
         let display = archive_career::chronicle_display_run_number(list_i, progress).unwrap_or(0);
-        let victory = matches!(rec.outcome, RunOutcome::Victory);
         let outcome_color = archive_career::chronicle_run_outcome_color(rec);
         let run_is_new =
             crate::core::archive_seen::chronicle_run_is_new(hist_idx, chronicle_last_seen_run_len);
         let score = archive_career::format_run_log_score(rec.total_score_earned);
-        let blind_spark = archive_career::run_blind_sparkline(rec);
 
         push_label_clipped(
             emit.labels,
@@ -1475,26 +1307,7 @@ fn push_run_log(draw: ChroniclePaneDraw<'_>, focused: Option<usize>) {
                 ..Default::default()
             }),
         );
-        if !blind_spark.is_empty() {
-            let line = if victory {
-                color::alpha(color::chart::POSITIVE, 0.82)
-            } else {
-                color::alpha(color::chart::NEGATIVE, 0.78)
-            };
-            push_sparkline(
-                emit.quads,
-                clip,
-                receipt.bar_x,
-                text_y + row_text_h * 0.22,
-                receipt.bar_w,
-                row_text_h * 0.56,
-                &blind_spark,
-                line,
-                color::alpha(color::WALNUT_INK, 0.5),
-            );
-        }
     }
-    push_run_log_legend(&mut emit, panes, full_clip, window_h, micro_px, caption_px);
 }
 
 fn push_insight_column(

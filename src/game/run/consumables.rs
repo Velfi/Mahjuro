@@ -20,7 +20,7 @@ impl RunState {
                 self.defeat_journal.zodiac_uses =
                     self.defeat_journal.zodiac_uses.saturating_add(1);
                 let yaku = z.yaku();
-                let new_level = self.yaku_levels.level_up(yaku);
+                let new_level = self.yaku_levels.level_up_for_zodiac(z);
                 Some(ConsumableUseResult::Zodiac { yaku, new_level })
             }
             Consumable::Talisman(t) => {
