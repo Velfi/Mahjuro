@@ -184,11 +184,23 @@ pub struct BotCli {
     #[arg(long)]
     pub output_runs: Option<PathBuf>,
     /// Wall-clock limit per run attempt, in seconds. 0 disables timeouts.
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, default_value_t = bot::DEFAULT_BOT_RUN_TIMEOUT_SECS)]
     pub bot_run_timeout_secs: u32,
     /// After a timed-out attempt, retry this many extra times (`1` = up to 2 attempts total).
     #[arg(long, default_value_t = 1)]
     pub timeout_retries: u32,
+    /// Proactively sell owned relics whose hold value is at or below the threshold.
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub sell_enabled: bool,
+    /// Sell relics at or below this hold-value threshold (default 0).
+    #[arg(long)]
+    pub sell_hold_threshold: Option<i32>,
+    /// Max proactive sells per shop visit (default 2).
+    #[arg(long)]
+    pub sell_max_per_visit: Option<u32>,
+    /// In-blind expectimax depth (`0` = legacy greedy, `1` = one-ply unified, `2` = recommended default, `3` = pruned).
+    #[arg(long, default_value_t = 2)]
+    pub blind_planner_depth: u32,
 }
 
 #[derive(Debug, Args)]
@@ -207,7 +219,7 @@ pub struct StrategySweepCli {
     #[arg(long)]
     pub export_json: Option<PathBuf>,
     /// Wall-clock limit per run attempt, in seconds. 0 disables timeouts.
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, default_value_t = bot::DEFAULT_BOT_RUN_TIMEOUT_SECS)]
     pub bot_run_timeout_secs: u32,
     /// After a timed-out attempt, retry this many extra times (`1` = up to 2 attempts total).
     #[arg(long, default_value_t = 1)]
@@ -230,6 +242,14 @@ impl BotCli {
             starting_discards: self.discards,
             starting_gold: self.gold,
             stake: self.stake,
+            sell_enabled: if self.sell_enabled {
+                Some(true)
+            } else {
+                None
+            },
+            sell_hold_threshold: self.sell_hold_threshold,
+            sell_max_per_visit: self.sell_max_per_visit,
+            blind_planner_depth: Some(self.blind_planner_depth),
             ..Default::default()
         }
     }

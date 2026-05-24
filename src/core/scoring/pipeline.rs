@@ -127,6 +127,7 @@ fn score_sets_inner(
             honor_triple,
             no_seq_bonus,
             has_triplet_boost,
+            detected_yaku: &detected_yaku,
         },
     );
 

@@ -68,7 +68,7 @@ fn honor_triplet_uses_flat_value() {
     ];
     let sets = find_pairs_and_triplets(&hand);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&RelicState::default(), false), &[]);
-    assert_eq!(breakdown.base_chips, 36);
+    assert_eq!(breakdown.base_chips, 45);
 }
 
 #[test]
@@ -81,9 +81,9 @@ fn triplet_boost_adds_chips_to_triplet() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::TripletBoost]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_chips, 49);
-    assert_eq!(breakdown.final_mult, 1.2);
-    assert_eq!(breakdown.total, 58);
+    assert_eq!(breakdown.final_chips, 69);
+    assert_eq!(breakdown.final_mult, 1.35);
+    assert_eq!(breakdown.total, 93);
     assert!(breakdown.steps.iter().any(|s| s.source == "Triplet Boost"));
 }
 
@@ -100,7 +100,7 @@ fn sequence_surge_adds_chips_to_sequence() {
     }];
     let r = relics(vec![RelicId::SequenceSurge]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_chips, 31);
+    assert_eq!(breakdown.final_chips, 46);
 }
 
 #[test]
@@ -146,8 +146,8 @@ fn stacked_yaku_score_full_value_without_loadout_gating() {
     let r = RelicState::default();
     let ctx = ctx_with(&r, false);
     let breakdown = score_sets(&hand, &sets, &ctx, &[]);
-    assert_eq!(breakdown.final_chips, 291);
-    assert_eq!(breakdown.final_mult, 18.0);
+    assert_eq!(breakdown.final_chips, 422);
+    assert_eq!(breakdown.final_mult, 19.0);
 }
 
 #[test]
@@ -195,9 +195,9 @@ fn pair_power_grants_chips_and_mult() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::PairPower]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_chips, 44);
-    assert_eq!(breakdown.final_mult, 2.0);
-    assert_eq!(breakdown.total, 88);
+    assert_eq!(breakdown.final_chips, 59);
+    assert_eq!(breakdown.final_mult, 2.5);
+    assert_eq!(breakdown.total, 147);
 }
 
 #[test]
@@ -232,9 +232,9 @@ fn white_dragons_hush_mults_white_dragon_pair() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::WhiteDragonsHush]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_chips, 24);
-    assert_eq!(breakdown.final_mult, 5.0);
-    assert_eq!(breakdown.total, 120);
+    assert_eq!(breakdown.final_chips, 30);
+    assert_eq!(breakdown.final_mult, 7.0);
+    assert_eq!(breakdown.total, 210);
 }
 
 #[test]
@@ -247,7 +247,7 @@ fn honor_fury_adds_chips_per_honor_tile() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::HonorFury]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_chips, 120);
+    assert_eq!(breakdown.final_chips, 171);
 }
 
 #[test]
@@ -260,9 +260,9 @@ fn dragon_rage_mults_red_triplet() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::DragonRage]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_chips, 76);
-    assert_eq!(breakdown.final_mult, 9.0);
-    assert_eq!(breakdown.total, 684);
+    assert_eq!(breakdown.final_chips, 105);
+    assert_eq!(breakdown.final_mult, 12.0);
+    assert_eq!(breakdown.total, 1260);
 }
 
 #[test]
@@ -379,8 +379,8 @@ fn chain_reaction_adds_mult_when_scored_last_turn() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::ChainReaction]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, true), &[]);
-    assert_eq!(breakdown.final_mult, 5.0);
-    assert_eq!(breakdown.total, 75);
+    assert_eq!(breakdown.final_mult, 7.0);
+    assert_eq!(breakdown.total, 105);
 }
 
 #[test]
@@ -406,8 +406,8 @@ fn pair_double_rule_adds_chips() {
         &ctx_with(&RelicState::default(), false),
         &[RuleModifier::PairDoubleScore],
     );
-    assert_eq!(breakdown.final_chips, 40);
-    assert_eq!(breakdown.total, 40);
+    assert_eq!(breakdown.final_chips, 55);
+    assert_eq!(breakdown.total, 55);
 }
 
 #[test]
@@ -434,7 +434,7 @@ fn dora_chips_per_matching_tile() {
         breakdown.steps[idx - 1].running_chips
     };
     let dora_delta = breakdown.steps[idx].running_chips - prev_chips;
-    assert_eq!(dora_delta, 300);
+    assert_eq!(dora_delta, 450);
 }
 
 #[test]
@@ -479,8 +479,8 @@ fn explosive_flush_full_hand_demonstration() {
     ];
     let breakdown = score_sets(&hand, &sets, &ctx_with(&RelicState::default(), false), &[]);
     assert_eq!(breakdown.base_chips, 74);
-    assert_eq!(breakdown.final_mult, 18.0);
-    assert_eq!(breakdown.total, 5238);
+    assert_eq!(breakdown.final_mult, 19.0);
+    assert_eq!(breakdown.total, 8018);
 }
 
 fn dora_chips_delta(breakdown: &ScoreBreakdown) -> i32 {
@@ -508,8 +508,8 @@ fn dora_crown_alone_adds_ten_per_dora() {
     let mut ctx = ctx_with(&r, false);
     ctx.pattern.dora_faces = vec![(Suit::Manzu, 5)];
     let breakdown = score_sets(&hand, &sets, &ctx, &[]);
-    // 3 dora * (100 base + 10 crown bonus) = 330
-    assert_eq!(dora_chips_delta(&breakdown), 330);
+    // 3 dora * (150 base + 15 crown bonus) = 495
+    assert_eq!(dora_chips_delta(&breakdown), 495);
 }
 
 #[test]
@@ -524,8 +524,8 @@ fn mirror_tile_doubles_dora_crown_bonus() {
     let mut ctx = ctx_with(&r, false);
     ctx.pattern.dora_faces = vec![(Suit::Manzu, 5)];
     let breakdown = score_sets(&hand, &sets, &ctx, &[]);
-    // 3 dora * 100 base + (3 dora * 10 crown bonus) * 2 (mirror) = 300 + 60 = 360
-    assert_eq!(dora_chips_delta(&breakdown), 360);
+    // 3 dora * 150 base + (3 dora * 15 crown bonus) * 2 (mirror) = 450 + 90 = 540
+    assert_eq!(dora_chips_delta(&breakdown), 540);
 }
 
 fn garden_keeper_chips_delta(breakdown: &ScoreBreakdown) -> i32 {
@@ -564,8 +564,8 @@ fn garden_keeper_adds_chips_per_scored_flower() {
     let base = score_sets(&hand, &sets, &ctx, &[]);
     let r = relics(vec![RelicId::GardenKeeper]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(garden_keeper_chips_delta(&breakdown), 25);
-    assert_eq!(breakdown.final_chips, base.final_chips + 25);
+    assert_eq!(garden_keeper_chips_delta(&breakdown), 40);
+    assert_eq!(breakdown.final_chips, base.final_chips + 40);
 }
 
 #[test]
@@ -588,7 +588,7 @@ fn mirror_tile_doubles_garden_keeper_flower_chips() {
     ];
     let r = relics(vec![RelicId::MirrorTile, RelicId::GardenKeeper]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(garden_keeper_chips_delta(&breakdown), 50);
+    assert_eq!(garden_keeper_chips_delta(&breakdown), 80);
 }
 
 #[test]
@@ -641,5 +641,67 @@ fn format_meld_groups_matches_cascade_set_labels() {
     assert_eq!(
         out,
         "Kong  9p 9p 9p 9p · Kong  9p 9p 9p 9p · Kong  9p 9p 9p 9p · Kong  9p 9p 9p 9p"
+    );
+}
+
+#[test]
+fn ancestor_echo_retriggers_highest_value_meld() {
+    let hand = vec![
+        Tile::new(Suit::Souzu, 3, 0),
+        Tile::new(Suit::Souzu, 3, 1),
+        Tile::new(Suit::Souzu, 3, 2),
+        Tile::new(Suit::Dragon, 1, 3),
+        Tile::new(Suit::Dragon, 1, 4),
+        Tile::new(Suit::Dragon, 1, 5),
+    ];
+    let sets = find_pairs_and_triplets(&hand);
+    let base = score_sets(&hand, &sets, &ctx_with(&RelicState::default(), false), &[]);
+    let with_echo = score_sets(
+        &hand,
+        &sets,
+        &ctx_with(&relics(vec![RelicId::AncestorEcho]), false),
+        &[],
+    );
+    assert_eq!(with_echo.final_chips, base.final_chips + 45);
+    assert!(
+        with_echo
+            .steps
+            .iter()
+            .any(|s| s.source == "Ancestor Echo")
+    );
+}
+
+#[test]
+fn crown_of_patterns_adds_mult_per_distinct_yaku() {
+    use crate::core::hand::validate_selection;
+    let tiles = vec![
+        Tile::new(Suit::Manzu, 2, 0),
+        Tile::new(Suit::Manzu, 3, 1),
+        Tile::new(Suit::Manzu, 4, 2),
+        Tile::new(Suit::Souzu, 2, 3),
+        Tile::new(Suit::Souzu, 3, 4),
+        Tile::new(Suit::Souzu, 4, 5),
+        Tile::new(Suit::Pinzu, 2, 6),
+        Tile::new(Suit::Pinzu, 3, 7),
+        Tile::new(Suit::Pinzu, 4, 8),
+        Tile::new(Suit::Manzu, 5, 9),
+        Tile::new(Suit::Manzu, 5, 10),
+        Tile::new(Suit::Manzu, 6, 11),
+        Tile::new(Suit::Manzu, 6, 12),
+        Tile::new(Suit::Manzu, 6, 13),
+    ];
+    let sets = validate_selection(&tiles).expect("full hand");
+    let base = score_sets(&tiles, &sets, &ctx_with(&RelicState::default(), false), &[]);
+    let with_crown = score_sets(
+        &tiles,
+        &sets,
+        &ctx_with(&relics(vec![RelicId::CrownOfPatterns]), false),
+        &[],
+    );
+    let yaku_count = with_crown.detected_yaku.len();
+    assert!(yaku_count >= 2);
+    assert_eq!(
+        with_crown.final_mult,
+        base.final_mult + 3.0 * yaku_count as f64
     );
 }

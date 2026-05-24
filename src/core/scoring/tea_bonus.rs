@@ -11,7 +11,7 @@ pub(crate) fn tea_harmony_chips(tiles: &[Tile]) -> Option<i32> {
         .filter(|t| matches!(t.suit, Suit::Souzu | Suit::Manzu | Suit::Pinzu))
         .map(|t| t.suit)
         .collect();
-    (suits.len() >= 2).then_some(40)
+    (suits.len() >= 2).then_some(60)
 }
 
 pub(crate) fn tea_respect_chips(tiles: &[Tile]) -> Option<i32> {
@@ -19,7 +19,7 @@ pub(crate) fn tea_respect_chips(tiles: &[Tile]) -> Option<i32> {
         .iter()
         .filter(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
         .count() as i32;
-    (honors > 0).then_some(10 * honors)
+    (honors > 0).then_some(15 * honors)
 }
 
 pub(crate) fn tea_purity_mult(tiles: &[Tile]) -> Option<f64> {
@@ -29,12 +29,12 @@ pub(crate) fn tea_purity_mult(tiles: &[Tile]) -> Option<f64> {
         .map(|t| t.suit)
         .collect();
     if !numbered_suits.is_empty() && numbered_suits.iter().all(|&s| s == numbered_suits[0]) {
-        Some(1.5)
+        Some(2.5)
     } else {
         None
     }
 }
 
 pub(crate) fn tea_tranquility_chips(sets: &[DetectedMeld]) -> Option<i32> {
-    sets.iter().any(|s| s.kind == MeldKind::Pair).then_some(35)
+    sets.iter().any(|s| s.kind == MeldKind::Pair).then_some(55)
 }

@@ -12,6 +12,9 @@ use super::{ScoreStep, StepKind, combine, tile_is_debuffed};
 /// Chips added per matching tile when a face is on the dora plinth.
 pub const DORA_CHIPS_PER_TILE: i32 = 100;
 
+/// Extra chips per dora tile from each Dora Crown copy.
+pub const DORA_CROWN_CHIPS_PER_TILE: i32 = 50;
+
 /// Apply Dora and scored yaku. Returns the yaku list used for the breakdown.
 pub(crate) fn apply_dora_yaku_and_structure(
     input: &ScoringLayerInput<'_>,
@@ -57,7 +60,7 @@ pub(crate) fn apply_dora_yaku_and_structure(
                     chips,
                     *mult,
                     format!("Dora Crown ×{dora_count}"),
-                    10 * dora_count,
+                    DORA_CROWN_CHIPS_PER_TILE * dora_count,
                 );
             }
         }

@@ -216,7 +216,7 @@ impl Tile {
     pub fn point_value(&self) -> u32 {
         match self.suit {
             Suit::Manzu | Suit::Souzu | Suit::Pinzu => self.rank as u32,
-            Suit::Wind | Suit::Dragon => 12,
+            Suit::Wind | Suit::Dragon => 15,
             // Flower wildcards contribute no chip value — their power is structural.
             Suit::Flower | Suit::Season => 0,
         }

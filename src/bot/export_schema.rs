@@ -1,4 +1,4 @@
-//! Serializable shapes for `mahjuro bot -o report.json` (schema version 3+).
+//! Serializable shapes for `mahjuro bot -o report.json` (export schema v5).
 //! `aggregate` splits sums vs maps; `derived` holds precomputed dashboard / summary numbers.
 
 use serde::Serialize;
@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use super::stats::PeakBlindSnapshot;
 
-pub const EXPORT_SCHEMA_VERSION: u32 = 4;
+pub const EXPORT_SCHEMA_VERSION: u32 = 5;
 
 #[derive(Serialize)]
 pub struct BotExportMeta {
@@ -94,7 +94,7 @@ pub struct AggregateMaps {
 }
 
 #[derive(Serialize)]
-pub struct BotAggregateV2 {
+pub struct BotAggregate {
     pub sums: AggregateSums,
     pub maps: AggregateMaps,
 }
@@ -278,6 +278,61 @@ pub struct RelicShopTimingRow {
 }
 
 #[derive(Serialize)]
+pub struct RelicShopFunnelRow {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rarity: Option<String>,
+    pub offers: u64,
+    pub bought: u32,
+    /// `bought / offers` when offers > 0.
+    pub take_rate_pct: f64,
+    pub avg_marginal_at_buy: f64,
+}
+
+#[derive(Serialize)]
+pub struct RelicValueRow {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rarity: Option<String>,
+    pub buy_count: u64,
+    pub avg_marginal: f64,
+    pub min_marginal: Option<i32>,
+    pub max_marginal: Option<i32>,
+    pub marginal_hist: Vec<NamedCount>,
+    pub sell_count: u64,
+    pub avg_hold: f64,
+    pub min_hold: Option<i32>,
+    pub max_hold: Option<i32>,
+    pub hold_hist: Vec<NamedCount>,
+}
+
+#[derive(Serialize)]
+pub struct RelicDepthRow {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rarity: Option<String>,
+    pub runs_with: u64,
+    pub avg_antes_with: f64,
+    pub runs_without: u64,
+    pub avg_antes_without: f64,
+    /// `avg_antes_with - avg_antes_without`.
+    pub delta_antes: f64,
+}
+
+#[derive(Serialize)]
+pub struct RelicAttributionRow {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rarity: Option<String>,
+    pub triggers: u64,
+    pub score_pts: u64,
+    pub chips_pts: u64,
+    pub mult_pts: u64,
+    pub pts_per_trigger: f64,
+    pub pts_per_run: f64,
+}
+
+#[derive(Serialize)]
 pub struct RelicWinRateRow {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -375,6 +430,14 @@ pub struct BotReportDerived {
     pub relics_by_win_rate: Vec<RelicWinRateRow>,
     /// Relics with enough early **and** late shop buys to compare win rates (selection-bias probe).
     pub relics_shop_timing_split: Vec<RelicShopTimingRow>,
+    /// Shop stock funnel: offers vs buys and bot marginal at purchase.
+    pub relics_shop_funnel: Vec<RelicShopFunnelRow>,
+    /// Marginal-at-buy and hold-at-sell histograms from bot valuation.
+    pub relics_value_analysis: Vec<RelicValueRow>,
+    /// Average ante depth on runs that bought vs never bought each relic.
+    pub relics_depth_split: Vec<RelicDepthRow>,
+    /// Score points attributed to relic sources on committed plays.
+    pub relics_score_attribution: Vec<RelicAttributionRow>,
     pub talismans_shop: Vec<NamedPerRun>,
     pub zodiacs_shop: Vec<NamedPerRun>,
     pub packs_shop: Vec<NamedPerRun>,
@@ -408,6 +471,10 @@ impl Default for BotReportDerived {
             relics_bought: Vec::new(),
             relics_by_win_rate: Vec::new(),
             relics_shop_timing_split: Vec::new(),
+            relics_shop_funnel: Vec::new(),
+            relics_value_analysis: Vec::new(),
+            relics_depth_split: Vec::new(),
+            relics_score_attribution: Vec::new(),
             talismans_shop: Vec::new(),
             zodiacs_shop: Vec::new(),
             packs_shop: Vec::new(),

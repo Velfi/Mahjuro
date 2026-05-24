@@ -37,7 +37,7 @@ pub use discard_undo::DiscardUndoSnapshot;
 
 /// Boss-blind state for the current run.  Extracted from `RunState` so
 /// boss-specific logic has a single owner.
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct BossState {
     /// Bosses still available for this run, drawn without replacement.
     pub pool_remaining: Vec<BossKind>,

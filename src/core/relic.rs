@@ -37,44 +37,44 @@ pub enum RelicId {
     // ── Draw tempo, dora, wind, zodiac ──────────────────────────────────
     /// Kongs grant +1 play this round and +4 mult when scored.
     KanDrum,
-    /// Reveal an extra dora indicator at round start; dora chips become +35.
+    /// Reveal an extra dora indicator at round start; each dora tile gains +25 chips.
     DoraCrown,
     /// Each round, also treats a second wind as round wind; round-wind triplets/kongs grant +6 mult.
     #[serde(alias = "round_compass")]
     WindReader,
     /// Scoring a FullHand grants 1 random Zodiac card (ignores slot cap).
     EightTreasures,
-    /// Kongs grant +120 chips and +2 mult each when scored.
+    /// Kongs grant +180 chips and +3 mult each when scored.
     KongsBlessing,
     // ── Flower-synergy relics ──────────────────────────────────────────
-    /// Each scored flower tile: +25 chips (stacks with Mirror Tile).
+    /// Each scored flower tile: +40 chips (stacks with Mirror Tile).
     GardenKeeper,
     /// Scoring 2+ flowers in one hand grants +6 mult.
     Ikebana,
     /// Each flower scored grants +3 gold immediately.
     Hanami,
     // ── Suit, rank, economy ───────────────────────────────────────────
-    /// Souzu-suit tiles in scored sets: +8 chips each.
+    /// Souzu-suit tiles in scored sets: +12 chips each.
     JadeSerpent,
-    /// Manzu-suit tiles in scored sets: +8 chips each.
+    /// Manzu-suit tiles in scored sets: +12 chips each.
     #[serde(alias = "red_serpent")]
     RubySerpent,
-    /// Pinzu tiles in scored sets: +8 chips each.
+    /// Pinzu tiles in scored sets: +12 chips each.
     #[serde(alias = "blue_serpent")]
     LapisSerpent,
-    /// Tiles ranked 1–3 in scored sets: +6 chips each.
+    /// Tiles ranked 1–3 in scored sets: +10 chips each.
     LowTide,
-    /// Tiles ranked 7–9 in scored sets: +6 chips each.
+    /// Tiles ranked 7–9 in scored sets: +10 chips each.
     HighTide,
     /// Relics cost 25% less in the shop, rounded down (minimum $1).
     MerchantsEye,
     /// Three shop restocks this run cost no gold.
     IGotAGuy,
-    /// Terminal tiles (rank 1 or 9) in scored sets: +12 chips each.
+    /// Terminal tiles (rank 1 or 9) in scored sets: +18 chips each.
     EdgeRunner,
-    /// Rank-7 tiles in scored sets: +1.5 mult each.
+    /// Rank-7 tiles in scored sets: +2 mult each.
     LuckySeven,
-    /// +0.5 mult per play already used this round.
+    /// +0.75 mult per play already used this round.
     Momentum,
     /// Playing exactly one set that is a pair: +4 mult.
     Minimalist,
@@ -82,32 +82,32 @@ pub enum RelicId {
     TurtleShell,
     /// All scored tiles are terminals or honors: +4 mult.
     ClosedGate,
-    /// +1 mult per 5 gold held.
+    /// +1 mult per 4 gold held.
     GoldenEngine,
     /// +0.1 mult per 100 total score earned this run.
     Snowball,
     /// +1 play per round.
     SecondWind,
-    /// ×3 final mult on the next scored hand, then destroyed (destruction).
+    /// ×7 final mult on the next scored hand, then destroyed (destruction).
     GlassCannon,
     // ── Retrigger starters, mirrors, suit purity ───────────────────────
     /// On your final play of the round, retrigger all scored tiles (they
     /// each contribute their chip value a second time).
     LastBreath,
-    /// Every scored tile permanently gains +3 chips for the rest of the
+    /// Every scored tile permanently gains +5 chips for the rest of the
     /// run. Accumulated in `relic_counters[TilePolisher]`.
     TilePolisher,
     /// +6 mult, but 1-in-5 chance to be destroyed at end of each round.
     /// When destroyed, replaced by Stone Lantern.
     PaperLantern,
-    /// Replaces Paper Lantern when it burns. ×2 final mult, 1-in-1000
+    /// Replaces Paper Lantern when it burns. ×3.5 final mult, 1-in-1000
     /// chance to break at end of round.
     #[serde(alias = "silver_filigree_lantern")]
     StoneLantern,
     /// Copies the relic in the next slot to the right in the relic bar.
     /// No effect if that slot is empty.
     MirrorTile,
-    /// ×2.5 mult if every scored tile belongs to a single numbered suit.
+    /// ×3.5 mult if every scored tile belongs to a single numbered suit.
     WayOfPurity,
     // ── Broad relic pool ───────────────────────────────────────────────
     // Retrigger
@@ -139,13 +139,13 @@ pub enum RelicId {
     Obsession,
     /// +0.4 mult per relic sold this run.
     Bonfire,
-    /// +20 chips permanently each time you score a sequence.
+    /// +30 chips permanently each time you score a sequence.
     RiverRunner,
     // Fragile
-    /// +80 chips, loses 8 chips per play. At 0 the relic burns (slot empties);
+    /// +120 chips, loses 12 chips per play. At 0 the relic burns (slot empties);
     /// Taotie enters the shop pool this run.
     MeltingIce,
-    /// Successor to Melting Ice after it burns — buy from shop. Permanent +80 chips base.
+    /// Successor to Melting Ice after it burns — buy from shop. Permanent +120 chips base.
     /// At cash-in, every scored honor (wind/dragon) tile is destroyed: the
     /// tile is permanently removed from the run's wall (added to
     /// `removed_tile_ids`) and Taotie's chip bonus grows by +20 per tile.
@@ -187,7 +187,7 @@ pub enum RelicId {
     // Conditional ×mult
     /// ×2 mult if scored hand is all pairs.
     WayOfPairs,
-    /// ×2.5 mult if scored hand is all triplets/kongs.
+    /// ×3.5 mult if scored hand is all triplets/kongs.
     WayOfTriplets,
     /// ×2 mult if scored hand is all sequences.
     WayOfSequences,
@@ -261,13 +261,17 @@ pub enum RelicId {
     /// Shop-only until Chrysalis hatches this run. +chips per score from a
     /// log tier derived from absorbed excess (`relic_counters[MonarchButterfly]`).
     MonarchButterfly,
+    /// Retriggers the scored meld with the highest total chip value once.
+    AncestorEcho,
+    /// +4 mult per distinct yaku on the scored hand.
+    CrownOfPatterns,
 }
 
 /// Total absorbed excess (post-target score) needed for Chrysalis to transform.
 pub const CHRYSALIS_HATCH_EXCESS_THRESHOLD: i32 = 2000;
 
 /// Chips per log-tier from [`monarch_butterfly_tier`].
-pub const MONARCH_CHIPS_PER_TIER: i32 = 12;
+pub const MONARCH_CHIPS_PER_TIER: i32 = 27;
 
 /// Max tier for Monarch Butterfly chip bonus.
 pub const MONARCH_TIER_CAP: i32 = 24;
@@ -406,6 +410,8 @@ impl RelicId {
             RelicId::TinyHands => "tiny_hands.png",
             RelicId::Chrysalis => "chrysalis.png",
             RelicId::MonarchButterfly => "monarch_butterfly.png",
+            RelicId::AncestorEcho => "ancestor_echo.png",
+            RelicId::CrownOfPatterns => "crown_of_patterns.png",
         }
     }
 }
@@ -670,15 +676,16 @@ pub fn relic_description_live(
     }
     match id {
         RelicId::MeltingIce => {
-            let remaining = counters.get(&RelicId::MeltingIce).copied().unwrap_or(80);
+            let remaining = counters
+                .get(&RelicId::MeltingIce)
+                .copied()
+                .unwrap_or(MELTING_ICE_START_CHIPS);
             format!("{base} [{remaining} chips left]")
         }
         RelicId::Taotie => {
-            // Counter stores accumulated chips (20 per destroyed honor); the
-            // honor count is the counter divided by that rate. Both numbers
-            // are useful — count is the flavor read, chips is the math.
+            // Counter stores accumulated chips (TAOTIE_CHIPS_PER_DEVOURED per destroyed honor).
             let chips = counters.get(&RelicId::Taotie).copied().unwrap_or(0);
-            let devoured = chips / 20;
+            let devoured = chips / TAOTIE_CHIPS_PER_DEVOURED;
             format!("{base} [{devoured} honors destroyed, +{chips} chips]")
         }
         RelicId::SilkThread => {
@@ -983,7 +990,7 @@ impl Default for RelicState {
     fn default() -> Self {
         Self {
             active: Vec::new(),
-            max_slots: 5,
+            max_slots: 6,
             debuffed: BTreeSet::new(),
         }
     }
@@ -1266,16 +1273,34 @@ pub struct ScoreEconomyBundle {
 /// Cleared blinds counted toward Snowball (cap).
 pub const SNOWBALL_STACK_CAP: i32 = 15;
 /// Chips added per scored hand for each blind clear counted on Snowball (before mult).
-pub const SNOWBALL_CHIPS_PER_CLEAR: i32 = 15;
+pub const SNOWBALL_CHIPS_PER_CLEAR: i32 = 25;
 
 /// Flat chips from Turtle Shell while the run still holds gold (`gold > 0` at score time).
 /// The relic is removed when run gold hits zero or below (handled in the run gold-change hook).
-pub const TURTLE_SHELL_CHIPS: i32 = 200;
+pub const TURTLE_SHELL_CHIPS: i32 = 300;
 
-/// Mult bonus from Golden Engine (+1 per 5 gold held at score time).
+/// Starting chip bonus for Melting Ice (also used when the counter is first set).
+pub const MELTING_ICE_START_CHIPS: i32 = 120;
+
+/// Chip bonus lost from Melting Ice after each play.
+pub const MELTING_ICE_DECAY_PER_PLAY: i32 = 12;
+
+/// Flat chip bonus from Taotie on every cash-in.
+pub const TAOTIE_BASE_CHIPS: i32 = 120;
+
+/// Permanent chip growth per honor devoured by Taotie.
+pub const TAOTIE_CHIPS_PER_DEVOURED: i32 = 30;
+
+/// Permanent chip growth per sequence scored while River Runner is owned.
+pub const RIVER_RUNNER_CHIPS_PER_SEQUENCE: i32 = 30;
+
+/// Permanent chip growth per tile in a scored cash-in while Tile Polisher is owned.
+pub const TILE_POLISHER_CHIPS_PER_TILE: i32 = 5;
+
+/// Mult bonus from Golden Engine (+1 per 3 gold held at score time).
 #[inline]
 pub fn golden_engine_mult_bonus(gold: i32) -> i32 {
-    (gold.max(0) as f64 / 5.0).floor() as i32
+    (gold.max(0) as f64 / 3.0).floor() as i32
 }
 
 /// Chips from Snowball for one scored hand (`stacks` = blind clears while owned, capped).
@@ -1311,11 +1336,12 @@ mod tests {
     };
 
     #[test]
-    fn golden_engine_mult_scales_per_five_gold() {
+    fn golden_engine_mult_scales_per_three_gold() {
         assert_eq!(golden_engine_mult_bonus(0), 0);
-        assert_eq!(golden_engine_mult_bonus(4), 0);
+        assert_eq!(golden_engine_mult_bonus(2), 0);
+        assert_eq!(golden_engine_mult_bonus(3), 1);
         assert_eq!(golden_engine_mult_bonus(5), 1);
-        assert_eq!(golden_engine_mult_bonus(24), 4);
+        assert_eq!(golden_engine_mult_bonus(24), 8);
         assert_eq!(golden_engine_mult_bonus(-3), 0);
     }
 
@@ -1473,7 +1499,9 @@ mod tests {
                     | RelicId::BigHands
                     | RelicId::TinyHands
                     | RelicId::Chrysalis
-                    | RelicId::MonarchButterfly => {}
+                    | RelicId::MonarchButterfly
+                    | RelicId::AncestorEcho
+                    | RelicId::CrownOfPatterns => {}
                 }
             }
             &[
@@ -1576,6 +1604,8 @@ mod tests {
                 RelicId::TinyHands,
                 RelicId::Chrysalis,
                 RelicId::MonarchButterfly,
+                RelicId::AncestorEcho,
+                RelicId::CrownOfPatterns,
             ]
         };
 

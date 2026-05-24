@@ -18,7 +18,7 @@ use super::{tile_by_id, tile_is_debuffed};
 pub(crate) fn apply_post_yaku_relic_modifiers(
     input: &ScoringLayerInput<'_>,
     out: ScoringLayerOut<'_>,
-    opts: PostYakuRelicLayerOpts,
+    opts: PostYakuRelicLayerOpts<'_>,
 ) {
     let ScoringLayerInput {
         ctx,
@@ -31,6 +31,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
         honor_triple,
         no_seq_bonus,
         has_triplet_boost,
+        detected_yaku,
     } = opts;
     let has = |id: RelicId| eff.has(ctx.relic.roster, id);
     let count = |id: RelicId| eff.count(ctx.relic.roster, id);
@@ -46,7 +47,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
                 .and_then(|id| tile_by_id(tiles, *id))
                 .is_some_and(|t| t.suit == Suit::Dragon);
             if is_dragon {
-                push_mult(steps, *chips, mult, "Dragon Rage", 5.0);
+                push_mult(steps, *chips, mult, "Dragon Rage", 8.0);
             }
         }
     }
@@ -62,7 +63,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
                 .and_then(|id| tile_by_id(tiles, *id))
                 .is_some_and(|t| t.suit == Suit::Dragon && t.rank == 3);
             if is_white_dragon {
-                push_mult(steps, *chips, mult, "White Dragon's Hush", 4.0);
+                push_mult(steps, *chips, mult, "White Dragon's Hush", 6.0);
             }
         }
     }
@@ -75,7 +76,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
                 *chips,
                 mult,
                 "Sequence Surge",
-                0.5 * seq_count as f64,
+                0.8 * seq_count as f64,
             );
         }
     }
@@ -83,14 +84,14 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     if has(RelicId::PairPower) {
         let pair_count = sets.iter().filter(|s| s.kind == MeldKind::Pair).count() as i32;
         if pair_count > 0 {
-            push_mult(steps, *chips, mult, "Pair Power", pair_count as f64);
+            push_mult(steps, *chips, mult, "Pair Power", 1.5 * pair_count as f64);
         }
     }
 
     if has(RelicId::KanDrum) {
         let kong_count = sets.iter().filter(|s| s.kind == MeldKind::Kong).count() as i32;
         if kong_count > 0 {
-            push_mult(steps, *chips, mult, "Kan Drum", 4.0 * kong_count as f64);
+            push_mult(steps, *chips, mult, "Kan Drum", 6.0 * kong_count as f64);
         }
     }
 
@@ -102,7 +103,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
                 *chips,
                 mult,
                 "Kong's Blessing",
-                2.0 * kong_count as f64,
+                3.0 * kong_count as f64,
             );
         }
     }
@@ -118,7 +119,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
                 *chips,
                 mult,
                 "Triplet Boost",
-                0.2 * trip_count as f64,
+                0.35 * trip_count as f64,
             );
         }
     }
@@ -142,7 +143,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
                 .and_then(|id| tile_by_id(tiles, *id))
                 .is_some_and(|t| t.suit == Suit::Wind && round_winds.contains(&t.rank));
             if is_round_wind {
-                push_mult(steps, *chips, mult, "Windreader", 6.0);
+                push_mult(steps, *chips, mult, "Windreader", 9.0);
             }
         }
     }
@@ -178,7 +179,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             })
             .count();
         if flower_count >= 2 {
-            push_mult(steps, *chips, mult, "Ikebana", 6.0);
+            push_mult(steps, *chips, mult, "Ikebana", 9.0);
         }
     }
 
@@ -193,12 +194,12 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             })
             .count();
         if count7 > 0 {
-            push_mult(steps, *chips, mult, "Lucky Seven", 1.5 * count7 as f64);
+            push_mult(steps, *chips, mult, "Lucky Seven", 3.0 * count7 as f64);
         }
     }
 
     for _ in 0..count(RelicId::PaperLantern) {
-        push_mult(steps, *chips, mult, "Paper Lantern", 4.0);
+        push_mult(steps, *chips, mult, "Paper Lantern", 6.0);
     }
 
     if has(RelicId::MultiplierMaster) {
@@ -209,7 +210,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     }
 
     if has(RelicId::ChainReaction) && ctx.round.scored_last_turn {
-        push_mult(steps, *chips, mult, "Chain Reaction", 4.0);
+        push_mult(steps, *chips, mult, "Chain Reaction", 6.0);
     }
 
     if has(RelicId::ClosedGate) {
@@ -223,7 +224,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
                         && (t.rank == 1 || t.rank == 9))
             });
         if all_terminal_or_honor {
-            push_mult(steps, *chips, mult, "Closed Gate", 4.0);
+            push_mult(steps, *chips, mult, "Closed Gate", 6.0);
         }
     }
 
@@ -253,12 +254,12 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             *chips,
             mult,
             "Momentum",
-            0.5 * ctx.round.plays_used as f64,
+            1.0 * ctx.round.plays_used as f64,
         );
     }
 
     if has(RelicId::Minimalist) && sets.len() == 1 && sets[0].kind == MeldKind::Pair {
-        push_mult(steps, *chips, mult, "Minimalist", 4.0);
+        push_mult(steps, *chips, mult, "Minimalist", 6.0);
     }
 
     if has(RelicId::TurtleShell) && ctx.economy.gold > 0 {
@@ -278,13 +279,13 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
                 *chips,
                 mult,
                 "Silk Thread",
-                thread_mult as f64 / 10.0,
+                thread_mult as f64 / 8.0,
             );
         }
     }
 
     if has(RelicId::SilkMoth) {
-        push_mult(steps, *chips, mult, "Silk Moth", 2.0);
+        push_mult(steps, *chips, mult, "Silk Moth", 3.0);
     }
 
     for _ in 0..count(RelicId::EulersNumber) {
@@ -303,7 +304,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             .copied()
             .unwrap_or(0);
         if streak > 0 {
-            push_mult(steps, *chips, mult, "Humility", 0.5 * streak as f64);
+            push_mult(steps, *chips, mult, "Humility", 0.75 * streak as f64);
         }
     }
 
@@ -315,7 +316,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             .copied()
             .unwrap_or(0);
         if rounds > 0 {
-            push_mult(steps, *chips, mult, "Obsession", 0.3 * rounds as f64);
+            push_mult(steps, *chips, mult, "Obsession", 0.5 * rounds as f64);
         }
     }
 
@@ -327,7 +328,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             .copied()
             .unwrap_or(0);
         if sold > 0 {
-            push_mult(steps, *chips, mult, "Bonfire", 0.4 * sold as f64);
+            push_mult(steps, *chips, mult, "Bonfire", 0.6 * sold as f64);
         }
     }
 
@@ -339,14 +340,14 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             .copied()
             .unwrap_or(0);
         if stacks > 0 {
-            push_mult(steps, *chips, mult, "Temperance", stacks as f64 / 10.0);
+            push_mult(steps, *chips, mult, "Temperance", stacks as f64 / 8.0);
         }
     }
 
     if has(RelicId::Chastity) && !tiles.is_empty() {
         let all_unenhanced = tiles.iter().all(|t| t.enhancement.is_none());
         if all_unenhanced {
-            push_mult(steps, *chips, mult, "Chastity", 2.0);
+            push_mult(steps, *chips, mult, "Chastity", 3.0);
         }
     }
 
@@ -384,7 +385,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             .max_slots
             .saturating_sub(ctx.relic.roster.active.len());
         if empty > 0 {
-            push_mult(steps, *chips, mult, "Solitary Sage", 1.5 * empty as f64);
+            push_mult(steps, *chips, mult, "Solitary Sage", 2.5 * empty as f64);
         }
     }
 
@@ -411,7 +412,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             .copied()
             .unwrap_or(0);
         if blooms > 0 {
-            push_mult(steps, *chips, mult, "Lotus Bloom", 0.5 * blooms as f64);
+            push_mult(steps, *chips, mult, "Lotus Bloom", 0.75 * blooms as f64);
         }
     }
 
@@ -430,7 +431,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             .max(0);
         let excess = overflow_extras + extra_added;
         if excess > 0 {
-            push_mult(steps, *chips, mult, "Wall Weaver", 0.2 * excess as f64);
+            push_mult(steps, *chips, mult, "Wall Weaver", 0.35 * excess as f64);
         }
     }
 
@@ -471,14 +472,14 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
         }
         let distinct = seen.iter().filter(|b| **b).count();
         if distinct > 0 {
-            push_mult(steps, *chips, mult, "Tourist", 3.0 * distinct as f64);
+            push_mult(steps, *chips, mult, "Tourist", 4.0 * distinct as f64);
         }
     }
 
     if has(RelicId::CrackedTile) {
         use rand::RngExt;
         let mut rng = rand::rng();
-        let bonus: f64 = rng.random_range(0.0..=8.0);
+        let bonus: f64 = rng.random_range(0.0..=12.0);
         if bonus > 0.0 {
             push_mult(
                 steps,
@@ -502,6 +503,11 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
         }
     }
 
+    if has(RelicId::CrownOfPatterns) && !detected_yaku.is_empty() {
+        let distinct = detected_yaku.len() as f64;
+        push_mult(steps, *chips, mult, "Crown of Patterns", 4.0 * distinct);
+    }
+
     if has(RelicId::WayOfPurity) {
         let numbered_suits: Vec<Suit> = sets
             .iter()
@@ -519,7 +525,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
                     .filter_map(|id| tile_by_id(tiles, *id))
                     .all(|t| matches!(t.suit, Suit::Souzu | Suit::Manzu | Suit::Pinzu));
             if all_same {
-                let delta = *mult * 1.5;
+                let delta = *mult * 2.5;
                 push_mult(steps, *chips, mult, "Way of Purity", delta);
             }
         }
@@ -527,7 +533,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
 
     if has(RelicId::WayOfPairs) && !sets.is_empty() && sets.iter().all(|s| s.kind == MeldKind::Pair)
     {
-        let delta = *mult;
+        let delta = *mult * 1.5;
         push_mult(steps, *chips, mult, "Way of Pairs", delta);
     }
 
@@ -537,7 +543,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             .iter()
             .all(|s| matches!(s.kind, MeldKind::Triplet | MeldKind::Kong))
     {
-        let delta = *mult * 1.5;
+        let delta = *mult * 2.5;
         push_mult(steps, *chips, mult, "Way of Triplets", delta);
     }
 
@@ -545,17 +551,17 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
         && !sets.is_empty()
         && sets.iter().all(|s| s.kind == MeldKind::Sequence)
     {
-        let delta = *mult;
+        let delta = *mult * 1.5;
         push_mult(steps, *chips, mult, "Way of Sequences", delta);
     }
 
     for _ in 0..count(RelicId::StoneLantern) {
-        let delta = *mult;
+        let delta = *mult * 2.5;
         push_mult(steps, *chips, mult, "Stone Lantern", delta);
     }
 
     for _ in 0..count(RelicId::GlassCannon) {
-        let delta = *mult * 2.0;
+        let delta = *mult * 6.0;
         push_mult(steps, *chips, mult, "Glass Cannon", delta);
     }
 }
