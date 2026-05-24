@@ -229,11 +229,6 @@ pub fn push_text_block(
 /// Vertical step multiplier for [`wrap_text`] blocks (matches [`push_dense_text_lines`] in scenes).
 pub const PLAIN_TEXT_LINE_STEP_MUL: f32 = 1.22;
 
-#[inline]
-pub fn plain_text_line_step(font_px: f32) -> f32 {
-    font_px * PLAIN_TEXT_LINE_STEP_MUL
-}
-
 /// Height of wrapped plain text at `font_px` and `line_mul` (same math as scene body copy).
 pub fn plain_text_block_height(text: &str, max_width_px: f32, font_px: f32, line_mul: f32) -> f32 {
     let wrapped = wrap_text(text, max_width_px, font_px / 0.99);
