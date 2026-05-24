@@ -6,10 +6,10 @@
 use crate::core::rules::BlindKind;
 
 /// Spring-stake chip base for ante 1 Small Blind (`base_target` before stake mult).
-pub const DEFAULT_BASE_TARGET: u32 = 500;
+pub const DEFAULT_BASE_TARGET: u32 = 1000;
 
 /// Per-ante multiplier on the run's `base_target`.
-pub const TARGET_SCALING: f32 = 1.6;
+pub const TARGET_SCALING: f32 = 2.0;
 
 /// Small-blind multiplier for the ante's chip base.
 pub const SMALL_MULT: f32 = 1.0;
@@ -63,7 +63,7 @@ mod tests {
 
     #[test]
     fn scales_exponentially_per_ante() {
-        assert_eq!(ante_chip_base(3, DEFAULT_BASE_TARGET), 1280);
-        assert_eq!(score_for(3, BlindKind::Boss, DEFAULT_BASE_TARGET), 2560);
+        assert_eq!(ante_chip_base(3, DEFAULT_BASE_TARGET), 2000);
+        assert_eq!(score_for(3, BlindKind::Boss, DEFAULT_BASE_TARGET), 4000);
     }
 }

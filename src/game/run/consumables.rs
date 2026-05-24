@@ -204,7 +204,7 @@ impl RunState {
     /// stored against its id in `tile_enhancements`. Called after any path
     /// that adds tiles to the hand (initial deal, post-play refill, mid-round
     /// draws, new-round redeal) so talisman effects survive for the whole run.
-    pub(super) fn restamp_hand_enhancements(&mut self) {
+    pub(crate) fn restamp_hand_enhancements(&mut self) {
         if self.tile_enhancements.is_empty() && self.global_buff_enhancement.is_none() {
             return;
         }
@@ -217,11 +217,17 @@ impl RunState {
         }
     }
 
-    /// Recompute consumable inventory capacity from
-    /// currently-owned relics. Idempotent — call after any relic add/remove.
+    /// Recompute inventory capacities from currently-owned relics.
+    /// Idempotent — call after any relic add/remove.
     pub fn recompute_capacities(&mut self) {
+        let mut relic_slots = 6usize;
+        if self.relics.owns(RelicId::BrocadePouch) {
+            relic_slots += 1;
+        }
+        self.relics.max_slots = relic_slots.max(self.relics.active.len());
+
         let mut consumable_cap = self.mode.consumable_capacity;
-        if self.relics.has(RelicId::BrocadePouch) {
+        if self.relics.owns(RelicId::BrocadePouch) {
             consumable_cap += 1;
         }
         self.consumables.capacity = consumable_cap;

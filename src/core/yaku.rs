@@ -50,6 +50,12 @@ fn yaku_def(id: YakuKind) -> &'static YakuDef {
         .unwrap_or_else(|| panic!("yaku def missing for {id:?}"))
 }
 
+/// Additive mult per zodiac level above 1 (applied on top of base yaku mult).
+pub const YAKU_MULT_PER_LEVEL: f64 = 0.9;
+
+/// Additive chips per zodiac level above 1.
+pub const YAKU_CHIPS_PER_LEVEL: i32 = 50;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum YakuKind {
@@ -134,25 +140,26 @@ impl YakuKind {
         yaku_def(self).chip_bonus
     }
 
-    /// Leveled mult bonus: `base + 0.5 × (level - 1)`. Level starts at 1 and rises
-    /// when the player uses the zodiac card bound to this yaku. `score_sets`
-    /// passes the effective level; use `mult_bonus()` when level is always 1.
+    /// Leveled mult bonus: `base + YAKU_MULT_PER_LEVEL × (level - 1)`. Level starts
+    /// at 1 and rises when the player uses the zodiac card bound to this yaku.
+    /// `score_sets` passes the effective level; use `mult_bonus()` when level is
+    /// always 1.
     pub fn mult_bonus_at(self, level: u32) -> f64 {
         let base = self.base_mult_bonus();
         if level <= 1 {
             base
         } else {
-            base + 0.5 * (level - 1) as f64
+            base + YAKU_MULT_PER_LEVEL * (level - 1) as f64
         }
     }
 
-    /// Leveled chip bonus: `base + 20 × (level - 1)`.
+    /// Leveled chip bonus: `base + YAKU_CHIPS_PER_LEVEL × (level - 1)`.
     pub fn chip_bonus_at(self, level: u32) -> i32 {
         let base = self.base_chip_bonus();
         if level <= 1 {
             base
         } else {
-            base + 20 * (level as i32 - 1)
+            base + YAKU_CHIPS_PER_LEVEL * (level as i32 - 1)
         }
     }
 
@@ -1685,12 +1692,11 @@ mod tests {
 
     #[test]
     fn mult_bonus_at_levels_up() {
-        // Level 1 = base; each subsequent level adds 0.5 mult and 20 chips.
         assert_eq!(YakuKind::Toitoi.mult_bonus_at(1), 3.0);
-        assert_eq!(YakuKind::Toitoi.mult_bonus_at(2), 3.5);
-        assert_eq!(YakuKind::Toitoi.mult_bonus_at(5), 5.0);
-        assert_eq!(YakuKind::Toitoi.chip_bonus_at(1), 42);
-        assert_eq!(YakuKind::Toitoi.chip_bonus_at(5), 122);
+        assert_eq!(YakuKind::Toitoi.mult_bonus_at(2), 3.9);
+        assert_eq!(YakuKind::Toitoi.mult_bonus_at(5), 6.6);
+        assert_eq!(YakuKind::Toitoi.chip_bonus_at(1), 63);
+        assert_eq!(YakuKind::Toitoi.chip_bonus_at(5), 263);
     }
 
     /// Force a panic on data drift. Touching every variant via the metadata

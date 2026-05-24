@@ -81,8 +81,11 @@ impl RunState {
         self.onboarding_notify_structure_committed();
 
         if self.relics.has(RelicId::MeltingIce) {
-            let v = self.relic_counters.entry(RelicId::MeltingIce).or_insert(80);
-            *v = (*v - 8).max(0);
+            let v = self
+                .relic_counters
+                .entry(RelicId::MeltingIce)
+                .or_insert(crate::core::relic::MELTING_ICE_START_CHIPS);
+            *v = (*v - crate::core::relic::MELTING_ICE_DECAY_PER_PLAY).max(0);
             if *v == 0 {
                 self.on_transformation_primary_burned(TransformationPrimaryRelic::MeltingIce, bus);
             }
@@ -251,28 +254,39 @@ impl RunState {
             self.memorial_round.next_cashin_yaku = None;
         }
         let pre_round = self.round_score;
-        let absorb_excess = (self.relics.has(crate::core::relic::RelicId::Chrysalis)
+        let target = self.target_score as u64;
+        let absorbs_excess = self.relics.has(crate::core::relic::RelicId::Chrysalis)
             || self
                 .relics
-                .has(crate::core::relic::RelicId::MonarchButterfly))
-            && pre_round >= self.target_score as u64;
-        let applied = if absorb_excess { 0u64 } else { breakdown_total };
+                .has(crate::core::relic::RelicId::MonarchButterfly);
+        let (applied, excess_to_absorb) = if absorbs_excess {
+            if pre_round >= target {
+                (0u64, breakdown_total)
+            } else if pre_round.saturating_add(breakdown_total) <= target {
+                (breakdown_total, 0u64)
+            } else {
+                let to_target = target.saturating_sub(pre_round);
+                (to_target, breakdown_total.saturating_sub(to_target))
+            }
+        } else {
+            (breakdown_total, 0u64)
+        };
 
         self.round_score = self.round_score.saturating_add(applied);
         self.total_score_earned = self.total_score_earned.saturating_add(applied);
-        if applied > self.best_structure_score {
-            self.best_structure_score = applied;
+        if breakdown_total > self.best_structure_score {
+            self.best_structure_score = breakdown_total;
             self.best_structure_name = structure_label_from_yaku(&breakdown.detected_yaku);
             self.best_hand_tiles = scoring_tiles.iter().map(|t| t.display_copy()).collect();
         }
 
-        if absorb_excess && breakdown_total > 0 {
+        if excess_to_absorb > 0 {
             let cur = self
                 .relic_counters
                 .entry(crate::core::relic::RelicId::MonarchButterfly)
                 .or_insert(0);
             let room = i64::from(i32::MAX) - i64::from(*cur);
-            let add = (breakdown_total.min(room.max(0) as u64)) as i32;
+            let add = (excess_to_absorb.min(room.max(0) as u64)) as i32;
             *cur = cur.saturating_add(add);
             if self.relics.has(crate::core::relic::RelicId::Chrysalis) {
                 self.push_relic_activation(crate::core::relic::RelicId::Chrysalis);
@@ -306,13 +320,14 @@ impl RunState {
             *self
                 .relic_counters
                 .entry(RelicId::TilePolisher)
-                .or_insert(0) += 3 * tile_count;
+                .or_insert(0) += crate::core::relic::TILE_POLISHER_CHIPS_PER_TILE * tile_count;
             self.push_relic_activation(RelicId::TilePolisher);
         }
         if self.relics.has(RelicId::RiverRunner) {
             let seq_count = sets.iter().filter(|s| s.kind == MeldKind::Sequence).count() as i32;
             if seq_count > 0 {
-                *self.relic_counters.entry(RelicId::RiverRunner).or_insert(0) += 20 * seq_count;
+                *self.relic_counters.entry(RelicId::RiverRunner).or_insert(0) +=
+                    crate::core::relic::RIVER_RUNNER_CHIPS_PER_SEQUENCE * seq_count;
                 self.push_relic_activation(RelicId::RiverRunner);
             }
         }
@@ -327,7 +342,7 @@ impl RunState {
             // Anti-synergy with Honor Fury / Windreader / Yakuhai is
             // deliberate — feeding the mask drains the supply those relics
             // depend on, which gives the build a real shape.
-            const CHIPS_PER_DEVOURED: i32 = 20;
+            use crate::core::relic::TAOTIE_CHIPS_PER_DEVOURED;
             let mut devoured = 0i32;
             for tile in &scoring_tiles {
                 if matches!(tile.suit, Suit::Wind | Suit::Dragon) {
@@ -338,7 +353,7 @@ impl RunState {
             }
             if devoured > 0 {
                 *self.relic_counters.entry(RelicId::Taotie).or_insert(0) +=
-                    CHIPS_PER_DEVOURED * devoured;
+                    TAOTIE_CHIPS_PER_DEVOURED * devoured;
                 self.push_relic_activation(RelicId::Taotie);
                 bus.push(GameEvent::TilesDestroyed);
             }

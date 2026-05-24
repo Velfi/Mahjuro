@@ -104,6 +104,51 @@ pub struct RunStats {
     pub final_gold: i32,
     pub blinds_skipped: u32,
     pub relics_bought: u32,
+    /// Proactive or swap-driven relic sells during shop visits.
+    pub relics_sold: u32,
+    pub relics_sold_picked: std::collections::BTreeMap<&'static str, u32>,
+    /// Relic offerings rolled in shop stock this run (including unpurchased).
+    #[serde(default)]
+    pub relic_shop_offers: std::collections::BTreeMap<&'static str, u32>,
+    /// Bot marginal-value estimate at purchase time.
+    #[serde(default)]
+    pub relic_marginal_buy_sum: std::collections::BTreeMap<&'static str, i64>,
+    #[serde(default)]
+    pub relic_marginal_buy_count: std::collections::BTreeMap<&'static str, u32>,
+    #[serde(default)]
+    pub relic_marginal_buy_min: std::collections::BTreeMap<&'static str, i32>,
+    #[serde(default)]
+    pub relic_marginal_buy_max: std::collections::BTreeMap<&'static str, i32>,
+    #[serde(default)]
+    pub relic_marginal_buy_buckets: std::collections::BTreeMap<
+        &'static str,
+        std::collections::BTreeMap<&'static str, u32>,
+    >,
+    /// Hold-value estimate when sold (proactive or swap).
+    #[serde(default)]
+    pub relic_hold_sell_sum: std::collections::BTreeMap<&'static str, i64>,
+    #[serde(default)]
+    pub relic_hold_sell_count: std::collections::BTreeMap<&'static str, u32>,
+    #[serde(default)]
+    pub relic_hold_sell_min: std::collections::BTreeMap<&'static str, i32>,
+    #[serde(default)]
+    pub relic_hold_sell_max: std::collections::BTreeMap<&'static str, i32>,
+    #[serde(default)]
+    pub relic_hold_sell_buckets: std::collections::BTreeMap<
+        &'static str,
+        std::collections::BTreeMap<&'static str, u32>,
+    >,
+    /// Score points attributed to relic sources on committed plays.
+    #[serde(default)]
+    pub relic_score_points: std::collections::BTreeMap<&'static str, u64>,
+    #[serde(default)]
+    pub relic_score_chips: std::collections::BTreeMap<&'static str, u64>,
+    #[serde(default)]
+    pub relic_score_mult_pts: std::collections::BTreeMap<&'static str, u64>,
+    #[serde(default)]
+    pub relic_score_gold: std::collections::BTreeMap<&'static str, u64>,
+    #[serde(default)]
+    pub relic_score_triggers: std::collections::BTreeMap<&'static str, u32>,
     pub gold_spent: u32,
     pub gold_from_clears: u32,
     pub gold_from_clear_base: u32,
@@ -208,6 +253,24 @@ impl Default for RunStats {
             final_gold: 0,
             blinds_skipped: 0,
             relics_bought: 0,
+            relics_sold: 0,
+            relics_sold_picked: std::collections::BTreeMap::new(),
+            relic_shop_offers: std::collections::BTreeMap::new(),
+            relic_marginal_buy_sum: std::collections::BTreeMap::new(),
+            relic_marginal_buy_count: std::collections::BTreeMap::new(),
+            relic_marginal_buy_min: std::collections::BTreeMap::new(),
+            relic_marginal_buy_max: std::collections::BTreeMap::new(),
+            relic_marginal_buy_buckets: std::collections::BTreeMap::new(),
+            relic_hold_sell_sum: std::collections::BTreeMap::new(),
+            relic_hold_sell_count: std::collections::BTreeMap::new(),
+            relic_hold_sell_min: std::collections::BTreeMap::new(),
+            relic_hold_sell_max: std::collections::BTreeMap::new(),
+            relic_hold_sell_buckets: std::collections::BTreeMap::new(),
+            relic_score_points: std::collections::BTreeMap::new(),
+            relic_score_chips: std::collections::BTreeMap::new(),
+            relic_score_mult_pts: std::collections::BTreeMap::new(),
+            relic_score_gold: std::collections::BTreeMap::new(),
+            relic_score_triggers: std::collections::BTreeMap::new(),
             gold_spent: 0,
             gold_from_clears: 0,
             gold_from_clear_base: 0,
@@ -282,6 +345,7 @@ pub struct AggregateStats {
     pub total_strategic_discards: u64,
     pub total_blinds_skipped: u64,
     pub total_relics_bought: u64,
+    pub total_relics_sold: u64,
     pub total_gold_spent: u64,
     pub total_final_gold: i64,
     pub total_gold_from_clears: u64,
@@ -345,6 +409,49 @@ pub struct AggregateStats {
     pub relic_activations: std::collections::BTreeMap<&'static str, u64>,
     pub total_tiles_destroyed: u64,
     pub transformations_successor: std::collections::BTreeMap<&'static str, u64>,
+    /// Shop stock appearances (all offerings, not just buys).
+    #[serde(default)]
+    pub relic_shop_offers: std::collections::BTreeMap<&'static str, u64>,
+    #[serde(default)]
+    pub relic_marginal_buy_sum: std::collections::BTreeMap<&'static str, i64>,
+    #[serde(default)]
+    pub relic_marginal_buy_count: std::collections::BTreeMap<&'static str, u64>,
+    #[serde(default)]
+    pub relic_marginal_buy_min: std::collections::BTreeMap<&'static str, i32>,
+    #[serde(default)]
+    pub relic_marginal_buy_max: std::collections::BTreeMap<&'static str, i32>,
+    #[serde(default)]
+    pub relic_marginal_buy_bucket_totals: std::collections::BTreeMap<String, u64>,
+    #[serde(default)]
+    pub relic_hold_sell_sum: std::collections::BTreeMap<&'static str, i64>,
+    #[serde(default)]
+    pub relic_hold_sell_count: std::collections::BTreeMap<&'static str, u64>,
+    #[serde(default)]
+    pub relic_hold_sell_min: std::collections::BTreeMap<&'static str, i32>,
+    #[serde(default)]
+    pub relic_hold_sell_max: std::collections::BTreeMap<&'static str, i32>,
+    #[serde(default)]
+    pub relic_hold_sell_bucket_totals: std::collections::BTreeMap<String, u64>,
+    /// Sum of `antes_cleared` for runs that bought this relic ≥1.
+    #[serde(default)]
+    pub relic_depth_with_antes_sum: std::collections::BTreeMap<&'static str, u64>,
+    #[serde(default)]
+    pub relic_depth_with_runs: std::collections::BTreeMap<&'static str, u64>,
+    /// Sum of `antes_cleared` for runs that never bought this relic.
+    #[serde(default)]
+    pub relic_depth_without_antes_sum: std::collections::BTreeMap<&'static str, u64>,
+    #[serde(default)]
+    pub relic_depth_without_runs: std::collections::BTreeMap<&'static str, u64>,
+    #[serde(default)]
+    pub relic_score_points: std::collections::BTreeMap<&'static str, u64>,
+    #[serde(default)]
+    pub relic_score_chips: std::collections::BTreeMap<&'static str, u64>,
+    #[serde(default)]
+    pub relic_score_mult_pts: std::collections::BTreeMap<&'static str, u64>,
+    #[serde(default)]
+    pub relic_score_gold: std::collections::BTreeMap<&'static str, u64>,
+    #[serde(default)]
+    pub relic_score_triggers: std::collections::BTreeMap<&'static str, u64>,
     /// Runs that ended with `RunStats::run_timed_out` after all timeout retries.
     pub timed_out_runs: u32,
 }
@@ -367,6 +474,7 @@ impl AggregateStats {
         self.total_strategic_discards += s.strategic_discards as u64;
         self.total_blinds_skipped += s.blinds_skipped as u64;
         self.total_relics_bought += s.relics_bought as u64;
+        self.total_relics_sold += s.relics_sold as u64;
         self.total_gold_spent += s.gold_spent as u64;
         self.total_final_gold += s.final_gold as i64;
         self.total_gold_from_clears += s.gold_from_clears as u64;
@@ -503,10 +611,11 @@ impl AggregateStats {
         for (name, count) in &s.yaku_scored {
             *self.yaku_scored.entry(name).or_insert(0) += *count as u64;
         }
+        super::relic_analytics::merge_run_relic_analytics(self, s);
     }
 
-    pub fn to_aggregate_v2(&self) -> crate::bot::export_schema::BotAggregateV2 {
-        crate::bot::stats_derived::aggregate_to_v2(self)
+    pub fn to_bot_aggregate(&self) -> crate::bot::export_schema::BotAggregate {
+        crate::bot::stats_derived::bot_aggregate_from(self)
     }
 
     pub fn to_derived(
@@ -848,6 +957,77 @@ impl AggregateStats {
                         row.late_won,
                         row.late_win_pct,
                         row.timing_gap_pct
+                    );
+                }
+            }
+            if !d.relics_shop_funnel.is_empty() {
+                out!("\nrelic shop funnel (offers vs buys; low take% + high offers → undervalued):");
+                out!(
+                    "  {:<22} {:>7} {:>7} {:>7} {:>10}",
+                    "relic",
+                    "offers",
+                    "bought",
+                    "take%",
+                    "avg_marg"
+                );
+                for row in d.relics_shop_funnel.iter().take(20) {
+                    out!(
+                        "  {:<22} {:>7} {:>7} {:>6.1}% {:>10.0}",
+                        row.name,
+                        row.offers,
+                        row.bought,
+                        row.take_rate_pct,
+                        row.avg_marginal_at_buy
+                    );
+                }
+            }
+            if !d.relics_depth_split.is_empty() {
+                out!("\nrelic depth split (avg antes: runs that bought vs never bought):");
+                out!(
+                    "  {:<22} {:>7} {:>7} {:>7} {:>7} {:>7}",
+                    "relic",
+                    "runs+",
+                    "antes+",
+                    "runs−",
+                    "antes−",
+                    "Δ"
+                );
+                let mut depth: Vec<_> = d.relics_depth_split.iter().collect();
+                depth.sort_by(|a, b| {
+                    b.delta_antes
+                        .partial_cmp(&a.delta_antes)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                for row in depth.iter().filter(|r| r.runs_with > 0).take(15) {
+                    out!(
+                        "  {:<22} {:>7} {:>7.2} {:>7} {:>7.2} {:>+7.2}",
+                        row.name,
+                        row.runs_with,
+                        row.avg_antes_with,
+                        row.runs_without,
+                        row.avg_antes_without,
+                        row.delta_antes
+                    );
+                }
+            }
+            if !d.relics_score_attribution.is_empty() {
+                out!("\nrelic score attribution (committed plays, top by score pts):");
+                out!(
+                    "  {:<22} {:>8} {:>10} {:>10} {:>10}",
+                    "relic",
+                    "triggers",
+                    "score",
+                    "chips",
+                    "mult"
+                );
+                for row in d.relics_score_attribution.iter().take(15) {
+                    out!(
+                        "  {:<22} {:>8} {:>10} {:>10} {:>10}",
+                        row.name,
+                        row.triggers,
+                        row.score_pts,
+                        row.chips_pts,
+                        row.mult_pts
                     );
                 }
             }

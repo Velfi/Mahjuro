@@ -1,12 +1,14 @@
-//! Build export `derived` views from [`AggregateStats`] (schema v3+).
+//! Build export `derived` views from [`AggregateStats`] (export schema v5).
 
 use super::export_schema::{
-    AggregateMaps, AggregateSums, AvgTurnsClearRow, BossBlindChartRow, BotAggregateV2,
+    AggregateMaps, AggregateSums, AvgTurnsClearRow, BossBlindChartRow, BotAggregate,
     BotIssuesDerived, BotReportDerived, DeathAnteHazardRow, DeathAnteRow, DistributionCandleRow,
     KpiTile, LossBreakdownDerived, MapTable, NamedCount, NamedCountPct, NamedPerRun,
-    PerRunAverages, RelicBuyRow, RelicShopTimingRow, RelicWinRateRow, SurplusSlotRow, WilsonCiPct,
-    YakuDerived, YakuRow,
+    PerRunAverages, RelicAttributionRow, RelicBuyRow, RelicDepthRow, RelicShopFunnelRow,
+    RelicShopTimingRow, RelicValueRow, RelicWinRateRow, SurplusSlotRow, WilsonCiPct, YakuDerived,
+    YakuRow,
 };
+use super::relic_analytics::VALUE_BUCKET_LABELS;
 use super::reporting::human_readable_score;
 use super::stats::{
     AggregateStats, MIN_SHOP_TIMING_SPLIT_PER_BUCKET, RELIC_SHOP_TIMING_EARLY_ANTE_MAX, RunStats,
@@ -42,8 +44,8 @@ fn top_string_u32(m: &std::collections::BTreeMap<String, u32>, n: usize) -> Vec<
     v
 }
 
-pub fn aggregate_to_v2(a: &AggregateStats) -> BotAggregateV2 {
-    BotAggregateV2 {
+pub fn bot_aggregate_from(a: &AggregateStats) -> BotAggregate {
+    BotAggregate {
         sums: AggregateSums {
             runs: a.runs,
             blinds_cleared_total: a.blinds_cleared_total,
@@ -792,6 +794,177 @@ pub fn derived_from_batch(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
+    fn bucket_hist_for_relic(
+        totals: &std::collections::BTreeMap<String, u64>,
+        name: &str,
+    ) -> Vec<NamedCount> {
+        VALUE_BUCKET_LABELS
+            .iter()
+            .filter_map(|label| {
+                let key = format!("{name}\0{label}");
+                totals.get(&key).copied().filter(|&c| c > 0).map(|count| NamedCount {
+                    name: (*label).to_string(),
+                    count,
+                })
+            })
+            .collect()
+    }
+
+    let mut relic_names: std::collections::BTreeSet<&str> = a
+        .relics_picked
+        .keys()
+        .copied()
+        .chain(a.relic_shop_offers.keys().copied())
+        .chain(a.relic_score_points.keys().copied())
+        .collect();
+    for def in all_relic_defs() {
+        relic_names.insert(def.name);
+    }
+
+    let mut relics_shop_funnel: Vec<RelicShopFunnelRow> = relic_names
+        .iter()
+        .filter_map(|name| {
+            let offers = a.relic_shop_offers.get(name).copied().unwrap_or(0);
+            let bought = a.relics_picked.get(name).copied().unwrap_or(0);
+            if offers == 0 && bought == 0 {
+                return None;
+            }
+            let buy_n = a.relic_marginal_buy_count.get(name).copied().unwrap_or(0);
+            let buy_sum = a.relic_marginal_buy_sum.get(name).copied().unwrap_or(0);
+            let avg_marginal = if buy_n > 0 {
+                buy_sum as f64 / buy_n as f64
+            } else {
+                0.0
+            };
+            Some(RelicShopFunnelRow {
+                name: (*name).to_string(),
+                rarity: relic_rarity_slug(name),
+                offers,
+                bought,
+                take_rate_pct: if offers > 0 {
+                    bought as f64 * 100.0 / offers as f64
+                } else {
+                    0.0
+                },
+                avg_marginal_at_buy: avg_marginal,
+            })
+        })
+        .collect();
+    relics_shop_funnel.sort_by(|a, b| {
+        b.offers
+            .cmp(&a.offers)
+            .then_with(|| b.bought.cmp(&a.bought))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+
+    let mut relics_value_analysis: Vec<RelicValueRow> = relic_names
+        .iter()
+        .filter_map(|name| {
+            let buy_count = a.relic_marginal_buy_count.get(name).copied().unwrap_or(0);
+            let sell_count = a.relic_hold_sell_count.get(name).copied().unwrap_or(0);
+            if buy_count == 0 && sell_count == 0 {
+                return None;
+            }
+            let buy_sum = a.relic_marginal_buy_sum.get(name).copied().unwrap_or(0);
+            let sell_sum = a.relic_hold_sell_sum.get(name).copied().unwrap_or(0);
+            Some(RelicValueRow {
+                name: (*name).to_string(),
+                rarity: relic_rarity_slug(name),
+                buy_count,
+                avg_marginal: if buy_count > 0 {
+                    buy_sum as f64 / buy_count as f64
+                } else {
+                    0.0
+                },
+                min_marginal: a.relic_marginal_buy_min.get(name).copied(),
+                max_marginal: a.relic_marginal_buy_max.get(name).copied(),
+                marginal_hist: bucket_hist_for_relic(&a.relic_marginal_buy_bucket_totals, name),
+                sell_count,
+                avg_hold: if sell_count > 0 {
+                    sell_sum as f64 / sell_count as f64
+                } else {
+                    0.0
+                },
+                min_hold: a.relic_hold_sell_min.get(name).copied(),
+                max_hold: a.relic_hold_sell_max.get(name).copied(),
+                hold_hist: bucket_hist_for_relic(&a.relic_hold_sell_bucket_totals, name),
+            })
+        })
+        .collect();
+    relics_value_analysis.sort_by(|a, b| {
+        b.buy_count
+            .cmp(&a.buy_count)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+
+    let mut relics_depth_split: Vec<RelicDepthRow> = all_relic_defs()
+        .iter()
+        .map(|def| {
+            let name = def.name;
+            let with_runs = a.relic_depth_with_runs.get(name).copied().unwrap_or(0);
+            let without_runs = a.relic_depth_without_runs.get(name).copied().unwrap_or(0);
+            let with_antes = a.relic_depth_with_antes_sum.get(name).copied().unwrap_or(0);
+            let without_antes = a
+                .relic_depth_without_antes_sum
+                .get(name)
+                .copied()
+                .unwrap_or(0);
+            let avg_with = if with_runs > 0 {
+                with_antes as f64 / with_runs as f64
+            } else {
+                0.0
+            };
+            let avg_without = if without_runs > 0 {
+                without_antes as f64 / without_runs as f64
+            } else {
+                0.0
+            };
+            RelicDepthRow {
+                name: name.to_string(),
+                rarity: relic_rarity_slug(name),
+                runs_with: with_runs,
+                avg_antes_with: avg_with,
+                runs_without: without_runs,
+                avg_antes_without: avg_without,
+                delta_antes: avg_with - avg_without,
+            }
+        })
+        .collect();
+    relics_depth_split.sort_by(|a, b| {
+        b.delta_antes
+            .partial_cmp(&a.delta_antes)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+
+    let mut relics_score_attribution: Vec<RelicAttributionRow> = a
+        .relic_score_points
+        .iter()
+        .filter(|(_, pts)| **pts > 0)
+        .map(|(name, score_pts)| {
+            let triggers = a.relic_score_triggers.get(name).copied().unwrap_or(0);
+            RelicAttributionRow {
+                name: (*name).to_string(),
+                rarity: relic_rarity_slug(name),
+                triggers,
+                score_pts: *score_pts,
+                chips_pts: a.relic_score_chips.get(name).copied().unwrap_or(0),
+                mult_pts: a.relic_score_mult_pts.get(name).copied().unwrap_or(0),
+                pts_per_trigger: if triggers > 0 {
+                    *score_pts as f64 / triggers as f64
+                } else {
+                    0.0
+                },
+                pts_per_run: *score_pts as f64 / rn as f64,
+            }
+        })
+        .collect();
+    relics_score_attribution.sort_by(|a, b| {
+        b.score_pts
+            .cmp(&a.score_pts)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+
     fn shop_per_run(
         m: &std::collections::BTreeMap<&'static str, u32>,
         runs: u32,
@@ -963,6 +1136,10 @@ pub fn derived_from_batch(
         relics_bought,
         relics_by_win_rate,
         relics_shop_timing_split,
+        relics_shop_funnel,
+        relics_value_analysis,
+        relics_depth_split,
+        relics_score_attribution,
         talismans_shop,
         zodiacs_shop,
         packs_shop,

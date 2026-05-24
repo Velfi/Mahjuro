@@ -67,6 +67,31 @@
       "pack_weight": 1.5,
       "zodiac_weight": 0.5,
       "talisman_weight": 0.5
+    },
+    {
+      "name": "swap-only",
+      "sell_enabled": false
+    },
+    {
+      "name": "proactive-sell",
+      "sell_enabled": true,
+      "sell_hold_threshold": 0,
+      "sell_max_per_visit": 2
+    },
+    {
+      "name": "strict-sell",
+      "sell_enabled": true,
+      "sell_hold_threshold": 500,
+      "sell_max_per_visit": 3,
+      "relic_weight": 2.5
+    },
+    {
+      "name": "sell-and-heavy-relics",
+      "sell_enabled": true,
+      "sell_hold_threshold": 0,
+      "sell_max_per_visit": 2,
+      "relic_weight": 2.5,
+      "pack_weight": 0.3
     }
   ]
 }

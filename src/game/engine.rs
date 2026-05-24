@@ -922,7 +922,8 @@ impl<'a> GameEngine<'a> {
                         ShopCommandRejection::InsufficientGold,
                     );
                 }
-                if self.run.relics.is_full() {
+                let grants_inventory_slot = relic == RelicId::BrocadePouch;
+                if self.run.relics.is_full() && !grants_inventory_slot {
                     return ShopCommandOutcome::rejected(
                         command,
                         before,
@@ -939,7 +940,10 @@ impl<'a> GameEngine<'a> {
                 self.bus.push(GameEvent::PlayRelicStinger(relic));
                 match relic {
                     RelicId::MeltingIce => {
-                        self.run.relic_counters.insert(RelicId::MeltingIce, 80);
+                        self.run.relic_counters.insert(
+                            RelicId::MeltingIce,
+                            crate::core::relic::MELTING_ICE_START_CHIPS,
+                        );
                     }
                     RelicId::Taotie => {
                         self.run.relic_counters.insert(RelicId::Taotie, 0);
@@ -1654,7 +1658,10 @@ mod tests {
         assert_eq!(outcome.rejection, None);
         assert!(run.relics.active.contains(&relic));
         assert_eq!(run.gold, 13);
-        assert_eq!(run.relic_counters.get(&RelicId::MeltingIce), Some(&80));
+        assert_eq!(
+            run.relic_counters.get(&RelicId::MeltingIce),
+            Some(&crate::core::relic::MELTING_ICE_START_CHIPS)
+        );
         assert!(outcome.ui_hints.contains(&UiHint::Resources));
         assert!(outcome.events.contains(&EngineEvent::GoldChanged {
             delta: -(price as i32)

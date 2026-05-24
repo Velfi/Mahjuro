@@ -29,7 +29,7 @@ use crate::core::relic::{
     relic_sell_price_live, relic_shop_price,
 };
 use crate::core::rules::{BlindKind, RuleModifier};
-use crate::core::scoring::{format_meld_groups, score_sets_with_original};
+use crate::core::scoring::{ScoreBreakdown, format_meld_groups, score_sets_with_original};
 use crate::core::structure::StructureTriggerMeta;
 use crate::core::talisman::TalismanKind;
 use crate::core::tile::{Suit, Tile};
@@ -40,7 +40,10 @@ use crate::game::event_bus::{EventBus, GameEvent};
 use crate::game::game_mode::{GameMode, HAND_SIZE};
 use crate::game::run::{FINAL_ANTE, RunState, relic_eligible_for_shop_stock};
 
+mod blind_planner;
+mod blind_sim;
 mod export_schema;
+mod relic_analytics;
 mod reporting;
 mod stats;
 mod stats_derived;
@@ -48,9 +51,9 @@ mod stats_wilson;
 
 pub use reporting::{
     BotConfig, BotOutputFormat, BotOutputTarget, BotRunOptions, BotStrategy, BotTimeoutDiag,
-    HeadlessBotBatch, StrategyFile, append_bot_run_to_progress, export_play_history_html,
-    run_forced_relic_sweep, run_headless, run_headless_aggregate, run_strategy_sweep, run_sweep,
-    seed_progress_from_bot_runs,
+    DEFAULT_BOT_RUN_TIMEOUT_SECS, HeadlessBotBatch, StrategyFile, append_bot_run_to_progress,
+    export_play_history_html, run_forced_relic_sweep, run_headless, run_headless_aggregate,
+    run_strategy_sweep, run_sweep, seed_progress_from_bot_runs,
 };
 use stats::clear_payout_breakdown;
 pub use stats::{AggregateStats, RunStats, RunTimeoutSnapshot};
@@ -71,7 +74,10 @@ fn acquire_relic(run: &mut RunState, id: RelicId) {
     run.relics.active.push(id);
     match id {
         RelicId::MeltingIce => {
-            run.relic_counters.insert(RelicId::MeltingIce, 80);
+            run.relic_counters.insert(
+                RelicId::MeltingIce,
+                crate::core::relic::MELTING_ICE_START_CHIPS,
+            );
         }
         RelicId::SilkThread => {
             run.relic_counters.insert(RelicId::SilkThread, 40);
@@ -115,6 +121,7 @@ fn bot_sell_relic(run: &mut RunState, index: usize, bus: Option<&mut EventBus>) 
     Some(refund)
 }
 
+#[macro_export]
 macro_rules! bot_log {
     ($enabled:expr, $($arg:tt)*) => {
         if $enabled {
@@ -467,7 +474,7 @@ fn evaluate_play_masks_payoff(
     best.map(|(rank, gold, indices)| (rank.score, gold, indices))
 }
 
-fn evaluate_play_masks(
+pub(crate) fn evaluate_play_masks(
     run: &RunState,
     hand: &[Tile],
     relics_override: Option<&RelicState>,
@@ -476,6 +483,109 @@ fn evaluate_play_masks(
 ) -> Option<(u64, Vec<usize>)> {
     evaluate_play_masks_payoff(run, hand, relics_override, yaku_levels_override, masks)
         .map(|(score, _, indices)| (score, indices))
+}
+
+/// Top-scoring play commits in one mask-evaluation pass (shared score context).
+pub(crate) fn top_k_plays_in_hand(
+    run: &RunState,
+    hand: &[Tile],
+    k: usize,
+) -> Vec<(u64, Vec<usize>)> {
+    let n = hand.len();
+    if !(2..=20).contains(&n) || k == 0 {
+        return Vec::new();
+    }
+    let commit_rules = run.validation_rules_for_structure_commits();
+    let masks = enumerate_candidate_play_masks(hand, &commit_rules);
+    let relics = &run.relics;
+    let mut ctx = bot_score_context_base(run, relics, None);
+    let base_set_len = run.structure_sets().len();
+    let base_tile_len = run.structure_tiles().len();
+    let mut merged_sets = run.structure_sets().to_vec();
+    let mut merged_tiles = run.structure_tiles().to_vec();
+    let mut top: Vec<(PlayRank, Vec<usize>)> = Vec::with_capacity(k.min(masks.len()));
+
+    for &mask in &masks {
+        let tiles = tiles_from_play_mask(hand, n, mask);
+        let Some((sets, scoring_tiles)) = run.try_validate_with_wildcards(&tiles) else {
+            continue;
+        };
+        if !structure_commit_fits(run, scoring_tiles.len(), &sets) {
+            continue;
+        }
+        merged_sets.truncate(base_set_len);
+        merged_sets.extend(sets.iter().cloned());
+        merged_tiles.truncate(base_tile_len);
+        merged_tiles.extend(scoring_tiles.iter().copied());
+        ctx.structure = Some(StructureTriggerMeta {
+            meld_count: merged_sets.len() as u32,
+            inject_chicken_if_no_yaku: true,
+        });
+        let breakdown =
+            score_sets_with_original(&merged_tiles, &merged_sets, &ctx, &run.round_rules, &tiles);
+        if breakdown.total == 0 && breakdown.flower_gold <= 0 {
+            continue;
+        }
+        let rank = PlayRank {
+            score: breakdown.total,
+            meld_count: sets.len(),
+            tile_count: scoring_tiles.len(),
+        };
+        let indices = indices_from_play_mask(n, mask);
+        if top.len() < k {
+            top.push((rank, indices));
+            top.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+        } else if rank > top.last().expect("top non-empty").0 {
+            top.pop();
+            top.push((rank, indices));
+            top.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+        }
+    }
+
+    top.sort_unstable_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    top.dedup_by(|a, b| a.1 == b.1);
+    top.truncate(k);
+    top.into_iter().map(|(rank, indices)| (rank.score, indices)).collect()
+}
+
+/// Full score breakdown for a specific hand subset (committed-play attribution).
+fn score_breakdown_for_play_indices(
+    run: &RunState,
+    hand: &[Tile],
+    indices: &[usize],
+) -> Option<ScoreBreakdown> {
+    let n = hand.len();
+    if indices.is_empty() || n == 0 {
+        return None;
+    }
+    let mut mask = 0u32;
+    for &i in indices {
+        if i >= n {
+            return None;
+        }
+        mask |= 1 << i;
+    }
+    let tiles = tiles_from_play_mask(hand, n, mask);
+    let (sets, scoring_tiles) = run.try_validate_with_wildcards(&tiles)?;
+    if !structure_commit_fits(run, scoring_tiles.len(), &sets) {
+        return None;
+    }
+    let mut ctx = bot_score_context_base(run, &run.relics, None);
+    let mut merged_sets = run.structure_sets().to_vec();
+    let mut merged_tiles = run.structure_tiles().to_vec();
+    merged_sets.extend(sets.iter().cloned());
+    merged_tiles.extend(scoring_tiles.iter().copied());
+    ctx.structure = Some(StructureTriggerMeta {
+        meld_count: merged_sets.len() as u32,
+        inject_chicken_if_no_yaku: true,
+    });
+    Some(score_sets_with_original(
+        &merged_tiles,
+        &merged_sets,
+        &ctx,
+        &run.round_rules,
+        &tiles,
+    ))
 }
 
 /// Masks that pass meld validation and structure-bank checks (still may score to zero).
@@ -1127,10 +1237,12 @@ fn drain_post_action_bus(
                 stats.tiles_destroyed += 1;
             }
             GameEvent::TransformationSuccessorDiscovered(id) => {
+                let rname = relic_display_name(id);
                 *stats
                     .transformations_successor
-                    .entry(relic_display_name(id))
+                    .entry(rname)
                     .or_insert(0) += 1;
+                *stats.relics_picked.entry(rname).or_insert(0) += 1;
             }
             _ => {}
         }
@@ -1146,6 +1258,7 @@ fn play_blind(
     log: bool,
     deadline: Option<Instant>,
     scoring_log: &mut Vec<BotScoringAction>,
+    strategy: &BotStrategy,
 ) -> (PlayBlindOutcome, u32) {
     let mut bus = EventBus::default();
     let mut rng = rand::rng();
@@ -1199,8 +1312,25 @@ fn play_blind(
             run.gold
         );
 
-        if use_bot_consumables(run, stats, log) {
+        if strategy.blind_planner_depth == 0 && use_bot_consumables(run, stats, log) {
             continue;
+        }
+
+        if strategy.blind_planner_depth >= 1 {
+            match blind_planner::execute_planned_turn(
+                run,
+                stats,
+                log,
+                strategy.blind_planner_depth,
+                scoring_log,
+                &mut bus,
+            ) {
+                Some(blind_planner::PlannedTurnOutcome::Continued) => continue,
+                Some(blind_planner::PlannedTurnOutcome::SecondWindForfeit) => {
+                    return (PlayBlindOutcome::SecondWindForfeit, turn);
+                }
+                Some(blind_planner::PlannedTurnOutcome::Failed) | None => {}
+            }
         }
 
         let best = pick_best_play(run);
@@ -1307,8 +1437,11 @@ fn play_blind(
                 fmt_indices(&indices),
                 best_score
             );
-            let bank_before_commit = run.structure_tiles().to_vec();
             let hand_before = run.hand().to_vec();
+            if let Some(breakdown) = score_breakdown_for_play_indices(run, &hand_before, &indices) {
+                relic_analytics::record_score_breakdown(stats, &breakdown);
+            }
+            let bank_before_commit = run.structure_tiles().to_vec();
             let mut idx_sorted: Vec<usize> = indices.to_vec();
             idx_sorted.sort_unstable();
             let selected_tiles: Vec<Tile> = idx_sorted
@@ -1409,10 +1542,12 @@ fn play_blind(
 #[cfg(test)]
 mod tests {
     use super::{
-        RunStats, ShopMarginalBase, best_play_in_hand, enumerate_candidate_play_masks,
-        pick_best_play, relic_marginal_value_with_base, relic_shop_offer_value_with_base,
-        remaining_antes_including_current, scale_long_term_value_for_ante, talisman_marginal_value,
-        use_bot_consumables, zodiac_marginal_value_with_base,
+        BotStrategy, EventBus, RunStats, ShopMarginalBase, best_play_in_hand,
+        enumerate_candidate_play_masks, pick_best_play, relic_hold_value_with_base,
+        relic_marginal_value_with_base, relic_shop_offer_value_with_base,
+        remaining_antes_including_current, scale_long_term_value_for_ante,
+        sell_underperforming_relics, talisman_marginal_value, use_bot_consumables,
+        zodiac_marginal_value_with_base,
     };
     use crate::core::consumable::Consumable;
     use crate::core::hand::{DetectedMeld, MeldKind};
@@ -1833,6 +1968,7 @@ mod tests {
             RelicId::SequenceSurge,
             RelicId::HonorFury,
             RelicId::DragonRage,
+            RelicId::GreenLuck,
         ];
         assert!(run.relics.is_full());
         let base = ShopMarginalBase::new(&run);
@@ -1848,6 +1984,49 @@ mod tests {
             0,
             "straight add path should stay blocked when full"
         );
+    }
+
+    #[test]
+    fn relic_hold_value_is_zero_without_scoring_relics() {
+        let run = scoring_test_run();
+        let base = ShopMarginalBase::new(&run);
+        assert_eq!(relic_hold_value_with_base(&run, 0, &base), 0);
+    }
+
+    #[test]
+    fn relic_hold_value_rises_with_scoring_relic() {
+        let mut run = scoring_test_run();
+        run.relics.active = vec![RelicId::PairPower];
+        let base = ShopMarginalBase::new(&run);
+        assert!(
+            relic_hold_value_with_base(&run, 0, &base) > 0,
+            "Pair Power should contribute positive hold value"
+        );
+    }
+
+    #[test]
+    fn proactive_sell_drops_low_hold_relic() {
+        let mut run = scoring_test_run();
+        run.relics.active = vec![RelicId::PairPower, RelicId::GreenLuck];
+        run.gold = 0;
+        let base = ShopMarginalBase::new(&run);
+        let hold_pair = relic_hold_value_with_base(&run, 0, &base);
+        let hold_luck = relic_hold_value_with_base(&run, 1, &base);
+        assert!(hold_pair > hold_luck);
+
+        let strategy = BotStrategy {
+            sell_enabled: true,
+            sell_hold_threshold: hold_pair - 1,
+            sell_max_per_visit: 1,
+            ..BotStrategy::default()
+        };
+        let mut stats = RunStats::default();
+        let mut bus = EventBus::default();
+        let sold = sell_underperforming_relics(&mut run, &mut stats, false, &strategy, &base, &mut bus);
+        assert_eq!(sold, 1);
+        assert_eq!(stats.relics_sold, 1);
+        assert_eq!(run.relics.active, vec![RelicId::PairPower]);
+        assert!(run.gold > 0);
     }
 }
 
@@ -1992,6 +2171,11 @@ fn scale_long_term_value_for_ante(raw_value: i32, ante: u32) -> i32 {
     scaled as i32
 }
 
+#[inline]
+fn relic_can_expand_inventory(id: RelicId) -> bool {
+    matches!(id, RelicId::BrocadePouch)
+}
+
 fn relic_marginal_value_with_base(
     run: &RunState,
     candidate: RelicId,
@@ -2000,7 +2184,7 @@ fn relic_marginal_value_with_base(
     if run.relics.owns(candidate) {
         return -1;
     }
-    if run.relics.is_full() {
+    if run.relics.is_full() && !relic_can_expand_inventory(candidate) {
         return 0;
     }
 
@@ -2038,6 +2222,74 @@ fn relic_swap_marginal_value_with_base(
     scale_long_term_value_for_ante((delta_sum / sample_count) as i32, run.ante)
 }
 
+fn relic_hold_value_with_base(run: &RunState, index: usize, base: &ShopMarginalBase) -> i32 {
+    if index >= run.relics.active.len() {
+        return 0;
+    }
+    let mut without = run.relics.clone();
+    without.active.remove(index);
+
+    let mut delta_sum: i64 = 0;
+    for hand in &base.hands {
+        delta_sum += best_play_score_for_hand(run, hand, Some(&run.relics), None) as i64
+            - best_play_score_for_hand(run, hand, Some(&without), None) as i64;
+    }
+    let sample_count = base.hands.len() as i64;
+    if sample_count == 0 {
+        return 0;
+    }
+    scale_long_term_value_for_ante((delta_sum / sample_count) as i32, run.ante)
+}
+
+/// Sell owned relics whose hold value is at or below the strategy threshold.
+/// Returns how many slots were cleared this pass.
+fn sell_underperforming_relics(
+    run: &mut RunState,
+    stats: &mut RunStats,
+    log: bool,
+    strategy: &BotStrategy,
+    base: &ShopMarginalBase,
+    bus: &mut EventBus,
+) -> u32 {
+    if !strategy.sell_enabled || run.relics.active.is_empty() {
+        return 0;
+    }
+
+    let mut sold = 0u32;
+    while sold < strategy.sell_max_per_visit {
+        let mut worst: Option<(usize, i32)> = None;
+        for idx in 0..run.relics.active.len() {
+            let hold = relic_hold_value_with_base(run, idx, base);
+            if hold <= strategy.sell_hold_threshold
+                && worst.map(|(_, best_hold)| hold < best_hold).unwrap_or(true)
+            {
+                worst = Some((idx, hold));
+            }
+        }
+        let Some((idx, hold)) = worst else {
+            break;
+        };
+        let rid = run.relics.active[idx];
+        let Some(refund) = bot_sell_relic(run, idx, Some(bus)) else {
+            break;
+        };
+        stats.relics_sold += 1;
+        let rname = relic_display_name(rid);
+        relic_analytics::record_hold_sell(stats, rname, hold);
+        *stats.relics_sold_picked.entry(rname).or_insert(0) += 1;
+        bot_log!(
+            log,
+            "    shop: sold {:?} for {} (hold value {}, threshold {})",
+            rid,
+            refund,
+            hold,
+            strategy.sell_hold_threshold
+        );
+        sold += 1;
+    }
+    sold
+}
+
 /// Marginal shop value for a relic offer. When inventory is full, returns the best
 /// swap lift and the owned slot to sell; otherwise behaves like a straight purchase.
 fn relic_shop_offer_value_with_base(
@@ -2050,7 +2302,7 @@ fn relic_shop_offer_value_with_base(
     if run.relics.owns(candidate) {
         return -1;
     }
-    if !run.relics.is_full() {
+    if !run.relics.is_full() || relic_can_expand_inventory(candidate) {
         return relic_marginal_value_with_base(run, candidate, base);
     }
 
@@ -2068,12 +2320,17 @@ fn relic_shop_offer_value_with_base(
     best
 }
 
-fn relic_offer_affordable(run: &RunState, price: i32, sell_index: Option<usize>) -> bool {
+fn relic_offer_affordable(
+    run: &RunState,
+    price: i32,
+    candidate: RelicId,
+    sell_index: Option<usize>,
+) -> bool {
     if let Some(idx) = sell_index {
         let owned = run.relics.active[idx];
         let refund = relic_sell_price_live(owned, &run.relic_counters) as i32;
         run.gold + refund >= price
-    } else if run.relics.is_full() {
+    } else if run.relics.is_full() && !relic_can_expand_inventory(candidate) {
         false
     } else {
         run.gold >= price
@@ -2100,7 +2357,7 @@ fn zodiac_marginal_value_with_base(
 /// Simulate applying a transform talisman to every tile in `hand` and return
 /// the expected best-play score delta. Returns `None` when the transform would
 /// not change the hand.
-fn transform_talisman_lift_on_hand(
+pub(crate) fn transform_talisman_lift_on_hand(
     run: &RunState,
     hand: &[Tile],
     kind: TalismanKind,
@@ -2251,7 +2508,7 @@ fn talisman_one_shot_shop_value(raw_avg: i32, ante: u32) -> i32 {
     (raw_avg as i64 / remaining_blinds) as i32
 }
 
-fn buff_talisman_lift_on_hand(run: &RunState, hand: &[Tile], talisman: TalismanKind) -> i32 {
+pub(crate) fn buff_talisman_lift_on_hand(run: &RunState, hand: &[Tile], talisman: TalismanKind) -> i32 {
     let baseline = best_play_shop_value_for_hand(run, hand, None, None);
     let mut enhanced = hand.to_vec();
     crate::core::talisman::apply_to_hand(&mut enhanced, talisman);
@@ -2502,6 +2759,12 @@ fn visit_shop(
     // 2 pack slots per shop, matching `N_TILE_PACKS` in `src/scenes/shop.rs`.
     shop.extend(pack_pool.into_iter().take(2).map(ShopOffer::Pack));
 
+    for offer in &shop {
+        if let ShopOffer::Relic(id) = offer {
+            relic_analytics::record_shop_offer(stats, relic_display_name(*id));
+        }
+    }
+
     let mut free_relic = patron_gift;
     bot_log!(
         log,
@@ -2524,10 +2787,17 @@ fn visit_shop(
             return ShopVisitOutcome::TimedOut;
         }
         if shop.is_empty() {
+            let shop_base = ShopMarginalBase::new(run);
+            if sell_underperforming_relics(run, stats, log, strategy, &shop_base, bus) > 0 {
+                continue;
+            }
             bot_log!(log, "    shop: leaving ({})", "no offerings left");
             break;
         }
         let shop_base = ShopMarginalBase::new(run);
+        if sell_underperforming_relics(run, stats, log, strategy, &shop_base, bus) > 0 {
+            continue;
+        }
         // Find the best affordable offer with positive marginal value.
         let mut best: Option<(usize, i32, Option<usize>)> = None;
         for (i, offer) in shop.iter().copied().enumerate() {
@@ -2555,7 +2825,7 @@ fn visit_shop(
             let raw_mv = match offer {
                 ShopOffer::Relic(id) => {
                     let mv = relic_shop_offer_value_with_base(run, id, &shop_base, &mut sell_index);
-                    if !relic_offer_affordable(run, price_i32, sell_index) {
+                    if !relic_offer_affordable(run, price_i32, id, sell_index) {
                         continue;
                     }
                     mv
@@ -2608,6 +2878,10 @@ fn visit_shop(
             }
         }
         let Some((idx, marginal_value, sell_index)) = best else {
+            let shop_base = ShopMarginalBase::new(run);
+            if sell_underperforming_relics(run, stats, log, strategy, &shop_base, bus) > 0 {
+                continue;
+            }
             bot_log!(log, "    shop: no positive-value affordable purchase");
             break;
         };
@@ -2622,12 +2896,15 @@ fn visit_shop(
                 free_relic = false;
                 if let Some(sell_idx) = sell_index {
                     let sold = run.relics.active[sell_idx];
+                    let hold = relic_hold_value_with_base(run, sell_idx, &shop_base);
                     if let Some(refund) = bot_sell_relic(run, sell_idx, Some(bus)) {
+                        relic_analytics::record_hold_sell(stats, relic_display_name(sold), hold);
                         bot_log!(
                             log,
-                            "    shop: sold {:?} for {} (making room)",
+                            "    shop: sold {:?} for {} (making room, hold {})",
                             sold,
-                            refund
+                            refund,
+                            hold
                         );
                     }
                 }
@@ -2635,6 +2912,7 @@ fn visit_shop(
                 acquire_relic(run, id);
                 stats.relics_bought += 1;
                 let rname = relic_display_name(id);
+                relic_analytics::record_marginal_buy(stats, rname, marginal_value);
                 *stats.relics_picked.entry(rname).or_insert(0) += 1;
                 if run.ante <= crate::bot::stats::RELIC_SHOP_TIMING_EARLY_ANTE_MAX {
                     *stats.relics_picked_shop_early.entry(rname).or_insert(0) += 1;
@@ -2855,7 +3133,14 @@ fn play_run_with_options(
         }
         let mut blind_scoring: Vec<BotScoringAction> = Vec::new();
         let (outcome, blind_turns) =
-            play_blind(&mut run, &mut stats, log, deadline, &mut blind_scoring);
+            play_blind(
+                &mut run,
+                &mut stats,
+                log,
+                deadline,
+                &mut blind_scoring,
+                &strategy,
+            );
         let blind_score = run.round_score;
         if matches!(blind, BlindKind::Boss) {
             *stats.boss_score_by_ante.entry(run.ante).or_insert(0) += blind_score;

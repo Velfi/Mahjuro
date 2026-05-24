@@ -45,7 +45,7 @@ each turn evaluates ~16k bitmasks; debug builds are 10–20× slower.
 | `--plays N` | u32 | 4 | `starting_plays` per blind. |
 | `--discards N` | u32 | 3 | `starting_discards` per blind. |
 | `--gold N` | u32 | 4 | `starting_gold`. |
-| `--bot-run-timeout-secs N` | u32 | 0 | Wall-clock cap per run **attempt** (seconds). `0` = off. |
+| `--bot-run-timeout-secs N` | u32 | 10 | Wall-clock cap per run **attempt** (seconds). `0` = off. |
 | `--timeout-retries N` | u32 | 1 | Extra attempts after a timeout (`1` ⇒ up to 2 tries per scheduled run). |
 
 Anything not overridden uses `GameMode::standard()`.
@@ -156,9 +156,23 @@ Per blind, in `play_run`:
    shared hand batch + cached baselines is built per “pick the next buy”
    iteration, then every affordable offering is scored against that same batch
    (pack pricing still walks the wall separately but uses the same **N**).
-4. **Shop visit.** Stock mirrors `ShopScene::new` (relic pool, ribbons, packs).
-   Loop: among affordable items with positive weighted marginal value, buy the
-   best; repeat until nothing worthwhile remains.
+4. **Relic hold value & selling.** Each owned relic gets a **hold value** —
+   average score lift from keeping it vs removing it (same sample hands as shop
+   buys). When inventory is full, swap sells still happen for better shop offers.
+   Strategies with `sell_enabled: true` also **proactively sell** relics at or
+   below `sell_hold_threshold` (up to `sell_max_per_visit` per shop). Compare
+   strategies via `strategy-sweep` (see [`docs/strategies_example.json`](docs/strategies_example.json)).
+5. **Shop visit.** Stock mirrors `ShopScene::new` (relic pool, ribbons, packs).
+   Loop: prune bad relics (if enabled), then among affordable items with positive
+   weighted marginal value, buy the best; repeat until nothing worthwhile remains.
+6. **Relic analytics (export schema v5).** Bot reports now include:
+   - **Shop funnel** — stock offers vs buys and take rate (undervalued relics show low take% with many offers).
+   - **Valuations** — marginal at buy / hold at sell histograms from the bot estimator.
+   - **Depth split** — avg antes on runs that bought vs never bought each relic.
+   - **Score attribution** — chips vs mult points from relic-named scoring steps on committed plays.
+7. **Blind planner (`--blind-planner-depth N`, default `2`).** Expectimax over play, discard,
+   structure cash-in, and consumables (zodiac/talisman). Depth `0` = legacy greedy;
+   `1` = unified one-ply; `2` = recommended default; `3` = three-ply with branch pruning.
 
 ## Limitations
 

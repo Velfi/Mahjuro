@@ -1,5 +1,7 @@
 //! Wall / deck construction and draw.
 
+use std::sync::Arc;
+
 use rand::rng;
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
@@ -86,14 +88,33 @@ pub fn shuffle_wall(wall: &mut [Tile]) {
     wall.shuffle(&mut rng());
 }
 
+/// Draw pile. The tile list is shared via [`Arc`] across planner checkpoints;
+/// only `cursor` (and rarely tile order after `draw_matching`) vary per branch.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Wall {
-    tiles: Vec<Tile>,
+    #[serde(
+        serialize_with = "serialize_tiles_arc",
+        deserialize_with = "deserialize_tiles_arc"
+    )]
+    tiles: Arc<Vec<Tile>>,
     cursor: usize,
     /// Dora tiles, displayed on the plinth and used to score the bonus.
     /// Stored as the actual dora face (not the traditional +1 indicator),
     /// so the tile the player sees is the tile that pays out.
     dora_indicators: Vec<Tile>,
+}
+
+fn serialize_tiles_arc<S: serde::Serializer>(
+    tiles: &Arc<Vec<Tile>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    tiles.as_ref().serialize(serializer)
+}
+
+fn deserialize_tiles_arc<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Arc<Vec<Tile>>, D::Error> {
+    Vec::<Tile>::deserialize(deserializer).map(Arc::new)
 }
 
 /// Traditional mahjong picks an "indicator" tile and the dora is the next rank.
@@ -141,7 +162,7 @@ impl Wall {
             .into_iter()
             .collect();
         Self {
-            tiles,
+            tiles: Arc::new(tiles),
             cursor: 0,
             dora_indicators,
         }
@@ -157,7 +178,7 @@ impl Wall {
             .into_iter()
             .collect();
         Self {
-            tiles,
+            tiles: Arc::new(tiles),
             cursor: 0,
             dora_indicators,
         }
@@ -273,12 +294,15 @@ impl Wall {
     /// Draw the first remaining tile matching the given suit and rank.
     /// If found, swaps it to the cursor position and advances the cursor.
     pub fn draw_matching(&mut self, suit: Suit, rank: u8) -> Option<Tile> {
-        let pos = self.tiles[self.cursor..]
+        let tiles = Arc::make_mut(&mut self.tiles);
+        let pos = tiles[self.cursor..]
             .iter()
             .position(|t| t.suit == suit && t.rank == rank)?;
         let idx = self.cursor + pos;
-        self.tiles.swap(self.cursor, idx);
-        self.draw()
+        tiles.swap(self.cursor, idx);
+        let t = tiles[self.cursor];
+        self.cursor += 1;
+        Some(t)
     }
 }
 
@@ -290,5 +314,21 @@ mod tests {
     fn wall_count() {
         let w = build_wall();
         assert_eq!(w.len(), 140); // 136 standard + 4 flowers
+    }
+
+    #[test]
+    fn wall_clone_shares_tile_storage() {
+        let mut wall = Wall::from_unshuffled(build_wall());
+        let checkpoint = wall.clone();
+        assert!(Arc::ptr_eq(&wall.tiles, &checkpoint.tiles));
+        assert_eq!(wall.cursor, checkpoint.cursor);
+
+        wall.draw();
+        assert_eq!(wall.cursor, checkpoint.cursor + 1);
+        assert_eq!(wall.remaining(), checkpoint.remaining() - 1);
+        assert!(Arc::ptr_eq(&wall.tiles, &checkpoint.tiles));
+
+        wall = checkpoint.clone();
+        assert_eq!(wall.remaining(), checkpoint.remaining());
     }
 }

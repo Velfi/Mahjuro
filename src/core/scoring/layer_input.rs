@@ -36,8 +36,9 @@ pub(crate) struct DoraYakuLayerOpts<'a> {
 }
 
 /// Options for [`super::relic_mult_layer::apply_post_yaku_relic_modifiers`].
-pub(crate) struct PostYakuRelicLayerOpts {
+pub(crate) struct PostYakuRelicLayerOpts<'a> {
     pub honor_triple: bool,
     pub no_seq_bonus: bool,
     pub has_triplet_boost: bool,
+    pub detected_yaku: &'a [crate::core::yaku::YakuKind],
 }

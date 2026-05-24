@@ -58,11 +58,21 @@ pub struct BotConfig {
     pub talisman_weight: Option<f32>,
     pub pack_weight: Option<f32>,
     pub skip_threshold_multiplier: Option<f32>,
+    /// When true, the bot sells owned relics whose estimated hold value is at or
+    /// below [`Self::sell_hold_threshold`] during shop visits (in addition to
+    /// swap sells when inventory is full).
+    pub sell_enabled: Option<bool>,
+    /// Sell a relic when its hold value (expected score lift from keeping it) is
+    /// at or below this threshold. Default 0.
+    pub sell_hold_threshold: Option<i32>,
+    /// Maximum proactive sells per shop visit. Default 2.
+    pub sell_max_per_visit: Option<u32>,
     pub forced_relic: Option<RelicId>,
     /// Difficulty stake used when building `GameMode`. `None` means Spring;
     /// `Some(Stake)` applies that tier's target / shop / boss deltas. Exposed
     /// on the CLI via `--stake` so balance snapshots can be stratified by
     /// difficulty.
+    pub blind_planner_depth: Option<u32>,
     pub stake: Option<crate::core::stake::Stake>,
 }
 
@@ -73,6 +83,12 @@ pub struct BotStrategy {
     pub talisman_weight: f32,
     pub pack_weight: f32,
     pub skip_threshold_multiplier: f32,
+    pub sell_enabled: bool,
+    pub sell_hold_threshold: i32,
+    pub sell_max_per_visit: u32,
+    /// In-blind expectimax depth (`0` = legacy greedy pipeline, `1` = unified one-ply,
+    /// `2` = recommended, `3` = pruned three-ply).
+    pub blind_planner_depth: u32,
 }
 
 impl BotStrategy {
@@ -86,6 +102,12 @@ impl BotStrategy {
             skip_threshold_multiplier: cfg
                 .skip_threshold_multiplier
                 .unwrap_or(d.skip_threshold_multiplier),
+            sell_enabled: cfg.sell_enabled.unwrap_or(d.sell_enabled),
+            sell_hold_threshold: cfg.sell_hold_threshold.unwrap_or(d.sell_hold_threshold),
+            sell_max_per_visit: cfg.sell_max_per_visit.unwrap_or(d.sell_max_per_visit),
+            blind_planner_depth: cfg
+                .blind_planner_depth
+                .unwrap_or(d.blind_planner_depth),
         }
     }
 }
@@ -98,9 +120,16 @@ impl Default for BotStrategy {
             talisman_weight: 0.5,
             pack_weight: 0.5,
             skip_threshold_multiplier: 2.0,
+            sell_enabled: false,
+            sell_hold_threshold: 0,
+            sell_max_per_visit: 2,
+            blind_planner_depth: 2,
         }
     }
 }
+
+/// Default wall-clock cap per bot run attempt (`0` = no timeout).
+pub const DEFAULT_BOT_RUN_TIMEOUT_SECS: u32 = 10;
 
 #[derive(Clone, Debug)]
 pub struct BotRunOptions {
@@ -120,7 +149,7 @@ impl Default for BotRunOptions {
             log: false,
             output: None,
             output_runs: None,
-            run_timeout: None,
+            run_timeout: Some(Duration::from_secs(DEFAULT_BOT_RUN_TIMEOUT_SECS as u64)),
             timeout_retries: 1,
         }
     }
@@ -149,7 +178,7 @@ struct BotExportPayload<'a> {
     meta: BotExportMeta,
     runs: u32,
     mode: &'a GameMode,
-    aggregate: crate::bot::export_schema::BotAggregateV2,
+    aggregate: crate::bot::export_schema::BotAggregate,
     derived: crate::bot::export_schema::BotReportDerived,
 }
 
@@ -168,7 +197,7 @@ fn bot_export_value(
         },
         runs,
         mode,
-        aggregate: agg.to_aggregate_v2(),
+        aggregate: agg.to_bot_aggregate(),
         derived: agg.to_derived(ykc, mode.base_target, Some(run_stats)),
     };
     Ok(serde_json::to_value(&payload)?)
@@ -601,6 +630,14 @@ pub struct StrategyDef {
     #[serde(default)]
     pub skip_threshold_multiplier: Option<f32>,
     #[serde(default)]
+    pub sell_enabled: Option<bool>,
+    #[serde(default)]
+    pub sell_hold_threshold: Option<i32>,
+    #[serde(default)]
+    pub sell_max_per_visit: Option<u32>,
+    #[serde(default)]
+    pub blind_planner_depth: Option<u32>,
+    #[serde(default)]
     pub base_target: Option<u32>,
     #[serde(default)]
     pub starting_plays: Option<u32>,
@@ -623,6 +660,10 @@ impl StrategyDef {
             talisman_weight: self.talisman_weight,
             pack_weight: self.pack_weight,
             skip_threshold_multiplier: self.skip_threshold_multiplier,
+            sell_enabled: self.sell_enabled,
+            sell_hold_threshold: self.sell_hold_threshold,
+            sell_max_per_visit: self.sell_max_per_visit,
+            blind_planner_depth: self.blind_planner_depth,
             stake: None,
         }
     }
@@ -696,12 +737,12 @@ pub fn run_strategy_sweep(
 
     println!();
     println!(
-        "{:>4}  {:<22}  {:>6}  {:>6}  {:>10}  {:>7}  {:>7}",
-        "rank", "strategy", "win%", "antes", "score", "relics", "packs"
+        "{:>4}  {:<22}  {:>6}  {:>6}  {:>10}  {:>7}  {:>7}  {:>6}",
+        "rank", "strategy", "win%", "antes", "score", "relics", "packs", "sells"
     );
     println!(
-        "{:->4}  {:-<22}  {:->6}  {:->6}  {:->10}  {:->7}  {:->7}",
-        "", "", "", "", "", "", ""
+        "{:->4}  {:-<22}  {:->6}  {:->6}  {:->10}  {:->7}  {:->7}  {:->6}",
+        "", "", "", "", "", "", "", ""
     );
     for (i, (name, agg)) in ranked.iter().enumerate() {
         let runs = agg.runs.max(1) as f64;
@@ -711,8 +752,9 @@ pub fn run_strategy_sweep(
         let relics = agg.total_relics_bought as f64 / runs;
         let packs: u64 = agg.packs_picked.values().map(|v| *v as u64).sum();
         let packs_per_run = packs as f64 / runs;
+        let sells = agg.total_relics_sold as f64 / runs;
         println!(
-            "{:>4}  {:<22}  {:>5.1}%  {:>6.2}  {:>10}  {:>7.2}  {:>7.2}",
+            "{:>4}  {:<22}  {:>5.1}%  {:>6.2}  {:>10}  {:>7.2}  {:>7.2}  {:>6.2}",
             i + 1,
             name,
             win_pct,
@@ -720,6 +762,7 @@ pub fn run_strategy_sweep(
             human_readable_score(score),
             relics,
             packs_per_run,
+            sells,
         );
     }
 

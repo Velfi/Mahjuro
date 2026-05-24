@@ -1376,6 +1376,28 @@ RELICS = [
         "wings filling the frame.",
         "Bright orange and black soft-enamel wing bands, cream wing spots, copper raised metal lines, soft amber rim light.",
     ),
+    (
+        "ancestor_echo",
+        "Ancestor Echo",
+        "A ceremonial bronze temple bell suspended in profile, struck by a "
+        "small carved wooden mallet. Three translucent afterimages of the "
+        "same bell trail behind it in diminishing arcs, each echo ring offset "
+        "from the last to suggest one powerful strike repeating through time. "
+        "Fine engraved cloud motifs and knotwork wrap the bell body; the pin "
+        "silhouette follows the bell-and-wave composition.",
+        "Aged bronze and dark umber enamel for the bell, pale jade echo rings, warm gold strike spark, deep indigo shadow wells.",
+    ),
+    (
+        "crown_of_patterns",
+        "Crown of Patterns",
+        "An ornate imperial crown formed from interlocking mahjong motifs: "
+        "miniature triplets, sequence runs, and pair crests woven into one "
+        "tiered diadem. At the center sits a radiant circular medallion with "
+        "concentric geometry, while side filigree branches into repeating "
+        "tile-like tessellations. Rich, symmetrical silhouette with layered "
+        "depth and strong readability at pin scale.",
+        "Royal crimson and deep indigo enamel wells, ivory tile motifs, luminous amber-gold highlights, cool jade accent inlays.",
+    ),
 ]
 
 
