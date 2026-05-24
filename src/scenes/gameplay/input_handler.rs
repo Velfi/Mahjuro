@@ -847,7 +847,7 @@ pub(super) fn process_focus_and_actions(
                     let anim_dur = scene
                         .active_discard_anim
                         .as_ref()
-                        .map(|b| b.total_duration(&ctx.cascade_tuning))
+                        .map(|b| b.total_duration(ctx.cascade_tuning))
                         .unwrap_or(fallback);
                     scene.pending_refill = Some(now + anim_dur.max(fallback));
                 }
@@ -1013,7 +1013,6 @@ pub(super) fn build_relic_tray(
                     glow,
                     silhouette: false,
                     debuffed: run.relics.is_debuffed(rid),
-                    pick_id: None,
                 },
                 hover_target: 0.0,
                 anim_id: 0,
@@ -1850,11 +1849,7 @@ pub(super) fn build_yaku_panel_and_tablets(
             let preview_mult = trigger_preview
                 .as_ref()
                 .map(|breakdown| breakdown.final_mult.max(1.0))
-                .unwrap_or_else(|| {
-                    1.0 + crate::core::structure::structure_depth_mult_bonus(
-                        gameplay.structure_sets.len() as u32,
-                    )
-                });
+                .unwrap_or(1.0);
             let chip_stack_count = structure_preview_chip_stack_count(preview_chips);
             let mult_stack_count = structure_preview_mult_stack_count(preview_mult);
             let (tr_x, tr_y, _tr_w, tr_h) = trigger_btn_rect;

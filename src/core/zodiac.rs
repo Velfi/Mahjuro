@@ -1,13 +1,12 @@
 //! Chinese Zodiac consumable cards — Mahjuro's planet-card analogue.
 //!
-//! Each Zodiac card is mapped 1:1 to one yaku in [`crate::core::yaku`]
-//! the rest of the run, scaling both the chip and mult contributions per the
-//! formula in `YakuKind::mult_bonus_at` / `chip_bonus_at`. Zodiacs are
-//! consumed when used on a tile, boosting the level of the yaku bound to that
-//! tile for the rest of the run.
+//! Each Zodiac card levels one or more yaku in [`crate::core::yaku`] for the
+//! rest of the run, scaling both chip and mult contributions per
+//! `YakuKind::mult_bonus_at` / `chip_bonus_at`. Zodiacs are consumed when used
+//! on a tile.
 //!
-//! Display names, asset slugs, yaku pairing, and ribbon shop price live in
-//! `assets/data/zodiacs.json`. Leveling behaviour stays in [`YakuLevels`].
+//! Display names, asset slugs, primary yaku pairing, and ribbon shop price live
+//! in `assets/data/zodiacs.json`. Leveling behaviour stays in [`YakuLevels`].
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -77,7 +76,7 @@ fn zodiac_row(kind: ZodiacKind) -> &'static ZodiacRow {
 }
 
 /// Zodiac ribbon kinds: the thirteen calendar animals (Mouse precedes Rat) plus
-/// **Qilin** for Kokushi Musō. Variant order matters for serialization stability.
+/// **Qilin**, **Phoenix**, and **Crane**. Variant order matters for serialization.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ZodiacKind {
@@ -95,10 +94,13 @@ pub enum ZodiacKind {
     Dog,
     Pig,
     Qilin,
+    Phoenix,
+    Crane,
 }
 
 impl ZodiacKind {
-    /// All ribbon kinds: calendar order (Mouse precedes Rat), then Qilin.
+    /// All ribbon kinds: calendar order (Mouse precedes Rat), then Qilin,
+    /// Phoenix, Crane.
     pub fn all() -> &'static [ZodiacKind] {
         &[
             ZodiacKind::Mouse,
@@ -115,6 +117,8 @@ impl ZodiacKind {
             ZodiacKind::Dog,
             ZodiacKind::Pig,
             ZodiacKind::Qilin,
+            ZodiacKind::Phoenix,
+            ZodiacKind::Crane,
         ]
     }
 
@@ -123,21 +127,46 @@ impl ZodiacKind {
         zodiac_row(self).name
     }
 
-    /// The yaku this zodiac levels up when used.
+    /// Primary yaku shown on shop ribbons and celebrations (first in [`Self::yaku_levels`]).
     pub fn yaku(self) -> YakuKind {
         zodiac_row(self).yaku
     }
 
+    /// Every yaku this ribbon levels when consumed.
+    pub fn yaku_levels(self) -> &'static [YakuKind] {
+        match self {
+            ZodiacKind::Mouse => &[YakuKind::Honitsu],
+            ZodiacKind::Rat => &[YakuKind::Chinitsu],
+            ZodiacKind::Ox => &[YakuKind::Toitoi],
+            ZodiacKind::Tiger => &[YakuKind::Honroutou],
+            ZodiacKind::Rabbit => &[YakuKind::Iipeikou, YakuKind::Ryanpeikou],
+            ZodiacKind::Dragon => &[YakuKind::FullHand],
+            ZodiacKind::Snake => &[YakuKind::Ittsu],
+            ZodiacKind::Horse => &[YakuKind::SanshokuDoujun, YakuKind::SanshokuDoukou],
+            ZodiacKind::Goat => &[YakuKind::Junchan],
+            ZodiacKind::Monkey => &[YakuKind::Tanyao],
+            ZodiacKind::Rooster => &[YakuKind::ChickenHand],
+            ZodiacKind::Dog => &[YakuKind::Yakuhai],
+            ZodiacKind::Pig => &[YakuKind::Chiitoitsu],
+            ZodiacKind::Qilin => &[YakuKind::KokushiMusou],
+            ZodiacKind::Phoenix => &[YakuKind::Chanta],
+            ZodiacKind::Crane => &[YakuKind::Pinfu],
+        }
+    }
+
     /// Lowercase slug used for asset filenames (e.g. `dragon` →
-    /// `assets/textures/zodiac_dragon_{top,mid,bot}.png`). See
+    /// `assets/textures/zodiacs/zodiac_dragon.png`). See
     /// `scripts/generate_zodiac_ribbons.py`.
     pub fn slug(self) -> &'static str {
         zodiac_row(self).slug
     }
 
-    /// Look up the zodiac that levels a given yaku, if any.
+    /// Look up the zodiac ribbon that levels a given yaku, if any.
     pub fn for_yaku(yaku: YakuKind) -> Option<ZodiacKind> {
-        Self::all().iter().copied().find(|z| z.yaku() == yaku)
+        Self::all()
+            .iter()
+            .copied()
+            .find(|z| z.yaku_levels().contains(&yaku))
     }
 
     /// Shop price in gold for buying one ribbon (same catalog price for every kind).
@@ -211,6 +240,15 @@ impl YakuLevels {
         self.levels.insert(yaku, next);
         next
     }
+
+    /// Level every yaku tied to a zodiac ribbon. Returns the last yaku's new level.
+    pub fn level_up_for_zodiac(&mut self, zodiac: ZodiacKind) -> u32 {
+        let mut last = 1;
+        for &yaku in zodiac.yaku_levels() {
+            last = self.level_up(yaku);
+        }
+        last
+    }
 }
 
 #[cfg(test)]
@@ -218,20 +256,52 @@ mod tests {
     use super::*;
 
     #[test]
-    fn each_zodiac_has_unique_yaku() {
-        let mut seen: rustc_hash::FxHashSet<YakuKind> = Default::default();
-        for &z in ZodiacKind::all() {
-            assert!(seen.insert(z.yaku()), "duplicate yaku for {:?}", z);
+    fn each_scoring_yaku_has_exactly_one_ribbon() {
+        for &yk in YakuKind::all() {
+            if yk == YakuKind::ChickenHand {
+                continue;
+            }
+            let ribbons: Vec<_> = ZodiacKind::all()
+                .iter()
+                .copied()
+                .filter(|z| z.yaku_levels().contains(&yk))
+                .collect();
+            assert_eq!(
+                ribbons.len(),
+                1,
+                "{yk:?} should map to one ribbon, got {ribbons:?}"
+            );
         }
-        assert_eq!(seen.len(), 14);
     }
 
     #[test]
     fn for_yaku_round_trips() {
         for &z in ZodiacKind::all() {
-            let yk = z.yaku();
-            assert_eq!(ZodiacKind::for_yaku(yk), Some(z));
+            for &yk in z.yaku_levels() {
+                assert_eq!(ZodiacKind::for_yaku(yk), Some(z), "{yk:?}");
+            }
         }
+    }
+
+    #[test]
+    fn rabbit_and_horse_level_two_yaku() {
+        assert_eq!(
+            ZodiacKind::Rabbit.yaku_levels(),
+            &[YakuKind::Iipeikou, YakuKind::Ryanpeikou]
+        );
+        assert_eq!(
+            ZodiacKind::Horse.yaku_levels(),
+            &[YakuKind::SanshokuDoujun, YakuKind::SanshokuDoukou]
+        );
+    }
+
+    #[test]
+    fn level_up_for_zodiac_levels_all_bound_yaku() {
+        let mut yl = YakuLevels::default();
+        let new_level = yl.level_up_for_zodiac(ZodiacKind::Rabbit);
+        assert_eq!(new_level, 2);
+        assert_eq!(yl.level_of(YakuKind::Iipeikou), 2);
+        assert_eq!(yl.level_of(YakuKind::Ryanpeikou), 2);
     }
 
     #[test]

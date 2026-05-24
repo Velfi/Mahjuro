@@ -145,6 +145,9 @@ pub struct ScreenshotCli {
     /// Profile slot for `--from-run-history` (default: active profile from settings).
     #[arg(long)]
     pub profile: Option<usize>,
+    /// 1-based guide page for `--scene guide` (e.g. 4 = Scoring Basics).
+    #[arg(long)]
+    pub guide_page: Option<u32>,
     /// `game_over_defeat` only: append N bot runs to the in-memory profile before
     /// `--from-run-history` (does not write disk; use with `--from-run-history`).
     #[arg(long)]

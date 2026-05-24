@@ -573,12 +573,6 @@ pub struct WgpuRenderer {
     /// reprojection. The relic id drives per-triangle trimesh picking so the
     /// click silhouette matches the visible relic outline.
     pub(super) last_relic_models: Vec<(Mat4, RelicId)>,
-    /// Per-relic (pick_id, model, relic_id) snapshot for scenes that want
-    /// to route clicks to a specific artifact index instead of the
-    /// positional order used by `last_relic_models`. Populated from any
-    /// `Object3dKind::Relic` draw whose `pick_id` is `Some`. Consumed by
-    /// `pick_collection_object`.
-    pub(super) last_pickable_relic_models: Vec<(u32, Mat4, RelicId)>,
     /// Currently bound relic texture per slot. `Some(id)` means that slot's
     /// bind group already points at the texture for `id`; `None` means the
     /// flat-white fallback. Avoids rebuilding bind groups every frame.

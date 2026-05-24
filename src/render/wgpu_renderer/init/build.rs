@@ -2403,14 +2403,14 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     crate::startup_profile::record("wgpu.shaders_and_pipelines", t_shaders.elapsed());
 
     let t_fonts = Instant::now();
-    let ui_font = load_ui_font();
+    let ui_font = load_ui_font().cloned();
     if ui_font.is_some() {
         log::debug!("UI font loaded.");
     } else {
         log::warn!("No UI font found; panel text will be blank.");
     }
-    let ui_font_italic = crate::render::decal::load_ui_font_italic();
-    let mono_font = load_mono_font();
+    let ui_font_italic = crate::render::decal::load_ui_font_italic().cloned();
+    let mono_font = load_mono_font().cloned();
     if mono_font.is_some() {
         log::debug!("Mono UI font loaded.");
     } else {
@@ -2479,7 +2479,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                             device: &device,
                             queue: &queue,
                             label: "tile-prim-albedo".to_string(),
-                            rgba: rgba,
+                            rgba,
                             width: *w,
                             height: *h,
                             format: wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -2493,7 +2493,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                                 device: &device,
                                 queue: &queue,
                                 label: format!("tile-prim-normal-{i}"),
-                                rgba: rgba,
+                                rgba,
                                 width: *w,
                                 height: *h,
                                 format: wgpu::TextureFormat::Rgba8Unorm,
@@ -2509,7 +2509,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                                 device: &device,
                                 queue: &queue,
                                 label: format!("tile-prim-mr-{i}"),
-                                rgba: rgba,
+                                rgba,
                                 width: *w,
                                 height: *h,
                                 format: wgpu::TextureFormat::Rgba8Unorm,
@@ -2525,7 +2525,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                                 device: &device,
                                 queue: &queue,
                                 label: format!("tile-prim-emissive-{i}"),
-                                rgba: rgba,
+                                rgba,
                                 width: *w,
                                 height: *h,
                                 format: wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -4173,7 +4173,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         last_pick_models: Vec::new(),
         last_pick_camera: None,
         last_relic_models: Vec::new(),
-        last_pickable_relic_models: Vec::new(),
         relic_slot_texture: vec![None; MAX_RELIC_SLOTS],
         boss_icon_instances,
         boss_icon_meshes: rustc_hash::FxHashMap::default(),

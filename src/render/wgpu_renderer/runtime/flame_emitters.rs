@@ -18,7 +18,7 @@ pub(super) fn build_flame_emitters(
     h: f32,
 ) -> Vec<crate::render::flame_volume::FlameEmitter> {
     if !frame.procedural_flame_emitters.is_empty() {
-        return frame.procedural_flame_emitters.iter().copied().collect();
+        return frame.procedural_flame_emitters.to_vec();
     }
     let mut out: Vec<crate::render::flame_volume::FlameEmitter> = Vec::new();
     // Candles in submission order.

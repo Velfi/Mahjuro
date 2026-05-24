@@ -14,6 +14,8 @@
     { "id": "rooster", "name": "Rooster", "slug": "rooster", "yaku": "chicken_hand" },
     { "id": "dog", "name": "Dog", "slug": "dog", "yaku": "yakuhai" },
     { "id": "pig", "name": "Pig", "slug": "pig", "yaku": "chiitoitsu" },
-    { "id": "qilin", "name": "Qilin", "slug": "qilin", "yaku": "kokushi_musou" }
+    { "id": "qilin", "name": "Qilin", "slug": "qilin", "yaku": "kokushi_musou" },
+    { "id": "phoenix", "name": "Phoenix", "slug": "phoenix", "yaku": "chanta" },
+    { "id": "crane", "name": "Crane", "slug": "crane", "yaku": "pinfu" }
   ]
 }

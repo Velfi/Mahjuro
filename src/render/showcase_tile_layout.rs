@@ -9,7 +9,7 @@ use crate::render::table_transform::{
     rot_euler_xyz_rad, tile_mesh_local_to_world, translate_rot_scale,
 };
 use crate::render::wgpu_renderer::{LOCAL_X_EXTENT, LOCAL_Y_EXTENT, LOCAL_Z_EXTENT};
-use crate::render::world_space::world_on_camera_ray_plane_z;
+use crate::render::world_space::layout_anchor_to_world;
 
 /// Max fraction of window width occupied by the pack-reveal row (projected silhouettes + gaps).
 const PACK_REVEAL_ROW_MAX_W_FRAC: f32 = 0.72;
@@ -55,18 +55,115 @@ pub struct PackRevealRowLayoutParams<'a> {
     pub rotation_xyz_rad: [f32; 3],
 }
 
-/// Horizontal span in layout pixels of a showcase tile's axis-aligned screen bounds.
+/// Axis-aligned screen bounds of a showcase tile mesh (layout pixels).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShowcaseTileScreenBounds {
+    pub min_x: f32,
+    pub min_y: f32,
+    pub max_x: f32,
+    pub max_y: f32,
+}
+
+impl ShowcaseTileScreenBounds {
+    pub fn width(self) -> f32 {
+        (self.max_x - self.min_x).max(1.0)
+    }
+
+    pub fn height(self) -> f32 {
+        (self.max_y - self.min_y).max(1.0)
+    }
+
+    pub fn bottom(self) -> f32 {
+        self.max_y
+    }
+
+    pub fn merge(self, other: Self) -> Self {
+        Self {
+            min_x: self.min_x.min(other.min_x),
+            min_y: self.min_y.min(other.min_y),
+            max_x: self.max_x.max(other.max_x),
+            max_y: self.max_y.max(other.max_y),
+        }
+    }
+}
+
+/// Gaps between a tile group's projected bottom edge and its underline / label row.
+#[derive(Clone, Copy, Debug)]
+pub struct ShowcaseTileLabelGaps {
+    pub underline_gap: f32,
+    pub underline_h: f32,
+    pub label_text_gap: f32,
+}
+
+/// Screen-space label row anchored to merged projected tile bounds.
+#[derive(Clone, Copy, Debug)]
+pub struct ShowcaseTileGroupLabelAnchor {
+    pub bounds: ShowcaseTileScreenBounds,
+    pub underline_y: f32,
+    pub label_y: f32,
+}
+
+/// Merged projected AABB for a row of showcase tiles sharing size / rotation / preset.
+pub fn showcase_tile_merge_projected_group(
+    cam: &crate::render::draw_cmd::CameraParams,
+    win_w: f32,
+    win_h: f32,
+    preset: TilePreset,
+    rotation_xyz_rad: [f32; 3],
+    placement_scale: f32,
+    size_px: f32,
+    lift_z: f32,
+    centers_xy: &[[f32; 2]],
+) -> ShowcaseTileScreenBounds {
+    let mut merged = ShowcaseTileScreenBounds {
+        min_x: f32::INFINITY,
+        min_y: f32::INFINITY,
+        max_x: f32::NEG_INFINITY,
+        max_y: f32::NEG_INFINITY,
+    };
+    for &[px, py] in centers_xy {
+        let bounds = showcase_tile_projected_bounds_px(&ShowcaseTileProjectParams {
+            win_w,
+            win_h,
+            cam,
+            preset,
+            center_px: [px, py, lift_z],
+            rotation_xyz_rad,
+            placement_scale,
+            size_px,
+        });
+        merged = merged.merge(bounds);
+    }
+    merged
+}
+
+/// Underline and label baseline Y from merged projected bounds (guide / tutorial / lab).
+pub fn showcase_tile_group_label_anchor(
+    bounds: ShowcaseTileScreenBounds,
+    gaps: ShowcaseTileLabelGaps,
+) -> ShowcaseTileGroupLabelAnchor {
+    let underline_y = bounds.bottom() + gaps.underline_gap;
+    let label_y = underline_y + gaps.underline_h + gaps.label_text_gap;
+    ShowcaseTileGroupLabelAnchor {
+        bounds,
+        underline_y,
+        label_y,
+    }
+}
+
+/// Projected screen-space AABB for one showcase tile.
 ///
 /// Uses the same ray→`plane_z` center mapping, `0.85` short-edge factor, preset ratios,
 /// and `tile_mesh_local_to_world` × Euler basis as the GPU showcase path.
-pub fn showcase_tile_projected_width_px(p: &ShowcaseTileProjectParams<'_>) -> f32 {
-    let center = world_on_camera_ray_plane_z(
+pub fn showcase_tile_projected_bounds_px(p: &ShowcaseTileProjectParams<'_>) -> ShowcaseTileScreenBounds {
+    let center = layout_anchor_to_world(
         p.win_w,
         p.win_h,
-        p.cam,
+        Some(p.cam),
         p.center_px[0],
         p.center_px[1],
         p.center_px[2],
+        true,
     );
 
     let tile_short_px = p.size_px * 0.85 * p.placement_scale;
@@ -87,7 +184,9 @@ pub fn showcase_tile_projected_width_px(p: &ShowcaseTileProjectParams<'_>) -> f3
     let model = translate_rot_scale(center, oriented, scale);
 
     let mut min_x = f32::INFINITY;
+    let mut min_y = f32::INFINITY;
     let mut max_x = f32::NEG_INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
     for &corner in &[
         Vec3::new(-0.5, -0.5, -0.5),
         Vec3::new(0.5, -0.5, -0.5),
@@ -99,11 +198,23 @@ pub fn showcase_tile_projected_width_px(p: &ShowcaseTileProjectParams<'_>) -> f3
         Vec3::new(0.5, 0.5, 0.5),
     ] {
         let world_c = model.transform_point3(corner);
-        let (sx, _) = p.cam.project_world_to_screen(p.win_w, p.win_h, world_c);
+        let (sx, sy) = p.cam.project_world_to_screen(p.win_w, p.win_h, world_c);
         min_x = min_x.min(sx);
+        min_y = min_y.min(sy);
         max_x = max_x.max(sx);
+        max_y = max_y.max(sy);
     }
-    (max_x - min_x).max(1.0)
+    ShowcaseTileScreenBounds {
+        min_x,
+        min_y,
+        max_x,
+        max_y,
+    }
+}
+
+/// Horizontal span in layout pixels of a showcase tile's axis-aligned screen bounds.
+pub fn showcase_tile_projected_width_px(p: &ShowcaseTileProjectParams<'_>) -> f32 {
+    showcase_tile_projected_bounds_px(p).width()
 }
 
 /// Row geometry for pack opening: largest `size_px` such that projected silhouettes fit in

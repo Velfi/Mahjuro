@@ -398,9 +398,8 @@ fn inline_segment_refs<'a>(
 }
 
 fn measure_text(font_px: f32, text: &str) -> f32 {
-    let ui_font = load_ui_font();
     let text_h_px = font_px.max(8.0).round().max(1.0) as u32;
-    if let Some(ref font) = ui_font {
+    if let Some(font) = load_ui_font() {
         let (_, _, advances) = measure_label_advances(font, text, 8192, text_h_px, Some(font_px));
         advances.iter().copied().sum()
     } else {
@@ -650,11 +649,6 @@ impl ColumnHintEntry {
             label,
             disabled: false,
         }
-    }
-
-    pub fn disabled(mut self) -> Self {
-        self.disabled = true;
-        self
     }
 }
 

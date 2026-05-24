@@ -9,8 +9,7 @@ Follow-up tasks that are scoped but not scheduled. Each entry links to a doc wit
 
 ## Tooling / quality
 
-- [Clippy — large enum variants](clippy-large-enum-variants.md) — box heavy `Scene`, GLB caches, and `ShowcasePresenter` variants to shrink enum size.
-- [Clippy — mechanical fixes](clippy-mechanical-fixes.md) — one-line / `clippy --fix` lints: clamp, needless borrow, docs, test module order, etc.
+- [Clippy — structural refactors](clippy-structural-refactors.md) — param structs for 8+ arg functions, `GltfMipChain` alias, box heavy `Scene` variants; ~56 warnings after mechanical fixes; no crate-level allows.
 
 ## Rendering / shaders
 

@@ -241,6 +241,7 @@ impl SceneBehavior for YakuJournalScene {
             clip_near: None,
             clip_far: None,
         });
+        // Placement policy: `yaku_journal` is on the pixel-to-world deny list (top-down 1:1 grid).
 
         // One soft high fill light. The previous two-light setup created
         // bright specular blooms on the wood that pulled the eye away

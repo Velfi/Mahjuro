@@ -139,43 +139,76 @@ const ROWS: &[Row] = &[
     Row::SaveAndProfiles,
 ];
 
-fn section_of_row(row: Row) -> Section {
-    match row {
-        Row::Master | Row::Music | Row::Sfx | Row::SfxToggle => Section::Audio,
-        Row::Gamma
-        | Row::Effects
-        | Row::Tile
-        | Row::Tileset
-        | Row::Surface
-        | Row::BorderlessFullscreen
-        | Row::Shadows
-        | Row::Ssr
-        | Row::Hdr => Section::Graphics,
-        Row::SwapAb
-        | Row::SwapXy
-        | Row::XyQuickAction
-        | Row::HoldToSellRumble
-        | Row::AutoCashInOnFullStructure => Section::Controls,
-        Row::UndoDiscard | Row::Hints | Row::GlyphPrompts => Section::Accessibility,
-        Row::ExportPlayStats | Row::SaveAndProfiles => Section::Data,
-    }
+// ── Content slots (section headers interspersed with rows) ─────────────
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ContentSlot {
+    Header(Section),
+    Row(Row),
 }
 
-fn row_index(row: Row) -> usize {
-    ROWS.iter().position(|&r| r == row).unwrap()
-}
+const CONTENT: &[ContentSlot] = &[
+    ContentSlot::Header(Section::Audio),
+    ContentSlot::Row(Row::Master),
+    ContentSlot::Row(Row::Music),
+    ContentSlot::Row(Row::Sfx),
+    ContentSlot::Row(Row::SfxToggle),
+    ContentSlot::Header(Section::Graphics),
+    ContentSlot::Row(Row::Gamma),
+    ContentSlot::Row(Row::Effects),
+    ContentSlot::Row(Row::Tile),
+    ContentSlot::Row(Row::Tileset),
+    ContentSlot::Row(Row::Surface),
+    ContentSlot::Row(Row::BorderlessFullscreen),
+    ContentSlot::Row(Row::Shadows),
+    ContentSlot::Row(Row::Ssr),
+    ContentSlot::Row(Row::Hdr),
+    ContentSlot::Header(Section::Controls),
+    ContentSlot::Row(Row::SwapAb),
+    ContentSlot::Row(Row::SwapXy),
+    ContentSlot::Row(Row::XyQuickAction),
+    ContentSlot::Row(Row::HoldToSellRumble),
+    ContentSlot::Row(Row::AutoCashInOnFullStructure),
+    ContentSlot::Header(Section::Accessibility),
+    ContentSlot::Row(Row::UndoDiscard),
+    ContentSlot::Row(Row::Hints),
+    ContentSlot::Row(Row::GlyphPrompts),
+    ContentSlot::Header(Section::Data),
+    ContentSlot::Row(Row::ExportPlayStats),
+    ContentSlot::Row(Row::SaveAndProfiles),
+];
 
-fn section_row_index(section: Section) -> usize {
-    ROWS.iter()
-        .position(|&r| section_of_row(r) == section)
+fn content_index_of_row(row: Row) -> usize {
+    CONTENT
+        .iter()
+        .position(|s| matches!(s, ContentSlot::Row(r) if *r == row))
         .unwrap()
 }
 
-/// Which section is at the top of the visible content viewport?
+fn content_index_of_section(section: Section) -> usize {
+    CONTENT
+        .iter()
+        .position(|s| matches!(s, ContentSlot::Header(sec) if *sec == section))
+        .unwrap()
+}
+
+/// Which section header is at the top of the visible content viewport?
 fn section_at_scroll(scroll: f32) -> Section {
-    ROWS.get(scroll.floor() as usize)
-        .map(|&row| section_of_row(row))
-        .unwrap_or(Section::Audio)
+    let idx = scroll.floor() as usize;
+    for slot in CONTENT.get(idx..).into_iter().flatten() {
+        if let ContentSlot::Header(sec) = slot {
+            return *sec;
+        }
+    }
+    for slot in CONTENT[..idx.min(CONTENT.len().saturating_sub(1)) + 1]
+        .iter()
+        .rev()
+    {
+        if let ContentSlot::Header(sec) = slot {
+            return *sec;
+        }
+    }
+    Section::Audio
 }
 
 /// Input/device context for hint copy and scroll fades in [`OptionsScene::draw_overlay`].
@@ -643,13 +676,13 @@ impl OptionsScene {
 
     /// Clamp scroll offset and update max for the given layout.
     fn sync_scroll(&self, layout: &PanelLayout) {
-        let max = ROWS.len().saturating_sub(layout.visible_slots) as u32;
+        let max = CONTENT.len().saturating_sub(layout.visible_slots) as u32;
         self.scroll.set_max(max);
     }
 
     /// Adjust scroll so `self.focused` is visible.
     fn ensure_focused_visible(&self, layout: &PanelLayout) {
-        let idx = row_index(self.focused) as f32;
+        let idx = content_index_of_row(self.focused) as f32;
         let scroll = self.scroll.target();
         let vis = layout.visible_slots as f32;
         if idx < scroll {
@@ -873,19 +906,20 @@ impl OptionsScene {
         if input_mode == InputMode::Cursor {
             let (cx, cy) = cursor_pos;
             let scroll = self.scroll.target() as usize;
-            for (vi, &row) in ROWS.iter().enumerate().skip(scroll) {
-                if vi - scroll >= layout.visible_slots {
+            for (vi, ci) in (scroll..CONTENT.len()).enumerate() {
+                if vi >= layout.visible_slots {
                     break;
                 }
-                let ry = layout.content_start_y
-                    + (vi - scroll) as f32 * (layout.slot_h + layout.slot_gap);
-                if cx >= layout.content_x
-                    && cx <= layout.content_x + layout.content_w
-                    && cy >= ry
-                    && cy <= ry + layout.slot_h
-                {
-                    self.focused = row;
-                    self.back_focused = false;
+                if let ContentSlot::Row(row) = CONTENT[ci] {
+                    let ry = layout.content_start_y + vi as f32 * (layout.slot_h + layout.slot_gap);
+                    if cx >= layout.content_x
+                        && cx <= layout.content_x + layout.content_w
+                        && cy >= ry
+                        && cy <= ry + layout.slot_h
+                    {
+                        self.focused = row;
+                        self.back_focused = false;
+                    }
                 }
             }
             if cx >= layout.back_x
@@ -902,10 +936,15 @@ impl OptionsScene {
             // TOC link?
             if cid >= TOC_ID_BASE && cid < TOC_ID_BASE + SECTIONS.len() as u32 {
                 let section = SECTIONS[(cid - TOC_ID_BASE) as usize];
-                let target = section_row_index(section) as f32;
+                let target = content_index_of_section(section) as f32;
                 self.scroll.set_target(target);
-                self.focused = ROWS[section_row_index(section)];
-                self.back_focused = false;
+                if let Some(first_row) = CONTENT[target as usize..].iter().find_map(|s| match s {
+                    ContentSlot::Row(r) => Some(*r),
+                    _ => None,
+                }) {
+                    self.focused = first_row;
+                    self.back_focused = false;
+                }
                 continue;
             }
             if cid == BACK_ID {
@@ -936,12 +975,7 @@ impl OptionsScene {
         // ── Keyboard / gamepad ─────────────────────────────────────────
         for a in actions {
             match a {
-                UiAction::FocusDown if self.back_focused => {
-                    // Wrap to first row.
-                    self.focused = ROWS[0];
-                    self.back_focused = false;
-                    self.scroll.set_target(0.0);
-                }
+                UiAction::FocusDown if self.back_focused => {}
                 UiAction::FocusUp if self.back_focused => {
                     self.back_focused = false;
                     self.focused = *ROWS.last().unwrap();
@@ -1121,38 +1155,70 @@ impl OptionsScene {
             layout.visible_slots as f32 * (layout.slot_h + layout.slot_gap),
         ];
 
+        let header_font = typography::size(typography::H28, h);
         let render_slots = layout.visible_slots + 1;
-        for (vi, &row) in ROWS.iter().enumerate().skip(scroll) {
-            if vi - scroll >= render_slots {
+        for (vi, ci) in (scroll..CONTENT.len()).enumerate() {
+            if vi >= render_slots {
                 break;
             }
             let slot_y = layout.content_start_y
-                + (vi - scroll) as f32 * (layout.slot_h + layout.slot_gap)
+                + vi as f32 * (layout.slot_h + layout.slot_gap)
                 + frac_offset;
             let slot_rect = [layout.content_x, slot_y, layout.content_w, layout.slot_h];
             let Some(clipped_slot_rect) = intersect_rect(slot_rect, content_clip_rect) else {
                 continue;
             };
-            let is_focused = !self.back_focused && row == self.focused;
-            self.draw_row(
-                instances,
-                text_labels,
-                row,
-                slot_rect,
-                content_clip_rect,
-                is_focused,
-                track_h,
-                &cols,
-            );
-            buttons.push(ButtonDef::scene(
-                (
-                    clipped_slot_rect[0],
-                    clipped_slot_rect[1],
-                    clipped_slot_rect[2],
-                    clipped_slot_rect[3],
-                ),
-                row.click_id(),
-            ));
+            match CONTENT[ci] {
+                ContentSlot::Header(section) => {
+                    text_labels.push(TextLabel {
+                        rect: slot_rect,
+                        text: section.label().into(),
+                        color: color::GOLD,
+                        font_px: Some(header_font),
+                        align: TextAlign::Left,
+                        clip_rect: Some(content_clip_rect),
+                        ..Default::default()
+                    });
+                    let line_y = slot_y + layout.slot_h - (1.0 * layout.scale);
+                    if let Some(line_rect) = intersect_rect(
+                        [
+                            layout.content_x,
+                            line_y,
+                            layout.content_w,
+                            (1.0 * layout.scale).max(1.0),
+                        ],
+                        content_clip_rect,
+                    ) {
+                        instances.push(GpuInstance {
+                            rect: line_rect,
+                            color: color::ANTIQUE,
+                            user: 0,
+                        });
+                    }
+                }
+                ContentSlot::Row(row) => {
+                    let is_focused = !self.back_focused && row == self.focused;
+                    self.draw_row(
+                        instances,
+                        text_labels,
+                        row,
+                        slot_rect,
+                        content_clip_rect,
+                        is_focused,
+                        track_h,
+                        &cols,
+                    );
+                    buttons.push(ButtonDef::scene(
+                        (
+                            clipped_slot_rect[0],
+                            clipped_slot_rect[1],
+                            clipped_slot_rect[2],
+                            clipped_slot_rect[3],
+                        ),
+                        row.click_id(),
+                    ));
+                }
+            }
         }
 
         // ── Scroll edge fades ──────────────────────────────────────────
@@ -1195,7 +1261,7 @@ impl OptionsScene {
                 color: color::WALNUT_RAISED,
                 user: 0,
             });
-            let thumb_h = (indicator_h * (layout.visible_slots as f32 / ROWS.len() as f32))
+            let thumb_h = (indicator_h * (layout.visible_slots as f32 / CONTENT.len() as f32))
                 .max(12.0 * layout.scale);
             let thumb_y = indicator_y + (indicator_h - thumb_h) * (smooth / max_scroll);
             instances.push(GpuInstance {

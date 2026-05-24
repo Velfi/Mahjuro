@@ -250,7 +250,7 @@ fn build_surplus_candles(runs: &[RunStats]) -> Vec<DistributionCandleRow> {
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect();
-    slots.sort_by(|a, b| aggregate_stats_slot_sort_key(a).cmp(&aggregate_stats_slot_sort_key(b)));
+    slots.sort_by_key(|a| aggregate_stats_slot_sort_key(a));
 
     let mut rows = Vec::new();
     for slot in slots {

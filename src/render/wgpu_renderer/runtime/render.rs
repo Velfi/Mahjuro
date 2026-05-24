@@ -969,7 +969,6 @@ impl WgpuRenderer {
 
         // ── Relic placeholders (migrated to Object3dKind::Relic) ──────
         self.last_relic_models.clear();
-        self.last_pickable_relic_models.clear();
         let mut relic_slot_cursor: usize = 0;
         let _ = &mut relic_slot_cursor;
 
@@ -1004,7 +1003,7 @@ impl WgpuRenderer {
         let shadow_light_changed = self.cached_shadow_light_view_proj != light_view_proj_arr;
         self.cached_shadow_light_view_proj = light_view_proj_arr;
         let mut shadow_uniforms_changed = shadow_just_enabled || shadow_light_changed;
-        let mut object3d_shadow = shadows_enabled.then(|| super::shadow_setup::Object3dShadowCtx {
+        let mut object3d_shadow = shadows_enabled.then_some(super::shadow_setup::Object3dShadowCtx {
             light_view_proj: light_view_proj_arr,
             changed: &mut shadow_uniforms_changed,
         });
@@ -1098,7 +1097,7 @@ impl WgpuRenderer {
             let shop_room_shadow = (shadows_enabled
                 && frame.shop_inspect_shadow_target.is_none()
                 && !room_uses_baked_shadow)
-                .then(|| (light_view_proj_arr, &mut shadow_uniforms_changed));
+                .then_some((light_view_proj_arr, &mut shadow_uniforms_changed));
             self.write_shop_environment_uniforms(frame, &camera, false, shop_room_shadow);
             if frame.scene_lighting.embedded_gltf_punctual {
                 self.write_shop_room_punctual_occluders(&camera);
@@ -1110,7 +1109,7 @@ impl WgpuRenderer {
                 &camera,
                 false,
                 (shadows_enabled && !room_uses_baked_shadow)
-                    .then(|| (light_view_proj_arr, &mut shadow_uniforms_changed)),
+                    .then_some((light_view_proj_arr, &mut shadow_uniforms_changed)),
             );
         }
         if self.archive_environment.is_some() {
@@ -1122,7 +1121,7 @@ impl WgpuRenderer {
                 &camera,
                 false,
                 (shadows_enabled && !room_uses_baked_shadow)
-                    .then(|| (light_view_proj_arr, &mut shadow_uniforms_changed)),
+                    .then_some((light_view_proj_arr, &mut shadow_uniforms_changed)),
             );
         }
         if ops_flags.main_menu_env {
@@ -1131,7 +1130,7 @@ impl WgpuRenderer {
                 &camera,
                 false,
                 (shadows_enabled && !room_uses_baked_shadow)
-                    .then(|| (light_view_proj_arr, &mut shadow_uniforms_changed)),
+                    .then_some((light_view_proj_arr, &mut shadow_uniforms_changed)),
             );
         }
         self.write_active_room_baked_shadow_globals(

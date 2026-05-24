@@ -2,8 +2,8 @@
 //!
 //! Each scored hand accumulates two parallel running totals:
 //!
-//! * **Chips** — additive. Tiles contribute their rank value (honors flat 10),
-//!   melds add a flat bonus, and chip-flavored relics pile on more.
+//! * **Chips** — additive. Tiles contribute their rank value (honors flat 12),
+//!   then yaku, dora, and chip-flavored relics pile on more.
 //! * **Mult** — multiplicative axis, but built additively (`+N mult`) so it
 //!   stacks fast and predictably. Yaku and "explosive" relics live here.
 //!
@@ -16,7 +16,7 @@
 //!
 //! * [`pipeline`] — thin orchestration: base melds, then each layer in order.
 //! * [`pre_yaku_layer`] — meld-linked chips/mults and early relic effects before Dora/yaku.
-//! * [`dora_yaku_layer`] — Dora, yaku lines, structure depth mult.
+//! * [`dora_yaku_layer`] — Dora and yaku chip/mult lines.
 //! * [`relic_mult_layer`] — post-yaku relic mults and late relic chips (one audit surface).
 //! * [`effective_relic`] — Mirror Tile / Shadow Hand resolved once per score.
 //! * [`presentation`] — optional regrouping of steps for the cascade (chips before mults).
@@ -78,16 +78,6 @@ pub struct ScoreBreakdown {
     pub flower_gold: i32,
 
     pub scored_meld_kinds: Vec<crate::core::hand::MeldKind>,
-}
-
-pub(crate) fn meld_chip_bonus(kind: MeldKind) -> i32 {
-    match kind {
-        MeldKind::Pair => 18,
-        MeldKind::Sequence => 28,
-        MeldKind::Triplet => 50,
-        MeldKind::Kong => 80,
-        MeldKind::Single => 0,
-    }
 }
 
 /// Grouped meld labels for logs and reports (`Pair  3m 3m · Kong  9p 9p 9p 9p`).

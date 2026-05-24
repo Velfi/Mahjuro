@@ -12,5 +12,9 @@
   { "id": "honroutou",       "name": "Honroutou",    "mult_bonus": 4.5, "chip_bonus": 55 },
   { "id": "chiitoitsu",      "name": "Chiitoitsu",   "mult_bonus": 6.5, "chip_bonus": 85 },
   { "id": "kokushi_musou",   "name": "Kokushi Musō", "mult_bonus": 10.0, "chip_bonus": 130 },
-  { "id": "chicken_hand",    "name": "Chicken Hand", "mult_bonus": 0.0, "chip_bonus":  0 }
+  { "id": "chicken_hand",    "name": "Chicken Hand", "mult_bonus": 0.0, "chip_bonus":  0 },
+  { "id": "chanta",          "name": "Chanta",       "mult_bonus": 4.0, "chip_bonus": 50 },
+  { "id": "ryanpeikou",      "name": "Ryanpeikou",   "mult_bonus": 5.5, "chip_bonus": 72 },
+  { "id": "sanshoku_doukou", "name": "Sanshoku Doukou", "mult_bonus": 6.0, "chip_bonus": 80 },
+  { "id": "pinfu",           "name": "Pinfu",        "mult_bonus": 4.0, "chip_bonus": 50 }
 ]

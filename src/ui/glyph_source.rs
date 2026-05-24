@@ -132,6 +132,13 @@ fn action_face(action: UiAction, swap_ab: bool, swap_xy: bool) -> Option<Face> {
                 Face::North
             }
         }
+        UiAction::Delete => {
+            if swap_xy {
+                Face::North
+            } else {
+                Face::West
+            }
+        }
         UiAction::TriggerStructure => Face::LeftTrigger,
         _ => return None,
     })

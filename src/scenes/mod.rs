@@ -24,6 +24,11 @@ pub mod showcase_stage;
 pub mod splash;
 pub mod start_game_modal;
 pub mod transition_playground;
+pub(crate) mod flowers_intro_copy;
+pub(crate) mod melds_intro_copy;
+pub(crate) mod scoring_intro_copy;
+pub(crate) mod tiles_intro_copy;
+pub mod tile_anchor_lab;
 pub mod tutorial_campaign;
 pub mod tutorial_summary;
 pub mod yaku_journal;
@@ -38,6 +43,7 @@ pub use options::OptionsScene;
 pub use pick_blind::PickBlindScene;
 pub use profile_select::ProfileSelectScene;
 pub use rumble_lab::RumbleLabScene;
+pub use tile_anchor_lab::TileAnchorLabScene;
 pub use shop::ShopScene;
 pub use showcase::{
     CollectionInspectPresenter, MetaLevelUpPresenter, ShopInspectPresenter, ShowcasePresenter,
@@ -151,12 +157,6 @@ pub struct UpdateCtx<'a> {
     /// update() to route mouse clicks to 3D action objects (sort/play
     /// wood tablets and the discard bowl).
     pub picked_gameplay_object: Option<crate::render::wgpu_renderer::GameplayPick>,
-    /// Result of `pick_collection_object` for the cursor this frame, when
-    /// the collection scene is active. Carries the artifact index (the
-    /// `pick_id` the scene stamped onto its `Object3dKind::Relic` draws)
-    /// of whichever relic the ray passes through, so clicks on the real
-    /// silhouette — not the loose cell rect — select the artifact.
-    pub picked_collection_object: Option<u32>,
     /// Which input device the player most recently used. Mirrors
     /// `DrawCtx::input_mode` so scenes can route directional actions
     /// vs. cursor activity in `update()` without re-deriving it.
@@ -424,6 +424,11 @@ pub type SceneTransition = Option<Scene>;
 ///   - Default methods like [`Self::has_blocking_overlay`] mean scenes that
 ///     don't care just inherit the safe answer — no per-variant `_ => false`
 ///     enumeration.
+///   - Large payloads (e.g. [`GameplayScene`]) live in [`Box`] inside the
+///     [`Scene`] enum; the blanket [`SceneBehavior`] impl for [`Box`] in this
+///     module forwards every method to the inner value. **When you add a
+///     method here, add a forward in that impl too** (even if this trait
+///     provides a default).
 ///   - Adding a new scene = add it to the [`Scene`] enum and `impl
 ///     SceneBehavior for NewScene { ... }`. No other files change.
 #[enum_dispatch]
@@ -462,6 +467,46 @@ pub trait SceneBehavior {
     fn pause_options_overlay(&self) -> Option<&OptionsScene> {
         None
     }
+
+    /// Map logical face buttons to semantic [`UiAction`]s for the active scene.
+    ///
+    /// The main loop skips this when an overlay stack entry or blocking in-scene
+    /// modal is up. Default: no face bindings.
+    fn face_button_bindings(&self, _ctx: crate::ui::input::FaceBindingCtx) -> crate::ui::input::FaceButtonBindings {
+        crate::ui::input::FaceButtonBindings::default()
+    }
+}
+
+/// Transparent adapter so large scene payloads can live in [`Box`] without a
+/// per-scene hand-maintained forward impl.
+///
+/// **When adding a method to [`SceneBehavior`], forward it here too** — even
+/// if the trait supplies a default. Otherwise boxed variants (notably
+/// [`Scene::Gameplay`]) silently inherit the default instead of delegating to
+/// the inner scene.
+impl<T: SceneBehavior + ?Sized> SceneBehavior for Box<T> {
+    fn update(&mut self, ctx: UpdateCtx<'_>) -> SceneTransition {
+        (**self).update(ctx)
+    }
+
+    fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
+        (**self).draw_frame(ctx)
+    }
+
+    fn has_blocking_overlay(&self) -> bool {
+        (**self).has_blocking_overlay()
+    }
+
+    fn pause_options_overlay(&self) -> Option<&OptionsScene> {
+        (**self).pause_options_overlay()
+    }
+
+    fn face_button_bindings(
+        &self,
+        ctx: crate::ui::input::FaceBindingCtx,
+    ) -> crate::ui::input::FaceButtonBindings {
+        (**self).face_button_bindings(ctx)
+    }
 }
 
 /// The active scene. Enum dispatch — no `Box<dyn Trait>`.
@@ -477,10 +522,12 @@ pub enum Scene {
     Shop(ShopScene),
     Showcase(ShowcaseScene),
     PickBlind(PickBlindScene),
+    /// Boxed to keep the enum small; [`SceneBehavior`] for [`Box`] forwards to the inner scene.
     Gameplay(Box<GameplayScene>),
     GameOver(GameOverScene),
     Guide(GuideScene),
     MaterialViewer(MaterialViewerScene),
+    TileAnchorLab(TileAnchorLabScene),
     Options(OptionsScene),
     Collection(CollectionScene),
     TutorialCampaign(TutorialCampaignScene),
@@ -498,4 +545,24 @@ pub(crate) fn scene_options_menu() -> Scene {
 /// Return from profile picker to the Archive (collection) without a `profile_select` ↔ `collection` cycle.
 pub(crate) fn scene_collection_archive() -> Scene {
     Scene::Collection(CollectionScene::new())
+}
+
+#[cfg(test)]
+mod scene_behavior_tests {
+    use super::*;
+    use crate::ui::input::{FaceBindingCtx, UiAction};
+
+    #[test]
+    fn boxed_gameplay_forwards_face_button_bindings_through_scene_enum() {
+        let scene = Scene::Gameplay(Box::new(GameplayScene::new()));
+        let bindings = scene.face_button_bindings(FaceBindingCtx {
+            xy_quick_action: true,
+        });
+        assert_eq!(
+            bindings.west_press,
+            Some(UiAction::WestFacePress),
+            "boxed Gameplay must delegate face bindings, not use the trait default"
+        );
+        assert_eq!(bindings.north_press, Some(UiAction::NorthFacePress));
+    }
 }

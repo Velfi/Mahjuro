@@ -226,6 +226,20 @@ pub fn push_text_block(
 /// font size the line will actually render at — `font_px ≈ line_h * 0.99`,
 /// matching `rasterize_label`'s `height * 0.55` term against the line-box
 /// height of `line_h * 1.8` that `push_text_block` produces.
+/// Vertical step multiplier for [`wrap_text`] blocks (matches [`push_dense_text_lines`] in scenes).
+pub const PLAIN_TEXT_LINE_STEP_MUL: f32 = 1.22;
+
+#[inline]
+pub fn plain_text_line_step(font_px: f32) -> f32 {
+    font_px * PLAIN_TEXT_LINE_STEP_MUL
+}
+
+/// Height of wrapped plain text at `font_px` and `line_mul` (same math as scene body copy).
+pub fn plain_text_block_height(text: &str, max_width_px: f32, font_px: f32, line_mul: f32) -> f32 {
+    let wrapped = wrap_text(text, max_width_px, font_px / 0.99);
+    font_px * line_mul * wrapped.len().max(1) as f32
+}
+
 pub fn wrap_text(text: &str, max_width_px: f32, line_h: f32) -> Vec<String> {
     let Some(font) = load_ui_font() else {
         // No font loaded — don't crash, just return the input as one line.
@@ -243,26 +257,17 @@ pub fn wrap_text(text: &str, max_width_px: f32, line_h: f32) -> Vec<String> {
 
     // Process each explicit line separately so '\n' always forces a break.
     for paragraph in text.split('\n') {
-        let mut current = String::new();
-        let mut current_w = 0.0f32;
-
-        for word in paragraph.split_whitespace() {
-            let ww = word_w(word);
-            let need = if current.is_empty() { ww } else { space_w + ww };
-            if !current.is_empty() && current_w + need > max_width_px {
-                lines.push(std::mem::take(&mut current));
-                current = word.to_string();
-                current_w = ww;
-            } else {
-                if !current.is_empty() {
-                    current.push(' ');
-                    current_w += space_w;
-                }
-                current.push_str(word);
-                current_w += ww;
-            }
+        let words: Vec<&str> = paragraph.split_whitespace().collect();
+        if words.is_empty() {
+            lines.push(String::new());
+            continue;
         }
-        lines.push(current);
+        lines.extend(crate::ui::text_wrap::wrap_words_kp(
+            &words,
+            word_w,
+            max_width_px,
+            space_w,
+        ));
     }
     if lines.is_empty() {
         lines.push(String::new());

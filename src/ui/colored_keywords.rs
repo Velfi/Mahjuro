@@ -39,7 +39,115 @@ pub use crate::render::vocabulary_colors::COLORED_KEYWORD_TABLE;
 pub use crate::render::vocabulary_colors::color_for_token;
 pub use crate::render::vocabulary_colors::colored_token_segments;
 use crate::render::wgpu_renderer::{TextAlign, TextLabel};
+use crate::ui::text_wrap::{TextBreakUnit, break_units_kp};
 use crate::ui::widget::{self, TextStyle};
+
+/// Vertical step between colored keyword rows ([`push_colored_rows_left`], tooltips, guide panels).
+/// All measure helpers and push paths must use this — do not duplicate the multiplier elsewhere.
+pub const COLORED_ROW_LINE_STEP_MUL: f32 = 1.4;
+
+#[inline]
+pub fn colored_row_line_step(line_h: f32) -> f32 {
+    line_h * COLORED_ROW_LINE_STEP_MUL
+}
+
+/// Height of already-wrapped rows at `line_h`.
+pub fn colored_wrapped_rows_height(rows: &[Vec<(String, [f32; 4])>], line_h: f32) -> f32 {
+    colored_row_line_step(line_h) * rows.len().max(1) as f32
+}
+
+/// Measure a single left-aligned colored line (same wrap + step as [`push_colored_line_left`]).
+pub fn colored_line_block_height(
+    text: &str,
+    inner_w: f32,
+    line_h: f32,
+    default: [f32; 4],
+) -> f32 {
+    let wrapped = wrap_colored_words(text, inner_w, line_h, default);
+    colored_wrapped_rows_height(&wrapped, line_h)
+}
+
+/// Height of [`wrap_colored_text_multiline`] output (focus inspect, `\n` in tooltips).
+pub fn colored_multiline_text_height(
+    text: &str,
+    inner_w: f32,
+    line_h: f32,
+    default: [f32; 4],
+) -> f32 {
+    let lines = wrap_colored_text_multiline(text, inner_w, line_h, default);
+    colored_wrapped_rows_height(&lines, line_h)
+}
+
+/// Sum of [`colored_line_block_height`] for multiple single-line strings.
+pub fn colored_lines_block_height(
+    lines: &[&str],
+    inner_w: f32,
+    line_h: f32,
+    default: [f32; 4],
+) -> f32 {
+    lines
+        .iter()
+        .map(|line| colored_line_block_height(line, inner_w, line_h, default))
+        .sum()
+}
+
+/// Pre-measured colored line — use [`Self::measure`] then [`Self::push_left`] so layout cannot drift.
+pub struct ColoredLineBlock {
+    wrapped: Vec<Vec<(String, [f32; 4])>>,
+    line_h: f32,
+}
+
+impl ColoredLineBlock {
+    pub fn measure(text: &str, inner_w: f32, line_h: f32, default: [f32; 4]) -> Self {
+        Self {
+            wrapped: wrap_colored_words(text, inner_w, line_h, default),
+            line_h,
+        }
+    }
+
+    pub fn height(&self) -> f32 {
+        colored_wrapped_rows_height(&self.wrapped, self.line_h)
+    }
+
+    pub fn push_left(
+        &self,
+        out: &mut Vec<TextLabel>,
+        text_left: f32,
+        top_y: f32,
+        inner_w: f32,
+        fallback_plain: &str,
+        fallback_color: [f32; 4],
+    ) {
+        push_colored_rows_left(
+            out,
+            ColoredRowsLayout {
+                text_left,
+                top_y,
+                inner_w,
+                line_h: self.line_h,
+                fallback_plain,
+                fallback_color,
+            },
+            &self.wrapped,
+        );
+    }
+}
+
+/// Wrap, push, and return drawn height (always equals [`colored_line_block_height`] for the same inputs).
+pub fn push_colored_line_left(
+    out: &mut Vec<TextLabel>,
+    text_left: f32,
+    top_y: f32,
+    inner_w: f32,
+    line_h: f32,
+    text: &str,
+    default: [f32; 4],
+) -> f32 {
+    let block = ColoredLineBlock::measure(text, inner_w, line_h, default);
+    let h = block.height();
+    block.push_left(out, text_left, top_y, inner_w, text, default);
+    h
+}
 
 fn word_width(font: &fontdue::Font, word: &str, font_px: f32) -> f32 {
     word.chars()
@@ -49,7 +157,9 @@ fn word_width(font: &fontdue::Font, word: &str, font_px: f32) -> f32 {
 
 /// Line-wrap `text` into rows of `(word, color)` chunks (spaces omitted as
 /// separate chunks; a following space is implied between words except at
-/// line breaks). Uses the same greedy width heuristic as [`crate::ui::widget::wrap_text`].
+/// line breaks). Words are atomic — punctuation split for tinting never
+/// becomes its own line — and breaks are chosen with TeX-style demerits
+/// ([`crate::ui::text_wrap::break_units_kp`]).
 pub fn wrap_colored_words(
     text: &str,
     max_width_px: f32,
@@ -70,46 +180,35 @@ pub fn wrap_colored_words(
         return vec![vec![(text.to_string(), default)]];
     }
 
-    let mut lines: Vec<Vec<(String, [f32; 4])>> = Vec::new();
-    let mut current: Vec<(String, [f32; 4])> = Vec::new();
-    let mut line_w = 0.0_f32;
+    let units: Vec<TextBreakUnit<Vec<(String, [f32; 4])>>> = words
+        .iter()
+        .map(|w| {
+            let segments = colored_token_segments(w, default);
+            let width = segments
+                .iter()
+                .map(|(seg, _)| word_width(&font, seg, font_px))
+                .sum();
+            TextBreakUnit {
+                width,
+                payload: segments,
+            }
+        })
+        .collect();
 
-    for w in words.iter() {
-        let segments = colored_token_segments(w, default);
-        for (si, (seg, col)) in segments.iter().enumerate() {
-            let w_w = word_width(&font, seg, font_px);
-            if w_w > max_width_px {
-                if !current.is_empty() {
-                    lines.push(std::mem::take(&mut current));
+    let broken = break_units_kp(&units, max_width_px, space_w);
+    broken
+        .into_iter()
+        .map(|word_segments| {
+            let mut line: Vec<(String, [f32; 4])> = Vec::new();
+            for (wi, segments) in word_segments.into_iter().enumerate() {
+                if wi > 0 {
+                    line.push((" ".to_string(), default));
                 }
-                lines.push(vec![(seg.clone(), *col)]);
-                line_w = 0.0;
-                continue;
+                line.extend(segments);
             }
-            let needs_word_gap = si == 0 && !current.is_empty();
-            let extra = if current.is_empty() {
-                w_w
-            } else if needs_word_gap {
-                space_w + w_w
-            } else {
-                w_w
-            };
-            if !current.is_empty() && line_w + extra > max_width_px {
-                lines.push(std::mem::take(&mut current));
-                line_w = 0.0;
-            }
-            if needs_word_gap {
-                current.push((" ".to_string(), default));
-                line_w += space_w;
-            }
-            current.push((seg.clone(), *col));
-            line_w += w_w;
-        }
-    }
-    if !current.is_empty() {
-        lines.push(current);
-    }
-    lines
+            line
+        })
+        .collect()
 }
 
 /// Same line breaks as [`widget::wrap_text`] (explicit `\n` splits paragraphs),
@@ -140,10 +239,9 @@ pub fn wrap_colored_text_multiline(
     out
 }
 
-/// Total height for [`wrap_colored_text_multiline`] at `line_h` (same `1.4` step as tooltips).
+/// Total height for [`wrap_colored_text_multiline`] at `line_h`.
 pub fn colored_multiline_block_height(line_count: usize, line_h: f32) -> f32 {
-    let line_step = line_h * 1.4;
-    line_count as f32 * line_step
+    colored_row_line_step(line_h) * line_count as f32
 }
 
 /// Layout for [`push_colored_rows_left`] / [`push_colored_rows_in_width`].
@@ -171,7 +269,7 @@ pub fn push_colored_rows_left(
         fallback_color,
     } = layout;
     let font_px = line_h;
-    let line_step = line_h * 1.4;
+    let line_step = colored_row_line_step(line_h);
     let Some(font) = load_ui_font() else {
         let wrapped = widget::wrap_text(fallback_plain, inner_w, line_h);
         let joined = wrapped.join("\n");
@@ -223,7 +321,7 @@ pub fn push_colored_rows_in_width(
         fallback_color,
     } = layout;
     let font_px = line_h;
-    let line_step = line_h * 1.4;
+    let line_step = colored_row_line_step(line_h);
     let Some(font) = load_ui_font() else {
         let wrapped = widget::wrap_text(fallback_plain, inner_w, line_h);
         let joined = wrapped.join("\n");
@@ -295,7 +393,7 @@ pub fn push_colored_text_block(
     let inner_h = (h - 2.0 * pad).max(1.0);
     let line_h = crate::render::theme::typography::size(style.tier, window_h);
     let font_px = line_h;
-    let line_step = line_h * 1.4;
+    let line_step = colored_row_line_step(line_h);
     let max_lines = ((inner_h / line_step).floor() as usize).max(1);
 
     let lines = wrap_colored_words(text, inner_w, line_h, style.color);
@@ -344,5 +442,57 @@ pub fn push_colored_text_block(
             });
             cx += piece_w;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::render::theme::color;
+
+    #[test]
+    fn push_colored_line_left_matches_colored_line_block_height() {
+        let text = "Manzu — Characters, ranks 1–9.";
+        let inner_w = 420.0;
+        let line_h = 22.0;
+        let default = color::PARCHMENT;
+        let measured = colored_line_block_height(text, inner_w, line_h, default);
+        let mut labels = Vec::new();
+        let drawn =
+            push_colored_line_left(&mut labels, 0.0, 0.0, inner_w, line_h, text, default);
+        assert!(
+            (measured - drawn).abs() < 0.01,
+            "measure/draw height drift: measured={measured} drawn={drawn}"
+        );
+    }
+
+    #[test]
+    fn colored_line_block_height_uses_row_step_multiplier() {
+        let line_h = 20.0;
+        let h = colored_line_block_height("foo bar", 800.0, line_h, [1.0; 4]);
+        assert!((h - colored_row_line_step(line_h)).abs() < 0.01);
+    }
+
+    #[test]
+    fn colored_wrap_keeps_trailing_punct_with_word() {
+        let font_px = 28.0;
+        let line_h = font_px / 0.99;
+        let text = "An East Wind is blowing!";
+        let font = load_ui_font().expect("ui font");
+        let max_w = word_width(&font, "An East Wind is blowing", font_px) + 2.0;
+        let default = [1.0, 1.0, 1.0, 1.0];
+        let lines = wrap_colored_words(text, max_w, line_h, default);
+        let joined: Vec<String> = lines
+            .iter()
+            .map(|row| row.iter().map(|(s, _)| s.as_str()).collect::<String>())
+            .collect();
+        assert!(
+            joined.iter().any(|l| l.contains('!')),
+            "expected ! on same line as blowing, got {joined:?}"
+        );
+        assert!(
+            !joined.iter().any(|l| l.trim() == "!"),
+            "orphan ! line: {joined:?}"
+        );
     }
 }

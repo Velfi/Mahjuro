@@ -75,7 +75,6 @@ pub fn push_gameplay_action_prompts(
         show_play_legend,
         hud_text,
     } = input;
-    let _ = (show_discard_legend, show_play_legend);
     let h = ctx.layout.window_h;
     let w = ctx.layout.window_w;
 
@@ -100,8 +99,6 @@ pub fn push_gameplay_action_prompts(
 
     let rects: [(f32, f32, f32, f32); 3] = [discard_btn_rect, play_btn_rect, trigger_btn_rect];
 
-    // Context-only prompt row: show actionable cash-in only. Discard / Play are
-    // baseline gameplay interactions and stay unlabeled to reduce hint noise.
     let mut visible: [usize; 3] = [0; 3];
     let mut n_visible = 0usize;
     for (i, rect) in rects.iter().enumerate() {
@@ -109,10 +106,13 @@ pub fn push_gameplay_action_prompts(
         if dw <= 1.0 || dh <= 1.0 {
             continue;
         }
-        if i != 2 {
-            continue;
-        }
-        if i == 2 && !cash_in_enabled {
+        let show = match i {
+            0 => show_discard_legend,
+            1 => show_play_legend,
+            2 => cash_in_enabled,
+            _ => false,
+        };
+        if !show {
             continue;
         }
         visible[n_visible] = i;
@@ -125,13 +125,7 @@ pub fn push_gameplay_action_prompts(
     let entries: Vec<ColumnHintEntry> = visible
         .iter()
         .take(n_visible)
-        .map(|&i| {
-            let mut entry = all_entries[i].clone();
-            if i == 2 && !cash_in_enabled {
-                entry = entry.disabled();
-            }
-            entry
-        })
+        .map(|&i| all_entries[i].clone())
         .collect();
 
     let layout = ColumnHintLayout::gameplay_floating_band(w, h, n_visible);

@@ -245,10 +245,6 @@ impl WgpuRenderer {
         let pl_w = self.size.width.max(1) as f32;
         let pl_h = self.size.height.max(1) as f32;
         let time_s = self.creation_time.elapsed().as_secs_f32();
-        let has_showcase_tiles = frame
-            .cmds
-            .iter()
-            .any(|c| matches!(c, crate::render::draw_cmd::DrawCmd::ShowcaseTileBatch(_)));
         let h = &frame.showcase_render_hints;
         // Keep shop inspect in the same lit-mesh GLTF intensity band as the
         // storeroom baseline so inspect entry does not pop brightness.
@@ -276,23 +272,9 @@ impl WgpuRenderer {
                 cam,
             })
         };
-        let point_lights_buf = match (self.active_scene_key, frame.camera_override.as_ref()) {
-            // Pack closeup has no showcase tiles; lights must still use the same
-            // ray → plane_z mapping as perspective `Object3d` / showcase placement.
-            (Some("tile_pack_celebration"), Some(cam)) => shop_camera_punctual(cam),
-            (Some("showcase"), Some(cam))
-                if h.object3d_use_camera_ray_plane_z
-                    || h.tile_pack_celebration_tonemap
-                    || (h.showcase_tiles_use_camera_ray_plane_z && has_showcase_tiles) =>
-            {
-                shop_camera_punctual(cam)
-            }
-            (Some("shop"), Some(cam)) if has_showcase_tiles => shop_camera_punctual(cam),
-            // Pick-blind always uses a perspective `camera_override` (hallway GLB).
-            // Smooth fills must use the same ray → plane_z mapping as the env mesh;
-            // `pixel_to_world` is not the inverse of that projection (see `world_space.rs`).
-            (Some("pick_blind"), Some(cam)) => shop_camera_punctual(cam),
-            (Some("main_menu_exterior"), Some(cam)) => shop_camera_punctual(cam),
+        let use_ray_plane = h.layout_uses_ray_plane(self.active_scene_key);
+        let point_lights_buf = match (use_ray_plane, frame.camera_override.as_ref()) {
+            (true, Some(cam)) => shop_camera_punctual(cam),
             _ => PointLightsBuf::from_scene_punctual(&punctual_bake),
         };
         self.queue.write_buffer(
@@ -302,15 +284,10 @@ impl WgpuRenderer {
         );
 
         // Upload spotlights (tile + `lit_mesh` group 3).
-        let spot_cam = match self.active_scene_key {
-            Some("tile_pack_celebration") => frame.camera_override.as_ref(),
-            Some("showcase")
-                if frame.showcase_render_hints.object3d_use_camera_ray_plane_z
-                    || frame.showcase_render_hints.tile_pack_celebration_tonemap =>
-            {
-                frame.camera_override.as_ref()
-            }
-            _ => None,
+        let spot_cam = if use_ray_plane {
+            frame.camera_override.as_ref()
+        } else {
+            None
         };
         self.queue.write_buffer(
             &self.spot_lights_buffer,

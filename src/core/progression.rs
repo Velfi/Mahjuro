@@ -901,6 +901,206 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
     }
 }
 
+/// Synthetic per-blind scores for screenshot/demo chronicle history.
+fn synthetic_blind_scores_for_demo(
+    total: u64,
+    final_ante: u32,
+    outcome: RunOutcome,
+    failing_round: u64,
+) -> Vec<u64> {
+    let cleared_antes = match outcome {
+        RunOutcome::Victory => final_ante,
+        RunOutcome::Defeat { .. } => final_ante.saturating_sub(1),
+    };
+    let mut n_blinds = cleared_antes.saturating_mul(3);
+    if matches!(outcome, RunOutcome::Defeat { .. }) {
+        n_blinds += 1;
+    }
+    n_blinds = n_blinds.max(1);
+    let mut scores = Vec::with_capacity(n_blinds as usize);
+    let mut rem = total;
+    for i in 0..n_blinds {
+        if i + 1 == n_blinds {
+            if matches!(outcome, RunOutcome::Defeat { .. }) {
+                scores.push(failing_round.max(1));
+            } else {
+                scores.push(rem.max(1));
+            }
+        } else {
+            let weight = 80 + (i as u64 * 37 % 120);
+            let share = (total * weight / (weight + (n_blinds - i) as u64 * 90)).max(1);
+            let capped = share.min(rem.saturating_sub((n_blinds - i - 1) as u64));
+            scores.push(capped);
+            rem = rem.saturating_sub(capped);
+        }
+    }
+    scores
+}
+
+impl PlayerProgress {
+    /// Fill bosses, yaku, talismans, and sample run history for collection/chronicle
+    /// screenshots. Never persisted — headless harness only.
+    pub fn apply_screenshot_collection_demo(
+        &mut self,
+        signature_hand: Vec<crate::core::tile::Tile>,
+    ) {
+        use crate::core::boss::all_bosses;
+        use crate::core::boss::BossKind;
+        use crate::core::talisman::TalismanKind;
+
+        self.runs_completed = 100;
+        self.has_won = true;
+        for yk in YakuKind::all() {
+            *self.yaku_times_scored.entry(*yk).or_insert(0) += 3;
+        }
+        for def in all_bosses() {
+            *self.boss_times_encountered.entry(def.kind).or_insert(0) += 5;
+            *self.boss_times_defeated.entry(def.kind).or_insert(0) += 2;
+        }
+        for tk in TalismanKind::all() {
+            *self.talisman_times_purchased.entry(*tk).or_insert(0) += 1;
+        }
+        if !self.run_history.is_empty() {
+            Self::ensure_screenshot_signature_hand(self, signature_hand);
+            return;
+        }
+
+        let mut yaku_mix = HashMap::default();
+        yaku_mix.insert(YakuKind::Tanyao, 6u32);
+        yaku_mix.insert(YakuKind::Yakuhai, 4u32);
+        yaku_mix.insert(YakuKind::Honitsu, 2u32);
+        let samples: [(RunOutcome, u64, u64, &str); 10] = [
+            (RunOutcome::Victory, 4200, 880, "Tanyao"),
+            (
+                RunOutcome::Defeat {
+                    reason: GameOverReason::OutOfPlays,
+                },
+                1800,
+                620,
+                "Tanyao",
+            ),
+            (RunOutcome::Victory, 9100, 1200, "Honitsu"),
+            (
+                RunOutcome::Defeat {
+                    reason: GameOverReason::NoActionsRemaining,
+                },
+                2400,
+                540,
+                "Pair",
+            ),
+            (RunOutcome::Victory, 15600, 2100, "Chinitsu"),
+            (RunOutcome::Victory, 6800, 960, "Toitoi"),
+            (
+                RunOutcome::Defeat {
+                    reason: GameOverReason::OutOfPlays,
+                },
+                3100,
+                710,
+                "Tanyao",
+            ),
+            (RunOutcome::Victory, 11200, 1450, "FullHand"),
+            (
+                RunOutcome::Defeat {
+                    reason: GameOverReason::NoActionsRemaining,
+                },
+                5200,
+                980,
+                "Yakuhai",
+            ),
+            (RunOutcome::Victory, 7400, 1100, "SanshokuDoujun"),
+        ];
+        let base_ts = 1_700_000_000u64;
+        for (i, (outcome, total, best_struct, struct_name)) in samples.into_iter().enumerate() {
+            let hand_tiles = if struct_name == "Toitoi" && !signature_hand.is_empty() {
+                signature_hand.clone()
+            } else {
+                Vec::new()
+            };
+            let final_ante = 4 + (i as u32 % 4);
+            let blind_scores =
+                synthetic_blind_scores_for_demo(total, final_ante, outcome, total / 3);
+            let chronicle = crate::core::run_chronicle::RunChronicle {
+                blind_scores,
+                ..Default::default()
+            };
+            self.run_history.push(RunRecord {
+                timestamp_unix: base_ts + i as u64 * 86_400,
+                run_number: (i + 1) as u32,
+                outcome,
+                final_ante,
+                final_blind: if i % 3 == 0 {
+                    BlindKind::Boss
+                } else {
+                    BlindKind::Big
+                },
+                final_boss: if i % 3 == 0 {
+                    Some(BossKind::TaxCollector)
+                } else {
+                    None
+                },
+                round_score: total / 3,
+                target_score: 900,
+                total_score_earned: total,
+                final_gold: 12,
+                plays_remaining: 1,
+                discards_remaining: 2,
+                plays_max: 4,
+                discards_max: 4,
+                tiles_played: 80 + i as u32 * 4,
+                tiles_discarded: 20 + i as u32,
+                times_restocked: (i % 2) as u32,
+                best_structure_score: best_struct,
+                best_structure_name: struct_name.into(),
+                yaku_times_played: yaku_mix.clone(),
+                relics_owned: vec![],
+                consumables_owned: vec![],
+                tile_material: TileMaterial::Bamboo,
+                stake: Stake::Spring,
+                tutorial_run: false,
+                memorial_kind: None,
+                best_hand_tiles: hand_tiles,
+                score_after_ante: vec![(final_ante, total)],
+                chronicle,
+                duration_secs: 600 + i as u32 * 120,
+            });
+        }
+        self.high_scores = vec![15600, 11200, 9100];
+        if !signature_hand.is_empty()
+            && let Some(idx) = self
+                .run_history
+                .iter()
+                .enumerate()
+                .max_by_key(|(_, r)| r.best_structure_score)
+                .map(|(i, _)| i)
+        {
+            self.run_history[idx].best_hand_tiles = signature_hand.clone();
+        }
+        Self::ensure_screenshot_signature_hand(self, signature_hand);
+    }
+
+    fn ensure_screenshot_signature_hand(
+        progress: &mut Self,
+        signature_hand: Vec<crate::core::tile::Tile>,
+    ) {
+        if signature_hand.is_empty() {
+            return;
+        }
+        if let Some(idx) = progress
+            .run_history
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| !r.tutorial_run)
+            .max_by_key(|(_, r)| r.best_structure_score)
+            .map(|(i, _)| i)
+        {
+            let rec = &mut progress.run_history[idx];
+            if rec.best_hand_tiles.is_empty() {
+                rec.best_hand_tiles = signature_hand;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

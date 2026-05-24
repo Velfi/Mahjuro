@@ -56,11 +56,6 @@ impl RunState {
             }
         };
         let sets = self.pick_best_decomposition(sets, &scoring_tiles, &selected_tiles);
-        let meld_kinds: Vec<MeldKind> = sets.iter().map(|s| s.kind).collect();
-        if self.onboarding_validate_melds(&meld_kinds).is_err() {
-            bus.push(GameEvent::InvalidAction);
-            return 0;
-        }
 
         if scoring_tiles != selected_tiles && self.relics.has(RelicId::JokerTile) {
             self.joker_used = true;
@@ -689,7 +684,7 @@ impl RunState {
 
     /// Banked meld chips in structure (for HUD tiers).
     pub fn structure_banked_meld_chips(&self) -> i32 {
-        banked_meld_chips(&self.structure_sets)
+        banked_meld_chips(&self.structure_tiles, &self.structure_sets)
     }
 
     /// Whether [`Self::trigger_structure_manual`] can score (structure non-empty and rules allow).

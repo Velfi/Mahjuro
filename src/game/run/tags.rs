@@ -65,15 +65,15 @@ impl RunState {
                     let idx = rng.random_range(0..pool.len());
                     let z = pool.remove(idx);
                     let yaku = z.yaku();
-                    let new_level = self.yaku_levels.level_up(yaku);
+                    let new_level = self.yaku_levels.level_up_for_zodiac(z);
                     self.pending_zodiac_celebrations.push((z, yaku, new_level));
                     granted += 1;
                 }
-                return match granted {
+                match granted {
                     0 => "No zodiac",
                     1 => "Zodiac activated",
                     _ => "2 zodiacs activated",
-                };
+                }
             }
             TagKind::BonusPlay => {
                 self.tag_bonus_plays += 1;

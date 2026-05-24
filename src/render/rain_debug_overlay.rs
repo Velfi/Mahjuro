@@ -475,8 +475,12 @@ impl RainDebugOverlay {
             ..Default::default()
         });
 
-        for i in self.scroll_row..(self.scroll_row + VISIBLE_ROWS).min(RAIN_DEBUG_SLIDER_COUNT) {
-            let (name, min, max, _) = RAIN_DEBUG_ROW_META[i];
+        for (i, (name, min, max, _)) in RAIN_DEBUG_ROW_META
+            .iter()
+            .enumerate()
+            .skip(self.scroll_row)
+            .take(VISIBLE_ROWS.min(RAIN_DEBUG_SLIDER_COUNT.saturating_sub(self.scroll_row)))
+        {
             let is_focused = self.cursor == i;
             let v = self.row_value(i);
 

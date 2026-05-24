@@ -118,22 +118,18 @@ impl WgpuRenderer {
                         obj.anim_id,
                     );
                     use crate::render::draw_cmd::Object3dKind;
-                    let use_ray_plane =
-                        match (self.active_scene_key, frame.camera_override.as_ref()) {
-                            (Some("tile_pack_celebration"), Some(_)) => true,
-                            (Some("showcase"), Some(_)) => {
-                                frame.showcase_render_hints.object3d_use_camera_ray_plane_z
-                            }
-                            _ => false,
-                        };
-                    let center = if use_ray_plane && let Some(cam) = frame.camera_override.as_ref()
-                    {
-                        crate::render::world_space::world_on_camera_ray_plane_z(
-                            w, h, cam, obj.pos[0], obj.pos[1], obj.pos[2],
-                        )
-                    } else {
-                        pixel_to_world(w, h, obj.pos[0], obj.pos[1], obj.pos[2])
-                    };
+                    let use_ray_plane = frame
+                        .showcase_render_hints
+                        .object3d_uses_ray_plane(self.active_scene_key);
+                    let center = crate::render::world_space::layout_anchor_to_world(
+                        w,
+                        h,
+                        frame.camera_override.as_ref(),
+                        obj.pos[0],
+                        obj.pos[1],
+                        obj.pos[2],
+                        use_ray_plane,
+                    );
                     let model = translate_rot_scale(
                         center,
                         obj.rotation_matrix(),
@@ -499,7 +495,6 @@ impl WgpuRenderer {
                             glow,
                             silhouette,
                             debuffed,
-                            pick_id,
                         } => {
                             if obj3d_relic_slot >= MAX_RELIC_SLOTS {
                                 continue;
@@ -620,10 +615,6 @@ impl WgpuRenderer {
                                 self.relic_slot_texture[slot_i] = want_tex;
                             }
                             self.last_relic_models.push((model, *relic_id));
-                            if let Some(pid) = pick_id {
-                                self.last_pickable_relic_models
-                                    .push((*pid, model, *relic_id));
-                            }
                             let projected_rect = project_unit_cube_rect(model);
                             self.proj.relic_rects.push(projected_rect);
                             if g > 0.0 {
@@ -1562,7 +1553,7 @@ impl WgpuRenderer {
                                     visible_slots.remove(0);
                                 }
                             }
-                            for (_stick_i, &k) in visible_slots.iter().enumerate() {
+                            for &k in visible_slots.iter() {
                                 if obj3d_tally_stick_cursor + 1 >= MAX_TALLY_STICK_SLOTS * 2 {
                                     break;
                                 }

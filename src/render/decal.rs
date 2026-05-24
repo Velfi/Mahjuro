@@ -10,7 +10,7 @@
 
 use crate::core::relic::RelicFlavorSpan;
 use crate::core::tile::{Suit, Tile, TileEnhancement};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::{Mutex, OnceLock};
 
 // ---------------------------------------------------------------------------
@@ -259,7 +259,7 @@ fn blit_set_decal(dst: &mut [u8], dst_w: u32, dst_h: u32, tile: &Tile, tile_set:
         return false;
     };
     let Some(&(ox, oy)) = atlas.origins.get(&code) else {
-        log::debug!("tile code '{code}' missing from atlas '{tile_set}'");
+        log_missing_tile_code_once(tile_set, &code);
         return false;
     };
     let _ = atlas.columns; // kept in the struct for debugging / future packing
@@ -285,6 +285,17 @@ fn blit_set_decal(dst: &mut [u8], dst_w: u32, dst_h: u32, tile: &Tile, tile_set:
         }
     }
     true
+}
+
+#[inline]
+fn log_missing_tile_code_once(tile_set: &str, code: &str) {
+    static MISSING_TILE_CODE_LOGGED: OnceLock<Mutex<FxHashSet<String>>> = OnceLock::new();
+    let key = format!("{tile_set}|{code}");
+    let cache = MISSING_TILE_CODE_LOGGED.get_or_init(|| Mutex::new(FxHashSet::default()));
+    let mut logged = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if logged.insert(key) {
+        log::debug!("tile code '{code}' missing from atlas '{tile_set}'");
+    }
 }
 
 /// Rasterise a `width × height` RGBA8 face decal that mirrors the 2D tile layout:
@@ -972,9 +983,9 @@ fn fit_plaque_text(
 }
 
 /// Word-wrap `text` to the given pixel width at `font_px`. Treats explicit
-/// `\n` as hard line breaks and otherwise greedy-wraps on whitespace. If a
-/// single word is wider than `max_w`, it's placed on its own line (we don't
-/// break inside words — the size-fit loop will shrink further instead).
+/// `\n` as hard line breaks and otherwise wraps on whitespace with TeX-style
+/// demerit minimization ([`crate::ui::text_wrap::break_units_kp`]). Words are
+/// atomic — we don't break inside words; the size-fit loop shrinks instead.
 fn wrap_lines(
     font: &fontdue::Font,
     emoji_font: Option<&fontdue::Font>,
@@ -982,27 +993,25 @@ fn wrap_lines(
     font_px: f32,
     max_w: f32,
 ) -> Vec<String> {
+    use crate::ui::text_wrap::{TextBreakUnit, break_units_kp};
+
+    let space_w = advance_width(font, emoji_font, " ", font_px);
     let mut out: Vec<String> = Vec::new();
     for hard in text.split('\n') {
-        let mut line = String::new();
-        for word in hard.split_whitespace() {
-            let candidate = if line.is_empty() {
-                word.to_string()
-            } else {
-                format!("{} {}", line, word)
-            };
-            if advance_width(font, emoji_font, &candidate, font_px) <= max_w || line.is_empty() {
-                line = candidate;
-            } else {
-                out.push(std::mem::take(&mut line));
-                line = word.to_string();
-            }
-        }
-        if !line.is_empty() {
-            out.push(line);
-        } else if hard.is_empty() {
-            // Preserve blank lines from explicit `\n\n` runs.
+        let words: Vec<&str> = hard.split_whitespace().collect();
+        if words.is_empty() {
             out.push(String::new());
+            continue;
+        }
+        let units: Vec<TextBreakUnit<String>> = words
+            .iter()
+            .map(|w| TextBreakUnit {
+                width: advance_width(font, emoji_font, w, font_px),
+                payload: (*w).to_string(),
+            })
+            .collect();
+        for line in break_units_kp(&units, max_w, space_w) {
+            out.push(line.join(" "));
         }
     }
     if out.is_empty() {
@@ -1793,7 +1802,7 @@ fn noto_sans_symbols_font() -> Option<&'static fontdue::Font> {
 
 /// Load the UI font and return a ready-to-use `fontdue::Font`.
 /// Cached so the font is only parsed once.
-pub fn load_ui_font() -> Option<fontdue::Font> {
+pub fn load_ui_font() -> Option<&'static fontdue::Font> {
     static CACHE: std::sync::OnceLock<Option<fontdue::Font>> = std::sync::OnceLock::new();
     CACHE
         .get_or_init(|| {
@@ -1801,11 +1810,11 @@ pub fn load_ui_font() -> Option<fontdue::Font> {
                 fontdue::Font::from_bytes(b.as_slice(), fontdue::FontSettings::default()).ok()
             })
         })
-        .clone()
+        .as_ref()
 }
 
 /// Xanh Mono for tabular Chronicle copy (run receipt columns, KPI values, chart ticks).
-pub fn load_mono_font() -> Option<fontdue::Font> {
+pub fn load_mono_font() -> Option<&'static fontdue::Font> {
     static CACHE: std::sync::OnceLock<Option<fontdue::Font>> = std::sync::OnceLock::new();
     CACHE
         .get_or_init(|| {
@@ -1814,26 +1823,27 @@ pub fn load_mono_font() -> Option<fontdue::Font> {
                 fontdue::Font::from_bytes(file.data.as_ref(), fontdue::FontSettings::default()).ok()
             })
         })
-        .clone()
+        .as_ref()
 }
 
 /// Instrument Serif italic for UI (relic inspect flavor, etc.). Falls back to
 /// [`load_ui_font`] when the italic file is missing.
-pub fn load_ui_font_italic() -> Option<fontdue::Font> {
+pub fn load_ui_font_italic() -> Option<&'static fontdue::Font> {
     static CACHE: std::sync::OnceLock<Option<fontdue::Font>> = OnceLock::new();
-    CACHE
-        .get_or_init(|| {
-            let path = "fonts/Instrument_Serif/InstrumentSerif-Italic.ttf";
-            if let Some(file) = crate::asset_path::get(path)
-                && let Ok(f) =
-                    fontdue::Font::from_bytes(file.data.as_ref(), fontdue::FontSettings::default())
-            {
-                return Some(f);
-            }
-            log::debug!("decal: italic UI font missing at {path}, using regular");
-            load_ui_font()
-        })
-        .clone()
+    match CACHE.get_or_init(|| {
+        let path = "fonts/Instrument_Serif/InstrumentSerif-Italic.ttf";
+        if let Some(file) = crate::asset_path::get(path)
+            && let Ok(f) =
+                fontdue::Font::from_bytes(file.data.as_ref(), fontdue::FontSettings::default())
+        {
+            return Some(f);
+        }
+        log::debug!("decal: italic UI font missing at {path}, using regular");
+        None
+    }) {
+        Some(font) => Some(font),
+        None => load_ui_font(),
+    }
 }
 
 /// Horizontal alignment hint for [`rasterize_label_styled`].

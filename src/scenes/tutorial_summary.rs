@@ -7,6 +7,7 @@ use crate::persistence;
 use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
+use crate::ui::focus_nav;
 use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
@@ -33,10 +34,9 @@ pub struct TutorialSummaryScene {
 
 impl TutorialSummaryScene {
     pub fn new(won: bool) -> Self {
-        Self {
-            won,
-            tree: TreeState::new(),
-        }
+        let mut tree = TreeState::new();
+        tree.set_focus(SummaryAction::Continue.id());
+        Self { won, tree }
     }
 
     fn flat_items(&self, w: f32, h: f32) -> Vec<FlatItem<SummaryAction>> {
@@ -243,9 +243,26 @@ impl SceneBehavior for TutorialSummaryScene {
         let mut btn_quads = Vec::new();
         let mut junk_buttons = Vec::new();
         for item in &items {
-            let (label, variant) = match item.action {
-                SummaryAction::Guide => ("Guide", ButtonVariant::Default),
-                SummaryAction::Continue => ("Continue", ButtonVariant::Primary),
+            let focused = self.tree.focused() == Some(item.id);
+            let (label, variant, state) = match item.action {
+                SummaryAction::Guide => (
+                    "Guide",
+                    ButtonVariant::Default,
+                    if focused {
+                        ButtonState::Hover
+                    } else {
+                        ButtonState::Rest
+                    },
+                ),
+                SummaryAction::Continue => (
+                    "Continue",
+                    ButtonVariant::Primary,
+                    if focused {
+                        ButtonState::Hover
+                    } else {
+                        ButtonState::Rest
+                    },
+                ),
             };
             crate::ui::widget::push_button(
                 &mut btn_quads,
@@ -255,11 +272,15 @@ impl SceneBehavior for TutorialSummaryScene {
                     rect: item.rect,
                     label,
                     variant,
-                    state: ButtonState::Rest,
+                    state,
                     action: UiAction::Confirm,
                 },
             );
+            if focused {
+                focus_nav::push_focus_ring(item.rect, scale, w, h, &mut btn_quads);
+            }
         }
+        junk_buttons.clear();
         frame.quads(btn_quads);
         frame.texts(texts);
         self.tree.register_flat_buttons(&items, &mut frame.buttons);

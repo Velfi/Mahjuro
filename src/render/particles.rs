@@ -144,11 +144,10 @@ fn segment_hit_rain_meshes(
 ) -> Option<Vec3> {
     let mut best_t: Option<f32> = None;
     for mesh in meshes {
-        if let Some(hit) = raycast::ray_hit_trimesh(&mesh.triangles, model, origin, dir_unit) {
-            if hit.t > 1e-5 && hit.t <= max_t {
+        if let Some(hit) = raycast::ray_hit_trimesh(&mesh.triangles, model, origin, dir_unit)
+            && hit.t > 1e-5 && hit.t <= max_t {
                 best_t = Some(best_t.map_or(hit.t, |bt| bt.min(hit.t)));
             }
-        }
     }
     best_t.map(|t| origin + dir_unit * t)
 }

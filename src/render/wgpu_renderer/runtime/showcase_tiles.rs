@@ -143,49 +143,18 @@ impl WgpuRenderer {
                             make_showcase_tile_gpu(&ctx, self.tile_base_color_factor, &p.tile);
                     }
 
-                    // Build model matrix from the placement's explicit 3D transform.
-                    // Shop uses a perspective camera; layout `(px, py, lift)` must match the same
-                    // ray → `plane_z` hit as `Object3d` anchors (`world_on_camera_ray_plane_z`),
-                    // not flat `pixel_to_world`, or celebration tiles miss the frustum.
-                    let hints = frame.showcase_render_hints;
-                    let pack_celeb = hints.tile_pack_celebration_tonemap;
-                    let center = match (self.active_scene_key, frame.camera_override.as_ref()) {
-                        (Some("shop") | Some("tile_pack_celebration"), Some(cam)) => {
-                            crate::render::world_space::world_on_camera_ray_plane_z(
-                                w,
-                                h,
-                                cam,
-                                p.center_pos[0],
-                                p.center_pos[1],
-                                p.center_pos[2],
-                            )
-                        }
-                        (Some("showcase"), Some(cam))
-                            if hints.showcase_tiles_use_camera_ray_plane_z || pack_celeb =>
-                        {
-                            crate::render::world_space::world_on_camera_ray_plane_z(
-                                w,
-                                h,
-                                cam,
-                                p.center_pos[0],
-                                p.center_pos[1],
-                                p.center_pos[2],
-                            )
-                        }
-                        (_, Some(cam)) if pack_celeb => {
-                            crate::render::world_space::world_on_camera_ray_plane_z(
-                                w,
-                                h,
-                                cam,
-                                p.center_pos[0],
-                                p.center_pos[1],
-                                p.center_pos[2],
-                            )
-                        }
-                        _ => {
-                            pixel_to_world(w, h, p.center_pos[0], p.center_pos[1], p.center_pos[2])
-                        }
-                    };
+                    let use_ray_plane = frame
+                        .showcase_render_hints
+                        .showcase_tiles_use_ray_plane(self.active_scene_key);
+                    let center = crate::render::world_space::layout_anchor_to_world(
+                        w,
+                        h,
+                        frame.camera_override.as_ref(),
+                        p.center_pos[0],
+                        p.center_pos[1],
+                        p.center_pos[2],
+                        use_ray_plane,
+                    );
                     let tile_short_px = p.size_px * 0.85;
                     let tile_long_px = tile_short_px * tile_preset.face_long_ratio();
                     let tile_thickness_px = tile_short_px * tile_preset.thickness_ratio();

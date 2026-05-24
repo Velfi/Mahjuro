@@ -94,7 +94,7 @@ fn flame_rw_1d(seed: f32, time_s: f32, rate_hz: f32) -> f32 {
     let f = x - cell;
     let smooth = f * f * (3.0 - 2.0 * f);
     let h = |cell: f32| {
-        let v = (seed * 127.1 + cell * 311.7).sin() * 43758.5453;
+        let v = (seed * 127.1 + cell * 311.7).sin() * 43_758.547;
         (v - v.floor()) * 2.0 - 1.0
     };
     let a = h(cell);

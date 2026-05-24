@@ -1,5 +1,5 @@
-//! Meld bonuses, early relic chips/mults, talismans, flowers, and Dragon Echo —
-//! everything applied before [`super::dora_yaku_layer`] (Dora, yaku, structure depth).
+//! Early relic chips/mults, talismans, flowers, and Dragon Echo —
+//! everything applied before [`super::dora_yaku_layer`] (Dora and yaku).
 
 use crate::core::hand::MeldKind;
 use crate::core::relic::{RelicId, ScoreContext};
@@ -10,7 +10,7 @@ use super::push_steps::{push_chips, push_gold, push_mult};
 use super::tea_bonus::{
     tea_harmony_chips, tea_purity_mult, tea_respect_chips, tea_tranquility_chips,
 };
-use super::{meld_chip_bonus, tile_by_id, tile_is_debuffed};
+use super::{tile_by_id, tile_is_debuffed};
 
 #[inline]
 fn effective_point_value(t: &Tile, ctx: &ScoreContext<'_>) -> i32 {
@@ -432,13 +432,11 @@ pub(crate) fn apply_pre_yaku_scoring(
         let set_bases: Vec<i32> = sets
             .iter()
             .map(|s| {
-                let mut c = meld_chip_bonus(s.kind);
-                for &tid in &s.tile_ids {
-                    if let Some(t) = tile_by_id(tiles, tid) {
-                        c += effective_point_value(t, ctx);
-                    }
-                }
-                c
+                s.tile_ids
+                    .iter()
+                    .filter_map(|&tid| tile_by_id(tiles, tid))
+                    .map(|t| effective_point_value(t, ctx))
+                    .sum()
             })
             .collect();
         let is_dragon_trip: Vec<bool> = sets

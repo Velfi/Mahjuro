@@ -370,14 +370,13 @@ fn score_snapshot_from_breakdown(
         } else if step.kind == StepKind::Chips && delta_chips != 0 {
             relic_chips += delta_chips;
         }
-        if step.source.contains("Boss") || step.source.contains("boss") {
-            if step.kind == StepKind::Mult && delta_chips == 0 {
+        if (step.source.contains("Boss") || step.source.contains("boss"))
+            && step.kind == StepKind::Mult && delta_chips == 0 {
                 let mult_delta = step.running_mult / prev_chips.max(1) as f64;
                 if mult_delta > 1.0 {
                     boss_mult = mult_delta;
                 }
             }
-        }
         if step.source.contains("Chain") || step.source.contains("Streak") {
             streak_mult = step.running_mult;
         }

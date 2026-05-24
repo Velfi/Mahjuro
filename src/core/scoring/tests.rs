@@ -54,9 +54,9 @@ fn bare_triplet_of_threes() {
     ];
     let sets = find_pairs_and_triplets(&hand);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&RelicState::default(), false), &[]);
-    assert_eq!(breakdown.base_chips, 59);
+    assert_eq!(breakdown.base_chips, 9);
     assert_eq!(breakdown.final_mult, 1.0);
-    assert_eq!(breakdown.total, 59);
+    assert_eq!(breakdown.total, 9);
 }
 
 #[test]
@@ -68,7 +68,7 @@ fn honor_triplet_uses_flat_value() {
     ];
     let sets = find_pairs_and_triplets(&hand);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&RelicState::default(), false), &[]);
-    assert_eq!(breakdown.base_chips, 86);
+    assert_eq!(breakdown.base_chips, 36);
 }
 
 #[test]
@@ -81,9 +81,9 @@ fn triplet_boost_adds_chips_to_triplet() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::TripletBoost]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_chips, 99);
+    assert_eq!(breakdown.final_chips, 49);
     assert_eq!(breakdown.final_mult, 1.2);
-    assert_eq!(breakdown.total, 118);
+    assert_eq!(breakdown.total, 58);
     assert!(breakdown.steps.iter().any(|s| s.source == "Triplet Boost"));
 }
 
@@ -100,7 +100,7 @@ fn sequence_surge_adds_chips_to_sequence() {
     }];
     let r = relics(vec![RelicId::SequenceSurge]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_chips, 59);
+    assert_eq!(breakdown.final_chips, 31);
 }
 
 #[test]
@@ -146,7 +146,7 @@ fn stacked_yaku_score_full_value_without_loadout_gating() {
     let r = RelicState::default();
     let ctx = ctx_with(&r, false);
     let breakdown = score_sets(&hand, &sets, &ctx, &[]);
-    assert_eq!(breakdown.final_chips, 443);
+    assert_eq!(breakdown.final_chips, 291);
     assert_eq!(breakdown.final_mult, 18.0);
 }
 
@@ -195,13 +195,13 @@ fn pair_power_grants_chips_and_mult() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::PairPower]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_chips, 62);
+    assert_eq!(breakdown.final_chips, 44);
     assert_eq!(breakdown.final_mult, 2.0);
-    assert_eq!(breakdown.total, 124);
+    assert_eq!(breakdown.total, 88);
 }
 
 #[test]
-fn debuffed_terminal_tiles_keep_pair_bonus_but_lose_tile_points() {
+fn debuffed_terminal_tiles_score_zero_chips() {
     let hand = vec![Tile::new(Suit::Pinzu, 1, 0), Tile::new(Suit::Pinzu, 1, 1)];
     let sets = find_pairs_and_triplets(&hand);
     let r = RelicState::default();
@@ -210,8 +210,8 @@ fn debuffed_terminal_tiles_keep_pair_bonus_but_lose_tile_points() {
         crate::core::debuff::TileDebuffClass::Terminals,
     )];
     let breakdown = score_sets(&hand, &sets, &ctx, &[]);
-    assert_eq!(breakdown.base_chips, 18);
-    assert_eq!(breakdown.total, 18);
+    assert_eq!(breakdown.base_chips, 0);
+    assert_eq!(breakdown.total, 0);
 }
 
 #[test]
@@ -221,9 +221,9 @@ fn debuffed_relic_is_disabled_for_scoring() {
     let mut r = relics(vec![RelicId::PairPower]);
     r.debuffed.insert(RelicId::PairPower);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_chips, 32);
+    assert_eq!(breakdown.final_chips, 14);
     assert_eq!(breakdown.final_mult, 1.0);
-    assert_eq!(breakdown.total, 32);
+    assert_eq!(breakdown.total, 14);
 }
 
 #[test]
@@ -232,9 +232,9 @@ fn white_dragons_hush_mults_white_dragon_pair() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::WhiteDragonsHush]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_chips, 42);
+    assert_eq!(breakdown.final_chips, 24);
     assert_eq!(breakdown.final_mult, 5.0);
-    assert_eq!(breakdown.total, 210);
+    assert_eq!(breakdown.total, 120);
 }
 
 #[test]
@@ -247,7 +247,7 @@ fn honor_fury_adds_chips_per_honor_tile() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::HonorFury]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_chips, 170);
+    assert_eq!(breakdown.final_chips, 120);
 }
 
 #[test]
@@ -260,9 +260,9 @@ fn dragon_rage_mults_red_triplet() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::DragonRage]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_chips, 126);
+    assert_eq!(breakdown.final_chips, 76);
     assert_eq!(breakdown.final_mult, 9.0);
-    assert_eq!(breakdown.total, 1134);
+    assert_eq!(breakdown.total, 684);
 }
 
 #[test]
@@ -341,7 +341,7 @@ fn dragon_echo_copies_adjacent_set_chips() {
         breakdown.steps[idx - 1].running_chips
     };
     let echo_delta = breakdown.steps[idx].running_chips - prev_chips;
-    assert_eq!(echo_delta, 86);
+    assert_eq!(echo_delta, 30);
 }
 
 #[test]
@@ -380,7 +380,7 @@ fn chain_reaction_adds_mult_when_scored_last_turn() {
     let r = relics(vec![RelicId::ChainReaction]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, true), &[]);
     assert_eq!(breakdown.final_mult, 5.0);
-    assert_eq!(breakdown.total, 325);
+    assert_eq!(breakdown.total, 75);
 }
 
 #[test]
@@ -406,8 +406,8 @@ fn pair_double_rule_adds_chips() {
         &ctx_with(&RelicState::default(), false),
         &[RuleModifier::PairDoubleScore],
     );
-    assert_eq!(breakdown.final_chips, 58);
-    assert_eq!(breakdown.total, 58);
+    assert_eq!(breakdown.final_chips, 40);
+    assert_eq!(breakdown.total, 40);
 }
 
 #[test]
@@ -478,9 +478,9 @@ fn explosive_flush_full_hand_demonstration() {
         },
     ];
     let breakdown = score_sets(&hand, &sets, &ctx_with(&RelicState::default(), false), &[]);
-    assert_eq!(breakdown.base_chips, 226);
+    assert_eq!(breakdown.base_chips, 74);
     assert_eq!(breakdown.final_mult, 18.0);
-    assert_eq!(breakdown.total, 7974);
+    assert_eq!(breakdown.total, 5238);
 }
 
 fn dora_chips_delta(breakdown: &ScoreBreakdown) -> i32 {

@@ -31,7 +31,7 @@ mod main_draw;
 mod main_event_loop;
 #[path = "main/frame_tick.rs"]
 mod main_frame_tick;
-#[path = "main/headless.rs"]
+#[path = "main/headless/mod.rs"]
 mod main_headless;
 #[path = "main/perf_watchdog.rs"]
 mod main_perf_watchdog;
@@ -202,7 +202,6 @@ pub(crate) struct FramePicks {
     pub hand: Option<usize>,
     pub shop: Option<render::wgpu_renderer::ShopHit>,
     pub gameplay: Option<render::wgpu_renderer::GameplayPick>,
-    pub collection: Option<u32>,
 }
 
 impl App {
@@ -213,6 +212,21 @@ impl App {
             Scene::Gameplay(_) => Some(persistence::ResumeScene::Gameplay),
             _ => None,
         }
+    }
+
+    /// Face-button semantics for the scene currently receiving controller input.
+    fn active_face_bindings(&self) -> crate::ui::input::FaceButtonBindings {
+        if !self.overlay_stack.is_empty() || self.scene.has_blocking_overlay() {
+            return crate::ui::input::FaceButtonBindings::default();
+        }
+        let xy_quick_action = self
+            .input
+            .as_ref()
+            .map(|i| i.xy_quick_action)
+            .unwrap_or(true);
+        self.scene.face_button_bindings(crate::ui::input::FaceBindingCtx {
+            xy_quick_action,
+        })
     }
 
     /// Single source of truth for "is anything modal-like up right now?"

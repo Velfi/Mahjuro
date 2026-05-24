@@ -75,8 +75,7 @@ impl TilePackPresenter {
 
     pub fn render_hints() -> ShowcaseRenderHints {
         ShowcaseRenderHints {
-            object3d_use_camera_ray_plane_z: true,
-            showcase_tiles_use_camera_ray_plane_z: true,
+            layout_use_ray_plane_z: true,
             tile_pack_celebration_tonemap: true,
             shop_tonemap_and_lit_mesh_context: false,
             collection_tonemap_context: false,

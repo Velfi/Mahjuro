@@ -319,7 +319,7 @@ const GRID_ROWS: [(usize, usize); 5] = [
 const TILE_PREVIEW_KEY_LIGHT_LIFT_FRAC_OF_H: f32 = 0.80;
 
 /// Compute 38 top-down pixel `(x, y, w, h)` slot rects (`y` increases downward; fed to
-/// [`crate::render::world_space::pixel_to_world`] via showcase draws).
+/// [`crate::render::world_space::layout_anchor_to_world`] via showcase draws).
 fn grid_slots(grid_x: f32, grid_y: f32, grid_w: f32, grid_h: f32) -> Vec<(f32, f32, f32, f32)> {
     let cols = 9.0_f32;
     let rows = GRID_ROWS.len() as f32;
@@ -460,11 +460,11 @@ impl SceneBehavior for TileSelectScene {
         let hint_px = typography::size(typography::H42, h);
 
         // Rect heights need room above the font size for line padding.
-        let title_h = title_px * 1.4;
-        let name_h = name_px * 1.4;
-        let bonus_h = bonus_px * 1.4;
-        let stake_desc_h = stake_desc_px * 1.4;
-        let hint_h = hint_px * 1.4;
+        let title_h = crate::ui::colored_keywords::colored_row_line_step(title_px);
+        let name_h = crate::ui::colored_keywords::colored_row_line_step(name_px);
+        let bonus_h = crate::ui::colored_keywords::colored_row_line_step(bonus_px);
+        let stake_desc_h = crate::ui::colored_keywords::colored_row_line_step(stake_desc_px);
+        let hint_h = crate::ui::colored_keywords::colored_row_line_step(hint_px);
 
         let text_x = self.positions.left_panel.nx * w;
         let mut cursor_y =

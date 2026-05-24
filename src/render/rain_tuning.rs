@@ -69,7 +69,7 @@ impl RainTuning {
                 spawn_rate: 280.0,
                 pool_size: 226.6241,
                 fall_speed: 8000.0,
-                wind_x: 423.8180,
+                wind_x: 423.818,
                 wind_y: 800.0,
                 streak_len_px: 48.0,
                 splash_count: 15.9531,

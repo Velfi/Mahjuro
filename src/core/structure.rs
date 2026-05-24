@@ -24,24 +24,13 @@ pub struct StructureTriggerMeta {
     pub inject_chicken_if_no_yaku: bool,
 }
 
-/// Sum of meld base chip bonuses — exposed for tier HUD.
-pub fn banked_meld_chips(sets: &[DetectedMeld]) -> i32 {
-    use crate::core::hand::MeldKind;
+/// Sum of tile point values banked in structure — exposed for tier HUD.
+pub fn banked_meld_chips(tiles: &[Tile], sets: &[DetectedMeld]) -> i32 {
     sets.iter()
-        .map(|s| match s.kind {
-            MeldKind::Pair => 18,
-            MeldKind::Sequence => 28,
-            MeldKind::Triplet => 50,
-            MeldKind::Kong => 80,
-            MeldKind::Single => 0,
-        })
+        .flat_map(|s| s.tile_ids.iter())
+        .filter_map(|id| tiles.iter().find(|t| t.id == *id))
+        .map(|t| t.point_value() as i32)
         .sum()
-}
-
-/// +mult per meld after the first, capped (applied at trigger).
-pub fn structure_depth_mult_bonus(meld_count: u32) -> f64 {
-    let extra = meld_count.saturating_sub(1) as f64 * 0.1;
-    extra.min(3.0)
 }
 
 pub fn is_winning_structure_shape(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {

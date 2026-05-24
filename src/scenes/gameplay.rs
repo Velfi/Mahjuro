@@ -751,10 +751,6 @@ impl GameplayScene {
             return Self::yaku_popup_center(layout, run, cascade_showcase);
         }
 
-        if step.source == "Structure depth" {
-            return Self::trigger_tablet_popup_center(layout, run, cascade_showcase);
-        }
-
         let ms = layout.modifier_strip;
         match step.kind {
             StepKind::Chips => (ms.x + ms.w * 0.30, ms.y + ms.h * 0.60),
@@ -792,28 +788,6 @@ impl GameplayScene {
         (
             hud_layout.action_bar.container_x + hud_layout.action_bar.container_w * 0.5,
             hud_layout.yaku_row_y + hud_layout.yaku_panel_h * 0.5,
-        )
-    }
-
-    fn trigger_tablet_popup_center(
-        layout: &crate::ui::layout::LayoutResult,
-        run: &crate::game::run::RunState,
-        cascade_showcase: Option<&CascadeShowcase>,
-    ) -> (f32, f32) {
-        let gameplay = GameEngine::read(run);
-        let interaction = GameEngine::read_interaction(run);
-        let hand_slots = hand_slots_for_count(layout, interaction.hand_len);
-        let has_structure = gameplay.has_structure;
-        let hud_layout = compute_gameplay_hud_layout(
-            layout,
-            &hand_slots,
-            has_structure,
-            has_structure || cascade_showcase.is_some(),
-        );
-        let trigger_btn_rect = hud_layout.action_bar.trigger_btn_rect;
-        (
-            trigger_btn_rect.0 + trigger_btn_rect.2 * 0.5,
-            trigger_btn_rect.1 + trigger_btn_rect.3 * 0.5,
         )
     }
 

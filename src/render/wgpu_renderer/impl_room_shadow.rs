@@ -57,9 +57,6 @@ impl WgpuRenderer {
                 .ok()
             })
         })
-        .try_into()
-        .ok()
-        .unwrap_or([None, None, None, None])
     }
 
     fn upload_room_baked_shadow_gpu(
@@ -311,7 +308,7 @@ impl WgpuRenderer {
             light_view_proj: staging.light_view_proj,
             depth_bias: staging.depth_bias,
             depth_bytes,
-            ao_bytes: Some(Arc::from(ao)),
+            ao_bytes: Some(ao),
         })
     }
 }
