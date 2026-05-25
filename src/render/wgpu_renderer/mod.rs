@@ -432,7 +432,8 @@ pub struct WgpuRenderer {
     room_gi_capture_meta: Option<crate::render::room_gi_bake::RoomGiBake>,
     room_gi_captured: Option<crate::render::room_gi_bake::RoomGiBake>,
     /// Offline baked room shadow maps (one per static room).
-    room_baked_shadow_gpu: [Option<impl_room_shadow::RoomBakedShadowGpu>; 4],
+    room_baked_shadow_gpu: [Option<impl_room_shadow::RoomBakedShadowGpu>;
+        crate::render::room_gi_bake::ROOM_GI_ROOM_COUNT],
     active_room_baked_shadow: Option<crate::render::room_gi_bake::RoomGiRoom>,
     room_shadow_capture_pending: Option<crate::render::room_gi_bake::RoomGiRoom>,
     room_shadow_captured: Option<crate::render::room_shadow_bake::RoomShadowBake>,

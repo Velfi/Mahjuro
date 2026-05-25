@@ -256,6 +256,29 @@ struct Cell {
     color: [f32; 4],
 }
 
+fn push_glossary_word_cells(
+    cells: &mut Vec<Cell>,
+    word: &str,
+    run: &StyledRun,
+    default_color: [f32; 4],
+) {
+    if word.is_empty() {
+        return;
+    }
+    for (segment, col) in colored_token_segments(word, default_color) {
+        for ch in segment.chars() {
+            cells.push(Cell {
+                ch,
+                bold: run.bold,
+                italic: run.italic,
+                underline: run.underline,
+                effect: run.effect,
+                color: col,
+            });
+        }
+    }
+}
+
 fn runs_to_cells_with_glossary(
     runs: &[StyledRun],
     default_color: [f32; 4],
@@ -276,8 +299,11 @@ fn runs_to_cells_with_glossary(
             }
             continue;
         }
-        for (pi, para) in run.text.split('\n').enumerate() {
-            if pi > 0 {
+        let mut word = String::new();
+        for ch in run.text.chars() {
+            if ch == '\n' {
+                push_glossary_word_cells(&mut cells, &word, run, default_color);
+                word.clear();
                 cells.push(Cell {
                     ch: '\n',
                     bold: run.bold,
@@ -286,34 +312,24 @@ fn runs_to_cells_with_glossary(
                     effect: run.effect,
                     color: default_color,
                 });
+                continue;
             }
-            let mut first_word = true;
-            for word in para.split_whitespace() {
-                if !first_word {
-                    cells.push(Cell {
-                        ch: ' ',
-                        bold: run.bold,
-                        italic: run.italic,
-                        underline: run.underline,
-                        effect: run.effect,
-                        color: default_color,
-                    });
-                }
-                first_word = false;
-                for (segment, col) in colored_token_segments(word, default_color) {
-                    for ch in segment.chars() {
-                        cells.push(Cell {
-                            ch,
-                            bold: run.bold,
-                            italic: run.italic,
-                            underline: run.underline,
-                            effect: run.effect,
-                            color: col,
-                        });
-                    }
-                }
+            if ch.is_whitespace() {
+                push_glossary_word_cells(&mut cells, &word, run, default_color);
+                word.clear();
+                cells.push(Cell {
+                    ch,
+                    bold: run.bold,
+                    italic: run.italic,
+                    underline: run.underline,
+                    effect: run.effect,
+                    color: default_color,
+                });
+            } else {
+                word.push(ch);
             }
         }
+        push_glossary_word_cells(&mut cells, &word, run, default_color);
     }
     cells
 }
@@ -338,6 +354,7 @@ fn tokenize_cells(cells: &[Cell]) -> Vec<&[Cell]> {
 
 fn char_advance_styled(
     ch: char,
+    bold: bool,
     italic: bool,
     font_px: f32,
     regular: Option<&fontdue::Font>,
@@ -351,7 +368,11 @@ fn char_advance_styled(
     } else {
         regular
     };
-    face.metrics(ch, font_px).advance_width
+    let mut adv = face.metrics(ch, font_px).advance_width;
+    if bold {
+        adv += crate::render::decal::FAUX_BOLD_OVERLAY_OFFSET_PX;
+    }
+    adv
 }
 
 fn cell_token_advance(
@@ -361,7 +382,7 @@ fn cell_token_advance(
     italic_f: Option<&fontdue::Font>,
 ) -> f32 {
     tok.iter()
-        .map(|c| char_advance_styled(c.ch, c.italic, font_px, regular, italic_f))
+        .map(|c| char_advance_styled(c.ch, c.bold, c.italic, font_px, regular, italic_f))
         .sum()
 }
 
@@ -480,7 +501,7 @@ fn merge_cells_for_runs(
     }
     let mut out: Vec<LineTextChunk> = Vec::new();
     for c in line {
-        let ch_w = char_advance_styled(c.ch, c.italic, font_px, regular, italic_f);
+        let ch_w = char_advance_styled(c.ch, c.bold, c.italic, font_px, regular, italic_f);
         if let Some(last) = out.last_mut()
             && last.bold == c.bold
             && last.italic == c.italic
@@ -503,6 +524,181 @@ fn merge_cells_for_runs(
         }
     }
     out
+}
+
+fn layout_styled_visual_lines_at_font_px(
+    text: &str,
+    max_width_px: f32,
+    font_px: f32,
+    glossary_tint: bool,
+    default_color: [f32; 4],
+) -> Vec<Vec<Cell>> {
+    let runs = parse_styled_text_lossy(text);
+    let cells = runs_to_cells_with_glossary(&runs, default_color, glossary_tint);
+    let hard_lines = split_lines_by_newline(&cells);
+    let regular = load_ui_font();
+    let italic = load_ui_font_italic();
+    let italic_f = italic.or(regular);
+    let mut visual_lines: Vec<Vec<Cell>> = Vec::new();
+    for hl in hard_lines {
+        if hl.is_empty() {
+            visual_lines.push(Vec::new());
+            continue;
+        }
+        let mut wrapped = wrap_cells_hard(&hl, max_width_px, font_px, regular, italic_f);
+        visual_lines.append(&mut wrapped);
+    }
+    if visual_lines.is_empty() {
+        visual_lines.push(Vec::new());
+    }
+    visual_lines
+}
+
+/// Line count after markup parse + wrap (same rules as [`push_styled_text_block`]).
+pub fn styled_wrapped_line_count_at_font_px(
+    text: &str,
+    max_width_px: f32,
+    font_px: f32,
+    glossary_tint: bool,
+    default_color: [f32; 4],
+) -> usize {
+    layout_styled_visual_lines_at_font_px(
+        text,
+        max_width_px,
+        font_px,
+        glossary_tint,
+        default_color,
+    )
+    .len()
+    .max(1)
+}
+
+pub fn styled_wrapped_line_count(
+    text: &str,
+    max_width_px: f32,
+    tier: f32,
+    window_h: f32,
+    glossary_tint: bool,
+    default_color: [f32; 4],
+) -> usize {
+    styled_wrapped_line_count_at_font_px(
+        text,
+        max_width_px,
+        typography::size(tier, window_h),
+        glossary_tint,
+        default_color,
+    )
+}
+
+/// Block height after markup parse + wrap (uses [`colored_row_line_step`]).
+pub fn styled_line_block_height_at_font_px(
+    text: &str,
+    max_width_px: f32,
+    font_px: f32,
+    glossary_tint: bool,
+    default_color: [f32; 4],
+) -> f32 {
+    let lines = styled_wrapped_line_count_at_font_px(
+        text,
+        max_width_px,
+        font_px,
+        glossary_tint,
+        default_color,
+    );
+    crate::ui::colored_keywords::colored_row_line_step(font_px) * lines as f32
+}
+
+pub fn styled_line_block_height(
+    text: &str,
+    max_width_px: f32,
+    tier: f32,
+    window_h: f32,
+    glossary_tint: bool,
+    default_color: [f32; 4],
+) -> f32 {
+    styled_line_block_height_at_font_px(
+        text,
+        max_width_px,
+        typography::size(tier, window_h),
+        glossary_tint,
+        default_color,
+    )
+}
+
+fn push_styled_visual_lines(
+    out: &mut Vec<TextLabel>,
+    rect: [f32; 4],
+    visual_lines: &[Vec<Cell>],
+    font_px: f32,
+    style: StyledBlockStyle,
+) {
+    let [x, y, w, h] = rect;
+    let pad = style.padding;
+    let inner_w = (w - 2.0 * pad).max(1.0);
+    let inner_h = (h - 2.0 * pad).max(1.0);
+    let line_step = crate::ui::colored_keywords::colored_row_line_step(font_px);
+    let max_lines = ((inner_h / line_step).floor() as usize).max(1);
+
+    let regular = load_ui_font();
+    let italic = load_ui_font_italic();
+    let italic_f = italic.or(regular);
+
+    let drawn: Vec<_> = visual_lines.iter().take(max_lines).collect();
+    let n = drawn.len().max(1);
+    let block_h = inner_h.min(n as f32 * line_step);
+    let base_y = y + pad + (inner_h - block_h) * 0.5;
+
+    for (row, line_cells) in drawn.iter().enumerate() {
+        if line_cells.is_empty() {
+            continue;
+        }
+        let chunks = merge_cells_for_runs(line_cells, font_px, regular, italic_f);
+        let line_y = base_y + row as f32 * line_step;
+        let total_w: f32 = chunks.iter().map(|c| c.advance_width).sum();
+        let mut cx = match style.align {
+            TextAlign::Left => x + pad,
+            TextAlign::Center => x + pad + (inner_w - total_w) * 0.5,
+            TextAlign::Right => x + pad + inner_w - total_w,
+        };
+        for chunk in chunks {
+            let piece_w = chunk.advance_width.max(1.0);
+            out.push(TextLabel {
+                rect: [cx, line_y, piece_w, line_step],
+                text: chunk.text,
+                color: chunk.color,
+                font_px: Some(font_px),
+                align: TextAlign::Left,
+                no_glossary: true,
+                underline: chunk.underline,
+                text_effect: chunk.effect,
+                bold: chunk.bold,
+                italic: chunk.italic,
+                flavor_spans: None,
+                ..Default::default()
+            });
+            cx += piece_w;
+        }
+    }
+}
+
+/// Push styled copy at an explicit font size (tutorial column scaling uses this).
+pub fn push_styled_text_block_at_font_px(
+    out: &mut Vec<TextLabel>,
+    rect: [f32; 4],
+    text: &str,
+    font_px: f32,
+    style: StyledBlockStyle,
+) {
+    let [_, _, w, _] = rect;
+    let inner_w = (w - 2.0 * style.padding).max(1.0);
+    let visual_lines = layout_styled_visual_lines_at_font_px(
+        text,
+        inner_w,
+        font_px,
+        style.glossary_tint,
+        style.color,
+    );
+    push_styled_visual_lines(out, rect, &visual_lines, font_px, style);
 }
 
 /// Style for [`push_styled_text_block`].
@@ -549,75 +745,45 @@ pub fn push_styled_text_block(
     style: StyledBlockStyle,
     window_h: f32,
 ) {
-    let runs = parse_styled_text_lossy(text);
-    let [x, y, w, h] = rect;
-    let pad = style.padding;
-    let inner_w = (w - 2.0 * pad).max(1.0);
-    let inner_h = (h - 2.0 * pad).max(1.0);
-    let line_h = typography::size(style.tier, window_h);
-    let font_px = line_h;
-    let line_step = crate::ui::colored_keywords::colored_row_line_step(line_h);
-    let max_lines = ((inner_h / line_step).floor() as usize).max(1);
-
-    let regular = load_ui_font();
-    let italic = load_ui_font_italic();
-    let italic_f = italic.or(regular);
-
-    let cells = runs_to_cells_with_glossary(&runs, style.color, style.glossary_tint);
-    let hard_lines = split_lines_by_newline(&cells);
-    let mut visual_lines: Vec<Vec<Cell>> = Vec::new();
-    for hl in hard_lines {
-        if hl.is_empty() {
-            visual_lines.push(Vec::new());
-            continue;
-        }
-        let mut wrapped = wrap_cells_hard(&hl, inner_w, font_px, regular, italic_f);
-        visual_lines.append(&mut wrapped);
-    }
-    if visual_lines.is_empty() {
-        visual_lines.push(Vec::new());
-    }
-    let drawn: Vec<_> = visual_lines.into_iter().take(max_lines).collect();
-    let n = drawn.len().max(1);
-    let block_h = inner_h.min(n as f32 * line_step);
-    let base_y = y + pad + (inner_h - block_h) * 0.5;
-
-    for (row, line_cells) in drawn.iter().enumerate() {
-        if line_cells.is_empty() {
-            continue;
-        }
-        let chunks = merge_cells_for_runs(line_cells, font_px, regular, italic_f);
-        let line_y = base_y + row as f32 * line_step;
-        let total_w: f32 = chunks.iter().map(|c| c.advance_width).sum();
-        let mut cx = match style.align {
-            TextAlign::Left => x + pad,
-            TextAlign::Center => x + pad + (inner_w - total_w) * 0.5,
-            TextAlign::Right => x + pad + inner_w - total_w,
-        };
-        for chunk in chunks {
-            let piece_w = chunk.advance_width.max(1.0);
-            out.push(TextLabel {
-                rect: [cx, line_y, piece_w, line_step],
-                text: chunk.text,
-                color: chunk.color,
-                font_px: Some(font_px),
-                align: TextAlign::Left,
-                no_glossary: true,
-                underline: chunk.underline,
-                text_effect: chunk.effect,
-                bold: chunk.bold,
-                italic: chunk.italic,
-                flavor_spans: None,
-                ..Default::default()
-            });
-            cx += piece_w;
-        }
-    }
+    let font_px = typography::size(style.tier, window_h);
+    let [_, _, w, _] = rect;
+    let inner_w = (w - 2.0 * style.padding).max(1.0);
+    let visual_lines = layout_styled_visual_lines_at_font_px(
+        text,
+        inner_w,
+        font_px,
+        style.glossary_tint,
+        style.color,
+    );
+    push_styled_visual_lines(out, rect, &visual_lines, font_px, style);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn glossary_tint_preserves_whitespace_around_bold() {
+        let runs = parse_styled_text("Select tiles. **Discard** what you don't need.").unwrap();
+        let cells = runs_to_cells_with_glossary(
+            &runs,
+            crate::render::theme::color::PARCHMENT,
+            true,
+        );
+        let text: String = cells.iter().map(|c| c.ch).collect();
+        assert_eq!(text, "Select tiles. Discard what you don't need.");
+    }
+
+    #[test]
+    fn styled_measure_matches_layout_line_count() {
+        let text = "Tap **Play**, then **Cash In**. Try **Discard**.";
+        let font_px = 18.0;
+        let w = 240.0;
+        let color = crate::render::theme::color::PARCHMENT;
+        let count = styled_wrapped_line_count_at_font_px(text, w, font_px, true, color);
+        let visual = layout_styled_visual_lines_at_font_px(text, w, font_px, true, color);
+        assert_eq!(count, visual.len().max(1));
+    }
 
     #[test]
     fn parse_bold_toggle() {

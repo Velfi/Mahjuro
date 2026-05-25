@@ -68,6 +68,10 @@ pub(crate) fn parse_bake_room_slug(
         "main_menu" | "main-menu" | "main_menu_exterior" => {
             Ok(crate::render::room_gi_bake::RoomGiRoom::MainMenu)
         }
-        other => anyhow::bail!("unknown room '{other}' (use shop, hallway, archive, or main_menu)"),
+        "staircase" | "stairway" => Ok(crate::render::room_gi_bake::RoomGiRoom::Staircase),
+        "gameplay" => Ok(crate::render::room_gi_bake::RoomGiRoom::Gameplay),
+        other => anyhow::bail!(
+            "unknown room '{other}' (use shop, hallway, staircase, archive, main_menu, or gameplay)"
+        ),
     }
 }

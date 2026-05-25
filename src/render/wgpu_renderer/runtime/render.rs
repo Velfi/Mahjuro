@@ -1833,8 +1833,10 @@ impl WgpuRenderer {
             crate::render::room_gi_bake::RoomGiRoom::from_ops(
                 ops_flags.shop_env,
                 ops_flags.hallway_env,
+                ops_flags.staircase_env,
                 ops_flags.archive_env,
                 ops_flags.main_menu_env,
+                ops_flags.gameplay_env,
             )
         } else {
             None

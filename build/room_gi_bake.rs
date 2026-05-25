@@ -17,7 +17,7 @@ const BAKE_HEIGHT: u32 = 1080;
 
 const STAMP_PATH: &str = "assets/data/room_gi/.inputs_stamp";
 const OUT_DIR: &str = "assets/data/room_gi";
-const ROOMS: &[&str] = &["shop", "hallway", "archive", "main_menu"];
+const ROOMS: &[&str] = &["shop", "hallway", "archive", "main_menu", "staircase", "gameplay"];
 
 /// Paths whose bytes are mixed into the inputs stamp (keep in sync with `rerun-if-changed` in `build.rs`).
 pub fn stamp_input_paths(repo: &Path) -> Vec<PathBuf> {
@@ -26,6 +26,8 @@ pub fn stamp_input_paths(repo: &Path) -> Vec<PathBuf> {
         "assets/3d/hallway.glb",
         "assets/3d/archive.glb",
         "assets/3d/main_menu.glb",
+        "assets/3d/staircase.glb",
+        "assets/3d/gameplay.glb",
         "src/render/room_glb.rs",
         "shaders/emissive_probe_update.wgsl",
         "shaders/emissive_probe_apply.wgsl",
@@ -46,6 +48,8 @@ pub fn emit_rerun_if_changed() {
         "assets/3d/hallway.glb",
         "assets/3d/archive.glb",
         "assets/3d/main_menu.glb",
+        "assets/3d/staircase.glb",
+        "assets/3d/gameplay.glb",
         "src/render/room_glb.rs",
         "shaders/emissive_probe_update.wgsl",
         "shaders/emissive_probe_apply.wgsl",

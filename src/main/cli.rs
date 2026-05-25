@@ -32,7 +32,7 @@ pub enum Command {
     /// Use `--scene showcase` without `--pack` for the zodiac ribbon (same as `zodiac_celebration`).
     /// Use `--scene game_over_level_up` for meta profile level-up (`Showcase` / `MetaLevelUpPresenter`).
     Screenshot(ScreenshotCli),
-    /// Bake offline emissive probe SH for a static room GLB (shop / hallway / archive / main menu).
+    /// Bake offline emissive probe SH for a static room GLB (shop / hallway / staircase / archive / main menu / gameplay).
     ///
     /// Writes `assets/data/room_gi/<room>.mgi` for packaging into the gameplay asset pack.
     /// Prefer **`cargo build --release`** — same cold-start cost as `screenshot`.
@@ -47,7 +47,7 @@ pub enum Command {
 /// Offline probe GI bake at the resting room camera (1920×1080 by default).
 #[derive(Debug, Args)]
 pub struct BakeRoomGiCli {
-    /// Room to bake: `shop`, `hallway`, `archive`, or `main_menu`.
+    /// Room to bake: `shop`, `hallway`, `staircase`, `archive`, `main_menu`, or `gameplay`.
     pub room: String,
     #[arg(long, default_value = "assets/data/room_gi")]
     pub output_dir: PathBuf,
@@ -145,9 +145,10 @@ pub struct ScreenshotCli {
     /// Profile slot for `--from-run-history` (default: active profile from settings).
     #[arg(long)]
     pub profile: Option<usize>,
-    /// 1-based guide page for `--scene guide` (e.g. 4 = Scoring Basics).
-    #[arg(long)]
-    pub guide_page: Option<u32>,
+    /// 1-based page for paginated scenes (`guide`, `tutorial`). Guide e.g. 4 =
+    /// Scoring Basics; tutorial 1 = tiles, 2 = scoring.
+    #[arg(long, visible_alias = "guide-page")]
+    pub page: Option<u32>,
     /// `game_over_defeat` only: append N bot runs to the in-memory profile before
     /// `--from-run-history` (does not write disk; use with `--from-run-history`).
     #[arg(long)]

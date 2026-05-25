@@ -174,6 +174,8 @@ fn write_room_shadow_bake(
         crate::render::room_gi_bake::RoomGiRoom::Hallway => "hallway.msh",
         crate::render::room_gi_bake::RoomGiRoom::Archive => "archive.msh",
         crate::render::room_gi_bake::RoomGiRoom::MainMenu => "main_menu.msh",
+        crate::render::room_gi_bake::RoomGiRoom::Staircase => "staircase.msh",
+        crate::render::room_gi_bake::RoomGiRoom::Gameplay => "gameplay.msh",
     };
     let out_path = output_dir.join(out_name);
     ensure_parent_dir(&out_path)?;
@@ -198,6 +200,8 @@ fn write_room_gi_bake(
         crate::render::room_gi_bake::RoomGiRoom::Hallway => "hallway.mgi",
         crate::render::room_gi_bake::RoomGiRoom::Archive => "archive.mgi",
         crate::render::room_gi_bake::RoomGiRoom::MainMenu => "main_menu.mgi",
+        crate::render::room_gi_bake::RoomGiRoom::Staircase => "staircase.mgi",
+        crate::render::room_gi_bake::RoomGiRoom::Gameplay => "gameplay.mgi",
     };
     let out_path = output_dir.join(out_name);
     ensure_parent_dir(&out_path)?;

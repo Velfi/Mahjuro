@@ -2,10 +2,8 @@
 
 use crate::render::draw_cmd::CameraParams;
 use crate::render::gameplay_glb::{
-    self, DISCARD_RIVER, HAND_TILES_LEFT, HAND_TILES_RIGHT, PLAY_MIRROR, PLAYER_CONSUMABLE_MARKERS,
-    PLAYER_DISCARD_TALLY, PLAYER_GOLD, PLAYER_PLAY_TALLY, PLAYER_RELIC_MARKERS, PLAYER_YAKU_JOURNAL,
-    STRUCTURE_TILES_LEFT, STRUCTURE_TILES_RIGHT, TILE_PLINTH_MARKERS, YAKU_TABLETS_LEFT,
-    YAKU_TABLETS_RIGHT,
+    self, DISCARD_RIVER, HAND_TILES_LEFT, HAND_TILES_RIGHT, PLAY_MIRROR, PLAYER_DISCARD_TALLY,
+    PLAYER_GOLD, PLAYER_PLAY_TALLY, PLAYER_RELIC_MARKERS, PLAYER_YAKU_JOURNAL, TILE_PLINTH_MARKERS,
 };
 use crate::render::room_glb::RoomGlbCpu;
 
@@ -20,10 +18,7 @@ pub struct GameplayGlbAnchors {
     pub discard_tally_anchor: [f32; 3],
     pub play_tally_anchor: [f32; 3],
     pub relic_anchors: Vec<[f32; 3]>,
-    pub consumable_anchors: Vec<[f32; 3]>,
     pub tile_plinth_anchors: Vec<[f32; 3]>,
-    pub yaku_tablet_mid: [f32; 3],
-    pub structure_strip_mid: [f32; 3],
 }
 
 fn marker_pair_screen_rect(
@@ -119,31 +114,10 @@ pub fn resolve_gameplay_glb_anchors(
             .filter_map(|name| gameplay_glb::gameplay_marker_surface_anchor(w, h, env_h, cpu, name))
             .collect();
 
-        let consumable_anchors: Vec<[f32; 3]> = PLAYER_CONSUMABLE_MARKERS
-            .iter()
-            .filter_map(|name| gameplay_glb::gameplay_marker_surface_anchor(w, h, env_h, cpu, name))
-            .collect();
-
         let tile_plinth_anchors: Vec<[f32; 3]> = TILE_PLINTH_MARKERS
             .iter()
             .filter_map(|name| gameplay_glb::gameplay_marker_surface_anchor(w, h, env_h, cpu, name))
             .collect();
-
-        let yaku_left = gameplay_glb::gameplay_marker_surface_anchor(w, h, env_h, cpu, YAKU_TABLETS_LEFT)?;
-        let yaku_right = gameplay_glb::gameplay_marker_surface_anchor(w, h, env_h, cpu, YAKU_TABLETS_RIGHT)?;
-        let yaku_tablet_mid = [
-            (yaku_left[0] + yaku_right[0]) * 0.5,
-            (yaku_left[1] + yaku_right[1]) * 0.5,
-            (yaku_left[2] + yaku_right[2]) * 0.5,
-        ];
-
-        let st_left = gameplay_glb::gameplay_marker_surface_anchor(w, h, env_h, cpu, STRUCTURE_TILES_LEFT)?;
-        let st_right = gameplay_glb::gameplay_marker_surface_anchor(w, h, env_h, cpu, STRUCTURE_TILES_RIGHT)?;
-        let structure_strip_mid = [
-            (st_left[0] + st_right[0]) * 0.5,
-            (st_left[1] + st_right[1]) * 0.5,
-            (st_left[2] + st_right[2]) * 0.5,
-        ];
 
         Some(GameplayGlbAnchors {
             hand_slots,
@@ -155,10 +129,7 @@ pub fn resolve_gameplay_glb_anchors(
             discard_tally_anchor,
             play_tally_anchor,
             relic_anchors,
-            consumable_anchors,
             tile_plinth_anchors,
-            yaku_tablet_mid,
-            structure_strip_mid,
         })
     })
 }

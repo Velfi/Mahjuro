@@ -71,7 +71,21 @@ pub(crate) fn validate_screenshot_cli(s: &main_cli::ScreenshotCli) -> anyhow::Re
             "--bot-play, --from-run-history, and --seed-bot-runs are only valid with --scene game_over_defeat"
         );
     }
+    if s.page.is_some() && !screenshot_scene_accepts_page(&s.scene) {
+        anyhow::bail!("--page is only valid with --scene guide or tutorial");
+    }
     Ok(())
+}
+
+fn screenshot_scene_accepts_page(scene: &str) -> bool {
+    matches!(
+        scene,
+        "guide" | "tile_guide" | "tiles_guide" | "tutorial" | "tutorial_campaign"
+    )
+}
+
+fn screenshot_page_index(s: &main_cli::ScreenshotCli) -> usize {
+    s.page.map(|p| p.saturating_sub(1) as usize).unwrap_or(0)
 }
 
 fn shop_focus_slug_inspectable(slug: &str) -> bool {
@@ -280,19 +294,16 @@ pub(crate) fn resolve_screenshot_scene(
             Scene::TileSelect(crate::scenes::TileSelectScene::new()),
             false,
         ),
-        "guide" | "tile_guide" | "tiles_guide" => {
-            let page = s
-                .guide_page
-                .map(|p| p.saturating_sub(1) as usize)
-                .unwrap_or(0);
-            (
-                Scene::Guide(crate::scenes::GuideScene::with_page(page)),
-                false,
-            )
-        }
-        "tutorial" | "tutorial_campaign" => {
-            (Scene::TutorialCampaign(TutorialCampaignScene::new()), false)
-        }
+        "guide" | "tile_guide" | "tiles_guide" => (
+            Scene::Guide(crate::scenes::GuideScene::with_page(screenshot_page_index(s))),
+            false,
+        ),
+        "tutorial" | "tutorial_campaign" => (
+            Scene::TutorialCampaign(TutorialCampaignScene::with_page(screenshot_page_index(
+                s,
+            ))),
+            false,
+        ),
         "transition_playground" => (
             Scene::TransitionPlayground(crate::scenes::TransitionPlaygroundScene::new(false)),
             false,
@@ -400,5 +411,14 @@ pub(crate) fn scene_for_room_gi_bake(
             run,
             false,
         ),
+        crate::render::room_gi_bake::RoomGiRoom::Staircase => (
+            Scene::Staircase(crate::scenes::StaircaseScene::new()),
+            run,
+            false,
+        ),
+        crate::render::room_gi_bake::RoomGiRoom::Gameplay => {
+            setup_gameplay_screenshot_state(&mut run);
+            (Scene::Gameplay(Box::new(GameplayScene::new())), run, true)
+        }
     }
 }
