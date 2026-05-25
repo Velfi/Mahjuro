@@ -13,7 +13,7 @@ use crate::render::draw_cmd::UiFrame;
 
 use super::{
     DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx, archive_career,
-    scene_collection_archive, scene_options_menu,
+    scene_collection_archive,
 };
 
 const PROFILE_COUNT: usize = 3;
@@ -189,13 +189,6 @@ fn profile_stat_lines(summary: &persistence::ProfileSummary) -> Vec<(String, [f3
     lines
 }
 
-/// Where [`ProfileSelectScene`] returns after pick / cancel.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ProfileSelectReturn {
-    Options,
-    Archive,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct PickProfile(usize);
 
@@ -211,35 +204,23 @@ enum ConfirmDelete {
 pub struct ProfileSelectScene {
     tree: TreeState,
     confirm_delete: ConfirmDelete,
-    return_to: ProfileSelectReturn,
 }
 
 impl ProfileSelectScene {
-    pub fn new(active_profile: usize, return_to: ProfileSelectReturn) -> Self {
+    pub fn from_archive_switch_save() -> Self {
+        let settings = persistence::load_settings();
         let mut tree = TreeState::new();
-        tree.set_focus(FocusId(active_profile.min(PROFILE_COUNT - 1) as u32));
+        tree.set_focus(FocusId(
+            settings.active_profile.min(PROFILE_COUNT - 1) as u32,
+        ));
         Self {
             tree,
             confirm_delete: ConfirmDelete::None,
-            return_to,
         }
-    }
-
-    pub fn from_options_menu() -> Self {
-        let settings = persistence::load_settings();
-        Self::new(settings.active_profile, ProfileSelectReturn::Options)
-    }
-
-    pub fn from_archive_switch_save() -> Self {
-        let settings = persistence::load_settings();
-        Self::new(settings.active_profile, ProfileSelectReturn::Archive)
     }
 
     fn pop_return_scene(&self) -> Scene {
-        match self.return_to {
-            ProfileSelectReturn::Options => scene_options_menu(),
-            ProfileSelectReturn::Archive => scene_collection_archive(),
-        }
+        scene_collection_archive()
     }
 
     fn cursor(&self) -> usize {
@@ -357,10 +338,7 @@ impl SceneBehavior for ProfileSelectScene {
 
         // Title.
         if !showing_dialog {
-            let title = match self.return_to {
-                ProfileSelectReturn::Options => "Save & profiles",
-                ProfileSelectReturn::Archive => "Switch save",
-            };
+            let title = "Switch save";
             frame.text(TextLabel {
                 rect: [0.0, layout.title_y, w, layout.title_h],
                 text: title.into(),

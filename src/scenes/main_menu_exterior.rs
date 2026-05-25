@@ -54,17 +54,13 @@ enum HubFocus {
     Quit,
 }
 
-/// Archive hub entry matches [`PlayerProgress::current_level`] ≥ 2 (first meta level-up).
-fn menu_items(in_progress: bool, progress: &PlayerProgress) -> Vec<HubFocus> {
-    let show_archive = progress.current_level() >= 2;
+fn menu_items(in_progress: bool) -> Vec<HubFocus> {
     let mut items = Vec::with_capacity(8);
     if in_progress {
         items.push(HubFocus::Continue);
     }
     items.push(HubFocus::NewGame);
-    if show_archive {
-        items.push(HubFocus::Archive);
-    }
+    items.push(HubFocus::Archive);
     items.push(HubFocus::Options);
     items.push(HubFocus::Quit);
     items
@@ -254,7 +250,7 @@ impl SceneBehavior for MainMenuExteriorScene {
                 .update(dt, &ctx.rain_tuning, &cam, w, h, env_scale, &meshes);
         }
         let in_progress = GameEngine::run_in_progress(ctx.run);
-        let items = menu_items(in_progress, ctx.progress);
+        let items = menu_items(in_progress);
 
         if self.focus.is_none() || !items.contains(&self.focus.unwrap()) {
             self.focus = Some(default_focus(in_progress));
@@ -416,7 +412,7 @@ impl SceneBehavior for MainMenuExteriorScene {
         }
 
         let in_progress = ctx.game_in_progress;
-        let items = menu_items(in_progress, ctx.progress);
+        let items = menu_items(in_progress);
         let layout = Self::hub_layout(w, h, &items);
         let focus_rects = layout.menu_rects.clone();
         *self.last_focus_rects.borrow_mut() = focus_rects.clone();
