@@ -33,7 +33,7 @@ gltf = { version = "1.4.1", features = [
     "KHR_lights_punctual",
     "KHR_materials_emissive_strength",
 ] }
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "gif", "webp"] }
 sdl3 = { version = "0.17", features = ["build-from-source-static", "raw-window-handle"] }
 log = "0.4.28"
 pollster = "0.4.0"

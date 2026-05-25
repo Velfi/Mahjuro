@@ -10,9 +10,28 @@ use crate::ui::input::UiAction;
 
 use crate::scenes::{BackgroundId, DrawCtx, OverlayRequest, SceneTransition, UpdateCtx};
 
+#[derive(Clone, Copy)]
+struct OrbitTargetLerp {
+    from: [f32; 3],
+    to: [f32; 3],
+    elapsed: f32,
+}
+
+const ORBIT_TARGET_LERP_DURATION: f32 = 0.16;
+
+#[inline]
+fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+    [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+    ]
+}
+
 pub struct CollectionInspectPresenter {
     pub orbit: ItemInspectOrbitState,
     last_frame: Instant,
+    target_lerp: Option<OrbitTargetLerp>,
 }
 
 impl CollectionInspectPresenter {
@@ -20,6 +39,23 @@ impl CollectionInspectPresenter {
         Self {
             orbit,
             last_frame: Instant::now(),
+            target_lerp: None,
+        }
+    }
+
+    fn apply_target_lerp(&mut self, dt: f32) {
+        let Some(mut lerp) = self.target_lerp else {
+            return;
+        };
+        lerp.elapsed += dt.max(0.0).min(0.10);
+        let t = (lerp.elapsed / ORBIT_TARGET_LERP_DURATION).clamp(0.0, 1.0);
+        let eased = crate::scenes::object3d_inspect::ease_in_out_cubic(t);
+        self.orbit.target_world = lerp3(lerp.from, lerp.to, eased);
+        if t >= 1.0 {
+            self.orbit.target_world = lerp.to;
+            self.target_lerp = None;
+        } else {
+            self.target_lerp = Some(lerp);
         }
     }
 
@@ -33,7 +69,14 @@ impl CollectionInspectPresenter {
     }
 
     pub fn update(&mut self, mut ctx: UpdateCtx<'_>) -> SceneTransition {
-        if let Some(collection) = ctx.suspended_collection.as_deref_mut() {
+        let now = Instant::now();
+        let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
+        self.last_frame = now;
+        self.apply_target_lerp(dt);
+
+        if self.target_lerp.is_none()
+            && let Some(collection) = ctx.suspended_collection.as_deref_mut()
+        {
             collection::sync_item_inspect_orbit_target(
                 &*collection,
                 ctx.layout.window_w,
@@ -44,10 +87,6 @@ impl CollectionInspectPresenter {
                 &mut self.orbit,
             );
         }
-
-        let now = Instant::now();
-        let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
-        self.last_frame = now;
 
         const ORBIT: f32 = 2.4;
         const P_LIM: f32 = 0.52;
@@ -81,6 +120,7 @@ impl CollectionInspectPresenter {
                         ctx.bus,
                     )
                 {
+                    let from = self.orbit.target_world;
                     collection::sync_item_inspect_orbit_target(
                         &*collection,
                         ctx.layout.window_w,
@@ -90,6 +130,18 @@ impl CollectionInspectPresenter {
                         ctx.room_gltf_height_scale,
                         &mut self.orbit,
                     );
+                    let to = self.orbit.target_world;
+                    let dx = to[0] - from[0];
+                    let dy = to[1] - from[1];
+                    let dz = to[2] - from[2];
+                    if dx * dx + dy * dy + dz * dz > 1e-6 {
+                        self.target_lerp = Some(OrbitTargetLerp {
+                            from,
+                            to,
+                            elapsed: 0.0,
+                        });
+                        self.apply_target_lerp(dt);
+                    }
                 }
                 continue;
             }

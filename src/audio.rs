@@ -108,8 +108,8 @@ fn decode_rodio(label: &str, bytes: &[u8]) -> Option<Arc<PcmClip>> {
 /// [`AudioManager::set_music_track`] / [`AudioManager::set_gameplay_music`].
 /// One-shot intros (`GameplayIntro`, `GameplayIntenseIntro`) play once on the
 /// music bus via [`AudioManager::play_music_intro_then_loop`], then hand off to
-/// their paired loop. Win/loss jingles (`BlindWin`, `BlindLoss`, `BossWin`,
-/// `BossLoss`) play once via [`AudioManager::play_music_jingle`] on the **SFX**
+/// their paired loop. Win/loss jingles (`ChamberWin`, `ChamberLoss`, `OrdealWin`,
+/// `OrdealLoss`) play once via [`AudioManager::play_music_jingle`] on the **SFX**
 /// volume bus (options SFX slider), then resume the last requested loop.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MusicId {
@@ -124,13 +124,13 @@ pub enum MusicId {
     GameplayIntenseIntro,
     Shop,
     /// Stinger when the player clears a Small/Big blind.
-    BlindWin,
+    ChamberWin,
     /// Stinger when the player fails a Small/Big blind.
-    BlindLoss,
+    ChamberLoss,
     /// Stinger when the player defeats a Boss blind.
-    BossWin,
+    OrdealWin,
     /// Stinger when the player fails a Boss blind.
-    BossLoss,
+    OrdealLoss,
 }
 
 impl MusicId {
@@ -142,10 +142,10 @@ impl MusicId {
             MusicId::GameplayIntro => "audio/music/gameplay_intro.ogg",
             MusicId::GameplayIntenseIntro => "audio/music/gameplay_intense_intro.ogg",
             MusicId::Shop => "audio/music/shop.ogg",
-            MusicId::BlindWin => "audio/music/blind_win.ogg",
-            MusicId::BlindLoss => "audio/music/blind_loss.ogg",
-            MusicId::BossWin => "audio/music/boss_win.ogg",
-            MusicId::BossLoss => "audio/music/boss_loss.ogg",
+            MusicId::ChamberWin => "audio/music/chamber_win.ogg",
+            MusicId::ChamberLoss => "audio/music/chamber_loss.ogg",
+            MusicId::OrdealWin => "audio/music/ordeal_win.ogg",
+            MusicId::OrdealLoss => "audio/music/ordeal_loss.ogg",
         }
     }
 
@@ -168,7 +168,7 @@ impl MusicId {
     fn is_jingle(self) -> bool {
         matches!(
             self,
-            MusicId::BlindWin | MusicId::BlindLoss | MusicId::BossWin | MusicId::BossLoss
+            MusicId::ChamberWin | MusicId::ChamberLoss | MusicId::OrdealWin | MusicId::OrdealLoss
         )
     }
 
@@ -316,8 +316,8 @@ pub enum SfxId {
     FocusDora,
     /// A gameplay round begins.
     RoundStart,
-    /// Player skipped a blind on pick_blind (lights brownout).
-    BlindSkipped,
+    /// Player skipped a blind on pick_chamber (lights brownout).
+    ChamberSkipped,
     /// The shooting-star cascade transition fires (dramatic scene change).
     StarShimmer,
     /// Relic / zodiac / talisman purchased in the shop.
@@ -378,9 +378,9 @@ pub enum SfxId {
     /// Tiles permanently destroyed (e.g. Taotie).
     TilesDestroyed,
     /// Boss blind encountered — ominous sting as the round begins.
-    BossEncountered,
+    OrdealEncountered,
     /// Boss blind defeated — triumphant sting.
-    BossDefeated,
+    OrdealDefeated,
     /// Talisman purchased from the shop.
     TalismanPurchased,
     /// Talisman consumed from the dish.
@@ -425,7 +425,7 @@ pub fn all_sfx_ids() -> &'static [SfxId] {
         SfxId::FocusYakuTablet,
         SfxId::FocusDora,
         SfxId::RoundStart,
-        SfxId::BlindSkipped,
+        SfxId::ChamberSkipped,
         SfxId::StarShimmer,
         SfxId::Purchase,
         SfxId::Sell,
@@ -460,8 +460,8 @@ pub fn all_sfx_ids() -> &'static [SfxId] {
         SfxId::MainMenuEnter,
         SfxId::LevelUp,
         SfxId::TilesDestroyed,
-        SfxId::BossEncountered,
-        SfxId::BossDefeated,
+        SfxId::OrdealEncountered,
+        SfxId::OrdealDefeated,
         SfxId::TalismanPurchased,
         SfxId::TalismanUsed,
     ]
@@ -504,7 +504,7 @@ impl SfxId {
             SfxId::FocusYakuTablet => "kenney_interface-sounds/Audio/scroll_003.ogg",
             SfxId::FocusDora => "kenney_interface-sounds/Audio/glass_001.ogg",
             SfxId::RoundStart => "kenney_interface-sounds/Audio/confirmation_004.ogg",
-            SfxId::BlindSkipped => "kenney_interface-sounds/Audio/glitch_004.ogg",
+            SfxId::ChamberSkipped => "kenney_interface-sounds/Audio/glitch_004.ogg",
             SfxId::StarShimmer => "kenney_interface-sounds/Audio/glass_005.ogg",
             SfxId::Purchase => "coindrop.ogg",
             SfxId::Sell => "kenney_interface-sounds/Audio/confirmation_002.ogg",
@@ -539,8 +539,8 @@ impl SfxId {
             SfxId::MainMenuEnter => "mahjuro.ogg",
             SfxId::LevelUp => "levelup.ogg",
             SfxId::TilesDestroyed => "tiles_destroyed.ogg",
-            SfxId::BossEncountered => "boss_encountered.ogg",
-            SfxId::BossDefeated => "boss_defeated.ogg",
+            SfxId::OrdealEncountered => "ordeal_encountered.ogg",
+            SfxId::OrdealDefeated => "ordeal_defeated.ogg",
             SfxId::TalismanPurchased => "talisman_purchased.ogg",
             SfxId::TalismanUsed => "talisman_used.ogg",
         }
@@ -902,8 +902,8 @@ impl AudioManager {
     }
 
     /// Start blind BGM: intro once, then the regular or boss loop.
-    pub fn set_gameplay_music(&mut self, boss_blind: bool) {
-        if boss_blind {
+    pub fn set_gameplay_music(&mut self, ordeal_chamber: bool) {
+        if ordeal_chamber {
             self.play_music_intro_then_loop(
                 MusicId::GameplayIntenseIntro,
                 MusicId::GameplayIntense,
@@ -945,9 +945,7 @@ impl AudioManager {
         self.music_active_id = None;
         self.jingle_active = true;
         self.pending_post_jingle_music = Some(loop_id);
-        log::debug!(
-            "play_music_intro_then_loop({intro:?}): loop_after={loop_id:?}"
-        );
+        log::debug!("play_music_intro_then_loop({intro:?}): loop_after={loop_id:?}");
     }
 
     /// Play `id` once on the music sink (no looping). Replaces whatever

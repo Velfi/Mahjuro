@@ -29,13 +29,15 @@ impl App {
             Scene::Shop(_) => Some("shop"),
             Scene::Gameplay(_) => Some("gameplay"),
             Scene::Collection(_) => Some("collection"),
-            Scene::PickBlind(_) => Some("pick_blind"),
+            Scene::PickChamber(_) => Some("pick_chamber"),
+            Scene::Staircase(_) => Some("staircase"),
             Scene::MainMenuExterior(_) => Some("main_menu_exterior"),
             Scene::TutorialCampaign(_) => Some("tutorial"),
             Scene::Guide(_) => Some("guide"),
             Scene::YakuJournal(_) => Some("yaku_journal"),
             Scene::TileAnchorLab(_) => Some("tile_anchor_lab"),
-            Scene::GameOver(s) if !s.won => Some("gameplay"),
+            Scene::Tixels(_) => Some("tixels"),
+            Scene::GameOver(_) => Some("gameplay"),
             _ => None,
         }
     }
@@ -98,8 +100,7 @@ impl App {
                                 ),
                             );
                             GameEngine::set_onboarding_shop_phase(&mut self.run);
-                            self.run
-                                .grant_pending_memorial(&mut self.progress);
+                            self.run.grant_pending_memorial(&mut self.progress);
                             self.mark_profile_dirty();
                             self.pending_scene = Some(Scene::Shop(
                                 crate::scenes::ShopScene::new_tutorial(&mut self.run),
@@ -125,7 +126,7 @@ impl App {
                 if !reached_target {
                     let cleared_round_score = self.run.round_score;
                     let cleared_target_score = self.run.target_score;
-                    self.run.forfeit_current_blind_second_wind(&mut self.bus);
+                    self.run.forfeit_current_chamber_second_wind(&mut self.bus);
                     self.audio.play_sfx(audio::SfxId::TilesDestroyed);
                     let modal = Modal::new(
                         "Second Wind",
@@ -136,8 +137,7 @@ impl App {
                         ModalTheme::Info,
                     );
                     self.modals.push(modal);
-                    self.run
-                        .grant_pending_memorial(&mut self.progress);
+                    self.run.grant_pending_memorial(&mut self.progress);
                     self.mark_profile_dirty();
                     self.pending_scene = Some(Scene::Shop(crate::scenes::ShopScene::new(
                         &mut self.run,
@@ -160,16 +160,18 @@ impl App {
                 // pending scene transition will queue Shop/Gameplay BGM
                 // behind it via `set_music_track`, and `AudioManager::tick`
                 // resumes that loop once the jingle finishes.
-                let won_jingle = if self.run.blind == crate::core::rules::BlindKind::Boss {
-                    audio::MusicId::BossWin
+                let won_jingle = if self.run.chamber == crate::core::rules::ChamberKind::Ordeal {
+                    audio::MusicId::OrdealWin
                 } else {
-                    audio::MusicId::BlindWin
+                    audio::MusicId::ChamberWin
                 };
                 self.audio.play_music_jingle(won_jingle);
                 // Capture round_score / target_score before advance_round
                 // clobbers target_score with base_target for the next blind.
                 let cleared_round_score = self.run.round_score;
                 let cleared_target_score = self.run.target_score;
+                let cleared_ordeal =
+                    self.run.chamber == crate::core::rules::ChamberKind::Ordeal;
                 self.run.advance_round(&mut self.bus);
 
                 {
@@ -201,6 +203,9 @@ impl App {
                     // Victory — save progress (mirrors the GameOver loss path).
                     self.progress.has_won = true;
                     self.progress.runs_completed += 1;
+                    self.progress.award_level_points_for_outcome(
+                        crate::core::progression::RunOutcome::Victory,
+                    );
                     self.progress.record_score(self.run.round_score);
                     let level_up = self.progress.check_level_up();
                     self.steam
@@ -233,14 +238,22 @@ impl App {
                     if let Some(result) = level_up
                         && let Some(modal) = build_level_up_modal(&result, ww, wh)
                     {
-                        log::info!("Level up! Now level {}", result.new_level);
+                        log::info!(
+                            "Depth increased to {}",
+                            core::progression::meta_depth_roman(result.new_level)
+                        );
                         self.pending_post_game_over_level_up = Some(modal);
                     }
 
                     Scene::GameOver(GameOverScene::victory(&self.run))
+                } else if cleared_ordeal
+                    && crate::render::staircase_glb::staircase_glb_loaded()
+                {
+                    self.run.grant_pending_memorial(&mut self.progress);
+                    self.mark_profile_dirty();
+                    Scene::Staircase(crate::scenes::StaircaseScene::new())
                 } else {
-                    self.run
-                        .grant_pending_memorial(&mut self.progress);
+                    self.run.grant_pending_memorial(&mut self.progress);
                     self.mark_profile_dirty();
                     Scene::Shop(crate::scenes::ShopScene::new(&mut self.run, &self.progress))
                 });
@@ -261,7 +274,7 @@ impl App {
                                 plays_left,
                             );
                             self.run.retry_onboarding_lessons();
-                            (feedback, self.run.blind)
+                            (feedback, self.run.chamber)
                         }
                         _ => {
                             let feedback = crate::game::onboarding::finale_failure_feedback(
@@ -271,19 +284,22 @@ impl App {
                                 last,
                             );
                             self.run.retry_onboarding_finale();
-                            (feedback, self.run.blind)
+                            (feedback, self.run.chamber)
                         }
                     };
                     self.audio.play_sfx(audio::SfxId::GameOver);
                     let modal = Modal::new("Try Again!", &feedback, ModalTheme::Info);
                     self.modals.push(modal);
                     self.pending_scene = Some(Scene::Gameplay(Box::new(
-                        GameplayScene::with_pending_blind(retry_blind),
+                        GameplayScene::with_pending_chamber(retry_blind),
                     )));
                     self.transition_alpha = 1.0;
                     return;
                 }
                 self.progress.runs_completed += 1;
+                self.progress.award_level_points_for_outcome(
+                    crate::core::progression::RunOutcome::Defeat { reason },
+                );
                 self.progress.record_score(self.run.round_score);
                 let level_up = self.progress.check_level_up();
                 let snap = crate::core::memorial_talisman::snapshot_from_run(
@@ -310,7 +326,10 @@ impl App {
                 if let Some(result) = level_up
                     && let Some(modal) = build_level_up_modal(&result, ww, wh)
                 {
-                    log::info!("Level up! Now level {}", result.new_level);
+                    log::info!(
+                        "Depth increased to {}",
+                        core::progression::meta_depth_roman(result.new_level)
+                    );
                     self.pending_post_game_over_level_up = Some(modal);
                 }
 
@@ -319,10 +338,10 @@ impl App {
                 // scene fades in; `sync_music_for_scene` will call
                 // `stop_background_music`, which defers until the jingle
                 // empties so the stinger isn't truncated mid-fade.
-                let loss_jingle = if self.run.blind == crate::core::rules::BlindKind::Boss {
-                    audio::MusicId::BossLoss
+                let loss_jingle = if self.run.chamber == crate::core::rules::ChamberKind::Ordeal {
+                    audio::MusicId::OrdealLoss
                 } else {
-                    audio::MusicId::BlindLoss
+                    audio::MusicId::ChamberLoss
                 };
                 self.audio.play_music_jingle(loss_jingle);
                 self.pending_scene = Some(Scene::GameOver(GameOverScene::new(&self.run, reason)));
@@ -358,7 +377,13 @@ impl App {
             || self.debug.hallway_distortion_debug_overlay.is_some();
         let preserve_overlay_stack_buttons = matches!(
             self.overlay_stack.last(),
-            Some(Scene::RumbleLab(_) | Scene::MaterialViewer(_) | Scene::TransitionPlayground(_) | Scene::TileAnchorLab(_))
+            Some(
+                Scene::RumbleLab(_)
+                    | Scene::MaterialViewer(_)
+                    | Scene::TransitionPlayground(_)
+                    | Scene::TileAnchorLab(_)
+                    | Scene::Tixels(_)
+            )
         );
         let scene_look = self.resolved_scene_look();
         let Some(renderer) = self.renderer.as_mut() else {
@@ -416,7 +441,7 @@ impl App {
             self.frame_picks.shop,
             scenes::DebugVisibility {
                 hide_candles: self.debug.hide_candles,
-                hide_blind_plaque: self.debug.hide_blind_plaque,
+                hide_chamber_plaque: self.debug.hide_chamber_plaque,
                 hide_scoring_placard: self.debug.hide_scoring_placard,
             },
             modal_active,
@@ -736,13 +761,15 @@ impl App {
             Scene::Shop(_) => Some("shop"),
             Scene::Gameplay(_) => Some("gameplay"),
             Scene::Collection(_) => Some("collection"),
-            Scene::PickBlind(_) => Some("pick_blind"),
+            Scene::PickChamber(_) => Some("pick_chamber"),
+            Scene::Staircase(_) => Some("staircase"),
             Scene::MainMenuExterior(_) => Some("main_menu_exterior"),
             Scene::TutorialCampaign(_) => Some("tutorial"),
             Scene::Guide(_) => Some("guide"),
             Scene::YakuJournal(_) => Some("yaku_journal"),
             Scene::TileAnchorLab(_) => Some("tile_anchor_lab"),
-            Scene::GameOver(s) if !s.won => Some("gameplay"),
+            Scene::Tixels(_) => Some("tixels"),
+            Scene::GameOver(_) => Some("gameplay"),
             _ => None,
         };
         renderer.set_active_scene(active_scene_key);
@@ -832,7 +859,10 @@ pub(crate) fn build_level_up_modal(
     }
     Some(
         Modal::new(
-            format!("Level Up! — Level {}", result.new_level),
+            format!(
+                "Deeper — Depth {}",
+                core::progression::meta_depth_roman(result.new_level)
+            ),
             "",
             ModalTheme::Success,
         )

@@ -1,15 +1,15 @@
 //! Pick-blind scene — choose **Play** or **Skip** before the next blind.
 //! Renders the [`hallway.glb`](../../assets/3d/hallway.glb) room with embedded
 //! punctual lights when the asset is present; copy and focus navigation use
-//! the GLB play/skip hit targets ([`hallway_glb::hallway_pick_blind_play_button_node`],
+//! the GLB play/skip hit targets ([`hallway_glb::hallway_pick_chamber_play_button_node`],
 //! `btn_skip_round`).
 //!
 //! Mirrors the shop scene's `draw_frame() -> UiFrame` pattern: a custom
-//! camera from [`hallway_glb::hallway_camera_pick_blind`], [`DrawCmd::HallwayEnvironment`],
+//! camera from [`hallway_glb::hallway_camera_pick_chamber`], [`DrawCmd::HallwayEnvironment`],
 //! and a 2D HUD (side panels, skip context) on top.
 
 use crate::audio::SfxId;
-use crate::core::rules::BlindKind;
+use crate::core::rules::ChamberKind;
 use crate::game::engine::{GameCommand, GameEngine};
 use crate::game::event_bus::GameEvent;
 use crate::render::decal::{load_ui_font, measure_label_advances};
@@ -18,7 +18,7 @@ use crate::render::hallway_glb::{self, BTN_SKIP_ROUND};
 use crate::render::room_glb;
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
-use crate::ui::boss_icons::boss_icon_source;
+use crate::ui::ordeal_icons::ordeal_icon_source;
 use crate::ui::focus_nav::push_focus_ring;
 use crate::ui::input::UiAction;
 use crate::ui::skip_tag_icons::skip_tag_icon_source;
@@ -30,34 +30,34 @@ use super::pause_menu::PauseMenu;
 use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum BlindAction {
-    PlayBlind,
-    SkipBlind,
+enum ChamberAction {
+    PlayChamber,
+    SkipChamber,
 }
 
-impl BlindAction {
+impl ChamberAction {
     fn id(self) -> FocusId {
         FocusId(self as u32 + 1)
     }
 }
 
-pub struct PickBlindScene {
+pub struct PickChamberScene {
     tree: TreeState,
     pause_menu: PauseMenu,
 }
 
-impl PickBlindScene {
+impl PickChamberScene {
     pub fn new() -> Self {
         let mut tree = TreeState::new();
-        tree.set_focus(BlindAction::PlayBlind.id());
+        tree.set_focus(ChamberAction::PlayChamber.id());
         Self {
             tree,
             pause_menu: PauseMenu::new(),
         }
     }
 
-    fn can_skip(blind: BlindKind) -> bool {
-        !matches!(blind, BlindKind::Boss)
+    fn can_skip(blind: ChamberKind) -> bool {
+        !matches!(blind, ChamberKind::Ordeal)
     }
 
     fn flat_items_hallway(
@@ -67,39 +67,39 @@ impl PickBlindScene {
         env_h: f32,
         can_skip: bool,
         play_node: &'static str,
-    ) -> Vec<FlatItem<BlindAction>> {
+    ) -> Vec<FlatItem<ChamberAction>> {
         let play_rect = hallway_button_screen_rect(win_w, win_h, cam, env_h, play_node)
             .map(inflate_hit_rect)
             .unwrap_or_else(|| [win_w * 0.12, win_h * 0.52, win_w * 0.30, win_h * 0.20]);
         let mut items = vec![FlatItem::new(
-            BlindAction::PlayBlind.id(),
+            ChamberAction::PlayChamber.id(),
             play_rect,
-            BlindAction::PlayBlind,
+            ChamberAction::PlayChamber,
         )];
         if can_skip {
             let skip_rect = hallway_button_screen_rect(win_w, win_h, cam, env_h, BTN_SKIP_ROUND)
                 .map(inflate_hit_rect)
                 .unwrap_or_else(|| [win_w * 0.58, win_h * 0.52, win_w * 0.30, win_h * 0.20]);
             items.push(FlatItem::new(
-                BlindAction::SkipBlind.id(),
+                ChamberAction::SkipChamber.id(),
                 skip_rect,
-                BlindAction::SkipBlind,
+                ChamberAction::SkipChamber,
             ));
         }
         items
     }
 
     fn skip_focused(&self) -> bool {
-        self.tree.focused() == Some(BlindAction::SkipBlind.id())
+        self.tree.focused() == Some(ChamberAction::SkipChamber.id())
     }
 
     fn play_focused(&self) -> bool {
-        self.tree.focused() == Some(BlindAction::PlayBlind.id())
+        self.tree.focused() == Some(ChamberAction::PlayChamber.id())
     }
 }
 
 #[inline]
-fn pick_blind_hallway_loaded() -> bool {
+fn pick_chamber_hallway_loaded() -> bool {
     hallway_glb::with_hallway_glb_cpu(|o| o.is_some())
 }
 
@@ -224,7 +224,7 @@ fn inflate_hit_rect(rect: [f32; 4]) -> [f32; 4] {
     ]
 }
 
-impl SceneBehavior for PickBlindScene {
+impl SceneBehavior for PickChamberScene {
     fn pause_options_overlay(&self) -> Option<&super::options::OptionsScene> {
         self.pause_menu.options_overlay()
     }
@@ -251,22 +251,22 @@ impl SceneBehavior for PickBlindScene {
             return t;
         }
 
-        let pick = GameEngine::read_pick_blind(ctx.run);
-        let upcoming = pick.upcoming_blind;
-        let upcoming_boss = upcoming == BlindKind::Boss;
+        let pick = GameEngine::read_pick_chamber(ctx.run);
+        let upcoming = pick.upcoming_chamber;
+        let upcoming_ordeal = upcoming == ChamberKind::Ordeal;
         let can_skip = Self::can_skip(upcoming);
-        let hallway_loaded = pick_blind_hallway_loaded();
+        let hallway_loaded = pick_chamber_hallway_loaded();
         let play_node = if hallway_loaded {
-            hallway_glb::hallway_pick_blind_play_button_node(upcoming_boss)
+            hallway_glb::hallway_pick_chamber_play_button_node(upcoming_ordeal)
         } else {
             hallway_glb::BTN_PLAY_ROUND
         };
 
-        let cam = hallway_glb::hallway_camera_pick_blind(
+        let cam = hallway_glb::hallway_camera_pick_chamber(
             ctx.layout.window_w,
             ctx.layout.window_h,
             ctx.room_gltf_height_scale,
-            upcoming_boss,
+            upcoming_ordeal,
         );
         let items = Self::flat_items_hallway(
             ctx.layout.window_w,
@@ -294,30 +294,30 @@ impl SceneBehavior for PickBlindScene {
         for a in ctx.actions {
             if matches!(a, UiAction::Cancel) && can_skip && !self.skip_focused() {
                 // Move focus to Skip; confirming still uses Confirm / click (Esc no longer skips).
-                self.tree.set_focus(BlindAction::SkipBlind.id());
+                self.tree.set_focus(ChamberAction::SkipChamber.id());
                 ctx.bus.push(GameEvent::UiSound(SfxId::TilePlace));
                 break;
             }
         }
 
         match action {
-            Some(BlindAction::SkipBlind) if can_skip => {
+            Some(ChamberAction::SkipChamber) if can_skip => {
                 let mut engine = GameEngine::new(ctx.run, ctx.bus);
-                let _ = engine.dispatch(GameCommand::SkipUpcomingBlindWithTag);
-                Some(Scene::PickBlind(PickBlindScene::new()))
+                let _ = engine.dispatch(GameCommand::SkipUpcomingChamberWithTag);
+                Some(Scene::PickChamber(PickChamberScene::new()))
             }
-            Some(BlindAction::PlayBlind) => {
+            Some(ChamberAction::PlayChamber) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::RoundStart));
-                if upcoming == BlindKind::Boss
-                    && let Some(bk) = pick.boss_kind
+                if upcoming == ChamberKind::Ordeal
+                    && let Some(bk) = pick.ordeal_kind
                 {
-                    ctx.bus.push(GameEvent::BossEncountered(bk));
+                    ctx.bus.push(GameEvent::OrdealEncountered(bk));
                 }
                 Some(Scene::Gameplay(Box::new(
-                    GameplayScene::with_pending_blind(upcoming),
+                    GameplayScene::with_pending_chamber(upcoming),
                 )))
             }
-            Some(BlindAction::SkipBlind) => None,
+            Some(ChamberAction::SkipChamber) => None,
             None => None,
         }
     }
@@ -326,9 +326,9 @@ impl SceneBehavior for PickBlindScene {
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
 
-        let pick = GameEngine::read_pick_blind(ctx.run);
-        let upcoming = pick.upcoming_blind;
-        let upcoming_boss = upcoming == BlindKind::Boss;
+        let pick = GameEngine::read_pick_chamber(ctx.run);
+        let upcoming = pick.upcoming_chamber;
+        let upcoming_ordeal = upcoming == ChamberKind::Ordeal;
         let can_skip = Self::can_skip(upcoming);
         let skip_tag = pick.skip_tag;
 
@@ -340,14 +340,14 @@ impl SceneBehavior for PickBlindScene {
         // layered dark indigo + vignettes, but the gamma-encoded linear
         // floor of even [0.002] reads as visible indigo on screen.)
         frame.background(BackgroundId::Black);
-        let hallway = pick_blind_hallway_loaded();
+        let hallway = pick_chamber_hallway_loaded();
         let play_node = if hallway {
-            hallway_glb::hallway_pick_blind_play_button_node(upcoming_boss)
+            hallway_glb::hallway_pick_chamber_play_button_node(upcoming_ordeal)
         } else {
             hallway_glb::BTN_PLAY_ROUND
         };
         let cam =
-            hallway_glb::hallway_camera_pick_blind(w, h, ctx.room_gltf_height_scale, upcoming_boss);
+            hallway_glb::hallway_camera_pick_chamber(w, h, ctx.room_gltf_height_scale, upcoming_ordeal);
         frame.camera_override = Some(cam);
 
         if hallway {
@@ -355,10 +355,10 @@ impl SceneBehavior for PickBlindScene {
             frame.hallway_distortion = Some(if let Some(snap) = ctx.hallway_distortion_debug {
                 snap.resolve(upcoming)
             } else {
-                hallway_glb::HallwayDistortion::from_pick_blind(
+                hallway_glb::HallwayDistortion::from_pick_chamber(
                     upcoming,
                     pick.run_number,
-                    pick.ante,
+                    pick.wing,
                 )
             });
             if let Some(ref mut dist) = frame.hallway_distortion {
@@ -505,10 +505,10 @@ impl SceneBehavior for PickBlindScene {
                 let h_blind = px_blind * 1.42;
                 let h_detail = px_detail * 1.36;
                 let target_value = pick.upcoming_target;
-                let blind_display = if upcoming == BlindKind::Boss {
-                    pick.boss_name
+                let chamber_display = if upcoming == ChamberKind::Ordeal {
+                    pick.ordeal_name
                         .clone()
-                        .unwrap_or_else(|| "Boss Blind".to_string())
+                        .unwrap_or_else(|| "Ordeal Chamber".to_string())
                 } else {
                     upcoming.name().to_string()
                 };
@@ -523,28 +523,28 @@ impl SceneBehavior for PickBlindScene {
                 let play_col_right = pr[0] - play_desc_gap;
                 let play_col_w = (play_col_right - edge_margin).max(min_col_w);
                 let lx_play = play_col_right - play_col_w;
-                let boss_icon_px = if upcoming == BlindKind::Boss && pick.boss_kind.is_some() {
+                let ordeal_icon_px = if upcoming == ChamberKind::Ordeal && pick.ordeal_kind.is_some() {
                     Some((h * 0.072).clamp(48.0, 80.0))
                 } else {
                     None
                 };
-                let boss_icon_gap = 10.0_f32;
-                let (text_x_play, text_w_play) = if let Some(ipx) = boss_icon_px {
+                let ordeal_icon_gap = 10.0_f32;
+                let (text_x_play, text_w_play) = if let Some(ipx) = ordeal_icon_px {
                     (
-                        lx_play + ipx + boss_icon_gap,
-                        (play_col_w - ipx - boss_icon_gap).max(80.0),
+                        lx_play + ipx + ordeal_icon_gap,
+                        (play_col_w - ipx - ordeal_icon_gap).max(80.0),
                     )
                 } else {
                     (lx_play, play_col_w)
                 };
                 let mut play_stack_h =
-                    wrapped_text_height(&blind_display, text_w_play, px_blind, h_blind)
+                    wrapped_text_height(&chamber_display, text_w_play, px_blind, h_blind)
                         + 6.0
                         + wrapped_text_height(
                             &format!(
-                                "Ante {}/{} · Target {}",
-                                pick.ante,
-                                crate::game::run::FINAL_ANTE,
+                                "Wing {}/{} · Target {}",
+                                pick.wing,
+                                crate::game::run::FINAL_WING,
                                 target_value,
                             ),
                             text_w_play,
@@ -558,8 +558,8 @@ impl SceneBehavior for PickBlindScene {
                             px_detail,
                             h_detail,
                         );
-                if upcoming == BlindKind::Boss
-                    && let Some(desc) = pick.boss_description.as_deref()
+                if upcoming == ChamberKind::Ordeal
+                    && let Some(desc) = pick.ordeal_description.as_deref()
                 {
                     play_stack_h +=
                         4.0 + wrapped_text_height(desc, text_w_play, px_detail, h_detail * 1.35);
@@ -578,7 +578,7 @@ impl SceneBehavior for PickBlindScene {
                     [pr[0], y_raw.clamp(min_y, max_y), pr[2], pr[3]]
                 };
                 let mut ly_play = (hud_row_cy - play_stack_h * 0.5).max(10.0);
-                let play_stack_label = if upcoming_boss { "BOSS" } else { "PLAY" };
+                let play_stack_label = if upcoming_ordeal { "BOSS" } else { "PLAY" };
                 texts.push(hallway_button_text_label(
                     pr_play_label,
                     play_stack_label,
@@ -593,15 +593,15 @@ impl SceneBehavior for PickBlindScene {
                 } else {
                     color::STONE
                 };
-                if let (Some(ipx), Some(bk)) = (boss_icon_px, pick.boss_kind) {
+                if let (Some(ipx), Some(bk)) = (ordeal_icon_px, pick.ordeal_kind) {
                     // Right-aligned title leaves empty space on the left; pin the
                     // icon to the measured left edge of the first line (like skip + tag).
-                    let title_lines = wrap_text(&blind_display, text_w_play, px_blind / 0.99);
+                    let title_lines = wrap_text(&chamber_display, text_w_play, px_blind / 0.99);
                     let first_line = title_lines
                         .first()
                         .map(|s| s.as_str())
                         .filter(|s| !s.is_empty())
-                        .unwrap_or(blind_display.as_str());
+                        .unwrap_or(chamber_display.as_str());
                     let title_w: f32 = if let Some(font) = load_ui_font() {
                         let (_, _, advances) = measure_label_advances(
                             &font,
@@ -615,7 +615,7 @@ impl SceneBehavior for PickBlindScene {
                         let n = first_line.chars().count().max(1) as f32;
                         (px_blind * 0.52 * n).min(text_w_play)
                     };
-                    let mut icon_x = text_x_play + text_w_play - title_w - boss_icon_gap - ipx;
+                    let mut icon_x = text_x_play + text_w_play - title_w - ordeal_icon_gap - ipx;
                     icon_x = icon_x.max(edge_margin);
                     let title_line_count = title_lines.len().max(1) as f32;
                     let name_block_h = h_blind * title_line_count;
@@ -626,7 +626,7 @@ impl SceneBehavior for PickBlindScene {
                             color: color::alpha(play_color, 0.98),
                             user: 0,
                         },
-                        source: boss_icon_source(bk),
+                        source: ordeal_icon_source(bk),
                     });
                 }
                 push_wrapped_column_line(WrappedColumnLine {
@@ -636,7 +636,7 @@ impl SceneBehavior for PickBlindScene {
                     col_w: text_w_play,
                     font_px: px_blind,
                     line_h: h_blind,
-                    text: &blind_display,
+                    text: &chamber_display,
                     color: play_color,
                     align: TextAlign::Right,
                 });
@@ -649,9 +649,9 @@ impl SceneBehavior for PickBlindScene {
                     font_px: px_detail,
                     line_h: h_detail,
                     text: &format!(
-                        "Ante {}/{} · Target {}",
-                        pick.ante,
-                        crate::game::run::FINAL_ANTE,
+                        "Wing {}/{} · Target {}",
+                        pick.wing,
+                        crate::game::run::FINAL_WING,
                         target_value,
                     ),
                     color: play_color,
@@ -669,9 +669,9 @@ impl SceneBehavior for PickBlindScene {
                     color: play_color,
                     align: TextAlign::Right,
                 });
-                if upcoming == BlindKind::Boss {
+                if upcoming == ChamberKind::Ordeal {
                     ly_play += 4.0;
-                    if let Some(desc) = pick.boss_description.as_deref() {
+                    if let Some(desc) = pick.ordeal_description.as_deref() {
                         push_wrapped_column_line(WrappedColumnLine {
                             texts: &mut texts,
                             x: text_x_play,
@@ -791,7 +791,7 @@ impl SceneBehavior for PickBlindScene {
                 push_focus_ring(skip_anchor_rect, big_ring_scale, w, h, &mut quads);
             }
 
-            // Register focus-tree click targets for PlayBlind + SkipBlind.
+            // Register focus-tree click targets for PlayChamber + SkipChamber.
             let items = Self::flat_items_hallway(
                 w,
                 h,

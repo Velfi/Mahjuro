@@ -5,7 +5,7 @@
 //! - `btn_play_boss` — optional boss-only play control (falls back to `btn_play_round` if absent).
 //! - `btn_skip_round` — skip for the tribute tag when allowed (non-boss).
 //! - Perspective cameras named `default` and `boss` select pick-blind framing (see
-//!   [`hallway_camera_pick_blind`]); legacy single-camera files still use the first embedded camera.
+//!   [`hallway_camera_pick_chamber`]); legacy single-camera files still use the first embedded camera.
 //!
 //! Decodes through [`crate::render::room_env_gltf`]; decoded layout matches [`crate::render::room_glb::RoomGlbCpu`]
 //! for the shared GPU path (`room_glb.wgsl` / embedded lights).
@@ -14,7 +14,7 @@ use std::sync::RwLock;
 
 use glam::Vec3;
 
-use crate::core::rules::BlindKind;
+use crate::core::rules::ChamberKind;
 use crate::render::draw_cmd::CameraParams;
 use crate::render::room_env_gltf::{RoomEnvWalkHooks, RoomMeshPolicy};
 use crate::render::room_glb::{self, RoomEnvLightingTune, RoomGlbCpu, load_room_glb_from_bytes};
@@ -44,12 +44,12 @@ const HALLWAY_WALL_TINTS: [[f32; 3]; 8] = [
 ];
 
 #[inline]
-fn pick_blind_embedded_camera_doc(
+fn pick_chamber_embedded_camera_doc(
     cpu: &RoomGlbCpu,
-    boss_blind: bool,
+    ordeal_chamber: bool,
 ) -> Option<room_glb::RoomGlbEmbeddedCamera> {
     let by = &cpu.embedded_cameras_by_name;
-    if boss_blind {
+    if ordeal_chamber {
         by.get("boss")
             .copied()
             .or_else(|| by.get("default").copied())
@@ -63,8 +63,8 @@ fn pick_blind_embedded_camera_doc(
 
 /// Which play-button mesh to use for hit targets / HUD anchors on the pick-blind scene.
 #[inline]
-pub fn hallway_pick_blind_play_button_node(boss_blind: bool) -> &'static str {
-    if !boss_blind {
+pub fn hallway_pick_chamber_play_button_node(ordeal_chamber: bool) -> &'static str {
+    if !ordeal_chamber {
         return BTN_PLAY_ROUND;
     }
     with_hallway_glb_cpu(|opt| {
@@ -189,11 +189,11 @@ pub struct HallwayDistortion {
 }
 
 #[inline]
-fn loop_seed_hash(run_number: u32, ante: u32, blind: BlindKind) -> u32 {
+fn loop_seed_hash(run_number: u32, ante: u32, blind: ChamberKind) -> u32 {
     let b = match blind {
-        BlindKind::Small => 0u32,
-        BlindKind::Big => 1u32,
-        BlindKind::Boss => 2u32,
+        ChamberKind::Small => 0u32,
+        ChamberKind::Big => 1u32,
+        ChamberKind::Ordeal => 2u32,
     };
     let mut x = run_number.wrapping_mul(0x9E37_79B1u32)
         ^ ante.wrapping_mul(0x85EB_CA6Bu32)
@@ -248,7 +248,7 @@ fn tag_hallway_walls_for_runtime_tint(cpu: &mut RoomGlbCpu) {
 impl HallwayDistortion {
     /// Build distortion parameters for the pick-blind hallway. Wall-clock time (seconds) is
     /// merged in [`WgpuRenderer::write_hallway_environment_uniforms`](crate::render::wgpu_renderer::WgpuRenderer).
-    pub fn from_pick_blind(blind: BlindKind, run_number: u32, ante: u32) -> Self {
+    pub fn from_pick_chamber(blind: ChamberKind, run_number: u32, ante: u32) -> Self {
         let h = loop_seed_hash(run_number, ante, blind);
         let breathe_phase = u01(h.rotate_left(7)) * std::f32::consts::TAU;
         let breathe_freq_jitter = 0.88 + u01(h.rotate_left(17)) * 0.22;
@@ -265,13 +265,13 @@ impl HallwayDistortion {
 
         let (global_intensity, breathe_mul, stretch_mul, twist_mul, ripple_mul, balloon_mul) =
             match blind {
-                BlindKind::Small => (0.58, 0.58, 0.7, 0.52, 0.5, 0.5),
-                BlindKind::Big => (0.74, 0.68, 0.85, 0.72, 0.75, 0.75),
-                BlindKind::Boss => (0.25, 0.82, 1.15, 1.08, 0.4, 1.0),
+                ChamberKind::Small => (0.58, 0.58, 0.7, 0.52, 0.5, 0.5),
+                ChamberKind::Big => (0.74, 0.68, 0.85, 0.72, 0.75, 0.75),
+                ChamberKind::Ordeal => (0.25, 0.82, 1.15, 1.08, 0.4, 1.0),
             };
         let boss_pressure = match blind {
-            BlindKind::Boss => 1.0,
-            BlindKind::Small | BlindKind::Big => 0.0,
+            ChamberKind::Ordeal => 1.0,
+            ChamberKind::Small | ChamberKind::Big => 0.0,
         };
         let wall_tint = hallway_wall_tint_rgb(run_number, ante);
         let ripple_amp = (HALLWAY_RIPPLE_AMOUNT * ripple_mul * global_intensity)
@@ -361,7 +361,7 @@ impl HallwayDistortion {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct HallwayDistortionDebugSnapshot {
     /// `0` = use the run's upcoming blind; `1` Small, `2` Big, `3` Boss.
-    pub blind_mode: u8,
+    pub chamber_mode: u8,
     pub seed_run: u32,
     pub seed_ante: u32,
     pub global_mul: f32,
@@ -381,19 +381,19 @@ pub struct HallwayDistortionDebugSnapshot {
 }
 
 impl HallwayDistortionDebugSnapshot {
-    /// `upcoming` is used when `blind_mode == 0` (Auto). Run/ante seeds always
+    /// `upcoming` is used when `chamber_mode == 0` (Auto). Run/ante seeds always
     /// come from [`HallwayDistortionDebugSnapshot::seed_run`] /
     /// [`HallwayDistortionDebugSnapshot::seed_ante`] (the overlay sliders).
-    pub fn resolve(self, upcoming: BlindKind) -> HallwayDistortion {
-        let blind = match self.blind_mode {
+    pub fn resolve(self, upcoming: ChamberKind) -> HallwayDistortion {
+        let blind = match self.chamber_mode {
             0 => upcoming,
-            1 => BlindKind::Small,
-            2 => BlindKind::Big,
-            _ => BlindKind::Boss,
+            1 => ChamberKind::Small,
+            2 => ChamberKind::Big,
+            _ => ChamberKind::Ordeal,
         };
         let rn = self.seed_run.max(1);
         let an = self.seed_ante.max(1);
-        let mut d = HallwayDistortion::from_pick_blind(blind, rn, an);
+        let mut d = HallwayDistortion::from_pick_chamber(blind, rn, an);
         d.apply_debug_snapshot_scales(self);
         d
     }
@@ -623,10 +623,10 @@ pub fn hallway_camera_from_glb_if_present(
 }
 
 /// Embedded perspective for pick-blind, honoring glTF cameras named `default` / `boss`.
-pub fn hallway_pick_blind_embedded_camera_params(
+pub fn hallway_pick_chamber_embedded_camera_params(
     window_h: f32,
     env_height_scale: f32,
-    boss_blind: bool,
+    ordeal_chamber: bool,
 ) -> Option<CameraParams> {
     with_hallway_glb_cpu(|opt| {
         let cpu = opt?;
@@ -634,7 +634,7 @@ pub fn hallway_pick_blind_embedded_camera_params(
             .environment_bounds_doc
             .map(|b| b.center())
             .unwrap_or(Vec3::ZERO);
-        pick_blind_embedded_camera_doc(cpu, boss_blind)
+        pick_chamber_embedded_camera_doc(cpu, ordeal_chamber)
             .map(|c| c.to_camera_params(window_h, env_height_scale, center_doc))
     })
 }
@@ -668,13 +668,13 @@ fn hallway_camera_resolve(
 }
 
 /// Camera for pick-blind: `default` / `boss` glTF cameras when present, else same as [`hallway_camera_base`].
-pub fn hallway_camera_pick_blind(w: f32, h: f32, env_h: f32, boss_blind: bool) -> CameraParams {
+pub fn hallway_camera_pick_chamber(w: f32, h: f32, env_h: f32, ordeal_chamber: bool) -> CameraParams {
     // Resolve outside nested `with_hallway_glb_cpu` — avoids deadlock on first load.
-    let from_glb = hallway_pick_blind_embedded_camera_params(h, env_h, boss_blind);
+    let from_glb = hallway_pick_chamber_embedded_camera_params(h, env_h, ordeal_chamber);
     hallway_camera_resolve(w, h, env_h, from_glb)
 }
 
-/// Legacy pick-blind camera (single embedded cam or bounds fit). Unit tests use this; gameplay uses [`hallway_camera_pick_blind`].
+/// Legacy pick-blind camera (single embedded cam or bounds fit). Unit tests use this; gameplay uses [`hallway_camera_pick_chamber`].
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn hallway_camera_base(w: f32, h: f32, env_h: f32) -> CameraParams {
     let from_glb = hallway_camera_from_glb_if_present(h, env_h);
@@ -737,7 +737,7 @@ mod tests {
     use glam::Vec3;
 
     use super::load_hallway_glb_from_bytes;
-    use crate::core::rules::BlindKind;
+    use crate::core::rules::ChamberKind;
     use crate::render::hallway_glb::{
         HALLWAY_RIPPLE_AMOUNT, HALLWAY_RIPPLE_SPEED, HALLWAY_RIPPLE_WAVES, HallwayDistortion,
     };
@@ -757,7 +757,7 @@ mod tests {
             .expect("walls primitive");
         let window_h = 1080.0f32;
         let env_h = 1.0f32;
-        let mut dist = HallwayDistortion::from_pick_blind(BlindKind::Big, 1, 1);
+        let mut dist = HallwayDistortion::from_pick_chamber(ChamberKind::Big, 1, 1);
         super::hallway_distortion_apply_glb_depth_extent(&mut dist, window_h, env_h);
         let m = room_glb::room_env_model_matrix_from_cpu(window_h, env_h, &cpu);
         let axis_doc = super::hallway_depth_axis_doc();
@@ -831,13 +831,13 @@ mod tests {
     }
 
     #[test]
-    fn pick_blind_distortion_populates_lateral_ripple() {
-        let d = HallwayDistortion::from_pick_blind(BlindKind::Big, 3, 2);
+    fn pick_chamber_distortion_populates_lateral_ripple() {
+        let d = HallwayDistortion::from_pick_chamber(ChamberKind::Big, 3, 2);
         assert!(d.ripple[0] > 1e-5, "ripple amplitude");
         assert!(d.ripple[1] >= HALLWAY_RIPPLE_WAVES * 0.89);
         assert!((d.ripple[2] - HALLWAY_RIPPLE_SPEED).abs() < 1e-5);
         assert!(d.ripple[3] >= 0.55 && d.ripple[3] <= 0.85);
-        let boss = HallwayDistortion::from_pick_blind(BlindKind::Boss, 3, 2);
+        let boss = HallwayDistortion::from_pick_chamber(ChamberKind::Ordeal, 3, 2);
         assert!(
             boss.ripple[0] >= HALLWAY_RIPPLE_AMOUNT * 0.39,
             "boss ripple keeps a visibility floor"
@@ -848,7 +848,7 @@ mod tests {
     /// Pick-blind room (`hallway.glb`) — documents how many environment primitives carry glTF
     /// emissive; re-run after authoring so the count reflects `emissiveTexture` / factor.
     #[test]
-    fn pick_blind_camera_uses_tight_clip_planes() {
+    fn pick_chamber_camera_uses_tight_clip_planes() {
         let w = 1920.0;
         let h = 1080.0;
         let cam = super::hallway_camera_base(w, h, 1.0);
@@ -870,10 +870,10 @@ mod tests {
     }
 
     #[test]
-    fn pick_blind_hallway_has_walls_primitive() {
+    fn pick_chamber_hallway_has_walls_primitive() {
         let Some(file) = crate::asset_path::get("3d/hallway.glb") else {
             eprintln!(
-                "skip pick_blind_hallway_has_walls_primitive: no 3d/hallway.glb (bake packs or set MAHJURO_ASSETS)"
+                "skip pick_chamber_hallway_has_walls_primitive: no 3d/hallway.glb (bake packs or set MAHJURO_ASSETS)"
             );
             return;
         };
@@ -899,12 +899,12 @@ mod tests {
     }
 
     #[test]
-    fn pick_blind_room_emissive_material_summary() {
+    fn pick_chamber_room_emissive_material_summary() {
         let data = match crate::asset_path::get("3d/hallway.glb") {
             Some(f) => f.data,
             None => {
                 eprintln!(
-                    "skip pick_blind_room_emissive_material_summary: no 3d/hallway.glb (bake packs or set MAHJURO_ASSETS)"
+                    "skip pick_chamber_room_emissive_material_summary: no 3d/hallway.glb (bake packs or set MAHJURO_ASSETS)"
                 );
                 return;
             }
@@ -933,10 +933,10 @@ mod tests {
     /// When `3d/hallway.glb` is available (baked packs / `MAHJURO_ASSETS`), assert pick-blind boss
     /// authoring: named `default` / `boss` cameras, distinct framing, and `btn_play_boss` marker data.
     #[test]
-    fn pick_blind_hallway_boss_camera_and_play_boss_marker() {
+    fn pick_chamber_hallway_boss_camera_and_play_boss_marker() {
         let Some(file) = crate::asset_path::get("3d/hallway.glb") else {
             eprintln!(
-                "skip pick_blind_hallway_boss_camera_and_play_boss_marker: no 3d/hallway.glb (bake packs or set MAHJURO_ASSETS)"
+                "skip pick_chamber_hallway_boss_camera_and_play_boss_marker: no 3d/hallway.glb (bake packs or set MAHJURO_ASSETS)"
             );
             return;
         };
@@ -945,7 +945,7 @@ mod tests {
         if !by.contains_key("default") || !by.contains_key("boss") {
             let keys: Vec<&String> = by.keys().collect();
             eprintln!(
-                "skip pick_blind_hallway_boss_camera_and_play_boss_marker: need perspective camera nodes named `default` and `boss` (got {} named camera(s): {:?})",
+                "skip pick_chamber_hallway_boss_camera_and_play_boss_marker: need perspective camera nodes named `default` and `boss` (got {} named camera(s): {:?})",
                 keys.len(),
                 keys
             );
@@ -973,7 +973,7 @@ mod tests {
             .sum();
         assert!(
             diff_eye + diff_tgt > 1e-3,
-            "hallway `default` and `boss` cameras should differ in eye/target for pick_blind; got eye_sum_abs_diff={diff_eye} target_sum_abs_diff={diff_tgt}"
+            "hallway `default` and `boss` cameras should differ in eye/target for pick_chamber; got eye_sum_abs_diff={diff_eye} target_sum_abs_diff={diff_tgt}"
         );
 
         let has_boss_play = room_glb::marker_translation(&cpu, super::BTN_PLAY_BOSS).is_some()
@@ -982,13 +982,13 @@ mod tests {
                 .is_some();
         if !has_boss_play {
             eprintln!(
-                "skip pick_blind_hallway_boss_camera_and_play_boss_marker: add `btn_play_boss` (transform and/or mesh) for boss pick-blind play hit target"
+                "skip pick_chamber_hallway_boss_camera_and_play_boss_marker: add `btn_play_boss` (transform and/or mesh) for boss pick-blind play hit target"
             );
             return;
         }
 
-        let cam_pb_false = super::hallway_camera_pick_blind(1920.0, 1080.0, env_h, false);
-        let cam_pb_true = super::hallway_camera_pick_blind(1920.0, 1080.0, env_h, true);
+        let cam_pb_false = super::hallway_camera_pick_chamber(1920.0, 1080.0, env_h, false);
+        let cam_pb_true = super::hallway_camera_pick_chamber(1920.0, 1080.0, env_h, true);
         let d: f32 = cam_pb_false
             .eye
             .iter()
@@ -1003,7 +1003,7 @@ mod tests {
                 .sum::<f32>();
         assert!(
             d > 1e-3,
-            "hallway_camera_pick_blind(boss=false) vs boss=true should differ when default/boss cameras differ; got combined_abs_diff={d}"
+            "hallway_camera_pick_chamber(boss=false) vs boss=true should differ when default/boss cameras differ; got combined_abs_diff={d}"
         );
     }
 }

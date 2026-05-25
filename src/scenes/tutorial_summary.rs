@@ -11,8 +11,8 @@ use crate::ui::focus_nav;
 use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
-use super::main_menu_exterior::MainMenuExteriorScene;
 use super::guide::GuideScene;
+use super::main_menu_exterior::MainMenuExteriorScene;
 use super::{DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,9 +82,9 @@ impl SceneBehavior for TutorialSummaryScene {
         match action {
             Some(SummaryAction::Guide) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
-                *ctx.overlay_request = Some(super::OverlayRequest::Push(Box::new(
-                    Scene::Guide(GuideScene::new()),
-                )));
+                *ctx.overlay_request = Some(super::OverlayRequest::Push(Box::new(Scene::Guide(
+                    GuideScene::new(),
+                ))));
                 None
             }
             Some(SummaryAction::Continue) => {

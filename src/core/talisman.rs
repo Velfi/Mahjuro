@@ -191,18 +191,21 @@ impl TalismanKind {
     pub fn heightmap_paths() -> &'static [(&'static str, &'static str)] {
         &[
             ("textures/talismans/talisman_pearl.png", "talisman-pearl-hm"),
-            ("textures/talismans/talisman_gilded.png", "talisman-gilded-hm"),
+            (
+                "textures/talismans/talisman_gilded.png",
+                "talisman-gilded-hm",
+            ),
             (
                 "textures/talismans/talisman_polychrome.png",
                 "talisman-polychrome-hm",
             ),
             ("textures/talismans/talisman_souzu.png", "talisman-souzu-hm"),
             ("textures/talismans/talisman_pinzu.png", "talisman-pinzu-hm"),
+            ("textures/talismans/talisman_manzu.png", "talisman-manzu-hm"),
             (
-                "textures/talismans/talisman_manzu.png",
-                "talisman-manzu-hm",
+                "textures/talismans/talisman_honors.png",
+                "talisman-honors-hm",
             ),
-            ("textures/talismans/talisman_honors.png", "talisman-honors-hm"),
             (
                 "textures/talismans/talisman_wildflower.png",
                 "talisman-wildflower-hm",
@@ -232,7 +235,10 @@ impl TalismanKind {
                 "textures/talismans/talisman_souzu_mask.png",
                 "talisman-souzu-mask",
             ),
-            ("textures/talismans/talisman_pinzu_mask.png", "talisman-pinzu-mask"),
+            (
+                "textures/talismans/talisman_pinzu_mask.png",
+                "talisman-pinzu-mask",
+            ),
             (
                 "textures/talismans/talisman_manzu_mask.png",
                 "talisman-manzu-mask",

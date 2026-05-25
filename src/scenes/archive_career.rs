@@ -1,7 +1,7 @@
 //! Career stats for the Archive: Chronicle dashboard copy, folio labels, and
 //! personal-record / rivalry helpers.
 
-use crate::core::boss::{BossKind, all_bosses, final_bosses};
+use crate::core::ordeal::{OrdealKind, all_ordeals, final_ordeals};
 use crate::core::progression::{PlayerProgress, RunOutcome, RunRecord};
 use crate::core::tile::{Suit, Tile};
 use crate::core::yaku::YakuKind;
@@ -85,15 +85,15 @@ pub fn chronicle_run_log_title(
         RunOutcome::Defeat { .. } => "Defeat",
     };
     let boss = rec
-        .final_boss
+        .final_ordeal
         .map(|b| format!(" — {}", b.name()))
         .unwrap_or_default();
     format!("{pins}Run {display_num} — {outcome}{boss}")
 }
 
 /// Full boss name for run-log row line 2.
-pub fn chronicle_run_log_boss_line(rec: &RunRecord) -> Option<String> {
-    rec.final_boss.map(|b| b.name().to_string())
+pub fn chronicle_run_log_ordeal_line(rec: &RunRecord) -> Option<String> {
+    rec.final_ordeal.map(|b| b.name().to_string())
 }
 
 /// Sample tiles for chronicle screenshots / empty career hero.
@@ -149,13 +149,13 @@ pub fn chronicle_run_description(rec: &RunRecord) -> String {
         RunOutcome::Defeat { reason } => format!("Defeat ({reason:?})"),
     };
     let boss = rec
-        .final_boss
+        .final_ordeal
         .map(|b| format!("{}\n", b.name()))
         .unwrap_or_default();
     format!(
-        "{outcome}\n{boss}Ante {} · {} blind\nRound score {} / target {}\nRun total score {}\nBest hand: {} ({})\nMaterial {} · stake {}",
-        rec.final_ante,
-        rec.final_blind.name(),
+        "{outcome}\n{boss}Wing {} · {} chamber\nRound score {} / target {}\nRun total score {}\nBest hand: {} ({})\nMaterial {} · stake {}",
+        rec.final_wing,
+        rec.final_chamber.name(),
         rec.round_score,
         rec.target_score,
         rec.total_score_earned,
@@ -167,24 +167,28 @@ pub fn chronicle_run_description(rec: &RunRecord) -> String {
 }
 
 /// Optional nemesis only when the player lost to the same boss at least 3 times.
-fn nemesis_line(progress: &PlayerProgress) -> Option<(BossKind, u32, u32)> {
+fn nemesis_line(progress: &PlayerProgress) -> Option<(OrdealKind, u32, u32)> {
     const MIN_LOSSES: u32 = 3;
-    let mut best: Option<(BossKind, u32, u32)> = None;
+    let mut best: Option<(OrdealKind, u32, u32)> = None;
 
-    for def in all_bosses().iter().chain(final_bosses().iter()) {
+    for def in all_ordeals().iter().chain(final_ordeals().iter()) {
         let losses = progress
             .run_history
             .iter()
             .filter(|r| {
                 !r.tutorial_run
                     && matches!(r.outcome, RunOutcome::Defeat { .. })
-                    && r.final_boss == Some(def.kind)
+                    && r.final_ordeal == Some(def.kind)
             })
             .count() as u32;
         if losses < MIN_LOSSES {
             continue;
         }
-        let wins = progress.boss_times_defeated.get(&def.kind).copied().unwrap_or(0);
+        let wins = progress
+            .ordeal_times_defeated
+            .get(&def.kind)
+            .copied()
+            .unwrap_or(0);
         let replace = match best {
             None => true,
             Some((_, prev_losses, _)) => losses > prev_losses,
@@ -211,16 +215,16 @@ pub struct ScoreHistoryPoint {
 }
 
 #[derive(Clone, Debug)]
-pub struct BossRecordRow {
-    pub boss: BossKind,
+pub struct OrdealRecordRow {
+    pub ordeal: OrdealKind,
     pub wins: u32,
     pub losses: u32,
     pub best_score: u64,
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct AnteOutcomeCell {
-    pub ante: u32,
+pub struct WingOutcomeCell {
+    pub wing: u32,
     pub wins: u32,
     pub losses: u32,
 }
@@ -251,14 +255,14 @@ pub fn career_average_score(progress: &PlayerProgress) -> u64 {
     runs.iter().map(|r| r.total_score_earned).sum::<u64>() / runs.len() as u64
 }
 
-pub fn career_boss_records(progress: &PlayerProgress) -> Vec<BossRecordRow> {
+pub fn career_ordeal_records(progress: &PlayerProgress) -> Vec<OrdealRecordRow> {
     use std::collections::HashMap;
-    let mut by_boss: HashMap<BossKind, (u32, u32, u64)> = HashMap::new();
+    let mut by_ordeal: HashMap<OrdealKind, (u32, u32, u64)> = HashMap::new();
     for r in serious_records(progress) {
-        let Some(boss) = r.final_boss else {
+        let Some(boss) = r.final_ordeal else {
             continue;
         };
-        let e = by_boss.entry(boss).or_insert((0, 0, 0));
+        let e = by_ordeal.entry(boss).or_insert((0, 0, 0));
         match r.outcome {
             RunOutcome::Victory => e.0 += 1,
             RunOutcome::Defeat { .. } => e.1 += 1,
@@ -267,10 +271,10 @@ pub fn career_boss_records(progress: &PlayerProgress) -> Vec<BossRecordRow> {
             e.2 = r.total_score_earned;
         }
     }
-    let mut rows: Vec<BossRecordRow> = by_boss
+    let mut rows: Vec<OrdealRecordRow> = by_ordeal
         .into_iter()
-        .map(|(boss, (wins, losses, best_score))| BossRecordRow {
-            boss,
+        .map(|(ordeal, (wins, losses, best_score))| OrdealRecordRow {
+            ordeal,
             wins,
             losses,
             best_score,
@@ -280,28 +284,24 @@ pub fn career_boss_records(progress: &PlayerProgress) -> Vec<BossRecordRow> {
         b.losses
             .cmp(&a.losses)
             .then_with(|| b.wins.cmp(&a.wins))
-            .then_with(|| a.boss.name().cmp(b.boss.name()))
+            .then_with(|| a.ordeal.name().cmp(b.ordeal.name()))
     });
     rows.truncate(6);
     rows
 }
 
-pub fn career_ante_outcome_matrix(progress: &PlayerProgress) -> Vec<AnteOutcomeCell> {
+pub fn career_ante_outcome_matrix(progress: &PlayerProgress) -> Vec<WingOutcomeCell> {
     use std::collections::BTreeMap;
     let mut map: BTreeMap<u32, (u32, u32)> = BTreeMap::new();
     for r in serious_records(progress) {
-        let e = map.entry(r.final_ante).or_insert((0, 0));
+        let e = map.entry(r.final_wing).or_insert((0, 0));
         match r.outcome {
             RunOutcome::Victory => e.0 += 1,
             RunOutcome::Defeat { .. } => e.1 += 1,
         }
     }
     map.into_iter()
-        .map(|(ante, (wins, losses))| AnteOutcomeCell {
-            ante,
-            wins,
-            losses,
-        })
+        .map(|(wing, (wins, losses))| WingOutcomeCell { wing, wins, losses })
         .collect()
 }
 
@@ -377,7 +377,7 @@ pub fn career_kpi_strip(progress: &PlayerProgress) -> Vec<CareerKpi> {
             wins += 1;
         }
         total_score = total_score.saturating_add(r.total_score_earned);
-        max_ante = max_ante.max(r.final_ante);
+        max_ante = max_ante.max(r.final_wing);
         if r.total_score_earned >= best_run {
             best_run = r.total_score_earned;
             best_run_num = r.run_number;
@@ -394,7 +394,7 @@ pub fn career_kpi_strip(progress: &PlayerProgress) -> Vec<CareerKpi> {
             value: format!("{win_pct}% · {wins}/{n}"),
         },
         CareerKpi {
-            label: "Peak ante",
+            label: "Peak wing",
             value: format!("{max_ante}"),
         },
         CareerKpi {
@@ -515,10 +515,7 @@ pub fn format_run_ended_timestamp(unix: u64) -> String {
     let Some(dt) = Local.timestamp_opt(unix as i64, 0).single() else {
         return "Ended · time unknown".into();
     };
-    format!(
-        "Ended · {}",
-        dt.format("%A, %B %d, %Y · %-I:%M %p")
-    )
+    format!("Ended · {}", dt.format("%A, %B %d, %Y · %-I:%M %p"))
 }
 
 #[derive(Clone, Debug)]
@@ -537,14 +534,18 @@ pub struct RunDetailModel {
     pub tiles_representative: bool,
     pub yaku_rows: Vec<(YakuKind, u32)>,
     pub score_lines: Vec<String>,
-    pub ante_scores: Vec<(u32, u64)>,
+    pub wing_scores: Vec<(u32, u64)>,
     pub timeline: Vec<(u32, String, String)>,
     pub footer: Vec<(String, String)>,
     #[allow(dead_code)]
     pub discard_by_suit: crate::core::run_chronicle::DiscardBySuit,
 }
 
-pub fn run_detail_model(progress: &PlayerProgress, display_num: u32, rec: &RunRecord) -> RunDetailModel {
+pub fn run_detail_model(
+    progress: &PlayerProgress,
+    display_num: u32,
+    rec: &RunRecord,
+) -> RunDetailModel {
     use crate::core::run_chronicle::format_run_seed;
 
     let heading = chronicle_run_log_title(progress, display_num, rec);
@@ -566,10 +567,11 @@ pub fn run_detail_model(progress: &PlayerProgress, display_num: u32, rec: &RunRe
         .unwrap_or_else(|| rec.best_hand_tiles.clone());
     let mut tiles_representative = false;
     if tiles.is_empty()
-        && let Some(yk) = run_dominant_yaku(rec) {
-            tiles = yaku_page_tiles(yk);
-            tiles_representative = !tiles.is_empty();
-        }
+        && let Some(yk) = run_dominant_yaku(rec)
+    {
+        tiles = yaku_page_tiles(yk);
+        tiles_representative = !tiles.is_empty();
+    }
 
     let mut yaku_rows: Vec<(YakuKind, u32)> = if !rec.chronicle.yaku_contributions.is_empty() {
         rec.chronicle
@@ -599,7 +601,10 @@ pub fn run_detail_model(progress: &PlayerProgress, display_num: u32, rec: &RunRe
         ));
         score_lines.push(format!("Total {}", snap.total));
     } else {
-        score_lines.push(format!("Round {} / target {}", rec.round_score, rec.target_score));
+        score_lines.push(format!(
+            "Round {} / target {}",
+            rec.round_score, rec.target_score
+        ));
         score_lines.push(format!("Run total {}", rec.total_score_earned));
     }
     score_lines.push(format!(
@@ -611,10 +616,10 @@ pub fn run_detail_model(progress: &PlayerProgress, display_num: u32, rec: &RunRe
         score_lines.push(format!("Victory tier · {}", tier.label()));
     }
 
-    let ante_scores = if rec.score_after_ante.is_empty() {
-        vec![(rec.final_ante, rec.total_score_earned)]
+    let wing_scores = if rec.score_after_wing.is_empty() {
+        vec![(rec.final_wing, rec.total_score_earned)]
     } else {
-        rec.score_after_ante.clone()
+        rec.score_after_wing.clone()
     };
 
     let timeline = encounter_timeline(rec);
@@ -631,9 +636,9 @@ pub fn run_detail_model(progress: &PlayerProgress, display_num: u32, rec: &RunRe
             "Best combo".into(),
             format!(
                 "{}",
-                rec.chronicle.best_combo_han.max(
-                    (rec.best_structure_score / 100).min(u32::MAX as u64) as u32
-                )
+                rec.chronicle
+                    .best_combo_han
+                    .max((rec.best_structure_score / 100).min(u32::MAX as u64) as u32)
             ),
         ),
     ];
@@ -650,7 +655,7 @@ pub fn run_detail_model(progress: &PlayerProgress, display_num: u32, rec: &RunRe
         tiles_representative,
         yaku_rows,
         score_lines,
-        ante_scores,
+        wing_scores,
         timeline,
         footer,
         discard_by_suit: c.discards_by_suit.clone(),
@@ -678,17 +683,17 @@ fn encounter_timeline(rec: &RunRecord) -> Vec<(u32, String, String)> {
             .encounters
             .iter()
             .map(|e| {
-                let blind = if let Some(boss) = &e.boss {
-                    format!("{} ({})", e.blind_label, boss)
+                let blind = if let Some(boss) = &e.ordeal_name {
+                    format!("{} ({})", e.chamber_label, boss)
                 } else {
-                    e.blind_label.clone()
+                    e.chamber_label.clone()
                 };
                 let note = if e.reward_note.is_empty() {
                     e.outcome.clone()
                 } else {
                     format!("{} · {}", e.outcome, e.reward_note)
                 };
-                (e.ante, blind, note)
+                (e.wing, blind, note)
             })
             .collect();
     }
@@ -697,13 +702,13 @@ fn encounter_timeline(rec: &RunRecord) -> Vec<(u32, String, String)> {
 
 fn lite_encounter_timeline(rec: &RunRecord) -> Vec<(u32, String, String)> {
     let mut rows = Vec::new();
-    for ante in 1..=rec.final_ante.max(1) {
-        let blind = if ante == rec.final_ante {
-            rec.final_blind.name().to_string()
+    for ante in 1..=rec.final_wing.max(1) {
+        let blind = if ante == rec.final_wing {
+            rec.final_chamber.name().to_string()
         } else {
             "Cleared".into()
         };
-        let note = if ante == rec.final_ante {
+        let note = if ante == rec.final_wing {
             match rec.outcome {
                 RunOutcome::Victory => "Victory".into(),
                 RunOutcome::Defeat { .. } => "Defeat".into(),
@@ -774,24 +779,24 @@ pub fn tile_image_source(tile: &Tile) -> Option<ImageQuadSource> {
 
 #[cfg(test)]
 mod tests {
-    use super::{career_boss_records, format_run_ended_timestamp};
-    use crate::core::boss::BossKind;
+    use super::{career_ordeal_records, format_run_ended_timestamp};
+    use crate::core::ordeal::OrdealKind;
     use crate::core::progression::{PlayerProgress, RunOutcome, RunRecord};
-    use crate::core::rules::BlindKind;
+    use crate::core::rules::ChamberKind;
     use crate::core::stake::Stake;
     use crate::game::event_bus::GameOverReason;
     use crate::persistence::TileMaterial;
 
-    fn defeat_against(boss: BossKind, score: u64) -> RunRecord {
+    fn defeat_against(boss: OrdealKind, score: u64) -> RunRecord {
         RunRecord {
             timestamp_unix: 0,
             run_number: 1,
             outcome: RunOutcome::Defeat {
                 reason: GameOverReason::OutOfPlays,
             },
-            final_ante: 4,
-            final_blind: BlindKind::Boss,
-            final_boss: Some(boss),
+            final_wing: 4,
+            final_chamber: ChamberKind::Ordeal,
+            final_ordeal: Some(boss),
             round_score: score,
             target_score: 500,
             total_score_earned: score,
@@ -813,28 +818,34 @@ mod tests {
             tutorial_run: false,
             memorial_kind: None,
             best_hand_tiles: vec![],
-            score_after_ante: vec![],
+            score_after_wing: vec![],
             chronicle: crate::core::run_chronicle::RunChronicle::default(),
             duration_secs: 0,
         }
     }
 
     #[test]
-    fn career_boss_records_breaks_wl_ties_by_name() {
+    fn career_ordeal_records_breaks_wl_ties_by_name() {
         let mut progress = PlayerProgress::new();
         for _ in 0..5 {
-            progress.run_history.push(defeat_against(BossKind::Whisper, 52_371));
+            progress
+                .run_history
+                .push(defeat_against(OrdealKind::Whisper, 52_371));
         }
         for _ in 0..3 {
-            progress.run_history.push(defeat_against(BossKind::Gate, 34_047));
-            progress.run_history.push(defeat_against(BossKind::Drought, 8_769));
+            progress
+                .run_history
+                .push(defeat_against(OrdealKind::Gate, 34_047));
+            progress
+                .run_history
+                .push(defeat_against(OrdealKind::Drought, 8_769));
         }
 
-        let rows = career_boss_records(&progress);
+        let rows = career_ordeal_records(&progress);
         assert_eq!(rows.len(), 3);
-        assert_eq!(rows[0].boss, BossKind::Whisper);
-        assert_eq!(rows[1].boss, BossKind::Drought);
-        assert_eq!(rows[2].boss, BossKind::Gate);
+        assert_eq!(rows[0].ordeal, OrdealKind::Whisper);
+        assert_eq!(rows[1].ordeal, OrdealKind::Drought);
+        assert_eq!(rows[2].ordeal, OrdealKind::Gate);
     }
 
     #[test]
@@ -847,10 +858,7 @@ mod tests {
 
     #[test]
     fn run_ended_timestamp_unknown_when_zero() {
-        assert_eq!(
-            format_run_ended_timestamp(0),
-            "Ended · time unknown"
-        );
+        assert_eq!(format_run_ended_timestamp(0), "Ended · time unknown");
     }
 }
 

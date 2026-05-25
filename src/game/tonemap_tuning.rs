@@ -1,7 +1,7 @@
 //! Per-scene tonemap + VHS overlay tuning.
 //!
 //! One [`TonemapTuning`] is resolved every frame from the active scene key
-//! (`gameplay`, `shop`, `pick_blind`, …) and uploaded into
+//! (`gameplay`, `shop`, `pick_chamber`, …) and uploaded into
 //! [`crate::render::wgpu_renderer::TonemapParams`]. Live-edited from the
 //! Debug → Tuning → Tonemap... overlay; the overlay's Save action persists
 //! the value through [`crate::persistence`] under
@@ -10,7 +10,7 @@
 //!
 //! `vhs_*` amounts are the **absolute** values fed to the shader. A scene
 //! that wants the look really cranked can push them above the conservative
-//! defaults; a scene that should stay clean (e.g. `pick_blind` shrine
+//! defaults; a scene that should stay clean (e.g. `pick_chamber` shrine
 //! reveal) can zero individual knobs without touching the global Options
 //! toggle. The Options "VHS overlay: ON/OFF" gate still wins — when it's
 //! off, every per-scene VHS amount is ignored.
@@ -119,7 +119,7 @@ pub const FALLBACK_SCENE_KEY: &str = "_default";
 pub const KNOWN_SCENE_KEYS: &[&str] = &[
     "gameplay",
     "shop",
-    "pick_blind",
+    "pick_chamber",
     "main_menu_exterior",
     "tutorial",
     "collection",

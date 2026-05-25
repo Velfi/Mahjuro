@@ -11,8 +11,7 @@ pub const SECTION_TILES: &str = "TILES & CHIPS";
 pub const TILES_INTRO: &str = "Tiles in your Structure are tallied when you Cash In.";
 
 pub const SECTION_YAKU: &str = "YAKU";
-pub const YAKU_INTRO: &str =
-    "Yaku are bonus patterns made from melds. When you Cash In, each yaku your structure matches adds chips and mult.";
+pub const YAKU_INTRO: &str = "Yaku are bonus patterns made from melds. When you Cash In, each yaku your structure matches adds chips and mult.";
 pub const YAKU_TABLE_HEADER: (&str, &str, &str) = ("Yaku", "+Mult", "+Chips");
 pub const YAKU_TABLE_ROWS: &[(&str, &str, &str)] = &[
     ("Tanyao", "2.0", "30"),
@@ -23,10 +22,8 @@ pub const YAKU_TABLE_ROWS: &[(&str, &str, &str)] = &[
 pub const SECTION_SCORE: &str = "YOUR SCORE";
 pub const SCORE_INTRO: &str = "When you Cash In:";
 pub const FINAL_EQUATION: &str = "score = chips × mult";
-pub const SCORE_CHIPS_LINE: &str =
-    "Chips = tile values + yaku chips + dora + relics";
-pub const SCORE_MULT_LINE: &str =
-    "Mult = 1.0 + yaku mult + relic mult + boss rules";
+pub const SCORE_CHIPS_LINE: &str = "Chips = tile values + yaku chips + dora + relics";
+pub const SCORE_MULT_LINE: &str = "Mult = 1.0 + yaku mult + relic mult + boss rules";
 pub const SCORE_EXAMPLE: &str = "Example: 200 chips × 3.0 mult = 600 score";
 
 /// Arrow glyph between loop diagram stages.

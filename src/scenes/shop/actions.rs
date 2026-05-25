@@ -284,11 +284,11 @@ impl ShopScene {
     pub(super) fn continue_scene(&self, run: &mut crate::game::run::RunState) -> Scene {
         if self.mode == ShopMode::Tutorial {
             GameEngine::transition_to_onboarding_finale(run);
-            Scene::Gameplay(Box::new(GameplayScene::with_pending_blind(
-                crate::core::rules::BlindKind::Boss,
+            Scene::Gameplay(Box::new(GameplayScene::with_pending_chamber(
+                crate::core::rules::ChamberKind::Ordeal,
             )))
         } else {
-            Scene::PickBlind(PickBlindScene::new())
+            Scene::PickChamber(PickChamberScene::new())
         }
     }
 

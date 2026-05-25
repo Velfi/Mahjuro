@@ -26,6 +26,7 @@ struct OpsFlags {
     needs_table: bool,
     shop_env: bool,
     hallway_env: bool,
+    staircase_env: bool,
     archive_env: bool,
     main_menu_env: bool,
     gameplay_env: bool,
@@ -40,6 +41,7 @@ impl OpsFlags {
                 RenderOp::Table => f.needs_table = true,
                 RenderOp::ShopEnvironment => f.shop_env = true,
                 RenderOp::HallwayEnvironment => f.hallway_env = true,
+                RenderOp::StaircaseEnvironment => f.staircase_env = true,
                 RenderOp::ArchiveEnvironment => f.archive_env = true,
                 RenderOp::MainMenuEnvironment => f.main_menu_env = true,
                 RenderOp::GameplayEnvironment => f.gameplay_env = true,
@@ -50,6 +52,7 @@ impl OpsFlags {
             if f.needs_table
                 && f.shop_env
                 && f.hallway_env
+                && f.staircase_env
                 && f.archive_env
                 && f.main_menu_env
                 && f.gameplay_env
@@ -645,6 +648,10 @@ impl WgpuRenderer {
                     ops.push(RenderOp::HallwayEnvironment);
                     i += 1;
                 }
+                DrawCmd::StaircaseEnvironment => {
+                    ops.push(RenderOp::StaircaseEnvironment);
+                    i += 1;
+                }
                 DrawCmd::ArchiveEnvironment => {
                     ops.push(RenderOp::ArchiveEnvironment);
                     i += 1;
@@ -1010,10 +1017,11 @@ impl WgpuRenderer {
         let shadow_light_changed = self.cached_shadow_light_view_proj != light_view_proj_arr;
         self.cached_shadow_light_view_proj = light_view_proj_arr;
         let mut shadow_uniforms_changed = shadow_just_enabled || shadow_light_changed;
-        let mut object3d_shadow = shadows_enabled.then_some(super::shadow_setup::Object3dShadowCtx {
-            light_view_proj: light_view_proj_arr,
-            changed: &mut shadow_uniforms_changed,
-        });
+        let mut object3d_shadow =
+            shadows_enabled.then_some(super::shadow_setup::Object3dShadowCtx {
+                light_view_proj: light_view_proj_arr,
+                changed: &mut shadow_uniforms_changed,
+            });
 
         self.run_object3d_placement(
             frame,
@@ -1096,10 +1104,9 @@ impl WgpuRenderer {
         let baked_loaded = active_env.and_then(|env| {
             super::shadow_setup::room_baked_shadow_loaded(&self.room_baked_shadow_gpu, env)
         });
-        let room_uses_baked_shadow = super::shadow_setup::room_env_uses_offline_baked_shadow(
-            active_env,
-            baked_loaded,
-        ) && self.room_shadow_capture_pending.is_none();
+        let room_uses_baked_shadow =
+            super::shadow_setup::room_env_uses_offline_baked_shadow(active_env, baked_loaded)
+                && self.room_shadow_capture_pending.is_none();
         if ops_flags.shop_env {
             let shop_room_shadow = (shadows_enabled
                 && frame.shop_inspect_shadow_target.is_none()
@@ -1112,6 +1119,15 @@ impl WgpuRenderer {
         }
         if ops_flags.hallway_env {
             self.write_hallway_environment_uniforms(
+                frame,
+                &camera,
+                false,
+                (shadows_enabled && !room_uses_baked_shadow)
+                    .then_some((light_view_proj_arr, &mut shadow_uniforms_changed)),
+            );
+        }
+        if ops_flags.staircase_env {
+            self.write_staircase_environment_uniforms(
                 frame,
                 &camera,
                 false,
@@ -1171,19 +1187,18 @@ impl WgpuRenderer {
             &tile_3d_rects,
         );
 
-        let room_shadow_capture_staging =
-            self.room_shadow_capture_pending.map(|room| {
-                use crate::render::wgpu_renderer::runtime::shadow_setup::SHADOW_MAP_SIZE;
-                const BIAS: f32 = 0.005;
-                self.encode_room_shadow_capture_copy(
-                    &mut encoder,
-                    room,
-                    SHADOW_MAP_SIZE as u32,
-                    SHADOW_MAP_SIZE as u32,
-                    light_view_proj_arr,
-                    BIAS,
-                )
-            });
+        let room_shadow_capture_staging = self.room_shadow_capture_pending.map(|room| {
+            use crate::render::wgpu_renderer::runtime::shadow_setup::SHADOW_MAP_SIZE;
+            const BIAS: f32 = 0.005;
+            self.encode_room_shadow_capture_copy(
+                &mut encoder,
+                room,
+                SHADOW_MAP_SIZE as u32,
+                SHADOW_MAP_SIZE as u32,
+                light_view_proj_arr,
+                BIAS,
+            )
+        });
 
         // Pass A renders into `scene_color_view`
         // (`Rgba16Float`). Do not key this on `is_prepass`: the journal
@@ -1504,6 +1519,7 @@ impl WgpuRenderer {
         let room_glb_emissive_env = frame.uses_room_glb_shader()
             && (ops_flags.shop_env
                 || ops_flags.hallway_env
+                || ops_flags.staircase_env
                 || ops_flags.archive_env
                 || ops_flags.main_menu_env
                 || ops_flags.gameplay_env);
@@ -1581,6 +1597,42 @@ impl WgpuRenderer {
                     self.draw_hallway_environment_meshes(&mut pass, frame, true);
                 }
                 self.write_hallway_environment_uniforms(frame, &camera, false, None);
+            }
+            if ops_flags.staircase_env
+                && self.staircase_environment.is_some()
+                && !self.staircase_env_primitives.is_empty()
+            {
+                self.write_staircase_environment_uniforms(frame, &camera, true, None);
+                {
+                    let room_bloom_ts = self
+                        .gpu_profiler
+                        .pass_writes(crate::render::gpu_profiler::PassSlot::RoomBloom);
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("staircase-emissive-prefetch-pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &self.room_emissive_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                store: wgpu::StoreOp::Store,
+                            },
+                            depth_slice: None,
+                        })],
+                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                            view: &self.depth_view,
+                            depth_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Load,
+                                store: wgpu::StoreOp::Store,
+                            }),
+                            stencil_ops: None,
+                        }),
+                        occlusion_query_set: None,
+                        timestamp_writes: room_bloom_ts,
+                        multiview_mask: None,
+                    });
+                    self.draw_staircase_environment_meshes(&mut pass, frame, true);
+                }
+                self.write_staircase_environment_uniforms(frame, &camera, false, None);
             }
             if ops_flags.archive_env
                 && self.archive_environment.is_some()
@@ -1715,6 +1767,17 @@ impl WgpuRenderer {
                 })
             } else if ops_flags.hallway_env {
                 crate::render::hallway_glb::with_hallway_glb_cpu(|cpu| {
+                    cpu.and_then(|c| {
+                        let corners = crate::render::room_glb::room_world_bounds_corners_centered(
+                            camera.h,
+                            self.room_gltf_height_scale,
+                            c,
+                        );
+                        crate::render::room_glb::room_probe_world_aabb(&corners, 0.035)
+                    })
+                })
+            } else if ops_flags.staircase_env {
+                crate::render::staircase_glb::with_staircase_glb_cpu(|cpu| {
                     cpu.and_then(|c| {
                         let corners = crate::render::room_glb::room_world_bounds_corners_centered(
                             camera.h,
@@ -2035,14 +2098,14 @@ impl WgpuRenderer {
         let bloom_h = (self.size.height.max(1) / 2).max(1);
         // `scene_color` is linear HDR — see `tonemap_composite.wgsl`.
         //
-        // Bloom extract threshold must stay **high (~1.0 scene-linear luminance)**:
+        // Bloom extract threshold must stay **high (~1.0+ scene-linear luminance)**:
         // the old two-texture path used this level on `scene_color` while routing
         // room emissive through a separate low-threshold buffer. A low threshold
         // here (e.g. 0.04) pulls in the procedural starfield and every mid-bright
-        // pixel, which half-res blur turns into large glowing discs.
-        let bloom_threshold = if bloom_active { 1.05 } else { 9999.0 };
-        let bloom_strength = if bloom_active { 0.92 } else { 0.0 };
-        let bloom_extract_scale = if bloom_active { 1.15 } else { 0.0 };
+        // pixel, which half-res blur turns into large glowing discs. Strength scales
+        // with room linear exposure — emissive is absolute HDR while lit crush is not.
+        let (bloom_threshold, bloom_strength, bloom_extract_scale) =
+            Self::bloom_render_tuning(frame, self.shop_env_linear_exposure);
         let extract_params = BloomParams {
             data0: [
                 bloom_threshold,

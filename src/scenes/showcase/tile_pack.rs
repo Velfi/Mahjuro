@@ -23,7 +23,7 @@ use crate::render::world_space::pixel_to_world;
 use crate::scenes::celebration_overlay::{
     self, CelebrationOverlayScratch, CelebrationShowcaseIntroGate, ShootingStarCelebrationIntro,
 };
-use crate::scenes::shop::pack_celebration::{PackCelebration, PackCelebPhase};
+use crate::scenes::shop::pack_celebration::{PackCelebPhase, PackCelebration};
 use crate::scenes::shop::shop_celebration_camera;
 use crate::ui::input::UiAction;
 use crate::ui::layout::LayoutResult;
@@ -317,7 +317,8 @@ impl TilePackPresenter {
                 let last_glow = deal_elapsed >= last_land_t
                     && deal_elapsed < last_land_t + PackCelebration::LAST_TILE_GLOW_SECS;
 
-                let total_w = n as f32 * row.silhouette_w + (n.saturating_sub(1)) as f32 * row.gap_px;
+                let total_w =
+                    n as f32 * row.silhouette_w + (n.saturating_sub(1)) as f32 * row.gap_px;
                 let row_cx = row.row_x0 + total_w * 0.5;
                 let deal_t = (deal_elapsed / celeb.total_duration().max(0.01)).clamp(0.0, 1.0);
                 let wash_cx = src_px + (row_cx - src_px) * deal_t;
@@ -461,7 +462,9 @@ impl TilePackPresenter {
         let content_alpha = self.intro_content_alpha(&ctx);
         let dimmer_alpha = pack_celebration_dimmer_alpha(content_alpha, &self.celebration);
         let dolly = match self.celebration.phase {
-            PackCelebPhase::Unseal => UNSEAL_DOLLY_PULL * ease_out_cubic(self.celebration.unseal_t()),
+            PackCelebPhase::Unseal => {
+                UNSEAL_DOLLY_PULL * ease_out_cubic(self.celebration.unseal_t())
+            }
             PackCelebPhase::Deal => UNSEAL_DOLLY_PULL,
             _ => 0.0,
         };
@@ -472,11 +475,13 @@ impl TilePackPresenter {
         frame.camera_override = Some(cam);
         frame.scene_lighting.embedded_gltf_punctual = false;
         frame.scene_lighting.room_glb_brdf = false;
-        frame.scene_lighting.set_smooth_points(pack_celebration_point_lights(
-            &self.celebration,
-            ctx.layout,
-            &self.positions,
-        ));
+        frame
+            .scene_lighting
+            .set_smooth_points(pack_celebration_point_lights(
+                &self.celebration,
+                ctx.layout,
+                &self.positions,
+            ));
         frame.scene_lighting.spot_lights = pack_celebration_spot_lights(
             &self.celebration,
             ctx.layout,
@@ -915,9 +920,8 @@ pub(crate) fn pack_closeup_world_extents(
 ) -> [f32; 3] {
     use glam::Vec3;
 
-    let center = crate::render::world_space::world_on_camera_ray_plane_z(
-        win_w, win_h, cam, px, py, plane_z,
-    );
+    let center =
+        crate::render::world_space::world_on_camera_ray_plane_z(win_w, win_h, cam, px, py, plane_z);
     let eye = Vec3::from_array(cam.eye);
     let dist = (eye - center).length().max(1.0);
     let h = win_h.max(1e-6);
@@ -928,11 +932,7 @@ pub(crate) fn pack_closeup_world_extents(
     let world_h = (screen_h_px / h) * visible_h;
     let screen_w_px = screen_h_px * crate::core::tile_pack::PACK_ASPECT_W_OVER_H;
     let world_w = (screen_w_px / w) * visible_w;
-    [
-        world_w.max(1.0),
-        world_h * 0.10,
-        world_h.max(1.0),
-    ]
+    [world_w.max(1.0), world_h * 0.10, world_h.max(1.0)]
 }
 
 pub(crate) fn pack_closeup_anchor(
@@ -1026,11 +1026,15 @@ mod tests {
             box_h,
         );
         let center = crate::render::world_space::world_on_camera_ray_plane_z(
-            w, h, &cam, anchor.pos[0], anchor.pos[1], anchor.pos[2],
+            w,
+            h,
+            &cam,
+            anchor.pos[0],
+            anchor.pos[1],
+            anchor.pos[2],
         );
         let rot = anchor.object3d_rotation();
-        let oriented =
-            crate::render::table_transform::rot_euler_xyz_rad(rot[0], rot[1], rot[2]);
+        let oriented = crate::render::table_transform::rot_euler_xyz_rad(rot[0], rot[1], rot[2]);
         let model = translate_rot_scale(center, oriented, Vec3::from(extents));
 
         let mut ndc_min = Vec3::splat(f32::INFINITY);

@@ -179,7 +179,7 @@ struct SsrGlobals {
     // w = ambient hemispheric scale (see `upload_camera_uniforms`).
     felt: vec4<f32>,
     // x = 1/shop_env_world_scale for embedded glTF punctual (document-space falloff); 0 = world units.
-    // y = shop vitrine material tuning (1 = shop + embedded punctual); attenuation uses x only.
+    // y = shop display-case material tuning (1 = shop + embedded punctual); attenuation uses x only.
     shop_punctual: vec4<f32>,
 };
 @group(3) @binding(1) var<uniform> ssr_globals: SsrGlobals;
@@ -849,7 +849,7 @@ fn fs_main(
     let felt_lod = clamp(ssr_globals.felt.x, 0.0, 2.0);
     let phys_hdr = clamp(ssr_globals.felt.y, 0.0, 1.0);
     // Shop storeroom-only albedo / spec / ambient tweaks (see `shop_punctual.y` upload).
-    let shop_vitrine_tuning = phys_hdr > 0.5 && ssr_globals.shop_punctual.y > 0.5;
+    let shop_display_case_tuning = phys_hdr > 0.5 && ssr_globals.shop_punctual.y > 0.5;
 
     // Brass is a conductor too; group with metal for the per-light
     // Fresnel-spec branch and for the rim halo. Skips the coin-face
@@ -1016,10 +1016,10 @@ fn fs_main(
         if (relic_front_tex > 0.48 && tex_sample.a < (16.0 / 255.0)) {
             discard;
         }
-        // Shop GLB vitrine: caps used `tex_rgb` alone — under punctual + key shadow,
+        // Shop GLB display case: caps used `tex_rgb` alone — under punctual + key shadow,
         // dark tex reads as a black slab while foil/talisman spec stays hot. Tint caps
         // by `base_color` like the sides so material + rarity survive.
-        if (shop_vitrine_tuning) {
+        if (shop_display_case_tuning) {
             let tinted = mesh.base_color.rgb * tex_rgb;
             albedo = mix(mesh.base_color.rgb, tinted, relic_front_tex);
         } else {
@@ -2379,11 +2379,11 @@ fn fs_main(
     if (decal_metallic > 0.001) {
         diffuse_scale = mix(diffuse_scale, 0.12, decal_metallic);
     }
-    let shop_vitrine_d = shop_vitrine_tuning;
-    if (shop_vitrine_d && is_foil) {
+    let shop_display_case_d = shop_display_case_tuning;
+    if (shop_display_case_d && is_foil) {
         diffuse_scale = diffuse_scale * 0.58;
     }
-    if (shop_vitrine_d && is_talisman && !is_chitin) {
+    if (shop_display_case_d && is_talisman && !is_chitin) {
         diffuse_scale = diffuse_scale * 0.62;
     }
     if (is_wood) {
@@ -2398,22 +2398,22 @@ fn fs_main(
         // ratio between channels so the chroma stays warm.
         lit = lit / (vec3<f32>(1.0) + lit * 0.55);
     }
-    // Shop vitrine enamel: diffuse is already balanced vs foil via shadow floor + albedo tint;
+    // Shop display-case enamel: diffuse is already balanced vs foil via shadow floor + albedo tint;
     // skip extra `lit` knee so relics don't fall to black next to spec-heavy props.
     // Conductors: soften only extreme hot spec (metal props), not enough to kill readable highlights.
-    if (shop_vitrine_tuning && is_conductor) {
+    if (shop_display_case_tuning && is_conductor) {
         spec_acc = spec_acc / (vec3<f32>(1.0) + spec_acc * 0.07);
     }
-    // Vitrine: foil packs + carved talismans keep extra spec/sheen lobes; pull them back so relic
+    // Display case: foil packs + carved talismans keep extra spec/sheen lobes; pull them back so relic
     // enamel (diffuse-led) isn't the only thing that looks under-lit.
-    let shop_vitrine = shop_vitrine_tuning;
-    if (shop_vitrine && is_foil) {
+    let shop_display_case = shop_display_case_tuning;
+    if (shop_display_case && is_foil) {
         spec_acc = spec_acc * 0.22;
         sheen_acc = sheen_acc * 0.22;
-    } else if (shop_vitrine && is_chitin) {
+    } else if (shop_display_case && is_chitin) {
         spec_acc = spec_acc * 0.68;
         sheen_acc = sheen_acc * 0.80;
-    } else if (shop_vitrine && is_talisman) {
+    } else if (shop_display_case && is_talisman) {
         spec_acc = spec_acc * 0.26;
         sheen_acc = sheen_acc * 0.26;
     }
@@ -2488,7 +2488,7 @@ fn fs_main(
             );
             albedo = mix(albedo, holo, rim);
         }
-        if (shop_vitrine && !is_chitin) {
+        if (shop_display_case && !is_chitin) {
             albedo = albedo * 0.86;
         }
     }
@@ -2521,7 +2521,7 @@ fn fs_main(
         // on shadowed edges, which the per-light spec can't deliver.
         let rim_gain = mix(albedo, albedo * 0.6 + holo * 0.5, rim);
         albedo = rim_gain;
-        if (shop_vitrine_tuning) {
+        if (shop_display_case_tuning) {
             albedo = albedo * 0.84;
         }
     }
@@ -2567,13 +2567,13 @@ fn fs_main(
     // Directional shadow map (mesh casters): PCF visibility in key-light
     // space. Analytic candle AABB occlusion (`cand_vis` above) still gates
     // each wick; this adds contact shadows from tall geometry onto the felt.
-    let shop_vitrine_shadow = shop_vitrine_tuning;
-    var lit_vitrine = lit;
-    if (shop_vitrine_shadow && is_foil) {
-        lit_vitrine = lit_vitrine * 0.40;
+    let shop_display_case_shadow = shop_display_case_tuning;
+    var lit_display_case = lit;
+    if (shop_display_case_shadow && is_foil) {
+        lit_display_case = lit_display_case * 0.40;
     }
-    if (shop_vitrine_shadow && is_talisman) {
-        lit_vitrine = lit_vitrine * 0.45;
+    if (shop_display_case_shadow && is_talisman) {
+        lit_display_case = lit_display_case * 0.45;
     }
     // Readable portrait silk (showcase zodiac ribbon): same rule as archive
     // description decals — do not stain copy with the key-light shadow map.
@@ -2582,10 +2582,10 @@ fn fs_main(
         1.0,
         skip_directional_shadow,
     );
-    if (shop_vitrine_shadow && is_enamel) {
+    if (shop_display_case_shadow && is_enamel) {
         shadow_vis = max(shadow_vis, 0.58);
     }
-    let lit_shadowed = lit_vitrine * shadow_vis;
+    let lit_shadowed = lit_display_case * shadow_vis;
     // Reinhard-knee the coat accumulator on wood: with many candles
     // contributing additive white highlights, the lacquer lobe was
     // piling up past 1.0 and milkifying the deep walnut. The knee

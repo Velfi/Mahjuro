@@ -114,7 +114,7 @@ impl ShowcaseRenderHints {
             Some(
                 "shop"
                     | "tutorial"
-                    | "pick_blind"
+                    | "pick_chamber"
                     | "main_menu_exterior"
                     | "tile_pack_celebration"
                     | "guide"
@@ -501,10 +501,10 @@ pub enum Object3dKind {
     MemorialTalisman {
         kind: crate::core::memorial_talisman::MemorialTalismanKind,
     },
-    /// Boss encounter icon — extruded silhouette mesh from `textures/boss_icons/`
+    /// Boss encounter icon — extruded silhouette mesh from `textures/ordeal_icons/`
     /// (same mesh builder as [`Relic`], archive cubbies + pedestal close-up).
     BossIcon {
-        kind: crate::core::boss::BossKind,
+        kind: crate::core::ordeal::OrdealKind,
         glow: f32,
         pick_id: Option<u32>,
     },
@@ -738,6 +738,8 @@ pub enum DrawCmd {
     ShopEnvironment,
     /// Imported `hallway.glb` pick-blind room (same GPU path as [`DrawCmd::ShopEnvironment`]).
     HallwayEnvironment,
+    /// Imported `staircase.glb` post-ordeal interstitial (same GPU path as [`DrawCmd::ShopEnvironment`]).
+    StaircaseEnvironment,
     /// Imported `archive.glb` Archive room (same GPU path as [`DrawCmd::ShopEnvironment`]).
     ArchiveEnvironment,
     /// Imported `main_menu.glb` hub waterfront (same GPU path as [`DrawCmd::ShopEnvironment`]).
@@ -915,6 +917,10 @@ impl UiFrame {
     pub fn hallway_environment(&mut self) {
         self.cmds.push(DrawCmd::HallwayEnvironment);
     }
+    /// Draw the post-ordeal staircase from embedded [`staircase.glb`](../../assets/3d/staircase.glb).
+    pub fn staircase_environment(&mut self) {
+        self.cmds.push(DrawCmd::StaircaseEnvironment);
+    }
     /// Draw [`archive.glb`](../../assets/3d/archive.glb). No-op if the asset failed to load.
     pub fn archive_environment(&mut self) {
         self.cmds.push(DrawCmd::ArchiveEnvironment);
@@ -1033,6 +1039,7 @@ impl UiFrame {
                 | DrawCmd::ShootingStarCascade
                 | DrawCmd::ShopEnvironment
                 | DrawCmd::HallwayEnvironment
+                | DrawCmd::StaircaseEnvironment
                 | DrawCmd::ArchiveEnvironment
                 | DrawCmd::MainMenuEnvironment
                 | DrawCmd::GameplayEnvironment
@@ -1069,6 +1076,7 @@ pub fn apply_modal_relic_staging(
                 | DrawCmd::TileFaceQuad(_)
                 | DrawCmd::ShopEnvironment
                 | DrawCmd::HallwayEnvironment
+                | DrawCmd::StaircaseEnvironment
                 | DrawCmd::ArchiveEnvironment
                 | DrawCmd::MainMenuEnvironment
                 | DrawCmd::Table

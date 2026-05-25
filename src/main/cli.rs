@@ -93,10 +93,10 @@ pub struct ScreenshotCli {
     /// Extra idle ticks before the capture frame (layout/asset settling).
     #[arg(long, default_value_t = 12)]
     pub warmup_frames: u32,
-    /// Boss slug for runs where gameplay bosses matter (`gameplay`, `pick_blind`, …).
+    /// Ordeal slug for runs where gameplay ordeals matter (`gameplay`, `pick_chamber`, …).
     /// Parsed but otherwise low impact for menu-only scenes.
-    #[arg(long)]
-    pub boss: Option<String>,
+    #[arg(long, alias = "boss")]
+    pub ordeal: Option<String>,
     #[arg(long)]
     pub fresh_progress: bool,
     /// Drive shop focus to a specific prop or item before capture, so
@@ -107,7 +107,7 @@ pub struct ScreenshotCli {
     #[arg(long)]
     pub shop_focus: Option<String>,
     /// Override `RoomEnvLightingTune::gltf_emissive_scale` for this capture
-    /// (glTF room mesh emissive gain). Compare e.g. `1` vs `12` on `--scene pick_blind`.
+    /// (glTF room mesh emissive gain). Compare e.g. `1` vs `12` on `--scene pick_chamber`.
     #[arg(long)]
     pub gltf_emissive_scale: Option<f32>,
     /// Zodiac animal slug for `--scene zodiac_celebration` or `--scene showcase`
@@ -200,7 +200,7 @@ pub struct BotCli {
     pub sell_max_per_visit: Option<u32>,
     /// In-blind expectimax depth (`0` = legacy greedy, `1` = one-ply unified, `2` = recommended default, `3` = pruned).
     #[arg(long, default_value_t = 2)]
-    pub blind_planner_depth: u32,
+    pub chamber_planner_depth: u32,
 }
 
 #[derive(Debug, Args)]
@@ -242,14 +242,10 @@ impl BotCli {
             starting_discards: self.discards,
             starting_gold: self.gold,
             stake: self.stake,
-            sell_enabled: if self.sell_enabled {
-                Some(true)
-            } else {
-                None
-            },
+            sell_enabled: if self.sell_enabled { Some(true) } else { None },
             sell_hold_threshold: self.sell_hold_threshold,
             sell_max_per_visit: self.sell_max_per_visit,
-            blind_planner_depth: Some(self.blind_planner_depth),
+            chamber_planner_depth: Some(self.chamber_planner_depth),
             ..Default::default()
         }
     }

@@ -1,10 +1,10 @@
 use crate::core::deck::Wall;
-use crate::core::rules::BlindKind;
+use crate::core::rules::ChamberKind;
 use crate::game::engine_state::GameplayCoreState;
 use crate::game::game_mode::GameMode;
 use crate::game::onboarding::{
     LESSONS_DISCARDS, LESSONS_HAND_SIZE, LESSONS_PLAYS, LESSONS_TARGET, OnboardingPhase,
-    OnboardingState, TUTORIAL_BOSS, tutorial_yaku,
+    OnboardingState, TUTORIAL_ORDEAL, tutorial_yaku,
 };
 use crate::game::run::RunState;
 
@@ -28,15 +28,15 @@ impl RunState {
         state.base_target = LESSONS_TARGET;
         state.target_score = LESSONS_TARGET;
         state.gold = state.mode.starting_gold as i32;
-        state.ante = 1;
+        state.wing = 1;
         state.run_number = 1;
-        state.blind = BlindKind::Small;
-        state.upcoming_blind = BlindKind::Small;
+        state.chamber = ChamberKind::Small;
+        state.upcoming_chamber = ChamberKind::Small;
         state.onboarding = Some(OnboardingState::new());
-        state.boss.upcoming = Some(TUTORIAL_BOSS);
-        state.resolve_upcoming_boss();
-        state.small_blind_tag = None;
-        state.big_blind_tag = None;
+        state.ordeal.upcoming = Some(TUTORIAL_ORDEAL);
+        state.resolve_upcoming_ordeal();
+        state.small_chamber_tag = None;
+        state.big_chamber_tag = None;
         state.tag_free_reroll = false;
         state.tag_patron_gift = false;
         state.tag_rich_stock = false;
@@ -80,9 +80,9 @@ impl RunState {
         self.available_yaku = Vec::new();
         self.base_target = LESSONS_TARGET;
         self.target_score = LESSONS_TARGET;
-        self.blind = BlindKind::Small;
-        self.upcoming_blind = BlindKind::Small;
-        self.boss.upcoming = None;
+        self.chamber = ChamberKind::Small;
+        self.upcoming_chamber = ChamberKind::Small;
+        self.ordeal.upcoming = None;
     }
 
     pub fn begin_onboarding_finale(&mut self) {
@@ -91,9 +91,9 @@ impl RunState {
             onboarding.finale_intro_shown = false;
         }
         self.available_yaku = tutorial_yaku();
-        self.boss.upcoming = Some(TUTORIAL_BOSS);
-        self.resolve_upcoming_boss();
-        self.upcoming_blind = BlindKind::Boss;
+        self.ordeal.upcoming = Some(TUTORIAL_ORDEAL);
+        self.resolve_upcoming_ordeal();
+        self.upcoming_chamber = ChamberKind::Ordeal;
     }
 
     /// After losing the onboarding boss blind, reset the round without advancing.
@@ -134,7 +134,7 @@ impl RunState {
             overflow,
         );
         self.hand.clear();
-        let draw_count = crate::core::boss::effective_hand_size(self);
+        let draw_count = crate::core::ordeal::effective_hand_size(self);
         for _ in 0..draw_count {
             if let Some(t) = self.wall.draw() {
                 self.hand.push(t);

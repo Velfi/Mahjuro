@@ -123,6 +123,11 @@ impl WgpuRenderer {
                 silk_mat.kind,
             );
         }
-        self.push_object3d_draw(object3d_draw_list, object3d_shadow_draw_list, DrawKind::Ribbon, slot_i);
+        self.push_object3d_draw(
+            object3d_draw_list,
+            object3d_shadow_draw_list,
+            DrawKind::Ribbon,
+            slot_i,
+        );
     }
 }

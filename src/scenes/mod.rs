@@ -4,31 +4,33 @@
 pub mod archive_career;
 pub mod celebration_overlay;
 pub mod collection;
+pub(crate) mod flowers_intro_copy;
 pub mod game_over;
 mod game_over_tableau;
 pub mod gameplay;
+pub mod guide;
 pub mod journal_transition;
 pub mod lamp_moths;
 pub mod main_menu_exterior;
 pub mod material_viewer;
-pub mod guide;
+pub(crate) mod melds_intro_copy;
 pub mod object3d_inspect;
 pub mod options;
 pub mod pause_menu;
-pub mod pick_blind;
+pub mod pick_chamber;
+pub mod staircase;
 pub mod profile_select;
 pub mod rumble_lab;
+pub(crate) mod scoring_intro_copy;
 pub mod shop;
 pub mod showcase;
 pub mod showcase_stage;
 pub mod splash;
 pub mod start_game_modal;
-pub mod transition_playground;
-pub(crate) mod flowers_intro_copy;
-pub(crate) mod melds_intro_copy;
-pub(crate) mod scoring_intro_copy;
-pub(crate) mod tiles_intro_copy;
 pub mod tile_anchor_lab;
+pub(crate) mod tiles_intro_copy;
+pub mod tixels;
+pub mod transition_playground;
 pub mod tutorial_campaign;
 pub mod tutorial_summary;
 pub mod yaku_journal;
@@ -36,14 +38,14 @@ pub use collection::CollectionScene;
 use enum_dispatch::enum_dispatch;
 pub use game_over::GameOverScene;
 pub use gameplay::GameplayScene;
+pub use guide::GuideScene;
 pub use main_menu_exterior::MainMenuExteriorScene;
 pub use material_viewer::MaterialViewerScene;
-pub use guide::GuideScene;
 pub use options::OptionsScene;
-pub use pick_blind::PickBlindScene;
+pub use pick_chamber::PickChamberScene;
+pub use staircase::StaircaseScene;
 pub use profile_select::ProfileSelectScene;
 pub use rumble_lab::RumbleLabScene;
-pub use tile_anchor_lab::TileAnchorLabScene;
 pub use shop::ShopScene;
 pub use showcase::{
     CollectionInspectPresenter, MetaLevelUpPresenter, ShopInspectPresenter, ShowcasePresenter,
@@ -51,6 +53,8 @@ pub use showcase::{
 };
 pub use splash::SplashScene;
 pub use start_game_modal::TileSelectScene;
+pub use tile_anchor_lab::TileAnchorLabScene;
+pub use tixels::TixelsScene;
 pub use transition_playground::TransitionPlaygroundScene;
 pub use tutorial_campaign::TutorialCampaignScene;
 pub use tutorial_summary::TutorialSummaryScene;
@@ -74,10 +78,10 @@ use crate::ui::layout::LayoutResult;
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DebugVisibility {
     pub hide_candles: bool,
-    pub hide_blind_plaque: bool,
+    pub hide_chamber_plaque: bool,
     /// When true, skip the gameplay score counter assembly (the prop that
     /// replaced the legacy blind plaque mesh). Plumbed from the debug
-    /// visibility modal alongside `hide_blind_plaque` for separate toggles.
+    /// visibility modal alongside `hide_chamber_plaque` for separate toggles.
     pub hide_scoring_placard: bool,
 }
 
@@ -284,7 +288,7 @@ pub struct DrawCtx<'a> {
     pub archive_chronicle_last_seen_run_len: u32,
     /// When set (Debug → Hallway hall FX…), pick-blind hallway uses
     /// [`HallwayDistortionDebugSnapshot::resolve`] (see `hallway_glb.rs`) instead of
-    /// [`HallwayDistortion::from_pick_blind`] alone.
+    /// [`HallwayDistortion::from_pick_chamber`] alone.
     pub hallway_distortion_debug:
         Option<crate::render::hallway_glb::HallwayDistortionDebugSnapshot>,
     pub rain_tuning: crate::render::rain_tuning::RainTuning,
@@ -472,7 +476,10 @@ pub trait SceneBehavior {
     ///
     /// The main loop skips this when an overlay stack entry or blocking in-scene
     /// modal is up. Default: no face bindings.
-    fn face_button_bindings(&self, _ctx: crate::ui::input::FaceBindingCtx) -> crate::ui::input::FaceButtonBindings {
+    fn face_button_bindings(
+        &self,
+        _ctx: crate::ui::input::FaceBindingCtx,
+    ) -> crate::ui::input::FaceButtonBindings {
         crate::ui::input::FaceButtonBindings::default()
     }
 }
@@ -521,13 +528,15 @@ pub enum Scene {
     ProfileSelect(ProfileSelectScene),
     Shop(ShopScene),
     Showcase(ShowcaseScene),
-    PickBlind(PickBlindScene),
+    PickChamber(PickChamberScene),
+    Staircase(StaircaseScene),
     /// Boxed to keep the enum small; [`SceneBehavior`] for [`Box`] forwards to the inner scene.
     Gameplay(Box<GameplayScene>),
     GameOver(GameOverScene),
     Guide(GuideScene),
     MaterialViewer(MaterialViewerScene),
     TileAnchorLab(TileAnchorLabScene),
+    Tixels(TixelsScene),
     Options(OptionsScene),
     Collection(CollectionScene),
     TutorialCampaign(TutorialCampaignScene),

@@ -4,37 +4,28 @@ use crate::core::tile_pack::TilePackKind;
 use crate::debug_overlays::{HallwayDistortionDebugOverlay, SceneLookDebugOverlay};
 use crate::game::engine::GameEngine;
 use crate::scenes::shop::PackCelebration;
-use crate::scenes::{ShowcasePresenter, ShowcaseScene, TileAnchorLabScene, TilePackPresenter};
+use crate::scenes::{
+    ShowcasePresenter, ShowcaseScene, TileAnchorLabScene, TilePackPresenter, TixelsScene,
+};
 use rand::RngExt;
 
 impl App {
     pub(super) fn handle_debug_action(&mut self, action: DebugAction) {
         match action {
             DebugAction::SetLevel(level) => {
-                // Set runs_completed to the minimum value for this level.
-                // Must match the curve in `PlayerProgress::current_level`.
-                let runs = match level {
-                    1 => 0,
-                    2 => 1,
-                    3 => 2,
-                    4 => 3,
-                    5 => 4,
-                    6 => 5,
-                    7 => 7,
-                    8 => 9,
-                    9 => 11,
-                    10 => 13,
-                    11 => 15,
-                    12 => 17,
-                    13 => 19,
-                    14 => 21,
-                    _ => 0,
-                };
-                self.progress.runs_completed = runs;
+                // Set progression points to the minimum required for this level.
+                let clamped_level = level.clamp(1, crate::core::progression::MAX_PROGRESS_LEVEL);
+                let points =
+                    crate::core::progression::PlayerProgress::min_points_for_level(clamped_level);
+                self.progress.level_progress_points = points;
                 let level_up = self.progress.check_level_up();
                 self.run.apply_progression(&self.progress);
                 let _ = persistence::save_profile(self.active_profile, &self.progress);
-                log::debug!("Set player level to {} (runs_completed={})", level, runs);
+                log::debug!(
+                    "Set player depth to {} (level_progress_points={})",
+                    crate::core::progression::meta_depth_roman(clamped_level),
+                    points
+                );
                 if let Some(result) = level_up {
                     let ww = self.last_drawable_px.width as f32;
                     let wh = self.last_drawable_px.height as f32;
@@ -70,7 +61,9 @@ impl App {
                 self.progress.cheat_reveal_kokushi_musou();
                 self.run.apply_progression(&self.progress);
                 let _ = persistence::save_profile(self.active_profile, &self.progress);
-                log::debug!("Revealed Kokushi Musō (available_yaku + journal/guide + Qilin ribbon)");
+                log::debug!(
+                    "Revealed Kokushi Musō (available_yaku + journal/guide + Qilin ribbon)"
+                );
             }
             DebugAction::SetGold(amount) => {
                 self.run.set_run_gold_direct(amount as i32, None);
@@ -125,7 +118,7 @@ impl App {
                     self.debug.visibility_overlay = Some(DebugVisibilityOverlay::new(
                         self.debug.hide_tiles,
                         self.debug.hide_candles,
-                        self.debug.hide_blind_plaque,
+                        self.debug.hide_chamber_plaque,
                         self.debug.hide_scoring_placard,
                         self.debug.hide_inventory,
                     ));
@@ -251,7 +244,8 @@ impl App {
                         Scene::ProfileSelect(_) => "ProfileSelect",
                         Scene::Shop(_) => "Shop",
                         Scene::Showcase(_) => "Showcase",
-                        Scene::PickBlind(_) => "PickBlind",
+                        Scene::PickChamber(_) => "PickChamber",
+                        Scene::Staircase(_) => "Staircase",
                         Scene::Gameplay(_) => "Gameplay",
                         Scene::GameOver(_) => "GameOver",
                         Scene::Guide(_) => "Guide",
@@ -263,19 +257,20 @@ impl App {
                         Scene::TutorialSummary(_) => "TutorialSummary",
                         Scene::TransitionPlayground(_) => "TransitionPlayground",
                         Scene::RumbleLab(_) => "RumbleLab",
+                        Scene::Tixels(_) => "Tixels",
                         Scene::YakuJournal(_) => "YakuJournal",
                     };
                     log::warn!("Demo Cascade ignored — current scene is {name}");
                 }
             }
-            DebugAction::SetBoss(kind) => {
+            DebugAction::SetOrdeal(kind) => {
                 // Replace the current ante's boss and rebuild the resolved
-                // effect. resolve_upcoming_boss handles both static (wraps
-                // BossDef::effect) and reactive (calls on_reveal) cases —
+                // effect. resolve_upcoming_ordeal handles both static (wraps
+                // OrdealDef::effect) and reactive (calls on_reveal) cases —
                 // and zeros tax_collector_cost so leftover state from a
                 // prior boss doesn't leak through.
-                self.run.boss.upcoming = Some(kind);
-                self.run.resolve_upcoming_boss();
+                self.run.ordeal.upcoming = Some(kind);
+                self.run.resolve_upcoming_ordeal();
                 log::debug!("Set boss to {}", kind.name());
             }
             DebugAction::SetDora(suit, rank) => {
@@ -313,6 +308,11 @@ impl App {
                     .push(Scene::TileAnchorLab(TileAnchorLabScene::new(true)));
                 log::debug!("Opened tile anchor lab");
             }
+            DebugAction::OpenTixels => {
+                self.overlay_stack
+                    .push(Scene::Tixels(TixelsScene::new(true)));
+                log::debug!("Opened tixels scene");
+            }
             DebugAction::OpenAbout => {
                 let body = format!(
                     "Mahjuro v{}\nA candlelit mahjong roguelike prototype.\n\nLocal icon asset: icon.png",
@@ -338,10 +338,7 @@ impl App {
                 );
                 self.run.defeat_memorial_kind =
                     Some(crate::core::memorial_talisman::select_memorial(&snap));
-                self.pending_scene = Some(Scene::GameOver(GameOverScene::new(
-                    &self.run,
-                    reason,
-                )));
+                self.pending_scene = Some(Scene::GameOver(GameOverScene::new(&self.run, reason)));
                 self.transition_alpha = 1.0;
                 log::debug!("Showing defeat screen");
             }

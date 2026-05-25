@@ -374,13 +374,8 @@ pub fn detect_yaku_best_decomposition(
     );
     let mut best_weight = yaku_bundle_weight(&best_yaku);
     for sets in alternatives.into_iter().skip(1) {
-        let yaku = detect_yaku_with_wind(
-            tiles,
-            &sets,
-            round_wind,
-            bonus_round_wind,
-            original_tiles,
-        );
+        let yaku =
+            detect_yaku_with_wind(tiles, &sets, round_wind, bonus_round_wind, original_tiles);
         let weight = yaku_bundle_weight(&yaku);
         if weight > best_weight {
             best_weight = weight;
@@ -392,8 +387,7 @@ pub fn detect_yaku_best_decomposition(
 }
 
 fn yaku_bundle_weight(yaku: &[YakuKind]) -> i64 {
-    yaku
-        .iter()
+    yaku.iter()
         .map(|y| y.chip_bonus() as i64 + (y.mult_bonus() * 100.0).round() as i64)
         .sum()
 }
@@ -516,10 +510,7 @@ fn is_chiitoitsu(sets: &[DetectedMeld]) -> bool {
 
 /// Chanta (半チャン): every non-pair meld contains a terminal or honor; pair may be 2–8.
 fn is_chanta(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
-    let melds: Vec<_> = sets
-        .iter()
-        .filter(|s| s.kind != MeldKind::Pair)
-        .collect();
+    let melds: Vec<_> = sets.iter().filter(|s| s.kind != MeldKind::Pair).collect();
     if melds.len() < 2 {
         return false;
     }
@@ -594,7 +585,12 @@ fn is_pinfu(tiles: &[Tile], sets: &[DetectedMeld]) -> bool {
     let pairs: Vec<_> = sets.iter().filter(|s| s.kind == MeldKind::Pair).collect();
     let melds: Vec<_> = sets
         .iter()
-        .filter(|s| matches!(s.kind, MeldKind::Sequence | MeldKind::Triplet | MeldKind::Kong))
+        .filter(|s| {
+            matches!(
+                s.kind,
+                MeldKind::Sequence | MeldKind::Triplet | MeldKind::Kong
+            )
+        })
         .collect();
     if pairs.len() != 1 || melds.len() != 4 {
         return false;
@@ -657,9 +653,7 @@ fn is_sanshoku_doujun(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
         by_low.entry(ranks[0]).or_default().push(tile_refs[0].suit);
     }
     by_low.values().any(|suits| {
-        suits.contains(&Suit::Manzu)
-            && suits.contains(&Suit::Souzu)
-            && suits.contains(&Suit::Pinzu)
+        suits.contains(&Suit::Manzu) && suits.contains(&Suit::Souzu) && suits.contains(&Suit::Pinzu)
     })
 }
 
@@ -676,10 +670,7 @@ fn is_ittsu(sets: &[DetectedMeld], tiles: &[Tile]) -> bool {
         if tile_refs.len() != 3 {
             continue;
         }
-        if !matches!(
-            tile_refs[0].suit,
-            Suit::Manzu | Suit::Souzu | Suit::Pinzu
-        ) {
+        if !matches!(tile_refs[0].suit, Suit::Manzu | Suit::Souzu | Suit::Pinzu) {
             continue;
         }
         let mut ranks: Vec<u8> = tile_refs.iter().map(|t| t.rank).collect();
@@ -738,13 +729,10 @@ fn is_honitsu(tiles: &[Tile]) -> bool {
 /// Terminal or honor present in a meld (yaochu for chanta/junchan meld checks).
 fn meld_has_yaochu(s: &DetectedMeld, tiles: &[Tile]) -> bool {
     s.tile_ids.iter().any(|id| {
-        tiles
-            .iter()
-            .find(|t| t.id == *id)
-            .is_some_and(|t| {
-                matches!(t.suit, Suit::Wind | Suit::Dragon)
-                    || (t.is_number_tile() && (t.rank == 1 || t.rank == 9))
-            })
+        tiles.iter().find(|t| t.id == *id).is_some_and(|t| {
+            matches!(t.suit, Suit::Wind | Suit::Dragon)
+                || (t.is_number_tile() && (t.rank == 1 || t.rank == 9))
+        })
     })
 }
 
@@ -1412,10 +1400,7 @@ mod tests {
             },
         ];
         let yaku = detect_yaku_with_wind(&tiles, &sets, None, None, None);
-        assert_eq!(
-            yaku.iter().filter(|y| **y == YakuKind::Yakuhai).count(),
-            2
-        );
+        assert_eq!(yaku.iter().filter(|y| **y == YakuKind::Yakuhai).count(), 2);
     }
 
     #[test]

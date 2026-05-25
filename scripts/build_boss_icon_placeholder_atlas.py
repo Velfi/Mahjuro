@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Build `assets/textures/boss_icons/atlas.png` from `atlas.toml`.
+"""Build `assets/textures/ordeal_icons/atlas.png` from `atlas.toml`.
 
 Writes simple distinct placeholder tiles (hue ramp + vignette) so the game
 has valid RGBA art before hand-painted icons land. For Gemini-generated art
-instead, use ``scripts/generate_boss_icons.py`` (writes ``source/boss_{slug}.png``,
+instead, use ``scripts/generate_ordeal_icons.py`` (writes ``source/ordeal_{slug}.png``,
 post-processes, and repacks the atlas).
 
 Replace cells by dropping 512×512 PNGs into
-``assets/textures/boss_icons/source/{slug}.png`` and re-run with Pillow to
+``assets/textures/ordeal_icons/source/{slug}.png`` and re-run with Pillow to
 composite those over the placeholders.
 
 Usage:
@@ -23,7 +23,7 @@ import tomllib
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-OUT_DIR = REPO / "assets" / "textures" / "boss_icons"
+OUT_DIR = REPO / "assets" / "textures" / "ordeal_icons"
 SOURCE_DIR = OUT_DIR / "source"
 
 try:

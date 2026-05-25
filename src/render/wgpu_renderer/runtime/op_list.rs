@@ -58,6 +58,8 @@ pub(super) enum RenderOp {
     ShopEnvironment,
     /// Pick-blind hallway (`hallway.glb`).
     HallwayEnvironment,
+    /// Post-ordeal staircase (`staircase.glb`).
+    StaircaseEnvironment,
     /// Archive room (`archive.glb`).
     ArchiveEnvironment,
     /// Main-menu waterfront (`main_menu.glb`).

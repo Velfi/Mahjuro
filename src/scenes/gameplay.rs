@@ -2,7 +2,7 @@
 //!
 //! **Concurrent UI / flow state** (orthogonal concerns; check the right gate per feature):
 //! - App-level [`crate::UpdateCtx::transitioning`] — global scene replace in progress; input blocked.
-//! - `pending_blind` — opening round; hand not yet applied until the candle light-ramp completes.
+//! - `pending_chamber` — opening round; hand not yet applied until the candle light-ramp completes.
 //! - `pause_menu` — pause root + optional embedded options + meld-guide request.
 //! - `cascade_queue` — scoring presentation; also drives [`crate::scenes::SceneBehavior::has_blocking_overlay`].
 //! - `journal_transition` + overlay push — Yaku Journal from the table book.
@@ -237,7 +237,7 @@ pub struct GameplayScene {
     /// target, or on-start relic triggers until the fade-in finishes, so
     /// Sweepstakes coin showers / DoraCrown reveals / future on-round-start
     /// effects are visible rather than hidden by the dark transition.
-    pending_blind: Option<crate::core::rules::BlindKind>,
+    pending_chamber: Option<crate::core::rules::ChamberKind>,
     /// Debug-only: when true, the renderer overlays world-axes bars at the
     /// camera target so we can see which direction is +X / +Y / +Z while
     /// dialing in placements. Toggled from the native Debug menu.
@@ -463,7 +463,7 @@ impl GameplayScene {
         if !self.invalid_meld_flash_slots.is_empty() {
             self.invalid_meld_flash_at = Some(Instant::now());
         }
-        if run.selection_blocked_by_boss_rules(&selected_tiles) {
+        if run.selection_blocked_by_ordeal_rules(&selected_tiles) {
             self.invalid_boss_flash_at = Some(Instant::now());
         }
     }
@@ -585,11 +585,11 @@ impl GameplayScene {
             debug_wind_at: None,
             light_ramp: 0.0,
             // Start the candle light-ramp immediately on scene entry so the
-            // fade-in isn't gated on the first deal. With `pending_blind`,
+            // fade-in isn't gated on the first deal. With `pending_chamber`,
             // the deal is deferred until the ramp completes, which would
             // otherwise deadlock (ramp waits on deal, deal waits on ramp).
             light_ramp_anchor: Some(now),
-            pending_blind: None,
+            pending_chamber: None,
             debug_show_axes: false,
             candle_flare: 0.0,
             held_relic_drag: None,
@@ -616,13 +616,13 @@ impl GameplayScene {
     }
 
     /// Enter the gameplay scene for a round that has not yet been applied to
-    /// the run. `apply_blind` fires once the opening transition completes
+    /// the run. `apply_chamber` fires once the opening transition completes
     /// (`light_ramp >= 1.0`) so on-round-start effects — Sweepstakes gold,
     /// DoraCrown reveal, relic activation glows — play while the smoke
     /// curtain clears instead of being hidden behind it.
-    pub fn with_pending_blind(blind: crate::core::rules::BlindKind) -> Self {
+    pub fn with_pending_chamber(blind: crate::core::rules::ChamberKind) -> Self {
         let mut s = Self::new();
-        s.pending_blind = Some(blind);
+        s.pending_chamber = Some(blind);
         s
     }
 

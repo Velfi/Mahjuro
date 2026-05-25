@@ -9,6 +9,7 @@
 //! shape. New shapes/materials are additive — add a [`MeshId`] variant
 //! and register the mesh, nothing else needs touching.
 
+use crate::render::depth_well_mesh::DepthWellRegionId;
 use crate::render::lit_mesh::{MaterialKind, MaterialParams};
 
 /// Which registered mesh to draw. Each variant maps to a [`LitMeshGpu`]
@@ -60,6 +61,34 @@ pub enum MeshId {
     /// Crimson silk tassel under [`MeshId::ShopBell`] — sways via scene
     /// rotation; anchored to the bell lip in the shop scene.
     BellTassel,
+    /// Beveled rail for post-run meta progression bars.
+    ProgressMeterRail,
+    /// Rounded pip element for post-run meta progression bars.
+    ProgressMeterPip,
+    /// Diegetic depth-well medallion — rim of the post-run progression gauge.
+    DepthWellRim,
+    /// Inner step 0 (outermost) of the depth-well progression gauge.
+    DepthWellStep0,
+    DepthWellStep1,
+    DepthWellStep2,
+    DepthWellStep3,
+    DepthWellStep4,
+    /// Central throat / bottom of the depth-well progression gauge.
+    DepthWellThroat,
+}
+
+/// Map a [`DepthWellRegionId`] to its registered [`MeshId`].
+pub fn depth_well_mesh_id(region: DepthWellRegionId) -> MeshId {
+    match region {
+        DepthWellRegionId::Rim => MeshId::DepthWellRim,
+        DepthWellRegionId::Step(0) => MeshId::DepthWellStep0,
+        DepthWellRegionId::Step(1) => MeshId::DepthWellStep1,
+        DepthWellRegionId::Step(2) => MeshId::DepthWellStep2,
+        DepthWellRegionId::Step(3) => MeshId::DepthWellStep3,
+        DepthWellRegionId::Step(4) => MeshId::DepthWellStep4,
+        DepthWellRegionId::Step(n) => panic!("depth_well_mesh_id: no MeshId for Step({n})"),
+        DepthWellRegionId::Throat => MeshId::DepthWellThroat,
+    }
 }
 
 /// Layout strategy for decal rasterization.

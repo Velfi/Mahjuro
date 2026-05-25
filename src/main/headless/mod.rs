@@ -7,10 +7,13 @@ mod slug;
 
 use std::path::PathBuf;
 
-use app::HeadlessApp;
-use scenes::{collection_screenshot_tab_for_overlay, resolve_screenshot_scene, scene_for_room_gi_bake, validate_screenshot_cli};
 use crate::scenes::{
     CollectionInspectPresenter, ShopInspectPresenter, ShowcasePresenter, ShowcaseScene,
+};
+use app::HeadlessApp;
+use scenes::{
+    collection_screenshot_tab_for_overlay, resolve_screenshot_scene, scene_for_room_gi_bake,
+    validate_screenshot_cli,
 };
 use slug::parse_bake_room_slug;
 
@@ -20,15 +23,15 @@ use crate::persistence;
 use crate::scenes::Scene;
 use crate::ui::input::{InputMode, UiAction};
 
-use fixtures::force_boss_blind;
-use slug::parse_boss_slug;
+use fixtures::force_ordeal_chamber;
+use slug::parse_ordeal_slug;
 
 pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> {
     crate::asset_path::init();
     crate::asset_path::log_all_assets();
     validate_screenshot_cli(&s)?;
 
-    let boss_override = s.boss.as_deref().map(parse_boss_slug).transpose()?;
+    let ordeal_override = s.ordeal.as_deref().map(parse_ordeal_slug).transpose()?;
     let settings = persistence::load_settings();
     let profile_index = s.profile.unwrap_or(settings.active_profile);
     let mut screenshot_progress = if s.fresh_progress {
@@ -37,8 +40,8 @@ pub fn run_screenshot_command(s: main_cli::ScreenshotCli) -> anyhow::Result<()> 
         persistence::load_profile(profile_index)
     };
     let mut run = RunState::new_demo();
-    if let Some(kind) = boss_override {
-        force_boss_blind(&mut run, kind);
+    if let Some(kind) = ordeal_override {
+        force_ordeal_chamber(&mut run, kind);
     }
 
     let setup = resolve_screenshot_scene(&s, &mut run, &mut screenshot_progress)?;

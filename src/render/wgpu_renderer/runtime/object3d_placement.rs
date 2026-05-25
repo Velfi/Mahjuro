@@ -11,12 +11,12 @@ use crate::render::{
     },
     talisman_mesh::{TALISMAN_LOCAL_HALF, memorial_talisman_material, talisman_material},
     wgpu_renderer::{
-        GpuInstance, MAX_BOOK_SLOTS, MAX_BOSS_ICON_SLOTS, MAX_BOWL_SLOTS, MAX_CASCADE_TOKEN_SLOTS,
+        GpuInstance, MAX_BOOK_SLOTS, MAX_ORDEAL_ICON_SLOTS, MAX_BOWL_SLOTS, MAX_CASCADE_TOKEN_SLOTS,
         MAX_EXTRUDED_GLYPH_SLOTS, MAX_MIRROR_SLOTS, MAX_ORB_SLOTS, MAX_PLINTH_SLOTS,
-        MAX_RELIC_SLOTS, MAX_TALISMAN_SLOTS, MEMORIAL_TALISMAN_TEXTURE_BASE,
-        MAX_TALLY_FAN_SLOTS, MAX_TALLY_STICK_SLOTS,
-        MAX_WALL_TILE_SLOTS, MAX_WOOD_TABLET_SLOTS, MAX_YAKU_TABLET_SLOTS, WgpuRenderer,
-        boss_icon_material_params, relic_material_params,
+        MAX_RELIC_SLOTS, MAX_TALISMAN_SLOTS, MAX_TALLY_FAN_SLOTS, MAX_TALLY_STICK_SLOTS,
+        MAX_WALL_TILE_SLOTS, MAX_WOOD_TABLET_SLOTS, MAX_YAKU_TABLET_SLOTS,
+        MEMORIAL_TALISMAN_TEXTURE_BASE, WgpuRenderer, ordeal_icon_material_params,
+        relic_material_params,
         runtime::{CameraFrame, DrawKind, RenderOp},
         tablet_label_hash,
     },
@@ -90,7 +90,7 @@ impl WgpuRenderer {
             let mut obj3d_wood_slot: usize = 0;
             let mut obj3d_book_slot: usize = 0;
             let mut obj3d_relic_slot: usize = 0;
-            let mut obj3d_boss_icon_slot: usize = 0;
+            let mut obj3d_ordeal_icon_slot: usize = 0;
             let mut obj3d_pack_slot: usize = 0;
             let mut obj3d_talisman_slot: usize = 0;
             let mut obj3d_ribbon_slot: usize = 0;
@@ -113,10 +113,11 @@ impl WgpuRenderer {
 
                 for obj in batch.iter() {
                     self.shadow_placement_anim_id = obj.anim_id;
-                    self.placement_shadow_casts = super::shadow_setup::object3d_casts_dynamic_shadow(
-                        self.placement_shadow_room,
-                        obj.anim_id,
-                    );
+                    self.placement_shadow_casts =
+                        super::shadow_setup::object3d_casts_dynamic_shadow(
+                            self.placement_shadow_room,
+                            obj.anim_id,
+                        );
                     use crate::render::draw_cmd::Object3dKind;
                     let use_ray_plane = frame
                         .showcase_render_hints
@@ -243,9 +244,9 @@ impl WgpuRenderer {
                                     material.kind,
                                 );
                             }
-            self.push_object3d_draw(
-                object3d_draw_list,
-                object3d_shadow_draw_list,
+                            self.push_object3d_draw(
+                                object3d_draw_list,
+                                object3d_shadow_draw_list,
                                 DrawKind::YakuTablet,
                                 slot_i,
                             );
@@ -319,9 +320,9 @@ impl WgpuRenderer {
                                     .push((Some(*pid), project_unit_cube_rect(model)));
                                 self.last_primitive_pick_models.insert(*pid, model);
                             }
-            self.push_object3d_draw(
-                object3d_draw_list,
-                object3d_shadow_draw_list,
+                            self.push_object3d_draw(
+                                object3d_draw_list,
+                                object3d_shadow_draw_list,
                                 DrawKind::WoodTablet,
                                 slot_i,
                             );
@@ -403,9 +404,9 @@ impl WgpuRenderer {
                                     .push((Some(*pid), project_unit_cube_rect(model)));
                                 self.last_primitive_pick_models.insert(*pid, model);
                             }
-            self.push_object3d_draw(
-                object3d_draw_list,
-                object3d_shadow_draw_list,
+                            self.push_object3d_draw(
+                                object3d_draw_list,
+                                object3d_shadow_draw_list,
                                 DrawKind::Book,
                                 slot_i,
                             );
@@ -483,9 +484,9 @@ impl WgpuRenderer {
                                     self.book_cover_mesh.default_material.kind,
                                 );
                             }
-            self.push_object3d_draw(
-                object3d_draw_list,
-                object3d_shadow_draw_list,
+                            self.push_object3d_draw(
+                                object3d_draw_list,
+                                object3d_shadow_draw_list,
                                 DrawKind::BookCover,
                                 slot_i,
                             );
@@ -646,9 +647,9 @@ impl WgpuRenderer {
                                     user: 0,
                                 });
                             }
-            self.push_object3d_draw(
-                object3d_draw_list,
-                object3d_shadow_draw_list,
+                            self.push_object3d_draw(
+                                object3d_draw_list,
+                                object3d_shadow_draw_list,
                                 DrawKind::Relic,
                                 slot_i,
                             );
@@ -658,12 +659,12 @@ impl WgpuRenderer {
                             glow,
                             pick_id,
                         } => {
-                            if obj3d_boss_icon_slot >= MAX_BOSS_ICON_SLOTS {
+                            if obj3d_ordeal_icon_slot >= MAX_ORDEAL_ICON_SLOTS {
                                 continue;
                             }
-                            self.ensure_boss_icon_gpu(*kind);
-                            let slot_i = obj3d_boss_icon_slot;
-                            obj3d_boss_icon_slot += 1;
+                            self.ensure_ordeal_icon_gpu(*kind);
+                            let slot_i = obj3d_ordeal_icon_slot;
+                            obj3d_ordeal_icon_slot += 1;
                             let g = glow.clamp(0.0, 1.0);
                             let base_color = if g > 0.0 {
                                 let target = [1.55, 1.32, 0.78, obj.color[3]];
@@ -676,8 +677,8 @@ impl WgpuRenderer {
                             } else {
                                 obj.color
                             };
-                            let material = boss_icon_material_params(base_color, g);
-                            self.boss_icon_instances[slot_i].write_uniform_with_decal(
+                            let material = ordeal_icon_material_params(base_color, g);
+                            self.ordeal_icon_instances[slot_i].write_uniform_with_decal(
                                 &self.queue,
                                 view_proj_arr,
                                 model,
@@ -688,23 +689,23 @@ impl WgpuRenderer {
                             if self.placement_shadow_writes(frame) {
                                 self.write_lit_mesh_shadow(
                                     &mut shadow,
-                                    &self.boss_icon_instances[slot_i],
+                                    &self.ordeal_icon_instances[slot_i],
                                     model,
                                     material.kind,
                                 );
                             }
                             let want_tex =
-                                self.boss_icon_textures.contains_key(kind).then_some(*kind);
-                            if self.boss_icon_slot_texture[slot_i] != want_tex {
+                                self.ordeal_icon_textures.contains_key(kind).then_some(*kind);
+                            if self.ordeal_icon_slot_texture[slot_i] != want_tex {
                                 let view = match want_tex {
-                                    Some(bk) => &self.boss_icon_textures[&bk].view,
+                                    Some(bk) => &self.ordeal_icon_textures[&bk].view,
                                     None => &self.lit_mesh_white_view,
                                 };
                                 let relief_view = match want_tex {
-                                    Some(bk) => &self.boss_icon_textures[&bk].relief_view,
+                                    Some(bk) => &self.ordeal_icon_textures[&bk].relief_view,
                                     None => &self.lit_mesh_relief_default_view,
                                 };
-                                let inst = &mut self.boss_icon_instances[slot_i];
+                                let inst = &mut self.ordeal_icon_instances[slot_i];
                                 inst.bind_group =
                                     self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                                         label: Some("boss-icon-bg"),
@@ -732,7 +733,7 @@ impl WgpuRenderer {
                                             },
                                         ],
                                     });
-                                self.boss_icon_slot_texture[slot_i] = want_tex;
+                                self.ordeal_icon_slot_texture[slot_i] = want_tex;
                             }
                             if g > 0.0 {
                                 let projected_rect = project_unit_cube_rect(model);
@@ -751,9 +752,9 @@ impl WgpuRenderer {
                                 });
                             }
                             let _ = pick_id;
-            self.push_object3d_draw(
-                object3d_draw_list,
-                object3d_shadow_draw_list,
+                            self.push_object3d_draw(
+                                object3d_draw_list,
+                                object3d_shadow_draw_list,
                                 DrawKind::BossIcon,
                                 slot_i,
                             );
@@ -894,9 +895,9 @@ impl WgpuRenderer {
                                     user: 0,
                                 });
                             }
-            self.push_object3d_draw(
-                object3d_draw_list,
-                object3d_shadow_draw_list,
+                            self.push_object3d_draw(
+                                object3d_draw_list,
+                                object3d_shadow_draw_list,
                                 DrawKind::Pack,
                                 slot_i,
                             );
@@ -922,7 +923,8 @@ impl WgpuRenderer {
                                     let idx = crate::core::talisman::TalismanKind::all()
                                         .iter()
                                         .position(|&k| k == *kind)
-                                        .unwrap_or(0) as u8;
+                                        .unwrap_or(0)
+                                        as u8;
                                     let height = self
                                         .talisman_height_views
                                         .get(idx as usize)
@@ -934,10 +936,11 @@ impl WgpuRenderer {
                                     (talisman_material(*kind, obj.color), idx, height, mask)
                                 }
                                 Object3dKind::MemorialTalisman { kind } => {
-                                    let idx = crate::core::memorial_talisman::MemorialTalismanKind::all()
-                                        .iter()
-                                        .position(|&k| k == *kind)
-                                        .unwrap_or(0);
+                                    let idx =
+                                        crate::core::memorial_talisman::MemorialTalismanKind::all()
+                                            .iter()
+                                            .position(|&k| k == *kind)
+                                            .unwrap_or(0);
                                     let cache_key =
                                         MEMORIAL_TALISMAN_TEXTURE_BASE.saturating_add(idx as u8);
                                     let height = self
@@ -989,9 +992,9 @@ impl WgpuRenderer {
                             self.proj
                                 .talisman_rects
                                 .push(project_unit_cube_rect(talisman_model));
-            self.push_object3d_draw(
-                object3d_draw_list,
-                object3d_shadow_draw_list,
+                            self.push_object3d_draw(
+                                object3d_draw_list,
+                                object3d_shadow_draw_list,
                                 DrawKind::Talisman,
                                 slot_i,
                             );
@@ -1112,9 +1115,9 @@ impl WgpuRenderer {
                                     self.proj.plinth_rect = Some(rect);
                                 }
                             }
-            self.push_object3d_draw(
-                object3d_draw_list,
-                object3d_shadow_draw_list,
+                            self.push_object3d_draw(
+                                object3d_draw_list,
+                                object3d_shadow_draw_list,
                                 DrawKind::Plinth,
                                 slot_i,
                             );
@@ -1150,9 +1153,9 @@ impl WgpuRenderer {
                                     self.bug_body_mesh.default_material.kind,
                                 );
                             }
-            self.push_object3d_draw(
-                object3d_draw_list,
-                object3d_shadow_draw_list,
+                            self.push_object3d_draw(
+                                object3d_draw_list,
+                                object3d_shadow_draw_list,
                                 DrawKind::BugBody,
                                 slot,
                             );
@@ -1174,9 +1177,9 @@ impl WgpuRenderer {
                                 wing_mat,
                                 live_tint,
                             );
-            self.push_object3d_draw(
-                object3d_draw_list,
-                object3d_shadow_draw_list,
+                            self.push_object3d_draw(
+                                object3d_draw_list,
+                                object3d_shadow_draw_list,
                                 DrawKind::BugWingL,
                                 slot,
                             );
@@ -1187,9 +1190,9 @@ impl WgpuRenderer {
                                 wing_mat,
                                 live_tint,
                             );
-            self.push_object3d_draw(
-                object3d_draw_list,
-                object3d_shadow_draw_list,
+                            self.push_object3d_draw(
+                                object3d_draw_list,
+                                object3d_shadow_draw_list,
                                 DrawKind::BugWingR,
                                 slot,
                             );
@@ -1208,9 +1211,9 @@ impl WgpuRenderer {
                                 blur_mat,
                                 blur_tint,
                             );
-            self.push_object3d_draw(
-                object3d_draw_list,
-                object3d_shadow_draw_list,
+                            self.push_object3d_draw(
+                                object3d_draw_list,
+                                object3d_shadow_draw_list,
                                 DrawKind::BugWingBlurL,
                                 slot,
                             );
@@ -1221,9 +1224,9 @@ impl WgpuRenderer {
                                 blur_mat,
                                 blur_tint,
                             );
-            self.push_object3d_draw(
-                object3d_draw_list,
-                object3d_shadow_draw_list,
+                            self.push_object3d_draw(
+                                object3d_draw_list,
+                                object3d_shadow_draw_list,
                                 DrawKind::BugWingBlurR,
                                 slot,
                             );
@@ -1249,9 +1252,9 @@ impl WgpuRenderer {
                                     material.kind,
                                 );
                             }
-            self.push_object3d_draw(
-                object3d_draw_list,
-                object3d_shadow_draw_list,
+                            self.push_object3d_draw(
+                                object3d_draw_list,
+                                object3d_shadow_draw_list,
                                 DrawKind::Orb,
                                 slot_i,
                             );
@@ -1308,9 +1311,9 @@ impl WgpuRenderer {
                                 ));
                                 self.last_mirror_model = Some(hover_model);
                             }
-            self.push_object3d_draw(
-                object3d_draw_list,
-                object3d_shadow_draw_list,
+                            self.push_object3d_draw(
+                                object3d_draw_list,
+                                object3d_shadow_draw_list,
                                 DrawKind::Mirror,
                                 slot_i,
                             );
@@ -1388,9 +1391,9 @@ impl WgpuRenderer {
                                     material.kind,
                                 );
                             }
-            self.push_object3d_draw(
-                object3d_draw_list,
-                object3d_shadow_draw_list,
+                            self.push_object3d_draw(
+                                object3d_draw_list,
+                                object3d_shadow_draw_list,
                                 DrawKind::ExtrudedGlyph,
                                 slot_i,
                             );
@@ -1435,9 +1438,9 @@ impl WgpuRenderer {
                                     material.kind,
                                 );
                             }
-            self.push_object3d_draw(
-                object3d_draw_list,
-                object3d_shadow_draw_list,
+                            self.push_object3d_draw(
+                                object3d_draw_list,
+                                object3d_shadow_draw_list,
                                 DrawKind::CascadeToken,
                                 slot_i,
                             );
@@ -1491,15 +1494,15 @@ impl WgpuRenderer {
                                     );
                                 }
                             }
-            self.push_object3d_draw(
-                object3d_draw_list,
-                object3d_shadow_draw_list,
+                            self.push_object3d_draw(
+                                object3d_draw_list,
+                                object3d_shadow_draw_list,
                                 DrawKind::CandleWax,
                                 slot_i,
                             );
-            self.push_object3d_draw(
-                object3d_draw_list,
-                object3d_shadow_draw_list,
+                            self.push_object3d_draw(
+                                object3d_draw_list,
+                                object3d_shadow_draw_list,
                                 DrawKind::CandleWick,
                                 slot_i,
                             );
@@ -1596,15 +1599,15 @@ impl WgpuRenderer {
                                         tip_material.kind,
                                     );
                                 }
-            self.push_object3d_draw(
-                object3d_draw_list,
-                object3d_shadow_draw_list,
+                                self.push_object3d_draw(
+                                    object3d_draw_list,
+                                    object3d_shadow_draw_list,
                                     DrawKind::TallyStickBase,
                                     obj3d_tally_stick_cursor,
                                 );
-            self.push_object3d_draw(
-                object3d_draw_list,
-                object3d_shadow_draw_list,
+                                self.push_object3d_draw(
+                                    object3d_draw_list,
+                                    object3d_shadow_draw_list,
                                     DrawKind::TallyStickTip,
                                     obj3d_tally_stick_cursor + 1,
                                 );
@@ -1681,9 +1684,9 @@ impl WgpuRenderer {
                                 self.proj.bowl_model = Some(hover_model);
                                 self.last_bowl_model = Some(hover_model);
                             }
-            self.push_object3d_draw(
-                object3d_draw_list,
-                object3d_shadow_draw_list,
+                            self.push_object3d_draw(
+                                object3d_draw_list,
+                                object3d_shadow_draw_list,
                                 DrawKind::Bowl,
                                 slot_i,
                             );

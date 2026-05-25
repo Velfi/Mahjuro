@@ -144,6 +144,22 @@ pub enum UiAction {
     WestFacePress,
     /// Gamepad **West** release / **Q** release — shop hold-to-sell completion; ignored elsewhere.
     WestFaceRelease,
+    /// Tixels scene: open image picker (`O`).
+    TixelsLoadImage,
+    /// Tixels scene: resolution preset down (`[`).
+    TixelsResolutionDown,
+    /// Tixels scene: resolution preset up (`]`).
+    TixelsResolutionUp,
+    /// Tixels scene: tile size down (`-`).
+    TixelsTileDown,
+    /// Tixels scene: tile size up (`=` / `+`).
+    TixelsTileUp,
+    /// Tixels scene: toggle Bayer dithering (`D`).
+    TixelsToggleBayer,
+    /// Tixels scene: toggle color tinting (`C`).
+    TixelsToggleColor,
+    /// Tixels scene: reset settings (`R`).
+    TixelsReset,
 }
 
 /// Context for [`crate::scenes::SceneBehavior::face_button_bindings`].
@@ -618,12 +634,18 @@ impl InputState {
                     UiAction::Cancel
                 }),
                 GpButton::West => {
-                    if let Some(action) = poll_ctx.face_bindings.face_press(GpButton::West, self.swap_xy) {
+                    if let Some(action) = poll_ctx
+                        .face_bindings
+                        .face_press(GpButton::West, self.swap_xy)
+                    {
                         actions.push(action);
                     }
                 }
                 GpButton::North => {
-                    if let Some(action) = poll_ctx.face_bindings.face_press(GpButton::North, self.swap_xy) {
+                    if let Some(action) = poll_ctx
+                        .face_bindings
+                        .face_press(GpButton::North, self.swap_xy)
+                    {
                         actions.push(action);
                     }
                 }
@@ -682,15 +704,17 @@ impl InputState {
                     }
                 }
                 GpButton::West => {
-                    if let Some(action) =
-                        poll_ctx.face_bindings.face_release(GpButton::West, self.swap_xy)
+                    if let Some(action) = poll_ctx
+                        .face_bindings
+                        .face_release(GpButton::West, self.swap_xy)
                     {
                         actions.push(action);
                     }
                 }
                 GpButton::North => {
-                    if let Some(action) =
-                        poll_ctx.face_bindings.face_release(GpButton::North, self.swap_xy)
+                    if let Some(action) = poll_ctx
+                        .face_bindings
+                        .face_release(GpButton::North, self.swap_xy)
                     {
                         actions.push(action);
                     }
@@ -752,7 +776,8 @@ impl InputState {
                     GpAxis::TriggerLeft => {
                         let cur = trigger_norm(value);
                         let prev = shell.lt_prev.get(&id).copied().unwrap_or(0.0);
-                        if prev < TRIG_PRESS && cur >= TRIG_PRESS
+                        if prev < TRIG_PRESS
+                            && cur >= TRIG_PRESS
                             && !poll_ctx.face_bindings.suppress_trigger_structure
                         {
                             actions.push(UiAction::TriggerStructure);
@@ -762,7 +787,8 @@ impl InputState {
                     GpAxis::TriggerRight => {
                         let cur = trigger_norm(value);
                         let prev = shell.rt_prev.get(&id).copied().unwrap_or(0.0);
-                        if prev < TRIG_PRESS && cur >= TRIG_PRESS
+                        if prev < TRIG_PRESS
+                            && cur >= TRIG_PRESS
                             && !poll_ctx.face_bindings.suppress_trigger_structure
                         {
                             actions.push(UiAction::TriggerStructure);
@@ -1320,7 +1346,17 @@ pub fn apply_ui_actions(
             | UiAction::TabPrev
             | UiAction::PageNext
             | UiAction::PagePrev => {}
-            UiAction::NorthFacePress | UiAction::WestFacePress | UiAction::WestFaceRelease => {}
+            UiAction::NorthFacePress
+            | UiAction::WestFacePress
+            | UiAction::WestFaceRelease
+            | UiAction::TixelsLoadImage
+            | UiAction::TixelsResolutionDown
+            | UiAction::TixelsResolutionUp
+            | UiAction::TixelsTileDown
+            | UiAction::TixelsTileUp
+            | UiAction::TixelsToggleBayer
+            | UiAction::TixelsToggleColor
+            | UiAction::TixelsReset => {}
             UiAction::CancelRelease => {}
         }
     }

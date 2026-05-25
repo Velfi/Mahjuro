@@ -1,15 +1,15 @@
 use crate::game::run::RunState;
 use crate::main_cli;
 use crate::scenes::shop::ShopScene;
+use crate::scenes::{GameOverScene, GameplayScene, Scene};
 use crate::scenes::{
     MetaLevelUpPresenter, ShowcasePresenter, ShowcaseScene, TilePackPresenter,
     TutorialCampaignScene, ZodiacPresenter,
 };
-use crate::scenes::{GameOverScene, GameplayScene, Scene};
 
 use super::fixtures::{
     prime_shop_stock, setup_defeat_game_over_screenshot_state, setup_gameplay_screenshot_state,
-    setup_hero_state, setup_shop_state,
+    setup_hero_state, setup_shop_state, setup_victory_game_over_screenshot_state,
 };
 use super::slug::{parse_tile_pack_slug, parse_zodiac_slug};
 
@@ -85,7 +85,7 @@ fn shop_focus_slug_inspectable(slug: &str) -> bool {
 enum CollectionScreenshotTab {
     Relics,
     Chronicle,
-    Bosses,
+    Ordeals,
     Talismans,
 }
 
@@ -97,7 +97,7 @@ fn collection_screenshot_tab(scene: &str) -> Option<CollectionScreenshotTab> {
     match scene {
         "collection" | "archive" => Some(CollectionScreenshotTab::Relics),
         "chronicle" | "archive_chronicle" => Some(CollectionScreenshotTab::Chronicle),
-        "archive_bosses" | "collection_bosses" => Some(CollectionScreenshotTab::Bosses),
+        "archive_ordeals" | "collection_ordeals" => Some(CollectionScreenshotTab::Ordeals),
         "archive_talismans" | "collection_talismans" => Some(CollectionScreenshotTab::Talismans),
         _ => None,
     }
@@ -108,7 +108,7 @@ fn collection_scene(tab: CollectionScreenshotTab) -> Scene {
     match tab {
         CollectionScreenshotTab::Relics => {}
         CollectionScreenshotTab::Chronicle => coll.prepare_chronicle_for_screenshot(),
-        CollectionScreenshotTab::Bosses => coll.prepare_bosses_for_screenshot(),
+        CollectionScreenshotTab::Ordeals => coll.prepare_ordeals_for_screenshot(),
         CollectionScreenshotTab::Talismans => coll.prepare_talismans_for_screenshot(),
     }
     Scene::Collection(coll)
@@ -129,9 +129,9 @@ pub(crate) fn zodiac_showcase_scene(s: &main_cli::ScreenshotCli) -> anyhow::Resu
     let z = zodiac_from_cli(s)?;
     let level = zodiac_celebration_level(s);
     let yaku = z.yaku();
-    Ok(Scene::Showcase(ShowcaseScene::new(ShowcasePresenter::Zodiac(
-        ZodiacPresenter::new(z, yaku.name(), level),
-    ))))
+    Ok(Scene::Showcase(ShowcaseScene::new(
+        ShowcasePresenter::Zodiac(ZodiacPresenter::new(z, yaku.name(), level)),
+    )))
 }
 
 pub(crate) fn tile_pack_showcase_scene(
@@ -142,9 +142,11 @@ pub(crate) fn tile_pack_showcase_scene(
         Some(slug) => parse_tile_pack_slug(slug)?,
         None => crate::core::tile_pack::TilePackKind::Honors,
     };
-    Ok(Scene::Showcase(ShowcaseScene::new(ShowcasePresenter::TilePack(
-        Box::new(TilePackPresenter::new_headless_screenshot(run, pack)),
-    ))))
+    Ok(Scene::Showcase(ShowcaseScene::new(
+        ShowcasePresenter::TilePack(Box::new(TilePackPresenter::new_headless_screenshot(
+            run, pack,
+        ))),
+    )))
 }
 
 fn game_over_defeat_scene(
@@ -239,7 +241,10 @@ pub(crate) fn resolve_screenshot_scene(
     let (scene, game_in_progress) = match s.scene.as_str() {
         "yaku_journal" => {
             unlock_yaku = true;
-            (Scene::YakuJournal(crate::scenes::YakuJournalScene::new()), false)
+            (
+                Scene::YakuJournal(crate::scenes::YakuJournalScene::new()),
+                false,
+            )
         }
         "gameplay" => {
             setup_gameplay_screenshot_state(run);
@@ -250,7 +255,13 @@ pub(crate) fn resolve_screenshot_scene(
             hero_play = true;
             (Scene::Gameplay(Box::new(GameplayScene::new())), true)
         }
-        "pick_blind" => (Scene::PickBlind(crate::scenes::PickBlindScene::new()), true),
+        "pick_chamber" | "pick_blind" => {
+            (Scene::PickChamber(crate::scenes::PickChamberScene::new()), true)
+        }
+        "staircase" => (
+            Scene::Staircase(crate::scenes::StaircaseScene::new()),
+            true,
+        ),
         "shop" => {
             setup_shop_state(run);
             let mut shop = ShopScene::new(run, progress);
@@ -265,10 +276,19 @@ pub(crate) fn resolve_screenshot_scene(
             Scene::MainMenuExterior(crate::scenes::MainMenuExteriorScene::new()),
             false,
         ),
-        "tile_select" => (Scene::TileSelect(crate::scenes::TileSelectScene::new()), false),
+        "tile_select" => (
+            Scene::TileSelect(crate::scenes::TileSelectScene::new()),
+            false,
+        ),
         "guide" | "tile_guide" | "tiles_guide" => {
-            let page = s.guide_page.map(|p| p.saturating_sub(1) as usize).unwrap_or(0);
-            (Scene::Guide(crate::scenes::GuideScene::with_page(page)), false)
+            let page = s
+                .guide_page
+                .map(|p| p.saturating_sub(1) as usize)
+                .unwrap_or(0);
+            (
+                Scene::Guide(crate::scenes::GuideScene::with_page(page)),
+                false,
+            )
         }
         "tutorial" | "tutorial_campaign" => {
             (Scene::TutorialCampaign(TutorialCampaignScene::new()), false)
@@ -281,11 +301,15 @@ pub(crate) fn resolve_screenshot_scene(
             Scene::MaterialViewer(crate::scenes::MaterialViewerScene::new(false)),
             false,
         ),
-        "rumble_lab" => (Scene::RumbleLab(crate::scenes::RumbleLabScene::new(false)), false),
+        "rumble_lab" => (
+            Scene::RumbleLab(crate::scenes::RumbleLabScene::new(false)),
+            false,
+        ),
         "tile_anchor_lab" => (
             Scene::TileAnchorLab(crate::scenes::TileAnchorLabScene::new(false)),
             false,
         ),
+        "tixels" => (Scene::Tixels(crate::scenes::TixelsScene::new(false)), false),
         "relic_unlock" => {
             force_relic_modal = true;
             (
@@ -295,7 +319,8 @@ pub(crate) fn resolve_screenshot_scene(
         }
         "game_over_level_up" | "meta_level_up" => {
             let mut level_progress = crate::core::progression::PlayerProgress::new();
-            level_progress.runs_completed = 1;
+            level_progress.level_progress_points =
+                crate::core::progression::PlayerProgress::min_points_for_level(2);
             let result = level_progress.check_level_up().ok_or_else(|| {
                 anyhow::anyhow!("game_over_level_up: check_level_up returned None")
             })?;
@@ -326,12 +351,16 @@ pub(crate) fn resolve_screenshot_scene(
             (tile_pack_showcase_scene(run, s.pack.as_deref())?, true)
         }
         "game_over_defeat" | "defeat" => (game_over_defeat_scene(s, run, progress)?, true),
+        "game_over_victory" | "victory" => {
+            setup_victory_game_over_screenshot_state(run);
+            (Scene::GameOver(GameOverScene::victory(run)), true)
+        }
         other => {
             anyhow::bail!(
-                "unsupported --scene '{other}' (supported: collection, archive, archive_bosses, chronicle, \
-                yaku_journal, gameplay, gameplay_hero, pick_blind, shop, options, \
+                "unsupported --scene '{other}' (supported: collection, archive, archive_ordeals, chronicle, \
+                yaku_journal, gameplay, gameplay_hero, pick_chamber, staircase, shop, options, \
                 main_menu_exterior, tile_select, guide, tutorial, transition_playground, \
-                material_viewer, relic_unlock, game_over_level_up, game_over_defeat, meta_level_up, \
+                material_viewer, tile_anchor_lab, tixels, relic_unlock, game_over_level_up, game_over_defeat, game_over_victory, meta_level_up, \
                 showcase, zodiac_celebration, tile_pack_celebration)"
             )
         }
@@ -357,9 +386,11 @@ pub(crate) fn scene_for_room_gi_bake(
             setup_shop_state(&mut run);
             (Scene::Shop(ShopScene::new(&mut run, progress)), run, false)
         }
-        crate::render::room_gi_bake::RoomGiRoom::Hallway => {
-            (Scene::PickBlind(crate::scenes::PickBlindScene::new()), run, true)
-        }
+        crate::render::room_gi_bake::RoomGiRoom::Hallway => (
+            Scene::PickChamber(crate::scenes::PickChamberScene::new()),
+            run,
+            true,
+        ),
         crate::render::room_gi_bake::RoomGiRoom::Archive => {
             let coll = crate::scenes::CollectionScene::new();
             (Scene::Collection(coll), run, false)

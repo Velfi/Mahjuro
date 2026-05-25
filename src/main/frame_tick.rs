@@ -223,30 +223,30 @@ impl App {
                     *self.progress.relic_times_activated.entry(rid).or_insert(0) += 1;
                     self.mark_profile_dirty();
                 }
-                GameEvent::BossEncountered(bk) => {
-                    self.audio.play_sfx(audio::SfxId::BossEncountered);
-                    *self.progress.boss_times_encountered.entry(bk).or_insert(0) += 1;
+                GameEvent::OrdealEncountered(bk) => {
+                    self.audio.play_sfx(audio::SfxId::OrdealEncountered);
+                    *self.progress.ordeal_times_encountered.entry(bk).or_insert(0) += 1;
                     self.mark_profile_dirty();
                     // "All bosses seen" — the regular (non-final)
                     // pool is the breadth-of-content signal we want.
                     // Beating Dragon is implied by `FirstRunCompleted`,
                     // so we don't gate this on it.
-                    let pool = crate::core::boss::regular_pool();
+                    let pool = crate::core::ordeal::regular_pool();
                     if pool
                         .iter()
-                        .all(|kind| self.progress.boss_times_encountered.contains_key(kind))
+                        .all(|kind| self.progress.ordeal_times_encountered.contains_key(kind))
                     {
                         self.steam
                             .unlock_achievement(crate::steam::Achievement::AllBossesSeen);
                     }
                 }
-                GameEvent::BossDefeated(bk) => {
-                    self.audio.play_sfx(audio::SfxId::BossDefeated);
-                    *self.progress.boss_times_defeated.entry(bk).or_insert(0) += 1;
+                GameEvent::OrdealDefeated(bk) => {
+                    self.audio.play_sfx(audio::SfxId::OrdealDefeated);
+                    *self.progress.ordeal_times_defeated.entry(bk).or_insert(0) += 1;
                     self.mark_profile_dirty();
                     self.steam
-                        .unlock_achievement(crate::steam::Achievement::FirstBossDefeated);
-                    if bk == crate::core::boss::BossKind::House {
+                        .unlock_achievement(crate::steam::Achievement::FirstOrdealDefeated);
+                    if bk == crate::core::ordeal::OrdealKind::House {
                         self.steam
                             .unlock_achievement(crate::steam::Achievement::HouseDefeated);
                     }
@@ -313,7 +313,7 @@ impl App {
                 }
                 GameEvent::RoomGltfBrownout => {
                     self.room_gltf_brownout.trigger();
-                    self.audio.play_sfx(audio::SfxId::BlindSkipped);
+                    self.audio.play_sfx(audio::SfxId::ChamberSkipped);
                 }
             }
         }
@@ -616,7 +616,7 @@ impl App {
             let result = overlay.update(&actions);
             self.debug.hide_tiles = overlay.hide_tiles;
             self.debug.hide_candles = overlay.hide_candles;
-            self.debug.hide_blind_plaque = overlay.hide_blind_plaque;
+            self.debug.hide_chamber_plaque = overlay.hide_chamber_plaque;
             self.debug.hide_scoring_placard = overlay.hide_scoring_placard;
             self.debug.hide_inventory = overlay.hide_inventory;
             if result == DebugVisResult::Stay {
@@ -1093,12 +1093,12 @@ impl App {
                     if let Some(scene) = Self::saved_resume_scene_for(&self.scene) {
                         self.resume_scene = scene;
                     }
-                    let gameplay_boss_blind = to_tag == SceneTag::Gameplay
-                        && self.run.blind == crate::core::rules::BlindKind::Boss;
+                    let gameplay_ordeal_chamber = to_tag == SceneTag::Gameplay
+                        && self.run.chamber == crate::core::rules::ChamberKind::Ordeal;
                     apply_post_scene_transition_effects(PostSceneTransitionCtx {
                         from: from_tag,
                         to: to_tag,
-                        gameplay_boss_blind,
+                        gameplay_ordeal_chamber,
                         anim: &mut self.anim,
                         renderer: self.renderer.as_mut(),
                         input: self.input.as_mut(),

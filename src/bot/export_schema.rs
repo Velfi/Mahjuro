@@ -1,12 +1,12 @@
-//! Serializable shapes for `mahjuro bot -o report.json` (export schema v5).
+//! Serializable shapes for `mahjuro bot -o report.json` (export schema v6).
 //! `aggregate` splits sums vs maps; `derived` holds precomputed dashboard / summary numbers.
 
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-use super::stats::PeakBlindSnapshot;
+use super::stats::PeakChamberSnapshot;
 
-pub const EXPORT_SCHEMA_VERSION: u32 = 5;
+pub const EXPORT_SCHEMA_VERSION: u32 = 6;
 
 #[derive(Serialize)]
 pub struct BotExportMeta {
@@ -17,15 +17,15 @@ pub struct BotExportMeta {
 #[derive(Serialize)]
 pub struct AggregateSums {
     pub runs: u32,
-    pub blinds_cleared_total: u64,
-    pub antes_cleared_total: u64,
+    pub chambers_cleared_total: u64,
+    pub wings_cleared_total: u64,
     pub victories: u32,
-    pub max_ante_reached: u32,
+    pub max_wing_reached: u32,
     pub total_score: u64,
     pub total_plays: u64,
     pub total_discards: u64,
     pub total_strategic_discards: u64,
-    pub total_blinds_skipped: u64,
+    pub total_chambers_skipped: u64,
     pub total_relics_bought: u64,
     pub total_gold_spent: u64,
     pub total_final_gold: i64,
@@ -38,9 +38,9 @@ pub struct AggregateSums {
     pub total_skip_tag_gold_value: u64,
     pub total_target_score: u64,
     pub total_overscore: u64,
-    pub peak_blind_score: u64,
+    pub peak_chamber_score: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub peak_blind_detail: Option<PeakBlindSnapshot>,
+    pub peak_chamber_detail: Option<PeakChamberSnapshot>,
     pub total_bot_issue_no_valid_hand: u64,
     pub total_bot_issue_only_valid_unplayable: u64,
     pub total_bot_issue_only_valid_no_score: u64,
@@ -64,9 +64,9 @@ pub struct AggregateSums {
 #[derive(Serialize)]
 pub struct AggregateMaps {
     pub bot_issues_by_reason: BTreeMap<String, u32>,
-    pub deaths_by_ante: BTreeMap<String, u32>,
-    pub deaths_by_blind: BTreeMap<String, u32>,
-    pub deaths_by_ante_cause: BTreeMap<String, u32>,
+    pub deaths_by_wing: BTreeMap<String, u32>,
+    pub deaths_by_chamber: BTreeMap<String, u32>,
+    pub deaths_by_wing_cause: BTreeMap<String, u32>,
     pub skipped_tags: BTreeMap<String, u32>,
     pub relics_picked: BTreeMap<String, u32>,
     pub relics_picked_victories: BTreeMap<String, u32>,
@@ -77,15 +77,15 @@ pub struct AggregateMaps {
     pub talismans_picked: BTreeMap<String, u32>,
     pub zodiacs_picked: BTreeMap<String, u32>,
     pub packs_picked: BTreeMap<String, u32>,
-    pub bot_issues_by_blind: BTreeMap<String, u32>,
-    pub bot_issues_by_boss: BTreeMap<String, u32>,
+    pub bot_issues_by_chamber: BTreeMap<String, u32>,
+    pub bot_issues_by_ordeal: BTreeMap<String, u32>,
     pub overscore_by_slot: BTreeMap<String, u64>,
     pub cleared_by_slot: BTreeMap<String, u64>,
-    pub turns_by_blind_slot: BTreeMap<String, u64>,
+    pub turns_by_chamber_slot: BTreeMap<String, u64>,
     pub turns_cleared_by_slot: BTreeMap<String, u64>,
-    pub discards_by_blind_slot: BTreeMap<String, u64>,
-    pub boss_faced: BTreeMap<String, u32>,
-    pub boss_beaten: BTreeMap<String, u32>,
+    pub discards_by_chamber_slot: BTreeMap<String, u64>,
+    pub ordeal_faced: BTreeMap<String, u32>,
+    pub ordeal_beaten: BTreeMap<String, u32>,
     pub yaku_scored: BTreeMap<String, u64>,
     pub zodiacs_used: BTreeMap<String, u64>,
     pub talismans_used: BTreeMap<String, u64>,
@@ -102,21 +102,21 @@ pub struct BotAggregate {
 #[derive(Default, Serialize)]
 pub struct PerRunAverages {
     pub win_rate_pct: f64,
-    pub blinds_cleared: f64,
-    pub antes_cleared: f64,
+    pub chambers_cleared: f64,
+    pub wings_cleared: f64,
     pub total_score: f64,
     pub plays: f64,
     pub discards: f64,
     pub strategic_discards: f64,
     pub random_discards: f64,
-    pub blinds_skipped: f64,
+    pub chambers_skipped: f64,
     pub relics_bought: f64,
     pub gold_spent: f64,
     pub gold_from_clears: f64,
-    /// `total_gold_from_clears / blinds_cleared_total` (batch ratio; 0 if no clears).
-    pub gold_per_blind_cleared: f64,
-    /// `(clears + skip-tags) / blinds_cleared_total`.
-    pub gold_per_blind_incl_skips: f64,
+    /// `total_gold_from_clears / chambers_cleared_total` (batch ratio; 0 if no clears).
+    pub gold_per_chamber_cleared: f64,
+    /// `(clears + skip-tags) / chambers_cleared_total`.
+    pub gold_per_chamber_incl_skips: f64,
     pub gold_from_skip_tags: f64,
     pub skip_tag_gold_value: f64,
     pub gold_clear_base: f64,
@@ -166,8 +166,8 @@ pub struct WilsonCiPct {
 }
 
 #[derive(Serialize)]
-pub struct DeathAnteRow {
-    pub ante: u32,
+pub struct DeathWingRow {
+    pub wing: u32,
     pub count: u32,
     pub pct_of_runs: f64,
     /// Wilson 95% CI for `count / runs` (percent scale).
@@ -181,8 +181,8 @@ pub struct DeathAnteRow {
 
 /// P(die on this ante | reached this ante) with Wilson 95% CI on hazard (percent scale).
 #[derive(Serialize)]
-pub struct DeathAnteHazardRow {
-    pub ante: u32,
+pub struct DeathWingHazardRow {
+    pub wing: u32,
     /// Runs that started this ante (denominator).
     pub reached: u32,
     pub deaths: u32,
@@ -228,8 +228,8 @@ pub struct AvgTurnsClearRow {
 
 /// Boss blind target vs mean round score per ante (overlaid bar chart).
 #[derive(Serialize)]
-pub struct BossBlindChartRow {
-    pub ante: u32,
+pub struct OrdealChamberChartRow {
+    pub wing: u32,
     pub target: u32,
     pub avg_score: f64,
     pub attempts: u32,
@@ -252,7 +252,7 @@ pub struct RelicBuyRow {
     pub win_pct_ci_hi: f64,
     /// `win_pct` minus overall batch win rate (percent points); not causal for shop picks.
     pub delta_vs_baseline_pct: f64,
-    /// Percent of this relic's shop purchases made when `run.ante > relic_shop_timing_early_ante_max`.
+    /// Percent of this relic's shop purchases made when `run.wing > relic_shop_timing_early_wing_max`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pct_shop_late: Option<f64>,
 }
@@ -387,8 +387,8 @@ pub struct BotIssuesDerived {
     pub only_no_score: u64,
     pub other: u64,
     pub lost_with_lines: u64,
-    pub hottest_blinds: Vec<(String, u32)>,
-    pub hottest_bosses: Vec<(String, u32)>,
+    pub hottest_chambers: Vec<(String, u32)>,
+    pub hottest_ordeals: Vec<(String, u32)>,
     pub reasons_top: Vec<(String, u32)>,
 }
 
@@ -403,24 +403,25 @@ pub struct BotReportDerived {
     pub per_run: PerRunAverages,
     /// Wilson 95% CI for overall win rate (percent scale).
     pub overall_win_rate_wilson_95: Option<WilsonCiPct>,
-    /// `RELIC_SHOP_TIMING_EARLY_ANTE_MAX` used for [`RelicBuyRow::pct_shop_late`] and timing splits.
-    pub relic_shop_timing_early_ante_max: u32,
+    /// `RELIC_SHOP_TIMING_EARLY_WING_MAX` used for [`RelicBuyRow::pct_shop_late`] and timing splits.
+    pub relic_shop_timing_early_wing_max: u32,
     /// Minimum buys per early/late bucket to include a [`RelicShopTimingRow`].
     pub relic_shop_timing_min_per_bucket: u32,
     pub kpis: Vec<KpiTile>,
     pub loss_breakdown: Option<LossBreakdownDerived>,
-    pub deaths_by_ante: Vec<DeathAnteRow>,
+    pub deaths_by_wing: Vec<DeathWingRow>,
     /// Conditional death hazard: P(die on ante a | reached ante a).
-    pub deaths_by_ante_hazard: Vec<DeathAnteHazardRow>,
-    pub deaths_by_blind: Vec<NamedCountPct>,
-    /// Per-ante boss target (from `blind_target`) vs mean boss round score in this batch.
-    pub boss_blind_chart: Vec<BossBlindChartRow>,
+    pub deaths_by_wing_hazard: Vec<DeathWingHazardRow>,
+    pub deaths_by_chamber: Vec<NamedCountPct>,
+    /// Per-ante boss target (from `chamber_target`) vs mean boss round score in this batch.
+    #[serde(alias = "ordeal_chamber_chart")]
+    pub ordeal_chamber_chart: Vec<OrdealChamberChartRow>,
     pub target_scaling: f32,
     pub surplus_by_slot: Vec<SurplusSlotRow>,
     /// Per blind-slot surplus distribution across runs (Q1/Q3 body, min/max wicks).
     pub surplus_candles: Vec<DistributionCandleRow>,
     /// Per-ante boss round-score distribution across runs; `target` = boss blind target.
-    pub boss_score_candles: Vec<DistributionCandleRow>,
+    pub ordeal_score_candles: Vec<DistributionCandleRow>,
     pub avg_turns_to_clear: Vec<AvgTurnsClearRow>,
     pub skip_tags: Vec<NamedCountPct>,
     pub consumable_zodiacs: Vec<NamedCount>,
@@ -451,18 +452,18 @@ impl Default for BotReportDerived {
         Self {
             per_run: PerRunAverages::default(),
             overall_win_rate_wilson_95: None,
-            relic_shop_timing_early_ante_max: 3,
+            relic_shop_timing_early_wing_max: 3,
             relic_shop_timing_min_per_bucket: 15,
             kpis: Vec::new(),
             loss_breakdown: None,
-            deaths_by_ante: Vec::new(),
-            deaths_by_ante_hazard: Vec::new(),
-            deaths_by_blind: Vec::new(),
-            boss_blind_chart: Vec::new(),
-            target_scaling: crate::core::blind_target::TARGET_SCALING,
+            deaths_by_wing: Vec::new(),
+            deaths_by_wing_hazard: Vec::new(),
+            deaths_by_chamber: Vec::new(),
+            ordeal_chamber_chart: Vec::new(),
+            target_scaling: crate::core::chamber_target::TARGET_SCALING,
             surplus_by_slot: Vec::new(),
             surplus_candles: Vec::new(),
-            boss_score_candles: Vec::new(),
+            ordeal_score_candles: Vec::new(),
             avg_turns_to_clear: Vec::new(),
             skip_tags: Vec::new(),
             consumable_zodiacs: Vec::new(),

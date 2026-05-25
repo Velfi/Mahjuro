@@ -4,7 +4,7 @@
     "name": "Gold Ingot",
     "description": "+8 gold",
     "rarity": "common",
-    "min_ante": 1,
+    "min_wing": 1,
     "gold_value": 8
   },
   {
@@ -12,7 +12,7 @@
     "name": "Treasure Chest",
     "description": "+20 gold",
     "rarity": "rare",
-    "min_ante": 3,
+    "min_wing": 3,
     "gold_value": 20
   },
   {
@@ -20,7 +20,7 @@
     "name": "Free Reroll",
     "description": "Next shop reroll is free",
     "rarity": "common",
-    "min_ante": 1,
+    "min_wing": 1,
     "gold_value": 5
   },
   {
@@ -28,7 +28,7 @@
     "name": "Patron's Gift",
     "description": "One shop relic is free",
     "rarity": "uncommon",
-    "min_ante": 1,
+    "min_wing": 1,
     "gold_value": 10
   },
   {
@@ -36,7 +36,7 @@
     "name": "Rich Stock",
     "description": "+2 relics in next shop",
     "rarity": "uncommon",
-    "min_ante": 1,
+    "min_wing": 1,
     "gold_value": 6
   },
   {
@@ -44,7 +44,7 @@
     "name": "Zodiac Blessing",
     "description": "Gain 2 random Zodiacs",
     "rarity": "uncommon",
-    "min_ante": 1,
+    "min_wing": 1,
     "gold_value": 6
   },
   {
@@ -52,7 +52,7 @@
     "name": "Bonus Play",
     "description": "+1 play next round",
     "rarity": "common",
-    "min_ante": 1,
+    "min_wing": 1,
     "gold_value": 8
   },
   {
@@ -60,7 +60,7 @@
     "name": "Bonus Discard",
     "description": "+1 discard next round",
     "rarity": "common",
-    "min_ante": 1,
+    "min_wing": 1,
     "gold_value": 5
   },
   {
@@ -68,7 +68,7 @@
     "name": "Wide Hand",
     "description": "+2 hand size next round",
     "rarity": "uncommon",
-    "min_ante": 1,
+    "min_wing": 1,
     "gold_value": 7
   }
 ]

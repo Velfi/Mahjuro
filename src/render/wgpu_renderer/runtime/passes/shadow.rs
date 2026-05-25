@@ -76,6 +76,16 @@ impl WgpuRenderer {
                         );
                     }
                 }
+                Some(ActiveRoomEnv::Staircase) => {
+                    if let Some(ref gpu) = self.staircase_environment {
+                        self.draw_gltf_room_env_shadow(
+                            &mut shadow_pass,
+                            &self.staircase_env_primitives,
+                            gpu,
+                            |_| false,
+                        );
+                    }
+                }
                 Some(ActiveRoomEnv::Archive) => {
                     if let Some(ref gpu) = self.archive_environment {
                         self.draw_gltf_room_env_shadow(
@@ -199,11 +209,11 @@ impl WgpuRenderer {
                 self.draw_lit_mesh_shadow(pass, mesh, inst);
             }
             DrawKind::BossIcon => {
-                let mesh = match self.boss_icon_slot_texture.get(slot_i).copied().flatten() {
-                    Some(bk) => self.boss_icon_mesh_for(bk),
+                let mesh = match self.ordeal_icon_slot_texture.get(slot_i).copied().flatten() {
+                    Some(bk) => self.ordeal_icon_mesh_for(bk),
                     None => &self.relic_box_mesh,
                 };
-                let Some(inst) = self.boss_icon_instances.get(slot_i) else {
+                let Some(inst) = self.ordeal_icon_instances.get(slot_i) else {
                     return;
                 };
                 self.draw_lit_mesh_shadow(pass, mesh, inst);

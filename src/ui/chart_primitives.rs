@@ -23,12 +23,7 @@ pub fn push_quad(out: &mut Vec<GpuInstance>, rect: [f32; 4], c: [f32; 4]) {
     });
 }
 
-pub fn push_quad_clipped(
-    out: &mut Vec<GpuInstance>,
-    rect: [f32; 4],
-    clip: ChartClip,
-    c: [f32; 4],
-) {
+pub fn push_quad_clipped(out: &mut Vec<GpuInstance>, rect: [f32; 4], clip: ChartClip, c: [f32; 4]) {
     let clip_rect = [
         rect[0],
         clip.top,
@@ -148,12 +143,7 @@ pub fn push_chart_y_axis(
         let tick_v = (max_v as f64 * value_frac as f64).round() as u64;
         let line_y = plot_y + plot_h * top_frac;
         if draw_grid && top_frac > 0.0 {
-            push_quad_clipped(
-                quads,
-                [plot_x, line_y, plot_w, 1.0],
-                clip,
-                grid_color,
-            );
+            push_quad_clipped(quads, [plot_x, line_y, plot_w, 1.0], clip, grid_color);
         }
         let label_y = (line_y - axis_line_h * 0.5).max(plot_y);
         if label_y + axis_line_h > plot_y + plot_h + 1.0 {
@@ -223,10 +213,20 @@ pub fn push_chart_time_axis_labels(
     );
     push_label_clipped(
         labels,
-        [plot_x + plot_w * 0.5, plot_y + plot_h + 4.0, plot_w * 0.5, cap_h],
+        [
+            plot_x + plot_w * 0.5,
+            plot_y + plot_h + 4.0,
+            plot_w * 0.5,
+            cap_h,
+        ],
         clip,
         TextLabel {
-            rect: [plot_x + plot_w * 0.5, plot_y + plot_h + 4.0, plot_w * 0.5, cap_h],
+            rect: [
+                plot_x + plot_w * 0.5,
+                plot_y + plot_h + 4.0,
+                plot_w * 0.5,
+                cap_h,
+            ],
             text: "now".into(),
             color: color::alpha(color::STONE, 0.75),
             font_px: Some(caption_px),
@@ -262,12 +262,7 @@ pub fn push_chart_stat_badge(
     let badge_w = pill_label_width(text, font_px) + pad_x * 2.0 + 3.0;
     let badge_h = line_h + pad_y * 2.0;
     let rect = [x, y, badge_w, badge_h];
-    push_quad_clipped(
-        quads,
-        rect,
-        clip,
-        color::alpha(color::WALNUT_DEEP, 0.94),
-    );
+    push_quad_clipped(quads, rect, clip, color::alpha(color::WALNUT_DEEP, 0.94));
     push_quad_clipped(
         quads,
         [x, y, 2.5, badge_h],
@@ -282,10 +277,20 @@ pub fn push_chart_stat_badge(
     );
     push_label_clipped(
         labels,
-        [x + pad_x + 2.5, y + pad_y, badge_w - pad_x * 2.0 - 2.5, line_h],
+        [
+            x + pad_x + 2.5,
+            y + pad_y,
+            badge_w - pad_x * 2.0 - 2.5,
+            line_h,
+        ],
         clip,
         TextLabel {
-            rect: [x + pad_x + 2.5, y + pad_y, badge_w - pad_x * 2.0 - 2.5, line_h],
+            rect: [
+                x + pad_x + 2.5,
+                y + pad_y,
+                badge_w - pad_x * 2.0 - 2.5,
+                line_h,
+            ],
             text: text.into(),
             color: color::CHAMPAGNE,
             font_px: Some(font_px),
@@ -323,7 +328,12 @@ pub fn push_chart_stat_badge_2line(
     let rect = [x, y, badge_w, badge_h];
 
     push_quad_clipped(quads, rect, clip, color::alpha(color::WALNUT_DEEP, 0.94));
-    push_quad_clipped(quads, [x, y, 2.5, badge_h], clip, color::alpha(accent, 0.98));
+    push_quad_clipped(
+        quads,
+        [x, y, 2.5, badge_h],
+        clip,
+        color::alpha(accent, 0.98),
+    );
     push_quad_clipped(
         quads,
         [x + 0.5, y + 0.5, badge_w - 1.0, 1.0],
@@ -389,8 +399,7 @@ pub fn push_yaku_pill(
 ) -> f32 {
     let pill_h = (row_h * 0.70).clamp(caption_px * 1.05, row_h - 4.0);
     let pad = (row_h - pill_h) * 0.5;
-    let pill_w = yaku_pill_width(label, caption_px, row_h)
-        .min((max_w - 2.0).max(caption_px * 2.4));
+    let pill_w = yaku_pill_width(label, caption_px, row_h).min((max_w - 2.0).max(caption_px * 2.4));
     let pill_y = y + pad;
     push_squircle_quad_clipped(
         squircle_quads,
@@ -657,12 +666,7 @@ fn push_sparkline_area_fill(
             let sy = y0 + (y1 - y0) * t;
             let bar_h = (floor_y - sy).max(0.0);
             if bar_h >= 0.5 {
-                push_quad_clipped(
-                    quads,
-                    [sx - slice_w * 0.5, sy, slice_w, bar_h],
-                    clip,
-                    fill,
-                );
+                push_quad_clipped(quads, [sx - slice_w * 0.5, sy, slice_w, bar_h], clip, fill);
             }
         }
     }

@@ -215,7 +215,10 @@ fn static_glyph_sprite(
     })
 }
 
-fn static_stick_sprite(style: GamepadStyle, side: StickSide) -> Option<(&'static str, &'static str)> {
+fn static_stick_sprite(
+    style: GamepadStyle,
+    side: StickSide,
+) -> Option<(&'static str, &'static str)> {
     use StickSide::{Left, Right};
     Some(match (style, side) {
         (GamepadStyle::PlayStation, Left) => (PLAYSTATION_SHEET, "playstation_stick_l"),
@@ -254,12 +257,13 @@ fn static_trigger_sprite(
     })
 }
 
-fn static_dpad_sprite(style: GamepadStyle, kind: DpadGlyph) -> Option<(&'static str, &'static str)> {
+fn static_dpad_sprite(
+    style: GamepadStyle,
+    kind: DpadGlyph,
+) -> Option<(&'static str, &'static str)> {
     use DpadGlyph::{Horizontal, Vertical};
     Some(match (style, kind) {
-        (GamepadStyle::PlayStation, Vertical) => {
-            (PLAYSTATION_SHEET, "playstation_dpad_vertical")
-        }
+        (GamepadStyle::PlayStation, Vertical) => (PLAYSTATION_SHEET, "playstation_dpad_vertical"),
         (GamepadStyle::PlayStation, Horizontal) => {
             (PLAYSTATION_SHEET, "playstation_dpad_horizontal")
         }
@@ -275,7 +279,9 @@ fn static_dpad_sprite(style: GamepadStyle, kind: DpadGlyph) -> Option<(&'static 
         (GamepadStyle::SteamController, Horizontal) => {
             (STEAM_CONTROLLER_SHEET, "steam_dpad_horizontal")
         }
-        (GamepadStyle::Xbox | GamepadStyle::Generic, Vertical) => (XBOX_SHEET, "xbox_dpad_vertical"),
+        (GamepadStyle::Xbox | GamepadStyle::Generic, Vertical) => {
+            (XBOX_SHEET, "xbox_dpad_vertical")
+        }
         (GamepadStyle::Xbox | GamepadStyle::Generic, Horizontal) => {
             (XBOX_SHEET, "xbox_dpad_horizontal")
         }

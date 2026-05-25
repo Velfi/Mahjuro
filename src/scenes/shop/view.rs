@@ -13,9 +13,7 @@ use crate::core::tile_pack::PACK_ASPECT_W_OVER_H;
 use crate::game::engine::{GameEngine, ShopReadModel, consumable_sell_price_for_mode};
 use crate::game::game_mode::GameMode;
 use crate::game::run::RunState;
-use crate::render::draw_cmd::{
-    CameraParams, Object3d, Object3dKind, ScenePunctualLight, UiFrame,
-};
+use crate::render::draw_cmd::{CameraParams, Object3d, Object3dKind, ScenePunctualLight, UiFrame};
 use crate::render::flame_volume::FlameEmitter;
 use crate::render::ribbon_mesh::{
     ZodiacRibbonSpec, ribbon_display_length, ribbon_length_fitting_rect, zodiac_ribbon_object3d,
@@ -592,7 +590,7 @@ pub(crate) fn render_shop_frame(
         frame.shop_environment();
     }
 
-    // Mesh anchors use ray/plane hits so props sit under vitrine pixels (plain
+    // Mesh anchors use ray/plane hits so props sit under display-case pixels (plain
     // `pixel_to_world` drifts under perspective).
     let base = shop_camera_base(w, h, env_h);
     let inspect_rig = InspectRig::shop(h, env_h);
@@ -1073,11 +1071,8 @@ pub(crate) fn render_shop_frame(
             ),
         ];
 
-        let mut legend_texts: Vec<TextLabel> = Vec::with_capacity(if inspect_active {
-            5
-        } else {
-            4
-        });
+        let mut legend_texts: Vec<TextLabel> =
+            Vec::with_capacity(if inspect_active { 5 } else { 4 });
         let slots = push_column_hints(
             &mut frame,
             &ctx,
@@ -1089,7 +1084,9 @@ pub(crate) fn render_shop_frame(
 
         const HOLD_SELL_LEGEND_COL: usize = 2;
         if let Some(started) = shop.west_sell_hold_started
-            && let Some(slot) = slots.iter().find(|s| s.column_index == HOLD_SELL_LEGEND_COL)
+            && let Some(slot) = slots
+                .iter()
+                .find(|s| s.column_index == HOLD_SELL_LEGEND_COL)
         {
             let elapsed = Instant::now()
                 .saturating_duration_since(started)
@@ -2039,8 +2036,12 @@ fn push_stock_meshes(
                         *foc,
                         Object3d {
                             pos: tal_pos,
-                            extents: crate::render::talisman_mesh::talisman_object_extents(tw * 1.15),
-                            rotation: crate::render::talisman_mesh::talisman_face_camera_rotation(0.0),
+                            extents: crate::render::talisman_mesh::talisman_object_extents(
+                                tw * 1.15,
+                            ),
+                            rotation: crate::render::talisman_mesh::talisman_face_camera_rotation(
+                                0.0,
+                            ),
                             color: col,
                             kind: Object3dKind::Talisman { kind: tk },
                             hover_target: 0.0,

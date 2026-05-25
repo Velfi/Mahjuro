@@ -150,7 +150,7 @@ pub(super) fn process_focus_and_actions(
             | FocusTarget::Gold
             | FocusTarget::YakuTablet(_)
             | FocusTarget::Dora
-            | FocusTarget::Boss
+            | FocusTarget::Ordeal
             | FocusTarget::RoundWind => true,
             FocusTarget::DiscardUndo => {
                 crate::persistence::load_settings().discard_undo_enabled
@@ -479,7 +479,7 @@ pub(super) fn process_focus_and_actions(
                     | Some(FocusTarget::Gold)
                     | Some(FocusTarget::YakuTablet(_))
                     | Some(FocusTarget::Dora)
-                    | Some(FocusTarget::Boss)
+                    | Some(FocusTarget::Ordeal)
                     | Some(FocusTarget::RoundWind) => {}
                     None => {}
                 }

@@ -83,7 +83,8 @@ pub enum ResumeScene {
     #[default]
     Gameplay,
     Shop,
-    PickBlind,
+    #[serde(alias = "PickBlind")]
+    PickChamber,
 }
 
 #[derive(Debug)]
@@ -644,6 +645,9 @@ fn load_profile_uncached(index: usize) -> PlayerProgress {
     };
     let mut progress: PlayerProgress =
         serde_json::from_str(&data).unwrap_or_else(|_| PlayerProgress::new());
+    // Meta-level points landed after older profiles were already on disk.
+    // Re-derive once from run history (or run count fallback) when absent.
+    progress.backfill_level_progress_points_from_history();
     // Stakes landed after some profiles already had victories on disk. Re-derive
     // `unlocked_stakes` from history every load so older saves see the right
     // ladder without requiring a manual migration — the backfill is idempotent.
@@ -863,24 +867,24 @@ pub fn load_run(index: usize) -> Option<LoadedRun> {
         return None;
     }
     // Rehydrate the resolved boss effect — it's `#[serde(skip)]`, so on
-    // reload `upcoming_boss_effect` is `None`. Reactive bosses re-run their
+    // reload `upcoming_ordeal_effect` is `None`. Reactive bosses re-run their
     // `on_reveal` hook against current state; since neither relics nor gold
     // change between save and reload, the result matches the original pick.
     let mut run = saved.run;
-    run.resolve_upcoming_boss();
+    run.resolve_upcoming_ordeal();
     let mut scene = saved.scene;
     // Repair stale/bad scene markers from older builds: a gameplay resume
     // must have an active dealt hand. If the snapshot is still in the
     // pre-blind state, land in the shop instead of the black gameplay shell.
     if matches!(scene, ResumeScene::Gameplay)
         && run.hand().is_empty()
-        && run.blind == run.upcoming_blind
+        && run.chamber == run.upcoming_chamber
     {
         log::warn!(
             "load_run: repairing saved scene marker from Gameplay to Shop (profile {}, round {}, blind {:?})",
             index,
             run.run_number,
-            run.blind
+            run.chamber
         );
         scene = ResumeScene::Shop;
     }

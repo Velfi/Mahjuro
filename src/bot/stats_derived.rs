@@ -1,8 +1,8 @@
-//! Build export `derived` views from [`AggregateStats`] (export schema v5).
+//! Build export `derived` views from [`AggregateStats`] (export schema v6).
 
 use super::export_schema::{
-    AggregateMaps, AggregateSums, AvgTurnsClearRow, BossBlindChartRow, BotAggregate,
-    BotIssuesDerived, BotReportDerived, DeathAnteHazardRow, DeathAnteRow, DistributionCandleRow,
+    AggregateMaps, AggregateSums, AvgTurnsClearRow, OrdealChamberChartRow, BotAggregate,
+    BotIssuesDerived, BotReportDerived, DeathWingHazardRow, DeathWingRow, DistributionCandleRow,
     KpiTile, LossBreakdownDerived, MapTable, NamedCount, NamedCountPct, NamedPerRun,
     PerRunAverages, RelicAttributionRow, RelicBuyRow, RelicDepthRow, RelicShopFunnelRow,
     RelicShopTimingRow, RelicValueRow, RelicWinRateRow, SurplusSlotRow, WilsonCiPct, YakuDerived,
@@ -11,13 +11,13 @@ use super::export_schema::{
 use super::relic_analytics::VALUE_BUCKET_LABELS;
 use super::reporting::human_readable_score;
 use super::stats::{
-    AggregateStats, MIN_SHOP_TIMING_SPLIT_PER_BUCKET, RELIC_SHOP_TIMING_EARLY_ANTE_MAX, RunStats,
+    AggregateStats, MIN_SHOP_TIMING_SPLIT_PER_BUCKET, RELIC_SHOP_TIMING_EARLY_WING_MAX, RunStats,
     aggregate_stats_slot_sort_key,
 };
 use super::stats_wilson::wilson_95_pct;
-use crate::core::blind_target::{TARGET_SCALING, score_for};
+use crate::core::chamber_target::{TARGET_SCALING, score_for};
 use crate::core::relic::{Rarity, all_relic_defs};
-use crate::core::rules::BlindKind;
+use crate::core::rules::ChamberKind;
 use crate::core::yaku::YakuKind;
 
 const MIN_SAMPLES_FOR_WIN_CORR: u32 = 20;
@@ -48,15 +48,15 @@ pub fn bot_aggregate_from(a: &AggregateStats) -> BotAggregate {
     BotAggregate {
         sums: AggregateSums {
             runs: a.runs,
-            blinds_cleared_total: a.blinds_cleared_total,
-            antes_cleared_total: a.antes_cleared_total,
+            chambers_cleared_total: a.chambers_cleared_total,
+            wings_cleared_total: a.wings_cleared_total,
             victories: a.victories,
-            max_ante_reached: a.max_ante_reached,
+            max_wing_reached: a.max_wing_reached,
             total_score: a.total_score,
             total_plays: a.total_plays,
             total_discards: a.total_discards,
             total_strategic_discards: a.total_strategic_discards,
-            total_blinds_skipped: a.total_blinds_skipped,
+            total_chambers_skipped: a.total_chambers_skipped,
             total_relics_bought: a.total_relics_bought,
             total_gold_spent: a.total_gold_spent,
             total_final_gold: a.total_final_gold,
@@ -69,8 +69,8 @@ pub fn bot_aggregate_from(a: &AggregateStats) -> BotAggregate {
             total_skip_tag_gold_value: a.total_skip_tag_gold_value,
             total_target_score: a.total_target_score,
             total_overscore: a.total_overscore,
-            peak_blind_score: a.peak_blind_score,
-            peak_blind_detail: a.peak_blind_detail.clone(),
+            peak_chamber_score: a.peak_chamber_score,
+            peak_chamber_detail: a.peak_chamber_detail.clone(),
             total_bot_issue_no_valid_hand: a.total_bot_issue_no_valid_hand,
             total_bot_issue_only_valid_unplayable: a.total_bot_issue_only_valid_unplayable,
             total_bot_issue_only_valid_no_score: a.total_bot_issue_only_valid_no_score,
@@ -92,17 +92,17 @@ pub fn bot_aggregate_from(a: &AggregateStats) -> BotAggregate {
         },
         maps: AggregateMaps {
             bot_issues_by_reason: a.bot_issues_by_reason.clone(),
-            deaths_by_ante: a
-                .deaths_by_ante
+            deaths_by_wing: a
+                .deaths_by_wing
                 .iter()
                 .map(|(k, v)| (k.to_string(), *v))
                 .collect(),
-            deaths_by_blind: a
-                .deaths_by_blind
+            deaths_by_chamber: a
+                .deaths_by_chamber
                 .iter()
                 .map(|(k, v)| ((*k).to_string(), *v))
                 .collect(),
-            deaths_by_ante_cause: a.deaths_by_ante_cause.clone(),
+            deaths_by_wing_cause: a.deaths_by_wing_cause.clone(),
             skipped_tags: a
                 .skipped_tags
                 .iter()
@@ -153,15 +153,15 @@ pub fn bot_aggregate_from(a: &AggregateStats) -> BotAggregate {
                 .iter()
                 .map(|(k, v)| ((*k).to_string(), *v))
                 .collect(),
-            bot_issues_by_blind: a.bot_issues_by_blind.clone(),
-            bot_issues_by_boss: a.bot_issues_by_boss.clone(),
+            bot_issues_by_chamber: a.bot_issues_by_chamber.clone(),
+            bot_issues_by_ordeal: a.bot_issues_by_ordeal.clone(),
             overscore_by_slot: a.overscore_by_slot.clone(),
             cleared_by_slot: a.cleared_by_slot.clone(),
-            turns_by_blind_slot: a.turns_by_blind_slot.clone(),
+            turns_by_chamber_slot: a.turns_by_chamber_slot.clone(),
             turns_cleared_by_slot: a.turns_cleared_by_slot.clone(),
-            discards_by_blind_slot: a.discards_by_blind_slot.clone(),
-            boss_faced: a.boss_faced.clone(),
-            boss_beaten: a.boss_beaten.clone(),
+            discards_by_chamber_slot: a.discards_by_chamber_slot.clone(),
+            ordeal_faced: a.ordeal_faced.clone(),
+            ordeal_beaten: a.ordeal_beaten.clone(),
             yaku_scored: a
                 .yaku_scored
                 .iter()
@@ -227,9 +227,9 @@ fn slot_label_compact(slot: &str) -> String {
     let (ante_str, rest) = slot.split_once('-').unwrap_or((slot, ""));
     let ante = ante_str.parse::<u32>().unwrap_or(0);
     let blind = match rest.trim() {
-        "Small Blind" => "S",
-        "Big Blind" => "B",
-        "Boss Blind" => "X",
+        "Small Chamber" => "S",
+        "Big Chamber" => "B",
+        "Ordeal Chamber" => "X",
         other => {
             if other.is_empty() {
                 "?"
@@ -283,14 +283,14 @@ fn build_surplus_candles(runs: &[RunStats]) -> Vec<DistributionCandleRow> {
     rows
 }
 
-fn build_boss_score_candles(runs: &[RunStats], base_target: u32) -> Vec<DistributionCandleRow> {
+fn build_ordeal_score_candles(runs: &[RunStats], base_target: u32) -> Vec<DistributionCandleRow> {
     if runs.is_empty() {
         return Vec::new();
     }
     let max_ante = runs
         .iter()
-        .flat_map(|s| s.boss_attempts_by_ante.keys().copied())
-        .chain(runs.iter().map(|s| s.died_on_ante))
+        .flat_map(|s| s.ordeal_attempts_by_wing.keys().copied())
+        .chain(runs.iter().map(|s| s.died_on_wing))
         .max()
         .unwrap_or(0);
     if max_ante == 0 {
@@ -302,11 +302,11 @@ fn build_boss_score_candles(runs: &[RunStats], base_target: u32) -> Vec<Distribu
         let samples: Vec<f64> = runs
             .iter()
             .filter_map(|s| {
-                let attempts = *s.boss_attempts_by_ante.get(&ante)?;
+                let attempts = *s.ordeal_attempts_by_wing.get(&ante)?;
                 if attempts == 0 {
                     return None;
                 }
-                let score = *s.boss_score_by_ante.get(&ante).unwrap_or(&0);
+                let score = *s.ordeal_score_by_wing.get(&ante).unwrap_or(&0);
                 Some(score as f64 / attempts as f64)
             })
             .collect();
@@ -314,23 +314,23 @@ fn build_boss_score_candles(runs: &[RunStats], base_target: u32) -> Vec<Distribu
             continue;
         };
         rows.push(DistributionCandleRow {
-            label: format!("Ante {ante}"),
+            label: format!("Wing {ante}"),
             n: samples.len() as u32,
             open,
             high,
             low,
             close,
-            target: Some(score_for(ante, BlindKind::Boss, base_target) as f64),
+            target: Some(score_for(ante, ChamberKind::Ordeal, base_target) as f64),
         });
     }
     rows
 }
 
-fn build_boss_blind_chart(a: &AggregateStats, base_target: u32) -> Vec<BossBlindChartRow> {
+fn build_ordeal_chamber_chart(a: &AggregateStats, base_target: u32) -> Vec<OrdealChamberChartRow> {
     let max_ante = a
-        .max_ante_reached
-        .max(a.boss_attempts_by_ante.keys().max().copied().unwrap_or(0))
-        .max(a.deaths_by_ante.keys().max().copied().unwrap_or(0));
+        .max_wing_reached
+        .max(a.ordeal_attempts_by_wing.keys().max().copied().unwrap_or(0))
+        .max(a.deaths_by_wing.keys().max().copied().unwrap_or(0));
     if max_ante == 0 {
         return Vec::new();
     }
@@ -338,10 +338,10 @@ fn build_boss_blind_chart(a: &AggregateStats, base_target: u32) -> Vec<BossBlind
     let mut scratch: Vec<(u32, u32, f64, u32)> = Vec::new();
     let mut scale_max = 1u64;
     for ante in 1..=max_ante {
-        let target = score_for(ante, BlindKind::Boss, base_target);
-        let attempts = *a.boss_attempts_by_ante.get(&ante).unwrap_or(&0);
+        let target = score_for(ante, ChamberKind::Ordeal, base_target);
+        let attempts = *a.ordeal_attempts_by_wing.get(&ante).unwrap_or(&0);
         let avg_score = if attempts > 0 {
-            *a.boss_score_by_ante.get(&ante).unwrap_or(&0) as f64 / attempts as f64
+            *a.ordeal_score_by_wing.get(&ante).unwrap_or(&0) as f64 / attempts as f64
         } else {
             0.0
         };
@@ -352,8 +352,8 @@ fn build_boss_blind_chart(a: &AggregateStats, base_target: u32) -> Vec<BossBlind
     let scale = scale_max.max(1) as f64;
     scratch
         .into_iter()
-        .map(|(ante, target, avg_score, attempts)| BossBlindChartRow {
-            ante,
+        .map(|(ante, target, avg_score, attempts)| OrdealChamberChartRow {
+            wing: ante,
             target,
             avg_score,
             attempts,
@@ -386,27 +386,27 @@ pub fn derived_from_batch(
 
     let per_run = PerRunAverages {
         win_rate_pct: a.victories as f64 * 100.0 / r,
-        blinds_cleared: a.blinds_cleared_total as f64 / r,
-        antes_cleared: a.antes_cleared_total as f64 / r,
+        chambers_cleared: a.chambers_cleared_total as f64 / r,
+        wings_cleared: a.wings_cleared_total as f64 / r,
         total_score: a.total_score as f64 / r,
         plays: a.total_plays as f64 / r,
         discards: a.total_discards as f64 / r,
         strategic_discards: a.total_strategic_discards as f64 / r,
         random_discards: (a.total_discards.saturating_sub(a.total_strategic_discards)) as f64 / r,
-        blinds_skipped: a.total_blinds_skipped as f64 / r,
+        chambers_skipped: a.total_chambers_skipped as f64 / r,
         relics_bought: a.total_relics_bought as f64 / r,
         gold_spent: a.total_gold_spent as f64 / r,
         gold_from_clears: a.total_gold_from_clears as f64 / r,
-        gold_per_blind_cleared: if a.blinds_cleared_total == 0 {
+        gold_per_chamber_cleared: if a.chambers_cleared_total == 0 {
             0.0
         } else {
-            a.total_gold_from_clears as f64 / a.blinds_cleared_total as f64
+            a.total_gold_from_clears as f64 / a.chambers_cleared_total as f64
         },
-        gold_per_blind_incl_skips: if a.blinds_cleared_total == 0 {
+        gold_per_chamber_incl_skips: if a.chambers_cleared_total == 0 {
             0.0
         } else {
             (a.total_gold_from_clears + a.total_gold_from_skip_tags) as f64
-                / a.blinds_cleared_total as f64
+                / a.chambers_cleared_total as f64
         },
         gold_from_skip_tags: a.total_gold_from_skip_tags as f64 / r,
         skip_tag_gold_value: a.total_skip_tag_gold_value as f64 / r,
@@ -463,23 +463,23 @@ pub fn derived_from_batch(
             highlight: false,
         },
         KpiTile {
-            id: "avg_blinds".into(),
+            id: "avg_chambers".into(),
             label: "Avg blinds".into(),
-            value: format!("{:.2}", per_run.blinds_cleared),
+            value: format!("{:.2}", per_run.chambers_cleared),
             hint: "cleared per run".into(),
             highlight: false,
         },
         KpiTile {
             id: "avg_antes".into(),
             label: "Avg antes".into(),
-            value: format!("{:.2}", per_run.antes_cleared),
+            value: format!("{:.2}", per_run.wings_cleared),
             hint: "through run".into(),
             highlight: false,
         },
         KpiTile {
-            id: "peak_blind".into(),
+            id: "peak_chamber".into(),
             label: "Peak blind".into(),
-            value: human_readable_score(a.peak_blind_score as f64),
+            value: human_readable_score(a.peak_chamber_score as f64),
             hint: "best single blind; see Peak blind (batch max) for tiles/relics".into(),
             highlight: false,
         },
@@ -499,17 +499,17 @@ pub fn derived_from_batch(
     };
 
     let max_death_pct = a
-        .deaths_by_ante
+        .deaths_by_wing
         .values()
         .map(|c| *c as f64 * 100.0 / r)
         .fold(0.0_f64, f64::max);
 
-    let mut ante_keys: Vec<u32> = a.deaths_by_ante.keys().copied().collect();
+    let mut ante_keys: Vec<u32> = a.deaths_by_wing.keys().copied().collect();
     ante_keys.sort_unstable();
-    let deaths_by_ante: Vec<DeathAnteRow> = ante_keys
+    let deaths_by_wing: Vec<DeathWingRow> = ante_keys
         .into_iter()
         .filter_map(|ante| {
-            let count = *a.deaths_by_ante.get(&ante)?;
+            let count = *a.deaths_by_wing.get(&ante)?;
             let pct = count as f64 * 100.0 / r;
             let text_bar = ((pct / 2.0).round() as u32).min(50);
             let dash_pct = if max_death_pct > 0.0 {
@@ -519,8 +519,8 @@ pub fn derived_from_batch(
             };
             let (pct_ci_lo, pct_ci_hi) =
                 wilson_95_pct(count as u64, rn as u64).unwrap_or((pct, pct));
-            Some(DeathAnteRow {
-                ante,
+            Some(DeathWingRow {
+                wing: ante,
                 count,
                 pct_of_runs: pct,
                 pct_ci_lo,
@@ -531,8 +531,8 @@ pub fn derived_from_batch(
         })
         .collect();
 
-    let deaths_by_ante_hazard: Vec<DeathAnteHazardRow> = a
-        .deaths_by_ante
+    let deaths_by_wing_hazard: Vec<DeathWingHazardRow> = a
+        .deaths_by_wing
         .keys()
         .max()
         .copied()
@@ -543,13 +543,13 @@ pub fn derived_from_batch(
                 if remaining == 0 {
                     break;
                 }
-                let deaths = *a.deaths_by_ante.get(&ante).unwrap_or(&0);
+                let deaths = *a.deaths_by_wing.get(&ante).unwrap_or(&0);
                 let reached = remaining;
                 let hazard_pct = deaths as f64 * 100.0 / reached as f64;
                 let (hazard_ci_lo, hazard_ci_hi) = wilson_95_pct(deaths as u64, reached as u64)
                     .unwrap_or((hazard_pct, hazard_pct));
-                rows.push(DeathAnteHazardRow {
-                    ante,
+                rows.push(DeathWingHazardRow {
+                    wing: ante,
                     reached,
                     deaths,
                     hazard_pct,
@@ -562,8 +562,8 @@ pub fn derived_from_batch(
         })
         .unwrap_or_default();
 
-    let mut blind_rows: Vec<NamedCountPct> = a
-        .deaths_by_blind
+    let mut chamber_rows: Vec<NamedCountPct> = a
+        .deaths_by_chamber
         .iter()
         .map(|(name, count)| NamedCountPct {
             name: (*name).to_string(),
@@ -571,11 +571,11 @@ pub fn derived_from_batch(
             pct_of_runs: *count as f64 * 100.0 / r,
         })
         .collect();
-    blind_rows.sort_by(|x, y| y.count.cmp(&x.count).then_with(|| x.name.cmp(&y.name)));
+    chamber_rows.sort_by(|x, y| y.count.cmp(&x.count).then_with(|| x.name.cmp(&y.name)));
 
-    let boss_blind_chart = build_boss_blind_chart(a, base_target);
+    let ordeal_chamber_chart = build_ordeal_chamber_chart(a, base_target);
     let surplus_candles = build_surplus_candles(runs);
-    let boss_score_candles = build_boss_score_candles(runs, base_target);
+    let ordeal_score_candles = build_ordeal_score_candles(runs, base_target);
 
     let mut surplus_tuples: Vec<(String, u64, f64)> = a
         .cleared_by_slot
@@ -802,10 +802,14 @@ pub fn derived_from_batch(
             .iter()
             .filter_map(|label| {
                 let key = format!("{name}\0{label}");
-                totals.get(&key).copied().filter(|&c| c > 0).map(|count| NamedCount {
-                    name: (*label).to_string(),
-                    count,
-                })
+                totals
+                    .get(&key)
+                    .copied()
+                    .filter(|&c| c > 0)
+                    .map(|count| NamedCount {
+                        name: (*label).to_string(),
+                        count,
+                    })
             })
             .collect()
     }
@@ -1036,8 +1040,8 @@ pub fn derived_from_batch(
             only_no_score: a.total_bot_issue_only_valid_no_score,
             other: a.total_bot_issue_other_stuck,
             lost_with_lines: a.total_bot_issue_lost_with_available_lines,
-            hottest_blinds: top_string_u32(&a.bot_issues_by_blind, 5),
-            hottest_bosses: top_string_u32(&a.bot_issues_by_boss, 5),
+            hottest_chambers: top_string_u32(&a.bot_issues_by_chamber, 5),
+            hottest_ordeals: top_string_u32(&a.bot_issues_by_ordeal, 5),
             reasons_top: top_string_u32(&a.bot_issues_by_reason, 8),
         })
     } else {
@@ -1046,9 +1050,9 @@ pub fn derived_from_batch(
 
     let supplementary_tables = vec![
         MapTable {
-            title: "Boss faced (runs)".into(),
+            title: "Ordeal faced (runs)".into(),
             rows: a
-                .boss_faced
+                .ordeal_faced
                 .iter()
                 .map(|(n, c)| NamedCount {
                     name: n.clone(),
@@ -1057,9 +1061,9 @@ pub fn derived_from_batch(
                 .collect(),
         },
         MapTable {
-            title: "Boss beaten (runs)".into(),
+            title: "Ordeal beaten (runs)".into(),
             rows: a
-                .boss_beaten
+                .ordeal_beaten
                 .iter()
                 .map(|(n, c)| NamedCount {
                     name: n.clone(),
@@ -1070,7 +1074,7 @@ pub fn derived_from_batch(
         MapTable {
             title: "Deaths by ante + cause".into(),
             rows: a
-                .deaths_by_ante_cause
+                .deaths_by_wing_cause
                 .iter()
                 .map(|(n, c)| NamedCount {
                     name: n.clone(),
@@ -1081,7 +1085,7 @@ pub fn derived_from_batch(
         MapTable {
             title: "Turns by blind slot".into(),
             rows: a
-                .turns_by_blind_slot
+                .turns_by_chamber_slot
                 .iter()
                 .map(|(n, c)| NamedCount {
                     name: n.clone(),
@@ -1092,7 +1096,7 @@ pub fn derived_from_batch(
         MapTable {
             title: "Discards by blind slot".into(),
             rows: a
-                .discards_by_blind_slot
+                .discards_by_chamber_slot
                 .iter()
                 .map(|(n, c)| NamedCount {
                     name: n.clone(),
@@ -1116,18 +1120,18 @@ pub fn derived_from_batch(
     BotReportDerived {
         per_run,
         overall_win_rate_wilson_95,
-        relic_shop_timing_early_ante_max: RELIC_SHOP_TIMING_EARLY_ANTE_MAX,
+        relic_shop_timing_early_wing_max: RELIC_SHOP_TIMING_EARLY_WING_MAX,
         relic_shop_timing_min_per_bucket: MIN_SHOP_TIMING_SPLIT_PER_BUCKET,
         kpis,
         loss_breakdown,
-        deaths_by_ante,
-        deaths_by_ante_hazard,
-        deaths_by_blind: blind_rows,
-        boss_blind_chart,
+        deaths_by_wing,
+        deaths_by_wing_hazard,
+        deaths_by_chamber: chamber_rows,
+        ordeal_chamber_chart,
         target_scaling: TARGET_SCALING,
         surplus_by_slot,
         surplus_candles,
-        boss_score_candles,
+        ordeal_score_candles,
         avg_turns_to_clear,
         skip_tags,
         consumable_zodiacs: zod,

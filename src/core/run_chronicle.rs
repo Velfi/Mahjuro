@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, HashMap};
 use serde::{Deserialize, Serialize};
 
 use crate::core::consumable::Consumable;
-use crate::core::rules::BlindKind;
+use crate::core::rules::ChamberKind;
 use crate::core::scoring::{ScoreBreakdown, StepKind};
 use crate::core::stake::Stake;
 use crate::core::tile::{Suit, Tile};
@@ -23,13 +23,16 @@ pub struct DiscardBySuit {
     pub honors: u32,
 }
 
-/// One ante/blind row in the encounter history table.
+/// One wing/chamber row in the encounter history table.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunEncounterRecord {
-    pub ante: u32,
-    pub blind_label: String,
+    #[serde(alias = "ante")]
+    pub wing: u32,
+    #[serde(alias = "blind_label")]
+    pub chamber_label: String,
     #[serde(default)]
-    pub boss: Option<String>,
+    #[serde(alias = "boss")]
+    pub ordeal_name: Option<String>,
     pub outcome: String,
     #[serde(default)]
     pub reward_note: String,
@@ -136,7 +139,7 @@ pub struct RunChronicle {
     pub victory_tier: Option<VictoryTier>,
     /// Round score when each blind ended (cleared, skipped, or failed).
     #[serde(default)]
-    pub blind_scores: Vec<u64>,
+    pub chamber_scores: Vec<u64>,
 }
 
 impl RunChronicle {
@@ -176,9 +179,15 @@ impl RunChronicle {
 
     pub fn note_discarded_tile(&mut self, tile: &Tile) {
         match tile.suit {
-            Suit::Manzu => self.discards_by_suit.manzu = self.discards_by_suit.manzu.saturating_add(1),
-            Suit::Pinzu => self.discards_by_suit.pinzu = self.discards_by_suit.pinzu.saturating_add(1),
-            Suit::Souzu => self.discards_by_suit.souzu = self.discards_by_suit.souzu.saturating_add(1),
+            Suit::Manzu => {
+                self.discards_by_suit.manzu = self.discards_by_suit.manzu.saturating_add(1)
+            }
+            Suit::Pinzu => {
+                self.discards_by_suit.pinzu = self.discards_by_suit.pinzu.saturating_add(1)
+            }
+            Suit::Souzu => {
+                self.discards_by_suit.souzu = self.discards_by_suit.souzu.saturating_add(1)
+            }
             Suit::Wind | Suit::Dragon | Suit::Flower | Suit::Season => {
                 self.discards_by_suit.honors = self.discards_by_suit.honors.saturating_add(1);
             }
@@ -193,30 +202,30 @@ impl RunChronicle {
         self.consumables_used.push(item);
     }
 
-    pub fn record_blind_cleared(
+    pub fn record_chamber_cleared(
         &mut self,
         ante: u32,
-        blind: BlindKind,
+        blind: ChamberKind,
         boss: Option<&str>,
         reward_note: String,
         round_score: u64,
     ) {
-        self.blind_scores.push(round_score);
+        self.chamber_scores.push(round_score);
         self.encounters.push(RunEncounterRecord {
-            ante,
-            blind_label: blind.name().to_string(),
-            boss: boss.map(str::to_string),
+            wing: ante,
+            chamber_label: blind.name().to_string(),
+            ordeal_name: boss.map(str::to_string),
             outcome: "Cleared".into(),
             reward_note,
         });
     }
 
-    pub fn record_blind_skipped(&mut self, ante: u32, blind: BlindKind, reward_note: String) {
-        self.blind_scores.push(0);
+    pub fn record_chamber_skipped(&mut self, ante: u32, blind: ChamberKind, reward_note: String) {
+        self.chamber_scores.push(0);
         self.encounters.push(RunEncounterRecord {
-            ante,
-            blind_label: blind.name().to_string(),
-            boss: None,
+            wing: ante,
+            chamber_label: blind.name().to_string(),
+            ordeal_name: None,
             outcome: "Skipped".into(),
             reward_note,
         });
@@ -225,22 +234,22 @@ impl RunChronicle {
     pub fn record_run_end_defeat(
         &mut self,
         ante: u32,
-        blind: BlindKind,
+        blind: ChamberKind,
         boss: Option<&str>,
         round_score: u64,
     ) {
         if self
             .encounters
             .last()
-            .is_some_and(|e| e.ante == ante && e.outcome == "Defeated")
+            .is_some_and(|e| e.wing == ante && e.outcome == "Defeated")
         {
             return;
         }
-        self.blind_scores.push(round_score);
+        self.chamber_scores.push(round_score);
         self.encounters.push(RunEncounterRecord {
-            ante,
-            blind_label: blind.name().to_string(),
-            boss: boss.map(str::to_string),
+            wing: ante,
+            chamber_label: blind.name().to_string(),
+            ordeal_name: boss.map(str::to_string),
             outcome: "Defeated".into(),
             reward_note: String::new(),
         });
@@ -285,12 +294,12 @@ impl RunChronicle {
         &mut self,
         victory: bool,
         total_score: u64,
-        final_ante: u32,
+        final_wing: u32,
         plays_remaining: u32,
     ) {
         if victory {
-            self.victory_tier = Some(victory_tier_for(total_score, final_ante));
-            self.milestones = compute_milestones(self, total_score, final_ante, plays_remaining);
+            self.victory_tier = Some(victory_tier_for(total_score, final_wing));
+            self.milestones = compute_milestones(self, total_score, final_wing, plays_remaining);
         }
     }
 }
@@ -365,18 +374,24 @@ fn score_snapshot_from_breakdown(
         let delta_chips = step.running_chips - prev_chips;
         if step.source.starts_with("Dora") {
             dora_chips += delta_chips;
-        } else if breakdown.detected_yaku.iter().any(|y| step.source.starts_with(y.name())) {
+        } else if breakdown
+            .detected_yaku
+            .iter()
+            .any(|y| step.source.starts_with(y.name()))
+        {
             yaku_chips += delta_chips;
         } else if step.kind == StepKind::Chips && delta_chips != 0 {
             relic_chips += delta_chips;
         }
         if (step.source.contains("Boss") || step.source.contains("boss"))
-            && step.kind == StepKind::Mult && delta_chips == 0 {
-                let mult_delta = step.running_mult / prev_chips.max(1) as f64;
-                if mult_delta > 1.0 {
-                    boss_mult = mult_delta;
-                }
+            && step.kind == StepKind::Mult
+            && delta_chips == 0
+        {
+            let mult_delta = step.running_mult / prev_chips.max(1) as f64;
+            if mult_delta > 1.0 {
+                boss_mult = mult_delta;
             }
+        }
         if step.source.contains("Chain") || step.source.contains("Streak") {
             streak_mult = step.running_mult;
         }
@@ -395,10 +410,10 @@ fn score_snapshot_from_breakdown(
     }
 }
 
-fn victory_tier_for(total_score: u64, final_ante: u32) -> VictoryTier {
-    if final_ante >= 8 && total_score >= 50_000 {
+fn victory_tier_for(total_score: u64, final_wing: u32) -> VictoryTier {
+    if final_wing >= 8 && total_score >= 50_000 {
         VictoryTier::Exceptional
-    } else if total_score >= 25_000 || final_ante >= 6 {
+    } else if total_score >= 25_000 || final_wing >= 6 {
         VictoryTier::High
     } else {
         VictoryTier::Standard
@@ -408,14 +423,14 @@ fn victory_tier_for(total_score: u64, final_ante: u32) -> VictoryTier {
 fn compute_milestones(
     chronicle: &RunChronicle,
     total_score: u64,
-    final_ante: u32,
+    final_wing: u32,
     plays_remaining: u32,
 ) -> Vec<String> {
     let mut tags = Vec::new();
     if total_score >= 30_000 {
         tags.push("High Score".into());
     }
-    if final_ante >= 8 && plays_remaining >= 2 {
+    if final_wing >= 8 && plays_remaining >= 2 {
         tags.push("Speed Clear".into());
     }
     if chronicle.best_combo_han >= 12 {
@@ -437,13 +452,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn blind_scores_record_on_clear_and_defeat() {
-        use crate::core::rules::BlindKind;
+    fn chamber_scores_record_on_clear_and_defeat() {
+        use crate::core::rules::ChamberKind;
         let mut c = RunChronicle::default();
-        c.record_blind_cleared(1, BlindKind::Small, None, String::new(), 420);
-        c.record_blind_cleared(1, BlindKind::Big, None, String::new(), 880);
-        c.record_run_end_defeat(1, BlindKind::Boss, Some("The Whisper"), 210);
-        assert_eq!(c.blind_scores, vec![420, 880, 210]);
+        c.record_chamber_cleared(1, ChamberKind::Small, None, String::new(), 420);
+        c.record_chamber_cleared(1, ChamberKind::Big, None, String::new(), 880);
+        c.record_run_end_defeat(1, ChamberKind::Ordeal, Some("The Whisper"), 210);
+        assert_eq!(c.chamber_scores, vec![420, 880, 210]);
     }
 
     #[test]

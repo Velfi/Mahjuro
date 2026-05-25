@@ -6,8 +6,8 @@
 use std::time::Instant;
 
 use crate::audio::SfxId;
-use crate::core::boss::{BossKind, all_bosses, final_bosses};
 use crate::core::archive_seen::{self, ArchiveSeenMark, ArchiveTab};
+use crate::core::ordeal::{OrdealKind, all_ordeals, final_ordeals};
 use crate::core::progression::is_transformation_successor_relic;
 use crate::core::relic::{RelicId, all_relic_defs};
 use crate::core::talisman::TalismanKind;
@@ -24,17 +24,13 @@ use crate::render::table_transform::{
     euler_xyz_rad_from_deg, mat4_to_euler_xyz_rad, rot_fixed_axes_deg,
 };
 use crate::render::theme::{color, metrics, typography};
-use crate::render::wgpu_renderer::{
-    GpuInstance, TextAlign, TextLabel,
-};
-use crate::render::world_space::{
-    surface_anchor_from_world_xyz, world_on_camera_ray_plane_z,
+use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
+use crate::render::world_space::{surface_anchor_from_world_xyz, world_on_camera_ray_plane_z};
+use crate::ui::controller_hints::{
+    HintKey, HintRow, HintSegment, HintStyle, inspect_camera_hint_row, inspect_dismiss_hint_row,
+    push_inline_hint_rows,
 };
 use crate::ui::focus_nav::{FocusDir, pick_neighbor, push_focus_ring};
-use crate::ui::controller_hints::{
-    HintKey, HintRow, HintSegment, HintStyle, inspect_camera_hint_row,
-    inspect_dismiss_hint_row, push_inline_hint_rows,
-};
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 use glam::{Mat4, Quat, Vec3};
@@ -44,9 +40,8 @@ use super::main_menu_exterior::MainMenuExteriorScene;
 use super::profile_select::ProfileSelectScene;
 use super::{DrawCtx, OverlayRequest, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 use crate::scenes::object3d_inspect::{
-    InspectDolly, InspectRig, ItemInspectOrbitState,
-    inspect_orbit_camera, lerp_camera, prepend_inspect_orbit_subject_rotation,
-    tick_inspect_dolly,
+    InspectDolly, InspectRig, ItemInspectOrbitState, inspect_orbit_camera, lerp_camera,
+    prepend_inspect_orbit_subject_rotation, tick_inspect_dolly,
 };
 /// 2D chrome sizes shared by [`CollectionScene::draw_collection_frame`] and
 /// [`CollectionScene::flat_items`] — tuned for legibility at TV distance.
@@ -76,7 +71,7 @@ fn archive_chrome_layout(w: f32, h: f32) -> ArchiveChromeLayout {
 enum Tab {
     Relics,
     Yaku,
-    Bosses,
+    Ordeals,
     Talismans,
     Chronicle,
 }
@@ -95,7 +90,7 @@ const TABS: [Tab; 5] = [
     Tab::Relics,
     Tab::Talismans,
     Tab::Yaku,
-    Tab::Bosses,
+    Tab::Ordeals,
     Tab::Chronicle,
 ];
 
@@ -104,7 +99,7 @@ impl Tab {
         match self {
             Tab::Relics => "Relics",
             Tab::Yaku => "Yaku",
-            Tab::Bosses => "Bosses",
+            Tab::Ordeals => "Ordeals",
             Tab::Talismans => "Talismans",
             Tab::Chronicle => "Chronicle",
         }
@@ -131,8 +126,8 @@ enum ArtifactKind {
     Relic(RelicId),
     Talisman(TalismanKind),
     Zodiac(ZodiacKind),
-    /// Boss encounter — flat icon from the boss atlas (no 3D mesh).
-    Boss(BossKind),
+    /// Ordeal encounter — flat icon from the ordeal atlas (no 3D mesh).
+    Ordeal(OrdealKind),
     /// Index into [`crate::core::progression::PlayerProgress::run_history`].
     ChronicleRun(usize),
     /// Aggregate career view (run-log row 0).
@@ -241,9 +236,9 @@ impl CollectionScene {
         self.chronicle_dashboard_scroll.set(0.0);
     }
 
-    /// Headless screenshot: open the Bosses tab on page 0 with the first entry focused.
-    pub fn prepare_bosses_for_screenshot(&mut self) {
-        *self = Self::with_active_tab(Tab::Bosses);
+    /// Headless screenshot: open the Ordeals tab on page 0 with the first entry focused.
+    pub fn prepare_ordeals_for_screenshot(&mut self) {
+        *self = Self::with_active_tab(Tab::Ordeals);
         self.focused_row = Some(0);
         self.archive_page = 0;
     }
@@ -844,7 +839,7 @@ impl CollectionScene {
                         },
                     )));
                 }
-                ArtifactKind::Boss(kind) => {
+                ArtifactKind::Ordeal(kind) => {
                     // BossIcon mesh caps face local +Y (same as Relic). Pedestal
                     // placement uses Rx(90°) for vertical plaques — don't reuse that
                     // rotation or the icon lies edge-on. Billboard toward the active camera.
@@ -987,7 +982,7 @@ impl CollectionScene {
                 ctx.progress,
                 ctx.archive_chronicle_last_seen_run_len,
             )
-                .for_tab(tab_to_archive_tab(self.active_tab));
+            .for_tab(tab_to_archive_tab(self.active_tab));
             if tab_new > 0 {
                 format!(
                     "Mahjuro — Archive ({} · {} new)",
@@ -999,15 +994,11 @@ impl CollectionScene {
             }
         };
         if inspect.is_some()
-            && let Some(tw) = self.collection_inspect_target_world(
-                w,
-                h,
-                bosses,
-                ctx.layout,
-                env_scale,
-            ) {
-                frame.shop_inspect_shadow_target = Some(tw);
-            }
+            && let Some(tw) =
+                self.collection_inspect_target_world(w, h, bosses, ctx.layout, env_scale)
+        {
+            frame.shop_inspect_shadow_target = Some(tw);
+        }
         frame
     }
 
@@ -1038,13 +1029,15 @@ impl CollectionScene {
         let page_nav = archive_page_nav(self.active_tab, ctx.progress, self.archive_page);
 
         if let Some(back_rect) = archive_main_menu_btn_rect(w, h, &cam, env_h_draw)
-            && ring_focus == Some(CollectionAction::Back) {
-                push_focus_ring(back_rect, scale, w, h, &mut quads);
-            }
+            && ring_focus == Some(CollectionAction::Back)
+        {
+            push_focus_ring(back_rect, scale, w, h, &mut quads);
+        }
         if let Some(switch_rect) = archive_switch_save_btn_rect(w, h, &cam, env_h_draw)
-            && ring_focus == Some(CollectionAction::SwitchSave) {
-                push_focus_ring(switch_rect, scale, w, h, &mut quads);
-            }
+            && ring_focus == Some(CollectionAction::SwitchSave)
+        {
+            push_focus_ring(switch_rect, scale, w, h, &mut quads);
+        }
         for (ti, rect) in archive_tab_hit_rects(w, h, env_h_draw, &cam) {
             if ring_focus == Some(CollectionAction::SelectTab(ti)) {
                 push_focus_ring(rect, scale, w, h, &mut quads);
@@ -1076,8 +1069,7 @@ impl CollectionScene {
         }
 
         let footer_anchor_y = h - back_h - h * 0.02;
-        let chronicle_ledger =
-            matches!(self.active_tab, Tab::Chronicle) && inspect.is_none();
+        let chronicle_ledger = matches!(self.active_tab, Tab::Chronicle) && inspect.is_none();
 
         // Control hints — pinned above the footer chrome. The page / scroll
         // affordance line is omitted when the tab fits in one page so the
@@ -1152,12 +1144,7 @@ impl CollectionScene {
 
         if inspect_open {
             legend_row_rects.push([hint_band_x, hint_y, hint_band_w, hint_line_h]);
-            legend_row_rects.push([
-                hint_band_x,
-                hint_y + hint_line_h,
-                hint_band_w,
-                hint_line_h,
-            ]);
+            legend_row_rects.push([hint_band_x, hint_y + hint_line_h, hint_band_w, hint_line_h]);
         } else {
             legend_row_rects.push([hint_band_x, hint_y, hint_band_w, hint_line_h]);
         }
@@ -1196,9 +1183,7 @@ impl CollectionScene {
                 )
             };
             let page_font = typography::size(typography::H36, h);
-            if let Some(rect) =
-                archive_page_indicator_rect(w, h, &cam, env_h_draw, page_font)
-            {
+            if let Some(rect) = archive_page_indicator_rect(w, h, &cam, env_h_draw, page_font) {
                 text_labels.push(TextLabel {
                     rect,
                     text: label,
@@ -1210,12 +1195,17 @@ impl CollectionScene {
             }
         }
 
-        let all_artifacts =
-            tab_artifacts(self.active_tab, ctx.progress, chronicle_last_seen);
+        let all_artifacts = tab_artifacts(self.active_tab, ctx.progress, chronicle_last_seen);
 
         // Grid layout, focus close-up, and description plaque.
-        let mut frame =
-            self.build_archive_grid_frame(frame, quads, &mut text_labels, &all_artifacts, &ctx, inspect);
+        let mut frame = self.build_archive_grid_frame(
+            frame,
+            quads,
+            &mut text_labels,
+            &all_artifacts,
+            &ctx,
+            inspect,
+        );
         if !legend_rows.is_empty() {
             push_inline_hint_rows(
                 &mut frame,
@@ -1348,13 +1338,7 @@ impl SceneBehavior for CollectionScene {
                                     bus: &mut crate::game::event_bus::EventBus,
                                     idx: usize| {
             bus.push(GameEvent::UiSound(SfxId::TilePlace));
-            collection_focus_artifact(
-                scene,
-                idx,
-                ctx.progress,
-                chronicle_last_seen,
-                bus,
-            );
+            collection_focus_artifact(scene, idx, ctx.progress, chronicle_last_seen, bus);
         };
 
         for a in ctx.actions {
@@ -1653,28 +1637,28 @@ impl SceneBehavior for CollectionScene {
                             CollectionAction::PrevPage => {
                                 let from = archive_focus_row_col_in_page(self.focused_row);
                                 archive_page_step(
-                            self,
-                            ctx.bus,
-                            -1,
-                            from,
-                            all_count,
-                            ctx.progress,
-                            chronicle_last_seen,
-                            Some(CollectionAction::PrevPage),
-                        );
+                                    self,
+                                    ctx.bus,
+                                    -1,
+                                    from,
+                                    all_count,
+                                    ctx.progress,
+                                    chronicle_last_seen,
+                                    Some(CollectionAction::PrevPage),
+                                );
                             }
                             CollectionAction::NextPage => {
                                 let from = archive_focus_row_col_in_page(self.focused_row);
                                 archive_page_step(
-                            self,
-                            ctx.bus,
-                            1,
-                            from,
-                            all_count,
-                            ctx.progress,
-                            chronicle_last_seen,
-                            None,
-                        );
+                                    self,
+                                    ctx.bus,
+                                    1,
+                                    from,
+                                    all_count,
+                                    ctx.progress,
+                                    chronicle_last_seen,
+                                    None,
+                                );
                             }
                             CollectionAction::SelectTab(i) => {
                                 if i < TABS.len() {
@@ -1720,8 +1704,7 @@ impl SceneBehavior for CollectionScene {
                 UiAction::NorthFacePress => {
                     let w = ctx.layout.window_w;
                     let h = ctx.layout.window_h;
-                    let bosses =
-                        tab_artifacts(self.active_tab, ctx.progress, chronicle_last_seen);
+                    let bosses = tab_artifacts(self.active_tab, ctx.progress, chronicle_last_seen);
                     if bosses.is_empty() {
                         continue;
                     }
@@ -1751,11 +1734,7 @@ impl SceneBehavior for CollectionScene {
         match action {
             Some(CollectionAction::Back) => {
                 ctx.bus.push(GameEvent::UiSound(SfxId::UiCancel));
-                maybe_bump_chronicle_on_exit(
-                    self,
-                    ctx.progress,
-                    ctx.bump_archive_chronicle_seen,
-                );
+                maybe_bump_chronicle_on_exit(self, ctx.progress, ctx.bump_archive_chronicle_seen);
                 return Some(Scene::MainMenuExterior(MainMenuExteriorScene::new()));
             }
             Some(CollectionAction::SwitchSave) => {
@@ -1835,14 +1814,7 @@ impl SceneBehavior for CollectionScene {
             let w = ctx.layout.window_w;
             let h = ctx.layout.window_h;
             let panel = chronicle_panel_rect(w, h);
-            chronicle_update_pane_from_cursor(
-                self,
-                w,
-                h,
-                panel,
-                ctx.cursor_pos,
-                ctx.input_mode,
-            );
+            chronicle_update_pane_from_cursor(self, w, h, panel, ctx.cursor_pos, ctx.input_mode);
             let entry_count = archive_career::chronicle_list_entry_count(ctx.progress);
             let right_max = crate::ui::chronicle_dashboard::chronicle_right_pane_scroll_max(
                 w,
@@ -1932,14 +1904,14 @@ fn tab_artifacts(
                 is_new: false,
             })
             .collect(),
-        Tab::Bosses => all_bosses()
+        Tab::Ordeals => all_ordeals()
             .iter()
-            .chain(final_bosses().iter())
-            .filter(|def| progress.boss_times_encountered.contains_key(&def.kind))
+            .chain(final_ordeals().iter())
+            .filter(|def| progress.ordeal_times_encountered.contains_key(&def.kind))
             .map(|def| Artifact {
                 name: def.name.to_string(),
                 unlocked: true,
-                kind: ArtifactKind::Boss(def.kind),
+                kind: ArtifactKind::Ordeal(def.kind),
                 accent: def.tier.halo_color(),
                 is_new: false,
             })
@@ -1993,7 +1965,7 @@ fn tab_to_archive_tab(tab: Tab) -> ArchiveTab {
         Tab::Relics => ArchiveTab::Relics,
         Tab::Talismans => ArchiveTab::Talismans,
         Tab::Yaku => ArchiveTab::Yaku,
-        Tab::Bosses => ArchiveTab::Bosses,
+        Tab::Ordeals => ArchiveTab::Ordeals,
         Tab::Chronicle => ArchiveTab::Chronicle,
     }
 }
@@ -2006,9 +1978,11 @@ fn artifact_is_new(
     match &art.kind {
         ArtifactKind::Relic(id) => !progress.archive_seen_relics.contains(id),
         ArtifactKind::Zodiac(zk) => !progress.archive_seen_yaku.contains(&zk.yaku()),
-        ArtifactKind::Boss(bk) => !progress.archive_seen_bosses.contains(bk),
+        ArtifactKind::Ordeal(bk) => !progress.archive_seen_ordeals.contains(bk),
         ArtifactKind::Talisman(tk) => !progress.archive_seen_talismans.contains(tk),
-        ArtifactKind::ChronicleRun(idx) => archive_seen::chronicle_run_is_new(*idx, chronicle_last_seen),
+        ArtifactKind::ChronicleRun(idx) => {
+            archive_seen::chronicle_run_is_new(*idx, chronicle_last_seen)
+        }
         ArtifactKind::ChronicleSummary => false,
     }
 }
@@ -2017,7 +1991,7 @@ fn artifact_seen_mark(art: &Artifact) -> Option<ArchiveSeenMark> {
     match art.kind {
         ArtifactKind::Relic(id) => Some(ArchiveSeenMark::Relic(id)),
         ArtifactKind::Zodiac(zk) => Some(ArchiveSeenMark::Yaku(zk.yaku())),
-        ArtifactKind::Boss(bk) => Some(ArchiveSeenMark::Boss(bk)),
+        ArtifactKind::Ordeal(bk) => Some(ArchiveSeenMark::Ordeal(bk)),
         ArtifactKind::Talisman(tk) => Some(ArchiveSeenMark::Talisman(tk)),
         ArtifactKind::ChronicleRun(_) | ArtifactKind::ChronicleSummary => None,
     }
@@ -2091,13 +2065,7 @@ fn collection_focus_artifact(
     bus: &mut crate::game::event_bus::EventBus,
 ) {
     collection_sync_artifact_focus_to_idx(scene, idx);
-    mark_artifact_seen_if_new(
-        scene.active_tab,
-        progress,
-        idx,
-        chronicle_last_seen,
-        bus,
-    );
+    mark_artifact_seen_if_new(scene.active_tab, progress, idx, chronicle_last_seen, bus);
 }
 
 /// Map a yaku to its matching zodiac ribbon. Every yaku has exactly one
@@ -2133,7 +2101,7 @@ fn description_for(
             "Levelled by the {} zodiac ribbon (+0.5 mult, +20 chips per level).",
             kind.name()
         ),
-        ArtifactKind::Boss(kind) => kind.def().description.to_string(),
+        ArtifactKind::Ordeal(kind) => kind.def().description.to_string(),
         ArtifactKind::ChronicleSummary => {
             let n = archive_career::chronicle_indices_recent_first(progress).len();
             format!(
@@ -2339,7 +2307,7 @@ fn collection_push_grid_cell_object3d(p: CollectionGridCellObject3d<'_>) {
                 placement_rot_deg: [0.0, 0.0, 0.0],
             }));
         }
-        ArtifactKind::Boss(kind) => {
+        ArtifactKind::Ordeal(kind) => {
             let f = fade.max(if is_focus { 1.0 } else { 0.55 });
             let lum = f.min(1.0);
             plaques.push(Object3d {
@@ -2522,8 +2490,7 @@ fn collection_sync_artifact_focus_to_idx(scene: &mut CollectionScene, idx: usize
         if prev != Some(idx) {
             scene.chronicle_dashboard_scroll.set(0.0);
         }
-        scene.chronicle_focused_pane =
-            crate::ui::chronicle_dashboard::ChronicleScrollPane::RunLog;
+        scene.chronicle_focused_pane = crate::ui::chronicle_dashboard::ChronicleScrollPane::RunLog;
     } else {
         scene.archive_page = archive_page_for_idx(idx);
     }
@@ -2845,7 +2812,10 @@ fn chronicle_apply_scroll_delta(
         ChronicleScrollPane::RunLog => {
             let entry_count = archive_career::chronicle_list_entry_count(progress);
             let max_s = crate::ui::chronicle_dashboard::chronicle_run_log_scroll_max(
-                w, h, panel, entry_count,
+                w,
+                h,
+                panel,
+                entry_count,
             );
             let next = (scene.chronicle_run_log_scroll.get() + delta).clamp(0.0, max_s);
             scene.chronicle_run_log_scroll.set(next);
@@ -2940,12 +2910,12 @@ fn collection_chronicle_tab_index() -> usize {
 }
 
 #[inline]
-fn collection_bosses_tab_index() -> usize {
+fn collection_ordeals_tab_index() -> usize {
     collection_chronicle_tab_index().saturating_sub(1)
 }
 
 /// Tab targets allowed for a vertical move from one tab button. Chronicle sits
-/// on a lower shelf and is only reachable downward from Bosses; other tabs
+/// on a lower shelf and is only reachable downward from Ordeals; other tabs
 /// should drop into the cabinet instead.
 fn collection_tab_chrome_rects_for_vertical_step(
     items: &[FlatItem<CollectionAction>],
@@ -2953,7 +2923,7 @@ fn collection_tab_chrome_rects_for_vertical_step(
     dir: FocusDir,
 ) -> Vec<(CollectionAction, [f32; 4])> {
     let chronicle_idx = collection_chronicle_tab_index();
-    let bosses_idx = collection_bosses_tab_index();
+    let bosses_idx = collection_ordeals_tab_index();
     collection_tab_chrome_rects(items)
         .into_iter()
         .filter(|(action, _)| match (from, dir) {
@@ -3060,8 +3030,8 @@ fn archive_marker_screen_rect(
 ) -> Option<[f32; 4]> {
     archive_glb::with_archive_glb_cpu(|opt| {
         let cpu = opt?;
-        if let Some(r) = room_glb::screen_rect_for_marker_mesh_bounds(
-            &room_glb::MarkerScreenRectParams {
+        if let Some(r) =
+            room_glb::screen_rect_for_marker_mesh_bounds(&room_glb::MarkerScreenRectParams {
                 win_w: w,
                 win_h: h,
                 cam,
@@ -3070,8 +3040,8 @@ fn archive_marker_screen_rect(
                 node_name,
                 min_rw: rw,
                 min_rh: rh,
-            },
-        ) {
+            })
+        {
             return Some(r);
         }
         let tw = room_glb::marker_translation(cpu, node_name)?
@@ -3081,12 +3051,7 @@ fn archive_marker_screen_rect(
     })
 }
 
-fn archive_main_menu_btn_rect(
-    w: f32,
-    h: f32,
-    cam: &CameraParams,
-    env_h: f32,
-) -> Option<[f32; 4]> {
+fn archive_main_menu_btn_rect(w: f32, h: f32, cam: &CameraParams, env_h: f32) -> Option<[f32; 4]> {
     archive_marker_screen_rect(
         w,
         h,
@@ -3115,12 +3080,7 @@ fn archive_switch_save_btn_rect(
     )
 }
 
-fn archive_page_left_btn_rect(
-    w: f32,
-    h: f32,
-    cam: &CameraParams,
-    env_h: f32,
-) -> Option<[f32; 4]> {
+fn archive_page_left_btn_rect(w: f32, h: f32, cam: &CameraParams, env_h: f32) -> Option<[f32; 4]> {
     archive_marker_screen_rect(
         w,
         h,
@@ -3132,12 +3092,7 @@ fn archive_page_left_btn_rect(
     )
 }
 
-fn archive_page_right_btn_rect(
-    w: f32,
-    h: f32,
-    cam: &CameraParams,
-    env_h: f32,
-) -> Option<[f32; 4]> {
+fn archive_page_right_btn_rect(w: f32, h: f32, cam: &CameraParams, env_h: f32) -> Option<[f32; 4]> {
     archive_marker_screen_rect(
         w,
         h,
@@ -3171,12 +3126,7 @@ fn archive_page_indicator_rect(
 }
 
 /// Tab hit/focus rects projected from authored `btn_*_tab` meshes ([`TABS`] order).
-fn archive_tab_hit_rects(
-    w: f32,
-    h: f32,
-    env_h: f32,
-    cam: &CameraParams,
-) -> Vec<(usize, [f32; 4])> {
+fn archive_tab_hit_rects(w: f32, h: f32, env_h: f32, cam: &CameraParams) -> Vec<(usize, [f32; 4])> {
     let rw = w * 0.09;
     let rh = h * 0.06;
     let mut out = Vec::new();
@@ -3272,13 +3222,15 @@ mod tests {
         let bosses_idx = chronicle_idx - 1;
         let bosses = chrome
             .iter()
-            .find(|(action, _)| matches!(action, CollectionAction::SelectTab(i) if *i == bosses_idx))
+            .find(
+                |(action, _)| matches!(action, CollectionAction::SelectTab(i) if *i == bosses_idx),
+            )
             .expect("bosses tab rect")
             .1;
         assert_eq!(
             pick_neighbor(bosses, FocusDir::Down, &chrome),
             Some(CollectionAction::SelectTab(chronicle_idx)),
-            "Down from Bosses should reach the lower-shelf Chronicle btn"
+            "Down from Ordeals should reach the lower-shelf Chronicle btn"
         );
         let relics = chrome
             .iter()
@@ -3337,4 +3289,3 @@ mod tests {
         );
     }
 }
-

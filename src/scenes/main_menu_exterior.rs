@@ -165,7 +165,7 @@ pub(crate) fn scene_from_resume(
                 Scene::Shop(ShopScene::new(run, progress))
             }
         }
-        ResumeScene::PickBlind => Scene::PickBlind(super::pick_blind::PickBlindScene::new()),
+        ResumeScene::PickChamber => Scene::PickChamber(super::pick_chamber::PickChamberScene::new()),
     }
 }
 

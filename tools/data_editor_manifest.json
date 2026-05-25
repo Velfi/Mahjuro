@@ -10,7 +10,7 @@
         "type": "enum",
         "options": ["soft", "medium", "hard", "final"]
       },
-      { "key": "min_ante", "type": "number", "step": 1 }
+      { "key": "min_wing", "type": "number", "step": 1 }
     ]
   },
   "yaku": {
@@ -31,7 +31,7 @@
       { "key": "base_target_mult", "type": "number", "step": "any" },
       { "key": "price_multiplier", "type": "number", "step": "any" },
       { "key": "reroll_base_cost", "type": "number", "step": 1 },
-      { "key": "boss_min_ante_floor", "type": "number", "step": 1 },
+      { "key": "boss_min_wing_floor", "type": "number", "step": 1 },
       { "key": "starting_rules", "type": "json" }
     ]
   },
@@ -46,7 +46,7 @@
         "type": "enum",
         "options": ["common", "uncommon", "rare"]
       },
-      { "key": "min_ante", "type": "number", "step": 1 },
+      { "key": "min_wing", "type": "number", "step": 1 },
       { "key": "gold_value", "type": "number", "step": 1 }
     ]
   },

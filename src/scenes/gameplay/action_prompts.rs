@@ -38,7 +38,7 @@ pub fn gameplay_west_north_legend_active(
                     | FocusTarget::Gold
                     | FocusTarget::YakuTablet(_)
                     | FocusTarget::Dora
-                    | FocusTarget::Boss
+                    | FocusTarget::Ordeal
                     | FocusTarget::RoundWind
                     | FocusTarget::Consumable(_),
                 ) => false,

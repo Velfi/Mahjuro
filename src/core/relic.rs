@@ -232,7 +232,7 @@ pub enum RelicId {
     Cosmopolitan,
     /// +1 mult per blind *played* this run (skips don't count). Counter in
     /// `relic_counters[Heirloom]` increments in `advance_round`, which runs
-    /// only after clearing a blind — `skip_to_next_blind` is a separate path.
+    /// only after clearing a blind — `skip_to_next_chamber` is a separate path.
     Heirloom,
     /// +3 mult per distinct suit among scored tiles (Flower counts).
     Tourist,
@@ -1134,13 +1134,14 @@ pub fn format_mirror_tile_inventory_help(relics: &RelicState, mirror_slot: usize
     }
 
     if let Some(fm) = first_mirror_slot
-        && fm != mirror_slot {
-            let tgt = active.get(fm + 1).copied().map(relic_display_name);
-            let tgt_s = tgt.unwrap_or_else(|| "nothing".into());
-            parts.push(format!(
-                "Only the leftmost mirror does anything (it copies {tgt_s})."
-            ));
-        }
+        && fm != mirror_slot
+    {
+        let tgt = active.get(fm + 1).copied().map(relic_display_name);
+        let tgt_s = tgt.unwrap_or_else(|| "nothing".into());
+        parts.push(format!(
+            "Only the leftmost mirror does anything (it copies {tgt_s})."
+        ));
+    }
 
     parts.join("\n")
 }

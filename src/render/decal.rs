@@ -68,13 +68,13 @@ pub fn tile_face_display_label(tile: &Tile) -> String {
 /// Emoji indicator for each suit, rendered below the main label.
 pub fn tile_suit_emoji(tile: &Tile) -> &'static str {
     match tile.suit {
-        Suit::Manzu => "\u{1F3B4}", // 🎴 flower card
-        Suit::Souzu => "\u{1F38B}",    // 🎋 tanabata tree / bamboo
-        Suit::Pinzu => "\u{1F534}",       // 🔴 red circle / disc
-        Suit::Wind => "\u{1F32C}",       // 🌬 wind face
-        Suit::Dragon => "\u{1F409}",     // 🐉 dragon
-        Suit::Flower => "\u{1F33A}",     // 🌺 hibiscus
-        Suit::Season => "\u{1F342}",     // 🍂 fallen leaf
+        Suit::Manzu => "\u{1F3B4}",  // 🎴 flower card
+        Suit::Souzu => "\u{1F38B}",  // 🎋 tanabata tree / bamboo
+        Suit::Pinzu => "\u{1F534}",  // 🔴 red circle / disc
+        Suit::Wind => "\u{1F32C}",   // 🌬 wind face
+        Suit::Dragon => "\u{1F409}", // 🐉 dragon
+        Suit::Flower => "\u{1F33A}", // 🌺 hibiscus
+        Suit::Season => "\u{1F342}", // 🍂 fallen leaf
     }
 }
 

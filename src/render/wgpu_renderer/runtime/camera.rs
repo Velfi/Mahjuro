@@ -193,7 +193,7 @@ impl WgpuRenderer {
         let h = frame.showcase_render_hints;
         let table_like = matches!(
             k,
-            Some("gameplay") | Some("tutorial") | Some("pick_blind") | Some("collection")
+            Some("gameplay") | Some("tutorial") | Some("pick_chamber") | Some("collection")
         ) || (k == Some("showcase") && h.collection_tonemap_context);
         let shop_scene =
             k == Some("shop") || (k == Some("showcase") && h.shop_tonemap_and_lit_mesh_context);
@@ -232,6 +232,7 @@ impl WgpuRenderer {
                     c,
                     DrawCmd::ShopEnvironment
                         | DrawCmd::HallwayEnvironment
+                        | DrawCmd::StaircaseEnvironment
                         | DrawCmd::ArchiveEnvironment
                         | DrawCmd::MainMenuEnvironment
                         | DrawCmd::GameplayEnvironment
@@ -268,7 +269,7 @@ impl WgpuRenderer {
             let mut e = self.shop_env_linear_exposure
                 * crate::render::room_glb::ROOM_GLB_LINEAR_EXPOSURE_BASE;
             let mut a = self.shop_env_ambient_scale;
-            if k == Some("pick_blind") {
+            if k == Some("pick_chamber") {
                 e *= crate::render::hallway_glb::HALLWAY_ENV_LINEAR_EXPOSURE_MUL;
                 a = a.max(crate::render::hallway_glb::HALLWAY_ENV_AMBIENT_SCALE_MIN);
             }
@@ -309,7 +310,7 @@ impl WgpuRenderer {
         // `KHR_lights_punctual`: `.x` = inverse document scale for attenuation
         // (matches `room_glb` `decal_atlas_uv.y`) whenever embedded punctual is
         // on — archive/collection need this too, not only `shop_like` scenes.
-        // `.y` = shop vitrine material tuning (albedo/ambient/shadow tweaks);
+        // `.y` = shop display-case material tuning (albedo/ambient/shadow tweaks);
         // keep that shop-only so archive relics do not stack extra fill on top
         // of corrected punctual.
         let shop_punctual_inv_doc = if frame.scene_lighting.embedded_gltf_punctual {
@@ -325,7 +326,8 @@ impl WgpuRenderer {
         } else {
             0.0
         };
-        let shop_punctual_vitrine = if shop_like && frame.scene_lighting.embedded_gltf_punctual {
+        let shop_punctual_display_case =
+            if shop_like && frame.scene_lighting.embedded_gltf_punctual {
             1.0
         } else {
             0.0
@@ -359,7 +361,7 @@ impl WgpuRenderer {
                 ssr_max_steps,
             ],
             felt: [self.felt_shader_lod, felt_y, felt_z, felt_w],
-            shop_punctual: [shop_punctual_inv_doc, shop_punctual_vitrine, 0.0, 0.0],
+            shop_punctual: [shop_punctual_inv_doc, shop_punctual_display_case, 0.0, 0.0],
         }
     }
 

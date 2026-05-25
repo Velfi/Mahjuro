@@ -1,36 +1,36 @@
 use crate::game::run::RunState;
 use crate::{
     core::{
-        boss,
+        ordeal,
         deck::Wall,
         relic::RelicId,
-        rules::{BlindKind, RuleModifier},
+        rules::{ChamberKind, RuleModifier},
         tile::Suit,
     },
-    game::{engine_state::GameplayCoreState, event_bus::EventBus, run::FINAL_ANTE},
+    game::{engine_state::GameplayCoreState, event_bus::EventBus, run::FINAL_WING},
 };
 
 impl RunState {
     /// Apply a blind choice: sets target score, dispatches boss effect on
     /// boss blinds, and applies any per-round resource resets.
-    pub fn apply_blind(&mut self, blind: BlindKind, bus: Option<&mut EventBus>) {
-        self.blind = blind;
+    pub fn apply_chamber(&mut self, blind: ChamberKind, bus: Option<&mut EventBus>) {
+        self.chamber = blind;
         self.round_score = 0;
         self.memorial_round.clear();
         self.reset_round_resources();
         self.tile_debuffs.clear();
         self.relics.clear_debuffs();
         // Per-ante exponential base × blind multiplier (Balatro-style); see
-        // `core::blind_target`. Skips do not inflate later targets.
-        self.target_score = self.blind_score_target(blind);
+        // `core::chamber_target`. Skips do not inflate later targets.
+        self.target_score = self.chamber_score_target(blind);
         // Boss dispatch — push rule modifiers and run the on_apply hook so
         // category-C taxers (zero discards, hand-size shrink, gold cost) take
         // effect before the player draws their first hand.
-        if blind == BlindKind::Boss {
+        if blind == ChamberKind::Ordeal {
             // Read from the resolved effect (built at reveal time) so reactive
             // bosses' chosen variants land correctly. Take/restore to dodge
             // the &mut self conflict when calling on_apply.
-            if let Some(eff) = self.boss.effect.take() {
+            if let Some(eff) = self.ordeal.effect.take() {
                 for &m in &eff.rule_pushes {
                     if !self.round_rules.contains(&m) {
                         self.round_rules.push(m);
@@ -41,7 +41,7 @@ impl RunState {
                 if let Some(hook) = eff.on_apply {
                     hook(self);
                 }
-                self.boss.effect = Some(eff);
+                self.ordeal.effect = Some(eff);
             }
         }
         self.feed_hungry_ghosts_at_round_start();
@@ -57,7 +57,7 @@ impl RunState {
         // Fold next-round Wide Hand into the round's effective hand size so
         // every refill and hand-size check sees the same total for the round.
         if self.tag_bonus_hand_size != 0 {
-            self.boss.bonus_hand_size += self.tag_bonus_hand_size;
+            self.ordeal.bonus_hand_size += self.tag_bonus_hand_size;
             self.tag_bonus_hand_size = 0;
         }
         // ReducedPlays modifier reduces plays from 4 to 3.
@@ -80,7 +80,7 @@ impl RunState {
             self.wall.reveal_extra_dora_indicator();
         }
         self.hand.clear();
-        let draw_count = boss::effective_hand_size(self);
+        let draw_count = ordeal::effective_hand_size(self);
         let lotus = self.relics.has(crate::core::relic::RelicId::LotusBloom);
         for _ in 0..draw_count {
             if let Some(t) = self.wall.draw() {
@@ -143,9 +143,9 @@ impl RunState {
     }
 
     /// Add the chosen relic, scale up the base target, and reset for the next round.
-    /// The actual target_score is set later by `apply_blind`.
+    /// The actual target_score is set later by `apply_chamber`.
     ///
-    /// Balatro-style ante progression: chip base grows each ante; `apply_blind`
+    /// Balatro-style ante progression: chip base grows each ante; `apply_chamber`
     /// applies Small/Big/Boss multipliers for that ante.
     pub fn advance_round(&mut self, bus: &mut EventBus) {
         self.roll_lantern_maybe_shatter(bus);
@@ -174,11 +174,11 @@ impl RunState {
         }
 
         // Defeating the Boss completes an ante (`ante` increments below).
-        let was_boss = self.blind == BlindKind::Boss;
+        let was_boss = self.chamber == ChamberKind::Ordeal;
         if was_boss {
-            self.score_after_ante
-                .push((self.ante, self.total_score_earned));
-            self.ante += 1;
+            self.score_after_wing
+                .push((self.wing, self.total_score_earned));
+            self.wing += 1;
             if self.relics.has(RelicId::BeggarsCup) {
                 *self.relic_counters.entry(RelicId::BeggarsCup).or_insert(0) += 1;
             }
@@ -196,19 +196,19 @@ impl RunState {
         // Kong Collector: per-round kong tally is consumed at round end; clear it now.
         self.relic_counters.remove(&RelicId::KongCollector);
         self.run_number += 1;
-        // `target_score` is recomputed by `apply_blind` when the next blind is picked.
+        // `target_score` is recomputed by `apply_chamber` when the next blind is picked.
         self.round_rules.clear();
         self.reset_round_resources();
         self.last_breakdown = None;
         self.scored_last_turn = false;
         self.joker_used = false;
         self.full_hand_played_this_round = false;
-        self.boss.bonus_hand_size = 0;
-        self.boss.gold_cost_per_play = 0;
+        self.ordeal.bonus_hand_size = 0;
+        self.ordeal.gold_cost_per_play = 0;
         self.played_yaku_this_round.clear();
         self.honors_scored_this_round = false;
-        self.upcoming_blind = self.upcoming_blind.next();
-        self.blind = self.upcoming_blind;
+        self.upcoming_chamber = self.upcoming_chamber.next();
+        self.chamber = self.upcoming_chamber;
         GameplayCoreState::with_run_mut(self, |core| {
             core.clear_hand_structure_bank();
         });
@@ -219,35 +219,35 @@ impl RunState {
         // without replacement from the regular pool.
         if was_boss {
             let mut rng = rand::rng();
-            let boss_floor = self.mode.stake.boss_min_ante_floor();
-            self.boss.upcoming = if self.ante == FINAL_ANTE {
-                Some(boss::pick_final(&mut rng))
-            } else if self.ante > FINAL_ANTE {
+            let ordeal_floor = self.mode.stake.ordeal_min_wing_floor();
+            self.ordeal.upcoming = if self.wing == FINAL_WING {
+                Some(ordeal::pick_final(&mut rng))
+            } else if self.wing > FINAL_WING {
                 None
             } else {
-                boss::pick_for_ante_with_floor(
-                    &mut self.boss.pool_remaining,
-                    self.ante,
-                    boss_floor,
+                ordeal::pick_for_wing_with_floor(
+                    &mut self.ordeal.pool_remaining,
+                    self.wing,
+                    ordeal_floor,
                     &mut rng,
                 )
             };
             // Bake the resolved effect now so reactive bosses see the
             // post-shop run state of the *outgoing* ante (their reveal
-            // moment) and pick_blind shows the chosen variant immediately.
-            self.resolve_upcoming_boss();
+            // moment) and pick_chamber shows the chosen variant immediately.
+            self.resolve_upcoming_ordeal();
             // Roll fresh skip-reward tags for the new ante. Shop-oriented
             // rewards must survive into the post-boss shop, but any
             // one-blind combat bonuses should expire at the ante boundary.
             self.roll_ante_tags();
-            self.clear_next_blind_tag_modifiers();
+            self.clear_next_chamber_tag_modifiers();
         }
     }
 
     /// Second Wind: leave the current blind with no blind clear gold and no boss
     /// / ante credit. Relic hooks that run at a normal round end (Paper Lantern,
     /// Nest Egg, Obsession, …) still apply; Heirloom does not (blind was not cleared).
-    pub(crate) fn forfeit_current_blind_second_wind(&mut self, bus: &mut EventBus) {
+    pub(crate) fn forfeit_current_chamber_second_wind(&mut self, bus: &mut EventBus) {
         self.roll_lantern_maybe_shatter(bus);
         if self.relics.has(RelicId::NestEgg) {
             *self.relic_counters.entry(RelicId::NestEgg).or_insert(0) += 1;
@@ -277,12 +277,12 @@ impl RunState {
         self.scored_last_turn = false;
         self.joker_used = false;
         self.full_hand_played_this_round = false;
-        self.boss.bonus_hand_size = 0;
-        self.boss.gold_cost_per_play = 0;
+        self.ordeal.bonus_hand_size = 0;
+        self.ordeal.gold_cost_per_play = 0;
         self.played_yaku_this_round.clear();
         self.honors_scored_this_round = false;
-        self.upcoming_blind = self.upcoming_blind.next();
-        self.blind = self.upcoming_blind;
+        self.upcoming_chamber = self.upcoming_chamber.next();
+        self.chamber = self.upcoming_chamber;
         GameplayCoreState::with_run_mut(self, |core| {
             core.clear_hand_structure_bank();
         });
@@ -292,30 +292,26 @@ impl RunState {
     /// Skip the upcoming blind: advance to the next in the cycle without
     /// playing or visiting the shop. Resets per-round state. Skipping is
     /// not allowed for the Boss blind — callers should check first.
-    pub fn skip_to_next_blind(&mut self) {
-        self.defeat_journal.blinds_skipped =
-            self.defeat_journal.blinds_skipped.saturating_add(1);
-        self.chronicle.record_blind_skipped(
-            self.ante,
-            self.upcoming_blind,
-            "Skip reward".into(),
-        );
-        self.upcoming_blind = self.upcoming_blind.next();
+    pub fn skip_to_next_chamber(&mut self) {
+        self.defeat_journal.chambers_skipped = self.defeat_journal.chambers_skipped.saturating_add(1);
+        self.chronicle
+            .record_chamber_skipped(self.wing, self.upcoming_chamber, "Skip reward".into());
+        self.upcoming_chamber = self.upcoming_chamber.next();
         self.run_number += 1;
-        // `target_score` is recomputed by `apply_blind` when the next blind is picked.
+        // `target_score` is recomputed by `apply_chamber` when the next blind is picked.
         self.round_rules.clear();
         self.reset_round_resources();
         self.last_breakdown = None;
         self.scored_last_turn = false;
         self.joker_used = false;
-        // Reset per-round boss-effect state. The ante's `upcoming_boss` is
+        // Reset per-round boss-effect state. The ante's `upcoming_ordeal` is
         // unchanged — skipping a Small/Big still leaves the same boss waiting.
-        self.boss.bonus_hand_size = 0;
-        self.boss.gold_cost_per_play = 0;
+        self.ordeal.bonus_hand_size = 0;
+        self.ordeal.gold_cost_per_play = 0;
         self.played_yaku_this_round.clear();
         self.honors_scored_this_round = false;
         self.memorial_round.clear();
-        self.blind = self.upcoming_blind;
+        self.chamber = self.upcoming_chamber;
         GameplayCoreState::with_run_mut(self, |core| {
             core.clear_hand_structure_bank();
         });

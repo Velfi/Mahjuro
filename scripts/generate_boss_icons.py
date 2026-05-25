@@ -2,30 +2,30 @@
 """
 Generate boss-blind encounter icons for Mahjuro and pack them into a sprite sheet.
 
-Each boss (`BossKind` in `src/core/boss.rs`) gets a distinct faceted low-poly
+Each boss (`OrdealKind` in `src/core/ordeal.rs`) gets a distinct faceted low-poly
 inventory icon in the Walnut, Brass & Felt palette. Calls Google's Nano Banana 2
 (`gemini-3.1-flash-image-preview`) for source art, then the shared post-process
 pipeline (`_icon_atlas_postprocess.py`), then packs a 5×5 row-major atlas.
 
-**Writes (under `assets/textures/boss_icons/` by default)**
+**Writes (under `assets/textures/ordeal_icons/` by default)**
 
-  • `source/boss_{slug}.png` — raw API output (RGBA)
-  • `processed/boss_{slug}.png` — cleaned icon, square `CELL_SIZE` (512×512)
-  • `atlas.png` / `atlas.toml` — grid aligned with `BossKind::ALL`
+  • `source/ordeal_{slug}.png` — raw API output (RGBA)
+  • `processed/ordeal_{slug}.png` — cleaned icon, square `CELL_SIZE` (512×512)
+  • `atlas.png` / `atlas.toml` — grid aligned with `OrdealKind::ALL`
 
-Slug order MUST match `BossKind::ALL` in `src/core/boss.rs` and ids in
-`assets/data/bosses.json`.
+Slug order MUST match `OrdealKind::ALL` in `src/core/ordeal.rs` and ids in
+`assets/data/ordeals.json`.
 
 Usage:
     pip install google-genai pillow
     export GEMINI_API_KEY="..."
-    python3 scripts/generate_boss_icons.py                  # missing only
-    python3 scripts/generate_boss_icons.py --force         # regenerate all
-    python3 scripts/generate_boss_icons.py --name drought
-    python3 scripts/generate_boss_icons.py --boss 3        # 1-indexed BossKind::ALL
-    python3 scripts/generate_boss_icons.py --list
-    python3 scripts/generate_boss_icons.py --dry-run
-    python3 scripts/generate_boss_icons.py --pack-only
+    python3 scripts/generate_ordeal_icons.py                  # missing only
+    python3 scripts/generate_ordeal_icons.py --force         # regenerate all
+    python3 scripts/generate_ordeal_icons.py --name drought
+    python3 scripts/generate_ordeal_icons.py --boss 3        # 1-indexed OrdealKind::ALL
+    python3 scripts/generate_ordeal_icons.py --list
+    python3 scripts/generate_ordeal_icons.py --dry-run
+    python3 scripts/generate_ordeal_icons.py --pack-only
 """
 
 from __future__ import annotations
@@ -58,9 +58,9 @@ except ImportError:
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-BOSS_JSON_PATH = REPO_ROOT / "assets" / "data" / "bosses.json"
-BOSS_RS_PATH = REPO_ROOT / "src" / "core" / "boss.rs"
-OUTPUT_DIR = REPO_ROOT / "assets" / "textures" / "boss_icons"
+BOSS_JSON_PATH = REPO_ROOT / "assets" / "data" / "ordeals.json"
+BOSS_RS_PATH = REPO_ROOT / "src" / "core" / "ordeal.rs"
+OUTPUT_DIR = REPO_ROOT / "assets" / "textures" / "ordeal_icons"
 
 COLUMNS = 5
 CELL_SIZE = 512
@@ -87,7 +87,7 @@ BOSS_TIER_ACCENTS: dict[str, str] = {
     ),
 }
 
-# One iconic, high-contrast subject per boss (64 px legibility). Keys = bosses.json `id`.
+# One iconic, high-contrast subject per boss (64 px legibility). Keys = ordeals.json `id`.
 BOSS_VISUALS: dict[str, str] = {
     "drought": (
         "A cracked dry lakebed forming a harsh X of fissures with one bone-dry "
@@ -233,25 +233,25 @@ def pascal_to_snake(name: str) -> str:
 
 
 def load_boss_kind_order() -> list[str]:
-    """Parse `BossKind::ALL` order from src/core/boss.rs."""
+    """Parse `OrdealKind::ALL` order from src/core/ordeal.rs."""
     if not BOSS_RS_PATH.exists():
         raise SystemExit(f"Cannot read boss order: {BOSS_RS_PATH} missing")
     text = BOSS_RS_PATH.read_text(encoding="utf-8")
     m = re.search(
-        r"pub const ALL: &'static \[BossKind\] = &\[(.*?)\];",
+        r"pub const ALL: &'static \[OrdealKind\] = &\[(.*?)\];",
         text,
         re.DOTALL,
     )
     if not m:
-        raise SystemExit("Failed to parse BossKind::ALL from boss.rs")
-    kinds = re.findall(r"BossKind::(\w+)", m.group(1))
+        raise SystemExit("Failed to parse OrdealKind::ALL from ordeal.rs")
+    kinds = re.findall(r"OrdealKind::(\w+)", m.group(1))
     if not kinds:
-        raise SystemExit("BossKind::ALL contained no variants")
+        raise SystemExit("OrdealKind::ALL contained no variants")
     return [pascal_to_snake(k) for k in kinds]
 
 
 def load_bosses() -> list[BossDef]:
-    """Load bosses.json rows in `BossKind::ALL` order."""
+    """Load ordeals.json rows in `OrdealKind::ALL` order."""
     if not BOSS_JSON_PATH.exists():
         raise SystemExit(f"Cannot read bosses: {BOSS_JSON_PATH} missing")
     raw = json.loads(BOSS_JSON_PATH.read_text(encoding="utf-8"))
@@ -260,7 +260,7 @@ def load_bosses() -> list[BossDef]:
     missing_json = [s for s in expected if s not in by_id]
     if missing_json:
         raise SystemExit(
-            "bosses.json missing ids: " + ", ".join(missing_json)
+            "ordeals.json missing ids: " + ", ".join(missing_json)
         )
     missing_visuals = [s for s in expected if s not in BOSS_VISUALS]
     if missing_visuals:
@@ -281,8 +281,8 @@ def load_bosses() -> list[BossDef]:
     return out
 
 
-BOSSES = load_bosses()
-LAYOUT = [b.slug for b in BOSSES] + [""]  # 5×5 pad cell
+ORDEALS = load_bosses()
+LAYOUT = [b.slug for b in ORDEALS] + [""]  # 5×5 pad cell
 
 
 def layout_rows() -> list[list[str]]:
@@ -356,7 +356,7 @@ def main() -> None:
         "--boss",
         type=int,
         default=None,
-        help="Generate only boss number N (1-indexed, BossKind::ALL order).",
+        help="Generate only boss number N (1-indexed, OrdealKind::ALL order).",
     )
     parser.add_argument(
         "--name",
@@ -417,7 +417,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.list:
-        for i, boss in enumerate(BOSSES, 1):
+        for i, boss in enumerate(ORDEALS, 1):
             print(
                 f"  {i:2d}. {boss.name:<22s}  {boss.slug:<18s}  "
                 f"[{boss.tier}]  {boss.description}"
@@ -438,18 +438,18 @@ def main() -> None:
         sys.exit(1)
 
     if args.boss is not None:
-        if args.boss < 1 or args.boss > len(BOSSES):
-            print(f"Error: --boss must be between 1 and {len(BOSSES)}")
+        if args.boss < 1 or args.boss > len(ORDEALS):
+            print(f"Error: --boss must be between 1 and {len(ORDEALS)}")
             sys.exit(1)
-        targets = [BOSSES[args.boss - 1]]
+        targets = [ORDEALS[args.boss - 1]]
     elif args.name is not None:
-        match = next((b for b in BOSSES if b.slug == args.name), None)
+        match = next((b for b in ORDEALS if b.slug == args.name), None)
         if match is None:
             print(f"Error: no boss with slug '{args.name}'. Try --list.")
             sys.exit(1)
         targets = [match]
     else:
-        targets = BOSSES
+        targets = ORDEALS
 
     client = None
     if not args.dry_run and not args.pack_only:
@@ -461,8 +461,8 @@ def main() -> None:
     total_jobs = len(targets)
 
     for job, boss in enumerate(targets, 1):
-        source_path = source_dir / f"boss_{boss.slug}.png"
-        processed_path = processed_dir / f"boss_{boss.slug}.png"
+        source_path = source_dir / f"ordeal_{boss.slug}.png"
+        processed_path = processed_dir / f"ordeal_{boss.slug}.png"
         prompt = build_prompt(boss)
 
         print(f"\n[{job}/{total_jobs}] {boss.name} ({boss.slug})")

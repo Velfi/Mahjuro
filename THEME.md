@@ -6,7 +6,7 @@ This document is **tone and framing** for environmental storytelling. Core loops
 
 ## Logline
 
-The player moves through a **shuttered gambling house** where each ante opens another wing—cracked screens, dust on racks, one lantern ahead. The building **tests** whether anyone can reach the **inner room** (final ante: the sealed table). Story is **implied** through inconsistency, inventory, and escalation—not explained.
+The player moves through a **shuttered gambling house** where each wing opens deeper into the building—cracked screens, dust on racks, one lantern ahead. The building **tests** whether anyone can reach the **inner room** (final wing: the sealed table). Story is **implied** through inconsistency, inventory, and escalation—not explained.
 
 **“The House”** should read three ways at once: the venue, the dealer’s edge, and an antagonist that **behaves like architecture**.
 
@@ -20,14 +20,14 @@ The player moves through a **shuttered gambling house** where each ante opens an
 
 ## Trials & wings
 
-- Fiction maps **ante progression** to **deeper wings** of the same venue. Same ritual anchor repeated (one lantern distance, a recurring floor motif) so depth reads as **recursion**, not unrelated rooms.
-- Boss blinds can coincide with **doorways**, **drafts**, or **scale shifts** (corridors feel longer after a boss) without stating why.
+- Fiction maps **wing progression** to **deeper wings** of the same venue. Same ritual anchor repeated (one lantern distance, a recurring floor motif) so depth reads as **recursion**, not unrelated rooms.
+- Ordeal chambers can coincide with **doorways**, **drafts**, or **scale shifts** (corridors feel longer after an ordeal) without stating why.
 
 ---
 
 ## The shop (storeroom)
 
-Between blinds, the player is not “at a store.” They are in the House’s **storeroom**—a **dead-letter room** for prior gamblers: vitrines, lacquer boxes, racks of cooled tea sets, glass like a **cabinet that opens itself**. The existing **curio cabinet** presentation already supports this; theme **names** what players see.
+Between chambers, the player is not “at a store.” They are in the House’s **storeroom**—a **dead-letter room** for prior gamblers: display cases, lacquer boxes, racks of cooled tea sets, glass like a **cabinet that opens itself**. The existing **curio cabinet** presentation already supports this; theme **names** what players see.
 
 The shop is **the House’s memory of its losers**, displayed and resold.
 
@@ -41,14 +41,14 @@ The shop is **the House’s memory of its losers**, displayed and resold.
 
 ## House credits (economy skin)
 
-**House credits** replace “gold” / “coins” in **player-facing copy** and HUD branding. Mechanics stay: earn from blinds, spend in storeroom, interest on savings, reroll costs, sell refunds.
+**House credits** replace “gold” / “coins” in **player-facing copy** and HUD branding. Mechanics stay: earn from chambers, spend in storeroom, interest on savings, reroll costs, sell refunds.
 
 **Fiction:**
 
-- Credits are **issued by the House** for clearing or skipping blinds; **valid only inside** the venue (explains why runs reset economically).
+- Credits are **issued by the House** for clearing or skipping chambers; **valid only inside** the venue (explains why runs reset economically).
 - Skipping pays a **token** amount—the House paying you to **keep walking**.
 - **Interest**: the House rewards a fat purse so the next storeroom feels earned (menace: it still wins on aggregate).
-- **Selling** returns an item to the vitrine—the tag was already waiting.
+- **Selling** returns an item to the display case—the tag was already waiting.
 
 **Loss:** When a run ends, the House **reclaims** credits and storeroom acquisitions. The **next run’s inventory is partly the corpse of the last run.**
 

@@ -1,7 +1,7 @@
 //! Depth-limited expectimax for in-blind turns (play, discard, structure, consumables).
 //!
 //! Uses oracle wall draws (same peek as the legacy discard rollout) and
-//! [`BlindPlanCheckpoint`](super::blind_sim::BlindPlanCheckpoint) restore so
+//! [`ChamberPlanCheckpoint`](super::chamber_sim::ChamberPlanCheckpoint) restore so
 //! candidate actions run through real `RunState` transitions.
 //!
 //! - **Depth 1:** one-ply unified action choice (play vs discard vs structure vs consumable).
@@ -14,12 +14,12 @@ use crate::core::talisman::TalismanKind;
 use crate::game::event_bus::EventBus;
 use crate::game::run::RunState;
 
-use super::blind_sim::{BlindAction, BlindPlanCheckpoint, branch_from_checkpoint};
+use super::chamber_sim::{ChamberAction, ChamberPlanCheckpoint, branch_from_checkpoint};
 use super::relic_analytics;
 use super::stats::{BotScoringAction, RunStats};
 use super::{
-    PlayBlindOutcome, blind_slot_key, buff_talisman_lift_on_hand, discard_candidates,
-    drain_post_action_bus, fmt_indices, score_breakdown_for_play_indices,
+    PlayChamberOutcome, chamber_slot_key, buff_talisman_lift_on_hand, build_bot_scoring_action,
+    discard_candidates, drain_post_action_bus, fmt_indices, score_breakdown_for_play_indices,
     top_k_plays_in_hand, transform_talisman_lift_on_hand,
 };
 
@@ -89,16 +89,16 @@ fn talisman_lift(run: &RunState, kind: TalismanKind) -> i32 {
     }
 }
 
-fn enumerate_actions(run: &RunState, cfg: ActionEnumConfig) -> Vec<BlindAction> {
+fn enumerate_actions(run: &RunState, cfg: ActionEnumConfig) -> Vec<ChamberAction> {
     let cache = build_turn_cache(run, cfg.max_play);
     let mut out = Vec::new();
 
     if cfg.consumables {
         for item in &run.consumables.items {
             match item {
-                Consumable::Zodiac(z) => out.push(BlindAction::UseZodiac(*z)),
+                Consumable::Zodiac(z) => out.push(ChamberAction::UseZodiac(*z)),
                 Consumable::Talisman(t) if talisman_lift(run, *t) > 0 => {
-                    out.push(BlindAction::UseTalisman(*t));
+                    out.push(ChamberAction::UseTalisman(*t));
                 }
                 Consumable::Talisman(_) | Consumable::Memorial(_) => {}
             }
@@ -106,23 +106,23 @@ fn enumerate_actions(run: &RunState, cfg: ActionEnumConfig) -> Vec<BlindAction> 
     }
 
     if cache.structure_preview > 0 {
-        out.push(BlindAction::TriggerStructure);
+        out.push(ChamberAction::TriggerStructure);
     }
 
     for (_, indices) in &cache.top_plays {
-        out.push(BlindAction::Play(indices.clone()));
+        out.push(ChamberAction::Play(indices.clone()));
     }
 
     if run.discards_remaining > 0 && run.plays_remaining > 0 {
         for cand in discard_candidates(run.hand(), cfg.max_discard) {
-            out.push(BlindAction::Discard(cand));
+            out.push(ChamberAction::Discard(cand));
         }
     }
 
     out
 }
 
-fn blind_utility_with(run: &RunState, best_play: u64, structure_preview: u64) -> f64 {
+fn chamber_utility_with(run: &RunState, best_play: u64, structure_preview: u64) -> f64 {
     let target = run.target_score.max(1) as f64;
     if run.round_score >= run.target_score as u64 {
         return 1_000_000.0 + run.plays_remaining as f64 * 100.0;
@@ -147,14 +147,8 @@ fn blind_utility_with(run: &RunState, best_play: u64, structure_preview: u64) ->
     progress * 12_000.0 + reach * 6_000.0 + resources * 80.0 + bank_value
 }
 
-/// Heuristic position value: progress toward clearing the blind plus resource slack.
-pub(crate) fn blind_utility(run: &RunState) -> f64 {
-    let cache = build_turn_cache(run, 1);
-    blind_utility_with(run, cache.best_play, cache.structure_preview)
-}
-
 /// Cheap one-step score for branch pruning (no play-mask enumeration).
-fn quick_blind_utility(run: &RunState) -> f64 {
+fn quick_chamber_utility(run: &RunState) -> f64 {
     let target = run.target_score.max(1) as f64;
     if run.round_score >= run.target_score as u64 {
         return 1_000_000.0 + run.plays_remaining as f64 * 100.0;
@@ -171,22 +165,22 @@ fn quick_blind_utility(run: &RunState) -> f64 {
 
 fn utility_after_action(run: &RunState) -> f64 {
     let cache = build_turn_cache(run, 1);
-    blind_utility_with(run, cache.best_play, cache.structure_preview)
+    chamber_utility_with(run, cache.best_play, cache.structure_preview)
 }
 
 fn prune_actions(
-    checkpoint: &BlindPlanCheckpoint,
+    checkpoint: &ChamberPlanCheckpoint,
     run: &mut RunState,
-    actions: Vec<BlindAction>,
+    actions: Vec<ChamberAction>,
     limit: usize,
-) -> Vec<BlindAction> {
+) -> Vec<ChamberAction> {
     if actions.len() <= limit {
         return actions;
     }
-    let mut quick: Vec<(f64, BlindAction)> = actions
+    let mut quick: Vec<(f64, ChamberAction)> = actions
         .into_iter()
         .filter_map(|action| {
-            branch_from_checkpoint(checkpoint, run, &action, |run| quick_blind_utility(run))
+            branch_from_checkpoint(checkpoint, run, &action, |run| quick_chamber_utility(run))
                 .map(|score| (score, action))
         })
         .collect();
@@ -197,24 +191,21 @@ fn prune_actions(
 }
 
 fn search_value(run: &mut RunState, depth: u32) -> f64 {
-    if depth == 0 || run.round_score >= run.target_score as u64 || run.round_failure_reason().is_some()
+    if depth == 0
+        || run.round_score >= run.target_score as u64
+        || run.round_failure_reason().is_some()
     {
         return utility_after_action(run);
     }
 
-    let checkpoint = BlindPlanCheckpoint::capture(run);
+    let checkpoint = ChamberPlanCheckpoint::capture(run);
     let cfg = enum_cfg_for_search_depth(depth);
     let branch_limit = if depth >= 2 {
         INNER_BRANCH_LIMIT
     } else {
         usize::MAX
     };
-    let actions = prune_actions(
-        &checkpoint,
-        run,
-        enumerate_actions(run, cfg),
-        branch_limit,
-    );
+    let actions = prune_actions(&checkpoint, run, enumerate_actions(run, cfg), branch_limit);
     if actions.is_empty() {
         checkpoint.restore(run);
         return utility_after_action(run);
@@ -242,11 +233,11 @@ fn search_value(run: &mut RunState, depth: u32) -> f64 {
     }
 }
 
-pub(crate) fn choose_blind_action(run: &mut RunState, depth: u32) -> Option<BlindAction> {
+pub(crate) fn choose_chamber_action(run: &mut RunState, depth: u32) -> Option<ChamberAction> {
     if depth == 0 {
         return None;
     }
-    let checkpoint = BlindPlanCheckpoint::capture(run);
+    let checkpoint = ChamberPlanCheckpoint::capture(run);
     let root_limit = if depth >= 3 {
         INNER_BRANCH_LIMIT
     } else {
@@ -262,7 +253,7 @@ pub(crate) fn choose_blind_action(run: &mut RunState, depth: u32) -> Option<Blin
         return None;
     }
 
-    let mut best_action: Option<BlindAction> = None;
+    let mut best_action: Option<ChamberAction> = None;
     let mut best_value = f64::NEG_INFINITY;
     for action in actions {
         let Some(value) = branch_from_checkpoint(&checkpoint, run, &action, |run| {
@@ -298,9 +289,9 @@ pub(crate) fn execute_planned_turn(
     scoring_log: &mut Vec<BotScoringAction>,
     bus: &mut EventBus,
 ) -> Option<PlannedTurnOutcome> {
-    let action = choose_blind_action(run, depth)?;
+    let action = choose_chamber_action(run, depth)?;
     match &action {
-        BlindAction::Play(indices) => {
+        ChamberAction::Play(indices) => {
             let best_score = top_k_plays_in_hand(run, run.hand(), 1)
                 .first()
                 .map(|(s, _)| *s)
@@ -316,6 +307,17 @@ pub(crate) fn execute_planned_turn(
             if let Some(breakdown) = score_breakdown_for_play_indices(run, &hand_before, indices) {
                 relic_analytics::record_score_breakdown(stats, &breakdown);
             }
+            let gold_before = run.gold;
+            let yaku_levels_before = run.yaku_levels.clone();
+            let golden_engine_active = run.relics.has(crate::core::relic::RelicId::GoldenEngine);
+            let bank_before_commit = run.structure_tiles().to_vec();
+            let mut idx_sorted = indices.clone();
+            idx_sorted.sort_unstable();
+            let selected_tiles: Vec<_> = idx_sorted
+                .iter()
+                .filter_map(|&i| hand_before.get(i).copied())
+                .collect();
+            let commit_melds = run.try_validate_with_wildcards(&selected_tiles);
             run.clear_selection();
             for i in indices {
                 run.toggle_select(*i);
@@ -326,20 +328,37 @@ pub(crate) fn execute_planned_turn(
                 return Some(PlannedTurnOutcome::Failed);
             }
             stats.plays_used += 1;
-            if drain_post_action_bus(run, bus, stats) == Some(PlayBlindOutcome::SecondWindForfeit) {
+            if drain_post_action_bus(run, bus, stats) == Some(PlayChamberOutcome::SecondWindForfeit) {
                 return Some(PlannedTurnOutcome::SecondWindForfeit);
             }
             let play_delta = run.round_score.saturating_sub(score_before);
             if play_delta > 0 {
-                scoring_log.push(BotScoringAction {
-                    kind: "play".into(),
-                    points: play_delta,
-                    tiles: None,
-                });
+                let tiles = if run.structure_tiles().is_empty() {
+                    let mut full = bank_before_commit;
+                    if let Some((_, scoring_tiles)) = &commit_melds {
+                        full.extend(scoring_tiles.iter().copied());
+                    } else {
+                        full.extend(selected_tiles.iter().copied());
+                    }
+                    run.try_validate_with_wildcards(&full)
+                        .and_then(|(sets, _)| format_meld_groups(&full, &sets))
+                } else {
+                    commit_melds
+                        .and_then(|(sets, scoring_tiles)| format_meld_groups(&scoring_tiles, &sets))
+                };
+                scoring_log.push(build_bot_scoring_action(
+                    "play",
+                    play_delta,
+                    tiles,
+                    run.last_breakdown.as_ref(),
+                    &yaku_levels_before,
+                    gold_before,
+                    golden_engine_active,
+                ));
             }
             Some(PlannedTurnOutcome::Continued)
         }
-        BlindAction::Discard(indices) => {
+        ChamberAction::Discard(indices) => {
             crate::bot_log!(
                 log,
                 "      planner: discard {} (depth {})",
@@ -354,20 +373,23 @@ pub(crate) fn execute_planned_turn(
             stats.discards_used += 1;
             stats.strategic_discards += 1;
             *stats
-                .discards_by_blind_slot
-                .entry(blind_slot_key(run))
+                .discards_by_chamber_slot
+                .entry(chamber_slot_key(run))
                 .or_insert(0) += 1;
-            if drain_post_action_bus(run, bus, stats) == Some(PlayBlindOutcome::SecondWindForfeit) {
+            if drain_post_action_bus(run, bus, stats) == Some(PlayChamberOutcome::SecondWindForfeit) {
                 return Some(PlannedTurnOutcome::SecondWindForfeit);
             }
             Some(PlannedTurnOutcome::Continued)
         }
-        BlindAction::TriggerStructure => {
+        ChamberAction::TriggerStructure => {
             let best_score = top_k_plays_in_hand(run, run.hand(), 1)
                 .first()
                 .map(|(s, _)| *s)
                 .unwrap_or(0);
             let score_before = run.round_score;
+            let gold_before = run.gold;
+            let yaku_levels_before = run.yaku_levels.clone();
+            let golden_engine_active = run.relics.has(crate::core::relic::RelicId::GoldenEngine);
             let cash_in_tiles = run.structure_tiles().to_vec();
             let cash_in_sets = run.structure_sets().to_vec();
             let earned = run.trigger_structure_manual(bus);
@@ -380,32 +402,36 @@ pub(crate) fn execute_planned_turn(
                 best_score,
                 depth
             );
-            if drain_post_action_bus(run, bus, stats) == Some(PlayBlindOutcome::SecondWindForfeit) {
+            if drain_post_action_bus(run, bus, stats) == Some(PlayChamberOutcome::SecondWindForfeit) {
                 return Some(PlannedTurnOutcome::SecondWindForfeit);
             }
             let structure_delta = run.round_score.saturating_sub(score_before);
             if structure_delta > 0 {
-                scoring_log.push(BotScoringAction {
-                    kind: "structure".into(),
-                    points: structure_delta,
-                    tiles: format_meld_groups(&cash_in_tiles, &cash_in_sets),
-                });
+                scoring_log.push(build_bot_scoring_action(
+                    "structure",
+                    structure_delta,
+                    format_meld_groups(&cash_in_tiles, &cash_in_sets),
+                    run.last_breakdown.as_ref(),
+                    &yaku_levels_before,
+                    gold_before,
+                    golden_engine_active,
+                ));
             }
             Some(PlannedTurnOutcome::Continued)
         }
-        BlindAction::UseZodiac(z) => {
+        ChamberAction::UseZodiac(z) => {
             let Some(idx) = consumable_slot(run, Consumable::Zodiac(*z)) else {
                 return Some(PlannedTurnOutcome::Failed);
             };
             let _ = run.use_consumable(idx, bus);
             *stats.zodiacs_used.entry(z.name()).or_insert(0) += 1;
             crate::bot_log!(log, "      planner: use zodiac {:?} (depth {})", z, depth);
-            if drain_post_action_bus(run, bus, stats) == Some(PlayBlindOutcome::SecondWindForfeit) {
+            if drain_post_action_bus(run, bus, stats) == Some(PlayChamberOutcome::SecondWindForfeit) {
                 return Some(PlannedTurnOutcome::SecondWindForfeit);
             }
             Some(PlannedTurnOutcome::Continued)
         }
-        BlindAction::UseTalisman(t) => {
+        ChamberAction::UseTalisman(t) => {
             let lift = talisman_lift(run, *t);
             let Some(idx) = consumable_slot(run, Consumable::Talisman(*t)) else {
                 return Some(PlannedTurnOutcome::Failed);
@@ -419,7 +445,7 @@ pub(crate) fn execute_planned_turn(
                 lift,
                 depth
             );
-            if drain_post_action_bus(run, bus, stats) == Some(PlayBlindOutcome::SecondWindForfeit) {
+            if drain_post_action_bus(run, bus, stats) == Some(PlayChamberOutcome::SecondWindForfeit) {
                 return Some(PlannedTurnOutcome::SecondWindForfeit);
             }
             Some(PlannedTurnOutcome::Continued)
@@ -439,33 +465,28 @@ mod tests {
     }
 
     #[test]
-    fn blind_utility_rises_with_round_score() {
-        let mut run = planner_test_run();
-        run.target_score = 1000;
-        run.round_score = 100;
-        let low = blind_utility(&run);
-        run.round_score = 600;
-        let high = blind_utility(&run);
-        assert!(high > low);
-    }
-
-    #[test]
     fn choose_action_depth_one_unifies_play_and_discard() {
         let mut run = planner_test_run();
-        assert!(choose_blind_action(&mut run, 1).is_some());
+        assert!(choose_chamber_action(&mut run, 1).is_some());
     }
 
     #[test]
     fn choose_action_depth_two() {
         let mut run = planner_test_run();
-        assert!(choose_blind_action(&mut run, 2).is_some());
+        assert!(choose_chamber_action(&mut run, 2).is_some());
     }
 
     #[test]
     fn zodiac_in_action_set_when_held() {
         let mut run = planner_test_run();
-        run.consumables.items.push(Consumable::Zodiac(ZodiacKind::Ox));
+        run.consumables
+            .items
+            .push(Consumable::Zodiac(ZodiacKind::Ox));
         let actions = enumerate_actions(&run, ENUM_FULL);
-        assert!(actions.iter().any(|a| matches!(a, BlindAction::UseZodiac(ZodiacKind::Ox))));
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, ChamberAction::UseZodiac(ZodiacKind::Ox)))
+        );
     }
 }

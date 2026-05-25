@@ -207,11 +207,11 @@ mod tests {
     }
 
     #[test]
-    fn every_boss_kind_has_boss_icon_atlas_cell() {
-        use crate::core::boss::BossKind;
+    fn every_ordeal_kind_has_ordeal_icon_atlas_cell() {
+        use crate::core::ordeal::OrdealKind;
 
-        for kind in BossKind::ALL {
-            let got = extract_sprite_rgba("textures/boss_icons/atlas.png", kind.atlas_slug());
+        for kind in OrdealKind::ALL {
+            let got = extract_sprite_rgba("textures/ordeal_icons/atlas.png", kind.atlas_slug());
             assert!(
                 got.is_some(),
                 "boss icon crop failed for {:?} ({})",

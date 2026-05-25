@@ -98,11 +98,8 @@ pub fn wrap_words_kp(
             payload: (*w).to_string(),
         })
         .collect();
-  let lines = break_units_kp(&units, max_width, space_width);
-    lines
-        .into_iter()
-        .map(|parts| parts.join(" "))
-        .collect()
+    let lines = break_units_kp(&units, max_width, space_width);
+    lines.into_iter().map(|parts| parts.join(" ")).collect()
 }
 
 #[cfg(test)]

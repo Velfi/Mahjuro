@@ -37,11 +37,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let scene = textureSample(scene_tex, src_smp, in.uv).rgb;
     let th = params.data0.x;
     let lum = dot(scene, vec3<f32>(0.2126, 0.7152, 0.0722));
-    // Wide knee: matches the legacy `scene_tex` branch when the threshold is
-    // ~1.0 scene-linear (only strong HDR peaks bloom; small sources stay sharp).
-    let soft = smoothstep(th - 0.25, th + 0.35, lum);
+    // Tight knee: only strong HDR peaks bloom; small sources stay sharp. In dim
+    // rooms emissive is absolute while crush is heavy — a wide knee reads foggy.
+    let soft = smoothstep(th - 0.12, th + 0.22, lum);
     let bright = max(scene - vec3<f32>(th), vec3<f32>(0.0));
     let out_rgb =
-        max(bright * (0.8 + soft * 1.6), vec3<f32>(0.0)) * params.data1.w;
+        max(bright * (0.55 + soft * 0.95), vec3<f32>(0.0)) * params.data1.w;
     return vec4<f32>(out_rgb, 1.0);
 }
