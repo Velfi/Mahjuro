@@ -37,7 +37,6 @@ pub mod picking;
 pub mod plaque_mesh;
 pub mod plinth_mesh;
 pub mod primitive;
-pub mod depth_well_mesh;
 pub mod progress_meter_mesh;
 pub mod rain_debug_overlay;
 pub mod rain_field;

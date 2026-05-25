@@ -12,14 +12,9 @@ use crate::game::engine::GameEngine;
 use crate::game::event_bus::{GameEvent, GameOverReason};
 use crate::game::run::RunState;
 use crate::persistence;
+use crate::render::draw_cmd::{ImageQuad, ImageQuadSource, UiFrame};
 use crate::render::theme::{color, typography};
-use crate::render::depth_well_mesh::DepthWellRegionId;
-use crate::render::draw_cmd::{CameraParams, Object3d, Object3dKind, UiFrame};
-use crate::render::lit_mesh::MaterialKind;
-use crate::render::primitive::{depth_well_mesh_id, MaterialSpec};
-use crate::render::table_transform::mat4_to_euler_xyz_rad;
-use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
-use crate::render::world_space::{surface_anchor_from_world_xyz, world_on_camera_ray_plane_z};
+use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::widget::wrap_text;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
@@ -82,27 +77,54 @@ pub struct GameOverScene {
 /// Delay between the game-over screen appearing and its outcome stinger.
 const OUTCOME_SFX_DELAY_SECS: f32 = 1.0;
 
-/// Square medallion diameter as a multiple of row height (~3× the original pip strip).
-const DEPTH_WELL_SCREEN_DIAMETER_MUL: f32 = 5.10;
+/// Stacked depth-well sprites — rim plus one ring per progression step.
+const DEPTH_WELL_LAYER_ASSETS: [&str; 6] = [
+    "textures/depth_well/depth_well_0.png",
+    "textures/depth_well/depth_well_1.png",
+    "textures/depth_well/depth_well_2.png",
+    "textures/depth_well/depth_well_3.png",
+    "textures/depth_well/depth_well_4.png",
+    "textures/depth_well/depth_well_5.png",
+];
 
-/// Euler XYZ rotation (radians) that tilts the depth-well disc — flat in XZ,
-/// normal = +Y — so its face points toward the camera eye.  Analogous to
-/// [`crate::render::draw_cmd::camera_facing_euler_xyz_rad`] but for +Y-normal
-/// meshes rather than +Z-normal upright panels.
-fn depth_well_facing_rotation(cam_eye: [f32; 3], disc_world: glam::Vec3) -> [f32; 3] {
-    let eye = glam::Vec3::from(cam_eye);
-    let face_dir = (eye - disc_world).normalize_or_zero();
-    if face_dir.length_squared() < 0.01 {
-        return [0.0, 0.0, 0.0];
+/// Normalized UV bounds of non-transparent pixels shared by all depth-well
+/// layers (measured from the 1254² source art). Layout targets this region
+/// instead of the full square texture so the medallion fills horizontally.
+const DEPTH_WELL_OPAQUE_UV: [f32; 4] = [0.017, 0.155, 0.982, 0.819];
+
+/// Cap the well's on-screen height (× row line height) so the plaque stays compact.
+const DEPTH_WELL_MAX_HEIGHT_MUL: f32 = 6.0;
+
+/// Size the well to fill `inner_w` horizontally, then shrink if that exceeds
+/// [`DEPTH_WELL_MAX_HEIGHT_MUL`]. Returns `(width, height)` in layout pixels.
+fn depth_well_size(inner_w: f32, inset: f32, row_line_h: f32) -> (f32, f32) {
+    let uw = DEPTH_WELL_OPAQUE_UV[2] - DEPTH_WELL_OPAQUE_UV[0];
+    let vh = DEPTH_WELL_OPAQUE_UV[3] - DEPTH_WELL_OPAQUE_UV[1];
+    let max_w = (inner_w - inset * 2.0).max(0.0);
+    let max_h = row_line_h * DEPTH_WELL_MAX_HEIGHT_MUL;
+    let mut w = max_w;
+    let mut h = w * vh / uw;
+    if h > max_h {
+        h = max_h;
+        w = h * uw / vh;
     }
-    let q = if (face_dir - glam::Vec3::Y).length_squared() < 1e-6 {
-        glam::Quat::IDENTITY
-    } else if (face_dir + glam::Vec3::Y).length_squared() < 1e-6 {
-        glam::Quat::from_axis_angle(glam::Vec3::X, std::f32::consts::PI)
-    } else {
-        glam::Quat::from_rotation_arc(glam::Vec3::Y, face_dir)
-    };
-    mat4_to_euler_xyz_rad(glam::Mat4::from_quat(q))
+    (w, h)
+}
+
+/// Map a layout viewport (where the opaque art should land) to the square
+/// [`GpuInstance::rect`] needed for a full-texture [`ImageQuad`].
+fn depth_well_draw_rect(viewport: [f32; 4]) -> [f32; 4] {
+    let [u0, v0, u1, v1] = DEPTH_WELL_OPAQUE_UV;
+    let uw = u1 - u0;
+    let vh = v1 - v0;
+    let side = viewport[2] / uw;
+    let opaque_h = side * vh;
+    [
+        viewport[0] - side * u0,
+        viewport[1] + (viewport[3] - opaque_h) * 0.5 - side * v0,
+        side,
+        side,
+    ]
 }
 
 /// Linear interpolation between two RGBA tints.
@@ -243,12 +265,12 @@ impl SceneBehavior for GameOverScene {
             .saturating_sub(min_for_level)
             .min(POINTS_PER_LEVEL);
         let progress_label = if current_level >= MAX_PROGRESS_LEVEL {
-            "Mastery complete".to_string()
+            "You have reached the limits of the house".to_string()
         } else {
             "Onward and downward".to_string()
         };
         let progress_value = if current_level >= MAX_PROGRESS_LEVEL {
-            "MAX".to_string()
+            "".to_string()
         } else {
             format!("{into_level}/{POINTS_PER_LEVEL}")
         };
@@ -287,7 +309,12 @@ impl SceneBehavior for GameOverScene {
         let inner_w = panel_w * 0.90;
         let label_col_w = inner_w * 0.48;
         let value_col_w = inner_w * 0.50;
-        let level_block_h = row_line_h * 5.75;
+        let level_well_inset = row_font_px * 0.32;
+        let level_inner_w_est = panel_w - 12.0;
+        let (_, well_height_px) =
+            depth_well_size(level_inner_w_est, level_well_inset, row_line_h);
+        let level_header_h = row_line_h * 2.35 + row_font_px * 0.18;
+        let level_block_h = level_header_h + well_height_px + row_font_px * 0.22;
         let level_block_gap = row_font_px * 0.60;
         let stats_h = rows
             .iter()
@@ -471,15 +498,15 @@ impl SceneBehavior for GameOverScene {
             level_rect[2] * 0.28,
             row_line_h,
         ];
-        let well_side_px = (row_line_h * DEPTH_WELL_SCREEN_DIAMETER_MUL)
-            .min(level_inner_rect[2] * 0.90)
-            .min((level_inner_rect[3] - row_line_h * 1.55).max(row_line_h * 2.0));
-        let well_viewport_rect = [
-            level_inner_rect[0] + (level_inner_rect[2] - well_side_px) * 0.5,
-            level_inner_rect[1] + level_inner_rect[3] - well_side_px - row_font_px * 0.22,
-            well_side_px,
-            well_side_px,
-        ];
+        let (well_width_px, well_height_px) =
+            depth_well_size(level_inner_rect[2], level_well_inset, row_line_h);
+        let well_slot_w = (level_inner_rect[2] - level_well_inset * 2.0).max(0.0);
+        let well_x = level_inner_rect[0]
+            + level_well_inset
+            + (well_slot_w - well_width_px).max(0.0) * 0.5;
+        let well_y = level_inner_rect[1] + row_line_h * 2.35;
+        let well_viewport_rect = [well_x, well_y, well_width_px, well_height_px];
+        let well_draw_rect = depth_well_draw_rect(well_viewport_rect);
         let transition_rect = [
             level_inner_rect[0] + row_font_px * 0.32,
             well_viewport_rect[1] - row_line_h * 0.82,
@@ -526,7 +553,7 @@ impl SceneBehavior for GameOverScene {
         });
         frame.text(TextLabel {
             rect: points_chip_rect,
-            text: format!("+{points_earned} pts"),
+            text: format!("{points_earned} steps down"),
             color: color::PARCHMENT,
             font_px: Some(points_chip_font),
             align: TextAlign::Center,
@@ -635,92 +662,39 @@ impl SceneBehavior for GameOverScene {
             ..Default::default()
         });
 
-        // ── 3D depth-well medallion ─────────────────────────────────────────
+        // ── Depth-well medallion (stacked UI sprites) ────────────────────────
         {
-            let table_cam = CameraParams::default_table_camera(h);
-            let cx = well_viewport_rect[0] + well_viewport_rect[2] * 0.5;
-            let cy = well_viewport_rect[1] + well_viewport_rect[3] * 0.5;
-            let half = well_side_px * 0.47;
-            let left_w  = world_on_camera_ray_plane_z(w, h, &table_cam, cx - half, cy, 0.0);
-            let right_w = world_on_camera_ray_plane_z(w, h, &table_cam, cx + half, cy, 0.0);
-            let top_w   = world_on_camera_ray_plane_z(w, h, &table_cam, cx, cy - half, 0.0);
-            let bot_w   = world_on_camera_ray_plane_z(w, h, &table_cam, cx, cy + half, 0.0);
-            let well_face = (right_w - left_w).length().min((bot_w - top_w).length());
-            let well_depth = well_face * 0.40;
-            let center_w = world_on_camera_ray_plane_z(w, h, &table_cam, cx, cy, 0.0);
-            let well_pos = surface_anchor_from_world_xyz(w, h, center_w);
-            let well_rotation = depth_well_facing_rotation(table_cam.eye, center_w);
-            let well_extents = [well_face, well_depth, well_face];
-
-            // Fill animation: ease from 0 to `into_level` over ~1 s.
             let elapsed = self.opened_at.elapsed().as_secs_f32();
-            let fill_target = into_level as f32;
-            let displayed_fill = (elapsed * 4.0).min(fill_target);
-
-            let rim_mat = MaterialSpec {
-                kind: MaterialKind::Brass,
-                specular_strength: 0.72,
-                specular_power: 128.0,
-                decal: None,
-            };
-            let unlit_mat = MaterialSpec {
-                kind: MaterialKind::Plain,
-                specular_strength: 0.08,
-                specular_power: 24.0,
-                decal: None,
-            };
-            let lit_mat = MaterialSpec {
-                kind: MaterialKind::Brass,
-                specular_strength: 0.82,
-                specular_power: 128.0,
-                decal: None,
-            };
+            let displayed_fill = (elapsed * 4.0).min(into_level as f32);
             let unlit_tint: [f32; 4] = [0.32, 0.24, 0.16, 1.0];
-            let lit_tint: [f32; 4]   = [1.15, 0.98, 0.72, 1.0];
+            let lit_tint: [f32; 4] = [1.15, 0.98, 0.72, 1.0];
+            let mut well_images: Vec<ImageQuad> = Vec::with_capacity(DEPTH_WELL_LAYER_ASSETS.len());
 
-            let mut well_objs: Vec<Object3d> = Vec::with_capacity(7);
-            let mut push = |region: DepthWellRegionId, mat: MaterialSpec, tint: [f32; 4]| {
-                well_objs.push(Object3d {
-                    pos: well_pos,
-                    extents: well_extents,
-                    rotation: well_rotation,
-                    color: tint,
-                    kind: Object3dKind::Primitive {
-                        shape: depth_well_mesh_id(region),
-                        material: mat,
-                        pick_id: None,
-                        shadow_caster: false,
-                        silhouette: false,
-                    },
-                    hover_target: 0.0,
-                    anim_id: 0,
-                });
-            };
-
-            push(DepthWellRegionId::Rim,    rim_mat,          [1.0, 1.0, 1.0, 1.0]);
-            let throat_fill = (displayed_fill - (POINTS_PER_LEVEL as f32 - 1.0)).clamp(0.0, 1.0);
-            push(DepthWellRegionId::Throat, unlit_mat.clone(), lerp_tint(unlit_tint, lit_tint, throat_fill));
+            well_images.push(ImageQuad {
+                inst: GpuInstance {
+                    rect: well_draw_rect,
+                    color: [1.0, 1.0, 1.0, 1.0],
+                    user: 0,
+                },
+                source: ImageQuadSource::Asset {
+                    path: DEPTH_WELL_LAYER_ASSETS[0],
+                },
+            });
             for idx in 0..POINTS_PER_LEVEL {
                 let t = (displayed_fill - idx as f32).clamp(0.0, 1.0);
-                let mat = if t > 0.5 { lit_mat.clone() } else { unlit_mat.clone() };
-                push(DepthWellRegionId::Step(idx as u8), mat, lerp_tint(unlit_tint, lit_tint, t));
+                well_images.push(ImageQuad {
+                    inst: GpuInstance {
+                        rect: well_draw_rect,
+                        color: lerp_tint(unlit_tint, lit_tint, t),
+                        user: 0,
+                    },
+                    source: ImageQuadSource::Asset {
+                        path: DEPTH_WELL_LAYER_ASSETS[(idx + 1) as usize],
+                    },
+                });
             }
 
-            if !well_objs.is_empty() {
-                frame.object3d_batch(well_objs);
-                frame.scene_lighting.push_smooth(PointLight {
-                    pos: well_pos,
-                    radius: well_face * 3.2,
-                    color: color::rgb(color::CHAMPAGNE),
-                    intensity: 1.20,
-                });
-                frame.scene_lighting.push_smooth(PointLight {
-                    pos: well_pos,
-                    radius: well_face * 1.8,
-                    color: color::rgb(color::GOLD),
-                    intensity: 0.60,
-                });
-            }
+            frame.image_quads(well_images);
         }
 
         frame.buttons = buttons;

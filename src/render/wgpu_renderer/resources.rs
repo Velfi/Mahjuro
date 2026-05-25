@@ -506,38 +506,6 @@ pub(super) fn load_mirror_heightmap(
     )
 }
 
-/// Decode one of the six depth-well region textures (`depth_well_0.png` …
-/// `depth_well_5.png`) and upload as an sRGB colour texture.  Falls back to
-/// a 1×1 white texel so the well still renders (tinted by `base_color`)
-/// if the asset is missing or fails to decode.
-pub(super) fn load_depth_well_albedo(
-    index: u8,
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-) -> (wgpu::Texture, wgpu::TextureView) {
-    let path = format!("textures/depth_well/depth_well_{index}.png");
-    let label = format!("depth-well-albedo-{index}");
-    let bytes_opt = crate::asset_path::get(&path);
-    let bytes = match &bytes_opt {
-        Some(file) => file.data.as_ref(),
-        None => {
-            log::warn!("depth-well texture missing at {path} — using white fallback");
-            return upload_rgba_texture(device, queue, &format!("{label}-flat"), &[255, 255, 255, 255], 1, 1);
-        }
-    };
-    match image::load_from_memory(bytes) {
-        Ok(img) => {
-            let rgba = img.into_rgba8();
-            let (w, h) = rgba.dimensions();
-            upload_rgba_texture(device, queue, &label, &rgba.into_raw(), w, h)
-        }
-        Err(e) => {
-            log::warn!("failed to decode {label}: {e} — using white fallback");
-            upload_rgba_texture(device, queue, &format!("{label}-flat"), &[255, 255, 255, 255], 1, 1)
-        }
-    }
-}
-
 /// Shared body for the per-asset heightmap loaders. Reads `path` from the
 /// embedded assets, decodes it, and uploads as a linear (non-sRGB) RGBA8
 /// texture. Falls back to a flat mid-gray 1×1 on any failure so the

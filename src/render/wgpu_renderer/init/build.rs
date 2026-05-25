@@ -4167,30 +4167,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 "primitive-progress-meter-pip",
             )),
         );
-        let depth_well_cpu = build_depth_well_mesh(&DepthWellConfig {
-            step_count: crate::core::progression::POINTS_PER_LEVEL as usize,
-            ..DepthWellConfig::default()
-        });
-        for region in [
-            DepthWellRegionId::Rim,
-            DepthWellRegionId::Step(0),
-            DepthWellRegionId::Step(1),
-            DepthWellRegionId::Step(2),
-            DepthWellRegionId::Step(3),
-            DepthWellRegionId::Step(4),
-            DepthWellRegionId::Throat,
-        ] {
-            let mesh_id = depth_well_mesh_id(region);
-            let label = format!("primitive-depth-well-{mesh_id:?}");
-            primitive_meshes.insert(
-                mesh_id,
-                std::sync::Arc::new(LitMeshGpu::new(
-                    &device,
-                    &extract_depth_well_region_mesh(&depth_well_cpu, region),
-                    &label,
-                )),
-            );
-        }
     }
     // Per-shape texture override: the coin cylinder needs its
     // engraved heightmap bound at both albedo and relief slots so
@@ -4313,29 +4289,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             lit_mesh_coin_height_view.clone(),
         ),
     );
-    // Depth-well albedo textures: one sRGB image per region.  Bound at the
-    // albedo slot so the lit_mesh shader multiplies `base_color * tex_rgb`.
-    // Textures 1–4 are the step rings (outermost → innermost); texture 5 is
-    // shared by Step(4) and Throat.  The relief slot keeps the default flat
-    // mid-gray (no heightmap perturbation on these flat disc meshes).
-    {
-        let well_regions: &[(DepthWellRegionId, u8)] = &[
-            (DepthWellRegionId::Rim,     0),
-            (DepthWellRegionId::Step(0), 1),
-            (DepthWellRegionId::Step(1), 2),
-            (DepthWellRegionId::Step(2), 3),
-            (DepthWellRegionId::Step(3), 4),
-            (DepthWellRegionId::Step(4), 5),
-            (DepthWellRegionId::Throat,  5),
-        ];
-        for &(region, img_idx) in well_regions {
-            let (_, view) = load_depth_well_albedo(img_idx, &device, &queue);
-            primitive_textures.insert(
-                depth_well_mesh_id(region),
-                (view, lit_mesh_relief_default_view.clone()),
-            );
-        }
-    }
     let mut bug_body_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_BUG_SLOTS);
     let mut bug_wing_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_BUG_SLOTS);
     let mut bug_wing_r_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_BUG_SLOTS);

@@ -69,10 +69,7 @@ use crate::render::ofuda_mesh::build_ofuda_mesh;
 use crate::render::orb_mesh::build_orb_mesh;
 use crate::render::plaque_mesh::build_plaque_mesh;
 use crate::render::plinth_mesh::build_plinth_mesh;
-use crate::render::depth_well_mesh::{
-    build_depth_well_mesh, extract_depth_well_region_mesh, DepthWellConfig, DepthWellRegionId,
-};
-use crate::render::primitive::{depth_well_mesh_id, MeshId};
+use crate::render::primitive::MeshId;
 use crate::render::progress_meter_mesh::{
     build_progress_meter_pip_mesh, build_progress_meter_rail_mesh,
 };
