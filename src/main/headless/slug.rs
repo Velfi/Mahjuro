@@ -5,17 +5,17 @@ pub(crate) fn normalize_slug(slug: &str) -> String {
         .replace(['_', '-', ' '], "")
 }
 
-/// Map `--boss` to [`BossKind`].
-pub(crate) fn parse_boss_slug(slug: &str) -> anyhow::Result<crate::core::boss::BossKind> {
+/// Map `--boss` to [`OrdealKind`].
+pub(crate) fn parse_ordeal_slug(slug: &str) -> anyhow::Result<crate::core::ordeal::OrdealKind> {
     let normalized = normalize_slug(slug);
     let normalize_name = |s: &str| {
         s.to_ascii_lowercase()
             .replace(['_', '-', ' ', '\''], "")
             .replace("the", "")
     };
-    for def in crate::core::boss::all_bosses()
+    for def in crate::core::ordeal::all_ordeals()
         .iter()
-        .chain(crate::core::boss::final_bosses().iter())
+        .chain(crate::core::ordeal::final_ordeals().iter())
     {
         if normalize_name(def.name) == normalized
             || format!("{:?}", def.kind).to_ascii_lowercase() == normalized
@@ -58,10 +58,12 @@ pub(crate) fn parse_tile_pack_slug(
     );
 }
 
-pub(crate) fn parse_bake_room_slug(slug: &str) -> anyhow::Result<crate::render::room_gi_bake::RoomGiRoom> {
+pub(crate) fn parse_bake_room_slug(
+    slug: &str,
+) -> anyhow::Result<crate::render::room_gi_bake::RoomGiRoom> {
     match slug.trim().to_ascii_lowercase().as_str() {
         "shop" => Ok(crate::render::room_gi_bake::RoomGiRoom::Shop),
-        "hallway" | "pick_blind" => Ok(crate::render::room_gi_bake::RoomGiRoom::Hallway),
+        "hallway" | "pick_chamber" => Ok(crate::render::room_gi_bake::RoomGiRoom::Hallway),
         "archive" | "collection" => Ok(crate::render::room_gi_bake::RoomGiRoom::Archive),
         "main_menu" | "main-menu" | "main_menu_exterior" => {
             Ok(crate::render::room_gi_bake::RoomGiRoom::MainMenu)

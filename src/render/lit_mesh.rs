@@ -851,7 +851,7 @@ pub struct SsrGlobals {
     pub felt: [f32; 4],
     /// x = `1/room_env_world_scale` for embedded glTF punctual attenuation in `lit_mesh`
     /// (document-space distance; **0** = world-space / gameplay).
-    /// y = shop vitrine material tuning (1 = shop + embedded punctual only); zw unused.
+    /// y = shop display-case material tuning (1 = shop + embedded punctual only); zw unused.
     pub shop_punctual: [f32; 4],
 }
 

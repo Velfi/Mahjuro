@@ -57,10 +57,7 @@ fn capped_image_base(img: &CappedGltfImage) -> (Vec<u8>, u32, u32) {
 }
 
 #[inline]
-fn capped_image_at(
-    capped: &[Option<CappedGltfImage>],
-    index: usize,
-) -> Option<&CappedGltfImage> {
+fn capped_image_at(capped: &[Option<CappedGltfImage>], index: usize) -> Option<&CappedGltfImage> {
     capped.get(index).and_then(|o| o.as_ref())
 }
 
@@ -1077,42 +1074,18 @@ pub fn walk_room_env_node(
     }
 
     if let Some(mesh) = node.mesh()
-        && !skip_room_env_authoring_mesh_node_name(name) && !hooks.skip_env_mesh(name) {
-            match hooks.mesh_policy(name) {
-                RoomMeshPolicy::SkipDrawCollisionIfMarker => {
-                    if hooks.is_marker(name) {
-                        let mut tris = Vec::new();
-                        for prim in mesh.primitives() {
-                            match decode_collision_triangles(prim, world, state.buffers) {
-                                Ok(chunk) => tris.extend(chunk),
-                                Err(e) => log::warn!("{label} node {:?} collision: {e:#}", name),
-                            }
-                        }
-                        if !tris.is_empty() {
-                            state.collision_meshes.push(RoomCollisionMesh {
-                                node_name: name.to_string(),
-                                triangles: tris,
-                            });
-                        }
-                    }
-                }
-                RoomMeshPolicy::EnvironmentDrawWithCollision => {
-                    let mut tris: Vec<[Vec3; 3]> = Vec::new();
+        && !skip_room_env_authoring_mesh_node_name(name)
+        && !hooks.skip_env_mesh(name)
+    {
+        match hooks.mesh_policy(name) {
+            RoomMeshPolicy::SkipDrawCollisionIfMarker => {
+                if hooks.is_marker(name) {
+                    let mut tris = Vec::new();
                     for prim in mesh.primitives() {
-                        match decode_collision_triangles(prim.clone(), world, state.buffers) {
+                        match decode_collision_triangles(prim, world, state.buffers) {
                             Ok(chunk) => tris.extend(chunk),
                             Err(e) => log::warn!("{label} node {:?} collision: {e:#}", name),
                         }
-                        let decoded = decode_env_primitive(
-                            prim,
-                            world,
-                            state.buffers,
-                            state.capped_images,
-                            label,
-                            name,
-                        )?;
-                        merge_marker_mesh_bounds(state.marker_mesh_bounds_doc, name, &decoded);
-                        state.env_primitives.push(decoded);
                     }
                     if !tris.is_empty() {
                         state.collision_meshes.push(RoomCollisionMesh {
@@ -1121,39 +1094,65 @@ pub fn walk_room_env_node(
                         });
                     }
                 }
-                RoomMeshPolicy::EnvironmentDraw => {
-                    for prim in mesh.primitives() {
-                        let decoded = decode_env_primitive(
-                            prim,
-                            world,
-                            state.buffers,
-                            state.capped_images,
-                            label,
-                            name,
-                        )?;
-                        if hooks.is_marker(name) {
-                            merge_marker_mesh_bounds(state.marker_mesh_bounds_doc, name, &decoded);
-                        }
-                        state.env_primitives.push(decoded);
+            }
+            RoomMeshPolicy::EnvironmentDrawWithCollision => {
+                let mut tris: Vec<[Vec3; 3]> = Vec::new();
+                for prim in mesh.primitives() {
+                    match decode_collision_triangles(prim.clone(), world, state.buffers) {
+                        Ok(chunk) => tris.extend(chunk),
+                        Err(e) => log::warn!("{label} node {:?} collision: {e:#}", name),
+                    }
+                    let decoded = decode_env_primitive(
+                        prim,
+                        world,
+                        state.buffers,
+                        state.capped_images,
+                        label,
+                        name,
+                    )?;
+                    merge_marker_mesh_bounds(state.marker_mesh_bounds_doc, name, &decoded);
+                    state.env_primitives.push(decoded);
+                }
+                if !tris.is_empty() {
+                    state.collision_meshes.push(RoomCollisionMesh {
+                        node_name: name.to_string(),
+                        triangles: tris,
+                    });
+                }
+            }
+            RoomMeshPolicy::EnvironmentDraw => {
+                for prim in mesh.primitives() {
+                    let decoded = decode_env_primitive(
+                        prim,
+                        world,
+                        state.buffers,
+                        state.capped_images,
+                        label,
+                        name,
+                    )?;
+                    if hooks.is_marker(name) {
+                        merge_marker_mesh_bounds(state.marker_mesh_bounds_doc, name, &decoded);
+                    }
+                    state.env_primitives.push(decoded);
+                }
+            }
+            RoomMeshPolicy::RainSurfaceCollision => {
+                let mut tris = Vec::new();
+                for prim in mesh.primitives() {
+                    match decode_collision_triangles(prim, world, state.buffers) {
+                        Ok(chunk) => tris.extend(chunk),
+                        Err(e) => log::warn!("{label} node {:?} rain surface: {e:#}", name),
                     }
                 }
-                RoomMeshPolicy::RainSurfaceCollision => {
-                    let mut tris = Vec::new();
-                    for prim in mesh.primitives() {
-                        match decode_collision_triangles(prim, world, state.buffers) {
-                            Ok(chunk) => tris.extend(chunk),
-                            Err(e) => log::warn!("{label} node {:?} rain surface: {e:#}", name),
-                        }
-                    }
-                    if !tris.is_empty() {
-                        state.rain_surface_meshes.push(RoomCollisionMesh {
-                            node_name: name.to_string(),
-                            triangles: tris,
-                        });
-                    }
+                if !tris.is_empty() {
+                    state.rain_surface_meshes.push(RoomCollisionMesh {
+                        node_name: name.to_string(),
+                        triangles: tris,
+                    });
                 }
             }
         }
+    }
 
     for child in node.children() {
         walk_room_env_node(child, world, hooks, state)?;

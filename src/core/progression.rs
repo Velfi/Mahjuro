@@ -5,10 +5,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use serde::{Deserialize, Serialize};
 
-use crate::core::boss::BossKind;
+use crate::core::ordeal::OrdealKind;
 use crate::core::consumable::Consumable;
 use crate::core::relic::RelicId;
-use crate::core::rules::{BlindKind, RuleModifier};
+use crate::core::rules::{ChamberKind, RuleModifier};
 use crate::core::stake::Stake;
 use crate::core::talisman::TalismanKind;
 use crate::core::yaku::YakuKind;
@@ -20,9 +20,13 @@ pub struct PlayerProgress {
     pub unlocked_relics: HashSet<RelicId>,
     pub unlocked_rules: HashSet<RuleModifier>,
     pub high_scores: Vec<u64>,
-    /// Total runs completed (drives level progression).
+    /// Total runs completed (drives profile stats/achievements).
     #[serde(default)]
     pub runs_completed: u32,
+    /// Meta progression points used for level unlock pacing.
+    /// Awarded per terminal run outcome (win/loss), not for quit/resume.
+    #[serde(default)]
+    pub level_progress_points: u32,
     /// Extra plays per round from permanent upgrades.
     #[serde(default)]
     pub bonus_plays: u32,
@@ -36,15 +40,15 @@ pub struct PlayerProgress {
     /// Unlocks the Plastic tile material.
     #[serde(default)]
     pub has_won: bool,
-    /// Times each boss was selected via PlayBlind on a Boss blind. Keys
+    /// Times each boss was selected via PlayChamber on a Boss blind. Keys
     /// present in this map are "encountered" and appear in the Collection's
-    /// Bosses tab; unseen bosses stay hidden.
-    #[serde(default)]
-    pub boss_times_encountered: HashMap<BossKind, u32>,
-    /// Times each boss was defeated (blind cleared with
-    /// `reached_target: true` while `self.blind == Boss`).
-    #[serde(default)]
-    pub boss_times_defeated: HashMap<BossKind, u32>,
+    /// Ordeals tab; unseen bosses stay hidden.
+    #[serde(default, alias = "boss_times_encountered")]
+    pub ordeal_times_encountered: HashMap<OrdealKind, u32>,
+    /// Times each ordeal was defeated (chamber cleared with
+    /// `reached_target: true` while `self.chamber == Ordeal`).
+    #[serde(default, alias = "boss_times_defeated")]
+    pub ordeal_times_defeated: HashMap<OrdealKind, u32>,
     /// Times each talisman was purchased from the shop. Pack-acquired or
     /// granted talismans don't count. Keys gate the Collection's
     /// Talismans tab.
@@ -69,7 +73,7 @@ pub struct PlayerProgress {
     /// Append-only log of every run that reached the defeat or victory
     /// screen. One row per finished run — rage-quits and still-in-progress
     /// runs do not land here. Source of truth for run-outcome analytics;
-    /// aggregate rollups (total victories, deaths_by_blind, etc.) can be
+    /// aggregate rollups (total victories, deaths_by_chamber, etc.) can be
     /// computed from this on demand.
     #[serde(default)]
     pub run_history: Vec<RunRecord>,
@@ -82,12 +86,10 @@ pub struct PlayerProgress {
     pub pending_memorial: Option<crate::core::memorial_talisman::MemorialTalismanKind>,
     /// Journal snapshot paired with [`Self::pending_memorial`].
     #[serde(default)]
-    pub pending_memorial_journal:
-        Option<crate::core::memorial_talisman::MemorialJournalSnapshot>,
+    pub pending_memorial_journal: Option<crate::core::memorial_talisman::MemorialJournalSnapshot>,
     /// Memorial remnants the player has carried at least once.
     #[serde(default)]
-    pub memorials_discovered:
-        HashSet<crate::core::memorial_talisman::MemorialTalismanKind>,
+    pub memorials_discovered: HashSet<crate::core::memorial_talisman::MemorialTalismanKind>,
     /// Per-material ladder of cleared stakes. `Spring` is implicitly unlocked
     /// for every material (never written to this map); higher stakes require
     /// a full victory on the previous tier *with that material*. So beating
@@ -104,9 +106,9 @@ pub struct PlayerProgress {
     /// Yaku the player has focused in Archive since first scored.
     #[serde(default)]
     pub archive_seen_yaku: HashSet<YakuKind>,
-    /// Bosses the player has focused in Archive since first encountered.
-    #[serde(default)]
-    pub archive_seen_bosses: HashSet<BossKind>,
+    /// Ordeals the player has focused in Archive since first encountered.
+    #[serde(default, alias = "archive_seen_bosses")]
+    pub archive_seen_ordeals: HashSet<OrdealKind>,
     /// Talismans the player has focused in Archive since first purchased.
     #[serde(default)]
     pub archive_seen_talismans: HashSet<TalismanKind>,
@@ -137,6 +139,32 @@ pub enum RunOutcome {
     Defeat { reason: GameOverReason },
 }
 
+pub const POINTS_PER_LEVEL: u32 = 5;
+pub const LEVEL_UP_POINTS_FOR_WIN: u32 = 3;
+pub const LEVEL_UP_POINTS_FOR_LOSS: u32 = 1;
+pub const MAX_PROGRESS_LEVEL: u32 = 14;
+
+/// Roman numeral for meta progression depth (1 = `I`, 14 = `XIV`).
+pub fn meta_depth_roman(depth: u32) -> &'static str {
+    match depth {
+        1 => "I",
+        2 => "II",
+        3 => "III",
+        4 => "IV",
+        5 => "V",
+        6 => "VI",
+        7 => "VII",
+        8 => "VIII",
+        9 => "IX",
+        10 => "X",
+        11 => "XI",
+        12 => "XII",
+        13 => "XIII",
+        14 => "XIV",
+        _ => "?",
+    }
+}
+
 /// Snapshot of a finished run at the moment the defeat or victory screen
 /// opened. Schema mirrors `bot::RunStats` where the data exists on
 /// `RunState`; append-only so older profiles remain readable (all new
@@ -152,14 +180,17 @@ pub struct RunRecord {
     // ── Where the run ended ──────────────────────────────────────────
     /// Ante the run ended on. Victory => the cleared final ante;
     /// defeat => the ante the player died on.
-    pub final_ante: u32,
-    /// Blind the run ended on. Victory => the final Boss blind;
-    /// defeat => the blind the player failed to clear.
-    pub final_blind: BlindKind,
+    #[serde(alias = "final_ante")]
+    pub final_wing: u32,
+    /// Chamber the run ended on. Victory => the final Boss chamber;
+    /// defeat => the chamber the player failed to clear.
+    #[serde(alias = "final_blind")]
+    pub final_chamber: ChamberKind,
     /// Specific boss facing the player when the run ended, if any.
-    /// Only meaningful when `final_blind == Boss`.
+    /// Only meaningful when `final_chamber == Boss`.
     #[serde(default)]
-    pub final_boss: Option<BossKind>,
+    #[serde(alias = "final_boss")]
+    pub final_ordeal: Option<OrdealKind>,
     // ── Score / resources at end of run ──────────────────────────────
     /// Score on the final round (the losing or winning round).
     pub round_score: u64,
@@ -202,8 +233,8 @@ pub struct RunRecord {
     #[serde(default)]
     pub best_hand_tiles: Vec<crate::core::tile::Tile>,
     /// Cumulative run score after each boss-cleared ante.
-    #[serde(default)]
-    pub score_after_ante: Vec<(u32, u64)>,
+    #[serde(default, alias = "score_after_ante")]
+    pub score_after_wing: Vec<(u32, u64)>,
     /// Extended Chronicle analytics (seed, encounters, breakdowns, milestones).
     #[serde(default)]
     pub chronicle: crate::core::run_chronicle::RunChronicle,
@@ -235,12 +266,13 @@ impl PlayerProgress {
             unlocked_rules: HashSet::default(),
             high_scores: Vec::new(),
             runs_completed: 0,
+            level_progress_points: 0,
             bonus_plays: 0,
             starting_relic_slots: 0,
             tutorial_completed: false,
             has_won: false,
-            boss_times_encountered: HashMap::default(),
-            boss_times_defeated: HashMap::default(),
+            ordeal_times_encountered: HashMap::default(),
+            ordeal_times_defeated: HashMap::default(),
             talisman_times_purchased: HashMap::default(),
             talisman_times_used: HashMap::default(),
             yaku_times_scored: HashMap::default(),
@@ -253,7 +285,7 @@ impl PlayerProgress {
             memorials_discovered: HashSet::default(),
             archive_seen_relics: HashSet::default(),
             archive_seen_yaku: HashSet::default(),
-            archive_seen_bosses: HashSet::default(),
+            archive_seen_ordeals: HashSet::default(),
             archive_seen_talismans: HashSet::default(),
         }
     }
@@ -331,26 +363,47 @@ impl PlayerProgress {
         self.high_scores.truncate(10);
     }
 
-    /// Current progression level (1–14) based on runs completed.
-    /// New unlocks land every run for the first six runs, then every other run
-    /// until the level-14 catch-all kicks in at 21 runs.
-    pub fn current_level(&self) -> u32 {
-        match self.runs_completed {
-            0 => 1,
-            1 => 2,
-            2 => 3,
-            3 => 4,
-            4 => 5,
-            5..=6 => 6,
-            7..=8 => 7,
-            9..=10 => 8,
-            11..=12 => 9,
-            13..=14 => 10,
-            15..=16 => 11,
-            17..=18 => 12,
-            19..=20 => 13,
-            _ => 14,
+    /// Minimum progression points required to reach `level`.
+    pub fn min_points_for_level(level: u32) -> u32 {
+        level.saturating_sub(1).saturating_mul(POINTS_PER_LEVEL)
+    }
+
+    /// Progression points awarded for a terminal run outcome.
+    pub fn level_points_for_outcome(outcome: RunOutcome) -> u32 {
+        match outcome {
+            RunOutcome::Victory => LEVEL_UP_POINTS_FOR_WIN,
+            RunOutcome::Defeat { .. } => LEVEL_UP_POINTS_FOR_LOSS,
         }
+    }
+
+    /// Add progression points from a terminal run outcome.
+    pub fn award_level_points_for_outcome(&mut self, outcome: RunOutcome) -> u32 {
+        let awarded = Self::level_points_for_outcome(outcome);
+        self.level_progress_points = self.level_progress_points.saturating_add(awarded);
+        awarded
+    }
+
+    /// Legacy migration: derive progression points for old saves that predate
+    /// `level_progress_points`.
+    pub fn backfill_level_progress_points_from_history(&mut self) {
+        if self.level_progress_points > 0 {
+            return;
+        }
+        if !self.run_history.is_empty() {
+            let points = self.run_history.iter().fold(0u32, |acc, rec| {
+                acc.saturating_add(Self::level_points_for_outcome(rec.outcome))
+            });
+            self.level_progress_points = points;
+            return;
+        }
+        // Old profiles may have runs counted but no run_history yet.
+        self.level_progress_points = self.runs_completed;
+    }
+
+    /// Current progression level (1–14) based on progression points.
+    pub fn current_level(&self) -> u32 {
+        let earned_levels = self.level_progress_points / POINTS_PER_LEVEL;
+        1u32.saturating_add(earned_levels).min(MAX_PROGRESS_LEVEL)
     }
 
     /// Check if a new level was reached and apply unlocks.
@@ -433,14 +486,20 @@ impl PlayerProgress {
     }
 
     /// Debug / cheat: reveal every transformation successor in the Collection
-    /// and raise `runs_completed` to at least level 11 so all fragile
+    /// and raise meta level to at least 11 so all fragile
     /// primaries (through Chrysalis) appear in [`Self::available_relics`].
     /// Does not call [`Self::check_level_up`] (avoids level-up modals).
     pub fn cheat_unlock_all_transformation_chains_meta(&mut self) {
         for &id in transformation_successor_relic_ids() {
             self.discovered_transformation_successors.insert(id);
         }
-        // Minimum `runs_completed` for `current_level() >= 11` (Chrysalis tier).
+        // Minimum points for `current_level() >= 11` (Chrysalis tier).
+        let min_points_for_all_fragile_primaries = Self::min_points_for_level(11);
+        if self.level_progress_points < min_points_for_all_fragile_primaries {
+            self.level_progress_points = min_points_for_all_fragile_primaries;
+        }
+        // Keep the historical debug behavior too so profile-level run counters
+        // still look "late game" when this cheat is used.
         const MIN_RUNS_FOR_ALL_FRAGILE_PRIMARIES: u32 = 15;
         if self.runs_completed < MIN_RUNS_FOR_ALL_FRAGILE_PRIMARIES {
             self.runs_completed = MIN_RUNS_FOR_ALL_FRAGILE_PRIMARIES;
@@ -513,11 +572,11 @@ impl RunRecord {
     /// Restore terminal run fields so [`crate::scenes::GameOverScene`] and the
     /// defeat tableau read the same stats as when the record was written.
     pub fn hydrate_game_over_run(&self, run: &mut crate::game::run::RunState) {
-        use crate::core::rules::BlindKind;
+        use crate::core::rules::ChamberKind;
 
         run.run_number = self.run_number;
-        run.ante = self.final_ante;
-        run.blind = self.final_blind;
+        run.wing = self.final_wing;
+        run.chamber = self.final_chamber;
         run.round_score = self.round_score;
         run.target_score = self.target_score;
         run.total_score_earned = self.total_score_earned;
@@ -532,12 +591,12 @@ impl RunRecord {
         run.best_structure_score = self.best_structure_score;
         run.best_structure_name = self.best_structure_name.clone();
         run.best_hand_tiles = self.best_hand_tiles.clone();
-        run.score_after_ante = self.score_after_ante.clone();
+        run.score_after_wing = self.score_after_wing.clone();
         run.yaku_times_played = self.yaku_times_played.clone();
         run.defeat_memorial_kind = self.memorial_kind;
-        run.boss.upcoming = self.final_boss;
-        if self.final_blind == BlindKind::Boss && self.final_boss.is_some() {
-            run.resolve_upcoming_boss();
+        run.ordeal.upcoming = self.final_ordeal;
+        if self.final_chamber == ChamberKind::Ordeal && self.final_ordeal.is_some() {
+            run.resolve_upcoming_ordeal();
         }
     }
 
@@ -549,8 +608,8 @@ impl RunRecord {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        let final_boss = if run.blind == BlindKind::Boss {
-            run.boss.upcoming
+        let final_ordeal = if run.chamber == ChamberKind::Ordeal {
+            run.ordeal.upcoming
         } else {
             None
         };
@@ -558,9 +617,9 @@ impl RunRecord {
             timestamp_unix,
             run_number: run.run_number,
             outcome,
-            final_ante: run.ante,
-            final_blind: run.blind,
-            final_boss,
+            final_wing: run.wing,
+            final_chamber: run.chamber,
+            final_ordeal,
             round_score: run.round_score,
             target_score: run.target_score,
             total_score_earned: run.total_score_earned,
@@ -582,7 +641,7 @@ impl RunRecord {
             tutorial_run: false,
             memorial_kind: run.defeat_memorial_kind,
             best_hand_tiles: run.best_hand_tiles.clone(),
-            score_after_ante: finalize_score_after_ante(run),
+            score_after_wing: finalize_score_after_wing(run),
             chronicle: finalize_run_chronicle(run, outcome),
             duration_secs: run_duration_secs(run),
         }
@@ -611,7 +670,7 @@ fn finalize_run_chronicle(
     chronicle.finalize_for_outcome(
         victory,
         run.total_score_earned,
-        run.ante,
+        run.wing,
         run.plays_remaining,
     );
 
@@ -626,28 +685,18 @@ fn finalize_run_chronicle(
     }
 
     if !victory {
-        let boss_name = if run.blind == BlindKind::Boss {
-            run.boss.upcoming.map(|b| b.name().to_string())
+        let ordeal_name = if run.chamber == ChamberKind::Ordeal {
+            run.ordeal.upcoming.map(|b| b.name().to_string())
         } else {
             None
         };
-        chronicle.record_run_end_defeat(
-            run.ante,
-            run.blind,
-            boss_name.as_deref(),
-            run.round_score,
-        );
+        chronicle.record_run_end_defeat(run.wing, run.chamber, ordeal_name.as_deref(), run.round_score);
     }
 
     if chronicle.signature_hand.is_none() && !run.best_hand_tiles.is_empty() {
         chronicle.signature_hand = Some(crate::core::run_chronicle::SignatureHandRecord {
             tiles: run.best_hand_tiles.clone(),
-            yaku: run
-                .yaku_times_played
-                .keys()
-                .copied()
-                .take(6)
-                .collect(),
+            yaku: run.yaku_times_played.keys().copied().take(6).collect(),
             yaku_han_total: 0,
             dora_count: 0,
             aka_dora_count: 0,
@@ -659,9 +708,9 @@ fn finalize_run_chronicle(
 }
 
 /// Ensure the terminal `(ante, total_score)` point is present for run-detail charts.
-fn finalize_score_after_ante(run: &crate::game::run::RunState) -> Vec<(u32, u64)> {
-    let mut v = run.score_after_ante.clone();
-    let terminal = (run.ante, run.total_score_earned);
+fn finalize_score_after_wing(run: &crate::game::run::RunState) -> Vec<(u32, u64)> {
+    let mut v = run.score_after_wing.clone();
+    let terminal = (run.wing, run.total_score_earned);
     if v.last().copied() != Some(terminal) {
         v.push(terminal);
     }
@@ -902,25 +951,25 @@ fn unlocks_for_level(level: u32) -> LevelUnlocks {
 }
 
 /// Synthetic per-blind scores for screenshot/demo chronicle history.
-fn synthetic_blind_scores_for_demo(
+fn synthetic_chamber_scores_for_demo(
     total: u64,
-    final_ante: u32,
+    final_wing: u32,
     outcome: RunOutcome,
     failing_round: u64,
 ) -> Vec<u64> {
-    let cleared_antes = match outcome {
-        RunOutcome::Victory => final_ante,
-        RunOutcome::Defeat { .. } => final_ante.saturating_sub(1),
+    let cleared_wings = match outcome {
+        RunOutcome::Victory => final_wing,
+        RunOutcome::Defeat { .. } => final_wing.saturating_sub(1),
     };
-    let mut n_blinds = cleared_antes.saturating_mul(3);
+    let mut n_chambers = cleared_wings.saturating_mul(3);
     if matches!(outcome, RunOutcome::Defeat { .. }) {
-        n_blinds += 1;
+        n_chambers += 1;
     }
-    n_blinds = n_blinds.max(1);
-    let mut scores = Vec::with_capacity(n_blinds as usize);
+    n_chambers = n_chambers.max(1);
+    let mut scores = Vec::with_capacity(n_chambers as usize);
     let mut rem = total;
-    for i in 0..n_blinds {
-        if i + 1 == n_blinds {
+    for i in 0..n_chambers {
+        if i + 1 == n_chambers {
             if matches!(outcome, RunOutcome::Defeat { .. }) {
                 scores.push(failing_round.max(1));
             } else {
@@ -928,8 +977,8 @@ fn synthetic_blind_scores_for_demo(
             }
         } else {
             let weight = 80 + (i as u64 * 37 % 120);
-            let share = (total * weight / (weight + (n_blinds - i) as u64 * 90)).max(1);
-            let capped = share.min(rem.saturating_sub((n_blinds - i - 1) as u64));
+            let share = (total * weight / (weight + (n_chambers - i) as u64 * 90)).max(1);
+            let capped = share.min(rem.saturating_sub((n_chambers - i - 1) as u64));
             scores.push(capped);
             rem = rem.saturating_sub(capped);
         }
@@ -944,18 +993,19 @@ impl PlayerProgress {
         &mut self,
         signature_hand: Vec<crate::core::tile::Tile>,
     ) {
-        use crate::core::boss::all_bosses;
-        use crate::core::boss::BossKind;
+        use crate::core::ordeal::OrdealKind;
+        use crate::core::ordeal::all_ordeals;
         use crate::core::talisman::TalismanKind;
 
         self.runs_completed = 100;
+        self.level_progress_points = Self::min_points_for_level(MAX_PROGRESS_LEVEL);
         self.has_won = true;
         for yk in YakuKind::all() {
             *self.yaku_times_scored.entry(*yk).or_insert(0) += 3;
         }
-        for def in all_bosses() {
-            *self.boss_times_encountered.entry(def.kind).or_insert(0) += 5;
-            *self.boss_times_defeated.entry(def.kind).or_insert(0) += 2;
+        for def in all_ordeals() {
+            *self.ordeal_times_encountered.entry(def.kind).or_insert(0) += 5;
+            *self.ordeal_times_defeated.entry(def.kind).or_insert(0) += 2;
         }
         for tk in TalismanKind::all() {
             *self.talisman_times_purchased.entry(*tk).or_insert(0) += 1;
@@ -1016,25 +1066,25 @@ impl PlayerProgress {
             } else {
                 Vec::new()
             };
-            let final_ante = 4 + (i as u32 % 4);
-            let blind_scores =
-                synthetic_blind_scores_for_demo(total, final_ante, outcome, total / 3);
+            let final_wing = 4 + (i as u32 % 4);
+            let chamber_scores =
+                synthetic_chamber_scores_for_demo(total, final_wing, outcome, total / 3);
             let chronicle = crate::core::run_chronicle::RunChronicle {
-                blind_scores,
+                chamber_scores,
                 ..Default::default()
             };
             self.run_history.push(RunRecord {
                 timestamp_unix: base_ts + i as u64 * 86_400,
                 run_number: (i + 1) as u32,
                 outcome,
-                final_ante,
-                final_blind: if i % 3 == 0 {
-                    BlindKind::Boss
+                final_wing,
+                final_chamber: if i % 3 == 0 {
+                    ChamberKind::Ordeal
                 } else {
-                    BlindKind::Big
+                    ChamberKind::Big
                 },
-                final_boss: if i % 3 == 0 {
-                    Some(BossKind::TaxCollector)
+                final_ordeal: if i % 3 == 0 {
+                    Some(OrdealKind::TaxCollector)
                 } else {
                     None
                 },
@@ -1059,7 +1109,7 @@ impl PlayerProgress {
                 tutorial_run: false,
                 memorial_kind: None,
                 best_hand_tiles: hand_tiles,
-                score_after_ante: vec![(final_ante, total)],
+                score_after_wing: vec![(final_wing, total)],
                 chronicle,
                 duration_secs: 600 + i as u32 * 120,
             });
@@ -1136,20 +1186,28 @@ mod tests {
     }
 
     #[test]
+    fn meta_depth_roman_covers_max_depth() {
+        assert_eq!(meta_depth_roman(1), "I");
+        assert_eq!(meta_depth_roman(4), "IV");
+        assert_eq!(meta_depth_roman(9), "IX");
+        assert_eq!(meta_depth_roman(MAX_PROGRESS_LEVEL), "XIV");
+    }
+
+    #[test]
     fn level_progression() {
         let mut p = PlayerProgress::new();
         assert_eq!(p.current_level(), 1);
-        p.runs_completed = 1;
+        p.level_progress_points = 5;
         assert_eq!(p.current_level(), 2);
-        p.runs_completed = 4;
+        p.level_progress_points = 20;
         assert_eq!(p.current_level(), 5);
-        p.runs_completed = 6;
+        p.level_progress_points = 25;
         assert_eq!(p.current_level(), 6);
-        p.runs_completed = 13;
+        p.level_progress_points = 45;
         assert_eq!(p.current_level(), 10);
-        p.runs_completed = 21;
+        p.level_progress_points = 65;
         assert_eq!(p.current_level(), 14);
-        p.runs_completed = 100;
+        p.level_progress_points = 100;
         assert_eq!(p.current_level(), 14);
     }
 
@@ -1157,7 +1215,7 @@ mod tests {
     fn level_up_unlocks_relics() {
         let mut p = PlayerProgress::new();
         // Hop from L1 to L5 in one bump: collect all intervening unlocks.
-        p.runs_completed = 4;
+        p.level_progress_points = PlayerProgress::min_points_for_level(5);
         let result = p.check_level_up();
         assert!(result.is_some());
         let result = result.unwrap();
@@ -1170,7 +1228,7 @@ mod tests {
     fn available_relics_grow_with_level() {
         let mut p = PlayerProgress::new();
         let l1 = p.available_relics().len();
-        p.runs_completed = 6;
+        p.level_progress_points = PlayerProgress::min_points_for_level(6);
         let l6 = p.available_relics().len();
         assert!(l6 > l1);
     }
@@ -1178,7 +1236,7 @@ mod tests {
     #[test]
     fn transformation_successors_hidden_until_discovered() {
         let mut p = PlayerProgress::new();
-        p.runs_completed = 100;
+        p.level_progress_points = 100;
         assert!(!p.available_relics().contains(&RelicId::SilkMoth));
         assert!(!p.transformation_successor_visible(RelicId::SilkMoth));
         assert!(p.note_transformation_successor_discovered(RelicId::SilkMoth));
@@ -1194,6 +1252,10 @@ mod tests {
     fn cheat_unlock_all_transformation_chains_meta_discovers_and_lists_primaries() {
         let mut p = PlayerProgress::new();
         p.cheat_unlock_all_transformation_chains_meta();
+        assert_eq!(
+            p.level_progress_points,
+            PlayerProgress::min_points_for_level(11)
+        );
         assert_eq!(p.runs_completed, 15);
         for &id in transformation_successor_relic_ids() {
             assert!(
@@ -1221,8 +1283,10 @@ mod tests {
     fn cheat_unlock_transformation_meta_does_not_lower_runs_completed() {
         let mut p = PlayerProgress::new();
         p.runs_completed = 100;
+        p.level_progress_points = 100;
         p.cheat_unlock_all_transformation_chains_meta();
         assert_eq!(p.runs_completed, 100);
+        assert_eq!(p.level_progress_points, 100);
     }
 
     #[test]
@@ -1263,7 +1327,7 @@ mod tests {
     fn dora_unlocks_at_level_6() {
         let mut p = PlayerProgress::new();
         assert!(!p.dora_enabled());
-        p.runs_completed = 5;
+        p.level_progress_points = PlayerProgress::min_points_for_level(6);
         assert_eq!(p.current_level(), 6);
         assert!(p.dora_enabled());
     }
@@ -1315,8 +1379,8 @@ mod tests {
             "timestamp_unix": 1,
             "run_number": 2,
             "outcome": "Victory",
-            "final_ante": 4,
-            "final_blind": "Boss",
+            "final_wing": 4,
+            "final_chamber": "Ordeal",
             "round_score": 100,
             "target_score": 50,
             "total_score_earned": 900,
@@ -1338,7 +1402,7 @@ mod tests {
         }"#;
         let rec: RunRecord = serde_json::from_str(json).expect("parse old run record");
         assert!(rec.best_hand_tiles.is_empty());
-        assert!(rec.score_after_ante.is_empty());
+        assert!(rec.score_after_wing.is_empty());
     }
 
     #[test]
@@ -1350,9 +1414,9 @@ mod tests {
             timestamp_unix: 0,
             run_number: 1,
             outcome: RunOutcome::Victory,
-            final_ante: 8,
-            final_blind: BlindKind::Boss,
-            final_boss: None,
+            final_wing: 8,
+            final_chamber: ChamberKind::Ordeal,
+            final_ordeal: None,
             round_score: 1000,
             target_score: 500,
             total_score_earned: 5000,
@@ -1374,7 +1438,7 @@ mod tests {
             tutorial_run: false,
             memorial_kind: None,
             best_hand_tiles: Vec::new(),
-            score_after_ante: vec![(8, 5000)],
+            score_after_wing: vec![(8, 5000)],
             chronicle: crate::core::run_chronicle::RunChronicle::default(),
             duration_secs: 0,
         });

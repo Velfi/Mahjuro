@@ -82,16 +82,14 @@ impl ProfileCardLayout {
         while min_content_h > card_h && body_font > body_floor + 0.5 {
             body_font = typography::tier_at_most(body_font - 1.0, h);
             body_line_h = body_font * 1.35;
-            min_content_h =
-                Self::card_content_h(pad_y, header_line_h, body_line_h, MAX_BODY_LINES);
+            min_content_h = Self::card_content_h(pad_y, header_line_h, body_line_h, MAX_BODY_LINES);
         }
 
         let header_floor = typography::size(typography::H36, h);
         while min_content_h > card_h && header_font > header_floor + 0.5 {
             header_font = typography::tier_at_most(header_font - 1.0, h);
             header_line_h = header_font * 1.35;
-            min_content_h =
-                Self::card_content_h(pad_y, header_line_h, body_line_h, MAX_BODY_LINES);
+            min_content_h = Self::card_content_h(pad_y, header_line_h, body_line_h, MAX_BODY_LINES);
         }
 
         Self {
@@ -125,7 +123,10 @@ impl ProfileCardLayout {
 fn profile_stat_lines(summary: &persistence::ProfileSummary) -> Vec<(String, [f32; 4])> {
     let mut lines = Vec::new();
     lines.push((
-        format!("Level {}", summary.level),
+        format!(
+            "Depth {}",
+            crate::core::progression::meta_depth_roman(summary.level)
+        ),
         color::STONE,
     ));
     lines.push((
@@ -150,25 +151,36 @@ fn profile_stat_lines(summary: &persistence::ProfileSummary) -> Vec<(String, [f3
     ));
     if summary.second_high_score > 0 {
         lines.push((
-            format!("2nd: {}", archive_career::format_score(summary.second_high_score)),
+            format!(
+                "2nd: {}",
+                archive_career::format_score(summary.second_high_score)
+            ),
             color::STONE,
         ));
     }
     if summary.third_high_score > 0 {
         lines.push((
-            format!("3rd: {}", archive_career::format_score(summary.third_high_score)),
+            format!(
+                "3rd: {}",
+                archive_career::format_score(summary.third_high_score)
+            ),
             color::STONE,
         ));
     }
     lines.push((
-        format!("{} relic{} unlocked", summary.relics_unlocked, if summary.relics_unlocked == 1 { "" } else { "s" }),
+        format!(
+            "{} relic{} unlocked",
+            summary.relics_unlocked,
+            if summary.relics_unlocked == 1 {
+                ""
+            } else {
+                "s"
+            }
+        ),
         color::STONE,
     ));
     lines.push((
-        format!(
-            "{} yaku discovered",
-            summary.yaku_discovered,
-        ),
+        format!("{} yaku discovered", summary.yaku_discovered,),
         color::STONE,
     ));
     if summary.has_saved_run {
@@ -459,9 +471,8 @@ impl SceneBehavior for ProfileSelectScene {
             if summary.exists {
                 let stat_x = card_x + pad_x;
                 let stat_w = card_w - pad_x * 2.0;
-                let mut line_y = header_top
-                    + header_line_h * if is_active { 2.0 } else { 1.0 }
-                    + pad_y * 0.5;
+                let mut line_y =
+                    header_top + header_line_h * if is_active { 2.0 } else { 1.0 } + pad_y * 0.5;
 
                 for (text, stat_color) in profile_stat_lines(summary) {
                     frame.text(TextLabel {
@@ -475,9 +486,7 @@ impl SceneBehavior for ProfileSelectScene {
                     line_y += body_line_h + pad_y * 0.3;
                 }
             } else {
-                let empty_y = header_top
-                    + header_line_h
-                    + pad_y;
+                let empty_y = header_top + header_line_h + pad_y;
                 frame.text(TextLabel {
                     rect: [
                         card_x + pad_x,

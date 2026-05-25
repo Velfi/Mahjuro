@@ -8,8 +8,8 @@
 //!   talismans / packs. Applied at call sites in `scenes/shop.rs` (see
 //!   `price_multiplier` field on `GameMode`).
 //! * `reroll_base_cost` — replaces `REROLL_BASE_COST` for the active run.
-//! * `boss_min_ante_floor` — reduces `BossDef::min_ante` in the filter in
-//!   `core::boss::pick_for_ante`, letting harder bosses appear earlier.
+//! * `ordeal_min_wing_floor` — reduces `OrdealDef::min_ante` in the filter in
+//!   `core::ordeal::pick_for_wing`, letting harder bosses appear earlier.
 //!
 //! Labels, descriptions, numeric knobs, and optional `starting_rules` slugs
 //! live in `assets/data/stakes.json`. `next` / `previous` unlock order stays
@@ -47,7 +47,7 @@ struct StakePresentationRaw {
     base_target_mult: f32,
     price_multiplier: f32,
     reroll_base_cost: u32,
-    boss_min_ante_floor: u32,
+    ordeal_min_wing_floor: u32,
     starting_rules: Vec<String>,
 }
 
@@ -57,7 +57,7 @@ struct StakePresentation {
     base_target_mult: f32,
     price_multiplier: f32,
     reroll_base_cost: u32,
-    boss_min_ante_floor: u32,
+    ordeal_min_wing_floor: u32,
     starting_rules: &'static [RuleModifier],
 }
 
@@ -89,7 +89,7 @@ fn stake_presentations() -> &'static HashMap<Stake, StakePresentation> {
                         base_target_mult: r.base_target_mult,
                         price_multiplier: r.price_multiplier,
                         reroll_base_cost: r.reroll_base_cost,
-                        boss_min_ante_floor: r.boss_min_ante_floor,
+                        ordeal_min_wing_floor: r.ordeal_min_wing_floor,
                         starting_rules,
                     },
                 )
@@ -134,12 +134,12 @@ impl Stake {
         stake_presentation(self).reroll_base_cost
     }
 
-    /// Subtracted from a boss's `min_ante` in `pick_for_ante`, letting higher
+    /// Subtracted from a boss's `min_ante` in `pick_for_wing`, letting higher
     /// stakes meet harder bosses on earlier antes. Zero or positive i32 only
     /// (a positive floor would *delay* bosses — not something any current
     /// stake does).
-    pub fn boss_min_ante_floor(self) -> u32 {
-        stake_presentation(self).boss_min_ante_floor
+    pub fn ordeal_min_wing_floor(self) -> u32 {
+        stake_presentation(self).ordeal_min_wing_floor
     }
 
     /// Run-wide `RuleModifier`s pushed into `GameMode::starting_rules`.

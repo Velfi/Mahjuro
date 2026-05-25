@@ -80,7 +80,7 @@ use crate::ui::focus_nav::{FocusDir, focus_target_at_cursor, pick_neighbor};
 use crate::ui::input::{InputMode, UiAction};
 
 use super::pause_menu::PauseMenu;
-use super::pick_blind::PickBlindScene;
+use super::pick_chamber::PickChamberScene;
 pub(crate) use super::{Scene, SceneTransition, UpdateCtx};
 
 pub struct ShopScene {

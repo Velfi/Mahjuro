@@ -181,11 +181,7 @@ const PART1_TILE_GROUPS: &[TileGroup] = &[
     TileGroup {
         label: "Dragons",
         accent: Suit::Dragon.keyword_color(),
-        tiles: &[
-            (Suit::Dragon, 1),
-            (Suit::Dragon, 2),
-            (Suit::Dragon, 3),
-        ],
+        tiles: &[(Suit::Dragon, 1), (Suit::Dragon, 2), (Suit::Dragon, 3)],
         debuffed_visual: false,
     },
 ];
@@ -613,8 +609,8 @@ impl TutorialCampaignScene {
         inter_tile_gap: f32,
         next_id: &mut u32,
     ) -> (Vec<ShowcaseTilePlacement>, f32, f32) {
-        let total_w =
-            group.tiles.len() as f32 * tile_size + (group.tiles.len().saturating_sub(1) as f32) * inter_tile_gap;
+        let total_w = group.tiles.len() as f32 * tile_size
+            + (group.tiles.len().saturating_sub(1) as f32) * inter_tile_gap;
         let mut placements = Vec::new();
         let mut cursor_x = start_x;
         for &(suit, rank) in group.tiles {
@@ -916,7 +912,8 @@ impl TutorialCampaignScene {
         texts: &mut Vec<TextLabel>,
     ) -> (Vec<ShowcaseTilePlacement>, Vec<TilesPageLabel>, f32, f32) {
         let stack_vertical = h < 760.0;
-        let plan = Self::plan_tutorial_demo_layout(page, col_w, h, scale, content_top, content_floor);
+        let plan =
+            Self::plan_tutorial_demo_layout(page, col_w, h, scale, content_top, content_floor);
         let max_tile = plan.terminals_size.max(plan.honor_size);
 
         let mut placements = Vec::new();
@@ -1140,8 +1137,8 @@ impl SceneBehavior for TutorialCampaignScene {
                     ctx.bus.push(GameEvent::UiSound(SfxId::RelicPickup));
                     GameEngine::begin_onboarding_lessons(ctx.run);
                     Some(Scene::Gameplay(Box::new(
-                        super::gameplay::GameplayScene::with_pending_blind(
-                            crate::core::rules::BlindKind::Small,
+                        super::gameplay::GameplayScene::with_pending_chamber(
+                            crate::core::rules::ChamberKind::Small,
                         ),
                     )))
                 }
@@ -1335,16 +1332,16 @@ impl SceneBehavior for TutorialCampaignScene {
             let subtitle_y = panel_y + 70.0 * scale;
             let subtitle_x = panel_x + 30.0 * scale;
             let subtitle_w = panel_w - 60.0 * scale;
-            let subtitle_end = Self::scoring_page_subtitle_end_y(
-                subtitle_y,
-                panel_w,
-                h,
-                scale,
-                page.subtitle,
-            );
+            let subtitle_end =
+                Self::scoring_page_subtitle_end_y(subtitle_y, panel_w, h, scale, page.subtitle);
             colored_keywords::push_colored_text_block(
                 &mut texts,
-                [subtitle_x, subtitle_y, subtitle_w, subtitle_end - subtitle_y],
+                [
+                    subtitle_x,
+                    subtitle_y,
+                    subtitle_w,
+                    subtitle_end - subtitle_y,
+                ],
                 page.subtitle,
                 TextStyle {
                     tier: typography::H36,
@@ -1362,9 +1359,9 @@ impl SceneBehavior for TutorialCampaignScene {
             (placements, tile_area_y, bottom)
         };
 
-        let try_it_layout = page.try_it_demo.then(|| {
-            Self::compute_try_it_layout(panel_x, panel_w, content_bottom, scale)
-        });
+        let try_it_layout = page
+            .try_it_demo
+            .then(|| Self::compute_try_it_layout(panel_x, panel_w, content_bottom, scale));
         let tiles_page_footer = content_floor;
         let glossary_y = if let Some(ref t) = try_it_layout {
             (t.content_floor_y + 14.0 * scale).min(nav_top - 180.0 * scale)
@@ -1694,9 +1691,21 @@ impl SceneBehavior for TutorialCampaignScene {
         let light_y = h * 0.18;
         let light_rows: &[(f32, f32, f32)] = if self.page == TUTORIAL_PAGE_TILES {
             &[
-                (tile_col_x + tile_col_w * 0.20, tile_light_y - 10.0 * scale, 1.95),
-                (tile_col_x + tile_col_w * 0.50, tile_light_y - 22.0 * scale, 2.15),
-                (tile_col_x + tile_col_w * 0.80, tile_light_y - 10.0 * scale, 1.95),
+                (
+                    tile_col_x + tile_col_w * 0.20,
+                    tile_light_y - 10.0 * scale,
+                    1.95,
+                ),
+                (
+                    tile_col_x + tile_col_w * 0.50,
+                    tile_light_y - 22.0 * scale,
+                    2.15,
+                ),
+                (
+                    tile_col_x + tile_col_w * 0.80,
+                    tile_light_y - 10.0 * scale,
+                    1.95,
+                ),
             ]
         } else {
             &[

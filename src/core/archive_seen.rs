@@ -1,8 +1,8 @@
 //! Archive catalog "seen" state — which unlocked entries the player has
 //! focused since they appeared in the Collection grids.
 
-use crate::core::boss::{BossKind, all_bosses, final_bosses};
-use crate::core::progression::{is_transformation_successor_relic, PlayerProgress};
+use crate::core::ordeal::{OrdealKind, all_ordeals, final_ordeals};
+use crate::core::progression::{PlayerProgress, is_transformation_successor_relic};
 use crate::core::relic::{RelicId, all_relic_defs};
 use crate::core::talisman::TalismanKind;
 use crate::core::yaku::YakuKind;
@@ -13,7 +13,7 @@ pub enum ArchiveTab {
     Relics = 0,
     Talismans = 1,
     Yaku = 2,
-    Bosses = 3,
+    Ordeals = 3,
     Chronicle = 4,
 }
 
@@ -21,7 +21,7 @@ pub enum ArchiveTab {
 pub enum ArchiveSeenMark {
     Relic(RelicId),
     Yaku(YakuKind),
-    Boss(BossKind),
+    Ordeal(OrdealKind),
     Talisman(TalismanKind),
 }
 
@@ -30,13 +30,13 @@ pub struct ArchiveNewCounts {
     pub relics: usize,
     pub talismans: usize,
     pub yaku: usize,
-    pub bosses: usize,
+    pub ordeals: usize,
     pub chronicle_runs: usize,
 }
 
 impl ArchiveNewCounts {
     pub fn total_catalog(&self) -> usize {
-        self.relics + self.talismans + self.yaku + self.bosses
+        self.relics + self.talismans + self.yaku + self.ordeals
     }
 
     pub fn any(&self) -> bool {
@@ -48,7 +48,7 @@ impl ArchiveNewCounts {
             ArchiveTab::Relics => self.relics,
             ArchiveTab::Talismans => self.talismans,
             ArchiveTab::Yaku => self.yaku,
-            ArchiveTab::Bosses => self.bosses,
+            ArchiveTab::Ordeals => self.ordeals,
             ArchiveTab::Chronicle => self.chronicle_runs,
         }
     }
@@ -71,18 +71,15 @@ pub fn archive_new_counts(
             .iter()
             .filter(|id| !progress.archive_seen_yaku.contains(id))
             .count(),
-        bosses: visible_archive_bosses(progress)
+        ordeals: visible_archive_ordeals(progress)
             .iter()
-            .filter(|id| !progress.archive_seen_bosses.contains(id))
+            .filter(|id| !progress.archive_seen_ordeals.contains(id))
             .count(),
         chronicle_runs: chronicle_unseen_run_count(progress, chronicle_last_seen_run_len),
     }
 }
 
-pub fn archive_has_any_new(
-    progress: &PlayerProgress,
-    chronicle_last_seen_run_len: u32,
-) -> bool {
+pub fn archive_has_any_new(progress: &PlayerProgress, chronicle_last_seen_run_len: u32) -> bool {
     archive_new_counts(progress, chronicle_last_seen_run_len).any()
 }
 
@@ -118,12 +115,12 @@ pub fn visible_archive_yaku(progress: &PlayerProgress) -> Vec<YakuKind> {
         .collect()
 }
 
-pub fn visible_archive_bosses(progress: &PlayerProgress) -> Vec<BossKind> {
-    all_bosses()
+pub fn visible_archive_ordeals(progress: &PlayerProgress) -> Vec<OrdealKind> {
+    all_ordeals()
         .iter()
-        .chain(final_bosses().iter())
+        .chain(final_ordeals().iter())
         .map(|def| def.kind)
-        .filter(|kind| progress.boss_times_encountered.contains_key(kind))
+        .filter(|kind| progress.ordeal_times_encountered.contains_key(kind))
         .collect()
 }
 
@@ -139,7 +136,7 @@ pub fn archive_seen_needs_migration_seed(progress: &PlayerProgress) -> bool {
     progress.runs_completed > 0
         && progress.archive_seen_relics.is_empty()
         && progress.archive_seen_yaku.is_empty()
-        && progress.archive_seen_bosses.is_empty()
+        && progress.archive_seen_ordeals.is_empty()
         && progress.archive_seen_talismans.is_empty()
 }
 
@@ -154,8 +151,8 @@ pub fn archive_seen_migration_seed(progress: &mut PlayerProgress) {
         .archive_seen_yaku
         .extend(visible_archive_yaku(progress));
     progress
-        .archive_seen_bosses
-        .extend(visible_archive_bosses(progress));
+        .archive_seen_ordeals
+        .extend(visible_archive_ordeals(progress));
     progress
         .archive_seen_talismans
         .extend(visible_archive_talismans(progress));
@@ -166,7 +163,7 @@ impl PlayerProgress {
         match mark {
             ArchiveSeenMark::Relic(id) => self.archive_seen_relics.insert(id),
             ArchiveSeenMark::Yaku(yk) => self.archive_seen_yaku.insert(yk),
-            ArchiveSeenMark::Boss(bk) => self.archive_seen_bosses.insert(bk),
+            ArchiveSeenMark::Ordeal(bk) => self.archive_seen_ordeals.insert(bk),
             ArchiveSeenMark::Talisman(tk) => self.archive_seen_talismans.insert(tk),
         }
     }
@@ -175,7 +172,7 @@ impl PlayerProgress {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::boss::BossKind;
+    use crate::core::ordeal::OrdealKind;
     use crate::core::relic::RelicId;
     use crate::core::yaku::YakuKind;
 
@@ -186,9 +183,9 @@ mod tests {
             outcome: crate::core::progression::RunOutcome::Defeat {
                 reason: crate::game::event_bus::GameOverReason::OutOfPlays,
             },
-            final_ante: 1,
-            final_blind: crate::core::rules::BlindKind::Small,
-            final_boss: None,
+            final_wing: 1,
+            final_chamber: crate::core::rules::ChamberKind::Small,
+            final_ordeal: None,
             round_score: 0,
             target_score: 100,
             total_score_earned: 0,
@@ -210,7 +207,7 @@ mod tests {
             tutorial_run: false,
             memorial_kind: None,
             best_hand_tiles: Vec::new(),
-            score_after_ante: Vec::new(),
+            score_after_wing: Vec::new(),
             chronicle: crate::core::run_chronicle::RunChronicle::default(),
             duration_secs: 0,
         }
@@ -222,13 +219,13 @@ mod tests {
         p.runs_completed = 3;
         p.unlocked_relics.insert(RelicId::MultiplierMaster);
         p.yaku_times_scored.insert(YakuKind::Tanyao, 1);
-        p.boss_times_encountered.insert(BossKind::House, 1);
+        p.ordeal_times_encountered.insert(OrdealKind::House, 1);
         assert!(archive_seen_needs_migration_seed(&p));
         archive_seen_migration_seed(&mut p);
         assert!(!archive_seen_needs_migration_seed(&p));
         assert_eq!(archive_new_counts(&p, 0).relics, 0);
         assert_eq!(archive_new_counts(&p, 0).yaku, 0);
-        assert_eq!(archive_new_counts(&p, 0).bosses, 0);
+        assert_eq!(archive_new_counts(&p, 0).ordeals, 0);
     }
 
     #[test]

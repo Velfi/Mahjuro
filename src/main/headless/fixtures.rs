@@ -40,19 +40,19 @@ pub(crate) fn setup_hero_state(run: &mut RunState) {
 pub(crate) fn setup_shop_state(run: &mut RunState) {
     run.gold = 42;
     run.run_number = 3;
-    run.ante = 3;
+    run.wing = 3;
     run.tag_rich_stock = true;
 }
 
 pub(crate) fn setup_defeat_game_over_screenshot_state(run: &mut RunState) {
-    use crate::core::boss::BossKind;
-    use crate::core::rules::BlindKind;
+    use crate::core::ordeal::OrdealKind;
+    use crate::core::rules::ChamberKind;
     use crate::core::yaku::YakuKind;
 
-    run.ante = 6;
+    run.wing = 6;
     run.run_number = 18;
-    run.blind = BlindKind::Boss;
-    run.boss.upcoming = Some(BossKind::Rot);
+    run.chamber = ChamberKind::Ordeal;
+    run.ordeal.upcoming = Some(OrdealKind::Rot);
     run.round_score = 5674;
     run.target_score = 10486;
     run.gold = 12;
@@ -62,6 +62,26 @@ pub(crate) fn setup_defeat_game_over_screenshot_state(run: &mut RunState) {
     run.best_structure_score = 6577;
     run.best_structure_name = ".tsu".into();
     run.yaku_times_played.insert(YakuKind::FullHand, 6);
+}
+
+pub(crate) fn setup_victory_game_over_screenshot_state(run: &mut RunState) {
+    use crate::core::ordeal::OrdealKind;
+    use crate::core::rules::ChamberKind;
+    use crate::core::yaku::YakuKind;
+
+    run.wing = 8;
+    run.run_number = 22;
+    run.chamber = ChamberKind::Ordeal;
+    run.ordeal.upcoming = Some(OrdealKind::House);
+    run.round_score = 12490;
+    run.target_score = 11900;
+    run.gold = 28;
+    run.tiles_played = 209;
+    run.tiles_discarded = 76;
+    run.times_restocked = 39;
+    run.best_structure_score = 8312;
+    run.best_structure_name = "Toitoi".into();
+    run.yaku_times_played.insert(YakuKind::Toitoi, 8);
 }
 
 pub(crate) fn setup_gameplay_screenshot_state(run: &mut RunState) {
@@ -128,16 +148,19 @@ pub(crate) fn setup_gameplay_screenshot_state(run: &mut RunState) {
         .try_push(Consumable::Zodiac(ZodiacKind::Dragon));
 }
 
-pub(crate) fn force_boss_blind(run: &mut RunState, kind: crate::core::boss::BossKind) {
-    run.blind = crate::core::rules::BlindKind::Boss;
-    run.upcoming_blind = crate::core::rules::BlindKind::Boss;
-    run.ante = kind.def().min_ante.max(run.ante);
-    run.boss.upcoming = Some(kind);
-    run.resolve_upcoming_boss();
-    run.apply_blind(crate::core::rules::BlindKind::Boss, None);
+pub(crate) fn force_ordeal_chamber(run: &mut RunState, kind: crate::core::ordeal::OrdealKind) {
+    run.chamber = crate::core::rules::ChamberKind::Ordeal;
+    run.upcoming_chamber = crate::core::rules::ChamberKind::Ordeal;
+    run.wing = kind.def().min_wing.max(run.wing);
+    run.ordeal.upcoming = Some(kind);
+    run.resolve_upcoming_ordeal();
+    run.apply_chamber(crate::core::rules::ChamberKind::Ordeal, None);
 }
 
 /// Prime shop stock generation (Qilin ribbon gate uses profile progress).
-pub(crate) fn prime_shop_stock(run: &mut RunState, progress: &crate::core::progression::PlayerProgress) {
+pub(crate) fn prime_shop_stock(
+    run: &mut RunState,
+    progress: &crate::core::progression::PlayerProgress,
+) {
     let _ = ShopScene::new(run, progress);
 }

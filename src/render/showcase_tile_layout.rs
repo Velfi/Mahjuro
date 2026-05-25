@@ -155,7 +155,9 @@ pub fn showcase_tile_group_label_anchor(
 ///
 /// Uses the same ray→`plane_z` center mapping, `0.85` short-edge factor, preset ratios,
 /// and `tile_mesh_local_to_world` × Euler basis as the GPU showcase path.
-pub fn showcase_tile_projected_bounds_px(p: &ShowcaseTileProjectParams<'_>) -> ShowcaseTileScreenBounds {
+pub fn showcase_tile_projected_bounds_px(
+    p: &ShowcaseTileProjectParams<'_>,
+) -> ShowcaseTileScreenBounds {
     let center = layout_anchor_to_world(
         p.win_w,
         p.win_h,
@@ -288,11 +290,7 @@ mod tests {
         let w = 1920.0_f32;
         let h = 1080.0_f32;
         let cam = shop_celebration_camera(w, h, crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE);
-        let rotation = [
-            32.0_f32.to_radians(),
-            0.0,
-            std::f32::consts::PI,
-        ];
+        let rotation = [32.0_f32.to_radians(), 0.0, std::f32::consts::PI];
         let row = compute_pack_reveal_row_layout(&PackRevealRowLayoutParams {
             win_w: w,
             win_h: h,

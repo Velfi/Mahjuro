@@ -41,11 +41,7 @@ pub fn push_defeat_memorial_tableau(
     // Camera is world-space; frame the talisman at screen center.
     let cs = (h / 2104.0_f32).max(1e-4);
     frame.camera_override = Some(CameraParams {
-        eye: [
-            target_w.x,
-            target_w.y - 980.0 * cs,
-            target_w.z + 440.0 * cs,
-        ],
+        eye: [target_w.x, target_w.y - 980.0 * cs, target_w.z + 440.0 * cs],
         target: [target_w.x, target_w.y, target_w.z + 12.0 * cs],
         up: [0.0, 0.0, 1.0],
         fovy_deg: 38.0,

@@ -179,11 +179,94 @@ impl WgpuRenderer {
                 DrawCmd::MoonlitWater
                     | DrawCmd::ShopEnvironment
                     | DrawCmd::HallwayEnvironment
+                    | DrawCmd::StaircaseEnvironment
                     | DrawCmd::ArchiveEnvironment
                     // Main menu stars / emissive sky read too hot with full HDR bloom.
                     | DrawCmd::EmberDrift
             )
         })
+    }
+
+    /// Linear HDR gain for embedded room env passes (matches `write_gltf_room_env_uniforms`).
+    pub(super) fn room_env_linear_hdr_gain(
+        frame: &UiFrame,
+        shop_env_linear_exposure: f32,
+    ) -> Option<f32> {
+        use crate::render::room_glb::ROOM_GLB_LINEAR_EXPOSURE_BASE;
+
+        let has_room_env = frame.cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                DrawCmd::ShopEnvironment
+                    | DrawCmd::HallwayEnvironment
+                    | DrawCmd::StaircaseEnvironment
+                    | DrawCmd::ArchiveEnvironment
+                    | DrawCmd::MainMenuEnvironment
+            )
+        });
+        if !has_room_env && !frame.uses_room_glb_shader() {
+            return None;
+        }
+
+        let hallway = frame
+            .cmds
+            .iter()
+            .any(|cmd| matches!(cmd, DrawCmd::HallwayEnvironment));
+        let staircase = frame
+            .cmds
+            .iter()
+            .any(|cmd| matches!(cmd, DrawCmd::StaircaseEnvironment));
+        let archive = frame
+            .cmds
+            .iter()
+            .any(|cmd| matches!(cmd, DrawCmd::ArchiveEnvironment));
+        let main_menu = frame
+            .cmds
+            .iter()
+            .any(|cmd| matches!(cmd, DrawCmd::MainMenuEnvironment));
+
+        let mut gain = shop_env_linear_exposure * ROOM_GLB_LINEAR_EXPOSURE_BASE;
+        if hallway {
+            gain *= crate::render::hallway_glb::HALLWAY_ENV_LINEAR_EXPOSURE_MUL;
+        }
+        if staircase {
+            gain *= crate::render::staircase_glb::STAIRCASE_ENV_LINEAR_EXPOSURE_MUL;
+        }
+        if archive {
+            gain *= crate::render::archive_glb::ARCHIVE_ENV_LINEAR_EXPOSURE_MUL;
+        }
+        if main_menu {
+            gain *= crate::render::main_menu_glb::MAIN_MENU_ENV_LINEAR_EXPOSURE_MUL;
+        }
+        Some(gain)
+    }
+
+    /// `(threshold, composite_strength, extract_scale)` for the bloom passes.
+    pub(super) fn bloom_render_tuning(
+        frame: &UiFrame,
+        shop_env_linear_exposure: f32,
+    ) -> (f32, f32, f32) {
+        if !Self::bloom_is_active(frame) {
+            return (9999.0, 0.0, 0.0);
+        }
+
+        const THRESHOLD: f32 = 1.30;
+        const EXTRACT_SCALE: f32 = 0.85;
+        const STRENGTH_NON_ROOM: f32 = 0.28;
+
+        let strength = if let Some(gain) =
+            Self::room_env_linear_hdr_gain(frame, shop_env_linear_exposure)
+        {
+            // glTF emissive is absolute HDR; lit surfaces use `tile_seed` exposure
+            // (often ≪ 1). Scale bloom down in crushed rooms so candle halos stay
+            // tight instead of fogging the frame.
+            let ev = gain.max(1e-8).log2();
+            ((ev + 8.5) * 0.045 + 0.14).clamp(0.12, 0.36)
+        } else {
+            STRENGTH_NON_ROOM
+        };
+
+        (THRESHOLD, strength, EXTRACT_SCALE)
     }
 
     pub(super) fn advance_frame_timers(

@@ -1,5 +1,5 @@
 //! Rare random bulb flicker + brief brownout for room-glTF scenes (shop,
-//! pick_blind, collection). Also fires when the player skips a blind.
+//! pick_chamber, collection). Also fires when the player skips a blind.
 //! Ticks only while that scene is on-screen and nothing is blocking
 //! gameplay-style overlays (pause, shop env debug, …).
 
@@ -55,7 +55,7 @@ impl RoomGltfBrownout {
         a.flicker_secs + a.dip_secs + a.recover_secs
     }
 
-    /// Start flicker + dip immediately (e.g. player skipped a blind on pick_blind).
+    /// Start flicker + dip immediately (e.g. player skipped a blind on pick_chamber).
     pub fn trigger(&mut self) {
         self.active = Some(Self::roll_active());
         self.secs_to_next = 0.0;
@@ -90,7 +90,7 @@ impl RoomGltfBrownout {
     pub fn scene_eligible(scene: &Scene) -> bool {
         matches!(
             scene,
-            Scene::Shop(_) | Scene::PickBlind(_) | Scene::Collection(_)
+            Scene::Shop(_) | Scene::PickChamber(_) | Scene::Staircase(_) | Scene::Collection(_)
         )
     }
 

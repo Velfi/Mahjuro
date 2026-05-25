@@ -487,8 +487,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     let shadow_baked_depth_white_view =
         shadow_baked_depth_white_texture.create_view(&Default::default());
     const BAKED_DEPTH_FAR: [u8; 4] = 0x3F80_0000u32.to_le_bytes();
-    let baked_depth_white_pixels: [u8; 64] =
-        std::array::from_fn(|i| BAKED_DEPTH_FAR[i % 4]);
+    let baked_depth_white_pixels: [u8; 64] = std::array::from_fn(|i| BAKED_DEPTH_FAR[i % 4]);
     queue.write_texture(
         wgpu::TexelCopyTextureInfo {
             texture: &shadow_baked_depth_white_texture,
@@ -3040,6 +3039,207 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
 
     crate::render::hallway_glb::release_hallway_environment_cpu_sources_after_gpu_upload();
 
+    let (staircase_env_primitives, staircase_environment) = {
+        let _staircase = crate::startup_profile::scope("wgpu.room.staircase");
+        crate::render::staircase_glb::with_staircase_glb_cpu(|cpu_opt| {
+            let mut prims = Vec::new();
+            let mut gpu_wrap = None;
+            let Some(cpu) = cpu_opt else {
+                return (prims, gpu_wrap);
+            };
+            if !cpu.environment_primitives.is_empty() {
+                let mut room_tex_cache = RoomEnvTextureCache::new();
+                let (_white_tex, white_albedo_view) = white_albedo(&device, &queue);
+                for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
+                    let prim = &env_prim.mesh;
+                    let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("staircase-env-verts-{i}")),
+                        contents: bytemuck::cast_slice(&prim.vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+                    let ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("staircase-env-idx-{i}")),
+                        contents: bytemuck::cast_slice(&prim.indices),
+                        usage: wgpu::BufferUsages::INDEX,
+                    });
+                    let mips = crate::render::gltf_helpers::wants_mipmaps(prim.sampler.min_filter);
+                    let albedo_view = room_tex_cache.upload_slot(
+                        &device,
+                        &queue,
+                        format!("staircase-env-albedo-{i}"),
+                        prim.albedo_rgba.as_ref(),
+                        prim.albedo_mip_chain.as_deref().map(|c| c.as_slice()),
+                        wgpu::TextureFormat::Rgba8UnormSrgb,
+                        mips,
+                        &white_albedo_view,
+                    );
+                    let normal_view = room_tex_cache.upload_slot(
+                        &device,
+                        &queue,
+                        format!("staircase-env-normal-{i}"),
+                        prim.normal_rgba.as_ref(),
+                        prim.normal_mip_chain.as_deref().map(|c| c.as_slice()),
+                        wgpu::TextureFormat::Rgba8Unorm,
+                        mips,
+                        &tile_default_normal_view,
+                    );
+                    let metallic_roughness_view = room_tex_cache.upload_slot(
+                        &device,
+                        &queue,
+                        format!("staircase-env-mr-{i}"),
+                        prim.metallic_roughness_rgba.as_ref(),
+                        prim.metallic_roughness_mip_chain
+                            .as_deref()
+                            .map(|c| c.as_slice()),
+                        wgpu::TextureFormat::Rgba8Unorm,
+                        mips,
+                        &tile_glb_default_mr_view,
+                    );
+                    let emissive_view = room_tex_cache.upload_slot(
+                        &device,
+                        &queue,
+                        format!("staircase-env-emissive-{i}"),
+                        prim.emissive_rgba.as_ref(),
+                        prim.emissive_mip_chain.as_deref().map(|c| c.as_slice()),
+                        wgpu::TextureFormat::Rgba8UnormSrgb,
+                        mips,
+                        &tile_glb_default_emissive_view,
+                    );
+                    let pbr_uniform_buffer =
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some(&format!("staircase-pbr-{i}")),
+                            contents: bytemuck::bytes_of(&GltfPbrUniform::from_loaded(
+                                prim.metallic_factor,
+                                prim.roughness_factor,
+                                prim.emissive_factor,
+                                prim.alpha_mode,
+                                prim.alpha_cutoff,
+                            )),
+                            usage: wgpu::BufferUsages::UNIFORM,
+                        });
+                    let sampler =
+                        device.create_sampler(&build_sampler_descriptor(prim.sampler, None));
+                    prims.push(TilePrimitiveGpu {
+                        vertex_buffer: vb,
+                        index_buffer: ib,
+                        index_count: prim.indices.len() as u32,
+                        albedo_view,
+                        normal_view,
+                        metallic_roughness_view,
+                        emissive_view,
+                        pbr_uniform_buffer,
+                        sampler,
+                        pipeline_key: TileGlbPipelineKey::from_loaded_primitive(prim),
+                    });
+                }
+                let (_white_tex, staircase_decal_view) = white_albedo(&device, &queue);
+                let identity = Mat4::IDENTITY;
+                let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("staircase-env-uniform"),
+                    contents: bytemuck::bytes_of(&CameraUniform {
+                        view_proj: identity.to_cols_array(),
+                        model: identity.to_cols_array(),
+                        base_color_factor: [
+                            1.0,
+                            0.0,
+                            0.0,
+                            crate::render::tile_body::TEXTURED_BASE_MAP_BODY_KIND,
+                        ],
+                        cam_pos: [0.0; 3],
+                        tile_seed: 0.0,
+                        decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
+                        hdr_tonemap: [0.0; 4],
+                    }),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+                let distortion_buffer =
+                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("staircase-env-distortion"),
+                        contents: bytemuck::bytes_of(
+                            &crate::render::hallway_glb::HallwayDistortion::default(),
+                        ),
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    });
+                let bind_groups: Vec<wgpu::BindGroup> = prims
+                    .iter()
+                    .map(|p| {
+                        device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("staircase-env-bg"),
+                            layout: &tile_material_layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: uniform_buffer.as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: wgpu::BindingResource::TextureView(&p.albedo_view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 2,
+                                    resource: wgpu::BindingResource::Sampler(&p.sampler),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 3,
+                                    resource: wgpu::BindingResource::TextureView(
+                                        &staircase_decal_view,
+                                    ),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 4,
+                                    resource: wgpu::BindingResource::TextureView(&p.normal_view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 5,
+                                    resource: p.pbr_uniform_buffer.as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 6,
+                                    resource: wgpu::BindingResource::TextureView(
+                                        &p.metallic_roughness_view,
+                                    ),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 7,
+                                    resource: wgpu::BindingResource::TextureView(&p.emissive_view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 8,
+                                    resource: distortion_buffer.as_entire_binding(),
+                                },
+                            ],
+                        })
+                    })
+                    .collect();
+                let (shadow_uniform_buffer, shadow_bind_group) = create_room_env_shadow_gpu(
+                    &device,
+                    &shadow_caster_layout,
+                    "staircase-env-shadow",
+                );
+                let shadow_warp_bind_group = create_shadow_warp_bind_group(
+                    &device,
+                    &shadow_warp_layout,
+                    &distortion_buffer,
+                    "staircase-env-shadow-warp",
+                );
+                gpu_wrap = Some(ShopEnvironmentGpu {
+                    uniform_buffer,
+                    distortion_buffer,
+                    shadow_uniform_buffer,
+                    shadow_bind_group,
+                    shadow_warp_bind_group,
+                    bind_groups,
+                    archive_sign_decal_texture: None,
+                    shop_candle_sss_texture: None,
+                });
+                log::info!("staircase.glb GPU: {} primitive draw(s)", prims.len());
+            }
+            (prims, gpu_wrap)
+        })
+    };
+
+    crate::render::staircase_glb::release_staircase_environment_cpu_sources_after_gpu_upload();
+
     let (
         archive_env_primitives,
         archive_environment,
@@ -3152,9 +3352,11 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                         });
                     let sampler =
                         device.create_sampler(&build_sampler_descriptor(prim.sampler, None));
-                    shadow_caster_mask.push(crate::render::archive_glb::archive_prim_casts_room_shadow(
-                        env_prim.gltf_node_name.as_deref(),
-                    ));
+                    shadow_caster_mask.push(
+                        crate::render::archive_glb::archive_prim_casts_room_shadow(
+                            env_prim.gltf_node_name.as_deref(),
+                        ),
+                    );
                     prims.push(TilePrimitiveGpu {
                         vertex_buffer: vb,
                         index_buffer: ib,
@@ -3949,6 +4151,46 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                 "primitive-bell-tassel",
             )),
         );
+        primitive_meshes.insert(
+            MeshId::ProgressMeterRail,
+            std::sync::Arc::new(LitMeshGpu::new(
+                &device,
+                &build_progress_meter_rail_mesh(),
+                "primitive-progress-meter-rail",
+            )),
+        );
+        primitive_meshes.insert(
+            MeshId::ProgressMeterPip,
+            std::sync::Arc::new(LitMeshGpu::new(
+                &device,
+                &build_progress_meter_pip_mesh(),
+                "primitive-progress-meter-pip",
+            )),
+        );
+        let depth_well_cpu = build_depth_well_mesh(&DepthWellConfig {
+            step_count: crate::core::progression::POINTS_PER_LEVEL as usize,
+            ..DepthWellConfig::default()
+        });
+        for region in [
+            DepthWellRegionId::Rim,
+            DepthWellRegionId::Step(0),
+            DepthWellRegionId::Step(1),
+            DepthWellRegionId::Step(2),
+            DepthWellRegionId::Step(3),
+            DepthWellRegionId::Step(4),
+            DepthWellRegionId::Throat,
+        ] {
+            let mesh_id = depth_well_mesh_id(region);
+            let label = format!("primitive-depth-well-{mesh_id:?}");
+            primitive_meshes.insert(
+                mesh_id,
+                std::sync::Arc::new(LitMeshGpu::new(
+                    &device,
+                    &extract_depth_well_region_mesh(&depth_well_cpu, region),
+                    &label,
+                )),
+            );
+        }
     }
     // Per-shape texture override: the coin cylinder needs its
     // engraved heightmap bound at both albedo and relief slots so
@@ -4019,9 +4261,9 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             &tile_sampler,
         ));
     }
-    let mut boss_icon_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_BOSS_ICON_SLOTS);
-    for _ in 0..MAX_BOSS_ICON_SLOTS {
-        boss_icon_instances.push(LitMeshInstance::new(
+    let mut ordeal_icon_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_ORDEAL_ICON_SLOTS);
+    for _ in 0..MAX_ORDEAL_ICON_SLOTS {
+        ordeal_icon_instances.push(LitMeshInstance::new(
             &device,
             &lit_mesh_material_layout,
             &shadow_caster_layout,
@@ -4071,6 +4313,29 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             lit_mesh_coin_height_view.clone(),
         ),
     );
+    // Depth-well albedo textures: one sRGB image per region.  Bound at the
+    // albedo slot so the lit_mesh shader multiplies `base_color * tex_rgb`.
+    // Textures 1–4 are the step rings (outermost → innermost); texture 5 is
+    // shared by Step(4) and Throat.  The relief slot keeps the default flat
+    // mid-gray (no heightmap perturbation on these flat disc meshes).
+    {
+        let well_regions: &[(DepthWellRegionId, u8)] = &[
+            (DepthWellRegionId::Rim,     0),
+            (DepthWellRegionId::Step(0), 1),
+            (DepthWellRegionId::Step(1), 2),
+            (DepthWellRegionId::Step(2), 3),
+            (DepthWellRegionId::Step(3), 4),
+            (DepthWellRegionId::Step(4), 5),
+            (DepthWellRegionId::Throat,  5),
+        ];
+        for &(region, img_idx) in well_regions {
+            let (_, view) = load_depth_well_albedo(img_idx, &device, &queue);
+            primitive_textures.insert(
+                depth_well_mesh_id(region),
+                (view, lit_mesh_relief_default_view.clone()),
+            );
+        }
+    }
     let mut bug_body_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_BUG_SLOTS);
     let mut bug_wing_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_BUG_SLOTS);
     let mut bug_wing_r_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_BUG_SLOTS);
@@ -4345,6 +4610,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         shop_environment,
         hallway_env_primitives,
         hallway_environment,
+        staircase_env_primitives,
+        staircase_environment,
         archive_env_primitives,
         archive_environment,
         main_menu_env_primitives,
@@ -4401,10 +4668,10 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         last_pick_camera: None,
         last_relic_models: Vec::new(),
         relic_slot_texture: vec![None; MAX_RELIC_SLOTS],
-        boss_icon_instances,
-        boss_icon_meshes: rustc_hash::FxHashMap::default(),
-        boss_icon_textures: rustc_hash::FxHashMap::default(),
-        boss_icon_slot_texture: vec![None; MAX_BOSS_ICON_SLOTS],
+        ordeal_icon_instances,
+        ordeal_icon_meshes: rustc_hash::FxHashMap::default(),
+        ordeal_icon_textures: rustc_hash::FxHashMap::default(),
+        ordeal_icon_slot_texture: vec![None; MAX_ORDEAL_ICON_SLOTS],
         pack_instances,
         pack_slot_texture: vec![None; 4],
         ribbon_mesh,

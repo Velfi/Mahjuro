@@ -57,12 +57,7 @@ pub fn colored_wrapped_rows_height(rows: &[Vec<(String, [f32; 4])>], line_h: f32
 }
 
 /// Measure a single left-aligned colored line (same wrap + step as [`push_colored_line_left`]).
-pub fn colored_line_block_height(
-    text: &str,
-    inner_w: f32,
-    line_h: f32,
-    default: [f32; 4],
-) -> f32 {
+pub fn colored_line_block_height(text: &str, inner_w: f32, line_h: f32, default: [f32; 4]) -> f32 {
     let wrapped = wrap_colored_words(text, inner_w, line_h, default);
     colored_wrapped_rows_height(&wrapped, line_h)
 }
@@ -458,8 +453,7 @@ mod tests {
         let default = color::PARCHMENT;
         let measured = colored_line_block_height(text, inner_w, line_h, default);
         let mut labels = Vec::new();
-        let drawn =
-            push_colored_line_left(&mut labels, 0.0, 0.0, inner_w, line_h, text, default);
+        let drawn = push_colored_line_left(&mut labels, 0.0, 0.0, inner_w, line_h, text, default);
         assert!(
             (measured - drawn).abs() < 0.01,
             "measure/draw height drift: measured={measured} drawn={drawn}"

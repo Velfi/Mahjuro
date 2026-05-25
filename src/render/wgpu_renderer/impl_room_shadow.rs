@@ -4,9 +4,7 @@ use super::*;
 use crate::render::lit_mesh::{ShadowGlobals, create_shadow_sample_bind_group};
 use crate::render::room_gi_bake::RoomGiRoom;
 use crate::render::room_shadow_bake::{self, RoomShadowBake};
-use crate::render::wgpu_renderer::runtime::shadow_setup::{
-    self, ActiveRoomEnv,
-};
+use crate::render::wgpu_renderer::runtime::shadow_setup::{self, ActiveRoomEnv};
 
 pub(crate) struct RoomBakedShadowGpu {
     pub sample_bind_group: wgpu::BindGroup,
@@ -106,9 +104,10 @@ impl WgpuRenderer {
             },
         );
 
-        let ao_bytes = bake.ao_bytes.clone().unwrap_or_else(|| {
-            Arc::from(vec![255u8; (w * h) as usize])
-        });
+        let ao_bytes = bake
+            .ao_bytes
+            .clone()
+            .unwrap_or_else(|| Arc::from(vec![255u8; (w * h) as usize]));
         let ao_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("room-baked-shadow-ao"),
             size: wgpu::Extent3d {
@@ -190,7 +189,11 @@ impl WgpuRenderer {
             return;
         };
         let enabled = if shadows_enabled { 1.0 } else { 0.0 };
-        let baked_mode = if room == RoomGiRoom::Archive { 2.0 } else { 1.0 };
+        let baked_mode = if room == RoomGiRoom::Archive {
+            2.0
+        } else {
+            1.0
+        };
         queue.write_buffer(
             &gpu.globals_buffer,
             0,
@@ -211,8 +214,7 @@ impl WgpuRenderer {
                 .map(|_| room)
         });
         self.active_room_baked_shadow = active_env.and_then(|env| {
-            shadow_setup::room_env_uses_offline_baked_shadow(Some(env), loaded)
-                .then_some(loaded?)
+            shadow_setup::room_env_uses_offline_baked_shadow(Some(env), loaded).then_some(loaded?)
         });
     }
 
@@ -335,15 +337,5 @@ fn room_index(room: RoomGiRoom) -> usize {
 impl ActiveRoomEnv {
     pub fn from_frame(frame: &UiFrame) -> Option<Self> {
         crate::render::wgpu_renderer::runtime::shadow_setup::active_room_env(frame)
-    }
-
-    pub fn to_room_gi(self) -> Option<RoomGiRoom> {
-        match self {
-            Self::Shop => Some(RoomGiRoom::Shop),
-            Self::Hallway => Some(RoomGiRoom::Hallway),
-            Self::Archive => Some(RoomGiRoom::Archive),
-            Self::MainMenu => Some(RoomGiRoom::MainMenu),
-            Self::Gameplay => None,
-        }
     }
 }

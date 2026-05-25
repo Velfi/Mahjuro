@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::core::blind_target::DEFAULT_BASE_TARGET;
+use crate::core::chamber_target::DEFAULT_BASE_TARGET;
 use crate::core::relic::RelicId;
 use crate::core::rules::RuleModifier;
 use crate::core::stake::Stake;
@@ -80,7 +80,7 @@ impl GameMode {
             TileMaterial::TortoiseShell => (0, 0, 10),
         };
         // Apply the stake's base-target multiplier once here; per-ante growth is
-        // `core::blind_target::TARGET_SCALING`.
+        // `core::chamber_target::TARGET_SCALING`.
         let base_target = ((DEFAULT_BASE_TARGET as f32) * stake.base_target_mult()).round() as u32;
         let mut starting_rules = vec![RuleModifier::PairDoubleScore];
         starting_rules.extend(stake.starting_rules());

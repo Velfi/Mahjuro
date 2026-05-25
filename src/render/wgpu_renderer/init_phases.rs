@@ -564,15 +564,16 @@ fn select_present_mode(caps: &wgpu::SurfaceCapabilities) -> wgpu::PresentMode {
                 log::warn!("MAHJURO_PRESENT_MODE={other:?} unrecognized; using default selection");
                 None
             }
-        } {
-            if caps.present_modes.contains(&mode) {
-                log::info!("MAHJURO_PRESENT_MODE override → {mode:?}");
-                return mode;
-            }
-            log::warn!(
-                "MAHJURO_PRESENT_MODE={mode:?} not advertised by surface; using default selection"
-            );
         }
+    {
+        if caps.present_modes.contains(&mode) {
+            log::info!("MAHJURO_PRESENT_MODE override → {mode:?}");
+            return mode;
+        }
+        log::warn!(
+            "MAHJURO_PRESENT_MODE={mode:?} not advertised by surface; using default selection"
+        );
+    }
 
     #[cfg(target_os = "windows")]
     {

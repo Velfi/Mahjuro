@@ -21,12 +21,12 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::core::boss::{self, BossKind};
+use crate::core::ordeal::{self, OrdealKind};
 use crate::core::debuff::TileDebuff;
 use crate::core::deck::Wall;
 use crate::core::hand::{DetectedMeld, validate_selection_with_rules};
 use crate::core::relic::{RelicId, RelicState};
-use crate::core::rules::{BlindKind, RuleModifier};
+use crate::core::rules::{ChamberKind, RuleModifier};
 use crate::core::scoring::ScoreBreakdown;
 use crate::core::tile::{Suit, Tile, TileEnhancement};
 use crate::core::yaku::YakuKind;
@@ -38,14 +38,14 @@ pub use discard_undo::DiscardUndoSnapshot;
 /// Boss-blind state for the current run.  Extracted from `RunState` so
 /// boss-specific logic has a single owner.
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
-pub struct BossState {
+pub struct OrdealState {
     /// Bosses still available for this run, drawn without replacement.
-    pub pool_remaining: Vec<BossKind>,
+    pub pool_remaining: Vec<OrdealKind>,
     /// The boss for the current ante.
-    pub upcoming: Option<BossKind>,
+    pub upcoming: Option<OrdealKind>,
     /// Resolved effect for `upcoming`, rebuilt from the kind on load.
     #[serde(skip)]
-    pub effect: Option<crate::core::boss::ResolvedBossEffect>,
+    pub effect: Option<crate::core::ordeal::ResolvedOrdealEffect>,
     /// Per-round hand-size delta from boss effects.
     pub bonus_hand_size: i32,
     /// Gold cost charged after each successful play (set by The Tribute).
@@ -71,7 +71,7 @@ pub enum ConsumableUseResult {
 }
 
 /// Defeating the Boss of this ante completes the run (Balatro-style).
-pub const FINAL_ANTE: u32 = 7;
+pub const FINAL_WING: u32 = 7;
 
 fn default_auto_cash_in_on_full_structure() -> bool {
     true
@@ -539,8 +539,9 @@ pub struct RunState {
     pub relics: RelicState,
     pub round_rules: Vec<RuleModifier>,
     pub run_number: u32,
-    /// Current ante (1-indexed). Increments after defeating each Boss blind.
-    pub ante: u32,
+    /// Current wing (1-indexed). Increments after defeating each Boss chamber.
+    #[serde(alias = "ante")]
+    pub wing: u32,
     pub plays_remaining: u32,
     /// Effective play peg row length for the current round after round-start
     /// modifiers (bosses, skip tags, relic taxes) have been applied.
@@ -552,9 +553,10 @@ pub struct RunState {
     #[serde(default)]
     pub discards_max: u32,
     pub gold: i32,
-    pub blind: BlindKind,
-    /// Next blind the player will face in the Small→Big→Boss cycle.
-    pub upcoming_blind: BlindKind,
+    #[serde(alias = "blind")]
+    pub chamber: ChamberKind,
+    /// Next chamber the player will face in the Small→Big→Boss cycle.
+    pub upcoming_chamber: ChamberKind,
     /// Last scoring breakdown for UI cascade display. Not persisted across
     /// quit/resume — the cascade is a transient UI artifact, not run state.
     #[serde(skip)]
@@ -590,7 +592,7 @@ pub struct RunState {
     pub hints_enabled: bool,
     // ── Boss blind state ─────────────────────────────────────────────────
     #[serde(flatten)]
-    pub boss: BossState,
+    pub ordeal: OrdealState,
     /// Yaku detected on prior plays in this round. Used by The Censor to
     /// halve repeat-yaku contributions. Reset on round start.
     #[serde(skip)]
@@ -601,7 +603,7 @@ pub struct RunState {
     /// Set true the first time this round a scored hand contains a Wind
     /// or Dragon tile. Powers Green Luck's per-round payout — the relic
     /// awards its bonus at round clear iff this stays false. Reset by
-    /// `advance_round` and `skip_to_next_blind`.
+    /// `advance_round` and `skip_to_next_chamber`.
     #[serde(skip)]
     pub honors_scored_this_round: bool,
     /// Second round wind chosen by Windreader at blind start (1–4).
@@ -652,9 +654,9 @@ pub struct RunState {
     /// Tiles from the highest-scoring structure cash-in (for chronicle display).
     #[serde(default)]
     pub best_hand_tiles: Vec<Tile>,
-    /// Cumulative run score snapshot after each boss-cleared ante.
-    #[serde(default)]
-    pub score_after_ante: Vec<(u32, u64)>,
+    /// Cumulative run score snapshot after each boss-cleared wing.
+    #[serde(default, alias = "score_after_ante")]
+    pub score_after_wing: Vec<(u32, u64)>,
     /// Per-run tile enhancement map, keyed by tile id. Talismans stamp every
     /// hand tile's id into this map; whenever tiles are drawn (initial deal,
     /// post-play refill, mid-round draws, new-round redeals), we re-apply the
@@ -681,10 +683,10 @@ pub struct RunState {
     // ── Skip-reward tags ──────────────────────────────────────────────
     /// Tag assigned to the Small blind this ante.
     #[serde(default)]
-    pub small_blind_tag: Option<crate::core::tag::TagKind>,
+    pub small_chamber_tag: Option<crate::core::tag::TagKind>,
     /// Tag assigned to the Big blind this ante.
     #[serde(default)]
-    pub big_blind_tag: Option<crate::core::tag::TagKind>,
+    pub big_chamber_tag: Option<crate::core::tag::TagKind>,
     /// Tag-granted: next shop's first reroll is free.
     #[serde(default)]
     pub tag_free_reroll: bool,
@@ -1032,7 +1034,7 @@ impl RunState {
 
     pub(crate) fn refresh_windreader_bonus_wind(&mut self) {
         self.windreader_bonus_wind = if self.relics.has(RelicId::WindReader) {
-            Some(crate::core::rules::BlindKind::roll_bonus_round_wind_for_ante(self.ante))
+            Some(crate::core::rules::ChamberKind::roll_bonus_round_wind_for_wing(self.wing))
         } else {
             None
         };
@@ -1081,7 +1083,7 @@ impl RunState {
             }
         }
 
-        let hand_size = boss::effective_hand_size_components(mode.hand_size, 0, &relics);
+        let hand_size = ordeal::effective_hand_size_components(mode.hand_size, 0, &relics);
         let mut hand = Vec::with_capacity(hand_size);
         for _ in 0..hand_size {
             if let Some(t) = wall.draw() {
@@ -1091,11 +1093,11 @@ impl RunState {
         hand.sort();
         let selected = vec![false; hand.len()];
 
-        let mut boss_pool_remaining = boss::regular_pool();
+        let mut ordeal_pool_remaining = ordeal::regular_pool();
         let mut rng = rand::rng();
-        let boss_floor = mode.stake.boss_min_ante_floor();
-        let upcoming_boss =
-            boss::pick_for_ante_with_floor(&mut boss_pool_remaining, 1, boss_floor, &mut rng);
+        let ordeal_floor = mode.stake.ordeal_min_wing_floor();
+        let upcoming_ordeal =
+            ordeal::pick_for_wing_with_floor(&mut ordeal_pool_remaining, 1, ordeal_floor, &mut rng);
 
         let starting_discards = Self::discard_cap_for(&mode, &relics);
         let starting_plays = Self::play_cap_for(&mode, &relics);
@@ -1106,23 +1108,23 @@ impl RunState {
             structure_sets: Vec::new(),
             structure_tiles: Vec::new(),
             round_score: 0,
-            target_score: crate::core::blind_target::score_for(
+            target_score: crate::core::chamber_target::score_for(
                 1,
-                BlindKind::Small,
+                ChamberKind::Small,
                 mode.base_target,
             ),
             base_target: mode.base_target,
             relics,
             round_rules: mode.starting_rules.clone(),
             run_number: 1,
-            ante: 1,
+            wing: 1,
             plays_remaining: starting_plays,
             plays_max: starting_plays,
             discards_remaining: starting_discards,
             discards_max: starting_discards,
             gold: mode.starting_gold as i32,
-            blind: BlindKind::Small,
-            upcoming_blind: BlindKind::Small,
+            chamber: ChamberKind::Small,
+            upcoming_chamber: ChamberKind::Small,
             last_breakdown: None,
             available_yaku: mode.starting_yaku.clone(),
             available_rules: mode.starting_rules.clone(),
@@ -1138,9 +1140,9 @@ impl RunState {
             mode,
             auto_cash_in_on_full_structure: true,
             hints_enabled: false,
-            boss: BossState {
-                pool_remaining: boss_pool_remaining,
-                upcoming: upcoming_boss,
+            ordeal: OrdealState {
+                pool_remaining: ordeal_pool_remaining,
+                upcoming: upcoming_ordeal,
                 effect: None,
                 bonus_hand_size: 0,
                 gold_cost_per_play: 0,
@@ -1164,13 +1166,13 @@ impl RunState {
             best_structure_score: 0,
             best_structure_name: String::new(),
             best_hand_tiles: Vec::new(),
-            score_after_ante: Vec::new(),
+            score_after_wing: Vec::new(),
             tile_enhancements: BTreeMap::new(),
             global_buff_enhancement: None,
             removed_tile_ids: rustc_hash::FxHashSet::default(),
             tile_packs: Vec::new(),
-            small_blind_tag: None,
-            big_blind_tag: None,
+            small_chamber_tag: None,
+            big_chamber_tag: None,
             tag_free_reroll: false,
             tag_patron_gift: false,
             tag_rich_stock: false,
@@ -1200,8 +1202,8 @@ impl RunState {
         // Roll skip-reward tags for ante 1.
         state.roll_ante_tags();
         // Resolve the first ante's boss now so reactive variants are baked
-        // in before pick_blind ever reads `upcoming_boss_effect`.
-        state.resolve_upcoming_boss();
+        // in before pick_chamber ever reads `upcoming_ordeal_effect`.
+        state.resolve_upcoming_ordeal();
         // No-op for a fresh run (empty enhancement map), but kept here so the
         // invariant "hand always reflects tile_enhancements" holds uniformly.
         state.restamp_hand_enhancements();
@@ -1223,7 +1225,10 @@ impl RunState {
     }
 
     /// Grant the memorial remnant carried over from the last defeat (once per run).
-    pub fn grant_pending_memorial(&mut self, progress: &mut crate::core::progression::PlayerProgress) {
+    pub fn grant_pending_memorial(
+        &mut self,
+        progress: &mut crate::core::progression::PlayerProgress,
+    ) {
         if self.memorial_granted {
             return;
         }
@@ -1238,18 +1243,18 @@ impl RunState {
         progress.memorials_discovered.insert(kind);
     }
 
-    /// Build the `ResolvedBossEffect` for the current `upcoming_boss`. For
-    /// static bosses this is a thin wrap of `BossDef::effect`. For reactive
+    /// Build the `ResolvedOrdealEffect` for the current `upcoming_ordeal`. For
+    /// static bosses this is a thin wrap of `OrdealDef::effect`. For reactive
     /// bosses (those with an `on_reveal` hook), the hook runs against the
     /// current `RunState` and produces a tailored effect that's locked in
     /// for the rest of the ante. Idempotent — safe to call from
     /// `RunState::new`, `advance_round`, and the save-load rehydrate path.
-    pub fn resolve_upcoming_boss(&mut self) {
-        use crate::core::boss::ResolvedBossEffect;
+    pub fn resolve_upcoming_ordeal(&mut self) {
+        use crate::core::ordeal::ResolvedOrdealEffect;
         // Reset any reactive scratch — the new boss may not need it.
-        self.boss.tax_collector_cost = 0;
-        let Some(kind) = self.boss.upcoming else {
-            self.boss.effect = None;
+        self.ordeal.tax_collector_cost = 0;
+        let Some(kind) = self.ordeal.upcoming else {
+            self.ordeal.effect = None;
             return;
         };
         let def = kind.def();
@@ -1257,9 +1262,9 @@ impl RunState {
         // function pointer (Copy), then call it with `&mut *self`.
         let effect = match def.on_reveal {
             Some(hook) => hook(self),
-            None => ResolvedBossEffect::from_static(&def.effect),
+            None => ResolvedOrdealEffect::from_static(&def.effect),
         };
-        self.boss.effect = Some(effect);
+        self.ordeal.effect = Some(effect);
     }
 
     /// [`Self::new`] with [`GameMode::standard`](crate::game::game_mode::GameMode::standard).
@@ -1282,9 +1287,9 @@ impl RunState {
         Self::new(GameMode::with_material_and_stake(material, stake))
     }
 
-    /// Score target for a blind at the current ante (see `core::blind_target`).
-    pub fn blind_score_target(&self, blind: crate::core::rules::BlindKind) -> u32 {
-        crate::core::blind_target::score_for(self.ante, blind, self.base_target)
+    /// Score target for a blind at the current ante (see `core::chamber_target`).
+    pub fn chamber_score_target(&self, blind: crate::core::rules::ChamberKind) -> u32 {
+        crate::core::chamber_target::score_for(self.wing, blind, self.base_target)
     }
 
     /// Whether a run is in progress (not a fresh/default state).
@@ -1294,7 +1299,7 @@ impl RunState {
 
     /// True once the player has defeated the Boss of the final ante.
     pub fn is_run_complete(&self) -> bool {
-        self.ante > FINAL_ANTE
+        self.wing > FINAL_WING
     }
 
     /// Set Magnet: after any draw phase, for each face with exactly 3 copies

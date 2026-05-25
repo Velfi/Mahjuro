@@ -13,7 +13,7 @@ use std::sync::OnceLock;
 use serde::{Deserialize, Serialize};
 
 use crate::core::json_asset::load_json_asset;
-use crate::core::rules::BlindKind;
+use crate::core::rules::ChamberKind;
 use crate::core::talisman::TalismanKind;
 use crate::core::tile::{Suit, TileEnhancement};
 use crate::core::yaku::YakuKind;
@@ -149,13 +149,22 @@ impl MemorialTalismanKind {
     /// `(path, gpu label)` pairs in [`Self::all()`] order — see `build.rs` loader.
     pub fn heightmap_paths() -> &'static [(&'static str, &'static str)] {
         &[
-            ("textures/talismans/memorial_exhausted.png", "memorial-exhausted-hm"),
+            (
+                "textures/talismans/memorial_exhausted.png",
+                "memorial-exhausted-hm",
+            ),
             (
                 "textures/talismans/memorial_frozen_hand.png",
                 "memorial-frozen-hand-hm",
             ),
-            ("textures/talismans/memorial_skipper.png", "memorial-skipper-hm"),
-            ("textures/talismans/memorial_hoarder.png", "memorial-hoarder-hm"),
+            (
+                "textures/talismans/memorial_skipper.png",
+                "memorial-skipper-hm",
+            ),
+            (
+                "textures/talismans/memorial_hoarder.png",
+                "memorial-hoarder-hm",
+            ),
             (
                 "textures/talismans/memorial_full_dish.png",
                 "memorial-full-dish-hm",
@@ -285,7 +294,7 @@ impl MemorialTalismanKind {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct RunDefeatJournal {
     #[serde(default)]
-    pub blinds_skipped: u32,
+    pub chambers_skipped: u32,
     #[serde(default)]
     pub shop_talisman_buys: u32,
     #[serde(default)]
@@ -334,8 +343,8 @@ impl RunDefeatJournal {
 pub struct MemorialJournalSnapshot {
     pub journal: RunDefeatJournal,
     pub loss_reason: GameOverReason,
-    pub final_ante: u32,
-    pub final_blind: BlindKind,
+    pub final_wing: u32,
+    pub final_chamber: ChamberKind,
     pub final_gold: i32,
     pub tiles_played: u32,
     pub tiles_discarded: u32,
@@ -365,14 +374,13 @@ impl MemorialRoundState {
 /// Priority: boss death, then dominant habits, then loss reason fallback.
 pub fn select_memorial(snapshot: &MemorialJournalSnapshot) -> MemorialTalismanKind {
     let j = &snapshot.journal;
-    if snapshot.final_blind == BlindKind::Boss {
+    if snapshot.final_chamber == ChamberKind::Ordeal {
         return MemorialTalismanKind::BossMark;
     }
-    if j.blinds_skipped >= 2 {
+    if j.chambers_skipped >= 2 {
         return MemorialTalismanKind::Skipper;
     }
-    if snapshot.final_gold >= 20
-        && j.shop_talisman_buys + j.shop_relic_buys + j.shop_pack_buys >= 3
+    if snapshot.final_gold >= 20 && j.shop_talisman_buys + j.shop_relic_buys + j.shop_pack_buys >= 3
     {
         return MemorialTalismanKind::Hoarder;
     }
@@ -396,7 +404,7 @@ pub fn select_memorial(snapshot: &MemorialJournalSnapshot) -> MemorialTalismanKi
     if snapshot.dominant_yaku.is_some() {
         return MemorialTalismanKind::MeldMason;
     }
-    if snapshot.final_ante >= 4 {
+    if snapshot.final_wing >= 4 {
         return MemorialTalismanKind::DeepWalker;
     }
     match snapshot.loss_reason {
@@ -426,8 +434,8 @@ pub fn snapshot_from_run(
     MemorialJournalSnapshot {
         journal: journal.clone(),
         loss_reason: reason,
-        final_ante: run.ante,
-        final_blind: run.blind,
+        final_wing: run.wing,
+        final_chamber: run.chamber,
         final_gold: run.gold,
         tiles_played: run.tiles_played,
         tiles_discarded: run.tiles_discarded,
@@ -458,14 +466,14 @@ pub fn transformer_target_suit(snapshot: &MemorialJournalSnapshot) -> Suit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::rules::BlindKind;
+    use crate::core::rules::ChamberKind;
 
     fn snapshot_with(journal: RunDefeatJournal, reason: GameOverReason) -> MemorialJournalSnapshot {
         MemorialJournalSnapshot {
             journal,
             loss_reason: reason,
-            final_ante: 1,
-            final_blind: BlindKind::Small,
+            final_wing: 1,
+            final_chamber: ChamberKind::Small,
             final_gold: 0,
             tiles_played: 0,
             tiles_discarded: 0,
@@ -477,7 +485,7 @@ mod tests {
     #[test]
     fn boss_death_selects_boss_mark() {
         let mut s = snapshot_with(RunDefeatJournal::default(), GameOverReason::OutOfPlays);
-        s.final_blind = BlindKind::Boss;
+        s.final_chamber = ChamberKind::Ordeal;
         assert_eq!(select_memorial(&s), MemorialTalismanKind::BossMark);
     }
 
@@ -499,7 +507,7 @@ mod tests {
     #[test]
     fn skipper_when_many_skips() {
         let mut j = RunDefeatJournal::default();
-        j.blinds_skipped = 3;
+        j.chambers_skipped = 3;
         let s = snapshot_with(j, GameOverReason::NoActionsRemaining);
         assert_eq!(select_memorial(&s), MemorialTalismanKind::Skipper);
     }

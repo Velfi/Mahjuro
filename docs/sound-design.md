@@ -43,8 +43,8 @@ These cues are considered final. They define the identity that everything else m
 | BGM — Gameplay (regular) | `audio/music/gameplay_intro.ogg` → `gameplay.ogg` | `MusicId::GameplayIntro` → `Gameplay` |
 | BGM — Gameplay (boss) | `audio/music/gameplay_intense_intro.ogg` → `gameplay_intense.ogg` | `MusicId::GameplayIntenseIntro` → `GameplayIntense` |
 | BGM — Shop / Pick Blind / Hallway | `audio/music/shop.ogg` | `MusicId::Shop` |
-| Blind / boss win stinger | `audio/music/blind_win.ogg`, `boss_win.ogg` | `MusicId::BlindWin`, `BossWin` |
-| Blind / boss loss stinger | `audio/music/blind_loss.ogg`, `boss_loss.ogg` | `MusicId::BlindLoss`, `BossLoss` |
+| Chamber / boss win stinger | `audio/music/chamber_win.ogg`, `boss_win.ogg` | `MusicId::ChamberWin`, `BossWin` |
+| Chamber / boss loss stinger | `audio/music/chamber_loss.ogg`, `boss_loss.ogg` | `MusicId::ChamberLoss`, `BossLoss` |
 | Pack open | `audio/pack_open.ogg` | `SfxId::PackOpen` |
 | Zodiac acquire | `audio/zodiac_reveal.ogg` | `SfxId::ZodiacReveal` |
 | Talisman trigger | `audio/talisman_used.ogg` | `SfxId::TalismanUsed` |
@@ -259,7 +259,7 @@ This is the only "music-aware" scheduling in the engine. Keep these intervals wh
 
 ### 5.3 Music transitions (implemented; minimal)
 
-Music switching is hard. `start_music_track` stops the current sink and immediately starts the new one ([src/audio.rs](../src/audio.rs)). Stingers (`MusicId::BlindWin`, `BossWin`, etc.) take ownership of the music sink, play once, and defer the next looping track until the stinger empties (`tick()`). This produces the existing "blind cleared → shop" hand-off.
+Music switching is hard. `start_music_track` stops the current sink and immediately starts the new one ([src/audio.rs](../src/audio.rs)). Stingers (`MusicId::ChamberWin`, `BossWin`, etc.) take ownership of the music sink, play once, and defer the next looping track until the stinger empties (`tick()`). This produces the existing "chamber cleared → shop" hand-off.
 
 **Designed but not built — crossfade.** Replace the hard stop with a 250–400 ms equal-power crossfade between two sinks. Mandatory for ambience beds (§5.5) where a hard cut between gameplay and shop ambience is jarring.
 
@@ -377,7 +377,7 @@ M1–M5 are pure content. M6 requires one new sink. M7 is the largest dev work a
 
 This is the design-side view of the cue inventory. The implementation-side source of truth is `enum SfxId` + `SfxId::filename()` in [src/audio.rs](../src/audio.rs); when the two disagree, source wins and this doc should be updated.
 
-**Locked:** `MainMenu` BGM, `Gameplay` BGM, `Shop` BGM, `BlindWin`/`BlindLoss`/`BossWin`/`BossLoss` music stingers, `TileDiscard`, `TileClick`, all `Yaku*` (except `YakuKokushiMusou`), all `audio/relics/<slug>.ogg` that ship today, `MainMenuEnter`, `RoundWin`, `Victory`/`Victory2`, `GameOver`, `Defeat`, `LevelUp`, `ZodiacLevelUp`, `CashIn`, `CoinDrop`, `Purchase`, `CandleFlareWhoosh`, `CandleFlareImpact`.
+**Locked:** `MainMenu` BGM, `Gameplay` BGM, `Shop` BGM, `ChamberWin`/`ChamberLoss`/`BossWin`/`BossLoss` music stingers, `TileDiscard`, `TileClick`, all `Yaku*` (except `YakuKokushiMusou`), all `audio/relics/<slug>.ogg` that ship today, `MainMenuEnter`, `RoundWin`, `Victory`/`Victory2`, `GameOver`, `Defeat`, `LevelUp`, `ZodiacLevelUp`, `CashIn`, `CoinDrop`, `Purchase`, `CandleFlareWhoosh`, `CandleFlareImpact`.
 
 **Placeholder — high priority replace (M1–M2):** `UiConfirm`, `UiCancel`, `FocusHandTile`, `FocusButton`, `FocusConsumable`, `FocusRelic`, `FocusPeg`, `FocusGold`, `FocusYakuTablet`, `FocusDora`, `TileSelect`, `TileDeselect`, `StructureCommit`, `InvalidAction`, `Pause`, `Unpause`.
 

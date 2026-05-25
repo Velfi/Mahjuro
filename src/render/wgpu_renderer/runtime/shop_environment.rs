@@ -6,6 +6,7 @@ struct GltfRoomEnvUniformParams<'a> {
     camera: &'a CameraFrame,
     embedded_gltf_punctual: bool,
     hallway_env: bool,
+    staircase_env: bool,
     archive_env: bool,
     main_menu_env: bool,
     gameplay_env: bool,
@@ -129,6 +130,26 @@ impl WgpuRenderer {
         );
     }
 
+    /// Draw [`staircase.glb`] (post-ordeal interstitial).
+    pub(super) fn draw_staircase_environment_meshes(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        frame: &crate::render::draw_cmd::UiFrame,
+        room_hdr_mrt_emissive: bool,
+    ) {
+        let Some(ref gpu) = self.staircase_environment else {
+            return;
+        };
+        self.draw_gltf_room_env_meshes(
+            pass,
+            frame,
+            &self.staircase_env_primitives,
+            gpu,
+            room_hdr_mrt_emissive,
+            |_| false,
+        );
+    }
+
     /// Draw [`archive.glb`] Archive room.
     pub(super) fn draw_archive_environment_meshes(
         &self,
@@ -155,6 +176,7 @@ impl WgpuRenderer {
             camera,
             embedded_gltf_punctual,
             hallway_env,
+            staircase_env,
             archive_env,
             main_menu_env,
             gameplay_env,
@@ -196,6 +218,10 @@ impl WgpuRenderer {
                 e *= crate::render::hallway_glb::HALLWAY_ENV_LINEAR_EXPOSURE_MUL;
                 a = a.max(crate::render::hallway_glb::HALLWAY_ENV_AMBIENT_SCALE_MIN);
             }
+            if staircase_env {
+                e *= crate::render::staircase_glb::STAIRCASE_ENV_LINEAR_EXPOSURE_MUL;
+                a = a.max(crate::render::staircase_glb::STAIRCASE_ENV_AMBIENT_SCALE_MIN);
+            }
             if archive_env {
                 e *= crate::render::archive_glb::ARCHIVE_ENV_LINEAR_EXPOSURE_MUL;
                 a = a.max(crate::render::archive_glb::ARCHIVE_ENV_AMBIENT_SCALE_MIN);
@@ -204,11 +230,7 @@ impl WgpuRenderer {
                 e *= crate::render::main_menu_glb::MAIN_MENU_ENV_LINEAR_EXPOSURE_MUL;
                 a = a.max(crate::render::main_menu_glb::MAIN_MENU_ENV_AMBIENT_SCALE_MIN);
             }
-            if gameplay_env {
-                e *= crate::render::gameplay_glb::GAMEPLAY_ENV_LINEAR_EXPOSURE_MUL;
-                a = a.max(crate::render::gameplay_glb::GAMEPLAY_ENV_AMBIENT_SCALE_MIN);
-            }
-            if !hallway_env && !archive_env && !main_menu_env && !gameplay_env {
+            if !hallway_env && !staircase_env && !archive_env && !main_menu_env {
                 a = a.max(crate::render::room_glb::SHOP_ENV_DIELECTRIC_AMBIENT_MIN);
             }
             (e, a)
@@ -294,6 +316,7 @@ impl WgpuRenderer {
             camera,
             embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
             hallway_env: false,
+            staircase_env: false,
             archive_env: false,
             main_menu_env: false,
             gameplay_env: false,
@@ -338,6 +361,7 @@ impl WgpuRenderer {
             model,
             gpu,
             shadow_upload,
+            staircase_env: false,
         });
     }
 
@@ -368,6 +392,7 @@ impl WgpuRenderer {
             camera,
             embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
             hallway_env: true,
+            staircase_env: false,
             archive_env: false,
             main_menu_env: false,
             gameplay_env: false,
@@ -380,6 +405,44 @@ impl WgpuRenderer {
         dist.time_pulse[0] = self.creation_time.elapsed().as_secs_f32();
         self.queue
             .write_buffer(&gpu.distortion_buffer, 0, bytemuck::bytes_of(&dist));
+    }
+
+    pub(super) fn write_staircase_environment_uniforms(
+        &self,
+        frame: &crate::render::draw_cmd::UiFrame,
+        camera: &CameraFrame,
+        bloom_linear_hdr_output: bool,
+        shadow_upload: Option<([f32; 16], &mut bool)>,
+    ) {
+        let Some(ref gpu) = self.staircase_environment else {
+            return;
+        };
+        let s =
+            crate::render::room_glb::room_env_world_scale(camera.h, self.room_gltf_height_scale);
+        let model = crate::render::staircase_glb::with_staircase_glb_cpu(|opt| {
+            opt.map(|cpu| {
+                crate::render::room_glb::room_env_model_matrix_from_cpu(
+                    camera.h,
+                    self.room_gltf_height_scale,
+                    cpu,
+                )
+            })
+        })
+        .unwrap_or_else(|| Mat4::from_scale(glam::Vec3::splat(s)));
+        self.write_gltf_room_env_uniforms(GltfRoomEnvUniformParams {
+            frame,
+            camera,
+            embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
+            hallway_env: false,
+            staircase_env: true,
+            archive_env: false,
+            main_menu_env: false,
+            bloom_linear_hdr_output,
+            model,
+            gpu,
+            shadow_upload,
+            gameplay_env: false,
+        });
     }
 
     /// Rasterize focused catalog copy into the archive room decal atlas (bound at group0
@@ -472,6 +535,7 @@ impl WgpuRenderer {
             camera,
             embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
             hallway_env: false,
+            staircase_env: false,
             archive_env: true,
             main_menu_env: false,
             gameplay_env: false,
@@ -526,6 +590,7 @@ impl WgpuRenderer {
             camera,
             embedded_gltf_punctual: frame.scene_lighting.embedded_gltf_punctual,
             hallway_env: false,
+            staircase_env: false,
             archive_env: false,
             main_menu_env: true,
             gameplay_env: false,
@@ -565,8 +630,7 @@ impl WgpuRenderer {
 
     #[inline]
     fn archive_env_is_description_sign_prim(&self, pi: usize) -> bool {
-        self.archive_sign_left_prim_idx == Some(pi)
-            || self.archive_sign_right_prim_idx == Some(pi)
+        self.archive_sign_left_prim_idx == Some(pi) || self.archive_sign_right_prim_idx == Some(pi)
     }
 
     /// Lit pass: draw only the active description board (opposite the focus ref).

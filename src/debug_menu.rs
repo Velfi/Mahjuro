@@ -24,7 +24,7 @@ use muda::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use sdl3::video::Window;
 
-use crate::core::boss::{BossKind, all_bosses, final_bosses};
+use crate::core::ordeal::{OrdealKind, all_ordeals, final_ordeals};
 use crate::core::relic::{RelicId, all_relic_defs};
 use crate::core::talisman::TalismanKind;
 use crate::core::tile::{Suit, Tile};
@@ -40,9 +40,9 @@ pub enum DebugAction {
     AddTalisman(TalismanKind),
     AddZodiac(ZodiacKind),
     ClearConsumables,
-    /// Replace the current ante's `upcoming_boss` and re-resolve its effect
+    /// Replace the current ante's `upcoming_ordeal` and re-resolve its effect
     /// (so reactive variants like Mirror/Tax Collector pick fresh).
-    SetBoss(BossKind),
+    SetOrdeal(OrdealKind),
     /// Replace the current dora indicator with a single tile of the given
     /// face. Clobbers any extra dora revealed by Dora Crown.
     SetDora(Suit, u8),
@@ -99,6 +99,7 @@ pub enum DebugAction {
     OpenTransitionPlayground,
     OpenRumbleLab,
     OpenTileAnchorLab,
+    OpenTixels,
     /// Open a simple in-app About modal. Used on macOS to avoid the native
     /// About panel's icon conversion path in `muda`.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -258,6 +259,10 @@ impl DebugMenuBar {
         ));
         let _ = jumps_sub.append(&tile_anchor_lab_item);
 
+        let tixels_item = MenuItem::new("Tixels...", true, None);
+        mappings.push((tixels_item.id().clone(), DebugAction::OpenTixels));
+        let _ = jumps_sub.append(&tixels_item);
+
         let test_overlay_item = MenuItem::new("Test Overlay", true, None);
         mappings.push((test_overlay_item.id().clone(), DebugAction::TestOverlay));
         let _ = jumps_sub.append(&test_overlay_item);
@@ -301,10 +306,14 @@ impl DebugMenuBar {
 
         let _ = cheats_sub.append(&PredefinedMenuItem::separator());
 
-        // Set Level submenu (levels 1-14).
-        let level_sub = Submenu::new("Set Player Level", true);
+        // Set depth submenu (depths I–XIV).
+        let level_sub = Submenu::new("Set Player Depth", true);
         for lvl in 1..=14u32 {
-            let item = MenuItem::new(format!("Level {lvl}"), true, None);
+            let item = MenuItem::new(
+                format!("Depth {}", crate::core::progression::meta_depth_roman(lvl)),
+                true,
+                None,
+            );
             mappings.push((item.id().clone(), DebugAction::SetLevel(lvl)));
             let _ = level_sub.append(&item);
         }
@@ -368,13 +377,13 @@ impl DebugMenuBar {
         let _ = cheats_sub.append(&consumable_sub);
 
         // Boss override submenu — pick any boss (regular or final) and the
-        // current ante's upcoming_boss is replaced + re-resolved. Useful for
+        // current ante's upcoming_ordeal is replaced + re-resolved. Useful for
         // testing reactive bosses (Mirror, Tax Collector) against specific
         // run states without rerolling antes until the right boss appears.
         let boss_sub = Submenu::new("Set Current Boss", true);
-        for def in all_bosses().iter().chain(final_bosses().iter()) {
+        for def in all_ordeals().iter().chain(final_ordeals().iter()) {
             let item = MenuItem::new(def.name, true, None);
-            mappings.push((item.id().clone(), DebugAction::SetBoss(def.kind)));
+            mappings.push((item.id().clone(), DebugAction::SetOrdeal(def.kind)));
             let _ = boss_sub.append(&item);
         }
         let _ = cheats_sub.append(&boss_sub);

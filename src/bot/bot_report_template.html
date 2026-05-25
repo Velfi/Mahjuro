@@ -939,6 +939,13 @@
     return new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 2 }).format(n);
   }
 
+  function fmtScoreSourceEntries(rows) {
+    if (!rows || !rows.length) return '—';
+    return rows
+      .map((row) => String(row.name || '—') + ' ' + fmtCompact(row.points || 0))
+      .join(', ');
+  }
+
   function loadPayload() {
     const text = exportNode.textContent.trim();
     const data = JSON.parse(text);
@@ -1396,10 +1403,10 @@
   function slotLabelShort(slot) {
     const parts = String(slot || '').split('-');
     if (parts.length < 2) return slot;
-    const ante = parseInt(parts[0], 10);
-    const blind = parts.slice(1).join('-').trim();
-    const m = { 'Small Blind': 'S', 'Big Blind': 'B', 'Boss Blind': 'X' };
-    return 'A' + (Number.isFinite(ante) ? ante : '?') + ' ' + (m[blind] || blind.slice(0, 6));
+    const wing = parseInt(parts[0], 10);
+    const chamber = parts.slice(1).join('-').trim();
+    const m = { 'Small Chamber': 'S', 'Big Chamber': 'B', 'Boss Chamber': 'X' };
+    return 'A' + (Number.isFinite(ante) ? wing : '?') + ' ' + (m[blind] || blind.slice(0, 6));
   }
 
   function renderHorizontalBars(parent, items, opts) {
@@ -1551,7 +1558,7 @@
     return wrap;
   }
 
-  function bossBlindChart(parent, rows, baseTarget, scaling, scoreCandles) {
+  function ordealChamberChart(parent, rows, baseTarget, scaling, scoreCandles) {
     const hasBars = rows && rows.length;
     const hasCandles = scoreCandles && scoreCandles.length;
     if (!hasBars && !hasCandles) return;
@@ -1559,7 +1566,7 @@
       + 'Base ' + (baseTarget != null ? baseTarget.toLocaleString('en') : '—')
       + ', scaling ×' + (scaling != null ? Number(scaling).toFixed(2) : '—')
       + ' per ante.';
-    const w = widget('Boss blind scoring', sub);
+    const w = widget('Boss chamber scoring', sub);
     const panels = el('div', 'card__panels');
     if (hasBars) {
       panels.appendChild(el('h4', 'dash-card__subhead', 'Targets vs batch mean'));
@@ -1576,7 +1583,7 @@
       const chart = el('div', 'target-chart');
       for (const row of rows) {
         const r = el('div', 'target-chart__row');
-        r.appendChild(el('span', 'target-chart__label', 'Ante ' + row.ante));
+        r.appendChild(el('span', 'target-chart__label', 'Wing ' + row.wing));
         const track = el('div', 'target-chart__track');
         const targetFill = el('div', 'target-chart__fill target-chart__fill--target');
         targetFill.style.width = (row.target_bar_pct || 0) + '%';
@@ -1594,7 +1601,7 @@
           vals.title = row.attempts + ' boss attempt' + (row.attempts === 1 ? '' : 's');
         } else {
           vals.textContent = '— / ' + fmtCompact(row.target);
-          vals.title = 'No boss attempts at this ante in the batch';
+          vals.title = 'No boss attempts at this wing in the batch';
         }
         r.appendChild(vals);
         chart.appendChild(r);
@@ -1670,9 +1677,9 @@
     modeRow('Starting gold', mode.starting_gold != null ? String(mode.starting_gold) : '—',
       'Gold in wallet when the run begins (includes tile-material bonus).');
     modeRow('Starting plays', mode.starting_plays != null ? String(mode.starting_plays) : '—',
-      'Play budget on the first blind of a run (material may add +1).');
+      'Play budget on the first chamber of a run (material may add +1).');
     modeRow('Starting discards', mode.starting_discards != null ? String(mode.starting_discards) : '—',
-      'Discard budget on the first blind (material may add +1).');
+      'Discard budget on the first chamber (material may add +1).');
     modeRow('Hand size', mode.hand_size != null ? String(mode.hand_size) : '—', null);
     modeRow('Tile material', tileMaterialLabel(mode.tile_material),
       'Bamboo +1 play, Plastic +1 discard, Tortoise Shell +10 starting gold.');
@@ -1687,7 +1694,7 @@
     parent.appendChild(w.section);
   }
 
-  const EXPECTED_SCHEMA_VERSION = 5;
+  const EXPECTED_SCHEMA_VERSION = 6;
 
   function renderReport(data) {
     const runs = data.runs;
@@ -1758,7 +1765,7 @@
     }
     ciP('The tables show a percentage from your bot batch (for example, how often it wins). The 95% CI is a "could easily be this low or this high" band around that number, based only on how many runs went into the count. More runs usually make the band narrower, like a poll\'s margin of error. It does not mean the true long-run rate has a 95% chance of sitting inside this one interval on this one report.');
     ciEx('Example 1:', '400 runs and 100 wins give a 25.0% win rate. The 95% band this report uses for that situation runs about 21.0% through 29.5%. Treating 25% as exact would be misleading — anything in that band is still plausible for the same batch.');
-    ciEx('Example 2:', 'Suppose only 50 runs reached a certain ante and 10 died there: that is a 20% hazard, but the same kind of interval is about 11.2% through 33.0%. A handful of different deaths would swing the headline, so tiny gaps between rows are often just noise.');
+    ciEx('Example 2:', 'Suppose only 50 runs reached a certain wing and 10 died there: that is a 20% hazard, but the same kind of interval is about 11.2% through 33.0%. A handful of different deaths would swing the headline, so tiny gaps between rows are often just noise.');
     ciP('Different tables count different things. Win rate divides by every run. "Death hazard" divides only by runs that actually reached that ante. Relic win% divides by runs where the bot bought that relic — it describes that subset of games, not proof the relic caused wins.');
     ciP('If two intervals overlap, that does not automatically mean the two rates are the same; if they do not overlap, it is a hint worth a closer look, not a courtroom verdict. Relic deltas and early/late splits still mix shop luck with skill — see the short note at the bottom of the page.');
     ciHelp.appendChild(ciBody);
@@ -1797,8 +1804,8 @@
       [{ cls: 'pill--muted', text: 'per run' }]));
     colM.appendChild(hero);
 
-    if ((d.boss_blind_chart || []).length || (d.boss_score_candles || []).length) {
-      bossBlindChart(colM, d.boss_blind_chart, mode.base_target, d.target_scaling, d.boss_score_candles);
+    if ((d.ordeal_chamber_chart || []).length || (d.ordeal_score_candles || []).length) {
+      ordealChamberChart(colM, d.ordeal_chamber_chart, mode.base_target, d.target_scaling, d.ordeal_score_candles);
     }
 
     function fmtWilson(lo, hi) {
@@ -1821,31 +1828,31 @@
       return String(Number(v.toPrecision(12)));
     }
 
-    const hasDeathAnte = (d.deaths_by_ante || []).length;
-    const hasDeathHazard = (d.deaths_by_ante_hazard || []).length;
-    if (hasDeathAnte || hasDeathHazard) {
+    const hasDeathWing = (d.deaths_by_wing || []).length;
+    const hasDeathHazard = (d.deaths_by_wing_hazard || []).length;
+    if (hasDeathWing || hasDeathHazard) {
       const anteC = card(
         'Deaths by ante',
         'Marginal % of all runs vs hazard given you reached the ante. Expand for counts and Wilson CIs.');
-      renderAnteDeathChart(anteC.body, d.deaths_by_ante, d.deaths_by_ante_hazard);
+      renderAnteDeathChart(anteC.body, d.deaths_by_wing, d.deaths_by_wing_hazard);
       addDetailsTable(anteC.body, 'Table: counts and Wilson 95% CIs', (body) => {
         if (hasDeathAnte) {
           body.appendChild(el('h3', 'dash-card__subhead', 'Share of all runs'));
-          const rows = d.deaths_by_ante.map((row) => ({
+          const rows = d.deaths_by_wing.map((row) => ({
             cells: [
-              String(row.ante),
+              String(row.wing),
               String(row.count),
               row.pct_of_runs.toFixed(1) + '%',
               fmtWilson(row.pct_ci_lo, row.pct_ci_hi)
             ],
-            keys: [Number(row.ante), row.count, row.pct_of_runs, null]
+            keys: [Number(row.wing), row.count, row.pct_of_runs, null]
           }));
           addTable(body,
             [
               { label: 'Ante', sort: 'num' },
               { label: 'Deaths', sort: 'num', align: 'right' },
               { label: '% runs', sort: 'pct', align: 'right',
-                help: 'Deaths on this ante ÷ all runs in the batch (not conditioned on reaching the ante).' },
+                help: 'Deaths on this wing ÷ all runs in the batch (not conditioned on reaching the ante).' },
               { label: '95% CI', sort: 'str', sortDefault: 'asc', align: 'right', help: HELP_WILSON_CI }
             ],
             rows);
@@ -1856,22 +1863,22 @@
             [
               { label: 'Ante', sort: 'num' },
               { label: 'Reached', sort: 'num', align: 'right',
-                help: 'Runs that started this ante before winning or dying earlier.' },
+                help: 'Runs that started this wing before winning or dying earlier.' },
               { label: 'Deaths', sort: 'num', align: 'right',
-                help: 'Runs that died while playing this ante (numerator for hazard).' },
+                help: 'Runs that died while playing this wing (numerator for hazard).' },
               { label: 'Hazard', sort: 'pct', align: 'right',
-                help: 'Deaths ÷ reached: chance of dying on this ante given you got that far.' },
+                help: 'Deaths ÷ reached: chance of dying on this wing given you got that far.' },
               { label: '95% CI', sort: 'str', sortDefault: 'asc', align: 'right', help: HELP_WILSON_CI }
             ],
-            d.deaths_by_ante_hazard.map((row) => ({
+            d.deaths_by_wing_hazard.map((row) => ({
               cells: [
-                String(row.ante),
+                String(row.wing),
                 String(row.reached),
                 String(row.deaths),
                 row.hazard_pct.toFixed(1) + '%',
                 fmtWilson(row.hazard_ci_lo, row.hazard_ci_hi)
               ],
-              keys: [Number(row.ante), row.reached, row.deaths, row.hazard_pct, null]
+              keys: [Number(row.wing), row.reached, row.deaths, row.hazard_pct, null]
             })));
         }
       });
@@ -1885,15 +1892,27 @@
     const pbd = sums.peak_blind_detail;
     if (pbd && pbd.total_score != null) {
       const peakC = card(
-        'Peak blind (batch max)',
-        'Single blind with the highest round score in this batch: active relics after that blind and each scoring step (tile column = full structure bank on cash-in; scoring commits that auto-clear the bank include prior bank + new meld). Points are round-score deltas after each action.');
+        'Peak chamber (batch max)',
+        'Highest single chamber in this batch: per-action score attribution (tiles/yaku/relic/other), gold context (for Golden Engine), and relic slot state at chamber end.');
       const sub = el('div', 'peak-blind-detail');
       const head = el('p', 'peak-blind-detail__head');
       head.appendChild(document.createTextNode(
-        (pbd.blind_label || pbd.blind_slot || '—') +
+        (pbd.chamber_label || pbd.chamber_slot || '—') +
         ' · target ' + String(pbd.target_score ?? '—') +
         ' · scored ' + fmtCompact(pbd.total_score ?? 0)));
       sub.appendChild(head);
+      if (pbd.gold_held != null) {
+        const gp = el('p', 'peak-blind-detail__gold');
+        const gs = el('strong');
+        gs.textContent = 'Gold at chamber end: ';
+        gp.appendChild(gs);
+        let txt = String(pbd.gold_held) + 'g';
+        if (pbd.golden_engine_mult_bonus != null) {
+          txt += ' (Golden Engine +' + String(pbd.golden_engine_mult_bonus) + ' mult)';
+        }
+        gp.appendChild(document.createTextNode(txt));
+        sub.appendChild(gp);
+      }
       if ((pbd.relics || []).length) {
         const relP = el('p', 'peak-blind-detail__relics');
         const rs = el('strong');
@@ -1901,6 +1920,20 @@
         relP.appendChild(rs);
         relP.appendChild(document.createTextNode(pbd.relics.join(', ')));
         sub.appendChild(relP);
+      }
+      if ((pbd.relic_state || []).length) {
+        const relStateP = el('p', 'peak-blind-detail__relic-state');
+        const rs = el('strong');
+        rs.textContent = 'Relic state: ';
+        relStateP.appendChild(rs);
+        const txt = pbd.relic_state.map((r) => {
+          let s = '#' + String(r.slot ?? '?') + ' ' + String(r.name ?? '—');
+          if (r.counter != null) s += ' [' + String(r.counter) + ']';
+          if (r.debuffed) s += ' (debuffed)';
+          return s;
+        }).join('; ');
+        relStateP.appendChild(document.createTextNode(txt));
+        sub.appendChild(relStateP);
       }
       const actions = pbd.scoring_actions || [];
       if (actions.length) {
@@ -1911,6 +1944,14 @@
           ['#', null],
           ['Kind', 'Scoring step type (yaku, hook, structure cash-in, etc.).'],
           ['Points', 'Round-score delta from this step.'],
+          ['Tile pts', 'Base meld chips from tiles before yaku/relic multipliers.'],
+          ['Yaku pts', 'Round-score delta attributed to yaku/dora score steps.'],
+          ['Relic pts', 'Round-score delta attributed to relic-named score steps.'],
+          ['Other pts', 'Residual score delta not classified as tiles/yaku/relic.'],
+          ['Gold / GE', 'Wallet gold at score time and Golden Engine bonus used for that action.'],
+          ['Yaku', 'Detected yaku for this action (with levels).'],
+          ['Yaku steps', 'Yaku/Dora score-step deltas that compose Yaku pts.'],
+          ['Relic steps', 'Relic score-step deltas that compose Relic pts.'],
           ['Tiles', 'Meld-grouped labels (same as in-game cascade: Pair / Sequence / Triplet / Kong + faces). Full bank on cash-in; partial commits show only melds just played.']
         ];
         for (const [lab, h] of peakCols) {
@@ -1926,6 +1967,21 @@
           tr.appendChild(el('td', null, String(i)));
           tr.appendChild(el('td', null, String(a.kind ?? '—')));
           tr.appendChild(el('td', 'num', fmtCompact(a.points ?? 0)));
+          tr.appendChild(el('td', 'num', a.tiles_points != null ? fmtCompact(a.tiles_points) : '—'));
+          tr.appendChild(el('td', 'num', a.yaku_points != null ? fmtCompact(a.yaku_points) : '—'));
+          tr.appendChild(el('td', 'num', a.relic_points != null ? fmtCompact(a.relic_points) : '—'));
+          tr.appendChild(el('td', 'num', a.other_points != null ? fmtCompact(a.other_points) : '—'));
+          let goldTxt = '—';
+          if (a.gold_held != null) {
+            goldTxt = String(a.gold_held) + 'g';
+            if (a.golden_engine_mult_bonus != null) {
+              goldTxt += ' / GE +' + String(a.golden_engine_mult_bonus) + 'm';
+            }
+          }
+          tr.appendChild(el('td', null, goldTxt));
+          tr.appendChild(el('td', null, (a.yaku || []).length ? a.yaku.join(', ') : '—'));
+          tr.appendChild(el('td', null, fmtScoreSourceEntries(a.yaku_steps)));
+          tr.appendChild(el('td', null, fmtScoreSourceEntries(a.relic_steps)));
           tr.appendChild(el('td', 'peak-blind-detail__tiles', a.tiles != null ? String(a.tiles) : '—'));
           tb.appendChild(tr);
         }
@@ -1954,11 +2010,11 @@
       'Mean blinds cleared per run (small, big, and boss each count as one).');
     row('Avg antes cleared', (pr.antes_cleared ?? 0).toFixed(2),
       'Mean boss blinds cleared per run (finishing a boss advances the ante).');
-    row('Max ante reached', String(sums.max_ante_reached ?? 0));
+    row('Max wing reached', String(sums.max_wing_reached ?? 0));
     row('Avg total score', fmtCompact(pr.total_score ?? 0),
       'Per-run mean of cumulative score earned over the whole run.');
     row('Avg plays used', (pr.plays ?? 0).toFixed(2),
-      'Mean plays consumed per run (each blind gives a fresh play budget).');
+      'Mean plays consumed per run (each chamber gives a fresh play budget).');
     row('Avg discards used',
       (pr.discards ?? 0).toFixed(2) + ' (' + (pr.strategic_discards ?? 0).toFixed(2) + ' strategic, ' + (pr.random_discards ?? 0).toFixed(2) + ' random)',
       'Strategic = a chosen scoring line included discards; random = scored line without a discard choice (see bot scoring policy).');
@@ -1969,20 +2025,20 @@
     row('Avg gold earned',
       (pr.gold_from_clears ?? 0).toFixed(1) + ' clears + ' + (pr.gold_from_skip_tags ?? 0).toFixed(1) + ' skip-tags = ' +
       ((pr.gold_from_clears ?? 0) + (pr.gold_from_skip_tags ?? 0)).toFixed(1),
-      'Gold from blind clears vs skip-tag payouts (value when you take a tag’s gold instead of skipping).');
-    const goldPerBlindClear = pr.gold_per_blind_cleared ?? 0;
-    const goldPerBlindInclSkips = pr.gold_per_blind_incl_skips ?? 0;
-    row('Avg gold per blind cleared',
+      'Gold from chamber clears vs skip-tag payouts (value when you take a tag’s gold instead of skipping).');
+    const goldPerBlindClear = pr.gold_per_chamber_cleared ?? 0;
+    const goldPerBlindInclSkips = pr.gold_per_chamber_incl_skips ?? 0;
+    row('Avg gold per chamber cleared',
       goldPerBlindClear.toFixed(1) + ' (clears only) · ' + goldPerBlindInclSkips.toFixed(1) + ' incl. skip-tags',
-      'Batch ratio: total gold earned ÷ total blinds cleared. “Round” = one blind (small / big / boss). Skip-tag gold is optional income on top of clear payouts.');
+      'Batch ratio: total gold earned ÷ total blinds cleared. “Round” = one chamber (small / big / boss). Skip-tag gold is optional income on top of clear payouts.');
     row('Avg clear payout',
       (pr.gold_clear_base ?? 0).toFixed(1) + ' base + ' + (pr.gold_clear_unused_plays ?? 0).toFixed(1) + ' plays + ' +
       (pr.gold_clear_interest ?? 0).toFixed(1) + ' interest + ' + (pr.gold_clear_relics ?? 0).toFixed(1) + ' relics',
-      'Mean gold components when a blind clears: base reward, unused plays, interest on banked gold, then relic modifiers (next row splits relics).');
-    row('Relic gold on blind clear',
+      'Mean gold components when a chamber clears: base reward, unused plays, interest on banked gold, then relic modifiers (next row splits relics).');
+    row('Relic gold on chamber clear',
       (pr.gold_clear_green_luck ?? 0).toFixed(1) + ' green luck + ' + (pr.gold_clear_gold_idol ?? 0).toFixed(1) + ' gold idol + ' +
       (pr.gold_clear_jade_abacus ?? 0).toFixed(1) + ' jade abacus + ' + (pr.gold_clear_patience ?? 0).toFixed(1) + ' patience',
-      'Per-run average of extra gold from relics when a blind is cleared. These four lines are the breakdown of the relics term in Avg clear payout (above); they sum to that value.');
+      'Per-run average of extra gold from relics when a chamber is cleared. These four lines are the breakdown of the relics term in Avg clear payout (above); they sum to that value.');
     const swAvg = Number(pr.second_wind_forfeits ?? 0);
     const swTotal = Number(sums.total_second_wind_forfeits ?? 0);
     row('Avg second-wind forfeits', fmtAvg2(swAvg),
@@ -2001,8 +2057,8 @@
       'Gold when the run ended; skip-tag figure is average gold taken when choosing a tag’s payout.');
     row('Avg targets faced',
       fmtCompact(pr.target_score_faced ?? 0) + ' (score/target ' + (pr.score_to_target_ratio ?? 0).toFixed(2) + 'x, avg overscore ' +
-      fmtCompact(pr.overscore ?? 0) + ', peak blind score ' + fmtCompact(sums.peak_blind_score ?? 0) + ')',
-      'Mean blind target score faced; ratio = total score ÷ sum of those targets; overscore = score above target on cleared blinds; peak = batch max single-blind score.');
+      fmtCompact(pr.overscore ?? 0) + ', peak chamber score ' + fmtCompact(sums.peak_chamber_score ?? 0) + ')',
+      'Mean chamber target score faced; ratio = total score ÷ sum of those targets; overscore = score above target on cleared blinds; peak = batch max single-blind score.');
     sumW.body.appendChild(dl);
     colM.appendChild(sumW.section);
 
@@ -2037,12 +2093,12 @@
 
     if (d.loss_breakdown) lossSidebar(colR, d.loss_breakdown);
 
-    const blindRows = (d.deaths_by_blind || []).slice(0, 6).map((r) => ({
+    const blindRows = (d.deaths_by_chamber || []).slice(0, 6).map((r) => ({
       name: r.name,
       v: r.count,
       display: r.pct_of_runs.toFixed(1) + '%'
     }));
-    if (blindRows.length) miniBarList(colR, 'Deaths by blind (top)', 'Percent of all runs', blindRows, true);
+    if (blindRows.length) miniBarList(colR, 'Deaths by chamber (top)', 'Percent of all runs', blindRows, true);
 
     const relicRows = (d.relics_bought || []).slice(0, 6).map((r) => ({
       name: r.name,
@@ -2062,9 +2118,9 @@
 
     const full = el('div', 'dash-full');
 
-    if ((d.deaths_by_blind || []).length) {
-      const sec = card('Deaths by blind', 'Percent of all runs ending on each blind type.');
-      const blindBars = d.deaths_by_blind.map((row) => ({
+    if ((d.deaths_by_chamber || []).length) {
+      const sec = card('Deaths by blind', 'Percent of all runs ending on each chamber type.');
+      const blindBars = d.deaths_by_chamber.map((row) => ({
         name: row.name,
         v: row.pct_of_runs,
         display: row.pct_of_runs.toFixed(1) + '% (' + row.count + ')',
@@ -2075,7 +2131,7 @@
     }
 
     if ((d.surplus_by_slot || []).length) {
-      const sec = card('Score surplus by blind slot', 'Candles = per-run spread; table = batch averages.');
+      const sec = card('Score surplus by chamber slot', 'Candles = per-run spread; table = batch averages.');
       if ((d.surplus_candles || []).length) {
         renderDistributionCandles(sec.body, d.surplus_candles, { valueFmt: fmtCompact });
         sec.body.appendChild(el('h3', 'dash-card__subhead', 'Batch averages'));
@@ -2083,7 +2139,7 @@
           [
             { label: 'Slot', sort: 'str', sortDefault: 'asc' },
             { label: 'n', sort: 'num', align: 'right',
-              help: 'Clears in this blind slot (denominator for average surplus).' },
+              help: 'Clears in this chamber slot (denominator for average surplus).' },
             { label: 'Avg surplus', sort: 'num', align: 'right',
               help: 'Mean (score − target) on clears for this slot.' }
           ],
@@ -2125,7 +2181,7 @@
     const hasTurns = (d.avg_turns_to_clear || []).length;
     const hasSkips = (d.skip_tags || []).length;
     if (hasTurns || hasSkips) {
-      const pace = card('Blind pacing', 'Turns to clear and skip-tag uptake.');
+      const pace = card('Chamber pacing', 'Turns to clear and skip-tag uptake.');
       if (hasTurns) {
         pace.body.appendChild(el('h3', 'dash-card__subhead', 'Avg turns to clear'));
         renderSlotMetricBars(pace.body, d.avg_turns_to_clear, 'avg_turns', {

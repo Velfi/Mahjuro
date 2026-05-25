@@ -49,8 +49,7 @@ use crate::render::candle_mesh::{build_candle_wax_mesh, build_candle_wick_mesh};
 use crate::render::coin_mesh::build_coin_mesh;
 use crate::render::decal::{
     LabelAlign, load_mono_font, load_noto_emoji_font, load_ui_font,
-    rasterize_label_styled_with_fallback,
-    rasterize_tile_face_decal,
+    rasterize_label_styled_with_fallback, rasterize_tile_face_decal,
 };
 use crate::render::draw_cmd::{
     DrawCmd, ShowcaseTilePlacement, TileFaceQuad, UiFrame, WallStackPlacement, YakuTabletPlacement,
@@ -70,7 +69,13 @@ use crate::render::ofuda_mesh::build_ofuda_mesh;
 use crate::render::orb_mesh::build_orb_mesh;
 use crate::render::plaque_mesh::build_plaque_mesh;
 use crate::render::plinth_mesh::build_plinth_mesh;
-use crate::render::primitive::MeshId;
+use crate::render::depth_well_mesh::{
+    build_depth_well_mesh, extract_depth_well_region_mesh, DepthWellConfig, DepthWellRegionId,
+};
+use crate::render::primitive::{depth_well_mesh_id, MeshId};
+use crate::render::progress_meter_mesh::{
+    build_progress_meter_pip_mesh, build_progress_meter_rail_mesh,
+};
 use crate::render::relic_dish::{
     build_dish_mesh, build_pack_mesh, build_porcelain_dish_mesh, build_relic_mesh,
     build_relic_mesh_from_rgba, build_round_dish_mesh, build_shop_action_prop_mesh,
@@ -81,8 +86,8 @@ use crate::render::river_mesh::build_river_mesh;
 use crate::render::shop_bell_mesh::build_shop_bell_mesh;
 use crate::render::table_mesh::build_table_mesh;
 use crate::render::table_transform::{
-    ribbon_submesh, rot_fixed_axes_deg_matrix, table_mesh_lay_flat,
-    tile_mesh_local_to_world, translate_rot_scale,
+    ribbon_submesh, rot_fixed_axes_deg_matrix, table_mesh_lay_flat, tile_mesh_local_to_world,
+    translate_rot_scale,
 };
 use crate::render::talisman_mesh::{TALISMAN_LOCAL_HALF, build_talisman_mesh};
 use crate::render::tally_stick_mesh::{build_tally_stick_base_mesh, build_tally_stick_tip_mesh};
@@ -208,6 +213,9 @@ pub struct WgpuRenderer {
     /// [`hallway.glb`](../../assets/3d/hallway.glb) pick-blind room.
     hallway_env_primitives: Vec<TilePrimitiveGpu>,
     hallway_environment: Option<ShopEnvironmentGpu>,
+    /// [`staircase.glb`](../../assets/3d/staircase.glb) post-ordeal interstitial.
+    staircase_env_primitives: Vec<TilePrimitiveGpu>,
+    staircase_environment: Option<ShopEnvironmentGpu>,
     /// [`archive.glb`](../../assets/3d/archive.glb) Archive room.
     archive_env_primitives: Vec<TilePrimitiveGpu>,
     archive_environment: Option<ShopEnvironmentGpu>,
@@ -364,7 +372,8 @@ pub struct WgpuRenderer {
     /// Current `Object3d::anim_id` while [`runtime::object3d_placement::WgpuRenderer::run_object3d_placement`] walks a batch.
     shadow_placement_anim_id: u64,
     /// Active imported room for per-frame Object3d shadow cast policy.
-    placement_shadow_room: Option<crate::render::wgpu_renderer::runtime::shadow_setup::ActiveRoomEnv>,
+    placement_shadow_room:
+        Option<crate::render::wgpu_renderer::runtime::shadow_setup::ActiveRoomEnv>,
     /// Whether the current Object3d placement iteration casts into the dynamic shadow map.
     placement_shadow_casts: bool,
     /// Pre-rasterized showcase tile decals + UV lookup (`showcase_decal_atlas.rs`).
@@ -580,10 +589,10 @@ pub struct WgpuRenderer {
     /// flat-white fallback. Avoids rebuilding bind groups every frame.
     relic_slot_texture: Vec<Option<RelicId>>,
     /// Per-slot boss-icon meshes/textures (archive catalog).
-    boss_icon_instances: Vec<LitMeshInstance>,
-    boss_icon_meshes: rustc_hash::FxHashMap<crate::core::boss::BossKind, LitMeshGpu>,
-    boss_icon_textures: rustc_hash::FxHashMap<crate::core::boss::BossKind, RelicTextureGpu>,
-    boss_icon_slot_texture: Vec<Option<crate::core::boss::BossKind>>,
+    ordeal_icon_instances: Vec<LitMeshInstance>,
+    ordeal_icon_meshes: rustc_hash::FxHashMap<crate::core::ordeal::OrdealKind, LitMeshGpu>,
+    ordeal_icon_textures: rustc_hash::FxHashMap<crate::core::ordeal::OrdealKind, RelicTextureGpu>,
+    ordeal_icon_slot_texture: Vec<Option<crate::core::ordeal::OrdealKind>>,
     /// Pre-allocated per-pack instances (lit-mesh foil; uses `pack_mesh` geometry).
     pack_instances: Vec<LitMeshInstance>,
     pack_slot_texture: Vec<Option<TilePackKind>>,
@@ -787,12 +796,11 @@ mod impl_screenshot;
 
 pub use constants::{
     MAIN_MENU_PICK_OPTIONS, MAIN_MENU_PICK_PLAY, MAIN_MENU_PICK_QUIT, MAX_BOOK_SLOTS,
-    MAX_BOSS_ICON_SLOTS, MAX_BOWL_SLOTS, MAX_BUG_SLOTS, MAX_CASCADE_TOKEN_SLOTS,
+    MAX_ORDEAL_ICON_SLOTS, MAX_BOWL_SLOTS, MAX_BUG_SLOTS, MAX_CASCADE_TOKEN_SLOTS,
     MAX_EXTRUDED_GLYPH_SLOTS, MAX_MIRROR_SLOTS, MAX_ORB_SLOTS, MAX_PLINTH_SLOTS, MAX_POINT_LIGHTS,
-    MAX_RELIC_SLOTS, MAX_RIBBON_SLOTS, MAX_SPOT_LIGHTS, MAX_TALISMAN_SLOTS,
-    MEMORIAL_TALISMAN_TEXTURE_BASE, MAX_TALLY_FAN_SLOTS,
+    MAX_RELIC_SLOTS, MAX_RIBBON_SLOTS, MAX_SPOT_LIGHTS, MAX_TALISMAN_SLOTS, MAX_TALLY_FAN_SLOTS,
     MAX_TALLY_STICK_SLOTS, MAX_TILE_OCCLUDERS, MAX_WALL_TILE_SLOTS, MAX_WOOD_TABLET_SLOTS,
-    MAX_YAKU_TABLET_SLOTS,
+    MAX_YAKU_TABLET_SLOTS, MEMORIAL_TALISMAN_TEXTURE_BASE,
 };
 pub use internal_slots::{RelicIcon, TextAlign, TextLabel};
 pub use layout_instances::build_instances_from_layout;

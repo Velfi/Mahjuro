@@ -10,10 +10,10 @@ use crate::core::zodiac::YakuLevels;
 use crate::game::event_bus::GameOverReason;
 use crate::game::run::RunState;
 
-/// Shop visits with `run.ante <=` this value (after `advance_round`, before the
+/// Shop visits with `run.wing <=` this value (after `advance_round`, before the
 /// next blind) count toward **early** relic timing stats; larger ante counts as **late**.
 /// Used only for bot reporting (selection-bias visibility), not gameplay.
-pub const RELIC_SHOP_TIMING_EARLY_ANTE_MAX: u32 = 3;
+pub const RELIC_SHOP_TIMING_EARLY_WING_MAX: u32 = 3;
 
 /// Minimum shop purchases in **each** of early/late buckets to emit a timing-split row.
 pub const MIN_SHOP_TIMING_SPLIT_PER_BUCKET: u32 = 15;
@@ -39,14 +39,14 @@ fn classify_run_death_cause(s: &RunStats) -> &'static str {
 #[derive(Debug, Clone, Serialize)]
 pub struct RunTimeoutSnapshot {
     pub phase: String,
-    pub ante: u32,
-    pub blind: String,
-    /// Decision turns completed this blind when phase is `playing_blind`, else `None`.
-    pub blind_turn: Option<u32>,
+    pub wing: u32,
+    pub chamber: String,
+    /// Decision turns completed this blind when phase is `playing_chamber`, else `None`.
+    pub chamber_turn: Option<u32>,
     /// Raw `RunState` fields at timeout. Meaning depends on [`Self::phase`]:
-    /// - `playing_blind`: cumulative score toward the **current** blind vs its `target_score`.
+    /// - `playing_chamber`: cumulative score toward the **current** blind vs its `target_score`.
     /// - `shop`: usually totals from the **just-cleared** blind (often ≫ target); `target_score`
-    ///   is not the upcoming fight’s goal — `apply_blind` has not run yet.
+    ///   is not the upcoming fight’s goal — `apply_chamber` has not run yet.
     /// - `outer`: between high-level loop iterations; same fields, rarely hit.
     pub round_score: u64,
     pub target_score: u32,
@@ -55,26 +55,85 @@ pub struct RunTimeoutSnapshot {
     pub elapsed_ms: u64,
 }
 
-/// One scoring step toward [`PeakBlindSnapshot::total_score`] (a committed play or structure cash-in).
+/// One scoring step toward [`PeakChamberSnapshot::total_score`] (a committed play or structure cash-in).
 ///
 /// `tiles`: meld-grouped labels (same as cascade HUD, e.g. `Kong  9p 9p 9p 9p · Triplet  3m 3m 3m`) —
 /// full structure bank on cash-in; partial commits show only the melds just played.
+fn bool_is_false(v: &bool) -> bool {
+    !*v
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BotScoreSourceEntry {
+    pub name: String,
+    pub points: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeakChamberRelicState {
+    /// 1-based tray slot index.
+    pub slot: u32,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub counter: Option<i32>,
+    #[serde(default, skip_serializing_if = "bool_is_false")]
+    pub debuffed: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BotScoringAction {
     pub kind: String,
     pub points: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tiles: Option<String>,
+    /// Base meld chips from tiles before yaku/relic multipliers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tiles_points: Option<u64>,
+    /// Round-score delta attributed to yaku / dora score steps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yaku_points: Option<u64>,
+    /// Round-score delta attributed to relic-named score steps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relic_points: Option<u64>,
+    /// Any remaining score delta not classified as tiles/yaku/relic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub other_points: Option<u64>,
+    /// Gold in wallet at score time (used by economy relics like Golden Engine).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gold_held: Option<i32>,
+    /// Golden Engine mult bonus (`floor(gold_held / 3)`) when active.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub golden_engine_mult_bonus: Option<i32>,
+    /// Yaku detected for this action (with levels used at score time).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub yaku: Vec<String>,
+    /// Yaku/Dora scoring steps and their score deltas.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub yaku_steps: Vec<BotScoreSourceEntry>,
+    /// Relic-named scoring steps and their score deltas.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub relic_steps: Vec<BotScoreSourceEntry>,
 }
 
 /// Context for the highest single-blind `round_score` seen in a batch (or one run).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PeakBlindSnapshot {
-    pub blind_slot: String,
-    pub blind_label: String,
+pub struct PeakChamberSnapshot {
+    #[serde(alias = "blind_slot")]
+    pub chamber_slot: String,
+    #[serde(alias = "blind_label")]
+    pub chamber_label: String,
     pub target_score: u32,
     pub total_score: u64,
     pub relics: Vec<String>,
+    /// Wallet gold at blind end (also used by Golden Engine scaling).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gold_held: Option<i32>,
+    /// `floor(gold_held / 3)` at blind end when Golden Engine is active.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub golden_engine_mult_bonus: Option<i32>,
+    /// Active relic slot state at blind end (counter/debuff visibility).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub relic_state: Vec<PeakChamberRelicState>,
     pub scoring_actions: Vec<BotScoringAction>,
 }
 
@@ -82,9 +141,9 @@ pub(crate) fn aggregate_stats_slot_sort_key(slot: &str) -> (u32, u32) {
     let (ante_str, rest) = slot.split_once('-').unwrap_or((slot, ""));
     let ante = ante_str.parse::<u32>().unwrap_or(99);
     let blind_order = match rest {
-        "Small Blind" => 0,
-        "Big Blind" => 1,
-        "Boss Blind" => 2,
+        "Small Chamber" => 0,
+        "Big Chamber" => 1,
+        "Ordeal Chamber" => 2,
         _ => 99,
     };
     (ante, blind_order)
@@ -92,17 +151,17 @@ pub(crate) fn aggregate_stats_slot_sort_key(slot: &str) -> (u32, u32) {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RunStats {
-    pub blinds_cleared: u32,
-    pub antes_cleared: u32,
+    pub chambers_cleared: u32,
+    pub wings_cleared: u32,
     pub victory: bool,
-    pub died_on_ante: u32,
-    pub died_on_blind: BlindKind,
+    pub died_on_wing: u32,
+    pub died_on_chamber: ChamberKind,
     pub total_score: u64,
     pub plays_used: u32,
     pub discards_used: u32,
     pub strategic_discards: u32,
     pub final_gold: i32,
-    pub blinds_skipped: u32,
+    pub chambers_skipped: u32,
     pub relics_bought: u32,
     /// Proactive or swap-driven relic sells during shop visits.
     pub relics_sold: u32,
@@ -120,10 +179,8 @@ pub struct RunStats {
     #[serde(default)]
     pub relic_marginal_buy_max: std::collections::BTreeMap<&'static str, i32>,
     #[serde(default)]
-    pub relic_marginal_buy_buckets: std::collections::BTreeMap<
-        &'static str,
-        std::collections::BTreeMap<&'static str, u32>,
-    >,
+    pub relic_marginal_buy_buckets:
+        std::collections::BTreeMap<&'static str, std::collections::BTreeMap<&'static str, u32>>,
     /// Hold-value estimate when sold (proactive or swap).
     #[serde(default)]
     pub relic_hold_sell_sum: std::collections::BTreeMap<&'static str, i64>,
@@ -134,10 +191,8 @@ pub struct RunStats {
     #[serde(default)]
     pub relic_hold_sell_max: std::collections::BTreeMap<&'static str, i32>,
     #[serde(default)]
-    pub relic_hold_sell_buckets: std::collections::BTreeMap<
-        &'static str,
-        std::collections::BTreeMap<&'static str, u32>,
-    >,
+    pub relic_hold_sell_buckets:
+        std::collections::BTreeMap<&'static str, std::collections::BTreeMap<&'static str, u32>>,
     /// Score points attributed to relic sources on committed plays.
     #[serde(default)]
     pub relic_score_points: std::collections::BTreeMap<&'static str, u64>,
@@ -159,15 +214,15 @@ pub struct RunStats {
     pub skip_tag_gold_value: u32,
     pub total_target_score: u64,
     pub total_overscore: u64,
-    pub peak_blind_score: u64,
-    /// Filled when this run sets a new [`Self::peak_blind_score`]: relics tray + per-play/structure points.
+    pub peak_chamber_score: u64,
+    /// Filled when this run sets a new [`Self::peak_chamber_score`]: relics tray + per-play/structure points.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub peak_blind_detail: Option<PeakBlindSnapshot>,
+    pub peak_chamber_detail: Option<PeakChamberSnapshot>,
     pub skipped_tags: std::collections::BTreeMap<&'static str, u32>,
     pub relics_picked: std::collections::BTreeMap<&'static str, u32>,
-    /// Shop buys with `run.ante <= RELIC_SHOP_TIMING_EARLY_ANTE_MAX` at purchase.
+    /// Shop buys with `run.wing <= RELIC_SHOP_TIMING_EARLY_WING_MAX` at purchase.
     pub relics_picked_shop_early: std::collections::BTreeMap<&'static str, u32>,
-    /// Shop buys with `run.ante > RELIC_SHOP_TIMING_EARLY_ANTE_MAX` at purchase.
+    /// Shop buys with `run.wing > RELIC_SHOP_TIMING_EARLY_WING_MAX` at purchase.
     pub relics_picked_shop_late: std::collections::BTreeMap<&'static str, u32>,
     pub talismans_picked: std::collections::BTreeMap<&'static str, u32>,
     pub zodiacs_picked: std::collections::BTreeMap<&'static str, u32>,
@@ -178,18 +233,18 @@ pub struct RunStats {
     pub bot_issue_other_stuck: u32,
     pub bot_issue_lost_with_available_lines: u32,
     pub bot_issues_by_reason: std::collections::BTreeMap<String, u32>,
-    pub bot_issues_by_blind: std::collections::BTreeMap<String, u32>,
-    pub bot_issues_by_boss: std::collections::BTreeMap<String, u32>,
+    pub bot_issues_by_chamber: std::collections::BTreeMap<String, u32>,
+    pub bot_issues_by_ordeal: std::collections::BTreeMap<String, u32>,
     pub overscore_by_slot: std::collections::BTreeMap<String, u64>,
     pub cleared_by_slot: std::collections::BTreeMap<String, u32>,
-    pub boss_faced: std::collections::BTreeMap<String, u8>,
-    pub boss_beaten: std::collections::BTreeMap<String, u8>,
+    pub ordeal_faced: std::collections::BTreeMap<String, u8>,
+    pub ordeal_beaten: std::collections::BTreeMap<String, u8>,
     /// Sum of round scores on boss blinds, keyed by ante (clears and losses).
     #[serde(default)]
-    pub boss_score_by_ante: std::collections::BTreeMap<u32, u64>,
+    pub ordeal_score_by_wing: std::collections::BTreeMap<u32, u64>,
     /// Boss blind attempts per ante.
     #[serde(default)]
-    pub boss_attempts_by_ante: std::collections::BTreeMap<u32, u32>,
+    pub ordeal_attempts_by_wing: std::collections::BTreeMap<u32, u32>,
     /// Count of [`GameEvent::YakuScored`] per committed scoring action (one play may award several).
     pub yaku_scored: std::collections::BTreeMap<&'static str, u32>,
     /// Zodiac **consumes** from the dish during blinds (not shop purchases; see `zodiacs_picked`).
@@ -206,10 +261,10 @@ pub struct RunStats {
     pub gold_clear_jade_abacus: u32,
     pub gold_clear_patience: u32,
     pub turns_total: u32,
-    pub turns_by_blind_slot: std::collections::BTreeMap<String, u32>,
+    pub turns_by_chamber_slot: std::collections::BTreeMap<String, u32>,
     /// Turn count for blinds that **cleared** only (denominator-friendly with `cleared_by_slot`).
     pub turns_cleared_by_slot: std::collections::BTreeMap<String, u32>,
-    pub discards_by_blind_slot: std::collections::BTreeMap<String, u32>,
+    pub discards_by_chamber_slot: std::collections::BTreeMap<String, u32>,
     pub peak_hand_size: u32,
     pub relic_activations: std::collections::BTreeMap<&'static str, u32>,
     pub tiles_destroyed: u32,
@@ -241,17 +296,17 @@ impl RunStats {
 impl Default for RunStats {
     fn default() -> Self {
         Self {
-            blinds_cleared: 0,
-            antes_cleared: 0,
+            chambers_cleared: 0,
+            wings_cleared: 0,
             victory: false,
-            died_on_ante: 1,
-            died_on_blind: BlindKind::Small,
+            died_on_wing: 1,
+            died_on_chamber: ChamberKind::Small,
             total_score: 0,
             plays_used: 0,
             discards_used: 0,
             strategic_discards: 0,
             final_gold: 0,
-            blinds_skipped: 0,
+            chambers_skipped: 0,
             relics_bought: 0,
             relics_sold: 0,
             relics_sold_picked: std::collections::BTreeMap::new(),
@@ -281,8 +336,8 @@ impl Default for RunStats {
             skip_tag_gold_value: 0,
             total_target_score: 0,
             total_overscore: 0,
-            peak_blind_score: 0,
-            peak_blind_detail: None,
+            peak_chamber_score: 0,
+            peak_chamber_detail: None,
             skipped_tags: std::collections::BTreeMap::new(),
             relics_picked: std::collections::BTreeMap::new(),
             relics_picked_shop_early: std::collections::BTreeMap::new(),
@@ -296,14 +351,14 @@ impl Default for RunStats {
             bot_issue_other_stuck: 0,
             bot_issue_lost_with_available_lines: 0,
             bot_issues_by_reason: std::collections::BTreeMap::new(),
-            bot_issues_by_blind: std::collections::BTreeMap::new(),
-            bot_issues_by_boss: std::collections::BTreeMap::new(),
+            bot_issues_by_chamber: std::collections::BTreeMap::new(),
+            bot_issues_by_ordeal: std::collections::BTreeMap::new(),
             overscore_by_slot: std::collections::BTreeMap::new(),
             cleared_by_slot: std::collections::BTreeMap::new(),
-            boss_faced: std::collections::BTreeMap::new(),
-            boss_beaten: std::collections::BTreeMap::new(),
-            boss_score_by_ante: std::collections::BTreeMap::new(),
-            boss_attempts_by_ante: std::collections::BTreeMap::new(),
+            ordeal_faced: std::collections::BTreeMap::new(),
+            ordeal_beaten: std::collections::BTreeMap::new(),
+            ordeal_score_by_wing: std::collections::BTreeMap::new(),
+            ordeal_attempts_by_wing: std::collections::BTreeMap::new(),
             yaku_scored: std::collections::BTreeMap::new(),
             zodiacs_used: std::collections::BTreeMap::new(),
             talismans_used: std::collections::BTreeMap::new(),
@@ -316,9 +371,9 @@ impl Default for RunStats {
             gold_clear_jade_abacus: 0,
             gold_clear_patience: 0,
             turns_total: 0,
-            turns_by_blind_slot: std::collections::BTreeMap::new(),
+            turns_by_chamber_slot: std::collections::BTreeMap::new(),
             turns_cleared_by_slot: std::collections::BTreeMap::new(),
-            discards_by_blind_slot: std::collections::BTreeMap::new(),
+            discards_by_chamber_slot: std::collections::BTreeMap::new(),
             peak_hand_size: 0,
             relic_activations: std::collections::BTreeMap::new(),
             tiles_destroyed: 0,
@@ -335,15 +390,15 @@ impl Default for RunStats {
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct AggregateStats {
     pub runs: u32,
-    pub blinds_cleared_total: u64,
-    pub antes_cleared_total: u64,
+    pub chambers_cleared_total: u64,
+    pub wings_cleared_total: u64,
     pub victories: u32,
-    pub max_ante_reached: u32,
+    pub max_wing_reached: u32,
     pub total_score: u64,
     pub total_plays: u64,
     pub total_discards: u64,
     pub total_strategic_discards: u64,
-    pub total_blinds_skipped: u64,
+    pub total_chambers_skipped: u64,
     pub total_relics_bought: u64,
     pub total_relics_sold: u64,
     pub total_gold_spent: u64,
@@ -357,17 +412,17 @@ pub struct AggregateStats {
     pub total_skip_tag_gold_value: u64,
     pub total_target_score: u64,
     pub total_overscore: u64,
-    pub peak_blind_score: u64,
+    pub peak_chamber_score: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub peak_blind_detail: Option<PeakBlindSnapshot>,
+    pub peak_chamber_detail: Option<PeakChamberSnapshot>,
     pub total_bot_issue_no_valid_hand: u64,
     pub total_bot_issue_only_valid_unplayable: u64,
     pub total_bot_issue_only_valid_no_score: u64,
     pub total_bot_issue_other_stuck: u64,
     pub total_bot_issue_lost_with_available_lines: u64,
     pub bot_issues_by_reason: std::collections::BTreeMap<String, u32>,
-    pub deaths_by_ante: std::collections::BTreeMap<u32, u32>,
-    pub deaths_by_blind: std::collections::BTreeMap<&'static str, u32>,
+    pub deaths_by_wing: std::collections::BTreeMap<u32, u32>,
+    pub deaths_by_chamber: std::collections::BTreeMap<&'static str, u32>,
     pub skipped_tags: std::collections::BTreeMap<&'static str, u32>,
     pub relics_picked: std::collections::BTreeMap<&'static str, u32>,
     pub relics_picked_victories: std::collections::BTreeMap<&'static str, u32>,
@@ -378,17 +433,17 @@ pub struct AggregateStats {
     pub talismans_picked: std::collections::BTreeMap<&'static str, u32>,
     pub zodiacs_picked: std::collections::BTreeMap<&'static str, u32>,
     pub packs_picked: std::collections::BTreeMap<&'static str, u32>,
-    pub bot_issues_by_blind: std::collections::BTreeMap<String, u32>,
-    pub bot_issues_by_boss: std::collections::BTreeMap<String, u32>,
+    pub bot_issues_by_chamber: std::collections::BTreeMap<String, u32>,
+    pub bot_issues_by_ordeal: std::collections::BTreeMap<String, u32>,
     pub overscore_by_slot: std::collections::BTreeMap<String, u64>,
     pub cleared_by_slot: std::collections::BTreeMap<String, u64>,
-    pub boss_faced: std::collections::BTreeMap<String, u32>,
-    pub boss_beaten: std::collections::BTreeMap<String, u32>,
+    pub ordeal_faced: std::collections::BTreeMap<String, u32>,
+    pub ordeal_beaten: std::collections::BTreeMap<String, u32>,
     #[serde(default)]
-    pub boss_score_by_ante: std::collections::BTreeMap<u32, u64>,
+    pub ordeal_score_by_wing: std::collections::BTreeMap<u32, u64>,
     #[serde(default)]
-    pub boss_attempts_by_ante: std::collections::BTreeMap<u32, u32>,
-    pub deaths_by_ante_cause: std::collections::BTreeMap<String, u32>,
+    pub ordeal_attempts_by_wing: std::collections::BTreeMap<u32, u32>,
+    pub deaths_by_wing_cause: std::collections::BTreeMap<String, u32>,
     pub yaku_scored: std::collections::BTreeMap<&'static str, u64>,
     pub total_zodiacs_used: std::collections::BTreeMap<&'static str, u64>,
     pub total_talismans_used: std::collections::BTreeMap<&'static str, u64>,
@@ -403,9 +458,9 @@ pub struct AggregateStats {
     pub total_gold_clear_patience: u64,
     pub total_turns: u64,
     pub sum_peak_hand_size: u64,
-    pub turns_by_blind_slot: std::collections::BTreeMap<String, u64>,
+    pub turns_by_chamber_slot: std::collections::BTreeMap<String, u64>,
     pub turns_cleared_by_slot: std::collections::BTreeMap<String, u64>,
-    pub discards_by_blind_slot: std::collections::BTreeMap<String, u64>,
+    pub discards_by_chamber_slot: std::collections::BTreeMap<String, u64>,
     pub relic_activations: std::collections::BTreeMap<&'static str, u64>,
     pub total_tiles_destroyed: u64,
     pub transformations_successor: std::collections::BTreeMap<&'static str, u64>,
@@ -432,12 +487,12 @@ pub struct AggregateStats {
     pub relic_hold_sell_max: std::collections::BTreeMap<&'static str, i32>,
     #[serde(default)]
     pub relic_hold_sell_bucket_totals: std::collections::BTreeMap<String, u64>,
-    /// Sum of `antes_cleared` for runs that bought this relic ≥1.
+    /// Sum of `wings_cleared` for runs that bought this relic ≥1.
     #[serde(default)]
     pub relic_depth_with_antes_sum: std::collections::BTreeMap<&'static str, u64>,
     #[serde(default)]
     pub relic_depth_with_runs: std::collections::BTreeMap<&'static str, u64>,
-    /// Sum of `antes_cleared` for runs that never bought this relic.
+    /// Sum of `wings_cleared` for runs that never bought this relic.
     #[serde(default)]
     pub relic_depth_without_antes_sum: std::collections::BTreeMap<&'static str, u64>,
     #[serde(default)]
@@ -462,17 +517,17 @@ impl AggregateStats {
         if s.run_timed_out {
             self.timed_out_runs += 1;
         }
-        self.blinds_cleared_total += s.blinds_cleared as u64;
-        self.antes_cleared_total += s.antes_cleared as u64;
+        self.chambers_cleared_total += s.chambers_cleared as u64;
+        self.wings_cleared_total += s.wings_cleared as u64;
         if s.victory {
             self.victories += 1;
         }
-        self.max_ante_reached = self.max_ante_reached.max(s.died_on_ante);
+        self.max_wing_reached = self.max_wing_reached.max(s.died_on_wing);
         self.total_score += s.total_score;
         self.total_plays += s.plays_used as u64;
         self.total_discards += s.discards_used as u64;
         self.total_strategic_discards += s.strategic_discards as u64;
-        self.total_blinds_skipped += s.blinds_skipped as u64;
+        self.total_chambers_skipped += s.chambers_skipped as u64;
         self.total_relics_bought += s.relics_bought as u64;
         self.total_relics_sold += s.relics_sold as u64;
         self.total_gold_spent += s.gold_spent as u64;
@@ -490,10 +545,10 @@ impl AggregateStats {
         self.total_gold_clear_patience += s.gold_clear_patience as u64;
         self.total_target_score += s.total_target_score;
         self.total_overscore += s.total_overscore;
-        let prev_peak = self.peak_blind_score;
-        self.peak_blind_score = prev_peak.max(s.peak_blind_score);
-        if s.peak_blind_score == self.peak_blind_score && self.peak_blind_score > prev_peak {
-            self.peak_blind_detail = s.peak_blind_detail.clone();
+        let prev_peak = self.peak_chamber_score;
+        self.peak_chamber_score = prev_peak.max(s.peak_chamber_score);
+        if s.peak_chamber_score == self.peak_chamber_score && self.peak_chamber_score > prev_peak {
+            self.peak_chamber_detail = s.peak_chamber_detail.clone();
         }
         self.total_bot_issue_no_valid_hand += s.bot_issue_no_valid_hand as u64;
         self.total_bot_issue_only_valid_unplayable += s.bot_issue_only_valid_unplayable as u64;
@@ -505,10 +560,10 @@ impl AggregateStats {
             *self.bot_issues_by_reason.entry(reason.clone()).or_insert(0) += *count;
         }
         if !s.victory && !s.run_timed_out {
-            *self.deaths_by_ante.entry(s.died_on_ante).or_insert(0) += 1;
+            *self.deaths_by_wing.entry(s.died_on_wing).or_insert(0) += 1;
             *self
-                .deaths_by_blind
-                .entry(s.died_on_blind.name())
+                .deaths_by_chamber
+                .entry(s.died_on_chamber.name())
                 .or_insert(0) += 1;
             match s.death_reason {
                 Some(GameOverReason::OutOfPlays) => self.deaths_out_of_plays += 1,
@@ -552,11 +607,11 @@ impl AggregateStats {
         for (name, count) in &s.packs_picked {
             *self.packs_picked.entry(name).or_insert(0) += *count;
         }
-        for (blind, count) in &s.bot_issues_by_blind {
-            *self.bot_issues_by_blind.entry(blind.clone()).or_insert(0) += *count;
+        for (blind, count) in &s.bot_issues_by_chamber {
+            *self.bot_issues_by_chamber.entry(blind.clone()).or_insert(0) += *count;
         }
-        for (boss, count) in &s.bot_issues_by_boss {
-            *self.bot_issues_by_boss.entry(boss.clone()).or_insert(0) += *count;
+        for (boss, count) in &s.bot_issues_by_ordeal {
+            *self.bot_issues_by_ordeal.entry(boss.clone()).or_insert(0) += *count;
         }
         for (slot, overscore) in &s.overscore_by_slot {
             *self.overscore_by_slot.entry(slot.clone()).or_insert(0) += *overscore;
@@ -564,22 +619,22 @@ impl AggregateStats {
         for (slot, count) in &s.cleared_by_slot {
             *self.cleared_by_slot.entry(slot.clone()).or_insert(0) += *count as u64;
         }
-        for boss in s.boss_faced.keys() {
-            *self.boss_faced.entry(boss.clone()).or_insert(0) += 1;
+        for boss in s.ordeal_faced.keys() {
+            *self.ordeal_faced.entry(boss.clone()).or_insert(0) += 1;
         }
-        for boss in s.boss_beaten.keys() {
-            *self.boss_beaten.entry(boss.clone()).or_insert(0) += 1;
+        for boss in s.ordeal_beaten.keys() {
+            *self.ordeal_beaten.entry(boss.clone()).or_insert(0) += 1;
         }
-        for (ante, score) in &s.boss_score_by_ante {
-            *self.boss_score_by_ante.entry(*ante).or_insert(0) += score;
+        for (ante, score) in &s.ordeal_score_by_wing {
+            *self.ordeal_score_by_wing.entry(*ante).or_insert(0) += score;
         }
-        for (ante, attempts) in &s.boss_attempts_by_ante {
-            *self.boss_attempts_by_ante.entry(*ante).or_insert(0) += attempts;
+        for (ante, attempts) in &s.ordeal_attempts_by_wing {
+            *self.ordeal_attempts_by_wing.entry(*ante).or_insert(0) += attempts;
         }
         if !s.victory && !s.run_timed_out {
             let cause = classify_run_death_cause(s);
-            let key = format!("{}|{}", s.died_on_ante, cause);
-            *self.deaths_by_ante_cause.entry(key).or_insert(0) += 1;
+            let key = format!("{}|{}", s.died_on_wing, cause);
+            *self.deaths_by_wing_cause.entry(key).or_insert(0) += 1;
         }
         self.total_structure_triggers += s.structure_triggers as u64;
         self.total_structure_trigger_points += s.structure_trigger_points;
@@ -593,14 +648,14 @@ impl AggregateStats {
         for (name, count) in &s.talismans_used {
             *self.total_talismans_used.entry(name).or_insert(0) += *count as u64;
         }
-        for (slot, count) in &s.turns_by_blind_slot {
-            *self.turns_by_blind_slot.entry(slot.clone()).or_insert(0) += *count as u64;
+        for (slot, count) in &s.turns_by_chamber_slot {
+            *self.turns_by_chamber_slot.entry(slot.clone()).or_insert(0) += *count as u64;
         }
         for (slot, count) in &s.turns_cleared_by_slot {
             *self.turns_cleared_by_slot.entry(slot.clone()).or_insert(0) += *count as u64;
         }
-        for (slot, count) in &s.discards_by_blind_slot {
-            *self.discards_by_blind_slot.entry(slot.clone()).or_insert(0) += *count as u64;
+        for (slot, count) in &s.discards_by_chamber_slot {
+            *self.discards_by_chamber_slot.entry(slot.clone()).or_insert(0) += *count as u64;
         }
         for (name, count) in &s.relic_activations {
             *self.relic_activations.entry(name).or_insert(0) += *count as u64;
@@ -645,7 +700,7 @@ impl AggregateStats {
         }
         let d = self.to_derived(
             YakuKind::all().len(),
-            crate::core::blind_target::DEFAULT_BASE_TARGET,
+            crate::core::chamber_target::DEFAULT_BASE_TARGET,
             None,
         );
         let pr = &d.per_run;
@@ -664,9 +719,9 @@ impl AggregateStats {
                 self.timed_out_runs
             );
         }
-        out!("avg blinds cleared:  {:.2}", pr.blinds_cleared);
-        out!("avg antes cleared:   {:.2}", pr.antes_cleared);
-        out!("max ante reached:    {}", self.max_ante_reached);
+        out!("avg blinds cleared:  {:.2}", pr.chambers_cleared);
+        out!("avg antes cleared:   {:.2}", pr.wings_cleared);
+        out!("max ante reached:    {}", self.max_wing_reached);
         out!(
             "avg total score:     {}",
             human_readable_score(pr.total_score)
@@ -678,7 +733,7 @@ impl AggregateStats {
             pr.strategic_discards,
             pr.random_discards
         );
-        out!("avg blinds skipped:  {:.2}", pr.blinds_skipped);
+        out!("avg blinds skipped:  {:.2}", pr.chambers_skipped);
         out!(
             "avg relics bought:   {:.2} (avg gold spent: {:.1})",
             pr.relics_bought,
@@ -730,7 +785,7 @@ impl AggregateStats {
             human_readable_score(pr.target_score_faced),
             pr.score_to_target_ratio,
             human_readable_score(pr.overscore),
-            human_readable_score(self.peak_blind_score as f64)
+            human_readable_score(self.peak_chamber_score as f64)
         );
 
         if let Some(ref lb) = d.loss_breakdown {
@@ -745,11 +800,11 @@ impl AggregateStats {
         }
 
         out!("\ndeaths by ante (Wilson 95% CI on % of all runs):");
-        for row in &d.deaths_by_ante {
+        for row in &d.deaths_by_wing {
             let bar = "#".repeat(row.text_bar_hashes as usize);
             out!(
                 "  ante {:>2}: {:>4} ({:>5.1}% [{:.1}–{:.1}]) {}",
-                row.ante,
+                row.wing,
                 row.count,
                 row.pct_of_runs,
                 row.pct_ci_lo,
@@ -758,7 +813,7 @@ impl AggregateStats {
             );
         }
 
-        if !d.deaths_by_ante_hazard.is_empty() {
+        if !d.deaths_by_wing_hazard.is_empty() {
             out!("\ndeath hazard P(die on ante | reached ante), Wilson 95% CI:");
             out!(
                 "  {:>4} {:>8} {:>8} {:>8} {:>14}",
@@ -768,10 +823,10 @@ impl AggregateStats {
                 "hazard",
                 "95% CI"
             );
-            for row in &d.deaths_by_ante_hazard {
+            for row in &d.deaths_by_wing_hazard {
                 out!(
                     "  {:>4} {:>8} {:>8} {:>7.1}% [{:>5.1}–{:>5.1}]",
-                    row.ante,
+                    row.wing,
                     row.reached,
                     row.deaths,
                     row.hazard_pct,
@@ -782,7 +837,7 @@ impl AggregateStats {
         }
 
         out!("\ndeaths by blind:");
-        for row in &d.deaths_by_blind {
+        for row in &d.deaths_by_chamber {
             out!(
                 "  {:<12} {:>4} ({:>5.1}%)",
                 row.name,
@@ -859,12 +914,12 @@ impl AggregateStats {
         if !d.relics_bought.is_empty() {
             const MIN_SAMPLES_FOR_WIN_CORR: u32 = 20;
             let overall_win_rate = pr.win_rate_pct;
-            let ante_mx = d.relic_shop_timing_early_ante_max;
+            let ante_mx = d.relic_shop_timing_early_wing_max;
             out!(
                 "\nrelics bought (sorted by total purchases; Wilson 95% CI on win% when bought ≥ 1):"
             );
             out!(
-                "  %late = share of buys when run.ante > {} at the shop visit.",
+                "  %late = share of buys when run.wing > {} at the shop visit.",
                 ante_mx
             );
             out!(
@@ -961,7 +1016,9 @@ impl AggregateStats {
                 }
             }
             if !d.relics_shop_funnel.is_empty() {
-                out!("\nrelic shop funnel (offers vs buys; low take% + high offers → undervalued):");
+                out!(
+                    "\nrelic shop funnel (offers vs buys; low take% + high offers → undervalued):"
+                );
                 out!(
                     "  {:<22} {:>7} {:>7} {:>7} {:>10}",
                     "relic",
@@ -1123,18 +1180,18 @@ impl AggregateStats {
             if bi.lost_with_lines > 0 {
                 out!("  lost with lines available: {}", bi.lost_with_lines);
             }
-            if !bi.hottest_blinds.is_empty() {
+            if !bi.hottest_chambers.is_empty() {
                 let s = bi
-                    .hottest_blinds
+                    .hottest_chambers
                     .iter()
                     .map(|(a, b)| format!("{a} x{b}"))
                     .collect::<Vec<_>>()
                     .join(", ");
                 out!("  hottest blinds: {s}");
             }
-            if !bi.hottest_bosses.is_empty() {
+            if !bi.hottest_ordeals.is_empty() {
                 let s = bi
-                    .hottest_bosses
+                    .hottest_ordeals
                     .iter()
                     .map(|(a, b)| format!("{a} x{b}"))
                     .collect::<Vec<_>>()
@@ -1174,7 +1231,7 @@ pub(crate) struct ClearPayoutBreakdown {
 }
 
 pub(crate) fn clear_payout_breakdown(run: &RunState) -> ClearPayoutBreakdown {
-    let base_reward = run.blind.clear_reward();
+    let base_reward = run.chamber.clear_reward();
     let unused_play_bonus = run.plays_remaining;
     let interest = (run.gold.max(0) as u32 / 5).min(3);
     let green_luck_bonus = if run.relics.has(RelicId::GreenLuck) && !run.honors_scored_this_round {

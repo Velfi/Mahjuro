@@ -1,12 +1,12 @@
-pub mod boss_icons;
+pub mod ordeal_icons;
 pub mod button_prompts;
 pub mod chart_primitives;
 pub mod chronicle_charts;
 pub mod chronicle_dashboard;
 pub mod clip;
 pub mod colored_keywords;
-pub mod corner_badge;
 pub mod controller_hints;
+pub mod corner_badge;
 pub mod focus_nav;
 pub mod glyph_source;
 pub mod input;

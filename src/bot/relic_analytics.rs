@@ -42,7 +42,10 @@ pub fn record_shop_offer(stats: &mut RunStats, relic_name: &'static str) {
 
 pub fn record_marginal_buy(stats: &mut RunStats, relic_name: &'static str, marginal: i32) {
     *stats.relic_marginal_buy_sum.entry(relic_name).or_insert(0) += marginal as i64;
-    *stats.relic_marginal_buy_count.entry(relic_name).or_insert(0) += 1;
+    *stats
+        .relic_marginal_buy_count
+        .entry(relic_name)
+        .or_insert(0) += 1;
     stats
         .relic_marginal_buy_min
         .entry(relic_name)
@@ -90,11 +93,7 @@ fn step_score_delta(prev_total: u64, step: &ScoreStep) -> u64 {
 
 pub fn record_score_breakdown(stats: &mut RunStats, breakdown: &ScoreBreakdown) {
     let mut prev_total = 0u64;
-    for step in breakdown
-        .base_steps
-        .iter()
-        .chain(breakdown.steps.iter())
-    {
+    for step in breakdown.base_steps.iter().chain(breakdown.steps.iter()) {
         if matches!(step.kind, StepKind::Final) {
             continue;
         }
@@ -127,11 +126,10 @@ pub fn record_run_depth_split(agg: &mut AggregateStats, run: &RunStats) {
     for def in all_relic_defs() {
         let name = def.name;
         if picked.contains(name) {
-            *agg.relic_depth_with_antes_sum.entry(name).or_insert(0) += run.antes_cleared as u64;
+            *agg.relic_depth_with_antes_sum.entry(name).or_insert(0) += run.wings_cleared as u64;
             *agg.relic_depth_with_runs.entry(name).or_insert(0) += 1;
         } else {
-            *agg.relic_depth_without_antes_sum.entry(name).or_insert(0) +=
-                run.antes_cleared as u64;
+            *agg.relic_depth_without_antes_sum.entry(name).or_insert(0) += run.wings_cleared as u64;
             *agg.relic_depth_without_runs.entry(name).or_insert(0) += 1;
         }
     }
@@ -163,8 +161,7 @@ pub fn merge_run_relic_analytics(agg: &mut AggregateStats, run: &RunStats) {
     }
     for (name, buckets) in &run.relic_marginal_buy_buckets {
         for (bucket, count) in buckets {
-            *agg
-                .relic_marginal_buy_bucket_totals
+            *agg.relic_marginal_buy_bucket_totals
                 .entry(bucket_map_key(name, bucket))
                 .or_insert(0) += *count as u64;
         }
@@ -190,8 +187,7 @@ pub fn merge_run_relic_analytics(agg: &mut AggregateStats, run: &RunStats) {
     }
     for (name, buckets) in &run.relic_hold_sell_buckets {
         for (bucket, count) in buckets {
-            *agg
-                .relic_hold_sell_bucket_totals
+            *agg.relic_hold_sell_bucket_totals
                 .entry(bucket_map_key(name, bucket))
                 .or_insert(0) += *count as u64;
         }

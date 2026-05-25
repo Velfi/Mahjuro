@@ -1,6 +1,6 @@
 use crate::{
     core::{
-        boss,
+        ordeal,
         hand::{DetectedMeld, validate_selection_with_rules},
         relic::RelicId,
         rules::RuleModifier,
@@ -70,25 +70,25 @@ impl RunState {
 
     /// True when the selection is invalid under the active round rules but would
     /// validate if this boss blind's [`RuleModifier`] pushes were removed.
-    pub fn selection_blocked_by_boss_rules(&self, tiles: &[Tile]) -> bool {
-        let boss_rules: &[RuleModifier] = self
-            .boss
+    pub fn selection_blocked_by_ordeal_rules(&self, tiles: &[Tile]) -> bool {
+        let ordeal_rules: &[RuleModifier] = self
+            .ordeal
             .effect
             .as_ref()
             .map(|e| e.rule_pushes.as_slice())
             .unwrap_or(&[]);
-        if boss_rules.is_empty() || tiles.is_empty() {
+        if ordeal_rules.is_empty() || tiles.is_empty() {
             return false;
         }
         if self.try_validate_with_wildcards(tiles).is_some() {
             return false;
         }
-        let without_boss: Vec<RuleModifier> = self
+        let without_ordeal: Vec<RuleModifier> = self
             .validation_rules_for_structure_commits()
             .into_iter()
-            .filter(|r| !boss_rules.contains(r))
+            .filter(|r| !ordeal_rules.contains(r))
             .collect();
-        self.try_validate_with_wildcards_and_rules(tiles, &without_boss)
+        self.try_validate_with_wildcards_and_rules(tiles, &without_ordeal)
             .is_some()
     }
 
@@ -110,10 +110,10 @@ impl RunState {
     }
 
     /// True when the current hand selection is invalid solely because of this
-    /// boss blind's rule modifiers (see [`Self::selection_blocked_by_boss_rules`]).
+    /// boss blind's rule modifiers (see [`Self::selection_blocked_by_ordeal_rules`]).
     pub fn hand_selection_blocked_by_boss(&self) -> bool {
-        use crate::core::rules::BlindKind;
-        if self.blind != BlindKind::Boss || self.selected_count() == 0 {
+        use crate::core::rules::ChamberKind;
+        if self.chamber != ChamberKind::Ordeal || self.selected_count() == 0 {
             return false;
         }
         let selected_tiles: Vec<Tile> = self
@@ -123,7 +123,7 @@ impl RunState {
             .filter(|&(_, &sel)| sel)
             .map(|(t, _)| *t)
             .collect();
-        !self.is_selection_valid() && self.selection_blocked_by_boss_rules(&selected_tiles)
+        !self.is_selection_valid() && self.selection_blocked_by_ordeal_rules(&selected_tiles)
     }
 
     /// Check if the current selection forms a valid playable hand.
@@ -227,7 +227,7 @@ impl RunState {
     pub fn refill_hand(&mut self, bus: &mut EventBus) {
         use crate::game::engine_state::GameplayCoreState;
 
-        let target = boss::effective_hand_size(self);
+        let target = ordeal::effective_hand_size(self);
         let lotus = self.relics.has(RelicId::LotusBloom);
         let mut drawn: Vec<Tile> = Vec::new();
         while self.hand.len() + drawn.len() < target {

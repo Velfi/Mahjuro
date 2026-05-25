@@ -422,4 +422,3 @@ pub(super) fn push_free_badge(
         ..Default::default()
     });
 }
-

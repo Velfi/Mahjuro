@@ -286,7 +286,7 @@ pub fn dora_focus_tooltip_strings(
         return (
             "Dora".to_string(),
             String::new(),
-            format!("Unlocks at Ante 4. {desc}"),
+            format!("Unlocks at Wing 4. {desc}"),
         );
     }
     if dora_faces.is_empty() {

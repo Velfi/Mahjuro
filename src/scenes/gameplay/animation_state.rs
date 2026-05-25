@@ -87,13 +87,13 @@ pub(super) fn tick_wind_and_deal_detection(
     scene.wind_duration_secs = ctx.cascade_tuning.wind_duration_ms as f32 / 1000.0;
     // Detect deal events: any time the hand grows (initial round deal,
     // post-discard refill) we stamp `last_deal_at` so the post-deal wind
-    // gust can fire `wind_delay_secs` later. While `pending_blind` is
+    // gust can fire `wind_delay_secs` later. While `pending_chamber` is
     // set, we intentionally ignore the stale previous-round hand — seed
-    // `prev_hand_len` to it so the detector fires only once apply_blind
+    // `prev_hand_len` to it so the detector fires only once apply_chamber
     // clears and redeals (marking the true round-start deal).
     let interaction = GameEngine::read_interaction(ctx.run);
     let cur_hand_len = interaction.hand_len;
-    if scene.pending_blind.is_some() {
+    if scene.pending_chamber.is_some() {
         scene.prev_hand_len = cur_hand_len;
     } else {
         if cur_hand_len > scene.prev_hand_len {
@@ -623,11 +623,11 @@ pub(super) fn build_ambient_table_objects(
         // tiles slightly above that in world units. With Dora Crown,
         // a second tile sits beside the first; otherwise just one.
         //
-        // While `pending_blind` is set, the round hasn't actually
+        // While `pending_chamber` is set, the round hasn't actually
         // started yet (smoke curtain is still clearing and
-        // `apply_blind` hasn't run). Keep the plinth bare in that
+        // `apply_chamber` hasn't run). Keep the plinth bare in that
         // window so the indicator appears to arrive with the deal.
-        let indicators: &[crate::core::tile::Tile] = if scene.pending_blind.is_some() {
+        let indicators: &[crate::core::tile::Tile] = if scene.pending_chamber.is_some() {
             &[]
         } else {
             gameplay.dora_indicator_tiles.as_slice()
@@ -687,7 +687,7 @@ pub(super) fn build_ambient_table_objects(
     // Boss plinth — same brass pedestal mesh, to the right of dora. During
     // boss rounds it displays the boss icon as a flat image quad in
     // `scene_behavior`; this object only provides the physical stand.
-    if !gameplay.boss_ofuda_title.is_empty() && !skip_authored_plinth_meshes {
+    if !gameplay.ordeal_ofuda_title.is_empty() {
         let boss_p = &scene.positions.boss_plinth;
         let plinth_w = layout.mm(48.0);
         let plinth_h = layout.mm(20.0);

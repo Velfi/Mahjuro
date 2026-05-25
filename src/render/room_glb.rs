@@ -336,7 +336,7 @@ pub const SHOP_ENV_AMBIENT_SCALE: f32 = 0.0;
 pub const SHOP_ENV_DIELECTRIC_AMBIENT_MIN: f32 = 0.24;
 
 /// Lower bound for `hdr_tonemap.z` on candle-key **table** scenes (`gameplay`, `tutorial`,
-/// `pick_blind`, `collection`). Shop keeps authored ambient only. Tiles and `lit_mesh` add
+/// `pick_chamber`, `collection`). Shop keeps authored ambient only. Tiles and `lit_mesh` add
 /// `albedo * scale * 0.08` before ACES — without this, shadowed areas read as pure black and
 /// lit areas clip warm, which feels flat and hyper-saturated.
 pub const GAMEPLAY_TABLE_AMBIENT_MIN: f32 = 0.52;

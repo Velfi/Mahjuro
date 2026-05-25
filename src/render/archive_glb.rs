@@ -222,7 +222,7 @@ fn is_archive_button_node(name: &str) -> bool {
             | BTN_BOSSES_TAB
             | BTN_TALISMANS_TAB
             | BTN_CHRONICLE_TAB
-            |         BTN_MAIN_MENU
+            | BTN_MAIN_MENU
             | BTN_SWITCH_SAVE
             | BTN_PAGE_LEFT
             | BTN_PAGE_RIGHT
@@ -495,9 +495,13 @@ mod tests {
         assert!(!archive_prim_casts_room_shadow(Some("main_fixture")));
         assert!(!archive_prim_casts_room_shadow(Some(SIGN_DESCRIPTION_LEFT)));
         assert!(!archive_prim_casts_room_shadow(Some("Cubby")));
-        assert!(archive_env_skips_directional_room_shadow("text_scene_title"));
+        assert!(archive_env_skips_directional_room_shadow(
+            "text_scene_title"
+        ));
         assert!(archive_env_skips_directional_room_shadow(BTN_PAGE_RIGHT));
         assert!(archive_env_skips_directional_room_shadow("main_fixture"));
-        assert!(!archive_env_skips_directional_room_shadow(SIGN_DESCRIPTION_LEFT));
+        assert!(!archive_env_skips_directional_room_shadow(
+            SIGN_DESCRIPTION_LEFT
+        ));
     }
 }

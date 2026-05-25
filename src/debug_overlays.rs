@@ -3,7 +3,7 @@
 //! intercept input while open.
 
 use crate::audio;
-use crate::core::rules::BlindKind;
+use crate::core::rules::ChamberKind;
 use crate::game::cascade::CascadeTuning;
 use crate::game::scene_look_tuning::{
     self, SCENE_LOOK_SLIDER_COUNT, SCENE_LOOK_SLIDER_META, SceneLookTuning, SceneLookTuningSet,
@@ -27,7 +27,7 @@ pub struct DebugVisibilityOverlay {
     cursor: usize,
     pub hide_tiles: bool,
     pub hide_candles: bool,
-    pub hide_blind_plaque: bool,
+    pub hide_chamber_plaque: bool,
     pub hide_scoring_placard: bool,
     pub hide_inventory: bool,
 }
@@ -42,7 +42,7 @@ impl DebugVisibilityOverlay {
     pub fn new(
         hide_tiles: bool,
         hide_candles: bool,
-        hide_blind_plaque: bool,
+        hide_chamber_plaque: bool,
         hide_scoring_placard: bool,
         hide_inventory: bool,
     ) -> Self {
@@ -50,7 +50,7 @@ impl DebugVisibilityOverlay {
             cursor: 0,
             hide_tiles,
             hide_candles,
-            hide_blind_plaque,
+            hide_chamber_plaque,
             hide_scoring_placard,
             hide_inventory,
         }
@@ -81,7 +81,7 @@ impl DebugVisibilityOverlay {
         let f = match self.cursor {
             0 => &mut self.hide_tiles,
             1 => &mut self.hide_candles,
-            2 => &mut self.hide_blind_plaque,
+            2 => &mut self.hide_chamber_plaque,
             3 => &mut self.hide_scoring_placard,
             4 => &mut self.hide_inventory,
             _ => return,
@@ -93,7 +93,7 @@ impl DebugVisibilityOverlay {
         match i {
             0 => ("Hand Tiles", self.hide_tiles),
             1 => ("Candles", self.hide_candles),
-            2 => ("Blind Plaque", self.hide_blind_plaque),
+            2 => ("Chamber Plaque", self.hide_chamber_plaque),
             3 => ("Scoring Placard", self.hide_scoring_placard),
             4 => ("Inventory + Items", self.hide_inventory),
             _ => ("", false),
@@ -1950,7 +1950,7 @@ fn hall_dist_point_in_rect(mx: f32, my: f32, r: (f32, f32, f32, f32)) -> bool {
 
 pub struct HallwayDistortionDebugOverlay {
     cursor: usize,
-    blind_row: u8,
+    chamber_row: u8,
     run_number: f32,
     ante: f32,
     global_mul: f32,
@@ -1974,7 +1974,7 @@ impl HallwayDistortionDebugOverlay {
     pub fn new() -> Self {
         Self {
             cursor: 0,
-            blind_row: 0,
+            chamber_row: 0,
             run_number: 1.0,
             ante: 1.0,
             global_mul: 1.0,
@@ -1997,7 +1997,7 @@ impl HallwayDistortionDebugOverlay {
 
     pub fn to_snapshot(&self) -> HallwayDistortionDebugSnapshot {
         HallwayDistortionDebugSnapshot {
-            blind_mode: self.blind_row.min(3),
+            chamber_mode: self.chamber_row.min(3),
             seed_run: self.run_number.round().clamp(1.0, 999.0) as u32,
             seed_ante: self.ante.round().clamp(1.0, 99.0) as u32,
             global_mul: self.global_mul,
@@ -2021,7 +2021,7 @@ impl HallwayDistortionDebugOverlay {
 
     fn row_value(&self, row: usize) -> f32 {
         match row {
-            0 => self.blind_row as f32,
+            0 => self.chamber_row as f32,
             1 => self.run_number,
             2 => self.ante,
             3 => self.global_mul,
@@ -2044,7 +2044,7 @@ impl HallwayDistortionDebugOverlay {
         let (_, lo, hi, _) = HALL_DIST_DEBUG_ROW_META[row];
         let v = v.clamp(lo, hi);
         match row {
-            0 => self.blind_row = (v.round() as i32).clamp(0, 3) as u8,
+            0 => self.chamber_row = (v.round() as i32).clamp(0, 3) as u8,
             1 => self.run_number = v,
             2 => self.ante = v,
             3 => self.global_mul = v,
@@ -2088,7 +2088,7 @@ impl HallwayDistortionDebugOverlay {
     fn begin_editing(&mut self) {
         let v = self.row_value(self.cursor);
         let mut s = if self.cursor == 0 {
-            format!("{}", self.blind_row)
+            format!("{}", self.chamber_row)
         } else if self.cursor == 9 {
             format!("{}", self.wall_tint.round() as u8)
         } else {
@@ -2131,8 +2131,8 @@ impl HallwayDistortionDebugOverlay {
         if ctrl && matches!(code, Scancode::C) && !self.editing {
             let s = self.to_snapshot();
             let text = format!(
-                "HallwayDistortionDebugSnapshot {{ blind_mode: {}, seed_run: {}, seed_ante: {}, global_mul: {:.4}, breathe_mul: {:.4}, ripple_mul: {:.4}, ceiling_mul: {:.4}, stretch_mul: {:.4}, twist_mul: {:.4}, pulse_mul: {:.4}, drift_mul: {:.4}, balloon_mul: {:.4}, wall_tint: {}, ripple_waves_mul: {:.4}, ripple_travel_mul: {:.4} }}",
-                s.blind_mode,
+                "HallwayDistortionDebugSnapshot {{ chamber_mode: {}, seed_run: {}, seed_ante: {}, global_mul: {:.4}, breathe_mul: {:.4}, ripple_mul: {:.4}, ceiling_mul: {:.4}, stretch_mul: {:.4}, twist_mul: {:.4}, pulse_mul: {:.4}, drift_mul: {:.4}, balloon_mul: {:.4}, wall_tint: {}, ripple_waves_mul: {:.4}, ripple_travel_mul: {:.4} }}",
+                s.chamber_mode,
                 s.seed_run,
                 s.seed_ante,
                 s.global_mul,
@@ -2327,12 +2327,12 @@ impl HallwayDistortionDebugOverlay {
         false
     }
 
-    fn preview_blind(&self) -> BlindKind {
-        match self.blind_row {
-            0 => BlindKind::Big,
-            1 => BlindKind::Small,
-            2 => BlindKind::Big,
-            _ => BlindKind::Boss,
+    fn preview_blind(&self) -> ChamberKind {
+        match self.chamber_row {
+            0 => ChamberKind::Big,
+            1 => ChamberKind::Small,
+            2 => ChamberKind::Big,
+            _ => ChamberKind::Ordeal,
         }
     }
 
@@ -2355,7 +2355,7 @@ impl HallwayDistortionDebugOverlay {
             return self.edit_buffer.clone();
         }
         if row == 0 {
-            return match self.blind_row {
+            return match self.chamber_row {
                 0 => "0 Auto → Big".into(),
                 1 => "1 Small".into(),
                 2 => "2 Big".into(),

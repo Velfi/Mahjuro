@@ -15,6 +15,7 @@ use crate::core::tile::{Suit, Tile};
 use crate::core::yaku::YakuKind;
 use crate::game::event_bus::GameEvent;
 use crate::persistence::TilePreset;
+use crate::render::decal::load_ui_font;
 use crate::render::draw_cmd::{CameraParams, DrawCmd, ShowcaseTilePlacement, UiFrame};
 use crate::render::showcase_tile_layout::{
     ShowcaseTileLabelGaps, showcase_tile_group_label_anchor, showcase_tile_merge_projected_group,
@@ -45,10 +46,7 @@ const PAGE_SCORING: usize = 3;
 const YAKU_PAGE_START: usize = 4;
 /// How many yaku entries to stack on one guide page when they fit.
 fn yaku_needs_solo_guide_page(yk: YakuKind) -> bool {
-    matches!(
-        yk,
-        YakuKind::Chiitoitsu | YakuKind::KokushiMusou
-    )
+    matches!(yk, YakuKind::Chiitoitsu | YakuKind::KokushiMusou)
 }
 
 /// Split visible yaku into guide pages (pairs of entries; chiitoitsu / kokushi solo).
@@ -82,7 +80,9 @@ fn yaku_chunk_for_page(page: usize, progress: &PlayerProgress) -> Option<Vec<Yak
         return None;
     }
     let idx = page - YAKU_PAGE_START;
-    yaku_guide_chunks(&progress.available_yaku()).get(idx).cloned()
+    yaku_guide_chunks(&progress.available_yaku())
+        .get(idx)
+        .cloned()
 }
 
 // ── Navigation ────────────────────────────────────────────────────────────
@@ -226,14 +226,7 @@ impl SceneBehavior for GuideScene {
         let (title, groups) = page_content(self.page, progress);
         let content_top = push_guide_chrome(&mut frame, &layout);
         push_guide_header_nav(
-            &mut frame,
-            &layout,
-            &self.tree,
-            self.page,
-            pages,
-            scale,
-            w,
-            h,
+            &mut frame, &layout, &self.tree, self.page, pages, scale, w, h,
         );
         let content_floor = layout.content_bottom;
         let cam = frame.camera_override.clone().expect("guide camera");
@@ -289,8 +282,7 @@ impl SceneBehavior for GuideScene {
                 content_floor,
             );
         } else if let Some(chunk) = yaku_chunk_for_page(self.page, progress) {
-            let body_top =
-                push_page_title(&mut frame, &layout, content_top, title, h);
+            let body_top = push_page_title(&mut frame, &layout, content_top, title, h);
             draw_yaku_guide_page(
                 &mut frame,
                 progress,
@@ -663,12 +655,7 @@ fn page_content(page: usize, progress: &PlayerProgress) -> (&'static str, Vec<Ti
                     {
                         let mut tile = t(Suit::Pinzu, 1, 12);
                         tile.debuffed_visual = true;
-                        tile_group_with_subtitle(
-                            "Debuffed",
-                            "+0 chips",
-                            vec![tile],
-                            color::STONE,
-                        )
+                        tile_group_with_subtitle("Debuffed", "+0 chips", vec![tile], color::STONE)
                     },
                 ],
             )
@@ -1088,15 +1075,14 @@ fn draw_yaku_entry(
 
     let stats = format!("+{} mult · +{} chips", yk.mult_bonus(), yk.chip_bonus());
     let stats_y = band_top + name_h + h * 0.002;
-    let stats_h = stats_font * 1.18;
-    frame.text(TextLabel {
-        rect: [pad, stats_y, inner_w, stats_h],
-        text: stats,
-        color: color::alpha(color::CHAMPAGNE, 0.82),
-        align: TextAlign::Left,
-        font_px: Some(stats_font),
-        ..Default::default()
-    });
+    let stats_h = push_dense_text_lines(
+        frame,
+        [pad, stats_y, inner_w, 0.0],
+        &stats,
+        stats_font,
+        color::alpha(color::CHAMPAGNE, 0.82),
+        1.18,
+    );
 
     let rule_y = stats_y + stats_h + h * 0.004;
     let rule_h = push_dense_text(
@@ -1178,17 +1164,68 @@ fn push_dense_text_lines(
     color: [f32; 4],
     line_mul: f32,
 ) -> f32 {
+    push_dense_text_lines_aligned(frame, rect, text, font_px, color, line_mul, TextAlign::Left)
+}
+
+fn push_dense_text_lines_aligned(
+    frame: &mut UiFrame,
+    rect: [f32; 4],
+    text: &str,
+    font_px: f32,
+    color: [f32; 4],
+    line_mul: f32,
+    align: TextAlign,
+) -> f32 {
     let line_h = font_px * line_mul;
-    let wrapped = wrap_text(text, rect[2], font_px / 0.99);
+    let wrapped =
+        colored_keywords::wrap_colored_text_multiline(text, rect[2], font_px / 0.99, color);
     let block_h = line_h * wrapped.len().max(1) as f32;
-    frame.text(TextLabel {
-        rect: [rect[0], rect[1], rect[2], block_h],
-        text: wrapped.join("\n"),
-        color,
-        align: TextAlign::Left,
-        font_px: Some(font_px),
-        ..Default::default()
-    });
+    let Some(font) = load_ui_font() else {
+        let wrapped = wrap_text(text, rect[2], font_px / 0.99);
+        frame.text(TextLabel {
+            rect: [rect[0], rect[1], rect[2], block_h],
+            text: wrapped.join("\n"),
+            color,
+            align,
+            font_px: Some(font_px),
+            ..Default::default()
+        });
+        return block_h;
+    };
+
+    for (row, chunks) in wrapped.iter().enumerate() {
+        let line_y = rect[1] + row as f32 * line_h;
+        let measured: f32 = chunks
+            .iter()
+            .map(|(s, _)| {
+                s.chars()
+                    .map(|ch| font.metrics(ch, font_px).advance_width)
+                    .sum::<f32>()
+            })
+            .sum();
+        let mut cx = match align {
+            TextAlign::Left => rect[0],
+            TextAlign::Center => rect[0] + (rect[2] - measured) * 0.5,
+            TextAlign::Right => rect[0] + rect[2] - measured,
+        };
+        for (s, c) in chunks {
+            let piece_w = s
+                .chars()
+                .map(|ch| font.metrics(ch, font_px).advance_width)
+                .sum::<f32>()
+                .max(1.0);
+            frame.text(TextLabel {
+                rect: [cx, line_y, piece_w, line_h],
+                text: s.clone(),
+                color: *c,
+                font_px: Some(font_px),
+                align: TextAlign::Left,
+                no_glossary: true,
+                ..Default::default()
+            });
+            cx += piece_w;
+        }
+    }
     block_h
 }
 
@@ -1225,494 +1262,434 @@ pub(crate) fn yaku_page(yk: YakuKind) -> (&'static str, Vec<TileGroup>) {
                 &[8, 8, 8],
                 trip_color,
             ),
-            (
-                "Pair",
-                MeldKind::Pair,
-                Suit::Manzu,
-                &[5, 5],
-                pair_color,
-            ),
+            ("Pair", MeldKind::Pair, Suit::Manzu, &[5, 5], pair_color),
         ]),
         YakuKind::Toitoi => meld_groups(&[
-                (
-                    "Triplet",
-                    MeldKind::Triplet,
-                    Suit::Manzu,
-                    &[1, 1, 1],
-                    trip_color,
-                ),
-                (
-                    "Triplet",
-                    MeldKind::Triplet,
-                    Suit::Souzu,
-                    &[5, 5, 5],
-                    trip_color,
-                ),
-                (
-                    "Triplet",
-                    MeldKind::Triplet,
-                    Suit::Pinzu,
-                    &[9, 9, 9],
-                    trip_color,
-                ),
-                ("Pair", MeldKind::Pair, Suit::Wind, &[1, 1], pair_color),
-            ]),
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Manzu,
+                &[1, 1, 1],
+                trip_color,
+            ),
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Souzu,
+                &[5, 5, 5],
+                trip_color,
+            ),
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Pinzu,
+                &[9, 9, 9],
+                trip_color,
+            ),
+            ("Pair", MeldKind::Pair, Suit::Wind, &[1, 1], pair_color),
+        ]),
         YakuKind::Honroutou => meld_groups(&[
-                (
-                    "Triplet",
-                    MeldKind::Triplet,
-                    Suit::Manzu,
-                    &[1, 1, 1],
-                    trip_color,
-                ),
-                (
-                    "Triplet",
-                    MeldKind::Triplet,
-                    Suit::Souzu,
-                    &[9, 9, 9],
-                    trip_color,
-                ),
-                (
-                    "Triplet",
-                    MeldKind::Triplet,
-                    Suit::Wind,
-                    &[1, 1, 1],
-                    trip_color,
-                ),
-                ("Pair", MeldKind::Pair, Suit::Pinzu, &[1, 1], pair_color),
-            ]),
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Manzu,
+                &[1, 1, 1],
+                trip_color,
+            ),
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Souzu,
+                &[9, 9, 9],
+                trip_color,
+            ),
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Wind,
+                &[1, 1, 1],
+                trip_color,
+            ),
+            ("Pair", MeldKind::Pair, Suit::Pinzu, &[1, 1], pair_color),
+        ]),
         YakuKind::Iipeikou => meld_groups(&[
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Souzu,
-                    &[1, 2, 3],
-                    seq_color,
-                ),
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Souzu,
-                    &[1, 2, 3],
-                    seq_color,
-                ),
-                (
-                    "Triplet",
-                    MeldKind::Triplet,
-                    Suit::Pinzu,
-                    &[4, 4, 4],
-                    trip_color,
-                ),
-                (
-                    "Triplet",
-                    MeldKind::Triplet,
-                    Suit::Manzu,
-                    &[5, 5, 5],
-                    trip_color,
-                ),
-                (
-                    "Pair",
-                    MeldKind::Pair,
-                    Suit::Wind,
-                    &[1, 1],
-                    pair_color,
-                ),
-            ]),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Souzu,
+                &[1, 2, 3],
+                seq_color,
+            ),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Souzu,
+                &[1, 2, 3],
+                seq_color,
+            ),
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Pinzu,
+                &[4, 4, 4],
+                trip_color,
+            ),
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Manzu,
+                &[5, 5, 5],
+                trip_color,
+            ),
+            ("Pair", MeldKind::Pair, Suit::Wind, &[1, 1], pair_color),
+        ]),
         YakuKind::FullHand => meld_groups(&[
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Manzu,
-                    &[1, 2, 3],
-                    seq_color,
-                ),
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Souzu,
-                    &[4, 5, 6],
-                    seq_color,
-                ),
-                (
-                    "Triplet",
-                    MeldKind::Triplet,
-                    Suit::Pinzu,
-                    &[7, 7, 7],
-                    trip_color,
-                ),
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Manzu,
-                    &[7, 8, 9],
-                    seq_color,
-                ),
-                ("Pair", MeldKind::Pair, Suit::Dragon, &[1, 1], pair_color),
-            ]),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Manzu,
+                &[1, 2, 3],
+                seq_color,
+            ),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Souzu,
+                &[4, 5, 6],
+                seq_color,
+            ),
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Pinzu,
+                &[7, 7, 7],
+                trip_color,
+            ),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Manzu,
+                &[7, 8, 9],
+                seq_color,
+            ),
+            ("Pair", MeldKind::Pair, Suit::Dragon, &[1, 1], pair_color),
+        ]),
         YakuKind::Chinitsu => meld_groups(&[
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Souzu,
-                    &[1, 2, 3],
-                    seq_color,
-                ),
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Souzu,
-                    &[4, 5, 6],
-                    seq_color,
-                ),
-                (
-                    "Triplet",
-                    MeldKind::Triplet,
-                    Suit::Souzu,
-                    &[7, 7, 7],
-                    trip_color,
-                ),
-                ("Pair", MeldKind::Pair, Suit::Souzu, &[9, 9], pair_color),
-            ]),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Souzu,
+                &[1, 2, 3],
+                seq_color,
+            ),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Souzu,
+                &[4, 5, 6],
+                seq_color,
+            ),
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Souzu,
+                &[7, 7, 7],
+                trip_color,
+            ),
+            ("Pair", MeldKind::Pair, Suit::Souzu, &[9, 9], pair_color),
+        ]),
         YakuKind::SanshokuDoujun => meld_groups(&[
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Manzu,
-                    &[4, 5, 6],
-                    seq_color,
-                ),
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Souzu,
-                    &[4, 5, 6],
-                    seq_color,
-                ),
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Pinzu,
-                    &[4, 5, 6],
-                    seq_color,
-                ),
-                ("Pair", MeldKind::Pair, Suit::Wind, &[1, 1], pair_color),
-            ]),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Manzu,
+                &[4, 5, 6],
+                seq_color,
+            ),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Souzu,
+                &[4, 5, 6],
+                seq_color,
+            ),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Pinzu,
+                &[4, 5, 6],
+                seq_color,
+            ),
+            ("Pair", MeldKind::Pair, Suit::Wind, &[1, 1], pair_color),
+        ]),
         YakuKind::Junchan => meld_groups(&[
-                (
-                    "Triplet",
-                    MeldKind::Triplet,
-                    Suit::Manzu,
-                    &[1, 1, 1],
-                    trip_color,
-                ),
-                (
-                    "Triplet",
-                    MeldKind::Triplet,
-                    Suit::Manzu,
-                    &[9, 9, 9],
-                    trip_color,
-                ),
-                (
-                    "Triplet",
-                    MeldKind::Triplet,
-                    Suit::Pinzu,
-                    &[1, 1, 1],
-                    trip_color,
-                ),
-                (
-                    "Triplet",
-                    MeldKind::Triplet,
-                    Suit::Dragon,
-                    &[2, 2, 2],
-                    trip_color,
-                ),
-                (
-                    "Pair",
-                    MeldKind::Pair,
-                    Suit::Souzu,
-                    &[9, 9],
-                    pair_color,
-                ),
-            ]),
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Manzu,
+                &[1, 1, 1],
+                trip_color,
+            ),
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Manzu,
+                &[9, 9, 9],
+                trip_color,
+            ),
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Pinzu,
+                &[1, 1, 1],
+                trip_color,
+            ),
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Dragon,
+                &[2, 2, 2],
+                trip_color,
+            ),
+            ("Pair", MeldKind::Pair, Suit::Souzu, &[9, 9], pair_color),
+        ]),
         YakuKind::Ittsu => meld_groups(&[
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Souzu,
-                    &[1, 2, 3],
-                    seq_color,
-                ),
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Souzu,
-                    &[4, 5, 6],
-                    seq_color,
-                ),
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Souzu,
-                    &[7, 8, 9],
-                    seq_color,
-                ),
-                (
-                    "Pair",
-                    MeldKind::Pair,
-                    Suit::Manzu,
-                    &[5, 5],
-                    pair_color,
-                ),
-            ]),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Souzu,
+                &[1, 2, 3],
+                seq_color,
+            ),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Souzu,
+                &[4, 5, 6],
+                seq_color,
+            ),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Souzu,
+                &[7, 8, 9],
+                seq_color,
+            ),
+            ("Pair", MeldKind::Pair, Suit::Manzu, &[5, 5], pair_color),
+        ]),
         YakuKind::Honitsu => meld_groups(&[
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Souzu,
-                    &[2, 3, 4],
-                    seq_color,
-                ),
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Souzu,
-                    &[6, 7, 8],
-                    seq_color,
-                ),
-                (
-                    "Triplet",
-                    MeldKind::Triplet,
-                    Suit::Wind,
-                    &[1, 1, 1],
-                    trip_color,
-                ),
-                ("Pair", MeldKind::Pair, Suit::Souzu, &[9, 9], pair_color),
-            ]),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Souzu,
+                &[2, 3, 4],
+                seq_color,
+            ),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Souzu,
+                &[6, 7, 8],
+                seq_color,
+            ),
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Wind,
+                &[1, 1, 1],
+                trip_color,
+            ),
+            ("Pair", MeldKind::Pair, Suit::Souzu, &[9, 9], pair_color),
+        ]),
         YakuKind::Yakuhai => meld_groups(&[
-                (
-                    "Triplet",
-                    MeldKind::Triplet,
-                    Suit::Dragon,
-                    &[1, 1, 1],
-                    trip_color,
-                ),
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Manzu,
-                    &[2, 3, 4],
-                    seq_color,
-                ),
-                ("Pair", MeldKind::Pair, Suit::Souzu, &[5, 5], pair_color),
-            ]),
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Dragon,
+                &[1, 1, 1],
+                trip_color,
+            ),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Manzu,
+                &[2, 3, 4],
+                seq_color,
+            ),
+            ("Pair", MeldKind::Pair, Suit::Souzu, &[5, 5], pair_color),
+        ]),
         YakuKind::Chiitoitsu => meld_groups(&[
-                (
-                    "Pair",
-                    MeldKind::Pair,
-                    Suit::Manzu,
-                    &[1, 1],
-                    pair_color,
-                ),
-                (
-                    "Pair",
-                    MeldKind::Pair,
-                    Suit::Manzu,
-                    &[3, 3],
-                    pair_color,
-                ),
-                ("Pair", MeldKind::Pair, Suit::Souzu, &[5, 5], pair_color),
-                ("Pair", MeldKind::Pair, Suit::Souzu, &[7, 7], pair_color),
-                ("Pair", MeldKind::Pair, Suit::Pinzu, &[2, 2], pair_color),
-                ("Pair", MeldKind::Pair, Suit::Pinzu, &[4, 4], pair_color),
-                ("Pair", MeldKind::Pair, Suit::Wind, &[1, 1], pair_color),
-            ]),
+            ("Pair", MeldKind::Pair, Suit::Manzu, &[1, 1], pair_color),
+            ("Pair", MeldKind::Pair, Suit::Manzu, &[3, 3], pair_color),
+            ("Pair", MeldKind::Pair, Suit::Souzu, &[5, 5], pair_color),
+            ("Pair", MeldKind::Pair, Suit::Souzu, &[7, 7], pair_color),
+            ("Pair", MeldKind::Pair, Suit::Pinzu, &[2, 2], pair_color),
+            ("Pair", MeldKind::Pair, Suit::Pinzu, &[4, 4], pair_color),
+            ("Pair", MeldKind::Pair, Suit::Wind, &[1, 1], pair_color),
+        ]),
         YakuKind::KokushiMusou => meld_groups(&[
-                (
-                    "Pair",
-                    MeldKind::Pair,
-                    Suit::Manzu,
-                    &[1, 1],
-                    pair_color,
-                ),
-                (
-                    "Single",
-                    MeldKind::Single,
-                    Suit::Manzu,
-                    &[9],
-                    single_color,
-                ),
-                (
-                    "Single",
-                    MeldKind::Single,
-                    Suit::Souzu,
-                    &[1],
-                    single_color,
-                ),
-                (
-                    "Single",
-                    MeldKind::Single,
-                    Suit::Souzu,
-                    &[9],
-                    single_color,
-                ),
-                ("Single", MeldKind::Single, Suit::Pinzu, &[1], single_color),
-                ("Single", MeldKind::Single, Suit::Pinzu, &[9], single_color),
-                ("Single", MeldKind::Single, Suit::Wind, &[1], single_color),
-                ("Single", MeldKind::Single, Suit::Wind, &[2], single_color),
-                ("Single", MeldKind::Single, Suit::Wind, &[3], single_color),
-                ("Single", MeldKind::Single, Suit::Wind, &[4], single_color),
-                ("Single", MeldKind::Single, Suit::Dragon, &[1], single_color),
-                ("Single", MeldKind::Single, Suit::Dragon, &[2], single_color),
-                ("Single", MeldKind::Single, Suit::Dragon, &[3], single_color),
-            ]),
+            ("Pair", MeldKind::Pair, Suit::Manzu, &[1, 1], pair_color),
+            ("Single", MeldKind::Single, Suit::Manzu, &[9], single_color),
+            ("Single", MeldKind::Single, Suit::Souzu, &[1], single_color),
+            ("Single", MeldKind::Single, Suit::Souzu, &[9], single_color),
+            ("Single", MeldKind::Single, Suit::Pinzu, &[1], single_color),
+            ("Single", MeldKind::Single, Suit::Pinzu, &[9], single_color),
+            ("Single", MeldKind::Single, Suit::Wind, &[1], single_color),
+            ("Single", MeldKind::Single, Suit::Wind, &[2], single_color),
+            ("Single", MeldKind::Single, Suit::Wind, &[3], single_color),
+            ("Single", MeldKind::Single, Suit::Wind, &[4], single_color),
+            ("Single", MeldKind::Single, Suit::Dragon, &[1], single_color),
+            ("Single", MeldKind::Single, Suit::Dragon, &[2], single_color),
+            ("Single", MeldKind::Single, Suit::Dragon, &[3], single_color),
+        ]),
         YakuKind::Chanta => meld_groups(&[
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Manzu,
-                    &[1, 2, 3],
-                    seq_color,
-                ),
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Souzu,
-                    &[7, 8, 9],
-                    seq_color,
-                ),
-                (
-                    "Triplet",
-                    MeldKind::Triplet,
-                    Suit::Wind,
-                    &[1, 1, 1],
-                    trip_color,
-                ),
-                (
-                    "Triplet",
-                    MeldKind::Triplet,
-                    Suit::Pinzu,
-                    &[9, 9, 9],
-                    trip_color,
-                ),
-                ("Pair", MeldKind::Pair, Suit::Manzu, &[5, 5], pair_color),
-            ]),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Manzu,
+                &[1, 2, 3],
+                seq_color,
+            ),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Souzu,
+                &[7, 8, 9],
+                seq_color,
+            ),
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Wind,
+                &[1, 1, 1],
+                trip_color,
+            ),
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Pinzu,
+                &[9, 9, 9],
+                trip_color,
+            ),
+            ("Pair", MeldKind::Pair, Suit::Manzu, &[5, 5], pair_color),
+        ]),
         YakuKind::Ryanpeikou => meld_groups(&[
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Manzu,
-                    &[2, 3, 4],
-                    seq_color,
-                ),
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Manzu,
-                    &[2, 3, 4],
-                    seq_color,
-                ),
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Manzu,
-                    &[5, 6, 7],
-                    seq_color,
-                ),
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Manzu,
-                    &[5, 6, 7],
-                    seq_color,
-                ),
-                ("Pair", MeldKind::Pair, Suit::Souzu, &[8, 8], pair_color),
-            ]),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Manzu,
+                &[2, 3, 4],
+                seq_color,
+            ),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Manzu,
+                &[2, 3, 4],
+                seq_color,
+            ),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Manzu,
+                &[5, 6, 7],
+                seq_color,
+            ),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Manzu,
+                &[5, 6, 7],
+                seq_color,
+            ),
+            ("Pair", MeldKind::Pair, Suit::Souzu, &[8, 8], pair_color),
+        ]),
         YakuKind::SanshokuDoukou => meld_groups(&[
-                (
-                    "Triplet",
-                    MeldKind::Triplet,
-                    Suit::Manzu,
-                    &[4, 4, 4],
-                    trip_color,
-                ),
-                (
-                    "Triplet",
-                    MeldKind::Triplet,
-                    Suit::Souzu,
-                    &[4, 4, 4],
-                    trip_color,
-                ),
-                (
-                    "Triplet",
-                    MeldKind::Triplet,
-                    Suit::Pinzu,
-                    &[4, 4, 4],
-                    trip_color,
-                ),
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Manzu,
-                    &[2, 3, 4],
-                    seq_color,
-                ),
-                ("Pair", MeldKind::Pair, Suit::Wind, &[1, 1], pair_color),
-            ]),
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Manzu,
+                &[4, 4, 4],
+                trip_color,
+            ),
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Souzu,
+                &[4, 4, 4],
+                trip_color,
+            ),
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Pinzu,
+                &[4, 4, 4],
+                trip_color,
+            ),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Manzu,
+                &[2, 3, 4],
+                seq_color,
+            ),
+            ("Pair", MeldKind::Pair, Suit::Wind, &[1, 1], pair_color),
+        ]),
         YakuKind::Pinfu => meld_groups(&[
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Manzu,
-                    &[2, 3, 4],
-                    seq_color,
-                ),
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Manzu,
-                    &[5, 6, 7],
-                    seq_color,
-                ),
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Souzu,
-                    &[3, 4, 5],
-                    seq_color,
-                ),
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Pinzu,
-                    &[6, 7, 8],
-                    seq_color,
-                ),
-                ("Pair", MeldKind::Pair, Suit::Manzu, &[5, 5], pair_color),
-            ]),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Manzu,
+                &[2, 3, 4],
+                seq_color,
+            ),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Manzu,
+                &[5, 6, 7],
+                seq_color,
+            ),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Souzu,
+                &[3, 4, 5],
+                seq_color,
+            ),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Pinzu,
+                &[6, 7, 8],
+                seq_color,
+            ),
+            ("Pair", MeldKind::Pair, Suit::Manzu, &[5, 5], pair_color),
+        ]),
         YakuKind::ChickenHand => meld_groups(&[
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Manzu,
-                    &[1, 2, 3],
-                    seq_color,
-                ),
-                (
-                    "Sequence",
-                    MeldKind::Sequence,
-                    Suit::Souzu,
-                    &[4, 5, 6],
-                    seq_color,
-                ),
-                (
-                    "Triplet",
-                    MeldKind::Triplet,
-                    Suit::Pinzu,
-                    &[3, 3, 3],
-                    trip_color,
-                ),
-                ("Pair", MeldKind::Pair, Suit::Wind, &[2, 2], pair_color),
-            ]),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Manzu,
+                &[1, 2, 3],
+                seq_color,
+            ),
+            (
+                "Sequence",
+                MeldKind::Sequence,
+                Suit::Souzu,
+                &[4, 5, 6],
+                seq_color,
+            ),
+            (
+                "Triplet",
+                MeldKind::Triplet,
+                Suit::Pinzu,
+                &[3, 3, 3],
+                trip_color,
+            ),
+            ("Pair", MeldKind::Pair, Suit::Wind, &[2, 2], pair_color),
+        ]),
     };
     (detail.rule, groups)
 }
@@ -1975,15 +1952,15 @@ fn push_scoring_loop_flow(
     pad: f32,
 ) {
     let [cx, cy, cw, ch] = content;
-    let caption_h = body_font * line_mul * 1.15;
-    frame.text(TextLabel {
-        rect: [cx, cy, cw, caption_h],
-        text: scoring_intro_copy::LOOP_CAPTION.into(),
-        color: color::PARCHMENT,
-        align: TextAlign::Center,
-        font_px: Some(body_font),
-        ..Default::default()
-    });
+    let caption_h = push_dense_text_lines_aligned(
+        frame,
+        [cx, cy, cw, 0.0],
+        scoring_intro_copy::LOOP_CAPTION,
+        body_font,
+        color::PARCHMENT,
+        line_mul * 1.15,
+        TextAlign::Center,
+    );
 
     let diagram_top = cy + caption_h + 2.0;
     let diagram_h = (cy + ch - diagram_top).max(1.0);
@@ -2010,23 +1987,29 @@ fn push_scoring_loop_flow(
                 color::alpha(color::GOLD, 0.55),
             );
         }
-        frame.text(TextLabel {
-            rect: [lane[0], lane[1], lane[2], label_h],
-            text: (*label).into(),
-            color: if *is_payoff {
-                color::GOLD
-            } else {
-                color::CHAMPAGNE
-            },
-            align: TextAlign::Center,
-            font_px: Some(body_font * 0.94),
-            bold: *is_payoff,
-            ..Default::default()
-        });
+        if *is_payoff {
+            frame.text(TextLabel {
+                rect: [lane[0], lane[1], lane[2], label_h],
+                text: (*label).into(),
+                color: color::GOLD,
+                align: TextAlign::Center,
+                font_px: Some(body_font * 0.94),
+                bold: true,
+                ..Default::default()
+            });
+        } else {
+            let _ = push_dense_text_lines_aligned(
+                frame,
+                [lane[0], lane[1], lane[2], 0.0],
+                label,
+                body_font * 0.94,
+                color::CHAMPAGNE,
+                label_h / (body_font * 0.94),
+                TextAlign::Center,
+            );
+        }
         let tile_cell = [lane[0], lane[1] + label_h, lane[2], tile_band_h];
-        let stage_tile = tile_size
-            .min(tile_band_h * 0.92)
-            .min(tile_cell[2] * 0.90);
+        let stage_tile = tile_size.min(tile_band_h * 0.92).min(tile_cell[2] * 0.90);
         match i {
             0 => {
                 placements.extend(layout_scoring_group_tiles(
@@ -2097,16 +2080,15 @@ fn push_scoring_chip_cards(
     pad: f32,
 ) {
     let [cx, cy, cw, ch] = content;
-    let line_h = text_font * line_mul;
-    let intro_h = line_h * 1.05;
-    frame.text(TextLabel {
-        rect: [cx, cy, cw, intro_h],
-        text: scoring_intro_copy::TILES_INTRO.into(),
-        color: color::PARCHMENT,
-        align: TextAlign::Center,
-        font_px: Some(text_font),
-        ..Default::default()
-    });
+    let intro_h = push_dense_text_lines_aligned(
+        frame,
+        [cx, cy, cw, 0.0],
+        scoring_intro_copy::TILES_INTRO,
+        text_font,
+        color::PARCHMENT,
+        line_mul * 1.05,
+        TextAlign::Center,
+    );
 
     let row_inset = (tile_size * 0.08).max(12.0);
     let ex_x = cx + row_inset;
@@ -2142,12 +2124,7 @@ fn push_scoring_chip_cards(
             ex_h,
         ];
         placements.extend(layout_scoring_group_tiles(
-            groups,
-            gi,
-            tile_area,
-            tile_px,
-            0.5,
-            false,
+            groups, gi, tile_area, tile_px, 0.5, false,
         ));
 
         let text_block_h = match group.subtitle {
@@ -2155,29 +2132,25 @@ fn push_scoring_chip_cards(
             None => label_line_h,
         };
         let text_y = ex_y + (ex_h - text_block_h) * 0.5;
-        frame.text(TextLabel {
-            rect: [text_x, text_y, text_w, label_line_h],
-            text: group.label.into(),
-            color: color::CHAMPAGNE,
-            align: TextAlign::Left,
-            font_px: Some(label_font),
-            bold: true,
-            ..Default::default()
-        });
+        let _ = push_dense_text_lines_aligned(
+            frame,
+            [text_x, text_y, text_w, 0.0],
+            group.label,
+            label_font,
+            color::CHAMPAGNE,
+            line_mul,
+            TextAlign::Left,
+        );
         if let Some(chips) = group.subtitle {
-            frame.text(TextLabel {
-                rect: [
-                    text_x,
-                    text_y + label_line_h + label_chips_gap,
-                    text_w,
-                    chips_line_h,
-                ],
-                text: chips.into(),
-                color: color::alpha(color::BRASS, 0.95),
-                align: TextAlign::Left,
-                font_px: Some(chips_font),
-                ..Default::default()
-            });
+            let _ = push_dense_text_lines_aligned(
+                frame,
+                [text_x, text_y + label_line_h + label_chips_gap, text_w, 0.0],
+                chips,
+                chips_font,
+                color::alpha(color::BRASS, 0.95),
+                line_mul,
+                TextAlign::Left,
+            );
         }
     }
     if !placements.is_empty() {
@@ -2232,9 +2205,7 @@ fn layout_tiles_in_cell(
 ) -> Vec<ShowcaseTilePlacement> {
     let [cx, cy, cw, ch] = cell;
     let n = tiles.len().max(1);
-    let size = tile_size
-        .min(cw / (n as f32 * 0.5 + 0.12))
-        .min(ch * 0.94);
+    let size = tile_size.min(cw / (n as f32 * 0.5 + 0.12)).min(ch * 0.94);
     let row_w = size * n as f32;
     // Left-aligned rows: offset center — 3D rotation extends past the naive half-width.
     let start_x = if align_start {
@@ -2294,16 +2265,14 @@ fn push_scoring_yaku_panel(
         ScoringPanelStyle::Ledger,
     );
     let [x, y, w, h] = content;
-    let line_h = body_font * line_mul;
-    let intro_h = line_h * 1.15;
-    frame.text(TextLabel {
-        rect: [x, y, w, intro_h],
-        text: scoring_intro_copy::YAKU_INTRO.into(),
-        color: color::PARCHMENT,
-        align: TextAlign::Left,
-        font_px: Some(body_font),
-        ..Default::default()
-    });
+    let intro_h = push_dense_text_lines(
+        frame,
+        [x, y, w, 0.0],
+        scoring_intro_copy::YAKU_INTRO,
+        body_font,
+        color::PARCHMENT,
+        line_mul * 1.15,
+    );
 
     let table_top = y + intro_h + 4.0;
     let table_h = (y + h - table_top).max(1.0);
@@ -2322,7 +2291,14 @@ fn push_scoring_yaku_panel(
         frame.text(TextLabel {
             rect: [ox, cursor, cw, row_h],
             text: text.into(),
-            color: color::CHAMPAGNE,
+            color: if col == 1 || col == 2 {
+                crate::render::vocabulary_colors::color_for_token(
+                    text.trim_start_matches('+'),
+                    color::CHAMPAGNE,
+                )
+            } else {
+                color::CHAMPAGNE
+            },
             align: if col == 0 {
                 TextAlign::Left
             } else {
@@ -2352,7 +2328,7 @@ fn push_scoring_yaku_panel(
         frame.text(TextLabel {
             rect: [x + col_name_w, cursor, col_num_w, row_h],
             text: (*mult).into(),
-            color: color::PARCHMENT,
+            color: color::keyword::MULT,
             align: TextAlign::Right,
             font_px: Some(body_font * 0.94),
             ..Default::default()
@@ -2360,7 +2336,7 @@ fn push_scoring_yaku_panel(
         frame.text(TextLabel {
             rect: [x + col_name_w + col_num_w, cursor, col_num_w, row_h],
             text: (*chips).into(),
-            color: color::PARCHMENT,
+            color: color::keyword::CHIPS,
             align: TextAlign::Right,
             font_px: Some(body_font * 0.94),
             ..Default::default()
@@ -2406,29 +2382,31 @@ fn push_scoring_final_panel(
                 color::alpha(color::GOLD, 0.55),
             );
         }
-        frame.text(TextLabel {
-            rect: [x + pad, row_y, w - pad * 2.0, row_h],
-            text: (*line).into(),
-            color: if is_eq {
-                color::GOLD
-            } else if i == lines.len() - 1 {
-                color::alpha(color::BRASS, 0.95)
-            } else {
-                color::PARCHMENT
-            },
-            align: if is_eq {
+        let font_px = if is_eq {
+            typography::size(typography::H24, window_h).max(body_font * 1.12)
+        } else {
+            body_font * 0.96
+        };
+        let line_color = if is_eq {
+            color::GOLD
+        } else if i == lines.len() - 1 {
+            color::alpha(color::BRASS, 0.95)
+        } else {
+            color::PARCHMENT
+        };
+        let _ = push_dense_text_lines_aligned(
+            frame,
+            [x + pad, row_y, w - pad * 2.0, 0.0],
+            line,
+            font_px,
+            line_color,
+            (row_h / font_px).max(0.9),
+            if is_eq {
                 TextAlign::Center
             } else {
                 TextAlign::Left
             },
-            font_px: Some(if is_eq {
-                typography::size(typography::H24, window_h).max(body_font * 1.12)
-            } else {
-                body_font * 0.96
-            }),
-            bold: is_eq,
-            ..Default::default()
-        });
+        );
     }
 }
 
@@ -2448,13 +2426,7 @@ fn draw_tiles_page(
 ) {
     let body_font = typography::size(typography::H42, h);
     let line_mul = 1.12;
-    let mut y = push_page_title(
-        frame,
-        layout,
-        content_top,
-        tiles_intro_copy::PAGE_TITLE,
-        h,
-    );
+    let mut y = push_page_title(frame, layout, content_top, tiles_intro_copy::PAGE_TITLE, h);
     for line in [
         tiles_intro_copy::INTRO_LINE_1,
         tiles_intro_copy::INTRO_LINE_2,
@@ -2488,16 +2460,8 @@ fn draw_tiles_page(
         line_mul,
     );
 
-    let (placements, labels, panels) = layout_tiles_page_grid(
-        cam,
-        groups,
-        right_x,
-        right_w,
-        w,
-        h,
-        y,
-        columns_bottom,
-    );
+    let (placements, labels, panels) =
+        layout_tiles_page_grid(cam, groups, right_x, right_w, w, h, y, columns_bottom);
     push_tiles_example_panels(frame, groups, &panels);
     if !placements.is_empty() {
         frame.cmds.push(DrawCmd::ShowcaseTileBatch(placements));
@@ -2524,14 +2488,11 @@ fn draw_melds_page(
 ) {
     let body_font = typography::size(typography::H42, h);
     let line_mul = 1.12;
-    let mut y = push_page_title(
-        frame,
-        layout,
-        content_top,
-        melds_intro_copy::PAGE_TITLE,
-        h,
-    );
-    for line in [melds_intro_copy::INTRO_LINE_1, melds_intro_copy::INTRO_LINE_2] {
+    let mut y = push_page_title(frame, layout, content_top, melds_intro_copy::PAGE_TITLE, h);
+    for line in [
+        melds_intro_copy::INTRO_LINE_1,
+        melds_intro_copy::INTRO_LINE_2,
+    ] {
         y += push_dense_text_lines(
             frame,
             [layout.content_x, y, layout.content_w, 0.0],
@@ -2675,7 +2636,10 @@ fn push_flowers_left_cards(
     let pad = 10.0;
     let inner_w = (w - pad * 2.0).max(1.0);
     let sections: [(&str, &[&str]); 2] = [
-        (flowers_intro_copy::SECTION_ALLOWED, flowers_intro_copy::ALLOWED_LINES),
+        (
+            flowers_intro_copy::SECTION_ALLOWED,
+            flowers_intro_copy::ALLOWED_LINES,
+        ),
         (
             flowers_intro_copy::SECTION_NOT_ALLOWED,
             flowers_intro_copy::NOT_ALLOWED_LINES,
@@ -2737,8 +2701,14 @@ fn push_melds_left_cards(
     let pad = 10.0;
     let inner_w = (w - pad * 2.0).max(1.0);
     let sections: [(&str, &[&str]); 2] = [
-        (melds_intro_copy::SECTION_STRUCTURE, melds_intro_copy::STRUCTURE_LINES),
-        (melds_intro_copy::SECTION_CASH_IN, melds_intro_copy::CASH_IN_LINES),
+        (
+            melds_intro_copy::SECTION_STRUCTURE,
+            melds_intro_copy::STRUCTURE_LINES,
+        ),
+        (
+            melds_intro_copy::SECTION_CASH_IN,
+            melds_intro_copy::CASH_IN_LINES,
+        ),
     ];
     push_guide_left_panels(
         frame,
@@ -2767,12 +2737,8 @@ fn tiles_section_panel_height(
 ) -> f32 {
     let heading_h = widget::plain_text_block_height(heading, inner_w, section_font, line_mul);
     let body_line_h = body_font * line_mul;
-    let body_h = colored_keywords::colored_lines_block_height(
-        lines,
-        inner_w,
-        body_line_h,
-        color::PARCHMENT,
-    );
+    let body_h =
+        colored_keywords::colored_lines_block_height(lines, inner_w, body_line_h, color::PARCHMENT);
     pad + heading_h + 6.0 + body_h + pad
 }
 
@@ -2790,9 +2756,18 @@ fn push_tiles_left_cards(
     let pad = 10.0;
     let inner_w = (w - pad * 2.0).max(1.0);
     let sections: &[(&str, &[&str])] = &[
-        (tiles_intro_copy::SECTION_NUMBER_SUITS, tiles_intro_copy::NUMBER_SUIT_LINES),
-        (tiles_intro_copy::SECTION_HONOR_SUITS, tiles_intro_copy::HONOR_LINES),
-        (tiles_intro_copy::SECTION_RANK_TERMS, tiles_intro_copy::RANK_TERM_LINES),
+        (
+            tiles_intro_copy::SECTION_NUMBER_SUITS,
+            tiles_intro_copy::NUMBER_SUIT_LINES,
+        ),
+        (
+            tiles_intro_copy::SECTION_HONOR_SUITS,
+            tiles_intro_copy::HONOR_LINES,
+        ),
+        (
+            tiles_intro_copy::SECTION_RANK_TERMS,
+            tiles_intro_copy::RANK_TERM_LINES,
+        ),
         (
             tiles_intro_copy::SECTION_SEQUENCE_RULES,
             tiles_intro_copy::SEQUENCE_RULE_LINES,
@@ -2998,13 +2973,7 @@ fn layout_guide_example_grid(
             if groups[gi].framed {
                 panels.push((gi, cell));
             }
-            let (p, l) = layout_tile_group_cell(
-                cam,
-                &groups[gi],
-                cell,
-                window_w,
-                window_h,
-            );
+            let (p, l) = layout_tile_group_cell(cam, &groups[gi], cell, window_w, window_h);
             placements.extend(p);
             if let Some(lbl) = l {
                 labels.push(lbl);
@@ -3065,8 +3034,7 @@ fn layout_tile_group_cell(
         .min(tile_area_h * 0.88)
         .min(window_h * 0.082)
         .max(24.0);
-    let tile_center_y =
-        (tile_area_top + max_tile * 0.5).min(cy + ch - pad - max_tile * 0.5);
+    let tile_center_y = (tile_area_top + max_tile * 0.5).min(cy + ch - pad - max_tile * 0.5);
     let group_w = max_tile * n as f32;
     let start_x = cx + (cw - group_w) * 0.5;
     let mut centers_xy = Vec::with_capacity(n);

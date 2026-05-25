@@ -153,7 +153,11 @@ fn collect_pack_input_paths(assets_root: &Path, dir: &Path, out: &mut Vec<PathBu
 
 fn compute_inputs_hash(repo: &Path, release: bool) -> String {
     let mut h = Fnv64::new();
-    h.write(if release { b"profile:release\n" } else { b"profile:debug\n" });
+    h.write(if release {
+        b"profile:release\n"
+    } else {
+        b"profile:debug\n"
+    });
     for path in [RULES_PATH, BAKE_SCRIPT_PATH] {
         let p = repo.join(path);
         h.write(path.as_bytes());

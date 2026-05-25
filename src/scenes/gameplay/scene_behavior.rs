@@ -5,7 +5,7 @@ use crate::core::relic::{RelicId, all_relic_defs, relic_description_live};
 use crate::render::theme::color;
 use crate::scenes::options;
 use crate::scenes::{BackgroundId, GuideScene, OverlayRequest};
-use crate::ui::boss_icons::boss_icon_source;
+use crate::ui::ordeal_icons::ordeal_icon_source;
 use crate::ui::inspect_plaque::{
     FocusTooltipPanelParams, dora_focus_tooltip_strings, gameplay_consumable_description_full,
     hand_tile_focus_tooltip, push_focus_tooltip_panel_2d, round_wind_focus_tooltip_strings,
@@ -82,7 +82,7 @@ impl SceneBehavior for GameplayScene {
             animation_state::tick_candle_and_light_ramp(self, now, dt);
         }
 
-        // Deferred round start: fire `apply_blind` once the opening candle
+        // Deferred round start: fire `apply_chamber` once the opening candle
         // light-ramp has hit full brightness. The round's hand deal, boss
         // rules, and on-round-start relic triggers (Sweepstakes coin shower,
         // DoraCrown extra dora, future hooks) all happen now instead of
@@ -90,20 +90,20 @@ impl SceneBehavior for GameplayScene {
         // transition clears. The post-deal wind gust that follows the
         // deal is what sweeps the remaining curtain away, so timing-wise
         // this lands at the end of the fade-in.
-        if let Some(blind) = self.pending_blind {
+        if let Some(blind) = self.pending_chamber {
             // Keep the felt empty behind the opening transition. Paths
             // that land here may have left a stale hand on the run state
             // (first-round `RunState::new` pre-draws, tutorial retry re-deals
-            // before transitioning), and `apply_blind` will do the real
+            // before transitioning), and `apply_chamber` will do the real
             // deal once the ramp completes.
-            GameEngine::prepare_pending_blind(ctx.run);
+            GameEngine::prepare_pending_chamber(ctx.run);
             if self.light_ramp >= 1.0 {
                 let mut engine = GameEngine::new(ctx.run, ctx.bus);
-                let _ = engine.dispatch(GameCommand::ApplyBlind { blind });
+                let _ = engine.dispatch(GameCommand::ApplyChamber { blind });
                 if ctx.run.onboarding_lessons_active() {
                     ctx.run.seed_onboarding_hand();
                 }
-                self.pending_blind = None;
+                self.pending_chamber = None;
             }
         }
 
@@ -112,11 +112,11 @@ impl SceneBehavior for GameplayScene {
 
         // Scene transition in progress — keep animations running but block
         // all input so the player can't alter game state during the fade-out.
-        // Also block while `pending_blind` is set: the scene is rendering the
+        // Also block while `pending_chamber` is set: the scene is rendering the
         // previous round's state behind the opening transition, and any
         // input would act on that stale state instead of the round that's
         // about to start.
-        if ctx.transitioning || self.pending_blind.is_some() {
+        if ctx.transitioning || self.pending_chamber.is_some() {
             return None;
         }
 
@@ -291,7 +291,7 @@ impl SceneBehavior for GameplayScene {
         // the screen.
         let window_title = format!(
             "Mahjuro — {} Round {}  {} / {}  Gold: {}  Hands: {}  Discards: {}",
-            gameplay.blind.name(),
+            gameplay.chamber.name(),
             gameplay.run_number,
             if !self.cascade_queue.is_empty() {
                 self.displayed_score
@@ -368,8 +368,8 @@ impl SceneBehavior for GameplayScene {
             .unwrap_or_else(|| hand_slots_for_count(layout, interaction.hand_len));
 
         // Boss payload for the dedicated boss plinth inspect target.
-        let boss_title_text = gameplay.boss_ofuda_title.clone();
-        let boss_rule_text = gameplay.boss_ofuda_rule_text.clone();
+        let boss_title_text = gameplay.ordeal_ofuda_title.clone();
+        let boss_rule_text = gameplay.ordeal_ofuda_rule_text.clone();
 
         // Modifier strip: cascade / sets (full width). Relics shown as row below score panel.
         let cascade_frame = self
@@ -611,7 +611,7 @@ impl SceneBehavior for GameplayScene {
         // tracks the actual on-screen tile as camera/arrange overrides shift
         // it). Falls back to a screen-position estimate before projection
         // cache has populated.
-        let dora_tile_count = if self.pending_blind.is_some() {
+        let dora_tile_count = if self.pending_chamber.is_some() {
             0
         } else {
             gameplay.dora_indicator_tiles.len().min(2)
@@ -652,7 +652,7 @@ impl SceneBehavior for GameplayScene {
                 [bx - bw * 0.5, by - bh * 0.5, bw, bh]
             })
         });
-        let boss_icon_rect: Option<[f32; 4]> = boss_plinth_rect.map(|rect| {
+        let ordeal_icon_rect: Option<[f32; 4]> = boss_plinth_rect.map(|rect| {
             let icon_size = layout.mm(20.0).min(rect[2] * 0.70).min(rect[3] * 0.70);
             let [anchor_x, platform_top_y] = ctx.proj.boss_plinth_platform_px.unwrap_or([
                 rect[0] + rect[2] * 0.5,
@@ -750,8 +750,7 @@ impl SceneBehavior for GameplayScene {
                     .hand_uids
                     .extend(interaction.hand.iter().map(|t| t.id));
                 cache.selection_mask = selection_mask;
-                cache.hints =
-                    suggest_completions(&interaction.hand, &interaction.selected_indices);
+                cache.hints = suggest_completions(&interaction.hand, &interaction.selected_indices);
             }
             cache.hints.clone()
         } else {
@@ -993,7 +992,7 @@ impl SceneBehavior for GameplayScene {
         // text pass). Cascade popups and hand-off glyphs still use 3D meshes;
         // their destinations use `score_counter_layout`.
         let score_counter = super::score_counter::score_counter_layout(layout, &self.positions);
-        // Debug visibility: `hide_blind_plaque` / `hide_scoring_placard` gate
+        // Debug visibility: `hide_chamber_plaque` / `hide_scoring_placard` gate
         // the 2D score readout (same flags as the former plaque / counter).
         // Anchor it from the plaque's *actual* left edge instead of the raw
         // score-panel bounds: perspective projection pulls taller / higher
@@ -1262,7 +1261,7 @@ impl SceneBehavior for GameplayScene {
                 glb_anchors.as_ref().map(|g| g.tile_plinth_anchors.as_slice()),
             );
         }
-        if let (Some(boss_kind), Some(icon_rect)) = (gameplay.boss_kind, boss_icon_rect) {
+        if let (Some(ordeal_kind), Some(icon_rect)) = (gameplay.ordeal_kind, ordeal_icon_rect) {
             let (boss_glow, boss_wiggle) = self.boss_rule_feedback(now, boss_blocks_selection);
             if boss_glow > 0.0 {
                 let pad = icon_rect[2].max(icon_rect[3]) * 0.42;
@@ -1273,12 +1272,7 @@ impl SceneBehavior for GameplayScene {
                         icon_rect[2] + pad * 2.0,
                         icon_rect[3] + pad * 2.0,
                     ],
-                    color: [
-                        1.0,
-                        0.48,
-                        0.10,
-                        0.18 + 0.42 * boss_glow,
-                    ],
+                    color: [1.0, 0.48, 0.10, 0.18 + 0.42 * boss_glow],
                     user: 0,
                 });
             }
@@ -1293,7 +1287,7 @@ impl SceneBehavior for GameplayScene {
                     color: color::alpha(color::CHAMPAGNE, 0.98),
                     user: 0,
                 },
-                source: boss_icon_source(boss_kind),
+                source: ordeal_icon_source(ordeal_kind),
             }));
         }
 
@@ -1455,7 +1449,7 @@ impl SceneBehavior for GameplayScene {
             }
         }
 
-        let hud_text = if !ctx.debug_visibility.hide_blind_plaque
+        let hud_text = if !ctx.debug_visibility.hide_chamber_plaque
             && !ctx.debug_visibility.hide_scoring_placard
         {
             use crate::render::theme::typography;
@@ -1558,8 +1552,8 @@ impl SceneBehavior for GameplayScene {
         // Dora indicator — display-only focus target so a controller
         // player can read what the brass plinth represents.
         focus_rect_graph.push((FocusTarget::Dora, dora_rect));
-        if let Some(rect) = boss_icon_rect {
-            focus_rect_graph.push((FocusTarget::Boss, rect));
+        if let Some(rect) = ordeal_icon_rect {
+            focus_rect_graph.push((FocusTarget::Ordeal, rect));
         }
         focus_rect_graph.push((FocusTarget::RoundWind, round_wind_rect));
 
@@ -1715,7 +1709,7 @@ impl SceneBehavior for GameplayScene {
                             },
                         );
                     }
-                    FocusTarget::Boss => {
+                    FocusTarget::Ordeal => {
                         if !boss_title_text.is_empty() {
                             push_focus_tooltip_panel_2d(
                                 &mut inspect_tooltip_quads,
@@ -1726,7 +1720,7 @@ impl SceneBehavior for GameplayScene {
                                     anchor_rect: Some(rect),
                                     title: &boss_title_text,
                                     desc: &boss_rule_text,
-                                    cta: "Boss Rule",
+                                    cta: "Ordeal Rule",
                                     accent_color: color::RUBY,
                                     hover_is_owned: false,
                                     skip_title_block: false,
@@ -1856,8 +1850,6 @@ impl SceneBehavior for GameplayScene {
 
         frame.candle_light_count = candle_placements.len() as u32;
         frame.flame_height_world = crate::render::flame_volume::flame_height_world(layout);
-        frame.scene_lighting.set_smooth_points(point_lights);
-        frame.scene_lighting.spot_lights = spot_lights;
         // Projected rects for the discard river + play mirror: hit-test order
         // before the fullscreen 3D catch-all (same id — dispatcher uses
         // `picked_gameplay_object`). Labels render centered in these rects in the

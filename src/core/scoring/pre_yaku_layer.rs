@@ -329,7 +329,13 @@ pub(crate) fn apply_pre_yaku_scoring(
         // honor the mask has devoured this run. The accumulator grows in
         // `apply_scored_melds` at cash-in time (each devoured honor adds
         // 20 chips and the tile is permanently removed from the wall).
-        push_chips(steps, chips, *mult, "Taotie", crate::core::relic::TAOTIE_BASE_CHIPS);
+        push_chips(
+            steps,
+            chips,
+            *mult,
+            "Taotie",
+            crate::core::relic::TAOTIE_BASE_CHIPS,
+        );
         let devoured_chips = ctx
             .relic
             .counters

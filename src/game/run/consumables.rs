@@ -17,8 +17,7 @@ impl RunState {
         self.chronicle.note_consumable_used(item);
         match item {
             Consumable::Zodiac(z) => {
-                self.defeat_journal.zodiac_uses =
-                    self.defeat_journal.zodiac_uses.saturating_add(1);
+                self.defeat_journal.zodiac_uses = self.defeat_journal.zodiac_uses.saturating_add(1);
                 let yaku = z.yaku();
                 let new_level = self.yaku_levels.level_up_for_zodiac(z);
                 Some(ConsumableUseResult::Zodiac { yaku, new_level })
@@ -72,7 +71,8 @@ impl RunState {
                 self.refill_hand(bus);
             }
             MemorialTalismanKind::Skipper => {
-                let bonus = 4u32.saturating_add(snapshot.map(|s| s.journal.blinds_skipped).unwrap_or(0));
+                let bonus =
+                    4u32.saturating_add(snapshot.map(|s| s.journal.chambers_skipped).unwrap_or(0));
                 self.memorial_round.clear_gold_bonus = bonus.min(12);
             }
             MemorialTalismanKind::Hoarder => {
@@ -119,8 +119,7 @@ impl RunState {
             }
             MemorialTalismanKind::MeldMason => {
                 self.memorial_round.next_cashin_bonus_chips = 80;
-                self.memorial_round.next_cashin_yaku =
-                    snapshot.and_then(|s| s.dominant_yaku);
+                self.memorial_round.next_cashin_yaku = snapshot.and_then(|s| s.dominant_yaku);
             }
             MemorialTalismanKind::DeepWalker => {
                 self.memorial_round.next_cashin_bonus_chips = 60;

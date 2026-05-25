@@ -77,20 +77,21 @@ impl RuleModifier {
     }
 }
 
-/// Blind difficulty chosen before each round.
+/// Chamber difficulty chosen before each round (Small / Big / Ordeal within a wing).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum BlindKind {
+pub enum ChamberKind {
     Small,
     Big,
-    Boss,
+    #[serde(alias = "Boss")]
+    Ordeal,
 }
 
-impl BlindKind {
-    /// Round wind for the given ante (1-indexed): East → South → West → North,
+impl ChamberKind {
+    /// Round wind for the given wing (1-indexed): East → South → West → North,
     /// cycling. The round wind tile becomes Yakuhai (a triplet/kong of it grants
-    /// the Yakuhai yaku) and is shown on the blind card.
-    pub fn round_wind_for_ante(ante: u32) -> u8 {
-        ((ante.saturating_sub(1)) % 4) as u8 + 1
+    /// the Yakuhai yaku) and is shown on the chamber card.
+    pub fn round_wind_for_wing(wing: u32) -> u8 {
+        ((wing.saturating_sub(1)) % 4) as u8 + 1
     }
 
     /// Display name for a wind rank (1=East, 2=South, 3=West, 4=North).
@@ -104,11 +105,11 @@ impl BlindKind {
         }
     }
 
-    /// Random wind rank (1–4) other than the ante's round wind.
-    pub fn roll_bonus_round_wind_for_ante(ante: u32) -> u8 {
+    /// Random wind rank (1–4) other than the wing's round wind.
+    pub fn roll_bonus_round_wind_for_wing(wing: u32) -> u8 {
         use rand::seq::IndexedRandom;
 
-        let primary = Self::round_wind_for_ante(ante);
+        let primary = Self::round_wind_for_wing(wing);
         let pool: Vec<u8> = (1u8..=4).filter(|w| *w != primary).collect();
         *pool
             .choose(&mut rand::rng())
@@ -123,32 +124,32 @@ impl BlindKind {
         }
     }
 
-    /// Flat gold reward for clearing this blind. Balatro-style: a fixed
-    /// payout per blind, not scaled by overscoring. Late-run income comes
+    /// Flat gold reward for clearing this chamber. Balatro-style: a fixed
+    /// payout per chamber, not scaled by overscoring. Late-run income comes
     /// from interest on banked gold and unused-plays payout, not from
     /// blowing past the target.
     pub fn clear_reward(self) -> u32 {
         match self {
-            BlindKind::Small => 3,
-            BlindKind::Big => 4,
-            BlindKind::Boss => 5,
+            ChamberKind::Small => 3,
+            ChamberKind::Big => 4,
+            ChamberKind::Ordeal => 5,
         }
     }
 
     pub fn name(self) -> &'static str {
         match self {
-            BlindKind::Small => "Small Blind",
-            BlindKind::Big => "Big Blind",
-            BlindKind::Boss => "Boss Blind",
+            ChamberKind::Small => "Small Chamber",
+            ChamberKind::Big => "Big Chamber",
+            ChamberKind::Ordeal => "Ordeal Chamber",
         }
     }
 
-    /// The next blind in the Small → Big → Boss → Small cycle.
-    pub fn next(self) -> BlindKind {
+    /// The next chamber in the Small → Big → Ordeal → Small cycle.
+    pub fn next(self) -> ChamberKind {
         match self {
-            BlindKind::Small => BlindKind::Big,
-            BlindKind::Big => BlindKind::Boss,
-            BlindKind::Boss => BlindKind::Small,
+            ChamberKind::Small => ChamberKind::Big,
+            ChamberKind::Big => ChamberKind::Ordeal,
+            ChamberKind::Ordeal => ChamberKind::Small,
         }
     }
 }

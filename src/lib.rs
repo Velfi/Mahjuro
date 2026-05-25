@@ -177,7 +177,7 @@ struct App {
     /// we only call `set_title` when it actually changes — Wayland/X11
     /// charges a syscall for each call.
     last_window_title: String,
-    /// Rare flicker + brownout on shop / pick_blind / collection room lighting.
+    /// Rare flicker + brownout on shop / pick_chamber / collection room lighting.
     room_gltf_brownout: main_room_gltf_brownout::RoomGltfBrownout,
     /// Frame-scoped scene-pick cache. Computed once at the top of
     /// `frame_tick` and reused by both `frame_tick` (for `update`) and
@@ -208,7 +208,7 @@ impl App {
     fn saved_resume_scene_for(scene: &Scene) -> Option<persistence::ResumeScene> {
         match scene {
             Scene::Shop(_) => Some(persistence::ResumeScene::Shop),
-            Scene::PickBlind(_) => Some(persistence::ResumeScene::PickBlind),
+            Scene::PickChamber(_) => Some(persistence::ResumeScene::PickChamber),
             Scene::Gameplay(_) => Some(persistence::ResumeScene::Gameplay),
             _ => None,
         }
@@ -224,9 +224,8 @@ impl App {
             .as_ref()
             .map(|i| i.xy_quick_action)
             .unwrap_or(true);
-        self.scene.face_button_bindings(crate::ui::input::FaceBindingCtx {
-            xy_quick_action,
-        })
+        self.scene
+            .face_button_bindings(crate::ui::input::FaceBindingCtx { xy_quick_action })
     }
 
     /// Single source of truth for "is anything modal-like up right now?"

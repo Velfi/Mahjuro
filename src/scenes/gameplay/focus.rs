@@ -57,8 +57,8 @@ pub(super) enum FocusTarget {
     YakuTablet(usize),
     /// The brass dora indicator stand at the back-right of the table.
     Dora,
-    /// The brass boss-rule stand parked to the right of dora during boss rounds.
-    Boss,
+    /// The brass ordeal-rule stand parked to the right of dora during ordeal rounds.
+    Ordeal,
     /// The brass round-wind stand beside the dora plinth.
     RoundWind,
     /// Optional post-discard undo control (accessibility).
@@ -149,7 +149,7 @@ pub(super) enum FocusKind {
     Gold,
     YakuTablet,
     Dora,
-    Boss,
+    Ordeal,
     RoundWind,
 }
 
@@ -163,7 +163,7 @@ pub(super) fn focus_kind(f: Option<FocusTarget>) -> Option<FocusKind> {
         FocusTarget::Gold => Some(FocusKind::Gold),
         FocusTarget::YakuTablet(_) => Some(FocusKind::YakuTablet),
         FocusTarget::Dora => Some(FocusKind::Dora),
-        FocusTarget::Boss => Some(FocusKind::Boss),
+        FocusTarget::Ordeal => Some(FocusKind::Ordeal),
         FocusTarget::RoundWind => Some(FocusKind::RoundWind),
         FocusTarget::DiscardUndo => Some(FocusKind::Button),
     }
@@ -180,7 +180,7 @@ pub(super) fn focus_kind_sfx(k: FocusKind) -> Option<crate::audio::SfxId> {
         FocusKind::Gold => SfxId::FocusGold,
         FocusKind::YakuTablet => SfxId::FocusYakuTablet,
         FocusKind::Dora => SfxId::FocusDora,
-        FocusKind::Boss => SfxId::FocusDora,
+        FocusKind::Ordeal => SfxId::FocusDora,
         FocusKind::RoundWind => SfxId::FocusDora,
     })
 }

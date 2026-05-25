@@ -198,12 +198,12 @@ impl WgpuRenderer {
                         continue;
                     }
                     if matches!(kind, DrawKind::BossIcon) {
-                        let mesh = match self.boss_icon_slot_texture.get(slot_i).copied().flatten()
+                        let mesh = match self.ordeal_icon_slot_texture.get(slot_i).copied().flatten()
                         {
-                            Some(bk) => self.boss_icon_mesh_for(bk),
+                            Some(bk) => self.ordeal_icon_mesh_for(bk),
                             None => &self.relic_box_mesh,
                         };
-                        if let Some(inst) = self.boss_icon_instances.get(slot_i) {
+                        if let Some(inst) = self.ordeal_icon_instances.get(slot_i) {
                             pass.set_bind_group(0, &inst.bind_group, &[]);
                             pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                             pass.set_index_buffer(
@@ -385,6 +385,11 @@ impl WgpuRenderer {
             RenderOp::HallwayEnvironment => {
                 if self.hallway_environment.is_some() {
                     self.draw_hallway_environment_meshes(pass, frame, false);
+                }
+            }
+            RenderOp::StaircaseEnvironment => {
+                if self.staircase_environment.is_some() {
+                    self.draw_staircase_environment_meshes(pass, frame, false);
                 }
             }
             RenderOp::ArchiveEnvironment => {

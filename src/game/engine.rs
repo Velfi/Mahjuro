@@ -10,12 +10,12 @@
 //! [`GameplayCoreState::with_run_mut`](crate::game::engine_state::GameplayCoreState::with_run_mut)
 //! so parallel vectors stay aligned.
 
-use crate::core::boss::BossKind;
+use crate::core::ordeal::OrdealKind;
 use crate::core::consumable::Consumable;
 use crate::core::hand::DetectedMeld;
 use crate::core::progression::PlayerProgress;
 use crate::core::relic::{RelicId, RelicState, apply_merchants_eye_discount};
-use crate::core::rules::BlindKind;
+use crate::core::rules::ChamberKind;
 use crate::core::scoring::ScoreBreakdown;
 use crate::core::structure::is_winning_structure_shape;
 use crate::core::tag::TagKind;
@@ -39,8 +39,8 @@ pub enum GameCommand {
     UseConsumable { index: usize },
     SortHandBySuit,
     SortHandByRank,
-    ApplyBlind { blind: BlindKind },
-    SkipUpcomingBlindWithTag,
+    ApplyChamber { blind: ChamberKind },
+    SkipUpcomingChamberWithTag,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,8 +76,8 @@ pub enum EngineEvent {
     StructureCommitted,
     StructureTriggered { earned: u64 },
     ConsumableUsed { result: ConsumableUseResult },
-    BlindApplied { blind: BlindKind },
-    BlindSkipped { next_blind: BlindKind },
+    ChamberApplied { blind: ChamberKind },
+    ChamberSkipped { next_chamber: ChamberKind },
     TagApplied { tag: TagKind },
     RoundComplete { reached_target: bool },
     GameOver { reason: GameOverReason },
@@ -124,8 +124,8 @@ pub enum CommandData {
     DiscardSelection { count: usize },
     RefillHand,
     UseConsumable { result: ConsumableUseResult },
-    ApplyBlind { blind: BlindKind },
-    SkipBlind { tag: Option<TagKind> },
+    ApplyChamber { blind: ChamberKind },
+    SkipChamber { tag: Option<TagKind> },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -261,11 +261,11 @@ impl ShopCommandOutcome {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct GameplayReadModel {
-    pub blind: BlindKind,
-    pub blind_label: String,
-    pub boss_kind: Option<BossKind>,
-    pub boss_ofuda_title: String,
-    pub boss_ofuda_rule_text: String,
+    pub chamber: ChamberKind,
+    pub chamber_label: String,
+    pub ordeal_kind: Option<OrdealKind>,
+    pub ordeal_ofuda_title: String,
+    pub ordeal_ofuda_rule_text: String,
     pub run_number: u32,
     pub round_wind_rank: u8,
     pub bonus_round_wind_rank: Option<u8>,
@@ -326,20 +326,20 @@ pub struct ShopReadModel {
     pub relic_counters: std::collections::BTreeMap<RelicId, i32>,
     pub total_score_earned: u64,
     /// Score target for the upcoming blind (per-ante scaling), for relic tooltips.
-    pub next_blind_target: u32,
+    pub next_chamber_target: u32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct PickBlindReadModel {
-    pub upcoming_blind: BlindKind,
-    pub ante: u32,
+pub struct PickChamberReadModel {
+    pub upcoming_chamber: ChamberKind,
+    pub wing: u32,
     pub run_number: u32,
     pub base_target: u32,
     pub upcoming_target: u32,
     pub skip_tag: Option<TagKind>,
-    pub boss_kind: Option<BossKind>,
-    pub boss_name: Option<String>,
-    pub boss_description: Option<String>,
+    pub ordeal_kind: Option<OrdealKind>,
+    pub ordeal_name: Option<String>,
+    pub ordeal_description: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -452,7 +452,7 @@ impl<'a> GameEngine<'a> {
         tags
     }
 
-    pub fn prepare_pending_blind(run: &mut RunState) {
+    pub fn prepare_pending_chamber(run: &mut RunState) {
         GameplayCoreState::with_run_mut(run, |core| {
             core.clear_hand_structure_bank();
         });
@@ -549,7 +549,7 @@ impl<'a> GameEngine<'a> {
             owned_talismans,
             relic_counters: run.relic_counters.clone(),
             total_score_earned: run.total_score_earned,
-            next_blind_target: run.blind_score_target(run.upcoming_blind),
+            next_chamber_target: run.chamber_score_target(run.upcoming_chamber),
         }
     }
 
@@ -566,12 +566,12 @@ impl<'a> GameEngine<'a> {
         run.tag_patron_gift
     }
 
-    pub fn read_pick_blind(run: &RunState) -> PickBlindReadModel {
-        let boss_kind = run.boss.upcoming;
-        let (boss_name, boss_description) = if let Some(kind) = boss_kind {
+    pub fn read_pick_chamber(run: &RunState) -> PickChamberReadModel {
+        let ordeal_kind = run.ordeal.upcoming;
+        let (ordeal_name, ordeal_description) = if let Some(kind) = ordeal_kind {
             let def = kind.def();
             let description = run
-                .boss
+                .ordeal
                 .effect
                 .as_ref()
                 .and_then(|effect| effect.description_override.clone())
@@ -580,16 +580,16 @@ impl<'a> GameEngine<'a> {
         } else {
             (None, None)
         };
-        PickBlindReadModel {
-            upcoming_blind: run.upcoming_blind,
-            ante: run.ante,
+        PickChamberReadModel {
+            upcoming_chamber: run.upcoming_chamber,
+            wing: run.wing,
             run_number: run.run_number,
             base_target: run.base_target,
-            upcoming_target: run.blind_score_target(run.upcoming_blind),
-            skip_tag: run.tag_for_blind(run.upcoming_blind),
-            boss_kind,
-            boss_name,
-            boss_description,
+            upcoming_target: run.chamber_score_target(run.upcoming_chamber),
+            skip_tag: run.tag_for_chamber(run.upcoming_chamber),
+            ordeal_kind,
+            ordeal_name,
+            ordeal_description,
         }
     }
 
@@ -634,8 +634,8 @@ impl<'a> GameEngine<'a> {
         run.is_selection_valid()
     }
 
-    pub fn selection_blocked_by_boss_rules(run: &RunState, tiles: &[Tile]) -> bool {
-        run.selection_blocked_by_boss_rules(tiles)
+    pub fn selection_blocked_by_ordeal_rules(run: &RunState, tiles: &[Tile]) -> bool {
+        run.selection_blocked_by_ordeal_rules(tiles)
     }
 
     pub fn validate_with_wildcards(
@@ -660,19 +660,19 @@ impl<'a> GameEngine<'a> {
 
     pub fn read(run: &RunState) -> GameplayReadModel {
         let core = GameplayCoreState::from_run(run);
-        let blind_label = if run.blind == BlindKind::Boss {
-            run.boss
+        let chamber_label = if run.chamber == ChamberKind::Ordeal {
+            run.ordeal
                 .upcoming
                 .map(|k| k.def().name.to_string())
-                .unwrap_or_else(|| run.blind.name().to_string())
+                .unwrap_or_else(|| run.chamber.name().to_string())
         } else {
-            run.blind.name().to_string()
+            run.chamber.name().to_string()
         };
-        let (boss_ofuda_title, boss_ofuda_rule_text) = if run.blind == BlindKind::Boss {
-            if let Some(kind) = run.boss.upcoming {
+        let (ordeal_ofuda_title, ordeal_ofuda_rule_text) = if run.chamber == ChamberKind::Ordeal {
+            if let Some(kind) = run.ordeal.upcoming {
                 let def = kind.def();
                 let desc = run
-                    .boss
+                    .ordeal
                     .effect
                     .as_ref()
                     .and_then(|effect| effect.description_override.as_deref())
@@ -684,15 +684,15 @@ impl<'a> GameEngine<'a> {
         } else {
             (String::new(), String::new())
         };
-        let round_wind = BlindKind::round_wind_for_ante(run.ante);
+        let round_wind = ChamberKind::round_wind_for_wing(run.wing);
         let bonus_round_wind = run.bonus_round_wind_for_yaku();
-        let round_wind_label = BlindKind::round_winds_label(round_wind, bonus_round_wind);
+        let round_wind_label = ChamberKind::round_winds_label(round_wind, bonus_round_wind);
         GameplayReadModel {
-            blind: run.blind,
-            blind_label,
-            boss_kind: run.boss.upcoming,
-            boss_ofuda_title,
-            boss_ofuda_rule_text,
+            chamber: run.chamber,
+            chamber_label,
+            ordeal_kind: run.ordeal.upcoming,
+            ordeal_ofuda_title,
+            ordeal_ofuda_rule_text,
             run_number: run.run_number,
             round_wind_rank: round_wind,
             bonus_round_wind_rank: bonus_round_wind,
@@ -758,8 +758,8 @@ impl<'a> GameEngine<'a> {
         run.run_number
     }
 
-    pub fn current_upcoming_blind(run: &RunState) -> BlindKind {
-        run.upcoming_blind
+    pub fn current_upcoming_chamber(run: &RunState) -> ChamberKind {
+        run.upcoming_chamber
     }
 
     pub fn dispatch(&mut self, command: GameCommand) -> CommandOutcome {
@@ -892,18 +892,18 @@ impl<'a> GameEngine<'a> {
                 });
                 CommandData::None
             }
-            GameCommand::ApplyBlind { blind } => {
-                self.run.apply_blind(blind, Some(&mut self.bus));
-                CommandData::ApplyBlind { blind }
+            GameCommand::ApplyChamber { blind } => {
+                self.run.apply_chamber(blind, Some(&mut self.bus));
+                CommandData::ApplyChamber { blind }
             }
-            GameCommand::SkipUpcomingBlindWithTag => {
-                let tag = self.run.tag_for_blind(self.run.upcoming_blind);
+            GameCommand::SkipUpcomingChamberWithTag => {
+                let tag = self.run.tag_for_chamber(self.run.upcoming_chamber);
                 if let Some(tag) = tag {
                     self.run.apply_tag(tag, Some(&mut self.bus));
                 }
-                self.run.skip_to_next_blind();
+                self.run.skip_to_next_chamber();
                 self.bus.push(GameEvent::RoomGltfBrownout);
-                CommandData::SkipBlind { tag }
+                CommandData::SkipChamber { tag }
             }
         };
 
@@ -1068,11 +1068,8 @@ impl<'a> GameEngine<'a> {
                 self.run
                     .apply_gold_delta(-(price as i32), Some(&mut self.bus));
                 self.run.consumables.items.push(Consumable::Talisman(kind));
-                self.run.defeat_journal.shop_talisman_buys = self
-                    .run
-                    .defeat_journal
-                    .shop_talisman_buys
-                    .saturating_add(1);
+                self.run.defeat_journal.shop_talisman_buys =
+                    self.run.defeat_journal.shop_talisman_buys.saturating_add(1);
                 self.bus
                     .push(GameEvent::UiSound(crate::audio::SfxId::Purchase));
                 self.bus.push(GameEvent::TalismanPurchased(kind));
@@ -1223,21 +1220,21 @@ impl<'a> GameEngine<'a> {
         if let CommandData::UseConsumable { result } = data {
             events.push(EngineEvent::ConsumableUsed { result });
         }
-        if let CommandData::ApplyBlind { blind } = data {
-            events.push(EngineEvent::BlindApplied { blind });
+        if let CommandData::ApplyChamber { blind } = data {
+            events.push(EngineEvent::ChamberApplied { blind });
         }
-        if let CommandData::SkipBlind { tag: Some(tag) } = data {
+        if let CommandData::SkipChamber { tag: Some(tag) } = data {
             events.push(EngineEvent::TagApplied { tag });
-            events.push(EngineEvent::BlindSkipped {
-                next_blind: self.run.upcoming_blind,
+            events.push(EngineEvent::ChamberSkipped {
+                next_chamber: self.run.upcoming_chamber,
             });
         }
 
         let mut ui_hints = Self::ui_hints(before, after);
-        if matches!(data, CommandData::ApplyBlind { .. }) {
+        if matches!(data, CommandData::ApplyChamber { .. }) {
             ui_hints.push(UiHint::Blind);
         }
-        if matches!(data, CommandData::SkipBlind { .. }) {
+        if matches!(data, CommandData::SkipChamber { .. }) {
             ui_hints.push(UiHint::Blind);
             ui_hints.push(UiHint::Round);
         }
@@ -1396,7 +1393,7 @@ mod tests {
         let mut run = RunState::new(GameMode::standard());
         let tiles = build_wall();
         let mut wall = Wall::from_unshuffled(tiles);
-        let target = crate::core::boss::effective_hand_size(&run);
+        let target = crate::core::ordeal::effective_hand_size(&run);
         let mut hand = Vec::with_capacity(target);
         for _ in 0..target {
             hand.push(wall.draw().expect("enough tiles for deterministic hand"));
@@ -1597,16 +1594,16 @@ mod tests {
     }
 
     #[test]
-    fn apply_blind_command_preserves_hand_selection_invariant() {
+    fn apply_chamber_command_preserves_hand_selection_invariant() {
         let mut run = deterministic_run();
-        run.blind = BlindKind::Small;
-        run.upcoming_blind = BlindKind::Small;
+        run.chamber = ChamberKind::Small;
+        run.upcoming_chamber = ChamberKind::Small;
         run.run_number = 1;
 
         let mut bus = EventBus::default();
         let mut engine = GameEngine::new(&mut run, &mut bus);
-        let outcome = engine.dispatch(GameCommand::ApplyBlind {
-            blind: BlindKind::Small,
+        let outcome = engine.dispatch(GameCommand::ApplyChamber {
+            blind: ChamberKind::Small,
         });
 
         assert_eq!(outcome.rejection, None);
@@ -1616,19 +1613,19 @@ mod tests {
     }
 
     #[test]
-    fn skip_upcoming_blind_applies_tag_and_emits_events() {
+    fn skip_upcoming_chamber_applies_tag_and_emits_events() {
         let mut run = deterministic_run();
-        run.small_blind_tag = Some(TagKind::GoldIngot);
-        run.upcoming_blind = BlindKind::Small;
+        run.small_chamber_tag = Some(TagKind::GoldIngot);
+        run.upcoming_chamber = ChamberKind::Small;
         let gold_before = run.gold;
         let mut bus = EventBus::default();
         let mut engine = GameEngine::new(&mut run, &mut bus);
 
-        let outcome = engine.dispatch(GameCommand::SkipUpcomingBlindWithTag);
+        let outcome = engine.dispatch(GameCommand::SkipUpcomingChamberWithTag);
 
         assert_eq!(
             outcome.data,
-            CommandData::SkipBlind {
+            CommandData::SkipChamber {
                 tag: Some(TagKind::GoldIngot)
             }
         );
@@ -1637,8 +1634,8 @@ mod tests {
         }));
         assert!(outcome.events.iter().any(|event| matches!(
             event,
-            EngineEvent::BlindSkipped {
-                next_blind: BlindKind::Big
+            EngineEvent::ChamberSkipped {
+                next_chamber: ChamberKind::Big
             }
         )));
         assert_eq!(run.gold, gold_before + 8);

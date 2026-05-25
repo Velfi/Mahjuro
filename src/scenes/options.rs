@@ -8,8 +8,8 @@ use crate::audio::SfxId;
 use crate::game::event_bus::GameEvent;
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
-use crate::ui::clip::intersect_rect;
 use crate::ui::button_prompts::{ButtonPrompt, GamepadStyle};
+use crate::ui::clip::intersect_rect;
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::smooth_scroll::SmoothScroll;
 
@@ -277,18 +277,23 @@ fn row_columns(content_x: f32, content_w: f32) -> RowColumns {
 }
 
 fn on_off(enabled: bool) -> String {
-    if enabled {
-        "ON".into()
-    } else {
-        "OFF".into()
-    }
+    if enabled { "ON".into() } else { "OFF".into() }
 }
 
 fn row_copy(row: Row, scene: &OptionsScene) -> (&'static str, String) {
     match row {
-        Row::Master => ("Master", format!("{}%", (scene.master_volume * 100.0).round() as u32)),
-        Row::Music => ("Music", format!("{}%", (scene.music_volume * 100.0).round() as u32)),
-        Row::Sfx => ("SFX", format!("{}%", (scene.sfx_volume * 100.0).round() as u32)),
+        Row::Master => (
+            "Master",
+            format!("{}%", (scene.master_volume * 100.0).round() as u32),
+        ),
+        Row::Music => (
+            "Music",
+            format!("{}%", (scene.music_volume * 100.0).round() as u32),
+        ),
+        Row::Sfx => (
+            "SFX",
+            format!("{}%", (scene.sfx_volume * 100.0).round() as u32),
+        ),
         Row::SfxToggle => ("SFX enabled", on_off(scene.sfx_enabled)),
         Row::Gamma => ("Gamma", format!("{:.2}", scene.gamma)),
         Row::Effects => ("Effects quality", scene.effects_quality.label().into()),
@@ -310,10 +315,9 @@ fn row_copy(row: Row, scene: &OptionsScene) -> (&'static str, String) {
         Row::SwapXy => ("Swap X/Y", on_off(scene.swap_xy)),
         Row::XyQuickAction => ("Face buttons: play/discard", on_off(scene.xy_quick_action)),
         Row::HoldToSellRumble => ("Controller rumble", on_off(scene.hold_to_sell_rumble)),
-        Row::AutoCashInOnFullStructure => (
-            "Auto cash-in",
-            on_off(scene.auto_cash_in_on_full_structure),
-        ),
+        Row::AutoCashInOnFullStructure => {
+            ("Auto cash-in", on_off(scene.auto_cash_in_on_full_structure))
+        }
         Row::Hints => ("Hints", on_off(scene.hints_enabled)),
         Row::GlyphPrompts => ("Button glyphs", scene.glyph_prompt.label().into()),
         Row::UndoDiscard => ("Discard undo", on_off(scene.discard_undo_enabled)),
@@ -1097,12 +1101,7 @@ impl OptionsScene {
         });
         let rule_y = layout.title_y + layout.title_h + (4.0 * layout.scale);
         instances.push(GpuInstance {
-            rect: [
-                w * 0.25,
-                rule_y,
-                w * 0.5,
-                (1.0 * layout.scale).max(1.0),
-            ],
+            rect: [w * 0.25, rule_y, w * 0.5, (1.0 * layout.scale).max(1.0)],
             color: color::BRASS,
             user: 0,
         });
@@ -1378,12 +1377,7 @@ impl OptionsScene {
                 }
 
                 text_labels.push(TextLabel {
-                    rect: [
-                        cols.label_x + pad,
-                        row_y,
-                        cols.label_w - pad * 2.0,
-                        row_h,
-                    ],
+                    rect: [cols.label_x + pad, row_y, cols.label_w - pad * 2.0, row_h],
                     text: label.into(),
                     color: label_color,
                     align: TextAlign::Left,
@@ -1433,12 +1427,7 @@ impl OptionsScene {
                 }
 
                 text_labels.push(TextLabel {
-                    rect: [
-                        cols.label_x + pad,
-                        row_y,
-                        cols.label_w - pad * 2.0,
-                        row_h,
-                    ],
+                    rect: [cols.label_x + pad, row_y, cols.label_w - pad * 2.0, row_h],
                     text: label.into(),
                     color: label_color,
                     align: TextAlign::Left,

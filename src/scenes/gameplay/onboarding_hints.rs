@@ -1,6 +1,6 @@
 //! Guided onboarding prompts during the Lessons blind.
 
-use crate::game::onboarding::{finale_intro_message};
+use crate::game::onboarding::finale_intro_message;
 use crate::game::run::RunState;
 use crate::render::draw_cmd::UiFrame;
 use crate::render::theme::{color, metrics, typography};

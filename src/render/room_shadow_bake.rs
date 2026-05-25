@@ -55,8 +55,9 @@ impl RoomShadowBake {
             depth_byte_len: self.depth_bytes.len() as u32,
             ao_byte_len: ao_len,
         };
-        let mut out =
-            Vec::with_capacity(std::mem::size_of::<RoomShadowBakeHeader>() + self.depth_bytes.len());
+        let mut out = Vec::with_capacity(
+            std::mem::size_of::<RoomShadowBakeHeader>() + self.depth_bytes.len(),
+        );
         out.extend_from_slice(bytemuck::bytes_of(&header));
         out.extend_from_slice(&self.depth_bytes);
         if let Some(ao) = &self.ao_bytes {
@@ -67,7 +68,10 @@ impl RoomShadowBake {
 
     pub fn decode_for_room(bytes: &[u8], expected_room: RoomGiRoom) -> anyhow::Result<Self> {
         let header_size = std::mem::size_of::<RoomShadowBakeHeader>();
-        anyhow::ensure!(bytes.len() >= header_size, "room shadow bake: file too small");
+        anyhow::ensure!(
+            bytes.len() >= header_size,
+            "room shadow bake: file too small"
+        );
         let header: &RoomShadowBakeHeader = bytemuck::try_from_bytes(&bytes[..header_size])
             .map_err(|e| anyhow::anyhow!("room shadow bake header: {e}"))?;
         anyhow::ensure!(header.magic == *MAGIC, "room shadow bake: bad magic");
@@ -105,7 +109,10 @@ impl RoomShadowBake {
         );
         let ao_bytes = if header.ao_byte_len > 0 {
             let ao_end = depth_end + header.ao_byte_len as usize;
-            anyhow::ensure!(bytes.len() >= ao_end, "room shadow bake: AO payload truncated");
+            anyhow::ensure!(
+                bytes.len() >= ao_end,
+                "room shadow bake: AO payload truncated"
+            );
             let ao: Arc<[u8]> = Arc::from(&bytes[depth_end..ao_end]);
             anyhow::ensure!(
                 ao.len() == header.width as usize * header.height as usize,

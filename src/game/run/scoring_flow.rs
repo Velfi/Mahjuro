@@ -2,7 +2,7 @@ use super::relic_removal::TransformationPrimaryRelic;
 use crate::{
     audio::SfxId,
     core::{
-        boss::{self, BossKind},
+        ordeal::{self, OrdealKind},
         debuff::TileDebuff,
         hand::{DetectedMeld, MeldKind, enumerate_decompositions},
         hand_intent::{DecompositionBias, decomposition_affinity, infer_decomposition_bias},
@@ -10,7 +10,7 @@ use crate::{
             RelicId, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
             ScoreRoundBundle, ScoreTileBundle,
         },
-        rules::{BlindKind, RuleModifier},
+        rules::{ChamberKind, RuleModifier},
         scoring::{EffectiveRelics, ScoreBreakdown, score_sets_with_original},
         structure::{
             StructureTriggerKind, StructureTriggerMeta, banked_meld_chips, can_trigger_structure,
@@ -143,7 +143,7 @@ impl RunState {
             let _ = core.take_selected_tiles();
         });
 
-        let effective = boss::effective_hand_size(self);
+        let effective = ordeal::effective_hand_size(self);
         let draw_target = if copy_eff.has(&self.relics, RelicId::QuickDraw) {
             self.push_relic_activation(RelicId::QuickDraw);
             effective + 1
@@ -172,13 +172,13 @@ impl RunState {
         });
         self.restamp_hand_enhancements();
 
-        if self.blind == BlindKind::Boss
-            && let Some(eff) = self.boss.effect.take()
+        if self.chamber == ChamberKind::Ordeal
+            && let Some(eff) = self.ordeal.effect.take()
         {
             if let Some(hook) = eff.on_play {
                 hook(self);
             }
-            self.boss.effect = Some(eff);
+            self.ordeal.effect = Some(eff);
         }
 
         self.try_autotrigger_structure_full(bus);
@@ -202,7 +202,7 @@ impl RunState {
         bus: &mut EventBus,
     ) -> u64 {
         let destroy_glass_cannon = self.relics.has(RelicId::GlassCannon);
-        let rw = Some(BlindKind::round_wind_for_ante(self.ante));
+        let rw = Some(ChamberKind::round_wind_for_wing(self.wing));
         let bonus_rw = self.bonus_round_wind_for_yaku();
         let scoring_tile_debuffs = self.scoring_tile_debuffs(&scoring_tiles);
         let ctx = ScoreContext {
@@ -248,7 +248,8 @@ impl RunState {
                 .map(|required| breakdown.detected_yaku.contains(&required))
                 .unwrap_or(true);
             if yaku_ok {
-                breakdown_total = breakdown_total.saturating_add(self.memorial_round.next_cashin_bonus_chips);
+                breakdown_total =
+                    breakdown_total.saturating_add(self.memorial_round.next_cashin_bonus_chips);
             }
             self.memorial_round.next_cashin_bonus_chips = 0;
             self.memorial_round.next_cashin_yaku = None;
@@ -467,8 +468,8 @@ impl RunState {
 
     fn scoring_tile_debuffs(&self, scoring_tiles: &[Tile]) -> Vec<TileDebuff> {
         let mut debuffs = self.tile_debuffs.clone();
-        let dragon_without_honors = self.blind == BlindKind::Boss
-            && self.boss.upcoming == Some(BossKind::Dragon)
+        let dragon_without_honors = self.chamber == ChamberKind::Ordeal
+            && self.ordeal.upcoming == Some(OrdealKind::Dragon)
             && !scoring_tiles
                 .iter()
                 .any(|t| matches!(t.suit, Suit::Wind | Suit::Dragon));
@@ -489,7 +490,7 @@ impl RunState {
         if self.cash_in_blocked_until_discards_spent() {
             return 0;
         }
-        let rw = Some(BlindKind::round_wind_for_ante(self.ante));
+        let rw = Some(ChamberKind::round_wind_for_wing(self.wing));
         let bonus_rw = self.bonus_round_wind_for_yaku();
         if kind == StructureTriggerKind::Manual
             && !can_trigger_structure(
@@ -533,7 +534,7 @@ impl RunState {
         if self.cash_in_blocked_until_discards_spent() {
             return;
         }
-        let rw = Some(BlindKind::round_wind_for_ante(self.ante));
+        let rw = Some(ChamberKind::round_wind_for_wing(self.wing));
         let bonus_rw = self.bonus_round_wind_for_yaku();
         if !is_winning_structure_shape(&self.structure_tiles, &self.structure_sets) {
             return;
@@ -554,7 +555,7 @@ impl RunState {
     pub(super) fn emit_round_resolution_events(&mut self, bus: &mut EventBus) {
         bus.push(GameEvent::ScoreUpdated);
         if self.round_score >= self.target_score as u64 {
-            let base_reward = self.blind.clear_reward();
+            let base_reward = self.chamber.clear_reward();
             let unused_play_bonus = self.plays_remaining;
             let interest = (self.gold.max(0) as u32 / 5).min(3);
             let green_luck_bonus =
@@ -648,15 +649,15 @@ impl RunState {
             } else {
                 String::new()
             };
-            let boss_name = if self.blind == BlindKind::Boss {
-                self.boss.upcoming.map(|b| b.name())
+            let ordeal_name = if self.chamber == ChamberKind::Ordeal {
+                self.ordeal.upcoming.map(|b| b.name())
             } else {
                 None
             };
-            self.chronicle.record_blind_cleared(
-                self.ante,
-                self.blind,
-                boss_name,
+            self.chronicle.record_chamber_cleared(
+                self.wing,
+                self.chamber,
+                ordeal_name,
                 reward_note,
                 self.round_score,
             );
@@ -670,10 +671,10 @@ impl RunState {
                     total: gold_earned,
                 },
             });
-            if self.blind == BlindKind::Boss
-                && let Some(bk) = self.boss.upcoming
+            if self.chamber == ChamberKind::Ordeal
+                && let Some(bk) = self.ordeal.upcoming
             {
-                bus.push(GameEvent::BossDefeated(bk));
+                bus.push(GameEvent::OrdealDefeated(bk));
             }
         } else if let Some(reason) = self.round_failure_reason()
             && !self.try_second_wind_salvage(reason, bus)
@@ -683,7 +684,7 @@ impl RunState {
     }
 
     /// When a round would end in defeat, Second Wind is destroyed and the blind
-    /// is forfeited (no gold payout); [`RunState::forfeit_current_blind_second_wind`]
+    /// is forfeited (no gold payout); [`RunState::forfeit_current_chamber_second_wind`]
     /// runs when the UI drains the deferred `RoundComplete`.
     fn try_second_wind_salvage(&mut self, _reason: GameOverReason, bus: &mut EventBus) -> bool {
         if !self.relics.has(RelicId::SecondWind) {
@@ -710,7 +711,7 @@ impl RunState {
         if self.cash_in_blocked_until_discards_spent() {
             return false;
         }
-        let rw = Some(BlindKind::round_wind_for_ante(self.ante));
+        let rw = Some(ChamberKind::round_wind_for_wing(self.wing));
         let bonus_rw = self.bonus_round_wind_for_yaku();
         can_trigger_structure(
             &self.structure_tiles,
@@ -731,7 +732,7 @@ impl RunState {
         if self.cash_in_blocked_until_discards_spent() {
             return None;
         }
-        let rw = Some(BlindKind::round_wind_for_ante(self.ante));
+        let rw = Some(ChamberKind::round_wind_for_wing(self.wing));
         let bonus_rw = self.bonus_round_wind_for_yaku();
         if !can_trigger_structure(
             &self.structure_tiles,
@@ -854,7 +855,7 @@ impl RunState {
             return best;
         }
         let scoring_tile_debuffs = self.scoring_tile_debuffs(scoring_tiles);
-        let rw = Some(BlindKind::round_wind_for_ante(self.ante));
+        let rw = Some(ChamberKind::round_wind_for_wing(self.wing));
         let bonus_rw = self.bonus_round_wind_for_yaku();
         let ctx = ScoreContext {
             relic: ScoreRelicBundle {

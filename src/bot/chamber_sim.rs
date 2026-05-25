@@ -14,7 +14,7 @@ use crate::game::event_bus::{EventBus, GameEvent};
 use crate::game::run::RunState;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum BlindAction {
+pub(crate) enum ChamberAction {
     Play(Vec<usize>),
     Discard(Vec<usize>),
     TriggerStructure,
@@ -24,7 +24,7 @@ pub(crate) enum BlindAction {
 
 /// Full run slice needed to rewind a blind-turn simulation branch.
 #[derive(Clone, Debug)]
-pub(crate) struct BlindPlanCheckpoint {
+pub(crate) struct ChamberPlanCheckpoint {
     hand: Vec<Tile>,
     selected: Vec<bool>,
     structure_sets: Vec<DetectedMeld>,
@@ -45,10 +45,10 @@ pub(crate) struct BlindPlanCheckpoint {
     global_buff_enhancement: Option<TileEnhancement>,
     yaku_levels: YakuLevels,
     consumables: crate::core::consumable::ConsumableInventory,
-    boss: crate::game::run::BossState,
+    ordeal: crate::game::run::OrdealState,
 }
 
-impl BlindPlanCheckpoint {
+impl ChamberPlanCheckpoint {
     pub(crate) fn capture(run: &RunState) -> Self {
         Self {
             hand: run.hand().to_vec(),
@@ -71,7 +71,7 @@ impl BlindPlanCheckpoint {
             global_buff_enhancement: run.global_buff_enhancement,
             yaku_levels: run.yaku_levels.clone(),
             consumables: run.consumables.clone(),
-            boss: run.boss.clone(),
+            ordeal: run.ordeal.clone(),
         }
     }
 
@@ -92,7 +92,7 @@ impl BlindPlanCheckpoint {
         run.global_buff_enhancement = self.global_buff_enhancement;
         run.yaku_levels = self.yaku_levels.clone();
         run.consumables = self.consumables.clone();
-        run.boss = self.boss.clone();
+        run.ordeal = self.ordeal.clone();
         run.set_gameplay_core_slice(
             self.hand.clone(),
             self.selected.clone(),
@@ -120,13 +120,13 @@ fn consumable_slot(run: &RunState, target: Consumable) -> Option<usize> {
     run.consumables.items.iter().position(|c| *c == target)
 }
 
-pub(crate) fn apply_blind_action(
+pub(crate) fn apply_chamber_action(
     run: &mut RunState,
-    action: &BlindAction,
+    action: &ChamberAction,
     bus: &mut EventBus,
 ) -> bool {
     match action {
-        BlindAction::Play(indices) => {
+        ChamberAction::Play(indices) => {
             run.clear_selection();
             for i in indices {
                 run.toggle_select(*i);
@@ -137,7 +137,7 @@ pub(crate) fn apply_blind_action(
             }
             ok
         }
-        BlindAction::Discard(indices) => {
+        ChamberAction::Discard(indices) => {
             run.clear_selection();
             for i in indices {
                 run.toggle_select(*i);
@@ -148,20 +148,20 @@ pub(crate) fn apply_blind_action(
             }
             ok
         }
-        BlindAction::TriggerStructure => {
+        ChamberAction::TriggerStructure => {
             let earned = run.trigger_structure_manual(bus);
             if earned > 0 {
                 sim_drain_bus(run, bus);
             }
             earned > 0
         }
-        BlindAction::UseZodiac(z) => {
+        ChamberAction::UseZodiac(z) => {
             let Some(idx) = consumable_slot(run, Consumable::Zodiac(*z)) else {
                 return false;
             };
             run.use_consumable(idx, bus).is_some()
         }
-        BlindAction::UseTalisman(t) => {
+        ChamberAction::UseTalisman(t) => {
             let Some(idx) = consumable_slot(run, Consumable::Talisman(*t)) else {
                 return false;
             };
@@ -172,14 +172,14 @@ pub(crate) fn apply_blind_action(
 
 /// Restore `checkpoint`, apply `action`, then run `eval` on the resulting state.
 pub(crate) fn branch_from_checkpoint<T>(
-    checkpoint: &BlindPlanCheckpoint,
+    checkpoint: &ChamberPlanCheckpoint,
     run: &mut RunState,
-    action: &BlindAction,
+    action: &ChamberAction,
     eval: impl FnOnce(&mut RunState) -> T,
 ) -> Option<T> {
     checkpoint.restore(run);
     let mut bus = EventBus::default();
-    if !apply_blind_action(run, action, &mut bus) {
+    if !apply_chamber_action(run, action, &mut bus) {
         return None;
     }
     Some(eval(run))
@@ -194,7 +194,7 @@ mod tests {
     fn checkpoint_restores_wall_after_branch_mutation() {
         let mut run = RunState::new(GameMode::standard());
         let remaining_before = run.wall.remaining();
-        let checkpoint = BlindPlanCheckpoint::capture(&run);
+        let checkpoint = ChamberPlanCheckpoint::capture(&run);
 
         checkpoint.restore(&mut run);
         for _ in 0..5 {

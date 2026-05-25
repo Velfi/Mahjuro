@@ -26,10 +26,12 @@ use crate::core::hand::{MeldKind, detect_all_sets, validate_selection_with_rules
 use crate::core::relic::{
     RelicId, RelicState, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
     ScoreRoundBundle, ScoreTileBundle, all_relic_defs, apply_merchants_eye_discount,
-    relic_sell_price_live, relic_shop_price,
+    golden_engine_mult_bonus, relic_sell_price_live, relic_shop_price,
 };
-use crate::core::rules::{BlindKind, RuleModifier};
-use crate::core::scoring::{ScoreBreakdown, format_meld_groups, score_sets_with_original};
+use crate::core::rules::{ChamberKind, RuleModifier};
+use crate::core::scoring::{
+    ScoreBreakdown, StepKind, format_meld_groups, score_sets_with_original,
+};
 use crate::core::structure::StructureTriggerMeta;
 use crate::core::talisman::TalismanKind;
 use crate::core::tile::{Suit, Tile};
@@ -38,10 +40,10 @@ use crate::core::zodiac::{YakuLevels, ZodiacKind};
 use crate::game::event_bus::GameOverReason;
 use crate::game::event_bus::{EventBus, GameEvent};
 use crate::game::game_mode::{GameMode, HAND_SIZE};
-use crate::game::run::{FINAL_ANTE, RunState, relic_eligible_for_shop_stock};
+use crate::game::run::{FINAL_WING, RunState, relic_eligible_for_shop_stock};
 
-mod blind_planner;
-mod blind_sim;
+mod chamber_planner;
+mod chamber_sim;
 mod export_schema;
 mod relic_analytics;
 mod reporting;
@@ -57,7 +59,7 @@ pub use reporting::{
 };
 use stats::clear_payout_breakdown;
 pub use stats::{AggregateStats, RunStats, RunTimeoutSnapshot};
-use stats::{BotScoringAction, PeakBlindSnapshot};
+use stats::{BotScoreSourceEntry, BotScoringAction, PeakChamberRelicState, PeakChamberSnapshot};
 
 fn relic_display_name(id: RelicId) -> &'static str {
     all_relic_defs()
@@ -130,19 +132,19 @@ macro_rules! bot_log {
     };
 }
 
-fn blind_slot_key(run: &RunState) -> String {
-    format!("{:02}-{}", run.ante, run.blind.name())
+fn chamber_slot_key(run: &RunState) -> String {
+    format!("{:02}-{}", run.wing, run.chamber.name())
 }
 
-fn blind_log_label(run: &RunState, blind: BlindKind) -> String {
+fn chamber_log_label(run: &RunState, blind: ChamberKind) -> String {
     match blind {
-        BlindKind::Boss => {
-            let boss_name = run
-                .boss
+        ChamberKind::Ordeal => {
+            let ordeal_name = run
+                .ordeal
                 .upcoming
-                .map(|boss| boss.name())
-                .unwrap_or("Unknown Boss");
-            format!("{} ({})", blind.name(), boss_name)
+                .map(|ordeal| ordeal.name())
+                .unwrap_or("Unknown Ordeal");
+            format!("{} ({})", blind.name(), ordeal_name)
         }
         _ => blind.name().to_string(),
     }
@@ -156,20 +158,20 @@ fn record_timeout_snapshot(
     stats: &mut RunStats,
     run: &RunState,
     phase: &str,
-    active_blind: BlindKind,
-    blind_turn: Option<u32>,
+    active_chamber: ChamberKind,
+    chamber_turn: Option<u32>,
     started: Instant,
 ) {
     stats.run_timed_out = true;
     stats.victory = false;
-    stats.died_on_ante = run.ante;
-    stats.died_on_blind = active_blind;
+    stats.died_on_wing = run.wing;
+    stats.died_on_chamber = active_chamber;
     stats.death_reason = None;
     stats.timeout_detail = Some(stats::RunTimeoutSnapshot {
         phase: phase.to_string(),
-        ante: run.ante,
-        blind: blind_log_label(run, active_blind),
-        blind_turn,
+        wing: run.wing,
+        chamber: chamber_log_label(run, active_chamber),
+        chamber_turn,
         round_score: run.round_score,
         target_score: run.target_score,
         plays_remaining: run.plays_remaining,
@@ -197,8 +199,8 @@ fn fmt_indices(indices: &[usize]) -> impl fmt::Display + '_ {
     DisplayIndices(indices)
 }
 
-fn current_boss_name(run: &RunState) -> Option<&'static str> {
-    run.boss.upcoming.map(|boss| boss.name())
+fn current_ordeal_name(run: &RunState) -> Option<&'static str> {
+    run.ordeal.upcoming.map(|boss| boss.name())
 }
 
 #[derive(Debug, Default)]
@@ -275,13 +277,13 @@ fn analyze_hand_options(run: &RunState, hand: &[Tile]) -> HandOptionAnalysis {
 
 fn record_terminal_hand_issue(stats: &mut RunStats, run: &RunState, cause: TerminalIssueCause) {
     *stats
-        .bot_issues_by_blind
-        .entry(blind_log_label(run, run.blind))
+        .bot_issues_by_chamber
+        .entry(chamber_log_label(run, run.chamber))
         .or_insert(0) += 1;
-    if let Some(boss_name) = current_boss_name(run) {
+    if let Some(ordeal_name) = current_ordeal_name(run) {
         *stats
-            .bot_issues_by_boss
-            .entry(boss_name.to_string())
+            .bot_issues_by_ordeal
+            .entry(ordeal_name.to_string())
             .or_insert(0) += 1;
     }
 
@@ -344,7 +346,7 @@ fn bot_score_context_base<'a>(
         round: ScoreRoundBundle {
             scored_last_turn: run.scored_last_turn,
             plays_used: plays_used_after,
-            round_wind: Some(BlindKind::round_wind_for_ante(run.ante)),
+            round_wind: Some(ChamberKind::round_wind_for_wing(run.wing)),
             bonus_round_wind: run.bonus_round_wind_for_yaku(),
             played_yaku_this_round: run.played_yaku_this_round.clone(),
             is_final_play: plays_rem_after == 0,
@@ -411,7 +413,7 @@ fn shop_payoff_units(run: &RunState, score: u64, gold: i32) -> i64 {
         return score_part;
     }
     let target = run.target_score.max(1) as i64;
-    let clear_gold = run.blind.clear_reward().max(1) as i64;
+    let clear_gold = run.chamber.clear_reward().max(1) as i64;
     score_part + gold as i64 * target / clear_gold
 }
 
@@ -545,7 +547,9 @@ pub(crate) fn top_k_plays_in_hand(
     top.sort_unstable_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
     top.dedup_by(|a, b| a.1 == b.1);
     top.truncate(k);
-    top.into_iter().map(|(rank, indices)| (rank.score, indices)).collect()
+    top.into_iter()
+        .map(|(rank, indices)| (rank.score, indices))
+        .collect()
 }
 
 /// Full score breakdown for a specific hand subset (committed-play attribution).
@@ -586,6 +590,114 @@ fn score_breakdown_for_play_indices(
         &run.round_rules,
         &tiles,
     ))
+}
+
+fn source_rows_from_points(
+    points_by_source: std::collections::BTreeMap<String, u64>,
+) -> Vec<BotScoreSourceEntry> {
+    let mut rows: Vec<BotScoreSourceEntry> = points_by_source
+        .into_iter()
+        .map(|(name, points)| BotScoreSourceEntry { name, points })
+        .collect();
+    rows.sort_by(|a, b| b.points.cmp(&a.points).then_with(|| a.name.cmp(&b.name)));
+    rows
+}
+
+fn is_yaku_or_dora_source(
+    source: &str,
+    yaku_names: &std::collections::BTreeSet<&'static str>,
+) -> bool {
+    source.starts_with("Dora ") || yaku_names.contains(source)
+}
+
+pub(crate) fn build_bot_scoring_action(
+    kind: &str,
+    points: u64,
+    tiles: Option<String>,
+    breakdown: Option<&ScoreBreakdown>,
+    yaku_levels_before: &YakuLevels,
+    gold_before: i32,
+    golden_engine_active: bool,
+) -> BotScoringAction {
+    let mut action = BotScoringAction {
+        kind: kind.to_string(),
+        points,
+        tiles,
+        tiles_points: None,
+        yaku_points: None,
+        relic_points: None,
+        other_points: None,
+        gold_held: Some(gold_before),
+        golden_engine_mult_bonus: golden_engine_active
+            .then_some(golden_engine_mult_bonus(gold_before)),
+        yaku: Vec::new(),
+        yaku_steps: Vec::new(),
+        relic_steps: Vec::new(),
+    };
+    let Some(breakdown) = breakdown else {
+        return action;
+    };
+
+    let tile_points = breakdown
+        .base_steps
+        .last()
+        .map(|s| s.running_total)
+        .unwrap_or(0);
+    let yaku_names: std::collections::BTreeSet<&'static str> =
+        breakdown.detected_yaku.iter().map(|y| y.name()).collect();
+
+    let mut yaku_points = 0u64;
+    let mut relic_points = 0u64;
+    let mut other_points = 0u64;
+    let mut yaku_step_points: std::collections::BTreeMap<String, u64> =
+        std::collections::BTreeMap::new();
+    let mut relic_step_points: std::collections::BTreeMap<String, u64> =
+        std::collections::BTreeMap::new();
+
+    let mut prev_total = tile_points;
+    for step in &breakdown.steps {
+        let delta = step.running_total.saturating_sub(prev_total);
+        prev_total = step.running_total;
+        if matches!(step.kind, StepKind::Final | StepKind::Gold) {
+            continue;
+        }
+        if let Some(relic_name) = relic_analytics::match_step_source_to_relic(&step.source) {
+            relic_points += delta;
+            *relic_step_points.entry(relic_name.to_string()).or_insert(0) += delta;
+        } else if is_yaku_or_dora_source(&step.source, &yaku_names) {
+            yaku_points += delta;
+            *yaku_step_points.entry(step.source.clone()).or_insert(0) += delta;
+        } else {
+            other_points += delta;
+        }
+    }
+
+    action.tiles_points = Some(tile_points);
+    action.yaku_points = Some(yaku_points);
+    action.relic_points = Some(relic_points);
+    action.other_points = Some(other_points);
+    action.yaku = breakdown
+        .detected_yaku
+        .iter()
+        .map(|&yk| format!("{} Lv{}", yk.name(), yaku_levels_before.level_of(yk)))
+        .collect();
+    action.yaku_steps = source_rows_from_points(yaku_step_points);
+    action.relic_steps = source_rows_from_points(relic_step_points);
+    action
+}
+
+fn peak_chamber_relic_state(run: &RunState) -> Vec<PeakChamberRelicState> {
+    run.relics
+        .active
+        .iter()
+        .enumerate()
+        .map(|(idx, &id)| PeakChamberRelicState {
+            slot: idx.saturating_add(1) as u32,
+            name: relic_display_name(id).to_string(),
+            counter: run.relic_counters.get(&id).copied(),
+            debuffed: run.relics.is_debuffed(id),
+        })
+        .collect()
 }
 
 /// Masks that pass meld validation and structure-bank checks (still may score to zero).
@@ -1185,7 +1297,7 @@ fn rollout_post_discard_score(run: &RunState, discard_indices: &[usize]) -> u64 
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PlayBlindOutcome {
+enum PlayChamberOutcome {
     Cleared,
     LostRun,
     SecondWindForfeit,
@@ -1204,7 +1316,7 @@ fn drain_post_action_bus(
     run: &mut RunState,
     bus: &mut EventBus,
     stats: &mut RunStats,
-) -> Option<PlayBlindOutcome> {
+) -> Option<PlayChamberOutcome> {
     let events: Vec<GameEvent> = bus.drain().collect();
     for ev in events {
         match ev {
@@ -1218,8 +1330,8 @@ fn drain_post_action_bus(
                 reached_target: false,
                 ..
             } => {
-                run.forfeit_current_blind_second_wind(bus);
-                return Some(PlayBlindOutcome::SecondWindForfeit);
+                run.forfeit_current_chamber_second_wind(bus);
+                return Some(PlayChamberOutcome::SecondWindForfeit);
             }
             GameEvent::YakuScored(yk) => {
                 *stats.yaku_scored.entry(yk.name()).or_insert(0) += 1;
@@ -1238,10 +1350,7 @@ fn drain_post_action_bus(
             }
             GameEvent::TransformationSuccessorDiscovered(id) => {
                 let rname = relic_display_name(id);
-                *stats
-                    .transformations_successor
-                    .entry(rname)
-                    .or_insert(0) += 1;
+                *stats.transformations_successor.entry(rname).or_insert(0) += 1;
                 *stats.relics_picked.entry(rname).or_insert(0) += 1;
             }
             _ => {}
@@ -1252,14 +1361,14 @@ fn drain_post_action_bus(
 
 /// Play the current blind to completion. Returns outcome and the number of **decision
 /// turns** taken this blind (incremented once per loop iteration after failure checks).
-fn play_blind(
+fn play_chamber(
     run: &mut RunState,
     stats: &mut RunStats,
     log: bool,
     deadline: Option<Instant>,
     scoring_log: &mut Vec<BotScoringAction>,
     strategy: &BotStrategy,
-) -> (PlayBlindOutcome, u32) {
+) -> (PlayChamberOutcome, u32) {
     let mut bus = EventBus::default();
     let mut rng = rand::rng();
     let mut turn = 0u32;
@@ -1273,7 +1382,7 @@ fn play_blind(
                 run.round_score,
                 run.target_score
             );
-            return (PlayBlindOutcome::Cleared, turn);
+            return (PlayChamberOutcome::Cleared, turn);
         }
         if let Some(reason) = run.round_failure_reason() {
             stats.death_reason = Some(reason);
@@ -1289,14 +1398,14 @@ fn play_blind(
                 run.round_score,
                 run.target_score
             );
-            return (PlayBlindOutcome::LostRun, turn);
+            return (PlayChamberOutcome::LostRun, turn);
         }
         if run_deadline_expired(deadline) {
-            return (PlayBlindOutcome::TimedOut, turn);
+            return (PlayChamberOutcome::TimedOut, turn);
         }
         turn += 1;
-        let slot = blind_slot_key(run);
-        *stats.turns_by_blind_slot.entry(slot).or_insert(0) += 1;
+        let slot = chamber_slot_key(run);
+        *stats.turns_by_chamber_slot.entry(slot).or_insert(0) += 1;
         stats.turns_total += 1;
         stats.peak_hand_size = stats.peak_hand_size.max(run.hand().len() as u32);
 
@@ -1312,24 +1421,24 @@ fn play_blind(
             run.gold
         );
 
-        if strategy.blind_planner_depth == 0 && use_bot_consumables(run, stats, log) {
+        if strategy.chamber_planner_depth == 0 && use_bot_consumables(run, stats, log) {
             continue;
         }
 
-        if strategy.blind_planner_depth >= 1 {
-            match blind_planner::execute_planned_turn(
+        if strategy.chamber_planner_depth >= 1 {
+            match chamber_planner::execute_planned_turn(
                 run,
                 stats,
                 log,
-                strategy.blind_planner_depth,
+                strategy.chamber_planner_depth,
                 scoring_log,
                 &mut bus,
             ) {
-                Some(blind_planner::PlannedTurnOutcome::Continued) => continue,
-                Some(blind_planner::PlannedTurnOutcome::SecondWindForfeit) => {
-                    return (PlayBlindOutcome::SecondWindForfeit, turn);
+                Some(chamber_planner::PlannedTurnOutcome::Continued) => continue,
+                Some(chamber_planner::PlannedTurnOutcome::SecondWindForfeit) => {
+                    return (PlayChamberOutcome::SecondWindForfeit, turn);
                 }
-                Some(blind_planner::PlannedTurnOutcome::Failed) | None => {}
+                Some(chamber_planner::PlannedTurnOutcome::Failed) | None => {}
             }
         }
 
@@ -1345,6 +1454,9 @@ fn play_blind(
         };
         if trigger_preview > 0 && (best_score == 0 || trigger_preview >= best_score) {
             let score_before_structure = run.round_score;
+            let gold_before = run.gold;
+            let yaku_levels_before = run.yaku_levels.clone();
+            let golden_engine_active = run.relics.has(RelicId::GoldenEngine);
             let cash_in_tiles = run.structure_tiles().to_vec();
             let cash_in_sets = run.structure_sets().to_vec();
             let earned = run.trigger_structure_manual(&mut bus);
@@ -1359,17 +1471,21 @@ fn play_blind(
                 );
             }
             if drain_post_action_bus(run, &mut bus, stats)
-                == Some(PlayBlindOutcome::SecondWindForfeit)
+                == Some(PlayChamberOutcome::SecondWindForfeit)
             {
-                return (PlayBlindOutcome::SecondWindForfeit, turn);
+                return (PlayChamberOutcome::SecondWindForfeit, turn);
             }
             let structure_delta = run.round_score.saturating_sub(score_before_structure);
             if structure_delta > 0 {
-                scoring_log.push(BotScoringAction {
-                    kind: "structure".into(),
-                    points: structure_delta,
-                    tiles: format_meld_groups(&cash_in_tiles, &cash_in_sets),
-                });
+                scoring_log.push(build_bot_scoring_action(
+                    "structure",
+                    structure_delta,
+                    format_meld_groups(&cash_in_tiles, &cash_in_sets),
+                    run.last_breakdown.as_ref(),
+                    &yaku_levels_before,
+                    gold_before,
+                    golden_engine_active,
+                ));
             }
             if earned > 0 {
                 continue;
@@ -1415,13 +1531,13 @@ fn play_blind(
                 stats.discards_used += 1;
                 stats.strategic_discards += 1;
                 *stats
-                    .discards_by_blind_slot
-                    .entry(blind_slot_key(run))
+                    .discards_by_chamber_slot
+                    .entry(chamber_slot_key(run))
                     .or_insert(0) += 1;
                 if drain_post_action_bus(run, &mut bus, stats)
-                    == Some(PlayBlindOutcome::SecondWindForfeit)
+                    == Some(PlayChamberOutcome::SecondWindForfeit)
                 {
-                    return (PlayBlindOutcome::SecondWindForfeit, turn);
+                    return (PlayChamberOutcome::SecondWindForfeit, turn);
                 }
                 did_discard = true;
             }
@@ -1441,6 +1557,9 @@ fn play_blind(
             if let Some(breakdown) = score_breakdown_for_play_indices(run, &hand_before, &indices) {
                 relic_analytics::record_score_breakdown(stats, &breakdown);
             }
+            let gold_before = run.gold;
+            let yaku_levels_before = run.yaku_levels.clone();
+            let golden_engine_active = run.relics.has(RelicId::GoldenEngine);
             let bank_before_commit = run.structure_tiles().to_vec();
             let mut idx_sorted: Vec<usize> = indices.to_vec();
             idx_sorted.sort_unstable();
@@ -1468,13 +1587,13 @@ fn play_blind(
                 run.clear_selection();
                 for _ in bus.drain() {}
                 record_terminal_hand_issue(stats, run, TerminalIssueCause::RejectedChosenPlay);
-                return (PlayBlindOutcome::LostRun, turn);
+                return (PlayChamberOutcome::LostRun, turn);
             }
             stats.plays_used += 1;
             if drain_post_action_bus(run, &mut bus, stats)
-                == Some(PlayBlindOutcome::SecondWindForfeit)
+                == Some(PlayChamberOutcome::SecondWindForfeit)
             {
-                return (PlayBlindOutcome::SecondWindForfeit, turn);
+                return (PlayChamberOutcome::SecondWindForfeit, turn);
             }
             let play_delta = run.round_score.saturating_sub(score_before);
             if play_delta > 0 {
@@ -1491,11 +1610,15 @@ fn play_blind(
                     commit_melds
                         .and_then(|(sets, scoring_tiles)| format_meld_groups(&scoring_tiles, &sets))
                 };
-                scoring_log.push(BotScoringAction {
-                    kind: "play".into(),
-                    points: play_delta,
+                scoring_log.push(build_bot_scoring_action(
+                    "play",
+                    play_delta,
                     tiles,
-                });
+                    run.last_breakdown.as_ref(),
+                    &yaku_levels_before,
+                    gold_before,
+                    golden_engine_active,
+                ));
             }
             continue;
         }
@@ -1505,14 +1628,14 @@ fn play_blind(
         if run.discards_remaining == 0 {
             record_terminal_hand_issue(stats, run, TerminalIssueCause::NoDiscardsRemaining);
             bot_log!(log, "      action: no discards remaining");
-            return (PlayBlindOutcome::LostRun, turn);
+            return (PlayChamberOutcome::LostRun, turn);
         }
         run.clear_selection();
         let hand_n = run.hand().len();
         if hand_n == 0 {
             record_terminal_hand_issue(stats, run, TerminalIssueCause::EmptyHand);
             bot_log!(log, "      action: hand empty, cannot continue");
-            return (PlayBlindOutcome::LostRun, turn);
+            return (PlayChamberOutcome::LostRun, turn);
         }
         let drop_n = rng.random_range(1..=hand_n.min(5));
         let mut indices: Vec<usize> = (0..hand_n).collect();
@@ -1529,12 +1652,12 @@ fn play_blind(
         run.discard_selected(&mut bus);
         stats.discards_used += 1;
         *stats
-            .discards_by_blind_slot
-            .entry(blind_slot_key(run))
+            .discards_by_chamber_slot
+            .entry(chamber_slot_key(run))
             .or_insert(0) += 1;
-        if drain_post_action_bus(run, &mut bus, stats) == Some(PlayBlindOutcome::SecondWindForfeit)
+        if drain_post_action_bus(run, &mut bus, stats) == Some(PlayChamberOutcome::SecondWindForfeit)
         {
-            return (PlayBlindOutcome::SecondWindForfeit, turn);
+            return (PlayChamberOutcome::SecondWindForfeit, turn);
         }
     }
 }
@@ -1545,7 +1668,7 @@ mod tests {
         BotStrategy, EventBus, RunStats, ShopMarginalBase, best_play_in_hand,
         enumerate_candidate_play_masks, pick_best_play, relic_hold_value_with_base,
         relic_marginal_value_with_base, relic_shop_offer_value_with_base,
-        remaining_antes_including_current, scale_long_term_value_for_ante,
+        remaining_wings_including_current, scale_long_term_value_for_wing,
         sell_underperforming_relics, talisman_marginal_value, use_bot_consumables,
         zodiac_marginal_value_with_base,
     };
@@ -1556,7 +1679,7 @@ mod tests {
     use crate::core::tile::{Suit, Tile};
     use crate::core::zodiac::ZodiacKind;
     use crate::game::game_mode::HAND_SIZE;
-    use crate::game::run::{FINAL_ANTE, RunState};
+    use crate::game::run::{FINAL_WING, RunState};
 
     fn brute_force_best_play_in_hand(run: &RunState) -> Option<(u64, Vec<usize>)> {
         #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -1904,20 +2027,20 @@ mod tests {
     }
 
     #[test]
-    fn remaining_antes_helper_tracks_final_ante() {
-        assert_eq!(remaining_antes_including_current(1), FINAL_ANTE);
-        assert_eq!(remaining_antes_including_current(FINAL_ANTE), 1);
-        assert_eq!(remaining_antes_including_current(FINAL_ANTE + 1), 0);
+    fn remaining_wings_helper_tracks_final_wing() {
+        assert_eq!(remaining_wings_including_current(1), FINAL_WING);
+        assert_eq!(remaining_wings_including_current(FINAL_WING), 1);
+        assert_eq!(remaining_wings_including_current(FINAL_WING + 1), 0);
     }
 
     #[test]
     fn long_term_value_scales_down_late_in_the_run() {
-        let baseline = FINAL_ANTE as i32 * 10;
-        assert_eq!(scale_long_term_value_for_ante(baseline, 1), baseline);
-        assert_eq!(scale_long_term_value_for_ante(baseline, FINAL_ANTE), 10);
+        let baseline = FINAL_WING as i32 * 10;
+        assert_eq!(scale_long_term_value_for_wing(baseline, 1), baseline);
+        assert_eq!(scale_long_term_value_for_wing(baseline, FINAL_WING), 10);
         assert!(
-            scale_long_term_value_for_ante(baseline, FINAL_ANTE)
-                < scale_long_term_value_for_ante(baseline, 2)
+            scale_long_term_value_for_wing(baseline, FINAL_WING)
+                < scale_long_term_value_for_wing(baseline, 2)
         );
     }
 
@@ -1926,16 +2049,16 @@ mod tests {
         let mut agg = super::AggregateStats::default();
         let win = super::RunStats {
             victory: true,
-            died_on_ante: FINAL_ANTE,
-            antes_cleared: FINAL_ANTE,
+            died_on_wing: FINAL_WING,
+            wings_cleared: FINAL_WING,
             ..Default::default()
         };
         agg.record(&win);
 
         assert_eq!(agg.victories, 1);
-        assert_eq!(agg.max_ante_reached, FINAL_ANTE);
-        assert!(agg.deaths_by_ante.is_empty());
-        assert!(agg.deaths_by_blind.is_empty());
+        assert_eq!(agg.max_wing_reached, FINAL_WING);
+        assert!(agg.deaths_by_wing.is_empty());
+        assert!(agg.deaths_by_chamber.is_empty());
     }
 
     #[test]
@@ -1973,12 +2096,8 @@ mod tests {
         assert!(run.relics.is_full());
         let base = ShopMarginalBase::new(&run);
         let mut sell_index = None;
-        let _swap_mv = relic_shop_offer_value_with_base(
-            &run,
-            RelicId::JadeSerpent,
-            &base,
-            &mut sell_index,
-        );
+        let _swap_mv =
+            relic_shop_offer_value_with_base(&run, RelicId::JadeSerpent, &base, &mut sell_index);
         assert_eq!(
             relic_marginal_value_with_base(&run, RelicId::JadeSerpent, &base),
             0,
@@ -2022,7 +2141,8 @@ mod tests {
         };
         let mut stats = RunStats::default();
         let mut bus = EventBus::default();
-        let sold = sell_underperforming_relics(&mut run, &mut stats, false, &strategy, &base, &mut bus);
+        let sold =
+            sell_underperforming_relics(&mut run, &mut stats, false, &strategy, &base, &mut bus);
         assert_eq!(sold, 1);
         assert_eq!(stats.relics_sold, 1);
         assert_eq!(run.relics.active, vec![RelicId::PairPower]);
@@ -2109,7 +2229,7 @@ fn best_play_shop_value_for_hand(
 /// Synthetic random hands per shop valuation (plus the real current hand).
 /// Late antes use fewer samples — each one runs `best_play_in_hand`.
 fn relic_eval_sample_count(ante: u32) -> usize {
-    if ante >= FINAL_ANTE {
+    if ante >= FINAL_WING {
         2
     } else if ante >= 5 {
         3
@@ -2126,8 +2246,8 @@ struct ShopMarginalBase {
 
 impl ShopMarginalBase {
     fn new(run: &RunState) -> Self {
-        let n = relic_eval_sample_count(run.ante);
-        let size = crate::core::boss::effective_hand_size(run);
+        let n = relic_eval_sample_count(run.wing);
+        let size = crate::core::ordeal::effective_hand_size(run);
         let mut hands = Vec::with_capacity(n + 1);
         hands.push(run.hand().to_vec());
         for _ in 0..n {
@@ -2154,20 +2274,20 @@ impl ShopMarginalBase {
 /// Wall-mutating relics (`StrengthInNumbers`, `SetMagnet`, `QuickDraw`, `WildWinds`,
 /// `JokerTile`) are still under-valued because we don't simulate draws between
 /// plays. Rarity tie-break compensates.
-fn remaining_antes_including_current(ante: u32) -> u32 {
-    if ante > FINAL_ANTE {
+fn remaining_wings_including_current(ante: u32) -> u32 {
+    if ante > FINAL_WING {
         0
     } else {
-        FINAL_ANTE - ante + 1
+        FINAL_WING - ante + 1
     }
 }
 
-fn scale_long_term_value_for_ante(raw_value: i32, ante: u32) -> i32 {
+fn scale_long_term_value_for_wing(raw_value: i32, ante: u32) -> i32 {
     if raw_value <= 0 {
         return raw_value;
     }
-    let remaining = remaining_antes_including_current(ante) as i64;
-    let scaled = (raw_value as i64 * remaining + FINAL_ANTE as i64 - 1) / FINAL_ANTE as i64;
+    let remaining = remaining_wings_including_current(ante) as i64;
+    let scaled = (raw_value as i64 * remaining + FINAL_WING as i64 - 1) / FINAL_WING as i64;
     scaled as i32
 }
 
@@ -2197,7 +2317,7 @@ fn relic_marginal_value_with_base(
             - base.baseline[h] as i64;
     }
     let sample_count = base.hands.len() as i64;
-    scale_long_term_value_for_ante((delta_sum / sample_count) as i32, run.ante)
+    scale_long_term_value_for_wing((delta_sum / sample_count) as i32, run.wing)
 }
 
 fn relic_swap_marginal_value_with_base(
@@ -2219,7 +2339,7 @@ fn relic_swap_marginal_value_with_base(
             - base.baseline[h] as i64;
     }
     let sample_count = base.hands.len() as i64;
-    scale_long_term_value_for_ante((delta_sum / sample_count) as i32, run.ante)
+    scale_long_term_value_for_wing((delta_sum / sample_count) as i32, run.wing)
 }
 
 fn relic_hold_value_with_base(run: &RunState, index: usize, base: &ShopMarginalBase) -> i32 {
@@ -2238,7 +2358,7 @@ fn relic_hold_value_with_base(run: &RunState, index: usize, base: &ShopMarginalB
     if sample_count == 0 {
         return 0;
     }
-    scale_long_term_value_for_ante((delta_sum / sample_count) as i32, run.ante)
+    scale_long_term_value_for_wing((delta_sum / sample_count) as i32, run.wing)
 }
 
 /// Sell owned relics whose hold value is at or below the strategy threshold.
@@ -2351,7 +2471,7 @@ fn zodiac_marginal_value_with_base(
             - base.baseline[h] as i64;
     }
     let sample_count = base.hands.len() as i64;
-    scale_long_term_value_for_ante((delta_sum / sample_count) as i32, run.ante)
+    scale_long_term_value_for_wing((delta_sum / sample_count) as i32, run.wing)
 }
 
 /// Simulate applying a transform talisman to every tile in `hand` and return
@@ -2504,11 +2624,15 @@ fn talisman_one_shot_shop_value(raw_avg: i32, ante: u32) -> i32 {
     if raw_avg <= 0 {
         return 0;
     }
-    let remaining_blinds = (remaining_antes_including_current(ante) as i64 * 3).max(1);
-    (raw_avg as i64 / remaining_blinds) as i32
+    let remaining_chambers = (remaining_wings_including_current(ante) as i64 * 3).max(1);
+    (raw_avg as i64 / remaining_chambers) as i32
 }
 
-pub(crate) fn buff_talisman_lift_on_hand(run: &RunState, hand: &[Tile], talisman: TalismanKind) -> i32 {
+pub(crate) fn buff_talisman_lift_on_hand(
+    run: &RunState,
+    hand: &[Tile],
+    talisman: TalismanKind,
+) -> i32 {
     let baseline = best_play_shop_value_for_hand(run, hand, None, None);
     let mut enhanced = hand.to_vec();
     crate::core::talisman::apply_to_hand(&mut enhanced, talisman);
@@ -2536,9 +2660,9 @@ fn talisman_marginal_value_with_base(
         sampled_transform_talisman_raw_avg(run, talisman, base)
     };
     if run.relics.has(RelicId::BrocadePouch) {
-        return scale_long_term_value_for_ante(raw_avg, run.ante);
+        return scale_long_term_value_for_wing(raw_avg, run.wing);
     }
-    let mut mv = talisman_one_shot_shop_value(raw_avg, run.ante);
+    let mut mv = talisman_one_shot_shop_value(raw_avg, run.wing);
     if matches!(talisman, TalismanKind::Polychrome | TalismanKind::Pearl) {
         mv = mv.saturating_mul(2);
     }
@@ -2561,7 +2685,7 @@ fn pack_marginal_value(run: &RunState, kind: TilePackKind) -> i32 {
     // packs mixed in); comparison samples the wall with the prospective
     // pack added. This captures diminishing returns — a second Flowers
     // Pack is worth much less than the first.
-    let pack_iters = relic_eval_sample_count(run.ante).saturating_add(1);
+    let pack_iters = relic_eval_sample_count(run.wing).saturating_add(1);
     for _ in 0..pack_iters {
         let base_wall = Wall::from_filtered_with_packs(
             &run.removed_tile_ids,
@@ -2569,7 +2693,7 @@ fn pack_marginal_value(run: &RunState, kind: TilePackKind) -> i32 {
             &run.tile_enhancements,
             run.relics.has(RelicId::StrengthInNumbers),
         );
-        let target = crate::core::boss::effective_hand_size(run);
+        let target = crate::core::ordeal::effective_hand_size(run);
         let mut base_hand = Vec::with_capacity(target);
         let mut base_wall = base_wall;
         for _ in 0..target {
@@ -2581,7 +2705,7 @@ fn pack_marginal_value(run: &RunState, kind: TilePackKind) -> i32 {
         let with = sample_random_hand_with_extra_pack(
             run,
             kind,
-            crate::core::boss::effective_hand_size(run),
+            crate::core::ordeal::effective_hand_size(run),
         );
         let base_score = best_play_score_for_hand(run, &base_hand, None, None) as i64;
         let enriched = best_play_score_for_hand(run, &with, None, None) as i64;
@@ -2598,7 +2722,7 @@ fn pack_marginal_value(run: &RunState, kind: TilePackKind) -> i32 {
     // round-level benefit. Empirically this keeps the bot from crowding
     // out higher-value relic purchases.
     let avg = (delta_sum / sample_count) as i32 / 2;
-    scale_long_term_value_for_ante(avg, run.ante)
+    scale_long_term_value_for_wing(avg, run.wing)
 }
 
 fn use_bot_consumables(run: &mut RunState, stats: &mut RunStats, log: bool) -> bool {
@@ -2869,11 +2993,7 @@ fn visit_shop(
             if mv <= 0 {
                 continue;
             }
-            if best
-                .as_ref()
-                .map(|(_, b, _)| mv > *b)
-                .unwrap_or(true)
-            {
+            if best.as_ref().map(|(_, b, _)| mv > *b).unwrap_or(true) {
                 best = Some((i, mv, sell_index));
             }
         }
@@ -2914,7 +3034,7 @@ fn visit_shop(
                 let rname = relic_display_name(id);
                 relic_analytics::record_marginal_buy(stats, rname, marginal_value);
                 *stats.relics_picked.entry(rname).or_insert(0) += 1;
-                if run.ante <= crate::bot::stats::RELIC_SHOP_TIMING_EARLY_ANTE_MAX {
+                if run.wing <= crate::bot::stats::RELIC_SHOP_TIMING_EARLY_WING_MAX {
                     *stats.relics_picked_shop_early.entry(rname).or_insert(0) += 1;
                 } else {
                     *stats.relics_picked_shop_late.entry(rname).or_insert(0) += 1;
@@ -3005,11 +3125,11 @@ fn visit_shop(
 /// the bot's projected total score (best play × plays_remaining) must comfortably
 /// exceed the blind's target so we'd be wasting plays clearing a trivially-easy
 /// blind. Boss blinds can never be skipped.
-fn should_skip_blind(run: &RunState, blind: BlindKind, strategy: &BotStrategy) -> bool {
-    if matches!(blind, BlindKind::Boss) {
+fn should_skip_chamber(run: &RunState, blind: ChamberKind, strategy: &BotStrategy) -> bool {
+    if matches!(blind, ChamberKind::Ordeal) {
         return false;
     }
-    let target = run.blind_score_target(blind);
+    let target = run.chamber_score_target(blind);
     let best = pick_best_play(run).map(|(s, _)| s).unwrap_or(0);
     if best == 0 {
         return false;
@@ -3062,8 +3182,8 @@ fn play_run_with_options(
         log,
         "== bot run{} start: ante {} | blind {} | target {} | gold {} ==",
         run_number.map(|n| format!(" #{n}")).unwrap_or_default(),
-        run.ante,
-        blind_log_label(&run, run.upcoming_blind),
+        run.wing,
+        chamber_log_label(&run, run.upcoming_chamber),
         run.target_score,
         run.gold
     );
@@ -3071,24 +3191,24 @@ fn play_run_with_options(
     loop {
         if run.is_run_complete() {
             stats.victory = true;
-            stats.died_on_ante = FINAL_ANTE;
+            stats.died_on_wing = FINAL_WING;
             bot_log!(
                 log,
                 "== bot run complete: victory at ante {} ==",
-                FINAL_ANTE
+                FINAL_WING
             );
             break;
         }
         if run_deadline_expired(deadline) {
-            record_timeout_snapshot(&mut stats, &run, "outer", run.upcoming_blind, None, started);
+            record_timeout_snapshot(&mut stats, &run, "outer", run.upcoming_chamber, None, started);
             break;
         }
-        let blind = run.upcoming_blind;
+        let blind = run.upcoming_chamber;
         bot_log!(
             log,
             "  ante {} | blind {} | target {} | gold {} | relics {}",
-            run.ante,
-            blind_log_label(&run, blind),
+            run.wing,
+            chamber_log_label(&run, blind),
             run.target_score,
             run.gold,
             run.relics.active.len()
@@ -3097,9 +3217,9 @@ fn play_run_with_options(
         // Skip strategy: bank gold on Small/Big when projected score comfortably
         // overshoots the target. Tag rewards replace flat gold — apply them
         // the same way the pick-blind scene does.
-        if should_skip_blind(&run, blind, &strategy) {
+        if should_skip_chamber(&run, blind, &strategy) {
             bot_log!(log, "    action: skip {}", blind.name());
-            if let Some(tag) = run.tag_for_blind(blind) {
+            if let Some(tag) = run.tag_for_chamber(blind) {
                 let gold_before = run.gold;
                 run.apply_tag(tag, Some(&mut bus));
                 let gold_after = run.gold;
@@ -3111,8 +3231,8 @@ fn play_run_with_options(
                     *stats.zodiacs_picked.entry(zodiac.name()).or_insert(0) += 1;
                 }
             }
-            run.skip_to_next_blind();
-            stats.blinds_skipped += 1;
+            run.skip_to_next_chamber();
+            stats.chambers_skipped += 1;
             continue;
         }
 
@@ -3122,89 +3242,93 @@ fn play_run_with_options(
         }
 
         stats.total_target_score += run.target_score as u64;
-        run.apply_blind(blind, Some(&mut bus));
-        let boss_for_this_blind = if matches!(blind, BlindKind::Boss) {
-            current_boss_name(&run).map(|name| name.to_string())
+        run.apply_chamber(blind, Some(&mut bus));
+        let ordeal_for_this_chamber = if matches!(blind, ChamberKind::Ordeal) {
+            current_ordeal_name(&run).map(|name| name.to_string())
         } else {
             None
         };
-        if let Some(boss_name) = &boss_for_this_blind {
-            stats.boss_faced.insert(boss_name.clone(), 1);
+        if let Some(ordeal_name) = &ordeal_for_this_chamber {
+            stats.ordeal_faced.insert(ordeal_name.clone(), 1);
         }
-        let mut blind_scoring: Vec<BotScoringAction> = Vec::new();
-        let (outcome, blind_turns) =
-            play_blind(
-                &mut run,
-                &mut stats,
-                log,
-                deadline,
-                &mut blind_scoring,
-                &strategy,
-            );
-        let blind_score = run.round_score;
-        if matches!(blind, BlindKind::Boss) {
-            *stats.boss_score_by_ante.entry(run.ante).or_insert(0) += blind_score;
-            *stats.boss_attempts_by_ante.entry(run.ante).or_insert(0) += 1;
+        let mut chamber_scoring: Vec<BotScoringAction> = Vec::new();
+        let (outcome, chamber_turns) = play_chamber(
+            &mut run,
+            &mut stats,
+            log,
+            deadline,
+            &mut chamber_scoring,
+            &strategy,
+        );
+        let chamber_score = run.round_score;
+        if matches!(blind, ChamberKind::Ordeal) {
+            *stats.ordeal_score_by_wing.entry(run.wing).or_insert(0) += chamber_score;
+            *stats.ordeal_attempts_by_wing.entry(run.wing).or_insert(0) += 1;
         }
-        stats.total_score += blind_score;
-        if blind_score > stats.peak_blind_score {
-            stats.peak_blind_detail = Some(PeakBlindSnapshot {
-                blind_slot: format!("{:02}-{}", run.ante, blind.name()),
-                blind_label: blind_log_label(&run, blind),
+        stats.total_score += chamber_score;
+        if chamber_score > stats.peak_chamber_score {
+            let golden_engine_active = run.relics.has(RelicId::GoldenEngine);
+            stats.peak_chamber_detail = Some(PeakChamberSnapshot {
+                chamber_slot: format!("{:02}-{}", run.wing, blind.name()),
+                chamber_label: chamber_log_label(&run, blind),
                 target_score: run.target_score,
-                total_score: blind_score,
+                total_score: chamber_score,
                 relics: run
                     .relics
                     .active
                     .iter()
                     .map(|&id| relic_display_name(id).to_string())
                     .collect(),
-                scoring_actions: blind_scoring,
+                gold_held: Some(run.gold),
+                golden_engine_mult_bonus: golden_engine_active
+                    .then_some(golden_engine_mult_bonus(run.gold)),
+                relic_state: peak_chamber_relic_state(&run),
+                scoring_actions: chamber_scoring,
             });
         }
-        stats.peak_blind_score = stats.peak_blind_score.max(blind_score);
-        stats.died_on_ante = run.ante;
-        stats.died_on_blind = blind;
-        if let Some(boss_name) = &boss_for_this_blind
-            && outcome == PlayBlindOutcome::Cleared
+        stats.peak_chamber_score = stats.peak_chamber_score.max(chamber_score);
+        stats.died_on_wing = run.wing;
+        stats.died_on_chamber = blind;
+        if let Some(ordeal_name) = &ordeal_for_this_chamber
+            && outcome == PlayChamberOutcome::Cleared
         {
-            stats.boss_beaten.insert(boss_name.clone(), 1);
+            stats.ordeal_beaten.insert(ordeal_name.clone(), 1);
         }
-        if outcome == PlayBlindOutcome::TimedOut {
+        if outcome == PlayChamberOutcome::TimedOut {
             record_timeout_snapshot(
                 &mut stats,
                 &run,
-                "playing_blind",
+                "playing_chamber",
                 blind,
-                Some(blind_turns),
+                Some(chamber_turns),
                 started,
             );
             stats.final_gold = run.gold;
             bot_log!(
                 log,
                 "== bot run end: wall-clock timeout during {} ==",
-                blind_log_label(&run, blind)
+                chamber_log_label(&run, blind)
             );
             break;
         }
-        if outcome == PlayBlindOutcome::LostRun {
+        if outcome == PlayChamberOutcome::LostRun {
             stats.final_gold = run.gold;
             bot_log!(
                 log,
                 "== bot run end: died on ante {} {} with gold {} ==",
-                run.ante,
-                blind_log_label(&run, blind),
+                run.wing,
+                chamber_log_label(&run, blind),
                 run.gold
             );
             break;
         }
-        if outcome == PlayBlindOutcome::SecondWindForfeit {
+        if outcome == PlayChamberOutcome::SecondWindForfeit {
             stats.second_wind_forfeits += 1;
             bot_log!(
                 log,
                 "  second wind — forfeited blind; gold {} | next {:?}",
                 run.gold,
-                run.upcoming_blind
+                run.upcoming_chamber
             );
             let qilin_unlocked = stats.kokushi_musou_scored();
             match visit_shop(
@@ -3222,7 +3346,7 @@ fn play_run_with_options(
                         &mut stats,
                         &run,
                         "shop",
-                        run.upcoming_blind,
+                        run.upcoming_chamber,
                         None,
                         started,
                     );
@@ -3232,18 +3356,18 @@ fn play_run_with_options(
             }
             continue;
         }
-        stats.blinds_cleared += 1;
+        stats.chambers_cleared += 1;
         let blind_overscore = run.round_score.saturating_sub(run.target_score as u64);
         stats.total_overscore += blind_overscore;
-        let slot_key = format!("{:02}-{}", run.ante, blind.name());
+        let slot_key = format!("{:02}-{}", run.wing, blind.name());
         *stats
             .turns_cleared_by_slot
             .entry(slot_key.clone())
-            .or_insert(0) += blind_turns;
+            .or_insert(0) += chamber_turns;
         *stats.overscore_by_slot.entry(slot_key.clone()).or_insert(0) += blind_overscore;
         *stats.cleared_by_slot.entry(slot_key).or_insert(0) += 1;
-        if matches!(blind, BlindKind::Boss) {
-            stats.antes_cleared += 1;
+        if matches!(blind, ChamberKind::Ordeal) {
+            stats.wings_cleared += 1;
         }
         let payout = clear_payout_breakdown(&run);
         stats.gold_from_clears += payout.total;
@@ -3259,14 +3383,14 @@ fn play_run_with_options(
         bot_log!(
             log,
             "  blind {} cleared; advancing with gold {} and total score {}",
-            blind_log_label(&run, blind),
+            chamber_log_label(&run, blind),
             run.gold,
             stats.total_score
         );
 
         run.advance_round(&mut bus);
 
-        // Shop visit happens after advance_round (matching Shop → PickBlind scene
+        // Shop visit happens after advance_round (matching Shop → PickChamber scene
         // flow), so we evaluate purchases against the freshly-drawn next hand.
         let qilin_unlocked = stats.kokushi_musou_scored();
         match visit_shop(
@@ -3284,7 +3408,7 @@ fn play_run_with_options(
                     &mut stats,
                     &run,
                     "shop",
-                    run.upcoming_blind,
+                    run.upcoming_chamber,
                     None,
                     started,
                 );

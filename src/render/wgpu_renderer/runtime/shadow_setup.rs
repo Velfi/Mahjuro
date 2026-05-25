@@ -11,6 +11,7 @@ use crate::render::room_gi_bake::RoomGiRoom;
 pub(crate) enum ActiveRoomEnv {
     Shop,
     Hallway,
+    Staircase,
     Archive,
     MainMenu,
     Gameplay,
@@ -22,6 +23,7 @@ pub fn active_room_env(frame: &UiFrame) -> Option<ActiveRoomEnv> {
         match cmd {
             DrawCmd::ShopEnvironment => return Some(ActiveRoomEnv::Shop),
             DrawCmd::HallwayEnvironment => return Some(ActiveRoomEnv::Hallway),
+            DrawCmd::StaircaseEnvironment => return Some(ActiveRoomEnv::Staircase),
             DrawCmd::ArchiveEnvironment => return Some(ActiveRoomEnv::Archive),
             DrawCmd::MainMenuEnvironment => return Some(ActiveRoomEnv::MainMenu),
             DrawCmd::GameplayEnvironment => return Some(ActiveRoomEnv::Gameplay),
@@ -37,8 +39,10 @@ impl ActiveRoomEnv {
         match self {
             Self::Shop => Some(RoomGiRoom::Shop),
             Self::Hallway => Some(RoomGiRoom::Hallway),
+            Self::Staircase => None,
             Self::Archive => Some(RoomGiRoom::Archive),
             Self::MainMenu => Some(RoomGiRoom::MainMenu),
+            Self::Gameplay => None,
         }
     }
 }
@@ -116,9 +120,8 @@ pub(super) fn object3d_casts_dynamic_shadow(
         | Some(ActiveRoomEnv::Shop)
         | Some(ActiveRoomEnv::Hallway)
         | Some(ActiveRoomEnv::MainMenu)
-        | Some(ActiveRoomEnv::Gameplay) => {
-            true
-        }
+        | Some(ActiveRoomEnv::Gameplay)
+        | Some(ActiveRoomEnv::Staircase) => true,
         // Baked archive contact is static; the live map is for inspect orbit only.
         Some(ActiveRoomEnv::Archive) => anim_id == SHOP_INSPECT_SUBJECT_ANIM_ID,
     }
@@ -162,7 +165,10 @@ impl WgpuRenderer {
         material: MaterialKind,
     ) {
         if let Some(shadow) = shadow.as_deref_mut()
-            && object3d_casts_dynamic_shadow(self.placement_shadow_room, self.shadow_placement_anim_id)
+            && object3d_casts_dynamic_shadow(
+                self.placement_shadow_room,
+                self.shadow_placement_anim_id,
+            )
             && material_casts_shadow(material)
         {
             *shadow.changed |=
@@ -201,6 +207,7 @@ fn frame_draws_room_environment(frame: &crate::render::draw_cmd::UiFrame) -> boo
             cmd,
             DrawCmd::ShopEnvironment
                 | DrawCmd::HallwayEnvironment
+                | DrawCmd::StaircaseEnvironment
                 | DrawCmd::ArchiveEnvironment
                 | DrawCmd::MainMenuEnvironment
                 | DrawCmd::GameplayEnvironment
@@ -239,7 +246,7 @@ impl WgpuRenderer {
                 Some(
                     "shop"
                         | "tile_pack_celebration"
-                        | "pick_blind"
+                        | "pick_chamber"
                         | "main_menu_exterior"
                         | "collection"
                 )

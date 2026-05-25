@@ -814,8 +814,8 @@ mod tests {
     use crate::ui::input::{InputMode, UiAction};
 
     #[test]
-    fn pick_blind_focus_next_moves_focus() {
-        // Replicates pick_blind: two FlatItems (Play=id 1, Skip=id 2), focus
+    fn pick_chamber_focus_next_moves_focus() {
+        // Replicates pick_chamber: two FlatItems (Play=id 1, Skip=id 2), focus
         // initially on Play. Pressing FocusNext should move focus to Skip.
         let mut tree = TreeState::new();
         tree.set_focus(FocusId(1));
@@ -846,7 +846,7 @@ mod tests {
     }
 
     #[test]
-    fn pick_blind_cursor_mode_does_not_clobber_focus_when_cursor_off_rects() {
+    fn pick_chamber_cursor_mode_does_not_clobber_focus_when_cursor_off_rects() {
         // In cursor mode, hover-follow only fires when cursor is inside a rect.
         // If cursor is at (0,0) and rects are far away, focus should not change.
         let mut tree = TreeState::new();
@@ -877,7 +877,7 @@ mod tests {
     }
 
     #[test]
-    fn pick_blind_cursor_over_rect_overrides_focus_move() {
+    fn pick_chamber_cursor_over_rect_overrides_focus_move() {
         // Under cursor mode, hover-follow runs BEFORE the action loop. If
         // cursor is over Play and we also press FocusNext, what happens?
         // Order: layout -> hover-follow (sets focus to Play) -> click route

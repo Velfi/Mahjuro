@@ -663,12 +663,7 @@ fn ancestor_echo_retriggers_highest_value_meld() {
         &[],
     );
     assert_eq!(with_echo.final_chips, base.final_chips + 45);
-    assert!(
-        with_echo
-            .steps
-            .iter()
-            .any(|s| s.source == "Ancestor Echo")
-    );
+    assert!(with_echo.steps.iter().any(|s| s.source == "Ancestor Echo"));
 }
 
 #[test]

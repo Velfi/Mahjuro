@@ -68,7 +68,8 @@ struct TagPresentationRaw {
     name: String,
     description: String,
     rarity: TagRarity,
-    min_ante: u32,
+    #[serde(alias = "min_ante")]
+    min_wing: u32,
     gold_value: u32,
 }
 
@@ -76,7 +77,7 @@ struct TagPresentation {
     name: &'static str,
     description: &'static str,
     rarity: TagRarity,
-    min_ante: u32,
+    min_wing: u32,
     gold_value: u32,
 }
 
@@ -93,7 +94,7 @@ fn tag_presentations() -> &'static HashMap<TagKind, TagPresentation> {
                         name: Box::leak(r.name.into_boxed_str()),
                         description: Box::leak(r.description.into_boxed_str()),
                         rarity: r.rarity,
-                        min_ante: r.min_ante,
+                        min_wing: r.min_wing,
                         gold_value: r.gold_value,
                     },
                 )
@@ -121,9 +122,9 @@ impl TagKind {
         tag_presentation(self).rarity
     }
 
-    /// Minimum ante required for this tag to appear in the pool.
-    pub fn min_ante(self) -> u32 {
-        tag_presentation(self).min_ante
+    /// Minimum wing required for this tag to appear in the pool.
+    pub fn min_wing(self) -> u32 {
+        tag_presentation(self).min_wing
     }
 
     /// All tag variants.
@@ -171,7 +172,7 @@ pub fn roll_tag(ante: u32, exclude: Option<TagKind>) -> TagKind {
     let pool: Vec<TagKind> = TagKind::all()
         .iter()
         .copied()
-        .filter(|t| t.min_ante() <= ante && Some(*t) != exclude)
+        .filter(|t| t.min_wing() <= ante && Some(*t) != exclude)
         .collect();
 
     let total_weight: u32 = pool.iter().map(|t| t.rarity().weight()).sum();

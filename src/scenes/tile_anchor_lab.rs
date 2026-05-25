@@ -235,7 +235,8 @@ impl SceneBehavior for TileAnchorLabScene {
         let corner_tile_size = (tile_size * 0.78).clamp(24.0, 56.0);
         let gap = tile_size * 0.6;
         let total_tiles: usize = DEMO_GROUPS.iter().map(|g| g.tiles.len()).sum();
-        let total_w = total_tiles as f32 * tile_size + (DEMO_GROUPS.len().saturating_sub(1) as f32) * gap;
+        let total_w =
+            total_tiles as f32 * tile_size + (DEMO_GROUPS.len().saturating_sub(1) as f32) * gap;
         let start_x = (w - total_w) * 0.5;
         let row_center_y = h * 0.48;
 
@@ -356,15 +357,7 @@ fn layout_demo_row(
         let group_w = spec.tiles.len() as f32 * tile_size;
         let center_x = cursor_x + group_w * 0.5;
         let (group_placements, group) = layout_single_tile_group(
-            cam,
-            win_w,
-            win_h,
-            center_x,
-            center_y,
-            tile_size,
-            label_gaps,
-            spec.tiles,
-            next_id,
+            cam, win_w, win_h, center_x, center_y, tile_size, label_gaps, spec.tiles, next_id,
         );
         placements.extend(group_placements);
         groups.push(group);
@@ -439,12 +432,7 @@ fn draw_projected_bounds(
     frame: &mut UiFrame,
 ) {
     frame.quad(GpuInstance {
-        rect: [
-            bounds.min_x,
-            bounds.min_y,
-            bounds.width(),
-            bounds.height(),
-        ],
+        rect: [bounds.min_x, bounds.min_y, bounds.width(), bounds.height()],
         color: color::alpha([0.25, 0.85, 0.45, 1.0], 0.22),
         user: 0,
     });

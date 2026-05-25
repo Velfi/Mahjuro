@@ -2,7 +2,7 @@
 mod cases {
     use std::collections::BTreeMap;
 
-    use crate::core::boss::{self, BossKind};
+    use crate::core::ordeal::{self, OrdealKind};
     use crate::core::deck::Wall;
     use crate::core::deck::build_wall;
     use crate::core::hand::{DetectedMeld, MeldKind};
@@ -15,7 +15,7 @@ mod cases {
     use crate::core::tile::{Suit, Tile};
     use crate::game::event_bus::{EventBus, GameEvent, GameOverReason};
     use crate::game::game_mode::{GameMode, HAND_SIZE};
-    use crate::game::run::{BlindKind, BossState, RunState, default_available_relics};
+    use crate::game::run::{ChamberKind, OrdealState, RunState, default_available_relics};
 
     /// Standard mode starting plays (Bamboo: 4 base + 1 bonus).
     const STARTING_PLAYS: u32 = 5;
@@ -40,13 +40,13 @@ mod cases {
             ..GameMode::standard()
         };
         RunState {
-            ante: 1,
+            wing: 1,
             available_rules: vec![],
             available_yaku: vec![],
             available_relics: default_available_relics(),
             base_target: mode.base_target,
-            blind: BlindKind::Small,
-            boss: BossState::default(),
+            chamber: ChamberKind::Small,
+            ordeal: OrdealState::default(),
             consumables: crate::core::consumable::ConsumableInventory::default(),
             discards_remaining: mode.starting_discards,
             discards_max: mode.starting_discards,
@@ -71,7 +71,7 @@ mod cases {
             best_structure_score: 0,
             best_structure_name: String::new(),
             best_hand_tiles: Vec::new(),
-            score_after_ante: Vec::new(),
+            score_after_wing: Vec::new(),
             plays_remaining: mode.starting_plays,
             plays_max: mode.starting_plays,
             relics: RelicState::default(),
@@ -84,7 +84,7 @@ mod cases {
             tile_enhancements: BTreeMap::new(),
             global_buff_enhancement: None,
             removed_tile_ids: rustc_hash::FxHashSet::default(),
-            upcoming_blind: BlindKind::Small,
+            upcoming_chamber: ChamberKind::Small,
             wall,
             yaku_levels: crate::core::zodiac::YakuLevels::default(),
             tile_packs: vec![],
@@ -95,8 +95,8 @@ mod cases {
             xxxl_egg_extinct: false,
             tea_ceremony_extinct: false,
             chrysalis_extinct: false,
-            small_blind_tag: None,
-            big_blind_tag: None,
+            small_chamber_tag: None,
+            big_chamber_tag: None,
             tag_free_reroll: false,
             tag_patron_gift: false,
             tag_rich_stock: false,
@@ -473,14 +473,14 @@ mod cases {
     }
 
     #[test]
-    fn apply_blind_feeds_hungry_ghost_the_next_relic() {
+    fn apply_chamber_feeds_hungry_ghost_the_next_relic() {
         use crate::core::relic::relic_sell_price;
 
         let mut run = test_run();
         run.relics.active.push(RelicId::HungryGhost);
         run.relics.active.push(RelicId::PairPower);
 
-        run.apply_blind(BlindKind::Small, None);
+        run.apply_chamber(ChamberKind::Small, None);
 
         assert_eq!(run.relics.active, vec![RelicId::HungryGhost]);
         let expected = relic_sell_price(RelicId::PairPower) as i32 * 10;
@@ -492,14 +492,14 @@ mod cases {
     }
 
     #[test]
-    fn apply_blind_rebuilds_round_resources_from_current_bonuses() {
+    fn apply_chamber_rebuilds_round_resources_from_current_bonuses() {
         let mut run = test_run();
         run.plays_remaining = 1;
         run.discards_remaining = 0;
         run.tag_bonus_plays = 1;
         run.tag_bonus_discards = 1;
 
-        run.apply_blind(BlindKind::Small, None);
+        run.apply_chamber(ChamberKind::Small, None);
 
         assert_eq!(run.plays_remaining, STARTING_PLAYS + 1);
         assert_eq!(run.plays_max, STARTING_PLAYS + 1);
@@ -560,18 +560,18 @@ mod cases {
             !run.relics.has(RelicId::SecondWind),
             "Second Wind should be destroyed"
         );
-        run.forfeit_current_blind_second_wind(&mut bus);
-        assert_eq!(run.upcoming_blind, BlindKind::Big);
+        run.forfeit_current_chamber_second_wind(&mut bus);
+        assert_eq!(run.upcoming_chamber, ChamberKind::Big);
         assert_eq!(run.run_number, 2);
     }
 
     #[test]
     fn second_wind_plays_used_uses_effective_round_cap() {
         let mut run = test_run();
-        run.apply_blind(BlindKind::Small, None);
+        run.apply_chamber(ChamberKind::Small, None);
         run.plays_remaining -= 2;
 
-        let rw = Some(BlindKind::round_wind_for_ante(run.ante));
+        let rw = Some(ChamberKind::round_wind_for_wing(run.wing));
         let ctx = ScoreContext {
             relic: ScoreRelicBundle {
                 roster: &run.relics,
@@ -605,14 +605,14 @@ mod cases {
     }
 
     #[test]
-    fn apply_blind_uses_material_starting_discards_before_skip_bonus() {
+    fn apply_chamber_uses_material_starting_discards_before_skip_bonus() {
         let mut run = RunState::new(GameMode::with_material(
             crate::persistence::TileMaterial::Plastic,
         ));
         run.discards_remaining = 0;
         run.tag_bonus_discards = 1;
 
-        run.apply_blind(BlindKind::Small, None);
+        run.apply_chamber(ChamberKind::Small, None);
 
         assert_eq!(run.discards_remaining, 6);
         assert_eq!(run.discards_max, 6);
@@ -620,13 +620,13 @@ mod cases {
     }
 
     #[test]
-    fn apply_blind_tracks_reduced_round_caps_for_boss_taxes() {
+    fn apply_chamber_tracks_reduced_round_caps_for_boss_taxes() {
         let mut run = test_run();
-        run.boss.effect = Some(crate::core::boss::ResolvedBossEffect::from_static(
-            &crate::core::boss::BossKind::Drought.def().effect,
+        run.ordeal.effect = Some(crate::core::ordeal::ResolvedOrdealEffect::from_static(
+            &crate::core::ordeal::OrdealKind::Drought.def().effect,
         ));
 
-        run.apply_blind(BlindKind::Boss, None);
+        run.apply_chamber(ChamberKind::Ordeal, None);
 
         assert_eq!(run.discards_remaining, STARTING_DISCARDS / 2);
         assert_eq!(run.discards_max, STARTING_DISCARDS / 2);
@@ -636,7 +636,7 @@ mod cases {
     fn big_hands_increases_effective_hand_and_reduces_discard_cap() {
         let mut run = test_run();
         run.relics.active.push(RelicId::BigHands);
-        assert_eq!(boss::effective_hand_size(&run), HAND_SIZE + 2);
+        assert_eq!(ordeal::effective_hand_size(&run), HAND_SIZE + 2);
         run.reset_round_resources();
         assert_eq!(run.discards_remaining, STARTING_DISCARDS - 1);
         assert_eq!(run.discards_max, STARTING_DISCARDS - 1);
@@ -646,7 +646,7 @@ mod cases {
     fn tiny_hands_decreases_effective_hand_and_adds_discard_cap() {
         let mut run = test_run();
         run.relics.active.push(RelicId::TinyHands);
-        assert_eq!(boss::effective_hand_size(&run), HAND_SIZE - 2);
+        assert_eq!(ordeal::effective_hand_size(&run), HAND_SIZE - 2);
         run.reset_round_resources();
         assert_eq!(run.discards_remaining, STARTING_DISCARDS + 2);
         assert_eq!(run.discards_max, STARTING_DISCARDS + 2);
@@ -675,7 +675,7 @@ mod cases {
         let mut run = test_run();
         run.relics.active.push(RelicId::BigHands);
         run.relics.active.push(RelicId::TinyHands);
-        assert_eq!(boss::effective_hand_size(&run), HAND_SIZE);
+        assert_eq!(ordeal::effective_hand_size(&run), HAND_SIZE);
     }
 
     #[test]
@@ -689,30 +689,30 @@ mod cases {
     }
 
     #[test]
-    fn apply_blind_promotes_wide_hand_bonus_to_round_hand_size() {
+    fn apply_chamber_promotes_wide_hand_bonus_to_round_hand_size() {
         let mut run = test_run();
         run.apply_tag(crate::core::tag::TagKind::WideHand, None);
 
-        run.apply_blind(BlindKind::Small, None);
+        run.apply_chamber(ChamberKind::Small, None);
 
         assert_eq!(run.hand.len(), HAND_SIZE + 2);
-        assert_eq!(boss::effective_hand_size(&run), HAND_SIZE + 2);
+        assert_eq!(ordeal::effective_hand_size(&run), HAND_SIZE + 2);
         assert_eq!(run.tag_bonus_hand_size, 0);
     }
 
     #[test]
-    fn skipping_with_wide_hand_carries_bonus_into_next_blind() {
+    fn skipping_with_wide_hand_carries_bonus_into_next_chamber() {
         let mut run = test_run();
 
         run.apply_tag(crate::core::tag::TagKind::WideHand, None);
-        run.skip_to_next_blind();
+        run.skip_to_next_chamber();
 
         assert_eq!(run.tag_bonus_hand_size, 2);
 
-        run.apply_blind(BlindKind::Big, None);
+        run.apply_chamber(ChamberKind::Big, None);
 
         assert_eq!(run.hand.len(), HAND_SIZE + 2);
-        assert_eq!(boss::effective_hand_size(&run), HAND_SIZE + 2);
+        assert_eq!(ordeal::effective_hand_size(&run), HAND_SIZE + 2);
         assert_eq!(run.tag_bonus_hand_size, 0);
     }
 
@@ -720,8 +720,8 @@ mod cases {
     fn advance_round_after_boss_preserves_pending_shop_skip_rewards() {
         let mut run = test_run();
         let mut bus = bus();
-        run.blind = BlindKind::Boss;
-        run.upcoming_blind = BlindKind::Boss;
+        run.chamber = ChamberKind::Ordeal;
+        run.upcoming_chamber = ChamberKind::Ordeal;
         run.tag_free_reroll = true;
         run.tag_patron_gift = true;
         run.tag_rich_stock = true;
@@ -734,30 +734,30 @@ mod cases {
     }
 
     #[test]
-    fn advance_round_after_boss_records_score_after_ante() {
+    fn advance_round_after_boss_records_score_after_wing() {
         let mut run = test_run();
         let mut bus = bus();
-        run.ante = 3;
+        run.wing = 3;
         run.total_score_earned = 12_500;
-        run.blind = BlindKind::Boss;
-        run.upcoming_blind = BlindKind::Boss;
+        run.chamber = ChamberKind::Ordeal;
+        run.upcoming_chamber = ChamberKind::Ordeal;
 
         run.advance_round(&mut bus);
 
-        assert_eq!(run.ante, 4);
+        assert_eq!(run.wing, 4);
         assert_eq!(
-            run.score_after_ante.last(),
+            run.score_after_wing.last(),
             Some(&(3, 12_500)),
             "snapshot taken before ante increment"
         );
     }
 
     #[test]
-    fn advance_round_after_boss_clears_unconsumed_next_blind_skip_bonuses() {
+    fn advance_round_after_boss_clears_unconsumed_next_chamber_skip_bonuses() {
         let mut run = test_run();
         let mut bus = bus();
-        run.blind = BlindKind::Boss;
-        run.upcoming_blind = BlindKind::Boss;
+        run.chamber = ChamberKind::Ordeal;
+        run.upcoming_chamber = ChamberKind::Ordeal;
         run.tag_bonus_plays = 1;
         run.tag_bonus_discards = 1;
         run.tag_bonus_hand_size = 2;
@@ -786,7 +786,7 @@ mod cases {
         assert!(run.relic_activations.contains(&RelicId::QuickDraw));
         assert_eq!(
             run.hand.len(),
-            boss::effective_hand_size(&run) + 1,
+            ordeal::effective_hand_size(&run) + 1,
             "Quick Draw refills to hand size + 1"
         );
     }
@@ -841,7 +841,7 @@ mod cases {
         }];
 
         let mut baseline = test_run();
-        baseline.blind = BlindKind::Small;
+        baseline.chamber = ChamberKind::Small;
         baseline.structure_tiles = tiles.clone();
         baseline.structure_sets = sets.clone();
         let mut baseline_bus = bus();
@@ -850,9 +850,9 @@ mod cases {
         let baseline_score = baseline.round_score;
 
         let mut dragon = test_run();
-        dragon.blind = BlindKind::Boss;
-        dragon.upcoming_blind = BlindKind::Boss;
-        dragon.boss.upcoming = Some(BossKind::Dragon);
+        dragon.chamber = ChamberKind::Ordeal;
+        dragon.upcoming_chamber = ChamberKind::Ordeal;
+        dragon.ordeal.upcoming = Some(OrdealKind::Dragon);
         dragon.structure_tiles = tiles;
         dragon.structure_sets = sets;
         let mut dragon_bus = bus();
@@ -1050,9 +1050,9 @@ mod cases {
     }
 
     #[test]
-    fn selection_blocked_by_boss_rules_detects_rot_and_bureaucrat() {
-        use crate::core::boss::{BossKind, ResolvedBossEffect};
-        use crate::core::rules::{BlindKind, RuleModifier};
+    fn selection_blocked_by_ordeal_rules_detects_rot_and_bureaucrat() {
+        use crate::core::ordeal::{OrdealKind, ResolvedOrdealEffect};
+        use crate::core::rules::{ChamberKind, RuleModifier};
         use crate::core::tile::{Suit, Tile};
 
         let tiles = vec![
@@ -1062,27 +1062,25 @@ mod cases {
         ];
 
         let mut run = test_run();
-        run.blind = BlindKind::Boss;
-        run.boss.effect = Some(ResolvedBossEffect::from_static(
-            &BossKind::Rot.def().effect,
-        ));
+        run.chamber = ChamberKind::Ordeal;
+        run.ordeal.effect = Some(ResolvedOrdealEffect::from_static(&OrdealKind::Rot.def().effect));
         run.round_rules.push(RuleModifier::NoFlowerWildcards);
-        assert!(run.selection_blocked_by_boss_rules(&tiles));
+        assert!(run.selection_blocked_by_ordeal_rules(&tiles));
 
         let mut run = test_run();
-        run.blind = BlindKind::Boss;
-        run.boss.effect = Some(ResolvedBossEffect::from_static(
-            &BossKind::Bureaucrat.def().effect,
+        run.chamber = ChamberKind::Ordeal;
+        run.ordeal.effect = Some(ResolvedOrdealEffect::from_static(
+            &OrdealKind::Bureaucrat.def().effect,
         ));
         run.round_rules.push(RuleModifier::MustPlayFive);
-        assert!(run.selection_blocked_by_boss_rules(&tiles));
+        assert!(run.selection_blocked_by_ordeal_rules(&tiles));
 
         let mut run = test_run();
-        run.blind = BlindKind::Boss;
-        run.boss.effect = Some(ResolvedBossEffect::from_static(
-            &BossKind::Gate.def().effect,
+        run.chamber = ChamberKind::Ordeal;
+        run.ordeal.effect = Some(ResolvedOrdealEffect::from_static(
+            &OrdealKind::Gate.def().effect,
         ));
-        assert!(!run.selection_blocked_by_boss_rules(&tiles));
+        assert!(!run.selection_blocked_by_ordeal_rules(&tiles));
     }
 
     // ── discard indices are correct (reverse removal) ───────────────
@@ -1590,14 +1588,14 @@ mod progression_snapshot_tests {
         // and make sure `apply_progression` only refreshes the run's
         // available pool when a fresh `RunState` is created.
         let mut progress = PlayerProgress::new();
-        progress.runs_completed = 6;
+        progress.level_progress_points = PlayerProgress::min_points_for_level(6);
         progress.check_level_up();
 
         let mut current_run = RunState::new_demo();
         current_run.apply_progression(&progress);
         assert!(!current_run.available_relics.contains(&RelicId::BigHands));
 
-        progress.runs_completed = 7;
+        progress.level_progress_points = PlayerProgress::min_points_for_level(7);
         let result = progress
             .check_level_up()
             .expect("crossing into level 7 should unlock new relics");

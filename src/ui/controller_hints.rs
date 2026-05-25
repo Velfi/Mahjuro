@@ -38,7 +38,8 @@ pub struct HintMetrics {
 impl HintMetrics {
     pub fn primary(h: f32) -> Self {
         let bar_h_ref = h * HINT_BAR_H_FRAC;
-        let icon_px = (bar_h_ref * HINT_ICON_BAR_FRAC * 3.0).clamp(HINT_ICON_PX_MIN, HINT_ICON_PX_MAX);
+        let icon_px =
+            (bar_h_ref * HINT_ICON_BAR_FRAC * 3.0).clamp(HINT_ICON_PX_MIN, HINT_ICON_PX_MAX);
         let legend_font_px = typography::size(typography::H20, h);
         let ui_font = load_ui_font();
         let legend_line_h = ui_font
@@ -48,9 +49,7 @@ impl HintMetrics {
             .unwrap_or(legend_font_px * 1.2)
             .max(legend_font_px * 0.85);
         let caption_px = typography::size(typography::H42, h);
-        let row_height = (icon_px * 1.06)
-            .max(legend_line_h)
-            .max(caption_px * 1.35);
+        let row_height = (icon_px * 1.06).max(legend_line_h).max(caption_px * 1.35);
         let gap_after_icon = icon_px * 0.18;
         Self {
             icon_px,
@@ -218,11 +217,7 @@ pub struct HintStyle {
 }
 
 impl HintStyle {
-    fn from_metrics(
-        metrics: HintMetrics,
-        text_color: [f32; 4],
-        icon_tint: [f32; 4],
-    ) -> Self {
+    fn from_metrics(metrics: HintMetrics, text_color: [f32; 4], icon_tint: [f32; 4]) -> Self {
         Self {
             font_px: metrics.legend_font_px,
             line_h: metrics.row_height,
@@ -496,7 +491,11 @@ fn emit_inline_row(
         match *seg {
             InlineSegmentRef::Sep => {
                 let w = measure_text(style.font_px, INLINE_SEP);
-                texts.push(inline_text_label([x, text_y, w, style.line_h], INLINE_SEP, style));
+                texts.push(inline_text_label(
+                    [x, text_y, w, style.line_h],
+                    INLINE_SEP,
+                    style,
+                ));
                 x += w;
             }
             InlineSegmentRef::PlainText(text) => {
@@ -578,8 +577,14 @@ pub fn push_inline_hint_rows(
         let fits = rows.iter().all(|row| {
             let mut scratch: Vec<InlineSegmentRef<'_>> = Vec::new();
             let segs = inline_segment_refs(&mut scratch, row);
-            measure_inline_row(glyphs, surface, icon_px, gap_after_icon, style.font_px, segs)
-                <= max_row_w
+            measure_inline_row(
+                glyphs,
+                surface,
+                icon_px,
+                gap_after_icon,
+                style.font_px,
+                segs,
+            ) <= max_row_w
         });
         if fits || icon_px <= 18.0 {
             break;
@@ -638,11 +643,7 @@ pub struct ColumnHintEntry {
 }
 
 impl ColumnHintEntry {
-    pub fn new(
-        controller: HintKey,
-        keyboard: ImageQuadSource,
-        label: &'static str,
-    ) -> Self {
+    pub fn new(controller: HintKey, keyboard: ImageQuadSource, label: &'static str) -> Self {
         Self {
             controller,
             keyboard,
@@ -782,10 +783,7 @@ pub fn push_column_hints(
     let col_w = layout.inner_width / layout.column_count as f32;
     let col_pad = (col_w * 0.045).clamp(2.0, 8.0);
 
-    let mut icon_px = layout
-        .icon_px
-        .unwrap_or(metrics.icon_px)
-        * style.icon_scale;
+    let mut icon_px = layout.icon_px.unwrap_or(metrics.icon_px) * style.icon_scale;
     let mut gap_after_icon = icon_px * 0.18;
 
     let ui_font = load_ui_font();

@@ -41,7 +41,8 @@ pub(crate) enum SceneTag {
     ProfileSelect,
     Shop,
     Showcase,
-    PickBlind,
+    PickChamber,
+    Staircase,
     Gameplay,
     GameOver,
     Guide,
@@ -53,6 +54,7 @@ pub(crate) enum SceneTag {
     TutorialSummary,
     TransitionPlayground,
     RumbleLab,
+    Tixels,
     YakuJournal,
 }
 
@@ -65,7 +67,8 @@ impl From<&Scene> for SceneTag {
             Scene::ProfileSelect(_) => SceneTag::ProfileSelect,
             Scene::Shop(_) => SceneTag::Shop,
             Scene::Showcase(_) => SceneTag::Showcase,
-            Scene::PickBlind(_) => SceneTag::PickBlind,
+            Scene::PickChamber(_) => SceneTag::PickChamber,
+            Scene::Staircase(_) => SceneTag::Staircase,
             Scene::Gameplay(_) => SceneTag::Gameplay,
             Scene::GameOver(_) => SceneTag::GameOver,
             Scene::Guide(_) => SceneTag::Guide,
@@ -77,6 +80,7 @@ impl From<&Scene> for SceneTag {
             Scene::TutorialSummary(_) => SceneTag::TutorialSummary,
             Scene::TransitionPlayground(_) => SceneTag::TransitionPlayground,
             Scene::RumbleLab(_) => SceneTag::RumbleLab,
+            Scene::Tixels(_) => SceneTag::Tixels,
             Scene::YakuJournal(_) => SceneTag::YakuJournal,
         }
     }
@@ -125,6 +129,18 @@ pub(crate) fn transition_spec_for_edge(from: SceneTag, to: SceneTag) -> Transiti
             speed: 0.025,
         };
     }
+    if (from, to) == (Gameplay, Staircase) {
+        return TransitionSpec {
+            kind: TransitionKind::Quick,
+            speed: 0.025,
+        };
+    }
+    if (from, to) == (Staircase, Shop) {
+        return TransitionSpec {
+            kind: TransitionKind::Quick,
+            speed: 0.03,
+        };
+    }
 
     DEFAULT_QUICK_SPEC
 }
@@ -157,7 +173,7 @@ pub(crate) fn should_clear_smoke_on_transition(from: SceneTag, to: SceneTag) -> 
         (TileSelect, Shop)
             | (TutorialCampaign, Shop)
             | (TutorialCampaign, Gameplay)
-            | (Shop, PickBlind)
+            | (Shop, PickChamber)
     )
 }
 
@@ -165,7 +181,7 @@ pub(crate) struct PostSceneTransitionCtx<'a> {
     pub from: SceneTag,
     pub to: SceneTag,
     /// Current blind is a boss when transitioning into gameplay (round-start BGM).
-    pub gameplay_boss_blind: bool,
+    pub gameplay_ordeal_chamber: bool,
     pub anim: &'a mut AnimationController,
     pub renderer: Option<&'a mut WgpuRenderer>,
     pub input: Option<&'a mut InputState>,
@@ -176,15 +192,17 @@ pub(crate) struct PostSceneTransitionCtx<'a> {
 pub(crate) fn sync_music_for_scene(
     audio: &mut crate::audio::AudioManager,
     tag: SceneTag,
-    gameplay_boss_blind: bool,
+    gameplay_ordeal_chamber: bool,
 ) {
     use crate::audio::MusicId;
     match tag {
         SceneTag::MainMenuExterior | SceneTag::Collection => {
             audio.set_music_track(MusicId::MainMenu)
         }
-        SceneTag::Gameplay => audio.set_gameplay_music(gameplay_boss_blind),
-        SceneTag::Shop | SceneTag::PickBlind => audio.set_music_track(MusicId::Shop),
+        SceneTag::Gameplay => audio.set_gameplay_music(gameplay_ordeal_chamber),
+        SceneTag::Shop | SceneTag::PickChamber | SceneTag::Staircase => {
+            audio.set_music_track(MusicId::Shop)
+        }
         _ => audio.stop_background_music(),
     }
 }
@@ -211,7 +229,7 @@ pub(crate) fn apply_post_scene_transition_effects(ctx: PostSceneTransitionCtx<'_
     if ctx.to == SceneTag::MainMenuExterior {
         crate::asset_path::prefetch_lazy_packs_after_menu_once();
     }
-    sync_music_for_scene(ctx.audio, ctx.to, ctx.gameplay_boss_blind);
+    sync_music_for_scene(ctx.audio, ctx.to, ctx.gameplay_ordeal_chamber);
     sync_ambient_for_scene(ctx.audio, ctx.to);
     if let Some(input) = ctx.input {
         input.focus_slot = 0;

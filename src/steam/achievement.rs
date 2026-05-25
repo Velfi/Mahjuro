@@ -19,7 +19,7 @@ pub enum Achievement {
     /// Beat round 1. Confirms one full round of the loop.
     FirstBlindCleared,
     /// Beat their first boss blind. First real difficulty checkpoint.
-    FirstBossDefeated,
+    FirstOrdealDefeated,
     /// Won a full run for the first time.
     FirstRunCompleted,
     /// Started 10 distinct runs. Retention signal.
@@ -50,7 +50,7 @@ impl Achievement {
             Self::TutorialComplete => "TUTORIAL_COMPLETE",
             Self::FirstStructure => "FIRST_STRUCTURE",
             Self::FirstBlindCleared => "FIRST_BLIND_CLEARED",
-            Self::FirstBossDefeated => "FIRST_BOSS_DEFEATED",
+            Self::FirstOrdealDefeated => "FIRST_BOSS_DEFEATED",
             Self::FirstRunCompleted => "FIRST_RUN_COMPLETED",
             Self::TenRunsPlayed => "TEN_RUNS_PLAYED",
             Self::Stake2Unlocked => "STAKE_2_UNLOCKED",

@@ -4,8 +4,7 @@ pub const PAGE_TITLE: &str = "The Tiles";
 
 pub const INTRO_LINE_1: &str =
     "Tiles are the pieces drawn from the wall. Most tiles have 4 copies.";
-pub const INTRO_LINE_2: &str =
-    "Suits are tile families. A meld usually uses tiles from one suit.";
+pub const INTRO_LINE_2: &str = "Suits are tile families. A meld usually uses tiles from one suit.";
 
 /// Legacy block for tutorial height estimates.
 pub const INTRO: &str = "Tiles are the pieces drawn from the wall. Most tiles have 4 copies.\n\nSuits are tile families. A meld usually uses tiles from one suit.";

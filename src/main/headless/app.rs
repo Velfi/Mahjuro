@@ -7,7 +7,7 @@ use crate::game::run::RunState;
 use crate::main_render_settings::RenderSettings;
 use crate::persistence;
 use crate::render::animation::AnimationController;
-use crate::render::draw_cmd::{apply_modal_relic_staging, UiFrame};
+use crate::render::draw_cmd::{UiFrame, apply_modal_relic_staging};
 use crate::render::wgpu_renderer::WgpuRenderer;
 use crate::scenes::{DrawCtx, Scene, SceneBehavior, UpdateCtx};
 use crate::ui::input::{InputMode, UiAction};
@@ -391,7 +391,7 @@ impl HeadlessApp {
             None,
             crate::scenes::DebugVisibility {
                 hide_candles: false,
-                hide_blind_plaque: false,
+                hide_chamber_plaque: false,
                 hide_scoring_placard: false,
             },
             false,
@@ -448,14 +448,16 @@ impl HeadlessApp {
             Scene::Showcase(_) => Some("showcase"),
             Scene::Shop(_) => Some("shop"),
             Scene::Gameplay(_) => Some("gameplay"),
-            Scene::GameOver(s) if !s.won => Some("gameplay"),
+            Scene::GameOver(_) => Some("gameplay"),
             Scene::Collection(_) => Some("collection"),
-            Scene::PickBlind(_) => Some("pick_blind"),
+            Scene::PickChamber(_) => Some("pick_chamber"),
+            Scene::Staircase(_) => Some("staircase"),
             Scene::MainMenuExterior(_) => Some("main_menu_exterior"),
             Scene::TutorialCampaign(_) => Some("tutorial"),
             Scene::Guide(_) => Some("guide"),
             Scene::YakuJournal(_) => Some("yaku_journal"),
             Scene::TileAnchorLab(_) => Some("tile_anchor_lab"),
+            Scene::Tixels(_) => Some("tixels"),
             _ => None,
         };
         self.renderer.set_active_scene(active_scene_key);
@@ -491,7 +493,11 @@ impl HeadlessApp {
         }
     }
 
-    pub(crate) fn run_screenshot(mut self, output: PathBuf, warmup_frames: u32) -> anyhow::Result<()> {
+    pub(crate) fn run_screenshot(
+        mut self,
+        output: PathBuf,
+        warmup_frames: u32,
+    ) -> anyhow::Result<()> {
         self.run_warmup(warmup_frames);
         self.renderer.queue_screenshot(output.clone());
         self.tick();

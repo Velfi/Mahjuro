@@ -6,7 +6,7 @@
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::scenes::archive_career::{
-    self, AnteOutcomeCell, BossRecordRow, CareerKpi, ScoreHistoryPoint,
+    self, WingOutcomeCell, OrdealRecordRow, CareerKpi, ScoreHistoryPoint,
 };
 use crate::ui::chart_primitives::{
     self, ChartClip, chart_y_axis_width_for_max, pill_label_width, push_chart_plot_baseline,
@@ -24,7 +24,12 @@ pub fn push_corner_brackets(
 ) {
     let tick = 7.0_f32;
     let tc = color::alpha(color::BRASS, 0.48);
-    for &(dx, dy) in &[(0.0, 0.0), (w - tick, 0.0), (0.0, h - tick), (w - tick, h - tick)] {
+    for &(dx, dy) in &[
+        (0.0, 0.0),
+        (w - tick, 0.0),
+        (0.0, h - tick),
+        (w - tick, h - tick),
+    ] {
         push_quad_clipped(quads, [x + dx, y + dy, tick, 1.0], clip, tc);
         push_quad_clipped(quads, [x + dx, y + dy, 1.0, tick], clip, tc);
     }
@@ -200,8 +205,8 @@ fn push_score_stat_panel(
     );
     push_corner_brackets(quads, clip, x, y, w, panel_h);
     let text_w = (w - inset * 2.0).max(1.0);
-    let label_w = (pill_label_width(label, caption_px) + inline_gap * 0.5)
-        .clamp(1.0, text_w * 0.42);
+    let label_w =
+        (pill_label_width(label, caption_px) + inline_gap * 0.5).clamp(1.0, text_w * 0.42);
     let value_w = (text_w - label_w - inline_gap).max(1.0);
     let value_x = x + inset + text_w - value_w;
     let line_y = y + inset;
@@ -243,8 +248,7 @@ fn score_history_stat_panel_width(
     inset: f32,
     inline_gap: f32,
 ) -> f32 {
-    let inner =
-        pill_label_width(label, caption_px) + inline_gap + pill_label_width(value, body_px);
+    let inner = pill_label_width(label, caption_px) + inline_gap + pill_label_width(value, body_px);
     (inner + inset * 2.0).max(1.0)
 }
 
@@ -351,14 +355,8 @@ pub fn push_score_history_ledger(
     let mut stat_x = plot_x;
     let stat_row_h_inner = cap_h.max(val_h);
     if let Some(avg) = avg_text {
-        let panel_w = score_history_stat_panel_width(
-            "Avg.",
-            &avg,
-            caption_px,
-            body_px,
-            inset,
-            inline_gap,
-        );
+        let panel_w =
+            score_history_stat_panel_width("Avg.", &avg, caption_px, body_px, inset, inline_gap);
         push_score_stat_panel(
             quads,
             labels,
@@ -376,14 +374,8 @@ pub fn push_score_history_ledger(
         );
         stat_x += panel_w + panel_gap;
     }
-    let peak_panel_w = score_history_stat_panel_width(
-        "Peak",
-        &peak_text,
-        caption_px,
-        body_px,
-        inset,
-        inline_gap,
-    );
+    let peak_panel_w =
+        score_history_stat_panel_width("Peak", &peak_text, caption_px, body_px, inset, inline_gap);
     push_score_stat_panel(
         quads,
         labels,
@@ -494,7 +486,7 @@ pub fn push_ante_outcome_matrix(
     y: f32,
     w: f32,
     h: f32,
-    cells: &[AnteOutcomeCell],
+    cells: &[WingOutcomeCell],
     caption_px: f32,
 ) {
     if cells.is_empty() {
@@ -516,7 +508,12 @@ pub fn push_ante_outcome_matrix(
         );
         push_quad_clipped(
             quads,
-            [cx + 1.0, y + label_h + 2.0 + cell_h * (1.0 - win_frac), cell_w - 2.0, cell_h * win_frac],
+            [
+                cx + 1.0,
+                y + label_h + 2.0 + cell_h * (1.0 - win_frac),
+                cell_w - 2.0,
+                cell_h * win_frac,
+            ],
             clip,
             color::alpha(color::chart::POSITIVE, 0.55 + win_frac * 0.35),
         );
@@ -526,7 +523,7 @@ pub fn push_ante_outcome_matrix(
             clip,
             TextLabel {
                 rect: [cx, y, cell_w, label_h],
-                text: format!("A{}", cell.ante),
+                text: format!("W{}", cell.wing),
                 color: color::alpha(color::STONE, 0.85),
                 font_px: Some(caption_px * 0.82),
                 align: TextAlign::Center,
@@ -537,7 +534,7 @@ pub fn push_ante_outcome_matrix(
     }
 }
 
-pub fn push_boss_record_rows(
+pub fn push_ordeal_record_rows(
     labels: &mut Vec<TextLabel>,
     quads: &mut Vec<GpuInstance>,
     clip: ChartClip,
@@ -545,7 +542,7 @@ pub fn push_boss_record_rows(
     y: f32,
     w: f32,
     row_h: f32,
-    rows: &[BossRecordRow],
+    rows: &[OrdealRecordRow],
     caption_px: f32,
     body_px: f32,
 ) {
@@ -569,7 +566,7 @@ pub fn push_boss_record_rows(
             clip,
             TextLabel {
                 rect: [x, ry, name_w, row_h],
-                text: row.boss.name().into(),
+                text: row.ordeal.name().into(),
                 color: color::alpha(color::PARCHMENT, 0.92),
                 font_px: Some(caption_px),
                 align: TextAlign::Left,

@@ -620,8 +620,7 @@ impl ModalQueue {
         let body_font = typography::size(typography::H36, window_h);
         let body_inner_w = card_w - padding * 2.0;
         let wrapped = wrap_text(&modal.body, body_inner_w, body_font);
-        let body_line_step =
-            crate::ui::colored_keywords::colored_row_line_step(body_font);
+        let body_line_step = crate::ui::colored_keywords::colored_row_line_step(body_font);
         let body_lines = wrapped.len().max(1) as f32;
         let chrome_h = padding + title_h + padding * 0.5 + padding * 0.75 + dismiss_h + padding;
         let max_body_h = window_h * 0.85 - chrome_h;

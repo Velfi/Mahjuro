@@ -1198,7 +1198,7 @@ fn scale_relic_mesh_vertex_positions(vertices: &mut [Vertex3dTex], scale: f32) {
 }
 
 /// Alpha cutoff for boss-icon extrusion (processed atlas cells use real transparency).
-const BOSS_ICON_ALPHA_SOLID_THRESH: u8 = 24;
+const ORDEAL_ICON_ALPHA_SOLID_THRESH: u8 = 24;
 
 /// Build a relic mesh whose cap silhouette is extracted from the supplied
 /// RGBA. Relic masks use **rec.709 luminance** ≥ 0.45 (many `*_mask.png` files
@@ -1232,7 +1232,7 @@ pub fn build_relic_mesh_from_rgba(
 
 /// Boss archive / HUD 3D icon mesh — silhouette from **alpha** only so black-painted
 /// art still extrudes correctly (luma would treat black pixels as empty).
-pub fn build_boss_icon_mesh_from_rgba(
+pub fn build_ordeal_icon_mesh_from_rgba(
     rgba: &[u8],
     width: u32,
     height: u32,
@@ -1243,7 +1243,7 @@ pub fn build_boss_icon_mesh_from_rgba(
     }
     let w = width as usize;
     let h = height as usize;
-    let solid = silhouette_solid_alpha(rgba, w, h, BOSS_ICON_ALPHA_SOLID_THRESH);
+    let solid = silhouette_solid_alpha(rgba, w, h, ORDEAL_ICON_ALPHA_SOLID_THRESH);
     build_extruded_pin_mesh_from_solid(&solid, width, height, source_label)
 }
 
@@ -1911,7 +1911,7 @@ mod silhouette_tests {
     }
 
     #[test]
-    fn boss_icon_mesh_extrudes_from_alpha_not_luma() {
+    fn ordeal_icon_mesh_extrudes_from_alpha_not_luma() {
         let mut rgba = vec![0u8; 16 * 16 * 4];
         for y in 3..13 {
             for x in 3..13 {
@@ -1922,7 +1922,7 @@ mod silhouette_tests {
                 rgba[i + 3] = 255;
             }
         }
-        let mesh = build_boss_icon_mesh_from_rgba(&rgba, 16, 16, "test:black_rgb_alpha")
+        let mesh = build_ordeal_icon_mesh_from_rgba(&rgba, 16, 16, "test:black_rgb_alpha")
             .expect("boss icon mesh should follow alpha");
         assert!(mesh.indices.len() >= 6 * 3);
         assert!(

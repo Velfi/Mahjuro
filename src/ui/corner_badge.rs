@@ -47,11 +47,7 @@ pub fn push_corner_badge(
 }
 
 /// Small filled dot for tab / row unread hints.
-pub fn push_new_dot(
-    quads: &mut Vec<GpuInstance>,
-    anchor_rect: [f32; 4],
-    scale: f32,
-) {
+pub fn push_new_dot(quads: &mut Vec<GpuInstance>, anchor_rect: [f32; 4], scale: f32) {
     let d = (10.0 * scale).clamp(8.0, 14.0);
     let x = anchor_rect[0] + anchor_rect[2] - d * 0.35;
     let y = anchor_rect[1] + d * 0.15;

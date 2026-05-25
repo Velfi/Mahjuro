@@ -72,7 +72,7 @@ pub struct BotConfig {
     /// `Some(Stake)` applies that tier's target / shop / boss deltas. Exposed
     /// on the CLI via `--stake` so balance snapshots can be stratified by
     /// difficulty.
-    pub blind_planner_depth: Option<u32>,
+    pub chamber_planner_depth: Option<u32>,
     pub stake: Option<crate::core::stake::Stake>,
 }
 
@@ -88,7 +88,7 @@ pub struct BotStrategy {
     pub sell_max_per_visit: u32,
     /// In-blind expectimax depth (`0` = legacy greedy pipeline, `1` = unified one-ply,
     /// `2` = recommended, `3` = pruned three-ply).
-    pub blind_planner_depth: u32,
+    pub chamber_planner_depth: u32,
 }
 
 impl BotStrategy {
@@ -105,9 +105,7 @@ impl BotStrategy {
             sell_enabled: cfg.sell_enabled.unwrap_or(d.sell_enabled),
             sell_hold_threshold: cfg.sell_hold_threshold.unwrap_or(d.sell_hold_threshold),
             sell_max_per_visit: cfg.sell_max_per_visit.unwrap_or(d.sell_max_per_visit),
-            blind_planner_depth: cfg
-                .blind_planner_depth
-                .unwrap_or(d.blind_planner_depth),
+            chamber_planner_depth: cfg.chamber_planner_depth.unwrap_or(d.chamber_planner_depth),
         }
     }
 }
@@ -123,7 +121,7 @@ impl Default for BotStrategy {
             sell_enabled: false,
             sell_hold_threshold: 0,
             sell_max_per_visit: 2,
-            blind_planner_depth: 2,
+            chamber_planner_depth: 2,
         }
     }
 }
@@ -365,7 +363,7 @@ fn bot_runs_progress_bar(n: u32) -> ProgressBar {
 
 fn timeout_progress_line(snapshot: &RunTimeoutSnapshot) -> String {
     match snapshot.phase.as_str() {
-        "playing_blind" => format!(
+        "playing_chamber" => format!(
             "blind score/target {}/{}",
             snapshot.round_score, snapshot.target_score
         ),
@@ -406,13 +404,13 @@ fn print_bot_timeout_report(events: &[BotTimeoutDiag]) {
         let s = &ev.snapshot;
         let progress = timeout_progress_line(s);
         println!(
-            "  run #{}, attempt {}: phase={} | ante {} | {} | blind_turn={:?} | {} | plays {} discards {} | {}ms",
+            "  run #{}, attempt {}: phase={} | ante {} | {} | chamber_turn={:?} | {} | plays {} discards {} | {}ms",
             ev.run_index,
             ev.attempt.saturating_add(1),
             s.phase,
-            s.ante,
-            s.blind,
-            s.blind_turn,
+            s.wing,
+            s.chamber,
+            s.chamber_turn,
             progress,
             s.plays_remaining,
             s.discards_remaining,
@@ -435,7 +433,7 @@ pub fn run_headless_aggregate(
         "Running bot for {} runs (base_target={}, target_scaling={}, plays={}, discards={}, gold={}, log={}, run_timeout={}, timeout_retries={})...",
         n,
         mode.base_target,
-        crate::core::blind_target::TARGET_SCALING,
+        crate::core::chamber_target::TARGET_SCALING,
         mode.starting_plays,
         mode.starting_discards,
         mode.starting_gold,
@@ -485,16 +483,16 @@ pub fn run_headless_aggregate(
                         .unwrap_or("?")
                 )
             } else if s.victory {
-                format!("VICTORY (ante {})", s.died_on_ante)
+                format!("VICTORY (ante {})", s.died_on_wing)
             } else {
-                format!("died ante {} on {}", s.died_on_ante, s.died_on_blind.name())
+                format!("died ante {} on {}", s.died_on_wing, s.died_on_chamber.name())
             };
             println!(
                 "  [{:>4}/{}] last: {} (cleared {} blinds, score {})",
                 run_number,
                 n,
                 outcome,
-                s.blinds_cleared,
+                s.chambers_cleared,
                 human_readable_score(s.total_score as f64),
             );
         }
@@ -550,11 +548,11 @@ pub fn run_sweep(
         plays_values.len(),
         runs_per_cell,
         base_targets.len() * plays_values.len() * runs_per_cell as usize,
-        crate::core::blind_target::TARGET_SCALING,
+        crate::core::chamber_target::TARGET_SCALING,
     );
     println!();
     println!(
-        "Each cell shows: antes_cleared_avg / win_rate_pct (avg blinds_cleared, avg total_score)"
+        "Each cell shows: wings_cleared_avg / win_rate_pct (avg chambers_cleared, avg total_score)"
     );
 
     for &plays in plays_values {
@@ -571,15 +569,15 @@ pub fn run_sweep(
                 ..Default::default()
             };
             let agg = run_with_sequential(runs_per_cell, cfg, BotRunOptions::default());
-            let avg_antes = agg.antes_cleared_total as f64 / agg.runs as f64;
+            let avg_antes = agg.wings_cleared_total as f64 / agg.runs as f64;
             let win_pct = agg.victories as f64 * 100.0 / agg.runs as f64;
-            let avg_blinds = agg.blinds_cleared_total as f64 / agg.runs as f64;
+            let avg_chambers = agg.chambers_cleared_total as f64 / agg.runs as f64;
             let avg_score = agg.total_score as f64 / agg.runs as f64;
             let cell = format!(
                 " {:>4.1}/{:>4.1}% ({:>3.1} blinds, {}) |",
                 avg_antes,
                 win_pct,
-                avg_blinds,
+                avg_chambers,
                 human_readable_score(avg_score)
             );
             if export_json.is_some() {
@@ -636,7 +634,7 @@ pub struct StrategyDef {
     #[serde(default)]
     pub sell_max_per_visit: Option<u32>,
     #[serde(default)]
-    pub blind_planner_depth: Option<u32>,
+    pub chamber_planner_depth: Option<u32>,
     #[serde(default)]
     pub base_target: Option<u32>,
     #[serde(default)]
@@ -663,7 +661,7 @@ impl StrategyDef {
             sell_enabled: self.sell_enabled,
             sell_hold_threshold: self.sell_hold_threshold,
             sell_max_per_visit: self.sell_max_per_visit,
-            blind_planner_depth: self.blind_planner_depth,
+            chamber_planner_depth: self.chamber_planner_depth,
             stake: None,
         }
     }
@@ -729,8 +727,8 @@ pub fn run_strategy_sweep(
         wb.partial_cmp(&wa)
             .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| {
-                let aa = a.antes_cleared_total as f64 / a.runs.max(1) as f64;
-                let ab = b.antes_cleared_total as f64 / b.runs.max(1) as f64;
+                let aa = a.wings_cleared_total as f64 / a.runs.max(1) as f64;
+                let ab = b.wings_cleared_total as f64 / b.runs.max(1) as f64;
                 ab.partial_cmp(&aa).unwrap_or(std::cmp::Ordering::Equal)
             })
     });
@@ -747,7 +745,7 @@ pub fn run_strategy_sweep(
     for (i, (name, agg)) in ranked.iter().enumerate() {
         let runs = agg.runs.max(1) as f64;
         let win_pct = agg.victories as f64 * 100.0 / runs;
-        let antes = agg.antes_cleared_total as f64 / runs;
+        let antes = agg.wings_cleared_total as f64 / runs;
         let score = agg.total_score as f64 / runs;
         let relics = agg.total_relics_bought as f64 / runs;
         let packs: u64 = agg.packs_picked.values().map(|v| *v as u64).sum();
@@ -870,7 +868,7 @@ pub fn run_forced_relic_sweep(runs_per_relic: u32, export_json: Option<&Path>) {
         let runs = agg.runs.max(1) as f64;
         let win_pct = agg.victories as f64 * 100.0 / runs;
         let delta = win_pct - baseline_win;
-        let antes = agg.antes_cleared_total as f64 / runs;
+        let antes = agg.wings_cleared_total as f64 / runs;
         let score = agg.total_score as f64 / runs;
         println!(
             "{:>4}  {:<22}  {:>5.1}%  {:>+6.1}  {:>7.2}  {:>10}",
@@ -905,11 +903,11 @@ pub fn run_forced_relic_sweep(runs_per_relic: u32, export_json: Option<&Path>) {
     }
 }
 
-fn blinds_cleared_before_death(blind: crate::core::rules::BlindKind) -> u32 {
+fn chambers_cleared_before_death(blind: crate::core::rules::ChamberKind) -> u32 {
     match blind {
-        crate::core::rules::BlindKind::Small => 0,
-        crate::core::rules::BlindKind::Big => 1,
-        crate::core::rules::BlindKind::Boss => 2,
+        crate::core::rules::ChamberKind::Small => 0,
+        crate::core::rules::ChamberKind::Big => 1,
+        crate::core::rules::ChamberKind::Ordeal => 2,
     }
 }
 
@@ -918,20 +916,20 @@ fn blinds_cleared_before_death(blind: crate::core::rules::BlindKind) -> u32 {
 pub fn run_stats_from_progress_record(rec: &crate::core::progression::RunRecord) -> RunStats {
     use crate::core::progression::RunOutcome;
     use crate::core::relic::all_relic_defs;
-    use crate::core::rules::BlindKind;
-    use crate::game::run::FINAL_ANTE;
+    use crate::core::rules::ChamberKind;
+    use crate::game::run::FINAL_WING;
     use std::collections::BTreeMap;
 
     let victory = matches!(rec.outcome, RunOutcome::Victory);
-    let (antes_cleared, blinds_cleared) = if victory {
-        (FINAL_ANTE, FINAL_ANTE.saturating_mul(3))
+    let (wings_cleared, chambers_cleared) = if victory {
+        (FINAL_WING, FINAL_WING.saturating_mul(3))
     } else {
-        let completed_antes = rec.final_ante.saturating_sub(1);
+        let completed_antes = rec.final_wing.saturating_sub(1);
         (
             completed_antes,
             completed_antes
                 .saturating_mul(3)
-                .saturating_add(blinds_cleared_before_death(rec.final_blind)),
+                .saturating_add(chambers_cleared_before_death(rec.final_chamber)),
         )
     };
     let death_reason = match rec.outcome {
@@ -954,42 +952,42 @@ pub fn run_stats_from_progress_record(rec: &crate::core::progression::RunRecord)
         })
         .collect();
     let final_consumables: Vec<String> = rec.consumables_owned.iter().map(|c| c.name()).collect();
-    let mut boss_faced: BTreeMap<String, u8> = BTreeMap::new();
-    let mut boss_beaten: BTreeMap<String, u8> = BTreeMap::new();
-    if rec.final_blind == BlindKind::Boss
-        && let Some(bk) = rec.final_boss
+    let mut ordeal_faced: BTreeMap<String, u8> = BTreeMap::new();
+    let mut ordeal_beaten: BTreeMap<String, u8> = BTreeMap::new();
+    if rec.final_chamber == ChamberKind::Ordeal
+        && let Some(bk) = rec.final_ordeal
     {
         let key = bk.name().to_string();
-        boss_faced.insert(key.clone(), 1);
+        ordeal_faced.insert(key.clone(), 1);
         if victory {
-            boss_beaten.insert(key, 1);
+            ordeal_beaten.insert(key, 1);
         }
     }
     RunStats {
-        blinds_cleared,
-        antes_cleared,
+        chambers_cleared,
+        wings_cleared,
         victory,
-        died_on_ante: rec.final_ante,
-        died_on_blind: rec.final_blind,
+        died_on_wing: rec.final_wing,
+        died_on_chamber: rec.final_chamber,
         total_score: rec.total_score_earned,
         discards_used: rec.tiles_discarded,
         final_gold: rec.final_gold,
-        peak_blind_score: rec.best_structure_score,
+        peak_chamber_score: rec.best_structure_score,
         yaku_scored,
         final_relics,
         final_consumables,
         death_reason,
-        boss_faced,
-        boss_beaten,
+        ordeal_faced,
+        ordeal_beaten,
         ..RunStats::default()
     }
 }
 
-fn boss_kind_by_display_name(name: &str) -> Option<crate::core::boss::BossKind> {
-    use crate::core::boss::{all_bosses, final_bosses};
-    all_bosses()
+fn ordeal_kind_by_display_name(name: &str) -> Option<crate::core::ordeal::OrdealKind> {
+    use crate::core::ordeal::{all_ordeals, final_ordeals};
+    all_ordeals()
         .iter()
-        .chain(final_bosses().iter())
+        .chain(final_ordeals().iter())
         .find(|d| d.name == name)
         .map(|d| d.kind)
 }
@@ -1024,6 +1022,7 @@ pub fn append_bot_run_to_progress(
 
     progress.run_history.push(record);
     progress.runs_completed = progress.runs_completed.saturating_add(1);
+    progress.award_level_points_for_outcome(outcome);
     progress.record_score(stats.total_score);
     if stats.victory {
         progress.has_won = true;
@@ -1035,14 +1034,14 @@ pub fn append_bot_run_to_progress(
             *progress.yaku_times_scored.entry(*yk).or_insert(0) += count;
         }
     }
-    for (name, &faced) in &stats.boss_faced {
-        if let Some(kind) = boss_kind_by_display_name(name) {
-            *progress.boss_times_encountered.entry(kind).or_insert(0) += u32::from(faced);
+    for (name, &faced) in &stats.ordeal_faced {
+        if let Some(kind) = ordeal_kind_by_display_name(name) {
+            *progress.ordeal_times_encountered.entry(kind).or_insert(0) += u32::from(faced);
         }
     }
-    for (name, &beaten) in &stats.boss_beaten {
-        if let Some(kind) = boss_kind_by_display_name(name) {
-            *progress.boss_times_defeated.entry(kind).or_insert(0) += u32::from(beaten);
+    for (name, &beaten) in &stats.ordeal_beaten {
+        if let Some(kind) = ordeal_kind_by_display_name(name) {
+            *progress.ordeal_times_defeated.entry(kind).or_insert(0) += u32::from(beaten);
         }
     }
     for (&name, &n) in &stats.relic_activations {

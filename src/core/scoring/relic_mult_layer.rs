@@ -130,9 +130,10 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             round_winds.push(w);
         }
         if let Some(w) = ctx.round.bonus_round_wind
-            && !round_winds.contains(&w) {
-                round_winds.push(w);
-            }
+            && !round_winds.contains(&w)
+        {
+            round_winds.push(w);
+        }
         for s in sets {
             if !matches!(s.kind, MeldKind::Triplet | MeldKind::Kong) {
                 continue;
@@ -189,9 +190,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             .flat_map(|s| &s.tile_ids)
             .filter_map(|id| tile_by_id(tiles, *id))
             .filter(|t| !tile_is_debuffed(t, ctx.tiles.debuffs))
-            .filter(|t| {
-                matches!(t.suit, Suit::Souzu | Suit::Manzu | Suit::Pinzu) && t.rank == 7
-            })
+            .filter(|t| matches!(t.suit, Suit::Souzu | Suit::Manzu | Suit::Pinzu) && t.rank == 7)
             .count();
         if count7 > 0 {
             push_mult(steps, *chips, mult, "Lucky Seven", 3.0 * count7 as f64);
@@ -274,13 +273,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             .copied()
             .unwrap_or(0);
         if thread_mult > 0 {
-            push_mult(
-                steps,
-                *chips,
-                mult,
-                "Silk Thread",
-                thread_mult as f64 / 8.0,
-            );
+            push_mult(steps, *chips, mult, "Silk Thread", thread_mult as f64 / 8.0);
         }
     }
 

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::core::boss::BossKind;
+use crate::core::ordeal::OrdealKind;
 use crate::core::scoring::ScoreBreakdown;
 use crate::core::yaku::YakuKind;
 use crate::game::engine::GameEngine;
@@ -74,7 +74,7 @@ impl OnboardingState {
     }
 }
 
-pub const TUTORIAL_BOSS: BossKind = BossKind::Relic;
+pub const TUTORIAL_ORDEAL: OrdealKind = OrdealKind::Relic;
 
 pub const LESSONS_TARGET: u32 = 100;
 pub const LESSONS_HAND_SIZE: usize = 10;
@@ -165,4 +165,3 @@ pub fn finale_intro_message() -> &'static str {
      Build in Souzu, Pinzu, and Manzu. Full Hand and Chiitoitsu (seven pairs) \
      are your best yaku here. You can retry if you miss the target."
 }
-

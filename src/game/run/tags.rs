@@ -5,18 +5,18 @@ impl RunState {
     pub fn roll_ante_tags(&mut self) {
         use crate::core::tag::roll_tag;
 
-        let small = roll_tag(self.ante, None);
-        let big = roll_tag(self.ante, Some(small));
-        self.small_blind_tag = Some(small);
-        self.big_blind_tag = Some(big);
+        let small = roll_tag(self.wing, None);
+        let big = roll_tag(self.wing, Some(small));
+        self.small_chamber_tag = Some(small);
+        self.big_chamber_tag = Some(big);
     }
 
     /// Return the tag assigned to the given blind, if any.
-    pub fn tag_for_blind(&self, blind: BlindKind) -> Option<crate::core::tag::TagKind> {
+    pub fn tag_for_chamber(&self, blind: ChamberKind) -> Option<crate::core::tag::TagKind> {
         match blind {
-            BlindKind::Small => self.small_blind_tag,
-            BlindKind::Big => self.big_blind_tag,
-            BlindKind::Boss => None,
+            ChamberKind::Small => self.small_chamber_tag,
+            ChamberKind::Big => self.big_chamber_tag,
+            ChamberKind::Ordeal => None,
         }
     }
 
@@ -91,7 +91,7 @@ impl RunState {
     }
 
     /// Clear transient skip-tag bonuses that only apply to the very next blind.
-    pub(super) fn clear_next_blind_tag_modifiers(&mut self) {
+    pub(super) fn clear_next_chamber_tag_modifiers(&mut self) {
         self.tag_bonus_plays = 0;
         self.tag_bonus_discards = 0;
         self.tag_bonus_hand_size = 0;

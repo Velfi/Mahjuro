@@ -1,26 +1,26 @@
 //! Boss blinds — Balatro-style themed encounters with distinct effects.
 //!
-//! Each boss is a `BossKind` variant with a `BossDef` describing how to
+//! Each boss is a `OrdealKind` variant with a `OrdealDef` describing how to
 //! apply it. Presentation (name, description, tier, min_ante) lives in
-//! `assets/data/bosses.json` and is loaded once at startup; behaviour
+//! `assets/data/ordeals.json` and is loaded once at startup; behaviour
 //! (rule_pushes, debuffs, on_apply / on_play / on_reveal hooks) stays in
 //! Rust where it can use function pointers freely. Final-tier bosses are
-//! kept in a separate pool — they only appear on `FINAL_ANTE` and are
+//! kept in a separate pool — they only appear on `FINAL_WING` and are
 //! never drawn by the regular roller.
 //!
 //! Effects dispatch through three hooks:
 //! * `rule_pushes` — `RuleModifier`s injected into `round_rules`, picked up by
 //!   `score_sets` and `validate_selection_with_rules` like any other rule.
-//! * `on_apply` — called from `apply_blind` when the boss blind starts. Used
+//! * `on_apply` — called from `apply_chamber` when the boss blind starts. Used
 //!   for one-shot mutations to `RunState` (zero discards, target bumps,
 //!   shrunken hand, etc.).
 //! * `on_play` — called from `commit_selection_to_structure` after a successful play,
 //!   for per-play taxers (gold cost, wall burn).
 //!
-//! Adding a new boss is purely a matter of appending to `bosses.json`
-//! (presentation), adding a `BossKind` variant, supplying the right
-//! hook in `boss_behavior`, and adding an atlas cell + slug in
-//! `assets/textures/boss_icons/atlas.toml` (`BossKind::ALL` / `atlas_slug`)
+//! Adding a new boss is purely a matter of appending to `ordeals.json`
+//! (presentation), adding a `OrdealKind` variant, supplying the right
+//! hook in `ordeal_behavior`, and adding an atlas cell + slug in
+//! `assets/textures/ordeal_icons/atlas.toml` (`OrdealKind::ALL` / `atlas_slug`)
 //! — no other file needs to know the boss exists.
 
 use std::sync::OnceLock;
@@ -36,7 +36,7 @@ use crate::game::run::RunState;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum BossKind {
+pub enum OrdealKind {
     // ── Soft / early bosses ──────────────────────────────────────────────
     Drought,
     Whisper,
@@ -63,7 +63,7 @@ pub enum BossKind {
     // ── Reactive (min_ante 3) ────────────────────────────────────────────
     // These bosses pick their rule at reveal time based on RunState. The
     // chosen variant is locked in immediately and displayed on the boss card
-    // — no mid-blind goalpost-moving. See `on_reveal` on `BossDef`.
+    // — no mid-blind goalpost-moving. See `on_reveal` on `OrdealDef`.
     Mirror,
     Counterweight,
     TaxCollector,
@@ -74,7 +74,7 @@ pub enum BossKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum BossTier {
+pub enum OrdealTier {
     Soft,
     Medium,
     Hard,
@@ -82,19 +82,19 @@ pub enum BossTier {
 }
 
 /// Static definition of a boss: presentation + effect dispatch.
-pub struct BossDef {
-    pub kind: BossKind,
+pub struct OrdealDef {
+    pub kind: OrdealKind,
     pub name: &'static str,
     pub description: &'static str,
-    pub tier: BossTier,
-    /// Earliest ante on which this boss may be drawn. Final-tier bosses
-    /// ignore this and only appear on `FINAL_ANTE`.
-    pub min_ante: u32,
-    pub effect: BossEffect,
+    pub tier: OrdealTier,
+    /// Earliest wing on which this boss may be drawn. Final-tier bosses
+    /// ignore this and only appear on `FINAL_WING`.
+    pub min_wing: u32,
+    pub effect: OrdealEffect,
     /// Reactive bosses use this hook to compute their final effect at the
     /// moment the ante reveals (i.e. inside `advance_round`/`RunState::new`).
-    /// The returned `ResolvedBossEffect` is locked in for the whole ante and
-    /// shown verbatim in pick_blind — the player sees the *resolved* rule
+    /// The returned `ResolvedOrdealEffect` is locked in for the whole ante and
+    /// shown verbatim in pick_chamber — the player sees the *resolved* rule
     /// before they ever set foot in the boss blind. Static bosses leave this
     /// `None` and get a wrapped copy of `effect`.
     ///
@@ -103,12 +103,12 @@ pub struct BossDef {
     /// to `RunState::tax_collector_cost`) — the actual scoring/resource
     /// effects still happen in `on_apply` / `on_play` during the boss blind,
     /// but the *parameters* of those effects are baked in here.
-    pub on_reveal: Option<fn(&mut RunState) -> ResolvedBossEffect>,
+    pub on_reveal: Option<fn(&mut RunState) -> ResolvedOrdealEffect>,
 }
 
 /// Three-axis effect descriptor. Each field is independently optional —
 /// most bosses use only one axis.
-pub struct BossEffect {
+pub struct OrdealEffect {
     /// Rule modifiers pushed into `round_rules` when the boss applies. The
     /// scoring/validation paths read these the same way they read starting
     /// rules, so adding category A/B effects is purely a data change.
@@ -123,27 +123,27 @@ pub struct BossEffect {
     pub on_play: Option<fn(&mut RunState)>,
 }
 
-/// Owned, ante-scoped sibling of `BossEffect`. Static bosses get one of these
-/// built from their static `BossEffect` at reveal time; reactive bosses build
-/// their own from scratch via `BossDef::on_reveal`. Stored on `RunState` and
-/// read by `apply_blind` / `commit_selection_to_structure` instead of the static def
+/// Owned, ante-scoped sibling of `OrdealEffect`. Static bosses get one of these
+/// built from their static `OrdealEffect` at reveal time; reactive bosses build
+/// their own from scratch via `OrdealDef::on_reveal`. Stored on `RunState` and
+/// read by `apply_chamber` / `commit_selection_to_structure` instead of the static def
 /// so reactive variants land at the right moment.
 #[derive(Clone, Debug)]
-pub struct ResolvedBossEffect {
+pub struct ResolvedOrdealEffect {
     pub rule_pushes: Vec<RuleModifier>,
     pub tile_debuffs: Vec<TileDebuff>,
     pub relic_debuffs: Vec<RelicId>,
     pub on_apply: Option<fn(&mut RunState)>,
     pub on_play: Option<fn(&mut RunState)>,
-    /// Replaces `BossDef::description` in the UI when present. Reactive
+    /// Replaces `OrdealDef::description` in the UI when present. Reactive
     /// bosses use this to report the *chosen* variant ("Pay 4 gold each
     /// play") rather than the generic static text.
     pub description_override: Option<String>,
 }
 
-impl ResolvedBossEffect {
+impl ResolvedOrdealEffect {
     /// Wrap a static def's effect verbatim. Used by every non-reactive boss.
-    pub fn from_static(eff: &BossEffect) -> Self {
+    pub fn from_static(eff: &OrdealEffect) -> Self {
         Self {
             rule_pushes: eff.rule_pushes.to_vec(),
             tile_debuffs: eff.tile_debuffs.to_vec(),
@@ -155,93 +155,93 @@ impl ResolvedBossEffect {
     }
 }
 
-impl BossKind {
-    /// Every boss variant, in `assets/textures/boss_icons/atlas.toml` row-major order.
-    pub const ALL: &'static [BossKind] = &[
-        BossKind::Drought,
-        BossKind::Whisper,
-        BossKind::Tribute,
-        BossKind::Gate,
-        BossKind::Grove,
-        BossKind::Coin,
-        BossKind::Rot,
-        BossKind::Hermit,
-        BossKind::Forest,
-        BossKind::Bureaucrat,
-        BossKind::Drunkard,
-        BossKind::Ash,
-        BossKind::Furnace,
-        BossKind::Relic,
-        BossKind::Blight,
-        BossKind::Hex,
-        BossKind::Famine,
-        BossKind::Tempest,
-        BossKind::Censor,
-        BossKind::Mirror,
-        BossKind::Counterweight,
-        BossKind::TaxCollector,
-        BossKind::Dragon,
-        BossKind::House,
+impl OrdealKind {
+    /// Every boss variant, in `assets/textures/ordeal_icons/atlas.toml` row-major order.
+    pub const ALL: &'static [OrdealKind] = &[
+        OrdealKind::Drought,
+        OrdealKind::Whisper,
+        OrdealKind::Tribute,
+        OrdealKind::Gate,
+        OrdealKind::Grove,
+        OrdealKind::Coin,
+        OrdealKind::Rot,
+        OrdealKind::Hermit,
+        OrdealKind::Forest,
+        OrdealKind::Bureaucrat,
+        OrdealKind::Drunkard,
+        OrdealKind::Ash,
+        OrdealKind::Furnace,
+        OrdealKind::Relic,
+        OrdealKind::Blight,
+        OrdealKind::Hex,
+        OrdealKind::Famine,
+        OrdealKind::Tempest,
+        OrdealKind::Censor,
+        OrdealKind::Mirror,
+        OrdealKind::Counterweight,
+        OrdealKind::TaxCollector,
+        OrdealKind::Dragon,
+        OrdealKind::House,
     ];
 
-    pub fn def(self) -> &'static BossDef {
-        all_bosses()
+    pub fn def(self) -> &'static OrdealDef {
+        all_ordeals()
             .iter()
-            .chain(final_bosses().iter())
+            .chain(final_ordeals().iter())
             .find(|d| d.kind == self)
-            .expect("every BossKind must have a definition")
+            .expect("every OrdealKind must have a definition")
     }
 
     pub fn name(self) -> &'static str {
         self.def().name
     }
 
-    pub fn tier(self) -> BossTier {
+    pub fn tier(self) -> OrdealTier {
         self.def().tier
     }
 
-    /// Stable atlas cell id (`assets/data/bosses.json` `id`, `textures/boss_icons/atlas.toml`).
+    /// Stable atlas cell id (`assets/data/ordeals.json` `id`, `textures/ordeal_icons/atlas.toml`).
     pub fn atlas_slug(self) -> &'static str {
         match self {
-            BossKind::Drought => "drought",
-            BossKind::Whisper => "whisper",
-            BossKind::Tribute => "tribute",
-            BossKind::Gate => "gate",
-            BossKind::Grove => "grove",
-            BossKind::Coin => "coin",
-            BossKind::Rot => "rot",
-            BossKind::Hermit => "hermit",
-            BossKind::Forest => "forest",
-            BossKind::Bureaucrat => "bureaucrat",
-            BossKind::Drunkard => "drunkard",
-            BossKind::Ash => "ash",
-            BossKind::Furnace => "furnace",
-            BossKind::Relic => "relic",
-            BossKind::Blight => "blight",
-            BossKind::Hex => "hex",
-            BossKind::Famine => "famine",
-            BossKind::Tempest => "tempest",
-            BossKind::Censor => "censor",
-            BossKind::Mirror => "mirror",
-            BossKind::Counterweight => "counterweight",
-            BossKind::TaxCollector => "tax_collector",
-            BossKind::Dragon => "dragon",
-            BossKind::House => "house",
+            OrdealKind::Drought => "drought",
+            OrdealKind::Whisper => "whisper",
+            OrdealKind::Tribute => "tribute",
+            OrdealKind::Gate => "gate",
+            OrdealKind::Grove => "grove",
+            OrdealKind::Coin => "coin",
+            OrdealKind::Rot => "rot",
+            OrdealKind::Hermit => "hermit",
+            OrdealKind::Forest => "forest",
+            OrdealKind::Bureaucrat => "bureaucrat",
+            OrdealKind::Drunkard => "drunkard",
+            OrdealKind::Ash => "ash",
+            OrdealKind::Furnace => "furnace",
+            OrdealKind::Relic => "relic",
+            OrdealKind::Blight => "blight",
+            OrdealKind::Hex => "hex",
+            OrdealKind::Famine => "famine",
+            OrdealKind::Tempest => "tempest",
+            OrdealKind::Censor => "censor",
+            OrdealKind::Mirror => "mirror",
+            OrdealKind::Counterweight => "counterweight",
+            OrdealKind::TaxCollector => "tax_collector",
+            OrdealKind::Dragon => "dragon",
+            OrdealKind::House => "house",
         }
     }
 }
 
-impl BossTier {
+impl OrdealTier {
     /// RGBA tint used to colour-code boss cards by severity. Soft is the
     /// neutral indigo of regular blinds; Medium/Hard/Final escalate through
     /// gold → amber → ruby so the player can read tier at a glance.
     pub fn halo_color(self) -> [f32; 4] {
         use crate::render::theme::color;
         match self {
-            BossTier::Soft => color::LAPIS,
-            BossTier::Medium => color::GOLD,
-            BossTier::Hard => color::AMBER,
-            BossTier::Final => color::RUBY,
+            OrdealTier::Soft => color::LAPIS,
+            OrdealTier::Medium => color::GOLD,
+            OrdealTier::Hard => color::AMBER,
+            OrdealTier::Final => color::RUBY,
         }
     }
 }
@@ -249,7 +249,7 @@ impl BossTier {
 // ── Effect helpers ───────────────────────────────────────────────────────
 //
 // These are top-level fns (not closures) so they can be used as `fn` pointers
-// in the static `BossDef` table — `Fn` trait objects can't sit in a const.
+// in the static `OrdealDef` table — `Fn` trait objects can't sit in a const.
 
 fn drought_apply(run: &mut RunState) {
     // Halve discards (round down). At default 4 starting discards this gives 2,
@@ -260,7 +260,7 @@ fn drought_apply(run: &mut RunState) {
 fn whisper_apply(run: &mut RunState) {
     // Shrink the hand by 1 for the whole round. The bonus_hand_size delta is
     // honored by `refill_hand` and the `commit_selection_to_structure` draw target.
-    run.boss.bonus_hand_size -= 1;
+    run.ordeal.bonus_hand_size -= 1;
     let target = effective_hand_size(run);
     crate::game::engine_state::GameplayCoreState::with_run_mut(run, |core| {
         while core.hand.len() > target {
@@ -271,7 +271,7 @@ fn whisper_apply(run: &mut RunState) {
 }
 
 fn tribute_apply(run: &mut RunState) {
-    run.boss.gold_cost_per_play = 1;
+    run.ordeal.gold_cost_per_play = 1;
 }
 
 fn famine_apply(run: &mut RunState) {
@@ -288,24 +288,24 @@ fn tribute_play(run: &mut RunState) {
     // Tax fires after the play has resolved. Gold is allowed to go negative
     // during boss rounds — the player can still finish the round but will
     // need to earn it back in the shop/payout phase.
-    let cost = run.boss.gold_cost_per_play as i32;
+    let cost = run.ordeal.gold_cost_per_play as i32;
     run.apply_gold_delta(-cost, None);
 }
 
 // ── Reactive boss hooks ───────────────────────────────────────────────────
 //
-// `on_reveal` runs at the ante boundary (inside `RunState::resolve_upcoming_boss`)
-// — well before `apply_blind`. It receives an immutable view of the run and
-// returns a `ResolvedBossEffect` whose hooks/rule_pushes/description are
+// `on_reveal` runs at the ante boundary (inside `RunState::resolve_upcoming_ordeal`)
+// — well before `apply_chamber`. It receives an immutable view of the run and
+// returns a `ResolvedOrdealEffect` whose hooks/rule_pushes/description are
 // frozen for the rest of the ante. The player sees the resolved description
-// in pick_blind from the moment the ante starts.
+// in pick_chamber from the moment the ante starts.
 
 /// Mirror — silences whichever scoring axis the player has invested most
 /// relic support in (pair / sequence / triplet). Reuses the existing rule
 /// modifiers from Hermit, Forest, and Censor — no new scoring math needed.
 /// Ties favor pairs (most universal yaku component); a player with no
 /// axis-leaning relics also gets PairsScoreZero as the default sting.
-fn mirror_reveal(run: &mut RunState) -> ResolvedBossEffect {
+fn mirror_reveal(run: &mut RunState) -> ResolvedOrdealEffect {
     let mut pair = 0u32;
     let mut seq = 0u32;
     let mut trip = 0u32;
@@ -330,7 +330,7 @@ fn mirror_reveal(run: &mut RunState) -> ResolvedBossEffect {
     } else {
         (RuleModifier::PairsScoreZero, "pairs")
     };
-    ResolvedBossEffect {
+    ResolvedOrdealEffect {
         rule_pushes: vec![rule],
         tile_debuffs: vec![],
         relic_debuffs: vec![],
@@ -350,10 +350,10 @@ fn mirror_reveal(run: &mut RunState) -> ResolvedBossEffect {
 /// `on_apply` hook can read it during the boss blind. Locking the cost at
 /// reveal means a player who spends gold down before the boss blind can't
 /// escape — the price was set when the ante began.
-fn tax_collector_reveal(run: &mut RunState) -> ResolvedBossEffect {
+fn tax_collector_reveal(run: &mut RunState) -> ResolvedOrdealEffect {
     let cost = (run.gold.max(0) as u32 / 10).clamp(2, 8);
-    run.boss.tax_collector_cost = cost;
-    ResolvedBossEffect {
+    run.ordeal.tax_collector_cost = cost;
+    ResolvedOrdealEffect {
         rule_pushes: vec![],
         tile_debuffs: vec![],
         relic_debuffs: vec![],
@@ -366,10 +366,10 @@ fn tax_collector_reveal(run: &mut RunState) -> ResolvedBossEffect {
 fn tax_collector_apply(run: &mut RunState) {
     // The cost was stashed on RunState by `tax_collector_reveal`. Mirror
     // Tribute's path: set gold_cost_per_play and let `tribute_play` drain it.
-    run.boss.gold_cost_per_play = run.boss.tax_collector_cost;
+    run.ordeal.gold_cost_per_play = run.ordeal.tax_collector_cost;
 }
 
-fn blight_reveal(run: &mut RunState) -> ResolvedBossEffect {
+fn blight_reveal(run: &mut RunState) -> ResolvedOrdealEffect {
     let candidates = [
         (
             TileDebuff::Suit(crate::core::tile::Suit::Manzu),
@@ -419,7 +419,7 @@ fn blight_reveal(run: &mut RunState) -> ResolvedBossEffect {
         .max_by_key(|(_, count)| *count)
         .map(|(debuff, _)| debuff)
         .unwrap_or(TileDebuff::Class(TileDebuffClass::Honors));
-    ResolvedBossEffect {
+    ResolvedOrdealEffect {
         rule_pushes: vec![],
         tile_debuffs: vec![chosen],
         relic_debuffs: vec![],
@@ -429,7 +429,7 @@ fn blight_reveal(run: &mut RunState) -> ResolvedBossEffect {
     }
 }
 
-fn counterweight_reveal(run: &mut RunState) -> ResolvedBossEffect {
+fn counterweight_reveal(run: &mut RunState) -> ResolvedOrdealEffect {
     let mut manzu = 0u32;
     let mut souzu = 0u32;
     let mut pinzu = 0u32;
@@ -490,10 +490,7 @@ fn counterweight_reveal(run: &mut RunState) -> ResolvedBossEffect {
         .0;
 
     let chosen = [
-        (
-            TileDebuff::Suit(crate::core::tile::Suit::Manzu),
-            manzu,
-        ),
+        (TileDebuff::Suit(crate::core::tile::Suit::Manzu), manzu),
         (TileDebuff::Suit(crate::core::tile::Suit::Souzu), souzu),
         (TileDebuff::Suit(crate::core::tile::Suit::Pinzu), pinzu),
         (TileDebuff::Class(TileDebuffClass::Honors), honors),
@@ -505,7 +502,7 @@ fn counterweight_reveal(run: &mut RunState) -> ResolvedBossEffect {
     .and_then(|(debuff, weight)| (weight > 0).then_some(debuff))
     .unwrap_or(fallback);
 
-    ResolvedBossEffect {
+    ResolvedOrdealEffect {
         rule_pushes: vec![],
         tile_debuffs: vec![chosen],
         relic_debuffs: vec![],
@@ -518,7 +515,7 @@ fn counterweight_reveal(run: &mut RunState) -> ResolvedBossEffect {
     }
 }
 
-fn hex_reveal(run: &mut RunState) -> ResolvedBossEffect {
+fn hex_reveal(run: &mut RunState) -> ResolvedOrdealEffect {
     use crate::core::relic::{Rarity, all_relic_defs};
 
     let target = run
@@ -548,7 +545,7 @@ fn hex_reveal(run: &mut RunState) -> ResolvedBossEffect {
             .unwrap_or("Unknown Relic");
         format!("{name} is debuffed and disabled this round")
     });
-    ResolvedBossEffect {
+    ResolvedOrdealEffect {
         rule_pushes: vec![],
         tile_debuffs: vec![],
         relic_debuffs: target.into_iter().collect(),
@@ -585,43 +582,44 @@ pub fn effective_hand_size_components(
 
 /// Effective hand size for `run` (see [`effective_hand_size_components`]).
 pub fn effective_hand_size(run: &RunState) -> usize {
-    effective_hand_size_components(run.mode.hand_size, run.boss.bonus_hand_size, &run.relics)
+    effective_hand_size_components(run.mode.hand_size, run.ordeal.bonus_hand_size, &run.relics)
 }
 
 // ── Boss catalog ─────────────────────────────────────────────────────────
 //
 // Presentation (name, description, tier, min_ante) is loaded from
-// `assets/data/bosses.json`. Behaviour (rule_pushes, debuffs, hooks)
-// stays here and is keyed off `BossKind` in `boss_behavior`. The two
-// halves are zipped together at first access in `all_bosses` /
-// `final_bosses`.
+// `assets/data/ordeals.json`. Behaviour (rule_pushes, debuffs, hooks)
+// stays here and is keyed off `OrdealKind` in `ordeal_behavior`. The two
+// halves are zipped together at first access in `all_ordeals` /
+// `final_ordeals`.
 
 #[derive(Deserialize)]
-struct BossPresentationRaw {
-    id: BossKind,
+struct OrdealPresentationRaw {
+    id: OrdealKind,
     name: String,
     description: String,
-    tier: BossTier,
-    min_ante: u32,
+    tier: OrdealTier,
+    #[serde(alias = "min_ante")]
+    min_wing: u32,
 }
 
-struct BossBehavior {
+struct OrdealBehavior {
     rule_pushes: &'static [RuleModifier],
     tile_debuffs: &'static [TileDebuff],
     relic_debuffs: &'static [RelicId],
     on_apply: Option<fn(&mut RunState)>,
     on_play: Option<fn(&mut RunState)>,
-    on_reveal: Option<fn(&mut RunState) -> ResolvedBossEffect>,
+    on_reveal: Option<fn(&mut RunState) -> ResolvedOrdealEffect>,
 }
 
 const NO_RULES: &[RuleModifier] = &[];
 const NO_TILE_DEBUFFS: &[TileDebuff] = &[];
 const NO_RELIC_DEBUFFS: &[RelicId] = &[];
 
-fn boss_behavior(kind: BossKind) -> BossBehavior {
+fn ordeal_behavior(kind: OrdealKind) -> OrdealBehavior {
     use crate::core::tile::Suit;
-    use BossKind as B;
-    let mut b = BossBehavior {
+    use OrdealKind as B;
+    let mut b = OrdealBehavior {
         rule_pushes: NO_RULES,
         tile_debuffs: NO_TILE_DEBUFFS,
         relic_debuffs: NO_RELIC_DEBUFFS,
@@ -661,19 +659,19 @@ fn boss_behavior(kind: BossKind) -> BossBehavior {
     b
 }
 
-fn load_boss_defs() -> Vec<BossDef> {
-    const PATH: &str = "data/bosses.json";
-    let raw: Vec<BossPresentationRaw> = load_json_asset(PATH, "boss data");
+fn load_ordeal_defs() -> Vec<OrdealDef> {
+    const PATH: &str = "data/ordeals.json";
+    let raw: Vec<OrdealPresentationRaw> = load_json_asset(PATH, "ordeal data");
     raw.into_iter()
         .map(|r| {
-            let beh = boss_behavior(r.id);
-            BossDef {
+            let beh = ordeal_behavior(r.id);
+            OrdealDef {
                 kind: r.id,
                 name: Box::leak(r.name.into_boxed_str()),
                 description: Box::leak(r.description.into_boxed_str()),
                 tier: r.tier,
-                min_ante: r.min_ante,
-                effect: BossEffect {
+                min_wing: r.min_wing,
+                effect: OrdealEffect {
                     rule_pushes: beh.rule_pushes,
                     tile_debuffs: beh.tile_debuffs,
                     relic_debuffs: beh.relic_debuffs,
@@ -686,36 +684,36 @@ fn load_boss_defs() -> Vec<BossDef> {
         .collect()
 }
 
-struct BossDefCaches {
-    regular: Vec<BossDef>,
-    final_: Vec<BossDef>,
+struct OrdealDefCaches {
+    regular: Vec<OrdealDef>,
+    final_: Vec<OrdealDef>,
 }
 
-static BOSS_DEF_CACHES: OnceLock<BossDefCaches> = OnceLock::new();
+static BOSS_DEF_CACHES: OnceLock<OrdealDefCaches> = OnceLock::new();
 
-fn boss_def_caches() -> &'static BossDefCaches {
+fn ordeal_def_caches() -> &'static OrdealDefCaches {
     BOSS_DEF_CACHES.get_or_init(|| {
-        let all = load_boss_defs();
+        let all = load_ordeal_defs();
         let (regular, final_): (Vec<_>, Vec<_>) =
-            all.into_iter().partition(|d| d.tier != BossTier::Final);
-        BossDefCaches { regular, final_ }
+            all.into_iter().partition(|d| d.tier != OrdealTier::Final);
+        OrdealDefCaches { regular, final_ }
     })
 }
 
 /// Non-final bosses (everything in the regular ante pool).
-pub fn all_bosses() -> &'static [BossDef] {
-    boss_def_caches().regular.as_slice()
+pub fn all_ordeals() -> &'static [OrdealDef] {
+    ordeal_def_caches().regular.as_slice()
 }
 
-/// Final-tier bosses. Reserved for `FINAL_ANTE` and never drawn into the
+/// Final-tier bosses. Reserved for `FINAL_WING` and never drawn into the
 /// regular pool.
-pub fn final_bosses() -> &'static [BossDef] {
-    boss_def_caches().final_.as_slice()
+pub fn final_ordeals() -> &'static [OrdealDef] {
+    ordeal_def_caches().final_.as_slice()
 }
 
 /// All non-final bosses, used to seed the per-run pool.
-pub fn regular_pool() -> Vec<BossKind> {
-    all_bosses().iter().map(|d| d.kind).collect()
+pub fn regular_pool() -> Vec<OrdealKind> {
+    all_ordeals().iter().map(|d| d.kind).collect()
 }
 
 /// Pick a random boss for `ante` from `pool`, removing it. Returns the
@@ -726,21 +724,21 @@ pub fn regular_pool() -> Vec<BossKind> {
 /// widen by ignoring `min_ante` rather than crashing — soft bosses on a late
 /// ante are still better than no boss at all.
 ///
-/// `min_ante_floor`: subtracted from each boss's `min_ante` (saturating) so
+/// `min_wing_floor`: subtracted from each boss's `min_ante` (saturating) so
 /// higher stakes can see harder bosses earlier. Use `0` for the Spring default.
-pub fn pick_for_ante_with_floor(
-    pool: &mut Vec<BossKind>,
+pub fn pick_for_wing_with_floor(
+    pool: &mut Vec<OrdealKind>,
     ante: u32,
-    min_ante_floor: u32,
+    min_wing_floor: u32,
     rng: &mut impl rand::Rng,
-) -> Option<BossKind> {
+) -> Option<OrdealKind> {
     if pool.is_empty() {
         return None;
     }
     let mut eligible: Vec<usize> = pool
         .iter()
         .enumerate()
-        .filter(|(_, k)| k.def().min_ante.saturating_sub(min_ante_floor) <= ante)
+        .filter(|(_, k)| k.def().min_wing.saturating_sub(min_wing_floor) <= ante)
         .map(|(i, _)| i)
         .collect();
     if eligible.is_empty() {
@@ -751,10 +749,10 @@ pub fn pick_for_ante_with_floor(
 }
 
 /// Pick a final boss for the final ante. Currently unconditional uniform
-/// pick from `final_bosses()` — separated from the main pool so soft
+/// pick from `final_ordeals()` — separated from the main pool so soft
 /// bosses can never appear on the climactic fight.
-pub fn pick_final(rng: &mut impl rand::Rng) -> BossKind {
-    let pool = final_bosses();
+pub fn pick_final(rng: &mut impl rand::Rng) -> OrdealKind {
+    let pool = final_ordeals();
     let idx = rng.random_range(0..pool.len());
     pool[idx].kind
 }
@@ -771,17 +769,14 @@ mod tests {
 
     #[test]
     fn the_rot_pushes_no_flower_wildcards_rule() {
-        let beh = boss_behavior(BossKind::Rot);
-        assert_eq!(
-            beh.rule_pushes,
-            &[RuleModifier::NoFlowerWildcards]
-        );
+        let beh = ordeal_behavior(OrdealKind::Rot);
+        assert_eq!(beh.rule_pushes, &[RuleModifier::NoFlowerWildcards]);
         assert!(beh.tile_debuffs.is_empty());
     }
 
     #[test]
     fn the_rot_is_in_regular_pool() {
-        assert!(regular_pool().contains(&BossKind::Rot));
+        assert!(regular_pool().contains(&OrdealKind::Rot));
     }
 
     #[test]
@@ -823,51 +818,51 @@ mod tests {
         );
     }
 
-    /// Every BossKind variant must appear in `assets/data/bosses.json` and
-    /// have a `boss_behavior` arm. The classify match below is exhaustive,
+    /// Every OrdealKind variant must appear in `assets/data/ordeals.json` and
+    /// have a `ordeal_behavior` arm. The classify match below is exhaustive,
     /// so a new variant won't compile until it's listed here; a missing
     /// JSON entry trips `def()`.
     #[test]
     fn every_boss_variant_has_one_data_entry() {
         // Force-compile-error if a new variant is added without classifying it.
-        for &kind in BossKind::ALL {
+        for &kind in OrdealKind::ALL {
             #[allow(unused)]
             match kind {
-                BossKind::Drought
-                | BossKind::Whisper
-                | BossKind::Tribute
-                | BossKind::Gate
-                | BossKind::Grove
-                | BossKind::Coin
-                | BossKind::Rot
-                | BossKind::Hermit
-                | BossKind::Forest
-                | BossKind::Bureaucrat
-                | BossKind::Drunkard
-                | BossKind::Ash
-                | BossKind::Furnace
-                | BossKind::Relic
-                | BossKind::Blight
-                | BossKind::Hex
-                | BossKind::Famine
-                | BossKind::Tempest
-                | BossKind::Censor
-                | BossKind::Mirror
-                | BossKind::Counterweight
-                | BossKind::TaxCollector
-                | BossKind::Dragon
-                | BossKind::House => {}
+                OrdealKind::Drought
+                | OrdealKind::Whisper
+                | OrdealKind::Tribute
+                | OrdealKind::Gate
+                | OrdealKind::Grove
+                | OrdealKind::Coin
+                | OrdealKind::Rot
+                | OrdealKind::Hermit
+                | OrdealKind::Forest
+                | OrdealKind::Bureaucrat
+                | OrdealKind::Drunkard
+                | OrdealKind::Ash
+                | OrdealKind::Furnace
+                | OrdealKind::Relic
+                | OrdealKind::Blight
+                | OrdealKind::Hex
+                | OrdealKind::Famine
+                | OrdealKind::Tempest
+                | OrdealKind::Censor
+                | OrdealKind::Mirror
+                | OrdealKind::Counterweight
+                | OrdealKind::TaxCollector
+                | OrdealKind::Dragon
+                | OrdealKind::House => {}
             }
             // Both presentation lookup and behaviour lookup must succeed.
             let _ = kind.def();
-            let _ = boss_behavior(kind);
+            let _ = ordeal_behavior(kind);
         }
-        let count = all_bosses().len() + final_bosses().len();
+        let count = all_ordeals().len() + final_ordeals().len();
         assert_eq!(
             count,
-            BossKind::ALL.len(),
-            "bosses.json count ({count}) does not match BossKind variant count ({})",
-            BossKind::ALL.len()
+            OrdealKind::ALL.len(),
+            "ordeals.json count ({count}) does not match OrdealKind variant count ({})",
+            OrdealKind::ALL.len()
         );
     }
 }
