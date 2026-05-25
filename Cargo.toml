@@ -1,6 +1,6 @@
 [package]
 name = "mahjuro"
-version = "0.5.0-19"
+version = "0.5.0-20"
 edition = "2024"
 
 [profile.release-with-debug]
