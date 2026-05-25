@@ -33,12 +33,14 @@ impl WgpuRenderer {
         dynamic_depth_view: &wgpu::TextureView,
         compare_sampler: &wgpu::Sampler,
         ao_sampler: &wgpu::Sampler,
-    ) -> [Option<RoomBakedShadowGpu>; 4] {
+    ) -> [Option<RoomBakedShadowGpu>; crate::render::room_gi_bake::ROOM_GI_ROOM_COUNT] {
         [
             RoomGiRoom::Shop,
             RoomGiRoom::Hallway,
             RoomGiRoom::Archive,
             RoomGiRoom::MainMenu,
+            RoomGiRoom::Staircase,
+            RoomGiRoom::Gameplay,
         ]
         .map(|room| {
             room_shadow_bake::cached_room_shadow_bake(room).and_then(|bake| {
@@ -185,7 +187,7 @@ impl WgpuRenderer {
         let Some(room) = self.active_room_baked_shadow else {
             return;
         };
-        let Some(gpu) = self.room_baked_shadow_gpu[room_index(room)].as_ref() else {
+        let Some(gpu) = self.room_baked_shadow_gpu[crate::render::room_gi_bake::room_gi_room_index(room)].as_ref() else {
             return;
         };
         let enabled = if shadows_enabled { 1.0 } else { 0.0 };
@@ -209,7 +211,7 @@ impl WgpuRenderer {
         let active_env = ActiveRoomEnv::from_frame(frame);
         let loaded = active_env.and_then(|env| {
             let room = env.to_room_gi()?;
-            self.room_baked_shadow_gpu[room_index(room)]
+            self.room_baked_shadow_gpu[crate::render::room_gi_bake::room_gi_room_index(room)]
                 .as_ref()
                 .map(|_| room)
         });
@@ -220,7 +222,9 @@ impl WgpuRenderer {
 
     pub(super) fn room_shadow_sample_bind_group(&self) -> &wgpu::BindGroup {
         if let Some(room) = self.active_room_baked_shadow
-            && let Some(gpu) = self.room_baked_shadow_gpu[room_index(room)].as_ref()
+            && let Some(gpu) = self.room_baked_shadow_gpu
+                [crate::render::room_gi_bake::room_gi_room_index(room)]
+                .as_ref()
         {
             return &gpu.sample_bind_group;
         }
@@ -323,15 +327,6 @@ pub(crate) struct RoomShadowCaptureStaging {
     height: u32,
     light_view_proj: [f32; 16],
     depth_bias: f32,
-}
-
-fn room_index(room: RoomGiRoom) -> usize {
-    match room {
-        RoomGiRoom::Shop => 0,
-        RoomGiRoom::Hallway => 1,
-        RoomGiRoom::Archive => 2,
-        RoomGiRoom::MainMenu => 3,
-    }
 }
 
 impl ActiveRoomEnv {

@@ -4,7 +4,7 @@ use crate::render::draw_cmd::{DrawCmd, UiFrame};
 use crate::render::lit_mesh::{
     LitMeshInstance, MaterialKind, ShadowCasterUniform, material_casts_shadow,
 };
-use crate::render::room_gi_bake::RoomGiRoom;
+use crate::render::room_gi_bake::{RoomGiRoom, room_gi_room_index};
 
 /// Which imported room mesh is active this frame (at most one is drawn).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,10 +39,10 @@ impl ActiveRoomEnv {
         match self {
             Self::Shop => Some(RoomGiRoom::Shop),
             Self::Hallway => Some(RoomGiRoom::Hallway),
-            Self::Staircase => None,
+            Self::Staircase => Some(RoomGiRoom::Staircase),
             Self::Archive => Some(RoomGiRoom::Archive),
             Self::MainMenu => Some(RoomGiRoom::MainMenu),
-            Self::Gameplay => None,
+            Self::Gameplay => Some(RoomGiRoom::Gameplay),
         }
     }
 }
@@ -63,16 +63,12 @@ pub(super) fn room_has_baked_shadow_asset(
 /// Loaded offline shadow field for the active room env, if any.
 #[inline]
 pub(super) fn room_baked_shadow_loaded(
-    slots: &[Option<crate::render::wgpu_renderer::impl_room_shadow::RoomBakedShadowGpu>; 4],
+    slots: &[Option<crate::render::wgpu_renderer::impl_room_shadow::RoomBakedShadowGpu>;
+        crate::render::room_gi_bake::ROOM_GI_ROOM_COUNT],
     env: ActiveRoomEnv,
 ) -> Option<RoomGiRoom> {
     let room = env.to_room_gi()?;
-    let idx = match room {
-        RoomGiRoom::Shop => 0,
-        RoomGiRoom::Hallway => 1,
-        RoomGiRoom::Archive => 2,
-        RoomGiRoom::MainMenu => 3,
-    };
+    let idx = room_gi_room_index(room);
     slots[idx].as_ref()?;
     Some(room)
 }

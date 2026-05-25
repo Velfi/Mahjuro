@@ -85,6 +85,8 @@ impl RoomShadowBake {
             1 => RoomGiRoom::Hallway,
             2 => RoomGiRoom::Archive,
             3 => RoomGiRoom::MainMenu,
+            4 => RoomGiRoom::Staircase,
+            5 => RoomGiRoom::Gameplay,
             _ => anyhow::bail!("room shadow bake: unknown room id {}", header.room),
         };
         anyhow::ensure!(
@@ -199,7 +201,9 @@ fn load_room_shadow_bake(room: RoomGiRoom) -> Option<Arc<RoomShadowBake>> {
         .ok()
 }
 
-static BAKE_CACHE: [OnceLock<Option<Arc<RoomShadowBake>>>; 4] = [
+static BAKE_CACHE: [OnceLock<Option<Arc<RoomShadowBake>>>; crate::render::room_gi_bake::ROOM_GI_ROOM_COUNT] = [
+    OnceLock::new(),
+    OnceLock::new(),
     OnceLock::new(),
     OnceLock::new(),
     OnceLock::new(),
@@ -212,6 +216,8 @@ fn cache_slot(room: RoomGiRoom) -> &'static OnceLock<Option<Arc<RoomShadowBake>>
         RoomGiRoom::Hallway => &BAKE_CACHE[1],
         RoomGiRoom::Archive => &BAKE_CACHE[2],
         RoomGiRoom::MainMenu => &BAKE_CACHE[3],
+        RoomGiRoom::Staircase => &BAKE_CACHE[4],
+        RoomGiRoom::Gameplay => &BAKE_CACHE[5],
     }
 }
 
@@ -227,6 +233,8 @@ impl RoomGiRoom {
             Self::Hallway => "data/room_shadow/hallway.msh",
             Self::Archive => "data/room_shadow/archive.msh",
             Self::MainMenu => "data/room_shadow/main_menu.msh",
+            Self::Staircase => "data/room_shadow/staircase.msh",
+            Self::Gameplay => "data/room_shadow/gameplay.msh",
         }
     }
 }

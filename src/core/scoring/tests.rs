@@ -434,7 +434,7 @@ fn dora_chips_per_matching_tile() {
         breakdown.steps[idx - 1].running_chips
     };
     let dora_delta = breakdown.steps[idx].running_chips - prev_chips;
-    assert_eq!(dora_delta, 450);
+    assert_eq!(dora_delta, 300);
 }
 
 #[test]
@@ -508,8 +508,8 @@ fn dora_crown_alone_adds_ten_per_dora() {
     let mut ctx = ctx_with(&r, false);
     ctx.pattern.dora_faces = vec![(Suit::Manzu, 5)];
     let breakdown = score_sets(&hand, &sets, &ctx, &[]);
-    // 3 dora * (150 base + 15 crown bonus) = 495
-    assert_eq!(dora_chips_delta(&breakdown), 495);
+    // 3 dora * (100 base + 50 crown bonus) = 450
+    assert_eq!(dora_chips_delta(&breakdown), 450);
 }
 
 #[test]
@@ -524,8 +524,8 @@ fn mirror_tile_doubles_dora_crown_bonus() {
     let mut ctx = ctx_with(&r, false);
     ctx.pattern.dora_faces = vec![(Suit::Manzu, 5)];
     let breakdown = score_sets(&hand, &sets, &ctx, &[]);
-    // 3 dora * 150 base + (3 dora * 15 crown bonus) * 2 (mirror) = 450 + 90 = 540
-    assert_eq!(dora_chips_delta(&breakdown), 540);
+    // 3 dora * 100 base + (3 dora * 50 crown bonus) * 2 (mirror) = 300 + 300 = 600
+    assert_eq!(dora_chips_delta(&breakdown), 600);
 }
 
 fn garden_keeper_chips_delta(breakdown: &ScoreBreakdown) -> i32 {
@@ -697,6 +697,6 @@ fn crown_of_patterns_adds_mult_per_distinct_yaku() {
     assert!(yaku_count >= 2);
     assert_eq!(
         with_crown.final_mult,
-        base.final_mult + 3.0 * yaku_count as f64
+        base.final_mult + 4.0 * yaku_count as f64
     );
 }

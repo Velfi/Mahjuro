@@ -40,7 +40,7 @@ pub use crate::render::vocabulary_colors::color_for_token;
 pub use crate::render::vocabulary_colors::colored_token_segments;
 use crate::render::wgpu_renderer::{TextAlign, TextLabel};
 use crate::ui::text_wrap::{TextBreakUnit, break_units_kp};
-use crate::ui::widget::{self, TextStyle};
+use crate::ui::widget;
 
 /// Vertical step between colored keyword rows ([`push_colored_rows_left`], tooltips, guide panels).
 /// All measure helpers and push paths must use this — do not duplicate the multiplier elsewhere.
@@ -343,85 +343,6 @@ pub fn push_colored_rows_in_width(
             TextAlign::Left => block_left,
             TextAlign::Center => block_left + (inner_w - measured) * 0.5,
             TextAlign::Right => block_left + inner_w - measured,
-        };
-        let mut cx = line_start;
-        for (s, c) in chunks {
-            let piece_w = word_width(&font, s, font_px).max(1.0);
-            out.push(TextLabel {
-                rect: [cx, line_y, piece_w, line_step],
-                text: s.clone(),
-                color: *c,
-                font_px: Some(font_px),
-                align: TextAlign::Left,
-                no_glossary: true,
-                ..Default::default()
-            });
-            cx += piece_w;
-        }
-    }
-}
-
-pub fn colored_wrapped_line_count(
-    text: &str,
-    max_width_px: f32,
-    line_h: f32,
-    default: [f32; 4],
-) -> usize {
-    let lines = wrap_colored_text_multiline(text, max_width_px, line_h, default);
-    if lines.is_empty() {
-        return 1;
-    }
-    lines.len()
-}
-
-/// Push one paragraph as multiple [`TextLabel`]s (one per colored chunk).
-pub fn push_colored_text_block(
-    out: &mut Vec<TextLabel>,
-    rect: [f32; 4],
-    text: &str,
-    style: TextStyle,
-    window_h: f32,
-) {
-    let [x, y, w, h] = rect;
-    let pad = style.padding;
-    let inner_w = (w - 2.0 * pad).max(1.0);
-    let inner_h = (h - 2.0 * pad).max(1.0);
-    let line_h = crate::render::theme::typography::size(style.tier, window_h);
-    let font_px = line_h;
-    let line_step = colored_row_line_step(line_h);
-    let max_lines = ((inner_h / line_step).floor() as usize).max(1);
-
-    let lines = wrap_colored_words(text, inner_w, line_h, style.color);
-    let lines: Vec<_> = lines.into_iter().take(max_lines).collect();
-    if lines.is_empty() {
-        return;
-    }
-    let n = lines.len();
-    let total_h = line_step * n as f32;
-    let block_top = y + pad + ((inner_h - total_h) * 0.5).max(0.0);
-
-    let Some(font) = load_ui_font() else {
-        out.push(TextLabel {
-            rect: [x + pad, y + pad, inner_w, inner_h],
-            text: text.to_string(),
-            color: style.color,
-            font_px: Some(font_px),
-            align: style.align,
-            ..Default::default()
-        });
-        return;
-    };
-
-    for (row, chunks) in lines.iter().enumerate() {
-        let line_y = block_top + row as f32 * line_step;
-        let mut measured = 0.0_f32;
-        for (s, _) in chunks {
-            measured += word_width(&font, s, font_px);
-        }
-        let line_start = match style.align {
-            TextAlign::Left => x + pad,
-            TextAlign::Center => x + pad + (inner_w - measured) * 0.5,
-            TextAlign::Right => x + pad + inner_w - measured,
         };
         let mut cx = line_start;
         for (s, c) in chunks {

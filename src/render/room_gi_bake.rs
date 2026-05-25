@@ -1,4 +1,4 @@
-//! Offline baked emissive probe SH for static room GLB scenes (shop / hallway / archive / main menu).
+//! Offline baked emissive probe SH for static room GLB scenes (shop / hallway / staircase / archive / main menu / gameplay).
 //!
 //! Probes are filled once by `mahjuro bake-room-gi` and uploaded at runtime so the
 //! per-frame `emissive-probe-update` compute pass can be skipped on static room views.
@@ -25,6 +25,22 @@ pub enum RoomGiRoom {
     Hallway = 1,
     Archive = 2,
     MainMenu = 3,
+    Staircase = 4,
+    Gameplay = 5,
+}
+
+pub const ROOM_GI_ROOM_COUNT: usize = 6;
+
+#[inline]
+pub fn room_gi_room_index(room: RoomGiRoom) -> usize {
+    match room {
+        RoomGiRoom::Shop => 0,
+        RoomGiRoom::Hallway => 1,
+        RoomGiRoom::Archive => 2,
+        RoomGiRoom::MainMenu => 3,
+        RoomGiRoom::Staircase => 4,
+        RoomGiRoom::Gameplay => 5,
+    }
 }
 
 impl RoomGiRoom {
@@ -34,18 +50,31 @@ impl RoomGiRoom {
             Self::Hallway => "data/room_gi/hallway.mgi",
             Self::Archive => "data/room_gi/archive.mgi",
             Self::MainMenu => "data/room_gi/main_menu.mgi",
+            Self::Staircase => "data/room_gi/staircase.mgi",
+            Self::Gameplay => "data/room_gi/gameplay.mgi",
         }
     }
 
-    pub fn from_ops(shop: bool, hallway: bool, archive: bool, main_menu: bool) -> Option<Self> {
+    pub fn from_ops(
+        shop: bool,
+        hallway: bool,
+        staircase: bool,
+        archive: bool,
+        main_menu: bool,
+        gameplay: bool,
+    ) -> Option<Self> {
         if shop {
             Some(Self::Shop)
         } else if hallway {
             Some(Self::Hallway)
+        } else if staircase {
+            Some(Self::Staircase)
         } else if archive {
             Some(Self::Archive)
         } else if main_menu {
             Some(Self::MainMenu)
+        } else if gameplay {
+            Some(Self::Gameplay)
         } else {
             None
         }
@@ -141,6 +170,8 @@ impl RoomGiBake {
             1 => RoomGiRoom::Hallway,
             2 => RoomGiRoom::Archive,
             3 => RoomGiRoom::MainMenu,
+            4 => RoomGiRoom::Staircase,
+            5 => RoomGiRoom::Gameplay,
             n => anyhow::bail!("room GI bake: unknown room id {n}"),
         };
         anyhow::ensure!(
@@ -230,7 +261,9 @@ fn load_room_gi_bake(room: RoomGiRoom) -> Option<Arc<RoomGiBake>> {
         })
 }
 
-static BAKE_CACHE: [OnceLock<Option<Arc<RoomGiBake>>>; 4] = [
+static BAKE_CACHE: [OnceLock<Option<Arc<RoomGiBake>>>; ROOM_GI_ROOM_COUNT] = [
+    OnceLock::new(),
+    OnceLock::new(),
     OnceLock::new(),
     OnceLock::new(),
     OnceLock::new(),
@@ -243,6 +276,8 @@ fn cache_slot(room: RoomGiRoom) -> &'static OnceLock<Option<Arc<RoomGiBake>>> {
         RoomGiRoom::Hallway => &BAKE_CACHE[1],
         RoomGiRoom::Archive => &BAKE_CACHE[2],
         RoomGiRoom::MainMenu => &BAKE_CACHE[3],
+        RoomGiRoom::Staircase => &BAKE_CACHE[4],
+        RoomGiRoom::Gameplay => &BAKE_CACHE[5],
     }
 }
 
