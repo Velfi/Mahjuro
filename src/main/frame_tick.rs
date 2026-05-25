@@ -2,7 +2,7 @@ use super::*;
 
 use crate::scene_transition::{
     DEFAULT_QUICK_SPEC, PendingSceneDestination, PostSceneTransitionCtx, SceneTag,
-    apply_post_scene_transition_effects, transition_spec_for_edge,
+    apply_post_scene_transition_effects, sync_music_for_scene, transition_spec_for_edge,
 };
 use crate::sdl_shell::SdlShell;
 use crate::ui::input::RumbleLabOp;
@@ -917,9 +917,23 @@ impl App {
         match overlay_request {
             Some(scenes::OverlayRequest::Push(s)) => {
                 self.overlay_stack.push(*s);
+                if matches!(self.overlay_stack.last(), Some(Scene::Credits(_))) {
+                    self.audio
+                        .set_music_track(crate::audio::MusicId::Credits);
+                }
             }
             Some(scenes::OverlayRequest::Pop) => {
+                let was_credits = self
+                    .overlay_stack
+                    .last()
+                    .is_some_and(|s| matches!(s, Scene::Credits(_)));
                 let _ = self.overlay_stack.pop();
+                if was_credits {
+                    let tag = SceneTag::from(&self.scene);
+                    let gameplay_ordeal_chamber = tag == SceneTag::Gameplay
+                        && self.run.chamber == crate::core::rules::ChamberKind::Ordeal;
+                    sync_music_for_scene(&mut self.audio, tag, gameplay_ordeal_chamber);
+                }
             }
             None => {}
         }

@@ -15,6 +15,7 @@ use crate::ui::smooth_scroll::SmoothScroll;
 
 use crate::render::draw_cmd::UiFrame;
 
+use super::credits::CreditsScene;
 use super::main_menu_exterior::MainMenuExteriorScene;
 use super::{ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
@@ -94,6 +95,7 @@ enum Row {
     Hints,
     GlyphPrompts,
     ExportPlayStats,
+    Credits,
 }
 
 impl Row {
@@ -134,6 +136,7 @@ const ROWS: &[Row] = &[
     Row::Hints,
     Row::GlyphPrompts,
     Row::ExportPlayStats,
+    Row::Credits,
 ];
 
 // ── Content slots (section headers interspersed with rows) ─────────────
@@ -172,6 +175,7 @@ const CONTENT: &[ContentSlot] = &[
     ContentSlot::Row(Row::GlyphPrompts),
     ContentSlot::Header(Section::Data),
     ContentSlot::Row(Row::ExportPlayStats),
+    ContentSlot::Row(Row::Credits),
 ];
 
 fn content_index_of_row(row: Row) -> usize {
@@ -318,6 +322,7 @@ fn row_copy(row: Row, scene: &OptionsScene) -> (&'static str, String) {
         Row::GlyphPrompts => ("Button glyphs", scene.glyph_prompt.label().into()),
         Row::UndoDiscard => ("Discard undo", on_off(scene.discard_undo_enabled)),
         Row::ExportPlayStats => ("Export play stats", String::new()),
+        Row::Credits => ("Credits", String::new()),
     }
 }
 
@@ -445,6 +450,8 @@ pub struct OptionsScene {
     cancel_requested: bool,
     /// User activated "Export play stats" this frame (after [`Self::update_input`]).
     export_requested: bool,
+    /// User activated "Credits" this frame (after [`Self::update_input`]).
+    credits_requested: bool,
     /// Smooth-scrolling state for the content pane.
     scroll: SmoothScroll,
     /// While `Some`, LMB is held after pressing on this row's slider track.
@@ -500,6 +507,7 @@ impl OptionsScene {
             confirm_requested: false,
             cancel_requested: false,
             export_requested: false,
+            credits_requested: false,
             scroll: SmoothScroll::new(),
             dragging_slider: None,
             master_volume: settings.master_volume,
@@ -598,6 +606,12 @@ impl OptionsScene {
     pub fn take_export_requested(&mut self) -> bool {
         let v = self.export_requested;
         self.export_requested = false;
+        v
+    }
+
+    pub fn take_credits_requested(&mut self) -> bool {
+        let v = self.credits_requested;
+        self.credits_requested = false;
         v
     }
 
@@ -715,7 +729,7 @@ impl OptionsScene {
             Row::Hints => self.hints_enabled = !self.hints_enabled,
             Row::GlyphPrompts => self.glyph_prompt = self.glyph_prompt.next(),
             Row::UndoDiscard => self.discard_undo_enabled = !self.discard_undo_enabled,
-            Row::ExportPlayStats => return,
+            Row::ExportPlayStats | Row::Credits => return,
             _ => return,
         }
         self.save_settings();
@@ -754,7 +768,7 @@ impl OptionsScene {
             Row::Hints => self.hints_enabled = !self.hints_enabled,
             Row::GlyphPrompts => self.glyph_prompt = self.glyph_prompt.prev(),
             Row::UndoDiscard => self.discard_undo_enabled = !self.discard_undo_enabled,
-            Row::ExportPlayStats => return,
+            Row::ExportPlayStats | Row::Credits => return,
             _ => return,
         }
         self.save_settings();
@@ -841,6 +855,9 @@ impl OptionsScene {
             }
             Row::ExportPlayStats => {
                 self.export_requested = true;
+            }
+            Row::Credits => {
+                self.credits_requested = true;
             }
         }
         false
@@ -1039,7 +1056,7 @@ impl OptionsScene {
             if self.focused.is_slider() {
                 return format!("←→: adjust   ·   ↑↓: navigate   ·   {cancel}: back");
             }
-            if self.focused == Row::ExportPlayStats {
+            if self.focused == Row::ExportPlayStats || self.focused == Row::Credits {
                 return format!("{confirm}: select   ·   ↑↓: navigate   ·   {cancel}: back");
             }
             return format!(
@@ -1051,7 +1068,7 @@ impl OptionsScene {
             "Enter: back · Esc: back".into()
         } else if self.focused.is_slider() {
             "←→ or drag: adjust · ↑↓: navigate · Esc: back".into()
-        } else if self.focused == Row::ExportPlayStats {
+        } else if self.focused == Row::ExportPlayStats || self.focused == Row::Credits {
             "Enter: select · ↑↓: navigate · Esc: back".into()
         } else {
             "←→: change · Enter: toggle · ↑↓: navigate · Esc: back".into()
@@ -1475,6 +1492,10 @@ impl SceneBehavior for OptionsScene {
                     body: format!("{e:#}"),
                 }),
             }
+        }
+        if self.take_credits_requested() {
+            ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
+            return Some(Scene::Credits(CreditsScene::from_options()));
         }
         None
     }

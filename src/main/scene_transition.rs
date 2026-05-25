@@ -49,6 +49,7 @@ pub(crate) enum SceneTag {
     MaterialViewer,
     TileAnchorLab,
     Options,
+    Credits,
     Collection,
     TutorialCampaign,
     TutorialSummary,
@@ -75,6 +76,7 @@ impl From<&Scene> for SceneTag {
             Scene::MaterialViewer(_) => SceneTag::MaterialViewer,
             Scene::TileAnchorLab(_) => SceneTag::TileAnchorLab,
             Scene::Options(_) => SceneTag::Options,
+            Scene::Credits(_) => SceneTag::Credits,
             Scene::Collection(_) => SceneTag::Collection,
             Scene::TutorialCampaign(_) => SceneTag::TutorialCampaign,
             Scene::TutorialSummary(_) => SceneTag::TutorialSummary,
@@ -108,7 +110,9 @@ pub(crate) fn transition_spec_for_edge(from: SceneTag, to: SceneTag) -> Transiti
             speed: 0.032,
         };
     }
-    if undirected_edge(from, to, MainMenuExterior, Options) {
+    if undirected_edge(from, to, MainMenuExterior, Options)
+        || undirected_edge(from, to, Options, Credits)
+    {
         return TransitionSpec {
             kind: TransitionKind::Maelstrom,
             speed: 0.032,
@@ -203,6 +207,7 @@ pub(crate) fn sync_music_for_scene(
         SceneTag::Shop | SceneTag::PickChamber | SceneTag::Staircase => {
             audio.set_music_track(MusicId::Shop)
         }
+        SceneTag::Credits => audio.set_music_track(MusicId::Credits),
         _ => audio.stop_background_music(),
     }
 }

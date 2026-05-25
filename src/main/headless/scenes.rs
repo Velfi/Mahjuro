@@ -286,6 +286,7 @@ pub(crate) fn resolve_screenshot_scene(
             (Scene::Shop(shop), true)
         }
         "options" => (Scene::Options(crate::scenes::OptionsScene::new()), false),
+        "credits" => (Scene::Credits(crate::scenes::CreditsScene::from_options()), false),
         "main_menu_exterior" | "start_screen" => (
             Scene::MainMenuExterior(crate::scenes::MainMenuExteriorScene::new()),
             false,
