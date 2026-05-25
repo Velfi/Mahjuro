@@ -721,6 +721,7 @@ impl CollectionScene {
             push_archive_cubby_new_badges(
                 bosses,
                 page,
+                focus_flat,
                 &anchors,
                 w,
                 h,
@@ -1049,7 +1050,13 @@ impl CollectionScene {
                 )
                 .for_tab(tab_to_archive_tab(TABS[ti]));
                 if tab_new > 0 {
-                    crate::ui::corner_badge::push_new_dot(&mut quads, rect, scale);
+                    crate::ui::corner_badge::push_corner_badge(
+                        &mut quads,
+                        &mut text_labels,
+                        rect,
+                        h,
+                        "NEW",
+                    );
                 }
             }
         }
@@ -2021,7 +2028,7 @@ fn enter_tab(
     tab: Tab,
     progress: &crate::core::progression::PlayerProgress,
     chronicle_last_seen: u32,
-    bus: &mut crate::game::event_bus::EventBus,
+    _bus: &mut crate::game::event_bus::EventBus,
 ) {
     scene.active_tab = tab;
     scene.selected_artifact = None;
@@ -2036,7 +2043,6 @@ fn enter_tab(
     let artifacts = tab_artifacts(tab, progress, chronicle_last_seen);
     if let Some(idx) = artifacts.iter().position(|a| a.is_new) {
         collection_sync_artifact_focus_to_idx(scene, idx);
-        mark_artifact_seen_if_new(tab, progress, idx, chronicle_last_seen, bus);
     } else if artifacts.is_empty() {
         scene.focused_row = None;
     } else {
@@ -2173,6 +2179,7 @@ struct CollectionGridCellObject3d<'a> {
 fn push_archive_cubby_new_badges(
     bosses: &[Artifact],
     page: usize,
+    focus_flat: i32,
     anchors: &[Option<[f32; 3]>],
     w: f32,
     h: f32,
@@ -2196,7 +2203,7 @@ fn push_archive_cubby_new_badges(
             continue;
         }
         let boss = &bosses[global_idx];
-        if !boss.is_new {
+        if !boss.is_new || global_idx == focus_flat as usize {
             continue;
         }
         let world = pixel_to_world_xy(w, h, anchor[0], anchor[1], anchor[2]);
@@ -2205,7 +2212,7 @@ fn push_archive_cubby_new_badges(
             continue;
         }
         let rect = [sx - rect_w * 0.5, sy - rect_h * 0.5, rect_w, rect_h];
-        crate::ui::corner_badge::push_corner_badge(quads, texts, rect, h, "NEW");
+        crate::ui::corner_badge::push_center_badge(quads, texts, rect, h, "NEW");
     }
 }
 
