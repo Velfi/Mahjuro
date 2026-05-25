@@ -2,6 +2,7 @@ pub mod archive_seen;
 pub mod chamber_target;
 pub mod ordeal;
 pub mod consumable;
+pub mod credits;
 pub mod debuff;
 pub mod deck;
 pub mod hand;

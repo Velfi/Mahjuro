@@ -123,6 +123,7 @@ pub enum MusicId {
     /// One-shot lead-in before [`MusicId::GameplayIntense`].
     GameplayIntenseIntro,
     Shop,
+    Credits,
     /// Stinger when the player clears a Small/Big blind.
     ChamberWin,
     /// Stinger when the player fails a Small/Big blind.
@@ -142,6 +143,7 @@ impl MusicId {
             MusicId::GameplayIntro => "audio/music/gameplay_intro.ogg",
             MusicId::GameplayIntenseIntro => "audio/music/gameplay_intense_intro.ogg",
             MusicId::Shop => "audio/music/shop.ogg",
+            MusicId::Credits => "audio/music/credits.ogg",
             MusicId::ChamberWin => "audio/music/chamber_win.ogg",
             MusicId::ChamberLoss => "audio/music/chamber_loss.ogg",
             MusicId::OrdealWin => "audio/music/ordeal_win.ogg",

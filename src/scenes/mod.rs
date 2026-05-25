@@ -4,6 +4,7 @@
 pub mod archive_career;
 pub mod celebration_overlay;
 pub mod collection;
+pub mod credits;
 pub(crate) mod flowers_intro_copy;
 pub mod game_over;
 mod game_over_tableau;
@@ -35,6 +36,7 @@ pub mod tutorial_campaign;
 pub mod tutorial_summary;
 pub mod yaku_journal;
 pub use collection::CollectionScene;
+pub use credits::CreditsScene;
 use enum_dispatch::enum_dispatch;
 pub use game_over::GameOverScene;
 pub use gameplay::GameplayScene;
@@ -538,6 +540,7 @@ pub enum Scene {
     TileAnchorLab(TileAnchorLabScene),
     Tixels(TixelsScene),
     Options(OptionsScene),
+    Credits(CreditsScene),
     Collection(CollectionScene),
     TutorialCampaign(TutorialCampaignScene),
     TutorialSummary(TutorialSummaryScene),

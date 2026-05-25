@@ -252,6 +252,7 @@ impl App {
                         Scene::MaterialViewer(_) => "MaterialViewer",
                         Scene::TileAnchorLab(_) => "TileAnchorLab",
                         Scene::Options(_) => "Options",
+                        Scene::Credits(_) => "Credits",
                         Scene::Collection(_) => "Collection",
                         Scene::TutorialCampaign(_) => "TutorialCampaign",
                         Scene::TutorialSummary(_) => "TutorialSummary",

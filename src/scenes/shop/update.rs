@@ -272,6 +272,12 @@ impl ShopScene {
                 ))));
                 return None;
             }
+            if self.pause_menu.take_credits_request() {
+                *ctx.overlay_request = Some(OverlayRequest::Push(Box::new(Scene::Credits(
+                    crate::scenes::CreditsScene::overlay(),
+                ))));
+                return None;
+            }
             return t;
         }
 

@@ -66,6 +66,8 @@ pub struct PauseMenu {
     /// The owning scene drains it via `take_guide_request()` after
     /// `handle()` returns and transitions to the Guide scene.
     guide_requested: bool,
+    /// One-shot flag set when the user opens Credits from the options overlay.
+    credits_requested: bool,
 }
 
 impl PauseMenu {
@@ -75,6 +77,7 @@ impl PauseMenu {
             tree: TreeState::new(),
             options_overlay: None,
             guide_requested: false,
+            credits_requested: false,
         }
     }
 
@@ -87,12 +90,21 @@ impl PauseMenu {
         v
     }
 
+    /// Drain the credits-open request flag. Returns `true` exactly once
+    /// after the user picks "Credits" from the pause options overlay.
+    pub fn take_credits_request(&mut self) -> bool {
+        let v = self.credits_requested;
+        self.credits_requested = false;
+        v
+    }
+
     /// Open the pause menu.
     pub fn open(&mut self) {
         self.paused = true;
         self.tree = TreeState::new();
         self.options_overlay = None;
         self.guide_requested = false;
+        self.credits_requested = false;
     }
 
     /// True when the embedded options overlay is currently visible. Callers
@@ -282,6 +294,13 @@ impl PauseMenu {
                             body: format!("{e:#}"),
                         }),
                     }
+                }
+                if opts.take_credits_requested() {
+                    bus.push(GameEvent::UiSound(SfxId::UiConfirm));
+                    self.options_overlay = None;
+                    self.credits_requested = true;
+                    self.paused = false;
+                    return PauseUpdate::Resume;
                 }
             }
             if self.options_overlay.is_none() {

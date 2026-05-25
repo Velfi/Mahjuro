@@ -1,0 +1,37 @@
+{
+  "title": "Credits",
+  "subtitle": "Mahjuro",
+  "sections": [
+    {
+      "title": "Development",
+      "entries": [
+        { "name": "Zelda Hessler", "role": "Lead Designer & Programmer" }
+      ]
+    },
+    {
+      "title": "Art",
+      "entries": [
+        { "name": "Otto Hessler", "role": "Art Director" },
+        { "name": "Ashley Alt", "role": "Tile Art (original)" },
+        { "name": "Mari Topel", "role": "Tile Art (painted from scratch)" },
+        { "name": "Caterina Gerbasi", "role": "Booster Pack Art" },
+        { "name": "Resvan", "role": "Main Menu Model" }
+      ]
+    },
+    {
+      "title": "Audio",
+      "entries": [
+        { "name": "Bo Tiger", "role": "Music" },
+        { "name": "Kenney", "role": "Various UI and game audio" }
+      ]
+    },
+    {
+      "title": "Special Thanks",
+      "entries": [
+        { "name": "Nicole LeGare", "role": "Playtesting & Feedback" },
+        { "name": "You", "role": "For playing" }
+      ]
+    }
+  ],
+  "footer": "The House and them that built it thank you for playing."
+}
