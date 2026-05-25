@@ -18,6 +18,7 @@ use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::widget::wrap_text;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
 
+use super::archive_career::format_score;
 use super::main_menu_exterior::MainMenuExteriorScene;
 use super::{DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
@@ -28,13 +29,46 @@ struct DismissAction;
 struct RunSummary {
     best_structure: String,
     most_played_structure: String,
-    wing: u32,
-    round: String,
+    total_score: String,
+    completion: String,
+}
+
+fn chambers_cleared_before_death(blind: crate::core::rules::ChamberKind) -> u32 {
+    use crate::core::rules::ChamberKind;
+    match blind {
+        ChamberKind::Small => 0,
+        ChamberKind::Big => 1,
+        ChamberKind::Ordeal => 2,
+    }
+}
+
+/// Chambers won vs chambers faced this run (`wins`, `chambers`).
+fn run_chamber_wins_and_total(run: &RunState) -> (u32, u32) {
+    if !run.chronicle.encounters.is_empty() {
+        let wins = run
+            .chronicle
+            .encounters
+            .iter()
+            .filter(|e| e.outcome == "Cleared")
+            .count() as u32;
+        let chambers = run.chronicle.encounters.len() as u32;
+        return (wins, chambers.max(1));
+    }
+    use crate::game::run::FINAL_WING;
+    if run.is_run_complete() {
+        let n = FINAL_WING.saturating_mul(3);
+        (n, n)
+    } else {
+        let completed_antes = run.wing.saturating_sub(1);
+        let wins = completed_antes
+            .saturating_mul(3)
+            .saturating_add(chambers_cleared_before_death(run.chamber));
+        (wins, wins.saturating_add(1))
+    }
 }
 
 impl RunSummary {
     fn from_run(run: &RunState) -> Self {
-        let gameplay = GameEngine::read(run);
         let best_structure = if run.best_structure_score > 0 {
             format!("{} ({})", run.best_structure_name, run.best_structure_score)
         } else {
@@ -46,16 +80,18 @@ impl RunSummary {
             .max_by(|(ya, ca), (yb, cb)| ca.cmp(cb).then_with(|| yb.name().cmp(ya.name())))
             .map(|(yaku, count)| format!("{} ({}x)", yaku.name(), count))
             .unwrap_or_else(|| "None".to_string());
+        let (wins, chambers) = run_chamber_wins_and_total(run);
+        let pct = if chambers > 0 {
+            (wins as f32 / chambers as f32 * 100.0).round() as u32
+        } else {
+            0
+        };
 
         Self {
             best_structure,
             most_played_structure,
-            wing: run.wing,
-            round: format!(
-                "{} ({})",
-                GameEngine::current_run_number(run),
-                gameplay.chamber_label
-            ),
+            total_score: format_score(run.total_score_earned),
+            completion: format!("{pct}%"),
         }
     }
 }
@@ -285,6 +321,7 @@ impl SceneBehavior for GameOverScene {
         };
 
         let mut rows = vec![
+            ("Total score".to_string(), self.summary.total_score.clone()),
             (
                 "Best structure".to_string(),
                 self.summary.best_structure.clone(),
@@ -293,8 +330,7 @@ impl SceneBehavior for GameOverScene {
                 "Most played".to_string(),
                 self.summary.most_played_structure.clone(),
             ),
-            ("Wing".to_string(), self.summary.wing.to_string()),
-            ("Round".to_string(), self.summary.round.clone()),
+            ("Completion".to_string(), self.summary.completion.clone()),
         ];
         if let Some(reason) = loss_reason {
             rows.push(("Defeat cause".to_string(), reason.to_string()));
