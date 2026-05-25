@@ -554,40 +554,68 @@ fn layout_styled_visual_lines_at_font_px(
     visual_lines
 }
 
-/// Line count after markup parse + wrap (same rules as [`push_styled_text_block`]).
-pub fn styled_wrapped_line_count_at_font_px(
-    text: &str,
-    max_width_px: f32,
+/// Pre-measured styled copy — use [`Self::measure_at_font_px`] then [`Self::line_count`],
+/// [`Self::block_height`], and [`Self::push_at_font_px`] so layout cannot drift.
+pub struct StyledTextBlock {
+    visual_lines: Vec<Vec<Cell>>,
     font_px: f32,
-    glossary_tint: bool,
-    default_color: [f32; 4],
-) -> usize {
-    layout_styled_visual_lines_at_font_px(
-        text,
-        max_width_px,
-        font_px,
-        glossary_tint,
-        default_color,
-    )
-    .len()
-    .max(1)
 }
 
-pub fn styled_wrapped_line_count(
-    text: &str,
-    max_width_px: f32,
-    tier: f32,
-    window_h: f32,
-    glossary_tint: bool,
-    default_color: [f32; 4],
-) -> usize {
-    styled_wrapped_line_count_at_font_px(
-        text,
-        max_width_px,
-        typography::size(tier, window_h),
-        glossary_tint,
-        default_color,
-    )
+impl StyledTextBlock {
+    pub fn measure_at_font_px(
+        text: &str,
+        max_width_px: f32,
+        font_px: f32,
+        glossary_tint: bool,
+        default_color: [f32; 4],
+    ) -> Self {
+        Self {
+            visual_lines: layout_styled_visual_lines_at_font_px(
+                text,
+                max_width_px,
+                font_px,
+                glossary_tint,
+                default_color,
+            ),
+            font_px,
+        }
+    }
+
+    pub fn measure(
+        text: &str,
+        max_width_px: f32,
+        tier: f32,
+        window_h: f32,
+        glossary_tint: bool,
+        default_color: [f32; 4],
+    ) -> Self {
+        Self::measure_at_font_px(
+            text,
+            max_width_px,
+            typography::size(tier, window_h),
+            glossary_tint,
+            default_color,
+        )
+    }
+
+    /// Line count after markup parse + wrap (same rules as [`push_styled_text_block`]).
+    pub fn line_count(&self) -> usize {
+        self.visual_lines.len().max(1)
+    }
+
+    /// Block height after markup parse + wrap (uses [`colored_row_line_step`]).
+    pub fn block_height(&self) -> f32 {
+        crate::ui::colored_keywords::colored_row_line_step(self.font_px) * self.line_count() as f32
+    }
+
+    pub fn push_at_font_px(
+        &self,
+        out: &mut Vec<TextLabel>,
+        rect: [f32; 4],
+        style: StyledBlockStyle,
+    ) {
+        push_styled_visual_lines(out, rect, &self.visual_lines, self.font_px, style);
+    }
 }
 
 /// Block height after markup parse + wrap (uses [`colored_row_line_step`]).
@@ -598,14 +626,14 @@ pub fn styled_line_block_height_at_font_px(
     glossary_tint: bool,
     default_color: [f32; 4],
 ) -> f32 {
-    let lines = styled_wrapped_line_count_at_font_px(
+    StyledTextBlock::measure_at_font_px(
         text,
         max_width_px,
         font_px,
         glossary_tint,
         default_color,
-    );
-    crate::ui::colored_keywords::colored_row_line_step(font_px) * lines as f32
+    )
+    .block_height()
 }
 
 pub fn styled_line_block_height(
@@ -616,13 +644,15 @@ pub fn styled_line_block_height(
     glossary_tint: bool,
     default_color: [f32; 4],
 ) -> f32 {
-    styled_line_block_height_at_font_px(
+    StyledTextBlock::measure(
         text,
         max_width_px,
-        typography::size(tier, window_h),
+        tier,
+        window_h,
         glossary_tint,
         default_color,
     )
+    .block_height()
 }
 
 fn push_styled_visual_lines(
@@ -691,14 +721,8 @@ pub fn push_styled_text_block_at_font_px(
 ) {
     let [_, _, w, _] = rect;
     let inner_w = (w - 2.0 * style.padding).max(1.0);
-    let visual_lines = layout_styled_visual_lines_at_font_px(
-        text,
-        inner_w,
-        font_px,
-        style.glossary_tint,
-        style.color,
-    );
-    push_styled_visual_lines(out, rect, &visual_lines, font_px, style);
+    StyledTextBlock::measure_at_font_px(text, inner_w, font_px, style.glossary_tint, style.color)
+        .push_at_font_px(out, rect, style);
 }
 
 /// Style for [`push_styled_text_block`].
@@ -745,17 +769,13 @@ pub fn push_styled_text_block(
     style: StyledBlockStyle,
     window_h: f32,
 ) {
-    let font_px = typography::size(style.tier, window_h);
-    let [_, _, w, _] = rect;
-    let inner_w = (w - 2.0 * style.padding).max(1.0);
-    let visual_lines = layout_styled_visual_lines_at_font_px(
+    push_styled_text_block_at_font_px(
+        out,
+        rect,
         text,
-        inner_w,
-        font_px,
-        style.glossary_tint,
-        style.color,
+        typography::size(style.tier, window_h),
+        style,
     );
-    push_styled_visual_lines(out, rect, &visual_lines, font_px, style);
 }
 
 #[cfg(test)]
@@ -780,9 +800,13 @@ mod tests {
         let font_px = 18.0;
         let w = 240.0;
         let color = crate::render::theme::color::PARCHMENT;
-        let count = styled_wrapped_line_count_at_font_px(text, w, font_px, true, color);
+        let block = StyledTextBlock::measure_at_font_px(text, w, font_px, true, color);
         let visual = layout_styled_visual_lines_at_font_px(text, w, font_px, true, color);
-        assert_eq!(count, visual.len().max(1));
+        assert_eq!(block.line_count(), visual.len().max(1));
+        assert_eq!(
+            styled_line_block_height_at_font_px(text, w, font_px, true, color),
+            block.block_height(),
+        );
     }
 
     #[test]
