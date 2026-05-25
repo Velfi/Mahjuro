@@ -723,18 +723,17 @@ impl TutorialCampaignScene {
         line_mul: f32,
     ) -> f32 {
         let line_h = Self::tutorial_tiles_copy_line_h(tier, h, line_mul);
-        let block_h = styled_text::styled_line_block_height_at_font_px(
+        let block = styled_text::StyledTextBlock::measure_at_font_px(
             text,
             copy_w,
             line_h,
             true,
             default_color,
         );
-        styled_text::push_styled_text_block_at_font_px(
+        let block_h = block.block_height();
+        block.push_at_font_px(
             texts,
             [copy_x, cursor, copy_w, block_h],
-            text,
-            line_h,
             styled_text::StyledBlockStyle {
                 tier: typography::H36,
                 color: default_color,
@@ -886,14 +885,13 @@ impl TutorialCampaignScene {
         let mut heights = Vec::with_capacity(glossary.len());
         let mut total_h = 0.0;
         for term in glossary {
-            let lines_n = styled_text::styled_wrapped_line_count_at_font_px(
+            let term_h = styled_text::styled_line_block_height_at_font_px(
                 term,
                 term_w,
                 term_font,
                 true,
                 color::STONE,
             );
-            let term_h = lines_n as f32 * colored_keywords::colored_row_line_step(term_font);
             heights.push(term_h);
             total_h += term_h;
         }
@@ -2259,13 +2257,14 @@ mod tests {
         let inner_w = TutorialCampaignScene::callout_text_inner_w(callout_w, scale);
         let inner_h = (callout_h - 28.0 * scale).max(1.0);
         let font_px = typography::size(typography::H36, h);
-        let line_count = styled_text::styled_wrapped_line_count_at_font_px(
+        let line_count = styled_text::StyledTextBlock::measure_at_font_px(
             callout,
             inner_w,
             font_px,
             true,
             color::CHAMPAGNE,
-        );
+        )
+        .line_count();
         let line_step = colored_keywords::colored_row_line_step(font_px);
         let max_lines = (inner_h / line_step).floor() as usize;
         assert!(
