@@ -546,11 +546,6 @@ pub enum Scene {
     YakuJournal(YakuJournalScene),
 }
 
-/// Avoid a `profile_select` ↔ `options` module cycle when returning from [`ProfileSelectScene`].
-pub(crate) fn scene_options_menu() -> Scene {
-    Scene::Options(OptionsScene::new())
-}
-
 /// Return from profile picker to the Archive (collection) without a `profile_select` ↔ `collection` cycle.
 pub(crate) fn scene_collection_archive() -> Scene {
     Scene::Collection(CollectionScene::new())
