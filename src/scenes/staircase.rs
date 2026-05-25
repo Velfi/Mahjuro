@@ -89,16 +89,6 @@ impl SceneBehavior for StaircaseScene {
             ..Default::default()
         });
 
-        let hint_font = typography::size(typography::H42, h);
-        frame.text(TextLabel {
-            text: "Click or press confirm to continue".into(),
-            rect: [0.0, h * 0.88, w, hint_font * 1.4],
-            font_px: Some(hint_font),
-            color: [1.0, 1.0, 1.0, 0.72],
-            align: TextAlign::Center,
-            ..Default::default()
-        });
-
         frame.buttons = vec![ButtonDef::ui((0.0, 0.0, w, h), UiAction::Confirm)];
 
         frame
