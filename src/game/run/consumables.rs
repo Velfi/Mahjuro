@@ -76,7 +76,10 @@ impl RunState {
                 self.memorial_round.clear_gold_bonus = bonus.min(12);
             }
             MemorialTalismanKind::Hoarder => {
-                self.apply_gold_reward(6, Some(bus));
+                self.apply_gold_reward(
+                    MemorialTalismanKind::HOARDER_GOLD as i32,
+                    Some(bus),
+                );
             }
             MemorialTalismanKind::FullDish => {
                 self.discards_remaining = self.discards_remaining.saturating_add(1);

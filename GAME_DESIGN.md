@@ -37,44 +37,61 @@ Mahjuro is a mahjong-inspired roguelite that makes mahjong approachable for west
 
 ### **B. Tile Enhancements & Talismans**
 
-**Enhancements** (persistent on tiles while they stay in hand / until played) come from shop **talismans**—many talismans buff the **whole hand** at once:
+**Enhancements** (persistent on tiles while they stay in hand / until played) come from shop **talismans**—buff talismans stamp **every tile in hand** at use time (Brocade Pouch extends that stamp to all future draws):
 
-* **Jade** — +20 chips
-* **Pearl** — +30 chips
-* **Gilded** — +0.5 mult
-* **Polychrome** — ×1.2 mult per meld containing the tile
+* **Pearl** — +100 chips per scored meld containing the tile
+* **Gilded** — +1 gold per scored meld containing the tile (separate from the chips × mult total)
+* **Polychrome** — +0.25 mult (additive) per scored meld containing the tile (→ ×1.25 when that is the only mult source on the hand)
 
 Additional talismans **transform** selected tiles (suit shifts, honors, flowers, conformity, etc.).
 
 ### **C. Meld Types & Base Scoring**
 
-| Meld     | Tiles              | Base Chips |
-| -------- | ------------------ | ---------- |
-| Pair     | 2 identical        | 18         |
-| Sequence | 3 consecutive      | 28         |
-| Triplet  | 3 identical        | 50         |
-| Kong     | 4 identical        | 80         |
+Meld **shape** drives yaku detection and relic triggers, but **base chips** are the sum of each scored tile's face value—there are no flat per-meld-type bonuses.
 
-**Dora** unlocks via meta progression: each round has indicator face(s) on the plinth; tiles that match score extra chips. **Dora Crown** adds another indicator and raises the payout.
+| Tile face | Chips |
+| --------- | ----- |
+| Number 1–9 | rank (1–9) |
+| Wind / Dragon | 15 each |
+| Flower / Season | 0 (structural wildcard only) |
+
+| Meld     | Tiles              | Example base chips |
+| -------- | ------------------ | ------------------ |
+| Pair     | 2 identical        | pair of 5s → 10    |
+| Sequence | 3 consecutive      | 1-2-3 → 6          |
+| Triplet  | 3 identical        | triplet of 3s → 9  |
+| Kong     | 4 identical        | kong of 9s → 36    |
+
+Debuffed tiles contribute **0**. Boss / round rules can modify meld base chips (e.g. **Pairs Score Zero** zeroes pair tile value; **Sequences Halved** floor-divides sequence tile value by 2).
+
+**Dora** — each round shows dora face(s) on the plinth (derived from wall picks; the displayed face is what pays). Every matching tile in the scored hand adds **+100 chips**. **Dora Crown** reveals an extra indicator and adds **+50 chips** per matching tile per Crown copy. Meta tier **L6** still flags dora in level-up messaging.
 
 ### **D. Yaku (Hand Patterns)**
 
 Many **yaku** are implemented (exact list and bonuses live in `assets/data/yaku.json`). They add chips and/or mult on top of meld scoring. Patterns include:
 
-* **Structure / value:** FullHand (4 melds + pair), Yakuhai (dragon or round-wind triplet), Chicken Hand (valid hand with no other yaku)
-* **Suit / composition:** Tanyao (2–8 only), Toitoi (all triplets/kongs), Iipeikou (doubled sequence on a full hand), Sanshoku Doujun (same sequence in three suits), Ittsu (1–9 straight one suit), Honitsu (one number suit + honors), Chinitsu (one number suit), Junchan (all 1/9/honors, every meld has a terminal or honor), Honroutou (terminals and honors only), Chiitoitsu (seven pairs)
+* **Structure / value:** FullHand (4 melds + pair), Yakuhai (dragon or round-wind triplet), Chicken Hand (valid structure with no other yaku), Pinfu (all-chow full hand; pair is 2–8 in a number suit)
+* **Suit / composition:** Tanyao (2–8 only), Toitoi (all triplets/kongs), Iipeikou (doubled sequence on a full hand), Ryanpeikou (two doubled sequences), Sanshoku Doujun (same sequence in three suits), Sanshoku Doukou (same triplet in three suits), Ittsu (1–9 straight one suit), Honitsu (one number suit + honors), Chinitsu (one number suit), Chanta (every meld has a terminal or honor), Junchan (all tiles are 1/9 or honor, every meld has a terminal or honor), Honroutou (terminals and honors only), Chiitoitsu (seven pairs), Kokushi Musō (thirteen orphans)
 
-After meta progression is applied to a run, the **full yaku list** is eligible for scoring (level-up tables still *mention* patterns alongside relic/rule/dora unlocks for pacing copy).
+In normal runs the **full yaku list** is scoring-eligible (`assets/data/yaku.json`). **Kokushi Musō** stays secret in journal/previews until the first time it is cashed in, but the scorer still awards it when the hand qualifies.
 
-Yaku level up via **zodiacs**: each use on a card boosts its bound yaku by `+20 chips` and `+0.5 mult` per level above 1.
+Yaku level up via **zodiacs**: each use on a card boosts its bound yaku by **`+50 chips`** and **`+0.9 mult`** per level above 1 (on top of the base chip/mult values in `yaku.json`).
 
 ### **E. Scoring System**
 
 `final_score = floor(chips × mult)`
 
-* **Chips** come from rank values (1–9 for numbers, flat 12 for honors) + meld bonuses + enhancements + dora
-* **Mult** accumulates from yaku, relics, zodiac levels, and conditional triggers
-* Cascading score steps drive the score popup animation
+Scoring runs in layers (`src/core/scoring/`):
+
+1. **Base melds** — sum each scored tile's `point_value()`; one cascade line per meld.
+2. **Pre-yaku layer** — meld-type relic chips (Triplet Boost, Sequence Surge, Pair Power, …), talisman enhancements, flower relics, retrigger chips, etc.
+3. **Dora & yaku** — dora chip lines, then each detected yaku's leveled chip and mult bonuses.
+4. **Post-yaku relic mults** — conditional mult relics, **Honor Triple Score** / **No-Sequence Bonus** rules, Way of Purity paths, etc.
+
+* **Chips** start at the meld tile-value sum and accumulate additively from yaku, dora, relics, and enhancements.
+* **Mult** starts at **1.0** and grows **additively** (`+N mult` steps stack into the displayed multiplier—e.g. three +2 lines → ×7).
+* **Gold** from Gilded talisman, Hanami, etc. is tracked on a separate axis in the cascade (not part of chips × mult).
+* The popup animation walks every step; chip lines are grouped before mult lines for readability.
 
 ### **F. Relics**
 
@@ -126,7 +143,7 @@ Talismans and zodiacs share one **consumable inventory** (default **2 slots**). 
 
 Tracked in `PlayerProgress` with a **tiered unlock ladder** driven by **runs completed** (thresholds live in progression code / data):
 
-* Each tier unlocks **relic shop pools**, **round rules** available in shops/runs, and **dora** at the configured tier. Level-up tables still reference **yaku names** for messaging; scoring uses the full yaku list once progression is applied.
+* Each tier unlocks **relic shop pools**, **round rules** available in shops/runs, and milestone copy for **yaku** / **dora** (dora scoring is active whenever indicators are on the wall; tier **L6** surfaces dora in level-up tables). The full yaku list scores in normal runs; **Kokushi Musō** stays hidden in reference UI until first cash-in.
 * A capped **high-score list** per profile; **run history** records finished runs for analytics and stake unlocks.
 * **Stake** ladder (**Spring → Summer → Autumn → Winter**) raises targets, shop prices, reroll base cost, and boss floors; **Winter** also adds the **No-Sequence Bonus** rule every round. Higher stakes unlock per **tile material** after clearing the previous stake with that material.
 * First **victory** unlocks **Plastic** tiles (+1 starting discard); **Tortoise Shell** grants bonus starting gold (material choice at run start).

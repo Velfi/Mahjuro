@@ -2,49 +2,49 @@
   {
     "id": "pearl",
     "name": "Pearl Talisman",
-    "description": "Every tile in hand: +100 chips when scored in a meld.",
+    "description": "Every tile in hand: melds including this tile score +100 chips.",
     "shop_price": 12,
     "accent": [0.920, 0.930, 0.950, 1.0]
   },
   {
     "id": "gilded",
     "name": "Gilded Talisman",
-    "description": "Every tile in hand: +$1 when scored in a meld.",
+    "description": "Every tile in hand: melds including this tile score +$1 gold.",
     "shop_price": 14,
     "accent": [0.843, 0.778, 0.575, 1.0]
   },
   {
     "id": "polychrome",
     "name": "Polychrome Talisman",
-    "description": "Every tile in hand: ×1.2 mult when scored in a meld.",
+    "description": "Every tile in hand: melds including this tile score ×1.25 mult.",
     "shop_price": 12,
     "accent": [0.680, 0.580, 0.720, 1.0]
   },
   {
     "id": "souzu",
     "name": "Souzu Talisman",
-    "description": "Every numbered tile in hand becomes souzu; honors unchanged.",
+    "description": "Every numbered tile in hand becomes souzu; This transformation excludes honors and flowers.",
     "shop_price": 8,
     "accent": [0.386, 0.582, 0.429, 1.0]
   },
   {
     "id": "pinzu",
     "name": "Pinzu Talisman",
-    "description": "Every numbered tile in hand becomes pinzu; honors unchanged.",
+    "description": "Every numbered tile in hand becomes pinzu; This transformation excludes honors and flowers.",
     "shop_price": 8,
     "accent": [0.306, 0.393, 0.567, 1.0]
   },
   {
     "id": "manzu",
     "name": "Manzu Talisman",
-    "description": "Every numbered tile in hand becomes manzu; honors unchanged.",
+    "description": "Every numbered tile in hand becomes manzu; This transformation excludes honors and flowers.",
     "shop_price": 8,
     "accent": [0.581, 0.320, 0.298, 1.0]
   },
   {
     "id": "honors",
     "name": "Honors Talisman",
-    "description": "Every numbered tile in hand becomes a random honor; honors unchanged.",
+    "description": "Every numbered tile in hand becomes a random honor; This transformation excludes honors and flowers.",
     "shop_price": 8,
     "accent": [0.639, 0.596, 0.422, 1.0]
   },

@@ -95,8 +95,19 @@ impl MemorialTalismanKind {
         ]
     }
 
-    /// Flat sell price when the player discards a remnant from the shop inventory.
+    /// Default sell price when the player discards a remnant from the shop inventory.
     pub const SHOP_SELL_PRICE: u32 = 4;
+
+    /// Immediate gold from using The Hoarder (also its shop sell price).
+    pub const HOARDER_GOLD: u32 = 6;
+
+    /// Sell price for this remnant in the shop inventory.
+    pub fn shop_sell_price(self) -> u32 {
+        match self {
+            Self::Hoarder => Self::HOARDER_GOLD,
+            _ => Self::SHOP_SELL_PRICE,
+        }
+    }
 
     pub fn name(self) -> &'static str {
         presentation(self).name

@@ -1370,8 +1370,8 @@ pub(crate) fn consumable_sell_price_for_mode(
     mode: &crate::game::game_mode::GameMode,
     relics: &RelicState,
 ) -> u32 {
-    if let Consumable::Memorial(_) = c {
-        return crate::core::memorial_talisman::MemorialTalismanKind::SHOP_SELL_PRICE;
+    if let Consumable::Memorial(kind) = c {
+        return kind.shop_sell_price();
     }
     let base = match c {
         Consumable::Zodiac(_) => crate::core::zodiac::ZodiacKind::shop_price(),
@@ -1809,17 +1809,23 @@ mod tests {
     }
 
     #[test]
-    fn memorial_sell_price_is_flat_four_gold() {
+    fn memorial_sell_price_is_flat_four_gold_except_hoarder() {
+        use crate::core::memorial_talisman::MemorialTalismanKind;
+
         let run = deterministic_run();
-        let price = consumable_sell_price_for_mode(
-            Consumable::Memorial(crate::core::memorial_talisman::MemorialTalismanKind::Exhausted),
+        let default_price = consumable_sell_price_for_mode(
+            Consumable::Memorial(MemorialTalismanKind::Exhausted),
             &run.mode,
             &run.relics,
         );
-        assert_eq!(
-            price,
-            crate::core::memorial_talisman::MemorialTalismanKind::SHOP_SELL_PRICE
+        assert_eq!(default_price, MemorialTalismanKind::SHOP_SELL_PRICE);
+
+        let hoarder_price = consumable_sell_price_for_mode(
+            Consumable::Memorial(MemorialTalismanKind::Hoarder),
+            &run.mode,
+            &run.relics,
         );
+        assert_eq!(hoarder_price, MemorialTalismanKind::HOARDER_GOLD);
     }
 
     #[test]
