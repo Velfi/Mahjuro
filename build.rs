@@ -24,9 +24,10 @@
 //! into `target/<profile>/` (see `build/asset_pack_bake.rs`; `.DS_Store` and other excluded
 //! paths do not invalidate the bake). Set `MAHJURO_SKIP_ASSET_BAKE=1` to skip entirely.
 //!
-//! **Room GI bakes:** when inputs change, `build/room_gi_bake.rs` may run
-//! `mahjuro bake-room-gi` (release builds only unless `MAHJURO_ROOM_GI_BAKE=1`).
-//! Skip with `MAHJURO_SKIP_ROOM_GI_BAKE=1`. See `AGENTS.md`.
+//! **Room GI / shadow bakes:** when inputs change, `build/room_gi_bake.rs` and
+//! `build/room_shadow_bake.rs` run `mahjuro bake-room-gi` / `mahjuro bake-room-shadows`
+//! (any profile; needs `mahjuro` in `target/<profile>/`, often a second `cargo build`).
+//! Skip with `MAHJURO_SKIP_ROOM_GI_BAKE=1` or `MAHJURO_SKIP_ROOM_SHADOW_BAKE=1`. See `AGENTS.md`.
 
 #[path = "build/asset_pack_bake.rs"]
 mod asset_pack_bake;

@@ -1,8 +1,8 @@
 //! Invoked from `build.rs`: hash room-GI bake inputs and run `mahjuro bake-room-gi` when stale.
 //!
-//! GPU bakes only run when the inputs stamp differs from `assets/data/room_gi/.inputs_stamp`
-//! (or a `.mgi` is missing). Default: **release** profile only; set `MAHJURO_ROOM_GI_BAKE=1` to
-//! force on debug builds. Set `MAHJURO_SKIP_ROOM_GI_BAKE=1` to disable entirely.
+//! GPU bakes run when the inputs stamp differs from `assets/data/room_gi/.inputs_stamp`
+//! or a `.mgi` is missing (any build profile). Set `MAHJURO_SKIP_ROOM_GI_BAKE=1` to disable.
+//! Requires `mahjuro` in `target/<profile>/` — often needs a second `cargo build` after the binary exists.
 
 use std::env;
 use std::fs;
@@ -17,7 +17,14 @@ const BAKE_HEIGHT: u32 = 1080;
 
 const STAMP_PATH: &str = "assets/data/room_gi/.inputs_stamp";
 const OUT_DIR: &str = "assets/data/room_gi";
-const ROOMS: &[&str] = &["shop", "hallway", "archive", "main_menu", "staircase", "gameplay"];
+const ROOMS: &[&str] = &[
+    "shop",
+    "hallway",
+    "archive",
+    "main_menu",
+    "staircase",
+    "gameplay",
+];
 
 /// Paths whose bytes are mixed into the inputs stamp (keep in sync with `rerun-if-changed` in `build.rs`).
 pub fn stamp_input_paths(repo: &Path) -> Vec<PathBuf> {
@@ -41,8 +48,7 @@ pub fn stamp_input_paths(repo: &Path) -> Vec<PathBuf> {
 
 pub fn emit_rerun_if_changed() {
     println!("cargo:rerun-if-env-changed=MAHJURO_SKIP_ROOM_GI_BAKE");
-    println!("cargo:rerun-if-env-changed=MAHJURO_ROOM_GI_BAKE");
-    println!("cargo:rerun-if-changed={STAMP_PATH}");
+    println!("cargo:rerun-if-env-changed={STAMP_PATH}");
     for path in [
         "assets/3d/shop.glb",
         "assets/3d/hallway.glb",
@@ -66,14 +72,6 @@ pub fn maybe_bake_room_gi(repo: &Path, profile_dir: &Path) {
         return;
     }
 
-    let profile = env::var("PROFILE").unwrap_or_default();
-    let force = env::var("MAHJURO_ROOM_GI_BAKE")
-        .map(|v| !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false"))
-        .unwrap_or(false);
-    if profile != "release" && !force {
-        return;
-    }
-
     let stamp_file = repo.join(STAMP_PATH);
     let out_dir = repo.join(OUT_DIR);
     let hash = compute_inputs_hash(repo);
@@ -91,15 +89,14 @@ pub fn maybe_bake_room_gi(repo: &Path, profile_dir: &Path) {
         if outputs_ok {
             println!(
                 "cargo:warning=room GI bake inputs changed but `mahjuro` is not built yet \
-                 (expected in {}); using existing .mgi until you rebuild — or run \
-                 `cargo build --release` again / `mahjuro bake-room-gi`",
+                 (expected in {}); using existing .mgi until you rebuild — run \
+                 `cargo build` again or `mahjuro bake-room-gi`",
                 profile_dir.display()
             );
         } else {
             println!(
                 "cargo:warning=room GI bakes missing under {OUT_DIR} and `mahjuro` is not in \
-                 {}; run `cargo build --release` twice, or bake manually with \
-                 `mahjuro bake-room-gi`",
+                 {}; run `cargo build` twice, or bake manually with `mahjuro bake-room-gi`",
                 profile_dir.display()
             );
         }

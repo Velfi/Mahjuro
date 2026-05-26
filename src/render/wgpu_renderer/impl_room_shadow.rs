@@ -187,7 +187,9 @@ impl WgpuRenderer {
         let Some(room) = self.active_room_baked_shadow else {
             return;
         };
-        let Some(gpu) = self.room_baked_shadow_gpu[crate::render::room_gi_bake::room_gi_room_index(room)].as_ref() else {
+        let Some(gpu) = self.room_baked_shadow_gpu
+            [crate::render::room_gi_bake::room_gi_room_index(room)]
+        .as_ref() else {
             return;
         };
         let enabled = if shadows_enabled { 1.0 } else { 0.0 };
@@ -224,7 +226,7 @@ impl WgpuRenderer {
         if let Some(room) = self.active_room_baked_shadow
             && let Some(gpu) = self.room_baked_shadow_gpu
                 [crate::render::room_gi_bake::room_gi_room_index(room)]
-                .as_ref()
+            .as_ref()
         {
             return &gpu.sample_bind_group;
         }

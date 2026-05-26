@@ -485,7 +485,11 @@ pub fn run_headless_aggregate(
             } else if s.victory {
                 format!("VICTORY (ante {})", s.died_on_wing)
             } else {
-                format!("died ante {} on {}", s.died_on_wing, s.died_on_chamber.name())
+                format!(
+                    "died ante {} on {}",
+                    s.died_on_wing,
+                    s.died_on_chamber.name()
+                )
             };
             println!(
                 "  [{:>4}/{}] last: {} (cleared {} blinds, score {})",

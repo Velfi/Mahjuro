@@ -351,7 +351,6 @@ impl App {
                 effects_quality: settings.effects_quality,
                 tile_preset: settings.tile_preset,
                 tile_material: settings.tile_material,
-                surface_kind: settings.surface_kind,
                 tileset_name: settings.tileset_name.clone(),
                 gamma: settings.gamma,
                 shadows_enabled: settings.shadows_enabled,

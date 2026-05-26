@@ -211,7 +211,7 @@ impl ProfileSelectScene {
         let settings = persistence::load_settings();
         let mut tree = TreeState::new();
         tree.set_focus(FocusId(
-            settings.active_profile.min(PROFILE_COUNT - 1) as u32,
+            settings.active_profile.min(PROFILE_COUNT - 1) as u32
         ));
         Self {
             tree,

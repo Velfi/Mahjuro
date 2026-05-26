@@ -269,13 +269,11 @@ pub(crate) fn resolve_screenshot_scene(
             hero_play = true;
             (Scene::Gameplay(Box::new(GameplayScene::new())), true)
         }
-        "pick_chamber" | "pick_blind" => {
-            (Scene::PickChamber(crate::scenes::PickChamberScene::new()), true)
-        }
-        "staircase" => (
-            Scene::Staircase(crate::scenes::StaircaseScene::new()),
+        "pick_chamber" | "pick_blind" => (
+            Scene::PickChamber(crate::scenes::PickChamberScene::new()),
             true,
         ),
+        "staircase" => (Scene::Staircase(crate::scenes::StaircaseScene::new()), true),
         "shop" => {
             setup_shop_state(run);
             let mut shop = ShopScene::new(run, progress);
@@ -286,7 +284,10 @@ pub(crate) fn resolve_screenshot_scene(
             (Scene::Shop(shop), true)
         }
         "options" => (Scene::Options(crate::scenes::OptionsScene::new()), false),
-        "credits" => (Scene::Credits(crate::scenes::CreditsScene::from_options()), false),
+        "credits" => (
+            Scene::Credits(crate::scenes::CreditsScene::from_options()),
+            false,
+        ),
         "main_menu_exterior" | "start_screen" => (
             Scene::MainMenuExterior(crate::scenes::MainMenuExteriorScene::new()),
             false,
@@ -296,13 +297,13 @@ pub(crate) fn resolve_screenshot_scene(
             false,
         ),
         "guide" | "tile_guide" | "tiles_guide" => (
-            Scene::Guide(crate::scenes::GuideScene::with_page(screenshot_page_index(s))),
+            Scene::Guide(crate::scenes::GuideScene::with_page(screenshot_page_index(
+                s,
+            ))),
             false,
         ),
         "tutorial" | "tutorial_campaign" => (
-            Scene::TutorialCampaign(TutorialCampaignScene::with_page(screenshot_page_index(
-                s,
-            ))),
+            Scene::TutorialCampaign(TutorialCampaignScene::with_page(screenshot_page_index(s))),
             false,
         ),
         "transition_playground" => (

@@ -2,10 +2,10 @@
 //! prompt before the between-wing shop.
 
 use crate::render::draw_cmd::{ScenePunctualLight, UiFrame};
-use crate::render::wgpu_renderer::{TextAlign, TextLabel};
 use crate::render::staircase_glb;
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::PointLight;
+use crate::render::wgpu_renderer::{TextAlign, TextLabel};
 use crate::scenes::shop::ShopScene;
 use crate::ui::input::UiAction;
 
@@ -38,8 +38,11 @@ impl SceneBehavior for StaircaseScene {
         frame.background(BackgroundId::Black);
 
         if staircase_glb::staircase_glb_loaded() {
-            frame.camera_override =
-                Some(staircase_glb::staircase_camera(w, h, ctx.room_gltf_height_scale));
+            frame.camera_override = Some(staircase_glb::staircase_camera(
+                w,
+                h,
+                ctx.room_gltf_height_scale,
+            ));
             frame.staircase_environment();
             let room_glb = staircase_glb::staircase_glb_has_embedded_lights();
             frame.scene_lighting.embedded_gltf_punctual = room_glb;

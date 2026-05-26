@@ -2,10 +2,10 @@
 mod cases {
     use std::collections::BTreeMap;
 
-    use crate::core::ordeal::{self, OrdealKind};
     use crate::core::deck::Wall;
     use crate::core::deck::build_wall;
     use crate::core::hand::{DetectedMeld, MeldKind};
+    use crate::core::ordeal::{self, OrdealKind};
     use crate::core::relic::RelicState;
     use crate::core::relic::{
         RelicId, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
@@ -1063,7 +1063,9 @@ mod cases {
 
         let mut run = test_run();
         run.chamber = ChamberKind::Ordeal;
-        run.ordeal.effect = Some(ResolvedOrdealEffect::from_static(&OrdealKind::Rot.def().effect));
+        run.ordeal.effect = Some(ResolvedOrdealEffect::from_static(
+            &OrdealKind::Rot.def().effect,
+        ));
         run.round_rules.push(RuleModifier::NoFlowerWildcards);
         assert!(run.selection_blocked_by_ordeal_rules(&tiles));
 

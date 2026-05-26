@@ -4,9 +4,9 @@
     "honors",
     "terminals",
     "flowers",
-    "bamboo_grove",
-    "coin_cache",
-    "scroll_library"
+    "souzu",
+    "pinzu",
+    "manzu"
   ],
   "border_gold": [
     0.785,
@@ -15,7 +15,7 @@
     1.0
   ],
   "packs": {
-    "bamboo_grove": {
+    "souzu": {
       "bg": [
         0.039,
         0.102,
@@ -23,7 +23,7 @@
         1.0
       ],
       "bg_name": "deep forest-black",
-      "display_name": "Bamboo Grove",
+      "display_name": "Souzu Pack",
       "foil": [
         0.48,
         0.78,
@@ -38,7 +38,7 @@
         1.0
       ]
     },
-    "coin_cache": {
+    "pinzu": {
       "bg": [
         0.102,
         0.055,
@@ -46,7 +46,7 @@
         1.0
       ],
       "bg_name": "burgundy-black",
-      "display_name": "Coin Cache",
+      "display_name": "Pinzu Pack",
       "foil": [
         0.78,
         0.82,
@@ -107,7 +107,7 @@
         1.0
       ]
     },
-    "scroll_library": {
+    "manzu": {
       "bg": [
         0.102,
         0.078,
@@ -115,7 +115,7 @@
         1.0
       ],
       "bg_name": "sepia-black",
-      "display_name": "Scroll Library",
+      "display_name": "Manzu Pack",
       "foil": [
         0.42,
         0.48,

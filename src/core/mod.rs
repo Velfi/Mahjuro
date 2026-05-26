@@ -1,6 +1,5 @@
 pub mod archive_seen;
 pub mod chamber_target;
-pub mod ordeal;
 pub mod consumable;
 pub mod credits;
 pub mod debuff;
@@ -9,6 +8,7 @@ pub mod hand;
 pub mod hand_intent;
 mod json_asset;
 pub mod memorial_talisman;
+pub mod ordeal;
 pub mod progression;
 pub mod relic;
 pub mod relic_desc_template;

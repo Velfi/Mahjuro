@@ -2,10 +2,10 @@ use super::relic_removal::TransformationPrimaryRelic;
 use crate::{
     audio::SfxId,
     core::{
-        ordeal::{self, OrdealKind},
         debuff::TileDebuff,
         hand::{DetectedMeld, MeldKind, enumerate_decompositions},
         hand_intent::{DecompositionBias, decomposition_affinity, infer_decomposition_bias},
+        ordeal::{self, OrdealKind},
         relic::{
             RelicId, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
             ScoreRoundBundle, ScoreTileBundle,

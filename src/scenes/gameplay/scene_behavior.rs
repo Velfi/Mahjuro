@@ -5,11 +5,32 @@ use crate::core::relic::{RelicId, all_relic_defs, relic_description_live};
 use crate::render::theme::color;
 use crate::scenes::options;
 use crate::scenes::{BackgroundId, GuideScene, OverlayRequest};
-use crate::ui::ordeal_icons::ordeal_icon_source;
 use crate::ui::inspect_plaque::{
     FocusTooltipPanelParams, dora_focus_tooltip_strings, gameplay_consumable_description_full,
     hand_tile_focus_tooltip, push_focus_tooltip_panel_2d, round_wind_focus_tooltip_strings,
 };
+use crate::ui::ordeal_icons::ordeal_icon_source;
+
+fn plinth_focus_rect_from_anchor(
+    anchor: &[f32; 3],
+    layout: &crate::ui::layout::LayoutResult,
+    tile_count: usize,
+) -> [f32; 4] {
+    let spacing = layout.mm(24.0);
+    let tile_w = layout.mm(22.0);
+    let strip_w = if tile_count >= 2 {
+        spacing + tile_w
+    } else {
+        tile_w
+    };
+    let strip_h = layout.mm(30.0);
+    [
+        anchor[0] - strip_w * 0.5,
+        anchor[1] - strip_h * 0.5,
+        strip_w,
+        strip_h,
+    ]
+}
 
 impl SceneBehavior for GameplayScene {
     /// Borrow the in-pause-menu options overlay, if the player has opened it.
@@ -91,7 +112,7 @@ impl SceneBehavior for GameplayScene {
         // deal is what sweeps the remaining curtain away, so timing-wise
         // this lands at the end of the fade-in.
         if let Some(blind) = self.pending_chamber {
-            // Keep the felt empty behind the opening transition. Paths
+            // Keep the table empty behind the opening transition. Paths
             // that land here may have left a stale hand on the run state
             // (first-round `RunState::new` pre-draws, tutorial retry re-deals
             // before transitioning), and `apply_chamber` will do the real
@@ -277,6 +298,7 @@ impl SceneBehavior for GameplayScene {
     }
 
     fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
+        let vis = ctx.debug_visibility;
         let layout = ctx.layout;
         let run = ctx.run;
         let gameplay = GameEngine::read(run);
@@ -292,13 +314,16 @@ impl SceneBehavior for GameplayScene {
         };
         let now = Instant::now();
 
+        let current_chamber = gameplay.run_number;
+        // TODO there should be a const for this
+        let total_chambers = 21;
+        let chamber_name = gameplay.chamber.name();
+
         // The window title is recomputed unconditionally so the OS chrome
         // tracks the current run state even when the glossary takes over
         // the screen.
         let window_title = format!(
-            "Mahjuro — {} Round {}  {} / {}  Gold: {}  Hands: {}  Discards: {}",
-            gameplay.chamber.name(),
-            gameplay.run_number,
+            "Mahjuro — {current_chamber}/{total_chambers} {chamber_name} {} / {}  Gold: {}  Hands: {}  Discards: {}",
             if !self.cascade_queue.is_empty() {
                 self.displayed_score
             } else {
@@ -333,45 +358,56 @@ impl SceneBehavior for GameplayScene {
         );
 
         let env_h = ctx.room_gltf_height_scale;
-        let use_glb_room = crate::render::gameplay_glb::gameplay_room_draw_ready();
-        let mut scene_camera = {
-            let h = layout.window_h;
-            let cs = h / 2104.0_f32;
-            let gp = &self.positions;
-            crate::render::gameplay_glb::gameplay_camera_from_glb_if_present(h, env_h)
-                .unwrap_or_else(|| crate::render::draw_cmd::CameraParams {
-                    eye: [
-                        0.0,
-                        -2104.0 * cs * gp.camera_eye_y_mul,
-                        1157.2 * cs * gp.camera_eye_z_mul,
-                    ],
-                    target: [
-                        0.0,
-                        -39.6 * cs * gp.camera_target_y_mul,
-                        105.2 * cs * gp.camera_target_z_mul,
-                    ],
-                    up: [0.0, 0.0, 1.0],
-                    fovy_deg: gp.camera_fovy_deg,
-                    clip_near: None,
-                    clip_far: None,
-                })
+        let glb_load = crate::render::gameplay_glb::gameplay_glb_load_state();
+        if !matches!(
+            glb_load,
+            crate::render::gameplay_glb::GameplayGlbLoadState::Ready
+        ) {
+            let msg = match glb_load {
+                crate::render::gameplay_glb::GameplayGlbLoadState::Invalid(m) => m,
+                crate::render::gameplay_glb::GameplayGlbLoadState::Missing => {
+                    "gameplay.glb is not embedded".to_string()
+                }
+                crate::render::gameplay_glb::GameplayGlbLoadState::Ready => unreachable!(),
+            };
+            return super::glb_anchors::gameplay_glb_error_frame(layout, &msg);
+        }
+        let mut scene_camera =
+            match crate::render::gameplay_glb::require_gameplay_camera(layout.window_h, env_h) {
+                Ok(cam) => cam,
+                Err(e) => {
+                    log::error!("{e:#}");
+                    return super::glb_anchors::gameplay_glb_error_frame(layout, &e.to_string());
+                }
+            };
+        let layout_scale = (layout.window_w.min(layout.window_h)) / 600.0;
+        let has_structure = gameplay.has_structure;
+        let cascade_showcase_ref = self.cascade_queue.front().and_then(|(_, sc)| sc.as_ref());
+        let showcase_present = has_structure || cascade_showcase_ref.is_some();
+        let (yaku_panel_h, structure_tag_h, structure_meld_h) =
+            super::glb_anchors::gameplay_hud_strip_heights(
+                layout.window_h,
+                layout_scale,
+                showcase_present,
+            );
+        let structure_strip_h = (structure_tag_h + structure_meld_h).max(1.0);
+        let glb_anchors = match super::glb_anchors::resolve_gameplay_glb_anchors(
+            layout,
+            interaction.hand_len,
+            layout.window_w,
+            layout.window_h,
+            &scene_camera,
+            env_h,
+            structure_strip_h,
+            yaku_panel_h,
+        ) {
+            Ok(anchors) => anchors,
+            Err(e) => {
+                log::error!("{e:#}");
+                return super::glb_anchors::gameplay_glb_error_frame(layout, &e.to_string());
+            }
         };
-        let glb_anchors = use_glb_room
-            .then(|| {
-                super::glb_anchors::resolve_gameplay_glb_anchors(
-                    layout,
-                    interaction.hand_len,
-                    layout.window_w,
-                    layout.window_h,
-                    &scene_camera,
-                    env_h,
-                )
-            })
-            .flatten();
-        let hand_slots = glb_anchors
-            .as_ref()
-            .map(|g| g.hand_slots.clone())
-            .unwrap_or_else(|| hand_slots_for_count(layout, interaction.hand_len));
+        let hand_slots = glb_anchors.hand_slots.clone();
 
         // Boss payload for the dedicated boss plinth inspect target.
         let boss_title_text = gameplay.ordeal_ofuda_title.clone();
@@ -382,70 +418,12 @@ impl SceneBehavior for GameplayScene {
             .cascade_queue
             .front()
             .map(|(cascade, _)| cascade.frame(now));
-        // Cascade chips/mult bone tokens — populated only while a cascade is
-        // active. The numerical readout that used to sit on top of these
-        // tokens (and the idle "Select tiles to play" / hand-preview line)
-        // is now handled by the floating 3D `ScorePopupSystem`, so no 2D
-        // labels are pushed for the modifier strip anymore.
-        let mut cascade_token_placements: Vec<Object3d> = Vec::new();
-        if let Some(frame) = cascade_frame.as_ref() {
-            // Geometry (chips pill on the left, mult pill on the right of the
-            // modifier strip) lives in `cascade_token_layout` so the popup
-            // streaming destinations stay locked to the drawn tokens.
-            let tokens = Self::cascade_token_layout(layout);
-            let extents = [
-                tokens.pill_w * 0.5,
-                (tokens.pill_h * 0.6 * 0.5).max(4.0),
-                tokens.pill_h * 0.5,
-            ];
-
-            // Pulse envelope: fast pop-in then settle. Active token grows ~12%.
-            let pulse_strength = (1.0 - frame.phase_t * 1.6).clamp(0.0, 1.0);
-            let pulse_for = |axis: StepKind| {
-                if frame.pulse_axis == Some(axis) {
-                    1.0 + 0.12 * pulse_strength
-                } else {
-                    1.0
-                }
-            };
-
-            for (center, axis, token_kind) in [
-                (
-                    tokens.chips_center,
-                    StepKind::Chips,
-                    crate::render::draw_cmd::CascadeTokenKind::Chips,
-                ),
-                (
-                    tokens.mult_center,
-                    StepKind::Mult,
-                    crate::render::draw_cmd::CascadeTokenKind::Mult,
-                ),
-            ] {
-                let pulse_t = ((pulse_for(axis) - 1.0) / 0.12).clamp(0.0, 1.0);
-                cascade_token_placements.push(Object3d {
-                    pos: [center.0, center.1, 24.0],
-                    extents,
-                    rotation: [0.0, 0.0, 0.0],
-                    color: [1.0, 1.0, 1.0, 1.0],
-                    kind: Object3dKind::CascadeToken {
-                        kind: token_kind,
-                        pulse: pulse_t,
-                    },
-                    hover_target: 0.0,
-                    anim_id: 0,
-                });
-            }
-
-            let _ = &frame.latest_step;
-        }
 
         // Active relics are 3D medallions in a horizontal tray (`build_relic_tray_and_wind`).
         // No 2D relic badge strip here — `RelicIcon` GPU path stays empty.
         let relic_icons: Vec<crate::render::wgpu_renderer::RelicIcon> = Vec::new();
 
-        // Bottom button bar: discard bowl, bronze mirror, journal — see
-        // [`action_bar_layout`] for spacing, lift, and rects.
-        let layout_scale = (layout.window_w.min(layout.window_h)) / 600.0;
+        // Bottom button bar: discard bowl, bronze mirror, journal — rects from GLB markers.
         let selected_count = gameplay.selected_count;
         let selection_valid = GameEngine::selection_is_valid(run);
         let boss_blocks_selection = self.boss_rule_feedback_live;
@@ -456,36 +434,9 @@ impl SceneBehavior for GameplayScene {
         //
         // Vertical order: structure strip, yaku tablets, hand rack, bowl/mirror
         // row, then journal.
-        let has_structure = gameplay.has_structure;
-        let cascade_showcase_ref = self.cascade_queue.front().and_then(|(_, sc)| sc.as_ref());
-        let showcase_present = has_structure || cascade_showcase_ref.is_some();
-        let hud_layout =
-            compute_gameplay_hud_layout(layout, &hand_slots, has_structure, showcase_present);
-        let yaku_panel_h = hud_layout.yaku_panel_h;
-        let structure_tag_h = hud_layout.structure_tag_h;
-        let structure_meld_h = hud_layout.structure_meld_h;
-        let structure_strip_top = hud_layout.structure_strip_top;
-        let yaku_row_y = hud_layout.yaku_row_y;
-        let ab = hud_layout.action_bar;
-        let ActionBarLayout {
-            scale,
-            container_w,
-            container_x,
-            mut journal_btn_rect,
-            mut journal_btn_cx,
-            mut discard_btn_rect,
-            mut play_btn_rect,
-            trigger_btn_rect,
-            action_hud_table_lift,
-            ..
-        } = ab;
-        if let Some(g) = &glb_anchors {
-            discard_btn_rect = g.discard_btn_rect;
-            play_btn_rect = g.play_btn_rect;
-            journal_btn_rect = g.journal_btn_rect;
-            journal_btn_cx = g.journal_btn_cx;
-        }
-        let action_world_z_py = action_hud_world_z_py_nudge(layout_scale);
+        let discard_btn_rect = glb_anchors.discard_btn_rect;
+        let play_btn_rect = glb_anchors.play_btn_rect;
+        let trigger_btn_rect = glb_anchors.cash_in_btn_rect;
 
         // ── Frame accumulators ───────────────────────────────────────────
         //
@@ -512,7 +463,6 @@ impl SceneBehavior for GameplayScene {
         let mut inspect_tooltip_quads: Vec<GpuInstance> = Vec::new();
         let mut inspect_tooltip_texts: Vec<TextLabel> = Vec::new();
         let mut structure_showcase: Vec<ShowcaseTilePlacement> = Vec::new();
-        let mut structure_pile_tokens: Vec<Object3d> = Vec::new();
         // Brass focus-ring quads (keyboard/controller focus).
         let mut hover_quads: Vec<GpuInstance> = Vec::new();
 
@@ -528,8 +478,6 @@ impl SceneBehavior for GameplayScene {
             yaku_preview_sets: _yaku_preview_sets,
             yaku_tablet_placements,
             structure_showcase: yaku_structure_showcase,
-            structure_pile_tokens: yaku_structure_pile_tokens,
-            cam_euler,
         } = {
             let _g = crate::render::cpu_profiler::scope("draw_frame.build_yaku_panel_and_tablets");
             input_handler::build_yaku_panel_and_tablets(
@@ -543,21 +491,11 @@ impl SceneBehavior for GameplayScene {
                 cascade_frame.as_ref(),
                 has_structure,
                 layout_scale,
-                container_w,
-                container_x,
-                structure_strip_top,
-                structure_tag_h,
-                structure_meld_h,
-                yaku_panel_h,
-                yaku_row_y,
-                trigger_btn_rect,
+                glb_anchors.structure_marker_poses,
+                glb_anchors.yaku_marker_poses,
             )
         };
-        // Merge the yaku-panel structure showcase + preview pile pushes
-        // into the outer accumulators so the rest of the draw_frame logic
-        // (which pushes its own placements) can append to them.
         structure_showcase.extend(yaku_structure_showcase);
-        structure_pile_tokens.extend(yaku_structure_pile_tokens);
 
         let paused = self.pause_menu.paused;
         let discard_undo_rect: Option<[f32; 4]> = if !paused
@@ -582,34 +520,22 @@ impl SceneBehavior for GameplayScene {
         let btn_rects = [discard_btn_rect, play_btn_rect, trigger_btn_rect];
         let play_enabled = selection_valid && gameplay.plays_remaining > 0;
         let discard_enabled = selected_count > 0 && gameplay.discards_remaining > 0;
+        input_handler::push_action_button_focus_rects(
+            &btn_rects,
+            has_structure,
+            &mut focus_rect_graph,
+        );
+        let action_row = input_handler::build_glb_action_pick_proxies(
+            &glb_anchors,
+            self.journal_open_amount,
+            has_structure,
+        );
         let input_handler::ActionRowOutputs {
-            mut wood_tablet_placements,
+            wood_tablet_placements,
             discard_bowl_placement,
             bronze_mirror_placement,
             journal_book,
-        } = {
-            let _g = crate::render::cpu_profiler::scope("draw_frame.build_action_row_and_journal");
-            input_handler::build_action_row_and_journal(
-                self,
-                layout,
-                run,
-                &ctx,
-                &gameplay,
-                &btn_rects,
-                journal_btn_rect,
-                journal_btn_cx,
-                action_world_z_py,
-                action_hud_table_lift,
-                cam_euler,
-                has_structure,
-                play_enabled,
-                discard_enabled,
-                now,
-                &mut focus_rect_graph,
-                !use_glb_room,
-            )
-        };
-        let _ = &mut wood_tablet_placements;
+        } = action_row;
 
         // Dora indicator screen rect. Pre-computed up here so the focus
         // rect graph entry can both use it.
@@ -622,71 +548,33 @@ impl SceneBehavior for GameplayScene {
         } else {
             gameplay.dora_indicator_tiles.len().min(2)
         };
-        let dora_rect: [f32; 4] = ctx.proj.dora_tile_rect.unwrap_or_else(|| {
-            let dora_x = self.positions.dora.nx * layout.window_w;
-            let dora_y = self.positions.dora.ny * layout.window_h;
-            let spacing = layout.mm(24.0);
-            let tile_w = layout.mm(22.0);
-            let dora_w = if dora_tile_count >= 2 {
-                spacing + tile_w
-            } else {
-                tile_w
-            };
-            let dora_h = layout.mm(30.0);
-            [dora_x - dora_w * 0.5, dora_y - dora_h * 0.5, dora_w, dora_h]
-        });
+        let dora_rect: [f32; 4] = plinth_focus_rect_from_anchor(
+            &glb_anchors.tile_plinth_poses[0].anchor,
+            layout,
+            dora_tile_count,
+        );
         let round_wind_tile_count = 1 + usize::from(gameplay.bonus_round_wind_rank.is_some());
-        let round_wind_rect: [f32; 4] = ctx.proj.round_wind_tile_rect.unwrap_or_else(|| {
-            let rw_x = self.positions.round_wind.nx * layout.window_w;
-            let rw_y = self.positions.round_wind.ny * layout.window_h;
-            let spacing = layout.mm(24.0);
-            let tile_w = layout.mm(22.0);
-            let rw_w = if round_wind_tile_count >= 2 {
-                spacing + tile_w
-            } else {
-                tile_w
-            };
-            let rw_h = layout.mm(30.0);
-            [rw_x - rw_w * 0.5, rw_y - rw_h * 0.5, rw_w, rw_h]
-        });
+        let round_wind_rect: [f32; 4] = plinth_focus_rect_from_anchor(
+            &glb_anchors.tile_plinth_poses[1].anchor,
+            layout,
+            round_wind_tile_count,
+        );
         let boss_plinth_rect: Option<[f32; 4]> = (!boss_title_text.is_empty()).then(|| {
-            ctx.proj.boss_plinth_rect.unwrap_or_else(|| {
-                let bx = self.positions.boss_plinth.nx * layout.window_w;
-                let by = self.positions.boss_plinth.ny * layout.window_h;
-                let bw = layout.mm(48.0);
-                let bh = layout.mm(34.0);
-                [bx - bw * 0.5, by - bh * 0.5, bw, bh]
-            })
+            plinth_focus_rect_from_anchor(&glb_anchors.tile_plinth_poses[2].anchor, layout, 1)
         });
         let ordeal_icon_rect: Option<[f32; 4]> = boss_plinth_rect.map(|rect| {
             let icon_size = layout.mm(20.0).min(rect[2] * 0.70).min(rect[3] * 0.70);
-            let [anchor_x, platform_top_y] = ctx.proj.boss_plinth_platform_px.unwrap_or([
-                rect[0] + rect[2] * 0.5,
-                // Fallback before projection cache warms: estimate the
-                // plinth's top platform in the projected bounds.
-                rect[1] + rect[3] * 0.14,
-            ]);
+            let anchor_x = rect[0] + rect[2] * 0.5;
+            let anchor_y = rect[1] + rect[3] * 0.5;
             [
                 anchor_x - icon_size * 0.5,
-                // Rest icon base on the plinth platform (with a tiny overlap
-                // so alpha bleed does not leave a visible gap).
-                // Texture has extra transparent footroom; bias upward so the
-                // visible glyph (not the texture bounds) reads centered.
-                platform_top_y - icon_size * 1.10,
+                anchor_y - icon_size * 0.5,
                 icon_size,
                 icon_size,
             ]
         });
 
-        let gold_anchor = glb_anchors
-            .as_ref()
-            .map(|g| g.gold_anchor)
-            .unwrap_or_else(|| {
-                crate::render::gold_display::gameplay_gold_pile_anchor(
-                    layout,
-                    &self.positions.coin_pile,
-                )
-            });
+        let gold_pose = glb_anchors.gold_pose;
         // Cash-in / play labels are engraved on the wood tablets (per-instance decals).
         // Discard river + play mirror use centered text in their projected rects in the
         // persistent HUD pass (see score readout + `hud_text` before `frame.texts`).
@@ -707,20 +595,18 @@ impl SceneBehavior for GameplayScene {
         let mut buttons: Vec<ButtonDef> = Vec::new();
         let _ = paused;
 
-        let input_handler::ConsumableDishBuild {
-            talisman_dish_placements,
-            ribbon_dish_placements,
-            talisman_dish_strip,
+        let input_handler::ConsumableBuild {
+            placements: consumable_placements,
         } = {
-            let _g = crate::render::cpu_profiler::scope("draw_frame.build_consumable_dish");
-            input_handler::build_consumable_dish(
-                self,
+            let _g = crate::render::cpu_profiler::scope("draw_frame.build_consumable_spawns");
+            input_handler::build_consumable_spawns(
                 layout,
                 &ctx,
                 &interaction,
                 paused,
                 &mut focus_rect_graph,
                 &mut buttons,
+                &glb_anchors.consumable_poses,
             )
         };
 
@@ -780,7 +666,7 @@ impl SceneBehavior for GameplayScene {
                 window_w: layout.window_w,
                 window_h: layout.window_h,
             },
-            scale,
+            layout_scale,
             crate::scenes::options::OptionsDrawHint::pause_overlay(&ctx),
             &mut pause_quads,
             &mut pause_text,
@@ -802,25 +688,16 @@ impl SceneBehavior for GameplayScene {
         // The glossary overlay path has its own early-return at the top of
         // this function, so it does not appear here.
 
-        let animation_state::CandleAndLightBuffers {
-            flame_emitters,
-            point_lights,
-            spot_lights,
-            candle_placements,
-        } = {
+        let animation_state::CandleAndLightBuffers { spot_lights } = {
             let _g = crate::render::cpu_profiler::scope("draw_frame.build_candles_and_spotlights");
             animation_state::build_candles_and_spotlights(
                 self,
                 layout,
-                run,
                 &gameplay,
-                &hand_slots,
+                glb_anchors.hand_world_slots.as_slice(),
                 &hint_indices,
-                discard_bowl_placement.as_ref(),
-                bronze_mirror_placement.as_ref(),
-                ctx.debug_visibility.hide_candles,
+                &glb_anchors.tile_plinth_poses,
                 ctx.progress.dora_enabled(),
-                !use_glb_room,
             )
         };
 
@@ -835,7 +712,9 @@ impl SceneBehavior for GameplayScene {
                 self,
                 layout,
                 run,
-                glb_anchors.as_ref().map(|g| g.relic_anchors.as_slice()),
+                Some(&scene_camera),
+                env_h,
+                &glb_anchors.relic_poses,
             )
         };
 
@@ -847,15 +726,23 @@ impl SceneBehavior for GameplayScene {
         let fov_pop_offset = self.final_tiles_fov_pop_offset_deg(now);
         scene_camera.fovy_deg = (scene_camera.fovy_deg - fov_pop_offset).max(35.0);
         frame.camera_override = Some(scene_camera);
+        frame.gameplay_action_picks = Some(crate::render::draw_cmd::GameplayActionPickProxies {
+            bowl: discard_bowl_placement.clone(),
+            mirror: bronze_mirror_placement.clone(),
+            journal: journal_book.clone(),
+            cash_in_tablet: wood_tablet_placements.first().cloned(),
+        });
         frame.background(BackgroundId::Black);
-        if use_glb_room {
+        if !vis.hide_environment {
             frame.gameplay_environment();
-            let room_glb_lights = crate::render::gameplay_glb::gameplay_glb_has_embedded_lights();
-            frame.scene_lighting.embedded_gltf_punctual = room_glb_lights;
-            frame.scene_lighting.room_glb_brdf = room_glb_lights;
-            if room_glb_lights {
-                let lamp_flicker = self.light_ramp * self.candle_wind_dim;
-                frame.scene_lighting.punctual = crate::render::gameplay_glb::gameplay_embedded_point_lights_runtime(
+        }
+        let room_glb_lights = crate::render::gameplay_glb::gameplay_glb_has_embedded_lights();
+        frame.scene_lighting.embedded_gltf_punctual = room_glb_lights;
+        frame.scene_lighting.room_glb_brdf = room_glb_lights;
+        if room_glb_lights && !vis.hide_candle_lights {
+            let lamp_flicker = self.light_ramp * self.candle_wind_dim;
+            frame.scene_lighting.punctual =
+                crate::render::gameplay_glb::gameplay_embedded_point_lights_runtime(
                     layout.window_w,
                     layout.window_h,
                     env_h,
@@ -864,67 +751,62 @@ impl SceneBehavior for GameplayScene {
                     lamp_flicker,
                 )
                 .into_iter()
-                .map(crate::render::draw_cmd::ScenePunctualLight::Smooth)
+                .map(crate::render::draw_cmd::ScenePunctualLight::InverseSquare)
                 .collect();
-                frame.scene_lighting.spot_lights =
-                    crate::render::gameplay_glb::gameplay_embedded_spot_lights_runtime(
-                        layout.window_w,
-                        layout.window_h,
-                        env_h,
-                        &ctx.shop_env_lighting,
-                    );
-                let glb_flames = crate::render::gameplay_glb::gameplay_gltf_candle_flame_emitters(
+            frame.scene_lighting.spot_lights =
+                crate::render::gameplay_glb::gameplay_embedded_spot_lights_runtime(
+                    layout.window_w,
                     layout.window_h,
                     env_h,
-                    lamp_flicker,
+                    &ctx.shop_env_lighting,
                 );
-                frame.candle_light_count = glb_flames.len() as u32;
-                frame.flame_height_world =
-                    crate::render::flame_volume::shop_gltf_flame_height_world(
-                        crate::render::room_glb::room_env_world_scale(layout.window_h, env_h),
-                    );
-                frame.procedural_flame_emitters = glb_flames;
-            }
-        } else {
-            frame.table();
+            let glb_flames = crate::render::gameplay_glb::gameplay_gltf_candle_flame_emitters(
+                layout.window_h,
+                env_h,
+                lamp_flicker,
+            );
+            frame.candle_light_count = glb_flames.len() as u32;
+            frame.flame_height_world = crate::render::flame_volume::shop_gltf_flame_height_world(
+                crate::render::room_glb::room_env_world_scale(layout.window_h, env_h),
+            );
+            frame.procedural_flame_emitters = glb_flames;
         }
 
-        let gold_label_rect = crate::render::gold_display::push_gold_amount_label(
-            &mut frame,
-            layout.window_w,
-            layout.window_h,
-            gameplay.gold,
-            (gold_anchor[0], gold_anchor[1]),
-        );
-        crate::render::wall_display::push_wall_remaining_hud(
-            &mut frame,
-            layout.window_w,
-            layout.window_h,
-            gameplay.tiles_left,
-        );
+        let gold_label_rect = if vis.hide_gold_label {
+            [0.0, 0.0, 0.0, 0.0]
+        } else {
+            crate::render::gold_display::push_gold_amount_label(
+                &mut frame,
+                layout.window_w,
+                layout.window_h,
+                gameplay.gold,
+                (gold_pose.anchor[0], gold_pose.anchor[1]),
+            )
+        };
+        if !vis.hide_wall_hud {
+            crate::render::wall_display::push_wall_remaining_hud(
+                &mut frame,
+                layout.window_w,
+                layout.window_h,
+                gameplay.tiles_left,
+            );
+        }
 
         // Build hand tile placements for the showcase pipeline.
         // Each slot becomes one ShowcaseTilePlacement; the renderer draws,
         // picks, and projects them with no separate hand-tile GPU path.
         {
             let _g = crate::render::cpu_profiler::scope("draw_frame.hand_tile_placements");
-            use crate::ui::layout::HAND_TILE_MESH_Y_FRAC;
-            // Rx(+π/2): rotates face normal from +Z → -Y (toward camera at large -Y).
-            // Rz(π): flips the tile's long axis so the top faces up (without Rz the top faces down).
-            // The -22° lean tilts the top slightly toward the player.
-            const HAND_TILE_RX: f32 =
-                std::f32::consts::FRAC_PI_2 - 22.0_f32 * std::f32::consts::PI / 180.0;
-            const HAND_TILE_RZ: f32 = std::f32::consts::PI;
             let hand = &interaction.hand;
+            let hand_world_slots = glb_anchors.hand_world_slots.as_slice();
+            let hand_scale_mul =
+                glb_anchors.hand_marker_poses[0].uniform_author_scale(layout.window_h, env_h);
             // Dora face set for highlighting matching hand tiles. Empty
             // before dora unlocks (level 4) so the marker only appears
             let mut hand_placements: Vec<crate::render::draw_cmd::ShowcaseTilePlacement> =
                 Vec::with_capacity(hand.len());
             let (invalid_flash, invalid_elapsed) = self.invalid_meld_flash_phase(now);
             for (i, &tile) in hand.iter().enumerate() {
-                let Some(&(sx, sy, sw, sh)) = hand_slots.get(i) else {
-                    continue;
-                };
                 let tile = Self::display_tile(tile, run);
                 let is_selected = interaction.selected.get(i).copied().unwrap_or(false);
                 let is_focused = focus == i;
@@ -933,7 +815,6 @@ impl SceneBehavior for GameplayScene {
                     invalid_flash > 0.0 && self.invalid_meld_flash_slots.contains(&i);
                 // Pop-in: slide_y 0→1, offset pixels downward (large py = nearer player).
                 let slide_y_frac = self.hand_slide_y.get(i).copied().unwrap_or(1.0);
-                let pop_offset = (1.0 - slide_y_frac) * sh * 0.3;
                 let slide_x_px = self.hand_slide_x.get(i).copied().unwrap_or(0.0);
                 // Side-to-side "no" shake — fast horizontal oscillation that decays out.
                 let reject_shake_x = if is_invalid_flash {
@@ -943,28 +824,23 @@ impl SceneBehavior for GameplayScene {
                 } else {
                     0.0
                 };
-                let cx = sx
-                    + sw * 0.5
-                    + slide_x_px
-                    + reject_shake_x
-                    + self.positions.hand_strip.nx * layout.window_w;
-                let cy = sy
-                    + sh * HAND_TILE_MESH_Y_FRAC
-                    + pop_offset
-                    + self.positions.hand_strip.ny * layout.window_h;
-                // Tile standing upright: center is at half the long dimension above the table.
-                // Chinese tile: 30mm long, half = 15mm. layout.mm() converts mm → world units.
-                let lift = layout.mm(15.0) + layout.mm(self.positions.hand_strip.lift_mm);
+                let Some(&([px, py, lift_z], sw, hand_rot)) = hand_world_slots.get(i) else {
+                    continue;
+                };
+                let sh = hand_slots.get(i).map(|(_, _, _, h)| *h).unwrap_or(sw);
+                let pop_offset = (1.0 - slide_y_frac) * sh * 0.3;
+                let (cx, cy, lift, size_px) = (
+                    px + slide_x_px + reject_shake_x,
+                    py + pop_offset,
+                    lift_z,
+                    sw * hand_scale_mul,
+                );
                 hand_placements.push(crate::render::draw_cmd::ShowcaseTilePlacement {
                     tile,
                     center_pos: [cx, cy, lift],
-                    rotation: [
-                        HAND_TILE_RX + self.positions.hand_strip.rx_deg.to_radians(),
-                        self.positions.hand_strip.ry_deg.to_radians(),
-                        HAND_TILE_RZ + self.positions.hand_strip.rz_deg.to_radians(),
-                    ],
+                    rotation: hand_rot,
                     scale: slide_y_frac.max(0.05),
-                    size_px: sw,
+                    size_px,
                     brightness: if is_invalid_flash { 1.12 } else { 1.0 },
                     // Suppress gold selection rim on straggler tiles so red reads clearly.
                     selected: is_selected && !is_invalid_flash,
@@ -980,14 +856,11 @@ impl SceneBehavior for GameplayScene {
                     overlay_rect_group: None,
                 });
             }
-            if !hand_placements.is_empty() {
+            if !vis.hide_hand_tiles && !hand_placements.is_empty() {
                 frame.showcase_tile_batch(hand_placements);
             }
         }
-        if !candle_placements.is_empty() {
-            frame.object3d_batch(candle_placements.clone());
-        }
-        if !relic_objects.is_empty() {
+        if !vis.hide_relics && !relic_objects.is_empty() {
             frame.object3d_batch(relic_objects);
         }
         // PERSISTENT HUD: score-panel overlay quads (none
@@ -998,8 +871,7 @@ impl SceneBehavior for GameplayScene {
         // text pass). Cascade popups and hand-off glyphs still use 3D meshes;
         // their destinations use `score_counter_layout`.
         let score_counter = super::score_counter::score_counter_layout(layout, &self.positions);
-        // Debug visibility: `hide_chamber_plaque` / `hide_scoring_placard` gate
-        // the 2D score readout (same flags as the former plaque / counter).
+        // Debug visibility: `hide_score_readout` gates the 2D score line.
         // Anchor it from the plaque's *actual* left edge instead of the raw
         // score-panel bounds: perspective projection pulls taller / higher
         // objects inward on screen, so a naive "some pixels left of
@@ -1020,16 +892,9 @@ impl SceneBehavior for GameplayScene {
             // Push each fan just toward-the-camera of its anchor so the
             // sticks stand on the table surface in front of (not inside)
             // the mirror/river.
-            let fan_forward_px = layout.mm(30.0);
-            let play_tally_pos = bronze_mirror_placement
-                .as_ref()
-                .map(|m| m.pos)
-                .or_else(|| glb_anchors.as_ref().map(|g| g.play_tally_anchor));
-            if let Some([fx, fy, flift]) = play_tally_pos {
-                let fan = &self.positions.counter_draws_fan;
-                let fx = fx + fan.nx * layout.window_w;
-                let fy = fy + fan_forward_px + fan.ny * layout.window_h;
-                let flift = flift + layout.mm(fan.lift_mm);
+            let [fx, fy, flift] = glb_anchors.play_tally_pose.anchor;
+            let play_rot = glb_anchors.play_tally_pose.rotation_deg();
+            if !vis.hide_play_tally_fan {
                 frame.object3d(Object3d {
                     pos: [fx, fy, flift],
                     extents: [1.0, 1.0, 1.0],
@@ -1043,23 +908,17 @@ impl SceneBehavior for GameplayScene {
                         max_count: gameplay.plays_max,
                         spread_deg,
                         tip_color: crate::render::theme::color::JADE,
-                        rotation_y_deg: fan.ry_deg,
-                        placement_rot_deg: fan.rotation_deg(),
+                        rotation_y_deg: play_rot[1],
+                        placement_rot_deg: play_rot,
                         kind: crate::render::draw_cmd::TallyFanKind::Draws,
                     },
                     hover_target: 0.0,
                     anim_id: 0,
                 });
             }
-            let discard_tally_pos = discard_bowl_placement
-                .as_ref()
-                .map(|b| b.pos)
-                .or_else(|| glb_anchors.as_ref().map(|g| g.discard_tally_anchor));
-            if let Some([fx, fy, flift]) = discard_tally_pos {
-                let fan = &self.positions.counter_discards_fan;
-                let fx = fx + fan.nx * layout.window_w;
-                let fy = fy + fan_forward_px + fan.ny * layout.window_h;
-                let flift = flift + layout.mm(fan.lift_mm);
+            let [fx, fy, flift] = glb_anchors.discard_tally_pose.anchor;
+            let discard_rot = glb_anchors.discard_tally_pose.rotation_deg();
+            if !vis.hide_discard_tally_fan {
                 frame.object3d(Object3d {
                     pos: [fx, fy, flift],
                     extents: [1.0, 1.0, 1.0],
@@ -1073,8 +932,8 @@ impl SceneBehavior for GameplayScene {
                         max_count: gameplay.discards_max,
                         spread_deg,
                         tip_color: crate::render::theme::color::AMBER,
-                        rotation_y_deg: fan.ry_deg,
-                        placement_rot_deg: fan.rotation_deg(),
+                        rotation_y_deg: discard_rot[1],
+                        placement_rot_deg: discard_rot,
                         kind: crate::render::draw_cmd::TallyFanKind::Discards,
                     },
                     hover_target: 0.0,
@@ -1082,13 +941,8 @@ impl SceneBehavior for GameplayScene {
                 });
             }
         }
-        // Phase 6: cascade scoring tokens (engraved bone, chips + mult)
-        // pop in during a scoring cascade.
-        if !cascade_token_placements.is_empty() {
-            frame.object3d_batch(cascade_token_placements);
-        }
         // Floating extruded-glyph score popups (per-step "+50" / "×3").
-        if self.score_popups.is_active() {
+        if !vis.hide_score_popups && self.score_popups.is_active() {
             let popup_scale = layout.window_w.min(layout.window_h) / 1080.0;
             let placements = self.score_popups.placements(now, popup_scale);
             frame.object3d_batch(placements);
@@ -1096,7 +950,9 @@ impl SceneBehavior for GameplayScene {
         // Cascade HUD: chips × mult counter under the score panel. During the
         // hand-off tween the trio merges into `= TOTAL` and flies up toward
         // the readout anchor (`score_counter.reel`).
-        if let Some(hud) = self.cascade_hud {
+        if !vis.hide_cascade_hud
+            && let Some(hud) = self.cascade_hud
+        {
             let placements = build_cascade_hud_placements(
                 &hud,
                 score_counter.cascade_pad,
@@ -1155,12 +1011,26 @@ impl SceneBehavior for GameplayScene {
         // Committed structure melds + tier tokens: inserted before the hand
         // `ShowcaseTileBatch` at end of `draw_frame` so they sit behind the rack (depth order).
         // Phase 3: bone yaku tablets (decal names on mesh).
-        if !yaku_tablet_placements.is_empty() {
+        if !vis.hide_yaku_tablets && !yaku_tablet_placements.is_empty() {
             frame.object3d_batch(yaku_tablet_placements);
         }
-        // Phase 4: wood sort/trigger + lacquered bowl + bronze mirror.
-        // Journal book is drawn later — last among gameplay props — so zoom depth cannot lose to bowl/mirror/etc.
-        if !wood_tablet_placements.is_empty() {
+        // `gameplay.glb` marker empties skip env draw; spawn procedural meshes at those anchors.
+        if !vis.hide_discard_bowl
+            && let Some(ref bowl) = discard_bowl_placement
+        {
+            frame.object3d(bowl.clone());
+        }
+        if !vis.hide_play_mirror
+            && let Some(ref mirror) = bronze_mirror_placement
+        {
+            frame.object3d(mirror.clone());
+        }
+        if !vis.hide_journal
+            && let Some(ref book) = journal_book
+        {
+            frame.object3d(book.clone());
+        }
+        if !vis.hide_wood_tablets && !wood_tablet_placements.is_empty() {
             frame.object3d_batch(wood_tablet_placements);
         }
         let bowl_model = ctx.proj.bowl_model.or_else(|| {
@@ -1168,9 +1038,6 @@ impl SceneBehavior for GameplayScene {
                 discard_animation::bowl_model_matrix(layout.window_w, layout.window_h, bowl)
             })
         });
-        if let Some(bowl) = discard_bowl_placement {
-            frame.object3d(bowl);
-        }
         // Discard river tiles (sinking pile, settled, in-flight) — after the
         // river mesh so tiles read as resting on / flying into the water.
         {
@@ -1202,72 +1069,37 @@ impl SceneBehavior for GameplayScene {
                 layout.window_h,
                 run,
             ));
-            if !discard_placements.is_empty() {
+            if !vis.hide_discard_tiles && !discard_placements.is_empty() {
                 frame.showcase_tile_batch(discard_placements);
             }
         }
-        if let Some(mirror) = bronze_mirror_placement {
-            frame.object3d(mirror);
-        }
-        // Talisman/zodiac dish on the right side of the table. Glazed
-        // porcelain with an aged-cream tint so the shader's crazing
-        // pattern lands on it — reads as a well-loved temple ceramic
-        // rather than a fresh kiln piece.
-        if let Some((sx, sy, sw, sh)) = talisman_dish_strip {
-            let dish_pad_x = sw * 0.10;
-            let dish_pad_y = sh * 0.40;
-            let td = &self.positions.talisman_dish;
-            frame.object3d(Object3d {
-                pos: [
-                    sx + sw * 0.5 + td.nx * layout.window_w,
-                    sy + sh * 0.5 + td.ny * layout.window_h,
-                    layout.mm(td.lift_mm) + layout.mm(18.0) * 0.5,
-                ],
-                // Porcelain dish ~18mm tall — gives the bowl profile
-                // enough vertical depth that the curved silhouette
-                // reads as ceramic dishware rather than a flat coaster.
-                extents: [
-                    sw + dish_pad_x * 2.0,
-                    layout.mm(18.0),
-                    sh + dish_pad_y * 2.0,
-                ],
-                rotation: [std::f32::consts::FRAC_PI_2, 0.0, 0.0],
-                // Aged cream — same tint as the gold dish so the two
-                // ceramic surfaces read as a matched set across the table.
-                color: color::PORCELAIN_AGED,
-                kind: Object3dKind::Primitive {
-                    shape: crate::render::primitive::MeshId::PorcelainDish,
-                    material: crate::render::primitive::MaterialSpec::porcelain(),
-                    pick_id: Some(PICK_CONSUMABLE_DISH),
-                    shadow_caster: true,
-                    silhouette: false,
-                },
-                hover_target: 0.0,
-                anim_id: 0,
-            });
-            if !ribbon_dish_placements.is_empty() {
-                frame.object3d_batch(ribbon_dish_placements);
-            }
-            if !talisman_dish_placements.is_empty() {
-                frame.object3d_batch(talisman_dish_placements);
-            }
+        if !vis.hide_consumables && !consumable_placements.is_empty() {
+            frame.object3d_batch(consumable_placements);
         }
 
         {
             let _g = crate::render::cpu_profiler::scope("draw_frame.build_ambient_table_objects");
-            let (boss_plinth_glow, _) = self.boss_rule_feedback(now, boss_blocks_selection);
-            animation_state::build_ambient_table_objects(
+            if let Err(e) = animation_state::build_ambient_table_objects(
                 self,
                 layout,
                 &gameplay,
                 ctx.progress.dora_enabled(),
-                boss_plinth_glow * 0.65,
                 &mut frame,
-                use_glb_room,
-                glb_anchors.as_ref().map(|g| g.tile_plinth_anchors.as_slice()),
-            );
+                &glb_anchors.tile_plinth_poses,
+                glb_anchors.gold_pose,
+                &scene_camera,
+                layout.window_w,
+                layout.window_h,
+                env_h,
+                vis,
+            ) {
+                log::error!("{e:#}");
+                return super::glb_anchors::gameplay_glb_error_frame(layout, &e.to_string());
+            }
         }
-        if let (Some(ordeal_kind), Some(icon_rect)) = (gameplay.ordeal_kind, ordeal_icon_rect) {
+        if !vis.hide_boss_icon
+            && let (Some(ordeal_kind), Some(icon_rect)) = (gameplay.ordeal_kind, ordeal_icon_rect)
+        {
             let (boss_glow, boss_wiggle) = self.boss_rule_feedback(now, boss_blocks_selection);
             if boss_glow > 0.0 {
                 let pad = icon_rect[2].max(icon_rect[3]) * 0.42;
@@ -1300,7 +1132,7 @@ impl SceneBehavior for GameplayScene {
         // Flying coin animations (gold changes).
         {
             let flying = self.flying_coins.placements();
-            if !flying.is_empty() {
+            if !vis.hide_flying_coins && !flying.is_empty() {
                 frame.object3d_batch(flying);
             }
         }
@@ -1318,32 +1150,10 @@ impl SceneBehavior for GameplayScene {
                 });
             }
         }
-        if let Some(book) = journal_book {
-            frame.object3d(book);
-        }
-
-        if use_glb_room {
-            frame.scene_lighting.punctual.extend(
-                point_lights
-                    .into_iter()
-                    .map(crate::render::draw_cmd::ScenePunctualLight::Smooth),
-            );
-            frame.scene_lighting.spot_lights.extend(spot_lights);
-        } else {
-            frame.procedural_flame_emitters = flame_emitters;
-            frame.candle_light_count = candle_placements.len() as u32;
-            frame.flame_height_world =
-                crate::render::flame_volume::flame_height_world(&layout);
-            frame.scene_lighting.set_smooth_points(point_lights);
-            frame.scene_lighting.spot_lights = spot_lights;
-        }
+        frame.scene_lighting.spot_lights.extend(spot_lights);
         if !frame.procedural_flame_emitters.is_empty() {
             // One `DrawCmd::Flame` triggers the volume batch (same path as shop).
-            frame.flames(std::iter::once(crate::render::wgpu_renderer::GpuInstance {
-                rect: [0.0, 0.0, 1.0, 1.0],
-                color: [0.0, 0.0, 1.0, 0.0],
-                user: 0,
-            }));
+            frame.flame_batch();
         }
 
         // Play mirror + discard river: labels centered in projected rects (not cursor hover tooltips).
@@ -1351,6 +1161,7 @@ impl SceneBehavior for GameplayScene {
             && !ctx.modal_active
             && self.cascade_queue.is_empty()
             && self.journal_transition.is_none()
+            && self.pending_chamber.is_none()
         {
             use crate::render::theme::typography;
             let body_px = typography::size(typography::H36, layout.window_h);
@@ -1455,9 +1266,7 @@ impl SceneBehavior for GameplayScene {
             }
         }
 
-        let hud_text = if !ctx.debug_visibility.hide_chamber_plaque
-            && !ctx.debug_visibility.hide_scoring_placard
-        {
+        let hud_text = if !vis.hide_score_readout {
             use crate::render::theme::typography;
             let sp = layout.score_panel;
             let zc = (layout.window_w / 900.0).max(0.55);
@@ -1835,7 +1644,7 @@ impl SceneBehavior for GameplayScene {
             if let Some(rect) = rect_lookup {
                 push_focus_ring(
                     rect,
-                    scale,
+                    layout_scale,
                     layout.window_w,
                     layout.window_h,
                     &mut hover_quads,
@@ -1854,8 +1663,6 @@ impl SceneBehavior for GameplayScene {
         frame.quads(pause_quads);
         frame.texts(pause_text);
 
-        frame.candle_light_count = candle_placements.len() as u32;
-        frame.flame_height_world = crate::render::flame_volume::flame_height_world(layout);
         // Projected rects for the discard river + play mirror: hit-test order
         // before the fullscreen 3D catch-all (same id — dispatcher uses
         // `picked_gameplay_object`). Labels render centered in these rects in the
@@ -1917,6 +1724,6 @@ impl SceneBehavior for GameplayScene {
         // order. Compiled out of release builds.
         debug_assert_marker_uniqueness(&frame);
 
-        insert_structure_before_hand(frame, structure_showcase, structure_pile_tokens)
+        insert_structure_before_hand(frame, structure_showcase, vis)
     }
 }

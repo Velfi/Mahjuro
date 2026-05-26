@@ -8,13 +8,11 @@
 //! - `journal_transition` + overlay push — Yaku Journal from the table book.
 //! - `tutorial_overlay` — in-run hints when the tutorial is active.
 
-mod action_bar_layout;
 mod action_prompts;
 mod animation_state;
-mod candle;
 mod cascade_controller;
 mod cascade_hud;
-mod discard_animation;
+pub(crate) mod discard_animation;
 mod focus;
 mod glb_anchors;
 mod hand_layout;
@@ -26,6 +24,9 @@ mod score_counter;
 use std::collections::VecDeque;
 use std::time::Instant;
 
+use super::journal_transition::JournalTransition;
+use super::pause_menu::PauseMenu;
+use super::{ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 use crate::core::hand::suggest_completions;
 use crate::core::scoring::StepKind;
 use crate::game::cascade::{CascadeTuning, ScoringCascade};
@@ -40,29 +41,13 @@ use crate::render::score_reel::ScoreReel;
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, TextLabel, build_instances_from_layout};
 use crate::ui::input::UiAction;
-use crate::ui::scene_layout::GameplayPositions;
 
-use super::journal_transition::JournalTransition;
-use super::pause_menu::PauseMenu;
-use super::{ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
-
-use action_bar_layout::{
-    ActionBarLayout, action_hud_world_z_py_nudge, compute_gameplay_hud_layout,
-};
-use candle::CandleState;
 use cascade_hud::{
     CascadeHandoffStage, CascadeHudState, CascadeShowcase, CascadeTokenLayout,
     build_cascade_hud_placements,
 };
 use focus::{FocusTarget, PegKind, focus_kind};
 use hand_layout::hand_slots_for_count;
-
-/// `pick_id` for the consumable inventory dish (Zodiacs + Talismans). Used
-/// to look up the dish's projected screen rect from `ctx.aux_dish_rects`
-/// so the per-slot hit-test, focus ring, and click target
-/// anchor track the visible (perspective-projected) dish position
-/// instead of the raw pixel anchor we hand the renderer.
-const PICK_CONSUMABLE_DISH: u32 = 1;
 
 use crate::ui::focus_nav::push_focus_ring;
 
@@ -164,9 +149,6 @@ pub struct GameplayScene {
     cached_cascade_tuning: CascadeTuning,
     /// Latest cursor position (window coords), captured each update for hover picking.
     cursor_pos: (f32, f32),
-    /// Score panel (2) + hand strip — upper pair (2) + lower pair (2) + footlight (1).
-    /// Updated every frame; consumed in `draw()` to position flames + lights.
-    candles: [CandleState; 7],
     /// Wall-clock time used to advance candle flicker (independent of the
     /// game's `Instant::now()` references so the candles keep moving even if
     /// the game logic is paused).
@@ -274,8 +256,7 @@ pub struct GameplayScene {
     journal_open_target: f32,
     /// Set after the forward transition pushes the journal; cleared when the closing animation starts.
     journal_was_open: bool,
-    /// Normalized screen-relative positions for the gameplay scene.
-    /// Loaded from JSON on construction; falls back to compiled defaults.
+    /// Candle + score-reel tunables (not authored as GLB spawn empties).
     pub positions: crate::ui::scene_layout::GameplayPositions,
     /// Snapshot of run state before the last discard; kept even when the
     /// accessibility undo option is off so turning it on can still undo that discard.
@@ -531,12 +512,6 @@ impl GameplayScene {
         FINAL_TILES_FOV_POP_DEGREES * (progress * std::f32::consts::PI).sin()
     }
 
-    fn trigger_tablet_wiggle_deg(&self, now: Instant) -> f32 {
-        let t = now.saturating_duration_since(self.last_frame).as_secs_f32() + self.candle_time;
-        let burst = (0.5 + 0.5 * (t * 3.1).sin()).powi(2);
-        burst * 8.0 * (t * 20.0).sin()
-    }
-
     pub fn new() -> Self {
         let now = Instant::now();
         Self {
@@ -561,15 +536,6 @@ impl GameplayScene {
             river_sink_batch: None,
             cached_cascade_tuning: CascadeTuning::default(),
             cursor_pos: (0.0, 0.0),
-            candles: [
-                CandleState::new(0.0),
-                CandleState::new(1.7),
-                CandleState::new(3.9),
-                CandleState::new(5.2),
-                CandleState::new(2.1),
-                CandleState::new(4.4),
-                CandleState::new(2.6),
-            ],
             candle_time: 0.0,
             candle_wind_dim: 1.0,
             relic_glow_starts: rustc_hash::FxHashMap::default(),
@@ -692,9 +658,7 @@ impl GameplayScene {
 
     /// Screen-space geometry for the chips (left) and mult (right) cascade
     /// accumulator tokens drawn inside the modifier strip. Single source of
-    /// truth for both the draw path (`CascadeToken` placements) and popup
-    /// streaming destinations, so chip/mult popups always land on the tokens
-    /// the player is watching pulse.
+    /// truth for score-popup streaming destinations during a cascade.
     #[allow(private_interfaces)]
     pub(super) fn cascade_token_layout(
         layout: &crate::ui::layout::LayoutResult,
@@ -724,7 +688,7 @@ impl GameplayScene {
         layout: &crate::ui::layout::LayoutResult,
         run: &crate::game::run::RunState,
         cascade_showcase: Option<&CascadeShowcase>,
-        gameplay_positions: &GameplayPositions,
+        env_height_scale: f32,
     ) -> (f32, f32) {
         if step.kind == StepKind::Final {
             let sp = layout.score_panel;
@@ -732,7 +696,7 @@ impl GameplayScene {
         }
 
         if let Some(rid) = crate::core::relic::relic_by_name(&step.source)
-            && let Some(center) = Self::relic_popup_center(layout, run, rid, gameplay_positions)
+            && let Some(center) = Self::relic_popup_center(layout, run, rid, env_height_scale)
         {
             return center;
         }
@@ -764,11 +728,11 @@ impl GameplayScene {
         layout: &crate::ui::layout::LayoutResult,
         run: &crate::game::run::RunState,
         rid: crate::core::relic::RelicId,
-        gameplay_positions: &GameplayPositions,
+        env_height_scale: f32,
     ) -> Option<(f32, f32)> {
         let active_ids = GameEngine::active_relics(run);
         let idx = active_ids.iter().position(|&id| id == rid)?;
-        input_handler::relic_tray_screen_center_xy(gameplay_positions, layout, run, idx)
+        input_handler::relic_tray_screen_center_xy(layout, env_height_scale, idx)
     }
 
     fn yaku_popup_center(
@@ -778,18 +742,18 @@ impl GameplayScene {
     ) -> (f32, f32) {
         let gameplay = GameEngine::read(run);
         let interaction = GameEngine::read_interaction(run);
-        let hand_slots = hand_slots_for_count(layout, interaction.hand_len);
         let has_structure = gameplay.has_structure;
-        let hud_layout = compute_gameplay_hud_layout(
+        let showcase_present = has_structure || cascade_showcase.is_some();
+        let env_h = crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE;
+        let anchors = glb_anchors::try_resolve_gameplay_glb_anchors(
             layout,
-            &hand_slots,
-            has_structure,
-            has_structure || cascade_showcase.is_some(),
+            interaction.hand_len,
+            showcase_present,
+            env_h,
         );
-        (
-            hud_layout.action_bar.container_x + hud_layout.action_bar.container_w * 0.5,
-            hud_layout.yaku_row_y + hud_layout.yaku_panel_h * 0.5,
-        )
+        anchors
+            .map(|a| glb_anchors::screen_rect_center(a.yaku_tablet_strip))
+            .unwrap_or((layout.window_w * 0.5, layout.window_h * 0.35))
     }
 
     fn showcase_tile_popup_center(
@@ -810,58 +774,24 @@ impl GameplayScene {
             return None;
         };
         let interaction = GameEngine::read_interaction(run);
-        let hand_slots = hand_slots_for_count(layout, interaction.hand_len);
         let layout_scale = (layout.window_w.min(layout.window_h)) / 600.0;
         let has_structure = gameplay.has_structure;
         let showcase_present = has_structure || cascade_showcase.is_some();
-        let hud_layout =
-            compute_gameplay_hud_layout(layout, &hand_slots, has_structure, showcase_present);
-        let ab = hud_layout.action_bar;
-        let pad = (8.0 * layout_scale).max(6.0);
-        let preview_pill_w = (22.0 * layout_scale).max(18.0);
-        let preview_gap_x = (8.0 * layout_scale).max(5.0);
-        let preview_lane_w = if has_structure && cascade_showcase.is_none() {
-            preview_pill_w * 2.6 + preview_gap_x + pad
-        } else {
-            0.0
-        };
-        let intra_gap = (3.0 * layout_scale).max(2.0);
-        let inter_gap = (10.0 * layout_scale).max(7.0);
-        let total_tiles: usize = showcase.sets.iter().map(|s| s.tile_ids.len()).sum();
-        let intra_count: usize = showcase
-            .sets
-            .iter()
-            .map(|s| s.tile_ids.len().saturating_sub(1))
-            .sum();
-        let inter_count = showcase.sets.len().saturating_sub(1);
-        let available_w = ab.container_w
-            - pad * 2.0
-            - preview_lane_w
-            - intra_count as f32 * intra_gap
-            - inter_count as f32 * inter_gap;
-        let tile_size =
-            (available_w / total_tiles.max(1) as f32).clamp(22.0, (44.0 * layout_scale).max(28.0));
-        let meld_top = hud_layout.structure_strip_top + hud_layout.structure_tag_h;
-        let center_py = meld_top + hud_layout.structure_meld_h * 0.5;
-        let mut x_cursor = ab.container_x + pad;
-        let mut sum_x = 0.0;
-        let mut sum_y = 0.0;
-        let mut count = 0usize;
-        for (mi, set) in showcase.sets.iter().enumerate() {
-            for &tid in &set.tile_ids {
-                let px = x_cursor + tile_size * 0.5;
-                if tile_ids.contains(&tid) {
-                    sum_x += px;
-                    sum_y += center_py;
-                    count += 1;
-                }
-                x_cursor += tile_size + intra_gap;
-            }
-            if mi + 1 < showcase.sets.len() {
-                x_cursor += inter_gap - intra_gap;
-            }
-        }
-        (count > 0).then_some((sum_x / count as f32, sum_y / count as f32))
+        let env_h = crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE;
+        let anchors = glb_anchors::try_resolve_gameplay_glb_anchors(
+            layout,
+            interaction.hand_len,
+            showcase_present,
+            env_h,
+        )?;
+        input_handler::structure_showcase_tile_popup_center(
+            &anchors.structure_marker_poses,
+            layout_scale,
+            &showcase,
+            tile_ids,
+            has_structure,
+            cascade_showcase.is_some(),
+        )
     }
 }
 
@@ -871,18 +801,18 @@ impl GameplayScene {
 fn insert_structure_before_hand(
     mut frame: UiFrame,
     structure_showcase: Vec<ShowcaseTilePlacement>,
-    structure_pile_tokens: Vec<Object3d>,
+    vis: crate::scenes::DebugVisibility,
 ) -> UiFrame {
+    let structure_showcase = if vis.hide_structure_tiles {
+        Vec::new()
+    } else {
+        structure_showcase
+    };
     let pos = frame
         .cmds
         .iter()
         .position(|c| matches!(c, DrawCmd::ShowcaseTileBatch(_)));
     let insert_at = pos.unwrap_or(frame.cmds.len());
-    if !structure_pile_tokens.is_empty() {
-        frame
-            .cmds
-            .insert(insert_at, DrawCmd::Object3dBatch(structure_pile_tokens));
-    }
     if !structure_showcase.is_empty() {
         frame
             .cmds

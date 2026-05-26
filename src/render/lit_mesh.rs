@@ -122,6 +122,7 @@ pub enum MaterialKind {
     /// and slight tone variance across the surface. Routed by the
     /// table-mesh draw when the user picks `SurfaceKind::GreenFelt`.
     /// No clearcoat, no SSR — felt is a diffuse dielectric.
+    #[allow(dead_code)]
     FeltGreen = 19,
     /// Unlit emission added on top of the usual lit path. `specular_strength`
     /// scales `base_color.rgb` in the shader (`lit_mesh.wgsl` emissive term).
@@ -187,17 +188,6 @@ impl MaterialParams {
             base_color: [1.0, 1.0, 1.0, 1.0], // ignored — wood shader is procedural
             specular_strength: 0.55,
             specular_power: 96.0,
-        }
-    }
-    pub fn felt_green() -> Self {
-        Self {
-            kind: MaterialKind::FeltGreen,
-            // Fallback tint if the procedural sampler is bypassed; the shader
-            // recolours from its own palette on the felt branch.
-            base_color: color::WALNUT_DEEP,
-            // Felt has no pinpoint highlight — broad soft sheen only.
-            specular_strength: 0.04,
-            specular_power: 8.0,
         }
     }
 

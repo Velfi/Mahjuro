@@ -18,9 +18,9 @@ use crate::render::table_transform;
 use crate::render::theme::{ButtonState, ButtonVariant, color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
 use crate::render::world_space::LayoutAnchorPx;
-use crate::ui::placement::PlacementAnchor;
 use crate::ui::colored_keywords;
 use crate::ui::focus_nav;
+use crate::ui::placement::PlacementAnchor;
 use crate::ui::styled_text;
 use crate::ui::widget::{self, TextStyle};
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
@@ -227,24 +227,25 @@ const TUTORIAL_PAGE_SCORING: usize = 1;
 
 const SCORING_MELDS_HEADING: &str = "Melds";
 
-const SCORING_DEMO_GROUPS: &[TileGroup] = &[TileGroup {
-    label: "Pair",
-    accent: color::CHAMPAGNE,
-    tiles: &[(Suit::Pinzu, 5), (Suit::Pinzu, 5)],
-    debuffed_visual: false,
-},
-TileGroup {
-    label: "Sequence",
-    accent: color::CHAMPAGNE,
-    tiles: &[(Suit::Manzu, 3), (Suit::Manzu, 4), (Suit::Manzu, 5)],
-    debuffed_visual: false,
-},
-TileGroup {
-    label: "Triplet",
-    accent: color::CHAMPAGNE,
-    tiles: &[(Suit::Souzu, 7), (Suit::Souzu, 7), (Suit::Souzu, 7)],
-    debuffed_visual: false,
-}
+const SCORING_DEMO_GROUPS: &[TileGroup] = &[
+    TileGroup {
+        label: "Pair",
+        accent: color::CHAMPAGNE,
+        tiles: &[(Suit::Pinzu, 5), (Suit::Pinzu, 5)],
+        debuffed_visual: false,
+    },
+    TileGroup {
+        label: "Sequence",
+        accent: color::CHAMPAGNE,
+        tiles: &[(Suit::Manzu, 3), (Suit::Manzu, 4), (Suit::Manzu, 5)],
+        debuffed_visual: false,
+    },
+    TileGroup {
+        label: "Triplet",
+        accent: color::CHAMPAGNE,
+        tiles: &[(Suit::Souzu, 7), (Suit::Souzu, 7), (Suit::Souzu, 7)],
+        debuffed_visual: false,
+    },
 ];
 
 const PAGES: &[TutorialPage] = &[
@@ -314,8 +315,7 @@ impl TutorialCampaignScene {
 
     fn show_try_it_flash(&mut self, kind: TryItFlash) {
         self.try_it_flash = Some(kind);
-        self.try_it_flash_until =
-            Instant::now() + Duration::from_secs_f32(TRY_IT_FLASH_SECS);
+        self.try_it_flash_until = Instant::now() + Duration::from_secs_f32(TRY_IT_FLASH_SECS);
     }
 
     fn tick_try_it_flash(&mut self) {
@@ -380,7 +380,12 @@ impl TutorialCampaignScene {
         TryItLayout {
             discard_rect: [left_x, slot_y, discard_w, slot_h],
             play_rect: [left_x + discard_w + gap, slot_y, play_w, slot_h],
-            trigger_rect: [left_x + discard_w + gap + play_w + gap, slot_y, tablet_w, slot_h],
+            trigger_rect: [
+                left_x + discard_w + gap + play_w + gap,
+                slot_y,
+                tablet_w,
+                slot_h,
+            ],
             heading_y,
             demo_line_y,
             content_floor_y,
@@ -1679,13 +1684,7 @@ impl SceneBehavior for TutorialCampaignScene {
 
         let (showcase_tiles, tile_light_y, content_bottom) = if self.page == TUTORIAL_PAGE_TILES {
             let copy_layout = tiles_copy_layout.as_ref().expect("tiles page layout");
-            Self::push_tutorial_tiles_copy_column(
-                &mut texts,
-                copy_x,
-                copy_layout,
-                copy_w,
-                h,
-            );
+            Self::push_tutorial_tiles_copy_column(&mut texts, copy_x, copy_layout, copy_w, h);
             let gutter_x = copy_x + copy_w + col_gutter * 0.5;
             fg_quads.push(GpuInstance {
                 rect: [
@@ -1721,7 +1720,9 @@ impl SceneBehavior for TutorialCampaignScene {
                 Self::tutorial_text_style(typography::H36, color::PARCHMENT, TextAlign::Center),
                 h,
             );
-            let gutter_mid = scoring.left_col_x + scoring.left_col_w + (scoring.right_col_x - scoring.left_col_x - scoring.left_col_w) * 0.5;
+            let gutter_mid = scoring.left_col_x
+                + scoring.left_col_w
+                + (scoring.right_col_x - scoring.left_col_x - scoring.left_col_w) * 0.5;
             let [mh_x, mh_y, mh_w, mh_h] = scoring.melds_heading_rect;
             texts.push(TextLabel {
                 rect: [mh_x, mh_y, mh_w, mh_h],
@@ -1764,9 +1765,9 @@ impl SceneBehavior for TutorialCampaignScene {
 
         let try_it_layout = scoring_layout.as_ref().map(|s| s.try_it);
         let tiles_page_footer = content_floor;
-        let scoring_glossary_metrics = scoring_layout.as_ref().map(|s| {
-            (s.term_heights.clone(), s.term_heights.iter().sum::<f32>())
-        });
+        let scoring_glossary_metrics = scoring_layout
+            .as_ref()
+            .map(|s| (s.term_heights.clone(), s.term_heights.iter().sum::<f32>()));
         let glossary_y = if scoring_layout.is_some() {
             content_bottom + 12.0 * scale
         } else if let Some(ref t) = try_it_layout {
@@ -1793,11 +1794,8 @@ impl SceneBehavior for TutorialCampaignScene {
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_secs_f32())
                 .unwrap_or(0.0);
-            let bowl_extents = Self::try_it_river_extents(
-                layout.discard_rect[2],
-                layout.discard_rect[3],
-                scale,
-            );
+            let bowl_extents =
+                Self::try_it_river_extents(layout.discard_rect[2], layout.discard_rect[3], scale);
             let bp = &self.positions.try_it_bowl;
             let bowl_anchor_px = LayoutAnchorPx {
                 px: discard_center_x,
@@ -1824,11 +1822,8 @@ impl SceneBehavior for TutorialCampaignScene {
                 hover_target: if discard_focused { 1.0 } else { 0.0 },
                 anim_id: 1,
             });
-            let mirror_diam = Self::try_it_mirror_diam(
-                layout.play_rect[2],
-                layout.play_rect[3],
-                scale,
-            );
+            let mirror_diam =
+                Self::try_it_mirror_diam(layout.play_rect[2], layout.play_rect[3], scale);
             let mp = &self.positions.try_it_mirror;
             let mirror_pos = LayoutAnchorPx {
                 px: play_center_x,
@@ -1843,12 +1838,13 @@ impl SceneBehavior for TutorialCampaignScene {
                     mirror_pos[2] + ctx.layout.mm(mp.lift_mm),
                 ],
                 extents: [mirror_diam, mirror_diam, mirror_diam],
-                rotation: [0.0, 0.0, 0.0],
+                rotation: crate::render::table_transform::euler_xyz_rad_from_deg(
+                    36.0,
+                    0.0,
+                    (wobble_t * 2.4).sin() * 7.5,
+                ),
                 color: [1.0, 1.0, 1.0, 1.0],
-                kind: Object3dKind::Mirror {
-                    rotation_x_deg: 36.0,
-                    rotation_z_deg: (wobble_t * 2.4).sin() * 7.5,
-                },
+                kind: Object3dKind::Mirror,
                 hover_target: if play_focused { 1.0 } else { 0.0 },
                 anim_id: 2,
             });
@@ -1860,9 +1856,9 @@ impl SceneBehavior for TutorialCampaignScene {
             }
             .to_draw_cmd_triple();
             let cam_euler = camera_facing_euler_xyz_rad(cam.eye, cam.target);
-            let cam_m = table_transform::rot_euler_xyz_rad(cam_euler[0], cam_euler[1], cam_euler[2]);
-            let tablet_extents =
-                Self::try_it_tablet_extents(layout.trigger_rect[2], scale);
+            let cam_m =
+                table_transform::rot_euler_xyz_rad(cam_euler[0], cam_euler[1], cam_euler[2]);
+            let tablet_extents = Self::try_it_tablet_extents(layout.trigger_rect[2], scale);
             wood_tablet_placements.push(Object3d {
                 pos: [
                     trigger_pos[0] + w * tp.nx,
@@ -1932,12 +1928,7 @@ impl SceneBehavior for TutorialCampaignScene {
                 .map(|s| s.left_col_x + 2.0 * scale)
                 .unwrap_or(panel_x + 34.0 * scale);
             texts.push(TextLabel {
-                rect: [
-                    glossary_x,
-                    glossary_y,
-                    term_w,
-                    24.0 * scale,
-                ],
+                rect: [glossary_x, glossary_y, term_w, 24.0 * scale],
                 text: "Key Terms".to_string(),
                 color: color::GOLD,
                 align: TextAlign::Left,
@@ -2047,7 +2038,9 @@ impl SceneBehavior for TutorialCampaignScene {
                         ButtonState::Rest
                     },
                 ),
-                TutorialNav::TryDiscard | TutorialNav::TryPlay | TutorialNav::TryTrigger => continue,
+                TutorialNav::TryDiscard | TutorialNav::TryPlay | TutorialNav::TryTrigger => {
+                    continue;
+                }
             };
             widget::push_button(
                 &mut fg_quads,
@@ -2185,8 +2178,12 @@ mod tests {
         let h = 720.0;
         let (copy_w, content_top, copy_floor, _) = tiles_page_copy_metrics(1280.0, h);
 
-        let layout =
-            TutorialCampaignScene::compute_tutorial_tiles_copy_layout(copy_w, content_top, copy_floor, h);
+        let layout = TutorialCampaignScene::compute_tutorial_tiles_copy_layout(
+            copy_w,
+            content_top,
+            copy_floor,
+            h,
+        );
         let natural_h =
             TutorialCampaignScene::tutorial_tiles_copy_natural_height(copy_w, h, layout.line_mul);
         let copy_bottom_pad = h * 0.008;
@@ -2210,8 +2207,12 @@ mod tests {
         let h = 1080.0;
         let (copy_w, content_top, copy_floor, _) = tiles_page_copy_metrics(1920.0, h);
 
-        let layout =
-            TutorialCampaignScene::compute_tutorial_tiles_copy_layout(copy_w, content_top, copy_floor, h);
+        let layout = TutorialCampaignScene::compute_tutorial_tiles_copy_layout(
+            copy_w,
+            content_top,
+            copy_floor,
+            h,
+        );
         let natural_h =
             TutorialCampaignScene::tutorial_tiles_copy_natural_height(copy_w, h, layout.line_mul);
         let copy_bottom_pad = h * 0.008;

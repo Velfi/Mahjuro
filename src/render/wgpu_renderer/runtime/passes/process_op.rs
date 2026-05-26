@@ -145,19 +145,6 @@ impl WgpuRenderer {
                 pass.set_bind_group(0, &self.cascade_composite_bind_group, &[]);
                 pass.draw(0..3, 0..1);
             }
-            RenderOp::Table => {
-                pass.set_pipeline(&self.lit_mesh_pipeline);
-                pass.set_bind_group(3, &self.lit_mesh_spot_ssr_bind_group, &[]);
-                pass.set_bind_group(0, &self.table_instance.bind_group, &[]);
-                pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
-                pass.set_bind_group(2, &self.shadow_sample_bind_group, &[]);
-                pass.set_vertex_buffer(0, self.table_mesh.vertex_buffer.slice(..));
-                pass.set_index_buffer(
-                    self.table_mesh.index_buffer.slice(..),
-                    wgpu::IndexFormat::Uint32,
-                );
-                pass.draw_indexed(0..self.table_mesh.index_count, 0, 0..1);
-            }
             RenderOp::Object3dBatch { start, end } => {
                 pass.set_pipeline(&self.lit_mesh_pipeline);
                 pass.set_bind_group(3, &self.lit_mesh_spot_ssr_bind_group, &[]);
@@ -198,11 +185,11 @@ impl WgpuRenderer {
                         continue;
                     }
                     if matches!(kind, DrawKind::BossIcon) {
-                        let mesh = match self.ordeal_icon_slot_texture.get(slot_i).copied().flatten()
-                        {
-                            Some(bk) => self.ordeal_icon_mesh_for(bk),
-                            None => &self.relic_box_mesh,
-                        };
+                        let mesh =
+                            match self.ordeal_icon_slot_texture.get(slot_i).copied().flatten() {
+                                Some(bk) => self.ordeal_icon_mesh_for(bk),
+                                None => &self.relic_box_mesh,
+                            };
                         if let Some(inst) = self.ordeal_icon_instances.get(slot_i) {
                             pass.set_bind_group(0, &inst.bind_group, &[]);
                             pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
@@ -254,24 +241,6 @@ impl WgpuRenderer {
                         }
                         continue;
                     }
-                    // Candle uses a [LitMeshInstance; 2] pair indexed by slot_i;
-                    // wax = pair[0], wick = pair[1].
-                    if matches!(kind, DrawKind::CandleWax | DrawKind::CandleWick) {
-                        let (mesh, idx) = match kind {
-                            DrawKind::CandleWax => (&self.candle_wax_mesh, 0),
-                            _ => (&self.candle_wick_mesh, 1),
-                        };
-                        if let Some(pair) = self.candle_instances.get(slot_i) {
-                            pass.set_bind_group(0, &pair[idx].bind_group, &[]);
-                            pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                            pass.set_index_buffer(
-                                mesh.index_buffer.slice(..),
-                                wgpu::IndexFormat::Uint32,
-                            );
-                            pass.draw_indexed(0..mesh.index_count, 0, 0..1);
-                        }
-                        continue;
-                    }
                     let (mesh, inst_opt): (&LitMeshGpu, Option<&LitMeshInstance>) = match kind {
                         DrawKind::YakuTablet => (
                             &self.bone_tablet_mesh,
@@ -308,7 +277,6 @@ impl WgpuRenderer {
                             self.bug_wing_blur_r_instances.get(slot_i),
                         ),
                         DrawKind::Orb => (&self.orb_mesh, self.orb_instances.get(slot_i)),
-                        DrawKind::Plinth => (&self.plinth_mesh, self.plinth_instances.get(slot_i)),
                         DrawKind::Bowl => (&self.bowl_mesh, self.bowl_instances.get(slot_i)),
                         DrawKind::Mirror => (&self.mirror_mesh, self.mirror_instances.get(slot_i)),
                         DrawKind::TallyStickBase => (
@@ -336,11 +304,9 @@ impl WgpuRenderer {
                             (mesh, inst)
                         }
                         // Handled by the early-out blocks above.
-                        DrawKind::Relic
-                        | DrawKind::ExtrudedGlyph
-                        | DrawKind::CandleWax
-                        | DrawKind::CandleWick
-                        | DrawKind::BossIcon => unreachable!(),
+                        DrawKind::Relic | DrawKind::ExtrudedGlyph | DrawKind::BossIcon => {
+                            unreachable!()
+                        }
                     };
                     let Some(inst) = inst_opt else { continue };
                     pass.set_bind_group(0, &inst.bind_group, &[]);

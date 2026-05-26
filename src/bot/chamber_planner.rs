@@ -18,7 +18,7 @@ use super::chamber_sim::{ChamberAction, ChamberPlanCheckpoint, branch_from_check
 use super::relic_analytics;
 use super::stats::{BotScoringAction, RunStats};
 use super::{
-    PlayChamberOutcome, chamber_slot_key, buff_talisman_lift_on_hand, build_bot_scoring_action,
+    PlayChamberOutcome, buff_talisman_lift_on_hand, build_bot_scoring_action, chamber_slot_key,
     discard_candidates, drain_post_action_bus, fmt_indices, score_breakdown_for_play_indices,
     top_k_plays_in_hand, transform_talisman_lift_on_hand,
 };
@@ -328,7 +328,8 @@ pub(crate) fn execute_planned_turn(
                 return Some(PlannedTurnOutcome::Failed);
             }
             stats.plays_used += 1;
-            if drain_post_action_bus(run, bus, stats) == Some(PlayChamberOutcome::SecondWindForfeit) {
+            if drain_post_action_bus(run, bus, stats) == Some(PlayChamberOutcome::SecondWindForfeit)
+            {
                 return Some(PlannedTurnOutcome::SecondWindForfeit);
             }
             let play_delta = run.round_score.saturating_sub(score_before);
@@ -376,7 +377,8 @@ pub(crate) fn execute_planned_turn(
                 .discards_by_chamber_slot
                 .entry(chamber_slot_key(run))
                 .or_insert(0) += 1;
-            if drain_post_action_bus(run, bus, stats) == Some(PlayChamberOutcome::SecondWindForfeit) {
+            if drain_post_action_bus(run, bus, stats) == Some(PlayChamberOutcome::SecondWindForfeit)
+            {
                 return Some(PlannedTurnOutcome::SecondWindForfeit);
             }
             Some(PlannedTurnOutcome::Continued)
@@ -402,7 +404,8 @@ pub(crate) fn execute_planned_turn(
                 best_score,
                 depth
             );
-            if drain_post_action_bus(run, bus, stats) == Some(PlayChamberOutcome::SecondWindForfeit) {
+            if drain_post_action_bus(run, bus, stats) == Some(PlayChamberOutcome::SecondWindForfeit)
+            {
                 return Some(PlannedTurnOutcome::SecondWindForfeit);
             }
             let structure_delta = run.round_score.saturating_sub(score_before);
@@ -426,7 +429,8 @@ pub(crate) fn execute_planned_turn(
             let _ = run.use_consumable(idx, bus);
             *stats.zodiacs_used.entry(z.name()).or_insert(0) += 1;
             crate::bot_log!(log, "      planner: use zodiac {:?} (depth {})", z, depth);
-            if drain_post_action_bus(run, bus, stats) == Some(PlayChamberOutcome::SecondWindForfeit) {
+            if drain_post_action_bus(run, bus, stats) == Some(PlayChamberOutcome::SecondWindForfeit)
+            {
                 return Some(PlannedTurnOutcome::SecondWindForfeit);
             }
             Some(PlannedTurnOutcome::Continued)
@@ -445,7 +449,8 @@ pub(crate) fn execute_planned_turn(
                 lift,
                 depth
             );
-            if drain_post_action_bus(run, bus, stats) == Some(PlayChamberOutcome::SecondWindForfeit) {
+            if drain_post_action_bus(run, bus, stats) == Some(PlayChamberOutcome::SecondWindForfeit)
+            {
                 return Some(PlannedTurnOutcome::SecondWindForfeit);
             }
             Some(PlannedTurnOutcome::Continued)

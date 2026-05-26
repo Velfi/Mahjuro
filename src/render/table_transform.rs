@@ -34,12 +34,6 @@
 //!
 use glam::{EulerRot, Mat4, Vec3, Vec4};
 
-/// Table procedural mesh is already in **XY** with normal **+Z**; no rotation.
-#[inline]
-pub fn table_mesh_lay_flat() -> Mat4 {
-    Mat4::IDENTITY
-}
-
 /// Mahjong tile mesh from [`crate::render::tile_glb`] after `normalize_mesh` (which may rotate
 /// vertices so thickness lands on **local +Y**).
 ///

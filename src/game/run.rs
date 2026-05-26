@@ -21,10 +21,10 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::core::ordeal::{self, OrdealKind};
 use crate::core::debuff::TileDebuff;
 use crate::core::deck::Wall;
 use crate::core::hand::{DetectedMeld, validate_selection_with_rules};
+use crate::core::ordeal::{self, OrdealKind};
 use crate::core::relic::{RelicId, RelicState};
 use crate::core::rules::{ChamberKind, RuleModifier};
 use crate::core::scoring::ScoreBreakdown;

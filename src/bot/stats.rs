@@ -655,7 +655,10 @@ impl AggregateStats {
             *self.turns_cleared_by_slot.entry(slot.clone()).or_insert(0) += *count as u64;
         }
         for (slot, count) in &s.discards_by_chamber_slot {
-            *self.discards_by_chamber_slot.entry(slot.clone()).or_insert(0) += *count as u64;
+            *self
+                .discards_by_chamber_slot
+                .entry(slot.clone())
+                .or_insert(0) += *count as u64;
         }
         for (name, count) in &s.relic_activations {
             *self.relic_activations.entry(name).or_insert(0) += *count as u64;

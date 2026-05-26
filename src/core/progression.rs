@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use serde::{Deserialize, Serialize};
 
-use crate::core::ordeal::OrdealKind;
 use crate::core::consumable::Consumable;
+use crate::core::ordeal::OrdealKind;
 use crate::core::relic::RelicId;
 use crate::core::rules::{ChamberKind, RuleModifier};
 use crate::core::stake::Stake;
@@ -690,7 +690,12 @@ fn finalize_run_chronicle(
         } else {
             None
         };
-        chronicle.record_run_end_defeat(run.wing, run.chamber, ordeal_name.as_deref(), run.round_score);
+        chronicle.record_run_end_defeat(
+            run.wing,
+            run.chamber,
+            ordeal_name.as_deref(),
+            run.round_score,
+        );
     }
 
     if chronicle.signature_hand.is_none() && !run.best_hand_tiles.is_empty() {

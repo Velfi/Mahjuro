@@ -21,15 +21,17 @@ use sdl3::keyboard::Scancode;
 
 // ── Debug visibility overlay ────────────────────────────────────────────
 
-pub const DEBUG_VIS_ROW_COUNT: usize = 5;
+use crate::scenes::debug_visibility::{
+    DebugVisibility, GAMEPLAY_VIS_ROW_COUNT, GAMEPLAY_VIS_VISIBLE_ROWS,
+};
+
+/// Cursor index for the Hide All / Reveal All button (one past the last checkbox row).
+const VIS_CURSOR_TOGGLE_ALL: usize = GAMEPLAY_VIS_ROW_COUNT;
 
 pub struct DebugVisibilityOverlay {
     cursor: usize,
-    pub hide_tiles: bool,
-    pub hide_candles: bool,
-    pub hide_chamber_plaque: bool,
-    pub hide_scoring_placard: bool,
-    pub hide_inventory: bool,
+    scroll: usize,
+    pub vis: DebugVisibility,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -39,34 +41,39 @@ pub enum DebugVisResult {
 }
 
 impl DebugVisibilityOverlay {
-    pub fn new(
-        hide_tiles: bool,
-        hide_candles: bool,
-        hide_chamber_plaque: bool,
-        hide_scoring_placard: bool,
-        hide_inventory: bool,
-    ) -> Self {
+    pub fn new(vis: DebugVisibility) -> Self {
         Self {
             cursor: 0,
-            hide_tiles,
-            hide_candles,
-            hide_chamber_plaque,
-            hide_scoring_placard,
-            hide_inventory,
+            scroll: 0,
+            vis,
         }
     }
+
+    /// Total cursor positions = checkbox rows + 1 (the toggle-all button).
+    const CURSOR_COUNT: usize = GAMEPLAY_VIS_ROW_COUNT + 1;
 
     pub fn update(&mut self, actions: &[UiAction]) -> DebugVisResult {
         for a in actions {
             match a {
                 UiAction::FocusDown => {
-                    self.cursor = (self.cursor + 1) % DEBUG_VIS_ROW_COUNT;
+                    self.cursor = (self.cursor + 1) % Self::CURSOR_COUNT;
+                    self.clamp_scroll();
                 }
                 UiAction::FocusUp => {
-                    self.cursor = (self.cursor + DEBUG_VIS_ROW_COUNT - 1) % DEBUG_VIS_ROW_COUNT;
+                    self.cursor = (self.cursor + Self::CURSOR_COUNT - 1) % Self::CURSOR_COUNT;
+                    self.clamp_scroll();
                 }
                 UiAction::Confirm => {
-                    self.toggle_current();
+                    if self.cursor == VIS_CURSOR_TOGGLE_ALL {
+                        let hide_all = !self.vis.any_hide();
+                        for i in 0..GAMEPLAY_VIS_ROW_COUNT {
+                            if let Some(f) = self.vis.flag_mut(i) {
+                                *f = hide_all;
+                            }
+                        }
+                    } else if let Some(f) = self.vis.flag_mut(self.cursor) {
+                        *f = !*f;
+                    }
                 }
                 UiAction::Cancel | UiAction::Pause => {
                     return DebugVisResult::Close;
@@ -77,26 +84,16 @@ impl DebugVisibilityOverlay {
         DebugVisResult::Stay
     }
 
-    fn toggle_current(&mut self) {
-        let f = match self.cursor {
-            0 => &mut self.hide_tiles,
-            1 => &mut self.hide_candles,
-            2 => &mut self.hide_chamber_plaque,
-            3 => &mut self.hide_scoring_placard,
-            4 => &mut self.hide_inventory,
-            _ => return,
-        };
-        *f = !*f;
-    }
-
-    fn row(&self, i: usize) -> (&'static str, bool) {
-        match i {
-            0 => ("Hand Tiles", self.hide_tiles),
-            1 => ("Candles", self.hide_candles),
-            2 => ("Chamber Plaque", self.hide_chamber_plaque),
-            3 => ("Scoring Placard", self.hide_scoring_placard),
-            4 => ("Inventory + Items", self.hide_inventory),
-            _ => ("", false),
+    fn clamp_scroll(&mut self) {
+        // The toggle-all button sits outside the scrollable list; nothing to scroll.
+        if self.cursor == VIS_CURSOR_TOGGLE_ALL {
+            return;
+        }
+        let window = GAMEPLAY_VIS_VISIBLE_ROWS.min(GAMEPLAY_VIS_ROW_COUNT);
+        if self.cursor < self.scroll {
+            self.scroll = self.cursor;
+        } else if self.cursor >= self.scroll + window {
+            self.scroll = self.cursor + 1 - window;
         }
     }
 
@@ -117,9 +114,13 @@ impl DebugVisibilityOverlay {
         let row_gap = (8.0 * scale).max(4.0);
         let title_h = (48.0 * scale).max(28.0);
         let footer_h = (22.0 * scale).max(14.0);
+        let visible_rows = GAMEPLAY_VIS_VISIBLE_ROWS.min(GAMEPLAY_VIS_ROW_COUNT) as f32;
+        let btn_h = (40.0 * scale).max(26.0);
         let panel_h = title_h
             + row_gap
-            + DEBUG_VIS_ROW_COUNT as f32 * (row_h + row_gap)
+            + visible_rows * (row_h + row_gap)
+            + row_gap
+            + btn_h
             + footer_h
             + row_gap * 3.0;
         let panel_x = (window_w - panel_w) * 0.5;
@@ -155,8 +156,14 @@ impl DebugVisibilityOverlay {
         let mut row_y = panel_y + row_gap + title_h + row_gap;
         let row_pad = 12.0 * scale;
         let check_size = row_h * 0.55;
-        for i in 0..DEBUG_VIS_ROW_COUNT {
-            let (name, checked) = self.row(i);
+        let window = GAMEPLAY_VIS_VISIBLE_ROWS.min(GAMEPLAY_VIS_ROW_COUNT);
+        let first = self.scroll.min(GAMEPLAY_VIS_ROW_COUNT.saturating_sub(1));
+        for slot in 0..window {
+            let i = first + slot;
+            if i >= GAMEPLAY_VIS_ROW_COUNT {
+                break;
+            }
+            let (name, checked) = self.vis.label_checked(i);
             let is_focused = self.cursor == i;
 
             // Row background.
@@ -220,10 +227,37 @@ impl DebugVisibilityOverlay {
             row_y += row_h + row_gap;
         }
 
+        // Hide All / Reveal All button.
+        let btn_focused = self.cursor == VIS_CURSOR_TOGGLE_ALL;
+        let all_hidden = self.vis.any_hide();
+        let btn_label = if all_hidden { "Reveal All" } else { "Hide All" };
+        let btn_bg = if btn_focused {
+            color::alpha(color::WALNUT_BRIGHT, 0.95)
+        } else {
+            color::alpha(color::WALNUT_DEEP, 0.85)
+        };
+        let btn_y = row_y + row_gap;
+        instances.push(GpuInstance {
+            rect: [panel_x + 4.0, btn_y, panel_w - 8.0, btn_h],
+            color: btn_bg,
+            user: 0,
+        });
+        labels.push(TextLabel {
+            rect: [panel_x + 4.0, btn_y, panel_w - 8.0, btn_h],
+            text: btn_label.into(),
+            color: if btn_focused {
+                color::GOLD
+            } else {
+                color::alpha(color::STONE, 0.9)
+            },
+            bold: btn_focused,
+            ..Default::default()
+        });
+
         // Footer hint.
         labels.push(TextLabel {
-            rect: [panel_x, row_y + row_gap, panel_w, footer_h],
-            text: "\u{2191}/\u{2193} select   \u{23ce} toggle   Esc close".into(),
+            rect: [panel_x, btn_y + btn_h + row_gap, panel_w, footer_h],
+            text: "\u{2191}/\u{2193} select   \u{23ce} toggle / activate   Esc close".into(),
             color: color::alpha(color::STONE, 0.75),
             ..Default::default()
         });

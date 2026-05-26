@@ -8,23 +8,15 @@ pub(super) enum GameplayButton {
     /// Cash in structure for score (wood tablet above mirror).
     Trigger,
     Discard,
-    /// Yaku Journal book — focusable so keyboard / controller players can
-    /// reach the journal without a mouse. Confirming starts the same
-    /// cover-open + zoom transition as the shop, then pushes
-    /// `YakuJournalScene` when the animation completes.
-    Journal,
 }
 
 impl GameplayButton {
     /// Maps a focusable action button to its `UiAction`. Returns `None`
-    /// for buttons whose activation is *not* expressible as a `UiAction`
-    /// — currently only `Journal` (transition + overlay push from `Confirm`).
     pub(super) fn ui_action(self) -> Option<UiAction> {
         Some(match self {
             GameplayButton::Play => UiAction::ScoreHand,
             GameplayButton::Trigger => UiAction::TriggerStructure,
             GameplayButton::Discard => UiAction::CommitDiscard,
-            GameplayButton::Journal => return None,
         })
     }
 }

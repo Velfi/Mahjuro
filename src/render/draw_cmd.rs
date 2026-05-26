@@ -100,14 +100,14 @@ impl ShowcaseRenderHints {
     /// **Pixel-to-world:** gameplay, yaku journal, archive collection.
     #[inline]
     pub fn layout_uses_ray_plane(self, active_scene_key: Option<&str>) -> bool {
+        if self.layout_use_ray_plane_z {
+            return true;
+        }
         if matches!(
             active_scene_key,
             Some("gameplay" | "yaku_journal" | "collection")
         ) {
             return false;
-        }
-        if self.layout_use_ray_plane_z {
-            return true;
         }
         matches!(
             active_scene_key,
@@ -235,14 +235,6 @@ pub struct YakuTabletPlacement {
 
 /// Which counter fan an `Object3dKind::TallyFan` represents. Drives per-fan
 /// focus rect slot and tooltip wiring on the gameplay scene side.
-/// Which gameplay plinth HUD rect slot to publish.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PlinthRole {
-    Dora,
-    Boss,
-    RoundWind,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TallyFanKind {
     /// Plays-remaining fan, anchored in front of the mirror.
@@ -466,11 +458,6 @@ pub enum Object3dKind {
     },
 
     // ── Props ────────────────────────────────────────────────────────
-    /// Procedural ornate brass plinth used by the gameplay scene to display
-    /// the dora indicator tile(s). The mesh has no roof; the indicator
-    /// tile face(s) are pushed separately as `ShowcaseTilePlacement`s
-    /// resting on the platform on top.
-    Plinth { glow: f32, role: PlinthRole },
     /// Relic medallion — shop for-sale, owned dish row, gameplay HUD
     /// tray, collection cards, tutorial panels, and unlock modals all use
     /// this single kind; callers pick the rotation so the face points at
@@ -522,15 +509,7 @@ pub enum Object3dKind {
     /// Discard bowl. Hover animation is driven by [`Object3d::hover_target`].
     Bowl,
     /// Bronze "play hand" mirror. Hover animation is driven by [`Object3d::hover_target`].
-    ///
-    /// `rotation_x_deg` is the base pitch before hover tilt is added.
-    /// `rotation_z_deg` is the Z-roll (idle wobble) applied simultaneously.
-    /// The `Object3d::rotation` field is ignored for Mirror; use these two
-    /// instead so hover can correctly modify only the X component.
-    Mirror {
-        rotation_x_deg: f32,
-        rotation_z_deg: f32,
-    },
+    Mirror,
     /// Engraved bone cascade token with a pulse-pop envelope.
     CascadeToken { kind: CascadeTokenKind, pulse: f32 },
     // (Dish is now modeled as `Primitive { shape: DiscSquare or
@@ -557,15 +536,6 @@ pub enum Object3dKind {
         label: Arc<str>,
         emissive: f32,
         material: GlyphMaterial,
-    },
-    /// Procedural candle mesh (wax body + wick). `Object3d::pos` sets the
-    /// base; `extents`/`rotation` are ignored — the renderer uses the
-    /// `scale` and `height_scale` fields to size the shared unit mesh.
-    Candle {
-        /// Uniform scale applied to the local-unit mesh.
-        scale: f32,
-        /// Extra Y-axis scale (height multiplier) on top of `scale`.
-        height_scale: f32,
     },
     /// Upright fan of bone tally sticks. `Object3d::pos` is the fan pivot;
     /// `Object3d::extents` is unused (stick dimensions come from the fields
@@ -714,9 +684,6 @@ pub enum DrawCmd {
     /// Procedural shooting-star cascade transition (fullscreen triangle, no data).
     /// Brightness driven by `UiFrame::transition_progress`.
     ShootingStarCascade,
-    /// Procedural lacquered-wood table mesh (one per scene, drawn via
-    /// `lit_mesh_pipeline`). Sized by the renderer from the current window.
-    Table,
     /// 3D candle meshes for the gameplay scene. Each placement becomes one
     /// wax-body draw + one wick draw via the `lit_mesh_pipeline`. Limited to
     /// the renderer's pre-allocated candle slot pool (currently 7).
@@ -769,9 +736,8 @@ pub enum DrawCmd {
     /// behind HUD content so panels read against busy backgrounds without
     /// a hard-edged letterbox. See `shaders/gradient_quad.wgsl`.
     GradientQuad(crate::render::wgpu_renderer::GradientQuadInstance),
-    /// Procedural candle flame (additive blend, animated by globals.time).
-    /// Instance `color.a` carries a per-flame phase offset in [0,1].
-    Flame(GpuInstance),
+    /// Triggers the volumetric flame batch (`procedural_flame_emitters` on the frame).
+    Flame,
     /// Rasterized text label.
     Text(TextLabel),
     /// Tinted RGBA texture quad (logos, Kenney prompts, atlas sprites, …).
@@ -790,6 +756,16 @@ pub enum DrawCmd {
 
 /// Everything a frame's draw needs: an ordered command list plus per-frame
 /// state used by hand-tile markers, hit testing, and the main loop.
+/// Pick-ray proxies for authored [`gameplay.glb`](../../assets/3d/gameplay.glb) action meshes.
+/// The renderer seeds `last_bowl_model` / `proj` rects without drawing duplicate geometry.
+#[derive(Clone, Debug, Default)]
+pub struct GameplayActionPickProxies {
+    pub bowl: Option<Object3d>,
+    pub mirror: Option<Object3d>,
+    pub journal: Option<Object3d>,
+    pub cash_in_tablet: Option<Object3d>,
+}
+
 pub struct UiFrame {
     /// Drawn back-to-front in order. Push earlier = renders under.
     pub cmds: Vec<DrawCmd>,
@@ -865,9 +841,11 @@ pub struct UiFrame {
     /// Shop item inspect: baked GI stays on; shadow pre-pass uses a tight frustum at this
     /// pivot and only draws the mesh tagged with [`SHOP_INSPECT_SUBJECT_ANIM_ID`].
     pub shop_inspect_shadow_target: Option<[f32; 3]>,
-    /// World-space flame emitters without a [`Object3dKind::Candle`] mesh (e.g. shop
+    /// World-space flame emitters without procedural candle meshes (e.g. shop
     /// `light_candle_*` punctual lights). Merged into the particle system each frame.
     pub procedural_flame_emitters: Vec<crate::render::flame_volume::FlameEmitter>,
+    /// Authored-table gameplay: raycast + projected rects for discard river, mirror, journal, cash-in.
+    pub gameplay_action_picks: Option<GameplayActionPickProxies>,
 }
 
 impl UiFrame {
@@ -896,6 +874,7 @@ impl UiFrame {
             room_gi_dynamic: false,
             shop_inspect_shadow_target: None,
             procedural_flame_emitters: Vec::new(),
+            gameplay_action_picks: None,
         }
     }
 
@@ -956,9 +935,6 @@ impl UiFrame {
     pub fn shooting_star_cascade(&mut self) {
         self.cmds.push(DrawCmd::ShootingStarCascade);
     }
-    pub fn table(&mut self) {
-        self.cmds.push(DrawCmd::Table);
-    }
     pub fn quad(&mut self, inst: GpuInstance) {
         self.cmds.push(DrawCmd::Quad(inst));
     }
@@ -983,8 +959,8 @@ impl UiFrame {
         self.cmds
             .extend(iter.into_iter().map(DrawCmd::GradientQuad));
     }
-    pub fn flames<I: IntoIterator<Item = GpuInstance>>(&mut self, iter: I) {
-        self.cmds.extend(iter.into_iter().map(DrawCmd::Flame));
+    pub fn flame_batch(&mut self) {
+        self.cmds.push(DrawCmd::Flame);
     }
     pub fn text(&mut self, label: TextLabel) {
         self.cmds.push(DrawCmd::Text(label));
@@ -1028,7 +1004,7 @@ impl UiFrame {
                 // Flame `color.a` is a phase offset, not a transparency.
                 // Don't scale it on transitions — the flame fades naturally
                 // because the underlying scene quads behind it fade.
-                DrawCmd::Flame(_) => {}
+                DrawCmd::Flame => {}
                 DrawCmd::Text(lbl) => lbl.color[3] *= alpha,
                 DrawCmd::Background(_)
                 | DrawCmd::Starfield
@@ -1044,7 +1020,6 @@ impl UiFrame {
                 | DrawCmd::MainMenuEnvironment
                 | DrawCmd::GameplayEnvironment
                 | DrawCmd::ClearSceneDepth
-                | DrawCmd::Table
                 | DrawCmd::ShowcaseTileBatch(_)
                 | DrawCmd::Object3d(_)
                 | DrawCmd::Object3dBatch(_) => {}
@@ -1079,7 +1054,6 @@ pub fn apply_modal_relic_staging(
                 | DrawCmd::StaircaseEnvironment
                 | DrawCmd::ArchiveEnvironment
                 | DrawCmd::MainMenuEnvironment
-                | DrawCmd::Table
         )
     });
     let w = window_w;

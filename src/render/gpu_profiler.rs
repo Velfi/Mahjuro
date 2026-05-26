@@ -235,10 +235,6 @@ impl GpuProfiler {
         log::debug!("Starting GPU profile capture over {frames} frames");
     }
 
-    pub fn is_sampling(&self) -> bool {
-        self.sampling
-    }
-
     /// Mark whether this `render_to` submission owns the active capture
     /// (swapchain) or is a secondary target (journal pre-pass).
     pub fn begin_submit(&self, primary: bool) {

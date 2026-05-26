@@ -5,7 +5,6 @@ pub struct RenderSettings {
     pub effects_quality: crate::persistence::EffectsQuality,
     pub tile_preset: crate::persistence::TilePreset,
     pub tile_material: crate::persistence::TileMaterial,
-    pub surface_kind: crate::persistence::SurfaceKind,
     pub tileset_name: String,
     pub gamma: f32,
     pub shadows_enabled: bool,

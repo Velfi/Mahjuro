@@ -1,26 +1,21 @@
 //! Player discard animation: lift from hand, staggered arc into the discard river,
-//! persist until the next discard. Bowl placement ([`crate::render::draw_cmd::Object3dKind::Bowl`])
-//! is the same HUD object as the procedural river mesh.
+//! persist until the next discard. River placement follows the `discard_river` GLB empty.
 
 use std::time::{Duration, Instant};
 
 use crate::core::tile::Tile;
 use crate::game::cascade::CascadeTuning;
 use crate::persistence::TilePreset;
-use crate::render::draw_cmd::{Object3d, Object3dKind, ShowcaseTilePlacement};
+use crate::render::draw_cmd::{Object3d, ShowcaseTilePlacement};
 use crate::render::river_mesh::{
     RIVER_TILE_FLOW_T_MAX, RIVER_TILE_FLOW_T_MIN, river_surface_local,
 };
 use crate::render::table_transform::{mat4_to_euler_xyz_rad, translate_rot_scale};
-use crate::render::world_space::{LayoutAnchorPx, pixel_to_world, surface_anchor_from_world_xyz};
+use crate::render::world_space::{pixel_to_world, surface_anchor_from_world_xyz};
 use crate::scenes::gameplay::GameplayScene;
-use crate::scenes::gameplay::action_bar_layout::{
-    action_hud_world_z_py_nudge, compute_gameplay_hud_layout,
-};
+use crate::scenes::gameplay::glb_anchors;
 use glam::Vec3;
 use rand::RngExt;
-
-use crate::ui::layout::HAND_TILE_MESH_Y_FRAC;
 
 /// Discard tiles in the river — smaller than hand slots, lying face-up on the water.
 const RIVER_TILE_SIZE_FRAC: f32 = 0.26;
@@ -39,7 +34,6 @@ pub struct RiverDiscardSlot {
     pub rotation: [f32; 3],
     pub size_px: f32,
 }
-use crate::ui::scene_layout::GameplayPositions;
 
 /// Per-tile phase within a discard batch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -154,72 +148,14 @@ fn ease_in_out_cubic(t: f32) -> f32 {
     }
 }
 
-fn hand_tile_rotation(positions: &GameplayPositions) -> [f32; 3] {
-    const HAND_TILE_RX: f32 = std::f32::consts::FRAC_PI_2 - 22.0_f32 * std::f32::consts::PI / 180.0;
-    const HAND_TILE_RZ: f32 = std::f32::consts::PI;
-    [
-        HAND_TILE_RX + positions.hand_strip.rx_deg.to_radians(),
-        positions.hand_strip.ry_deg.to_radians(),
-        HAND_TILE_RZ + positions.hand_strip.rz_deg.to_radians(),
-    ]
-}
-
-/// Screen-space hand slot center for a tile about to depart.
-pub fn hand_slot_center(
-    layout: &crate::ui::layout::LayoutResult,
-    positions: &GameplayPositions,
-    hand_slots: &[(f32, f32, f32, f32)],
+fn hand_slot_center(
+    hand_world_slots: &[super::glb_anchors::HandWorldSlot],
     slot: usize,
-) -> ([f32; 3], f32) {
-    let (sx, sy, sw, sh) = hand_slots[slot];
-    let cx = sx + sw * 0.5 + positions.hand_strip.nx * layout.window_w;
-    let cy = sy + sh * HAND_TILE_MESH_Y_FRAC + positions.hand_strip.ny * layout.window_h;
-    let lift = layout.mm(15.0) + layout.mm(positions.hand_strip.lift_mm);
-    ([cx, cy, lift], sw)
+) -> super::glb_anchors::HandWorldSlot {
+    hand_world_slots[slot]
 }
 
-/// Build the discard river [`Object3d`] — same geometry as the gameplay draw path.
-pub fn build_discard_river_object3d(
-    layout: &crate::ui::layout::LayoutResult,
-    positions: &GameplayPositions,
-    discard_btn_rect: [f32; 4],
-    action_world_z_py: f32,
-    action_hud_table_lift: f32,
-) -> Object3d {
-    let (dx, dy, dw, dh) = (
-        discard_btn_rect[0],
-        discard_btn_rect[1],
-        discard_btn_rect[2],
-        discard_btn_rect[3],
-    );
-    let diam = dw.min(dh);
-    let river_len = diam * 1.9;
-    let river_width = diam * 1.1;
-    let anchor = LayoutAnchorPx {
-        px: dx + dw * 0.5,
-        py: dy + dh * 0.5 + action_world_z_py,
-        lift_z: action_hud_table_lift,
-    };
-    let t = anchor.to_draw_cmd_triple();
-    let bowl = &positions.bowl;
-    let bowl_anchor = crate::ui::placement::PlacementAnchor::new(
-        [t[0], t[1], t[2]],
-        crate::render::table_transform::rot_fixed_axes_deg(90.0, 0.0, 0.0),
-        bowl,
-        layout,
-    );
-    Object3d {
-        pos: bowl_anchor.pos,
-        extents: [river_len, diam, river_width],
-        rotation: bowl_anchor.object3d_rotation(),
-        color: [1.0, 1.0, 1.0, 1.0],
-        kind: Object3dKind::Bowl,
-        hover_target: 0.0,
-        anim_id: 1,
-    }
-}
-
-pub fn bowl_model_matrix(window_w: f32, window_h: f32, bowl: &Object3d) -> glam::Mat4 {
+pub(crate) fn bowl_model_matrix(window_w: f32, window_h: f32, bowl: &Object3d) -> glam::Mat4 {
     let center = pixel_to_world(
         window_w,
         window_h,
@@ -664,8 +600,7 @@ fn sample_river_sink_tile(
 pub fn begin_discard_batch(
     scene: &mut GameplayScene,
     layout: &crate::ui::layout::LayoutResult,
-    hand_slots: &[(f32, f32, f32, f32)],
-    has_structure: bool,
+    env_height_scale: f32,
     selected_indices: &[usize],
     tiles: &[Tile],
     now: Instant,
@@ -676,23 +611,47 @@ pub fn begin_discard_batch(
         return;
     }
 
-    let hud = compute_gameplay_hud_layout(layout, hand_slots, has_structure, has_structure);
-    let (dx, dy, dw, dh) = hud.action_bar.discard_btn_rect;
-    let discard_btn_rect = [dx, dy, dw, dh];
-    let layout_scale = (layout.window_w.min(layout.window_h)) / 600.0;
-    let action_world_z_py = action_hud_world_z_py_nudge(layout_scale);
-    let bowl = build_discard_river_object3d(
+    let w = layout.window_w;
+    let h = layout.window_h;
+    let cam = match crate::render::gameplay_glb::require_gameplay_camera(h, env_height_scale) {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("discard batch camera: {e}");
+            scene.active_discard_anim = None;
+            return;
+        }
+    };
+    let hand_len = selected_indices
+        .iter()
+        .copied()
+        .max()
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let anchors = match glb_anchors::resolve_gameplay_glb_anchors(
         layout,
-        &scene.positions,
-        discard_btn_rect,
-        action_world_z_py,
-        hud.action_bar.action_hud_table_lift,
-    );
-    let hand_rotation = hand_tile_rotation(&scene.positions);
+        hand_len,
+        w,
+        h,
+        &cam,
+        env_height_scale,
+        0.0,
+        0.0,
+    ) {
+        Ok(a) => a,
+        Err(e) => {
+            log::warn!("discard batch anchors: {e}");
+            scene.active_discard_anim = None;
+            return;
+        }
+    };
+    let bowl = anchors.discard_river_pick.clone();
+    let hand_world_slots = anchors.hand_world_slots;
+    let hand_scale_mul = anchors.hand_marker_poses[0].uniform_author_scale(h, env_height_scale);
     let reference_size_px = selected_indices
         .iter()
-        .map(|&slot| hand_slot_center(layout, &scene.positions, hand_slots, slot).1)
-        .fold(0.0_f32, f32::max);
+        .map(|&slot| hand_slot_center(&hand_world_slots, slot).1)
+        .fold(0.0_f32, f32::max)
+        * hand_scale_mul;
     let bowl_model = bowl_model_matrix(layout.window_w, layout.window_h, &bowl);
     let flow_ts = flow_params_for_tiles(tiles.len(), bowl_model, reference_size_px);
     let river_slots = river_slots_for_discard(
@@ -709,8 +668,9 @@ pub fn begin_discard_batch(
         random_start_delays(tiles.len(), scene.cached_cascade_tuning.discard_stagger_ms);
     for (seq, &tile) in tiles.iter().enumerate() {
         let slot = selected_indices[seq];
-        let (start_center, start_size_px) =
-            hand_slot_center(layout, &scene.positions, hand_slots, slot);
+        let (start_center, start_size_px, hand_rotation) =
+            hand_slot_center(&hand_world_slots, slot);
+        let start_size_px = start_size_px * hand_scale_mul;
         let river = river_slots[seq];
         anim_tiles.push(DiscardAnimTile {
             tile,
@@ -946,6 +906,7 @@ pub fn in_flight_placements(
 mod tests {
     use super::*;
     use crate::core::tile::{Suit, Tile};
+    use crate::render::draw_cmd::Object3dKind;
     use std::time::Instant;
 
     fn test_tile(id: u32) -> Tile {

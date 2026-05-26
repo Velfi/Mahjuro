@@ -668,7 +668,12 @@ fn hallway_camera_resolve(
 }
 
 /// Camera for pick-blind: `default` / `boss` glTF cameras when present, else same as [`hallway_camera_base`].
-pub fn hallway_camera_pick_chamber(w: f32, h: f32, env_h: f32, ordeal_chamber: bool) -> CameraParams {
+pub fn hallway_camera_pick_chamber(
+    w: f32,
+    h: f32,
+    env_h: f32,
+    ordeal_chamber: bool,
+) -> CameraParams {
     // Resolve outside nested `with_hallway_glb_cpu` — avoids deadlock on first load.
     let from_glb = hallway_pick_chamber_embedded_camera_params(h, env_h, ordeal_chamber);
     hallway_camera_resolve(w, h, env_h, from_glb)

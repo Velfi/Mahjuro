@@ -225,7 +225,11 @@ impl App {
                 }
                 GameEvent::OrdealEncountered(bk) => {
                     self.audio.play_sfx(audio::SfxId::OrdealEncountered);
-                    *self.progress.ordeal_times_encountered.entry(bk).or_insert(0) += 1;
+                    *self
+                        .progress
+                        .ordeal_times_encountered
+                        .entry(bk)
+                        .or_insert(0) += 1;
                     self.mark_profile_dirty();
                     // "All bosses seen" — the regular (non-final)
                     // pool is the breadth-of-content signal we want.
@@ -614,11 +618,7 @@ impl App {
         // changes immediately.
         if let Some(mut overlay) = self.debug.visibility_overlay.take() {
             let result = overlay.update(&actions);
-            self.debug.hide_tiles = overlay.hide_tiles;
-            self.debug.hide_candles = overlay.hide_candles;
-            self.debug.hide_chamber_plaque = overlay.hide_chamber_plaque;
-            self.debug.hide_scoring_placard = overlay.hide_scoring_placard;
-            self.debug.hide_inventory = overlay.hide_inventory;
+            self.debug.visibility = overlay.vis;
             if result == DebugVisResult::Stay {
                 self.debug.visibility_overlay = Some(overlay);
             } else {
@@ -918,8 +918,7 @@ impl App {
             Some(scenes::OverlayRequest::Push(s)) => {
                 self.overlay_stack.push(*s);
                 if matches!(self.overlay_stack.last(), Some(Scene::Credits(_))) {
-                    self.audio
-                        .set_music_track(crate::audio::MusicId::Credits);
+                    self.audio.set_music_track(crate::audio::MusicId::Credits);
                 }
             }
             Some(scenes::OverlayRequest::Pop) => {
@@ -999,7 +998,6 @@ impl App {
             self.gfx.effects_quality = opts.effects_quality;
             self.gfx.tile_preset = opts.tile_preset;
             self.gfx.tileset_name = opts.tileset_name.clone();
-            self.gfx.surface_kind = opts.surface_kind;
             self.gfx.gamma = opts.gamma;
             self.gfx.shadows_enabled = opts.shadows_enabled;
             self.gfx.ssr_enabled = opts.ssr_enabled;

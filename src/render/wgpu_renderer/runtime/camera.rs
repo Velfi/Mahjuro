@@ -197,6 +197,14 @@ impl WgpuRenderer {
         ) || (k == Some("showcase") && h.collection_tonemap_context);
         let shop_scene =
             k == Some("shop") || (k == Some("showcase") && h.shop_tonemap_and_lit_mesh_context);
+        let gameplay_glb_room = matches!(k, Some("gameplay") | Some("tutorial"))
+            && frame.scene_lighting.embedded_gltf_punctual
+            && frame
+                .cmds
+                .iter()
+                .any(|c| matches!(c, DrawCmd::GameplayEnvironment));
+        // `gameplay.glb` uses the embedded-room tile path (`ROOM_GLB_LINEAR_EXPOSURE_BASE` × room mul).
+        let shop_env_tonemap = shop_scene;
         let tile_pack_celebration = k == Some("tile_pack_celebration")
             || (k == Some("showcase") && h.tile_pack_celebration_tonemap);
         if shop_scene && frame.shop_inspect_lit_mesh_hdr {
@@ -242,10 +250,10 @@ impl WgpuRenderer {
             let linear_hdr = self.shop_env_linear_exposure;
             return [1.0, linear_hdr, self.shop_env_ambient_scale, 0.0];
         }
-        if !(shop_scene || table_like) {
+        if !(shop_env_tonemap || table_like) {
             return [0.0; 4];
         }
-        let (mut linear_hdr, mut ambient) = if shop_scene {
+        let (mut linear_hdr, mut ambient) = if shop_env_tonemap {
             (
                 self.shop_env_linear_exposure
                     * crate::render::room_glb::ROOM_GLB_LINEAR_EXPOSURE_BASE,
@@ -253,6 +261,7 @@ impl WgpuRenderer {
                     .max(crate::render::room_glb::SHOP_ENV_DIELECTRIC_AMBIENT_MIN),
             )
         } else {
+            // Non-shop table-like scenes without a room GLB (collection, pick chamber, …).
             (
                 self.shop_env_linear_exposure
                     * crate::render::room_glb::GAMEPLAY_TABLE_HDR_LINEAR_MUL,
@@ -261,29 +270,30 @@ impl WgpuRenderer {
             )
         };
 
-        // Embedded `KHR_lights_punctual` rooms (archive, hallway) already tune exposure
-        // for the GLB env in `write_gltf_room_env_uniforms`. Match that here so `lit_mesh`
-        // props (relics, plaques, decals) share the same ACES linear gain as the room —
-        // not the gameplay-table multiplier meant for mahjong tiles on felt.
-        if frame.scene_lighting.embedded_gltf_punctual && !shop_scene {
+        // Embedded `KHR_lights_punctual` rooms tune exposure in `write_gltf_room_env_uniforms`.
+        // Match that here so showcase tiles and `lit_mesh` props share the same ACES linear gain
+        // as the room mesh (hallway, archive, gameplay.glb, …).
+        if frame.scene_lighting.embedded_gltf_punctual && !shop_env_tonemap {
             let mut e = self.shop_env_linear_exposure
                 * crate::render::room_glb::ROOM_GLB_LINEAR_EXPOSURE_BASE;
             let mut a = self.shop_env_ambient_scale;
-            if k == Some("pick_chamber") {
-                e *= crate::render::hallway_glb::HALLWAY_ENV_LINEAR_EXPOSURE_MUL;
-                a = a.max(crate::render::hallway_glb::HALLWAY_ENV_AMBIENT_SCALE_MIN);
-            }
-            if k == Some("main_menu_exterior") {
-                e *= crate::render::main_menu_glb::MAIN_MENU_ENV_LINEAR_EXPOSURE_MUL;
-                a = a.max(crate::render::main_menu_glb::MAIN_MENU_ENV_AMBIENT_SCALE_MIN);
-            }
-            if k == Some("collection") || (k == Some("showcase") && h.collection_tonemap_context) {
-                e *= crate::render::archive_glb::ARCHIVE_ENV_LINEAR_EXPOSURE_MUL;
-                a = a.max(crate::render::archive_glb::ARCHIVE_ENV_AMBIENT_SCALE_MIN);
-            }
-            if k == Some("gameplay") || k == Some("tutorial") {
-                e *= crate::render::gameplay_glb::GAMEPLAY_ENV_LINEAR_EXPOSURE_MUL;
-                a = a.max(crate::render::gameplay_glb::GAMEPLAY_ENV_AMBIENT_SCALE_MIN);
+            match k {
+                Some("pick_chamber") => {
+                    e *= crate::render::hallway_glb::HALLWAY_ENV_LINEAR_EXPOSURE_MUL;
+                    a = a.max(crate::render::hallway_glb::HALLWAY_ENV_AMBIENT_SCALE_MIN);
+                }
+                Some("main_menu_exterior") => {
+                    e *= crate::render::main_menu_glb::MAIN_MENU_ENV_LINEAR_EXPOSURE_MUL;
+                    a = a.max(crate::render::main_menu_glb::MAIN_MENU_ENV_AMBIENT_SCALE_MIN);
+                }
+                Some("collection") | Some("showcase") if h.collection_tonemap_context => {
+                    e *= crate::render::archive_glb::ARCHIVE_ENV_LINEAR_EXPOSURE_MUL;
+                    a = a.max(crate::render::archive_glb::ARCHIVE_ENV_AMBIENT_SCALE_MIN);
+                }
+                Some("gameplay") | Some("tutorial") if gameplay_glb_room => {
+                    e *= crate::render::gameplay_glb::GAMEPLAY_ENV_LINEAR_EXPOSURE_MUL;
+                }
+                _ => {}
             }
             linear_hdr = e;
             ambient = a;
@@ -326,8 +336,8 @@ impl WgpuRenderer {
         } else {
             0.0
         };
-        let shop_punctual_display_case =
-            if shop_like && frame.scene_lighting.embedded_gltf_punctual {
+        let shop_punctual_display_case = if shop_like && frame.scene_lighting.embedded_gltf_punctual
+        {
             1.0
         } else {
             0.0

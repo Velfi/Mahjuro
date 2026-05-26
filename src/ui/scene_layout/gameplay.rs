@@ -1,141 +1,19 @@
-use crate::ui::placement::Placement;
+//! Tunables for gameplay that are not authored as `gameplay.glb` spawn empties.
+//!
+//! Prop positions, hand rack, relics, plinths, consumables, and action buttons
+//! come from GLB markers via [`crate::scenes::gameplay::glb_anchors`].
 
+/// Non-GLB gameplay layout knobs (2D score cascade reel).
 #[derive(Clone, Debug)]
 pub struct GameplayPositions {
-    pub relic_col: Placement,
-    pub relic_col_top_ny: f32,
-    pub relic_col_bottom_ny: f32,
-    pub relic_cell_height_mm: f32,
-    pub plaque: Placement,
-    pub counter_draws_fan: Placement,
-    pub counter_discards_fan: Placement,
-    pub coin_pile: Placement,
-    pub dora: Placement,
-    pub boss_plinth: Placement,
-    pub round_wind: Placement,
-    pub talisman_dish: Placement,
-    pub consumable_dish_talisman: Placement,
-    pub bowl: Placement,
-    pub mirror: Placement,
-    pub tablet_cash_in: Placement,
-    pub tablet_journal: Placement,
-    pub candle_back_z_push_candle_w_frac: f32,
-    pub candle_bottom_z_back_candle_h_frac: f32,
-    pub hand_strip: Placement,
-    pub yaku_tablet: Placement,
-    pub camera_eye_y_mul: f32,
-    pub camera_eye_z_mul: f32,
-    pub camera_target_y_mul: f32,
-    pub camera_target_z_mul: f32,
-    pub camera_fovy_deg: f32,
+    /// Lift (mm) for cascade reel / popup anchors above the 2D score strip.
+    pub score_reel_lift_mm: f32,
 }
 
 impl Default for GameplayPositions {
     fn default() -> Self {
         Self {
-            relic_col: Placement::at(-0.950_520_9, 0.071_863_13, 2.144_608),
-            relic_col_top_ny: 0.22,
-            relic_col_bottom_ny: 0.78,
-            relic_cell_height_mm: 42.0,
-            plaque: Placement {
-                nx: 0.0,
-                ny: 0.18,
-                lift_mm: 139.161_16,
-                rx_deg: 0.0,
-                ry_deg: 0.0,
-                rz_deg: 0.0,
-            },
-            counter_draws_fan: Placement {
-                nx: -0.042_534_72,
-                ny: -0.036_121_674,
-                lift_mm: 0.744_655_5,
-                rx_deg: 0.0,
-                ry_deg: 0.0,
-                rz_deg: -30.0,
-            },
-            counter_discards_fan: Placement {
-                nx: 0.084_490_73,
-                ny: 0.065_589_31,
-                lift_mm: 19.361_042,
-                rx_deg: 0.0,
-                ry_deg: 0.0,
-                rz_deg: 45.0,
-            },
-            coin_pile: Placement::at(1.179_050_6, 0.13, 2.144_608),
-            dora: Placement {
-                nx: 0.765_231_4,
-                ny: -0.540_456_24,
-                lift_mm: 2.144_608_5,
-                rx_deg: 0.0,
-                ry_deg: 180.0,
-                rz_deg: 180.0,
-            },
-            boss_plinth: Placement {
-                nx: 0.885_231_4,
-                ny: -0.540_456_24,
-                lift_mm: 2.144_608_5,
-                rx_deg: 0.0,
-                ry_deg: 180.0,
-                rz_deg: 180.0,
-            },
-            round_wind: Placement {
-                nx: 0.645_231_4,
-                ny: -0.540_456_24,
-                lift_mm: 2.144_608_5,
-                rx_deg: 0.0,
-                ry_deg: 180.0,
-                rz_deg: 180.0,
-            },
-            talisman_dish: Placement::at(-0.492_442_13, -0.626_977_2, -3.365_842_3),
-            consumable_dish_talisman: Placement {
-                nx: -0.008_575_439,
-                ny: 0.049_166_66,
-                lift_mm: 1.489_310_9,
-                rx_deg: 0.0,
-                ry_deg: 0.0,
-                rz_deg: 0.0,
-            },
-            bowl: Placement {
-                nx: -0.051_770_832,
-                ny: -0.115_193_285,
-                lift_mm: -32.109_547,
-                rx_deg: 0.0,
-                ry_deg: 0.0,
-                rz_deg: 45.0,
-            },
-            mirror: Placement {
-                nx: -0.006_076_388_5,
-                ny: 0.023_764_258,
-                lift_mm: 1.995_676_9,
-                rx_deg: -159.0,
-                ry_deg: 75.0,
-                rz_deg: -78.0,
-            },
-            tablet_cash_in: Placement::at(0.0, 0.0, 2.144_608),
-            tablet_journal: Placement::at(0.0, -0.064_638_78, 2.144_608),
-            candle_back_z_push_candle_w_frac: 1.0,
-            candle_bottom_z_back_candle_h_frac: 0.55,
-            hand_strip: Placement {
-                nx: 0.0,
-                ny: 0.221_292_81,
-                lift_mm: 36.458_336,
-                rx_deg: -12.0,
-                ry_deg: 0.0,
-                rz_deg: 0.0,
-            },
-            yaku_tablet: Placement {
-                nx: 0.0,
-                ny: 0.155_893_97,
-                lift_mm: 19.301_472,
-                rx_deg: -20.0,
-                ry_deg: 0.0,
-                rz_deg: 0.0,
-            },
-            camera_eye_y_mul: 1.0,
-            camera_eye_z_mul: 1.0,
-            camera_target_y_mul: 1.0,
-            camera_target_z_mul: 1.0,
-            camera_fovy_deg: 55.0,
+            score_reel_lift_mm: 139.161_16,
         }
     }
 }

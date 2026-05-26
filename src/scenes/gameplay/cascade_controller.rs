@@ -160,7 +160,7 @@ pub(super) fn tick_active_cascade(
                         ctx.layout,
                         ctx.run,
                         cascade_showcase.as_ref(),
-                        &scene.positions,
+                        ctx.room_gltf_height_scale,
                     );
                     let counter =
                         super::score_counter::score_counter_layout(ctx.layout, &scene.positions);

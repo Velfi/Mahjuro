@@ -81,7 +81,6 @@ enum Row {
     Effects,
     Tile,
     Tileset,
-    Surface,
     BorderlessFullscreen,
     Shadows,
     Ssr,
@@ -122,7 +121,6 @@ const ROWS: &[Row] = &[
     Row::Effects,
     Row::Tile,
     Row::Tileset,
-    Row::Surface,
     Row::BorderlessFullscreen,
     Row::Shadows,
     Row::Ssr,
@@ -158,7 +156,6 @@ const CONTENT: &[ContentSlot] = &[
     ContentSlot::Row(Row::Effects),
     ContentSlot::Row(Row::Tile),
     ContentSlot::Row(Row::Tileset),
-    ContentSlot::Row(Row::Surface),
     ContentSlot::Row(Row::BorderlessFullscreen),
     ContentSlot::Row(Row::Shadows),
     ContentSlot::Row(Row::Ssr),
@@ -299,7 +296,6 @@ fn row_copy(row: Row, scene: &OptionsScene) -> (&'static str, String) {
         Row::Effects => ("Effects quality", scene.effects_quality.label().into()),
         Row::Tile => ("Tile style", scene.tile_preset.label().into()),
         Row::Tileset => ("Tile set", scene.tileset_name.clone()),
-        Row::Surface => ("Surface", scene.surface_kind.label().into()),
         Row::BorderlessFullscreen => (
             "Window mode",
             if scene.borderless_fullscreen {
@@ -466,7 +462,6 @@ pub struct OptionsScene {
     pub tile_preset: crate::persistence::TilePreset,
     pub tileset_name: String,
     pub available_tilesets: Vec<String>,
-    pub surface_kind: crate::persistence::SurfaceKind,
     pub gamma: f32,
     pub shadows_enabled: bool,
     pub ssr_enabled: bool,
@@ -518,7 +513,6 @@ impl OptionsScene {
             tile_preset: settings.tile_preset,
             tileset_name,
             available_tilesets,
-            surface_kind: settings.surface_kind,
             gamma: settings.gamma,
             shadows_enabled: settings.shadows_enabled,
             ssr_enabled: settings.ssr_enabled,
@@ -550,14 +544,6 @@ impl OptionsScene {
         self.tileset_name = self.available_tilesets[next].clone();
     }
 
-    fn cycle_surface(&mut self, delta: isize) {
-        self.surface_kind = if delta >= 0 {
-            self.surface_kind.next()
-        } else {
-            self.surface_kind.prev()
-        };
-    }
-
     fn save_settings(&self) {
         let mut settings = crate::persistence::load_settings();
         settings.master_volume = self.master_volume;
@@ -567,7 +553,6 @@ impl OptionsScene {
         settings.effects_quality = self.effects_quality;
         settings.tile_preset = self.tile_preset;
         settings.tileset_name = self.tileset_name.clone();
-        settings.surface_kind = self.surface_kind;
         settings.gamma = self.gamma;
         settings.shadows_enabled = self.shadows_enabled;
         settings.ssr_enabled = self.ssr_enabled;
@@ -708,7 +693,6 @@ impl OptionsScene {
             Row::Effects => self.effects_quality = self.effects_quality.next(),
             Row::Tile => self.tile_preset = self.tile_preset.next(),
             Row::Tileset => self.cycle_tileset(1),
-            Row::Surface => self.cycle_surface(1),
             Row::BorderlessFullscreen => self.borderless_fullscreen = !self.borderless_fullscreen,
             Row::Shadows => self.shadows_enabled = !self.shadows_enabled,
             Row::Ssr => self.ssr_enabled = !self.ssr_enabled,
@@ -747,7 +731,6 @@ impl OptionsScene {
             Row::Effects => self.effects_quality = self.effects_quality.prev(),
             Row::Tile => self.tile_preset = self.tile_preset.prev(),
             Row::Tileset => self.cycle_tileset(-1),
-            Row::Surface => self.cycle_surface(-1),
             Row::BorderlessFullscreen => self.borderless_fullscreen = !self.borderless_fullscreen,
             Row::Shadows => self.shadows_enabled = !self.shadows_enabled,
             Row::Ssr => self.ssr_enabled = !self.ssr_enabled,
@@ -797,10 +780,6 @@ impl OptionsScene {
             }
             Row::Tileset => {
                 self.cycle_tileset(1);
-                self.save_settings();
-            }
-            Row::Surface => {
-                self.cycle_surface(1);
                 self.save_settings();
             }
             Row::BorderlessFullscreen => {

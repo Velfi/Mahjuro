@@ -93,12 +93,12 @@ pub enum TilePackKind {
     Terminals,
     #[serde(alias = "Flowers")]
     Flowers,
-    #[serde(alias = "BambooGrove")]
-    BambooGrove,
-    #[serde(alias = "CoinCache")]
-    CoinCache,
-    #[serde(alias = "ScrollLibrary")]
-    ScrollLibrary,
+    #[serde(alias = "Souzu")]
+    Souzu,
+    #[serde(alias = "Pinzu")]
+    Pinzu,
+    #[serde(alias = "Manzu")]
+    Manzu,
 }
 
 impl TilePackKind {
@@ -107,9 +107,9 @@ impl TilePackKind {
             Self::Honors,
             Self::Terminals,
             Self::Flowers,
-            Self::BambooGrove,
-            Self::CoinCache,
-            Self::ScrollLibrary,
+            Self::Souzu,
+            Self::Pinzu,
+            Self::Manzu,
         ]
     }
 
@@ -206,21 +206,21 @@ impl TilePackKind {
                     push(Suit::Flower, rank, &mut out);
                 }
             }
-            Self::BambooGrove => {
+            Self::Souzu => {
                 let mut ranks: Vec<u8> = (1..=9).collect();
                 seeded_shuffle(&mut ranks, rng_state);
                 for &rank in ranks.iter().take(8) {
                     push(Suit::Souzu, rank, &mut out);
                 }
             }
-            Self::CoinCache => {
+            Self::Pinzu => {
                 let mut ranks: Vec<u8> = (1..=9).collect();
                 seeded_shuffle(&mut ranks, rng_state);
                 for &rank in ranks.iter().take(8) {
                     push(Suit::Pinzu, rank, &mut out);
                 }
             }
-            Self::ScrollLibrary => {
+            Self::Manzu => {
                 let mut ranks: Vec<u8> = (1..=9).collect();
                 seeded_shuffle(&mut ranks, rng_state);
                 for &rank in ranks.iter().take(8) {
@@ -250,9 +250,9 @@ mod tests {
             TilePackKind::Honors,
             TilePackKind::Terminals,
             TilePackKind::Flowers,
-            TilePackKind::BambooGrove,
-            TilePackKind::CoinCache,
-            TilePackKind::ScrollLibrary,
+            TilePackKind::Souzu,
+            TilePackKind::Pinzu,
+            TilePackKind::Manzu,
         ];
         let map = tile_pack_presentations();
         assert_eq!(

@@ -5,8 +5,6 @@
 
 use glam::{Vec2, Vec3};
 
-use crate::ui::layout::LayoutResult;
-
 // ── Tuning (keep in sync with `shaders/flame.wgsl` / `shaders/blackbody.wgsl`) ──
 
 /// Godot base mesh height multiplier in `flame.wgsl` (`FLAME_HEIGHT = BASE * SCALE`).
@@ -16,14 +14,8 @@ pub const FLAME_MESH_HEIGHT_SCALE: f32 = 2.0;
 #[allow(dead_code)]
 pub const FLAME_MESH_WIDTH_MUL: f32 = 0.82;
 
-/// Gameplay votive height in millimeters ([`Object3dKind::Candle`] mesh scale).
-pub const CANDLE_HEIGHT_MM: f32 = 78.0;
-
 /// World scale factor applied to candle height for flame emitter size.
 pub const FLAME_EMITTER_SCALE_MUL: f32 = 0.22;
-
-/// Lit-mesh lightbake envelope (`lights.extras.z`), world mm via [`flame_height_world`].
-pub const FLAME_LIGHTBAKE_HEIGHT_MM: f32 = 30.0 * FLAME_MESH_HEIGHT_SCALE;
 
 /// Typical baked shop candle height in glTF document metres (~52 mm).
 pub const SHOP_GLTF_CANDLE_HEIGHT_DOC_M: f32 = 0.052;
@@ -34,9 +26,7 @@ pub const SHOP_WICK_BELOW_LIGHT_FRAC: f32 = 0.42;
 /// Lightbake height as fraction of shop candle world height.
 pub const SHOP_FLAME_LIGHTBAKE_HEIGHT_FRAC: f32 = 0.48;
 
-/// Fast candle flicker swing (±) at [`FLAME_FLICKER_RATE_HZ`].
-pub const FLAME_FLICKER_AMP: f32 = 0.032;
-/// Shop `light_candle*` punctuals + flames — same rate, gentler swing.
+/// Shop `light_candle*` punctuals + flames — flicker swing at [`FLAME_FLICKER_RATE_HZ`].
 pub const SHOP_CANDLE_FLICKER_AMP: f32 = 0.019;
 const FLAME_FLICKER_RATE_HZ: f32 = 24.0;
 
@@ -102,12 +92,6 @@ fn flame_rw_1d(seed: f32, time_s: f32, rate_hz: f32) -> f32 {
     a + (b - a) * smooth
 }
 
-/// Shared candle brightness flicker — mesh + punctual lights (indoor: small, fast).
-#[inline]
-pub fn flame_flicker_multiplier(phase: f32, time_s: f32) -> f32 {
-    flame_flicker_multiplier_amp(phase, time_s, FLAME_FLICKER_AMP)
-}
-
 #[inline]
 pub fn shop_candle_flicker_multiplier(phase: f32, time_s: f32) -> f32 {
     flame_flicker_multiplier_amp(phase, time_s, SHOP_CANDLE_FLICKER_AMP)
@@ -124,11 +108,6 @@ pub fn flame_flicker_multiplier_amp(phase: f32, time_s: f32, amp: f32) -> f32 {
 #[inline]
 pub fn flame_emitter_scale(candle_world_scale: f32, height_scale: f32) -> f32 {
     candle_world_scale * height_scale * FLAME_EMITTER_SCALE_MUL
-}
-
-#[inline]
-pub fn flame_height_world(layout: &LayoutResult) -> f32 {
-    layout.mm(FLAME_LIGHTBAKE_HEIGHT_MM)
 }
 
 #[inline]
@@ -180,7 +159,7 @@ mod tests {
     fn flicker_is_bounded() {
         for i in 0..64 {
             let phase = i as f32 / 64.0;
-            let f = flame_flicker_multiplier(phase, 1.5);
+            let f = flame_flicker_multiplier_amp(phase, 1.5, SHOP_CANDLE_FLICKER_AMP);
             assert!(f >= 0.96 && f <= 1.04, "f={f}");
         }
     }

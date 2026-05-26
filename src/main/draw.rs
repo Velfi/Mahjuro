@@ -170,8 +170,7 @@ impl App {
                 // clobbers target_score with base_target for the next blind.
                 let cleared_round_score = self.run.round_score;
                 let cleared_target_score = self.run.target_score;
-                let cleared_ordeal =
-                    self.run.chamber == crate::core::rules::ChamberKind::Ordeal;
+                let cleared_ordeal = self.run.chamber == crate::core::rules::ChamberKind::Ordeal;
                 self.run.advance_round(&mut self.bus);
 
                 {
@@ -246,9 +245,7 @@ impl App {
                     }
 
                     Scene::GameOver(GameOverScene::victory(&self.run))
-                } else if cleared_ordeal
-                    && crate::render::staircase_glb::staircase_glb_loaded()
-                {
+                } else if cleared_ordeal && crate::render::staircase_glb::staircase_glb_loaded() {
                     self.run.grant_pending_memorial(&mut self.progress);
                     self.mark_profile_dirty();
                     Scene::Staircase(crate::scenes::StaircaseScene::new())
@@ -439,11 +436,7 @@ impl App {
             // tests twice per frame for free was the prior behavior.
             self.frame_picks.gameplay,
             self.frame_picks.shop,
-            scenes::DebugVisibility {
-                hide_candles: self.debug.hide_candles,
-                hide_chamber_plaque: self.debug.hide_chamber_plaque,
-                hide_scoring_placard: self.debug.hide_scoring_placard,
-            },
+            self.debug.visibility,
             modal_active,
             scene_look.room_gltf_height_scale,
             shop_env_for_frame,
@@ -714,27 +707,6 @@ impl App {
             });
         }
 
-        // Debug: drop draw cmds for hidden HUD elements so we can inspect the
-        // procedural 3D scene underneath. The blind plaque / score counter and
-        // candles are gated at the *call site* in `scene_behavior.rs` (via
-        // `DrawCtx::debug_visibility`) because (a) multiple elements share the
-        // same `DrawCmd::Plaque(_)` variant and can't be told apart by a
-        // post-process filter, and (b) skipping candle pushes also skips the
-        // attached `PointLight`s, which a cmd-only filter would leak. Tiles
-        // and inventory items have unambiguous variants and can be safely
-        // dropped after the fact.
-        let any_hide = self.debug.hide_tiles || self.debug.hide_inventory;
-        if any_hide {
-            let hide_tiles = self.debug.hide_tiles;
-            frame.cmds.retain(|c| {
-                use crate::render::draw_cmd::DrawCmd;
-                if hide_tiles && matches!(c, DrawCmd::ShowcaseTileBatch(_)) {
-                    return false;
-                }
-                true
-            });
-        }
-
         // Convert settle ms to exponential decay speed (inversely proportional).
         // Default: 500ms → speed 8.0, 400ms → speed 10.0.
         let draw_settle_speed = 8.0 * (500.0 / self.cascade_tuning.draw_settle_ms.max(1) as f32);
@@ -774,6 +746,15 @@ impl App {
         };
         renderer.set_active_scene(active_scene_key);
 
+        if matches!(active_scene_key, Some("gameplay") | Some("tutorial"))
+            && self.debug.visibility.any_hide()
+        {
+            crate::scenes::debug_visibility::filter_gameplay_frame_cmds(
+                &mut frame,
+                &self.debug.visibility,
+            );
+        }
+
         renderer.set_tonemap_tuning(&scene_look.tonemap);
 
         renderer.set_room_gltf_height_scale(scene_look.room_gltf_height_scale);
@@ -791,7 +772,6 @@ impl App {
                 gfx: &self.gfx,
                 tile_preset: self.gfx.tile_preset,
                 tile_material: active_material,
-                surface_kind: self.gfx.surface_kind,
                 tileset_name: active_tileset_name,
                 draw_settle_speed,
                 sort_settle_speed,

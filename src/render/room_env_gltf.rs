@@ -1011,6 +1011,10 @@ pub trait RoomEnvWalkHooks {
     fn skip_env_mesh(&self, _name: &str) -> bool {
         false
     }
+    /// Hard error when a named mesh must not appear in the glTF export (e.g. gameplay Unexportables).
+    fn forbid_env_mesh(&self, _name: &str) -> bool {
+        false
+    }
 }
 
 /// Mutable harvest targets for [`walk_room_env_node`].
@@ -1071,6 +1075,14 @@ pub fn walk_room_env_node(
             "{label}: duplicate marker node name {:?} — using last transform",
             name
         );
+    }
+
+    if let Some(_mesh) = node.mesh() {
+        if hooks.forbid_env_mesh(name) {
+            anyhow::bail!(
+                "{label} must not export Unexportables mesh `{name}` — disable that collection for glTF export"
+            );
+        }
     }
 
     if let Some(mesh) = node.mesh()

@@ -53,9 +53,7 @@ pub(crate) fn parse_tile_pack_slug(
             return Ok(k);
         }
     }
-    anyhow::bail!(
-        "unknown --pack '{slug}' (try honors, terminals, flowers, bamboo_grove, coin_cache, scroll_library)"
-    );
+    anyhow::bail!("unknown --pack '{slug}' (try honors, terminals, flowers, souzu, pinzu, manzu)");
 }
 
 pub(crate) fn parse_bake_room_slug(

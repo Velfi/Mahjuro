@@ -3900,9 +3900,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                                 },
                                 wgpu::BindGroupEntry {
                                     binding: 3,
-                                    resource: wgpu::BindingResource::TextureView(
-                                        &decal_view,
-                                    ),
+                                    resource: wgpu::BindingResource::TextureView(&decal_view),
                                 },
                                 wgpu::BindGroupEntry {
                                     binding: 4,
@@ -3979,11 +3977,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             (Some(Instant::now()), Some(spawn_background_loader()))
         };
 
-    // ---- Lit-mesh procedural geometry (candles + table) ----
+    // ---- Lit-mesh procedural geometry (candles) ----
     let t_lit_meshes = Instant::now();
-    let candle_wax_mesh = LitMeshGpu::new(&device, &build_candle_wax_mesh(), "candle-wax");
-    let candle_wick_mesh = LitMeshGpu::new(&device, &build_candle_wick_mesh(), "candle-wick");
-    let table_mesh = LitMeshGpu::new(&device, &build_table_mesh(), "table");
     let relic_box_cpu = build_relic_mesh();
     let relic_box_tris: Vec<[glam::Vec3; 3]> = relic_box_cpu
         .indices
@@ -4003,7 +3998,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     let pack_mesh = LitMeshGpu::new(&device, &build_pack_mesh(), "pack-mesh");
     let ribbon_mesh = LitMeshGpu::new(&device, &build_ribbon_mesh(), "ribbon");
     let talisman_mesh = LitMeshGpu::new(&device, &build_talisman_mesh(), "talisman");
-    let plinth_mesh = LitMeshGpu::new(&device, &build_plinth_mesh(), "plinth");
     let bug_body_mesh = LitMeshGpu::new(&device, &build_bug_body_mesh(), "bug-body");
     let bug_wing_mesh = LitMeshGpu::new(&device, &build_bug_wing_mesh(), "bug-wing");
     let bug_wing_blur_mesh = LitMeshGpu::new(&device, &build_bug_wing_blur_mesh(), "bug-wing-blur");
@@ -4194,38 +4188,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     // Shared 1×1 white texture for procedural meshes that don't sample.
     let (_lit_mesh_white_tex, lit_mesh_white_view) = white_albedo(&device, &queue);
 
-    // Pre-allocate candle slots (gameplay: score pair + two hand-strip
-    // pairs + footlight). Each slot owns two instances: wax + wick.
-    const NUM_CANDLE_SLOTS: usize = 7;
-    let mut candle_instances: Vec<[LitMeshInstance; 2]> = Vec::with_capacity(NUM_CANDLE_SLOTS);
-    for _ in 0..NUM_CANDLE_SLOTS {
-        candle_instances.push([
-            LitMeshInstance::new(
-                &device,
-                &lit_mesh_material_layout,
-                &shadow_caster_layout,
-                &lit_mesh_white_view,
-                &lit_mesh_relief_default_view,
-                &tile_sampler,
-            ),
-            LitMeshInstance::new(
-                &device,
-                &lit_mesh_material_layout,
-                &shadow_caster_layout,
-                &lit_mesh_white_view,
-                &lit_mesh_relief_default_view,
-                &tile_sampler,
-            ),
-        ]);
-    }
-    let table_instance = LitMeshInstance::new(
-        &device,
-        &lit_mesh_material_layout,
-        &shadow_caster_layout,
-        &lit_mesh_white_view,
-        &lit_mesh_relief_default_view,
-        &tile_sampler,
-    );
     let mut relic_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_RELIC_SLOTS);
     for _ in 0..MAX_RELIC_SLOTS {
         relic_instances.push(LitMeshInstance::new(
@@ -4391,18 +4353,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             &tile_sampler,
         ));
     }
-    let mut plinth_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_PLINTH_SLOTS);
-    for _ in 0..MAX_PLINTH_SLOTS {
-        plinth_instances.push(LitMeshInstance::new(
-            &device,
-            &lit_mesh_material_layout,
-            &shadow_caster_layout,
-            &lit_mesh_white_view,
-            &lit_mesh_relief_default_view,
-            &tile_sampler,
-        ));
-    }
-
     // ── Skeuomorphic gameplay HUD slot pools (phase 1) ─────────────
     let make_pool = |n: usize| -> Vec<LitMeshInstance> {
         (0..n)
@@ -4629,7 +4579,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         pack_slot_texture: vec![None; 4],
         ribbon_mesh,
         talisman_mesh,
-        plinth_mesh,
         ribbon_instances,
         ribbon_slot_zodiac,
         ribbon_zodiac_tex,
@@ -4644,7 +4593,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         bug_wing_blur_r_instances,
         orb_mesh,
         orb_instances,
-        plinth_instances,
         last_ribbon_models: Vec::new(),
         last_ribbon_batch_slot_counts: Vec::new(),
         last_talisman_models: Vec::new(),
@@ -4792,20 +4740,12 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         memorial_talisman_height_views,
         memorial_talisman_mask_views,
         talisman_slot_kind,
-        candle_wax_mesh,
-        candle_wick_mesh,
-        table_mesh,
         relic_box_mesh,
         relic_box_tris,
         relic_tri_lists: rustc_hash::FxHashMap::default(),
         pack_mesh,
         relic_meshes: rustc_hash::FxHashMap::default(),
-        candle_instances,
-        table_instance,
         felt_shader_lod: 2.0,
-        // Default to felt; `apply_render_settings` overwrites this each
-        // frame once the user's persisted choice has been threaded in.
-        table_material: MaterialParams::lacquered_wood(),
         relic_instances,
         shadow_map_texture,
         shadow_map_view,

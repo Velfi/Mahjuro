@@ -11,8 +11,8 @@ use crate::render::{
     },
     talisman_mesh::{TALISMAN_LOCAL_HALF, memorial_talisman_material, talisman_material},
     wgpu_renderer::{
-        GpuInstance, MAX_BOOK_SLOTS, MAX_ORDEAL_ICON_SLOTS, MAX_BOWL_SLOTS, MAX_CASCADE_TOKEN_SLOTS,
-        MAX_EXTRUDED_GLYPH_SLOTS, MAX_MIRROR_SLOTS, MAX_ORB_SLOTS, MAX_PLINTH_SLOTS,
+        GpuInstance, MAX_BOOK_SLOTS, MAX_BOWL_SLOTS, MAX_CASCADE_TOKEN_SLOTS,
+        MAX_EXTRUDED_GLYPH_SLOTS, MAX_MIRROR_SLOTS, MAX_ORB_SLOTS, MAX_ORDEAL_ICON_SLOTS,
         MAX_RELIC_SLOTS, MAX_TALISMAN_SLOTS, MAX_TALLY_FAN_SLOTS, MAX_TALLY_STICK_SLOTS,
         MAX_WALL_TILE_SLOTS, MAX_WOOD_TABLET_SLOTS, MAX_YAKU_TABLET_SLOTS,
         MEMORIAL_TALISMAN_TEXTURE_BASE, WgpuRenderer, ordeal_icon_material_params,
@@ -24,6 +24,95 @@ use crate::render::{
 };
 
 impl WgpuRenderer {
+    /// Raycast + projected HUD rects for authored `gameplay.glb` discard / play / journal / cash-in
+    /// meshes (no extra draw calls).
+    pub(super) fn seed_gameplay_action_pick_proxies(
+        &mut self,
+        camera: &CameraFrame,
+        picks: &crate::render::draw_cmd::GameplayActionPickProxies,
+    ) {
+        use crate::render::draw_cmd::Object3dKind;
+        use crate::scenes::gameplay::discard_animation::bowl_model_matrix;
+        use crate::scenes::journal_transition::YAKU_JOURNAL_BOOK_PICK_ID;
+
+        let w = camera.w;
+        let h = camera.h;
+        let project_aabb_rect = |model: Mat4, half: [f32; 3], center_y: f32| -> [f32; 4] {
+            camera.project_aabb_rect(model, half, center_y)
+        };
+
+        if let Some(bowl) = &picks.bowl {
+            let hover_model = bowl_model_matrix(w, h, bowl);
+            self.proj.bowl_rect = Some(project_aabb_rect(
+                hover_model,
+                RIVER_LOCAL_HALF,
+                RIVER_LOCAL_CENTER_Y,
+            ));
+            self.proj.bowl_model = Some(hover_model);
+            self.last_bowl_model = Some(hover_model);
+        }
+        if let Some(mirror) = &picks.mirror
+            && matches!(mirror.kind, Object3dKind::Mirror)
+        {
+            let center = pixel_to_world(
+                w,
+                h,
+                mirror.pos[0],
+                mirror.pos[1],
+                mirror.pos[2] + mirror.extents[1] * 0.5,
+            );
+            let hover_model = translate_rot_scale(
+                center,
+                mirror.rotation_matrix(),
+                glam::Vec3::from(mirror.extents),
+            );
+            self.proj.mirror_rect = Some(project_aabb_rect(
+                hover_model,
+                MIRROR_LOCAL_HALF,
+                MIRROR_LOCAL_CENTER_Y,
+            ));
+            self.last_mirror_model = Some(hover_model);
+        }
+        if let Some(book) = &picks.journal {
+            let center = pixel_to_world(
+                w,
+                h,
+                book.pos[0],
+                book.pos[1],
+                book.pos[2] + book.extents[1] * 0.5,
+            );
+            let model = translate_rot_scale(
+                center,
+                rot_fixed_axes_deg_matrix(book.rotation_matrix()),
+                glam::Vec3::from(book.extents),
+            );
+            self.last_primitive_pick_models
+                .insert(YAKU_JOURNAL_BOOK_PICK_ID, model);
+            self.proj.aux_dish_rects.push((
+                Some(YAKU_JOURNAL_BOOK_PICK_ID),
+                camera.project_unit_cube_rect(model),
+            ));
+        }
+        if let Some(tablet) = &picks.cash_in_tablet {
+            let center = pixel_to_world(
+                w,
+                h,
+                tablet.pos[0],
+                tablet.pos[1],
+                tablet.pos[2] + tablet.extents[1] * 0.5,
+            );
+            let model = translate_rot_scale(
+                center,
+                rot_fixed_axes_deg_matrix(tablet.rotation_matrix()),
+                glam::Vec3::from(tablet.extents),
+            );
+            self.last_wood_tablet_models.push(model);
+            self.proj
+                .wood_tablet_rects
+                .push(camera.project_unit_cube_rect(model));
+        }
+    }
+
     #[inline]
     pub(super) fn push_object3d_draw(
         &self,
@@ -62,8 +151,6 @@ impl WgpuRenderer {
         let view_proj_arr = camera.view_proj_arr;
         let w = camera.w;
         let h = camera.h;
-        let project_to_screen =
-            |world: glam::Vec3| -> (f32, f32) { camera.project_to_screen(world) };
         let project_unit_cube_rect =
             |model: Mat4| -> [f32; 4] { camera.project_unit_cube_rect(model) };
         let project_aabb_rect = |model: Mat4, half: [f32; 3], center_y: f32| -> [f32; 4] {
@@ -94,13 +181,11 @@ impl WgpuRenderer {
             let mut obj3d_pack_slot: usize = 0;
             let mut obj3d_talisman_slot: usize = 0;
             let mut obj3d_ribbon_slot: usize = 0;
-            let mut obj3d_plinth_slot: usize = 0;
             let mut obj3d_orb_slot: usize = 0;
             let mut obj3d_bowl_slot: usize = 0;
             let mut obj3d_mirror_slot: usize = 0;
             let mut obj3d_tally_fan_idx: usize = 0;
             let mut obj3d_tally_stick_cursor: usize = 0;
-            let mut obj3d_candle_slot: usize = 0;
             let mut obj3d_cascade_token_slot: usize = 0;
             let mut obj3d_glyph_slot: usize = 0;
 
@@ -150,8 +235,7 @@ impl WgpuRenderer {
                     // never pop a barely-on-screen object.
                     let cull_eligible = !matches!(
                         obj.kind,
-                        Object3dKind::Candle { .. }
-                            | Object3dKind::ZodiacRibbon { .. }
+                        Object3dKind::ZodiacRibbon { .. }
                             | Object3dKind::Pack { .. }
                             | Object3dKind::Talisman { .. }
                             | Object3dKind::MemorialTalisman { .. }
@@ -694,8 +778,10 @@ impl WgpuRenderer {
                                     material.kind,
                                 );
                             }
-                            let want_tex =
-                                self.ordeal_icon_textures.contains_key(kind).then_some(*kind);
+                            let want_tex = self
+                                .ordeal_icon_textures
+                                .contains_key(kind)
+                                .then_some(*kind);
                             if self.ordeal_icon_slot_texture[slot_i] != want_tex {
                                 let view = match want_tex {
                                     Some(bk) => &self.ordeal_icon_textures[&bk].view,
@@ -1012,116 +1098,6 @@ impl WgpuRenderer {
                                 &mut shadow,
                             );
                         }
-                        Object3dKind::Plinth { glow, role } => {
-                            if obj3d_plinth_slot >= MAX_PLINTH_SLOTS {
-                                continue;
-                            }
-                            let slot_i = obj3d_plinth_slot;
-                            obj3d_plinth_slot += 1;
-                            // Mesh is built Y-up centered; lift the world position
-                            // by half-height so `obj.pos` describes the plinth's
-                            // base sitting on the table felt.
-                            let plinth_center = pixel_to_world(
-                                w,
-                                h,
-                                obj.pos[0],
-                                obj.pos[1],
-                                obj.pos[2] + obj.extents[1] * 0.5,
-                            );
-                            let plinth_rot =
-                                mesh_y_thickness_along_local_y_to_z_up() * obj.rotation_matrix();
-                            let plinth_model = translate_rot_scale(
-                                plinth_center,
-                                plinth_rot,
-                                glam::Vec3::from(obj.extents),
-                            );
-                            let g = glow.clamp(0.0, 1.0);
-                            let base_color = if g > 0.0 {
-                                let target = [1.10, 0.95, 0.55, obj.color[3]];
-                                [
-                                    obj.color[0] + (target[0] - obj.color[0]) * g,
-                                    obj.color[1] + (target[1] - obj.color[1]) * g,
-                                    obj.color[2] + (target[2] - obj.color[2]) * g,
-                                    obj.color[3],
-                                ]
-                            } else {
-                                obj.color
-                            };
-                            let material = MaterialParams {
-                                kind: MaterialKind::Metal,
-                                base_color,
-                                specular_strength: 0.85,
-                                specular_power: 64.0,
-                            };
-                            self.plinth_instances[slot_i].write_uniform_with_decal(
-                                &self.queue,
-                                view_proj_arr,
-                                plinth_model,
-                                material,
-                                false,
-                            );
-                            self.register_placement_shadow_slot(DrawKind::Plinth, slot_i);
-                            if self.placement_shadow_writes(frame) {
-                                self.write_lit_mesh_shadow(
-                                    &mut shadow,
-                                    &self.plinth_instances[slot_i],
-                                    plinth_model,
-                                    material.kind,
-                                );
-                            }
-                            // Project AABB → screen rect for hover/focus.
-                            let plinth_world_center = plinth_model.w_axis.truncate();
-                            let [hx, hy, hz] = [
-                                obj.extents[0] * 0.5,
-                                obj.extents[1] * 0.5,
-                                obj.extents[2] * 0.5,
-                            ];
-                            let (mut mn_x, mut mn_y, mut mx_x, mut mx_y) = (
-                                f32::INFINITY,
-                                f32::INFINITY,
-                                f32::NEG_INFINITY,
-                                f32::NEG_INFINITY,
-                            );
-                            for cx in [-hx, hx] {
-                                for cy in [-hy, hy] {
-                                    for cz in [-hz, hz] {
-                                        let world =
-                                            plinth_world_center + glam::Vec3::new(cx, cy, cz);
-                                        let (px, py) = project_to_screen(world);
-                                        mn_x = mn_x.min(px);
-                                        mn_y = mn_y.min(py);
-                                        mx_x = mx_x.max(px);
-                                        mx_y = mx_y.max(py);
-                                    }
-                                }
-                            }
-                            let rect = [mn_x, mn_y, mx_x - mn_x, mx_y - mn_y];
-                            // Local +Y is plinth height; +0.36 is the top platform
-                            // where tiles/icons rest (vs. the decorative crown).
-                            let platform_world =
-                                plinth_model.transform_point3(glam::Vec3::new(0.0, 0.36, 0.0));
-                            let (platform_px, platform_py) = project_to_screen(platform_world);
-                            use crate::render::draw_cmd::PlinthRole;
-                            match role {
-                                PlinthRole::RoundWind => {
-                                    self.proj.round_wind_plinth_rect = Some(rect);
-                                }
-                                PlinthRole::Boss => {
-                                    self.proj.boss_plinth_rect = Some(rect);
-                                    self.proj.boss_plinth_platform_px =
-                                        Some([platform_px, platform_py]);
-                                }
-                                PlinthRole::Dora => {
-                                    self.proj.plinth_rect = Some(rect);
-                                }
-                            }
-                            self.push_object3d_draw(
-                                object3d_draw_list,
-                                object3d_shadow_draw_list,
-                                DrawKind::Plinth,
-                                slot_i,
-                            );
-                        }
                         Object3dKind::Bug {
                             slot,
                             flap_rad,
@@ -1259,10 +1235,7 @@ impl WgpuRenderer {
                                 slot_i,
                             );
                         }
-                        Object3dKind::Mirror {
-                            rotation_x_deg,
-                            rotation_z_deg,
-                        } => {
+                        Object3dKind::Mirror => {
                             if obj3d_mirror_slot >= MAX_MIRROR_SLOTS {
                                 continue;
                             }
@@ -1275,7 +1248,7 @@ impl WgpuRenderer {
                             *e += (target - *e) * k;
                             let anim = *e;
                             let lift = anim * obj.extents[1] * 0.15;
-                            let tilt_deg = *rotation_x_deg + anim * 22.0;
+                            let tilt = anim * 22.0_f32.to_radians();
                             let center = pixel_to_world(
                                 w,
                                 h,
@@ -1285,10 +1258,7 @@ impl WgpuRenderer {
                             );
                             let hover_model = translate_rot_scale(
                                 center,
-                                rot_fixed_axes_deg_matrix(
-                                    Mat4::from_rotation_z((*rotation_z_deg).to_radians())
-                                        * Mat4::from_rotation_x(tilt_deg.to_radians()),
-                                ),
+                                Mat4::from_rotation_x(tilt) * obj.rotation_matrix(),
                                 glam::Vec3::from(obj.extents),
                             );
                             self.mirror_instances[slot_i].write_uniform(
@@ -1442,68 +1412,6 @@ impl WgpuRenderer {
                                 object3d_draw_list,
                                 object3d_shadow_draw_list,
                                 DrawKind::CascadeToken,
-                                slot_i,
-                            );
-                        }
-                        Object3dKind::Candle {
-                            scale,
-                            height_scale,
-                        } => {
-                            let slot_i = obj3d_candle_slot;
-                            obj3d_candle_slot += 1;
-                            if self.candle_instances.get(slot_i).is_none() {
-                                continue;
-                            }
-                            let base = pixel_to_world(w, h, obj.pos[0], obj.pos[1], obj.pos[2]);
-                            let s = *scale;
-                            let candle_model = translate_rot_scale(
-                                base,
-                                mesh_y_thickness_along_local_y_to_z_up(),
-                                glam::Vec3::new(s, s * *height_scale, s),
-                            );
-                            self.candle_instances[slot_i][0].write_uniform(
-                                &self.queue,
-                                view_proj_arr,
-                                candle_model,
-                                self.candle_wax_mesh.default_material,
-                            );
-                            self.register_placement_shadow_slot(DrawKind::CandleWax, slot_i);
-                            if self.placement_shadow_writes(frame) {
-                                self.write_lit_mesh_shadow(
-                                    &mut shadow,
-                                    &self.candle_instances[slot_i][0],
-                                    candle_model,
-                                    self.candle_wax_mesh.default_material.kind,
-                                );
-                            }
-                            self.candle_instances[slot_i][1].write_uniform(
-                                &self.queue,
-                                view_proj_arr,
-                                candle_model,
-                                self.candle_wick_mesh.default_material,
-                            );
-                            self.register_placement_shadow_slot(DrawKind::CandleWax, slot_i);
-                            if self.placement_shadow_writes(frame) {
-                                self.register_placement_shadow_slot(DrawKind::CandleWick, slot_i);
-                                if self.placement_shadow_writes(frame) {
-                                    self.write_lit_mesh_shadow(
-                                        &mut shadow,
-                                        &self.candle_instances[slot_i][1],
-                                        candle_model,
-                                        self.candle_wick_mesh.default_material.kind,
-                                    );
-                                }
-                            }
-                            self.push_object3d_draw(
-                                object3d_draw_list,
-                                object3d_shadow_draw_list,
-                                DrawKind::CandleWax,
-                                slot_i,
-                            );
-                            self.push_object3d_draw(
-                                object3d_draw_list,
-                                object3d_shadow_draw_list,
-                                DrawKind::CandleWick,
                                 slot_i,
                             );
                         }
