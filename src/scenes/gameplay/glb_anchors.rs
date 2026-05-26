@@ -6,6 +6,7 @@ use crate::render::gameplay_glb::{
     PLAY_MIRROR, PLAYER_CONSUMABLE_MARKERS, PLAYER_DISCARD_TALLY, PLAYER_GOLD, PLAYER_PLAY_TALLY,
     PLAYER_RELIC_MARKERS, STRUCTURE_TILES_LEFT, STRUCTURE_TILES_RIGHT, TILE_PLINTH_MARKERS,
     YAKU_TABLETS_LEFT, YAKU_TABLETS_RIGHT,
+    gameplay_discard_river_model_screen_rect, gameplay_play_mirror_model_screen_rect,
 };
 use crate::render::room_glb::RoomGlbCpu;
 
@@ -37,6 +38,40 @@ pub fn gameplay_hud_strip_heights(
 #[inline]
 pub fn screen_rect_center(rect: (f32, f32, f32, f32)) -> (f32, f32) {
     (rect.0 + rect.2 * 0.5, rect.1 + rect.3 * 0.5)
+}
+
+/// Discard / play / cash-in hit rects projected with the **same** camera used for this frame's
+/// render (`camera_override` after FOV pop, etc.). [`resolve_gameplay_glb_anchors`] runs earlier
+/// with a pre-pop camera; call this once the final [`CameraParams`] are known.
+pub fn reproject_action_button_rects(
+    win_w: f32,
+    win_h: f32,
+    cam: &CameraParams,
+    env_h: f32,
+    layout_scale: f32,
+    anchors: &GameplayGlbAnchors,
+) -> ((f32, f32, f32, f32), (f32, f32, f32, f32), (f32, f32, f32, f32)) {
+    let discard = gameplay_discard_river_model_screen_rect(win_w, win_h, cam, &anchors.discard_river_pick);
+    let play = gameplay_play_mirror_model_screen_rect(win_w, win_h, cam, &anchors.play_mirror_pick);
+    let cash_in_w = (96.0 * layout_scale).max(72.0);
+    let cash_in_h = (36.0 * layout_scale).max(24.0);
+    let cash_in = gameplay_glb::with_gameplay_glb_cpu(|opt| {
+        let cpu = opt?;
+        gameplay_glb::gameplay_marker_screen_rect_resolved(
+            win_w,
+            win_h,
+            cam,
+            env_h,
+            cpu,
+            BTN_CASH_IN,
+            cash_in_w,
+            cash_in_h,
+        )
+        .ok()
+    })
+    .map(Into::into)
+    .unwrap_or(anchors.cash_in_btn_rect);
+    (discard.into(), play.into(), cash_in)
 }
 
 /// Best-effort anchors for tooltips / popups outside `draw_frame` (no `DrawCtx`).
@@ -116,6 +151,20 @@ fn require_marker_pair_screen_rect(
     Ok((left_x, ly - slot_h * 0.5, strip_w, slot_h))
 }
 
+/// Lerp parameter along `hand_tiles_left` → `hand_tiles_right` for slot `index`.
+fn hand_marker_lerp_t(hand_len: usize, ref_count: usize, index: usize) -> f32 {
+    if hand_len == 1 {
+        return 0.5;
+    }
+    let ref_n = ref_count.max(2);
+    if hand_len <= ref_count {
+        let center = (ref_count - hand_len) as f32 * 0.5;
+        (center + index as f32) / (ref_n - 1) as f32
+    } else {
+        index as f32 / (hand_len - 1) as f32
+    }
+}
+
 fn hand_slots_from_markers(
     layout: &crate::ui::layout::LayoutResult,
     hand_len: usize,
@@ -125,13 +174,14 @@ fn hand_slots_from_markers(
         return Vec::new();
     }
     let (sx, sy, sw, sh) = strip;
-    if hand_len <= layout.hand_slots.len() {
-        let center_offset = if hand_len < layout.hand_slots.len() {
-            ((layout.hand_slots.len() - hand_len) as f32 * sw / hand_len as f32) * 0.5
+    let ref_count = layout.hand_slots.len().max(1);
+    if hand_len <= ref_count {
+        let slot_w = sw / ref_count as f32;
+        let center_offset = if hand_len < ref_count {
+            ((ref_count - hand_len) as f32 * slot_w) * 0.5
         } else {
             0.0
         };
-        let slot_w = sw / hand_len as f32;
         return (0..hand_len)
             .map(|i| (sx + center_offset + i as f32 * slot_w, sy, slot_w, sh))
             .collect();
@@ -144,6 +194,7 @@ fn hand_slots_from_markers(
 
 fn require_hand_world_slots_from_markers(
     hand_len: usize,
+    ref_count: usize,
     hand_marker_poses: &[GameplayMarkerPose; 2],
 ) -> Vec<HandWorldSlot> {
     if hand_len == 0 {
@@ -152,17 +203,18 @@ fn require_hand_world_slots_from_markers(
     let a_l = hand_marker_poses[0].anchor;
     let a_r = hand_marker_poses[1].anchor;
     let strip_w = gameplay_glb::marker_pair_span_px(a_l, a_r);
-    let slot_w_px = strip_w / hand_len as f32;
+    let ref_n = ref_count.max(1);
+    let slot_w_px = if hand_len <= ref_count {
+        strip_w / ref_n as f32
+    } else {
+        strip_w / hand_len as f32
+    };
     let rot_l = hand_marker_poses[0].rotation_rad;
     let rot_r = hand_marker_poses[1].rotation_rad;
 
     (0..hand_len)
         .map(|i| {
-            let t = if hand_len == 1 {
-                0.5
-            } else {
-                i as f32 / (hand_len - 1) as f32
-            };
+            let t = hand_marker_lerp_t(hand_len, ref_count, i);
             let anchor = gameplay_glb::lerp_marker_anchor(a_l, a_r, t);
             let rotation = gameplay_glb::lerp_marker_rotation_rad(rot_l, rot_r, t);
             (anchor, slot_w_px, rotation)
@@ -244,7 +296,9 @@ fn resolve_gameplay_glb_anchors_from_cpu(
         gameplay_glb::require_gameplay_marker_pose(w, h, env_h, cpu, HAND_TILES_LEFT)?,
         gameplay_glb::require_gameplay_marker_pose(w, h, env_h, cpu, HAND_TILES_RIGHT)?,
     ];
-    let hand_world_slots = require_hand_world_slots_from_markers(hand_len, &hand_marker_poses);
+    let hand_ref_count = layout.hand_slots.len().max(1);
+    let hand_world_slots =
+        require_hand_world_slots_from_markers(hand_len, hand_ref_count, &hand_marker_poses);
     let gold_pose = gameplay_glb::require_gameplay_marker_pose(w, h, env_h, cpu, PLAYER_GOLD)?;
 
     let layout_scale = (w.min(h)) / 600.0;
@@ -411,6 +465,15 @@ mod tests {
     use crate::render::world_space::layout_anchor_to_world;
 
     #[test]
+    fn hand_marker_lerp_t_centers_short_hands() {
+        assert!((super::hand_marker_lerp_t(10, 14, 0) - 2.0 / 13.0).abs() < 1e-4);
+        assert!((super::hand_marker_lerp_t(10, 14, 9) - 11.0 / 13.0).abs() < 1e-4);
+        assert!((super::hand_marker_lerp_t(14, 14, 0) - 0.0).abs() < 1e-4);
+        assert!((super::hand_marker_lerp_t(14, 14, 13) - 1.0).abs() < 1e-4);
+        assert!((super::hand_marker_lerp_t(1, 14, 0) - 0.5).abs() < 1e-4);
+    }
+
+    #[test]
     fn gameplay_hand_slots_project_on_screen() {
         let bytes = include_bytes!("../../../assets/3d/gameplay.glb");
         let cpu = load_gameplay_glb_from_bytes(bytes).expect("gameplay.glb");
@@ -464,6 +527,26 @@ mod tests {
             "hand strip spans markers"
         );
         assert!(anchors.hand_world_slots[0].1 > 0.0, "slot width");
+
+        let short = super::resolve_gameplay_glb_anchors_from_cpu(
+            &cpu, &layout, 10, w, h, &cam, env_h, 48.0, 32.0,
+        )
+        .expect("anchors");
+        let (short_first, short_w, _) = short.hand_world_slots.first().unwrap();
+        let (short_last, _, _) = short.hand_world_slots.last().unwrap();
+        let full_w = anchors.hand_world_slots[0].1;
+        assert!(
+            (short_w - full_w).abs() < 0.01,
+            "short hand keeps reference slot width"
+        );
+        assert!(
+            (short_first[0] - left[0]).abs() > 0.05,
+            "short hand does not start at left marker"
+        );
+        assert!(
+            (short_last[0] - right[0]).abs() > 0.05,
+            "short hand does not end at right marker"
+        );
         assert!(
             anchors.hand_marker_poses[0]
                 .scale

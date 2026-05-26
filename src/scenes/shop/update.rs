@@ -98,14 +98,7 @@ impl ShopScene {
                 (ctx.layout.window_w, ctx.layout.window_h),
             );
         } else {
-            let focus = ShopFocus::from_hit(hit);
-            self.try_push_shop_inspect_overlay(
-                focus,
-                ctx.layout.window_w,
-                ctx.layout.window_h,
-                &shop,
-                ctx.overlay_request,
-            );
+            self.focus = Some(ShopFocus::from_hit(hit));
         }
         None
     }
@@ -176,6 +169,31 @@ impl ShopScene {
         let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
         self.age_secs += dt;
+        if ctx.mouse_left_down {
+            // Subtle pre-inspect peek — much slower and tighter than item-inspect orbit.
+            const ORBIT: f32 = 0.55;
+            const SENS: f32 = 0.010;
+            const YAW_LIM: f32 = 0.12;
+            const PITCH_LIM: f32 = 0.06;
+            let (mx, my) = ctx.shop_storeroom_orbit_drag_px;
+            let sx = (mx * SENS).clamp(-1.0, 1.0);
+            let sy = (-my * SENS).clamp(-1.0, 1.0);
+            self.storeroom_orbit_yaw =
+                (self.storeroom_orbit_yaw + sx * ORBIT * dt).clamp(-YAW_LIM, YAW_LIM);
+            self.storeroom_orbit_pitch = (self.storeroom_orbit_pitch + sy * ORBIT * dt)
+                .clamp(-PITCH_LIM, PITCH_LIM);
+        } else if self.storeroom_orbit_yaw.abs() > 1e-5 || self.storeroom_orbit_pitch.abs() > 1e-5
+        {
+            let k = 1.0 - (-7.0_f32 * dt).exp();
+            self.storeroom_orbit_yaw += (0.0 - self.storeroom_orbit_yaw) * k;
+            self.storeroom_orbit_pitch += (0.0 - self.storeroom_orbit_pitch) * k;
+            if self.storeroom_orbit_yaw.abs() < 1e-5 {
+                self.storeroom_orbit_yaw = 0.0;
+            }
+            if self.storeroom_orbit_pitch.abs() < 1e-5 {
+                self.storeroom_orbit_pitch = 0.0;
+            }
+        }
         if std::mem::take(&mut ctx.run.pending_shop_focus_snap_after_celebration) {
             let w = ctx.layout.window_w;
             let h = ctx.layout.window_h;
@@ -460,16 +478,6 @@ impl ShopScene {
                                 Scene::YakuJournal(YakuJournalScene::new()),
                             )));
                             return None;
-                        } else {
-                            // Select / Space / Enter with no purchase (e.g. owned relic): same
-                            // [`ShowcaseScene`] inspect path as Y / E / North.
-                            self.try_push_shop_inspect_overlay(
-                                focus,
-                                w,
-                                h,
-                                &shop,
-                                ctx.overlay_request,
-                            );
                         }
                     }
                 }

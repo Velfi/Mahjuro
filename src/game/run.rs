@@ -637,6 +637,10 @@ pub struct RunState {
     /// (defaults to empty for old saves).
     #[serde(default)]
     pub yaku_times_played: rustc_hash::FxHashMap<crate::core::yaku::YakuKind, u32>,
+    /// Yaku cashed in on prior runs when this run started. Combined with
+    /// [`Self::yaku_times_played`] to gate zodiac ribbon spawns.
+    #[serde(default)]
+    pub profile_yaku_scored: rustc_hash::FxHashSet<crate::core::yaku::YakuKind>,
     /// Cumulative tiles committed from hand into the structure bank (melds).
     #[serde(default)]
     pub tiles_played: u32,
@@ -1161,6 +1165,7 @@ impl RunState {
             tea_ceremony_extinct: false,
             chrysalis_extinct: false,
             yaku_times_played: rustc_hash::FxHashMap::default(),
+            profile_yaku_scored: rustc_hash::FxHashSet::default(),
             tiles_played: 0,
             tiles_discarded: 0,
             times_restocked: 0,
@@ -1223,6 +1228,18 @@ impl RunState {
         self.available_yaku = progress.available_yaku();
         self.available_rules = progress.available_rules();
         self.available_relics = progress.available_relics();
+        self.profile_yaku_scored = progress.yaku_times_scored.keys().copied().collect();
+    }
+
+    /// Whether the player has cashed in `yaku` on a prior run or this one.
+    pub fn yaku_scored_ever(&self, yaku: crate::core::yaku::YakuKind) -> bool {
+        self.profile_yaku_scored.contains(&yaku)
+            || self.yaku_times_played.get(&yaku).copied().unwrap_or(0) > 0
+    }
+
+    /// Zodiac ribbons eligible for shop stock and random grants this run.
+    pub fn zodiac_spawn_pool(&self) -> Vec<crate::core::zodiac::ZodiacKind> {
+        crate::core::zodiac::ZodiacKind::spawn_pool(|yk| self.yaku_scored_ever(yk))
     }
 
     /// Grant the memorial remnant carried over from the last defeat (once per run).

@@ -47,8 +47,10 @@ impl WgpuRenderer {
         let project_aabb_rect = |model: Mat4, half: [f32; 3], center_y: f32| -> [f32; 4] {
             camera.project_aabb_rect(model, half, center_y)
         };
-        let gameplay_tile_z_flip =
-            matches!(self.active_scene_key, Some("gameplay") | Some("tutorial"));
+        // Gameplay hand/structure tiles use GLB-authored rotation (often identity) and need
+        // a π Z correction here. Tutorial showcase tiles already bake π into placement
+        // (`TUTORIAL_TILE_ROTATION`); applying the same flip would double-invert them.
+        let gameplay_tile_z_flip = self.active_scene_key == Some("gameplay");
         // ── Showcase tile GPU resources + uniforms ────────────────────────
         // Grow or update the pool so each tile in every ShowcaseTileBatch has
         // a ready-to-draw ShowcaseTileGpu slot with the correct decal and

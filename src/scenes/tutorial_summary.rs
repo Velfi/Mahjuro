@@ -109,16 +109,15 @@ impl SceneBehavior for TutorialSummaryScene {
             "Tutorial Recap"
         };
         let subtitle = if self.won {
-            "You beat The Iconoclast and finished onboarding."
+            "You surpassed The Iconoclast and won, an auspicious beginning."
         } else {
-            "You reached the finale. Honors scored low under The Iconoclast — souzu, pinzu, manzu, and shop picks carried most runs."
+            "You reached the finale but faltered against The Iconoclast. Perhaps you'll fare better next time."
         };
         let bullets = [
-            "Pairs become melds when you bank them into your structure.",
-            "Full Hand and Chiitoitsu (seven pairs) are the two tutorial yaku to learn first.",
-            "Play banks melds; Cash In scores them (chips × mult).",
-            "Coming up: the shop introduces relics, ribbons, talismans, packs, and more.",
-            "Any time: open Pause → Guide for pictures of every meld and yaku.",
+            "Bank melds to your structure to form yaku. Cash in your structure to score (chips × mult).",
+            "Full Hand and Chiitoitsu are good yaku to memorize first.",
+            "Any time during a run: open Pause → Guide for a review of mechanics and as well as every meld and yaku.",
+            "The more you play, the more the house will reveal to you. How far will you go?",
         ];
 
         let mut frame = UiFrame::new();

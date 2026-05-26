@@ -12,6 +12,7 @@ use std::num::NonZeroU64;
 use wgpu::util::DeviceExt;
 
 use crate::render::theme::color;
+use crate::render::punctual_shadow_atlas::MAX_PUNCTUAL_SHADOW_LIGHTS;
 use crate::render::tile_glb::Vertex3dTex;
 
 /// Axis-aligned box extents for the `push_box` family of mesh builders.
@@ -524,6 +525,20 @@ impl LitMeshInstance {
         true
     }
 
+    /// Update only the light view-projection for an already-uploaded shadow caster.
+    pub fn rewrite_shadow_light_view_proj(&self, queue: &wgpu::Queue, light_view_proj: [f32; 16]) {
+        let mut last = self.last_shadow_uniform.borrow_mut();
+        if last.light_view_proj == light_view_proj {
+            return;
+        }
+        last.light_view_proj = light_view_proj;
+        queue.write_buffer(
+            &self.shadow_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&*last),
+        );
+    }
+
     pub fn write_uniform(
         &self,
         queue: &wgpu::Queue,
@@ -698,19 +713,46 @@ pub fn create_shadow_warp_bind_group(
     })
 }
 
+/// One tile in the punctual shadow depth atlas (`gameplay` candles).
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct PunctualShadowSlotGpu {
+    pub light_view_proj: [f32; 16],
+    /// xy = atlas UV origin, zw = atlas UV scale.
+    pub atlas_rect: [f32; 4],
+}
+
 /// Frame-shared shadow sampling uniform consumed by lit_mesh.wgsl /
 /// tile_3d.wgsl in the main pass via group 2. (`tile_outline` binds the
 /// same group for layout compatibility but does not sample the map.)
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ShadowGlobals {
-    /// Live 1024² shadow map (moving catalog props); updated every frame.
+    /// Live shadow depth atlas (key light or punctual tiles); updated every frame.
     pub light_view_proj: [f32; 16],
     /// x = enabled (0/1), y = depth bias, z = texel size,
     /// w = room shadow mode (`room_glb.wgsl` only): 0 = live, 1 = baked×live, 2 = baked contact only (archive).
     pub params: [f32; 4],
     /// Offline `*.msh` room shadow; only read when `params.w > 0.5` (`room_glb.wgsl`).
     pub room_baked_light_view_proj: [f32; 16],
+    /// x = punctual shadow count, y = punctual tile texel size, z = punctual atlas enabled, w = unused.
+    pub punctual_params: [f32; 4],
+    pub punctual_lights: [PunctualShadowSlotGpu; MAX_PUNCTUAL_SHADOW_LIGHTS],
+}
+
+impl ShadowGlobals {
+    pub fn empty_punctual() -> Self {
+        Self {
+            light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
+            params: [0.0, 0.0015, 0.0, 0.0],
+            room_baked_light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
+            punctual_params: [0.0; 4],
+            punctual_lights: [PunctualShadowSlotGpu {
+                light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
+                atlas_rect: [0.0; 4],
+            }; MAX_PUNCTUAL_SHADOW_LIGHTS],
+        }
+    }
 }
 
 /// Bind-group layout for the shadow-sampling group (group 2) shared by

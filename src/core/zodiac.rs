@@ -173,6 +173,21 @@ impl ZodiacKind {
     pub fn shop_price() -> u32 {
         zodiac_catalog().ribbon_shop_price
     }
+
+    /// Whether this ribbon may appear in shop stock or random zodiac grants.
+    /// Requires at least one bound yaku to have been cashed in before.
+    pub fn eligible_for_spawn(self, yaku_scored: impl Fn(YakuKind) -> bool) -> bool {
+        self.yaku_levels().iter().any(|&yk| yaku_scored(yk))
+    }
+
+    /// Ribbons eligible for shop stock and random zodiac grants.
+    pub fn spawn_pool(yaku_scored: impl Fn(YakuKind) -> bool) -> Vec<ZodiacKind> {
+        Self::all()
+            .iter()
+            .copied()
+            .filter(|z| z.eligible_for_spawn(&yaku_scored))
+            .collect()
+    }
 }
 
 /// Small inventory of Zodiac cards held mid-run. Capacity is set by the run
@@ -254,6 +269,29 @@ impl YakuLevels {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spawn_pool_requires_scored_bound_yaku() {
+        let run = crate::game::run::RunState::new(crate::game::game_mode::GameMode::standard());
+        assert!(ZodiacKind::spawn_pool(|_| false).is_empty());
+        assert!(!ZodiacKind::Dragon.eligible_for_spawn(|_| false));
+
+        let mut scored_run = run;
+        scored_run
+            .yaku_times_played
+            .insert(YakuKind::FullHand, 1);
+        let pool = scored_run.zodiac_spawn_pool();
+        assert!(pool.contains(&ZodiacKind::Dragon));
+        assert!(!pool.contains(&ZodiacKind::Rat));
+    }
+
+    #[test]
+    fn rabbit_unlocks_when_either_bound_yaku_scored() {
+        let mut run =
+            crate::game::run::RunState::new(crate::game::game_mode::GameMode::standard());
+        run.yaku_times_played.insert(YakuKind::Ryanpeikou, 1);
+        assert!(run.zodiac_spawn_pool().contains(&ZodiacKind::Rabbit));
+    }
 
     #[test]
     fn each_scoring_yaku_has_exactly_one_ribbon() {

@@ -45,20 +45,28 @@ impl App {
 
     /// Tonemap + room GLB look for the active scene. When the scene-look
     /// overlay is editing the active scene, returns its live draft.
+    pub(super) fn resolved_scene_look_for(
+        &self,
+        scene_key: Option<&str>,
+    ) -> crate::game::scene_look_tuning::SceneLookTuning {
+        let (overlay_key, overlay_look) = self
+            .debug
+            .scene_look_debug_overlay
+            .as_ref()
+            .map(|o| (Some(o.scene_key_persist()), Some(o.look)))
+            .unwrap_or((None, None));
+        crate::game::scene_look_tuning::resolve_scene_look_with_overlay(
+            &self.scene_look,
+            overlay_key,
+            overlay_look,
+            scene_key,
+        )
+    }
+
+    /// Tonemap + room GLB look for the active scene. When the scene-look
+    /// overlay is editing that scene (or `_default` with no override), returns its live draft.
     pub(super) fn resolved_scene_look(&self) -> crate::game::scene_look_tuning::SceneLookTuning {
-        let active = self.active_scene_key_for_renderer();
-        if let Some(ref overlay) = self.debug.scene_look_debug_overlay {
-            if overlay.editing_active_scene(active) {
-                return overlay.look;
-            }
-            // `_default` overlay uses `scene_key() == None`, so it never matches
-            // `active_scene_key == Some("…")` — still preview when the running scene
-            // falls back to the default bucket (no `SceneLookTuning:<scene>` file).
-            if overlay.scene_key().is_none() && !self.scene_look.has_override(active) {
-                return overlay.look;
-            }
-        }
-        self.scene_look.resolve(active)
+        self.resolved_scene_look_for(self.active_scene_key_for_renderer())
     }
 
     /// Process a `RoundComplete` or `GameOver` event that was held while the
@@ -110,6 +118,8 @@ impl App {
                             return;
                         }
                         Some(crate::game::onboarding::OnboardingPhase::Finale) => {
+                            self.audio
+                                .play_music_jingle(audio::MusicId::OrdealWin);
                             self.progress.tutorial_completed = true;
                             let _ = persistence::save_profile(self.active_profile, &self.progress);
                             persistence::delete_saved_run(self.active_profile);
@@ -425,6 +435,31 @@ impl App {
         let swap_xy = self.input.as_ref().map(|i| i.swap_xy).unwrap_or(false);
         let glyphs = crate::ui::glyph_source::GlyphResolver::new(prompt_style, swap_ab, swap_xy);
         let shop_env_for_frame = self.room_gltf_brownout.apply(scene_look.room);
+        let (overlay_key, overlay_look) = self
+            .debug
+            .scene_look_debug_overlay
+            .as_ref()
+            .map(|o| (Some(o.scene_key_persist()), Some(o.look)))
+            .unwrap_or((None, None));
+        let mut env_per_scene = rustc_hash::FxHashMap::default();
+        let mut env_frame_tunes = Vec::new();
+        for &key in crate::game::scene_look_tuning::GLTF_ENV_SCENE_KEYS {
+            let look =
+                crate::game::scene_look_tuning::resolve_scene_look_with_overlay(
+                    &self.scene_look,
+                    overlay_key,
+                    overlay_look,
+                    Some(key),
+                );
+            let room = self.room_gltf_brownout.apply(look.room);
+            env_per_scene.insert(key, (room, look.room_gltf_height_scale));
+            env_frame_tunes.push((
+                key,
+                crate::game::scene_look_tuning::RoomEnvFrameTune::from_scene_look(
+                    &look, room,
+                ),
+            ));
+        }
         let ctx = DrawCtx::new(
             &layout,
             &self.anim,
@@ -442,6 +477,7 @@ impl App {
             modal_active,
             scene_look.room_gltf_height_scale,
             shop_env_for_frame,
+            &env_per_scene,
             self.effect_layers,
             self.input
                 .as_ref()
@@ -760,14 +796,7 @@ impl App {
 
         renderer.set_tonemap_tuning(&scene_look.tonemap);
 
-        renderer.set_room_gltf_height_scale(scene_look.room_gltf_height_scale);
-        let sl = shop_env_for_frame;
-        renderer.set_shop_env_render_tune(
-            sl.linear_exposure,
-            sl.ambient_scale,
-            sl.lit_mesh_gltf_punctual_scale,
-            sl.gltf_emissive_scale,
-        );
+        renderer.set_frame_scene_env_tunes(active_scene_key, &env_frame_tunes);
 
         let active_tileset_name = self.gfx.tileset_name.clone();
         let render_settings = self.effect_layers.wgpu_render_settings(

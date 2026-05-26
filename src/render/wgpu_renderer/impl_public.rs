@@ -45,7 +45,6 @@ impl WgpuRenderer {
         self.tonemap_vhs_scanline = tuning.vhs_scanline;
         self.tonemap_vhs_grain = tuning.vhs_grain;
         self.tonemap_vhs_vignette = tuning.vhs_vignette;
-        self.tonemap_film_grain = tuning.film_grain;
         // Per-scene "VHS on" comes from any non-zero amplitude — a scene
         // that tunes every amount to 0 reads as "VHS effectively off"
         // here even when the Options master toggle is on. This lets
@@ -137,28 +136,34 @@ impl WgpuRenderer {
         &self.proj
     }
 
-    /// Scale factor for embedded glTF room geometry vs window height. Must match shop/hallway/archive marker math.
-    pub fn set_room_gltf_height_scale(&mut self, v: f32) {
-        self.room_gltf_height_scale = v;
-    }
-
-    /// Shop room tonemap + `lit_mesh` glTF punctual scale. Set each frame from app debug tuning.
-    pub fn set_shop_env_render_tune(
+    /// Upload per-scene room GLB tuning for this frame. `active_key` selects
+    /// [`WgpuRenderer::active_frame_env`] (tiles / bloom / active-scene lit_mesh).
+    pub fn set_frame_scene_env_tunes(
         &mut self,
-        linear_exposure: f32,
-        ambient_scale: f32,
-        lit_mesh_gltf_punctual_scale: f32,
-        gltf_emissive_scale: f32,
+        active_key: Option<&str>,
+        tunes: &[(&'static str, crate::game::scene_look_tuning::RoomEnvFrameTune)],
     ) {
-        self.shop_env_linear_exposure = linear_exposure;
-        self.shop_env_ambient_scale = ambient_scale;
-        self.shop_lit_mesh_gltf_punctual_scale = lit_mesh_gltf_punctual_scale;
-        self.shop_gltf_emissive_scale = gltf_emissive_scale;
+        use crate::game::scene_look_tuning::RoomEnvFrameTune;
+        self.frame_env_tunes.clear();
+        for (key, tune) in tunes {
+            self.frame_env_tunes.insert(*key, *tune);
+        }
+        self.active_frame_env = active_key
+            .and_then(|k| self.frame_env_tunes.get(k).copied())
+            .unwrap_or_else(RoomEnvFrameTune::default);
     }
 
     #[inline]
-    pub(crate) fn room_gltf_height_scale(&self) -> f32 {
-        self.room_gltf_height_scale
+    pub(crate) fn env_tune_for(&self, scene_key: &str) -> crate::game::scene_look_tuning::RoomEnvFrameTune {
+        *self
+            .frame_env_tunes
+            .get(scene_key)
+            .unwrap_or(&self.active_frame_env)
+    }
+
+    #[inline]
+    pub(crate) fn active_frame_env(&self) -> crate::game::scene_look_tuning::RoomEnvFrameTune {
+        self.active_frame_env
     }
 
     pub fn clear_smoke(&mut self) {

@@ -6,13 +6,17 @@ use crate::render::archive_glb::{
     self, ARCHIVE_TAB_BUTTON_NODES, BTN_MAIN_MENU, BTN_PAGE_LEFT, BTN_PAGE_RIGHT,
     BTN_SWITCH_SAVE,
 };
-use crate::render::draw_cmd::{CameraParams, UiFrame};
+use crate::render::draw_cmd::{CameraParams, Object3d, UiFrame};
 use crate::render::gameplay_glb::{
     self, BTN_CASH_IN, DISCARD_RIVER, PLAY_MIRROR, gameplay_discard_river_model_screen_rect,
     gameplay_play_mirror_model_screen_rect,
 };
-use crate::render::room_glb::{self, MarkerScreenRectParams, screen_rect_for_marker_mesh_bounds};
-use crate::render::theme::{color, metrics, typography};
+use crate::render::room_glb::{
+    self, MarkerScreenRectParams, marker_mesh_bounds_reference_object3d,
+    screen_rect_for_marker_mesh_bounds,
+};
+use crate::render::theme::color;
+use crate::render::theme::{metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::input::UiAction;
 
@@ -132,7 +136,14 @@ struct ResolvedProbe {
     label: &'static str,
     mesh: Option<[f32; 4]>,
     model: Option<[f32; 4]>,
+    /// Lit mesh matching the mesh AABB (green reference cube).
+    mesh_ref: Option<Object3d>,
+    /// Spawned pick proxy (gameplay discard river / play mirror).
+    model_ref: Option<Object3d>,
 }
+
+const MESH_REF_TINT: [f32; 4] = [0.25, 0.85, 0.45, 0.35];
+const MODEL_REF_TINT: [f32; 4] = [0.95, 0.95, 0.98, 1.0];
 
 pub struct ButtonAabbLabScene {
     has_suspended: bool,
@@ -242,7 +253,8 @@ impl SceneBehavior for ButtonAabbLabScene {
         frame.text(TextLabel {
             rect: [w * 0.04, legend_y, w * 0.92, body_font * 4.2],
             text: format!(
-                "Green = mesh AABB (hit target). Magenta = spawned model AABB (gameplay discard / play).\n\
+                "Green = mesh AABB (hit target) + green cube = that bounds in 3D. \
+                 Magenta = spawned model AABB; bowl/mirror are the live pick proxies.\n\
                  Room: {} (↑/↓). Click overlays to log ids. Back / Esc to exit.",
                 self.room.label(),
             ),
@@ -259,14 +271,24 @@ impl SceneBehavior for ButtonAabbLabScene {
         };
 
         let resolved = resolve_probes(self.room, w, h, &cam, env_h, layout_scale, &probes);
+        let mut reference_objects: Vec<Object3d> = Vec::new();
         for (i, probe) in resolved.iter().enumerate() {
             draw_probe_overlays(&mut frame, probe, label_font, label_line_h);
+            if let Some(obj) = &probe.mesh_ref {
+                reference_objects.push(obj.clone());
+            }
+            if let Some(obj) = &probe.model_ref {
+                reference_objects.push(obj.clone());
+            }
             if let Some(rect) = probe.mesh {
                 frame.buttons.push(ButtonDef::scene(
                     (rect[0], rect[1], rect[2], rect[3]),
                     CLICK_PROBE_BASE + i as u32,
                 ));
             }
+        }
+        if !reference_objects.is_empty() {
+            frame.object3d_batch(reference_objects);
         }
 
         let btn_font = typography::size(typography::H36, h);
@@ -347,10 +369,15 @@ fn resolve_archive_probe(
         min_rw,
         min_rh,
     });
+    let mesh_ref = mesh.and_then(|_| {
+        marker_mesh_bounds_reference_object3d(w, h, env_h, cpu, probe.node, MESH_REF_TINT)
+    });
     ResolvedProbe {
         label: probe.label,
         mesh,
         model: None,
+        mesh_ref,
+        model_ref: None,
     }
 }
 
@@ -374,19 +401,24 @@ fn resolve_gameplay_probe(
         min_rw,
         min_rh,
     });
-    let model = if probe.show_model_aabb {
-        model_aabb_for_marker(w, h, cam, env_h, cpu, probe.node, min_rw, min_rh)
+    let (model, model_ref) = if probe.show_model_aabb {
+        model_aabb_and_ref_for_marker(w, h, cam, env_h, cpu, probe.node, min_rw, min_rh)
     } else {
-        None
+        (None, None)
     };
+    let mesh_ref = mesh.and_then(|_| {
+        marker_mesh_bounds_reference_object3d(w, h, env_h, cpu, probe.node, MESH_REF_TINT)
+    });
     ResolvedProbe {
         label: probe.label,
         mesh,
         model,
+        mesh_ref,
+        model_ref,
     }
 }
 
-fn model_aabb_for_marker(
+fn model_aabb_and_ref_for_marker(
     w: f32,
     h: f32,
     cam: &CameraParams,
@@ -395,21 +427,28 @@ fn model_aabb_for_marker(
     node: &str,
     min_rw: f32,
     min_rh: f32,
-) -> Option<[f32; 4]> {
-    let fallback = gameplay_glb::gameplay_marker_screen_rect_resolved(
+) -> (Option<[f32; 4]>, Option<Object3d>) {
+    let fallback = match gameplay_glb::gameplay_marker_screen_rect_resolved(
         w, h, cam, env_h, cpu, node, min_rw, min_rh,
-    )
-    .ok()?;
-    let obj = match node {
-        DISCARD_RIVER => gameplay_glb::gameplay_pick_discard_river(w, h, env_h, cpu, fallback).ok()?,
-        PLAY_MIRROR => gameplay_glb::gameplay_pick_play_mirror(w, h, env_h, cpu, fallback).ok()?,
-        _ => return None,
+    ) {
+        Ok(r) => r,
+        Err(_) => return (None, None),
     };
-    Some(match node {
+    let obj = match node {
+        DISCARD_RIVER => gameplay_glb::gameplay_pick_discard_river(w, h, env_h, cpu, fallback).ok(),
+        PLAY_MIRROR => gameplay_glb::gameplay_pick_play_mirror(w, h, env_h, cpu, fallback).ok(),
+        _ => None,
+    };
+    let Some(mut obj) = obj else {
+        return (None, None);
+    };
+    obj.color = MODEL_REF_TINT;
+    let rect = match node {
         DISCARD_RIVER => gameplay_discard_river_model_screen_rect(w, h, cam, &obj),
         PLAY_MIRROR => gameplay_play_mirror_model_screen_rect(w, h, cam, &obj),
-        _ => return None,
-    })
+        _ => return (None, None),
+    };
+    (Some(rect), Some(obj))
 }
 
 fn draw_probe_overlays(frame: &mut UiFrame, probe: &ResolvedProbe, label_font: f32, label_line_h: f32) {

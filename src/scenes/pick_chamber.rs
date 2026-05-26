@@ -383,7 +383,7 @@ impl SceneBehavior for PickChamberScene {
                     w,
                     h,
                     ctx.room_gltf_height_scale,
-                    &ctx.shop_env_lighting,
+                    &ctx.room_env_for("pick_chamber").0,
                 )
             } else {
                 Vec::new()
@@ -393,7 +393,7 @@ impl SceneBehavior for PickChamberScene {
                     w,
                     h,
                     ctx.room_gltf_height_scale,
-                    &ctx.shop_env_lighting,
+                    &ctx.room_env_for("pick_chamber").0,
                 )
                 .into_iter()
                 .map(ScenePunctualLight::InverseSquare)

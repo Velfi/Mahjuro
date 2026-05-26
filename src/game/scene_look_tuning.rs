@@ -28,15 +28,14 @@ impl Default for SceneLookTuning {
 }
 
 /// Slider rows for [`SceneLookDebugOverlay`](crate::debug_overlays::SceneLookDebugOverlay).
-/// Order: tonemap (6) then room / height (12). Must match [`scene_look_row_value`] /
+/// Order: tonemap (5) then room / height (12). Must match [`scene_look_row_value`] /
 /// [`scene_look_row_set`].
 pub const SCENE_LOOK_SLIDER_META: &[(&str, f32, f32, f32)] = &[
     ("Exposure (post)", 0.25, 2.50, 0.01),
     ("VHS Chromatic", 0.0, 0.005, 0.0001),
     ("VHS Scanline", 0.0, 0.20, 0.005),
-    ("VHS Grain", 0.0, 0.10, 0.002),
+    ("VHS Grain", 0.0, 0.15, 0.002),
     ("VHS Vignette", 0.0, 0.40, 0.005),
-    ("Film Grain", 0.0, 0.12, 0.002),
     ("Room height scale", 0.001, 40.0, 0.005),
     ("glTF light intensity", 0.0, 40.0, 0.0025),
     ("Room linear exposure", 0.001, 40.0, 0.0025),
@@ -52,25 +51,25 @@ pub const SCENE_LOOK_SLIDER_META: &[(&str, f32, f32, f32)] = &[
 ];
 
 /// First row of each punctual-tint HSL group — used for color swatches in the overlay.
-pub const SCENE_LOOK_CANDLE_TINT_ROW: usize = 12;
-pub const SCENE_LOOK_LANTERN_TINT_ROW: usize = 15;
+pub const SCENE_LOOK_CANDLE_TINT_ROW: usize = 11;
+pub const SCENE_LOOK_LANTERN_TINT_ROW: usize = 14;
 
-pub const SCENE_LOOK_SLIDER_COUNT: usize = 18;
+pub const SCENE_LOOK_SLIDER_COUNT: usize = 17;
 
 pub fn scene_look_row_value(look: &SceneLookTuning, row: usize) -> f32 {
     match row {
-        0..=5 => look.tonemap.field_at(row),
-        6 => look.room_gltf_height_scale,
-        7 => look.room.gltf_light_intensity_scale,
-        8 => look.room.linear_exposure,
-        9 => look.room.ambient_scale,
-        10 => look.room.lit_mesh_gltf_punctual_scale,
-        11 => look.room.gltf_emissive_scale,
-        12..=14 => {
-            punctual_tint_mul_to_hsv(look.room.candle_light_color_mul).component_at(row - 12)
+        0..=4 => look.tonemap.field_at(row),
+        5 => look.room_gltf_height_scale,
+        6 => look.room.gltf_light_intensity_scale,
+        7 => look.room.linear_exposure,
+        8 => look.room.ambient_scale,
+        9 => look.room.lit_mesh_gltf_punctual_scale,
+        10 => look.room.gltf_emissive_scale,
+        11..=13 => {
+            punctual_tint_mul_to_hsv(look.room.candle_light_color_mul).component_at(row - 11)
         }
-        15..=17 => {
-            punctual_tint_mul_to_hsv(look.room.lantern_light_color_mul).component_at(row - 15)
+        14..=16 => {
+            punctual_tint_mul_to_hsv(look.room.lantern_light_color_mul).component_at(row - 14)
         }
         _ => 0.0,
     }
@@ -80,21 +79,21 @@ pub fn scene_look_row_set(look: &mut SceneLookTuning, row: usize, v: f32) {
     let (_, lo, hi, _) = SCENE_LOOK_SLIDER_META[row.min(SCENE_LOOK_SLIDER_COUNT - 1)];
     let v = v.clamp(lo, hi);
     match row {
-        0..=5 => look.tonemap.set_field_at(row, v),
-        6 => look.room_gltf_height_scale = v,
-        7 => look.room.gltf_light_intensity_scale = v,
-        8 => look.room.linear_exposure = v,
-        9 => look.room.ambient_scale = v,
-        10 => look.room.lit_mesh_gltf_punctual_scale = v,
-        11 => look.room.gltf_emissive_scale = v,
-        12..=14 => {
+        0..=4 => look.tonemap.set_field_at(row, v),
+        5 => look.room_gltf_height_scale = v,
+        6 => look.room.gltf_light_intensity_scale = v,
+        7 => look.room.linear_exposure = v,
+        8 => look.room.ambient_scale = v,
+        9 => look.room.lit_mesh_gltf_punctual_scale = v,
+        10 => look.room.gltf_emissive_scale = v,
+        11..=13 => {
             let (h, s, i) = punctual_tint_mul_to_hsv(look.room.candle_light_color_mul);
-            let (h, s, i) = (h, s, i).with_component(row - 12, v);
+            let (h, s, i) = (h, s, i).with_component(row - 11, v);
             look.room.candle_light_color_mul = hsv_to_punctual_tint_mul(h, s, i);
         }
-        15..=17 => {
+        14..=16 => {
             let (h, s, i) = punctual_tint_mul_to_hsv(look.room.lantern_light_color_mul);
-            let (h, s, i) = (h, s, i).with_component(row - 15, v);
+            let (h, s, i) = (h, s, i).with_component(row - 14, v);
             look.room.lantern_light_color_mul = hsv_to_punctual_tint_mul(h, s, i);
         }
         _ => {}
@@ -153,6 +152,82 @@ impl SceneLookTuningSet {
     }
 }
 
+/// Scene keys for embedded GLB room environments. Each gets its own
+/// [`RoomEnvFrameTune`] every frame (not the active scene's globals).
+pub const GLTF_ENV_SCENE_KEYS: &[&str] = &[
+    "shop",
+    "pick_chamber",
+    "staircase",
+    "collection",
+    "main_menu_exterior",
+    "gameplay",
+    "tutorial",
+];
+
+/// GPU + collision scale for one scene's room GLB pass (brownout already applied on room fields).
+#[derive(Clone, Copy, Debug)]
+pub struct RoomEnvFrameTune {
+    pub linear_exposure: f32,
+    pub ambient_scale: f32,
+    pub lit_mesh_gltf_punctual_scale: f32,
+    pub gltf_emissive_scale: f32,
+    pub height_scale: f32,
+}
+
+impl RoomEnvFrameTune {
+    pub fn from_scene_look(look: &SceneLookTuning, room: RoomEnvLightingTune) -> Self {
+        Self {
+            linear_exposure: room.linear_exposure,
+            ambient_scale: room.ambient_scale,
+            lit_mesh_gltf_punctual_scale: room.lit_mesh_gltf_punctual_scale,
+            gltf_emissive_scale: room.gltf_emissive_scale,
+            height_scale: look.room_gltf_height_scale,
+        }
+    }
+}
+
+impl Default for RoomEnvFrameTune {
+    fn default() -> Self {
+        let room = RoomEnvLightingTune::SOURCE_DEFAULTS;
+        Self {
+            linear_exposure: room.linear_exposure,
+            ambient_scale: room.ambient_scale,
+            lit_mesh_gltf_punctual_scale: room.lit_mesh_gltf_punctual_scale,
+            gltf_emissive_scale: room.gltf_emissive_scale,
+            height_scale: SHOP_ENV_HEIGHT_SCALE,
+        }
+    }
+}
+
+/// Resolve look for `scene_key`, applying the scene-look debug overlay when it
+/// targets that bucket (or `_default` when the scene has no override).
+pub fn resolve_scene_look_with_overlay(
+    set: &SceneLookTuningSet,
+    overlay_persist_key: Option<&str>,
+    overlay_look: Option<SceneLookTuning>,
+    scene_key: Option<&str>,
+) -> SceneLookTuning {
+    if let (Some(overlay_key), Some(look)) = (overlay_persist_key, overlay_look) {
+        let editing_this = match scene_key {
+            None => overlay_key == FALLBACK_SCENE_KEY,
+            Some(k) => overlay_key == k,
+        };
+        if editing_this {
+            return look;
+        }
+        if overlay_key == FALLBACK_SCENE_KEY {
+            if let Some(k) = scene_key {
+                if !set.has_override(Some(k)) {
+                    return look;
+                }
+            } else {
+                return look;
+            }
+        }
+    }
+    set.resolve(scene_key)
+}
+
 pub fn storage_key(scene_key: &str) -> String {
     format!("SceneLookTuning:{scene_key}")
 }
@@ -189,6 +264,9 @@ pub const OVERLAY_SCENE_KEYS: &[&str] = &[
     KNOWN_SCENE_KEYS[5],
     KNOWN_SCENE_KEYS[6],
     KNOWN_SCENE_KEYS[7],
+    KNOWN_SCENE_KEYS[8],
+    KNOWN_SCENE_KEYS[9],
+    KNOWN_SCENE_KEYS[10],
 ];
 
 pub fn overlay_scene_keys() -> &'static [&'static str] {
@@ -203,7 +281,7 @@ pub fn scene_look_row_is_hue(row: usize) -> bool {
 }
 
 pub fn scene_look_row_is_saturation(row: usize) -> bool {
-    matches!(row, 13 | 16)
+    matches!(row, 12 | 15)
 }
 
 /// Linear RGB preview (channels clamped to 0–1) for a punctual tint swatch.
@@ -221,8 +299,8 @@ pub fn punctual_tint_preview_linear(rgb_mul: [f32; 3]) -> [f32; 3] {
 
 pub fn scene_look_tint_swatch_rgb(look: &SceneLookTuning, row: usize) -> Option<[f32; 3]> {
     let rgb = match row {
-        12..=14 => look.room.candle_light_color_mul,
-        15..=17 => look.room.lantern_light_color_mul,
+        11..=13 => look.room.candle_light_color_mul,
+        14..=16 => look.room.lantern_light_color_mul,
         _ => return None,
     };
     Some(punctual_tint_preview_linear(rgb))

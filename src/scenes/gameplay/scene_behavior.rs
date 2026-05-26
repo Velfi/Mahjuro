@@ -1,4 +1,5 @@
 use super::*;
+use super::focus::GameplayButton;
 use super::{animation_state, cascade_controller, input_handler};
 use crate::core::consumable::Consumable;
 use crate::core::relic::{RelicId, all_relic_defs, relic_description_live};
@@ -9,8 +10,6 @@ use crate::ui::inspect_plaque::{
     FocusTooltipPanelParams, dora_focus_tooltip_strings, gameplay_consumable_description_full,
     hand_tile_focus_tooltip, push_focus_tooltip_panel_2d, round_wind_focus_tooltip_strings,
 };
-use crate::ui::ordeal_icons::ordeal_icon_source;
-
 fn plinth_focus_rect_from_anchor(
     anchor: &[f32; 3],
     layout: &crate::ui::layout::LayoutResult,
@@ -30,6 +29,23 @@ fn plinth_focus_rect_from_anchor(
         strip_w,
         strip_h,
     ]
+}
+
+fn plinth_focus_rect(
+    projected: Option<[f32; 4]>,
+    anchor: &[f32; 3],
+    layout: &crate::ui::layout::LayoutResult,
+    tile_count: usize,
+) -> [f32; 4] {
+    if let Some(r) = projected
+        && r[2] > 1.0
+        && r[3] > 1.0
+        && r[0].is_finite()
+        && r[1].is_finite()
+    {
+        return r;
+    }
+    plinth_focus_rect_from_anchor(anchor, layout, tile_count)
 }
 
 impl SceneBehavior for GameplayScene {
@@ -434,9 +450,9 @@ impl SceneBehavior for GameplayScene {
         //
         // Vertical order: structure strip, yaku tablets, hand rack, bowl/mirror
         // row, then journal.
-        let discard_btn_rect = glb_anchors.discard_btn_rect;
-        let play_btn_rect = glb_anchors.play_btn_rect;
-        let trigger_btn_rect = glb_anchors.cash_in_btn_rect;
+        let mut discard_btn_rect = glb_anchors.discard_btn_rect;
+        let mut play_btn_rect = glb_anchors.play_btn_rect;
+        let mut trigger_btn_rect = glb_anchors.cash_in_btn_rect;
 
         // ── Frame accumulators ───────────────────────────────────────────
         //
@@ -498,34 +514,10 @@ impl SceneBehavior for GameplayScene {
         structure_showcase.extend(yaku_structure_showcase);
 
         let paused = self.pause_menu.paused;
-        let discard_undo_rect: Option<[f32; 4]> = if !paused
-            && !ctx.modal_active
-            && self.cascade_queue.is_empty()
-            && self.journal_transition.is_none()
-            && crate::persistence::load_settings().discard_undo_enabled
-            && self.discard_undo.is_some()
-            && self.pending_refill.is_none()
-            && let Some(bowl_rect) = ctx.proj.bowl_rect
-        {
-            let zscale = (layout.window_w.min(layout.window_h)) / 600.0;
-            let gap = (6.0 * zscale).max(4.0);
-            let btn_h = (28.0 * zscale).max(22.0);
-            let btn_w = (88.0 * zscale).max(72.0);
-            let bx = bowl_rect[0];
-            let by = bowl_rect[1] + bowl_rect[3] + gap;
-            Some([bx, by, btn_w, btn_h])
-        } else {
-            None
-        };
+        let mut discard_undo_rect: Option<[f32; 4]> = None;
         let cash_in_enabled = gameplay.trigger_enabled;
-        let btn_rects = [discard_btn_rect, play_btn_rect, trigger_btn_rect];
         let play_enabled = selection_valid && gameplay.plays_remaining > 0;
         let discard_enabled = selected_count > 0 && gameplay.discards_remaining > 0;
-        input_handler::push_action_button_focus_rects(
-            &btn_rects,
-            cash_in_enabled,
-            &mut focus_rect_graph,
-        );
         let action_row = input_handler::build_glb_action_pick_proxies(
             &glb_anchors,
             self.journal_open_amount,
@@ -549,32 +541,19 @@ impl SceneBehavior for GameplayScene {
         } else {
             gameplay.dora_indicator_tiles.len().min(2)
         };
-        let dora_rect: [f32; 4] = plinth_focus_rect_from_anchor(
+        let dora_rect: [f32; 4] = plinth_focus_rect(
+            ctx.proj.dora_tile_rect,
             &glb_anchors.tile_plinth_poses[0].anchor,
             layout,
             dora_tile_count,
         );
         let round_wind_tile_count = 1 + usize::from(gameplay.bonus_round_wind_rank.is_some());
-        let round_wind_rect: [f32; 4] = plinth_focus_rect_from_anchor(
+        let round_wind_rect: [f32; 4] = plinth_focus_rect(
+            ctx.proj.round_wind_tile_rect,
             &glb_anchors.tile_plinth_poses[1].anchor,
             layout,
             round_wind_tile_count,
         );
-        let boss_plinth_rect: Option<[f32; 4]> = (!boss_title_text.is_empty()).then(|| {
-            plinth_focus_rect_from_anchor(&glb_anchors.tile_plinth_poses[2].anchor, layout, 1)
-        });
-        let ordeal_icon_rect: Option<[f32; 4]> = boss_plinth_rect.map(|rect| {
-            let icon_size = layout.mm(20.0).min(rect[2] * 0.70).min(rect[3] * 0.70);
-            let anchor_x = rect[0] + rect[2] * 0.5;
-            let anchor_y = rect[1] + rect[3] * 0.5;
-            [
-                anchor_x - icon_size * 0.5,
-                anchor_y - icon_size * 0.5,
-                icon_size,
-                icon_size,
-            ]
-        });
-
         let gold_pose = glb_anchors.gold_pose;
         // Cash-in / play labels are engraved on the wood tablets (per-instance decals).
         // Discard river + play mirror use centered text in their projected rects in the
@@ -727,6 +706,86 @@ impl SceneBehavior for GameplayScene {
         let fov_pop_offset = self.final_tiles_fov_pop_offset_deg(now);
         scene_camera.fovy_deg = (scene_camera.fovy_deg - fov_pop_offset).max(35.0);
         frame.camera_override = Some(scene_camera);
+        (discard_btn_rect, play_btn_rect, trigger_btn_rect) =
+            super::glb_anchors::reproject_action_button_rects(
+                layout.window_w,
+                layout.window_h,
+                &scene_camera,
+                env_h,
+                layout_scale,
+                &glb_anchors,
+            );
+        let btn_rects = [discard_btn_rect, play_btn_rect, trigger_btn_rect];
+        input_handler::push_action_button_focus_rects(
+            &btn_rects,
+            cash_in_enabled,
+            &mut focus_rect_graph,
+        );
+        if !vis.hide_journal
+            && self.journal_transition.is_none()
+        {
+            let journal_rect = crate::render::gameplay_glb::gameplay_journal_book_screen_rect(
+                layout.window_w,
+                layout.window_h,
+                &scene_camera,
+                &glb_anchors.journal_pick,
+            );
+            if journal_rect[2] > 1.0 && journal_rect[3] > 1.0 {
+                focus_rect_graph.push((FocusTarget::Journal, journal_rect));
+            }
+        }
+        let hand_slot_w = layout
+            .hand_slots
+            .first()
+            .map(|r| r.w)
+            .unwrap_or(layout.window_w * crate::ui::layout::HAND_SLOT_W_RATIO);
+        let tile_size_px = hand_slot_w * (22.0 / crate::ui::layout::TILE_WIDTH_MM);
+        let (boss_ordeal_obj, ordeal_icon_rect, boss_ordeal_glow, boss_ordeal_wiggle) =
+            if !vis.hide_boss_icon && let Some(kind) = gameplay.ordeal_kind {
+                let (boss_glow, boss_wiggle) =
+                    self.boss_rule_feedback(now, boss_blocks_selection);
+                let obj = crate::render::gameplay_glb::gameplay_boss_ordeal_object3d(
+                    &glb_anchors.tile_plinth_poses[2],
+                    layout.window_w,
+                    layout.window_h,
+                    env_h,
+                    &scene_camera,
+                    tile_size_px,
+                    kind,
+                    boss_glow,
+                );
+                let rect = crate::render::gameplay_glb::gameplay_boss_ordeal_screen_rect(
+                    &glb_anchors.tile_plinth_poses[2],
+                    layout.window_w,
+                    layout.window_h,
+                    env_h,
+                    &scene_camera,
+                    tile_size_px,
+                );
+                (Some(obj), Some(rect), boss_glow, boss_wiggle)
+            } else {
+                (None, None, 0.0, 0.0)
+            };
+        discard_undo_rect = if !paused
+            && !ctx.modal_active
+            && self.cascade_queue.is_empty()
+            && self.journal_transition.is_none()
+            && crate::persistence::load_settings().discard_undo_enabled
+            && self.discard_undo.is_some()
+            && self.pending_refill.is_none()
+            && discard_btn_rect.2 > 1.0
+            && discard_btn_rect.3 > 1.0
+        {
+            let zscale = (layout.window_w.min(layout.window_h)) / 600.0;
+            let gap = (6.0 * zscale).max(4.0);
+            let btn_h = (28.0 * zscale).max(22.0);
+            let btn_w = (88.0 * zscale).max(72.0);
+            let bx = discard_btn_rect.0;
+            let by = discard_btn_rect.1 + discard_btn_rect.3 + gap;
+            Some([bx, by, btn_w, btn_h])
+        } else {
+            None
+        };
         frame.gameplay_cash_in_button_visible = gameplay.trigger_enabled;
         frame.gameplay_action_picks = Some(crate::render::draw_cmd::GameplayActionPickProxies {
             bowl: discard_bowl_placement.clone(),
@@ -748,7 +807,7 @@ impl SceneBehavior for GameplayScene {
                     layout.window_w,
                     layout.window_h,
                     env_h,
-                    &ctx.shop_env_lighting,
+                    &ctx.room_env_for("gameplay").0,
                     self.candle_time,
                     lamp_flicker,
                 )
@@ -760,7 +819,7 @@ impl SceneBehavior for GameplayScene {
                     layout.window_w,
                     layout.window_h,
                     env_h,
-                    &ctx.shop_env_lighting,
+                    &ctx.room_env_for("gameplay").0,
                 );
             let glb_flames = crate::render::gameplay_glb::gameplay_gltf_candle_flame_emitters(
                 layout.window_h,
@@ -803,8 +862,7 @@ impl SceneBehavior for GameplayScene {
             let hand_world_slots = glb_anchors.hand_world_slots.as_slice();
             let hand_scale_mul =
                 glb_anchors.hand_marker_poses[0].uniform_author_scale(layout.window_h, env_h);
-            // Dora face set for highlighting matching hand tiles. Empty
-            // before dora unlocks (level 4) so the marker only appears
+            // Hand tile placements (dora gold overlay comes from renderer merge rects).
             let mut hand_placements: Vec<crate::render::draw_cmd::ShowcaseTilePlacement> =
                 Vec::with_capacity(hand.len());
             let (invalid_flash, invalid_elapsed) = self.invalid_meld_flash_phase(now);
@@ -1103,36 +1161,21 @@ impl SceneBehavior for GameplayScene {
                 return super::glb_anchors::gameplay_glb_error_frame(layout, &e.to_string());
             }
         }
-        if !vis.hide_boss_icon
-            && let (Some(ordeal_kind), Some(icon_rect)) = (gameplay.ordeal_kind, ordeal_icon_rect)
-        {
-            let (boss_glow, boss_wiggle) = self.boss_rule_feedback(now, boss_blocks_selection);
-            if boss_glow > 0.0 {
+        if let (Some(obj), Some(icon_rect)) = (boss_ordeal_obj, ordeal_icon_rect) {
+            if boss_ordeal_glow > 0.0 {
                 let pad = icon_rect[2].max(icon_rect[3]) * 0.42;
                 hud_quads.push(GpuInstance {
                     rect: [
-                        icon_rect[0] - pad + boss_wiggle,
+                        icon_rect[0] - pad + boss_ordeal_wiggle,
                         icon_rect[1] - pad,
                         icon_rect[2] + pad * 2.0,
                         icon_rect[3] + pad * 2.0,
                     ],
-                    color: [1.0, 0.48, 0.10, 0.18 + 0.42 * boss_glow],
+                    color: [1.0, 0.48, 0.10, 0.18 + 0.42 * boss_ordeal_glow],
                     user: 0,
                 });
             }
-            frame.image_quads(std::iter::once(crate::render::draw_cmd::ImageQuad {
-                inst: GpuInstance {
-                    rect: [
-                        icon_rect[0] + boss_wiggle,
-                        icon_rect[1],
-                        icon_rect[2],
-                        icon_rect[3],
-                    ],
-                    color: color::alpha(color::CHAMPAGNE, 0.98),
-                    user: 0,
-                },
-                source: ordeal_icon_source(ordeal_kind),
-            }));
+            frame.object3d_batch(vec![obj]);
         }
 
         // Flying coin animations (gold changes).
@@ -1186,12 +1229,20 @@ impl SceneBehavior for GameplayScene {
                     ..Default::default()
                 });
             };
-            if let Some(rect) = ctx.proj.bowl_rect {
-                push_centered(&mut hud_text, rect, "Discard");
-            }
-            if let Some(rect) = ctx.proj.mirror_rect {
-                push_centered(&mut hud_text, rect, "Play");
-            }
+            let discard_rect = [
+                discard_btn_rect.0,
+                discard_btn_rect.1,
+                discard_btn_rect.2,
+                discard_btn_rect.3,
+            ];
+            let play_rect = [
+                play_btn_rect.0,
+                play_btn_rect.1,
+                play_btn_rect.2,
+                play_btn_rect.3,
+            ];
+            push_centered(&mut hud_text, discard_rect, "Discard");
+            push_centered(&mut hud_text, play_rect, "Play");
             {
                 use crate::core::relic::RelicId;
                 let ids = GameEngine::active_relics(run);
@@ -1628,6 +1679,78 @@ impl SceneBehavior for GameplayScene {
                             },
                         );
                     }
+                    FocusTarget::Button(GameplayButton::Discard) => {
+                        push_focus_tooltip_panel_2d(
+                            &mut inspect_tooltip_quads,
+                            &mut inspect_tooltip_texts,
+                            FocusTooltipPanelParams {
+                                window_w: layout.window_w,
+                                window_h: layout.window_h,
+                                anchor_rect: Some(rect),
+                                title: "Discard",
+                                desc: "Confirm to discard the selected tiles from your hand.",
+                                cta: "",
+                                accent_color: color::CHAMPAGNE,
+                                hover_is_owned: false,
+                                skip_title_block: false,
+                                avoid_rect: None,
+                            },
+                        );
+                    }
+                    FocusTarget::Button(GameplayButton::Play) => {
+                        push_focus_tooltip_panel_2d(
+                            &mut inspect_tooltip_quads,
+                            &mut inspect_tooltip_texts,
+                            FocusTooltipPanelParams {
+                                window_w: layout.window_w,
+                                window_h: layout.window_h,
+                                anchor_rect: Some(rect),
+                                title: "Play",
+                                desc: "Confirm to bank the selected meld into your structure.",
+                                cta: "",
+                                accent_color: color::CHAMPAGNE,
+                                hover_is_owned: false,
+                                skip_title_block: false,
+                                avoid_rect: None,
+                            },
+                        );
+                    }
+                    FocusTarget::Button(GameplayButton::Trigger) => {
+                        push_focus_tooltip_panel_2d(
+                            &mut inspect_tooltip_quads,
+                            &mut inspect_tooltip_texts,
+                            FocusTooltipPanelParams {
+                                window_w: layout.window_w,
+                                window_h: layout.window_h,
+                                anchor_rect: Some(rect),
+                                title: "Cash in",
+                                desc: "Confirm to score the melds in your structure and end the round.",
+                                cta: "",
+                                accent_color: color::CHAMPAGNE,
+                                hover_is_owned: false,
+                                skip_title_block: false,
+                                avoid_rect: None,
+                            },
+                        );
+                    }
+                    FocusTarget::Journal => {
+                        push_focus_tooltip_panel_2d(
+                            &mut inspect_tooltip_quads,
+                            &mut inspect_tooltip_texts,
+                            FocusTooltipPanelParams {
+                                window_w: layout.window_w,
+                                window_h: layout.window_h,
+                                anchor_rect: Some(rect),
+                                title: "Yaku journal",
+                                desc: "Confirm to open the journal and browse yaku reference.",
+                                cta: "",
+                                accent_color: color::CHAMPAGNE,
+                                hover_is_owned: false,
+                                skip_title_block: false,
+                                avoid_rect: None,
+                            },
+                        );
+                    }
                     _ => {}
                 }
             }
@@ -1675,15 +1798,25 @@ impl SceneBehavior for GameplayScene {
         // `picked_gameplay_object`). Labels render centered in these rects in the
         // persistent HUD text pass above.
         if !self.pause_menu.paused {
-            if let Some(rect) = ctx.proj.bowl_rect {
+            if discard_btn_rect.2 > 1.0 && discard_btn_rect.3 > 1.0 {
                 buttons.push(ButtonDef::scene(
-                    (rect[0], rect[1], rect[2], rect[3]),
+                    (
+                        discard_btn_rect.0,
+                        discard_btn_rect.1,
+                        discard_btn_rect.2,
+                        discard_btn_rect.3,
+                    ),
                     GAMEPLAY_3D_HIT_ID,
                 ));
             }
-            if let Some(rect) = ctx.proj.mirror_rect {
+            if play_btn_rect.2 > 1.0 && play_btn_rect.3 > 1.0 {
                 buttons.push(ButtonDef::scene(
-                    (rect[0], rect[1], rect[2], rect[3]),
+                    (
+                        play_btn_rect.0,
+                        play_btn_rect.1,
+                        play_btn_rect.2,
+                        play_btn_rect.3,
+                    ),
                     GAMEPLAY_3D_HIT_ID,
                 ));
             }

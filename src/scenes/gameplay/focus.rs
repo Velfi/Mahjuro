@@ -55,6 +55,8 @@ pub(super) enum FocusTarget {
     RoundWind,
     /// Optional post-discard undo control (accessibility).
     DiscardUndo,
+    /// Yaku journal on the table (`player_yaku_journal` empty).
+    Journal,
 }
 
 pub(super) const ALL_BUTTONS: [GameplayButton; 3] = [
@@ -157,7 +159,7 @@ pub(super) fn focus_kind(f: Option<FocusTarget>) -> Option<FocusKind> {
         FocusTarget::Dora => Some(FocusKind::Dora),
         FocusTarget::Ordeal => Some(FocusKind::Ordeal),
         FocusTarget::RoundWind => Some(FocusKind::RoundWind),
-        FocusTarget::DiscardUndo => Some(FocusKind::Button),
+        FocusTarget::DiscardUndo | FocusTarget::Journal => Some(FocusKind::Button),
     }
 }
 

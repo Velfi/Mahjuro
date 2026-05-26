@@ -254,6 +254,20 @@ fn is_gameplay_env_button_node(name: &str) -> bool {
     name == BTN_CASH_IN
 }
 
+/// Static env meshes that should not cast into the punctual shadow atlas (or the
+/// shared key-light map). The table is a receiver; candles are light sources;
+/// flat dishes and engraved UI read as harsh rectangular pools.
+#[inline]
+pub fn gameplay_prim_casts_room_shadow(node_name: Option<&str>) -> bool {
+    match node_name {
+        None => true,
+        Some("table") | Some("candles") | Some("candle_wicks") => false,
+        Some("consumables_dish") | Some("gold_dish") => false,
+        Some(n) if n.starts_with("label_") || n.starts_with("btn_") => false,
+        Some(_) => true,
+    }
+}
+
 #[derive(Copy, Clone)]
 struct GameplayRoomWalkHooks;
 
@@ -761,6 +775,16 @@ pub fn gameplay_object3d_unit_screen_rect(
     project_object3d_aabb_rect(win_w, win_h, cam, obj, [0.5, 0.5, 0.5], 0.0, false)
 }
 
+/// Project the yaku journal book pick proxy (unit-cube local bounds, center lifted on Y).
+pub fn gameplay_journal_book_screen_rect(
+    win_w: f32,
+    win_h: f32,
+    cam: &CameraParams,
+    obj: &Object3d,
+) -> [f32; 4] {
+    project_object3d_aabb_rect(win_w, win_h, cam, obj, [0.5, 0.5, 0.5], 0.0, true)
+}
+
 /// Project a named marker's mesh AABB to screen pixels when the GLB node carries authoring
 /// geometry; otherwise fall back to the empty origin with pixel `min_rw` × `min_rh`.
 pub fn gameplay_marker_screen_rect_resolved(
@@ -836,6 +860,133 @@ pub fn require_gameplay_marker_screen_rect(
         min_rh,
     )
     .ok_or_else(|| anyhow::anyhow!("gameplay.glb missing required empty `{name}` (runtime)"))
+}
+
+/// Billboards a [`Object3dKind::BossIcon`] toward the gameplay camera (mesh cap faces local **+Y**),
+/// then spins 90° about local **+Y** so atlas art reads upright on the plinth.
+pub fn gameplay_boss_icon_rotation(
+    window_w: f32,
+    window_h: f32,
+    cam: &CameraParams,
+    anchor: [f32; 3],
+) -> [f32; 3] {
+    use crate::render::draw_cmd::camera_facing_euler_xyz_rad;
+    use crate::render::world_space::layout_anchor_to_world;
+
+    let center = layout_anchor_to_world(
+        window_w,
+        window_h,
+        Some(cam),
+        anchor[0],
+        anchor[1],
+        anchor[2],
+        false,
+    );
+    let eye = Vec3::from_array(cam.eye);
+    let mut forward = eye - center;
+    if forward.length_squared() < 1e-8 {
+        let e = camera_facing_euler_xyz_rad(cam.eye, cam.target);
+        return compose_rotation_euler(
+            rot_euler_xyz_rad(e[0], e[1], e[2]),
+            [0.0, 90.0, 0.0],
+        );
+    }
+    forward = forward.normalize();
+    if forward.y.abs() > 0.97 {
+        let e = camera_facing_euler_xyz_rad(cam.eye, cam.target);
+        return compose_rotation_euler(
+            rot_euler_xyz_rad(e[0], e[1], e[2]),
+            [0.0, 90.0, 0.0],
+        );
+    }
+    let q = Quat::from_rotation_arc(Vec3::Y, forward);
+    compose_rotation_euler(Mat4::from_quat(q.normalize()), [0.0, 90.0, 0.0])
+}
+
+/// Boss ordeal token at `tile_plinth.002` — same footprint as plinth showcase tiles.
+pub fn gameplay_boss_ordeal_object3d(
+    plinth: &GameplayMarkerPose,
+    window_w: f32,
+    window_h: f32,
+    env_height_scale: f32,
+    cam: &CameraParams,
+    icon_size_px: f32,
+    kind: crate::core::ordeal::OrdealKind,
+    glow: f32,
+) -> Object3d {
+    let scale = icon_size_px * plinth.uniform_author_scale(window_h, env_height_scale);
+    let rotation = gameplay_boss_icon_rotation(window_w, window_h, cam, plinth.anchor);
+    Object3d {
+        pos: plinth.anchor,
+        extents: [scale, scale * 0.04, scale],
+        rotation,
+        color: [1.0, 1.0, 1.0, 0.98],
+        kind: Object3dKind::BossIcon {
+            kind,
+            glow,
+            pick_id: None,
+        },
+        hover_target: 0.0,
+        anim_id: 0,
+    }
+}
+
+/// Screen-space hit / focus rect for the boss ordeal icon at `tile_plinth.002`.
+pub fn gameplay_boss_ordeal_screen_rect(
+    plinth: &GameplayMarkerPose,
+    window_w: f32,
+    window_h: f32,
+    env_height_scale: f32,
+    cam: &CameraParams,
+    icon_size_px: f32,
+) -> [f32; 4] {
+    use crate::render::world_space::layout_anchor_to_world;
+
+    let icon_px = icon_size_px * plinth.uniform_author_scale(window_h, env_height_scale);
+    let half = icon_px * 0.5;
+    let center = layout_anchor_to_world(
+        window_w,
+        window_h,
+        Some(cam),
+        plinth.anchor[0],
+        plinth.anchor[1],
+        plinth.anchor[2],
+        false,
+    );
+    let eye = Vec3::from_array(cam.eye);
+    let target = Vec3::from_array(cam.target);
+    let mut forward = eye - center;
+    if forward.length_squared() < 1e-8 {
+        forward = target - eye;
+    }
+    forward = forward.normalize();
+    let world_up = Vec3::Z;
+    let mut right = forward.cross(world_up);
+    if right.length_squared() < 1e-8 {
+        right = Vec3::X;
+    } else {
+        right = right.normalize();
+    }
+    let up = right.cross(forward).normalize();
+
+    let mut mn_x = f32::INFINITY;
+    let mut mn_y = f32::INFINITY;
+    let mut mx_x = f32::NEG_INFINITY;
+    let mut mx_y = f32::NEG_INFINITY;
+    for offset in [
+        (-half, -half),
+        (half, -half),
+        (-half, half),
+        (half, half),
+    ] {
+        let world = center + right * offset.0 + up * offset.1;
+        let (sx, sy) = cam.project_world_to_screen(window_w, window_h, world);
+        mn_x = mn_x.min(sx);
+        mn_y = mn_y.min(sy);
+        mx_x = mx_x.max(sx);
+        mx_y = mx_y.max(sy);
+    }
+    [mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]
 }
 
 fn gameplay_embedded_camera_doc(cpu: &RoomGlbCpu) -> Option<room_glb::RoomGlbEmbeddedCamera> {
@@ -1009,6 +1160,17 @@ mod tests {
         assert!(!is_gameplay_unexportable_mesh("table"));
         assert!(!is_gameplay_unexportable_mesh("btn_cash_in"));
         assert!(!is_gameplay_unexportable_mesh("CandleWax_6_29"));
+    }
+
+    #[test]
+    fn gameplay_room_shadow_caster_policy() {
+        assert!(!gameplay_prim_casts_room_shadow(Some("table")));
+        assert!(!gameplay_prim_casts_room_shadow(Some("candles")));
+        assert!(!gameplay_prim_casts_room_shadow(Some("candle_wicks")));
+        assert!(!gameplay_prim_casts_room_shadow(Some("gold_dish")));
+        assert!(!gameplay_prim_casts_room_shadow(Some("label_cash_in")));
+        assert!(gameplay_prim_casts_room_shadow(Some("plinth_dora")));
+        assert!(gameplay_prim_casts_room_shadow(Some("plinth_ordeal")));
     }
 
     #[test]

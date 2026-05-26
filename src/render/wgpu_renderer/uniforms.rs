@@ -40,9 +40,7 @@ pub(crate) struct TonemapParams {
     pub vhs_grain: f32,
     /// Vignette corner darkening (0..~0.4 sensible).
     pub vhs_vignette: f32,
-    /// 70s photochemical grain (0..~0.12 sensible). Independent of VHS.
-    pub film_grain: f32,
-    /// Monotonic frame counter for in-place grain re-roll (not spatial scroll).
+    /// Monotonic frame counter for in-place VHS grain re-roll (not spatial scroll).
     pub grain_frame: f32,
 }
 

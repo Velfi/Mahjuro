@@ -133,21 +133,6 @@ impl MaterialSpec {
         }
     }
 
-    /// Glazed porcelain — cool-white dielectric with a tight pinpoint
-    /// highlight, broad wet-glaze lobe, Fresnel rim, and warm wrap-SSS.
-    /// The shader also drives crazing (the spider-web of fine cracks
-    /// across aged glaze) off the warmth/tint of `obj.color`: pristine
-    /// white stays clean, sepia/cream tints get a light crackle, and
-    /// brown-stained tints get heavy antique crazing.
-    pub fn porcelain() -> Self {
-        Self {
-            kind: MaterialKind::Porcelain,
-            specular_strength: 0.7,
-            specular_power: 128.0,
-            decal: None,
-        }
-    }
-
     /// Attach a decal to this material, returning the modified spec.
     pub fn with_decal(mut self, decal: DecalSpec) -> Self {
         self.decal = Some(decal);

@@ -975,11 +975,24 @@ impl WgpuRenderer {
 
         let shadow_frame = self.setup_shadow_frame(&camera, shadows_enabled, frame);
         let light_view_proj_arr = shadow_frame.light_view_proj_arr;
+        let punctual_frame =
+            self.prepare_punctual_shadow_frame(frame, &camera, shadows_enabled);
+        let punctual_active = !punctual_frame.lights.is_empty();
+        if punctual_active {
+            const PUNCTUAL_SHADOW_DEPTH_BIAS: f32 = 0.005;
+            self.upload_punctual_shadow_globals(
+                shadows_enabled,
+                PUNCTUAL_SHADOW_DEPTH_BIAS,
+                &punctual_frame.lights,
+            );
+        }
         let shadow_just_enabled = shadows_enabled && !self.prev_frame_shadows_enabled;
         self.prev_frame_shadows_enabled = shadows_enabled;
         let shadow_light_changed = self.cached_shadow_light_view_proj != light_view_proj_arr;
         self.cached_shadow_light_view_proj = light_view_proj_arr;
-        let mut shadow_uniforms_changed = shadow_just_enabled || shadow_light_changed;
+        let mut shadow_uniforms_changed = shadow_just_enabled
+            || shadow_light_changed
+            || punctual_frame.changed;
         let mut object3d_shadow =
             shadows_enabled.then_some(super::shadow_setup::Object3dShadowCtx {
                 light_view_proj: light_view_proj_arr,
@@ -1130,7 +1143,7 @@ impl WgpuRenderer {
                 frame,
                 &camera,
                 false,
-                (shadows_enabled && !room_uses_baked_shadow)
+                (shadows_enabled && !room_uses_baked_shadow && !punctual_active)
                     .then(|| (light_view_proj_arr, &mut shadow_uniforms_changed)),
             );
         }
@@ -1149,11 +1162,14 @@ impl WgpuRenderer {
         self.render_shadow_pre_pass(
             &mut encoder,
             frame,
+            camera.h,
             shadows_enabled,
             shadow_uniforms_changed,
+            &punctual_frame.lights,
             &object3d_shadow_draw_list,
             &showcase_tile_batches,
             &tile_3d_rects,
+            &tile_pick_models,
         );
 
         let room_shadow_capture_staging = self.room_shadow_capture_pending.map(|room| {
@@ -1710,7 +1726,7 @@ impl WgpuRenderer {
                     cpu.and_then(|c| {
                         let corners = crate::render::room_glb::room_world_bounds_corners_centered(
                             camera.h,
-                            self.room_gltf_height_scale,
+                            self.active_frame_env().height_scale,
                             c,
                         );
                         crate::render::room_glb::room_probe_world_aabb(&corners, 0.035)
@@ -1721,7 +1737,7 @@ impl WgpuRenderer {
                     cpu.and_then(|c| {
                         let corners = crate::render::room_glb::room_world_bounds_corners_centered(
                             camera.h,
-                            self.room_gltf_height_scale,
+                            self.active_frame_env().height_scale,
                             c,
                         );
                         crate::render::room_glb::room_probe_world_aabb(&corners, 0.035)
@@ -1732,7 +1748,7 @@ impl WgpuRenderer {
                     cpu.and_then(|c| {
                         let corners = crate::render::room_glb::room_world_bounds_corners_centered(
                             camera.h,
-                            self.room_gltf_height_scale,
+                            self.active_frame_env().height_scale,
                             c,
                         );
                         crate::render::room_glb::room_probe_world_aabb(&corners, 0.035)
@@ -1743,7 +1759,7 @@ impl WgpuRenderer {
                     cpu.and_then(|c| {
                         let corners = crate::render::room_glb::room_world_bounds_corners_centered(
                             camera.h,
-                            self.room_gltf_height_scale,
+                            self.active_frame_env().height_scale,
                             c,
                         );
                         crate::render::room_glb::room_probe_world_aabb(&corners, 0.035)
@@ -1751,7 +1767,7 @@ impl WgpuRenderer {
                 })
             } else if ops_flags.main_menu_env {
                 let env_h = crate::render::main_menu_glb::main_menu_env_height_scale(
-                    self.room_gltf_height_scale,
+                    self.active_frame_env().height_scale,
                 );
                 crate::render::main_menu_glb::with_main_menu_glb_cpu(|cpu| {
                     cpu.and_then(|c| {
@@ -1766,7 +1782,7 @@ impl WgpuRenderer {
                     cpu.and_then(|c| {
                         let corners = crate::render::room_glb::room_world_bounds_corners_centered(
                             camera.h,
-                            self.room_gltf_height_scale,
+                            self.active_frame_env().height_scale,
                             c,
                         );
                         crate::render::room_glb::room_probe_world_aabb(&corners, 0.035)
@@ -2042,7 +2058,7 @@ impl WgpuRenderer {
         // pixel, which half-res blur turns into large glowing discs. Strength scales
         // with room linear exposure — emissive is absolute HDR while lit crush is not.
         let (bloom_threshold, bloom_strength, bloom_extract_scale) =
-            Self::bloom_render_tuning(frame, self.shop_env_linear_exposure);
+            Self::bloom_render_tuning(frame, self.active_frame_env().linear_exposure);
         let extract_params = BloomParams {
             data0: [
                 bloom_threshold,
@@ -2250,8 +2266,8 @@ impl WgpuRenderer {
         // resamples a buffer with overlay artifacts baked in.
         let vhs_on_now = if is_prepass { false } else { effective_vhs_on };
         let tonemap_time = self.creation_time.elapsed().as_secs_f32();
-        let grain_frame = self.film_grain_frame as f32;
-        self.film_grain_frame = self.film_grain_frame.wrapping_add(1);
+        let grain_frame = self.vhs_grain_frame as f32;
+        self.vhs_grain_frame = self.vhs_grain_frame.wrapping_add(1);
         self.queue.write_buffer(
             &self.tonemap_params_buffer,
             0,
@@ -2264,7 +2280,6 @@ impl WgpuRenderer {
                 vhs_scanline: self.tonemap_vhs_scanline,
                 vhs_grain: self.tonemap_vhs_grain,
                 vhs_vignette: self.tonemap_vhs_vignette,
-                film_grain: self.tonemap_film_grain,
                 grain_frame,
             }),
         );

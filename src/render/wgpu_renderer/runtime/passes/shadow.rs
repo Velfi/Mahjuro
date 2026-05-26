@@ -1,25 +1,27 @@
 use super::*;
+use crate::render::punctual_shadow_atlas::{PunctualShadowLightSetup, atlas_tile_viewport_px};
 use crate::render::wgpu_renderer::runtime::shadow_setup::ActiveRoomEnv;
 
 impl WgpuRenderer {
-    /// Shadow pre-pass — render room GLB + lit-mesh casters (table excluded) into the
-    /// shadow map from the light's POV. Skipped entirely when shadows are
-    /// disabled — the lit shaders short-circuit on `params.x = 0` and the
-    /// stale map contents go unread.
+    /// Shadow pre-pass — render room GLB + lit-mesh casters into the depth atlas.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn render_shadow_pre_pass(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         frame: &UiFrame,
+        camera_h: f32,
         shadows_enabled: bool,
         shadow_uniforms_changed: bool,
+        punctual_lights: &[PunctualShadowLightSetup],
         object3d_draw_list: &[(DrawKind, usize)],
         showcase_tile_batches: &[&[ShowcaseTilePlacement]],
         tile_3d_rects: &[(usize, [f32; 4])],
+        tile_pick_models: &[(usize, glam::Mat4)],
     ) {
         if !(shadows_enabled && shadow_uniforms_changed) {
             return;
         }
+
         let shadow_ts = self
             .gpu_profiler
             .pass_writes(crate::render::gpu_profiler::PassSlot::Shadow);
@@ -38,27 +40,89 @@ impl WgpuRenderer {
             timestamp_writes: shadow_ts,
             multiview_mask: None,
         });
-        shadow_pass.set_pipeline(&self.shadow_pipeline);
 
+        if punctual_lights.is_empty() {
+            shadow_pass.set_pipeline(&self.shadow_pipeline);
+            self.draw_shadow_casters(
+                &mut shadow_pass,
+                frame,
+                camera_h,
+                false,
+                object3d_draw_list,
+                showcase_tile_batches,
+                tile_3d_rects,
+                None,
+            );
+            return;
+        }
+
+        for (light_idx, light) in punctual_lights.iter().enumerate() {
+            let (vx, vy, vw, vh) = atlas_tile_viewport_px(light_idx);
+            shadow_pass.set_viewport(vx, vy, vw, vh, 0.0, 1.0);
+            let lvp = light.light_view_proj.to_cols_array();
+            self.rewrite_shadow_casters_for_light(
+                lvp,
+                object3d_draw_list,
+                tile_pick_models,
+                showcase_tile_batches,
+            );
+            shadow_pass.set_pipeline(&self.shadow_pipeline);
+            self.draw_shadow_casters(
+                &mut shadow_pass,
+                frame,
+                camera_h,
+                true,
+                object3d_draw_list,
+                showcase_tile_batches,
+                tile_3d_rects,
+                Some((lvp, light_idx)),
+            );
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_shadow_casters(
+        &self,
+        shadow_pass: &mut wgpu::RenderPass<'_>,
+        frame: &UiFrame,
+        camera_h: f32,
+        force_room_env: bool,
+        object3d_draw_list: &[(DrawKind, usize)],
+        showcase_tile_batches: &[&[ShowcaseTilePlacement]],
+        tile_3d_rects: &[(usize, [f32; 4])],
+        room_shadow_lvp: Option<([f32; 16], usize)>,
+    ) {
         let shop_inspect_shadow_only = frame.shop_inspect_shadow_target.is_some();
-
-        // Imported room GLB — opaque primitives only (blend/glass skipped).
         let active_room_env = super::shadow_setup::active_room_env(frame);
         let bake_capture = self.room_shadow_capture_pending.is_some();
         let baked_loaded = active_room_env.and_then(|env| {
             super::shadow_setup::room_baked_shadow_loaded(&self.room_baked_shadow_gpu, env)
         });
-        let skip_room_dynamic = super::shadow_setup::skip_room_env_live_shadow_pass(
-            active_room_env,
-            baked_loaded,
-            bake_capture,
-        );
+        let skip_room_dynamic = !force_room_env
+            && super::shadow_setup::skip_room_env_live_shadow_pass(
+                active_room_env,
+                baked_loaded,
+                bake_capture,
+            );
         if !skip_room_dynamic {
+            let mut room_changed = false;
+            if let Some((lvp, _)) = room_shadow_lvp {
+                // Room env shadow matrix is rewritten per punctual light above.
+                let _ = lvp;
+            }
             match active_room_env {
                 Some(ActiveRoomEnv::Shop) if !shop_inspect_shadow_only => {
                     if let Some(ref gpu) = self.shop_environment {
+                        if let Some((lvp, _)) = room_shadow_lvp {
+                            self.write_room_env_shadow_caster(
+                                gpu,
+                                lvp,
+                                glam::Mat4::IDENTITY,
+                                &mut room_changed,
+                            );
+                        }
                         self.draw_gltf_room_env_shadow(
-                            &mut shadow_pass,
+                            shadow_pass,
                             &self.shop_env_primitives,
                             gpu,
                             |_| false,
@@ -68,8 +132,16 @@ impl WgpuRenderer {
                 Some(ActiveRoomEnv::Shop) => {}
                 Some(ActiveRoomEnv::Hallway) => {
                     if let Some(ref gpu) = self.hallway_environment {
+                        if let Some((lvp, _)) = room_shadow_lvp {
+                            self.write_room_env_shadow_caster(
+                                gpu,
+                                lvp,
+                                glam::Mat4::IDENTITY,
+                                &mut room_changed,
+                            );
+                        }
                         self.draw_gltf_room_env_shadow(
-                            &mut shadow_pass,
+                            shadow_pass,
                             &self.hallway_env_primitives,
                             gpu,
                             |_| false,
@@ -78,8 +150,16 @@ impl WgpuRenderer {
                 }
                 Some(ActiveRoomEnv::Staircase) => {
                     if let Some(ref gpu) = self.staircase_environment {
+                        if let Some((lvp, _)) = room_shadow_lvp {
+                            self.write_room_env_shadow_caster(
+                                gpu,
+                                lvp,
+                                glam::Mat4::IDENTITY,
+                                &mut room_changed,
+                            );
+                        }
                         self.draw_gltf_room_env_shadow(
-                            &mut shadow_pass,
+                            shadow_pass,
                             &self.staircase_env_primitives,
                             gpu,
                             |_| false,
@@ -88,8 +168,16 @@ impl WgpuRenderer {
                 }
                 Some(ActiveRoomEnv::Archive) => {
                     if let Some(ref gpu) = self.archive_environment {
+                        if let Some((lvp, _)) = room_shadow_lvp {
+                            self.write_room_env_shadow_caster(
+                                gpu,
+                                lvp,
+                                glam::Mat4::IDENTITY,
+                                &mut room_changed,
+                            );
+                        }
                         self.draw_gltf_room_env_shadow(
-                            &mut shadow_pass,
+                            shadow_pass,
                             &self.archive_env_primitives,
                             gpu,
                             |pi| self.archive_env_skip_room_shadow_caster(pi),
@@ -98,8 +186,16 @@ impl WgpuRenderer {
                 }
                 Some(ActiveRoomEnv::MainMenu) => {
                     if let Some(ref gpu) = self.main_menu_environment {
+                        if let Some((lvp, _)) = room_shadow_lvp {
+                            self.write_room_env_shadow_caster(
+                                gpu,
+                                lvp,
+                                glam::Mat4::IDENTITY,
+                                &mut room_changed,
+                            );
+                        }
                         self.draw_gltf_room_env_shadow(
-                            &mut shadow_pass,
+                            shadow_pass,
                             &self.main_menu_env_primitives,
                             gpu,
                             |_| false,
@@ -108,11 +204,36 @@ impl WgpuRenderer {
                 }
                 Some(ActiveRoomEnv::Gameplay) => {
                     if let Some(ref gpu) = self.gameplay_environment {
+                        if let Some((lvp, _)) = room_shadow_lvp {
+                            let env_key = if self.active_scene_key == Some("tutorial") {
+                                "tutorial"
+                            } else {
+                                "gameplay"
+                            };
+                            let height = self.env_tune_for(env_key).height_scale;
+                            let s = crate::render::room_glb::room_env_world_scale(camera_h, height);
+                            let model = crate::render::gameplay_glb::with_gameplay_glb_cpu(|opt| {
+                                opt.map(|cpu| {
+                                    crate::render::room_glb::room_env_model_matrix_from_cpu(
+                                        camera_h,
+                                        height,
+                                        cpu,
+                                    )
+                                })
+                            })
+                            .unwrap_or_else(|| glam::Mat4::from_scale(glam::Vec3::splat(s)));
+                            self.write_room_env_shadow_caster(
+                                gpu,
+                                lvp,
+                                model,
+                                &mut room_changed,
+                            );
+                        }
                         self.draw_gltf_room_env_shadow(
-                            &mut shadow_pass,
+                            shadow_pass,
                             &self.gameplay_env_primitives,
                             gpu,
-                            |pi| self.gameplay_env_skip_prim(pi, frame),
+                            |pi| self.gameplay_env_skip_shadow_prim(pi, frame),
                         );
                     }
                 }
@@ -127,13 +248,9 @@ impl WgpuRenderer {
             {
                 continue;
             }
-            self.draw_object3d_shadow_entry(&mut shadow_pass, frame, kind, slot_i);
+            self.draw_object3d_shadow_entry(shadow_pass, frame, kind, slot_i);
         }
 
-        // Hand tiles — one draw per (tile, primitive). Same multi-prim
-        // walk the main pass uses, but only the position attribute is
-        // read by the shadow shader so the bind group is the per-tile
-        // shadow uniform, not the multi-prim main bind group.
         if !self.tile_primitives.is_empty() && self.tile_outline_index_count > 0 {
             shadow_pass.set_vertex_buffer(0, self.tile_outline_vertex_buffer.slice(..));
             shadow_pass.set_index_buffer(
@@ -149,7 +266,6 @@ impl WgpuRenderer {
                 shadow_pass.draw_indexed(0..self.tile_outline_index_count, 0, 0..1);
             }
 
-            // Showcase tiles — same mesh, separate GPU resource pool.
             let total_showcase: usize = showcase_tile_batches
                 .iter()
                 .map(|b| b.len())

@@ -127,6 +127,7 @@ pub(super) fn process_focus_and_actions(
             | FocusTarget::Dora
             | FocusTarget::Ordeal
             | FocusTarget::RoundWind => true,
+            FocusTarget::Journal => scene.journal_transition.is_none(),
             FocusTarget::DiscardUndo => {
                 crate::persistence::load_settings().discard_undo_enabled
                     && scene.discard_undo.is_some()
@@ -269,6 +270,36 @@ pub(super) fn process_focus_and_actions(
                             .find(|(t, _)| matches!(t, FocusTarget::Button(GameplayButton::Play)))
                             .map(|(t, _)| *t)
                     }
+                    // RIGHT from Play → Cash in when banked structure can be scored
+                    (Some(FocusTarget::Button(GameplayButton::Play)), FocusDir::Right)
+                        if GameEngine::read(ctx.run).trigger_enabled =>
+                    {
+                        focus_rects
+                            .iter()
+                            .find(|(t, _)| {
+                                matches!(t, FocusTarget::Button(GameplayButton::Trigger))
+                            })
+                            .map(|(t, _)| *t)
+                    }
+                    // LEFT from Cash in → Play
+                    (Some(FocusTarget::Button(GameplayButton::Trigger)), FocusDir::Left) => {
+                        focus_rects
+                            .iter()
+                            .find(|(t, _)| matches!(t, FocusTarget::Button(GameplayButton::Play)))
+                            .map(|(t, _)| *t)
+                    }
+                    // DOWN from Play → journal book
+                    (Some(FocusTarget::Button(GameplayButton::Play)), FocusDir::Down) => {
+                        focus_rects
+                            .iter()
+                            .find(|(t, _)| matches!(t, FocusTarget::Journal))
+                            .map(|(t, _)| *t)
+                    }
+                    // UP from journal → Play
+                    (Some(FocusTarget::Journal), FocusDir::Up) => focus_rects
+                        .iter()
+                        .find(|(t, _)| matches!(t, FocusTarget::Button(GameplayButton::Play)))
+                        .map(|(t, _)| *t),
                     // DOWN from Discard (river) → Undo when the accessibility control is shown
                     (Some(FocusTarget::Button(GameplayButton::Discard)), FocusDir::Down) => {
                         focus_rects
@@ -386,6 +417,13 @@ pub(super) fn process_focus_and_actions(
                             actions_for_scene.push(a);
                         }
                     }
+                    Some(FocusTarget::Journal) if scene.journal_transition.is_none() => {
+                        scene.journal_transition = Some(JournalTransition {
+                            start: now,
+                            dir: JournalDirection::Opening,
+                        });
+                        return Some(None);
+                    }
                     Some(FocusTarget::Consumable(i)) => {
                         let outcome = {
                             let mut engine = GameEngine::new(ctx.run, ctx.bus);
@@ -445,7 +483,8 @@ pub(super) fn process_focus_and_actions(
                     | Some(FocusTarget::YakuTablet(_))
                     | Some(FocusTarget::Dora)
                     | Some(FocusTarget::Ordeal)
-                    | Some(FocusTarget::RoundWind) => {}
+                    | Some(FocusTarget::RoundWind)
+                    | Some(FocusTarget::Journal) => {}
                     None => {}
                 }
                 continue;
@@ -1164,9 +1203,10 @@ pub(super) fn push_action_button_focus_rects(
         if i == 2 && !cash_in_enabled {
             continue;
         }
-        if i < 2 {
-            focus_rect_graph.push((FocusTarget::Button(ALL_BUTTONS[i]), [bx, by, bw, bh]));
+        if bw <= 1.0 || bh <= 1.0 {
+            continue;
         }
+        focus_rect_graph.push((FocusTarget::Button(ALL_BUTTONS[i]), [bx, by, bw, bh]));
     }
 }
 
@@ -1303,26 +1343,34 @@ pub(super) fn build_yaku_panel_and_tablets(
     let mut yaku_preview_effective_tiles: Vec<crate::core::tile::Tile> = Vec::new();
     let mut yaku_preview_sets: Vec<crate::core::hand::DetectedMeld> = Vec::new();
 
+    // Cash-in clears live structure immediately; keep the scored melds for
+    // yaku tablets until the scoring cascade finishes.
+    let (base_structure_tiles, base_structure_sets) = if let Some(showcase) = cascade_showcase_ref
+    {
+        (showcase.tiles.clone(), showcase.sets.clone())
+    } else {
+        (
+            GameplayScene::display_tiles(gameplay.structure_tiles.iter().copied(), run),
+            gameplay.structure_sets.clone(),
+        )
+    };
+
     if selected_tiles_for_yaku.is_empty() {
-        yaku_preview_original_tiles =
-            GameplayScene::display_tiles(gameplay.structure_tiles.iter().copied(), run);
-        yaku_preview_effective_tiles =
-            GameplayScene::display_tiles(gameplay.structure_tiles.iter().copied(), run);
-        yaku_preview_sets = gameplay.structure_sets.clone();
+        yaku_preview_original_tiles = base_structure_tiles.clone();
+        yaku_preview_effective_tiles = base_structure_tiles;
+        yaku_preview_sets = base_structure_sets;
     } else if let Some((selected_sets, selected_scoring_tiles)) = wildcard_result.as_ref() {
-        yaku_preview_original_tiles =
-            GameplayScene::display_tiles(gameplay.structure_tiles.iter().copied(), run);
+        yaku_preview_original_tiles = base_structure_tiles.clone();
         yaku_preview_original_tiles.extend(GameplayScene::display_tiles(
             selected_tiles_for_yaku.iter().copied(),
             run,
         ));
-        yaku_preview_effective_tiles =
-            GameplayScene::display_tiles(gameplay.structure_tiles.iter().copied(), run);
+        yaku_preview_effective_tiles = base_structure_tiles;
         yaku_preview_effective_tiles.extend(GameplayScene::display_tiles(
             selected_scoring_tiles.iter().copied(),
             run,
         ));
-        yaku_preview_sets = gameplay.structure_sets.clone();
+        yaku_preview_sets = base_structure_sets;
         yaku_preview_sets.extend(selected_sets.iter().cloned());
     }
 

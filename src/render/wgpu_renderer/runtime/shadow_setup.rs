@@ -1,10 +1,16 @@
 use super::*;
 use crate::render::draw_cmd::SHOP_INSPECT_SUBJECT_ANIM_ID;
 use crate::render::draw_cmd::{DrawCmd, UiFrame};
+use crate::render::lit_mesh::{PunctualShadowSlotGpu, ShadowGlobals};
 use crate::render::lit_mesh::{
     LitMeshInstance, MaterialKind, ShadowCasterUniform, material_casts_shadow,
 };
+use crate::render::punctual_shadow_atlas::{
+    PUNCTUAL_SHADOW_ATLAS_SIZE, PUNCTUAL_SHADOW_TILE_SIZE, PunctualShadowLightSetup,
+    gameplay_candle_punctual_shadow_setup,
+};
 use crate::render::room_gi_bake::{RoomGiRoom, room_gi_room_index};
+use crate::render::punctual_shadow_atlas::MAX_PUNCTUAL_SHADOW_LIGHTS;
 
 /// Which imported room mesh is active this frame (at most one is drawn).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,7 +53,7 @@ impl ActiveRoomEnv {
     }
 }
 
-pub(super) const SHADOW_MAP_SIZE: f32 = 1024.0;
+pub(super) const SHADOW_MAP_SIZE: f32 = PUNCTUAL_SHADOW_ATLAS_SIZE as f32;
 
 /// The active imported room has a loaded offline shadow field (`.msh`) on disk.
 #[inline]
@@ -60,7 +66,96 @@ pub(super) fn room_has_baked_shadow_asset(
         .is_some_and(|(frame_room, loaded)| frame_room == loaded)
 }
 
-/// Loaded offline shadow field for the active room env, if any.
+/// Gameplay uses per-candle shadow tiles instead of the single key-light map.
+#[inline]
+pub(super) fn gameplay_punctual_shadows_active(
+    frame: &UiFrame,
+    active_scene_key: Option<&str>,
+) -> bool {
+    active_scene_key == Some("gameplay")
+        && frame.scene_lighting.embedded_gltf_punctual
+        && active_room_env(frame) == Some(ActiveRoomEnv::Gameplay)
+}
+
+#[inline]
+fn punctual_shadow_hash(lights: &[PunctualShadowLightSetup]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    lights.len().hash(&mut h);
+    for light in lights {
+        light.light_view_proj.to_cols_array().map(f32::to_bits).hash(&mut h);
+        light.atlas_rect.map(f32::to_bits).hash(&mut h);
+    }
+    h.finish()
+}
+
+#[allow(dead_code)]
+pub(super) struct PunctualShadowFrame {
+    pub lights: Vec<PunctualShadowLightSetup>,
+    pub changed: bool,
+}
+
+impl WgpuRenderer {
+    pub(super) fn prepare_punctual_shadow_frame(
+        &mut self,
+        frame: &UiFrame,
+        camera: &CameraFrame,
+        shadows_enabled: bool,
+    ) -> PunctualShadowFrame {
+        if !(shadows_enabled && gameplay_punctual_shadows_active(frame, self.active_scene_key)) {
+            self.punctual_shadow_lights.clear();
+            return PunctualShadowFrame {
+                lights: Vec::new(),
+                changed: false,
+            };
+        }
+        let env = self.active_frame_env();
+        let lights = gameplay_candle_punctual_shadow_setup(camera.h, env.height_scale);
+        let hash = punctual_shadow_hash(&lights);
+        let changed = hash != self.cached_punctual_shadow_hash;
+        self.cached_punctual_shadow_hash = hash;
+        self.punctual_shadow_lights = lights.clone();
+        PunctualShadowFrame { lights, changed }
+    }
+
+    pub(super) fn upload_punctual_shadow_globals(
+        &self,
+        shadows_enabled: bool,
+        depth_bias: f32,
+        lights: &[PunctualShadowLightSetup],
+    ) {
+        let tile_texel = 1.0 / PUNCTUAL_SHADOW_TILE_SIZE as f32;
+        let count = lights.len().min(MAX_PUNCTUAL_SHADOW_LIGHTS) as f32;
+        let mut globals = ShadowGlobals::empty_punctual();
+        globals.params = [
+            if shadows_enabled { 1.0 } else { 0.0 },
+            depth_bias,
+            1.0 / SHADOW_MAP_SIZE,
+            0.0,
+        ];
+        globals.punctual_params = [
+            count,
+            tile_texel,
+            if shadows_enabled && count > 0.0 {
+                1.0
+            } else {
+                0.0
+            },
+            0.0,
+        ];
+        for (i, setup) in lights.iter().take(MAX_PUNCTUAL_SHADOW_LIGHTS).enumerate() {
+            globals.punctual_lights[i] = PunctualShadowSlotGpu {
+                light_view_proj: setup.light_view_proj.to_cols_array(),
+                atlas_rect: setup.atlas_rect,
+            };
+        }
+        self.queue.write_buffer(
+            &self.shadow_globals_buffer,
+            0,
+            bytemuck::bytes_of(&globals),
+        );
+    }
+}
 #[inline]
 pub(super) fn room_baked_shadow_loaded(
     slots: &[Option<crate::render::wgpu_renderer::impl_room_shadow::RoomBakedShadowGpu>;
@@ -252,10 +347,10 @@ impl WgpuRenderer {
         {
             let env_height_scale = if self.active_scene_key == Some("main_menu_exterior") {
                 crate::render::main_menu_glb::main_menu_env_height_scale(
-                    self.room_gltf_height_scale,
+                    self.active_frame_env().height_scale,
                 )
             } else {
-                self.room_gltf_height_scale
+                self.active_frame_env().height_scale
             };
             let extent = camera.h * env_height_scale;
             let half = extent * 0.11;
@@ -266,10 +361,10 @@ impl WgpuRenderer {
             // frustum in depth so shelf props cast contact shadows on the env.
             let env_height_scale = if self.active_scene_key == Some("main_menu_exterior") {
                 crate::render::main_menu_glb::main_menu_env_height_scale(
-                    self.room_gltf_height_scale,
+                    self.active_frame_env().height_scale,
                 )
             } else {
-                self.room_gltf_height_scale
+                self.active_frame_env().height_scale
             };
             let extent = camera.h * env_height_scale;
             let archive_offline_bake = self.room_shadow_capture_pending
@@ -322,26 +417,24 @@ impl WgpuRenderer {
         } else {
             0.0
         };
-        self.queue.write_buffer(
-            &self.shadow_globals_buffer,
-            0,
-            bytemuck::bytes_of(&ShadowGlobals {
-                light_view_proj: light_view_proj_arr,
-                params: [shadow_enabled_flag, depth_bias, 1.0 / SHADOW_MAP_SIZE, 0.0],
-                room_baked_light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
-            }),
-        );
+        let punctual = gameplay_punctual_shadows_active(frame, self.active_scene_key);
+        if !punctual {
+            let mut globals = ShadowGlobals::empty_punctual();
+            globals.light_view_proj = light_view_proj_arr;
+            globals.params = [shadow_enabled_flag, depth_bias, 1.0 / SHADOW_MAP_SIZE, 0.0];
+            self.queue.write_buffer(
+                &self.shadow_globals_buffer,
+                0,
+                bytemuck::bytes_of(&globals),
+            );
+        }
         ShadowFrame {
             light_view_proj,
             light_view_proj_arr,
         }
     }
 
-    /// Per-instance shadow caster uniforms. Mirrors the model matrices
-    /// written into the main lit-mesh + hand-tile uniforms so the shadow
-    /// pre-pass can re-render the same geometry from the light's POV. Table
-    /// is excluded — it's a flat receiver, not a caster. Returns nothing —
-    /// writes to per-instance shadow uniform buffers via `self.queue`.
+    /// Per-instance shadow caster uniforms for the first (or key) light.
     pub(super) fn write_per_instance_shadow_casters(
         &mut self,
         _frame: &UiFrame,
@@ -350,11 +443,7 @@ impl WgpuRenderer {
         tile_pick_models: &[(usize, Mat4)],
         shadow_uniforms_changed: &mut bool,
     ) {
-        // Object3d / primitive shadow uniforms are written during
-        // [`run_object3d_placement`] so model matrices match the lit pass.
-        // Hand tile shadow uniforms — pull each tile's model matrix from
-        // `tile_pick_models` (snapshot of the per-tile model written above).
-        for (i, model) in tile_pick_models.iter() {
+        for (i, model) in tile_pick_models {
             if let Some(htg) = self.hand_tiles.get(*i) {
                 self.queue.write_buffer(
                     &htg.shadow_uniform_buffer,
@@ -365,6 +454,93 @@ impl WgpuRenderer {
                     }),
                 );
                 *shadow_uniforms_changed = true;
+            }
+        }
+    }
+
+    /// Rewrite every dynamic caster's shadow uniform for one punctual atlas light.
+    pub(super) fn rewrite_shadow_casters_for_light(
+        &self,
+        light_view_proj_arr: [f32; 16],
+        object3d_draw_list: &[(super::DrawKind, usize)],
+        tile_pick_models: &[(usize, glam::Mat4)],
+        showcase_tile_batches: &[&[super::ShowcaseTilePlacement]],
+    ) {
+        for &(kind, slot_i) in object3d_draw_list {
+            self.rewrite_object3d_shadow_light(kind, slot_i, light_view_proj_arr);
+        }
+        for (i, model) in tile_pick_models {
+            if let Some(htg) = self.hand_tiles.get(*i) {
+                self.queue.write_buffer(
+                    &htg.shadow_uniform_buffer,
+                    0,
+                    bytemuck::bytes_of(&ShadowCasterUniform {
+                        light_view_proj: light_view_proj_arr,
+                        model: model.to_cols_array(),
+                    }),
+                );
+            }
+        }
+        let total_showcase: usize = showcase_tile_batches
+            .iter()
+            .map(|b| b.len())
+            .sum::<usize>()
+            .min(super::super::MAX_SHOWCASE_TILE_SLOTS);
+        for slot_i in 0..total_showcase {
+            let Some(stg) = self.showcase_tiles.get(slot_i) else {
+                break;
+            };
+            self.queue.write_buffer(
+                &stg.shadow_uniform_buffer,
+                0,
+                bytemuck::bytes_of(&ShadowCasterUniform {
+                    light_view_proj: light_view_proj_arr,
+                    model: stg.cached_shadow_caster.model,
+                }),
+            );
+        }
+    }
+
+    fn rewrite_object3d_shadow_light(
+        &self,
+        kind: super::DrawKind,
+        slot_i: usize,
+        light_view_proj_arr: [f32; 16],
+    ) {
+        macro_rules! rewrite {
+            ($pool:expr) => {
+                if let Some(inst) = $pool.get(slot_i) {
+                    inst.rewrite_shadow_light_view_proj(&self.queue, light_view_proj_arr);
+                }
+            };
+        }
+        match kind {
+            super::DrawKind::YakuTablet => rewrite!(self.yaku_tablet_instances),
+            super::DrawKind::WoodTablet => rewrite!(self.wood_tablet_instances),
+            super::DrawKind::Book => rewrite!(self.book_instances),
+            super::DrawKind::BookCover => rewrite!(self.book_cover_instances),
+            super::DrawKind::Relic => rewrite!(self.relic_instances),
+            super::DrawKind::BossIcon => rewrite!(self.ordeal_icon_instances),
+            super::DrawKind::Pack => rewrite!(self.pack_instances),
+            super::DrawKind::Ribbon => rewrite!(self.ribbon_instances),
+            super::DrawKind::Talisman => rewrite!(self.talisman_instances),
+            super::DrawKind::BugBody => rewrite!(self.bug_body_instances),
+            super::DrawKind::BugWingL => rewrite!(self.bug_wing_instances),
+            super::DrawKind::BugWingR => rewrite!(self.bug_wing_r_instances),
+            super::DrawKind::BugWingBlurL => rewrite!(self.bug_wing_blur_instances),
+            super::DrawKind::BugWingBlurR => rewrite!(self.bug_wing_blur_r_instances),
+            super::DrawKind::Orb => rewrite!(self.orb_instances),
+            super::DrawKind::Bowl => rewrite!(self.bowl_instances),
+            super::DrawKind::Mirror => rewrite!(self.mirror_instances),
+            super::DrawKind::TallyStickBase | super::DrawKind::TallyStickTip => {
+                rewrite!(self.tally_stick_instances)
+            }
+            super::DrawKind::CascadeToken => rewrite!(self.cascade_token_instances),
+            super::DrawKind::ExtrudedGlyph => rewrite!(self.extruded_glyph_instances),
+            super::DrawKind::Primitive(shape) => {
+                if let Some(pool) = self.primitive_instances.get(&shape) {
+                    rewrite!(pool);
+                }
             }
         }
     }

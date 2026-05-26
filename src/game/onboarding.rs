@@ -82,7 +82,11 @@ pub const LESSONS_PLAYS: u32 = 3;
 pub const LESSONS_DISCARDS: u32 = 2;
 
 pub fn tutorial_yaku() -> Vec<YakuKind> {
-    vec![YakuKind::FullHand, YakuKind::Chiitoitsu]
+    vec![
+        YakuKind::ChickenHand,
+        YakuKind::FullHand,
+        YakuKind::Chiitoitsu,
+    ]
 }
 
 /// Hint text after failing the Lessons blind.
@@ -134,7 +138,7 @@ pub fn finale_failure_feedback(
 
     if chicken_only {
         return format!(
-            "Your last cash-in was a Chicken Hand (no yaku bonus). This run only awards Full Hand and Chiitoitsu — build one of those shapes so mult is not stuck near zero. You were {} / {} ({}%).",
+            "Your last cash-in was a Chicken Hand — legal, but the lowest-scoring yaku (no mult or chip bonus). Full Hand and Chiitoitsu raise mult much more on this shrine. You were {} / {} ({}%).",
             round_score, target, score_pct,
         );
     }
@@ -160,8 +164,8 @@ pub fn finale_failure_feedback(
 }
 
 pub fn finale_intro_message() -> &'static str {
-    "Boss shrine — The Iconoclast\n\n\
-     Yaku = hand patterns that add mult. Winds and dragons are debuffed: they still form melds, but score much less. \
-     Build in Souzu, Pinzu, and Manzu. Full Hand and Chiitoitsu (seven pairs) \
-     are your best yaku here. You can retry if you miss the target."
+    "You must now prepare to undergo an ordeal — The Iconoclast\n\n\
+     The Iconoclast changes the rules of the game, debuffing Wind and Dragon tiles. \
+     They still form melds, but they score for nothing. \
+     The bigger the structure, the bigger the score. Check the pause menu Guide to learn more."
 }

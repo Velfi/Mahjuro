@@ -553,10 +553,9 @@ impl PlayerProgress {
         self.has_won
     }
 
-    /// Whether dora tiles are enabled at this level.
+    /// Whether dora tiles are active (plinth display, hand highlights, scoring).
     pub fn dora_enabled(&self) -> bool {
-        let level = self.current_level();
-        (1..=level).any(|l| unlocks_for_level(l).dora)
+        true
     }
 }
 
@@ -1329,11 +1328,8 @@ mod tests {
     }
 
     #[test]
-    fn dora_unlocks_at_level_6() {
-        let mut p = PlayerProgress::new();
-        assert!(!p.dora_enabled());
-        p.level_progress_points = PlayerProgress::min_points_for_level(6);
-        assert_eq!(p.current_level(), 6);
+    fn dora_always_enabled() {
+        let p = PlayerProgress::new();
         assert!(p.dora_enabled());
     }
 

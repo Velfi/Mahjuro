@@ -52,10 +52,9 @@ impl RunState {
                 "+2 shop relics"
             }
             TagKind::ZodiacBlessing => {
-                use crate::core::zodiac::ZodiacKind;
                 use rand::RngExt;
 
-                let mut pool: Vec<ZodiacKind> = ZodiacKind::all().to_vec();
+                let mut pool = self.zodiac_spawn_pool();
                 let mut rng = rand::rng();
                 let mut granted = 0u32;
                 for _ in 0..2 {

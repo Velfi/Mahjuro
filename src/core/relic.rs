@@ -783,7 +783,7 @@ pub fn relic_description_live(
             let rounds = counters.get(&RelicId::NestEgg).copied().unwrap_or(0);
             let sell = relic_sell_price_live(id, counters);
             format!(
-                "{base} [held {rounds} round{}, sell {sell}g]",
+                "{base} [held {rounds} round{}, sell ${sell}g]",
                 if rounds == 1 { "" } else { "s" }
             )
         }
