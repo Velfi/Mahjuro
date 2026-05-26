@@ -85,9 +85,6 @@ pub(crate) use super::{Scene, SceneTransition, UpdateCtx};
 
 pub struct ShopScene {
     mode: ShopMode,
-    /// Snapshot when the shop opened: Qilin is in the zodiac roll only if
-    /// [`crate::core::progression::PlayerProgress::qilin_ribbon_unlocked`].
-    qilin_ribbon_unlocked: bool,
     items: Vec<ShopItem>,
     zodiac_items: Vec<ConsumableShopItem>,
     talisman_items: Vec<ConsumableShopItem>,
@@ -132,6 +129,9 @@ pub struct ShopScene {
     last_inspect_cam: std::cell::Cell<Option<CameraParams>>,
     /// West-face hold-to-sell (gamepad West / **Q**): press time when a hold is in progress.
     west_sell_hold_started: Option<std::time::Instant>,
+    /// LMB-drag turntable on the storeroom camera (radians, applied around [`CameraParams::target`]).
+    storeroom_orbit_yaw: f32,
+    storeroom_orbit_pitch: f32,
 }
 
 /// Click id for the `?` glossary badge in the shop HUD.
@@ -274,6 +274,7 @@ mod tests {
         let relics = RelicState::default();
         let available_relics = vec![RelicId::PairPower];
         let mode = GameMode::standard();
+        let run = crate::game::run::RunState::new(mode.clone());
 
         let (items, _, _, _) = actions::generate_shop_stock(
             &relics,
@@ -281,7 +282,7 @@ mod tests {
             1,
             crate::game::run::RelicShopPoolExtinction::default(),
             &mode,
-            false,
+            &run,
         );
 
         assert!(!items.is_empty());
@@ -295,6 +296,8 @@ mod tests {
         let available = vec![RelicId::PairPower];
         let spring = GameMode::with_material_and_stake(TileMaterial::Bamboo, Stake::Spring);
         let winter = GameMode::with_material_and_stake(TileMaterial::Bamboo, Stake::Winter);
+        let spring_run = crate::game::run::RunState::new(spring.clone());
+        let winter_run = crate::game::run::RunState::new(winter.clone());
 
         let (spring_items, _, _, _) = actions::generate_shop_stock(
             &relics,
@@ -302,7 +305,7 @@ mod tests {
             1,
             crate::game::run::RelicShopPoolExtinction::default(),
             &spring,
-            false,
+            &spring_run,
         );
         let (winter_items, _, _, _) = actions::generate_shop_stock(
             &relics,
@@ -310,7 +313,7 @@ mod tests {
             1,
             crate::game::run::RelicShopPoolExtinction::default(),
             &winter,
-            false,
+            &winter_run,
         );
 
         let spring_price = spring_items[0].price;
@@ -324,28 +327,30 @@ mod tests {
     }
 
     #[test]
-    fn shop_zodiac_stock_excludes_qilin_until_meta_unlock() {
+    fn shop_zodiac_stock_requires_scored_yaku() {
+        use crate::core::yaku::YakuKind;
         let relics = RelicState::default();
         let available = vec![RelicId::PairPower];
         let mode = GameMode::standard();
         let ex = crate::game::run::RelicShopPoolExtinction::default();
+        let fresh_run = crate::game::run::RunState::new(mode.clone());
         for _ in 0..48 {
             let (_, zodiacs, _, _) =
-                actions::generate_shop_stock(&relics, &available, 0, ex, &mode, false);
-            assert!(
-                !zodiacs.iter().any(|item| {
-                    matches!(item.consumable, Consumable::Zodiac(ZodiacKind::Qilin))
-                })
-            );
+                actions::generate_shop_stock(&relics, &available, 0, ex, &mode, &fresh_run);
+            assert!(zodiacs.is_empty(), "fresh profile should offer no zodiacs");
         }
+
+        let mut unlocked_run = crate::game::run::RunState::new(mode.clone());
+        unlocked_run
+            .profile_yaku_scored
+            .insert(YakuKind::KokushiMusou);
         let mut saw_qilin = false;
         for _ in 0..64 {
             let (_, zodiacs, _, _) =
-                actions::generate_shop_stock(&relics, &available, 0, ex, &mode, true);
-            if zodiacs
-                .iter()
-                .any(|item| matches!(item.consumable, Consumable::Zodiac(ZodiacKind::Qilin)))
-            {
+                actions::generate_shop_stock(&relics, &available, 0, ex, &mode, &unlocked_run);
+            if zodiacs.iter().any(|item| {
+                matches!(item.consumable, Consumable::Zodiac(ZodiacKind::Qilin))
+            }) {
                 saw_qilin = true;
                 break;
             }

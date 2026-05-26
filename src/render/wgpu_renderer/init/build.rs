@@ -1,6 +1,5 @@
 use super::super::*;
 
-use crate::game::tonemap_tuning::TonemapTuning;
 use crate::render::gltf_helpers::{GltfPbrUniform, build_sampler_descriptor};
 use crate::render::moths_to_a_light::{
     build_bug_body_mesh, build_bug_wing_blur_mesh, build_bug_wing_mesh,
@@ -395,7 +394,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     // ---- Shadow map resources (depth texture + sampler + layouts) ----
     // Built up here so the shared sampling layout can be plumbed into
     // both `tile_layout` and `lit_mesh_pl` below as group 2.
-    const SHADOW_MAP_SIZE: u32 = 1024;
+    const SHADOW_MAP_SIZE: u32 =
+        crate::render::punctual_shadow_atlas::PUNCTUAL_SHADOW_ATLAS_SIZE;
     let shadow_map_texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("shadow-map"),
         size: wgpu::Extent3d {
@@ -440,11 +440,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     let shadow_sample_layout = create_shadow_sample_layout(&device);
     let shadow_globals_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("shadow-globals"),
-        contents: bytemuck::bytes_of(&ShadowGlobals {
-            light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
-            params: [0.0, 0.0015, 1.0 / SHADOW_MAP_SIZE as f32, 0.0],
-            room_baked_light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
-        }),
+        contents: bytemuck::bytes_of(&ShadowGlobals::empty_punctual()),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
     let shadow_ao_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -3734,14 +3730,20 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
 
     crate::render::main_menu_glb::release_main_menu_environment_cpu_sources_after_gpu_upload();
 
-    let (gameplay_env_primitives, gameplay_environment, gameplay_cash_in_prim_indices) = {
+    let (gameplay_env_primitives, gameplay_environment, gameplay_cash_in_prim_indices, gameplay_env_shadow_caster_mask) = {
         let _gameplay = crate::startup_profile::scope("wgpu.room.gameplay");
         crate::render::gameplay_glb::with_gameplay_glb_cpu(|cpu_opt| {
             let mut prims = Vec::new();
             let mut gpu_wrap = None;
             let mut gameplay_cash_in_prim_indices = Vec::new();
+            let mut gameplay_env_shadow_caster_mask = Vec::new();
             let Some(cpu) = cpu_opt else {
-                return (prims, gpu_wrap, gameplay_cash_in_prim_indices);
+                return (
+                    prims,
+                    gpu_wrap,
+                    gameplay_cash_in_prim_indices,
+                    gameplay_env_shadow_caster_mask,
+                );
             };
             if !cpu.environment_primitives.is_empty() {
                 let mut room_tex_cache = RoomEnvTextureCache::new();
@@ -3756,6 +3758,11 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                             gameplay_cash_in_prim_indices.push(i);
                         }
                     }
+                    gameplay_env_shadow_caster_mask.push(
+                        crate::render::gameplay_glb::gameplay_prim_casts_room_shadow(
+                            env_prim.gltf_node_name.as_deref(),
+                        ),
+                    );
                     let prim = &env_prim.mesh;
                     let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some(&format!("gameplay-env-verts-{i}")),
@@ -3960,9 +3967,19 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     shop_candle_sss_texture: gameplay_candle_sss_tex.map(|(t, _)| t),
                 });
                 log::info!("gameplay.glb GPU: {} primitive draw(s)", prims.len());
-                return (prims, gpu_wrap, gameplay_cash_in_prim_indices);
+                return (
+                    prims,
+                    gpu_wrap,
+                    gameplay_cash_in_prim_indices,
+                    gameplay_env_shadow_caster_mask,
+                );
             }
-            (prims, gpu_wrap, gameplay_cash_in_prim_indices)
+            (
+                prims,
+                gpu_wrap,
+                gameplay_cash_in_prim_indices,
+                gameplay_env_shadow_caster_mask,
+            )
         })
     };
 
@@ -4443,7 +4460,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             vhs_scanline: 0.0,
             vhs_grain: 0.0,
             vhs_vignette: 0.0,
-            film_grain: TonemapTuning::shipping_default().film_grain,
             grain_frame: 0.0,
         }),
     );
@@ -4536,6 +4552,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         main_menu_environment,
         gameplay_env_primitives,
         gameplay_cash_in_prim_indices,
+        gameplay_env_shadow_caster_mask,
         gameplay_environment,
         archive_sign_left_prim_idx,
         archive_sign_right_prim_idx,
@@ -4543,12 +4560,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         archive_page_right_prim_indices,
         archive_env_shadow_caster_mask,
         archive_sign_decal_upload_key: 0,
-        room_gltf_height_scale: crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
-        shop_env_linear_exposure: crate::render::room_glb::SHOP_ENV_LINEAR_EXPOSURE,
-        shop_env_ambient_scale: crate::render::room_glb::SHOP_ENV_AMBIENT_SCALE,
-        shop_lit_mesh_gltf_punctual_scale:
-            crate::render::room_glb::SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE,
-        shop_gltf_emissive_scale: crate::render::room_glb::SHOP_GLTF_EMISSIVE_SCALE,
+        frame_env_tunes: rustc_hash::FxHashMap::default(),
+        active_frame_env: crate::game::scene_look_tuning::RoomEnvFrameTune::default(),
         shop_env_collision_meshes,
         gameplay_env_collision_meshes,
         tile_base_color_factor,
@@ -4649,7 +4662,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         frame_dt: 0.0,
         obj3d_hover_state: rustc_hash::FxHashMap::default(),
         creation_time: Instant::now(),
-        film_grain_frame: 0,
+        vhs_grain_frame: 0,
         relic_textures: rustc_hash::FxHashMap::default(),
         relic_rx,
         relic_load_start,
@@ -4663,6 +4676,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         tile_uid_scratch: rustc_hash::FxHashSet::default(),
         prev_frame_shadows_enabled: false,
         cached_shadow_light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
+        punctual_shadow_lights: Vec::new(),
+        cached_punctual_shadow_hash: 0,
         shop_inspect_subject_shadow_slot: None,
         shadow_placement_anim_id: 0,
         placement_shadow_room: None,
@@ -4747,7 +4762,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         tonemap_vhs_scanline: 0.040,
         tonemap_vhs_grain: 0.020,
         tonemap_vhs_vignette: 0.100,
-        tonemap_film_grain: TonemapTuning::shipping_default().film_grain,
         rain_tuning: crate::render::rain_tuning::RainTuning::load(),
         lit_mesh_pipeline,
         lit_mesh_blended_pipeline,

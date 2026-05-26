@@ -434,7 +434,7 @@ impl RunState {
                 use rand::seq::IndexedRandom;
 
                 let mut rng = rand::rng();
-                if let Some(&z) = crate::core::zodiac::ZodiacKind::all().choose(&mut rng) {
+                if let Some(&z) = self.zodiac_spawn_pool().choose(&mut rng) {
                     self.consumables
                         .items
                         .push(crate::core::consumable::Consumable::Zodiac(z));

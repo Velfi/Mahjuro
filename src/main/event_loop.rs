@@ -190,6 +190,8 @@ impl App {
             } if window_id == our_win || window_id == 0 => {
                 if mouse_btn == SdlMouseButton::Left {
                     self.sdl_handle_left_button(shell, true);
+                } else if mouse_btn == SdlMouseButton::Right {
+                    self.sdl_handle_right_button(shell, true);
                 }
             }
             Event::MouseButtonUp {
@@ -258,18 +260,32 @@ impl App {
         }
     }
 
+    fn sdl_handle_right_button(&mut self, _shell: &mut SdlShell, down: bool) {
+        if down && self.shop_storeroom_face_active() {
+            self.mouse_right_clicked = true;
+            if let Some(input) = self.input.as_mut() {
+                input.mode = InputMode::Cursor;
+            }
+        }
+    }
+
     fn sdl_handle_left_button(&mut self, _shell: &mut SdlShell, down: bool) {
         let cursor = self
             .input
             .as_ref()
             .map(|i| i.last_cursor)
             .unwrap_or((0.0, 0.0));
+        let defer_shop_click = self.shop_defer_lmb_clicks();
 
         if down {
             self.mouse_left_down = true;
             self.mouse_clicked = true;
             if let Some(input) = self.input.as_mut() {
                 input.mode = InputMode::Cursor;
+            }
+            if defer_shop_click {
+                self.mouse_left_press_cursor = Some(cursor);
+                self.deferred_lmb_button_click = None;
             }
 
             // Check if click hit any button.
@@ -281,7 +297,11 @@ impl App {
                     match btn.action {
                         ButtonAction::Ui(a) => self.mouse_actions.push(a),
                         ButtonAction::Scene(id) => {
-                            self.mouse_button_clicks.push(id);
+                            if defer_shop_click {
+                                self.deferred_lmb_button_click = Some(id);
+                            } else {
+                                self.mouse_button_clicks.push(id);
+                            }
                         }
                     }
                     hit = true;
@@ -312,6 +332,20 @@ impl App {
             }
         } else {
             self.mouse_left_down = false;
+            if self.shop_defer_lmb_clicks() {
+                let click_ok = self
+                    .mouse_left_press_cursor
+                    .map(|(x0, y0)| {
+                        let dx = cursor.0 - x0;
+                        let dy = cursor.1 - y0;
+                        dx * dx + dy * dy < 100.0
+                    })
+                    .unwrap_or(true);
+                if click_ok && let Some(id) = self.deferred_lmb_button_click.take() {
+                    self.mouse_button_clicks.push(id);
+                }
+                self.mouse_left_press_cursor = None;
+            }
             // End drag — swap relics if dropped on a different slot.
             // Require minimum drag distance to avoid accidental swaps.
             let dropped_relic_slot = self.gameplay_relic_slot_at_cursor(cursor);
@@ -341,8 +375,20 @@ impl App {
     }
 
     fn sdl_handle_mouse_motion(&mut self, shell: &mut SdlShell, x: f32, y: f32) {
+        let new_cursor = (x, y);
+        let showcase_orbit = self
+            .overlay_stack
+            .last()
+            .is_some_and(|top| matches!(top, Scene::Showcase(s) if s.wants_orbit_input()));
+        let shop_storeroom_orbit = self.shop_storeroom_face_active() && self.mouse_left_down;
+        if let Some((x0, y0)) = self.mouse_left_press_cursor {
+            let ddx = new_cursor.0 - x0;
+            let ddy = new_cursor.1 - y0;
+            if ddx * ddx + ddy * ddy > 100.0 {
+                self.deferred_lmb_button_click = None;
+            }
+        }
         if let Some(input) = self.input.as_mut() {
-            let new_cursor = (x, y);
             let prev_mode = input.mode;
             let dx = new_cursor.0 - input.last_cursor.0;
             let dy = new_cursor.1 - input.last_cursor.1;
@@ -388,14 +434,13 @@ impl App {
                 }
             }
             input.update_pointer_hover(input.last_cursor, &slots);
-            // Showcase inspect (shop / collection): orbit with LMB drag
-            // (same channel as right stick / arrow-key orbit input).
-            let showcase_orbit = self
-                .overlay_stack
-                .last()
-                .is_some_and(|top| matches!(top, Scene::Showcase(s) if s.wants_orbit_input()));
+            // Showcase item inspect: LMB drag orbits the subject.
             if showcase_orbit && self.mouse_left_down {
                 input.accum_item_inspect_mouse_orbit(dx, dy);
+            }
+            // Storeroom shop (pre-inspect): LMB drag orbits the room camera.
+            if shop_storeroom_orbit {
+                input.accum_shop_storeroom_mouse_orbit(dx, dy);
             }
             // Update drag position if dragging.
             if let Some(ref mut drag) = input.drag {

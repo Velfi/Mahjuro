@@ -137,12 +137,19 @@ fn candle_occlusion(light_pos: vec3<f32>, frag_pos: vec3<f32>, frag_xy: vec2<f32
     return 1.0;
 }
 
+struct PunctualShadowSlot {
+    light_view_proj: mat4x4<f32>,
+    atlas_rect: vec4<f32>,
+};
+
 // ── Shadow sampling (group 2, shared frame-wide) ─────────────────────
 struct ShadowGlobals {
     light_view_proj: mat4x4<f32>,
     // x = enabled (0/1), y = depth bias, z = texel size, w = unused
     params: vec4<f32>,
     room_baked_light_view_proj: mat4x4<f32>,
+    punctual_params: vec4<f32>,
+    punctual_lights: array<PunctualShadowSlot, 8>,
 };
 @group(2) @binding(0) var<uniform> shadow_globals: ShadowGlobals;
 @group(2) @binding(1) var shadow_map: texture_depth_2d;
@@ -1421,7 +1428,7 @@ fn fs_main(
             let n_w = normalize(vec3<f32>(-dhdu_total, 1.0, -dhdv_total));
             water_n = normalize((mesh.model * vec4<f32>(n_w, 0.0)).xyz);
             water_albedo = albedo;
-            water_spec_strength = 1.4;
+            water_spec_strength = 0.85;
             water_spec_power = 220.0;
         } else {
             // Stone trough: dark slate with a tiny per-pixel speckle so
@@ -1455,9 +1462,9 @@ fn fs_main(
             );
             let l_dir = to_light / max(dist, 0.0001);
             let nl = max(dot(water_n, l_dir), 0.0);
-            // Lift the ambient floor on water so the trough silhouette
-            // reads even when no candle pool is overhead.
-            let lambert = select(0.30, 0.45, is_water) + 0.55 * nl;
+            // Slight diffuse floor on water so the stream silhouette reads
+            // between candle pools without blowing out vs other lit_mesh props.
+            let lambert = select(0.30, 0.38, is_water) + 0.55 * nl;
             lit_water = lit_water + lc * intensity * atten * lambert;
 
             if (water_spec_strength > 0.001) {
@@ -1486,7 +1493,7 @@ fn fs_main(
             }
             let to_light = -frag_dir;
             let nl = max(dot(water_n, to_light), 0.0);
-            let lambert_sp = select(0.30, 0.45, is_water) + 0.55 * nl;
+            let lambert_sp = select(0.30, 0.38, is_water) + 0.55 * nl;
             let sc = s.color.rgb * s.color.a * atten_sp * spot_factor * lights.extras.w;
             lit_water = lit_water + sc * lambert_sp;
 
@@ -1497,16 +1504,22 @@ fn fs_main(
                 spec_water = spec_water + sc * sp;
             }
         }
-        // A constant cool ambient term so the river is visible across the
-        // whole table even between candle pools — the surface is the
-        // discard target, players should never lose track of where it is.
+        // Small cool ambient lift on water (stone keeps the lower term).
+        // Must share the same linear-exposure path as the main lit_mesh branch.
         let ambient = select(
             vec3<f32>(0.020, 0.024, 0.034),
-            vec3<f32>(0.032, 0.046, 0.090),
+            vec3<f32>(0.022, 0.032, 0.058),
             is_water,
         );
-        // Linear HDR — `tonemap_composite.wgsl` applies the single ACES pass.
-        let rgb_w = water_albedo * (lit_water + ambient) + spec_water;
+        var rgb_w = water_albedo * (lit_water + ambient) + spec_water;
+        if (phys_hdr > 0.5) {
+            let amb = ssr_globals.felt.w * 0.08;
+            rgb_w = rgb_w + water_albedo * vec3<f32>(amb);
+            rgb_w = rgb_w * ssr_globals.felt.z;
+        } else {
+            let inv_g = 1.0 / max(lights.extras.x, 0.01);
+            rgb_w = pow(rgb_w, vec3<f32>(inv_g));
+        }
         return vec4<f32>(rgb_w, mesh.base_color.a);
     }
 
@@ -1830,14 +1843,16 @@ fn fs_main(
         let ndl_raw = dot(n, l_dir);
         let nl = max(ndl_raw, 0.0);
         let lambert = 0.35 + 0.65 * nl;
-        // Analytic AABB occlusion: tiles between the candle and this
-        // fragment block the light's diffuse + specular contribution.
-        // Floor at 0.18 so shadowed regions still pick up a soft bounce
-        // term — fully black shadows look painted on.
-        let cand_vis = mix(
-            mix(0.18, 1.0, candle_occlusion(lp, in.world_pos, in.clip_pos.xy)),
-            1.0,
-            phys_hdr,
+        // Per-light shadow: punctual depth atlas on gameplay, else tile AABB occlusion.
+        let use_punctual_atlas = shadow_globals.punctual_params.z > 0.5;
+        let cand_vis = select(
+            mix(
+                mix(0.18, 1.0, candle_occlusion(lp, in.world_pos, in.clip_pos.xy)),
+                1.0,
+                phys_hdr,
+            ),
+            punctual_shadow_vis(i, in.world_pos),
+            use_punctual_atlas,
         );
         lit = lit + lc * intensity * atten * lambert * cand_vis;
 
@@ -2577,10 +2592,11 @@ fn fs_main(
     }
     // Readable portrait silk (showcase zodiac ribbon): same rule as archive
     // description decals — do not stain copy with the key-light shadow map.
+    let punctual_atlas = shadow_globals.punctual_params.z > 0.5;
     var shadow_vis = select(
         sample_shadow_visibility(in.world_pos),
         1.0,
-        skip_directional_shadow,
+        skip_directional_shadow || punctual_atlas,
     );
     if (shop_display_case_shadow && is_enamel) {
         shadow_vis = max(shadow_vis, 0.58);

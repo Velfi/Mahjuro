@@ -64,6 +64,11 @@ pub const TILE_3D: &str = concat!(
     )),
     "\n",
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/tile_3d.wgsl")),
+    "\n",
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/shaders/punctual_shadow_atlas.wgsl"
+    )),
 );
 
 /// `scene_pbr_lights` + `room_glb`
@@ -81,6 +86,11 @@ pub const SHOP_GLB: &str = concat!(
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/shaders/room_glb.wgsl"
+    )),
+    "\n",
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/shaders/punctual_shadow_atlas.wgsl"
     )),
 );
 
@@ -100,5 +110,10 @@ pub const LIT_MESH: &str = concat!(
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/shaders/lit_mesh.wgsl"
+    )),
+    "\n",
+    include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/shaders/punctual_shadow_atlas.wgsl"
     )),
 );

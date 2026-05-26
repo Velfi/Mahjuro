@@ -318,6 +318,8 @@ pub struct InputState {
     pub item_inspect_orbit_stick: (f32, f32),
     /// LMB drag pixel delta this frame (summed from motion events); merged in [`Self::gamepad_frame_tick`].
     item_inspect_mouse_orbit_px: (f32, f32),
+    /// LMB-drag turntable on the shop storeroom camera (consumed in [`crate::main::frame_tick`]).
+    shop_storeroom_mouse_orbit_px: (f32, f32),
     /// Trigger analog zoom for item inspect: `RightTrigger2 − LeftTrigger2`, plus bumpers (see [`Self::sample_item_inspect_analog`]).
     pub item_inspect_zoom_triggers: f32,
     /// Right stick vertical axis used for list/pane scroll scenes (`-1..1`).
@@ -356,6 +358,7 @@ impl InputState {
             dpad_axis_repeat_y: None,
             item_inspect_orbit_stick: (0.0, 0.0),
             item_inspect_mouse_orbit_px: (0.0, 0.0),
+            shop_storeroom_mouse_orbit_px: (0.0, 0.0),
             item_inspect_zoom_triggers: 0.0,
             right_stick_scroll_axis: 0.0,
             gamepad_style: GamepadStyle::default(),
@@ -368,6 +371,19 @@ impl InputState {
     pub fn accum_item_inspect_mouse_orbit(&mut self, dx: f32, dy: f32) {
         self.item_inspect_mouse_orbit_px.0 += dx;
         self.item_inspect_mouse_orbit_px.1 += dy;
+    }
+
+    #[inline]
+    pub fn accum_shop_storeroom_mouse_orbit(&mut self, dx: f32, dy: f32) {
+        self.shop_storeroom_mouse_orbit_px.0 += dx;
+        self.shop_storeroom_mouse_orbit_px.1 += dy;
+    }
+
+    #[inline]
+    pub fn take_shop_storeroom_mouse_orbit_px(&mut self) -> (f32, f32) {
+        let px = self.shop_storeroom_mouse_orbit_px;
+        self.shop_storeroom_mouse_orbit_px = (0.0, 0.0);
+        px
     }
 
     /// Run scheduled SDL rumble pulses (composite / staggered lab patterns).

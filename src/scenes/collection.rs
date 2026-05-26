@@ -647,7 +647,7 @@ impl CollectionScene {
                     w,
                     h,
                     env_scale,
-                    &ctx.shop_env_lighting,
+                    &ctx.room_env_for("collection").0,
                 )
             } else {
                 Vec::new()
@@ -657,7 +657,7 @@ impl CollectionScene {
                     w,
                     h,
                     env_scale,
-                    &ctx.shop_env_lighting,
+                    &ctx.room_env_for("collection").0,
                 )
                 .into_iter()
                 .map(ScenePunctualLight::InverseSquare)
@@ -1298,8 +1298,16 @@ impl SceneBehavior for CollectionScene {
         //   - Cabinet: ←/↓ forward along the catalogue; →/↑ backward (wrap); wheel / PgUp/Dn flip pages
         //   - Confirm / North → orbit inspect on the focused artifact
         let all_count = tab_artifacts(self.active_tab, ctx.progress, chronicle_last_seen).len();
-        if focus_changed && self.focused_chrome.is_none() {
-            collection_sync_hover_artifact_focus(self, &items, all_count);
+        if matches!(ctx.input_mode, InputMode::Cursor) && self.focused_chrome.is_none() {
+            collection_apply_cursor_catalog_hover(
+                self,
+                &items,
+                all_count,
+                ctx.cursor_pos,
+                ctx.progress,
+                chronicle_last_seen,
+                ctx.bus,
+            );
         }
 
         if ctx.scroll_lines.abs() > 0.001 {
@@ -2466,29 +2474,46 @@ fn archive_page_for_idx(idx: usize) -> usize {
     idx / archive_page_size().max(1)
 }
 
-/// Keep [`CollectionScene::focused_row`] in sync when the widget tree's hover
-/// target moves onto a catalog cell (same flat rects as every other tab).
-fn collection_sync_hover_artifact_focus(
+/// First flat hit target under the cursor (same iteration order as
+/// [`TreeState::update_flat`] hover-follow).
+fn collection_cursor_hover_target(
+    items: &[FlatItem<CollectionAction>],
+    cursor_pos: (f32, f32),
+) -> Option<CollectionAction> {
+    let (cx, cy) = cursor_pos;
+    for it in items {
+        let [x, y, w, h] = it.rect;
+        if cx >= x && cx <= x + w && cy >= y && cy <= y + h {
+            return Some(it.action);
+        }
+    }
+    None
+}
+
+/// Keep catalog focus in sync with cursor hover and clear NEW badges once the
+/// player has looked at an entry (no click required).
+fn collection_apply_cursor_catalog_hover(
     scene: &mut CollectionScene,
     items: &[FlatItem<CollectionAction>],
     all_count: usize,
+    cursor_pos: (f32, f32),
+    progress: &crate::core::progression::PlayerProgress,
+    chronicle_last_seen: u32,
+    bus: &mut crate::game::event_bus::EventBus,
 ) {
     if all_count == 0 {
         return;
     }
-    let Some(f) = scene.tree.focused() else {
-        return;
-    };
-    let Some(it) = items.iter().find(|i| i.id == f) else {
-        return;
-    };
-    let CollectionAction::SelectArtifact(idx) = it.action else {
+    let Some(CollectionAction::SelectArtifact(idx)) =
+        collection_cursor_hover_target(items, cursor_pos)
+    else {
         return;
     };
     let idx = idx.min(all_count - 1);
     if scene.focused_row != Some(idx) {
         collection_sync_artifact_focus_to_idx(scene, idx);
     }
+    mark_artifact_seen_if_new(scene.active_tab, progress, idx, chronicle_last_seen, bus);
 }
 
 fn collection_sync_artifact_focus_to_idx(scene: &mut CollectionScene, idx: usize) {

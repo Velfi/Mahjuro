@@ -146,13 +146,13 @@ impl WgpuRenderer {
         );
 
         let texel = 1.0 / w.max(h) as f32;
+        let mut globals = ShadowGlobals::empty_punctual();
+        globals.light_view_proj = glam::Mat4::IDENTITY.to_cols_array();
+        globals.params = [1.0, bake.depth_bias, texel, 1.0];
+        globals.room_baked_light_view_proj = bake.light_view_proj;
         let globals_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("room-baked-shadow-globals"),
-            contents: bytemuck::bytes_of(&ShadowGlobals {
-                light_view_proj: glam::Mat4::IDENTITY.to_cols_array(),
-                params: [1.0, bake.depth_bias, texel, 1.0],
-                room_baked_light_view_proj: bake.light_view_proj,
-            }),
+            contents: bytemuck::bytes_of(&globals),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let sample_bind_group = create_shadow_sample_bind_group(
@@ -201,10 +201,12 @@ impl WgpuRenderer {
         queue.write_buffer(
             &gpu.globals_buffer,
             0,
-            bytemuck::bytes_of(&ShadowGlobals {
-                light_view_proj,
-                params: [enabled, gpu.depth_bias, gpu.texel, baked_mode],
-                room_baked_light_view_proj: gpu.baked_light_view_proj,
+            bytemuck::bytes_of(&{
+                let mut globals = ShadowGlobals::empty_punctual();
+                globals.light_view_proj = light_view_proj;
+                globals.params = [enabled, gpu.depth_bias, gpu.texel, baked_mode];
+                globals.room_baked_light_view_proj = gpu.baked_light_view_proj;
+                globals
             }),
         );
     }

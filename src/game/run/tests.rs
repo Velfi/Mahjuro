@@ -66,6 +66,7 @@ mod cases {
             honors_scored_this_round: false,
             windreader_bonus_wind: None,
             yaku_times_played: rustc_hash::FxHashMap::default(),
+            profile_yaku_scored: rustc_hash::FxHashSet::default(),
             tiles_played: 0,
             tiles_discarded: 0,
             times_restocked: 0,

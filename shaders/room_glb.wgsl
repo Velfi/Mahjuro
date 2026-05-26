@@ -119,10 +119,17 @@ struct SpotLights {
 };
 @group(3) @binding(0) var<uniform> spot_lights: SpotLights;
 
+struct PunctualShadowSlot {
+    light_view_proj: mat4x4<f32>,
+    atlas_rect: vec4<f32>,
+};
+
 struct ShadowGlobals {
     light_view_proj: mat4x4<f32>,
     params: vec4<f32>,
     room_baked_light_view_proj: mat4x4<f32>,
+    punctual_params: vec4<f32>,
+    punctual_lights: array<PunctualShadowSlot, 8>,
 };
 @group(2) @binding(0) var<uniform> shadow_globals: ShadowGlobals;
 @group(2) @binding(1) var shadow_map: texture_depth_2d;
@@ -427,7 +434,13 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         let kD = dielectric_kD(kS, metallic);
 
         let has_room_occluders = select(0.0, 1.0, room_occluders.count.x > 0u);
-        let punc_vis = mix(1.0, mix(0.14, 1.0, room_punctual_occlusion(light_pos, in.world_pos, in.clip_pos.xy)), has_room_occluders);
+        let use_punctual_atlas = shadow_globals.punctual_params.z > 0.5;
+        let analytic_vis = mix(0.14, 1.0, room_punctual_occlusion(light_pos, in.world_pos, in.clip_pos.xy));
+        let punc_vis = select(
+            mix(1.0, analytic_vis, has_room_occluders),
+            punctual_shadow_vis(i, in.world_pos),
+            use_punctual_atlas,
+        );
         let diffuse = kD * albedo / PI * radiance * NdotL * punc_vis;
 
         let D = distribution_ggx(NdotH, roughness);
@@ -514,10 +527,12 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     var lit_hdr = Lo * cam.tile_seed + ambient + metal_hemi;
     // Shared directional shadow map (props + room self-shadow in key-light space).
     // Archive signs + chrome/pedestal shells skip directional shadows (tags 2 / 3 in `room_env_gltf`).
+    // Gameplay punctual atlas replaces the single key-light map.
+    let punctual_atlas = shadow_globals.punctual_params.z > 0.5;
     let shadow_vis = select(
         sample_shadow_visibility(in.world_pos),
         1.0,
-        is_archive_decal || is_archive_no_dir_shadow,
+        punctual_atlas || is_archive_decal || is_archive_no_dir_shadow,
     );
     lit_hdr = lit_hdr * shadow_vis;
     var hdr = lit_hdr + emissive;

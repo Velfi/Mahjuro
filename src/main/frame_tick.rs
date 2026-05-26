@@ -342,6 +342,13 @@ impl App {
             face_bindings: self.active_face_bindings(),
             item_inspect_overlay: showcase_orbit_overlay,
         };
+        actions.append(&mut self.mouse_actions);
+        if self.mouse_right_clicked {
+            self.mouse_right_clicked = false;
+            if self.shop_storeroom_face_active() {
+                actions.push(crate::ui::input::UiAction::NorthFacePress);
+            }
+        }
         if let Some(input) = self.input.as_mut() {
             input.item_inspect_orbit_stick = (0.0, 0.0);
             input.item_inspect_zoom_triggers = 0.0;
@@ -367,8 +374,6 @@ impl App {
                 shell.show_cursor(true);
             }
             self.prev_controller_present = now_controller_present;
-
-            actions.append(&mut self.mouse_actions);
 
             let size = self.last_drawable_px;
             let layout = self
@@ -746,6 +751,11 @@ impl App {
         let archive_chronicle_last_seen = settings_for_archive.archive_last_seen_run_len[p];
         let room_gltf_height_for_update = self.resolved_scene_look().room_gltf_height_scale;
         let updated_overlay = !self.overlay_stack.is_empty();
+        let shop_storeroom_orbit_drag_px = self
+            .input
+            .as_mut()
+            .map(|i| i.take_shop_storeroom_mouse_orbit_px())
+            .unwrap_or((0.0, 0.0));
         self.cpu_profiler
             .begin(crate::render::cpu_profiler::CpuStage::Update);
         let update_result = if self.overlay_stack.is_empty() {
@@ -794,6 +804,7 @@ impl App {
                     .as_ref()
                     .map(|i| i.item_inspect_zoom_triggers)
                     .unwrap_or(0.0),
+                shop_storeroom_orbit_drag_px,
                 rumble_lab_ops: &mut rumble_lab_ops,
                 suspended_shop: None,
                 suspended_collection: None,
@@ -880,6 +891,7 @@ impl App {
                         .as_ref()
                         .map(|i| i.item_inspect_zoom_triggers)
                         .unwrap_or(0.0),
+                    shop_storeroom_orbit_drag_px,
                     rumble_lab_ops: &mut rumble_lab_ops,
                     suspended_shop,
                     suspended_collection,

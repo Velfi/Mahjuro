@@ -218,6 +218,8 @@ pub struct WgpuRenderer {
     gameplay_env_primitives: Vec<TilePrimitiveGpu>,
     /// GPU primitive indices for `btn_cash_in` / `label_cash_in` (multi-material meshes).
     gameplay_cash_in_prim_indices: Vec<usize>,
+    /// Per-primitive gameplay env shadow cast policy (see [`gameplay_prim_casts_room_shadow`]).
+    gameplay_env_shadow_caster_mask: Vec<bool>,
     gameplay_environment: Option<ShopEnvironmentGpu>,
     /// GPU primitive index of `sign_description_left` in `archive_env_primitives` (for culling).
     archive_sign_left_prim_idx: Option<usize>,
@@ -229,18 +231,12 @@ pub struct WgpuRenderer {
     archive_env_shadow_caster_mask: Vec<bool>,
     /// Last-uploaded description decal (`archive_sign_decal_texture`); `u64::MAX` = cleared / none.
     archive_sign_decal_upload_key: u64,
-    /// Multiplier for embedded glTF **room** scale (`window_h *` this): shop, hallway, archive, etc.
-    /// Set each frame from the app (debug overlay may override [`crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE`]).
-    room_gltf_height_scale: f32,
-    /// Debug HDR tune; embedded GLB rooms apply [`crate::render::room_glb::ROOM_GLB_LINEAR_EXPOSURE_BASE`]
-    /// × this before ACES (`CameraUniform.tile_seed` + `SsrGlobals.felt.z`).
-    shop_env_linear_exposure: f32,
-    /// Hemispheric ambient scale (`CameraUniform.decal_atlas_uv.x`).
-    shop_env_ambient_scale: f32,
-    /// Scales embedded glTF punctual contribution in `lit_mesh` (`PointLightsBuf.extras.w` when embedded).
-    shop_lit_mesh_gltf_punctual_scale: f32,
-    /// Scales glTF mesh emissive on `shop.glb` / `hallway.glb` (`CameraUniform.decal_atlas_uv.z`).
-    shop_gltf_emissive_scale: f32,
+    /// Per-scene room GLB tuning (linear/ambient/emissive/height). Filled each frame
+    /// from [`crate::game::scene_look_tuning::SceneLookTuningSet`]; each GLB env pass
+    /// reads its own scene key (shop, pick_chamber, gameplay, …).
+    frame_env_tunes: rustc_hash::FxHashMap<&'static str, crate::game::scene_look_tuning::RoomEnvFrameTune>,
+    /// Active scene's room values (tiles, bloom, lit_mesh when not env-specific).
+    active_frame_env: crate::game::scene_look_tuning::RoomEnvFrameTune,
     /// CPU triangle soups from invisible marker meshes in [`shop.glb`](../../assets/3d/shop.glb).
     pub(super) shop_env_collision_meshes: Vec<crate::render::room_glb::RoomCollisionMesh>,
     /// CPU triangle soups from authored gameplay env buttons (`btn_cash_in`, …).
@@ -366,6 +362,9 @@ pub struct WgpuRenderer {
     prev_frame_shadows_enabled: bool,
     /// Last uploaded directional shadow matrix — redraw when the room frustum moves.
     cached_shadow_light_view_proj: [f32; 16],
+    /// Gameplay candle shadow atlas slots for the current frame.
+    punctual_shadow_lights: Vec<crate::render::punctual_shadow_atlas::PunctualShadowLightSetup>,
+    cached_punctual_shadow_hash: u64,
     /// Lit-mesh slot for [`crate::scenes::shop::shared::SHOP_INSPECT_SUBJECT_ANIM_ID`] this frame.
     shop_inspect_subject_shadow_slot: Option<(runtime::DrawKind, usize)>,
     /// Current `Object3d::anim_id` while [`runtime::object3d_placement::WgpuRenderer::run_object3d_placement`] walks a batch.
@@ -510,9 +509,8 @@ pub struct WgpuRenderer {
     pub tonemap_vhs_scanline: f32,
     pub tonemap_vhs_grain: f32,
     pub tonemap_vhs_vignette: f32,
-    pub tonemap_film_grain: f32,
-    /// Increments each `render` call; re-rolls film grain without UV scroll.
-    film_grain_frame: u32,
+    /// Increments each `render` call; re-rolls VHS tape grain without UV scroll.
+    vhs_grain_frame: u32,
     /// Main-menu world rain tuning (CPU field). Live-tuned via Debug > Rain.
     pub rain_tuning: crate::render::rain_tuning::RainTuning,
     /// Pipeline for procedural scene props (candles, table). Shares the

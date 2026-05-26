@@ -177,13 +177,6 @@ impl CameraFrame {
     }
 }
 
-/// Which [`SsrGlobals.felt`] row to upload for shop item inspect (`lit_mesh` physical HDR).
-#[derive(Clone, Copy)]
-pub(super) enum ShopInspectLitMeshFelt {
-    /// Matches storeroom proportion — shelf props + coins + journal before the hero mesh.
-    Dim,
-}
-
 impl WgpuRenderer {
     pub(super) fn room_punctual_inv_doc_scale(
         &self,
@@ -194,9 +187,9 @@ impl WgpuRenderer {
             return 0.0;
         }
         let height_scale = if self.active_scene_key == Some("main_menu_exterior") {
-            crate::render::main_menu_glb::main_menu_env_height_scale(self.room_gltf_height_scale)
+            crate::render::main_menu_glb::main_menu_env_height_scale(self.active_frame_env().height_scale)
         } else {
-            self.room_gltf_height_scale
+            self.active_frame_env().height_scale
         };
         let s = crate::render::room_glb::room_env_world_scale(cam.h, height_scale);
         1.0 / s.max(1e-6)
@@ -224,20 +217,12 @@ impl WgpuRenderer {
         let shop_env_tonemap = shop_scene;
         let tile_pack_celebration = k == Some("tile_pack_celebration")
             || (k == Some("showcase") && h.tile_pack_celebration_tonemap);
-        if shop_scene && frame.shop_inspect_lit_mesh_hdr {
-            let linear_hdr = self.shop_env_linear_exposure
-                * crate::render::room_glb::SHOP_INSPECT_LIT_MESH_HDR_LINEAR_MUL;
-            let ambient = (self.shop_env_ambient_scale
-                + crate::render::room_glb::SHOP_INSPECT_LIT_MESH_AMBIENT)
-                .min(0.30);
-            return [1.0, linear_hdr, ambient, 0.0];
-        }
         if tile_pack_celebration {
-            let ambient = (self.shop_env_ambient_scale * 0.45)
+            let ambient = (self.active_frame_env().ambient_scale * 0.45)
                 .max(crate::render::room_glb::TILE_PACK_CELEBRATION_LIT_MESH_AMBIENT_MIN);
             let hdr = [
                 1.0,
-                self.shop_env_linear_exposure
+                self.active_frame_env().linear_exposure
                     * crate::render::room_glb::TILE_PACK_CELEBRATION_HDR_LINEAR_EXPOSURE,
                 ambient,
                 0.0,
@@ -264,25 +249,25 @@ impl WgpuRenderer {
                 )
             });
         if shop_showcase_without_env {
-            let linear_hdr = self.shop_env_linear_exposure;
-            return [1.0, linear_hdr, self.shop_env_ambient_scale, 0.0];
+            let linear_hdr = self.active_frame_env().linear_exposure;
+            return [1.0, linear_hdr, self.active_frame_env().ambient_scale, 0.0];
         }
         if !(shop_env_tonemap || table_like) {
             return [0.0; 4];
         }
         let (mut linear_hdr, mut ambient) = if shop_env_tonemap {
             (
-                self.shop_env_linear_exposure
+                self.active_frame_env().linear_exposure
                     * crate::render::room_glb::ROOM_GLB_LINEAR_EXPOSURE_BASE,
-                self.shop_env_ambient_scale
+                self.active_frame_env().ambient_scale
                     .max(crate::render::room_glb::SHOP_ENV_DIELECTRIC_AMBIENT_MIN),
             )
         } else {
             // Non-shop table-like scenes without a room GLB (collection, pick chamber, …).
             (
-                self.shop_env_linear_exposure
+                self.active_frame_env().linear_exposure
                     * crate::render::room_glb::GAMEPLAY_TABLE_HDR_LINEAR_MUL,
-                self.shop_env_ambient_scale
+                self.active_frame_env().ambient_scale
                     .max(crate::render::room_glb::GAMEPLAY_TABLE_AMBIENT_MIN),
             )
         };
@@ -291,9 +276,9 @@ impl WgpuRenderer {
         // Match that here so showcase tiles and `lit_mesh` props share the same ACES linear gain
         // as the room mesh (hallway, archive, gameplay.glb, …).
         if frame.scene_lighting.embedded_gltf_punctual && !shop_env_tonemap {
-            let mut e = self.shop_env_linear_exposure
+            let mut e = self.active_frame_env().linear_exposure
                 * crate::render::room_glb::ROOM_GLB_LINEAR_EXPOSURE_BASE;
-            let mut a = self.shop_env_ambient_scale;
+            let mut a = self.active_frame_env().ambient_scale;
             match k {
                 Some("pick_chamber") => {
                     e *= crate::render::hallway_glb::HALLWAY_ENV_LINEAR_EXPOSURE_MUL;
@@ -323,12 +308,11 @@ impl WgpuRenderer {
         cam: &CameraFrame,
         ssr_enabled: bool,
         frame: &crate::render::draw_cmd::UiFrame,
-        shop_inspect_felt: Option<ShopInspectLitMeshFelt>,
     ) -> SsrGlobals {
         let tm = self.tile_hdr_tonemap(frame);
         let felt_y = tm[0];
-        let mut felt_z = if felt_y > 0.5 { tm[1] } else { 0.0 };
-        let mut felt_w = if felt_y > 0.5 { tm[2] } else { 0.0 };
+        let felt_z = if felt_y > 0.5 { tm[1] } else { 0.0 };
+        let felt_w = if felt_y > 0.5 { tm[2] } else { 0.0 };
         let shop_like = self.active_scene_key == Some("shop")
             || (self.active_scene_key == Some("showcase")
                 && frame
@@ -348,21 +332,6 @@ impl WgpuRenderer {
         } else {
             0.0
         };
-        if shop_like
-            && frame.shop_inspect_lit_mesh_hdr
-            && let Some(phase) = shop_inspect_felt
-        {
-            match phase {
-                ShopInspectLitMeshFelt::Dim => {
-                    felt_z = tm[1] * crate::render::room_glb::SHOP_INSPECT_ENV_VS_LIT_LINEAR;
-                    felt_w = tm[2] * crate::render::room_glb::SHOP_INSPECT_ENV_VS_LIT_AMBIENT;
-                    if felt_y <= 0.5 {
-                        felt_z = 0.0;
-                        felt_w = 0.0;
-                    }
-                }
-            }
-        }
         let ssr_max_distance = cam.h * 2.0;
         let ssr_stride = cam.h * 0.04;
         let ssr_max_steps = 24.0;
@@ -387,17 +356,7 @@ impl WgpuRenderer {
         ssr_enabled: bool,
         frame: &crate::render::draw_cmd::UiFrame,
     ) {
-        let shop_like = self.active_scene_key == Some("shop")
-            || (self.active_scene_key == Some("showcase")
-                && frame
-                    .showcase_render_hints
-                    .shop_tonemap_and_lit_mesh_context);
-        let shop_inspect_felt = if shop_like && frame.shop_inspect_lit_mesh_hdr {
-            Some(ShopInspectLitMeshFelt::Dim)
-        } else {
-            None
-        };
-        let g = self.lit_mesh_ssr_globals(cam, ssr_enabled, frame, shop_inspect_felt);
+        let g = self.lit_mesh_ssr_globals(cam, ssr_enabled, frame);
         self.queue
             .write_buffer(&self.lit_mesh_ssr_buffer, 0, bytemuck::bytes_of(&g));
 

@@ -350,13 +350,13 @@ impl WgpuRenderer {
         // shop.glb invisible marker colliders (spawn slots, inventory anchors, …).
         let env_s = crate::render::room_glb::room_env_world_scale(
             cam.viewport_h,
-            self.room_gltf_height_scale(),
+            self.active_frame_env().height_scale,
         );
         let env_model = crate::render::room_glb::with_shop_glb_cpu(|opt| {
             opt.map(|cpu| {
                 crate::render::room_glb::room_env_model_matrix_from_cpu(
                     cam.viewport_h,
-                    self.room_gltf_height_scale(),
+                    self.active_frame_env().height_scale,
                     cpu,
                 )
             })
@@ -489,7 +489,7 @@ impl WgpuRenderer {
             opt.map(|cpu| {
                 crate::render::room_glb::room_env_model_matrix_from_cpu(
                     cam.viewport_h,
-                    self.room_gltf_height_scale(),
+                    self.active_frame_env().height_scale,
                     cpu,
                 )
             })
@@ -497,7 +497,7 @@ impl WgpuRenderer {
         .unwrap_or_else(|| {
             Mat4::from_scale(Vec3::splat(crate::render::room_glb::room_env_world_scale(
                 cam.viewport_h,
-                self.room_gltf_height_scale(),
+                self.active_frame_env().height_scale,
             )))
         });
         if self.last_gameplay_cash_in_button_visible {

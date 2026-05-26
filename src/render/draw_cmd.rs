@@ -87,7 +87,7 @@ pub struct ShowcaseRenderHints {
     pub layout_use_ray_plane_z: bool,
     /// [`crate::render::wgpu_renderer::runtime::camera::WgpuRenderer::tile_hdr_tonemap`] pack-celebration path.
     pub tile_pack_celebration_tonemap: bool,
-    /// Shop storeroom tonemap + lit_mesh inspect / glTF punctual branches.
+    /// Shop storeroom tonemap + lit_mesh glTF punctual branches (showcase overlay hosting shop).
     pub shop_tonemap_and_lit_mesh_context: bool,
     /// Archive grid HDR / tonemap branch for the showcase overlay.
     pub collection_tonemap_context: bool,
@@ -817,11 +817,6 @@ pub struct UiFrame {
     /// window cut through the page mesh into a live render of the
     /// post-transition scene.
     pub journal_prepass_frame: Option<Box<UiFrame>>,
-    /// Shop [`ItemInspectScene`] uses synthetic point lights only (GLB punctual off). Those
-    /// lights are tuned for table-scale HDR — not the `/512` crush used for bright `shop.glb`.
-    /// When set, [`crate::render::wgpu_renderer::runtime::camera::WgpuRenderer::tile_hdr_tonemap`]
-    /// applies gameplay-style linear exposure for `lit_mesh` so shelf props stay visible.
-    pub shop_inspect_lit_mesh_hdr: bool,
     /// Set by showcase overlay presenters; read by shadow / placement / tonemap paths.
     pub showcase_render_hints: ShowcaseRenderHints,
     /// Archive description quads: `Some(true)` = show left sign only; `Some(false)` = right only;
@@ -866,7 +861,6 @@ impl UiFrame {
             transition_progress: 0.0,
             fisheye_strength: 0.0,
             journal_prepass_frame: None,
-            shop_inspect_lit_mesh_hdr: false,
             showcase_render_hints: ShowcaseRenderHints::default(),
             archive_description_sign_use_left: None,
             archive_page_left_visible: false,
@@ -881,10 +875,10 @@ impl UiFrame {
         }
     }
 
-    /// `room_glb.wgsl` for room meshes vs `tile_3d` (includes shop inspect storeroom path).
+    /// `room_glb.wgsl` for room meshes vs `tile_3d`.
     #[inline]
     pub fn uses_room_glb_shader(&self) -> bool {
-        self.scene_lighting.room_glb_brdf || self.shop_inspect_lit_mesh_hdr
+        self.scene_lighting.room_glb_brdf
     }
 
     // ── Push helpers ────────────────────────────────────────────────────

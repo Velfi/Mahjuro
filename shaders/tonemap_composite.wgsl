@@ -7,9 +7,6 @@
 // after ACES so the rest of the scene's exposure/color math is unchanged. Per-
 // component amounts are read from the uniform — see `crate::game::tonemap_tuning`
 // for the per-scene tuning that drives them.
-//
-// Film grain (`film_grain` > 0) is independent: per-pixel noise keyed by output
-// raster position + `grain_frame` (full re-roll each present, no UV scroll).
 
 struct TonemapParams {
     exposure: f32,
@@ -24,9 +21,7 @@ struct TonemapParams {
     vhs_scanline: f32,
     vhs_grain: f32,
     vhs_vignette: f32,
-    /// 70s photochemical grain strength (0 = off). Independent of VHS.
-    film_grain: f32,
-    /// Monotonic present counter — re-rolls grain each frame without scrolling UVs.
+    /// Monotonic present counter — re-rolls tape grain each frame without UV scroll.
     grain_frame: f32,
 }
 
@@ -66,59 +61,56 @@ fn aces_fitted(color: vec3<f32>) -> vec3<f32> {
     );
 }
 
-// Cheap hash → [0, 1). Same canonical 12.9898 / 78.233 sin trick used in
-// `golden_dust.wgsl` etc.; resolution-independent because we feed it pixel-ish
-// coords (uv * synthetic CRT line count) plus a time term so noise re-rolls.
+// Cheap hash → [0, 1).
 fn vhs_rand(p: vec2<f32>) -> f32 {
     return fract(sin(dot(p, vec2<f32>(12.9898, 78.233))) * 43758.5453);
 }
 
-fn grain_hash21(p: vec2<f32>) -> f32 {
-    return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453);
-}
-
-// Per-output-pixel white noise keyed only by raster position + frame index.
-// No time offset in spatial coords — grain flickers in place like photochemical
-// silver halide, it does not crawl across the frame.
-fn film_grain_rgb(px: vec2<f32>, frame: f32) -> vec3<f32> {
-    let f = floor(frame);
-    let seed = vec2<f32>(f * 12.9898 + 0.5, f * 78.233 + 0.5);
-
-    let fine = vec3<f32>(
-        grain_hash21(px + seed),
-        grain_hash21(px + seed + vec2<f32>(17.3, 9.1)),
-        grain_hash21(px + seed + vec2<f32>(3.7, 23.1)),
-    ) * 2.0 - 1.0;
-
-    let coarse_px = floor(px * 0.30);
-    let coarse = vec3<f32>(
-        grain_hash21(coarse_px + seed + vec2<f32>(41.0, 11.0)),
-        grain_hash21(coarse_px + seed + vec2<f32>(53.2, 7.4)),
-        grain_hash21(coarse_px + seed + vec2<f32>(29.8, 19.6)),
-    ) * 2.0 - 1.0;
-
-    return fine * 0.62 + coarse * 0.38;
-}
-
-fn apply_film_grain(
+// VHS tape noise: horizontally correlated luma speckle + stronger chroma (Cb/Cr),
+// per-scanline AGC wobble, and whole-frame flutter. Masked into midtones so crushed
+// blacks and paper whites stay clean like a well-tracked consumer deck.
+fn apply_vhs_grain(
     color: vec3<f32>,
     frag_coord: vec2<f32>,
-    strength: f32,
     frame: f32,
+    time: f32,
+    strength: f32,
 ) -> vec3<f32> {
     if strength <= 0.0 {
         return color;
     }
-    let lum = dot(color, vec3<f32>(0.299, 0.587, 0.114));
-    // Photochemical grain sits in midtones; lifts off crushed blacks and paper whites.
-    let mask = smoothstep(0.03, 0.18, lum) * (1.0 - smoothstep(0.82, 0.97, lum));
+
     let px = floor(frag_coord);
-    // Whole-frame exposure wobble — constant per frame, not spatial drift.
-    let flicker = 0.90 + 0.10 * grain_hash21(vec2<f32>(floor(frame), floor(frame) * 0.71));
-    let grain_rgb = film_grain_rgb(px, frame) * flicker;
-    // Slight warm bias — Kodak-era print stock.
-    let warm = vec3<f32>(grain_rgb.r * 1.04, grain_rgb.g, grain_rgb.b * 0.94);
-    return color + warm * (strength * mask);
+    let line_y = px.y;
+    let f = floor(frame);
+
+    // Tracking / AGC: noise floor shifts per scanline and slowly over time.
+    let line_wobble = vhs_rand(vec2(line_y * 0.013, f * 7.1 + time * 0.37)) * 2.0 - 1.0;
+    let line_gain = 0.82 + 0.36 * (line_wobble * 0.5 + 0.5);
+
+    // Luminance bandwidth on VHS was ~3 MHz — noise clumps horizontally.
+    let h_block = floor(px.x * 0.32);
+    let h_seed = vec2(h_block + line_y * 0.061, f * 13.0 + time * 0.21);
+    let fine = vhs_rand(px * vec2(0.78, 1.0) + vec2(f * 17.0, f * 31.0)) * 2.0 - 1.0;
+    let coarse_luma = vhs_rand(h_seed) * 2.0 - 1.0;
+    let luma_noise = (fine * 0.52 + coarse_luma * 0.48) * line_gain;
+
+    // Chroma path is noisier than luma on consumer tape (Y/C separation bleed).
+    let chroma_r = vhs_rand(px + vec2(f * 23.0 + 1.7, line_y * 0.19)) * 2.0 - 1.0;
+    let chroma_b = vhs_rand(px.yx + vec2(line_y * 0.11, f * 29.0 + 4.3)) * 2.0 - 1.0;
+    let grain = vec3<f32>(
+        luma_noise + chroma_r * 0.44,
+        luma_noise,
+        luma_noise + chroma_b * 0.44,
+    );
+
+    // Whole-frame exposure flutter (capstan / dropout shimmer).
+    let flicker = 0.88 + 0.14 * vhs_rand(vec2(f, f * 0.673 + time * 0.05));
+
+    let lum = dot(color, vec3<f32>(0.299, 0.587, 0.114));
+    let mask = smoothstep(0.025, 0.14, lum) * (1.0 - smoothstep(0.86, 0.97, lum));
+
+    return color + grain * (strength * flicker * mask);
 }
 
 @fragment
@@ -153,11 +145,14 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             color = color * (1.0 - scan * params.vhs_scanline);
         }
 
-        // Tape grain: per-pixel flicker, no UV crawl.
         if params.vhs_grain > 0.0 {
-            let px = floor(in.clip_pos.xy);
-            let n = vhs_rand(px + vec2<f32>(params.grain_frame * 17.0, params.grain_frame * 31.0));
-            color = color + vec3<f32>((n - 0.5) * params.vhs_grain);
+            color = apply_vhs_grain(
+                color,
+                in.clip_pos.xy,
+                params.grain_frame,
+                t,
+                params.vhs_grain,
+            );
         }
 
         // Vignette: corner darkening (aspect-correct so ultrawide isn't weak in
@@ -172,8 +167,6 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             color = color * (1.0 - vig * params.vhs_vignette);
         }
     }
-
-    color = apply_film_grain(color, in.clip_pos.xy, params.film_grain, params.grain_frame);
 
     return vec4<f32>(color, 1.0);
 }

@@ -111,6 +111,12 @@ struct App {
     mouse_clicked: bool,
     /// True while the left mouse button is held (for slider drag).
     mouse_left_down: bool,
+    /// True on the frame a right mouse button press landed (shop inspect).
+    mouse_right_clicked: bool,
+    /// Scene button id deferred until LMB release when shop uses drag-to-orbit.
+    deferred_lmb_button_click: Option<u32>,
+    /// Cursor at LMB press for drag-vs-click discrimination in the shop.
+    mouse_left_press_cursor: Option<(f32, f32)>,
     scroll_delta: f32,
     active_buttons: Vec<ButtonDef>,
     scene: Scene,
@@ -262,6 +268,26 @@ impl App {
     /// Gameplay-only hover hit-test for the on-table relic row. Uses the
     /// renderer's projected relic rects, so it matches the visible 3D boxes
     /// the same way gameplay focus and tooltips already do.
+    fn active_scene(&self) -> &Scene {
+        self.overlay_stack.last().unwrap_or(&self.scene)
+    }
+
+    /// Storeroom shop is the active face (no showcase inspect overlay, not paused).
+    fn shop_storeroom_face_active(&self) -> bool {
+        self.overlay_stack.is_empty()
+            && matches!(self.scene, Scene::Shop(_))
+            && !self.scene.has_blocking_overlay()
+    }
+
+    /// Shop or item-inspect showcase: LMB drag orbits instead of firing clicks on press.
+    fn shop_defer_lmb_clicks(&self) -> bool {
+        self.shop_storeroom_face_active()
+            || self
+                .overlay_stack
+                .last()
+                .is_some_and(|s| matches!(s, Scene::Showcase(s) if s.wants_orbit_input()))
+    }
+
     fn gameplay_relic_slot_at_cursor(&self, cursor: (f32, f32)) -> Option<usize> {
         if self.modal_overlay_active() || !matches!(self.scene, Scene::Gameplay(_)) {
             return None;
@@ -327,6 +353,9 @@ impl App {
             mouse_button_clicks: Vec::new(),
             mouse_clicked: false,
             mouse_left_down: false,
+            mouse_right_clicked: false,
+            deferred_lmb_button_click: None,
+            mouse_left_press_cursor: None,
             scroll_delta: 0.0,
             active_buttons: Vec::new(),
             scene: Scene::Splash(SplashScene::new()),

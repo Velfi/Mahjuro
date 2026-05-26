@@ -304,28 +304,6 @@ pub const TILE_PACK_CELEBRATION_HDR_LINEAR_EXPOSURE: f32 = 1.0 / 3.8;
 /// when [`SHOP_ENV_AMBIENT_SCALE`] is 0.
 pub const TILE_PACK_CELEBRATION_LIT_MESH_AMBIENT_MIN: f32 = 0.62;
 
-/// Shop [`ItemInspectScene`] `lit_mesh` path: synthetic inspect lights only (no GLB punctual).
-/// [`ROOM_GLB_LINEAR_EXPOSURE_BASE`] is too dark; [`GAMEPLAY_TABLE_HDR_LINEAR_MUL`] reads blown out.
-pub const SHOP_INSPECT_LIT_MESH_HDR_LINEAR_MUL: f32 = 1.0 / 52.0;
-
-/// Hemispheric fill term in `lit_mesh.wgsl` (`felt.w * 0.08` before ACES). Keep below
-/// [`GAMEPLAY_TABLE_AMBIENT_MIN`] so inspect does not wash out like the table.
-pub const SHOP_INSPECT_LIT_MESH_AMBIENT: f32 = 0.29;
-
-/// Storeroom linear HDR during shop inspect = subject linear × this. Using the ratio of
-/// legacy shop crush ([`ROOM_GLB_LINEAR_EXPOSURE_BASE`]) to subject inspect gain
-/// ([`SHOP_INSPECT_LIT_MESH_HDR_LINEAR_MUL`]) ties both to the same tuning multiplier and
-/// composite path (SDR and HDR swapchains share `tonemap_composite.wgsl`).
-pub const SHOP_INSPECT_ENV_VS_LIT_LINEAR: f32 =
-    ROOM_GLB_LINEAR_EXPOSURE_BASE / SHOP_INSPECT_LIT_MESH_HDR_LINEAR_MUL;
-
-/// Room hemispheric fill vs subject `hdr_tonemap.z` during inspect (`tile_3d.wgsl`).
-pub const SHOP_INSPECT_ENV_VS_LIT_AMBIENT: f32 = 0.45;
-
-/// Item inspect disables GLB punctual and drives `room_glb.wgsl` via `tile_seed` / ambient.
-/// The storeroom BRDF stacks different radiance than `lit_mesh`; without this boost the room reads black.
-pub const SHOP_INSPECT_STOREROOM_GLB_TILE_SEED_MUL: f32 = 12.0;
-
 /// Hemispheric fill in `room_glb.wgsl` (`decal_atlas_uv.x`). Authoring default is 0
 /// (punctual-forward interior); [`SHOP_ENV_DIELECTRIC_AMBIENT_MIN`] is still applied so
 /// low-roughness dielectrics (porcelain trays) do not go black on faces away from lights.
@@ -621,6 +599,49 @@ pub fn screen_rect_for_marker_mesh_bounds(p: &MarkerScreenRectParams<'_>) -> Opt
     let rw = ((mx_x - mn_x).max(1.0)).max(p.min_rw);
     let rh = ((mx_y - mn_y).max(1.0)).max(p.min_rh);
     Some([cx - rw * 0.5, cy - rh * 0.5, rw, rh])
+}
+
+/// World-space unit-cube primitive matching a marker's decoded mesh AABB (same basis as
+/// [`screen_rect_for_marker_mesh_bounds`]). Used by debug overlays (e.g. Button AABB Lab).
+pub fn marker_mesh_bounds_reference_object3d(
+    win_w: f32,
+    win_h: f32,
+    env_height_scale: f32,
+    cpu: &RoomGlbCpu,
+    node_name: &str,
+    tint: [f32; 4],
+) -> Option<crate::render::draw_cmd::Object3d> {
+    use crate::render::draw_cmd::{Object3d, Object3dKind};
+    use crate::render::primitive::{MaterialSpec, MeshId};
+    use crate::render::world_space::object3d_pos_triple_for_world_center;
+
+    let bounds = cpu.marker_mesh_bounds_doc_for(node_name)?;
+    let s = room_env_world_scale(win_h, env_height_scale);
+    let center_doc = cpu
+        .environment_bounds_doc
+        .map(|b| b.center())
+        .unwrap_or(Vec3::ZERO);
+    let center_world = (bounds.center() - center_doc) * s;
+    let d = bounds.max - bounds.min;
+    let extents = [(d.x * s).abs(), (d.y * s).abs(), (d.z * s).abs()];
+    if extents[0] < 1e-6 || extents[1] < 1e-6 || extents[2] < 1e-6 {
+        return None;
+    }
+    Some(Object3d {
+        pos: object3d_pos_triple_for_world_center(win_w, win_h, center_world),
+        extents,
+        rotation: [0.0, 0.0, 0.0],
+        color: tint,
+        kind: Object3dKind::Primitive {
+            shape: MeshId::Cube,
+            material: MaterialSpec::plain(),
+            pick_id: None,
+            shadow_caster: false,
+            silhouette: false,
+        },
+        hover_target: 0.0,
+        anim_id: 0,
+    })
 }
 
 /// Shared glTF room walk used by [`load_shop_glb_from_bytes`] and [`crate::render::hallway_glb`].

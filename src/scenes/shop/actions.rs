@@ -13,7 +13,7 @@ pub(super) fn generate_shop_stock(
     extra_relics: usize,
     pool_extinction: crate::game::run::RelicShopPoolExtinction,
     mode: &crate::game::game_mode::GameMode,
-    qilin_ribbon_unlocked: bool,
+    run: &crate::game::run::RunState,
 ) -> (
     Vec<ShopItem>,
     Vec<ConsumableShopItem>,
@@ -91,10 +91,7 @@ pub(super) fn generate_shop_stock(
         })
         .collect();
 
-    let mut zodiac_pool: Vec<ZodiacKind> = ZodiacKind::all().to_vec();
-    if !qilin_ribbon_unlocked {
-        zodiac_pool.retain(|&z| z != ZodiacKind::Qilin);
-    }
+    let mut zodiac_pool = run.zodiac_spawn_pool();
     zodiac_pool.shuffle(&mut rng);
     let mut talisman_pool: Vec<TalismanKind> = TalismanKind::all().to_vec();
     talisman_pool.shuffle(&mut rng);
@@ -202,12 +199,11 @@ impl ShopScene {
     fn new_with_mode(
         run: &mut crate::game::run::RunState,
         mode: ShopMode,
-        progress: &crate::core::progression::PlayerProgress,
+        _progress: &crate::core::progression::PlayerProgress,
     ) -> Self {
         if mode != ShopMode::Tutorial {
             run.chronicle.note_shop_visit();
         }
-        let qilin_ribbon_unlocked = progress.qilin_ribbon_unlocked();
         let shop = GameEngine::read_shop(run);
         let extra_relics = GameEngine::shop_extra_relic_stock(run);
         let stake = run.mode.stake;
@@ -220,7 +216,7 @@ impl ShopScene {
                 extra_relics,
                 run.relic_shop_pool_extinction(),
                 &run.mode,
-                qilin_ribbon_unlocked,
+                run,
             )
         };
 
@@ -254,7 +250,6 @@ impl ShopScene {
         ));
         Self {
             mode,
-            qilin_ribbon_unlocked,
             items,
             zodiac_items,
             talisman_items,
@@ -278,6 +273,8 @@ impl ShopScene {
             }),
             last_inspect_cam: std::cell::Cell::new(None),
             west_sell_hold_started: None,
+            storeroom_orbit_yaw: 0.0,
+            storeroom_orbit_pitch: 0.0,
         }
     }
 
@@ -444,7 +441,7 @@ impl ShopScene {
             0,
             run.relic_shop_pool_extinction(),
             &run.mode,
-            self.qilin_ribbon_unlocked,
+            run,
         );
         self.items = items;
         self.zodiac_items = zodiac_items;
@@ -467,7 +464,7 @@ impl ShopScene {
             0,
             run.relic_shop_pool_extinction(),
             &run.mode,
-            self.qilin_ribbon_unlocked,
+            run,
         );
         self.items = items;
         self.zodiac_items = zodiac_items;

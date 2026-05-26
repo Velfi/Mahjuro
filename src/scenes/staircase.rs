@@ -52,7 +52,7 @@ impl SceneBehavior for StaircaseScene {
                     w,
                     h,
                     ctx.room_gltf_height_scale,
-                    &ctx.shop_env_lighting,
+                    &ctx.room_env_for("staircase").0,
                 )
             } else {
                 Vec::new()
@@ -62,7 +62,7 @@ impl SceneBehavior for StaircaseScene {
                     w,
                     h,
                     ctx.room_gltf_height_scale,
-                    &ctx.shop_env_lighting,
+                    &ctx.room_env_for("staircase").0,
                 )
                 .into_iter()
                 .map(ScenePunctualLight::InverseSquare)

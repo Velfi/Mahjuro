@@ -315,17 +315,11 @@ impl WgpuRenderer {
         let pl_w = self.size.width.max(1) as f32;
         let pl_h = self.size.height.max(1) as f32;
         let time_s = self.creation_time.elapsed().as_secs_f32();
-        let h = &frame.showcase_render_hints;
-        // Keep shop inspect in the same lit-mesh GLTF intensity band as the
-        // storeroom baseline so inspect entry does not pop brightness.
-        let shop_inspect_context =
-            self.active_scene_key == Some("showcase") && h.shop_tonemap_and_lit_mesh_context;
-        let lit_mesh_inv_scale =
-            if frame.scene_lighting.embedded_gltf_punctual || shop_inspect_context {
-                self.shop_lit_mesh_gltf_punctual_scale
-            } else {
-                1.0
-            };
+        let lit_mesh_inv_scale = if frame.scene_lighting.embedded_gltf_punctual {
+            self.active_frame_env().lit_mesh_gltf_punctual_scale
+        } else {
+            1.0
+        };
         let punctual_bake = PunctualLightBakeParams {
             src: &frame.scene_lighting.punctual,
             candle_count: frame.candle_light_count,
@@ -342,7 +336,9 @@ impl WgpuRenderer {
                 cam,
             })
         };
-        let use_ray_plane = h.layout_uses_ray_plane(self.active_scene_key);
+        let use_ray_plane = frame
+            .showcase_render_hints
+            .layout_uses_ray_plane(self.active_scene_key);
         let point_lights_buf = match (use_ray_plane, frame.camera_override.as_ref()) {
             (true, Some(cam)) => shop_camera_punctual(cam),
             _ => PointLightsBuf::from_scene_punctual(&punctual_bake),

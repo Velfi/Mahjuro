@@ -572,7 +572,7 @@ pub(crate) fn render_shop_frame(
 ) -> UiFrame {
     let w = ctx.layout.window_w;
     let h = ctx.layout.window_h;
-    let env_h = ctx.room_gltf_height_scale;
+    let env_h = ctx.room_env_for("shop").1;
     shop.drawn_room_gltf_height_scale.set(env_h);
     let shop_rm = GameEngine::read_shop(ctx.run);
 
@@ -590,7 +590,21 @@ pub(crate) fn render_shop_frame(
 
     // Mesh anchors use ray/plane hits so props sit under display-case pixels (plain
     // `pixel_to_world` drifts under perspective).
-    let base = shop_camera_base(w, h, env_h);
+    let base = {
+        let base = shop_camera_base(w, h, env_h);
+        if inspect.is_none()
+            && (shop.storeroom_orbit_yaw.abs() > 1e-6 || shop.storeroom_orbit_pitch.abs() > 1e-6)
+        {
+            crate::scenes::object3d_inspect::orbit_camera_around_pivot(
+                &base,
+                base.target,
+                shop.storeroom_orbit_yaw,
+                shop.storeroom_orbit_pitch,
+            )
+        } else {
+            base
+        }
+    };
     let inspect_rig = InspectRig::shop(h, env_h);
     let (inspect_anchor, _inspect_cam_now, cam) = {
         let _g = crate::render::cpu_profiler::scope("draw_frame.shop_camera_inspect");
@@ -669,7 +683,7 @@ pub(crate) fn render_shop_frame(
                 w,
                 h,
                 env_h,
-                &ctx.shop_env_lighting,
+                &ctx.room_env_for("shop").0,
                 shop.age_secs,
                 lamp_flicker,
             )
@@ -793,7 +807,7 @@ pub(crate) fn render_shop_frame(
         merged_punctual.extend(point_lights.into_iter().map(ScenePunctualLight::Smooth));
         frame.scene_lighting.punctual = merged_punctual;
         frame.scene_lighting.spot_lights =
-            shop_embedded_spot_lights_runtime(w, h, env_h, &ctx.shop_env_lighting);
+            shop_embedded_spot_lights_runtime(w, h, env_h, &ctx.room_env_for("shop").0);
         if use_glb_lights {
             let candle_flames = shop_gltf_candle_flame_emitters(
                 w,

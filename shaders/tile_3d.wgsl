@@ -83,11 +83,18 @@ struct SpotLights {
 @group(3) @binding(0) var<uniform> spot_lights: SpotLights;
 
 // ── Shadow sampling (group 2, shared frame-wide) ─────────────────────
+struct PunctualShadowSlot {
+    light_view_proj: mat4x4<f32>,
+    atlas_rect: vec4<f32>,
+};
+
 struct ShadowGlobals {
     light_view_proj: mat4x4<f32>,
     // x = enabled (0/1), y = depth bias, z = texel size, w = unused
     params: vec4<f32>,
     room_baked_light_view_proj: mat4x4<f32>,
+    punctual_params: vec4<f32>,
+    punctual_lights: array<PunctualShadowSlot, 8>,
 };
 @group(2) @binding(0) var<uniform> shadow_globals: ShadowGlobals;
 @group(2) @binding(1) var shadow_map: texture_depth_2d;
@@ -543,7 +550,8 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         // 0.35 ambient floor so even back-facing fragments warm up a little
         // (matches how a real candle bounces off the table around a tile).
         let lambert = 0.35 + 0.65 * nl;
-        point_contrib = point_contrib + lc * intensity * atten * lambert;
+        let punc_vis = punctual_shadow_vis(i, in.world_pos);
+        point_contrib = point_contrib + lc * intensity * atten * lambert * punc_vis;
 
         // ── Enhancement sheen lobes ────────────────────────────────────
         // Fresnel-masked specular highlights per enhancement type, matching

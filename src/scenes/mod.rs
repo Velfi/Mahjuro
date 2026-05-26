@@ -193,6 +193,8 @@ pub struct UpdateCtx<'a> {
     pub item_inspect_orbit_stick: (f32, f32),
     /// Showcase orbit zoom: analog triggers (`RT − LT`) plus digital bumpers as ±1.
     pub item_inspect_zoom_triggers: f32,
+    /// LMB-drag pixel delta for shop storeroom turntable (consumed each frame by [`ShopScene`]).
+    pub shop_storeroom_orbit_drag_px: (f32, f32),
     /// Queued by the rumble lab scene; drained into input state after `update()`.
     pub rumble_lab_ops: &'a mut Vec<RumbleLabOp>,
     /// [`ShopScene`] under shop showcase **inspect** presenter: orbit sync + focus cycling.
@@ -252,6 +254,11 @@ pub struct DrawCtx<'a> {
     pub room_gltf_height_scale: f32,
     /// Shop punctual + tonemap tuning (debug overlay / defaults from `room_glb` constants).
     pub shop_env_lighting: crate::render::room_glb::RoomEnvLightingTune,
+    /// Per-scene room GLB lighting + height (shop, pick_chamber, gameplay, …).
+    pub env_per_scene: &'a rustc_hash::FxHashMap<
+        &'static str,
+        (crate::render::room_glb::RoomEnvLightingTune, f32),
+    >,
     /// Master switches for layered visuals — start from [`EffectLayers::BASELINE`]
     /// and enable fields incrementally (see `effect_layers.rs`).
     pub effect_layers: EffectLayers,
@@ -302,6 +309,10 @@ impl<'a> DrawCtx<'a> {
         modal_active: bool,
         room_gltf_height_scale: f32,
         shop_env_lighting: crate::render::room_glb::RoomEnvLightingTune,
+        env_per_scene: &'a rustc_hash::FxHashMap<
+            &'static str,
+            (crate::render::room_glb::RoomEnvLightingTune, f32),
+        >,
         effect_layers: EffectLayers,
         cursor_pos: (f32, f32),
         input_mode: InputMode,
@@ -333,6 +344,7 @@ impl<'a> DrawCtx<'a> {
             modal_active,
             room_gltf_height_scale,
             shop_env_lighting,
+            env_per_scene,
             effect_layers,
             cursor_pos,
             input_mode,
@@ -348,6 +360,17 @@ impl<'a> DrawCtx<'a> {
             hallway_distortion_debug,
             rain_tuning,
         }
+    }
+
+    /// Room punctual tuning + glTF height for a specific scene bucket.
+    pub fn room_env_for(
+        &self,
+        scene_key: &'static str,
+    ) -> (crate::render::room_glb::RoomEnvLightingTune, f32) {
+        *self
+            .env_per_scene
+            .get(scene_key)
+            .unwrap_or(&(self.shop_env_lighting, self.room_gltf_height_scale))
     }
 }
 

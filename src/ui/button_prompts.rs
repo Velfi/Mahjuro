@@ -251,7 +251,7 @@ mod tests {
         match surface {
             PromptInputSurface::Controller => inspect_camera_extras(style),
             PromptInputSurface::MouseOrKeyboard => {
-                "Arrows or drag: orbit item · WASD: cycle items · Shift+W/↑ zoom in · Shift+S/↓ zoom out · Mouse wheel: zoom (inspect)"
+                "Left-drag: orbit item · Right-click: inspect · WASD: cycle items · Shift+W/↑ zoom in · Shift+S/↓ zoom out · Wheel: zoom"
                     .to_string()
             }
         }
@@ -274,7 +274,8 @@ mod tests {
                 )
             }
             PromptInputSurface::MouseOrKeyboard => {
-                "Backspace exit  ·  Space / Enter select  ·  Hold Q sell  ·  E inspect".to_string()
+                "Backspace exit  ·  Space / Enter select  ·  Hold Q sell  ·  Right-click inspect  ·  Drag orbit"
+                    .to_string()
             }
         }
     }
