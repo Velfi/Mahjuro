@@ -325,6 +325,8 @@ pub struct ShopReadModel {
     pub owned_talismans: Vec<ShopOwnedConsumable>,
     pub relic_counters: std::collections::BTreeMap<RelicId, i32>,
     pub total_score_earned: u64,
+    /// Current ante (1-indexed), for relic tooltips (e.g. Beggar's Cup).
+    pub wing: u32,
     /// Score target for the upcoming blind (per-ante scaling), for relic tooltips.
     pub next_chamber_target: u32,
 }
@@ -549,6 +551,7 @@ impl<'a> GameEngine<'a> {
             owned_talismans,
             relic_counters: run.relic_counters.clone(),
             total_score_earned: run.total_score_earned,
+            wing: run.wing,
             next_chamber_target: run.chamber_score_target(run.upcoming_chamber),
         }
     }
@@ -690,7 +693,7 @@ impl<'a> GameEngine<'a> {
         GameplayReadModel {
             chamber: run.chamber,
             chamber_label,
-            ordeal_kind: run.ordeal.upcoming,
+            ordeal_kind: (run.chamber == ChamberKind::Ordeal).then(|| run.ordeal.upcoming).flatten(),
             ordeal_ofuda_title,
             ordeal_ofuda_rule_text,
             run_number: run.run_number,

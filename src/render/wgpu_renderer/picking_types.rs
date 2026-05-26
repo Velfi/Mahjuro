@@ -63,9 +63,10 @@ pub enum GameplayPick {
     /// Index into the most recent `YakuTabletBatch` (hover only — yaku
     /// tablets aren't clickable, just informational).
     YakuTablet(usize),
-    /// Index into the most recent `WoodTabletBatch` — 0 = cash-in tablet
-    /// when structure is committed.
+    /// Index into the most recent `WoodTabletBatch` (tutorial / legacy procedural tablets).
     WoodTablet(usize),
+    /// Authored `btn_cash_in` mesh in `gameplay.glb` (env draw + collision pick).
+    CashInButton,
     /// Leather-bound Yaku Journal book (same mesh as the shop).
     JournalBook,
     /// The discard bowl. Click target = commit the selected discard.

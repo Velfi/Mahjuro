@@ -81,7 +81,9 @@ pub(crate) fn apply_dora_yaku_and_structure(
             .filter(|y| {
                 // Secret pattern: Kokushi Musō is omitted from `available_yaku`
                 // until the first cash-in, but the hand must still score when valid.
-                if *y == YakuKind::KokushiMusou {
+                // Chicken Hand is omitted from some tutorial pools but must still
+                // score (and proc post-cash-in hooks) on legal no-yaku shapes.
+                if *y == YakuKind::KokushiMusou || *y == YakuKind::ChickenHand {
                     return true;
                 }
                 ctx.pattern.available_yaku.contains(y)

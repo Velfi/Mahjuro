@@ -227,6 +227,46 @@ fn debuffed_relic_is_disabled_for_scoring() {
 }
 
 #[test]
+fn minimalist_mults_single_meld() {
+    let hand = vec![
+        Tile::new(Suit::Souzu, 3, 0),
+        Tile::new(Suit::Souzu, 3, 1),
+        Tile::new(Suit::Souzu, 3, 2),
+    ];
+    let sets = find_pairs_and_triplets(&hand);
+    let r = relics(vec![RelicId::Minimalist]);
+    let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
+    assert_eq!(breakdown.final_chips, 9);
+    assert_eq!(breakdown.final_mult, 7.0);
+    assert!(breakdown.steps.iter().any(|s| s.source == "Minimalist"));
+}
+
+#[test]
+fn minimalist_skipped_with_multiple_melds() {
+    let hand = vec![
+        Tile::new(Suit::Souzu, 3, 0),
+        Tile::new(Suit::Souzu, 3, 1),
+        Tile::new(Suit::Souzu, 3, 2),
+        Tile::new(Suit::Manzu, 5, 3),
+        Tile::new(Suit::Manzu, 6, 4),
+        Tile::new(Suit::Manzu, 7, 5),
+    ];
+    let sets = vec![
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Triplet,
+            tile_ids: vec![0, 1, 2],
+        },
+        crate::core::hand::DetectedMeld {
+            kind: crate::core::hand::MeldKind::Sequence,
+            tile_ids: vec![3, 4, 5],
+        },
+    ];
+    let r = relics(vec![RelicId::Minimalist]);
+    let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
+    assert!(!breakdown.steps.iter().any(|s| s.source == "Minimalist"));
+}
+
+#[test]
 fn white_dragons_hush_mults_white_dragon_pair() {
     let hand = vec![Tile::new(Suit::Dragon, 3, 0), Tile::new(Suit::Dragon, 3, 1)];
     let sets = find_pairs_and_triplets(&hand);
@@ -279,7 +319,7 @@ fn dragon_rage_fires_on_any_dragon_triplet() {
 }
 
 #[test]
-fn multiplier_master_adds_one_mult_per_relic() {
+fn multiplier_master_adds_two_mult_per_relic() {
     let hand = vec![
         Tile::new(Suit::Manzu, 9, 0),
         Tile::new(Suit::Manzu, 9, 1),
@@ -288,20 +328,20 @@ fn multiplier_master_adds_one_mult_per_relic() {
     let sets = find_pairs_and_triplets(&hand);
     let r = relics(vec![RelicId::MultiplierMaster]);
     let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    assert_eq!(breakdown.final_mult, 2.0);
+    assert_eq!(breakdown.final_mult, 3.0);
 
     let r2 = relics(vec![RelicId::MultiplierMaster, RelicId::ChainReaction]);
     let breakdown2 = score_sets(&hand, &sets, &ctx_with(&r2, false), &[]);
-    assert_eq!(breakdown2.final_mult, 3.0);
+    assert_eq!(breakdown2.final_mult, 5.0);
 
     let mut r3 = relics(vec![RelicId::MultiplierMaster, RelicId::ChainReaction]);
     r3.set_debuffed([RelicId::ChainReaction]);
     let breakdown3 = score_sets(&hand, &sets, &ctx_with(&r3, false), &[]);
-    assert_eq!(breakdown3.final_mult, 3.0);
+    assert_eq!(breakdown3.final_mult, 5.0);
 }
 
 #[test]
-fn dragon_echo_copies_adjacent_set_chips() {
+fn dragon_echo_retriggers_dragon_melds() {
     let hand = vec![
         Tile::new(Suit::Manzu, 1, 0),
         Tile::new(Suit::Manzu, 2, 1),
@@ -327,21 +367,30 @@ fn dragon_echo_copies_adjacent_set_chips() {
             tile_ids: vec![6, 7, 8],
         },
     ];
-    let r = relics(vec![RelicId::DragonEcho]);
-    let breakdown = score_sets(&hand, &sets, &ctx_with(&r, false), &[]);
-    let (idx, _) = breakdown
-        .steps
-        .iter()
-        .enumerate()
-        .find(|(_, s)| s.source == "Dragon Echo")
-        .unwrap();
-    let prev_chips = if idx == 0 {
-        breakdown.base_chips
-    } else {
-        breakdown.steps[idx - 1].running_chips
-    };
-    let echo_delta = breakdown.steps[idx].running_chips - prev_chips;
-    assert_eq!(echo_delta, 30);
+    let base = score_sets(&hand, &sets, &ctx_with(&RelicState::default(), false), &[]);
+    let with_echo = score_sets(
+        &hand,
+        &sets,
+        &ctx_with(&relics(vec![RelicId::DragonEcho]), false),
+        &[],
+    );
+    assert_eq!(with_echo.final_chips, base.final_chips + 45);
+    assert!(with_echo.steps.iter().any(|s| s.source == "Dragon Echo"));
+}
+
+#[test]
+fn dragon_echo_retriggers_dragon_pairs() {
+    let hand = vec![Tile::new(Suit::Dragon, 3, 0), Tile::new(Suit::Dragon, 3, 1)];
+    let sets = find_pairs_and_triplets(&hand);
+    let base = score_sets(&hand, &sets, &ctx_with(&RelicState::default(), false), &[]);
+    let with_echo = score_sets(
+        &hand,
+        &sets,
+        &ctx_with(&relics(vec![RelicId::DragonEcho]), false),
+        &[],
+    );
+    assert_eq!(with_echo.final_chips, base.final_chips + 30);
+    assert!(with_echo.steps.iter().any(|s| s.source == "Dragon Echo"));
 }
 
 #[test]
@@ -623,6 +672,43 @@ fn kokushi_musou_scores_when_omitted_from_available_yaku() {
     assert!(
         breakdown.detected_yaku.contains(&YakuKind::KokushiMusou),
         "expected Kokushi despite secret-yaku filter, got {:?}",
+        breakdown.detected_yaku
+    );
+}
+
+#[test]
+fn chicken_hand_scores_when_omitted_from_available_yaku() {
+    use crate::core::hand::validate_selection;
+    use crate::core::structure::StructureTriggerMeta;
+    use crate::core::yaku::YakuKind;
+    let tiles = vec![
+        Tile::new(Suit::Manzu, 1, 0),
+        Tile::new(Suit::Manzu, 2, 1),
+        Tile::new(Suit::Manzu, 3, 2),
+        Tile::new(Suit::Souzu, 4, 3),
+        Tile::new(Suit::Souzu, 5, 4),
+        Tile::new(Suit::Souzu, 6, 5),
+        Tile::new(Suit::Pinzu, 7, 6),
+        Tile::new(Suit::Pinzu, 8, 7),
+        Tile::new(Suit::Pinzu, 9, 8),
+        Tile::new(Suit::Pinzu, 3, 9),
+        Tile::new(Suit::Pinzu, 3, 10),
+        Tile::new(Suit::Pinzu, 3, 11),
+        Tile::new(Suit::Wind, 2, 12),
+        Tile::new(Suit::Wind, 2, 13),
+    ];
+    let sets = validate_selection(&tiles).expect("chicken decomposition");
+    let r = RelicState::default();
+    let mut ctx = ctx_with(&r, false);
+    ctx.pattern.available_yaku = vec![YakuKind::Tanyao, YakuKind::Toitoi];
+    ctx.structure = Some(StructureTriggerMeta {
+        meld_count: sets.len() as u32,
+        inject_chicken_if_no_yaku: true,
+    });
+    let breakdown = score_sets(&tiles, &sets, &ctx, &[]);
+    assert!(
+        breakdown.detected_yaku.contains(&YakuKind::ChickenHand),
+        "expected Chicken Hand despite tutorial pool, got {:?}",
         breakdown.detected_yaku
     );
 }

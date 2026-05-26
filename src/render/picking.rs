@@ -18,8 +18,16 @@ use crate::render::wgpu_renderer::{
     GameplayPick, LOCAL_X_EXTENT, LOCAL_Y_EXTENT, LOCAL_Z_EXTENT, MAIN_MENU_PICK_OPTIONS,
     MAIN_MENU_PICK_PLAY, MAIN_MENU_PICK_QUIT, MainMenuPick, ShopHit, WgpuRenderer,
 };
+use crate::render::gameplay_glb::BTN_CASH_IN;
 use crate::scenes::journal_transition::YAKU_JOURNAL_BOOK_PICK_ID;
 use crate::scenes::shop::pick_ids::{PICK_LEAVE_PROP, PICK_REROLL_PROP};
+
+fn gameplay_env_collision_node_to_hit(node_name: &str) -> Option<GameplayPick> {
+    match node_name {
+        BTN_CASH_IN => Some(GameplayPick::CashInButton),
+        _ => None,
+    }
+}
 
 fn shop_env_collision_node_to_hit(node_name: &str) -> Option<ShopHit> {
     match node_name {
@@ -386,12 +394,18 @@ impl WgpuRenderer {
         ]
         .into_iter()
         .any(|id| self.last_primitive_pick_models.contains_key(&id));
+        let has_cash_in_btn = self.last_gameplay_cash_in_button_visible
+            && self
+                .gameplay_env_collision_meshes
+                .iter()
+                .any(|m| m.node_name == BTN_CASH_IN);
         if self.last_yaku_tablet_models.is_empty()
             && self.last_wood_tablet_models.is_empty()
             && self.last_bowl_model.is_none()
             && self.last_mirror_model.is_none()
             && !has_journal_book
             && !has_main_menu_pick
+            && !has_cash_in_btn
         {
             return None;
         }
@@ -464,10 +478,41 @@ impl WgpuRenderer {
                 consider(GameplayPick::YakuTablet(i), t);
             }
         }
-        // Wood action tablets — same unit cube as the yaku tablets.
+        // Wood action tablets — tutorial / legacy procedural tablets only.
         for (i, model) in self.last_wood_tablet_models.iter().enumerate() {
             if let Some(t) = slab_test(*model, 0.5, 0.5, 0.5, 0.0) {
                 consider(GameplayPick::WoodTablet(i), t);
+            }
+        }
+        // Authored gameplay env buttons (`btn_cash_in`, …).
+        let gameplay_env_model = crate::render::gameplay_glb::with_gameplay_glb_cpu(|opt| {
+            opt.map(|cpu| {
+                crate::render::room_glb::room_env_model_matrix_from_cpu(
+                    cam.viewport_h,
+                    self.room_gltf_height_scale(),
+                    cpu,
+                )
+            })
+        })
+        .unwrap_or_else(|| {
+            Mat4::from_scale(Vec3::splat(crate::render::room_glb::room_env_world_scale(
+                cam.viewport_h,
+                self.room_gltf_height_scale(),
+            )))
+        });
+        if self.last_gameplay_cash_in_button_visible {
+            for mesh in &self.gameplay_env_collision_meshes {
+                let Some(hit) = gameplay_env_collision_node_to_hit(mesh.node_name.as_str()) else {
+                    continue;
+                };
+                if let Some(t_w) = trimesh_hit_world_t_tris(
+                    &mesh.triangles,
+                    gameplay_env_model,
+                    world_origin,
+                    world_dir,
+                ) {
+                    consider(hit, t_w);
+                }
             }
         }
         // Yaku Journal book — same unit-cube proxy as shop (`Object3dKind::Book`).

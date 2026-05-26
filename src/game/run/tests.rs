@@ -2,6 +2,7 @@
 mod cases {
     use std::collections::BTreeMap;
 
+    use crate::core::debuff::{TileDebuff, TileDebuffClass};
     use crate::core::deck::Wall;
     use crate::core::deck::build_wall;
     use crate::core::hand::{DetectedMeld, MeldKind};
@@ -717,6 +718,53 @@ mod cases {
     }
 
     #[test]
+    fn advance_round_after_big_keeps_cleared_chamber_until_apply() {
+        let mut run = test_run();
+        let mut bus = bus();
+        run.chamber = ChamberKind::Big;
+        run.upcoming_chamber = ChamberKind::Big;
+        run.apply_chamber(ChamberKind::Big, None);
+        let cleared_target = run.target_score;
+
+        run.advance_round(&mut bus);
+
+        assert_eq!(run.chamber, ChamberKind::Big);
+        assert_eq!(run.upcoming_chamber, ChamberKind::Ordeal);
+        assert_eq!(run.target_score, cleared_target);
+    }
+
+    #[test]
+    fn advance_round_after_boss_clears_upcoming_ordeal_until_reveal() {
+        let mut run = test_run();
+        let mut bus = bus();
+        run.chamber = ChamberKind::Ordeal;
+        run.upcoming_chamber = ChamberKind::Ordeal;
+        run.ordeal.upcoming = Some(OrdealKind::Drought);
+        run.resolve_upcoming_ordeal();
+
+        run.advance_round(&mut bus);
+
+        assert_eq!(run.wing, 2);
+        assert_eq!(run.upcoming_chamber, ChamberKind::Small);
+        assert_eq!(run.chamber, ChamberKind::Ordeal);
+        assert!(run.ordeal.upcoming.is_none());
+        assert!(run.ordeal.effect.is_none());
+    }
+
+    #[test]
+    fn ensure_ordeal_revealed_rolls_for_current_wing() {
+        let mut run = RunState::new_demo();
+        run.wing = 2;
+        run.ordeal.upcoming = None;
+        run.ordeal.effect = None;
+
+        run.ensure_ordeal_revealed();
+
+        assert!(run.ordeal.upcoming.is_some());
+        assert!(run.ordeal.effect.is_some());
+    }
+
+    #[test]
     fn advance_round_after_boss_preserves_pending_shop_skip_rewards() {
         let mut run = test_run();
         let mut bus = bus();
@@ -826,6 +874,60 @@ mod cases {
         assert_eq!(run.round_play_cap(), STARTING_PLAYS);
         run.relics.active.push(RelicId::GlassCannon);
         assert_eq!(run.round_play_cap(), STARTING_PLAYS);
+    }
+
+    #[test]
+    fn green_luck_committing_honors_does_not_count_until_cash_in() {
+        let mut run = test_run();
+        run.auto_cash_in_on_full_structure = false;
+        let winds = [
+            Tile::new(Suit::Wind, 1, 901),
+            Tile::new(Suit::Wind, 1, 902),
+            Tile::new(Suit::Wind, 1, 903),
+        ];
+        let mut hand: Vec<Tile> = (0..HAND_SIZE - 3)
+            .map(|i| Tile::new(Suit::Manzu, 1, 100 + i as u32))
+            .collect();
+        hand.extend(winds);
+        run.hand = hand;
+        run.selected = std::iter::repeat_n(false, HAND_SIZE - 3)
+            .chain(std::iter::repeat_n(true, 3))
+            .collect();
+        let mut bus = bus();
+        assert!(run.commit_selection_to_structure(&mut bus) > 0);
+        assert!(
+            !run.honors_scored_this_round,
+            "banking honors must not count toward Green Luck until cash-in scores them"
+        );
+    }
+
+    #[test]
+    fn green_luck_ignores_debuffed_honors_at_cash_in() {
+        let mut run = test_run();
+        run.tile_debuffs = vec![TileDebuff::Class(TileDebuffClass::Honors)];
+        let (tiles, sets) = winning_structure();
+        run.structure_tiles = tiles;
+        run.structure_sets = sets;
+        let mut bus = bus();
+        let _ = run.trigger_structure_manual(&mut bus);
+        assert!(
+            !run.honors_scored_this_round,
+            "debuffed honor tiles in a cash-in must not count as scored honors"
+        );
+    }
+
+    #[test]
+    fn green_luck_counts_non_debuffed_honors_at_cash_in() {
+        let mut run = test_run();
+        let (tiles, sets) = winning_structure();
+        run.structure_tiles = tiles;
+        run.structure_sets = sets;
+        let mut bus = bus();
+        let _ = run.trigger_structure_manual(&mut bus);
+        assert!(
+            run.honors_scored_this_round,
+            "cash-in that scores live honor tiles should block Green Luck"
+        );
     }
 
     #[test]

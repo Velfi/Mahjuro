@@ -105,7 +105,7 @@ impl WgpuRenderer {
             &self.gameplay_env_primitives,
             gpu,
             room_hdr_mrt_emissive,
-            |_| false,
+            |pi| self.gameplay_env_skip_prim(pi, frame),
         );
     }
 
@@ -673,6 +673,15 @@ impl WgpuRenderer {
             Some(false) => self.archive_sign_left_prim_idx == Some(pi),
             _ => false,
         }
+    }
+
+    #[inline]
+    pub(super) fn gameplay_env_skip_prim(
+        &self,
+        pi: usize,
+        frame: &crate::render::draw_cmd::UiFrame,
+    ) -> bool {
+        self.gameplay_cash_in_prim_indices.contains(&pi) && !frame.gameplay_cash_in_button_visible
     }
 
     /// Shadow pre-pass / offline bake: never cast from either sign — they are flat

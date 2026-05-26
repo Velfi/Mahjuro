@@ -242,7 +242,12 @@ pub(super) fn build_candles_and_spotlights(
             let Some(&([cx, cy, _lift], sw, _rot)) = hand_world_slots.get(idx) else {
                 continue;
             };
-            let behind_px = sw * 0.15;
+            let tile_size_px = super::hand_layout::hand_tile_size_from_slot_width(
+                sw,
+                hand_world_slots.len(),
+                1.0,
+            );
+            let behind_px = tile_size_px * 0.15;
             let lift = layout.mm(90.0);
             spot_lights.push(SpotLight {
                 pos: [cx, cy - behind_px, lift],

@@ -2,10 +2,10 @@
 
 use crate::render::draw_cmd::{CameraParams, Object3d};
 use crate::render::gameplay_glb::{
-    self, DISCARD_RIVER, GameplayMarkerPose, HAND_TILES_LEFT, HAND_TILES_RIGHT, PLAY_MIRROR,
-    PLAYER_CASH_IN, PLAYER_CONSUMABLE_MARKERS, PLAYER_DISCARD_TALLY, PLAYER_GOLD,
-    PLAYER_PLAY_TALLY, PLAYER_RELIC_MARKERS, STRUCTURE_TILES_LEFT, STRUCTURE_TILES_RIGHT,
-    TILE_PLINTH_MARKERS, YAKU_TABLETS_LEFT, YAKU_TABLETS_RIGHT,
+    self, BTN_CASH_IN, DISCARD_RIVER, GameplayMarkerPose, HAND_TILES_LEFT, HAND_TILES_RIGHT,
+    PLAY_MIRROR, PLAYER_CONSUMABLE_MARKERS, PLAYER_DISCARD_TALLY, PLAYER_GOLD, PLAYER_PLAY_TALLY,
+    PLAYER_RELIC_MARKERS, STRUCTURE_TILES_LEFT, STRUCTURE_TILES_RIGHT, TILE_PLINTH_MARKERS,
+    YAKU_TABLETS_LEFT, YAKU_TABLETS_RIGHT,
 };
 use crate::render::room_glb::RoomGlbCpu;
 
@@ -94,7 +94,6 @@ pub struct GameplayGlbAnchors {
     pub discard_river_pick: Object3d,
     pub play_mirror_pick: Object3d,
     pub journal_pick: Object3d,
-    pub cash_in_pick: Option<Object3d>,
 }
 
 fn require_marker_pair_screen_rect(
@@ -250,7 +249,7 @@ fn resolve_gameplay_glb_anchors_from_cpu(
 
     let layout_scale = (w.min(h)) / 600.0;
     let bowl_d = (120.0 * layout_scale).max(48.0);
-    let discard_btn_rect = gameplay_glb::gameplay_marker_screen_rect_resolved(
+    let discard_btn_fallback_rect = gameplay_glb::gameplay_marker_screen_rect_resolved(
         w,
         h,
         cam,
@@ -260,7 +259,7 @@ fn resolve_gameplay_glb_anchors_from_cpu(
         bowl_d,
         bowl_d,
     )?;
-    let play_btn_rect = gameplay_glb::gameplay_marker_screen_rect_resolved(
+    let play_btn_fallback_rect = gameplay_glb::gameplay_marker_screen_rect_resolved(
         w,
         h,
         cam,
@@ -307,17 +306,20 @@ fn resolve_gameplay_glb_anchors_from_cpu(
         cam,
         env_h,
         cpu,
-        PLAYER_CASH_IN,
+        BTN_CASH_IN,
         cash_in_w,
         cash_in_h,
     )?;
 
     let discard_river_pick =
-        gameplay_glb::gameplay_pick_discard_river(w, h, env_h, cpu, discard_btn_rect)?;
+        gameplay_glb::gameplay_pick_discard_river(w, h, env_h, cpu, discard_btn_fallback_rect)?;
     let play_mirror_pick =
-        gameplay_glb::gameplay_pick_play_mirror(w, h, env_h, cpu, play_btn_rect)?;
+        gameplay_glb::gameplay_pick_play_mirror(w, h, env_h, cpu, play_btn_fallback_rect)?;
     let journal_pick = gameplay_glb::gameplay_pick_journal_book(w, h, env_h, cpu, 0.0)?;
-    let cash_in_pick = build_cash_in_pick_proxy(w, h, env_h, cpu, cash_in_btn_rect);
+    let discard_btn_rect =
+        gameplay_glb::gameplay_discard_river_model_screen_rect(w, h, cam, &discard_river_pick);
+    let play_btn_rect =
+        gameplay_glb::gameplay_play_mirror_model_screen_rect(w, h, cam, &play_mirror_pick);
 
     Ok(GameplayGlbAnchors {
         hand_slots,
@@ -339,7 +341,6 @@ fn resolve_gameplay_glb_anchors_from_cpu(
         discard_river_pick,
         play_mirror_pick,
         journal_pick,
-        cash_in_pick,
     })
 }
 
@@ -379,40 +380,6 @@ pub fn resolve_player_gold_pose(
     gameplay_glb::with_gameplay_glb_cpu(|cpu| {
         let cpu = cpu.ok_or_else(|| anyhow::anyhow!("gameplay.glb not loaded"))?;
         gameplay_glb::require_gameplay_marker_pose(w, h, env_height_scale, cpu, PLAYER_GOLD)
-    })
-}
-
-fn build_cash_in_pick_proxy(
-    w: f32,
-    h: f32,
-    env_h: f32,
-    cpu: &RoomGlbCpu,
-    cash_in_rect: [f32; 4],
-) -> Option<Object3d> {
-    use crate::render::draw_cmd::Object3dKind;
-
-    let pose = gameplay_glb::resolve_gameplay_marker_pose(w, h, env_h, cpu, PLAYER_CASH_IN).ok()?;
-    let (tw, th) = (cash_in_rect[2], cash_in_rect[3]);
-    let tablet_thickness = (th * 0.35).max(8.0);
-    let fallback_extents = [
-        tw * pose.scale[0],
-        tablet_thickness * pose.scale[1],
-        th * pose.scale[2],
-    ];
-    let extents = gameplay_glb::gameplay_marker_mesh_extents_world(h, env_h, cpu, PLAYER_CASH_IN)
-        .filter(|dims| dims.iter().all(|v| v.is_finite() && *v > 0.0))
-        .unwrap_or(fallback_extents);
-    Some(Object3d {
-        pos: pose.anchor,
-        extents,
-        rotation: pose.rotation_rad,
-        color: [1.0, 1.0, 1.0, 1.0],
-        kind: Object3dKind::WoodTablet {
-            label: std::borrow::Cow::Borrowed("Cash in"),
-            pick_id: None,
-        },
-        hover_target: 0.0,
-        anim_id: 0,
     })
 }
 

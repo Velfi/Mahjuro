@@ -74,7 +74,7 @@
   {
     "id": "dragon_rage",
     "name": "Dragon Rage",
-    "description": "Any dragon triplet/kong: +8 mult",
+    "description": "Cashing in a dragon triplet/kong: +8 mult",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -87,7 +87,7 @@
   {
     "id": "green_luck",
     "name": "Green Luck",
-    "description": "+4 gold at round end if no honors scored",
+    "description": "Chamber cleared: +$4 gold if no honors were scored",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -110,7 +110,7 @@
   {
     "id": "white_dragons_hush",
     "name": "White Dragon's Hush",
-    "description": "White dragon pairs score an additional +6 mult and draw a zodiac ribbon",
+    "description": "White dragon pairs score an additional +6 mult and grant a random Zodiac",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -195,7 +195,7 @@
   {
     "id": "multiplier_master",
     "name": "Multiplier Master",
-    "description": "+1 mult per relic held",
+    "description": "+2 mult per relic held",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -254,7 +254,7 @@
   {
     "id": "dragon_echo",
     "name": "Dragon Echo",
-    "description": "Dragon triplets/kongs copy every other set's base chips",
+    "description": "Cashing in a structure: retrigger dragon melds",
     "rarity": "legendary",
     "flavor_spans": [
       {
@@ -277,7 +277,7 @@
   {
     "id": "kan_drum",
     "name": "Kan Drum",
-    "description": "Kongs grant +1 play this round and +6 mult",
+    "description": "Cashing in a structure with at least one kong: +1 play and +6 mult",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -290,7 +290,7 @@
   {
     "id": "dora_crown",
     "name": "Dora Crown",
-    "description": "+1 dora indicator; Dora tiles score an additional +50 chips",
+    "description": "There are now two dora tiles; Dora tiles score an additional +50 chips",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -313,7 +313,7 @@
   {
     "id": "wind_reader",
     "name": "Windreader",
-    "description": "Each round, also treat a second wind as round wind; round wind triplets/kongs: +9 mult",
+    "description": "There are now two round winds; round wind triplets/kongs: +9 mult",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -336,7 +336,7 @@
   {
     "id": "eight_treasures",
     "name": "Eight Treasures",
-    "description": "Scoring a Full Hand grants a random Zodiac ribbon",
+    "description": "Cashing in a Full Hand grants a random Zodiac",
     "rarity": "legendary",
     "flavor_spans": [
       {
@@ -372,7 +372,7 @@
   {
     "id": "garden_keeper",
     "name": "Garden Keeper",
-    "description": "Scored flower tiles: +40 chips each",
+    "description": "Flower tiles score an additional +40 chips",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -390,7 +390,7 @@
   {
     "id": "ikebana",
     "name": "Ikebana",
-    "description": "scoring 2+ flowers in a structure: +9 mult",
+    "description": "Cashing in a structure with 2+ flowers: +9 mult",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -403,7 +403,7 @@
   {
     "id": "hanami",
     "name": "Hanami",
-    "description": "+$3 gold per scored flower tile",
+    "description": "+$3 gold per cashed-in flower tile",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -426,7 +426,7 @@
   {
     "id": "jade_serpent",
     "name": "Jade Serpent",
-    "description": "Souzu tiles in scored sets: +12 chips each",
+    "description": "Souzu tiles score an additional +12 chips",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -449,7 +449,7 @@
   {
     "id": "ruby_serpent",
     "name": "Ruby Serpent",
-    "description": "Manzu tiles in scored sets: +12 chips each",
+    "description": "Manzu tiles score an additional +12 chips",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -462,7 +462,7 @@
   {
     "id": "lapis_serpent",
     "name": "Lapis Serpent",
-    "description": "Pinzu tiles in scored sets: +12 chips each",
+    "description": "Pinzu tiles score an additional +12 chips",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -485,7 +485,7 @@
   {
     "id": "low_tide",
     "name": "Low Tide",
-    "description": "Tiles ranked 1-3 in scored sets: +10 chips each",
+    "description": "Tiles ranked 1-3 score an additional +10 chips",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -508,7 +508,7 @@
   {
     "id": "high_tide",
     "name": "High Tide",
-    "description": "Tiles ranked 7-9 in scored sets: +10 chips each",
+    "description": "Tiles ranked 7-9 score an additional +10 chips",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -567,7 +567,7 @@
   {
     "id": "edge_runner",
     "name": "Edge Runner",
-    "description": "Terminal tiles (1s and 9s) in scored sets: +18 chips each",
+    "description": "Terminals score an additional +18 chips",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -608,7 +608,7 @@
   {
     "id": "momentum",
     "name": "Momentum",
-    "description": "+1 mult per play already used this round",
+    "description": "+2 mult per play already used this round",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -631,7 +631,7 @@
   {
     "id": "minimalist",
     "name": "Minimalist",
-    "description": "Playing a single pair: +6 mult",
+    "description": "Cashing in a one-meld structure: +6 mult",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -644,7 +644,7 @@
   {
     "id": "turtle_shell",
     "name": "Turtle Shell",
-    "description": "+300 chips while you have gold; shatters when gold hits 0",
+    "description": "Cashing in a structure: +300 chips; destroyed if gold hits 0",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -667,7 +667,7 @@
   {
     "id": "closed_gate",
     "name": "Closed Gate",
-    "description": "+6 mult when every tile you cash in is a terminal or honor",
+    "description": "Structure is exclusively terminals and honors: +6 mult",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -718,7 +718,7 @@
   {
     "id": "snowball",
     "name": "Snowball",
-    "description": "+25 chips for each cleared blind (max 15x)",
+    "description": "+25 chips for each cleared chamber (max 15 clears)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -764,7 +764,7 @@
   {
     "id": "glass_cannon",
     "name": "Glass Cannon",
-    "description": "×7 final mult on your next scored hand, then destroyed",
+    "description": "Cashing in a structure: ×7 mult; destroyed after activation",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -777,7 +777,7 @@
   {
     "id": "last_breath",
     "name": "Last Breath",
-    "description": "On your last play, retrigger all tiles you cash in",
+    "description": "Cashing in a structure with 0 plays left: retrigger all tiles in the structure",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -800,7 +800,7 @@
   {
     "id": "tile_polisher",
     "name": "Tile Polisher",
-    "description": "Every tile you cash in gains +5 chips permanently",
+    "description": "Cashed in tiles gain a permanent, stacking +5 chip bonus",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -882,7 +882,7 @@
   {
     "id": "way_of_purity",
     "name": "Way of Purity",
-    "description": "All scored tiles are one suit: ×3.5 mult",
+    "description": "Structure is all one suit: ×3.5 mult",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -895,7 +895,7 @@
   {
     "id": "geese",
     "name": "Geese",
-    "description": "When you cash in: retrigger the first 5 tiles",
+    "description": "Cashing in a structure: retrigger the first 5 tiles",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -913,7 +913,7 @@
   {
     "id": "voice_of_the_people",
     "name": "Voice of the People",
-    "description": "When you cash in: retrigger tiles ranked 1-4",
+    "description": "Cashing in a structure: retrigger tiles ranked 1-4",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -936,7 +936,7 @@
   {
     "id": "voice_of_the_elite",
     "name": "Voice of the Elite",
-    "description": "When you cash in: retrigger tiles ranked 6-9",
+    "description": "Cashing in a structure: retrigger tiles ranked 6-9",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -949,7 +949,7 @@
   {
     "id": "xxxl_egg",
     "name": "XXXL Egg",
-    "description": "When you cash in: retrigger all tiles. Destroyed after 3 uses",
+    "description": "Cashing in a structure: retrigger all tiles. Destroyed after 3 uses",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -972,7 +972,7 @@
   {
     "id": "tea_ceremony",
     "name": "Tea Ceremony",
-    "description": "Each of the next 4 times you cash in follows one principle (Harmony, Respect, Purity, Tranquility), then this relic is destroyed",
+    "description": "Activates four separate bonuses in turn (Harmony, Respect, Purity, Tranquility). Destroyed after the fourth activation",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -995,7 +995,7 @@
   {
     "id": "rakuware",
     "name": "Rakuware",
-    "description": "When you cash in: +60 chips if 2+ numbered suits; +15 chips per honor; +2.5 mult if numbered tiles are one suit; +55 chips if a pair meld",
+    "description": "Cashing in a structure with 2+ numbered suits: +60 chips; Honor tiles score an additional +15 chips; Cashing in a structure with all numbered tiles in one suit: +2.5 mult; Cashing in a structure with a pair meld: +55 chips",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1008,7 +1008,7 @@
   {
     "id": "ghost_hand",
     "name": "Ghost Hand",
-    "description": "When you cash in: +chips equal to the value of your current hand",
+    "description": "Cashing in a structure: +chips equal to the value of your current hand",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1021,7 +1021,7 @@
   {
     "id": "humility",
     "name": "Humility",
-    "description": "+0.75 mult per consecutive play without honors",
+    "description": "+0.75 mult per consecutive cash-in without honors",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1044,7 +1044,7 @@
   {
     "id": "obsession",
     "name": "Obsession",
-    "description": "+0.5 mult per round without your most-used yaku in any cash-in",
+    "description": "Cashing in a structure without your most played yaku: this relic accumulates +0.5 mult. Resets if you cash in a structure with your most played yaku.",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1080,7 +1080,7 @@
   {
     "id": "river_runner",
     "name": "River Runner",
-    "description": "This relic gains +30 chips permanently for each sequence when you cash in",
+    "description": "Cashing in a structure with sequences: this relic accumulates +30 chips for each sequence",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1103,7 +1103,7 @@
   {
     "id": "melting_ice",
     "name": "Melting Ice",
-    "description": "+120 chips, loses 12 per play. At 0 it is destroyed",
+    "description": "+120 chips. Loses 12 chips per play. At 0 it is destroyed",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1116,7 +1116,7 @@
   {
     "id": "taotie",
     "name": "Taotie",
-    "description": "+120 chips. When you cash in, each honor tile in the structure is destroyed. Each adds +30 chips permanently to this relic.",
+    "description": "+120 chips. Cashing in a structure: each honor tile in the structure is destroyed. For each honor tile destroyed this way, this relic accumulates +30 chips.",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1139,7 +1139,7 @@
   {
     "id": "silk_thread",
     "name": "Silk Thread",
-    "description": "+6 mult (counter÷8), loses 0.3 per discard. At 0 it is destroyed",
+    "description": "+6 mult. Loses 0.3 mult per discard. At 0 it is destroyed",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1235,7 +1235,7 @@
         "italic": true
       },
       {
-        "text": "The doorman thinks it's fake\" - E.V Dropper",
+        "text": "The doorman thinks it's fake\" - E.V. Dropper",
         "bold": false,
         "italic": true
       }
@@ -1267,7 +1267,7 @@
   {
     "id": "nest_egg",
     "name": "Nest Egg",
-    "description": "Gains +2 sell value each round",
+    "description": "Chamber cleared: this relic accumulates +$2 sell value",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -1280,7 +1280,7 @@
   {
     "id": "patience",
     "name": "Patience",
-    "description": "+$2 per unused discard at round end",
+    "description": "Chamber cleared: +$2 per unused discard",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -1293,7 +1293,7 @@
   {
     "id": "kindness",
     "name": "Kindness",
-    "description": "+1 discard per round",
+    "description": "+1 discard",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -1306,7 +1306,7 @@
   {
     "id": "temperance",
     "name": "Temperance",
-    "description": "+0.5 permanent mult per unused play when you clear the blind",
+    "description": "Chamber cleared: this relic accumulates +0.5 mult per unused play",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1319,7 +1319,7 @@
   {
     "id": "chastity",
     "name": "Chastity",
-    "description": "+3 mult if no scored tile has an enhancement",
+    "description": "Cashing in a structure: +3 mult if no scored tile has an enhancement",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -1332,7 +1332,7 @@
   {
     "id": "charity",
     "name": "Charity",
-    "description": "Round start: if gold < $10, +$5",
+    "description": "If gold is less than $10 upon entering a chamber: +$5",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1345,7 +1345,7 @@
   {
     "id": "diligence",
     "name": "Diligence",
-    "description": "+1 play per round",
+    "description": "+1 play",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -1358,7 +1358,7 @@
   {
     "id": "way_of_pairs",
     "name": "Way of Pairs",
-    "description": "All pairs scored: ×2.5 mult",
+    "description": "Cashing in a structure with a pair meld: ×2.5 mult",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1381,7 +1381,7 @@
   {
     "id": "way_of_triplets",
     "name": "Way of Triplets",
-    "description": "All triplets/kongs scored: ×3.5 mult",
+    "description": "Cashing in a structure with a triplet/kong meld: ×3.5 mult",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1404,7 +1404,7 @@
   {
     "id": "way_of_sequences",
     "name": "Way of Sequences",
-    "description": "All sequences scored: ×2.5 mult",
+    "description": "Cashing in a structure with a sequence meld: ×2.5 mult",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1417,7 +1417,7 @@
   {
     "id": "fortunes_favor",
     "name": "Fortune's Favor",
-    "description": "Doubles all relic trigger probabilities",
+    "description": "Stochastic relics trigger twice as often",
     "rarity": "legendary",
     "flavor_spans": [
       {
@@ -1430,7 +1430,7 @@
   {
     "id": "cracked_tile",
     "name": "Cracked Tile",
-    "description": "+0 to +12 mult (random per play)",
+    "description": "Cashing in a structure: random +0 to +12 mult",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -1443,7 +1443,7 @@
   {
     "id": "star_tile",
     "name": "Star Tile",
-    "description": "1-in-4 chance to level up a yaku when you cash in",
+    "description": "Cashing in a structure: 1-in-4 chance to level up a yaku present in the structure",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1456,7 +1456,7 @@
   {
     "id": "hungry_ghost",
     "name": "Hungry Ghost",
-    "description": "At round beginning, destroy the next relic in inventory. If a relic was destroyed this way, add a permanent mult increase equal to its sell value",
+    "description": "Round start: destroy the next relic in inventory. If a relic was destroyed this way, this relic accumulates +mult equal to the destroyed relic's sell value",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1469,11 +1469,11 @@
   {
     "id": "disgust",
     "name": "Disgust",
-    "description": "East + 1/2/3 West tiles count as pair/triplet/kong",
+    "description": "East + 1/2/3 West tiles count as pair/triplet/kong melds",
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "\"The courtyard pond is choked with rotten slime.A thousand petals fall before their time.The gate bears the fetid cloak of rust.A staggering scent of rot.The painting of lingering disgust.\"                                                             - ",
+        "text": "\"The courtyard pond is choked with rotten slime. A thousand petals fall before their time.The gate bears the fetid cloak of rust.A staggering scent of rot.The painting of lingering disgust.\"                                                             - ",
         "bold": false,
         "italic": false
       },
@@ -1500,7 +1500,7 @@
   {
     "id": "lotus_bloom",
     "name": "Lotus Bloom",
-    "description": "+0.75 mult permanently per flower drawn or scored",
+    "description": "Drawing or scoring a flower tile: this relic accumulates +0.75 mult",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1536,7 +1536,7 @@
   {
     "id": "kong_collector",
     "name": "Kong Collector",
-    "description": "+$5 per kong scored this round, paid at round end",
+    "description": "Scoring a kong: +$5; Paid at round end",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1559,7 +1559,7 @@
   {
     "id": "no_honor_but_wealth",
     "name": "No Honor But Wealth",
-    "description": "+$1 each time an honor tile is discarded",
+    "description": "Discarding an honor tile: +$1",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -1572,7 +1572,7 @@
   {
     "id": "sweepstakes",
     "name": "Sweepstakes",
-    "description": "Round start: 25% +$2, 25% +$4, 50% nothing",
+    "description": "Chamber entered: 25% +$2, 25% +$4, 50% nothing",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -1595,7 +1595,7 @@
   {
     "id": "beggars_cup",
     "name": "Beggar's Cup",
-    "description": "+$1 at round end, +$1 more per boss defeated",
+    "description": "Chamber cleared: +$1 gold multiplied by the current ante",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1613,7 +1613,7 @@
   {
     "id": "cosmopolitan",
     "name": "Cosmopolitan",
-    "description": "+$1 at round end per unique yaku from your cash-ins this round",
+    "description": "Chamber cleared: +$1 gold per unique yaku scored in the chamber",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1631,7 +1631,7 @@
   {
     "id": "heirloom",
     "name": "Heirloom",
-    "description": "+1 mult per blind played (skips don't count)",
+    "description": "Chamber cleared: this relic accumulates +1 mult.",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1654,7 +1654,7 @@
   {
     "id": "tourist",
     "name": "Tourist",
-    "description": "+4 mult per distinct suit among tiles you cash in",
+    "description": "Cashing in a structure: +4 mult per distinct suit among tiles in the structure",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1677,7 +1677,7 @@
   {
     "id": "kintsugi",
     "name": "Kintsugi",
-    "description": "+1 mult permanently each time another relic is destroyed",
+    "description": "A relic is destroyed: this relic accumulates +1 mult",
     "rarity": "legendary",
     "flavor_spans": [
       {
@@ -1713,11 +1713,11 @@
   {
     "id": "brocade_pouch",
     "name": "Brocade Pouch",
-    "description": "Buff talismans mark every drawn tile for the rest of the run. +1 consumable slot",
+    "description": "Tile buff talismans mark every tile drawn for the rest of the chamber; +1 consumable slot",
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Gold and silk thread flow together , forming the wind, clouds , and sky. Inside the pouch, the happy coins let out a chorus.",
+        "text": "Gold and silk thread flow together, forming the wind, clouds, and sky. Inside the pouch, the happy coins let out a chorus.",
         "bold": false,
         "italic": false
       }
@@ -1726,7 +1726,7 @@
   {
     "id": "eulers_number",
     "name": "Euler's Number",
-    "description": "Flat +e mult (Euler's constant ≈ 2.71828…)",
+    "description": "Cashing in a structure: +e mult (Euler's constant ≈ 2.71828…)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1769,7 +1769,7 @@
   {
     "id": "pi_constant",
     "name": "Pi",
-    "description": "Flat +π mult (≈ 3.14159…)",
+    "description": "Cashing in a structure: +π mult (≈ 3.14159…)",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1823,7 +1823,7 @@
   {
     "id": "chrysalis",
     "name": "Chrysalis",
-    "description": "Excess score is absorbed each round. At 2000 absorbed excess, hatches into Monarch Butterfly.",
+    "description": "Chamber cleared: this relic absorbs excess score; Hatches after absorbing 10000 excess score.",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1846,7 +1846,7 @@
   {
     "id": "monarch_butterfly",
     "name": "Monarch Butterfly",
-    "description": "Each time you cash in: +chips from total absorbed excess. Excess score is absorbed each round.",
+    "description": "Cashing in a structure: +chips from total absorbed excess. Excess score is absorbed each round.",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -1869,7 +1869,7 @@
   {
     "id": "ancestor_echo",
     "name": "Ancestor Echo",
-    "description": "Retriggers the scored meld with the highest chip value once",
+    "description": "Cashing in a structure: retrigger your highest scoring meld",
     "rarity": "legendary",
     "flavor_spans": [
       {
@@ -1882,7 +1882,7 @@
   {
     "id": "crown_of_patterns",
     "name": "Crown of Patterns",
-    "description": "+4 mult per distinct yaku on the scored hand",
+    "description": "Cashing in a structure: +4 mult per yaku in the structure",
     "rarity": "legendary",
     "flavor_spans": [
       {

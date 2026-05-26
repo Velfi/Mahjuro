@@ -5,7 +5,8 @@ use crate::debug_overlays::{HallwayDistortionDebugOverlay, SceneLookDebugOverlay
 use crate::game::engine::GameEngine;
 use crate::scenes::shop::PackCelebration;
 use crate::scenes::{
-    ShowcasePresenter, ShowcaseScene, TileAnchorLabScene, TilePackPresenter, TixelsScene,
+    ButtonAabbLabScene, ShowcasePresenter, ShowcaseScene, TileAnchorLabScene, TilePackPresenter,
+    TixelsScene,
 };
 use rand::RngExt;
 
@@ -246,6 +247,7 @@ impl App {
                         Scene::Guide(_) => "Guide",
                         Scene::MaterialViewer(_) => "MaterialViewer",
                         Scene::TileAnchorLab(_) => "TileAnchorLab",
+                        Scene::ButtonAabbLab(_) => "ButtonAabbLab",
                         Scene::Options(_) => "Options",
                         Scene::Credits(_) => "Credits",
                         Scene::Collection(_) => "Collection",
@@ -303,6 +305,11 @@ impl App {
                 self.overlay_stack
                     .push(Scene::TileAnchorLab(TileAnchorLabScene::new(true)));
                 log::debug!("Opened tile anchor lab");
+            }
+            DebugAction::OpenButtonAabbLab => {
+                self.overlay_stack
+                    .push(Scene::ButtonAabbLab(ButtonAabbLabScene::new(true)));
+                log::debug!("Opened button AABB lab");
             }
             DebugAction::OpenTixels => {
                 self.overlay_stack

@@ -508,9 +508,10 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         dark_metal_face,
     );
 
-    // `tile_seed` is scene exposure for punctual/ambient PBR (often ≪ 1). glTF emissive is
-    // already outgoing radiance — do not shadow it.
-    var lit_hdr = (ambient + Lo + metal_hemi) * cam.tile_seed;
+    // `tile_seed` is scene exposure for punctual PBR (often ≪ 1 to tame imported
+    // glTF light energy). Keep the runtime hemisphere fill in scene-linear units
+    // so the Scene Look "Room ambient" slider remains visible.
+    var lit_hdr = Lo * cam.tile_seed + ambient + metal_hemi;
     // Shared directional shadow map (props + room self-shadow in key-light space).
     // Archive signs + chrome/pedestal shells skip directional shadows (tags 2 / 3 in `room_env_gltf`).
     let shadow_vis = select(

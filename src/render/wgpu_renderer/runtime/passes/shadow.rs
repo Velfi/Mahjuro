@@ -112,7 +112,7 @@ impl WgpuRenderer {
                             &mut shadow_pass,
                             &self.gameplay_env_primitives,
                             gpu,
-                            |_| false,
+                            |pi| self.gameplay_env_skip_prim(pi, frame),
                         );
                     }
                 }

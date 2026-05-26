@@ -31,7 +31,7 @@ pub struct DebugVisibility {
 }
 
 pub const GAMEPLAY_VIS_ROW_COUNT: usize = 23;
-pub const GAMEPLAY_VIS_VISIBLE_ROWS: usize = 14;
+pub const GAMEPLAY_VIS_VISIBLE_ROWS: usize = 10;
 
 impl DebugVisibility {
     pub fn flag_mut(&mut self, row: usize) -> Option<&mut bool> {

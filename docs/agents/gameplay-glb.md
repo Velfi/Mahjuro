@@ -17,7 +17,7 @@ Blender object names must match glTF node names exactly:
 | `discard_river` / `play_mirror` | Procedural discard bowl + play mirror (`Object3dKind::Bowl` / `Mirror`) |
 | `player_gold` | Coin pile |
 | `player_discard_tally` / `player_play_tally` | Discard / play tally-stick fans |
-| `player_cash_in` | Cash-in button spawn |
+| `btn_cash_in` / `label_cash_in` | Authored cash-in control (env mesh + engraved label) |
 | `player_relic` … `player_relic.004` | Relic medallions (up to five) |
 | `player_consumables` / `.001` | Owned consumable spawns (ribbon / talisman; porcelain dish is static env) |
 | `player_yaku_journal` | Procedural journal book (`Object3dKind::Book`; opens yaku journal on click) |
@@ -29,6 +29,8 @@ Static geometry (table surface, dishes, candles, …) is part of the environment
 Dynamic spawns use [`GameplayGlbAnchors`](../../src/scenes/gameplay/glb_anchors.rs) (built from [`GameplayMarkerPose`](../../src/render/gameplay_glb.rs): surface anchor + euler rotation + scale per empty) — [`GameplayPositions`](../../src/ui/scene_layout/gameplay.rs) keeps candle tuning and score-reel lift, not prop placement.
 
 In Blender, set **location, rotation, and scale** on each spawn empty; the exporter writes them into the glTF node transform. Uniform scale on an empty sizes hand tiles, relics, plinth indicators, coin piles, and consumable slots; rotation drives hand tilt, tally fans, pick proxies, and consumable orientation.
+
+Hand tile **mesh** scale is derived from the `hand_tiles_*` strip span in [`hand_layout.rs`](../../src/scenes/gameplay/hand_layout.rs): ideal at **14** tiles, capped so shorter hands (12–13) do not grow past that size, and eased so 15–20 tile hands stay readable without dominating the rack.
 
 ## Camera & lights
 
