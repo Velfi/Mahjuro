@@ -353,6 +353,35 @@ pub fn archive_camera_base(w: f32, h: f32, env_h: f32) -> CameraParams {
     })
 }
 
+/// Screen AABB of the description board that is currently visible (the opposite side is culled).
+pub fn archive_active_description_sign_screen_rect(
+    win_w: f32,
+    win_h: f32,
+    env_h: f32,
+    cam: &crate::render::draw_cmd::CameraParams,
+    use_left: Option<bool>,
+) -> Option<[f32; 4]> {
+    let use_left = use_left?;
+    with_archive_glb_cpu(|opt| {
+        let cpu = opt?;
+        let node = if use_left {
+            SIGN_DESCRIPTION_LEFT
+        } else {
+            SIGN_DESCRIPTION_RIGHT
+        };
+        room_glb::screen_rect_for_marker_mesh_bounds(&room_glb::MarkerScreenRectParams {
+            win_w,
+            win_h,
+            cam,
+            env_height_scale: env_h,
+            cpu,
+            node_name: node,
+            min_rw: 8.0,
+            min_rh: 8.0,
+        })
+    })
+}
+
 /// When both description signs have projected bounds, compares `ref_x` (screen-X in window pixels)
 /// to the midpoint between their screen centers so the visible quad tends to sit **away** from
 /// `ref_x`. Callers pass the cursor X in [`crate::ui::input::InputMode::Cursor`] and the focused

@@ -837,7 +837,7 @@ impl App {
 }
 
 /// Build the paginated celebration modal for a level-up. Returns `None`
-/// when the level grants nothing displayable (no new relics or rules).
+/// when the level grants no new relics (rule unlocks are silent mechanics).
 pub(crate) fn build_level_up_modal(
     result: &core::progression::LevelUpResult,
     window_w: f32,
@@ -856,15 +856,6 @@ pub(crate) fn build_level_up_modal(
                 accent_color: accent,
             });
         }
-    }
-    for rm in &result.rules {
-        pages.push(UnlockPage {
-            category: "New Rule".into(),
-            name: rm.name().into(),
-            description: rm.description().into(),
-            relic_id: None,
-            accent_color: render::theme::color::AMBER,
-        });
     }
     if pages.is_empty() {
         return None;

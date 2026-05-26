@@ -829,7 +829,7 @@ fn draw_modal_paginated_unlock(
     let desc_font = typography::size(typography::H36, window_h);
     let nav_font = typography::size(typography::H42, window_h);
 
-    // Category placard ("New Relic" / "New Rule") — sits above the
+    // Category placard ("New Relic") — sits above the
     // relic, slate tone, smaller. Reads as a museum label.
     let category_y = icon_center_y - icon_size * 0.55 - category_font * 1.6;
     labels.push(TextLabel {
