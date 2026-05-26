@@ -579,6 +579,7 @@ pub(crate) fn render_shop_frame(
     let scale = metrics::scene_scale(w, h);
 
     let mut frame = UiFrame::new();
+    frame.shop_eyeball_travel_sec = shop.eyeball_travel_playback_sec();
     frame.quad(GpuInstance {
         rect: [0.0, 0.0, w, h],
         color: color::WALNUT_INK,

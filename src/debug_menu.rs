@@ -82,6 +82,12 @@ pub enum DebugAction {
     RerollShop,
     /// Force-open a random tile pack celebration (free, ignores shop stock).
     OpenPack,
+    /// Start or resume `eyeball_travel` on the shop GLB `Eyeball` mesh.
+    StartShopEyeballTravel,
+    /// Pause/resume `eyeball_travel` playback on the shop Eyeball mesh.
+    TogglePauseShopEyeballTravel,
+    /// Restart `eyeball_travel` from time 0 on the shop Eyeball mesh.
+    RestartShopEyeballTravel,
     /// Spawn a burst of demo score popups streaming toward the reel —
     /// visually exercises the chips/mult/gold polychrome streaming effect
     /// without needing to play a hand. Only meaningful in the gameplay scene.
@@ -288,6 +294,27 @@ impl DebugMenuBar {
         let open_pack_item = MenuItem::new("Open Tile Pack", true, None);
         mappings.push((open_pack_item.id().clone(), DebugAction::OpenPack));
         let _ = cheats_sub.append(&open_pack_item);
+
+        let eyeball_travel_item = MenuItem::new("Start Eyeball Travel (Shop)", true, None);
+        mappings.push((
+            eyeball_travel_item.id().clone(),
+            DebugAction::StartShopEyeballTravel,
+        ));
+        let _ = cheats_sub.append(&eyeball_travel_item);
+
+        let eyeball_pause_item = MenuItem::new("Pause/Resume Eyeball Travel (Shop)", true, None);
+        mappings.push((
+            eyeball_pause_item.id().clone(),
+            DebugAction::TogglePauseShopEyeballTravel,
+        ));
+        let _ = cheats_sub.append(&eyeball_pause_item);
+
+        let eyeball_restart_item = MenuItem::new("Restart Eyeball Travel (Shop)", true, None);
+        mappings.push((
+            eyeball_restart_item.id().clone(),
+            DebugAction::RestartShopEyeballTravel,
+        ));
+        let _ = cheats_sub.append(&eyeball_restart_item);
 
         let demo_cascade_item = MenuItem::new("Demo Score Cascade", true, None);
         mappings.push((demo_cascade_item.id().clone(), DebugAction::DemoCascade));

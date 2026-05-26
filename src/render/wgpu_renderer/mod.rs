@@ -203,6 +203,16 @@ pub struct WgpuRenderer {
     /// [`shop.glb`](../../assets/3d/shop.glb) environment primitives (tile vertex layout + materials).
     shop_env_primitives: Vec<TilePrimitiveGpu>,
     shop_environment: Option<ShopEnvironmentGpu>,
+    /// GPU index of the `Eyeball` primitive in [`Self::shop_env_primitives`].
+    shop_eyeball_prim_index: Option<usize>,
+    /// Cached at init from [`crate::render::room_glb::RoomGlbCpu::shop_eyeball_travel`].
+    shop_eyeball_travel: Option<crate::render::room_gltf_anim::ShopEyeballTravelAnim>,
+    shop_eyeball_missing_clip_warned: std::cell::Cell<bool>,
+    shop_eyeball_missing_prim_warned: std::cell::Cell<bool>,
+    /// Last shop room env camera uniform (for per-primitive model patches during `eyeball_travel`).
+    shop_env_last_camera_uniform: std::cell::Cell<uniforms::CameraUniform>,
+    shop_env_base_model: std::cell::Cell<glam::Mat4>,
+    shop_env_shadow_light_view_proj: std::cell::Cell<[f32; 16]>,
     /// [`hallway.glb`](../../assets/3d/hallway.glb) pick-blind room.
     hallway_env_primitives: Vec<TilePrimitiveGpu>,
     hallway_environment: Option<ShopEnvironmentGpu>,

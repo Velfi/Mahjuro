@@ -112,22 +112,7 @@ impl WgpuRenderer {
             }
             match active_room_env {
                 Some(ActiveRoomEnv::Shop) if !shop_inspect_shadow_only => {
-                    if let Some(ref gpu) = self.shop_environment {
-                        if let Some((lvp, _)) = room_shadow_lvp {
-                            self.write_room_env_shadow_caster(
-                                gpu,
-                                lvp,
-                                glam::Mat4::IDENTITY,
-                                &mut room_changed,
-                            );
-                        }
-                        self.draw_gltf_room_env_shadow(
-                            shadow_pass,
-                            &self.shop_env_primitives,
-                            gpu,
-                            |_| false,
-                        );
-                    }
+                    self.draw_shop_environment_shadow(&mut shadow_pass, frame);
                 }
                 Some(ActiveRoomEnv::Shop) => {}
                 Some(ActiveRoomEnv::Hallway) => {
@@ -141,10 +126,13 @@ impl WgpuRenderer {
                             );
                         }
                         self.draw_gltf_room_env_shadow(
-                            shadow_pass,
+                            &mut shadow_pass,
+                            frame,
                             &self.hallway_env_primitives,
                             gpu,
                             |_| false,
+                            None,
+                            None,
                         );
                     }
                 }
@@ -159,10 +147,13 @@ impl WgpuRenderer {
                             );
                         }
                         self.draw_gltf_room_env_shadow(
-                            shadow_pass,
+                            &mut shadow_pass,
+                            frame,
                             &self.staircase_env_primitives,
                             gpu,
                             |_| false,
+                            None,
+                            None,
                         );
                     }
                 }
@@ -177,10 +168,13 @@ impl WgpuRenderer {
                             );
                         }
                         self.draw_gltf_room_env_shadow(
-                            shadow_pass,
+                            &mut shadow_pass,
+                            frame,
                             &self.archive_env_primitives,
                             gpu,
                             |pi| self.archive_env_skip_room_shadow_caster(pi),
+                            None,
+                            None,
                         );
                     }
                 }
@@ -195,10 +189,13 @@ impl WgpuRenderer {
                             );
                         }
                         self.draw_gltf_room_env_shadow(
-                            shadow_pass,
+                            &mut shadow_pass,
+                            frame,
                             &self.main_menu_env_primitives,
                             gpu,
                             |_| false,
+                            None,
+                            None,
                         );
                     }
                 }
@@ -230,10 +227,13 @@ impl WgpuRenderer {
                             );
                         }
                         self.draw_gltf_room_env_shadow(
-                            shadow_pass,
+                            &mut shadow_pass,
+                            frame,
                             &self.gameplay_env_primitives,
                             gpu,
-                            |pi| self.gameplay_env_skip_shadow_prim(pi, frame),
+                            |_| false,
+                            None,
+                            None,
                         );
                     }
                 }

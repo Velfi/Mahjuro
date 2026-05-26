@@ -49,6 +49,7 @@ pub mod river_mesh;
 pub mod room_env_gltf;
 pub mod room_gi_bake;
 pub mod room_glb;
+pub mod room_gltf_anim;
 pub mod room_gltf_punctual;
 pub mod room_shadow_bake;
 pub mod score_popups;
