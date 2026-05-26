@@ -50,9 +50,9 @@ impl Suit {
 pub enum TileEnhancement {
     /// Flat chips per scored meld that includes this stamp (see scoring pipeline; Polychrome’s chip twin).
     Pearl,
-    /// +$1 when this tile is part of a scored meld.
+    /// +$1 gold once per scored meld that includes this stamp (pairs included).
     Gilded,
-    /// ×1.2 mult applied once per meld that contains this tile.
+    /// ×1.25 mult applied once per meld that contains this tile.
     Polychrome,
 }
 

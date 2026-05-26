@@ -200,6 +200,7 @@ impl ShopScene {
             if self.storeroom_orbit_pitch.abs() < 1e-5 {
                 self.storeroom_orbit_pitch = 0.0;
             }
+        }
         if self.eyeball_travel_duration_secs.is_some() && self.eyeball_travel_playback_sec().is_none()
         {
             self.eyeball_travel_started = None;

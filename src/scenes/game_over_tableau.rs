@@ -1,12 +1,14 @@
-//! Defeat-screen 3D tableau: centered memorial talisman under a spotlight.
+//! Defeat-screen 3D tableau: low wood floor receding into black + memorial talisman.
 
 use crate::core::memorial_talisman::MemorialTalismanKind;
 use crate::render::draw_cmd::{CameraParams, DrawCmd, Object3d, Object3dKind, UiFrame};
+use crate::render::primitive::{MaterialSpec, MeshId};
 use crate::render::table_transform::rot_fixed_axes_deg;
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{PointLight, SpotLight};
 use crate::render::world_space::pixel_to_world;
 use crate::ui::placement::{Placement, PlacementAnchor};
+use glam::Vec3;
 
 /// Screen-center hero placement: lifted so the tilted tablet clears the felt.
 const DEFEAT_MEMORIAL_PLACEMENT: Placement = Placement {
@@ -18,7 +20,24 @@ const DEFEAT_MEMORIAL_PLACEMENT: Placement = Placement {
     rz_deg: 0.0,
 };
 
-/// Push table + centered, lit memorial talisman (no sunlit-water backdrop).
+/// Wood floor anchor — lower third of the frame, pitched toward the camera.
+const DEFEAT_WOOD_PLACEMENT: Placement = Placement {
+    nx: 0.0,
+    ny: 0.34,
+    lift_mm: 1.5,
+    rx_deg: 8.0,
+    ry_deg: 0.0,
+    rz_deg: 0.0,
+};
+
+const DEFEAT_FOVY_DEG: f32 = 38.0;
+const DEFEAT_WOOD_WIDTH_MUL: f32 = 1.65;
+const DEFEAT_WOOD_DEPTH_MUL: f32 = 5.0;
+const DEFEAT_WOOD_THICKNESS_MUL: f32 = 0.012;
+/// Scene key/fill intensities relative to the first defeat-tableau pass.
+const DEFEAT_LIGHT_SCALE: f32 = 0.08;
+
+/// Push wood floor + centered, lit memorial talisman (no sunlit-water backdrop).
 pub fn push_defeat_memorial_tableau(
     frame: &mut UiFrame,
     layout: &crate::ui::layout::LayoutResult,
@@ -40,11 +59,19 @@ pub fn push_defeat_memorial_tableau(
 
     // Camera is world-space; frame the talisman at screen center.
     let cs = (h / 2104.0_f32).max(1e-4);
+    let eye = Vec3::new(
+        target_w.x,
+        target_w.y - 980.0 * cs,
+        target_w.z + 440.0 * cs,
+    );
+    let look_target = Vec3::new(target_w.x, target_w.y, target_w.z + 12.0 * cs);
+    let cam_eye = eye.to_array();
+    let cam_target = look_target.to_array();
     frame.camera_override = Some(CameraParams {
-        eye: [target_w.x, target_w.y - 980.0 * cs, target_w.z + 440.0 * cs],
-        target: [target_w.x, target_w.y, target_w.z + 12.0 * cs],
+        eye: cam_eye,
+        target: cam_target,
         up: [0.0, 0.0, 1.0],
-        fovy_deg: 38.0,
+        fovy_deg: DEFEAT_FOVY_DEG,
         clip_near: None,
         clip_far: None,
     });
@@ -52,10 +79,40 @@ pub fn push_defeat_memorial_tableau(
     let hero = h.min(w);
     let tscale = hero * 0.13;
     let accent = kind.accent_color();
+    let talisman_rotation = anchor.object3d_rotation();
+
+    let wood_anchor = PlacementAnchor::new(
+        [w * 0.5, h * 0.5, 0.0],
+        glam::Mat4::IDENTITY,
+        &DEFEAT_WOOD_PLACEMENT,
+        layout,
+    );
+    let mut board_pos = wood_anchor.pos;
+    // Nudge toward the bottom edge so the slab reads as a floor receding into the black above.
+    board_pos[1] += h * 0.08;
+    let wood_board = Object3d {
+        pos: board_pos,
+        extents: [
+            w * DEFEAT_WOOD_WIDTH_MUL,
+            h * DEFEAT_WOOD_DEPTH_MUL,
+            hero * DEFEAT_WOOD_THICKNESS_MUL,
+        ],
+        rotation: wood_anchor.object3d_rotation(),
+        color: color::darken(color::WALNUT_DEEP, 0.18),
+        kind: Object3dKind::Primitive {
+            shape: MeshId::Cube,
+            material: MaterialSpec::lacquered_wood_flat(),
+            pick_id: None,
+            shadow_caster: false,
+            silhouette: false,
+        },
+        hover_target: 0.0,
+        anim_id: 0,
+    };
     let memorial = Object3d {
         pos: anchor.pos,
         extents: crate::render::talisman_mesh::talisman_object_extents(tscale),
-        rotation: anchor.object3d_rotation(),
+        rotation: talisman_rotation,
         color: [
             (accent[0] * 1.2).min(1.0),
             (accent[1] * 1.2).min(1.0),
@@ -66,7 +123,7 @@ pub fn push_defeat_memorial_tableau(
         hover_target: 0.0,
         anim_id: 0,
     };
-    frame.cmds.push(DrawCmd::Object3dBatch(vec![memorial]));
+    frame.cmds.push(DrawCmd::Object3dBatch(vec![wood_board, memorial]));
 
     let parchment = color::rgb(color::PARCHMENT);
     let accent_rgb = [accent[0], accent[1], accent[2]];
@@ -75,19 +132,19 @@ pub fn push_defeat_memorial_tableau(
             pos: [tx, ty - h * 0.05, tz + h * 0.40],
             radius: w.max(h) * 2.4,
             color: parchment,
-            intensity: 5.5,
+            intensity: 5.5 * DEFEAT_LIGHT_SCALE,
         },
         PointLight {
             pos: [tx, ty + h * 0.04, tz + h * 0.10],
             radius: w.max(h) * 1.2,
             color: [0.42, 0.38, 0.50],
-            intensity: 0.55,
+            intensity: 0.55 * DEFEAT_LIGHT_SCALE,
         },
         PointLight {
             pos: [tx + w * 0.18, ty, tz + h * 0.16],
             radius: w.max(h) * 1.0,
             color: accent_rgb,
-            intensity: 3.0,
+            intensity: 3.0 * DEFEAT_LIGHT_SCALE,
         },
         PointLight {
             pos: [tx - w * 0.18, ty, tz + h * 0.16],
@@ -97,7 +154,7 @@ pub fn push_defeat_memorial_tableau(
                 accent_rgb[1] * 0.55 + 0.22,
                 accent_rgb[2] * 0.55 + 0.38,
             ],
-            intensity: 2.2,
+            intensity: 2.2 * DEFEAT_LIGHT_SCALE,
         },
     ]);
 
@@ -118,6 +175,6 @@ pub fn push_defeat_memorial_tableau(
         cos_outer,
         cos_inner,
         color: parchment,
-        intensity: 12.0,
+        intensity: 12.0 * DEFEAT_LIGHT_SCALE,
     }];
 }

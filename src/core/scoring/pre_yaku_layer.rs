@@ -349,13 +349,16 @@ pub(crate) fn apply_pre_yaku_scoring(
 
     {
         use crate::core::tile::TileEnhancement;
-        /// Flat chips per scored meld that includes ≥1 Pearl-stamped tile (Polychrome’s chip twin).
-        const PEARL_CHIPS_PER_MELD: i32 = 150;
+        /// Flat chips per scored meld that includes ≥1 Pearl-stamped tile.
+        const PEARL_CHIPS_PER_MELD: i32 = 100;
+        /// Additive mult bonus per scored meld with Polychrome (1.0 + 0.25 = ×1.25).
+        const POLYCHROME_MULT_PER_MELD: f64 = 0.25;
         let mut pearl_melds = 0i32;
         let mut gilded_gold = 0i32;
         let mut polychrome_melds = 0i32;
         for s in sets {
             let mut meld_has_pearl = false;
+            let mut meld_has_gilded = false;
             let mut meld_has_polychrome = false;
             for &tid in &s.tile_ids {
                 let Some(t) = tile_by_id(tiles, tid) else {
@@ -367,16 +370,15 @@ pub(crate) fn apply_pre_yaku_scoring(
                 let Some(enh) = t.enhancement else { continue };
                 match enh {
                     TileEnhancement::Pearl => meld_has_pearl = true,
-                    TileEnhancement::Gilded => {
-                        if !matches!(s.kind, MeldKind::Pair) {
-                            gilded_gold += 1;
-                        }
-                    }
+                    TileEnhancement::Gilded => meld_has_gilded = true,
                     TileEnhancement::Polychrome => meld_has_polychrome = true,
                 }
             }
             if meld_has_pearl {
                 pearl_melds += 1;
+            }
+            if meld_has_gilded {
+                gilded_gold += 1;
             }
             if meld_has_polychrome {
                 polychrome_melds += 1;
@@ -396,8 +398,13 @@ pub(crate) fn apply_pre_yaku_scoring(
             );
         }
         for _ in 0..polychrome_melds {
-            let delta = *mult * 0.35;
-            push_mult(steps, *chips, mult, "Polychrome Talisman", delta);
+            push_mult(
+                steps,
+                *chips,
+                mult,
+                "Polychrome Talisman",
+                POLYCHROME_MULT_PER_MELD,
+            );
         }
     }
 

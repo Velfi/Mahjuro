@@ -5,7 +5,7 @@ use crate::core::relic::{
     ScoreRoundBundle, ScoreTileBundle,
 };
 use crate::core::rules::RuleModifier;
-use crate::core::tile::{Suit, Tile};
+use crate::core::tile::{Suit, Tile, TileEnhancement};
 
 fn ctx_with(relics: &RelicState, scored_last_turn: bool) -> ScoreContext<'_> {
     ScoreContext {
@@ -711,6 +711,109 @@ fn chicken_hand_scores_when_omitted_from_available_yaku() {
         "expected Chicken Hand despite tutorial pool, got {:?}",
         breakdown.detected_yaku
     );
+}
+
+#[test]
+fn pearl_stamp_adds_100_chips_per_meld() {
+    let hand = vec![
+        {
+            let mut t = Tile::new(Suit::Souzu, 3, 0);
+            t.enhancement = Some(TileEnhancement::Pearl);
+            t
+        },
+        {
+            let mut t = Tile::new(Suit::Souzu, 3, 1);
+            t.enhancement = Some(TileEnhancement::Pearl);
+            t
+        },
+        {
+            let mut t = Tile::new(Suit::Souzu, 3, 2);
+            t.enhancement = Some(TileEnhancement::Pearl);
+            t
+        },
+    ];
+    let sets = find_pairs_and_triplets(&hand);
+    let breakdown = score_sets(&hand, &sets, &ctx_with(&RelicState::default(), false), &[]);
+    assert_eq!(
+        breakdown
+            .steps
+            .iter()
+            .filter(|s| s.source == "Pearl Talisman")
+            .map(|s| s.running_chips)
+            .last(),
+        Some(breakdown.base_chips + 100)
+    );
+}
+
+#[test]
+fn polychrome_stamp_adds_0_25_mult_per_meld() {
+    let hand = vec![
+        {
+            let mut t = Tile::new(Suit::Manzu, 5, 0);
+            t.enhancement = Some(TileEnhancement::Polychrome);
+            t
+        },
+        {
+            let mut t = Tile::new(Suit::Manzu, 5, 1);
+            t.enhancement = Some(TileEnhancement::Polychrome);
+            t
+        },
+    ];
+    let sets = vec![crate::core::hand::DetectedMeld {
+        kind: crate::core::hand::MeldKind::Pair,
+        tile_ids: vec![0, 1],
+    }];
+    let breakdown = score_sets(&hand, &sets, &ctx_with(&RelicState::default(), false), &[]);
+    assert!(
+        (breakdown.final_mult - 1.25).abs() < f64::EPSILON,
+        "expected ×1.25 mult from one polychrome meld, got {}",
+        breakdown.final_mult
+    );
+}
+
+#[test]
+fn gilded_stamp_pays_once_per_meld_including_pairs() {
+    let mut t0 = Tile::new(Suit::Manzu, 5, 0);
+    let mut t1 = Tile::new(Suit::Manzu, 5, 1);
+    t0.enhancement = Some(TileEnhancement::Gilded);
+    t1.enhancement = Some(TileEnhancement::Gilded);
+    let hand = vec![t0, t1];
+    let sets = vec![crate::core::hand::DetectedMeld {
+        kind: crate::core::hand::MeldKind::Pair,
+        tile_ids: vec![0, 1],
+    }];
+    let breakdown = score_sets(&hand, &sets, &ctx_with(&RelicState::default(), false), &[]);
+    assert_eq!(breakdown.flower_gold, 1);
+    assert!(
+        breakdown
+            .steps
+            .iter()
+            .any(|s| s.source == "Gilded Talisman" && s.kind == StepKind::Gold)
+    );
+}
+
+#[test]
+fn gilded_stamp_pays_once_per_meld_not_per_tile() {
+    let hand = vec![
+        {
+            let mut t = Tile::new(Suit::Souzu, 3, 0);
+            t.enhancement = Some(TileEnhancement::Gilded);
+            t
+        },
+        {
+            let mut t = Tile::new(Suit::Souzu, 3, 1);
+            t.enhancement = Some(TileEnhancement::Gilded);
+            t
+        },
+        {
+            let mut t = Tile::new(Suit::Souzu, 3, 2);
+            t.enhancement = Some(TileEnhancement::Gilded);
+            t
+        },
+    ];
+    let sets = find_pairs_and_triplets(&hand);
+    let breakdown = score_sets(&hand, &sets, &ctx_with(&RelicState::default(), false), &[]);
+    assert_eq!(breakdown.flower_gold, 1);
 }
 
 #[test]

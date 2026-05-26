@@ -112,7 +112,7 @@ impl WgpuRenderer {
             }
             match active_room_env {
                 Some(ActiveRoomEnv::Shop) if !shop_inspect_shadow_only => {
-                    self.draw_shop_environment_shadow(&mut shadow_pass, frame);
+                    self.draw_shop_environment_shadow(shadow_pass, frame);
                 }
                 Some(ActiveRoomEnv::Shop) => {}
                 Some(ActiveRoomEnv::Hallway) => {
@@ -126,7 +126,7 @@ impl WgpuRenderer {
                             );
                         }
                         self.draw_gltf_room_env_shadow(
-                            &mut shadow_pass,
+                            shadow_pass,
                             frame,
                             &self.hallway_env_primitives,
                             gpu,
@@ -147,7 +147,7 @@ impl WgpuRenderer {
                             );
                         }
                         self.draw_gltf_room_env_shadow(
-                            &mut shadow_pass,
+                            shadow_pass,
                             frame,
                             &self.staircase_env_primitives,
                             gpu,
@@ -168,7 +168,7 @@ impl WgpuRenderer {
                             );
                         }
                         self.draw_gltf_room_env_shadow(
-                            &mut shadow_pass,
+                            shadow_pass,
                             frame,
                             &self.archive_env_primitives,
                             gpu,
@@ -189,7 +189,7 @@ impl WgpuRenderer {
                             );
                         }
                         self.draw_gltf_room_env_shadow(
-                            &mut shadow_pass,
+                            shadow_pass,
                             frame,
                             &self.main_menu_env_primitives,
                             gpu,
@@ -227,7 +227,7 @@ impl WgpuRenderer {
                             );
                         }
                         self.draw_gltf_room_env_shadow(
-                            &mut shadow_pass,
+                            shadow_pass,
                             frame,
                             &self.gameplay_env_primitives,
                             gpu,

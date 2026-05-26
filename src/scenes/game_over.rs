@@ -404,9 +404,14 @@ impl SceneBehavior for GameOverScene {
         self.tree.register_flat_buttons(&items, &mut buttons);
 
         let mut frame = UiFrame::new();
+        let backdrop = if !self.won && self.memorial_kind.is_some() {
+            [0.0, 0.0, 0.0, 1.0]
+        } else {
+            color::WALNUT_INK
+        };
         frame.quad(GpuInstance {
             rect: [0.0, 0.0, w, h],
-            color: color::WALNUT_INK,
+            color: backdrop,
             user: 0,
         });
         if self.won {

@@ -396,10 +396,10 @@ pub fn hand_tile_keyword_lines(
 
     if let Some(e) = tile.enhancement {
         lines.push(match e {
-            TileEnhancement::Pearl => ("Stamp · Pearl +150/meld".into(), color::JADE),
+            TileEnhancement::Pearl => ("Stamp · Pearl +100/meld".into(), color::JADE),
             TileEnhancement::Gilded => ("Stamp · Gilded +$1/meld".into(), color::GOLD),
             TileEnhancement::Polychrome => {
-                ("Stamp · Polychrome ×1.2/meld".into(), color::WALNUT_BRIGHT)
+                ("Stamp · Polychrome ×1.25/meld".into(), color::WALNUT_BRIGHT)
             }
         });
     }

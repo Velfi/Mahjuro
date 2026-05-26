@@ -326,7 +326,7 @@ impl WgpuRenderer {
             ],
             cam_pos: camera.cam_pos.to_array(),
             tile_seed: exposure,
-            decal_atlas_uv: [ambient_x, inv_doc_scale, self.shop_gltf_emissive_scale, 1.0],
+            decal_atlas_uv: [ambient_x, inv_doc_scale, env_tune.gltf_emissive_scale, 1.0],
             hdr_tonemap,
         };
         self.queue.write_buffer(
