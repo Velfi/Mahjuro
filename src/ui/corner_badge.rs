@@ -66,12 +66,16 @@ pub fn push_corner_badge(
 }
 
 /// Brass pill centered on `rect` (archive cubby overlays).
+///
+/// When `occluder` is set, the badge is skipped if its screen rect intersects it (e.g. the
+/// archive description sign, which is drawn in the room pass before cubby overlay quads).
 pub fn push_center_badge(
     quads: &mut Vec<GpuInstance>,
     texts: &mut Vec<TextLabel>,
     rect: [f32; 4],
     window_h: f32,
     label: &str,
+    occluder: Option<[f32; 4]>,
 ) {
     if rect[2] <= 1.0 || rect[3] <= 1.0 || !rect[0].is_finite() || !rect[1].is_finite() {
         return;
@@ -79,6 +83,10 @@ pub fn push_center_badge(
     let (badge_w, badge_h, badge_font) = badge_metrics(label, window_h);
     let badge_x = rect[0] + (rect[2] - badge_w) * 0.5;
     let badge_y = rect[1] + (rect[3] - badge_h) * 0.5;
+    let badge_rect = [badge_x, badge_y, badge_w, badge_h];
+    if occluder.is_some_and(|occ| crate::ui::clip::intersect_rect(badge_rect, occ).is_some()) {
+        return;
+    }
     push_badge_at(
         quads, texts, badge_x, badge_y, badge_w, badge_h, badge_font, label,
     );

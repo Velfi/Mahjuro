@@ -718,6 +718,13 @@ impl CollectionScene {
                     layout: ctx.layout,
                 });
             }
+            let sign_occluder = archive_glb::archive_active_description_sign_screen_rect(
+                w,
+                h,
+                env_scale,
+                &final_cam,
+                frame.archive_description_sign_use_left,
+            );
             push_archive_cubby_new_badges(
                 bosses,
                 page,
@@ -727,6 +734,7 @@ impl CollectionScene {
                 h,
                 &final_cam,
                 cell,
+                sign_occluder,
                 &mut quads,
                 text_labels,
             );
@@ -2194,6 +2202,7 @@ fn push_archive_cubby_new_badges(
     h: f32,
     cam: &CameraParams,
     cell: f32,
+    sign_occluder: Option<[f32; 4]>,
     quads: &mut Vec<GpuInstance>,
     texts: &mut Vec<TextLabel>,
 ) {
@@ -2221,7 +2230,7 @@ fn push_archive_cubby_new_badges(
             continue;
         }
         let rect = [sx - rect_w * 0.5, sy - rect_h * 0.5, rect_w, rect_h];
-        crate::ui::corner_badge::push_center_badge(quads, texts, rect, h, "NEW");
+        crate::ui::corner_badge::push_center_badge(quads, texts, rect, h, "NEW", sign_occluder);
     }
 }
 
