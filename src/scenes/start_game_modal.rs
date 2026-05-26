@@ -634,7 +634,6 @@ impl SceneBehavior for TileSelectScene {
 
         let mut frame = UiFrame::new();
         frame.background(BackgroundId::Black);
-        frame.table();
         if !preview_placements.is_empty() {
             frame.showcase_tile_batch(preview_placements);
         }

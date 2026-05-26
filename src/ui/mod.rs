@@ -1,4 +1,3 @@
-pub mod ordeal_icons;
 pub mod button_prompts;
 pub mod chart_primitives;
 pub mod chronicle_charts;
@@ -14,6 +13,7 @@ pub mod inspect_plaque;
 pub mod kenney_prompt_paths;
 pub mod layout;
 pub mod modal;
+pub mod ordeal_icons;
 pub mod placement;
 pub mod prompt_hold_ring;
 pub mod scene_layout;

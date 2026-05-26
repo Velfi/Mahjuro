@@ -10,11 +10,7 @@ use std::time::Instant;
 use super::GameplayScene;
 use super::{CANDLE_FLARE_DECAY, LIGHT_RAMP_DELAY_SECS, LIGHT_RAMP_DURATION_SECS};
 use crate::game::engine::GameEngine;
-use crate::render::candle_mesh::WICK_TIP_Y;
-use crate::render::draw_cmd::{Object3d, Object3dKind};
-use crate::render::flame_volume::{FlameEmitter, flame_emitter_scale, flame_flicker_multiplier};
-use crate::render::wgpu_renderer::{PointLight, SpotLight};
-use crate::render::world_space::pixel_to_world;
+use crate::render::wgpu_renderer::SpotLight;
 use crate::scenes::UpdateCtx;
 
 /// Tick particles, flying coins, score popups, score reel target, and
@@ -62,13 +58,22 @@ pub(super) fn tick_basic_animations(
             let uid = interaction.hand_ids[i];
             if scene.hand_tile_uids[i] != uid {
                 scene.hand_tile_uids[i] = uid;
-                scene.hand_slide_y[i] = 0.0; // trigger pop-in
+                if !ctx.headless {
+                    scene.hand_slide_y[i] = 0.0; // trigger pop-in
+                }
             }
-            // Animate slide_y toward 1.0 (settled position).
-            let speed = 6.0_f32; // slots per second
-            scene.hand_slide_y[i] = (scene.hand_slide_y[i] + dt * speed).min(1.0);
-            // Decay slide_x toward 0 (sort shuffle settles).
-            scene.hand_slide_x[i] *= (1.0_f32 - dt * 12.0).max(0.0);
+            if ctx.headless {
+                // Headless ticks run back-to-back with ~0 dt; skip deal pop-in so
+                // screenshot captures show a full rack instead of 5% scale tiles.
+                scene.hand_slide_y[i] = 1.0;
+                scene.hand_slide_x[i] = 0.0;
+            } else {
+                // Animate slide_y toward 1.0 (settled position).
+                let speed = 6.0_f32; // slots per second
+                scene.hand_slide_y[i] = (scene.hand_slide_y[i] + dt * speed).min(1.0);
+                // Decay slide_x toward 0 (sort shuffle settles).
+                scene.hand_slide_x[i] *= (1.0_f32 - dt * 12.0).max(0.0);
+            }
         }
     }
 }
@@ -114,10 +119,14 @@ pub(super) fn tick_gold_change_coins(scene: &mut GameplayScene, ctx: &mut Update
     if delta != 0 && scene.prev_gold != 0 {
         // Recompute the dish center from layout (mirrors draw_frame).
         let layout = ctx.layout;
-        let anchor = crate::render::gold_display::gameplay_gold_pile_anchor(
-            layout,
-            &scene.positions.coin_pile,
-        );
+        let anchor = match super::glb_anchors::resolve_player_gold_anchor(
+            layout.window_w,
+            layout.window_h,
+            ctx.room_gltf_height_scale,
+        ) {
+            Ok(a) => a,
+            Err(_) => return,
+        };
         let (coin_radius, coin_thickness, _) =
             crate::render::gold_display::gold_coin_dims(|n| layout.mm(n));
         let pile_cx = anchor[0];
@@ -198,219 +207,22 @@ pub(super) fn tick_candle_and_light_ramp(scene: &mut GameplayScene, now: Instant
     }
 }
 
-/// Buffers populated by [`build_candles_and_spotlights`].
+/// Spot lights for hint tiles and plinth indicators (candles come from `gameplay.glb`).
 pub(super) struct CandleAndLightBuffers {
-    pub(super) flame_emitters: Vec<FlameEmitter>,
-    pub(super) point_lights: Vec<PointLight>,
     pub(super) spot_lights: Vec<SpotLight>,
-    pub(super) candle_placements: Vec<Object3d>,
 }
 
-/// Build candle 3D placements + flame additive quads + point lights, plus
-/// hint / plinth spotlight & point-light highlights. Identical to
-/// the inline draw_frame chunks; relocated for organisation.
-#[allow(clippy::too_many_arguments)]
+/// Hint / plinth spotlights for gameplay (procedural candles removed — GLB supplies lamps).
 pub(super) fn build_candles_and_spotlights(
     scene: &GameplayScene,
     layout: &crate::ui::layout::LayoutResult,
-    _run: &crate::game::run::RunState,
     gameplay: &crate::game::engine::GameplayReadModel,
-    hand_slots: &[(f32, f32, f32, f32)],
+    hand_world_slots: &[super::glb_anchors::HandWorldSlot],
     hint_indices: &[usize],
-    _discard_bowl_placement: Option<&Object3d>,
-    _bronze_mirror_placement: Option<&Object3d>,
-    debug_visibility_hide_candles: bool,
+    tile_plinth_poses: &[crate::render::gameplay_glb::GameplayMarkerPose; 3],
     progress_dora_enabled: bool,
-    spawn_procedural_candles: bool,
 ) -> CandleAndLightBuffers {
-    // ── Candles ─────────────────────────────────────────────────────
-    // Score L/R, hand strip L/R (upper row), hand strip L/R (lower row),
-    // footlight. Each: 3D wax + wick, additive `Flame` quad, `PointLight`.
-    let mut flame_emitters: Vec<FlameEmitter> = Vec::new();
-    let mut point_lights: Vec<PointLight> = Vec::new();
     let mut spot_lights: Vec<SpotLight> = Vec::new();
-    let mut candle_placements: Vec<Object3d> = Vec::new();
-    // `scale_c` is still used by per-candle jitter offsets below; the
-    // jitters are positional fudges, not physical mesh sizes, so they
-    // stay in pixel space.
-    let scale_c = (layout.window_w / 600.0).max(0.5);
-    // The wax mesh is now ~0.555 tall and ~0.36 wide in local units
-    // (votive proportions), so `candle_scale` (= the uniform mesh
-    // scale) is the height of the votive in world units. Sized in
-    // real-world millimeters via `layout.mm()` so the candle stays
-    // at true votive proportions next to the mahjong tiles.
-    let candle_h = layout.mm(crate::render::flame_volume::CANDLE_HEIGHT_MM);
-    let candle_w = candle_h * 0.72; // votive footprint, used for layout padding
-    let radius_px = layout.mm(244.0); // candlelight pool radius
-    let win_w = layout.window_w;
-    let win_h = layout.window_h;
-    let edge_pad = layout.mm(12.0);
-    // Position centres for each candle: (cx, cy_base) where cy_base is
-    // the bottom of the candle body. Order matches `self.candles[]`.
-    let sp = layout.score_panel;
-    let strip_y = if let Some(first) = layout.hand_slots.first() {
-        first.y + first.h * 0.5
-    } else {
-        layout.window_h - 100.0 * scale_c
-    };
-    let strip_left = layout.hand_slots.first().map(|r| r.x).unwrap_or(0.0);
-    let strip_right = layout
-        .hand_slots
-        .last()
-        .map(|r| r.x + r.w)
-        .unwrap_or(layout.window_w);
-    let rack_bottom = layout
-        .hand_slots
-        .first()
-        .map(|s| s.y + s.h)
-        .unwrap_or_else(|| layout.hand_strip.y + layout.hand_strip.h);
-    // Bottom candles are pushed well outboard from the hand strip
-    // *and* shifted backward in Z (smaller pixel-y → farther from
-    // the camera), so they sit behind the tile strip in depth as
-    // well as beside it horizontally. Without the Z shift, even an
-    // outboard candle's tall silhouette can creep into the tile
-    // sightline because the camera is in front of and slightly
-    // above the table — putting them at strip_y meant the candle's
-    // wick projected into the same screen band as the tiles.
-    let bottom_pad = edge_pad + candle_w * 1.6;
-    let bottom_z_back = candle_h * scene.positions.candle_bottom_z_back_candle_h_frac;
-    let back_z_push = candle_w * scene.positions.candle_back_z_push_candle_w_frac;
-    let cy_hand_upper = strip_y - bottom_z_back;
-    let cy_hand_lower = rack_bottom + candle_w * 0.5 + edge_pad * 0.5;
-    let candle_centers: [(f32, f32); 7] = [
-        (
-            (sp.x - candle_w - edge_pad).max(candle_w * 0.5 + 4.0),
-            sp.y + sp.h * 0.5 - back_z_push,
-        ),
-        (
-            (sp.x + sp.w + candle_w + edge_pad).min(layout.window_w - candle_w * 0.5 - 4.0),
-            sp.y + sp.h * 0.5 - back_z_push,
-        ),
-        (
-            (strip_left - candle_w * 0.5 - bottom_pad).max(candle_w * 0.5 + 4.0),
-            cy_hand_upper,
-        ),
-        (
-            (strip_right + candle_w * 0.5 + bottom_pad).min(layout.window_w - candle_w * 0.5 - 4.0),
-            cy_hand_upper,
-        ),
-        (
-            (strip_left - candle_w * 0.5 - bottom_pad).max(candle_w * 0.5 + 4.0),
-            cy_hand_lower,
-        ),
-        (
-            (strip_right + candle_w * 0.5 + bottom_pad).min(layout.window_w - candle_w * 0.5 - 4.0),
-            cy_hand_lower,
-        ),
-        (layout.window_w * 0.5, layout.window_h * 1.55),
-    ];
-
-    // The candles stand vertically on the (now horizontal) wood table.
-    // We pass them to the renderer in pixel-layout coordinates: the
-    // first two components are the layout x/y of the candle's base on
-    // the table (renderer maps pixel y → table z = front/back), and
-    // the third component is the height above the wood (always 0 so
-    // the wax base sits flush on the table).
-    //
-    // The candle mesh's local Y axis is "up", so once the renderer
-    // translates to (table_x, 0, table_z), scaling by `candle_scale`
-    // gives a candle of approximately `candle_scale` pixels in
-    // visible height. The wick tip lives at WICK_TIP_Y * scale above
-    // the base in true world units.
-    // Cheap deterministic hash → 4 pseudorandom values in [-1, 1].
-    // Used to jitter candle position, scale, and height per index so
-    // votives don't snap to a perfectly symmetric grid.
-    fn candle_jitter(seed: u32) -> (f32, f32, f32, f32) {
-        let s = seed.wrapping_add(1);
-        let h = |k: u32| -> f32 {
-            let mut x = s.wrapping_mul(k) ^ 0x9E3779B9;
-            x ^= x >> 16;
-            x = x.wrapping_mul(0x7feb352d);
-            x ^= x >> 15;
-            x = x.wrapping_mul(0x846ca68b);
-            x ^= x >> 16;
-            ((x as f32) / (u32::MAX as f32)) * 2.0 - 1.0
-        };
-        (h(0x68E31DA4), h(0xB5297A4D), h(0x1B56C4E9), h(0xA3D70F8C))
-    }
-
-    let candle_scale_base = candle_h;
-    // Debug visibility: when the candle row is hidden, skip the entire
-    // push loop. We can't filter `CandleBatch` / `Flame` post-hoc because
-    // each candle also pushes a `PointLight` and the table shader would
-    // keep getting lit by invisible flames.
-    let hide_candles = debug_visibility_hide_candles || !spawn_procedural_candles;
-    if !hide_candles {
-        for (i, &(cx, cy_anchor)) in candle_centers.iter().enumerate() {
-            let candle = scene.candles[i];
-
-            // Per-candle jitter. Bottom (front) candles get directionally
-            // constrained offsets so they never drift forward into the
-            // tile sightline; top candles can wander freely.
-            let (jx, jy, js, jh) = candle_jitter(i as u32);
-            let (jitter_x_pix, jitter_y_pix) = match i {
-                0 | 1 => (jx * 22.0 * scale_c, jy * 16.0 * scale_c),
-                2 | 4 => (-jx.abs() * 26.0 * scale_c, -jy.abs() * 22.0 * scale_c),
-                3 | 5 => (jx.abs() * 26.0 * scale_c, -jy.abs() * 22.0 * scale_c),
-                _ => (jx * 14.0 * scale_c, jy.abs() * 8.0 * scale_c),
-            };
-            let cx_j = cx + jitter_x_pix;
-            let cy_j = cy_anchor + jitter_y_pix;
-            // ±12% scale variation so the table votives read as a real
-            // set rather than identical instances.
-            let candle_scale = candle_scale_base * (1.0 + js * 0.12);
-            // ±15% height variation so they aren't all the same tallness.
-            let height_scale = 1.0 + jh * 0.15;
-
-            candle_placements.push(Object3d {
-                pos: [cx_j, cy_j, 0.0],
-                extents: [1.0, 1.0, 1.0],
-                rotation: [0.0, 0.0, 0.0],
-                color: [1.0, 1.0, 1.0, 1.0],
-                kind: Object3dKind::Candle {
-                    scale: candle_scale,
-                    height_scale,
-                },
-                hover_target: 0.0,
-                anim_id: 0,
-            });
-            let phase01 = (candle.phase / std::f32::consts::TAU).fract().abs();
-            let flare_mul = 1.0 + scene.candle_flare;
-            let base_brightness = scene.light_ramp * flare_mul * scene.candle_wind_dim;
-            let wick_lift = WICK_TIP_Y * candle_scale * height_scale;
-            let wick_world = pixel_to_world(win_w, win_h, cx_j, cy_j, wick_lift);
-            flame_emitters.push(FlameEmitter {
-                wick_world,
-                scale: flame_emitter_scale(candle_scale, height_scale),
-                wind: glam::Vec2::ZERO,
-                brightness: base_brightness,
-                phase: phase01,
-                flicker_amp: crate::render::flame_volume::FLAME_FLICKER_AMP,
-            });
-
-            // Point light at the wick tip — sits at world_y =
-            // WICK_TIP_Y * candle_scale above the table, at the candle's
-            // jittered table-plane (cx_j, cy_j) anchor. The renderer
-            // maps the pixel-layout x/y onto the table.
-            let wick_world_y = wick_lift;
-            // The footlight (index 6) sits well behind the camera, so its
-            // wick is much farther from the action row than any of the
-            // table-edge candles — bump its radius and intensity to
-            // compensate, otherwise the front row stays in shadow.
-            let (light_radius_mul, light_intensity) = if i == 6 { (2.2, 1.0) } else { (1.0, 2.05) };
-            // Flare multiplier: boosts intensity and radius when a
-            // monster hand clears the whole blind in one shot.
-            let flick = flame_flicker_multiplier(phase01, scene.candle_time);
-            point_lights.push(PointLight {
-                pos: [cx_j, cy_j, wick_world_y],
-                radius: radius_px * light_radius_mul * 1.15 * flare_mul,
-                // Slightly desaturated vs pure amber so candle key doesn’t dye every albedo neon-warm.
-                color: [1.0, 0.62, 0.34],
-                intensity: light_intensity * base_brightness * flick,
-            });
-            let _ = candle_w;
-        }
-    }
 
     // ── Hint spotlights ──────────────────────────────────────────────
     // Each hinted tile gets a directional green SpotLight positioned
@@ -426,31 +238,12 @@ pub(super) fn build_candles_and_spotlights(
         // 24° inner / 36° outer — a tight pool with a soft edge.
         let cos_inner = (24.0_f32).to_radians().cos();
         let cos_outer = (36.0_f32).to_radians().cos();
-        // Hand tiles are rendered at hand_slots[i] + the hand_strip
-        // offset (see the showcase placement at the bottom of
-        // draw_frame). The spotlight has to match, or it lands on
-        // bare felt hundreds of pixels off.
-        let strip_dx = scene.positions.hand_strip.nx * layout.window_w;
-        let strip_dy = scene.positions.hand_strip.ny * layout.window_h;
         for &idx in hint_indices.iter().take(hint_budget) {
-            let Some(&(sx, sy, sw, sh)) = hand_slots.get(idx) else {
+            let Some(&([cx, cy, _lift], sw, _rot)) = hand_world_slots.get(idx) else {
                 continue;
             };
-            // Tile mesh center in pixel space — same formula the
-            // showcase placement uses (see HAND_TILE_MESH_Y_FRAC).
-            let cx = sx + sw * 0.5 + strip_dx;
-            let cy = sy + sh * crate::ui::layout::HAND_TILE_MESH_Y_FRAC + strip_dy;
-            // Place the spotlight above and slightly behind the tile
-            // in world-Y (smaller pixel-y = +world-Y), aimed down and
-            // forward so the beam hits the tile's -Y-facing front.
-            // In world-space (Z-up, Y-forward): direction = (0, +Y fwd
-            // → but light travels toward player = -world-Y, and down
-            // = -Z). Since pos_pixel_y maps with y flip, pushing
-            // pixel-y downward from cy means the light's world-Y is
-            // larger (farther from player) so the direction toward
-            // the tile front is -world-Y plus -Z downward.
+            let behind_px = sw * 0.15;
             let lift = layout.mm(90.0);
-            let behind_px = sh * 0.15;
             spot_lights.push(SpotLight {
                 pos: [cx, cy - behind_px, lift],
                 // Aim at a point just in front of the tile face at
@@ -494,30 +287,34 @@ pub(super) fn build_candles_and_spotlights(
         });
     };
 
+    let hand_slot_w = layout
+        .hand_slots
+        .first()
+        .map(|r| r.w)
+        .unwrap_or(layout.window_w * crate::ui::layout::HAND_SLOT_W_RATIO);
+    let plinth_tile_size_px = hand_slot_w * (22.0 / crate::ui::layout::TILE_WIDTH_MM);
+    let plinth_tile_spacing = hand_slot_w * (24.0 / crate::ui::layout::TILE_WIDTH_MM);
+    let plinth_tile_lift = |anchor_z: f32| anchor_z;
+
     if progress_dora_enabled && !gameplay.dora_indicator_tiles.is_empty() {
         let pulse = 0.80 + 0.20 * (scene.candle_time * 2.5).sin();
         let dora_color = [1.00, 0.22, 0.18];
-        let dora_p = &scene.positions.dora;
-        let plinth_h = layout.mm(20.0);
-        let plinth_cx = dora_p.nx * layout.window_w;
-        let plinth_cy = dora_p.ny * layout.window_h;
-        let plinth_lift = layout.mm(dora_p.lift_mm);
-        let tile_lift = plinth_lift + plinth_h * (0.5 + 0.36) + layout.mm(15.0);
-        let tile_size_px = layout.mm(22.0);
-        let spacing = layout.mm(24.0);
+        let plinth = &tile_plinth_poses[0];
+        let [plinth_cx, plinth_cy, plinth_lift] = plinth.anchor;
+        let tile_lift = plinth_tile_lift(plinth_lift);
         let count = gameplay.dora_indicator_tiles.len().min(2);
         for i in 0..count {
             let offset = if count == 1 {
                 0.0
             } else {
-                (i as f32 - 0.5) * spacing
+                (i as f32 - 0.5) * plinth_tile_spacing
             };
             plinth_spot(
                 &mut spot_lights,
                 plinth_cx + offset,
                 plinth_cy,
                 tile_lift,
-                tile_size_px,
+                plinth_tile_size_px,
                 dora_color,
                 pulse,
             );
@@ -527,145 +324,90 @@ pub(super) fn build_candles_and_spotlights(
     {
         let pulse = 0.80 + 0.20 * (scene.candle_time * 2.5).sin();
         let wind_color = [0.28, 0.52, 1.00];
-        let rw_p = &scene.positions.round_wind;
-        let plinth_h = layout.mm(20.0);
-        let plinth_cx = rw_p.nx * layout.window_w;
-        let plinth_cy = rw_p.ny * layout.window_h;
-        let plinth_lift = layout.mm(rw_p.lift_mm);
-        let tile_lift = plinth_lift + plinth_h * (0.5 + 0.36) + layout.mm(15.0);
-        let tile_size_px = layout.mm(22.0);
-        let spacing = layout.mm(24.0);
+        let plinth = &tile_plinth_poses[1];
+        let [plinth_cx, plinth_cy, plinth_lift] = plinth.anchor;
+        let tile_lift = plinth_tile_lift(plinth_lift);
         let wind_count = 1 + usize::from(gameplay.bonus_round_wind_rank.is_some());
         for i in 0..wind_count.min(2) {
             let offset = if wind_count == 1 {
                 0.0
             } else {
-                (i as f32 - 0.5) * spacing
+                (i as f32 - 0.5) * plinth_tile_spacing
             };
             plinth_spot(
                 &mut spot_lights,
                 plinth_cx + offset,
                 plinth_cy,
                 tile_lift,
-                tile_size_px,
+                plinth_tile_size_px,
                 wind_color,
                 pulse,
             );
         }
     }
 
-    CandleAndLightBuffers {
-        flame_emitters,
-        point_lights,
-        spot_lights,
-        candle_placements,
-    }
+    CandleAndLightBuffers { spot_lights }
 }
 
-/// Build the ambient table objects: dora indicator plinth + indicator
-/// tile faces, and the coin pile dish + scattered coins. Behaviour is a
-/// verbatim lift of the inline `draw_frame` chunk; relocated for
-/// organisation.
+/// Dora / round-wind indicator tiles on `tile_plinth` empties and settled gold at `player_gold`.
+/// Plinth meshes live in `gameplay.glb`; only dynamic tile faces and coins are spawned here.
 pub(super) fn build_ambient_table_objects(
     scene: &GameplayScene,
     layout: &crate::ui::layout::LayoutResult,
     gameplay: &crate::game::engine::GameplayReadModel,
     progress_dora_enabled: bool,
-    boss_plinth_glow: f32,
     frame: &mut crate::render::draw_cmd::UiFrame,
-    skip_authored_plinth_meshes: bool,
-    tile_plinth_anchors: Option<&[[f32; 3]]>,
-) {
-    use crate::render::draw_cmd::{Object3d, Object3dKind};
-    // Phase 7: ambient table objects — physical coin pile (gold) and the
-    // dora indicator stand. None of these are clickable; they're pure
-    // atmosphere. Wall tiles remaining are shown in the lower-right HUD.
-    //
-    // Dora indicator plinth — ornate brass pedestal at center-stage
-    // (back of the table by default; user-arrangeable). Holds 1–2
-    // dora indicator tile faces. Only drawn once dora is unlocked
-    // (level 4+); the focusable rect powers the focus ring + tooltip
-    // below.
-    if progress_dora_enabled {
-        let dora_p = &scene.positions.dora;
-        let plinth_w = layout.mm(48.0);
-        let plinth_h = layout.mm(20.0);
-        let plinth_d = layout.mm(34.0);
-        let (plinth_cx, plinth_cy, plinth_lift) = tile_plinth_anchors
-            .and_then(|a| a.first().copied())
-            .map(|[x, y, z]| (x, y, z))
-            .unwrap_or((
-                dora_p.nx * layout.window_w,
-                dora_p.ny * layout.window_h,
-                layout.mm(dora_p.lift_mm),
-            ));
-        if !skip_authored_plinth_meshes {
-            frame.object3d(Object3d {
-                pos: [plinth_cx, plinth_cy, plinth_lift],
-                extents: [plinth_w, plinth_h, plinth_d],
-                rotation: crate::render::table_transform::mat4_to_euler_xyz_rad(
-                    glam::Mat4::from_rotation_y(dora_p.ry_deg.to_radians())
-                        * glam::Mat4::from_rotation_x(dora_p.rx_deg.to_radians())
-                        * glam::Mat4::from_rotation_z(dora_p.rz_deg.to_radians()),
-                ),
-                color: [1.0, 1.0, 1.0, 1.0],
-                kind: crate::render::draw_cmd::Object3dKind::Plinth {
-                    glow: 0.0,
-                    role: crate::render::draw_cmd::PlinthRole::Dora,
-                },
-                hover_target: 0.0,
-                anim_id: 0,
-            });
-        }
+    tile_plinth_poses: &[crate::render::gameplay_glb::GameplayMarkerPose; 3],
+    gold_pile_pose: crate::render::gameplay_glb::GameplayMarkerPose,
+    cam: &crate::render::draw_cmd::CameraParams,
+    window_w: f32,
+    window_h: f32,
+    env_height_scale: f32,
+    vis: crate::scenes::DebugVisibility,
+) -> anyhow::Result<()> {
+    use crate::core::tile::{Suit, Tile};
+    use crate::render::draw_cmd::ShowcaseTilePlacement;
 
-        // Indicator tile face(s) sitting on the platform. The mesh
-        // platform's top is at local-y = +0.36 (lip rim), so place
-        // tiles slightly above that in world units. With Dora Crown,
-        // a second tile sits beside the first; otherwise just one.
-        //
-        // While `pending_chamber` is set, the round hasn't actually
-        // started yet (smoke curtain is still clearing and
-        // `apply_chamber` hasn't run). Keep the plinth bare in that
-        // window so the indicator appears to arrive with the deal.
-        let indicators: &[crate::core::tile::Tile] = if scene.pending_chamber.is_some() {
+    let hand_slot_w = layout
+        .hand_slots
+        .first()
+        .map(|r| r.w)
+        .unwrap_or(layout.window_w * crate::ui::layout::HAND_SLOT_W_RATIO);
+    let tile_size_px = hand_slot_w * (22.0 / crate::ui::layout::TILE_WIDTH_MM);
+    let tile_spacing = hand_slot_w * (24.0 / crate::ui::layout::TILE_WIDTH_MM);
+    let tile_on_plinth_lift = |z: f32| z;
+
+    if !vis.hide_plinth_tiles && progress_dora_enabled {
+        let plinth = &tile_plinth_poses[0];
+        let [plinth_cx, plinth_cy, plinth_lift] = plinth.anchor;
+        let tile_lift = tile_on_plinth_lift(plinth_lift);
+        let tile_size_px = tile_size_px * plinth.uniform_author_scale(window_h, env_height_scale);
+        let indicators: &[Tile] = if scene.pending_chamber.is_some() {
             &[]
         } else {
             gameplay.dora_indicator_tiles.as_slice()
         };
         if !indicators.is_empty() {
-            use crate::render::draw_cmd::ShowcaseTilePlacement;
-            let tile_size_px = layout.mm(22.0);
-            // Platform-top lift in world units. Mesh local-y goes up
-            // to +0.36 (lip top); the plinth's full Y extent is
-            // `plinth_h`, so the platform sits at +0.36 / 0.5 *
-            // (plinth_h * 0.5) above the plinth center. Plinth
-            // center is at lift + plinth_h*0.5 (because mesh is
-            // centered and we lifted by half-height in the renderer).
-            let platform_top = plinth_lift + plinth_h * (0.5 + 0.36);
-            // Stand the tile half its long dimension above the
-            // platform so it appears upright resting in the lip.
-            let tile_lift = platform_top + layout.mm(15.0);
             let count = indicators.len().min(2);
-            let spacing = layout.mm(24.0);
             let mut tile_placements: Vec<ShowcaseTilePlacement> = Vec::with_capacity(count);
             for (i, &t) in indicators.iter().take(count).enumerate() {
                 let offset = if count == 1 {
                     0.0
                 } else {
-                    (i as f32 - 0.5) * spacing
+                    (i as f32 - 0.5) * tile_spacing
                 };
+                let center_pos = crate::render::gameplay_glb::showcase_anchor_spread_px(
+                    window_w,
+                    window_h,
+                    cam,
+                    [plinth_cx, plinth_cy, tile_lift],
+                    plinth.rotation_rad,
+                    offset,
+                );
                 tile_placements.push(ShowcaseTilePlacement {
                     tile: t,
-                    center_pos: [plinth_cx + offset, plinth_cy, tile_lift],
-                    // Stand upright with face toward the camera: Rx(+π/2)
-                    // sends the +Z face normal to -Y, and Rz(π) keeps the
-                    // tile's top edge up. The small negative lean tilts
-                    // the face slightly forward for the high camera.
-                    rotation: [
-                        std::f32::consts::FRAC_PI_2 - 15.0_f32.to_radians(),
-                        0.0,
-                        std::f32::consts::PI,
-                    ],
+                    center_pos,
+                    rotation: plinth.rotation_rad,
                     scale: 1.0,
                     size_px: tile_size_px,
                     brightness: 1.0,
@@ -684,95 +426,35 @@ pub(super) fn build_ambient_table_objects(
         }
     }
 
-    // Boss plinth — same brass pedestal mesh, to the right of dora. During
-    // boss rounds it displays the boss icon as a flat image quad in
-    // `scene_behavior`; this object only provides the physical stand.
-    if !gameplay.ordeal_ofuda_title.is_empty() {
-        let boss_p = &scene.positions.boss_plinth;
-        let plinth_w = layout.mm(48.0);
-        let plinth_h = layout.mm(20.0);
-        let plinth_d = layout.mm(34.0);
-        let (plinth_cx, plinth_cy, plinth_lift) = tile_plinth_anchors
-            .and_then(|a| a.get(2).copied())
-            .map(|[x, y, z]| (x, y, z))
-            .unwrap_or((
-                boss_p.nx * layout.window_w,
-                boss_p.ny * layout.window_h,
-                layout.mm(boss_p.lift_mm),
-            ));
-        frame.object3d(Object3d {
-            pos: [plinth_cx, plinth_cy, plinth_lift],
-            extents: [plinth_w, plinth_h, plinth_d],
-            rotation: crate::render::table_transform::mat4_to_euler_xyz_rad(
-                glam::Mat4::from_rotation_y(boss_p.ry_deg.to_radians())
-                    * glam::Mat4::from_rotation_x(boss_p.rx_deg.to_radians())
-                    * glam::Mat4::from_rotation_z(boss_p.rz_deg.to_radians()),
-            ),
-            color: [1.0, 1.0, 1.0, 1.0],
-            kind: Object3dKind::Plinth {
-                glow: boss_plinth_glow.clamp(0.0, 1.0),
-                role: crate::render::draw_cmd::PlinthRole::Boss,
-            },
-            hover_target: 0.0,
-            anim_id: 0,
-        });
-    }
-
-    // Round wind plinth — same brass pedestal mesh as dora, parked beside
-    // it by default. Shows the ante's round wind (and a second face when
-    // Windreader is active).
-    {
-        use crate::core::tile::{Suit, Tile};
-        use crate::render::draw_cmd::ShowcaseTilePlacement;
-
-        let rw_p = &scene.positions.round_wind;
-        let plinth_w = layout.mm(48.0);
-        let plinth_h = layout.mm(20.0);
-        let plinth_d = layout.mm(34.0);
-        let plinth_cx = rw_p.nx * layout.window_w;
-        let plinth_cy = rw_p.ny * layout.window_h;
-        let plinth_lift = layout.mm(rw_p.lift_mm);
-        frame.object3d(Object3d {
-            pos: [plinth_cx, plinth_cy, plinth_lift],
-            extents: [plinth_w, plinth_h, plinth_d],
-            rotation: crate::render::table_transform::mat4_to_euler_xyz_rad(
-                glam::Mat4::from_rotation_y(rw_p.ry_deg.to_radians())
-                    * glam::Mat4::from_rotation_x(rw_p.rx_deg.to_radians())
-                    * glam::Mat4::from_rotation_z(rw_p.rz_deg.to_radians()),
-            ),
-            color: [1.0, 1.0, 1.0, 1.0],
-            kind: Object3dKind::Plinth {
-                glow: 0.0,
-                role: crate::render::draw_cmd::PlinthRole::RoundWind,
-            },
-            hover_target: 0.0,
-            anim_id: 0,
-        });
-
+    if !vis.hide_plinth_tiles {
+        let plinth = &tile_plinth_poses[1];
+        let [plinth_cx, plinth_cy, plinth_lift] = plinth.anchor;
+        let tile_lift = tile_on_plinth_lift(plinth_lift);
+        let tile_size_px = tile_size_px * plinth.uniform_author_scale(window_h, env_height_scale);
         let mut winds = vec![Tile::new(Suit::Wind, gameplay.round_wind_rank, 0)];
         if let Some(bonus) = gameplay.bonus_round_wind_rank {
             winds.push(Tile::new(Suit::Wind, bonus, 1));
         }
-        let tile_size_px = layout.mm(22.0);
-        let platform_top = plinth_lift + plinth_h * (0.5 + 0.36);
-        let tile_lift = platform_top + layout.mm(15.0);
         let count = winds.len().min(2);
-        let spacing = layout.mm(24.0);
         let mut tile_placements: Vec<ShowcaseTilePlacement> = Vec::with_capacity(count);
         for (i, t) in winds.into_iter().take(count).enumerate() {
             let offset = if count == 1 {
                 0.0
             } else {
-                (i as f32 - 0.5) * spacing
+                (i as f32 - 0.5) * tile_spacing
             };
+            let center_pos = crate::render::gameplay_glb::showcase_anchor_spread_px(
+                window_w,
+                window_h,
+                cam,
+                [plinth_cx, plinth_cy, tile_lift],
+                plinth.rotation_rad,
+                offset,
+            );
             tile_placements.push(ShowcaseTilePlacement {
                 tile: t,
-                center_pos: [plinth_cx + offset, plinth_cy, tile_lift],
-                rotation: [
-                    std::f32::consts::FRAC_PI_2 - 15.0_f32.to_radians(),
-                    0.0,
-                    std::f32::consts::PI,
-                ],
+                center_pos,
+                rotation: plinth.rotation_rad,
                 scale: 1.0,
                 size_px: tile_size_px,
                 brightness: 1.0,
@@ -790,16 +472,18 @@ pub(super) fn build_ambient_table_objects(
         frame.showcase_tile_batch(tile_placements);
     }
 
-    // Gold coin pile — same settled cylinders as the shop (no procedural dish).
-    let gold_anchor =
-        crate::render::gold_display::gameplay_gold_pile_anchor(layout, &scene.positions.coin_pile);
-    let coins = crate::render::gold_display::build_settled_gold_coin_pile(
-        |n| layout.mm(n),
-        gameplay.gold,
-        gold_anchor,
-        crate::render::gold_display::GAMEPLAY_GOLD_PILE_SEED,
-    );
-    if !coins.is_empty() {
-        frame.object3d_batch(coins);
+    if !vis.hide_gold_pile {
+        let coins = crate::render::gold_display::build_settled_gold_coin_pile(
+            |n| layout.mm(n),
+            gameplay.gold,
+            gold_pile_pose.anchor,
+            crate::render::gold_display::GAMEPLAY_GOLD_PILE_SEED,
+            Some((layout.window_w, layout.window_h)),
+            gold_pile_pose.uniform_author_scale(window_h, env_height_scale),
+        );
+        if !coins.is_empty() {
+            frame.object3d_batch(coins);
+        }
     }
+    Ok(())
 }

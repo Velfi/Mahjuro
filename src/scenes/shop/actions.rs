@@ -164,7 +164,7 @@ fn tutorial_shop_stock(
         // tutorial pack (ScrollLibrary) in the first slot.
         vec![
             TilePackShopItem {
-                kind: TilePackKind::ScrollLibrary,
+                kind: TilePackKind::Manzu,
                 sold: false,
             },
             TilePackShopItem {
@@ -174,8 +174,8 @@ fn tutorial_shop_stock(
                     let all = TilePackKind::all();
                     all.iter()
                         .copied()
-                        .find(|&k| k != TilePackKind::ScrollLibrary)
-                        .unwrap_or(TilePackKind::ScrollLibrary)
+                        .find(|&k| k != TilePackKind::Manzu)
+                        .unwrap_or(TilePackKind::Manzu)
                 },
                 sold: false,
             },

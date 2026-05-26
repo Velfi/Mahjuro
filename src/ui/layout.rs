@@ -2,7 +2,7 @@
 //!
 //! Active relics are **not** Cassowary rects: they render as a **horizontal 3D tray**
 //! across the upper screen (`build_relic_tray_and_wind` in `gameplay/input_handler.rs`),
-//! centered/clamped via [`crate::ui::scene_layout::GameplayPositions`] (`relic_col`, …).
+//! centered/clamped via [`crate::scenes::gameplay::glb_anchors`] when `gameplay.glb` is loaded.
 //! The old `relic_strip` layout field is gone; `hand_top` sits directly below the
 //! modifier strip.
 
@@ -78,14 +78,6 @@ const MOD_H_RATIO: f64 = 0.05; //  5% of window height (30px at 600px)
 /// Horizontal inset (per side) of the hand strip relative to the window.
 /// Reduced from 22% → 16% to widen the tile rack; leaves margin for table framing.
 const HAND_X_PAD_RATIO: f64 = 0.16;
-
-/// Where the **3D hand tile mesh** is anchored vertically within each tall slot (fraction from top).
-/// Higher values move the rack toward the bottom of the slot — nearer the player in table space —
-/// so structure / yaku sit further from the tile silhouettes.
-pub const HAND_TILE_MESH_Y_FRAC: f32 = 0.63;
-/// Reference height within the slot for stacking yaku + structure **above** the rack (smaller than
-/// [`HAND_TILE_MESH_Y_FRAC`] so HUD bands sit higher on screen than the physical tiles).
-pub const HAND_HUD_STACK_Y_FRAC: f32 = 0.38;
 
 pub struct UiLayout {
     solver: Solver,

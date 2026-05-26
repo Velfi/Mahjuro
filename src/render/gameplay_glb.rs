@@ -2,29 +2,38 @@
 //!
 //! Spawn empties (Blender object names → glTF nodes):
 //! - `hand_tiles_left` / `hand_tiles_right` — hand rack extent
-//! - `structure_tiles_left` / `structure_tiles_right` — open-meld showcase strip
-//! - `yaku_tablets_left` / `yaku_tablets_right` — yaku bone tablets
-//! - `tile_plinth` / `.001` / `.002` — wall-tile plinths (dora / round wind / boss)
-//! - `discard_river` / `play_mirror` — discard bowl + play mirror pick anchors
-//! - `player_gold` — coin pile on dish
-//! - `player_discard_tally` / `player_play_tally` — tally-stick fans
-//! - `player_relic` … `player_relic.004` — five relic slots
-//! - `player_consumables` / `.001` — talisman + ribbon dishes
-//! - `player_yaku_journal` — journal book anchor
+//! - `structure_tiles_left` / `structure_tiles_right` — structure tile strip bounds
+//! - `yaku_tablets_left` / `yaku_tablets_right` — yaku bone tablet row bounds
+//! - `tile_plinth` / `.001` / `.002` — dora / round-wind / boss indicator tiles
+//! - `discard_river` / `play_mirror` — procedural discard bowl + play mirror at marker empties
+//! - `player_gold` — coin pile spawn
+//! - `player_discard_tally` / `player_play_tally` — tally-stick fan spawns
+//! - `player_cash_in` — cash-in button spawn
+//! - `player_relic` … `player_relic.004` — relic medallion slots
+//! - `player_consumables` / `.001` — consumable dish slots
+//! - `player_yaku_journal` — journal book anchor (opens yaku journal on click)
+//! - `default` — embedded glTF perspective camera (not a spawn empty)
 //!
-//! Static geometry (table, dishes, candles, score plaque, cash-in control, …) draws from the
-//! environment mesh; dynamic props still spawn at the markers above.
+//! Static geometry (table, dishes, candles, score plaque, …) draws from the environment mesh.
+//! Dynamic props spawn at the markers above. Missing required empties fail load — no procedural fallback.
 //!
 //! Export **without Draco**. Decodes through [`crate::render::room_env_gltf`].
 
 use std::sync::RwLock;
 
-use glam::Vec3;
+use glam::{EulerRot, Mat4, Quat, Vec2, Vec3};
 
-use crate::render::draw_cmd::CameraParams;
-use crate::render::flame_volume::{FlameEmitter, shop_gltf_flame_emitter_scale, shop_gltf_wick_from_light};
+use crate::render::draw_cmd::{CameraParams, Object3d, Object3dKind};
+use crate::render::flame_volume::{
+    FlameEmitter, shop_gltf_flame_emitter_scale, shop_gltf_wick_from_light,
+};
+use crate::render::mirror_mesh::MIRROR_LOCAL_HALF;
+use crate::render::river_mesh::RIVER_LOCAL_HALF;
 use crate::render::room_env_gltf::{RoomEnvWalkHooks, RoomMeshPolicy};
 use crate::render::room_glb::{self, RoomEnvLightingTune, RoomGlbCpu, load_room_glb_from_bytes};
+use crate::render::table_transform::{
+    compose_rotation_euler, mat4_to_euler_xyz_rad, rot_euler_xyz_rad,
+};
 use crate::render::wgpu_renderer::{PointLight, SpotLight};
 use crate::render::world_space::surface_anchor_from_world_xyz;
 
@@ -40,8 +49,15 @@ pub const PLAYER_GOLD: &str = "player_gold";
 pub const PLAYER_DISCARD_TALLY: &str = "player_discard_tally";
 pub const PLAYER_PLAY_TALLY: &str = "player_play_tally";
 pub const PLAYER_YAKU_JOURNAL: &str = "player_yaku_journal";
-pub const BTN_CASH_IN: &str = "btn_cash_in";
-pub const GAMEPLAY_CAMERA_NODE: &str = "Camera";
+pub const PLAYER_CASH_IN: &str = "player_cash_in";
+pub const GAMEPLAY_CAMERA_NODE: &str = "default";
+const GAMEPLAY_ACTION_PICK_SHRINK_MUL: f32 = 0.125;
+const GAMEPLAY_DISCARD_RIVER_SIZE_MUL: f32 = 1.5;
+
+/// Per-room linear HDR multiplier for `gameplay.glb` **and** showcase tiles when
+/// [`DrawCmd::GameplayEnvironment`] is active — same path as hallway/archive in
+/// [`crate::render::wgpu_renderer::runtime::camera::WgpuRenderer::tile_hdr_tonemap`].
+pub const GAMEPLAY_ENV_LINEAR_EXPOSURE_MUL: f32 = 1.0;
 
 pub const PLAYER_RELIC_MARKERS: [&str; 5] = [
     "player_relic",
@@ -51,62 +67,131 @@ pub const PLAYER_RELIC_MARKERS: [&str; 5] = [
     "player_relic.004",
 ];
 
-pub const PLAYER_CONSUMABLE_MARKERS: [&str; 2] = [
-    "player_consumables",
-    "player_consumables.001",
-];
+pub const PLAYER_CONSUMABLE_MARKERS: [&str; 2] = ["player_consumables", "player_consumables.001"];
 
 pub const TILE_PLINTH_MARKERS: [&str; 3] = ["tile_plinth", "tile_plinth.001", "tile_plinth.002"];
 
-/// Linear HDR exposure multiplier when embedded punctual lights are active.
-pub const GAMEPLAY_ENV_LINEAR_EXPOSURE_MUL: f32 = 1.0;
-pub const GAMEPLAY_ENV_AMBIENT_SCALE_MIN: f32 = 0.06;
+/// Every spawn empty that must exist in a shippable `gameplay.glb`.
+pub const REQUIRED_GAMEPLAY_MARKER_NODES: &[&str] = &[
+    HAND_TILES_LEFT,
+    HAND_TILES_RIGHT,
+    STRUCTURE_TILES_LEFT,
+    STRUCTURE_TILES_RIGHT,
+    YAKU_TABLETS_LEFT,
+    YAKU_TABLETS_RIGHT,
+    DISCARD_RIVER,
+    PLAY_MIRROR,
+    PLAYER_GOLD,
+    PLAYER_DISCARD_TALLY,
+    PLAYER_PLAY_TALLY,
+    PLAYER_YAKU_JOURNAL,
+    PLAYER_CASH_IN,
+];
 
 enum GameplayGlbCache {
     Uninit,
-    Ready(Option<Box<RoomGlbCpu>>),
+    Missing,
+    Invalid(String),
+    Ready(Box<RoomGlbCpu>),
 }
 
 static GAMEPLAY_GLB_CPU: RwLock<GameplayGlbCache> = RwLock::new(GameplayGlbCache::Uninit);
+
+/// Whether [`gameplay.glb`] is absent, invalid, or ready for the authored table path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GameplayGlbLoadState {
+    Missing,
+    Invalid(String),
+    Ready,
+}
+
+pub fn gameplay_glb_load_state() -> GameplayGlbLoadState {
+    ensure_gameplay_glb_loaded();
+    match &*GAMEPLAY_GLB_CPU.read().unwrap_or_else(|e| e.into_inner()) {
+        GameplayGlbCache::Uninit => GameplayGlbLoadState::Missing,
+        GameplayGlbCache::Missing => GameplayGlbLoadState::Missing,
+        GameplayGlbCache::Invalid(msg) => GameplayGlbLoadState::Invalid(msg.clone()),
+        GameplayGlbCache::Ready(_) => GameplayGlbLoadState::Ready,
+    }
+}
 
 fn ensure_gameplay_glb_loaded() {
     let mut w = GAMEPLAY_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
     if !matches!(*w, GameplayGlbCache::Uninit) {
         return;
     }
-    let ready = if let Some(file) = crate::asset_path::get("3d/gameplay.glb") {
+    *w = if let Some(file) = crate::asset_path::get("3d/gameplay.glb") {
         match load_gameplay_glb_from_bytes(&file.data) {
-            Ok(cpu) => {
-                log::debug!(
-                    "gameplay.glb: {} marker(s), {} draw primitive(s)",
-                    cpu.markers.len(),
-                    cpu.environment_primitives.len(),
-                );
-                Some(cpu)
-            }
+            Ok(cpu) => match validate_gameplay_glb(cpu) {
+                Ok(cpu) => GameplayGlbCache::Ready(cpu),
+                Err(e) => {
+                    log::error!("gameplay.glb rejected: {e:#}");
+                    GameplayGlbCache::Invalid(e.to_string())
+                }
+            },
             Err(e) => {
-                log::error!("gameplay.glb failed to load: {e:#}");
-                None
+                log::error!("gameplay.glb failed to decode: {e:#}");
+                GameplayGlbCache::Invalid(e.to_string())
             }
         }
     } else {
-        log::debug!("gameplay.glb not embedded — gameplay uses procedural table");
-        None
+        log::error!("gameplay.glb not embedded");
+        GameplayGlbCache::Missing
     };
-    *w = GameplayGlbCache::Ready(ready.map(Box::new));
 }
 
-/// `true` when `gameplay.glb` loaded and has drawable environment geometry.
-pub fn gameplay_room_draw_ready() -> bool {
-    with_gameplay_glb_cpu(|opt| opt.is_some_and(|c| !c.environment_primitives.is_empty()))
+pub fn validate_gameplay_glb(cpu: RoomGlbCpu) -> anyhow::Result<Box<RoomGlbCpu>> {
+    if cpu.environment_primitives.is_empty() {
+        anyhow::bail!("gameplay.glb has no drawable environment geometry");
+    }
+    for name in REQUIRED_GAMEPLAY_MARKER_NODES {
+        if !cpu.markers.contains_key(*name) {
+            anyhow::bail!("gameplay.glb missing required empty `{name}`");
+        }
+    }
+    for name in PLAYER_RELIC_MARKERS {
+        if !cpu.markers.contains_key(name) {
+            anyhow::bail!("gameplay.glb missing required empty `{name}`");
+        }
+    }
+    for name in PLAYER_CONSUMABLE_MARKERS {
+        if !cpu.markers.contains_key(name) {
+            anyhow::bail!("gameplay.glb missing required empty `{name}`");
+        }
+    }
+    for name in TILE_PLINTH_MARKERS {
+        if !cpu.markers.contains_key(name) {
+            anyhow::bail!("gameplay.glb missing required empty `{name}`");
+        }
+    }
+    if gameplay_embedded_camera_doc(&cpu).is_none() {
+        anyhow::bail!(
+            "gameplay.glb missing glTF perspective camera node `{GAMEPLAY_CAMERA_NODE}` (assign a Camera object in Blender, export as glTF camera)"
+        );
+    }
+    for prim in &cpu.environment_primitives {
+        if let Some(name) = prim.gltf_node_name.as_deref()
+            && is_gameplay_unexportable_mesh(name)
+        {
+            anyhow::bail!(
+                "gameplay.glb exports Unexportables mesh `{name}` — disable the Unexportables collection for glTF export"
+            );
+        }
+    }
+    log::debug!(
+        "gameplay.glb: {} marker(s), {} draw primitive(s)",
+        cpu.markers.len(),
+        cpu.environment_primitives.len(),
+    );
+    Ok(Box::new(cpu))
 }
 
 pub fn with_gameplay_glb_cpu<R>(f: impl FnOnce(Option<&RoomGlbCpu>) -> R) -> R {
     ensure_gameplay_glb_loaded();
     let g = GAMEPLAY_GLB_CPU.read().unwrap_or_else(|e| e.into_inner());
     match &*g {
-        GameplayGlbCache::Ready(Some(cpu)) => f(Some(cpu)),
-        GameplayGlbCache::Ready(None) => f(None),
+        GameplayGlbCache::Ready(cpu) => f(Some(cpu)),
+        GameplayGlbCache::Missing | GameplayGlbCache::Invalid(_) => f(None),
         GameplayGlbCache::Uninit => {
             log::warn!("gameplay.glb cache still Uninit after ensure — treating as absent");
             f(None)
@@ -116,7 +201,7 @@ pub fn with_gameplay_glb_cpu<R>(f: impl FnOnce(Option<&RoomGlbCpu>) -> R) -> R {
 
 pub fn release_gameplay_environment_cpu_sources_after_gpu_upload() {
     let mut g = GAMEPLAY_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
-    if let GameplayGlbCache::Ready(Some(cpu)) = &mut *g {
+    if let GameplayGlbCache::Ready(cpu) = &mut *g {
         room_glb::release_room_environment_primitives_cpu(cpu);
     }
 }
@@ -137,10 +222,30 @@ fn is_gameplay_spawn_marker(name: &str) -> bool {
             | PLAYER_DISCARD_TALLY
             | PLAYER_PLAY_TALLY
             | PLAYER_YAKU_JOURNAL
-            | BTN_CASH_IN
+            | PLAYER_CASH_IN
     ) || PLAYER_RELIC_MARKERS.contains(&name)
         || PLAYER_CONSUMABLE_MARKERS.contains(&name)
         || TILE_PLINTH_MARKERS.contains(&name)
+}
+
+/// Blender **Unexportables** collection: layout-preview meshes that must not be in the
+/// glTF export (tiles, relics, score plaque parts, action props, …).
+#[inline]
+fn is_gameplay_unexportable_mesh(name: &str) -> bool {
+    name.starts_with("score_counter")
+        || name.starts_with("hand_tile")
+        || name.starts_with("Relic_")
+        || name.starts_with("Ribbon_")
+        || name.starts_with("Talisman_")
+        || name.starts_with("YakuTablet_")
+        || name.starts_with("TallyStick")
+        || name.starts_with("Book")
+        || name.starts_with("Bowl_")
+        || name == "gold coins"
+        || matches!(
+            name,
+            "btn_cash_in" | "Cash In" | "Text" | "player_relic.005"
+        )
 }
 
 #[derive(Copy, Clone)]
@@ -151,11 +256,13 @@ impl RoomEnvWalkHooks for GameplayRoomWalkHooks {
         is_gameplay_spawn_marker(name)
     }
 
+    fn forbid_env_mesh(&self, name: &str) -> bool {
+        is_gameplay_unexportable_mesh(name)
+    }
+
     fn mesh_policy(&self, name: &str) -> RoomMeshPolicy {
         if is_gameplay_spawn_marker(name) {
             RoomMeshPolicy::SkipDrawCollisionIfMarker
-        } else if name == BTN_CASH_IN {
-            RoomMeshPolicy::EnvironmentDrawWithCollision
         } else {
             RoomMeshPolicy::EnvironmentDraw
         }
@@ -187,6 +294,186 @@ pub fn gameplay_marker_world(
     Some(t * s)
 }
 
+pub fn require_gameplay_marker_world(
+    window_h: f32,
+    env_height_scale: f32,
+    cpu: &RoomGlbCpu,
+    name: &str,
+) -> anyhow::Result<Vec3> {
+    gameplay_marker_world(window_h, env_height_scale, cpu, name)
+        .ok_or_else(|| anyhow::anyhow!("gameplay.glb missing required empty `{name}` (runtime)"))
+}
+
+/// Position, rotation, and scale for a spawn empty in one resolve.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GameplayMarkerPose {
+    /// Packed surface anchor `(pixel_x, pixel_y, lift)`.
+    pub anchor: [f32; 3],
+    /// Euler XYZ radians in world space (same as [`Object3d::rotation`]).
+    pub rotation_rad: [f32; 3],
+    /// Non-uniform scale from the glTF node (`room * node` decomposition).
+    pub scale: [f32; 3],
+}
+
+impl GameplayMarkerPose {
+    pub const UNIT_SCALE: [f32; 3] = [1.0, 1.0, 1.0];
+
+    #[inline]
+    pub fn rotation_deg(&self) -> [f32; 3] {
+        [
+            self.rotation_rad[0].to_degrees(),
+            self.rotation_rad[1].to_degrees(),
+            self.rotation_rad[2].to_degrees(),
+        ]
+    }
+
+    /// Uniform scale for sizing props (geometric mean of the three axes).
+    #[inline]
+    pub fn uniform_scale(&self) -> f32 {
+        let [x, y, z] = self.scale;
+        (x * y * z).cbrt()
+    }
+
+    /// Dimensionless Blender-empty scale for pixel-footprint sizing.
+    ///
+    /// [`Self::scale`] is in world units because procedural meshes use it for
+    /// extents. Showcase tile `size_px` is already in renderer world/pixel
+    /// units, so it should only honor the empty's authored scale, not the
+    /// room's window-height scale a second time.
+    #[inline]
+    pub fn uniform_author_scale(&self, window_h: f32, env_height_scale: f32) -> f32 {
+        let room_scale = room_glb::room_env_world_scale(window_h, env_height_scale).max(1e-8);
+        self.uniform_scale() / room_scale
+    }
+}
+
+/// Lerp packed surface anchors between two marker empties.
+#[inline]
+pub fn lerp_marker_anchor(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+    [
+        a[0] + t * (b[0] - a[0]),
+        a[1] + t * (b[1] - a[1]),
+        a[2] + t * (b[2] - a[2]),
+    ]
+}
+
+/// Screen-space distance between two marker anchors (for strip sizing).
+#[inline]
+pub fn marker_pair_span_px(a_l: [f32; 3], a_r: [f32; 3]) -> f32 {
+    ((a_r[0] - a_l[0]).powi(2) + (a_r[1] - a_l[1]).powi(2))
+        .sqrt()
+        .max(8.0)
+}
+
+/// Axis-aligned screen rect spanning two marker anchors (focus rects / tooltips).
+pub fn marker_pair_screen_rect_from_poses(
+    left: &GameplayMarkerPose,
+    right: &GameplayMarkerPose,
+    slot_h: f32,
+) -> (f32, f32, f32, f32) {
+    let left_x = left.anchor[0].min(right.anchor[0]);
+    let cy = (left.anchor[1] + right.anchor[1]) * 0.5;
+    let w = marker_pair_span_px(left.anchor, right.anchor);
+    (left_x, cy - slot_h * 0.5, w, slot_h)
+}
+
+/// Slerp two marker euler triples (XYZ radians).
+pub fn lerp_marker_rotation_rad(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+    let qa = Quat::from_euler(EulerRot::XYZ, a[0], a[1], a[2]);
+    let qb = Quat::from_euler(EulerRot::XYZ, b[0], b[1], b[2]);
+    mat4_to_euler_xyz_rad(Mat4::from_quat(qa.slerp(qb, t.clamp(0.0, 1.0))))
+}
+
+/// Offset a packed surface anchor along the marker's local **+X** in screen pixels.
+pub fn showcase_anchor_spread_px(
+    w: f32,
+    h: f32,
+    cam: &CameraParams,
+    anchor: [f32; 3],
+    rotation_rad: [f32; 3],
+    offset_px: f32,
+) -> [f32; 3] {
+    use crate::render::table_transform::rot_euler_xyz_rad;
+    use crate::render::world_space::layout_anchor_to_world;
+
+    let world = layout_anchor_to_world(w, h, Some(cam), anchor[0], anchor[1], anchor[2], true);
+    let rot = rot_euler_xyz_rad(rotation_rad[0], rotation_rad[1], rotation_rad[2]);
+    let local_x = rot.transform_vector3(Vec3::X);
+    let (px0, py0) = cam.project_world_to_screen(w, h, world);
+    let (px1, py1) = cam.project_world_to_screen(w, h, world + local_x);
+    let dir = Vec2::new(px1 - px0, py1 - py0);
+    let len = dir.length();
+    if len < 1e-4 {
+        return [anchor[0] + offset_px, anchor[1], anchor[2]];
+    }
+    let dir = dir / len;
+    [
+        anchor[0] + dir.x * offset_px,
+        anchor[1] + dir.y * offset_px,
+        anchor[2],
+    ]
+}
+
+/// Rotation (XYZ radians) and scale from a marker's world matrix.
+pub fn gameplay_marker_rotation_scale(
+    window_h: f32,
+    env_height_scale: f32,
+    cpu: &RoomGlbCpu,
+    name: &str,
+) -> anyhow::Result<([f32; 3], [f32; 3])> {
+    let room = room_glb::room_env_model_matrix_from_cpu(window_h, env_height_scale, cpu);
+    let node = cpu
+        .marker_node_transform_doc(name)
+        .ok_or_else(|| anyhow::anyhow!("gameplay.glb missing marker `{name}`"))?;
+    let world_uniform = room_glb::room_env_world_scale(window_h, env_height_scale);
+    let node_scale = Vec3::new(
+        node.x_axis.truncate().length(),
+        node.y_axis.truncate().length(),
+        node.z_axis.truncate().length(),
+    );
+    let scale = [
+        node_scale.x * world_uniform,
+        node_scale.y * world_uniform,
+        node_scale.z * world_uniform,
+    ];
+    let inv_node_scale = Mat4::from_scale(Vec3::new(
+        1.0 / node_scale.x.max(1e-8),
+        1.0 / node_scale.y.max(1e-8),
+        1.0 / node_scale.z.max(1e-8),
+    ));
+    let (_, rot, _) = (room * node * inv_node_scale).to_scale_rotation_translation();
+    Ok((mat4_to_euler_xyz_rad(Mat4::from_quat(rot)), scale))
+}
+
+/// Full spawn pose: surface anchor + rotation + scale.
+pub fn resolve_gameplay_marker_pose(
+    window_w: f32,
+    window_h: f32,
+    env_height_scale: f32,
+    cpu: &RoomGlbCpu,
+    name: &str,
+) -> anyhow::Result<GameplayMarkerPose> {
+    let anchor =
+        require_gameplay_marker_surface_anchor(window_w, window_h, env_height_scale, cpu, name)?;
+    let (rotation_rad, scale) =
+        gameplay_marker_rotation_scale(window_h, env_height_scale, cpu, name)?;
+    Ok(GameplayMarkerPose {
+        anchor,
+        rotation_rad,
+        scale,
+    })
+}
+
+pub fn require_gameplay_marker_pose(
+    window_w: f32,
+    window_h: f32,
+    env_height_scale: f32,
+    cpu: &RoomGlbCpu,
+    name: &str,
+) -> anyhow::Result<GameplayMarkerPose> {
+    resolve_gameplay_marker_pose(window_w, window_h, env_height_scale, cpu, name)
+}
+
 /// Packed [`crate::render::draw_cmd::WorldSurfaceAnchor`] for spawning dynamic props.
 pub fn gameplay_marker_surface_anchor(
     window_w: f32,
@@ -197,6 +484,213 @@ pub fn gameplay_marker_surface_anchor(
 ) -> Option<[f32; 3]> {
     let world = gameplay_marker_world(window_h, env_height_scale, cpu, name)?;
     Some(surface_anchor_from_world_xyz(window_w, window_h, world))
+}
+
+pub fn require_gameplay_marker_surface_anchor(
+    window_w: f32,
+    window_h: f32,
+    env_height_scale: f32,
+    cpu: &RoomGlbCpu,
+    name: &str,
+) -> anyhow::Result<[f32; 3]> {
+    gameplay_marker_surface_anchor(window_w, window_h, env_height_scale, cpu, name)
+        .ok_or_else(|| anyhow::anyhow!("gameplay.glb missing required empty `{name}` (runtime)"))
+}
+
+/// Euler XYZ (radians) for a spawn empty in world space — used by pick-proxy meshes.
+pub fn gameplay_marker_rotation_euler_rad(
+    window_h: f32,
+    env_height_scale: f32,
+    cpu: &RoomGlbCpu,
+    name: &str,
+) -> anyhow::Result<[f32; 3]> {
+    Ok(gameplay_marker_rotation_scale(window_h, env_height_scale, cpu, name)?.0)
+}
+
+#[inline]
+fn scale_extents(extents: [f32; 3], scale: [f32; 3]) -> [f32; 3] {
+    [
+        extents[0] * scale[0],
+        extents[1] * scale[1],
+        extents[2] * scale[2],
+    ]
+}
+
+#[inline]
+fn scale_extents_uniform(extents: [f32; 3], mul: f32) -> [f32; 3] {
+    [extents[0] * mul, extents[1] * mul, extents[2] * mul]
+}
+
+#[inline]
+fn rotate_marker_pose_x_180(rotation_rad: [f32; 3]) -> [f32; 3] {
+    compose_rotation_euler(
+        rot_euler_xyz_rad(rotation_rad[0], rotation_rad[1], rotation_rad[2]),
+        [180.0, 0.0, 0.0],
+    )
+}
+
+/// World-space size of a marker's authoring mesh AABB (full extents, not half).
+pub fn gameplay_marker_mesh_extents_world(
+    window_h: f32,
+    env_height_scale: f32,
+    cpu: &RoomGlbCpu,
+    name: &str,
+) -> Option<[f32; 3]> {
+    let b = cpu.marker_mesh_bounds_doc_for(name)?;
+    let s = room_glb::room_env_world_scale(window_h, env_height_scale);
+    let d = b.max - b.min;
+    Some([(d.x * s).abs(), (d.y * s).abs(), (d.z * s).abs()])
+}
+
+/// Pick-ray proxy for the discard river — position/rotation from the `discard_river` empty.
+pub fn gameplay_pick_discard_river(
+    window_w: f32,
+    window_h: f32,
+    env_height_scale: f32,
+    cpu: &RoomGlbCpu,
+    _screen_rect: [f32; 4],
+) -> anyhow::Result<Object3d> {
+    let pose =
+        require_gameplay_marker_pose(window_w, window_h, env_height_scale, cpu, DISCARD_RIVER)?;
+    let extents = scale_extents_uniform(
+        scale_extents(
+            [
+                RIVER_LOCAL_HALF[0] * 2.0,
+                RIVER_LOCAL_HALF[1] * 2.0,
+                RIVER_LOCAL_HALF[2] * 2.0,
+            ],
+            pose.scale,
+        ),
+        GAMEPLAY_ACTION_PICK_SHRINK_MUL * GAMEPLAY_DISCARD_RIVER_SIZE_MUL,
+    );
+    Ok(Object3d {
+        pos: pose.anchor,
+        extents,
+        rotation: rotate_marker_pose_x_180(pose.rotation_rad),
+        color: [1.0, 1.0, 1.0, 1.0],
+        kind: Object3dKind::Bowl,
+        hover_target: 0.0,
+        anim_id: 1,
+    })
+}
+
+/// Pick-ray proxy for the journal book — position/rotation from `player_yaku_journal`.
+pub fn gameplay_pick_journal_book(
+    window_w: f32,
+    window_h: f32,
+    env_height_scale: f32,
+    cpu: &RoomGlbCpu,
+    open_amount: f32,
+) -> anyhow::Result<Object3d> {
+    use crate::scenes::journal_transition::{
+        BOOK_SPINE_THICKNESS_MM, YAKU_JOURNAL_BOOK_PICK_ID, book_cover_face_extents_xy,
+    };
+
+    let pose = require_gameplay_marker_pose(
+        window_w,
+        window_h,
+        env_height_scale,
+        cpu,
+        PLAYER_YAKU_JOURNAL,
+    )?;
+    let (face_w, face_h) = book_cover_face_extents_xy(window_w, 1.0);
+    let spine_mm = layout_mm(window_h, BOOK_SPINE_THICKNESS_MM);
+    let face_h_safe = face_h.max(1e-6);
+    let extents = scale_extents_uniform(
+        scale_extents(
+            [face_w / face_h_safe, spine_mm / face_h_safe, 1.0],
+            pose.scale,
+        ),
+        GAMEPLAY_ACTION_PICK_SHRINK_MUL,
+    );
+    Ok(Object3d {
+        pos: pose.anchor,
+        extents,
+        rotation: rotate_marker_pose_x_180(pose.rotation_rad),
+        color: [1.0, 1.0, 1.0, 1.0],
+        kind: Object3dKind::Book {
+            spine_label: std::borrow::Cow::Borrowed("Journal"),
+            pick_id: Some(YAKU_JOURNAL_BOOK_PICK_ID),
+            open_amount,
+        },
+        hover_target: 0.0,
+        anim_id: 0,
+    })
+}
+
+#[inline]
+fn layout_mm(window_h: f32, mm: f32) -> f32 {
+    mm * (window_h / 2104.0)
+}
+
+/// Pick-ray proxy for the play mirror — position/rotation from the `play_mirror` empty.
+pub fn gameplay_pick_play_mirror(
+    window_w: f32,
+    window_h: f32,
+    env_height_scale: f32,
+    cpu: &RoomGlbCpu,
+    _screen_rect: [f32; 4],
+) -> anyhow::Result<Object3d> {
+    let pose =
+        require_gameplay_marker_pose(window_w, window_h, env_height_scale, cpu, PLAY_MIRROR)?;
+    let extents = scale_extents_uniform(
+        scale_extents(
+            [
+                MIRROR_LOCAL_HALF[0] * 2.0,
+                MIRROR_LOCAL_HALF[1] * 2.0,
+                MIRROR_LOCAL_HALF[2] * 2.0,
+            ],
+            pose.scale,
+        ),
+        GAMEPLAY_ACTION_PICK_SHRINK_MUL,
+    );
+    Ok(Object3d {
+        pos: pose.anchor,
+        extents,
+        rotation: rotate_marker_pose_x_180(pose.rotation_rad),
+        color: [1.0, 1.0, 1.0, 1.0],
+        kind: Object3dKind::Mirror,
+        hover_target: 0.0,
+        anim_id: 2,
+    })
+}
+
+/// Project a named marker's mesh AABB to screen pixels when the GLB node carries authoring
+/// geometry; otherwise fall back to the empty origin with pixel `min_rw` × `min_rh`.
+pub fn gameplay_marker_screen_rect_resolved(
+    win_w: f32,
+    win_h: f32,
+    cam: &CameraParams,
+    env_height_scale: f32,
+    cpu: &RoomGlbCpu,
+    name: &str,
+    min_rw_px: f32,
+    min_rh_px: f32,
+) -> anyhow::Result<[f32; 4]> {
+    use crate::render::room_glb::{MarkerScreenRectParams, screen_rect_for_marker_mesh_bounds};
+    let params = MarkerScreenRectParams {
+        win_w,
+        win_h,
+        cam,
+        env_height_scale,
+        cpu,
+        node_name: name,
+        min_rw: min_rw_px,
+        min_rh: min_rh_px,
+    };
+    if let Some(rect) = screen_rect_for_marker_mesh_bounds(&params) {
+        return Ok(rect);
+    }
+    require_gameplay_marker_screen_rect(
+        win_w,
+        win_h,
+        cam,
+        env_height_scale,
+        cpu,
+        name,
+        min_rw_px,
+        min_rh_px,
+    )
 }
 
 /// Screen center + minimum hit size for a spawn empty (cursor / focus).
@@ -215,22 +709,80 @@ pub fn gameplay_marker_screen_rect(
     Some([cx - min_rw * 0.5, cy - min_rh * 0.5, min_rw, min_rh])
 }
 
-/// Embedded perspective camera (`Camera` node), scaled like the room mesh.
+pub fn require_gameplay_marker_screen_rect(
+    win_w: f32,
+    win_h: f32,
+    cam: &CameraParams,
+    env_height_scale: f32,
+    cpu: &RoomGlbCpu,
+    name: &str,
+    min_rw: f32,
+    min_rh: f32,
+) -> anyhow::Result<[f32; 4]> {
+    gameplay_marker_screen_rect(
+        win_w,
+        win_h,
+        cam,
+        env_height_scale,
+        cpu,
+        name,
+        min_rw,
+        min_rh,
+    )
+    .ok_or_else(|| anyhow::anyhow!("gameplay.glb missing required empty `{name}` (runtime)"))
+}
+
+fn gameplay_embedded_camera_doc(cpu: &RoomGlbCpu) -> Option<room_glb::RoomGlbEmbeddedCamera> {
+    cpu.embedded_cameras_by_name
+        .get(GAMEPLAY_CAMERA_NODE)
+        .copied()
+}
+
+/// Embedded glTF perspective camera (`default` node), scaled like the room mesh.
+pub fn gameplay_camera_from_cpu(
+    cpu: &RoomGlbCpu,
+    window_h: f32,
+    env_height_scale: f32,
+) -> Option<CameraParams> {
+    let center_doc = cpu
+        .environment_bounds_doc
+        .map(|b| b.center())
+        .unwrap_or(Vec3::ZERO);
+    gameplay_embedded_camera_doc(cpu)
+        .map(|c| c.to_camera_params(window_h, env_height_scale, center_doc))
+}
+
+/// Embedded glTF perspective camera (`default` node), scaled like the room mesh.
 pub fn gameplay_camera_from_glb_if_present(
     window_h: f32,
     env_height_scale: f32,
 ) -> Option<CameraParams> {
     with_gameplay_glb_cpu(|opt| {
-        let cpu = opt?;
-        let center_doc = cpu
-            .environment_bounds_doc
-            .map(|b| b.center())
-            .unwrap_or(Vec3::ZERO);
-        cpu.embedded_cameras_by_name
-            .get(GAMEPLAY_CAMERA_NODE)
-            .copied()
-            .or(cpu.embedded_perspective_camera)
-            .map(|c| c.to_camera_params(window_h, env_height_scale, center_doc))
+        opt.and_then(|cpu| gameplay_camera_from_cpu(cpu, window_h, env_height_scale))
+    })
+}
+
+pub fn require_gameplay_camera(
+    window_h: f32,
+    env_height_scale: f32,
+) -> anyhow::Result<CameraParams> {
+    gameplay_camera_from_glb_if_present(window_h, env_height_scale).ok_or_else(|| {
+        anyhow::anyhow!(
+            "gameplay.glb missing glTF perspective camera node `{GAMEPLAY_CAMERA_NODE}`"
+        )
+    })
+}
+
+#[cfg(test)]
+pub fn require_gameplay_camera_from_cpu(
+    cpu: &RoomGlbCpu,
+    window_h: f32,
+    env_height_scale: f32,
+) -> anyhow::Result<CameraParams> {
+    gameplay_camera_from_cpu(cpu, window_h, env_height_scale).ok_or_else(|| {
+        anyhow::anyhow!(
+            "gameplay.glb missing glTF perspective camera node `{GAMEPLAY_CAMERA_NODE}`"
+        )
     })
 }
 
@@ -276,7 +828,12 @@ pub fn gameplay_embedded_spot_lights_runtime(
     with_gameplay_glb_cpu(|opt| {
         opt.map(|cpu| {
             crate::render::room_gltf_punctual::embedded_spot_lights_runtime(
-                cpu, w, h, env_h, tune, "gameplay.glb",
+                cpu,
+                w,
+                h,
+                env_h,
+                tune,
+                "gameplay.glb",
             )
         })
         .unwrap_or_default()
@@ -323,4 +880,35 @@ pub fn gameplay_gltf_candle_flame_emitters(
             })
             .collect()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unexportable_mesh_names_are_recognized() {
+        for name in [
+            "score_counter.001",
+            "hand_tile_0",
+            "Relic_0_31",
+            "Bowl_0_57",
+            "btn_cash_in",
+            "gold coins",
+        ] {
+            assert!(
+                is_gameplay_unexportable_mesh(name),
+                "{name} should be forbidden"
+            );
+        }
+        assert!(!is_gameplay_unexportable_mesh("table"));
+        assert!(!is_gameplay_unexportable_mesh("CandleWax_6_29"));
+    }
+
+    #[test]
+    fn shipped_gameplay_glb_loads_with_required_markers_and_no_unexportables() {
+        let bytes = include_bytes!("../../assets/3d/gameplay.glb");
+        let cpu = load_gameplay_glb_from_bytes(bytes).expect("decode gameplay.glb");
+        validate_gameplay_glb(cpu).expect("valid gameplay.glb");
+    }
 }

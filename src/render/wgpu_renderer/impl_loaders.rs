@@ -7,7 +7,10 @@ impl WgpuRenderer {
             .unwrap_or(&self.relic_box_mesh)
     }
 
-    pub(crate) fn ordeal_icon_mesh_for(&self, kind: crate::core::ordeal::OrdealKind) -> &LitMeshGpu {
+    pub(crate) fn ordeal_icon_mesh_for(
+        &self,
+        kind: crate::core::ordeal::OrdealKind,
+    ) -> &LitMeshGpu {
         self.ordeal_icon_meshes
             .get(&kind)
             .unwrap_or(&self.relic_box_mesh)
@@ -19,7 +22,8 @@ impl WgpuRenderer {
         use crate::render::relic_dish::build_ordeal_icon_mesh_from_rgba;
         use crate::ui::ordeal_icons::ordeal_icon_rgba;
 
-        if self.ordeal_icon_meshes.contains_key(&kind) && self.ordeal_icon_textures.contains_key(&kind)
+        if self.ordeal_icon_meshes.contains_key(&kind)
+            && self.ordeal_icon_textures.contains_key(&kind)
         {
             return;
         }

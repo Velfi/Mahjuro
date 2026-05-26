@@ -5,7 +5,7 @@
 //! individual fields on to restore heavier visuals.
 
 use crate::main_render_settings::RenderSettings as AppRenderSettings;
-use crate::persistence::{EffectsQuality, SurfaceKind, TileMaterial, TilePreset};
+use crate::persistence::{EffectsQuality, TileMaterial, TilePreset};
 use crate::render::wgpu_renderer::RenderSettings as WgpuRenderSettings;
 
 /// Inputs for [`EffectLayers::wgpu_render_settings`].
@@ -13,7 +13,6 @@ pub struct WgpuRenderSettingsParams<'a> {
     pub gfx: &'a AppRenderSettings,
     pub tile_preset: TilePreset,
     pub tile_material: TileMaterial,
-    pub surface_kind: SurfaceKind,
     pub tileset_name: String,
     pub draw_settle_speed: f32,
     pub sort_settle_speed: f32,
@@ -59,7 +58,6 @@ impl EffectLayers {
             },
             tile_preset: p.tile_preset,
             tile_material: p.tile_material,
-            surface_kind: p.surface_kind,
             tileset_name: p.tileset_name.clone(),
             draw_settle_speed: p.draw_settle_speed,
             sort_settle_speed: p.sort_settle_speed,

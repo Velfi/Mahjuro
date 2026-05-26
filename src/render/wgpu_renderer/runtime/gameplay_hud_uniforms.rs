@@ -27,10 +27,6 @@ impl WgpuRenderer {
         self.proj.bowl_rect = None;
         self.proj.bowl_model = None;
         self.proj.mirror_rect = None;
-        self.proj.plinth_rect = None;
-        self.proj.boss_plinth_rect = None;
-        self.proj.boss_plinth_platform_px = None;
-        self.proj.round_wind_plinth_rect = None;
         self.proj.dora_tile_rect = None;
         self.proj.round_wind_tile_rect = None;
         self.proj.peg_rects = [None, None];

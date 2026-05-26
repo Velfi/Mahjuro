@@ -3,13 +3,14 @@
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 
+use glam::Vec3;
+
 use crate::render::decal::{load_ui_font, measure_label_advances};
 use crate::render::draw_cmd::{Object3d, Object3dKind, UiFrame};
 use crate::render::primitive::{MaterialSpec, MeshId};
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
-use crate::ui::placement::Placement;
-
+use crate::render::world_space::{object3d_pos_triple_for_world_center, pixel_to_world};
 /// RNG seed for the shop coin pile layout (stable across frames).
 pub const SHOP_GOLD_PILE_SEED: u64 = 0x5EED_E0D1_D151_0001;
 /// RNG seed for gameplay — distinct from shop so layouts don't match exactly.
@@ -23,36 +24,33 @@ pub fn gold_coin_dims(mm: impl Fn(f32) -> f32) -> (f32, f32, f32) {
     (coin_radius, coin_thickness, scatter_half)
 }
 
-/// Screen-space anchor for the gameplay coin pile (`Object3d::pos` xy + dish floor z).
-pub fn gameplay_gold_pile_anchor(
-    layout: &crate::ui::layout::LayoutResult,
-    placement: &Placement,
-) -> [f32; 3] {
-    let (_, _, scatter_half) = gold_coin_dims(|n| layout.mm(n));
-    let coin_back_z_push = scatter_half * 0.5;
-    let pile_cx = placement.nx * layout.window_w;
-    let pile_cy = layout.score_panel.y + layout.score_panel.h * 0.5
-        - coin_back_z_push
-        - layout.window_h * placement.ny;
-    let dish_floor_z = layout.mm(placement.lift_mm) + layout.mm(3.0);
-    [pile_cx, pile_cy, dish_floor_z]
-}
-
 /// Settled metal coin cylinders on a dish floor — no procedural tray mesh (GLB or layout supplies the tray).
+///
+/// When `window` is `Some((w, h))`, the anchor is a [`surface_anchor`](crate::render::world_space::surface_anchor_from_world_xyz)
+/// and scatter happens in world XY (for gameplay GLB `player_gold`). Otherwise the anchor is already
+/// in `Object3d::pos` form and scatter offsets are added directly (legacy gameplay layout / shop).
 pub fn build_settled_gold_coin_pile(
     mm: impl Fn(f32) -> f32,
     gold: i32,
     anchor: [f32; 3],
     rng_seed: u64,
+    window: Option<(f32, f32)>,
+    scale_mul: f32,
 ) -> Vec<Object3d> {
     if gold <= 0 {
         return Vec::new();
     }
     let coin_count = (gold as usize).min(48);
     let (coin_radius, coin_thickness, scatter_half) = gold_coin_dims(&mm);
-    let pile_cx = anchor[0];
-    let pile_cy = anchor[1];
-    let dish_floor_z = anchor[2];
+    let coin_radius = coin_radius * scale_mul;
+    let coin_thickness = coin_thickness * scale_mul;
+    let scatter_half = scatter_half * scale_mul;
+    let (pile_cx, pile_cy, dish_floor_z, world_scatter) = if let Some((w, h)) = window {
+        let floor = pixel_to_world(w, h, anchor[0], anchor[1], anchor[2]);
+        (floor.x, floor.y, floor.z, true)
+    } else {
+        (anchor[0], anchor[1], anchor[2], false)
+    };
     let overlap_r = coin_radius * 2.0;
     let overlap_r2 = overlap_r * overlap_r;
     const CANDIDATES_PER_COIN: u32 = 12;
@@ -85,8 +83,15 @@ pub fn build_settled_gold_coin_pile(
         let (lx, lz, support_y, rot_y) = best.unwrap();
         let world_y = support_y + coin_thickness * 0.5;
         placed.push((lx, lz, world_y + coin_thickness * 0.5));
+        let center = Vec3::new(pile_cx + lx, pile_cy + lz, world_y);
+        let pos = if world_scatter {
+            let (w, h) = window.expect("world scatter requires window size");
+            object3d_pos_triple_for_world_center(w, h, center)
+        } else {
+            [center.x, center.y, center.z]
+        };
         coins.push(Object3d {
-            pos: [pile_cx + lx, pile_cy + lz, world_y],
+            pos,
             extents: [coin_radius * 2.0, coin_thickness, coin_radius * 2.0],
             rotation: [0.0, rot_y, 0.0],
             color: color::RELIC_GOLD,

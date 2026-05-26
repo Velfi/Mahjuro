@@ -87,9 +87,9 @@ pub const FLOWERS: PackPalette = PackPalette {
     insignia: "F",
 };
 
-pub const BAMBOO_GROVE: PackPalette = PackPalette {
-    slug: "bamboo_grove",
-    display_name: "Bamboo Grove",
+pub const SOUZU: PackPalette = PackPalette {
+    slug: "souzu",
+    display_name: "Souzu Pack",
     foil: [0.48, 0.78, 0.52, 1.0],
     seal: [0.78, 0.18, 0.14, 1.0],
     bg: [0.039, 0.102, 0.055, 1.0], // #0A1A0E
@@ -97,9 +97,9 @@ pub const BAMBOO_GROVE: PackPalette = PackPalette {
     insignia: "B",
 };
 
-pub const COIN_CACHE: PackPalette = PackPalette {
-    slug: "coin_cache",
-    display_name: "Coin Cache",
+pub const PINZU: PackPalette = PackPalette {
+    slug: "pinzu",
+    display_name: "Pinzu Pack",
     foil: [0.78, 0.82, 0.88, 1.0],
     seal: [0.58, 0.10, 0.18, 1.0],
     bg: [0.102, 0.055, 0.071, 1.0], // #1A0E12
@@ -107,9 +107,9 @@ pub const COIN_CACHE: PackPalette = PackPalette {
     insignia: "C",
 };
 
-pub const SCROLL_LIBRARY: PackPalette = PackPalette {
-    slug: "scroll_library",
-    display_name: "Scroll Library",
+pub const MANZU: PackPalette = PackPalette {
+    slug: "manzu",
+    display_name: "Manzu Pack",
     foil: [0.42, 0.48, 0.78, 1.0],
     seal: [0.72, 0.18, 0.18, 1.0],
     bg: [0.102, 0.078, 0.039, 1.0], // #1A140A
@@ -123,9 +123,9 @@ pub const fn for_kind(kind: TilePackKind) -> PackPalette {
         TilePackKind::Honors => HONORS,
         TilePackKind::Terminals => TERMINALS,
         TilePackKind::Flowers => FLOWERS,
-        TilePackKind::BambooGrove => BAMBOO_GROVE,
-        TilePackKind::CoinCache => COIN_CACHE,
-        TilePackKind::ScrollLibrary => SCROLL_LIBRARY,
+        TilePackKind::Souzu => SOUZU,
+        TilePackKind::Pinzu => PINZU,
+        TilePackKind::Manzu => MANZU,
     }
 }
 

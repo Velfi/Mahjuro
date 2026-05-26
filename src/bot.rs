@@ -1655,7 +1655,8 @@ fn play_chamber(
             .discards_by_chamber_slot
             .entry(chamber_slot_key(run))
             .or_insert(0) += 1;
-        if drain_post_action_bus(run, &mut bus, stats) == Some(PlayChamberOutcome::SecondWindForfeit)
+        if drain_post_action_bus(run, &mut bus, stats)
+            == Some(PlayChamberOutcome::SecondWindForfeit)
         {
             return (PlayChamberOutcome::SecondWindForfeit, turn);
         }
@@ -3200,7 +3201,14 @@ fn play_run_with_options(
             break;
         }
         if run_deadline_expired(deadline) {
-            record_timeout_snapshot(&mut stats, &run, "outer", run.upcoming_chamber, None, started);
+            record_timeout_snapshot(
+                &mut stats,
+                &run,
+                "outer",
+                run.upcoming_chamber,
+                None,
+                started,
+            );
             break;
         }
         let blind = run.upcoming_chamber;

@@ -13,11 +13,13 @@ use crate::core::tile_pack::PACK_ASPECT_W_OVER_H;
 use crate::game::engine::{GameEngine, ShopReadModel, consumable_sell_price_for_mode};
 use crate::game::game_mode::GameMode;
 use crate::game::run::RunState;
+use crate::render::consumable_prop_scale::{
+    FOR_SALE_TALISMAN_W_FRAC, OWNED_TALISMAN_W_FRAC, for_sale_ribbon_length,
+    for_sale_talisman_tablet_extent, owned_ribbon_length, owned_talisman_tablet_extent,
+};
 use crate::render::draw_cmd::{CameraParams, Object3d, Object3dKind, ScenePunctualLight, UiFrame};
 use crate::render::flame_volume::FlameEmitter;
-use crate::render::ribbon_mesh::{
-    ZodiacRibbonSpec, ribbon_display_length, ribbon_length_fitting_rect, zodiac_ribbon_object3d,
-};
+use crate::render::ribbon_mesh::{ZodiacRibbonSpec, ribbon_display_length, zodiac_ribbon_object3d};
 use crate::render::room_glb::{
     MarkerScreenRectParams, marker_translation, player_consumable_marker_name,
     player_gold_dish_marker_translation, player_relic_marker_name,
@@ -264,7 +266,7 @@ fn shop_inspect_pivot_world(
             }
             ShopFocus::Ribbon(i) => {
                 scene.zodiac_items.get(i)?;
-                let ribbon_len = ribbon_length_fitting_rect(r[2] * 0.38, r[3] * 0.62);
+                let ribbon_len = for_sale_ribbon_length(r[2], r[3]);
                 let ribbon_world = ribbon_display_length(ribbon_len);
                 let cz = wz + ribbon_world * 0.35 - ribbon_world * 0.5;
                 sale_anchor_at_slot(SaleAnchorAtSlot {
@@ -338,7 +340,7 @@ fn shop_inspect_pivot_world(
                 let zodiac_for_sale = scene.zodiac_items.len();
                 let oi = i.saturating_sub(zodiac_for_sale);
                 shop.owned_zodiacs.get(oi)?;
-                let ribbon_len = ribbon_length_fitting_rect(r[2] * 0.36, r[3] * 0.58);
+                let ribbon_len = owned_ribbon_length(r[2], r[3]);
                 let ribbon_world = ribbon_display_length(ribbon_len);
                 let cz = wz + ribbon_world * 0.32 - ribbon_world * 0.5;
                 inv_marker_surface_anchor(InvMarkerSurfaceAnchor {
@@ -844,6 +846,8 @@ pub(crate) fn render_shop_frame(
             shop_rm.display_gold as i32,
             gold_pile_anchor,
             crate::render::gold_display::SHOP_GOLD_PILE_SEED,
+            None,
+            1.0,
         );
         (stock_dim, stock_subj) = push_stock_meshes(shop, &shop_rm, w, h, &cam, inspect_anchor);
     }
@@ -864,11 +868,7 @@ pub(crate) fn render_shop_frame(
     // any 2D HUD (tooltips, focus rings, pause). `frame.flames` at end of draw
     // stamped additive fire over tooltip panels.
     if !frame.procedural_flame_emitters.is_empty() {
-        frame.flames(std::iter::once(GpuInstance {
-            rect: [0.0, 0.0, 1.0, 1.0],
-            color: [0.0, 0.0, 1.0, 0.0],
-            user: 0,
-        }));
+        frame.flame_batch();
     }
 
     // Gold plaque + label sit on the post-tonemap overlay layer (text label
@@ -1950,7 +1950,7 @@ fn push_stock_meshes(
                 // Largest 3:1 ribbon that fits the inspect slot's
                 // (0.38 × 0.62) envelope — width-bound when the slot is
                 // very tall, length-bound otherwise.
-                let ribbon_len = ribbon_length_fitting_rect(r[2] * 0.38, r[3] * 0.62);
+                let ribbon_len = for_sale_ribbon_length(r[2], r[3]);
                 let ribbon_world = ribbon_display_length(ribbon_len);
                 let z_k = if let Consumable::Zodiac(z) = item.consumable {
                     Some(z)
@@ -2008,7 +2008,7 @@ fn push_stock_meshes(
                     // Slightly smaller than ribbons/packs in the same row so
                     // adjacent buff tablets (e.g. Pearl + Gilded) don't read as
                     // one mass under the shared for-sale talisman tilt.
-                    let tw = r[2] * 0.80;
+                    let tw = r[2] * FOR_SALE_TALISMAN_W_FRAC;
                     let cz = wz + tw * 0.55;
                     let mut tal_pos = object3d_pos_for_shop_inspect_focus(
                         inspect_anchor,
@@ -2037,7 +2037,7 @@ fn push_stock_meshes(
                         Object3d {
                             pos: tal_pos,
                             extents: crate::render::talisman_mesh::talisman_object_extents(
-                                tw * 1.15,
+                                for_sale_talisman_tablet_extent(r[2]),
                             ),
                             rotation: crate::render::talisman_mesh::talisman_face_camera_rotation(
                                 0.0,
@@ -2138,7 +2138,7 @@ fn push_stock_meshes(
                 if let Consumable::Zodiac(z) = owned.consumable {
                     // Largest 3:1 ribbon that fits the inventory slot's
                     // (0.36 × 0.58) envelope.
-                    let ribbon_len = ribbon_length_fitting_rect(r[2] * 0.36, r[3] * 0.58);
+                    let ribbon_len = owned_ribbon_length(r[2], r[3]);
                     let ribbon_world = ribbon_display_length(ribbon_len);
                     let cz = wz + ribbon_world * 0.32 - ribbon_world * 0.5;
                     let mut pos = object3d_pos_for_shop_inspect_focus(
@@ -2192,7 +2192,7 @@ fn push_stock_meshes(
                 let Some(owned) = shop.owned_talismans.get(oi) else {
                     continue;
                 };
-                let tw = r[2] * 0.72;
+                let tw = r[2] * OWNED_TALISMAN_W_FRAC;
                 let cz = wz + tw * 0.45;
                 let mut pos = object3d_pos_for_shop_inspect_focus(
                     inspect_anchor,
@@ -2234,7 +2234,9 @@ fn push_stock_meshes(
                     *foc,
                     Object3d {
                         pos,
-                        extents: crate::render::talisman_mesh::talisman_object_extents(tw * 1.15),
+                        extents: crate::render::talisman_mesh::talisman_object_extents(
+                            owned_talisman_tablet_extent(r[2]),
+                        ),
                         rotation: euler_rad_add(base_rot, sell_hold_wobble_euler_rad(scene, *foc)),
                         color,
                         kind,

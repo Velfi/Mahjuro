@@ -49,8 +49,6 @@ pub fn push_defeat_memorial_tableau(
         clip_far: None,
     });
 
-    frame.table();
-
     let hero = h.min(w);
     let tscale = hero * 0.13;
     let accent = kind.accent_color();

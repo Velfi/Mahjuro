@@ -1,8 +1,8 @@
 use crate::game::run::RunState;
 use crate::{
     core::{
-        ordeal,
         deck::Wall,
+        ordeal,
         relic::RelicId,
         rules::{ChamberKind, RuleModifier},
         tile::Suit,
@@ -293,9 +293,13 @@ impl RunState {
     /// playing or visiting the shop. Resets per-round state. Skipping is
     /// not allowed for the Boss blind — callers should check first.
     pub fn skip_to_next_chamber(&mut self) {
-        self.defeat_journal.chambers_skipped = self.defeat_journal.chambers_skipped.saturating_add(1);
-        self.chronicle
-            .record_chamber_skipped(self.wing, self.upcoming_chamber, "Skip reward".into());
+        self.defeat_journal.chambers_skipped =
+            self.defeat_journal.chambers_skipped.saturating_add(1);
+        self.chronicle.record_chamber_skipped(
+            self.wing,
+            self.upcoming_chamber,
+            "Skip reward".into(),
+        );
         self.upcoming_chamber = self.upcoming_chamber.next();
         self.run_number += 1;
         // `target_score` is recomputed by `apply_chamber` when the next blind is picked.

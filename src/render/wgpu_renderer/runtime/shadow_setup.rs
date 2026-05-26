@@ -64,7 +64,7 @@ pub(super) fn room_has_baked_shadow_asset(
 #[inline]
 pub(super) fn room_baked_shadow_loaded(
     slots: &[Option<crate::render::wgpu_renderer::impl_room_shadow::RoomBakedShadowGpu>;
-        crate::render::room_gi_bake::ROOM_GI_ROOM_COUNT],
+         crate::render::room_gi_bake::ROOM_GI_ROOM_COUNT],
     env: ActiveRoomEnv,
 ) -> Option<RoomGiRoom> {
     let room = env.to_room_gi()?;

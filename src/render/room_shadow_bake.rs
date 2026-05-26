@@ -201,7 +201,8 @@ fn load_room_shadow_bake(room: RoomGiRoom) -> Option<Arc<RoomShadowBake>> {
         .ok()
 }
 
-static BAKE_CACHE: [OnceLock<Option<Arc<RoomShadowBake>>>; crate::render::room_gi_bake::ROOM_GI_ROOM_COUNT] = [
+static BAKE_CACHE: [OnceLock<Option<Arc<RoomShadowBake>>>;
+    crate::render::room_gi_bake::ROOM_GI_ROOM_COUNT] = [
     OnceLock::new(),
     OnceLock::new(),
     OnceLock::new(),

@@ -347,8 +347,7 @@ impl SceneBehavior for GameOverScene {
         let value_col_w = inner_w * 0.50;
         let level_well_inset = row_font_px * 0.32;
         let level_inner_w_est = panel_w - 12.0;
-        let (_, well_height_px) =
-            depth_well_size(level_inner_w_est, level_well_inset, row_line_h);
+        let (_, well_height_px) = depth_well_size(level_inner_w_est, level_well_inset, row_line_h);
         let level_header_h = row_line_h * 2.35 + row_font_px * 0.18;
         let level_block_h = level_header_h + well_height_px + row_font_px * 0.22;
         let level_block_gap = row_font_px * 0.60;
@@ -537,9 +536,8 @@ impl SceneBehavior for GameOverScene {
         let (well_width_px, well_height_px) =
             depth_well_size(level_inner_rect[2], level_well_inset, row_line_h);
         let well_slot_w = (level_inner_rect[2] - level_well_inset * 2.0).max(0.0);
-        let well_x = level_inner_rect[0]
-            + level_well_inset
-            + (well_slot_w - well_width_px).max(0.0) * 0.5;
+        let well_x =
+            level_inner_rect[0] + level_well_inset + (well_slot_w - well_width_px).max(0.0) * 0.5;
         let well_y = level_inner_rect[1] + row_line_h * 2.35;
         let well_viewport_rect = [well_x, well_y, well_width_px, well_height_px];
         let well_draw_rect = depth_well_draw_rect(well_viewport_rect);
@@ -737,10 +735,7 @@ impl SceneBehavior for GameOverScene {
         frame.window_title = if self.won {
             "Victory! — Final wing cleared".to_string()
         } else {
-            format!(
-                "Game Over — {} / {}",
-                self.final_score, self.target_score
-            )
+            format!("Game Over — {} / {}", self.final_score, self.target_score)
         };
         frame
     }

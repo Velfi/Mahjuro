@@ -5,6 +5,7 @@ pub mod archive_career;
 pub mod celebration_overlay;
 pub mod collection;
 pub mod credits;
+pub mod debug_visibility;
 pub(crate) mod flowers_intro_copy;
 pub mod game_over;
 mod game_over_tableau;
@@ -19,7 +20,6 @@ pub mod object3d_inspect;
 pub mod options;
 pub mod pause_menu;
 pub mod pick_chamber;
-pub mod staircase;
 pub mod profile_select;
 pub mod rumble_lab;
 pub(crate) mod scoring_intro_copy;
@@ -27,6 +27,7 @@ pub mod shop;
 pub mod showcase;
 pub mod showcase_stage;
 pub mod splash;
+pub mod staircase;
 pub mod start_game_modal;
 pub mod tile_anchor_lab;
 pub(crate) mod tiles_intro_copy;
@@ -45,7 +46,6 @@ pub use main_menu_exterior::MainMenuExteriorScene;
 pub use material_viewer::MaterialViewerScene;
 pub use options::OptionsScene;
 pub use pick_chamber::PickChamberScene;
-pub use staircase::StaircaseScene;
 pub use profile_select::ProfileSelectScene;
 pub use rumble_lab::RumbleLabScene;
 pub use shop::ShopScene;
@@ -54,6 +54,7 @@ pub use showcase::{
     ShowcaseScene, TilePackPresenter, ZodiacPresenter,
 };
 pub use splash::SplashScene;
+pub use staircase::StaircaseScene;
 pub use start_game_modal::TileSelectScene;
 pub use tile_anchor_lab::TileAnchorLabScene;
 pub use tixels::TixelsScene;
@@ -72,20 +73,7 @@ use crate::render::draw_cmd::UiFrame;
 use crate::ui::input::{InputMode, RumbleLabOp, UiAction};
 use crate::ui::layout::LayoutResult;
 
-/// Per-element visibility flags driven by the debug visibility modal.
-/// Plumbed through `DrawCtx` so scenes can skip pushing draw cmds at the
-/// call site (necessary for elements that share a `DrawCmd` variant — e.g.
-/// multiple plaques that are both `DrawCmd::Plaque(_)` and so can't be told
-/// apart by a post-process filter).
-#[derive(Clone, Copy, Debug, Default)]
-pub struct DebugVisibility {
-    pub hide_candles: bool,
-    pub hide_chamber_plaque: bool,
-    /// When true, skip the gameplay score counter assembly (the prop that
-    /// replaced the legacy blind plaque mesh). Plumbed from the debug
-    /// visibility modal alongside `hide_chamber_plaque` for separate toggles.
-    pub hide_scoring_placard: bool,
-}
+pub use debug_visibility::DebugVisibility;
 
 /// Which background image to display behind the scene.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]

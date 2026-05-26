@@ -63,7 +63,6 @@ impl WgpuRenderer {
     pub(super) fn apply_render_settings(
         &mut self,
         tile_material: crate::persistence::TileMaterial,
-        surface_kind: crate::persistence::SurfaceKind,
         effects_quality: crate::persistence::EffectsQuality,
         tileset_name: &str,
     ) {
@@ -78,18 +77,6 @@ impl WgpuRenderer {
             crate::render::tile_body::TileBodyShaderKind::resolve(tile_material).id()
         } else {
             crate::render::tile_body::TEXTURED_TILE_GAMEPLAY_BODY_KIND
-        };
-
-        // Pick which procedural surface the table mesh routes through. The
-        // shader branch is selected by `material_params.x` (the kind), so
-        // swapping the params is enough — no pipeline / mesh rebuild.
-        self.table_material = match surface_kind {
-            crate::persistence::SurfaceKind::Walnut => {
-                crate::render::lit_mesh::MaterialParams::lacquered_wood()
-            }
-            crate::persistence::SurfaceKind::GreenFelt => {
-                crate::render::lit_mesh::MaterialParams::felt_green()
-            }
         };
 
         self.felt_shader_lod = effects_quality.felt_shader_lod();
@@ -202,6 +189,7 @@ impl WgpuRenderer {
                     | DrawCmd::StaircaseEnvironment
                     | DrawCmd::ArchiveEnvironment
                     | DrawCmd::MainMenuEnvironment
+                    | DrawCmd::GameplayEnvironment
             )
         });
         if !has_room_env && !frame.uses_room_glb_shader() {
@@ -254,17 +242,16 @@ impl WgpuRenderer {
         const EXTRACT_SCALE: f32 = 0.85;
         const STRENGTH_NON_ROOM: f32 = 0.28;
 
-        let strength = if let Some(gain) =
-            Self::room_env_linear_hdr_gain(frame, shop_env_linear_exposure)
-        {
-            // glTF emissive is absolute HDR; lit surfaces use `tile_seed` exposure
-            // (often ≪ 1). Scale bloom down in crushed rooms so candle halos stay
-            // tight instead of fogging the frame.
-            let ev = gain.max(1e-8).log2();
-            ((ev + 8.5) * 0.045 + 0.14).clamp(0.12, 0.36)
-        } else {
-            STRENGTH_NON_ROOM
-        };
+        let strength =
+            if let Some(gain) = Self::room_env_linear_hdr_gain(frame, shop_env_linear_exposure) {
+                // glTF emissive is absolute HDR; lit surfaces use `tile_seed` exposure
+                // (often ≪ 1). Scale bloom down in crushed rooms so candle halos stay
+                // tight instead of fogging the frame.
+                let ev = gain.max(1e-8).log2();
+                ((ev + 8.5) * 0.045 + 0.14).clamp(0.12, 0.36)
+            } else {
+                STRENGTH_NON_ROOM
+            };
 
         (THRESHOLD, strength, EXTRACT_SCALE)
     }

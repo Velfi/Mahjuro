@@ -39,7 +39,7 @@ pub fn score_counter_layout(
     positions: &GameplayPositions,
 ) -> ScoreCounterLayout {
     let sp = layout.score_panel;
-    let plaque_lift = layout.mm(positions.plaque.lift_mm);
+    let plaque_lift = layout.mm(positions.score_reel_lift_mm);
     let screen = layout.window_w.min(layout.window_h);
     ScoreCounterLayout {
         reel: LayoutAnchorPx {

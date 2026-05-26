@@ -6,7 +6,7 @@
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::scenes::archive_career::{
-    self, WingOutcomeCell, OrdealRecordRow, CareerKpi, ScoreHistoryPoint,
+    self, CareerKpi, OrdealRecordRow, ScoreHistoryPoint, WingOutcomeCell,
 };
 use crate::ui::chart_primitives::{
     self, ChartClip, chart_y_axis_width_for_max, pill_label_width, push_chart_plot_baseline,

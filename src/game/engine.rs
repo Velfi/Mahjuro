@@ -10,9 +10,9 @@
 //! [`GameplayCoreState::with_run_mut`](crate::game::engine_state::GameplayCoreState::with_run_mut)
 //! so parallel vectors stay aligned.
 
-use crate::core::ordeal::OrdealKind;
 use crate::core::consumable::Consumable;
 use crate::core::hand::DetectedMeld;
+use crate::core::ordeal::OrdealKind;
 use crate::core::progression::PlayerProgress;
 use crate::core::relic::{RelicId, RelicState, apply_merchants_eye_discount};
 use crate::core::rules::ChamberKind;

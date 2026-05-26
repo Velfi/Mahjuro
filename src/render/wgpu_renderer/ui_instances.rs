@@ -17,9 +17,6 @@ pub struct RenderSettings {
     pub effects_quality: crate::persistence::EffectsQuality,
     pub tile_preset: crate::persistence::TilePreset,
     pub tile_material: crate::persistence::TileMaterial,
-    /// Which procedural surface the table mesh routes through (walnut wood
-    /// or green felt). Matches the user's Options-scene choice.
-    pub surface_kind: crate::persistence::SurfaceKind,
     /// Subdirectory of `assets/textures/tile_sets/` whose PNGs should be used for tile faces.
     pub tileset_name: String,
     pub draw_settle_speed: f32,

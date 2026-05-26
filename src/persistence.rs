@@ -293,47 +293,6 @@ fn default_tile_material() -> TileMaterial {
     TileMaterial::Bamboo
 }
 
-/// The endless playing surface beneath the tiles. Controls which procedural
-/// branch the table mesh routes through in `lit_mesh.wgsl` — walnut wood
-/// vs mahjong-parlor green felt.
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
-)]
-pub enum SurfaceKind {
-    /// Lacquered walnut — original surface, glossy clearcoat + SSR.
-    #[default]
-    Walnut,
-    /// Mahjong-parlor green felt — broad soft sheen, no clearcoat, no SSR.
-    GreenFelt,
-}
-
-impl SurfaceKind {
-    pub fn next(self) -> Self {
-        match self {
-            Self::Walnut => Self::GreenFelt,
-            Self::GreenFelt => Self::Walnut,
-        }
-    }
-
-    pub fn prev(self) -> Self {
-        match self {
-            Self::Walnut => Self::GreenFelt,
-            Self::GreenFelt => Self::Walnut,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Walnut => "Walnut",
-            Self::GreenFelt => "Green Felt",
-        }
-    }
-}
-
-fn default_surface_kind() -> SurfaceKind {
-    SurfaceKind::Walnut
-}
-
 fn default_tileset_name() -> String {
     "original".to_string()
 }
@@ -357,8 +316,6 @@ pub struct AppSettings {
     pub tile_preset: TilePreset,
     #[serde(default = "default_tile_material")]
     pub tile_material: TileMaterial,
-    #[serde(default = "default_surface_kind")]
-    pub surface_kind: SurfaceKind,
     #[serde(default = "default_tileset_name")]
     pub tileset_name: String,
     #[serde(default = "default_gamma")]
@@ -441,7 +398,6 @@ impl Default for AppSettings {
             effects_quality: EffectsQuality::High,
             tile_preset: TilePreset::Chinese,
             tile_material: TileMaterial::Bamboo,
-            surface_kind: SurfaceKind::Walnut,
             tileset_name: default_tileset_name(),
             gamma: 1.0,
             shadows_enabled: true,

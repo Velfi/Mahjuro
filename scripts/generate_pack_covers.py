@@ -162,8 +162,8 @@ _SIGILS = [
         "area — a single blossom, not a spray or pattern.",
     ),
     (
-        "bamboo_grove",
-        "Bamboo Grove",
+        "souzu",
+        "Souzu Pack",
         "Sigil: a single upright bamboo stalk silhouette, flat "
         "jade-green (#3aa84e), centered, running the full height of "
         "the sigil area. The stalk is segmented by a handful of thin "
@@ -172,8 +172,8 @@ _SIGILS = [
         "outward from near the top. A single stalk, not a grove.",
     ),
     (
-        "coin_cache",
-        "Coin Cache",
+        "pinzu",
+        "Pinzu Pack",
         "Sigil: a single bold round Chinese cash-coin silhouette, "
         "flat gold (#e8c46a), centered, large and filling most of the "
         "sigil area. A square hole is punched out of the center, "
@@ -182,8 +182,8 @@ _SIGILS = [
         "axis-aligned. A single coin, not a pile.",
     ),
     (
-        "scroll_library",
-        "Scroll Library",
+        "manzu",
+        "Manzu Pack",
         "Sigil: a single partly-unrolled scroll silhouette, flat "
         "cream (#f2ead6), centered, horizontally oriented. Two flat "
         "cream cylindrical rolls sit at the left and right ends; "

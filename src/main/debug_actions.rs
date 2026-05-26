@@ -115,13 +115,8 @@ impl App {
                     self.debug.visibility_overlay = None;
                     log::debug!("Closed debug visibility overlay");
                 } else {
-                    self.debug.visibility_overlay = Some(DebugVisibilityOverlay::new(
-                        self.debug.hide_tiles,
-                        self.debug.hide_candles,
-                        self.debug.hide_chamber_plaque,
-                        self.debug.hide_scoring_placard,
-                        self.debug.hide_inventory,
-                    ));
+                    self.debug.visibility_overlay =
+                        Some(DebugVisibilityOverlay::new(self.debug.visibility));
                     log::debug!("Opened debug visibility overlay");
                 }
             }

@@ -1,7 +1,7 @@
 use crate::{
     core::{
-        ordeal,
         hand::{DetectedMeld, validate_selection_with_rules},
+        ordeal,
         relic::RelicId,
         rules::RuleModifier,
         scoring::EffectiveRelics,

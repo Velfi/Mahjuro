@@ -61,14 +61,7 @@ pub fn push_corner_badge(
     let badge_x = rect[0] + rect[2] - badge_w * 0.88;
     let badge_y = rect[1] - badge_h * 0.22;
     push_badge_at(
-        quads,
-        texts,
-        badge_x,
-        badge_y,
-        badge_w,
-        badge_h,
-        badge_font,
-        label,
+        quads, texts, badge_x, badge_y, badge_w, badge_h, badge_font, label,
     );
 }
 
@@ -87,13 +80,6 @@ pub fn push_center_badge(
     let badge_x = rect[0] + (rect[2] - badge_w) * 0.5;
     let badge_y = rect[1] + (rect[3] - badge_h) * 0.5;
     push_badge_at(
-        quads,
-        texts,
-        badge_x,
-        badge_y,
-        badge_w,
-        badge_h,
-        badge_font,
-        label,
+        quads, texts, badge_x, badge_y, badge_w, badge_h, badge_font, label,
     );
 }

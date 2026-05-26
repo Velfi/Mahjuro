@@ -1,4 +1,7 @@
 //! Invoked from `build.rs`: hash room-shadow bake inputs and run `mahjuro bake-room-shadows` when stale.
+//!
+//! Runs when the inputs stamp differs from `assets/data/room_shadow/.inputs_stamp` or a `.msh`
+//! is missing (any build profile). Set `MAHJURO_SKIP_ROOM_SHADOW_BAKE=1` to disable.
 
 use std::env;
 use std::fs;
@@ -9,7 +12,14 @@ use std::process::Command;
 const MSH_FORMAT_VERSION: u32 = 2;
 const STAMP_PATH: &str = "assets/data/room_shadow/.inputs_stamp";
 const OUT_DIR: &str = "assets/data/room_shadow";
-const ROOMS: &[&str] = &["shop", "hallway", "archive", "main_menu"];
+const ROOMS: &[&str] = &[
+    "shop",
+    "hallway",
+    "archive",
+    "main_menu",
+    "staircase",
+    "gameplay",
+];
 
 pub fn stamp_input_paths(repo: &Path) -> Vec<PathBuf> {
     [
@@ -17,7 +27,10 @@ pub fn stamp_input_paths(repo: &Path) -> Vec<PathBuf> {
         "assets/3d/hallway.glb",
         "assets/3d/archive.glb",
         "assets/3d/main_menu.glb",
+        "assets/3d/staircase.glb",
+        "assets/3d/gameplay.glb",
         "src/render/archive_glb.rs",
+        "src/render/gameplay_glb.rs",
         "src/render/room_shadow_bake.rs",
         "src/render/wgpu_renderer/runtime/shop_environment.rs",
         "src/render/wgpu_renderer/runtime/shadow_setup.rs",
@@ -31,14 +44,16 @@ pub fn stamp_input_paths(repo: &Path) -> Vec<PathBuf> {
 
 pub fn emit_rerun_if_changed() {
     println!("cargo:rerun-if-env-changed=MAHJURO_SKIP_ROOM_SHADOW_BAKE");
-    println!("cargo:rerun-if-env-changed=MAHJURO_ROOM_SHADOW_BAKE");
     println!("cargo:rerun-if-changed={STAMP_PATH}");
     for path in [
         "assets/3d/shop.glb",
         "assets/3d/hallway.glb",
         "assets/3d/archive.glb",
         "assets/3d/main_menu.glb",
+        "assets/3d/staircase.glb",
+        "assets/3d/gameplay.glb",
         "src/render/archive_glb.rs",
+        "src/render/gameplay_glb.rs",
         "src/render/room_shadow_bake.rs",
         "src/render/wgpu_renderer/runtime/shop_environment.rs",
         "src/render/wgpu_renderer/runtime/shadow_setup.rs",
@@ -55,14 +70,6 @@ pub fn maybe_bake_room_shadows(repo: &Path, profile_dir: &Path) {
         .unwrap_or(false)
     {
         println!("cargo:warning=MAHJURO_SKIP_ROOM_SHADOW_BAKE: skipping room shadow bake");
-        return;
-    }
-
-    let profile = env::var("PROFILE").unwrap_or_default();
-    let force = env::var("MAHJURO_ROOM_SHADOW_BAKE")
-        .map(|v| !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false"))
-        .unwrap_or(false);
-    if profile != "release" && !force {
         return;
     }
 
@@ -88,7 +95,7 @@ pub fn maybe_bake_room_shadows(repo: &Path, profile_dir: &Path) {
         } else {
             println!(
                 "cargo:warning=room shadow bakes missing under {OUT_DIR}; run \
-                 `cargo build --release` twice or `mahjuro bake-room-shadows`"
+                 `cargo build` twice or `mahjuro bake-room-shadows <room>`"
             );
         }
         return;

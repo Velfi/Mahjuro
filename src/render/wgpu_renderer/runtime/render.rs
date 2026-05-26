@@ -23,7 +23,6 @@ enum PassAShopInspectHdrUpload {
 /// times in `render()` and each was a fresh O(n) walk over the op list.
 #[derive(Default, Clone, Copy)]
 struct OpsFlags {
-    needs_table: bool,
     shop_env: bool,
     hallway_env: bool,
     staircase_env: bool,
@@ -38,7 +37,6 @@ impl OpsFlags {
         let mut f = OpsFlags::default();
         for op in ops {
             match op {
-                RenderOp::Table => f.needs_table = true,
                 RenderOp::ShopEnvironment => f.shop_env = true,
                 RenderOp::HallwayEnvironment => f.hallway_env = true,
                 RenderOp::StaircaseEnvironment => f.staircase_env = true,
@@ -49,8 +47,7 @@ impl OpsFlags {
                 _ => {}
             }
             // Early-out: if every flag we care about is set, stop scanning.
-            if f.needs_table
-                && f.shop_env
+            if f.shop_env
                 && f.hallway_env
                 && f.staircase_env
                 && f.archive_env
@@ -153,7 +150,6 @@ impl WgpuRenderer {
             effects_quality,
             tile_preset,
             tile_material,
-            surface_kind,
             tileset_name,
             draw_settle_speed,
             sort_settle_speed,
@@ -171,7 +167,7 @@ impl WgpuRenderer {
         // amplitudes. Computed locally — `self.tonemap_vhs_enabled` keeps
         // the per-scene resolution so re-enabling restores the look.
         let effective_vhs_on = self.tonemap_vhs_enabled && vhs_enabled;
-        self.apply_render_settings(tile_material, surface_kind, effects_quality, &tileset_name);
+        self.apply_render_settings(tile_material, effects_quality, &tileset_name);
 
         // Upload any relic/background textures that finished decoding.
         self.poll_relic_textures();
@@ -267,7 +263,6 @@ impl WgpuRenderer {
         let camera = CameraFrame::build(frame, self.size);
         self.upload_camera_uniforms(&camera, ssr_enabled, frame);
         let look_target = camera.look_target;
-        let view_proj_arr = camera.view_proj_arr;
         let w = camera.w;
         let h = camera.h;
         let project_to_screen =
@@ -636,10 +631,6 @@ impl WgpuRenderer {
                     }
                     i += 1;
                 }
-                DrawCmd::Table => {
-                    ops.push(RenderOp::Table);
-                    i += 1;
-                }
                 DrawCmd::ShopEnvironment => {
                     ops.push(RenderOp::ShopEnvironment);
                     i += 1;
@@ -732,13 +723,8 @@ impl WgpuRenderer {
                         count: batch.len() as u32,
                     });
                 }
-                DrawCmd::Flame(_) => {
-                    // Drain the contiguous run of Flame cmds. Per-flame
-                    // brightness + phase were already harvested into
-                    // `flame_emitters` above, so here we just advance `i`
-                    // and emit a single `FlameBatch` op that the dispatch
-                    // side will expand into particle-system state.
-                    while let Some(DrawCmd::Flame(_)) = frame.cmds.get(i) {
+                DrawCmd::Flame => {
+                    while let Some(DrawCmd::Flame) = frame.cmds.get(i) {
                         i += 1;
                     }
                     // One Godot-style volume mesh per candle emitter.
@@ -953,29 +939,6 @@ impl WgpuRenderer {
         // with one O(n) loop.
         let ops_flags = OpsFlags::scan(&ops);
 
-        // ── Update procedural lit-mesh uniforms (table + candles) ───────
-        // Written before the render pass begins, since the pass borrows
-        // `self` immutably.
-        if ops_flags.needs_table {
-            // Horizontal table: mesh is local XY with +Z normal; Y-up mesh
-            // chain uses Rx(-90°) so the felt normal is +Y in that basis, then
-            // [`translate_rot_scale`] maps to world +Z. Wood grain is
-            // evaluated in world XY in the shader.
-            let table_extent = h * 30.0;
-            let table_w = table_extent;
-            let table_d = table_extent;
-            let model = translate_rot_scale(
-                glam::Vec3::ZERO,
-                table_mesh_lay_flat(),
-                glam::Vec3::new(table_w, table_d, 1.0),
-            );
-            self.table_instance.write_uniform(
-                &self.queue,
-                view_proj_arr,
-                model,
-                self.table_material,
-            );
-        }
         // Reset the debug pickable catch-all for this frame; each draw
         // loop below appends entries it wants to expose to
 
@@ -1022,6 +985,10 @@ impl WgpuRenderer {
                 light_view_proj: light_view_proj_arr,
                 changed: &mut shadow_uniforms_changed,
             });
+
+        if let Some(ref picks) = frame.gameplay_action_picks {
+            self.seed_gameplay_action_pick_proxies(&camera, picks);
+        }
 
         self.run_object3d_placement(
             frame,
@@ -1290,10 +1257,7 @@ impl WgpuRenderer {
 
         // ── Pass A: clear + draw main scene ───────────────────────────────
         {
-            #[cfg(debug_assertions)]
-            let split_main_for_profile = self.gpu_profiler.is_sampling() && ops_flags.needs_table;
-            #[cfg(not(debug_assertions))]
-            let split_main_for_profile = self.gpu_profiler.is_sampling() && ops_flags.needs_table;
+            let split_main_for_profile = false;
 
             let mut pass_a_chunks = split_pass_a_chunks(&ops);
             if pass_a_chunks.is_empty() && !ops.is_empty() {
@@ -1304,12 +1268,11 @@ impl WgpuRenderer {
             }
 
             macro_rules! pass_a_draw_loop {
-                ($pass:expr, $skip_table:expr, $only_table:expr) => {{
+                ($pass:expr) => {{
                     for op in &ops {
                         // 2D HUD text labels are drawn in a later overlay pass
                         // (Load on the tonemapped target) so they are not stored
-                        // in `scene_prev_texture` and do not appear in the
-                        // lacquered-table SSR sample. Gameplay plaques are
+                        // in `scene_prev_texture`. Gameplay plaques are
                         // `Object3d` meshes (engraved decal on the mesh); they
                         // render here in Pass A like other lit meshes.
                         if matches!(
@@ -1320,20 +1283,13 @@ impl WgpuRenderer {
                         ) {
                             continue;
                         }
-                        let is_table = matches!(op, RenderOp::Table);
-                        if $only_table && !is_table {
-                            continue;
-                        }
-                        if $skip_table && is_table {
-                            continue;
-                        }
                         self.process_op(&mut $pass, op, &process_ctx_scene);
                     }
                 }};
             }
 
             macro_rules! pass_a_draw_chunk {
-                ($pass:expr, $chunk:expr, $skip_table:expr, $only_table:expr) => {{
+                ($pass:expr, $chunk:expr) => {{
                     for op in $chunk.ops.iter() {
                         if matches!(
                             op,
@@ -1341,13 +1297,6 @@ impl WgpuRenderer {
                                 | RenderOp::ImageQuad(_)
                                 | RenderOp::OverlayQuadBatch { .. }
                         ) {
-                            continue;
-                        }
-                        let is_table = matches!(op, RenderOp::Table);
-                        if $only_table && !is_table {
-                            continue;
-                        }
-                        if $skip_table && is_table {
                             continue;
                         }
                         self.process_op(&mut $pass, op, &process_ctx_scene);
@@ -1402,7 +1351,7 @@ impl WgpuRenderer {
                     timestamp_writes: ts_table,
                     multiview_mask: None,
                 });
-                pass_a_draw_loop!(pass, false, true);
+                pass_a_draw_loop!(pass);
                 drop(pass);
 
                 if !pass_a_chunks.is_empty() {
@@ -1447,7 +1396,7 @@ impl WgpuRenderer {
                             },
                             multiview_mask: None,
                         });
-                        pass_a_draw_chunk!(pass, chunk, true, false);
+                        pass_a_draw_chunk!(pass, chunk);
                         if is_last_scene_chunk {
                             pass_a_debug_axes!(pass);
                         }
@@ -1497,7 +1446,7 @@ impl WgpuRenderer {
                             },
                             multiview_mask: None,
                         });
-                        pass_a_draw_chunk!(pass, chunk, false, false);
+                        pass_a_draw_chunk!(pass, chunk);
                         if is_last_chunk {
                             pass_a_debug_axes!(pass);
                         }
@@ -2019,25 +1968,9 @@ impl WgpuRenderer {
         }
 
         // ── SSR snapshot ────────────────────────────────────────────────
-        // After full Pass A, copy linear HDR colour + depth into
-        // `scene_prev_texture` / `ssr_prev_depth_texture` for next frame's
-        // lacquered-table SSR. Only the primary visible pass updates history —
-        // not `output_override` prepasses (e.g. shop journal → book texture).
-        //
-        // At 1080p the color copy alone is ~16 MB of `Rgba16Float` per frame,
-        // plus ~8 MB of depth. Skip it on scenes that won't sample SSR:
-        // - prepass (`is_prepass`): journal/etc. don't feed the visible history.
-        // - SSR disabled by user setting (`ssr_enabled = false`).
-        // - Table material is not the lacquered wood that samples SSR; the
-        //   green-felt surface doesn't read `scene_prev_texture`.
-        // - No table on screen this frame at all (`!ops_flags.needs_table`).
-        //
-        // When SSR could be active next frame after a transition, the stale
-        // copy lags one frame — the existing fallback when the camera moves.
-        let ssr_writes_history = !is_prepass
-            && ssr_enabled
-            && surface_kind == crate::persistence::SurfaceKind::Walnut
-            && ops_flags.needs_table;
+        // Lacquered-table SSR history is unused now that gameplay draws
+        // `gameplay.glb` instead of a procedural table mesh.
+        let ssr_writes_history = false;
         if ssr_writes_history {
             // Half-res blit replaces the old full-res
             // `copy_texture_to_texture` of `scene_color → scene_prev`.

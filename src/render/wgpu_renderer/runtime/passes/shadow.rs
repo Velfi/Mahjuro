@@ -272,12 +272,6 @@ impl WgpuRenderer {
                 };
                 self.draw_lit_mesh_shadow(pass, &self.orb_mesh, inst);
             }
-            DrawKind::Plinth => {
-                let Some(inst) = self.plinth_instances.get(slot_i) else {
-                    return;
-                };
-                self.draw_lit_mesh_shadow(pass, &self.plinth_mesh, inst);
-            }
             DrawKind::Bowl => {
                 let Some(inst) = self.bowl_instances.get(slot_i) else {
                     return;
@@ -307,18 +301,6 @@ impl WgpuRenderer {
                     return;
                 };
                 self.draw_lit_mesh_shadow(pass, &self.bone_tablet_mesh, inst);
-            }
-            DrawKind::CandleWax => {
-                let Some(pair) = self.candle_instances.get(slot_i) else {
-                    return;
-                };
-                self.draw_lit_mesh_shadow(pass, &self.candle_wax_mesh, &pair[0]);
-            }
-            DrawKind::CandleWick => {
-                let Some(pair) = self.candle_instances.get(slot_i) else {
-                    return;
-                };
-                self.draw_lit_mesh_shadow(pass, &self.candle_wick_mesh, &pair[1]);
             }
             DrawKind::ExtrudedGlyph => {
                 let label: Option<&str> = frame

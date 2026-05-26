@@ -626,14 +626,8 @@ pub fn styled_line_block_height_at_font_px(
     glossary_tint: bool,
     default_color: [f32; 4],
 ) -> f32 {
-    StyledTextBlock::measure_at_font_px(
-        text,
-        max_width_px,
-        font_px,
-        glossary_tint,
-        default_color,
-    )
-    .block_height()
+    StyledTextBlock::measure_at_font_px(text, max_width_px, font_px, glossary_tint, default_color)
+        .block_height()
 }
 
 pub fn styled_line_block_height(
@@ -785,11 +779,8 @@ mod tests {
     #[test]
     fn glossary_tint_preserves_whitespace_around_bold() {
         let runs = parse_styled_text("Select tiles. **Discard** what you don't need.").unwrap();
-        let cells = runs_to_cells_with_glossary(
-            &runs,
-            crate::render::theme::color::PARCHMENT,
-            true,
-        );
+        let cells =
+            runs_to_cells_with_glossary(&runs, crate::render::theme::color::PARCHMENT, true);
         let text: String = cells.iter().map(|c| c.ch).collect();
         assert_eq!(text, "Select tiles. Discard what you don't need.");
     }

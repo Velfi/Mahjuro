@@ -319,12 +319,7 @@ impl SceneBehavior for CreditsScene {
                     let role_x = row_rect[0] + label_w + pad;
                     let role_w = row_rect[2] - label_w - pad * 2.0;
                     texts.push(TextLabel {
-                        rect: [
-                            row_rect[0] + pad,
-                            row_y,
-                            label_w - pad,
-                            layout.slot_h,
-                        ],
+                        rect: [row_rect[0] + pad, row_y, label_w - pad, layout.slot_h],
                         text: name.clone(),
                         color: color::PARCHMENT,
                         align: TextAlign::Left,

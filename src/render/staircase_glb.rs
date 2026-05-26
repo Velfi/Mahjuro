@@ -24,9 +24,7 @@ enum StaircaseGlbCache {
 static STAIRCASE_GLB_CPU: RwLock<StaircaseGlbCache> = RwLock::new(StaircaseGlbCache::Uninit);
 
 fn ensure_staircase_glb_loaded() {
-    let mut w = STAIRCASE_GLB_CPU
-        .write()
-        .unwrap_or_else(|e| e.into_inner());
+    let mut w = STAIRCASE_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
     if !matches!(*w, StaircaseGlbCache::Uninit) {
         return;
     }
@@ -67,9 +65,7 @@ pub fn with_staircase_glb_cpu<R>(f: impl FnOnce(Option<&RoomGlbCpu>) -> R) -> R 
 }
 
 pub fn release_staircase_environment_cpu_sources_after_gpu_upload() {
-    let mut g = STAIRCASE_GLB_CPU
-        .write()
-        .unwrap_or_else(|e| e.into_inner());
+    let mut g = STAIRCASE_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
     if let StaircaseGlbCache::Ready(Some(cpu)) = &mut *g {
         room_glb::release_room_environment_primitives_cpu(cpu);
     }
@@ -195,7 +191,12 @@ pub fn staircase_embedded_spot_lights_runtime(
     with_staircase_glb_cpu(|opt| {
         opt.map(|cpu| {
             crate::render::room_gltf_punctual::embedded_spot_lights_runtime(
-                cpu, w, h, env_h, tune, "staircase.glb",
+                cpu,
+                w,
+                h,
+                env_h,
+                tune,
+                "staircase.glb",
             )
         })
         .unwrap_or_default()

@@ -209,8 +209,14 @@ impl WgpuRenderer {
         let _ = bloom_linear_hdr_output;
         hdr_tonemap[3] = 1.0;
         let (exposure, ambient_x) = if embedded_gltf_punctual {
+            let gameplay_table =
+                matches!(self.active_scene_key, Some("gameplay") | Some("tutorial"));
+            // `gameplay.glb` room + tiles share `ROOM_GLB_LINEAR_EXPOSURE_BASE` × this mul via `tile_hdr_tonemap`.
             let mut e = self.shop_env_linear_exposure
                 * crate::render::room_glb::ROOM_GLB_LINEAR_EXPOSURE_BASE;
+            if gameplay_table {
+                e *= crate::render::gameplay_glb::GAMEPLAY_ENV_LINEAR_EXPOSURE_MUL;
+            }
             let mut a = self.shop_env_ambient_scale;
             if hallway_env {
                 e *= crate::render::hallway_glb::HALLWAY_ENV_LINEAR_EXPOSURE_MUL;
@@ -228,7 +234,8 @@ impl WgpuRenderer {
                 e *= crate::render::main_menu_glb::MAIN_MENU_ENV_LINEAR_EXPOSURE_MUL;
                 a = a.max(crate::render::main_menu_glb::MAIN_MENU_ENV_AMBIENT_SCALE_MIN);
             }
-            if !hallway_env && !staircase_env && !archive_env && !main_menu_env {
+            // Gameplay/tutorial GLB: windowless interior — authored ambient only (usually 0).
+            if !gameplay_table && !hallway_env && !staircase_env && !archive_env && !main_menu_env {
                 a = a.max(crate::render::room_glb::SHOP_ENV_DIELECTRIC_AMBIENT_MIN);
             }
             (e, a)

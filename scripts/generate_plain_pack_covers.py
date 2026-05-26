@@ -135,7 +135,7 @@ _COMPOSITIONS = [
         "All flowers are plain flat-color shapes.",
     ),
     (
-        "bamboo_grove",
+        "souzu",
         "Composition: a horizontal forest scene. A row of flat "
         "emerald-green (#3aa84e) vertical bamboo stalks of varying "
         "heights stand side by side across the full width of the "
@@ -147,7 +147,7 @@ _COMPOSITIONS = [
         "a handful of small flat yellow (#f8e87a) dot-fireflies.",
     ),
     (
-        "coin_cache",
+        "pinzu",
         "Composition: a diagonal cascade of coins. In the lower-left "
         "corner, a flat dark-red (#6a1a24) tipped-over rectangular "
         "chest shape with a flat gold (#c8882a) rim along its open "
@@ -160,7 +160,7 @@ _COMPOSITIONS = [
         "diagonal.",
     ),
     (
-        "scroll_library",
+        "manzu",
         "Composition: an interior wall of shelves. A grid of flat "
         "brown (#6a4a1a) rectangular cubbyhole openings — three "
         "columns wide and several rows tall — fills most of the "

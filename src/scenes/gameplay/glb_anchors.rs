@@ -1,27 +1,103 @@
-//! Resolve gameplay spawn positions from [`gameplay.glb`](../../../assets/3d/gameplay.glb) empties.
+//! Resolve gameplay spawn poses from [`gameplay.glb`](../../../assets/3d/gameplay.glb) empties.
 
-use crate::render::draw_cmd::CameraParams;
+use crate::render::draw_cmd::{CameraParams, Object3d};
 use crate::render::gameplay_glb::{
-    self, DISCARD_RIVER, HAND_TILES_LEFT, HAND_TILES_RIGHT, PLAY_MIRROR, PLAYER_DISCARD_TALLY,
-    PLAYER_GOLD, PLAYER_PLAY_TALLY, PLAYER_RELIC_MARKERS, PLAYER_YAKU_JOURNAL, TILE_PLINTH_MARKERS,
+    self, DISCARD_RIVER, GameplayMarkerPose, HAND_TILES_LEFT, HAND_TILES_RIGHT, PLAY_MIRROR,
+    PLAYER_CASH_IN, PLAYER_CONSUMABLE_MARKERS, PLAYER_DISCARD_TALLY, PLAYER_GOLD,
+    PLAYER_PLAY_TALLY, PLAYER_RELIC_MARKERS, STRUCTURE_TILES_LEFT, STRUCTURE_TILES_RIGHT,
+    TILE_PLINTH_MARKERS, YAKU_TABLETS_LEFT, YAKU_TABLETS_RIGHT,
 };
 use crate::render::room_glb::RoomGlbCpu;
 
-/// Per-frame anchors derived from `gameplay.glb` marker nodes (screen space + lift).
-pub struct GameplayGlbAnchors {
-    pub hand_slots: Vec<(f32, f32, f32, f32)>,
-    pub gold_anchor: [f32; 3],
-    pub discard_btn_rect: (f32, f32, f32, f32),
-    pub play_btn_rect: (f32, f32, f32, f32),
-    pub journal_btn_rect: (f32, f32, f32, f32),
-    pub journal_btn_cx: f32,
-    pub discard_tally_anchor: [f32; 3],
-    pub play_tally_anchor: [f32; 3],
-    pub relic_anchors: Vec<[f32; 3]>,
-    pub tile_plinth_anchors: Vec<[f32; 3]>,
+/// Hand rack slot: surface anchor, slot width (px), rotation (XYZ rad from GLB markers).
+pub type HandWorldSlot = ([f32; 3], f32, [f32; 3]);
+use crate::render::theme::color;
+use crate::render::wgpu_renderer::{TextAlign, TextLabel};
+
+/// Pixel heights for projecting `structure_*` / `yaku_tablets_*` marker pairs.
+pub fn gameplay_hud_strip_heights(
+    window_h: f32,
+    layout_scale: f32,
+    showcase_present: bool,
+) -> (f32, f32, f32) {
+    let yaku_panel_h = (33.0 * layout_scale).max(24.0).min(window_h * 0.10);
+    let structure_tag_h = if showcase_present {
+        (17.0 * layout_scale).max(14.0)
+    } else {
+        0.0
+    };
+    let structure_meld_h = if showcase_present {
+        (46.0 * layout_scale).max(38.0)
+    } else {
+        0.0
+    };
+    (yaku_panel_h, structure_tag_h, structure_meld_h)
 }
 
-fn marker_pair_screen_rect(
+#[inline]
+pub fn screen_rect_center(rect: (f32, f32, f32, f32)) -> (f32, f32) {
+    (rect.0 + rect.2 * 0.5, rect.1 + rect.3 * 0.5)
+}
+
+/// Best-effort anchors for tooltips / popups outside `draw_frame` (no `DrawCtx`).
+pub fn try_resolve_gameplay_glb_anchors(
+    layout: &crate::ui::layout::LayoutResult,
+    hand_len: usize,
+    showcase_present: bool,
+    env_height_scale: f32,
+) -> Option<GameplayGlbAnchors> {
+    let layout_scale = (layout.window_w.min(layout.window_h)) / 600.0;
+    let (yaku_panel_h, structure_tag_h, structure_meld_h) =
+        gameplay_hud_strip_heights(layout.window_h, layout_scale, showcase_present);
+    let structure_strip_h = (structure_tag_h + structure_meld_h).max(1.0);
+    let cam = crate::render::gameplay_glb::gameplay_camera_from_glb_if_present(
+        layout.window_h,
+        env_height_scale,
+    )?;
+    resolve_gameplay_glb_anchors(
+        layout,
+        hand_len,
+        layout.window_w,
+        layout.window_h,
+        &cam,
+        env_height_scale,
+        structure_strip_h,
+        yaku_panel_h,
+    )
+    .ok()
+}
+
+/// Per-frame anchors derived from validated `gameplay.glb` marker nodes.
+pub struct GameplayGlbAnchors {
+    pub hand_slots: Vec<(f32, f32, f32, f32)>,
+    pub hand_world_slots: Vec<HandWorldSlot>,
+    /// `hand_tiles_left` / `hand_tiles_right` — rotation is lerped per slot; scale from the left.
+    pub hand_marker_poses: [GameplayMarkerPose; 2],
+    pub gold_pose: GameplayMarkerPose,
+    pub discard_btn_rect: (f32, f32, f32, f32),
+    pub play_btn_rect: (f32, f32, f32, f32),
+    pub play_tally_pose: GameplayMarkerPose,
+    pub discard_tally_pose: GameplayMarkerPose,
+    pub relic_poses: [GameplayMarkerPose; 5],
+    pub tile_plinth_poses: [GameplayMarkerPose; 3],
+    pub cash_in_btn_rect: (f32, f32, f32, f32),
+    /// `structure_tiles_left` / `structure_tiles_right` — per-tile anchor + rotation lerped along the row.
+    pub structure_marker_poses: [GameplayMarkerPose; 2],
+    /// `yaku_tablets_left` / `yaku_tablets_right` — per-tablet anchor + rotation lerped along the row.
+    pub yaku_marker_poses: [GameplayMarkerPose; 2],
+    /// Screen bounds for structure focus / tooltips (derived from [`Self::structure_marker_poses`]).
+    pub structure_strip: (f32, f32, f32, f32),
+    /// Screen bounds for yaku focus / tooltips (derived from [`Self::yaku_marker_poses`]).
+    pub yaku_tablet_strip: (f32, f32, f32, f32),
+    pub consumable_poses: [GameplayMarkerPose; 2],
+    /// Procedural meshes + pick proxies at GLB marker empties (env pass skips marker geometry).
+    pub discard_river_pick: Object3d,
+    pub play_mirror_pick: Object3d,
+    pub journal_pick: Object3d,
+    pub cash_in_pick: Option<Object3d>,
+}
+
+fn require_marker_pair_screen_rect(
     w: f32,
     h: f32,
     cam: &CameraParams,
@@ -30,15 +106,15 @@ fn marker_pair_screen_rect(
     left: &str,
     right: &str,
     slot_h: f32,
-) -> Option<(f32, f32, f32, f32)> {
-    let lw = gameplay_glb::gameplay_marker_world(h, env_h, cpu, left)?;
-    let rw = gameplay_glb::gameplay_marker_world(h, env_h, cpu, right)?;
+) -> anyhow::Result<(f32, f32, f32, f32)> {
+    let lw = gameplay_glb::require_gameplay_marker_world(h, env_h, cpu, left)?;
+    let rw = gameplay_glb::require_gameplay_marker_world(h, env_h, cpu, right)?;
     let (lx, ly) = cam.project_world_to_screen(w, h, lw);
     let (rx, _) = cam.project_world_to_screen(w, h, rw);
     let left_x = lx.min(rx);
     let right_x = lx.max(rx);
     let strip_w = (right_x - left_x).max(8.0);
-    Some((left_x, ly - slot_h * 0.5, strip_w, slot_h))
+    Ok((left_x, ly - slot_h * 0.5, strip_w, slot_h))
 }
 
 fn hand_slots_from_markers(
@@ -67,7 +143,53 @@ fn hand_slots_from_markers(
         .collect()
 }
 
-/// Build anchors for the current window; returns `None` when the room GLB is absent.
+fn require_hand_world_slots_from_markers(
+    hand_len: usize,
+    hand_marker_poses: &[GameplayMarkerPose; 2],
+) -> Vec<HandWorldSlot> {
+    if hand_len == 0 {
+        return Vec::new();
+    }
+    let a_l = hand_marker_poses[0].anchor;
+    let a_r = hand_marker_poses[1].anchor;
+    let strip_w = gameplay_glb::marker_pair_span_px(a_l, a_r);
+    let slot_w_px = strip_w / hand_len as f32;
+    let rot_l = hand_marker_poses[0].rotation_rad;
+    let rot_r = hand_marker_poses[1].rotation_rad;
+
+    (0..hand_len)
+        .map(|i| {
+            let t = if hand_len == 1 {
+                0.5
+            } else {
+                i as f32 / (hand_len - 1) as f32
+            };
+            let anchor = gameplay_glb::lerp_marker_anchor(a_l, a_r, t);
+            let rotation = gameplay_glb::lerp_marker_rotation_rad(rot_l, rot_r, t);
+            (anchor, slot_w_px, rotation)
+        })
+        .collect()
+}
+
+fn collect_marker_poses<const N: usize>(
+    w: f32,
+    h: f32,
+    env_h: f32,
+    cpu: &RoomGlbCpu,
+    names: &[&str; N],
+) -> anyhow::Result<[GameplayMarkerPose; N]> {
+    let mut out = [GameplayMarkerPose {
+        anchor: [0.0; 3],
+        rotation_rad: [0.0; 3],
+        scale: GameplayMarkerPose::UNIT_SCALE,
+    }; N];
+    for (slot, name) in out.iter_mut().zip(names.iter()) {
+        *slot = gameplay_glb::require_gameplay_marker_pose(w, h, env_h, cpu, name)?;
+    }
+    Ok(out)
+}
+
+/// Build anchors for the current window. Errors when any required empty is absent.
 pub fn resolve_gameplay_glb_anchors(
     layout: &crate::ui::layout::LayoutResult,
     hand_len: usize,
@@ -75,62 +197,313 @@ pub fn resolve_gameplay_glb_anchors(
     h: f32,
     cam: &CameraParams,
     env_h: f32,
-) -> Option<GameplayGlbAnchors> {
+    structure_strip_h: f32,
+    yaku_panel_h: f32,
+) -> anyhow::Result<GameplayGlbAnchors> {
     gameplay_glb::with_gameplay_glb_cpu(|cpu| {
-        let cpu = cpu?;
-        let slot_h = layout.hand_strip.h;
-        let hand_strip = marker_pair_screen_rect(
-            w, h, cam, env_h, cpu, HAND_TILES_LEFT, HAND_TILES_RIGHT, slot_h,
-        )?;
-        let hand_slots = hand_slots_from_markers(layout, hand_len, hand_strip);
-        let gold_anchor = gameplay_glb::gameplay_marker_surface_anchor(w, h, env_h, cpu, PLAYER_GOLD)?;
-
-        let bowl_d = (layout.mm(120.0)).max(48.0);
-        let discard_btn_rect = gameplay_glb::gameplay_marker_screen_rect(
-            w, h, cam, env_h, cpu, DISCARD_RIVER, bowl_d, bowl_d,
-        )?;
-        let play_btn_rect = gameplay_glb::gameplay_marker_screen_rect(
-            w, h, cam, env_h, cpu, PLAY_MIRROR, bowl_d, bowl_d,
-        )?;
-
-        let journal = gameplay_glb::gameplay_marker_surface_anchor(w, h, env_h, cpu, PLAYER_YAKU_JOURNAL)?;
-        let jw = layout.mm(70.0);
-        let jh = layout.mm(32.0);
-        let journal_btn_rect = (
-            journal[0] - jw * 0.5,
-            journal[1] - jh * 0.5,
-            jw,
-            jh,
-        );
-        let journal_btn_cx = journal[0];
-
-        let discard_tally_anchor =
-            gameplay_glb::gameplay_marker_surface_anchor(w, h, env_h, cpu, PLAYER_DISCARD_TALLY)?;
-        let play_tally_anchor =
-            gameplay_glb::gameplay_marker_surface_anchor(w, h, env_h, cpu, PLAYER_PLAY_TALLY)?;
-
-        let relic_anchors: Vec<[f32; 3]> = PLAYER_RELIC_MARKERS
-            .iter()
-            .filter_map(|name| gameplay_glb::gameplay_marker_surface_anchor(w, h, env_h, cpu, name))
-            .collect();
-
-        let tile_plinth_anchors: Vec<[f32; 3]> = TILE_PLINTH_MARKERS
-            .iter()
-            .filter_map(|name| gameplay_glb::gameplay_marker_surface_anchor(w, h, env_h, cpu, name))
-            .collect();
-
-        Some(GameplayGlbAnchors {
-            hand_slots,
-            gold_anchor,
-            discard_btn_rect: discard_btn_rect.into(),
-            play_btn_rect: play_btn_rect.into(),
-            journal_btn_rect,
-            journal_btn_cx,
-            discard_tally_anchor,
-            play_tally_anchor,
-            relic_anchors,
-            tile_plinth_anchors,
-        })
+        let cpu = cpu.ok_or_else(|| {
+            anyhow::anyhow!("gameplay.glb anchors requested but room GLB is not loaded")
+        })?;
+        resolve_gameplay_glb_anchors_from_cpu(
+            cpu,
+            layout,
+            hand_len,
+            w,
+            h,
+            cam,
+            env_h,
+            structure_strip_h,
+            yaku_panel_h,
+        )
     })
 }
 
+fn resolve_gameplay_glb_anchors_from_cpu(
+    cpu: &RoomGlbCpu,
+    layout: &crate::ui::layout::LayoutResult,
+    hand_len: usize,
+    w: f32,
+    h: f32,
+    cam: &CameraParams,
+    env_h: f32,
+    structure_strip_h: f32,
+    yaku_panel_h: f32,
+) -> anyhow::Result<GameplayGlbAnchors> {
+    let slot_h = layout.hand_strip.h;
+    let hand_strip = require_marker_pair_screen_rect(
+        w,
+        h,
+        cam,
+        env_h,
+        cpu,
+        HAND_TILES_LEFT,
+        HAND_TILES_RIGHT,
+        slot_h,
+    )?;
+    let hand_slots = hand_slots_from_markers(layout, hand_len, hand_strip);
+    let hand_marker_poses = [
+        gameplay_glb::require_gameplay_marker_pose(w, h, env_h, cpu, HAND_TILES_LEFT)?,
+        gameplay_glb::require_gameplay_marker_pose(w, h, env_h, cpu, HAND_TILES_RIGHT)?,
+    ];
+    let hand_world_slots = require_hand_world_slots_from_markers(hand_len, &hand_marker_poses);
+    let gold_pose = gameplay_glb::require_gameplay_marker_pose(w, h, env_h, cpu, PLAYER_GOLD)?;
+
+    let layout_scale = (w.min(h)) / 600.0;
+    let bowl_d = (120.0 * layout_scale).max(48.0);
+    let discard_btn_rect = gameplay_glb::gameplay_marker_screen_rect_resolved(
+        w,
+        h,
+        cam,
+        env_h,
+        cpu,
+        DISCARD_RIVER,
+        bowl_d,
+        bowl_d,
+    )?;
+    let play_btn_rect = gameplay_glb::gameplay_marker_screen_rect_resolved(
+        w,
+        h,
+        cam,
+        env_h,
+        cpu,
+        PLAY_MIRROR,
+        bowl_d,
+        bowl_d,
+    )?;
+
+    let play_tally_pose =
+        gameplay_glb::require_gameplay_marker_pose(w, h, env_h, cpu, PLAYER_PLAY_TALLY)?;
+    let discard_tally_pose =
+        gameplay_glb::require_gameplay_marker_pose(w, h, env_h, cpu, PLAYER_DISCARD_TALLY)?;
+
+    let relic_poses = collect_marker_poses(w, h, env_h, cpu, &PLAYER_RELIC_MARKERS)?;
+    let tile_plinth_poses = collect_marker_poses(w, h, env_h, cpu, &TILE_PLINTH_MARKERS)?;
+    let consumable_poses = collect_marker_poses(w, h, env_h, cpu, &PLAYER_CONSUMABLE_MARKERS)?;
+
+    let structure_marker_poses = [
+        gameplay_glb::require_gameplay_marker_pose(w, h, env_h, cpu, STRUCTURE_TILES_LEFT)?,
+        gameplay_glb::require_gameplay_marker_pose(w, h, env_h, cpu, STRUCTURE_TILES_RIGHT)?,
+    ];
+    let yaku_marker_poses = [
+        gameplay_glb::require_gameplay_marker_pose(w, h, env_h, cpu, YAKU_TABLETS_LEFT)?,
+        gameplay_glb::require_gameplay_marker_pose(w, h, env_h, cpu, YAKU_TABLETS_RIGHT)?,
+    ];
+    let structure_strip = gameplay_glb::marker_pair_screen_rect_from_poses(
+        &structure_marker_poses[0],
+        &structure_marker_poses[1],
+        structure_strip_h,
+    );
+    let yaku_tablet_strip = gameplay_glb::marker_pair_screen_rect_from_poses(
+        &yaku_marker_poses[0],
+        &yaku_marker_poses[1],
+        yaku_panel_h,
+    );
+
+    let cash_in_w = (96.0 * layout_scale).max(72.0);
+    let cash_in_h = (36.0 * layout_scale).max(24.0);
+    let cash_in_btn_rect = gameplay_glb::gameplay_marker_screen_rect_resolved(
+        w,
+        h,
+        cam,
+        env_h,
+        cpu,
+        PLAYER_CASH_IN,
+        cash_in_w,
+        cash_in_h,
+    )?;
+
+    let discard_river_pick =
+        gameplay_glb::gameplay_pick_discard_river(w, h, env_h, cpu, discard_btn_rect)?;
+    let play_mirror_pick =
+        gameplay_glb::gameplay_pick_play_mirror(w, h, env_h, cpu, play_btn_rect)?;
+    let journal_pick = gameplay_glb::gameplay_pick_journal_book(w, h, env_h, cpu, 0.0)?;
+    let cash_in_pick = build_cash_in_pick_proxy(w, h, env_h, cpu, cash_in_btn_rect);
+
+    Ok(GameplayGlbAnchors {
+        hand_slots,
+        hand_world_slots,
+        hand_marker_poses,
+        gold_pose,
+        discard_btn_rect: discard_btn_rect.into(),
+        play_btn_rect: play_btn_rect.into(),
+        play_tally_pose,
+        discard_tally_pose,
+        relic_poses,
+        tile_plinth_poses,
+        cash_in_btn_rect: cash_in_btn_rect.into(),
+        structure_marker_poses,
+        yaku_marker_poses,
+        structure_strip,
+        yaku_tablet_strip,
+        consumable_poses,
+        discard_river_pick,
+        play_mirror_pick,
+        journal_pick,
+        cash_in_pick,
+    })
+}
+
+/// Screen center of relic slot `idx` from `player_relic` empties.
+pub fn relic_tray_screen_center(
+    w: f32,
+    h: f32,
+    env_height_scale: f32,
+    idx: usize,
+) -> anyhow::Result<(f32, f32)> {
+    let name = PLAYER_RELIC_MARKERS
+        .get(idx)
+        .copied()
+        .ok_or_else(|| anyhow::anyhow!("relic slot index {idx} out of range"))?;
+    gameplay_glb::with_gameplay_glb_cpu(|cpu| {
+        let cpu = cpu.ok_or_else(|| anyhow::anyhow!("gameplay.glb not loaded"))?;
+        let pose = gameplay_glb::require_gameplay_marker_pose(w, h, env_height_scale, cpu, name)?;
+        Ok((pose.anchor[0], pose.anchor[1]))
+    })
+}
+
+/// `player_gold` surface anchor for coin pile / flying coins.
+pub fn resolve_player_gold_anchor(
+    w: f32,
+    h: f32,
+    env_height_scale: f32,
+) -> anyhow::Result<[f32; 3]> {
+    resolve_player_gold_pose(w, h, env_height_scale).map(|p| p.anchor)
+}
+
+/// `player_gold` spawn pose for coin pile / flying coins.
+pub fn resolve_player_gold_pose(
+    w: f32,
+    h: f32,
+    env_height_scale: f32,
+) -> anyhow::Result<GameplayMarkerPose> {
+    gameplay_glb::with_gameplay_glb_cpu(|cpu| {
+        let cpu = cpu.ok_or_else(|| anyhow::anyhow!("gameplay.glb not loaded"))?;
+        gameplay_glb::require_gameplay_marker_pose(w, h, env_height_scale, cpu, PLAYER_GOLD)
+    })
+}
+
+fn build_cash_in_pick_proxy(
+    w: f32,
+    h: f32,
+    env_h: f32,
+    cpu: &RoomGlbCpu,
+    cash_in_rect: [f32; 4],
+) -> Option<Object3d> {
+    use crate::render::draw_cmd::Object3dKind;
+
+    let pose = gameplay_glb::resolve_gameplay_marker_pose(w, h, env_h, cpu, PLAYER_CASH_IN).ok()?;
+    let (tw, th) = (cash_in_rect[2], cash_in_rect[3]);
+    let tablet_thickness = (th * 0.35).max(8.0);
+    let fallback_extents = [
+        tw * pose.scale[0],
+        tablet_thickness * pose.scale[1],
+        th * pose.scale[2],
+    ];
+    let extents = gameplay_glb::gameplay_marker_mesh_extents_world(h, env_h, cpu, PLAYER_CASH_IN)
+        .filter(|dims| dims.iter().all(|v| v.is_finite() && *v > 0.0))
+        .unwrap_or(fallback_extents);
+    Some(Object3d {
+        pos: pose.anchor,
+        extents,
+        rotation: pose.rotation_rad,
+        color: [1.0, 1.0, 1.0, 1.0],
+        kind: Object3dKind::WoodTablet {
+            label: std::borrow::Cow::Borrowed("Cash in"),
+            pick_id: None,
+        },
+        hover_target: 0.0,
+        anim_id: 0,
+    })
+}
+
+/// Minimal error frame when `gameplay.glb` failed validation.
+pub fn gameplay_glb_error_frame(
+    layout: &crate::ui::layout::LayoutResult,
+    message: &str,
+) -> crate::render::draw_cmd::UiFrame {
+    use crate::render::draw_cmd::UiFrame;
+    use crate::scenes::BackgroundId;
+
+    let mut frame = UiFrame::new();
+    frame.background(BackgroundId::Black);
+    let w = layout.window_w;
+    let h = layout.window_h;
+    let mut label = TextLabel::default();
+    label.rect = [w * 0.08, h * 0.35, w * 0.84, h * 0.3];
+    label.text = format!("gameplay.glb failed to load:\n{message}");
+    label.color = color::alpha(color::CHAMPAGNE, 0.95);
+    label.font_px = Some((h * 0.028).max(18.0));
+    label.align = TextAlign::Center;
+    frame.texts(vec![label]);
+    frame
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::render::gameplay_glb::{self, load_gameplay_glb_from_bytes, validate_gameplay_glb};
+    use crate::render::world_space::layout_anchor_to_world;
+
+    #[test]
+    fn gameplay_hand_slots_project_on_screen() {
+        let bytes = include_bytes!("../../../assets/3d/gameplay.glb");
+        let cpu = load_gameplay_glb_from_bytes(bytes).expect("gameplay.glb");
+        let cpu = validate_gameplay_glb(cpu).expect("required gameplay.glb spawn empties");
+        let w = 1920.0_f32;
+        let h = 1080.0_f32;
+        let env_h = 1.0_f32;
+        let layout = {
+            let mut solver = crate::ui::layout::UiLayout::new();
+            solver.solve(w, h)
+        };
+        let cam = gameplay_glb::require_gameplay_camera_from_cpu(&cpu, h, env_h)
+            .expect("embedded gameplay camera");
+        let hand_len = 14;
+        let anchors = super::resolve_gameplay_glb_anchors_from_cpu(
+            &cpu, &layout, hand_len, w, h, &cam, env_h, 48.0, 32.0,
+        )
+        .expect("anchors");
+        assert_eq!(anchors.hand_world_slots.len(), hand_len, "hand slots");
+        let left = anchors.hand_marker_poses[0].anchor;
+        let right = anchors.hand_marker_poses[1].anchor;
+        for (i, &(center, slot_w, rot)) in anchors.hand_world_slots.iter().enumerate() {
+            assert!(
+                center[0].is_finite() && center[1].is_finite() && center[2].is_finite(),
+                "slot {i} finite"
+            );
+            assert!(
+                center[0] >= -w && center[0] <= w * 2.0 && center[1] >= -h && center[1] <= h * 2.0,
+                "slot {i} on screen-ish: {:?}",
+                center
+            );
+            assert!(slot_w > 0.0, "slot {i} width");
+            assert!(
+                rot.iter().all(|r| r.is_finite()),
+                "slot {i} marker rotation finite: {rot:?}",
+            );
+            let world =
+                layout_anchor_to_world(w, h, Some(&cam), center[0], center[1], center[2], false);
+            assert!(world.z.is_finite(), "slot {i} finite world z: {world:?}");
+        }
+        let (first, _, _) = anchors.hand_world_slots.first().unwrap();
+        let (last, _, _) = anchors.hand_world_slots.last().unwrap();
+        for (a, b) in [(first, left), (last, right)] {
+            assert!(
+                (a[0] - b[0]).abs() < 0.5 && (a[1] - b[1]).abs() < 0.5 && (a[2] - b[2]).abs() < 0.5,
+                "end slot matches marker anchor: slot {a:?} marker {b:?}",
+            );
+        }
+        assert!(
+            last[0] > first[0] || last[1] != first[1],
+            "hand strip spans markers"
+        );
+        assert!(anchors.hand_world_slots[0].1 > 0.0, "slot width");
+        assert!(
+            anchors.hand_marker_poses[0]
+                .scale
+                .iter()
+                .all(|s| s.is_finite() && *s > 0.0),
+            "hand marker scale finite positive: {:?}",
+            anchors.hand_marker_poses[0].scale
+        );
+    }
+}

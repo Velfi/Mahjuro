@@ -45,7 +45,6 @@ use crate::render::bell_tassel_mesh::build_bell_tassel_mesh;
 use crate::render::bone_tablet_mesh::build_bone_tablet_mesh;
 use crate::render::book_mesh::{build_book_body_mesh, build_book_cover_mesh};
 use crate::render::cabinet_mesh::{build_cabinet_mesh, build_cabinet_rails_mesh};
-use crate::render::candle_mesh::{build_candle_wax_mesh, build_candle_wick_mesh};
 use crate::render::coin_mesh::build_coin_mesh;
 use crate::render::decal::{
     LabelAlign, load_mono_font, load_noto_emoji_font, load_ui_font,
@@ -68,7 +67,6 @@ use crate::render::mirror_mesh::build_mirror_mesh;
 use crate::render::ofuda_mesh::build_ofuda_mesh;
 use crate::render::orb_mesh::build_orb_mesh;
 use crate::render::plaque_mesh::build_plaque_mesh;
-use crate::render::plinth_mesh::build_plinth_mesh;
 use crate::render::primitive::MeshId;
 use crate::render::progress_meter_mesh::{
     build_progress_meter_pip_mesh, build_progress_meter_rail_mesh,
@@ -81,10 +79,8 @@ use crate::render::relic_pipeline::spawn_relic_loader;
 use crate::render::ribbon_mesh::build_ribbon_mesh;
 use crate::render::river_mesh::build_river_mesh;
 use crate::render::shop_bell_mesh::build_shop_bell_mesh;
-use crate::render::table_mesh::build_table_mesh;
 use crate::render::table_transform::{
-    ribbon_submesh, rot_fixed_axes_deg_matrix, table_mesh_lay_flat, tile_mesh_local_to_world,
-    translate_rot_scale,
+    ribbon_submesh, rot_fixed_axes_deg_matrix, tile_mesh_local_to_world, translate_rot_scale,
 };
 use crate::render::talisman_mesh::{TALISMAN_LOCAL_HALF, build_talisman_mesh};
 use crate::render::tally_stick_mesh::{build_tally_stick_base_mesh, build_tally_stick_tip_mesh};
@@ -542,9 +538,6 @@ pub struct WgpuRenderer {
     /// is still bound.
     talisman_slot_kind: Vec<Option<u8>>,
     /// Shared procedural meshes.
-    candle_wax_mesh: LitMeshGpu,
-    candle_wick_mesh: LitMeshGpu,
-    table_mesh: LitMeshGpu,
     relic_box_mesh: LitMeshGpu,
     /// Unit box for tile booster packs (correct UVs per face; avoids the relic
     /// cylinder's repeated side strips).
@@ -562,18 +555,9 @@ pub struct WgpuRenderer {
     /// the click silhouette matches the visible relic outline instead of a
     /// loose AABB slab.
     pub(super) relic_tri_lists: FxHashMap<RelicId, Vec<[glam::Vec3; 3]>>,
-    /// Pre-allocated per-candle uniform buffers + bind groups (one per
-    /// primitive). Indexed by candle slot, then 0=wax/1=wick.
-    candle_instances: Vec<[LitMeshInstance; 2]>,
-    /// Single uniform buffer + bind group for the gameplay-scene table.
-    table_instance: LitMeshInstance,
     /// Uploaded to `SsrGlobals.felt.x` — procedural felt shader tier (see
     /// [`crate::persistence::EffectsQuality::felt_shader_lod`]).
     pub(super) felt_shader_lod: f32,
-    /// Active material params for the gameplay-scene table. Switched between
-    /// `lacquered_wood()` and `felt_green()` by `apply_render_settings`
-    /// based on the user's `SurfaceKind` choice.
-    pub(super) table_material: MaterialParams,
     /// Pre-allocated per-relic-placeholder instances. Sized at startup to
     /// match `MAX_RELIC_SLOTS`; indexed by placement order each frame.
     relic_instances: Vec<LitMeshInstance>,
@@ -597,9 +581,6 @@ pub struct WgpuRenderer {
     // ── Shop scene meshes (curio cabinet + ribbons + talismans) ─
     ribbon_mesh: LitMeshGpu,
     talisman_mesh: LitMeshGpu,
-    /// Procedural ornate brass plinth used by the gameplay scene to hold
-    /// the dora indicator tile(s).
-    plinth_mesh: LitMeshGpu,
     /// Per-ribbon draw-slot instances (shop scene). One slot per ribbon —
     /// the whole ribbon is a single textured mesh now. Truncated at
     /// `MAX_RIBBON_SLOTS`.
@@ -651,10 +632,6 @@ pub struct WgpuRenderer {
     /// render flat, previewing the shading model rather than any per-asset
     /// heightmap.
     orb_instances: Vec<LitMeshInstance>,
-    /// Per-plinth instances (gameplay scene). Truncated at
-    /// `MAX_PLINTH_SLOTS`. Gameplay can push up to three plinths
-    /// per frame (dora, boss, round wind).
-    plinth_instances: Vec<LitMeshInstance>,
     /// Per-ribbon world-space model matrices for `pick_shop_object`.
     pub(super) last_ribbon_models: Vec<Mat4>,
     /// Per-batch ribbon slot counts: `last_ribbon_batch_slot_counts[batch_idx]`
@@ -794,9 +771,9 @@ mod impl_screenshot;
 
 pub use constants::{
     MAIN_MENU_PICK_OPTIONS, MAIN_MENU_PICK_PLAY, MAIN_MENU_PICK_QUIT, MAX_BOOK_SLOTS,
-    MAX_ORDEAL_ICON_SLOTS, MAX_BOWL_SLOTS, MAX_BUG_SLOTS, MAX_CASCADE_TOKEN_SLOTS,
-    MAX_EXTRUDED_GLYPH_SLOTS, MAX_MIRROR_SLOTS, MAX_ORB_SLOTS, MAX_PLINTH_SLOTS, MAX_POINT_LIGHTS,
-    MAX_RELIC_SLOTS, MAX_RIBBON_SLOTS, MAX_SPOT_LIGHTS, MAX_TALISMAN_SLOTS, MAX_TALLY_FAN_SLOTS,
+    MAX_BOWL_SLOTS, MAX_BUG_SLOTS, MAX_CASCADE_TOKEN_SLOTS, MAX_EXTRUDED_GLYPH_SLOTS,
+    MAX_MIRROR_SLOTS, MAX_ORB_SLOTS, MAX_ORDEAL_ICON_SLOTS, MAX_POINT_LIGHTS, MAX_RELIC_SLOTS,
+    MAX_RIBBON_SLOTS, MAX_SPOT_LIGHTS, MAX_TALISMAN_SLOTS, MAX_TALLY_FAN_SLOTS,
     MAX_TALLY_STICK_SLOTS, MAX_TILE_OCCLUDERS, MAX_WALL_TILE_SLOTS, MAX_WOOD_TABLET_SLOTS,
     MAX_YAKU_TABLET_SLOTS, MEMORIAL_TALISMAN_TEXTURE_BASE,
 };

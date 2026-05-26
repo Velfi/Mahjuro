@@ -18,9 +18,9 @@ use crate::render::hallway_glb::{self, BTN_SKIP_ROUND};
 use crate::render::room_glb;
 use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
-use crate::ui::ordeal_icons::ordeal_icon_source;
 use crate::ui::focus_nav::push_focus_ring;
 use crate::ui::input::UiAction;
+use crate::ui::ordeal_icons::ordeal_icon_source;
 use crate::ui::skip_tag_icons::skip_tag_icon_source;
 use crate::ui::widget::wrap_text;
 use crate::ui::widget_tree::{FlatItem, FocusId, TreeInput, TreeState};
@@ -346,8 +346,12 @@ impl SceneBehavior for PickChamberScene {
         } else {
             hallway_glb::BTN_PLAY_ROUND
         };
-        let cam =
-            hallway_glb::hallway_camera_pick_chamber(w, h, ctx.room_gltf_height_scale, upcoming_ordeal);
+        let cam = hallway_glb::hallway_camera_pick_chamber(
+            w,
+            h,
+            ctx.room_gltf_height_scale,
+            upcoming_ordeal,
+        );
         frame.camera_override = Some(cam);
 
         if hallway {
@@ -523,11 +527,12 @@ impl SceneBehavior for PickChamberScene {
                 let play_col_right = pr[0] - play_desc_gap;
                 let play_col_w = (play_col_right - edge_margin).max(min_col_w);
                 let lx_play = play_col_right - play_col_w;
-                let ordeal_icon_px = if upcoming == ChamberKind::Ordeal && pick.ordeal_kind.is_some() {
-                    Some((h * 0.072).clamp(48.0, 80.0))
-                } else {
-                    None
-                };
+                let ordeal_icon_px =
+                    if upcoming == ChamberKind::Ordeal && pick.ordeal_kind.is_some() {
+                        Some((h * 0.072).clamp(48.0, 80.0))
+                    } else {
+                        None
+                    };
                 let ordeal_icon_gap = 10.0_f32;
                 let (text_x_play, text_w_play) = if let Some(ipx) = ordeal_icon_px {
                     (

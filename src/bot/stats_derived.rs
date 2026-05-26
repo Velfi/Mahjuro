@@ -1,9 +1,9 @@
 //! Build export `derived` views from [`AggregateStats`] (export schema v6).
 
 use super::export_schema::{
-    AggregateMaps, AggregateSums, AvgTurnsClearRow, OrdealChamberChartRow, BotAggregate,
-    BotIssuesDerived, BotReportDerived, DeathWingHazardRow, DeathWingRow, DistributionCandleRow,
-    KpiTile, LossBreakdownDerived, MapTable, NamedCount, NamedCountPct, NamedPerRun,
+    AggregateMaps, AggregateSums, AvgTurnsClearRow, BotAggregate, BotIssuesDerived,
+    BotReportDerived, DeathWingHazardRow, DeathWingRow, DistributionCandleRow, KpiTile,
+    LossBreakdownDerived, MapTable, NamedCount, NamedCountPct, NamedPerRun, OrdealChamberChartRow,
     PerRunAverages, RelicAttributionRow, RelicBuyRow, RelicDepthRow, RelicShopFunnelRow,
     RelicShopTimingRow, RelicValueRow, RelicWinRateRow, SurplusSlotRow, WilsonCiPct, YakuDerived,
     YakuRow,
@@ -352,14 +352,16 @@ fn build_ordeal_chamber_chart(a: &AggregateStats, base_target: u32) -> Vec<Ordea
     let scale = scale_max.max(1) as f64;
     scratch
         .into_iter()
-        .map(|(ante, target, avg_score, attempts)| OrdealChamberChartRow {
-            wing: ante,
-            target,
-            avg_score,
-            attempts,
-            target_bar_pct: (target as f64 / scale * 100.0).min(100.0),
-            avg_bar_pct: (avg_score / scale * 100.0).min(100.0),
-        })
+        .map(
+            |(ante, target, avg_score, attempts)| OrdealChamberChartRow {
+                wing: ante,
+                target,
+                avg_score,
+                attempts,
+                target_bar_pct: (target as f64 / scale * 100.0).min(100.0),
+                avg_bar_pct: (avg_score / scale * 100.0).min(100.0),
+            },
+        )
         .collect()
 }
 
