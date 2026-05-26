@@ -819,6 +819,8 @@ pub struct UiFrame {
     pub gameplay_action_picks: Option<GameplayActionPickProxies>,
     /// When false, `btn_cash_in` / `label_cash_in` env meshes are not drawn or pickable.
     pub gameplay_cash_in_button_visible: bool,
+    /// Shop `eyeball_travel` playback time in seconds (`None` = bind pose).
+    pub shop_eyeball_travel_sec: Option<f32>,
 }
 
 impl UiFrame {
@@ -848,6 +850,7 @@ impl UiFrame {
             procedural_flame_emitters: Vec::new(),
             gameplay_action_picks: None,
             gameplay_cash_in_button_visible: false,
+            shop_eyeball_travel_sec: None,
         }
     }
 

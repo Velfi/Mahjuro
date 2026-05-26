@@ -1017,10 +1017,19 @@ pub trait RoomEnvWalkHooks {
     }
 }
 
+/// Bind pose for shop [`shop.glb`](../../assets/3d/shop.glb) `Eyeball` (filled during scene walk).
+#[derive(Clone, Copy, Debug)]
+pub struct ShopEyeballBindPose {
+    pub bind_world_doc: Mat4,
+    pub parent_world_doc: Mat4,
+}
+
 /// Mutable harvest targets for [`walk_room_env_node`].
 pub struct RoomEnvWalkState<'a> {
     pub candle_node_prefix: &'a str,
     pub lantern_node_prefix: &'a str,
+    /// When walking `shop.glb`, captures the Eyeball node for `eyeball_travel`.
+    pub shop_eyeball_bind: Option<ShopEyeballBindPose>,
     pub markers: &'a mut FxHashMap<String, Mat4>,
     pub env_primitives: &'a mut Vec<RoomEnvPrimitiveCpu>,
     pub marker_mesh_bounds_doc: &'a mut FxHashMap<String, RoomEnvironmentBounds>,
@@ -1075,6 +1084,19 @@ pub fn walk_room_env_node(
             "{label}: duplicate marker node name {:?} — using last transform",
             name
         );
+    }
+
+    if name == "Eyeball" {
+        if state.shop_eyeball_bind.is_none() {
+            state.shop_eyeball_bind = Some(ShopEyeballBindPose {
+                bind_world_doc: world,
+                parent_world_doc: parent,
+            });
+        } else {
+            // Keep the first Eyeball as canonical so animation parsing,
+            // bind capture, and GPU primitive mapping all agree.
+            log::warn!("{label}: duplicate Eyeball node found — using first match");
+        }
     }
 
     if let Some(_mesh) = node.mesh() {

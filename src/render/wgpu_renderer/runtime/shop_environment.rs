@@ -14,9 +14,57 @@ struct GltfRoomEnvUniformParams<'a> {
     model: Mat4,
     gpu: &'a ShopEnvironmentGpu,
     shadow_upload: Option<([f32; 16], &'a mut bool)>,
+    /// Cache uniform + model for shop `eyeball_travel` per-primitive draws.
+    cache_shop_env_uniform: bool,
 }
 
 impl WgpuRenderer {
+    fn shop_eyeball_prim_delta(
+        &self,
+        frame: &crate::render::draw_cmd::UiFrame,
+    ) -> Option<(usize, Mat4)> {
+        let t = frame.shop_eyeball_travel_sec?;
+        let Some(pi) = self.shop_eyeball_prim_index else {
+            if !self.shop_eyeball_missing_prim_warned.replace(true) {
+                log::warn!(
+                    "shop eyeball_travel: playback requested but Eyeball primitive index is missing"
+                );
+            }
+            return None;
+        };
+        let Some(anim) = self.shop_eyeball_travel.as_ref() else {
+            if !self.shop_eyeball_missing_clip_warned.replace(true) {
+                log::warn!("shop eyeball_travel: playback requested but clip is missing");
+            }
+            return None;
+        };
+        self.shop_eyeball_missing_prim_warned.set(false);
+        self.shop_eyeball_missing_clip_warned.set(false);
+        Some((pi, anim.delta_doc_at(t)))
+    }
+
+    fn upload_shop_env_model(&self, gpu: &ShopEnvironmentGpu, model: Mat4) {
+        let mut u = self.shop_env_last_camera_uniform.get();
+        u.model = model.to_cols_array();
+        self.shop_env_last_camera_uniform.set(u);
+        self.queue.write_buffer(
+            &gpu.uniform_buffer,
+            0,
+            bytemuck::bytes_of(&u),
+        );
+    }
+
+    fn upload_shop_env_shadow_model(&self, gpu: &ShopEnvironmentGpu, model: Mat4) {
+        self.queue.write_buffer(
+            &gpu.shadow_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&crate::render::lit_mesh::ShadowCasterUniform {
+                light_view_proj: self.shop_env_shadow_light_view_proj.get(),
+                model: model.to_cols_array(),
+            }),
+        );
+    }
+
     fn draw_gltf_room_env_meshes(
         &self,
         pass: &mut wgpu::RenderPass<'_>,
@@ -25,6 +73,8 @@ impl WgpuRenderer {
         gpu: &ShopEnvironmentGpu,
         room_hdr_mrt_emissive: bool,
         skip_prim: impl Fn(usize) -> bool,
+        eyeball_anim: Option<(usize, Mat4)>,
+        shop_env_base_model: Option<Mat4>,
     ) {
         if prims.is_empty() {
             return;
@@ -32,6 +82,9 @@ impl WgpuRenderer {
         pass.set_bind_group(1, &self.point_lights_bind_group, &[]);
         pass.set_bind_group(2, self.room_shadow_sample_bind_group(), &[]);
         pass.set_bind_group(3, &self.spot_lights_bind_group, &[]);
+        let patch_shop_model = shop_env_base_model.is_some();
+        let base_model = shop_env_base_model.unwrap_or(Mat4::IDENTITY);
+        let mut cur_model = base_model;
         for blend_phase in [false, true] {
             let mut last_pi: Option<usize> = None;
             let mut last_key = None;
@@ -41,6 +94,19 @@ impl WgpuRenderer {
                 }
                 if prim.pipeline_key.is_blend() != blend_phase {
                     continue;
+                }
+                if patch_shop_model {
+                    let eyeball_this_prim = eyeball_anim.is_some_and(|(idx, _)| idx == pi);
+                    let want_model = if eyeball_this_prim {
+                        let (_, delta) = eyeball_anim.expect("checked above");
+                        base_model * delta
+                    } else {
+                        base_model
+                    };
+                    if eyeball_this_prim || want_model != cur_model {
+                        self.upload_shop_env_model(gpu, want_model);
+                        cur_model = want_model;
+                    }
                 }
                 if last_key != Some(prim.pipeline_key) {
                     let pipe = if frame.uses_room_glb_shader() {
@@ -80,6 +146,7 @@ impl WgpuRenderer {
         let Some(ref gpu) = self.shop_environment else {
             return;
         };
+        let eyeball = self.shop_eyeball_prim_delta(frame);
         self.draw_gltf_room_env_meshes(
             pass,
             frame,
@@ -87,6 +154,8 @@ impl WgpuRenderer {
             gpu,
             room_hdr_mrt_emissive,
             |_| false,
+            eyeball,
+            Some(self.shop_env_base_model.get()),
         );
     }
 
@@ -106,7 +175,9 @@ impl WgpuRenderer {
             &self.gameplay_env_primitives,
             gpu,
             room_hdr_mrt_emissive,
-            |pi| self.gameplay_env_skip_prim(pi, frame),
+            |_| false,
+            None,
+            None,
         );
     }
 
@@ -127,6 +198,8 @@ impl WgpuRenderer {
             gpu,
             room_hdr_mrt_emissive,
             |_| false,
+            None,
+            None,
         );
     }
 
@@ -147,6 +220,8 @@ impl WgpuRenderer {
             gpu,
             room_hdr_mrt_emissive,
             |_| false,
+            None,
+            None,
         );
     }
 
@@ -167,6 +242,8 @@ impl WgpuRenderer {
             gpu,
             room_hdr_mrt_emissive,
             |pi| self.archive_env_skip_archive_prim(pi, frame),
+            None,
+            None,
         );
     }
 
@@ -184,6 +261,7 @@ impl WgpuRenderer {
             model,
             gpu,
             shadow_upload,
+            cache_shop_env_uniform,
         } = p;
         let env_tune = self.env_tune_for(env_scene_key);
         let height_scale = if main_menu_env {
@@ -237,24 +315,32 @@ impl WgpuRenderer {
         } else {
             (0.0, 0.0)
         };
+        let uniform = CameraUniform {
+            view_proj: camera.view_proj_arr,
+            model: model.to_cols_array(),
+            base_color_factor: [
+                1.0,
+                0.0,
+                0.0,
+                crate::render::tile_body::TEXTURED_BASE_MAP_BODY_KIND,
+            ],
+            cam_pos: camera.cam_pos.to_array(),
+            tile_seed: exposure,
+            decal_atlas_uv: [ambient_x, inv_doc_scale, self.shop_gltf_emissive_scale, 1.0],
+            hdr_tonemap,
+        };
         self.queue.write_buffer(
             &gpu.uniform_buffer,
             0,
-            bytemuck::bytes_of(&CameraUniform {
-                view_proj: camera.view_proj_arr,
-                model: model.to_cols_array(),
-                base_color_factor: [
-                    1.0,
-                    0.0,
-                    0.0,
-                    crate::render::tile_body::TEXTURED_BASE_MAP_BODY_KIND,
-                ],
-                cam_pos: camera.cam_pos.to_array(),
-                tile_seed: exposure,
-                decal_atlas_uv: [ambient_x, inv_doc_scale, env_tune.gltf_emissive_scale, 1.0],
-                hdr_tonemap,
-            }),
+            bytemuck::bytes_of(&uniform),
         );
+        if cache_shop_env_uniform {
+            self.shop_env_last_camera_uniform.set(uniform);
+            self.shop_env_base_model.set(model);
+            if let Some((lvp, _)) = shadow_upload {
+                self.shop_env_shadow_light_view_proj.set(lvp);
+            }
+        }
         if let Some((lvp, changed)) = shadow_upload {
             self.write_room_env_shadow_caster(gpu, lvp, model, changed);
         }
@@ -264,9 +350,12 @@ impl WgpuRenderer {
     pub(super) fn draw_gltf_room_env_shadow(
         &self,
         pass: &mut wgpu::RenderPass<'_>,
+        _frame: &crate::render::draw_cmd::UiFrame,
         prims: &[TilePrimitiveGpu],
         gpu: &ShopEnvironmentGpu,
         skip_prim: impl Fn(usize) -> bool,
+        eyeball_anim: Option<(usize, Mat4)>,
+        shop_env_base_model: Option<Mat4>,
     ) {
         if prims.is_empty() {
             return;
@@ -274,14 +363,50 @@ impl WgpuRenderer {
         pass.set_pipeline(&self.shadow_pipeline_room_env);
         pass.set_bind_group(0, &gpu.shadow_bind_group, &[]);
         pass.set_bind_group(1, &gpu.shadow_warp_bind_group, &[]);
+        let patch_shop_model = shop_env_base_model.is_some();
+        let base_model = shop_env_base_model.unwrap_or(Mat4::IDENTITY);
+        let mut cur_model = base_model;
         for (pi, prim) in prims.iter().enumerate() {
             if skip_prim(pi) || prim.pipeline_key.is_blend() {
                 continue;
+            }
+            if patch_shop_model {
+                let eyeball_this_prim = eyeball_anim.is_some_and(|(idx, _)| idx == pi);
+                let want_model = if eyeball_this_prim {
+                    let (_, delta) = eyeball_anim.expect("checked above");
+                    base_model * delta
+                } else {
+                    base_model
+                };
+                if eyeball_this_prim || want_model != cur_model {
+                    self.upload_shop_env_shadow_model(gpu, want_model);
+                    cur_model = want_model;
+                }
             }
             pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
             pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..prim.index_count, 0, 0..1);
         }
+    }
+
+    pub(super) fn draw_shop_environment_shadow(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        frame: &crate::render::draw_cmd::UiFrame,
+    ) {
+        let Some(ref gpu) = self.shop_environment else {
+            return;
+        };
+        let eyeball = self.shop_eyeball_prim_delta(frame);
+        self.draw_gltf_room_env_shadow(
+            pass,
+            frame,
+            &self.shop_env_primitives,
+            gpu,
+            |_| false,
+            eyeball,
+            Some(self.shop_env_base_model.get()),
+        );
     }
 
     pub(super) fn write_shop_environment_uniforms(
@@ -315,6 +440,7 @@ impl WgpuRenderer {
             model,
             gpu,
             shadow_upload,
+            cache_shop_env_uniform: true,
         });
     }
 
@@ -354,6 +480,7 @@ impl WgpuRenderer {
             gpu,
             shadow_upload,
             staircase_env: false,
+            cache_shop_env_uniform: false,
         });
     }
 
@@ -392,6 +519,7 @@ impl WgpuRenderer {
             model,
             gpu,
             shadow_upload,
+            cache_shop_env_uniform: false,
         });
         let mut dist = frame.hallway_distortion.unwrap_or_default();
         dist.time_pulse[0] = self.creation_time.elapsed().as_secs_f32();
@@ -434,6 +562,7 @@ impl WgpuRenderer {
             model,
             gpu,
             shadow_upload,
+            cache_shop_env_uniform: false,
         });
     }
 
@@ -535,6 +664,7 @@ impl WgpuRenderer {
             model,
             gpu,
             shadow_upload,
+            cache_shop_env_uniform: false,
         });
     }
 
@@ -555,6 +685,8 @@ impl WgpuRenderer {
             gpu,
             room_hdr_mrt_emissive,
             |_| false,
+            None,
+            None,
         );
     }
 
@@ -591,6 +723,7 @@ impl WgpuRenderer {
             model,
             gpu,
             shadow_upload,
+            cache_shop_env_uniform: false,
         });
     }
 

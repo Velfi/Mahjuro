@@ -6,7 +6,7 @@
     "rarity": "common",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Triplet Boost wherever it rests.",
+        "text": "\"Three of a kind? Heh!? a powerful omen indeed!\" - Voice in the crowd.",
         "bold": false,
         "italic": true
       }
@@ -19,17 +19,7 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "Sequence",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " — never the tile, always the tale.",
+        "text": "Power surges through your tiles! You are kind of afraid to touch them now, You didn't even know these were conductive.",
         "bold": false,
         "italic": false
       }
@@ -42,17 +32,7 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "countless",
-        "bold": true,
-        "italic": true
-      },
-      {
-        "text": " late-night rounds.",
+        "text": "Alone we are formidable, but together we are unstoppable!",
         "bold": false,
         "italic": false
       }
@@ -91,17 +71,7 @@
     "rarity": "common",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "countless",
-        "bold": true,
-        "italic": true
-      },
-      {
-        "text": " late-night rounds.",
+        "text": "The luck of the Irish!",
         "bold": false,
         "italic": false
       }
@@ -114,7 +84,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows White Dragon's Hush wherever it rests.",
+        "text": "The White Dragon's Hush is a silence so palpable it pushes every emotion from the room save two. Fear, and Reverence.",
         "bold": false,
         "italic": true
       }
@@ -127,17 +97,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "Joker",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " — never the tile, always the tale.",
+        "text": "What is both the sage and the idiot? ",
         "bold": false,
         "italic": false
       }
@@ -150,17 +110,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "countless",
-        "bold": true,
-        "italic": true
-      },
-      {
-        "text": " late-night rounds.",
+        "text": "Your tiles form a mighty phalanx, like the  shell of a beetle!",
         "bold": false,
         "italic": false
       }
@@ -173,7 +123,7 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Quick Draw wherever it rests.",
+        "text": "\"You're twitchin mister, look mighty antsy to put them tiles down. Why don't you do that? That is, if you think your draw is quick enough.\" - Doc'hao Li Dei.",
         "bold": false,
         "italic": true
       }
@@ -199,17 +149,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "countless",
-        "bold": true,
-        "italic": true
-      },
-      {
-        "text": " late-night rounds.",
+        "text": "Rumors carry across the air that you might just be the next Multiplier Master, could it be true?",
         "bold": false,
         "italic": false
       }
@@ -222,7 +162,7 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Set Magnet wherever it rests.",
+        "text": "\"This relic has a strange aura about it. Tiles are drawn to it, but only in certain orders. How peculiar.\" - Sagacious Zhou",
         "bold": false,
         "italic": true
       }
@@ -235,17 +175,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "Wild",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " — never the tile, always the tale.",
+        "text": "\"The winds wage war on one another since time immemorial, the ghosts of summers and springs passed that charge screaming over the waves and lay siege to the shore. Will they fight for you?\" -Toad",
         "bold": false,
         "italic": false
       }
@@ -281,7 +211,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Kan Drum wherever it rests.",
+        "text": "The drum beats guide your feet, the rhythm moves your hands even though not a hand plays it.",
         "bold": false,
         "italic": true
       }
@@ -317,17 +247,7 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "The needle never settles on ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "one",
-        "bold": true,
-        "italic": true
-      },
-      {
-        "text": " direction for long.",
+        "text": "The readers gaze never settles in one direction for very long.",
         "bold": false,
         "italic": false
       }
@@ -394,7 +314,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Ikebana wherever it rests.",
+        "text": "\"When you give life to the flowers, they give you something in return. Oh how I love my flowers.\" - Lady Blossom.",
         "bold": false,
         "italic": true
       }
@@ -407,19 +327,19 @@
     "rarity": "common",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
+        "text": "\"What a strange thing! to be alive beneath cherry blossoms.\"",
+        "bold": false,
+        "italic": true
+      },
+      {
+        "text": " - ",
         "bold": false,
         "italic": false
       },
       {
-        "text": "Hanami",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " — never the tile, always the tale.",
+        "text": "Kobayashi issa",
         "bold": false,
-        "italic": false
+        "italic": true
       }
     ]
   },
@@ -430,17 +350,12 @@
     "rarity": "common",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
+        "text": "Bringer of The Monsoon, Carry to me your favor, over mountain and hill, through thicket and thistle! Carry to me your favor!",
         "bold": false,
-        "italic": false
-      },
-      {
-        "text": "countless",
-        "bold": true,
         "italic": true
       },
       {
-        "text": " late-night rounds.",
+        "text": " - Prayer chalked onto the pot of a withered Bonsai",
         "bold": false,
         "italic": false
       }
@@ -453,7 +368,7 @@
     "rarity": "common",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Ruby Serpent wherever it rests.",
+        "text": "\"Serpent of Wealth and Honor, bringer of prosperity! Please, I don't have much coin left. My child is sick let me win and I shall make a shrine for you, and burn incense every day of my life!\" - Half burnt petition",
         "bold": false,
         "italic": true
       }
@@ -466,17 +381,12 @@
     "rarity": "common",
     "flavor_spans": [
       {
-        "text": "With ever link in the chain , the power of your tiles grow.",
+        "text": "Serpent of Truth and Wisdom, show me now! Show me what is to be my fate! I must know! ",
         "bold": false,
-        "italic": false
+        "italic": true
       },
       {
-        "text": "intertwines",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " itself with the blue tiles you have played.",
+        "text": "- Plea laboriously carved into one of the play tables.",
         "bold": false,
         "italic": false
       }
@@ -489,17 +399,7 @@
     "rarity": "common",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "countless",
-        "bold": true,
-        "italic": true
-      },
-      {
-        "text": " late-night rounds.",
+        "text": "Mud, Silt and the ever present stench of decay let you know, every. single. day.",
         "bold": false,
         "italic": false
       }
@@ -512,7 +412,12 @@
     "rarity": "common",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows High Tide wherever it rests.",
+        "text": "The rising tide lifts all ships!",
+        "bold": false,
+        "italic": false
+      },
+      {
+        "text": " - Mortal proverb",
         "bold": false,
         "italic": true
       }
@@ -525,17 +430,7 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "Merchant's",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " — never the tile, always the tale.",
+        "text": "The eye bounces happily amidst the small pile of coin you set down, then it rolls off the counter out of sight. Strange times ahead.",
         "bold": false,
         "italic": false
       }
@@ -548,17 +443,7 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "countless",
-        "bold": true,
-        "italic": true
-      },
-      {
-        "text": " late-night rounds.",
+        "text": "They say he can Do anything, Be anyone. He's willing to lend you a hand.",
         "bold": false,
         "italic": false
       }
@@ -589,17 +474,7 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "Lucky",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " — never the tile, always the tale.",
+        "text": "Those other plays? not so lucky. This time? this time is different!",
         "bold": false,
         "italic": false
       }
@@ -612,17 +487,7 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "countless",
-        "bold": true,
-        "italic": true
-      },
-      {
-        "text": " late-night rounds.",
+        "text": "\"Man, this thing really goes once you get the ball rolling!\" - An excited gambler",
         "bold": false,
         "italic": false
       }
@@ -635,9 +500,9 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Minimalist wherever it rests.",
+        "text": "You have always managed to get by with very little, and this should be no different.",
         "bold": false,
-        "italic": true
+        "italic": false
       }
     ]
   },
@@ -648,17 +513,7 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "Turtle",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " — never the tile, always the tale.",
+        "text": "Loba was supposed to be wise, and ancient beyond reasoning. Now this relic is all that remembers use it while it lasts, all things fade.",
         "bold": false,
         "italic": false
       }
@@ -722,17 +577,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "Snowball",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " — never the tile, always the tale.",
+        "text": "At first it wasn't that big of a deal. BUT NOW! IT'S OUT OF CONTROL!",
         "bold": false,
         "italic": false
       }
@@ -745,17 +590,12 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
+        "text": "\"This tile has gotten me out of more close calls then I care to remember.\"",
         "bold": false,
-        "italic": false
-      },
-      {
-        "text": "countless",
-        "bold": true,
         "italic": true
       },
       {
-        "text": " late-night rounds.",
+        "text": " - Toad",
         "bold": false,
         "italic": false
       }
@@ -781,18 +621,8 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "Last Breath",
+        "text": "This one is cold. It makes you feel lonely. You want to discard, but you can't.",
         "bold": true,
-        "italic": false
-      },
-      {
-        "text": " — never the tile, always the tale.",
-        "bold": false,
         "italic": false
       }
     ]
@@ -804,17 +634,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "countless",
-        "bold": true,
-        "italic": true
-      },
-      {
-        "text": " late-night rounds.",
+        "text": "You can rub out just about anything, any smudge or streak even your sins.",
         "bold": false,
         "italic": false
       }
@@ -827,9 +647,9 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Paper Lantern wherever it rests.",
+        "text": "Handcrafted and full of light, the lights of The Shop guide you to more than victory.",
         "bold": false,
-        "italic": true
+        "italic": false
       }
     ]
   },
@@ -850,7 +670,7 @@
         "italic": false
       },
       {
-        "text": " keeps in the garden after.",
+        "text": " keeps in the garden ever after.",
         "bold": false,
         "italic": false
       }
@@ -863,17 +683,7 @@
     "rarity": "legendary",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "countless",
-        "bold": true,
-        "italic": true
-      },
-      {
-        "text": " late-night rounds.",
+        "text": "When you look into the mirror all you see is your weary face, but you feel it. It see you.",
         "bold": false,
         "italic": false
       }
@@ -886,9 +696,9 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Way of Purity wherever it rests.",
+        "text": "The way is open to the walker whose innocence guides them along the path purity.",
         "bold": false,
-        "italic": true
+        "italic": false
       }
     ]
   },
@@ -917,17 +727,7 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "countless",
-        "bold": true,
-        "italic": true
-      },
-      {
-        "text": " late-night rounds.",
+        "text": "Ones worth is greater than can be summed up by numbers alone, The people united though small outnumber all.",
         "bold": false,
         "italic": false
       }
@@ -940,7 +740,7 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Voice of the Elite wherever it rests.",
+        "text": "The quiet murmurs of  bureaucrats and traders fill the room the second you touch this one,  You want in on the deal?",
         "bold": false,
         "italic": true
       }
@@ -953,17 +753,17 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
+        "text": "Now that's a ",
         "bold": false,
         "italic": false
       },
       {
-        "text": "XXXL",
+        "text": "big",
         "bold": true,
         "italic": false
       },
       {
-        "text": " — never the tile, always the tale.",
+        "text": " egg! What could have laid a thing like that?!",
         "bold": false,
         "italic": false
       }
@@ -976,19 +776,9 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
+        "text": "\"Walk through the garden for a time, it was beautiful once. Have some tea. These were once such beautiful cups.The House has little time for tea anymore.\" - A confused old man in passing.",
         "bold": false,
-        "italic": false
-      },
-      {
-        "text": "countless",
-        "bold": true,
         "italic": true
-      },
-      {
-        "text": " late-night rounds.",
-        "bold": false,
-        "italic": false
       }
     ]
   },
@@ -1025,17 +815,7 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "countless",
-        "bold": true,
-        "italic": true
-      },
-      {
-        "text": " late-night rounds.",
+        "text": "\n",
         "bold": false,
         "italic": false
       }
@@ -1048,9 +828,9 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Obsession wherever it rests.",
+        "text": "You can't eat, you can't sleep. You do nothing but think of coin. ",
         "bold": false,
-        "italic": true
+        "italic": false
       }
     ]
   },
@@ -1084,17 +864,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "countless",
-        "bold": true,
-        "italic": true
-      },
-      {
-        "text": " late-night rounds.",
+        "text": "This tiles edges are smooth like that of a river stone, you enjoy the feel of it in your hand.",
         "bold": false,
         "italic": false
       }
@@ -1107,9 +877,9 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Melting Ice wherever it rests.",
+        "text": "\"Wherever this tile sits, a small pool of water eventually and inexplicably appears they say. I've put mine in my ramen.\" - The Tanuki",
         "bold": false,
-        "italic": true
+        "italic": false
       }
     ]
   },
@@ -1120,17 +890,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "Taotie",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " — never the tile, always the tale.",
+        "text": "This relic honors The House in it's likeness, a great boon in bestowed upon you!",
         "bold": false,
         "italic": false
       }
@@ -1143,17 +903,7 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "countless",
-        "bold": true,
-        "italic": true
-      },
-      {
-        "text": " late-night rounds.",
+        "text": "Worth more than gold, this humble worm's simple secret clothes emperors and kings alike in it's supple threads.",
         "bold": false,
         "italic": false
       }
@@ -1166,9 +916,9 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Silk Moth wherever it rests.",
+        "text": "The Silk Moth teaches us that to move forward we must ourselves change.",
         "bold": false,
-        "italic": true
+        "italic": false
       }
     ]
   },
@@ -1179,17 +929,7 @@
     "rarity": "legendary",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "Shadow",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " — never the tile, always the tale.",
+        "text": "Dark forces conspire to send forth hands to do their evil bidding.  This works in your favor!",
         "bold": false,
         "italic": false
       }
@@ -1202,17 +942,12 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
+        "text": "\"At this point the loneliness doesn't even get to me anymore, I've pretty much transcended the need for human connection.\"",
         "bold": false,
-        "italic": false
-      },
-      {
-        "text": "countless",
-        "bold": true,
         "italic": true
       },
       {
-        "text": " late-night rounds.",
+        "text": " - A Wayward Monk.",
         "bold": false,
         "italic": false
       }
@@ -1248,17 +983,7 @@
     "rarity": "common",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "Jade",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " — never the tile, always the tale.",
+        "text": "This implement has weathered a thousand years of accounts both heavenly and mundane and shows no crack or scuff, no blemishes at all.",
         "bold": false,
         "italic": false
       }
@@ -1284,9 +1009,9 @@
     "rarity": "common",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Patience wherever it rests.",
+        "text": "\n",
         "bold": false,
-        "italic": true
+        "italic": false
       }
     ]
   },
@@ -1297,9 +1022,9 @@
     "rarity": "common",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Kindness wherever it rests.",
+        "text": "\n",
         "bold": false,
-        "italic": true
+        "italic": false
       }
     ]
   },
@@ -1349,9 +1074,9 @@
     "rarity": "common",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Diligence wherever it rests.",
+        "text": "\n",
         "bold": false,
-        "italic": true
+        "italic": false
       }
     ]
   },
@@ -1362,17 +1087,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "Way",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " — never the tile, always the tale.",
+        "text": "The way is open to the walker whose heart guides them along the path of synergy.",
         "bold": false,
         "italic": false
       }
@@ -1385,19 +1100,9 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
+        "text": "\"Those of us that travel The Way see the value in sacred numerology and the tiles illustrate it's truth to us every play.\" - Strange Foreigner.",
         "bold": false,
-        "italic": false
-      },
-      {
-        "text": "countless",
-        "bold": true,
         "italic": true
-      },
-      {
-        "text": " late-night rounds.",
-        "bold": false,
-        "italic": false
       }
     ]
   },
@@ -1408,9 +1113,9 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Way of Sequences wherever it rests.",
+        "text": "The way is open to the walker who knows the code and serves the cycle.",
         "bold": false,
-        "italic": true
+        "italic": false
       }
     ]
   },
@@ -1447,9 +1152,9 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Star Tile wherever it rests.",
+        "text": "This tile shines brighter than all the others, a small treasure in your hands.",
         "bold": false,
-        "italic": true
+        "italic": false
       }
     ]
   },
@@ -1460,7 +1165,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Hungry Ghost wherever it rests.",
+        "text": "\"The tiles weren't enough, the coin wasn't enough either. The hunger tears at me from within, One more wing, that will be enough.\" - The Disheveled Man.",
         "bold": false,
         "italic": true
       }
@@ -1504,7 +1209,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Lotus Bloom wherever it rests.",
+        "text": "\"Even from this rotten ditch a blossom may appear, beauty is all around us.\" - Toad",
         "bold": false,
         "italic": true
       }
@@ -1517,17 +1222,7 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "Wall",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " — never the tile, always the tale.",
+        "text": "Strong and sturdy. The wall blocks the cold edge to the air, any shelter will do in this accursed rain.",
         "bold": false,
         "italic": false
       }
@@ -1540,17 +1235,7 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "countless",
-        "bold": true,
-        "italic": true
-      },
-      {
-        "text": " late-night rounds.",
+        "text": "The overwhelming urge to make every kong yours can no longer be abated!",
         "bold": false,
         "italic": false
       }
@@ -1563,7 +1248,7 @@
     "rarity": "common",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows No Honor But Wealth wherever it rests.",
+        "text": "\"There is no honor here, but wealth abounds.  It's sickening.\" - A Wayward Monk.",
         "bold": false,
         "italic": true
       }
@@ -1576,17 +1261,7 @@
     "rarity": "common",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "Sweepstakes",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " — never the tile, always the tale.",
+        "text": "You have won The House Sweepstakes! You, our most honored contestant! and guest!",
         "bold": false,
         "italic": false
       }
@@ -1635,17 +1310,17 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
+        "text": "This is the ",
         "bold": false,
         "italic": false
       },
       {
-        "text": "Heirloom",
+        "text": "only one",
         "bold": true,
         "italic": false
       },
       {
-        "text": " — never the tile, always the tale.",
+        "text": " , of every other tile within the entirety of The House that you yourself brought in with you.",
         "bold": false,
         "italic": false
       }
@@ -1658,17 +1333,12 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
+        "text": "\"People come and people go, This one might do you some good! It's perfect for a tourist like yourself.\"",
         "bold": false,
-        "italic": false
-      },
-      {
-        "text": "countless",
-        "bold": true,
         "italic": true
       },
       {
-        "text": " late-night rounds.",
+        "text": " - The Blind Merchant.",
         "bold": false,
         "italic": false
       }
@@ -1681,7 +1351,7 @@
     "rarity": "legendary",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Kintsugi wherever it rests.",
+        "text": "Gold veins weave through your tea cup, Does gold flow in your veins as well? - The Tanuki.",
         "bold": false,
         "italic": true
       }
@@ -1773,17 +1443,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Old players swear by the ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "Pi",
-        "bold": true,
-        "italic": false
-      },
-      {
-        "text": " — never the tile, always the tale.",
+        "text": "3.141592653589793238462643383279502884 and so on, and so on ,and so on, and so on, and so on.",
         "bold": false,
         "italic": false
       }
@@ -1814,7 +1474,7 @@
     "rarity": "uncommon",
     "flavor_spans": [
       {
-        "text": "A quiet rumor follows Tiny Hands wherever it rests.",
+        "text": "\"Tiny hands make quick plays , but things keep going missing here.\" - Inspector Gyoza",
         "bold": false,
         "italic": true
       }
@@ -1850,17 +1510,7 @@
     "rarity": "rare",
     "flavor_spans": [
       {
-        "text": "Worn smooth by ",
-        "bold": false,
-        "italic": false
-      },
-      {
-        "text": "countless",
-        "bold": true,
-        "italic": true
-      },
-      {
-        "text": " late-night rounds.",
+        "text": "The King of butterflies hath arrived, bask in your majesty's orangeness. Gamble for it's entertainment! The King demands it!",
         "bold": false,
         "italic": false
       }
@@ -1873,9 +1523,9 @@
     "rarity": "legendary",
     "flavor_spans": [
       {
-        "text": "The loudest hand is the one that answers itself.",
+        "text": "\n",
         "bold": false,
-        "italic": true
+        "italic": false
       }
     ]
   },

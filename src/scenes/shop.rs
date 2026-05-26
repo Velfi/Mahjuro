@@ -132,6 +132,14 @@ pub struct ShopScene {
     /// LMB-drag turntable on the storeroom camera (radians, applied around [`CameraParams::target`]).
     storeroom_orbit_yaw: f32,
     storeroom_orbit_pitch: f32,
+    /// Wall-clock start of debug `eyeball_travel` playback (`None` = idle at bind pose).
+    eyeball_travel_started: Option<Instant>,
+    /// Clip length captured when playback starts (from loaded `shop.glb`).
+    eyeball_travel_duration_secs: Option<f32>,
+    /// Accumulated elapsed seconds while paused/stopped between resumes.
+    eyeball_travel_elapsed_secs: f32,
+    /// Debug playback pause state.
+    eyeball_travel_paused: bool,
 }
 
 /// Click id for the `?` glossary badge in the shop HUD.

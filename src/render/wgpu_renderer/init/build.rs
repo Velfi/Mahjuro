@@ -2614,18 +2614,25 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         )
     };
 
-    let (shop_env_primitives, shop_environment) = {
+    let (shop_env_primitives, shop_environment, shop_eyeball_prim_index, shop_eyeball_travel) = {
         let _shop = crate::startup_profile::scope("wgpu.room.shop");
         crate::render::room_glb::with_shop_glb_cpu(|cpu_opt| {
             let mut prims = Vec::new();
             let mut gpu_wrap = None;
+            let mut shop_eyeball_prim_index = None;
+            let mut shop_eyeball_travel = None;
+            let mut eyeball_prim_indices: Vec<usize> = Vec::new();
             let Some(cpu) = cpu_opt else {
-                return (prims, gpu_wrap);
+                return (prims, gpu_wrap, shop_eyeball_prim_index, shop_eyeball_travel);
             };
+            shop_eyeball_travel = cpu.shop_eyeball_travel.clone();
             if !cpu.environment_primitives.is_empty() {
                 let mut room_tex_cache = RoomEnvTextureCache::new();
                 let (_white_tex, white_albedo_view) = white_albedo(&device, &queue);
                 for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
+                    if env_prim.gltf_node_name.as_deref() == Some("Eyeball") {
+                        eyeball_prim_indices.push(i);
+                    }
                     let prim = &env_prim.mesh;
                     let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some(&format!("shop-env-verts-{i}")),
@@ -2826,9 +2833,22 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     archive_sign_decal_texture: None,
                     shop_candle_sss_texture: shop_candle_sss_tex.map(|(t, _)| t),
                 });
+                shop_eyeball_prim_index = eyeball_prim_indices.first().copied();
+                if eyeball_prim_indices.len() > 1 {
+                    log::warn!(
+                        "shop.glb GPU: multiple Eyeball primitives {:?} — using first index {}",
+                        eyeball_prim_indices,
+                        shop_eyeball_prim_index.unwrap_or(0)
+                    );
+                } else if shop_eyeball_prim_index.is_none() {
+                    log::warn!("shop.glb GPU: Eyeball primitive not found");
+                }
+                if shop_eyeball_travel.is_none() {
+                    log::warn!("shop.glb GPU: eyeball_travel clip unavailable");
+                }
                 log::info!("shop.glb GPU: {} primitive draw(s)", prims.len());
             }
-            (prims, gpu_wrap)
+            (prims, gpu_wrap, shop_eyeball_prim_index, shop_eyeball_travel)
         })
     };
 
@@ -4541,6 +4561,26 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         tile_outline_index_count,
         shop_env_primitives,
         shop_environment,
+        shop_eyeball_prim_index,
+        shop_eyeball_travel,
+        shop_eyeball_missing_clip_warned: std::cell::Cell::new(false),
+        shop_eyeball_missing_prim_warned: std::cell::Cell::new(false),
+        shop_env_last_camera_uniform: std::cell::Cell::new(CameraUniform {
+            view_proj: glam::Mat4::IDENTITY.to_cols_array(),
+            model: glam::Mat4::IDENTITY.to_cols_array(),
+            base_color_factor: [
+                1.0,
+                0.0,
+                0.0,
+                crate::render::tile_body::TEXTURED_BASE_MAP_BODY_KIND,
+            ],
+            cam_pos: [0.0; 3],
+            tile_seed: 0.0,
+            decal_atlas_uv: [0.0; 4],
+            hdr_tonemap: [0.0; 4],
+        }),
+        shop_env_base_model: std::cell::Cell::new(glam::Mat4::IDENTITY),
+        shop_env_shadow_light_view_proj: std::cell::Cell::new(glam::Mat4::IDENTITY.to_cols_array()),
         hallway_env_primitives,
         hallway_environment,
         staircase_env_primitives,

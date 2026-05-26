@@ -166,6 +166,11 @@ impl WgpuRenderer {
         self.active_frame_env
     }
 
+    #[inline]
+    pub fn shop_eyeball_primitive_index(&self) -> Option<usize> {
+        self.shop_eyeball_prim_index
+    }
+
     pub fn clear_smoke(&mut self) {
         self.prev_tile_world.clear();
     }

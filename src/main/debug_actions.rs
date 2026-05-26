@@ -211,6 +211,47 @@ impl App {
                 }
                 _ => log::warn!("Reroll Shop ignored — not in shop scene"),
             },
+            DebugAction::StartShopEyeballTravel => match &mut self.scene {
+                Scene::Shop(s) => {
+                    let clip_loaded = crate::render::room_glb::with_shop_glb_cpu(|opt| {
+                        opt.is_some_and(|cpu| cpu.shop_eyeball_travel.is_some())
+                    });
+                    let prim_index_loaded = self
+                        .renderer
+                        .as_ref()
+                        .is_some_and(|r| r.shop_eyeball_primitive_index().is_some());
+                    if s.debug_start_eyeball_travel() {
+                        log::debug!(
+                            "Started shop eyeball_travel playback (gpu_eyeball_prim_index_loaded={prim_index_loaded})"
+                        );
+                    } else {
+                        log::warn!(
+                            "Play Eyeball Travel failed: clip_loaded={clip_loaded}, gpu_eyeball_prim_index_loaded={prim_index_loaded}"
+                        );
+                    }
+                }
+                _ => log::warn!("Start Eyeball Travel ignored — not in shop scene"),
+            },
+            DebugAction::TogglePauseShopEyeballTravel => match &mut self.scene {
+                Scene::Shop(s) => match s.debug_toggle_pause_eyeball_travel() {
+                    Some(true) => log::debug!("Paused shop eyeball_travel playback"),
+                    Some(false) => log::debug!("Resumed shop eyeball_travel playback"),
+                    None => log::warn!(
+                        "Pause/Resume Eyeball Travel ignored — clip is not active (start it first)"
+                    ),
+                },
+                _ => log::warn!("Pause/Resume Eyeball Travel ignored — not in shop scene"),
+            },
+            DebugAction::RestartShopEyeballTravel => match &mut self.scene {
+                Scene::Shop(s) => {
+                    if s.debug_restart_eyeball_travel() {
+                        log::debug!("Restarted shop eyeball_travel playback");
+                    } else {
+                        log::warn!("Restart Eyeball Travel failed — clip is not loaded");
+                    }
+                }
+                _ => log::warn!("Restart Eyeball Travel ignored — not in shop scene"),
+            },
             DebugAction::OpenPack => match &mut self.scene {
                 Scene::Shop(s) => {
                     let kinds = TilePackKind::all();
