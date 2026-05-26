@@ -6,7 +6,6 @@ use crate::game::game_mode::HAND_SIZE;
 pub(crate) const HAND_TILE_REFERENCE_COUNT: usize = HAND_SIZE;
 
 /// Hand sizes tuned beyond the reference (ordeals / relic modifiers).
-pub(crate) const HAND_TILE_COUNT_MIN: usize = 12;
 pub(crate) const HAND_TILE_COUNT_MAX: usize = 20;
 
 /// At [`HAND_TILE_COUNT_MAX`] tiles, size is at least this fraction of the reference.
@@ -94,7 +93,7 @@ pub(crate) fn hand_tile_size_from_slot_width(
 mod tests {
     use super::{
         hand_slots_for_count, hand_tile_layout_size_px, HAND_TILE_COUNT_MAX,
-        HAND_TILE_COUNT_MIN, HAND_TILE_REFERENCE_COUNT,
+        HAND_TILE_REFERENCE_COUNT,
     };
 
     #[test]
@@ -139,7 +138,7 @@ mod tests {
         let at_14 = hand_tile_layout_size_px(strip, 14, 1.0);
         let at_12 = hand_tile_layout_size_px(strip, 12, 1.0);
         assert!((at_12 - at_14).abs() < 0.01);
-        assert!(hand_tile_layout_size_px(strip, HAND_TILE_COUNT_MIN, 1.0) <= at_14 + 0.01);
+        assert!(hand_tile_layout_size_px(strip, 12, 1.0) <= at_14 + 0.01);
     }
 
     #[test]

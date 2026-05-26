@@ -265,13 +265,6 @@ impl App {
             || !self.overlay_stack.is_empty()
     }
 
-    /// Gameplay-only hover hit-test for the on-table relic row. Uses the
-    /// renderer's projected relic rects, so it matches the visible 3D boxes
-    /// the same way gameplay focus and tooltips already do.
-    fn active_scene(&self) -> &Scene {
-        self.overlay_stack.last().unwrap_or(&self.scene)
-    }
-
     /// Storeroom shop is the active face (no showcase inspect overlay, not paused).
     fn shop_storeroom_face_active(&self) -> bool {
         self.overlay_stack.is_empty()

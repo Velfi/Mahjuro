@@ -4434,7 +4434,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     // every slot populated.
     let tally_stick_instances = make_pool(MAX_TALLY_STICK_SLOTS * 2);
     let wall_tile_instances = make_pool(MAX_WALL_TILE_SLOTS);
-    let cascade_token_instances = make_pool(MAX_CASCADE_TOKEN_SLOTS);
     let extruded_glyph_instances = make_pool(MAX_EXTRUDED_GLYPH_SLOTS);
     let debug_axes_instances = make_pool(3);
     crate::startup_profile::record("wgpu.lit_meshes_and_pools", t_lit_meshes.elapsed());
@@ -4644,7 +4643,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         mirror_instances,
         tally_stick_instances,
         wall_tile_instances,
-        cascade_token_instances,
         extruded_glyph_instances,
         glyph_cpu_cache: crate::render::glyph_mesh::GlyphMeshCache::new(),
         extruded_glyph_meshes: rustc_hash::FxHashMap::default(),

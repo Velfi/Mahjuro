@@ -635,7 +635,6 @@ pub fn begin_discard_batch(
         &cam,
         env_height_scale,
         0.0,
-        0.0,
     ) {
         Ok(a) => a,
         Err(e) => {

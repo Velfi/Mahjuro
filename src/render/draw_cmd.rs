@@ -256,28 +256,6 @@ pub struct WallStackPlacement {
     pub row_len: u32,
 }
 
-/// Which cascade-readout axis a token represents — drives its tint and
-/// the gameplay scene's pulse animation routing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CascadeTokenKind {
-    Chips,
-    Mult,
-}
-
-impl CascadeTokenKind {
-    /// Canonical RGBA tint for this cascade token kind. Centralized so
-    /// the score-popup glyphs, the cascade HUD label, and the 3D
-    /// cascade-token meshes all stay in sync — any one of those reading
-    /// the wrong color would break the warm-vs-cool reading of the
-    /// score breakdown.
-    pub fn color(self) -> [f32; 4] {
-        match self {
-            CascadeTokenKind::Chips => crate::render::theme::color::LAPIS,
-            CascadeTokenKind::Mult => crate::render::theme::color::RUBY,
-        }
-    }
-}
-
 /// Material selector for the extruded-glyph score popup. Maps to the lit-mesh
 /// shader's `MaterialKind` branch at render time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -510,8 +488,6 @@ pub enum Object3dKind {
     Bowl,
     /// Bronze "play hand" mirror. Hover animation is driven by [`Object3d::hover_target`].
     Mirror,
-    /// Engraved bone cascade token with a pulse-pop envelope.
-    CascadeToken { kind: CascadeTokenKind, pulse: f32 },
     // (Dish is now modeled as `Primitive { shape: DiscSquare or
     // DiscRound, material: MaterialSpec::plain(), shadow_caster: true
     // }`. Callers set `pos[2]` to the dish center (base + extents[1] *

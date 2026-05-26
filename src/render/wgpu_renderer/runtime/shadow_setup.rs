@@ -535,7 +535,6 @@ impl WgpuRenderer {
             super::DrawKind::TallyStickBase | super::DrawKind::TallyStickTip => {
                 rewrite!(self.tally_stick_instances)
             }
-            super::DrawKind::CascadeToken => rewrite!(self.cascade_token_instances),
             super::DrawKind::ExtrudedGlyph => rewrite!(self.extruded_glyph_instances),
             super::DrawKind::Primitive(shape) => {
                 if let Some(pool) = self.primitive_instances.get(&shape) {

@@ -102,7 +102,6 @@ pub enum DrawKind {
     Mirror,
     TallyStickBase,
     TallyStickTip,
-    CascadeToken,
     ExtrudedGlyph,
     Primitive(crate::render::primitive::MeshId),
 }

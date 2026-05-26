@@ -519,16 +519,6 @@ pub fn require_gameplay_marker_surface_anchor(
         .ok_or_else(|| anyhow::anyhow!("gameplay.glb missing required empty `{name}` (runtime)"))
 }
 
-/// Euler XYZ (radians) for a spawn empty in world space — used by pick-proxy meshes.
-pub fn gameplay_marker_rotation_euler_rad(
-    window_h: f32,
-    env_height_scale: f32,
-    cpu: &RoomGlbCpu,
-    name: &str,
-) -> anyhow::Result<[f32; 3]> {
-    Ok(gameplay_marker_rotation_scale(window_h, env_height_scale, cpu, name)?.0)
-}
-
 #[inline]
 fn scale_extents(extents: [f32; 3], scale: [f32; 3]) -> [f32; 3] {
     [
@@ -549,19 +539,6 @@ pub(crate) fn rotate_marker_pose_x_180(rotation_rad: [f32; 3]) -> [f32; 3] {
         rot_euler_xyz_rad(rotation_rad[0], rotation_rad[1], rotation_rad[2]),
         [180.0, 0.0, 0.0],
     )
-}
-
-/// World-space size of a marker's authoring mesh AABB (full extents, not half).
-pub fn gameplay_marker_mesh_extents_world(
-    window_h: f32,
-    env_height_scale: f32,
-    cpu: &RoomGlbCpu,
-    name: &str,
-) -> Option<[f32; 3]> {
-    let b = cpu.marker_mesh_bounds_doc_for(name)?;
-    let s = room_glb::room_env_world_scale(window_h, env_height_scale);
-    let d = b.max - b.min;
-    Some([(d.x * s).abs(), (d.y * s).abs(), (d.z * s).abs()])
 }
 
 /// Pick-ray proxy for the discard river — position/rotation from the `discard_river` empty.
@@ -763,16 +740,6 @@ pub fn gameplay_play_mirror_model_screen_rect(
         MIRROR_LOCAL_CENTER_Y,
         true,
     )
-}
-
-/// Project a unit-cube `Object3d` placement at its GLB marker pose.
-pub fn gameplay_object3d_unit_screen_rect(
-    win_w: f32,
-    win_h: f32,
-    cam: &CameraParams,
-    obj: &Object3d,
-) -> [f32; 4] {
-    project_object3d_aabb_rect(win_w, win_h, cam, obj, [0.5, 0.5, 0.5], 0.0, false)
 }
 
 /// Project the yaku journal book pick proxy (unit-cube local bounds, center lifted on Y).
