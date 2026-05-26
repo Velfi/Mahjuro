@@ -113,7 +113,7 @@ pub struct GameOverScene {
 /// Delay between the game-over screen appearing and its outcome stinger.
 const OUTCOME_SFX_DELAY_SECS: f32 = 1.0;
 
-/// Stacked depth-well sprites — rim plus one ring per progression step.
+/// Depth-well fill states — one composite sprite per step (0 = empty … 5 = full).
 const DEPTH_WELL_LAYER_ASSETS: [&str; 6] = [
     "textures/depth_well/depth_well_0.png",
     "textures/depth_well/depth_well_1.png",
@@ -160,17 +160,6 @@ fn depth_well_draw_rect(viewport: [f32; 4]) -> [f32; 4] {
         viewport[1] + (viewport[3] - opaque_h) * 0.5 - side * v0,
         side,
         side,
-    ]
-}
-
-/// Linear interpolation between two RGBA tints.
-#[inline]
-fn lerp_tint(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
-    [
-        a[0] + (b[0] - a[0]) * t,
-        a[1] + (b[1] - a[1]) * t,
-        a[2] + (b[2] - a[2]) * t,
-        a[3] + (b[3] - a[3]) * t,
     ]
 }
 
@@ -696,39 +685,21 @@ impl SceneBehavior for GameOverScene {
             ..Default::default()
         });
 
-        // ── Depth-well medallion (stacked UI sprites) ────────────────────────
+        // ── Depth-well medallion (one composite sprite per fill step) ────────
         {
             let elapsed = self.opened_at.elapsed().as_secs_f32();
             let displayed_fill = (elapsed * 4.0).min(into_level as f32);
-            let unlit_tint: [f32; 4] = [0.32, 0.24, 0.16, 1.0];
-            let lit_tint: [f32; 4] = [1.15, 0.98, 0.72, 1.0];
-            let mut well_images: Vec<ImageQuad> = Vec::with_capacity(DEPTH_WELL_LAYER_ASSETS.len());
-
-            well_images.push(ImageQuad {
+            let sprite_idx = (displayed_fill.floor() as usize).min(POINTS_PER_LEVEL as usize);
+            frame.image_quads([ImageQuad {
                 inst: GpuInstance {
                     rect: well_draw_rect,
                     color: [1.0, 1.0, 1.0, 1.0],
                     user: 0,
                 },
                 source: ImageQuadSource::Asset {
-                    path: DEPTH_WELL_LAYER_ASSETS[0],
+                    path: DEPTH_WELL_LAYER_ASSETS[sprite_idx],
                 },
-            });
-            for idx in 0..POINTS_PER_LEVEL {
-                let t = (displayed_fill - idx as f32).clamp(0.0, 1.0);
-                well_images.push(ImageQuad {
-                    inst: GpuInstance {
-                        rect: well_draw_rect,
-                        color: lerp_tint(unlit_tint, lit_tint, t),
-                        user: 0,
-                    },
-                    source: ImageQuadSource::Asset {
-                        path: DEPTH_WELL_LAYER_ASSETS[(idx + 1) as usize],
-                    },
-                });
-            }
-
-            frame.image_quads(well_images);
+            }]);
         }
 
         frame.buttons = buttons;
