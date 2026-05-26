@@ -11,10 +11,12 @@ use crate::{
             ScoreRoundBundle, ScoreTileBundle,
         },
         rules::{ChamberKind, RuleModifier},
-        scoring::{EffectiveRelics, ScoreBreakdown, score_sets_with_original},
+        scoring::{
+            EffectiveRelics, ScoreBreakdown, score_sets_with_original, tile_is_debuffed,
+        },
         structure::{
             StructureTriggerKind, StructureTriggerMeta, banked_meld_chips, can_trigger_structure,
-            is_winning_structure_shape,
+            is_winning_structure_shape, star_tile_yaku_pool,
         },
         tile::{Suit, Tile},
     },
@@ -103,10 +105,10 @@ impl RunState {
                 );
             }
         }
+        let has_honors = scoring_tiles
+            .iter()
+            .any(|t| matches!(t.suit, Suit::Wind | Suit::Dragon));
         if self.relics.has(RelicId::Humility) {
-            let has_honors = scoring_tiles
-                .iter()
-                .any(|t| matches!(t.suit, Suit::Wind | Suit::Dragon));
             let v = self.relic_counters.entry(RelicId::Humility).or_insert(0);
             if has_honors {
                 *v = 0;
@@ -205,6 +207,12 @@ impl RunState {
         let rw = Some(ChamberKind::round_wind_for_wing(self.wing));
         let bonus_rw = self.bonus_round_wind_for_yaku();
         let scoring_tile_debuffs = self.scoring_tile_debuffs(&scoring_tiles);
+        if scoring_tiles.iter().any(|t| {
+            matches!(t.suit, Suit::Wind | Suit::Dragon)
+                && !tile_is_debuffed(t, &scoring_tile_debuffs)
+        }) {
+            self.honors_scored_this_round = true;
+        }
         let ctx = ScoreContext {
             relic: ScoreRelicBundle {
                 roster: &self.relics,
@@ -359,21 +367,27 @@ impl RunState {
                 bus.push(GameEvent::TilesDestroyed);
             }
         }
-        if self.relics.has(RelicId::StarTile) && !breakdown.detected_yaku.is_empty() {
+        if self.relics.has(RelicId::StarTile) {
             use rand::RngExt;
             use rand::seq::IndexedRandom;
 
-            let mut rng = rand::rng();
-            let prob = if self.relics.has(RelicId::FortunesFavor) {
-                2
-            } else {
-                1
-            };
-            if rng.random_ratio(prob, 4)
-                && let Some(&y) = breakdown.detected_yaku.choose(&mut rng)
-            {
-                let _new_level = self.yaku_levels.level_up(y);
-                self.push_relic_activation(RelicId::StarTile);
+            let star_pool = star_tile_yaku_pool(
+                &breakdown.detected_yaku,
+                structure_meta,
+                &scoring_tiles,
+                &sets,
+            );
+            if !star_pool.is_empty() {
+                let mut rng = rand::rng();
+                let prob = if self.relics.has(RelicId::FortunesFavor) {
+                    2
+                } else {
+                    1
+                };
+                if rng.random_ratio(prob, 4) && let Some(&y) = star_pool.choose(&mut rng) {
+                    let _new_level = self.yaku_levels.level_up(y);
+                    self.push_relic_activation(RelicId::StarTile);
+                }
             }
         }
         if breakdown.flower_gold > 0 {
@@ -412,14 +426,6 @@ impl RunState {
         self.chronicle.note_turn();
         self.last_breakdown = Some(breakdown);
         self.scored_last_turn = breakdown_total > 0;
-
-        if !self.honors_scored_this_round
-            && scoring_tiles
-                .iter()
-                .any(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
-        {
-            self.honors_scored_this_round = true;
-        }
 
         if scored_full_hand {
             let treasures = EffectiveRelics::from_roster(&self.relics)
@@ -605,13 +611,7 @@ impl RunState {
                 0
             };
             let beggars_cup_bonus = if self.relics.has(RelicId::BeggarsCup) {
-                let bosses = self
-                    .relic_counters
-                    .get(&RelicId::BeggarsCup)
-                    .copied()
-                    .unwrap_or(0)
-                    .max(0) as u32;
-                let bonus = 1u32.saturating_add(bosses);
+                let bonus = self.wing.max(1);
                 self.push_relic_activation(RelicId::BeggarsCup);
                 bonus
             } else {

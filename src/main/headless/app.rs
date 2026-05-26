@@ -452,6 +452,7 @@ impl HeadlessApp {
             Scene::Guide(_) => Some("guide"),
             Scene::YakuJournal(_) => Some("yaku_journal"),
             Scene::TileAnchorLab(_) => Some("tile_anchor_lab"),
+            Scene::ButtonAabbLab(_) => Some("button_aabb_lab"),
             Scene::Tixels(_) => Some("tixels"),
             _ => None,
         };

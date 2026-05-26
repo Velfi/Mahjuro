@@ -8,7 +8,7 @@
 //! - `discard_river` / `play_mirror` — procedural discard bowl + play mirror at marker empties
 //! - `player_gold` — coin pile spawn
 //! - `player_discard_tally` / `player_play_tally` — tally-stick fan spawns
-//! - `player_cash_in` — cash-in button spawn
+//! - `btn_cash_in` / `label_cash_in` — authored cash-in control (env mesh + label)
 //! - `player_relic` … `player_relic.004` — relic medallion slots
 //! - `player_consumables` / `.001` — consumable dish slots
 //! - `player_yaku_journal` — journal book anchor (opens yaku journal on click)
@@ -27,15 +27,15 @@ use crate::render::draw_cmd::{CameraParams, Object3d, Object3dKind};
 use crate::render::flame_volume::{
     FlameEmitter, shop_gltf_flame_emitter_scale, shop_gltf_wick_from_light,
 };
-use crate::render::mirror_mesh::MIRROR_LOCAL_HALF;
-use crate::render::river_mesh::RIVER_LOCAL_HALF;
+use crate::render::mirror_mesh::{MIRROR_LOCAL_CENTER_Y, MIRROR_LOCAL_HALF};
+use crate::render::river_mesh::{RIVER_LOCAL_CENTER_Y, RIVER_LOCAL_HALF};
 use crate::render::room_env_gltf::{RoomEnvWalkHooks, RoomMeshPolicy};
 use crate::render::room_glb::{self, RoomEnvLightingTune, RoomGlbCpu, load_room_glb_from_bytes};
 use crate::render::table_transform::{
-    compose_rotation_euler, mat4_to_euler_xyz_rad, rot_euler_xyz_rad,
+    compose_rotation_euler, mat4_to_euler_xyz_rad, rot_euler_xyz_rad, translate_rot_scale,
 };
 use crate::render::wgpu_renderer::{PointLight, SpotLight};
-use crate::render::world_space::surface_anchor_from_world_xyz;
+use crate::render::world_space::{pixel_to_world, surface_anchor_from_world_xyz};
 
 pub const HAND_TILES_LEFT: &str = "hand_tiles_left";
 pub const HAND_TILES_RIGHT: &str = "hand_tiles_right";
@@ -49,7 +49,10 @@ pub const PLAYER_GOLD: &str = "player_gold";
 pub const PLAYER_DISCARD_TALLY: &str = "player_discard_tally";
 pub const PLAYER_PLAY_TALLY: &str = "player_play_tally";
 pub const PLAYER_YAKU_JOURNAL: &str = "player_yaku_journal";
-pub const PLAYER_CASH_IN: &str = "player_cash_in";
+/// Authored cash-in button mesh in `gameplay.glb` (draw + pick collision).
+pub const BTN_CASH_IN: &str = "btn_cash_in";
+/// Engraved label mesh parented to the cash-in control.
+pub const LABEL_CASH_IN: &str = "label_cash_in";
 pub const GAMEPLAY_CAMERA_NODE: &str = "default";
 const GAMEPLAY_ACTION_PICK_SHRINK_MUL: f32 = 0.125;
 const GAMEPLAY_DISCARD_RIVER_SIZE_MUL: f32 = 1.5;
@@ -85,7 +88,6 @@ pub const REQUIRED_GAMEPLAY_MARKER_NODES: &[&str] = &[
     PLAYER_DISCARD_TALLY,
     PLAYER_PLAY_TALLY,
     PLAYER_YAKU_JOURNAL,
-    PLAYER_CASH_IN,
 ];
 
 enum GameplayGlbCache {
@@ -164,6 +166,9 @@ pub fn validate_gameplay_glb(cpu: RoomGlbCpu) -> anyhow::Result<Box<RoomGlbCpu>>
             anyhow::bail!("gameplay.glb missing required empty `{name}`");
         }
     }
+    if !cpu.marker_mesh_bounds_doc.contains_key(BTN_CASH_IN) {
+        anyhow::bail!("gameplay.glb missing authored cash-in mesh `{BTN_CASH_IN}`");
+    }
     if gameplay_embedded_camera_doc(&cpu).is_none() {
         anyhow::bail!(
             "gameplay.glb missing glTF perspective camera node `{GAMEPLAY_CAMERA_NODE}` (assign a Camera object in Blender, export as glTF camera)"
@@ -222,7 +227,6 @@ fn is_gameplay_spawn_marker(name: &str) -> bool {
             | PLAYER_DISCARD_TALLY
             | PLAYER_PLAY_TALLY
             | PLAYER_YAKU_JOURNAL
-            | PLAYER_CASH_IN
     ) || PLAYER_RELIC_MARKERS.contains(&name)
         || PLAYER_CONSUMABLE_MARKERS.contains(&name)
         || TILE_PLINTH_MARKERS.contains(&name)
@@ -242,10 +246,12 @@ fn is_gameplay_unexportable_mesh(name: &str) -> bool {
         || name.starts_with("Book")
         || name.starts_with("Bowl_")
         || name == "gold coins"
-        || matches!(
-            name,
-            "btn_cash_in" | "Cash In" | "Text" | "player_relic.005"
-        )
+        || matches!(name, "Cash In" | "Text" | "player_relic.005")
+}
+
+#[inline]
+fn is_gameplay_env_button_node(name: &str) -> bool {
+    name == BTN_CASH_IN
 }
 
 #[derive(Copy, Clone)]
@@ -263,6 +269,8 @@ impl RoomEnvWalkHooks for GameplayRoomWalkHooks {
     fn mesh_policy(&self, name: &str) -> RoomMeshPolicy {
         if is_gameplay_spawn_marker(name) {
             RoomMeshPolicy::SkipDrawCollisionIfMarker
+        } else if is_gameplay_env_button_node(name) {
+            RoomMeshPolicy::EnvironmentDrawWithCollision
         } else {
             RoomMeshPolicy::EnvironmentDraw
         }
@@ -522,7 +530,7 @@ fn scale_extents_uniform(extents: [f32; 3], mul: f32) -> [f32; 3] {
 }
 
 #[inline]
-fn rotate_marker_pose_x_180(rotation_rad: [f32; 3]) -> [f32; 3] {
+pub(crate) fn rotate_marker_pose_x_180(rotation_rad: [f32; 3]) -> [f32; 3] {
     compose_rotation_euler(
         rot_euler_xyz_rad(rotation_rad[0], rotation_rad[1], rotation_rad[2]),
         [180.0, 0.0, 0.0],
@@ -653,6 +661,104 @@ pub fn gameplay_pick_play_mirror(
         hover_target: 0.0,
         anim_id: 2,
     })
+}
+
+fn project_object3d_aabb_rect(
+    win_w: f32,
+    win_h: f32,
+    cam: &CameraParams,
+    obj: &Object3d,
+    half: [f32; 3],
+    center_y: f32,
+    lift_half_y: bool,
+) -> [f32; 4] {
+    let center_lift = if lift_half_y {
+        obj.pos[2] + obj.extents[1] * 0.5
+    } else {
+        obj.pos[2]
+    };
+    let center = pixel_to_world(win_w, win_h, obj.pos[0], obj.pos[1], center_lift);
+    let model = translate_rot_scale(center, obj.rotation_matrix(), Vec3::from(obj.extents));
+    project_model_aabb_rect(win_w, win_h, cam, model, half, center_y)
+}
+
+fn project_model_aabb_rect(
+    win_w: f32,
+    win_h: f32,
+    cam: &CameraParams,
+    model: Mat4,
+    half: [f32; 3],
+    center_y: f32,
+) -> [f32; 4] {
+    let corners = [
+        Vec3::new(-half[0], center_y - half[1], -half[2]),
+        Vec3::new(half[0], center_y - half[1], -half[2]),
+        Vec3::new(-half[0], center_y + half[1], -half[2]),
+        Vec3::new(half[0], center_y + half[1], -half[2]),
+        Vec3::new(-half[0], center_y - half[1], half[2]),
+        Vec3::new(half[0], center_y - half[1], half[2]),
+        Vec3::new(-half[0], center_y + half[1], half[2]),
+        Vec3::new(half[0], center_y + half[1], half[2]),
+    ];
+    let mut mn_x = f32::INFINITY;
+    let mut mn_y = f32::INFINITY;
+    let mut mx_x = f32::NEG_INFINITY;
+    let mut mx_y = f32::NEG_INFINITY;
+    for c in corners {
+        let world = model.transform_point3(c);
+        let (sx, sy) = cam.project_world_to_screen(win_w, win_h, world);
+        mn_x = mn_x.min(sx);
+        mn_y = mn_y.min(sy);
+        mx_x = mx_x.max(sx);
+        mx_y = mx_y.max(sy);
+    }
+    [mn_x, mn_y, mx_x - mn_x, mx_y - mn_y]
+}
+
+/// Project the spawned discard river model at its GLB marker pose.
+pub fn gameplay_discard_river_model_screen_rect(
+    win_w: f32,
+    win_h: f32,
+    cam: &CameraParams,
+    obj: &Object3d,
+) -> [f32; 4] {
+    project_object3d_aabb_rect(
+        win_w,
+        win_h,
+        cam,
+        obj,
+        RIVER_LOCAL_HALF,
+        RIVER_LOCAL_CENTER_Y,
+        true,
+    )
+}
+
+/// Project the spawned play mirror model at its GLB marker pose.
+pub fn gameplay_play_mirror_model_screen_rect(
+    win_w: f32,
+    win_h: f32,
+    cam: &CameraParams,
+    obj: &Object3d,
+) -> [f32; 4] {
+    project_object3d_aabb_rect(
+        win_w,
+        win_h,
+        cam,
+        obj,
+        MIRROR_LOCAL_HALF,
+        MIRROR_LOCAL_CENTER_Y,
+        true,
+    )
+}
+
+/// Project a unit-cube `Object3d` placement at its GLB marker pose.
+pub fn gameplay_object3d_unit_screen_rect(
+    win_w: f32,
+    win_h: f32,
+    cam: &CameraParams,
+    obj: &Object3d,
+) -> [f32; 4] {
+    project_object3d_aabb_rect(win_w, win_h, cam, obj, [0.5, 0.5, 0.5], 0.0, false)
 }
 
 /// Project a named marker's mesh AABB to screen pixels when the GLB node carries authoring
@@ -893,7 +999,6 @@ mod tests {
             "hand_tile_0",
             "Relic_0_31",
             "Bowl_0_57",
-            "btn_cash_in",
             "gold coins",
         ] {
             assert!(
@@ -902,6 +1007,7 @@ mod tests {
             );
         }
         assert!(!is_gameplay_unexportable_mesh("table"));
+        assert!(!is_gameplay_unexportable_mesh("btn_cash_in"));
         assert!(!is_gameplay_unexportable_mesh("CandleWax_6_29"));
     }
 

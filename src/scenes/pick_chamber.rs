@@ -251,6 +251,9 @@ impl SceneBehavior for PickChamberScene {
             return t;
         }
 
+        if ctx.run.upcoming_chamber == ChamberKind::Ordeal {
+            ctx.run.ensure_ordeal_revealed();
+        }
         let pick = GameEngine::read_pick_chamber(ctx.run);
         let upcoming = pick.upcoming_chamber;
         let upcoming_ordeal = upcoming == ChamberKind::Ordeal;

@@ -2101,6 +2101,7 @@ fn description_for(
             run.gold,
             None,
             Some(run.ghost_hand_preview_chips()),
+            None,
         ),
         ArtifactKind::Talisman(kind) => kind.description().to_string(),
         ArtifactKind::Zodiac(kind) => format!(

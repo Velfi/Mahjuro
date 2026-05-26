@@ -216,6 +216,8 @@ pub struct WgpuRenderer {
     main_menu_env_primitives: Vec<TilePrimitiveGpu>,
     main_menu_environment: Option<ShopEnvironmentGpu>,
     gameplay_env_primitives: Vec<TilePrimitiveGpu>,
+    /// GPU primitive indices for `btn_cash_in` / `label_cash_in` (multi-material meshes).
+    gameplay_cash_in_prim_indices: Vec<usize>,
     gameplay_environment: Option<ShopEnvironmentGpu>,
     /// GPU primitive index of `sign_description_left` in `archive_env_primitives` (for culling).
     archive_sign_left_prim_idx: Option<usize>,
@@ -241,6 +243,8 @@ pub struct WgpuRenderer {
     shop_gltf_emissive_scale: f32,
     /// CPU triangle soups from invisible marker meshes in [`shop.glb`](../../assets/3d/shop.glb).
     pub(super) shop_env_collision_meshes: Vec<crate::render::room_glb::RoomCollisionMesh>,
+    /// CPU triangle soups from authored gameplay env buttons (`btn_cash_in`, …).
+    pub(super) gameplay_env_collision_meshes: Vec<crate::render::room_glb::RoomCollisionMesh>,
     /// Identity factor used by every primitive (kept for the cam uniform).
     tile_base_color_factor: [f32; 4],
     /// Active tileset directory name (e.g. `"original"`). When `Some`, tile
@@ -315,6 +319,8 @@ pub struct WgpuRenderer {
     /// Camera state captured at the end of the previous frame, used by
     /// `pick_hand_tile` to unproject the cursor into a world-space ray.
     pub(super) last_pick_camera: Option<PickCamera>,
+    /// Previous frame: authored cash-in control drawn and pickable.
+    pub(super) last_gameplay_cash_in_button_visible: bool,
     /// Timestamp of the previous frame — used to compute delta time for lerping.
     last_frame: Instant,
     /// Delta time of the *current* frame in seconds (set early in

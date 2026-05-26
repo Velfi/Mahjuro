@@ -7,13 +7,16 @@ use crate::{
         rules::{ChamberKind, RuleModifier},
         tile::Suit,
     },
-    game::{engine_state::GameplayCoreState, event_bus::EventBus, run::FINAL_WING},
+    game::{engine_state::GameplayCoreState, event_bus::EventBus},
 };
 
 impl RunState {
     /// Apply a blind choice: sets target score, dispatches boss effect on
     /// boss blinds, and applies any per-round resource resets.
     pub fn apply_chamber(&mut self, blind: ChamberKind, bus: Option<&mut EventBus>) {
+        if blind == ChamberKind::Ordeal {
+            self.ensure_ordeal_revealed();
+        }
         self.chamber = blind;
         self.round_score = 0;
         self.memorial_round.clear();
@@ -179,9 +182,6 @@ impl RunState {
             self.score_after_wing
                 .push((self.wing, self.total_score_earned));
             self.wing += 1;
-            if self.relics.has(RelicId::BeggarsCup) {
-                *self.relic_counters.entry(RelicId::BeggarsCup).or_insert(0) += 1;
-            }
         }
         // Heirloom: +1 mult per blind *played* (skips don't count — this
         // path only runs when a blind was cleared).
@@ -208,39 +208,26 @@ impl RunState {
         self.played_yaku_this_round.clear();
         self.honors_scored_this_round = false;
         self.upcoming_chamber = self.upcoming_chamber.next();
-        self.chamber = self.upcoming_chamber;
+        // Leave `chamber` on the blind we just cleared until `apply_chamber`
+        // starts the next one — otherwise gameplay round-end still shows the
+        // next ordeal's icon and target before the player enters that blind.
         GameplayCoreState::with_run_mut(self, |core| {
             core.clear_hand_structure_bank();
         });
         self.tag_bonus_hand_size = 0;
 
-        // Roll the next ante's boss when we cross an ante boundary. Final
-        // ante draws from the dedicated final pool; everyone else draws
-        // without replacement from the regular pool.
         if was_boss {
-            let mut rng = rand::rng();
-            let ordeal_floor = self.mode.stake.ordeal_min_wing_floor();
-            self.ordeal.upcoming = if self.wing == FINAL_WING {
-                Some(ordeal::pick_final(&mut rng))
-            } else if self.wing > FINAL_WING {
-                None
-            } else {
-                ordeal::pick_for_wing_with_floor(
-                    &mut self.ordeal.pool_remaining,
-                    self.wing,
-                    ordeal_floor,
-                    &mut rng,
-                )
-            };
-            // Bake the resolved effect now so reactive bosses see the
-            // post-shop run state of the *outgoing* ante (their reveal
-            // moment) and pick_chamber shows the chosen variant immediately.
-            self.resolve_upcoming_ordeal();
-            // Roll fresh skip-reward tags for the new ante. Shop-oriented
+            // Roll fresh skip-reward tags for the new wing. Shop-oriented
             // rewards must survive into the post-boss shop, but any
-            // one-blind combat bonuses should expire at the ante boundary.
+            // one-blind combat bonuses should expire at the wing boundary.
             self.roll_ante_tags();
             self.clear_next_chamber_tag_modifiers();
+            // Boss identity and reactive `on_reveal` hooks run in
+            // `ensure_ordeal_revealed` when the player is about to enter the
+            // Ordeal blind (pick_chamber or `apply_chamber`), not here.
+            self.ordeal.upcoming = None;
+            self.ordeal.effect = None;
+            self.ordeal.tax_collector_cost = 0;
         }
     }
 

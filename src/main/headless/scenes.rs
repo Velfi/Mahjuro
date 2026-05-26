@@ -322,6 +322,10 @@ pub(crate) fn resolve_screenshot_scene(
             Scene::TileAnchorLab(crate::scenes::TileAnchorLabScene::new(false)),
             false,
         ),
+        "button_aabb_lab" => (
+            Scene::ButtonAabbLab(crate::scenes::ButtonAabbLabScene::new(false)),
+            false,
+        ),
         "tixels" => (Scene::Tixels(crate::scenes::TixelsScene::new(false)), false),
         "relic_unlock" => {
             force_relic_modal = true;

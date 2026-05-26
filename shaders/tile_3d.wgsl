@@ -9,7 +9,8 @@ struct CameraUniform {
     tile_seed: f32,
     // Showcase decal atlas: xy = origin in normalized atlas coords, zw = scale per axis.
     decal_atlas_uv: vec4<f32>,
-    /// x = ACES HDR path on; y = linear exposure; z = hemispheric ambient (albedo * 0.08); w = unused.
+    /// x = ACES HDR path on; y = linear exposure; z = hemispheric ambient (albedo * 0.08);
+    /// w = inverse document scale for embedded glTF punctual attenuation.
     hdr_tonemap: vec4<f32>,
 };
 
@@ -54,7 +55,7 @@ struct PointLight {
 struct PointLights {
     // count.x = number of active lights; rest is std140 padding.
     count: vec4<u32>,
-    // extras.x = display gamma; extras.w = inverse-square scale for `lit_mesh` when embedded GLB.
+    // extras.x = display gamma; extras.w = inverse-square scale for procedural meshes when embedded GLB.
     extras: vec4<f32>,
     lights: array<PointLight, 16>,
 };
@@ -526,12 +527,12 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     for (var i: u32 = 0u; i < light_count; i = i + 1u) {
         let lp = lights.lights[i].pos.xyz;
         let radius = lights.lights[i].pos.w;
-        let lc = lights.lights[i].color.rgb * punc_rgb_mul;
-        let intensity = lights.lights[i].color.a;
         let kind = lights.lights[i].params.x;
+        let lc = lights.lights[i].color.rgb * punc_rgb_mul;
+        let intensity = lights.lights[i].color.a * select(1.0, lights.extras.w, kind > 0.5);
         let to_light = lp - in.world_pos;
         let dist = length(to_light);
-        let inv_doc = cam.decal_atlas_uv.y;
+        let inv_doc = cam.hdr_tonemap.w;
         let atten = select(
             scene_smooth_point_atten(dist, radius),
             punctual_attenuation_with_inv_doc_scale(dist, radius, inv_doc),
@@ -651,8 +652,12 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     // map so casters darken tiles on the table like the lit-mesh path.
     // `use_textured_env` = imported shop room (`shop.glb`): same table shadow map
     // mismatch as `room_glb.wgsl` — skip gameplay shadow for that path only.
+    // Embedded glTF punctual rooms already carry their authored room/baked shadows; procedural
+    // tiles use the candle/spot lights directly and skip the directional receiver map so they
+    // do not self-shadow into hard black under the room frustum.
     let mesh_shadow_vis = sample_shadow_visibility(in.world_pos);
-    let mesh_shadow = select(mesh_shadow_vis, 1.0, use_textured_env);
+    let embedded_gltf_punctual = cam.hdr_tonemap.w > 1e-8;
+    let mesh_shadow = select(mesh_shadow_vis, 1.0, use_textured_env || embedded_gltf_punctual);
     var lit_rgb = (rgb * point_contrib + sheen_acc) * mesh_shadow;
 
     // Tortoise shell: warm amber Fresnel rim at grazing angles.

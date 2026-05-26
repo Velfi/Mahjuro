@@ -3734,18 +3734,28 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
 
     crate::render::main_menu_glb::release_main_menu_environment_cpu_sources_after_gpu_upload();
 
-    let (gameplay_env_primitives, gameplay_environment) = {
+    let (gameplay_env_primitives, gameplay_environment, gameplay_cash_in_prim_indices) = {
         let _gameplay = crate::startup_profile::scope("wgpu.room.gameplay");
         crate::render::gameplay_glb::with_gameplay_glb_cpu(|cpu_opt| {
             let mut prims = Vec::new();
             let mut gpu_wrap = None;
+            let mut gameplay_cash_in_prim_indices = Vec::new();
             let Some(cpu) = cpu_opt else {
-                return (prims, gpu_wrap);
+                return (prims, gpu_wrap, gameplay_cash_in_prim_indices);
             };
             if !cpu.environment_primitives.is_empty() {
                 let mut room_tex_cache = RoomEnvTextureCache::new();
                 let (_white_tex, white_albedo_view) = white_albedo(&device, &queue);
                 for (i, env_prim) in cpu.environment_primitives.iter().enumerate() {
+                    if let Some(ref name) = env_prim.gltf_node_name {
+                        if matches!(
+                            name.as_str(),
+                            crate::render::gameplay_glb::BTN_CASH_IN
+                                | crate::render::gameplay_glb::LABEL_CASH_IN
+                        ) {
+                            gameplay_cash_in_prim_indices.push(i);
+                        }
+                    }
                     let prim = &env_prim.mesh;
                     let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some(&format!("gameplay-env-verts-{i}")),
@@ -3950,12 +3960,17 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     shop_candle_sss_texture: gameplay_candle_sss_tex.map(|(t, _)| t),
                 });
                 log::info!("gameplay.glb GPU: {} primitive draw(s)", prims.len());
+                return (prims, gpu_wrap, gameplay_cash_in_prim_indices);
             }
-            (prims, gpu_wrap)
+            (prims, gpu_wrap, gameplay_cash_in_prim_indices)
         })
     };
 
     crate::render::gameplay_glb::release_gameplay_environment_cpu_sources_after_gpu_upload();
+
+    let gameplay_env_collision_meshes = crate::render::gameplay_glb::with_gameplay_glb_cpu(|opt| {
+        opt.map(|c| c.collision_meshes.clone()).unwrap_or_default()
+    });
 
     let shop_env_collision_meshes = crate::render::room_glb::with_shop_glb_cpu(|opt| {
         opt.map(|c| c.collision_meshes.clone()).unwrap_or_default()
@@ -4520,6 +4535,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         main_menu_env_primitives,
         main_menu_environment,
         gameplay_env_primitives,
+        gameplay_cash_in_prim_indices,
         gameplay_environment,
         archive_sign_left_prim_idx,
         archive_sign_right_prim_idx,
@@ -4534,6 +4550,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             crate::render::room_glb::SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE,
         shop_gltf_emissive_scale: crate::render::room_glb::SHOP_GLTF_EMISSIVE_SCALE,
         shop_env_collision_meshes,
+        gameplay_env_collision_meshes,
         tile_base_color_factor,
         // Populated on first render() from RenderSettings.tileset_name.
         tile_set: None,
@@ -4569,6 +4586,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         proj: ProjectionCache::default(),
         last_pick_models: Vec::new(),
         last_pick_camera: None,
+        last_gameplay_cash_in_button_visible: false,
         last_relic_models: Vec::new(),
         relic_slot_texture: vec![None; MAX_RELIC_SLOTS],
         ordeal_icon_instances,

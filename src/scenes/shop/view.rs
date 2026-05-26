@@ -38,9 +38,8 @@ use crate::render::world_space::{
     surface_anchor_from_world_xyz,
 };
 use crate::scenes::object3d_inspect::{
-    InspectRig, ItemInspectOrbitState, inspect_orbit_camera, inspect_point_lights,
-    inspect_subject_spotlight, lerp_camera, prepend_inspect_orbit_subject_rotation,
-    tick_inspect_dolly,
+    InspectRig, ItemInspectOrbitState, inspect_orbit_camera, lerp_camera,
+    prepend_inspect_orbit_subject_rotation, tick_inspect_dolly,
 };
 use crate::scenes::options::OptionsScene;
 use crate::scenes::{ButtonDef, DrawCtx, SceneBehavior, SceneTransition, UpdateCtx};
@@ -63,9 +62,6 @@ use super::shared::shop_focus_inspectable;
 use super::{
     ConsumableShopItem, ShopFocus, ShopItem, ShopMode, ShopScene, TilePackShopItem, push_free_badge,
 };
-
-/// Extra gain on the dynamic inspect rig (additive over storeroom GLB lights).
-const SHOP_INSPECT_LIGHT_MUL: f32 = 10.0;
 
 /// Matches [`super::RELIC_GLOW_LIFETIME`] — keep glow envelope in sync.
 const RELIC_GLOW_SECS: f32 = 0.9;
@@ -596,7 +592,7 @@ pub(crate) fn render_shop_frame(
     // `pixel_to_world` drifts under perspective).
     let base = shop_camera_base(w, h, env_h);
     let inspect_rig = InspectRig::shop(h, env_h);
-    let (inspect_anchor, _inspect_cam_now, cam, eased) = {
+    let (inspect_anchor, _inspect_cam_now, cam) = {
         let _g = crate::render::cpu_profiler::scope("draw_frame.shop_camera_inspect");
         let (inspect_anchor, inspect_cam_now) = if let Some(ins) = inspect {
             let ic = inspect_orbit_camera(ins, &inspect_rig);
@@ -629,7 +625,7 @@ pub(crate) fn render_shop_frame(
         {
             frame.shop_inspect_shadow_target = Some(tw);
         }
-        (inspect_anchor, inspect_cam_now, final_cam, eased)
+        (inspect_anchor, inspect_cam_now, final_cam)
     };
 
     let ppmm = ctx.layout.mm(1.0);
@@ -798,23 +794,6 @@ pub(crate) fn render_shop_frame(
         frame.scene_lighting.punctual = merged_punctual;
         frame.scene_lighting.spot_lights =
             shop_embedded_spot_lights_runtime(w, h, env_h, &ctx.shop_env_lighting);
-        if let Some(ins) = inspect {
-            let tw = inspect_anchor.map(|(_, tw)| tw).unwrap_or(ins.target_world);
-            let k = eased.clamp(0.0, 1.0) * SHOP_INSPECT_LIGHT_MUL;
-            if k > 1e-4 {
-                let mut rig_lights = inspect_point_lights(w, h, &cam, tw, inspect_rig.light_preset);
-                for pl in &mut rig_lights {
-                    pl.intensity *= k;
-                }
-                frame
-                    .scene_lighting
-                    .punctual
-                    .extend(rig_lights.into_iter().map(ScenePunctualLight::Smooth));
-                let mut spot = inspect_subject_spotlight(w, h, &cam, tw);
-                spot.intensity *= k;
-                frame.scene_lighting.spot_lights.push(spot);
-            }
-        }
         if use_glb_lights {
             let candle_flames = shop_gltf_candle_flame_emitters(
                 w,
@@ -1241,6 +1220,7 @@ fn hover_tooltip_content(
                 shop.gold,
                 Some((&shop.relic_state, oi)),
                 None,
+                Some(shop.wing),
             );
             let sell = relic_sell_price_live(rid, &shop.relic_counters);
             Some((name, desc, format!("Sell {}g", sell), color::CHAMPAGNE))

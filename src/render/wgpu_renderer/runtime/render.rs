@@ -986,6 +986,8 @@ impl WgpuRenderer {
                 changed: &mut shadow_uniforms_changed,
             });
 
+        self.last_gameplay_cash_in_button_visible = frame.gameplay_cash_in_button_visible;
+
         if let Some(ref picks) = frame.gameplay_action_picks {
             self.seed_gameplay_action_pick_proxies(&camera, picks);
         }

@@ -43,6 +43,7 @@ pub struct ItemInspectOrbitState {
 }
 
 /// Key / fill / rim intensity and radius scale (relative to `window_h.max(120)`).
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub struct InspectLightPreset {
     pub key_i: f32,
@@ -80,6 +81,7 @@ pub struct InspectRig {
     pub base_dir: Vec3,
     pub base_distance: f32,
     pub fovy_deg: f32,
+    #[allow(dead_code)]
     pub light_preset: InspectLightPreset,
 }
 
@@ -89,7 +91,7 @@ impl InspectRig {
         let h = window_h.max(1.0);
         let s = crate::render::room_glb::room_env_world_scale(h, room_gltf_height_scale);
         Self {
-            base_dir: Vec3::new(0.0_f32, -0.74, 0.59).normalize(),
+            base_dir: Vec3::new(0.0_f32, -0.944, 0.330).normalize(),
             base_distance: 0.52 * s,
             fovy_deg: 32.0,
             light_preset: InspectLightPreset::SHOP,
@@ -182,11 +184,13 @@ pub fn prepend_inspect_orbit_subject_rotation(
 }
 
 #[inline]
+#[allow(dead_code)]
 fn world_to_point_light_pos(window_w: f32, window_h: f32, world: Vec3) -> [f32; 3] {
     [world.x + window_w * 0.5, window_h * 0.5 - world.y, world.z]
 }
 
 /// Three-point rig in inspect space — not the shop lamp, GLB punctual, or [`InspectRig::collection`] defaults.
+#[allow(dead_code)]
 pub fn inspect_point_lights(
     window_w: f32,
     window_h: f32,
@@ -251,6 +255,7 @@ pub fn inspect_point_lights(
 }
 
 /// Tight cone aimed at the inspect pivot — pools extra energy on the hero mesh (`lit_mesh` spot loop).
+#[allow(dead_code)]
 pub fn inspect_subject_spotlight(
     window_w: f32,
     window_h: f32,

@@ -88,6 +88,27 @@ pub fn can_trigger_structure(
     true
 }
 
+/// Yaku eligible for Star Tile's post-cash-in level roll.
+///
+/// Chicken Hand is injected when a structure cash-in has no unlocked yaku; treat
+/// that cash-in as having scored yaku even if the breakdown vec were empty.
+pub fn star_tile_yaku_pool(
+    detected_yaku: &[YakuKind],
+    structure_meta: Option<StructureTriggerMeta>,
+    tiles: &[Tile],
+    sets: &[DetectedMeld],
+) -> Vec<YakuKind> {
+    if !detected_yaku.is_empty() {
+        return detected_yaku.to_vec();
+    }
+    if structure_meta.is_some_and(|m| m.inject_chicken_if_no_yaku)
+        && is_complete_winning_hand(tiles, sets)
+    {
+        return vec![YakuKind::ChickenHand];
+    }
+    Vec::new()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,5 +188,33 @@ mod tests {
             &[],
             &[RuleModifier::RequireHonor],
         ));
+    }
+
+    #[test]
+    fn star_tile_yaku_pool_counts_injected_chicken() {
+        use crate::core::hand::validate_selection;
+        let tiles = vec![
+            tile(Suit::Manzu, 1, 0),
+            tile(Suit::Manzu, 2, 1),
+            tile(Suit::Manzu, 3, 2),
+            tile(Suit::Souzu, 4, 3),
+            tile(Suit::Souzu, 5, 4),
+            tile(Suit::Souzu, 6, 5),
+            tile(Suit::Pinzu, 7, 6),
+            tile(Suit::Pinzu, 8, 7),
+            tile(Suit::Pinzu, 9, 8),
+            tile(Suit::Pinzu, 3, 9),
+            tile(Suit::Pinzu, 3, 10),
+            tile(Suit::Pinzu, 3, 11),
+            tile(Suit::Wind, 2, 12),
+            tile(Suit::Wind, 2, 13),
+        ];
+        let sets = validate_selection(&tiles).expect("chicken decomposition");
+        let meta = StructureTriggerMeta {
+            meld_count: sets.len() as u32,
+            inject_chicken_if_no_yaku: true,
+        };
+        let pool = star_tile_yaku_pool(&[], Some(meta), &tiles, &sets);
+        assert_eq!(pool, vec![YakuKind::ChickenHand]);
     }
 }

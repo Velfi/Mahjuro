@@ -600,9 +600,10 @@ pub struct RunState {
     /// Round-scoped tile debuffs applied by the active boss.
     #[serde(default)]
     pub tile_debuffs: Vec<TileDebuff>,
-    /// Set true the first time this round a scored hand contains a Wind
-    /// or Dragon tile. Powers Green Luck's per-round payout — the relic
-    /// awards its bonus at round clear iff this stays false. Reset by
+    /// Set true the first time this round a structure cash-in scores a
+    /// non-debuffed Wind or Dragon tile. Powers Green Luck's chamber payout —
+    /// the relic awards its bonus at chamber clear iff this stays false.
+    /// Committing honors to structure alone does not set this. Reset by
     /// `advance_round` and `skip_to_next_chamber`.
     #[serde(skip)]
     pub honors_scored_this_round: bool,
@@ -1243,12 +1244,38 @@ impl RunState {
         progress.memorials_discovered.insert(kind);
     }
 
+    /// Roll and lock in this wing's boss when the player is about to face the
+    /// Ordeal blind. Wing 1 is pre-rolled in [`Self::new`]; later wings defer
+    /// until here so round-end gameplay does not show the next boss early.
+    /// Idempotent once `ordeal.upcoming` is set.
+    pub fn ensure_ordeal_revealed(&mut self) {
+        if self.ordeal.upcoming.is_some() {
+            self.resolve_upcoming_ordeal();
+            return;
+        }
+        let mut rng = rand::rng();
+        let ordeal_floor = self.mode.stake.ordeal_min_wing_floor();
+        self.ordeal.upcoming = if self.wing == FINAL_WING {
+            Some(ordeal::pick_final(&mut rng))
+        } else if self.wing > FINAL_WING {
+            None
+        } else {
+            ordeal::pick_for_wing_with_floor(
+                &mut self.ordeal.pool_remaining,
+                self.wing,
+                ordeal_floor,
+                &mut rng,
+            )
+        };
+        self.resolve_upcoming_ordeal();
+    }
+
     /// Build the `ResolvedOrdealEffect` for the current `upcoming_ordeal`. For
     /// static bosses this is a thin wrap of `OrdealDef::effect`. For reactive
     /// bosses (those with an `on_reveal` hook), the hook runs against the
     /// current `RunState` and produces a tailored effect that's locked in
-    /// for the rest of the ante. Idempotent — safe to call from
-    /// `RunState::new`, `advance_round`, and the save-load rehydrate path.
+    /// for the rest of the wing. Idempotent — safe to call from
+    /// `ensure_ordeal_revealed` and the save-load rehydrate path.
     pub fn resolve_upcoming_ordeal(&mut self) {
         use crate::core::ordeal::ResolvedOrdealEffect;
         // Reset any reactive scratch — the new boss may not need it.

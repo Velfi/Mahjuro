@@ -649,9 +649,11 @@ pub fn begin_discard_batch(
     let hand_scale_mul = anchors.hand_marker_poses[0].uniform_author_scale(h, env_height_scale);
     let reference_size_px = selected_indices
         .iter()
-        .map(|&slot| hand_slot_center(&hand_world_slots, slot).1)
-        .fold(0.0_f32, f32::max)
-        * hand_scale_mul;
+        .map(|&slot| {
+            let (_, sw, _) = hand_slot_center(&hand_world_slots, slot);
+            super::hand_layout::hand_tile_size_from_slot_width(sw, hand_len, hand_scale_mul)
+        })
+        .fold(0.0_f32, f32::max);
     let bowl_model = bowl_model_matrix(layout.window_w, layout.window_h, &bowl);
     let flow_ts = flow_params_for_tiles(tiles.len(), bowl_model, reference_size_px);
     let river_slots = river_slots_for_discard(
@@ -668,9 +670,9 @@ pub fn begin_discard_batch(
         random_start_delays(tiles.len(), scene.cached_cascade_tuning.discard_stagger_ms);
     for (seq, &tile) in tiles.iter().enumerate() {
         let slot = selected_indices[seq];
-        let (start_center, start_size_px, hand_rotation) =
-            hand_slot_center(&hand_world_slots, slot);
-        let start_size_px = start_size_px * hand_scale_mul;
+        let (start_center, sw, hand_rotation) = hand_slot_center(&hand_world_slots, slot);
+        let start_size_px =
+            super::hand_layout::hand_tile_size_from_slot_width(sw, hand_len, hand_scale_mul);
         let river = river_slots[seq];
         anim_tiles.push(DiscardAnimTile {
             tile,

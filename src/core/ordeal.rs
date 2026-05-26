@@ -92,7 +92,8 @@ pub struct OrdealDef {
     pub min_wing: u32,
     pub effect: OrdealEffect,
     /// Reactive bosses use this hook to compute their final effect at the
-    /// moment the ante reveals (i.e. inside `advance_round`/`RunState::new`).
+    /// moment the Ordeal blind is revealed (`ensure_ordeal_revealed` / wing 1
+    /// `RunState::new`), not when the previous wing's boss is defeated.
     /// The returned `ResolvedOrdealEffect` is locked in for the whole ante and
     /// shown verbatim in pick_chamber — the player sees the *resolved* rule
     /// before they ever set foot in the boss blind. Static bosses leave this
@@ -294,7 +295,7 @@ fn tribute_play(run: &mut RunState) {
 
 // ── Reactive boss hooks ───────────────────────────────────────────────────
 //
-// `on_reveal` runs at the ante boundary (inside `RunState::resolve_upcoming_ordeal`)
+// `on_reveal` runs when the Ordeal blind is revealed (`RunState::ensure_ordeal_revealed`)
 // — well before `apply_chamber`. It receives an immutable view of the run and
 // returns a `ResolvedOrdealEffect` whose hooks/rule_pushes/description are
 // frozen for the rest of the ante. The player sees the resolved description

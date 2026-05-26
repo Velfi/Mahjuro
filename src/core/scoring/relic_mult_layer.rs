@@ -204,7 +204,7 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
     if has(RelicId::MultiplierMaster) {
         let n = ctx.relic.roster.len() as f64;
         if n > 0.0 {
-            push_mult(steps, *chips, mult, "Multiplier Master", n);
+            push_mult(steps, *chips, mult, "Multiplier Master", n * 2.0);
         }
     }
 
@@ -253,11 +253,14 @@ pub(crate) fn apply_post_yaku_relic_modifiers(
             *chips,
             mult,
             "Momentum",
-            1.0 * ctx.round.plays_used as f64,
+            2.0 * ctx.round.plays_used as f64,
         );
     }
 
-    if has(RelicId::Minimalist) && sets.len() == 1 && sets[0].kind == MeldKind::Pair {
+    if has(RelicId::Minimalist)
+        && sets.len() == 1
+        && sets[0].kind != MeldKind::Single
+    {
         push_mult(steps, *chips, mult, "Minimalist", 6.0);
     }
 

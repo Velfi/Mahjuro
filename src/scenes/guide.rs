@@ -3300,8 +3300,9 @@ mod tests {
     /// teaching examples — if one drifts out of sync with the scorer we'd
     /// be teaching a lie, so the test locks the data to the implementation.
     ///
-    /// Chicken Hand is skipped: by definition its hand triggers *no* yaku,
-    /// so the detector returns an empty list rather than `ChickenHand`.
+    /// Chicken Hand is skipped: the canonical example is a partial hand for
+    /// display; full-run chicken is injected at structure cash-in when no
+    /// unlocked yaku applies.
     #[test]
     fn every_yaku_page_hand_scores_as_its_yaku() {
         for &yk in YakuKind::all() {

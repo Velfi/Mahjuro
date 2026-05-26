@@ -452,41 +452,22 @@ pub(crate) fn apply_pre_yaku_scoring(
     }
 
     if eff.has(ctx.relic.roster, RelicId::DragonEcho) {
-        let set_bases: Vec<i32> = sets
-            .iter()
-            .map(|s| {
-                s.tile_ids
-                    .iter()
-                    .filter_map(|&tid| tile_by_id(tiles, tid))
-                    .map(|t| effective_point_value(t, ctx))
-                    .sum()
-            })
-            .collect();
-        let is_dragon_trip: Vec<bool> = sets
-            .iter()
-            .map(|s| {
-                if !matches!(s.kind, MeldKind::Triplet | MeldKind::Kong) {
-                    return false;
+        for s in sets {
+            let mut base = 0i32;
+            let mut is_dragon_meld = !s.tile_ids.is_empty();
+            for &tid in &s.tile_ids {
+                let Some(t) = tile_by_id(tiles, tid) else {
+                    is_dragon_meld = false;
+                    break;
+                };
+                if t.suit != Suit::Dragon {
+                    is_dragon_meld = false;
+                    break;
                 }
-                s.tile_ids
-                    .first()
-                    .and_then(|id| tile_by_id(tiles, *id))
-                    .is_some_and(|t| t.suit == Suit::Dragon)
-            })
-            .collect();
-
-        for (i, &is_echoer) in is_dragon_trip.iter().enumerate() {
-            if !is_echoer {
-                continue;
+                base += effective_point_value(t, ctx);
             }
-            let echo: i32 = set_bases
-                .iter()
-                .enumerate()
-                .filter(|&(j, _)| j != i && !is_dragon_trip[j])
-                .map(|(_, b)| *b)
-                .sum();
-            if echo > 0 {
-                push_chips(steps, chips, *mult, "Dragon Echo", echo);
+            if is_dragon_meld && base > 0 {
+                push_chips(steps, chips, *mult, "Dragon Echo", base);
             }
         }
     }

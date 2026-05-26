@@ -185,6 +185,23 @@ pub(super) enum ShopInspectLitMeshFelt {
 }
 
 impl WgpuRenderer {
+    pub(super) fn room_punctual_inv_doc_scale(
+        &self,
+        cam: &CameraFrame,
+        enabled: bool,
+    ) -> f32 {
+        if !enabled {
+            return 0.0;
+        }
+        let height_scale = if self.active_scene_key == Some("main_menu_exterior") {
+            crate::render::main_menu_glb::main_menu_env_height_scale(self.room_gltf_height_scale)
+        } else {
+            self.room_gltf_height_scale
+        };
+        let s = crate::render::room_glb::room_env_world_scale(cam.h, height_scale);
+        1.0 / s.max(1e-6)
+    }
+
     /// Shop-style ACES tonemap knobs for `tile_3d` / `tile_outline` (`CameraUniform.hdr_tonemap`)
     /// and `lit_mesh` (`SsrGlobals.felt`). Same `RoomEnvLightingTune` as the room.
     pub(super) fn tile_hdr_tonemap(&self, frame: &crate::render::draw_cmd::UiFrame) -> [f32; 4] {
@@ -323,19 +340,8 @@ impl WgpuRenderer {
         // `.y` = shop display-case material tuning (albedo/ambient/shadow tweaks);
         // keep that shop-only so archive relics do not stack extra fill on top
         // of corrected punctual.
-        let shop_punctual_inv_doc = if frame.scene_lighting.embedded_gltf_punctual {
-            let height_scale = if self.active_scene_key == Some("main_menu_exterior") {
-                crate::render::main_menu_glb::main_menu_env_height_scale(
-                    self.room_gltf_height_scale,
-                )
-            } else {
-                self.room_gltf_height_scale
-            };
-            let s = crate::render::room_glb::room_env_world_scale(cam.h, height_scale);
-            1.0 / s.max(1e-6)
-        } else {
-            0.0
-        };
+        let shop_punctual_inv_doc =
+            self.room_punctual_inv_doc_scale(cam, frame.scene_lighting.embedded_gltf_punctual);
         let shop_punctual_display_case = if shop_like && frame.scene_lighting.embedded_gltf_punctual
         {
             1.0

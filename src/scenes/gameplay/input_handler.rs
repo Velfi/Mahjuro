@@ -142,8 +142,7 @@ pub(super) fn process_focus_and_actions(
         Some(FocusTarget::Button(GameplayButton::Trigger))
     ) {
         let gameplay = GameEngine::read(ctx.run);
-        let has_structure = gameplay.has_structure;
-        if !has_structure {
+        if !gameplay.trigger_enabled {
             scene.focus = None;
         }
     }
@@ -544,7 +543,7 @@ pub(super) fn process_focus_and_actions(
         }
         use crate::render::wgpu_renderer::GameplayPick;
         let gameplay = GameEngine::read(ctx.run);
-        let has_structure = gameplay.has_structure;
+        let cash_in_enabled = gameplay.trigger_enabled;
         if matches!(ctx.picked_gameplay_object, Some(GameplayPick::JournalBook))
             && scene.journal_transition.is_none()
         {
@@ -555,7 +554,7 @@ pub(super) fn process_focus_and_actions(
             return Some(None);
         }
         let action = match ctx.picked_gameplay_object {
-            Some(GameplayPick::WoodTablet(0)) if has_structure => Some(UiAction::TriggerStructure),
+            Some(GameplayPick::CashInButton) if cash_in_enabled => Some(UiAction::TriggerStructure),
             Some(GameplayPick::BronzeMirror) => Some(UiAction::ScoreHand),
             Some(GameplayPick::DiscardBowl) => Some(UiAction::CommitDiscard),
             _ => None,
@@ -950,7 +949,9 @@ pub(super) fn build_relic_tray(
                 (0.0, 0.0)
             };
 
-            let mut rotation = pose.rotation_rad;
+            let mut rotation = crate::render::gameplay_glb::rotate_marker_pose_x_180(
+                pose.rotation_rad,
+            );
             if wiggle_deg != 0.0 {
                 rotation = compose_rotation_euler(
                     rot_euler_xyz_rad(rotation[0], rotation[1], rotation[2]),
@@ -1155,12 +1156,12 @@ pub(super) fn build_consumable_spawns(
 /// Keyboard-nav focus rects for discard / play action buttons (layout rects).
 pub(super) fn push_action_button_focus_rects(
     btn_rects: &[(f32, f32, f32, f32); 3],
-    has_structure: bool,
+    cash_in_enabled: bool,
     focus_rect_graph: &mut Vec<(super::focus::FocusTarget, [f32; 4])>,
 ) {
     use super::focus::{ALL_BUTTONS, FocusTarget};
     for (i, &(bx, by, bw, bh)) in btn_rects.iter().enumerate() {
-        if i == 2 && !has_structure {
+        if i == 2 && !cash_in_enabled {
             continue;
         }
         if i < 2 {
@@ -1169,11 +1170,11 @@ pub(super) fn push_action_button_focus_rects(
     }
 }
 
-/// Pick-ray proxies for authored `gameplay.glb` discard / play / journal / cash-in meshes.
+/// Pick-ray proxies for authored `gameplay.glb` discard / play / journal meshes.
 pub(super) fn build_glb_action_pick_proxies(
     anchors: &super::glb_anchors::GameplayGlbAnchors,
     journal_open_amount: f32,
-    has_structure: bool,
+    _has_structure: bool,
 ) -> ActionRowOutputs {
     use crate::render::draw_cmd::Object3dKind;
 
@@ -1183,11 +1184,7 @@ pub(super) fn build_glb_action_pick_proxies(
     }
 
     ActionRowOutputs {
-        wood_tablet_placements: if has_structure {
-            anchors.cash_in_pick.clone().into_iter().collect()
-        } else {
-            Vec::new()
-        },
+        wood_tablet_placements: Vec::new(),
         discard_bowl_placement: Some(anchors.discard_river_pick.clone()),
         bronze_mirror_placement: Some(anchors.play_mirror_pick.clone()),
         journal_book: Some(journal_book),
@@ -1482,14 +1479,11 @@ pub(super) fn build_yaku_panel_and_tablets(
         let card_gap = 6.0 * layout_scale;
         let natural_card_w = (span - card_gap * 2.0) / 3.0;
         let card_w = ((span - card_gap * (n - 1.0)) / n).min(natural_card_w);
+        let tablet_step_t = ((card_w + card_gap) / span).clamp(0.0, 1.0);
         let tablet_thickness = (8.0 * layout_scale).max(6.0) * yaku_scale;
         let tablet_depth = panel_h * yaku_scale;
         let mut push_tablet = |i: usize, label: std::borrow::Cow<'static, str>, active: bool| {
-            let t = if tablet_count == 1 {
-                0.5
-            } else {
-                i as f32 / (tablet_count - 1) as f32
-            };
+            let t = (i as f32 * tablet_step_t).clamp(0.0, 1.0);
             let pos = crate::render::gameplay_glb::lerp_marker_anchor(a_l, a_r, t);
             let rotation = crate::render::gameplay_glb::lerp_marker_rotation_rad(rot_l, rot_r, t);
             let hovered_now = matches!(

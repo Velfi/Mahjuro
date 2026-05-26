@@ -22,7 +22,9 @@ impl WgpuRenderer {
         tile_glows: &mut Vec<GpuInstance>,
         shadow_uniforms_changed: &mut bool,
     ) {
-        let hdr_tonemap = self.tile_hdr_tonemap(frame);
+        let mut hdr_tonemap = self.tile_hdr_tonemap(frame);
+        hdr_tonemap[3] =
+            self.room_punctual_inv_doc_scale(camera, frame.scene_lighting.embedded_gltf_punctual);
         self.queue.write_buffer(
             &self.tile_outline_frame_uniform_buffer,
             0,
@@ -45,6 +47,8 @@ impl WgpuRenderer {
         let project_aabb_rect = |model: Mat4, half: [f32; 3], center_y: f32| -> [f32; 4] {
             camera.project_aabb_rect(model, half, center_y)
         };
+        let gameplay_tile_z_flip =
+            matches!(self.active_scene_key, Some("gameplay") | Some("tutorial"));
         // ── Showcase tile GPU resources + uniforms ────────────────────────
         // Grow or update the pool so each tile in every ShowcaseTileBatch has
         // a ready-to-draw ShowcaseTileGpu slot with the correct decal and
@@ -164,8 +168,13 @@ impl WgpuRenderer {
                         tile_short_px / LOCAL_Z_EXTENT,
                     ) * p.scale;
 
-                    let base_rotation =
-                        rot_euler_xyz_rad(p.rotation[0], p.rotation[1], p.rotation[2]);
+                    let rotation_z = p.rotation[2]
+                        + if gameplay_tile_z_flip {
+                            std::f32::consts::PI
+                        } else {
+                            0.0
+                        };
+                    let base_rotation = rot_euler_xyz_rad(p.rotation[0], p.rotation[1], rotation_z);
 
                     let oriented = base_rotation * tile_basis;
                     let model = translate_rot_scale(center, oriented, scale);

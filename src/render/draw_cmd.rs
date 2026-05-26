@@ -846,6 +846,8 @@ pub struct UiFrame {
     pub procedural_flame_emitters: Vec<crate::render::flame_volume::FlameEmitter>,
     /// Authored-table gameplay: raycast + projected rects for discard river, mirror, journal, cash-in.
     pub gameplay_action_picks: Option<GameplayActionPickProxies>,
+    /// When false, `btn_cash_in` / `label_cash_in` env meshes are not drawn or pickable.
+    pub gameplay_cash_in_button_visible: bool,
 }
 
 impl UiFrame {
@@ -875,6 +877,7 @@ impl UiFrame {
             shop_inspect_shadow_target: None,
             procedural_flame_emitters: Vec::new(),
             gameplay_action_picks: None,
+            gameplay_cash_in_button_visible: false,
         }
     }
 

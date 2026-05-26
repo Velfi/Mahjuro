@@ -346,10 +346,11 @@ pub const GAMEPLAY_TABLE_AMBIENT_MIN: f32 = 0.52;
 /// before ACES so highlights retain separation from midtones.
 pub const GAMEPLAY_TABLE_HDR_LINEAR_MUL: f32 = 1.0;
 
-/// Applied in `lit_mesh.wgsl` as the punctual buffer `extras.w` when
+/// Applied to procedural tile / lit-mesh shaders as punctual buffer `extras.w` when
 /// [`crate::render::draw_cmd::SceneLighting::embedded_gltf_punctual`] is set (`room_glb.wgsl` ignores it).
-/// Defaults to `1` so embedded punctual lights match the room; debug tuning may lower it.
-pub const SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE: f32 = 0.55;
+/// The procedural shaders are Lambert-forward and skip the room PBR diffuse `/PI` term, so keep this
+/// below 1.0 to sit in the same brightness band as imported GLB geometry.
+pub const SHOP_LIT_MESH_GLTF_PUNCTUAL_SCALE: f32 = 0.28;
 
 /// glTF **node** name prefix for punctual lights that should read as warm candles
 /// (`light_candle`, `light_candle.001`, `light_candle_06`, …).

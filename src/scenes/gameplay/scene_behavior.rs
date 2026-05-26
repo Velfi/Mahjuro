@@ -517,12 +517,13 @@ impl SceneBehavior for GameplayScene {
         } else {
             None
         };
+        let cash_in_enabled = gameplay.trigger_enabled;
         let btn_rects = [discard_btn_rect, play_btn_rect, trigger_btn_rect];
         let play_enabled = selection_valid && gameplay.plays_remaining > 0;
         let discard_enabled = selected_count > 0 && gameplay.discards_remaining > 0;
         input_handler::push_action_button_focus_rects(
             &btn_rects,
-            has_structure,
+            cash_in_enabled,
             &mut focus_rect_graph,
         );
         let action_row = input_handler::build_glb_action_pick_proxies(
@@ -726,11 +727,12 @@ impl SceneBehavior for GameplayScene {
         let fov_pop_offset = self.final_tiles_fov_pop_offset_deg(now);
         scene_camera.fovy_deg = (scene_camera.fovy_deg - fov_pop_offset).max(35.0);
         frame.camera_override = Some(scene_camera);
+        frame.gameplay_cash_in_button_visible = gameplay.trigger_enabled;
         frame.gameplay_action_picks = Some(crate::render::draw_cmd::GameplayActionPickProxies {
             bowl: discard_bowl_placement.clone(),
             mirror: bronze_mirror_placement.clone(),
             journal: journal_book.clone(),
-            cash_in_tablet: wood_tablet_placements.first().cloned(),
+            cash_in_tablet: None,
         });
         frame.background(BackgroundId::Black);
         if !vis.hide_environment {
@@ -829,11 +831,15 @@ impl SceneBehavior for GameplayScene {
                 };
                 let sh = hand_slots.get(i).map(|(_, _, _, h)| *h).unwrap_or(sw);
                 let pop_offset = (1.0 - slide_y_frac) * sh * 0.3;
-                let (cx, cy, lift, size_px) = (
+                let size_px = super::hand_layout::hand_tile_size_from_slot_width(
+                    sw,
+                    hand.len(),
+                    hand_scale_mul,
+                );
+                let (cx, cy, lift) = (
                     px + slide_x_px + reject_shake_x,
                     py + pop_offset,
                     lift_z,
-                    sw * hand_scale_mul,
                 );
                 hand_placements.push(crate::render::draw_cmd::ShowcaseTilePlacement {
                     tile,
@@ -1398,6 +1404,7 @@ impl SceneBehavior for GameplayScene {
                                 run.gold,
                                 Some((&run.relics, i)),
                                 Some(run.ghost_hand_preview_chips()),
+                                Some(run.wing),
                             );
                             let cta = match rid {
                                 RelicId::MirrorTile => {
@@ -1679,6 +1686,10 @@ impl SceneBehavior for GameplayScene {
                     (rect[0], rect[1], rect[2], rect[3]),
                     GAMEPLAY_3D_HIT_ID,
                 ));
+            }
+            if cash_in_enabled {
+                let (bx, by, bw, bh) = trigger_btn_rect;
+                buttons.push(ButtonDef::scene((bx, by, bw, bh), GAMEPLAY_3D_HIT_ID));
             }
         }
         // Catch-all 3D-hit dispatcher: a full-screen `ButtonDef::scene`

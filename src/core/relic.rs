@@ -74,7 +74,7 @@ pub enum RelicId {
     EdgeRunner,
     /// Rank-7 tiles in scored sets: +2 mult each.
     LuckySeven,
-    /// +0.75 mult per play already used this round.
+    /// +2 mult per play already used this round.
     Momentum,
     /// Playing exactly one set that is a pair: +4 mult.
     Minimalist,
@@ -225,8 +225,7 @@ pub enum RelicId {
     NoHonorButWealth,
     /// Round start: 25% +$2, 25% +$4, 50% nothing.
     Sweepstakes,
-    /// +$1 at round end; permanent +$1 per boss blind defeated
-    /// (tracked in `relic_counters[BeggarsCup]`).
+    /// Chamber cleared: +$1 gold multiplied by the current ante (`wing`).
     BeggarsCup,
     /// +$1 at round end per unique yaku scored this round.
     Cosmopolitan,
@@ -268,7 +267,7 @@ pub enum RelicId {
 }
 
 /// Total absorbed excess (post-target score) needed for Chrysalis to transform.
-pub const CHRYSALIS_HATCH_EXCESS_THRESHOLD: i32 = 2000;
+pub const CHRYSALIS_HATCH_EXCESS_THRESHOLD: i32 = 10_000;
 
 /// Chips per log-tier from [`monarch_butterfly_tier`].
 pub const MONARCH_CHIPS_PER_TIER: i32 = 27;
@@ -665,6 +664,7 @@ pub fn relic_description_live(
     gold: i32,
     inventory_focus: Option<(&RelicState, usize)>,
     ghost_hand_chips_preview: Option<i32>,
+    wing: Option<u32>,
 ) -> String {
     let base = all_relic_defs()
         .iter()
@@ -817,16 +817,8 @@ pub fn relic_description_live(
             format!("{base} [{held}g held, +{bonus} mult]")
         }
         RelicId::BeggarsCup => {
-            let bosses = counters
-                .get(&RelicId::BeggarsCup)
-                .copied()
-                .unwrap_or(0)
-                .max(0);
-            let payout = 1 + bosses;
-            format!(
-                "{base} [{bosses} boss{}, +${payout} at round end]",
-                if bosses == 1 { "" } else { "es" }
-            )
+            let ante = wing.unwrap_or(1).max(1);
+            format!("{base} [ante {ante}, +${ante} on clear]")
         }
         RelicId::WallWeaver => {
             let added = counters
@@ -877,7 +869,7 @@ pub fn relic_description_live(
         RelicId::MultiplierMaster => {
             if let Some((relics, _)) = inventory_focus {
                 let n = relics.len();
-                format!("{base} [+{n} mult]")
+                format!("{base} [+{} mult]", n * 2)
             } else {
                 base.to_string()
             }

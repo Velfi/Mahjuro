@@ -14,8 +14,8 @@ use crate::render::draw_cmd::CameraParams;
 use crate::render::hallway_glb::{
     HallwayDistortion, HallwayDistortionDebugSnapshot, hallway_distortion_apply_glb_depth_extent,
 };
-use crate::render::theme::{color, metrics};
-use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
+use crate::render::theme::{color, metrics, typography};
+use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::ui::input::UiAction;
 use sdl3::keyboard::Scancode;
 
@@ -109,13 +109,16 @@ impl DebugVisibilityOverlay {
             user: 0,
         });
 
-        let panel_w = (440.0 * scale).min(window_w * 0.90);
-        let row_h = (44.0 * scale).max(28.0);
-        let row_gap = (8.0 * scale).max(4.0);
-        let title_h = (48.0 * scale).max(28.0);
-        let footer_h = (22.0 * scale).max(14.0);
+        let panel_w = (440.0 * scale).clamp(360.0, 680.0).min(window_w * 0.90);
+        let title_font = typography::tier_at_most(34.0, window_h);
+        let row_font = typography::tier_at_most(26.0, window_h);
+        let footer_font = (row_font * 0.70).max(12.0);
+        let row_h = (row_font * 1.55).clamp(30.0, 44.0);
+        let row_gap = (5.0 * scale).clamp(4.0, 6.0);
+        let title_h = (title_font * 1.45).clamp(34.0, 50.0);
+        let footer_h = (footer_font * 1.35).clamp(16.0, 24.0);
         let visible_rows = GAMEPLAY_VIS_VISIBLE_ROWS.min(GAMEPLAY_VIS_ROW_COUNT) as f32;
-        let btn_h = (40.0 * scale).max(26.0);
+        let btn_h = (row_font * 1.6).clamp(30.0, 44.0);
         let panel_h = title_h
             + row_gap
             + visible_rows * (row_h + row_gap)
@@ -150,12 +153,13 @@ impl DebugVisibilityOverlay {
             rect: [panel_x, panel_y + row_gap, panel_w, title_h],
             text: "Debug Visibility".into(),
             color: color::PARCHMENT,
+            font_px: Some(title_font),
             ..Default::default()
         });
 
         let mut row_y = panel_y + row_gap + title_h + row_gap;
-        let row_pad = 12.0 * scale;
-        let check_size = row_h * 0.55;
+        let row_pad = (12.0 * scale).clamp(10.0, 18.0);
+        let check_size = (row_h * 0.48).clamp(16.0, 22.0);
         let window = GAMEPLAY_VIS_VISIBLE_ROWS.min(GAMEPLAY_VIS_ROW_COUNT);
         let first = self.scroll.min(GAMEPLAY_VIS_ROW_COUNT.saturating_sub(1));
         for slot in 0..window {
@@ -215,12 +219,14 @@ impl DebugVisibilityOverlay {
             labels.push(TextLabel {
                 rect: [
                     cb_x + check_size + row_pad,
-                    row_y,
+                    row_y + (row_h - row_font * 1.25) * 0.5,
                     panel_w - (check_size + row_pad * 3.0),
-                    row_h,
+                    row_font * 1.25,
                 ],
                 text: name.to_string(),
                 color: tc,
+                font_px: Some(row_font),
+                align: TextAlign::Left,
                 ..Default::default()
             });
 
@@ -250,6 +256,7 @@ impl DebugVisibilityOverlay {
             } else {
                 color::alpha(color::STONE, 0.9)
             },
+            font_px: Some(row_font),
             bold: btn_focused,
             ..Default::default()
         });
@@ -257,8 +264,9 @@ impl DebugVisibilityOverlay {
         // Footer hint.
         labels.push(TextLabel {
             rect: [panel_x, btn_y + btn_h + row_gap, panel_w, footer_h],
-            text: "\u{2191}/\u{2193} select   \u{23ce} toggle / activate   Esc close".into(),
+            text: "Up/Down select   Enter toggle / activate   Esc close".into(),
             color: color::alpha(color::STONE, 0.75),
+            font_px: Some(footer_font),
             ..Default::default()
         });
 
