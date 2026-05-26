@@ -674,10 +674,6 @@ pub struct WgpuRenderer {
     /// `bone_tablet_mesh` for phase 1 (a plain box) — phase 7 may swap to the
     /// real tile mesh.
     wall_tile_instances: Vec<LitMeshInstance>,
-    /// Per-cascade-token instances. Reuses `bone_tablet_mesh` (geometry)
-    /// but the instances are kept in a dedicated pool so the cascade pulse
-    /// scaling doesn't compete with the yaku tablet pool.
-    cascade_token_instances: Vec<LitMeshInstance>,
     /// Per-extruded-glyph-popup instances. Each slot owns its own uniform
     /// buffer + bind group; the *mesh* it renders against is fetched from
     /// `extruded_glyph_meshes` per draw because each label has a different
@@ -775,7 +771,7 @@ mod impl_screenshot;
 
 pub use constants::{
     MAIN_MENU_PICK_OPTIONS, MAIN_MENU_PICK_PLAY, MAIN_MENU_PICK_QUIT, MAX_BOOK_SLOTS,
-    MAX_BOWL_SLOTS, MAX_BUG_SLOTS, MAX_CASCADE_TOKEN_SLOTS, MAX_EXTRUDED_GLYPH_SLOTS,
+    MAX_BOWL_SLOTS, MAX_BUG_SLOTS, MAX_EXTRUDED_GLYPH_SLOTS,
     MAX_MIRROR_SLOTS, MAX_ORB_SLOTS, MAX_ORDEAL_ICON_SLOTS, MAX_POINT_LIGHTS, MAX_RELIC_SLOTS,
     MAX_RIBBON_SLOTS, MAX_SPOT_LIGHTS, MAX_TALISMAN_SLOTS, MAX_TALLY_FAN_SLOTS,
     MAX_TALLY_STICK_SLOTS, MAX_TILE_OCCLUDERS, MAX_WALL_TILE_SLOTS, MAX_WOOD_TABLET_SLOTS,

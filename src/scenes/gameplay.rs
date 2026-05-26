@@ -677,8 +677,6 @@ impl GameplayScene {
         CascadeTokenLayout {
             chips_center: (chips_cx, cy),
             mult_center: (mult_cx, cy),
-            pill_w,
-            pill_h,
         }
     }
 

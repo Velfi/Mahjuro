@@ -1217,10 +1217,6 @@ impl SceneLookDebugOverlay {
         scene_look_tuning::overlay_scene_keys()[self.scene_index]
     }
 
-    pub fn editing_active_scene(&self, active_scene_key: Option<&str>) -> bool {
-        self.scene_key() == active_scene_key
-    }
-
     fn row_count(&self) -> usize {
         SCENE_LOOK_ROW_COUNT
     }

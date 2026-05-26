@@ -624,9 +624,7 @@ mod cases {
     #[test]
     fn apply_chamber_tracks_reduced_round_caps_for_boss_taxes() {
         let mut run = test_run();
-        run.ordeal.effect = Some(crate::core::ordeal::ResolvedOrdealEffect::from_static(
-            &crate::core::ordeal::OrdealKind::Drought.def().effect,
-        ));
+        run.ordeal.upcoming = Some(OrdealKind::Drought);
 
         run.apply_chamber(ChamberKind::Ordeal, None);
 

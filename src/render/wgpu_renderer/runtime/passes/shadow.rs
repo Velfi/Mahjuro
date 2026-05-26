@@ -412,12 +412,6 @@ impl WgpuRenderer {
                 };
                 self.draw_lit_mesh_shadow(pass, &self.tally_stick_tip_mesh, inst);
             }
-            DrawKind::CascadeToken => {
-                let Some(inst) = self.cascade_token_instances.get(slot_i) else {
-                    return;
-                };
-                self.draw_lit_mesh_shadow(pass, &self.bone_tablet_mesh, inst);
-            }
             DrawKind::ExtrudedGlyph => {
                 let label: Option<&str> = frame
                     .cmds

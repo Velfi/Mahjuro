@@ -16,14 +16,6 @@ pub const PUNCTUAL_SHADOW_ATLAS_SIZE: u32 = 2048;
 pub const PUNCTUAL_SHADOW_TILE_SIZE: u32 = 512;
 const GRID_COLS: u32 = 4;
 
-/// One candle shadow slot uploaded to [`crate::render::lit_mesh::ShadowGlobals`].
-#[derive(Clone, Copy, Debug, Default)]
-pub struct PunctualShadowSlot {
-    pub light_view_proj: [f32; 16],
-    /// xy = atlas UV origin, zw = atlas UV scale (tile size / atlas size).
-    pub atlas_rect: [f32; 4],
-}
-
 /// CPU-side setup for one gameplay candle shadow pass.
 #[derive(Clone, Copy, Debug)]
 pub struct PunctualShadowLightSetup {
@@ -99,13 +91,4 @@ pub fn gameplay_candle_punctual_shadow_setup(
             })
             .collect()
     })
-}
-
-impl PunctualShadowSlot {
-    pub fn from_setup(setup: &PunctualShadowLightSetup) -> Self {
-        Self {
-            light_view_proj: setup.light_view_proj.to_cols_array(),
-            atlas_rect: setup.atlas_rect,
-        }
-    }
 }

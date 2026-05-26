@@ -11,8 +11,7 @@ use crate::render::{
     },
     talisman_mesh::{TALISMAN_LOCAL_HALF, memorial_talisman_material, talisman_material},
     wgpu_renderer::{
-        GpuInstance, MAX_BOOK_SLOTS, MAX_BOWL_SLOTS, MAX_CASCADE_TOKEN_SLOTS,
-        MAX_EXTRUDED_GLYPH_SLOTS, MAX_MIRROR_SLOTS, MAX_ORB_SLOTS, MAX_ORDEAL_ICON_SLOTS,
+        GpuInstance, MAX_BOOK_SLOTS, MAX_BOWL_SLOTS, MAX_EXTRUDED_GLYPH_SLOTS, MAX_MIRROR_SLOTS, MAX_ORB_SLOTS, MAX_ORDEAL_ICON_SLOTS,
         MAX_RELIC_SLOTS, MAX_TALISMAN_SLOTS, MAX_TALLY_FAN_SLOTS, MAX_TALLY_STICK_SLOTS,
         MAX_WALL_TILE_SLOTS, MAX_WOOD_TABLET_SLOTS, MAX_YAKU_TABLET_SLOTS,
         MEMORIAL_TALISMAN_TEXTURE_BASE, WgpuRenderer, ordeal_icon_material_params,
@@ -186,7 +185,6 @@ impl WgpuRenderer {
             let mut obj3d_mirror_slot: usize = 0;
             let mut obj3d_tally_fan_idx: usize = 0;
             let mut obj3d_tally_stick_cursor: usize = 0;
-            let mut obj3d_cascade_token_slot: usize = 0;
             let mut obj3d_glyph_slot: usize = 0;
 
             // Find the RenderOp::Object3dBatch ops to patch their start/end.
@@ -1365,53 +1363,6 @@ impl WgpuRenderer {
                                 object3d_draw_list,
                                 object3d_shadow_draw_list,
                                 DrawKind::ExtrudedGlyph,
-                                slot_i,
-                            );
-                        }
-                        Object3dKind::CascadeToken { kind: ck, pulse } => {
-                            if obj3d_cascade_token_slot >= MAX_CASCADE_TOKEN_SLOTS {
-                                continue;
-                            }
-                            let slot_i = obj3d_cascade_token_slot;
-                            obj3d_cascade_token_slot += 1;
-                            let pulse_f = pulse.clamp(0.0, 1.0);
-                            let pulse_scale = 1.0 + 0.18 * pulse_f;
-                            let center = pixel_to_world(w, h, obj.pos[0], obj.pos[1], obj.pos[2]);
-                            let model = translate_rot_scale(
-                                center,
-                                Mat4::IDENTITY,
-                                glam::Vec3::new(
-                                    obj.extents[0] * pulse_scale,
-                                    obj.extents[1] * pulse_scale,
-                                    obj.extents[2] * pulse_scale,
-                                ),
-                            );
-                            let base = ck.color();
-                            let material = MaterialParams {
-                                kind: MaterialKind::Plain,
-                                base_color: base,
-                                specular_strength: 0.40 + 0.30 * pulse_f,
-                                specular_power: 48.0,
-                            };
-                            self.cascade_token_instances[slot_i].write_uniform(
-                                &self.queue,
-                                view_proj_arr,
-                                model,
-                                material,
-                            );
-                            self.register_placement_shadow_slot(DrawKind::CascadeToken, slot_i);
-                            if self.placement_shadow_writes(frame) {
-                                self.write_lit_mesh_shadow(
-                                    &mut shadow,
-                                    &self.cascade_token_instances[slot_i],
-                                    model,
-                                    material.kind,
-                                );
-                            }
-                            self.push_object3d_draw(
-                                object3d_draw_list,
-                                object3d_shadow_draw_list,
-                                DrawKind::CascadeToken,
                                 slot_i,
                             );
                         }

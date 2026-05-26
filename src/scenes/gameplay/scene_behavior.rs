@@ -400,13 +400,11 @@ impl SceneBehavior for GameplayScene {
         let has_structure = gameplay.has_structure;
         let cascade_showcase_ref = self.cascade_queue.front().and_then(|(_, sc)| sc.as_ref());
         let showcase_present = has_structure || cascade_showcase_ref.is_some();
-        let (yaku_panel_h, structure_tag_h, structure_meld_h) =
-            super::glb_anchors::gameplay_hud_strip_heights(
-                layout.window_h,
-                layout_scale,
-                showcase_present,
-            );
-        let structure_strip_h = (structure_tag_h + structure_meld_h).max(1.0);
+        let (yaku_panel_h, _, _) = super::glb_anchors::gameplay_hud_strip_heights(
+            layout.window_h,
+            layout_scale,
+            showcase_present,
+        );
         let glb_anchors = match super::glb_anchors::resolve_gameplay_glb_anchors(
             layout,
             interaction.hand_len,
@@ -414,7 +412,6 @@ impl SceneBehavior for GameplayScene {
             layout.window_h,
             &scene_camera,
             env_h,
-            structure_strip_h,
             yaku_panel_h,
         ) {
             Ok(anchors) => anchors,
@@ -450,9 +447,9 @@ impl SceneBehavior for GameplayScene {
         //
         // Vertical order: structure strip, yaku tablets, hand rack, bowl/mirror
         // row, then journal.
-        let mut discard_btn_rect = glb_anchors.discard_btn_rect;
-        let mut play_btn_rect = glb_anchors.play_btn_rect;
-        let mut trigger_btn_rect = glb_anchors.cash_in_btn_rect;
+        let discard_btn_rect;
+        let play_btn_rect;
+        let trigger_btn_rect;
 
         // ── Frame accumulators ───────────────────────────────────────────
         //
@@ -514,7 +511,7 @@ impl SceneBehavior for GameplayScene {
         structure_showcase.extend(yaku_structure_showcase);
 
         let paused = self.pause_menu.paused;
-        let mut discard_undo_rect: Option<[f32; 4]> = None;
+        let discard_undo_rect;
         let cash_in_enabled = gameplay.trigger_enabled;
         let play_enabled = selection_valid && gameplay.plays_remaining > 0;
         let discard_enabled = selected_count > 0 && gameplay.discards_remaining > 0;

@@ -287,10 +287,6 @@ impl WgpuRenderer {
                             &self.tally_stick_tip_mesh,
                             self.tally_stick_instances.get(slot_i),
                         ),
-                        DrawKind::CascadeToken => (
-                            &self.bone_tablet_mesh,
-                            self.cascade_token_instances.get(slot_i),
-                        ),
                         DrawKind::Primitive(mid) => {
                             let mesh = self
                                 .primitive_meshes

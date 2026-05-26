@@ -47,8 +47,6 @@ pub(super) enum CascadeHandoffStage {
 pub(super) struct CascadeTokenLayout {
     pub(super) chips_center: (f32, f32),
     pub(super) mult_center: (f32, f32),
-    pub(super) pill_w: f32,
-    pub(super) pill_h: f32,
 }
 
 /// Build the extruded-glyph placements for the cascade HUD — the
