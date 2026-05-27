@@ -220,6 +220,10 @@ impl App {
                         .renderer
                         .as_ref()
                         .is_some_and(|r| r.shop_gltf_anim_has_clip("eyeball_travel"));
+                    let prim_index_loaded = self
+                        .renderer
+                        .as_ref()
+                        .is_some_and(|r| r.shop_eyeball_prim_index_loaded());
                     if s.debug_start_eyeball_travel() {
                         log::info!(
                             "Started shop eyeball_travel playback at t={:.3}s (clip_loaded={clip_loaded}, gpu_eyeball_prim_index_loaded={prim_index_loaded})",
