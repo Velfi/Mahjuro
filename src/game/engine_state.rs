@@ -27,7 +27,7 @@ pub struct GameplayCoreState {
     pub plays_max: u32,
     pub discards_remaining: u32,
     pub discards_max: u32,
-    pub gold: i32,
+    pub yen: i32,
     pub available_yaku: Vec<YakuKind>,
     pub consumables: ConsumableInventory,
 }
@@ -45,7 +45,7 @@ impl GameplayCoreState {
             plays_max: run.plays_max,
             discards_remaining: run.discards_remaining,
             discards_max: run.discards_max,
-            gold: run.gold,
+            yen: run.yen,
             available_yaku: run.available_yaku.clone(),
             consumables: run.consumables.clone(),
         }
@@ -69,7 +69,7 @@ impl GameplayCoreState {
         run.plays_max = self.plays_max;
         run.discards_remaining = self.discards_remaining;
         run.discards_max = self.discards_max;
-        run.gold = self.gold;
+        run.yen = self.yen;
         run.available_yaku = self.available_yaku.clone();
         run.consumables = self.consumables.clone();
     }
@@ -240,14 +240,14 @@ mod tests {
             Tile::new(Suit::Souzu, 4, 3),
         ];
         *run.selected_mut() = vec![true, false, true];
-        run.gold = 42;
+        run.yen = 42;
 
         let mut core = GameplayCoreState::from_run(&run);
         core.sort_hand_by_rank();
-        core.gold += 5;
+        core.yen += 5;
         core.write_back(&mut run);
 
-        assert_eq!(run.gold, 47);
+        assert_eq!(run.yen, 47);
         assert_eq!(run.selected_slice(), &[false, false, false]);
         assert_eq!(run.hand()[0].rank, 2);
         assert_eq!(run.hand()[1].rank, 4);

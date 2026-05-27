@@ -65,6 +65,7 @@ impl CollectionInspectPresenter {
             tile_pack_celebration_tonemap: false,
             shop_tonemap_and_lit_mesh_context: false,
             collection_tonemap_context: true,
+            modal_relic_staging: false,
         }
     }
 

@@ -1,21 +1,7 @@
 //! Simple event queue for UI and core.
 
-use crate::audio::SfxId;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum GameOverReason {
-    OutOfPlays,
-    NoActionsRemaining,
-}
-
-impl GameOverReason {
-    pub fn loss_summary(self) -> &'static str {
-        match self {
-            Self::OutOfPlays => "No plays remaining",
-            Self::NoActionsRemaining => "No legal actions remained",
-        }
-    }
-}
+pub use crate::sfx_id::SfxId;
+pub use mahjuro_types::GameOverReason;
 
 /// Itemized breakdown of the gold awarded for clearing a blind. Mirrors
 /// the calculation in `RunState::play_selected` so the celebration UI can

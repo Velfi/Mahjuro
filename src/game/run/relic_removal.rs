@@ -8,6 +8,43 @@ use crate::steam::Achievement;
 use super::RunState;
 
 impl RunState {
+    /// Push a relic onto the active list and run first-purchase counter setup.
+    pub fn grant_relic(&mut self, relic: RelicId) {
+        self.relics.active.push(relic);
+        match relic {
+            RelicId::MeltingIce => {
+                self.relic_counters.insert(
+                    RelicId::MeltingIce,
+                    crate::core::relic::MELTING_ICE_START_CHIPS,
+                );
+            }
+            RelicId::Taotie => {
+                self.relic_counters.insert(RelicId::Taotie, 0);
+            }
+            RelicId::SilkThread => {
+                self.relic_counters.insert(RelicId::SilkThread, 40);
+            }
+            RelicId::SilkMoth => {
+                self.relic_counters.insert(RelicId::SilkMoth, 0);
+            }
+            RelicId::XxxlEgg => {
+                self.relic_counters.insert(RelicId::XxxlEgg, 3);
+            }
+            RelicId::TeaCeremony => {
+                self.relic_counters.insert(RelicId::TeaCeremony, 0);
+            }
+            RelicId::Chrysalis | RelicId::MonarchButterfly => {
+                self.relic_counters.insert(RelicId::MonarchButterfly, 0);
+            }
+            RelicId::IGotAGuy => {
+                self.relic_counters.insert(RelicId::IGotAGuy, 3);
+            }
+            RelicId::Rakuware => {}
+            _ => {}
+        }
+        self.recompute_capacities();
+    }
+
     /// Clears [`crate::core::relic::RelicState::debuffed`] and [`RunState::relic_counters`]
     /// entries keyed by `relic_id`. Does not touch [`crate::core::relic::RelicState::active`]
     /// or Kintsugi — use when inventory was already updated (e.g. shop sell).
@@ -33,7 +70,7 @@ impl RunState {
         true
     }
 
-    /// Melting Ice / Goose Egg / Silk Thread: primary relic burned (counter exhausted).
+    /// Melting Ice / XXXL Egg / Silk Thread: primary relic burned (counter exhausted).
     /// Marks shop-pool extinction, strips inventory (Kintsugi counts), emits successor + Steam ping.
     pub(crate) fn on_transformation_primary_burned(
         &mut self,
@@ -139,7 +176,7 @@ impl RunState {
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum TransformationPrimaryRelic {
     MeltingIce,
-    RustlingGooseEgg,
+    XxxlEgg,
     SilkThread,
 }
 
@@ -147,7 +184,7 @@ impl TransformationPrimaryRelic {
     fn primary_id(self) -> RelicId {
         match self {
             Self::MeltingIce => RelicId::MeltingIce,
-            Self::RustlingGooseEgg => RelicId::RustlingGooseEgg,
+            Self::XxxlEgg => RelicId::XxxlEgg,
             Self::SilkThread => RelicId::SilkThread,
         }
     }
@@ -155,7 +192,7 @@ impl TransformationPrimaryRelic {
     fn mark_extinct(self, run: &mut RunState) {
         match self {
             Self::MeltingIce => run.melting_ice_extinct = true,
-            Self::RustlingGooseEgg => run.xxxl_egg_extinct = true,
+            Self::XxxlEgg => run.xxxl_egg_extinct = true,
             Self::SilkThread => run.silk_thread_extinct = true,
         }
     }
@@ -163,7 +200,7 @@ impl TransformationPrimaryRelic {
     fn successor(self) -> RelicId {
         match self {
             Self::MeltingIce => RelicId::Taotie,
-            Self::RustlingGooseEgg => RelicId::Geese,
+            Self::XxxlEgg => RelicId::Geese,
             Self::SilkThread => RelicId::SilkMoth,
         }
     }
@@ -171,7 +208,7 @@ impl TransformationPrimaryRelic {
     fn achievement(self) -> Achievement {
         match self {
             Self::MeltingIce => Achievement::TaotieAwakened,
-            Self::RustlingGooseEgg => Achievement::GeeseTakeFlight,
+            Self::XxxlEgg => Achievement::GeeseTakeFlight,
             Self::SilkThread => Achievement::SilkMothEmerged,
         }
     }

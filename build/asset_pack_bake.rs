@@ -8,6 +8,9 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Instant;
+
+use super::input_hash::{Fnv64, log_bake_timing, read_stamp_line, write_stamp_line};
 
 const RULES_PATH: &str = "tools/bake_assets/pack_rules.json";
 const BAKE_SCRIPT_PATH: &str = "tools/bake_assets/bake_assets.py";
@@ -70,16 +73,15 @@ pub fn maybe_bake_asset_packs(repo: &Path, profile_dir: &Path) {
         return;
     }
 
+    let start = Instant::now();
     if let Err(e) = run_pack_bake(repo, &script, profile_dir, release) {
         panic!("asset pack bake failed: {e}");
     }
 
-    if let Err(e) = write_stamp(&stamp_file, &hash) {
-        println!(
-            "cargo:warning=asset pack bake: could not write stamp {}: {e}",
-            stamp_file.display()
-        );
-    }
+    write_stamp_line(&stamp_file, &hash).unwrap_or_else(|e| {
+        panic!("asset pack bake: could not write stamp {}: {e}", stamp_file.display());
+    });
+    log_bake_timing("asset packs", start);
 }
 
 fn skip_bake_env() -> bool {
@@ -160,8 +162,7 @@ fn compute_inputs_hash(repo: &Path, release: bool) -> String {
     });
     for path in [RULES_PATH, BAKE_SCRIPT_PATH] {
         let p = repo.join(path);
-        h.write(path.as_bytes());
-        h.write(b"\0");
+        h.write_path_key(&p);
         if p.is_file()
             && let Ok(bytes) = fs::read(&p)
         {
@@ -179,24 +180,11 @@ fn compute_inputs_hash(repo: &Path, release: bool) -> String {
             h.write(&bytes);
         }
     }
-    format!("{:016x}", h.finish())
+    h.finish_hex()
 }
 
 fn read_stamp(path: &Path) -> Option<String> {
-    let s = fs::read_to_string(path).ok()?;
-    let line = s.lines().next()?.trim();
-    if line.is_empty() {
-        None
-    } else {
-        Some(line.to_string())
-    }
-}
-
-fn write_stamp(path: &Path, hash: &str) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, format!("{hash}\n"))
+    read_stamp_line(path)
 }
 
 fn run_pack_bake(repo: &Path, script: &Path, out_dir: &Path, release: bool) -> Result<(), String> {
@@ -237,30 +225,4 @@ fn run_pack_bake(repo: &Path, script: &Path, out_dir: &Path, release: bool) -> R
          install Python or set MAHJURO_SKIP_ASSET_BAKE=1 and provide MAHJURO_ASSETS"
             .into(),
     )
-}
-
-struct Fnv64 {
-    state: u64,
-}
-
-impl Fnv64 {
-    const OFFSET: u64 = 0xcbf29ce484222325;
-    const PRIME: u64 = 0x100000001b3;
-
-    fn new() -> Self {
-        Self {
-            state: Self::OFFSET,
-        }
-    }
-
-    fn write(&mut self, bytes: &[u8]) {
-        for &b in bytes {
-            self.state ^= u64::from(b);
-            self.state = self.state.wrapping_mul(Self::PRIME);
-        }
-    }
-
-    fn finish(self) -> u64 {
-        self.state
-    }
 }

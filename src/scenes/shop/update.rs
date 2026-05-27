@@ -243,7 +243,7 @@ impl ShopScene {
                 center,
                 center,
                 None,
-                crate::core::scoring::StepKind::Gold,
+                crate::core::scoring::StepKind::Yen,
                 new_level as f32,
             );
             self.particles.emit(

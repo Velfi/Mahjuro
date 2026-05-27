@@ -2,7 +2,8 @@
 //!
 //! Built as a separate workspace crate so `cargo build -p mahjuro-bake` does not produce the
 //! interactive game binary. Bake and screenshot share [`HeadlessApp`] but use different feature
-//! flags on the `mahjuro` dependency (screenshot pulls in bot + draw helpers).
+//! flags on the `mahjuro` dependency: bake uses `bake-support` (no SDL/Steam/rodio);
+//! screenshot pulls in bot + draw helpers via `headless-screenshot`.
 
 mod app;
 mod fixtures;

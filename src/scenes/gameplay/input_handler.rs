@@ -426,7 +426,7 @@ pub(super) fn process_focus_and_actions(
                                     src,
                                     src,
                                     None,
-                                    crate::core::scoring::StepKind::Gold,
+                                    crate::core::scoring::StepKind::Yen,
                                     new_level as f32,
                                 );
                                 scene.particles.emit(

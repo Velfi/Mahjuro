@@ -18,7 +18,7 @@ pub const CONSUMABLE_CAPACITY: usize = 2;
 /// All tuneable starting conditions for a run, bundled into one preset.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GameMode {
-    pub starting_gold: u32,
+    pub starting_yen: u32,
     pub starting_plays: u32,
     pub starting_discards: u32,
     pub hand_size: usize,
@@ -85,7 +85,7 @@ impl GameMode {
         let mut starting_rules = vec![RuleModifier::PairDoubleScore];
         starting_rules.extend(stake.starting_rules());
         Self {
-            starting_gold: STARTING_GOLD + bonus_gold,
+            starting_yen: STARTING_GOLD + bonus_gold,
             starting_plays: STARTING_PLAYS + bonus_plays,
             starting_discards: STARTING_DISCARDS + bonus_discards,
             hand_size: HAND_SIZE,

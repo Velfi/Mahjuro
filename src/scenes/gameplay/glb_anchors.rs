@@ -464,7 +464,7 @@ mod tests {
             let mut solver = crate::ui::layout::UiLayout::new();
             solver.solve(w, h)
         };
-        let cam = gameplay_glb::require_gameplay_camera_from_cpu(&cpu, h, env_h)
+        let cam = gameplay_glb::gameplay_camera_from_cpu(&cpu, h, env_h)
             .expect("embedded gameplay camera");
         let hand_len = 14;
         let anchors = super::resolve_gameplay_glb_anchors_from_cpu(

@@ -24,11 +24,15 @@
 //! into `target/<profile>/` (see `build/asset_pack_bake.rs`; `.DS_Store` and other excluded
 //! paths do not invalidate the bake). Set `MAHJURO_SKIP_ASSET_BAKE=1` to skip entirely.
 //!
-//! **Room GI / shadow bakes:** when inputs change, `build/room_gi_bake.rs` and
-//! `build/room_shadow_bake.rs` run `mahjuro-bake`
-//! (any profile; needs `mahjuro` in `target/<profile>/`, often a second `cargo build`).
-//! Skip with `MAHJURO_SKIP_ROOM_GI_BAKE=1` or `MAHJURO_SKIP_ROOM_SHADOW_BAKE=1`. See `AGENTS.md`.
+//! **Room GI / shadow / decal bakes:** when inputs change, `build.rs` runs offline bakers
+//! if `mahjuro-bake` / `mahjuro-bake-decal-atlases` already exist in `target/<profile>/`
+//! (build them first: `cargo build -p mahjuro-headless --bin mahjuro-bake` — never from inside
+//! `build.rs`; nested `cargo` deadlocks on the target lock). Skip with
+//! `MAHJURO_SKIP_ROOM_GI_BAKE=1`, `MAHJURO_SKIP_ROOM_SHADOW_BAKE=1`, or
+//! `MAHJURO_SKIP_SHOWCASE_DECAL_BAKE=1`. See `AGENTS.md`.
 
+#[path = "build/input_hash.rs"]
+mod input_hash;
 #[path = "build/asset_pack_bake.rs"]
 mod asset_pack_bake;
 #[path = "build/bake_tool.rs"]
@@ -37,6 +41,10 @@ mod bake_tool;
 mod room_gi_bake;
 #[path = "build/room_shadow_bake.rs"]
 mod room_shadow_bake;
+#[path = "build/room_gpu_bake.rs"]
+mod room_gpu_bake;
+#[path = "build/showcase_decal_bake.rs"]
+mod showcase_decal_bake;
 
 use std::env;
 use std::fs;
@@ -65,16 +73,16 @@ fn main() {
     println!("cargo:rerun-if-env-changed=STEAM_SDK_LOCATION");
     println!("cargo:rerun-if-env-changed=MAHJURO_SKIP_ASSET_BAKE");
     println!("cargo:rerun-if-changed=build.rs");
-    room_gi_bake::emit_rerun_if_changed();
-    room_shadow_bake::emit_rerun_if_changed();
+    room_gpu_bake::emit_rerun_if_changed();
+    showcase_decal_bake::emit_rerun_if_changed();
 
     if let Some(out_dir) = env::var_os("OUT_DIR").map(PathBuf::from)
         && let Some(profile_dir) = profile_dir(&out_dir)
         && let Some(repo) = env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from)
     {
         asset_pack_bake::emit_rerun_if_changed(&repo, &profile_dir);
-        room_gi_bake::maybe_bake_room_gi(&repo, &profile_dir);
-        room_shadow_bake::maybe_bake_room_shadows(&repo, &profile_dir);
+        room_gpu_bake::maybe_bake_room_gpu(&repo, &profile_dir);
+        showcase_decal_bake::maybe_bake_showcase_decal_atlases(&repo, &profile_dir);
         asset_pack_bake::maybe_bake_asset_packs(&repo, &profile_dir);
     }
 

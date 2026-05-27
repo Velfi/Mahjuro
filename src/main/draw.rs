@@ -33,24 +33,7 @@ impl App {
     /// `_default` slot in [`crate::game::scene_look_tuning::SceneLookTuningSet`].
     pub(super) fn active_scene_key_for_renderer(&self) -> Option<&'static str> {
         let scene_for_renderer = self.overlay_stack.last().unwrap_or(&self.scene);
-        match scene_for_renderer {
-            Scene::Showcase(_) => Some("showcase"),
-            Scene::Shop(_) => Some("shop"),
-            Scene::Gameplay(_) => Some("gameplay"),
-            Scene::Collection(_) => Some("collection"),
-            Scene::PickChamber(_) => Some("pick_chamber"),
-            Scene::Staircase(_) => Some("staircase"),
-            Scene::MainMenuExterior(_) => Some("main_menu_exterior"),
-            Scene::TutorialCampaign(_) => Some("tutorial"),
-            Scene::Guide(_) => Some("guide"),
-            Scene::YakuJournal(_) => Some("yaku_journal"),
-            Scene::TileAnchorLab(_) => Some("tile_anchor_lab"),
-            Scene::ButtonAabbLab(_) => Some("button_aabb_lab"),
-            Scene::AnimationLab(_) => Some("shop"),
-            Scene::Tixels(_) => Some("tixels"),
-            Scene::GameOver(_) => Some("gameplay"),
-            _ => None,
-        }
+        crate::scenes::active_scene_key(scene_for_renderer)
     }
 
     /// Tonemap + room GLB look for the active scene. When the scene-look
@@ -93,7 +76,7 @@ impl App {
             } => {
                 if self.run.onboarding_active() && reached_target {
                     self.run
-                        .apply_gold_reward(payout.total as i32, Some(&mut self.bus));
+                        .apply_yen_reward(payout.total as i32, Some(&mut self.bus));
                     match self.run.onboarding_phase() {
                         Some(crate::game::onboarding::OnboardingPhase::Lessons) => {
                             self.audio.play_sfx(audio::SfxId::RoundWin);
@@ -175,7 +158,7 @@ impl App {
                 // Apply the gold payout now that the scoring cascade has
                 // finished — kept deferred so the UI doesn't jump early.
                 self.run
-                    .apply_gold_reward(payout.total as i32, Some(&mut self.bus));
+                    .apply_yen_reward(payout.total as i32, Some(&mut self.bus));
                 self.audio.play_sfx(audio::SfxId::RoundWin);
                 // Win jingle owns the music sink for the celebration; the
                 // pending scene transition will queue Shop/Gameplay BGM
@@ -199,19 +182,19 @@ impl App {
                         "Score: {} / {}",
                         cleared_round_score, cleared_target_score
                     )];
-                    lines.push(format!("Base reward  +${}", payout.base_reward));
+                    lines.push(format!("Base reward  +¥{}", payout.base_reward));
                     if payout.unused_play_bonus > 0 {
-                        lines.push(format!("Unused plays  +${}", payout.unused_play_bonus));
+                        lines.push(format!("Unused plays  +¥{}", payout.unused_play_bonus));
                     }
                     if payout.interest > 0 {
-                        lines.push(format!("Interest  +${}", payout.interest));
+                        lines.push(format!("Interest  +¥{}", payout.interest));
                     }
                     if payout.green_luck_bonus > 0 {
-                        lines.push(format!("Green Luck  +${}", payout.green_luck_bonus));
+                        lines.push(format!("Green Luck  +¥{}", payout.green_luck_bonus));
                     }
-                    lines.push(format!("Total  +${}", payout.total));
+                    lines.push(format!("Total  +¥{}", payout.total));
                     let modal =
-                        Modal::new("Round Complete!", lines.join("\n"), ModalTheme::Success)
+                        Modal::new("Another chamber is behind you!", lines.join("\n"), ModalTheme::Success)
                             .with_fireworks(ww * 0.5, wh * 0.8, ww * 0.6, 5);
                     self.modals.push(modal);
                 }
@@ -247,7 +230,7 @@ impl App {
                     }
                     self.progress
                         .run_history
-                        .push(crate::core::progression::RunRecord::from_run(
+                        .push(crate::game::progression_run::run_record_from_run(
                             &self.run,
                             crate::core::progression::RunOutcome::Victory,
                         ));
@@ -320,7 +303,7 @@ impl App {
                 );
                 self.progress.record_score(self.run.round_score);
                 let level_up = self.progress.check_level_up();
-                let snap = crate::core::memorial_talisman::snapshot_from_run(
+                let snap = crate::game::memorial_run::snapshot_from_run(
                     &self.run.defeat_journal,
                     reason,
                     &self.run,
@@ -331,7 +314,7 @@ impl App {
                 self.progress.pending_memorial_journal = Some(snap);
                 self.progress
                     .run_history
-                    .push(crate::core::progression::RunRecord::from_run(
+                    .push(crate::game::progression_run::run_record_from_run(
                         &self.run,
                         crate::core::progression::RunOutcome::Defeat { reason },
                     ));
@@ -466,7 +449,7 @@ impl App {
             env_per_scene.insert(key, (room, look.room_gltf_height_scale));
             env_frame_tunes.push((
                 key,
-                crate::game::scene_look_tuning::RoomEnvFrameTune::from_scene_look(
+                mahjuro_render::tuning::scene_look::room_env_frame_from_scene_look(
                     &look, room,
                 ),
             ));
@@ -781,28 +764,8 @@ impl App {
         // Tell the renderer which scene is active so shared mesh pipelines
         // (Object3dKind::Ofuda, coin/gold piles, etc.) can emit correctly-
         // prefixed canonical pickable names.
-        // Inlined (rather than calling `active_scene_key_for_renderer`)
-        // because `renderer` already holds a mutable borrow of
-        // `self.renderer`; an `&self` helper here would clash.
         let scene_for_renderer = self.overlay_stack.last().unwrap_or(&self.scene);
-        let active_scene_key: Option<&'static str> = match scene_for_renderer {
-            Scene::Showcase(_) => Some("showcase"),
-            Scene::Shop(_) => Some("shop"),
-            Scene::Gameplay(_) => Some("gameplay"),
-            Scene::Collection(_) => Some("collection"),
-            Scene::PickChamber(_) => Some("pick_chamber"),
-            Scene::Staircase(_) => Some("staircase"),
-            Scene::MainMenuExterior(_) => Some("main_menu_exterior"),
-            Scene::TutorialCampaign(_) => Some("tutorial"),
-            Scene::Guide(_) => Some("guide"),
-            Scene::YakuJournal(_) => Some("yaku_journal"),
-            Scene::TileAnchorLab(_) => Some("tile_anchor_lab"),
-            Scene::ButtonAabbLab(_) => Some("button_aabb_lab"),
-            Scene::AnimationLab(_) => Some("shop"),
-            Scene::Tixels(_) => Some("tixels"),
-            Scene::GameOver(_) => Some("gameplay"),
-            _ => None,
-        };
+        let active_scene_key = crate::scenes::active_scene_key(scene_for_renderer);
         renderer.set_active_scene(active_scene_key);
 
         if matches!(active_scene_key, Some("gameplay") | Some("tutorial"))

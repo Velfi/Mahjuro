@@ -2,18 +2,18 @@
   {
     "id": "gold_ingot",
     "name": "Gold Ingot",
-    "description": "+8 gold",
+    "description": "+8 yen",
     "rarity": "common",
     "min_wing": 1,
-    "gold_value": 8
+    "yen_value": 8
   },
   {
     "id": "treasure_chest",
     "name": "Treasure Chest",
-    "description": "+20 gold",
+    "description": "+20 yen",
     "rarity": "rare",
     "min_wing": 3,
-    "gold_value": 20
+    "yen_value": 20
   },
   {
     "id": "free_reroll",
@@ -21,7 +21,7 @@
     "description": "Next shop reroll is free",
     "rarity": "common",
     "min_wing": 1,
-    "gold_value": 5
+    "yen_value": 5
   },
   {
     "id": "patron_gift",
@@ -29,7 +29,7 @@
     "description": "One shop relic is free",
     "rarity": "uncommon",
     "min_wing": 1,
-    "gold_value": 10
+    "yen_value": 10
   },
   {
     "id": "rich_stock",
@@ -37,7 +37,7 @@
     "description": "+2 relics in next shop",
     "rarity": "uncommon",
     "min_wing": 1,
-    "gold_value": 6
+    "yen_value": 6
   },
   {
     "id": "zodiac_blessing",
@@ -45,7 +45,7 @@
     "description": "Gain 2 random Zodiacs",
     "rarity": "uncommon",
     "min_wing": 1,
-    "gold_value": 6
+    "yen_value": 6
   },
   {
     "id": "bonus_play",
@@ -53,7 +53,7 @@
     "description": "+1 play next round",
     "rarity": "common",
     "min_wing": 1,
-    "gold_value": 8
+    "yen_value": 8
   },
   {
     "id": "bonus_discard",
@@ -61,7 +61,7 @@
     "description": "+1 discard next round",
     "rarity": "common",
     "min_wing": 1,
-    "gold_value": 5
+    "yen_value": 5
   },
   {
     "id": "wide_hand",
@@ -69,6 +69,6 @@
     "description": "+2 hand size next round",
     "rarity": "uncommon",
     "min_wing": 1,
-    "gold_value": 7
+    "yen_value": 7
   }
 ]

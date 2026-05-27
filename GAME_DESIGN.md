@@ -40,7 +40,7 @@ Mahjuro is a mahjong-inspired roguelite that makes mahjong approachable for west
 **Enhancements** (persistent on tiles while they stay in hand / until played) come from shop **talismans**—buff talismans stamp **every tile in hand** at use time (Brocade Pouch extends that stamp to all future draws):
 
 * **Pearl** — +100 chips per scored meld containing the tile
-* **Gilded** — +1 gold per scored meld containing the tile (separate from the chips × mult total)
+* **Gilded** — +¥1 per scored meld containing the tile (separate from the chips × mult total)
 * **Polychrome** — +0.25 mult (additive) per scored meld containing the tile (→ ×1.25 when that is the only mult source on the hand)
 
 Additional talismans **transform** selected tiles (suit shifts, honors, flowers, conformity, etc.).
@@ -103,7 +103,7 @@ A large **relic** pool is implemented (see `assets/data/relics.json`), spanning 
 * **Suit, rank, terminal, shop** — JadeSerpent, RubySerpent, LapisSerpent, LowTide, HighTide, MerchantsEye, EdgeRunner, LuckySeven
 * **Plays per round & conditional mult** — Momentum, Minimalist, TurtleShell, ClosedGate, GoldenEngine, SecondWind, GlassCannon
 * **Plays per round & scaling chips** — Snowball
-* **Interest & passive gold** — GoldIdol, JadeAbacus, NestEgg, Patience
+* **Interest & passive yen** — GoldIdol, JadeAbacus, NestEgg, Patience
 * **Retrigger, polish, lanterns, mirror** — LastBreath, TilePolisher, PaperLantern, StoneLantern, MirrorTile, Geese, VoiceOfThePeople, VoiceOfTheElite, TeaCeremony, GhostHand
 * **Ramp, fragile evolutions, inventory tricks** — Humility, Obsession, Bonfire, RiverRunner, MeltingIce, Taotie, SilkThread, SilkMoth, ShadowHand, SolitarySage, Disgust
 * **Hand-shape mult** — WayOfPairs, WayOfTriplets, WayOfSequences, WayOfPurity
@@ -119,13 +119,13 @@ Multiple **`RuleModifier`** variants — round rules and boss-pushed scoring/val
 * **Round rules:** Sequence Wrap (8-9-1 and 9-1-2 style wraps), Pair Double Score, No Sequences, Reduced Plays (3 plays for the round), Honor Triple Score, No-Sequence Bonus
 * **Boss validation/scoring:** Pairs Score Zero (Hermit), Sequences Halved (Forest), **Must Play Five** (Bureaucrat — selection must be exactly five tiles), Require Honor (Dragon final boss), Censor Repeats (Censor)
 
-Other boss effects use **tile debuffs**, relic taxes, gold-per-play hooks, etc.—for example **Drunkard** debuffs **rank-5** tiles so they do not contribute when scored (not expressed as a round `RuleModifier`).
+Other boss effects use **tile debuffs**, relic taxes, yen-per-play hooks, etc.—for example **Drunkard** debuffs **rank-5** tiles so they do not contribute when scored (not expressed as a round `RuleModifier`).
 
 ### **H. Consumables & Slots**
 
 Talismans and zodiacs share one **consumable inventory** (default **2 slots**). **Brocade Pouch** adds **+1 slot** and changes how buff talismans apply to drawn tiles. Shop talismans are bought in the storeroom and used manually from the gameplay dish.
 
-**Memorial talismans (remnants)** — After a defeat, the House selects one **remnant** from your last run’s habits (blinds skipped, how you lost, discards, boss death, etc.). The next run grants exactly **one** memorial into a consumable slot (not bought in the shop; sellable for **4** gold). Using it applies an **in-round** benefit for the current blind only (extra plays/discards, hand stamp, gold on clear, next cash-in bonus, etc.).
+**Memorial talismans (remnants)** — After a defeat, the House selects one **remnant** from your last run’s habits (blinds skipped, how you lost, discards, boss death, etc.). The next run grants exactly **one** memorial into a consumable slot (not bought in the shop; sellable for **4** yen). Using it applies an **in-round** benefit for the current blind only (extra plays/discards, hand stamp, yen on clear, next cash-in bonus, etc.).
 
 ---
 
@@ -146,7 +146,7 @@ Tracked in `PlayerProgress` with a **tiered unlock ladder** driven by **runs com
 * Each tier unlocks **relic shop pools**, **round rules** available in shops/runs, and milestone copy for **yaku** / **dora** (dora scoring is active whenever indicators are on the wall; tier **L6** surfaces dora in level-up tables). The full yaku list scores in normal runs; **Kokushi Musō** stays hidden in reference UI until first cash-in.
 * A capped **high-score list** per profile; **run history** records finished runs for analytics and stake unlocks.
 * **Stake** ladder (**Spring → Summer → Autumn → Winter**) raises targets, shop prices, reroll base cost, and boss floors; **Winter** also adds the **No-Sequence Bonus** rule every round. Higher stakes unlock per **tile material** after clearing the previous stake with that material.
-* First **victory** unlocks **Plastic** tiles (+1 starting discard); **Tortoise Shell** grants bonus starting gold (material choice at run start).
+* First **victory** unlocks **Plastic** tiles (+1 starting discard); **Tortoise Shell** grants bonus starting yen (material choice at run start).
 
 ### **C. Knowledge Progression**
 
@@ -159,7 +159,7 @@ Tracked in `PlayerProgress` with a **tiered unlock ladder** driven by **runs com
 
 ## **5. Difficulty Scaling**
 
-* Many distinct **boss kinds** in code, grouped into soft / medium / hard / reactive pools, with **Dragon** on the final ante (full roster in `assets/data/bosses.json` + `BossKind` in `boss.rs`)—effects mix `RuleModifier` pushes, **tile debuffs**, gold taxes, hand-size tweaks, and reactive “pick at reveal” variants (**Mirror**, **Counterweight**, **Tax Collector**).
+* Many distinct **boss kinds** in code, grouped into soft / medium / hard / reactive pools, with **Dragon** on the final ante (full roster in `assets/data/bosses.json` + `BossKind` in `boss.rs`)—effects mix `RuleModifier` pushes, **tile debuffs**, taxes, tweaks, and reactive “pick at reveal” variants (**Mirror**, **Counterweight**, **Tax Collector**).
 * Score targets rise with **run_number** (every blind faced or skipped) and **stake** (`base_target`); ante progression swaps boss pools and round wind
 * Round rules and boss hooks stack in later antes
 * The **Dragon** final boss pushes **Require Honor** (structure must include an honor tile)

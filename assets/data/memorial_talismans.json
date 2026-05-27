@@ -14,13 +14,13 @@
   {
     "id": "skipper",
     "name": "The Skipper",
-    "description": "Use: +$4 when you clear this blind.",
+    "description": "Use: +¥4 yen when you clear this blind.",
     "accent": [0.72, 0.68, 0.42, 1.0]
   },
   {
     "id": "hoarder",
     "name": "The Hoarder",
-    "description": "Use: gain $6 immediately.",
+    "description": "Use: gain ¥6 yen immediately.",
     "accent": [0.92, 0.78, 0.28, 1.0]
   },
   {

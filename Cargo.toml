@@ -1,5 +1,13 @@
 [workspace]
-members = [".", "crates/mahjuro-headless"]
+members = [
+    ".",
+    "crates/mahjuro-assets",
+    "crates/mahjuro-gfx-types",
+    "crates/mahjuro-types",
+    "crates/mahjuro-core",
+    "crates/mahjuro-render",
+    "crates/mahjuro-headless",
+]
 default-members = ["."]
 resolver = "2"
 
@@ -16,9 +24,16 @@ game = [
     "dep:rodio",
     "dep:muda",
     "dep:arboard",
+    "mahjuro-render/clipboard",
 ]
-headless-bake = ["dep:rodio", "dep:steamworks"]
-headless-screenshot = ["dep:rodio", "dep:arboard", "dep:steamworks"]
+headless-bake = []
+headless-screenshot = [
+    "dep:rodio",
+    "dep:arboard",
+    "dep:steamworks",
+    "mahjuro-render/clipboard",
+]
+bake-support = []
 
 [[bin]]
 name = "mahjuro"
@@ -41,6 +56,11 @@ opt-level = 2
 opt-level = 3
 
 [dependencies]
+mahjuro-assets = { path = "crates/mahjuro-assets" }
+mahjuro-gfx-types = { path = "crates/mahjuro-gfx-types" }
+mahjuro-types = { path = "crates/mahjuro-types" }
+mahjuro-core = { path = "crates/mahjuro-core" }
+mahjuro-render = { path = "crates/mahjuro-render", default-features = false }
 anyhow = "1.0.102"
 bytemuck = { version = "1.23", features = ["derive"] }
 cassowary = "0.3.0"

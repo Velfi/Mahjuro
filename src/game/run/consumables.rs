@@ -88,11 +88,11 @@ impl RunState {
             MemorialTalismanKind::Skipper => {
                 let bonus =
                     4u32.saturating_add(snapshot.map(|s| s.journal.chambers_skipped).unwrap_or(0));
-                self.memorial_round.clear_gold_bonus = bonus.min(12);
+                self.memorial_round.clear_yen_bonus = bonus.min(12);
             }
             MemorialTalismanKind::Hoarder => {
-                self.apply_gold_reward(
-                    MemorialTalismanKind::HOARDER_GOLD as i32,
+                self.apply_yen_reward(
+                    MemorialTalismanKind::HOARDER_YEN as i32,
                     Some(bus),
                 );
             }

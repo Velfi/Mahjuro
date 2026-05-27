@@ -5,17 +5,22 @@
 
 #![deny(unused_imports)]
 
-pub mod asset_path;
-mod asset_sources;
-#[cfg(any(
-    feature = "game",
-    feature = "headless-bake",
-    feature = "headless-screenshot"
-))]
+pub use mahjuro_assets::asset_path;
+pub use mahjuro_assets::asset_sources;
+pub mod core;
+pub use mahjuro_render as render;
+
+/// Ordeal presentation helpers (`def` / `name` / `tier`) live in the game crate.
+pub use game::ordeal::OrdealKindExt;
+pub mod sfx_id;
+#[cfg(any(feature = "game", feature = "headless-screenshot"))]
 mod audio;
+#[cfg(feature = "bake-support")]
+pub mod audio {
+    pub use crate::sfx_id::{all_sfx_ids, AmbientId, MusicId, SfxId};
+}
 #[cfg(any(feature = "game", feature = "headless-screenshot"))]
 pub mod bot;
-pub mod core;
 #[cfg(feature = "game")]
 mod crash_guard;
 #[cfg(feature = "game")]
@@ -55,24 +60,22 @@ pub mod main_render_settings;
 #[path = "main/room_gltf_brownout.rs"]
 mod main_room_gltf_brownout;
 pub mod persistence;
-mod physical_size;
-pub mod render;
+pub use mahjuro_render::physical_size;
 #[cfg(any(feature = "game", feature = "headless-screenshot"))]
 #[path = "main/scene_transition.rs"]
 mod scene_transition;
 pub mod scenes;
 #[cfg(any(
     feature = "game",
-    feature = "headless-bake",
-    feature = "headless-screenshot"
+    feature = "headless-screenshot",
+    feature = "bake-support"
 ))]
 mod sdl_shell;
-mod startup_profile;
-#[cfg(any(
-    feature = "game",
-    feature = "headless-bake",
-    feature = "headless-screenshot"
-))]
+pub use mahjuro_render::startup_profile;
+#[cfg(any(feature = "game", feature = "headless-screenshot"))]
+mod steam;
+#[cfg(feature = "bake-support")]
+#[path = "steam/bake_stub.rs"]
 mod steam;
 pub mod ui;
 

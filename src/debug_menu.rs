@@ -34,7 +34,7 @@ use crate::core::zodiac::ZodiacKind;
 #[derive(Clone, Debug)]
 pub enum DebugAction {
     SetLevel(u32),
-    SetGold(u32),
+    SetYen(u32),
     AddRelic(RelicId),
     ClearRelics,
     AddTalisman(TalismanKind),
@@ -374,7 +374,7 @@ impl DebugMenuBar {
         let gold_sub = Submenu::new("Set Gold", true);
         for &amount in &[0u32, 10, 50, 100, 500, 9999] {
             let item = MenuItem::new(format!("{amount} Gold"), true, None);
-            mappings.push((item.id().clone(), DebugAction::SetGold(amount)));
+            mappings.push((item.id().clone(), DebugAction::SetYen(amount)));
             let _ = gold_sub.append(&item);
         }
         let _ = cheats_sub.append(&gold_sub);

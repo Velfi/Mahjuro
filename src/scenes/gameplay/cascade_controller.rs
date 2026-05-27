@@ -150,7 +150,7 @@ pub(super) fn tick_active_cascade(
                     StepKind::Mult if mult_delta.abs() > 0.001 => {
                         Some(format!("{mult_delta:+.1}x"))
                     }
-                    StepKind::Gold => Some(step.source.clone()),
+                    StepKind::Yen => Some(step.source.clone()),
                     StepKind::Final => Some(format!("={}", step.running_total)),
                     _ => None,
                 };

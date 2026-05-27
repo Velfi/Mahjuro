@@ -3,6 +3,7 @@
 //! See [`chart_primitives`](crate::ui::chart_primitives) and
 //! [chart guidelines](https://guides.library.duke.edu/datavis/topten).
 
+use crate::core::OrdealKindExt;
 use crate::render::theme::color;
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::scenes::archive_career::{

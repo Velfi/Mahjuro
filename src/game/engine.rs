@@ -13,6 +13,7 @@
 use crate::core::consumable::Consumable;
 use crate::core::hand::DetectedMeld;
 use crate::core::ordeal::OrdealKind;
+use crate::core::OrdealKindExt;
 use crate::core::progression::PlayerProgress;
 use crate::core::relic::{RelicId, RelicState, apply_merchants_eye_discount};
 use crate::core::rules::ChamberKind;
@@ -95,7 +96,7 @@ pub struct EngineSnapshot {
     pub structure_sets: usize,
     pub consumable_count: usize,
     pub round_score: u64,
-    pub gold: i32,
+    pub yen: i32,
     pub plays_remaining: u32,
     pub discards_remaining: u32,
 }
@@ -109,7 +110,7 @@ impl EngineSnapshot {
             structure_sets: run.structure_sets().len(),
             consumable_count: run.consumables.items.len(),
             round_score: run.round_score,
-            gold: run.gold,
+            yen: run.yen,
             plays_remaining: run.plays_remaining,
             discards_remaining: run.discards_remaining,
         }
@@ -160,9 +161,9 @@ pub struct GameEngine<'a> {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ConsumedShopTags {
-    pub free_reroll: bool,
-    pub patron_gift: bool,
-    pub rich_stock: bool,
+    pub free_reroll: u32,
+    pub patron_gift: u32,
+    pub rich_stock: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -225,7 +226,7 @@ pub enum ShopCommandData {
         pack_kind: TilePackKind,
     },
     Rerolled {
-        /// True for a skip-tag free reroll (`cost == 0`) or when [RelicId::IGotAGuy] waived gold.
+        /// True for a skip-tag free reroll (`cost == 0`) or when [RelicId::IGotAGuy] waived yen.
         skip_cost_escalation: bool,
     },
 }
@@ -287,7 +288,7 @@ pub struct GameplayReadModel {
     pub plays_max: u32,
     pub discards_remaining: u32,
     pub discards_max: u32,
-    pub gold: i32,
+    pub yen: i32,
     pub available_yaku: Vec<YakuKind>,
     pub has_dora_crown: bool,
 }
@@ -314,8 +315,8 @@ pub struct ShopOwnedConsumable {
 
 #[derive(Clone, Debug)]
 pub struct ShopReadModel {
-    pub gold: i32,
-    pub display_gold: u32,
+    pub yen: i32,
+    pub display_yen: u32,
     pub relics_full: bool,
     pub consumables_full: bool,
     pub relic_state: RelicState,
@@ -448,9 +449,9 @@ impl<'a> GameEngine<'a> {
             patron_gift: run.tag_patron_gift,
             rich_stock: run.tag_rich_stock,
         };
-        run.tag_free_reroll = false;
-        run.tag_patron_gift = false;
-        run.tag_rich_stock = false;
+        run.tag_free_reroll = 0;
+        run.tag_patron_gift = 0;
+        run.tag_rich_stock = 0;
         tags
     }
 
@@ -540,8 +541,8 @@ impl<'a> GameEngine<'a> {
             }
         }
         ShopReadModel {
-            gold: run.gold,
-            display_gold: run.gold.max(0) as u32,
+            yen: run.yen,
+            display_yen: run.yen.max(0) as u32,
             relics_full: run.relics.is_full(),
             consumables_full: run.consumables.is_full(),
             relic_state: run.relics.clone(),
@@ -557,16 +558,12 @@ impl<'a> GameEngine<'a> {
     }
 
     pub fn shop_extra_relic_stock(run: &RunState) -> usize {
-        let extra_relics: usize = if run.tag_rich_stock { 2 } else { 0 };
-        if run.tag_patron_gift {
-            extra_relics.max(1)
-        } else {
-            extra_relics
-        }
+        let rich_stock = run.tag_rich_stock as usize * 2;
+        rich_stock.max(run.tag_patron_gift as usize)
     }
 
     pub fn shop_has_patron_gift(run: &RunState) -> bool {
-        run.tag_patron_gift
+        run.tag_patron_gift > 0
     }
 
     pub fn read_pick_chamber(run: &RunState) -> PickChamberReadModel {
@@ -720,7 +717,7 @@ impl<'a> GameEngine<'a> {
             plays_max: core.plays_max,
             discards_remaining: core.discards_remaining,
             discards_max: core.discards_max,
-            gold: core.gold,
+            yen: core.yen,
             available_yaku: core.available_yaku.clone(),
             has_dora_crown: run.relics.has(RelicId::DoraCrown),
         }
@@ -918,7 +915,7 @@ impl<'a> GameEngine<'a> {
         let queue_start = self.bus.queue.len();
         let data = match command {
             ShopCommand::BuyRelic { relic, price } => {
-                if self.run.gold < price as i32 {
+                if self.run.yen < price as i32 {
                     return ShopCommandOutcome::rejected(
                         command,
                         before,
@@ -934,48 +931,13 @@ impl<'a> GameEngine<'a> {
                     );
                 }
                 self.run
-                    .apply_gold_delta(-(price as i32), Some(&mut self.bus));
-                self.run.relics.active.push(relic);
+                    .apply_yen_delta(-(price as i32), Some(&mut self.bus));
+                self.run.grant_relic(relic);
                 self.run.defeat_journal.shop_relic_buys =
                     self.run.defeat_journal.shop_relic_buys.saturating_add(1);
                 self.bus
                     .push(GameEvent::UiSound(crate::audio::SfxId::Purchase));
                 self.bus.push(GameEvent::PlayRelicStinger(relic));
-                match relic {
-                    RelicId::MeltingIce => {
-                        self.run.relic_counters.insert(
-                            RelicId::MeltingIce,
-                            crate::core::relic::MELTING_ICE_START_CHIPS,
-                        );
-                    }
-                    RelicId::Taotie => {
-                        self.run.relic_counters.insert(RelicId::Taotie, 0);
-                    }
-                    RelicId::SilkThread => {
-                        self.run.relic_counters.insert(RelicId::SilkThread, 40);
-                    }
-                    RelicId::SilkMoth => {
-                        self.run.relic_counters.insert(RelicId::SilkMoth, 0);
-                    }
-                    RelicId::RustlingGooseEgg => {
-                        self.run.relic_counters.insert(RelicId::RustlingGooseEgg, 3);
-                    }
-                    RelicId::TeaCeremony => {
-                        self.run.relic_counters.insert(RelicId::TeaCeremony, 0);
-                    }
-                    RelicId::Chrysalis => {
-                        self.run.relic_counters.insert(RelicId::MonarchButterfly, 0);
-                    }
-                    RelicId::MonarchButterfly => {
-                        self.run.relic_counters.insert(RelicId::MonarchButterfly, 0);
-                    }
-                    RelicId::IGotAGuy => {
-                        self.run.relic_counters.insert(RelicId::IGotAGuy, 3);
-                    }
-                    RelicId::Rakuware => {}
-                    _ => {}
-                }
-                self.run.recompute_capacities();
                 ShopCommandData::None
             }
             ShopCommand::SellRelic { index } => {
@@ -1003,7 +965,7 @@ impl<'a> GameEngine<'a> {
                     self.run.relic_counters.remove(&RelicId::IGotAGuy);
                 }
                 self.run
-                    .apply_gold_reward(refund as i32, Some(&mut self.bus));
+                    .apply_yen_reward(refund as i32, Some(&mut self.bus));
                 self.bus.push(GameEvent::UiSound(crate::audio::SfxId::Sell));
                 *self.run.relic_counters.entry(RelicId::Bonfire).or_insert(0) += 1;
                 if self.run.relics.has(RelicId::Bonfire) {
@@ -1034,7 +996,7 @@ impl<'a> GameEngine<'a> {
                 ShopCommandData::None
             }
             ShopCommand::BuyZodiac { zodiac, price } => {
-                if self.run.gold < price as i32 {
+                if self.run.yen < price as i32 {
                     return ShopCommandOutcome::rejected(
                         command,
                         before,
@@ -1042,7 +1004,7 @@ impl<'a> GameEngine<'a> {
                     );
                 }
                 self.run
-                    .apply_gold_delta(-(price as i32), Some(&mut self.bus));
+                    .apply_yen_delta(-(price as i32), Some(&mut self.bus));
                 self.bus
                     .push(GameEvent::UiSound(crate::audio::SfxId::Purchase));
                 let yaku = zodiac.yaku();
@@ -1054,7 +1016,7 @@ impl<'a> GameEngine<'a> {
                 }
             }
             ShopCommand::BuyTalisman { kind, price } => {
-                if self.run.gold < price as i32 {
+                if self.run.yen < price as i32 {
                     return ShopCommandOutcome::rejected(
                         command,
                         before,
@@ -1069,7 +1031,7 @@ impl<'a> GameEngine<'a> {
                     );
                 }
                 self.run
-                    .apply_gold_delta(-(price as i32), Some(&mut self.bus));
+                    .apply_yen_delta(-(price as i32), Some(&mut self.bus));
                 self.run.consumables.items.push(Consumable::Talisman(kind));
                 self.run.defeat_journal.shop_talisman_buys =
                     self.run.defeat_journal.shop_talisman_buys.saturating_add(1);
@@ -1091,7 +1053,7 @@ impl<'a> GameEngine<'a> {
                     consumable_sell_price_for_mode(consumable, &self.run.mode, &self.run.relics);
                 self.run.consumables.items.remove(index);
                 self.run
-                    .apply_gold_reward(refund as i32, Some(&mut self.bus));
+                    .apply_yen_reward(refund as i32, Some(&mut self.bus));
                 self.bus.push(GameEvent::UiSound(crate::audio::SfxId::Sell));
                 ShopCommandData::None
             }
@@ -1119,7 +1081,7 @@ impl<'a> GameEngine<'a> {
                 }
             }
             ShopCommand::BuyPack { kind, price } => {
-                if self.run.gold < price as i32 {
+                if self.run.yen < price as i32 {
                     return ShopCommandOutcome::rejected(
                         command,
                         before,
@@ -1127,7 +1089,7 @@ impl<'a> GameEngine<'a> {
                     );
                 }
                 self.run
-                    .apply_gold_delta(-(price as i32), Some(&mut self.bus));
+                    .apply_yen_delta(-(price as i32), Some(&mut self.bus));
                 let pack_idx = self.run.tile_packs.len();
                 let start_id = PACK_TILE_ID_BASE + (pack_idx as u32) * PACK_ID_STRIDE;
                 let mut tiles = kind.generate_tiles(start_id);
@@ -1148,10 +1110,10 @@ impl<'a> GameEngine<'a> {
                 }
             }
             ShopCommand::RerollShop { cost } => {
-                let mut gold_cost = cost;
+                let mut yen_cost = cost;
                 // Skip-tag free reroll (`cost == 0`) and I Got A Guy waivers keep the listed price.
                 let mut skip_cost_escalation = cost == 0;
-                if gold_cost > 0
+                if yen_cost > 0
                     && self.run.relics.has(RelicId::IGotAGuy)
                     && self
                         .run
@@ -1164,10 +1126,10 @@ impl<'a> GameEngine<'a> {
                     if let Some(n) = self.run.relic_counters.get_mut(&RelicId::IGotAGuy) {
                         *n -= 1;
                     }
-                    gold_cost = 0;
+                    yen_cost = 0;
                     skip_cost_escalation = true;
                 }
-                if self.run.gold < gold_cost as i32 {
+                if self.run.yen < yen_cost as i32 {
                     return ShopCommandOutcome::rejected(
                         command,
                         before,
@@ -1175,7 +1137,7 @@ impl<'a> GameEngine<'a> {
                     );
                 }
                 self.run
-                    .apply_gold_delta(-(gold_cost as i32), Some(&mut self.bus));
+                    .apply_yen_delta(-(yen_cost as i32), Some(&mut self.bus));
                 ShopCommandData::Rerolled {
                     skip_cost_escalation,
                 }
@@ -1204,13 +1166,13 @@ impl<'a> GameEngine<'a> {
         {
             events.push(EngineEvent::ScoreChanged { delta: score_delta });
         }
-        let gold_delta = after.gold - before.gold;
-        if gold_delta != 0
+        let yen_delta = after.yen - before.yen;
+        if yen_delta != 0
             && !events
                 .iter()
                 .any(|event| matches!(event, EngineEvent::GoldChanged { .. }))
         {
-            events.push(EngineEvent::GoldChanged { delta: gold_delta });
+            events.push(EngineEvent::GoldChanged { delta: yen_delta });
         }
         if matches!(data, CommandData::TriggerStructure { earned } if earned > 0)
             && !events
@@ -1317,7 +1279,7 @@ impl<'a> GameEngine<'a> {
         }
         if before.plays_remaining != after.plays_remaining
             || before.discards_remaining != after.discards_remaining
-            || before.gold != after.gold
+            || before.yen != after.yen
         {
             hints.push(UiHint::Resources);
         }
@@ -1339,13 +1301,13 @@ impl<'a> GameEngine<'a> {
     ) -> ShopCommandOutcome {
         let after = self.snapshot();
         let mut events = self.map_bus_events(&self.bus.queue[queue_start..]);
-        let gold_delta = after.gold - before.gold;
-        if gold_delta != 0
+        let yen_delta = after.yen - before.yen;
+        if yen_delta != 0
             && !events
                 .iter()
                 .any(|event| matches!(event, EngineEvent::GoldChanged { .. }))
         {
-            events.push(EngineEvent::GoldChanged { delta: gold_delta });
+            events.push(EngineEvent::GoldChanged { delta: yen_delta });
         }
         if matches!(data, ShopCommandData::ZodiacApplied { .. }) {
             events.push(EngineEvent::ZodiacLevelUp);
@@ -1620,7 +1582,7 @@ mod tests {
         let mut run = deterministic_run();
         run.small_chamber_tag = Some(TagKind::GoldIngot);
         run.upcoming_chamber = ChamberKind::Small;
-        let gold_before = run.gold;
+        let yen_before = run.yen;
         let mut bus = EventBus::default();
         let mut engine = GameEngine::new(&mut run, &mut bus);
 
@@ -1641,13 +1603,13 @@ mod tests {
                 next_chamber: ChamberKind::Big
             }
         )));
-        assert_eq!(run.gold, gold_before + 8);
+        assert_eq!(run.yen, yen_before + 8);
     }
 
     #[test]
-    fn buy_relic_shop_command_deducts_gold_and_adds_relic() {
+    fn buy_relic_shop_command_deducts_yen_and_adds_relic() {
         let mut run = deterministic_run();
-        run.gold = 20;
+        run.yen = 20;
         let relic = RelicId::MeltingIce;
         let price = 7;
         let mut bus = EventBus::default();
@@ -1657,7 +1619,7 @@ mod tests {
 
         assert_eq!(outcome.rejection, None);
         assert!(run.relics.active.contains(&relic));
-        assert_eq!(run.gold, 13);
+        assert_eq!(run.yen, 13);
         assert_eq!(
             run.relic_counters.get(&RelicId::MeltingIce),
             Some(&crate::core::relic::MELTING_ICE_START_CHIPS)
@@ -1671,7 +1633,7 @@ mod tests {
     #[test]
     fn buy_zodiac_shop_command_reports_level_up_payload() {
         let mut run = deterministic_run();
-        run.gold = 10;
+        run.yen = 10;
         let zodiac = ZodiacKind::Rat;
         let mut bus = EventBus::default();
 
@@ -1679,7 +1641,7 @@ mod tests {
             .dispatch_shop(ShopCommand::BuyZodiac { zodiac, price: 5 });
 
         assert_eq!(outcome.rejection, None);
-        assert_eq!(run.gold, 5);
+        assert_eq!(run.yen, 5);
         assert_eq!(run.yaku_levels.level_of(zodiac.yaku()), 2);
         assert_eq!(
             outcome.data,
@@ -1692,10 +1654,10 @@ mod tests {
     }
 
     #[test]
-    fn reroll_shop_rejects_without_mutation_when_gold_is_low() {
+    fn reroll_shop_rejects_without_mutation_when_yen_is_low() {
         let mut run = deterministic_run();
-        run.gold = 1;
-        let before = run.gold;
+        run.yen = 1;
+        let before = run.yen;
         let mut bus = EventBus::default();
 
         let outcome =
@@ -1705,14 +1667,14 @@ mod tests {
             outcome.rejection,
             Some(ShopCommandRejection::InsufficientGold)
         );
-        assert_eq!(run.gold, before);
+        assert_eq!(run.yen, before);
         assert_eq!(outcome.before, outcome.after);
     }
 
     #[test]
-    fn reroll_shop_spends_i_got_a_guy_charge_when_gold_is_low() {
+    fn reroll_shop_spends_i_got_a_guy_charge_when_yen_is_low() {
         let mut run = deterministic_run();
-        run.gold = 0;
+        run.yen = 0;
         run.relics
             .active
             .push(crate::core::relic::RelicId::IGotAGuy);
@@ -1724,7 +1686,7 @@ mod tests {
             GameEngine::new(&mut run, &mut bus).dispatch_shop(ShopCommand::RerollShop { cost: 5 });
 
         assert_eq!(outcome.rejection, None);
-        assert_eq!(run.gold, 0);
+        assert_eq!(run.yen, 0);
         assert_eq!(
             run.relic_counters
                 .get(&crate::core::relic::RelicId::IGotAGuy)
@@ -1742,7 +1704,7 @@ mod tests {
     #[test]
     fn reroll_shop_paid_does_not_skip_cost_escalation() {
         let mut run = deterministic_run();
-        run.gold = 100;
+        run.yen = 100;
         let mut bus = EventBus::default();
 
         let outcome =
@@ -1758,15 +1720,15 @@ mod tests {
     }
 
     #[test]
-    fn reroll_shop_rejects_when_gold_low_and_no_i_got_a_guy_charges() {
+    fn reroll_shop_rejects_when_yen_low_and_no_i_got_a_guy_charges() {
         let mut run = deterministic_run();
-        run.gold = 0;
+        run.yen = 0;
         run.relics
             .active
             .push(crate::core::relic::RelicId::IGotAGuy);
         run.relic_counters
             .insert(crate::core::relic::RelicId::IGotAGuy, 0);
-        let before_gold = run.gold;
+        let before_yen = run.yen;
         let mut bus = EventBus::default();
 
         let outcome =
@@ -1776,13 +1738,13 @@ mod tests {
             outcome.rejection,
             Some(ShopCommandRejection::InsufficientGold)
         );
-        assert_eq!(run.gold, before_gold);
+        assert_eq!(run.yen, before_yen);
     }
 
     #[test]
     fn reroll_shop_zero_cost_does_not_spend_i_got_a_guy_charge() {
         let mut run = deterministic_run();
-        run.gold = 0;
+        run.yen = 0;
         run.relics
             .active
             .push(crate::core::relic::RelicId::IGotAGuy);
@@ -1809,7 +1771,7 @@ mod tests {
     }
 
     #[test]
-    fn memorial_sell_price_is_flat_four_gold_except_hoarder() {
+    fn memorial_sell_price_is_flat_four_yen_except_hoarder() {
         use crate::core::memorial_talisman::MemorialTalismanKind;
 
         let run = deterministic_run();
@@ -1825,7 +1787,7 @@ mod tests {
             &run.mode,
             &run.relics,
         );
-        assert_eq!(hoarder_price, MemorialTalismanKind::HOARDER_GOLD);
+        assert_eq!(hoarder_price, MemorialTalismanKind::HOARDER_YEN);
     }
 
     #[test]

@@ -167,7 +167,9 @@ fn game_over_defeat_scene(
     run: &mut RunState,
     progress: &mut mahjuro::core::progression::PlayerProgress,
 ) -> anyhow::Result<Scene> {
-    use mahjuro::core::memorial_talisman::{select_memorial, snapshot_from_run};
+    use mahjuro::core::memorial_talisman::select_memorial;
+    use mahjuro::game::memorial_run::snapshot_from_run;
+    use mahjuro::game::progression_run::{hydrate_game_over_run, run_record_defeat_reason};
     use mahjuro::game::event_bus::GameOverReason;
 
     if s.bot_play && s.from_run_history.is_some() {
@@ -188,10 +190,10 @@ fn game_over_defeat_scene(
                 progress.run_history.len()
             )
         })?;
-        let reason = rec.defeat_reason().ok_or_else(|| {
+        let reason = run_record_defeat_reason(rec).ok_or_else(|| {
             anyhow::anyhow!("profile run_history[{idx}] is not a defeat (use a defeat index)")
         })?;
-        rec.hydrate_game_over_run(run);
+        hydrate_game_over_run(rec, run);
         reason
     } else if s.bot_play {
         let (terminal, stats) = mahjuro::bot::play_bot_run(

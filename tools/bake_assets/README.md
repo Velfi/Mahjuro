@@ -29,7 +29,7 @@ Outputs `pack_manifest.json`, `mahjuro-pack-shared.zip`, `mahjuro-pack-gameplay.
 
 Release CI (Windows / macOS) installs `ffmpeg`, `pngquant`, and `oxipng` before baking so `--lossy` optimizers run on tagged builds.
 
-### Room GLB textures (`shop`, `hallway`, `archive`, `main_menu`)
+### Room GLB textures (`shop`, `hallway`, `archive`, `main_menu`, `staircase`, `gameplay`)
 
 At runtime the game caps room textures to **1024px** and builds mip chains on the CPU when uploading to the GPU. Large source GLBs (e.g. multi‑hundred‑MB `Shop.glb`) dominate startup.
 
@@ -37,7 +37,7 @@ When **`gltf-transform`** is on `PATH` (`npm i -g @gltf-transform/cli`), the bak
 
 `gltf-transform resize <input.glb> <output> --width 1024 --height 1024`
 
-for those four room files before they go into `mahjuro-pack-gameplay.zip`. Without the tool, GLBs are copied as-is and a warning is printed for files over 32 MB.
+for those room files before they go into `mahjuro-pack-gameplay.zip`. Without the tool, GLBs are copied as-is and a warning is printed for files over 32 MB.
 
 Authoring tip: export room textures at ≤1024 in Blender so decode + pack size stay small even without `gltf-transform`.
 

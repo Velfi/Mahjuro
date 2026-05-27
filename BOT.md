@@ -44,7 +44,7 @@ each turn evaluates ~16k bitmasks; debug builds are 10–20× slower.
 | `--target-scale F` | f32 | 1.7 | Multiplier applied to `base_target` when an ante completes. |
 | `--plays N` | u32 | 4 | `starting_plays` per blind. |
 | `--discards N` | u32 | 3 | `starting_discards` per blind. |
-| `--gold N` | u32 | 4 | `starting_gold`. |
+| `--yen N` | u32 | 4 | `starting_yen`. |
 | `--bot-run-timeout-secs N` | u32 | 10 | Wall-clock cap per run **attempt** (seconds). `0` = off. |
 | `--timeout-retries N` | u32 | 1 | Extra attempts after a timeout (`1` ⇒ up to 2 tries per scheduled run). |
 
@@ -63,8 +63,8 @@ max ante reached:    3
 avg total score:     2911
 avg plays used:      13.65
 avg discards used:   3.06 (2.77 strategic, 0.30 random)
-avg blinds skipped:  1.50      ← Small/Big skipped to bank gold
-avg relics bought:   2.04 (avg gold spent: 12.4)
+avg blinds skipped:  1.50      ← Small/Big skipped to bank yen
+avg relics bought:   2.04 (avg yen spent: 12.4)
 
 deaths by ante:
   ante  1:    4 (  2.0%) #
@@ -146,7 +146,7 @@ Per turn, in [src/bot.rs](src/bot.rs)::`play_blind`:
 Per blind, in `play_run`:
 
 1. **Skip strategy.** Skip Small/Big blinds when projected score
-   (`best_play × plays_remaining`) ≥ 2× the target — banks `skip_reward()` gold
+   (`best_play × plays_remaining`) ≥ 2× the target — banks `skip_reward()` yen
    without burning plays. Boss never skipped.
 2. **Apply blind, play it.** See above.
 3. **Shop marginal values (relics / zodiacs / talismans / packs).** For each

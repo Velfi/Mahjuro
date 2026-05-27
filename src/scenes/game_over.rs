@@ -3,7 +3,8 @@
 use std::time::Instant;
 
 use crate::audio::SfxId;
-use crate::core::memorial_talisman::{MemorialTalismanKind, select_memorial, snapshot_from_run};
+use crate::core::memorial_talisman::{MemorialTalismanKind, select_memorial};
+use crate::game::memorial_run::snapshot_from_run;
 use crate::core::progression::{
     LEVEL_UP_POINTS_FOR_LOSS, LEVEL_UP_POINTS_FOR_WIN, MAX_PROGRESS_LEVEL, POINTS_PER_LEVEL,
     PlayerProgress, meta_depth_roman,

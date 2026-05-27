@@ -100,7 +100,7 @@ pub struct BotScoringAction {
     pub other_points: Option<u64>,
     /// Gold in wallet at score time (used by economy relics like Golden Engine).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gold_held: Option<i32>,
+    pub yen_held: Option<i32>,
     /// Golden Engine mult bonus (`floor(gold_held / 3)`) when active.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub golden_engine_mult_bonus: Option<i32>,
@@ -127,8 +127,8 @@ pub struct PeakChamberSnapshot {
     pub relics: Vec<String>,
     /// Wallet gold at blind end (also used by Golden Engine scaling).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gold_held: Option<i32>,
-    /// `floor(gold_held / 3)` at blind end when Golden Engine is active.
+    pub yen_held: Option<i32>,
+    /// `floor(yen_held / 3)` at blind end when Golden Engine is active.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub golden_engine_mult_bonus: Option<i32>,
     /// Active relic slot state at blind end (counter/debuff visibility).
@@ -160,7 +160,7 @@ pub struct RunStats {
     pub plays_used: u32,
     pub discards_used: u32,
     pub strategic_discards: u32,
-    pub final_gold: i32,
+    pub final_yen: i32,
     pub chambers_skipped: u32,
     pub relics_bought: u32,
     /// Proactive or swap-driven relic sells during shop visits.
@@ -201,17 +201,17 @@ pub struct RunStats {
     #[serde(default)]
     pub relic_score_mult_pts: std::collections::BTreeMap<&'static str, u64>,
     #[serde(default)]
-    pub relic_score_gold: std::collections::BTreeMap<&'static str, u64>,
+    pub relic_score_yen: std::collections::BTreeMap<&'static str, u64>,
     #[serde(default)]
     pub relic_score_triggers: std::collections::BTreeMap<&'static str, u32>,
-    pub gold_spent: u32,
-    pub gold_from_clears: u32,
-    pub gold_from_clear_base: u32,
-    pub gold_from_unused_plays: u32,
-    pub gold_from_interest: u32,
-    pub gold_from_clear_relics: u32,
-    pub gold_from_skip_tags: u32,
-    pub skip_tag_gold_value: u32,
+    pub yen_spent: u32,
+    pub yen_from_clears: u32,
+    pub yen_from_clear_base: u32,
+    pub yen_from_unused_plays: u32,
+    pub yen_from_interest: u32,
+    pub yen_from_clear_relics: u32,
+    pub yen_from_skip_tags: u32,
+    pub skip_tag_yen_value: u32,
     pub total_target_score: u64,
     pub total_overscore: u64,
     pub peak_chamber_score: u64,
@@ -256,10 +256,10 @@ pub struct RunStats {
     pub second_wind_forfeits: u32,
     /// Set when the run ends on [`RunState::round_failure_reason`]; absent for victory / odd losses.
     pub death_reason: Option<GameOverReason>,
-    pub gold_clear_green_luck: u32,
-    pub gold_clear_gold_idol: u32,
-    pub gold_clear_jade_abacus: u32,
-    pub gold_clear_patience: u32,
+    pub yen_clear_green_luck: u32,
+    pub yen_clear_gold_idol: u32,
+    pub yen_clear_jade_abacus: u32,
+    pub yen_clear_patience: u32,
     pub turns_total: u32,
     pub turns_by_chamber_slot: std::collections::BTreeMap<String, u32>,
     /// Turn count for blinds that **cleared** only (denominator-friendly with `cleared_by_slot`).
@@ -305,7 +305,7 @@ impl Default for RunStats {
             plays_used: 0,
             discards_used: 0,
             strategic_discards: 0,
-            final_gold: 0,
+            final_yen: 0,
             chambers_skipped: 0,
             relics_bought: 0,
             relics_sold: 0,
@@ -324,16 +324,16 @@ impl Default for RunStats {
             relic_score_points: std::collections::BTreeMap::new(),
             relic_score_chips: std::collections::BTreeMap::new(),
             relic_score_mult_pts: std::collections::BTreeMap::new(),
-            relic_score_gold: std::collections::BTreeMap::new(),
+            relic_score_yen: std::collections::BTreeMap::new(),
             relic_score_triggers: std::collections::BTreeMap::new(),
-            gold_spent: 0,
-            gold_from_clears: 0,
-            gold_from_clear_base: 0,
-            gold_from_unused_plays: 0,
-            gold_from_interest: 0,
-            gold_from_clear_relics: 0,
-            gold_from_skip_tags: 0,
-            skip_tag_gold_value: 0,
+            yen_spent: 0,
+            yen_from_clears: 0,
+            yen_from_clear_base: 0,
+            yen_from_unused_plays: 0,
+            yen_from_interest: 0,
+            yen_from_clear_relics: 0,
+            yen_from_skip_tags: 0,
+            skip_tag_yen_value: 0,
             total_target_score: 0,
             total_overscore: 0,
             peak_chamber_score: 0,
@@ -366,10 +366,10 @@ impl Default for RunStats {
             structure_trigger_points: 0,
             second_wind_forfeits: 0,
             death_reason: None,
-            gold_clear_green_luck: 0,
-            gold_clear_gold_idol: 0,
-            gold_clear_jade_abacus: 0,
-            gold_clear_patience: 0,
+            yen_clear_green_luck: 0,
+            yen_clear_gold_idol: 0,
+            yen_clear_jade_abacus: 0,
+            yen_clear_patience: 0,
             turns_total: 0,
             turns_by_chamber_slot: std::collections::BTreeMap::new(),
             turns_cleared_by_slot: std::collections::BTreeMap::new(),
@@ -401,15 +401,15 @@ pub struct AggregateStats {
     pub total_chambers_skipped: u64,
     pub total_relics_bought: u64,
     pub total_relics_sold: u64,
-    pub total_gold_spent: u64,
-    pub total_final_gold: i64,
-    pub total_gold_from_clears: u64,
-    pub total_gold_from_clear_base: u64,
-    pub total_gold_from_unused_plays: u64,
-    pub total_gold_from_interest: u64,
-    pub total_gold_from_clear_relics: u64,
-    pub total_gold_from_skip_tags: u64,
-    pub total_skip_tag_gold_value: u64,
+    pub total_yen_spent: u64,
+    pub total_final_yen: i64,
+    pub total_yen_from_clears: u64,
+    pub total_yen_from_clear_base: u64,
+    pub total_yen_from_unused_plays: u64,
+    pub total_yen_from_interest: u64,
+    pub total_yen_from_clear_relics: u64,
+    pub total_yen_from_skip_tags: u64,
+    pub total_skip_tag_yen_value: u64,
     pub total_target_score: u64,
     pub total_overscore: u64,
     pub peak_chamber_score: u64,
@@ -452,10 +452,10 @@ pub struct AggregateStats {
     pub total_second_wind_forfeits: u64,
     pub deaths_out_of_plays: u32,
     pub deaths_no_actions_remaining: u32,
-    pub total_gold_clear_green_luck: u64,
-    pub total_gold_clear_gold_idol: u64,
-    pub total_gold_clear_jade_abacus: u64,
-    pub total_gold_clear_patience: u64,
+    pub total_yen_clear_green_luck: u64,
+    pub total_yen_clear_gold_idol: u64,
+    pub total_yen_clear_jade_abacus: u64,
+    pub total_yen_clear_patience: u64,
     pub total_turns: u64,
     pub sum_peak_hand_size: u64,
     pub turns_by_chamber_slot: std::collections::BTreeMap<String, u64>,
@@ -504,7 +504,7 @@ pub struct AggregateStats {
     #[serde(default)]
     pub relic_score_mult_pts: std::collections::BTreeMap<&'static str, u64>,
     #[serde(default)]
-    pub relic_score_gold: std::collections::BTreeMap<&'static str, u64>,
+    pub relic_score_yen: std::collections::BTreeMap<&'static str, u64>,
     #[serde(default)]
     pub relic_score_triggers: std::collections::BTreeMap<&'static str, u64>,
     /// Runs that ended with `RunStats::run_timed_out` after all timeout retries.
@@ -530,19 +530,19 @@ impl AggregateStats {
         self.total_chambers_skipped += s.chambers_skipped as u64;
         self.total_relics_bought += s.relics_bought as u64;
         self.total_relics_sold += s.relics_sold as u64;
-        self.total_gold_spent += s.gold_spent as u64;
-        self.total_final_gold += s.final_gold as i64;
-        self.total_gold_from_clears += s.gold_from_clears as u64;
-        self.total_gold_from_clear_base += s.gold_from_clear_base as u64;
-        self.total_gold_from_unused_plays += s.gold_from_unused_plays as u64;
-        self.total_gold_from_interest += s.gold_from_interest as u64;
-        self.total_gold_from_clear_relics += s.gold_from_clear_relics as u64;
-        self.total_gold_from_skip_tags += s.gold_from_skip_tags as u64;
-        self.total_skip_tag_gold_value += s.skip_tag_gold_value as u64;
-        self.total_gold_clear_green_luck += s.gold_clear_green_luck as u64;
-        self.total_gold_clear_gold_idol += s.gold_clear_gold_idol as u64;
-        self.total_gold_clear_jade_abacus += s.gold_clear_jade_abacus as u64;
-        self.total_gold_clear_patience += s.gold_clear_patience as u64;
+        self.total_yen_spent += s.yen_spent as u64;
+        self.total_final_yen += s.final_yen as i64;
+        self.total_yen_from_clears += s.yen_from_clears as u64;
+        self.total_yen_from_clear_base += s.yen_from_clear_base as u64;
+        self.total_yen_from_unused_plays += s.yen_from_unused_plays as u64;
+        self.total_yen_from_interest += s.yen_from_interest as u64;
+        self.total_yen_from_clear_relics += s.yen_from_clear_relics as u64;
+        self.total_yen_from_skip_tags += s.yen_from_skip_tags as u64;
+        self.total_skip_tag_yen_value += s.skip_tag_yen_value as u64;
+        self.total_yen_clear_green_luck += s.yen_clear_green_luck as u64;
+        self.total_yen_clear_gold_idol += s.yen_clear_gold_idol as u64;
+        self.total_yen_clear_jade_abacus += s.yen_clear_jade_abacus as u64;
+        self.total_yen_clear_patience += s.yen_clear_patience as u64;
         self.total_target_score += s.total_target_score;
         self.total_overscore += s.total_overscore;
         let prev_peak = self.peak_chamber_score;
@@ -740,27 +740,27 @@ impl AggregateStats {
         out!(
             "avg relics bought:   {:.2} (avg gold spent: {:.1})",
             pr.relics_bought,
-            pr.gold_spent
+            pr.yen_spent
         );
         out!(
             "avg gold earned:     {:.1} clears + {:.1} skip-tags = {:.1}",
-            pr.gold_from_clears,
-            pr.gold_from_skip_tags,
-            pr.gold_from_clears + pr.gold_from_skip_tags
+            pr.yen_from_clears,
+            pr.yen_from_skip_tags,
+            pr.yen_from_clears + pr.yen_from_skip_tags
         );
         out!(
             "avg clear payout:    {:.1} base + {:.1} plays + {:.1} interest + {:.1} relics",
-            pr.gold_clear_base,
-            pr.gold_clear_unused_plays,
-            pr.gold_clear_interest,
-            pr.gold_clear_relics
+            pr.yen_clear_base,
+            pr.yen_clear_unused_plays,
+            pr.yen_clear_interest,
+            pr.yen_clear_relics
         );
         out!(
             "  (relic slice:      {:.1} green luck + {:.1} gold idol + {:.1} jade abacus + {:.1} patience)",
-            pr.gold_clear_green_luck,
-            pr.gold_clear_gold_idol,
-            pr.gold_clear_jade_abacus,
-            pr.gold_clear_patience
+            pr.yen_clear_green_luck,
+            pr.yen_clear_gold_idol,
+            pr.yen_clear_jade_abacus,
+            pr.yen_clear_patience
         );
         out!("avg second-wind forfeits: {:.2}", pr.second_wind_forfeits);
         out!(
@@ -779,9 +779,9 @@ impl AggregateStats {
             pr.relic_activations
         );
         out!(
-            "avg final gold:      {:.1} (avg skip-tag value taken: {:.1})",
-            pr.final_gold,
-            pr.skip_tag_gold_value
+            "avg final yen:      {:.1} (avg skip-tag value taken: {:.1})",
+            pr.final_yen,
+            pr.skip_tag_yen_value
         );
         out!(
             "avg targets faced:   {} (score/target {:.2}x, avg overscore {}, peak blind score {})",
@@ -1236,7 +1236,7 @@ pub(crate) struct ClearPayoutBreakdown {
 pub(crate) fn clear_payout_breakdown(run: &RunState) -> ClearPayoutBreakdown {
     let base_reward = run.chamber.clear_reward();
     let unused_play_bonus = run.plays_remaining;
-    let interest = (run.gold.max(0) as u32 / 5).min(3);
+    let interest = (run.yen.max(0) as u32 / 5).min(3);
     let green_luck_bonus = if run.relics.has(RelicId::GreenLuck) && !run.honors_scored_this_round {
         4
     } else {
@@ -1248,7 +1248,7 @@ pub(crate) fn clear_payout_breakdown(run: &RunState) -> ClearPayoutBreakdown {
         0
     };
     let jade_abacus_bonus = if run.relics.has(RelicId::JadeAbacus) {
-        (run.gold.max(0) as u32 / 4).min(4)
+        (run.yen.max(0) as u32 / 4).min(4)
     } else {
         0
     };

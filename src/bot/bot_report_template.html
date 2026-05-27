@@ -1739,7 +1739,7 @@
     header_chips.appendChild(el('span', 'chip chip--warm', stake));
     header_chips.appendChild(el('span', 'chip', 'target ' + (mode.base_target ?? '—')));
     if (mode.starting_gold != null) {
-      header_chips.appendChild(el('span', 'chip', '$' + mode.starting_gold + ' start'));
+      header_chips.appendChild(el('span', 'chip', '¥' + mode.starting_gold + ' start'));
     }
     if (mode.tile_material != null) {
       header_chips.appendChild(el('span', 'chip', tileMaterialLabel(mode.tile_material)));
@@ -2075,7 +2075,7 @@
     s2.appendChild(b2);
     s2.appendChild(document.createTextNode(
       stake + ' · target ' + (mode.base_target ?? '—') +
-      ' · $' + (mode.starting_gold ?? '—') + ' start · ' +
+      ' · ¥' + (mode.starting_gold ?? '—') + ' start · ' +
       (mode.starting_plays ?? '—') + ' plays · ' +
       (mode.starting_discards ?? '—') + ' discards'));
     const s3 = el('div');

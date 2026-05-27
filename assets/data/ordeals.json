@@ -1,7 +1,7 @@
 [
   { "id": "drought",       "name": "The Drought",       "description": "Start with half discards",                              "tier": "soft",   "min_wing": 1 },
   { "id": "whisper",       "name": "The Whisper",       "description": "Hand size −1",                                          "tier": "soft",   "min_wing": 1 },
-  { "id": "tribute",       "name": "The Tribute",       "description": "Pay 1 gold each play",                                  "tier": "soft",   "min_wing": 1 },
+  { "id": "tribute",       "name": "The Tribute",       "description": "Pay ¥1 each play",                                  "tier": "soft",   "min_wing": 1 },
   { "id": "gate",          "name": "The Ink Gate",      "description": "Manzu are debuffed",                               "tier": "soft",   "min_wing": 2 },
   { "id": "grove",         "name": "The Jade Grove",    "description": "Souzu are debuffed",                                  "tier": "soft",   "min_wing": 2 },
   { "id": "coin",          "name": "The Copper Wheel",  "description": "Pinzu are debuffed",                                  "tier": "soft",   "min_wing": 2 },
@@ -20,7 +20,7 @@
   { "id": "censor",        "name": "The Censor",        "description": "Repeated yaku score at half",                           "tier": "hard",   "min_wing": 4 },
   { "id": "mirror",        "name": "The Mirror",        "description": "Silences your strongest scoring axis",                  "tier": "medium", "min_wing": 3 },
   { "id": "counterweight", "name": "The Counterweight", "description": "Debuffs the tile family your relics support most",      "tier": "medium", "min_wing": 3 },
-  { "id": "tax_collector", "name": "The Tax Collector", "description": "Per-play gold cost scales to your hoard",               "tier": "medium", "min_wing": 3 },
+  { "id": "tax_collector", "name": "The Tax Collector", "description": "Per-play yen cost scales to your hoard",               "tier": "medium", "min_wing": 3 },
   { "id": "dragon",        "name": "The Dragon",        "description": "Structures without an honor score zero",                "tier": "final",  "min_wing": 7 },
   { "id": "house",         "name": "The House",         "description": "Cannot cash in until all discards are used",            "tier": "final",  "min_wing": 7 }
 ]

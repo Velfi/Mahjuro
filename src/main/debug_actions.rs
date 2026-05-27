@@ -66,9 +66,9 @@ impl App {
                     "Revealed Kokushi Musō (available_yaku + journal/guide + Qilin ribbon)"
                 );
             }
-            DebugAction::SetGold(amount) => {
-                self.run.set_run_gold_direct(amount as i32, None);
-                log::debug!("Set gold to {}", amount);
+            DebugAction::SetYen(amount) => {
+                self.run.set_run_yen_direct(amount as i32, None);
+                log::debug!("Set yen to {}", amount);
             }
             DebugAction::AddRelic(relic_id) => {
                 if !self.run.relics.active.contains(&relic_id) {
@@ -221,14 +221,9 @@ impl App {
                         .as_ref()
                         .is_some_and(|r| r.shop_gltf_anim_has_clip("eyeball_travel"));
                     if s.debug_start_eyeball_travel() {
-<<<<<<< HEAD
-                        log::debug!(
-                            "Started shop eyeball_travel playback (gpu_clip_loaded={gpu_clip_loaded})"
-=======
                         log::info!(
                             "Started shop eyeball_travel playback at t={:.3}s (clip_loaded={clip_loaded}, gpu_eyeball_prim_index_loaded={prim_index_loaded})",
                             s.eyeball_travel_playback_sec().unwrap_or(0.0)
->>>>>>> 3ab1ff47 (Re-did pedestals in blender for Gameplay.glb, also added abalone coin bowl.)
                         );
                     } else {
                         log::warn!(
@@ -393,7 +388,7 @@ impl App {
             DebugAction::ShowDefeatScreen => {
                 while self.modals.dismiss() {}
                 let reason = crate::game::event_bus::GameOverReason::OutOfPlays;
-                let snap = crate::core::memorial_talisman::snapshot_from_run(
+                let snap = crate::game::memorial_run::snapshot_from_run(
                     &self.run.defeat_journal,
                     reason,
                     &self.run,

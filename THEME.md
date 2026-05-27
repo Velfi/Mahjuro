@@ -39,18 +39,18 @@ The shop is **the House’s memory of its losers**, displayed and resold.
 
 ---
 
-## House credits (economy skin)
+## Yen (economy skin)
 
-**House credits** replace “gold” / “coins” in **player-facing copy** and HUD branding. Mechanics stay: earn from chambers, spend in storeroom, interest on savings, reroll costs, sell refunds.
+**Yen** replace “gold” / “coins” in **player-facing copy** and HUD branding. Mechanics stay: earn from chambers, spend in storeroom, interest on savings, reroll costs, sell refunds.
 
 **Fiction:**
 
-- Credits are **issued by the House** for clearing or skipping chambers; **valid only inside** the venue (explains why runs reset economically).
+- Yen are **issued by the House** for clearing or skipping chambers; **valid only inside** the venue (explains why runs reset economically).
 - Skipping pays a **token** amount—the House paying you to **keep walking**.
 - **Interest**: the House rewards a fat purse so the next storeroom feels earned (menace: it still wins on aggregate).
 - **Selling** returns an item to the display case—the tag was already waiting.
 
-**Loss:** When a run ends, the House **reclaims** credits and storeroom acquisitions. The **next run’s inventory is partly the corpse of the last run.**
+**Loss:** When a run ends, the House **reclaims** yen and storeroom acquisitions. The **next run’s inventory is partly the corpse of the last run.**
 
 ---
 

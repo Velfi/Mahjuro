@@ -22,45 +22,15 @@ pub(super) fn generate_shop_stock(
 ) {
     let mut rng = rand::rng();
 
-    const MAX_RIBBONS: usize = 4;
-    let max_relics = KIOSK_RELIC_SLOTS;
-
-    let mut n_relics = rng.random_range(0..=max_relics) + extra_relics;
-    let mut n_zodiacs = rng.random_range(1..=MAX_RIBBONS);
-    let mut n_talismans = rng.random_range(1..=MAX_RIBBONS);
-    if n_zodiacs + n_talismans > MAX_RIBBONS {
-        while n_zodiacs + n_talismans > MAX_RIBBONS {
-            if n_talismans >= n_zodiacs {
-                n_talismans -= 1;
-            } else {
-                n_zodiacs -= 1;
-            }
-        }
-    }
-    while n_relics + n_zodiacs + n_talismans < 2 {
-        let relics_room = n_relics < max_relics;
-        let ribbons_room = n_zodiacs + n_talismans < MAX_RIBBONS;
-        let zodiacs_room = ribbons_room && n_zodiacs < MAX_RIBBONS;
-        let talismans_room = ribbons_room && n_talismans < MAX_RIBBONS;
-        let mut choices: Vec<u8> = Vec::with_capacity(3);
-        if relics_room {
-            choices.push(0);
-        }
-        if zodiacs_room {
-            choices.push(1);
-        }
-        if talismans_room {
-            choices.push(2);
-        }
-        if choices.is_empty() {
-            break;
-        }
-        match choices[rng.random_range(0..choices.len())] {
-            0 => n_relics += 1,
-            1 => n_zodiacs += 1,
-            _ => n_talismans += 1,
-        }
-    }
+    let crate::game::run::ShopOfferCounts {
+        n_relics,
+        n_zodiacs,
+        n_talismans,
+    } = crate::game::run::roll_shop_offer_counts(
+        extra_relics,
+        crate::game::run::KIOSK_RELIC_SLOTS,
+        &mut rng,
+    );
 
     let defs = all_relic_defs();
     // Some relics are never offered in the shop — they only appear via
@@ -220,23 +190,35 @@ impl ShopScene {
             )
         };
 
-        // PatronGift: zero out one random relic's price.
+        // PatronGift: zero out one random relic's price per stacked tag.
         if mode == ShopMode::Standard && GameEngine::shop_has_patron_gift(run) && !items.is_empty()
         {
-            use rand::prelude::IndexedMutRandom;
+            use rand::RngExt;
 
+            let patron_gifts = run.tag_patron_gift;
             let mut rng = rand::rng();
-            if let Some(item) = items.choose_mut(&mut rng) {
-                item.price = 0;
+            for _ in 0..patron_gifts {
+                let unpaid: Vec<usize> = items
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, item)| item.price > 0)
+                    .map(|(idx, _)| idx)
+                    .collect();
+                if unpaid.is_empty() {
+                    break;
+                }
+                let idx = unpaid[rng.random_range(0..unpaid.len())];
+                items[idx].price = 0;
             }
         }
 
         let consumed_tags = GameEngine::consume_shop_tags(run);
+        let remaining_free_rerolls = consumed_tags.free_reroll;
         // Reroll base cost is driven by the run's stake; tutorial and
         // free-reroll tags still override it.
         let reroll_cost = if mode == ShopMode::Tutorial {
             u32::MAX
-        } else if consumed_tags.free_reroll {
+        } else if remaining_free_rerolls > 0 {
             0
         } else {
             stake.reroll_base_cost()
@@ -255,6 +237,7 @@ impl ShopScene {
             talisman_items,
             pack_items,
             reroll_cost,
+            remaining_free_rerolls,
             pause_menu: PauseMenu::new(),
             focus,
             last_focus_rects: std::cell::RefCell::new(Vec::new()),
@@ -340,6 +323,21 @@ impl ShopScene {
     /// Returns `true` when clip is available.
     pub fn debug_restart_eyeball_travel(&mut self) -> bool {
         self.restart_gltf_anim("eyeball_travel")
+    }
+
+    /// Whether storeroom dwell time should accumulate toward the eyeball milestone.
+    pub(crate) fn counts_storeroom_dwell_time(&self) -> bool {
+        self.mode == ShopMode::Standard && !self.pause_menu.paused
+    }
+
+    /// Play (or restart) `eyeball_travel` when a 15-minute storeroom milestone is reached.
+    pub(crate) fn play_eyeball_travel_milestone(&mut self) {
+        const CLIP: &str = "eyeball_travel";
+        if self.gltf_anims.is_playing(CLIP) {
+            let _ = self.restart_gltf_anim(CLIP);
+        } else {
+            let _ = self.play_gltf_anim(CLIP, false);
+        }
     }
 
     pub(super) fn continue_scene(&self, run: &mut crate::game::run::RunState) -> Scene {
@@ -493,8 +491,15 @@ impl ShopScene {
                 skip_cost_escalation: true,
                 ..
             } => {
-                // Free reroll (skip tag or I Got A Guy): next restock starts at stake base.
-                self.reroll_cost = run.mode.stake.reroll_base_cost();
+                // Free reroll (skip tag or I Got A Guy): spend one queued waiver.
+                if self.remaining_free_rerolls > 0 {
+                    self.remaining_free_rerolls -= 1;
+                }
+                self.reroll_cost = if self.remaining_free_rerolls > 0 {
+                    0
+                } else {
+                    run.mode.stake.reroll_base_cost()
+                };
             }
             _ => self.reroll_cost += REROLL_COST_INCREMENT,
         }

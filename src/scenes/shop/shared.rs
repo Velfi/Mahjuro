@@ -327,16 +327,6 @@ pub(super) struct ShopItem {
     pub(super) sold: bool,
 }
 
-impl ShopItem {
-    pub(super) fn buy_label(&self) -> String {
-        if self.price == 0 {
-            "FREE".to_string()
-        } else {
-            format!("Buy {}g", self.price)
-        }
-    }
-}
-
 /// A purchasable consumable in the shop — either a Zodiac or a Talisman.
 /// Both share the player's [`crate::core::consumable::ConsumableInventory`]
 /// slots.

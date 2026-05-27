@@ -32,23 +32,23 @@ impl RunState {
 
         match tag {
             TagKind::GoldIngot => {
-                self.apply_gold_reward(8, bus);
-                "+8 gold"
+                self.apply_yen_reward(8, bus);
+                "+8 yen"
             }
             TagKind::TreasureChest => {
-                self.apply_gold_reward(20, bus);
-                "+20 gold"
+                self.apply_yen_reward(20, bus);
+                "+20 yen"
             }
             TagKind::FreeReroll => {
-                self.tag_free_reroll = true;
+                self.tag_free_reroll += 1;
                 "Free reroll"
             }
             TagKind::PatronGift => {
-                self.tag_patron_gift = true;
+                self.tag_patron_gift += 1;
                 "Free relic"
             }
             TagKind::RichStock => {
-                self.tag_rich_stock = true;
+                self.tag_rich_stock += 1;
                 "+2 shop relics"
             }
             TagKind::ZodiacBlessing => {

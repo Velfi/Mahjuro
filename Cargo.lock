@@ -1991,6 +1991,11 @@ dependencies = [
  "log",
  "lyon_path",
  "lyon_tessellation",
+ "mahjuro-assets",
+ "mahjuro-core",
+ "mahjuro-gfx-types",
+ "mahjuro-render",
+ "mahjuro-types",
  "muda",
  "objc2-app-kit",
  "pollster",
@@ -2012,15 +2017,95 @@ dependencies = [
 ]
 
 [[package]]
+name = "mahjuro-assets"
+version = "0.5.0-21"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+ "zip",
+]
+
+[[package]]
+name = "mahjuro-core"
+version = "0.5.0-21"
+dependencies = [
+ "anyhow",
+ "glam",
+ "log",
+ "mahjuro-assets",
+ "mahjuro-gfx-types",
+ "mahjuro-types",
+ "proptest",
+ "rand 0.10.1",
+ "rustc-hash 2.1.2",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "mahjuro-gfx-types"
+version = "0.5.0-21"
+dependencies = [
+ "anyhow",
+ "dirs",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "mahjuro-headless"
 version = "0.5.0-21"
 dependencies = [
  "anyhow",
  "clap",
  "env_logger",
+ "image",
  "log",
  "mahjuro",
+ "mahjuro-assets",
+ "mahjuro-render",
  "rustc-hash 2.1.2",
+]
+
+[[package]]
+name = "mahjuro-render"
+version = "0.5.0-21"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "bytemuck",
+ "chrono",
+ "fontdue",
+ "glam",
+ "gltf",
+ "image",
+ "log",
+ "lyon_path",
+ "lyon_tessellation",
+ "mahjuro-assets",
+ "mahjuro-core",
+ "mahjuro-gfx-types",
+ "mahjuro-types",
+ "pollster",
+ "rand 0.10.1",
+ "raw-window-handle",
+ "rayon",
+ "resvg",
+ "rustc-hash 2.1.2",
+ "sdl3",
+ "serde",
+ "serde_json",
+ "ttf-parser 0.25.1",
+ "wgpu",
+]
+
+[[package]]
+name = "mahjuro-types"
+version = "0.5.0-21"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

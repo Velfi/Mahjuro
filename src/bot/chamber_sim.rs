@@ -111,7 +111,7 @@ pub(crate) fn sim_drain_bus(run: &mut RunState, bus: &mut EventBus) {
             reached_target: true,
         } = ev
         {
-            run.apply_gold_reward(payout.total as i32, None);
+            run.apply_yen_reward(payout.total as i32, None);
         }
     }
 }
