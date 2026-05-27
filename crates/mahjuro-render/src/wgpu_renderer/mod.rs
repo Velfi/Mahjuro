@@ -214,18 +214,6 @@ pub struct WgpuRenderer {
     shop_gltf_anim_missing_clip_warned: std::cell::Cell<bool>,
     /// GPU primitive indices for the `Eyeball` node in [`Self::shop_env_primitives`].
     shop_eyeball_prim_indices: Vec<usize>,
-    /// GPU index of the `Eyeball` primitive in [`Self::shop_env_primitives`].
-    shop_eyeball_prim_index: Option<usize>,
-    /// Cached at init from [`crate::render::room_glb::RoomGlbCpu::shop_eyeball_travel`].
-    shop_eyeball_travel: Option<crate::render::room_gltf_anim::ShopEyeballTravelAnim>,
-    shop_eyeball_missing_clip_warned: std::cell::Cell<bool>,
-    shop_eyeball_missing_prim_warned: std::cell::Cell<bool>,
-    /// One-shot info log latch while `shop_eyeball_travel` playback is active.
-    shop_eyeball_playback_logged: std::cell::Cell<bool>,
-    /// Last shop room env camera uniform (for per-primitive model patches during `eyeball_travel`).
-    shop_env_last_camera_uniform: std::cell::Cell<uniforms::CameraUniform>,
-    shop_env_base_model: std::cell::Cell<glam::Mat4>,
-    shop_env_shadow_light_view_proj: std::cell::Cell<[f32; 16]>,
     /// Bitset: which deferred room environments finished GPU upload (see `room_gpu_load.rs`).
     rooms_gpu_loaded: u8,
     shadow_warp_layout: wgpu::BindGroupLayout,

@@ -19,6 +19,17 @@ struct GltfRoomEnvUniformParams<'a> {
 }
 
 impl WgpuRenderer {
+    fn shop_eyeball_prim_indices_for_draw(&self) -> Vec<usize> {
+        if !self.shop_eyeball_prim_indices.is_empty() {
+            return self.shop_eyeball_prim_indices.clone();
+        }
+        self.shop_gltf_anim
+            .clip_prim_bindings
+            .get("eyeball_travel")
+            .map(|b| b.iter().map(|(pi, _)| *pi).collect())
+            .unwrap_or_default()
+    }
+
     fn shop_gltf_anim_prim_deltas(
         &self,
         frame: &crate::draw_cmd::UiFrame,
@@ -103,15 +114,7 @@ impl WgpuRenderer {
             return;
         };
         let eyeball_only = frame.shop_env_eyeball_only;
-        let eyeball_indices: Vec<usize> = if !self.shop_eyeball_prim_indices.is_empty() {
-            self.shop_eyeball_prim_indices.clone()
-        } else {
-            self.shop_gltf_anim
-                .clip_prim_bindings
-                .get("eyeball_travel")
-                .map(|b| b.iter().map(|(pi, _)| *pi).collect())
-                .unwrap_or_default()
-        };
+        let eyeball_indices = self.shop_eyeball_prim_indices_for_draw();
         self.draw_gltf_room_env_meshes(
             pass,
             frame,
@@ -356,15 +359,7 @@ impl WgpuRenderer {
             return;
         };
         let eyeball_only = frame.shop_env_eyeball_only;
-        let eyeball_indices: Vec<usize> = if !self.shop_eyeball_prim_indices.is_empty() {
-            self.shop_eyeball_prim_indices.clone()
-        } else {
-            self.shop_gltf_anim
-                .clip_prim_bindings
-                .get("eyeball_travel")
-                .map(|b| b.iter().map(|(pi, _)| *pi).collect())
-                .unwrap_or_default()
-        };
+        let eyeball_indices = self.shop_eyeball_prim_indices_for_draw();
         self.draw_gltf_room_env_shadow(
             pass,
             &self.shop_env_primitives,

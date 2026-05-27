@@ -446,6 +446,10 @@ impl GltfAnimPlaybackSet {
         self.active.contains_key(clip_name)
     }
 
+    pub fn playback_sec(&self, clip_name: &str) -> Option<f32> {
+        self.active.get(clip_name)?.playback_sec()
+    }
+
     /// Read active samples without removing finished clips.
     pub fn active_samples(&self) -> Vec<(String, f32)> {
         self.active

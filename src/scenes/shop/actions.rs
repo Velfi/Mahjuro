@@ -307,6 +307,11 @@ impl ShopScene {
         self.gltf_anims.active_samples()
     }
 
+    /// Current `eyeball_travel` playback time in seconds, if active.
+    pub fn eyeball_travel_playback_sec(&self) -> Option<f32> {
+        self.gltf_anims.playback_sec("eyeball_travel")
+    }
+
     /// Debug: start `eyeball_travel` if available and not already running.
     /// Returns `true` when playback is active after this call.
     pub fn debug_start_eyeball_travel(&mut self) -> bool {

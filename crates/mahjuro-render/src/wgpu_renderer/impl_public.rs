@@ -141,6 +141,12 @@ impl WgpuRenderer {
         self.shop_gltf_anim.has_clip(clip_name)
     }
 
+    #[inline]
+    pub fn shop_eyeball_prim_index_loaded(&self) -> bool {
+        !self.shop_eyeball_prim_indices.is_empty()
+            || self.shop_gltf_anim.has_clip("eyeball_travel")
+    }
+
     pub fn clear_smoke(&mut self) {
         self.prev_tile_world.clear();
     }
