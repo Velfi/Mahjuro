@@ -221,8 +221,14 @@ impl App {
                         .as_ref()
                         .is_some_and(|r| r.shop_gltf_anim_has_clip("eyeball_travel"));
                     if s.debug_start_eyeball_travel() {
+<<<<<<< HEAD
                         log::debug!(
                             "Started shop eyeball_travel playback (gpu_clip_loaded={gpu_clip_loaded})"
+=======
+                        log::info!(
+                            "Started shop eyeball_travel playback at t={:.3}s (clip_loaded={clip_loaded}, gpu_eyeball_prim_index_loaded={prim_index_loaded})",
+                            s.eyeball_travel_playback_sec().unwrap_or(0.0)
+>>>>>>> 3ab1ff47 (Re-did pedestals in blender for Gameplay.glb, also added abalone coin bowl.)
                         );
                     } else {
                         log::warn!(
@@ -234,8 +240,14 @@ impl App {
             },
             DebugAction::TogglePauseShopEyeballTravel => match &mut self.scene {
                 Scene::Shop(s) => match s.debug_toggle_pause_eyeball_travel() {
-                    Some(true) => log::debug!("Paused shop eyeball_travel playback"),
-                    Some(false) => log::debug!("Resumed shop eyeball_travel playback"),
+                    Some(true) => log::info!(
+                        "Paused shop eyeball_travel playback at t={:.3}s",
+                        s.eyeball_travel_playback_sec().unwrap_or(0.0)
+                    ),
+                    Some(false) => log::info!(
+                        "Resumed shop eyeball_travel playback at t={:.3}s",
+                        s.eyeball_travel_playback_sec().unwrap_or(0.0)
+                    ),
                     None => log::warn!(
                         "Pause/Resume Eyeball Travel ignored — clip is not active (start it first)"
                     ),
@@ -245,7 +257,7 @@ impl App {
             DebugAction::RestartShopEyeballTravel => match &mut self.scene {
                 Scene::Shop(s) => {
                     if s.debug_restart_eyeball_travel() {
-                        log::debug!("Restarted shop eyeball_travel playback");
+                        log::info!("Restarted shop eyeball_travel playback at t=0.000s");
                     } else {
                         log::warn!("Restart Eyeball Travel failed — clip is not loaded");
                     }

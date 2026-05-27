@@ -349,12 +349,29 @@ impl GltfAnimPlayback {
         self.started.is_some() || self.paused
     }
 
+<<<<<<< HEAD
     pub fn restart(&mut self, duration_secs: f32) {
         self.duration_secs = duration_secs;
         self.elapsed_secs = 0.0;
         self.started = Some(Instant::now());
         self.paused = false;
     }
+=======
+    let (raw_bind_scale, _, _) = bind_world_doc.to_scale_rotation_translation();
+    let bind_scale = if raw_bind_scale.is_finite()
+        && raw_bind_scale.x.abs() > 1e-5
+        && raw_bind_scale.y.abs() > 1e-5
+        && raw_bind_scale.z.abs() > 1e-5
+    {
+        raw_bind_scale
+    } else {
+        log::warn!(
+            "shop.glb eyeball_travel: invalid bind scale {:?} — falling back to Vec3::ONE",
+            raw_bind_scale
+        );
+        Vec3::ONE
+    };
+>>>>>>> 3ab1ff47 (Re-did pedestals in blender for Gameplay.glb, also added abalone coin bowl.)
 
     pub fn resume(&mut self) {
         if self.paused {
