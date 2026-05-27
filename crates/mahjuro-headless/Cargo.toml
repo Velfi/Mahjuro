@@ -10,10 +10,6 @@ default = []
 bake = ["mahjuro/bake-support"]
 screenshot = ["mahjuro/headless-screenshot"]
 
-[[bin]]
-name = "mahjuro-bake-decal-atlases"
-path = "src/bin/mahjuro-bake-decal-atlases.rs"
-
 [dependencies]
 mahjuro = { path = "../..", default-features = false }
 mahjuro-render = { path = "../mahjuro-render" }

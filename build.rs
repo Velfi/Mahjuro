@@ -28,8 +28,8 @@
 //! if `mahjuro-bake` / `mahjuro-bake-decal-atlases` already exist in `target/<profile>/`
 //! (build them first: `cargo build -p mahjuro-headless --bin mahjuro-bake` — never from inside
 //! `build.rs`; nested `cargo` deadlocks on the target lock). Skip with
-//! `MAHJURO_SKIP_ROOM_GI_BAKE=1`, `MAHJURO_SKIP_ROOM_SHADOW_BAKE=1`, or
-//! `MAHJURO_SKIP_SHOWCASE_DECAL_BAKE=1`. See `AGENTS.md`.
+//! `MAHJURO_SKIP_ROOM_GI_BAKE=1`, `MAHJURO_SKIP_ROOM_SHADOW_BAKE=1`,
+//! `MAHJURO_SKIP_SHOWCASE_DECAL_BAKE=1`, or `MAHJURO_SKIP_RELIC_BAKE=1`. See `AGENTS.md`.
 
 #[path = "build/input_hash.rs"]
 mod input_hash;
@@ -45,6 +45,8 @@ mod room_shadow_bake;
 mod room_gpu_bake;
 #[path = "build/showcase_decal_bake.rs"]
 mod showcase_decal_bake;
+#[path = "build/relic_bake.rs"]
+mod relic_bake;
 
 use std::env;
 use std::fs;
@@ -75,6 +77,7 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     room_gpu_bake::emit_rerun_if_changed();
     showcase_decal_bake::emit_rerun_if_changed();
+    relic_bake::emit_rerun_if_changed();
 
     if let Some(out_dir) = env::var_os("OUT_DIR").map(PathBuf::from)
         && let Some(profile_dir) = profile_dir(&out_dir)
@@ -83,6 +86,7 @@ fn main() {
         asset_pack_bake::emit_rerun_if_changed(&repo, &profile_dir);
         room_gpu_bake::maybe_bake_room_gpu(&repo, &profile_dir);
         showcase_decal_bake::maybe_bake_showcase_decal_atlases(&repo, &profile_dir);
+        relic_bake::maybe_bake_relics(&repo, &profile_dir);
         asset_pack_bake::maybe_bake_asset_packs(&repo, &profile_dir);
     }
 

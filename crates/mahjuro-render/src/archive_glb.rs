@@ -165,7 +165,10 @@ fn ensure_archive_glb_loaded() {
     let mut w = ARCHIVE_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
     match &*w {
         ArchiveGlbCache::Uninit => {}
-        ArchiveGlbCache::Ready(Some(cpu)) if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu) => {
+        ArchiveGlbCache::Ready(Some(cpu))
+            if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu)
+                || room_glb::room_glb_cpu_stale_environment_for_gpu_upload(cpu) =>
+        {
             *w = ArchiveGlbCache::Uninit;
         }
         _ => return,

@@ -50,7 +50,10 @@ fn ensure_main_menu_glb_loaded() {
     let mut w = MAIN_MENU_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
     match &*w {
         MainMenuGlbCache::Uninit => {}
-        MainMenuGlbCache::Ready(Some(cpu)) if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu) => {
+        MainMenuGlbCache::Ready(Some(cpu))
+            if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu)
+                || room_glb::room_glb_cpu_stale_environment_for_gpu_upload(cpu) =>
+        {
             *w = MainMenuGlbCache::Uninit;
         }
         _ => return,

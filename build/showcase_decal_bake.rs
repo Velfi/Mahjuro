@@ -59,7 +59,7 @@ pub fn maybe_bake_showcase_decal_atlases(repo: &Path, profile_dir: &Path) {
         }
         Ok(s) => panic!(
             "showcase decal atlas bake failed (exit {s}); run \
-             `cargo run -p mahjuro-headless --bin mahjuro-bake-decal-atlases` manually"
+             `cargo run -p mahjuro-render --bin mahjuro-bake-decal-atlases` manually"
         ),
         Err(e) => panic!("showcase decal atlas bake failed to run: {e}"),
     }

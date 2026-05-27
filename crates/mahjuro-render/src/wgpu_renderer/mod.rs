@@ -3,6 +3,7 @@
 mod embedded_wgsl;
 mod frame_pool;
 mod init;
+mod init_deferred;
 mod init_phases;
 pub(crate) mod resources;
 
@@ -81,7 +82,6 @@ use crate::relic_dish::{
     build_dish_mesh, build_pack_mesh, build_porcelain_dish_mesh, build_relic_mesh,
     build_round_dish_mesh, build_shop_action_prop_mesh,
 };
-use crate::relic_pipeline::spawn_relic_loader;
 use crate::ribbon_mesh::build_ribbon_mesh;
 use crate::river_mesh::build_river_mesh;
 use crate::shop_bell_mesh::build_shop_bell_mesh;
@@ -353,8 +353,14 @@ pub struct WgpuRenderer {
     creation_time: Instant,
     /// Cached relic icon textures, populated asynchronously from the loader thread.
     relic_textures: FxHashMap<RelicId, RelicTextureGpu>,
+    /// Per-frame relic draw slots — populated lazily via [`init_deferred`](init_deferred).
+    relic_instances: Vec<LitMeshInstance>,
+    gameplay_hud_pools_ready: bool,
+    talisman_textures_ready: bool,
     /// Receives decoded relic RGBA data from the background loader thread.
     relic_rx: Option<mpsc::Receiver<DecodedRelicImage>>,
+    /// Set when the background relic loader has finished (avoids respawning each frame).
+    relic_load_finished: bool,
     /// Wall-clock start of the relic load pipeline (spawn → last GPU upload).
     relic_load_start: Option<Instant>,
     /// Cumulative main-thread mesh extraction + GPU mesh buffer creation during relic boot.
@@ -580,9 +586,6 @@ pub struct WgpuRenderer {
     /// Uploaded to `SsrGlobals.felt.x` — procedural felt shader tier (see
     /// [`mahjuro_gfx_types::EffectsQuality::felt_shader_lod`]).
     pub(super) felt_shader_lod: f32,
-    /// Pre-allocated per-relic-placeholder instances. Sized at startup to
-    /// match `MAX_RELIC_SLOTS`; indexed by placement order each frame.
-    relic_instances: Vec<LitMeshInstance>,
     /// Per-relic-placeholder (world-space model matrix, relic id) captured
     /// each frame for `pick_shop_object` raycasting and the bulk screen-rect
     /// reprojection. The relic id drives per-triangle trimesh picking so the
