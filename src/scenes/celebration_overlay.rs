@@ -8,7 +8,9 @@
 //! [`ShootingStarCelebrationIntro`] drives the shooting-star cascade wipe used for
 //! the zodiac ribbon celebration. When [`Self::force_shooting_star_wipe`] is set
 //! (see [`ShootingStarCelebrationIntro::new_zodiac`]), the wipe runs whenever the
-//! celebration opens; otherwise it follows [`EffectLayers::transition_fullscreen_fx`]
+//! celebration opens; otherwise it follows [`EffectLayers::transition_fullscreen_fx`].
+//! Shader layer counts use the user's Options → Effects tier, not baseline
+//! [`EffectLayers::procedural_surface_quality`].
 
 use std::time::{Duration, Instant};
 
@@ -147,6 +149,32 @@ pub fn label_zodiac_level_title(h: f32, w: f32, text: String, alpha: f32) -> Tex
     }
 }
 
+/// Intro motion applied to celebration hero meshes and title bands.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CelebrationContentDrift {
+    pub scale: f32,
+    pub xy: [f32; 2],
+}
+
+impl CelebrationContentDrift {
+    #[inline]
+    pub fn identity() -> Self {
+        Self {
+            scale: 1.0,
+            xy: [0.0, 0.0],
+        }
+    }
+
+    #[inline]
+    pub fn apply_to_pos(&self, pos: [f32; 3]) -> [f32; 3] {
+        [
+            pos[0] + self.xy[0],
+            pos[1] + self.xy[1],
+            pos[2],
+        ]
+    }
+}
+
 #[inline]
 fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     let t = ((x - edge0) / (edge1 - edge0).max(1e-6)).clamp(0.0, 1.0);
@@ -250,6 +278,21 @@ impl ShootingStarCelebrationIntro {
         }
         let t = self.transition_progress();
         smoothstep(Self::CONTENT_FADE_START, Self::CONTENT_FADE_END, t)
+    }
+
+    /// Subtle scale + vertical drift while celebration content eases in after the wipe.
+    #[inline]
+    pub fn content_drift_for(&self, _w: f32, h: f32, layers: &EffectLayers) -> CelebrationContentDrift {
+        if !self.wipe_active(layers) {
+            return CelebrationContentDrift::identity();
+        }
+        let t = self.transition_progress();
+        let ease = smoothstep(Self::CONTENT_FADE_START, Self::CONTENT_FADE_END, t);
+        let inv = 1.0 - ease;
+        CelebrationContentDrift {
+            scale: 0.92 + 0.08 * ease,
+            xy: [0.0, h * 0.04 * inv],
+        }
     }
 
     #[inline]

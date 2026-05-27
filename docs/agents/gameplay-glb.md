@@ -35,7 +35,7 @@ Hand tile **mesh** scale is derived from the `hand_tiles_*` strip span in [`hand
 ## Camera & lights
 
 - Embedded **glTF perspective camera**: Blender object `default` with a real Camera data-block (exports as a glTF `camera` extension on that node — not an empty). Orthographic cameras are rejected.
-- `light_candle*` punctual lights drive `room_glb.wgsl` and procedural flame particles (same path as shop candles; wax uses `textures/shop/candle_sss.png` on `Candle*` meshes).
+- `light_candle*` punctual lights drive `room_glb.wgsl` and procedural flame particles (same path as shop candles).
 - When embedded punctual lights are present, gameplay uses the **same env tonemap + attenuation** as the shop.
 
 ## Export notes

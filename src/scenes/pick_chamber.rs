@@ -778,7 +778,7 @@ impl SceneBehavior for PickChamberScene {
                             col_w: skip_col_w,
                             font_px: px_detail,
                             line_h: h_detail,
-                            text: "Tribute · Esc",
+                            text: "Tribute",
                             color: skip_color,
                             align: TextAlign::Left,
                         });
@@ -822,7 +822,7 @@ impl SceneBehavior for PickChamberScene {
                 window_h: h,
             },
             scale,
-            crate::scenes::options::OptionsDrawHint::pause_overlay(&ctx),
+            crate::scenes::options::options_scroll_fade_backdrop(true),
             &mut quads,
             &mut texts,
             &mut buttons,

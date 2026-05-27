@@ -2718,17 +2718,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     });
                 }
                 let (_white_tex, shop_decal_view) = white_albedo(&device, &queue);
-                let shop_candle_sss_tex = load_room_env_png_texture(
-                    &device,
-                    &queue,
-                    crate::render::room_env_gltf::SHOP_CANDLE_SSS_BAKE_TEXTURE,
-                    "shop-candle-sss-bake",
-                    wgpu::TextureFormat::Rgba8Unorm,
-                );
-                let shop_candle_sss_view = shop_candle_sss_tex
-                    .as_ref()
-                    .map(|(_, v)| v)
-                    .unwrap_or(&shop_decal_view);
                 let uniform_buffers = create_room_env_camera_uniform_buffers(
                     &device,
                     prims.len(),
@@ -2746,18 +2735,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     .iter()
                     .enumerate()
                     .map(|(pi, p)| {
-                        let is_candle = cpu
-                            .environment_primitives
-                            .get(pi)
-                            .and_then(|ep| ep.gltf_node_name.as_deref())
-                            .is_some_and(
-                                crate::render::room_env_gltf::is_shop_candle_wax_node_name,
-                            );
-                        let decal_view = if is_candle {
-                            shop_candle_sss_view
-                        } else {
-                            &shop_decal_view
-                        };
                         device.create_bind_group(&wgpu::BindGroupDescriptor {
                             label: Some("shop-env-bg"),
                             layout: &tile_material_layout,
@@ -2776,7 +2753,7 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                                 },
                                 wgpu::BindGroupEntry {
                                     binding: 3,
-                                    resource: wgpu::BindingResource::TextureView(decal_view),
+                                    resource: wgpu::BindingResource::TextureView(&shop_decal_view),
                                 },
                                 wgpu::BindGroupEntry {
                                     binding: 4,
@@ -2825,7 +2802,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     shadow_warp_bind_group,
                     bind_groups,
                     archive_sign_decal_texture: None,
-                    shop_candle_sss_texture: shop_candle_sss_tex.map(|(t, _)| t),
                 });
                 if shop_eyeball_prim_indices.is_empty() {
                     if let Some(bindings) = shop_gltf_anim.clip_prim_bindings.get("eyeball_travel") {
@@ -3030,7 +3006,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     shadow_warp_bind_group,
                     bind_groups,
                     archive_sign_decal_texture: None,
-                    shop_candle_sss_texture: None,
                 });
                 log::info!("hallway.glb GPU: {} primitive draw(s)", prims.len());
             }
@@ -3220,7 +3195,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     shadow_warp_bind_group,
                     bind_groups,
                     archive_sign_decal_texture: None,
-                    shop_candle_sss_texture: None,
                 });
                 log::info!("staircase.glb GPU: {} primitive draw(s)", prims.len());
             }
@@ -3493,7 +3467,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     shadow_warp_bind_group,
                     bind_groups,
                     archive_sign_decal_texture: Some(archive_sign_decal_tex),
-                    shop_candle_sss_texture: None,
                 });
                 log::info!("archive.glb GPU: {} primitive draw(s)", prims.len());
             }
@@ -3691,7 +3664,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     shadow_warp_bind_group,
                     bind_groups,
                     archive_sign_decal_texture: None,
-                    shop_candle_sss_texture: None,
                 });
                 log::info!("main_menu.glb GPU: {} primitive draw(s)", prims.len());
             }
@@ -3821,17 +3793,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     });
                 }
                 let (_white_tex, gameplay_decal_view) = white_albedo(&device, &queue);
-                let gameplay_candle_sss_tex = load_room_env_png_texture(
-                    &device,
-                    &queue,
-                    crate::render::room_env_gltf::SHOP_CANDLE_SSS_BAKE_TEXTURE,
-                    "gameplay-candle-sss-bake",
-                    wgpu::TextureFormat::Rgba8Unorm,
-                );
-                let gameplay_candle_sss_view = gameplay_candle_sss_tex
-                    .as_ref()
-                    .map(|(_, v)| v)
-                    .unwrap_or(&gameplay_decal_view);
                 let uniform_buffers = create_room_env_camera_uniform_buffers(
                     &device,
                     prims.len(),
@@ -3849,18 +3810,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     .iter()
                     .enumerate()
                     .map(|(pi, p)| {
-                        let is_candle = cpu
-                            .environment_primitives
-                            .get(pi)
-                            .and_then(|ep| ep.gltf_node_name.as_deref())
-                            .is_some_and(
-                                crate::render::room_env_gltf::is_shop_candle_wax_node_name,
-                            );
-                        let decal_view = if is_candle {
-                            gameplay_candle_sss_view
-                        } else {
-                            &gameplay_decal_view
-                        };
                         device.create_bind_group(&wgpu::BindGroupDescriptor {
                             label: Some("gameplay-env-bg"),
                             layout: &tile_material_layout,
@@ -3879,7 +3828,9 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                                 },
                                 wgpu::BindGroupEntry {
                                     binding: 3,
-                                    resource: wgpu::BindingResource::TextureView(&decal_view),
+                                    resource: wgpu::BindingResource::TextureView(
+                                        &gameplay_decal_view,
+                                    ),
                                 },
                                 wgpu::BindGroupEntry {
                                     binding: 4,
@@ -3928,7 +3879,6 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                     shadow_warp_bind_group,
                     bind_groups,
                     archive_sign_decal_texture: None,
-                    shop_candle_sss_texture: gameplay_candle_sss_tex.map(|(t, _)| t),
                 });
                 log::info!("gameplay.glb GPU: {} primitive draw(s)", prims.len());
                 return (

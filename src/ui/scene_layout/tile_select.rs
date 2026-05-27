@@ -4,8 +4,6 @@ use crate::ui::placement::Placement;
 pub struct TileSelectPositions {
     /// Top-left of the title / material copy column (normalized window fractions).
     pub left_panel: Placement,
-    /// Top-left of the bottom hint line (`Esc to go back`, etc.).
-    pub bottom_hint: Placement,
     /// Top-left of the focusable button column (Play, Back, stake row).
     pub button_menu: Placement,
     /// Top-left corner of the tile preview grid.
@@ -21,8 +19,6 @@ impl Default for TileSelectPositions {
         Self {
             // Matches legacy `panel_w * 0.05` and `cursor_y = h * 0.10` (non-tutorial base).
             left_panel: Placement::at(0.019, 0.10, 0.0),
-            // Approx. `h - hint_h - 12px` at 1080p-scale caption sizing.
-            bottom_hint: Placement::at(0.019, 0.971, 0.0),
             // Centered in the left panel column at a typical desktop aspect.
             button_menu: Placement::at(0.122, 0.60, 0.0),
             // Former `TILE_PREVIEW_GRID_*` fractions (reference ~1080p height).

@@ -1,6 +1,6 @@
 //! Offline baked directional shadow maps for static room GLB scenes.
 //!
-//! Filled by `mahjuro bake-room-shadows` and sampled at runtime so room meshes
+//! Filled by `mahjuro bake-room` and sampled at runtime so room meshes
 //! use a stable contact shadow field while catalog props use the live shadow map.
 //!
 //! **Rebake** after changing room GLB layout, key-light direction, or shadow

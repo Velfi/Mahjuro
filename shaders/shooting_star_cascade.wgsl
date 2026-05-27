@@ -19,6 +19,10 @@ struct Globals {
     cursor_pos: vec2<f32>,
     transition_progress: f32,
     quality_level: f32,
+    moon_phase: f32,
+    /// User Effects tier for this wipe (Rust `Globals._globals_pad[0]`).
+    cascade_quality_level: f32,
+    _globals_pad: vec2<f32>,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -405,12 +409,15 @@ fn star_streak_layer(
     let grid_uv = uv * grid_scale;
     let base_cell = floor(grid_uv);
 
+    // 3×3 neighbor search (was 5×5): streaks are short enough that one cell
+    // of slack on each side is sufficient at half-res composite.
+
     // Base arc direction: upper-left → lower-right (same as lead star)
     // Angle ≈ 0.74 rad (≈ 42°), pointing down-right in UV space.
     let base_angle = 0.74;
 
-    for (var dy = -2i; dy <= 2i; dy++) {
-        for (var dx = -2i; dx <= 2i; dx++) {
+    for (var dy = -1i; dy <= 1i; dy++) {
+        for (var dx = -1i; dx <= 1i; dx++) {
             let cell = base_cell + vec2<f32>(f32(dx), f32(dy));
             let seed = cell + vec2<f32>(layer_seed * 347.0, layer_seed * 113.0);
 
@@ -492,10 +499,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Low: 2 layers, Medium: +1, High: +2 = 5 total
     color += star_streak_layer(uv, aspect, progress, 16.0, 1.0, 1.0);
     color += star_streak_layer(uv, aspect, progress, 16.0, 2.0, 0.85);
-    if globals.quality_level >= 1.0 {
+    let cq = globals.cascade_quality_level;
+    if cq >= 1.0 {
         color += star_streak_layer(uv, aspect, progress, 16.0, 3.0, 0.70);
     }
-    if globals.quality_level >= 2.0 {
+    if cq >= 2.0 {
         color += star_streak_layer(uv, aspect, progress, 16.0, 4.0, 0.90);
         color += star_streak_layer(uv, aspect, progress, 16.0, 5.0, 0.75);
     }
@@ -506,13 +514,13 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     color += cascade_layer(uv, aspect,  1.0, progress, t);
     color += cascade_layer(uv, aspect,  2.0, progress, t);
     color += cascade_layer(uv, aspect,  3.0, progress, t);
-    if globals.quality_level >= 1.0 {
+    if cq >= 1.0 {
         color += cascade_layer(uv, aspect,  4.0, progress, t);
         color += cascade_layer(uv, aspect,  5.0, progress, t);
         color += cascade_layer(uv, aspect,  6.0, progress, t);
         color += cascade_layer(uv, aspect,  7.0, progress, t);
     }
-    if globals.quality_level >= 2.0 {
+    if cq >= 2.0 {
         color += cascade_layer(uv, aspect,  8.0, progress, t);
         color += cascade_layer(uv, aspect,  9.0, progress, t);
         color += cascade_layer(uv, aspect, 10.0, progress, t);
@@ -525,13 +533,13 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     // ── 4. Micro-sparkle layers ─────────────────────────────────────
     // Low: 0, Medium: 4, High: 8
-    if globals.quality_level >= 1.0 {
+    if cq >= 1.0 {
         color += sparkle_layer(uv, aspect, 0.0, progress, t);
         color += sparkle_layer(uv, aspect, 1.0, progress, t);
         color += sparkle_layer(uv, aspect, 2.0, progress, t);
         color += sparkle_layer(uv, aspect, 3.0, progress, t);
     }
-    if globals.quality_level >= 2.0 {
+    if cq >= 2.0 {
         color += sparkle_layer(uv, aspect, 4.0, progress, t);
         color += sparkle_layer(uv, aspect, 5.0, progress, t);
         color += sparkle_layer(uv, aspect, 6.0, progress, t);
@@ -539,7 +547,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     }
 
     // ── 5. Constellation flashes (Medium+) ──────────────────────────
-    if globals.quality_level >= 1.0 {
+    if cq >= 1.0 {
         color += constellation_flash(uv, aspect, progress);
     }
 

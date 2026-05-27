@@ -561,23 +561,6 @@ impl SceneBehavior for TileSelectScene {
             });
         }
 
-        // Hint at the bottom of the panel — only surface info the buttons
-        // don't already teach. Left/right already have a visible chevron row;
-        // Esc does not, so that's what the hint says.
-        let hint_panel_x = self.positions.bottom_hint.nx * w;
-        let hint_panel_y = self.positions.bottom_hint.ny * h;
-        text_labels.push(TextLabel {
-            rect: [hint_panel_x, hint_panel_y, text_w, hint_h],
-            text: if self.tutorial_mode {
-                "Enter to confirm the focused option".into()
-            } else {
-                "Esc to go back".into()
-            },
-            color: color::UMBER,
-            font_px: Some(hint_px),
-            ..Default::default()
-        });
-
         // ── Buttons (via widget tree) ──────────────────────────────
         let tree = self.build_tree(w, h, ctx.progress, &self.positions);
         let mut tree_frame = TreeFrame {

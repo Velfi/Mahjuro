@@ -1,10 +1,10 @@
-use crate::game::run::RunState;
-use crate::scenes::shop::ShopScene;
+use mahjuro::game::run::RunState;
+use mahjuro::scenes::shop::ShopScene;
 
 /// Replace `run`'s hand with a curated hero rack for marketing captures.
 pub(crate) fn setup_hero_state(run: &mut RunState) {
-    use crate::core::relic::RelicId;
-    use crate::core::tile::{Suit, Tile};
+    use mahjuro::core::relic::RelicId;
+    use mahjuro::core::tile::{Suit, Tile};
     *run.hand_mut() = vec![
         Tile::new(Suit::Dragon, 1, 100),
         Tile::new(Suit::Dragon, 1, 101),
@@ -45,9 +45,9 @@ pub(crate) fn setup_shop_state(run: &mut RunState) {
 }
 
 pub(crate) fn setup_defeat_game_over_screenshot_state(run: &mut RunState) {
-    use crate::core::ordeal::OrdealKind;
-    use crate::core::rules::ChamberKind;
-    use crate::core::yaku::YakuKind;
+    use mahjuro::core::ordeal::OrdealKind;
+    use mahjuro::core::rules::ChamberKind;
+    use mahjuro::core::yaku::YakuKind;
 
     run.wing = 6;
     run.run_number = 18;
@@ -65,9 +65,9 @@ pub(crate) fn setup_defeat_game_over_screenshot_state(run: &mut RunState) {
 }
 
 pub(crate) fn setup_victory_game_over_screenshot_state(run: &mut RunState) {
-    use crate::core::ordeal::OrdealKind;
-    use crate::core::rules::ChamberKind;
-    use crate::core::yaku::YakuKind;
+    use mahjuro::core::ordeal::OrdealKind;
+    use mahjuro::core::rules::ChamberKind;
+    use mahjuro::core::yaku::YakuKind;
 
     run.wing = 8;
     run.run_number = 22;
@@ -85,12 +85,12 @@ pub(crate) fn setup_victory_game_over_screenshot_state(run: &mut RunState) {
 }
 
 pub(crate) fn setup_gameplay_screenshot_state(run: &mut RunState) {
-    use crate::core::consumable::Consumable;
-    use crate::core::hand::{DetectedMeld, MeldKind};
-    use crate::core::relic::RelicId;
-    use crate::core::talisman::TalismanKind;
-    use crate::core::tile::{Suit, Tile};
-    use crate::core::zodiac::ZodiacKind;
+    use mahjuro::core::consumable::Consumable;
+    use mahjuro::core::hand::{DetectedMeld, MeldKind};
+    use mahjuro::core::relic::RelicId;
+    use mahjuro::core::talisman::TalismanKind;
+    use mahjuro::core::tile::{Suit, Tile};
+    use mahjuro::core::zodiac::ZodiacKind;
 
     setup_hero_state(run);
     *run.selected_mut() = vec![false; run.hand().len()];
@@ -148,19 +148,19 @@ pub(crate) fn setup_gameplay_screenshot_state(run: &mut RunState) {
         .try_push(Consumable::Zodiac(ZodiacKind::Dragon));
 }
 
-pub(crate) fn force_ordeal_chamber(run: &mut RunState, kind: crate::core::ordeal::OrdealKind) {
-    run.chamber = crate::core::rules::ChamberKind::Ordeal;
-    run.upcoming_chamber = crate::core::rules::ChamberKind::Ordeal;
+pub(crate) fn force_ordeal_chamber(run: &mut RunState, kind: mahjuro::core::ordeal::OrdealKind) {
+    run.chamber = mahjuro::core::rules::ChamberKind::Ordeal;
+    run.upcoming_chamber = mahjuro::core::rules::ChamberKind::Ordeal;
     run.wing = kind.def().min_wing.max(run.wing);
     run.ordeal.upcoming = Some(kind);
     run.resolve_upcoming_ordeal();
-    run.apply_chamber(crate::core::rules::ChamberKind::Ordeal, None);
+    run.apply_chamber(mahjuro::core::rules::ChamberKind::Ordeal, None);
 }
 
 /// Prime shop stock generation (Qilin ribbon gate uses profile progress).
 pub(crate) fn prime_shop_stock(
     run: &mut RunState,
-    progress: &crate::core::progression::PlayerProgress,
+    progress: &mahjuro::core::progression::PlayerProgress,
 ) {
     let _ = ShopScene::new(run, progress);
 }

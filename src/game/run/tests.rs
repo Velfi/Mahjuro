@@ -3,9 +3,11 @@ mod cases {
     use std::collections::BTreeMap;
 
     use crate::core::debuff::{TileDebuff, TileDebuffClass};
+    use crate::core::consumable::{Consumable, ConsumableInventory};
     use crate::core::deck::Wall;
     use crate::core::deck::build_wall;
     use crate::core::hand::{DetectedMeld, MeldKind};
+    use crate::core::memorial_talisman::MemorialTalismanKind;
     use crate::core::ordeal::{self, OrdealKind};
     use crate::core::relic::RelicState;
     use crate::core::relic::{
@@ -511,6 +513,33 @@ mod cases {
         assert_eq!(run.tag_bonus_discards, 0);
     }
 
+    fn dead_hand_no_actions_fixture() -> (RunState, EventBus) {
+        let mut run = test_run();
+        let bus = bus();
+        run.hand = vec![
+            Tile::new(Suit::Manzu, 1, 1),
+            Tile::new(Suit::Manzu, 3, 2),
+            Tile::new(Suit::Manzu, 5, 3),
+            Tile::new(Suit::Manzu, 7, 4),
+            Tile::new(Suit::Manzu, 9, 5),
+            Tile::new(Suit::Souzu, 2, 6),
+            Tile::new(Suit::Souzu, 4, 7),
+            Tile::new(Suit::Souzu, 6, 8),
+            Tile::new(Suit::Souzu, 8, 9),
+            Tile::new(Suit::Pinzu, 1, 10),
+            Tile::new(Suit::Pinzu, 3, 11),
+            Tile::new(Suit::Pinzu, 5, 12),
+            Tile::new(Suit::Wind, 1, 13),
+            Tile::new(Suit::Dragon, 1, 14),
+        ];
+        run.selected = vec![false; run.hand.len()];
+        run.discards_remaining = 0;
+        run.plays_remaining = 3;
+        run.structure_sets.clear();
+        run.structure_tiles.clear();
+        (run, bus)
+    }
+
     #[test]
     fn second_wind_salvages_round_instead_of_game_over() {
         let mut run = test_run();
@@ -565,6 +594,83 @@ mod cases {
         run.forfeit_current_chamber_second_wind(&mut bus);
         assert_eq!(run.upcoming_chamber, ChamberKind::Big);
         assert_eq!(run.run_number, 2);
+    }
+
+    #[test]
+    fn boss_mark_salvages_out_of_plays_instead_of_game_over() {
+        let mut run = test_run();
+        let mut bus = bus();
+        run.plays_remaining = 0;
+        run.consumables = ConsumableInventory {
+            items: vec![Consumable::Memorial(MemorialTalismanKind::BossMark)],
+            capacity: 2,
+        };
+
+        run.refill_hand(&mut bus);
+
+        assert!(
+            !bus.queue
+                .iter()
+                .any(|ev| matches!(ev, GameEvent::GameOver { .. })),
+            "Boss Mark should prevent GameOver when out of plays"
+        );
+        assert_eq!(run.plays_remaining, 1);
+        assert!(run.consumables.items.is_empty());
+        assert!(
+            bus.queue.iter().any(|ev| matches!(
+                ev,
+                GameEvent::MemorialTalismanUsed(MemorialTalismanKind::BossMark)
+            ))
+        );
+    }
+
+    #[test]
+    fn exhausted_preferred_over_boss_mark_for_out_of_plays() {
+        let mut run = test_run();
+        let mut bus = bus();
+        run.plays_remaining = 0;
+        run.consumables = ConsumableInventory {
+            items: vec![
+                Consumable::Memorial(MemorialTalismanKind::BossMark),
+                Consumable::Memorial(MemorialTalismanKind::Exhausted),
+            ],
+            capacity: 2,
+        };
+
+        run.refill_hand(&mut bus);
+
+        assert_eq!(run.plays_remaining, 2);
+        assert_eq!(
+            run.consumables.items,
+            vec![Consumable::Memorial(MemorialTalismanKind::BossMark)]
+        );
+        assert!(
+            bus.queue.iter().any(|ev| matches!(
+                ev,
+                GameEvent::MemorialTalismanUsed(MemorialTalismanKind::Exhausted)
+            ))
+        );
+    }
+
+    #[test]
+    fn frozen_hand_salvages_no_actions_remaining_instead_of_game_over() {
+        let (mut run, mut bus) = dead_hand_no_actions_fixture();
+        run.consumables = ConsumableInventory {
+            items: vec![Consumable::Memorial(MemorialTalismanKind::FrozenHand)],
+            capacity: 2,
+        };
+
+        run.refill_hand(&mut bus);
+
+        assert!(
+            !bus.queue
+                .iter()
+                .any(|ev| matches!(ev, GameEvent::GameOver { .. })),
+            "Frozen Hand should prevent GameOver when no actions remain"
+        );
+        assert_eq!(run.discards_remaining, 1);
+        assert!(run.consumables.items.is_empty());
+        assert!(!run.hand.is_empty());
     }
 
     #[test]
@@ -1053,29 +1159,7 @@ mod cases {
 
     #[test]
     fn refill_hand_ends_round_when_no_actions_remain() {
-        let mut run = test_run();
-        let mut bus = bus();
-        run.hand = vec![
-            Tile::new(Suit::Manzu, 1, 1),
-            Tile::new(Suit::Manzu, 3, 2),
-            Tile::new(Suit::Manzu, 5, 3),
-            Tile::new(Suit::Manzu, 7, 4),
-            Tile::new(Suit::Manzu, 9, 5),
-            Tile::new(Suit::Souzu, 2, 6),
-            Tile::new(Suit::Souzu, 4, 7),
-            Tile::new(Suit::Souzu, 6, 8),
-            Tile::new(Suit::Souzu, 8, 9),
-            Tile::new(Suit::Pinzu, 1, 10),
-            Tile::new(Suit::Pinzu, 3, 11),
-            Tile::new(Suit::Pinzu, 5, 12),
-            Tile::new(Suit::Wind, 1, 13),
-            Tile::new(Suit::Dragon, 1, 14),
-        ];
-        run.selected = vec![false; run.hand.len()];
-        run.discards_remaining = 0;
-        run.plays_remaining = 3;
-        run.structure_sets.clear();
-        run.structure_tiles.clear();
+        let (mut run, mut bus) = dead_hand_no_actions_fixture();
 
         run.refill_hand(&mut bus);
 

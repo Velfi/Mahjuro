@@ -282,6 +282,17 @@ impl MemorialTalismanKind {
         ]
     }
 
+    /// Memorial talismans that can avert the given defeat reason, in preferred
+    /// auto-use order when the round would otherwise end.
+    pub fn salvage_candidates(reason: GameOverReason) -> &'static [MemorialTalismanKind] {
+        match reason {
+            GameOverReason::OutOfPlays => &[Self::Exhausted, Self::BossMark, Self::TagBearer],
+            GameOverReason::NoActionsRemaining => {
+                &[Self::FrozenHand, Self::FullDish, Self::Discarded, Self::TagBearer]
+            }
+        }
+    }
+
     /// One-line flavor for the defeat screen from journal habits.
     pub fn defeat_subtitle(self, _journal: &MemorialJournalSnapshot) -> &'static str {
         match self {

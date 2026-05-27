@@ -7,94 +7,149 @@
 
 pub mod asset_path;
 mod asset_sources;
+#[cfg(any(
+    feature = "game",
+    feature = "headless-bake",
+    feature = "headless-screenshot"
+))]
 mod audio;
+#[cfg(any(feature = "game", feature = "headless-screenshot"))]
 pub mod bot;
 pub mod core;
-pub mod crash_guard;
+#[cfg(feature = "game")]
+mod crash_guard;
+#[cfg(feature = "game")]
 mod debug_menu;
+#[cfg(feature = "game")]
 mod debug_overlays;
-mod effect_layers;
+pub mod effect_layers;
 pub mod game;
-#[cfg(target_os = "macos")]
+#[cfg(all(feature = "game", target_os = "macos"))]
 mod macos_fullscreen_shortcut;
+#[cfg(feature = "game")]
 #[path = "main/cli.rs"]
 mod main_cli;
+#[cfg(feature = "game")]
 #[path = "main/commands.rs"]
 mod main_commands;
+#[cfg(feature = "game")]
 #[path = "main/debug_actions.rs"]
 mod main_debug_actions;
+#[cfg(feature = "game")]
 #[path = "main/debug_state.rs"]
 mod main_debug_state;
+#[cfg(any(feature = "game", feature = "headless-screenshot"))]
 #[path = "main/draw.rs"]
-mod main_draw;
+pub mod main_draw;
+#[cfg(feature = "game")]
 #[path = "main/event_loop.rs"]
 mod main_event_loop;
+#[cfg(feature = "game")]
 #[path = "main/frame_tick.rs"]
 mod main_frame_tick;
-#[path = "main/headless/mod.rs"]
-mod main_headless;
+#[cfg(feature = "game")]
 #[path = "main/perf_watchdog.rs"]
 mod main_perf_watchdog;
 #[path = "main/render_settings.rs"]
-mod main_render_settings;
+pub mod main_render_settings;
 #[path = "main/room_gltf_brownout.rs"]
 mod main_room_gltf_brownout;
-mod persistence;
+pub mod persistence;
 mod physical_size;
-mod render;
+pub mod render;
+#[cfg(any(feature = "game", feature = "headless-screenshot"))]
 #[path = "main/scene_transition.rs"]
 mod scene_transition;
-mod scenes;
+pub mod scenes;
+#[cfg(any(
+    feature = "game",
+    feature = "headless-bake",
+    feature = "headless-screenshot"
+))]
 mod sdl_shell;
 mod startup_profile;
+#[cfg(any(
+    feature = "game",
+    feature = "headless-bake",
+    feature = "headless-screenshot"
+))]
 mod steam;
-mod ui;
+pub mod ui;
 
+#[cfg(feature = "game")]
+#[path = "main/app.rs"]
+mod app;
+#[cfg(feature = "game")]
 use std::time::Instant;
 
+#[cfg(feature = "game")]
+use crate::game::cascade::CascadeTuning;
+#[cfg(feature = "game")]
+use crate::game::event_bus::{EventBus, GameEvent};
+#[cfg(feature = "game")]
+use crate::game::run::RunState;
+#[cfg(feature = "game")]
+use crate::game::scene_look_tuning::SceneLookTuningSet;
+#[cfg(feature = "game")]
+use crate::main_debug_state::DebugState;
+#[cfg(feature = "game")]
+use crate::main_render_settings::RenderSettings;
+#[cfg(feature = "game")]
+use crate::physical_size::PhysicalSize;
+#[cfg(feature = "game")]
+use crate::render::animation::AnimationController;
+#[cfg(feature = "game")]
+use crate::render::wgpu_renderer::WgpuRenderer;
+#[cfg(feature = "game")]
+use crate::scene_transition::{PendingSceneDestination, TransitionKind};
+#[cfg(feature = "game")]
+use crate::scenes::{ButtonDef, Scene, SceneBehavior};
+#[cfg(feature = "game")]
+use crate::ui::input::{InputMode, InputState, UiAction};
+#[cfg(feature = "game")]
+use crate::ui::layout::UiLayout;
+#[cfg(feature = "game")]
+use crate::ui::modal::{Modal, ModalQueue};
+#[cfg(feature = "game")]
+use crate::ui::modal::ModalTheme;
+#[cfg(feature = "game")]
+use sdl3::keyboard::Mod;
+
+#[cfg(feature = "game")]
 use clap::{ArgAction, Args, Parser, Subcommand};
-use debug_menu::DebugAction;
+#[cfg(feature = "game")]
+use crate::debug_menu::DebugAction;
+#[cfg(feature = "game")]
 #[cfg(debug_menu_enabled)]
-use debug_menu::DebugMenuBar;
-use debug_overlays::{
+use crate::debug_menu::DebugMenuBar;
+#[cfg(feature = "game")]
+use crate::debug_overlays::{
     CameraDebugOverlay, DebugVisResult, DebugVisibilityOverlay, SfxTestOverlay, TuningOverlay,
     TuningResult,
 };
-use game::cascade::CascadeTuning;
-use game::event_bus::{EventBus, GameEvent};
-use game::run::RunState;
-use game::scene_look_tuning::SceneLookTuningSet;
-use render::animation::AnimationController;
-use render::draw_cmd::{CameraParams, UiFrame, apply_modal_relic_staging};
-use render::wgpu_renderer::{GpuInstance, TextLabel, WgpuRenderer};
-use scenes::game_over::GameOverScene;
-use scenes::gameplay::GameplayScene;
-use scenes::animation_lab::AnimationLabScene;
-use scenes::material_viewer::MaterialViewerScene;
-use scenes::rumble_lab::RumbleLabScene;
-use scenes::splash::SplashScene;
-use scenes::transition_playground::TransitionPlaygroundScene;
-use scenes::tutorial_summary::TutorialSummaryScene;
-use scenes::{ButtonAction, ButtonDef, DrawCtx, Scene, SceneBehavior, UpdateCtx};
-use ui::input::{InputMode, InputState, UiAction};
-use ui::layout::UiLayout;
-use ui::modal::{Modal, ModalQueue, ModalTheme, UnlockPage};
+#[cfg(feature = "game")]
+use crate::render::draw_cmd::{CameraParams, UiFrame, apply_modal_relic_staging};
+#[cfg(feature = "game")]
+use crate::render::wgpu_renderer::{GpuInstance, TextLabel};
+#[cfg(feature = "game")]
+use crate::scenes::game_over::GameOverScene;
+#[cfg(feature = "game")]
+use crate::scenes::gameplay::GameplayScene;
+#[cfg(feature = "game")]
+use crate::scenes::animation_lab::AnimationLabScene;
+#[cfg(feature = "game")]
+use crate::scenes::material_viewer::MaterialViewerScene;
+#[cfg(feature = "game")]
+use crate::scenes::rumble_lab::RumbleLabScene;
+#[cfg(feature = "game")]
+use crate::scenes::transition_playground::TransitionPlaygroundScene;
+#[cfg(feature = "game")]
+use crate::scenes::tutorial_summary::TutorialSummaryScene;
+#[cfg(feature = "game")]
+use crate::scenes::{ButtonAction, DrawCtx, UpdateCtx};
 
-use crate::physical_size::PhysicalSize;
-use sdl3::keyboard::{Mod, Scancode};
-
-use main_cli::Cli;
-use main_debug_state::DebugState;
-use main_render_settings::RenderSettings;
-
-// Debug overlays (visibility toggles, cascade tuning, SFX test, camera
-// params) live in `debug_overlays.rs`.  See `mod debug_overlays` above.
-// `DebugState` and `RenderSettings` live in
-// `main/debug_state.rs` and `main/render_settings.rs`.
-
-use scene_transition::{DEFAULT_QUICK_SPEC, PendingSceneDestination, TransitionKind};
-
-struct App {
+#[cfg(feature = "game")]
+pub(crate) struct App {
     /// Last known drawable size in pixels (updated each SDL frame).
     last_drawable_px: PhysicalSize,
     renderer: Option<WgpuRenderer>,
@@ -204,342 +259,21 @@ struct App {
 /// Each field is `None` when the renderer is missing or the cursor is
 /// outside the relevant pickable surface this frame. Recomputed every
 /// frame_tick from the latest cursor position.
+#[cfg(feature = "game")]
 #[derive(Clone, Copy, Default, Debug)]
 pub(crate) struct FramePicks {
-    pub hand: Option<usize>,
-    pub shop: Option<render::wgpu_renderer::ShopHit>,
-    pub gameplay: Option<render::wgpu_renderer::GameplayPick>,
+    pub(crate) hand: Option<usize>,
+    pub(crate) shop: Option<crate::render::wgpu_renderer::ShopHit>,
+    pub(crate) gameplay: Option<crate::render::wgpu_renderer::GameplayPick>,
 }
 
-impl App {
-    fn saved_resume_scene_for(scene: &Scene) -> Option<persistence::ResumeScene> {
-        match scene {
-            Scene::Shop(_) => Some(persistence::ResumeScene::Shop),
-            Scene::PickChamber(_) => Some(persistence::ResumeScene::PickChamber),
-            Scene::Gameplay(_) => Some(persistence::ResumeScene::Gameplay),
-            _ => None,
-        }
-    }
-
-    /// Face-button semantics for the scene currently receiving controller input.
-    fn active_face_bindings(&self) -> crate::ui::input::FaceButtonBindings {
-        if !self.overlay_stack.is_empty() || self.scene.has_blocking_overlay() {
-            return crate::ui::input::FaceButtonBindings::default();
-        }
-        let xy_quick_action = self
-            .input
-            .as_ref()
-            .map(|i| i.xy_quick_action)
-            .unwrap_or(true);
-        self.scene
-            .face_button_bindings(crate::ui::input::FaceBindingCtx { xy_quick_action })
-    }
-
-    /// Single source of truth for "is anything modal-like up right now?"
-    ///
-    /// **The modal-blocking pattern.** Any overlay that should block input
-    /// and hover for elements below it is reported here, by ORing together:
-    ///   - The app-owned [`ModalQueue`] (toast modals).
-    ///   - App-owned debug overlays (`tuning_overlay`, `sfx_test_overlay`).
-    ///   - The active scene's own internal overlays, via
-    ///     [`Scene::has_blocking_overlay`].
-    ///
-    /// The main loop also consults this for the **click safety wipe**:
-    /// right after the scene populates `active_buttons`, those buttons are
-    /// cleared if any modal is up, so scene buttons can never be clicked
-    /// through. Overlays that *want* their own clickable surface (e.g.
-    /// `ModalQueue`'s full-screen dismiss) write to `active_buttons`
-    /// *after* the wipe in their own draw step.
-    ///
-    /// To make a new overlay modal-blocking by default:
-    ///   - If it's app-owned: add it to this OR-chain.
-    ///   - If it's scene-owned: report it from the scene's
-    ///     `has_blocking_overlay()` method.
-    ///
-    /// No per-call-site changes are needed — the gates pick it up
-    /// automatically.
-    fn modal_overlay_active(&self) -> bool {
-        self.modals.is_active()
-            || self.debug.any_overlay_active()
-            || self.scene.has_blocking_overlay()
-            || self.overlay_stack.iter().any(|s| s.has_blocking_overlay())
-            || !self.overlay_stack.is_empty()
-    }
-
-    /// Storeroom shop is the active face (no showcase inspect overlay, not paused).
-    fn shop_storeroom_face_active(&self) -> bool {
-        self.overlay_stack.is_empty()
-            && matches!(self.scene, Scene::Shop(_))
-            && !self.scene.has_blocking_overlay()
-    }
-
-    /// Shop or item-inspect showcase: LMB drag orbits instead of firing clicks on press.
-    fn shop_defer_lmb_clicks(&self) -> bool {
-        self.shop_storeroom_face_active()
-            || self
-                .overlay_stack
-                .last()
-                .is_some_and(|s| matches!(s, Scene::Showcase(s) if s.wants_orbit_input()))
-    }
-
-    fn gameplay_relic_slot_at_cursor(&self, cursor: (f32, f32)) -> Option<usize> {
-        if self.modal_overlay_active() || !matches!(self.scene, Scene::Gameplay(_)) {
-            return None;
-        }
-        let renderer = self.renderer.as_ref()?;
-        renderer
-            .projections()
-            .relic_rects
-            .iter()
-            .enumerate()
-            .find_map(|(i, rect)| {
-                let [x, y, w, h] = *rect;
-                (w > 1.0
-                    && h > 1.0
-                    && x.is_finite()
-                    && y.is_finite()
-                    && cursor.0 >= x
-                    && cursor.0 <= x + w
-                    && cursor.1 >= y
-                    && cursor.1 <= y + h)
-                    .then_some(i)
-            })
-    }
-
-    fn new(steam: steam::SteamClient) -> Self {
-        let settings = persistence::load_settings();
-        let active_profile = settings.active_profile;
-        let progress = persistence::load_profile(active_profile);
-        // Prefer a saved-on-quit run for this profile (resume). If none
-        // exists or it was written by a previous build version, fall back
-        // to a fresh demo run. `load_run` deletes stale/corrupt saves.
-        let loaded_run = persistence::load_run(active_profile);
-        let resume_scene = loaded_run
-            .as_ref()
-            .map(|saved| saved.scene)
-            .unwrap_or(persistence::ResumeScene::Gameplay);
-        let mut run = loaded_run
-            .map(|saved| saved.run)
-            .unwrap_or_else(RunState::new_demo);
-        run.set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
-        run.set_hints_enabled(settings.hints_enabled);
-        run.apply_progression(&progress);
-        steam.sync_profile_stats(&progress);
-        let mut audio = audio::AudioManager::new();
-        audio.set_master_volume(settings.master_volume);
-        audio.set_sfx_volume(settings.sfx_volume);
-        audio.set_music_volume(settings.music_volume);
-        if !settings.sfx_enabled {
-            audio.set_enabled(false);
-        }
-        let scene_look = SceneLookTuningSet::load();
-        Self {
-            last_drawable_px: PhysicalSize::new(1920, 1080),
-            renderer: None,
-            layout_engine: UiLayout::new(),
-            input: None,
-            run,
-            bus: EventBus::default(),
-            anim: AnimationController::new(),
-            last_frame: Instant::now(),
-            last_frame_dt: 1.0 / 60.0,
-            mouse_actions: Vec::new(),
-            mouse_button_clicks: Vec::new(),
-            mouse_clicked: false,
-            mouse_left_down: false,
-            mouse_right_clicked: false,
-            deferred_lmb_button_click: None,
-            mouse_left_press_cursor: None,
-            scroll_delta: 0.0,
-            active_buttons: Vec::new(),
-            scene: Scene::Splash(SplashScene::new()),
-            resume_scene,
-            progress,
-            active_profile,
-            audio,
-            transition_alpha: 1.0,
-            transition_speed: DEFAULT_QUICK_SPEC.speed,
-            transition_timer: 0.0,
-            transition_kind: TransitionKind::Quick,
-            pending_scene: None,
-            pending_scene_destination: PendingSceneDestination::default(),
-            overlay_stack: Vec::new(),
-            prev_controller_present: false,
-            quit_requested: false,
-            close_saved: false,
-            modals: ModalQueue::default(),
-            pending_post_game_over_level_up: None,
-            deferred_round_end: None,
-            gfx: RenderSettings {
-                effects_quality: settings.effects_quality,
-                tile_preset: settings.tile_preset,
-                tile_material: settings.tile_material,
-                tileset_name: settings.tileset_name.clone(),
-                gamma: settings.gamma,
-                shadows_enabled: settings.shadows_enabled,
-                ssr_enabled: settings.ssr_enabled,
-                hdr_enabled: settings.hdr_enabled,
-                vhs_enabled: settings.vhs_enabled,
-            },
-            // Default: cheap baseline; see `effect_layers.rs`. Use `FULL` or flip
-            // flags to restore shadows, SSR, particles, transition FX, HDR, etc.
-            effect_layers: crate::effect_layers::EffectLayers::BASELINE,
-            debug: DebugState::new(),
-            cascade_tuning: CascadeTuning::default(),
-            scene_look,
-            modifiers: Mod::NOMOD,
-            steam,
-            archive_last_seen_run_len: settings.archive_last_seen_run_len,
-            cpu_profiler: render::cpu_profiler::CpuProfiler::new(),
-            profile_saver: persistence::ProfileSaver::spawn(),
-            profile_dirty: false,
-            last_window_title: String::new(),
-            room_gltf_brownout: main_room_gltf_brownout::RoomGltfBrownout::new(),
-            frame_picks: FramePicks::default(),
-            perf_watchdog: main_perf_watchdog::FramePerfWatchdog::new(),
-        }
-    }
-
-    /// Flag `progress` for a background save at frame end. Cheap — the
-    /// actual JSON serialize + write happens off-thread via
-    /// [`persistence::ProfileSaver`]. The cache is updated when the
-    /// flush enqueues a snapshot, which is fine because nothing
-    /// `load_profile`s mid-frame between event handlers.
-    pub(crate) fn mark_profile_dirty(&mut self) {
-        self.profile_dirty = true;
-    }
-
-    /// Frame-end flush: hand a snapshot of `progress` to the saver
-    /// thread iff something marked it dirty. Resets the flag.
-    pub(crate) fn flush_dirty_profile(&mut self) {
-        if self.profile_dirty {
-            self.profile_saver
-                .enqueue(self.active_profile, &self.progress);
-            self.profile_dirty = false;
-        }
-    }
-
-    /// Quit / window-close hand-off: synchronously persist `progress`
-    /// after stopping the background saver. The saver is shut down
-    /// first so any pending older snapshot in its channel can't land
-    /// on disk after the synchronous write.
-    pub(crate) fn save_profile_sync_for_exit(&mut self) {
-        self.profile_saver.shutdown();
-        if let Err(e) = persistence::save_profile(self.active_profile, &self.progress) {
-            log::warn!("save_profile (exit) failed: {e}");
-        }
-        self.profile_dirty = false;
-    }
-
-    fn toggle_fullscreen(&mut self, shell: &mut sdl_shell::SdlShell) -> anyhow::Result<()> {
-        let on = shell.desktop_fullscreen_on();
-        shell.set_desktop_fullscreen(!on)?;
-        let mut settings = persistence::load_settings();
-        settings.borderless_fullscreen = shell.desktop_fullscreen_on();
-        let _ = persistence::save_settings(&settings);
-        Ok(())
-    }
-
-    fn wants_fullscreen_shortcut(
-        &self,
-        scancode: Option<Scancode>,
-        keymod: Mod,
-        repeat: bool,
-    ) -> bool {
-        if repeat {
-            return false;
-        }
-        let Some(code) = scancode else {
-            return false;
-        };
-
-        #[cfg(target_os = "windows")]
-        {
-            let no_extra_modifiers = !(keymod.contains(Mod::LCTRLMOD | Mod::RCTRLMOD)
-                || keymod.contains(Mod::LSHIFTMOD | Mod::RSHIFTMOD)
-                || keymod.contains(Mod::LGUIMOD | Mod::RGUIMOD));
-            keymod.contains(Mod::LALTMOD | Mod::RALTMOD)
-                && no_extra_modifiers
-                && matches!(code, Scancode::Return | Scancode::KpEnter)
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            if code != Scancode::F {
-                return false;
-            }
-            let disallowed_mod = keymod.contains(Mod::LCTRLMOD)
-                || keymod.contains(Mod::RCTRLMOD)
-                || keymod.contains(Mod::LALTMOD)
-                || keymod.contains(Mod::RALTMOD)
-                || keymod.contains(Mod::LGUIMOD)
-                || keymod.contains(Mod::RGUIMOD)
-                || keymod.contains(Mod::LSHIFTMOD)
-                || keymod.contains(Mod::RSHIFTMOD);
-            if disallowed_mod {
-                return false;
-            }
-            crate::macos_fullscreen_shortcut::fn_modifier_held()
-        }
-
-        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-        {
-            let _ = code;
-            let _ = keymod;
-            false
-        }
-    }
-
-    /// Switch to a different profile, reloading progress.
-    fn switch_profile(&mut self, new_index: usize) {
-        // Save current profile + any in-progress run before swapping out.
-        let _ = persistence::save_profile(self.active_profile, &self.progress);
-        self.persist_run_if_in_progress();
-        self.active_profile = new_index;
-        self.progress = persistence::load_profile(new_index);
-        // Resume the new profile's saved run if it has one — otherwise a
-        // fresh demo run, exactly like first-launch behavior.
-        let loaded_run = persistence::load_run(new_index);
-        self.resume_scene = loaded_run
-            .as_ref()
-            .map(|saved| saved.scene)
-            .unwrap_or(persistence::ResumeScene::Gameplay);
-        self.run = loaded_run
-            .map(|saved| saved.run)
-            .unwrap_or_else(RunState::new_demo);
-        let mut settings = persistence::load_settings();
-        self.run
-            .set_auto_cash_in_on_full_structure(settings.auto_cash_in_on_full_structure);
-        self.run.set_hints_enabled(settings.hints_enabled);
-        self.run.apply_progression(&self.progress);
-        self.steam.sync_profile_stats(&self.progress);
-        // Persist the active profile choice.
-        settings.active_profile = new_index;
-        let _ = persistence::save_settings(&settings);
-        self.archive_last_seen_run_len = settings.archive_last_seen_run_len;
-    }
-
-    /// Persist `self.run` for resume on next launch. Called from every quit
-    /// path so the player can resume regardless of how the game was closed.
-    /// If the run is fresh (default starting state — e.g. the player started
-    /// a new game then quit immediately), the saved-run file is deleted
-    /// instead of overwritten. Otherwise the existing save would still
-    /// linger and we'd resume into a stale run on next launch.
-    fn persist_run_if_in_progress(&self) {
-        if self.run.is_in_progress() {
-            let scene = Self::saved_resume_scene_for(&self.scene).unwrap_or(self.resume_scene);
-            if let Err(e) = persistence::save_run(self.active_profile, &self.run, scene) {
-                log::warn!("save_run failed: {e}");
-            }
-        } else {
-            persistence::delete_saved_run(self.active_profile);
-        }
-    }
-}
+#[cfg(feature = "game")]
+use main_cli::Cli;
 
 /// When `MAHJURO_LOG_FILE` is set, send `log` output to that path (append) instead
 /// of stderr. Steam and other GUI launchers often discard stderr, so this is the
 /// reliable way to capture `RUST_LOG` when launching from Steam.
+#[cfg(feature = "game")]
 fn init_env_logger() {
     use std::fs::OpenOptions;
     use std::io::LineWriter;
@@ -569,6 +303,7 @@ fn init_env_logger() {
 
 /// Non-panic startup failures never run the panic hook / `crash_guard` dialog.
 /// If the user set `MAHJURO_LOG_FILE`, mirror the final error there too.
+#[cfg(feature = "game")]
 fn append_startup_error_to_log_file(msg: &str) {
     use std::io::Write;
 
@@ -591,6 +326,7 @@ fn append_startup_error_to_log_file(msg: &str) {
 }
 
 /// Interactive / CLI entry used by the `mahjuro` binary.
+#[cfg(feature = "game")]
 pub fn run() -> anyhow::Result<()> {
     crash_guard::install();
     init_env_logger();

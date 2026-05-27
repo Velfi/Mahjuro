@@ -1,8 +1,16 @@
+#[cfg(feature = "game")]
 use super::*;
 
+#[cfg(feature = "game")]
 use crate::game::engine::GameEngine;
+#[cfg(feature = "game")]
 use crate::scene_transition::overlay_kind_for_transition;
 
+use crate::core;
+use crate::render;
+use crate::ui::modal::{Modal, ModalTheme, UnlockPage};
+
+#[cfg(feature = "game")]
 #[inline]
 fn append_fullscreen_debug_panel(
     frame: &mut UiFrame,
@@ -15,6 +23,7 @@ fn append_fullscreen_debug_panel(
     active_buttons.clear();
 }
 
+#[cfg(feature = "game")]
 impl App {
     /// Canonical scene-key string for the renderer (`active_scene_key`).
     /// Mirrors the match in [`Self::draw`]; pulled out so the per-scene
@@ -489,9 +498,6 @@ impl App {
                 .as_ref()
                 .map(|i| i.mode)
                 .unwrap_or(crate::ui::input::InputMode::Cursor),
-            swap_ab,
-            swap_xy,
-            prompt_style,
             glyphs,
             suspended_shop,
             suspended_collection,
@@ -850,9 +856,10 @@ impl App {
     }
 }
 
+#[cfg(any(feature = "game", feature = "headless-screenshot"))]
 /// Build the paginated celebration modal for a level-up. Returns `None`
 /// when the level grants no new relics (rule unlocks are silent mechanics).
-pub(crate) fn build_level_up_modal(
+pub fn build_level_up_modal(
     result: &core::progression::LevelUpResult,
     window_w: f32,
     window_h: f32,

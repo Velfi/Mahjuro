@@ -52,13 +52,11 @@ use crate::ui::input::InputMode;
 use crate::ui::inspect_plaque::{
     FocusTooltipPanelParams, push_floating_relic_flavor_labels, push_focus_tooltip_panel_2d,
 };
-use crate::ui::kenney_prompt_paths::shop_keyboard_prompt_icons;
-
 use super::layout::{
     consumable_color, is_tile_pack_pick, live_shop_hit, rarity_color, relic_half_extents,
     tile_pack_index_from_pick,
 };
-use super::shared::shop_focus_inspectable;
+use super::shared::{focused_sell_action, shop_focus_inspectable};
 use super::{
     ConsumableShopItem, ShopFocus, ShopItem, ShopMode, ShopScene, TilePackShopItem, push_free_badge,
 };
@@ -985,7 +983,7 @@ pub(crate) fn render_shop_frame(
                 window_h: h,
             },
             scale,
-            crate::scenes::options::OptionsDrawHint::pause_overlay(&ctx),
+            crate::scenes::options::options_scroll_fade_backdrop(true),
             &mut pause_quads,
             &mut pause_text,
             &mut pause_buttons,
@@ -1040,33 +1038,72 @@ pub(crate) fn render_shop_frame(
         let inner_right = x + bw * 0.98;
         let inner_w = (inner_right - inner_left).max(8.0);
 
-        let layout = ColumnHintLayout::shop_floating_band(w, h, inspect_active, 4);
-        let keyboard_icons = shop_keyboard_prompt_icons();
-        let entries = [
-            ColumnHintEntry::new(
-                HintKey::Action(crate::ui::input::UiAction::Cancel),
-                keyboard_icons[0].clone(),
-                "Exit",
-            ),
-            ColumnHintEntry::new(
-                HintKey::Action(crate::ui::input::UiAction::Confirm),
-                keyboard_icons[1].clone(),
-                "Select",
-            ),
-            ColumnHintEntry::new(
-                HintKey::Action(crate::ui::input::UiAction::WestFacePress),
-                keyboard_icons[2].clone(),
-                "Sell",
-            ),
-            ColumnHintEntry::new(
-                HintKey::Action(crate::ui::input::UiAction::NorthFacePress),
-                keyboard_icons[3].clone(),
-                "Inspect",
-            ),
-        ];
+        let sell_hint_hit = ctx
+            .picked_shop_object
+            .and_then(|hit| {
+                live_shop_hit(
+                    hit,
+                    shop,
+                    &shop.items,
+                    &shop.zodiac_items,
+                    &shop.talisman_items,
+                    &shop.pack_items,
+                    &shop_rm,
+                )
+            })
+            .or_else(|| {
+                shop.focus
+                    .and_then(|f| f.to_hit())
+                    .and_then(|hit| {
+                        live_shop_hit(
+                            hit,
+                            shop,
+                            &shop.items,
+                            &shop.zodiac_items,
+                            &shop.talisman_items,
+                            &shop.pack_items,
+                            &shop_rm,
+                        )
+                    })
+            });
+        let hover_sellable = sell_hint_hit.is_some_and(|hit| {
+            focused_sell_action(
+                Some(ShopFocus::from_hit(hit)),
+                shop.items.len(),
+                &shop.zodiac_items,
+                &shop.talisman_items,
+                &shop_rm,
+            )
+            .is_some()
+        });
+        let show_hold_sell_hint =
+            inspect.is_none() && (shop.west_sell_hold_started.is_some() || hover_sellable);
 
-        let mut legend_texts: Vec<TextLabel> =
-            Vec::with_capacity(if inspect_active { 5 } else { 4 });
+        let layout = ColumnHintLayout::shop_floating_band(
+            w,
+            h,
+            inspect_active,
+            if show_hold_sell_hint { 2 } else { 1 },
+        );
+        let keyboard_icons = crate::ui::kenney_prompt_paths::shop_action_prompt_icons();
+        let mut entries: Vec<ColumnHintEntry> = Vec::with_capacity(2);
+        let mut hold_sell_col: Option<usize> = None;
+        if show_hold_sell_hint {
+            hold_sell_col = Some(entries.len());
+            entries.push(ColumnHintEntry::surrounding_icon(
+                HintKey::Action(crate::ui::input::UiAction::WestFacePress),
+                keyboard_icons[0].clone(),
+                "Hold ",
+                " Sell",
+            ));
+        }
+        entries.push(ColumnHintEntry::new(
+            HintKey::Action(crate::ui::input::UiAction::NorthFacePress),
+            keyboard_icons[1].clone(),
+            "Inspect",
+        ));
+
+        let mut legend_texts: Vec<TextLabel> = Vec::with_capacity(entries.len());
         let slots = push_column_hints(
             &mut frame,
             &ctx,
@@ -1076,11 +1113,8 @@ pub(crate) fn render_shop_frame(
             &mut legend_texts,
         );
 
-        const HOLD_SELL_LEGEND_COL: usize = 2;
-        if let Some(started) = shop.west_sell_hold_started
-            && let Some(slot) = slots
-                .iter()
-                .find(|s| s.column_index == HOLD_SELL_LEGEND_COL)
+        if let (Some(started), Some(col)) = (shop.west_sell_hold_started, hold_sell_col)
+            && let Some(slot) = slots.iter().find(|s| s.column_index == col)
         {
             let elapsed = Instant::now()
                 .saturating_duration_since(started)

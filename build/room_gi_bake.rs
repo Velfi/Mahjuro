@@ -1,4 +1,4 @@
-//! Invoked from `build.rs`: hash room-GI bake inputs and run `mahjuro bake-room-gi` when stale.
+//! Invoked from `build.rs`: hash room-GI bake inputs and run `mahjuro bake-room` when stale.
 //!
 //! GPU bakes run when the inputs stamp differs from `assets/data/room_gi/.inputs_stamp`
 //! or a `.mgi` is missing (any build profile). Set `MAHJURO_SKIP_ROOM_GI_BAKE=1` to disable.
@@ -85,18 +85,18 @@ pub fn maybe_bake_room_gi(repo: &Path, profile_dir: &Path) {
         return;
     }
 
-    let Some(exe) = find_mahjuro_exe(profile_dir) else {
+    let Some(exe) = super::bake_tool::ensure_bake_exe(repo, profile_dir) else {
         if outputs_ok {
             println!(
-                "cargo:warning=room GI bake inputs changed but `mahjuro` is not built yet \
+                "cargo:warning=room GI bake inputs changed but `mahjuro-bake` is not built yet \
                  (expected in {}); using existing .mgi until you rebuild — run \
-                 `cargo build` again or `mahjuro bake-room-gi`",
+                 `cargo build -p mahjuro-bake` or `cargo run -p mahjuro-bake -- --kinds gi`",
                 profile_dir.display()
             );
         } else {
             println!(
-                "cargo:warning=room GI bakes missing under {OUT_DIR} and `mahjuro` is not in \
-                 {}; run `cargo build` twice, or bake manually with `mahjuro bake-room-gi`",
+                "cargo:warning=room GI bakes missing under {OUT_DIR} and `mahjuro-bake` is not in \
+                 {}; run `cargo build -p mahjuro-bake`, or `cargo run -p mahjuro-bake -- --kinds gi`",
                 profile_dir.display()
             );
         }
@@ -111,37 +111,36 @@ pub fn maybe_bake_room_gi(repo: &Path, profile_dir: &Path) {
         "cargo:warning=room GI bake: inputs stale, running GPU bake via {}",
         exe.display()
     );
-    for room in ROOMS {
-        let status = Command::new(&exe)
-            .current_dir(repo)
-            .arg("bake-room-gi")
-            .arg(room)
-            .arg("--output-dir")
-            .arg(&out_dir)
-            .arg("--width")
-            .arg(BAKE_WIDTH.to_string())
-            .arg("--height")
-            .arg(BAKE_HEIGHT.to_string())
-            .status();
-        match status {
-            Ok(s) if s.success() => {}
-            Ok(s) => {
-                let out_path = out_dir.join(format!("{room}.mgi"));
-                if out_path.is_file() {
-                    println!(
-                        "cargo:warning=room GI bake for {room} failed ({s}); keeping existing \
-                         {} — rebuild once with MAHJURO_SKIP_ROOM_GI_BAKE=1 if bakes stay stale",
-                        out_path.display()
-                    );
-                } else {
-                    panic!(
-                        "room GI bake for {room} failed ({s}); fix GPU/headless init or set \
-                         MAHJURO_SKIP_ROOM_GI_BAKE=1"
-                    );
-                }
+    let status = Command::new(&exe)
+        .current_dir(repo)
+        .args([
+            "--kinds",
+            "gi",
+            "--gi-dir",
+            out_dir.to_str().unwrap_or(OUT_DIR),
+            "--width",
+            &BAKE_WIDTH.to_string(),
+            "--height",
+            &BAKE_HEIGHT.to_string(),
+        ])
+        .status();
+    match status {
+        Ok(s) if s.success() => {}
+        Ok(s) => {
+            let any_missing = ROOMS
+                .iter()
+                .any(|room| !out_dir.join(format!("{room}.mgi")).is_file());
+            if any_missing {
+                panic!(
+                    "room GI bake failed ({s}); fix GPU/headless init or set MAHJURO_SKIP_ROOM_GI_BAKE=1"
+                );
             }
-            Err(e) => panic!("failed to spawn room GI bake for {room}: {e}"),
+            println!(
+                "cargo:warning=room GI bake failed ({s}); keeping existing .mgi files — \
+                 rebuild once with MAHJURO_SKIP_ROOM_GI_BAKE=1 if bakes stay stale"
+            );
         }
+        Err(e) => panic!("failed to spawn room GI bake: {e}"),
     }
 
     if let Err(e) = write_stamp(&stamp_file, &hash) {
@@ -159,21 +158,6 @@ fn skip_bake_env() -> bool {
             !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false")
         })
         .unwrap_or(false)
-}
-
-fn find_mahjuro_exe(profile_dir: &Path) -> Option<PathBuf> {
-    #[cfg(windows)]
-    let names = ["mahjuro.exe", "mahjuro"];
-    #[cfg(not(windows))]
-    let names = ["mahjuro"];
-
-    for name in names {
-        let p = profile_dir.join(name);
-        if p.is_file() {
-            return Some(p);
-        }
-    }
-    None
 }
 
 fn compute_inputs_hash(repo: &Path) -> String {

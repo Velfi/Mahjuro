@@ -1,4 +1,4 @@
-//! Invoked from `build.rs`: hash room-shadow bake inputs and run `mahjuro bake-room-shadows` when stale.
+//! Invoked from `build.rs`: hash room-shadow bake inputs and run `mahjuro bake-room` when stale.
 //!
 //! Runs when the inputs stamp differs from `assets/data/room_shadow/.inputs_stamp` or a `.msh`
 //! is missing (any build profile). Set `MAHJURO_SKIP_ROOM_SHADOW_BAKE=1` to disable.
@@ -86,44 +86,41 @@ pub fn maybe_bake_room_shadows(repo: &Path, profile_dir: &Path) {
         return;
     }
 
-    let Some(exe) = find_mahjuro_exe(profile_dir) else {
+    let Some(exe) = super::bake_tool::ensure_bake_exe(repo, profile_dir) else {
         if outputs_ok {
             println!(
-                "cargo:warning=room shadow bake inputs changed but `mahjuro` is not built yet; \
+                "cargo:warning=room shadow bake inputs changed but `mahjuro-bake` is not built yet; \
                  using existing .msh until rebuild"
             );
         } else {
             println!(
                 "cargo:warning=room shadow bakes missing under {OUT_DIR}; run \
-                 `cargo build` twice or `mahjuro bake-room-shadows <room>`"
+                 `cargo build -p mahjuro-bake` or `cargo run -p mahjuro-bake -- --kinds shadow`"
             );
         }
         return;
     };
 
     fs::create_dir_all(&out_dir).ok();
-    for room in ROOMS {
-        let status = Command::new(&exe)
-            .args([
-                "bake-room-shadows",
-                room,
-                "--output-dir",
-                out_dir.to_str().unwrap_or(OUT_DIR),
-            ])
-            .status();
-        match status {
-            Ok(s) if s.success() => {}
-            Ok(s) => {
-                println!(
-                    "cargo:warning=room shadow bake for {room} failed (exit {s}); \
-                     run `mahjuro bake-room-shadows {room}` manually"
-                );
-                return;
-            }
-            Err(e) => {
-                println!("cargo:warning=room shadow bake spawn failed: {e}");
-                return;
-            }
+    let status = Command::new(&exe)
+        .args([
+            "--kinds",
+            "shadow",
+            "--shadow-dir",
+            out_dir.to_str().unwrap_or(OUT_DIR),
+        ])
+        .status();
+    match status {
+        Ok(s) if s.success() => {}
+        Ok(s) => {
+            println!(
+                "cargo:warning=room shadow bake failed (exit {s}); run `cargo run -p mahjuro-bake -- --kinds shadow` manually"
+            );
+            return;
+        }
+        Err(e) => {
+            println!("cargo:warning=room shadow bake spawn failed: {e}");
+            return;
         }
     }
     let _ = write_stamp(&stamp_file, &hash);
@@ -156,17 +153,3 @@ fn write_stamp(path: &Path, hash: &str) -> io::Result<()> {
     fs::write(path, hash)
 }
 
-fn find_mahjuro_exe(profile_dir: &Path) -> Option<PathBuf> {
-    #[cfg(windows)]
-    let names = ["mahjuro.exe", "mahjuro"];
-    #[cfg(not(windows))]
-    let names = ["mahjuro"];
-
-    for name in names {
-        let p = profile_dir.join(name);
-        if p.is_file() {
-            return Some(p);
-        }
-    }
-    None
-}

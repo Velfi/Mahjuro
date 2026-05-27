@@ -52,9 +52,11 @@ pub use profile_select::ProfileSelectScene;
 pub use rumble_lab::RumbleLabScene;
 pub use shop::ShopScene;
 pub use showcase::{
-    CollectionInspectPresenter, MetaLevelUpPresenter, ShopInspectPresenter, ShowcasePresenter,
-    ShowcaseScene, TilePackPresenter, ZodiacPresenter,
+    CollectionInspectPresenter, ShopInspectPresenter, ShowcasePresenter, ShowcaseScene,
+    TilePackPresenter, ZodiacPresenter,
 };
+#[cfg(any(feature = "game", feature = "headless-screenshot"))]
+pub use showcase::MetaLevelUpPresenter;
 pub use splash::SplashScene;
 pub use staircase::StaircaseScene;
 pub use start_game_modal::TileSelectScene;
@@ -268,12 +270,6 @@ pub struct DrawCtx<'a> {
     pub cursor_pos: (f32, f32),
     /// Active input device — cursor-driven scenes use this with `cursor_pos` for hover rings.
     pub input_mode: InputMode,
-    /// Reflects settings: when true, gamepad South/East (A/B) actions are swapped.
-    pub gamepad_swap_ab: bool,
-    /// Reflects settings: when true, gamepad West/North (X/Y on Xbox layout) actions are swapped.
-    pub gamepad_swap_xy: bool,
-    /// Detected controller family for button-prompt glyphs (see [`crate::ui::button_prompts`]).
-    pub gamepad_style: crate::ui::button_prompts::GamepadStyle,
     /// Resolves a controller-prompt glyph for a given [`UiAction`] (Kenney
     /// Input Prompts atlases). See [`crate::ui::glyph_source::GlyphResolver`].
     pub glyphs: crate::ui::glyph_source::GlyphResolver,
@@ -318,9 +314,6 @@ impl<'a> DrawCtx<'a> {
         effect_layers: EffectLayers,
         cursor_pos: (f32, f32),
         input_mode: InputMode,
-        gamepad_swap_ab: bool,
-        gamepad_swap_xy: bool,
-        gamepad_style: crate::ui::button_prompts::GamepadStyle,
         glyphs: crate::ui::glyph_source::GlyphResolver,
         suspended_shop: Option<&'a ShopScene>,
         suspended_collection: Option<&'a CollectionScene>,
@@ -350,9 +343,6 @@ impl<'a> DrawCtx<'a> {
             effect_layers,
             cursor_pos,
             input_mode,
-            gamepad_swap_ab,
-            gamepad_swap_xy,
-            gamepad_style,
             glyphs,
             suspended_shop,
             suspended_collection,

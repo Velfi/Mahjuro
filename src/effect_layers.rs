@@ -56,6 +56,7 @@ impl EffectLayers {
             } else {
                 EffectsQuality::Off
             },
+            cascade_effects_quality: p.gfx.effects_quality,
             tile_preset: p.tile_preset,
             tile_material: p.tile_material,
             tileset_name: p.tileset_name.clone(),

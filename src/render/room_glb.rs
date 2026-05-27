@@ -15,11 +15,6 @@
 //! soups for cursor ray picking (`pick_shop_object`). **Shop buttons** (`exit_btn`, `restock_btn`,
 //! `journal_btn`) still record marker transforms **and** decode their meshes for drawing.
 //!
-//! ## Shop candle wax (baked SSS)
-//! `Candle*` meshes with material **Wax SSS translucent shader** use glTF `TEXCOORD_1` to sample
-//! [`SHOP_CANDLE_SSS_BAKE_TEXTURE`](crate::render::room_env_gltf::SHOP_CANDLE_SSS_BAKE_TEXTURE)
-//! in `room_glb.wgsl` (`decal_tex` bind). Rebake with Blender or `scripts/bake_shop_candle_sss.py`.
-//!
 //! ## Materials
 //! Each primitive uses glTF PBR **base color texture** (if present) and multiplies by
 //! **`baseColorFactor`** on the CPU. Factor-only materials become a 1×1 uploaded texture.

@@ -34,8 +34,6 @@ struct Layout {
     back_y: f32,
     back_w: f32,
     back_h: f32,
-    hint_y: f32,
-    hint_h: f32,
 }
 
 fn compute_layout(w: f32, h: f32) -> Layout {
@@ -56,9 +54,7 @@ fn compute_layout(w: f32, h: f32) -> Layout {
     let slot_gap = (10.0 * scale).max(5.0);
 
     let back_h = (42.0 * scale).max(28.0);
-    let hint_h = (20.0 * scale).max(14.0);
-    let hint_y = h - hint_h - (18.0 * scale);
-    let back_y = hint_y - back_h - (12.0 * scale);
+    let back_y = h - back_h - (18.0 * scale);
     let back_w = content_w;
     let back_x = content_x;
 
@@ -85,8 +81,6 @@ fn compute_layout(w: f32, h: f32) -> Layout {
         back_y,
         back_w,
         back_h,
-        hint_y,
-        hint_h,
     }
 }
 
@@ -396,20 +390,6 @@ impl SceneBehavior for CreditsScene {
                 user: 0,
             });
         }
-
-        let hint = if matches!(ctx.input_mode, InputMode::Controller) {
-            "Scroll: stick · B: back".into()
-        } else {
-            "Scroll · Esc: back".into()
-        };
-        texts.push(TextLabel {
-            rect: [0.0, layout.hint_y, w, layout.hint_h],
-            text: hint,
-            color: color::UMBER,
-            align: TextAlign::Center,
-            font_px: Some(typography::size(typography::H45, h)),
-            ..Default::default()
-        });
 
         let back_bg = if self.back_focused {
             color::WALNUT_BRIGHT

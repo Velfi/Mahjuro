@@ -34,12 +34,6 @@ impl GlyphResolver {
             .map(|(sheet, name)| ImageQuadSource::AtlasSprite { sheet, name })
     }
 
-    /// D-pad composite glyphs for navigation hints (↑↓ / ←→).
-    pub fn dpad_glyph(&self, kind: DpadGlyph) -> Option<ImageQuadSource> {
-        static_dpad_sprite(self.style, kind)
-            .map(|(sheet, name)| ImageQuadSource::AtlasSprite { sheet, name })
-    }
-
     /// Analog stick glyphs (left / right).
     pub fn stick_glyph(&self, side: StickSide) -> Option<ImageQuadSource> {
         static_stick_sprite(self.style, side)
@@ -51,13 +45,6 @@ impl GlyphResolver {
         static_trigger_sprite(self.style, side)
             .map(|(sheet, name)| ImageQuadSource::AtlasSprite { sheet, name })
     }
-}
-
-/// Composite d-pad artwork for footer / HUD navigation copy.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DpadGlyph {
-    Vertical,
-    Horizontal,
 }
 
 /// Left / right analog stick artwork.
@@ -257,37 +244,6 @@ fn static_trigger_sprite(
     })
 }
 
-fn static_dpad_sprite(
-    style: GamepadStyle,
-    kind: DpadGlyph,
-) -> Option<(&'static str, &'static str)> {
-    use DpadGlyph::{Horizontal, Vertical};
-    Some(match (style, kind) {
-        (GamepadStyle::PlayStation, Vertical) => (PLAYSTATION_SHEET, "playstation_dpad_vertical"),
-        (GamepadStyle::PlayStation, Horizontal) => {
-            (PLAYSTATION_SHEET, "playstation_dpad_horizontal")
-        }
-        (GamepadStyle::Nintendo, Vertical) => (SWITCH_SHEET, "switch_dpad_vertical"),
-        (GamepadStyle::Nintendo, Horizontal) => (SWITCH_SHEET, "switch_dpad_horizontal"),
-        (GamepadStyle::NintendoSwitch2, Vertical) => (SWITCH2_SHEET, "switch_dpad_vertical"),
-        (GamepadStyle::NintendoSwitch2, Horizontal) => (SWITCH2_SHEET, "switch_dpad_horizontal"),
-        (GamepadStyle::SteamDeck, Vertical) => (STEAM_DECK_SHEET, "steamdeck_dpad_vertical"),
-        (GamepadStyle::SteamDeck, Horizontal) => (STEAM_DECK_SHEET, "steamdeck_dpad_horizontal"),
-        (GamepadStyle::SteamController, Vertical) => {
-            (STEAM_CONTROLLER_SHEET, "steam_dpad_vertical")
-        }
-        (GamepadStyle::SteamController, Horizontal) => {
-            (STEAM_CONTROLLER_SHEET, "steam_dpad_horizontal")
-        }
-        (GamepadStyle::Xbox | GamepadStyle::Generic, Vertical) => {
-            (XBOX_SHEET, "xbox_dpad_vertical")
-        }
-        (GamepadStyle::Xbox | GamepadStyle::Generic, Horizontal) => {
-            (XBOX_SHEET, "xbox_dpad_horizontal")
-        }
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -418,32 +374,6 @@ mod tests {
                         );
                     }
                 }
-            }
-        }
-    }
-
-    #[test]
-    fn every_dpad_glyph_resolves_in_atlas() {
-        use DpadGlyph::{Horizontal, Vertical};
-        let styles = [
-            GamepadStyle::Xbox,
-            GamepadStyle::PlayStation,
-            GamepadStyle::Nintendo,
-            GamepadStyle::NintendoSwitch2,
-            GamepadStyle::SteamDeck,
-            GamepadStyle::SteamController,
-            GamepadStyle::Generic,
-        ];
-        for &style in &styles {
-            for &kind in &[Vertical, Horizontal] {
-                let Some((sheet, name)) = static_dpad_sprite(style, kind) else {
-                    continue;
-                };
-                let names = names_in(xml_for(sheet));
-                assert!(
-                    names.contains_key(name),
-                    "{style:?} / {kind:?} references '{name}' missing from {sheet}",
-                );
             }
         }
     }
