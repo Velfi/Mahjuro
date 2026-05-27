@@ -22,6 +22,7 @@ impl WgpuRenderer {
     fn shop_gltf_anim_prim_deltas(
         &self,
         frame: &crate::render::draw_cmd::UiFrame,
+<<<<<<< HEAD
     ) -> rustc_hash::FxHashMap<usize, glam::Mat4> {
         if frame.shop_gltf_anim_samples.is_empty() {
             return rustc_hash::FxHashMap::default();
@@ -37,6 +38,59 @@ impl WgpuRenderer {
             self.shop_gltf_anim_missing_clip_warned.set(false);
         }
         deltas
+=======
+    ) -> Option<(usize, Mat4)> {
+        let Some(t) = frame.shop_eyeball_travel_sec else {
+            self.shop_eyeball_playback_logged.set(false);
+            return None;
+        };
+        let Some(pi) = self.shop_eyeball_prim_index else {
+            if !self.shop_eyeball_missing_prim_warned.replace(true) {
+                log::warn!(
+                    "shop eyeball_travel: playback requested but Eyeball primitive index is missing"
+                );
+            }
+            return None;
+        };
+        let Some(anim) = self.shop_eyeball_travel.as_ref() else {
+            if !self.shop_eyeball_missing_clip_warned.replace(true) {
+                log::warn!("shop eyeball_travel: playback requested but clip is missing");
+            }
+            return None;
+        };
+        self.shop_eyeball_missing_prim_warned.set(false);
+        self.shop_eyeball_missing_clip_warned.set(false);
+        if !self.shop_eyeball_playback_logged.replace(true) {
+            log::info!(
+                "shop eyeball_travel: applying clip at t={:.3}s to primitive index {}",
+                t,
+                pi
+            );
+        }
+        Some((pi, anim.delta_doc_at(t)))
+    }
+
+    fn upload_shop_env_model(&self, gpu: &ShopEnvironmentGpu, model: Mat4) {
+        let mut u = self.shop_env_last_camera_uniform.get();
+        u.model = model.to_cols_array();
+        self.shop_env_last_camera_uniform.set(u);
+        self.queue.write_buffer(
+            &gpu.uniform_buffer,
+            0,
+            bytemuck::bytes_of(&u),
+        );
+    }
+
+    fn upload_shop_env_shadow_model(&self, gpu: &ShopEnvironmentGpu, model: Mat4) {
+        self.queue.write_buffer(
+            &gpu.shadow_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&crate::render::lit_mesh::ShadowCasterUniform {
+                light_view_proj: self.shop_env_shadow_light_view_proj.get(),
+                model: model.to_cols_array(),
+            }),
+        );
+>>>>>>> 3ab1ff47 (Re-did pedestals in blender for Gameplay.glb, also added abalone coin bowl.)
     }
 
     fn draw_gltf_room_env_meshes(

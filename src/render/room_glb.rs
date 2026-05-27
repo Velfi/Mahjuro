@@ -122,9 +122,17 @@ fn ensure_shop_glb_loaded() {
                     cpu.collision_meshes.len(),
                 );
                 log::info!(
+<<<<<<< HEAD
                     "shop.glb: node bind poses={} glTF anim clips={}",
                     cpu.node_bind_poses.len(),
                     cpu.gltf_anim_library.clips.len()
+=======
+                    "shop.glb: eyeball node parsed={} eyeball_travel clip={}",
+                    cpu.environment_primitives
+                        .iter()
+                        .any(|p| p.gltf_node_name.as_deref() == Some("Eyeball")),
+                    cpu.shop_eyeball_travel.is_some()
+>>>>>>> 3ab1ff47 (Re-did pedestals in blender for Gameplay.glb, also added abalone coin bowl.)
                 );
                 if cpu.embedded_perspective_camera.is_some()
                     || !cpu.embedded_point_lights.is_empty()

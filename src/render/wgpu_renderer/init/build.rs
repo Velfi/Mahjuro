@@ -2817,6 +2817,16 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
                         "shop.glb GPU: Eyeball primitive indices {:?}",
                         shop_eyeball_prim_indices
                     );
+<<<<<<< HEAD
+=======
+                } else if shop_eyeball_prim_index.is_none() {
+                    log::warn!("shop.glb GPU: Eyeball primitive not found");
+                } else if let Some(pi) = shop_eyeball_prim_index {
+                    log::info!("shop.glb GPU: Eyeball primitive index = {pi}");
+                }
+                if shop_eyeball_travel.is_none() {
+                    log::warn!("shop.glb GPU: eyeball_travel clip unavailable");
+>>>>>>> 3ab1ff47 (Re-did pedestals in blender for Gameplay.glb, also added abalone coin bowl.)
                 }
                 log::info!("shop.glb GPU: {} primitive draw(s)", prims.len());
             }
@@ -4455,9 +4465,33 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         tile_outline_index_count,
         shop_env_primitives,
         shop_environment,
+<<<<<<< HEAD
         shop_gltf_anim,
         shop_gltf_anim_missing_clip_warned: std::cell::Cell::new(false),
         shop_eyeball_prim_indices,
+=======
+        shop_eyeball_prim_index,
+        shop_eyeball_travel,
+        shop_eyeball_missing_clip_warned: std::cell::Cell::new(false),
+        shop_eyeball_missing_prim_warned: std::cell::Cell::new(false),
+        shop_eyeball_playback_logged: std::cell::Cell::new(false),
+        shop_env_last_camera_uniform: std::cell::Cell::new(CameraUniform {
+            view_proj: glam::Mat4::IDENTITY.to_cols_array(),
+            model: glam::Mat4::IDENTITY.to_cols_array(),
+            base_color_factor: [
+                1.0,
+                0.0,
+                0.0,
+                crate::render::tile_body::TEXTURED_BASE_MAP_BODY_KIND,
+            ],
+            cam_pos: [0.0; 3],
+            tile_seed: 0.0,
+            decal_atlas_uv: [0.0; 4],
+            hdr_tonemap: [0.0; 4],
+        }),
+        shop_env_base_model: std::cell::Cell::new(glam::Mat4::IDENTITY),
+        shop_env_shadow_light_view_proj: std::cell::Cell::new(glam::Mat4::IDENTITY.to_cols_array()),
+>>>>>>> 3ab1ff47 (Re-did pedestals in blender for Gameplay.glb, also added abalone coin bowl.)
         hallway_env_primitives,
         hallway_environment,
         staircase_env_primitives,
