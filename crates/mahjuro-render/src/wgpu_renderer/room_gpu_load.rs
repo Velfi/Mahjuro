@@ -1164,6 +1164,7 @@ impl WgpuRenderer {
         if self.rooms_gpu_loaded & ROOM_SHOP != 0 {
             return;
         }
+        self.ensure_talisman_textures();
         let _scope = crate::startup_profile::scope("wgpu.room.shop");
         let ctx = self.room_gpu_upload_ctx();
         let (prims, gpu_wrap, anim, eyeball) = load_shop_room_gpu(ctx);
@@ -1211,6 +1212,8 @@ impl WgpuRenderer {
         if self.rooms_gpu_loaded & ROOM_ARCHIVE != 0 {
             return;
         }
+        self.ensure_ordeal_icon_pool();
+        self.ensure_talisman_textures();
         let _scope = crate::startup_profile::scope("wgpu.room.archive");
         let ctx = self.room_gpu_upload_ctx();
         let (prims, gpu_wrap, sign_l, sign_r, page_left, page_right, shadow_mask) =
@@ -1231,6 +1234,7 @@ impl WgpuRenderer {
         if self.rooms_gpu_loaded & ROOM_GAMEPLAY != 0 {
             return;
         }
+        self.ensure_gameplay_hud_pools();
         let _scope = crate::startup_profile::scope("wgpu.room.gameplay");
         let ctx = self.room_gpu_upload_ctx();
         let (prims, gpu_wrap, cash_in, shadow_mask) = load_gameplay_room_gpu(ctx);
@@ -1244,5 +1248,6 @@ impl WgpuRenderer {
         });
         crate::gameplay_glb::release_gameplay_environment_cpu_sources_after_gpu_upload();
         self.rooms_gpu_loaded |= ROOM_GAMEPLAY;
+        crate::startup_profile::log_sample("wgpu.room.gameplay", "first gameplay GPU upload");
     }
 }

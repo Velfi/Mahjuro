@@ -410,7 +410,10 @@ fn ensure_hallway_glb_loaded() {
     let mut w = HALLWAY_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
     match &*w {
         HallwayGlbCache::Uninit => {}
-        HallwayGlbCache::Ready(Some(cpu)) if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu) => {
+        HallwayGlbCache::Ready(Some(cpu))
+            if room_glb::room_glb_cpu_needs_environment_mesh_reload(cpu)
+                || room_glb::room_glb_cpu_stale_environment_for_gpu_upload(cpu) =>
+        {
             *w = HallwayGlbCache::Uninit;
         }
         _ => return,

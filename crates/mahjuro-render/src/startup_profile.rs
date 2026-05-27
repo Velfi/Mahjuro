@@ -2,6 +2,8 @@
 //!
 //! Named [`scope`] guards record elapsed time on drop. [`report_sync_boot`] and
 //! [`note_async_boot_complete`] emit sorted `log::info!` tables (slowest first).
+//! Deferred room GPU uploads log via [`log_sample`] when they finish (e.g. first
+//! transition into gameplay).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -84,6 +86,25 @@ pub fn note_async_boot_complete() {
         return;
     }
     emit_report("async boot (relic + menu backdrop uploads)");
+}
+
+/// Log the most recent duration recorded for `name` (e.g. deferred `wgpu.room.gameplay`).
+pub fn log_sample(name: &'static str, context: &str) {
+    if !enabled() {
+        return;
+    }
+    let ms = samples().lock().ok().and_then(|v| {
+        v.iter()
+            .rev()
+            .find(|s| s.name == name)
+            .map(|s| s.ms)
+    });
+    if let Some(ms) = ms {
+        log::info!(
+            "startup profile: {name} — {context} ({ms:.1} ms, wall {:.0} ms)",
+            wall_ms()
+        );
+    }
 }
 
 fn emit_report(phase: &str) {

@@ -2077,6 +2077,7 @@ dependencies = [
  "arboard",
  "bytemuck",
  "chrono",
+ "env_logger",
  "fontdue",
  "glam",
  "gltf",

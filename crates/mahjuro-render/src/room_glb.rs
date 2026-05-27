@@ -111,7 +111,10 @@ fn ensure_shop_glb_loaded() {
     let mut w = ROOM_GLB_CPU.write().unwrap_or_else(|e| e.into_inner());
     match &*w {
         RoomGlbCache::Uninit => {}
-        RoomGlbCache::Ready(Some(cpu)) if room_glb_cpu_needs_environment_mesh_reload(cpu) => {
+        RoomGlbCache::Ready(Some(cpu))
+            if room_glb_cpu_needs_environment_mesh_reload(cpu)
+                || room_glb_cpu_stale_environment_for_gpu_upload(cpu) =>
+        {
             *w = RoomGlbCache::Uninit;
         }
         _ => return,
@@ -172,13 +175,22 @@ pub fn release_room_environment_primitives_cpu(cpu: &mut RoomGlbCpu) {
         release_loaded_primitive_gpu_source_buffers(&mut env.mesh);
     }
     cpu.environment_primitives.clear();
+    cpu.environment_primitives_released = true;
 }
 
-/// After [`release_room_environment_primitives_cpu`], mesh RAM is gone but bounds/markers remain.
-/// A second GPU upload (e.g. headless room bakes spawning another [`crate::wgpu_renderer::WgpuRenderer`])
-/// must reload the glTF environment meshes instead of uploading empty vertex buffers.
+/// Corrupt / partial decode — environment bounds exist but mesh buffers were never uploaded.
 pub(crate) fn room_glb_cpu_needs_environment_mesh_reload(cpu: &RoomGlbCpu) -> bool {
-    cpu.environment_bounds_doc.is_some() && cpu.environment_primitives.is_empty()
+    cpu.environment_bounds_doc.is_some()
+        && cpu.environment_primitives.is_empty()
+        && !cpu.environment_primitives_released
+}
+
+/// After [`release_room_environment_primitives_cpu`], a second [`crate::wgpu_renderer::WgpuRenderer`]
+/// init must re-parse environment meshes for GPU upload; metadata-only accessors must not.
+pub(crate) fn room_glb_cpu_stale_environment_for_gpu_upload(cpu: &RoomGlbCpu) -> bool {
+    cpu.environment_primitives_released
+        && cpu.environment_primitives.is_empty()
+        && cpu.environment_bounds_doc.is_some()
 }
 
 pub fn release_shop_environment_cpu_sources_after_gpu_upload() {
@@ -522,6 +534,9 @@ pub fn room_camera_with_room_clip_planes(
 pub struct RoomGlbCpu {
     pub markers: FxHashMap<String, Mat4>,
     pub environment_primitives: Vec<RoomEnvPrimitiveCpu>,
+    /// Set by [`release_room_environment_primitives_cpu`]. Keeps collision / rain /
+    /// marker metadata without re-parsing the glTF on every [`with_shop_glb_cpu`] call.
+    pub environment_primitives_released: bool,
     pub environment_bounds_doc: Option<RoomEnvironmentBounds>,
     pub marker_mesh_bounds_doc: FxHashMap<String, RoomEnvironmentBounds>,
     pub collision_meshes: Vec<RoomCollisionMesh>,
@@ -770,6 +785,7 @@ pub fn load_room_glb_from_bytes(
     Ok(RoomGlbCpu {
         markers,
         environment_primitives,
+        environment_primitives_released: false,
         environment_bounds_doc,
         marker_mesh_bounds_doc,
         collision_meshes,

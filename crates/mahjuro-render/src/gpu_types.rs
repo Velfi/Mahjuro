@@ -12,7 +12,7 @@ pub(crate) struct RelicTextureGpu {
 }
 
 /// Decoded relic image data sent from the background loader thread.
-pub(crate) struct DecodedRelicImage {
+pub struct DecodedRelicImage {
     pub id: RelicId,
     pub name: &'static str,
     pub rgba: Vec<u8>,

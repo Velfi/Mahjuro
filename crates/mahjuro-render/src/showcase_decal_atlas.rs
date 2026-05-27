@@ -214,7 +214,7 @@ pub fn load_showcase_decal_atlas(
         anyhow::anyhow!(
             "missing baked showcase decal atlas at {path}; run `cargo build` (needs \
              mahjuro-bake-decal-atlases in target/<profile>/) or \
-             `cargo run -p mahjuro-headless --bin mahjuro-bake-decal-atlases`"
+             `cargo run -p mahjuro-render --bin mahjuro-bake-decal-atlases`"
         )
     })?;
     let img = image::load_from_memory(&file.data)

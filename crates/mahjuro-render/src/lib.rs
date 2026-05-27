@@ -43,6 +43,7 @@ pub mod rain_debug_overlay;
 pub mod rain_field;
 pub mod rain_tuning;
 pub mod raycast;
+pub mod relic_bake;
 pub mod relic_dish;
 pub mod relic_pipeline;
 pub mod reliquary_tray_mesh;

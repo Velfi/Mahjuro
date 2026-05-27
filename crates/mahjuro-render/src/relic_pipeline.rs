@@ -159,7 +159,7 @@ fn load_relic_albedo_rgba(primary: &str, object: &str) -> Option<image::RgbaImag
 }
 
 /// Decode one relic from embedded assets. Returns `None` if neither albedo path exists.
-pub(crate) fn decode_relic_assets(
+pub fn decode_relic_assets(
     id: RelicId,
     name: &'static str,
 ) -> Option<(DecodedRelicImage, std::time::Duration)> {
@@ -232,8 +232,55 @@ pub(crate) fn decode_relic_assets(
     ))
 }
 
-/// Background thread: decode every relic once, send [`DecodedRelicImage`] to the renderer.
+/// Background thread: load every relic once, send [`DecodedRelicImage`] to the renderer.
 pub(crate) fn spawn_relic_loader() -> mpsc::Receiver<DecodedRelicImage> {
+    if crate::relic_bake::all_relic_bakes_available() {
+        spawn_relic_bake_loader()
+    } else {
+        log::warn!(
+            "relic RLC1 bakes missing — falling back to PNG decode; run \
+             `cargo build` (mahjuro-bake-relics) or `cargo run -p mahjuro-render --bin mahjuro-bake-relics`"
+        );
+        spawn_relic_png_loader()
+    }
+}
+
+fn spawn_relic_bake_loader() -> mpsc::Receiver<DecodedRelicImage> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::Builder::new()
+        .name("relic-loader".into())
+        .spawn(move || {
+            let t_thread = Instant::now();
+            let mut decoded = 0usize;
+            for d in all_relic_defs() {
+                match crate::relic_bake::load_baked_relic(d.id) {
+                    Ok(msg) => {
+                        decoded += 1;
+                        if tx.send(msg).is_err() {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "baked relic {:?} failed to load: {e:#}",
+                            d.id
+                        );
+                    }
+                }
+            }
+            let thread_total = t_thread.elapsed();
+            crate::startup_profile::record("relic.decode_thread", thread_total);
+            crate::startup_profile::record("relic.decode_cpu", thread_total);
+            crate::startup_profile::record("relic.mesh_build_thread", std::time::Duration::ZERO);
+            log::debug!(
+                "relic-loader (RLC1): loaded {decoded} baked relics in {thread_total:?}",
+            );
+        })
+        .expect("failed to spawn relic-loader thread");
+    rx
+}
+
+fn spawn_relic_png_loader() -> mpsc::Receiver<DecodedRelicImage> {
     let (tx, rx) = mpsc::channel();
 
     std::thread::Builder::new()
@@ -265,7 +312,7 @@ pub(crate) fn spawn_relic_loader() -> mpsc::Receiver<DecodedRelicImage> {
             crate::startup_profile::record("relic.decode_cpu", decode_time);
             crate::startup_profile::record("relic.mesh_build_thread", mesh_build_time);
             log::debug!(
-                "relic-loader thread finished: decoded {decoded} images in {decode_time:?} (thread total {thread_total:?})",
+                "relic-loader (PNG) finished: decoded {decoded} images in {decode_time:?} (thread total {thread_total:?})",
             );
         })
         .expect("failed to spawn relic-loader thread");

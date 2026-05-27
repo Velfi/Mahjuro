@@ -64,6 +64,7 @@ impl WgpuRenderer {
     /// Drain any decoded relic images from the background loader and upload them
     /// to the GPU.  Called once per frame; a no-op once all images are loaded.
     pub(crate) fn poll_relic_textures(&mut self) {
+        self.ensure_relic_loader_started();
         let Some(ref rx) = self.relic_rx else { return };
         let mut finished = false;
         // Non-blocking drain: upload every image that's ready this frame.
@@ -123,6 +124,7 @@ impl WgpuRenderer {
                 self.relic_textures.len(),
             );
             self.relic_rx = None; // drop the channel
+            self.relic_load_finished = true;
             if !self.is_loading() {
                 crate::startup_profile::note_async_boot_complete();
             }

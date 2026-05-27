@@ -270,6 +270,7 @@ impl WgpuRenderer {
                             active,
                             hover,
                         } => {
+                            self.ensure_gameplay_hud_pools();
                             let slot_i = obj3d_yaku_slot;
                             obj3d_yaku_slot += 1;
                             if slot_i >= MAX_YAKU_TABLET_SLOTS {
@@ -334,6 +335,7 @@ impl WgpuRenderer {
                             );
                         }
                         Object3dKind::WoodTablet { label, pick_id } => {
+                            self.ensure_gameplay_hud_pools();
                             let slot_i = obj3d_wood_slot;
                             obj3d_wood_slot += 1;
                             if slot_i >= MAX_WOOD_TABLET_SLOTS {
@@ -579,6 +581,8 @@ impl WgpuRenderer {
                             silhouette,
                             debuffed,
                         } => {
+                            self.ensure_relic_loader_started();
+                            self.ensure_relic_instance_pool();
                             if obj3d_relic_slot >= MAX_RELIC_SLOTS {
                                 continue;
                             }
@@ -752,6 +756,7 @@ impl WgpuRenderer {
                             glow,
                             pick_id,
                         } => {
+                            self.ensure_ordeal_icon_pool();
                             if obj3d_ordeal_icon_slot >= MAX_ORDEAL_ICON_SLOTS {
                                 continue;
                             }
@@ -998,6 +1003,7 @@ impl WgpuRenderer {
                             );
                         }
                         Object3dKind::Talisman { .. } | Object3dKind::MemorialTalisman { .. } => {
+                            self.ensure_talisman_textures();
                             if obj3d_talisman_slot >= MAX_TALISMAN_SLOTS {
                                 continue;
                             }
@@ -1217,6 +1223,7 @@ impl WgpuRenderer {
                             );
                         }
                         Object3dKind::MaterialOrb { material } => {
+                            self.ensure_orb_pool();
                             if obj3d_orb_slot >= MAX_ORB_SLOTS {
                                 continue;
                             }
@@ -1245,6 +1252,7 @@ impl WgpuRenderer {
                             );
                         }
                         Object3dKind::Mirror => {
+                            self.ensure_gameplay_hud_pools();
                             if obj3d_mirror_slot >= MAX_MIRROR_SLOTS {
                                 continue;
                             }
@@ -1305,6 +1313,7 @@ impl WgpuRenderer {
                             emissive,
                             material: g_mat,
                         } => {
+                            self.ensure_gameplay_hud_pools();
                             if obj3d_glyph_slot >= MAX_EXTRUDED_GLYPH_SLOTS {
                                 continue;
                             }
@@ -1389,6 +1398,7 @@ impl WgpuRenderer {
                             placement_rot_deg,
                             kind: fan_kind,
                         } => {
+                            self.ensure_gameplay_hud_pools();
                             let fan_i = obj3d_tally_fan_idx;
                             obj3d_tally_fan_idx += 1;
                             if fan_i >= MAX_TALLY_FAN_SLOTS {
@@ -1505,6 +1515,7 @@ impl WgpuRenderer {
                             self.proj.peg_rects[slot_idx] = Some(project_unit_cube_rect(fan_model));
                         }
                         Object3dKind::Bowl => {
+                            self.ensure_gameplay_hud_pools();
                             if obj3d_bowl_slot >= MAX_BOWL_SLOTS {
                                 continue;
                             }
@@ -1588,6 +1599,9 @@ impl WgpuRenderer {
         // table, height growing slightly as the stack thickens. Phase 1 uses
         // the bone tablet mesh (a plain box) — phase 7 may swap to the real
         // tile mesh.
+        if !wall_stack_cmds.is_empty() {
+            self.ensure_gameplay_hud_pools();
+        }
         let mut wall_tile_slot_cursor: usize = 0;
         for w_cmd in wall_stack_cmds.iter() {
             let row_len = w_cmd.row_len.max(1);

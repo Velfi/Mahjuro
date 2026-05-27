@@ -28,7 +28,10 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         super::super::init_phases::early_gpu_and_depth(target_init)?
     };
 
-    crate::offline_bakes::require_all_at_startup()?;
+    {
+        let _bakes = crate::startup_profile::scope("wgpu.offline_bakes");
+        crate::offline_bakes::require_all_at_startup()?;
+    }
 
     // Linear HDR intermediate — main scene + bloom; tonemap maps to the swapchain format.
     let scene_hdr_format = SCENE_HDR_FORMAT;
@@ -2821,25 +2824,25 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         })
     };
 
+    let main_menu_env_collision_meshes =
+        crate::main_menu_glb::with_main_menu_glb_cpu(|opt| {
+            opt.map(|c| c.collision_meshes.clone()).unwrap_or_default()
+        });
     crate::main_menu_glb::release_main_menu_environment_cpu_sources_after_gpu_upload();
 
     anyhow::ensure!(
         main_menu_environment.is_some() && !main_menu_env_primitives.is_empty(),
         "main_menu.glb failed to load (required at renderer init)"
     );
-
-    let main_menu_env_collision_meshes =
-        crate::main_menu_glb::with_main_menu_glb_cpu(|opt| {
-            opt.map(|c| c.collision_meshes.clone()).unwrap_or_default()
-        });
     let (gameplay_env_primitives, gameplay_environment, gameplay_cash_in_prim_indices, gameplay_env_shadow_caster_mask) =
         (Vec::new(), None, Vec::new(), Vec::new());
     let gameplay_env_collision_meshes = Vec::new();
     let shop_env_collision_meshes = Vec::new();
 
-    // Kick off background relic image loading (non-blocking).
-    let relic_load_start = Some(Instant::now());
-    let relic_rx = Some(spawn_relic_loader());
+    // Relic decode starts on first frame (`ensure_relic_loader_started`) so sync boot
+    // is not competing with 100+ PNG decodes on a background thread.
+    let relic_load_start = None;
+    let relic_rx = None;
     let (_lit_mesh_relief_default_tex, lit_mesh_relief_default_view) =
         flat_relief_height(&device, &queue);
     let pack_textures_map = {
@@ -3064,28 +3067,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
     // Shared 1×1 white texture for procedural meshes that don't sample.
     let (_lit_mesh_white_tex, lit_mesh_white_view) = white_albedo(&device, &queue);
 
-    let mut relic_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_RELIC_SLOTS);
-    for _ in 0..MAX_RELIC_SLOTS {
-        relic_instances.push(LitMeshInstance::new(
-            &device,
-            &lit_mesh_material_layout,
-            &shadow_caster_layout,
-            &lit_mesh_white_view,
-            &lit_mesh_relief_default_view,
-            &tile_sampler,
-        ));
-    }
-    let mut ordeal_icon_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_ORDEAL_ICON_SLOTS);
-    for _ in 0..MAX_ORDEAL_ICON_SLOTS {
-        ordeal_icon_instances.push(LitMeshInstance::new(
-            &device,
-            &lit_mesh_material_layout,
-            &shadow_caster_layout,
-            &lit_mesh_white_view,
-            &lit_mesh_relief_default_view,
-            &tile_sampler,
-        ));
-    }
+    let relic_instances: Vec<LitMeshInstance> = Vec::new();
+    let ordeal_icon_instances: Vec<LitMeshInstance> = Vec::new();
     let mut pack_instances: Vec<LitMeshInstance> = Vec::with_capacity(4);
     for _ in 0..4 {
         pack_instances.push(LitMeshInstance::new(
@@ -3175,48 +3158,11 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         ));
     }
     let orb_mesh = LitMeshGpu::new(&device, &build_orb_mesh(), "material-orb");
-    let mut orb_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_ORB_SLOTS);
-    for _ in 0..MAX_ORB_SLOTS {
-        orb_instances.push(LitMeshInstance::new(
-            &device,
-            &lit_mesh_material_layout,
-            &shadow_caster_layout,
-            &lit_mesh_white_view,
-            &lit_mesh_relief_default_view,
-            &tile_sampler,
-        ));
-    }
-    // Per-kind heightmap textures for talisman tablets. Each is a PNG
-    // asset loaded from assets/textures/ and uploaded as a linear RGBA8
-    // texture. Falls back to a flat mid-gray 1×1 if the asset is missing.
-    // Order matches `TalismanKind::all()` — reuse art where dedicated assets
-    // are not yet present.
-    let talisman_height_paths = mahjuro_core::core::talisman::TalismanKind::heightmap_paths();
-    let mut talisman_height_views: Vec<wgpu::TextureView> = Vec::new();
-    for &(path, label) in talisman_height_paths {
-        let (_tex, view) = load_metal_heightmap(&device, &queue, path, label);
-        talisman_height_views.push(view);
-    }
-    let talisman_mask_paths = mahjuro_core::core::talisman::TalismanKind::mask_paths();
-    let mut talisman_mask_views: Vec<wgpu::TextureView> = Vec::new();
-    for &(path, label) in talisman_mask_paths {
-        let (_tex, view) = load_metal_heightmap(&device, &queue, path, label);
-        talisman_mask_views.push(view);
-    }
-    let memorial_talisman_height_paths =
-        mahjuro_core::core::memorial_talisman::MemorialTalismanKind::heightmap_paths();
-    let mut memorial_talisman_height_views: Vec<wgpu::TextureView> = Vec::new();
-    for &(path, label) in memorial_talisman_height_paths {
-        let (_tex, view) = load_metal_heightmap(&device, &queue, path, label);
-        memorial_talisman_height_views.push(view);
-    }
-    let memorial_talisman_mask_paths =
-        mahjuro_core::core::memorial_talisman::MemorialTalismanKind::mask_paths();
-    let mut memorial_talisman_mask_views: Vec<wgpu::TextureView> = Vec::new();
-    for &(path, label) in memorial_talisman_mask_paths {
-        let (_tex, view) = load_metal_heightmap(&device, &queue, path, label);
-        memorial_talisman_mask_views.push(view);
-    }
+    let orb_instances: Vec<LitMeshInstance> = Vec::new();
+    let talisman_height_views: Vec<wgpu::TextureView> = Vec::new();
+    let talisman_mask_views: Vec<wgpu::TextureView> = Vec::new();
+    let memorial_talisman_height_views: Vec<wgpu::TextureView> = Vec::new();
+    let memorial_talisman_mask_views: Vec<wgpu::TextureView> = Vec::new();
     let talisman_slot_kind: Vec<Option<u8>> = vec![None; MAX_TALISMAN_SLOTS];
     let mut talisman_instances: Vec<LitMeshInstance> = Vec::with_capacity(MAX_TALISMAN_SLOTS);
     for _ in 0..MAX_TALISMAN_SLOTS {
@@ -3229,7 +3175,8 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             &tile_sampler,
         ));
     }
-    // ── Skeuomorphic gameplay HUD slot pools (phase 1) ─────────────
+  // Shop journal books are cheap; gameplay HUD instance pools are deferred
+    // until first gameplay draw (`ensure_gameplay_hud_pools`).
     let make_pool = |n: usize| -> Vec<LitMeshInstance> {
         (0..n)
             .map(|_| {
@@ -3244,41 +3191,15 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
             })
             .collect()
     };
-    // Plaque instances grow on demand via `ensure_plaque_slots` rather
-    // than reserving a fixed cap — see that helper for context.
-    // Cabinet instances grow on demand via `ensure_lit_mesh_pool` —
-    // collection is the only consumer for now and only ever needs a
-    // single instance, so reserving a fixed cap would be silly.
-    let yaku_tablet_instances = make_pool(MAX_YAKU_TABLET_SLOTS);
-    let wood_tablet_instances = make_pool(MAX_WOOD_TABLET_SLOTS);
     let book_instances = make_pool(MAX_BOOK_SLOTS);
     let book_cover_instances = make_pool(MAX_BOOK_SLOTS);
-    let bowl_instances = make_pool(MAX_BOWL_SLOTS);
-    // Bronze mirror face heightmap (Han/Tang four-spirit relief). Bound
-    // at slot 1 of every mirror instance; the metal branch in
-    // lit_mesh.wgsl samples it as a heightfield to perturb the polished
-    // face's surface normal so the cast guardians and TLV marks catch
-    // the candle highlights. Same setup as the coin pile above.
-    let (_lit_mesh_mirror_height_tex, lit_mesh_mirror_height_view) =
-        load_mirror_heightmap(&device, &queue);
-    let mirror_instances: Vec<LitMeshInstance> = (0..MAX_MIRROR_SLOTS)
-        .map(|_| {
-            LitMeshInstance::new(
-                &device,
-                &lit_mesh_material_layout,
-                &shadow_caster_layout,
-                &lit_mesh_mirror_height_view,
-                &lit_mesh_mirror_height_view,
-                &tile_sampler,
-            )
-        })
-        .collect();
-    // Each visible stick consumes two slots (bone + tip) so the pool is
-    // sized at `2 × MAX_TALLY_STICK_SLOTS` to cover the worst case of
-    // every slot populated.
-    let tally_stick_instances = make_pool(MAX_TALLY_STICK_SLOTS * 2);
-    let wall_tile_instances = make_pool(MAX_WALL_TILE_SLOTS);
-    let extruded_glyph_instances = make_pool(MAX_EXTRUDED_GLYPH_SLOTS);
+    let yaku_tablet_instances: Vec<LitMeshInstance> = Vec::new();
+    let wood_tablet_instances: Vec<LitMeshInstance> = Vec::new();
+    let bowl_instances: Vec<LitMeshInstance> = Vec::new();
+    let mirror_instances: Vec<LitMeshInstance> = Vec::new();
+    let tally_stick_instances: Vec<LitMeshInstance> = Vec::new();
+    let wall_tile_instances: Vec<LitMeshInstance> = Vec::new();
+    let extruded_glyph_instances: Vec<LitMeshInstance> = Vec::new();
     let debug_axes_instances = make_pool(3);
     crate::startup_profile::record("wgpu.lit_meshes_and_pools", t_lit_meshes.elapsed());
 
@@ -3515,7 +3436,10 @@ pub(super) fn build_renderer_new(target_init: TargetInit) -> anyhow::Result<Wgpu
         creation_time: Instant::now(),
         vhs_grain_frame: 0,
         relic_textures: rustc_hash::FxHashMap::default(),
+        gameplay_hud_pools_ready: false,
+        talisman_textures_ready: false,
         relic_rx,
+        relic_load_finished: false,
         relic_load_start,
         relic_profile_upload_cpu: std::time::Duration::ZERO,
         pack_textures: pack_textures_map,

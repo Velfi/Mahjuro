@@ -1,6 +1,6 @@
 name: Build offline bake tools
 description: >
-  Build mahjuro-bake and mahjuro-bake-decal-atlases into target/<triple>/<profile>/
+  Build mahjuro-bake, mahjuro-bake-decal-atlases, and mahjuro-bake-relics into target/<triple>/<profile>/
   before the main mahjuro build. build.rs cannot spawn nested cargo (target-dir deadlock).
   Skips GPU bakes while compiling so stale stamps do not require the binaries yet.
 
@@ -20,15 +20,17 @@ runs:
     - shell: bash
       run: |
         set -euo pipefail
-        CARGO=(cargo build --locked -p mahjuro-headless)
+        bake=(cargo build --locked)
         if [[ -n "${{ inputs.target }}" ]]; then
-          CARGO+=(--target "${{ inputs.target }}")
+          bake+=(--target "${{ inputs.target }}")
         fi
         if [[ "${{ inputs.profile }}" == release ]]; then
-          CARGO+=(--release)
+          bake+=(--release)
         fi
         export MAHJURO_SKIP_ROOM_GI_BAKE=1
         export MAHJURO_SKIP_ROOM_SHADOW_BAKE=1
         export MAHJURO_SKIP_SHOWCASE_DECAL_BAKE=1
-        "${CARGO[@]}" --bin mahjuro-bake --features bake
-        "${CARGO[@]}" --bin mahjuro-bake-decal-atlases
+        export MAHJURO_SKIP_RELIC_BAKE=1
+        "${bake[@]}" -p mahjuro-headless --bin mahjuro-bake --features bake
+        "${bake[@]}" -p mahjuro-render --bin mahjuro-bake-decal-atlases
+        "${bake[@]}" -p mahjuro-render --bin mahjuro-bake-relics
