@@ -7,6 +7,7 @@ mod init_deferred;
 mod init_phases;
 pub(crate) mod resources;
 
+#[cfg(feature = "windowed")]
 pub fn run_vulkan_wsi_probe_with_window(window: sdl3::video::Window) -> anyhow::Result<()> {
     init_phases::early_gpu_and_depth(targets::TargetInit::Windowed {
         window,

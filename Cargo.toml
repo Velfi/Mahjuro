@@ -25,6 +25,7 @@ game = [
     "dep:muda",
     "dep:arboard",
     "mahjuro-render/clipboard",
+    "mahjuro-render/windowed",
 ]
 headless-bake = []
 headless-screenshot = [

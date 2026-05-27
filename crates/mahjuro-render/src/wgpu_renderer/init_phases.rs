@@ -233,6 +233,7 @@ pub(super) fn early_gpu_and_depth(target_init: TargetInit) -> anyhow::Result<Ear
         crate::physical_size::PhysicalSize,
         bool,
     ) = match &target_init {
+        #[cfg(feature = "windowed")]
         TargetInit::Windowed {
             window,
             hdr_enabled,

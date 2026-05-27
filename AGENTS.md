@@ -2,6 +2,8 @@
 
 Short pointers to deeper context. Read the linked file before working in the area.
 
+- **CI locally** — `./scripts/check.sh` mirrors the GitHub `build-and-test` job (bake tools → `cargo build` → `cargo test`; Linux needs `xvfb-run`). Optional `--extras` for fmt/clippy/Python (not in CI).
+
 - [3D world space](docs/agents/world-space.md) — Z-up frame, table at `z = 0`, `WorldSurfaceAnchor` packing, `table_transform.rs` for mesh orientation.
 - **Scene placement** — screen vs world coordinates, [`Placement`](src/ui/placement.rs) degrees composed in `PlacementAnchor::object3d_rotation`, `Object3d` euler vs `Placement` degrees.
 - [Font scaling](docs/agents/font-scaling.md) — `rasterize_label` width cap shrinks text in tall/narrow rects; use wide rects and split long content. **Layout:** tinted vocabulary → `colored_keywords::{colored_line_block_height, push_colored_line_left, colored_row_line_step}` (never `line_h * 1.4` at call sites); plain `wrap_text` → `widget::{plain_text_block_height, PLAIN_TEXT_LINE_STEP_MUL}`.
