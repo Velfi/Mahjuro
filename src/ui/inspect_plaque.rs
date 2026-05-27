@@ -9,8 +9,8 @@ use crate::render::wgpu_renderer::{GpuInstance, GradientQuadInstance, TextAlign,
 use crate::ui::colored_keywords;
 use crate::ui::tooltip::{self, push_tooltip_frame_quads};
 
-/// Rough line count for relic flavor layout (matches bottom-aligned raster band).
-fn estimated_flavor_line_count(
+/// Rough line count for relic / staircase flavor layout (matches bottom-aligned raster band).
+pub fn estimated_flavor_line_count(
     spans: &[RelicFlavorSpan],
     band_w: f32,
     body_px: f32,

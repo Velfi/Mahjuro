@@ -52,7 +52,7 @@ pub struct BotConfig {
     pub base_target: Option<u32>,
     pub starting_plays: Option<u32>,
     pub starting_discards: Option<u32>,
-    pub starting_gold: Option<u32>,
+    pub starting_yen: Option<u32>,
     pub relic_weight: Option<f32>,
     pub zodiac_weight: Option<f32>,
     pub talisman_weight: Option<f32>,
@@ -301,8 +301,8 @@ impl BotConfig {
         if let Some(v) = self.starting_discards {
             mode.starting_discards = v;
         }
-        if let Some(v) = self.starting_gold {
-            mode.starting_gold = v;
+        if let Some(v) = self.starting_yen {
+            mode.starting_yen = v;
         }
         mode
     }
@@ -436,7 +436,7 @@ pub fn run_headless_aggregate(
         crate::core::chamber_target::TARGET_SCALING,
         mode.starting_plays,
         mode.starting_discards,
-        mode.starting_gold,
+        mode.starting_yen,
         options.log,
         timeout_label,
         options.timeout_retries,
@@ -655,7 +655,7 @@ impl StrategyDef {
             base_target: self.base_target,
             starting_plays: self.starting_plays,
             starting_discards: self.starting_discards,
-            starting_gold: self.starting_gold,
+            starting_yen: self.starting_gold,
             forced_relic: None,
             relic_weight: self.relic_weight,
             zodiac_weight: self.zodiac_weight,
@@ -975,7 +975,7 @@ pub fn run_stats_from_progress_record(rec: &crate::core::progression::RunRecord)
         died_on_chamber: rec.final_chamber,
         total_score: rec.total_score_earned,
         discards_used: rec.tiles_discarded,
-        final_gold: rec.final_gold,
+        final_yen: rec.final_yen,
         peak_chamber_score: rec.best_structure_score,
         yaku_scored,
         final_relics,
@@ -1003,7 +1003,7 @@ pub fn append_bot_run_to_progress(
     stats: &RunStats,
     history_index: u64,
 ) {
-    use crate::core::progression::{RunOutcome, RunRecord};
+    use crate::core::progression::RunOutcome;
     use crate::core::relic::all_relic_defs;
     use crate::core::talisman::TalismanKind;
     use crate::core::yaku::YakuKind;
@@ -1016,7 +1016,7 @@ pub fn append_bot_run_to_progress(
             reason: stats.death_reason.unwrap_or(GameOverReason::OutOfPlays),
         }
     };
-    let mut record = RunRecord::from_run(run, outcome);
+    let mut record = crate::game::progression_run::run_record_from_run(run, outcome);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())

@@ -108,13 +108,13 @@ impl RunState {
             core.finalize_hand_after_draw();
         });
 
-        // Round-start gold (Charity, Sweepstakes): one `apply_gold_reward` so `bus` is not moved twice.
-        let mut round_start_gold = 0i32;
-        if self.relics.has(RelicId::Charity) && self.gold < 10 {
-            round_start_gold += 5;
+        // Round-start yen (Charity, Sweepstakes): one `apply_yen_reward` so `bus` is not moved twice.
+        let mut round_start_yen = 0i32;
+        if self.relics.has(RelicId::Charity) && self.yen < 10 {
+            round_start_yen += 5;
             self.push_relic_activation(RelicId::Charity);
         }
-        // Sweepstakes: 25% +$2, 25% +$4, 50% nothing. Rolled each round start.
+        // Sweepstakes: 25% +¥2, 25% +¥4, 50% nothing. Rolled each round start.
         // Fortune's Favor doubles the weight of each payout vs. nothing → ⅓ / ⅓ / ⅓.
         if self.relics.has(crate::core::relic::RelicId::Sweepstakes) {
             use rand::RngExt;
@@ -135,13 +135,13 @@ impl RunState {
                 }
             };
             if payout > 0 {
-                round_start_gold += payout;
+                round_start_yen += payout;
                 self.relic_activations
                     .push(crate::core::relic::RelicId::Sweepstakes);
             }
         }
-        if round_start_gold > 0 {
-            self.apply_gold_reward(round_start_gold, bus);
+        if round_start_yen > 0 {
+            self.apply_yen_reward(round_start_yen, bus);
         }
     }
 
@@ -204,7 +204,7 @@ impl RunState {
         self.joker_used = false;
         self.full_hand_played_this_round = false;
         self.ordeal.bonus_hand_size = 0;
-        self.ordeal.gold_cost_per_play = 0;
+        self.ordeal.yen_cost_per_play = 0;
         self.played_yaku_this_round.clear();
         self.honors_scored_this_round = false;
         self.upcoming_chamber = self.upcoming_chamber.next();
@@ -265,7 +265,7 @@ impl RunState {
         self.joker_used = false;
         self.full_hand_played_this_round = false;
         self.ordeal.bonus_hand_size = 0;
-        self.ordeal.gold_cost_per_play = 0;
+        self.ordeal.yen_cost_per_play = 0;
         self.played_yaku_this_round.clear();
         self.honors_scored_this_round = false;
         self.upcoming_chamber = self.upcoming_chamber.next();
@@ -298,7 +298,7 @@ impl RunState {
         // Reset per-round boss-effect state. The ante's `upcoming_ordeal` is
         // unchanged — skipping a Small/Big still leaves the same boss waiting.
         self.ordeal.bonus_hand_size = 0;
-        self.ordeal.gold_cost_per_play = 0;
+        self.ordeal.yen_cost_per_play = 0;
         self.played_yaku_this_round.clear();
         self.honors_scored_this_round = false;
         self.memorial_round.clear();

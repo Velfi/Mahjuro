@@ -67,7 +67,7 @@
   {
     "id": "green_luck",
     "name": "Green Luck",
-    "description": "Chamber cleared: +$4 gold if no honors were scored",
+    "description": "Chamber cleared: +¥4 yen if no honors were scored",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -323,7 +323,7 @@
   {
     "id": "hanami",
     "name": "Hanami",
-    "description": "+$3 gold per cashed-in flower tile",
+    "description": "+¥3 yen per cashed-in flower tile",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -509,7 +509,7 @@
   {
     "id": "turtle_shell",
     "name": "Turtle Shell",
-    "description": "Cashing in a structure: +300 chips; destroyed if gold hits 0",
+    "description": "Cashing in a structure: +300 chips; destroyed if yen hits 0",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -540,7 +540,7 @@
   {
     "id": "golden_engine",
     "name": "Golden Engine",
-    "description": "+1 mult per 3 gold held",
+    "description": "+1 mult per 3 yen held",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -912,7 +912,7 @@
   {
     "id": "silk_moth",
     "name": "Silk Moth",
-    "description": "+3 mult; +$1 each time you discard",
+    "description": "+3 mult; +¥1 yen each time you discard",
     "rarity": "rare",
     "flavor_spans": [
       {
@@ -956,7 +956,7 @@
   {
     "id": "gold_idol",
     "name": "Gold Idol",
-    "description": "+$3 at round end",
+    "description": "+¥3 yen at round end",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -979,7 +979,7 @@
   {
     "id": "jade_abacus",
     "name": "Jade Abacus",
-    "description": "+$1 interest per 4 gold held (max +$4)",
+    "description": "+¥1 interest per 4 yen held (max +¥4)",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -992,7 +992,7 @@
   {
     "id": "nest_egg",
     "name": "Nest Egg",
-    "description": "Chamber cleared: this relic accumulates +$2 sell value",
+    "description": "Chamber cleared: this relic accumulates +¥2 yen sell value",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -1005,7 +1005,7 @@
   {
     "id": "patience",
     "name": "Patience",
-    "description": "Chamber cleared: +$2 per unused discard",
+    "description": "Chamber cleared: +¥2 yen per unused discard",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -1057,7 +1057,7 @@
   {
     "id": "charity",
     "name": "Charity",
-    "description": "If gold is less than $10 upon entering a chamber: +$5",
+    "description": "If yen is less than ¥10 upon entering a chamber: +¥5 yen",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1231,7 +1231,7 @@
   {
     "id": "kong_collector",
     "name": "Kong Collector",
-    "description": "Scoring a kong: +$5; Paid at round end",
+    "description": "Scoring a kong: +¥5 yen; Paid at round end",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1244,7 +1244,7 @@
   {
     "id": "no_honor_but_wealth",
     "name": "No Honor But Wealth",
-    "description": "Discarding an honor tile: +$1",
+    "description": "Discarding an honor tile: +¥1 yen",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -1257,7 +1257,7 @@
   {
     "id": "sweepstakes",
     "name": "Sweepstakes",
-    "description": "Chamber entered: 25% +$2, 25% +$4, 50% nothing",
+    "description": "Chamber entered: 25% +¥2, 25% +¥4, 50% nothing",
     "rarity": "common",
     "flavor_spans": [
       {
@@ -1270,7 +1270,7 @@
   {
     "id": "beggars_cup",
     "name": "Beggar's Cup",
-    "description": "Chamber cleared: +$1 gold multiplied by the current ante",
+    "description": "Chamber cleared: +¥1 yen multiplied by the current ante",
     "rarity": "uncommon",
     "flavor_spans": [
       {
@@ -1288,7 +1288,7 @@
   {
     "id": "cosmopolitan",
     "name": "Cosmopolitan",
-    "description": "Chamber cleared: +$1 gold per unique yaku scored in the chamber",
+    "description": "Chamber cleared: +¥1 yen per unique yaku scored in the chamber",
     "rarity": "uncommon",
     "flavor_spans": [
       {

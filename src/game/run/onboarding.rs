@@ -13,7 +13,7 @@ impl RunState {
     /// campaign. Slides → guided Lessons blind → shop → boss finale.
     pub fn new_onboarding() -> Self {
         let mut mode = GameMode::with_material(crate::persistence::TileMaterial::Bamboo);
-        mode.starting_gold = 16;
+        mode.starting_yen = 16;
         mode.starting_plays = LESSONS_PLAYS;
         mode.starting_discards = LESSONS_DISCARDS;
         mode.hand_size = LESSONS_HAND_SIZE;
@@ -27,7 +27,7 @@ impl RunState {
         state.available_rules = state.mode.starting_rules.clone();
         state.base_target = LESSONS_TARGET;
         state.target_score = LESSONS_TARGET;
-        state.gold = state.mode.starting_gold as i32;
+        state.yen = state.mode.starting_yen as i32;
         state.wing = 1;
         state.run_number = 1;
         state.chamber = ChamberKind::Small;
@@ -37,9 +37,9 @@ impl RunState {
         state.resolve_upcoming_ordeal();
         state.small_chamber_tag = None;
         state.big_chamber_tag = None;
-        state.tag_free_reroll = false;
-        state.tag_patron_gift = false;
-        state.tag_rich_stock = false;
+        state.tag_free_reroll = 0;
+        state.tag_patron_gift = 0;
+        state.tag_rich_stock = 0;
         state.tag_bonus_plays = 0;
         state.tag_bonus_discards = 0;
         state.tag_bonus_hand_size = 0;

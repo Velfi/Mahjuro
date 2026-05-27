@@ -172,7 +172,7 @@ impl RunState {
             return 0;
         }
         let eff = EffectiveRelics::from_roster(&self.relics);
-        let honor_gold = if eff.has(&self.relics, RelicId::NoHonorButWealth) {
+        let honor_yen = if eff.has(&self.relics, RelicId::NoHonorButWealth) {
             let base = selected_indices
                 .iter()
                 .filter_map(|&i| self.hand.get(i))
@@ -189,8 +189,8 @@ impl RunState {
             return 0;
         }
 
-        if honor_gold > 0 {
-            self.apply_gold_reward(honor_gold, Some(bus));
+        if honor_yen > 0 {
+            self.apply_yen_reward(honor_yen, Some(bus));
             self.push_relic_activation(RelicId::NoHonorButWealth);
         }
         for tile in &removed {
@@ -209,10 +209,10 @@ impl RunState {
             }
         }
 
-        // Silk Moth: produce $1 per discard action and accumulate the lifetime
+        // Silk Moth: produce ¥1 yen per discard action and accumulate the lifetime
         // total in `relic_counters[SilkMoth]` so the live tooltip can show it.
         if self.relics.has(RelicId::SilkMoth) {
-            self.apply_gold_reward(1, Some(bus));
+            self.apply_yen_reward(1, Some(bus));
             *self.relic_counters.entry(RelicId::SilkMoth).or_insert(0) += 1;
             self.push_relic_activation(RelicId::SilkMoth);
         }

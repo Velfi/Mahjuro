@@ -2,6 +2,7 @@
 //! personal-record / rivalry helpers.
 
 use crate::core::ordeal::{OrdealKind, all_ordeals, final_ordeals};
+use crate::core::OrdealKindExt;
 use crate::core::progression::{PlayerProgress, RunOutcome, RunRecord};
 use crate::core::tile::{Suit, Tile};
 use crate::core::yaku::YakuKind;
@@ -631,7 +632,7 @@ pub fn run_detail_model(
         ("Shops".into(), format!("{}", c.shops_visited)),
         ("Rerolls".into(), format!("{}", c.rerolls_used)),
         ("Relic triggers".into(), format!("{}", c.relic_triggers)),
-        ("Gold earned".into(), format!("{}", c.gold_earned)),
+        ("Yen earned".into(), format!("{}", c.yen_earned)),
         (
             "Best combo".into(),
             format!(
@@ -800,7 +801,7 @@ mod tests {
             round_score: score,
             target_score: 500,
             total_score_earned: score,
-            final_gold: 0,
+            final_yen: 0,
             plays_remaining: 0,
             discards_remaining: 0,
             plays_max: 4,

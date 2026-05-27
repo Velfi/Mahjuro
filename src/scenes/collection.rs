@@ -8,6 +8,7 @@ use std::time::Instant;
 use crate::audio::SfxId;
 use crate::core::archive_seen::{self, ArchiveSeenMark, ArchiveTab};
 use crate::core::ordeal::{OrdealKind, all_ordeals, final_ordeals};
+use crate::core::OrdealKindExt;
 use crate::core::progression::is_transformation_successor_relic;
 use crate::core::relic::{RelicId, all_relic_defs};
 use crate::core::talisman::TalismanKind;
@@ -2083,7 +2084,7 @@ fn description_for(
         ArtifactKind::Relic(id) => crate::core::relic::relic_description_live(
             *id,
             &run.relic_counters,
-            run.gold,
+            run.yen,
             None,
             Some(run.ghost_hand_preview_chips()),
             None,

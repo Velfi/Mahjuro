@@ -1,0 +1,11 @@
+[package]
+name = "mahjuro-assets"
+version = "0.5.0-21"
+edition = "2024"
+publish = false
+
+[dependencies]
+log = "0.4.28"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+zip = { version = "2.2", default-features = false, features = ["deflate"] }

@@ -40,6 +40,12 @@ impl App {
             })?
         };
         self.renderer = Some(renderer);
+        if matches!(self.resume_scene, crate::persistence::ResumeScene::Gameplay) {
+            self.renderer
+                .as_mut()
+                .expect("renderer just set")
+                .ensure_gameplay_room_gpu_for_resume();
+        }
         self.input = {
             let _input = crate::startup_profile::scope("input.new");
             Some(InputState::new()?)
@@ -110,7 +116,7 @@ impl App {
                         && !renderer.showcase_decal_atlases_baked_for_all_player_tilesets();
                     if splash_atlas_pending {
                         let tileset = self.gfx.tileset_name.clone();
-                        renderer.prebake_showcase_decal_atlases_for_all_player_tilesets(&tileset);
+                        renderer.ensure_active_showcase_decal_atlas(&tileset);
                         did_loader_work = true;
                     }
                 }

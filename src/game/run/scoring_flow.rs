@@ -1,6 +1,7 @@
 use super::relic_removal::TransformationPrimaryRelic;
 use crate::{
     audio::SfxId,
+    OrdealKindExt,
     core::{
         debuff::TileDebuff,
         hand::{DetectedMeld, MeldKind, enumerate_decompositions},
@@ -92,15 +93,15 @@ impl RunState {
                 self.on_transformation_primary_burned(TransformationPrimaryRelic::MeltingIce, bus);
             }
         }
-        if self.relics.has(RelicId::RustlingGooseEgg) {
+        if self.relics.has(RelicId::XxxlEgg) {
             let v = self
                 .relic_counters
-                .entry(RelicId::RustlingGooseEgg)
+                .entry(RelicId::XxxlEgg)
                 .or_insert(3);
             *v -= 1;
             if *v <= 0 {
                 self.on_transformation_primary_burned(
-                    TransformationPrimaryRelic::RustlingGooseEgg,
+                    TransformationPrimaryRelic::XxxlEgg,
                     bus,
                 );
             }
@@ -236,7 +237,7 @@ impl RunState {
                 yaku_levels: Some(self.yaku_levels.clone()),
             },
             economy: ScoreEconomyBundle {
-                gold: self.gold,
+                yen: self.yen,
                 total_score: self.total_score_earned,
             },
             structure: structure_meta,
@@ -390,8 +391,8 @@ impl RunState {
                 }
             }
         }
-        if breakdown.flower_gold > 0 {
-            self.apply_gold_reward(breakdown.flower_gold, Some(bus));
+        if breakdown.flower_yen > 0 {
+            self.apply_yen_reward(breakdown.flower_yen, Some(bus));
         }
         let scored_full_hand = breakdown
             .detected_yaku
@@ -563,7 +564,7 @@ impl RunState {
         if self.round_score >= self.target_score as u64 {
             let base_reward = self.chamber.clear_reward();
             let unused_play_bonus = self.plays_remaining;
-            let interest = (self.gold.max(0) as u32 / 5).min(3);
+            let interest = (self.yen.max(0) as u32 / 5).min(3);
             let green_luck_bonus =
                 if self.relics.has(RelicId::GreenLuck) && !self.honors_scored_this_round {
                     self.push_relic_activation(RelicId::GreenLuck);
@@ -578,7 +579,7 @@ impl RunState {
                 0
             };
             let jade_abacus_bonus = if self.relics.has(RelicId::JadeAbacus) {
-                let bonus = (self.gold.max(0) as u32 / 4).min(4);
+                let bonus = (self.yen.max(0) as u32 / 4).min(4);
                 if bonus > 0 {
                     self.push_relic_activation(RelicId::JadeAbacus);
                 }
@@ -631,8 +632,8 @@ impl RunState {
                 *self.relic_counters.entry(RelicId::Temperance).or_insert(0) += stacks;
                 self.push_relic_activation(RelicId::Temperance);
             }
-            let memorial_clear = self.memorial_round.clear_gold_bonus;
-            self.memorial_round.clear_gold_bonus = 0;
+            let memorial_clear = self.memorial_round.clear_yen_bonus;
+            self.memorial_round.clear_yen_bonus = 0;
             let gold_earned = base_reward
                 .saturating_add(unused_play_bonus)
                 .saturating_add(interest)
@@ -791,7 +792,7 @@ impl RunState {
                 yaku_levels: Some(self.yaku_levels.clone()),
             },
             economy: ScoreEconomyBundle {
-                gold: self.gold,
+                yen: self.yen,
                 total_score: self.total_score_earned,
             },
             structure: Some(meta),
@@ -896,7 +897,7 @@ impl RunState {
                 yaku_levels: Some(self.yaku_levels.clone()),
             },
             economy: ScoreEconomyBundle {
-                gold: self.gold,
+                yen: self.yen,
                 total_score: self.total_score_earned,
             },
             structure: None,

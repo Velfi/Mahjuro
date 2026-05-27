@@ -12,8 +12,8 @@ pub struct DebugVisibility {
     pub hide_discard_tiles: bool,
     pub hide_plinth_tiles: bool,
     pub hide_relics: bool,
-    pub hide_gold_pile: bool,
-    pub hide_gold_label: bool,
+    pub hide_yen_pile: bool,
+    pub hide_yen_label: bool,
     pub hide_wall_hud: bool,
     pub hide_score_readout: bool,
     pub hide_play_tally_fan: bool,
@@ -43,8 +43,8 @@ impl DebugVisibility {
             4 => &mut self.hide_discard_tiles,
             5 => &mut self.hide_plinth_tiles,
             6 => &mut self.hide_relics,
-            7 => &mut self.hide_gold_pile,
-            8 => &mut self.hide_gold_label,
+            7 => &mut self.hide_yen_pile,
+            8 => &mut self.hide_yen_label,
             9 => &mut self.hide_wall_hud,
             10 => &mut self.hide_score_readout,
             11 => &mut self.hide_play_tally_fan,
@@ -72,8 +72,8 @@ impl DebugVisibility {
             4 => ("Discard river tiles", self.hide_discard_tiles),
             5 => ("Plinth tiles (dora / wind)", self.hide_plinth_tiles),
             6 => ("Relics", self.hide_relics),
-            7 => ("Gold coin pile", self.hide_gold_pile),
-            8 => ("Gold amount label", self.hide_gold_label),
+            7 => ("Gold coin pile", self.hide_yen_pile),
+            8 => ("Gold amount label", self.hide_yen_label),
             9 => ("Wall tiles HUD", self.hide_wall_hud),
             10 => ("Score readout (0 / N)", self.hide_score_readout),
             11 => ("Play tally fan", self.hide_play_tally_fan),
@@ -115,7 +115,7 @@ impl DebugVisibility {
             Object3dKind::Primitive { shape, .. } => {
                 use crate::render::primitive::MeshId;
                 match shape {
-                    MeshId::Cylinder => self.hide_gold_pile,
+                    MeshId::Cylinder => self.hide_yen_pile,
                     _ => false,
                 }
             }

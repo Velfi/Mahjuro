@@ -112,7 +112,7 @@ impl SceneBehavior for GameplayScene {
         }
         {
             let _g = crate::render::cpu_profiler::scope("update.tick_gold_change_coins");
-            animation_state::tick_gold_change_coins(self, &mut ctx);
+            animation_state::tick_yen_change_coins(self, &mut ctx);
         }
         {
             let _g = crate::render::cpu_profiler::scope("update.tick_candle_and_light_ramp");
@@ -240,7 +240,7 @@ impl SceneBehavior for GameplayScene {
                             src,
                             src,
                             None,
-                            crate::core::scoring::StepKind::Gold,
+                            crate::core::scoring::StepKind::Yen,
                             new_level as f32,
                         );
                         self.particles
@@ -346,7 +346,7 @@ impl SceneBehavior for GameplayScene {
                 gameplay.round_score
             },
             gameplay.target_score,
-            gameplay.gold,
+            gameplay.yen,
             gameplay.plays_remaining,
             gameplay.discards_remaining,
         );
@@ -830,14 +830,14 @@ impl SceneBehavior for GameplayScene {
             frame.procedural_flame_emitters = glb_flames;
         }
 
-        let gold_label_rect = if vis.hide_gold_label {
+        let yen_label_rect = if vis.hide_yen_label {
             [0.0, 0.0, 0.0, 0.0]
         } else {
-            crate::render::gold_display::push_gold_amount_label(
+            crate::render::yen_display::push_yen_amount_label(
                 &mut frame,
                 layout.window_w,
                 layout.window_h,
-                gameplay.gold,
+                gameplay.yen,
                 (gold_pose.anchor[0], gold_pose.anchor[1]),
             )
         };
@@ -1407,7 +1407,7 @@ impl SceneBehavior for GameplayScene {
         // there is gold to display). The pile rect was computed up at
         // the top of `draw_frame` so the focus ring and
         // physical pile draw all share one source of truth.
-        focus_rect_graph.push((FocusTarget::Gold, gold_label_rect));
+        focus_rect_graph.push((FocusTarget::Gold, yen_label_rect));
         // Yaku tablets — push the projected rects into the focus graph
         // so spatial nav can land on them. We use the projected rects
         // (one frame stale) to match where the player actually sees the
@@ -1449,7 +1449,7 @@ impl SceneBehavior for GameplayScene {
                             let desc = relic_description_live(
                                 rid,
                                 &run.relic_counters,
-                                run.gold,
+                                run.yen,
                                 Some((&run.relics, i)),
                                 Some(run.ghost_hand_preview_chips()),
                                 Some(run.wing),
@@ -1648,9 +1648,9 @@ impl SceneBehavior for GameplayScene {
                                 window_w: layout.window_w,
                                 window_h: layout.window_h,
                                 anchor_rect: Some(rect),
-                                title: "Gold",
-                                desc: "Your current treasure",
-                                cta: &format!("{}g", gameplay.gold),
+                                title: "Yen",
+                                desc: "Your wealth in yen",
+                                cta: &format!("¥{}", gameplay.yen),
                                 accent_color: color::GOLD,
                                 hover_is_owned: false,
                                 skip_title_block: false,

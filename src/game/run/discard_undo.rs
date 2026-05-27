@@ -12,7 +12,7 @@ pub struct DiscardUndoSnapshot {
     selected: Vec<bool>,
     discards_remaining: u32,
     wall: Wall,
-    gold: i32,
+    yen: i32,
     tiles_discarded: u32,
     times_restocked: u32,
     relic_counters: std::collections::BTreeMap<RelicId, i32>,
@@ -27,7 +27,7 @@ impl DiscardUndoSnapshot {
             selected: run.selected.clone(),
             discards_remaining: run.discards_remaining,
             wall: run.wall.clone(),
-            gold: run.gold,
+            yen: run.yen,
             tiles_discarded: run.tiles_discarded,
             times_restocked: run.times_restocked,
             relic_counters: run.relic_counters.clone(),
@@ -43,10 +43,10 @@ impl super::RunState {
         snap: DiscardUndoSnapshot,
         bus: Option<&mut crate::game::event_bus::EventBus>,
     ) {
-        let gold_delta = snap.gold - self.gold;
+        let yen_delta = snap.yen - self.yen;
         self.discards_remaining = snap.discards_remaining;
         self.wall = snap.wall;
-        self.gold = snap.gold;
+        self.yen = snap.yen;
         self.tiles_discarded = snap.tiles_discarded;
         self.times_restocked = snap.times_restocked;
         self.relic_counters = snap.relic_counters;
@@ -59,8 +59,8 @@ impl super::RunState {
             core.selected = selected;
         });
         self.restamp_hand_enhancements();
-        if gold_delta != 0 {
-            self.notify_run_gold_changed(gold_delta, bus);
+        if yen_delta != 0 {
+            self.notify_run_yen_changed(yen_delta, bus);
         }
-    }
+    }       
 }

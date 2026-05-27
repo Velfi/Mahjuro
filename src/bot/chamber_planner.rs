@@ -307,7 +307,7 @@ pub(crate) fn execute_planned_turn(
             if let Some(breakdown) = score_breakdown_for_play_indices(run, &hand_before, indices) {
                 relic_analytics::record_score_breakdown(stats, &breakdown);
             }
-            let gold_before = run.gold;
+            let yen_before = run.yen;
             let yaku_levels_before = run.yaku_levels.clone();
             let golden_engine_active = run.relics.has(crate::core::relic::RelicId::GoldenEngine);
             let bank_before_commit = run.structure_tiles().to_vec();
@@ -353,7 +353,7 @@ pub(crate) fn execute_planned_turn(
                     tiles,
                     run.last_breakdown.as_ref(),
                     &yaku_levels_before,
-                    gold_before,
+                    yen_before,
                     golden_engine_active,
                 ));
             }
@@ -389,7 +389,7 @@ pub(crate) fn execute_planned_turn(
                 .map(|(s, _)| *s)
                 .unwrap_or(0);
             let score_before = run.round_score;
-            let gold_before = run.gold;
+            let yen_before = run.yen;
             let yaku_levels_before = run.yaku_levels.clone();
             let golden_engine_active = run.relics.has(crate::core::relic::RelicId::GoldenEngine);
             let cash_in_tiles = run.structure_tiles().to_vec();
@@ -416,7 +416,7 @@ pub(crate) fn execute_planned_turn(
                     format_meld_groups(&cash_in_tiles, &cash_in_sets),
                     run.last_breakdown.as_ref(),
                     &yaku_levels_before,
-                    gold_before,
+                    yen_before,
                     golden_engine_active,
                 ));
             }

@@ -81,36 +81,7 @@ use crate::ui::layout::LayoutResult;
 
 pub use debug_visibility::DebugVisibility;
 
-/// Which background image to display behind the scene.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
-pub enum BackgroundId {
-    /// No background image — just the clear color.
-    #[default]
-    None,
-    /// Solid black fill. Synthesised in the renderer (1×1 black texture)
-    /// rather than loaded from disk so scenes that need a true-black backdrop
-    /// behind the volumetric smoke composite have a pass-A draw to bind to.
-    /// Quad-based fills get reordered into the late HUD overlay pass and
-    /// would paint over the smoke instead.
-    Black,
-}
-
-impl BackgroundId {
-    /// Asset path relative to the `assets/` root (packs or loose `assets/`).
-    pub fn asset_path(self) -> Option<&'static str> {
-        match self {
-            BackgroundId::None => None,
-            BackgroundId::Black => None,
-        }
-    }
-
-    /// RGBA multiplied with the background texture sample in `image_quad.wgsl` before gamma.
-    /// Values above 1.0 are allowed when drawing into the HDR scene buffer. Used to tune
-    /// individual backdrops without re-authoring source art.
-    pub fn image_vertex_color(self) -> [f32; 4] {
-        [1.0, 1.0, 1.0, 1.0]
-    }
-}
+pub use mahjuro_types::BackgroundId;
 
 /// Everything a scene's `update()` may need.
 pub struct UpdateCtx<'a> {
@@ -366,57 +337,7 @@ impl<'a> DrawCtx<'a> {
     }
 }
 
-/// What happens when a `ButtonDef` is clicked.
-///
-/// `Ui(action)` enqueues `action` into the next frame's action queue, just
-/// like a key/gamepad press — use this when the click is semantically the
-/// same as some keyboard input the scene already handles (e.g. a "Next"
-/// button that does the same thing as Enter).
-///
-/// `Scene(id)` enqueues `id` into `UpdateCtx::button_clicks`, where the
-/// scene's `update()` can match against its own named const values. Use this
-/// when N buttons each need to do something different and there is no
-/// natural keyboard equivalent — it avoids hijacking unrelated `UiAction`
-/// variants. See AGENTS.md "Mouse Input in Scenes".
-#[derive(Clone, Copy, Debug)]
-pub enum ButtonAction {
-    Ui(UiAction),
-    Scene(u32),
-}
-
-/// A clickable UI button: screen rect + the action it triggers.
-#[derive(Clone)]
-pub struct ButtonDef {
-    pub rect: (f32, f32, f32, f32),
-    pub action: ButtonAction,
-    /// Cursor-hover hint (shown above the rect when [`crate::ui::input::InputMode::Cursor`]).
-    pub hover_label: Option<std::borrow::Cow<'static, str>>,
-}
-
-impl ButtonDef {
-    /// Convenience constructor for the common `Ui(action)` case.
-    pub fn ui(rect: (f32, f32, f32, f32), action: UiAction) -> Self {
-        Self {
-            rect,
-            action: ButtonAction::Ui(action),
-            hover_label: None,
-        }
-    }
-
-    /// Convenience constructor for scene-defined click ids.
-    pub fn scene(rect: (f32, f32, f32, f32), id: u32) -> Self {
-        Self {
-            rect,
-            action: ButtonAction::Scene(id),
-            hover_label: None,
-        }
-    }
-
-    pub fn with_hover_label(mut self, label: impl Into<std::borrow::Cow<'static, str>>) -> Self {
-        self.hover_label = Some(label.into());
-        self
-    }
-}
+pub use mahjuro_types::{ButtonAction, ButtonDef};
 
 /// `None` = stay in current scene; `Some(scene)` = transition.
 pub type SceneTransition = Option<Scene>;
@@ -554,6 +475,28 @@ pub enum Scene {
     AnimationLab(AnimationLabScene),
     RumbleLab(RumbleLabScene),
     YakuJournal(YakuJournalScene),
+}
+
+/// Canonical renderer scene-key string for tonemap, shadows, and pick prefixes.
+pub fn active_scene_key(scene: &Scene) -> Option<&'static str> {
+    match scene {
+        Scene::Showcase(_) => Some("showcase"),
+        Scene::Shop(_) => Some("shop"),
+        Scene::Gameplay(_) => Some("gameplay"),
+        Scene::Collection(_) => Some("collection"),
+        Scene::PickChamber(_) => Some("pick_chamber"),
+        Scene::Staircase(_) => Some("staircase"),
+        Scene::MainMenuExterior(_) => Some("main_menu_exterior"),
+        Scene::TutorialCampaign(_) => Some("tutorial"),
+        Scene::Guide(_) => Some("guide"),
+        Scene::YakuJournal(_) => Some("yaku_journal"),
+        Scene::TileAnchorLab(_) => Some("tile_anchor_lab"),
+        Scene::ButtonAabbLab(_) => Some("button_aabb_lab"),
+        Scene::AnimationLab(_) => Some("shop"),
+        Scene::Tixels(_) => Some("tixels"),
+        Scene::GameOver(_) => Some("gameplay"),
+        _ => None,
+    }
 }
 
 /// Return from profile picker to the Archive (collection) without a `profile_select` ↔ `collection` cycle.

@@ -1,7 +1,7 @@
 # Event-driven run mutations (subscribers beyond gold)
 
 ## Why
-Gold changes now funnel through [`RunState::apply_gold_delta`](../../src/game/run.rs) / [`apply_gold_reward`](../../src/game/run.rs) / [`notify_run_gold_changed`](../../src/game/run.rs), which emit [`GameEvent::GoldChanged`](../../src/game/event_bus.rs) and call [`relic_hooks_on_run_gold_changed`](../../src/game/run.rs) (Turtle Shell today). Other run mutations still scatter across call sites: each path must remember `note_relic_destroyed`, the right `GameEvent`, shop-pool extinction flags, and Steam/App reactions. That duplication is easy to get wrong (especially Kintsugi) and makes new relics expensive to wire.
+Yen changes now funnel through [`RunState::apply_yen_delta`](../../src/game/run.rs) / [`apply_yen_reward`](../../src/game/run.rs) / [`notify_run_yen_changed`](../../src/game/run.rs), which emit [`GameEvent::YenChanged`](../../src/game/event_bus.rs) and call [`relic_hooks_on_run_yen_changed`](../../src/game/run.rs) (Turtle Shell today). Other run mutations still scatter across call sites: each path must remember `note_relic_destroyed`, the right `GameEvent`, shop-pool extinction flags, and Steam/App reactions. That duplication is easy to get wrong (especially Kintsugi) and makes new relics expensive to wire.
 
 ## Scope
 One umbrella refactor — pick pieces in order of leverage; none of this blocks shipping individual features.
@@ -19,7 +19,7 @@ Out of scope: changing `GameEvent` wire format for saves/replays, moving all Ste
 ## Touchpoints
 - [`src/game/run.rs`](../../src/game/run.rs) — `note_relic_destroyed`, `relic_hooks_on_run_gold_changed`, gold helpers; natural home for `destroy_relic` and future `relic_hooks_on_*`.
 - [`src/game/event_bus.rs`](../../src/game/event_bus.rs) — new variants only if something truly needs a distinct UI/audio channel; prefer reusing existing events where semantics already match.
-- [`src/game/run/scoring_flow.rs`](../../src/game/run/scoring_flow.rs) — Melting Ice, Rustling Goose Egg, Glass Cannon, Tea Ceremony / Chrysalis, Second Wind, Taotie: all mix relic removal with other logic.
+- [`src/game/run/scoring_flow.rs`](../../src/game/run/scoring_flow.rs) — Melting Ice, XXXL Egg, Glass Cannon, Tea Ceremony / Chrysalis, Second Wind, Taotie: all mix relic removal with other logic.
 - [`src/game/run/round_flow.rs`](../../src/game/run/round_flow.rs) — Paper Lantern, Silver Filigree Lantern, duplicated patterns in `advance_round` vs `forfeit_current_blind_second_wind`.
 - [`src/game/run/hand_ops.rs`](../../src/game/run/hand_ops.rs) — Silk Thread burn path calls `note_relic_destroyed` directly.
 - [`src/game/engine.rs`](../../src/game/engine.rs) — shop sells/removals that touch relics without going through run helpers.

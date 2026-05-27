@@ -7,14 +7,21 @@ publish = false
 
 [features]
 default = []
-bake = ["mahjuro/headless-bake"]
+bake = ["mahjuro/bake-support"]
 screenshot = ["mahjuro/headless-screenshot"]
+
+[[bin]]
+name = "mahjuro-bake-decal-atlases"
+path = "src/bin/mahjuro-bake-decal-atlases.rs"
 
 [dependencies]
 mahjuro = { path = "../..", default-features = false }
+mahjuro-render = { path = "../mahjuro-render" }
+mahjuro-assets = { path = "../mahjuro-assets" }
 anyhow = "1.0.102"
 clap = { version = "4.5", features = ["derive"] }
 env_logger = "0.11.8"
+image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4.28"
 rustc-hash = "2.1"
 

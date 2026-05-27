@@ -10,12 +10,38 @@ pub mod discard_undo;
 mod consumables;
 mod hand_ops;
 mod onboarding;
+pub mod play_masks;
 mod relic_removal;
 mod round_flow;
 mod scoring_flow;
+mod shop_stock;
 mod tags;
+
+pub use play_masks::enumerate_candidate_play_masks;
+pub use shop_stock::{KIOSK_RELIC_SLOTS, ShopOfferCounts, roll_shop_offer_counts};
 #[cfg(test)]
 mod tests;
+
+mod save_compat {
+    use serde::Deserialize;
+
+    /// Older saves stored shop skip-tag stacks as booleans.
+    pub fn u32_from_bool_or_u32<'de, D>(deserializer: D) -> Result<u32, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum BoolOrU32 {
+            Bool(bool),
+            U32(u32),
+        }
+        Ok(match BoolOrU32::deserialize(deserializer)? {
+            BoolOrU32::Bool(v) => u32::from(v),
+            BoolOrU32::U32(v) => v,
+        })
+    }
+}
 
 use std::collections::BTreeMap;
 
@@ -25,6 +51,7 @@ use crate::core::debuff::TileDebuff;
 use crate::core::deck::Wall;
 use crate::core::hand::{DetectedMeld, validate_selection_with_rules};
 use crate::core::ordeal::{self, OrdealKind};
+use crate::core::OrdealKindExt;
 use crate::core::relic::{RelicId, RelicState};
 use crate::core::rules::{ChamberKind, RuleModifier};
 use crate::core::scoring::ScoreBreakdown;
@@ -48,8 +75,8 @@ pub struct OrdealState {
     pub effect: Option<crate::core::ordeal::ResolvedOrdealEffect>,
     /// Per-round hand-size delta from boss effects.
     pub bonus_hand_size: i32,
-    /// Gold cost charged after each successful play (set by The Tribute).
-    pub gold_cost_per_play: u32,
+    /// Yen cost charged after each successful play (set by The Tribute).
+    pub yen_cost_per_play: u32,
     /// Per-play cost baked in by The Tax Collector at reveal time.
     #[serde(default)]
     pub tax_collector_cost: u32,
@@ -113,7 +140,7 @@ fn transformation_successor_shop_eligible(
         }
         RelicId::SilkMoth => ex.silk_thread && available_relics.contains(&RelicId::SilkThread),
         RelicId::Taotie => ex.melting_ice && available_relics.contains(&RelicId::MeltingIce),
-        RelicId::Geese => available_relics.contains(&RelicId::RustlingGooseEgg) && ex.xxxl_egg,
+        RelicId::Geese => available_relics.contains(&RelicId::XxxlEgg) && ex.xxxl_egg,
         RelicId::Rakuware => available_relics.contains(&RelicId::TeaCeremony) && ex.tea_ceremony,
         RelicId::MonarchButterfly => available_relics.contains(&RelicId::Chrysalis) && ex.chrysalis,
         _ => false,
@@ -144,7 +171,7 @@ pub(crate) fn relic_eligible_for_shop_stock(
     if id == RelicId::MeltingIce && ex.melting_ice {
         return false;
     }
-    if id == RelicId::RustlingGooseEgg && ex.xxxl_egg {
+    if id == RelicId::XxxlEgg && ex.xxxl_egg {
         return false;
     }
     if id == RelicId::TeaCeremony && ex.tea_ceremony {
@@ -156,362 +183,7 @@ pub(crate) fn relic_eligible_for_shop_stock(
     true
 }
 
-#[derive(Clone, Copy)]
-struct IndexedTile {
-    hand_index: usize,
-    tile: Tile,
-}
-
-fn enumerate_candidate_play_masks(hand: &[Tile], rules: &[RuleModifier]) -> Vec<u32> {
-    let mut regular = Vec::with_capacity(hand.len());
-    let mut flowers = Vec::new();
-    for (hand_index, &tile) in hand.iter().enumerate() {
-        let indexed = IndexedTile { hand_index, tile };
-        if tile.is_flower() {
-            flowers.push(indexed);
-        } else {
-            regular.push(indexed);
-        }
-    }
-    regular.sort_by_key(|it| it.tile);
-    flowers.sort_by_key(|it| it.tile);
-
-    let subset_rules = PlayMaskRules {
-        allow_wrap: rules.contains(&RuleModifier::SequenceWrap),
-        no_sequences: rules.contains(&RuleModifier::NoSequences),
-        require_honor: rules.contains(&RuleModifier::RequireHonor),
-        must_play_five: rules.contains(&RuleModifier::MustPlayFive),
-        no_flower_wildcards: rules.contains(&RuleModifier::NoFlowerWildcards),
-    };
-
-    let mut masks: rustc_hash::FxHashSet<u32> = rustc_hash::FxHashSet::default();
-    enumerate_regular_subsets(&regular, &flowers, 0, subset_rules, 0, &mut masks);
-    let mut out: Vec<u32> = masks.into_iter().collect();
-    out.sort_unstable();
-    out
-}
-
-#[derive(Clone, Copy)]
-struct PlayMaskRules {
-    allow_wrap: bool,
-    no_sequences: bool,
-    require_honor: bool,
-    must_play_five: bool,
-    no_flower_wildcards: bool,
-}
-
-fn enumerate_regular_subsets(
-    remaining: &[IndexedTile],
-    flowers: &[IndexedTile],
-    current_mask: u32,
-    rules: PlayMaskRules,
-    current_tile_count: usize,
-    out: &mut rustc_hash::FxHashSet<u32>,
-) {
-    let PlayMaskRules {
-        allow_wrap,
-        no_sequences,
-        require_honor,
-        must_play_five,
-        no_flower_wildcards,
-    } = rules;
-    if current_tile_count > 14 || (must_play_five && current_tile_count > 5) {
-        return;
-    }
-
-    if remaining.is_empty() {
-        emit_leaf_masks(flowers, current_mask, current_tile_count, rules, out);
-        return;
-    }
-
-    let first = remaining[0];
-    enumerate_regular_subsets(
-        &remaining[1..],
-        flowers,
-        current_mask,
-        rules,
-        current_tile_count,
-        out,
-    );
-
-    if remaining.len() >= 2
-        && same_face(first.tile, remaining[1].tile)
-        && (!require_honor || tiles_have_honor(&[first.tile, remaining[1].tile]))
-    {
-        enumerate_regular_subsets(
-            &remaining[2..],
-            flowers,
-            current_mask | (1 << first.hand_index) | (1 << remaining[1].hand_index),
-            rules,
-            current_tile_count + 2,
-            out,
-        );
-    }
-
-    if remaining.len() >= 3
-        && same_face(first.tile, remaining[1].tile)
-        && same_face(first.tile, remaining[2].tile)
-        && (!require_honor || tiles_have_honor(&[first.tile, remaining[1].tile, remaining[2].tile]))
-    {
-        enumerate_regular_subsets(
-            &remaining[3..],
-            flowers,
-            current_mask
-                | (1 << first.hand_index)
-                | (1 << remaining[1].hand_index)
-                | (1 << remaining[2].hand_index),
-            rules,
-            current_tile_count + 3,
-            out,
-        );
-    }
-
-    if remaining.len() >= 4
-        && same_face(first.tile, remaining[1].tile)
-        && same_face(first.tile, remaining[2].tile)
-        && same_face(first.tile, remaining[3].tile)
-        && (!require_honor
-            || tiles_have_honor(&[
-                first.tile,
-                remaining[1].tile,
-                remaining[2].tile,
-                remaining[3].tile,
-            ]))
-    {
-        enumerate_regular_subsets(
-            &remaining[4..],
-            flowers,
-            current_mask
-                | (1 << first.hand_index)
-                | (1 << remaining[1].hand_index)
-                | (1 << remaining[2].hand_index)
-                | (1 << remaining[3].hand_index),
-            rules,
-            current_tile_count + 4,
-            out,
-        );
-    }
-
-    let can_use_flower_wildcard = !flowers.is_empty() && !no_flower_wildcards;
-    if can_use_flower_wildcard
-        && remaining.len() >= 2
-        && same_face(first.tile, remaining[1].tile)
-        && (!require_honor || tiles_have_honor(&[first.tile, remaining[1].tile]))
-    {
-        for (flower_idx, flower) in flowers.iter().copied().enumerate() {
-            enumerate_regular_subsets(
-                &remaining[2..],
-                &remove_flower(flowers, flower_idx),
-                current_mask
-                    | (1 << first.hand_index)
-                    | (1 << remaining[1].hand_index)
-                    | (1 << flower.hand_index),
-                rules,
-                current_tile_count + 3,
-                out,
-            );
-        }
-    }
-
-    if !no_sequences && first.tile.is_number_tile() && !require_honor {
-        for seq in sequence_candidates(remaining, allow_wrap, can_use_flower_wildcard, first) {
-            let mut next_mask = current_mask | (1 << first.hand_index);
-            let mut remove = vec![0usize];
-            for idx in seq.regular_indices {
-                next_mask |= 1 << remaining[idx].hand_index;
-                remove.push(idx);
-            }
-            let rest = remove_indices(remaining, &remove);
-            if seq.uses_flower {
-                for (flower_idx, flower) in flowers.iter().copied().enumerate() {
-                    enumerate_regular_subsets(
-                        &rest,
-                        &remove_flower(flowers, flower_idx),
-                        next_mask | (1 << flower.hand_index),
-                        rules,
-                        current_tile_count + 3,
-                        out,
-                    );
-                }
-            } else {
-                enumerate_regular_subsets(
-                    &rest,
-                    flowers,
-                    next_mask,
-                    rules,
-                    current_tile_count + 3,
-                    out,
-                );
-            }
-        }
-    }
-}
-
-fn emit_leaf_masks(
-    flowers: &[IndexedTile],
-    current_mask: u32,
-    current_tile_count: usize,
-    rules: PlayMaskRules,
-    out: &mut rustc_hash::FxHashSet<u32>,
-) {
-    let must_play_five = rules.must_play_five;
-    let round_rules = if rules.no_flower_wildcards {
-        &[RuleModifier::NoFlowerWildcards][..]
-    } else {
-        &[][..]
-    };
-    for extra_mask in flower_meld_partition_masks(flowers, round_rules) {
-        let total_mask = current_mask | extra_mask;
-        let total_count = total_mask.count_ones() as usize;
-        if total_count == 0 {
-            continue;
-        }
-        if must_play_five {
-            if total_count == 5 {
-                out.insert(total_mask);
-            }
-        } else if total_count >= current_tile_count {
-            out.insert(total_mask);
-        }
-    }
-}
-
-fn flower_meld_partition_masks(flowers: &[IndexedTile], rules: &[RuleModifier]) -> Vec<u32> {
-    let indexed: Vec<(usize, u32)> = flowers.iter().map(|f| (f.hand_index, f.tile.id)).collect();
-    crate::core::hand::decomposition::flower_meld_partition_masks(&indexed, rules)
-}
-
-fn remove_flower(flowers: &[IndexedTile], remove_idx: usize) -> Vec<IndexedTile> {
-    flowers
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, flower)| (idx != remove_idx).then_some(*flower))
-        .collect()
-}
-
-fn same_face(a: Tile, b: Tile) -> bool {
-    a.suit == b.suit && a.rank == b.rank
-}
-
-fn tiles_have_honor(tiles: &[Tile]) -> bool {
-    tiles
-        .iter()
-        .any(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
-}
-
-fn remove_indices(remaining: &[IndexedTile], remove: &[usize]) -> Vec<IndexedTile> {
-    let mut remove_flags = vec![false; remaining.len()];
-    for &idx in remove {
-        remove_flags[idx] = true;
-    }
-    remaining
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, tile)| (!remove_flags[idx]).then_some(*tile))
-        .collect()
-}
-
-#[derive(Clone, Copy)]
-struct SequenceCandidate {
-    regular_indices: [usize; 2],
-    uses_flower: bool,
-}
-
-fn sequence_candidates(
-    remaining: &[IndexedTile],
-    allow_wrap: bool,
-    can_use_flower: bool,
-    first: IndexedTile,
-) -> Vec<SequenceCandidate> {
-    let mut out = Vec::new();
-    push_sequence_candidate(
-        remaining,
-        first.tile.suit,
-        [first.tile.rank + 1, first.tile.rank + 2],
-        false,
-        &mut out,
-    );
-    if can_use_flower {
-        push_sequence_candidate(
-            remaining,
-            first.tile.suit,
-            [first.tile.rank + 1],
-            true,
-            &mut out,
-        );
-        push_sequence_candidate(
-            remaining,
-            first.tile.suit,
-            [first.tile.rank + 2],
-            true,
-            &mut out,
-        );
-    }
-    if allow_wrap {
-        for needs in wrap_sequence_needs(first.tile.rank) {
-            push_sequence_candidate(remaining, first.tile.suit, *needs, false, &mut out);
-        }
-        if can_use_flower {
-            for needs in wrap_sequence_needs(first.tile.rank) {
-                push_sequence_candidate(remaining, first.tile.suit, [needs[0]], true, &mut out);
-                push_sequence_candidate(remaining, first.tile.suit, [needs[1]], true, &mut out);
-            }
-        }
-    }
-    out
-}
-
-fn push_sequence_candidate(
-    remaining: &[IndexedTile],
-    suit: Suit,
-    needed_ranks: impl AsRef<[u8]>,
-    uses_flower: bool,
-    out: &mut Vec<SequenceCandidate>,
-) {
-    let needed_ranks = needed_ranks.as_ref();
-    let mut found = Vec::with_capacity(needed_ranks.len());
-    for &rank in needed_ranks {
-        let Some((idx, _)) = remaining.iter().enumerate().skip(1).find(|(_, tile)| {
-            tile.tile.suit == suit && tile.tile.rank == rank && !found.contains(&tile.hand_index)
-        }) else {
-            return;
-        };
-        found.push(remaining[idx].hand_index);
-    }
-
-    let mut regular_indices = [0usize; 2];
-    for (i, found_hand_index) in found.iter().enumerate() {
-        let Some((remaining_idx, _)) = remaining
-            .iter()
-            .enumerate()
-            .find(|(_, tile)| tile.hand_index == *found_hand_index)
-        else {
-            return;
-        };
-        regular_indices[i] = remaining_idx;
-    }
-    out.push(SequenceCandidate {
-        regular_indices,
-        uses_flower,
-    });
-}
-
-fn wrap_sequence_needs(rank: u8) -> &'static [[u8; 2]] {
-    match rank {
-        1 => &[[2, 3], [9, 2], [8, 9]],
-        2 => &[[3, 4], [1, 3], [9, 1]],
-        3 => &[[4, 5], [2, 4], [1, 2]],
-        4 => &[[5, 6], [3, 5], [2, 3]],
-        5 => &[[6, 7], [4, 6], [3, 4]],
-        6 => &[[7, 8], [5, 7], [4, 5]],
-        7 => &[[8, 9], [6, 8], [5, 6]],
-        8 => &[[9, 1], [7, 9], [6, 7]],
-        9 => &[[8, 1], [1, 2], [7, 8]],
-        _ => &[],
-    }
-}
-
-fn structure_label_from_yaku(yaku: &[YakuKind]) -> String {
+pub(crate) fn structure_label_from_yaku(yaku: &[YakuKind]) -> String {
     if yaku.is_empty() {
         return "No Yaku".to_string();
     }
@@ -552,7 +224,7 @@ pub struct RunState {
     /// modifiers (bosses, skip tags, relic taxes) have been applied.
     #[serde(default)]
     pub discards_max: u32,
-    pub gold: i32,
+    pub yen: i32,
     #[serde(alias = "blind")]
     pub chamber: ChamberKind,
     /// Next chamber the player will face in the Small→Big→Boss cycle.
@@ -692,15 +364,15 @@ pub struct RunState {
     /// Tag assigned to the Big blind this ante.
     #[serde(default)]
     pub big_chamber_tag: Option<crate::core::tag::TagKind>,
-    /// Tag-granted: next shop's first reroll is free.
-    #[serde(default)]
-    pub tag_free_reroll: bool,
-    /// Tag-granted: one random relic in the next shop costs 0.
-    #[serde(default)]
-    pub tag_patron_gift: bool,
-    /// Tag-granted: next shop stocks 2 extra relics.
-    #[serde(default)]
-    pub tag_rich_stock: bool,
+    /// Tag-granted: free shop rerolls queued for the next visit (stacking).
+    #[serde(default, deserialize_with = "save_compat::u32_from_bool_or_u32")]
+    pub tag_free_reroll: u32,
+    /// Tag-granted: free relics queued for the next shop (stacking).
+    #[serde(default, deserialize_with = "save_compat::u32_from_bool_or_u32")]
+    pub tag_patron_gift: u32,
+    /// Tag-granted: +2 shop relics per stack for the next visit.
+    #[serde(default, deserialize_with = "save_compat::u32_from_bool_or_u32")]
+    pub tag_rich_stock: u32,
     /// Tag-granted bonus plays for the next round.
     #[serde(default)]
     pub tag_bonus_plays: u32,
@@ -779,7 +451,7 @@ pub struct RunState {
 }
 
 impl RunState {
-    /// Remaining gold-free shop restocks from [RelicId::IGotAGuy]. Zero if not owned.
+    /// Remaining yen-free shop restocks from [RelicId::IGotAGuy]. Zero if not owned.
     pub(crate) fn i_got_a_guy_restock_charges(&self) -> i32 {
         if !self.relics.has(RelicId::IGotAGuy) {
             return 0;
@@ -792,7 +464,7 @@ impl RunState {
 
     pub(crate) fn can_afford_shop_reroll(&self, reroll_cost: u32) -> bool {
         reroll_cost == 0
-            || self.gold >= reroll_cost as i32
+            || self.yen >= reroll_cost as i32
             || self.i_got_a_guy_restock_charges() > 0
     }
 
@@ -955,29 +627,29 @@ impl RunState {
         true
     }
 
-    /// Apply a signed gold change (shop spend, boss tax). Balance may go negative.
-    pub(crate) fn apply_gold_delta(&mut self, delta: i32, bus: Option<&mut EventBus>) {
+    /// Apply a signed yen change (shop spend, boss tax). Balance may go negative.
+    pub(crate) fn apply_yen_delta(&mut self, delta: i32, bus: Option<&mut EventBus>) {
         if delta == 0 {
             return;
         }
-        self.gold += delta;
-        self.notify_run_gold_changed(delta, bus);
+        self.yen += delta;
+        self.notify_run_yen_changed(delta, bus);
     }
 
-    /// Apply a non-negative gold gain with saturation at `i32::MAX`.
-    pub(crate) fn apply_gold_reward(&mut self, delta: i32, bus: Option<&mut EventBus>) {
+    /// Apply a non-negative yen gain with saturation at `i32::MAX`.
+    pub(crate) fn apply_yen_reward(&mut self, delta: i32, bus: Option<&mut EventBus>) {
         if delta <= 0 {
             if delta < 0 {
-                self.apply_gold_delta(delta, bus);
+                self.apply_yen_delta(delta, bus);
             }
             return;
         }
-        let old = self.gold;
-        self.gold = self.gold.saturating_add(delta);
-        let applied = self.gold - old;
+        let old = self.yen;
+        self.yen = self.yen.saturating_add(delta);
+        let applied = self.yen - old;
         if applied != 0 {
-            self.chronicle.note_gold_earned(applied);
-            self.notify_run_gold_changed(applied, bus);
+            self.chronicle.note_yen_earned(applied);
+            self.notify_run_yen_changed(applied, bus);
         }
     }
 
@@ -988,34 +660,34 @@ impl RunState {
         self.chronicle.note_relic_trigger();
     }
 
-    /// Set run gold to an absolute value (debug / tooling). Emits the net delta.
-    pub(crate) fn set_run_gold_direct(&mut self, new_gold: i32, bus: Option<&mut EventBus>) {
-        let old = self.gold;
-        if new_gold == old {
+    /// Set run yen to an absolute value (debug / tooling). Emits the net delta.
+    pub(crate) fn set_run_yen_direct(&mut self, new_yen: i32, bus: Option<&mut EventBus>) {
+        let old = self.yen;
+        if new_yen == old {
             return;
         }
-        self.gold = new_gold;
-        self.notify_run_gold_changed(new_gold - old, bus);
+        self.yen = new_yen;
+        self.notify_run_yen_changed(new_yen - old, bus);
     }
 
-    /// Push [`GameEvent::GoldChanged`] and run gold-reactive relic hooks.
-    pub(crate) fn notify_run_gold_changed(&mut self, delta: i32, mut bus: Option<&mut EventBus>) {
+    /// Push [`GameEvent::GoldChanged`] and run yen-reactive relic hooks.
+    pub(crate) fn notify_run_yen_changed(&mut self, delta: i32, mut bus: Option<&mut EventBus>) {
         if delta == 0 {
             return;
         }
         if let Some(b) = bus.as_mut() {
             b.push(GameEvent::GoldChanged { delta });
         }
-        self.relic_hooks_on_run_gold_changed(bus);
+        self.relic_hooks_on_run_yen_changed(bus);
     }
 
-    /// Extensible hook for relics that care about the bank after any gold mutation.
-    fn relic_hooks_on_run_gold_changed(&mut self, bus: Option<&mut EventBus>) {
-        self.turtle_shell_on_gold_broke(bus);
+    /// Extensible hook for relics that care about the bank after any yen mutation.
+    fn relic_hooks_on_run_yen_changed(&mut self, bus: Option<&mut EventBus>) {
+        self.turtle_shell_on_yen_broke(bus);
     }
 
-    fn turtle_shell_on_gold_broke(&mut self, bus: Option<&mut EventBus>) {
-        if self.gold > 0 {
+    fn turtle_shell_on_yen_broke(&mut self, bus: Option<&mut EventBus>) {
+        if self.yen > 0 {
             return;
         }
         if !self.relics.has(RelicId::TurtleShell) {
@@ -1127,7 +799,7 @@ impl RunState {
             plays_max: starting_plays,
             discards_remaining: starting_discards,
             discards_max: starting_discards,
-            gold: mode.starting_gold as i32,
+            yen: mode.starting_yen as i32,
             chamber: ChamberKind::Small,
             upcoming_chamber: ChamberKind::Small,
             last_breakdown: None,
@@ -1150,7 +822,7 @@ impl RunState {
                 upcoming: upcoming_ordeal,
                 effect: None,
                 bonus_hand_size: 0,
-                gold_cost_per_play: 0,
+                yen_cost_per_play: 0,
                 tax_collector_cost: 0,
             },
             played_yaku_this_round: Vec::new(),
@@ -1179,9 +851,9 @@ impl RunState {
             tile_packs: Vec::new(),
             small_chamber_tag: None,
             big_chamber_tag: None,
-            tag_free_reroll: false,
-            tag_patron_gift: false,
-            tag_rich_stock: false,
+            tag_free_reroll: 0,
+            tag_patron_gift: 0,
+            tag_rich_stock: 0,
             tag_bonus_plays: 0,
             tag_bonus_discards: 0,
             tag_bonus_hand_size: 0,
@@ -1338,7 +1010,7 @@ impl RunState {
 
     /// Whether a run is in progress (not a fresh/default state).
     pub fn is_in_progress(&self) -> bool {
-        self.round_score > 0 || self.run_number > 1 || self.gold != self.mode.starting_gold as i32
+        self.round_score > 0 || self.run_number > 1 || self.yen != self.mode.starting_yen as i32
     }
 
     /// True once the player has defeated the Boss of the final ante.

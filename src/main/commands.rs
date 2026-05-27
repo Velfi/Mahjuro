@@ -59,7 +59,8 @@ pub fn run_cli_command(command: Option<Command>) -> anyhow::Result<bool> {
             Ok(true)
         }
         Some(Command::VulkanWsiProbe) => {
-            crate::render::wgpu_renderer::run_vulkan_wsi_probe_smoke()?;
+            let shell = crate::sdl_shell::SdlShell::new("Vulkan WSI probe", 256, 256, false)?;
+            crate::render::wgpu_renderer::run_vulkan_wsi_probe_with_window(shell.window)?;
             Ok(true)
         }
         None => Ok(false),

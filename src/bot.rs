@@ -12,6 +12,7 @@
 //!
 //! Run with: `cargo run --release -- --bot 200`
 
+use crate::core::OrdealKindExt;
 use rand::RngExt;
 use rand::seq::SliceRandom;
 use rayon::prelude::*;
@@ -22,7 +23,7 @@ use std::time::Instant;
 
 use crate::core::consumable::Consumable;
 use crate::core::deck::Wall;
-use crate::core::hand::{MeldKind, detect_all_sets, validate_selection_with_rules};
+use crate::core::hand::{MeldKind, detect_all_sets};
 use crate::core::relic::{
     RelicId, RelicState, ScoreContext, ScoreEconomyBundle, ScorePatternBundle, ScoreRelicBundle,
     ScoreRoundBundle, ScoreTileBundle, all_relic_defs, apply_merchants_eye_discount,
@@ -40,7 +41,10 @@ use crate::core::zodiac::{YakuLevels, ZodiacKind};
 use crate::game::event_bus::GameOverReason;
 use crate::game::event_bus::{EventBus, GameEvent};
 use crate::game::game_mode::{GameMode, HAND_SIZE};
-use crate::game::run::{FINAL_WING, RunState, relic_eligible_for_shop_stock};
+use crate::game::run::{
+    FINAL_WING, KIOSK_RELIC_SLOTS, RunState, enumerate_candidate_play_masks,
+    relic_eligible_for_shop_stock, roll_shop_offer_counts,
+};
 
 mod chamber_planner;
 mod chamber_sim;
@@ -69,37 +73,8 @@ fn relic_display_name(id: RelicId) -> &'static str {
         .unwrap_or("?")
 }
 
-/// Push a relic onto the run's active list and run any first-purchase
-/// bookkeeping (counter initialization, capacity recomputation). Shared
-/// by the shop buy path and by forced-relic injection at run start.
 fn acquire_relic(run: &mut RunState, id: RelicId) {
-    run.relics.active.push(id);
-    match id {
-        RelicId::MeltingIce => {
-            run.relic_counters.insert(
-                RelicId::MeltingIce,
-                crate::core::relic::MELTING_ICE_START_CHIPS,
-            );
-        }
-        RelicId::SilkThread => {
-            run.relic_counters.insert(RelicId::SilkThread, 40);
-        }
-        RelicId::RustlingGooseEgg => {
-            run.relic_counters.insert(RelicId::RustlingGooseEgg, 3);
-        }
-        RelicId::TeaCeremony => {
-            run.relic_counters.insert(RelicId::TeaCeremony, 0);
-        }
-        RelicId::Chrysalis => {
-            run.relic_counters.insert(RelicId::MonarchButterfly, 0);
-        }
-        RelicId::MonarchButterfly => {
-            run.relic_counters.insert(RelicId::MonarchButterfly, 0);
-        }
-        RelicId::Rakuware => {}
-        _ => {}
-    }
-    run.recompute_capacities();
+    run.grant_relic(id);
 }
 
 /// Headless analogue of `ShopCommand::SellRelic`.
@@ -114,7 +89,7 @@ fn bot_sell_relic(run: &mut RunState, index: usize, bus: Option<&mut EventBus>) 
     if !run.relics.has(RelicId::IGotAGuy) {
         run.relic_counters.remove(&RelicId::IGotAGuy);
     }
-    run.apply_gold_reward(refund as i32, bus);
+    run.apply_yen_reward(refund as i32, bus);
     *run.relic_counters.entry(RelicId::Bonfire).or_insert(0) += 1;
     if run.relics.has(RelicId::Bonfire) {
         run.relic_activations.push(RelicId::Bonfire);
@@ -361,7 +336,7 @@ fn bot_score_context_base<'a>(
             ),
         },
         economy: ScoreEconomyBundle {
-            gold: run.gold,
+            yen: run.yen,
             total_score: run.total_score_earned,
         },
         structure: None,
@@ -405,16 +380,16 @@ struct PlayRank {
     tile_count: usize,
 }
 
-/// Convert immediate gold (Gilded, flowers, etc.) into shop-comparable score units.
+/// Convert immediate yen (Gilded, flowers, etc.) into shop-comparable score units.
 /// Uses the upcoming blind's chip target vs its flat clear payout as the exchange rate.
-fn shop_payoff_units(run: &RunState, score: u64, gold: i32) -> i64 {
+fn shop_payoff_units(run: &RunState, score: u64, yen: i32) -> i64 {
     let score_part = score as i64;
-    if gold <= 0 {
+    if yen <= 0 {
         return score_part;
     }
     let target = run.target_score.max(1) as i64;
-    let clear_gold = run.chamber.clear_reward().max(1) as i64;
-    score_part + gold as i64 * target / clear_gold
+    let clear_yen = run.chamber.clear_reward().max(1) as i64;
+    score_part + yen as i64 * target / clear_yen
 }
 
 /// Best play from an explicit candidate mask list (used by [`best_play_in_hand`] and benches).
@@ -455,7 +430,7 @@ fn evaluate_play_masks_payoff(
         });
         let breakdown =
             score_sets_with_original(&merged_tiles, &merged_sets, &ctx, &run.round_rules, &tiles);
-        if breakdown.total == 0 && breakdown.flower_gold <= 0 {
+        if breakdown.total == 0 && breakdown.flower_yen <= 0 {
             continue;
         }
         let rank = PlayRank {
@@ -464,16 +439,16 @@ fn evaluate_play_masks_payoff(
             tile_count: scoring_tiles.len(),
         };
         let indices = indices_from_play_mask(n, mask);
-        let gold = breakdown.flower_gold;
+        let yen = breakdown.flower_yen;
         if best
             .as_ref()
             .map(|(best_rank, _, _)| rank > *best_rank)
             .unwrap_or(true)
         {
-            best = Some((rank, gold, indices));
+            best = Some((rank, yen, indices));
         }
     }
-    best.map(|(rank, gold, indices)| (rank.score, gold, indices))
+    best.map(|(rank, yen, indices)| (rank.score, yen, indices))
 }
 
 pub(crate) fn evaluate_play_masks(
@@ -525,7 +500,7 @@ pub(crate) fn top_k_plays_in_hand(
         });
         let breakdown =
             score_sets_with_original(&merged_tiles, &merged_sets, &ctx, &run.round_rules, &tiles);
-        if breakdown.total == 0 && breakdown.flower_gold <= 0 {
+        if breakdown.total == 0 && breakdown.flower_yen <= 0 {
             continue;
         }
         let rank = PlayRank {
@@ -616,7 +591,7 @@ pub(crate) fn build_bot_scoring_action(
     tiles: Option<String>,
     breakdown: Option<&ScoreBreakdown>,
     yaku_levels_before: &YakuLevels,
-    gold_before: i32,
+    yen_before: i32,
     golden_engine_active: bool,
 ) -> BotScoringAction {
     let mut action = BotScoringAction {
@@ -627,9 +602,9 @@ pub(crate) fn build_bot_scoring_action(
         yaku_points: None,
         relic_points: None,
         other_points: None,
-        gold_held: Some(gold_before),
+        yen_held: Some(yen_before),
         golden_engine_mult_bonus: golden_engine_active
-            .then_some(golden_engine_mult_bonus(gold_before)),
+            .then_some(golden_engine_mult_bonus(yen_before)),
         yaku: Vec::new(),
         yaku_steps: Vec::new(),
         relic_steps: Vec::new(),
@@ -658,7 +633,7 @@ pub(crate) fn build_bot_scoring_action(
     for step in &breakdown.steps {
         let delta = step.running_total.saturating_sub(prev_total);
         prev_total = step.running_total;
-        if matches!(step.kind, StepKind::Final | StepKind::Gold) {
+        if matches!(step.kind, StepKind::Final | StepKind::Yen) {
             continue;
         }
         if let Some(relic_name) = relic_analytics::match_step_source_to_relic(&step.source) {
@@ -776,408 +751,6 @@ fn best_play_in_hand(
     evaluate_play_masks(run, hand, relics_override, yaku_levels_override, &masks)
 }
 
-#[derive(Clone, Copy)]
-struct IndexedTile {
-    hand_index: usize,
-    tile: Tile,
-}
-
-fn enumerate_candidate_play_masks(hand: &[Tile], rules: &[RuleModifier]) -> Vec<u32> {
-    let mut regular = Vec::with_capacity(hand.len());
-    let mut flowers = Vec::new();
-    for (hand_index, &tile) in hand.iter().enumerate() {
-        let indexed = IndexedTile { hand_index, tile };
-        if tile.is_flower() {
-            flowers.push(indexed);
-        } else {
-            regular.push(indexed);
-        }
-    }
-    regular.sort_by_key(|it| it.tile);
-    flowers.sort_by_key(|it| it.tile);
-
-    let subset_rules = SubsetRules {
-        allow_wrap: rules.contains(&RuleModifier::SequenceWrap),
-        no_sequences: rules.contains(&RuleModifier::NoSequences),
-        require_honor: rules.contains(&RuleModifier::RequireHonor),
-        must_play_five: rules.contains(&RuleModifier::MustPlayFive),
-        no_flower_wildcards: rules.contains(&RuleModifier::NoFlowerWildcards),
-    };
-
-    let mut masks: rustc_hash::FxHashSet<u32> = rustc_hash::FxHashSet::default();
-    enumerate_regular_subsets(&regular, &flowers, 0, subset_rules, 0, &mut masks);
-    push_kokushi_play_masks(hand, rules, &mut masks);
-    let mut out: Vec<u32> = masks.into_iter().collect();
-    out.sort_unstable();
-    out
-}
-
-/// Advance `pos` (length k, strictly increasing) to the next k-combination of indices `0..n`.
-/// Returns `false` when `pos` already was the last combination.
-fn next_combination_in_range(pos: &mut [usize], n: usize) -> bool {
-    let k = pos.len();
-    if k == 0 || k > n {
-        return false;
-    }
-    for i in (0..k).rev() {
-        let upper = n - k + i;
-        if pos[i] < upper {
-            pos[i] += 1;
-            for j in i + 1..k {
-                pos[j] = pos[j - 1] + 1;
-            }
-            return true;
-        }
-    }
-    false
-}
-
-/// Kokushi Musō uses twelve [`MeldKind::Single`]s and one pair — the meld-based enumerator
-/// never selects singletons, so it would miss every Kokushi win. Add every 14-tile orphan
-/// subset that [`validate_selection_with_rules`] accepts as Kokushi (or another valid hand).
-fn push_kokushi_play_masks(
-    hand: &[Tile],
-    rules: &[RuleModifier],
-    out: &mut rustc_hash::FxHashSet<u32>,
-) {
-    if rules.contains(&RuleModifier::MustPlayFive) {
-        return;
-    }
-    let pool: Vec<usize> = hand
-        .iter()
-        .enumerate()
-        .filter(|(_, t)| !t.is_flower() && t.is_kokushi_orphan())
-        .map(|(i, _)| i)
-        .collect();
-    let olen = pool.len();
-    if olen < 14 {
-        return;
-    }
-    let mut pos: Vec<usize> = (0..14).collect();
-    loop {
-        let mask: u32 = pos.iter().fold(0u32, |acc, &pi| acc | (1u32 << pool[pi]));
-        let tiles: Vec<Tile> = pos.iter().map(|&pi| hand[pool[pi]]).collect();
-        if validate_selection_with_rules(&tiles, rules).is_some() {
-            out.insert(mask);
-        }
-        if !next_combination_in_range(&mut pos, olen) {
-            break;
-        }
-    }
-}
-
-/// Active rule modifiers for `enumerate_regular_subsets`: captures the
-/// boolean flags that shape which plays are legal so the recursion doesn't
-/// thread them as separate params.
-#[derive(Clone, Copy)]
-struct SubsetRules {
-    allow_wrap: bool,
-    no_sequences: bool,
-    require_honor: bool,
-    must_play_five: bool,
-    no_flower_wildcards: bool,
-}
-
-fn enumerate_regular_subsets(
-    remaining: &[IndexedTile],
-    flowers: &[IndexedTile],
-    current_mask: u32,
-    rules: SubsetRules,
-    current_tile_count: usize,
-    out: &mut rustc_hash::FxHashSet<u32>,
-) {
-    let SubsetRules {
-        allow_wrap,
-        no_sequences,
-        require_honor,
-        must_play_five,
-        no_flower_wildcards,
-    } = rules;
-    if current_tile_count > 14 || (must_play_five && current_tile_count > 5) {
-        return;
-    }
-
-    if remaining.is_empty() {
-        emit_leaf_masks(flowers, current_mask, current_tile_count, rules, out);
-        return;
-    }
-
-    let first = remaining[0];
-
-    // Skip this tile entirely; it won't be part of the scored selection.
-    enumerate_regular_subsets(
-        &remaining[1..],
-        flowers,
-        current_mask,
-        rules,
-        current_tile_count,
-        out,
-    );
-
-    if remaining.len() >= 2
-        && same_face(first.tile, remaining[1].tile)
-        && (!require_honor || tiles_have_honor(&[first.tile, remaining[1].tile]))
-    {
-        enumerate_regular_subsets(
-            &remaining[2..],
-            flowers,
-            current_mask | (1 << first.hand_index) | (1 << remaining[1].hand_index),
-            rules,
-            current_tile_count + 2,
-            out,
-        );
-    }
-
-    if remaining.len() >= 3
-        && same_face(first.tile, remaining[1].tile)
-        && same_face(first.tile, remaining[2].tile)
-        && (!require_honor || tiles_have_honor(&[first.tile, remaining[1].tile, remaining[2].tile]))
-    {
-        enumerate_regular_subsets(
-            &remaining[3..],
-            flowers,
-            current_mask
-                | (1 << first.hand_index)
-                | (1 << remaining[1].hand_index)
-                | (1 << remaining[2].hand_index),
-            rules,
-            current_tile_count + 3,
-            out,
-        );
-    }
-
-    if remaining.len() >= 4
-        && same_face(first.tile, remaining[1].tile)
-        && same_face(first.tile, remaining[2].tile)
-        && same_face(first.tile, remaining[3].tile)
-        && (!require_honor
-            || tiles_have_honor(&[
-                first.tile,
-                remaining[1].tile,
-                remaining[2].tile,
-                remaining[3].tile,
-            ]))
-    {
-        enumerate_regular_subsets(
-            &remaining[4..],
-            flowers,
-            current_mask
-                | (1 << first.hand_index)
-                | (1 << remaining[1].hand_index)
-                | (1 << remaining[2].hand_index)
-                | (1 << remaining[3].hand_index),
-            rules,
-            current_tile_count + 4,
-            out,
-        );
-    }
-
-    let can_use_flower_wildcard = !flowers.is_empty() && !no_flower_wildcards;
-    if can_use_flower_wildcard
-        && remaining.len() >= 2
-        && same_face(first.tile, remaining[1].tile)
-        && (!require_honor || tiles_have_honor(&[first.tile, remaining[1].tile]))
-    {
-        for (flower_idx, flower) in flowers.iter().copied().enumerate() {
-            enumerate_regular_subsets(
-                &remaining[2..],
-                &remove_flower(flowers, flower_idx),
-                current_mask
-                    | (1 << first.hand_index)
-                    | (1 << remaining[1].hand_index)
-                    | (1 << flower.hand_index),
-                rules,
-                current_tile_count + 3,
-                out,
-            );
-        }
-    }
-
-    if !no_sequences && first.tile.is_number_tile() && !require_honor {
-        for seq in sequence_candidates(remaining, allow_wrap, can_use_flower_wildcard, first) {
-            let mut next_mask = current_mask | (1 << first.hand_index);
-            let mut remove = vec![0usize];
-            for idx in seq.regular_indices {
-                next_mask |= 1 << remaining[idx].hand_index;
-                remove.push(idx);
-            }
-            let rest = remove_indices(remaining, &remove);
-            if seq.uses_flower {
-                for (flower_idx, flower) in flowers.iter().copied().enumerate() {
-                    enumerate_regular_subsets(
-                        &rest,
-                        &remove_flower(flowers, flower_idx),
-                        next_mask | (1 << flower.hand_index),
-                        rules,
-                        current_tile_count + 3,
-                        out,
-                    );
-                }
-            } else {
-                enumerate_regular_subsets(
-                    &rest,
-                    flowers,
-                    next_mask,
-                    rules,
-                    current_tile_count + 3,
-                    out,
-                );
-            }
-        }
-    }
-}
-
-fn emit_leaf_masks(
-    flowers: &[IndexedTile],
-    current_mask: u32,
-    current_tile_count: usize,
-    rules: SubsetRules,
-    out: &mut rustc_hash::FxHashSet<u32>,
-) {
-    let must_play_five = rules.must_play_five;
-    let round_rules = if rules.no_flower_wildcards {
-        &[RuleModifier::NoFlowerWildcards][..]
-    } else {
-        &[][..]
-    };
-    for extra_mask in flower_meld_partition_masks(flowers, round_rules) {
-        let total_mask = current_mask | extra_mask;
-        let total_count = total_mask.count_ones() as usize;
-        if total_count == 0 {
-            continue;
-        }
-        if must_play_five {
-            if total_count == 5 {
-                out.insert(total_mask);
-            }
-        } else if total_count >= current_tile_count {
-            out.insert(total_mask);
-        }
-    }
-}
-
-fn flower_meld_partition_masks(flowers: &[IndexedTile], rules: &[RuleModifier]) -> Vec<u32> {
-    let indexed: Vec<(usize, u32)> = flowers.iter().map(|f| (f.hand_index, f.tile.id)).collect();
-    crate::core::hand::decomposition::flower_meld_partition_masks(&indexed, rules)
-}
-
-fn remove_flower(flowers: &[IndexedTile], remove_idx: usize) -> Vec<IndexedTile> {
-    flowers
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, flower)| (idx != remove_idx).then_some(*flower))
-        .collect()
-}
-
-fn same_face(a: Tile, b: Tile) -> bool {
-    a.suit == b.suit && a.rank == b.rank
-}
-
-fn tiles_have_honor(tiles: &[Tile]) -> bool {
-    tiles
-        .iter()
-        .any(|t| matches!(t.suit, Suit::Wind | Suit::Dragon))
-}
-
-fn remove_indices(remaining: &[IndexedTile], remove: &[usize]) -> Vec<IndexedTile> {
-    let mut remove_flags = vec![false; remaining.len()];
-    for &idx in remove {
-        remove_flags[idx] = true;
-    }
-    remaining
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, tile)| (!remove_flags[idx]).then_some(*tile))
-        .collect()
-}
-
-#[derive(Clone, Copy)]
-struct SequenceCandidate {
-    regular_indices: [usize; 2],
-    uses_flower: bool,
-}
-
-fn sequence_candidates(
-    remaining: &[IndexedTile],
-    allow_wrap: bool,
-    can_use_flower: bool,
-    first: IndexedTile,
-) -> Vec<SequenceCandidate> {
-    let mut out = Vec::new();
-    push_sequence_candidate(
-        remaining,
-        first.tile.suit,
-        [first.tile.rank + 1, first.tile.rank + 2],
-        false,
-        &mut out,
-    );
-    if can_use_flower {
-        push_sequence_candidate(
-            remaining,
-            first.tile.suit,
-            [first.tile.rank + 1, first.tile.rank + 2],
-            true,
-            &mut out,
-        );
-    }
-
-    if allow_wrap {
-        for ranks in wrap_sequence_ranks(first.tile.rank) {
-            push_sequence_candidate(remaining, first.tile.suit, *ranks, false, &mut out);
-            if can_use_flower {
-                push_sequence_candidate(remaining, first.tile.suit, *ranks, true, &mut out);
-            }
-        }
-    }
-
-    out
-}
-
-fn push_sequence_candidate(
-    remaining: &[IndexedTile],
-    suit: Suit,
-    ranks: [u8; 2],
-    allow_one_missing: bool,
-    out: &mut Vec<SequenceCandidate>,
-) {
-    let mut found = Vec::new();
-    for &rank in &ranks {
-        let next = remaining
-            .iter()
-            .enumerate()
-            .skip(1)
-            .find_map(|(idx, tile)| {
-                (tile.tile.suit == suit && tile.tile.rank == rank).then_some(idx)
-            });
-        if let Some(idx) = next {
-            found.push(idx);
-        } else if !allow_one_missing {
-            return;
-        }
-    }
-
-    match found.len() {
-        2 => out.push(SequenceCandidate {
-            regular_indices: [found[0], found[1]],
-            uses_flower: false,
-        }),
-        1 if allow_one_missing => out.push(SequenceCandidate {
-            regular_indices: [found[0], found[0]],
-            uses_flower: true,
-        }),
-        _ => {}
-    }
-}
-
-fn wrap_sequence_ranks(rank: u8) -> &'static [[u8; 2]] {
-    match rank {
-        1 => &[[9, 2], [8, 9]],
-        2 => &[[9, 1]],
-        8 => &[[9, 1]],
-        9 => &[[8, 1], [1, 2]],
-        _ => &[],
-    }
-}
 
 /// Search for the highest-scoring playable selection in the current hand.
 /// Returns `(score, indices)`, or `None` if no positive-scoring play exists.
@@ -1324,7 +897,7 @@ fn drain_post_action_bus(
                 payout,
                 reached_target: true,
             } => {
-                run.apply_gold_reward(payout.total as i32, Some(bus));
+                run.apply_yen_reward(payout.total as i32, Some(bus));
             }
             GameEvent::RoundComplete {
                 reached_target: false,
@@ -1411,14 +984,14 @@ fn play_chamber(
 
         bot_log!(
             log,
-            "    turn {:>2}: score {}/{} | plays {} | discards {} | hand {} | gold {}",
+            "    turn {:>2}: score {}/{} | plays {} | discards {} | hand {} | yen {}",
             turn,
             run.round_score,
             run.target_score,
             run.plays_remaining,
             run.discards_remaining,
             run.hand().len(),
-            run.gold
+            run.yen
         );
 
         if strategy.chamber_planner_depth == 0 && use_bot_consumables(run, stats, log) {
@@ -1454,7 +1027,7 @@ fn play_chamber(
         };
         if trigger_preview > 0 && (best_score == 0 || trigger_preview >= best_score) {
             let score_before_structure = run.round_score;
-            let gold_before = run.gold;
+            let yen_before = run.yen;
             let yaku_levels_before = run.yaku_levels.clone();
             let golden_engine_active = run.relics.has(RelicId::GoldenEngine);
             let cash_in_tiles = run.structure_tiles().to_vec();
@@ -1483,7 +1056,7 @@ fn play_chamber(
                     format_meld_groups(&cash_in_tiles, &cash_in_sets),
                     run.last_breakdown.as_ref(),
                     &yaku_levels_before,
-                    gold_before,
+                    yen_before,
                     golden_engine_active,
                 ));
             }
@@ -1557,7 +1130,7 @@ fn play_chamber(
             if let Some(breakdown) = score_breakdown_for_play_indices(run, &hand_before, &indices) {
                 relic_analytics::record_score_breakdown(stats, &breakdown);
             }
-            let gold_before = run.gold;
+            let yen_before = run.yen;
             let yaku_levels_before = run.yaku_levels.clone();
             let golden_engine_active = run.relics.has(RelicId::GoldenEngine);
             let bank_before_commit = run.structure_tiles().to_vec();
@@ -1616,7 +1189,7 @@ fn play_chamber(
                     tiles,
                     run.last_breakdown.as_ref(),
                     &yaku_levels_before,
-                    gold_before,
+                    yen_before,
                     golden_engine_active,
                 ));
             }
@@ -1996,13 +1569,13 @@ mod tests {
     }
 
     #[test]
-    fn gilded_talisman_shop_value_counts_gold_from_scored_melds() {
+    fn gilded_talisman_shop_value_counts_yen_from_scored_melds() {
         let run = scoring_test_run();
         let pearl = talisman_marginal_value(&run, TalismanKind::Pearl);
         let gilded = talisman_marginal_value(&run, TalismanKind::Gilded);
         assert!(
             gilded > 0,
-            "gilded should contribute shop value via gold (pearl={pearl}, gilded={gilded})"
+            "gilded should contribute shop value via yen (pearl={pearl}, gilded={gilded})"
         );
     }
 
@@ -2128,7 +1701,7 @@ mod tests {
     fn proactive_sell_drops_low_hold_relic() {
         let mut run = scoring_test_run();
         run.relics.active = vec![RelicId::PairPower, RelicId::GreenLuck];
-        run.gold = 0;
+        run.yen = 0;
         let base = ShopMarginalBase::new(&run);
         let hold_pair = relic_hold_value_with_base(&run, 0, &base);
         let hold_luck = relic_hold_value_with_base(&run, 1, &base);
@@ -2147,7 +1720,7 @@ mod tests {
         assert_eq!(sold, 1);
         assert_eq!(stats.relics_sold, 1);
         assert_eq!(run.relics.active, vec![RelicId::PairPower]);
-        assert!(run.gold > 0);
+        assert!(run.yen > 0);
     }
 }
 
@@ -2212,8 +1785,8 @@ fn best_play_score_for_hand(
         .unwrap_or(0)
 }
 
-/// Best-play value for shop/talisman estimates: blind chips plus gold converted at
-/// target÷clear_reward so Gilded and other gold sources compete with score upgrades.
+/// Best-play value for shop/talisman estimates: blind chips plus yen converted at
+/// target÷clear_reward so Gilded and other yen sources compete with score upgrades.
 fn best_play_shop_value_for_hand(
     run: &RunState,
     hand: &[Tile],
@@ -2223,7 +1796,7 @@ fn best_play_shop_value_for_hand(
     let commit_rules = run.validation_rules_for_structure_commits();
     let masks = enumerate_candidate_play_masks(hand, &commit_rules);
     evaluate_play_masks_payoff(run, hand, relics_override, yaku_levels_override, &masks)
-        .map(|(score, gold, _)| shop_payoff_units(run, score, gold))
+        .map(|(score, yen, _)| shop_payoff_units(run, score, yen))
         .unwrap_or(0)
 }
 
@@ -2450,11 +2023,11 @@ fn relic_offer_affordable(
     if let Some(idx) = sell_index {
         let owned = run.relics.active[idx];
         let refund = relic_sell_price_live(owned, &run.relic_counters) as i32;
-        run.gold + refund >= price
+        run.yen + refund >= price
     } else if run.relics.is_full() && !relic_can_expand_inventory(candidate) {
         false
     } else {
-        run.gold >= price
+        run.yen >= price
     }
 }
 
@@ -2800,12 +2373,12 @@ fn visit_shop(
     bus: &mut crate::game::event_bus::EventBus,
 ) -> ShopVisitOutcome {
     // Consume tag-granted shop modifiers (headless analogue of ShopScene::new).
-    let extra_relics: usize = if run.tag_rich_stock { 2 } else { 0 };
-    let patron_gift = run.tag_patron_gift;
+    let extra_relics: usize = (run.tag_rich_stock as usize * 2).max(run.tag_patron_gift as usize);
+    let patron_gifts = run.tag_patron_gift;
     // Free reroll is a no-op for the bot (it doesn't reroll).
-    run.tag_free_reroll = false;
-    run.tag_patron_gift = false;
-    run.tag_rich_stock = false;
+    run.tag_free_reroll = 0;
+    run.tag_patron_gift = 0;
+    run.tag_rich_stock = 0;
 
     let defs = all_relic_defs();
     let pool_x = run.relic_shop_pool_extinction();
@@ -2816,42 +2389,11 @@ fn visit_shop(
         .collect();
     pool.shuffle(&mut rand::rng());
     let mut rng = rand::rng();
-    const MAX_RIBBONS: usize = 4;
-    const MAX_RELICS: usize = 6;
-    let mut n_relics = rng.random_range(0..=MAX_RELICS) + extra_relics;
-    let mut n_zodiacs = rng.random_range(1..=MAX_RIBBONS);
-    let mut n_talismans = rng.random_range(1..=MAX_RIBBONS);
-    while n_zodiacs + n_talismans > MAX_RIBBONS {
-        if n_talismans >= n_zodiacs {
-            n_talismans -= 1;
-        } else {
-            n_zodiacs -= 1;
-        }
-    }
-    while n_relics + n_zodiacs + n_talismans < 2 {
-        let relics_room = n_relics < MAX_RELICS;
-        let ribbons_room = n_zodiacs + n_talismans < MAX_RIBBONS;
-        let zodiacs_room = ribbons_room && n_zodiacs < MAX_RIBBONS;
-        let talismans_room = ribbons_room && n_talismans < MAX_RIBBONS;
-        let mut choices = Vec::with_capacity(3);
-        if relics_room {
-            choices.push(0u8);
-        }
-        if zodiacs_room {
-            choices.push(1u8);
-        }
-        if talismans_room {
-            choices.push(2u8);
-        }
-        if choices.is_empty() {
-            break;
-        }
-        match choices[rng.random_range(0..choices.len())] {
-            0 => n_relics += 1,
-            1 => n_zodiacs += 1,
-            _ => n_talismans += 1,
-        }
-    }
+    let crate::game::run::ShopOfferCounts {
+        n_relics,
+        n_zodiacs,
+        n_talismans,
+    } = roll_shop_offer_counts(extra_relics, KIOSK_RELIC_SLOTS, &mut rng);
 
     let mut zodiac_pool = run.zodiac_spawn_pool();
     zodiac_pool.shuffle(&mut rng);
@@ -2886,17 +2428,17 @@ fn visit_shop(
         }
     }
 
-    let mut free_relic = patron_gift;
+    let mut free_relics = patron_gifts;
     bot_log!(
         log,
-        "    shop: gold {} | relic slots {}/{} | consumables {}/{} | offerings {:?}{}",
-        run.gold,
+        "    shop: yen {} | relic slots {}/{} | consumables {}/{} | offerings {:?}{}",
+        run.yen,
         run.relics.active.len(),
         run.relics.max_slots,
         run.consumables.items.len(),
         run.consumables.capacity,
         shop,
-        if free_relic {
+        if free_relics > 0 {
             " | patron gift active"
         } else {
             ""
@@ -2924,7 +2466,7 @@ fn visit_shop(
         for (i, offer) in shop.iter().copied().enumerate() {
             let price = match offer {
                 ShopOffer::Relic(id) => {
-                    if free_relic {
+                    if free_relics > 0 {
                         0
                     } else {
                         run.mode.scale_shop_price(relic_shop_price(id, &run.relics))
@@ -2952,13 +2494,13 @@ fn visit_shop(
                     mv
                 }
                 ShopOffer::Zodiac(zodiac) => {
-                    if price_i32 > run.gold {
+                    if price_i32 > run.yen {
                         continue;
                     }
                     zodiac_marginal_value_with_base(run, zodiac, &shop_base)
                 }
                 ShopOffer::Talisman(kind) => {
-                    if price_i32 > run.gold {
+                    if price_i32 > run.yen {
                         continue;
                     }
                     if run.consumables.is_full()
@@ -2972,7 +2514,7 @@ fn visit_shop(
                     }
                 }
                 ShopOffer::Pack(kind) => {
-                    if price_i32 > run.gold {
+                    if price_i32 > run.yen {
                         continue;
                     }
                     pack_marginal_value(run, kind)
@@ -3005,12 +2547,14 @@ fn visit_shop(
         let offer = shop.remove(idx);
         match offer {
             ShopOffer::Relic(id) => {
-                let price = if free_relic {
+                let price = if free_relics > 0 {
                     0
                 } else {
                     run.mode.scale_shop_price(relic_shop_price(id, &run.relics))
                 };
-                free_relic = false;
+                if free_relics > 0 {
+                    free_relics -= 1;
+                }
                 if let Some(sell_idx) = sell_index {
                     let sold = run.relics.active[sell_idx];
                     let hold = relic_hold_value_with_base(run, sell_idx, &shop_base);
@@ -3025,7 +2569,7 @@ fn visit_shop(
                         );
                     }
                 }
-                run.apply_gold_delta(-(price as i32), Some(bus));
+                run.apply_yen_delta(-(price as i32), Some(bus));
                 acquire_relic(run, id);
                 stats.relics_bought += 1;
                 let rname = relic_display_name(id);
@@ -3036,14 +2580,14 @@ fn visit_shop(
                 } else {
                     *stats.relics_picked_shop_late.entry(rname).or_insert(0) += 1;
                 }
-                stats.gold_spent += price;
+                stats.yen_spent += price;
                 bot_log!(
                     log,
-                    "    shop: bought {:?} for {} (marginal value {}, gold now {})",
+                    "    shop: bought {:?} for {} (marginal value {}, yen now {})",
                     id,
                     price,
                     marginal_value,
-                    run.gold
+                    run.yen
                 );
             }
             ShopOffer::Zodiac(zodiac) => {
@@ -3051,42 +2595,42 @@ fn visit_shop(
                     ZodiacKind::shop_price(),
                     &run.relics,
                 ));
-                run.apply_gold_delta(-(price as i32), Some(bus));
+                run.apply_yen_delta(-(price as i32), Some(bus));
                 let new_level = run.yaku_levels.level_up_for_zodiac(zodiac);
-                stats.gold_spent += price;
+                stats.yen_spent += price;
                 *stats.zodiacs_picked.entry(zodiac.name()).or_insert(0) += 1;
                 bot_log!(
                     log,
-                    "    shop: bought zodiac {:?} for {} (marginal value {}, level {}, gold now {})",
+                    "    shop: bought zodiac {:?} for {} (marginal value {}, level {}, yen now {})",
                     zodiac,
                     price,
                     marginal_value,
                     new_level,
-                    run.gold
+                    run.yen
                 );
             }
             ShopOffer::Talisman(kind) => {
                 let price = run
                     .mode
                     .scale_shop_price(apply_merchants_eye_discount(kind.shop_price(), &run.relics));
-                run.apply_gold_delta(-(price as i32), Some(bus));
+                run.apply_yen_delta(-(price as i32), Some(bus));
                 run.consumables.items.push(Consumable::Talisman(kind));
-                stats.gold_spent += price;
+                stats.yen_spent += price;
                 *stats.talismans_picked.entry(kind.name()).or_insert(0) += 1;
                 bot_log!(
                     log,
-                    "    shop: bought talisman {:?} for {} (marginal value {}, gold now {})",
+                    "    shop: bought talisman {:?} for {} (marginal value {}, yen now {})",
                     kind,
                     price,
                     marginal_value,
-                    run.gold
+                    run.yen
                 );
             }
             ShopOffer::Pack(kind) => {
                 let price = run
                     .mode
                     .scale_shop_price(apply_merchants_eye_discount(kind.shop_price(), &run.relics));
-                run.apply_gold_delta(-(price as i32), Some(bus));
+                run.apply_yen_delta(-(price as i32), Some(bus));
                 // Mirror the real shop: pre-stamp any enhancement from the
                 // pack kind onto the tiles' IDs, then append the pack. The
                 // wall gets rebuilt with these packs at the start of every
@@ -3100,15 +2644,15 @@ fn visit_shop(
                     }
                 }
                 run.tile_packs.push(kind);
-                stats.gold_spent += price;
+                stats.yen_spent += price;
                 *stats.packs_picked.entry(kind.name()).or_insert(0) += 1;
                 bot_log!(
                     log,
-                    "    shop: bought pack {:?} for {} (marginal value {}, gold now {})",
+                    "    shop: bought pack {:?} for {} (marginal value {}, yen now {})",
                     kind,
                     price,
                     marginal_value,
-                    run.gold
+                    run.yen
                 );
             }
         }
@@ -3117,8 +2661,8 @@ fn visit_shop(
 }
 
 /// Decide whether to skip the upcoming non-Boss blind. We skip when the bot can
-/// reasonably expect to clear the blind anyway *and* it can't, so the gold reward
-/// from skipping is more valuable than the gold reward from clearing. Specifically:
+/// reasonably expect to clear the blind anyway *and* it can't, so the yen reward
+/// from skipping is more valuable than the yen reward from clearing. Specifically:
 /// the bot's projected total score (best play × plays_remaining) must comfortably
 /// exceed the blind's target so we'd be wasting plays clearing a trivially-easy
 /// blind. Boss blinds can never be skipped.
@@ -3177,12 +2721,12 @@ fn play_run_with_options(
 
     bot_log!(
         log,
-        "== bot run{} start: ante {} | blind {} | target {} | gold {} ==",
+        "== bot run{} start: ante {} | blind {} | target {} | yen {} ==",
         run_number.map(|n| format!(" #{n}")).unwrap_or_default(),
         run.wing,
         chamber_log_label(&run, run.upcoming_chamber),
         run.target_score,
-        run.gold
+        run.yen
     );
 
     loop {
@@ -3210,26 +2754,26 @@ fn play_run_with_options(
         let blind = run.upcoming_chamber;
         bot_log!(
             log,
-            "  ante {} | blind {} | target {} | gold {} | relics {}",
+            "  ante {} | blind {} | target {} | yen {} | relics {}",
             run.wing,
             chamber_log_label(&run, blind),
             run.target_score,
-            run.gold,
+            run.yen,
             run.relics.active.len()
         );
 
-        // Skip strategy: bank gold on Small/Big when projected score comfortably
-        // overshoots the target. Tag rewards replace flat gold — apply them
+        // Skip strategy: bank yen on Small/Big when projected score comfortably
+        // overshoots the target. Tag rewards replace flat yen — apply them
         // the same way the pick-blind scene does.
         if should_skip_chamber(&run, blind, &strategy) {
             bot_log!(log, "    action: skip {}", blind.name());
             if let Some(tag) = run.tag_for_chamber(blind) {
-                let gold_before = run.gold;
+                let yen_before = run.yen;
                 run.apply_tag(tag, Some(&mut bus));
-                let gold_after = run.gold;
-                let realized_gold = gold_after.saturating_sub(gold_before).max(0) as u32;
-                stats.gold_from_skip_tags += realized_gold;
-                stats.skip_tag_gold_value += tag.gold_value();
+                let yen_after = run.yen;
+                let realized_yen = yen_after.saturating_sub(yen_before).max(0) as u32;
+                stats.yen_from_skip_tags += realized_yen;
+                stats.skip_tag_yen_value += tag.yen_value();
                 *stats.skipped_tags.entry(tag.name()).or_insert(0) += 1;
                 for (zodiac, _, _) in &run.pending_zodiac_celebrations {
                     *stats.zodiacs_picked.entry(zodiac.name()).or_insert(0) += 1;
@@ -3283,9 +2827,9 @@ fn play_run_with_options(
                     .iter()
                     .map(|&id| relic_display_name(id).to_string())
                     .collect(),
-                gold_held: Some(run.gold),
+                yen_held: Some(run.yen),
                 golden_engine_mult_bonus: golden_engine_active
-                    .then_some(golden_engine_mult_bonus(run.gold)),
+                    .then_some(golden_engine_mult_bonus(run.yen)),
                 relic_state: peak_chamber_relic_state(&run),
                 scoring_actions: chamber_scoring,
             });
@@ -3307,7 +2851,7 @@ fn play_run_with_options(
                 Some(chamber_turns),
                 started,
             );
-            stats.final_gold = run.gold;
+            stats.final_yen = run.yen;
             bot_log!(
                 log,
                 "== bot run end: wall-clock timeout during {} ==",
@@ -3316,13 +2860,13 @@ fn play_run_with_options(
             break;
         }
         if outcome == PlayChamberOutcome::LostRun {
-            stats.final_gold = run.gold;
+            stats.final_yen = run.yen;
             bot_log!(
                 log,
-                "== bot run end: died on ante {} {} with gold {} ==",
+                "== bot run end: died on ante {} {} with yen {} ==",
                 run.wing,
                 chamber_log_label(&run, blind),
-                run.gold
+                run.yen
             );
             break;
         }
@@ -3330,8 +2874,8 @@ fn play_run_with_options(
             stats.second_wind_forfeits += 1;
             bot_log!(
                 log,
-                "  second wind — forfeited blind; gold {} | next {:?}",
-                run.gold,
+                "  second wind — forfeited blind; yen {} | next {:?}",
+                run.yen,
                 run.upcoming_chamber
             );
             match visit_shop(
@@ -3352,7 +2896,7 @@ fn play_run_with_options(
                         None,
                         started,
                     );
-                    stats.final_gold = run.gold;
+                    stats.final_yen = run.yen;
                     break;
                 }
             }
@@ -3372,21 +2916,21 @@ fn play_run_with_options(
             stats.wings_cleared += 1;
         }
         let payout = clear_payout_breakdown(&run);
-        stats.gold_from_clears += payout.total;
-        stats.gold_from_clear_base += payout.base_reward;
-        stats.gold_from_unused_plays += payout.unused_play_bonus;
-        stats.gold_from_interest += payout.interest;
-        stats.gold_from_clear_relics += payout.relic_bonus;
-        stats.gold_clear_green_luck += payout.green_luck_bonus;
-        stats.gold_clear_gold_idol += payout.gold_idol_bonus;
-        stats.gold_clear_jade_abacus += payout.jade_abacus_bonus;
-        stats.gold_clear_patience += payout.patience_bonus;
+        stats.yen_from_clears += payout.total;
+        stats.yen_from_clear_base += payout.base_reward;
+        stats.yen_from_unused_plays += payout.unused_play_bonus;
+        stats.yen_from_interest += payout.interest;
+        stats.yen_from_clear_relics += payout.relic_bonus;
+        stats.yen_clear_green_luck += payout.green_luck_bonus;
+        stats.yen_clear_gold_idol += payout.gold_idol_bonus;
+        stats.yen_clear_jade_abacus += payout.jade_abacus_bonus;
+        stats.yen_clear_patience += payout.patience_bonus;
 
         bot_log!(
             log,
-            "  blind {} cleared; advancing with gold {} and total score {}",
+            "  blind {} cleared; advancing with yen {} and total score {}",
             chamber_log_label(&run, blind),
-            run.gold,
+            run.yen,
             stats.total_score
         );
 
@@ -3412,7 +2956,7 @@ fn play_run_with_options(
                     None,
                     started,
                 );
-                stats.final_gold = run.gold;
+                stats.final_yen = run.yen;
                 break;
             }
         }
@@ -3426,7 +2970,7 @@ fn play_run_with_options(
         .collect();
     stats.final_consumables = run.consumables.items.iter().map(|c| c.name()).collect();
     stats.final_yaku_levels = run.yaku_levels.clone();
-    stats.final_gold = run.gold;
+    stats.final_yen = run.yen;
     bot_log!(log, "== bot run stats: {:?} ==", stats);
     (run, stats)
 }

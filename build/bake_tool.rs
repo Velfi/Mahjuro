@@ -1,7 +1,38 @@
-//! Resolve or build the `mahjuro-bake` workspace binary for `build.rs` GPU bakes.
+//! Locate `mahjuro-bake` binaries for `build.rs` GPU bakes.
+//!
+//! Do not spawn nested `cargo build` from build scripts — the parent `cargo` already
+//! holds the target directory lock, so a child build deadlocks at `mahjuro(build)`.
+//! Build the bake tools once (any profile), then rebuild `mahjuro`:
+//! `cargo build -p mahjuro-headless --bin mahjuro-bake --features bake`
+//! `cargo build -p mahjuro-headless --bin mahjuro-bake-decal-atlases`
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
+
+pub fn find_decal_bake_exe(profile_dir: &Path) -> Option<PathBuf> {
+    #[cfg(windows)]
+    let names = ["mahjuro-bake-decal-atlases.exe"];
+    #[cfg(not(windows))]
+    let names = ["mahjuro-bake-decal-atlases"];
+
+    for name in names {
+        let p = profile_dir.join(name);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn require_decal_bake_exe(profile_dir: &Path) -> PathBuf {
+    find_decal_bake_exe(profile_dir).unwrap_or_else(|| {
+        panic!(
+            "mahjuro-bake-decal-atlases not found in {}; build it before the showcase decal bake \
+             (nested `cargo build` from build.rs deadlocks): \
+             `cargo build -p mahjuro-headless --bin mahjuro-bake-decal-atlases`",
+            profile_dir.display()
+        );
+    })
+}
 
 pub fn find_bake_exe(profile_dir: &Path) -> Option<PathBuf> {
     #[cfg(windows)]
@@ -18,27 +49,13 @@ pub fn find_bake_exe(profile_dir: &Path) -> Option<PathBuf> {
     None
 }
 
-/// `mahjuro-bake` is a separate workspace crate; build it when stale room data needs a GPU pass.
-pub fn ensure_bake_exe(repo: &Path, profile_dir: &Path) -> Option<PathBuf> {
-    if let Some(exe) = find_bake_exe(profile_dir) {
-        return Some(exe);
-    }
-    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| std::ffi::OsString::from("cargo"));
-    let status = Command::new(cargo)
-        .args(["build", "-p", "mahjuro-headless", "--bin", "mahjuro-bake", "--quiet"])
-        .current_dir(repo)
-        .status();
-    match status {
-        Ok(s) if s.success() => find_bake_exe(profile_dir),
-        Ok(s) => {
-            println!(
-                "cargo:warning=failed to build mahjuro-bake (exit {s}); offline room bake skipped"
-            );
-            None
-        }
-        Err(e) => {
-            println!("cargo:warning=failed to spawn `cargo build -p mahjuro-bake`: {e}");
-            None
-        }
-    }
+pub fn require_bake_exe(profile_dir: &Path) -> PathBuf {
+    find_bake_exe(profile_dir).unwrap_or_else(|| {
+        panic!(
+            "mahjuro-bake not found in {}; build it before room GPU bakes \
+             (nested `cargo build` from build.rs deadlocks): \
+             `cargo build -p mahjuro-headless --bin mahjuro-bake --features bake`",
+            profile_dir.display()
+        );
+    })
 }

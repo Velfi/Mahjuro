@@ -77,6 +77,17 @@ impl crate::App {
                 .is_some_and(|s| matches!(s, Scene::Showcase(s) if s.wants_orbit_input()))
     }
 
+    /// Standard storeroom visit (not tutorial/paused/transitioning away).
+    pub(crate) fn shop_storeroom_dwell_active(&self) -> bool {
+        if self.pending_scene.is_some() {
+            return false;
+        }
+        match &self.scene {
+            Scene::Shop(shop) => shop.counts_storeroom_dwell_time(),
+            _ => false,
+        }
+    }
+
     pub(crate) fn gameplay_relic_slot_at_cursor(&self, cursor: (f32, f32)) -> Option<usize> {
         if self.modal_overlay_active() || !matches!(self.scene, Scene::Gameplay(_)) {
             return None;

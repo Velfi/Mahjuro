@@ -10,8 +10,9 @@ use crate::render::draw_cmd::{Object3d, ShowcaseTilePlacement};
 use crate::render::river_mesh::{
     RIVER_TILE_FLOW_T_MAX, RIVER_TILE_FLOW_T_MIN, river_surface_local,
 };
-use crate::render::table_transform::{mat4_to_euler_xyz_rad, translate_rot_scale};
-use crate::render::world_space::{pixel_to_world, surface_anchor_from_world_xyz};
+use crate::render::table_transform::mat4_to_euler_xyz_rad;
+use crate::render::world_space::surface_anchor_from_world_xyz;
+pub(crate) use mahjuro_render::scene_glue::bowl_model_matrix;
 use crate::scenes::gameplay::GameplayScene;
 use crate::scenes::gameplay::glb_anchors;
 use glam::Vec3;
@@ -153,17 +154,6 @@ fn hand_slot_center(
     slot: usize,
 ) -> super::glb_anchors::HandWorldSlot {
     hand_world_slots[slot]
-}
-
-pub(crate) fn bowl_model_matrix(window_w: f32, window_h: f32, bowl: &Object3d) -> glam::Mat4 {
-    let center = pixel_to_world(
-        window_w,
-        window_h,
-        bowl.pos[0],
-        bowl.pos[1],
-        bowl.pos[2] + bowl.extents[1] * 0.5,
-    );
-    translate_rot_scale(center, bowl.rotation_matrix(), Vec3::from(bowl.extents))
 }
 
 fn river_surface_normal_world(model: glam::Mat4) -> Vec3 {
@@ -907,6 +897,7 @@ pub fn in_flight_placements(
 mod tests {
     use super::*;
     use crate::core::tile::{Suit, Tile};
+    use crate::render::world_space::pixel_to_world;
     use crate::render::draw_cmd::Object3dKind;
     use std::time::Instant;
 

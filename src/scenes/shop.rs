@@ -13,34 +13,11 @@ mod view;
 
 pub(crate) use self::view::render_shop_frame;
 
-use crate::render::draw_cmd::CameraParams;
 use crate::scenes::object3d_inspect::InspectDolly;
 
 pub(crate) use self::pack_celebration::PackCelebration;
-
-/// Perspective camera for tile-pack celebration overlays (not item-inspect orbit).
-///
-/// Authored hero framing on **−Y** (foil faces the camera), not [`view::shop_camera_base`].
-/// Pitch is shallower than the old table-style fallback (~58° FOV, target at origin) so the
-/// pack reads as a frontal product shot instead of a birds-eye on the lid.
-pub(crate) fn shop_celebration_camera(_w: f32, h: f32, _env_h: f32) -> CameraParams {
-    let cs = (h / 1080_f32).max(1e-6);
-    // ref_h: 1080 — eye / target in world units before `cs` scale.
-    const EYE_Y: f32 = -1780.0;
-    const EYE_Z: f32 = 620.0;
-    const TARGET_Y: f32 = 90.0;
-    const TARGET_Z: f32 = 150.0;
-    /// Wider than the storeroom table camera (58°) — less telephoto stretch on the tall pack.
-    const FOVY_DEG: f32 = 46.0;
-    CameraParams {
-        eye: [0.0, EYE_Y * cs, EYE_Z * cs],
-        target: [0.0, TARGET_Y * cs, TARGET_Z * cs],
-        up: [0.0, 0.0, 1.0],
-        fovy_deg: FOVY_DEG,
-        clip_near: None,
-        clip_far: None,
-    }
-}
+use mahjuro_render::draw_cmd::CameraParams;
+pub(crate) use mahjuro_render::scene_glue::shop_celebration_camera;
 
 pub(crate) fn sync_item_inspect_orbit_target(
     scene: &ShopScene,
@@ -60,7 +37,6 @@ pub(super) use self::pick_ids::{
     PICK_TILE_PACK_BASE,
 };
 
-use rand::RngExt;
 use rand::seq::SliceRandom;
 
 use std::time::Instant;
@@ -93,6 +69,8 @@ pub struct ShopScene {
     /// Current reroll cost — starts at `REROLL_BASE_COST` and increases by
     /// `REROLL_COST_INCREMENT` each time the player rerolls this shop visit.
     reroll_cost: u32,
+    /// Skip-tag free rerolls still owed this visit (consumed one at a time).
+    remaining_free_rerolls: u32,
     pause_menu: PauseMenu,
     /// Currently focused shop element. Starts on the first for-sale shelf item
     /// (or the leave bell when the shelf is empty). In cursor mode, hover follows
@@ -156,9 +134,6 @@ const SHOP_SELL_CONSUMABLE_BASE: u32 = 0x9600;
 const RELIC_GLOW_LIFETIME: std::time::Duration = std::time::Duration::from_millis(900);
 /// How much the reroll cost increases per use within a single shop visit.
 const REROLL_COST_INCREMENT: u32 = 5;
-
-/// Max for-sale relic slots on the kiosk (must match stock generation).
-const KIOSK_RELIC_SLOTS: usize = 3;
 
 /// Pitch relic cuboids toward the camera ([`crate::render::table_transform::rot_fixed_axes_deg`]).
 /// The relic front cap is at local +Y; pitching past 90° tilts it to face -Y
@@ -251,24 +226,46 @@ mod tests {
     #[test]
     fn patron_gift_shop_always_contains_a_free_relic() {
         let mut run = crate::game::run::RunState::new(GameMode::standard());
-        run.tag_patron_gift = true;
+        run.tag_patron_gift = 1;
 
         let shop = ShopScene::new(&mut run, &crate::core::progression::PlayerProgress::new());
 
         assert!(!shop.items.is_empty());
         assert!(shop.items.iter().any(|item| item.price == 0));
-        assert!(!run.tag_patron_gift);
+        assert_eq!(run.tag_patron_gift, 0);
+    }
+
+    #[test]
+    fn stacked_patron_gift_shop_zeros_multiple_relics() {
+        let mut run = crate::game::run::RunState::new(GameMode::standard());
+        run.tag_patron_gift = 2;
+
+        let shop = ShopScene::new(&mut run, &crate::core::progression::PlayerProgress::new());
+
+        assert!(shop.items.iter().filter(|item| item.price == 0).count() >= 2);
+        assert_eq!(run.tag_patron_gift, 0);
     }
 
     #[test]
     fn rich_stock_shop_starts_with_two_extra_relics() {
         let mut run = crate::game::run::RunState::new(GameMode::standard());
-        run.tag_rich_stock = true;
+        run.tag_rich_stock = 1;
 
         let shop = ShopScene::new(&mut run, &crate::core::progression::PlayerProgress::new());
 
         assert!(shop.items.len() >= 2);
-        assert!(!run.tag_rich_stock);
+        assert_eq!(run.tag_rich_stock, 0);
+    }
+
+    #[test]
+    fn stacked_rich_stock_shop_adds_four_extra_relics() {
+        let mut run = crate::game::run::RunState::new(GameMode::standard());
+        run.tag_rich_stock = 2;
+
+        let shop = ShopScene::new(&mut run, &crate::core::progression::PlayerProgress::new());
+
+        assert!(shop.items.len() >= 4);
+        assert_eq!(run.tag_rich_stock, 0);
     }
 
     #[test]

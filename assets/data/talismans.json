@@ -9,7 +9,7 @@
   {
     "id": "gilded",
     "name": "Gilded Talisman",
-    "description": "Every tile in hand: melds including this tile score +$1 gold.",
+    "description": "Every tile in hand: melds including this tile score +¥1 yen.",
     "shop_price": 14,
     "accent": [0.843, 0.778, 0.575, 1.0]
   },

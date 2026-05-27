@@ -2,7 +2,8 @@
 mod cases {
     use std::collections::BTreeMap;
 
-    use crate::core::debuff::{TileDebuff, TileDebuffClass};
+    use crate::OrdealKindExt;
+use crate::core::debuff::{TileDebuff, TileDebuffClass};
     use crate::core::consumable::{Consumable, ConsumableInventory};
     use crate::core::deck::Wall;
     use crate::core::deck::build_wall;
@@ -37,7 +38,7 @@ mod cases {
         }
         let selected = vec![false; hand.len()];
         let mode = GameMode {
-            starting_gold: 0,
+            starting_yen: 0,
             starting_rules: vec![],
             starting_yaku: vec![],
             ..GameMode::standard()
@@ -54,7 +55,7 @@ mod cases {
             discards_remaining: mode.starting_discards,
             discards_max: mode.starting_discards,
             full_hand_played_this_round: false,
-            gold: mode.starting_gold as i32,
+            yen: mode.starting_yen as i32,
             hand,
             structure_sets: vec![],
             structure_tiles: vec![],
@@ -101,9 +102,9 @@ mod cases {
             chrysalis_extinct: false,
             small_chamber_tag: None,
             big_chamber_tag: None,
-            tag_free_reroll: false,
-            tag_patron_gift: false,
-            tag_rich_stock: false,
+            tag_free_reroll: 0,
+            tag_patron_gift: 0,
+            tag_rich_stock: 0,
             tag_bonus_plays: 0,
             tag_bonus_discards: 0,
             tag_bonus_hand_size: 0,
@@ -703,7 +704,7 @@ mod cases {
                 yaku_levels: Some(run.yaku_levels.clone()),
             },
             economy: ScoreEconomyBundle {
-                gold: run.gold,
+                yen: run.yen,
                 total_score: run.total_score_earned,
             },
             structure: None,
@@ -795,6 +796,30 @@ mod cases {
     }
 
     #[test]
+    fn duplicate_skip_tags_stack() {
+        use crate::core::tag::TagKind;
+
+        let mut run = test_run();
+        run.apply_tag(TagKind::FreeReroll, None);
+        run.apply_tag(TagKind::FreeReroll, None);
+        run.apply_tag(TagKind::PatronGift, None);
+        run.apply_tag(TagKind::PatronGift, None);
+        run.apply_tag(TagKind::RichStock, None);
+        run.apply_tag(TagKind::RichStock, None);
+        run.apply_tag(TagKind::BonusPlay, None);
+        run.apply_tag(TagKind::BonusPlay, None);
+        run.apply_tag(TagKind::WideHand, None);
+        run.apply_tag(TagKind::WideHand, None);
+
+        assert_eq!(run.tag_free_reroll, 2);
+        assert_eq!(run.tag_patron_gift, 2);
+        assert_eq!(run.tag_rich_stock, 2);
+        assert_eq!(run.tag_bonus_plays, 2);
+        assert_eq!(run.tag_bonus_discards, 0);
+        assert_eq!(run.tag_bonus_hand_size, 4);
+    }
+
+    #[test]
     fn apply_chamber_promotes_wide_hand_bonus_to_round_hand_size() {
         let mut run = test_run();
         run.apply_tag(crate::core::tag::TagKind::WideHand, None);
@@ -875,15 +900,15 @@ mod cases {
         let mut bus = bus();
         run.chamber = ChamberKind::Ordeal;
         run.upcoming_chamber = ChamberKind::Ordeal;
-        run.tag_free_reroll = true;
-        run.tag_patron_gift = true;
-        run.tag_rich_stock = true;
+        run.tag_free_reroll = 1;
+        run.tag_patron_gift = 1;
+        run.tag_rich_stock = 1;
 
         run.advance_round(&mut bus);
 
-        assert!(run.tag_free_reroll);
-        assert!(run.tag_patron_gift);
-        assert!(run.tag_rich_stock);
+        assert_eq!(run.tag_free_reroll, 1);
+        assert_eq!(run.tag_patron_gift, 1);
+        assert_eq!(run.tag_rich_stock, 1);
     }
 
     #[test]

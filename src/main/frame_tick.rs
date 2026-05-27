@@ -692,13 +692,8 @@ impl App {
             .map(|i| i.last_cursor)
             .unwrap_or((0.0, 0.0));
         let loading_done = match &self.scene {
-            // Splash may dismiss as soon as the window has a renderer AND all
-            // player tilesets have their showcase decal atlases pre-baked.
-            // Relic and menu-backdrop decode continue in parallel (solid
-            // fallback until the façade texture lands). The atlas bake is the
-            // largest one-shot CPU cost in the renderer; the bake itself is
-            // kicked at the bottom of this frame_tick when splash is active,
-            // so the splash plate is shown for at least one full frame first.
+            // Splash may dismiss as soon as the window has a renderer and every
+            // player tileset has its offline showcase decal atlas PNG on disk.
             Scene::Splash(_) => self
                 .renderer
                 .as_ref()
@@ -710,7 +705,8 @@ impl App {
         // `App::frame_picks`). Without this caching, each gameplay frame
         // pays for two full walks of the per-class matrix lists for
         // shop/gameplay objects in particular.
-        self.frame_picks = if let Some(r) = self.renderer.as_ref() {
+        self.frame_picks = if let Some(r) = self.renderer.as_mut() {
+            r.ensure_rooms_for_scene_key(crate::scenes::active_scene_key(&self.scene));
             FramePicks {
                 hand: r.pick_hand_tile(cursor_pos.0, cursor_pos.1),
                 shop: r.pick_shop_object(cursor_pos.0, cursor_pos.1),
@@ -911,6 +907,19 @@ impl App {
         }
         self.cpu_profiler
             .end(crate::render::cpu_profiler::CpuStage::Update);
+        if self.shop_storeroom_dwell_active() {
+            let milestones = self
+                .progress
+                .accumulate_shop_storeroom_seconds(self.last_frame_dt);
+            if milestones > 0 {
+                self.mark_profile_dirty();
+                if let Scene::Shop(shop) = &mut self.scene {
+                    for _ in 0..milestones {
+                        shop.play_eyeball_travel_milestone();
+                    }
+                }
+            }
+        }
         if seed_archive_seen {
             crate::core::archive_seen::archive_seen_migration_seed(&mut self.progress);
             self.mark_profile_dirty();
@@ -1156,19 +1165,13 @@ impl App {
         // synchronously inside `enqueue` so subsequent loads see fresh data.
         self.flush_dirty_profile();
 
-        // After the splash plate has been presented, pre-bake showcase decal
-        // atlases for every player tileset. This is synchronous and can take
-        // several seconds total, but doing it here keeps the cost behind the
-        // splash instead of hitching when the player cycles tilesets later.
-        // Splash dismissal in `loading_done` (above) waits for this to finish.
+        // After the splash plate has been presented, upload the active tileset
+        // showcase decal atlas from its baked PNG.
         if matches!(self.scene, Scene::Splash(_)) {
             let tileset = self.gfx.tileset_name.clone();
             if let Some(renderer) = self.renderer.as_mut() {
-                // Upload any relics decoded before the (long) decal atlas pass.
                 renderer.poll_pending_texture_uploads();
-                if !renderer.showcase_decal_atlases_baked_for_all_player_tilesets() {
-                    renderer.prebake_showcase_decal_atlases_for_all_player_tilesets(&tileset);
-                }
+                renderer.ensure_active_showcase_decal_atlas(&tileset);
                 renderer.poll_pending_texture_uploads();
             }
         }

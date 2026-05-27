@@ -362,7 +362,7 @@ impl GameplayScene {
             (StepKind::Chips, "+50", 50.0),
             (StepKind::Mult, "+3.0x", 3.0),
             (StepKind::Chips, "+120", 120.0),
-            (StepKind::Gold, "Lucky Cat", 10.0),
+            (StepKind::Yen, "Lucky Cat", 10.0),
             (StepKind::Mult, "+1.5x", 1.5),
         ];
         for (i, (kind, label, mag)) in steps.iter().enumerate() {
@@ -718,7 +718,7 @@ impl GameplayScene {
         match step.kind {
             StepKind::Chips => (ms.x + ms.w * 0.30, ms.y + ms.h * 0.60),
             StepKind::Mult => (ms.x + ms.w * 0.70, ms.y + ms.h * 0.60),
-            StepKind::Gold | StepKind::Final => (ms.x + ms.w * 0.50, ms.y + ms.h * 0.45),
+            StepKind::Yen | StepKind::Final => (ms.x + ms.w * 0.50, ms.y + ms.h * 0.45),
         }
     }
 

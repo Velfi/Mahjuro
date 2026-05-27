@@ -103,7 +103,7 @@ pub fn record_score_breakdown(stats: &mut RunStats, breakdown: &ScoreBreakdown) 
         };
         let delta = step_score_delta(prev_total, step);
         prev_total = step.running_total;
-        if delta == 0 && !matches!(step.kind, StepKind::Gold) {
+        if delta == 0 && !matches!(step.kind, StepKind::Yen) {
             continue;
         }
         *stats.relic_score_triggers.entry(relic).or_insert(0) += 1;
@@ -115,8 +115,8 @@ pub fn record_score_breakdown(stats: &mut RunStats, breakdown: &ScoreBreakdown) 
             StepKind::Mult => {
                 *stats.relic_score_mult_pts.entry(relic).or_insert(0) += delta;
             }
-            // Gold steps do not move `running_total`; economy relics use `gold_clear_*` counters.
-            StepKind::Gold | StepKind::Final => {}
+            // Yen steps do not move `running_total`; economy relics use `yen_clear_*` counters.
+            StepKind::Yen | StepKind::Final => {}
         }
     }
 }
@@ -202,8 +202,8 @@ pub fn merge_run_relic_analytics(agg: &mut AggregateStats, run: &RunStats) {
     for (name, pts) in &run.relic_score_mult_pts {
         *agg.relic_score_mult_pts.entry(name).or_insert(0) += *pts;
     }
-    for (name, gold) in &run.relic_score_gold {
-        *agg.relic_score_gold.entry(name).or_insert(0) += *gold;
+    for (name, gold) in &run.relic_score_yen {
+        *agg.relic_score_yen.entry(name).or_insert(0) += *gold;
     }
     for (name, n) in &run.relic_score_triggers {
         *agg.relic_score_triggers.entry(name).or_insert(0) += *n as u64;

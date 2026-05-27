@@ -38,10 +38,10 @@ pub(crate) fn setup_hero_state(run: &mut RunState) {
 }
 
 pub(crate) fn setup_shop_state(run: &mut RunState) {
-    run.gold = 42;
+    run.yen = 42;
     run.run_number = 3;
     run.wing = 3;
-    run.tag_rich_stock = true;
+    run.tag_rich_stock = 1;
 }
 
 pub(crate) fn setup_defeat_game_over_screenshot_state(run: &mut RunState) {
@@ -55,7 +55,7 @@ pub(crate) fn setup_defeat_game_over_screenshot_state(run: &mut RunState) {
     run.ordeal.upcoming = Some(OrdealKind::Rot);
     run.round_score = 5674;
     run.target_score = 10486;
-    run.gold = 12;
+    run.yen = 12;
     run.tiles_played = 170;
     run.tiles_discarded = 97;
     run.times_restocked = 44;
@@ -75,7 +75,7 @@ pub(crate) fn setup_victory_game_over_screenshot_state(run: &mut RunState) {
     run.ordeal.upcoming = Some(OrdealKind::House);
     run.round_score = 12490;
     run.target_score = 11900;
-    run.gold = 28;
+    run.yen = 28;
     run.tiles_played = 209;
     run.tiles_discarded = 76;
     run.times_restocked = 39;
@@ -149,6 +149,7 @@ pub(crate) fn setup_gameplay_screenshot_state(run: &mut RunState) {
 }
 
 pub(crate) fn force_ordeal_chamber(run: &mut RunState, kind: mahjuro::core::ordeal::OrdealKind) {
+    use mahjuro::OrdealKindExt;
     run.chamber = mahjuro::core::rules::ChamberKind::Ordeal;
     run.upcoming_chamber = mahjuro::core::rules::ChamberKind::Ordeal;
     run.wing = kind.def().min_wing.max(run.wing);

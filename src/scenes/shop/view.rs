@@ -833,11 +833,11 @@ pub(crate) fn render_shop_frame(
     let (stock_dim, stock_subj);
     {
         let _g = crate::render::cpu_profiler::scope("draw_frame.shop_stock_meshes");
-        gold_pile = crate::render::gold_display::build_settled_gold_coin_pile(
+        gold_pile = crate::render::yen_display::build_settled_yen_coin_pile(
             |n| ppmm * n,
-            shop_rm.display_gold as i32,
+            shop_rm.display_yen as i32,
             gold_pile_anchor,
-            crate::render::gold_display::SHOP_GOLD_PILE_SEED,
+            crate::render::yen_display::SHOP_GOLD_PILE_SEED,
             None,
             1.0,
         );
@@ -877,11 +877,11 @@ pub(crate) fn render_shop_frame(
             Some((cx, cy))
         })
         .unwrap_or((gold_dish_anchor[0], gold_dish_anchor[1]));
-        crate::render::gold_display::push_gold_amount_label(
+        crate::render::yen_display::push_yen_amount_label(
             &mut frame,
             w,
             h,
-            shop_rm.display_gold as i32,
+            shop_rm.display_yen as i32,
             gold_label_center,
         )
     };
@@ -1191,17 +1191,25 @@ pub(crate) fn render_shop_frame(
     frame
 }
 
-/// Name, description, price line, and accent colour for hover tooltip.
+/// Price line for hover tooltip on a standard purchasable slot.
 #[inline]
-fn purchasable_tooltip_cta(price: u32, sold: bool, can_afford: bool, display_gold: u32) -> String {
+fn purchasable_tooltip_cta(
+    price: u32,
+    sold: bool,
+    can_afford: bool,
+    display_gold: u32,
+    unaffordable_label: Option<&str>,
+) -> String {
     if sold {
         "SOLD".to_string()
+    } else if !can_afford {
+        unaffordable_label
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("${} (have ¥{})", price, display_gold))
     } else if price == 0 {
         "FREE".to_string()
-    } else if can_afford {
-        format!("Buy {}g", price)
     } else {
-        format!("${} (have {}g)", price, display_gold)
+        format!("Buy ¥{}", price)
     }
 }
 
@@ -1224,24 +1232,21 @@ fn hover_tooltip_content(
     };
     let reroll_affordable = matches!(scene.mode, ShopMode::Standard)
         && (scene.reroll_cost == 0
-            || shop.gold >= scene.reroll_cost as i32
+            || shop.yen >= scene.reroll_cost as i32
             || i_got_a_guy_charges > 0);
 
     let tuple_opt = match hit {
         ShopHit::Relic(i) if i < n_for_sale_relics => {
             let item = &scene.items[i];
-            let can_afford = shop.gold >= item.price as i32 && !shop.relics_full && !item.sold;
-            let cta = if item.sold {
-                "SOLD".to_string()
-            } else if !can_afford {
-                if shop.relics_full {
-                    "Relics full".to_string()
-                } else {
-                    format!("${} (have {}g)", item.price, shop.display_gold)
-                }
-            } else {
-                item.buy_label()
-            };
+            let can_afford = shop.yen >= item.price as i32 && !shop.relics_full && !item.sold;
+            let unaffordable = shop.relics_full.then_some("Relics full");
+            let cta = purchasable_tooltip_cta(
+                item.price,
+                item.sold,
+                can_afford,
+                shop.display_yen,
+                unaffordable,
+            );
             let col = if item.sold {
                 color::UMBER
             } else if can_afford {
@@ -1266,27 +1271,19 @@ fn hover_tooltip_content(
             let desc = relic_description_live(
                 rid,
                 &shop.relic_counters,
-                shop.gold,
+                shop.yen,
                 Some((&shop.relic_state, oi)),
                 None,
                 Some(shop.wing),
             );
             let sell = relic_sell_price_live(rid, &shop.relic_counters);
-            Some((name, desc, format!("Sell {}g", sell), color::CHAMPAGNE))
+            Some((name, desc, format!("Sell ¥{}", sell), color::CHAMPAGNE))
         }
         ShopHit::Ribbon(i) if i < n_for_sale_zodiacs => {
             let item = &scene.zodiac_items[i];
             let price = item.price(mode, &shop.relic_state);
-            let can_afford = shop.gold >= price as i32 && !item.sold;
-            let cta = if item.sold {
-                "SOLD".to_string()
-            } else if !can_afford {
-                format!("${} (have {}g)", price, shop.display_gold)
-            } else if price == 0 {
-                "FREE".to_string()
-            } else {
-                format!("Buy {}g", price)
-            };
+            let can_afford = shop.yen >= price as i32 && !item.sold;
+            let cta = purchasable_tooltip_cta(price, item.sold, can_afford, shop.display_yen, None);
             let col = if item.sold {
                 color::UMBER
             } else if can_afford {
@@ -1313,20 +1310,15 @@ fn hover_tooltip_content(
         ShopHit::Talisman(i) if i < n_for_sale_talismans => {
             let item = &scene.talisman_items[i];
             let price = item.price(mode, &shop.relic_state);
-            let can_afford = shop.gold >= price as i32 && !shop.consumables_full && !item.sold;
-            let cta = if item.sold {
-                "SOLD".to_string()
-            } else if !can_afford {
-                if shop.consumables_full {
-                    "Inventory full".to_string()
-                } else {
-                    format!("${} (have {}g)", price, shop.display_gold)
-                }
-            } else if price == 0 {
-                "FREE".to_string()
-            } else {
-                format!("Buy {}g", price)
-            };
+            let can_afford = shop.yen >= price as i32 && !shop.consumables_full && !item.sold;
+            let unaffordable = shop.consumables_full.then_some("Inventory full");
+            let cta = purchasable_tooltip_cta(
+                price,
+                item.sold,
+                can_afford,
+                shop.display_yen,
+                unaffordable,
+            );
             let col = if item.sold {
                 color::UMBER
             } else if can_afford {
@@ -1347,16 +1339,16 @@ fn hover_tooltip_content(
                 item.name(),
                 item.description(),
                 format!(
-                    "Sell {}g",
+                    "Sell ¥{}",
                     consumable_sell_price_for_mode(c, mode, &shop.relic_state)
                 ),
                 color::CHAMPAGNE,
             ))
         }
         ShopHit::Dish(id) if id == super::PICK_COIN_DISH => Some((
-            "Gold".to_string(),
-            "Your current treasure".to_string(),
-            format!("{}g", shop.gold),
+            "Yen".to_string(),
+            "Your wealth in yen".to_string(),
+            format!("¥{}", shop.yen),
             color::GOLD,
         )),
         ShopHit::Dish(id) if id == super::PICK_JOURNAL_BOOK => Some((
@@ -1399,14 +1391,14 @@ fn hover_tooltip_content(
                     color::GOLD,
                 )
             } else {
-                let cta = if shop.gold >= scene.reroll_cost as i32 {
-                    format!("{}g", scene.reroll_cost)
+                let cta = if shop.yen >= scene.reroll_cost as i32 {
+                    format!("¥{}", scene.reroll_cost)
                 } else {
-                    format!("${} (have {}g)", scene.reroll_cost, shop.display_gold)
+                    format!("${} (have ¥{})", scene.reroll_cost, shop.display_yen)
                 };
                 (
                     "Restock".to_string(),
-                    format!("Refresh shop for {}g", scene.reroll_cost),
+                    format!("Refresh shop for ¥{}", scene.reroll_cost),
                     cta,
                     if reroll_affordable {
                         color::GOLD
@@ -1424,8 +1416,9 @@ fn hover_tooltip_content(
                         pack.kind.shop_price(),
                         &shop.relic_state,
                     ));
-                let can_afford = shop.gold >= price as i32 && !pack.sold;
-                let cta = purchasable_tooltip_cta(price, pack.sold, can_afford, shop.display_gold);
+                let can_afford = shop.yen >= price as i32 && !pack.sold;
+                let cta =
+                    purchasable_tooltip_cta(price, pack.sold, can_afford, shop.display_yen, None);
                 let col = if pack.sold {
                     color::UMBER
                 } else if can_afford {
@@ -1455,8 +1448,9 @@ fn hover_tooltip_content(
                         pack.kind.shop_price(),
                         &shop.relic_state,
                     ));
-                let can_afford = shop.gold >= price as i32 && !pack.sold;
-                let cta = purchasable_tooltip_cta(price, pack.sold, can_afford, shop.display_gold);
+                let can_afford = shop.yen >= price as i32 && !pack.sold;
+                let cta =
+                    purchasable_tooltip_cta(price, pack.sold, can_afford, shop.display_yen, None);
                 let col = if pack.sold {
                     color::UMBER
                 } else if can_afford {

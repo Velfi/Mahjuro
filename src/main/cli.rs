@@ -47,7 +47,7 @@ pub struct BotCli {
     #[arg(long)]
     pub discards: Option<u32>,
     #[arg(long)]
-    pub gold: Option<u32>,
+    pub yen: Option<u32>,
     /// Difficulty stake: spring (baseline), summer, autumn, or winter. Omit
     /// for Spring. Stratifies balance snapshots so each tier's target /
     /// shop / boss deltas can be evaluated independently.
@@ -122,7 +122,7 @@ impl BotCli {
             base_target: self.base_target,
             starting_plays: self.plays,
             starting_discards: self.discards,
-            starting_gold: self.gold,
+            starting_yen: self.yen,
             stake: self.stake,
             sell_enabled: if self.sell_enabled { Some(true) } else { None },
             sell_hold_threshold: self.sell_hold_threshold,

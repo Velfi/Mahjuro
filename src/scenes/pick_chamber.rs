@@ -561,7 +561,7 @@ impl SceneBehavior for PickChamberScene {
                         )
                         + 4.0
                         + wrapped_text_height(
-                            &format!("Reward ${}{}", upcoming.clear_reward(), stake_suffix),
+                            &format!("Reward ¥{}{}", upcoming.clear_reward(), stake_suffix),
                             text_w_play,
                             px_detail,
                             h_detail,
@@ -673,7 +673,7 @@ impl SceneBehavior for PickChamberScene {
                     col_w: text_w_play,
                     font_px: px_detail,
                     line_h: h_detail,
-                    text: &format!("Reward ${}{}", upcoming.clear_reward(), stake_suffix),
+                    text: &format!("Reward ¥{}{}", upcoming.clear_reward(), stake_suffix),
                     color: play_color,
                     align: TextAlign::Right,
                 });

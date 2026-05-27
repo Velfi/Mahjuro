@@ -388,7 +388,7 @@ impl HeadlessApp {
             env_per_scene.insert(key, (room, look.room_gltf_height_scale));
             env_frame_tunes.push((
                 key,
-                mahjuro::game::scene_look_tuning::RoomEnvFrameTune::from_scene_look(
+                mahjuro_render::tuning::scene_look::room_env_frame_from_scene_look(
                     &look, room,
                 ),
             ));
@@ -452,23 +452,7 @@ impl HeadlessApp {
         }
 
         let scene_for_renderer = self.overlay_stack.last().unwrap_or(&self.scene);
-        let active_scene_key: Option<&'static str> = match scene_for_renderer {
-            Scene::Showcase(_) => Some("showcase"),
-            Scene::Shop(_) => Some("shop"),
-            Scene::Gameplay(_) => Some("gameplay"),
-            Scene::GameOver(_) => Some("gameplay"),
-            Scene::Collection(_) => Some("collection"),
-            Scene::PickChamber(_) => Some("pick_chamber"),
-            Scene::Staircase(_) => Some("staircase"),
-            Scene::MainMenuExterior(_) => Some("main_menu_exterior"),
-            Scene::TutorialCampaign(_) => Some("tutorial"),
-            Scene::Guide(_) => Some("guide"),
-            Scene::YakuJournal(_) => Some("yaku_journal"),
-            Scene::TileAnchorLab(_) => Some("tile_anchor_lab"),
-            Scene::ButtonAabbLab(_) => Some("button_aabb_lab"),
-            Scene::Tixels(_) => Some("tixels"),
-            _ => None,
-        };
+        let active_scene_key = mahjuro::scenes::active_scene_key(scene_for_renderer);
         self.renderer.set_active_scene(active_scene_key);
         let look = self.scene_look.resolve(active_scene_key);
         self.renderer.set_tonemap_tuning(&look.tonemap);

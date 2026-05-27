@@ -8,6 +8,11 @@ use std::sync::{Mutex, OnceLock};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
+pub use mahjuro_gfx_types::{
+    EffectsQuality, TileMaterial, TilePreset, clear_tuning_override, has_tuning_override,
+    load_tuning_override, save_tuning_override,
+};
+
 use crate::core::progression::{PlayerProgress, RunOutcome};
 use crate::game::run::RunState;
 use crate::ui::button_prompts::GamepadStyle;
@@ -110,188 +115,19 @@ fn data_dir() -> PathBuf {
     PathBuf::from(".")
 }
 
-/// Controls the quality of fullscreen vignette effects (starfield, ember
-/// drift, golden dust, shooting-star cascade). Lower levels reduce or skip
-/// procedural layers to save GPU ALU on weaker hardware.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum EffectsQuality {
-    Off,
-    Low,
-    Medium,
-    High,
-}
-
-impl EffectsQuality {
-    pub fn next(self) -> Self {
-        match self {
-            Self::Off => Self::Low,
-            Self::Low => Self::Medium,
-            Self::Medium => Self::High,
-            Self::High => Self::Off,
-        }
-    }
-
-    pub fn prev(self) -> Self {
-        match self {
-            Self::Off => Self::High,
-            Self::Low => Self::Off,
-            Self::Medium => Self::Low,
-            Self::High => Self::Medium,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Off => "Off",
-            Self::Low => "Low",
-            Self::Medium => "Medium",
-            Self::High => "High",
-        }
-    }
-
-    /// Numeric quality level uploaded to the GPU globals uniform.
-    /// The cascade shader uses this to gate layer groups.
-    pub fn quality_level_f32(self) -> f32 {
-        match self {
-            Self::Off => 0.0,
-            Self::Low => 0.0,
-            Self::Medium => 1.0,
-            Self::High => 2.0,
-        }
-    }
-
-    /// Procedural felt shader tier for `lit_mesh.wgsl` (`SsrGlobals.felt.x`).
-    /// `0` = minimal baize tint (effects Off), `1` = reduced noise path
-    /// (Low), `2` = full detail (Medium/High).
-    pub fn felt_shader_lod(self) -> f32 {
-        match self {
-            Self::Off => 0.0,
-            Self::Low => 1.0,
-            Self::Medium | Self::High => 2.0,
-        }
-    }
-}
-
 fn default_effects_quality() -> EffectsQuality {
     EffectsQuality::High
-}
-
-/// Mahjong tile size preset. Proportions are taken from Wikipedia's
-/// "Mahjong tiles" article and reflect the canonical real-world dimensions
-/// of three common regional sets. Each preset controls the face aspect
-/// (long edge / short edge) and the slab thickness relative to the short
-/// edge — i.e. it changes the *shape* of every rendered tile, not just a
-/// uniform size scale.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TilePreset {
-    /// Chinese standard, ~30 × 20 × 15 mm.
-    Chinese,
-    /// Japanese-style proportions, ~26 × 19 × 16 mm — chunkier and squarer.
-    Japanese,
-    /// American mah jongg, ~32 × 25 × 19 mm — largest.
-    American,
-}
-
-impl TilePreset {
-    pub fn next(self) -> Self {
-        match self {
-            Self::Chinese => Self::Japanese,
-            Self::Japanese => Self::American,
-            Self::American => Self::Chinese,
-        }
-    }
-
-    pub fn prev(self) -> Self {
-        match self {
-            Self::Chinese => Self::American,
-            Self::Japanese => Self::Chinese,
-            Self::American => Self::Japanese,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Chinese => "Chinese (30×20×15mm)",
-            Self::Japanese => "Japanese (26×19×16mm)",
-            Self::American => "American (32×25×19mm)",
-        }
-    }
-
-    /// Face long edge divided by short edge.
-    pub fn face_long_ratio(self) -> f32 {
-        match self {
-            Self::Chinese => 30.0 / 20.0,
-            Self::Japanese => 26.0 / 19.0,
-            Self::American => 32.0 / 25.0,
-        }
-    }
-
-    /// Slab thickness divided by short edge.
-    pub fn thickness_ratio(self) -> f32 {
-        match self {
-            Self::Chinese => 15.0 / 20.0,
-            Self::Japanese => 16.0 / 19.0,
-            Self::American => 19.0 / 25.0,
-        }
-    }
 }
 
 fn default_tile_preset() -> TilePreset {
     TilePreset::Chinese
 }
 
-/// Tile material / colour scheme. Controls the procedural surface
-/// appearance in the tile shader — ivory+bamboo, plastic, etc.
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
-)]
-pub enum TileMaterial {
-    /// Traditional ivory face on a bamboo body.
-    #[default]
-    Bamboo,
-    /// Mint-green plastic with a bright white face (common mass-produced set).
-    Plastic,
-    /// Blonde bekko — honey-amber keratin with dark mahogany mottling.
-    TortoiseShell,
-}
-
-impl TileMaterial {
-    pub fn next(self) -> Self {
-        match self {
-            Self::Bamboo => Self::Plastic,
-            Self::Plastic => Self::TortoiseShell,
-            Self::TortoiseShell => Self::Bamboo,
-        }
-    }
-
-    pub fn prev(self) -> Self {
-        match self {
-            Self::Bamboo => Self::TortoiseShell,
-            Self::Plastic => Self::Bamboo,
-            Self::TortoiseShell => Self::Plastic,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Bamboo => "Bamboo & Ivory",
-            Self::Plastic => "Plastic",
-            Self::TortoiseShell => "Tortoise Shell",
-        }
-    }
-
-    pub fn bonus_description(self) -> &'static str {
-        match self {
-            Self::Bamboo => "+1 Hand per round",
-            Self::Plastic => "+1 Discard per round",
-            Self::TortoiseShell => "+$10 starting gold",
-        }
-    }
-}
-
 fn default_tile_material() -> TileMaterial {
     TileMaterial::Bamboo
 }
+
+
 
 fn default_tileset_name() -> String {
     "original".to_string()
@@ -483,77 +319,6 @@ pub fn save_settings(settings: &AppSettings) -> anyhow::Result<()> {
         *guard = Some(settings.clone());
     }
     Ok(())
-}
-
-// ── Tuning overrides ────────────────────────────────────────────────────
-//
-// A small persistence layer that lets the debug overlays promote a live-
-// edited tuning struct to a "user default" that survives restarts. Values
-// live in `tuning_overrides.json` keyed by struct name. `load_or_default`
-// reads the override if present, falling back to `Default::default()`.
-// When a value is promoted into code (copied into the `Default` impl),
-// clear the override with `clear_tuning_override` so the code default
-// takes over again.
-
-const TUNING_OVERRIDES_NAME: &str = "tuning_overrides.json";
-
-fn tuning_overrides_path() -> PathBuf {
-    data_dir().join(TUNING_OVERRIDES_NAME)
-}
-
-fn read_tuning_overrides() -> serde_json::Map<String, serde_json::Value> {
-    let path = tuning_overrides_path();
-    if !path.exists() {
-        return serde_json::Map::new();
-    }
-    let data = match fs::read_to_string(&path) {
-        Ok(s) => s,
-        Err(_) => return serde_json::Map::new(),
-    };
-    match serde_json::from_str::<serde_json::Value>(&data) {
-        Ok(serde_json::Value::Object(map)) => map,
-        _ => serde_json::Map::new(),
-    }
-}
-
-fn write_tuning_overrides(map: &serde_json::Map<String, serde_json::Value>) -> anyhow::Result<()> {
-    let json = serde_json::to_string_pretty(map).context("serialize tuning overrides")?;
-    fs::write(tuning_overrides_path(), json).context("write tuning overrides")
-}
-
-/// Load an override for `T` keyed by `name`, or fall back to `Default`.
-/// `name` should uniquely identify the struct (typically its type name).
-pub fn load_tuning_override<T: serde::de::DeserializeOwned + Default>(name: &str) -> T {
-    let map = read_tuning_overrides();
-    match map.get(name) {
-        Some(v) => serde_json::from_value(v.clone()).unwrap_or_default(),
-        None => T::default(),
-    }
-}
-
-/// True iff a tuning override exists on disk for `name`. Used by the
-/// per-scene tonemap loader to distinguish "no entry" (fall back to the
-/// default tuning) from "entry that happens to match defaults".
-pub fn has_tuning_override(name: &str) -> bool {
-    read_tuning_overrides().contains_key(name)
-}
-
-/// Promote the current value of `T` to the persistent override.
-pub fn save_tuning_override<T: serde::Serialize>(name: &str, value: &T) -> anyhow::Result<()> {
-    let mut map = read_tuning_overrides();
-    let v = serde_json::to_value(value).context("serialize tuning value")?;
-    map.insert(name.to_string(), v);
-    write_tuning_overrides(&map)
-}
-
-/// Remove a persisted override so the code default applies on next load.
-pub fn clear_tuning_override(name: &str) -> anyhow::Result<()> {
-    let mut map = read_tuning_overrides();
-    if map.remove(name).is_some() {
-        write_tuning_overrides(&map)
-    } else {
-        Ok(())
-    }
 }
 
 fn profile_path(index: usize) -> PathBuf {

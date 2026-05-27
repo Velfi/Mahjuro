@@ -112,9 +112,9 @@ pub(super) fn tick_wind_and_deal_detection(
 }
 
 /// Detect gold changes and spawn flying coin animations.
-pub(super) fn tick_gold_change_coins(scene: &mut GameplayScene, ctx: &mut UpdateCtx<'_>) {
+pub(super) fn tick_yen_change_coins(scene: &mut GameplayScene, ctx: &mut UpdateCtx<'_>) {
     let gameplay = GameEngine::read(ctx.run);
-    let cur_gold = gameplay.gold;
+    let cur_gold = gameplay.yen;
     let delta = cur_gold - scene.prev_gold;
     if delta != 0 && scene.prev_gold != 0 {
         // Recompute the dish center from layout (mirrors draw_frame).
@@ -128,7 +128,7 @@ pub(super) fn tick_gold_change_coins(scene: &mut GameplayScene, ctx: &mut Update
             Err(_) => return,
         };
         let (coin_radius, coin_thickness, _) =
-            crate::render::gold_display::gold_coin_dims(|n| layout.mm(n));
+            crate::render::yen_display::yen_coin_dims(|n| layout.mm(n));
         let pile_cx = anchor[0];
         let pile_cy = anchor[1];
         let dish_floor_z = anchor[2];
@@ -477,12 +477,12 @@ pub(super) fn build_ambient_table_objects(
         frame.showcase_tile_batch(tile_placements);
     }
 
-    if !vis.hide_gold_pile {
-        let coins = crate::render::gold_display::build_settled_gold_coin_pile(
+    if !vis.hide_yen_pile {
+        let coins = crate::render::yen_display::build_settled_yen_coin_pile(
             |n| layout.mm(n),
-            gameplay.gold,
+            gameplay.yen,
             gold_pile_pose.anchor,
-            crate::render::gold_display::GAMEPLAY_GOLD_PILE_SEED,
+            crate::render::yen_display::GAMEPLAY_GOLD_PILE_SEED,
             Some((layout.window_w, layout.window_h)),
             gold_pile_pose.uniform_author_scale(window_h, env_height_scale),
         );

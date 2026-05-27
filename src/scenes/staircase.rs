@@ -1,22 +1,63 @@
 //! Post-ordeal interstitial — [`staircase.glb`](../../assets/3d/staircase.glb) and a single
 //! prompt before the between-wing shop.
 
+use crate::core::relic::RelicFlavorSpan;
 use crate::render::draw_cmd::{ScenePunctualLight, UiFrame};
 use crate::render::staircase_glb;
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::PointLight;
 use crate::render::wgpu_renderer::{TextAlign, TextLabel};
 use crate::scenes::shop::ShopScene;
+use crate::ui::colored_keywords;
+use crate::ui::inspect_plaque::estimated_flavor_line_count;
 use crate::ui::input::UiAction;
 
 use super::{BackgroundId, ButtonDef, DrawCtx, Scene, SceneBehavior, SceneTransition, UpdateCtx};
 
-pub struct StaircaseScene;
+pub struct StaircaseScene {
+    flavor: &'static [RelicFlavorSpan],
+}
 
 impl StaircaseScene {
     pub fn new() -> Self {
-        Self
+        Self {
+            flavor: crate::core::staircase_flavor::random_entry_flavor(),
+        }
     }
+}
+
+fn push_flavor_text(frame: &mut UiFrame, w: f32, h: f32, flavor: &'static [RelicFlavorSpan]) {
+    if flavor.is_empty() {
+        return;
+    }
+    let margin_x = w * 0.045;
+    let margin_y = h * 0.11;
+    let max_inner_w = (w * 0.42).min(560.0);
+    let body_px = typography::size(typography::H32, h);
+    let line_step = colored_keywords::colored_row_line_step(body_px);
+    let char_w = body_px * 0.52;
+    let char_count: usize = flavor.iter().map(|s| s.text.chars().count()).sum();
+    let chars_per_line = (max_inner_w / char_w).max(18.0) as usize;
+    let content_lines = estimated_flavor_line_count(flavor, max_inner_w, body_px, 8);
+    let content_h = line_step * content_lines as f32;
+    let content_w = if content_lines <= 1 && char_count <= chars_per_line {
+        (char_count as f32 * char_w).max(body_px * 4.0)
+    } else {
+        max_inner_w
+    };
+    let left = w - margin_x - content_w;
+    let top = margin_y;
+
+    frame.text(TextLabel {
+        rect: [left, top, content_w, content_h],
+        text: String::new(),
+        color: color::CHAMPAGNE,
+        font_px: Some(body_px),
+        align: TextAlign::Center,
+        no_glossary: true,
+        flavor_spans: Some(flavor),
+        ..Default::default()
+    });
 }
 
 impl SceneBehavior for StaircaseScene {
@@ -32,6 +73,7 @@ impl SceneBehavior for StaircaseScene {
     }
 
     fn draw_frame(&self, ctx: DrawCtx<'_>) -> UiFrame {
+        let flavor = self.flavor;
         let w = ctx.layout.window_w;
         let h = ctx.layout.window_h;
         let mut frame = UiFrame::new();
@@ -80,6 +122,8 @@ impl SceneBehavior for StaircaseScene {
                 }]);
             }
         }
+
+        push_flavor_text(&mut frame, w, h, flavor);
 
         let prompt_font = typography::size(typography::H20, h);
         let prompt_y = h * 0.78;
