@@ -494,7 +494,6 @@ impl SceneBehavior for ProfileSelectScene {
                 user: 0,
             });
 
-            let hint_style = HintStyle::profile_footer(h);
             let dialog_pad_x = (18.0 * scale).max(14.0);
             let dialog_pad_y = (16.0 * scale).max(12.0);
             let section_gap = (10.0 * scale).max(8.0);
@@ -503,14 +502,11 @@ impl SceneBehavior for ProfileSelectScene {
             let dialog_body_font = typography::size(typography::H36, h);
             let title_line_h = dialog_title_font * 1.35;
             let body_line_h = dialog_body_font * 1.35;
-            let btn_h = hint_style.line_h;
 
             let content_h = dialog_pad_y
                 + title_line_h
                 + section_gap
                 + body_line_h
-                + section_gap
-                + btn_h
                 + dialog_pad_y;
             let dialog_w = ((360.0 * scale).max(280.0)).min(w * 0.85);
             let dialog_h = content_h;
@@ -558,68 +554,20 @@ impl SceneBehavior for ProfileSelectScene {
                 ..Default::default()
             });
 
-            content_y += body_line_h + section_gap;
-            let dialog_footer = HintRow::new()
-                .bind(
-                    "confirm",
-                    vec![HintKey::for_input(
-                        ctx.input_mode,
-                        UiAction::Confirm,
-                        "keyboard_enter",
-                    )],
-                )
-                .sep()
-                .bind(
-                    "cancel",
-                    vec![HintKey::for_input(
-                        ctx.input_mode,
-                        UiAction::Cancel,
-                        "keyboard_escape",
-                    )],
-                )
-                .into_segments();
-            let dialog_rect = [inner_x, content_y, inner_w, btn_h];
-            push_inline_hint_rows(
-                &mut frame,
-                &ctx,
-                &[dialog_rect],
-                &[dialog_footer],
-                hint_style,
-            );
         }
 
-        // Hint icons at bottom.
+        // Scene-specific action hint (delete is not a universal face-button mapping).
         if self.confirm_delete == ConfirmDelete::None {
             let hint_style = HintStyle::profile_footer(h);
             let hint_h = hint_style.line_h;
             let hint_y = h - hint_h - h * 0.02;
             let bottom_footer = HintRow::new()
-                .bind("browse", vec![HintKey::dpad_horizontal()])
-                .sep()
-                .bind(
-                    "select",
-                    vec![HintKey::for_input(
-                        ctx.input_mode,
-                        UiAction::Confirm,
-                        "keyboard_enter",
-                    )],
-                )
-                .sep()
                 .bind(
                     "delete",
                     vec![HintKey::for_input(
                         ctx.input_mode,
                         UiAction::Delete,
                         "keyboard_x",
-                    )],
-                )
-                .sep()
-                .bind(
-                    "back",
-                    vec![HintKey::for_input(
-                        ctx.input_mode,
-                        UiAction::Cancel,
-                        "keyboard_escape",
                     )],
                 )
                 .into_segments();

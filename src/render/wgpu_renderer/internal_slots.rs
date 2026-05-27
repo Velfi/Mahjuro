@@ -190,9 +190,6 @@ pub(crate) struct ShopEnvironmentGpu {
     pub bind_groups: Vec<wgpu::BindGroup>,
     /// Archive room only: CPU-updated decal atlas at `@group(0) @binding(3)`.
     pub archive_sign_decal_texture: Option<wgpu::Texture>,
-    /// Retains the shop candle SSS bake GPU resource (`textures/shop/candle_sss.png`).
-    #[allow(dead_code)]
-    pub shop_candle_sss_texture: Option<wgpu::Texture>,
 }
 
 pub(crate) struct TileFaceOverlayGpu {

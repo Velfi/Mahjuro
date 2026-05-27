@@ -122,13 +122,6 @@ impl MetaLevelUpPresenter {
         }
         apply_modal_relic_staging(&mut frame, w, h, relic_objects);
 
-        let t = Instant::now()
-            .saturating_duration_since(self.started_at)
-            .as_secs_f32();
-        frame.text(celebration_overlay::label_confirm_to_continue(
-            h, w, t, intro_a,
-        ));
-
         if self.intro_gate.intro.is_done_for(&ctx.effect_layers) {
             frame.buttons = vec![ButtonDef::scene((0.0, 0.0, w, h), u32::MAX)];
         }

@@ -938,6 +938,7 @@ impl RainDebugOverlay {
 
     pub fn copy_to_clipboard(&self) {
         let text = self.tuning.to_rust_literal();
+        #[cfg(any(feature = "game", feature = "headless-screenshot"))]
         match arboard::Clipboard::new() {
             Ok(mut cb) => {
                 if let Err(e) = cb.set_text(&text) {
@@ -948,6 +949,8 @@ impl RainDebugOverlay {
             }
             Err(e) => log::error!("Could not open clipboard: {e}"),
         }
+        #[cfg(not(any(feature = "game", feature = "headless-screenshot")))]
+        log::info!("Rain tuning snapshot (clipboard unavailable in this build):\n{text}");
     }
 
     pub fn feed_key_event(&mut self, scancode: Option<Scancode>, ctrl: bool) -> bool {

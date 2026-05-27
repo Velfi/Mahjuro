@@ -8,7 +8,7 @@ pub(crate) struct RoomGiCaptureStaging {
 
 impl WgpuRenderer {
     /// Queue a one-shot GPU readback of probe SH after the next dynamic GI compute
-    /// (`mahjuro bake-room-gi`).
+    /// (`mahjuro bake-room`).
     pub fn request_room_gi_capture(&mut self, room: crate::render::room_gi_bake::RoomGiRoom) {
         self.room_gi_capture_pending = Some(room);
         self.room_gi_captured = None;

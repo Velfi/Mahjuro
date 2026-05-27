@@ -334,8 +334,7 @@ struct ShopShaded {
 fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
     let base_s = textureSample(base_color, base_sampler, in.uv);
     let is_hallway_wall_tint = abs(in.v_color.a - 3.0) < 0.01;
-    let is_candle_sss_bake = abs(in.v_color.a - 4.0) < 0.01;
-    let vtx_alpha = select(in.v_color.a, 1.0, is_hallway_wall_tint || is_candle_sss_bake);
+    let vtx_alpha = select(in.v_color.a, 1.0, is_hallway_wall_tint);
     let tex_a = base_s.a * vtx_alpha;
     if (pbr.alpha_mode == 1u) {
         if (tex_a < pbr.alpha_cutoff) {
@@ -548,13 +547,7 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         punctual_atlas || is_archive_decal || is_archive_no_dir_shadow,
     );
     lit_hdr = lit_hdr * shadow_vis;
-    var hdr = lit_hdr + emissive;
-
-    // Shop candle wax: offline SSS bake on `TEXCOORD_1` stored in `in.uv` (`decal_tex`, linear RGB).
-    if (is_candle_sss_bake) {
-        let baked_sss = textureSample(decal_tex, base_sampler, in.uv).rgb;
-        hdr = hdr + baked_sss * cam.tile_seed;
-    }
+    let hdr = lit_hdr + emissive;
 
     return ShopShaded(hdr, emissive, out_alpha);
 }

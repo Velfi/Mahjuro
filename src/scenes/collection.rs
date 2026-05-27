@@ -27,7 +27,7 @@ use crate::render::theme::{color, metrics, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::render::world_space::{surface_anchor_from_world_xyz, world_on_camera_ray_plane_z};
 use crate::ui::controller_hints::{
-    HintKey, HintRow, HintSegment, HintStyle, inspect_camera_hint_row, inspect_dismiss_hint_row,
+    HintSegment, HintStyle, inspect_camera_hint_row,
     push_inline_hint_rows,
 };
 use crate::ui::focus_nav::{FocusDir, pick_neighbor, push_focus_ring};
@@ -1099,70 +1099,38 @@ impl CollectionScene {
         let hint_line_h = hint_style.line_h;
         let hint_band_x = margin_x * 0.5;
         let hint_band_w = w - margin_x;
-        let controller = matches!(ctx.input_mode, InputMode::Controller);
         let inspect_open = inspect.is_some();
 
         let mut legend_row_rects: Vec<[f32; 4]> = Vec::new();
         let mut legend_rows: Vec<Vec<HintSegment>> = Vec::new();
-        let mut hint_line_count = 1usize;
 
         if inspect_open {
             legend_rows.push(inspect_camera_hint_row(ctx.input_mode));
-            legend_rows.push(inspect_dismiss_hint_row(ctx.input_mode));
-            hint_line_count = 2;
         } else if matches!(self.active_tab, Tab::Chronicle) && all_count_hint == 0 {
             legend_rows.push(vec![HintSegment::text(
                 "Finish a non-tutorial run to add folios here.",
             )]);
-        } else if matches!(self.active_tab, Tab::Chronicle) && all_count_hint > 0 {
-            let mut chronicle_row = HintRow::new();
-            if !controller {
-                chronicle_row = chronicle_row.text("Wheel or ");
-            }
-            legend_rows.push(
-                chronicle_row
-                    .bind("scroll", vec![HintKey::dpad_vertical()])
-                    .sep()
-                    .bind("pane", vec![HintKey::dpad_horizontal()])
-                    .into_segments(),
-            );
-        } else {
-            let inspect_keys = if controller {
-                vec![
-                    HintKey::Action(UiAction::Confirm),
-                    HintKey::Action(UiAction::NorthFacePress),
-                ]
-            } else {
-                vec![
-                    HintKey::Keyboard("keyboard_enter"),
-                    HintKey::Keyboard("keyboard_e"),
-                ]
-            };
-            if archive_multi_page {
-                legend_rows.push(
-                    HintRow::new()
-                        .bind("inspect", inspect_keys)
-                        .sep()
-                        .bind("page", vec![HintKey::dpad_horizontal()])
-                        .into_segments(),
-                );
-            } else {
-                legend_rows.push(HintRow::new().bind("inspect", inspect_keys).into_segments());
-            }
         }
 
-        let hint_h = hint_line_h * hint_line_count as f32 + 10.0;
+        let hint_line_count = legend_rows.len();
+        let hint_h = if hint_line_count == 0 {
+            0.0
+        } else {
+            hint_line_h * hint_line_count as f32 + 10.0
+        };
         let hint_y = if chronicle_ledger {
             h - hint_h - (h * 0.018).max(10.0)
         } else {
             footer_anchor_y - hint_h - (h * 0.014).max(10.0)
         };
 
-        if inspect_open {
-            legend_row_rects.push([hint_band_x, hint_y, hint_band_w, hint_line_h]);
-            legend_row_rects.push([hint_band_x, hint_y + hint_line_h, hint_band_w, hint_line_h]);
-        } else {
-            legend_row_rects.push([hint_band_x, hint_y, hint_band_w, hint_line_h]);
+        for i in 0..hint_line_count {
+            legend_row_rects.push([
+                hint_band_x,
+                hint_y + hint_line_h * i as f32,
+                hint_band_w,
+                hint_line_h,
+            ]);
         }
 
         // Page indicator — `Page X / Y · ● ○ ○ …` centred in the gap between
@@ -2957,9 +2925,16 @@ fn collection_ordeals_tab_index() -> usize {
     collection_chronicle_tab_index().saturating_sub(1)
 }
 
+#[inline]
+fn collection_yaku_tab_index() -> usize {
+    TABS.iter()
+        .position(|t| matches!(t, Tab::Yaku))
+        .unwrap_or(2)
+}
+
 /// Tab targets allowed for a vertical move from one tab button. Chronicle sits
-/// on a lower shelf and is only reachable downward from Ordeals; other tabs
-/// should drop into the cabinet instead.
+/// on a lower shelf and is reachable downward from Yaku (zodiacs btn) and
+/// Ordeals; other main-row tabs should drop into the cabinet instead.
 fn collection_tab_chrome_rects_for_vertical_step(
     items: &[FlatItem<CollectionAction>],
     from: CollectionAction,
@@ -2967,10 +2942,13 @@ fn collection_tab_chrome_rects_for_vertical_step(
 ) -> Vec<(CollectionAction, [f32; 4])> {
     let chronicle_idx = collection_chronicle_tab_index();
     let bosses_idx = collection_ordeals_tab_index();
+    let yaku_idx = collection_yaku_tab_index();
     collection_tab_chrome_rects(items)
         .into_iter()
         .filter(|(action, _)| match (from, dir) {
-            (CollectionAction::SelectTab(i), FocusDir::Down) if i != bosses_idx => {
+            (CollectionAction::SelectTab(i), FocusDir::Down)
+                if i != bosses_idx && i != yaku_idx =>
+            {
                 !matches!(action, CollectionAction::SelectTab(ti) if *ti == chronicle_idx)
             }
             _ => true,
@@ -3286,6 +3264,7 @@ mod tests {
             .collect();
         let chronicle_idx = TABS.len() - 1;
         let bosses_idx = chronicle_idx - 1;
+        let yaku_idx = collection_yaku_tab_index();
         let bosses = chrome
             .iter()
             .find(
@@ -3297,6 +3276,16 @@ mod tests {
             pick_neighbor(bosses, FocusDir::Down, &chrome),
             Some(CollectionAction::SelectTab(chronicle_idx)),
             "Down from Ordeals should reach the lower-shelf Chronicle btn"
+        );
+        let yaku = chrome
+            .iter()
+            .find(|(action, _)| matches!(action, CollectionAction::SelectTab(i) if *i == yaku_idx))
+            .expect("yaku tab rect")
+            .1;
+        assert_eq!(
+            pick_neighbor(yaku, FocusDir::Down, &chrome),
+            Some(CollectionAction::SelectTab(chronicle_idx)),
+            "Down from Yaku (zodiacs btn) should reach Chronicle"
         );
         let relics = chrome
             .iter()

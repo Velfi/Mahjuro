@@ -136,10 +136,8 @@ impl TilePackKind {
     }
 
     /// Wax-seal color for the merchant-envelope detail centered on the
-    /// pack face. Used both at bake time (`scripts/bake_pack_seals.py`,
-    /// reading `tools/pack_palette.json`) and at runtime as the hover
-    /// halo on the shop counter — the two MUST agree, which is why the
-    /// canonical value lives in [`crate::render::pack_palette`].
+    /// pack face. Matches cover art and the runtime hover halo on the shop
+    /// counter — canonical value in [`crate::render::pack_palette`].
     ///
     /// Each pack nudges off canonical `RUBY` so the seals read as a
     /// *family* of ceremonial reds rather than six unrelated splotches.

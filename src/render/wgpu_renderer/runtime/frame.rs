@@ -291,12 +291,20 @@ impl WgpuRenderer {
         &self,
         frame: &UiFrame,
         effects_quality: crate::persistence::EffectsQuality,
+        cascade_effects_quality: crate::persistence::EffectsQuality,
         gamma: f32,
     ) {
         // Update globals with current time for animated shaders.
         let w_f = self.size.width as f32;
         let h_f = self.size.height as f32;
         let (cx, cy) = frame.cursor_pos.unwrap_or((w_f * 0.5, h_f * 0.5));
+        let cascade_quality_level = if frame.transition_progress > 0.0
+            && frame.transition_progress < 1.0
+        {
+            cascade_effects_quality.quality_level_f32()
+        } else {
+            0.0
+        };
         self.queue.write_buffer(
             &self.globals_buffer,
             0,
@@ -308,7 +316,7 @@ impl WgpuRenderer {
                 transition_progress: frame.transition_progress,
                 quality_level: effects_quality.quality_level_f32(),
                 moon_phase: current_moon_phase(),
-                _globals_pad: [0.0; 3],
+                _globals_pad: [cascade_quality_level, 0.0, 0.0],
             }),
         );
         // Gameplay / artist-style point lights (group 1 for tiles + lit_mesh).

@@ -2,7 +2,6 @@ use anyhow::Context;
 
 use super::bot;
 use super::main_cli::Command;
-use super::main_headless;
 
 /// Run non-interactive CLI subcommands. Returns `Ok(true)` when the command
 /// was handled and the app should exit before creating the window.
@@ -57,18 +56,6 @@ pub fn run_cli_command(command: Option<Command>) -> anyhow::Result<bool> {
                 bot_cli.bot_config(),
                 bot_cli.bot_run_options(),
             );
-            Ok(true)
-        }
-        Some(Command::Screenshot(s)) => {
-            main_headless::run_screenshot_command(s)?;
-            Ok(true)
-        }
-        Some(Command::BakeRoomGi(b)) => {
-            main_headless::run_bake_room_gi_command(b)?;
-            Ok(true)
-        }
-        Some(Command::BakeRoomShadows(b)) => {
-            main_headless::run_bake_room_shadows_command(b)?;
             Ok(true)
         }
         Some(Command::VulkanWsiProbe) => {

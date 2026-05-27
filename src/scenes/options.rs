@@ -8,7 +8,6 @@ use crate::audio::SfxId;
 use crate::game::event_bus::GameEvent;
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
-use crate::ui::button_prompts::{ButtonPrompt, GamepadStyle};
 use crate::ui::clip::intersect_rect;
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::smooth_scroll::SmoothScroll;
@@ -208,45 +207,12 @@ fn section_at_scroll(scroll: f32) -> Section {
     Section::Audio
 }
 
-/// Input/device context for hint copy and scroll fades in [`OptionsScene::draw_overlay`].
-pub struct OptionsDrawHint {
-    pub input_mode: InputMode,
-    pub gamepad_style: GamepadStyle,
-    pub swap_ab: bool,
-    pub swap_xy: bool,
-    /// Color the top/bottom scroll fades blend into (standalone vs pause overlay).
-    pub scroll_fade_backdrop: [f32; 4],
-}
-
-impl Default for OptionsDrawHint {
-    fn default() -> Self {
-        Self {
-            input_mode: InputMode::Cursor,
-            gamepad_style: GamepadStyle::default(),
-            swap_ab: false,
-            swap_xy: false,
-            scroll_fade_backdrop: color::WALNUT_INK,
-        }
-    }
-}
-
-impl OptionsDrawHint {
-    pub fn from_draw_ctx(ctx: &DrawCtx<'_>) -> Self {
-        Self {
-            input_mode: ctx.input_mode,
-            gamepad_style: ctx.gamepad_style,
-            swap_ab: ctx.gamepad_swap_ab,
-            swap_xy: ctx.gamepad_swap_xy,
-            scroll_fade_backdrop: color::WALNUT_INK,
-        }
-    }
-
-    /// Pause-menu overlay sits on a dim walnut scrim, not a solid fill.
-    pub fn pause_overlay(ctx: &DrawCtx<'_>) -> Self {
-        Self {
-            scroll_fade_backdrop: color::alpha(color::WALNUT_INK, 0.78),
-            ..Self::from_draw_ctx(ctx)
-        }
+/// Scroll-fade backdrop for [`OptionsScene::draw_overlay`].
+pub fn options_scroll_fade_backdrop(pause_scrim: bool) -> [f32; 4] {
+    if pause_scrim {
+        color::alpha(color::WALNUT_INK, 0.78)
+    } else {
+        color::WALNUT_INK
     }
 }
 
@@ -348,10 +314,7 @@ struct PanelLayout {
     back_y: f32,
     back_w: f32,
     back_h: f32,
-    // Hint
-    hint_y: f32,
-    hint_h: f32,
-    // Version footer (below hint)
+    // Version footer
     version_y: f32,
     version_h: f32,
 }
@@ -381,13 +344,11 @@ fn compute_layout(w: f32, h: f32) -> PanelLayout {
     let slot_h = (40.0 * scale).max(26.0);
     let slot_gap = (10.0 * scale).max(5.0);
 
-    // Back button, hint, and version footer pinned to the bottom.
+    // Back button and version footer pinned to the bottom.
     let back_h = (42.0 * scale).max(28.0);
-    let hint_h = (20.0 * scale).max(14.0);
     let version_h = (14.0 * scale).max(10.0);
     let version_y = h - version_h - (4.0 * scale);
-    let hint_y = version_y - hint_h - (6.0 * scale);
-    let back_y = hint_y - back_h - (12.0 * scale);
+    let back_y = version_y - back_h - (12.0 * scale);
     let back_w = total_w;
     let back_x = margin;
 
@@ -415,8 +376,6 @@ fn compute_layout(w: f32, h: f32) -> PanelLayout {
         back_y,
         back_w,
         back_h,
-        hint_y,
-        hint_h,
         version_y,
         version_h,
     }
@@ -1013,53 +972,12 @@ impl OptionsScene {
         false
     }
 
-    fn hint_text(&self, back_focused: bool, hint: &OptionsDrawHint) -> String {
-        if matches!(hint.input_mode, InputMode::Controller) {
-            let confirm = ButtonPrompt::controller_action_label(
-                hint.gamepad_style,
-                UiAction::Confirm,
-                hint.swap_ab,
-                hint.swap_xy,
-            )
-            .unwrap_or("A");
-            let cancel = ButtonPrompt::controller_action_label(
-                hint.gamepad_style,
-                UiAction::Cancel,
-                hint.swap_ab,
-                hint.swap_xy,
-            )
-            .unwrap_or("B");
-            if back_focused {
-                return format!("{confirm}: back   ·   {cancel}: back");
-            }
-            if self.focused.is_slider() {
-                return format!("←→: adjust   ·   ↑↓: navigate   ·   {cancel}: back");
-            }
-            if self.focused == Row::ExportPlayStats || self.focused == Row::Credits {
-                return format!("{confirm}: select   ·   ↑↓: navigate   ·   {cancel}: back");
-            }
-            return format!(
-                "←→: change   ·   {confirm}: toggle   ·   ↑↓: navigate   ·   {cancel}: back"
-            );
-        }
-
-        if back_focused {
-            "Enter: back · Esc: back".into()
-        } else if self.focused.is_slider() {
-            "←→ or drag: adjust · ↑↓: navigate · Esc: back".into()
-        } else if self.focused == Row::ExportPlayStats || self.focused == Row::Credits {
-            "Enter: select · ↑↓: navigate · Esc: back".into()
-        } else {
-            "←→: change · Enter: toggle · ↑↓: navigate · Esc: back".into()
-        }
-    }
-
     /// Build the options menu UI elements into the supplied buffers.
     pub fn draw_overlay(
         &self,
         w: f32,
         h: f32,
-        hint: OptionsDrawHint,
+        scroll_fade_backdrop: [f32; 4],
         instances: &mut Vec<GpuInstance>,
         text_labels: &mut Vec<TextLabel>,
         buttons: &mut Vec<ButtonDef>,
@@ -1211,7 +1129,7 @@ impl OptionsScene {
                     layout.content_w,
                     fade_h.min(content_h * 0.35),
                 ],
-                color: color::alpha(hint.scroll_fade_backdrop, 0.72),
+                color: color::alpha(scroll_fade_backdrop, 0.72),
                 user: 0,
             });
         }
@@ -1223,7 +1141,7 @@ impl OptionsScene {
                     layout.content_w,
                     fade_h.min(content_h * 0.35),
                 ],
-                color: color::alpha(hint.scroll_fade_backdrop, 0.72),
+                color: color::alpha(scroll_fade_backdrop, 0.72),
                 user: 0,
             });
         }
@@ -1275,14 +1193,6 @@ impl OptionsScene {
             (layout.back_x, layout.back_y, layout.back_w, layout.back_h),
             BACK_ID,
         ));
-
-        // ── Hint ───────────────────────────────────────────────────────
-        text_labels.push(TextLabel {
-            rect: [0.0, layout.hint_y, w, layout.hint_h],
-            text: self.hint_text(self.back_focused, &hint),
-            color: color::STONE,
-            ..Default::default()
-        });
 
         let version_text = if cfg!(debug_assertions) {
             "vNEXT".into()
@@ -1459,6 +1369,7 @@ impl SceneBehavior for OptionsScene {
         if self.take_confirm_requested() {
             ctx.bus.push(GameEvent::UiSound(SfxId::UiConfirm));
         }
+        #[cfg(any(feature = "game", feature = "headless-screenshot"))]
         if self.take_export_requested() {
             let path = crate::persistence::play_stats_export_path(ctx.active_profile);
             match crate::bot::export_play_history_html(&path, ctx.progress) {
@@ -1494,7 +1405,7 @@ impl SceneBehavior for OptionsScene {
         self.draw_overlay(
             w,
             h,
-            OptionsDrawHint::from_draw_ctx(&ctx),
+            options_scroll_fade_backdrop(false),
             &mut instances,
             &mut text_labels,
             &mut buttons,

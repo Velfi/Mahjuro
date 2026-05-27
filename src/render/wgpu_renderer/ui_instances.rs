@@ -15,6 +15,9 @@ pub struct GpuInstance {
 #[derive(Clone)]
 pub struct RenderSettings {
     pub effects_quality: crate::persistence::EffectsQuality,
+    /// User Options → Effects tier for the shooting-star wipe only (see
+    /// `Globals._globals_pad[0]` / `shooting_star_cascade.wgsl`).
+    pub cascade_effects_quality: crate::persistence::EffectsQuality,
     pub tile_preset: crate::persistence::TilePreset,
     pub tile_material: crate::persistence::TileMaterial,
     /// Subdirectory of `assets/textures/tile_sets/` whose PNGs should be used for tile faces.

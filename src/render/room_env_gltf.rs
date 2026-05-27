@@ -65,15 +65,6 @@ fn capped_image_at(capped: &[Option<CappedGltfImage>], index: usize) -> Option<&
 pub const ROOM_ENV_COLOR_A_ARCHIVE_DECAL: f32 = 2.0;
 /// `COLOR_0.a` tag: skip directional shadow receive (`room_glb.wgsl`) — chrome / pedestal shell.
 pub const ROOM_ENV_COLOR_A_ARCHIVE_NO_DIRECTIONAL_SHADOW: f32 = 3.0;
-/// `COLOR_0.a` tag: shop candle wax samples baked SSS at `uv` (glTF `TEXCOORD_1`).
-pub const ROOM_ENV_COLOR_A_CANDLE_SSS_BAKE: f32 = 4.0;
-
-/// glTF node prefix for shop environment candle **meshes** (not `light_candle*` punctuals).
-pub const SHOP_CANDLE_WAX_NODE_PREFIX: &str = "Candle";
-/// Blender material name on exported shop candle geometry.
-pub const SHOP_CANDLE_WAX_MATERIAL_NAME: &str = "Wax SSS translucent shader";
-/// Baked subsurface pass (linear RGB) sampled with `TEXCOORD_1` — rebake after moving candles.
-pub const SHOP_CANDLE_SSS_BAKE_TEXTURE: &str = "textures/shop/candle_sss.png";
 
 /// Shop [`shop.glb`](../../../assets/3d/shop.glb) glazed ceramic on relic/talisman trays.
 pub const SHOP_PORCELAIN_MATERIAL_NAME: &str = "Porcelain";
@@ -85,18 +76,6 @@ pub const SHOP_PORCELAIN_ROUGHNESS_FACTOR: f32 = 0.40;
 #[inline]
 pub fn is_shop_porcelain_material(material_name: Option<&str>) -> bool {
     material_name == Some(SHOP_PORCELAIN_MATERIAL_NAME)
-}
-
-/// Shop [`shop.glb`](../../../assets/3d/shop.glb) candle votive mesh (wax body).
-#[inline]
-pub fn is_shop_candle_wax_mesh(gltf_node_name: &str, material_name: Option<&str>) -> bool {
-    gltf_node_name.starts_with(SHOP_CANDLE_WAX_NODE_PREFIX)
-        || material_name == Some(SHOP_CANDLE_WAX_MATERIAL_NAME)
-}
-
-#[inline]
-pub fn is_shop_candle_wax_node_name(node: &str) -> bool {
-    node.starts_with(SHOP_CANDLE_WAX_NODE_PREFIX)
 }
 
 /// One environment mesh primitive plus embedded glTF sampler parameters for GPU samplers.
@@ -670,7 +649,6 @@ pub fn decode_env_primitive(
     let normal_xform = node_world.inverse().transpose();
     let material = primitive.material();
     let material_name = material.name();
-    let is_candle_wax = is_shop_candle_wax_mesh(gltf_node_name, material_name);
     let is_porcelain = is_shop_porcelain_material(material_name);
     let sampler_cpu = sampler_cpu_from_material(&material);
 
@@ -767,25 +745,6 @@ pub fn decode_env_primitive(
             compute_vertex_tangents(&positions_local, &normals_local, &uv_emr, &indices);
     }
 
-    // Candle wax: `uv` = lightmap (`TEXCOORD_1`) for baked SSS; `uv_emr` stays on set 0 for defaults.
-    if is_candle_wax {
-        if let Some(tc1) = reader.read_tex_coords(1) {
-            let uv1: Vec<[f32; 2]> = tc1.into_f32().collect();
-            if uv1.len() == positions_local.len() {
-                uvs = uv1;
-            } else {
-                log::warn!(
-                    "{log_asset_label} {gltf_node_name}: TEXCOORD_1 count mismatch for candle SSS"
-                );
-            }
-        }
-        uv_emr = if let Some(tc0) = reader.read_tex_coords(0) {
-            tc0.into_f32().collect()
-        } else {
-            vec![[0.0, 0.0]; positions_local.len()]
-        };
-    }
-
     let colors: Vec<[f32; 4]> = if let Some(iter) = reader.read_colors(0) {
         iter.into_rgba_f32().collect()
     } else {
@@ -863,10 +822,6 @@ pub fn decode_env_primitive(
         for v in &mut vertices {
             v.color[3] = ROOM_ENV_COLOR_A_ARCHIVE_NO_DIRECTIONAL_SHADOW;
         }
-    } else if is_candle_wax {
-        for v in &mut vertices {
-            v.color[3] = ROOM_ENV_COLOR_A_CANDLE_SSS_BAKE;
-        }
     }
     let factor = pbr.base_color_factor();
 
@@ -887,16 +842,10 @@ pub fn decode_env_primitive(
     match &mut albedo_rgba {
         Some((pix, _, _)) => multiply_rgba8_by_factor(pix, &factor),
         None => {
-            let want_fallback_tex = is_candle_wax
-                || factor != [1.0, 1.0, 1.0, 1.0]
-                || pbr.base_color_texture().is_some();
+            let want_fallback_tex =
+                factor != [1.0, 1.0, 1.0, 1.0] || pbr.base_color_texture().is_some();
             if want_fallback_tex {
-                let wax_factor = if is_candle_wax {
-                    [0.94, 0.86, 0.62, 1.0]
-                } else {
-                    factor
-                };
-                albedo_rgba = Some(solid_albedo_rgba8(&wax_factor));
+                albedo_rgba = Some(solid_albedo_rgba8(&factor));
             }
         }
     }
@@ -947,18 +896,12 @@ pub fn decode_env_primitive(
 
     let alpha_mode = GltfAlphaMode::from(material.alpha_mode());
     let alpha_cutoff = material.alpha_cutoff().unwrap_or(0.5);
-    let (metallic_factor, roughness_factor) = if is_candle_wax {
-        (0.0, 0.88)
-    } else if is_porcelain {
+    let (metallic_factor, roughness_factor) = if is_porcelain {
         (0.0, SHOP_PORCELAIN_ROUGHNESS_FACTOR)
     } else {
         (pbr.metallic_factor(), pbr.roughness_factor())
     };
-    let emissive_factor = if is_candle_wax {
-        [0.0, 0.0, 0.0]
-    } else {
-        crate::render::gltf_helpers::effective_gltf_emissive_rgb(&material)
-    };
+    let emissive_factor = crate::render::gltf_helpers::effective_gltf_emissive_rgb(&material);
 
     Ok(RoomEnvPrimitiveCpu {
         gltf_node_name: if gltf_node_name.is_empty() {

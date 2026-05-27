@@ -252,24 +252,8 @@ pub(super) fn process_focus_and_actions(
             });
             if let Some(rect) = start_rect {
                 let spatial = pick_neighbor(rect, dir, &focus_rects);
-                // Navigation overrides for the two-row action bar:
+                // Navigation overrides for the action bar (vertical links + cash-in row).
                 let overridden = match (scene.focus, dir) {
-                    // LEFT from Play (commit melds) → Discard
-                    (Some(FocusTarget::Button(GameplayButton::Play)), FocusDir::Left) => {
-                        focus_rects
-                            .iter()
-                            .find(|(t, _)| {
-                                matches!(t, FocusTarget::Button(GameplayButton::Discard))
-                            })
-                            .map(|(t, _)| *t)
-                    }
-                    // RIGHT from Discard → Play (commit melds)
-                    (Some(FocusTarget::Button(GameplayButton::Discard)), FocusDir::Right) => {
-                        focus_rects
-                            .iter()
-                            .find(|(t, _)| matches!(t, FocusTarget::Button(GameplayButton::Play)))
-                            .map(|(t, _)| *t)
-                    }
                     // RIGHT from Play → Cash in when banked structure can be scored
                     (Some(FocusTarget::Button(GameplayButton::Play)), FocusDir::Right)
                         if GameEngine::read(ctx.run).trigger_enabled =>

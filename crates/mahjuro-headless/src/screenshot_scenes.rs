@@ -1,8 +1,7 @@
-use crate::game::run::RunState;
-use crate::main_cli;
-use crate::scenes::shop::ShopScene;
-use crate::scenes::{GameOverScene, GameplayScene, Scene};
-use crate::scenes::{
+use mahjuro::game::run::RunState;
+use mahjuro::scenes::shop::ShopScene;
+use mahjuro::scenes::{GameOverScene, GameplayScene, Scene};
+use mahjuro::scenes::{
     MetaLevelUpPresenter, ShowcasePresenter, ShowcaseScene, TilePackPresenter,
     TutorialCampaignScene, ZodiacPresenter,
 };
@@ -13,7 +12,7 @@ use super::fixtures::{
 };
 use super::slug::{parse_tile_pack_slug, parse_zodiac_slug};
 
-pub(crate) fn validate_screenshot_cli(s: &main_cli::ScreenshotCli) -> anyhow::Result<()> {
+pub(crate) fn validate_screenshot_cli(s: &crate::screenshot_cli::ScreenshotCli) -> anyhow::Result<()> {
     let shop_like = matches!(s.scene.as_str(), "shop");
     let collection_like = collection_screenshot_tab(&s.scene).is_some();
     if s.item_inspect && !shop_like && !collection_like {
@@ -84,7 +83,7 @@ fn screenshot_scene_accepts_page(scene: &str) -> bool {
     )
 }
 
-fn screenshot_page_index(s: &main_cli::ScreenshotCli) -> usize {
+fn screenshot_page_index(s: &crate::screenshot_cli::ScreenshotCli) -> usize {
     s.page.map(|p| p.saturating_sub(1) as usize).unwrap_or(0)
 }
 
@@ -118,7 +117,7 @@ fn collection_screenshot_tab(scene: &str) -> Option<CollectionScreenshotTab> {
 }
 
 fn collection_scene(tab: CollectionScreenshotTab) -> Scene {
-    let mut coll = crate::scenes::CollectionScene::new();
+    let mut coll = mahjuro::scenes::CollectionScene::new();
     match tab {
         CollectionScreenshotTab::Relics => {}
         CollectionScreenshotTab::Chronicle => coll.prepare_chronicle_for_screenshot(),
@@ -128,18 +127,18 @@ fn collection_scene(tab: CollectionScreenshotTab) -> Scene {
     Scene::Collection(coll)
 }
 
-fn zodiac_from_cli(s: &main_cli::ScreenshotCli) -> anyhow::Result<crate::core::zodiac::ZodiacKind> {
+fn zodiac_from_cli(s: &crate::screenshot_cli::ScreenshotCli) -> anyhow::Result<mahjuro::core::zodiac::ZodiacKind> {
     match s.zodiac.as_deref() {
         Some(slug) => parse_zodiac_slug(slug),
-        None => Ok(crate::core::zodiac::ZodiacKind::Snake),
+        None => Ok(mahjuro::core::zodiac::ZodiacKind::Snake),
     }
 }
 
-fn zodiac_celebration_level(s: &main_cli::ScreenshotCli) -> u32 {
+fn zodiac_celebration_level(s: &crate::screenshot_cli::ScreenshotCli) -> u32 {
     s.celebration_level.unwrap_or(2).max(1)
 }
 
-pub(crate) fn zodiac_showcase_scene(s: &main_cli::ScreenshotCli) -> anyhow::Result<Scene> {
+pub(crate) fn zodiac_showcase_scene(s: &crate::screenshot_cli::ScreenshotCli) -> anyhow::Result<Scene> {
     let z = zodiac_from_cli(s)?;
     let level = zodiac_celebration_level(s);
     let yaku = z.yaku();
@@ -154,7 +153,7 @@ pub(crate) fn tile_pack_showcase_scene(
 ) -> anyhow::Result<Scene> {
     let pack = match pack_slug {
         Some(slug) => parse_tile_pack_slug(slug)?,
-        None => crate::core::tile_pack::TilePackKind::Honors,
+        None => mahjuro::core::tile_pack::TilePackKind::Honors,
     };
     Ok(Scene::Showcase(ShowcaseScene::new(
         ShowcasePresenter::TilePack(Box::new(TilePackPresenter::new_headless_screenshot(
@@ -164,12 +163,12 @@ pub(crate) fn tile_pack_showcase_scene(
 }
 
 fn game_over_defeat_scene(
-    s: &main_cli::ScreenshotCli,
+    s: &crate::screenshot_cli::ScreenshotCli,
     run: &mut RunState,
-    progress: &mut crate::core::progression::PlayerProgress,
+    progress: &mut mahjuro::core::progression::PlayerProgress,
 ) -> anyhow::Result<Scene> {
-    use crate::core::memorial_talisman::{select_memorial, snapshot_from_run};
-    use crate::game::event_bus::GameOverReason;
+    use mahjuro::core::memorial_talisman::{select_memorial, snapshot_from_run};
+    use mahjuro::game::event_bus::GameOverReason;
 
     if s.bot_play && s.from_run_history.is_some() {
         anyhow::bail!("use only one of --bot-play or --from-run-history");
@@ -179,7 +178,7 @@ fn game_over_defeat_scene(
     }
 
     if let Some(n) = s.seed_bot_runs {
-        crate::bot::seed_progress_from_bot_runs(progress, n);
+        mahjuro::bot::seed_progress_from_bot_runs(progress, n);
     }
 
     let reason = if let Some(idx) = s.from_run_history {
@@ -195,11 +194,11 @@ fn game_over_defeat_scene(
         rec.hydrate_game_over_run(run);
         reason
     } else if s.bot_play {
-        let (terminal, stats) = crate::bot::play_bot_run(
-            crate::bot::BotConfig::default(),
-            crate::bot::BotRunOptions {
+        let (terminal, stats) = mahjuro::bot::play_bot_run(
+            mahjuro::bot::BotConfig::default(),
+            mahjuro::bot::BotRunOptions {
                 log: false,
-                ..crate::bot::BotRunOptions::default()
+                ..mahjuro::bot::BotRunOptions::default()
             },
             Some(progress.runs_completed.saturating_add(1).max(1)),
         );
@@ -231,9 +230,9 @@ pub(crate) struct ScreenshotSceneSetup {
 }
 
 pub(crate) fn resolve_screenshot_scene(
-    s: &main_cli::ScreenshotCli,
+    s: &crate::screenshot_cli::ScreenshotCli,
     run: &mut RunState,
-    progress: &mut crate::core::progression::PlayerProgress,
+    progress: &mut mahjuro::core::progression::PlayerProgress,
 ) -> anyhow::Result<ScreenshotSceneSetup> {
     let mut hero_play = false;
     let mut unlock_yaku = false;
@@ -256,7 +255,7 @@ pub(crate) fn resolve_screenshot_scene(
         "yaku_journal" => {
             unlock_yaku = true;
             (
-                Scene::YakuJournal(crate::scenes::YakuJournalScene::new()),
+                Scene::YakuJournal(mahjuro::scenes::YakuJournalScene::new()),
                 false,
             )
         }
@@ -270,10 +269,10 @@ pub(crate) fn resolve_screenshot_scene(
             (Scene::Gameplay(Box::new(GameplayScene::new())), true)
         }
         "pick_chamber" | "pick_blind" => (
-            Scene::PickChamber(crate::scenes::PickChamberScene::new()),
+            Scene::PickChamber(mahjuro::scenes::PickChamberScene::new()),
             true,
         ),
-        "staircase" => (Scene::Staircase(crate::scenes::StaircaseScene::new()), true),
+        "staircase" => (Scene::Staircase(mahjuro::scenes::StaircaseScene::new()), true),
         "shop" => {
             setup_shop_state(run);
             let mut shop = ShopScene::new(run, progress);
@@ -283,21 +282,21 @@ pub(crate) fn resolve_screenshot_scene(
             }
             (Scene::Shop(shop), true)
         }
-        "options" => (Scene::Options(crate::scenes::OptionsScene::new()), false),
+        "options" => (Scene::Options(mahjuro::scenes::OptionsScene::new()), false),
         "credits" => (
-            Scene::Credits(crate::scenes::CreditsScene::from_options()),
+            Scene::Credits(mahjuro::scenes::CreditsScene::from_options()),
             false,
         ),
         "main_menu_exterior" | "start_screen" => (
-            Scene::MainMenuExterior(crate::scenes::MainMenuExteriorScene::new()),
+            Scene::MainMenuExterior(mahjuro::scenes::MainMenuExteriorScene::new()),
             false,
         ),
         "tile_select" => (
-            Scene::TileSelect(crate::scenes::TileSelectScene::new()),
+            Scene::TileSelect(mahjuro::scenes::TileSelectScene::new()),
             false,
         ),
         "guide" | "tile_guide" | "tiles_guide" => (
-            Scene::Guide(crate::scenes::GuideScene::with_page(screenshot_page_index(
+            Scene::Guide(mahjuro::scenes::GuideScene::with_page(screenshot_page_index(
                 s,
             ))),
             false,
@@ -307,43 +306,43 @@ pub(crate) fn resolve_screenshot_scene(
             false,
         ),
         "transition_playground" => (
-            Scene::TransitionPlayground(crate::scenes::TransitionPlaygroundScene::new(false)),
+            Scene::TransitionPlayground(mahjuro::scenes::TransitionPlaygroundScene::new(false)),
             false,
         ),
         "material_viewer" => (
-            Scene::MaterialViewer(crate::scenes::MaterialViewerScene::new(false)),
+            Scene::MaterialViewer(mahjuro::scenes::MaterialViewerScene::new(false)),
             false,
         ),
         "rumble_lab" => (
-            Scene::RumbleLab(crate::scenes::RumbleLabScene::new(false)),
+            Scene::RumbleLab(mahjuro::scenes::RumbleLabScene::new(false)),
             false,
         ),
         "tile_anchor_lab" => (
-            Scene::TileAnchorLab(crate::scenes::TileAnchorLabScene::new(false)),
+            Scene::TileAnchorLab(mahjuro::scenes::TileAnchorLabScene::new(false)),
             false,
         ),
         "button_aabb_lab" => (
-            Scene::ButtonAabbLab(crate::scenes::ButtonAabbLabScene::new(false)),
+            Scene::ButtonAabbLab(mahjuro::scenes::ButtonAabbLabScene::new(false)),
             false,
         ),
-        "tixels" => (Scene::Tixels(crate::scenes::TixelsScene::new(false)), false),
+        "tixels" => (Scene::Tixels(mahjuro::scenes::TixelsScene::new(false)), false),
         "relic_unlock" => {
             force_relic_modal = true;
             (
-                Scene::MainMenuExterior(crate::scenes::MainMenuExteriorScene::new()),
+                Scene::MainMenuExterior(mahjuro::scenes::MainMenuExteriorScene::new()),
                 false,
             )
         }
         "game_over_level_up" | "meta_level_up" => {
-            let mut level_progress = crate::core::progression::PlayerProgress::new();
+            let mut level_progress = mahjuro::core::progression::PlayerProgress::new();
             level_progress.level_progress_points =
-                crate::core::progression::PlayerProgress::min_points_for_level(2);
+                mahjuro::core::progression::PlayerProgress::min_points_for_level(2);
             let result = level_progress.check_level_up().ok_or_else(|| {
                 anyhow::anyhow!("game_over_level_up: check_level_up returned None")
             })?;
             let ww = s.width.max(1) as f32;
             let hh = s.height.max(1) as f32;
-            let modal = crate::main_draw::build_level_up_modal(&result, ww, hh)
+            let modal = mahjuro::main_draw::build_level_up_modal(&result, ww, hh)
                 .ok_or_else(|| anyhow::anyhow!("game_over_level_up: no unlock pages for modal"))?;
             (
                 Scene::Showcase(ShowcaseScene::new(ShowcasePresenter::MetaLevelUp(
@@ -391,40 +390,4 @@ pub(crate) fn resolve_screenshot_scene(
         unlock_collection,
         force_relic_modal,
     })
-}
-
-pub(crate) fn scene_for_room_gi_bake(
-    room: crate::render::room_gi_bake::RoomGiRoom,
-    progress: &crate::core::progression::PlayerProgress,
-) -> (Scene, RunState, bool) {
-    let mut run = RunState::new_demo();
-    match room {
-        crate::render::room_gi_bake::RoomGiRoom::Shop => {
-            setup_shop_state(&mut run);
-            (Scene::Shop(ShopScene::new(&mut run, progress)), run, false)
-        }
-        crate::render::room_gi_bake::RoomGiRoom::Hallway => (
-            Scene::PickChamber(crate::scenes::PickChamberScene::new()),
-            run,
-            true,
-        ),
-        crate::render::room_gi_bake::RoomGiRoom::Archive => {
-            let coll = crate::scenes::CollectionScene::new();
-            (Scene::Collection(coll), run, false)
-        }
-        crate::render::room_gi_bake::RoomGiRoom::MainMenu => (
-            Scene::MainMenuExterior(crate::scenes::MainMenuExteriorScene::new()),
-            run,
-            false,
-        ),
-        crate::render::room_gi_bake::RoomGiRoom::Staircase => (
-            Scene::Staircase(crate::scenes::StaircaseScene::new()),
-            run,
-            false,
-        ),
-        crate::render::room_gi_bake::RoomGiRoom::Gameplay => {
-            setup_gameplay_screenshot_state(&mut run);
-            (Scene::Gameplay(Box::new(GameplayScene::new())), run, true)
-        }
-    }
 }

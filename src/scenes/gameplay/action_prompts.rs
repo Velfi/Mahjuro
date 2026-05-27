@@ -1,4 +1,4 @@
-//! Floating Kenney prompts along the bottom edge (Discard / Draw / Cash in).
+//! Floating Kenney prompts along the bottom edge (Discard / Play / Cash In).
 
 use super::focus::FocusTarget;
 use crate::render::draw_cmd::UiFrame;
@@ -49,7 +49,7 @@ pub fn gameplay_west_north_legend_active(
 }
 
 /// Matches [`crate::scenes::gameplay::scene_behavior`] copy: discard → bowl, play → mirror, cash in → trigger.
-const GAMEPLAY_ACTION_PROMPT_LABELS: [&str; 3] = ["Discard", "Play", "Cash in"];
+const GAMEPLAY_ACTION_PROMPT_LABELS: [&str; 3] = ["Discard", "Play", "Cash In"];
 
 pub struct GameplayActionPromptInput<'a> {
     pub discard_btn_rect: (f32, f32, f32, f32),

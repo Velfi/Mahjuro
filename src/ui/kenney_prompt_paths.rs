@@ -21,14 +21,9 @@ pub fn keyboard_key(name: &'static str) -> ImageQuadSource {
     key(name)
 }
 
-/// Four keyboard icons matching the shop legend (Exit, Select, Sell, Inspect).
-pub fn shop_keyboard_prompt_icons() -> [ImageQuadSource; 4] {
-    [
-        key("keyboard_backspace"),
-        key("keyboard_space"),
-        key("keyboard_q"),
-        key("keyboard_e"),
-    ]
+/// Keyboard icons for shop action hints (Sell, Inspect).
+pub fn shop_action_prompt_icons() -> [ImageQuadSource; 2] {
+    [key("keyboard_q"), key("keyboard_e")]
 }
 
 /// Three keyboard icons under the discard bowl, play mirror, and cash-in tablet.
@@ -57,8 +52,8 @@ mod tests {
     }
 
     #[test]
-    fn shop_keyboard_icons_resolve_in_atlas() {
-        for icon in shop_keyboard_prompt_icons() {
+    fn shop_action_icons_resolve_in_atlas() {
+        for icon in shop_action_prompt_icons() {
             expect_resolves(&icon);
         }
     }

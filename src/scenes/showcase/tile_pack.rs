@@ -21,7 +21,8 @@ use crate::render::wgpu_renderer::{
 };
 use crate::render::world_space::pixel_to_world;
 use crate::scenes::celebration_overlay::{
-    self, CelebrationOverlayScratch, CelebrationShowcaseIntroGate, ShootingStarCelebrationIntro,
+    CelebrationContentDrift, CelebrationOverlayScratch, CelebrationShowcaseIntroGate,
+    ShootingStarCelebrationIntro,
 };
 use crate::scenes::shop::pack_celebration::{PackCelebPhase, PackCelebration};
 use crate::scenes::shop::shop_celebration_camera;
@@ -111,6 +112,10 @@ impl TilePackPresenter {
         ctx: &DrawCtx<'_>,
     ) {
         let celeb = &self.celebration;
+        let drift = self
+            .intro_gate
+            .intro
+            .content_drift_for(w, h, &ctx.effect_layers);
         let palette = pack_palette::for_kind(celeb.pack_kind);
         let n = celeb.tiles.len();
 
@@ -159,7 +164,7 @@ impl TilePackPresenter {
                 crate::render::theme::typography::size(crate::render::theme::typography::H24, h);
             frame.text(TextLabel {
                 text: celeb.pack_name.to_string(),
-                rect: [0.0, h * 0.18, w, title_font * 1.5],
+                rect: [0.0, h * 0.18 + drift.xy[1], w, title_font * 1.5],
                 font_px: Some(title_font),
                 color: [
                     color::CHAMPAGNE[0],
@@ -176,6 +181,40 @@ impl TilePackPresenter {
 
         match celeb.phase {
             PackCelebPhase::Arrival => {
+                let anchor = pack_closeup_anchor(screen, &self.positions, box_h * drift.scale, Mat4::IDENTITY);
+                let hero = drift.apply_to_pos(anchor.pos);
+                let cx = hero[0];
+                let cy = hero[1];
+
+                let mut gradients = Vec::new();
+                let mut squircles = Vec::new();
+                let wipe_t = self.intro_gate.intro.transition_progress();
+                let seal_pulse = 0.35 + 0.25 * smoothstep(0.35, 0.75, wipe_t);
+                push_pack_aura(
+                    &mut gradients,
+                    &mut squircles,
+                    cx,
+                    cy,
+                    box_h * drift.scale,
+                    palette,
+                    content_alpha,
+                    seal_pulse,
+                );
+                flush_backdrop_quads(frame, gradients, squircles);
+
+                let mut foil = celeb.pack_kind.foil_tint();
+                foil[3] *= content_alpha;
+                push_pack_object3d_at(
+                    frame,
+                    w,
+                    h,
+                    cam,
+                    &anchor,
+                    hero,
+                    box_h * drift.scale,
+                    celeb.pack_kind,
+                    foil,
+                );
                 push_pack_title(frame);
             }
             PackCelebPhase::Anticipation => {
@@ -187,8 +226,13 @@ impl TilePackPresenter {
                 let bob_rot = Mat4::from_rotation_y(bob_ry.to_radians())
                     * Mat4::from_rotation_x(bob_rx.to_radians());
                 let anchor = pack_closeup_anchor(screen, &self.positions, box_h, bob_rot);
-                let cx = anchor.pos[0] + bob_x;
-                let cy = anchor.pos[1] + bob_y;
+                let hero = drift.apply_to_pos([
+                    anchor.pos[0] + bob_x,
+                    anchor.pos[1] + bob_y,
+                    anchor.pos[2],
+                ]);
+                let cx = hero[0];
+                let cy = hero[1];
 
                 let mut gradients = Vec::new();
                 let mut squircles = Vec::new();
@@ -207,25 +251,19 @@ impl TilePackPresenter {
                 flush_backdrop_quads(frame, gradients, squircles);
 
                 let foil = celeb.pack_kind.foil_tint();
-                push_pack_object3d(
+                push_pack_object3d_at(
                     frame,
                     w,
                     h,
                     cam,
                     &anchor,
+                    hero,
                     box_h,
                     celeb.pack_kind,
                     foil,
-                    Some((bob_x, bob_y)),
                 );
                 push_pack_title(frame);
 
-                frame.text(celebration_overlay::label_confirm_to_unseal(
-                    h,
-                    w,
-                    t,
-                    content_alpha,
-                ));
             }
             PackCelebPhase::Unseal => {
                 let u = celeb.unseal_t();
@@ -368,14 +406,6 @@ impl TilePackPresenter {
 
                 frame.cmds.push(DrawCmd::ShowcaseTileBatch(placements));
 
-                if celeb.fully_settled() {
-                    frame.text(celebration_overlay::label_confirm_to_continue(
-                        h,
-                        w,
-                        celeb.elapsed(),
-                        content_alpha,
-                    ));
-                }
             }
         }
     }
@@ -475,12 +505,17 @@ impl TilePackPresenter {
         frame.camera_override = Some(cam);
         frame.scene_lighting.embedded_gltf_punctual = false;
         frame.scene_lighting.room_glb_brdf = false;
+        let drift = self
+            .intro_gate
+            .intro
+            .content_drift_for(w, h, &ctx.effect_layers);
         frame
             .scene_lighting
             .set_smooth_points(pack_celebration_point_lights(
                 &self.celebration,
                 ctx.layout,
                 &self.positions,
+                drift,
             ));
         frame.scene_lighting.spot_lights = pack_celebration_spot_lights(
             &self.celebration,
@@ -488,6 +523,7 @@ impl TilePackPresenter {
             &cam,
             &self.positions,
             ctx.tile_preset,
+            drift,
         );
 
         self.push_celebration_draw(
@@ -587,16 +623,38 @@ fn quad_bezier(a: [f32; 3], b: [f32; 3], c: [f32; 3], t: f32) -> (f32, f32, f32)
     (px, py, lift)
 }
 
+fn pack_hero_center(
+    screen: &LayoutResult,
+    positions: &ShopPositions,
+    box_h: f32,
+    drift: CelebrationContentDrift,
+    bob_xy: (f32, f32),
+) -> (f32, f32, f32) {
+    let anchor = pack_closeup_anchor(screen, positions, box_h, Mat4::IDENTITY);
+    let p = drift.apply_to_pos([
+        anchor.pos[0] + bob_xy.0,
+        anchor.pos[1] + bob_xy.1,
+        anchor.pos[2],
+    ]);
+    (p[0], p[1], p[2])
+}
+
 fn pack_celebration_spot_lights(
     celeb: &PackCelebration,
     screen: &LayoutResult,
     cam: &CameraParams,
     positions: &ShopPositions,
     tile_preset: TilePreset,
+    drift: CelebrationContentDrift,
 ) -> Vec<SpotLight> {
     let w = screen.window_w;
     let h = screen.window_h;
     let (cos_outer, cos_inner, intensity) = match celeb.phase {
+        PackCelebPhase::Arrival => (
+            (38.0_f32).to_radians().cos(),
+            (24.0_f32).to_radians().cos(),
+            4.5,
+        ),
         PackCelebPhase::Anticipation | PackCelebPhase::Unseal => (
             (34.0_f32).to_radians().cos(),
             (20.0_f32).to_radians().cos(),
@@ -607,15 +665,14 @@ fn pack_celebration_spot_lights(
             (20.0_f32).to_radians().cos(),
             10.0,
         ),
-        PackCelebPhase::Arrival => return Vec::new(),
     };
     let warm = [1.0_f32, 0.93, 0.78];
     let box_h = h * PACK_CELEB_BOX_H_FRAC;
 
     let (cx, cy, lift) = match celeb.phase {
+        PackCelebPhase::Arrival => pack_hero_center(screen, positions, box_h * drift.scale, drift, (0.0, 0.0)),
         PackCelebPhase::Anticipation | PackCelebPhase::Unseal => {
-            let a = pack_closeup_anchor(screen, positions, box_h, Mat4::IDENTITY);
-            (a.pos[0], a.pos[1], a.pos[2])
+            pack_hero_center(screen, positions, box_h, drift, (0.0, 0.0))
         }
         PackCelebPhase::Deal => {
             let pack_a = pack_closeup_anchor(screen, positions, box_h, Mat4::IDENTITY);
@@ -648,7 +705,6 @@ fn pack_celebration_spot_lights(
             let cx = pack_a.pos[0] + (row_cx - pack_a.pos[0]) * deal_t;
             (cx, reveal_anchor.pos[1], row_lift)
         }
-        PackCelebPhase::Arrival => return Vec::new(),
     };
 
     let light_lift = lift + h * 0.52 + box_h * 0.38;
@@ -677,16 +733,16 @@ fn pack_celebration_point_lights(
     celeb: &PackCelebration,
     screen: &LayoutResult,
     positions: &ShopPositions,
+    drift: CelebrationContentDrift,
 ) -> Vec<PointLight> {
     let w = screen.window_w;
     let h = screen.window_h;
     let box_h = h * PACK_CELEB_BOX_H_FRAC;
     let (cx, row_py, lift) = match celeb.phase {
-        PackCelebPhase::Anticipation | PackCelebPhase::Unseal => {
-            let a = pack_closeup_anchor(screen, positions, box_h, Mat4::IDENTITY);
-            (a.pos[0], a.pos[1], a.pos[2])
+        PackCelebPhase::Arrival | PackCelebPhase::Anticipation | PackCelebPhase::Unseal => {
+            pack_hero_center(screen, positions, box_h, drift, (0.0, 0.0))
         }
-        PackCelebPhase::Deal | PackCelebPhase::Arrival => {
+        PackCelebPhase::Deal => {
             let a = PlacementAnchor::new(
                 [w * 0.5, h * 0.5, 0.0],
                 Mat4::IDENTITY,
@@ -697,9 +753,9 @@ fn pack_celebration_point_lights(
         }
     };
     let (i_mul, r_mul, close_z) = match celeb.phase {
+        PackCelebPhase::Arrival => (1.6, 1.15, box_h * 0.12),
         PackCelebPhase::Anticipation | PackCelebPhase::Unseal => (2.6, 1.4, box_h * 0.22),
         PackCelebPhase::Deal => (1.9, 1.15, 0.0),
-        PackCelebPhase::Arrival => (1.2, 1.0, 0.0),
     };
     let foil = pack_palette::for_kind(celeb.pack_kind).foil;
     vec![
@@ -972,6 +1028,20 @@ pub(crate) fn push_pack_object3d(
 ) {
     let (bx, by) = bob_xy.unwrap_or((0.0, 0.0));
     let pos = [anchor.pos[0] + bx, anchor.pos[1] + by, anchor.pos[2]];
+    push_pack_object3d_at(frame, win_w, win_h, cam, anchor, pos, screen_h_px, pack_kind, color);
+}
+
+fn push_pack_object3d_at(
+    frame: &mut UiFrame,
+    win_w: f32,
+    win_h: f32,
+    cam: &CameraParams,
+    anchor: &PlacementAnchor,
+    pos: [f32; 3],
+    screen_h_px: f32,
+    pack_kind: TilePackKind,
+    color: [f32; 4],
+) {
     let extents =
         pack_closeup_world_extents(win_w, win_h, cam, pos[0], pos[1], pos[2], screen_h_px);
     frame.object3d_batch(vec![Object3d {

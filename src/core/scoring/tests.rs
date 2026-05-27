@@ -487,6 +487,33 @@ fn dora_chips_per_matching_tile() {
 }
 
 #[test]
+fn dora_chips_per_matching_flower_tile() {
+    let hand = vec![
+        Tile::new(Suit::Flower, 2, 0),
+        Tile::new(Suit::Manzu, 3, 1),
+        Tile::new(Suit::Manzu, 3, 2),
+    ];
+    let sets = find_pairs_and_triplets(&hand);
+    let r = RelicState::default();
+    let mut ctx = ctx_with(&r, false);
+    ctx.pattern.dora_faces = vec![(Suit::Flower, 2)];
+    let breakdown = score_sets(&hand, &sets, &ctx, &[]);
+    let (idx, _) = breakdown
+        .steps
+        .iter()
+        .enumerate()
+        .find(|(_, s)| s.source.starts_with("Dora"))
+        .unwrap();
+    let prev_chips = if idx == 0 {
+        breakdown.base_chips
+    } else {
+        breakdown.steps[idx - 1].running_chips
+    };
+    let dora_delta = breakdown.steps[idx].running_chips - prev_chips;
+    assert_eq!(dora_delta, 100);
+}
+
+#[test]
 fn explosive_flush_full_hand_demonstration() {
     let hand = vec![
         Tile::new(Suit::Souzu, 1, 0),

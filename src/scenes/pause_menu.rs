@@ -10,7 +10,7 @@ use crate::ui::input::UiAction;
 use crate::ui::widget_tree::{self as wt, FocusId, Tree, TreeFrame, TreeInput, TreeState};
 
 use super::main_menu_exterior::MainMenuExteriorScene;
-use super::options::{OptionsDrawHint, OptionsScene};
+use super::options::OptionsScene;
 use super::shop::ShopScene;
 use super::{ButtonDef, Scene, SceneTransition, UpdateCtx};
 
@@ -282,6 +282,7 @@ impl PauseMenu {
                 if opts.take_confirm_requested() {
                     bus.push(GameEvent::UiSound(SfxId::UiConfirm));
                 }
+                #[cfg(any(feature = "game", feature = "headless-screenshot"))]
                 if opts.take_export_requested() {
                     let path = crate::persistence::play_stats_export_path(active_profile);
                     match crate::bot::export_play_history_html(&path, progress) {
@@ -387,7 +388,7 @@ impl PauseMenu {
         &self,
         viewport: crate::ui::layout::ViewportCtx,
         scale: f32,
-        hint: OptionsDrawHint,
+        scroll_fade_backdrop: [f32; 4],
         instances: &mut Vec<GpuInstance>,
         text_labels: &mut Vec<TextLabel>,
         buttons: &mut Vec<ButtonDef>,
@@ -407,7 +408,14 @@ impl PauseMenu {
         // If the options sub-overlay is open, draw it instead of the pause
         // menu root. The dim quad above already provides the backdrop.
         if let Some(opts) = self.options_overlay.as_ref() {
-            opts.draw_overlay(window_w, window_h, hint, instances, text_labels, buttons);
+            opts.draw_overlay(
+                window_w,
+                window_h,
+                scroll_fade_backdrop,
+                instances,
+                text_labels,
+                buttons,
+            );
             return;
         }
 

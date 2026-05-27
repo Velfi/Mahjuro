@@ -678,9 +678,25 @@ impl RunState {
             }
         } else if let Some(reason) = self.round_failure_reason()
             && !self.try_second_wind_salvage(reason, bus)
+            && !self.try_talisman_salvage(reason, bus)
         {
             bus.push(GameEvent::GameOver { reason });
         }
+    }
+
+    /// When a round would end in defeat, consume a memorial talisman that grants
+    /// plays or discards so the blind can continue.
+    fn try_talisman_salvage(&mut self, reason: GameOverReason, bus: &mut EventBus) -> bool {
+        let Some(index) = self.find_salvage_talisman_index(reason) else {
+            return false;
+        };
+        if self.use_consumable(index, bus).is_none() {
+            return false;
+        }
+        if self.round_failure_reason().is_none() {
+            bus.push(GameEvent::ScoreUpdated);
+        }
+        true
     }
 
     /// When a round would end in defeat, Second Wind is destroyed and the blind

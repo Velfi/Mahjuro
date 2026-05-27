@@ -83,13 +83,16 @@ impl ZodiacPresenter {
         frame.background(BackgroundId::Black);
 
         let intro_a = self.intro_gate.intro.content_alpha_for(&ctx.effect_layers);
+        let drift = self
+            .intro_gate
+            .intro
+            .content_drift_for(w, h, &ctx.effect_layers);
         celebration_overlay::CelebrationOverlayScratch::new(w, h)
             .push_dimmer_scaled(&mut frame, intro_a)
             .push_starfield_if(&mut frame, ctx.effect_layers.starfield)
             .push_depth_reset_for_celebration_mesh(&mut frame);
 
         let t = self.elapsed();
-        let ribbon_l = h * 0.40;
 
         let sway_yaw = (t * 1.8).sin() * 12.0;
         let sway_roll = (t * 2.5 + 0.7).sin() * 6.0;
@@ -110,9 +113,11 @@ impl ZodiacPresenter {
             &self.positions.celeb_zodiac,
             ctx.layout,
         );
-        let cx = anchor.pos[0];
-        let cy = anchor.pos[1];
-        let lift = anchor.pos[2];
+        let hero_pos = drift.apply_to_pos(anchor.pos);
+        let cx = hero_pos[0];
+        let cy = hero_pos[1];
+        let lift = hero_pos[2];
+        let ribbon_l = h * 0.40 * drift.scale;
 
         frame.scene_lighting.set_smooth_points(vec![
             PointLight {
@@ -158,7 +163,7 @@ impl ZodiacPresenter {
         }];
 
         frame.object3d_batch(vec![zodiac_ribbon_object3d(ZodiacRibbonSpec {
-            pos: anchor.pos,
+            pos: hero_pos,
             length: ribbon_l,
             rotation: anchor.object3d_rotation(),
             color: [1.0, 1.0, 1.0, alpha],
@@ -168,16 +173,10 @@ impl ZodiacPresenter {
             placement_rot_deg: [0.0, 0.0, 0.0],
         })]);
 
-        frame.text(celebration_overlay::label_zodiac_level_title(
-            h,
-            w,
-            format!("{} Lvl.{}", self.yaku_name, self.new_level),
-            alpha,
-        ));
-        frame.text(celebration_overlay::label_confirm_to_continue(
-            h, w, t, alpha,
-        ));
-
+        let mut title =
+            celebration_overlay::label_zodiac_level_title(h, w, format!("{} Lvl.{}", self.yaku_name, self.new_level), alpha);
+        title.rect[1] += drift.xy[1];
+        frame.text(title);
         if self.intro_gate.intro.is_done_for(&ctx.effect_layers) {
             frame.buttons = vec![ButtonDef::scene((0.0, 0.0, w, h), u32::MAX)];
         }

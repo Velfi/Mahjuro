@@ -1,6 +1,6 @@
 //! Offline baked emissive probe SH for static room GLB scenes (shop / hallway / staircase / archive / main menu / gameplay).
 //!
-//! Probes are filled once by `mahjuro bake-room-gi` and uploaded at runtime so the
+//! Probes are filled once by `mahjuro bake-room` and uploaded at runtime so the
 //! per-frame `emissive-probe-update` compute pass can be skipped on static room views.
 //! Dynamic updates resume when [`crate::render::draw_cmd::UiFrame::room_gi_dynamic`] is set.
 //!
@@ -44,6 +44,26 @@ pub fn room_gi_room_index(room: RoomGiRoom) -> usize {
 }
 
 impl RoomGiRoom {
+    pub const ALL: [Self; ROOM_GI_ROOM_COUNT] = [
+        Self::Shop,
+        Self::Hallway,
+        Self::Archive,
+        Self::MainMenu,
+        Self::Staircase,
+        Self::Gameplay,
+    ];
+
+    pub fn slug(self) -> &'static str {
+        match self {
+            Self::Shop => "shop",
+            Self::Hallway => "hallway",
+            Self::Archive => "archive",
+            Self::MainMenu => "main_menu",
+            Self::Staircase => "staircase",
+            Self::Gameplay => "gameplay",
+        }
+    }
+
     pub fn asset_path(self) -> &'static str {
         match self {
             Self::Shop => "data/room_gi/shop.mgi",
@@ -81,7 +101,7 @@ impl RoomGiRoom {
     }
 }
 
-/// Probe march settings recorded in the bake file (`bake-room-gi` always uses High-quality values).
+/// Probe march settings recorded in the bake file (`mahjuro bake-room` always uses High-quality values).
 pub fn bake_probe_sample_params() -> (u32, u32) {
     (
         room_glb::ROOM_EMISSIVE_PROBE_DIR_SAMPLES,
@@ -202,7 +222,7 @@ impl RoomGiBake {
         anyhow::ensure!(
             header.dir_samples == exp_dir && header.march_steps == exp_march,
             "room GI bake probe settings {}×{} do not match runtime {}×{} — rebake with \
-             `mahjuro bake-room-gi`",
+             `mahjuro bake-room`",
             header.dir_samples,
             header.march_steps,
             exp_dir,
@@ -288,7 +308,7 @@ pub fn cached_room_gi_bake(room: RoomGiRoom) -> Option<Arc<RoomGiBake>> {
         .clone()
 }
 
-/// Placeholder SH payload for GPU readback (`mahjuro bake-room-gi`).
+/// Placeholder SH payload for GPU readback (`mahjuro bake-room`).
 pub fn probe_sh_meta(
     room: RoomGiRoom,
     world_min: Vec3,

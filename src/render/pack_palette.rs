@@ -4,14 +4,13 @@
 //! Tile packs have *four* color signals that need to agree:
 //!
 //! 1. The 3D foil shader on the rendered booster pack (`Object3d.color`).
-//! 2. The wax seal disc baked onto the cover PNG.
+//! 2. The wax seal on the cover PNG (authored in cover art).
 //! 3. The runtime hover halo on the shop counter.
 //! 4. The deep background color the AI cover art is generated against.
 //!
 //! Before this module, those four lived in three different places — a Rust
-//! method on `TilePackKind` (#1, #3), a Python tuple in
-//! `scripts/bake_pack_seals.py` (#2), and a Python prompt string in
-//! `scripts/generate_pack_covers.py` (#4). Drift was inevitable.
+//! method on `TilePackKind` (#1, #3), cover-art authoring (#2), and a Python
+//! prompt string in `scripts/generate_pack_covers.py` (#4). Drift was inevitable.
 //!
 //! Now Rust is the canonical source for all four, mirrored into
 //! `tools/pack_palette.json` (checked in). The Python bake / generate
@@ -40,8 +39,8 @@ pub struct PackPalette {
     /// Shrink-wrap sleeve tint — multiplied on pack edges; cover art uses
     /// the decal. See `TilePackKind::foil_tint`.
     pub foil: [f32; 4],
-    /// Wax-seal red baked onto the cover PNG and reused at runtime for
-    /// the hover-glow halo. See `TilePackKind::seal_color`.
+    /// Wax-seal red on the cover PNG and reused at runtime for the hover-glow
+    /// halo. See `TilePackKind::seal_color`.
     pub seal: [f32; 4],
     /// Background the AI generates the cover art against; baked into
     /// the PNG as a solid edge-to-edge fill. Effectively the dominant
@@ -51,9 +50,8 @@ pub struct PackPalette {
     /// navy", "warm obsidian", etc.). The hex is interpolated next to
     /// it to disambiguate.
     pub bg_name: &'static str,
-    /// Single-character insignia stamped into the wax seal at bake
-    /// time. Picked from the ASCII subset that the bake script's
-    /// fallback font always renders.
+    /// Single-character insignia on the wax seal in cover art (authoring
+    /// reference for `generate_pack_covers.py` prompts).
     pub insignia: &'static str,
 }
 

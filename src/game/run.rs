@@ -800,7 +800,7 @@ impl RunState {
         &self.hand
     }
 
-    pub(crate) fn hand_mut(&mut self) -> &mut Vec<Tile> {
+    pub fn hand_mut(&mut self) -> &mut Vec<Tile> {
         &mut self.hand
     }
 
@@ -819,7 +819,7 @@ impl RunState {
             .sum()
     }
 
-    pub(crate) fn selected_mut(&mut self) -> &mut Vec<bool> {
+    pub fn selected_mut(&mut self) -> &mut Vec<bool> {
         &mut self.selected
     }
 
@@ -827,7 +827,7 @@ impl RunState {
         &self.structure_sets
     }
 
-    pub(crate) fn structure_sets_mut(&mut self) -> &mut Vec<DetectedMeld> {
+    pub fn structure_sets_mut(&mut self) -> &mut Vec<DetectedMeld> {
         &mut self.structure_sets
     }
 
@@ -835,7 +835,7 @@ impl RunState {
         &self.structure_tiles
     }
 
-    pub(crate) fn structure_tiles_mut(&mut self) -> &mut Vec<Tile> {
+    pub fn structure_tiles_mut(&mut self) -> &mut Vec<Tile> {
         &mut self.structure_tiles
     }
 

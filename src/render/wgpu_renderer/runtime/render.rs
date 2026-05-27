@@ -148,6 +148,7 @@ impl WgpuRenderer {
     ) -> anyhow::Result<()> {
         let RenderSettings {
             effects_quality,
+            cascade_effects_quality,
             tile_preset,
             tile_material,
             tileset_name,
@@ -225,7 +226,7 @@ impl WgpuRenderer {
         // Lerp per-tile slide animations toward 0 (ease-out).
         let dt = self.advance_frame_timers(draw_settle_speed, sort_settle_speed);
 
-        self.upload_frame_uniforms(frame, effects_quality, gamma);
+        self.upload_frame_uniforms(frame, effects_quality, cascade_effects_quality, gamma);
 
         // Build 2D backdrop quads (selection borders, hint pulses) and text
         // labels (just the focused arrow — the symbol+emoji live in the 3D

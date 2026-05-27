@@ -1,7 +1,7 @@
 //! Reusable Kenney controller / keyboard hint rows.
 //!
 //! Two layouts:
-//! - **Inline** — compact centred `[icon]: verb · …` copy (archive footer, profile switch).
+//! - **Inline** — compact centred `[icon]: verb · …` copy (archive inspect, profile delete).
 //! - **Column** — equal-width `[icon][label]` slots with optional pill backers (shop, gameplay).
 
 use crate::render::decal::{load_ui_font, measure_label_advances};
@@ -9,8 +9,7 @@ use crate::render::draw_cmd::{ImageQuad, ImageQuadSource, UiFrame};
 use crate::render::theme::{color, typography};
 use crate::render::wgpu_renderer::{GpuInstance, TextAlign, TextLabel};
 use crate::scenes::DrawCtx;
-use crate::ui::button_prompts::PromptInputSurface;
-use crate::ui::glyph_source::{DpadGlyph, GlyphResolver, StickSide, TriggerSide};
+use crate::ui::glyph_source::{GlyphResolver, StickSide, TriggerSide};
 use crate::ui::input::{InputMode, UiAction};
 use crate::ui::kenney_prompt_paths::keyboard_key;
 
@@ -63,6 +62,12 @@ impl HintMetrics {
 
 // ── Shared key resolution ───────────────────────────────────────────────────
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PromptInputSurface {
+    Controller,
+    MouseOrKeyboard,
+}
+
 /// How multiple icons in one bind are joined visually.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum HintKeyJoin {
@@ -72,11 +77,10 @@ pub enum HintKeyJoin {
     Tight,
 }
 
-/// One resolved icon slot (controller action, d-pad composite, or keyboard atlas name).
+/// One resolved icon slot (controller action, stick, trigger, or keyboard atlas name).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HintKey {
     Action(UiAction),
-    Dpad(DpadGlyph),
     Stick(StickSide),
     Trigger(TriggerSide),
     Keyboard(&'static str),
@@ -88,14 +92,6 @@ impl HintKey {
             InputMode::Controller => Self::Action(action),
             InputMode::Keyboard | InputMode::Cursor => Self::Keyboard(keyboard),
         }
-    }
-
-    pub fn dpad_vertical() -> Self {
-        Self::Dpad(DpadGlyph::Vertical)
-    }
-
-    pub fn dpad_horizontal() -> Self {
-        Self::Dpad(DpadGlyph::Horizontal)
     }
 }
 
@@ -113,16 +109,9 @@ fn resolve_hint_key(
 ) -> Option<ImageQuadSource> {
     match (surface, key) {
         (PromptInputSurface::Controller, HintKey::Action(action)) => glyphs.glyph_for(action),
-        (PromptInputSurface::Controller, HintKey::Dpad(kind)) => glyphs.dpad_glyph(kind),
         (PromptInputSurface::Controller, HintKey::Stick(side)) => glyphs.stick_glyph(side),
         (PromptInputSurface::Controller, HintKey::Trigger(side)) => glyphs.trigger_glyph(side),
         (PromptInputSurface::MouseOrKeyboard, HintKey::Keyboard(name)) => Some(keyboard_key(name)),
-        (PromptInputSurface::MouseOrKeyboard, HintKey::Dpad(DpadGlyph::Vertical)) => {
-            Some(keyboard_key("keyboard_arrows_vertical"))
-        }
-        (PromptInputSurface::MouseOrKeyboard, HintKey::Dpad(DpadGlyph::Horizontal)) => {
-            Some(keyboard_key("keyboard_arrows_horizontal"))
-        }
         _ => None,
     }
 }
@@ -195,11 +184,6 @@ impl HintRow {
         self
     }
 
-    pub fn text(mut self, text: impl Into<String>) -> Self {
-        self.segments.push(HintSegment::text(text));
-        self
-    }
-
     pub fn into_segments(self) -> Vec<HintSegment> {
         self.segments
     }
@@ -253,19 +237,13 @@ impl HintStyle {
     }
 }
 
-/// Camera-orbit hint row while item inspect is active.
+/// Camera controls while item inspect is active (orbit + zoom only; item cycling uses normal focus nav).
 pub fn inspect_camera_hint_row(input_mode: InputMode) -> Vec<HintSegment> {
     if matches!(input_mode, InputMode::Controller) {
         HintRow::new()
             .bind_join(
-                "orbit item",
+                "orbit",
                 vec![HintKey::Stick(StickSide::Right)],
-                HintKeyJoin::Tight,
-            )
-            .sep()
-            .bind_join(
-                "cycle items",
-                vec![HintKey::Stick(StickSide::Left)],
                 HintKeyJoin::Tight,
             )
             .sep()
@@ -281,23 +259,12 @@ pub fn inspect_camera_hint_row(input_mode: InputMode) -> Vec<HintSegment> {
     } else {
         HintRow::new()
             .bind_join(
-                "orbit item",
+                "orbit",
                 vec![
                     HintKey::Keyboard("keyboard_arrows"),
                     HintKey::Keyboard("mouse_move"),
                 ],
                 HintKeyJoin::Slash,
-            )
-            .sep()
-            .bind_join(
-                "cycle items",
-                vec![
-                    HintKey::Keyboard("keyboard_w"),
-                    HintKey::Keyboard("keyboard_a"),
-                    HintKey::Keyboard("keyboard_s"),
-                    HintKey::Keyboard("keyboard_d"),
-                ],
-                HintKeyJoin::Tight,
             )
             .sep()
             .bind_join(
@@ -325,29 +292,6 @@ pub fn inspect_camera_hint_row(input_mode: InputMode) -> Vec<HintSegment> {
             )
             .into_segments()
     }
-}
-
-/// Close / back hint row while item inspect is active.
-pub fn inspect_dismiss_hint_row(input_mode: InputMode) -> Vec<HintSegment> {
-    HintRow::new()
-        .bind(
-            "close",
-            vec![HintKey::for_input(
-                input_mode,
-                UiAction::NorthFacePress,
-                "keyboard_e",
-            )],
-        )
-        .sep()
-        .bind(
-            "menu",
-            vec![HintKey::for_input(
-                input_mode,
-                UiAction::Cancel,
-                "keyboard_escape",
-            )],
-        )
-        .into_segments()
 }
 
 enum InlineSegmentRef<'a> {
@@ -638,6 +582,8 @@ fn inline_text_label(rect: [f32; 4], text: &str, style: HintStyle) -> TextLabel 
 pub struct ColumnHintEntry {
     pub controller: HintKey,
     pub keyboard: ImageQuadSource,
+    /// When set, layout is `label_before` + icon + `label` (e.g. "Hold " + Q + " Sell").
+    pub label_before: Option<&'static str>,
     pub label: &'static str,
     pub disabled: bool,
 }
@@ -647,7 +593,24 @@ impl ColumnHintEntry {
         Self {
             controller,
             keyboard,
+            label_before: None,
             label,
+            disabled: false,
+        }
+    }
+
+    /// `before` + bind icon + `after` (shop hold-to-sell, etc.).
+    pub fn surrounding_icon(
+        controller: HintKey,
+        keyboard: ImageQuadSource,
+        before: &'static str,
+        after: &'static str,
+    ) -> Self {
+        Self {
+            controller,
+            keyboard,
+            label_before: Some(before),
+            label: after,
             disabled: false,
         }
     }
@@ -791,35 +754,49 @@ pub fn push_column_hints(
     let legend_text_h_px = legend_line_h.max(8.0).round().max(1.0) as u32;
     let label_block_h = legend_line_h + style.label_pad_y * 2.0;
 
-    let measured: Vec<f32> = entries
+    let measure_label = |text: &str| -> f32 {
+        if let Some(ref font) = ui_font {
+            let (_, _, advances) = measure_label_advances(
+                font,
+                text,
+                8192,
+                legend_text_h_px,
+                Some(style.legend_font_px),
+            );
+            advances.iter().copied().sum()
+        } else {
+            let est_ch = text.chars().count().max(1) as f32;
+            (style.legend_font_px * 0.52 * est_ch).max(8.0)
+        }
+    };
+
+    let measured: Vec<(f32, f32)> = entries
         .iter()
         .map(|entry| {
-            if let Some(ref font) = ui_font {
-                let (_, _, advances) = measure_label_advances(
-                    font,
-                    entry.label,
-                    8192,
-                    legend_text_h_px,
-                    Some(style.legend_font_px),
-                );
-                advances.iter().copied().sum()
-            } else {
-                let est_ch = entry.label.chars().count().max(1) as f32;
-                (style.legend_font_px * 0.52 * est_ch).max(8.0)
-            }
+            let before_w = entry
+                .label_before
+                .map(measure_label)
+                .unwrap_or(0.0);
+            let after_w = measure_label(entry.label);
+            (before_w, after_w)
         })
         .collect();
 
     loop {
         let mut fits = true;
-        for (i, &text_w) in measured.iter().enumerate().take(entries.len()) {
-            let label_inner = text_w + style.label_pad_x * 2.0;
-            let cluster = icon_px + gap_after_icon + label_inner;
+        for (i, entry) in entries.iter().enumerate().take(entries.len()) {
+            let (before_w, after_w) = measured[i];
+            let label_inner = (before_w + after_w) + style.label_pad_x * 2.0;
+            let cluster = match entry.label_before {
+                None => icon_px + gap_after_icon + label_inner,
+                Some(_) => {
+                    before_w + gap_after_icon + icon_px + gap_after_icon + label_inner
+                }
+            };
             if cluster > col_w - col_pad * 2.0 {
                 fits = false;
                 break;
             }
-            let _ = i;
         }
         if fits || icon_px <= 18.0 {
             break;
@@ -844,30 +821,9 @@ pub fn push_column_hints(
 
     for (col_i, entry) in entries.iter().enumerate().take(layout.column_count) {
         let col_x = layout.inner_left + col_i as f32 * col_w;
-        let ix = col_x + col_pad;
-        let text_x = ix + icon_px + gap_after_icon;
-        let max_text_w = (col_x + col_w - col_pad - text_x).max(10.0);
-        let text_w = measured[col_i].min(max_text_w).max(1.0);
-        let label_inner_w = text_w + style.label_pad_x * 2.0;
-
-        if let Some(pill_bg) = if entry.disabled {
-            style.pill_bg_disabled
-        } else {
-            style.pill_bg
-        } {
-            let pill_left = text_x - pill_pad_x;
-            let pill_w = (label_inner_w + pill_pad_x * 2.0).max(1.0);
-            pill_quads.push(GpuInstance {
-                rect: [
-                    pill_left,
-                    label_top - pill_pad_y,
-                    pill_w,
-                    label_block_h + pill_pad_y * 2.0,
-                ],
-                color: pill_bg,
-                user: 0,
-            });
-        }
+        let cluster_left = col_x + col_pad;
+        let (before_w, after_w) = measured[col_i];
+        let max_cluster_w = (col_w - col_pad * 2.0).max(10.0);
 
         let icon_tint = if entry.disabled {
             style.disabled_icon_tint
@@ -884,34 +840,108 @@ pub fn push_column_hints(
             PromptInputSurface::Controller => resolve_hint_key(glyphs, surface, entry.controller),
             PromptInputSurface::MouseOrKeyboard => Some(entry.keyboard.clone()),
         };
-        let icon_rect = [ix, iy, icon_px, icon_px];
-        if let Some(source) = source {
-            icon_cmds.push(ImageQuad {
-                inst: GpuInstance {
-                    rect: icon_rect,
-                    color: icon_tint,
-                    user: 0,
-                },
-                source,
+
+        let (icon_rect, cluster_w) = if let Some(before) = entry.label_before {
+            let gap = gap_after_icon;
+            let mut x = cluster_left;
+            let before_draw_w = before_w.min((max_cluster_w - icon_px - gap * 2.0 - after_w).max(1.0));
+            text_out.push(TextLabel {
+                rect: [
+                    x + style.label_pad_x,
+                    label_top + style.label_pad_y,
+                    before_draw_w.max(1.0),
+                    legend_line_h,
+                ],
+                text: before.to_string(),
+                color: label_color,
+                font_px: Some(style.legend_font_px),
+                align: TextAlign::Left,
+                ..Default::default()
+            });
+            x += before_draw_w + gap;
+            let icon_rect = [x, iy, icon_px, icon_px];
+            if let Some(source) = source.clone() {
+                icon_cmds.push(ImageQuad {
+                    inst: GpuInstance {
+                        rect: icon_rect,
+                        color: icon_tint,
+                        user: 0,
+                    },
+                    source,
+                });
+            }
+            x += icon_px + gap;
+            let after_draw_w = after_w.min((max_cluster_w - (x - cluster_left)).max(1.0));
+            text_out.push(TextLabel {
+                rect: [
+                    x + style.label_pad_x,
+                    label_top + style.label_pad_y,
+                    after_draw_w.max(1.0),
+                    legend_line_h,
+                ],
+                text: entry.label.to_string(),
+                color: label_color,
+                font_px: Some(style.legend_font_px),
+                align: TextAlign::Left,
+                ..Default::default()
+            });
+            let cluster_w = (x + after_draw_w + style.label_pad_x - cluster_left).max(1.0);
+            (icon_rect, cluster_w)
+        } else {
+            let ix = cluster_left;
+            let text_x = ix + icon_px + gap_after_icon;
+            let max_text_w = (col_x + col_w - col_pad - text_x).max(10.0);
+            let text_w = after_w.min(max_text_w).max(1.0);
+            let icon_rect = [ix, iy, icon_px, icon_px];
+            if let Some(source) = source {
+                icon_cmds.push(ImageQuad {
+                    inst: GpuInstance {
+                        rect: icon_rect,
+                        color: icon_tint,
+                        user: 0,
+                    },
+                    source,
+                });
+            }
+            text_out.push(TextLabel {
+                rect: [
+                    text_x + style.label_pad_x,
+                    label_top + style.label_pad_y,
+                    text_w,
+                    legend_line_h,
+                ],
+                text: entry.label.to_string(),
+                color: label_color,
+                font_px: Some(style.legend_font_px),
+                align: TextAlign::Left,
+                ..Default::default()
+            });
+            let cluster_w = icon_px + gap_after_icon + text_w + style.label_pad_x * 2.0;
+            (icon_rect, cluster_w)
+        };
+
+        if let Some(pill_bg) = if entry.disabled {
+            style.pill_bg_disabled
+        } else {
+            style.pill_bg
+        } {
+            let pill_left = cluster_left - pill_pad_x;
+            let pill_w = (cluster_w + pill_pad_x * 2.0).max(1.0);
+            pill_quads.push(GpuInstance {
+                rect: [
+                    pill_left,
+                    label_top - pill_pad_y,
+                    pill_w,
+                    label_block_h + pill_pad_y * 2.0,
+                ],
+                color: pill_bg,
+                user: 0,
             });
         }
+
         slots.push(ColumnHintSlot {
             column_index: col_i,
             icon_rect,
-        });
-
-        text_out.push(TextLabel {
-            rect: [
-                text_x + style.label_pad_x,
-                label_top + style.label_pad_y,
-                text_w,
-                legend_line_h,
-            ],
-            text: entry.label.to_string(),
-            color: label_color,
-            font_px: Some(style.legend_font_px),
-            align: TextAlign::Left,
-            ..Default::default()
         });
     }
 

@@ -452,7 +452,7 @@ impl SceneBehavior for SolitaireScene {
         let hint_y = btn_y - hint_h - (4.0 * scale);
         frame.text(TextLabel {
             rect: [0.0, hint_y, w, hint_h],
-            text: "Match pairs of identical free tiles.   Esc: back".into(),
+            text: "Match pairs of identical free tiles.".into(),
             color: [0.50, 0.48, 0.42, 0.7], // warm medium gray
             ..Default::default()
         });

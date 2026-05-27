@@ -1,7 +1,22 @@
 use super::*;
+use crate::core::consumable::Consumable;
+use crate::core::memorial_talisman::MemorialTalismanKind;
 use crate::game::engine_state::GameplayCoreState;
+use crate::game::event_bus::GameOverReason;
 
 impl RunState {
+    /// Index of the best memorial talisman in inventory that can avert `reason`.
+    pub fn find_salvage_talisman_index(&self, reason: GameOverReason) -> Option<usize> {
+        for &kind in MemorialTalismanKind::salvage_candidates(reason) {
+            if let Some(index) = self.consumables.items.iter().position(|c| {
+                matches!(c, Consumable::Memorial(k) if *k == kind)
+            }) {
+                return Some(index);
+            }
+        }
+        None
+    }
+
     /// Use a consumable from the shared inventory at `index`. Zodiacs level
     /// their yaku for the run; Talismans stamp their enhancement onto every
     /// tile currently in the player's hand. Returns a [`ConsumableUseResult`]

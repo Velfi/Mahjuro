@@ -222,11 +222,10 @@ impl Wall {
         Self::new(tiles)
     }
 
-    /// The tile faces that count as dora. Flower/Season tiles are never dora.
+    /// The tile faces that count as dora (same faces shown on the plinth).
     pub fn dora_faces(&self) -> Vec<(Suit, u8)> {
         self.dora_indicators
             .iter()
-            .filter(|t| !matches!(t.suit, Suit::Flower | Suit::Season))
             .map(|t| (t.suit, t.rank))
             .collect()
     }
@@ -259,9 +258,6 @@ impl Wall {
         while idx > 0 {
             idx -= 1;
             let candidate = self.tiles[idx];
-            if matches!(candidate.suit, Suit::Flower | Suit::Season) {
-                continue;
-            }
             if self.dora_indicators.iter().any(|t| t.id == candidate.id) {
                 continue;
             }
@@ -314,6 +310,34 @@ mod tests {
     fn wall_count() {
         let w = build_wall();
         assert_eq!(w.len(), 140); // 136 standard + 4 flowers
+    }
+
+    #[test]
+    fn dora_faces_include_flower_indicators() {
+        let mut wall = Wall::from_unshuffled(build_wall());
+        wall.set_sole_dora(Suit::Flower, 2);
+        assert_eq!(wall.dora_faces(), vec![(Suit::Flower, 2)]);
+        assert_eq!(
+            wall.dora_indicator_tiles(),
+            &[Tile::new(Suit::Flower, 2, wall.dora_indicator_tiles()[0].id)]
+        );
+    }
+
+    #[test]
+    fn reveal_extra_dora_can_pick_flower_from_wall() {
+        let mut tiles = build_wall();
+        let flower = Tile::new(Suit::Flower, 3, 9999);
+        tiles.push(flower);
+        let mut wall = Wall::from_unshuffled(tiles);
+        wall.set_sole_dora(Suit::Manzu, 1);
+        wall.reveal_extra_dora_indicator();
+        assert!(
+            wall.dora_faces()
+                .iter()
+                .any(|&(s, r)| s == Suit::Flower && r == 3),
+            "expected flower dora from back-of-wall pick, got {:?}",
+            wall.dora_faces()
+        );
     }
 
     #[test]

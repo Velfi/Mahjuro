@@ -614,15 +614,13 @@ impl ModalQueue {
         let card_w = (360.0 * scale).min(window_w * 0.8);
         let title_px = typography::size(typography::H20, window_h);
         let title_h = title_px * 1.35;
-        let dismiss_px = typography::size(typography::H42, window_h);
-        let dismiss_h = dismiss_px * 1.15;
         let padding = (20.0 * scale).max(10.0);
         let body_font = typography::size(typography::H36, window_h);
         let body_inner_w = card_w - padding * 2.0;
         let wrapped = wrap_text(&modal.body, body_inner_w, body_font);
         let body_line_step = crate::ui::colored_keywords::colored_row_line_step(body_font);
         let body_lines = wrapped.len().max(1) as f32;
-        let chrome_h = padding + title_h + padding * 0.5 + padding * 0.75 + dismiss_h + padding;
+        let chrome_h = padding + title_h + padding * 0.5 + padding;
         let max_body_h = window_h * 0.85 - chrome_h;
         let body_h = (body_lines * body_line_step)
             .max(20.0)
@@ -677,23 +675,6 @@ impl ModalQueue {
             ..Default::default()
         });
 
-        // Dismiss hint.
-        let dismiss_y = body_y + body_h + padding * 0.75;
-        labels.push(TextLabel {
-            rect: [
-                card_x + padding,
-                dismiss_y,
-                card_w - padding * 2.0,
-                dismiss_h,
-            ],
-            text: "Press Enter to continue".into(),
-            color: {
-                let [r, g, b, a] = crate::render::theme::color::UMBER;
-                [r, g, b, a * 0.8 * alpha]
-            },
-            font_px: Some(dismiss_px),
-            ..Default::default()
-        });
     }
 }
 
@@ -877,31 +858,22 @@ fn draw_modal_paginated_unlock(
         ..Default::default()
     });
 
-    // ── Footer (page indicator + dismiss hint) ───────────────────
+    // ── Footer (page indicator when multi-page) ───────────────────
     let total = modal.pages.len();
-    let current = modal.current_page + 1;
-    let nav_text = if total > 1 {
-        format!(
-            "\u{25c0}  {} / {}  \u{25b6}    Enter to continue",
-            current, total
-        )
-    } else {
-        "Enter to continue".into()
-    };
-    labels.push(TextLabel {
-        rect: [0.0, window_h - nav_font * 3.0, window_w, nav_font * 1.5],
-        text: nav_text,
-        color: {
-            let [r, g, b, _] = crate::render::theme::color::STONE;
-            [r, g, b, 0.7 * alpha]
-        },
-        font_px: Some(nav_font),
-        ..Default::default()
-    });
+    if total > 1 {
+        let current = modal.current_page + 1;
+        labels.push(TextLabel {
+            rect: [0.0, window_h - nav_font * 3.0, window_w, nav_font * 1.5],
+            text: format!("\u{25c0}  {} / {}  \u{25b6}", current, total),
+            color: {
+                let [r, g, b, _] = crate::render::theme::color::STONE;
+                [r, g, b, 0.7 * alpha]
+            },
+            font_px: Some(nav_font),
+            ..Default::default()
+        });
+    }
 
-    // Bottom hint strip — left as a single-line caption since
-    // multi-modal interaction (arrows + enter) is the same on
-    // gamepad, keyboard, and mouse via the Confirm action.
     let _ = scale; // kept on signature for parity with simple draw
 }
 

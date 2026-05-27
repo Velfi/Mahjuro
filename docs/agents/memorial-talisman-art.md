@@ -42,9 +42,9 @@ Heightmaps align with `talisman_face_uv` (`v = 0` at +local Y, flat octagon edge
 `screenshot --scene game_over_defeat` can hydrate stats from real runs instead of the baked fixture:
 
 ```bash
-cargo run --release -- screenshot --scene game_over_defeat --bot-play
-cargo run --release -- screenshot --scene game_over_defeat --from-run-history 2 --profile 0
-cargo run --release -- screenshot --scene game_over_defeat --seed-bot-runs 20 --from-run-history 15
+cargo run -p mahjuro-headless --bin mahjuro-screenshot --features screenshot --release -- --scene game_over_defeat --bot-play
+cargo run -p mahjuro-headless --bin mahjuro-screenshot --features screenshot --release -- --scene game_over_defeat --from-run-history 2 --profile 0
+cargo run -p mahjuro-headless --bin mahjuro-screenshot --features screenshot --release -- --scene game_over_defeat --seed-bot-runs 20 --from-run-history 15
 ```
 
 `RunRecord::hydrate_game_over_run` restores the fields `GameOverScene` reads.

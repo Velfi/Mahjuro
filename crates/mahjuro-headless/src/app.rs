@@ -1,17 +1,17 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use crate::game::cascade::CascadeTuning;
-use crate::game::event_bus::EventBus;
-use crate::game::run::RunState;
-use crate::main_render_settings::RenderSettings;
-use crate::persistence;
-use crate::render::animation::AnimationController;
-use crate::render::draw_cmd::{UiFrame, apply_modal_relic_staging};
-use crate::render::wgpu_renderer::WgpuRenderer;
-use crate::scenes::{DrawCtx, Scene, SceneBehavior, UpdateCtx};
-use crate::ui::input::{InputMode, UiAction};
-use crate::ui::layout::UiLayout;
+use mahjuro::game::cascade::CascadeTuning;
+use mahjuro::game::event_bus::EventBus;
+use mahjuro::game::run::RunState;
+use mahjuro::main_render_settings::RenderSettings;
+use mahjuro::persistence;
+use mahjuro::render::animation::AnimationController;
+use mahjuro::render::draw_cmd::{UiFrame, apply_modal_relic_staging};
+use mahjuro::render::wgpu_renderer::WgpuRenderer;
+use mahjuro::scenes::{DrawCtx, Scene, SceneBehavior, UpdateCtx};
+use mahjuro::ui::input::{InputMode, UiAction};
+use mahjuro::ui::layout::UiLayout;
 
 const LOAD_WAIT_MAX_EXTRA: u32 = 600;
 const LOAD_WAIT_SLEEP_MS: u64 = 16;
@@ -22,10 +22,10 @@ struct HeadlessTickScratch {
     switch_profile: Option<usize>,
     delete_profile: Option<usize>,
     complete_onboarding: bool,
-    overlay_request: Option<crate::scenes::OverlayRequest>,
+    overlay_request: Option<mahjuro::scenes::OverlayRequest>,
     bump_archive_chronicle_seen: Option<u32>,
     seed_archive_seen: bool,
-    rumble_lab_ops: Vec<crate::ui::input::RumbleLabOp>,
+    rumble_lab_ops: Vec<mahjuro::ui::input::RumbleLabOp>,
 }
 
 impl Default for HeadlessTickScratch {
@@ -51,18 +51,18 @@ pub(crate) struct HeadlessApp {
     pub(crate) overlay_stack: Vec<Scene>,
     pub(crate) run: RunState,
     anim: AnimationController,
-    pub(crate) progress: crate::core::progression::PlayerProgress,
+    pub(crate) progress: mahjuro::core::progression::PlayerProgress,
     active_profile: usize,
     gfx: RenderSettings,
-    effect_layers: crate::effect_layers::EffectLayers,
-    scene_look: crate::game::scene_look_tuning::SceneLookTuningSet,
+    effect_layers: mahjuro::effect_layers::EffectLayers,
+    scene_look: mahjuro::game::scene_look_tuning::SceneLookTuningSet,
     width: u32,
     height: u32,
     game_in_progress: bool,
     tick_count: u32,
     queued_actions: Vec<(u32, UiAction)>,
-    modal_overlay: Option<crate::ui::modal::ModalQueue>,
-    pub(crate) shop_env_lighting: crate::render::room_glb::RoomEnvLightingTune,
+    modal_overlay: Option<mahjuro::ui::modal::ModalQueue>,
+    pub(crate) shop_env_lighting: mahjuro::render::room_glb::RoomEnvLightingTune,
     pub(crate) input_mode_override: Option<InputMode>,
 }
 
@@ -74,10 +74,10 @@ impl HeadlessApp {
         height: u32,
         game_in_progress: bool,
         active_profile: usize,
-        progress: crate::core::progression::PlayerProgress,
+        progress: mahjuro::core::progression::PlayerProgress,
     ) -> anyhow::Result<Self> {
         let settings = persistence::load_settings();
-        let renderer = WgpuRenderer::new(crate::render::wgpu_renderer::TargetInit::Headless {
+        let renderer = WgpuRenderer::new(mahjuro::render::wgpu_renderer::TargetInit::Headless {
             width,
             height,
             hdr_enabled: false,
@@ -102,8 +102,8 @@ impl HeadlessApp {
                 hdr_enabled: false,
                 vhs_enabled: false,
             },
-            effect_layers: crate::effect_layers::EffectLayers::BASELINE,
-            scene_look: crate::game::scene_look_tuning::SceneLookTuningSet::load(),
+            effect_layers: mahjuro::effect_layers::EffectLayers::BASELINE,
+            scene_look: mahjuro::game::scene_look_tuning::SceneLookTuningSet::load(),
             width,
             height,
             game_in_progress,
@@ -111,7 +111,7 @@ impl HeadlessApp {
             queued_actions: Vec::new(),
             modal_overlay: None,
             input_mode_override: None,
-            shop_env_lighting: crate::render::room_glb::RoomEnvLightingTune::SOURCE_DEFAULTS,
+            shop_env_lighting: mahjuro::render::room_glb::RoomEnvLightingTune::SOURCE_DEFAULTS,
         })
     }
 
@@ -120,7 +120,7 @@ impl HeadlessApp {
     }
 
     pub(crate) fn unlock_all_yaku_for_screenshot(&mut self) {
-        use crate::core::yaku::YakuKind;
+        use mahjuro::core::yaku::YakuKind;
         for yk in YakuKind::all() {
             *self.progress.yaku_times_scored.entry(*yk).or_insert(0) += 1;
         }
@@ -135,14 +135,14 @@ impl HeadlessApp {
     }
 
     pub(crate) fn unlock_all_for_collection_screenshot(&mut self) {
-        let signature_hand = crate::scenes::archive_career::sample_signature_hand_tiles();
+        let signature_hand = mahjuro::scenes::archive_career::sample_signature_hand_tiles();
         self.progress
             .apply_screenshot_collection_demo(signature_hand);
     }
 
     pub(crate) fn force_relic_unlock_modal(&mut self) {
-        use crate::core::relic::all_relic_defs;
-        use crate::ui::modal::{Modal, ModalQueue, ModalTheme, UnlockPage};
+        use mahjuro::core::relic::all_relic_defs;
+        use mahjuro::ui::modal::{Modal, ModalQueue, ModalTheme, UnlockPage};
 
         let defs = all_relic_defs();
         let chosen = defs
@@ -150,7 +150,7 @@ impl HeadlessApp {
             .find(|d| d.name == "Kong Collector")
             .or_else(|| defs.first())
             .expect("at least one relic must be defined");
-        let accent = crate::render::theme::color::rarity(chosen.rarity.tier());
+        let accent = mahjuro::render::theme::color::rarity(chosen.rarity.tier());
         let hero = UnlockPage {
             category: "New Relic".into(),
             name: chosen.name.into(),
@@ -277,7 +277,7 @@ impl HeadlessApp {
                 rumble_lab_ops: &mut scratch.rumble_lab_ops,
                 suspended_shop: None,
                 suspended_collection: None,
-                room_gltf_height_scale: crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
+                room_gltf_height_scale: mahjuro::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
                 bump_archive_chronicle_seen: &mut scratch.bump_archive_chronicle_seen,
                 seed_archive_seen: &mut scratch.seed_archive_seen,
                 archive_chronicle_last_seen: 0,
@@ -288,22 +288,22 @@ impl HeadlessApp {
                 matches!(
                     top,
                     Scene::Showcase(s)
-                        if matches!(s.presenter, crate::scenes::ShowcasePresenter::ShopInspect(_))
+                        if matches!(s.presenter, mahjuro::scenes::ShowcasePresenter::ShopInspect(_))
                 )
             });
             let showcase_collection_inspect = self.overlay_stack.last().is_some_and(|top| {
                 matches!(
                     top,
                     Scene::Showcase(s)
-                        if matches!(s.presenter, crate::scenes::ShowcasePresenter::CollectionInspect(_))
+                        if matches!(s.presenter, mahjuro::scenes::ShowcasePresenter::CollectionInspect(_))
                 )
             });
             let (suspended_shop, suspended_collection) = match &mut self.scene {
-                crate::scenes::Scene::Shop(shop) if showcase_shop_inspect => {
+                mahjuro::scenes::Scene::Shop(shop) if showcase_shop_inspect => {
                     shop.tick_suspended_animation_clock();
                     (Some(shop), None)
                 }
-                crate::scenes::Scene::Collection(collection) if showcase_collection_inspect => {
+                mahjuro::scenes::Scene::Collection(collection) if showcase_collection_inspect => {
                     (None, Some(collection))
                 }
                 _ => (None, None),
@@ -347,7 +347,7 @@ impl HeadlessApp {
                     rumble_lab_ops: &mut scratch.rumble_lab_ops,
                     suspended_shop,
                     suspended_collection,
-                    room_gltf_height_scale: crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
+                    room_gltf_height_scale: mahjuro::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
                     bump_archive_chronicle_seen: &mut scratch.bump_archive_chronicle_seen,
                     seed_archive_seen: &mut scratch.seed_archive_seen,
                     archive_chronicle_last_seen: 0,
@@ -355,8 +355,8 @@ impl HeadlessApp {
                 })
         };
         match scratch.overlay_request {
-            Some(crate::scenes::OverlayRequest::Push(s)) => self.overlay_stack.push(*s),
-            Some(crate::scenes::OverlayRequest::Pop) => {
+            Some(mahjuro::scenes::OverlayRequest::Push(s)) => self.overlay_stack.push(*s),
+            Some(mahjuro::scenes::OverlayRequest::Pop) => {
                 self.overlay_stack.pop();
             }
             None => {}
@@ -377,18 +377,18 @@ impl HeadlessApp {
         };
 
         let settings = persistence::load_settings();
-        let detected = crate::ui::button_prompts::GamepadStyle::default();
+        let detected = mahjuro::ui::button_prompts::GamepadStyle::default();
         let prompt_style = settings.glyph_prompt.resolve(detected);
-        let glyphs = crate::ui::glyph_source::GlyphResolver::new(prompt_style, false, false);
+        let glyphs = mahjuro::ui::glyph_source::GlyphResolver::new(prompt_style, false, false);
         let mut env_per_scene = rustc_hash::FxHashMap::default();
         let mut env_frame_tunes = Vec::new();
-        for &key in crate::game::scene_look_tuning::GLTF_ENV_SCENE_KEYS {
+        for &key in mahjuro::game::scene_look_tuning::GLTF_ENV_SCENE_KEYS {
             let look = self.scene_look.resolve(Some(key));
             let room = look.room;
             env_per_scene.insert(key, (room, look.room_gltf_height_scale));
             env_frame_tunes.push((
                 key,
-                crate::game::scene_look_tuning::RoomEnvFrameTune::from_scene_look(
+                mahjuro::game::scene_look_tuning::RoomEnvFrameTune::from_scene_look(
                     &look, room,
                 ),
             ));
@@ -403,17 +403,14 @@ impl HeadlessApp {
             self.renderer.projections(),
             None,
             None,
-            crate::scenes::DebugVisibility::default(),
+            mahjuro::scenes::DebugVisibility::default(),
             false,
-            crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
+            mahjuro::render::room_glb::SHOP_ENV_HEIGHT_SCALE,
             self.shop_env_lighting,
             &env_per_scene,
             self.effect_layers,
             (0.0, 0.0),
             self.input_mode_override.unwrap_or(InputMode::Cursor),
-            false,
-            false,
-            prompt_style,
             glyphs,
             suspended_shop,
             suspended_collection,
@@ -482,7 +479,7 @@ impl HeadlessApp {
             .unwrap_or(self.gfx.tile_material);
         let active_tileset_name = self.gfx.tileset_name.clone();
         let render_settings = self.effect_layers.wgpu_render_settings(
-            &crate::effect_layers::WgpuRenderSettingsParams {
+            &mahjuro::effect_layers::WgpuRenderSettingsParams {
                 gfx: &self.gfx,
                 tile_preset: self.gfx.tile_preset,
                 tile_material: active_material,
@@ -513,18 +510,31 @@ impl HeadlessApp {
         Ok(())
     }
 
-    pub(crate) fn run_room_gi_bake(
-        mut self,
-        room: crate::render::room_gi_bake::RoomGiRoom,
+    pub(crate) fn bake_room_gi(
+        &mut self,
+        room: mahjuro::render::room_gi_bake::RoomGiRoom,
         warmup_frames: u32,
-    ) -> anyhow::Result<crate::render::room_gi_bake::RoomGiBake> {
+    ) -> anyhow::Result<mahjuro::render::room_gi_bake::RoomGiBake> {
         self.effect_layers.procedural_surface_quality = true;
-        self.gfx.effects_quality = crate::persistence::EffectsQuality::High;
+        self.gfx.effects_quality = mahjuro::persistence::EffectsQuality::High;
         self.renderer.request_room_gi_capture(room);
         self.run_warmup(warmup_frames);
         self.tick();
         self.renderer.take_room_gi_capture().ok_or_else(|| {
             anyhow::anyhow!("room GI bake: GPU readback missing (was probe compute dispatched?)")
+        })
+    }
+
+    pub(crate) fn bake_room_shadow(
+        &mut self,
+        room: mahjuro::render::room_gi_bake::RoomGiRoom,
+        warmup_frames: u32,
+    ) -> anyhow::Result<mahjuro::render::room_shadow_bake::RoomShadowBake> {
+        self.renderer.request_room_shadow_capture(room);
+        self.run_warmup_frames(warmup_frames);
+        self.tick_frame();
+        self.renderer.take_room_shadow_capture().ok_or_else(|| {
+            anyhow::anyhow!("room shadow bake: GPU readback missing")
         })
     }
 }
