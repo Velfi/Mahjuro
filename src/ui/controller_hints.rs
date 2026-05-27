@@ -271,7 +271,7 @@ pub fn inspect_camera_hint_row(input_mode: InputMode) -> Vec<HintSegment> {
                 "zoom in",
                 vec![
                     HintKey::Keyboard("keyboard_shift"),
-                    HintKey::Keyboard("keyboard_w"),
+                    HintKey::Keyboard("keyboard_arrow_up"),
                 ],
                 HintKeyJoin::Plus,
             )
@@ -280,7 +280,7 @@ pub fn inspect_camera_hint_row(input_mode: InputMode) -> Vec<HintSegment> {
                 "zoom out",
                 vec![
                     HintKey::Keyboard("keyboard_shift"),
-                    HintKey::Keyboard("keyboard_s"),
+                    HintKey::Keyboard("keyboard_arrow_down"),
                 ],
                 HintKeyJoin::Plus,
             )

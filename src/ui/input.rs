@@ -779,19 +779,17 @@ impl InputState {
                 (self.item_inspect_orbit_stick.1 + sy).clamp(-1.0, 1.0);
 
             // Keyboard orbit controls while inspect overlay is active:
-            // arrows map to orbit; W/S (with Shift) drive zoom.
+            // arrows map to orbit; Shift+Up/Down drive zoom.
             let ks = shell.pump.keyboard_state();
             let shift = ks.is_scancode_pressed(Scancode::LShift)
                 || ks.is_scancode_pressed(Scancode::RShift);
             let up_orbit = ks.is_scancode_pressed(Scancode::Up);
             let down_orbit = ks.is_scancode_pressed(Scancode::Down);
-            let up_zoom = ks.is_scancode_pressed(Scancode::W) || up_orbit;
-            let down_zoom = ks.is_scancode_pressed(Scancode::S) || down_orbit;
             if shift {
-                if up_zoom {
+                if up_orbit {
                     self.item_inspect_zoom_triggers += 1.0;
                 }
-                if down_zoom {
+                if down_orbit {
                     self.item_inspect_zoom_triggers -= 1.0;
                 }
             }

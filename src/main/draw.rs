@@ -194,7 +194,7 @@ impl App {
                     }
                     lines.push(format!("Total  +¥{}", payout.total));
                     let modal =
-                        Modal::new("Another chamber is behind you!", lines.join("\n"), ModalTheme::Success)
+                        Modal::new("Winner!", lines.join("\n"), ModalTheme::Success)
                             .with_fireworks(ww * 0.5, wh * 0.8, ww * 0.6, 5);
                     self.modals.push(modal);
                 }
