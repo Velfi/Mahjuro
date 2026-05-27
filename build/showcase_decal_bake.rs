@@ -12,9 +12,13 @@ const STAMP_PATH: &str = "assets/textures/tile_sets/.decal_bake_stamp";
 
 /// Baked outputs and the stamp file must not feed back into the input fingerprint.
 fn skip_decal_input(rel: &str) -> bool {
-    rel == ".decal_bake_stamp"
-        || rel.ends_with("/showcase_decal_atlas.png")
-        || rel.ends_with("\\showcase_decal_atlas.png")
+    let base = std::path::Path::new(rel)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    base == ".decal_bake_stamp"
+        || base == "showcase_decal_atlas.png"
+        || base == ".DS_Store"
 }
 
 pub fn emit_rerun_if_changed() {

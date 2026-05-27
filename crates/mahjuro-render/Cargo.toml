@@ -15,6 +15,8 @@ path = "src/bin/mahjuro-bake-relics.rs"
 [features]
 default = []
 clipboard = ["dep:arboard"]
+# SDL window/surface path for the interactive game; off for CPU-only bake binaries.
+windowed = ["dep:sdl3"]
 
 [dependencies]
 arboard = { version = "3.6.1", optional = true }
@@ -47,4 +49,4 @@ lyon_tessellation = "1.0"
 resvg = "0.44"
 rayon = "1.11.0"
 chrono = "0.4"
-sdl3 = { version = "0.17", features = ["raw-window-handle"] }
+sdl3 = { version = "0.17", features = ["raw-window-handle"], optional = true }

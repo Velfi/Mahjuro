@@ -1,3 +1,4 @@
+#[cfg(feature = "windowed")]
 use sdl3::video::Window;
 
 /// Where the final composited frame lands. `Surface` is the normal
@@ -18,6 +19,7 @@ pub(crate) enum RenderTarget {
 /// the interactive game builds a `Windowed`; the screenshot CLI builds a
 /// `Headless`.
 pub enum TargetInit {
+    #[cfg(feature = "windowed")]
     Windowed {
         window: Window,
         hdr_enabled: bool,

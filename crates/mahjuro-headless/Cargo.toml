@@ -6,13 +6,15 @@ description = "Offscreen GPU tools for Mahjuro (room bakes + screenshots)"
 publish = false
 
 [features]
-default = []
+# `bake-support` must stay enabled whenever this crate is built: shared `mahjuro`
+# code still links scenes/game/ui and needs audio/steam/sdl stubs.
+default = ["bake"]
 bake = ["mahjuro/bake-support"]
 screenshot = ["mahjuro/headless-screenshot"]
 
 [dependencies]
 mahjuro = { path = "../..", default-features = false }
-mahjuro-render = { path = "../mahjuro-render" }
+mahjuro-render = { path = "../mahjuro-render", default-features = false }
 mahjuro-assets = { path = "../mahjuro-assets" }
 anyhow = "1.0.102"
 clap = { version = "4.5", features = ["derive"] }
