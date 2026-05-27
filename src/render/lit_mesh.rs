@@ -632,34 +632,69 @@ impl LitMeshInstance {
     }
 }
 
-/// Bind-group layout for the per-caster shadow uniform consumed by
-/// `shaders/shadow.wgsl` during the shadow pre-pass. A single uniform
-/// containing `(light_view_proj, model)`.
-/// Per-room-GLB shadow caster buffer + bind group (shared model matrix for all primitives).
-pub fn create_room_env_shadow_gpu(
+/// Per-primitive camera uniform buffers for imported room GLB meshes.
+/// Each primitive gets its own buffer so glTF node TRS deltas can be baked
+/// before the render pass (mid-pass `write_buffer` on a shared uniform is unreliable).
+pub fn create_room_env_camera_uniform_buffers(
+    device: &wgpu::Device,
+    count: usize,
+    label: &str,
+) -> Vec<wgpu::Buffer> {
+    use crate::render::tile_body;
+    use crate::render::wgpu_renderer::CameraUniform;
+    let identity = glam::Mat4::IDENTITY.to_cols_array();
+    let initial = CameraUniform {
+        view_proj: identity,
+        model: identity,
+        base_color_factor: [1.0, 0.0, 0.0, tile_body::TEXTURED_BASE_MAP_BODY_KIND],
+        cam_pos: [0.0; 3],
+        tile_seed: 0.0,
+        decal_atlas_uv: [0.0, 0.0, 1.0, 1.0],
+        hdr_tonemap: [0.0; 4],
+    };
+    (0..count)
+        .map(|i| {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("{label}-{i}")),
+                contents: bytemuck::bytes_of(&initial),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            })
+        })
+        .collect()
+}
+
+/// Per-primitive shadow caster buffers + bind groups for room GLB depth passes.
+pub fn create_room_env_shadow_gpu_batch(
     device: &wgpu::Device,
     shadow_caster_layout: &wgpu::BindGroupLayout,
+    count: usize,
     label: &str,
-) -> (wgpu::Buffer, wgpu::BindGroup) {
+) -> (Vec<wgpu::Buffer>, Vec<wgpu::BindGroup>) {
     let identity = glam::Mat4::IDENTITY.to_cols_array();
     let initial = ShadowCasterUniform {
         light_view_proj: identity,
         model: identity,
     };
-    let shadow_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some(label),
-        contents: bytemuck::bytes_of(&initial),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
-    let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some(label),
-        layout: shadow_caster_layout,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: shadow_uniform_buffer.as_entire_binding(),
-        }],
-    });
-    (shadow_uniform_buffer, shadow_bind_group)
+    let mut buffers = Vec::with_capacity(count);
+    let mut bind_groups = Vec::with_capacity(count);
+    for i in 0..count {
+        let shadow_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("{label}-{i}")),
+            contents: bytemuck::bytes_of(&initial),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("{label}-bg-{i}")),
+            layout: shadow_caster_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: shadow_uniform_buffer.as_entire_binding(),
+            }],
+        });
+        buffers.push(shadow_uniform_buffer);
+        bind_groups.push(shadow_bind_group);
+    }
+    (buffers, bind_groups)
 }
 
 pub fn create_shadow_caster_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {

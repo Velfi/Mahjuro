@@ -122,17 +122,15 @@ impl WgpuRenderer {
                                 gpu,
                                 lvp,
                                 glam::Mat4::IDENTITY,
+                                &rustc_hash::FxHashMap::default(),
                                 &mut room_changed,
                             );
                         }
                         self.draw_gltf_room_env_shadow(
                             shadow_pass,
-                            frame,
                             &self.hallway_env_primitives,
                             gpu,
                             |_| false,
-                            None,
-                            None,
                         );
                     }
                 }
@@ -143,17 +141,15 @@ impl WgpuRenderer {
                                 gpu,
                                 lvp,
                                 glam::Mat4::IDENTITY,
+                                &rustc_hash::FxHashMap::default(),
                                 &mut room_changed,
                             );
                         }
                         self.draw_gltf_room_env_shadow(
                             shadow_pass,
-                            frame,
                             &self.staircase_env_primitives,
                             gpu,
                             |_| false,
-                            None,
-                            None,
                         );
                     }
                 }
@@ -164,17 +160,15 @@ impl WgpuRenderer {
                                 gpu,
                                 lvp,
                                 glam::Mat4::IDENTITY,
+                                &rustc_hash::FxHashMap::default(),
                                 &mut room_changed,
                             );
                         }
                         self.draw_gltf_room_env_shadow(
                             shadow_pass,
-                            frame,
                             &self.archive_env_primitives,
                             gpu,
                             |pi| self.archive_env_skip_room_shadow_caster(pi),
-                            None,
-                            None,
                         );
                     }
                 }
@@ -185,17 +179,15 @@ impl WgpuRenderer {
                                 gpu,
                                 lvp,
                                 glam::Mat4::IDENTITY,
+                                &rustc_hash::FxHashMap::default(),
                                 &mut room_changed,
                             );
                         }
                         self.draw_gltf_room_env_shadow(
                             shadow_pass,
-                            frame,
                             &self.main_menu_env_primitives,
                             gpu,
                             |_| false,
-                            None,
-                            None,
                         );
                     }
                 }
@@ -223,17 +215,18 @@ impl WgpuRenderer {
                                 gpu,
                                 lvp,
                                 model,
+                                &rustc_hash::FxHashMap::default(),
                                 &mut room_changed,
                             );
                         }
                         self.draw_gltf_room_env_shadow(
                             shadow_pass,
-                            frame,
                             &self.gameplay_env_primitives,
                             gpu,
-                            |_| false,
-                            None,
-                            None,
+                            |pi| {
+                                !frame.gameplay_cash_in_button_visible
+                                    && self.gameplay_cash_in_prim_indices.contains(&pi)
+                            },
                         );
                     }
                 }

@@ -1062,6 +1062,7 @@ impl CollectionScene {
                         &mut quads,
                         &mut text_labels,
                         rect,
+                        w,
                         h,
                         "NEW",
                     );
@@ -3243,6 +3244,29 @@ mod tests {
         assert!(
             chronicle_y > main_row_y + h * 0.2,
             "chronicle tab should sit on the lower shelf"
+        );
+    }
+
+    #[test]
+    fn chronicle_tab_new_badge_stays_on_screen() {
+        let w = 1920.0;
+        let h = 1080.0;
+        let env_h = crate::render::room_glb::SHOP_ENV_HEIGHT_SCALE;
+        let cam = archive_glb::archive_camera_base(w, h, env_h);
+        let tab_rects = archive_tab_hit_rects(w, h, env_h, &cam);
+        let chronicle_idx = TABS.len() - 1;
+        let (_, host) = tab_rects
+            .iter()
+            .find(|(ti, _)| *ti == chronicle_idx)
+            .expect("chronicle tab rect");
+        let badge = crate::ui::corner_badge::corner_badge_rect(*host, w, h, "NEW")
+            .expect("badge layout");
+        assert!(
+            badge[0] >= 0.0
+                && badge[1] >= 0.0
+                && badge[0] + badge[2] <= w + 0.5
+                && badge[1] + badge[3] <= h + 0.5,
+            "chronicle NEW badge should fit in {w}x{h}, got {badge:?} for host {host:?}"
         );
     }
 

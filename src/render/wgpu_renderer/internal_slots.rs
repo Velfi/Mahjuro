@@ -175,15 +175,16 @@ pub(crate) struct ShowcaseTileGpu {
     pub tile_id: (Suit, u8, Option<crate::core::tile::TileEnhancement>, bool),
 }
 
-/// GPU uniforms + bind groups for the imported [`shop.glb`](../../assets/3d/shop.glb) environment mesh.
+/// GPU uniforms + bind groups for imported room GLB environment meshes.
 /// Uses the same tile textured pipeline as hand tiles; vertices are already in world space (`model = I`).
 pub(crate) struct ShopEnvironmentGpu {
-    pub uniform_buffer: wgpu::Buffer,
+    /// Per-primitive camera uniforms; `uniform_buffers[i]` matches `bind_groups[i]`.
+    pub uniform_buffers: Vec<wgpu::Buffer>,
     /// Shared by all room primitives; pick-blind uploads [`crate::render::hallway_glb::HallwayDistortion`].
     pub distortion_buffer: wgpu::Buffer,
-    /// `(light_view_proj, model)` for [`shaders/shadow.wgsl`] — one matrix for all env prims.
-    pub shadow_uniform_buffer: wgpu::Buffer,
-    pub shadow_bind_group: wgpu::BindGroup,
+    /// Per-primitive `(light_view_proj, model)` for [`shaders/shadow.wgsl`].
+    pub shadow_uniform_buffers: Vec<wgpu::Buffer>,
+    pub shadow_bind_groups: Vec<wgpu::BindGroup>,
     /// Same `distortion_buffer` as `room_glb` @binding(8) — shadow VS group 1 (warp disabled when zeroed).
     pub shadow_warp_bind_group: wgpu::BindGroup,
     pub bind_groups: Vec<wgpu::BindGroup>,

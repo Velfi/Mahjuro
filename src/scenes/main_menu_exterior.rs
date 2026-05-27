@@ -9,11 +9,13 @@ use crate::game::engine::GameEngine;
 use crate::game::event_bus::GameEvent;
 use crate::game::run::RunState;
 use crate::persistence::{self, ResumeScene, TileMaterial};
-use crate::render::draw_cmd::{ImageQuad, ImageQuadSource, ScenePunctualLight, UiFrame};
+use crate::render::draw_cmd::{CameraParams, ImageQuad, ImageQuadSource, ScenePunctualLight, UiFrame};
 use crate::render::main_menu_glb;
 use crate::render::rain_field::RainField;
+use crate::render::room_glb::{self, RoomEnvLightingTune};
+use crate::render::scene_light_sample::{PunctualOccluderAabb, SceneLightSampleCtx};
 use crate::render::theme::{color, metrics, typography};
-use crate::render::wgpu_renderer::{GpuInstance, PointLight, TextAlign, TextLabel};
+use crate::render::wgpu_renderer::{GpuInstance, PointLight, SpotLight, TextAlign, TextLabel};
 use crate::ui::focus_nav::{self, FocusDir};
 use crate::ui::input::UiAction;
 
@@ -42,7 +44,18 @@ fn push_main_menu_rain(
     let cam = frame
         .camera_override
         .unwrap_or_else(|| main_menu_glb::main_menu_camera_base(w, h, env_scale));
-    rain_field.push_quads(frame, &cam, w, h, ctx.rain_tuning.field.streak_len_px);
+    let tune = ctx.room_env_for("main_menu_exterior").0;
+    let bundle = build_main_menu_rain_lighting(w, h, env_scale, &tune);
+    let lighting = main_menu_rain_light_sample_ctx(w, h, env_scale, &cam, &tune, &bundle);
+    rain_field.push_quads(
+        frame,
+        &cam,
+        w,
+        h,
+        ctx.rain_tuning.field.streak_len_px,
+        ctx.rain_tuning.field.drop_color,
+        Some(&lighting),
+    );
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -96,23 +109,14 @@ fn default_focus(in_progress: bool) -> HubFocus {
     }
 }
 
-fn push_main_menu_room_frame(
-    frame: &mut UiFrame,
+fn main_menu_scene_punctual(
     w: f32,
     h: f32,
     env_scale: f32,
-    tune: &crate::render::room_glb::RoomEnvLightingTune,
-) {
-    if !main_menu_glb::main_menu_room_draw_ready() {
-        return;
-    }
-    frame.background(BackgroundId::Black);
-    frame.main_menu_environment();
-    frame.camera_override = Some(main_menu_glb::main_menu_camera_base(w, h, env_scale));
+    tune: &RoomEnvLightingTune,
+) -> (Vec<ScenePunctualLight>, Vec<SpotLight>) {
     let room_glb = main_menu_glb::main_menu_glb_has_embedded_lights();
-    frame.scene_lighting.embedded_gltf_punctual = room_glb;
-    frame.scene_lighting.room_glb_brdf = room_glb;
-    frame.scene_lighting.spot_lights = if room_glb {
+    let spots = if room_glb {
         main_menu_glb::main_menu_embedded_spot_lights_runtime(w, h, env_scale, tune)
     } else {
         Vec::new()
@@ -144,6 +148,93 @@ fn push_main_menu_room_frame(
         ]
     };
     punctual.extend(fill.into_iter().map(ScenePunctualLight::Smooth));
+    (punctual, spots)
+}
+
+struct MainMenuRainLighting {
+    punctual: Vec<ScenePunctualLight>,
+    spots: Vec<SpotLight>,
+    occluders: Vec<PunctualOccluderAabb>,
+}
+
+fn build_main_menu_rain_lighting(
+    w: f32,
+    h: f32,
+    env_scale: f32,
+    tune: &RoomEnvLightingTune,
+) -> MainMenuRainLighting {
+    let (punctual, spots) = main_menu_scene_punctual(w, h, env_scale, tune);
+    let occluders = main_menu_glb::main_menu_rain_env_model_matrix(h, env_scale)
+        .map(|model| {
+            PunctualOccluderAabb::from_room_collision_meshes(
+                model,
+                &main_menu_glb::main_menu_collision_meshes(),
+            )
+        })
+        .unwrap_or_default();
+    MainMenuRainLighting {
+        punctual,
+        spots,
+        occluders,
+    }
+}
+
+fn main_menu_rain_light_sample_ctx<'a>(
+    w: f32,
+    h: f32,
+    env_scale: f32,
+    cam: &'a CameraParams,
+    tune: &RoomEnvLightingTune,
+    bundle: &'a MainMenuRainLighting,
+) -> SceneLightSampleCtx<'a> {
+    let room_glb = main_menu_glb::main_menu_glb_has_embedded_lights();
+    let world_scale = room_glb::room_env_world_scale(h, env_scale);
+    let inv_doc_scale = if room_glb {
+        1.0 / world_scale.max(1e-6)
+    } else {
+        0.0
+    };
+    let ambient = tune
+        .ambient_scale
+        .max(main_menu_glb::MAIN_MENU_ENV_AMBIENT_SCALE_MIN);
+    let linear_exposure = if room_glb {
+        tune.linear_exposure
+            * room_glb::ROOM_GLB_LINEAR_EXPOSURE_BASE
+            * main_menu_glb::MAIN_MENU_ENV_LINEAR_EXPOSURE_MUL
+    } else {
+        1.0
+    };
+    SceneLightSampleCtx {
+        screen_w: w,
+        screen_h: h,
+        cam: Some(cam),
+        ambient_scale: ambient,
+        inv_doc_scale,
+        linear_exposure,
+        punctual: &bundle.punctual,
+        spots: &bundle.spots,
+        occluders: &bundle.occluders,
+    }
+}
+
+fn push_main_menu_room_frame(
+    frame: &mut UiFrame,
+    w: f32,
+    h: f32,
+    env_scale: f32,
+    tune: &RoomEnvLightingTune,
+) {
+    if !main_menu_glb::main_menu_room_draw_ready() {
+        return;
+    }
+    frame.background(BackgroundId::Black);
+    frame.main_menu_environment();
+    frame.camera_override = Some(main_menu_glb::main_menu_camera_base(w, h, env_scale));
+    let room_glb = main_menu_glb::main_menu_glb_has_embedded_lights();
+    frame.scene_lighting.embedded_gltf_punctual = room_glb;
+    frame.scene_lighting.room_glb_brdf = room_glb;
+    let (punctual, spots) = main_menu_scene_punctual(w, h, env_scale, tune);
+    frame.scene_lighting.spot_lights = spots;
     frame.scene_lighting.punctual = punctual;
 }
 
@@ -248,8 +339,19 @@ impl SceneBehavior for MainMenuExteriorScene {
             let env_scale = main_menu_glb::main_menu_env_height_scale(ctx.room_gltf_height_scale);
             let cam = main_menu_glb::main_menu_camera_base(w, h, env_scale);
             let meshes = main_menu_glb::main_menu_rain_surface_meshes();
-            self.rain_field
-                .update(dt, &ctx.rain_tuning, &cam, w, h, env_scale, &meshes);
+            let tune = RoomEnvLightingTune::default();
+            let bundle = build_main_menu_rain_lighting(w, h, env_scale, &tune);
+            let lighting = main_menu_rain_light_sample_ctx(w, h, env_scale, &cam, &tune, &bundle);
+            self.rain_field.update(
+                dt,
+                &ctx.rain_tuning,
+                &cam,
+                w,
+                h,
+                env_scale,
+                &meshes,
+                Some(&lighting),
+            );
         }
         let in_progress = GameEngine::run_in_progress(ctx.run);
         let items = menu_items(in_progress);
@@ -382,14 +484,14 @@ impl SceneBehavior for MainMenuExteriorScene {
             let env_scale = main_menu_glb::main_menu_env_height_scale(ctx.room_gltf_height_scale);
             if main_menu_glb::main_menu_room_draw_ready() {
                 push_main_menu_room_frame(&mut frame, w, h, env_scale, &ctx.room_env_for("main_menu_exterior").0);
-                if let Some(door_light) =
-                    main_menu_glb::main_menu_door_light_object3d_anchor(w, h, env_scale)
+                if let Some(light_door) =
+                    main_menu_glb::main_menu_light_door_object3d_anchor(w, h, env_scale)
                 {
                     lamp_moths::push_moths_around_lamp(
                         &mut frame,
                         w,
                         h,
-                        door_light,
+                        light_door,
                         h * 0.16,
                         h * 0.20,
                         self.age_secs,
@@ -448,14 +550,14 @@ impl SceneBehavior for MainMenuExteriorScene {
         let env_scale = main_menu_glb::main_menu_env_height_scale(ctx.room_gltf_height_scale);
         if main_menu_glb::main_menu_room_draw_ready() {
             push_main_menu_room_frame(&mut frame, w, h, env_scale, &ctx.room_env_for("main_menu_exterior").0);
-            if let Some(door_light) =
-                main_menu_glb::main_menu_door_light_object3d_anchor(w, h, env_scale)
+            if let Some(light_door) =
+                main_menu_glb::main_menu_light_door_object3d_anchor(w, h, env_scale)
             {
                 lamp_moths::push_moths_around_lamp(
                     &mut frame,
                     w,
                     h,
-                    door_light,
+                    light_door,
                     h * 0.16,
                     h * 0.20,
                     self.age_secs,

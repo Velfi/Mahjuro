@@ -14,7 +14,7 @@ use std::sync::RwLock;
 use glam::Vec3;
 
 use crate::render::draw_cmd::CameraParams;
-use crate::render::room_env_gltf::{RoomEnvWalkHooks, RoomMeshPolicy};
+use crate::render::room_env_gltf::{self, RoomEnvWalkHooks, RoomMeshPolicy};
 use crate::render::room_glb::{self, RoomEnvLightingTune, RoomGlbCpu, load_room_glb_from_bytes};
 use crate::render::wgpu_renderer::{PointLight, SpotLight};
 use crate::render::world_space::surface_anchor_from_world_xyz;
@@ -75,11 +75,13 @@ fn ensure_main_menu_glb_loaded() {
                     );
                 }
                 log::debug!(
-                    "main_menu.glb: {} marker(s), {} draw primitive(s), named cameras: {:?}",
+                    "main_menu.glb: {} marker(s), {} draw primitive(s), {} punctual occluder mesh(es), named cameras: {:?}",
                     cpu.markers.len(),
                     cpu.environment_primitives.len(),
+                    cpu.collision_meshes.len(),
                     cpu.embedded_cameras_by_name.keys().collect::<Vec<_>>(),
                 );
+                crate::render::room_gltf_punctual::log_main_menu_punctual_light_nodes(&cpu);
                 Some(cpu)
             }
             Err(e) => {
@@ -106,6 +108,42 @@ pub fn main_menu_rain_surface_meshes() -> Vec<crate::render::room_env_gltf::Room
     with_main_menu_glb_cpu(|opt| {
         opt.map(|c| c.rain_surface_meshes.clone())
             .unwrap_or_default()
+    })
+}
+
+/// Room collision meshes for analytic punctual occlusion (roof, etc.).
+pub fn main_menu_collision_meshes() -> Vec<crate::render::room_env_gltf::RoomCollisionMesh> {
+    with_main_menu_glb_cpu(|opt| {
+        opt.map(|c| c.collision_meshes.clone()).unwrap_or_default()
+    })
+}
+
+/// Visible ground mesh node in [`main_menu.glb`](../../../assets/3d/main_menu.glb) (spawn fallback only).
+pub const MAIN_MENU_RAIN_GROUND_NODE: &str = "ground";
+
+/// World-space spawn column for CPU rain — union of every `rain_hit_*` shell (deck, rocks, roof, …).
+pub fn main_menu_rain_hit_spawn_aabb(
+    window_h: f32,
+    env_scale: f32,
+) -> Option<([f32; 3], [f32; 3])> {
+    with_main_menu_glb_cpu(|opt| {
+        let cpu = opt?;
+        let center = cpu.environment_bounds_doc?.center();
+        let bounds_doc = room_env_gltf::RoomEnvironmentBounds::from_collision_meshes(
+            &cpu.rain_surface_meshes,
+        )
+        .or_else(|| {
+            room_env_gltf::room_env_primitive_bounds_doc(
+                &cpu.environment_primitives,
+                MAIN_MENU_RAIN_GROUND_NODE,
+            )
+        })?;
+        Some(room_env_gltf::room_world_bounds_aabb_centered(
+            bounds_doc,
+            center,
+            window_h,
+            env_scale,
+        ))
     })
 }
 
@@ -141,6 +179,15 @@ pub fn release_main_menu_environment_cpu_sources_after_gpu_upload() {
     }
 }
 
+/// Meshes that block embedded doorway / porch punctuals in `room_glb.wgsl` (analytic AABB rays).
+#[inline]
+fn is_main_menu_punctual_occluder_mesh(name: &str) -> bool {
+    matches!(
+        name,
+        "rooflet" | "pCube22_M_roof_0" | "pCube22_aiStandardSurface8_0"
+    )
+}
+
 #[derive(Copy, Clone)]
 struct MainMenuRoomWalkHooks;
 
@@ -152,6 +199,8 @@ impl RoomEnvWalkHooks for MainMenuRoomWalkHooks {
     fn mesh_policy(&self, name: &str) -> RoomMeshPolicy {
         if name.starts_with("rain_hit") {
             RoomMeshPolicy::RainSurfaceCollision
+        } else if is_main_menu_punctual_occluder_mesh(name) {
+            RoomMeshPolicy::EnvironmentDrawWithCollision
         } else {
             RoomMeshPolicy::EnvironmentDraw
         }
@@ -235,15 +284,15 @@ pub fn main_menu_glb_has_embedded_lights() -> bool {
     })
 }
 
-/// Object3d anchor `[px, py, lift]` for the `door_light` punctual node in `main_menu.glb`.
+/// Object3d anchor `[px, py, lift]` for the `light_doorway` punctual node in `main_menu.glb`.
 #[allow(dead_code)]
-pub fn main_menu_door_light_object3d_anchor(w: f32, h: f32, env_h: f32) -> Option<[f32; 3]> {
+pub fn main_menu_light_door_object3d_anchor(w: f32, h: f32, env_h: f32) -> Option<[f32; 3]> {
     with_main_menu_glb_cpu(|opt| {
         let cpu = opt?;
         let light = cpu
             .embedded_point_lights
             .iter()
-            .find(|l| l.node_name == "door_light")?;
+            .find(|l| l.node_name == "light_doorway")?;
         let s = room_glb::room_env_world_scale(h, env_h);
         let center_doc = cpu
             .environment_bounds_doc

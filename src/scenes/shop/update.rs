@@ -110,13 +110,7 @@ impl ShopScene {
         let dt = now.saturating_duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
         self.age_secs += dt;
-        if self.eyeball_travel_duration_secs.is_some() && self.eyeball_travel_playback_sec().is_none()
-        {
-            self.eyeball_travel_started = None;
-            self.eyeball_travel_duration_secs = None;
-            self.eyeball_travel_elapsed_secs = 0.0;
-            self.eyeball_travel_paused = false;
-        }
+        self.gltf_anims.prune_finished();
     }
 
     /// Move inspect focus between inspectable stock items while the shop is suspended
@@ -201,13 +195,7 @@ impl ShopScene {
                 self.storeroom_orbit_pitch = 0.0;
             }
         }
-        if self.eyeball_travel_duration_secs.is_some() && self.eyeball_travel_playback_sec().is_none()
-        {
-            self.eyeball_travel_started = None;
-            self.eyeball_travel_duration_secs = None;
-            self.eyeball_travel_elapsed_secs = 0.0;
-            self.eyeball_travel_paused = false;
-        }
+        self.gltf_anims.prune_finished();
         if std::mem::take(&mut ctx.run.pending_shop_focus_snap_after_celebration) {
             let w = ctx.layout.window_w;
             let h = ctx.layout.window_h;

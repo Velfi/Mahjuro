@@ -52,6 +52,7 @@ pub mod room_glb;
 pub mod room_gltf_anim;
 pub mod room_gltf_punctual;
 pub mod room_shadow_bake;
+pub mod scene_light_sample;
 pub mod score_popups;
 pub mod score_reel;
 pub mod shop_bell_mesh;

@@ -103,6 +103,7 @@ pub enum DebugAction {
     OpenMaterialViewer,
     /// Push the transition playground scene onto the overlay stack.
     OpenTransitionPlayground,
+    OpenAnimationLab,
     OpenRumbleLab,
     OpenTileAnchorLab,
     OpenButtonAabbLab,
@@ -254,6 +255,13 @@ impl DebugMenuBar {
             DebugAction::OpenTransitionPlayground,
         ));
         let _ = jumps_sub.append(&transition_playground_item);
+
+        let animation_lab_item = MenuItem::new("Animation Lab...", true, None);
+        mappings.push((
+            animation_lab_item.id().clone(),
+            DebugAction::OpenAnimationLab,
+        ));
+        let _ = jumps_sub.append(&animation_lab_item);
 
         let rumble_lab_item = MenuItem::new("Rumble Lab...", true, None);
         mappings.push((rumble_lab_item.id().clone(), DebugAction::OpenRumbleLab));

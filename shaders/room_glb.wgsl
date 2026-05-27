@@ -368,6 +368,19 @@ fn shop_shade(in: VsOut, front_facing: bool) -> ShopShaded {
         let dec = textureSample(decal_tex, base_sampler, in.uv);
         albedo = mix(albedo, dec.rgb, dec.a);
     }
+
+    // Animation-lab false shading: albedo × simple N·L (skips punctual PBR / shadows).
+    if (cam.base_color_factor.y > 0.5) {
+        var n_geom = normalize(in.wn);
+        if (!front_facing) {
+            n_geom = -n_geom;
+        }
+        let key = normalize(vec3<f32>(0.32, -0.58, 0.75));
+        let ndl = max(dot(n_geom, key), 0.0);
+        let fake = albedo * (0.18 + 0.82 * ndl);
+        return ShopShaded(fake, vec3<f32>(0.0), out_alpha);
+    }
+
     let albedo_lum = dot(albedo, vec3<f32>(0.299, 0.587, 0.114));
 
     let mr_s = textureSample(metallic_roughness_tex, base_sampler, in.uv_emr);

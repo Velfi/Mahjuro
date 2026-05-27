@@ -315,7 +315,7 @@ pub const RAIN_DEBUG_ROW_META: &[(&str, f32, f32, f32)] = &[
     ("Fall speed (world Z u/s)", 0.0, 8000.0, 20.0),
     ("Wind X", -800.0, 800.0, 5.0),
     ("Wind Y", -800.0, 800.0, 5.0),
-    ("Streak length (px)", 2.0, 48.0, 1.0),
+    ("Streak length (px)", 2.0, 512.0, 1.0),
     ("Splash count", 1.0, 24.0, 1.0),
     ("Splash lifetime", 0.05, 1.5, 0.02),
     ("Drop hue", 0.0, 1.0, 1.0 / 360.0),

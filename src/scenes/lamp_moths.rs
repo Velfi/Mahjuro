@@ -1,4 +1,4 @@
-//! Moths fluttering back and forth around the main-menu door light (`door_light` in `main_menu.glb`).
+//! Moths fluttering back and forth around the main-menu door light (`light_doorway` in `main_menu.glb`).
 //!
 //! Currently parked: the main-menu scene no longer spawns these. Kept available
 //! for re-enabling without restoring code.

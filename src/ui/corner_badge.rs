@@ -46,20 +46,37 @@ fn push_badge_at(
     });
 }
 
-/// Brass pill anchored to the top-right of `rect`.
+/// Screen rect `[x, y, w, h]` for a corner badge on `host`, clamped inside the viewport.
+pub(crate) fn corner_badge_rect(
+    host: [f32; 4],
+    window_w: f32,
+    window_h: f32,
+    label: &str,
+) -> Option<[f32; 4]> {
+    if host[2] <= 1.0 || host[3] <= 1.0 || !host[0].is_finite() || !host[1].is_finite() {
+        return None;
+    }
+    let (badge_w, badge_h, _) = badge_metrics(label, window_h);
+    let badge_x = (host[0] + host[2] - badge_w * 0.88).clamp(0.0, (window_w - badge_w).max(0.0));
+    let badge_y = (host[1] - badge_h * 0.22).clamp(0.0, (window_h - badge_h).max(0.0));
+    Some([badge_x, badge_y, badge_w, badge_h])
+}
+
+/// Brass pill anchored to the top-right of `rect` (clamped to the viewport).
 pub fn push_corner_badge(
     quads: &mut Vec<GpuInstance>,
     texts: &mut Vec<TextLabel>,
     rect: [f32; 4],
+    window_w: f32,
     window_h: f32,
     label: &str,
 ) {
-    if rect[2] <= 1.0 || rect[3] <= 1.0 || !rect[0].is_finite() || !rect[1].is_finite() {
+    let Some([badge_x, badge_y, badge_w, badge_h]) =
+        corner_badge_rect(rect, window_w, window_h, label)
+    else {
         return;
-    }
-    let (badge_w, badge_h, badge_font) = badge_metrics(label, window_h);
-    let badge_x = rect[0] + rect[2] - badge_w * 0.88;
-    let badge_y = rect[1] - badge_h * 0.22;
+    };
+    let (_, _, badge_font) = badge_metrics(label, window_h);
     push_badge_at(
         quads, texts, badge_x, badge_y, badge_w, badge_h, badge_font, label,
     );
@@ -90,4 +107,19 @@ pub fn push_center_badge(
     push_badge_at(
         quads, texts, badge_x, badge_y, badge_w, badge_h, badge_font, label,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn corner_badge_rect_clamps_past_right_edge() {
+        let w = 800.0;
+        let h = 600.0;
+        let host = [720.0, 400.0, 90.0, 60.0];
+        let badge = corner_badge_rect(host, w, h, "NEW").expect("badge");
+        assert!(badge[0] + badge[2] <= w + 0.5, "badge should not extend past viewport");
+        assert!(badge[0] >= 0.0);
+    }
 }

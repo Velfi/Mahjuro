@@ -167,8 +167,8 @@ impl WgpuRenderer {
     }
 
     #[inline]
-    pub fn shop_eyeball_primitive_index(&self) -> Option<usize> {
-        self.shop_eyeball_prim_index
+    pub fn shop_gltf_anim_has_clip(&self, clip_name: &str) -> bool {
+        self.shop_gltf_anim.has_clip(clip_name)
     }
 
     pub fn clear_smoke(&mut self) {
