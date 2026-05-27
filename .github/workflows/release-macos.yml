@@ -91,6 +91,18 @@ jobs:
       - name: Bake asset packs
         run: python3 tools/bake_assets/bake_assets.py --out baked-packs
 
+      - name: Build offline bake tools (aarch64)
+        uses: ./.github/actions/build-bake-tools
+        with:
+          target: aarch64-apple-darwin
+          profile: release
+
+      - name: Build offline bake tools (x86_64)
+        uses: ./.github/actions/build-bake-tools
+        with:
+          target: x86_64-apple-darwin
+          profile: release
+
       - name: Build macOS universal release
         run: |
           cargo build --release --locked --target aarch64-apple-darwin

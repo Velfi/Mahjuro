@@ -87,6 +87,12 @@ jobs:
           prefix-key: bot-stats-20k
           key: x86_64-unknown-linux-gnu
 
+      - name: Build offline bake tools
+        uses: ./.github/actions/build-bake-tools
+        with:
+          target: x86_64-unknown-linux-gnu
+          profile: release
+
       - name: Build release binary
         run: cargo build --release --locked --target x86_64-unknown-linux-gnu
 
